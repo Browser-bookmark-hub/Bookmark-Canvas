@@ -1,0 +1,7344 @@
+// =============================================================================
+// 全局变量和常量
+// =============================================================================
+
+let currentLang = 'zh_CN';
+// [Init] Restore custom language from storage immediately
+try {
+    const saved = localStorage.getItem('historyViewerCustomLang');
+    if (saved === 'en' || saved === 'zh_CN') {
+        currentLang = saved;
+        // console.log('[History Viewer] Restored language:', currentLang);
+    } else {
+        try {
+            const ui = (chrome?.i18n?.getUILanguage?.() || '').toLowerCase();
+            currentLang = ui.startsWith('zh') ? 'zh_CN' : 'en';
+        } catch (e) {
+        }
+    }
+} catch (e) { }
+
+window.currentLang = currentLang; // 暴露给其他模块使用
+// 允许外部页面限制可用视图（拆分插件时使用）
+const DEFAULT_VIEWS = ['canvas'];
+const ALLOWED_VIEWS = (Array.isArray(window.__ALLOWED_VIEWS) && window.__ALLOWED_VIEWS.length)
+    ? window.__ALLOWED_VIEWS
+    : DEFAULT_VIEWS;
+const DEFAULT_VIEW = (typeof window.__DEFAULT_VIEW === 'string' && ALLOWED_VIEWS.includes(window.__DEFAULT_VIEW))
+    ? window.__DEFAULT_VIEW
+    : ALLOWED_VIEWS[0];
+const isViewAllowed = (view) => ALLOWED_VIEWS.includes(view);
+let currentTheme = 'light';
+// 从 localStorage 立即恢复视图，避免页面闪烁
+// 从 URL 参数或 localStorage 恢复视图
+let currentView = (() => {
+    try {
+        // 1. 优先尝试从 URL 参数获取
+        // 注意：此时 window.location.search 可能已经可用
+        const params = new URLSearchParams(window.location.search);
+        const viewFromUrl = params.get('view');
+        if (viewFromUrl) {
+            console.log('[全局初始化] URL 参数中的视图:', viewFromUrl);
+            return viewFromUrl;
+        }
+
+        // 2. 其次尝试从 localStorage 获取
+        const saved = localStorage.getItem('lastActiveView');
+        console.log('[全局初始化] localStorage中的视图:', saved);
+        return saved || DEFAULT_VIEW;
+    } catch (e) {
+        console.error('[全局初始化] 读取视图失败:', e);
+        return DEFAULT_VIEW;
+    }
+})();
+
+// 用于避免重复在一次快照后多次重置（基于最近一条记录的指纹或时间）
+window.__lastResetFingerprint = window.__lastResetFingerprint || null;
+
+// 用于标记由拖拽操作处理过的移动，防止 applyIncrementalMoveToTree 重复处理
+window.__dragMoveHandled = window.__dragMoveHandled || new Set();
+
+// 清理所有颜色标识与动作徽标，不改变布局/滚动/展开状态
+function resetPermanentSectionChangeMarkers() {
+    try {
+        // 支持同时清理：
+        // 1) Canvas 视图中的永久栏目
+        const sections = [];
+        const permanentSection = document.getElementById('permanentSection');
+        const previewSection = document.getElementById('changesPreviewPermanentSection');
+        if (permanentSection) sections.push(permanentSection);
+        if (previewSection) sections.push(previewSection);
+        // 3) Canvas 视图中的永久栏目副本
+        document.querySelectorAll('.permanent-bookmark-section.permanent-section-copy').forEach(sec => {
+            if (sec) sections.push(sec);
+        });
+        if (!sections.length) return;
+
+        const changeClasses = ['tree-change-added', 'tree-change-modified', 'tree-change-moved', 'tree-change-mixed', 'tree-change-deleted'];
+
+        sections.forEach(section => {
+            // 每个栏目内部都有自己独立的滚动容器和书签树
+            const tree =
+                section.querySelector('#bookmarkTree') || // Canvas 永久栏目
+                section.querySelector('.bookmark-tree');  // Current Changes 预览中的克隆树
+            if (!tree) return;
+
+            const body = section.querySelector('.permanent-section-body');
+            const prevScrollTop = body ? body.scrollTop : null;
+
+            // 1) 红色（deleted）项目：直接移除对应的 .tree-node
+            tree.querySelectorAll('.tree-item.tree-change-deleted').forEach(item => {
+                const node = item.closest('.tree-node');
+                if (node && node.parentNode) node.parentNode.removeChild(node);
+            });
+
+            // 2) 清理其余颜色标识类和内联样式、徽标
+            const selector = changeClasses.map(c => `.tree-item.${c}`).join(',');
+            tree.querySelectorAll(selector).forEach(item => {
+                changeClasses.forEach(c => item.classList.remove(c));
+                const link = item.querySelector('.tree-bookmark-link');
+                const label = item.querySelector('.tree-label');
+                if (link) {
+                    link.style.color = '';
+                    link.style.fontWeight = '';
+                    link.style.textDecoration = '';
+                    link.style.opacity = '';
+                }
+                if (label) {
+                    label.style.color = '';
+                    label.style.fontWeight = '';
+                    label.style.textDecoration = '';
+                    label.style.opacity = '';
+                }
+                const badges = item.querySelector('.change-badges');
+                if (badges) badges.innerHTML = '';
+            });
+
+            // 3) 清理灰色引导标识 (.change-badge.has-changes)
+            // 这些标识可能存在于没有变化类的文件夹节点上（表示"此文件夹下有变化"）
+            tree.querySelectorAll('.change-badge.has-changes').forEach(badge => {
+                badge.remove();
+            });
+
+            // 4) 清理图例（上次快照无变化时无需显示图例）
+            const legend = tree.querySelector('.tree-legend');
+            if (legend) {
+                legend.remove();
+            }
+
+            if (body != null && prevScrollTop != null) {
+                body.scrollTop = prevScrollTop;
+            }
+        });
+
+        console.log('[Canvas] 永久栏目及预览颜色标识已清理完毕');
+    } catch (e) {
+        console.warn('[Canvas] 清理永久栏目/预览标识时出错:', e);
+    }
+}
+
+// =============================================================================
+// 变化标识控制（手动/自动清除 & 开关）
+// =============================================================================
+
+const MARKER_SETTINGS_KEY = 'canvas_marker_settings_v1';
+const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
+const MARKER_PRESET_MINUTES = [60, 180, 360, 720, 1440, 4320, 10080];
+const DEFAULT_MARKER_SETTINGS = {
+    enabled: true,
+    autoClearEnabled: true,
+    autoClearMinutes: 60,
+    nextAutoClearAt: 0
+};
+let canvasMarkerSettings = { ...DEFAULT_MARKER_SETTINGS };
+let markerAutoClearTimer = null;
+let persistMovedTimer = null;
+let lastMarkerBaselineWriteAt = 0;
+
+function normalizeMarkerSettings(input) {
+    const out = { ...DEFAULT_MARKER_SETTINGS };
+    if (input && typeof input === 'object') {
+        if (typeof input.enabled === 'boolean') out.enabled = input.enabled;
+        if (typeof input.autoClearEnabled === 'boolean') out.autoClearEnabled = input.autoClearEnabled;
+        const mins = Number(input.autoClearMinutes);
+        if (Number.isFinite(mins) && mins > 0) out.autoClearMinutes = mins;
+        const at = Number(input.nextAutoClearAt);
+        if (Number.isFinite(at) && at > 0) out.nextAutoClearAt = at;
+    }
+    return out;
+}
+
+function isMarkerEnabled() {
+    return canvasMarkerSettings.enabled !== false;
+}
+
+function getMarkerSettings() {
+    return { ...canvasMarkerSettings };
+}
+
+async function saveMarkerSettings() {
+    try {
+        if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
+            await browserAPI.storage.local.set({ [MARKER_SETTINGS_KEY]: canvasMarkerSettings });
+        }
+    } catch (e) {
+        console.warn('[Marker] 保存设置失败:', e);
+    }
+}
+
+async function loadMarkerSettings() {
+    try {
+        if (!browserAPI || !browserAPI.storage || !browserAPI.storage.local) return;
+        const data = await browserAPI.storage.local.get([MARKER_SETTINGS_KEY]);
+        canvasMarkerSettings = normalizeMarkerSettings(data && data[MARKER_SETTINGS_KEY]);
+        // 初始化自动清除下一次时间
+        if (canvasMarkerSettings.autoClearEnabled && (!canvasMarkerSettings.nextAutoClearAt || canvasMarkerSettings.nextAutoClearAt < Date.now())) {
+            canvasMarkerSettings.nextAutoClearAt = Date.now() + canvasMarkerSettings.autoClearMinutes * 60 * 1000;
+            await saveMarkerSettings();
+        }
+        scheduleMarkerAutoClear();
+        updateMarkerControlsUI();
+    } catch (e) {
+        console.warn('[Marker] 读取设置失败:', e);
+    }
+}
+
+function scheduleMarkerAutoClear() {
+    if (markerAutoClearTimer) {
+        clearTimeout(markerAutoClearTimer);
+        markerAutoClearTimer = null;
+    }
+    if (!canvasMarkerSettings.autoClearEnabled) return;
+    const now = Date.now();
+    const targetAt = canvasMarkerSettings.nextAutoClearAt || (now + canvasMarkerSettings.autoClearMinutes * 60 * 1000);
+    const delay = Math.max(1000, targetAt - now);
+    markerAutoClearTimer = setTimeout(async () => {
+        if (!canvasMarkerSettings.autoClearEnabled) return;
+        await clearMarkersAndSetBaseline('auto');
+        canvasMarkerSettings.nextAutoClearAt = Date.now() + canvasMarkerSettings.autoClearMinutes * 60 * 1000;
+        await saveMarkerSettings();
+        scheduleMarkerAutoClear();
+    }, delay);
+}
+
+function schedulePersistExplicitMovedIds() {
+    if (persistMovedTimer) clearTimeout(persistMovedTimer);
+    persistMovedTimer = setTimeout(async () => {
+        try {
+            if (!browserAPI || !browserAPI.storage || !browserAPI.storage.local) return;
+            const list = [];
+            explicitMovedIds.forEach((expiry, id) => {
+                if (!id) return;
+                list.push({ id: String(id), expiry });
+            });
+            await browserAPI.storage.local.set({ [RECENT_MOVED_IDS_KEY]: list });
+        } catch (e) {
+            console.warn('[Marker] 持久化移动标识失败:', e);
+        }
+    }, 300);
+}
+
+async function restoreExplicitMovedIdsFromStorage() {
+    try {
+        if (!browserAPI || !browserAPI.storage || !browserAPI.storage.local) return;
+        const data = await browserAPI.storage.local.get([RECENT_MOVED_IDS_KEY]);
+        const recentMovedIds = data && Array.isArray(data[RECENT_MOVED_IDS_KEY]) ? data[RECENT_MOVED_IDS_KEY] : [];
+        // Always reset, so cross-window clears can take effect immediately.
+        explicitMovedIds = new Map();
+        if (!recentMovedIds.length) return;
+        const MAX_RESTORE = 2000;
+        const slice = recentMovedIds.length > MAX_RESTORE ? recentMovedIds.slice(-MAX_RESTORE) : recentMovedIds;
+        slice.forEach(entry => {
+            const id = entry && entry.id;
+            if (!id) return;
+            const expiry = entry && typeof entry.expiry === 'number' ? entry.expiry : Infinity;
+            explicitMovedIds.set(String(id), expiry);
+        });
+        console.log('[移动标识] 已从storage恢复显式移动ID数量:', explicitMovedIds.size);
+    } catch (e) {
+        console.warn('[移动标识] 从storage恢复显式移动ID失败:', e);
+    }
+}
+
+function updateMarkerControlsUI() {
+    try {
+        const formatLabel = (minutes) => {
+            const m = Math.max(1, Math.round(minutes));
+            const isEn = currentLang === 'en';
+            if (m % 1440 === 0) {
+                const v = Math.round(m / 1440);
+                return isEn ? `${v} day${v > 1 ? 's' : ''}` : `${v}天`;
+            }
+            if (m % 60 === 0) {
+                const v = Math.round(m / 60);
+                return isEn ? `${v} hour${v > 1 ? 's' : ''}` : `${v}小时`;
+            }
+            return isEn ? `${m} min` : `${m}分钟`;
+        };
+
+        const menuText = document.getElementById('markerMenuText');
+        if (menuText) menuText.textContent = i18n.markerMenuText[currentLang];
+        const clearText = document.getElementById('markerClearText');
+        if (clearText) clearText.textContent = i18n.markerClearText[currentLang];
+        const toggleText = document.getElementById('markerToggleText');
+        if (toggleText) {
+            toggleText.textContent = isMarkerEnabled()
+                ? i18n.markerToggleOff[currentLang]
+                : i18n.markerToggleOn[currentLang];
+        }
+        const toggleIcon = document.querySelector('#markerToggleBtn i');
+        if (toggleIcon) {
+            toggleIcon.className = isMarkerEnabled() ? 'fas fa-eye-slash' : 'fas fa-eye';
+        }
+        const autoClearText = document.getElementById('markerAutoClearText');
+        if (autoClearText) autoClearText.textContent = i18n.markerAutoClearText[currentLang];
+        const intervalLabel = document.getElementById('markerAutoClearIntervalLabel');
+        if (intervalLabel) intervalLabel.textContent = i18n.markerAutoClearIntervalLabel[currentLang];
+        const autoToggle = document.getElementById('markerAutoClearToggle');
+        if (autoToggle) autoToggle.checked = !!canvasMarkerSettings.autoClearEnabled;
+        const inputEl = document.getElementById('markerAutoClearInput');
+        const minutes = Number(canvasMarkerSettings.autoClearMinutes) || 30;
+        const enabled = !!canvasMarkerSettings.autoClearEnabled;
+        const toggleBtn = document.getElementById('markerAutoClearToggleBtn');
+        if (inputEl) {
+            inputEl.value = formatLabel(minutes);
+            inputEl.disabled = !enabled;
+        }
+        const optionList = document.querySelectorAll('#markerAutoClearList .marker-combo-option');
+        optionList.forEach((btn) => {
+            const minsAttr = btn.getAttribute('data-minutes');
+            const mins = Number(minsAttr);
+            if (Number.isFinite(mins) && mins > 0) {
+                btn.textContent = formatLabel(mins);
+            }
+        });
+        if (toggleBtn) {
+            toggleBtn.disabled = !enabled;
+        }
+    } catch (_) { }
+}
+
+async function clearMarkersAndSetBaseline(reason = 'manual') {
+    try {
+        const snapshot = await getBookmarkTreeSnapshot();
+        const tree = snapshot && snapshot.tree ? snapshot.tree : null;
+        if (tree) {
+            const now = Date.now();
+            await browserAPI.storage.local.set({
+                lastBookmarkData: {
+                    bookmarkTree: tree,
+                    updatedAt: now,
+                    reason
+                }
+            });
+            lastMarkerBaselineWriteAt = now;
+        }
+        explicitMovedIds = new Map();
+        schedulePersistExplicitMovedIds();
+        resetPermanentSectionChangeMarkers();
+        await renderTreeView(true);
+        console.log('[Marker] 已清除标识并设为新基准:', reason);
+    } catch (e) {
+        console.warn('[Marker] 清除标识失败:', e);
+    }
+}
+
+function extractLastBookmarkTree(storageData) {
+    const raw = storageData && storageData.lastBookmarkData;
+    if (Array.isArray(raw)) return raw;
+    return raw && raw.bookmarkTree ? raw.bookmarkTree : null;
+}
+
+window.__canvasMarkerControl = {
+    getSettings: getMarkerSettings,
+    updateUI: updateMarkerControlsUI,
+    setEnabled: async (enabled) => {
+        const nextEnabled = !!enabled;
+        canvasMarkerSettings.enabled = nextEnabled;
+        await saveMarkerSettings();
+        updateMarkerControlsUI();
+        // 关闭时先清空现有标识，保证即时生效
+        if (!nextEnabled) {
+            try {
+                resetPermanentSectionChangeMarkers();
+                treeChangeMap = new Map();
+                try { window.__canvasPermanentHintSet = null; } catch (_) { }
+                try { window.__canvasPermanentAncestorBadges = null; } catch (_) { }
+                __canvasPermanentHintSet = null;
+                __canvasPermanentAncestorBadges = null;
+            } catch (_) { }
+        }
+        await renderTreeView(true);
+        try {
+            if (typeof showToast === 'function') {
+                const msg = nextEnabled
+                    ? (currentLang === 'en' ? 'Markers enabled (refreshed)' : '已开启标识显示（已刷新）')
+                    : (currentLang === 'en' ? 'Markers disabled (refreshed)' : '已关闭标识显示（已刷新）');
+                showToast(msg);
+            }
+        } catch (_) { }
+    },
+    setAutoClearEnabled: async (enabled) => {
+        canvasMarkerSettings.autoClearEnabled = !!enabled;
+        if (canvasMarkerSettings.autoClearEnabled) {
+            canvasMarkerSettings.nextAutoClearAt = Date.now() + (canvasMarkerSettings.autoClearMinutes || 30) * 60 * 1000;
+        }
+        await saveMarkerSettings();
+        scheduleMarkerAutoClear();
+        updateMarkerControlsUI();
+    },
+    setAutoClearMinutes: async (minutes) => {
+        const m = Number(minutes);
+        if (Number.isFinite(m) && m > 0) {
+            canvasMarkerSettings.autoClearMinutes = m;
+            if (canvasMarkerSettings.autoClearEnabled) {
+                canvasMarkerSettings.nextAutoClearAt = Date.now() + m * 60 * 1000;
+            }
+            await saveMarkerSettings();
+            scheduleMarkerAutoClear();
+            updateMarkerControlsUI();
+        }
+    },
+    clearAndSetBaseline: clearMarkersAndSetBaseline
+};
+console.log('[全局初始化] currentView初始值:', currentView);
+let allBookmarks = [];
+let currentBookmarkData = null;
+
+const bookmarkUrlSet = new Set();
+const bookmarkTitleSet = new Set(); // 书签标题集合（用于标题匹配的实时刷新）
+
+const DATA_CACHE_KEYS = {
+    bookmarks: 'bb_cache_bookmarks_v1'
+};
+
+let bookmarkCacheRestored = false;
+let saveBookmarkCacheTimer = null;
+
+// 预加载缓存
+let cachedBookmarkTree = null;
+
+// 图标预加载缓存
+const preloadedIcons = new Map();
+const iconPreloadQueue = [];
+
+// Favicon 缓存管理（持久化 + 失败缓存）
+const FaviconCache = {
+    db: null,
+    dbName: 'BookmarkFaviconCache',
+    dbVersion: 1,
+    storeName: 'favicons',
+    failureStoreName: 'failures',
+    memoryCache: new Map(), // {url: faviconDataUrl}
+    failureCache: new Set(), // 失败的域名集合
+    pendingRequests: new Map(), // 正在请求的URL，避免重复请求
+
+    // 初始化 IndexedDB
+    async init() {
+        if (this.db) return;
+
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, this.dbVersion);
+
+            request.onerror = () => {
+                reject(request.error);
+            };
+
+            request.onsuccess = () => {
+                this.db = request.result;
+                resolve();
+            };
+
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+
+                // 创建成功缓存的存储
+                if (!db.objectStoreNames.contains(this.storeName)) {
+                    const store = db.createObjectStore(this.storeName, { keyPath: 'domain' });
+                    store.createIndex('timestamp', 'timestamp', { unique: false });
+                }
+
+                // 创建失败缓存的存储
+                if (!db.objectStoreNames.contains(this.failureStoreName)) {
+                    const failureStore = db.createObjectStore(this.failureStoreName, { keyPath: 'domain' });
+                    failureStore.createIndex('timestamp', 'timestamp', { unique: false });
+                }
+            };
+        });
+    },
+
+    // 检查URL是否为本地/内网/明显无效
+    isInvalidUrl(url) {
+        if (!url || typeof url !== 'string') return true;
+
+        try {
+            const urlObj = new URL(url);
+            const hostname = urlObj.hostname.toLowerCase();
+
+            // 本地地址
+            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+                return true;
+            }
+
+            // 内网地址
+            if (hostname.match(/^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/)) {
+                return true;
+            }
+
+            // .local 域名
+            if (hostname.endsWith('.local')) {
+                return true;
+            }
+
+            // 文件协议等
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                return true;
+            }
+
+            return false;
+        } catch (e) {
+            return true;
+        }
+    },
+
+    // 从缓存获取favicon
+    async get(url) {
+        if (this.isInvalidUrl(url)) {
+            return null;
+        }
+
+        try {
+            const urlObj = new URL(url);
+            const domain = urlObj.hostname;
+
+            // 检查失败缓存
+            if (this.failureCache.has(domain)) {
+                return 'failed';
+            }
+
+            // 检查内存缓存
+            if (this.memoryCache.has(domain)) {
+                return this.memoryCache.get(domain);
+            }
+
+            // 从 IndexedDB 读取
+            if (!this.db) await this.init();
+
+            return new Promise((resolve) => {
+                const transaction = this.db.transaction([this.storeName, this.failureStoreName], 'readonly');
+
+                // 先检查失败缓存
+                const failureStore = transaction.objectStore(this.failureStoreName);
+                const failureRequest = failureStore.get(domain);
+
+                failureRequest.onsuccess = () => {
+                    if (failureRequest.result) {
+                        // 检查失败缓存是否过期（7天）
+                        const age = Date.now() - failureRequest.result.timestamp;
+                        if (age < 7 * 24 * 60 * 60 * 1000) {
+                            this.failureCache.add(domain);
+                            resolve('failed');
+                            return;
+                        }
+                    }
+
+                    // 检查成功缓存
+                    const store = transaction.objectStore(this.storeName);
+                    const request = store.get(domain);
+
+                    request.onsuccess = () => {
+                        if (request.result) {
+                            // 永久缓存，不检查过期（只有删除书签时才删除缓存）
+                            this.memoryCache.set(domain, request.result.dataUrl);
+                            resolve(request.result.dataUrl);
+                        } else {
+                            resolve(null);
+                        }
+                    };
+
+                    request.onerror = () => resolve(null);
+                };
+
+                failureRequest.onerror = () => resolve(null);
+            });
+        } catch (e) {
+            return null;
+        }
+    },
+
+    // 保存favicon到缓存
+    async save(url, dataUrl) {
+        if (this.isInvalidUrl(url)) return;
+
+        try {
+            const urlObj = new URL(url);
+            const domain = urlObj.hostname;
+
+            // 更新内存缓存
+            this.memoryCache.set(domain, dataUrl);
+
+            // 保存到 IndexedDB
+            if (!this.db) await this.init();
+
+            const transaction = this.db.transaction([this.storeName], 'readwrite');
+            const store = transaction.objectStore(this.storeName);
+
+            store.put({
+                domain: domain,
+                dataUrl: dataUrl,
+                timestamp: Date.now()
+            });
+
+            // 从失败缓存中移除（如果存在）
+            this.failureCache.delete(domain);
+            this.removeFailure(domain);
+
+        } catch (e) {
+            // 静默处理
+        }
+    },
+
+    // 记录失败
+    async saveFailure(url) {
+        if (this.isInvalidUrl(url)) return;
+
+        try {
+            const urlObj = new URL(url);
+            const domain = urlObj.hostname;
+
+            // 更新内存缓存
+            this.failureCache.add(domain);
+
+            // 保存到 IndexedDB
+            if (!this.db) await this.init();
+
+            const transaction = this.db.transaction([this.failureStoreName], 'readwrite');
+            const store = transaction.objectStore(this.failureStoreName);
+
+            store.put({
+                domain: domain,
+                timestamp: Date.now()
+            });
+
+        } catch (e) {
+            // 静默处理
+        }
+    },
+
+    // 移除失败记录（当URL被修改时）
+    async removeFailure(domain) {
+        try {
+            if (!this.db) await this.init();
+
+            const transaction = this.db.transaction([this.failureStoreName], 'readwrite');
+            const store = transaction.objectStore(this.failureStoreName);
+            store.delete(domain);
+        } catch (e) {
+            // 静默失败
+        }
+    },
+
+    // 清除特定URL的缓存（用于书签URL修改时）
+    async clear(url) {
+        if (this.isInvalidUrl(url)) return;
+
+        try {
+            const urlObj = new URL(url);
+            const domain = urlObj.hostname;
+
+            // 清除内存缓存
+            this.memoryCache.delete(domain);
+            this.failureCache.delete(domain);
+
+            // 清除 IndexedDB
+            if (!this.db) await this.init();
+
+            const transaction = this.db.transaction([this.storeName, this.failureStoreName], 'readwrite');
+            transaction.objectStore(this.storeName).delete(domain);
+            transaction.objectStore(this.failureStoreName).delete(domain);
+
+        } catch (e) {
+            // 静默处理
+        }
+    },
+
+    // 获取favicon（带缓存和请求合并）
+    async fetch(url) {
+        if (this.isInvalidUrl(url)) {
+            return fallbackIcon;
+        }
+
+        try {
+            const urlObj = new URL(url);
+            const domain = urlObj.hostname;
+
+            // 1. 检查缓存
+            const cached = await this.get(url);
+            if (cached === 'failed') {
+                return fallbackIcon;
+            }
+            if (cached) {
+                return cached;
+            }
+
+            // 2. 检查是否已有相同请求在进行中（避免重复请求）
+            if (this.pendingRequests.has(domain)) {
+                return this.pendingRequests.get(domain);
+            }
+
+            // 3. 发起新请求
+            const requestPromise = this._fetchFavicon(url);
+            this.pendingRequests.set(domain, requestPromise);
+
+            try {
+                const result = await requestPromise;
+                return result;
+            } finally {
+                this.pendingRequests.delete(domain);
+            }
+
+        } catch (e) {
+            return fallbackIcon;
+        }
+    },
+
+    // 实际请求favicon - 多源降级策略
+    // 注意：不再直接请求网站的 /favicon.ico，因为某些网站（如需要认证的网站）
+    // 可能返回 HTML 页面而非图标，导致浏览器解析其中的 preload 标签并产生警告
+    async _fetchFavicon(url) {
+        return new Promise(async (resolve) => {
+            try {
+                const urlObj = new URL(url);
+                const domain = urlObj.hostname;
+
+                // 定义多个 favicon 源，按优先级尝试
+                // 只使用第三方服务，避免直接请求可能返回 HTML 的网站
+                const faviconSources = [
+                    // 1. DuckDuckGo（全球可用，国内可访问，推荐首选）
+                    `https://icons.duckduckgo.com/ip3/${domain}.ico`,
+                    // 2. Google S2（功能强大，但中国大陆被墙）
+                    `https://www.google.com/s2/favicons?domain=${domain}&sz=32`
+                ];
+
+                // 尝试每个源
+                for (let i = 0; i < faviconSources.length; i++) {
+                    const faviconUrl = faviconSources[i];
+                    const sourceName = ['DuckDuckGo', 'Google S2'][i];
+
+                    const result = await this._tryLoadFavicon(faviconUrl, url, sourceName);
+                    if (result && result !== fallbackIcon) {
+                        resolve(result);
+                        return;
+                    }
+                }
+
+                // 所有源都失败，记录失败并返回 fallback（静默）
+                this.saveFailure(url);
+                resolve(fallbackIcon);
+
+            } catch (e) {
+                // 静默处理错误
+                this.saveFailure(url);
+                resolve(fallbackIcon);
+            }
+        });
+    },
+
+    // 尝试从单个源加载 favicon
+    async _tryLoadFavicon(faviconUrl, originalUrl, sourceName) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            // 不设置 crossOrigin，避免 CORS 预检请求导致的错误
+            // img.crossOrigin = 'anonymous';
+
+            const timeout = setTimeout(() => {
+                img.src = '';
+                resolve(null); // 超时，尝试下一个源
+            }, 3000); // 每个源最多等待3秒
+
+            img.onload = () => {
+                clearTimeout(timeout);
+
+                // 检查是否是有效的图片（某些服务器返回1x1的占位图）
+                if (img.width < 8 || img.height < 8) {
+                    resolve(null);
+                    return;
+                }
+
+                // 尝试转换为 Base64（可能因 CORS 失败，但不显示错误）
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    const dataUrl = canvas.toDataURL('image/png');
+
+                    // 保存到缓存
+                    this.save(originalUrl, dataUrl);
+                    resolve(dataUrl);
+                } catch (e) {
+                    // CORS 限制，直接使用原 URL（静默处理，不输出日志）
+                    this.save(originalUrl, faviconUrl);
+                    resolve(faviconUrl);
+                }
+            };
+
+            img.onerror = () => {
+                clearTimeout(timeout);
+                resolve(null); // 失败，尝试下一个源
+            };
+
+            img.src = faviconUrl;
+        });
+    }
+};
+
+// 浏览器 API 兼容性
+const browserAPI = (typeof chrome !== 'undefined') ? chrome : browser;
+
+function getCacheStorageArea() {
+    try {
+        if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
+            return browserAPI.storage.local;
+        }
+    } catch (_) {
+        // ignore
+    }
+    return null;
+}
+
+// =============================================================================
+// Canvas 永久栏目副本：渲染同步（主永久栏目 -> 所有副本）
+// =============================================================================
+
+let permanentTreeCopySyncObserver = null;
+let permanentTreeCopySyncTarget = null;
+let permanentTreeCopySyncScheduled = false;
+let permanentTreeCopySyncTimer = null;
+
+function schedulePermanentTreeCopySync() {
+    try {
+        if (currentView !== 'canvas') return;
+    } catch (_) { return; }
+
+    const DEBOUNCE_MS = 220;
+    if (permanentTreeCopySyncTimer) {
+        try { clearTimeout(permanentTreeCopySyncTimer); } catch (_) { }
+    }
+    permanentTreeCopySyncTimer = setTimeout(() => {
+        permanentTreeCopySyncTimer = null;
+        syncPermanentTreeCopiesFromPrimary();
+    }, DEBOUNCE_MS);
+}
+window.schedulePermanentTreeCopySync = schedulePermanentTreeCopySync;
+
+function __captureTreeExpandedNodeIds(tree) {
+    const expanded = new Set();
+    if (!tree) return expanded;
+    try {
+        tree.querySelectorAll('.tree-children.expanded').forEach(children => {
+            const node = children.closest('.tree-node');
+            const item = node ? node.querySelector(':scope > .tree-item[data-node-id]') : null;
+            const nodeId = item && item.dataset ? item.dataset.nodeId : null;
+            if (nodeId) expanded.add(String(nodeId));
+        });
+    } catch (_) { }
+    return expanded;
+}
+
+function __resetTreeExpandedState(tree) {
+    if (!tree) return;
+    try {
+        tree.querySelectorAll('.tree-children.expanded').forEach(children => {
+            children.classList.remove('expanded');
+        });
+        tree.querySelectorAll('.tree-toggle.expanded').forEach(toggle => {
+            toggle.classList.remove('expanded');
+        });
+        tree.querySelectorAll('.tree-item[data-node-type="folder"] .tree-icon.fas.fa-folder-open').forEach(icon => {
+            icon.classList.remove('fa-folder-open');
+            icon.classList.add('fa-folder');
+        });
+    } catch (_) { }
+}
+
+function __applyTreeExpandedNodeIds(tree, expandedNodeIds) {
+    if (!tree || !expandedNodeIds) return;
+    const expanded = expandedNodeIds instanceof Set ? expandedNodeIds : new Set(expandedNodeIds);
+    if (!expanded.size) return;
+    expanded.forEach(nodeId => {
+        try {
+            const selector = `.tree-item[data-node-id="${CSS.escape(String(nodeId))}"]`;
+            const item = tree.querySelector(selector);
+            if (!item) return;
+            const node = item.closest('.tree-node');
+            if (!node) return;
+            const children = node.querySelector(':scope > .tree-children');
+            const toggle = item.querySelector(':scope > .tree-toggle') || item.querySelector('.tree-toggle');
+            if (children) children.classList.add('expanded');
+            if (toggle) toggle.classList.add('expanded');
+            const icon = item.querySelector('.tree-icon.fas.fa-folder, .tree-icon.fas.fa-folder-open');
+            if (icon) {
+                icon.classList.remove('fa-folder');
+                icon.classList.add('fa-folder-open');
+            }
+        } catch (_) { }
+    });
+}
+
+function __ensureTreeRootExpanded(tree) {
+    if (!tree) return;
+    try {
+        const rootItem = tree.querySelector('.tree-item[data-node-type="folder"][data-node-level="0"][data-node-id]');
+        if (!rootItem) return;
+        const node = rootItem.closest('.tree-node');
+        if (!node) return;
+        const children = node.querySelector(':scope > .tree-children');
+        const toggle = rootItem.querySelector('.tree-toggle');
+        const icon = rootItem.querySelector('.tree-icon.fas');
+        if (children) children.classList.add('expanded');
+        if (toggle) toggle.classList.add('expanded');
+        if (icon && icon.classList.contains('fa-folder')) {
+            icon.classList.remove('fa-folder');
+            icon.classList.add('fa-folder-open');
+        }
+    } catch (_) { }
+}
+
+// NOTE: bookmark_canvas_module.js already defines global PERMANENT_SECTION_EXPANDED_KEY.
+// We must NOT redeclare it here (global const redeclare throws SyntaxError).
+const __PERMANENT_SECTION_EXPANDED_KEY = (typeof PERMANENT_SECTION_EXPANDED_KEY !== 'undefined')
+    ? PERMANENT_SECTION_EXPANDED_KEY
+    : 'permanent-section-expanded';
+
+function __getTreeExpandStateStorageKey(treeContainer) {
+    try {
+        const previewRoot = treeContainer && treeContainer.closest ? treeContainer.closest('#changesTreePreviewInline') : null;
+        if (previewRoot) {
+            const mode = previewRoot.classList && previewRoot.classList.contains('compact-mode') ? 'compact' : 'detailed';
+            return `changesPreviewExpandedNodes:${mode}`;
+        }
+    } catch (_) { }
+
+    // Canvas 永久栏目：每个副本独立持久化展开状态（不做同步）
+    try {
+        if (currentView === 'canvas') {
+            const section = treeContainer && treeContainer.closest ? treeContainer.closest('.permanent-bookmark-section') : null;
+            if (section) {
+                const copyId = section.dataset ? section.dataset.permanentSectionCopyId : null;
+                if (copyId) return `${__PERMANENT_SECTION_EXPANDED_KEY}:${copyId}`;
+                return __PERMANENT_SECTION_EXPANDED_KEY;
+            }
+        }
+    } catch (_) { }
+    return 'treeExpandedNodeIds';
+}
+
+function __readTreeExpandStateFromStorage(treeContainer) {
+    const key = __getTreeExpandStateStorageKey(treeContainer);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw) return raw;
+    } catch (_) { }
+
+    // 兼容旧版本：主永久栏目历史上使用 treeExpandedNodeIds
+    if (key === __PERMANENT_SECTION_EXPANDED_KEY) {
+        try {
+            const legacy = localStorage.getItem('treeExpandedNodeIds');
+            if (legacy) return legacy;
+        } catch (_) { }
+    }
+    return null;
+}
+
+function __getPermanentSectionScrollStorageKeyFromTree(tree) {
+    try {
+        const section = tree && tree.closest ? tree.closest('.permanent-bookmark-section') : null;
+        const copyId = section && section.dataset ? section.dataset.permanentSectionCopyId : null;
+        return copyId ? `permanent-section-scroll:${copyId}` : 'permanent-section-scroll';
+    } catch (_) {
+        return 'permanent-section-scroll';
+    }
+}
+
+function __readLocalStorageJSON(key) {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (_) { return null; }
+}
+
+function __lazyLoadExpandedFolders(tree, expandedNodeIds) {
+    if (!tree || !expandedNodeIds || typeof loadPermanentFolderChildrenLazy !== 'function') return;
+    try {
+        const ids = expandedNodeIds instanceof Set ? expandedNodeIds : new Set(expandedNodeIds);
+        if (!ids.size) return;
+        ids.forEach((nodeId) => {
+            try {
+                const item = tree.querySelector(`.tree-item[data-node-id="${CSS.escape(String(nodeId))}"]`);
+                if (!item) return;
+                if (item.dataset.nodeType !== 'folder') return;
+                if (item.dataset.childrenLoaded !== 'false') return;
+                if (item.dataset.hasChildren !== 'true') return;
+                const node = item.closest('.tree-node');
+                if (!node) return;
+                const children = node.querySelector(':scope > .tree-children');
+                if (!children) return;
+                loadPermanentFolderChildrenLazy(item.dataset.nodeId, children, 0, null);
+            } catch (_) { }
+        });
+    } catch (_) { }
+}
+
+function syncPermanentTreeCopiesFromPrimary() {
+    try {
+        if (currentView !== 'canvas') return;
+    } catch (_) { }
+
+    const primaryTree = document.getElementById('bookmarkTree');
+    if (!primaryTree) return;
+    // 主树尚未渲染完成时，避免把副本刷成“空树”导致闪烁（等主树真正有节点再同步）
+    try {
+        if (!primaryTree.querySelector('.tree-item, .empty-state, .error')) return;
+    } catch (_) { return; }
+
+    const canvasContent = document.getElementById('canvasContent');
+    if (!canvasContent) return;
+
+    const trees = Array.from(canvasContent.querySelectorAll('.permanent-bookmark-section .bookmark-tree'));
+    const copyTrees = trees.filter(t => t && t !== primaryTree);
+    if (!copyTrees.length) return;
+
+    const primaryChildren = Array.from(primaryTree.childNodes);
+
+    copyTrees.forEach((tree) => {
+        const body = tree.closest('.permanent-section-body');
+        const prevScrollTop = body ? body.scrollTop : null;
+        const prevScrollLeft = body ? body.scrollLeft : 0;
+        const prevExpanded = __captureTreeExpandedNodeIds(tree);
+        let persistedExpanded = null;
+        try {
+            const raw = __readTreeExpandStateFromStorage(tree);
+            if (raw) {
+                const arr = JSON.parse(raw);
+                if (Array.isArray(arr) && arr.length > 0) {
+                    persistedExpanded = new Set(arr.map(String));
+                }
+            }
+        } catch (_) { }
+
+        // 滚动位置：每个副本独立持久化（不做同步）；同步刷新时优先使用持久化值
+        let desiredScrollTop = prevScrollTop;
+        let desiredScrollLeft = prevScrollLeft;
+        try {
+            const key = __getPermanentSectionScrollStorageKeyFromTree(tree);
+            const persisted = __readLocalStorageJSON(key);
+            if (persisted && typeof persisted.top === 'number' && isFinite(persisted.top)) {
+                desiredScrollTop = persisted.top;
+                desiredScrollLeft = (typeof persisted.left === 'number' && isFinite(persisted.left)) ? persisted.left : 0;
+            }
+        } catch (_) { }
+
+        // 使用一次性替换，避免同步过程中短暂“清空”导致的可见闪烁
+        const frag = document.createDocumentFragment();
+        primaryChildren.forEach((child) => {
+            try { frag.appendChild(child.cloneNode(true)); } catch (_) { }
+        });
+        try {
+            tree.replaceChildren(frag);
+        } catch (_) {
+            tree.innerHTML = '';
+            try { tree.appendChild(frag); } catch (_) { }
+        }
+
+        // 右键菜单/临时选中态不应同步到副本：
+        // - 右键菜单会被“主树 -> 副本”cloneNode(true) 复制，导致所有副本同时出现菜单 UI
+        // - context-selected 仅应作用于当前用户交互的那一个树实例
+        try {
+            tree.querySelectorAll('#bookmark-context-menu, .bookmark-context-menu').forEach(el => {
+                try { el.remove(); } catch (_) { }
+            });
+            tree.querySelectorAll('.tree-item.context-selected').forEach(el => {
+                try { el.classList.remove('context-selected'); } catch (_) { }
+            });
+        } catch (_) { }
+
+        // 展开状态：每个副本独立，优先持久化；若无持久化则保留本副本当前展开状态
+        __resetTreeExpandedState(tree);
+        __ensureTreeRootExpanded(tree);
+        const expandedFallback = (persistedExpanded && persistedExpanded.size)
+            ? persistedExpanded
+            : prevExpanded;
+        if (expandedFallback && expandedFallback.size) {
+            __applyTreeExpandedNodeIds(tree, expandedFallback);
+            __lazyLoadExpandedFolders(tree, expandedFallback);
+        }
+
+        if (body && desiredScrollTop !== null) {
+            const restore = () => {
+                try {
+                    const until = parseInt(body.dataset.scrollRestoreBlockUntil || '0', 10) || 0;
+                    if (until && Date.now() < until) return;
+                } catch (_) { }
+                body.scrollTop = desiredScrollTop;
+                body.scrollLeft = desiredScrollLeft;
+            };
+            restore();
+            requestAnimationFrame(() => {
+                restore();
+                setTimeout(restore, 80);
+                setTimeout(restore, 180);
+                setTimeout(restore, 360);
+            });
+        }
+
+    });
+}
+
+function ensurePermanentTreeCopySync() {
+    const primaryTree = document.getElementById('bookmarkTree');
+    if (!primaryTree) return;
+
+    if (permanentTreeCopySyncObserver && permanentTreeCopySyncTarget === primaryTree) return;
+
+    teardownPermanentTreeCopySync();
+
+    permanentTreeCopySyncTarget = primaryTree;
+    permanentTreeCopySyncObserver = new MutationObserver(() => {
+        try {
+            if (currentView !== 'canvas') return;
+        } catch (_) { return; }
+
+        schedulePermanentTreeCopySync();
+    });
+
+    // 同步必须覆盖“增/删/改/移”的标识与内容更新：
+    // - childList: 徽标插入/节点插入/移动
+    // - characterData: 标题文本更新
+    // - attributes: href/title/data-* 等的更新
+    permanentTreeCopySyncObserver.observe(primaryTree, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: [
+            'href',
+            'title',
+            'data-node-title',
+            'data-node-url',
+            'data-move-from'
+        ]
+    });
+    // 触发一次初始同步（通过 debounce 合并，避免和首屏渲染的 mutation “打架”造成闪烁）
+    setTimeout(schedulePermanentTreeCopySync, 0);
+}
+
+function teardownPermanentTreeCopySync() {
+    if (permanentTreeCopySyncObserver) {
+        try { permanentTreeCopySyncObserver.disconnect(); } catch (_) { }
+    }
+    permanentTreeCopySyncObserver = null;
+    permanentTreeCopySyncTarget = null;
+    permanentTreeCopySyncScheduled = false;
+    if (permanentTreeCopySyncTimer) {
+        try { clearTimeout(permanentTreeCopySyncTimer); } catch (_) { }
+    }
+    permanentTreeCopySyncTimer = null;
+}
+
+// Debug helper: inspect copy-specific persisted states (run in DevTools: `__debugPermanentCopyStates()`)
+function __debugPermanentCopyStates() {
+    try {
+        const canvasContent = document.getElementById('canvasContent');
+        if (!canvasContent) {
+            console.log('[DebugCopyState] canvasContent not found');
+            return;
+        }
+        const sections = Array.from(canvasContent.querySelectorAll('.permanent-bookmark-section.permanent-section-copy'));
+        if (!sections.length) {
+            console.log('[DebugCopyState] no permanent-section-copy found');
+            return;
+        }
+        sections.forEach((sec) => {
+            const copyId = sec.dataset ? sec.dataset.permanentSectionCopyId : null;
+            const tree = sec.querySelector('.bookmark-tree');
+            const body = sec.querySelector('.permanent-section-body');
+
+            const scrollKey = copyId ? `permanent-section-scroll:${copyId}` : 'permanent-section-scroll';
+            const expandKey = tree ? __getTreeExpandStateStorageKey(tree) : null;
+
+            let storedScroll = null;
+            let storedExpandedCount = null;
+            try { storedScroll = __readLocalStorageJSON(scrollKey); } catch (_) { }
+            try {
+                if (expandKey) {
+                    const raw = localStorage.getItem(expandKey);
+                    const parsed = raw ? JSON.parse(raw) : null;
+                    storedExpandedCount = Array.isArray(parsed) ? parsed.length : null;
+                }
+            } catch (_) { }
+
+            let runtimeExpandedCount = null;
+            try { runtimeExpandedCount = tree ? tree.querySelectorAll('.tree-children.expanded').length : null; } catch (_) { }
+
+            console.log('[DebugCopyState]', {
+                copyId,
+                scrollKey,
+                storedScroll,
+                runtimeScrollTop: body ? body.scrollTop : null,
+                runtimeScrollLeft: body ? body.scrollLeft : null,
+                expandKey,
+                storedExpandedCount,
+                runtimeExpandedCount
+            });
+        });
+    } catch (e) {
+        console.error('[DebugCopyState] failed:', e);
+    }
+}
+window.__debugPermanentCopyStates = __debugPermanentCopyStates;
+
+function readCachedValue(key) {
+    return new Promise((resolve) => {
+        const storageArea = getCacheStorageArea();
+        if (storageArea) {
+            storageArea.get([key], (result) => {
+                if (browserAPI.runtime && browserAPI.runtime.lastError) {
+                    console.warn('[Cache] 读取失败:', browserAPI.runtime.lastError.message);
+                    resolve(null);
+                    return;
+                }
+                resolve(result ? result[key] : null);
+            });
+            return;
+        }
+
+        try {
+            const raw = localStorage.getItem(key);
+            resolve(raw ? JSON.parse(raw) : null);
+        } catch (error) {
+            console.warn('[Cache] 读取 localStorage 失败:', error);
+            resolve(null);
+        }
+    });
+}
+
+function writeCachedValue(key, value) {
+    return new Promise((resolve) => {
+        const storageArea = getCacheStorageArea();
+        if (storageArea) {
+            storageArea.set({ [key]: value }, () => {
+                if (browserAPI.runtime && browserAPI.runtime.lastError) {
+                    console.warn('[Cache] 写入失败:', browserAPI.runtime.lastError.message);
+                }
+                resolve();
+            });
+            return;
+        }
+
+        try {
+            localStorage.setItem(key, JSON.stringify(value));
+        } catch (error) {
+            console.warn('[Cache] 写入 localStorage 失败:', error);
+        }
+        resolve();
+    });
+}
+
+function normalizeBookmarkCacheEntry(entry) {
+    if (!entry || !entry.url) return null;
+    const timestamp = typeof entry.dateAdded === 'number'
+        ? entry.dateAdded
+        : (entry.dateAdded instanceof Date ? entry.dateAdded.getTime() : Date.now());
+    return {
+        id: entry.id,
+        title: entry.title || entry.url || '',
+        url: entry.url || '',
+        dateAdded: timestamp,
+        parentId: entry.parentId || '',
+        path: entry.path || ''
+    };
+}
+
+async function ensureBookmarkCacheLoaded(skipRender) {
+    if (bookmarkCacheRestored || allBookmarks.length > 0) {
+        return;
+    }
+    try {
+        const cached = await readCachedValue(DATA_CACHE_KEYS.bookmarks);
+        if (cached && Array.isArray(cached.bookmarks)) {
+            allBookmarks = cached.bookmarks
+                .map(normalizeBookmarkCacheEntry)
+                .filter(Boolean);
+            bookmarkCacheRestored = true;
+            rebuildBookmarkUrlSet();
+            console.log('[BookmarkCache] 已从缓存恢复记录:', allBookmarks.length);
+            if (!skipRender) {
+            }
+        }
+    } catch (error) {
+        console.warn('[BookmarkCache] 恢复失败:', error);
+    }
+}
+
+async function persistBookmarkCache() {
+    try {
+        const payload = {
+            timestamp: Date.now(),
+            bookmarks: allBookmarks.map(normalizeBookmarkCacheEntry).filter(Boolean)
+        };
+        await writeCachedValue(DATA_CACHE_KEYS.bookmarks, payload);
+        console.log('[BookmarkCache] 已保存:', payload.bookmarks.length);
+    } catch (error) {
+        console.warn('[BookmarkCache] 保存失败:', error);
+    }
+}
+
+function scheduleBookmarkCacheSave() {
+    if (saveBookmarkCacheTimer) {
+        clearTimeout(saveBookmarkCacheTimer);
+    }
+    saveBookmarkCacheTimer = setTimeout(() => {
+        saveBookmarkCacheTimer = null;
+        persistBookmarkCache();
+    }, 600);
+}
+
+function handleBookmarkCacheMutation(forceRender = true) {
+    bookmarkCacheRestored = true;
+    scheduleBookmarkCacheSave();
+}
+
+function addBookmarkToCache(bookmark) {
+    const normalized = normalizeBookmarkCacheEntry(bookmark);
+    if (!normalized) return;
+    allBookmarks.push(normalized);
+    addUrlToBookmarkSet(normalized.url);
+    const normalizedTitle = normalizeBookmarkTitle(normalized.title);
+    if (normalizedTitle) {
+        bookmarkTitleSet.add(normalizedTitle);
+    }
+    handleBookmarkCacheMutation(true);
+}
+
+function removeBookmarkFromCache(bookmarkId) {
+    if (!bookmarkId) return;
+    const index = allBookmarks.findIndex(item => item.id === bookmarkId);
+    if (index === -1) return;
+    removeUrlFromBookmarkSet(allBookmarks[index].url);
+    allBookmarks.splice(index, 1);
+    handleBookmarkCacheMutation(true);
+}
+
+function updateBookmarkInCache(bookmarkId, changeInfo = {}) {
+    if (!bookmarkId) return;
+    const target = allBookmarks.find(item => item.id === bookmarkId);
+    if (!target) return;
+    const prevUrl = target.url;
+    if (typeof changeInfo.title !== 'undefined') {
+        target.title = changeInfo.title;
+        const normalizedTitle = normalizeBookmarkTitle(changeInfo.title);
+        if (normalizedTitle) {
+            bookmarkTitleSet.add(normalizedTitle);
+        }
+    }
+    if (typeof changeInfo.url !== 'undefined') {
+        target.url = changeInfo.url;
+        removeUrlFromBookmarkSet(prevUrl);
+        addUrlToBookmarkSet(changeInfo.url);
+    }
+    handleBookmarkCacheMutation(true);
+}
+
+function moveBookmarkInCache(bookmarkId, moveInfo = {}) {
+    if (!bookmarkId) return;
+    const target = allBookmarks.find(item => item.id === bookmarkId);
+    if (!target) return;
+    if (typeof moveInfo.parentId !== 'undefined') {
+        target.parentId = moveInfo.parentId;
+    }
+    handleBookmarkCacheMutation(false);
+}
+
+function normalizeBookmarkTitle(title) {
+    if (!title || typeof title !== 'string') return null;
+    const trimmed = title.trim();
+    return trimmed || null;
+}
+
+function normalizeBookmarkUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        return null;
+    }
+    return url.trim();
+}
+
+function rebuildBookmarkUrlSet() {
+    bookmarkUrlSet.clear();
+    bookmarkTitleSet.clear();
+    allBookmarks.forEach(item => {
+        const normalized = normalizeBookmarkUrl(item.url);
+        if (normalized) {
+            bookmarkUrlSet.add(normalized);
+        }
+        const normalizedTitle = normalizeBookmarkTitle(item.title);
+        if (normalizedTitle) {
+            bookmarkTitleSet.add(normalizedTitle);
+        }
+    });
+}
+
+function addUrlToBookmarkSet(url) {
+    const normalized = normalizeBookmarkUrl(url);
+    if (normalized) {
+        bookmarkUrlSet.add(normalized);
+    }
+}
+
+function removeUrlFromBookmarkSet(url) {
+    const normalized = normalizeBookmarkUrl(url);
+    if (normalized) {
+        bookmarkUrlSet.delete(normalized);
+    }
+}
+
+// 实时更新状态控制
+let messageListenerRegistered = false;
+// 显式移动集合（基于 onMoved 事件），用于同级移动标识，设置短期有效期
+let explicitMovedIds = new Map(); // id -> expiryTimestamp
+
+// 页面刷新/重新打开时，恢复“显式移动”标记
+
+// =============================================================================
+// 辅助函数 - URL 处理
+// =============================================================================
+
+// 安全地获取网站图标 URL（同步版本，用于兼容旧代码）
+// 注意：这个函数会触发后台异步加载，初次调用返回fallbackIcon
+function getFaviconUrl(url) {
+    if (!url) return fallbackIcon;
+
+    // 验证是否是有效的 HTTP/HTTPS URL
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        return fallbackIcon;
+    }
+
+    // 检查是否是无效URL
+    if (FaviconCache.isInvalidUrl(url)) {
+        return fallbackIcon;
+    }
+
+    try {
+        const urlObj = new URL(url);
+        const domain = urlObj.hostname;
+
+        // 【关键修复】先检查内存缓存（在 renderTreeView 时已预热）
+        if (FaviconCache.memoryCache.has(domain)) {
+            return FaviconCache.memoryCache.get(domain);
+        }
+
+        // 检查失败缓存
+        if (FaviconCache.failureCache.has(domain)) {
+            return fallbackIcon;
+        }
+
+        // 触发后台异步加载（不等待结果）
+        // 注意：由于在 renderTreeView 时已经预热了缓存，
+        // 这里只是作为兜底机制，处理动态添加的书签
+        FaviconCache.fetch(url).then(dataUrl => {
+            // 加载完成后，查找并更新所有使用这个URL的img标签
+            if (dataUrl && dataUrl !== fallbackIcon) {
+                updateFaviconImages(url, dataUrl);
+            }
+        });
+
+        // 立即返回 fallback 图标作为占位符
+        return fallbackIcon;
+    } catch (error) {
+        return fallbackIcon;
+    }
+}
+
+// 更新页面上所有指定URL的favicon图片
+function updateFaviconImages(url, dataUrl) {
+    let updatedCount = 0;
+    try {
+        const urlObj = new URL(url);
+        const domain = urlObj.hostname;
+
+        // 查找所有相关的img标签（通过data-favicon-domain或父元素的data-node-url/data-bookmark-url）
+        const allImages = document.querySelectorAll('img.tree-icon, img.canvas-bookmark-icon, img.search-result-favicon');
+
+        allImages.forEach(img => {
+            // 优先检查 img 元素自身的 data-bookmark-url 属性（搜索结果场景）
+            let itemUrl = img.dataset.bookmarkUrl;
+
+            // 如果 img 自身没有，再检查父元素
+            if (!itemUrl) {
+                const item = img.closest('[data-node-url], [data-bookmark-url]');
+                if (item) {
+                    itemUrl = item.dataset.nodeUrl || item.dataset.bookmarkUrl;
+                }
+            }
+
+            if (itemUrl) {
+                try {
+                    const itemDomain = new URL(itemUrl).hostname;
+                    if (itemDomain === domain) {
+                        // 更新图标
+                        img.src = dataUrl;
+
+                        // 如果图片之前是隐藏的（被黄色书签图标替代），现在显示它
+                        if (img.style.display === 'none') {
+                            img.style.display = '';
+                            // 隐藏相邻的 fallback 图标（可能是 previousSibling 或在同一父容器中）
+                            const prevSibling = img.previousElementSibling;
+                            if (prevSibling && prevSibling.classList.contains('search-result-icon-box-inline')) {
+                                prevSibling.style.display = 'none';
+                            } else {
+                                // 在父容器中查找 fallback 图标
+                                const parent = img.parentElement;
+                                if (parent) {
+                                    const fallbackIcon = parent.querySelector('.search-result-icon-box-inline');
+                                    if (fallbackIcon) {
+                                        fallbackIcon.style.display = 'none';
+                                    }
+                                }
+                            }
+                        }
+
+                        updatedCount++;
+                    }
+                } catch (e) {
+                    // 忽略无效URL
+                }
+            }
+        });
+    } catch (e) {
+        // 静默处理
+    }
+    return updatedCount;
+}
+
+// 全局图片错误处理（使用事件委托，避免CSP内联事件处理器）
+function setupGlobalImageErrorHandler() {
+    document.addEventListener('error', (e) => {
+        if (e.target.tagName === 'IMG' &&
+            (e.target.classList.contains('tree-icon') ||
+                e.target.classList.contains('canvas-bookmark-icon') ||
+                e.target.classList.contains('search-result-favicon'))) {
+            // 只在src不是fallbackIcon时才替换，避免无限循环
+            // fallbackIcon 是 data URL，不会加载失败
+            if (e.target.src !== fallbackIcon && !e.target.src.startsWith('data:image/svg+xml')) {
+                e.target.src = fallbackIcon;
+            }
+        }
+    }, true); // 使用捕获阶段
+}
+
+// 异步获取favicon（推荐使用，支持完整缓存）
+async function getFaviconUrlAsync(url) {
+    if (!url) return fallbackIcon;
+
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        return fallbackIcon;
+    }
+
+    return await FaviconCache.fetch(url);
+}
+
+// Fallback 图标 - 星标书签图标
+const fallbackIcon = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Cpath fill=%22%23999%22 d=%22M8 0l2.8 5.5 6.2 0.5-4.5 4 1.5 6-5.5-3.5-5.5 3.5 1.5-6-4.5-4 6.2-0.5z%22/%3E%3C/svg%3E';
+
+// Edge/Chrome 内置页面 scheme 不同（仅用于展示/跳转提示）
+const internalScheme = (navigator.userAgent || '').includes('Edg/') ? 'edge://' : 'chrome://';
+
+// =============================================================================
+// 国际化文本
+// =============================================================================
+
+const i18n = {
+    pageTitle: {
+        'zh_CN': '书签画布',
+        'en': 'Bookmark Canvas'
+    },
+    pageSubtitle: {
+        'zh_CN': '',
+        'en': ''
+    },
+    searchPlaceholder: {
+        'zh_CN': '搜索书签、文件夹...',
+        'en': 'Search bookmarks, folders...'
+    },
+    helpTooltip: {
+        'zh_CN': '开源信息与快捷键',
+        'en': 'Open Source Info & Shortcuts'
+    },
+    navCanvas: {
+        'zh_CN': '书签画布',
+        'en': 'Bookmark Canvas'
+    },
+    importCanvasText: {
+        'zh_CN': '导入',
+        'en': 'Import'
+    },
+    exportCanvasText: {
+        'zh_CN': '导出',
+        'en': 'Export'
+    },
+    markerMenuText: {
+        'zh_CN': '标识',
+        'en': 'Markers'
+    },
+    markerMenuTitle: {
+        'zh_CN': '标识管理',
+        'en': 'Marker Settings'
+    },
+    markerClearText: {
+        'zh_CN': '清除标识（设为基准）',
+        'en': 'Clear markers (set baseline)'
+    },
+    markerToggleOn: {
+        'zh_CN': '开启标识显示',
+        'en': 'Enable markers'
+    },
+    markerToggleOff: {
+        'zh_CN': '关闭标识显示',
+        'en': 'Disable markers'
+    },
+    markerAutoClearText: {
+        'zh_CN': '自动定时清除',
+        'en': 'Auto-clear'
+    },
+    markerAutoClearIntervalLabel: {
+        'zh_CN': '间隔',
+        'en': 'Interval'
+    },
+    markerAutoClearPlaceholder: {
+        'zh_CN': '例如：30分钟 / 2小时 / 1天',
+        'en': 'e.g. 30 min / 2 hours / 1 day'
+    },
+    markerAutoClearCustomLabel: {
+        'zh_CN': '自定义',
+        'en': 'Custom'
+    },
+    clearMenuText: {
+        'zh_CN': '清除',
+        'en': 'Clear'
+    },
+    clearByClickText: {
+        'zh_CN': '点击清除',
+        'en': 'Click to Clear'
+    },
+    clearTempNodesText: {
+        'zh_CN': '清空未标注节点',
+        'en': 'Clear Unmarked Nodes'
+    },
+    clearAllText: {
+        'zh_CN': '清除全部（永久栏目除外）',
+        'en': 'Clear All (Except Permanent)'
+    },
+    clearRulesTooltipTitle: {
+        'zh_CN': '清除规则',
+        'en': 'Clear Rules'
+    },
+    clearRulesWillClear: {
+        'zh_CN': '会被清除：',
+        'en': 'Will be cleared:'
+    },
+    clearRulesWillKeep: {
+        'zh_CN': '会被保留：',
+        'en': 'Will be kept:'
+    },
+    clearRuleTemp: {
+        'zh_CN': '<strong>书签型临时栏目</strong>：无说明 + 默认标题 + 无连接线',
+        'en': '<strong>Temp Section</strong>: No description + Default title + No edges'
+    },
+    clearRuleMd: {
+        'zh_CN': '<strong>空白栏目</strong>：内容为空 + 无连接线',
+        'en': '<strong>Blank Node</strong>: Empty content + No edges'
+    },
+    clearRuleKeepDesc: {
+        'zh_CN': '<i class="fas fa-check"></i> 有说明文字',
+        'en': '<i class="fas fa-check"></i> Has description'
+    },
+    clearRuleKeepTitle: {
+        'zh_CN': '<i class="fas fa-check"></i> 标题被修改过',
+        'en': '<i class="fas fa-check"></i> Custom title'
+    },
+    clearRuleKeepEdge: {
+        'zh_CN': '<i class="fas fa-check"></i> 有连接线',
+        'en': '<i class="fas fa-check"></i> Has edges'
+    },
+    canvasFullscreenEnter: {
+        'zh_CN': '全屏',
+        'en': 'Fullscreen'
+    },
+    canvasFullscreenExit: {
+        'zh_CN': '退出',
+        'en': 'Exit'
+    },
+    canvasZoomLabel: {
+        'zh_CN': '缩放',
+        'en': 'Zoom'
+    },
+    zoomInTitle: {
+        'zh_CN': '放大 (10%)',
+        'en': 'Zoom In (10%)'
+    },
+    zoomOutTitle: {
+        'zh_CN': '缩小 (10%)',
+        'en': 'Zoom Out (10%)'
+    },
+    zoomLocateTitle: {
+        'zh_CN': '定位到永久栏目',
+        'en': 'Locate to Permanent Section'
+    },
+    zoomLocateText: {
+        'zh_CN': '定位',
+        'en': 'Locate'
+    },
+    canvasManageText: {
+        'zh_CN': '管理',
+        'en': 'Manage'
+    },
+    canvasManageTitle: {
+        'zh_CN': '画布管理',
+        'en': 'Canvas Manage'
+    },
+    canvasPerfSettingsText: {
+        'zh_CN': '性能',
+        'en': 'Performance'
+    },
+    canvasHelpBtnTitle: {
+        'zh_CN': '说明',
+        'en': 'Help'
+    },
+    canvasHelpModalTitle: {
+        'zh_CN': '说明',
+        'en': 'Help'
+    },
+    canvasHelpCtrlTitle: {
+        'zh_CN': 'Ctrl 键操作',
+        'en': 'Ctrl Key Actions'
+    },
+    canvasHelpCtrlLeftClick: {
+        'zh_CN': '左键（按住）',
+        'en': 'Left Click (Hold)'
+    },
+    canvasHelpCtrlLeftDesc: {
+        'zh_CN': '拖动画布 或 栏目卡片',
+        'en': 'Drag canvas or section card'
+    },
+    canvasHelpCtrlWheel: {
+        'zh_CN': '滚轮',
+        'en': 'Wheel'
+    },
+    canvasHelpCtrlWheelDesc: {
+        'zh_CN': '缩放',
+        'en': 'Zoom'
+    },
+    canvasHelpCtrlRightClick: {
+        'zh_CN': '右键（单击）',
+        'en': 'Right Click'
+    },
+    canvasHelpCtrlRightDesc: {
+        'zh_CN': '更改栏目卡片的大小',
+        'en': 'Resize section card'
+    },
+    canvasHelpSpaceTitle: {
+        'zh_CN': '空格键操作',
+        'en': 'Space Key Actions'
+    },
+    canvasHelpSpaceKey: {
+        'zh_CN': '空格',
+        'en': 'Space'
+    },
+    canvasHelpSpaceLeftClick: {
+        'zh_CN': '左键（按住）',
+        'en': 'Left Click (Hold)'
+    },
+    canvasHelpSpaceDesc: {
+        'zh_CN': '拖动画布',
+        'en': 'Drag canvas'
+    },
+    canvasHelpTouchpadTitle: {
+        'zh_CN': '触控板操作',
+        'en': 'Touchpad Actions'
+    },
+    canvasHelpTouchpadPinch: {
+        'zh_CN': '双指捏合',
+        'en': 'Pinch'
+    },
+    canvasHelpTouchpadPinchDesc: {
+        'zh_CN': '缩放画布',
+        'en': 'Zoom canvas'
+    },
+    canvasHelpTouchpadScroll: {
+        'zh_CN': '双指滑动',
+        'en': 'Two-finger Scroll'
+    },
+    canvasHelpTouchpadScrollDesc: {
+        'zh_CN': '拖动画布',
+        'en': 'Pan canvas'
+    },
+    canvasShortcutRecorderCancel: {
+        'zh_CN': '取消',
+        'en': 'Cancel'
+    },
+    canvasShortcutEditTitle: {
+        'zh_CN': '点击修改快捷键',
+        'en': 'Click to change shortcut'
+    },
+    recorderHelpTitle: {
+        'zh_CN': '可用按键',
+        'en': 'Available Keys'
+    },
+    recorderHelpBtnTitle: {
+        'zh_CN': '查看可用按键',
+        'en': 'View available keys'
+    },
+    tooltipModifierLabel: {
+        'zh_CN': '修饰键:',
+        'en': 'Modifiers:'
+    },
+    tooltipSpecialLabel: {
+        'zh_CN': '特殊键:',
+        'en': 'Special:'
+    },
+    tooltipLetterLabel: {
+        'zh_CN': '字母键:',
+        'en': 'Letters:'
+    },
+    tooltipNumberLabel: {
+        'zh_CN': '数字键:',
+        'en': 'Numbers:'
+    },
+    permanentSectionTitle: {
+        'zh_CN': '书签树 (永久栏目)',
+        'en': 'Bookmark Tree (Permanent)'
+    },
+    permanentSectionTip: {
+        'zh_CN': '点击添加说明...',
+        'en': 'Click to add description...'
+    },
+    shortcutsModalTitle: {
+        'zh_CN': '开源信息与快捷键',
+        'en': 'Open Source Info & Shortcuts'
+    },
+    openSourceGithubLabel: {
+        'zh_CN': 'GitHub 仓库:',
+        'en': 'GitHub Repository:'
+    },
+    openSourceIssueLabel: {
+        'zh_CN': '问题反馈:',
+        'en': 'Feedback / Issues:'
+    },
+    openSourceIssueText: {
+        'zh_CN': '提交问题',
+        'en': 'Submit Issue'
+    },
+    shortcutsTitle: {
+        'zh_CN': '当前可用快捷键',
+        'en': 'Available Shortcuts'
+    },
+    shortcutsTableHeaderKey: {
+        'zh_CN': '按键',
+        'en': 'Key'
+    },
+    shortcutsTableHeaderAction: {
+        'zh_CN': '功能',
+        'en': 'Action'
+    },
+    shortcutsSettingsTooltip: {
+        'zh_CN': '在浏览器中管理快捷键',
+        'en': 'Manage shortcuts in browser'
+    },
+    shortcutCanvas: {
+        'zh_CN': '打开「书签画布」视图',
+        'en': 'Open "Bookmark Canvas" view'
+    },
+    closeShortcutsText: {
+        'zh_CN': '关闭',
+        'en': 'Close'
+    },
+    emptyTree: {
+        'zh_CN': '无法加载书签树',
+        'en': 'Unable to load bookmark tree'
+    },
+    loading: {
+        'zh_CN': '加载中...',
+        'en': 'Loading...'
+    },
+    themeTooltip: {
+        'zh_CN': '切换主题',
+        'en': 'Toggle Theme'
+    },
+    langTooltip: {
+        'zh_CN': '切换语言',
+        'en': 'Switch Language'
+    },
+    bookmarkToolboxTitle: {
+        'zh_CN': '书签工具箱',
+        'en': 'Bookmark Toolbox'
+    },
+    horizontalScrollHint: {
+        'zh_CN': 'Shift + 滚轮',
+        'en': 'Shift + Wheel'
+    },
+};
+window.i18n = i18n; // 暴露给其他模块使用
+
+// =============================================================================
+// 初始化
+// =============================================================================
+
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log('历史查看器初始化...');
+
+    // ========================================================================
+    // 【关键步骤 -1】检测是否需要清除 localStorage（"恢复到初始状态"功能触发）
+    // ========================================================================
+    try {
+        const resetCheck = await new Promise(resolve => {
+            browserAPI.storage.local.get(['needClearLocalStorage'], result => resolve(result));
+        });
+
+        if (resetCheck && resetCheck.needClearLocalStorage === true) {
+            console.log('[初始化] 检测到重置标志，正在清除 localStorage...');
+
+            // 清除当前页面上下文的所有 localStorage
+            localStorage.clear();
+
+            // 移除重置标志（避免重复清除）
+            await new Promise(resolve => {
+                browserAPI.storage.local.remove(['needClearLocalStorage'], resolve);
+            });
+
+            console.log('[初始化] localStorage 已清除，重置标志已移除');
+        }
+    } catch (error) {
+        console.warn('[初始化] 检测重置标志时出错:', error);
+    }
+
+    // ========================================================================
+    // 【关键步骤 0】初始化 Favicon 缓存系统
+    // ========================================================================
+    try {
+        await FaviconCache.init();
+    } catch (error) {
+        // 静默处理
+    }
+
+
+    // 设置全局图片错误处理（避免CSP内联事件处理器）
+    setupGlobalImageErrorHandler();
+
+    // ========================================================================
+    // 【关键步骤 1】最优先：立即恢复并应用视图状态
+    // ========================================================================
+    const urlParams = new URLSearchParams(window.location.search);
+    const viewParam = urlParams.get('view');
+
+    // 优先级：URL参数 > localStorage > 默认值
+    if (viewParam && ALLOWED_VIEWS.includes(viewParam)) {
+        currentView = viewParam;
+        console.log('[初始化] 从URL参数设置视图:', currentView);
+
+        // 【关键】应用 URL 参数后，立即从 URL 中移除 view 参数
+        // 这样刷新页面时就会使用 localStorage，实现持久化
+        const newUrl = new URL(window.location.href);
+        newUrl.searchParams.delete('view');
+        window.history.replaceState({}, '', newUrl.toString());
+        console.log('[初始化] 已从URL中移除view参数，刷新时将使用localStorage');
+    } else {
+        const lastView = localStorage.getItem('lastActiveView');
+        if (lastView && ALLOWED_VIEWS.includes(lastView)) {
+            currentView = lastView;
+            console.log('[初始化] 从localStorage恢复视图:', currentView);
+        } else {
+            currentView = DEFAULT_VIEW;
+            console.log('[初始化] 使用默认视图:', currentView);
+        }
+    }
+
+    // 立即应用视图状态到DOM
+    console.log('[初始化] >>>立即应用视图状态<<<:', currentView);
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+        if (tab.dataset.view === currentView) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+    document.querySelectorAll('.view').forEach(view => {
+        if (view.id === `${currentView}View`) {
+            view.classList.add('active');
+        } else {
+            view.classList.remove('active');
+        }
+    });
+
+    // Canvas 视图：去除 content-area padding，避免画布四周出现“边框/留白”
+    const initialContentArea = document.querySelector('.content-area');
+    if (initialContentArea) {
+        initialContentArea.classList.toggle('canvas-full-bleed', currentView === 'canvas');
+    }
+    // Canvas 视图：取消 html 的 scrollbar gutter，避免右侧出现空隙/黑边
+    try {
+        document.documentElement.classList.toggle('canvas-view-active', currentView === 'canvas');
+    } catch (_) { }
+    localStorage.setItem('lastActiveView', currentView);
+    console.log('[初始化] 视图状态已应用完成');
+
+    // [Search Context Boot] 首次加载时同步 SearchContextManager 的 view/tab/subTab。
+    // 这里不能依赖 switchView()，因为初始化阶段是直接改 DOM 来显示视图。
+    try {
+        if (window.SearchContextManager && typeof window.SearchContextManager.updateContext === 'function') {
+            window.SearchContextManager.updateContext(currentView, null, null);
+        }
+    } catch (_) { }
+
+    // ========================================================================
+    // 其他初始化
+    // ========================================================================
+    console.log('[URL参数] 完整URL:', window.location.href);
+    console.log('[URL参数] viewParam:', viewParam);
+
+    // 加载用户设置
+    await loadUserSettings();
+    // 加载变化标识设置（含自动清除调度）
+    await loadMarkerSettings();
+
+    // 初始化 UI（此时currentView已经是正确的值）
+    initializeUI();
+
+    // 初始化侧边栏收起功能
+    initSidebarToggle();
+    // Canvas-only：不初始化非画布功能
+
+    // 初始化右键菜单和拖拽功能
+    if (typeof initContextMenu === 'function') {
+        initContextMenu();
+    }
+    if (typeof initDragDrop === 'function') {
+        initDragDrop();
+    }
+
+    // 初始化批量操作相关功能
+    if (typeof initBatchToolbar === 'function') {
+        initBatchToolbar();
+        console.log('[主程序] 批量工具栏已初始化');
+    }
+    if (typeof initKeyboardShortcuts === 'function') {
+        initKeyboardShortcuts();
+        console.log('[主程序] 快捷键已初始化');
+    }
+    if (typeof initClickSelect === 'function') {
+        initClickSelect();
+        console.log('[主程序] 点击选择已初始化');
+    }
+
+    // 注册消息监听
+    setupRealtimeMessageListener();
+
+    // 恢复移动蓝标（避免 Canvas 懒加载模式下“刷新后移动效果消失”）
+    await restoreExplicitMovedIdsFromStorage();
+
+    // 先加载基础数据
+    console.log('[初始化] 加载基础数据...');
+    await loadAllData();
+
+    // 使用智能等待：尝试渲染，如果数据不完整则等待后重试
+    // 初始化时强制刷新缓存，确保显示最新数据
+    console.log('[初始化] 开始渲染当前视图:', currentView);
+
+    // 根据当前视图渲染
+    await renderCurrentView();
+
+    // 如果通过 window_marker.html 传入了定位参数，则在 Canvas 视图渲染后执行一次定位
+    try {
+        const lt = urlParams.get('lt'); // 'permanent' | 'temporary'
+        const sid = urlParams.get('sid');
+        const nid = urlParams.get('nid');
+        const titleParam = urlParams.get('t');
+        const typeParam = urlParams.get('type'); // 'hyperlink' 或 undefined
+
+        if (titleParam && typeof titleParam === 'string' && titleParam.trim()) {
+            // 根据type参数设置不同的标题格式
+            if (typeParam === 'hyperlink') {
+                // 超链接系统：使用 "Hyperlink N" 格式
+                document.title = `Hyperlink ${titleParam.trim()}`;
+            } else {
+                // 书签系统：直接使用数字
+                document.title = titleParam.trim();
+            }
+        }
+
+        const waitFor = (predicate, timeout = 5000, interval = 50) => new Promise((resolve, reject) => {
+            const start = Date.now();
+            const tick = () => {
+                try {
+                    if (predicate()) return resolve(true);
+                    if (Date.now() - start >= timeout) return resolve(false);
+                } catch (_) { }
+                setTimeout(tick, interval);
+            };
+            tick();
+        });
+
+        if (currentView === 'canvas' && (lt === 'permanent' || lt === 'temporary')) {
+            // 等待 Canvas 初始化完成
+            await waitFor(() => window.CanvasModule && document.getElementById('canvasWorkspace'));
+            if (lt === 'permanent') {
+                if (window.CanvasModule && typeof window.CanvasModule.locatePermanent === 'function') {
+                    window.CanvasModule.locatePermanent();
+                }
+                if (nid) {
+                    // 等待树节点渲染完成后滚动到对应书签
+                    await waitFor(() => document.querySelector('#permanentSection .permanent-section-body .tree-item'));
+                    const body = document.querySelector('#permanentSection .permanent-section-body');
+                    const target = body ? body.querySelector(`.tree-item[data-node-id="${CSS.escape(nid)}"]`) : null;
+                    if (target && target.scrollIntoView) {
+                        try { target.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (_) { target.scrollIntoView(); }
+                    }
+                }
+            } else if (lt === 'temporary' && sid) {
+                if (window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
+                    try { window.CanvasModule.locateSection(sid); } catch (_) { }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('[初始化] Canvas 定位参数处理失败:', e);
+    }
+
+    // 并行预加载其他视图和图标（不阻塞）
+    Promise.all([
+        preloadCommonIcons()
+    ]).then(() => {
+        console.log('[初始化] 所有资源预加载完成');
+    }).catch(error => {
+        console.error('[初始化] 预加载失败:', error);
+    });
+
+    // 监听存储变化（实时更新）
+    browserAPI.storage.onChanged.addListener(handleStorageChange);
+
+    // 监听书签API变化（实时更新书签树视图）
+    setupBookmarkListener();
+
+    console.log('历史查看器初始化完成');
+});
+
+// =============================================================================
+// 用户设置
+// =============================================================================
+
+// 检查是否有覆盖设置
+function hasThemeOverride() {
+    try {
+        return localStorage.getItem('historyViewerHasCustomTheme') === 'true';
+    } catch (e) {
+        return false;
+    }
+}
+
+function hasLangOverride() {
+    try {
+        return localStorage.getItem('historyViewerHasCustomLang') === 'true';
+    } catch (e) {
+        return false;
+    }
+}
+
+// 获取覆盖设置
+function getThemeOverride() {
+    try {
+        return localStorage.getItem('historyViewerCustomTheme');
+    } catch (e) {
+        return null;
+    }
+}
+
+function getLangOverride() {
+    try {
+        return localStorage.getItem('historyViewerCustomLang');
+    } catch (e) {
+        return null;
+    }
+}
+
+async function loadUserSettings() {
+    return new Promise((resolve) => {
+        browserAPI.storage.local.get(['preferredLang', 'currentTheme'], (result) => {
+            const mainUILang = result.preferredLang || 'zh_CN';
+            const prefersDark = typeof window !== 'undefined'
+                && window.matchMedia
+                && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const mainUITheme = result.currentTheme || (prefersDark ? 'dark' : 'light');
+
+            // 优先使用覆盖设置，否则使用主UI设置
+            if (hasThemeOverride()) {
+                currentTheme = getThemeOverride() || mainUITheme;
+                console.log('[加载用户设置] 使用History Viewer的主题覆盖:', currentTheme);
+            } else {
+                currentTheme = mainUITheme;
+                console.log('[加载用户设置] 跟随主UI主题:', currentTheme);
+            }
+
+            if (hasLangOverride()) {
+                currentLang = getLangOverride() || mainUILang;
+                window.currentLang = currentLang; // 同步到 window
+                console.log('[加载用户设置] 使用History Viewer的语言覆盖:', currentLang);
+            } else {
+                currentLang = mainUILang;
+                window.currentLang = currentLang; // 同步到 window
+                console.log('[加载用户设置] 跟随主UI语言:', currentLang);
+            }
+
+            // 应用主题
+            document.documentElement.setAttribute('data-theme', currentTheme);
+
+            // 更新主题切换按钮图标
+            const themeIcon = document.querySelector('#themeToggle i');
+            if (themeIcon) {
+                themeIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+            }
+
+            // 应用语言
+            applyLanguage();
+
+            // 更新语言切换按钮文本
+            const langText = document.querySelector('#langToggle .lang-text');
+            if (langText) {
+                langText.textContent = currentLang === 'zh_CN' ? 'EN' : '中';
+            }
+
+            resolve();
+        });
+    });
+}
+
+function applyLanguage() {
+    document.getElementById('pageTitle').textContent = i18n.pageTitle[currentLang];
+    const subtitleEl = document.getElementById('pageSubtitle');
+    if (subtitleEl) {
+        const subtitleText = (i18n.pageSubtitle && i18n.pageSubtitle[currentLang]) ? i18n.pageSubtitle[currentLang] : '';
+        subtitleEl.textContent = subtitleText;
+        subtitleEl.style.display = subtitleText ? '' : 'none';
+    }
+
+    // 搜索框 placeholder 由 SearchContextManager 统一控制
+    try {
+        if (window.SearchContextManager && typeof window.SearchContextManager.updateUI === 'function') {
+            window.SearchContextManager.updateUI();
+        } else {
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) searchInput.placeholder = i18n.searchPlaceholder[currentLang];
+        }
+    } catch (_) { }
+
+    // Canvas 搜索模式 UI（左侧模式按钮 + placeholder）由 search.js 维护
+    try {
+        if (currentView === 'canvas') {
+            if (typeof renderSearchModeUI === 'function') {
+                renderSearchModeUI();
+            }
+            if (typeof window.updateSearchUILanguage === 'function') {
+                window.updateSearchUILanguage();
+            }
+        }
+    } catch (_) { }
+
+    const navCanvasText = document.getElementById('navCanvasText');
+    if (navCanvasText) navCanvasText.textContent = i18n.navCanvas[currentLang];
+    const bookmarkToolboxTitle = document.getElementById('bookmarkToolboxTitle');
+    if (bookmarkToolboxTitle) bookmarkToolboxTitle.textContent = i18n.bookmarkToolboxTitle[currentLang];
+
+    // Canvas 视图按钮翻译
+    const importCanvasText = document.getElementById('importCanvasText');
+    if (importCanvasText) importCanvasText.textContent = i18n.importCanvasText[currentLang];
+    const exportCanvasText = document.getElementById('exportCanvasText');
+    if (exportCanvasText) exportCanvasText.textContent = i18n.exportCanvasText[currentLang];
+    const markerMenuBtn = document.getElementById('markerMenuBtn');
+    if (markerMenuBtn) markerMenuBtn.title = i18n.markerMenuTitle[currentLang];
+    updateMarkerControlsUI();
+    const markerAutoClearInput = document.getElementById('markerAutoClearInput');
+    if (markerAutoClearInput) markerAutoClearInput.placeholder = i18n.markerAutoClearPlaceholder[currentLang];
+    const markerAutoClearCustomLabel = document.getElementById('markerAutoClearCustomLabel');
+    if (markerAutoClearCustomLabel) markerAutoClearCustomLabel.textContent = i18n.markerAutoClearCustomLabel[currentLang];
+    const clearMenuText = document.getElementById('clearMenuText');
+    if (clearMenuText) clearMenuText.textContent = i18n.clearMenuText[currentLang];
+    const clearByClickText = document.getElementById('clearByClickText');
+    if (clearByClickText) clearByClickText.textContent = i18n.clearByClickText[currentLang];
+    const clearTempNodesText = document.getElementById('clearTempNodesText');
+    if (clearTempNodesText) clearTempNodesText.textContent = i18n.clearTempNodesText[currentLang];
+    const clearAllText = document.getElementById('clearAllText');
+    if (clearAllText) clearAllText.textContent = i18n.clearAllText[currentLang];
+
+    // 清除规则提示框翻译
+    const clearRulesTooltipTitle = document.getElementById('clearRulesTooltipTitle');
+    if (clearRulesTooltipTitle) clearRulesTooltipTitle.textContent = i18n.clearRulesTooltipTitle[currentLang];
+    const clearRulesWillClear = document.getElementById('clearRulesWillClear');
+    if (clearRulesWillClear) clearRulesWillClear.textContent = i18n.clearRulesWillClear[currentLang];
+    const clearRulesWillKeep = document.getElementById('clearRulesWillKeep');
+    if (clearRulesWillKeep) clearRulesWillKeep.textContent = i18n.clearRulesWillKeep[currentLang];
+    const clearRuleTemp = document.getElementById('clearRuleTemp');
+    if (clearRuleTemp) clearRuleTemp.innerHTML = i18n.clearRuleTemp[currentLang];
+    const clearRuleMd = document.getElementById('clearRuleMd');
+    if (clearRuleMd) clearRuleMd.innerHTML = i18n.clearRuleMd[currentLang];
+    const clearRuleKeepDesc = document.getElementById('clearRuleKeepDesc');
+    if (clearRuleKeepDesc) clearRuleKeepDesc.innerHTML = i18n.clearRuleKeepDesc[currentLang];
+    const clearRuleKeepTitle = document.getElementById('clearRuleKeepTitle');
+    if (clearRuleKeepTitle) clearRuleKeepTitle.innerHTML = i18n.clearRuleKeepTitle[currentLang];
+    const clearRuleKeepEdge = document.getElementById('clearRuleKeepEdge');
+    if (clearRuleKeepEdge) clearRuleKeepEdge.innerHTML = i18n.clearRuleKeepEdge[currentLang];
+
+    const canvasZoomLabel = document.getElementById('canvasZoomLabel');
+    if (canvasZoomLabel) canvasZoomLabel.textContent = i18n.canvasZoomLabel[currentLang];
+    const zoomInBtn = document.getElementById('zoomInBtn');
+    if (zoomInBtn) zoomInBtn.title = i18n.zoomInTitle[currentLang];
+    const zoomOutBtn = document.getElementById('zoomOutBtn');
+    if (zoomOutBtn) zoomOutBtn.title = i18n.zoomOutTitle[currentLang];
+    const zoomLocateBtn = document.getElementById('zoomLocateBtn');
+    if (zoomLocateBtn) zoomLocateBtn.title = i18n.zoomLocateTitle[currentLang];
+    const zoomLocateText = document.getElementById('zoomLocateText');
+    if (zoomLocateText) zoomLocateText.textContent = i18n.zoomLocateText[currentLang];
+
+    const canvasManageText = document.getElementById('canvasManageText');
+    if (canvasManageText) canvasManageText.textContent = i18n.canvasManageText[currentLang];
+    const canvasManageBtn = document.getElementById('canvasManageBtn');
+    if (canvasManageBtn) canvasManageBtn.title = i18n.canvasManageTitle[currentLang];
+    const canvasHelpBtn = document.getElementById('canvasHelpBtn');
+    if (canvasHelpBtn) canvasHelpBtn.title = i18n.canvasHelpBtnTitle[currentLang];
+
+    const canvasManageModalTitle = document.getElementById('canvasManageModalTitle');
+    if (canvasManageModalTitle) canvasManageModalTitle.textContent = i18n.canvasManageTitle[currentLang];
+
+    const canvasHelpModalTitle = document.getElementById('canvasHelpModalTitle');
+    if (canvasHelpModalTitle) canvasHelpModalTitle.textContent = i18n.canvasHelpModalTitle[currentLang];
+    const canvasHelpCtrlTitle = document.getElementById('canvasHelpCtrlTitle');
+    if (canvasHelpCtrlTitle) canvasHelpCtrlTitle.textContent = i18n.canvasHelpCtrlTitle[currentLang];
+    const canvasHelpCtrlLeftClick = document.getElementById('canvasHelpCtrlLeftClick');
+    if (canvasHelpCtrlLeftClick) canvasHelpCtrlLeftClick.textContent = i18n.canvasHelpCtrlLeftClick[currentLang];
+    const canvasHelpCtrlLeftDesc = document.getElementById('canvasHelpCtrlLeftDesc');
+    if (canvasHelpCtrlLeftDesc) canvasHelpCtrlLeftDesc.textContent = i18n.canvasHelpCtrlLeftDesc[currentLang];
+    const canvasHelpCtrlWheel = document.getElementById('canvasHelpCtrlWheel');
+    if (canvasHelpCtrlWheel) canvasHelpCtrlWheel.textContent = i18n.canvasHelpCtrlWheel[currentLang];
+    const canvasHelpCtrlWheelDesc = document.getElementById('canvasHelpCtrlWheelDesc');
+    if (canvasHelpCtrlWheelDesc) canvasHelpCtrlWheelDesc.textContent = i18n.canvasHelpCtrlWheelDesc[currentLang];
+    const canvasHelpCtrlRightClick = document.getElementById('canvasHelpCtrlRightClick');
+    if (canvasHelpCtrlRightClick) canvasHelpCtrlRightClick.textContent = i18n.canvasHelpCtrlRightClick[currentLang];
+    const canvasHelpCtrlRightDesc = document.getElementById('canvasHelpCtrlRightDesc');
+    if (canvasHelpCtrlRightDesc) canvasHelpCtrlRightDesc.textContent = i18n.canvasHelpCtrlRightDesc[currentLang];
+    const canvasHelpSpaceTitle = document.getElementById('canvasHelpSpaceTitle');
+    if (canvasHelpSpaceTitle) canvasHelpSpaceTitle.textContent = i18n.canvasHelpSpaceTitle[currentLang];
+    const canvasHelpSpaceKey = document.getElementById('canvasHelpSpaceKey');
+    if (canvasHelpSpaceKey) canvasHelpSpaceKey.textContent = i18n.canvasHelpSpaceKey[currentLang];
+    const canvasHelpSpaceLeftClick = document.getElementById('canvasHelpSpaceLeftClick');
+    if (canvasHelpSpaceLeftClick) canvasHelpSpaceLeftClick.textContent = i18n.canvasHelpSpaceLeftClick[currentLang];
+    const canvasHelpSpaceDesc = document.getElementById('canvasHelpSpaceDesc');
+    if (canvasHelpSpaceDesc) canvasHelpSpaceDesc.textContent = i18n.canvasHelpSpaceDesc[currentLang];
+    const canvasHelpTouchpadTitle = document.getElementById('canvasHelpTouchpadTitle');
+    if (canvasHelpTouchpadTitle) canvasHelpTouchpadTitle.textContent = i18n.canvasHelpTouchpadTitle[currentLang];
+    const canvasHelpTouchpadPinch = document.getElementById('canvasHelpTouchpadPinch');
+    if (canvasHelpTouchpadPinch) canvasHelpTouchpadPinch.textContent = i18n.canvasHelpTouchpadPinch[currentLang];
+    const canvasHelpTouchpadPinchDesc = document.getElementById('canvasHelpTouchpadPinchDesc');
+    if (canvasHelpTouchpadPinchDesc) canvasHelpTouchpadPinchDesc.textContent = i18n.canvasHelpTouchpadPinchDesc[currentLang];
+    const canvasHelpTouchpadScroll = document.getElementById('canvasHelpTouchpadScroll');
+    if (canvasHelpTouchpadScroll) canvasHelpTouchpadScroll.textContent = i18n.canvasHelpTouchpadScroll[currentLang];
+    const canvasHelpTouchpadScrollDesc = document.getElementById('canvasHelpTouchpadScrollDesc');
+    if (canvasHelpTouchpadScrollDesc) canvasHelpTouchpadScrollDesc.textContent = i18n.canvasHelpTouchpadScrollDesc[currentLang];
+
+    const editCtrlKeyBtn = document.getElementById('editCtrlKeyBtn');
+    if (editCtrlKeyBtn) editCtrlKeyBtn.title = i18n.canvasShortcutEditTitle[currentLang];
+    const editSpaceKeyBtn = document.getElementById('editSpaceKeyBtn');
+    if (editSpaceKeyBtn) editSpaceKeyBtn.title = i18n.canvasShortcutEditTitle[currentLang];
+    const recorderCancelBtn = document.getElementById('recorderCancelBtn');
+    if (recorderCancelBtn) recorderCancelBtn.textContent = i18n.canvasShortcutRecorderCancel[currentLang];
+    const recorderHelpBtn = document.getElementById('recorderHelpBtn');
+    if (recorderHelpBtn) recorderHelpBtn.title = i18n.recorderHelpBtnTitle[currentLang];
+    const recorderHelpTitle = document.getElementById('recorderHelpTitle');
+    if (recorderHelpTitle) recorderHelpTitle.textContent = i18n.recorderHelpTitle[currentLang];
+    const tooltipModifierLabel = document.getElementById('tooltipModifierLabel');
+    if (tooltipModifierLabel) tooltipModifierLabel.textContent = i18n.tooltipModifierLabel[currentLang];
+    const tooltipSpecialLabel = document.getElementById('tooltipSpecialLabel');
+    if (tooltipSpecialLabel) tooltipSpecialLabel.textContent = i18n.tooltipSpecialLabel[currentLang];
+    const tooltipLetterLabel = document.getElementById('tooltipLetterLabel');
+    if (tooltipLetterLabel) tooltipLetterLabel.textContent = i18n.tooltipLetterLabel[currentLang];
+    const tooltipNumberLabel = document.getElementById('tooltipNumberLabel');
+    if (tooltipNumberLabel) tooltipNumberLabel.textContent = i18n.tooltipNumberLabel[currentLang];
+
+    if (window.CanvasModule && typeof window.CanvasModule.updateShortcutDisplays === 'function') {
+        window.CanvasModule.updateShortcutDisplays();
+    }
+
+    const fullscreenBtn = document.getElementById('canvasFullscreenBtn');
+    if (fullscreenBtn) {
+        if (window.CanvasModule && typeof window.CanvasModule.updateFullscreenButton === 'function') {
+            window.CanvasModule.updateFullscreenButton();
+        }
+        const container = document.querySelector('.canvas-main-container');
+        const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+        const isFullscreen = container && fullscreenElement === container;
+        const key = isFullscreen ? 'canvasFullscreenExit' : 'canvasFullscreenEnter';
+        const text = i18n[key] && i18n[key][currentLang] ? i18n[key][currentLang] : (key === 'canvasFullscreenExit' ? (currentLang === 'en' ? 'Exit' : '退出') : (currentLang === 'en' ? 'Fullscreen' : '全屏'));
+        fullscreenBtn.textContent = text;
+        fullscreenBtn.setAttribute('aria-label', text);
+        fullscreenBtn.classList.toggle('fullscreen-active', Boolean(isFullscreen));
+        fullscreenBtn.setAttribute('aria-pressed', isFullscreen ? 'true' : 'false');
+    }
+
+    const permanentSectionTitle = document.getElementById('permanentSectionTitle');
+    if (permanentSectionTitle) permanentSectionTitle.textContent = i18n.permanentSectionTitle[currentLang];
+    const permanentSectionTip = document.getElementById('permanentSectionTip');
+    if (permanentSectionTip) {
+        const placeholder = i18n.permanentSectionTip[currentLang];
+        try {
+            permanentSectionTip.setAttribute('data-placeholder', placeholder);
+            permanentSectionTip.setAttribute('aria-label', placeholder);
+        } catch (_) { }
+
+        let savedTip = '';
+        try { savedTip = localStorage.getItem('canvas-permanent-tip-text') || ''; } catch { }
+        if (!savedTip.trim()) {
+            const t = (permanentSectionTip.textContent || '').trim();
+            const zh = i18n.permanentSectionTip['zh_CN'];
+            const en = i18n.permanentSectionTip['en'];
+            if (t === zh || t === en) {
+                permanentSectionTip.innerHTML = '';
+            }
+        }
+    }
+
+    const themeTooltip = document.getElementById('themeTooltip');
+    if (themeTooltip) themeTooltip.textContent = i18n.themeTooltip[currentLang];
+    const langTooltip = document.getElementById('langTooltip');
+    if (langTooltip) langTooltip.textContent = i18n.langTooltip[currentLang];
+    const helpTooltip = document.getElementById('helpTooltip');
+    if (helpTooltip) helpTooltip.textContent = i18n.helpTooltip[currentLang];
+
+    const shortcutsModalTitle = document.getElementById('shortcutsModalTitle');
+    if (shortcutsModalTitle) shortcutsModalTitle.textContent = i18n.shortcutsModalTitle[currentLang];
+    const openSourceGithubLabel = document.getElementById('openSourceGithubLabel');
+    if (openSourceGithubLabel) openSourceGithubLabel.textContent = i18n.openSourceGithubLabel[currentLang];
+    const openSourceIssueLabel = document.getElementById('openSourceIssueLabel');
+    if (openSourceIssueLabel) openSourceIssueLabel.textContent = i18n.openSourceIssueLabel[currentLang];
+    const openSourceIssueText = document.getElementById('openSourceIssueText');
+    if (openSourceIssueText) openSourceIssueText.textContent = i18n.openSourceIssueText[currentLang];
+    const closeShortcutsText = document.getElementById('closeShortcutsText');
+    if (closeShortcutsText) closeShortcutsText.textContent = i18n.closeShortcutsText[currentLang];
+
+    const scrollbarHint = document.querySelector('.canvas-scrollbar.horizontal .scrollbar-hint');
+    if (scrollbarHint) scrollbarHint.textContent = i18n.horizontalScrollHint[currentLang];
+
+    const langText = document.querySelector('#langToggle .lang-text');
+    if (langText) langText.textContent = currentLang === 'zh_CN' ? 'EN' : '中';
+
+    const themeIcon = document.querySelector('#themeToggle i');
+    if (themeIcon) {
+        themeIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
+
+    const canvasPerfSettingsText = document.getElementById('canvasPerfSettingsText');
+    if (canvasPerfSettingsText) canvasPerfSettingsText.textContent = i18n.canvasPerfSettingsText[currentLang];
+}
+// =============================================================================
+// UI 初始化
+// =============================================================================
+
+function initializeUI() {
+    // 导航标签切换
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+        tab.addEventListener('click', () => switchView(tab.dataset.view));
+    });
+
+    // 工具按钮
+    const themeToggle = document.getElementById('themeToggle');
+    if (themeToggle) themeToggle.addEventListener('click', toggleTheme);
+    const langToggle = document.getElementById('langToggle');
+    if (langToggle) langToggle.addEventListener('click', toggleLanguage);
+
+    const helpToggle = document.getElementById('helpToggle');
+    const shortcutsModal = document.getElementById('shortcutsModal');
+    const closeShortcutsModal = document.getElementById('closeShortcutsModal');
+    if (helpToggle && shortcutsModal) {
+        helpToggle.addEventListener('click', () => {
+            if (typeof updateShortcutsDisplay === 'function') {
+                updateShortcutsDisplay();
+            }
+            shortcutsModal.classList.add('show');
+        });
+    }
+    if (closeShortcutsModal && shortcutsModal) {
+        closeShortcutsModal.addEventListener('click', () => {
+            shortcutsModal.classList.remove('show');
+        });
+    }
+    if (shortcutsModal) {
+        shortcutsModal.addEventListener('click', (e) => {
+            if (e.target === shortcutsModal) {
+                shortcutsModal.classList.remove('show');
+            }
+        });
+    }
+
+    // 搜索
+    const searchInputEl = document.getElementById('searchInput');
+    if (searchInputEl && !searchInputEl.hasAttribute('data-search-bound')) {
+        searchInputEl.addEventListener('input', handleSearch);
+        searchInputEl.addEventListener('keydown', handleSearchKeydown);
+        searchInputEl.addEventListener('focus', handleSearchInputFocus);
+        searchInputEl.setAttribute('data-search-bound', 'true');
+    }
+
+    const searchResultsPanel = document.getElementById('searchResultsPanel');
+    if (searchResultsPanel && !searchResultsPanel.hasAttribute('data-search-bound')) {
+        searchResultsPanel.addEventListener('click', handleSearchResultsPanelClick);
+        searchResultsPanel.addEventListener('mouseover', handleSearchResultsPanelMouseOver);
+        searchResultsPanel.setAttribute('data-search-bound', 'true');
+    }
+
+    if (!document.documentElement.hasAttribute('data-search-outside-bound')) {
+        document.addEventListener('click', handleSearchOutsideClick, true);
+        document.documentElement.setAttribute('data-search-outside-bound', 'true');
+    }
+
+    console.log('[initializeUI] UI事件监听器初始化完成，当前视图:', currentView);
+}
+
+// =============================================================================
+// 数据加载
+// =============================================================================
+
+async function loadAllData(options = {}) {
+    const { skipRender = false } = options;
+    console.log('[loadAllData] 开始加载所有数据...');
+
+    try {
+        await ensureBookmarkCacheLoaded(skipRender);
+
+        const bookmarkTree = await loadBookmarkTree();
+        allBookmarks = flattenBookmarkTree(bookmarkTree);
+        rebuildBookmarkUrlSet();
+        bookmarkCacheRestored = true;
+        await persistBookmarkCache();
+        cachedBookmarkTree = bookmarkTree;
+
+        console.log('[loadAllData] 数据加载完成:', {
+            书签总数: allBookmarks.length
+        });
+    } catch (error) {
+        console.error('[loadAllData] 加载数据失败:', error);
+        showError('加载数据失败');
+    }
+}
+
+// 预加载常见网站的图标
+async function preloadCommonIcons() {
+    console.log('[图标预加载] 开始预加载常见图标...');
+
+    try {
+        // 获取当前所有书签的 URL，过滤掉无效的
+        const urls = allBookmarks
+            .map(b => b.url)
+            .filter(url => url && url.trim() && (url.startsWith('http://') || url.startsWith('https://')));
+
+        if (urls.length === 0) {
+            console.log('[图标预加载] 没有有效的 URL 需要预加载');
+            return;
+        }
+
+        // 批量预加载（限制并发数）
+        const batchSize = 10;
+        const maxPreload = Math.min(urls.length, 50);
+
+        for (let i = 0; i < maxPreload; i += batchSize) {
+            const batch = urls.slice(i, i + batchSize);
+            await Promise.all(batch.map(url => preloadIcon(url)));
+        }
+
+        console.log('[图标预加载] 完成，已预加载', maxPreload, '个图标');
+    } catch (error) {
+        console.error('[图标预加载] 失败:', error);
+    }
+}
+
+// 预加载单个图标（使用新的缓存系统）
+async function preloadIcon(url) {
+    try {
+        // 基本验证
+        if (!url || FaviconCache.isInvalidUrl(url)) {
+            return;
+        }
+
+        // 使用缓存系统获取favicon（会自动缓存）
+        await FaviconCache.fetch(url);
+    } catch (error) {
+        console.warn('[图标预加载] URL 预加载失败:', url, error.message);
+    }
+}
+
+// 【关键修复】预热 favicon 内存缓存（从 IndexedDB 批量加载）
+// 用于解决切换视图时图标变成五角星的问题
+async function warmupFaviconCache(bookmarkUrls) {
+    if (!bookmarkUrls || bookmarkUrls.length === 0) return;
+
+    try {
+        console.log('[Favicon预热] 开始预热内存缓存，书签数量:', bookmarkUrls.length);
+
+        // 初始化 IndexedDB（如果还没初始化）
+        if (!FaviconCache.db) {
+            await FaviconCache.init();
+        }
+
+        // 批量从 IndexedDB 读取所有域名的 favicon
+        const domains = new Set();
+        bookmarkUrls.forEach(url => {
+            try {
+                if (!FaviconCache.isInvalidUrl(url)) {
+                    const domain = new URL(url).hostname;
+                    domains.add(domain);
+                }
+            } catch (e) {
+                // 忽略无效URL
+            }
+        });
+
+        if (domains.size === 0) return;
+
+        console.log('[Favicon预热] 需要预热的域名数:', domains.size);
+
+        // 批量读取
+        const transaction = FaviconCache.db.transaction([FaviconCache.storeName], 'readonly');
+        const store = transaction.objectStore(FaviconCache.storeName);
+
+        let loaded = 0;
+        for (const domain of domains) {
+            // 跳过已在内存缓存中的
+            if (FaviconCache.memoryCache.has(domain)) continue;
+
+            try {
+                const request = store.get(domain);
+                await new Promise((resolve) => {
+                    request.onsuccess = () => {
+                        if (request.result && request.result.dataUrl) {
+                            FaviconCache.memoryCache.set(domain, request.result.dataUrl);
+                            loaded++;
+                        }
+                        resolve();
+                    };
+                    request.onerror = () => resolve();
+                });
+            } catch (e) {
+                // 忽略单个域名的错误
+            }
+        }
+
+        console.log('[Favicon预热] 完成，从IndexedDB加载了', loaded, '个favicon到内存');
+    } catch (error) {
+        console.warn('[Favicon预热] 失败:', error);
+    }
+}
+
+function loadBookmarkTree() {
+    return new Promise((resolve) => {
+        browserAPI.bookmarks.getTree((tree) => {
+            resolve(tree[0]);
+        });
+    });
+}
+
+function flattenBookmarkTree(node, parentPath = '') {
+    const bookmarks = [];
+    const currentPath = parentPath ? `${parentPath}/${node.title}` : node.title;
+
+    if (node.url) {
+        bookmarks.push({
+            id: node.id,
+            title: node.title,
+            url: node.url,
+            dateAdded: node.dateAdded,
+            path: currentPath,
+            parentId: node.parentId
+        });
+    }
+
+    if (node.children) {
+        node.children.forEach(child => {
+            bookmarks.push(...flattenBookmarkTree(child, currentPath));
+        });
+    }
+
+    return bookmarks;
+}
+
+// =============================================================================
+
+
+
+function buildChangeSummary(diffMeta, stats, lang) {
+    const effectiveLang = lang === 'en' ? 'en' : 'zh_CN';
+    const summary = {
+        hasQuantityChange: false,
+        quantityTotalLine: '',
+        quantityDiffLine: '',
+        hasStructuralChange: false,
+        structuralLine: '',
+        structuralItems: []
+    };
+
+    if (!diffMeta) {
+        diffMeta = {
+            bookmarkDiff: 0,
+            folderDiff: 0,
+            hasNumericalChange: false,
+            currentBookmarkCount: 0,
+            currentFolderCount: 0
+        };
+    }
+
+    const bookmarkDiff = diffMeta.bookmarkDiff || 0;
+    const folderDiff = diffMeta.folderDiff || 0;
+    const hasNumericalChange = diffMeta.hasNumericalChange === true;
+    const currentBookmarks = diffMeta.currentBookmarkCount ?? 0;
+    const currentFolders = diffMeta.currentFolderCount ?? 0;
+
+    // 新口径：若 background 提供了新增/删除分开计数，则优先用它（支持“加减相同数量但内容不同”）
+    const bookmarkAdded = typeof stats?.bookmarkAdded === 'number' ? stats.bookmarkAdded : null;
+    const bookmarkDeleted = typeof stats?.bookmarkDeleted === 'number' ? stats.bookmarkDeleted : null;
+    const folderAdded = typeof stats?.folderAdded === 'number' ? stats.folderAdded : null;
+    const folderDeleted = typeof stats?.folderDeleted === 'number' ? stats.folderDeleted : null;
+    const hasDetailedQuantity = (bookmarkAdded !== null) || (bookmarkDeleted !== null) || (folderAdded !== null) || (folderDeleted !== null);
+    const hasQuantityChange = hasDetailedQuantity
+        ? ((bookmarkAdded || 0) > 0 || (bookmarkDeleted || 0) > 0 || (folderAdded || 0) > 0 || (folderDeleted || 0) > 0)
+        : hasNumericalChange;
+
+    const i18nBookmarksLabel = window.i18nLabels?.bookmarksLabel || (effectiveLang === 'en' ? 'bookmarks' : '个书签');
+    const i18nFoldersLabel = window.i18nLabels?.foldersLabel || (effectiveLang === 'en' ? 'folders' : '个文件夹');
+    const totalBookmarkTerm = effectiveLang === 'en' ? 'BKM' : i18nBookmarksLabel;
+    const totalFolderTerm = effectiveLang === 'en' ? 'FLD' : i18nFoldersLabel;
+
+    summary.quantityTotalLine = effectiveLang === 'en'
+        ? `${currentBookmarks} ${totalBookmarkTerm}, ${currentFolders} ${totalFolderTerm}`
+        : `${currentBookmarks}${totalBookmarkTerm}，${currentFolders}${totalFolderTerm}`;
+
+    if (hasQuantityChange) {
+        summary.hasQuantityChange = true;
+        const parts = [];
+
+        if (hasDetailedQuantity) {
+            const joinDelta = (deltaParts) => {
+                const sep = '<span style="display:inline-block;width:3px;"></span>/<span style="display:inline-block;width:3px;"></span>';
+                return deltaParts.join(sep);
+            };
+
+            const buildDual = (added, deleted, label) => {
+                const deltaParts = [];
+                if (added > 0) deltaParts.push(`<span style="color:var(--positive-color, #4CAF50);font-weight:bold;">+${added}</span>`);
+                if (deleted > 0) deltaParts.push(`<span style="color:var(--negative-color, #F44336);font-weight:bold;">-${deleted}</span>`);
+                if (deltaParts.length === 0) return '';
+                const numbersHTML = joinDelta(deltaParts);
+                return effectiveLang === 'en' ? `${numbersHTML} ${label}` : `${numbersHTML}${label}`;
+            };
+
+            const bookmarkLabel = effectiveLang === 'en' ? 'BKM' : '书签';
+            const folderLabel = effectiveLang === 'en' ? 'FLD' : '文件夹';
+
+            const bPart = buildDual(bookmarkAdded || 0, bookmarkDeleted || 0, bookmarkLabel);
+            const fPart = buildDual(folderAdded || 0, folderDeleted || 0, folderLabel);
+
+            if (bPart) parts.push(bPart);
+            if (fPart) parts.push(fPart);
+        } else {
+            if (bookmarkDiff !== 0) {
+                const sign = bookmarkDiff > 0 ? '+' : '';
+                const color = bookmarkDiff > 0 ? 'var(--positive-color, #4CAF50)' : 'var(--negative-color, #F44336)';
+                const label = effectiveLang === 'en' ? 'BKM' : '书签';
+                parts.push(`<span style="color:${color};font-weight:bold;">${sign}${bookmarkDiff}</span>${effectiveLang === 'en' ? ` ${label}` : label}`);
+            }
+
+            if (folderDiff !== 0) {
+                const sign = folderDiff > 0 ? '+' : '';
+                const color = folderDiff > 0 ? 'var(--positive-color, #4CAF50)' : 'var(--negative-color, #F44336)';
+                const label = effectiveLang === 'en' ? 'FLD' : '文件夹';
+                parts.push(`<span style="color:${color};font-weight:bold;">${sign}${folderDiff}</span>${effectiveLang === 'en' ? ` ${label}` : label}`);
+            }
+        }
+
+        summary.quantityDiffLine = parts.join(effectiveLang === 'en' ? ` <span style="color:var(--text-tertiary);">|</span> ` : '、');
+    }
+
+    const bookmarkMoved = Boolean(stats?.bookmarkMoved);
+    const folderMoved = Boolean(stats?.folderMoved);
+    const bookmarkModified = Boolean(stats?.bookmarkModified);
+    const folderModified = Boolean(stats?.folderModified);
+
+    const hasBookmarkStructural = bookmarkMoved || bookmarkModified;
+    const hasFolderStructural = folderMoved || folderModified;
+
+    if (hasBookmarkStructural || hasFolderStructural) {
+        summary.hasStructuralChange = true;
+
+        // 构建具体的结构变化列表
+        const structuralParts = [];
+        const movedCount = typeof stats?.movedCount === 'number'
+            ? stats.movedCount
+            : (typeof stats?.movedBookmarkCount === 'number' ? stats.movedBookmarkCount : 0) + (typeof stats?.movedFolderCount === 'number' ? stats.movedFolderCount : 0);
+        const modifiedCount = typeof stats?.modifiedCount === 'number'
+            ? stats.modifiedCount
+            : (typeof stats?.modifiedBookmarkCount === 'number' ? stats.modifiedBookmarkCount : 0) + (typeof stats?.modifiedFolderCount === 'number' ? stats.modifiedFolderCount : 0);
+
+        if (bookmarkMoved || folderMoved) {
+            const movedLabel = effectiveLang === 'en' ? (movedCount > 0 ? `${movedCount} moved` : 'Moved') : (movedCount > 0 ? `${movedCount}个移动` : '移动');
+            structuralParts.push(movedLabel);
+            summary.structuralItems.push(movedLabel);
+        }
+        if (bookmarkModified || folderModified) {
+            const modifiedLabel = effectiveLang === 'en' ? (modifiedCount > 0 ? `${modifiedCount} modified` : 'Modified') : (modifiedCount > 0 ? `${modifiedCount}个修改` : '修改');
+            structuralParts.push(modifiedLabel);
+            summary.structuralItems.push(modifiedLabel);
+        }
+
+
+        // 用具体的变化类型替代通用的"变动"标签
+        const separator = effectiveLang === 'en' ? ' <span style="color:var(--text-tertiary);">|</span> ' : '、';
+        const structuralText = structuralParts.join(separator);
+        summary.structuralLine = `<span style="color:var(--accent-secondary, #FF9800);font-weight:bold;">${structuralText}</span>`;
+    }
+
+    return summary;
+}
+
+// =============================================================================
+// 侧边栏收起功能
+// =============================================================================
+
+function initSidebarToggle() {
+    const sidebar = document.getElementById('sidebar');
+    const toggleBtn = document.getElementById('sidebarToggle');
+
+    if (!sidebar || !toggleBtn) {
+        console.warn('[侧边栏] 找不到侧边栏或切换按钮');
+        return;
+    }
+
+    // 根据当前实际 DOM 宽度更新侧边栏宽度 CSS 变量
+    function syncSidebarWidth() {
+        // 直接读取 sidebar 实际渲染宽度，兼容：
+        // - 手动折叠/展开（.collapsed）
+        // - 响应式 CSS 自动收缩
+        const rect = sidebar.getBoundingClientRect();
+        const widthPx = rect && rect.width ? `${rect.width}px` : '260px';
+        document.documentElement.style.setProperty('--sidebar-width', widthPx);
+    }
+
+    // 从 localStorage 恢复侧边栏状态
+    const savedState = localStorage.getItem('sidebarCollapsed');
+    if (savedState === 'true') {
+        sidebar.classList.add('collapsed');
+        console.log('[侧边栏] 恢复收起状态');
+    }
+    // 恢复完状态后，同步一次真实宽度
+    syncSidebarWidth();
+    // 点击切换按钮
+    toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sidebar.classList.toggle('collapsed');
+
+        // 保存状态到 localStorage
+        const isCollapsed = sidebar.classList.contains('collapsed');
+        localStorage.setItem('sidebarCollapsed', isCollapsed.toString());
+
+        // 更新 CSS 变量（用于弹窗定位）
+        syncSidebarWidth();
+        console.log('[侧边栏]', isCollapsed ? '已收起' : '已展开');
+    });
+
+    // 窗口尺寸变化时，侧边栏可能被 CSS 自动收缩/展开，这里也同步一次宽度
+    window.addEventListener('resize', () => {
+        syncSidebarWidth();
+    });
+}
+
+// =============================================================================
+// 视图切换
+// =============================================================================
+
+function switchView(view) {
+    console.log('[switchView] 切换视图到:', view);
+
+    const previousView = currentView;
+
+
+    // 当从 Canvas 视图切换到其他视图时，尝试更新一次缩略图
+    if (previousView === 'canvas' && view !== 'canvas') {
+        try {
+            if (typeof requestCanvasThumbnailUpdate === 'function') {
+                requestCanvasThumbnailUpdate('switch-view');
+            } else {
+                captureCanvasThumbnail();
+            }
+        } catch (e) {
+            console.warn('[Canvas Thumbnail] switchView 捕获失败:', e);
+        }
+    }
+
+    // 更新全局变量
+    currentView = view;
+
+    // 视图切换时隐藏搜索结果面板并清除搜索缓存（Phase 1 & 2 & 2.5）
+    try {
+        // [隔离增强] 确保清理搜索 UI 状态
+        if (typeof cancelPendingMainSearchDebounce === 'function') cancelPendingMainSearchDebounce();
+        if (typeof hideSearchResultsPanel === 'function') hideSearchResultsPanel();
+        if (typeof toggleSearchModeMenu === 'function') toggleSearchModeMenu(false);
+        if (typeof renderSearchModeUI === 'function') renderSearchModeUI();
+
+        // [Search Isolation] Search box behaviors differ by view.
+        // When leaving a view, clear the shared top search input to avoid leaking queries.
+        if (previousView !== view && typeof window !== 'undefined' && typeof window.resetMainSearchUI === 'function') {
+            window.resetMainSearchUI({ reason: 'switchView' });
+        }
+
+        if (window.SearchContextManager) {
+            // but we set the main view here.
+            window.SearchContextManager.updateContext(view);
+        }
+
+        // 当前仅保留 Canvas 视图，无需清理历史视图搜索缓存
+    } catch (_) { }
+
+    // 更新导航标签
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+        if (tab.dataset.view === view) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+
+    // 更新视图容器
+    document.querySelectorAll('.view').forEach(v => {
+        if (v.id === `${view}View`) {
+            v.classList.add('active');
+        } else {
+            v.classList.remove('active');
+        }
+    });
+
+    // Canvas 视图：去除 content-area padding，避免画布四周出现“边框/留白”
+    const contentArea = document.querySelector('.content-area');
+    if (contentArea) {
+        contentArea.classList.toggle('canvas-full-bleed', view === 'canvas');
+    }
+    // Canvas 视图：取消 html 的 scrollbar gutter，避免右侧出现空隙/黑边
+    try {
+        document.documentElement.classList.toggle('canvas-view-active', view === 'canvas');
+    } catch (_) { }
+
+    // 保存到 localStorage
+    localStorage.setItem('lastActiveView', view);
+    console.log('[switchView] 已保存视图到localStorage:', view);
+
+    // 渲染当前视图
+    renderCurrentView();
+}
+
+// 捕获当前窗口中 Bookmark Canvas 页面的可见区域，并保存为主界面缩略图
+// 注意：为了实现「只截画布容器」，这里采用两级方案：
+// 1）优先在页面内按 .canvas-main-container 的 rect 进行裁剪；
+// 2）若裁剪失败，则退回整页截图（保持兼容性）。
+function captureCanvasThumbnail() {
+    try {
+        // 仅在 Canvas 视图下尝试截屏
+        if (currentView !== 'canvas') return;
+        if (!browserAPI || !browserAPI.tabs || !browserAPI.tabs.captureVisibleTab) return;
+
+        // 使用 tabs.captureVisibleTab 先拿整页截图，再在内容页内裁剪
+        browserAPI.tabs.captureVisibleTab(null, { format: 'png' }, (dataUrl) => {
+            try {
+                const captureError = browserAPI.runtime && browserAPI.runtime.lastError;
+                if (captureError) {
+                    console.warn('[Canvas Thumbnail] 截图失败:', captureError.message || captureError);
+                    return;
+                }
+
+                if (!dataUrl) return;
+
+                // 在当前页面内按书签画布主容器（不含标题栏）的 rect 进行裁剪
+                try {
+                    const container = document.querySelector('.canvas-main-container');
+                    if (!container) {
+                        // 找不到容器，直接保存整页截图作为兜底
+                        browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
+                        return;
+                    }
+
+                    const rect = container.getBoundingClientRect();
+                    const pageWidth = window.innerWidth || document.documentElement.clientWidth;
+
+                    // 固定缩略图输出尺寸，适配主UI的框（约 270x180，宽高比 3:2）
+                    // 使用 8x 分辨率确保超清显示
+                    const THUMBNAIL_WIDTH = 2160;
+                    const THUMBNAIL_HEIGHT = 1440;
+
+                    const img = new Image();
+                    img.onload = () => {
+                        try {
+                            const canvas = document.createElement('canvas');
+                            // 使用固定尺寸输出
+                            canvas.width = THUMBNAIL_WIDTH;
+                            canvas.height = THUMBNAIL_HEIGHT;
+                            const ctx = canvas.getContext('2d');
+                            if (!ctx) {
+                                console.warn('[Canvas Thumbnail] 无法获取 2D 上下文，退回整页截图');
+                                browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
+                                return;
+                            }
+
+                            // 计算截图和页面之间的缩放比（captureVisibleTab 生成的图片宽度 / 当前页面宽度）
+                            const ratio = img.width / pageWidth;
+
+                            // 先按容器 rect 获取截图中的源区域（像素坐标）
+                            let sx = rect.left * ratio;
+                            let sy = rect.top * ratio;
+                            let sw = rect.width * ratio;
+                            let sh = rect.height * ratio;
+
+                            // 安全处理：裁剪到截图可用范围（避免容器部分在可视区外时越界）
+                            const ix = Math.max(0, sx);
+                            const iy = Math.max(0, sy);
+                            const iw = Math.max(0, Math.min(img.width - ix, sw - (ix - sx)));
+                            const ih = Math.max(0, Math.min(img.height - iy, sh - (iy - sy)));
+
+                            if (iw <= 1 || ih <= 1) {
+                                console.warn('[Canvas Thumbnail] 裁剪区域无效，退回整页截图');
+                                browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
+                                return;
+                            }
+
+                            // 关键：保持主 UI 固定输出尺寸，但不要拉伸变形
+                            // 这里采用「cover」策略：按目标宽高比在源图中居中裁剪，再缩放到固定尺寸
+                            const targetAspect = canvas.width / canvas.height; // 3:2
+                            let csx = ix;
+                            let csy = iy;
+                            let csw = iw;
+                            let csh = ih;
+
+                            const sourceAspect = csw / csh;
+                            if (sourceAspect > targetAspect) {
+                                // 源区域过宽：左右裁剪
+                                const newW = csh * targetAspect;
+                                csx = csx + (csw - newW) / 2;
+                                csw = newW;
+                            } else if (sourceAspect < targetAspect) {
+                                // 源区域过高：上下裁剪
+                                const newH = csw / targetAspect;
+                                csy = csy + (csh - newH) / 2;
+                                csh = newH;
+                            }
+
+                            // 最后再做一次边界收敛（浮点误差导致的越界）
+                            csx = Math.max(0, csx);
+                            csy = Math.max(0, csy);
+                            csw = Math.max(1, Math.min(img.width - csx, csw));
+                            csh = Math.max(1, Math.min(img.height - csy, csh));
+
+                            ctx.drawImage(img, csx, csy, csw, csh, 0, 0, canvas.width, canvas.height);
+
+                            const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.98);
+                            browserAPI.storage.local.set({ bookmarkCanvasThumbnail: croppedDataUrl }, () => {
+                                // 静默保存，不输出日志
+                            });
+                        } catch (e) {
+                            console.warn('[Canvas Thumbnail] 裁剪缩略图时出错，退回整页截图:', e);
+                            browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
+                        }
+                    };
+                    img.onerror = () => {
+                        console.warn('[Canvas Thumbnail] 缩略图图片加载失败，退回整页截图');
+                        browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
+                    };
+                    img.src = dataUrl;
+                } catch (cropError) {
+                    console.warn('[Canvas Thumbnail] 裁剪逻辑异常，退回整页截图:', cropError);
+                    browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
+                }
+            } catch (e) {
+                console.warn('[Canvas Thumbnail] 保存缩略图时出错:', e);
+            }
+        });
+    } catch (error) {
+        console.warn('[Canvas Thumbnail] 截图失败:', error);
+    }
+}
+
+// 供 Canvas 模块调用的去抖更新入口
+let canvasThumbnailUpdateTimer = null;
+function requestCanvasThumbnailUpdate(reason) {
+    try {
+        // 提前检查：只在 Canvas 视图下调度截图
+        if (currentView !== 'canvas') return;
+
+        if (canvasThumbnailUpdateTimer) {
+            clearTimeout(canvasThumbnailUpdateTimer);
+        }
+        canvasThumbnailUpdateTimer = setTimeout(() => {
+            canvasThumbnailUpdateTimer = null;
+            try {
+                captureCanvasThumbnail();
+            } catch (e) {
+                // 静默处理错误
+            }
+        }, 1500); // 1.5 秒内合并多次修改
+    } catch (e) {
+        // 忽略去抖调度错误
+    }
+}
+
+// Canvas 滚动视图相关截图节流
+let canvasScrollThumbnailBound = false;
+let canvasScrollThumbnailTimer = null;
+
+function renderCurrentView() {
+    // 离开 Canvas 时，停止永久栏目副本同步监听（减少无意义的 DOM 观察开销）
+    if (currentView !== 'canvas') {
+        teardownPermanentTreeCopySync();
+    }
+
+    // 控制缩放控制器的显示/隐藏
+    const zoomIndicator = document.getElementById('canvasZoomIndicator');
+    if (zoomIndicator) {
+        if (currentView === 'canvas') {
+            zoomIndicator.style.display = 'block';
+        } else {
+            zoomIndicator.style.display = 'none';
+        }
+    }
+
+    switch (currentView) {
+        case 'canvas':
+            // Canvas视图：包含原Bookmark Tree所有功能 + Canvas画布功能
+            // 性能优化：使用状态缓存，避免重复初始化
+            {
+                const canvasContent = document.getElementById('canvasContent');
+                let permanentSectionExists = document.getElementById('permanentSection');
+                const canvasView = document.getElementById('canvasView');
+
+                // 检查Canvas是否已经初始化过
+                const isCanvasInitialized = canvasView && canvasView.dataset.initialized === 'true';
+
+                // 1. 先从template创建永久栏目并添加到canvas-content（如果还不存在）
+                if (!permanentSectionExists && canvasContent) {
+                    const template = document.getElementById('permanentSectionTemplate');
+                    if (template) {
+                        const permanentSection = template.content.cloneNode(true);
+                        canvasContent.appendChild(permanentSection);
+                        console.log('[Canvas] 永久栏目已从template创建到canvas-content');
+
+                        // 立即应用语言设置（使用主UI的applyLanguage函数）
+                        setTimeout(() => {
+                            applyLanguage();
+                            console.log('[Canvas] 永久栏目语言已应用:', currentLang);
+                        }, 0);
+                    } else {
+                        console.error('[Canvas] 找不到permanentSectionTemplate');
+                    }
+                } else if (!canvasContent) {
+                    console.error('[Canvas] 找不到canvasContent');
+                } else {
+                    console.log('[Canvas] 永久栏目已存在，跳过创建');
+                }
+
+                // 2. 渲染书签树
+                // 即使是已初始化状态，也需要调用 renderTreeView 检查是否有数据更新（内部有缓存机制，开销很小）
+                renderTreeView().catch(e => console.error('[Canvas] 书签树渲染失败:', e));
+                // 多永久栏目副本：启动“主永久栏目 -> 副本”的同步
+                ensurePermanentTreeCopySync();
+
+                // 3. 初始化Canvas功能（缩放、平移、拖拽等）- 仅首次执行
+                if (!isCanvasInitialized) {
+                    // 首次初始化
+                    try {
+                        if (window.CanvasModule) {
+                            window.CanvasModule.init();
+                        }
+
+                        // 标记Canvas已初始化
+                        if (canvasView) {
+                            canvasView.dataset.initialized = 'true';
+                            canvasView.dataset.initTime = Date.now().toString();
+                        }
+                        console.log('[Canvas] 首次初始化完成');
+                    } catch (initError) {
+                        console.error('[Canvas] 初始化失败:', initError);
+                        // 初始化失败时不标记为已初始化，下次会重试
+                    }
+                } else {
+                    // 已初始化：验证状态
+                    console.log('[Canvas] 使用缓存状态，检查完整性');
+
+                    // 验证Canvas状态是否有效
+                    const canvasWorkspace = document.getElementById('canvasWorkspace');
+                    const canvasContentEl = document.getElementById('canvasContent');
+                    // 只要容器存在即可，children.length 检查交由 renderTreeView 保证
+                    const hasValidState = canvasWorkspace && canvasContentEl;
+
+                    if (!hasValidState) {
+                        // 状态无效，尝试重新初始化模块
+                        console.warn('[Canvas] 缓存状态无效，重新初始化模块');
+                        if (canvasView) {
+                            canvasView.dataset.initialized = 'false';
+                        }
+                        try {
+                            if (window.CanvasModule) {
+                                window.CanvasModule.init();
+                            }
+                            if (canvasView) {
+                                canvasView.dataset.initialized = 'true';
+                                canvasView.dataset.initTime = Date.now().toString();
+                            }
+                        } catch (reinitError) {
+                            console.error('[Canvas] 重新初始化失败:', reinitError);
+                        }
+                    } else {
+                        // 触发视口休眠管理，唤醒可见栏目
+                        if (window.CanvasModule && window.CanvasModule.scheduleDormancyUpdate) {
+                            // 延迟执行，确保视图切换完成
+                            setTimeout(() => {
+                                try {
+                                    window.CanvasModule.scheduleDormancyUpdate();
+                                } catch (err) {
+                                    console.warn('[Canvas] 休眠管理调度失败:', err);
+                                }
+                            }, 50);
+                        }
+                    }
+                }
+
+                // 4. 首次进入或刷新 Canvas 视图后，延迟截一次图
+                setTimeout(() => {
+                    try {
+                        if (currentView === 'canvas') {
+                            captureCanvasThumbnail();
+                        }
+                    } catch (_) { }
+                }, 800);
+
+                // 5. 绑定 Canvas 滚动截图逻辑（只绑定一次）
+                const workspace = document.getElementById('canvasWorkspace');
+                if (workspace && !canvasScrollThumbnailBound) {
+                    canvasScrollThumbnailBound = true;
+                    workspace.addEventListener('wheel', () => {
+                        try {
+                            if (currentView !== 'canvas') return;
+                            if (!requestCanvasThumbnailUpdate) return;
+                            if (canvasScrollThumbnailTimer) {
+                                clearTimeout(canvasScrollThumbnailTimer);
+                            }
+                            canvasScrollThumbnailTimer = setTimeout(() => {
+                                canvasScrollThumbnailTimer = null;
+                                requestCanvasThumbnailUpdate('scroll');
+                            }, 2500);
+                        } catch (_) { }
+                    }, { passive: true });
+                }
+            }
+            break;
+    }
+}
+
+// =============================================================================
+// 本项目有三套独立的链接点击处理系统，互不干扰：
+//   1. 书签系统（defaultOpenMode）- 处理 .tree-bookmark-link
+//      → history.js:attachTreeEvents + bookmark_canvas_module.js:tempLinkClickHandler
+//   2. 超链接系统（hyperlinkDefaultOpenMode）- 处理说明框/Markdown卡片内链接
+//      → bookmark_tree_context_menu.js:attachHyperlinkContextMenu
+//   3. 时间捕捉兜底（本监听器）- 处理其他所有 target="_blank" 链接
+//
+// ⚠️ 添加新功能时必须注意：
+//   - 如果新增链接区域有自己的处理逻辑，必须在下面添加排除条件！
+//   - 否则会导致链接被打开两次（本监听器 + 专用监听器都处理）
+//   - 详见：.agent/workflows/link-click-handling.md
+// =============================================================================
+// 书签树视图
+// =============================================================================
+
+let treeChangeMap = null; // 缓存变动映射
+let cachedTreeData = null; // 缓存树数据
+let cachedOldTree = null; // 缓存旧树数据
+let cachedCurrentTree = null; // 缓存当前树数据（用于智能路径检测）
+let lastTreeFingerprint = null; // 上次树的指纹
+let lastTreeSnapshotVersion = null; // 上次快照版本（来自 background 缓存）
+let cachedCurrentTreeIndex = null; // id -> node（懒加载用，按需构建）
+let cachedRenderTreeIndex = null; // id -> node（懒加载用，包含 deleted 合并树）
+
+// Canvas 懒加载：用于“祖先文件夹灰点提示”的缓存（避免每次加载子节点都重复计算）
+let __canvasPermanentHintSet = null;
+// Canvas 懒加载：用于“祖先文件夹聚合徽标（+/-/~/>>）”的缓存
+let __canvasPermanentAncestorBadges = null;
+
+// Canvas 永久栏目树：懒加载配置（避免首次进入构建海量 DOM）
+const CANVAS_PERMANENT_TREE_LAZY_ENABLED = true;
+const CANVAS_PERMANENT_TREE_CHILD_BATCH = 200;
+
+// Canvas 懒加载模式下的“变化提示缓存”（仅四类：新增/删除/修改/移动）
+const CANVAS_LAZY_CHANGE_HINT_TTL_MS = 5 * 60 * 1000;
+let canvasLazyChangeHints = {
+    updatedAt: 0,
+    added: new Set(),
+    modified: new Set(),
+    moved: new Set(),
+    movedInfo: new Map(), // key -> { oldPath }
+    deletedCount: 0,
+    hasAny: false
+};
+let canvasLazyChangeHintsPromise = null;
+
+// 清除树缓存（供拖拽模块调用，防止缓存覆盖DOM更新）
+function clearTreeCache() {
+    cachedTreeData = null;
+    lastTreeFingerprint = null;
+    lastTreeSnapshotVersion = null;
+    cachedCurrentTreeIndex = null;
+    cachedRenderTreeIndex = null;
+    console.log('[树缓存] 已清除');
+}
+window.clearTreeCache = clearTreeCache;
+
+function buildTreeIndexFromRoot(root) {
+    if (!root) return null;
+    const map = new Map();
+    const stack = [root];
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node || node.id == null) continue;
+        map.set(String(node.id), node);
+        if (Array.isArray(node.children) && node.children.length) {
+            for (let i = node.children.length - 1; i >= 0; i--) {
+                stack.push(node.children[i]);
+            }
+        }
+    }
+    return map;
+}
+
+function clearCanvasLazyChangeHints(reason = '') {
+    canvasLazyChangeHints = {
+        updatedAt: 0,
+        added: new Set(),
+        modified: new Set(),
+        moved: new Set(),
+        movedInfo: new Map(),
+        deletedCount: 0,
+        hasAny: false
+    };
+    if (reason) console.log('[Canvas变化提示] 已清空:', reason);
+}
+
+function buildFingerprintKeyFromChangeItem(item) {
+    if (!item) return '';
+    const path = typeof item.path === 'string' ? item.path : '';
+    const title = typeof item.title === 'string' ? item.title : '';
+    const url = typeof item.url === 'string' ? item.url : '';
+    return `B:${path}|${title}|${url}`;
+}
+
+function getFolderPathFromBreadcrumb(bc) {
+    if (!bc) return '';
+    const parts = bc.split(' > ').map(s => s.trim()).filter(Boolean);
+    const rootTitle = cachedCurrentTree && cachedCurrentTree[0] ? cachedCurrentTree[0].title : '';
+    if (rootTitle && parts[0] === rootTitle) parts.shift();
+    if (parts.length <= 1) return '';
+    parts.pop(); // 移除当前节点名
+    return parts.join('/');
+}
+
+function buildFingerprintKeyForBookmarkNode(node) {
+    if (!node || !node.url) return '';
+    const bc = cachedCurrentTree ? getNamedPathFromTree(cachedCurrentTree, node.id) : '';
+    const folderPath = getFolderPathFromBreadcrumb(bc);
+    return `B:${folderPath}|${node.title || ''}|${node.url || ''}`;
+}
+
+function formatFingerprintPathToSlash(path) {
+    if (typeof path !== 'string' || !path.length) return '/';
+    return path.startsWith('/') ? path : `/${path}`;
+}
+
+async function ensureCanvasLazyChangeHints(forceRefresh = false) {
+    if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return null;
+    const now = Date.now();
+    if (!forceRefresh && canvasLazyChangeHints.updatedAt && (now - canvasLazyChangeHints.updatedAt) < CANVAS_LAZY_CHANGE_HINT_TTL_MS) {
+        return canvasLazyChangeHints;
+    }
+    if (canvasLazyChangeHintsPromise) return canvasLazyChangeHintsPromise;
+
+    canvasLazyChangeHintsPromise = (async () => {
+        try {
+            const changeData = null;
+            const added = new Set();
+            const modified = new Set();
+            const moved = new Set();
+            const movedInfo = new Map();
+            let deletedCount = 0;
+
+            const stats = changeData && changeData.stats ? changeData.stats : null;
+            const statsHasAny = !!(stats && (
+                stats.bookmarkDiff || stats.folderDiff ||
+                stats.bookmarkMoved || stats.folderMoved ||
+                stats.bookmarkModified || stats.folderModified
+            ));
+
+            if (changeData && (changeData.hasChanges || statsHasAny)) {
+                if (Array.isArray(changeData.added)) {
+                    changeData.added.forEach(item => {
+                        const key = buildFingerprintKeyFromChangeItem(item);
+                        if (key) added.add(key);
+                    });
+                }
+                if (Array.isArray(changeData.modified)) {
+                    changeData.modified.forEach(item => {
+                        const key = buildFingerprintKeyFromChangeItem(item);
+                        if (key) modified.add(key);
+                    });
+                }
+                if (Array.isArray(changeData.moved)) {
+                    changeData.moved.forEach(item => {
+                        const key = buildFingerprintKeyFromChangeItem(item);
+                        if (key) {
+                            moved.add(key);
+                            if (item.oldPath) movedInfo.set(key, { oldPath: item.oldPath });
+                        }
+                    });
+                }
+                if (Array.isArray(changeData.deleted)) {
+                    deletedCount = changeData.deleted.length;
+                }
+            }
+
+            canvasLazyChangeHints = {
+                updatedAt: Date.now(),
+                added,
+                modified,
+                moved,
+                movedInfo,
+                deletedCount,
+                hasAny: added.size > 0 || modified.size > 0 || moved.size > 0 || deletedCount > 0 || statsHasAny
+            };
+            return canvasLazyChangeHints;
+        } catch (e) {
+            console.warn('[Canvas变化提示] 生成失败，回退为空:', e);
+            canvasLazyChangeHints = {
+                updatedAt: Date.now(),
+                added: new Set(),
+                modified: new Set(),
+                moved: new Set(),
+                movedInfo: new Map(),
+                deletedCount: 0,
+                hasAny: false
+            };
+            return canvasLazyChangeHints;
+        } finally {
+            canvasLazyChangeHintsPromise = null;
+        }
+    })();
+
+    return canvasLazyChangeHintsPromise;
+}
+
+function getCanvasLazyHintForBookmark(node) {
+    if (!node || !node.url) return null;
+    if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return null;
+    if (!canvasLazyChangeHints || !canvasLazyChangeHints.hasAny) return null;
+    const key = buildFingerprintKeyForBookmarkNode(node);
+    if (!key) return null;
+    if (canvasLazyChangeHints.added.has(key)) return { type: 'added' };
+    if (canvasLazyChangeHints.modified.has(key)) return { type: 'modified' };
+    if (canvasLazyChangeHints.moved.has(key)) {
+        const info = canvasLazyChangeHints.movedInfo.get(key) || {};
+        return { type: 'moved', oldPath: info.oldPath || '' };
+    }
+    return null;
+}
+
+function ensureCanvasLazyLegend(treeContainer) {
+    if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
+    const container = treeContainer || document.getElementById('bookmarkTree');
+    if (!container) return;
+    const existing = container.querySelector('.tree-legend');
+    if (!canvasLazyChangeHints || !canvasLazyChangeHints.hasAny) {
+        if (existing) existing.remove();
+        return;
+    }
+    if (existing) return;
+    const legend = document.createElement('div');
+    legend.className = 'tree-legend';
+    legend.innerHTML = `
+        <span class="legend-item"><span class="legend-dot added"></span> ${currentLang === 'zh_CN' ? '新增' : 'Added'}</span>
+        <span class="legend-item"><span class="legend-dot deleted"></span> ${currentLang === 'zh_CN' ? '删除' : 'Deleted'}</span>
+        <span class="legend-item"><span class="legend-dot moved"></span> ${currentLang === 'zh_CN' ? '移动' : 'Moved'}</span>
+        <span class="legend-item"><span class="legend-dot modified"></span> ${currentLang === 'zh_CN' ? '修改' : 'Modified'}</span>
+    `;
+    container.insertBefore(legend, container.firstChild);
+}
+
+// 生成书签树指纹（快速哈希）
+function getTreeFingerprint(tree) {
+    if (!tree || !tree[0]) return '';
+
+    // 只提取关键信息生成指纹
+    const extractKey = (node) => {
+        const key = {
+            i: node.id,
+            t: node.title,
+            u: node.url,
+            p: node.parentId,
+            x: node.index
+        };
+        if (node.children) {
+            key.c = node.children.map(extractKey);
+        }
+        return key;
+    };
+
+    return JSON.stringify(extractKey(tree[0]));
+}
+
+// 从 background.js 获取书签树快照（优先走缓存，失败再直连 getTree）
+async function getBookmarkTreeSnapshot() {
+    try {
+        if (browserAPI && browserAPI.runtime && typeof browserAPI.runtime.sendMessage === 'function') {
+            const resp = await browserAPI.runtime.sendMessage({ action: 'getBookmarkSnapshot' });
+            if (resp && resp.success && Array.isArray(resp.tree)) {
+                return { tree: resp.tree, version: resp.version ?? null };
+            }
+        }
+    } catch (e) {
+        console.warn('[TreeSnapshot] 获取后台快照失败，回退直连:', e);
+    }
+    const tree = await new Promise(resolve => browserAPI.bookmarks.getTree(resolve));
+    return { tree, version: null };
+}
+
+// Canvas 永久栏目懒加载：需要依赖 cachedCurrentTree 来按需加载 folder children。
+// 若只做 DOM 增量更新但不刷新 cachedCurrentTree，则在“展开/加载更多”时可能被旧快照覆盖，
+// 造成“刷新/展开后移动效果消失 / 节点跑回去”的错觉。
+let pendingTreeSnapshotRefreshTimer = null;
+let treeSnapshotRefreshing = false;
+let treeSnapshotRefreshQueued = false;
+
+async function refreshCachedCurrentTreeSnapshot(reason = '') {
+    if (!((currentView === 'canvas') && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
+    if (treeSnapshotRefreshing) {
+        treeSnapshotRefreshQueued = true;
+        return;
+    }
+    treeSnapshotRefreshing = true;
+    try {
+        const snapshot = await getBookmarkTreeSnapshot();
+        if (snapshot && Array.isArray(snapshot.tree)) {
+            cachedCurrentTree = snapshot.tree;
+            cachedCurrentTreeIndex = null;
+            cachedRenderTreeIndex = null;
+            try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+            if (typeof snapshot.version !== 'undefined') {
+                lastTreeSnapshotVersion = snapshot.version;
+            }
+            console.log('[TreeSnapshot] 已刷新 cachedCurrentTree（Canvas懒加载）', reason || '');
+        }
+    } catch (e) {
+        console.warn('[TreeSnapshot] 刷新 cachedCurrentTree 失败:', e);
+    } finally {
+        treeSnapshotRefreshing = false;
+        if (treeSnapshotRefreshQueued) {
+            treeSnapshotRefreshQueued = false;
+            refreshCachedCurrentTreeSnapshot('queued').catch(() => { });
+        }
+    }
+}
+
+function scheduleCachedCurrentTreeSnapshotRefresh(reason = '') {
+    if (!((currentView === 'canvas') && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
+    if (pendingTreeSnapshotRefreshTimer) clearTimeout(pendingTreeSnapshotRefreshTimer);
+    pendingTreeSnapshotRefreshTimer = setTimeout(() => {
+        pendingTreeSnapshotRefreshTimer = null;
+        refreshCachedCurrentTreeSnapshot(reason).catch(() => { });
+    }, 300);
+}
+
+function applyIncrementalMoveToCachedCurrentTree(id, moveInfo) {
+    try {
+        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
+        if (!id || !moveInfo || typeof moveInfo.parentId === 'undefined' || typeof moveInfo.oldParentId === 'undefined') return;
+        if (!cachedCurrentTree || !cachedCurrentTree[0]) return;
+
+        const index = getCachedCurrentTreeIndex();
+        if (!index) return;
+
+        const keyId = String(id);
+        const movedNode = index.get(keyId);
+        const oldParent = index.get(String(moveInfo.oldParentId));
+        const newParent = index.get(String(moveInfo.parentId));
+        if (!movedNode || !oldParent || !newParent) return;
+
+        const oldChildren = Array.isArray(oldParent.children) ? oldParent.children : [];
+        oldParent.children = oldChildren.filter(child => String(child?.id) !== keyId);
+
+        const newChildren = Array.isArray(newParent.children) ? newParent.children : [];
+        const filteredNew = newChildren.filter(child => String(child?.id) !== keyId);
+        const insertIndex = (typeof moveInfo.index === 'number')
+            ? Math.max(0, Math.min(moveInfo.index, filteredNew.length))
+            : filteredNew.length;
+        filteredNew.splice(insertIndex, 0, movedNode);
+        newParent.children = filteredNew;
+
+        // 更新节点自身的父信息（供路径/懒加载逻辑使用）
+        movedNode.parentId = String(moveInfo.parentId);
+        if (typeof moveInfo.index === 'number') movedNode.index = moveInfo.index;
+    } catch (_) {
+        // 静默失败：最终会由 refreshCachedCurrentTreeSnapshot() 兜底
+    }
+}
+
+function getCachedCurrentTreeIndex() {
+    if (cachedCurrentTreeIndex) return cachedCurrentTreeIndex;
+    if (!cachedCurrentTree || !cachedCurrentTree[0]) return null;
+    cachedCurrentTreeIndex = buildTreeIndexFromRoot(cachedCurrentTree[0]);
+    return cachedCurrentTreeIndex;
+}
+
+function getCachedRenderTreeIndex() {
+    if (cachedRenderTreeIndex) return cachedRenderTreeIndex;
+    try {
+        if (window.__canvasRenderTreeIndex instanceof Map) {
+            cachedRenderTreeIndex = window.__canvasRenderTreeIndex;
+            return cachedRenderTreeIndex;
+        }
+    } catch (_) { }
+    return null;
+}
+
+function getChangesPreviewTreeIndex() {
+    try {
+        if (window.__changesPreviewTreeIndex instanceof Map) return window.__changesPreviewTreeIndex;
+    } catch (_) { }
+    return null;
+}
+
+async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, startIndex = 0, triggerBtn = null, isReadOnly = false) {
+    try {
+        if (!parentId || !childrenContainer) return;
+        const treeRoot = childrenContainer.closest('.bookmark-tree') || document.getElementById('bookmarkTree') || document;
+        const index = isReadOnly
+            ? getChangesPreviewTreeIndex()
+            : ((currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)
+                ? (getCachedRenderTreeIndex() || getCachedCurrentTreeIndex())
+                : getCachedCurrentTreeIndex());
+        const parent = index ? index.get(String(parentId)) : null;
+        if (!parent || !Array.isArray(parent.children) || parent.children.length === 0) {
+            const item = treeRoot.querySelector(`.tree-item[data-node-id="${CSS.escape(String(parentId))}"]`);
+            if (item) {
+                item.dataset.childrenLoaded = 'true';
+                item.dataset.hasChildren = 'false';
+            }
+            if (triggerBtn) {
+                try { triggerBtn.remove(); } catch (_) { }
+            }
+            return;
+        }
+
+        const item = treeRoot.querySelector(`.tree-item[data-node-id="${CSS.escape(String(parentId))}"]`);
+        const level = item ? (parseInt(item.dataset.nodeLevel, 10) || 0) : 0;
+        const nextLevel = level + 1;
+        const underDeletedAncestor = !!(item && item.classList && item.classList.contains('tree-change-deleted'));
+
+        const slice = parent.children.slice(startIndex, startIndex + CANVAS_PERMANENT_TREE_CHILD_BATCH);
+        const visited = new Set([String(parentId)]);
+        let hintSet = null;
+        if (isReadOnly && (window.__changesPreviewHintSet instanceof Set)) {
+            hintSet = window.__changesPreviewHintSet;
+        } else if (!isReadOnly && currentView === 'canvas' && (window.__canvasPermanentHintSet instanceof Set)) {
+            hintSet = window.__canvasPermanentHintSet;
+        }
+        const options = isReadOnly ? { forceExpandOverrideLazyStop: false } : undefined;
+        const html = slice.map(child => renderTreeNodeWithChanges(child, nextLevel, 50, visited, hintSet, options, underDeletedAncestor)).join('');
+
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = html;
+
+        const frag = document.createDocumentFragment();
+        while (tempDiv.firstChild) {
+            frag.appendChild(tempDiv.firstChild);
+        }
+
+        if (startIndex === 0 && !triggerBtn) {
+            childrenContainer.innerHTML = '';
+        }
+
+        // 插入到“加载更多”按钮之前（若存在）
+        if (triggerBtn && triggerBtn.parentElement === childrenContainer) {
+            childrenContainer.insertBefore(frag, triggerBtn);
+        } else {
+            childrenContainer.appendChild(frag);
+        }
+
+        if (item) {
+            item.dataset.childrenLoaded = 'true';
+            item.dataset.hasChildren = 'true';
+        }
+
+        const nextStart = startIndex + slice.length;
+        const remaining = parent.children.length - nextStart;
+
+        let loadMoreBtn = triggerBtn;
+        if (remaining > 0) {
+            if (!loadMoreBtn) {
+                loadMoreBtn = document.createElement('button');
+                loadMoreBtn.type = 'button';
+                loadMoreBtn.className = 'tree-load-more';
+                childrenContainer.appendChild(loadMoreBtn);
+            }
+            loadMoreBtn.dataset.parentId = String(parentId);
+            loadMoreBtn.dataset.startIndex = String(nextStart);
+            loadMoreBtn.textContent = currentLang === 'zh_CN'
+                ? `加载更多（剩余 ${remaining} 项）`
+                : `Load more (${remaining} remaining)`;
+        } else if (loadMoreBtn) {
+            try { loadMoreBtn.remove(); } catch (_) { }
+        }
+
+        // 懒加载插入新节点后：补绑定拖拽事件（内部拖拽排序/移动）
+        try {
+            // 仅对“刚插入的子树”补绑，避免每次懒加载都扫描整棵书签树
+            if (typeof attachDragEvents === 'function' && !isReadOnly) {
+                attachDragEvents(childrenContainer);
+            }
+        } catch (_) { }
+
+        if (isReadOnly) {
+            try {
+                // 1. 禁用拖拽
+                childrenContainer.querySelectorAll('[draggable="true"]').forEach(el => {
+                    el.setAttribute('draggable', 'false');
+                });
+                // 2. 添加 dataset-readonly
+                childrenContainer.querySelectorAll('.tree-item').forEach(el => {
+                    el.dataset.readonly = 'true';
+                });
+                // 3. 移除右键菜单（如果有）
+                childrenContainer.querySelectorAll('#bookmark-context-menu, .bookmark-context-menu').forEach(el => {
+                    el.remove();
+                });
+            } catch (_) { }
+        }
+
+        // 懒加载完成后：检查新加载的子节点是否有需要恢复展开状态的
+        // 注意：Canvas 永久栏目副本需要“按副本”独立恢复展开状态
+        try {
+            const treeForState = childrenContainer && childrenContainer.closest ? childrenContainer.closest('.bookmark-tree') : null;
+            const savedState = __readTreeExpandStateFromStorage(treeForState);
+            if (savedState) {
+                const expandedIds = JSON.parse(savedState);
+                if (Array.isArray(expandedIds) && expandedIds.length > 0) {
+                    const expandedSet = new Set(expandedIds);
+                    // 只检查刚加载的子节点
+                    childrenContainer.querySelectorAll(':scope > .tree-node > .tree-item[data-node-id]').forEach(item => {
+                        if (expandedSet.has(item.dataset.nodeId)) {
+                            const node = item.closest('.tree-node');
+                            if (!node) return;
+                            const children = node.querySelector(':scope > .tree-children');
+                            const toggle = item.querySelector('.tree-toggle');
+                            const icon = item.querySelector('.tree-icon.fas');
+                            if (children && toggle) {
+                                children.classList.add('expanded');
+                                toggle.classList.add('expanded');
+                                if (icon && icon.classList.contains('fa-folder')) {
+                                    icon.classList.remove('fa-folder');
+                                    icon.classList.add('fa-folder-open');
+                                }
+                                // 如果这个节点也需要懒加载，递归加载
+                                 if (item.dataset.childrenLoaded === 'false' && item.dataset.hasChildren === 'true') {
+                                     setTimeout(() => {
+                                         loadPermanentFolderChildrenLazy(item.dataset.nodeId, children, 0, null, isReadOnly);
+                                     }, 10);
+                                 }
+                             }
+                         }
+                    });
+                }
+            }
+        } catch (_) { }
+    } catch (e) {
+        console.warn('[Canvas Tree Lazy] load children failed:', e);
+    }
+}
+// 导出到全局，供拖拽模块在悬浮展开时调用
+window.loadPermanentFolderChildrenLazy = loadPermanentFolderChildrenLazy;
+
+
+// 计算节点在指定树中的“索引地址路径”（示例：/1/2/3），从根的第一层开始使用 1 基索引
+function getIndexAddressPathFromTree(tree, targetId) {
+    try {
+        if (!tree || !tree[0]) return '';
+        // 构建 id -> node 快速索引
+        const map = new Map();
+        (function build(n) {
+            if (!n) return;
+            map.set(n.id, n);
+            if (n.children) n.children.forEach(build);
+        })(tree[0]);
+
+        const target = map.get(targetId);
+        if (!target) return '';
+        const segments = [];
+        let cur = target;
+        // 将当前节点的 index+1 放入，逐层向上直到父为 '0' 或无父
+        while (cur && typeof cur.index === 'number') {
+            segments.push(cur.index + 1);
+            const pid = cur.parentId;
+            if (!pid || pid === '0') break;
+            cur = map.get(pid);
+        }
+        // 如果父为 '0'，还需要把顶层容器自身的 index+1 也包含（cur 即顶层容器）
+        if (cur && typeof cur.parentId !== 'undefined' && cur.parentId === '0' && typeof cur.index === 'number') {
+            // 已经在循环中加入了 cur 的 index+1（作为上一轮child），此处不重复
+        }
+        return segments.length ? ('/' + segments.reverse().join('/')) : '';
+    } catch (_) {
+        return '';
+    }
+}
+
+// 计算“旧位置”的索引地址路径：优先从 cachedOldTree 获取；失败返回空串
+function getOldIndexAddressForNode(nodeId) {
+    if (!nodeId) return '';
+    try {
+        if (cachedOldTree && cachedOldTree[0]) {
+            return getIndexAddressPathFromTree(cachedOldTree, nodeId);
+        }
+    } catch (_) { }
+    return '';
+}
+
+// ============ 名称路径（按文件夹名称，不含数字） ============
+function getNamedPathFromTree(tree, targetId) {
+    try {
+        if (!tree || !tree[0]) return '';
+        const path = [];
+        const dfs = (node, cur) => {
+            if (!node) return false;
+            if (node.id === String(targetId)) { path.push(...cur, node.title); return true; }
+            if (node.children) {
+                for (const c of node.children) {
+                    if (dfs(c, [...cur, node.title])) return true;
+                }
+            }
+            return false;
+        };
+        dfs(tree[0], []);
+        return path.join(' > ');
+    } catch (_) { return ''; }
+}
+
+function breadcrumbToSlashFolders(bc) {
+    if (!bc) return '';
+    const parts = bc.split(' > ').map(s => s.trim()).filter(Boolean);
+    if (parts.length === 0) return '';
+    // 只取文件夹路径：去掉最后一级（当前节点名）
+    if (parts.length > 1) parts.pop(); else return '/';
+    return '/' + parts.join('/');
+}
+
+function breadcrumbToSlashFull(bc) {
+    if (!bc) return '/';
+    const parts = bc.split(' > ').map(s => s.trim()).filter(Boolean);
+    return parts.length ? ('/' + parts.join('/')) : '/';
+}
+
+// 将 "/A/B/C" 转为带矩形片段的 HTML（用于 move tooltip）
+function slashPathToChipsHTML(slashPath) {
+    try {
+        if (!slashPath || typeof slashPath !== 'string') return '<span class="breadcrumb-item">/</span>';
+        const parts = slashPath.split('/').filter(Boolean);
+        if (parts.length === 0) return '<span class="breadcrumb-item">/</span>';
+        const chips = parts.map((p, i) => {
+            const safe = escapeHtml(p);
+            return `<span class="breadcrumb-item">${safe}</span>`;
+        });
+        const sep = '<span class="breadcrumb-separator">/</span>';
+        return chips.join(sep);
+    } catch (_) {
+        return '<span class="breadcrumb-item">/</span>';
+    }
+}
+
+// 基于“旧父ID + 旧index”从当前树推导旧地址（避免必须完整旧树）
+function getOldAddressFromParentAndIndex(oldParentId, oldIndex) {
+    try {
+        if (typeof oldParentId === 'undefined' || oldParentId === null) return '';
+        const base = (cachedCurrentTree && cachedCurrentTree[0]) ? cachedCurrentTree : (cachedOldTree && cachedOldTree[0] ? cachedOldTree : null);
+        if (!base) return '';
+        const parentPath = getIndexAddressPathFromTree(base, String(oldParentId));
+        if (!parentPath) return '';
+        const childSeg = (typeof oldIndex === 'number') ? ('/' + (oldIndex + 1)) : '';
+        return parentPath + childSeg;
+    } catch (_) { return ''; }
+}
+
+// 防止并发渲染和闪烁的标志
+let isRenderingTree = false;
+let pendingRenderRequest = null;
+
+async function renderTreeViewSync() {
+    console.log('[renderTreeViewSync] 开始同步渲染...');
+
+    const treeContainer = document.getElementById('bookmarkTree');
+    if (!treeContainer) {
+        console.error('[renderTreeViewSync] 容器元素未找到');
+        return;
+    }
+
+    // 清除缓存，确保重新渲染
+    cachedTreeData = null;
+    lastTreeFingerprint = null;
+    lastTreeSnapshotVersion = null;
+    cachedCurrentTreeIndex = null;
+
+    try {
+        // 并行获取数据
+        const [snapshot, storageData] = await Promise.all([
+            getBookmarkTreeSnapshot(),
+            new Promise(resolve => browserAPI.storage.local.get(['lastBookmarkData'], resolve))
+        ]);
+        const currentTree = snapshot ? snapshot.tree : null;
+        lastTreeSnapshotVersion = snapshot ? snapshot.version : null;
+
+        if (!currentTree || currentTree.length === 0) {
+            treeContainer.innerHTML = `<div class="empty-state"><div class="empty-state-icon"><i class="fas fa-sitemap"></i></div><div class="empty-state-title">${i18n.emptyTree[currentLang]}</div></div>`;
+            return;
+        }
+
+        const oldTree = extractLastBookmarkTree(storageData);
+        cachedOldTree = oldTree;
+        cachedCurrentTree = currentTree;
+        cachedCurrentTreeIndex = null;
+
+        // 检测变动（标识关闭时跳过）
+        if (isMarkerEnabled() && oldTree && oldTree[0]) {
+            treeChangeMap = await detectTreeChangesFast(oldTree, currentTree);
+            console.log('[renderTreeViewSync] 检测到变动数量:', treeChangeMap.size);
+        } else {
+            treeChangeMap = new Map();
+        }
+
+        // 合并旧树和新树，显示删除的节点
+        let treeToRender = currentTree;
+        if (oldTree && oldTree[0] && treeChangeMap && treeChangeMap.size > 0) {
+            let hasDeletedNodes = false;
+            for (const [, change] of treeChangeMap) {
+                if (change.type === 'deleted') {
+                    hasDeletedNodes = true;
+                    break;
+                }
+            }
+            if (hasDeletedNodes) {
+                try {
+                    treeToRender = rebuildTreeWithDeleted(oldTree, currentTree, treeChangeMap);
+                } catch (error) {
+                    console.error('[renderTreeViewSync] 重建树时出错:', error);
+                    treeToRender = currentTree;
+                }
+            }
+        }
+
+        // 渲染树
+        const fragment = document.createDocumentFragment();
+
+        if (treeChangeMap.size > 0) {
+            const legend = document.createElement('div');
+            legend.className = 'tree-legend';
+            legend.innerHTML = `
+                <span class="legend-item"><span class="legend-dot added"></span> ${currentLang === 'zh_CN' ? '新增' : 'Added'}</span>
+                <span class="legend-item"><span class="legend-dot deleted"></span> ${currentLang === 'zh_CN' ? '删除' : 'Deleted'}</span>
+                <span class="legend-item"><span class="legend-dot modified"></span> ${currentLang === 'zh_CN' ? '修改' : 'Modified'}</span>
+                <span class="legend-item"><span class="legend-dot moved"></span> ${currentLang === 'zh_CN' ? '移动' : 'Moved'}</span>
+            `;
+            fragment.appendChild(legend);
+        }
+
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = renderTreeNodeWithChanges(treeToRender[0], 0);
+        while (tempDiv.firstChild) {
+            fragment.appendChild(tempDiv.firstChild);
+        }
+
+        treeContainer.innerHTML = '';
+        treeContainer.appendChild(fragment);
+        treeContainer.style.display = 'block';
+
+        // 绑定事件
+        attachTreeEvents(treeContainer);
+
+        console.log('[renderTreeViewSync] 渲染完成');
+
+    } catch (error) {
+        console.error('[renderTreeViewSync] 渲染失败:', error);
+        treeContainer.innerHTML = `<div class="error">${currentLang === 'zh_CN' ? '加载失败' : 'Failed to load'}</div>`;
+    }
+}
+
+// 目标：避免 renderTreeViewSync 的整树 DOM 构建导致“黑屏/卡顿感”。
+async function ensureChangesPreviewTreeDataLoaded() {
+    try {
+        const [snapshot, storageData] = await Promise.all([
+            getBookmarkTreeSnapshot(),
+            new Promise(resolve => browserAPI.storage.local.get(['lastBookmarkData'], resolve))
+        ]);
+
+        const currentTree = snapshot ? snapshot.tree : null;
+        if (!currentTree || !Array.isArray(currentTree) || currentTree.length === 0) {
+            cachedCurrentTree = null;
+            treeChangeMap = new Map();
+            return;
+        }
+
+        const oldTree = extractLastBookmarkTree(storageData);
+        cachedOldTree = oldTree;
+        cachedCurrentTree = currentTree;
+        cachedCurrentTreeIndex = null;
+        lastTreeSnapshotVersion = snapshot ? snapshot.version : null;
+
+        if (isMarkerEnabled() && oldTree && oldTree[0]) {
+            treeChangeMap = await detectTreeChangesFast(oldTree, currentTree);
+        } else {
+            treeChangeMap = new Map();
+        }
+    } catch (e) {
+        console.warn('[ensureChangesPreviewTreeDataLoaded] Failed:', e);
+        try { treeChangeMap = new Map(); } catch (_) { }
+    }
+}
+
+async function renderTreeView(forceRefresh = false) {
+    console.log('[renderTreeView] 开始渲染, forceRefresh:', forceRefresh);
+
+    // 如果正在渲染中，合并请求，避免重复渲染导致闪烁
+    if (isRenderingTree) {
+        console.log('[renderTreeView] 已有渲染进行中，合并请求');
+        pendingRenderRequest = forceRefresh;
+        return;
+    }
+
+    isRenderingTree = true;
+
+    // 记录永久栏目滚动位置，渲染后恢复
+    // 优先使用当前滚动位置；如果是0，尝试从 localStorage 读取持久化的值（页面刷新场景）
+    const permBody = document.querySelector('.permanent-section-body');
+    let permScrollTop = permBody ? permBody.scrollTop : null;
+    let permScrollLeft = permBody ? permBody.scrollLeft : 0;
+
+    // 避免“渲染后多次恢复滚动”与用户滚动产生抢夺：一旦检测到用户开始滚动，短时间内停止自动恢复
+    const isScrollRestoreBlocked = () => {
+        if (!permBody) return false;
+        try {
+            const until = parseInt(permBody.dataset.scrollRestoreBlockUntil || '0', 10) || 0;
+            return until && Date.now() < until;
+        } catch (_) {
+            return false;
+        }
+    };
+    if (permBody && permBody.dataset.scrollRestoreGuardAttached !== 'true') {
+        permBody.dataset.scrollRestoreGuardAttached = 'true';
+        const blockMs = 1000;
+        const block = () => {
+            try {
+                permBody.dataset.scrollRestoreBlockUntil = String(Date.now() + blockMs);
+            } catch (_) { }
+        };
+        permBody.addEventListener('wheel', block, { passive: true });
+        permBody.addEventListener('touchstart', block, { passive: true });
+        permBody.addEventListener('touchmove', block, { passive: true });
+        // 仅当直接在滚动容器上按下（如拖动滚动条/空白区域）才算用户滚动意图，避免点击树节点误触发
+        permBody.addEventListener('pointerdown', (e) => {
+            if (e && e.target === permBody) block();
+        }, { passive: true });
+    }
+
+    // 页面刷新后，permScrollTop 是 0，需要从 localStorage 恢复
+    if (permScrollTop === 0 && currentView === 'canvas') {
+        try {
+            const persisted = JSON.parse(localStorage.getItem('permanent-section-scroll'));
+            if (persisted && typeof persisted.top === 'number') {
+                permScrollTop = persisted.top;
+                permScrollLeft = persisted.left || 0;
+            }
+        } catch (_) { }
+    }
+
+    const treeContainer = document.getElementById('bookmarkTree');
+
+    if (!treeContainer) {
+        console.error('[renderTreeView] 容器元素未找到');
+        isRenderingTree = false;
+        return;
+    }
+
+    // 强制刷新时清除缓存，确保重新渲染
+    if (forceRefresh) {
+        cachedTreeData = null;
+        lastTreeFingerprint = null;
+        lastTreeSnapshotVersion = null;
+        cachedCurrentTreeIndex = null;
+        console.log('[renderTreeView] 强制刷新，已清除缓存');
+    }
+
+    // 如果已有缓存且不强制刷新，直接使用（快速路径）
+    if (!forceRefresh && cachedTreeData && cachedTreeData.treeFragment) {
+        console.log('[renderTreeView] 使用现有缓存（快速显示）');
+        if (currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED) {
+            await ensureCanvasLazyChangeHints(false);
+        }
+        // Canvas 视图下尽量避免整树替换，减少“重新加载感”
+        if (currentView === 'canvas' && treeContainer.children.length) {
+            treeContainer.style.display = 'block';
+            ensureCanvasLazyLegend(treeContainer);
+        } else {
+            treeContainer.innerHTML = '';
+            treeContainer.appendChild(cachedTreeData.treeFragment.cloneNode(true));
+            treeContainer.style.display = 'block';
+            ensureCanvasLazyLegend(treeContainer);
+        }
+
+        // 重新绑定事件
+        attachTreeEvents(treeContainer);
+
+        console.log('[renderTreeView] 缓存显示完成');
+        // 恢复滚动位置（延迟确保展开状态恢复后再恢复滚动位置）
+        if (permBody && permScrollTop !== null) {
+            const restoreScroll = () => {
+                if (isScrollRestoreBlocked()) return;
+                permBody.scrollTop = permScrollTop;
+                permBody.scrollLeft = permScrollLeft;
+            };
+            restoreScroll();
+            requestAnimationFrame(() => {
+                restoreScroll();
+                setTimeout(restoreScroll, 50);
+                setTimeout(restoreScroll, 150);
+                setTimeout(restoreScroll, 300);
+                setTimeout(restoreScroll, 500);
+            });
+        }
+
+        // 【关键修复】即使使用缓存，也要预热内存缓存
+        // 因为内存缓存可能在页面刷新后被清空，导致图标显示为五角星
+        // 预热完成后会自动更新页面上的图标
+        (async () => {
+            try {
+                if (currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED) {
+                    // Canvas 永久栏目首屏多为文件夹，不需要全量预热 favicon（会导致首次进入卡顿）
+                    return;
+                }
+                // 获取当前书签树（优先后台快照）
+                const snapshot = await getBookmarkTreeSnapshot();
+                const currentTree = snapshot ? snapshot.tree : null;
+                if (currentTree && currentTree.length > 0) {
+                    // 收集所有书签URL
+                    const allBookmarkUrls = [];
+                    const collectUrls = (nodes) => {
+                        if (!nodes) return;
+                        nodes.forEach(node => {
+                            if (node.url) allBookmarkUrls.push(node.url);
+                            if (node.children) collectUrls(node.children);
+                        });
+                    };
+                    collectUrls(currentTree);
+
+                    if (allBookmarkUrls.length > 0) {
+                        await warmupFaviconCache(allBookmarkUrls);
+
+                        // 预热完成后，更新页面上所有使用fallback图标的img标签
+                        allBookmarkUrls.forEach(url => {
+                            try {
+                                const urlObj = new URL(url);
+                                const domain = urlObj.hostname;
+                                const cachedFavicon = FaviconCache.memoryCache.get(domain);
+                                if (cachedFavicon && cachedFavicon !== fallbackIcon) {
+                                    updateFaviconImages(url, cachedFavicon);
+                                }
+                            } catch (e) {
+                                // 忽略无效URL
+                            }
+                        });
+
+                        console.log('[renderTreeView] 快速路径预热完成，已更新图标');
+                    }
+                }
+            } catch (e) {
+                console.warn('[renderTreeView] 快速路径预热失败:', e);
+            }
+        })();
+
+        // 重置渲染标志并处理合并请求
+        isRenderingTree = false;
+        if (pendingRenderRequest !== null) {
+            const pending = pendingRenderRequest;
+            pendingRenderRequest = null;
+            console.log('[renderTreeView] 处理待处理的渲染请求（快速路径）');
+            renderTreeView(pending);
+        }
+        return;
+    }
+
+    // 没有缓存，开始加载数据
+    // 注意：不清空容器，保持原有内容，避免闪烁和滚动位置丢失
+    // 只有在容器为空时才显示加载状态
+    console.log('[renderTreeView] 无缓存，开始加载数据');
+    if (!treeContainer.children.length || treeContainer.querySelector('.loading') || treeContainer.querySelector('.empty-state') || treeContainer.querySelector('.error')) {
+        treeContainer.innerHTML = `<div class="loading">${i18n.loading[currentLang]}</div>`;
+    }
+    treeContainer.style.display = 'block';
+
+    // 获取数据并行处理
+    Promise.all([
+        getBookmarkTreeSnapshot(),
+        new Promise(resolve => browserAPI.storage.local.get(['lastBookmarkData'], resolve))
+    ]).then(async ([snapshot, storageData]) => {
+        const currentTree = snapshot ? snapshot.tree : null;
+        const snapshotVersion = snapshot ? snapshot.version : null;
+        if (!currentTree || currentTree.length === 0) {
+            treeContainer.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon"><i class="fas fa-sitemap"></i></div>
+                    <div class="empty-state-title">${i18n.emptyTree[currentLang]}</div>
+                </div>
+            `;
+            isRenderingTree = false;
+            if (pendingRenderRequest !== null) {
+                const pending = pendingRenderRequest;
+                pendingRenderRequest = null;
+                renderTreeView(pending);
+            }
+            return;
+        }
+
+        // 版本快路径：优先使用 background 快照版本，避免对整棵树做 JSON 指纹（非常耗时）
+        const canUseVersion = snapshotVersion !== null && typeof snapshotVersion !== 'undefined';
+        const currentFingerprint = canUseVersion ? null : getTreeFingerprint(currentTree);
+
+        // 如果版本/指纹相同，直接使用缓存（树没有变化）
+        if (cachedTreeData && ((canUseVersion && snapshotVersion === lastTreeSnapshotVersion) || (!canUseVersion && currentFingerprint === lastTreeFingerprint))) {
+            console.log('[renderTreeView] 使用缓存（书签未变化）');
+
+            // Canvas 视图下，如果已有 DOM，避免整树替换造成"重新加载感"
+            if (currentView === 'canvas' && treeContainer.children.length) {
+                cachedCurrentTree = currentTree;
+                cachedCurrentTreeIndex = null;
+                if (currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED) {
+                    await ensureCanvasLazyChangeHints(false);
+                    ensureCanvasLazyLegend(treeContainer);
+                }
+                // 恢复滚动位置
+                if (permBody && permScrollTop !== null && !isScrollRestoreBlocked()) {
+                    permBody.scrollTop = permScrollTop;
+                    permBody.scrollLeft = permScrollLeft;
+                }
+                isRenderingTree = false;
+                if (pendingRenderRequest !== null) {
+                    const pending = pendingRenderRequest;
+                    pendingRenderRequest = null;
+                    console.log('[renderTreeView] 处理待处理的渲染请求（Canvas无变化）');
+                    renderTreeView(pending);
+                }
+                return;
+            }
+
+            treeContainer.innerHTML = '';
+            treeContainer.appendChild(cachedTreeData.treeFragment.cloneNode(true));
+            treeContainer.style.display = 'block';
+            if (currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED) {
+                await ensureCanvasLazyChangeHints(false);
+                ensureCanvasLazyLegend(treeContainer);
+            }
+
+            // 重新绑定事件
+            attachTreeEvents(treeContainer);
+            // 恢复滚动位置（延迟确保展开状态恢复后再恢复滚动位置）
+            if (permBody && permScrollTop !== null) {
+                const restoreScroll = () => {
+                    if (isScrollRestoreBlocked()) return;
+                    permBody.scrollTop = permScrollTop;
+                    permBody.scrollLeft = permScrollLeft;
+                };
+                restoreScroll();
+                requestAnimationFrame(() => {
+                    restoreScroll();
+                    setTimeout(restoreScroll, 50);
+                    setTimeout(restoreScroll, 150);
+                    setTimeout(restoreScroll, 300);
+                    setTimeout(restoreScroll, 500);
+                });
+            }
+
+            // 重置渲染标志并处理合并请求
+            isRenderingTree = false;
+            if (pendingRenderRequest !== null) {
+                const pending = pendingRenderRequest;
+                pendingRenderRequest = null;
+                console.log('[renderTreeView] 处理待处理的渲染请求（指纹一致）');
+                renderTreeView(pending);
+            }
+            return;
+        }
+
+        // 树有变化，重新渲染
+        console.log('[renderTreeView] 检测到书签变化，重新渲染');
+
+        const oldTree = extractLastBookmarkTree(storageData);
+        cachedOldTree = oldTree;
+        cachedCurrentTree = currentTree; // 缓存当前树，用于智能路径检测
+        cachedCurrentTreeIndex = null;
+
+        // 【关键修复】预热 favicon 缓存 - 从 IndexedDB 批量加载到内存
+        // Canvas 永久栏目采用懒加载时，避免首次进入遍历整棵树做预热（代价很高）
+        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) {
+            // 收集所有书签URL
+            const allBookmarkUrls = [];
+            const collectUrls = (nodes) => {
+                if (!nodes) return;
+                nodes.forEach(node => {
+                    if (node.url) {
+                        allBookmarkUrls.push(node.url);
+                    }
+                    if (node.children) {
+                        collectUrls(node.children);
+                    }
+                });
+            };
+            collectUrls(currentTree);
+
+            // 批量预热缓存（等待完成，确保渲染时缓存已就绪）
+            if (allBookmarkUrls.length > 0) {
+                try {
+                    await warmupFaviconCache(allBookmarkUrls);
+                } catch (e) {
+                    console.warn('[renderTreeView] favicon缓存预热失败，继续渲染:', e);
+                }
+            }
+        }
+
+        // 快速检测变动（只在有上次快照数据时才检测）
+        console.log('[renderTreeView] oldTree 存在:', !!oldTree);
+        console.log('[renderTreeView] oldTree[0] 存在:', !!(oldTree && oldTree[0]));
+
+        const markerEnabled = isMarkerEnabled();
+
+        if (markerEnabled && currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED) {
+            // [Modified] In lazy mode, we still need diff detection to show "Add/Reduce/Modify/Move" indicators
+            // previously we skipped it for performance, now we keep it but optimize rendering
+            // treeChangeMap = new Map(); // Don't skip!
+            console.log('[renderTreeView] Canvas lazy mode: executing diff detection to show indicators');
+            treeChangeMap = await detectTreeChangesFast(oldTree, currentTree);
+        } else if (markerEnabled && oldTree && oldTree[0]) {
+            console.log('[renderTreeView] 开始检测变动...');
+            treeChangeMap = await detectTreeChangesFast(oldTree, currentTree);
+            console.log('[renderTreeView] 检测到的变动数量:', treeChangeMap.size);
+
+            // 打印前5个变动
+            let count = 0;
+            for (const [id, change] of treeChangeMap) {
+                if (count++ < 5) {
+                    console.log('[renderTreeView] 变动:', id, change);
+                }
+            }
+        } else {
+            treeChangeMap = new Map(); // 无上次快照数据，不显示任何变化标记
+            console.log('[renderTreeView] 无上次快照数据，不显示变化标记');
+        }
+
+        // Canvas 懒加载：使用轻量变化提示缓存（用于显示四类图例/标识）
+        let canvasHints = null;
+        if (markerEnabled && currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED) {
+            canvasHints = await ensureCanvasLazyChangeHints(false);
+        }
+
+        // 合并旧树和新树，显示删除的节点
+        let treeToRender = currentTree;
+        if (oldTree && oldTree[0] && treeChangeMap && treeChangeMap.size > 0) {
+            // 检查是否有删除的节点，只有在有删除节点时才重建树
+            let hasDeletedNodes = false;
+            for (const [, change] of treeChangeMap) {
+                if (change.type === 'deleted') {
+                    hasDeletedNodes = true;
+                    break;
+                }
+            }
+            if (hasDeletedNodes) {
+                console.log('[renderTreeView] 检测到删除节点，合并旧树和新树');
+                try {
+                    treeToRender = rebuildTreeWithDeleted(oldTree, currentTree, treeChangeMap);
+                } catch (error) {
+                    console.error('[renderTreeView] 重建树时出错:', error);
+                    treeToRender = currentTree; // 回退到原始树
+                }
+            }
+        }
+        console.log('[renderTreeView] 使用树:', treeToRender === currentTree ? 'currentTree' : 'rebuiltTree');
+
+        // Canvas 懒加载：lazy-load 读取 children 数据时必须基于“实际渲染的树”。
+        // 否则当 treeToRender 是 rebuiltTree（包含 deleted）时，展开文件夹仍会按 currentTreeIndex 取 children，导致 deleted 永远看不到。
+        try {
+            cachedRenderTreeIndex = null;
+            if (currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED && treeToRender && treeToRender[0]) {
+                const idx = buildTreeIndexFromRoot(treeToRender[0]);
+                if (idx) {
+                    cachedRenderTreeIndex = idx;
+                    try { window.__canvasRenderTreeIndex = idx; } catch (_) { }
+                }
+            } else {
+                try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+            }
+        } catch (_) { }
+
+        // 使用 DocumentFragment 优化渲染
+        const fragment = document.createDocumentFragment();
+
+        // 只在有变化时才显示图例（Canvas 懒加载可使用变化提示缓存）
+        // 只在有变化时才显示图例（Canvas 懒加载可使用变化提示缓存）
+        if (markerEnabled && (treeChangeMap.size > 0 || (canvasHints && canvasHints.hasAny))) {
+            const legend = document.createElement('div');
+            legend.className = 'tree-legend';
+            const cursorStyle = 'cursor: pointer; user-select: none;';
+            legend.innerHTML = `
+                <span class="legend-item" data-change-type="added" style="${cursorStyle}" title="${currentLang === 'zh_CN' ? '点击查看新增项' : 'Click to view added items'}"><span class="legend-dot added"></span> ${currentLang === 'zh_CN' ? '新增' : 'Added'}</span>
+                <span class="legend-item" data-change-type="deleted" style="${cursorStyle}" title="${currentLang === 'zh_CN' ? '点击查看删除项' : 'Click to view deleted items'}"><span class="legend-dot deleted"></span> ${currentLang === 'zh_CN' ? '删除' : 'Deleted'}</span>
+                <span class="legend-item" data-change-type="moved" style="${cursorStyle}" title="${currentLang === 'zh_CN' ? '点击查看移动项' : 'Click to view moved items'}"><span class="legend-dot moved"></span> ${currentLang === 'zh_CN' ? '移动' : 'Moved'}</span>
+                <span class="legend-item" data-change-type="modified" style="${cursorStyle}" title="${currentLang === 'zh_CN' ? '点击查看修改项' : 'Click to view modified items'}"><span class="legend-dot modified"></span> ${currentLang === 'zh_CN' ? '修改' : 'Modified'}</span>
+            `;
+            fragment.appendChild(legend);
+        }
+
+        // Canvas 懒加载：计算“包含变化”的提示集合（用于灰点提示，不用于强制渲染/展开）
+        // 改为回溯祖先（不做 O(N) 整树扫描），避免大树/大变化导致“没有任何标识/简略空白”。
+        let hintSet = null;
+        if (markerEnabled && currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED) {
+            const explicitSet = new Set();
+            try {
+                if (explicitMovedIds instanceof Map && explicitMovedIds.size) {
+                    const now = Date.now();
+                    for (const [id, expiry] of explicitMovedIds.entries()) {
+                        if (typeof expiry !== 'number' || expiry > now) {
+                            explicitSet.add(String(id));
+                        }
+                    }
+                }
+            } catch (_) { }
+
+            try {
+                hintSet = computeChangesHintSetFast(treeChangeMap, explicitSet);
+                console.log('[renderTreeView] Changes hint nodes count:', hintSet.size);
+            } catch (e) {
+                console.warn('[renderTreeView] build hintSet failed:', e);
+                hintSet = null;
+            }
+
+            // 祖先聚合徽标：不加载子树也能看出变化类型
+            try {
+                const badgeMap = computeAncestorChangeBadgesFast(treeChangeMap, explicitSet);
+                window.__canvasPermanentAncestorBadges = badgeMap;
+                __canvasPermanentAncestorBadges = badgeMap;
+            } catch (_) {
+                try { window.__canvasPermanentAncestorBadges = null; } catch (_) { }
+                __canvasPermanentAncestorBadges = null;
+            }
+
+            // 供后续懒加载子节点渲染使用（否则展开后灰点会消失）
+            try { window.__canvasPermanentHintSet = hintSet; } catch (_) { }
+            __canvasPermanentHintSet = hintSet;
+        }
+
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = renderTreeNodeWithChanges(treeToRender[0], 0, 50, new Set(), hintSet);
+        while (tempDiv.firstChild) {
+            fragment.appendChild(tempDiv.firstChild);
+        }
+
+        // 更新缓存
+        cachedTreeData = {
+            treeFragment: fragment.cloneNode(true),
+            currentTree: currentTree,
+            renderTree: treeToRender
+        };
+        if (canUseVersion) {
+            lastTreeSnapshotVersion = snapshotVersion;
+        } else {
+            lastTreeFingerprint = currentFingerprint;
+        }
+
+        // 使用 requestAnimationFrame 确保 DOM 更新和滚动恢复在同一帧内完成，减少闪烁
+        requestAnimationFrame(() => {
+            treeContainer.innerHTML = '';
+            treeContainer.appendChild(fragment);
+            treeContainer.style.display = 'block';
+
+            // 绑定事件
+            attachTreeEvents(treeContainer);
+
+            // 恢复滚动位置（延迟确保展开状态和懒加载完成后再恢复滚动位置）
+            if (permBody && permScrollTop !== null) {
+                const restoreScroll = () => {
+                    if (isScrollRestoreBlocked()) return;
+                    permBody.scrollTop = permScrollTop;
+                    permBody.scrollLeft = permScrollLeft;
+                };
+                restoreScroll();
+                setTimeout(restoreScroll, 50);
+                setTimeout(restoreScroll, 150);
+                setTimeout(restoreScroll, 300); // 等待懒加载完成
+                setTimeout(restoreScroll, 500); // 最终确保
+            }
+
+            console.log('[renderTreeView] 渲染完成');
+        });
+
+        // 重置渲染标志
+        isRenderingTree = false;
+
+        // 如果有待处理的渲染请求，处理它
+        if (pendingRenderRequest !== null) {
+            const pending = pendingRenderRequest;
+            pendingRenderRequest = null;
+            console.log('[renderTreeView] 处理待处理的渲染请求');
+            renderTreeView(pending);
+        }
+    }).catch(error => {
+        console.error('[renderTreeView] 错误:', error);
+        treeContainer.innerHTML = `<div class="error">加载失败: ${escapeHtml(error && error.message ? error.message : String(error))}</div>`;
+        treeContainer.style.display = 'block';
+
+        // 重置渲染标志
+        isRenderingTree = false;
+        pendingRenderRequest = null;
+    });
+}
+
+// 树事件处理器映射（避免重复绑定）
+const treeClickHandlers = new WeakMap();
+const treeContextMenuHandlers = new WeakMap();
+
+// 绑定树的展开/折叠事件
+function attachTreeEvents(treeContainer) {
+    const isReadOnlyChangesPreview = (() => {
+        try {
+            return !!(treeContainer && treeContainer.closest && treeContainer.closest('.changes-preview-readonly'));
+        } catch (_) {
+            return false;
+        }
+    })();
+
+    // 移除旧的事件监听器
+    const existingHandler = treeClickHandlers.get(treeContainer);
+    if (existingHandler) {
+        treeContainer.removeEventListener('click', existingHandler);
+    }
+
+    // 创建新的事件处理器
+    const clickHandler = async (e) => {
+        // Canvas 永久栏目懒加载：加载更多
+        try {
+            const loadMoreBtn = e.target && e.target.closest ? e.target.closest('.tree-load-more') : null;
+            if (loadMoreBtn && CANVAS_PERMANENT_TREE_LAZY_ENABLED && (currentView === 'canvas' || isReadOnlyChangesPreview)) {
+                e.preventDefault();
+                e.stopPropagation();
+                const parentId = loadMoreBtn.dataset.parentId;
+                const startIndex = parseInt(loadMoreBtn.dataset.startIndex, 10) || 0;
+                const childrenContainer = loadMoreBtn.closest('.tree-children');
+                loadPermanentFolderChildrenLazy(parentId, childrenContainer, startIndex, loadMoreBtn, isReadOnlyChangesPreview);
+                return;
+            }
+        } catch (_) { }
+
+        // 处理移动标记的点击
+        const moveBadge = e.target.closest('.change-badge.moved');
+        if (moveBadge) {
+            e.stopPropagation();
+            let fromPath = moveBadge.getAttribute('data-move-from') || moveBadge.getAttribute('title');
+            if (!fromPath) {
+                const tooltipEl = moveBadge.querySelector('.move-tooltip');
+                fromPath = tooltipEl ? (tooltipEl.textContent || '').trim() : '';
+            }
+            if (!fromPath) {
+                try {
+                    const item = moveBadge.closest('.tree-item');
+                    const nodeId = item ? item.getAttribute('data-node-id') : null;
+                    if (nodeId && cachedOldTree) {
+                        const bc = getNamedPathFromTree(cachedOldTree, nodeId);
+                        fromPath = breadcrumbToSlashFolders(bc);
+                    }
+                } catch (_) { }
+            }
+            if (!fromPath) fromPath = '/';
+            const message = currentLang === 'zh_CN'
+                ? `原位置：\n${fromPath}`
+                : `Original location:\n${fromPath}`;
+            alert(message);
+            return;
+        }
+
+        // =============================================================================
+        // 【重要架构】永久栏目书签左键点击处理器
+        // =============================================================================
+        // 本处理器是「书签系统」的一部分，与临时栏目的处理逻辑
+        // （bookmark_canvas_module.js:tempLinkClickHandler）必须保持同步！
+        // 两者都使用 window.defaultOpenMode 变量。
+        //
+        // ⚠️ 添加新的打开模式时，必须同时修改：
+        //   1. 本文件 → attachTreeEvents → clickHandler（永久栏目）
+        //   2. bookmark_canvas_module.js → tempLinkClickHandler（临时栏目）
+        //   3. bookmark_tree_context_menu.js → 右键菜单action处理
+        //
+        // 详见：.agent/workflows/link-click-handling.md
+        // =============================================================================
+        // 左键点击书签标签，根据默认打开方式打开（避免重复绑定多个 click 监听器）
+        try {
+            const link = e.target && e.target.closest ? e.target.closest('a.tree-bookmark-link') : null;
+            if (link && treeContainer.contains(link)) {
+                // 尊重系统快捷键：Ctrl/Cmd/Shift 走浏览器默认行为
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+
+                e.preventDefault();
+                const url = link.getAttribute('href');
+                const nodeElement = link.closest('.tree-item[data-node-id]');
+                const contextInfo = nodeElement ? {
+                    treeType: nodeElement.dataset.treeType || 'permanent',
+                    sectionId: nodeElement.dataset.sectionId || null,
+                    nodeId: nodeElement.dataset.nodeId || null
+                } : { treeType: 'permanent' };
+                // 永久栏目副本：补充 copyId / displayIndex，供“同窗专属组 / 专属标签组 / 专属窗口”等按栏目作用域区分
+                try {
+                    const sectionEl = link.closest ? link.closest('.permanent-bookmark-section') : null;
+                    if (sectionEl && sectionEl.classList && sectionEl.classList.contains('permanent-section-copy') && sectionEl.dataset) {
+                        const copyIdRaw = sectionEl.dataset.permanentSectionCopyId;
+                        const copyId = (typeof copyIdRaw === 'string') ? copyIdRaw.trim() : '';
+                        if (copyId) contextInfo.permanentCopyId = copyId;
+                        const displayIndexRaw = sectionEl.dataset.permanentSectionDisplayIndex;
+                        const displayIndex = parseInt(displayIndexRaw, 10);
+                        if (Number.isFinite(displayIndex) && displayIndex > 0) {
+                            contextInfo.permanentDisplayIndex = displayIndex;
+                        }
+                    }
+                } catch (_) { }
+
+                try {
+                    if (window.defaultOpenMode === undefined && typeof window.getDefaultOpenMode === 'function') {
+                        window.defaultOpenMode = window.getDefaultOpenMode();
+                    }
+                } catch (_) { }
+                const mode = (typeof window !== 'undefined' && window.defaultOpenMode) || (typeof defaultOpenMode !== 'undefined' ? defaultOpenMode : 'new-tab');
+
+                const actionKey = `left-click-${mode}-${url}`;
+                if (typeof shouldAllowBookmarkOpen === 'function' && !shouldAllowBookmarkOpen(actionKey)) {
+                    return;
+                }
+
+                if (mode === 'new-window') {
+                    if (typeof openBookmarkNewWindow === 'function') openBookmarkNewWindow(url, false); else window.open(url, '_blank');
+                } else if (mode === 'incognito') {
+                    if (typeof openBookmarkNewWindow === 'function') openBookmarkNewWindow(url, true); else window.open(url, '_blank');
+                } else if (mode === 'specific-window') {
+                    if (typeof openInSpecificWindow === 'function') openInSpecificWindow(url); else window.open(url, '_blank');
+                } else if (mode === 'specific-group') {
+                    if (typeof openInSpecificTabGroup === 'function') openInSpecificTabGroup(url); else window.open(url, '_blank');
+                } else if (mode === 'scoped-window') {
+                    if (typeof openInScopedWindow === 'function') openInScopedWindow(url, { context: contextInfo }); else window.open(url, '_blank');
+                } else if (mode === 'scoped-group') {
+                    if (typeof openInScopedTabGroup === 'function') openInScopedTabGroup(url, { context: contextInfo }); else window.open(url, '_blank');
+                } else if (mode === 'same-window-specific-group') {
+                    if (typeof openInSameWindowSpecificGroup === 'function') openInSameWindowSpecificGroup(url, { context: contextInfo }); else window.open(url, '_blank');
+                } else if (mode === 'manual-select') {
+                    if (typeof openBookmarkWithManualSelection === 'function') openBookmarkWithManualSelection(url); else window.open(url, '_blank');
+                } else {
+                    if (typeof openBookmarkNewTab === 'function') openBookmarkNewTab(url); else window.open(url, '_blank');
+                }
+                return;
+            }
+        } catch (_) { }
+
+        // 点击整个文件夹行都可以展开
+        const treeItem = e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
+        if (treeItem) {
+            // 找到包含这个tree-item的tree-node
+            const node = treeItem.closest('.tree-node');
+            if (!node) {
+                console.log('[树事件] 未找到tree-node');
+                return;
+            }
+
+            const children = node.querySelector(':scope > .tree-children');
+            const toggle = treeItem.querySelector(':scope > .tree-toggle');
+
+            console.log('[树事件] 点击节点:', {
+                hasChildren: !!children,
+                hasToggle: !!toggle,
+                nodeHTML: node.outerHTML.substring(0, 200)
+            });
+
+            if (children && toggle) {
+                e.stopPropagation();
+                children.classList.toggle('expanded');
+                toggle.classList.toggle('expanded');
+
+                console.log('[树事件] 切换展开状态:', toggle.classList.contains('expanded'));
+
+                // 保存展开状态
+                saveTreeExpandState(treeContainer);
+
+                // Canvas 永久栏目懒加载：展开时按需加载子节点
+                try {
+                    const expanded = children.classList.contains('expanded');
+                    if (expanded &&
+                        CANVAS_PERMANENT_TREE_LAZY_ENABLED &&
+                        (currentView === 'canvas' || isReadOnlyChangesPreview) &&
+                        treeItem.dataset.nodeType === 'folder' &&
+                        treeItem.dataset.childrenLoaded === 'false' &&
+                        treeItem.dataset.hasChildren === 'true') {
+                        loadPermanentFolderChildrenLazy(treeItem.dataset.nodeId, children, 0, null, isReadOnlyChangesPreview);
+                    }
+                } catch (_) { }
+            }
+        }
+    };
+
+    // 绑定新的事件监听器
+    treeContainer.addEventListener('click', clickHandler);
+    treeClickHandlers.set(treeContainer, clickHandler);
+
+    // 绑定右键菜单事件（只读预览禁用）
+    if (!isReadOnlyChangesPreview) {
+        const existingContextHandler = treeContextMenuHandlers.get(treeContainer);
+        if (existingContextHandler) {
+            treeContainer.removeEventListener('contextmenu', existingContextHandler);
+        }
+        const contextHandler = (e) => {
+            const item = e && e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
+            if (!item || !treeContainer.contains(item)) return;
+            if (typeof showContextMenu === 'function') {
+                showContextMenu(e, item);
+            }
+        };
+        treeContainer.addEventListener('contextmenu', contextHandler);
+        treeContextMenuHandlers.set(treeContainer, contextHandler);
+    }
+
+    // 绑定拖拽事件（只读预览禁用）
+    if (!isReadOnlyChangesPreview && typeof attachDragEvents === 'function') {
+        attachDragEvents(treeContainer);
+    }
+
+    // 绑定指针拖拽事件（支持滚轮滚动）
+    if (typeof attachPointerDragEvents === 'function') {
+        attachPointerDragEvents(treeContainer);
+        console.log('[树事件] 指针拖拽事件已绑定');
+    }
+
+    // 如果在Canvas视图，重新绑定Canvas拖出功能
+    if (currentView === 'canvas' && window.CanvasModule && window.CanvasModule.enhance) {
+        console.log('[树事件] 当前在Canvas视图，重新绑定Canvas拖出功能');
+        window.CanvasModule.enhance();
+    }
+
+    console.log('[树事件] 事件绑定完成');
+
+    // 恢复展开状态
+    restoreTreeExpandState(treeContainer);
+
+    // 绑定Permanent Section图例点击事件
+    setupLegendClickHandlers(treeContainer);
+}
+
+// 绑定图例点击导航功能
+function setupLegendClickHandlers(container) {
+    const legends = container.querySelectorAll('.tree-legend .legend-item[data-change-type]');
+    legends.forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const type = item.getAttribute('data-change-type');
+            if (type) {
+                jumpToNextChangeType(type, container);
+            }
+        });
+    });
+}
+
+// 导航到下一个指定类型的变动节点
+// 维护每个类型的当前索引，实现循环跳转
+const _changeTypeIndices = { added: -1, deleted: -1, modified: -1, moved: -1 };
+async function jumpToNextChangeType(type, container) {
+    if (!treeChangeMap || treeChangeMap.size === 0) {
+        const msg = currentLang === 'zh_CN' ? '当前没有变动' : 'No changes detected';
+        // 使用简单的提示，或者 custom toast
+        console.log(msg);
+        return;
+    }
+
+    // 收集所有符合类型的节点ID
+    let targetIds = [];
+    const candidates = new Set();
+    for (const [id, change] of treeChangeMap.entries()) {
+        let match = false;
+        if (type === 'added' && change.type === 'added') match = true;
+        else if (type === 'deleted' && change.type === 'deleted') match = true;
+        else if (type === 'modified' && change.type.includes('modified')) match = true;
+        else if (type === 'moved' && change.type.includes('moved')) match = true;
+
+        if (match) candidates.add(id);
+    }
+
+    // 还有显式移动的
+    if (type === 'moved' && explicitMovedIds) {
+        const now = Date.now();
+        for (const [id, expiry] of explicitMovedIds.entries()) {
+            if (expiry > now) {
+                candidates.add(id);
+            }
+        }
+    }
+
+    // [New] 按照树的视觉顺序（从上到下）排序 targetIds
+    if (candidates.size > 0) {
+        if (cachedTreeData && cachedTreeData.renderTree) {
+            const sorted = [];
+            const traverse = (nodes) => {
+                if (!nodes || !Array.isArray(nodes)) return;
+                for (const node of nodes) {
+                    if (candidates.has(node.id)) {
+                        sorted.push(node.id);
+                    }
+                    if (node.children && node.children.length > 0) {
+                        traverse(node.children);
+                    }
+                }
+            };
+            // 根节点通常是虚拟的或者就是 treeToRender[0]
+            traverse(cachedTreeData.renderTree);
+            targetIds = sorted;
+
+            // 兜底：如果有遗漏（理论上不应该，除非 renderTree 不全），把剩下的追加在后面
+            if (sorted.length < candidates.size) {
+                candidates.forEach(id => {
+                    if (!sorted.includes(id)) targetIds.push(id);
+                });
+            }
+        } else {
+            // 降级：无树结构缓存，使用默认 Map 顺序
+            targetIds = Array.from(candidates);
+        }
+    }
+
+
+
+    if (targetIds.length === 0) {
+        const typeLabels = {
+            added: currentLang === 'zh_CN' ? '新增' : 'Added',
+            deleted: currentLang === 'zh_CN' ? '删除' : 'Deleted',
+            modified: currentLang === 'zh_CN' ? '修改' : 'Modified',
+            moved: currentLang === 'zh_CN' ? '移动' : 'Moved'
+        };
+        const msg = currentLang === 'zh_CN'
+            ? `没有找到"${typeLabels[type]}"类型的变动`
+            : `No items found for "${typeLabels[type]}"`;
+        alert(msg);
+        return;
+    }
+
+    // 循环索引
+    _changeTypeIndices[type]++;
+    if (_changeTypeIndices[type] >= targetIds.length) {
+        _changeTypeIndices[type] = 0;
+    }
+    const targetId = targetIds[_changeTypeIndices[type]];
+
+    console.log(`[JumpToChange] Type: ${type}, Index: ${_changeTypeIndices[type]}/${targetIds.length}, ID: ${targetId}`);
+
+    // 如果节点未渲染（在懒加载的折叠文件夹中），需要先展开父级
+    // 我们复用 computeForceExpandSet 的逻辑思想，但这里针对单个节点
+    // 1. 找到该节点的所有父ID
+    // 2. 强制展开这些父ID
+    // 3. 滚动到该节点
+
+    // 获取路径
+    // 由于我们可能是在 collapsed 的文件夹里，DOM里可能没有这个元素
+    let targetItem = container.querySelector(`.tree-item[data-node-id="${targetId}"]`);
+
+    if (!targetItem) {
+        // 尝试在 cachedTreeData.currentTree (或者 rebuilding logic) 中找路径
+        // 但最简单的是：触发一次带 forceExpand 的渲染，但这比较重
+        // 替代方案：根据 treeChangeMap 里的 info (detectTreeChangesFast 里有 parentId) 
+        // 但 fast map里存的结构可能不全。
+        // 可靠方案：如果 treeChangeMap 存在，说明我们有完整树数据。
+        // 我们利用 search 的 jumpToResult 逻辑（如果它通用），或者简单地：
+        // 强制把这个 targetId 加入 forceExpandSet（如果能传进去），然后重绘? 
+        // 不，重绘太慢。
+
+        // 更好的方式：利用 loadPermanentFolderChildrenLazy 递归加载/展开路径
+        // 但我们需要知道路径。
+        // 如果我们有 cachedOldTree 和 cachedCurrentTree (treeToRender)，我们可以遍历找到路径。
+
+        // 这里简化处理：如果找不到DOM，提示用户展开文件夹，或者尝试触发一次“定位重绘”
+        // 实际上，我们之前的 forceExpandSet 逻辑应该已经保证了“有变动的节点”是渲染了的（除非是“此文件夹下有变化”的深层节点）
+        // 等等，之前的 forceExpandSet 是把**所有**变动节点都强制展开了吗？
+        // 是的：computeForceExpandSet 递归检查，如果子节点有变动，父节点加入set。
+        // 此时 renderTreeView 会使用 set 来决定是否截断懒加载。
+        // 所以，如果 renderTreeView 已经运行过且正确，target element 应该已经在 DOM 中了！
+        // 除非 target element 本身是折叠状态（但 forceExpandSet 也会展开它？不，forceExpandSet 是让它*被渲染*，是否 `expanded` 取决于 `expanded` class）
+
+        // 检查 renderTreeNodeWithChanges:
+        // const shouldForceExpand = forceExpandSet && forceExpandSet.has(node.id);
+        // <span class="tree-children ${level === 0 || shouldForceExpand ? 'expanded' : ''}">
+        // 所以，如果有变动，父文件夹应该是 expanded 的。
+        // 唯一的例外是：如果是 lazy rendering 初次加载，可能还在进行中？或者 forceExpandSet 被漏了？
+        // 前面的修复确保了 Canvas 模式下总是计算 forceExpandSet。
+
+        // 所以理论上 targetItem 应该存在。如果不存在，可能是：
+        // 1. 这是一个删除的节点，且父节点被折叠 (?)
+        // 2. 这是一个“移动”的节点，在 lazy load 区域 (?)
+    }
+
+    if (targetItem) {
+        // 确保父级视觉上展开 (css check)
+        let parent = targetItem.closest('.tree-children');
+        let expandedAny = false;
+        while (parent && parent !== container) {
+            if (!parent.classList.contains('expanded')) {
+                parent.classList.add('expanded');
+                expandedAny = true;
+                const pNode = parent.closest('.tree-node');
+                if (pNode) {
+                    const toggle = pNode.querySelector('.tree-toggle');
+                    if (toggle) toggle.classList.add('expanded');
+                    const icon = pNode.querySelector('.tree-icon.fas.fa-folder');
+                    if (icon) {
+                        icon.classList.remove('fa-folder');
+                        icon.classList.add('fa-folder-open');
+                    }
+                }
+            }
+            parent = parent.parentElement ? parent.parentElement.closest('.tree-children') : null;
+        }
+
+        // 如果展开了任何文件夹，保存展开状态以实现持久化
+        if (expandedAny) {
+            saveTreeExpandState(container);
+        }
+
+        // 滚动并高亮
+        targetItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // 移除旧的跳转高亮（不要复用 .highlight-target，它在别处是统一橙色高亮）
+        container.querySelectorAll('.jump-highlight').forEach(el => {
+            el.classList.remove('jump-highlight');
+            el.style.animation = '';
+        });
+
+        const pulseByType = {
+            added: 'highlightPulseAdded',
+            deleted: 'highlightPulseDeleted',
+            modified: 'highlightPulseModified',
+            moved: 'highlightPulseMoved'
+        };
+        const pulse = pulseByType[type] || 'highlightPulseModified';
+
+        // 高亮所有该类型的节点 (Added matches Added, Modified matches Modifed, etc)
+        // 从 targetIds 列表里找，只要 DOM 里存在的都高亮
+        let highlightCount = 0;
+        targetIds.forEach(id => {
+            const item = container.querySelector(`.tree-item[data-node-id="${id}"]`);
+            if (item) {
+                // 确保样式类存在并触发重绘
+                item.classList.add('jump-highlight');
+                item.style.animation = 'none';
+                item.offsetHeight; /* trigger reflow */
+                // 使用各自的变化颜色（而不是统一橙色）
+                item.style.animation = `${pulse} 2s ease-out infinite`;
+                highlightCount++;
+
+                // 3秒后移除动画
+                setTimeout(() => {
+                    // 检查是否还在 DOM 中（防止已经被重新渲染替换）
+                    if (item.isConnected) {
+                        item.style.animation = '';
+                        item.classList.remove('jump-highlight');
+                    }
+                }, 3000);
+            }
+        });
+
+        console.log(`[JumpToChange] Scrolled to ${targetId}, Highlighted ${highlightCount} items`);
+    } else {
+        console.warn(`[JumpToChange] Element ${targetId} not found in DOM even after force expand check.`);
+        // fallback?
+    }
+}
+
+// 保存JSON滚动位置
+function saveJSONScrollPosition(jsonContainer) {
+    try {
+        const content = jsonContainer.querySelector('.json-diff-content');
+        if (content) {
+            const scrollTop = content.scrollTop;
+            localStorage.setItem('jsonScrollPosition', scrollTop.toString());
+            console.log('[JSON状态] 保存滚动位置:', scrollTop);
+        }
+    } catch (e) {
+        console.error('[JSON状态] 保存滚动位置失败:', e);
+    }
+}
+
+// 恢复JSON滚动位置
+function restoreJSONScrollPosition(jsonContainer) {
+    try {
+        const savedPosition = localStorage.getItem('jsonScrollPosition');
+        if (savedPosition) {
+            const content = jsonContainer.querySelector('.json-diff-content');
+            if (content) {
+                content.scrollTop = parseInt(savedPosition, 10);
+                console.log('[JSON状态] 恢复滚动位置:', savedPosition);
+            }
+        }
+    } catch (e) {
+        console.error('[JSON状态] 恢复滚动位置失败:', e);
+    }
+}
+
+// 保存树的展开状态（使用节点 ID，更可靠）
+const _saveTreeExpandStateTimers = new WeakMap();
+function __saveTreeExpandStateToStorage(treeContainer) {
+    if (!treeContainer) return;
+    try {
+        const expandedIds = [];
+        treeContainer.querySelectorAll('.tree-children.expanded').forEach(children => {
+            const node = children.closest('.tree-node');
+            const item = node ? node.querySelector(':scope > .tree-item[data-node-id]') : null;
+            if (item && item.dataset && item.dataset.nodeId) {
+                expandedIds.push(item.dataset.nodeId);
+            }
+        });
+        const key = __getTreeExpandStateStorageKey(treeContainer);
+        localStorage.setItem(key, JSON.stringify(expandedIds));
+        console.log('[树状态] 保存展开节点:', expandedIds.length, 'key:', key);
+    } catch (e) {
+        console.error('[树状态] 保存失败:', e);
+    }
+}
+function saveTreeExpandState(treeContainer) {
+    try {
+        if (!treeContainer) return;
+        try {
+            const key = __getTreeExpandStateStorageKey(treeContainer);
+            if (key && key.startsWith('changesPreviewExpandedNodes:')) {
+                const prevTimer = _saveTreeExpandStateTimers.get(treeContainer);
+                if (prevTimer) {
+                    clearTimeout(prevTimer);
+                    try { _saveTreeExpandStateTimers.delete(treeContainer); } catch (_) { }
+                }
+                __saveTreeExpandStateToStorage(treeContainer);
+                return;
+            }
+        } catch (_) { }
+
+        // Canvas 永久栏目副本：立即写入（避免同步/刷新时 debounce 丢失，确保“副本独立记忆”可靠）
+        try {
+            if (currentView === 'canvas') {
+                const key = __getTreeExpandStateStorageKey(treeContainer);
+                if (key && key.startsWith(`${__PERMANENT_SECTION_EXPANDED_KEY}:`)) {
+                    const prevTimer = _saveTreeExpandStateTimers.get(treeContainer);
+                    if (prevTimer) {
+                        clearTimeout(prevTimer);
+                        try { _saveTreeExpandStateTimers.delete(treeContainer); } catch (_) { }
+                    }
+                    __saveTreeExpandStateToStorage(treeContainer);
+                    return;
+                }
+            }
+        } catch (_) { }
+        const prevTimer = _saveTreeExpandStateTimers.get(treeContainer);
+        if (prevTimer) {
+            clearTimeout(prevTimer);
+        }
+        const timer = setTimeout(() => {
+            try { _saveTreeExpandStateTimers.delete(treeContainer); } catch (_) { }
+            __saveTreeExpandStateToStorage(treeContainer);
+        }, 250);
+        _saveTreeExpandStateTimers.set(treeContainer, timer);
+    } catch (e) {
+        console.error('[树状态] 保存失败:', e);
+    }
+}
+
+// 恢复树的展开状态（使用节点 ID，更可靠）
+function restoreTreeExpandState(treeContainer) {
+    try {
+        const savedState = __readTreeExpandStateFromStorage(treeContainer);
+        if (!savedState) return;
+
+        const expandedIds = JSON.parse(savedState);
+        if (!Array.isArray(expandedIds) || expandedIds.length === 0) return;
+
+        const expandedSet = new Set(expandedIds);
+        const nodesToLazyLoad = []; // Canvas 懒加载模式下需要加载子节点的文件夹
+
+        const isReadOnlyChangesPreview = (() => {
+            try {
+                return !!(treeContainer && treeContainer.closest && treeContainer.closest('.changes-preview-readonly'));
+            } catch (_) {
+                return false;
+            }
+        })();
+
+        treeContainer.querySelectorAll('.tree-item[data-node-id]').forEach(item => {
+            if (expandedSet.has(item.dataset.nodeId)) {
+                const node = item.closest('.tree-node');
+                if (!node) return;
+                const children = node.querySelector(':scope > .tree-children');
+                const toggle = item.querySelector('.tree-toggle');
+                const icon = item.querySelector('.tree-icon.fas');
+                if (children && toggle) {
+                    children.classList.add('expanded');
+                    toggle.classList.add('expanded');
+                    // 更新文件夹图标
+                    if (icon && icon.classList.contains('fa-folder')) {
+                        icon.classList.remove('fa-folder');
+                        icon.classList.add('fa-folder-open');
+                    }
+                    // Canvas 懒加载模式：如果子节点未加载，记录下来稍后加载
+                    if ((currentView === 'canvas' || isReadOnlyChangesPreview) &&
+                        CANVAS_PERMANENT_TREE_LAZY_ENABLED &&
+                        item.dataset.childrenLoaded === 'false' &&
+                        item.dataset.hasChildren === 'true') {
+                        nodesToLazyLoad.push({ parentId: item.dataset.nodeId, children });
+                    }
+                }
+            }
+        });
+
+        // Canvas 懒加载模式：批量加载需要展开的文件夹的子节点
+        if (nodesToLazyLoad.length > 0) {
+            console.log('[树状态] Canvas懒加载：需要加载', nodesToLazyLoad.length, '个文件夹的子节点');
+            // 延迟加载，避免阻塞渲染
+                setTimeout(() => {
+                    nodesToLazyLoad.forEach(({ parentId, children }) => {
+                        try {
+                            loadPermanentFolderChildrenLazy(parentId, children, 0, null, isReadOnlyChangesPreview);
+                        } catch (e) {
+                            console.warn('[树状态] 懒加载子节点失败:', parentId, e);
+                        }
+                    });
+                }, 50);
+        }
+
+        console.log('[树状态] 恢复展开节点:', expandedIds.length);
+    } catch (e) {
+        console.error('[树状态] 恢复失败:', e);
+    }
+}
+
+// Canvas 永久栏目：在刷新/关闭前强制 flush 展开状态，避免 debounce 丢失（副本尤其明显）
+function __flushCanvasPermanentSectionExpandState() {
+    try {
+        if (currentView !== 'canvas') return;
+        const canvasContent = document.getElementById('canvasContent');
+        if (!canvasContent) return;
+        canvasContent.querySelectorAll('.permanent-bookmark-section .bookmark-tree').forEach(tree => {
+            try {
+                const t = _saveTreeExpandStateTimers.get(tree);
+                if (t) {
+                    clearTimeout(t);
+                    _saveTreeExpandStateTimers.delete(tree);
+                }
+            } catch (_) { }
+            try { __saveTreeExpandStateToStorage(tree); } catch (_) { }
+        });
+    } catch (_) { }
+}
+if (!window.__canvasPermanentSectionExpandStateFlushBound) {
+    window.__canvasPermanentSectionExpandStateFlushBound = true;
+    window.addEventListener('pagehide', __flushCanvasPermanentSectionExpandState);
+    document.addEventListener('visibilitychange', () => {
+        try {
+            if (document.visibilityState === 'hidden') {
+                __flushCanvasPermanentSectionExpandState();
+            }
+        } catch (_) { }
+    });
+}
+
+// 快速检测书签树变动（性能优化版 + 智能移动检测）
+// options:
+async function detectTreeChangesFast(oldTree, newTree, options = {}) {
+    const changes = new Map();
+    if (!oldTree || !newTree) return changes;
+
+    const now = Date.now();
+
+    const useGlobalExplicitMovedIds = options.useGlobalExplicitMovedIds !== false;
+    let explicitMovedIdSet = null;
+    if (options && typeof options === 'object' && 'explicitMovedIdSet' in options) {
+        const src = options.explicitMovedIdSet;
+        if (src instanceof Set) {
+            explicitMovedIdSet = new Set(Array.from(src).map(v => String(v)));
+        } else if (Array.isArray(src)) {
+            explicitMovedIdSet = new Set(src.map(v => String(v)));
+        } else if (src === null) {
+            explicitMovedIdSet = null;
+        }
+    } else if (useGlobalExplicitMovedIds && explicitMovedIds instanceof Map) {
+        explicitMovedIdSet = new Set();
+        for (const [id, expiry] of explicitMovedIds.entries()) {
+            if (typeof expiry !== 'number' || expiry > now) {
+                explicitMovedIdSet.add(String(id));
+            }
+        }
+    }
+    const hasExplicitMovedInfo = explicitMovedIdSet instanceof Set && explicitMovedIdSet.size > 0;
+
+    const oldNodes = new Map();
+    const newNodes = new Map();
+    const oldByParent = new Map(); // parentId -> [{id,index}]
+    const newByParent = new Map();
+
+    const traverse = (node, map, byParent, parentId = null) => {
+        if (node && node.id) {
+            const record = {
+                title: node.title,
+                url: node.url,
+                parentId: node.parentId || parentId,
+                index: node.index
+            };
+            map.set(node.id, record);
+            if (record.parentId) {
+                if (!byParent.has(record.parentId)) byParent.set(record.parentId, []);
+                byParent.get(record.parentId).push({ id: node.id, index: record.index });
+            }
+        }
+        if (node && node.children) node.children.forEach(child => traverse(child, map, byParent, node.id));
+    };
+
+    if (oldTree[0]) traverse(oldTree[0], oldNodes, oldByParent, null);
+    if (newTree[0]) traverse(newTree[0], newNodes, newByParent, null);
+
+    const getNodePath = (tree, targetId) => {
+        const path = [];
+        const dfs = (node, cur) => {
+            if (!node) return false;
+            if (node.id === targetId) { path.push(...cur, node.title); return true; }
+            if (node.children) {
+                for (const c of node.children) { if (dfs(c, [...cur, node.title])) return true; }
+            }
+            return false;
+        };
+        if (tree[0]) dfs(tree[0], []);
+        return path.join(' > ');
+    };
+
+    // 新增 / 修改 / 跨级移动
+    newNodes.forEach((n, id) => {
+        const o = oldNodes.get(id);
+        if (!o) { changes.set(id, { type: 'added' }); return; }
+        const modified = (o.title !== n.title) || (o.url !== n.url);
+        const crossMove = o.parentId !== n.parentId;
+        if (modified || crossMove) {
+            const types = [];
+            const detail = {};
+            if (modified) types.push('modified');
+            if (crossMove) {
+                types.push('moved');
+                detail.moved = {
+                    oldPath: getNodePath(oldTree, id),
+                    newPath: getNodePath(newTree, id),
+                    oldParentId: o.parentId,
+                    oldIndex: o.index,
+                    newParentId: n.parentId,
+                    newIndex: n.index
+                };
+            }
+            changes.set(id, { type: types.join('+'), ...detail });
+        }
+    });
+
+    // 删除（补充 oldParentId / oldIndex / oldPath，供懒加载“灰点提示”快速回溯祖先）
+    oldNodes.forEach((o, id) => {
+        if (newNodes.has(id)) return;
+        try {
+            changes.set(id, {
+                type: 'deleted',
+                deleted: {
+                    oldPath: getNodePath(oldTree, id),
+                    oldParentId: o && o.parentId ? o.parentId : null,
+                    oldIndex: (o && typeof o.index === 'number') ? o.index : null
+                }
+            });
+        } catch (_) {
+            changes.set(id, { type: 'deleted' });
+        }
+    });
+
+    // 建立“子节点集合发生变化”的父级集合：
+    // - add/delete 会导致同级 index 被动变化（不应被当成 moved）
+    // - 跨级移动会改变源/目标父级的 children 集合（同样不应误标同级为 moved）
+    const parentsWithChildSetChange = new Set();
+    changes.forEach((change, id) => {
+        if (!change || !change.type) return;
+
+        if (change.type.includes('added') || change.type.includes('deleted')) {
+            const node = change.type.includes('added') ? newNodes.get(id) : oldNodes.get(id);
+            if (node && node.parentId) parentsWithChildSetChange.add(node.parentId);
+        }
+
+        // 跨级移动：把 old/new parent 都加入（避免同级被动位移误标）
+        if (change.type.includes('moved') && change.moved && change.moved.oldParentId !== change.moved.newParentId) {
+            if (change.moved.oldParentId) parentsWithChildSetChange.add(change.moved.oldParentId);
+            if (change.moved.newParentId) parentsWithChildSetChange.add(change.moved.newParentId);
+        }
+    });
+
+    const markMoved = (id) => {
+        const existing = changes.get(id);
+        const types = existing && existing.type ? new Set(existing.type.split('+')) : new Set();
+        types.add('moved');
+        const movedDetail = { oldPath: getNodePath(oldTree, id), newPath: getNodePath(newTree, id) };
+        changes.set(id, { type: Array.from(types).join('+'), moved: movedDetail });
+    };
+
+    // 同级移动（重要：只标记“被拖动”的对象；不标记因为插入/删除/跨级移动导致的同级被动位移）
+    // - 有显式 moved IDs（onMoved）时：只按显式集合打标（即使该父级也发生了 add/delete 或跨级移动）
+    // - 无显式 moved IDs 时：仅在该父级 children 集合未变化时，用 LIS 推导最小 moved 集合
+    const commonPosCache = new Map(); // parentId -> { oldPosById, newPosById } （仅针对 common ids）
+    const getCommonPositions = (parentId) => {
+        if (commonPosCache.has(parentId)) return commonPosCache.get(parentId);
+
+        const oldList = oldByParent.get(parentId) || [];
+        const newList = newByParent.get(parentId) || [];
+        const newIdSet = new Set(newList.map(x => String(x.id)));
+
+        const oldPosById = new Map();
+        let oldPos = 0;
+        for (const item of oldList) {
+            const sid = String(item.id);
+            if (newIdSet.has(sid)) {
+                oldPosById.set(sid, oldPos++);
+            }
+        }
+
+        const newPosById = new Map();
+        let newPos = 0;
+        for (const item of newList) {
+            const sid = String(item.id);
+            if (oldPosById.has(sid)) {
+                newPosById.set(sid, newPos++);
+            }
+        }
+
+        const entry = { oldPosById, newPosById };
+        commonPosCache.set(parentId, entry);
+        return entry;
+    };
+
+    if (hasExplicitMovedInfo) {
+        for (const id of explicitMovedIdSet) {
+            const o = oldNodes.get(id);
+            const n = newNodes.get(id);
+            if (!o || !n) continue; // added/deleted: Git 口径不算 moved
+            if (!o.parentId || !n.parentId) continue;
+            if (o.parentId !== n.parentId) continue; // 跨级 moved 已在上方标记
+
+            const parentId = n.parentId;
+            const { oldPosById, newPosById } = getCommonPositions(parentId);
+            const oldPos = oldPosById.get(id);
+            const newPos = newPosById.get(id);
+            if (typeof oldPos === 'number' && typeof newPos === 'number' && oldPos !== newPos) {
+                markMoved(id);
+            }
+        }
+    } else {
+        // 无显式 moved：对“children 集合未变化”的父级做最小 moved 推导
+        newByParent.forEach((newList, parentId) => {
+            if (parentsWithChildSetChange.has(parentId)) return;
+
+            const oldList = oldByParent.get(parentId) || [];
+            if (oldList.length === 0 || newList.length === 0) return;
+            if (oldList.length !== newList.length) return;
+
+            // 先快速判等（完全一致则不必做 LIS）
+            let sameOrder = true;
+            for (let i = 0; i < oldList.length; i++) {
+                if (String(oldList[i].id) !== String(newList[i].id)) {
+                    sameOrder = false;
+                    break;
+                }
+            }
+            if (sameOrder) return;
+
+            const oldPosById = new Map();
+            for (let i = 0; i < oldList.length; i++) {
+                oldPosById.set(String(oldList[i].id), i);
+            }
+
+            const seq = [];
+            for (let i = 0; i < newList.length; i++) {
+                const id = String(newList[i].id);
+                const oldPos = oldPosById.get(id);
+                if (typeof oldPos !== 'number') return; // children 集合变化（保险兜底）
+                seq.push({ id, oldPos });
+            }
+
+            // 计算 LIS（基于 oldPos，得到最大稳定子序列），其余视为 moved
+            const tails = [];
+            const tailsIdx = [];
+            const prevIdx = new Array(seq.length).fill(-1);
+
+            for (let i = 0; i < seq.length; i++) {
+                const v = seq[i].oldPos;
+                let lo = 0;
+                let hi = tails.length;
+                while (lo < hi) {
+                    const mid = (lo + hi) >> 1;
+                    if (tails[mid] < v) lo = mid + 1;
+                    else hi = mid;
+                }
+                const pos = lo;
+                if (pos > 0) prevIdx[i] = tailsIdx[pos - 1];
+                if (pos === tails.length) {
+                    tails.push(v);
+                    tailsIdx.push(i);
+                } else {
+                    tails[pos] = v;
+                    tailsIdx[pos] = i;
+                }
+            }
+
+            const stableIds = new Set();
+            let k = tailsIdx.length ? tailsIdx[tailsIdx.length - 1] : -1;
+            while (k >= 0) {
+                stableIds.add(seq[k].id);
+                k = prevIdx[k];
+            }
+
+            for (const item of seq) {
+                if (!stableIds.has(item.id)) {
+                    markMoved(item.id);
+                }
+            }
+        });
+    }
+
+    return changes;
+}
+
+// 懒加载场景下的“包含变化”提示集合：
+// - 不做 O(N) 整树扫描（避免大树/大变化卡顿）
+// - 只从 changeMap 的 changed ids 出发，用 parentId 链回溯祖先
+// 作用：给“祖先文件夹”显示灰点（.change-badge.has-changes），避免详细/简略模式看起来“没有任何标识”。
+function computeChangesHintSetFast(changeMap, explicitMovedIdSet = null) {
+    const out = new Set();
+    if (!changeMap || !(changeMap instanceof Map) || changeMap.size === 0) return out;
+
+    const index = getCachedCurrentTreeIndex();
+    if (!index) return out;
+
+    const addAncestorsFrom = (startId) => {
+        let curId = String(startId);
+        let guard = 0;
+        while (guard++ < 256) {
+            const node = index.get(curId);
+            if (!node) break;
+            const parentId = node.parentId != null ? String(node.parentId) : '';
+            if (!parentId) break;
+            if (!out.has(parentId)) out.add(parentId);
+            curId = parentId;
+        }
+    };
+
+    // 1) 基于 changeMap：为每个变化节点回溯祖先
+    try {
+        changeMap.forEach((change, id) => {
+            if (!id) return;
+
+            // deleted：节点本身不在 currentTree 里，优先用 oldParentId
+            const type = change && typeof change.type === 'string' ? change.type : '';
+            if (type.includes('deleted')) {
+                const oldParentId = change && change.deleted && change.deleted.oldParentId ? change.deleted.oldParentId : null;
+                if (oldParentId != null) {
+                    out.add(String(oldParentId));
+                    addAncestorsFrom(String(oldParentId));
+                }
+                return;
+            }
+
+            addAncestorsFrom(String(id));
+        });
+    } catch (_) { /* ignore */ }
+
+    // 2) 显式 moved：同样回溯祖先
+    try {
+        if (explicitMovedIdSet instanceof Set && explicitMovedIdSet.size) {
+            for (const id of explicitMovedIdSet) {
+                if (!id) continue;
+                addAncestorsFrom(String(id));
+            }
+        }
+    } catch (_) { /* ignore */ }
+
+    return out;
+}
+
+function computeAncestorChangeBadgesFast(changeMap, explicitMovedIdSet = null) {
+    // bitmask: 1=added, 2=deleted, 4=modified, 8=moved
+    const out = new Map();
+    if (!changeMap || !(changeMap instanceof Map) || changeMap.size === 0) return out;
+
+    const index = getCachedCurrentTreeIndex();
+    if (!index) return out;
+
+    const addMask = (folderId, mask) => {
+        if (!folderId) return;
+        const sid = String(folderId);
+        const prev = out.get(sid) || 0;
+        out.set(sid, prev | mask);
+    };
+
+    const bubbleUp = (startId, mask) => {
+        let curId = String(startId);
+        let guard = 0;
+        while (guard++ < 256) {
+            const node = index.get(curId);
+            if (!node) break;
+            const parentId = node.parentId != null ? String(node.parentId) : '';
+            if (!parentId) break;
+            addMask(parentId, mask);
+            curId = parentId;
+        }
+    };
+
+    try {
+        changeMap.forEach((change, id) => {
+            if (!id) return;
+            const type = change && typeof change.type === 'string' ? change.type : '';
+            if (!type) return;
+
+            // deleted：从 oldParentId 向上冒泡（被删除节点本身不在 currentTree）
+            if (type.includes('deleted')) {
+                const oldParentId = change && change.deleted && change.deleted.oldParentId ? change.deleted.oldParentId : null;
+                if (oldParentId != null) {
+                    addMask(String(oldParentId), 2);
+                    bubbleUp(String(oldParentId), 2);
+                }
+                return;
+            }
+
+            const masks = [];
+            if (type.includes('added')) masks.push(1);
+            if (type.includes('modified')) masks.push(4);
+            if (type.includes('moved')) masks.push(8);
+            // 注意：非 deleted 情况下，folderDiff / bookmarkDiff 的“数量变化”不在 treeChangeMap 里，
+            // 这里只聚合结构变化（added/modified/moved）即可。
+            masks.forEach(mask => bubbleUp(String(id), mask));
+        });
+    } catch (_) { /* ignore */ }
+
+    // 显式 moved：同样向上冒泡 moved
+    try {
+        if (explicitMovedIdSet instanceof Set && explicitMovedIdSet.size) {
+            for (const id of explicitMovedIdSet) {
+                if (!id) continue;
+                bubbleUp(String(id), 8);
+            }
+        }
+    } catch (_) { /* ignore */ }
+
+    return out;
+}
+
+
+
+// 重建树结构，包含删除的节点（保持原始位置）
+function rebuildTreeWithDeleted(oldTree, newTree, changeMap) {
+    console.log('[树重建] 开始重建树结构');
+
+    if (!oldTree || !oldTree[0] || !newTree || !newTree[0]) {
+        console.log('[树重建] 缺少树数据，返回新树');
+        return newTree;
+    }
+
+    // 防止循环引用的集合
+    const visitedIds = new Set();
+    const MAX_DEPTH = 50;
+
+    // 基于旧树重建，添加新节点和保留删除节点
+    function rebuildNode(oldNode, newNodes, depth = 0) {
+        // 安全检查
+        if (!oldNode || typeof oldNode.id === 'undefined') {
+            console.log('[树重建] 跳过无效节点:', oldNode);
+            return null;
+        }
+
+        // 深度限制
+        if (depth > MAX_DEPTH) {
+            console.warn('[树重建] 超过最大深度限制:', depth);
+            return null;
+        }
+
+        // 循环引用检测
+        if (visitedIds.has(oldNode.id)) {
+            console.warn('[树重建] 检测到循环引用:', oldNode.id);
+            return null;
+        }
+        visitedIds.add(oldNode.id);
+
+        // 在新树中查找对应的节点
+        const newNode = newNodes ? newNodes.find(n => n && n.id === oldNode.id) : null;
+        const change = changeMap ? changeMap.get(oldNode.id) : null;
+
+        if (change && change.type === 'deleted') {
+            // 节点被删除，保留但标记
+            console.log('[树重建] 保留删除节点:', oldNode.title);
+            const deletedNodeCopy = JSON.parse(JSON.stringify(oldNode));
+
+            // 递归处理子节点
+            if (oldNode.children && oldNode.children.length > 0) {
+                deletedNodeCopy.children = oldNode.children.map(child => rebuildNode(child, null, depth + 1)).filter(n => n !== null);
+            }
+
+            return deletedNodeCopy;
+        } else if (newNode) {
+            // 节点存在于新树中
+            const nodeCopy = JSON.parse(JSON.stringify(newNode));
+
+            // 处理子节点：合并新旧子节点
+            if (oldNode.children || newNode.children) {
+                const childrenMap = new Map();
+
+                // 先添加旧的子节点
+                if (oldNode.children) {
+                    oldNode.children.forEach((child, index) => {
+                        childrenMap.set(child.id, { node: child, index, source: 'old' });
+                    });
+                }
+
+                // 更新或添加新的子节点
+                if (newNode.children) {
+                    newNode.children.forEach((child, index) => {
+                        childrenMap.set(child.id, { node: child, index, source: 'new' });
+                    });
+                }
+
+                // 重建子节点列表，保持原始顺序
+                const rebuiltChildren = [];
+
+                // 按照旧树的顺序遍历
+                if (oldNode.children) {
+                    oldNode.children.forEach(oldChild => {
+                        if (!oldChild) return; // 跳过null/undefined子节点
+
+                        const childInfo = childrenMap.get(oldChild.id);
+                        if (childInfo) {
+                            const rebuiltChild = rebuildNode(oldChild, newNode.children, depth + 1);
+                            if (rebuiltChild) {
+                                rebuiltChildren.push(rebuiltChild);
+                            }
+                        }
+                    });
+                }
+
+                // 添加新增的子节点
+                if (newNode.children) {
+                    newNode.children.forEach(newChild => {
+                        if (!newChild) return; // 跳过null/undefined子节点
+
+                        if (!oldNode.children || !oldNode.children.find(c => c && c.id === newChild.id)) {
+                            // 这是新增的节点
+                            console.log('[树重建] 添加新节点:', newChild.title);
+                            rebuiltChildren.push(newChild);
+                        }
+                    });
+                }
+
+                nodeCopy.children = rebuiltChildren;
+            }
+
+            return nodeCopy;
+        } else if (newNodes === null && change && change.type === 'deleted') {
+            // 父节点已删除，这个子节点也视为删除，保留但标记
+            console.log('[树重建] 保留已删除节点的子节点:', oldNode.title);
+            const deletedNodeCopy = JSON.parse(JSON.stringify(oldNode));
+
+            // 递归处理子节点
+            if (oldNode.children && oldNode.children.length > 0) {
+                deletedNodeCopy.children = oldNode.children.map(child => rebuildNode(child, null, depth + 1)).filter(n => n !== null);
+            }
+
+            return deletedNodeCopy;
+        } else {
+            // 节点在新树中不存在，不是删除，跳过它
+            console.log('[树重建] 节点在新树中不存在，跳过:', oldNode.title);
+            return null;
+        }
+    }
+
+    // 重建根节点
+    const rebuiltRoot = rebuildNode(oldTree[0], [newTree[0]]);
+
+    console.log('[树重建] 重建完成');
+    return [rebuiltRoot];
+}
+
+// 从完整路径中提取父文件夹路径（去掉最后一级）
+function getParentFolderPath(fullPath, lang = 'zh_CN') {
+    if (!fullPath) return lang === 'zh_CN' ? '未知位置' : 'Unknown';
+
+    // 分割路径（使用 ' > ' 作为分隔符）
+    const parts = fullPath.split(' > ').filter(p => p.trim());
+
+    // 如果只有一级（根目录），直接返回
+    if (parts.length <= 1) {
+        return lang === 'zh_CN' ? '根目录' : 'Root';
+    }
+
+    // 去掉最后一级（书签/文件夹自己的名称），保留父文件夹路径
+    parts.pop();
+    return parts.join(' > ');
+}
+
+// 智能检测父路径是否发生变化（重命名、移动、删除等）
+// 返回 { originalPath, currentPath, hasChanges }
+function detectParentPathChanges(fullOldPath, oldTree, newTree, lang = 'zh_CN') {
+    const parentPath = getParentFolderPath(fullOldPath, lang);
+
+    // 如果是根目录，不需要检测
+    if (parentPath === '根目录' || parentPath === 'Root') {
+        return {
+            originalPath: parentPath,
+            currentPath: null,
+            hasChanges: false
+        };
+    }
+
+    // 分解父路径中的文件夹名称
+    const folderNames = parentPath.split(' > ').filter(p => p.trim());
+
+    if (folderNames.length === 0) {
+        return {
+            originalPath: parentPath,
+            currentPath: null,
+            hasChanges: false
+        };
+    }
+
+    // 在旧树中找到这些文件夹对应的ID
+    const folderIds = findFolderIdsByPath(oldTree, folderNames);
+
+    if (folderIds.length === 0) {
+        return {
+            originalPath: parentPath,
+            currentPath: null,
+            hasChanges: false
+        };
+    }
+
+    // 检查这些文件夹在新树中的路径
+    let hasChanges = false;
+    const currentPaths = [];
+
+    folderIds.forEach(folderId => {
+        if (treeChangeMap && treeChangeMap.has(folderId)) {
+            const change = treeChangeMap.get(folderId);
+            // 如果文件夹被移动、重命名或删除
+            if (change.type === 'moved' || change.type === 'modified' || change.type === 'deleted' ||
+                change.type.includes('moved') || change.type.includes('modified')) {
+                hasChanges = true;
+            }
+        }
+    });
+
+    // 如果有变化，构建当前路径
+    let currentPath = null;
+    if (hasChanges && newTree) {
+        // 尝试在新树中找到最后一个文件夹（最深层的父文件夹）
+        const lastFolderId = folderIds[folderIds.length - 1];
+        currentPath = findNodePathInTree(newTree, lastFolderId);
+
+        if (currentPath) {
+            // 去掉最后一级（这是找到的文件夹自己）
+            currentPath = getParentFolderPath(currentPath + ' > dummy', lang);
+        }
+    }
+
+    return {
+        originalPath: parentPath,
+        currentPath: currentPath,
+        hasChanges: hasChanges && currentPath && currentPath !== parentPath
+    };
+}
+
+// 根据路径中的文件夹名称找到对应的ID
+function findFolderIdsByPath(tree, folderNames) {
+    const ids = [];
+
+    if (!tree || !tree[0] || folderNames.length === 0) {
+        return ids;
+    }
+
+    let currentNodes = [tree[0]];
+
+    for (const folderName of folderNames) {
+        let found = false;
+
+        for (const node of currentNodes) {
+            if (node.children) {
+                const folder = node.children.find(child =>
+                    child.title === folderName && !child.url
+                );
+
+                if (folder) {
+                    ids.push(folder.id);
+                    currentNodes = [folder];
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        if (!found) break;
+    }
+
+    return ids;
+}
+
+// 在树中根据ID找到节点的完整路径
+function findNodePathInTree(tree, nodeId) {
+    if (!tree || !tree[0]) return null;
+
+    const path = [];
+
+    function traverse(node, currentPath) {
+        if (node.id === nodeId) {
+            path.push(...currentPath, node.title);
+            return true;
+        }
+
+        if (node.children) {
+            for (const child of node.children) {
+                if (traverse(child, [...currentPath, node.title])) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    if (traverse(tree[0], [])) {
+        return path.join(' > ');
+    }
+
+    return null;
+}
+
+// 渲染带变动标记的树节点
+// Helper to identify nodes that must be expanded because they contain changes
+function computeForceExpandSet(nodes, changeMap, explicitMovedIdSet = null) {
+    const set = new Set();
+    const hasAny =
+        (!!(changeMap && changeMap.size)) ||
+        (!!(explicitMovedIdSet && explicitMovedIdSet.size));
+    if (!nodes || !hasAny) return set;
+
+    // Recursive check. Returns true if node or descendants have changes.
+    const check = (node) => {
+        if (!node) return false;
+        const id = String(node.id);
+        let hasChange =
+            (!!(changeMap && changeMap.has(node.id))) ||
+            (!!(explicitMovedIdSet && explicitMovedIdSet.has(id)));
+
+        if (node.children) {
+            node.children.forEach(child => {
+                if (check(child)) {
+                    hasChange = true;
+                }
+            });
+        }
+
+        // If this node or any child has changes, this node must be expanded/rendered
+        // Note: we might want to distinguish between "render children" and "expand visually".
+        // Here we put it in the set, meaning "override lazy loading stop".
+        if (hasChange) {
+            set.add(node.id);
+        }
+        return hasChange;
+    };
+
+    if (Array.isArray(nodes)) {
+        nodes.forEach(node => check(node));
+    } else {
+        check(nodes);
+    }
+    return set;
+}
+
+function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = new Set(), forceExpandSet = null, options = {}, underDeletedAncestor = false) {
+    // 防止无限递归的保护机制
+    const MAX_DEPTH = maxDepth;
+    const MAX_NODES = 10000;
+
+    if (!node) return '';
+    if (level > MAX_DEPTH) {
+        console.warn('[renderTreeNodeWithChanges] 超过最大深度限制:', level);
+        return '';
+    }
+
+    // 检测循环引用
+    if (visitedIds.has(node.id)) {
+        console.warn('[renderTreeNodeWithChanges] 检测到循环引用:', node.id);
+        return '';
+    }
+    visitedIds.add(node.id);
+
+    if (visitedIds.size > MAX_NODES) {
+        console.warn('[renderTreeNodeWithChanges] 超过最大节点限制');
+        return '';
+    }
+
+    const markerEnabled = isMarkerEnabled();
+    const explicitMovedIdsForRender = markerEnabled ? explicitMovedIds : new Map();
+    const change = (markerEnabled && treeChangeMap) ? treeChangeMap.get(node.id) : null;
+    let statusIcon = '';
+    let changeClass = '';
+    const changeTypeStr = (change && typeof change.type === 'string') ? change.type : '';
+
+    if (node.url) {
+        // 叶子（书签）
+        if (node.url) {
+            const isExplicitMovedOnly = markerEnabled && explicitMovedIdsForRender.has(node.id) && explicitMovedIdsForRender.get(node.id) > Date.now();
+            const lazyHint = markerEnabled ? getCanvasLazyHintForBookmark(node) : null;
+            if (change) {
+                if (change.type === 'added') {
+                    changeClass = 'tree-change-added';
+                    statusIcon = '<span class="change-badge added"><span class="badge-symbol">+</span></span>';
+                } else if (change.type === 'deleted') {
+                    changeClass = 'tree-change-deleted';
+                    statusIcon = '<span class="change-badge deleted"><span class="badge-symbol">-</span></span>';
+                } else {
+                    const types = change.type.split('+');
+                    const hasModified = types.includes('modified');
+                    const isMoved = types.includes('moved');
+                    const isExplicitMoved = isExplicitMovedOnly;
+
+                    if (hasModified) {
+                        changeClass = 'tree-change-modified';
+                        statusIcon += '<span class="change-badge modified"><span class="badge-symbol">~</span></span>';
+                    }
+
+                    // 移动标记：检测到 moved 类型就显示，不仅限于显式拖动
+                    // isMoved 为 true 表示 detectTreeChangesFast 检测到了跨级移动
+                    if (isMoved) {
+                        // 如果既有modified又有moved，添加mixed类
+                        if (hasModified) {
+                            changeClass = 'tree-change-mixed';
+                        } else {
+                            changeClass = 'tree-change-moved';
+                        }
+                        {
+                            let slash = '';
+                            if (change.moved && change.moved.oldPath) {
+                                slash = breadcrumbToSlashFolders(change.moved.oldPath);
+                            }
+                            if (!slash && cachedOldTree) {
+                                const bc = getNamedPathFromTree(cachedOldTree, node.id);
+                                slash = breadcrumbToSlashFolders(bc);
+                            }
+                            statusIcon += `<span class="change-badge moved" data-move-from="${escapeHtml(slash)}" title="${escapeHtml(slash)}"><span class="badge-symbol">>></span><span class="move-tooltip">${slashPathToChipsHTML(slash)}</span></span>`;
+                        }
+                    }
+                }
+            } else if (lazyHint) {
+                if (lazyHint.type === 'added') {
+                    changeClass = 'tree-change-added';
+                    statusIcon = '<span class="change-badge added"><span class="badge-symbol">+</span></span>';
+                } else if (lazyHint.type === 'modified') {
+                    changeClass = 'tree-change-modified';
+                    statusIcon += '<span class="change-badge modified"><span class="badge-symbol">~</span></span>';
+                } else if (lazyHint.type === 'moved') {
+                    changeClass = 'tree-change-moved';
+                    const slash = formatFingerprintPathToSlash(lazyHint.oldPath || '');
+                    statusIcon += `<span class="change-badge moved" data-move-from="${escapeHtml(slash)}" title="${escapeHtml(slash)}"><span class="badge-symbol">>></span><span class="move-tooltip">${slashPathToChipsHTML(slash)}</span></span>`;
+                }
+            } else if (isExplicitMovedOnly) {
+                // 无 diff 记录但存在显式移动标识：也显示蓝色移动徽标
+                changeClass = 'tree-change-moved';
+                let slash = '';
+                if (cachedOldTree) {
+                    const bc = getNamedPathFromTree(cachedOldTree, node.id);
+                    slash = breadcrumbToSlashFolders(bc);
+                }
+                statusIcon += `<span class="change-badge moved" data-move-from="${escapeHtml(slash)}" title="${escapeHtml(slash)}"><span class="badge-symbol">>></span><span class="move-tooltip">${slashPathToChipsHTML(slash)}</span></span>`;
+            }
+            const favicon = getFaviconUrl(node.url);
+            return `
+                <div class="tree-node">
+                    <div class="tree-item ${changeClass}" data-node-id="${node.id}" data-node-title="${escapeHtml(node.title)}" data-node-url="${escapeHtml(node.url || '')}" data-node-type="bookmark" data-node-level="${level}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
+                        <span class="tree-toggle" style="opacity: 0"></span>
+                        ${favicon ? `<img class="tree-icon" src="${favicon}" alt="">` : `<i class="tree-icon fas fa-bookmark"></i>`}
+                        <a href="${escapeHtml(node.url)}" target="_blank" class="tree-label tree-bookmark-link" rel="noopener noreferrer">${escapeHtml(node.title)}</a>
+                        <span class="change-badges">${statusIcon}</span>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    // 文件夹
+    const __isExplicitMovedOnlyFolder = markerEnabled && explicitMovedIdsForRender.has(node.id) && explicitMovedIdsForRender.get(node.id) > Date.now();
+    if (change) {
+        if (change.type === 'added') {
+            changeClass = 'tree-change-added';
+            statusIcon = '<span class="change-badge added"><span class="badge-symbol">+</span></span>';
+        } else if (change.type === 'deleted') {
+            changeClass = 'tree-change-deleted';
+            statusIcon = '<span class="change-badge deleted"><span class="badge-symbol">-</span></span>';
+        } else {
+            const types = change.type.split('+');
+            const hasModified = types.includes('modified');
+            const isMoved = types.includes('moved');
+            const isExplicitMoved = markerEnabled && explicitMovedIdsForRender.has(node.id) && explicitMovedIdsForRender.get(node.id) > Date.now();
+
+            if (hasModified) {
+                changeClass = 'tree-change-modified';
+                statusIcon += '<span class="change-badge modified"><span class="badge-symbol">~</span></span>';
+            }
+
+            // 移动标记：检测到 moved 类型就显示，不仅限于显式拖动
+            // isMoved 为 true 表示 detectTreeChangesFast 检测到了跨级移动
+            if (isMoved) {
+                // 如果既有modified又有moved，添加mixed类
+                if (hasModified) {
+                    changeClass = 'tree-change-mixed';
+                } else {
+                    changeClass = 'tree-change-moved';
+                }
+                {
+                    let slash = '';
+                    if (change.moved && change.moved.oldPath) {
+                        slash = breadcrumbToSlashFolders(change.moved.oldPath);
+                    }
+                    if (!slash && cachedOldTree) {
+                        const bc = getNamedPathFromTree(cachedOldTree, node.id);
+                        slash = breadcrumbToSlashFolders(bc);
+                    }
+                    statusIcon += `<span class="change-badge moved" data-move-from="${escapeHtml(slash)}" title="${escapeHtml(slash)}"><span class="badge-symbol">>></span><span class="move-tooltip">${slashPathToChipsHTML(slash)}</span></span>`;
+                }
+            }
+        }
+    } else if (__isExplicitMovedOnlyFolder) {
+        // 无 diff 记录但存在显式移动标识：也显示蓝色移动徽标
+        changeClass = 'tree-change-moved';
+        let slash = '';
+        if (cachedOldTree) {
+            const bc = getNamedPathFromTree(cachedOldTree, node.id);
+            slash = breadcrumbToSlashFolders(bc);
+        }
+        statusIcon += `<span class="change-badge moved" data-move-from="${escapeHtml(slash)}" title="${escapeHtml(slash)}"><span class="badge-symbol">>></span><span class="move-tooltip">${slashPathToChipsHTML(slash)}</span></span>`;
+    }
+
+    // forceExpandSet 仅用于“包含变化”的提示点（灰点），不再用于覆盖懒加载。
+    // 需求：即使是新增/删除/移动/修改相关的文件夹，也必须保持与普通文件夹一致的懒加载行为。
+    const shouldForceExpand = forceExpandSet && forceExpandSet.has(node.id);
+    const allowOverrideLazyStop = !!(options && options.forceExpandOverrideLazyStop === true);
+    const shouldOverrideLazyStop = allowOverrideLazyStop && shouldForceExpand;
+    const isLazyEnabledInContext = CANVAS_PERMANENT_TREE_LAZY_ENABLED;
+    const isLazyStop = !shouldOverrideLazyStop && isLazyEnabledInContext && (currentView === 'canvas') && level > 0;
+    const hasOwnChange = !!(change || __isExplicitMovedOnlyFolder);
+    let hasChangesHintBadge = false;
+    const isDeletedFolder = !!(!node.url && node.children && changeTypeStr && changeTypeStr.split('+').includes('deleted'));
+
+    // 并显示子树聚合徽标（+/-/~/>>）。
+    //
+    // 注意：聚合徽标来自 badgeMap，代表“子树中出现的变化类型”，不应被父节点自身的变化类型掩盖。
+    // 例如：父=修改+移动，子树也有移动，仍应显示灰点 + 子树聚合移动标识。
+    if (!underDeletedAncestor && level > 0 && isLazyEnabledInContext && (currentView === 'canvas')) {
+        try {
+            // 祖先聚合徽标
+            const badgeMap = (currentView === 'canvas'
+                ? (window.__canvasPermanentAncestorBadges instanceof Map ? window.__canvasPermanentAncestorBadges : null)
+                : (window.__changesPreviewAncestorBadges instanceof Map ? window.__changesPreviewAncestorBadges : null));
+
+            const mask = badgeMap ? (badgeMap.get(String(node.id)) || 0) : 0;
+            // Note: in this function the 5th param is historically used as the "hint set"
+            // (ancestor path ids). Keep using it here to avoid adding a new parameter.
+            const hintHasDescendants = !!(forceExpandSet && forceExpandSet.has && forceExpandSet.has(String(node.id)));
+            const hasDescendants = !!(mask || hintHasDescendants);
+            if (hasDescendants) {
+                const title = currentLang === 'zh_CN' ? '此文件夹下有变化' : 'Contains changes';
+                let pathBadges = `<span class="path-badges"><span class="path-dot" title="${escapeHtml(title)}">•</span>`;
+                hasChangesHintBadge = true;
+
+                // 子树聚合徽标：即使与父自身类型重复，也保留（避免“被掩盖”）
+                if (mask) {
+                    if (mask & 1) pathBadges += '<span class="path-symbol added" title="+">+</span>';
+                    if (mask & 2) pathBadges += '<span class="path-symbol deleted" title="-">-</span>';
+                    if (mask & 4) pathBadges += '<span class="path-symbol modified" title="~">~</span>';
+                    if (mask & 8) pathBadges += '<span class="path-symbol moved" title=">>">>></span>';
+                }
+                pathBadges += '</span>';
+                statusIcon += pathBadges;
+            }
+        } catch (_) { }
+    }
+
+    if (isLazyStop) {
+        const childCount = Array.isArray(node.children) ? node.children.length : 0;
+        const hasChildren = childCount > 0;
+        return `
+            <div class="tree-node">
+                <div class="tree-item ${changeClass}" data-node-id="${node.id}" data-node-title="${escapeHtml(node.title)}" data-node-type="folder" data-node-level="${level}" data-has-children="${hasChildren ? 'true' : 'false'}" data-children-loaded="${hasChildren ? 'false' : 'true'}" data-child-count="${childCount}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
+                    <span class="tree-toggle"><i class="fas fa-chevron-right"></i></span>
+                    <i class="tree-icon fas fa-folder"></i>
+                    <span class="tree-label">${escapeHtml(node.title)}</span>
+                    <span class="change-badges">${statusIcon}</span>
+                </div>
+                <div class="tree-children"></div>
+            </div>
+        `;
+    }
+
+    // 若文件夹本身无变化，但其子树存在变化，追加灰色“指引”标识。
+    // 因此这里只在“非懒加载上下文”下才允许 descendant scan。
+    if (!underDeletedAncestor &&
+        !hasChangesHintBadge &&
+        !(isLazyEnabledInContext && (currentView === 'canvas'))) {
+        try {
+            const hasDescendant = (function hasDescendantChangesFast(n) {
+                if (!n || !Array.isArray(n.children) || n.children.length === 0) return false;
+                const now = Date.now();
+                const stack = [...n.children];
+                while (stack.length) {
+                    const cur = stack.pop();
+                    if (!cur) continue;
+                    if ((treeChangeMap && treeChangeMap.has(cur.id)) || (explicitMovedIds && explicitMovedIds.has(cur.id) && explicitMovedIds.get(cur.id) > now)) {
+                        return true;
+                    }
+                    if (Array.isArray(cur.children) && cur.children.length) stack.push(...cur.children);
+                }
+                return false;
+            })(node);
+            if (hasDescendant) {
+                const badgeMap = (currentView === 'canvas'
+                    ? (window.__canvasPermanentAncestorBadges instanceof Map ? window.__canvasPermanentAncestorBadges : null)
+                    : (window.__changesPreviewAncestorBadges instanceof Map ? window.__changesPreviewAncestorBadges : null));
+                const mask = badgeMap ? (badgeMap.get(String(node.id)) || 0) : 0;
+                const title = currentLang === 'zh_CN' ? '此文件夹下有变化' : 'Contains changes';
+                let pathBadges = `<span class="path-badges"><span class="path-dot" title="${escapeHtml(title)}">•</span>`;
+                if (mask) {
+                    if (mask & 1) pathBadges += '<span class="path-symbol added" title="+">+</span>';
+                    if (mask & 2) pathBadges += '<span class="path-symbol deleted" title="-">-</span>';
+                    if (mask & 4) pathBadges += '<span class="path-symbol modified" title="~">~</span>';
+                    if (mask & 8) pathBadges += '<span class="path-symbol moved" title=">>">>></span>';
+                }
+                pathBadges += '</span>';
+                statusIcon += pathBadges;
+            }
+        } catch (_) { /* ignore */ }
+    }
+
+    // 对子节点排序：
+    // - 优先显示当前存在的节点（非 deleted），严格按 Chrome 的 index 升序
+    // - 被标记为 deleted 的旧节点排在最后，按其旧 index 升序
+    // - 缺少 index 的节点保持原始 children 数组中的相对顺序（稳定）
+    const children = Array.isArray(node.children) ? node.children : [];
+    const originalPos = new Map();
+    for (let i = 0; i < children.length; i++) originalPos.set(children[i]?.id, i);
+
+    const isDeleted = (n) => {
+        if (!treeChangeMap) return false;
+        const ch = treeChangeMap.get(n?.id);
+        return !!(ch && ch.type === 'deleted');
+    };
+
+    const cmpStable = (a, b) => {
+        const ia = (typeof a?.index === 'number') ? a.index : Number.POSITIVE_INFINITY;
+        const ib = (typeof b?.index === 'number') ? b.index : Number.POSITIVE_INFINITY;
+        if (ia !== ib) return ia - ib;
+        // 稳定性：当 index 相同或缺失，按原始出现顺序
+        const pa = originalPos.get(a?.id) ?? 0;
+        const pb = originalPos.get(b?.id) ?? 0;
+        return pa - pb;
+    };
+
+    // 保持删除标识在原位置显示：
+    // rebuildTreeWithDeleted 已经按照旧树的顺序构建了children数组，
+    // 删除的节点在数据层面不占位（不影响浏览器书签库），
+    // 但在视觉层面保持原有位置
+    const sortedChildren = children.slice().sort((a, b) => {
+        const pa = originalPos.get(a?.id) ?? Number.POSITIVE_INFINITY;
+        const pb = originalPos.get(b?.id) ?? Number.POSITIVE_INFINITY;
+        return pa - pb;
+    });
+
+    const nextUnderDeletedAncestor = underDeletedAncestor || isDeletedFolder;
+
+    return `
+            <div class="tree-node">
+                <div class="tree-item ${changeClass}" data-node-id="${node.id}" data-node-title="${escapeHtml(node.title)}" data-node-type="folder" data-node-level="${level}" data-has-children="${Array.isArray(node.children) && node.children.length ? 'true' : 'false'}" data-children-loaded="true" data-child-count="${Array.isArray(node.children) ? node.children.length : 0}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
+                    <span class="tree-toggle ${level === 0 ? 'expanded' : ''}"><i class="fas fa-chevron-right"></i></span>
+                    <i class="tree-icon fas fa-folder${level === 0 ? '-open' : ''}"></i>
+                    <span class="tree-label">${escapeHtml(node.title)}</span>
+                    <span class="change-badges">${statusIcon}</span>
+                </div>
+                <div class="tree-children ${level === 0 ? 'expanded' : ''}">
+                    ${sortedChildren.map(child => renderTreeNodeWithChanges(child, level + 1, maxDepth, visitedIds, forceExpandSet, options, nextUnderDeletedAncestor)).join('')}
+                </div>
+            </div>
+        `;
+}
+
+// ===== 辅助函数：确保图例存在 =====
+// 在增量更新时，如果图例不存在，则创建并插入到书签树顶部
+function ensureTreeLegendExists(container) {
+    if (!container) return;
+
+    // 检查图例是否已存在
+    const existingLegend = container.querySelector('.tree-legend');
+    if (existingLegend) return; // 已存在，无需创建
+
+    // 创建图例
+    const legend = document.createElement('div');
+    legend.className = 'tree-legend';
+    const cursorStyle = 'cursor: pointer; user-select: none;';
+    legend.innerHTML = `
+        <span class="legend-item" data-change-type="added" style="${cursorStyle}" title="${currentLang === 'zh_CN' ? '点击查看新增项' : 'Click to view added items'}"><span class="legend-dot added"></span> ${currentLang === 'zh_CN' ? '新增' : 'Added'}</span>
+        <span class="legend-item" data-change-type="deleted" style="${cursorStyle}" title="${currentLang === 'zh_CN' ? '点击查看删除项' : 'Click to view deleted items'}"><span class="legend-dot deleted"></span> ${currentLang === 'zh_CN' ? '删除' : 'Deleted'}</span>
+        <span class="legend-item" data-change-type="moved" style="${cursorStyle}" title="${currentLang === 'zh_CN' ? '点击查看移动项' : 'Click to view moved items'}"><span class="legend-dot moved"></span> ${currentLang === 'zh_CN' ? '移动' : 'Moved'}</span>
+        <span class="legend-item" data-change-type="modified" style="${cursorStyle}" title="${currentLang === 'zh_CN' ? '点击查看修改项' : 'Click to view modified items'}"><span class="legend-dot modified"></span> ${currentLang === 'zh_CN' ? '修改' : 'Modified'}</span>
+    `;
+
+    // 插入到容器顶部
+    container.insertBefore(legend, container.firstChild);
+
+    // 绑定点击事件
+    setupLegendClickHandlers(container);
+
+    console.log('[增量更新] 图例已创建');
+}
+
+// ===== 增量更新：创建 =====
+async function applyIncrementalCreateToTree(id, bookmark) {
+    const permBody = document.querySelector('.permanent-section-body');
+    const permScrollTop = permBody ? permBody.scrollTop : null;
+    const container = document.getElementById('bookmarkTree');
+    if (!container) return;
+    // 获取父节点 DOM
+    const parentId = bookmark.parentId;
+    const parentItem = parentId
+        ? container.querySelector(`.tree-item[data-node-id="${CSS.escape(String(parentId))}"]`)
+        : null;
+    const parentTreeNode = parentItem ? parentItem.closest('.tree-node') : null;
+    const parentNode = parentTreeNode ? parentTreeNode.querySelector(':scope > .tree-children') : null;
+    const isCanvasLazyMode = currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED;
+
+    if (!parentItem || !parentNode) {
+        // Canvas 懒加载模式：父节点未渲染/未展开属于正常情况；不要触发全量重绘（会在大量批量操作时灾难级卡顿）。
+        // 数据层面的快照刷新会保证用户后续展开时看到正确结果。
+        if (isCanvasLazyMode) return;
+
+        // 非懒加载模式：兜底全量渲染
+        await renderTreeView(true);
+        return;
+    }
+    // 生成新节点 HTML（添加绿色变更标记）
+    const favicon = getFaviconUrl(bookmark.url || '');
+    const labelColor = 'color: #28a745;'; // 绿色
+    const labelFontWeight = 'font-weight: 500;';
+    const html = `
+        <div class="tree-node">
+            <div class="tree-item tree-change-added" data-node-id="${id}" data-node-title="${escapeHtml(bookmark.title || '')}" data-node-url="${escapeHtml(bookmark.url || '')}" data-node-type="${bookmark.url ? 'bookmark' : 'folder'}">
+                <span class="tree-toggle" style="opacity: 0"></span>
+                ${bookmark.url ? (favicon ? `<img class="tree-icon" src="${favicon}" alt="">` : `<i class="tree-icon fas fa-bookmark"></i>`) : `<i class="tree-icon fas fa-folder"></i>`}
+                ${bookmark.url ? `<a href="${escapeHtml(bookmark.url)}" target="_blank" class="tree-label tree-bookmark-link" rel="noopener noreferrer" style="${labelColor} ${labelFontWeight}">${escapeHtml(bookmark.title || '')}</a>` : `<span class="tree-label" style="${labelColor} ${labelFontWeight}">${escapeHtml(bookmark.title || '')}</span>`}
+                <span class="change-badges"><span class="change-badge added"><span class="badge-symbol">+</span></span></span>
+            </div>
+            ${bookmark.url ? '' : '<div class="tree-children"></div>'}
+        </div>
+    `;
+    // 插入到正确的 index 位置（忽略已删除的占位项）
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+    const newNodeEl = wrapper.firstElementChild; // .tree-node
+
+    // 计算锚点：仅统计未被标记为删除的同级节点
+    const siblingsAll = Array.from(parentNode.querySelectorAll(':scope > .tree-node'));
+    const presentSiblings = siblingsAll.filter(n => {
+        const item = n.querySelector(':scope > .tree-item');
+        return !(item && item.classList.contains('tree-change-deleted'));
+    });
+
+    const targetIndex = (typeof bookmark.index === 'number' && bookmark.index >= 0)
+        ? bookmark.index : presentSiblings.length;
+
+    const anchor = presentSiblings[targetIndex] || null;
+    if (anchor) {
+        parentNode.insertBefore(newNodeEl, anchor);
+    } else {
+        // 末尾插入：尽量插在第一个已删除节点之前，避免落到删除分组之后
+        const firstDeleted = siblingsAll.find(n => n.querySelector(':scope > .tree-item')?.classList.contains('tree-change-deleted'));
+        if (firstDeleted) parentNode.insertBefore(newNodeEl, firstDeleted); else parentNode.appendChild(newNodeEl);
+    }
+
+    // 为新创建的节点绑定事件
+    const newItem = newNodeEl?.querySelector('.tree-item');
+    if (newItem) {
+        // 绑定右键菜单
+        newItem.addEventListener('contextmenu', (e) => {
+            if (typeof showContextMenu === 'function') {
+                showContextMenu(e, newItem);
+            }
+        });
+
+        // 绑定拖拽事件
+        if (typeof attachDragEvents === 'function') {
+            attachDragEvents(container);
+        }
+
+        // 如果在Canvas视图，绑定Canvas拖出功能
+        if (currentView === 'canvas' && window.CanvasModule && window.CanvasModule.enhance) {
+            window.CanvasModule.enhance();
+        }
+    }
+    // 确保图例存在
+    ensureTreeLegendExists(container);
+    // 恢复滚动位置
+    if (permBody && permScrollTop !== null) permBody.scrollTop = permScrollTop;
+}
+
+// ===== 增量更新：删除 =====
+function applyIncrementalRemoveFromTree(id) {
+    const permBody = document.querySelector('.permanent-section-body');
+    const permScrollTop = permBody ? permBody.scrollTop : null;
+    const container = document.getElementById('bookmarkTree');
+    if (!container) return;
+    const item = container.querySelector(`.tree-item[data-node-id="${id}"]`);
+    if (!item) {
+        // Canvas 懒加载：节点可能根本未渲染（所在父文件夹未展开）。
+        // 这里不要触发全量重绘，否则在大量删除时会非常卡。
+        const isCanvasLazyMode = currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED;
+        if (!isCanvasLazyMode) {
+            renderTreeView(true).catch(e => console.error(e));
+        }
+        return;
+    }
+
+    // 先添加红色标识和删除类
+    item.classList.add('tree-change-deleted');
+
+    // 直接设置标签的红色样式
+    const labelLink = item.querySelector('.tree-bookmark-link');
+    const labelSpan = item.querySelector('.tree-label');
+    if (labelLink) {
+        labelLink.style.color = '#dc3545';
+        labelLink.style.fontWeight = '500';
+        labelLink.style.textDecoration = 'line-through';
+        labelLink.style.opacity = '0.7';
+    }
+    if (labelSpan) {
+        labelSpan.style.color = '#dc3545';
+        labelSpan.style.fontWeight = '500';
+        labelSpan.style.textDecoration = 'line-through';
+        labelSpan.style.opacity = '0.7';
+    }
+
+    // 添加红色标识
+    const badges = item.querySelector('.change-badges');
+    if (badges) {
+        badges.innerHTML = '<span class="change-badge deleted"><span class="badge-symbol">-</span></span>';
+    } else {
+        item.insertAdjacentHTML('beforeend', '<span class="change-badges"><span class="change-badge deleted"><span class="badge-symbol">-</span></span></span>');
+    }
+
+    // 保持删除标识在原位显示，不自动移除节点
+    // 用户可以通过"清理变动标识"功能来清除这些已删除的项目
+    // 确保图例存在
+    ensureTreeLegendExists(container);
+    // 恢复滚动位置
+    if (permBody && permScrollTop !== null) permBody.scrollTop = permScrollTop;
+}
+
+// ===== 增量更新：修改 =====
+async function applyIncrementalChangeToTree(id, changeInfo) {
+    const permBody = document.querySelector('.permanent-section-body');
+    const permScrollTop = permBody ? permBody.scrollTop : null;
+    const container = document.getElementById('bookmarkTree');
+    if (!container) return;
+    const item = container.querySelector(`.tree-item[data-node-id="${id}"]`);
+    if (!item) {
+        // Canvas 懒加载：节点可能未渲染（所在父文件夹未展开），无需强制全量重绘。
+        const isCanvasLazyMode = currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED;
+        if (!isCanvasLazyMode) {
+            await renderTreeView(true);
+        }
+        return;
+    }
+
+    console.log('[applyIncrementalChangeToTree] 修改书签:', id, changeInfo);
+
+    // 添加修改类
+    if (!item.classList.contains('tree-change-modified')) {
+        item.classList.add('tree-change-modified');
+    }
+
+    // 总是确保橙色样式被应用（即使已经修改过）- 使用!important强制应用
+    const labelLink = item.querySelector('.tree-bookmark-link');
+    const labelSpan = item.querySelector('.tree-label');
+
+    console.log('[applyIncrementalChangeToTree] labelLink:', !!labelLink, 'labelSpan:', !!labelSpan);
+
+    if (labelLink) {
+        labelLink.style.setProperty('color', '#fd7e14', 'important');
+        labelLink.style.setProperty('font-weight', '500', 'important');
+        console.log('[applyIncrementalChangeToTree] 已设置labelLink样式');
+    }
+    if (labelSpan) {
+        labelSpan.style.setProperty('color', '#fd7e14', 'important');
+        labelSpan.style.setProperty('font-weight', '500', 'important');
+        console.log('[applyIncrementalChangeToTree] 已设置labelSpan样式');
+    }
+
+    // 修改内容
+    if (changeInfo.title) {
+        if (labelLink) labelLink.textContent = changeInfo.title;
+        if (labelSpan) labelSpan.textContent = changeInfo.title;
+        item.setAttribute('data-node-title', escapeHtml(changeInfo.title));
+        console.log('[applyIncrementalChangeToTree] 已修改标题:', changeInfo.title);
+    }
+    if (changeInfo.url !== undefined) {
+        const link = item.querySelector('.tree-bookmark-link');
+        if (link) link.href = changeInfo.url || '';
+        const icon = item.querySelector('img.tree-icon');
+        if (icon) {
+            const fav = getFaviconUrl(changeInfo.url || '');
+            if (fav) icon.src = fav;
+        }
+        item.setAttribute('data-node-url', escapeHtml(changeInfo.url || ''));
+    }
+
+    // 给该节点增加"modified"标识
+    const badges = item.querySelector('.change-badges');
+    if (badges && !badges.querySelector('.modified')) {
+        badges.insertAdjacentHTML('beforeend', '<span class="change-badge modified"><span class="badge-symbol">~</span></span>');
+    }
+    // 确保图例存在
+    ensureTreeLegendExists(container);
+    // 恢复滚动位置
+    if (permBody && permScrollTop !== null) permBody.scrollTop = permScrollTop;
+}
+
+// ===== 增量更新：移动 =====
+async function applyIncrementalMoveToTree(id, moveInfo) {
+    console.log('[增量移动] 开始处理:', id, moveInfo);
+
+    const permBody = document.querySelector('.permanent-section-body');
+    const permScrollTop = permBody ? permBody.scrollTop : null;
+    const container = document.getElementById('bookmarkTree');
+    if (!container) return;
+    const item = container.querySelector(`.tree-item[data-node-id="${id}"]`);
+    if (!item) {
+        // Canvas 懒加载：节点可能未渲染（所在父文件夹未展开）。
+        // 大量移动/批量操作时如果这里触发全量重绘，会造成灾难级卡顿。
+        // 数据层面会通过 scheduleCachedCurrentTreeSnapshotRefresh 刷新快照，用户展开时即可看到。
+        const isCanvasLazyMode = currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED;
+        if (!isCanvasLazyMode) {
+            const isDragHandled = window.__dragMoveHandled && window.__dragMoveHandled.has(id);
+            if (!isDragHandled) {
+                renderTreeView(true).catch(e => console.error(e));
+            }
+        }
+        return;
+    }
+    const node = item.closest('.tree-node');
+    const oldParentItem = container.querySelector(`.tree-item[data-node-id="${moveInfo.oldParentId}"]`);
+    const newParentItem = container.querySelector(`.tree-item[data-node-id="${moveInfo.parentId}"]`);
+    const newParentChildren = newParentItem && newParentItem.nextElementSibling && newParentItem.nextElementSibling.classList.contains('tree-children')
+        ? newParentItem.nextElementSibling : null;
+
+    if (!newParentChildren) {
+        // 如果找不到新父容器但节点有移动标记，说明即时更新已处理，只需添加徽标
+        if (item.classList.contains('tree-change-moved')) {
+            console.log('[增量移动] 节点已有移动标记，跳过DOM操作');
+            if (permBody && permScrollTop !== null) permBody.scrollTop = permScrollTop;
+            return;
+        }
+        console.warn('[增量移动] 找不到新父容器，跳过');
+        return;
+    }
+
+    // 关键修复：同一父级内的“排序移动”时，node 仍在 newParentChildren 里，但位置需要更新。
+    // 之前的 alreadyInPlace 逻辑会直接跳过，导致移动后视觉不跟随（只能依赖全量 renderTreeView 修正）。
+    if (!node) {
+        console.warn('[增量移动] 找不到tree-node容器，跳过');
+        return;
+    }
+    // 从旧位置移除并插入新父下（即使同父级也需要重排）
+    try {
+        if (node.parentNode) node.parentNode.removeChild(node);
+    } catch (_) { /* ignore */ }
+
+    // 按目标 index 插入更准确（忽略已删除的同级节点）
+    const targetIndex = (moveInfo && typeof moveInfo.index === 'number') ? moveInfo.index : null;
+    const siblingsAll = Array.from(newParentChildren.querySelectorAll(':scope > .tree-node'));
+    const presentSiblings = siblingsAll.filter(n => !n.querySelector(':scope > .tree-item')?.classList.contains('tree-change-deleted'));
+
+    if (targetIndex === null) {
+        // 尽量插在第一个已删除节点之前
+        const firstDeleted = siblingsAll.find(n => n.querySelector(':scope > .tree-item')?.classList.contains('tree-change-deleted'));
+        if (firstDeleted) newParentChildren.insertBefore(node, firstDeleted);
+        else newParentChildren.appendChild(node);
+    } else {
+        const safeIndex = Math.max(0, targetIndex);
+        const anchor = presentSiblings[safeIndex] || null;
+        if (anchor) newParentChildren.insertBefore(node, anchor);
+        else {
+            const firstDeleted = siblingsAll.find(n => n.querySelector(':scope > .tree-item')?.classList.contains('tree-change-deleted'));
+            if (firstDeleted) newParentChildren.insertBefore(node, firstDeleted);
+            else newParentChildren.appendChild(node);
+        }
+    }
+
+    // 注意：缩进由 DOM 结构（.tree-children 的 margin-left）自动决定。
+    // 这里不要给 .tree-node 设 padding-left，否则会导致“放手瞬间层级不对齐”的视觉问题。
+    // 清理历史遗留的 padding-left（旧版本曾写入），避免刷新前后出现“对齐忽然变正常/又异常”的错觉。
+    try {
+        if (node && node.style) node.style.paddingLeft = '';
+        // 仅清理确实带有 padding-left 的节点，避免无谓遍历
+        node.querySelectorAll('.tree-node[style*="padding-left"]').forEach(n => {
+            try { n.style.paddingLeft = ''; } catch (_) { }
+        });
+    } catch (_) { /* ignore */ }
+
+    // 如果已经有移动标记（由即时更新处理），跳过徽标添加
+    if (item.classList.contains('tree-change-moved') && item.querySelector('.change-badge.moved')) {
+        console.log('[增量移动] 节点已有移动徽标，跳过');
+        if (permBody && permScrollTop !== null) permBody.scrollTop = permScrollTop;
+        return;
+    }
+
+    // 关键：仅对这个被拖拽的节点标记为蓝色"moved"
+    // 其他由于这次移动而位置改变的兄弟节点不标记，因为我们只标识用户直接操作的对象
+    let badges = item.querySelector('.change-badges');
+    if (!badges) {
+        item.insertAdjacentHTML('beforeend', '<span class="change-badges"></span>');
+        badges = item.querySelector('.change-badges');
+    }
+    if (badges) {
+        const existing = badges.querySelector('.change-badge.moved');
+        if (existing) existing.remove();
+        // 计算旧位置（名称路径）：优先用旧父ID从旧树取父路径；回退为旧树中该节点路径的父级
+        let tip = '';
+        if (cachedOldTree && moveInfo && typeof moveInfo.oldParentId !== 'undefined') {
+            const bcParent = getNamedPathFromTree(cachedOldTree, String(moveInfo.oldParentId));
+            if (bcParent) tip = breadcrumbToSlashFull(bcParent);
+        }
+        if (!tip && cachedOldTree) {
+            const bcSelf = getNamedPathFromTree(cachedOldTree, id);
+            if (bcSelf) tip = breadcrumbToSlashFolders(bcSelf);
+        }
+        if (!tip) tip = '/';
+        badges.insertAdjacentHTML('beforeend', `<span class="change-badge moved" data-move-from="${escapeHtml(tip)}" title="${escapeHtml(tip)}"><span class="badge-symbol">>></span><span class="move-tooltip">${slashPathToChipsHTML(tip)}</span></span>`);
+        item.classList.add('tree-change-moved');
+
+        // 设置蓝色样式
+        const labelLink = item.querySelector('.tree-bookmark-link');
+        const labelSpan = item.querySelector('.tree-label');
+        if (labelLink) {
+            labelLink.style.setProperty('color', '#007bff', 'important');
+            labelLink.style.setProperty('font-weight', '500', 'important');
+        }
+        if (labelSpan) {
+            labelSpan.style.setProperty('color', '#007bff', 'important');
+            labelSpan.style.setProperty('font-weight', '500', 'important');
+        }
+    }
+    // 确保图例存在
+    ensureTreeLegendExists(container);
+    // 恢复滚动位置
+    if (permBody && permScrollTop !== null) permBody.scrollTop = permScrollTop;
+}
+
+
+
+// =============================================================================
+// 搜索功能（核心逻辑已移动到 search/search.js）
+// =============================================================================
+
+// NOTE:
+// 顶部搜索框在多个视图/子标签共用。
+// 这里做“请求隔离 + 防抖取消”，避免：
+// - 用户清空输入 / 切换视图后，旧的 debounce 回调仍执行，导致候选列表“串台”
+// - 首次进入页面/快捷键进入/刷新时，初始化时序导致的旧状态残留
+
+let mainSearchDebounceTimer = null;
+let mainSearchDebounceSeq = 0;
+
+function getMainSearchContextKey() {
+    const view = (typeof currentView === 'string' && currentView) ? currentView : 'unknown';
+    try {
+        const ctx = window.SearchContextManager && window.SearchContextManager.currentContext
+            ? window.SearchContextManager.currentContext
+            : null;
+        if (ctx && typeof ctx === 'object') {
+            const parts = [ctx.view || view, ctx.tab, ctx.subTab].filter(Boolean);
+            if (parts.length) return parts.join('|');
+        }
+    } catch (_) { }
+    return view;
+}
+
+function cancelPendingMainSearchDebounce() {
+    try {
+        if (mainSearchDebounceTimer) {
+            clearTimeout(mainSearchDebounceTimer);
+            mainSearchDebounceTimer = null;
+        }
+    } catch (_) { }
+    // bump seq so any already-scheduled closures become stale
+    mainSearchDebounceSeq += 1;
+}
+
+try {
+    window.cancelPendingMainSearchDebounce = cancelPendingMainSearchDebounce;
+} catch (_) { }
+
+function handleSearch(e) {
+    const inputEl = e && e.target;
+    const raw = (inputEl && typeof inputEl.value === 'string') ? inputEl.value : '';
+    const normalizedQuery = raw.trim().toLowerCase();
+
+    // 清空输入：立即执行清理，且取消所有排队的搜索
+    if (!normalizedQuery) {
+        cancelPendingMainSearchDebounce();
+        performSearch('');
+        return;
+    }
+
+    const seq = (mainSearchDebounceSeq += 1);
+    const scheduledContextKey = getMainSearchContextKey();
+
+    if (mainSearchDebounceTimer) clearTimeout(mainSearchDebounceTimer);
+    mainSearchDebounceTimer = setTimeout(() => {
+        // 1) 新的输入事件已经触发，旧回调作废
+        if (seq !== mainSearchDebounceSeq) return;
+
+        // 2) 切换了视图/子标签：作废（避免候选列表串台）
+        if (scheduledContextKey !== getMainSearchContextKey()) return;
+
+        // 3) 输入框内容已变化：作废（避免输入已清空但旧结果仍渲染）
+        const currentInput = document.getElementById('searchInput');
+        const currentNormalized = (currentInput && typeof currentInput.value === 'string')
+            ? currentInput.value.trim().toLowerCase()
+            : '';
+        if (currentNormalized !== normalizedQuery) return;
+
+        performSearch(normalizedQuery);
+    }, 260);
+}
+
+function performSearch(query) {
+    if (!query) {
+        hideSearchResultsPanel();
+        if (typeof clearCanvasSearchHighlight === 'function') {
+            clearCanvasSearchHighlight();
+        }
+        return;
+    }
+
+    // 根据当前视图执行搜索（仅 Canvas）
+    if (currentView === 'canvas') {
+        if (typeof searchCanvasAndRender === 'function') {
+            searchCanvasAndRender(query);
+        } else {
+            console.warn('[Search] searchCanvasAndRender not available');
+            hideSearchResultsPanel();
+        }
+    }
+}
+
+// =============================================================================
+// 主题和语言切换
+// =============================================================================
+
+// 主题和语言切换 - 独立设置，主UI优先
+// 设置覆盖后会显示重置按钮
+
+function toggleTheme() {
+    currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', currentTheme);
+
+    // 主题切换后立即刷新画布连接线标签背景色
+    try {
+        if (currentView === 'canvas' && typeof renderEdges === 'function') {
+            renderEdges();
+        }
+    } catch (_) { }
+
+    // 设置覆盖标志
+    try {
+        localStorage.setItem('historyViewerHasCustomTheme', 'true');
+        localStorage.setItem('historyViewerCustomTheme', currentTheme);
+        console.log('[History Viewer] 设置主题覆盖:', currentTheme);
+    } catch (e) {
+        console.error('[History Viewer] 无法保存主题覆盖:', e);
+    }
+
+    // 更新图标
+    const icon = document.querySelector('#themeToggle i');
+    if (icon) {
+        icon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
+}
+
+function toggleLanguage() {
+    currentLang = currentLang === 'zh_CN' ? 'en' : 'zh_CN';
+    window.currentLang = currentLang; // 同步到 window
+
+    // 设置覆盖标志
+    try {
+        localStorage.setItem('historyViewerHasCustomLang', 'true');
+        localStorage.setItem('historyViewerCustomLang', currentLang);
+        console.log('[History Viewer] 设置语言覆盖:', currentLang);
+    } catch (e) {
+        console.error('[History Viewer] 无法保存语言覆盖:', e);
+    }
+
+    applyLanguage();
+
+    // 只更新界面文字，不重新渲染内容（避免图标重新加载）
+    // renderCurrentView();
+
+    // 手动更新需要多语言的UI元素（不涉及书签树内容）
+    updateLanguageDependentUI();
+
+    // [User Request] 更新搜索组件语言
+    if (typeof window.updateSearchUILanguage === 'function') {
+        window.updateSearchUILanguage();
+    }
+
+    // Canvas-only：不涉及热力图/关联记录
+}
+
+// 更新依赖语言的UI元素（不重新渲染内容，避免图标重新加载）
+function updateLanguageDependentUI() {
+    const isEn = currentLang === 'en';
+
+    // 只更新图例文字（如果存在）
+    const legends = document.querySelectorAll('.tree-legend');
+    legends.forEach(legend => {
+        legend.innerHTML = `
+            <span class="legend-item"><span class="legend-dot added"></span> ${isEn ? 'Added' : '新增'}</span>
+            <span class="legend-item"><span class="legend-dot deleted"></span> ${isEn ? 'Deleted' : '删除'}</span>
+            <span class="legend-item"><span class="legend-dot moved"></span> ${isEn ? 'Moved' : '移动'}</span>
+            <span class="legend-item"><span class="legend-dot modified"></span> ${isEn ? 'Modified' : '修改'}</span>
+        `;
+    });
+
+    // 更新加载文本（如果存在）
+    const loadingTexts = document.querySelectorAll('.loading');
+    loadingTexts.forEach(el => {
+        if (el.textContent.includes('Loading') || el.textContent.includes('加载中')) {
+            el.textContent = i18n.loading[currentLang];
+        }
+    });
+
+    // 更新空状态文本
+    const emptyStates = document.querySelectorAll('.empty-state');
+    emptyStates.forEach(el => {
+        if (el.textContent.includes('No') || el.textContent.includes('没有')) {
+            el.textContent = isEn ? 'No data' : '没有数据';
+        }
+    });
+
+    // ===== 更新临时栏目相关的多语言元素 =====
+
+    // 1. 更新临时栏目的按钮tooltip
+    document.querySelectorAll('.temp-node-rename-btn').forEach(btn => {
+        const label = isEn ? 'Rename section' : '重命名栏目';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+    });
+
+    document.querySelectorAll('.temp-node-color-btn, .temp-node-color-input').forEach(btn => {
+        const label = isEn ? 'Change color' : '调整栏目颜色';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+    });
+
+    document.querySelectorAll('.temp-color-lock-btn').forEach(btn => {
+        const locked = btn.classList.contains('locked');
+        const label = locked
+            ? (isEn ? 'Unlock color' : '解除锁定')
+            : (isEn ? 'Lock color' : '锁定颜色');
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+    });
+
+    document.querySelectorAll('.temp-node-close').forEach(btn => {
+        const label = isEn ? 'Remove section' : '删除临时栏目';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+    });
+
+    // 2. 更新临时栏目说明（现为 WYSIWYG editor）
+    document.querySelectorAll('.temp-node-description').forEach(descEl => {
+        const placeholder = isEn ? 'Click to add description...' : '点击添加说明...';
+        try {
+            descEl.setAttribute('data-placeholder', placeholder);
+            descEl.setAttribute('aria-label', placeholder);
+        } catch (_) { }
+
+        const text = (descEl.textContent || '').replace(/\u200B/g, '').trim();
+        const hasNonText = !!descEl.querySelector('hr, input[type="checkbox"], ul, ol, blockquote, h1, h2, h3, h4, h5, h6');
+        const hasContent = Boolean(text) || hasNonText;
+        descEl.title = hasContent
+            ? (isEn ? 'Click to edit' : '点击编辑说明')
+            : (isEn ? 'Click to add description' : '点击添加说明');
+    });
+
+    // 3. 更新说明编辑按钮的tooltip
+    document.querySelectorAll('.temp-node-desc-edit-btn').forEach(btn => {
+        btn.title = isEn ? 'Edit description' : '编辑说明';
+    });
+
+    document.querySelectorAll('.temp-node-desc-format-btn').forEach(btn => {
+        btn.title = isEn ? 'Format toolbar' : '格式工具栏';
+    });
+
+    document.querySelectorAll('.temp-node-desc-delete-btn').forEach(btn => {
+        btn.title = isEn ? 'Clear input' : '清空输入框';
+    });
+
+    // 3.5. Update Permanent Section Titles (Copies)
+    const pTitle = i18n.permanentSectionTitle[currentLang];
+    document.querySelectorAll('.permanent-section-copy .permanent-section-title h3').forEach(el => {
+        el.textContent = pTitle;
+    });
+
+    // 4. 更新永久栏目的说明提示 (Including Copies)
+    document.querySelectorAll('.permanent-section-tip-collapsed span').forEach(el => {
+        const text = isEn ? 'Click to add description...' : '点击添加说明...';
+        el.textContent = text;
+    });
+
+    document.querySelectorAll('.permanent-section-tip').forEach(tip => {
+        const placeholder = isEn ? 'Click to add description...' : '点击添加说明...';
+        try {
+            tip.setAttribute('data-placeholder', placeholder);
+            tip.setAttribute('aria-label', placeholder);
+        } catch (_) { }
+
+        const text = (tip.textContent || '').replace(/\u200B/g, '').trim();
+        const hasNonText = !!tip.querySelector('hr, input[type="checkbox"], ul, ol, blockquote, h1, h2, h3, h4, h5, h6');
+        const hasContent = Boolean(text) || hasNonText;
+        tip.title = hasContent
+            ? (isEn ? 'Click to edit' : '点击编辑说明')
+            : (isEn ? 'Click to add description' : '点击添加说明');
+    });
+
+    document.querySelectorAll('.permanent-section-tip-format-btn').forEach(btn => {
+        btn.title = isEn ? 'Format toolbar' : '格式工具栏';
+    });
+
+    console.log('[toggleLanguage] 已更新UI文字（包括临时栏目）');
+}
+
+// =============================================================================
+// 实时更新
+// =============================================================================
+
+function handleStorageChange(changes, namespace) {
+    if (namespace !== 'local') return;
+
+    console.log('[存储监听] 检测到变化:', Object.keys(changes));
+
+    // 标识设置变化（多窗口同步）
+    if (changes[MARKER_SETTINGS_KEY]) {
+        try {
+            canvasMarkerSettings = normalizeMarkerSettings(changes[MARKER_SETTINGS_KEY].newValue);
+            updateMarkerControlsUI();
+            scheduleMarkerAutoClear();
+        } catch (_) { }
+    }
+
+    // 主题变化（只在没有覆盖设置时跟随主UI）
+    if (changes.currentTheme && !hasThemeOverride()) {
+        const newTheme = changes.currentTheme.newValue;
+        console.log('[存储监听] 主题变化，跟随主UI:', newTheme);
+        currentTheme = newTheme;
+        document.documentElement.setAttribute('data-theme', currentTheme);
+
+        // 更新主题切换按钮图标
+        const icon = document.querySelector('#themeToggle i');
+        if (icon) {
+            icon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+        }
+    }
+
+    // 语言变化（只在没有覆盖设置时跟随主UI）
+    if (changes.preferredLang && !hasLangOverride()) {
+        const newLang = changes.preferredLang.newValue;
+        console.log('[存储监听] 语言变化，跟随主UI:', newLang);
+        currentLang = newLang;
+        window.currentLang = currentLang; // 同步到 window
+
+        // 更新语言切换按钮文本
+        const langText = document.querySelector('#langToggle .lang-text');
+        if (langText) {
+            langText.textContent = currentLang === 'zh_CN' ? 'EN' : '中';
+        }
+
+        // 应用新语言到所有UI元素
+        applyLanguage();
+
+        // 重新渲染当前视图以应用语言
+        renderCurrentView();
+    }
+
+    // 标识基线变化（清除标识/自动清除）跨窗口同步
+    if (changes.lastBookmarkData) {
+        try {
+            const updatedAt = changes.lastBookmarkData.newValue && changes.lastBookmarkData.newValue.updatedAt;
+            if (updatedAt && updatedAt === lastMarkerBaselineWriteAt) return;
+            // 清空显式移动标识，避免残留蓝标
+            explicitMovedIds = new Map();
+            try { window.__canvasPermanentHintSet = null; } catch (_) { }
+            try { window.__canvasPermanentAncestorBadges = null; } catch (_) { }
+            __canvasPermanentHintSet = null;
+            __canvasPermanentAncestorBadges = null;
+            try { treeChangeMap = new Map(); } catch (_) { }
+            resetPermanentSectionChangeMarkers();
+            renderTreeView(true);
+        } catch (_) { }
+    }
+}
+
+
+// =============================================================================
+// 书签API监听（实时更新书签树）
+// =============================================================================
+
+function setupBookmarkListener() {
+    if (!browserAPI.bookmarks) {
+        console.warn('[书签监听] 书签API不可用');
+        return;
+    }
+
+    console.log('[书签监听] 设置书签API监听器');
+
+    // 书签创建
+browserAPI.bookmarks.onCreated.addListener(async (id, bookmark) => {
+        console.log('[书签监听] 书签创建:', bookmark.title);
+        try {
+            addBookmarkToCache(bookmark);
+        // 支持 canvas 视图（包含永久栏目的书签树）
+        if (currentView === 'canvas') {
+            await applyIncrementalCreateToTree(id, bookmark);
+            scheduleCachedCurrentTreeSnapshotRefresh('onCreated');
+        }
+        clearCanvasLazyChangeHints('onCreated');
+        } catch (e) {
+            // 仅记录错误，不触发完全刷新以避免页面闪烁和滚动位置丢失
+            console.warn('[书签监听] onCreated 处理异常:', e);
+        }
+    });
+
+    // 书签删除
+browserAPI.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
+        console.log('[书签监听] 书签删除:', id);
+        try {
+            removeBookmarkFromCache(id);
+        // 删除对应的 favicon 缓存
+        // removeInfo.node 包含被删除书签的信息（包括 URL）
+        if (removeInfo.node && removeInfo.node.url) {
+            FaviconCache.clear(removeInfo.node.url);
+        }
+
+        // 支持 canvas 视图（包含永久栏目的书签树）
+        if (currentView === 'canvas') {
+            applyIncrementalRemoveFromTree(id);
+            scheduleCachedCurrentTreeSnapshotRefresh('onRemoved');
+        }
+        clearCanvasLazyChangeHints('onRemoved');
+        } catch (e) {
+            // 仅记录错误，不触发完全刷新以避免页面闪烁和滚动位置丢失
+            console.warn('[书签监听] onRemoved 处理异常:', e);
+        }
+    });
+
+    // 书签修改
+browserAPI.bookmarks.onChanged.addListener(async (id, changeInfo) => {
+        console.log('[书签监听] 书签修改:', changeInfo);
+        try {
+            updateBookmarkInCache(id, changeInfo);
+
+            // 支持 canvas 视图（包含永久栏目的书签树）
+            if (currentView === 'canvas') {
+                await applyIncrementalChangeToTree(id, changeInfo);
+                scheduleCachedCurrentTreeSnapshotRefresh('onChanged');
+            }
+            clearCanvasLazyChangeHints('onChanged');
+        } catch (e) {
+            // 仅记录错误，不触发完全刷新以避免页面闪烁和滚动位置丢失
+            console.warn('[书签监听] onChanged 处理异常:', e);
+        }
+    });
+
+    // 书签移动
+browserAPI.bookmarks.onMoved.addListener(async (id, moveInfo) => {
+        console.log('[书签监听] 书签移动:', id);
+
+        try {
+            moveBookmarkInCache(id, moveInfo);
+            // 将本次移动记为显式主动移动，确保稳定显示蓝色标识
+            explicitMovedIds.set(id, Date.now() + Infinity);
+            schedulePersistExplicitMovedIds();
+
+        // 支持 canvas 视图（包含永久栏目的书签树）
+        if (currentView === 'canvas') {
+            await applyIncrementalMoveToTree(id, moveInfo);
+            applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
+            scheduleCachedCurrentTreeSnapshotRefresh('onMoved');
+        }
+        clearCanvasLazyChangeHints('onMoved');
+        } catch (e) {
+            // 仅记录错误，不触发完全刷新以避免页面闪烁和滚动位置丢失
+            console.warn('[书签监听] onMoved 处理异常:', e);
+        }
+    });
+}
+
+// 如果当前在 Canvas 视图，刷新书签树
+async function refreshTreeViewIfVisible() {
+    if (currentView === 'canvas') {
+        console.log('[书签监听] 检测到书签变化，刷新树视图');
+
+        // 清除缓存，强制刷新
+        cachedBookmarkTree = null;
+        cachedTreeData = null;
+        lastTreeFingerprint = null;
+        lastTreeSnapshotVersion = null;
+        cachedCurrentTreeIndex = null;
+
+        // 延迟一点刷新，避免频繁更新
+        setTimeout(async () => {
+            try {
+                await renderTreeView(true);
+                console.log('[书签监听] 树视图刷新完成');
+            } catch (error) {
+                console.error('[书签监听] 刷新树视图失败:', error);
+            }
+        }, 200);
+    }
+}
+
+// =============================================================================
+// 消息监听
+// =============================================================================
+
+function setupRealtimeMessageListener() {
+    if (messageListenerRegistered) return;
+    messageListenerRegistered = true;
+
+    browserAPI.runtime.onMessage.addListener((message) => {
+        if (!message || !message.action) return;
+
+        if (message.action === 'clearFaviconCache') {
+            // 书签URL被修改，清除favicon缓存（静默）
+            if (message.url) {
+                FaviconCache.clear(message.url);
+            }
+        } else if (message.action === 'updateFaviconFromTab') {
+            // 从打开的 tab 更新 favicon（静默）
+            if (message.url && message.favIconUrl) {
+                FaviconCache.save(message.url, message.favIconUrl).then(() => {
+                    // 更新页面上对应的 favicon 图标
+                    updateFaviconImages(message.url, message.favIconUrl);
+                }).catch(() => {
+                    // 静默处理错误
+                });
+            }
+        } else if (message.action === 'captureCanvasThumbnailNow') {
+            // 主 UI 请求当前 Canvas 立即截图
+            if (currentView === 'canvas') {
+                try {
+                    captureCanvasThumbnail();
+                } catch (e) {
+                    console.warn('[Canvas Thumbnail] 即时截图失败:', e);
+                }
+            }
+        } else if (message.action === 'clearExplicitMoved') {
+            try {
+                explicitMovedIds = new Map();
+                schedulePersistExplicitMovedIds();
+                resetPermanentSectionChangeMarkers();
+            } catch (e) { /* 忽略 */ }
+        } else if (message.action === 'recentMovedBroadcast' && message.id) {
+            // 后台广播的最近被移动的ID，立即记入显式集合（仅标记这个节点）
+            // 这确保用户拖拽的节点优先被标识为蓝色"moved"
+            // 永久记录，不再有时间限制
+            explicitMovedIds.set(message.id, Date.now() + Infinity);
+            schedulePersistExplicitMovedIds();
+            // 若在 Canvas 视图，立即给这个被拖拽的节点补蓝标（不影响其他节点）
+            if (currentView === 'canvas') {
+                try {
+                    const container = document.getElementById('bookmarkTree');
+                    const item = container && container.querySelector(`.tree-item[data-node-id="${message.id}"]`);
+                    if (item) {
+                        const badges = item.querySelector('.change-badges');
+                        if (badges) {
+                            const existing = badges.querySelector('.change-badge.moved');
+                            if (existing) existing.remove();
+                            let tip = '';
+                            try {
+                                if (cachedOldTree) {
+                                    const bcSelf = getNamedPathFromTree(cachedOldTree, String(message.id));
+                                    if (bcSelf) tip = breadcrumbToSlashFolders(bcSelf);
+                                }
+                            } catch (_) { }
+                            if (!tip) tip = '/';
+                            badges.insertAdjacentHTML('beforeend', `<span class="change-badge moved" data-move-from="${escapeHtml(tip)}" title="${escapeHtml(tip)}"><span class="badge-symbol">>></span><span class="move-tooltip">${slashPathToChipsHTML(tip)}</span></span>`);
+                            item.classList.add('tree-change-moved');
+                        }
+                    }
+                } catch (_) { }
+            }
+        } else if (message.action === 'clearLocalStorage') {
+            // 收到来自 background.js 的清除 localStorage 请求（"恢复到初始状态"功能）
+            console.log('[history.js] 收到清除 localStorage 请求');
+            try {
+                localStorage.clear();
+                console.log('[history.js] localStorage 已清除');
+            } catch (e) {
+                console.warn('[history.js] 清除 localStorage 失败:', e);
+            }
+        }
+    });
+}
+
+// =============================================================================
+// 工具函数
+// =============================================================================
+
+function formatTime(timestamp) {
+    const date = new Date(timestamp);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+
+    return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
+}
+
+// 用于导出文件名的本地时间格式化（避免 toISOString 的 UTC 时区问题）
+function formatTimeForFilename(timestamp) {
+    const date = timestamp ? new Date(timestamp) : new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
+}
+
+function sanitizeFilenameSegment(text) {
+    return String(text || '')
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .replace(/\s+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '');
+}
+
+function buildSequenceMapFromHistory(historyRecords) {
+    const records = Array.isArray(historyRecords) ? historyRecords.slice() : [];
+    records.sort((a, b) => Number(a?.time || 0) - Number(b?.time || 0));
+    const map = new Map();
+    const used = new Set();
+    for (const r of records) {
+        const seq = Number(r?.seqNumber);
+        if (Number.isFinite(seq) && seq > 0) used.add(seq);
+    }
+    let next = 1;
+    for (const r of records) {
+        let seq = Number(r?.seqNumber);
+        if (!(Number.isFinite(seq) && seq > 0)) {
+            while (used.has(next)) next++;
+            seq = next;
+            used.add(seq);
+            next++;
+        }
+        map.set(String(r.time), seq);
+    }
+    return map;
+}
+
+function formatSelectedSequenceRanges(seqNumbers, lang) {
+    const delim = lang === 'zh_CN' ? '、' : ',';
+    const nums = Array.from(new Set((seqNumbers || []).filter(n => Number.isFinite(n) && n > 0)))
+        .sort((a, b) => a - b);
+    if (nums.length === 0) return '';
+
+    const parts = [];
+    let start = nums[0];
+    let end = nums[0];
+    for (let i = 1; i < nums.length; i++) {
+        const n = nums[i];
+        if (n === end + 1) {
+            end = n;
+            continue;
+        }
+        parts.push(start === end ? String(start) : `${start}-${end}`);
+        start = n;
+        end = n;
+    }
+    parts.push(start === end ? String(start) : `${start}-${end}`);
+    return parts.join(delim);
+}
+
+function generateBookmarkExportHTMLFromTree(treeRoot) {
+    const escapeAttr = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const escapeText = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    let html = '<!DOCTYPE NETSCAPE-Bookmark-file-1>\n';
+    html += '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n';
+    html += '<TITLE>Bookmarks</TITLE>\n';
+    html += '<H1>Bookmarks</H1>\n';
+    html += '<DL><p>\n';
+
+    const generateNodeHTML = (node, indentLevel) => {
+        const indent = '    '.repeat(indentLevel);
+        const title = escapeText(node?.title || '');
+        const url = node?.url ? String(node.url) : '';
+        const isFolder = !url && node && Array.isArray(node.children);
+
+        if (isFolder) {
+            let result = `${indent}<DT><H3>${title}</H3>\n`;
+            result += `${indent}<DL><p>\n`;
+            node.children.forEach(child => {
+                result += generateNodeHTML(child, indentLevel + 1);
+            });
+            result += `${indent}</DL><p>\n`;
+            return result;
+        }
+
+        if (url) {
+            return `${indent}<DT><A HREF="${escapeAttr(url)}">${title}</A>\n`;
+        }
+
+        // fallback: treat as folder-ish if children exists, otherwise skip
+        if (node && Array.isArray(node.children)) {
+            let result = `${indent}<DT><H3>${title}</H3>\n`;
+            result += `${indent}<DL><p>\n`;
+            node.children.forEach(child => {
+                result += generateNodeHTML(child, indentLevel + 1);
+            });
+            result += `${indent}</DL><p>\n`;
+            return result;
+        }
+
+        return '';
+    };
+
+    const nodes = Array.isArray(treeRoot) ? treeRoot : [treeRoot];
+    nodes.forEach(root => {
+        if (!root) return;
+        if (root.title) {
+            html += generateNodeHTML({ title: root.title, children: root.children || [] }, 1);
+            return;
+        }
+        if (Array.isArray(root.children)) {
+            root.children.forEach(child => {
+                html += generateNodeHTML(child, 1);
+            });
+        }
+    });
+
+    html += '</DL><p>\n';
+    return html;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function showLoading() {
+    document.querySelectorAll('.view.active .bookmark-tree').forEach(el => {
+        el.innerHTML = `<div class="loading">${i18n.loading[currentLang]}</div>`;
+    });
+}
+
+function showError(message) {
+    const container = document.querySelector('.view.active > div:last-child');
+    if (container) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon"><i class="fas fa-exclamation-triangle"></i></div>
+                <div class="empty-state-title">${escapeHtml(message)}</div>
+            </div>
+        `;
+    }
+}
+
+function showToast(message) {
+    // 简单的提示功能
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        background: var(--accent-primary);
+        color: white;
+        border-radius: 8px;
+        box-shadow: var(--shadow-lg);
+        z-index: 10000;
+        animation: slideIn 0.3s ease;
+    `;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 2000);
+}
+
+
+
+// 添加动画样式
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes slideOut {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(100%); opacity: 0; }
+    }
+`;
+document.head.appendChild(style);

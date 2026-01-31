@@ -1,0 +1,14 @@
+{
+  "extensionName": {
+    "message": "Bookmark Canvas",
+    "description": "Extension name"
+  },
+  "extensionDescription": {
+    "message": "Bookmark Canvas: visualize and organize bookmarks with links and notes, with search and export.",
+    "description": "Extension description"
+  },
+  "actionTitle": {
+    "message": "Bookmark Canvas",
+    "description": "Toolbar tooltip title"
+  }
+}

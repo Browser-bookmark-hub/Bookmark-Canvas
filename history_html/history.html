@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title></title>
+    <link rel="stylesheet" href="history.css?v=2.1">
+    <link rel="stylesheet" href="search/search.css">
+    <link rel="stylesheet" href="canvas_obsidian_style.css">
+    <link rel="stylesheet" href="../font-awesome.min.css">
+    <script src="history_bootstrap.js" defer></script>
+    <script src="vendor/marked.min.js"></script>
+    <script src="vendor/obsidian-markdown.js"></script>
+    <script src="bookmark_tree_context_menu.js" defer></script>
+    <script src="bookmark_tree_drag_drop.js" defer></script>
+    <script src="pointer_drag.js" defer></script>
+    <script src="bookmark_canvas_module.js?v=3.7" defer></script>
+    <script src="shortcuts_helpers.js" defer></script>
+    <script src="search/search.js" defer></script>
+    <script src="history.js" defer></script>
+</head>
+
+<body>
+    <!-- 头部导航 -->
+    <header class="history-header">
+        <div class="header-left">
+            <h1 id="pageTitle">书签画布</h1>
+            <span class="header-subtitle" id="pageSubtitle"></span>
+        </div>
+        <div class="header-right">
+            <!-- 搜索框 -->
+            <div class="search-container">
+                <button id="searchModeTrigger" class="search-mode-trigger" aria-label="切换搜索模式" title="切换搜索模式">
+                    <i class="fas fa-search"></i>
+                </button>
+                <div id="searchModeMenu" class="search-mode-menu" hidden>
+                    <!-- 模式菜单项动态生成 -->
+                </div>
+                <div class="search-input-wrapper">
+                    <!-- Chip 将插入在这里 -->
+                    <input type="text" id="searchInput" />
+                </div>
+                <!-- 搜索结果面板 -->
+                <div id="searchResultsPanel" class="search-results-panel" role="listbox" aria-label="Search results">
+                </div>
+            </div>
+
+            <!-- 工具按钮组 -->
+            <div class="tool-buttons">
+
+                <!-- 主题切换按钮 - 独立设置，主UI优先 -->
+                <button id="themeToggle" class="tool-btn">
+                    <i class="fas fa-moon"></i>
+                    <span class="btn-tooltip" id="themeTooltip"></span>
+                </button>
+                <!-- 语言切换按钮 - 独立设置，主UI优先 -->
+                <button id="langToggle" class="tool-btn">
+                    <span class="lang-text">EN</span>
+                    <span class="btn-tooltip" id="langTooltip"></span>
+                </button>
+                <!-- 说明按钮：快捷键 & 开源信息 -->
+                <button id="helpToggle" class="tool-btn">
+                    <i class="fab fa-github"></i>
+                    <span class="btn-tooltip" id="helpTooltip"></span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区域 -->
+    <div class="main-container">
+        <!-- 左侧导航栏 -->
+        <aside class="sidebar" id="sidebar">
+            <!-- 侧边栏收起按钮 -->
+            <button class="sidebar-toggle" id="sidebarToggle" title="收起/展开侧边栏">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+
+            <nav class="nav-tabs">
+                <div class="nav-group">
+                    <div class="nav-group-title" id="bookmarkToolboxTitle"></div>
+                    <button class="nav-tab" data-view="canvas">
+                        <i class="fas fa-project-diagram"></i>
+                        <span id="navCanvasText">Bookmark Canvas</span>
+                    </button>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- 右侧内容区域 -->
+        <main class="content-area">
+            <!-- 快捷键与开源信息弹窗 -->
+            <div id="shortcutsModal" class="modal">
+                <div class="modal-content shortcuts-modal">
+                    <div class="shortcuts-header">
+                        <h2 id="shortcutsModalTitle"></h2>
+                        <button id="closeShortcutsModal" class="modal-close" aria-label="Close">×</button>
+                    </div>
+                    <div id="openSourceInfo" class="shortcuts-section open-source-section">
+                        <div class="shortcuts-card">
+                            <div style="display: flex; flex-direction: column; gap: 10px;">
+                                <div>
+                                    <p id="openSourceGithubLabel"
+                                        style="font-size: 14px; color: var(--text-secondary); margin: 0 0 4px 0;">GitHub
+                                        仓库:</p>
+                                    <a id="openSourceGithubLink"
+                                        href="https://github.com/kwenxu/Bookmark-Backup?tab=readme-ov-file#readme"
+                                        target="_blank"
+                                        style="display: block; padding: 8px 12px; background-color: var(--bg-tertiary); border-radius: 6px; color: var(--link-color); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                        <i class="fab fa-github" style="margin-right: 5px;"></i>
+                                        https://github.com/kwenxu/Bookmark-Backup
+                                    </a>
+                                </div>
+
+                                <div>
+                                    <p id="openSourceIssueLabel"
+                                        style="font-size: 14px; color: var(--text-secondary); margin: 0 0 4px 0;">问题反馈:
+                                    </p>
+                                    <a id="openSourceIssueLink" href="https://github.com/kwenxu/Bookmark-Backup/issues"
+                                        target="_blank"
+                                        style="display: block; padding: 8px 12px; background-color: var(--bg-tertiary); border-radius: 6px; color: var(--link-color); text-decoration: none;">
+                                        <i class="fas fa-exclamation-circle" style="margin-right: 5px;"></i>
+                                        <span id="openSourceIssueText">提交问题</span>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <hr class="shortcuts-divider" />
+                    <div id="shortcutsContent" class="shortcuts-section"></div>
+                </div>
+            </div>
+
+
+
+            <!-- Bookmark Canvas 视图 (原Bookmark Tree改造) -->
+            <div id="canvasView" class="view canvas-fullpage-view">
+                <!-- Canvas主容器 -->
+                <!-- 初始缩放由 bookmark_canvas_module.js 中 CANVAS_BASE_ZOOM_DEFAULT 统一控制 -->
+                <div class="canvas-main-container" style="--canvas-scale: 1; --canvas-pan-x: 0px; --canvas-pan-y: 0px;">
+                    <!-- 自定义纵向滚动条 -->
+                    <div class="canvas-scrollbar vertical" id="canvasVerticalScrollbar">
+                        <div class="scrollbar-controls">
+                            <button class="scrollbar-btn scroll-hide" data-axis="vertical" data-action="toggle-hide"
+                                aria-label="隐藏纵向滚动条">
+                                <i class="fas fa-eye-slash"></i>
+                            </button>
+                            <button class="scrollbar-btn scroll-disable" data-axis="vertical"
+                                data-action="toggle-disable" aria-label="禁用纵向滚动">
+                                <i class="fas fa-ban"></i>
+                            </button>
+                        </div>
+                        <div class="scrollbar-track">
+                            <div class="scrollbar-thumb" data-axis="vertical"></div>
+                        </div>
+                    </div>
+
+                    <!-- 自定义横向滚动条 -->
+                    <div class="canvas-scrollbar horizontal" id="canvasHorizontalScrollbar"
+                        style="display: flex; align-items: center; gap: 12px;">
+                        <div class="scrollbar-controls">
+                            <button class="scrollbar-btn scroll-hide" data-axis="horizontal" data-action="toggle-hide"
+                                aria-label="隐藏横向滚动条">
+                                <i class="fas fa-eye-slash"></i>
+                            </button>
+                            <button class="scrollbar-btn scroll-disable" data-axis="horizontal"
+                                data-action="toggle-disable" aria-label="禁用横向滚动">
+                                <i class="fas fa-ban"></i>
+                            </button>
+                        </div>
+                        <span class="scrollbar-hint" data-i18n-text="horizontalScrollHint" data-en="Shift + Wheel"
+                            data-zh="Shift + 滚轮">Shift + 滚轮</span>
+                        <div class="scrollbar-track">
+                            <div class="scrollbar-thumb" data-axis="horizontal"></div>
+                        </div>
+                    </div>
+
+                    <!-- Canvas画布工作区 -->
+                    <div class="canvas-workspace" id="canvasWorkspace">
+                        <!-- Grid Layer（使用 transform 移动，避免滚动时每帧 repaint） -->
+                        <div class="canvas-grid-layer" id="canvasGridLayer" aria-hidden="true"></div>
+                        <!-- 缩放控制器（固定在画布左上角） -->
+                        <div class="canvas-zoom-indicator" id="canvasZoomIndicator" style="display: none;">
+                            <div class="canvas-zoom-header">
+                                <button class="canvas-fullscreen-btn" id="canvasFullscreenBtn" aria-label="进入全屏"
+                                    aria-pressed="false">全屏</button>
+                                <button class="canvas-help-btn" id="canvasHelpBtn" title="说明"><i
+                                        class="fas fa-question-circle"></i></button>
+                                <span class="canvas-zoom-label" id="canvasZoomLabel">缩放</span>
+                                <span class="zoom-value" id="zoomValue">100%</span>
+                            </div>
+                            <div class="canvas-zoom-controls">
+                                <button class="zoom-btn" id="canvasManageBtn" title="管理"><span
+                                        id="canvasManageText">管理</span></button>
+                                <button class="zoom-btn" id="zoomLocateBtn" title="定位到永久栏目"><span
+                                        id="zoomLocateText">定位</span></button>
+                                <button class="zoom-btn" id="zoomOutBtn" title="缩小 (10%)">−</button>
+                                <button class="zoom-btn" id="zoomInBtn" title="放大 (10%)">+</button>
+                            </div>
+                        </div>
+
+                        <!-- Canvas快捷键说明弹窗 -->
+                        <div class="canvas-help-modal" id="canvasHelpModal" style="display: none;">
+                            <div class="canvas-help-modal-header">
+                                <h4 id="canvasHelpModalTitle">说明</h4>
+                                <button class="canvas-help-modal-close" id="canvasHelpModalClose"><i
+                                        class="fas fa-times"></i></button>
+                            </div>
+                            <div class="canvas-help-modal-body">
+                                <div class="canvas-help-section">
+                                    <div class="canvas-help-section-header">
+                                        <span class="canvas-help-section-title" id="canvasHelpCtrlTitle">Ctrl 键操作</span>
+                                        <button class="canvas-shortcut-edit-btn" id="editCtrlKeyBtn" title="点击修改快捷键"><i
+                                                class="fas fa-edit"></i></button>
+                                    </div>
+                                    <div class="canvas-help-row">
+                                        <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                                id="ctrlKeyDisplay">Ctrl</kbd> + <span
+                                                id="canvasHelpCtrlLeftClick">左键（按住）</span></span>
+                                        <span class="canvas-help-desc" id="canvasHelpCtrlLeftDesc">拖动画布 或 栏目卡片</span>
+                                    </div>
+                                    <div class="canvas-help-row">
+                                        <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                                id="ctrlKeyDisplay2">Ctrl</kbd> + <span
+                                                id="canvasHelpCtrlWheel">滚轮</span></span>
+                                        <span class="canvas-help-desc" id="canvasHelpCtrlWheelDesc">缩放</span>
+                                    </div>
+                                    <div class="canvas-help-row">
+                                        <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                                id="ctrlKeyDisplay3">Ctrl</kbd> + <span
+                                                id="canvasHelpCtrlRightClick">右键（单击）</span></span>
+                                        <span class="canvas-help-desc" id="canvasHelpCtrlRightDesc">更改栏目卡片的大小</span>
+                                    </div>
+                                </div>
+                                <div class="canvas-help-section">
+                                    <div class="canvas-help-section-header">
+                                        <span class="canvas-help-section-title" id="canvasHelpSpaceTitle">空格键操作</span>
+                                        <button class="canvas-shortcut-edit-btn" id="editSpaceKeyBtn" title="点击修改快捷键"><i
+                                                class="fas fa-edit"></i></button>
+                                    </div>
+                                    <div class="canvas-help-row">
+                                        <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                                id="spaceKeyDisplay">空格</kbd> + <span
+                                                id="canvasHelpSpaceLeftClick">左键（按住）</span></span>
+                                        <span class="canvas-help-desc" id="canvasHelpSpaceDesc">拖动画布</span>
+                                    </div>
+                                </div>
+                                <div class="canvas-help-section">
+                                    <div class="canvas-help-section-title" id="canvasHelpTouchpadTitle">触控板操作</div>
+                                    <div class="canvas-help-row">
+                                        <span class="canvas-help-key" id="canvasHelpTouchpadPinch">双指捏合</span>
+                                        <span class="canvas-help-desc" id="canvasHelpTouchpadPinchDesc">缩放画布</span>
+                                    </div>
+                                    <div class="canvas-help-row">
+                                        <span class="canvas-help-key" id="canvasHelpTouchpadScroll">双指滑动</span>
+                                        <span class="canvas-help-desc" id="canvasHelpTouchpadScrollDesc">拖动画布</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- 快捷键录制提示 -->
+                            <div class="canvas-shortcut-recorder" id="canvasShortcutRecorder" style="display: none;">
+                                <div class="recorder-content">
+                                    <span class="recorder-text" id="recorderText">请按下新的快捷键...</span>
+                                    <div class="recorder-buttons">
+                                        <button class="recorder-help-btn" id="recorderHelpBtn" title="可用按键"><i
+                                                class="fas fa-question-circle"></i></button>
+                                        <button class="recorder-cancel-btn" id="recorderCancelBtn">取消</button>
+                                    </div>
+                                </div>
+                                <!-- 可用按键说明 -->
+                                <div class="recorder-help-tooltip" id="recorderHelpTooltip" style="display: none;">
+                                    <div class="tooltip-title" id="recorderHelpTitle">可用按键</div>
+                                    <div class="tooltip-content">
+                                        <div class="tooltip-row"><span class="tooltip-label"
+                                                id="tooltipModifierLabel">修饰键:</span> Ctrl, Alt, Shift, Cmd/Win</div>
+                                        <div class="tooltip-row"><span class="tooltip-label"
+                                                id="tooltipSpecialLabel">特殊键:</span> Space, Tab</div>
+                                        <div class="tooltip-row"><span class="tooltip-label"
+                                                id="tooltipLetterLabel">字母键:</span> A-Z</div>
+                                        <div class="tooltip-row"><span class="tooltip-label"
+                                                id="tooltipNumberLabel">数字键:</span> 0-9</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Canvas管理弹窗 -->
+                        <div class="canvas-manage-modal" id="canvasManageModal" style="display: none;">
+                            <div class="canvas-manage-modal-header">
+                                <h4 id="canvasManageModalTitle">画布管理</h4>
+                                <button class="canvas-manage-modal-close" id="canvasManageModalClose"><i
+                                        class="fas fa-times"></i></button>
+                            </div>
+                            <div class="canvas-manage-modal-body">
+                                <button id="canvasPerfSettingsBtn" class="canvas-manage-btn"
+                                    style="margin-bottom: 8px;">
+                                    <i class="fas fa-tachometer-alt"></i>
+                                    <span id="canvasPerfSettingsText">性能</span>
+                                </button>
+                                <button id="importCanvasBtn" class="canvas-manage-btn">
+                                    <i class="fas fa-file-import"></i>
+                                    <span id="importCanvasText">导入</span>
+                                </button>
+                                <button id="exportCanvasBtn" class="canvas-manage-btn">
+                                    <i class="fas fa-file-export"></i>
+                                    <span id="exportCanvasText">导出</span>
+                                </button>
+                                <!-- 清除按钮组（主按钮 + 下拉菜单） -->
+                                <div class="canvas-clear-dropdown" id="canvasClearDropdown">
+                                    <button id="clearMenuBtn" class="canvas-manage-btn danger">
+                                        <i class="fas fa-trash-alt"></i>
+                                        <span id="clearMenuText">清除</span>
+                                        <i class="fas fa-chevron-down clear-dropdown-arrow"></i>
+                                    </button>
+                                    <!-- 清除下拉菜单 -->
+                                    <div class="clear-dropdown-menu" id="clearDropdownMenu" style="display: none;">
+                                        <!-- 选项1：点击清除 -->
+                                        <button class="clear-dropdown-item" id="clearByClickBtn">
+                                            <i class="fas fa-mouse-pointer"></i>
+                                            <span id="clearByClickText">点击清除</span>
+                                        </button>
+                                        <!-- 选项2：清空未标注节点（原有功能） -->
+                                        <div class="clear-dropdown-item-group">
+                                            <button class="clear-dropdown-item" id="clearTempNodesBtn">
+                                                <i class="fas fa-eraser"></i>
+                                                <span id="clearTempNodesText">清空未标注节点</span>
+                                            </button>
+                                            <button class="clear-dropdown-help-btn" id="clearTempNodesHelpBtn"
+                                                title="查看清除规则">
+                                                <i class="fas fa-question-circle"></i>
+                                            </button>
+                                            <!-- 清除规则提示框 -->
+                                            <div class="clear-rules-tooltip" id="clearRulesTooltip"
+                                                style="display: none;">
+                                                <div class="clear-rules-header">
+                                                    <i class="fas fa-info-circle"></i>
+                                                    <span id="clearRulesTooltipTitle">清除规则</span>
+                                                </div>
+                                                <div class="clear-rules-content">
+                                                    <div class="clear-rules-section">
+                                                        <div class="clear-rules-section-title" id="clearRulesWillClear">
+                                                            会被清除：
+                                                        </div>
+                                                        <ul>
+                                                            <li id="clearRuleTemp"><strong>书签型临时栏目</strong>：无说明 + 默认标题 +
+                                                                无连接线
+                                                            </li>
+                                                            <li id="clearRuleMd"><strong>空白栏目</strong>：内容为空 + 无连接线</li>
+                                                        </ul>
+                                                    </div>
+                                                    <div class="clear-rules-section">
+                                                        <div class="clear-rules-section-title" id="clearRulesWillKeep">
+                                                            会被保留：
+                                                        </div>
+                                                        <ul>
+                                                            <li id="clearRuleKeepDesc"><i class="fas fa-check"></i>
+                                                                有说明文字</li>
+                                                            <li id="clearRuleKeepTitle"><i class="fas fa-check"></i>
+                                                                标题被修改过</li>
+                                                            <li id="clearRuleKeepEdge"><i class="fas fa-check"></i> 有连接线
+                                                            </li>
+                                                        </ul>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <!-- 选项3：清除全部（永久栏目除外） -->
+                                        <button class="clear-dropdown-item clear-all-danger" id="clearAllBtn">
+                                            <i class="fas fa-trash"></i>
+                                            <span id="clearAllText">清除全部（永久栏目除外）</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Canvas内容容器（应用缩放和平移） -->
+                        <div class="canvas-content" id="canvasContent">
+                            <!-- 临时节点和永久栏目都在这里 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 永久栏目 - 在canvas-content内部通过JS添加 -->
+            <template id="permanentSectionTemplate">
+                <div class="permanent-bookmark-section" id="permanentSection">
+                    <div class="permanent-section-header" id="permanentSectionHeader">
+                        <div class="permanent-section-title">
+                            <div class="permanent-section-title-left">
+                                <span class="permanent-section-index-badge" data-permanent-index-badge
+                                    style="display: none;"></span>
+                                <h3 id="permanentSectionTitle">书签树 (永久栏目)</h3>
+                            </div>
+                            <div class="permanent-section-actions">
+                                <div class="permanent-section-marker-dropdown" id="markerDropdown">
+                                    <button class="permanent-section-action-btn marker-action-btn"
+                                        id="markerMenuBtn" title="标识管理">
+                                        <i class="fas fa-tags"></i>
+                                    </button>
+                                    <div class="marker-dropdown-menu" id="markerDropdownMenu" style="display: none;">
+                                        <button class="marker-dropdown-item" id="markerClearBtn">
+                                            <i class="fas fa-eraser"></i>
+                                            <span id="markerClearText">清除标识（设为基准）</span>
+                                        </button>
+                                        <button class="marker-dropdown-item" id="markerToggleBtn">
+                                            <i class="fas fa-eye-slash"></i>
+                                            <span id="markerToggleText">关闭标识显示</span>
+                                        </button>
+                                        <div class="marker-dropdown-separator"></div>
+                                        <label class="marker-dropdown-item marker-auto-toggle" for="markerAutoClearToggle">
+                                            <input type="checkbox" id="markerAutoClearToggle">
+                                            <span id="markerAutoClearText">自动定时清除</span>
+                                        </label>
+                                        <div class="marker-dropdown-item marker-auto-interval">
+                                            <span id="markerAutoClearIntervalLabel">间隔</span>
+                                            <div class="marker-interval-controls">
+                                                <div class="marker-combo" id="markerAutoClearCombo">
+                                                    <input type="text" id="markerAutoClearInput" value="1小时" autocomplete="off">
+                                                    <button type="button" class="marker-combo-toggle" id="markerAutoClearToggleBtn"
+                                                        title="选择预设">
+                                                        <i class="fas fa-chevron-down"></i>
+                                                    </button>
+                                                    <div class="marker-combo-list" id="markerAutoClearList" style="display: none;">
+                                                        <button type="button" class="marker-combo-option" data-minutes="60">1小时</button>
+                                                        <button type="button" class="marker-combo-option" data-minutes="180">3小时</button>
+                                                        <button type="button" class="marker-combo-option" data-minutes="360">6小时</button>
+                                                        <button type="button" class="marker-combo-option" data-minutes="720">12小时</button>
+                                                        <button type="button" class="marker-combo-option" data-minutes="1440">1天</button>
+                                                        <button type="button" class="marker-combo-option" data-minutes="4320">3天</button>
+                                                        <button type="button" class="marker-combo-option" data-minutes="10080">7天</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button class="permanent-section-action-btn permanent-section-copy-btn" title="复制永久栏目">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                                <button class="permanent-section-action-btn permanent-section-pin-btn pinned"
+                                    id="permanentSectionPinBtn" title="置顶栏目">
+                                    <i class="fas fa-thumbtack"></i>
+                                </button>
+                                <button class="permanent-section-action-btn permanent-section-remove-btn"
+                                    title="删除该永久栏目副本">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="permanent-section-tip-container" id="permanentSectionTipContainer">
+                            <div class="permanent-section-tip-content">
+                                <div class="permanent-section-tip" id="permanentSectionTip"></div>
+                                <div class="permanent-section-tip-controls">
+                                    <button class="permanent-section-tip-edit-btn" id="permanentSectionTipEditBtn"
+                                        title="编辑说明">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button class="permanent-section-tip-close" id="permanentSectionTipClose"
+                                        title="关闭提示">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <textarea class="permanent-section-tip-editor" id="permanentSectionTipEditor"
+                                style="display: none;" placeholder=""></textarea>
+                        </div>
+                    </div>
+                    <div class="permanent-section-body">
+                        <div id="bookmarkTree" class="bookmark-tree">
+                            <!-- 动态加载书签树 -->
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </main>
+    </div>
+
+    <!-- 清除画布确认弹窗 -->
+    <div id="clearCanvasModal" class="modal content-center">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header compact" style="padding-left: 20px; padding-right: 20px;">
+                <h3 id="clearCanvasModalTitle" style="margin-left: 0;">清除画布</h3>
+                <button class="modal-close" id="clearCanvasModalClose">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="padding: 16px 20px;">
+                <p id="clearCanvasModalDesc" style="font-size: 14px; color: var(--text-primary); margin: 0 0 14px 0;">
+                    选择要清除的内容：
+                </p>
+
+                <div
+                    style="background: var(--bg-secondary); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <!-- 默认选中的项 (只读) -->
+                    <div>
+                        <label class="checkbox-label"
+                            style="display: flex; align-items: center; gap: 8px; cursor: not-allowed; opacity: 0.8;">
+                            <input type="checkbox" checked disabled>
+                            <span id="clearCanvasLabelDefault">临时栏目、空白节点与连接线</span>
+                        </label>
+                    </div>
+
+                    <!-- 选项：是否包含副本 -->
+                    <div>
+                        <label class="checkbox-label"
+                            style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="clearCanvasIncludeCopies">
+                            <span id="clearCanvasLabelCopies">同时清除永久栏目副本</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 统计信息 -->
+                <div id="clearCanvasStats"
+                    style="margin-bottom: 15px; padding-top: 10px; border-top: 1px dashed var(--border-color); font-size: 13px; color: var(--text-secondary);">
+                    <!-- 动态填充 -->
+                </div>
+
+                <div class="modal-footer"
+                    style="margin-top: 14px; display: flex; justify-content: flex-end; gap: 10px;">
+                    <button class="modal-btn" id="clearCanvasCancelBtn">取消</button>
+                    <button class="modal-btn danger" id="clearCanvasConfirmBtn">确认清除</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+
+    <!-- 编辑书签/文件夹弹窗 -->
+    <div id="editBookmarkModal" class="modal content-center">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header compact">
+                <h3 id="editBookmarkModalTitle">编辑书签</h3>
+                <button class="modal-close" id="editBookmarkModalClose">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="edit-bookmark-form">
+                    <div class="edit-bookmark-field">
+                        <label for="editBookmarkTitle" id="editBookmarkTitleLabel">名称</label>
+                        <input type="text" id="editBookmarkTitle" class="edit-bookmark-input" placeholder="输入名称...">
+                    </div>
+                    <div class="edit-bookmark-field" id="editBookmarkUrlField">
+                        <label for="editBookmarkUrl" id="editBookmarkUrlLabel">地址</label>
+                        <input type="text" id="editBookmarkUrl" class="edit-bookmark-input" placeholder="https://...">
+                    </div>
+                </div>
+                <div class="edit-bookmark-actions">
+                    <button id="editBookmarkCancelBtn" class="modal-btn">取消</button>
+                    <button id="editBookmarkSaveBtn" class="modal-btn primary">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

@@ -1,0 +1,1665 @@
+/* Obsidian风格的Canvas缩放和平移 */
+
+.canvas-main-container {
+    position: relative;
+    width: 100%;
+    /* Canvas 视图由外层布局负责高度，避免留下底部“黑边/空白” */
+    height: 100%;
+    overflow: hidden;
+    /* 无边框：不在容器上绘制背景渐变，避免与画布背景形成“外圈” */
+    background: transparent;
+    margin: 0;
+}
+
+[data-theme="dark"] .canvas-main-container {
+    background: transparent;
+}
+
+.canvas-workspace {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    /* 基础背景色保留在容器上 */
+    background-color: #ffffff;
+    overflow: hidden;
+    /* 无边框：移除 inset 线框 */
+    box-shadow: none;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+
+/* Grid Layer：用 transform 来移动（合成层），避免滚动时每帧更新 background-position 触发 repaint */
+.canvas-workspace::before {
+    content: none;
+}
+
+.canvas-grid-layer {
+    position: absolute;
+    inset: -200px;
+    /* 给平移留缓冲，避免 transform 位移露出空白边缘 */
+    pointer-events: none;
+    z-index: 0;
+    background-image: radial-gradient(#d0d7de 1px, transparent 1px);
+    background-size: calc(var(--canvas-scale) * 100px) calc(var(--canvas-scale) * 100px);
+    background-position: 0 0;
+    transform: translate3d(0px, 0px, 0);
+    will-change: transform;
+}
+
+[data-theme="dark"] .canvas-workspace {
+    background-color: #242526;
+    background-image: none;
+    /* 移除原有背景 */
+    box-shadow: none;
+}
+
+[data-theme="dark"] .canvas-grid-layer {
+    background-image: radial-gradient(#3a3b3c 1px, transparent 1px);
+}
+
+.canvas-content {
+    width: 100%;
+    height: 100%;
+    transform: translate(var(--canvas-pan-x), var(--canvas-pan-y)) scale(var(--canvas-scale));
+    transform-origin: left top;
+    position: relative;
+    z-index: 1;
+    will-change: transform;
+    /* GPU 加速：使用 translateZ(0) 替代 perspective，避免 3D 模式导致文字模糊 */
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    transform-style: flat;
+    /* 强制 2D 渲染，避免 perspective 引起的亚像素抗锯齿问题 */
+    /* macOS 字体平滑优化 */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.canvas-workspace.space-pressed {
+    cursor: grab;
+}
+
+.canvas-workspace.panning {
+    cursor: grabbing;
+    user-select: none;
+}
+
+.canvas-scrollbar {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 5;
+    color: #57606a;
+    pointer-events: auto;
+    transition: opacity 0.2s ease;
+    opacity: 0.92;
+}
+
+.canvas-scrollbar.vertical {
+    top: 20px;
+    right: 20px;
+    height: calc(100% - 116px);
+    flex-direction: column;
+    align-items: center;
+}
+
+.canvas-scrollbar.horizontal {
+    left: 20px;
+    bottom: 36px;
+    width: calc(100% - 80px);
+    position: absolute;
+}
+
+.canvas-scrollbar .scrollbar-controls {
+    display: flex;
+    gap: 6px;
+    pointer-events: auto;
+    opacity: 0;
+    padding: 0;
+    border-radius: 8px;
+    background: transparent;
+    box-shadow: none;
+    transition: opacity 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, padding 0.2s ease;
+}
+
+.canvas-scrollbar.vertical .scrollbar-controls {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    align-self: center;
+    order: -1;
+    margin-bottom: 8px;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.canvas-scrollbar.horizontal .scrollbar-controls {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    flex-shrink: 0;
+}
+
+.canvas-scrollbar.show-controls .scrollbar-controls {
+    opacity: 1;
+    padding: 6px;
+    background: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+}
+
+.canvas-scrollbar.horizontal.show-controls .scrollbar-controls {
+    padding: 4px 6px;
+}
+
+.canvas-scrollbar.vertical.show-controls .scrollbar-controls {
+    padding: 6px 4px;
+}
+
+.canvas-scrollbar:hover .scrollbar-controls {
+    opacity: 1;
+    padding: 6px;
+    background: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+}
+
+.canvas-scrollbar.horizontal:hover .scrollbar-controls {
+    padding: 4px 6px;
+}
+
+.canvas-scrollbar.vertical:hover .scrollbar-controls {
+    padding: 6px 4px;
+}
+
+.canvas-scrollbar.is-hidden.show-controls .scrollbar-track {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.canvas-scrollbar .scrollbar-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid rgba(9, 105, 218, 0.18);
+    background: rgba(9, 105, 218, 0.08);
+    color: #0550ae;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 12px;
+}
+
+.canvas-scrollbar .scrollbar-btn:hover {
+    background: rgba(9, 105, 218, 0.15);
+    border-color: rgba(9, 105, 218, 0.35);
+}
+
+.canvas-scrollbar .scrollbar-btn:active {
+    transform: translateY(1px);
+}
+
+.canvas-scrollbar .scrollbar-btn i {
+    pointer-events: none;
+}
+
+.canvas-scrollbar .scrollbar-track {
+    position: relative;
+    background: rgba(27, 31, 36, 0.08);
+    border-radius: 6px;
+    pointer-events: auto;
+    overflow: hidden;
+}
+
+.canvas-scrollbar.vertical .scrollbar-track {
+    width: 12px;
+    flex: 1;
+    order: 1;
+}
+
+.canvas-scrollbar.horizontal .scrollbar-track {
+    height: 12px;
+    width: 50%;
+    min-width: 200px;
+    max-width: 500px;
+    position: absolute;
+    left: 52%;
+    transform: translateX(-50%);
+    bottom: 10.5px;
+}
+
+.canvas-scrollbar .scrollbar-thumb {
+    position: absolute;
+    background: rgba(9, 105, 218, 0.5);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.canvas-scrollbar.vertical .scrollbar-thumb {
+    width: 100%;
+    min-height: 32px;
+    top: 0;
+}
+
+.canvas-scrollbar.horizontal .scrollbar-thumb {
+    height: 100%;
+    min-width: 32px;
+    left: 0;
+}
+
+.canvas-scrollbar .scrollbar-thumb:hover,
+.canvas-scrollbar .scrollbar-thumb.dragging {
+    background: rgba(9, 105, 218, 0.65);
+}
+
+.canvas-scrollbar.is-hidden {
+    opacity: 0.35;
+    pointer-events: none;
+    /* 隐藏时允许穿透 */
+}
+
+.canvas-scrollbar.is-hidden .scrollbar-controls {
+    pointer-events: auto;
+    /* 但控制按钮仍可点击 */
+}
+
+.canvas-scrollbar.is-hidden.show-controls {
+    opacity: 1;
+    pointer-events: auto;
+    /* 显示控制时恢复事件 */
+}
+
+.canvas-scrollbar.is-hidden .scrollbar-track {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.canvas-scrollbar.is-hidden .scrollbar-thumb {
+    display: none;
+}
+
+.canvas-scrollbar.is-disabled .scrollbar-track {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+.canvas-scrollbar.is-disabled .scrollbar-thumb {
+    cursor: not-allowed;
+}
+
+.canvas-scrollbar.is-disabled .scrollbar-btn.scroll-disable {
+    background: rgba(9, 105, 218, 0.12);
+    color: rgba(9, 105, 218, 0.6);
+}
+
+.canvas-scrollbar .scrollbar-btn.scroll-hide {
+    background: rgba(9, 105, 218, 0.1);
+}
+
+.canvas-scrollbar:hover {
+    opacity: 1;
+}
+
+.canvas-scrollbar.horizontal .scrollbar-hint {
+    display: none;
+    font-size: 12px;
+    color: #57606a;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.canvas-scrollbar.horizontal.show-controls .scrollbar-hint {
+    display: inline-block;
+}
+
+
+[data-theme="dark"] .canvas-scrollbar {
+    color: #c9d1d9;
+}
+
+[data-theme="dark"] .canvas-scrollbar.show-controls .scrollbar-controls {
+    background: rgba(27, 32, 45, 0.9);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .canvas-scrollbar.horizontal.show-controls .scrollbar-controls {
+    background: rgba(27, 32, 45, 0.9);
+}
+
+[data-theme="dark"] .canvas-scrollbar:hover .scrollbar-controls {
+    background: rgba(27, 32, 45, 0.9);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .canvas-scrollbar.horizontal:hover .scrollbar-controls {
+    background: rgba(27, 32, 45, 0.9);
+}
+
+[data-theme="dark"] .canvas-scrollbar .scrollbar-btn {
+    border-color: rgba(48, 129, 247, 0.35);
+    background: rgba(48, 129, 247, 0.18);
+    color: #9bc1ff;
+}
+
+[data-theme="dark"] .canvas-scrollbar .scrollbar-btn:hover {
+    background: rgba(48, 129, 247, 0.28);
+}
+
+[data-theme="dark"] .canvas-scrollbar .scrollbar-track {
+    /* 改为更深的轨道颜色，避免在深色背景下显得偏亮 */
+    background: #121315 !important;
+}
+
+/* 明确指定纵向滚动条轨道为深色，以覆盖可能的继承样式 */
+[data-theme="dark"] .canvas-scrollbar.vertical .scrollbar-track {
+    background: #0f1012 !important;
+}
+
+[data-theme="dark"] .canvas-scrollbar .scrollbar-thumb {
+    background: rgba(48, 129, 247, 0.55);
+}
+
+[data-theme="dark"] .canvas-scrollbar .scrollbar-thumb:hover,
+[data-theme="dark"] .canvas-scrollbar .scrollbar-thumb.dragging {
+    background: rgba(48, 129, 247, 0.75);
+}
+
+[data-theme="dark"] .canvas-scrollbar.horizontal .scrollbar-hint {
+    color: #8b949e;
+}
+
+[data-theme="dark"] .canvas-scrollbar.is-disabled .scrollbar-btn.scroll-disable {
+    background: rgba(48, 129, 247, 0.24);
+    color: #bcd7ff;
+}
+
+[data-theme="dark"] .canvas-scrollbar .scrollbar-btn.scroll-hide {
+    background: rgba(48, 129, 247, 0.24);
+}
+
+[data-theme="dark"] .canvas-scrollbar .scrollbar-btn.scroll-hide:hover {
+    background: rgba(48, 129, 247, 0.3);
+}
+
+[data-theme="dark"] .canvas-scrollbar.is-disabled .scrollbar-track {
+    opacity: 0.5;
+}
+
+[data-theme="dark"] .canvas-scrollbar.is-hidden {
+    opacity: 0.45;
+}
+
+
+/* 优化缩放动画 */
+.canvas-content {
+    /* [Fix] 移除默认的 transform 过渡，防止与 JS 驱动的平移/缩放发生冲突导致闪烁 */
+    /* transition: transform 0.05s ease-out; */
+    will-change: transform;
+    /* 确保始终提升为合成层 */
+}
+
+/* 拖动时禁用过渡，确保跟手 */
+.canvas-workspace.panning .canvas-content,
+.canvas-workspace.space-pressed .canvas-content,
+.canvas-workspace.ctrl-pressed .canvas-content {
+    transition: none !important;
+}
+
+/* [Fix] 缩放时彻底禁用元素过渡，防止卡片“收缩/挤压”视觉瑕疵 */
+.canvas-workspace.is-zooming .canvas-content,
+.canvas-workspace.is-zooming .temp-canvas-node,
+.canvas-workspace.is-zooming .permanent-bookmark-section,
+.canvas-workspace.is-zooming .md-canvas-node {
+    transition: none !important;
+}
+
+/* [Fix] 缩放时禁用书签树节点的过渡效果，防止阴影/hover闪烁 */
+/* 使用通配符确保canvas内所有元素的过渡都被禁用 */
+.canvas-workspace.is-zooming .tree-item,
+.canvas-workspace.is-zooming .tree-item *,
+.canvas-workspace.is-zooming .tree-node,
+.canvas-workspace.is-zooming .bookmark-tree,
+.canvas-workspace.is-zooming .bookmark-tree *,
+.canvas-workspace.is-zooming .tree-item::after,
+.canvas-workspace.is-zooming .tree-item::before,
+.canvas-workspace.is-zooming .tree-label,
+.canvas-workspace.is-zooming .temp-bookmark-tree,
+.canvas-workspace.is-zooming .temp-bookmark-tree * {
+    transition: none !important;
+}
+
+/* 缩放时隐藏 hover 状态的拖拽提示点，避免闪烁 */
+.canvas-workspace.is-zooming .tree-item::after {
+    opacity: 0 !important;
+}
+
+/* 缩放时禁用hover效果，防止样式重计算导致闪烁 */
+.canvas-workspace.is-zooming .tree-item:hover {
+    background: transparent !important;
+}
+
+.canvas-workspace.panning .canvas-content {
+    /* Panning 时禁用命中测试，避免大量 hover/重算样式导致掉帧与内容闪烁 */
+    pointer-events: none;
+}
+
+.canvas-workspace.panning .canvas-section-ctrl-overlay {
+    /* Ctrl 蒙版在拖动时会显著增加合成与绘制压力：拖动期间直接隐藏 */
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: none !important;
+}
+
+.canvas-workspace.panning::before {
+    /* 拖动期间隐藏网格，减少高频重绘压力（结束后自动恢复） */
+    opacity: 0;
+}
+
+.canvas-workspace {
+    transition: background-position 0.05s ease-out;
+}
+
+/* 拖出永久栏目边界时的“替代UI”样式（隐藏原图标并显示简洁提示） */
+.tree-item.tree-drag-leaving {
+    position: relative;
+    opacity: 0.5;
+}
+
+.tree-item.tree-drag-leaving .tree-icon {
+    opacity: 0;
+}
+
+.tree-item.tree-drag-leaving::after {
+    content: '+';
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    line-height: 18px;
+    text-align: center;
+    border-radius: 50%;
+    background: rgba(37, 99, 235, 0.15);
+    color: #2563eb;
+    border: 1px solid rgba(37, 99, 235, 0.35);
+    font-weight: 700;
+    font-size: 12px;
+}
+
+[data-theme="dark"] .tree-item.tree-drag-leaving::after {
+    background: rgba(88, 166, 255, 0.18);
+    color: #9bc1ff;
+    border-color: rgba(88, 166, 255, 0.45);
+}
+
+/* ==================== Canvas Connections ==================== */
+.canvas-edges {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    /* Let clicks pass through to nodes */
+    z-index: 0;
+    /* Behind nodes (nodes usually have z-index 1+) */
+    overflow: visible;
+}
+
+.canvas-workspace.panning #edge-toolbar,
+.canvas-workspace.is-scrolling #edge-toolbar {
+    display: none !important;
+}
+
+.canvas-edge {
+    fill: none;
+    stroke: #999;
+    stroke-width: 2px;
+    pointer-events: stroke;
+    /* Allow interaction with the line itself */
+    cursor: pointer;
+    transition: stroke 0.2s, stroke-width 0.2s;
+}
+
+.canvas-edge:hover,
+.canvas-edge.hover {
+    stroke: #666;
+    stroke-width: 3px;
+}
+
+.canvas-edge.selected {
+    stroke: var(--accent-primary, #1877f2);
+    stroke-width: 3px;
+}
+
+[data-theme="dark"] .canvas-edge {
+    stroke: #555;
+}
+
+[data-theme="dark"] .canvas-edge:hover {
+    stroke: #888;
+}
+
+/* 连接线标签样式 */
+.canvas-edge-label {
+    font-size: 16px;
+    /* 放大标签字体，提升可读性 */
+    font-weight: 500;
+    fill: #666;
+    pointer-events: all;
+    cursor: pointer;
+    user-select: none;
+    text-shadow:
+        -1px -1px 0 #fff,
+        1px -1px 0 #fff,
+        -1px 1px 0 #fff,
+        1px 1px 0 #fff,
+        0 0 3px #fff;
+}
+
+/* 低细节模式：连线说明文字固定屏幕像素大小（不随缩放“漂移/乱跳”） */
+.canvas-workspace.canvas-low-detail .canvas-edge-label {
+    font-size: calc(8px * var(--canvas-low-detail-freeze-inv, var(--canvas-scale-inv, 1)));
+    text-shadow:
+        0 0 2px #fff,
+        0 0 4px #fff;
+}
+
+[data-theme="dark"] .canvas-workspace.canvas-low-detail .canvas-edge-label {
+    text-shadow:
+        0 0 2px #1a1a1a,
+        0 0 4px #1a1a1a;
+}
+
+/* 低细节模式下不显示“挖空矩形”（否则尺寸会与反向缩放后的文字不匹配） */
+.canvas-workspace.canvas-low-detail .canvas-edge-label-bg {
+    display: none;
+}
+
+[data-theme="dark"] .canvas-edge-label {
+    fill: #aaa;
+    text-shadow:
+        -1px -1px 0 #1a1a1a,
+        1px -1px 0 #1a1a1a,
+        -1px 1px 0 #1a1a1a,
+        1px 1px 0 #1a1a1a,
+        0 0 3px #1a1a1a;
+}
+
+.canvas-edge-label:hover {
+    fill: #333;
+}
+
+[data-theme="dark"] .canvas-edge-label:hover {
+    fill: #ddd;
+}
+
+/* 连接线标签就地编辑输入框（跟随主题） */
+.edge-label-editor {
+    position: absolute;
+    z-index: 10000;
+    padding: 6px 10px;
+    min-width: 140px;
+    max-width: 360px;
+    border-radius: 8px;
+    border: 1px solid #c9d1d9;
+    background: #ffffff;
+    color: #111111;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    outline: none;
+    pointer-events: auto;
+    white-space: nowrap;
+    font-size: 16px;
+    /* 输入字体更大 */
+    line-height: 20px;
+}
+
+[data-theme="dark"] .edge-label-editor {
+    background: #1f2022;
+    color: #e6e6e6;
+    border-color: #3a3b3c;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+/* 连接线标签内联编辑（foreignObject中的div） */
+.edge-label-inline {
+    font-size: 16px;
+    font-weight: 500;
+    white-space: nowrap;
+    color: inherit;
+    /* 会被行内样式设置为连线颜色 */
+    background: transparent;
+    outline: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    line-height: 1.05;
+    cursor: text;
+}
+
+/* Anchors & Zones - Strictly OUTSIDE node to prevent conflicts */
+.canvas-anchor-zone {
+    position: absolute;
+    z-index: 240;
+    /* Layer for hover reveal only */
+    pointer-events: auto;
+    /* Enable hover detection in external zones */
+    /* Debug: uncomment to visualize hover zones */
+    /* background: rgba(255, 0, 0, 0.1); */
+}
+
+/* Hover zones - Large semi-circle shapes for better detection (2.5x radius) */
+.zone-top {
+    top: -37.5px;
+    height: 37.5px;
+    left: 50%;
+    width: 75px;
+    transform: translateX(-50%);
+    border-radius: 37.5px 37.5px 0 0;
+}
+
+.zone-bottom {
+    bottom: -37.5px;
+    height: 37.5px;
+    left: 50%;
+    width: 75px;
+    transform: translateX(-50%);
+    border-radius: 0 0 37.5px 37.5px;
+}
+
+.zone-left {
+    left: -37.5px;
+    width: 37.5px;
+    top: 50%;
+    height: 75px;
+    transform: translateY(-50%);
+    border-radius: 37.5px 0 0 37.5px;
+}
+
+.zone-right {
+    right: -37.5px;
+    width: 37.5px;
+    top: 50%;
+    height: 75px;
+    transform: translateY(-50%);
+    border-radius: 0 37.5px 37.5px 0;
+}
+
+/* MD nodes: offset top zone and anchor down to avoid toolbar conflict */
+.md-canvas-node .zone-top {
+    top: -30px;
+    height: 30px;
+}
+
+.md-canvas-node .canvas-node-anchor[data-side="top"] {
+    top: -30px;
+    height: 30px;
+}
+
+.md-canvas-node .canvas-node-anchor[data-side="top"]::before {
+    height: 12px;
+    width: 24px;
+    border-radius: 12px 12px 0 0;
+}
+
+.canvas-node-anchor {
+    position: absolute;
+    /* Large transparent clickable area (2.5x radius) */
+    z-index: 11000;
+    /* Above resize handles (10003) */
+    opacity: 0;
+    /* Hidden by default, show on hover */
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    cursor: crosshair;
+    pointer-events: auto;
+    /* Transparent background - visible UI is in ::before */
+    background-color: transparent;
+    border: none;
+}
+
+/* Small visible UI inside large clickable area - 视觉更小但点击区域不变 */
+.canvas-node-anchor::before {
+    content: '';
+    position: absolute;
+    background-color: rgba(100, 100, 100, 0.4);
+    border: 1px solid rgba(100, 100, 100, 0.55);
+}
+
+/* Top anchor: large clickable area, small visual */
+.canvas-node-anchor[data-side="top"] {
+    width: 75px;
+    height: 37.5px;
+    top: -37.5px;
+    left: 50%;
+    transform: translateX(-50%);
+    --anchor-translate-x: -50%;
+    --anchor-translate-y: 0;
+}
+
+.canvas-node-anchor[data-side="top"]::before {
+    width: 18px;
+    height: 9px;
+    border-radius: 9px 9px 0 0;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* Bottom anchor */
+.canvas-node-anchor[data-side="bottom"] {
+    width: 75px;
+    height: 37.5px;
+    bottom: -37.5px;
+    left: 50%;
+    transform: translateX(-50%);
+    --anchor-translate-x: -50%;
+    --anchor-translate-y: 0;
+}
+
+.canvas-node-anchor[data-side="bottom"]::before {
+    width: 18px;
+    height: 9px;
+    border-radius: 0 0 9px 9px;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* Left anchor */
+.canvas-node-anchor[data-side="left"] {
+    width: 37.5px;
+    height: 75px;
+    left: -37.5px;
+    top: 50%;
+    transform: translateY(-50%);
+    --anchor-translate-x: 0;
+    --anchor-translate-y: -50%;
+}
+
+.canvas-node-anchor[data-side="left"]::before {
+    width: 9px;
+    height: 18px;
+    border-radius: 9px 0 0 9px;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+/* Right anchor */
+.canvas-node-anchor[data-side="right"] {
+    width: 37.5px;
+    height: 75px;
+    right: -37.5px;
+    top: 50%;
+    transform: translateY(-50%);
+    --anchor-translate-x: 0;
+    --anchor-translate-y: -50%;
+}
+
+.canvas-node-anchor[data-side="right"]::before {
+    width: 9px;
+    height: 18px;
+    border-radius: 0 9px 9px 0;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+/* 永久栏目（绿色） */
+.permanent-bookmark-section .canvas-node-anchor::before {
+    background-color: rgba(16, 185, 129, 0.4);
+    border-color: rgba(16, 185, 129, 0.6);
+}
+
+.permanent-bookmark-section .canvas-node-anchor:hover::before {
+    background-color: rgba(16, 185, 129, 0.6);
+    border-color: rgba(16, 185, 129, 0.85);
+}
+
+/* 临时书签栏目（使用自定义颜色） */
+.temp-canvas-node .canvas-node-anchor::before {
+    background-color: color-mix(in srgb, var(--section-color, #2563eb) 45%, transparent);
+    border-color: color-mix(in srgb, var(--section-color, #2563eb) 65%, transparent);
+}
+
+.temp-canvas-node .canvas-node-anchor:hover::before {
+    background-color: color-mix(in srgb, var(--section-color, #2563eb) 65%, transparent);
+    border-color: color-mix(in srgb, var(--section-color, #2563eb) 90%, transparent);
+}
+
+/* 空白栏目（默认蓝色） */
+.md-canvas-node .canvas-node-anchor::before {
+    background-color: rgba(9, 105, 218, 0.4);
+    border-color: rgba(9, 105, 218, 0.6);
+}
+
+.md-canvas-node .canvas-node-anchor:hover::before {
+    background-color: rgba(9, 105, 218, 0.6);
+    border-color: rgba(9, 105, 218, 0.85);
+}
+
+/* 空白栏目有自定义颜色时 */
+.md-canvas-node[data-has-color="true"] .canvas-node-anchor::before {
+    background-color: color-mix(in srgb, var(--node-glow-color) 45%, transparent);
+    border-color: color-mix(in srgb, var(--node-glow-color) 65%, transparent);
+}
+
+.md-canvas-node[data-has-color="true"] .canvas-node-anchor:hover::before {
+    background-color: color-mix(in srgb, var(--node-glow-color) 65%, transparent);
+    border-color: color-mix(in srgb, var(--node-glow-color) 90%, transparent);
+}
+
+/* 深色模式 */
+[data-theme="dark"] .canvas-node-anchor::before {
+    background-color: rgba(200, 200, 200, 0.25);
+    border-color: rgba(200, 200, 200, 0.4);
+}
+
+[data-theme="dark"] .permanent-bookmark-section .canvas-node-anchor::before {
+    background-color: rgba(52, 211, 153, 0.35);
+    border-color: rgba(52, 211, 153, 0.55);
+}
+
+[data-theme="dark"] .permanent-bookmark-section .canvas-node-anchor:hover::before {
+    background-color: rgba(52, 211, 153, 0.55);
+    border-color: rgba(52, 211, 153, 0.8);
+}
+
+[data-theme="dark"] .temp-canvas-node .canvas-node-anchor::before {
+    background-color: color-mix(in srgb, var(--section-color, #60a5fa) 40%, transparent);
+    border-color: color-mix(in srgb, var(--section-color, #60a5fa) 60%, transparent);
+}
+
+[data-theme="dark"] .temp-canvas-node .canvas-node-anchor:hover::before {
+    background-color: color-mix(in srgb, var(--section-color, #60a5fa) 60%, transparent);
+    border-color: color-mix(in srgb, var(--section-color, #60a5fa) 85%, transparent);
+}
+
+[data-theme="dark"] .md-canvas-node .canvas-node-anchor::before {
+    background-color: rgba(88, 166, 255, 0.35);
+    border-color: rgba(88, 166, 255, 0.55);
+}
+
+[data-theme="dark"] .md-canvas-node .canvas-node-anchor:hover::before {
+    background-color: rgba(88, 166, 255, 0.55);
+    border-color: rgba(88, 166, 255, 0.8);
+}
+
+[data-theme="dark"] .md-canvas-node[data-has-color="true"] .canvas-node-anchor::before {
+    background-color: color-mix(in srgb, var(--node-glow-color) 40%, transparent);
+    border-color: color-mix(in srgb, var(--node-glow-color) 60%, transparent);
+}
+
+[data-theme="dark"] .md-canvas-node[data-has-color="true"] .canvas-node-anchor:hover::before {
+    background-color: color-mix(in srgb, var(--node-glow-color) 60%, transparent);
+    border-color: color-mix(in srgb, var(--node-glow-color) 85%, transparent);
+}
+
+/* Smart Hover: Show specific anchor when its zone is hovered */
+.zone-top:hover~.canvas-node-anchor[data-side="top"],
+.zone-bottom:hover~.canvas-node-anchor[data-side="bottom"],
+.zone-left:hover~.canvas-node-anchor[data-side="left"],
+.zone-right:hover~.canvas-node-anchor[data-side="right"],
+.canvas-workspace.connecting .canvas-node-anchor,
+.canvas-node-anchor:hover {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Hover scale effect */
+.canvas-node-anchor[data-side="top"]:hover {
+    transform: translateX(-50%) scale(1.2);
+}
+
+.canvas-node-anchor[data-side="bottom"]:hover {
+    transform: translateX(-50%) scale(1.2);
+}
+
+.canvas-node-anchor[data-side="left"]:hover {
+    transform: translateY(-50%) scale(1.2);
+}
+
+.canvas-node-anchor[data-side="right"]:hover {
+    transform: translateY(-50%) scale(1.2);
+}
+
+/* Removed edge-tight positions to keep anchors clear of toolbars */
+
+/* ===== Direction popover (for Line direction) ===== */
+.md-direction-popover {
+    display: flex;
+    gap: 6px;
+    justify-content: space-between;
+    min-width: 132px;
+}
+
+.md-direction-popover .dir-chip {
+    flex: 1 1 0;
+    height: 26px;
+    min-width: 26px;
+    border-radius: 6px;
+    border: 1px solid rgba(9, 105, 218, 0.18);
+    background: rgba(255, 255, 255, 0.95);
+    color: #57606a;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.md-direction-popover .dir-chip i {
+    font-size: 12px;
+}
+
+[data-theme="dark"] .md-direction-popover .dir-chip {
+    border-color: rgba(48, 129, 247, 0.35);
+    background: rgba(27, 32, 45, 0.95);
+    color: #c9d1d9;
+}
+
+/* 画布书签树连线样式 - 永久栏目和书签型临时栏目 */
+.permanent-section-body .tree-children {
+    position: relative;
+    --tree-toggle-center: 16px;
+    --tree-children-indent: 12px;
+    margin-left: var(--tree-toggle-center);
+    padding-left: var(--tree-children-indent);
+    border-left: 1px solid var(--border-color);
+}
+
+.temp-canvas-node .tree-children {
+    position: relative;
+    --tree-toggle-center: 14px;
+    --tree-children-indent: 12px;
+    margin-left: var(--tree-toggle-center);
+    padding-left: var(--tree-children-indent);
+    border-left: 1px solid var(--border-color);
+}
+
+.permanent-section-body .tree-children>.tree-node,
+.temp-canvas-node .tree-children>.tree-node {
+    position: relative;
+}
+
+.permanent-section-body .tree-children>.tree-node>.tree-item,
+.temp-canvas-node .tree-children>.tree-node>.tree-item {
+    position: relative;
+}
+
+.permanent-section-body .tree-children>.tree-node>.tree-item::before,
+.temp-canvas-node .tree-children>.tree-node>.tree-item::before {
+    content: '';
+    position: absolute;
+    left: calc(-1 * var(--tree-children-indent));
+    top: 50%;
+    width: calc(var(--tree-children-indent) + var(--tree-toggle-center));
+    height: 1px;
+    transform: translateY(-50%);
+    background: var(--border-color);
+    pointer-events: none;
+}
+
+/* 暗色模式下连线颜色 */
+[data-theme="dark"] .permanent-section-body .tree-children,
+[data-theme="dark"] .temp-canvas-node .tree-children {
+    border-left-color: #3a3b3c;
+}
+
+[data-theme="dark"] .permanent-section-body .tree-children>.tree-node>.tree-item::before,
+[data-theme="dark"] .temp-canvas-node .tree-children>.tree-node>.tree-item::before {
+    background: #3a3b3c;
+}
+
+/* 画布书签树文件夹图标样式 */
+.permanent-section-body i.fas.fa-folder,
+.permanent-section-body i.fas.fa-folder-open,
+.temp-canvas-node i.fas.fa-folder,
+.temp-canvas-node i.fas.fa-folder-open {
+    color: var(--accent-primary) !important;
+    font-size: 15px !important;
+}
+
+/* 图标垂直对齐修正 */
+.permanent-section-body .tree-item .tree-icon,
+.temp-canvas-node .tree-item .tree-icon {
+    vertical-align: middle;
+    position: relative;
+    top: 0;
+}
+
+/* =============================================================================
+   性能优化：懒加载相关样式
+   ============================================================================= */
+
+/* 文件夹数量提示徽标 */
+.folder-count-badge {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 5px;
+    font-size: 10px;
+    color: var(--text-secondary, #6b7280);
+    background: var(--bg-tertiary, #f3f4f6);
+    border-radius: 8px;
+    font-weight: 500;
+    line-height: 1.3;
+    vertical-align: middle;
+}
+
+[data-theme="dark"] .folder-count-badge {
+    background: #374151;
+    color: #9ca3af;
+}
+
+/* "加载更多"按钮样式 */
+.tree-load-more {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    margin: 4px 0 4px 20px;
+    font-size: 12px;
+    color: var(--accent-primary, #2563eb);
+    background: var(--bg-secondary, #f9fafb);
+    border: 1px dashed var(--border-color, #e5e7eb);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+
+.tree-load-more:hover {
+    background: var(--accent-primary-light, #eff6ff);
+    border-color: var(--accent-primary, #2563eb);
+    transform: translateX(2px);
+}
+
+.tree-load-more i {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+[data-theme="dark"] .tree-load-more {
+    background: #1f2937;
+    border-color: #374151;
+    color: #60a5fa;
+}
+
+[data-theme="dark"] .tree-load-more:hover {
+    background: #1e3a5f;
+    border-color: #60a5fa;
+}
+
+/* "加载更多"按钮样式（根列表，避免与 folder-load-more 点击逻辑冲突） */
+.tree-load-more-root {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    margin: 6px 0;
+    font-size: 12px;
+    color: var(--accent-primary, #2563eb);
+    background: var(--bg-secondary, #f9fafb);
+    border: 1px dashed var(--border-color, #e5e7eb);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+
+.tree-load-more-root:hover {
+    background: var(--accent-primary-light, #eff6ff);
+    border-color: var(--accent-primary, #2563eb);
+    transform: translateX(2px);
+}
+
+.tree-load-more-root i {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+[data-theme="dark"] .tree-load-more-root {
+    background: #1f2937;
+    border-color: #374151;
+    color: #60a5fa;
+}
+
+[data-theme="dark"] .tree-load-more-root:hover {
+    background: #1e3a5f;
+    border-color: #60a5fa;
+}
+
+/* 折叠的文件夹子容器 - 不显示 */
+.tree-children:not(.expanded) {
+    display: none;
+}
+
+/* 休眠栏目样式（视口外） */
+.temp-canvas-node.dormant-content {
+    /* 休眠时减少渲染负担 */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 280px;
+}
+
+.temp-canvas-node.dormant-content .temp-node-body {
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.temp-canvas-node.dormant-content .temp-bookmark-tree {
+    display: none;
+}
+
+/* 低缩放细节模式：缩得很小时隐藏“重内容”，但保留连接线与线标签 */
+.canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-description-container,
+.canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-body {
+    display: none !important;
+}
+
+.canvas-workspace.canvas-low-detail .permanent-section-body {
+    display: none !important;
+}
+
+.canvas-workspace.canvas-low-detail .canvas-node-anchor,
+.canvas-workspace.canvas-low-detail .canvas-anchor-zone {
+    display: none !important;
+}
+
+/* 低缩放：栏目/永久栏目“序号(#) + 标题”居中大字（反向缩放，保证在很小缩放下仍可读） */
+.temp-node-low-detail-overlay,
+.permanent-node-low-detail-overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 2;
+    overflow: hidden;
+    /* 限制叠加文字/背景不要“溢出栏目卡片” */
+}
+
+.canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-low-detail-overlay,
+.canvas-workspace.canvas-low-detail .permanent-bookmark-section .permanent-node-low-detail-overlay {
+    display: flex;
+}
+
+/* 休眠/按需加载未渲染树内容时：也显示低细节叠层文字占位，避免出现“空白栏目” */
+.temp-canvas-node.dormant-content .temp-node-low-detail-overlay,
+.temp-canvas-node.temp-tree-unloaded .temp-node-low-detail-overlay {
+    display: flex;
+}
+
+.temp-node-low-detail-content,
+.permanent-node-low-detail-content {
+    text-align: center;
+    width: 90%;
+    /* 关键：内容会做 scale(反向缩放)，因此这里要按比例缩小“布局宽度”，避免视觉上溢出被裁剪 */
+    max-width: calc(90% / var(--canvas-low-detail-freeze-inv, var(--canvas-scale-inv, 1)));
+    max-height: calc(90% / var(--canvas-low-detail-freeze-inv, var(--canvas-scale-inv, 1)));
+    color: var(--text-primary, #111);
+    overflow: hidden;
+    box-sizing: border-box;
+    /* 只展示文字，不额外增加“卡片UI” */
+    padding: 2px;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    /* 固定相对大小（进入低细节后不再随缩放继续“变大”） */
+    transform: scale(var(--canvas-low-detail-freeze-inv, var(--canvas-scale-inv, 1)));
+    transform-origin: center;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+}
+
+[data-theme="dark"] .temp-node-low-detail-content,
+[data-theme="dark"] .permanent-node-low-detail-content {
+    color: #e5e7eb;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+.temp-node-low-detail-badge,
+.permanent-node-low-detail-badge {
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: inherit;
+    opacity: 0.9;
+    margin-bottom: 2px;
+    width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.temp-node-low-detail-title,
+.permanent-node-low-detail-title {
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 1.2;
+    width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+/* ========== 丝滑缩放性能架构 (Core Performance) ========== */
+
+/* 1. 静态优化：布局隔离 + 文字渲染优化 */
+.temp-canvas-node,
+.md-canvas-node {
+    contain: layout style;
+    /* 强制 2D 平面渲染，避免缩放时文字模糊 */
+    transform-style: flat;
+    /* macOS 字体平滑优化 */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* ========== 动态优化回退 ========== */
+/* 经测试，高频切换样式导致的 Recalc Style 开销大于渲染节省的开销，且会导致内容闪烁 */
+/* 故移除所有 is-zooming 下的隐藏/降级逻辑，保持视觉一致性 */
+
+/* 2. 动态优化：is-zooming 模式 */
+/* Grid：缩放时不再隐藏，依靠独立的 ::before 层和 GPU 合成来保证性能 */
+/* .canvas-workspace.is-zooming::before { opacity: 0; } */
+
+/* 内容层：禁用交互，且禁用过渡以消除操作延迟 */
+.canvas-workspace.is-zooming .canvas-content {
+    /* 停止鼠标命中测试，这是唯一保留的高性价比优化 */
+    pointer-events: none;
+
+    /* 核心修复：必须禁用 CSS 过渡！ */
+    /* 在快速滚动时，CSS 的 0.05s 动画会由于跟不上 JS 的 RAF 更新频率而不断被打断/重置，导致视觉上的“顿挫/阶梯感”。 */
+    /* 禁用后，画面将完全由 JS 的 RAF 驱动，实现 120Hz 的物理级丝滑。 */
+    transition: none !important;
+}
+
+/* 卡片：不再动态降级样式，避免闪烁 */
+/*
+.canvas-workspace.is-zooming .temp-canvas-node,
+.canvas-workspace.is-zooming .md-canvas-node { ... }
+*/
+
+/* 不再隐藏装饰伪元素 */
+/*
+.canvas-workspace.is-zooming .temp-canvas-node::before... { ... }
+*/
+
+/* 文字保持高质量 */
+/* .canvas-workspace.is-zooming { text-rendering: optimizeSpeed; } */
+
+/* 连接线标签不再隐藏 */
+/* .canvas-workspace.is-zooming .canvas-edge-label { opacity: 0; } */
+
+/* 3. 按钮缩放动画 */
+.canvas-content.animate-zoom {
+    transition: transform 0.3s cubic-bezier(0.33, 1, 0.68, 1) !important;
+}
+
+/* ========== 4. 视觉优化：内容加载过渡 (Fade In) ========== */
+/* 书签树加载时的平滑淡入效果（避免低细节/空白 -> DOM 的生硬切换） */
+@keyframes fadeInContent {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.bookmark-tree.animate-fade-in {
+    animation: fadeInContent 0.25s ease-out forwards;
+}
+
+/* 性能管理弹窗样式 */
+.perf-settings-modal {
+    width: 460px;
+    max-width: 90vw;
+}
+
+.perf-settings-section {
+    padding: 16px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border-color);
+}
+
+.perf-settings-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.perf-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.perf-stat-item {
+    background: var(--bg-secondary);
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.perf-stat-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.perf-stat-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--accent-primary);
+    font-family: monospace;
+}
+
+.perf-input-group {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.perf-input-group:last-child {
+    margin-bottom: 0;
+}
+
+.perf-input-group label {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.perf-input-group input {
+    width: 60px;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: monospace;
+    text-align: center;
+    -moz-appearance: textfield;
+    /* Hide spinners in Firefox */
+    appearance: textfield;
+}
+
+/* Hide spinners in Chrome/Safari/Edge/Opera */
+.perf-input-group input::-webkit-outer-spin-button,
+.perf-input-group input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.perf-input-group input:focus {
+    border-color: var(--accent-primary);
+    outline: none;
+}
+
+.perf-status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.perf-status-badge.active {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+}
+
+.perf-status-badge.inactive {
+    background: rgba(107, 114, 128, 0.15);
+    color: #6b7280;
+}
+
+[data-theme="dark"] .perf-status-badge.active {
+    background: rgba(16, 185, 129, 0.25);
+    color: #34d399;
+}
+
+/* 帮助按钮样式 */
+.perf-help-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-size: 13px;
+}
+
+.perf-help-btn:hover {
+    color: var(--accent-primary);
+    background: var(--accent-primary-light, rgba(37, 99, 235, 0.1));
+}
+
+.perf-help-btn i {
+    font-size: inherit;
+}
+
+/* 恢复默认按钮样式 */
+.perf-restore-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-size: 12px;
+}
+
+.perf-restore-btn:hover {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    background: var(--accent-primary-light, rgba(37, 99, 235, 0.08));
+}
+
+.perf-restore-btn i {
+    font-size: inherit;
+}
+
+/* 帮助弹层样式 */
+.perf-help-popover {
+    position: absolute;
+    z-index: 1000;
+    max-width: 320px;
+    padding: 12px 14px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    transition: all 0.15s ease;
+    pointer-events: none;
+}
+
+.perf-help-popover.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.perf-help-popover-content {
+    color: var(--text-secondary);
+}
+
+.perf-help-popover-content b {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+[data-theme="dark"] .perf-help-popover {
+    background: var(--bg-secondary);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* 关闭按钮样式（与canvas-manage-modal-close统一） */
+.perf-modal-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-size: 14px;
+}
+
+.perf-modal-close:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.perf-modal-close i {
+    font-size: inherit;
+}
+
+/* 底部按钮区样式 */
+.perf-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+    margin-top: 4px;
+}
+
+/* 底部按钮样式 */
+.perf-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+}
+
+.perf-btn i {
+    font-size: 12px;
+}
+
+.perf-btn.secondary {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.perf-btn.secondary:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--text-tertiary);
+}
+
+.perf-btn.primary {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: #ffffff;
+}
+
+.perf-btn.primary:hover {
+    background: var(--accent-primary-hover, #1d4ed8);
+    border-color: var(--accent-primary-hover, #1d4ed8);
+}
+
+[data-theme="dark"] .perf-btn.secondary {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .perf-btn.secondary:hover {
+    background: #374151;
+    color: var(--text-primary);
+}
+
+/* ==================== 性能优化：CSS 隔离与合成层管理 ==================== */
+
+/* 1. 核心容器隔离：防止内部布局变动影响外部 */
+/* 1. 核心容器隔离：防止内部布局变动影响外部 */
+/* [Fix] 移除 .canvas-content 的隔离，因为它需要显示那些绝对定位且可能超出其初始宽高的子元素 */
+.permanent-bookmark-section,
+.temp-canvas-node,
+.md-canvas-node {
+    /* 严格限制布局计算范围：内部改动不触发布局重排，且自带层叠上下文 */
+    /* [Fix] 移除 paint 以避免裁剪溢出的子元素（如连接点、悬浮工具栏） */
+    contain: layout style;
+}
+
+/* 2. 拖动时的性能模式 */
+.canvas-workspace.is-dragging .canvas-content *,
+.canvas-workspace.panning .canvas-content * {
+    /* 拖动期间禁止绝大多数鼠标事件响应，防止 Hover/HitTest 计算风暴 */
+    pointer-events: none !important;
+}
+
+/* 但被拖动的那个元素本身必须能响应（否则拖不动） */
+.canvas-workspace.is-dragging .permanent-bookmark-section.dragging,
+.canvas-workspace.is-dragging .temp-canvas-node.dragging {
+    pointer-events: auto !important;
+    /* 提升被拖动元素层级，并隔离 */
+    will-change: transform;
+    z-index: 9999 !important;
+}
+
+/* 3. 极速模式下的样式简化（色块模式） */
+.canvas-workspace.canvas-low-detail .permanent-bookmark-section,
+.canvas-workspace.canvas-low-detail .temp-canvas-node {
+    /* 色块模式下不需要绘制阴影和圆角细节，能省则省 */
+    box-shadow: none !important;
+    /* 强制背景不透明，方便合成器做遮挡剔除 (Occlusion Culling) */
+    background-color: var(--bg-secondary) !important;
+}
+
+/* 4. GPU 加速提示（仅针对由 JS 频繁控制 transform 的元素） */
+.permanent-bookmark-section,
+.temp-canvas-node {
+    /* 提示浏览器：这个东西经常变位置，请给它分配独立的显存纹理 */
+    will-change: transform;
+    /* 这里的 transform-style: preserve-3d 有时会引起 blurry text，但在拖动优化中通常利大于弊 */
+    /* 如果发现文字模糊，请移除下面这行 */
+    /* transform: translateZ(0); */
+}

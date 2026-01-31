@@ -1,0 +1,14 @@
+{
+  "extensionName": {
+    "message": "书签画布",
+    "description": "插件名称"
+  },
+  "extensionDescription": {
+    "message": "书签画布：可视化整理书签、连接与说明，支持搜索与导出。",
+    "description": "插件描述"
+  },
+  "actionTitle": {
+    "message": "书签画布",
+    "description": "工具栏悬浮标题"
+  }
+}

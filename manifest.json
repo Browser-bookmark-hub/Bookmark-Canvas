@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "default_locale": "en",
+  "name": "__MSG_extensionName__",
+  "version": "1.0.0",
+  "description": "__MSG_extensionDescription__",
+  "author": "kk1",
+  "icons": {
+    "100": "icons/icon200.png"
+  },
+  "action": {
+    "default_icon": {
+      "200": "icons/icon200.png"
+    },
+    "default_title": "__MSG_actionTitle__",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "commands": {
+    "open_canvas_view": {
+      "suggested_key": {
+        "default": "Alt+3",
+        "mac": "Alt+3",
+        "windows": "Alt+3",
+        "linux": "Alt+3"
+      },
+      "description": "Open 'Bookmark Canvas' view"
+    }
+  },
+  "permissions": [
+    "bookmarks",
+    "storage",
+    "downloads",
+    "tabs",
+    "tabGroups",
+    "windows",
+    "commands"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "resources": [
+        "popup.html",
+        "icons/icon200.png",
+        "history_html/*"
+      ]
+    }
+  ]
+}
