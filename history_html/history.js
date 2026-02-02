@@ -2982,18 +2982,10 @@ function captureCanvasThumbnail() {
                     const rect = container.getBoundingClientRect();
                     const pageWidth = window.innerWidth || document.documentElement.clientWidth;
 
-                    // 固定缩略图输出尺寸，适配主UI的框（约 270x180，宽高比 3:2）
-                    // 使用 8x 分辨率确保超清显示
-                    const THUMBNAIL_WIDTH = 2160;
-                    const THUMBNAIL_HEIGHT = 1440;
-
                     const img = new Image();
                     img.onload = () => {
                         try {
                             const canvas = document.createElement('canvas');
-                            // 使用固定尺寸输出
-                            canvas.width = THUMBNAIL_WIDTH;
-                            canvas.height = THUMBNAIL_HEIGHT;
                             const ctx = canvas.getContext('2d');
                             if (!ctx) {
                                 console.warn('[Canvas Thumbnail] 无法获取 2D 上下文，退回整页截图');
@@ -3022,36 +3014,12 @@ function captureCanvasThumbnail() {
                                 return;
                             }
 
-                            // 关键：保持主 UI 固定输出尺寸，但不要拉伸变形
-                            // 这里采用「cover」策略：按目标宽高比在源图中居中裁剪，再缩放到固定尺寸
-                            const targetAspect = canvas.width / canvas.height; // 3:2
-                            let csx = ix;
-                            let csy = iy;
-                            let csw = iw;
-                            let csh = ih;
+                            // 使用源分辨率输出，避免缩放带来的模糊
+                            canvas.width = Math.round(iw);
+                            canvas.height = Math.round(ih);
+                            ctx.drawImage(img, ix, iy, iw, ih, 0, 0, canvas.width, canvas.height);
 
-                            const sourceAspect = csw / csh;
-                            if (sourceAspect > targetAspect) {
-                                // 源区域过宽：左右裁剪
-                                const newW = csh * targetAspect;
-                                csx = csx + (csw - newW) / 2;
-                                csw = newW;
-                            } else if (sourceAspect < targetAspect) {
-                                // 源区域过高：上下裁剪
-                                const newH = csw / targetAspect;
-                                csy = csy + (csh - newH) / 2;
-                                csh = newH;
-                            }
-
-                            // 最后再做一次边界收敛（浮点误差导致的越界）
-                            csx = Math.max(0, csx);
-                            csy = Math.max(0, csy);
-                            csw = Math.max(1, Math.min(img.width - csx, csw));
-                            csh = Math.max(1, Math.min(img.height - csy, csh));
-
-                            ctx.drawImage(img, csx, csy, csw, csh, 0, 0, canvas.width, canvas.height);
-
-                            const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.98);
+                            const croppedDataUrl = canvas.toDataURL('image/png');
                             browserAPI.storage.local.set({ bookmarkCanvasThumbnail: croppedDataUrl }, () => {
                                 // 静默保存，不输出日志
                             });

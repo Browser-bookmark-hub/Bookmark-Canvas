@@ -256,6 +256,8 @@
 
     // 在文档加载完成后初始化
     function initialize() {
+        // Apply theme immediately to prevent flash before DOMContentLoaded.
+        applyTheme(loadThemePreference());
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', initializeThemeSwitcher);
         } else {

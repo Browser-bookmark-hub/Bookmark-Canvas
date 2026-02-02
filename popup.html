@@ -1,56 +1,280 @@
 <!DOCTYPE html>
 <html lang="zh">
+
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bookmark Canvas</title>
-  <link rel="stylesheet" href="font-awesome.min.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title></title>
+  <link rel="stylesheet" href="font-awesome.min.css">
   <script src="theme.js"></script>
   <style>
-    :root {
-      --theme-bg-primary: #f6f7fb;
-      --theme-bg-secondary: #ffffff;
-      --theme-bg-tertiary: #f1f2f6;
-      --theme-text-primary: #1f2430;
-      --theme-text-secondary: #6b7280;
-      --theme-accent-color: #2563eb;
-      --theme-border-primary: #e5e7eb;
+    /* Theme variables */
+    html {
+      /* Light Theme (Default) */
+      --light-bg-primary: #ffffff;
+      --light-bg-secondary: #f8f9fa;
+      --light-bg-tertiary: #f0f0f0;
+      --light-bg-elevated: #ffffff;
+
+      --light-text-primary: #212529;
+      --light-text-secondary: #6c757d;
+      --light-text-disabled: #adb5bd;
+      --light-text-on-accent: #ffffff;
+
+      --light-border-primary: #dee2e6;
+      --light-border-secondary: #ced4da;
+
+      --light-input-bg: #ffffff;
+      --light-input-text: #495057;
+      --light-input-border: #ced4da;
+      --light-input-placeholder: #adb5bd;
+      --light-input-focus-border: #007AFF;
+      --light-input-focus-shadow: rgba(0, 122, 255, 0.2);
+
+      --light-accent-color: #007AFF;
+      --light-accent-color-hover: #0062cc;
+      --light-accent-text-color: #007AFF;
+
+      --light-success-color: #4CAF50;
+      --light-error-color: #FF3B30;
+      --light-warning-color: #ff9800;
+
+      --light-link-color: #007AFF;
+
+      --light-scrollbar-track: #f1f1f1;
+      --light-scrollbar-thumb: #c1c1c1;
+      --light-scrollbar-thumb-hover: #a8a8a8;
+
+      --light-icon-color: #6c757d;
+      --light-svg-icon-stroke-color-path: "%23666";
+
+      --light-status-info-bg: #e6f3ff;
+      --light-status-info-text: #007AFF;
+
+      /* Dark Theme */
+      --dark-bg-primary: #1e1e1e;
+      --dark-bg-secondary: #2d2d2d;
+      --dark-bg-tertiary: #333333;
+      --dark-bg-elevated: #383838;
+
+      --dark-text-primary: #e0e0e0;
+      --dark-text-secondary: #9e9e9e;
+      --dark-text-disabled: #6c6c6c;
+      --dark-text-on-accent: #ffffff;
+
+      --dark-border-primary: #444444;
+      --dark-border-secondary: #555555;
+
+      --dark-input-bg: #2d2d2d;
+      --dark-input-text: #e0e0e0;
+      --dark-input-border: #555555;
+      --dark-input-placeholder: #777777;
+      --dark-input-focus-border: #007AFF;
+      --dark-input-focus-shadow: rgba(0, 122, 255, 0.3);
+
+      --dark-accent-color: #007AFF;
+      --dark-accent-color-hover: #0062cc;
+      --dark-accent-text-color: #3694ff;
+
+      --dark-success-color: #4CAF50;
+      --dark-error-color: #FF3B30;
+      --dark-warning-color: #ff9800;
+
+      --dark-link-color: #3694ff;
+
+      --dark-scrollbar-track: #2d2d2d;
+      --dark-scrollbar-thumb: #555555;
+      --dark-scrollbar-thumb-hover: #666666;
+
+      --dark-icon-color: #9e9e9e;
+      --dark-svg-icon-stroke-color-path: "%23aaa";
+
+      --dark-status-info-bg: #1a3f5f;
+      --dark-status-info-text: #4da3ff;
+
+      /* Apply theme variables - defaults to light theme */
+      --theme-bg-primary: var(--light-bg-primary);
+      --theme-bg-secondary: var(--light-bg-secondary);
+      --theme-bg-tertiary: var(--light-bg-tertiary);
+      --theme-bg-elevated: var(--light-bg-elevated);
+
+      --theme-text-primary: var(--light-text-primary);
+      --theme-text-secondary: var(--light-text-secondary);
+      --theme-text-disabled: var(--light-text-disabled);
+      --theme-text-on-accent: var(--light-text-on-accent);
+
+      --theme-border-primary: var(--light-border-primary);
+      --theme-border-secondary: var(--light-border-secondary);
+
+      --theme-input-bg: var(--light-input-bg);
+      --theme-input-text: var(--light-input-text);
+      --theme-input-border: var(--light-input-border);
+      --theme-input-placeholder: var(--light-input-placeholder);
+      --theme-input-focus-border: var(--light-input-focus-border);
+      --theme-input-focus-shadow: var(--light-input-focus-shadow);
+
+      --theme-accent-color: var(--light-accent-color);
+      --theme-accent-color-hover: var(--light-accent-color-hover);
+      --theme-accent-text-color: var(--light-accent-text-color);
+
+      --theme-success-color: var(--light-success-color);
+      --theme-error-color: var(--light-error-color);
+      --theme-warning-color: var(--light-warning-color);
+
+      --theme-link-color: var(--light-link-color);
+
+      --theme-scrollbar-track: var(--light-scrollbar-track);
+      --theme-scrollbar-thumb: var(--light-scrollbar-thumb);
+      --theme-scrollbar-thumb-hover: var(--light-scrollbar-thumb-hover);
+
+      --theme-icon-color: var(--light-icon-color);
+      --theme-svg-icon-stroke-color-path: var(--light-svg-icon-stroke-color-path);
+
+      --theme-status-info-bg: var(--light-status-info-bg);
+      --theme-status-info-text: var(--light-status-info-text);
+      --theme-status-info-border: #b3d9ff;
+
+      --theme-status-error-bg: #fff2f2;
+      --theme-status-error-text: #FF3B30;
+      --theme-status-error-border: #ffcdd2;
+
+      --theme-hover-bg: #e9ecef;
+      --theme-selected-item-bg: #ddeeff;
+
+      --theme-switch-bg: #ccc;
+      --theme-switch-bg-checked: #007AFF;
+      --theme-switch-slider-bg: #ffffff;
+
+      --theme-backup-mode-auto-gradient: linear-gradient(to right, #e8f5e9, #f0f0f0);
+      --theme-backup-mode-manual-gradient: linear-gradient(to right, #f0f0f0, #e6f7ff);
+      --theme-backup-mode-slider-bg: #ffffff;
+      --theme-backup-mode-auto-text: #4CAF50;
+      --theme-backup-mode-manual-text: #007AFF;
+      --theme-backup-mode-inactive-text: #6c757d;
+
+      --theme-settings-button-bg: #f5f5f5;
+      --theme-settings-button-text: #333;
+      --theme-settings-button-border: #ddd;
+      --theme-settings-button-hover-bg: #eaeaea;
+
+      --theme-dropzone-bg: #f8f9fa;
+      --theme-dropzone-border: #ccc;
+      --theme-dropzone-hover-bg: #f0f7ff;
+      --theme-dropzone-drag-bg: #e8f4fc;
+      --theme-dropzone-success-bg: #f0fff0;
+      --theme-dropzone-error-bg: #fff0f0;
+      --theme-dropzone-text-color: #666;
+
+      color-scheme: light;
     }
-    html, body {
+
+    /* Dark Theme */
+    html[data-theme="dark"] {
+      --theme-bg-primary: var(--dark-bg-primary);
+      --theme-bg-secondary: var(--dark-bg-secondary);
+      --theme-bg-tertiary: var(--dark-bg-tertiary);
+      --theme-bg-elevated: var(--dark-bg-elevated);
+
+      --theme-text-primary: var(--dark-text-primary);
+      --theme-text-secondary: var(--dark-text-secondary);
+      --theme-text-disabled: var(--dark-text-disabled);
+      --theme-text-on-accent: var(--dark-text-on-accent);
+
+      --theme-border-primary: var(--dark-border-primary);
+      --theme-border-secondary: var(--dark-border-secondary);
+
+      --theme-input-bg: var(--dark-input-bg);
+      --theme-input-text: var(--dark-input-text);
+      --theme-input-border: var(--dark-input-border);
+      --theme-input-placeholder: var(--dark-input-placeholder);
+      --theme-input-focus-shadow: var(--dark-input-focus-shadow);
+
+      --theme-accent-text-color: #66b3ff;
+      --theme-link-color: #66b3ff;
+
+      --theme-scrollbar-track: var(--dark-scrollbar-track);
+      --theme-scrollbar-thumb: var(--dark-scrollbar-thumb);
+      --theme-scrollbar-thumb-hover: var(--dark-scrollbar-thumb-hover);
+
+      --theme-icon-color: var(--dark-icon-color);
+      --theme-svg-icon-stroke-color-path: var(--dark-svg-icon-stroke-color-path);
+
+      --theme-status-info-bg: var(--dark-status-info-bg);
+      --theme-status-info-text: var(--dark-status-info-text);
+      --theme-status-info-border: #33628f;
+
+      --theme-status-error-bg: #592626;
+      --theme-status-error-text: #ff7066;
+      --theme-status-error-border: #8f4040;
+
+      --theme-hover-bg: #3a3a3a;
+      --theme-selected-item-bg: #2a3f55;
+
+      --theme-switch-bg: #555;
+      --theme-switch-slider-bg: #121212;
+
+      --theme-backup-mode-auto-gradient: linear-gradient(to right, #253825, #2c2c2c);
+      --theme-backup-mode-manual-gradient: linear-gradient(to right, #2c2c2c, #253845);
+      --theme-backup-mode-slider-bg: #1e1e1e;
+      --theme-backup-mode-inactive-text: #757575;
+
+      --theme-settings-button-bg: #3a3a3a;
+      --theme-settings-button-text: var(--dark-text-primary);
+      --theme-settings-button-border: #555;
+      --theme-settings-button-hover-bg: #4a4a4a;
+
+      --theme-dropzone-bg: #2c2c2c;
+      --theme-dropzone-border: #555;
+      --theme-dropzone-hover-bg: #2a3a4f;
+      --theme-dropzone-drag-bg: #25354a;
+      --theme-dropzone-success-bg: #204020;
+      --theme-dropzone-error-bg: #402020;
+      --theme-dropzone-text-color: var(--dark-text-secondary);
+
+      color-scheme: dark;
+    }
+
+    body {
+      width: auto;
+      min-width: 750px;
+      max-width: 850px;
+      height: 560px;
+      min-height: 560px;
       margin: 0;
       padding: 0;
-      width: 360px;
       background: var(--theme-bg-primary);
       color: var(--theme-text-primary);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
+
     .popup-root {
       padding: 12px;
-    }
-    .section-title {
-      font-size: 14px;
-      font-weight: 600;
-      margin-bottom: 8px;
+      height: 100%;
+      box-sizing: border-box;
       display: flex;
-      align-items: center;
-      gap: 6px;
+      flex-direction: column;
     }
+
     .toolbox-canvas {
-      background: var(--theme-bg-secondary);
-      border: 1px solid var(--theme-border-primary);
-      border-radius: 10px;
-      padding: 10px;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      padding: 0;
       cursor: pointer;
       transition: box-shadow 0.2s ease, transform 0.1s ease;
+      box-shadow: none;
+      flex: 1;
     }
+
     .toolbox-canvas:hover {
-      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      box-shadow: none;
       transform: translateY(-1px);
     }
+
     #canvasThumbnail {
       width: 100%;
-      height: 160px;
-      border-radius: 8px;
+      height: 100%;
+      border-radius: 0;
       background: var(--theme-bg-tertiary);
       display: flex;
       align-items: center;
@@ -62,27 +286,221 @@
       text-align: center;
       line-height: 1.4;
     }
+
     #canvasThumbnail img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
     }
+
     .hint {
-      margin-top: 8px;
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 16px;
+      font-size: 12px;
+      color: var(--theme-text-secondary);
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+    }
+
+    .modal-content {
+      position: relative;
+      background-color: var(--theme-bg-primary);
+      margin: 10% auto;
+      padding: 16px;
+      width: 86%;
+      max-width: 520px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .modal-header h3 {
+      margin: 0;
+      font-size: 16px;
+      color: var(--theme-accent-text-color);
+    }
+
+    .modal-close {
+      border: none;
+      background: transparent;
+      font-size: 18px;
+      color: var(--theme-text-secondary);
+      cursor: pointer;
+    }
+
+    .open-source-links p {
+      margin: 8px 0 4px;
+      font-size: 13px;
+      color: var(--theme-text-secondary);
+    }
+
+    .open-source-links a {
+      display: block;
+      padding: 8px 12px;
+      background-color: var(--theme-bg-tertiary);
+      border-radius: 6px;
+      color: var(--theme-link-color);
+      text-decoration: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .shortcuts-section {
+      margin-top: 12px;
+      border-top: 1px solid var(--theme-border-primary);
+      padding-top: 12px;
+    }
+
+    .shortcuts-title {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: var(--theme-text-primary);
+    }
+
+    .shortcuts-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
       font-size: 12px;
       color: var(--theme-text-secondary);
     }
+
+    .shortcuts-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .shortcuts-row kbd {
+      background: var(--theme-bg-tertiary);
+      border: 1px solid var(--theme-border-primary);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-family: inherit;
+      color: var(--theme-text-primary);
+    }
+
+    .shortcuts-settings-btn {
+      margin-top: 10px;
+      border: 1px solid var(--theme-border-primary);
+      background: var(--theme-bg-tertiary);
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--theme-text-primary);
+    }
+
+    .shortcuts-settings-btn:hover {
+      background: var(--theme-hover-bg);
+    }
+
+    #lang-toggle-btn {
+      border: none;
+      background-color: var(--theme-accent-color);
+      color: var(--theme-text-on-accent);
+      border-radius: 8px;
+      font-weight: 500;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    #lang-toggle-btn:hover {
+      background-color: var(--theme-accent-color-hover);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+      transform: translateY(-1px);
+    }
   </style>
 </head>
+
 <body>
   <div class="popup-root">
-    <div class="section-title"><i class="fas fa-project-diagram"></i><span id="bookmarkCanvasTitle">Bookmark Canvas</span></div>
-    <div id="bookmarkCanvas" class="toolbox-canvas">
-      <div id="canvasThumbnail">Loading...</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <h2 style="margin: 0; color: #007AFF; font-size: 18px;">
+        <span id="pageTitleElement">书签画布</span>
+      </h2>
+      <div style="display: flex; align-items: center;">
+        <button id="openSourceInfoBtn"
+          style="font-size: 14px; padding: 5px 8px; margin-right: 8px; background-color: var(--theme-bg-tertiary); border: 1px solid var(--theme-border-primary); border-radius: 4px; color: var(--theme-text-secondary); cursor: pointer; position: relative;">
+          <i class="fab fa-github"></i>
+          <span class="tooltip"
+            style="position: absolute; background-color: var(--theme-tooltip-bg, rgba(0,0,0,0.7)); color: var(--theme-tooltip-text, white); padding: 2px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; visibility: hidden; opacity: 0; transition: opacity 0.3s; pointer-events: none; top: 100%; margin-top: 6px; left: 50%; transform: translateX(-50%);"
+            id="openSourceTooltip">开源信息</span>
+        </button>
+        <button id="themeSwitcher"
+          style="font-size: 14px; padding: 5px 8px; margin-right: 8px; background-color: var(--theme-bg-tertiary); border: 1px solid var(--theme-border-primary); border-radius: 4px; color: var(--theme-text-secondary); cursor: pointer; position: relative;">
+          <i class="fas fa-moon" id="darkModeIcon" style="display: none;"></i>
+          <i class="fas fa-sun" id="lightModeIcon" style="display: none;"></i>
+          <i class="fas fa-desktop" id="systemModeIcon"></i>
+          <span class="tooltip"
+            style="position: absolute; background-color: var(--theme-tooltip-bg, rgba(0,0,0,0.7)); color: var(--theme-tooltip-text, white); padding: 2px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; visibility: hidden; opacity: 0; transition: opacity 0.3s; pointer-events: none; top: 100%; margin-top: 6px; left: 50%; transform: translateX(-50%);"
+            id="themeSwitcherTooltip">切换主题</span>
+        </button>
+        <button id="lang-toggle-btn"
+          style="font-size: 12px; padding: 5px 8px; margin: 0; z-index: 10000; position: relative; min-width: 90px; min-height: 28px;">中文
+          / English</button>
+      </div>
     </div>
-    <div class="hint" id="canvasHint"></div>
+
+    <div id="bookmarkCanvas" class="toolbox-canvas">
+      <div id="canvasThumbnail">
+        <div class="hint" id="canvasHint"></div>
+      </div>
+    </div>
   </div>
+
+  <div id="openSourceInfoDialog" class="modal" aria-hidden="true">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="openSourceInfoTitle">开源信息</h3>
+        <button id="closeOpenSourceDialog" class="modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="open-source-links">
+        <p id="openSourceGithubLabel">GitHub 仓库:</p>
+        <a id="openSourceGithubLink"
+          href="https://github.com/kwenxu/Bookmark-Backup?tab=readme-ov-file#readme" target="_blank">
+          <i class="fab fa-github" style="margin-right: 5px;"></i>
+          https://github.com/kwenxu/Bookmark-Backup
+        </a>
+        <p id="openSourceIssueLabel">问题反馈:</p>
+        <a id="openSourceIssueLink" href="https://github.com/kwenxu/Bookmark-Backup/issues" target="_blank">
+          <span id="openSourceIssueText">提交问题</span>
+        </a>
+      </div>
+      <div class="shortcuts-section">
+        <h4 class="shortcuts-title" id="shortcutsTitle">快捷键</h4>
+        <div class="shortcuts-list" id="shortcutsList"></div>
+        <button id="openShortcutsSettingsBtn" class="shortcuts-settings-btn" type="button">
+          在浏览器中管理快捷键
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script src="popup.js"></script>
 </body>
+
 </html>

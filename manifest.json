@@ -37,7 +37,8 @@
     "tabs",
     "tabGroups",
     "windows",
-    "commands"
+    "commands",
+    "activeTab"
   ],
   "host_permissions": [
     "<all_urls>"
