@@ -32,8 +32,16 @@ const popupI18n = {
   }
 };
 
-let currentLang = 'zh_CN';
+let currentLang = 'en';
 let currentShortcut = 'Alt+3';
+
+function detectDefaultLang() {
+  try {
+    const ui = (browserAPI?.i18n?.getUILanguage?.() || '').toLowerCase();
+    return ui.startsWith('zh') ? 'zh_CN' : 'en';
+  } catch (_) {}
+  return 'en';
+}
 
 async function safeCreateTab({ url }) {
   if (browserAPI && browserAPI.tabs && browserAPI.tabs.create) {
@@ -59,11 +67,11 @@ function setPreferredLang(lang) {
 function loadPreferredLang() {
   return new Promise((resolve) => {
     if (!browserAPI?.storage?.local) {
-      resolve('zh_CN');
+      resolve(detectDefaultLang());
       return;
     }
     browserAPI.storage.local.get(['preferredLang'], (data) => {
-      resolve(data.preferredLang || 'zh_CN');
+      resolve(data.preferredLang || detectDefaultLang());
     });
   });
 }

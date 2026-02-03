@@ -106,9 +106,18 @@ if (browserAPI.bookmarks && browserAPI.bookmarks.onChanged) {
 async function getCurrentLang() {
   try {
     const { currentLang, preferredLang } = await browserAPI.storage.local.get(['currentLang', 'preferredLang']);
-    return currentLang || preferredLang || 'zh_CN';
+    if (currentLang || preferredLang) return currentLang || preferredLang;
+    try {
+      const ui = (browserAPI?.i18n?.getUILanguage?.() || '').toLowerCase();
+      return ui.startsWith('zh') ? 'zh_CN' : 'en';
+    } catch (_) {}
+    return 'en';
   } catch (_) {
-    return 'zh_CN';
+    try {
+      const ui = (browserAPI?.i18n?.getUILanguage?.() || '').toLowerCase();
+      return ui.startsWith('zh') ? 'zh_CN' : 'en';
+    } catch (_) {}
+    return 'en';
   }
 }
 

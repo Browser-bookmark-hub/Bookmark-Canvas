@@ -26,7 +26,12 @@
         } catch (e) {
             console.warn('从 chrome.storage.local 或 localStorage 获取语言设置失败:', e);
         }
-        return 'zh_CN'; // 默认语言
+        // 默认：跟随浏览器 UI 语言（中文 => zh_CN，其它 => en）
+        try {
+            const ui = (chrome?.i18n?.getUILanguage?.() || '').toLowerCase();
+            return ui.startsWith('zh') ? 'zh_CN' : 'en';
+        } catch (_) { }
+        return 'en';
     }
     
     // 获取当前主题状态的文本说明 (异步)
