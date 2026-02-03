@@ -139,8 +139,7 @@
 
 html {
     height: 100%;
-    /* 避免滚动条出现/消失导致内容宽度变化，从而在 resize 时产生抖动 */
-    scrollbar-gutter: stable;
+    scrollbar-gutter: auto;
 }
 
 /* Canvas 视图需要“真正贴边铺满”，不保留 scrollbar gutter（否则右侧会出现一条空隙/黑边） */
@@ -765,8 +764,7 @@ body {
     flex: 1;
     padding: 24px;
     overflow-y: auto;
-    /* 避免滚动条出现/消失导致内容宽度变化，从而在 resize 时产生抖动 */
-    scrollbar-gutter: stable;
+    scrollbar-gutter: auto;
     /* 让内容区域成为稳定的滚动容器（避免撑开父级） */
     min-height: 0;
 }
