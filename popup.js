@@ -4,7 +4,8 @@ const browserAPI = (typeof chrome !== 'undefined' && chrome.runtime) ? chrome :
 const popupI18n = {
   zh_CN: {
     pageTitle: '书签画布',
-    canvasHint: (shortcut) => `点击进入画布（快捷键 ${shortcut}）`,
+    canvasHintAction: '点击进入画布',
+    canvasHintShortcut: (shortcut) => `快捷键 ${shortcut}`,
     loading: '加载中...',
     noThumbnail: '暂无缩略图',
     openSourceInfo: '开源信息',
@@ -18,7 +19,8 @@ const popupI18n = {
   },
   en: {
     pageTitle: 'Bookmark Canvas',
-    canvasHint: (shortcut) => `Click to open Canvas (${shortcut})`,
+    canvasHintAction: 'Click to open Canvas',
+    canvasHintShortcut: (shortcut) => `Shortcut ${shortcut}`,
     loading: 'Loading...',
     noThumbnail: 'No thumbnail yet',
     openSourceInfo: 'Open source',
@@ -80,7 +82,16 @@ function updateCanvasHintText(lang, shortcut) {
   const hint = document.getElementById('canvasHint');
   if (!hint) return;
   const strings = getLangStrings(lang);
-  hint.textContent = strings.canvasHint(shortcut);
+  const shortcutText = (typeof strings.canvasHintShortcut === 'function')
+    ? strings.canvasHintShortcut(shortcut)
+    : `Shortcut ${shortcut}`;
+  const actionText = strings.canvasHintAction || 'Click to open Canvas';
+  hint.innerHTML = `
+    <div class="canvas-hint-content" aria-hidden="true">
+      <div class="canvas-hint-shortcut">${shortcutText}</div>
+      <div class="canvas-hint-action">${actionText}</div>
+    </div>
+  `;
 }
 
 function updateOpenSourceText(lang) {
@@ -201,8 +212,16 @@ function applyLanguage(lang) {
   const pageTitleElement = document.getElementById('pageTitleElement');
   if (pageTitleElement) pageTitleElement.textContent = strings.pageTitle;
   const canvasThumbnailContainer = document.getElementById('canvasThumbnail');
+  // Do not overwrite the thumbnail container via textContent; it would remove the shortcut hint overlay.
+  // Instead, update/ensure the placeholder element.
   if (canvasThumbnailContainer && !canvasThumbnailContainer.querySelector('img')) {
-    canvasThumbnailContainer.textContent = strings.noThumbnail;
+    let placeholder = canvasThumbnailContainer.querySelector('.canvas-thumbnail-placeholder');
+    if (!placeholder) {
+      placeholder = document.createElement('div');
+      placeholder.className = 'canvas-thumbnail-placeholder';
+      canvasThumbnailContainer.prepend(placeholder);
+    }
+    placeholder.textContent = strings.noThumbnail;
   }
   updateCanvasHintText(lang, currentShortcut);
   updateOpenSourceText(lang);
@@ -242,6 +261,7 @@ function initializeBookmarkCanvasPopup() {
     if (hint) hint.remove();
     canvasThumbnailContainer.innerHTML = '';
     if (thumbnail && typeof thumbnail === 'string') {
+      // Clear placeholder if any
       const img = document.createElement('img');
       img.src = thumbnail;
       img.alt = 'Canvas Thumbnail';
@@ -251,9 +271,10 @@ function initializeBookmarkCanvasPopup() {
         canvasThumbnailContainer.appendChild(hint);
       }
     } else {
-      const wrapper = document.createElement('div');
-      wrapper.textContent = strings.noThumbnail;
-      canvasThumbnailContainer.appendChild(wrapper);
+      const placeholder = document.createElement('div');
+      placeholder.className = 'canvas-thumbnail-placeholder';
+      placeholder.textContent = strings.noThumbnail;
+      canvasThumbnailContainer.appendChild(placeholder);
       if (hint) {
         hint.style.display = '';
         updateCanvasHintText(lang, currentShortcut);
