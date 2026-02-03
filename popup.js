@@ -52,6 +52,48 @@ async function safeCreateTab({ url }) {
   window.open(url, '_blank');
 }
 
+async function focusOrCreateCanvasTabInCurrentWindow() {
+  const canvasUrlBase = browserAPI?.runtime?.getURL
+    ? browserAPI.runtime.getURL('history_html/history.html')
+    : null;
+  if (!canvasUrlBase) {
+    window.open('history_html/history.html?view=canvas', '_blank');
+    return;
+  }
+
+  try {
+    const win = await new Promise((resolve) => {
+      if (!browserAPI?.windows?.getCurrent) return resolve(null);
+      browserAPI.windows.getCurrent((w) => resolve(w || null));
+    });
+    const windowId = win && typeof win.id === 'number' ? win.id : null;
+
+    const tabs = await new Promise((resolve) => {
+      if (!browserAPI?.tabs?.query || windowId == null) return resolve([]);
+      browserAPI.tabs.query({ windowId }, (list) => resolve(Array.isArray(list) ? list : []));
+    });
+
+    const existing = tabs.find(t => t && typeof t.url === 'string' && t.url.startsWith(canvasUrlBase));
+    if (existing && typeof existing.id === 'number') {
+      await new Promise((resolve) => {
+        browserAPI.tabs.update(existing.id, { active: true }, () => resolve());
+      });
+      // Keep behavior window-local: only focus the current window.
+      if (windowId != null && browserAPI?.windows?.update) {
+        browserAPI.windows.update(windowId, { focused: true }, () => {});
+      }
+      return;
+    }
+
+    await new Promise((resolve) => {
+      browserAPI.tabs.create({ url: `${canvasUrlBase}?view=canvas`, active: true, windowId: windowId ?? undefined }, () => resolve());
+    });
+  } catch (_) {
+    // Fallback: create a new tab
+    await safeCreateTab({ url: `${canvasUrlBase}?view=canvas` });
+  }
+}
+
 function getLangStrings(lang) {
   return popupI18n[lang] || popupI18n.zh_CN;
 }
@@ -236,8 +278,7 @@ function initializeBookmarkCanvasPopup() {
 
   canvasContainer.addEventListener('click', async () => {
     try {
-      const url = browserAPI.runtime.getURL('history_html/history.html?view=canvas');
-      await safeCreateTab({ url });
+      await focusOrCreateCanvasTabInCurrentWindow();
     } catch (e) {
       console.warn('[Canvas Popup] Failed to open canvas view:', e);
     }
