@@ -2541,8 +2541,6 @@ function applyLanguage() {
     if (canvasHelpTabRelease) canvasHelpTabRelease.textContent = i18n.canvasHelpTabRelease[currentLang];
     const canvasHelpTabFeatures = document.getElementById('canvasHelpTabFeatures');
     if (canvasHelpTabFeatures) canvasHelpTabFeatures.textContent = i18n.canvasHelpTabFeatures[currentLang];
-    const canvasHelpPanelShortcuts = document.getElementById('canvasHelpPanelShortcuts');
-    if (canvasHelpPanelShortcuts) canvasHelpPanelShortcuts.innerHTML = i18n.canvasHelpPanelShortcuts[currentLang];
     const canvasHelpPanelRelease = document.getElementById('canvasHelpPanelRelease');
     if (canvasHelpPanelRelease) canvasHelpPanelRelease.innerHTML = i18n.canvasHelpPanelRelease[currentLang];
     const canvasHelpPanelFeatures = document.getElementById('canvasHelpPanelFeatures');
@@ -2582,10 +2580,21 @@ function applyLanguage() {
     const canvasHelpTouchpadScrollDesc = document.getElementById('canvasHelpTouchpadScrollDesc');
     if (canvasHelpTouchpadScrollDesc) canvasHelpTouchpadScrollDesc.textContent = i18n.canvasHelpTouchpadScrollDesc[currentLang];
 
+    document.querySelectorAll('[data-i18n-key]').forEach(el => {
+        const key = el.getAttribute('data-i18n-key');
+        if (key && i18n[key] && i18n[key][currentLang]) {
+            el.textContent = i18n[key][currentLang];
+        }
+    });
+
     const editCtrlKeyBtn = document.getElementById('editCtrlKeyBtn');
     if (editCtrlKeyBtn) editCtrlKeyBtn.title = i18n.canvasShortcutEditTitle[currentLang];
     const editSpaceKeyBtn = document.getElementById('editSpaceKeyBtn');
     if (editSpaceKeyBtn) editSpaceKeyBtn.title = i18n.canvasShortcutEditTitle[currentLang];
+    const editCtrlKeyBtnHelp = document.getElementById('editCtrlKeyBtnHelp');
+    if (editCtrlKeyBtnHelp) editCtrlKeyBtnHelp.title = i18n.canvasShortcutEditTitle[currentLang];
+    const editSpaceKeyBtnHelp = document.getElementById('editSpaceKeyBtnHelp');
+    if (editSpaceKeyBtnHelp) editSpaceKeyBtnHelp.title = i18n.canvasShortcutEditTitle[currentLang];
     const recorderCancelBtn = document.getElementById('recorderCancelBtn');
     if (recorderCancelBtn) recorderCancelBtn.textContent = i18n.canvasShortcutRecorderCancel[currentLang];
     const recorderHelpBtn = document.getElementById('recorderHelpBtn');

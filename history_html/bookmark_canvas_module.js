@@ -4380,11 +4380,19 @@ function updateShortcutDisplays() {
     document.querySelectorAll('[data-shortcut-display="ctrl"]').forEach(el => {
         el.textContent = ctrlName;
     });
+    const ctrlTitleSuffix = (lang === 'en') ? ' Key Operations' : '键操作';
+    document.querySelectorAll('[data-shortcut-title="ctrl"]').forEach(el => {
+        el.textContent = `${ctrlName}${ctrlTitleSuffix}`;
+    });
 
     // 更新 Space 键显示
     const spaceName = getKeyDisplayName(canvasShortcuts.spaceKey, lang);
     document.querySelectorAll('[data-shortcut-display="space"]').forEach(el => {
         el.textContent = spaceName;
+    });
+    const spaceTitleSuffix = (lang === 'en') ? ' Key Operations' : '键操作';
+    document.querySelectorAll('[data-shortcut-title="space"]').forEach(el => {
+        el.textContent = `${spaceName}${spaceTitleSuffix}`;
     });
 }
 
@@ -4504,6 +4512,14 @@ function setupCanvasHelpModal() {
         // 切换帮助弹窗
         const isVisible = helpModal.style.display === 'block';
         helpModal.style.display = isVisible ? 'none' : 'block';
+        if (!isVisible) {
+            if (typeof updateShortcutDisplays === 'function') {
+                updateShortcutDisplays();
+            }
+            if (typeof updateShortcutsDisplay === 'function') {
+                updateShortcutsDisplay();
+            }
+        }
         if (!isVisible && tabs.length && !tabs.some(tab => tab.classList.contains('active'))) {
             setActiveTab(tabs[0].dataset.helpTab);
         }
@@ -4518,6 +4534,8 @@ function setupCanvasHelpModal() {
     // 快捷键编辑按钮
     const editCtrlBtn = document.getElementById('editCtrlKeyBtn');
     const editSpaceBtn = document.getElementById('editSpaceKeyBtn');
+    const editCtrlBtnHelp = document.getElementById('editCtrlKeyBtnHelp');
+    const editSpaceBtnHelp = document.getElementById('editSpaceKeyBtnHelp');
     const recorderCancelBtn = document.getElementById('recorderCancelBtn');
 
     if (editCtrlBtn) {
@@ -4530,6 +4548,22 @@ function setupCanvasHelpModal() {
     if (editSpaceBtn) {
         editSpaceBtn.addEventListener('click', (e) => {
             e.stopPropagation();
+            startShortcutRecording('space');
+        });
+    }
+
+    if (editCtrlBtnHelp) {
+        editCtrlBtnHelp.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openCanvasShortcutsModal();
+            startShortcutRecording('ctrl');
+        });
+    }
+
+    if (editSpaceBtnHelp) {
+        editSpaceBtnHelp.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openCanvasShortcutsModal();
             startShortcutRecording('space');
         });
     }

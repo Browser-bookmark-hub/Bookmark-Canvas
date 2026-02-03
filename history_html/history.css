@@ -8134,30 +8134,7 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-shortcuts-open-header {
-    display: grid;
-    grid-template-columns: 60px 1fr;
-    align-items: center;
-    gap: 12px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border-color);
     margin-bottom: 6px;
-}
-
-.canvas-shortcuts-open-title-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-}
-
-.canvas-shortcuts-open-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-secondary);
-}
-
-.canvas-shortcuts-open-spacer {
-    height: 1px;
 }
 
 .canvas-shortcuts-available-list {
@@ -8166,40 +8143,11 @@ a.tree-label.tree-bookmark-link:hover {
     gap: 6px;
 }
 
-.canvas-shortcuts-row {
-    display: grid;
-    grid-template-columns: 60px 1fr;
-    align-items: center;
-    gap: 12px;
-    padding: 6px 0;
-}
-
-.canvas-shortcuts-key {
-    text-align: center;
-}
-
-.canvas-shortcuts-key kbd {
-    display: inline-block;
-    min-width: 60px;
-    text-align: center;
-    padding: 2px 6px;
-    border-radius: 4px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-tertiary);
-    font-size: 11px;
-}
-
-.canvas-shortcuts-action {
-    font-size: 12px;
-    color: var(--text-primary);
-    text-align: left;
-}
-
 .canvas-shortcuts-jump-btn {
     border: 1px solid var(--border-color);
     background: var(--bg-secondary);
     color: var(--accent-primary);
-    font-size: 11px;
+    font-size: 12px;
     padding: 4px 8px;
     border-radius: 6px;
     cursor: pointer;
@@ -8228,7 +8176,7 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-help-section-title {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text-secondary);
     margin-bottom: 8px;
@@ -8245,7 +8193,7 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-help-key {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-primary);
     display: flex;
     align-items: center;
@@ -8253,7 +8201,7 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-help-key kbd {
-    font-size: 10px;
+    font-size: 11px;
     padding: 2px 5px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
@@ -8262,7 +8210,7 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-help-desc {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-secondary);
     text-align: right;
 }
@@ -8340,7 +8288,7 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-shortcuts-panel .canvas-help-modal-body {
-    padding: 12px 12px 48px;
+    padding: 6px 12px 40px;
 }
 
 .canvas-manage-btn {
@@ -8678,7 +8626,7 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-help-section-header-left .canvas-shortcut-key {
-    font-size: 10px;
+    font-size: 11px;
     padding: 2px 5px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
