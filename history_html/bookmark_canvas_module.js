@@ -20261,6 +20261,7 @@ function setupMarkerDropdownControls() {
     const menu = document.getElementById('markerDropdownMenu');
     const clearBtn = document.getElementById('markerClearBtn');
     const toggleBtn = document.getElementById('markerToggleBtn');
+    const pathToggle = document.getElementById('markerPathBadgesToggle');
     const autoToggle = document.getElementById('markerAutoClearToggle');
     const inputEl = document.getElementById('markerAutoClearInput');
     const listEl = document.getElementById('markerAutoClearList');
@@ -20341,6 +20342,19 @@ function setupMarkerDropdownControls() {
                 }
             } catch (err) {
                 console.warn('[Marker] 设置自动清除失败:', err);
+            }
+        });
+    }
+
+    if (pathToggle) {
+        pathToggle.addEventListener('change', async (e) => {
+            e.stopPropagation();
+            try {
+                if (window.__canvasMarkerControl && typeof window.__canvasMarkerControl.setShowPathBadges === 'function') {
+                    await window.__canvasMarkerControl.setShowPathBadges(!!pathToggle.checked);
+                }
+            } catch (err) {
+                console.warn('[Marker] 设置路径徽标显示失败:', err);
             }
         });
     }

@@ -146,6 +146,7 @@ const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
 const MARKER_PRESET_MINUTES = [60, 180, 360, 720, 1440, 4320, 10080];
 const DEFAULT_MARKER_SETTINGS = {
     enabled: true,
+    showPathBadges: true,
     autoClearEnabled: true,
     autoClearMinutes: 60,
     nextAutoClearAt: 0
@@ -159,6 +160,7 @@ function normalizeMarkerSettings(input) {
     const out = { ...DEFAULT_MARKER_SETTINGS };
     if (input && typeof input === 'object') {
         if (typeof input.enabled === 'boolean') out.enabled = input.enabled;
+        if (typeof input.showPathBadges === 'boolean') out.showPathBadges = input.showPathBadges;
         if (typeof input.autoClearEnabled === 'boolean') out.autoClearEnabled = input.autoClearEnabled;
         const mins = Number(input.autoClearMinutes);
         if (Number.isFinite(mins) && mins > 0) out.autoClearMinutes = mins;
@@ -290,6 +292,10 @@ function updateMarkerControlsUI() {
         if (toggleIcon) {
             toggleIcon.className = isMarkerEnabled() ? 'fas fa-eye-slash' : 'fas fa-eye';
         }
+        const pathBadgeText = document.getElementById('markerPathBadgesText');
+        if (pathBadgeText) pathBadgeText.textContent = i18n.markerPathBadgesText[currentLang];
+        const pathBadgeToggle = document.getElementById('markerPathBadgesToggle');
+        if (pathBadgeToggle) pathBadgeToggle.checked = canvasMarkerSettings.showPathBadges !== false;
         const autoClearText = document.getElementById('markerAutoClearText');
         if (autoClearText) autoClearText.textContent = i18n.markerAutoClearText[currentLang];
         const intervalLabel = document.getElementById('markerAutoClearIntervalLabel');
@@ -377,6 +383,12 @@ window.__canvasMarkerControl = {
                 showToast(msg);
             }
         } catch (_) { }
+    },
+    setShowPathBadges: async (enabled) => {
+        canvasMarkerSettings.showPathBadges = !!enabled;
+        await saveMarkerSettings();
+        updateMarkerControlsUI();
+        scheduleCanvasPathBadgeRefresh('toggle-path-badges');
     },
     setAutoClearEnabled: async (enabled) => {
         canvasMarkerSettings.autoClearEnabled = !!enabled;
@@ -1608,6 +1620,10 @@ const i18n = {
     markerToggleOff: {
         'zh_CN': '关闭标识显示',
         'en': 'Disable markers'
+    },
+    markerPathBadgesText: {
+        'zh_CN': '显示路径徽标',
+        'en': 'Show path badges'
     },
     markerAutoClearText: {
         'zh_CN': '自动定时清除',
@@ -3569,6 +3585,99 @@ function applyIncrementalMoveToCachedCurrentTree(id, moveInfo) {
         // 更新节点自身的父信息（供路径/懒加载逻辑使用）
         movedNode.parentId = String(moveInfo.parentId);
         if (typeof moveInfo.index === 'number') movedNode.index = moveInfo.index;
+        cachedRenderTreeIndex = null;
+        try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+    } catch (_) {
+        // 静默失败：最终会由 refreshCachedCurrentTreeSnapshot() 兜底
+    }
+}
+
+function applyIncrementalCreateToCachedCurrentTree(id, bookmark) {
+    try {
+        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
+        if (!id || !bookmark || typeof bookmark.parentId === 'undefined') return;
+        if (!cachedCurrentTree || !cachedCurrentTree[0]) return;
+
+        const index = getCachedCurrentTreeIndex();
+        if (!index) return;
+
+        const parent = index.get(String(bookmark.parentId));
+        if (!parent) return;
+
+        const nodeId = String(id);
+        const children = Array.isArray(parent.children) ? parent.children.filter(child => String(child?.id) !== nodeId) : [];
+        const insertIndex = (typeof bookmark.index === 'number')
+            ? Math.max(0, Math.min(bookmark.index, children.length))
+            : children.length;
+
+        const newNode = {
+            id: nodeId,
+            title: bookmark.title || '',
+            url: bookmark.url || undefined,
+            parentId: String(bookmark.parentId),
+            index: (typeof bookmark.index === 'number') ? bookmark.index : insertIndex
+        };
+        if (!bookmark.url) newNode.children = [];
+
+        children.splice(insertIndex, 0, newNode);
+        parent.children = children;
+
+        if (cachedCurrentTreeIndex instanceof Map) {
+            cachedCurrentTreeIndex.set(nodeId, newNode);
+        }
+        cachedRenderTreeIndex = null;
+        try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+    } catch (_) {
+        // 静默失败：最终会由 refreshCachedCurrentTreeSnapshot() 兜底
+    }
+}
+
+function applyIncrementalRemoveFromCachedCurrentTree(id, removeInfo) {
+    try {
+        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
+        if (!id) return;
+        if (!cachedCurrentTree || !cachedCurrentTree[0]) return;
+
+        const index = getCachedCurrentTreeIndex();
+        if (!index) return;
+
+        const key = String(id);
+        const node = index.get(key);
+        const parentId = (node && typeof node.parentId !== 'undefined')
+            ? node.parentId
+            : (removeInfo && typeof removeInfo.parentId !== 'undefined'
+                ? removeInfo.parentId
+                : (removeInfo && removeInfo.node && typeof removeInfo.node.parentId !== 'undefined'
+                    ? removeInfo.node.parentId
+                    : null));
+        if (!parentId) return;
+        const parent = index.get(String(parentId));
+        if (!parent || !Array.isArray(parent.children)) return;
+        parent.children = parent.children.filter(child => String(child?.id) !== key);
+
+        cachedCurrentTreeIndex = null;
+        cachedRenderTreeIndex = null;
+        try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+    } catch (_) {
+        // 静默失败：最终会由 refreshCachedCurrentTreeSnapshot() 兜底
+    }
+}
+
+function applyIncrementalChangeToCachedCurrentTree(id, changeInfo) {
+    try {
+        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
+        if (!id || !changeInfo) return;
+        if (!cachedCurrentTree || !cachedCurrentTree[0]) return;
+
+        const index = getCachedCurrentTreeIndex();
+        if (!index) return;
+
+        const node = index.get(String(id));
+        if (!node) return;
+        if (typeof changeInfo.title !== 'undefined') node.title = changeInfo.title;
+        if (typeof changeInfo.url !== 'undefined') node.url = changeInfo.url || undefined;
+        cachedRenderTreeIndex = null;
+        try { window.__canvasRenderTreeIndex = null; } catch (_) { }
     } catch (_) {
         // 静默失败：最终会由 refreshCachedCurrentTreeSnapshot() 兜底
     }
@@ -5533,6 +5642,200 @@ function computeAncestorChangeBadgesFast(changeMap, explicitMovedIdSet = null) {
     return out;
 }
 
+function shouldShowPathBadges() {
+    return isMarkerEnabled() && canvasMarkerSettings.showPathBadges !== false;
+}
+
+function __ensureTreeChangeMap() {
+    if (!treeChangeMap || !(treeChangeMap instanceof Map)) {
+        treeChangeMap = new Map();
+    }
+    return treeChangeMap;
+}
+
+function updateTreeChangeMapForCreate(id) {
+    if (!id || !isMarkerEnabled()) return;
+    const map = __ensureTreeChangeMap();
+    map.set(String(id), { type: 'added' });
+}
+
+function updateTreeChangeMapForRemove(id, removeInfo) {
+    if (!id || !isMarkerEnabled()) return;
+    const map = __ensureTreeChangeMap();
+    const key = String(id);
+    const existing = map.get(key);
+    if (existing && existing.type && existing.type.includes('added')) {
+        map.delete(key);
+        return;
+    }
+    const oldParentId = (removeInfo && typeof removeInfo.parentId !== 'undefined')
+        ? removeInfo.parentId
+        : (removeInfo && removeInfo.node && typeof removeInfo.node.parentId !== 'undefined' ? removeInfo.node.parentId : null);
+    const oldIndex = (removeInfo && typeof removeInfo.index === 'number')
+        ? removeInfo.index
+        : (removeInfo && removeInfo.node && typeof removeInfo.node.index === 'number' ? removeInfo.node.index : null);
+    map.set(key, {
+        type: 'deleted',
+        deleted: {
+            oldParentId: oldParentId != null ? oldParentId : null,
+            oldIndex: oldIndex != null ? oldIndex : null
+        }
+    });
+}
+
+function updateTreeChangeMapForChange(id) {
+    if (!id || !isMarkerEnabled()) return;
+    const map = __ensureTreeChangeMap();
+    const key = String(id);
+    const existing = map.get(key);
+    if (existing && existing.type && existing.type.includes('deleted')) return;
+    if (existing && existing.type && existing.type.includes('added')) return;
+    const types = new Set((existing && existing.type ? existing.type.split('+') : []).filter(Boolean));
+    types.add('modified');
+    map.set(key, { ...(existing || {}), type: Array.from(types).join('+') });
+}
+
+function updateTreeChangeMapForMove(id, moveInfo) {
+    if (!id || !isMarkerEnabled()) return;
+    const map = __ensureTreeChangeMap();
+    const key = String(id);
+    const existing = map.get(key);
+    if (existing && existing.type && existing.type.includes('deleted')) return;
+    if (existing && existing.type && existing.type.includes('added')) return;
+    const types = new Set((existing && existing.type ? existing.type.split('+') : []).filter(Boolean));
+    types.add('moved');
+    const next = { ...(existing || {}), type: Array.from(types).join('+') };
+    if (moveInfo && typeof moveInfo === 'object') {
+        next.moved = {
+            oldParentId: moveInfo.oldParentId,
+            oldIndex: moveInfo.oldIndex,
+            newParentId: moveInfo.parentId,
+            newIndex: moveInfo.index
+        };
+    }
+    map.set(key, next);
+}
+
+let pendingPathBadgeRefreshTimer = null;
+function scheduleCanvasPathBadgeRefresh(reason = '') {
+    if (pendingPathBadgeRefreshTimer) {
+        try { clearTimeout(pendingPathBadgeRefreshTimer); } catch (_) { }
+    }
+    pendingPathBadgeRefreshTimer = setTimeout(() => {
+        pendingPathBadgeRefreshTimer = null;
+        refreshCanvasPathBadges(reason).catch(() => { });
+    }, 80);
+}
+
+async function refreshCanvasPathBadges(reason = '') {
+    try {
+        if (currentView !== 'canvas') return;
+        const tree = document.getElementById('bookmarkTree');
+        if (!tree) return;
+
+        if (!shouldShowPathBadges()) {
+            tree.querySelectorAll('.path-badges').forEach(el => {
+                try { el.remove(); } catch (_) { }
+            });
+            try { window.__canvasPermanentHintSet = null; } catch (_) { }
+            __canvasPermanentHintSet = null;
+            try { window.__canvasPermanentAncestorBadges = null; } catch (_) { }
+            __canvasPermanentAncestorBadges = null;
+            return;
+        }
+
+        if (!cachedCurrentTree || !cachedCurrentTree[0]) {
+            await refreshCachedCurrentTreeSnapshot('path-badges');
+        }
+        if (!cachedCurrentTree || !cachedCurrentTree[0]) return;
+
+        const map = __ensureTreeChangeMap();
+        if (map.size === 0) {
+            tree.querySelectorAll('.path-badges').forEach(el => {
+                try { el.remove(); } catch (_) { }
+            });
+            try { window.__canvasPermanentHintSet = null; } catch (_) { }
+            __canvasPermanentHintSet = null;
+            try { window.__canvasPermanentAncestorBadges = null; } catch (_) { }
+            __canvasPermanentAncestorBadges = null;
+            return;
+        }
+
+        const explicitSet = new Set();
+        try {
+            if (explicitMovedIds instanceof Map) {
+                const now = Date.now();
+                for (const [id, expiry] of explicitMovedIds.entries()) {
+                    if (typeof expiry !== 'number' || expiry > now) {
+                        explicitSet.add(String(id));
+                    }
+                }
+            }
+        } catch (_) { }
+
+        let hintSet = null;
+        let badgeMap = null;
+        try { hintSet = computeChangesHintSetFast(map, explicitSet); } catch (_) { hintSet = new Set(); }
+        try { badgeMap = computeAncestorChangeBadgesFast(map, explicitSet); } catch (_) { badgeMap = new Map(); }
+
+        try { window.__canvasPermanentHintSet = hintSet; } catch (_) { }
+        __canvasPermanentHintSet = hintSet;
+        try { window.__canvasPermanentAncestorBadges = badgeMap; } catch (_) { }
+        __canvasPermanentAncestorBadges = badgeMap;
+
+        const title = currentLang === 'zh_CN' ? '此文件夹下有变化' : 'Contains changes';
+        const items = tree.querySelectorAll('.tree-item[data-node-type="folder"]');
+        items.forEach((item) => {
+            if (!item || !item.dataset) return;
+            const level = parseInt(item.dataset.nodeLevel || '0', 10) || 0;
+            const nodeId = item.dataset.nodeId;
+            const badges = item.querySelector('.change-badges') || (function () {
+                item.insertAdjacentHTML('beforeend', '<span class="change-badges"></span>');
+                return item.querySelector('.change-badges');
+            })();
+            if (badges) {
+                badges.querySelectorAll('.path-badges').forEach(el => {
+                    try { el.remove(); } catch (_) { }
+                });
+            }
+            if (!nodeId || level <= 0) return;
+
+            // Skip if any ancestor is deleted
+            let underDeletedAncestor = false;
+            try {
+                let node = item.closest('.tree-node');
+                while (node) {
+                    const parentNode = node.parentElement && node.parentElement.closest ? node.parentElement.closest('.tree-node') : null;
+                    if (!parentNode) break;
+                    const parentItem = parentNode.querySelector(':scope > .tree-item');
+                    if (parentItem && parentItem.classList.contains('tree-change-deleted')) {
+                        underDeletedAncestor = true;
+                        break;
+                    }
+                    node = parentNode;
+                }
+            } catch (_) { }
+            if (underDeletedAncestor) return;
+
+            const mask = badgeMap ? (badgeMap.get(String(nodeId)) || 0) : 0;
+            const hasDescendants = !!(mask || (hintSet && hintSet.has && hintSet.has(String(nodeId))));
+            if (!hasDescendants || !badges) return;
+
+            let html = `<span class="path-badges"><span class="path-dot" title="${escapeHtml(title)}">•</span>`;
+            if (mask) {
+                if (mask & 1) html += '<span class="path-symbol added" title="+">+</span>';
+                if (mask & 2) html += '<span class="path-symbol deleted" title="-">-</span>';
+                if (mask & 4) html += '<span class="path-symbol modified" title="~">~</span>';
+                if (mask & 8) html += '<span class="path-symbol moved" title=">>">>></span>';
+            }
+            html += '</span>';
+            badges.insertAdjacentHTML('beforeend', html);
+        });
+
+        if (reason) console.log('[PathBadges] refreshed', reason);
+    } catch (_) { }
+}
+
 
 
 // 重建树结构，包含删除的节点（保持原始位置）
@@ -6039,7 +6342,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
     //
     // 注意：聚合徽标来自 badgeMap，代表“子树中出现的变化类型”，不应被父节点自身的变化类型掩盖。
     // 例如：父=修改+移动，子树也有移动，仍应显示灰点 + 子树聚合移动标识。
-    if (!underDeletedAncestor && level > 0 && isLazyEnabledInContext && (currentView === 'canvas')) {
+    if (!underDeletedAncestor && level > 0 && isLazyEnabledInContext && (currentView === 'canvas') && shouldShowPathBadges()) {
         try {
             // 祖先聚合徽标
             const badgeMap = (currentView === 'canvas'
@@ -6089,7 +6392,8 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
     // 因此这里只在“非懒加载上下文”下才允许 descendant scan。
     if (!underDeletedAncestor &&
         !hasChangesHintBadge &&
-        !(isLazyEnabledInContext && (currentView === 'canvas'))) {
+        !(isLazyEnabledInContext && (currentView === 'canvas')) &&
+        shouldShowPathBadges()) {
         try {
             const hasDescendant = (function hasDescendantChangesFast(n) {
                 if (!n || !Array.isArray(n.children) || n.children.length === 0) return false;
@@ -6845,6 +7149,7 @@ function handleStorageChange(changes, namespace) {
             canvasMarkerSettings = normalizeMarkerSettings(changes[MARKER_SETTINGS_KEY].newValue);
             updateMarkerControlsUI();
             scheduleMarkerAutoClear();
+            scheduleCanvasPathBadgeRefresh('marker-settings');
         } catch (_) { }
     }
 
@@ -6921,6 +7226,9 @@ browserAPI.bookmarks.onCreated.addListener(async (id, bookmark) => {
         // 支持 canvas 视图（包含永久栏目的书签树）
         if (currentView === 'canvas') {
             await applyIncrementalCreateToTree(id, bookmark);
+            applyIncrementalCreateToCachedCurrentTree(id, bookmark);
+            updateTreeChangeMapForCreate(id);
+            scheduleCanvasPathBadgeRefresh('onCreated');
             scheduleCachedCurrentTreeSnapshotRefresh('onCreated');
         }
         clearCanvasLazyChangeHints('onCreated');
@@ -6944,6 +7252,9 @@ browserAPI.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
         // 支持 canvas 视图（包含永久栏目的书签树）
         if (currentView === 'canvas') {
             applyIncrementalRemoveFromTree(id);
+            applyIncrementalRemoveFromCachedCurrentTree(id, removeInfo);
+            updateTreeChangeMapForRemove(id, removeInfo);
+            scheduleCanvasPathBadgeRefresh('onRemoved');
             scheduleCachedCurrentTreeSnapshotRefresh('onRemoved');
         }
         clearCanvasLazyChangeHints('onRemoved');
@@ -6962,6 +7273,9 @@ browserAPI.bookmarks.onChanged.addListener(async (id, changeInfo) => {
             // 支持 canvas 视图（包含永久栏目的书签树）
             if (currentView === 'canvas') {
                 await applyIncrementalChangeToTree(id, changeInfo);
+                applyIncrementalChangeToCachedCurrentTree(id, changeInfo);
+                updateTreeChangeMapForChange(id);
+                scheduleCanvasPathBadgeRefresh('onChanged');
                 scheduleCachedCurrentTreeSnapshotRefresh('onChanged');
             }
             clearCanvasLazyChangeHints('onChanged');
@@ -6985,6 +7299,8 @@ browserAPI.bookmarks.onMoved.addListener(async (id, moveInfo) => {
         if (currentView === 'canvas') {
             await applyIncrementalMoveToTree(id, moveInfo);
             applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
+            updateTreeChangeMapForMove(id, moveInfo);
+            scheduleCanvasPathBadgeRefresh('onMoved');
             scheduleCachedCurrentTreeSnapshotRefresh('onMoved');
         }
         clearCanvasLazyChangeHints('onMoved');
