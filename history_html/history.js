@@ -3298,14 +3298,21 @@ window.clearTreeCache = clearTreeCache;
 function buildTreeIndexFromRoot(root) {
     if (!root) return null;
     const map = new Map();
-    const stack = [root];
+    // Some bookmark snapshots (or trimmed caches) may omit parentId/index.
+    // For path-based features (e.g. ancestor "path badges"), we can safely infer them from structure.
+    const stack = [{ node: root, parentId: null, index: null }];
     while (stack.length) {
-        const node = stack.pop();
+        const cur = stack.pop();
+        const node = cur ? cur.node : null;
         if (!node || node.id == null) continue;
+        try {
+            if (cur && cur.parentId != null && typeof node.parentId === 'undefined') node.parentId = String(cur.parentId);
+            if (cur && typeof cur.index === 'number' && !Number.isNaN(cur.index) && typeof node.index !== 'number') node.index = cur.index;
+        } catch (_) { }
         map.set(String(node.id), node);
         if (Array.isArray(node.children) && node.children.length) {
             for (let i = node.children.length - 1; i >= 0; i--) {
-                stack.push(node.children[i]);
+                stack.push({ node: node.children[i], parentId: node.id, index: i });
             }
         }
     }
@@ -5730,12 +5737,22 @@ function scheduleCanvasPathBadgeRefresh(reason = '') {
 async function refreshCanvasPathBadges(reason = '') {
     try {
         if (currentView !== 'canvas') return;
-        const tree = document.getElementById('bookmarkTree');
-        if (!tree) return;
+        const trees = [];
+        const primaryTree = document.getElementById('bookmarkTree');
+        if (primaryTree) trees.push(primaryTree);
+        // Permanent section copies (each has its own .bookmark-tree; keep them in sync too)
+        try {
+            document.querySelectorAll('#canvasContent .permanent-bookmark-section.permanent-section-copy .bookmark-tree').forEach(t => {
+                if (t && t !== primaryTree) trees.push(t);
+            });
+        } catch (_) { }
+        if (!trees.length) return;
 
         if (!shouldShowPathBadges()) {
-            tree.querySelectorAll('.path-badges').forEach(el => {
-                try { el.remove(); } catch (_) { }
+            trees.forEach(tree => {
+                tree.querySelectorAll('.path-badges').forEach(el => {
+                    try { el.remove(); } catch (_) { }
+                });
             });
             try { window.__canvasPermanentHintSet = null; } catch (_) { }
             __canvasPermanentHintSet = null;
@@ -5748,11 +5765,21 @@ async function refreshCanvasPathBadges(reason = '') {
             await refreshCachedCurrentTreeSnapshot('path-badges');
         }
         if (!cachedCurrentTree || !cachedCurrentTree[0]) return;
+        // If cached index is missing/stale (can happen during incremental updates),
+        // refresh once so ancestor computations work without requiring a full page reload.
+        try {
+            const idx = getCachedCurrentTreeIndex();
+            if (!idx) {
+                await refreshCachedCurrentTreeSnapshot('path-badges-index');
+            }
+        } catch (_) { }
 
         const map = __ensureTreeChangeMap();
         if (map.size === 0) {
-            tree.querySelectorAll('.path-badges').forEach(el => {
-                try { el.remove(); } catch (_) { }
+            trees.forEach(tree => {
+                tree.querySelectorAll('.path-badges').forEach(el => {
+                    try { el.remove(); } catch (_) { }
+                });
             });
             try { window.__canvasPermanentHintSet = null; } catch (_) { }
             __canvasPermanentHintSet = null;
@@ -5760,6 +5787,24 @@ async function refreshCanvasPathBadges(reason = '') {
             __canvasPermanentAncestorBadges = null;
             return;
         }
+
+        // If the cached current tree snapshot doesn't include some non-deleted changed nodes yet
+        // (e.g. incremental cache update failed / race), refresh snapshot once so path computation works.
+        try {
+            const idx = getCachedCurrentTreeIndex();
+            let missing = false;
+            if (idx instanceof Map) {
+                map.forEach((change, id) => {
+                    if (missing) return;
+                    const type = change && typeof change.type === 'string' ? change.type : '';
+                    if (type.includes('deleted')) return;
+                    if (!idx.has(String(id))) missing = true;
+                });
+            }
+            if (missing) {
+                await refreshCachedCurrentTreeSnapshot('path-badges-missing-nodes');
+            }
+        } catch (_) { }
 
         const explicitSet = new Set();
         try {
@@ -5784,52 +5829,54 @@ async function refreshCanvasPathBadges(reason = '') {
         __canvasPermanentAncestorBadges = badgeMap;
 
         const title = currentLang === 'zh_CN' ? '此文件夹下有变化' : 'Contains changes';
-        const items = tree.querySelectorAll('.tree-item[data-node-type="folder"]');
-        items.forEach((item) => {
-            if (!item || !item.dataset) return;
-            const level = parseInt(item.dataset.nodeLevel || '0', 10) || 0;
-            const nodeId = item.dataset.nodeId;
-            const badges = item.querySelector('.change-badges') || (function () {
-                item.insertAdjacentHTML('beforeend', '<span class="change-badges"></span>');
-                return item.querySelector('.change-badges');
-            })();
-            if (badges) {
-                badges.querySelectorAll('.path-badges').forEach(el => {
-                    try { el.remove(); } catch (_) { }
-                });
-            }
-            if (!nodeId || level <= 0) return;
-
-            // Skip if any ancestor is deleted
-            let underDeletedAncestor = false;
-            try {
-                let node = item.closest('.tree-node');
-                while (node) {
-                    const parentNode = node.parentElement && node.parentElement.closest ? node.parentElement.closest('.tree-node') : null;
-                    if (!parentNode) break;
-                    const parentItem = parentNode.querySelector(':scope > .tree-item');
-                    if (parentItem && parentItem.classList.contains('tree-change-deleted')) {
-                        underDeletedAncestor = true;
-                        break;
-                    }
-                    node = parentNode;
+        trees.forEach((tree) => {
+            const items = tree.querySelectorAll('.tree-item[data-node-type="folder"]');
+            items.forEach((item) => {
+                if (!item || !item.dataset) return;
+                const level = parseInt(item.dataset.nodeLevel || '0', 10) || 0;
+                const nodeId = item.dataset.nodeId;
+                const badges = item.querySelector('.change-badges') || (function () {
+                    item.insertAdjacentHTML('beforeend', '<span class="change-badges"></span>');
+                    return item.querySelector('.change-badges');
+                })();
+                if (badges) {
+                    badges.querySelectorAll('.path-badges').forEach(el => {
+                        try { el.remove(); } catch (_) { }
+                    });
                 }
-            } catch (_) { }
-            if (underDeletedAncestor) return;
+                if (!nodeId || level <= 0) return;
 
-            const mask = badgeMap ? (badgeMap.get(String(nodeId)) || 0) : 0;
-            const hasDescendants = !!(mask || (hintSet && hintSet.has && hintSet.has(String(nodeId))));
-            if (!hasDescendants || !badges) return;
+                // Skip if any ancestor is deleted
+                let underDeletedAncestor = false;
+                try {
+                    let node = item.closest('.tree-node');
+                    while (node) {
+                        const parentNode = node.parentElement && node.parentElement.closest ? node.parentElement.closest('.tree-node') : null;
+                        if (!parentNode) break;
+                        const parentItem = parentNode.querySelector(':scope > .tree-item');
+                        if (parentItem && parentItem.classList.contains('tree-change-deleted')) {
+                            underDeletedAncestor = true;
+                            break;
+                        }
+                        node = parentNode;
+                    }
+                } catch (_) { }
+                if (underDeletedAncestor) return;
 
-            let html = `<span class="path-badges"><span class="path-dot" title="${escapeHtml(title)}">•</span>`;
-            if (mask) {
-                if (mask & 1) html += '<span class="path-symbol added" title="+">+</span>';
-                if (mask & 2) html += '<span class="path-symbol deleted" title="-">-</span>';
-                if (mask & 4) html += '<span class="path-symbol modified" title="~">~</span>';
-                if (mask & 8) html += '<span class="path-symbol moved" title=">>">>></span>';
-            }
-            html += '</span>';
-            badges.insertAdjacentHTML('beforeend', html);
+                const mask = badgeMap ? (badgeMap.get(String(nodeId)) || 0) : 0;
+                const hasDescendants = !!(mask || (hintSet && hintSet.has && hintSet.has(String(nodeId))));
+                if (!hasDescendants || !badges) return;
+
+                let html = `<span class="path-badges"><span class="path-dot" title="${escapeHtml(title)}">•</span>`;
+                if (mask) {
+                    if (mask & 1) html += '<span class="path-symbol added" title="+">+</span>';
+                    if (mask & 2) html += '<span class="path-symbol deleted" title="-">-</span>';
+                    if (mask & 4) html += '<span class="path-symbol modified" title="~">~</span>';
+                    if (mask & 8) html += '<span class="path-symbol moved" title=">>">>></span>';
+                }
+                html += '</span>';
+                badges.insertAdjacentHTML('beforeend', html);
+            });
         });
 
         if (reason) console.log('[PathBadges] refreshed', reason);
@@ -6532,21 +6579,44 @@ async function applyIncrementalCreateToTree(id, bookmark) {
         await renderTreeView(true);
         return;
     }
+    // Keep dataset compatible with renderTreeNodeWithChanges(), otherwise "path badges"
+    // (ancestor grey dot and +/-/~/>>) can't be applied during realtime incremental updates.
+    const parentLevel = (() => {
+        try { return parseInt(parentItem.dataset.nodeLevel || '0', 10) || 0; } catch (_) { return 0; }
+    })();
+    const nodeLevel = parentLevel + 1;
+    const nodeIndex = (typeof bookmark.index === 'number') ? bookmark.index : '';
+    try { parentItem.dataset.hasChildren = 'true'; } catch (_) { }
+
     // 生成新节点 HTML（添加绿色变更标记）
     const favicon = getFaviconUrl(bookmark.url || '');
     const labelColor = 'color: #28a745;'; // 绿色
     const labelFontWeight = 'font-weight: 500;';
-    const html = `
+    const isBookmark = !!bookmark.url;
+    const safeTitle = escapeHtml(bookmark.title || '');
+    const safeUrl = escapeHtml(bookmark.url || '');
+    const html = isBookmark
+        ? `
         <div class="tree-node">
-            <div class="tree-item tree-change-added" data-node-id="${id}" data-node-title="${escapeHtml(bookmark.title || '')}" data-node-url="${escapeHtml(bookmark.url || '')}" data-node-type="${bookmark.url ? 'bookmark' : 'folder'}">
+            <div class="tree-item tree-change-added" data-node-id="${id}" data-node-title="${safeTitle}" data-node-url="${safeUrl}" data-node-type="bookmark" data-node-level="${nodeLevel}" data-node-index="${nodeIndex}">
                 <span class="tree-toggle" style="opacity: 0"></span>
-                ${bookmark.url ? (favicon ? `<img class="tree-icon" src="${favicon}" alt="">` : `<i class="tree-icon fas fa-bookmark"></i>`) : `<i class="tree-icon fas fa-folder"></i>`}
-                ${bookmark.url ? `<a href="${escapeHtml(bookmark.url)}" target="_blank" class="tree-label tree-bookmark-link" rel="noopener noreferrer" style="${labelColor} ${labelFontWeight}">${escapeHtml(bookmark.title || '')}</a>` : `<span class="tree-label" style="${labelColor} ${labelFontWeight}">${escapeHtml(bookmark.title || '')}</span>`}
+                ${favicon ? `<img class="tree-icon" src="${favicon}" alt="">` : `<i class="tree-icon fas fa-bookmark"></i>`}
+                <a href="${safeUrl}" target="_blank" class="tree-label tree-bookmark-link" rel="noopener noreferrer" style="${labelColor} ${labelFontWeight}">${safeTitle}</a>
                 <span class="change-badges"><span class="change-badge added"><span class="badge-symbol">+</span></span></span>
             </div>
-            ${bookmark.url ? '' : '<div class="tree-children"></div>'}
         </div>
-    `;
+        `
+        : `
+        <div class="tree-node">
+            <div class="tree-item tree-change-added" data-node-id="${id}" data-node-title="${safeTitle}" data-node-type="folder" data-node-level="${nodeLevel}" data-has-children="false" data-children-loaded="true" data-child-count="0" data-node-index="${nodeIndex}">
+                <span class="tree-toggle"><i class="fas fa-chevron-right"></i></span>
+                <i class="tree-icon fas fa-folder"></i>
+                <span class="tree-label" style="${labelColor} ${labelFontWeight}">${safeTitle}</span>
+                <span class="change-badges"><span class="change-badge added"><span class="badge-symbol">+</span></span></span>
+            </div>
+            <div class="tree-children"></div>
+        </div>
+        `;
     // 插入到正确的 index 位置（忽略已删除的占位项）
     const wrapper = document.createElement('div');
     wrapper.innerHTML = html;
