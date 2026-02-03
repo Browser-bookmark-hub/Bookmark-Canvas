@@ -20260,7 +20260,6 @@ function setupMarkerDropdownControls() {
     const menuBtn = document.getElementById('markerMenuBtn');
     const menu = document.getElementById('markerDropdownMenu');
     const clearBtn = document.getElementById('markerClearBtn');
-    const toggleBtn = document.getElementById('markerToggleBtn');
     const pathToggle = document.getElementById('markerPathBadgesToggle');
     const autoToggle = document.getElementById('markerAutoClearToggle');
     const inputEl = document.getElementById('markerAutoClearInput');
@@ -20316,17 +20315,13 @@ function setupMarkerDropdownControls() {
         });
     }
 
-    if (toggleBtn) {
-        toggleBtn.addEventListener('click', async (e) => {
-            e.preventDefault();
+    const masterToggle = document.getElementById('markerMasterToggle');
+    if (masterToggle) {
+        masterToggle.addEventListener('change', async (e) => {
             e.stopPropagation();
             try {
                 if (!window.__canvasMarkerControl || typeof window.__canvasMarkerControl.setEnabled !== 'function') return;
-                const settings = (typeof window.__canvasMarkerControl.getSettings === 'function')
-                    ? window.__canvasMarkerControl.getSettings()
-                    : null;
-                const currentEnabled = settings ? settings.enabled !== false : true;
-                await window.__canvasMarkerControl.setEnabled(!currentEnabled);
+                await window.__canvasMarkerControl.setEnabled(!!masterToggle.checked);
             } catch (err) {
                 console.warn('[Marker] 切换标识显示失败:', err);
             }

@@ -405,15 +405,21 @@
                                             <i class="fas fa-eraser"></i>
                                             <span id="markerClearText">清除标识（设为基准）</span>
                                         </button>
-                                        <button class="marker-dropdown-item" id="markerToggleBtn">
-                                            <i class="fas fa-eye-slash"></i>
-                                            <span id="markerToggleText">关闭标识显示</span>
-                                        </button>
+                                        <label class="marker-dropdown-item marker-master-toggle" id="markerMasterRow">
+                                            <span class="marker-master-left">
+                                                <i class="fas fa-eye"></i>
+                                                <span id="markerMasterText">标识显示</span>
+                                            </span>
+                                            <span class="marker-switch" title="">
+                                                <input type="checkbox" id="markerMasterToggle">
+                                                <span class="marker-switch-slider"></span>
+                                            </span>
+                                        </label>
+                                        <div class="marker-dropdown-separator"></div>
                                         <label class="marker-dropdown-item marker-auto-toggle" for="markerPathBadgesToggle">
                                             <input type="checkbox" id="markerPathBadgesToggle">
                                             <span id="markerPathBadgesText">显示路径徽标</span>
                                         </label>
-                                        <div class="marker-dropdown-separator"></div>
                                         <label class="marker-dropdown-item marker-auto-toggle" for="markerAutoClearToggle">
                                             <input type="checkbox" id="markerAutoClearToggle">
                                             <span id="markerAutoClearText">自动定时清除</span>

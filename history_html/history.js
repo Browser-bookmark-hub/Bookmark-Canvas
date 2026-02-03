@@ -210,13 +210,34 @@ function scheduleMarkerAutoClear() {
         clearTimeout(markerAutoClearTimer);
         markerAutoClearTimer = null;
     }
+    // Master switch off -> auto clear is effectively disabled.
+    if (!isMarkerEnabled()) return;
     if (!canvasMarkerSettings.autoClearEnabled) return;
     const now = Date.now();
     const targetAt = canvasMarkerSettings.nextAutoClearAt || (now + canvasMarkerSettings.autoClearMinutes * 60 * 1000);
     const delay = Math.max(1000, targetAt - now);
     markerAutoClearTimer = setTimeout(async () => {
         if (!canvasMarkerSettings.autoClearEnabled) return;
-        await clearMarkersAndSetBaseline('auto');
+        if (!isMarkerEnabled()) return;
+        // If there are no markers to clear, don't refresh; just restart the timer.
+        let hasAny = false;
+        try {
+            if (treeChangeMap instanceof Map && treeChangeMap.size > 0) hasAny = true;
+        } catch (_) { }
+        try {
+            if (!hasAny && explicitMovedIds instanceof Map) {
+                const now2 = Date.now();
+                for (const [, expiry] of explicitMovedIds.entries()) {
+                    if (typeof expiry !== 'number' || expiry > now2) { hasAny = true; break; }
+                }
+            }
+        } catch (_) { }
+        try {
+            if (!hasAny && canvasLazyChangeHints && canvasLazyChangeHints.hasAny) hasAny = true;
+        } catch (_) { }
+        if (hasAny) {
+            await clearMarkersAndSetBaseline('auto');
+        }
         canvasMarkerSettings.nextAutoClearAt = Date.now() + canvasMarkerSettings.autoClearMinutes * 60 * 1000;
         await saveMarkerSettings();
         scheduleMarkerAutoClear();
@@ -282,29 +303,34 @@ function updateMarkerControlsUI() {
         if (menuText) menuText.textContent = i18n.markerMenuText[currentLang];
         const clearText = document.getElementById('markerClearText');
         if (clearText) clearText.textContent = i18n.markerClearText[currentLang];
-        const toggleText = document.getElementById('markerToggleText');
-        if (toggleText) {
-            toggleText.textContent = isMarkerEnabled()
-                ? i18n.markerToggleOff[currentLang]
-                : i18n.markerToggleOn[currentLang];
-        }
-        const toggleIcon = document.querySelector('#markerToggleBtn i');
-        if (toggleIcon) {
-            toggleIcon.className = isMarkerEnabled() ? 'fas fa-eye-slash' : 'fas fa-eye';
-        }
+        const masterEnabled = isMarkerEnabled();
+        const masterText = document.getElementById('markerMasterText');
+        if (masterText) masterText.textContent = i18n.markerMasterLabel[currentLang];
+        const masterToggle = document.getElementById('markerMasterToggle');
+        if (masterToggle) masterToggle.checked = masterEnabled;
         const pathBadgeText = document.getElementById('markerPathBadgesText');
         if (pathBadgeText) pathBadgeText.textContent = i18n.markerPathBadgesText[currentLang];
         const pathBadgeToggle = document.getElementById('markerPathBadgesToggle');
-        if (pathBadgeToggle) pathBadgeToggle.checked = canvasMarkerSettings.showPathBadges !== false;
+        if (pathBadgeToggle) {
+            pathBadgeToggle.checked = canvasMarkerSettings.showPathBadges !== false;
+            pathBadgeToggle.disabled = !masterEnabled;
+            const label = pathBadgeToggle.closest('.marker-dropdown-item');
+            if (label) label.classList.toggle('is-disabled', !masterEnabled);
+        }
         const autoClearText = document.getElementById('markerAutoClearText');
         if (autoClearText) autoClearText.textContent = i18n.markerAutoClearText[currentLang];
         const intervalLabel = document.getElementById('markerAutoClearIntervalLabel');
         if (intervalLabel) intervalLabel.textContent = i18n.markerAutoClearIntervalLabel[currentLang];
         const autoToggle = document.getElementById('markerAutoClearToggle');
-        if (autoToggle) autoToggle.checked = !!canvasMarkerSettings.autoClearEnabled;
+        if (autoToggle) {
+            autoToggle.checked = !!canvasMarkerSettings.autoClearEnabled;
+            autoToggle.disabled = !masterEnabled;
+            const label = autoToggle.closest('.marker-dropdown-item');
+            if (label) label.classList.toggle('is-disabled', !masterEnabled);
+        }
         const inputEl = document.getElementById('markerAutoClearInput');
         const minutes = Number(canvasMarkerSettings.autoClearMinutes) || 30;
-        const enabled = !!canvasMarkerSettings.autoClearEnabled;
+        const enabled = masterEnabled && !!canvasMarkerSettings.autoClearEnabled;
         const toggleBtn = document.getElementById('markerAutoClearToggleBtn');
         if (inputEl) {
             inputEl.value = formatLabel(minutes);
@@ -317,9 +343,19 @@ function updateMarkerControlsUI() {
             if (Number.isFinite(mins) && mins > 0) {
                 btn.textContent = formatLabel(mins);
             }
+            btn.disabled = !enabled;
         });
         if (toggleBtn) {
             toggleBtn.disabled = !enabled;
+        }
+
+        const intervalRow = document.getElementById('markerAutoClearCombo')?.closest('.marker-dropdown-item');
+        if (intervalRow) intervalRow.classList.toggle('is-disabled', !enabled);
+
+        // Close any open interval dropdown when disabling (prevents "still clickable" impression).
+        if (!enabled) {
+            const listEl = document.getElementById('markerAutoClearList');
+            if (listEl) listEl.style.display = 'none';
         }
     } catch (_) { }
 }
@@ -363,6 +399,8 @@ window.__canvasMarkerControl = {
         canvasMarkerSettings.enabled = nextEnabled;
         await saveMarkerSettings();
         updateMarkerControlsUI();
+        // Start/stop auto-clear timer depending on master switch.
+        scheduleMarkerAutoClear();
         // 关闭时先清空现有标识，保证即时生效
         if (!nextEnabled) {
             try {
@@ -1612,6 +1650,10 @@ const i18n = {
     markerClearText: {
         'zh_CN': '清除标识（设为基准）',
         'en': 'Clear markers (set baseline)'
+    },
+    markerMasterLabel: {
+        'zh_CN': '标识显示',
+        'en': 'Marker display'
     },
     markerToggleOn: {
         'zh_CN': '开启标识显示',

@@ -974,8 +974,8 @@ body {
 .tree-legend {
     display: flex;
     gap: 20px;
-    margin-bottom: 16px;
-    padding: 10px;
+    margin-bottom: 10px;
+    padding: 6px 10px;
     background: var(--bg-secondary);
     border-radius: 6px;
 }
@@ -3986,6 +3986,37 @@ a.tree-label.tree-bookmark-link:hover {
     background: var(--bg-tertiary);
 }
 
+.marker-dropdown-item.is-disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.marker-dropdown-item.is-disabled:hover {
+    background: transparent;
+}
+
+.marker-dropdown-item.is-disabled * {
+    pointer-events: none;
+}
+
+/* "Clear markers" should be visually destructive */
+#markerClearBtn {
+    background: #dc3545;
+    color: #fff;
+}
+
+#markerClearBtn i {
+    color: rgba(255, 255, 255, 0.95);
+}
+
+#markerClearBtn:hover {
+    background: #c82333;
+}
+
+#markerClearBtn:hover i {
+    color: #fff;
+}
+
 .marker-dropdown-item i {
     font-size: 13px;
     color: var(--text-secondary);
@@ -3996,6 +4027,68 @@ a.tree-label.tree-bookmark-link:hover {
 
 .marker-dropdown-item:hover i {
     color: var(--accent-primary);
+}
+
+.marker-master-toggle {
+    justify-content: space-between;
+}
+
+.marker-master-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.marker-switch {
+    position: relative;
+    width: 38px;
+    height: 20px;
+    flex: 0 0 auto;
+}
+
+.marker-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.marker-switch-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    transition: background 0.15s ease, border-color 0.15s ease;
+    cursor: pointer;
+}
+
+.marker-switch-slider:before {
+    content: "";
+    position: absolute;
+    height: 16px;
+    width: 16px;
+    left: 1px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: #fff;
+    border-radius: 999px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    transition: transform 0.15s ease;
+}
+
+.marker-switch input:checked + .marker-switch-slider {
+    background: rgba(40, 167, 69, 0.18);
+    border-color: rgba(40, 167, 69, 0.6);
+}
+
+.marker-switch input:checked + .marker-switch-slider:before {
+    transform: translate(18px, -50%);
+}
+
+/* Disabled state for the master toggle */
+.marker-master-toggle.is-disabled .marker-switch-slider {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .marker-dropdown-separator {
