@@ -1,7 +1,8 @@
 // Helper to render current keyboard shortcuts in the secondary UI
 function updateShortcutsDisplay() {
     const shortcutsContent = document.getElementById('shortcutsContent');
-    if (!shortcutsContent) return;
+    const canvasShortcutsList = document.getElementById('canvasShortcutsList');
+    if (!shortcutsContent && !canvasShortcutsList) return;
 
     const lang = typeof currentLang === 'string' ? currentLang : 'zh_CN';
     const isMac = navigator.platform?.toUpperCase().includes('MAC') || 
@@ -16,20 +17,20 @@ function updateShortcutsDisplay() {
         return key;
     };
 
-    const render = (shortcuts) => {
+    const renderShortcutsModal = (shortcuts) => {
+        if (!shortcutsContent) return;
         const safe = (value, fallback) => (value && typeof value === 'string') ? value : fallback;
         const defaultPrefix = isMac ? '⌥' : 'Alt+';
         const key3 = formatKey(safe(shortcuts.open_canvas_view, defaultPrefix + '3'));
 
         const rows = [];
         rows.push({ key: key3, label: i18n.shortcutCanvas[lang] });
-
         shortcutsContent.innerHTML = `
             <div class="shortcuts-card">
                 <div class="shortcuts-section">
                     <div class="shortcuts-header-row">
                         <div>${i18n.shortcutsTitle[lang]}</div>
-                        <button id="openShortcutsSettingsBtn" class="shortcuts-settings-btn"
+                        <button class="shortcuts-settings-btn open-shortcuts-settings-btn"
                             title="${i18n.shortcutsSettingsTooltip[lang]}">
                             <i class="fas fa-external-link-alt"></i>
                         </button>
@@ -49,9 +50,43 @@ function updateShortcutsDisplay() {
                 </div>
             </div>
         `;
+    };
 
-        const openBtn = document.getElementById('openShortcutsSettingsBtn');
-        if (openBtn && browserAPI && browserAPI.tabs) {
+    const renderCanvasShortcuts = (shortcuts) => {
+        if (!canvasShortcutsList) return;
+        const safe = (value, fallback) => (value && typeof value === 'string') ? value : fallback;
+        const defaultPrefix = isMac ? '⌥' : 'Alt+';
+        const key3 = formatKey(safe(shortcuts.open_canvas_view, defaultPrefix + '3'));
+
+        const rows = [];
+        rows.push({ key: key3, label: i18n.shortcutCanvas[lang] });
+
+        canvasShortcutsList.innerHTML = `
+            <div class="canvas-shortcuts-open-header">
+                <div class="canvas-shortcuts-open-spacer"></div>
+                <div class="canvas-shortcuts-open-title-row">
+                    <span class="canvas-shortcuts-open-title">${i18n.shortcutsOpenTitle[lang]}</span>
+                    <button class="canvas-shortcuts-jump-btn open-shortcuts-settings-btn"
+                        title="${i18n.shortcutsSettingsTooltip[lang]}">
+                        <i class="fas fa-external-link-alt"></i>
+                        <span>${i18n.shortcutsSettingsButton[lang]}</span>
+                    </button>
+                </div>
+            </div>
+            <div class="canvas-shortcuts-available-list">
+                ${rows.map((row) => `
+                    <div class="canvas-shortcuts-row">
+                        <div class="canvas-shortcuts-key"><kbd>${row.key}</kbd></div>
+                        <div class="canvas-shortcuts-action">${row.label}</div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    };
+
+    const bindOpenSettings = (container) => {
+        if (!container || !(browserAPI && browserAPI.tabs)) return;
+        container.querySelectorAll('.open-shortcuts-settings-btn').forEach((openBtn) => {
             openBtn.addEventListener('click', () => {
                 try {
                     const ua = navigator.userAgent || '';
@@ -64,7 +99,7 @@ function updateShortcutsDisplay() {
                     console.warn('[Shortcuts] 打开浏览器快捷键设置页面失败:', e);
                 }
             });
-        }
+        });
     };
 
     if (browserAPI && browserAPI.commands && browserAPI.commands.getAll) {
@@ -79,13 +114,22 @@ function updateShortcutsDisplay() {
                         }
                     });
                 }
-                render({ open_canvas_view: map.open_canvas_view });
+                renderShortcutsModal({ open_canvas_view: map.open_canvas_view });
+                renderCanvasShortcuts({ open_canvas_view: map.open_canvas_view });
+                bindOpenSettings(shortcutsContent);
+                bindOpenSettings(canvasShortcutsList);
             });
         } catch (e) {
             console.warn('[Shortcuts] 读取快捷键失败，使用默认值:', e);
-            render({});
+            renderShortcutsModal({});
+            renderCanvasShortcuts({});
+            bindOpenSettings(shortcutsContent);
+            bindOpenSettings(canvasShortcutsList);
         }
     } else {
-        render({});
+        renderShortcutsModal({});
+        renderCanvasShortcuts({});
+        bindOpenSettings(shortcutsContent);
+        bindOpenSettings(canvasShortcutsList);
     }
 }

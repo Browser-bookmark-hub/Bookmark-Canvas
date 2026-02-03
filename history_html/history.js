@@ -1772,6 +1772,142 @@ const i18n = {
         'zh_CN': '说明',
         'en': 'Help'
     },
+    canvasHelpTabShortcuts: {
+        'zh_CN': '快捷键',
+        'en': 'Shortcuts'
+    },
+    canvasHelpTabRelease: {
+        'zh_CN': '版本说明',
+        'en': 'Release Notes'
+    },
+    canvasHelpTabFeatures: {
+        'zh_CN': '特性',
+        'en': 'Features'
+    },
+    canvasHelpPanelShortcuts: {
+        'zh_CN': `<h2>快捷键说明</h2>
+<h3>Ctrl 键操作</h3>
+<ul>
+<li><strong>Ctrl + 左键（按住）</strong>：拖动画布 或 栏目卡片</li>
+<li><strong>Ctrl + 滚轮</strong>：缩放画布</li>
+<li><strong>Ctrl + 右键（单击）</strong>：更改栏目卡片的大小</li>
+</ul>
+<h3>空格键操作</h3>
+<ul>
+<li><strong>空格 + 左键（按住）</strong>：拖动画布</li>
+</ul>
+<h3>触控板操作</h3>
+<ul>
+<li><strong>双指捏合</strong>：缩放画布</li>
+<li><strong>双指滑动</strong>：拖动画布</li>
+</ul>
+<hr>
+<p><em>快捷键可在左上角「管理」中自定义</em></p>`,
+        'en': `<h2>Keyboard Shortcuts</h2>
+<h3>Ctrl Key Operations</h3>
+<ul>
+<li><strong>Ctrl + Left Click (hold)</strong>: Drag canvas or section card</li>
+<li><strong>Ctrl + Scroll</strong>: Zoom canvas</li>
+<li><strong>Ctrl + Right Click</strong>: Resize section card</li>
+</ul>
+<h3>Space Key Operations</h3>
+<ul>
+<li><strong>Space + Left Click (hold)</strong>: Drag canvas</li>
+</ul>
+<h3>Touchpad Operations</h3>
+<ul>
+<li><strong>Pinch gesture</strong>: Zoom canvas</li>
+<li><strong>Two-finger swipe</strong>: Drag canvas</li>
+</ul>
+<hr>
+<p><em>Shortcuts can be customized in the "Manage" button at top-left</em></p>`
+    },
+    canvasHelpPanelRelease: {
+        'zh_CN': `<h2>书签画布（v3.0） - 使用说明</h2>
+<ol>
+<li><strong>拖动书签/文件夹至空白处</strong>，创建书签型临时节点；</li>
+<li>临时节点的修改<strong>不计入核心数据</strong>，可用来对比查看/整理；</li>
+<li><strong>栏目间可互相拖动/粘贴</strong>。</li>
+</ol>
+<hr>
+<h3>基本操作</h3>
+<ul>
+<li><strong>创建临时栏目</strong>：从书签树拖动书签到空白处</li>
+<li><strong>创建空白卡片</strong>：双击画布空白处</li>
+<li><strong>平移画布</strong>：空格+拖动 或 双指滑动</li>
+<li><strong>缩放画布</strong>：Ctrl+滚轮 或 双指捏合</li>
+</ul>
+<h3>连接线</h3>
+<ul>
+<li><strong>创建连接</strong>：点击栏目边缘连接点，拖向另一栏目</li>
+<li><strong>编辑连接</strong>：点击连接线，可修改颜色、方向、标签</li>
+<li><strong>预设颜色</strong>：<font color="#ff6666">红</font> <font color="#66bbff">蓝</font> <font color="#ffdd66">黄</font> <font color="#66ffaa">绿</font> <font color="#ffaa66">橙</font> <font color="#bf66ff">紫</font></li>
+</ul>
+<p><em>提示：此卡片可自由编辑或删除</em></p>`,
+        'en': `<h2>Bookmark Canvas (v3.0) - User Guide</h2>
+<ol>
+<li><strong>Drag bookmarks/folders to blank area</strong> to create bookmark-type temp nodes;</li>
+<li>Temp node changes are <strong>not saved to core data</strong>, useful for comparison/organization;</li>
+<li><strong>Drag/paste between sections</strong>.</li>
+</ol>
+<hr>
+<h3>Basic Operations</h3>
+<ul>
+<li><strong>Create temp section</strong>: Drag bookmark from tree to blank area</li>
+<li><strong>Create blank card</strong>: Double-click on canvas blank area</li>
+<li><strong>Pan canvas</strong>: Space+drag or two-finger swipe</li>
+<li><strong>Zoom canvas</strong>: Ctrl+scroll or pinch gesture</li>
+</ul>
+<h3>Connection Lines</h3>
+<ul>
+<li><strong>Create connection</strong>: Click section edge anchor, drag to another section</li>
+<li><strong>Edit connection</strong>: Click line to change color, direction, label</li>
+<li><strong>Preset colors</strong>: <font color="#ff6666">Red</font> <font color="#66bbff">Blue</font> <font color="#ffdd66">Yellow</font> <font color="#66ffaa">Green</font> <font color="#ffaa66">Orange</font> <font color="#bf66ff">Purple</font></li>
+</ul>
+<p><em>Tip: This card can be freely edited or deleted</em></p>`
+    },
+    canvasHelpPanelFeatures: {
+        'zh_CN': `<h2>打开方式特色功能</h2>
+<h3>⭐ 一键连续打开</h3>
+<ul>
+<li><strong>勾选默认打开方式</strong>：右键菜单中选择并勾选你想要的打开方式</li>
+<li><strong>左键单击即生效</strong>：设置后，每次左键点击书签自动使用已选方式打开</li>
+</ul>
+<h3>可选打开方式</h3>
+<ul>
+<li><strong>同窗专属组</strong>：在同一窗口的专属标签组中打开</li>
+<li><strong>手动选择...</strong>：每次手动选择目标窗口和标签组</li>
+<li>新标签页 / 同一标签组 / 专属标签组</li>
+<li>新窗口 / 同一窗口 / 专属窗口 / 无痕窗口</li>
+</ul>
+<h3>批量操作</h3>
+<ul>
+<li><strong>选择（批量操作）</strong>：进入多选模式，支持跨栏目多选</li>
+<li><strong>文件夹自动成组</strong>：批量打开时，文件夹自动创建标签组</li>
+</ul>
+<hr>
+<p><em>提示：此卡片可自由编辑或删除</em></p>`,
+        'en': `<h2>Open Mode Features</h2>
+<h3>⭐ One-Click Continuous Open</h3>
+<ul>
+<li><strong>Check default open mode</strong>: Right-click menu to select and check your preferred mode</li>
+<li><strong>Left-click to open</strong>: After setting, each left-click opens bookmark in the chosen mode</li>
+</ul>
+<h3>Available Open Modes</h3>
+<ul>
+<li><strong>Same Window + Exclusive Group</strong>: Open in exclusive tab group of same window</li>
+<li><strong>Manual Select...</strong>: Manually choose target window and tab group each time</li>
+<li>New Tab / Same Group / Exclusive Group</li>
+<li>New Window / Same Window / Exclusive Window / Incognito</li>
+</ul>
+<h3>Batch Operations</h3>
+<ul>
+<li><strong>Select (Batch)</strong>: Enter multi-select mode, supports cross-column selection</li>
+<li><strong>Auto folder grouping</strong>: Folders auto-create tab groups when batch opening</li>
+</ul>
+<hr>
+<p><em>Tip: This card can be freely edited or deleted</em></p>`
+    },
     canvasHelpCtrlTitle: {
         'zh_CN': 'Ctrl 键操作',
         'en': 'Ctrl Key Actions'
@@ -1835,6 +1971,14 @@ const i18n = {
     canvasHelpTouchpadScrollDesc: {
         'zh_CN': '拖动画布',
         'en': 'Pan canvas'
+    },
+    canvasShortcutSettingsText: {
+        'zh_CN': '快捷键',
+        'en': 'Shortcuts'
+    },
+    canvasShortcutsModalTitle: {
+        'zh_CN': '快捷键',
+        'en': 'Shortcuts'
     },
     canvasShortcutRecorderCancel: {
         'zh_CN': '取消',
@@ -1907,6 +2051,14 @@ const i18n = {
     shortcutsSettingsTooltip: {
         'zh_CN': '在浏览器中管理快捷键',
         'en': 'Manage shortcuts in browser'
+    },
+    shortcutsOpenTitle: {
+        'zh_CN': '打开',
+        'en': 'Open'
+    },
+    shortcutsSettingsButton: {
+        'zh_CN': '跳转',
+        'en': 'Open'
     },
     shortcutCanvas: {
         'zh_CN': '打开「书签画布」视图',
@@ -2373,6 +2525,8 @@ function applyLanguage() {
     if (canvasManageText) canvasManageText.textContent = i18n.canvasManageText[currentLang];
     const canvasManageBtn = document.getElementById('canvasManageBtn');
     if (canvasManageBtn) canvasManageBtn.title = i18n.canvasManageTitle[currentLang];
+    const canvasShortcutSettingsText = document.getElementById('canvasShortcutSettingsText');
+    if (canvasShortcutSettingsText) canvasShortcutSettingsText.textContent = i18n.canvasShortcutSettingsText[currentLang];
     const canvasHelpBtn = document.getElementById('canvasHelpBtn');
     if (canvasHelpBtn) canvasHelpBtn.title = i18n.canvasHelpBtnTitle[currentLang];
 
@@ -2381,6 +2535,20 @@ function applyLanguage() {
 
     const canvasHelpModalTitle = document.getElementById('canvasHelpModalTitle');
     if (canvasHelpModalTitle) canvasHelpModalTitle.textContent = i18n.canvasHelpModalTitle[currentLang];
+    const canvasHelpTabShortcuts = document.getElementById('canvasHelpTabShortcuts');
+    if (canvasHelpTabShortcuts) canvasHelpTabShortcuts.textContent = i18n.canvasHelpTabShortcuts[currentLang];
+    const canvasHelpTabRelease = document.getElementById('canvasHelpTabRelease');
+    if (canvasHelpTabRelease) canvasHelpTabRelease.textContent = i18n.canvasHelpTabRelease[currentLang];
+    const canvasHelpTabFeatures = document.getElementById('canvasHelpTabFeatures');
+    if (canvasHelpTabFeatures) canvasHelpTabFeatures.textContent = i18n.canvasHelpTabFeatures[currentLang];
+    const canvasHelpPanelShortcuts = document.getElementById('canvasHelpPanelShortcuts');
+    if (canvasHelpPanelShortcuts) canvasHelpPanelShortcuts.innerHTML = i18n.canvasHelpPanelShortcuts[currentLang];
+    const canvasHelpPanelRelease = document.getElementById('canvasHelpPanelRelease');
+    if (canvasHelpPanelRelease) canvasHelpPanelRelease.innerHTML = i18n.canvasHelpPanelRelease[currentLang];
+    const canvasHelpPanelFeatures = document.getElementById('canvasHelpPanelFeatures');
+    if (canvasHelpPanelFeatures) canvasHelpPanelFeatures.innerHTML = i18n.canvasHelpPanelFeatures[currentLang];
+    const canvasShortcutsModalTitle = document.getElementById('canvasShortcutsModalTitle');
+    if (canvasShortcutsModalTitle) canvasShortcutsModalTitle.textContent = i18n.canvasShortcutsModalTitle[currentLang];
     const canvasHelpCtrlTitle = document.getElementById('canvasHelpCtrlTitle');
     if (canvasHelpCtrlTitle) canvasHelpCtrlTitle.textContent = i18n.canvasHelpCtrlTitle[currentLang];
     const canvasHelpCtrlLeftClick = document.getElementById('canvasHelpCtrlLeftClick');
@@ -2432,7 +2600,6 @@ function applyLanguage() {
     if (tooltipLetterLabel) tooltipLetterLabel.textContent = i18n.tooltipLetterLabel[currentLang];
     const tooltipNumberLabel = document.getElementById('tooltipNumberLabel');
     if (tooltipNumberLabel) tooltipNumberLabel.textContent = i18n.tooltipNumberLabel[currentLang];
-
     if (window.CanvasModule && typeof window.CanvasModule.updateShortcutDisplays === 'function') {
         window.CanvasModule.updateShortcutDisplays();
     }
@@ -2506,6 +2673,9 @@ function applyLanguage() {
 
     const canvasPerfSettingsText = document.getElementById('canvasPerfSettingsText');
     if (canvasPerfSettingsText) canvasPerfSettingsText.textContent = i18n.canvasPerfSettingsText[currentLang];
+    if (typeof updateShortcutsDisplay === 'function') {
+        updateShortcutsDisplay();
+    }
 }
 // =============================================================================
 // UI 初始化

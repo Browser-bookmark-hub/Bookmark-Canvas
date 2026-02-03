@@ -7992,8 +7992,8 @@ a.tree-label.tree-bookmark-link:hover {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
     backdrop-filter: blur(10px);
     z-index: 1001;
-    min-width: 280px;
-    max-width: 360px;
+    min-width: 320px;
+    max-width: 520px;
 }
 
 .canvas-help-modal-header {
@@ -8029,6 +8029,194 @@ a.tree-label.tree-bookmark-link:hover {
 
 .canvas-help-modal-body {
     padding: 12px 14px;
+}
+
+.canvas-help-tabs-body {
+    padding: 0;
+}
+
+.canvas-help-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.canvas-help-tab {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.canvas-help-tab:hover {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+}
+
+.canvas-help-tab.active {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.canvas-help-panels {
+    padding: 12px 14px;
+    max-height: 360px;
+    overflow: auto;
+}
+
+.canvas-help-panel {
+    display: none;
+}
+
+.canvas-help-panel.active {
+    display: block;
+}
+
+.canvas-help-panel-content h2 {
+    font-size: 15px;
+    margin: 0 0 8px 0;
+    color: var(--text-primary);
+}
+
+.canvas-help-panel-content h3 {
+    font-size: 12px;
+    margin: 10px 0 6px 0;
+    color: var(--text-secondary);
+}
+
+.canvas-help-panel-content ul,
+.canvas-help-panel-content ol {
+    margin: 6px 0;
+    padding-left: 18px;
+    color: var(--text-primary);
+    font-size: 12px;
+}
+
+.canvas-help-panel-content li {
+    margin: 4px 0;
+}
+
+.canvas-help-panel-content p {
+    margin: 6px 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.canvas-help-panel-content hr {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 10px 0;
+}
+
+/* Canvas 快捷键二级 UI */
+.modal-content.canvas-shortcuts-modal {
+    width: 520px;
+    max-width: 90vw;
+}
+
+.canvas-shortcuts-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.canvas-shortcuts-available {
+    margin-bottom: 10px;
+}
+
+.canvas-shortcuts-open-header {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 6px;
+}
+
+.canvas-shortcuts-open-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.canvas-shortcuts-open-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.canvas-shortcuts-open-spacer {
+    height: 1px;
+}
+
+.canvas-shortcuts-available-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.canvas-shortcuts-row {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+}
+
+.canvas-shortcuts-key {
+    text-align: center;
+}
+
+.canvas-shortcuts-key kbd {
+    display: inline-block;
+    min-width: 60px;
+    text-align: center;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    font-size: 11px;
+}
+
+.canvas-shortcuts-action {
+    font-size: 12px;
+    color: var(--text-primary);
+    text-align: left;
+}
+
+.canvas-shortcuts-jump-btn {
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--accent-primary);
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.canvas-shortcuts-jump-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+    color: var(--accent-hover);
+}
+
+.canvas-shortcuts-jump-btn i {
+    font-size: 11px;
 }
 
 .canvas-help-section {
@@ -8096,7 +8284,8 @@ a.tree-label.tree-bookmark-link:hover {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
     backdrop-filter: blur(10px);
     z-index: 1001;
-    min-width: 200px;
+    min-width: 240px;
+    max-width: 420px;
 }
 
 .canvas-manage-modal-header {
@@ -8134,7 +8323,24 @@ a.tree-label.tree-bookmark-link:hover {
     padding: 10px;
     display: flex;
     flex-direction: column;
+    gap: 10px;
+}
+
+.canvas-manage-actions {
+    display: flex;
+    flex-direction: column;
     gap: 6px;
+}
+
+.canvas-shortcuts-panel {
+    position: relative;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+}
+
+.canvas-shortcuts-panel .canvas-help-modal-body {
+    padding: 12px 12px 48px;
 }
 
 .canvas-manage-btn {
@@ -8463,6 +8669,21 @@ a.tree-label.tree-bookmark-link:hover {
     margin-bottom: 8px;
     padding-bottom: 4px;
     border-bottom: 1px solid var(--border-color);
+}
+
+.canvas-help-section-header-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.canvas-help-section-header-left .canvas-shortcut-key {
+    font-size: 10px;
+    padding: 2px 5px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-family: monospace;
 }
 
 .canvas-help-section-header .canvas-help-section-title {

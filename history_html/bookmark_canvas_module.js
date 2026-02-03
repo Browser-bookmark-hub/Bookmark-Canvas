@@ -985,7 +985,7 @@ function createInitialDemoTemplate() {
 <li><strong>双指滑动</strong>：拖动画布</li>
 </ul>
 <hr>
-<p><em>快捷键可在左上角「说明」按钮中自定义</em></p>`;
+<p><em>快捷键可在左上角「管理」中自定义</em></p>`;
 
     // 英文版：快捷键说明
     const shortcutGuideHtml_en = `<h2>Keyboard Shortcuts</h2>
@@ -1005,7 +1005,7 @@ function createInitialDemoTemplate() {
 <li><strong>Two-finger swipe</strong>: Drag canvas</li>
 </ul>
 <hr>
-<p><em>Shortcuts can be customized in the "Help" button at top-left</em></p>`;
+<p><em>Shortcuts can be customized in the "Manage" button at top-left</em></p>`;
 
     // 根据语言选择对应版本
     const bookmarkGuideHtml = isEnglish ? bookmarkGuideHtml_en : bookmarkGuideHtml_zh;
@@ -2274,6 +2274,8 @@ function initCanvasView() {
     loadCanvasDataIntensiveSettings();
     // 绑定性能管理按钮
     setupCanvasPerfSettingsBtn();
+    // 绑定快捷键设置按钮
+    setupCanvasShortcutsSettingsBtn();
 
     // [数据密集模式] 初始化时计算一次视口数据量
     try { setTimeout(() => updateDataIntensiveMode(true), 200); } catch (_) { }
@@ -4231,20 +4233,34 @@ function setupCanvasManageModal() {
     const manageModal = document.getElementById('canvasManageModal');
     const manageModalClose = document.getElementById('canvasManageModalClose');
     const helpModal = document.getElementById('canvasHelpModal');
+    const shortcutsModal = document.getElementById('canvasShortcutsModal');
 
     if (!manageBtn || !manageModal) return;
+
+    // 加载保存的快捷键设置
+    loadCanvasShortcuts();
 
     manageBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         // 先关闭帮助弹窗
         if (helpModal) helpModal.style.display = 'none';
+        if (shortcutsModal) shortcutsModal.classList.remove('show');
         // 切换管理弹窗
         const isVisible = manageModal.style.display === 'block';
         manageModal.style.display = isVisible ? 'none' : 'block';
+        if (isVisible) {
+            stopShortcutRecording(null);
+        } else {
+            updateShortcutDisplays();
+            if (typeof updateShortcutsDisplay === 'function') {
+                updateShortcutsDisplay();
+            }
+        }
     });
 
     if (manageModalClose) {
         manageModalClose.addEventListener('click', () => {
+            stopShortcutRecording(null);
             manageModal.style.display = 'none';
         });
     }
@@ -4255,9 +4271,53 @@ function setupCanvasManageModal() {
             !manageModal.contains(e.target) &&
             e.target !== manageBtn &&
             !manageBtn.contains(e.target)) {
+            stopShortcutRecording(null);
             manageModal.style.display = 'none';
         }
     });
+}
+
+function setupCanvasShortcutsSettingsBtn() {
+    const btn = document.getElementById('canvasShortcutSettingsBtn');
+    if (!btn) return;
+    btn.onclick = () => {
+        try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
+        openCanvasShortcutsModal();
+    };
+}
+
+function setupCanvasShortcutsModal() {
+    const modal = document.getElementById('canvasShortcutsModal');
+    if (!modal || modal.dataset.bound === 'true') return;
+    modal.dataset.bound = 'true';
+
+    const closeBtn = document.getElementById('canvasShortcutsModalClose');
+    const close = () => closeCanvasShortcutsModal();
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) close();
+    });
+}
+
+function openCanvasShortcutsModal() {
+    const modal = document.getElementById('canvasShortcutsModal');
+    if (!modal) return;
+    setupCanvasShortcutsModal();
+
+    // 先关闭帮助弹窗
+    try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
+
+    modal.classList.add('show');
+    updateShortcutDisplays();
+    if (typeof updateShortcutsDisplay === 'function') {
+        updateShortcutsDisplay();
+    }
+}
+
+function closeCanvasShortcutsModal() {
+    const modal = document.getElementById('canvasShortcutsModal');
+    if (modal) modal.classList.remove('show');
+    stopShortcutRecording(null);
 }
 
 // =============================================================================
@@ -4316,32 +4376,16 @@ function updateShortcutDisplays() {
     const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
 
     // 更新 Ctrl 键显示
-    const ctrlDisplays = ['ctrlKeyDisplay', 'ctrlKeyDisplay2', 'ctrlKeyDisplay3'];
     const ctrlName = getKeyDisplayName(canvasShortcuts.ctrlKey, lang);
-    ctrlDisplays.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = ctrlName;
+    document.querySelectorAll('[data-shortcut-display="ctrl"]').forEach(el => {
+        el.textContent = ctrlName;
     });
 
     // 更新 Space 键显示
-    const spaceDisplay = document.getElementById('spaceKeyDisplay');
-    if (spaceDisplay) {
-        spaceDisplay.textContent = getKeyDisplayName(canvasShortcuts.spaceKey, lang);
-    }
-
-    // 更新标题
-    const ctrlTitle = document.getElementById('canvasHelpCtrlTitle');
-    if (ctrlTitle) {
-        const isZh = lang === 'zh_CN';
-        ctrlTitle.textContent = isZh ? `${ctrlName} 键操作` : `${ctrlName} Key Actions`;
-    }
-
-    const spaceTitle = document.getElementById('canvasHelpSpaceTitle');
-    if (spaceTitle) {
-        const isZh = lang === 'zh_CN';
-        const spaceName = getKeyDisplayName(canvasShortcuts.spaceKey, lang);
-        spaceTitle.textContent = isZh ? `${spaceName}键操作` : `${spaceName} Key Actions`;
-    }
+    const spaceName = getKeyDisplayName(canvasShortcuts.spaceKey, lang);
+    document.querySelectorAll('[data-shortcut-display="space"]').forEach(el => {
+        el.textContent = spaceName;
+    });
 }
 
 function startShortcutRecording(target) {
@@ -4361,22 +4405,21 @@ function startShortcutRecording(target) {
 
     // 高亮对应的键
     if (target === 'ctrl') {
-        ['ctrlKeyDisplay', 'ctrlKeyDisplay2', 'ctrlKeyDisplay3'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.classList.add('recording');
+        document.querySelectorAll('[data-shortcut-display="ctrl"]').forEach(el => {
+            el.classList.add('recording');
         });
     } else if (target === 'space') {
-        const el = document.getElementById('spaceKeyDisplay');
-        if (el) el.classList.add('recording');
+        document.querySelectorAll('[data-shortcut-display="space"]').forEach(el => {
+            el.classList.add('recording');
+        });
     }
 }
 
 function stopShortcutRecording(newKey) {
     if (!isRecordingShortcut) return;
 
-    ['ctrlKeyDisplay', 'ctrlKeyDisplay2', 'ctrlKeyDisplay3', 'spaceKeyDisplay'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.remove('recording');
+    document.querySelectorAll('[data-shortcut-display]').forEach(el => {
+        el.classList.remove('recording');
     });
 
     const recorder = document.getElementById('canvasShortcutRecorder');
@@ -4430,24 +4473,44 @@ function setupCanvasHelpModal() {
 
     if (!helpBtn || !helpModal) return;
 
-    // 加载保存的快捷键设置
-    loadCanvasShortcuts();
+    const tabs = Array.from(helpModal.querySelectorAll('.canvas-help-tab'));
+    const panels = Array.from(helpModal.querySelectorAll('.canvas-help-panel'));
+
+    const setActiveTab = (tabName) => {
+        tabs.forEach(tab => {
+            const isActive = tab.dataset.helpTab === tabName;
+            tab.classList.toggle('active', isActive);
+            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        panels.forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.helpPanel === tabName);
+        });
+    };
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setActiveTab(tab.dataset.helpTab);
+        });
+    });
 
     helpBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         // 先关闭管理弹窗
-        if (manageModal) manageModal.style.display = 'none';
+        if (manageModal) {
+            stopShortcutRecording(null);
+            manageModal.style.display = 'none';
+        }
         // 切换帮助弹窗
         const isVisible = helpModal.style.display === 'block';
         helpModal.style.display = isVisible ? 'none' : 'block';
-        if (!isVisible) {
-            updateShortcutDisplays();
+        if (!isVisible && tabs.length && !tabs.some(tab => tab.classList.contains('active'))) {
+            setActiveTab(tabs[0].dataset.helpTab);
         }
     });
 
     if (helpModalClose) {
         helpModalClose.addEventListener('click', () => {
-            stopShortcutRecording(null);
             helpModal.style.display = 'none';
         });
     }
@@ -4535,7 +4598,6 @@ function setupCanvasHelpModal() {
             !helpModal.contains(e.target) &&
             e.target !== helpBtn &&
             !helpBtn.contains(e.target)) {
-            stopShortcutRecording(null);
             helpModal.style.display = 'none';
         }
     });
@@ -7290,6 +7352,12 @@ function getCurrentFullscreenElement() {
 function shouldHandleCustomScroll(event) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace || !workspace.contains(event.target)) {
+        return false;
+    }
+
+    // 说明/管理弹窗内滚动：不拦截，让弹窗自身滚动
+    if (event.target.closest('.canvas-help-modal') ||
+        event.target.closest('.canvas-manage-modal')) {
         return false;
     }
 
