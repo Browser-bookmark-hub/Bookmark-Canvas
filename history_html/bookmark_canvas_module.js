@@ -195,7 +195,8 @@ const CanvasState = {
     isConnecting: false,
     connectionStart: null, // { nodeId, side, anchorEl }
     selectedEdgeId: null,
-    appearanceSettings: null
+    appearanceSettings: null,
+    otherSettings: null
 };
 
 // 缩放范围：最小显示 1%（display zoom），最大 raw zoom 3x
@@ -928,8 +929,24 @@ const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
     }
 };
 
+// Canvas 其他设置（默认值）
+const CANVAS_OTHER_SETTINGS_KEY = 'canvas-other-settings-v1';
+const DEFAULT_CANVAS_OTHER_SETTINGS = {
+    autoLinkSplit: false, // 临时栏目分裂后自动连接
+    tempColorFollow: true, // 临时栏目颜色跟随
+    useDefaultZoomCurve: true, // 使用默认缩放曲线（跟随性能磁矩）
+    zoomCurve: {
+        p1: { x: 0.25, y: 1 },
+        p2: { x: 0.67, y: 1 }
+    }
+};
+
 function __cloneDefaultAppearanceSettings() {
     return JSON.parse(JSON.stringify(DEFAULT_CANVAS_APPEARANCE_SETTINGS));
+}
+
+function __cloneDefaultOtherSettings() {
+    return JSON.parse(JSON.stringify(DEFAULT_CANVAS_OTHER_SETTINGS));
 }
 
 function __clampNumber(value, min, max, fallback) {
@@ -943,6 +960,29 @@ function __clampNumber(value, min, max, fallback) {
 function __normalizeAppearanceColor(value, fallback) {
     const normalized = normalizeHexColor(String(value || ''));
     return normalized ? `#${normalized}` : fallback;
+}
+
+function __normalizeZoomCurve(input) {
+    const fallback = __cloneDefaultOtherSettings().zoomCurve;
+    if (!input || typeof input !== 'object') return fallback;
+    const p1 = input.p1 || {};
+    const p2 = input.p2 || {};
+    const out = {
+        p1: {
+            x: __clampNumber(p1.x, 0, 1, fallback.p1.x),
+            y: __clampNumber(p1.y, 0, 1, fallback.p1.y)
+        },
+        p2: {
+            x: __clampNumber(p2.x, 0, 1, fallback.p2.x),
+            y: __clampNumber(p2.y, 0, 1, fallback.p2.y)
+        }
+    };
+    if (out.p1.x > out.p2.x) {
+        const tmp = out.p1;
+        out.p1 = out.p2;
+        out.p2 = tmp;
+    }
+    return out;
 }
 
 function normalizeCanvasAppearanceSettings(input) {
@@ -987,11 +1027,28 @@ function normalizeCanvasAppearanceSettings(input) {
     return out;
 }
 
+function normalizeCanvasOtherSettings(input) {
+    const out = __cloneDefaultOtherSettings();
+    if (!input || typeof input !== 'object') return out;
+    if (typeof input.autoLinkSplit === 'boolean') out.autoLinkSplit = input.autoLinkSplit;
+    if (typeof input.tempColorFollow === 'boolean') out.tempColorFollow = input.tempColorFollow;
+    if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
+    out.zoomCurve = __normalizeZoomCurve(input.zoomCurve);
+    return out;
+}
+
 function getCanvasAppearanceSettings() {
     if (!CanvasState.appearanceSettings) {
         CanvasState.appearanceSettings = __cloneDefaultAppearanceSettings();
     }
     return CanvasState.appearanceSettings;
+}
+
+function getCanvasOtherSettings() {
+    if (!CanvasState.otherSettings) {
+        CanvasState.otherSettings = __cloneDefaultOtherSettings();
+    }
+    return CanvasState.otherSettings;
 }
 
 function loadCanvasAppearanceSettings() {
@@ -1002,6 +1059,30 @@ function loadCanvasAppearanceSettings() {
     } catch (_) { }
     CanvasState.appearanceSettings = normalizeCanvasAppearanceSettings(saved);
     applyCanvasAppearanceSettings(CanvasState.appearanceSettings, { applyPermanentSize: false });
+}
+
+function loadCanvasOtherSettings() {
+    let saved = null;
+    try {
+        const raw = localStorage.getItem(CANVAS_OTHER_SETTINGS_KEY);
+        if (raw) saved = JSON.parse(raw);
+    } catch (_) { }
+    CanvasState.otherSettings = normalizeCanvasOtherSettings(saved);
+}
+
+function shouldAutoLinkTempSplit() {
+    const settings = getCanvasOtherSettings();
+    return !!(settings && settings.autoLinkSplit);
+}
+
+function isTempColorFollowEnabled() {
+    const settings = getCanvasOtherSettings();
+    return !(settings && settings.tempColorFollow === false);
+}
+
+function shouldUseDefaultZoomCurve() {
+    const settings = getCanvasOtherSettings();
+    return !(settings && settings.useDefaultZoomCurve === false);
 }
 
 function getTempSectionBaseSize() {
@@ -2099,6 +2180,7 @@ function updateTempSectionColor(section, color) {
 }
 
 function propagateTempSectionColor(parentSection, color) {
+    if (!isTempColorFollowEnabled()) return;
     if (!parentSection) return;
     const parentLabel = getTempSectionLabel(parentSection);
     if (!parentLabel) return;
@@ -2112,6 +2194,34 @@ function propagateTempSectionColor(parentSection, color) {
             updateTempSectionColor(section, color);
         }
     });
+}
+
+function __hasEdgeBetween(nodeA, nodeB) {
+    if (!nodeA || !nodeB) return false;
+    return CanvasState.edges.some(edge =>
+        (edge.fromNode === nodeA && edge.toNode === nodeB) ||
+        (edge.fromNode === nodeB && edge.toNode === nodeA)
+    );
+}
+
+function __autoLinkTempSplit(parentSection, childSection) {
+    if (!parentSection || !childSection) return;
+    if (__hasEdgeBetween(parentSection.id, childSection.id)) return;
+
+    const parentEl = document.getElementById(parentSection.id);
+    const childEl = document.getElementById(childSection.id);
+    if (!parentEl || !childEl) return;
+
+    const parentRect = parentEl.getBoundingClientRect();
+    const childRect = childEl.getBoundingClientRect();
+    const parentCenterX = (parentRect.left + parentRect.right) / 2;
+    const parentCenterY = (parentRect.top + parentRect.bottom) / 2;
+    const childCenterX = (childRect.left + childRect.right) / 2;
+    const childCenterY = (childRect.top + childRect.bottom) / 2;
+
+    const fromSide = getNearestSide(parentRect, childCenterX, childCenterY);
+    const toSide = getNearestSide(childRect, parentCenterX, parentCenterY);
+    addEdge(parentSection.id, fromSide, childSection.id, toSide);
 }
 
 function getSplitTempSectionLabel(parentSection) {
@@ -2575,6 +2685,8 @@ function initCanvasView() {
     loadTempExpandState();
     // 加载外观设置（默认尺寸/颜色/名称）
     loadCanvasAppearanceSettings();
+    // 加载其他设置（分裂自动连接/颜色跟随）
+    loadCanvasOtherSettings();
 
     // 初始化连接线层
     setupCanvasEdgesLayer();
@@ -2629,6 +2741,8 @@ function initCanvasView() {
     setupCanvasPerfSettingsBtn();
     // 绑定外观设置按钮
     setupCanvasAppearanceSettingsBtn();
+    // 绑定其他设置按钮
+    setupCanvasOtherSettingsBtn();
     // 绑定快捷键设置按钮
     setupCanvasShortcutsSettingsBtn();
 
@@ -4393,7 +4507,8 @@ function setupCanvasZoomAndPan() {
             const displayZoomForCalc = baseZoomForCalc / base;
             const nextDisplayZoomNoMagnet = (baseZoomForCalc * Math.exp(delta * zoomSpeed)) / base;
             const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
-            const effectiveDelta = delta * magnet.factor;
+            const speedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
+            const effectiveDelta = delta * magnet.factor * speedFactor;
 
             // 计算缩放因子：delta > 0 放大，delta < 0 缩小
             // 使用 Math.exp 实现指数缩放，确保放大和缩小是对称的
@@ -5141,6 +5256,73 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
         factor: Math.max(0.05, Math.min(1, factor)),
         strength: Math.max(0, Math.min(1, strength))
     };
+}
+
+function getCanvasZoomCurveSettings() {
+    const settings = getCanvasOtherSettings();
+    return (settings && settings.zoomCurve) ? settings.zoomCurve : __cloneDefaultOtherSettings().zoomCurve;
+}
+
+function __getSuggestedZoomCurveFromMagnet() {
+    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
+    const maxPercent = 100;
+    const range = Math.max(1, maxPercent - minPercent);
+    const safePercent = Math.max(minPercent, Math.min(maxPercent, getCanvasSafeZoneThreshold() * 100));
+    const enter = getCanvasLowDetailDisplayZoomThreshold() * 100;
+    const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100;
+    const midPercent = Number.isFinite(enter) && Number.isFinite(exit)
+        ? (enter + exit) / 2
+        : (minPercent + range * 0.25);
+    const p1x = __clamp01((midPercent - minPercent) / range);
+    const p2x = __clamp01((safePercent - minPercent) / range);
+    return {
+        p1: { x: p1x, y: 1 },
+        p2: { x: Math.max(p2x, p1x + 0.02), y: 1 }
+    };
+}
+
+function __isDefaultZoomCurve(curve) {
+    if (!curve || !curve.p1 || !curve.p2) return true;
+    const def = __cloneDefaultOtherSettings().zoomCurve;
+    const near = (a, b) => Math.abs(a - b) < 0.001;
+    return near(curve.p1.x, def.p1.x)
+        && near(curve.p1.y, def.p1.y)
+        && near(curve.p2.x, def.p2.x)
+        && near(curve.p2.y, def.p2.y);
+}
+
+function __cubicBezierCoord(t, p0, p1, p2, p3) {
+    const u = 1 - t;
+    return (u * u * u * p0) + (3 * u * u * t * p1) + (3 * u * t * t * p2) + (t * t * t * p3);
+}
+
+function __solveBezierTForX(x, x1, x2) {
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 24; i++) {
+        const mid = (lo + hi) / 2;
+        const midX = __cubicBezierCoord(mid, 0, x1, x2, 1);
+        if (midX < x) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+}
+
+function __getZoomSpeedFactorFromCurve(displayZoom, curve) {
+    if (!curve || !curve.p1 || !curve.p2) return 1;
+    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
+    const maxPercent = 100;
+    const range = Math.max(1, maxPercent - minPercent);
+    const percent = Math.max(minPercent, Math.min(maxPercent, (displayZoom || 1) * 100));
+    const x = (percent - minPercent) / range;
+    const t = __solveBezierTForX(x, curve.p1.x, curve.p2.x);
+    const y = __cubicBezierCoord(t, 1, curve.p1.y, curve.p2.y, 1);
+    return Math.max(0.05, Math.min(1, y));
+}
+
+function getCanvasZoomSpeedFactor(displayZoom) {
+    if (shouldUseDefaultZoomCurve()) return 1;
+    const curve = getCanvasZoomCurveSettings();
+    return __getZoomSpeedFactorFromCurve(displayZoom, curve);
 }
 
 function getCanvasLowDetailDisplayZoomThreshold() {
@@ -10272,9 +10454,10 @@ async function createTempNode(data, x, y) {
     let inheritedColor = null;
     let splitPayload = [];
     let originPermanent = null;
+    let parentSection = null;
 
     if (isTempSplit) {
-        const parentSection = getTempSection(data.sectionId);
+        parentSection = getTempSection(data.sectionId);
         if (parentSection) {
             inheritedLabel = getSplitTempSectionLabel(parentSection);
             const parentTitle = String(parentSection.title || '').trim();
@@ -10425,6 +10608,11 @@ async function createTempNode(data, x, y) {
 
     renderTempNode(section);
     applyTempSectionAutoSizeIfNeeded(section);
+    if (isTempSplit && parentSection && shouldAutoLinkTempSplit()) {
+        requestAnimationFrame(() => {
+            try { __autoLinkTempSplit(parentSection, section); } catch (_) { }
+        });
+    }
 
     // 延迟管理休眠状态
     scheduleDormancyUpdate();
@@ -28089,6 +28277,527 @@ function createCanvasAppearanceSettingsModal() {
         if (!color) return;
         __syncAppearanceColorRow(row, color);
     });
+}
+
+// =============================================================================
+// 其他管理面板 (Other Settings)
+// =============================================================================
+
+function setupCanvasOtherSettingsBtn() {
+    const btn = document.getElementById('canvasOtherSettingsBtn');
+    if (!btn) return;
+    btn.onclick = () => {
+        try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
+        openCanvasOtherSettingsModal();
+    };
+}
+
+function openCanvasOtherSettingsModal() {
+    let modal = document.getElementById('canvasOtherSettingsModal');
+    if (modal) modal.remove();
+    createCanvasOtherSettingsModal();
+    modal = document.getElementById('canvasOtherSettingsModal');
+    if (!modal) return;
+
+    const settings = getCanvasOtherSettings();
+    const autoLink = modal.querySelector('#otherAutoLinkSplit');
+    const colorFollow = modal.querySelector('#otherTempColorFollow');
+    const useDefaultCurve = !(settings && settings.useDefaultZoomCurve === false);
+    const defaultCurveToggle = modal.querySelector('#otherUseDefaultZoomCurve');
+    if (autoLink) autoLink.checked = !!settings.autoLinkSplit;
+    if (colorFollow) colorFollow.checked = !(settings.tempColorFollow === false);
+    if (defaultCurveToggle) defaultCurveToggle.checked = useDefaultCurve;
+    modal._useDefaultZoomCurve = useDefaultCurve;
+    modal._zoomCurve = __normalizeZoomCurve(settings.zoomCurve);
+    if (!useDefaultCurve && __isDefaultZoomCurve(modal._zoomCurve)) {
+        modal._zoomCurve = __normalizeZoomCurve(__getSuggestedZoomCurveFromMagnet());
+    }
+
+    modal.style.display = 'flex';
+    requestAnimationFrame(() => {
+        try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+    });
+}
+
+function closeCanvasOtherSettingsModal() {
+    const modal = document.getElementById('canvasOtherSettingsModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function saveCanvasOtherSettings() {
+    const modal = document.getElementById('canvasOtherSettingsModal');
+    if (!modal) return;
+    const autoLink = modal.querySelector('#otherAutoLinkSplit');
+    const colorFollow = modal.querySelector('#otherTempColorFollow');
+    const useDefaultCurve = modal.querySelector('#otherUseDefaultZoomCurve');
+    const settingsInput = {
+        autoLinkSplit: !!(autoLink && autoLink.checked),
+        tempColorFollow: !!(colorFollow && colorFollow.checked),
+        useDefaultZoomCurve: useDefaultCurve ? !!useDefaultCurve.checked : true,
+        zoomCurve: modal._zoomCurve || getCanvasZoomCurveSettings()
+    };
+    const normalized = normalizeCanvasOtherSettings(settingsInput);
+    CanvasState.otherSettings = normalized;
+    try {
+        localStorage.setItem(CANVAS_OTHER_SETTINGS_KEY, JSON.stringify(normalized));
+    } catch (_) { }
+    closeCanvasOtherSettingsModal();
+}
+
+function __updateOtherMagnetLegend(modal, meta) {
+    if (!modal || !meta) return;
+    const safeLegend = modal.querySelector('#otherMagnetSafeLegend');
+    const midLegend = modal.querySelector('#otherMagnetMidLegend');
+    const safeValueEl = modal.querySelector('#otherMagnetSafeValue');
+    const midValueEl = modal.querySelector('#otherMagnetMidValue');
+    if (safeValueEl) safeValueEl.textContent = meta.safePercentText;
+    if (midValueEl) midValueEl.textContent = meta.midPercentText;
+    if (safeLegend) safeLegend.classList.toggle('is-disabled', !meta.safeEnabled);
+    if (midLegend) midLegend.classList.toggle('is-disabled', !meta.midEnabled);
+}
+
+function __renderOtherZoomMagnetCurve(modal) {
+    const canvas = modal ? modal.querySelector('#otherZoomMagnetCurve') : null;
+    if (!canvas || typeof canvas.getContext !== 'function') return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+
+    const settings = getCanvasZoomMagnetSettings();
+    const magnetEnabled = !!(settings && settings.enabled);
+    const safeEnabled = magnetEnabled && !!settings.enableSafeZone && isCanvasSafeZoneEnabled();
+    const midEnabled = magnetEnabled && !!settings.enableLowDetailMid;
+
+    const safeValue = safeEnabled ? getCanvasSafeZoneThreshold() : null;
+    let midValue = null;
+    if (midEnabled) {
+        const enter = getCanvasLowDetailDisplayZoomThreshold();
+        const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
+        if (Number.isFinite(enter) && Number.isFinite(exit)) midValue = (enter + exit) / 2;
+    }
+
+    const safePercentText = Number.isFinite(safeValue) ? `${Math.round(safeValue * 100)}%` : '--';
+    const midPercentText = Number.isFinite(midValue) ? `${Math.round(midValue * 1000) / 10}%` : '--';
+    __updateOtherMagnetLegend(modal, {
+        safeEnabled,
+        midEnabled,
+        safePercentText,
+        midPercentText
+    });
+
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = canvas.clientWidth || 360;
+    const cssHeight = canvas.clientHeight || 180;
+    canvas.width = Math.max(1, Math.floor(cssWidth * dpr));
+    canvas.height = Math.max(1, Math.floor(cssHeight * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const style = getComputedStyle(document.documentElement);
+    const axisColor = (style.getPropertyValue('--border-color') || '#e2e8f0').trim();
+    const gridColor = (style.getPropertyValue('--bg-tertiary') || '#f1f5f9').trim();
+    const textColor = (style.getPropertyValue('--text-secondary') || '#64748b').trim();
+    const curveColor = (style.getPropertyValue('--accent-primary') || '#2563eb').trim();
+    const mutedCurve = (style.getPropertyValue('--text-tertiary') || '#94a3b8').trim();
+
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    const paddingLeft = 34;
+    const paddingRight = 10;
+    const paddingTop = 12;
+    const paddingBottom = 26;
+    const plotW = Math.max(1, cssWidth - paddingLeft - paddingRight);
+    const plotH = Math.max(1, cssHeight - paddingTop - paddingBottom);
+
+    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
+    const maxPercent = 100;
+    const range = Math.max(1, maxPercent - minPercent);
+    const percentToX = (p) => paddingLeft + ((p - minPercent) / range) * plotW;
+    const factorToY = (factor) => paddingTop + (1 - factor) * plotH;
+
+    // Grid
+    ctx.strokeStyle = gridColor;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    for (let i = 0; i <= 4; i++) {
+        const y = paddingTop + (plotH / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(paddingLeft, y);
+        ctx.lineTo(paddingLeft + plotW, y);
+        ctx.stroke();
+    }
+
+    // Axes
+    ctx.strokeStyle = axisColor;
+    ctx.beginPath();
+    ctx.moveTo(paddingLeft, paddingTop);
+    ctx.lineTo(paddingLeft, paddingTop + plotH);
+    ctx.lineTo(paddingLeft + plotW, paddingTop + plotH);
+    ctx.stroke();
+
+    const useDefaultCurve = (modal && typeof modal._useDefaultZoomCurve === 'boolean')
+        ? modal._useDefaultZoomCurve
+        : shouldUseDefaultZoomCurve();
+    const curveCard = modal ? modal.querySelector('.other-curve-card') : null;
+    if (curveCard) curveCard.classList.toggle('is-disabled', useDefaultCurve);
+
+    const noteEl = modal ? modal.querySelector('.other-curve-note') : null;
+    if (noteEl) {
+        noteEl.textContent = useDefaultCurve
+            ? (isEn
+                ? 'Default curve follows performance magnet settings. Turn off to edit Duration 1/2.'
+                : '默认曲线跟随性能磁矩设置。关闭后可拖动持续1/持续2 调整。')
+            : (isEn
+                ? 'Drag Duration 1/2 (affects 3 segments). X: zoom %, Y: speed (higher = faster). Smoother = slower.'
+                : '拖动持续1/持续2（影响三段曲线）。X 轴为缩放比例，Y 轴为速率强度（越高越快、越平滑越慢）。');
+    }
+
+    const curve = (modal && modal._zoomCurve) ? modal._zoomCurve : getCanvasZoomCurveSettings();
+    const p1 = curve && curve.p1 ? curve.p1 : { x: 0.25, y: 1 };
+    const p2 = curve && curve.p2 ? curve.p2 : { x: 0.67, y: 1 };
+    const normToX = (nx) => paddingLeft + Math.max(0, Math.min(1, nx)) * plotW;
+    const normToY = (ny) => paddingTop + (1 - Math.max(0, Math.min(1, ny))) * plotH;
+
+    const startX = normToX(0);
+    const startY = normToY(1);
+    const p1x = normToX(p1.x);
+    const p1y = normToY(p1.y);
+    const p2x = normToX(p2.x);
+    const p2y = normToY(p2.y);
+    const endX = normToX(1);
+    const endY = normToY(1);
+
+    const getMagnetFactor = (percent) => {
+        const dz = percent / 100;
+        const m = getCanvasZoomMagnetEffect(dz, dz);
+        return (m && Number.isFinite(m.factor)) ? m.factor : 1;
+    };
+    const getCustomFactor = (percent) => {
+        if (useDefaultCurve) return 1;
+        return __getZoomSpeedFactorFromCurve(percent / 100, curve);
+    };
+    const getCombinedFactor = (percent) => {
+        const v = getMagnetFactor(percent) * getCustomFactor(percent);
+        return Math.max(0.02, Math.min(1, v));
+    };
+
+    const drawFactorCurve = (getFactor, color, dash = []) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash(dash);
+        ctx.beginPath();
+        for (let t = 0; t <= 1.001; t += 0.02) {
+            const percent = minPercent + t * range;
+            const x = percentToX(percent);
+            const y = factorToY(getFactor(percent));
+            if (t === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+    };
+
+    if (!useDefaultCurve) {
+        // Baseline custom curve (muted)
+        drawFactorCurve(getCustomFactor, mutedCurve, [4, 4]);
+
+        // Control polygon
+        ctx.strokeStyle = axisColor;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(p1x, p1y);
+        ctx.lineTo(p2x, p2y);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Combined curve (magnet + custom)
+    drawFactorCurve(getCombinedFactor, curveColor);
+
+    if (!useDefaultCurve) {
+        // Control points
+        ctx.fillStyle = curveColor;
+        ctx.beginPath();
+        ctx.arc(p1x, p1y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(p2x, p2y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = textColor;
+        ctx.font = '11px sans-serif';
+        ctx.fillText(isEn ? 'D1' : '续1', p1x + 6, p1y - 6);
+        ctx.fillText(isEn ? 'D2' : '续2', p2x + 6, p2y - 6);
+    }
+
+    // Magnet markers
+    const drawMarker = (percent, color) => {
+        if (!Number.isFinite(percent)) return;
+        if (percent < minPercent || percent > maxPercent) return;
+        const x = percentToX(percent);
+        ctx.strokeStyle = color;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(x, paddingTop);
+        ctx.lineTo(x, paddingTop + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    };
+    if (safeEnabled && Number.isFinite(safeValue)) {
+        drawMarker(safeValue * 100, '#10b981');
+    }
+    if (midEnabled && Number.isFinite(midValue)) {
+        drawMarker(midValue * 100, '#a855f7');
+    }
+
+    // Axis labels
+    ctx.fillStyle = textColor;
+    ctx.font = '12px sans-serif';
+    ctx.fillText(`${minPercent}%`, paddingLeft, paddingTop + plotH + 18);
+    ctx.fillText(`${maxPercent}%`, paddingLeft + plotW - 22, paddingTop + plotH + 18);
+    ctx.fillText(isEn ? 'Fast' : '快', paddingLeft - 28, paddingTop + 6);
+    ctx.fillText(isEn ? 'Slow' : '慢', paddingLeft - 28, paddingTop + plotH);
+
+    modal._curveLayout = {
+        paddingLeft,
+        paddingTop,
+        plotW,
+        plotH,
+        cssWidth,
+        cssHeight
+    };
+}
+
+function __clamp01(value) {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
+}
+
+function __getOtherCurveLayout(modal, canvas) {
+    if (modal && modal._curveLayout) return modal._curveLayout;
+    const cssWidth = canvas.clientWidth || 360;
+    const cssHeight = canvas.clientHeight || 180;
+    const paddingLeft = 34;
+    const paddingRight = 10;
+    const paddingTop = 12;
+    const paddingBottom = 26;
+    return {
+        paddingLeft,
+        paddingTop,
+        plotW: Math.max(1, cssWidth - paddingLeft - paddingRight),
+        plotH: Math.max(1, cssHeight - paddingTop - paddingBottom),
+        cssWidth,
+        cssHeight
+    };
+}
+
+function __bindOtherCurveInteractions(modal) {
+    const canvas = modal ? modal.querySelector('#otherZoomMagnetCurve') : null;
+    if (!canvas) return;
+    const dragState = { active: false, point: null, pointerId: null };
+    const hitRadius = 10;
+    const minGap = 0.04;
+
+    const isDefaultCurve = () => {
+        if (modal && typeof modal._useDefaultZoomCurve === 'boolean') return modal._useDefaultZoomCurve;
+        return shouldUseDefaultZoomCurve();
+    };
+
+    const getCurve = () => __normalizeZoomCurve((modal && modal._zoomCurve) || getCanvasZoomCurveSettings());
+    const setCurve = (curve) => { modal._zoomCurve = __normalizeZoomCurve(curve); };
+
+    const getPointPositions = () => {
+        const layout = __getOtherCurveLayout(modal, canvas);
+        const curve = getCurve();
+        const p1x = layout.paddingLeft + curve.p1.x * layout.plotW;
+        const p1y = layout.paddingTop + (1 - curve.p1.y) * layout.plotH;
+        const p2x = layout.paddingLeft + curve.p2.x * layout.plotW;
+        const p2y = layout.paddingTop + (1 - curve.p2.y) * layout.plotH;
+        return { layout, p1: { x: p1x, y: p1y }, p2: { x: p2x, y: p2y }, curve };
+    };
+
+    const hitTest = (clientX, clientY) => {
+        const rect = canvas.getBoundingClientRect();
+        const localX = clientX - rect.left;
+        const localY = clientY - rect.top;
+        const { p1, p2 } = getPointPositions();
+        const d1 = Math.hypot(localX - p1.x, localY - p1.y);
+        const d2 = Math.hypot(localX - p2.x, localY - p2.y);
+        if (d1 <= hitRadius) return 'p1';
+        if (d2 <= hitRadius) return 'p2';
+        return null;
+    };
+
+    const updateCursor = (clientX, clientY) => {
+        if (isDefaultCurve()) {
+            canvas.style.cursor = 'default';
+            return;
+        }
+        if (dragState.active) return;
+        const hit = hitTest(clientX, clientY);
+        canvas.style.cursor = hit ? 'grab' : 'default';
+    };
+
+    const updateCurveFromPointer = (clientX, clientY) => {
+        const rect = canvas.getBoundingClientRect();
+        const localX = clientX - rect.left;
+        const localY = clientY - rect.top;
+        const { layout, curve } = getPointPositions();
+        const nx = __clamp01((localX - layout.paddingLeft) / layout.plotW);
+        const ny = __clamp01(1 - (localY - layout.paddingTop) / layout.plotH);
+        if (dragState.point === 'p1') {
+            curve.p1.x = Math.min(nx, curve.p2.x - minGap);
+            curve.p1.y = ny;
+        } else if (dragState.point === 'p2') {
+            curve.p2.x = Math.max(nx, curve.p1.x + minGap);
+            curve.p2.y = ny;
+        }
+        setCurve(curve);
+        __renderOtherZoomMagnetCurve(modal);
+    };
+
+    canvas.addEventListener('pointerdown', (e) => {
+        if (isDefaultCurve()) return;
+        const hit = hitTest(e.clientX, e.clientY);
+        if (!hit) return;
+        dragState.active = true;
+        dragState.point = hit;
+        dragState.pointerId = e.pointerId;
+        canvas.setPointerCapture(e.pointerId);
+        canvas.style.cursor = 'grabbing';
+        updateCurveFromPointer(e.clientX, e.clientY);
+        e.preventDefault();
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+        if (dragState.active) {
+            updateCurveFromPointer(e.clientX, e.clientY);
+            return;
+        }
+        updateCursor(e.clientX, e.clientY);
+    });
+
+    const endDrag = (e) => {
+        if (!dragState.active) return;
+        dragState.active = false;
+        dragState.point = null;
+        if (dragState.pointerId !== null) {
+            try { canvas.releasePointerCapture(dragState.pointerId); } catch (_) { }
+        }
+        dragState.pointerId = null;
+        canvas.style.cursor = 'default';
+    };
+
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', endDrag);
+    canvas.addEventListener('pointerleave', (e) => {
+        if (!dragState.active) canvas.style.cursor = 'default';
+    });
+}
+
+function createCanvasOtherSettingsModal() {
+    const modal = document.createElement('div');
+    modal.id = 'canvasOtherSettingsModal';
+    modal.className = 'modal';
+    modal.style.display = 'none';
+
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+
+    modal.innerHTML = `
+        <div class="modal-content other-settings-modal">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <h3>${isEn ? 'Other' : '其他设置'}</h3>
+                </div>
+                <button class="perf-modal-close" id="otherModalCloseBtn"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'Special' : '特殊'}</div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Auto-link after split' : '临时栏目分裂后自动连接'}</div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherAutoLinkSplit">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherTempColorFollow">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'Zoom Speed & Magnet' : '缩放速率与磁矩'}</div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Use default curve' : '使用默认曲线'}</div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherUseDefaultZoomCurve">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="other-curve-card">
+                        <canvas id="otherZoomMagnetCurve" class="other-curve-canvas"></canvas>
+                        <div class="other-curve-legend">
+                            <div class="other-curve-legend-item" id="otherMagnetSafeLegend">
+                                <span class="other-curve-dot dot-safe"></span>
+                                <span>${isEn ? 'Magnet 1' : '磁矩1'}</span>
+                                <span id="otherMagnetSafeValue">--</span>
+                            </div>
+                            <div class="other-curve-legend-item" id="otherMagnetMidLegend">
+                                <span class="other-curve-dot dot-mid"></span>
+                                <span>${isEn ? 'Magnet 2' : '磁矩2'}</span>
+                                <span id="otherMagnetMidValue">--</span>
+                            </div>
+                        </div>
+                        <div class="other-curve-note">${isEn ? 'Default curve follows performance magnet settings.' : '默认曲线跟随性能磁矩设置。'}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="perf-modal-footer">
+                <button class="perf-btn secondary" id="otherCancelBtn">${isEn ? 'Cancel' : '取消'}</button>
+                <button class="perf-btn primary" id="otherSaveBtn">
+                    <i class="fas fa-check"></i>
+                    <span>${isEn ? 'Save' : '保存'}</span>
+                </button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const closeBtn = modal.querySelector('#otherModalCloseBtn');
+    if (closeBtn) closeBtn.addEventListener('click', closeCanvasOtherSettingsModal);
+    const cancelBtn = modal.querySelector('#otherCancelBtn');
+    if (cancelBtn) cancelBtn.addEventListener('click', closeCanvasOtherSettingsModal);
+    const saveBtn = modal.querySelector('#otherSaveBtn');
+    if (saveBtn) saveBtn.addEventListener('click', saveCanvasOtherSettings);
+    const defaultToggle = modal.querySelector('#otherUseDefaultZoomCurve');
+    if (defaultToggle) {
+        defaultToggle.addEventListener('change', () => {
+            const nextUseDefault = !!defaultToggle.checked;
+            if (!nextUseDefault) {
+                const cur = __normalizeZoomCurve(modal._zoomCurve || getCanvasZoomCurveSettings());
+                if (__isDefaultZoomCurve(cur)) {
+                    modal._zoomCurve = __normalizeZoomCurve(__getSuggestedZoomCurveFromMagnet());
+                }
+            }
+            modal._useDefaultZoomCurve = nextUseDefault;
+            try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+        });
+    }
+    __bindOtherCurveInteractions(modal);
 }
 
 // =============================================================================
