@@ -936,8 +936,10 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     tempColorFollow: true, // 临时栏目颜色跟随
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
     zoomCurve: {
+        p0: { x: 0, y: 1 },
         p1: { x: 0.25, y: 1 },
-        p2: { x: 0.67, y: 1 }
+        p2: { x: 0.67, y: 1 },
+        p3: { x: 1, y: 1 }
     },
     magnetPoints: {
         m1: { x: 0.67, y: 0.05 },
@@ -975,9 +977,15 @@ function __normalizeAppearanceColor(value, fallback) {
 function __normalizeZoomCurve(input) {
     const fallback = __cloneDefaultOtherSettings().zoomCurve;
     if (!input || typeof input !== 'object') return fallback;
+    const p0 = input.p0 || {};
     const p1 = input.p1 || {};
     const p2 = input.p2 || {};
+    const p3 = input.p3 || {};
     const out = {
+        p0: {
+            x: 0,
+            y: __clampNumber(p0.y, 0, 1, fallback.p0.y)
+        },
         p1: {
             x: __clampNumber(p1.x, 0, 1, fallback.p1.x),
             y: __clampNumber(p1.y, 0, 1, fallback.p1.y)
@@ -985,6 +993,10 @@ function __normalizeZoomCurve(input) {
         p2: {
             x: __clampNumber(p2.x, 0, 1, fallback.p2.x),
             y: __clampNumber(p2.y, 0, 1, fallback.p2.y)
+        },
+        p3: {
+            x: 1,
+            y: __clampNumber(p3.y, 0, 1, fallback.p3.y)
         }
     };
     if (out.p1.x > out.p2.x) {
@@ -5610,6 +5622,18 @@ function __cubicBezierCoord(t, p0, p1, p2, p3) {
     return (u * u * u * p0) + (3 * u * u * t * p1) + (3 * u * t * t * p2) + (t * t * t * p3);
 }
 
+function __scaleZoomCurveFactor(raw) {
+    const clamped = Math.max(0, Math.min(1, raw));
+    const scaled = Math.pow(clamped, 1.35) * 0.60;
+    return Math.max(0.005, Math.min(0.65, scaled));
+}
+
+function __unscaleZoomCurveFactor(scaled) {
+    const v = Math.max(0.005, Math.min(0.65, scaled));
+    const norm = Math.max(0, Math.min(1, v / 0.60));
+    return Math.pow(norm, 1 / 1.35);
+}
+
 function __solveBezierTForX(x, x1, x2) {
     let lo = 0;
     let hi = 1;
@@ -5629,8 +5653,10 @@ function __getZoomSpeedFactorFromCurve(displayZoom, curve) {
     const percent = Math.max(minPercent, Math.min(maxPercent, (displayZoom || 1) * 100));
     const x = (percent - minPercent) / range;
     const t = __solveBezierTForX(x, curve.p1.x, curve.p2.x);
-    const y = __cubicBezierCoord(t, 1, curve.p1.y, curve.p2.y, 1);
-    return Math.max(0.05, Math.min(1, y));
+    const p0y = (curve.p0 && Number.isFinite(curve.p0.y)) ? curve.p0.y : 1;
+    const p3y = (curve.p3 && Number.isFinite(curve.p3.y)) ? curve.p3.y : 1;
+    const y = __cubicBezierCoord(t, p0y, curve.p1.y, curve.p2.y, p3y);
+    return __scaleZoomCurveFactor(y);
 }
 
 function getCanvasZoomSpeedFactor(displayZoom) {
@@ -28758,11 +28784,19 @@ function __renderOtherZoomMagnetCurve(modal) {
     ctx.strokeStyle = gridColor;
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
-    for (let i = 0; i <= 4; i++) {
-        const y = paddingTop + (plotH / 4) * i;
+    const gridDiv = 4; // 5 lines
+    for (let i = 0; i <= gridDiv; i++) {
+        const y = paddingTop + (plotH / gridDiv) * i;
         ctx.beginPath();
         ctx.moveTo(paddingLeft, y);
         ctx.lineTo(paddingLeft + plotW, y);
+        ctx.stroke();
+    }
+    for (let i = 0; i <= gridDiv; i++) {
+        const x = paddingLeft + (plotW / gridDiv) * i;
+        ctx.beginPath();
+        ctx.moveTo(x, paddingTop);
+        ctx.lineTo(x, paddingTop + plotH);
         ctx.stroke();
     }
 
@@ -28781,24 +28815,26 @@ function __renderOtherZoomMagnetCurve(modal) {
                 ? 'Default curve resets to standard values. Drag any point to switch to custom.'
                 : '默认曲线会还原到标准数值，拖动任意点会自动切换为自定义。')
             : (isEn
-                ? 'Drag Magnet 1/2 and Rate 1/2. X: zoom %, Y: speed (higher = faster). Smoother = slower.'
-                : '拖动磁矩点1/2与速率点1/2。X 轴为缩放比例，Y 轴为速率强度（越高越快、越平滑越慢）。');
+                ? 'Drag Magnet 1/2 and Rate 1–4. X: zoom %, Y: speed (higher = faster). Smoother = slower.'
+                : '拖动磁矩点1/2与速率点1-4。X 轴为缩放比例，Y 轴为速率强度（越高越快、越平滑越慢）。');
     }
 
     const curve = (modal && modal._zoomCurve) ? modal._zoomCurve : getCanvasZoomCurveSettings();
+    const p0 = curve && curve.p0 ? curve.p0 : { x: 0, y: 1 };
     const p1 = curve && curve.p1 ? curve.p1 : { x: 0.25, y: 1 };
     const p2 = curve && curve.p2 ? curve.p2 : { x: 0.67, y: 1 };
+    const p3 = curve && curve.p3 ? curve.p3 : { x: 1, y: 1 };
     const normToX = (nx) => paddingLeft + Math.max(0, Math.min(1, nx)) * plotW;
     const normToY = (ny) => paddingTop + (1 - Math.max(0, Math.min(1, ny))) * plotH;
 
     const startX = normToX(0);
-    const startY = normToY(1);
+    const startY = normToY(__scaleZoomCurveFactor(p0.y));
     const p1x = normToX(p1.x);
     const p1y = normToY(p1.y);
     const p2x = normToX(p2.x);
     const p2y = normToY(p2.y);
     const endX = normToX(1);
-    const endY = normToY(1);
+    const endY = normToY(__scaleZoomCurveFactor(p3.y));
 
     const safeCenter = safePercent / 100;
     const midCenter = midPercent / 100;
@@ -28844,9 +28880,11 @@ function __renderOtherZoomMagnetCurve(modal) {
     const drawFactorCurve = (getFactor, color, dash = []) => {
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
         ctx.setLineDash(dash);
         ctx.beginPath();
-        for (let t = 0; t <= 1.001; t += 0.02) {
+        for (let t = 0; t <= 1.001; t += 0.01) {
             const percent = minPercent + t * range;
             const x = percentToX(percent);
             const y = factorToY(getFactor(percent));
@@ -28882,10 +28920,18 @@ function __renderOtherZoomMagnetCurve(modal) {
     ctx.beginPath();
     ctx.arc(p2x, p2y, 4, 0, Math.PI * 2);
     ctx.fill();
+    ctx.beginPath();
+    ctx.arc(startX, startY, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(endX, endY, 4, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = textColor;
     ctx.font = '11px sans-serif';
     ctx.fillText(isEn ? 'R1' : '速1', p1x + 6, p1y - 6);
     ctx.fillText(isEn ? 'R2' : '速2', p2x + 6, p2y - 6);
+    ctx.fillText(isEn ? 'R3' : '速3', startX + 6, startY - 6);
+    ctx.fillText(isEn ? 'R4' : '速4', endX - 20, endY - 6);
 
     // Magnet markers + points
     const drawMarker = (percent, color, enabled) => {
@@ -28991,18 +29037,24 @@ function __bindOtherCurveInteractions(modal) {
         const layout = __getOtherCurveLayout(modal, canvas);
         const curve = getCurve();
         const magnets = getMagnets();
+        const p0x = layout.paddingLeft + (curve.p0 ? curve.p0.x : 0) * layout.plotW;
+        const p0y = layout.paddingTop + (1 - __scaleZoomCurveFactor(curve.p0 ? curve.p0.y : 1)) * layout.plotH;
         const p1x = layout.paddingLeft + curve.p1.x * layout.plotW;
         const p1y = layout.paddingTop + (1 - curve.p1.y) * layout.plotH;
         const p2x = layout.paddingLeft + curve.p2.x * layout.plotW;
         const p2y = layout.paddingTop + (1 - curve.p2.y) * layout.plotH;
+        const p3x = layout.paddingLeft + (curve.p3 ? curve.p3.x : 1) * layout.plotW;
+        const p3y = layout.paddingTop + (1 - __scaleZoomCurveFactor(curve.p3 ? curve.p3.y : 1)) * layout.plotH;
         const m1x = layout.paddingLeft + magnets.m1.x * layout.plotW;
         const m1y = layout.paddingTop + (1 - magnets.m1.y) * layout.plotH;
         const m2x = layout.paddingLeft + magnets.m2.x * layout.plotW;
         const m2y = layout.paddingTop + (1 - magnets.m2.y) * layout.plotH;
         return {
             layout,
+            p0: { x: p0x, y: p0y },
             p1: { x: p1x, y: p1y },
             p2: { x: p2x, y: p2y },
+            p3: { x: p3x, y: p3y },
             m1: { x: m1x, y: m1y },
             m2: { x: m2x, y: m2y },
             curve,
@@ -29014,10 +29066,12 @@ function __bindOtherCurveInteractions(modal) {
         const rect = canvas.getBoundingClientRect();
         const localX = clientX - rect.left;
         const localY = clientY - rect.top;
-        const { p1, p2, m1, m2 } = getPointPositions();
+        const { p0, p1, p2, p3, m1, m2 } = getPointPositions();
         const points = [
+            { id: 'p0', d: Math.hypot(localX - p0.x, localY - p0.y) },
             { id: 'p1', d: Math.hypot(localX - p1.x, localY - p1.y) },
             { id: 'p2', d: Math.hypot(localX - p2.x, localY - p2.y) },
+            { id: 'p3', d: Math.hypot(localX - p3.x, localY - p3.y) },
             { id: 'm1', d: Math.hypot(localX - m1.x, localY - m1.y) },
             { id: 'm2', d: Math.hypot(localX - m2.x, localY - m2.y) }
         ];
@@ -29039,12 +29093,20 @@ function __bindOtherCurveInteractions(modal) {
         const { layout, curve, magnets } = getPointPositions();
         const nx = __clamp01((localX - layout.paddingLeft) / layout.plotW);
         const ny = __clamp01(1 - (localY - layout.paddingTop) / layout.plotH);
-        if (dragState.point === 'p1') {
+        const maxScaled = __scaleZoomCurveFactor(1);
+        const minScaled = __scaleZoomCurveFactor(0);
+        if (dragState.point === 'p0') {
+            const display = Math.max(minScaled, Math.min(maxScaled, ny));
+            curve.p0.y = __unscaleZoomCurveFactor(display);
+        } else if (dragState.point === 'p1') {
             curve.p1.x = Math.min(nx, curve.p2.x - minGap);
             curve.p1.y = ny;
         } else if (dragState.point === 'p2') {
             curve.p2.x = Math.max(nx, curve.p1.x + minGap);
             curve.p2.y = ny;
+        } else if (dragState.point === 'p3') {
+            const display = Math.max(minScaled, Math.min(maxScaled, ny));
+            curve.p3.y = __unscaleZoomCurveFactor(display);
         } else if (dragState.point === 'm1') {
             magnets.m1.x = Math.max(nx, magnets.m2.x + magnetGap);
             magnets.m1.y = Math.max(0.02, Math.min(1, ny));
