@@ -1764,6 +1764,10 @@ const i18n = {
         'zh_CN': '性能',
         'en': 'Performance'
     },
+    canvasAppearanceSettingsText: {
+        'zh_CN': '外观',
+        'en': 'Appearance'
+    },
     canvasHelpBtnTitle: {
         'zh_CN': '说明',
         'en': 'Help'
@@ -2525,6 +2529,8 @@ function applyLanguage() {
     if (canvasManageText) canvasManageText.textContent = i18n.canvasManageText[currentLang];
     const canvasManageBtn = document.getElementById('canvasManageBtn');
     if (canvasManageBtn) canvasManageBtn.title = i18n.canvasManageTitle[currentLang];
+    const canvasAppearanceSettingsText = document.getElementById('canvasAppearanceSettingsText');
+    if (canvasAppearanceSettingsText) canvasAppearanceSettingsText.textContent = i18n.canvasAppearanceSettingsText[currentLang];
     const canvasShortcutSettingsText = document.getElementById('canvasShortcutSettingsText');
     if (canvasShortcutSettingsText) canvasShortcutSettingsText.textContent = i18n.canvasShortcutSettingsText[currentLang];
     const canvasHelpBtn = document.getElementById('canvasHelpBtn');

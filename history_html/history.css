@@ -43,6 +43,11 @@
 
     /* Layout constants */
     --sidebar-collapsed-width: 60px;
+
+    /* Canvas appearance */
+    --permanent-section-color: #10b981;
+    --permanent-section-color-dark: #059669;
+    --permanent-section-color-rgb: 16, 185, 129;
 }
 
 [data-theme="dark"] {
@@ -3813,7 +3818,7 @@ a.tree-label.tree-bookmark-link:hover {
     height: 70vh;
     /* 移除背景色，让内层元素填充 */
     background: transparent;
-    border: 3px solid #10b981;
+    border: 3px solid var(--permanent-section-color, #10b981);
     border-radius: 12px;
     box-shadow: var(--shadow-lg);
     /* 使用 clip 裁剪内容，确保圆角生效 */
@@ -3839,7 +3844,7 @@ a.tree-label.tree-bookmark-link:hover {
 
 [data-theme="dark"] .permanent-bookmark-section {
     background: transparent;
-    border-color: #10b981;
+    border-color: var(--permanent-section-color, #10b981);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
@@ -3865,12 +3870,13 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .permanent-bookmark-section.drag-origin-active {
-    border-color: rgba(16, 185, 129, 0.6);
-    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.06), 0 12px 30px rgba(16, 185, 129, 0.18);
+    border-color: rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.6);
+    box-shadow: 0 0 0 4px rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.06),
+        0 12px 30px rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.18);
 }
 
 .permanent-bookmark-section {
-    --section-color: #10b981;
+    --section-color: var(--permanent-section-color, #10b981);
 }
 
 @keyframes dropTargetPulse {
@@ -3884,19 +3890,19 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .permanent-section-header {
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    background: linear-gradient(135deg, var(--permanent-section-color, #10b981) 0%, var(--permanent-section-color-dark, #059669) 100%);
     color: white;
     padding: 14px 18px;
     cursor: move;
     user-select: none;
-    border-bottom: 1px solid rgba(16, 185, 129, 0.2);
+    border-bottom: 1px solid rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.2);
     border-top-left-radius: 9px;
     border-top-right-radius: 9px;
     /* 外层 overflow:hidden 会自动裁剪圆角，无需单独设置 */
 }
 
 .permanent-section-header:hover {
-    background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+    background: linear-gradient(135deg, var(--permanent-section-color-dark, #059669) 0%, var(--permanent-section-color, #10b981) 100%);
 }
 
 .permanent-section-title {
@@ -5785,7 +5791,7 @@ a.tree-label.tree-bookmark-link:hover {
 
 /* 永久栏目（绿色） */
 .permanent-bookmark-section .resize-handle:hover {
-    background: rgba(16, 185, 129, 0.06) !important;
+    background: rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.06) !important;
 }
 
 /* 临时书签栏目（使用自定义颜色） */
@@ -5852,7 +5858,7 @@ a.tree-label.tree-bookmark-link:hover {
 .permanent-bookmark-section .resize-handle-ne:hover::after,
 .permanent-bookmark-section .resize-handle-sw:hover::after,
 .permanent-bookmark-section .resize-handle-se:hover::after {
-    background: #10b981;
+    background: var(--permanent-section-color, #10b981);
 }
 
 /* 临时书签栏目（使用自定义颜色） */

@@ -194,7 +194,8 @@ const CanvasState = {
     edgeCounter: 0,
     isConnecting: false,
     connectionStart: null, // { nodeId, side, anchorEl }
-    selectedEdgeId: null
+    selectedEdgeId: null,
+    appearanceSettings: null
 };
 
 // 缩放范围：最小显示 1%（display zoom），最大 raw zoom 3x
@@ -907,6 +908,165 @@ const TEMP_SECTION_DEFAULT_COLOR = '#2563eb';
 const MD_NODE_DEFAULT_WIDTH = 300;
 const MD_NODE_DEFAULT_HEIGHT = 300;
 
+// Canvas 外观设置（默认值）
+const CANVAS_APPEARANCE_SETTINGS_KEY = 'canvas-appearance-settings-v1';
+const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
+    sizes: {
+        permanent: { mode: 'manual', width: 600, height: 600 },
+        temp: { mode: 'manual', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT },
+        mdNode: { width: MD_NODE_DEFAULT_WIDTH, height: MD_NODE_DEFAULT_HEIGHT }
+    },
+    colors: {
+        permanent: '#10b981',
+        temp: TEMP_SECTION_DEFAULT_COLOR,
+        mdNode: '#888888',
+        edge: '#999999'
+    },
+    names: {
+        temp: { mode: 'timestamp', manualValue: '' },
+        edge: { mode: 'blank', manualValue: '' }
+    }
+};
+
+function __cloneDefaultAppearanceSettings() {
+    return JSON.parse(JSON.stringify(DEFAULT_CANVAS_APPEARANCE_SETTINGS));
+}
+
+function __clampNumber(value, min, max, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    if (typeof min === 'number' && n < min) return min;
+    if (typeof max === 'number' && n > max) return max;
+    return n;
+}
+
+function __normalizeAppearanceColor(value, fallback) {
+    const normalized = normalizeHexColor(String(value || ''));
+    return normalized ? `#${normalized}` : fallback;
+}
+
+function normalizeCanvasAppearanceSettings(input) {
+    const out = __cloneDefaultAppearanceSettings();
+    if (!input || typeof input !== 'object') return out;
+
+    const sizes = input.sizes || {};
+    const permSize = sizes.permanent || {};
+    const tempSize = sizes.temp || {};
+    const mdSize = sizes.mdNode || {};
+
+    out.sizes.permanent.mode = (permSize.mode === 'auto') ? 'auto' : 'manual';
+    out.sizes.temp.mode = (tempSize.mode === 'auto') ? 'auto' : 'manual';
+
+    out.sizes.permanent.width = __clampNumber(permSize.width, 300, 3000, out.sizes.permanent.width);
+    out.sizes.permanent.height = __clampNumber(permSize.height, 200, 4000, out.sizes.permanent.height);
+
+    out.sizes.temp.width = __clampNumber(tempSize.width, 200, 2400, out.sizes.temp.width);
+    out.sizes.temp.height = __clampNumber(tempSize.height, 150, 3000, out.sizes.temp.height);
+
+    out.sizes.mdNode.width = __clampNumber(mdSize.width, 180, 2000, out.sizes.mdNode.width);
+    out.sizes.mdNode.height = __clampNumber(mdSize.height, 140, 2000, out.sizes.mdNode.height);
+
+    const colors = input.colors || {};
+    out.colors.permanent = __normalizeAppearanceColor(colors.permanent, out.colors.permanent);
+    out.colors.temp = __normalizeAppearanceColor(colors.temp, out.colors.temp);
+    out.colors.mdNode = __normalizeAppearanceColor(colors.mdNode, out.colors.mdNode);
+    out.colors.edge = __normalizeAppearanceColor(colors.edge, out.colors.edge);
+
+    const names = input.names || {};
+    const tempNames = names.temp || {};
+    const edgeNames = names.edge || {};
+    const tempMode = String(tempNames.mode || '').toLowerCase();
+    const edgeMode = String(edgeNames.mode || '').toLowerCase();
+
+    out.names.temp.mode = ['manual', 'timestamp', 'split', 'blank'].includes(tempMode) ? tempMode : out.names.temp.mode;
+    out.names.temp.manualValue = typeof tempNames.manualValue === 'string' ? tempNames.manualValue : out.names.temp.manualValue;
+
+    out.names.edge.mode = ['manual', 'timestamp', 'parent', 'child', 'blank'].includes(edgeMode) ? edgeMode : out.names.edge.mode;
+    out.names.edge.manualValue = typeof edgeNames.manualValue === 'string' ? edgeNames.manualValue : out.names.edge.manualValue;
+
+    return out;
+}
+
+function getCanvasAppearanceSettings() {
+    if (!CanvasState.appearanceSettings) {
+        CanvasState.appearanceSettings = __cloneDefaultAppearanceSettings();
+    }
+    return CanvasState.appearanceSettings;
+}
+
+function loadCanvasAppearanceSettings() {
+    let saved = null;
+    try {
+        const raw = localStorage.getItem(CANVAS_APPEARANCE_SETTINGS_KEY);
+        if (raw) saved = JSON.parse(raw);
+    } catch (_) { }
+    CanvasState.appearanceSettings = normalizeCanvasAppearanceSettings(saved);
+    applyCanvasAppearanceSettings(CanvasState.appearanceSettings, { applyPermanentSize: false });
+}
+
+function getTempSectionBaseSize() {
+    const settings = getCanvasAppearanceSettings();
+    const size = settings.sizes && settings.sizes.temp ? settings.sizes.temp : DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.temp;
+    return { width: size.width, height: size.height, mode: size.mode || 'manual' };
+}
+
+function getPermanentSectionBaseSize() {
+    const settings = getCanvasAppearanceSettings();
+    const size = settings.sizes && settings.sizes.permanent ? settings.sizes.permanent : DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.permanent;
+    return { width: size.width, height: size.height, mode: 'manual' };
+}
+
+function getBlankNodeDefaultSize() {
+    const settings = getCanvasAppearanceSettings();
+    const size = settings.sizes && settings.sizes.mdNode ? settings.sizes.mdNode : DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.mdNode;
+    return { width: size.width, height: size.height };
+}
+
+function getTempSectionDefaultColor() {
+    const settings = getCanvasAppearanceSettings();
+    return (settings.colors && settings.colors.temp) ? settings.colors.temp : TEMP_SECTION_DEFAULT_COLOR;
+}
+
+function getBlankNodeDefaultColor() {
+    const settings = getCanvasAppearanceSettings();
+    return (settings.colors && settings.colors.mdNode) ? settings.colors.mdNode : '#888888';
+}
+
+function getEdgeDefaultColor() {
+    const settings = getCanvasAppearanceSettings();
+    return (settings.colors && settings.colors.edge) ? settings.colors.edge : '#999999';
+}
+
+function getPermanentSectionDefaultColor() {
+    const settings = getCanvasAppearanceSettings();
+    return (settings.colors && settings.colors.permanent) ? settings.colors.permanent : '#10b981';
+}
+
+function __setCssVar(name, value) {
+    try {
+        if (document && document.documentElement) {
+            document.documentElement.style.setProperty(name, value);
+        }
+    } catch (_) { }
+}
+
+function applyPermanentSectionColorVars(color) {
+    const hex = __normalizeAppearanceColor(color, '#10b981');
+    const rgb = hexToRgb(hex) || { r: 16, g: 185, b: 129 };
+    const dark = darkenHexColor(hex, 0.18);
+    __setCssVar('--permanent-section-color', hex);
+    __setCssVar('--permanent-section-color-dark', dark);
+    __setCssVar('--permanent-section-color-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+}
+
+function applyCanvasAppearanceSettings(settings, options = {}) {
+    if (!settings) return;
+    applyPermanentSectionColorVars(settings.colors && settings.colors.permanent);
+    if (options && options.applyPermanentSize) {
+        applyPermanentSectionSizeFromAppearance(settings, { force: true });
+    }
+}
+
 // =============================================================================
 // 初始演示模板 - 首次使用时显示的使用指南
 // =============================================================================
@@ -1158,7 +1318,10 @@ function createInitialDemoTemplate() {
 // 用于跟踪导入偏移的计数器
 let importPositionOffset = 0;
 
-function findAvailablePositionInViewport(width = TEMP_SECTION_DEFAULT_WIDTH, height = TEMP_SECTION_DEFAULT_HEIGHT) {
+function findAvailablePositionInViewport(width = null, height = null) {
+    const defaults = getTempSectionBaseSize();
+    const resolvedWidth = Number.isFinite(width) ? width : defaults.width;
+    const resolvedHeight = Number.isFinite(height) ? height : defaults.height;
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) {
         return { x: 100, y: 100, needsHigherZIndex: false };
@@ -1223,7 +1386,7 @@ function findAvailablePositionInViewport(width = TEMP_SECTION_DEFAULT_WIDTH, hei
             const sy = Number(sec.y);
             const sw = Number(sec.width);
             const sh = Number(sec.height);
-            if (overlaps(x, y, width, height, sx, sy, sw, sh)) return true;
+            if (overlaps(x, y, resolvedWidth, resolvedHeight, sx, sy, sw, sh)) return true;
         }
         for (const node of (CanvasState.mdNodes || [])) {
             if (!node) continue;
@@ -1231,18 +1394,18 @@ function findAvailablePositionInViewport(width = TEMP_SECTION_DEFAULT_WIDTH, hei
             const ny = Number(node.y);
             const nw = Number(node.width) || 200;
             const nh = Number(node.height) || 100;
-            if (overlaps(x, y, width, height, nx, ny, nw, nh)) return true;
+            if (overlaps(x, y, resolvedWidth, resolvedHeight, nx, ny, nw, nh)) return true;
         }
         return false;
     };
 
-    const baseX = viewportCenterCanvasX - width / 2 + baseRightBiasX;
-    const baseY = viewportCenterCanvasY - height / 2;
+    const baseX = viewportCenterCanvasX - resolvedWidth / 2 + baseRightBiasX;
+    const baseY = viewportCenterCanvasY - resolvedHeight / 2;
 
     // 搜索候选点：优先“偏右”，上下交替扩展；步长按元素尺寸计算，保证连续导入不会重叠/内嵌
     const minStepPx = 44;
-    const stepX = Math.max((width + pad * 2), (minStepPx / zoom));
-    const stepY = Math.max((height * 0.65 + pad * 2), ((minStepPx * 0.6) / zoom));
+    const stepX = Math.max((resolvedWidth + pad * 2), (minStepPx / zoom));
+    const stepY = Math.max((resolvedHeight * 0.65 + pad * 2), ((minStepPx * 0.6) / zoom));
     const yMultipliers = [0, 1, -1, 2, -2, 3, -3, 4, -4];
     const xMultipliers = [0, 1, 2, 3, 4, 5, 6];
 
@@ -1258,12 +1421,12 @@ function findAvailablePositionInViewport(width = TEMP_SECTION_DEFAULT_WIDTH, hei
             const x = clampWithin(
                 baseX + xMultipliers[xi] * stepX + seedX,
                 viewportLeftCanvasX + marginX,
-                viewportRightCanvasX - width - marginX
+                viewportRightCanvasX - resolvedWidth - marginX
             );
             const y = clampWithin(
                 baseY + yMultipliers[yi] * stepY + seedY,
                 viewportTopCanvasY + marginY,
-                viewportBottomCanvasY - height - marginY
+                viewportBottomCanvasY - resolvedHeight - marginY
             );
             if (!collidesWithExisting(x, y)) {
                 targetX = x;
@@ -1278,12 +1441,12 @@ function findAvailablePositionInViewport(width = TEMP_SECTION_DEFAULT_WIDTH, hei
         targetX = clampWithin(
             baseX + seedX,
             viewportLeftCanvasX + marginX,
-            viewportRightCanvasX - width - marginX
+            viewportRightCanvasX - resolvedWidth - marginX
         );
         targetY = clampWithin(
             baseY + seedY,
             viewportTopCanvasY + marginY,
-            viewportBottomCanvasY - height - marginY
+            viewportBottomCanvasY - resolvedHeight - marginY
         );
     }
 
@@ -1295,6 +1458,93 @@ function findAvailablePositionInViewport(width = TEMP_SECTION_DEFAULT_WIDTH, hei
         y: targetY,
         needsHigherZIndex: true  // 所有导入的栏目都设置更高z-index，确保可见
     };
+}
+
+function __computeTempSectionAutoSize(section, nodeElement, baseSize) {
+    const el = nodeElement || (section && section.id ? document.getElementById(section.id) : null);
+    if (!el) return null;
+    const header = el.querySelector('.temp-node-header');
+    const desc = el.querySelector('.temp-node-description-container');
+    const body = el.querySelector('.temp-node-body');
+
+    const headerH = header ? header.offsetHeight : 0;
+    const descH = desc ? desc.offsetHeight : 0;
+    const bodyH = body ? Math.max(body.scrollHeight || 0, body.offsetHeight || 0) : 0;
+    const bodyW = body ? Math.max(body.scrollWidth || 0, body.offsetWidth || 0) : 0;
+    const headerW = header ? Math.max(header.scrollWidth || 0, header.offsetWidth || 0) : 0;
+    const descW = desc ? Math.max(desc.scrollWidth || 0, desc.offsetWidth || 0) : 0;
+
+    const minW = baseSize && Number.isFinite(baseSize.width) ? baseSize.width : TEMP_SECTION_DEFAULT_WIDTH;
+    const minH = baseSize && Number.isFinite(baseSize.height) ? baseSize.height : TEMP_SECTION_DEFAULT_HEIGHT;
+
+    return {
+        width: Math.max(minW, Math.round(Math.max(bodyW, headerW, descW))),
+        height: Math.max(minH, Math.round(headerH + descH + bodyH))
+    };
+}
+
+function applyTempSectionAutoSize(section, options = {}) {
+    if (!section) return;
+    const baseSize = getTempSectionBaseSize();
+    const el = document.getElementById(section.id);
+    if (!el) return;
+    const size = __computeTempSectionAutoSize(section, el, baseSize);
+    if (!size) return;
+
+    section.width = size.width;
+    section.height = size.height;
+    el.style.width = `${size.width}px`;
+    el.style.height = `${size.height}px`;
+
+    if (!options || options.save !== false) {
+        saveTempNodes();
+        scheduleBoundsUpdate();
+        scheduleScrollbarUpdate();
+        scheduleEdgesRender();
+    }
+}
+
+function applyTempSectionAutoSizeIfNeeded(section) {
+    if (!section) return;
+    const settings = getCanvasAppearanceSettings();
+    const mode = settings && settings.sizes && settings.sizes.temp ? settings.sizes.temp.mode : 'manual';
+    if (mode !== 'auto') return;
+    requestAnimationFrame(() => {
+        applyTempSectionAutoSize(section, { save: true });
+    });
+}
+
+function applyTempSectionAutoSizeAll() {
+    const settings = getCanvasAppearanceSettings();
+    const mode = settings && settings.sizes && settings.sizes.temp ? settings.sizes.temp.mode : 'manual';
+    if (mode !== 'auto') return;
+    const sections = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections : [];
+    if (!sections.length) return;
+
+    requestAnimationFrame(() => {
+        let updated = false;
+        const baseSize = getTempSectionBaseSize();
+        sections.forEach(section => {
+            if (!section || !section.id) return;
+            const el = document.getElementById(section.id);
+            if (!el) return;
+            const size = __computeTempSectionAutoSize(section, el, baseSize);
+            if (!size) return;
+            if (section.width !== size.width || section.height !== size.height) {
+                section.width = size.width;
+                section.height = size.height;
+                el.style.width = `${size.width}px`;
+                el.style.height = `${size.height}px`;
+                updated = true;
+            }
+        });
+        if (updated) {
+            saveTempNodes();
+            scheduleBoundsUpdate();
+            scheduleScrollbarUpdate();
+            scheduleEdgesRender();
+        }
+    });
 }
 
 /**
@@ -1465,12 +1715,112 @@ function formatTimestampForTitle(date = new Date()) {
     return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
-function getDefaultTempSectionTitle() {
+function getDefaultTempSectionTitle(options = {}) {
+    const settings = getCanvasAppearanceSettings();
+    const mode = settings && settings.names && settings.names.temp ? settings.names.temp.mode : 'timestamp';
+    const manualValue = settings && settings.names && settings.names.temp ? settings.names.temp.manualValue : '';
+    const splitTitle = (options && typeof options.splitTitle === 'string') ? options.splitTitle.trim() : '';
+
+    if (mode === 'split' && splitTitle) return splitTitle;
+    if (mode === 'blank') return '';
+    if (mode === 'manual') return manualValue;
+    if (mode === 'timestamp') {
+        try {
+            return formatTimestampForTitle();
+        } catch (_) {
+            return new Date().toLocaleString();
+        }
+    }
+
     try {
         return formatTimestampForTitle();
     } catch (_) {
         return new Date().toLocaleString();
     }
+}
+
+function getTempSectionDisplayTitle(section, options = {}) {
+    if (section && typeof section.title === 'string') return section.title;
+    return getDefaultTempSectionTitle(options);
+}
+
+function __getPermanentSectionTitleText() {
+    try {
+        const section = document.getElementById('permanentSection');
+        const titleEl = section ? section.querySelector('.permanent-section-title h3') : null;
+        const text = titleEl ? String(titleEl.textContent || '').trim() : '';
+        if (text) return text;
+    } catch (_) { }
+    const lang = (typeof currentLang !== 'undefined' && currentLang) ? currentLang : 'zh_CN';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+    return isEn ? 'Permanent Section' : '永久栏目';
+}
+
+function __extractFirstLine(text) {
+    const clean = String(text || '').replace(/\u200B/g, '').trim();
+    if (!clean) return '';
+    const lines = clean.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    return lines.length ? lines[0] : clean;
+}
+
+function __getMdNodeTitleText(node) {
+    if (!node) return '';
+    if (typeof node.title === 'string' && node.title.trim()) {
+        return __extractFirstLine(node.title);
+    }
+    if (typeof node.text === 'string' && node.text.trim()) {
+        return __extractFirstLine(node.text);
+    }
+    if (typeof node.html === 'string' && node.html.trim()) {
+        try {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = node.html;
+            const text = tmp.textContent || '';
+            return __extractFirstLine(text);
+        } catch (_) {
+            return __extractFirstLine(node.html);
+        }
+    }
+    return '';
+}
+
+function getEdgeNodeDisplayTitle(nodeId) {
+    if (!nodeId) return '';
+    if (nodeId === 'permanent-section' || nodeId === 'permanentSection') {
+        return __getPermanentSectionTitleText();
+    }
+    const temp = Array.isArray(CanvasState.tempSections)
+        ? CanvasState.tempSections.find(section => section && section.id === nodeId)
+        : null;
+    if (temp) {
+        const title = getTempSectionDisplayTitle(temp);
+        return typeof title === 'string' ? title.trim() : '';
+    }
+    const md = Array.isArray(CanvasState.mdNodes)
+        ? CanvasState.mdNodes.find(node => node && node.id === nodeId)
+        : null;
+    if (md) return __getMdNodeTitleText(md);
+    return '';
+}
+
+function getDefaultEdgeLabel(options = {}) {
+    const settings = getCanvasAppearanceSettings();
+    const edgeSettings = settings && settings.names ? settings.names.edge : null;
+    const mode = edgeSettings && edgeSettings.mode ? edgeSettings.mode : 'blank';
+    const manualValue = edgeSettings && typeof edgeSettings.manualValue === 'string' ? edgeSettings.manualValue : '';
+
+    if (mode === 'manual') return manualValue;
+    if (mode === 'blank') return '';
+    if (mode === 'timestamp') {
+        try {
+            return formatTimestampForTitle();
+        } catch (_) {
+            return new Date().toLocaleString();
+        }
+    }
+    if (mode === 'parent') return getEdgeNodeDisplayTitle(options.fromNode);
+    if (mode === 'child') return getEdgeNodeDisplayTitle(options.toNode);
+    return '';
 }
 
 function escapeRegExp(value) {
@@ -1739,7 +2089,7 @@ function hasLockedAncestor(parentLabel, candidateLabel, labelMap) {
 
 function updateTempSectionColor(section, color) {
     if (!section) return;
-    section.color = color || TEMP_SECTION_DEFAULT_COLOR;
+    section.color = color || getTempSectionDefaultColor();
     const element = document.getElementById(section.id);
     if (!element) return;
     const header = element.querySelector('.temp-node-header');
@@ -1792,7 +2142,7 @@ function getSplitTempSectionLabel(parentSection) {
 
 function pickTempSectionColor() {
     CanvasState.colorCursor = (CanvasState.colorCursor + 1) % 1;
-    return TEMP_SECTION_DEFAULT_COLOR;
+    return getTempSectionDefaultColor();
 }
 
 function cloneBookmarkNode(node) {
@@ -1898,14 +2248,15 @@ function convertLegacyTempNode(legacyNode, index) {
         ? legacyNode.id
         : `temp-section-${index + 1}`;
 
+    const baseSize = getTempSectionBaseSize();
     const section = {
         id: sectionId,
         title: (legacyNode.data && legacyNode.data.title) ? legacyNode.data.title : getDefaultTempSectionTitle(),
         color: pickTempSectionColor(),
         x: legacyNode.x || 0,
         y: legacyNode.y || 0,
-        width: legacyNode.width || TEMP_SECTION_DEFAULT_WIDTH,
-        height: legacyNode.height || TEMP_SECTION_DEFAULT_HEIGHT,
+        width: legacyNode.width || baseSize.width,
+        height: legacyNode.height || baseSize.height,
         createdAt: Date.now(),
         items: []
     };
@@ -2222,6 +2573,8 @@ function initCanvasView() {
 
     // 加载临时栏目展开状态
     loadTempExpandState();
+    // 加载外观设置（默认尺寸/颜色/名称）
+    loadCanvasAppearanceSettings();
 
     // 初始化连接线层
     setupCanvasEdgesLayer();
@@ -2274,6 +2627,8 @@ function initCanvasView() {
     loadCanvasDataIntensiveSettings();
     // 绑定性能管理按钮
     setupCanvasPerfSettingsBtn();
+    // 绑定外观设置按钮
+    setupCanvasAppearanceSettingsBtn();
     // 绑定快捷键设置按钮
     setupCanvasShortcutsSettingsBtn();
 
@@ -2748,6 +3103,7 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         : '';
 
     // 创建临时栏目
+    const baseSize = getTempSectionBaseSize();
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
     const section = {
         id: sectionId,
@@ -2757,8 +3113,8 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         color: pickTempSectionColor(),
         x: dropX,
         y: dropY,
-        width: TEMP_SECTION_DEFAULT_WIDTH,
-        height: TEMP_SECTION_DEFAULT_HEIGHT,
+        width: baseSize.width,
+        height: baseSize.height,
         createdAt: Date.now(),
         source: 'browser-drop',  // 标记来源
         items: bookmarks.map((bm, index) => ({
@@ -2774,6 +3130,7 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
 
     CanvasState.tempSections.push(section);
     renderTempNode(section);
+    applyTempSectionAutoSizeIfNeeded(section);
 
     // 设置更高的 z-index 和呼吸效果
     const nodeElement = document.getElementById(section.id);
@@ -3150,14 +3507,15 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
         color: pickTempSectionColor(),
         x: dropX,
         y: dropY,
-        width: TEMP_SECTION_DEFAULT_WIDTH,
-        height: TEMP_SECTION_DEFAULT_HEIGHT,
+        width: baseSize.width,
+        height: baseSize.height,
         createdAt: Date.now(),
         items: items
     };
 
     CanvasState.tempSections.push(section);
     renderTempNode(section);
+    applyTempSectionAutoSizeIfNeeded(section);
 
     // 设置更高的 z-index 和呼吸效果
     const nodeElement = document.getElementById(section.id);
@@ -3254,6 +3612,7 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
         const totalCount = countBookmarks(children);
 
         // 创建临时栏目（使用默认标题格式）
+        const baseSize = getTempSectionBaseSize();
         const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
         const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
         const section = {
@@ -3263,8 +3622,8 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
             color: pickTempSectionColor(),
             x: dropX,
             y: dropY,
-            width: TEMP_SECTION_DEFAULT_WIDTH,
-            height: TEMP_SECTION_DEFAULT_HEIGHT,
+            width: baseSize.width,
+            height: baseSize.height,
             createdAt: Date.now(),
             items: []
         };
@@ -3298,6 +3657,7 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
 
         CanvasState.tempSections.push(section);
         renderTempNode(section);
+        applyTempSectionAutoSizeIfNeeded(section);
 
         // 设置更高的 z-index
         const nodeElement = document.getElementById(section.id);
@@ -3358,8 +3718,8 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         color: pickTempSectionColor(),
         x: dropX,
         y: dropY,
-        width: TEMP_SECTION_DEFAULT_WIDTH,
-        height: TEMP_SECTION_DEFAULT_HEIGHT,
+        width: baseSize.width,
+        height: baseSize.height,
         createdAt: Date.now(),
         source: 'browser-drop',  // 标记来源
         items: [{
@@ -3375,6 +3735,7 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
 
     CanvasState.tempSections.push(section);
     renderTempNode(section);
+    applyTempSectionAutoSizeIfNeeded(section);
 
     // 设置更高的 z-index
     const nodeElement = document.getElementById(section.id);
@@ -5083,6 +5444,7 @@ function getCanvasViewportDataStats() {
     let visibleFolderCount = 0;
     let loadedSectionCount = 0; // count of sections with DOM loaded
 
+    const baseSize = getTempSectionBaseSize();
     for (const section of (CanvasState.tempSections || [])) {
         if (!section || !section.id) continue;
         const x = Number(section.x);
@@ -5149,13 +5511,14 @@ function getCanvasViewportDataStats() {
 
     // 空白栏目也计入“可视栏目数”；导入的组框（import-container）出现则额外 +1
     try {
+        const mdBaseSize = getBlankNodeDefaultSize();
         let hasVisibleImportContainer = false;
         for (const node of (CanvasState.mdNodes || [])) {
             if (!node || !node.id) continue;
             const x = Number(node.x);
             const y = Number(node.y);
-            const w = Number(node.width || MD_NODE_DEFAULT_WIDTH);
-            const h = Number(node.height || MD_NODE_DEFAULT_HEIGHT);
+            const w = Number(node.width || mdBaseSize.width);
+            const h = Number(node.height || mdBaseSize.height);
             if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
 
             const inViewport = !(
@@ -5494,14 +5857,15 @@ function runCanvasVirtualizationUpdate(options = {}) {
     const viewportCenterX = (rect.width / 2 - panX) / zoom;
     const viewportCenterY = (rect.height / 2 - panY) / zoom;
 
+    const baseSize = getTempSectionBaseSize();
     const candidates = [];
     const mustLoad = new Set(); // 视界内：必须保持树内容加载（减少“可见区域闪烁”）
     for (const section of (CanvasState.tempSections || [])) {
         if (!section || !section.id) continue;
         const x = Number(section.x);
         const y = Number(section.y);
-        const w = Number(section.width || TEMP_SECTION_DEFAULT_WIDTH);
-        const h = Number(section.height || TEMP_SECTION_DEFAULT_HEIGHT);
+        const w = Number(section.width || baseSize.width);
+        const h = Number(section.height || baseSize.height);
         if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
         const inViewport = !(
             x + w < viewportLeft0 ||
@@ -5561,8 +5925,8 @@ function runCanvasVirtualizationUpdate(options = {}) {
             // 兜底：严格视口内永远不卸载（避免“看得见的栏目内容闪一下就没了”）
             const x = Number(section.x);
             const y = Number(section.y);
-            const w = Number(section.width || TEMP_SECTION_DEFAULT_WIDTH);
-            const h = Number(section.height || TEMP_SECTION_DEFAULT_HEIGHT);
+            const w = Number(section.width || baseSize.width);
+            const h = Number(section.height || baseSize.height);
             const hasRect = [x, y, w, h].every(v => typeof v === 'number' && isFinite(v));
             const inViewportStrict = hasRect ? !(
                 x + w < viewportLeft0 ||
@@ -5662,10 +6026,11 @@ function __getCanvasBlockDormancyActiveRange(workspaceRect) {
 
 function __isTempSectionInBlockRange(section, range) {
     if (!section || !section.id || !range) return false;
+    const baseSize = getTempSectionBaseSize();
     const x = Number(section.x);
     const y = Number(section.y);
-    const w = Number(section.width || TEMP_SECTION_DEFAULT_WIDTH);
-    const h = Number(section.height || TEMP_SECTION_DEFAULT_HEIGHT);
+    const w = Number(section.width || baseSize.width);
+    const h = Number(section.height || baseSize.height);
     if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) return false;
     const minBx = Math.floor(x / range.cellW);
     const maxBx = Math.floor((x + w) / range.cellW);
@@ -5714,8 +6079,8 @@ function runCanvasBlockDormancyUpdate(options = {}) {
         const pinned = !!section.pinned;
         const x = Number(section.x);
         const y = Number(section.y);
-        const w = Number(section.width || TEMP_SECTION_DEFAULT_WIDTH);
-        const h = Number(section.height || TEMP_SECTION_DEFAULT_HEIGHT);
+        const w = Number(section.width || baseSize.width);
+        const h = Number(section.height || baseSize.height);
         const hasRect = [x, y, w, h].every(v => typeof v === 'number' && isFinite(v));
         const inViewportStrict = hasRect ? !(
             x + w < range.viewportLeft ||
@@ -8272,9 +8637,10 @@ function computeCanvasContentBounds() {
         hasContent = true;
     });
 
+    const tempBaseSize = getTempSectionBaseSize();
     CanvasState.tempSections.forEach(section => {
-        const width = section.width || TEMP_SECTION_DEFAULT_WIDTH;
-        const height = section.height || TEMP_SECTION_DEFAULT_HEIGHT;
+        const width = section.width || tempBaseSize.width;
+        const height = section.height || tempBaseSize.height;
         minX = Math.min(minX, section.x);
         maxX = Math.max(maxX, section.x + width);
         minY = Math.min(minY, section.y);
@@ -8283,9 +8649,10 @@ function computeCanvasContentBounds() {
     });
     // 计算 Markdown 文本节点范围
     if (Array.isArray(CanvasState.mdNodes)) {
+        const mdBaseSize = getBlankNodeDefaultSize();
         CanvasState.mdNodes.forEach(node => {
-            const width = node.width || MD_NODE_DEFAULT_WIDTH;
-            const height = node.height || MD_NODE_DEFAULT_HEIGHT;
+            const width = node.width || mdBaseSize.width;
+            const height = node.height || mdBaseSize.height;
             minX = Math.min(minX, node.x);
             maxX = Math.max(maxX, node.x + width);
             minY = Math.min(minY, node.y);
@@ -9245,16 +9612,28 @@ function loadPermanentSectionPosition() {
         const hasInlineWidth = !!(permanentSection.style.width && permanentSection.style.width.trim());
         const hasInlineHeight = !!(permanentSection.style.height && permanentSection.style.height.trim());
         if (!hasInlineWidth || !hasInlineHeight) {
+            const baseSize = getPermanentSectionBaseSize();
             // 确保 left/top 已经初始化（否则保存会写入空值）
             if (!permanentSection.style.left || !permanentSection.style.top) {
                 try { initializePermanentSectionPosition(permanentSection); } catch (_) { }
             }
 
-            // 用当前渲染尺寸固化为 px（避免 70vh 这种相对单位随窗口变化）
-            const widthPx = Math.max(300, Math.round(permanentSection.offsetWidth || 0));
-            const heightPx = Math.max(200, Math.round(permanentSection.offsetHeight || 0));
-            if (!hasInlineWidth) permanentSection.style.width = `${widthPx}px`;
-            if (!hasInlineHeight) permanentSection.style.height = `${heightPx}px`;
+            if (baseSize.mode === 'manual') {
+                if (!hasInlineWidth) permanentSection.style.width = `${baseSize.width}px`;
+                if (!hasInlineHeight) permanentSection.style.height = `${baseSize.height}px`;
+            } else {
+                const autoSize = __computePermanentSectionAutoSize(permanentSection, baseSize);
+                if (autoSize) {
+                    if (!hasInlineWidth) permanentSection.style.width = `${autoSize.width}px`;
+                    if (!hasInlineHeight) permanentSection.style.height = `${autoSize.height}px`;
+                } else {
+                    // 回退：用当前渲染尺寸固化为 px（避免 70vh 这种相对单位随窗口变化）
+                    const widthPx = Math.max(300, Math.round(permanentSection.offsetWidth || 0));
+                    const heightPx = Math.max(200, Math.round(permanentSection.offsetHeight || 0));
+                    if (!hasInlineWidth) permanentSection.style.width = `${widthPx}px`;
+                    if (!hasInlineHeight) permanentSection.style.height = `${heightPx}px`;
+                }
+            }
 
             try { savePermanentSectionPosition(); } catch (_) { }
             console.log('[Canvas] 固化永久栏目默认尺寸为固定像素:', {
@@ -9291,6 +9670,68 @@ function loadPermanentSectionPosition() {
         } catch (_) { }
     } catch (error) {
         console.error('[Canvas] 加载永久栏目位置失败:', error);
+    }
+}
+
+function __computePermanentSectionAutoSize(permanentSection, baseSize) {
+    if (!permanentSection) return null;
+    const header = permanentSection.querySelector('.permanent-section-header');
+    const tip = permanentSection.querySelector('.permanent-section-tip-container');
+    const body = permanentSection.querySelector('.permanent-section-body');
+
+    const headerH = header ? header.offsetHeight : 0;
+    const tipH = tip ? tip.offsetHeight : 0;
+    const bodyH = body ? Math.max(body.scrollHeight || 0, body.offsetHeight || 0) : 0;
+    const bodyW = body ? Math.max(body.scrollWidth || 0, body.offsetWidth || 0) : 0;
+    const headerW = header ? Math.max(header.scrollWidth || 0, header.offsetWidth || 0) : 0;
+    const tipW = tip ? Math.max(tip.scrollWidth || 0, tip.offsetWidth || 0) : 0;
+
+    const minW = baseSize && Number.isFinite(baseSize.width) ? baseSize.width : 300;
+    const minH = baseSize && Number.isFinite(baseSize.height) ? baseSize.height : 200;
+
+    return {
+        width: Math.max(minW, Math.round(Math.max(bodyW, headerW, tipW))),
+        height: Math.max(minH, Math.round(headerH + tipH + bodyH))
+    };
+}
+
+function applyPermanentSectionSizeFromAppearance(settings, options = {}) {
+    const permanentSection = document.getElementById('permanentSection');
+    if (!permanentSection) return;
+    const baseSize = (settings && settings.sizes && settings.sizes.permanent) ? settings.sizes.permanent : getPermanentSectionBaseSize();
+    const mode = baseSize.mode === 'auto' ? 'auto' : 'manual';
+
+    const applySize = () => {
+        if (!permanentSection.style.left || !permanentSection.style.top) {
+            try { initializePermanentSectionPosition(permanentSection); } catch (_) { }
+        }
+        permanentSection.style.transition = 'none';
+        permanentSection.style.transform = 'none';
+
+        if (mode === 'manual') {
+            permanentSection.style.width = `${baseSize.width}px`;
+            permanentSection.style.height = `${baseSize.height}px`;
+        } else {
+            const autoSize = __computePermanentSectionAutoSize(permanentSection, baseSize);
+            if (autoSize) {
+                permanentSection.style.width = `${autoSize.width}px`;
+                permanentSection.style.height = `${autoSize.height}px`;
+            }
+        }
+
+        permanentSection.offsetHeight;
+        permanentSection.style.transition = '';
+
+        try { savePermanentSectionPosition(); } catch (_) { }
+        try { updateCanvasScrollBounds(); } catch (_) { }
+        try { updateScrollbarThumbs(); } catch (_) { }
+        try { scheduleEdgesRender(); } catch (_) { }
+    };
+
+    if (options && options.defer === false) {
+        applySize();
+    } else {
+        requestAnimationFrame(applySize);
     }
 }
 
@@ -9804,6 +10245,21 @@ function __resolveOriginPermanentForNewTempSection(data) {
     return null;
 }
 
+function __resolveTempSplitTitle(data, splitPayload) {
+    if (data && typeof data.splitTitle === 'string' && data.splitTitle.trim()) {
+        return data.splitTitle.trim();
+    }
+    if (data && typeof data.title === 'string' && data.title.trim()) {
+        return data.title.trim();
+    }
+    if (Array.isArray(splitPayload) && splitPayload.length) {
+        const first = splitPayload[0];
+        const title = first && typeof first.title === 'string' ? first.title.trim() : '';
+        if (title) return title;
+    }
+    return '';
+}
+
 async function createTempNode(data, x, y) {
     // Ensure new sequenceNumber continues from existing sections
     try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
@@ -9826,7 +10282,7 @@ async function createTempNode(data, x, y) {
             if (inheritedLabel && parentTitle && parentLabel && parentTitle === parentLabel) {
                 inheritedTitle = inheritedLabel;
             }
-            inheritedColor = parentSection.color || TEMP_SECTION_DEFAULT_COLOR;
+            inheritedColor = parentSection.color || getTempSectionDefaultColor();
             try {
                 const fallbackId = data.id || null;
                 let ids = [];
@@ -9857,17 +10313,32 @@ async function createTempNode(data, x, y) {
         } catch (_) { }
     }
 
+    const baseSize = getTempSectionBaseSize();
+    const tempNameMode = (getCanvasAppearanceSettings().names && getCanvasAppearanceSettings().names.temp)
+        ? getCanvasAppearanceSettings().names.temp.mode
+        : 'timestamp';
+    const splitTitle = __resolveTempSplitTitle(data, splitPayload);
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
     const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
+    let resolvedTitle = explicitTitle;
+    if (!resolvedTitle) {
+        if (tempNameMode === 'split' && splitTitle) {
+            resolvedTitle = splitTitle;
+        } else if (inheritedTitle) {
+            resolvedTitle = inheritedTitle;
+        } else {
+            resolvedTitle = getDefaultTempSectionTitle({ splitTitle });
+        }
+    }
     const section = {
         id: sectionId,
-        title: explicitTitle || inheritedTitle || getDefaultTempSectionTitle(),
+        title: resolvedTitle,
         sequenceNumber: sequenceNumber,
         color: inheritedColor || pickTempSectionColor(),
         x,
         y,
-        width: TEMP_SECTION_DEFAULT_WIDTH,
-        height: TEMP_SECTION_DEFAULT_HEIGHT,
+        width: baseSize.width,
+        height: baseSize.height,
         createdAt: Date.now(),
         pinned: !!(data && data.pinned),
         items: []
@@ -9948,6 +10419,7 @@ async function createTempNode(data, x, y) {
     CanvasState.tempSections.push(section);
 
     renderTempNode(section);
+    applyTempSectionAutoSizeIfNeeded(section);
 
     // 延迟管理休眠状态
     scheduleDormancyUpdate();
@@ -9960,6 +10432,7 @@ async function createTempNode(data, x, y) {
 function createEmptyTempSection(x, y, options = {}) {
     // Ensure new sequenceNumber continues from existing sections
     try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
+    const baseSize = getTempSectionBaseSize();
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
     const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
     const title = (options && typeof options.title === 'string' && options.title.trim())
@@ -9979,8 +10452,8 @@ function createEmptyTempSection(x, y, options = {}) {
         color,
         x: (typeof x === 'number' && isFinite(x)) ? x : 0,
         y: (typeof y === 'number' && isFinite(y)) ? y : 0,
-        width: TEMP_SECTION_DEFAULT_WIDTH,
-        height: TEMP_SECTION_DEFAULT_HEIGHT,
+        width: baseSize.width,
+        height: baseSize.height,
         createdAt: Date.now(),
         pinned: !!(options && options.pinned),
         items: []
@@ -9992,6 +10465,7 @@ function createEmptyTempSection(x, y, options = {}) {
 
     CanvasState.tempSections.push(section);
     renderTempNode(section);
+    applyTempSectionAutoSizeIfNeeded(section);
     scheduleDormancyUpdate();
     saveTempNodes();
     return sectionId;
@@ -10028,14 +10502,16 @@ function duplicateMdNode(nodeId) {
     const node = (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.find(n => n.id === nodeId) : null);
     if (!node) return null;
     const id = `md-node-${++CanvasState.mdNodeCounter}`;
+    const baseSize = getBlankNodeDefaultSize();
     const copy = {
         id,
         x: (node.x || 0) + 24,
         y: (node.y || 0) + 24,
-        width: node.width || MD_NODE_DEFAULT_WIDTH,
-        height: node.height || MD_NODE_DEFAULT_HEIGHT,
+        width: node.width || baseSize.width,
+        height: node.height || baseSize.height,
         text: node.text || '',
         color: node.color || null,
+        colorHex: node.colorHex || null,
         createdAt: Date.now()
     };
     CanvasState.mdNodes.push(copy);
@@ -10161,10 +10637,11 @@ function renderMdNode(node) {
     }
 
     // Always update position/size/style
+    const mdBaseSize = getBlankNodeDefaultSize();
     el.style.left = node.x + 'px';
     el.style.top = node.y + 'px';
-    el.style.width = (node.width || 120) + 'px'; // Fallback to safe default
-    el.style.height = (node.height || 60) + 'px';
+    el.style.width = (node.width || mdBaseSize.width) + 'px';
+    el.style.height = (node.height || mdBaseSize.height) + 'px';
 
     // 应用自定义样式 (用于 import-container 等)
     if (node.style) {
@@ -13952,7 +14429,7 @@ function ensureMdColorPopover(toolbar, node) {
     const recentChipEl = pop.querySelector('.md-color-recent-chip');
     const resolveHistoryColor = (value) => {
         const normalized = normalizeHexColor(value || '');
-        return normalized ? `#${normalized}` : '#66bbff';
+        return normalized ? `#${normalized}` : getBlankNodeDefaultColor();
     };
     const syncHistoryChip = (value) => {
         if (!recentChipEl) return;
@@ -13961,13 +14438,13 @@ function ensureMdColorPopover(toolbar, node) {
         recentChipEl.style.backgroundColor = safe;
     };
     // 初始化上一次颜色
-    syncHistoryChip(CanvasState.mdNodePrevColor || '#66bbff');
+    syncHistoryChip(CanvasState.mdNodePrevColor || getBlankNodeDefaultColor());
 
     // RGB选择器UI（显示在色盘上方）
     const rgbPicker = document.createElement('div');
     rgbPicker.className = 'md-rgb-picker';
     rgbPicker.innerHTML = `
-        <input class="md-color-input" type="color" value="${node.colorHex || '#66bbff'}" title="${customColorTitle}" />
+        <input class="md-color-input" type="color" value="${node.colorHex || getBlankNodeDefaultColor()}" title="${customColorTitle}" />
     `;
     pop.appendChild(rgbPicker);
 
@@ -14152,15 +14629,18 @@ function locateAndZoomToMdNode(nodeId, targetZoom = null) {
 }
 
 async function createMdNode(x, y, text = '') {
+    const baseSize = getBlankNodeDefaultSize();
+    const defaultColor = getBlankNodeDefaultColor();
     const id = `md-node-${++CanvasState.mdNodeCounter}`;
     const node = {
         id,
         x,
         y,
-        width: MD_NODE_DEFAULT_WIDTH,
-        height: MD_NODE_DEFAULT_HEIGHT,
+        width: baseSize.width,
+        height: baseSize.height,
         text,
         color: null,
+        colorHex: defaultColor || null,
         createdAt: Date.now()
     };
     CanvasState.mdNodes.push(node);
@@ -16894,7 +17374,8 @@ function renderTempNode(section, options = {}) {
         return;
     }
 
-    section.color = section.color || TEMP_SECTION_DEFAULT_COLOR;
+    section.color = section.color || getTempSectionDefaultColor();
+    const baseSize = getTempSectionBaseSize();
 
     let nodeElement = document.getElementById(section.id);
     const isNew = !nodeElement;
@@ -16934,8 +17415,8 @@ function renderTempNode(section, options = {}) {
         nodeElement.style.transition = 'none';
         nodeElement.style.left = section.x + 'px';
         nodeElement.style.top = section.y + 'px';
-        nodeElement.style.width = (section.width || TEMP_SECTION_DEFAULT_WIDTH) + 'px';
-        nodeElement.style.height = (section.height || TEMP_SECTION_DEFAULT_HEIGHT) + 'px';
+        nodeElement.style.width = (section.width || baseSize.width) + 'px';
+        nodeElement.style.height = (section.height || baseSize.height) + 'px';
     } else {
         // 更新时清空内容，但保持位置和大小不变
         nodeElement.innerHTML = '';
@@ -16952,12 +17433,12 @@ function renderTempNode(section, options = {}) {
     const pinnedState = section.pinned || false;
     nodeElement.style.zIndex = pinnedState ? '200' : '100';
     nodeElement.style.position = 'absolute'; // Ensure absolute positioning
-    nodeElement.style.setProperty('--section-color', section.color || TEMP_SECTION_DEFAULT_COLOR);
+    nodeElement.style.setProperty('--section-color', section.color || getTempSectionDefaultColor());
 
     const header = document.createElement('div');
     header.className = 'temp-node-header';
     header.dataset.sectionId = section.id;
-    header.style.setProperty('--section-color', section.color || TEMP_SECTION_DEFAULT_COLOR);
+    header.style.setProperty('--section-color', section.color || getTempSectionDefaultColor());
 
     // 创建标题容器（包含序号标签和标题输入框）
     const titleContainer = document.createElement('div');
@@ -16990,7 +17471,7 @@ function renderTempNode(section, options = {}) {
     const titleInput = document.createElement('input');
     titleInput.type = 'text';
     titleInput.className = 'temp-node-title temp-node-title-input';
-    titleInput.value = section.title || getDefaultTempSectionTitle();
+    titleInput.value = getTempSectionDisplayTitle(section);
     titleInput.placeholder = '临时栏目';
     titleInput.readOnly = true;
     titleInput.setAttribute('readonly', 'readonly');
@@ -17015,7 +17496,7 @@ function renderTempNode(section, options = {}) {
     const colorInput = document.createElement('input');
     colorInput.type = 'color';
     colorInput.className = 'temp-node-color-input md-color-input';
-    colorInput.value = section.color || '#66bbff';
+    colorInput.value = section.color || getTempSectionDefaultColor();
     colorInput.title = colorLabel;
 
     const lockBtn = document.createElement('button');
@@ -17069,7 +17550,7 @@ function renderTempNode(section, options = {}) {
     const defaultChipEl = chipRow.querySelector('.temp-color-current-chip');
     const resolveHistoryColor = (value) => {
         const normalized = normalizeHexColor(value || '');
-        return normalized ? `#${normalized}` : TEMP_SECTION_DEFAULT_COLOR;
+        return normalized ? `#${normalized}` : getTempSectionDefaultColor();
     };
     const syncHistoryChip = (value) => {
         if (!defaultChipEl) return;
@@ -17081,12 +17562,12 @@ function renderTempNode(section, options = {}) {
     };
     const updateColorHistory = (value) => {
         const safe = resolveHistoryColor(value);
-        const last = resolveHistoryColor(CanvasState.tempSectionLastColor || TEMP_SECTION_DEFAULT_COLOR);
+        const last = resolveHistoryColor(CanvasState.tempSectionLastColor || getTempSectionDefaultColor());
         CanvasState.tempSectionPrevColor = last;
         CanvasState.tempSectionLastColor = safe;
-        syncHistoryChip(CanvasState.tempSectionPrevColor || TEMP_SECTION_DEFAULT_COLOR);
+        syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor());
     };
-    syncHistoryChip(CanvasState.tempSectionPrevColor || TEMP_SECTION_DEFAULT_COLOR);
+    syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor());
     chipRow.appendChild(lockBtn);
     colorPopover.appendChild(chipRow);
     colorPopover.appendChild(colorInput);
@@ -17110,7 +17591,7 @@ function renderTempNode(section, options = {}) {
             closeColorPopover();
             return;
         }
-        syncHistoryChip(CanvasState.tempSectionPrevColor || TEMP_SECTION_DEFAULT_COLOR);
+        syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor());
         colorPopover.classList.add('open');
         updateCanvasPopoverState(true);
 
@@ -17133,7 +17614,7 @@ function renderTempNode(section, options = {}) {
     closeBtn.addEventListener('click', () => removeTempNode(section.id));
 
     colorInput.addEventListener('input', (event) => {
-        const nextColor = event.target.value || TEMP_SECTION_DEFAULT_COLOR;
+        const nextColor = event.target.value || getTempSectionDefaultColor();
         section.color = nextColor;
         applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
         propagateTempSectionColor(section, nextColor);
@@ -17162,7 +17643,7 @@ function renderTempNode(section, options = {}) {
         }
 
         if (action === 'md-color-recent') {
-            const nextColor = (defaultChipEl && defaultChipEl.dataset.color) || TEMP_SECTION_DEFAULT_COLOR;
+            const nextColor = (defaultChipEl && defaultChipEl.dataset.color) || getTempSectionDefaultColor();
             section.color = nextColor;
             applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
             propagateTempSectionColor(section, nextColor);
@@ -17174,7 +17655,7 @@ function renderTempNode(section, options = {}) {
 
         if (action === 'md-color-preset') {
             const preset = String(btn.getAttribute('data-color') || '').trim();
-            const nextColor = presetToHex(preset) || TEMP_SECTION_DEFAULT_COLOR;
+            const nextColor = presetToHex(preset) || getTempSectionDefaultColor();
             section.color = nextColor;
             applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
             propagateTempSectionColor(section, nextColor);
@@ -17632,7 +18113,7 @@ function renderTempNode(section, options = {}) {
 
         const titleEl = document.createElement('div');
         titleEl.className = 'temp-node-low-detail-title';
-        titleEl.textContent = (titleInput && typeof titleInput.value === 'string') ? titleInput.value : (section.title || '');
+        titleEl.textContent = (titleInput && typeof titleInput.value === 'string') ? titleInput.value : getTempSectionDisplayTitle(section);
 
         contentWrap.appendChild(badgeEl);
         contentWrap.appendChild(titleEl);
@@ -17873,8 +18354,8 @@ function buildAdaptivePalette(baseColor, preferLightening) {
 
 function createTempSectionPalettes(color) {
     const normalizedValue = normalizeHexColor(color);
-    const normalizedColor = normalizedValue ? `#${normalizedValue}` : TEMP_SECTION_DEFAULT_COLOR;
-    const sectionRgb = hexToRgb(normalizedColor) || hexToRgb(TEMP_SECTION_DEFAULT_COLOR);
+    const normalizedColor = normalizedValue ? `#${normalizedValue}` : getTempSectionDefaultColor();
+    const sectionRgb = hexToRgb(normalizedColor) || hexToRgb(getTempSectionDefaultColor());
     const sectionLuminance = sectionRgb ? calculateRelativeLuminance(sectionRgb) : 0.5;
     const preferLightening = sectionLuminance < 0.45;
 
@@ -17885,9 +18366,9 @@ function createTempSectionPalettes(color) {
 }
 
 function applyTempSectionColor(section, nodeElement, header, colorButton, colorInput) {
-    const rawColor = section.color || TEMP_SECTION_DEFAULT_COLOR;
+    const rawColor = section.color || getTempSectionDefaultColor();
     const normalizedValue = normalizeHexColor(rawColor);
-    const safeColor = normalizedValue ? `#${normalizedValue}` : TEMP_SECTION_DEFAULT_COLOR;
+    const safeColor = normalizedValue ? `#${normalizedValue}` : getTempSectionDefaultColor();
     const palettes = createTempSectionPalettes(safeColor);
 
     if (nodeElement) {
@@ -17937,12 +18418,12 @@ function beginTempSectionTitleEdit(section, input, renameButton) {
 function finishTempSectionTitleEdit(section, input, renameButton, commit) {
     if (!input) return;
     if (commit) {
-        const newTitle = input.value.trim() || getDefaultTempSectionTitle();
+        const newTitle = typeof input.value === 'string' ? input.value.trim() : '';
         section.title = newTitle;
         input.value = newTitle;
         saveTempNodes();
     } else {
-        input.value = section.title || getDefaultTempSectionTitle();
+        input.value = getTempSectionDisplayTitle(section);
     }
     input.classList.remove('editing');
     input.readOnly = true;
@@ -21244,7 +21725,8 @@ async function importHtmlBookmarks(html) {
 
     // 创建一个新的临时栏目容器
     // 在当前视口中找一个空白位置
-    const position = findAvailablePositionInViewport(TEMP_SECTION_DEFAULT_WIDTH, TEMP_SECTION_DEFAULT_HEIGHT);
+    const baseSize = getTempSectionBaseSize();
+    const position = findAvailablePositionInViewport(baseSize.width, baseSize.height);
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
     const section = {
         id: sectionId,
@@ -21254,8 +21736,8 @@ async function importHtmlBookmarks(html) {
         color: pickTempSectionColor(),
         x: position.x,
         y: position.y,
-        width: TEMP_SECTION_DEFAULT_WIDTH,
-        height: TEMP_SECTION_DEFAULT_HEIGHT,
+        width: baseSize.width,
+        height: baseSize.height,
         createdAt: Date.now(),
         items: []
     };
@@ -21283,6 +21765,7 @@ async function importHtmlBookmarks(html) {
 
     CanvasState.tempSections.push(section);
     renderTempNode(section);
+    applyTempSectionAutoSizeIfNeeded(section);
 
     // 如果找不到空白位置，需要将新栏目设置为更高的 z-index（覆盖在其他元素之上）
     if (position.needsHigherZIndex) {
@@ -21579,7 +22062,8 @@ async function importJsonBookmarks(json) {
 
     // 创建一个新的临时栏目容器
     // 在当前视口中找一个空白位置
-    const position = findAvailablePositionInViewport(TEMP_SECTION_DEFAULT_WIDTH, TEMP_SECTION_DEFAULT_HEIGHT);
+    const baseSize = getTempSectionBaseSize();
+    const position = findAvailablePositionInViewport(baseSize.width, baseSize.height);
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
     const section = {
         id: sectionId,
@@ -21589,14 +22073,15 @@ async function importJsonBookmarks(json) {
         color: pickTempSectionColor(),
         x: position.x,
         y: position.y,
-        width: TEMP_SECTION_DEFAULT_WIDTH,
-        height: TEMP_SECTION_DEFAULT_HEIGHT,
+        width: baseSize.width,
+        height: baseSize.height,
         createdAt: Date.now(),
         items: items.map(item => convertToTempItem(item, sectionId)).filter(Boolean)
     };
 
     CanvasState.tempSections.push(section);
     renderTempNode(section);
+    applyTempSectionAutoSizeIfNeeded(section);
 
     // 如果找不到空白位置，需要将新栏目设置为更高的 z-index（覆盖在其他元素之上）
     if (position.needsHigherZIndex) {
@@ -22922,7 +23407,7 @@ async function exportCanvasPackage(options = {}) {
             tempSectionCounter: CanvasState.tempSectionCounter,
             tempItemCounter: CanvasState.tempItemCounter,
             colorCursor: CanvasState.colorCursor,
-            tempSectionLastColor: CanvasState.tempSectionLastColor || TEMP_SECTION_DEFAULT_COLOR,
+            tempSectionLastColor: CanvasState.tempSectionLastColor || getTempSectionDefaultColor(),
             tempSectionPrevColor: CanvasState.tempSectionPrevColor || null,
             mdNodes: CanvasState.mdNodes,
             mdNodeCounter: CanvasState.mdNodeCounter,
@@ -23458,6 +23943,7 @@ async function exportCanvasPackage(options = {}) {
 
         // import-container: export as Obsidian group nodes (JSON Canvas spec)
         try {
+            const exportMdBase = getBlankNodeDefaultSize();
             (CanvasState.mdNodes || [])
                 .filter(n => n && n.subtype === 'import-container')
                 .forEach((n) => {
@@ -23468,14 +23954,16 @@ async function exportCanvasPackage(options = {}) {
                         type: 'group',
                         x: Math.round(n.x || 0),
                         y: Math.round(n.y || 0),
-                        width: Math.round(n.width || MD_NODE_DEFAULT_WIDTH),
-                        height: Math.round(n.height || MD_NODE_DEFAULT_HEIGHT),
+                        width: Math.round(n.width || exportMdBase.width),
+                        height: Math.round(n.height || exportMdBase.height),
                         ...(label ? { label } : {}),
                         ...(color ? { color } : {})
                     });
                 });
         } catch (_) { }
 
+        const exportTempBase = getTempSectionBaseSize();
+        const exportMdBase = getBlankNodeDefaultSize();
         tempSectionMdPaths.forEach(({ id, rel }) => {
             const section = CanvasState.tempSections.find(s => s && s.id === id);
             if (!section) return;
@@ -23484,8 +23972,8 @@ async function exportCanvasPackage(options = {}) {
                 type: 'file',
                 x: Math.round(section.x || 0),
                 y: Math.round(section.y || 0),
-                width: Math.round(section.width || TEMP_SECTION_DEFAULT_WIDTH),
-                height: Math.round(section.height || TEMP_SECTION_DEFAULT_HEIGHT),
+                width: Math.round(section.width || exportTempBase.width),
+                height: Math.round(section.height || exportTempBase.height),
                 file: withPrefix(rel),
                 color: section.color || null
             });
@@ -23500,8 +23988,8 @@ async function exportCanvasPackage(options = {}) {
                 type: 'file',
                 x: Math.round(node.x || 0),
                 y: Math.round(node.y || 0),
-                width: Math.round(node.width || MD_NODE_DEFAULT_WIDTH),
-                height: Math.round(node.height || MD_NODE_DEFAULT_HEIGHT),
+                width: Math.round(node.width || exportMdBase.width),
+                height: Math.round(node.height || exportMdBase.height),
                 file: withPrefix(rel),
                 ...(color ? { color } : {})
             });
@@ -23546,7 +24034,7 @@ async function exportCanvasPackage(options = {}) {
         tempSectionCounter: CanvasState.tempSectionCounter,
         tempItemCounter: CanvasState.tempItemCounter,
         colorCursor: CanvasState.colorCursor,
-        tempSectionLastColor: CanvasState.tempSectionLastColor || TEMP_SECTION_DEFAULT_COLOR,
+        tempSectionLastColor: CanvasState.tempSectionLastColor || getTempSectionDefaultColor(),
         tempSectionPrevColor: CanvasState.tempSectionPrevColor || null,
         mdNodes: CanvasState.mdNodes,
         mdNodeCounter: CanvasState.mdNodeCounter,
@@ -25500,7 +25988,7 @@ function __applyCanvasTempStateObject(state) {
     CanvasState.tempSectionCounter = state.tempSectionCounter || CanvasState.tempSections.length;
     CanvasState.tempItemCounter = state.tempItemCounter || 0;
     CanvasState.colorCursor = state.colorCursor || 0;
-    CanvasState.tempSectionLastColor = state.tempSectionLastColor || TEMP_SECTION_DEFAULT_COLOR;
+    CanvasState.tempSectionLastColor = state.tempSectionLastColor || getTempSectionDefaultColor();
     CanvasState.tempSectionPrevColor = state.tempSectionPrevColor || null;
     CanvasState.mdNodes = Array.isArray(state.mdNodes) ? state.mdNodes : [];
     CanvasState.mdNodeCounter = state.mdNodeCounter || CanvasState.mdNodes.length || 0;
@@ -25534,23 +26022,30 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
     // 序号系统升级：把旧版的 A1 / A1-1 ... 统一转换为 A-1-1 / A-1-1-1 ...（不影响用户自定义的新格式）
     try { __normalizeExistingTempSectionLabels(); } catch (_) { }
 
+    let shouldRenderShellOnly = false;
     suppressScrollSync = true;
     try {
-        const shouldRenderShellOnly = isCanvasVirtualizationEnabled() || isCanvasBlockDormancyEnabled();
+        shouldRenderShellOnly = isCanvasVirtualizationEnabled() || isCanvasBlockDormancyEnabled();
+        const baseSize = getTempSectionBaseSize();
+        const mdBaseSize = getBlankNodeDefaultSize();
         CanvasState.tempSections.forEach(section => {
-            section.width = section.width || TEMP_SECTION_DEFAULT_WIDTH;
-            section.height = section.height || TEMP_SECTION_DEFAULT_HEIGHT;
+            section.width = section.width || baseSize.width;
+            section.height = section.height || baseSize.height;
             // 大数据/极限模式 / 区块休眠：先渲染“壳体”，树内容按需加载（避免启动即卡死/一上来全量加载）
             renderTempNode(section, shouldRenderShellOnly ? { skipTree: true } : {});
         });
         // 渲染 Markdown 文本卡片
         CanvasState.mdNodes.forEach(node => {
-            node.width = node.width || MD_NODE_DEFAULT_WIDTH;
-            node.height = node.height || MD_NODE_DEFAULT_HEIGHT;
+            node.width = node.width || mdBaseSize.width;
+            node.height = node.height || mdBaseSize.height;
             renderMdNode(node);
         });
     } finally {
         suppressScrollSync = false;
+    }
+
+    if (!shouldRenderShellOnly) {
+        try { applyTempSectionAutoSizeAll(); } catch (_) { }
     }
 
     console.log(`[Canvas] 加载了 ${CanvasState.tempSections.length} 个临时栏目`);
@@ -25686,7 +26181,7 @@ function saveTempNodes() {
             tempSectionCounter: CanvasState.tempSectionCounter,
             tempItemCounter: CanvasState.tempItemCounter,
             colorCursor: CanvasState.colorCursor,
-            tempSectionLastColor: CanvasState.tempSectionLastColor || TEMP_SECTION_DEFAULT_COLOR,
+            tempSectionLastColor: CanvasState.tempSectionLastColor || getTempSectionDefaultColor(),
             tempSectionPrevColor: CanvasState.tempSectionPrevColor || null,
             // 新增：保存 Markdown 文本卡片
             mdNodes: CanvasState.mdNodes,
@@ -25729,7 +26224,7 @@ function loadTempNodes() {
         CanvasState.tempSectionCounter = 0;
         CanvasState.tempItemCounter = 0;
         CanvasState.colorCursor = 0;
-        CanvasState.tempSectionLastColor = TEMP_SECTION_DEFAULT_COLOR;
+        CanvasState.tempSectionLastColor = getTempSectionDefaultColor();
         CanvasState.tempSectionPrevColor = null;
         CanvasState.mdNodes = [];
         CanvasState.mdNodeCounter = 0;
@@ -26056,6 +26551,8 @@ function addEdge(fromNode, fromSide, toNode, toSide) {
         return;
     }
 
+    const defaultLabel = getDefaultEdgeLabel({ fromNode, toNode });
+    const defaultColor = getEdgeDefaultColor();
     const id = `edge - ${++CanvasState.edgeCounter} -${Date.now()} `;
     CanvasState.edges.push({
         id,
@@ -26065,8 +26562,8 @@ function addEdge(fromNode, fromSide, toNode, toSide) {
         toSide,
         direction: 'none', // 'none' | 'forward' | 'both'
         color: null, // 预设颜色编号 (1-6) 或 null
-        colorHex: null, // 自定义十六进制颜色
-        label: '' // 连接线文字标签
+        colorHex: defaultColor || null, // 自定义十六进制颜色
+        label: defaultLabel || '' // 连接线文字标签
     });
     renderEdges();
     saveTempNodes();
@@ -26853,7 +27350,7 @@ function ensureEdgeColorPopover(toolbar, edge) {
     const recentChipEl = pop.querySelector('.md-color-recent-chip');
     const resolveHistoryColor = (value) => {
         const normalized = normalizeHexColor(value || '');
-        return normalized ? `#${normalized}` : '#66bbff';
+        return normalized ? `#${normalized}` : getEdgeDefaultColor();
     };
     const syncHistoryChip = (value) => {
         if (!recentChipEl) return;
@@ -26862,13 +27359,13 @@ function ensureEdgeColorPopover(toolbar, edge) {
         recentChipEl.style.backgroundColor = safe;
     };
     // 初始化上一次颜色
-    syncHistoryChip(CanvasState.edgePrevColor || '#66bbff');
+    syncHistoryChip(CanvasState.edgePrevColor || getEdgeDefaultColor());
 
     // RGB选择器UI（显示在色盘上方，与空白栏目完全一致）
     const rgbPicker = document.createElement('div');
     rgbPicker.className = 'md-rgb-picker';
     rgbPicker.innerHTML = `
-        <input class="md-color-input" type="color" value="${edge.colorHex || '#66bbff'}" title="${customColorTitle}" />
+        <input class="md-color-input" type="color" value="${edge.colorHex || getEdgeDefaultColor()}" title="${customColorTitle}" />
     `;
     pop.appendChild(rgbPicker);
 
@@ -27228,6 +27725,365 @@ window.CanvasModule = {
 
     }
 };
+
+// =============================================================================
+// 外观管理面板 (Appearance Settings)
+// =============================================================================
+
+function setupCanvasAppearanceSettingsBtn() {
+    const btn = document.getElementById('canvasAppearanceSettingsBtn');
+    if (!btn) return;
+    btn.onclick = () => {
+        try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
+        openCanvasAppearanceSettingsModal();
+    };
+}
+
+function __setAppearanceRadioGroup(modal, groupName, value) {
+    if (!modal) return;
+    const radios = modal.querySelectorAll(`input[name="${groupName}"]`);
+    if (!radios.length) return;
+    let matched = false;
+    radios.forEach(radio => {
+        const isMatch = radio.value === value;
+        radio.checked = isMatch;
+        if (isMatch) matched = true;
+    });
+    if (!matched) radios[0].checked = true;
+}
+
+function __getAppearanceRadioValue(modal, groupName, fallback) {
+    if (!modal) return fallback;
+    const checked = modal.querySelector(`input[name="${groupName}"]:checked`);
+    return checked ? checked.value : fallback;
+}
+
+function __updateAppearanceSizeMode(modal, groupName, inputsId) {
+    if (!modal) return;
+    const inputs = modal.querySelector(`#${inputsId}`);
+    if (!inputs) return;
+    const mode = __getAppearanceRadioValue(modal, groupName, 'manual');
+    inputs.classList.toggle('is-disabled', mode === 'auto');
+}
+
+function __updateAppearanceNameMode(modal, selectId, manualWrapId) {
+    if (!modal) return;
+    const select = modal.querySelector(`#${selectId}`);
+    const manualWrap = modal.querySelector(`#${manualWrapId}`);
+    if (!select || !manualWrap) return;
+    manualWrap.style.display = (select.value === 'manual') ? 'flex' : 'none';
+}
+
+function __syncAppearanceColorRow(rowEl, color) {
+    if (!rowEl) return;
+    const input = rowEl.querySelector('.appearance-color-input');
+    const valueEl = rowEl.querySelector('.appearance-color-value');
+    const normalized = __normalizeAppearanceColor(color, input ? input.value : '#000000');
+    if (input) input.value = normalized;
+    if (valueEl) valueEl.textContent = normalized;
+}
+
+function openCanvasAppearanceSettingsModal() {
+    let modal = document.getElementById('canvasAppearanceSettingsModal');
+    if (modal) modal.remove();
+    createCanvasAppearanceSettingsModal();
+    modal = document.getElementById('canvasAppearanceSettingsModal');
+    if (!modal) return;
+
+    const settings = getCanvasAppearanceSettings();
+    const sizes = settings.sizes || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes;
+    const colors = settings.colors || DEFAULT_CANVAS_APPEARANCE_SETTINGS.colors;
+    const names = settings.names || DEFAULT_CANVAS_APPEARANCE_SETTINGS.names;
+
+    __setAppearanceRadioGroup(modal, 'appearance-temp-size-mode', sizes.temp.mode || 'manual');
+
+    const tempW = modal.querySelector('#appearanceTempWidth');
+    const tempH = modal.querySelector('#appearanceTempHeight');
+    const blankW = modal.querySelector('#appearanceBlankWidth');
+    const blankH = modal.querySelector('#appearanceBlankHeight');
+
+    if (tempW) tempW.value = sizes.temp.width;
+    if (tempH) tempH.value = sizes.temp.height;
+    if (blankW) blankW.value = sizes.mdNode.width;
+    if (blankH) blankH.value = sizes.mdNode.height;
+
+    modal.querySelectorAll('.appearance-color-row').forEach(row => {
+        const target = row.dataset.colorTarget;
+        if (target === 'permanent') __syncAppearanceColorRow(row, colors.permanent);
+        if (target === 'temp') __syncAppearanceColorRow(row, colors.temp);
+        if (target === 'blank') __syncAppearanceColorRow(row, colors.mdNode);
+        if (target === 'edge') __syncAppearanceColorRow(row, colors.edge);
+    });
+
+    const tempNameSelect = modal.querySelector('#appearanceTempNameMode');
+    const tempNameManual = modal.querySelector('#appearanceTempNameManual');
+    const edgeNameSelect = modal.querySelector('#appearanceEdgeNameMode');
+    const edgeNameManual = modal.querySelector('#appearanceEdgeNameManual');
+
+    if (tempNameSelect) tempNameSelect.value = names.temp.mode || 'timestamp';
+    if (tempNameManual) tempNameManual.value = names.temp.manualValue || '';
+    if (edgeNameSelect) edgeNameSelect.value = names.edge.mode || 'blank';
+    if (edgeNameManual) edgeNameManual.value = names.edge.manualValue || '';
+
+    __updateAppearanceSizeMode(modal, 'appearance-temp-size-mode', 'appearanceTempSizeInputs');
+    __updateAppearanceNameMode(modal, 'appearanceTempNameMode', 'appearanceTempNameManualWrap');
+    __updateAppearanceNameMode(modal, 'appearanceEdgeNameMode', 'appearanceEdgeNameManualWrap');
+
+    modal.style.display = 'flex';
+}
+
+function closeCanvasAppearanceSettingsModal() {
+    const modal = document.getElementById('canvasAppearanceSettingsModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function saveCanvasAppearanceSettings() {
+    const modal = document.getElementById('canvasAppearanceSettingsModal');
+    if (!modal) return;
+
+    const current = getCanvasAppearanceSettings();
+    const currentSizes = current.sizes || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes;
+
+    const readNumber = (id) => {
+        const el = modal.querySelector(`#${id}`);
+        if (!el) return NaN;
+        return parseInt(el.value, 10);
+    };
+
+    const settingsInput = {
+        sizes: {
+            permanent: currentSizes.permanent || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.permanent,
+            temp: {
+                mode: __getAppearanceRadioValue(modal, 'appearance-temp-size-mode', 'manual'),
+                width: readNumber('appearanceTempWidth'),
+                height: readNumber('appearanceTempHeight')
+            },
+            mdNode: {
+                width: readNumber('appearanceBlankWidth'),
+                height: readNumber('appearanceBlankHeight')
+            }
+        },
+        colors: {
+            permanent: (modal.querySelector('#appearanceColorPermanent') || {}).value,
+            temp: (modal.querySelector('#appearanceColorTemp') || {}).value,
+            mdNode: (modal.querySelector('#appearanceColorBlank') || {}).value,
+            edge: (modal.querySelector('#appearanceColorEdge') || {}).value
+        },
+        names: {
+            temp: {
+                mode: (modal.querySelector('#appearanceTempNameMode') || {}).value,
+                manualValue: String((modal.querySelector('#appearanceTempNameManual') || {}).value || '').trim()
+            },
+            edge: {
+                mode: (modal.querySelector('#appearanceEdgeNameMode') || {}).value,
+                manualValue: String((modal.querySelector('#appearanceEdgeNameManual') || {}).value || '').trim()
+            }
+        }
+    };
+
+    const normalized = normalizeCanvasAppearanceSettings(settingsInput);
+    CanvasState.appearanceSettings = normalized;
+    try {
+        localStorage.setItem(CANVAS_APPEARANCE_SETTINGS_KEY, JSON.stringify(normalized));
+    } catch (_) { }
+
+    applyCanvasAppearanceSettings(normalized, { applyPermanentSize: false });
+    applyTempSectionAutoSizeAll();
+    closeCanvasAppearanceSettingsModal();
+}
+
+function createCanvasAppearanceSettingsModal() {
+    const modal = document.createElement('div');
+    modal.id = 'canvasAppearanceSettingsModal';
+    modal.className = 'modal';
+    modal.style.display = 'none';
+
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+
+    const chipsHtml = `
+        <span class="md-color-chip appearance-color-chip" data-color="#888888" style="background:#888888" title="${isEn ? 'Gray' : '灰色'}"></span>
+        <span class="md-color-chip appearance-color-chip" data-color="#66bbff" style="background:#66bbff" title="${isEn ? 'Default Blue' : '默认蓝色'}"></span>
+        <span class="md-color-chip appearance-color-chip" data-color="#fb464c" style="background:#fb464c"></span>
+        <span class="md-color-chip appearance-color-chip" data-color="#e9973f" style="background:#e9973f"></span>
+        <span class="md-color-chip appearance-color-chip" data-color="#e0de71" style="background:#e0de71"></span>
+        <span class="md-color-chip appearance-color-chip" data-color="#44cf6e" style="background:#44cf6e"></span>
+        <span class="md-color-chip appearance-color-chip" data-color="#53dfdd" style="background:#53dfdd"></span>
+        <span class="md-color-chip appearance-color-chip" data-color="#a882ff" style="background:#a882ff"></span>
+    `;
+
+    modal.innerHTML = `
+        <div class="modal-content appearance-settings-modal">
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <h3>${isEn ? 'Appearance' : '外观设置'}</h3>
+                </div>
+                <button class="perf-modal-close" id="appearanceModalCloseBtn"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'Default Sizes' : '默认尺寸'}</div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Temp' : '临时栏目'}</div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-mode-toggle">
+                                <label class="appearance-radio">
+                                    <input type="radio" name="appearance-temp-size-mode" value="manual">
+                                    <span>${isEn ? 'Manual' : '手动输入'}</span>
+                                </label>
+                                <label class="appearance-radio">
+                                    <input type="radio" name="appearance-temp-size-mode" value="auto">
+                                    <span>${isEn ? 'Auto-fit tree' : '自适应'}</span>
+                                </label>
+                            </div>
+                            <div class="appearance-size-inputs" id="appearanceTempSizeInputs">
+                                <input type="number" id="appearanceTempWidth" min="200" max="2400" step="10">
+                                <span>×</span>
+                                <input type="number" id="appearanceTempHeight" min="150" max="3000" step="10">
+                                <span>px</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Blank (non-group)' : '空白栏目（非组框）'}</div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-size-inputs" id="appearanceBlankSizeInputs">
+                                <input type="number" id="appearanceBlankWidth" min="180" max="2000" step="10">
+                                <span>×</span>
+                                <input type="number" id="appearanceBlankHeight" min="140" max="2000" step="10">
+                                <span>px</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'Default Colors' : '默认颜色'}</div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Permanent' : '永久栏目'}</div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-color-row" data-color-target="permanent">
+                                <input type="color" id="appearanceColorPermanent" class="appearance-color-input" data-color-target="permanent">
+                                <span class="appearance-color-value" id="appearanceColorPermanentValue">#10b981</span>
+                                <div class="appearance-color-chips">${chipsHtml}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Temp' : '临时栏目'}</div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-color-row" data-color-target="temp">
+                                <input type="color" id="appearanceColorTemp" class="appearance-color-input" data-color-target="temp">
+                                <span class="appearance-color-value" id="appearanceColorTempValue">#2563eb</span>
+                                <div class="appearance-color-chips">${chipsHtml}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Blank (non-group)' : '空白栏目（非组框）'}</div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-color-row" data-color-target="blank">
+                                <input type="color" id="appearanceColorBlank" class="appearance-color-input" data-color-target="blank">
+                                <span class="appearance-color-value" id="appearanceColorBlankValue">#888888</span>
+                                <div class="appearance-color-chips">${chipsHtml}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Edge' : '连接线'}</div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-color-row" data-color-target="edge">
+                                <input type="color" id="appearanceColorEdge" class="appearance-color-input" data-color-target="edge">
+                                <span class="appearance-color-value" id="appearanceColorEdgeValue">#999999</span>
+                                <div class="appearance-color-chips">${chipsHtml}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'Default Names' : '默认名称'}</div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Temp' : '临时栏目'}</div>
+                        <div class="appearance-row-content">
+                            <select id="appearanceTempNameMode" class="appearance-name-select">
+                                <option value="timestamp">${isEn ? 'Timestamp' : '时间标记'}</option>
+                                <option value="split">${isEn ? 'Split name' : '分裂名称'}</option>
+                                <option value="blank">${isEn ? 'Blank' : '空白'}</option>
+                                <option value="manual">${isEn ? 'Manual' : '手动输入'}</option>
+                            </select>
+                            <div class="appearance-name-manual" id="appearanceTempNameManualWrap">
+                                <input type="text" id="appearanceTempNameManual" placeholder="${isEn ? 'Enter default temp name' : '输入默认临时栏目名称'}">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Edge' : '连接线'}</div>
+                        <div class="appearance-row-content">
+                            <select id="appearanceEdgeNameMode" class="appearance-name-select">
+                                <option value="manual">${isEn ? 'Manual' : '手动输入'}</option>
+                                <option value="timestamp">${isEn ? 'Timestamp' : '时间标记'}</option>
+                                <option value="parent">${isEn ? 'Parent name' : '母栏目名字'}</option>
+                                <option value="child">${isEn ? 'Child name' : '子栏目名字'}</option>
+                                <option value="blank">${isEn ? 'Blank' : '空白'}</option>
+                            </select>
+                            <div class="appearance-name-manual" id="appearanceEdgeNameManualWrap">
+                                <input type="text" id="appearanceEdgeNameManual" placeholder="${isEn ? 'Enter default edge label' : '输入默认连接线名称'}">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="perf-modal-footer">
+                <button class="perf-btn secondary" id="appearanceCancelBtn">${isEn ? 'Cancel' : '取消'}</button>
+                <button class="perf-btn primary" id="appearanceSaveBtn">
+                    <i class="fas fa-check"></i>
+                    <span>${isEn ? 'Save' : '保存'}</span>
+                </button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const closeBtn = modal.querySelector('#appearanceModalCloseBtn');
+    if (closeBtn) closeBtn.addEventListener('click', closeCanvasAppearanceSettingsModal);
+    const cancelBtn = modal.querySelector('#appearanceCancelBtn');
+    if (cancelBtn) cancelBtn.addEventListener('click', closeCanvasAppearanceSettingsModal);
+    const saveBtn = modal.querySelector('#appearanceSaveBtn');
+    if (saveBtn) saveBtn.addEventListener('click', saveCanvasAppearanceSettings);
+
+    const tempRadios = modal.querySelectorAll('input[name="appearance-temp-size-mode"]');
+    tempRadios.forEach(radio => radio.addEventListener('change', () => {
+        __updateAppearanceSizeMode(modal, 'appearance-temp-size-mode', 'appearanceTempSizeInputs');
+    }));
+
+    const tempNameSelect = modal.querySelector('#appearanceTempNameMode');
+    if (tempNameSelect) tempNameSelect.addEventListener('change', () => {
+        __updateAppearanceNameMode(modal, 'appearanceTempNameMode', 'appearanceTempNameManualWrap');
+    });
+    const edgeNameSelect = modal.querySelector('#appearanceEdgeNameMode');
+    if (edgeNameSelect) edgeNameSelect.addEventListener('change', () => {
+        __updateAppearanceNameMode(modal, 'appearanceEdgeNameMode', 'appearanceEdgeNameManualWrap');
+    });
+
+    modal.querySelectorAll('.appearance-color-input').forEach(input => {
+        input.addEventListener('input', () => {
+            const row = input.closest('.appearance-color-row');
+            if (!row) return;
+            const valueEl = row.querySelector('.appearance-color-value');
+            if (valueEl) valueEl.textContent = input.value;
+        });
+    });
+
+    modal.addEventListener('click', (event) => {
+        const chip = event.target.closest('.appearance-color-chip');
+        if (!chip) return;
+        const row = chip.closest('.appearance-color-row');
+        if (!row) return;
+        const color = chip.getAttribute('data-color');
+        if (!color) return;
+        __syncAppearanceColorRow(row, color);
+    });
+}
 
 // =============================================================================
 // 性能管理面板 (Performance Settings)

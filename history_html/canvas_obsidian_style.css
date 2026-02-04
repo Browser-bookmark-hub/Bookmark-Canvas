@@ -814,13 +814,13 @@
 
 /* 永久栏目（绿色） */
 .permanent-bookmark-section .canvas-node-anchor::before {
-    background-color: rgba(16, 185, 129, 0.4);
-    border-color: rgba(16, 185, 129, 0.6);
+    background-color: rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.4);
+    border-color: rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.6);
 }
 
 .permanent-bookmark-section .canvas-node-anchor:hover::before {
-    background-color: rgba(16, 185, 129, 0.6);
-    border-color: rgba(16, 185, 129, 0.85);
+    background-color: rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.6);
+    border-color: rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.85);
 }
 
 /* 临时书签栏目（使用自定义颜色） */
@@ -1562,6 +1562,140 @@
     padding-top: 8px;
     border-top: 1px solid var(--border-color);
     margin-top: 4px;
+}
+
+/* 外观设置弹窗样式 */
+.appearance-settings-modal {
+    width: 520px;
+    max-width: 92vw;
+}
+
+.appearance-row {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+.appearance-row + .appearance-row {
+    margin-top: 12px;
+}
+
+.appearance-row-label {
+    min-width: 90px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    padding-top: 2px;
+}
+
+.appearance-row-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.appearance-mode-toggle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+}
+
+.appearance-radio {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.appearance-size-inputs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.appearance-size-inputs input {
+    width: 70px;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: monospace;
+    text-align: center;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.appearance-size-inputs input::-webkit-outer-spin-button,
+.appearance-size-inputs input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.appearance-size-inputs.is-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.appearance-color-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.appearance-color-chips {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.appearance-color-input {
+    width: 34px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    cursor: pointer;
+}
+
+.appearance-color-value {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.appearance-name-select {
+    width: 100%;
+    max-width: 240px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 12px;
+}
+
+.appearance-name-manual {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.appearance-name-manual input {
+    flex: 1;
+    min-width: 180px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 12px;
 }
 
 /* 底部按钮样式 */
