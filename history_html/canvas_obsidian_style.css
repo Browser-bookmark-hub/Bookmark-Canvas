@@ -1938,13 +1938,141 @@
     opacity: 0.7;
 }
 
+.other-curve-chart {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    grid-template-rows: 1fr auto;
+    column-gap: 0;
+    row-gap: 0;
+    align-items: stretch;
+    width: 100%;
+}
+
+.other-curve-plot {
+    grid-column: 2;
+    grid-row: 1;
+    height: 240px;
+    background: var(--bg-primary);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
 .other-curve-canvas {
     width: 100%;
-    height: 240px;
+    height: 100%;
     display: block;
     border-radius: 8px;
-    background: var(--bg-primary);
+    background: transparent;
     touch-action: none;
+}
+
+.other-curve-axis {
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1;
+}
+
+.other-curve-axis-title {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.other-curve-axis-y {
+    grid-column: 1;
+    grid-row: 1;
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    align-items: stretch;
+}
+
+.other-curve-axis-y .other-curve-axis-title {
+    grid-column: 1;
+    grid-row: 1;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.other-curve-axis-label {
+    writing-mode: vertical-rl;
+}
+
+.other-curve-axis-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    line-height: 1;
+}
+
+.other-curve-axis-letter {
+    display: inline-block;
+}
+
+.other-curve-axis-paren {
+    display: inline-block;
+}
+
+.other-curve-axis-y .other-curve-axis-ticks {
+    grid-column: 2;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding-right: 6px;
+}
+
+.other-curve-axis-y .other-curve-tick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.other-curve-axis-y .other-curve-tick::after {
+    content: "";
+    width: 8px;
+    height: 1px;
+    background: var(--border-color);
+}
+
+.other-curve-axis-x {
+    grid-column: 2;
+    grid-row: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding-top: 6px;
+}
+
+.other-curve-axis-x .other-curve-axis-ticks {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.other-curve-axis-x .other-curve-tick {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.other-curve-axis-x .other-curve-tick::before {
+    content: "";
+    width: 1px;
+    height: 8px;
+    background: var(--border-color);
+}
+
+.other-curve-axis-x .other-curve-axis-title {
+    margin-top: 6px;
+    text-align: center;
 }
 
 .other-curve-legend {
@@ -2020,6 +2148,31 @@
 
 .other-default-hint-row .other-default-hint {
     margin-top: 0;
+}
+
+.other-magnet-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+}
+
+.other-magnet-toggle-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.other-magnet-value {
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+}
+
+.other-magnet-toggle-item.is-disabled {
+    opacity: 0.4;
 }
 
 .other-default-jump-btn {

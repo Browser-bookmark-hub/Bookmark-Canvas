@@ -28807,16 +28807,43 @@ function __renderOtherZoomMagnetCurve(modal) {
 
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-    const paddingLeft = 72;
-    const paddingRight = 10;
-    const paddingTop = 12;
-    const paddingBottom = 52;
+    const paddingLeft = 0;
+    const paddingRight = 0;
+    const paddingTop = 0;
+    const paddingBottom = 0;
     const plotW = Math.max(1, cssWidth - paddingLeft - paddingRight);
     const plotH = Math.max(1, cssHeight - paddingTop - paddingBottom);
 
     const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
     const maxPercent = 100;
     const range = Math.max(1, maxPercent - minPercent);
+    const tickCount = 4;
+    if (modal) {
+        const xTitle = modal.querySelector('#otherCurveXAxisTitle');
+        if (xTitle) xTitle.textContent = isEn ? 'Zoom Ratio (X)' : '缩放比例 (X)';
+        const yTitle = modal.querySelector('#otherCurveYAxisTitle');
+        if (yTitle) {
+            const label = isEn ? 'Zoom Speed' : '缩放速率';
+            yTitle.innerHTML = `<span class="other-curve-axis-label">${label}</span><span class="other-curve-axis-indicator"><span class="other-curve-axis-paren">(</span><span class="other-curve-axis-letter">Y</span><span class="other-curve-axis-paren">)</span></span>`;
+        }
+        const xTickLabels = modal.querySelectorAll('#otherCurveXAxisTicks .other-curve-tick-label');
+        if (xTickLabels && xTickLabels.length) {
+            for (let i = 0; i <= tickCount && i < xTickLabels.length; i++) {
+                const t = i / tickCount;
+                const v = minPercent + t * range;
+                const label = (Math.round(v * 10) / 10).toString();
+                xTickLabels[i].textContent = `${label}%`;
+            }
+        }
+        const yTickLabels = modal.querySelectorAll('#otherCurveYAxisTicks .other-curve-tick-label');
+        if (yTickLabels && yTickLabels.length) {
+            for (let i = 0; i <= tickCount && i < yTickLabels.length; i++) {
+                const t = (tickCount - i) / tickCount;
+                const label = Math.round(t * 100);
+                yTickLabels[i].textContent = `${label}%`;
+            }
+        }
+    }
     const percentToX = (p) => paddingLeft + ((p - minPercent) / range) * plotW;
     let maxFactor = ZOOM_CURVE_MAX_FACTOR;
     const factorToY = (factor) => {
@@ -28863,64 +28890,14 @@ function __renderOtherZoomMagnetCurve(modal) {
         ctx.stroke();
     }
 
-    // Axes + ticks
+    // Axes
     ctx.strokeStyle = axisColor;
     ctx.lineWidth = 1.4;
     ctx.beginPath();
-    const axisExtend = 12;
-    ctx.moveTo(paddingLeft, paddingTop - axisExtend);
+    ctx.moveTo(paddingLeft, paddingTop);
     ctx.lineTo(paddingLeft, paddingTop + plotH);
-    ctx.lineTo(paddingLeft + plotW + axisExtend, paddingTop + plotH);
+    ctx.lineTo(paddingLeft + plotW, paddingTop + plotH);
     ctx.stroke();
-
-    // Arrow heads
-    const arrow = 8;
-    ctx.fillStyle = axisColor;
-    ctx.beginPath();
-    ctx.moveTo(paddingLeft, paddingTop - axisExtend);
-    ctx.lineTo(paddingLeft - arrow / 2, paddingTop - axisExtend + arrow);
-    ctx.lineTo(paddingLeft + arrow / 2, paddingTop - axisExtend + arrow);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(paddingLeft + plotW + axisExtend, paddingTop + plotH);
-    ctx.lineTo(paddingLeft + plotW + axisExtend - arrow, paddingTop + plotH - arrow / 2);
-    ctx.lineTo(paddingLeft + plotW + axisExtend - arrow, paddingTop + plotH + arrow / 2);
-    ctx.closePath();
-    ctx.fill();
-
-    // Axis ticks + labels
-    ctx.strokeStyle = axisColor;
-    ctx.lineWidth = 1;
-    ctx.fillStyle = textColor;
-    ctx.font = '11px sans-serif';
-    const tickCount = 4;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    for (let i = 0; i <= tickCount; i++) {
-        const t = i / tickCount;
-        const x = paddingLeft + t * plotW;
-        ctx.beginPath();
-        ctx.moveTo(x, paddingTop + plotH);
-        ctx.lineTo(x, paddingTop + plotH + 4);
-        ctx.stroke();
-        const v = minPercent + t * range;
-        const label = (Math.round(v * 10) / 10).toString();
-        ctx.fillText(`${label}%`, x, paddingTop + plotH + 8);
-    }
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    for (let i = 0; i <= tickCount; i++) {
-        const t = i / tickCount;
-        const y = paddingTop + plotH - t * plotH;
-        ctx.beginPath();
-        ctx.moveTo(paddingLeft - 4, y);
-        ctx.lineTo(paddingLeft, y);
-        ctx.stroke();
-        const label = Math.round(t * 100);
-        ctx.fillText(`${label}%`, paddingLeft - 6, y);
-    }
 
 
     const noteEl = modal ? modal.querySelector('.other-curve-note') : null;
@@ -29134,20 +29111,6 @@ function __renderOtherZoomMagnetCurve(modal) {
     drawMagnetPoint(safePercent, getCombinedFactor(safePercent), '#10b981', isEn ? 'M1' : '磁1', safeEnabled, 'm1');
     drawMagnetPoint(midPercent, getCombinedFactor(midPercent), '#a855f7', isEn ? 'M2' : '磁2', midEnabled, 'm2');
 
-    // Axis titles
-    ctx.fillStyle = textColor;
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillText(isEn ? 'Zoom Ratio' : '缩放比例', paddingLeft + plotW / 2, paddingTop + plotH + 28);
-    ctx.save();
-    ctx.translate(paddingLeft - 56, paddingTop + plotH / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillText(isEn ? 'Zoom Speed' : '缩放速率', 0, 0);
-    ctx.restore();
-
     modal._curveLayout = {
         paddingLeft,
         paddingTop,
@@ -29167,10 +29130,10 @@ function __getOtherCurveLayout(modal, canvas) {
     if (modal && modal._curveLayout) return modal._curveLayout;
     const cssWidth = canvas.clientWidth || 360;
     const cssHeight = canvas.clientHeight || 180;
-    const paddingLeft = 72;
-    const paddingRight = 10;
-    const paddingTop = 12;
-    const paddingBottom = 52;
+    const paddingLeft = 0;
+    const paddingRight = 0;
+    const paddingTop = 0;
+    const paddingBottom = 0;
     return {
         paddingLeft,
         paddingTop,
@@ -29480,26 +29443,50 @@ function createCanvasOtherSettingsModal() {
                             </svg>
                         </button>
                     </div>
+                    <div class="other-magnet-toggle-row">
+                        <div class="other-magnet-toggle-item" id="otherMagnetSafeLegend">
+                            <span class="other-curve-dot dot-safe"></span>
+                            <span>${isEn ? 'Magnet Point 1' : '磁矩点1'}</span>
+                            <span class="other-magnet-value" id="otherMagnetSafeValue">--</span>
+                            <label class="other-toggle-switch other-magnet-toggle">
+                                <input type="checkbox" id="otherMagnetSafeToggle">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="other-magnet-toggle-item" id="otherMagnetMidLegend">
+                            <span class="other-curve-dot dot-mid"></span>
+                            <span>${isEn ? 'Magnet Point 2' : '磁矩点2'}</span>
+                            <span class="other-magnet-value" id="otherMagnetMidValue">--</span>
+                            <label class="other-toggle-switch other-magnet-toggle">
+                                <input type="checkbox" id="otherMagnetMidToggle">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
                     <div class="other-curve-card">
-                        <canvas id="otherZoomMagnetCurve" class="other-curve-canvas"></canvas>
-                        <div class="other-curve-legend">
-                            <div class="other-curve-legend-item" id="otherMagnetSafeLegend">
-                                <span class="other-curve-dot dot-safe"></span>
-                                <span>${isEn ? 'Magnet Point 1' : '磁矩点1'}</span>
-                                <span id="otherMagnetSafeValue">--</span>
-                                <label class="other-toggle-switch other-magnet-toggle">
-                                    <input type="checkbox" id="otherMagnetSafeToggle">
-                                    <span class="other-toggle-slider"></span>
-                                </label>
+                        <div class="other-curve-chart" id="otherZoomMagnetChart">
+                            <div class="other-curve-axis other-curve-axis-y">
+                                <div class="other-curve-axis-title" id="otherCurveYAxisTitle"></div>
+                                <div class="other-curve-axis-ticks" id="otherCurveYAxisTicks">
+                                    <div class="other-curve-tick"><span class="other-curve-tick-label">100%</span></div>
+                                    <div class="other-curve-tick"><span class="other-curve-tick-label">75%</span></div>
+                                    <div class="other-curve-tick"><span class="other-curve-tick-label">50%</span></div>
+                                    <div class="other-curve-tick"><span class="other-curve-tick-label">25%</span></div>
+                                    <div class="other-curve-tick"><span class="other-curve-tick-label">0%</span></div>
+                                </div>
                             </div>
-                            <div class="other-curve-legend-item" id="otherMagnetMidLegend">
-                                <span class="other-curve-dot dot-mid"></span>
-                                <span>${isEn ? 'Magnet Point 2' : '磁矩点2'}</span>
-                                <span id="otherMagnetMidValue">--</span>
-                                <label class="other-toggle-switch other-magnet-toggle">
-                                    <input type="checkbox" id="otherMagnetMidToggle">
-                                    <span class="other-toggle-slider"></span>
-                                </label>
+                            <div class="other-curve-plot">
+                                <canvas id="otherZoomMagnetCurve" class="other-curve-canvas"></canvas>
+                            </div>
+                            <div class="other-curve-axis other-curve-axis-x">
+                                <div class="other-curve-axis-ticks" id="otherCurveXAxisTicks">
+                                    <div class="other-curve-tick"><span class="other-curve-tick-label">--%</span></div>
+                                    <div class="other-curve-tick"><span class="other-curve-tick-label">--%</span></div>
+                                    <div class="other-curve-tick"><span class="other-curve-tick-label">--%</span></div>
+                                    <div class="other-curve-tick"><span class="other-curve-tick-label">--%</span></div>
+                                    <div class="other-curve-tick"><span class="other-curve-tick-label">--%</span></div>
+                                </div>
+                                <div class="other-curve-axis-title" id="otherCurveXAxisTitle"></div>
                             </div>
                         </div>
                         <div class="other-curve-note">${isEn ? 'Default curve resets to standard values. Drag any point to switch to custom.' : '默认曲线会还原到标准数值，拖动任意点会自动切换为自定义。'}</div>
