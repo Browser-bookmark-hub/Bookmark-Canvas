@@ -1961,6 +1961,22 @@
     gap: 6px;
 }
 
+.other-magnet-toggle {
+    width: 28px;
+    height: 16px;
+}
+
+.other-magnet-toggle .other-toggle-slider::before {
+    width: 12px;
+    height: 12px;
+    top: 2px;
+    left: 2px;
+}
+
+.other-magnet-toggle input:checked + .other-toggle-slider::before {
+    transform: translateX(12px);
+}
+
 .other-curve-legend-item.is-disabled {
     opacity: 0.4;
 }

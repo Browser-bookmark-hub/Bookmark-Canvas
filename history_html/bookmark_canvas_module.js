@@ -942,8 +942,8 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
     zoomCurve: {
         p0: { x: 0, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) },
-        p1: { x: 0.25, y: 1 },
-        p2: { x: 0.67, y: 1 },
+        p1: { x: 0.25, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) },
+        p2: { x: 0.67, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) },
         p3: { x: 1, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) }
     },
     magnetPoints: {
@@ -5535,6 +5535,42 @@ function getCanvasZoomMagnetSettings() {
     } catch (_) { }
 
     return defaults;
+}
+
+function __writeCanvasZoomMagnetSettings(next) {
+    const cur = getCanvasZoomMagnetSettings();
+    const merged = {
+        enabled: (typeof next.enabled === 'boolean') ? next.enabled : cur.enabled,
+        enableSafeZone: (typeof next.enableSafeZone === 'boolean') ? next.enableSafeZone : cur.enableSafeZone,
+        enableLowDetailMid: (typeof next.enableLowDetailMid === 'boolean') ? next.enableLowDetailMid : cur.enableLowDetailMid
+    };
+    try { localStorage.setItem('canvasZoomMagnetSettings', JSON.stringify(merged)); } catch (_) { }
+    // legacy compatibility
+    try { localStorage.setItem('canvasZoomMagnetEnabled', merged.enabled ? 'true' : 'false'); } catch (_) { }
+    return merged;
+}
+
+function __syncPerfMagnetTogglesFromSettings(settings) {
+    const modal = document.getElementById('canvasPerfSettingsModal');
+    if (!modal || modal.style.display === 'none') return;
+    const t = modal.querySelector('#perfToggleZoomMagnet');
+    const s = modal.querySelector('#perfToggleZoomMagnetSafe');
+    const m = modal.querySelector('#perfToggleZoomMagnetMid');
+    if (t && typeof settings.enabled === 'boolean') t.checked = settings.enabled;
+    if (s && typeof settings.enableSafeZone === 'boolean') s.checked = settings.enableSafeZone;
+    if (m && typeof settings.enableLowDetailMid === 'boolean') m.checked = settings.enableLowDetailMid;
+    if (t) {
+        try { t.dispatchEvent(new Event('change')); } catch (_) { }
+    }
+}
+
+function __syncOtherMagnetTogglesFromSettings(modal, settings) {
+    const target = modal || document.getElementById('canvasOtherSettingsModal');
+    if (!target || target.style.display === 'none') return;
+    const safeToggle = target.querySelector('#otherMagnetSafeToggle');
+    const midToggle = target.querySelector('#otherMagnetMidToggle');
+    if (safeToggle && typeof settings.enableSafeZone === 'boolean') safeToggle.checked = settings.enableSafeZone;
+    if (midToggle && typeof settings.enableLowDetailMid === 'boolean') midToggle.checked = settings.enableLowDetailMid;
 }
 
 function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
@@ -28785,6 +28821,7 @@ function __renderOtherZoomMagnetCurve(modal) {
         ? __getDefaultMagnetPointsFromPerf((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints())
         : __normalizeMagnetPoints((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints());
     if (modal) modal._magnetPoints = magnetPoints;
+    if (modal) __syncOtherMagnetTogglesFromSettings(modal, settings);
 
     const safePercent = minPercent + (__clamp01(magnetPoints.m1.x) * range);
     const midPercent = minPercent + (__clamp01(magnetPoints.m2.x) * range);
@@ -29248,6 +29285,14 @@ function __bindOtherCurveInteractions(modal) {
     canvas.addEventListener('pointerdown', (e) => {
         const hit = hitTest(e.clientX, e.clientY);
         if (!hit) return;
+        if (hit === 'm1' || hit === 'm2') {
+            const merged = __writeCanvasZoomMagnetSettings({
+                enabled: true,
+                enableSafeZone: hit === 'm1' ? true : undefined,
+                enableLowDetailMid: hit === 'm2' ? true : undefined
+            });
+            __syncPerfMagnetTogglesFromSettings(merged);
+        }
         ensureCustom();
         dragState.active = true;
         dragState.point = hit;
@@ -29351,11 +29396,19 @@ function createCanvasOtherSettingsModal() {
                                 <span class="other-curve-dot dot-safe"></span>
                                 <span>${isEn ? 'Magnet Point 1' : '磁矩点1'}</span>
                                 <span id="otherMagnetSafeValue">--</span>
+                                <label class="other-toggle-switch other-magnet-toggle">
+                                    <input type="checkbox" id="otherMagnetSafeToggle">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
                             </div>
                             <div class="other-curve-legend-item" id="otherMagnetMidLegend">
                                 <span class="other-curve-dot dot-mid"></span>
                                 <span>${isEn ? 'Magnet Point 2' : '磁矩点2'}</span>
                                 <span id="otherMagnetMidValue">--</span>
+                                <label class="other-toggle-switch other-magnet-toggle">
+                                    <input type="checkbox" id="otherMagnetMidToggle">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
                             </div>
                         </div>
                         <div class="other-curve-note">${isEn ? 'Default curve resets to standard values. Drag any point to switch to custom.' : '默认曲线会还原到标准数值，拖动任意点会自动切换为自定义。'}</div>
@@ -29382,6 +29435,8 @@ function createCanvasOtherSettingsModal() {
     if (saveBtn) saveBtn.addEventListener('click', saveCanvasOtherSettings);
     const defaultToggle = modal.querySelector('#otherUseDefaultZoomCurve');
     const jumpPerfBtn = modal.querySelector('#otherDefaultJumpPerfBtn');
+    const safeToggle = modal.querySelector('#otherMagnetSafeToggle');
+    const midToggle = modal.querySelector('#otherMagnetMidToggle');
     if (defaultToggle) {
         defaultToggle.addEventListener('change', () => {
             const nextUseDefault = !!defaultToggle.checked;
@@ -29402,6 +29457,19 @@ function createCanvasOtherSettingsModal() {
             openCanvasPerfSettingsModal();
         });
     }
+    const syncMagnetSettingsFromOther = () => {
+        const cur = getCanvasZoomMagnetSettings();
+        const next = {
+            enableSafeZone: safeToggle ? !!safeToggle.checked : cur.enableSafeZone,
+            enableLowDetailMid: midToggle ? !!midToggle.checked : cur.enableLowDetailMid
+        };
+        if (next.enableSafeZone || next.enableLowDetailMid) next.enabled = true;
+        const merged = __writeCanvasZoomMagnetSettings(next);
+        __syncPerfMagnetTogglesFromSettings(merged);
+        try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+    };
+    if (safeToggle) safeToggle.addEventListener('change', syncMagnetSettingsFromOther);
+    if (midToggle) midToggle.addEventListener('change', syncMagnetSettingsFromOther);
     __bindOtherCurveInteractions(modal);
 }
 
@@ -29536,7 +29604,7 @@ function openCanvasPerfSettingsModal() {
 
     const perfFocus = CanvasState.perfSettingsFocus;
     if (perfFocus === 'magnet') {
-        const target = modal.querySelector('#perfMagnetSection');
+        const target = modal.querySelector('#perfMagnetP5Section') || modal.querySelector('#perfMagnetSection');
         if (target) {
             requestAnimationFrame(() => {
                 try { target.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (_) { }
@@ -30033,7 +30101,7 @@ function createCanvasPerfSettingsModal() {
                 </div>
 
                 <!-- [Priority 5] Zoom Magnet (Lenz-like slow zone) -->
-                <div class="perf-settings-section">
+                <div class="perf-settings-section" id="perfMagnetP5Section">
                     <div class="perf-settings-section-title">
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <span style="background: linear-gradient(135deg, #a855f7, #7c3aed); color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">P5</span>
@@ -30308,7 +30376,26 @@ function createCanvasPerfSettingsModal() {
         if (toggleSafe) toggleSafe.disabled = !on;
         if (toggleMid) toggleMid.disabled = !on;
     };
-    if (toggleMagnet) toggleMagnet.addEventListener('change', applyMagnetToggleState);
+    const syncMagnetSettingsFromPerf = () => {
+        const merged = __writeCanvasZoomMagnetSettings({
+            enabled: toggleMagnet ? !!toggleMagnet.checked : true,
+            enableSafeZone: toggleSafe ? !!toggleSafe.checked : true,
+            enableLowDetailMid: toggleMid ? !!toggleMid.checked : false
+        });
+        __syncOtherMagnetTogglesFromSettings(null, merged);
+        const otherModal = document.getElementById('canvasOtherSettingsModal');
+        if (otherModal && otherModal.style.display !== 'none') {
+            try { __renderOtherZoomMagnetCurve(otherModal); } catch (_) { }
+        }
+    };
+    if (toggleMagnet) {
+        toggleMagnet.addEventListener('change', () => {
+            applyMagnetToggleState();
+            syncMagnetSettingsFromPerf();
+        });
+    }
+    if (toggleSafe) toggleSafe.addEventListener('change', syncMagnetSettingsFromPerf);
+    if (toggleMid) toggleMid.addEventListener('change', syncMagnetSettingsFromPerf);
     applyMagnetToggleState();
 }
 
