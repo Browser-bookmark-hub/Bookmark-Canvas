@@ -1871,7 +1871,7 @@
 
 /* 其他设置弹窗样式 */
 .other-settings-modal {
-    width: 520px;
+    width: 620px;
     max-width: 92vw;
     position: relative;
 }
@@ -1940,7 +1940,7 @@
 
 .other-curve-canvas {
     width: 100%;
-    height: 180px;
+    height: 240px;
     display: block;
     border-radius: 8px;
     background: var(--bg-primary);

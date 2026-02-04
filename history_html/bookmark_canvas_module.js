@@ -28807,10 +28807,10 @@ function __renderOtherZoomMagnetCurve(modal) {
 
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-    const paddingLeft = 34;
+    const paddingLeft = 72;
     const paddingRight = 10;
     const paddingTop = 12;
-    const paddingBottom = 26;
+    const paddingBottom = 52;
     const plotW = Math.max(1, cssWidth - paddingLeft - paddingRight);
     const plotH = Math.max(1, cssHeight - paddingTop - paddingBottom);
 
@@ -28863,23 +28863,70 @@ function __renderOtherZoomMagnetCurve(modal) {
         ctx.stroke();
     }
 
-    // Axes
+    // Axes + ticks
     ctx.strokeStyle = axisColor;
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.moveTo(paddingLeft, paddingTop);
+    const axisExtend = 12;
+    ctx.moveTo(paddingLeft, paddingTop - axisExtend);
     ctx.lineTo(paddingLeft, paddingTop + plotH);
-    ctx.lineTo(paddingLeft + plotW, paddingTop + plotH);
+    ctx.lineTo(paddingLeft + plotW + axisExtend, paddingTop + plotH);
     ctx.stroke();
+
+    // Arrow heads
+    const arrow = 8;
+    ctx.fillStyle = axisColor;
+    ctx.beginPath();
+    ctx.moveTo(paddingLeft, paddingTop - axisExtend);
+    ctx.lineTo(paddingLeft - arrow / 2, paddingTop - axisExtend + arrow);
+    ctx.lineTo(paddingLeft + arrow / 2, paddingTop - axisExtend + arrow);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(paddingLeft + plotW + axisExtend, paddingTop + plotH);
+    ctx.lineTo(paddingLeft + plotW + axisExtend - arrow, paddingTop + plotH - arrow / 2);
+    ctx.lineTo(paddingLeft + plotW + axisExtend - arrow, paddingTop + plotH + arrow / 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Axis ticks + labels
+    ctx.strokeStyle = axisColor;
+    ctx.lineWidth = 1;
+    ctx.fillStyle = textColor;
+    ctx.font = '11px sans-serif';
+    const tickCount = 4;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let i = 0; i <= tickCount; i++) {
+        const t = i / tickCount;
+        const x = paddingLeft + t * plotW;
+        ctx.beginPath();
+        ctx.moveTo(x, paddingTop + plotH);
+        ctx.lineTo(x, paddingTop + plotH + 4);
+        ctx.stroke();
+        const v = minPercent + t * range;
+        const label = (Math.round(v * 10) / 10).toString();
+        ctx.fillText(`${label}%`, x, paddingTop + plotH + 8);
+    }
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i <= tickCount; i++) {
+        const t = i / tickCount;
+        const y = paddingTop + plotH - t * plotH;
+        ctx.beginPath();
+        ctx.moveTo(paddingLeft - 4, y);
+        ctx.lineTo(paddingLeft, y);
+        ctx.stroke();
+        const label = Math.round(t * 100);
+        ctx.fillText(`${label}%`, paddingLeft - 6, y);
+    }
+
 
     const noteEl = modal ? modal.querySelector('.other-curve-note') : null;
     if (noteEl) {
-        noteEl.textContent = useDefaultCurve
-            ? (isEn
-                ? 'Default curve resets to standard values. Drag any point to switch to custom.'
-                : '默认曲线会还原到标准数值，拖动任意点会自动切换为自定义。')
-            : (isEn
-                ? 'Drag Magnet 1/2 and Rate 1–4. X: zoom %, Y: speed (higher = faster). Smoother = slower.'
-                : '拖动磁矩点1/2与速率点1-4。X 轴为缩放比例，Y 轴为速率强度（越高越快、越平滑越慢）。');
+        noteEl.textContent = '';
+        noteEl.style.display = 'none';
     }
 
     const curve = (modal && modal._zoomCurve) ? modal._zoomCurve : getCanvasZoomCurveSettings();
@@ -29087,13 +29134,19 @@ function __renderOtherZoomMagnetCurve(modal) {
     drawMagnetPoint(safePercent, getCombinedFactor(safePercent), '#10b981', isEn ? 'M1' : '磁1', safeEnabled, 'm1');
     drawMagnetPoint(midPercent, getCombinedFactor(midPercent), '#a855f7', isEn ? 'M2' : '磁2', midEnabled, 'm2');
 
-    // Axis labels
+    // Axis titles
     ctx.fillStyle = textColor;
     ctx.font = '12px sans-serif';
-    ctx.fillText(`${minPercent}%`, paddingLeft, paddingTop + plotH + 18);
-    ctx.fillText(`${maxPercent}%`, paddingLeft + plotW - 22, paddingTop + plotH + 18);
-    ctx.fillText(isEn ? 'Fast' : '快', paddingLeft - 28, paddingTop + 6);
-    ctx.fillText(isEn ? 'Slow' : '慢', paddingLeft - 28, paddingTop + plotH);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(isEn ? 'Zoom Ratio' : '缩放比例', paddingLeft + plotW / 2, paddingTop + plotH + 28);
+    ctx.save();
+    ctx.translate(paddingLeft - 56, paddingTop + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(isEn ? 'Zoom Speed' : '缩放速率', 0, 0);
+    ctx.restore();
 
     modal._curveLayout = {
         paddingLeft,
@@ -29114,10 +29167,10 @@ function __getOtherCurveLayout(modal, canvas) {
     if (modal && modal._curveLayout) return modal._curveLayout;
     const cssWidth = canvas.clientWidth || 360;
     const cssHeight = canvas.clientHeight || 180;
-    const paddingLeft = 34;
+    const paddingLeft = 72;
     const paddingRight = 10;
     const paddingTop = 12;
-    const paddingBottom = 26;
+    const paddingBottom = 52;
     return {
         paddingLeft,
         paddingTop,
@@ -29132,7 +29185,7 @@ function __bindOtherCurveInteractions(modal) {
     const canvas = modal ? modal.querySelector('#otherZoomMagnetCurve') : null;
     if (!canvas) return;
     const dragState = { active: false, point: null, pointerId: null };
-    const hitRadius = 10;
+    const hitRadius = 14;
     const minGap = 0.04;
     const magnetGap = 0.02;
 
@@ -29341,6 +29394,9 @@ function __bindOtherCurveInteractions(modal) {
             updateCurveFromPointer(e.clientX, e.clientY);
             return;
         }
+        updateCursor(e.clientX, e.clientY);
+    });
+    canvas.addEventListener('pointerenter', (e) => {
         updateCursor(e.clientX, e.clientY);
     });
 
