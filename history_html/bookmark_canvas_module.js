@@ -936,6 +936,7 @@ const ZOOM_CURVE_MAX_FACTOR = 1.6;
 const ZOOM_CURVE_ABS_MAX_FACTOR = 2.4;
 const ZOOM_CURVE_EXPONENT = 1.35;
 const ZOOM_CURVE_RAW_MAX = Math.pow(ZOOM_CURVE_ABS_MAX_FACTOR / ZOOM_CURVE_MAX_FACTOR, 1 / ZOOM_CURVE_EXPONENT);
+const ZOOM_SPEED_GLOBAL_MULTIPLIER = 0.5;
 const DEFAULT_CANVAS_OTHER_SETTINGS = {
     autoLinkSplit: false, // 临时栏目分裂后自动连接
     tempColorFollow: true, // 临时栏目颜色跟随
@@ -947,8 +948,8 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
         p3: { x: 1, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) }
     },
     magnetPoints: {
-        m1: { x: 0.67, y: 0.05 },
-        m2: { x: 0.25, y: 0.04 }
+        m1: { x: 0.67, y: 0.10 },
+        m2: { x: 0.25, y: 0.10 }
     }
 };
 
@@ -4851,7 +4852,7 @@ function setupCanvasZoomAndPan() {
             const nextDisplayZoomNoMagnet = (baseZoomForCalc * Math.exp(delta * zoomSpeed)) / base;
             const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
             const speedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
-            const effectiveDelta = delta * magnet.factor * speedFactor;
+            const effectiveDelta = delta * magnet.factor * speedFactor * ZOOM_SPEED_GLOBAL_MULTIPLIER;
 
             // 计算缩放因子：delta > 0 放大，delta < 0 缩小
             // 使用 Math.exp 实现指数缩放，确保放大和缩小是对称的
@@ -5579,6 +5580,10 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
     const nextDz = (typeof nextDisplayZoom === 'number' && isFinite(nextDisplayZoom) && nextDisplayZoom > 0) ? nextDisplayZoom : dz;
     const baseFactor = Math.max(0.005, getCanvasZoomSpeedFactor(dz));
     const maxFactor = ZOOM_CURVE_ABS_MAX_FACTOR;
+    const travel = Math.abs(Math.log(nextDz / dz));
+    const speedBoost = Math.max(0, Math.min(1, travel / 0.08));
+    const widthBoost = 1 + speedBoost * 0.8;
+    const strengthBoost = 1 + speedBoost * 0.6;
 
     const settings = getCanvasZoomMagnetSettings();
     const useDefaultCurve = shouldUseDefaultZoomCurve();
@@ -5601,7 +5606,8 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
             const safe = safePercent / 100;
             if (Number.isFinite(safe) && safe > 0) {
                 // Safe Zone 附近更明显（范围更宽、减速更强）
-                magnets.push({ center: safe, halfWidth: 0.08, minFactor: magnetPoints.m1.y });
+                const halfWidth = Math.min(0.16, 0.08 * widthBoost);
+                magnets.push({ center: safe, halfWidth, minFactor: magnetPoints.m1.y, boost: strengthBoost });
             }
         }
     } catch (_) { }
@@ -5615,8 +5621,9 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
                 const mid = midPercent / 100;
                 const band = Math.max(0.01, Math.abs(enter - exit));
                 // (30%~35%) 的中点附近给一个更宽的“缓慢区”，避免感觉只是“一个点”
-                const halfWidth = Math.min(0.12, Math.max(0.06, band * 2.5));
-                magnets.push({ center: mid, halfWidth, minFactor: magnetPoints.m2.y });
+                const baseHalf = Math.min(0.12, Math.max(0.06, band * 2.5));
+                const halfWidth = Math.min(0.18, baseHalf * widthBoost);
+                magnets.push({ center: mid, halfWidth, minFactor: magnetPoints.m2.y, boost: strengthBoost });
             }
         }
     } catch (_) { }
@@ -5637,7 +5644,7 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
 
         const t = Math.max(0, Math.min(1, minD / m.halfWidth));
         const smooth = t * t * (3 - 2 * t); // smoothstep
-        const localStrength = 1 - smooth; // 0..1 (center strongest)
+        const localStrength = Math.min(1, (1 - smooth) * (Number.isFinite(m.boost) ? m.boost : 1));
         const desired = (Number.isFinite(m.minFactor) ? m.minFactor : 1) / baseFactor;
         const localFactor = 1 + localStrength * (desired - 1);
         const minLocal = 0.005 / baseFactor;
@@ -29010,12 +29017,36 @@ function __renderOtherZoomMagnetCurve(modal) {
     ctx.beginPath();
     ctx.arc(endX, endY, 4, 0, Math.PI * 2);
     ctx.fill();
+    const formatCoord = (v) => {
+        if (!Number.isFinite(v)) return '--';
+        const n = Math.round(v * 10) / 10;
+        return (n % 1 === 0) ? n.toFixed(0) : n.toFixed(1);
+    };
+    const activePoint = (modal && modal._dragPoint) ? modal._dragPoint : null;
+    const showCoords = (id) => activePoint === id;
+    const formatLabel = (label, id, xVal, yVal) => {
+        if (!showCoords(id)) return label;
+        return `${label} (${formatCoord(xVal)},${formatCoord(yVal)})`;
+    };
+    const drawPointLabel = (text, x, y, alignRight = false) => {
+        const w = ctx.measureText(text).width;
+        const dx = alignRight ? -w - 6 : 6;
+        ctx.fillText(text, x + dx, y - 6);
+    };
     ctx.fillStyle = textColor;
     ctx.font = '11px sans-serif';
-    ctx.fillText(isEn ? 'R1' : '速1', p1x + 6, p1y - 6);
-    ctx.fillText(isEn ? 'R2' : '速2', p2x + 6, p2y - 6);
-    ctx.fillText(isEn ? 'R3' : '速3', startX + 6, startY - 6);
-    ctx.fillText(isEn ? 'R4' : '速4', endX - 20, endY - 6);
+    const p0xVal = minPercent;
+    const p0yVal = __scaleZoomCurveFactor(p0.y) * 100;
+    const p1xVal = minPercent + (p1.x * range);
+    const p1yVal = __scaleZoomCurveFactor(p1.y) * 100;
+    const p2xVal = minPercent + (p2.x * range);
+    const p2yVal = __scaleZoomCurveFactor(p2.y) * 100;
+    const p3xVal = maxPercent;
+    const p3yVal = __scaleZoomCurveFactor(p3.y) * 100;
+    drawPointLabel(formatLabel(isEn ? 'R1' : '速1', 'p1', p1xVal, p1yVal), p1x, p1y);
+    drawPointLabel(formatLabel(isEn ? 'R2' : '速2', 'p2', p2xVal, p2yVal), p2x, p2y);
+    drawPointLabel(formatLabel(isEn ? 'R3' : '速3', 'p0', p0xVal, p0yVal), startX, startY);
+    drawPointLabel(formatLabel(isEn ? 'R4' : '速4', 'p3', p3xVal, p3yVal), endX, endY, true);
 
     // Magnet markers + points
     const drawMarker = (percent, color, enabled) => {
@@ -29036,11 +29067,12 @@ function __renderOtherZoomMagnetCurve(modal) {
     drawMarker(safePercent, '#10b981', safeEnabled);
     drawMarker(midPercent, '#a855f7', midEnabled);
 
-    const drawMagnetPoint = (percent, y, color, label, enabled) => {
+    const drawMagnetPoint = (percent, y, color, label, enabled, id) => {
         if (!Number.isFinite(percent) || !Number.isFinite(y)) return;
         if (percent < minPercent || percent > maxPercent) return;
         const x = percentToX(percent);
         const py = factorToY(y);
+        const text = showCoords(id) ? `${label} (${formatCoord(percent)},${formatCoord(y * 100)})` : label;
         ctx.save();
         ctx.globalAlpha = enabled ? 1 : 0.35;
         ctx.fillStyle = color;
@@ -29049,11 +29081,11 @@ function __renderOtherZoomMagnetCurve(modal) {
         ctx.fill();
         ctx.fillStyle = textColor;
         ctx.font = '11px sans-serif';
-        ctx.fillText(label, x + 6, py - 6);
+        ctx.fillText(text, x + 6, py - 6);
         ctx.restore();
     };
-    drawMagnetPoint(safePercent, getCombinedFactor(safePercent), '#10b981', isEn ? 'M1' : '磁1', safeEnabled);
-    drawMagnetPoint(midPercent, getCombinedFactor(midPercent), '#a855f7', isEn ? 'M2' : '磁2', midEnabled);
+    drawMagnetPoint(safePercent, getCombinedFactor(safePercent), '#10b981', isEn ? 'M1' : '磁1', safeEnabled, 'm1');
+    drawMagnetPoint(midPercent, getCombinedFactor(midPercent), '#a855f7', isEn ? 'M2' : '磁2', midEnabled, 'm2');
 
     // Axis labels
     ctx.fillStyle = textColor;
@@ -29296,6 +29328,7 @@ function __bindOtherCurveInteractions(modal) {
         ensureCustom();
         dragState.active = true;
         dragState.point = hit;
+        if (modal) modal._dragPoint = hit;
         dragState.pointerId = e.pointerId;
         canvas.setPointerCapture(e.pointerId);
         canvas.style.cursor = 'grabbing';
@@ -29315,11 +29348,13 @@ function __bindOtherCurveInteractions(modal) {
         if (!dragState.active) return;
         dragState.active = false;
         dragState.point = null;
+        if (modal) modal._dragPoint = null;
         if (dragState.pointerId !== null) {
             try { canvas.releasePointerCapture(dragState.pointerId); } catch (_) { }
         }
         dragState.pointerId = null;
         canvas.style.cursor = 'default';
+        __renderOtherZoomMagnetCurve(modal);
     };
 
     canvas.addEventListener('pointerup', endDrag);
@@ -29380,7 +29415,7 @@ function createCanvasOtherSettingsModal() {
                         </div>
                     </div>
                     <div class="other-default-hint-row">
-                        <div class="other-default-hint">${isEn ? 'Default restore: M1 (X=70%, Y=5%), M2 (X=32.5%, Y=4%).' : '默认还原：磁1（X=70%，Y=5%），磁2（X=32.5%，Y=4%）。'}</div>
+                        <div class="other-default-hint">${isEn ? 'Default restore: M1 (X=70%, Y=10%), M2 (X=32.5%, Y=10%).' : '默认还原：磁1（X=70%，Y=10%），磁2（X=32.5%，Y=10%）。'}</div>
                         <button class="perf-source-btn other-default-jump-btn" id="otherDefaultJumpPerfBtn" title="${isEn ? 'Go to Performance' : '跳转到性能'}" aria-label="${isEn ? 'Go to Performance' : '跳转到性能'}">
                             <svg class="jump-icon" viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M14 3h7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
