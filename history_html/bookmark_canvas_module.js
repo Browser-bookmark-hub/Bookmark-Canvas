@@ -931,15 +931,20 @@ const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
 
 // Canvas 其他设置（默认值）
 const CANVAS_OTHER_SETTINGS_KEY = 'canvas-other-settings-v1';
+const DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y = 0.65;
+const ZOOM_CURVE_MAX_FACTOR = 1.6;
+const ZOOM_CURVE_ABS_MAX_FACTOR = 2.4;
+const ZOOM_CURVE_EXPONENT = 1.35;
+const ZOOM_CURVE_RAW_MAX = Math.pow(ZOOM_CURVE_ABS_MAX_FACTOR / ZOOM_CURVE_MAX_FACTOR, 1 / ZOOM_CURVE_EXPONENT);
 const DEFAULT_CANVAS_OTHER_SETTINGS = {
     autoLinkSplit: false, // 临时栏目分裂后自动连接
     tempColorFollow: true, // 临时栏目颜色跟随
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
     zoomCurve: {
-        p0: { x: 0, y: 1 },
+        p0: { x: 0, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) },
         p1: { x: 0.25, y: 1 },
         p2: { x: 0.67, y: 1 },
-        p3: { x: 1, y: 1 }
+        p3: { x: 1, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) }
     },
     magnetPoints: {
         m1: { x: 0.67, y: 0.05 },
@@ -984,19 +989,19 @@ function __normalizeZoomCurve(input) {
     const out = {
         p0: {
             x: 0,
-            y: __clampNumber(p0.y, 0, 1, fallback.p0.y)
+            y: __clampNumber(p0.y, 0, ZOOM_CURVE_RAW_MAX, fallback.p0.y)
         },
         p1: {
             x: __clampNumber(p1.x, 0, 1, fallback.p1.x),
-            y: __clampNumber(p1.y, 0, 1, fallback.p1.y)
+            y: __clampNumber(p1.y, 0, ZOOM_CURVE_RAW_MAX, fallback.p1.y)
         },
         p2: {
             x: __clampNumber(p2.x, 0, 1, fallback.p2.x),
-            y: __clampNumber(p2.y, 0, 1, fallback.p2.y)
+            y: __clampNumber(p2.y, 0, ZOOM_CURVE_RAW_MAX, fallback.p2.y)
         },
         p3: {
             x: 1,
-            y: __clampNumber(p3.y, 0, 1, fallback.p3.y)
+            y: __clampNumber(p3.y, 0, ZOOM_CURVE_RAW_MAX, fallback.p3.y)
         }
     };
     if (out.p1.x > out.p2.x) {
@@ -1033,11 +1038,11 @@ function __normalizeMagnetPoints(input) {
     const out = {
         m1: {
             x: __clampNumber(m1.x, 0, 1, fallback.m1.x),
-            y: __clampNumber(m1.y, 0.02, 1, fallback.m1.y)
+            y: __clampNumber(m1.y, 0.005, ZOOM_CURVE_ABS_MAX_FACTOR, fallback.m1.y)
         },
         m2: {
             x: __clampNumber(m2.x, 0, 1, fallback.m2.x),
-            y: __clampNumber(m2.y, 0.02, 1, fallback.m2.y)
+            y: __clampNumber(m2.y, 0.005, ZOOM_CURVE_ABS_MAX_FACTOR, fallback.m2.y)
         }
     };
     if (out.m2.x > out.m1.x) {
@@ -5536,6 +5541,8 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
     if (!isCanvasZoomMagnetEnabled()) return { factor: 1, strength: 0 };
     const dz = (typeof displayZoom === 'number' && isFinite(displayZoom) && displayZoom > 0) ? displayZoom : 1;
     const nextDz = (typeof nextDisplayZoom === 'number' && isFinite(nextDisplayZoom) && nextDisplayZoom > 0) ? nextDisplayZoom : dz;
+    const baseFactor = Math.max(0.005, getCanvasZoomSpeedFactor(dz));
+    const maxFactor = ZOOM_CURVE_ABS_MAX_FACTOR;
 
     const settings = getCanvasZoomMagnetSettings();
     const useDefaultCurve = shouldUseDefaultZoomCurve();
@@ -5580,8 +5587,8 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
 
     if (!magnets.length) return { factor: 1, strength: 0 };
 
-    // 在“磁矩”附近将缩放变得更缓慢；离开附近则恢复正常曲线。
-    // factor: 1 = 不减速；越接近 center 越接近 minFactor。
+    // 在“磁矩”附近将缩放变得更缓慢或更快；离开附近则恢复正常曲线。
+    // factor: 1 = 不变；越接近 center 越接近 minFactor。
     let factor = 1;
     let strength = 0;
     for (const m of magnets) {
@@ -5595,13 +5602,21 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
         const t = Math.max(0, Math.min(1, minD / m.halfWidth));
         const smooth = t * t * (3 - 2 * t); // smoothstep
         const localStrength = 1 - smooth; // 0..1 (center strongest)
-        const localFactor = 1 - localStrength * (1 - m.minFactor);
+        const desired = (Number.isFinite(m.minFactor) ? m.minFactor : 1) / baseFactor;
+        const localFactor = 1 + localStrength * (desired - 1);
+        const minLocal = 0.005 / baseFactor;
+        const maxLocal = maxFactor / baseFactor;
+        const clampedLocal = Math.max(minLocal, Math.min(maxLocal, localFactor));
 
-        if (localFactor < factor) factor = localFactor;
-        if (localStrength > strength) strength = localStrength;
+        if (desired >= 1) {
+            if (clampedLocal > factor) factor = clampedLocal;
+        } else {
+            if (clampedLocal < factor) factor = clampedLocal;
+            if (localStrength > strength) strength = localStrength;
+        }
     }
     return {
-        factor: Math.max(0.05, Math.min(1, factor)),
+        factor: Math.max(0.005 / baseFactor, Math.min(maxFactor / baseFactor, factor)),
         strength: Math.max(0, Math.min(1, strength))
     };
 }
@@ -5623,15 +5638,15 @@ function __cubicBezierCoord(t, p0, p1, p2, p3) {
 }
 
 function __scaleZoomCurveFactor(raw) {
-    const clamped = Math.max(0, Math.min(1, raw));
-    const scaled = Math.pow(clamped, 1.35) * 0.60;
-    return Math.max(0.005, Math.min(0.65, scaled));
+    const clamped = Math.max(0, Math.min(ZOOM_CURVE_RAW_MAX, raw));
+    const scaled = Math.pow(clamped, ZOOM_CURVE_EXPONENT) * ZOOM_CURVE_MAX_FACTOR;
+    return Math.max(0, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, scaled));
 }
 
 function __unscaleZoomCurveFactor(scaled) {
-    const v = Math.max(0.005, Math.min(0.65, scaled));
-    const norm = Math.max(0, Math.min(1, v / 0.60));
-    return Math.pow(norm, 1 / 1.35);
+    const v = Math.max(0, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, scaled));
+    const norm = Math.max(0, v / ZOOM_CURVE_MAX_FACTOR);
+    return Math.pow(norm, 1 / ZOOM_CURVE_EXPONENT);
 }
 
 function __solveBezierTForX(x, x1, x2) {
@@ -5656,7 +5671,7 @@ function __getZoomSpeedFactorFromCurve(displayZoom, curve) {
     const p0y = (curve.p0 && Number.isFinite(curve.p0.y)) ? curve.p0.y : 1;
     const p3y = (curve.p3 && Number.isFinite(curve.p3.y)) ? curve.p3.y : 1;
     const y = __cubicBezierCoord(t, p0y, curve.p1.y, curve.p2.y, p3y);
-    return __scaleZoomCurveFactor(y);
+    return Math.max(0.005, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, __scaleZoomCurveFactor(y)));
 }
 
 function getCanvasZoomSpeedFactor(displayZoom) {
@@ -28760,7 +28775,11 @@ function __renderOtherZoomMagnetCurve(modal) {
     const maxPercent = 100;
     const range = Math.max(1, maxPercent - minPercent);
     const percentToX = (p) => paddingLeft + ((p - minPercent) / range) * plotW;
-    const factorToY = (factor) => paddingTop + (1 - factor) * plotH;
+    let maxFactor = ZOOM_CURVE_MAX_FACTOR;
+    const factorToY = (factor) => {
+        const f = Math.max(0, Math.min(maxFactor, factor));
+        return paddingTop + (1 - (f / maxFactor)) * plotH;
+    };
 
     const magnetPoints = useDefaultCurve
         ? __getDefaultMagnetPointsFromPerf((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints())
@@ -28825,16 +28844,27 @@ function __renderOtherZoomMagnetCurve(modal) {
     const p2 = curve && curve.p2 ? curve.p2 : { x: 0.67, y: 1 };
     const p3 = curve && curve.p3 ? curve.p3 : { x: 1, y: 1 };
     const normToX = (nx) => paddingLeft + Math.max(0, Math.min(1, nx)) * plotW;
-    const normToY = (ny) => paddingTop + (1 - Math.max(0, Math.min(1, ny))) * plotH;
+    const curveMax = Math.max(
+        __scaleZoomCurveFactor(p0.y),
+        __scaleZoomCurveFactor(p1.y),
+        __scaleZoomCurveFactor(p2.y),
+        __scaleZoomCurveFactor(p3.y)
+    );
+    const magnetMax = Math.max(
+        Number.isFinite(magnetPoints.m1 && magnetPoints.m1.y) ? magnetPoints.m1.y : 0,
+        Number.isFinite(magnetPoints.m2 && magnetPoints.m2.y) ? magnetPoints.m2.y : 0
+    );
+    maxFactor = Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, Math.max(ZOOM_CURVE_MAX_FACTOR, curveMax, magnetMax));
+    if (modal) modal._curveMaxFactor = maxFactor;
 
     const startX = normToX(0);
-    const startY = normToY(__scaleZoomCurveFactor(p0.y));
+    const startY = factorToY(__scaleZoomCurveFactor(p0.y));
     const p1x = normToX(p1.x);
-    const p1y = normToY(p1.y);
+    const p1y = factorToY(__scaleZoomCurveFactor(p1.y));
     const p2x = normToX(p2.x);
-    const p2y = normToY(p2.y);
+    const p2y = factorToY(__scaleZoomCurveFactor(p2.y));
     const endX = normToX(1);
-    const endY = normToY(__scaleZoomCurveFactor(p3.y));
+    const endY = factorToY(__scaleZoomCurveFactor(p3.y));
 
     const safeCenter = safePercent / 100;
     const midCenter = midPercent / 100;
@@ -28846,14 +28876,23 @@ function __renderOtherZoomMagnetCurve(modal) {
     const getMagnetFactor = (percent) => {
         const dz = percent / 100;
         let factor = 1;
+        const baseAt = Math.max(0.005, getCustomFactor(percent));
         if (safeEnabled && Number.isFinite(safeCenter) && safeCenter > 0) {
             const minD = Math.abs(dz - safeCenter);
             if (minD < 0.08) {
                 const t = Math.max(0, Math.min(1, minD / 0.08));
                 const smooth = t * t * (3 - 2 * t);
                 const localStrength = 1 - smooth;
-                const localFactor = 1 - localStrength * (1 - magnetPoints.m1.y);
-                if (localFactor < factor) factor = localFactor;
+                const desired = (Number.isFinite(magnetPoints.m1.y) ? magnetPoints.m1.y : 1) / baseAt;
+                const localFactor = 1 + localStrength * (desired - 1);
+                const minLocal = 0.005 / baseAt;
+                const maxLocal = maxFactor / baseAt;
+                const clampedLocal = Math.max(minLocal, Math.min(maxLocal, localFactor));
+                if (desired >= 1) {
+                    if (clampedLocal > factor) factor = clampedLocal;
+                } else {
+                    if (clampedLocal < factor) factor = clampedLocal;
+                }
             }
         }
         if (midEnabled && Number.isFinite(midCenter) && midCenter > 0) {
@@ -28862,11 +28901,19 @@ function __renderOtherZoomMagnetCurve(modal) {
                 const t = Math.max(0, Math.min(1, minD / midHalfWidth));
                 const smooth = t * t * (3 - 2 * t);
                 const localStrength = 1 - smooth;
-                const localFactor = 1 - localStrength * (1 - magnetPoints.m2.y);
-                if (localFactor < factor) factor = localFactor;
+                const desired = (Number.isFinite(magnetPoints.m2.y) ? magnetPoints.m2.y : 1) / baseAt;
+                const localFactor = 1 + localStrength * (desired - 1);
+                const minLocal = 0.005 / baseAt;
+                const maxLocal = maxFactor / baseAt;
+                const clampedLocal = Math.max(minLocal, Math.min(maxLocal, localFactor));
+                if (desired >= 1) {
+                    if (clampedLocal > factor) factor = clampedLocal;
+                } else {
+                    if (clampedLocal < factor) factor = clampedLocal;
+                }
             }
         }
-        return Math.max(0.02, Math.min(1, factor));
+        return Math.max(0.005 / baseAt, Math.min(maxFactor / baseAt, factor));
     };
     const getCustomFactor = (percent) => {
         if (useDefaultCurve) return 1;
@@ -28874,7 +28921,7 @@ function __renderOtherZoomMagnetCurve(modal) {
     };
     const getCombinedFactor = (percent) => {
         const v = getMagnetFactor(percent) * getCustomFactor(percent);
-        return Math.max(0.02, Math.min(1, v));
+        return Math.max(0.005, Math.min(maxFactor, v));
     };
 
     const drawFactorCurve = (getFactor, color, dash = []) => {
@@ -28956,7 +29003,7 @@ function __renderOtherZoomMagnetCurve(modal) {
         if (!Number.isFinite(percent) || !Number.isFinite(y)) return;
         if (percent < minPercent || percent > maxPercent) return;
         const x = percentToX(percent);
-        const py = factorToY(__clamp01(y));
+        const py = factorToY(y);
         ctx.save();
         ctx.globalAlpha = enabled ? 1 : 0.35;
         ctx.fillStyle = color;
@@ -28968,8 +29015,8 @@ function __renderOtherZoomMagnetCurve(modal) {
         ctx.fillText(label, x + 6, py - 6);
         ctx.restore();
     };
-    drawMagnetPoint(safePercent, magnetPoints.m1.y, '#10b981', isEn ? 'M1' : '磁1', safeEnabled);
-    drawMagnetPoint(midPercent, magnetPoints.m2.y, '#a855f7', isEn ? 'M2' : '磁2', midEnabled);
+    drawMagnetPoint(safePercent, getCombinedFactor(safePercent), '#10b981', isEn ? 'M1' : '磁1', safeEnabled);
+    drawMagnetPoint(midPercent, getCombinedFactor(midPercent), '#a855f7', isEn ? 'M2' : '磁2', midEnabled);
 
     // Axis labels
     ctx.fillStyle = textColor;
@@ -29037,18 +29084,88 @@ function __bindOtherCurveInteractions(modal) {
         const layout = __getOtherCurveLayout(modal, canvas);
         const curve = getCurve();
         const magnets = getMagnets();
+        const maxFactor = (modal && Number.isFinite(modal._curveMaxFactor)) ? modal._curveMaxFactor : ZOOM_CURVE_MAX_FACTOR;
+        const toY = (factor) => layout.paddingTop + (1 - (Math.max(0, Math.min(maxFactor, factor)) / maxFactor)) * layout.plotH;
         const p0x = layout.paddingLeft + (curve.p0 ? curve.p0.x : 0) * layout.plotW;
-        const p0y = layout.paddingTop + (1 - __scaleZoomCurveFactor(curve.p0 ? curve.p0.y : 1)) * layout.plotH;
+        const p0y = toY(__scaleZoomCurveFactor(curve.p0 ? curve.p0.y : 1));
         const p1x = layout.paddingLeft + curve.p1.x * layout.plotW;
-        const p1y = layout.paddingTop + (1 - curve.p1.y) * layout.plotH;
+        const p1y = toY(__scaleZoomCurveFactor(curve.p1.y));
         const p2x = layout.paddingLeft + curve.p2.x * layout.plotW;
-        const p2y = layout.paddingTop + (1 - curve.p2.y) * layout.plotH;
+        const p2y = toY(__scaleZoomCurveFactor(curve.p2.y));
         const p3x = layout.paddingLeft + (curve.p3 ? curve.p3.x : 1) * layout.plotW;
-        const p3y = layout.paddingTop + (1 - __scaleZoomCurveFactor(curve.p3 ? curve.p3.y : 1)) * layout.plotH;
+        const p3y = toY(__scaleZoomCurveFactor(curve.p3 ? curve.p3.y : 1));
+        const settings = getCanvasZoomMagnetSettings();
+        const magnetEnabled = !!(settings && settings.enabled);
+        const safeEnabled = magnetEnabled && !!settings.enableSafeZone && isCanvasSafeZoneEnabled();
+        const midEnabled = magnetEnabled && !!settings.enableLowDetailMid;
+        const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
+        const maxPercent = 100;
+        const range = Math.max(1, maxPercent - minPercent);
+        const baseFactorAt = (nx) => {
+            if (modal && modal._useDefaultZoomCurve) return 1;
+            const percent = minPercent + (__clamp01(nx) * range);
+            return __getZoomSpeedFactorFromCurve(percent / 100, curve);
+        };
+        const getMagnetFactorAt = (percent) => {
+            const dz = percent / 100;
+            let factor = 1;
+            const baseAt = Math.max(0.005, baseFactorAt((percent - minPercent) / range));
+            if (safeEnabled && Number.isFinite(magnets.m1.y)) {
+                const safePercent = minPercent + (__clamp01(magnets.m1.x) * range);
+                const safeCenter = safePercent / 100;
+                const minD = Math.abs(dz - safeCenter);
+                if (minD < 0.08) {
+                    const t = Math.max(0, Math.min(1, minD / 0.08));
+                    const smooth = t * t * (3 - 2 * t);
+                    const localStrength = 1 - smooth;
+                    const desired = (Number.isFinite(magnets.m1.y) ? magnets.m1.y : 1) / baseAt;
+                    const localFactor = 1 + localStrength * (desired - 1);
+                    const minLocal = 0.005 / baseAt;
+                    const maxLocal = maxFactor / baseAt;
+                    const clampedLocal = Math.max(minLocal, Math.min(maxLocal, localFactor));
+                    if (desired >= 1) {
+                        if (clampedLocal > factor) factor = clampedLocal;
+                    } else {
+                        if (clampedLocal < factor) factor = clampedLocal;
+                    }
+                }
+            }
+            if (midEnabled && Number.isFinite(magnets.m2.y)) {
+                const midPercent = minPercent + (__clamp01(magnets.m2.x) * range);
+                const midCenter = midPercent / 100;
+                const enter = getCanvasLowDetailDisplayZoomThreshold();
+                const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
+                const band = (Number.isFinite(enter) && Number.isFinite(exit)) ? Math.max(0.01, Math.abs(enter - exit)) : 0.05;
+                const midHalfWidth = Math.min(0.12, Math.max(0.06, band * 2.5));
+                const minD = Math.abs(dz - midCenter);
+                if (minD < midHalfWidth) {
+                    const t = Math.max(0, Math.min(1, minD / midHalfWidth));
+                    const smooth = t * t * (3 - 2 * t);
+                    const localStrength = 1 - smooth;
+                    const desired = (Number.isFinite(magnets.m2.y) ? magnets.m2.y : 1) / baseAt;
+                    const localFactor = 1 + localStrength * (desired - 1);
+                    const minLocal = 0.005 / baseAt;
+                    const maxLocal = maxFactor / baseAt;
+                    const clampedLocal = Math.max(minLocal, Math.min(maxLocal, localFactor));
+                    if (desired >= 1) {
+                        if (clampedLocal > factor) factor = clampedLocal;
+                    } else {
+                        if (clampedLocal < factor) factor = clampedLocal;
+                    }
+                }
+            }
+            return Math.max(0.005 / baseAt, Math.min(maxFactor / baseAt, factor));
+        };
+        const combinedFactorAt = (nx) => {
+            const base = baseFactorAt(nx);
+            const percent = minPercent + (__clamp01(nx) * range);
+            const magnetFactor = (modal && modal._useDefaultZoomCurve) ? 1 : getMagnetFactorAt(percent);
+            return Math.max(0.005, Math.min(maxFactor, base * magnetFactor));
+        };
         const m1x = layout.paddingLeft + magnets.m1.x * layout.plotW;
-        const m1y = layout.paddingTop + (1 - magnets.m1.y) * layout.plotH;
+        const m1y = layout.paddingTop + (1 - (combinedFactorAt(magnets.m1.x) / maxFactor)) * layout.plotH;
         const m2x = layout.paddingLeft + magnets.m2.x * layout.plotW;
-        const m2y = layout.paddingTop + (1 - magnets.m2.y) * layout.plotH;
+        const m2y = layout.paddingTop + (1 - (combinedFactorAt(magnets.m2.x) / maxFactor)) * layout.plotH;
         return {
             layout,
             p0: { x: p0x, y: p0y },
@@ -29092,27 +29209,33 @@ function __bindOtherCurveInteractions(modal) {
         const localY = clientY - rect.top;
         const { layout, curve, magnets } = getPointPositions();
         const nx = __clamp01((localX - layout.paddingLeft) / layout.plotW);
-        const ny = __clamp01(1 - (localY - layout.paddingTop) / layout.plotH);
-        const maxScaled = __scaleZoomCurveFactor(1);
-        const minScaled = __scaleZoomCurveFactor(0);
+        const axisMax = (modal && Number.isFinite(modal._curveMaxFactor)) ? modal._curveMaxFactor : ZOOM_CURVE_MAX_FACTOR;
+        const nyRaw = 1 - (localY - layout.paddingTop) / layout.plotH;
+        const maxRatio = ZOOM_CURVE_ABS_MAX_FACTOR / axisMax;
+        const ny = Math.max(0, Math.min(maxRatio, nyRaw));
+        const clampMagnetFactor = (v) => Math.max(0.005, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, v));
         if (dragState.point === 'p0') {
-            const display = Math.max(minScaled, Math.min(maxScaled, ny));
+            const display = ny * axisMax;
             curve.p0.y = __unscaleZoomCurveFactor(display);
         } else if (dragState.point === 'p1') {
             curve.p1.x = Math.min(nx, curve.p2.x - minGap);
-            curve.p1.y = ny;
+            const display = ny * axisMax;
+            curve.p1.y = __unscaleZoomCurveFactor(display);
         } else if (dragState.point === 'p2') {
             curve.p2.x = Math.max(nx, curve.p1.x + minGap);
-            curve.p2.y = ny;
+            const display = ny * axisMax;
+            curve.p2.y = __unscaleZoomCurveFactor(display);
         } else if (dragState.point === 'p3') {
-            const display = Math.max(minScaled, Math.min(maxScaled, ny));
+            const display = ny * axisMax;
             curve.p3.y = __unscaleZoomCurveFactor(display);
         } else if (dragState.point === 'm1') {
             magnets.m1.x = Math.max(nx, magnets.m2.x + magnetGap);
-            magnets.m1.y = Math.max(0.02, Math.min(1, ny));
+            const display = ny * axisMax;
+            magnets.m1.y = clampMagnetFactor(display);
         } else if (dragState.point === 'm2') {
             magnets.m2.x = Math.min(nx, magnets.m1.x - magnetGap);
-            magnets.m2.y = Math.max(0.02, Math.min(1, ny));
+            const display = ny * axisMax;
+            magnets.m2.y = clampMagnetFactor(display);
         }
         setCurve(curve);
         setMagnets(magnets);
@@ -29671,6 +29794,14 @@ function saveCanvasPerfSettings() {
     // 立即刷新状态
     updateDataIntensiveMode(true);
     __clearPerfLinkedFromOther();
+    try {
+        const otherModal = document.getElementById('canvasOtherSettingsModal');
+        if (otherModal && otherModal.style.display !== 'none') {
+            requestAnimationFrame(() => {
+                try { __renderOtherZoomMagnetCurve(otherModal); } catch (_) { }
+            });
+        }
+    } catch (_) { }
     closeCanvasPerfSettingsModal();
 
     // Show toast? simple alert for now or custom toast if available
