@@ -10320,12 +10320,17 @@ async function createTempNode(data, x, y) {
     const splitTitle = __resolveTempSplitTitle(data, splitPayload);
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
     const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
-    let resolvedTitle = explicitTitle;
+    const isDragBased = !!(data && (data.source === 'permanent' || data.source === 'temporary' || data.multi));
+    let resolvedTitle = (!isDragBased && explicitTitle) ? explicitTitle : '';
     if (!resolvedTitle) {
-        if (tempNameMode === 'split' && splitTitle) {
-            resolvedTitle = splitTitle;
-        } else if (inheritedTitle) {
-            resolvedTitle = inheritedTitle;
+        if (tempNameMode === 'split') {
+            resolvedTitle = splitTitle || '';
+            if (!resolvedTitle && inheritedTitle) {
+                resolvedTitle = inheritedTitle;
+            }
+            if (!resolvedTitle) {
+                resolvedTitle = getDefaultTempSectionTitle({ splitTitle });
+            }
         } else {
             resolvedTitle = getDefaultTempSectionTitle({ splitTitle });
         }
