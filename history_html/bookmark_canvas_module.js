@@ -934,7 +934,7 @@ const CANVAS_OTHER_SETTINGS_KEY = 'canvas-other-settings-v1';
 const DEFAULT_CANVAS_OTHER_SETTINGS = {
     autoLinkSplit: false, // 临时栏目分裂后自动连接
     tempColorFollow: true, // 临时栏目颜色跟随
-    useDefaultZoomCurve: true, // 使用默认缩放曲线（跟随性能磁矩）
+    useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
     zoomCurve: {
         p1: { x: 0.25, y: 1 },
         p2: { x: 0.67, y: 1 }
@@ -943,6 +943,12 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
         m1: { x: 0.67, y: 0.05 },
         m2: { x: 0.25, y: 0.04 }
     }
+};
+
+const DEFAULT_PERF_BASELINE = {
+    safeZone: 70,
+    exitLowDetail: 30,
+    enterLowDetail: 35
 };
 
 function __cloneDefaultAppearanceSettings() {
@@ -989,18 +995,18 @@ function __normalizeZoomCurve(input) {
     return out;
 }
 
-function __getDefaultMagnetPointsFromPerf() {
-    const fallback = __cloneDefaultOtherSettings().magnetPoints;
+function __getDefaultMagnetPointsFromPerf(baseMagnets) {
+    const fallback = baseMagnets ? __normalizeMagnetPoints(baseMagnets) : __cloneDefaultOtherSettings().magnetPoints;
     const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
     const maxPercent = 100;
     const range = Math.max(1, maxPercent - minPercent);
     const toNorm = (percent) => __clamp01((percent - minPercent) / range);
-    const safePercent = getCanvasSafeZoneThreshold() * 100;
-    const enter = getCanvasLowDetailDisplayZoomThreshold() * 100;
-    const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100;
-    const midPercent = Number.isFinite(enter) && Number.isFinite(exit) ? (enter + exit) / 2 : (minPercent + range * 0.25);
-    const m1x = toNorm(Number.isFinite(safePercent) ? safePercent : 70);
-    const m2x = toNorm(Number.isFinite(midPercent) ? midPercent : 32.5);
+    const safePercent = DEFAULT_PERF_BASELINE.safeZone;
+    const enter = DEFAULT_PERF_BASELINE.enterLowDetail;
+    const exit = DEFAULT_PERF_BASELINE.exitLowDetail;
+    const midPercent = (enter + exit) / 2;
+    const m1x = toNorm(safePercent);
+    const m2x = toNorm(midPercent);
     return {
         m1: { x: m1x, y: fallback.m1.y },
         m2: { x: m2x, y: fallback.m2.y }
@@ -1131,7 +1137,46 @@ function shouldUseDefaultZoomCurve() {
     return !(settings && settings.useDefaultZoomCurve === false);
 }
 
+const CANVAS_PERF_MANUAL_BASE_KEY = 'canvas-perf-manual-base-v1';
 const CANVAS_PERF_LINKED_FROM_OTHER_KEY = 'canvas-perf-linked-from-other-v1';
+
+function __readPerfManualBaseline() {
+    try {
+        const raw = localStorage.getItem(CANVAS_PERF_MANUAL_BASE_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') return parsed;
+        }
+    } catch (_) { }
+    return null;
+}
+
+function __writePerfManualBaseline(payload) {
+    try {
+        localStorage.setItem(CANVAS_PERF_MANUAL_BASE_KEY, JSON.stringify(payload || {}));
+    } catch (_) { }
+}
+
+function __getPerfManualBaseline() {
+    const saved = __readPerfManualBaseline();
+    if (saved && Number.isFinite(saved.safeZone) && Number.isFinite(saved.exitLowDetail) && Number.isFinite(saved.enterLowDetail)) {
+        return saved;
+    }
+    return {
+        safeZone: getCanvasSafeZoneThreshold() * 100,
+        exitLowDetail: getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100,
+        enterLowDetail: getCanvasLowDetailDisplayZoomThreshold() * 100
+    };
+}
+
+function __ensurePerfManualBaseline() {
+    if (__readPerfManualBaseline()) return;
+    __writePerfManualBaseline({
+        safeZone: getCanvasSafeZoneThreshold() * 100,
+        exitLowDetail: getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100,
+        enterLowDetail: getCanvasLowDetailDisplayZoomThreshold() * 100
+    });
+}
 
 function __readPerfLinkedFromOther() {
     try {
@@ -1160,6 +1205,86 @@ function __formatPercentInputValue(value) {
     return (v % 1 === 0) ? v.toFixed(0) : v.toFixed(1);
 }
 
+function __applyPerfManualBaselineToPerf() {
+    const baseline = __getPerfManualBaseline();
+    if (!baseline) return;
+    const safeZoneSettings = (() => {
+        try {
+            const raw = localStorage.getItem('canvasSafeZoneSettings');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object') return parsed;
+            }
+        } catch (_) { }
+        return { threshold: 0.70, enabled: true };
+    })();
+    safeZoneSettings.threshold = baseline.safeZone / 100;
+    try { localStorage.setItem('canvasSafeZoneSettings', JSON.stringify(safeZoneSettings)); } catch (_) { }
+
+    const zoomThresholds = {
+        enterLowDetail: baseline.enterLowDetail / 100,
+        exitLowDetail: baseline.exitLowDetail / 100
+    };
+    try { localStorage.setItem('canvasZoomThresholds', JSON.stringify(zoomThresholds)); } catch (_) { }
+
+    const safeInput = document.getElementById('perfInputSafeZone');
+    if (safeInput) safeInput.value = __formatPercentInputValue(baseline.safeZone);
+    const exitInput = document.getElementById('perfInputExitLowDetail');
+    if (exitInput) exitInput.value = __formatPercentInputValue(baseline.exitLowDetail);
+    const enterInput = document.getElementById('perfInputEnterLowDetail');
+    if (enterInput) enterInput.value = __formatPercentInputValue(baseline.enterLowDetail);
+
+    const safeValueEl = document.getElementById('perfMagnetSafeValue');
+    if (safeValueEl) safeValueEl.textContent = `${__formatPercentInputValue(baseline.safeZone)}%`;
+    const midValueEl = document.getElementById('perfMagnetMidValue');
+    if (midValueEl) {
+        const mid = (baseline.exitLowDetail + baseline.enterLowDetail) / 2;
+        midValueEl.textContent = `${__formatPercentInputValue(mid)}%`;
+    }
+
+    __clearPerfLinkedFromOther();
+    __applyPerfLinkedStyles();
+}
+
+function __applyPerfDefaultBaselineToPerf() {
+    const safeZoneSettings = (() => {
+        try {
+            const raw = localStorage.getItem('canvasSafeZoneSettings');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object') return parsed;
+            }
+        } catch (_) { }
+        return { threshold: 0.70, enabled: true };
+    })();
+    safeZoneSettings.threshold = DEFAULT_PERF_BASELINE.safeZone / 100;
+    try { localStorage.setItem('canvasSafeZoneSettings', JSON.stringify(safeZoneSettings)); } catch (_) { }
+
+    const zoomThresholds = {
+        enterLowDetail: DEFAULT_PERF_BASELINE.enterLowDetail / 100,
+        exitLowDetail: DEFAULT_PERF_BASELINE.exitLowDetail / 100
+    };
+    try { localStorage.setItem('canvasZoomThresholds', JSON.stringify(zoomThresholds)); } catch (_) { }
+
+    const safeInput = document.getElementById('perfInputSafeZone');
+    if (safeInput) safeInput.value = __formatPercentInputValue(DEFAULT_PERF_BASELINE.safeZone);
+    const exitInput = document.getElementById('perfInputExitLowDetail');
+    if (exitInput) exitInput.value = __formatPercentInputValue(DEFAULT_PERF_BASELINE.exitLowDetail);
+    const enterInput = document.getElementById('perfInputEnterLowDetail');
+    if (enterInput) enterInput.value = __formatPercentInputValue(DEFAULT_PERF_BASELINE.enterLowDetail);
+
+    const safeValueEl = document.getElementById('perfMagnetSafeValue');
+    if (safeValueEl) safeValueEl.textContent = `${__formatPercentInputValue(DEFAULT_PERF_BASELINE.safeZone)}%`;
+    const midValueEl = document.getElementById('perfMagnetMidValue');
+    if (midValueEl) {
+        const mid = (DEFAULT_PERF_BASELINE.exitLowDetail + DEFAULT_PERF_BASELINE.enterLowDetail) / 2;
+        midValueEl.textContent = `${__formatPercentInputValue(mid)}%`;
+    }
+
+    __clearPerfLinkedFromOther();
+    __applyPerfLinkedStyles();
+}
+
 function __applyPerfLinkedStyles() {
     const flags = __readPerfLinkedFromOther();
     const safeInput = document.getElementById('perfInputSafeZone');
@@ -1168,17 +1293,12 @@ function __applyPerfLinkedStyles() {
     const magnetSafeValue = document.getElementById('perfMagnetSafeValue');
     const magnetMidValue = document.getElementById('perfMagnetMidValue');
     const magnetNote = document.getElementById('perfMagnetLinkedNote');
+    const magnetTitle = document.getElementById('perfMagnetTitleText');
 
-    const apply = (input, target) => {
+    const apply = (input) => {
         if (!input) return;
         const unit = input.parentElement ? input.parentElement.querySelector('span') : null;
-        if (!flags || !Number.isFinite(target)) {
-            input.classList.remove('perf-linked-input');
-            if (unit) unit.classList.remove('perf-linked-text');
-            return;
-        }
-        const cur = parseFloat(input.value);
-        if (Number.isFinite(cur) && Math.abs(cur - target) < 0.11) {
+        if (flags) {
             input.classList.add('perf-linked-input');
             if (unit) unit.classList.add('perf-linked-text');
         } else {
@@ -1187,9 +1307,9 @@ function __applyPerfLinkedStyles() {
         }
     };
 
-    apply(safeInput, flags.safeZone);
-    apply(exitInput, flags.exitLowDetail);
-    apply(enterInput, flags.enterLowDetail);
+    apply(safeInput);
+    apply(exitInput);
+    apply(enterInput);
 
     const toggleLinkedText = (el) => {
         if (!el) return;
@@ -1198,6 +1318,7 @@ function __applyPerfLinkedStyles() {
     };
     toggleLinkedText(magnetSafeValue);
     toggleLinkedText(magnetMidValue);
+    toggleLinkedText(magnetTitle);
 
     if (magnetNote) {
         magnetNote.style.display = flags ? 'flex' : 'none';
@@ -1205,6 +1326,7 @@ function __applyPerfLinkedStyles() {
 }
 
 function __syncPerfSettingsFromOtherMagnetPoints(magnetPoints) {
+    __ensurePerfManualBaseline();
     const points = __normalizeMagnetPoints(magnetPoints);
     const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
     const maxPercent = 100;
@@ -1213,9 +1335,8 @@ function __syncPerfSettingsFromOtherMagnetPoints(magnetPoints) {
     const midPercent = minPercent + (__clamp01(points.m2.x) * range);
 
     let gap = 5;
-    const curEnter = getCanvasLowDetailDisplayZoomThreshold() * 100;
-    const curExit = getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100;
-    const curGap = curEnter - curExit;
+    const baseline = __getPerfManualBaseline();
+    const curGap = baseline.enterLowDetail - baseline.exitLowDetail;
     if (Number.isFinite(curGap) && curGap > 0) gap = curGap;
     if (!Number.isFinite(gap) || gap <= 0) gap = 5;
 
@@ -5398,7 +5519,7 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
     const settings = getCanvasZoomMagnetSettings();
     const useDefaultCurve = shouldUseDefaultZoomCurve();
     const magnetPoints = useDefaultCurve
-        ? __getDefaultMagnetPointsFromPerf()
+        ? __getDefaultMagnetPointsFromPerf(getCanvasZoomMagnetPoints())
         : __normalizeMagnetPoints(getCanvasZoomMagnetPoints());
     const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
     const maxPercent = 100;
@@ -28495,7 +28616,20 @@ function openCanvasOtherSettingsModal() {
     const baseCurve = __normalizeZoomCurve(settings.zoomCurve);
     const baseMagnets = __normalizeMagnetPoints(settings.magnetPoints);
     modal._zoomCurve = useDefaultCurve ? __cloneDefaultOtherSettings().zoomCurve : baseCurve;
-    modal._magnetPoints = useDefaultCurve ? __getDefaultMagnetPointsFromPerf() : baseMagnets;
+    modal._magnetPoints = useDefaultCurve ? __getDefaultMagnetPointsFromPerf(baseMagnets) : baseMagnets;
+    if (useDefaultCurve && __readPerfLinkedFromOther()) {
+        __applyPerfDefaultBaselineToPerf();
+    }
+
+    const focus = CanvasState.otherSettingsFocus;
+    const zoomTitle = modal.querySelector('#otherZoomMagnetTitle');
+    if (zoomTitle) {
+        zoomTitle.classList.toggle('other-focus-highlight', focus === 'zoomMagnet');
+        if (focus === 'zoomMagnet') {
+            try { zoomTitle.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) { }
+        }
+    }
+    if (focus) CanvasState.otherSettingsFocus = null;
 
     modal.style.display = 'flex';
     requestAnimationFrame(() => {
@@ -28516,7 +28650,7 @@ function saveCanvasOtherSettings() {
     const useDefaultCurve = modal.querySelector('#otherUseDefaultZoomCurve');
     const useDefault = useDefaultCurve ? !!useDefaultCurve.checked : true;
     const defaultCurve = __cloneDefaultOtherSettings().zoomCurve;
-    const defaultMagnets = __getDefaultMagnetPointsFromPerf();
+    const defaultMagnets = __getDefaultMagnetPointsFromPerf(modal._magnetPoints || getCanvasZoomMagnetPoints());
     const settingsInput = {
         autoLinkSplit: !!(autoLink && autoLink.checked),
         tempColorFollow: !!(colorFollow && colorFollow.checked),
@@ -28529,6 +28663,9 @@ function saveCanvasOtherSettings() {
     try {
         localStorage.setItem(CANVAS_OTHER_SETTINGS_KEY, JSON.stringify(normalized));
     } catch (_) { }
+    if (useDefault) {
+        __applyPerfDefaultBaselineToPerf();
+    }
     closeCanvasOtherSettingsModal();
 }
 
@@ -28591,7 +28728,7 @@ function __renderOtherZoomMagnetCurve(modal) {
     const factorToY = (factor) => paddingTop + (1 - factor) * plotH;
 
     const magnetPoints = useDefaultCurve
-        ? __getDefaultMagnetPointsFromPerf()
+        ? __getDefaultMagnetPointsFromPerf((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints())
         : __normalizeMagnetPoints((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints());
     if (modal) modal._magnetPoints = magnetPoints;
 
@@ -28632,8 +28769,8 @@ function __renderOtherZoomMagnetCurve(modal) {
     if (noteEl) {
         noteEl.textContent = useDefaultCurve
             ? (isEn
-                ? 'Default curve follows performance magnets. Drag any point to switch to custom.'
-                : '默认曲线跟随性能磁矩设置。拖动任意点会自动关闭默认。')
+                ? 'Default curve resets to standard values. Drag any point to switch to custom.'
+                : '默认曲线会还原到标准数值，拖动任意点会自动切换为自定义。')
             : (isEn
                 ? 'Drag Magnet 1/2 and Rate 1/2. X: zoom %, Y: speed (higher = faster). Smoother = slower.'
                 : '拖动磁矩点1/2与速率点1/2。X 轴为缩放比例，Y 轴为速率强度（越高越快、越平滑越慢）。');
@@ -28993,15 +29130,25 @@ function createCanvasOtherSettingsModal() {
                     </div>
                 </div>
                 <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? 'Zoom Speed & Magnet' : '缩放速率与磁矩'}</div>
+                    <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? 'Zoom Speed & Magnet' : '缩放速率与磁矩'}</div>
                     <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Use default curve' : '使用默认曲线'}</div>
+                        <div class="appearance-row-label">${isEn ? 'Use default' : '使用默认'}</div>
                         <div class="appearance-row-content">
                             <label class="other-toggle-switch">
                                 <input type="checkbox" id="otherUseDefaultZoomCurve">
                                 <span class="other-toggle-slider"></span>
                             </label>
                         </div>
+                    </div>
+                    <div class="other-default-hint-row">
+                        <div class="other-default-hint">${isEn ? 'Default restore values: Safe Zone 70%, Preload 30%, Low-detail 35%.' : '默认还原数值：安全区 70%、预加载 30%、低细节切换 35%。'}</div>
+                        <button class="perf-source-btn other-default-jump-btn" id="otherDefaultJumpPerfBtn" title="${isEn ? 'Go to Performance' : '跳转到性能'}" aria-label="${isEn ? 'Go to Performance' : '跳转到性能'}">
+                            <svg class="jump-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M14 3h7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                <path d="M10 14L21 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                <path d="M21 14v7H3V3h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
+                        </button>
                     </div>
                     <div class="other-curve-card">
                         <canvas id="otherZoomMagnetCurve" class="other-curve-canvas"></canvas>
@@ -29017,7 +29164,7 @@ function createCanvasOtherSettingsModal() {
                                 <span id="otherMagnetMidValue">--</span>
                             </div>
                         </div>
-                        <div class="other-curve-note">${isEn ? 'Default curve follows performance magnet settings.' : '默认曲线跟随性能磁矩设置。'}</div>
+                        <div class="other-curve-note">${isEn ? 'Default curve resets to standard values. Drag any point to switch to custom.' : '默认曲线会还原到标准数值，拖动任意点会自动切换为自定义。'}</div>
                     </div>
                 </div>
             </div>
@@ -29040,15 +29187,25 @@ function createCanvasOtherSettingsModal() {
     const saveBtn = modal.querySelector('#otherSaveBtn');
     if (saveBtn) saveBtn.addEventListener('click', saveCanvasOtherSettings);
     const defaultToggle = modal.querySelector('#otherUseDefaultZoomCurve');
+    const jumpPerfBtn = modal.querySelector('#otherDefaultJumpPerfBtn');
     if (defaultToggle) {
         defaultToggle.addEventListener('change', () => {
             const nextUseDefault = !!defaultToggle.checked;
             if (nextUseDefault) {
                 modal._zoomCurve = __cloneDefaultOtherSettings().zoomCurve;
-                modal._magnetPoints = __getDefaultMagnetPointsFromPerf();
+                modal._magnetPoints = __getDefaultMagnetPointsFromPerf(modal._magnetPoints || getCanvasZoomMagnetPoints());
+                __applyPerfDefaultBaselineToPerf();
             }
             modal._useDefaultZoomCurve = nextUseDefault;
             try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+        });
+    }
+    if (jumpPerfBtn) {
+        jumpPerfBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            CanvasState.perfSettingsFocus = 'magnet';
+            closeCanvasOtherSettingsModal();
+            openCanvasPerfSettingsModal();
         });
     }
     __bindOtherCurveInteractions(modal);
@@ -29182,6 +29339,17 @@ function openCanvasPerfSettingsModal() {
     if (enterInput) enterInput.addEventListener('input', clearLinked);
 
     modal.style.display = 'flex';
+
+    const perfFocus = CanvasState.perfSettingsFocus;
+    if (perfFocus === 'magnet') {
+        const target = modal.querySelector('#perfMagnetSection');
+        if (target) {
+            requestAnimationFrame(() => {
+                try { target.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (_) { }
+            });
+        }
+    }
+    if (perfFocus) CanvasState.perfSettingsFocus = null;
 
     // Refresh totals (permanent tree needs async fetch)
     try { __refreshCanvasPermanentBaseStatsForPerfTotals(); } catch (_) { }
@@ -29366,6 +29534,11 @@ function saveCanvasPerfSettings() {
         enabled: toggleSafeZone ? toggleSafeZone.checked : true
     };
     localStorage.setItem('canvasSafeZoneSettings', JSON.stringify(safeZoneSettings));
+    __writePerfManualBaseline({
+        safeZone: safeZoneSettings.threshold * 100,
+        exitLowDetail: zoomThresholds.exitLowDetail * 100,
+        enterLowDetail: zoomThresholds.enterLowDetail * 100
+    });
 
     // 保存缩放下限设置
     const minZoomInput = document.getElementById('perfInputMinZoom');
@@ -29516,7 +29689,7 @@ function createCanvasPerfSettingsModal() {
                 </div>
                 
                 <!-- [Priority 1] 安全区设置 -->
-                <div class="perf-settings-section">
+                <div class="perf-settings-section" id="perfMagnetSection">
                     <div class="perf-settings-section-title">
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <span style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">P1</span>
@@ -29662,7 +29835,7 @@ function createCanvasPerfSettingsModal() {
                     <div class="perf-settings-section-title">
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <span style="background: linear-gradient(135deg, #a855f7, #7c3aed); color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">P5</span>
-                            <span>${isEn ? 'Zoom Magnet' : '缩放磁矩'}</span>
+                            <span id="perfMagnetTitleText">${isEn ? 'Zoom Magnet' : '缩放磁矩'}</span>
                             <button class="perf-help-btn" id="perfMagnetHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
@@ -29704,6 +29877,16 @@ function createCanvasPerfSettingsModal() {
                                 <span class="slider round"></span>
                             </label>
                         </div>
+                    </div>
+                    <div class="perf-jump-row">
+                        <span>${isEn ? 'Go to Other → Zoom Speed & Magnet' : '跳转到其他 → 缩放速率与磁矩'}</span>
+                        <button class="perf-source-btn perf-jump-btn" id="perfMagnetJumpOtherBtn" title="${isEn ? 'Go to Other settings' : '跳转到其他设置'}" aria-label="${isEn ? 'Go to Other settings' : '跳转到其他设置'}">
+                            <svg class="jump-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M14 3h7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                <path d="M10 14L21 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                <path d="M21 14v7H3V3h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
+                        </button>
                     </div>
                     <div class="perf-linked-note" id="perfMagnetLinkedNote" style="display: none;">
                         <span>${isEn ? 'Source: Other → Zoom Speed & Magnet' : '来源：其他 → 缩放速率与磁矩'}</span>
@@ -29805,8 +29988,10 @@ function createCanvasPerfSettingsModal() {
     const sourceSafeBtn = modal.querySelector('#perfSourceSafeZoneBtn');
     const sourceLowBtn = modal.querySelector('#perfSourceLowDetailBtn');
     const sourceMagnetBtn = modal.querySelector('#perfSourceMagnetBtn');
+    const jumpOtherBtn = modal.querySelector('#perfMagnetJumpOtherBtn');
 
     const openOtherFromPerf = () => {
+        CanvasState.otherSettingsFocus = 'zoomMagnet';
         closeCanvasPerfSettingsModal();
         openCanvasOtherSettingsModal();
     };
@@ -29898,6 +30083,12 @@ function createCanvasPerfSettingsModal() {
 
     if (sourceMagnetBtn) {
         sourceMagnetBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openOtherFromPerf();
+        });
+    }
+    if (jumpOtherBtn) {
+        jumpOtherBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             openOtherFromPerf();
         });
