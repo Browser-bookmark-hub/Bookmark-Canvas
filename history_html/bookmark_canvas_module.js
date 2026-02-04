@@ -28702,7 +28702,7 @@ function openCanvasOtherSettingsModal() {
     const baseCurve = __normalizeZoomCurve(settings.zoomCurve);
     const baseMagnets = __normalizeMagnetPoints(settings.magnetPoints);
     modal._zoomCurve = useDefaultCurve ? __cloneDefaultOtherSettings().zoomCurve : baseCurve;
-    modal._magnetPoints = useDefaultCurve ? __getDefaultMagnetPointsFromPerf(baseMagnets) : baseMagnets;
+    modal._magnetPoints = useDefaultCurve ? __getDefaultMagnetPointsFromPerf() : baseMagnets;
     if (useDefaultCurve && __readPerfLinkedFromOther()) {
         __applyPerfDefaultBaselineToPerf();
     }
@@ -28736,7 +28736,7 @@ function saveCanvasOtherSettings() {
     const useDefaultCurve = modal.querySelector('#otherUseDefaultZoomCurve');
     const useDefault = useDefaultCurve ? !!useDefaultCurve.checked : true;
     const defaultCurve = __cloneDefaultOtherSettings().zoomCurve;
-    const defaultMagnets = __getDefaultMagnetPointsFromPerf(modal._magnetPoints || getCanvasZoomMagnetPoints());
+    const defaultMagnets = __getDefaultMagnetPointsFromPerf();
     const settingsInput = {
         autoLinkSplit: !!(autoLink && autoLink.checked),
         tempColorFollow: !!(colorFollow && colorFollow.checked),
@@ -29380,7 +29380,7 @@ function createCanvasOtherSettingsModal() {
                         </div>
                     </div>
                     <div class="other-default-hint-row">
-                        <div class="other-default-hint">${isEn ? 'Default restore values: Safe Zone 70%, Preload 30%, Low-detail 35%.' : '默认还原数值：安全区 70%、预加载 30%、低细节切换 35%。'}</div>
+                        <div class="other-default-hint">${isEn ? 'Default restore: M1 (X=70%, Y=5%), M2 (X=32.5%, Y=4%).' : '默认还原：磁1（X=70%，Y=5%），磁2（X=32.5%，Y=4%）。'}</div>
                         <button class="perf-source-btn other-default-jump-btn" id="otherDefaultJumpPerfBtn" title="${isEn ? 'Go to Performance' : '跳转到性能'}" aria-label="${isEn ? 'Go to Performance' : '跳转到性能'}">
                             <svg class="jump-icon" viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M14 3h7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -29442,7 +29442,7 @@ function createCanvasOtherSettingsModal() {
             const nextUseDefault = !!defaultToggle.checked;
             if (nextUseDefault) {
                 modal._zoomCurve = __cloneDefaultOtherSettings().zoomCurve;
-                modal._magnetPoints = __getDefaultMagnetPointsFromPerf(modal._magnetPoints || getCanvasZoomMagnetPoints());
+                modal._magnetPoints = __getDefaultMagnetPointsFromPerf();
                 __applyPerfDefaultBaselineToPerf();
             }
             modal._useDefaultZoomCurve = nextUseDefault;
