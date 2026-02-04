@@ -527,6 +527,39 @@ body {
     position: relative;
 }
 
+button {
+    cursor: pointer;
+}
+
+[role="button"] {
+    cursor: pointer;
+}
+
+button:disabled {
+    cursor: not-allowed;
+}
+
+.tool-btn *,
+.batch-btn *,
+.batch-toolbar .exit-select-btn *,
+.batch-panel-help-btn *,
+.batch-help-popover-close *,
+.context-menu-item *,
+.md-node-toolbar-btn *,
+.md-format-btn *,
+.md-color-chip *,
+.md-color-picker-btn *,
+.md-fontcolor-chip *,
+.md-align-option *,
+.md-heading-option *,
+.md-list-option *,
+.temp-node-action-btn *,
+.click-to-clear-btn *,
+button *,
+[role="button"] * {
+    cursor: inherit !important;
+}
+
 .tool-btn:hover {
     background: var(--bg-tertiary);
     border-color: var(--border-hover);

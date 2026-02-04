@@ -1787,6 +1787,10 @@
     opacity: 0.9;
 }
 
+.perf-btn * {
+    cursor: inherit;
+}
+
 .perf-btn i {
     font-size: 12px;
 }
