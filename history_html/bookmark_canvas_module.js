@@ -28514,7 +28514,7 @@ function createCanvasPerfSettingsModal() {
                 <h3>${isEn ? 'Performance' : '性能'}</h3>
                 <button class="perf-modal-close" id="perfModalCloseBtn"><i class="fas fa-times"></i></button>
             </div>
-            <div class="modal-body" style="padding: 20px; padding-bottom: 70px; overflow-y: auto; flex: 1;">
+            <div class="modal-body" style="padding: 20px; padding-bottom: 78px; overflow-y: auto; flex: 1;">
                 
                 <!-- [Redesigned Viewport Stats] -->
                 <div class="perf-stats-hero" style="display: flex; justify-content: space-around; gap: 10px; margin-bottom: 20px; padding: 0 4px;">
@@ -28718,13 +28718,14 @@ function createCanvasPerfSettingsModal() {
                     </div>
                 </div>
                  
-                <div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 16px 24px; display: flex; justify-content: flex-end; gap: 12px; background: transparent; pointer-events: none;">
-                    <button class="modal-btn" id="perfCancelBtn" style="min-width: 80px; pointer-events: auto;">${isEn ? 'Cancel' : '取消'}</button>
-                    <button class="modal-btn primary" id="perfSaveBtn" style="min-width: 120px; pointer-events: auto;">
-                        <i class="fas fa-check" style="margin-right: 6px;"></i><span>${isEn ? 'Confirm' : '确认'}</span>
-                    </button>
-                </div>
             </div>
+            <div class="perf-modal-footer">
+                <button class="perf-btn secondary" id="perfCancelBtn" style="min-width: 80px;">${isEn ? 'Cancel' : '取消'}</button>
+                <button class="perf-btn primary" id="perfSaveBtn" style="min-width: 120px;">
+                    <i class="fas fa-check" style="margin-right: 6px;"></i><span>${isEn ? 'Confirm' : '确认'}</span>
+                </button>
+            </div>
+        </div>
         </div>
         
         <!-- 安全区帮助弹层 -->

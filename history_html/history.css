@@ -8132,29 +8132,30 @@ a.tree-label.tree-bookmark-link:hover {
 .canvas-shortcuts-modal-body {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
+    padding: 14px 18px;
 }
 
 .canvas-shortcuts-available {
-    margin-bottom: 10px;
+    margin-bottom: 6px;
 }
 
 .canvas-shortcuts-open-header {
-    margin-bottom: 6px;
+    margin-bottom: 4px;
 }
 
 .canvas-shortcuts-available-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
 }
 
 .canvas-shortcuts-jump-btn {
     border: 1px solid var(--border-color);
     background: var(--bg-secondary);
     color: var(--accent-primary);
-    font-size: 12px;
-    padding: 4px 8px;
+    font-size: 12.5px;
+    padding: 3px 8px;
     border-radius: 6px;
     cursor: pointer;
     display: inline-flex;
@@ -8174,7 +8175,7 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-help-section {
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 }
 
 .canvas-help-section:last-child {
@@ -8182,11 +8183,11 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-help-section-title {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--text-secondary);
-    margin-bottom: 8px;
-    padding-bottom: 4px;
+    margin-bottom: 6px;
+    padding-bottom: 3px;
     border-bottom: 1px solid var(--border-color);
 }
 
@@ -8194,12 +8195,12 @@ a.tree-label.tree-bookmark-link:hover {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 0;
-    gap: 12px;
+    padding: 4px 0;
+    gap: 10px;
 }
 
 .canvas-help-key {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-primary);
     display: flex;
     align-items: center;
@@ -8207,8 +8208,8 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-help-key kbd {
-    font-size: 11px;
-    padding: 2px 5px;
+    font-size: 12px;
+    padding: 2px 6px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: 4px;
@@ -8216,7 +8217,7 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-help-desc {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-secondary);
     text-align: right;
 }
@@ -8294,7 +8295,7 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .canvas-shortcuts-panel .canvas-help-modal-body {
-    padding: 6px 12px 40px;
+    padding: 4px 10px 26px;
 }
 
 .canvas-manage-btn {

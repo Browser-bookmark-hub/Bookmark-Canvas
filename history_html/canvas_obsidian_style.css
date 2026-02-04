@@ -1559,15 +1559,31 @@
     display: flex;
     justify-content: flex-end;
     gap: 10px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-color);
-    margin-top: 4px;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 12px 16px;
+    border-top: none;
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.perf-modal-footer .perf-btn {
+    pointer-events: auto;
 }
 
 /* 外观设置弹窗样式 */
 .appearance-settings-modal {
     width: 500px;
     max-width: 92vw;
+    position: relative;
+}
+
+.appearance-settings-modal .modal-body {
+    padding-bottom: 78px;
 }
 
 .appearance-row {
@@ -1759,6 +1775,7 @@
 .perf-btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
     padding: 8px 16px;
     border-radius: 6px;
@@ -1766,7 +1783,8 @@
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s ease;
-    border: 1px solid transparent;
+    border: 1px solid rgba(0, 0, 0, 0.18);
+    opacity: 0.9;
 }
 
 .perf-btn i {
@@ -1775,7 +1793,6 @@
 
 .perf-btn.secondary {
     background: var(--bg-secondary);
-    border-color: var(--border-color);
     color: var(--text-secondary);
 }
 
@@ -1783,23 +1800,27 @@
     background: var(--bg-tertiary);
     color: var(--text-primary);
     border-color: var(--text-tertiary);
+    opacity: 1;
 }
 
 .perf-btn.primary {
     background: var(--accent-primary);
-    border-color: var(--accent-primary);
     color: #ffffff;
 }
 
 .perf-btn.primary:hover {
     background: var(--accent-primary-hover, #1d4ed8);
     border-color: var(--accent-primary-hover, #1d4ed8);
+    opacity: 1;
 }
 
 [data-theme="dark"] .perf-btn.secondary {
     background: var(--bg-tertiary);
-    border-color: var(--border-color);
     color: var(--text-secondary);
+}
+
+[data-theme="dark"] .perf-btn {
+    border-color: rgba(255, 255, 255, 0.16);
 }
 
 [data-theme="dark"] .perf-btn.secondary:hover {
