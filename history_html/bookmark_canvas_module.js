@@ -913,7 +913,7 @@ const CANVAS_APPEARANCE_SETTINGS_KEY = 'canvas-appearance-settings-v1';
 const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
     sizes: {
         permanent: { mode: 'manual', width: 600, height: 600 },
-        temp: { mode: 'manual', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT },
+        temp: { mode: 'auto', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT },
         mdNode: { width: MD_NODE_DEFAULT_WIDTH, height: MD_NODE_DEFAULT_HEIGHT }
     },
     colors: {
@@ -27769,6 +27769,7 @@ function __updateAppearanceSizeMode(modal, groupName, inputsId) {
     if (!inputs) return;
     const mode = __getAppearanceRadioValue(modal, groupName, 'manual');
     inputs.classList.toggle('is-disabled', mode === 'auto');
+    inputs.classList.toggle('is-hidden', mode === 'auto');
 }
 
 function __updateAppearanceNameMode(modal, selectId, manualWrapId) {
@@ -27930,7 +27931,7 @@ function createCanvasAppearanceSettingsModal() {
                     <div class="detail-section-title">${isEn ? 'Default Sizes' : '默认尺寸'}</div>
                     <div class="appearance-row">
                         <div class="appearance-row-label">${isEn ? 'Temp' : '临时栏目'}</div>
-                        <div class="appearance-row-content">
+                        <div class="appearance-row-content appearance-row-content-inline">
                             <div class="appearance-mode-toggle">
                                 <label class="appearance-radio">
                                     <input type="radio" name="appearance-temp-size-mode" value="manual">
@@ -27967,9 +27968,9 @@ function createCanvasAppearanceSettingsModal() {
                         <div class="appearance-row-label">${isEn ? 'Permanent' : '永久栏目'}</div>
                         <div class="appearance-row-content">
                             <div class="appearance-color-row" data-color-target="permanent">
-                                <input type="color" id="appearanceColorPermanent" class="appearance-color-input" data-color-target="permanent">
-                                <span class="appearance-color-value" id="appearanceColorPermanentValue">#10b981</span>
                                 <div class="appearance-color-chips">${chipsHtml}</div>
+                                <span class="appearance-color-value" id="appearanceColorPermanentValue">#10b981</span>
+                                <input type="color" id="appearanceColorPermanent" class="appearance-color-input" data-color-target="permanent">
                             </div>
                         </div>
                     </div>
@@ -27977,9 +27978,9 @@ function createCanvasAppearanceSettingsModal() {
                         <div class="appearance-row-label">${isEn ? 'Temp' : '临时栏目'}</div>
                         <div class="appearance-row-content">
                             <div class="appearance-color-row" data-color-target="temp">
-                                <input type="color" id="appearanceColorTemp" class="appearance-color-input" data-color-target="temp">
-                                <span class="appearance-color-value" id="appearanceColorTempValue">#2563eb</span>
                                 <div class="appearance-color-chips">${chipsHtml}</div>
+                                <span class="appearance-color-value" id="appearanceColorTempValue">#2563eb</span>
+                                <input type="color" id="appearanceColorTemp" class="appearance-color-input" data-color-target="temp">
                             </div>
                         </div>
                     </div>
@@ -27987,9 +27988,9 @@ function createCanvasAppearanceSettingsModal() {
                         <div class="appearance-row-label">${isEn ? 'Blank (non-group)' : '空白栏目（非组框）'}</div>
                         <div class="appearance-row-content">
                             <div class="appearance-color-row" data-color-target="blank">
-                                <input type="color" id="appearanceColorBlank" class="appearance-color-input" data-color-target="blank">
-                                <span class="appearance-color-value" id="appearanceColorBlankValue">#888888</span>
                                 <div class="appearance-color-chips">${chipsHtml}</div>
+                                <span class="appearance-color-value" id="appearanceColorBlankValue">#888888</span>
+                                <input type="color" id="appearanceColorBlank" class="appearance-color-input" data-color-target="blank">
                             </div>
                         </div>
                     </div>
@@ -27997,9 +27998,9 @@ function createCanvasAppearanceSettingsModal() {
                         <div class="appearance-row-label">${isEn ? 'Edge' : '连接线'}</div>
                         <div class="appearance-row-content">
                             <div class="appearance-color-row" data-color-target="edge">
-                                <input type="color" id="appearanceColorEdge" class="appearance-color-input" data-color-target="edge">
-                                <span class="appearance-color-value" id="appearanceColorEdgeValue">#999999</span>
                                 <div class="appearance-color-chips">${chipsHtml}</div>
+                                <span class="appearance-color-value" id="appearanceColorEdgeValue">#999999</span>
+                                <input type="color" id="appearanceColorEdge" class="appearance-color-input" data-color-target="edge">
                             </div>
                         </div>
                     </div>

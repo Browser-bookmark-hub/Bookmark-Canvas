@@ -1566,7 +1566,7 @@
 
 /* 外观设置弹窗样式 */
 .appearance-settings-modal {
-    width: 520px;
+    width: 500px;
     max-width: 92vw;
 }
 
@@ -1574,7 +1574,7 @@
     display: flex;
     gap: 12px;
     align-items: flex-start;
-    justify-content: space-between;
+    justify-content: flex-start;
 }
 
 .appearance-row + .appearance-row {
@@ -1582,42 +1582,90 @@
 }
 
 .appearance-row-label {
-    min-width: 90px;
+    min-width: 120px;
     font-size: 13px;
     color: var(--text-secondary);
     padding-top: 2px;
+    text-align: left;
 }
 
 .appearance-row-content {
-    flex: 1;
+    flex: 0 0 auto;
+    margin-left: auto;
     display: flex;
     flex-direction: column;
     gap: 8px;
+    align-items: flex-end;
+    max-width: 100%;
+}
+
+.appearance-row-content-inline {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 .appearance-mode-toggle {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: 6px;
     align-items: center;
+    justify-content: flex-end;
 }
 
 .appearance-radio {
+    position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
     font-size: 12px;
     color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.appearance-radio input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.appearance-radio span {
+    padding: 4px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    transition: all 0.15s ease;
+    line-height: 1.2;
+    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+}
+
+.appearance-radio:hover span {
+    border-color: var(--border-hover);
+    color: var(--text-primary);
+}
+
+.appearance-radio input:checked + span {
+    background: var(--accent-light);
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-sm);
 }
 
 .appearance-size-inputs {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    justify-content: flex-end;
 }
 
 .appearance-size-inputs input {
-    width: 70px;
+    width: 64px;
     padding: 4px 8px;
     border: 1px solid var(--border-color);
     border-radius: 4px;
@@ -1640,11 +1688,17 @@
     pointer-events: none;
 }
 
+.appearance-size-inputs.is-hidden {
+    display: none;
+}
+
 .appearance-color-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: wrap;
+    justify-content: flex-end;
+    align-self: flex-end;
 }
 
 .appearance-color-chips {
@@ -1665,14 +1719,16 @@
 }
 
 .appearance-color-value {
+    min-width: 66px;
+    text-align: right;
     font-size: 11px;
     color: var(--text-tertiary);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 .appearance-name-select {
-    width: 100%;
-    max-width: 240px;
+    width: 180px;
+    max-width: 180px;
     padding: 6px 8px;
     border-radius: 6px;
     border: 1px solid var(--border-color);
@@ -1685,11 +1741,12 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    justify-content: flex-end;
 }
 
 .appearance-name-manual input {
-    flex: 1;
-    min-width: 180px;
+    width: 180px;
+    min-width: 150px;
     padding: 6px 8px;
     border: 1px solid var(--border-color);
     border-radius: 6px;
