@@ -1292,8 +1292,9 @@ function __applyPerfLinkedStyles() {
     const enterInput = document.getElementById('perfInputEnterLowDetail');
     const magnetSafeValue = document.getElementById('perfMagnetSafeValue');
     const magnetMidValue = document.getElementById('perfMagnetMidValue');
-    const magnetNote = document.getElementById('perfMagnetLinkedNote');
     const magnetTitle = document.getElementById('perfMagnetTitleText');
+    const magnetJumpLabel = document.getElementById('perfMagnetJumpLabel');
+    const magnetJumpBtn = document.getElementById('perfMagnetJumpOtherBtn');
 
     const apply = (input) => {
         if (!input) return;
@@ -1320,8 +1321,16 @@ function __applyPerfLinkedStyles() {
     toggleLinkedText(magnetMidValue);
     toggleLinkedText(magnetTitle);
 
-    if (magnetNote) {
-        magnetNote.style.display = flags ? 'flex' : 'none';
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
+    const isEn = lang === 'en';
+    if (magnetJumpLabel) {
+        magnetJumpLabel.textContent = flags
+            ? (isEn ? 'Source: Other → Zoom Speed & Magnet' : '来源：其他 → 缩放速率与磁矩')
+            : (isEn ? 'Go to Other → Zoom Speed & Magnet' : '跳转到其他 → 缩放速率与磁矩');
+        toggleLinkedText(magnetJumpLabel);
+    }
+    if (magnetJumpBtn) {
+        toggleLinkedText(magnetJumpBtn);
     }
 }
 
@@ -29878,8 +29887,8 @@ function createCanvasPerfSettingsModal() {
                             </label>
                         </div>
                     </div>
-                    <div class="perf-jump-row">
-                        <span>${isEn ? 'Go to Other → Zoom Speed & Magnet' : '跳转到其他 → 缩放速率与磁矩'}</span>
+                    <div class="perf-jump-row" id="perfMagnetJumpRow">
+                        <span id="perfMagnetJumpLabel">${isEn ? 'Go to Other → Zoom Speed & Magnet' : '跳转到其他 → 缩放速率与磁矩'}</span>
                         <button class="perf-source-btn perf-jump-btn" id="perfMagnetJumpOtherBtn" title="${isEn ? 'Go to Other settings' : '跳转到其他设置'}" aria-label="${isEn ? 'Go to Other settings' : '跳转到其他设置'}">
                             <svg class="jump-icon" viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M14 3h7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -29887,10 +29896,6 @@ function createCanvasPerfSettingsModal() {
                                 <path d="M21 14v7H3V3h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
                             </svg>
                         </button>
-                    </div>
-                    <div class="perf-linked-note" id="perfMagnetLinkedNote" style="display: none;">
-                        <span>${isEn ? 'Source: Other → Zoom Speed & Magnet' : '来源：其他 → 缩放速率与磁矩'}</span>
-                        <button class="perf-source-link-btn" id="perfSourceMagnetBtn">${isEn ? 'Go to source' : '跳转到来源'}</button>
                     </div>
                 </div>
                  
