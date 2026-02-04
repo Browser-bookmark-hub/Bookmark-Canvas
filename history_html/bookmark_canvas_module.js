@@ -938,6 +938,10 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     zoomCurve: {
         p1: { x: 0.25, y: 1 },
         p2: { x: 0.67, y: 1 }
+    },
+    magnetPoints: {
+        m1: { x: 0.67, y: 0.05 },
+        m2: { x: 0.25, y: 0.04 }
     }
 };
 
@@ -981,6 +985,47 @@ function __normalizeZoomCurve(input) {
         const tmp = out.p1;
         out.p1 = out.p2;
         out.p2 = tmp;
+    }
+    return out;
+}
+
+function __getDefaultMagnetPointsFromPerf() {
+    const fallback = __cloneDefaultOtherSettings().magnetPoints;
+    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
+    const maxPercent = 100;
+    const range = Math.max(1, maxPercent - minPercent);
+    const toNorm = (percent) => __clamp01((percent - minPercent) / range);
+    const safePercent = getCanvasSafeZoneThreshold() * 100;
+    const enter = getCanvasLowDetailDisplayZoomThreshold() * 100;
+    const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100;
+    const midPercent = Number.isFinite(enter) && Number.isFinite(exit) ? (enter + exit) / 2 : (minPercent + range * 0.25);
+    const m1x = toNorm(Number.isFinite(safePercent) ? safePercent : 70);
+    const m2x = toNorm(Number.isFinite(midPercent) ? midPercent : 32.5);
+    return {
+        m1: { x: m1x, y: fallback.m1.y },
+        m2: { x: m2x, y: fallback.m2.y }
+    };
+}
+
+function __normalizeMagnetPoints(input) {
+    const fallback = __getDefaultMagnetPointsFromPerf();
+    if (!input || typeof input !== 'object') return fallback;
+    const m1 = input.m1 || {};
+    const m2 = input.m2 || {};
+    const out = {
+        m1: {
+            x: __clampNumber(m1.x, 0, 1, fallback.m1.x),
+            y: __clampNumber(m1.y, 0.02, 1, fallback.m1.y)
+        },
+        m2: {
+            x: __clampNumber(m2.x, 0, 1, fallback.m2.x),
+            y: __clampNumber(m2.y, 0.02, 1, fallback.m2.y)
+        }
+    };
+    if (out.m2.x > out.m1.x) {
+        const tmp = out.m1;
+        out.m1 = out.m2;
+        out.m2 = tmp;
     }
     return out;
 }
@@ -1034,6 +1079,7 @@ function normalizeCanvasOtherSettings(input) {
     if (typeof input.tempColorFollow === 'boolean') out.tempColorFollow = input.tempColorFollow;
     if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
     out.zoomCurve = __normalizeZoomCurve(input.zoomCurve);
+    out.magnetPoints = __normalizeMagnetPoints(input.magnetPoints);
     return out;
 }
 
@@ -5200,6 +5246,14 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
     const nextDz = (typeof nextDisplayZoom === 'number' && isFinite(nextDisplayZoom) && nextDisplayZoom > 0) ? nextDisplayZoom : dz;
 
     const settings = getCanvasZoomMagnetSettings();
+    const useDefaultCurve = shouldUseDefaultZoomCurve();
+    const magnetPoints = useDefaultCurve
+        ? __getDefaultMagnetPointsFromPerf()
+        : __normalizeMagnetPoints(getCanvasZoomMagnetPoints());
+    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
+    const maxPercent = 100;
+    const range = Math.max(1, maxPercent - minPercent);
+    const normToPercent = (nx) => minPercent + (__clamp01(nx) * range);
 
     // 两个“磁矩”位置：
     // - Safe Zone 阈值（默认 70%）
@@ -5208,10 +5262,11 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
 
     try {
         if (settings.enableSafeZone && isCanvasSafeZoneEnabled()) {
-            const safe = getCanvasSafeZoneThreshold();
+            const safePercent = normToPercent(magnetPoints.m1.x);
+            const safe = safePercent / 100;
             if (Number.isFinite(safe) && safe > 0) {
                 // Safe Zone 附近更明显（范围更宽、减速更强）
-                magnets.push({ center: safe, halfWidth: 0.08, minFactor: 0.05 });
+                magnets.push({ center: safe, halfWidth: 0.08, minFactor: magnetPoints.m1.y });
             }
         }
     } catch (_) { }
@@ -5221,11 +5276,12 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
             const enter = getCanvasLowDetailDisplayZoomThreshold();
             const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
             if (Number.isFinite(enter) && Number.isFinite(exit) && enter > 0 && exit > 0) {
-                const mid = (enter + exit) / 2;
+                const midPercent = normToPercent(magnetPoints.m2.x);
+                const mid = midPercent / 100;
                 const band = Math.max(0.01, Math.abs(enter - exit));
                 // (30%~35%) 的中点附近给一个更宽的“缓慢区”，避免感觉只是“一个点”
                 const halfWidth = Math.min(0.12, Math.max(0.06, band * 2.5));
-                magnets.push({ center: mid, halfWidth, minFactor: 0.04 });
+                magnets.push({ center: mid, halfWidth, minFactor: magnetPoints.m2.y });
             }
         }
     } catch (_) { }
@@ -5263,32 +5319,10 @@ function getCanvasZoomCurveSettings() {
     return (settings && settings.zoomCurve) ? settings.zoomCurve : __cloneDefaultOtherSettings().zoomCurve;
 }
 
-function __getSuggestedZoomCurveFromMagnet() {
-    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
-    const maxPercent = 100;
-    const range = Math.max(1, maxPercent - minPercent);
-    const safePercent = Math.max(minPercent, Math.min(maxPercent, getCanvasSafeZoneThreshold() * 100));
-    const enter = getCanvasLowDetailDisplayZoomThreshold() * 100;
-    const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100;
-    const midPercent = Number.isFinite(enter) && Number.isFinite(exit)
-        ? (enter + exit) / 2
-        : (minPercent + range * 0.25);
-    const p1x = __clamp01((midPercent - minPercent) / range);
-    const p2x = __clamp01((safePercent - minPercent) / range);
-    return {
-        p1: { x: p1x, y: 1 },
-        p2: { x: Math.max(p2x, p1x + 0.02), y: 1 }
-    };
-}
-
-function __isDefaultZoomCurve(curve) {
-    if (!curve || !curve.p1 || !curve.p2) return true;
-    const def = __cloneDefaultOtherSettings().zoomCurve;
-    const near = (a, b) => Math.abs(a - b) < 0.001;
-    return near(curve.p1.x, def.p1.x)
-        && near(curve.p1.y, def.p1.y)
-        && near(curve.p2.x, def.p2.x)
-        && near(curve.p2.y, def.p2.y);
+function getCanvasZoomMagnetPoints() {
+    const settings = getCanvasOtherSettings();
+    if (settings && settings.magnetPoints) return settings.magnetPoints;
+    return __getDefaultMagnetPointsFromPerf();
 }
 
 function __cubicBezierCoord(t, p0, p1, p2, p3) {
@@ -28308,10 +28342,10 @@ function openCanvasOtherSettingsModal() {
     if (colorFollow) colorFollow.checked = !(settings.tempColorFollow === false);
     if (defaultCurveToggle) defaultCurveToggle.checked = useDefaultCurve;
     modal._useDefaultZoomCurve = useDefaultCurve;
-    modal._zoomCurve = __normalizeZoomCurve(settings.zoomCurve);
-    if (!useDefaultCurve && __isDefaultZoomCurve(modal._zoomCurve)) {
-        modal._zoomCurve = __normalizeZoomCurve(__getSuggestedZoomCurveFromMagnet());
-    }
+    const baseCurve = __normalizeZoomCurve(settings.zoomCurve);
+    const baseMagnets = __normalizeMagnetPoints(settings.magnetPoints);
+    modal._zoomCurve = useDefaultCurve ? __cloneDefaultOtherSettings().zoomCurve : baseCurve;
+    modal._magnetPoints = useDefaultCurve ? __getDefaultMagnetPointsFromPerf() : baseMagnets;
 
     modal.style.display = 'flex';
     requestAnimationFrame(() => {
@@ -28330,11 +28364,15 @@ function saveCanvasOtherSettings() {
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
     const colorFollow = modal.querySelector('#otherTempColorFollow');
     const useDefaultCurve = modal.querySelector('#otherUseDefaultZoomCurve');
+    const useDefault = useDefaultCurve ? !!useDefaultCurve.checked : true;
+    const defaultCurve = __cloneDefaultOtherSettings().zoomCurve;
+    const defaultMagnets = __getDefaultMagnetPointsFromPerf();
     const settingsInput = {
         autoLinkSplit: !!(autoLink && autoLink.checked),
         tempColorFollow: !!(colorFollow && colorFollow.checked),
-        useDefaultZoomCurve: useDefaultCurve ? !!useDefaultCurve.checked : true,
-        zoomCurve: modal._zoomCurve || getCanvasZoomCurveSettings()
+        useDefaultZoomCurve: useDefault,
+        zoomCurve: useDefault ? defaultCurve : (modal._zoomCurve || getCanvasZoomCurveSettings()),
+        magnetPoints: useDefault ? defaultMagnets : (modal._magnetPoints || getCanvasZoomMagnetPoints())
     };
     const normalized = normalizeCanvasOtherSettings(settingsInput);
     CanvasState.otherSettings = normalized;
@@ -28369,23 +28407,9 @@ function __renderOtherZoomMagnetCurve(modal) {
     const magnetEnabled = !!(settings && settings.enabled);
     const safeEnabled = magnetEnabled && !!settings.enableSafeZone && isCanvasSafeZoneEnabled();
     const midEnabled = magnetEnabled && !!settings.enableLowDetailMid;
-
-    const safeValue = safeEnabled ? getCanvasSafeZoneThreshold() : null;
-    let midValue = null;
-    if (midEnabled) {
-        const enter = getCanvasLowDetailDisplayZoomThreshold();
-        const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
-        if (Number.isFinite(enter) && Number.isFinite(exit)) midValue = (enter + exit) / 2;
-    }
-
-    const safePercentText = Number.isFinite(safeValue) ? `${Math.round(safeValue * 100)}%` : '--';
-    const midPercentText = Number.isFinite(midValue) ? `${Math.round(midValue * 1000) / 10}%` : '--';
-    __updateOtherMagnetLegend(modal, {
-        safeEnabled,
-        midEnabled,
-        safePercentText,
-        midPercentText
-    });
+    const useDefaultCurve = (modal && typeof modal._useDefaultZoomCurve === 'boolean')
+        ? modal._useDefaultZoomCurve
+        : shouldUseDefaultZoomCurve();
 
     const dpr = window.devicePixelRatio || 1;
     const cssWidth = canvas.clientWidth || 360;
@@ -28416,6 +28440,24 @@ function __renderOtherZoomMagnetCurve(modal) {
     const percentToX = (p) => paddingLeft + ((p - minPercent) / range) * plotW;
     const factorToY = (factor) => paddingTop + (1 - factor) * plotH;
 
+    const magnetPoints = useDefaultCurve
+        ? __getDefaultMagnetPointsFromPerf()
+        : __normalizeMagnetPoints((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints());
+    if (modal) modal._magnetPoints = magnetPoints;
+
+    const safePercent = minPercent + (__clamp01(magnetPoints.m1.x) * range);
+    const midPercent = minPercent + (__clamp01(magnetPoints.m2.x) * range);
+    const formatPercent = (v) => Number.isFinite(v) ? `${Math.round(v * 10) / 10}%` : '--';
+    const formatSpeed = (v) => Number.isFinite(v) ? `${Math.round(v * 100)}%` : '--';
+    const safePercentText = `${formatPercent(safePercent)} · ${formatSpeed(magnetPoints.m1.y)}`;
+    const midPercentText = `${formatPercent(midPercent)} · ${formatSpeed(magnetPoints.m2.y)}`;
+    __updateOtherMagnetLegend(modal, {
+        safeEnabled,
+        midEnabled,
+        safePercentText,
+        midPercentText
+    });
+
     // Grid
     ctx.strokeStyle = gridColor;
     ctx.lineWidth = 1;
@@ -28436,21 +28478,15 @@ function __renderOtherZoomMagnetCurve(modal) {
     ctx.lineTo(paddingLeft + plotW, paddingTop + plotH);
     ctx.stroke();
 
-    const useDefaultCurve = (modal && typeof modal._useDefaultZoomCurve === 'boolean')
-        ? modal._useDefaultZoomCurve
-        : shouldUseDefaultZoomCurve();
-    const curveCard = modal ? modal.querySelector('.other-curve-card') : null;
-    if (curveCard) curveCard.classList.toggle('is-disabled', useDefaultCurve);
-
     const noteEl = modal ? modal.querySelector('.other-curve-note') : null;
     if (noteEl) {
         noteEl.textContent = useDefaultCurve
             ? (isEn
-                ? 'Default curve follows performance magnet settings. Turn off to edit Duration 1/2.'
-                : '默认曲线跟随性能磁矩设置。关闭后可拖动持续1/持续2 调整。')
+                ? 'Default curve follows performance magnets. Drag any point to switch to custom.'
+                : '默认曲线跟随性能磁矩设置。拖动任意点会自动关闭默认。')
             : (isEn
-                ? 'Drag Duration 1/2 (affects 3 segments). X: zoom %, Y: speed (higher = faster). Smoother = slower.'
-                : '拖动持续1/持续2（影响三段曲线）。X 轴为缩放比例，Y 轴为速率强度（越高越快、越平滑越慢）。');
+                ? 'Drag Magnet 1/2 and Rate 1/2. X: zoom %, Y: speed (higher = faster). Smoother = slower.'
+                : '拖动磁矩点1/2与速率点1/2。X 轴为缩放比例，Y 轴为速率强度（越高越快、越平滑越慢）。');
     }
 
     const curve = (modal && modal._zoomCurve) ? modal._zoomCurve : getCanvasZoomCurveSettings();
@@ -28468,10 +28504,37 @@ function __renderOtherZoomMagnetCurve(modal) {
     const endX = normToX(1);
     const endY = normToY(1);
 
+    const safeCenter = safePercent / 100;
+    const midCenter = midPercent / 100;
+    const enter = getCanvasLowDetailDisplayZoomThreshold();
+    const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
+    const band = (Number.isFinite(enter) && Number.isFinite(exit)) ? Math.max(0.01, Math.abs(enter - exit)) : 0.05;
+    const midHalfWidth = Math.min(0.12, Math.max(0.06, band * 2.5));
+
     const getMagnetFactor = (percent) => {
         const dz = percent / 100;
-        const m = getCanvasZoomMagnetEffect(dz, dz);
-        return (m && Number.isFinite(m.factor)) ? m.factor : 1;
+        let factor = 1;
+        if (safeEnabled && Number.isFinite(safeCenter) && safeCenter > 0) {
+            const minD = Math.abs(dz - safeCenter);
+            if (minD < 0.08) {
+                const t = Math.max(0, Math.min(1, minD / 0.08));
+                const smooth = t * t * (3 - 2 * t);
+                const localStrength = 1 - smooth;
+                const localFactor = 1 - localStrength * (1 - magnetPoints.m1.y);
+                if (localFactor < factor) factor = localFactor;
+            }
+        }
+        if (midEnabled && Number.isFinite(midCenter) && midCenter > 0) {
+            const minD = Math.abs(dz - midCenter);
+            if (minD < midHalfWidth) {
+                const t = Math.max(0, Math.min(1, minD / midHalfWidth));
+                const smooth = t * t * (3 - 2 * t);
+                const localStrength = 1 - smooth;
+                const localFactor = 1 - localStrength * (1 - magnetPoints.m2.y);
+                if (localFactor < factor) factor = localFactor;
+            }
+        }
+        return Math.max(0.02, Math.min(1, factor));
     };
     const getCustomFactor = (percent) => {
         if (useDefaultCurve) return 1;
@@ -28497,46 +28560,44 @@ function __renderOtherZoomMagnetCurve(modal) {
         ctx.setLineDash([]);
     };
 
-    if (!useDefaultCurve) {
-        // Baseline custom curve (muted)
-        drawFactorCurve(getCustomFactor, mutedCurve, [4, 4]);
+    // Baseline custom curve (muted)
+    drawFactorCurve(getCustomFactor, mutedCurve, [4, 4]);
 
-        // Control polygon
-        ctx.strokeStyle = axisColor;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        ctx.moveTo(startX, startY);
-        ctx.lineTo(p1x, p1y);
-        ctx.lineTo(p2x, p2y);
-        ctx.lineTo(endX, endY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-    }
+    // Control polygon
+    ctx.strokeStyle = axisColor;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(p1x, p1y);
+    ctx.lineTo(p2x, p2y);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
     // Combined curve (magnet + custom)
     drawFactorCurve(getCombinedFactor, curveColor);
 
-    if (!useDefaultCurve) {
-        // Control points
-        ctx.fillStyle = curveColor;
-        ctx.beginPath();
-        ctx.arc(p1x, p1y, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(p2x, p2y, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = textColor;
-        ctx.font = '11px sans-serif';
-        ctx.fillText(isEn ? 'D1' : '续1', p1x + 6, p1y - 6);
-        ctx.fillText(isEn ? 'D2' : '续2', p2x + 6, p2y - 6);
-    }
+    // Control points (rate points)
+    ctx.fillStyle = curveColor;
+    ctx.beginPath();
+    ctx.arc(p1x, p1y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(p2x, p2y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = textColor;
+    ctx.font = '11px sans-serif';
+    ctx.fillText(isEn ? 'R1' : '速1', p1x + 6, p1y - 6);
+    ctx.fillText(isEn ? 'R2' : '速2', p2x + 6, p2y - 6);
 
-    // Magnet markers
-    const drawMarker = (percent, color) => {
+    // Magnet markers + points
+    const drawMarker = (percent, color, enabled) => {
         if (!Number.isFinite(percent)) return;
         if (percent < minPercent || percent > maxPercent) return;
         const x = percentToX(percent);
+        ctx.save();
+        ctx.globalAlpha = enabled ? 1 : 0.35;
         ctx.strokeStyle = color;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
@@ -28544,13 +28605,29 @@ function __renderOtherZoomMagnetCurve(modal) {
         ctx.lineTo(x, paddingTop + plotH);
         ctx.stroke();
         ctx.setLineDash([]);
+        ctx.restore();
     };
-    if (safeEnabled && Number.isFinite(safeValue)) {
-        drawMarker(safeValue * 100, '#10b981');
-    }
-    if (midEnabled && Number.isFinite(midValue)) {
-        drawMarker(midValue * 100, '#a855f7');
-    }
+    drawMarker(safePercent, '#10b981', safeEnabled);
+    drawMarker(midPercent, '#a855f7', midEnabled);
+
+    const drawMagnetPoint = (percent, y, color, label, enabled) => {
+        if (!Number.isFinite(percent) || !Number.isFinite(y)) return;
+        if (percent < minPercent || percent > maxPercent) return;
+        const x = percentToX(percent);
+        const py = factorToY(__clamp01(y));
+        ctx.save();
+        ctx.globalAlpha = enabled ? 1 : 0.35;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, py, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = textColor;
+        ctx.font = '11px sans-serif';
+        ctx.fillText(label, x + 6, py - 6);
+        ctx.restore();
+    };
+    drawMagnetPoint(safePercent, magnetPoints.m1.y, '#10b981', isEn ? 'M1' : '磁1', safeEnabled);
+    drawMagnetPoint(midPercent, magnetPoints.m2.y, '#a855f7', isEn ? 'M2' : '磁2', midEnabled);
 
     // Axis labels
     ctx.fillStyle = textColor;
@@ -28599,42 +28676,61 @@ function __bindOtherCurveInteractions(modal) {
     const dragState = { active: false, point: null, pointerId: null };
     const hitRadius = 10;
     const minGap = 0.04;
-
-    const isDefaultCurve = () => {
-        if (modal && typeof modal._useDefaultZoomCurve === 'boolean') return modal._useDefaultZoomCurve;
-        return shouldUseDefaultZoomCurve();
-    };
+    const magnetGap = 0.02;
 
     const getCurve = () => __normalizeZoomCurve((modal && modal._zoomCurve) || getCanvasZoomCurveSettings());
     const setCurve = (curve) => { modal._zoomCurve = __normalizeZoomCurve(curve); };
+    const getMagnets = () => __normalizeMagnetPoints((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints());
+    const setMagnets = (magnets) => { modal._magnetPoints = __normalizeMagnetPoints(magnets); };
+
+    const ensureCustom = () => {
+        if (modal && modal._useDefaultZoomCurve) {
+            modal._useDefaultZoomCurve = false;
+            const toggle = modal.querySelector('#otherUseDefaultZoomCurve');
+            if (toggle) toggle.checked = false;
+        }
+    };
 
     const getPointPositions = () => {
         const layout = __getOtherCurveLayout(modal, canvas);
         const curve = getCurve();
+        const magnets = getMagnets();
         const p1x = layout.paddingLeft + curve.p1.x * layout.plotW;
         const p1y = layout.paddingTop + (1 - curve.p1.y) * layout.plotH;
         const p2x = layout.paddingLeft + curve.p2.x * layout.plotW;
         const p2y = layout.paddingTop + (1 - curve.p2.y) * layout.plotH;
-        return { layout, p1: { x: p1x, y: p1y }, p2: { x: p2x, y: p2y }, curve };
+        const m1x = layout.paddingLeft + magnets.m1.x * layout.plotW;
+        const m1y = layout.paddingTop + (1 - magnets.m1.y) * layout.plotH;
+        const m2x = layout.paddingLeft + magnets.m2.x * layout.plotW;
+        const m2y = layout.paddingTop + (1 - magnets.m2.y) * layout.plotH;
+        return {
+            layout,
+            p1: { x: p1x, y: p1y },
+            p2: { x: p2x, y: p2y },
+            m1: { x: m1x, y: m1y },
+            m2: { x: m2x, y: m2y },
+            curve,
+            magnets
+        };
     };
 
     const hitTest = (clientX, clientY) => {
         const rect = canvas.getBoundingClientRect();
         const localX = clientX - rect.left;
         const localY = clientY - rect.top;
-        const { p1, p2 } = getPointPositions();
-        const d1 = Math.hypot(localX - p1.x, localY - p1.y);
-        const d2 = Math.hypot(localX - p2.x, localY - p2.y);
-        if (d1 <= hitRadius) return 'p1';
-        if (d2 <= hitRadius) return 'p2';
+        const { p1, p2, m1, m2 } = getPointPositions();
+        const points = [
+            { id: 'p1', d: Math.hypot(localX - p1.x, localY - p1.y) },
+            { id: 'p2', d: Math.hypot(localX - p2.x, localY - p2.y) },
+            { id: 'm1', d: Math.hypot(localX - m1.x, localY - m1.y) },
+            { id: 'm2', d: Math.hypot(localX - m2.x, localY - m2.y) }
+        ];
+        points.sort((a, b) => a.d - b.d);
+        if (points[0].d <= hitRadius) return points[0].id;
         return null;
     };
 
     const updateCursor = (clientX, clientY) => {
-        if (isDefaultCurve()) {
-            canvas.style.cursor = 'default';
-            return;
-        }
         if (dragState.active) return;
         const hit = hitTest(clientX, clientY);
         canvas.style.cursor = hit ? 'grab' : 'default';
@@ -28644,7 +28740,7 @@ function __bindOtherCurveInteractions(modal) {
         const rect = canvas.getBoundingClientRect();
         const localX = clientX - rect.left;
         const localY = clientY - rect.top;
-        const { layout, curve } = getPointPositions();
+        const { layout, curve, magnets } = getPointPositions();
         const nx = __clamp01((localX - layout.paddingLeft) / layout.plotW);
         const ny = __clamp01(1 - (localY - layout.paddingTop) / layout.plotH);
         if (dragState.point === 'p1') {
@@ -28653,15 +28749,22 @@ function __bindOtherCurveInteractions(modal) {
         } else if (dragState.point === 'p2') {
             curve.p2.x = Math.max(nx, curve.p1.x + minGap);
             curve.p2.y = ny;
+        } else if (dragState.point === 'm1') {
+            magnets.m1.x = Math.max(nx, magnets.m2.x + magnetGap);
+            magnets.m1.y = Math.max(0.02, Math.min(1, ny));
+        } else if (dragState.point === 'm2') {
+            magnets.m2.x = Math.min(nx, magnets.m1.x - magnetGap);
+            magnets.m2.y = Math.max(0.02, Math.min(1, ny));
         }
         setCurve(curve);
+        setMagnets(magnets);
         __renderOtherZoomMagnetCurve(modal);
     };
 
     canvas.addEventListener('pointerdown', (e) => {
-        if (isDefaultCurve()) return;
         const hit = hitTest(e.clientX, e.clientY);
         if (!hit) return;
+        ensureCustom();
         dragState.active = true;
         dragState.point = hit;
         dragState.pointerId = e.pointerId;
@@ -28752,12 +28855,12 @@ function createCanvasOtherSettingsModal() {
                         <div class="other-curve-legend">
                             <div class="other-curve-legend-item" id="otherMagnetSafeLegend">
                                 <span class="other-curve-dot dot-safe"></span>
-                                <span>${isEn ? 'Magnet 1' : '磁矩1'}</span>
+                                <span>${isEn ? 'Magnet Point 1' : '磁矩点1'}</span>
                                 <span id="otherMagnetSafeValue">--</span>
                             </div>
                             <div class="other-curve-legend-item" id="otherMagnetMidLegend">
                                 <span class="other-curve-dot dot-mid"></span>
-                                <span>${isEn ? 'Magnet 2' : '磁矩2'}</span>
+                                <span>${isEn ? 'Magnet Point 2' : '磁矩点2'}</span>
                                 <span id="otherMagnetMidValue">--</span>
                             </div>
                         </div>
@@ -28787,11 +28890,9 @@ function createCanvasOtherSettingsModal() {
     if (defaultToggle) {
         defaultToggle.addEventListener('change', () => {
             const nextUseDefault = !!defaultToggle.checked;
-            if (!nextUseDefault) {
-                const cur = __normalizeZoomCurve(modal._zoomCurve || getCanvasZoomCurveSettings());
-                if (__isDefaultZoomCurve(cur)) {
-                    modal._zoomCurve = __normalizeZoomCurve(__getSuggestedZoomCurveFromMagnet());
-                }
+            if (nextUseDefault) {
+                modal._zoomCurve = __cloneDefaultOtherSettings().zoomCurve;
+                modal._magnetPoints = __getDefaultMagnetPointsFromPerf();
             }
             modal._useDefaultZoomCurve = nextUseDefault;
             try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
@@ -28910,6 +29011,10 @@ function openCanvasPerfSettingsModal() {
     if (toggleMagnetSafe) toggleMagnetSafe.checked = !!magnetSettings.enableSafeZone;
     const toggleMagnetMid = document.getElementById('perfToggleZoomMagnetMid');
     if (toggleMagnetMid) toggleMagnetMid.checked = !!magnetSettings.enableLowDetailMid;
+    if (toggleMagnet) {
+        // Ensure sub toggles are enabled/disabled after programmatic state sync
+        toggleMagnet.dispatchEvent(new Event('change'));
+    }
 
     modal.style.display = 'flex';
 

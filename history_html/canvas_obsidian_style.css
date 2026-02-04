@@ -1840,10 +1840,6 @@
     opacity: 0.7;
 }
 
-.other-curve-card.is-disabled .other-curve-canvas {
-    pointer-events: none;
-}
-
 .other-curve-canvas {
     width: 100%;
     height: 180px;
