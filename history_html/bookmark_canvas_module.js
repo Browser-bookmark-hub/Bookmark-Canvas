@@ -1131,6 +1131,156 @@ function shouldUseDefaultZoomCurve() {
     return !(settings && settings.useDefaultZoomCurve === false);
 }
 
+const CANVAS_PERF_LINKED_FROM_OTHER_KEY = 'canvas-perf-linked-from-other-v1';
+
+function __readPerfLinkedFromOther() {
+    try {
+        const raw = localStorage.getItem(CANVAS_PERF_LINKED_FROM_OTHER_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') return parsed;
+        }
+    } catch (_) { }
+    return null;
+}
+
+function __writePerfLinkedFromOther(payload) {
+    try {
+        localStorage.setItem(CANVAS_PERF_LINKED_FROM_OTHER_KEY, JSON.stringify(payload || {}));
+    } catch (_) { }
+}
+
+function __clearPerfLinkedFromOther() {
+    try { localStorage.removeItem(CANVAS_PERF_LINKED_FROM_OTHER_KEY); } catch (_) { }
+}
+
+function __formatPercentInputValue(value) {
+    if (!Number.isFinite(value)) return '';
+    const v = Math.round(value * 10) / 10;
+    return (v % 1 === 0) ? v.toFixed(0) : v.toFixed(1);
+}
+
+function __applyPerfLinkedStyles() {
+    const flags = __readPerfLinkedFromOther();
+    const safeInput = document.getElementById('perfInputSafeZone');
+    const exitInput = document.getElementById('perfInputExitLowDetail');
+    const enterInput = document.getElementById('perfInputEnterLowDetail');
+    const magnetSafeValue = document.getElementById('perfMagnetSafeValue');
+    const magnetMidValue = document.getElementById('perfMagnetMidValue');
+    const magnetNote = document.getElementById('perfMagnetLinkedNote');
+
+    const apply = (input, target) => {
+        if (!input) return;
+        const unit = input.parentElement ? input.parentElement.querySelector('span') : null;
+        if (!flags || !Number.isFinite(target)) {
+            input.classList.remove('perf-linked-input');
+            if (unit) unit.classList.remove('perf-linked-text');
+            return;
+        }
+        const cur = parseFloat(input.value);
+        if (Number.isFinite(cur) && Math.abs(cur - target) < 0.11) {
+            input.classList.add('perf-linked-input');
+            if (unit) unit.classList.add('perf-linked-text');
+        } else {
+            input.classList.remove('perf-linked-input');
+            if (unit) unit.classList.remove('perf-linked-text');
+        }
+    };
+
+    apply(safeInput, flags.safeZone);
+    apply(exitInput, flags.exitLowDetail);
+    apply(enterInput, flags.enterLowDetail);
+
+    const toggleLinkedText = (el) => {
+        if (!el) return;
+        if (flags) el.classList.add('perf-linked-text');
+        else el.classList.remove('perf-linked-text');
+    };
+    toggleLinkedText(magnetSafeValue);
+    toggleLinkedText(magnetMidValue);
+
+    if (magnetNote) {
+        magnetNote.style.display = flags ? 'flex' : 'none';
+    }
+}
+
+function __syncPerfSettingsFromOtherMagnetPoints(magnetPoints) {
+    const points = __normalizeMagnetPoints(magnetPoints);
+    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
+    const maxPercent = 100;
+    const range = Math.max(1, maxPercent - minPercent);
+    const safePercent = minPercent + (__clamp01(points.m1.x) * range);
+    const midPercent = minPercent + (__clamp01(points.m2.x) * range);
+
+    let gap = 5;
+    const curEnter = getCanvasLowDetailDisplayZoomThreshold() * 100;
+    const curExit = getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100;
+    const curGap = curEnter - curExit;
+    if (Number.isFinite(curGap) && curGap > 0) gap = curGap;
+    if (!Number.isFinite(gap) || gap <= 0) gap = 5;
+
+    let exitPercent = midPercent - gap / 2;
+    let enterPercent = midPercent + gap / 2;
+    const minV = 1;
+    const maxV = 100;
+    if (exitPercent < minV) {
+        exitPercent = minV;
+        enterPercent = exitPercent + gap;
+    }
+    if (enterPercent > maxV) {
+        enterPercent = maxV;
+        exitPercent = enterPercent - gap;
+    }
+    exitPercent = Math.max(minV, Math.min(maxV, exitPercent));
+    enterPercent = Math.max(minV, Math.min(maxV, enterPercent));
+    if (enterPercent < exitPercent) {
+        const tmp = enterPercent;
+        enterPercent = exitPercent;
+        exitPercent = tmp;
+    }
+
+    const safeZoneSettings = (() => {
+        try {
+            const raw = localStorage.getItem('canvasSafeZoneSettings');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object') return parsed;
+            }
+        } catch (_) { }
+        return { threshold: 0.70, enabled: true };
+    })();
+    safeZoneSettings.threshold = safePercent / 100;
+    try { localStorage.setItem('canvasSafeZoneSettings', JSON.stringify(safeZoneSettings)); } catch (_) { }
+
+    const zoomThresholds = {
+        enterLowDetail: enterPercent / 100,
+        exitLowDetail: exitPercent / 100
+    };
+    try { localStorage.setItem('canvasZoomThresholds', JSON.stringify(zoomThresholds)); } catch (_) { }
+
+    __writePerfLinkedFromOther({
+        safeZone: safePercent,
+        exitLowDetail: exitPercent,
+        enterLowDetail: enterPercent,
+        midPercent,
+        updatedAt: Date.now()
+    });
+
+    const safeInput = document.getElementById('perfInputSafeZone');
+    if (safeInput) safeInput.value = __formatPercentInputValue(safePercent);
+    const exitInput = document.getElementById('perfInputExitLowDetail');
+    if (exitInput) exitInput.value = __formatPercentInputValue(exitPercent);
+    const enterInput = document.getElementById('perfInputEnterLowDetail');
+    if (enterInput) enterInput.value = __formatPercentInputValue(enterPercent);
+
+    const safeValueEl = document.getElementById('perfMagnetSafeValue');
+    if (safeValueEl) safeValueEl.textContent = `${__formatPercentInputValue(safePercent)}%`;
+    const midValueEl = document.getElementById('perfMagnetMidValue');
+    if (midValueEl) midValueEl.textContent = `${__formatPercentInputValue(midPercent)}%`;
+
+    __applyPerfLinkedStyles();
+}
+
 function getTempSectionBaseSize() {
     const settings = getCanvasAppearanceSettings();
     const size = settings.sizes && settings.sizes.temp ? settings.sizes.temp : DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.temp;
@@ -28758,6 +28908,9 @@ function __bindOtherCurveInteractions(modal) {
         }
         setCurve(curve);
         setMagnets(magnets);
+        if (dragState.point === 'm1' || dragState.point === 'm2') {
+            __syncPerfSettingsFromOtherMagnetPoints(magnets);
+        }
         __renderOtherZoomMagnetCurve(modal);
     };
 
@@ -28974,12 +29127,12 @@ function openCanvasPerfSettingsModal() {
     document.getElementById('perfInputAvg').value = th.sectionBookmarkAvg;
 
     // 初始化缩放阈值输入框 (显示为百分比)
-    document.getElementById('perfInputEnterLowDetail').value = Math.round(getCanvasLowDetailDisplayZoomThreshold() * 100);
-    document.getElementById('perfInputExitLowDetail').value = Math.round(getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100);
+    document.getElementById('perfInputEnterLowDetail').value = __formatPercentInputValue(getCanvasLowDetailDisplayZoomThreshold() * 100);
+    document.getElementById('perfInputExitLowDetail').value = __formatPercentInputValue(getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100);
 
     // 初始化安全区阈值输入框 (显示为百分比)
     const safeZoneInput = document.getElementById('perfInputSafeZone');
-    if (safeZoneInput) safeZoneInput.value = Math.round(getCanvasSafeZoneThreshold() * 100);
+    if (safeZoneInput) safeZoneInput.value = __formatPercentInputValue(getCanvasSafeZoneThreshold() * 100);
 
     const minZoomInput = document.getElementById('perfInputMinZoom');
     if (minZoomInput) minZoomInput.value = getCanvasMinZoomLimit();
@@ -29016,6 +29169,18 @@ function openCanvasPerfSettingsModal() {
         toggleMagnet.dispatchEvent(new Event('change'));
     }
 
+    // 标记来自“其他”的联动修改
+    __applyPerfLinkedStyles();
+    const clearLinked = () => {
+        __clearPerfLinkedFromOther();
+        __applyPerfLinkedStyles();
+    };
+    const exitInput = document.getElementById('perfInputExitLowDetail');
+    const enterInput = document.getElementById('perfInputEnterLowDetail');
+    if (safeZoneInput) safeZoneInput.addEventListener('input', clearLinked);
+    if (exitInput) exitInput.addEventListener('input', clearLinked);
+    if (enterInput) enterInput.addEventListener('input', clearLinked);
+
     modal.style.display = 'flex';
 
     // Refresh totals (permanent tree needs async fetch)
@@ -29039,6 +29204,8 @@ function closeCanvasPerfSettingsModal() {
 function updateCanvasPerfSettingsUI() {
     const modal = document.getElementById('canvasPerfSettingsModal');
     if (!modal || modal.style.display === 'none') return;
+
+    __applyPerfLinkedStyles();
 
     // 更新状态指示器
     const statusBadge = document.getElementById('perfStatusBadge');
@@ -29173,8 +29340,8 @@ function saveCanvasPerfSettings() {
     localStorage.setItem('canvasDataIntensiveThresholds', JSON.stringify(CanvasState.dataIntensiveMode.thresholds));
 
     // 保存缩放阈值 (从百分比转换为小数)
-    const enterLowDetail = parseInt(document.getElementById('perfInputEnterLowDetail').value, 10);
-    const exitLowDetail = parseInt(document.getElementById('perfInputExitLowDetail').value, 10);
+    const enterLowDetail = parseFloat(document.getElementById('perfInputEnterLowDetail').value);
+    const exitLowDetail = parseFloat(document.getElementById('perfInputExitLowDetail').value);
 
     const zoomThresholds = {
         enterLowDetail: Number.isFinite(enterLowDetail) && enterLowDetail > 0 ? enterLowDetail / 100 : 0.35,
@@ -29191,9 +29358,10 @@ function saveCanvasPerfSettings() {
     // 保存安全区设置 (从百分比转换为小数)
     const safeZoneInput = document.getElementById('perfInputSafeZone');
     const toggleSafeZone = document.getElementById('perfToggleSafeZone');
+    const safeZoneValue = safeZoneInput ? parseFloat(safeZoneInput.value) : NaN;
     const safeZoneSettings = {
-        threshold: safeZoneInput && Number.isFinite(parseInt(safeZoneInput.value, 10)) && parseInt(safeZoneInput.value, 10) > 0
-            ? parseInt(safeZoneInput.value, 10) / 100
+        threshold: Number.isFinite(safeZoneValue) && safeZoneValue > 0
+            ? safeZoneValue / 100
             : 0.70,
         enabled: toggleSafeZone ? toggleSafeZone.checked : true
     };
@@ -29258,6 +29426,7 @@ function saveCanvasPerfSettings() {
 
     // 立即刷新状态
     updateDataIntensiveMode(true);
+    __clearPerfLinkedFromOther();
     closeCanvasPerfSettingsModal();
 
     // Show toast? simple alert for now or custom toast if available
@@ -29355,6 +29524,9 @@ function createCanvasPerfSettingsModal() {
                             <button class="perf-help-btn" id="perfSafeZoneHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
+                            <button class="perf-source-btn" id="perfSourceSafeZoneBtn" title="${isEn ? 'Go to source' : '跳转到来源'}">
+                                <i class="fas fa-link"></i>
+                            </button>
                         </div>
                         <div class="toggle-wrapper">
                             <button class="perf-restore-btn" id="perfRestoreSafeZoneBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}">
@@ -29369,7 +29541,7 @@ function createCanvasPerfSettingsModal() {
                     <div class="perf-input-group">
                         <label>${isEn ? 'Safe Zone Threshold' : '安全区阈值'}</label>
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            <input type="number" id="perfInputSafeZone" min="50" max="100" step="5">
+                            <input type="number" id="perfInputSafeZone" min="1" max="100" step="5">
                             <span style="color: var(--text-secondary); font-size: 12px;">%</span>
                         </div>
                     </div>
@@ -29426,6 +29598,9 @@ function createCanvasPerfSettingsModal() {
                             <button class="perf-help-btn" id="perfZoomHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
+                            <button class="perf-source-btn" id="perfSourceLowDetailBtn" title="${isEn ? 'Go to source' : '跳转到来源'}">
+                                <i class="fas fa-link"></i>
+                            </button>
                         </div>
                         <div class="toggle-wrapper">
                             <button class="perf-restore-btn" id="perfRestoreZoomDefaultsBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}">
@@ -29440,14 +29615,14 @@ function createCanvasPerfSettingsModal() {
                     <div class="perf-input-group">
                         <label>${isEn ? 'Preload Threshold' : '预加载阈值'}</label>
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            <input type="number" id="perfInputExitLowDetail" min="10" max="100" step="5">
+                            <input type="number" id="perfInputExitLowDetail" min="10" max="100" step="0.5">
                             <span style="color: var(--text-secondary); font-size: 12px;">%</span>
                         </div>
                     </div>
                     <div class="perf-input-group">
                         <label>${isEn ? 'Low Detail Switch Threshold' : '低细节显示切换阈值'}</label>
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            <input type="number" id="perfInputEnterLowDetail" min="10" max="100" step="5">
+                            <input type="number" id="perfInputEnterLowDetail" min="10" max="100" step="0.5">
                             <span style="color: var(--text-secondary); font-size: 12px;">%</span>
                         </div>
                     </div>
@@ -29529,6 +29704,10 @@ function createCanvasPerfSettingsModal() {
                                 <span class="slider round"></span>
                             </label>
                         </div>
+                    </div>
+                    <div class="perf-linked-note" id="perfMagnetLinkedNote" style="display: none;">
+                        <span>${isEn ? 'Source: Other → Zoom Speed & Magnet' : '来源：其他 → 缩放速率与磁矩'}</span>
+                        <button class="perf-source-link-btn" id="perfSourceMagnetBtn">${isEn ? 'Go to source' : '跳转到来源'}</button>
                     </div>
                 </div>
                  
@@ -29623,6 +29802,14 @@ function createCanvasPerfSettingsModal() {
     const magnetHelpPopover = modal.querySelector('#perfMagnetHelpPopover');
     const totalAlwaysHelpBtn = modal.querySelector('#perfTotalAlwaysHelpBtn');
     const totalAlwaysHelpPopover = modal.querySelector('#perfTotalAlwaysHelpPopover');
+    const sourceSafeBtn = modal.querySelector('#perfSourceSafeZoneBtn');
+    const sourceLowBtn = modal.querySelector('#perfSourceLowDetailBtn');
+    const sourceMagnetBtn = modal.querySelector('#perfSourceMagnetBtn');
+
+    const openOtherFromPerf = () => {
+        closeCanvasPerfSettingsModal();
+        openCanvasOtherSettingsModal();
+    };
 
     function showPopover(btn, popover) {
         // 关闭其他弹层
@@ -29692,6 +29879,27 @@ function createCanvasPerfSettingsModal() {
             } else {
                 showPopover(magnetHelpBtn, magnetHelpPopover);
             }
+        });
+    }
+
+    if (sourceSafeBtn) {
+        sourceSafeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openOtherFromPerf();
+        });
+    }
+
+    if (sourceLowBtn) {
+        sourceLowBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openOtherFromPerf();
+        });
+    }
+
+    if (sourceMagnetBtn) {
+        sourceMagnetBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openOtherFromPerf();
         });
     }
 
