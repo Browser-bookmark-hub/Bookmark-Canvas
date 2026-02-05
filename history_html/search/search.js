@@ -418,24 +418,29 @@ function handleSearchKeydown(e) {
 
         if (e.key === 'ArrowRight') {
             const view = getCurrentViewSafe();
-            if (view === 'canvas' && searchUiState && searchUiState.activeMode === 'bookmark') {
-                if (panelVisible && panelType === 'results') {
-                    const counts = searchUiState.bookmarkModeCounts || {};
-                    const bookmarkCount = Number(counts.bookmarkCount || 0);
-                    const folderCount = Number(counts.folderCount || 0);
-                    if (bookmarkCount > 0 && folderCount > 0) {
-                        e.preventDefault();
-                        const currentType = searchUiState.bookmarkTypeFilter;
-                        const nextType = currentType === 'folder' ? 'bookmark' : 'folder';
-                        searchUiState.bookmarkTypeFilter = nextType;
-                        const groups = searchUiState.bookmarkGroupModel;
-                        if (Array.isArray(groups)) {
-                            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
-                            renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
-                        } else {
-                            searchCanvasAndRender(searchUiState.query);
+            const input = e.target;
+            if (view === 'canvas' && input && typeof input.selectionStart === 'number') {
+                const value = String(input.value || '');
+                const atEnd = input.selectionStart === value.length && input.selectionEnd === value.length;
+                if (atEnd && value.trim() && searchUiState && searchUiState.activeMode === 'bookmark') {
+                    if (panelVisible && panelType === 'results') {
+                        const counts = searchUiState.bookmarkModeCounts || {};
+                        const bookmarkCount = Number(counts.bookmarkCount || 0);
+                        const folderCount = Number(counts.folderCount || 0);
+                        if (bookmarkCount > 0 && folderCount > 0) {
+                            e.preventDefault();
+                            const currentType = searchUiState.bookmarkTypeFilter;
+                            const nextType = currentType === 'folder' ? 'bookmark' : 'folder';
+                            searchUiState.bookmarkTypeFilter = nextType;
+                            const groups = searchUiState.bookmarkGroupModel;
+                            if (Array.isArray(groups)) {
+                                const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
+                                renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
+                            } else {
+                                searchCanvasAndRender(searchUiState.query);
+                            }
+                            return;
                         }
-                        return;
                     }
                 }
             }
@@ -3194,11 +3199,13 @@ function renderCanvasSearchSuggestions() {
         ? '点左侧按钮切换模式'
         : 'Use the left button to switch mode';
     const hintHelpText = isZh
-        ? '空输入：↑/↓ 直接切换；或 ← 到左侧模式再 ↑/↓。有输入：← 移到左侧模式，↑/↓ 切换并实时更新结果。书签模式：→ 直接切换书签/文件夹筛选；↑/↓ 选择候选，Enter 确认。'
-        : 'Empty: ↑/↓ switches; or ← to focus mode then ↑/↓. With query: ← to focus mode, ↑/↓ switches and updates results. Bookmark mode: → toggles bookmark/folder filter; ↑/↓ select, Enter apply.';
+        ? '模式切换：← 到左侧模式按钮，↑/↓ 切换并实时更新结果；空输入：↑/↓ 直接切换模式。书签模式：光标在输入末尾时，→ 切换书签/文件夹筛选。候选条目：↑/↓ 选择，Enter 跳转。'
+        : 'Mode: ← to the left mode button, ↑/↓ switches and updates results; empty: ↑/↓ switches modes directly. Bookmark mode: with cursor at end, → toggles bookmark/folder filter. Results: ↑/↓ to select, Enter to jump.';
+    const hintLabelWidth = isZh ? '5em' : '6ch';
+    const hintLabelStyle = `display:inline-block; min-width:${hintLabelWidth};`;
     const hintHelpHtml = isZh
-        ? '空输入：↑/↓ 直接切换；或 ← 到左侧模式再 ↑/↓。<br>有输入：← 移到左侧模式，↑/↓ 切换并实时更新结果。<br>书签模式：→ 直接切换书签/文件夹筛选；↑/↓ 选择候选，Enter 确认。'
-        : 'Empty: ↑/↓ switches; or ← to focus mode then ↑/↓.<br>With query: ← to focus mode, ↑/↓ switches and updates results.<br>Bookmark mode: → toggles bookmark/folder filter; ↑/↓ select, Enter apply.';
+        ? `<span style="${hintLabelStyle}">模式切换：</span><span>← 到左侧模式按钮，↑/↓ 切换并实时更新结果；</span><br><span style="${hintLabelStyle}"></span><span>空输入：↑/↓ 直接切换模式。</span><br>书签模式：光标在输入末尾时，→ 切换书签/文件夹筛选。<br>候选条目：↑/↓ 选择，Enter 跳转。`
+        : `<span style="${hintLabelStyle}">Mode:</span><span>← to the left mode button, ↑/↓ switches and updates results;</span><br><span style="${hintLabelStyle}"></span><span>Empty: ↑/↓ switches modes directly.</span><br>Bookmark mode: with cursor at end, → toggles bookmark/folder filter.<br>Results: ↑/↓ to select, Enter to jump.`;
 
     panel.innerHTML = `
         <div class="search-suggestions-header" style="position:relative; padding:6px 10px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:flex-end; gap:10px;">

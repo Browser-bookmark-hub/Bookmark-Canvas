@@ -7302,6 +7302,19 @@ function handleSearch(e) {
     // 清空输入：立即执行清理，且取消所有排队的搜索
     if (!normalizedQuery) {
         cancelPendingMainSearchDebounce();
+        if (currentView === 'canvas') {
+            try {
+                if (typeof shouldShowEmptyQuerySuggestions === 'function' && typeof renderCanvasSearchSuggestions === 'function') {
+                    if (shouldShowEmptyQuerySuggestions()) {
+                        renderCanvasSearchSuggestions();
+                        if (typeof showSearchResultsPanel === 'function') {
+                            showSearchResultsPanel();
+                        }
+                        return;
+                    }
+                }
+            } catch (_) { }
+        }
         performSearch('');
         return;
     }
