@@ -8,6 +8,7 @@ const getCanvasExportFolder = () => (typeof currentLang !== 'undefined' && curre
 
 // Canvas状态管理
 const CANVAS_BASE_ZOOM_DEFAULT = 0.6; // 新默认基准缩放：旧 60% 视图 = 新 100%
+const NODE_MAXIMIZED_STORAGE_KEY = 'canvas-node-maximized-v1';
 
 // 统一的首屏初始缩放：让 HTML 不需要再手动同步数值
 try {
@@ -154,6 +155,8 @@ const CanvasState = {
     isCtrlPressed: false,
     isFullscreen: false,
     fullscreenHandlersBound: false,
+    nodeMaximizedActive: false,
+    pendingMaximizedDescriptor: null,
     scrollState: {
         vertical: {
             hidden: true,
@@ -3164,6 +3167,9 @@ function initCanvasView() {
     cachedCanvasContainer = null;
     cachedCanvasContent = null;
 
+    // 读取上次“栏目最大化”状态（用于恢复）
+    CanvasState.pendingMaximizedDescriptor = __loadMaximizedNodeFromStorage();
+
     // 加载临时栏目展开状态
     loadTempExpandState();
     // 加载外观设置（默认尺寸/颜色/名称）
@@ -3217,6 +3223,7 @@ function initCanvasView() {
     // 设置连接线交互
     setupCanvasConnectionInteractions();
     addAnchorsToNode(document.getElementById('permanentSection'), 'permanent-section');
+    updateNodeFullscreenButtons();
 
     // [数据密集模式] 加载自定义阈值配置
     loadCanvasDataIntensiveSettings();
@@ -5196,6 +5203,7 @@ function setupCanvasZoomAndPan() {
         resizeTimer = setTimeout(() => {
             scheduleDormancyUpdate(120);
             updateCanvasScrollBounds({ recomputeBounds: true, initial: false });
+            refreshMaximizedNodes();
         }, 300);
     });
 
@@ -5640,6 +5648,7 @@ function applyCanvasContentTransform(content, panX, panY, scale) {
     // 与 CSS 保持一致：translate(...) scale(...)（右侧先应用 scale，再应用 translate；平移不随缩放变化）
     content.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${s})`;
     try { updateCanvasGridLayerTransform(x, y, s); } catch (_) { }
+    try { refreshMaximizedNodes(); } catch (_) { }
 }
 
 function getCanvasDisplayZoom() {
@@ -8441,6 +8450,7 @@ function handleCanvasFullscreenChange() {
     const container = document.querySelector('.canvas-main-container');
     CanvasState.isFullscreen = getCurrentFullscreenElement() === container;
     updateFullscreenButtonState();
+    updateNodeFullscreenButtons();
 }
 
 function updateFullscreenButtonState() {
@@ -8483,6 +8493,227 @@ function getCurrentFullscreenElement() {
         document.webkitFullscreenElement ||
         document.mozFullScreenElement ||
         document.msFullscreenElement || null;
+}
+
+function __getCanvasViewportRect() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return null;
+    const rect = workspace.getBoundingClientRect();
+    const zoom = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.zoom === 'number' && CanvasState.zoom > 0)
+        ? CanvasState.zoom : 1;
+    const panX = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.panOffsetX === 'number')
+        ? CanvasState.panOffsetX : 0;
+    const panY = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.panOffsetY === 'number')
+        ? CanvasState.panOffsetY : 0;
+    return {
+        x: (-panX) / zoom,
+        y: (-panY) / zoom,
+        width: rect.width / zoom,
+        height: rect.height / zoom
+    };
+}
+
+function __isNodeMaximized(element) {
+    return !!(element && element.classList && element.classList.contains('canvas-node-maximized'));
+}
+
+function __serializeMaximizedNode(element) {
+    if (!element || !element.classList) return null;
+    const isPermanent = element.classList.contains('permanent-bookmark-section');
+    const isTemp = element.classList.contains('temp-canvas-node');
+    const isMd = element.classList.contains('md-canvas-node');
+
+    if (isPermanent) {
+        const copyId = element.dataset ? element.dataset.permanentSectionCopyId : null;
+        if (copyId) {
+            return { type: 'permanent-copy', copyId: String(copyId) };
+        }
+        return { type: 'permanent', id: 'permanentSection' };
+    }
+
+    if (isTemp) {
+        const id = element.id || (element.dataset ? element.dataset.sectionId : null);
+        if (id) return { type: 'temp-node', id: String(id) };
+    }
+
+    if (isMd) {
+        const id = element.id;
+        if (id) return { type: 'md-node', id: String(id) };
+    }
+
+    if (element.id) {
+        return { type: 'node', id: String(element.id) };
+    }
+    return null;
+}
+
+function __saveMaximizedNodeToStorage(element) {
+    const payload = __serializeMaximizedNode(element);
+    if (!payload) return;
+    try {
+        localStorage.setItem(NODE_MAXIMIZED_STORAGE_KEY, JSON.stringify(payload));
+    } catch (_) { }
+}
+
+function __clearMaximizedNodeStorage() {
+    try { localStorage.removeItem(NODE_MAXIMIZED_STORAGE_KEY); } catch (_) { }
+}
+
+function __loadMaximizedNodeFromStorage() {
+    try {
+        const raw = localStorage.getItem(NODE_MAXIMIZED_STORAGE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (!data || typeof data !== 'object') return null;
+        return data;
+    } catch (_) {
+        return null;
+    }
+}
+
+function __resolveMaximizedNode(descriptor) {
+    if (!descriptor || typeof descriptor !== 'object') return null;
+    if (descriptor.type === 'permanent') {
+        return document.getElementById('permanentSection');
+    }
+    if (descriptor.type === 'permanent-copy') {
+        const copyId = String(descriptor.copyId || '').trim();
+        if (!copyId) return null;
+        return document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${CSS.escape(copyId)}"]`);
+    }
+    if (descriptor.id) {
+        return document.getElementById(String(descriptor.id));
+    }
+    return null;
+}
+
+function __tryRestoreMaximizedNode({ clearIfMissing = false } = {}) {
+    if (!CanvasState.pendingMaximizedDescriptor) return;
+    const target = __resolveMaximizedNode(CanvasState.pendingMaximizedDescriptor);
+    if (target) {
+        maximizeCanvasNode(target);
+        CanvasState.pendingMaximizedDescriptor = null;
+        return;
+    }
+    if (clearIfMissing) {
+        CanvasState.pendingMaximizedDescriptor = null;
+        __clearMaximizedNodeStorage();
+        __updateNodeMaximizedState();
+    }
+}
+
+function __updateNodeMaximizedState() {
+    try {
+        CanvasState.nodeMaximizedActive = !!document.querySelector('.canvas-node-maximized');
+        if (document && document.body) {
+            document.body.classList.toggle('canvas-node-maximized-active', CanvasState.nodeMaximizedActive);
+        }
+    } catch (_) {
+        CanvasState.nodeMaximizedActive = false;
+    }
+}
+
+function __clearOtherMaximizedNodes(except) {
+    document.querySelectorAll('.canvas-node-maximized').forEach((el) => {
+        if (except && el === except) return;
+        restoreCanvasNodeLayout(el);
+    });
+}
+
+function maximizeCanvasNode(element) {
+    if (!element) return;
+    const rect = __getCanvasViewportRect();
+    if (!rect) return;
+    __clearOtherMaximizedNodes(element);
+
+    if (!element.dataset) return;
+    element.dataset.maxPrevLeft = element.style.left || '';
+    element.dataset.maxPrevTop = element.style.top || '';
+    element.dataset.maxPrevWidth = element.style.width || '';
+    element.dataset.maxPrevHeight = element.style.height || '';
+    element.dataset.maxPrevTransform = element.style.transform || '';
+    element.dataset.maxPrevZ = element.style.zIndex || '';
+
+    element.classList.add('canvas-node-maximized');
+    element.style.transform = 'none';
+    element.style.left = `${rect.x}px`;
+    element.style.top = `${rect.y}px`;
+    element.style.width = `${rect.width}px`;
+    element.style.height = `${rect.height}px`;
+    element.style.zIndex = '10000';
+    __updateNodeMaximizedState();
+    __saveMaximizedNodeToStorage(element);
+    updateNodeFullscreenButtons();
+}
+
+function restoreCanvasNodeLayout(element) {
+    if (!element || !element.dataset) return;
+    if (!__isNodeMaximized(element)) return;
+    element.classList.remove('canvas-node-maximized');
+    element.style.left = element.dataset.maxPrevLeft || '';
+    element.style.top = element.dataset.maxPrevTop || '';
+    element.style.width = element.dataset.maxPrevWidth || '';
+    element.style.height = element.dataset.maxPrevHeight || '';
+    element.style.transform = element.dataset.maxPrevTransform || '';
+    element.style.zIndex = element.dataset.maxPrevZ || '';
+    delete element.dataset.maxPrevLeft;
+    delete element.dataset.maxPrevTop;
+    delete element.dataset.maxPrevWidth;
+    delete element.dataset.maxPrevHeight;
+    delete element.dataset.maxPrevTransform;
+    delete element.dataset.maxPrevZ;
+    __updateNodeMaximizedState();
+    if (!CanvasState.nodeMaximizedActive) {
+        __clearMaximizedNodeStorage();
+    }
+    updateNodeFullscreenButtons();
+}
+
+function toggleElementFullscreen(element) {
+    if (!element) return;
+    if (__isNodeMaximized(element)) {
+        restoreCanvasNodeLayout(element);
+    } else {
+        maximizeCanvasNode(element);
+    }
+    updateNodeFullscreenButtons();
+}
+
+function refreshMaximizedNodes() {
+    if (!CanvasState.nodeMaximizedActive) return;
+    const rect = __getCanvasViewportRect();
+    if (!rect) return;
+    document.querySelectorAll('.canvas-node-maximized').forEach((element) => {
+        if (!element) return;
+        element.style.left = `${rect.x}px`;
+        element.style.top = `${rect.y}px`;
+        element.style.width = `${rect.width}px`;
+        element.style.height = `${rect.height}px`;
+    });
+}
+
+function updateNodeFullscreenButtons() {
+    const buttons = document.querySelectorAll('.canvas-node-fullscreen-btn');
+    if (!buttons.length) return;
+    const lang = getCanvasLanguage();
+
+    buttons.forEach((btn) => {
+        if (!btn) return;
+        const target = btn.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
+        if (!target) return;
+        const isFullscreen = __isNodeMaximized(target);
+        const labelKey = isFullscreen ? 'canvasFullscreenExit' : 'canvasFullscreenEnter';
+        const label = getFullscreenLabel(labelKey, lang);
+        btn.setAttribute('title', label);
+        btn.setAttribute('aria-label', label);
+        btn.setAttribute('data-tooltip', label);
+        btn.classList.toggle('fullscreen-active', isFullscreen);
+        const icon = btn.querySelector('i');
+        if (icon) {
+            icon.classList.toggle('fa-expand', !isFullscreen);
+            icon.classList.toggle('fa-compress', isFullscreen);
+        }
+    });
 }
 
 function shouldHandleCustomScroll(event) {
@@ -9874,6 +10105,17 @@ function __ensurePermanentSectionCopyControlsBound() {
             return;
         }
 
+        const fullscreenBtn = e && e.target && e.target.closest ? e.target.closest('.permanent-section-fullscreen-btn') : null;
+        if (fullscreenBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const sectionEl = fullscreenBtn.closest('.permanent-bookmark-section');
+            if (sectionEl) {
+                toggleElementFullscreen(sectionEl);
+            }
+            return;
+        }
+
         const removeBtn = e && e.target && e.target.closest ? e.target.closest('.permanent-section-remove-btn') : null;
         if (removeBtn) {
             e.preventDefault();
@@ -10008,6 +10250,7 @@ function createPermanentSectionCopy(sourceSection) {
 
     // Bind description editing behavior
     try { bindPermanentSectionTipBehavior(copySection); } catch (_) { }
+    updateNodeFullscreenButtons();
 
     return copySection;
 }
@@ -10047,6 +10290,7 @@ function __createPermanentSectionCopyFromStorage(copyData) {
         try { __updatePermanentSectionIndexBadges(); } catch (_) { }
         try { __updatePermanentSectionIndexBadges(); } catch (_) { }
         try { bindPermanentSectionTipBehavior(existed); } catch (_) { }
+        updateNodeFullscreenButtons();
         return existed;
     }
 
@@ -10102,6 +10346,7 @@ function __createPermanentSectionCopyFromStorage(copyData) {
     try { __updatePermanentSectionIndexBadges(); } catch (_) { }
     try { __updatePermanentSectionIndexBadges(); } catch (_) { }
     try { bindPermanentSectionTipBehavior(copySection); } catch (_) { }
+    updateNodeFullscreenButtons();
     return copySection;
 }
 
@@ -10172,6 +10417,7 @@ function makePermanentSectionDraggable(permanentSection) {
     registerSectionCtrlOverlay(permanentSection);
 
     const onMouseDown = (e) => {
+        if (permanentSection.classList.contains('canvas-node-maximized')) return;
         // 不要在连接点或其触发区上触发拖动
         if (e.target.closest('.canvas-node-anchor') || e.target.closest('.canvas-anchor-zone')) return;
 
@@ -11440,6 +11686,7 @@ function renderMdNode(node) {
     const focusTitle = lang === 'en' ? 'Locate and zoom' : '定位并放大';
     const editTitle = lang === 'en' ? 'Edit' : '编辑';
     const formatTitle = lang === 'en' ? 'Format toolbar' : '格式工具栏';
+    const fullscreenTitle = getFullscreenLabel('canvasFullscreenEnter', lang);
 
     // 多语言：import-container 的两个删除按钮
     const deleteFrameTitle = lang === 'en' ? 'Delete Frame Only' : '仅删除框体';
@@ -11462,6 +11709,9 @@ function renderMdNode(node) {
             <button class="md-node-toolbar-btn" data-action="md-focus" data-tooltip="${focusTitle}">
                 <i class="fas fa-search-plus"></i>
             </button>
+            <button class="md-node-toolbar-btn canvas-node-fullscreen-btn" data-action="md-fullscreen" data-tooltip="${fullscreenTitle}">
+                <i class="fas fa-expand"></i>
+            </button>
         `;
     } else {
         // 普通节点使用标准工具栏
@@ -11470,6 +11720,7 @@ function renderMdNode(node) {
             <button class="md-node-toolbar-btn" data-action="md-color-toggle" data-tooltip="${colorTitle}"><i class="fas fa-palette"></i></button>
             <button class="md-node-toolbar-btn" data-action="md-format-toggle" data-tooltip="${formatTitle}"><i class="fas fa-font"></i></button>
             <button class="md-node-toolbar-btn" data-action="md-focus" data-tooltip="${focusTitle}"><i class="fas fa-search-plus"></i></button>
+            <button class="md-node-toolbar-btn canvas-node-fullscreen-btn" data-action="md-fullscreen" data-tooltip="${fullscreenTitle}"><i class="fas fa-expand"></i></button>
             <button class="md-node-toolbar-btn" data-action="md-edit" data-tooltip="${editTitle}"><i class="far fa-edit"></i></button>
         `;
     }
@@ -14492,6 +14743,7 @@ function renderMdNode(node) {
 
     el.appendChild(toolbar);
     el.appendChild(editor);
+    updateNodeFullscreenButtons();
 
     // 点击处理：格式化元素展开为源码，链接打开
     editor.addEventListener('click', (e) => {
@@ -14997,6 +15249,8 @@ function renderMdNode(node) {
         } else if (action === 'md-focus') {
             selectMdNode(node.id);
             locateAndZoomToMdNode(node.id);
+        } else if (action === 'md-fullscreen') {
+            toggleElementFullscreen(el);
         } else if (action === 'md-format-toggle') {
             // 打开格式工具栏
             toggleFormatPopover(btn);
@@ -18521,8 +18775,22 @@ function renderTempNode(section, options = {}) {
         saveTempNodes();
     });
 
+    const fullscreenBtn = document.createElement('button');
+    fullscreenBtn.type = 'button';
+    fullscreenBtn.className = 'temp-node-action-btn temp-node-fullscreen-btn canvas-node-fullscreen-btn';
+    const fullscreenLabel = getFullscreenLabel('canvasFullscreenEnter', getCanvasLanguage());
+    fullscreenBtn.title = fullscreenLabel;
+    fullscreenBtn.setAttribute('aria-label', fullscreenLabel);
+    fullscreenBtn.innerHTML = '<i class="fas fa-expand"></i>';
+    fullscreenBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleElementFullscreen(nodeElement);
+    });
+
     actions.appendChild(renameBtn);
     actions.appendChild(pinBtn);
+    actions.appendChild(fullscreenBtn);
     actions.appendChild(colorWrap);
     actions.appendChild(closeBtn);
 
@@ -18876,6 +19144,7 @@ function renderTempNode(section, options = {}) {
     nodeElement.appendChild(header);
     nodeElement.appendChild(descriptionContainer);
     nodeElement.appendChild(body);
+    updateNodeFullscreenButtons();
 
     // 低缩放模式：居中大字显示“序号(#) + 标题”，便于在缩小视图快速识别栏目
     // （类似 Obsidian Canvas 的远景视图）
@@ -20111,6 +20380,7 @@ function makeNodeDraggable(element, section) {
     const onMouseDown = (e) => {
         const target = e.target;
         if (!target) return;
+        if (element.classList.contains('canvas-node-maximized')) return;
 
         if (target.closest('.temp-node-action-btn') ||
             target.closest('.temp-color-popover') ||
@@ -26865,6 +27135,9 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
         }
         try { localStorage.setItem(openedKey, 'true'); } catch (_) { }
     }
+
+    // Restore maximized node state after all nodes are rendered
+    __tryRestoreMaximizedNode({ clearIfMissing: true });
 }
 
 function __tryRestoreTempNodesFromChromeStorage() {
@@ -28478,6 +28751,7 @@ window.CanvasModule = {
     enhance: enhanceBookmarkTreeForCanvas, // 增强书签树的Canvas功能
     clear: clearAllTempNodes,
     updateFullscreenButton: updateFullscreenButtonState,
+    updateNodeFullscreenButtons: updateNodeFullscreenButtons,
     updateShortcutDisplays: updateShortcutDisplays, // 更新快捷键显示
     CanvasState: CanvasState, // 导出状态供外部访问（如指针拖拽）
     createTempNode: createTempNode, // 导出创建临时节点函数

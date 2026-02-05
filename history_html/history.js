@@ -2692,6 +2692,9 @@ function applyLanguage() {
         if (window.CanvasModule && typeof window.CanvasModule.updateFullscreenButton === 'function') {
             window.CanvasModule.updateFullscreenButton();
         }
+        if (window.CanvasModule && typeof window.CanvasModule.updateNodeFullscreenButtons === 'function') {
+            window.CanvasModule.updateNodeFullscreenButtons();
+        }
         const container = document.querySelector('.canvas-main-container');
         const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
         const isFullscreen = container && fullscreenElement === container;

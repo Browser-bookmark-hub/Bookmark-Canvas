@@ -5806,6 +5806,18 @@ a.tree-label.tree-bookmark-link:hover {
     /* 悬停显示抓手 */
 }
 
+/* Node maximize state (permanent/temp/blank cards) */
+.canvas-node-maximized {
+    border-radius: 0;
+    box-shadow: var(--shadow-lg);
+}
+
+/* Hide canvas scrollbars + floating zoom tools while a node is maximized */
+body.canvas-node-maximized-active .canvas-scrollbar,
+body.canvas-node-maximized-active .canvas-zoom-indicator {
+    display: none !important;
+}
+
 /* 编辑模式下禁用拖拽光标 */
 .md-canvas-node.editing {
     cursor: default;
