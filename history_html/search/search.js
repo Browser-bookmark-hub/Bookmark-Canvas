@@ -34,13 +34,26 @@ const searchUiState = {
     bookmarkGroupCollapse: new Map(), // groupId -> boolean (true = collapsed)
     bookmarkGroupModel: null // [{ header, children:[{item,s}] }]
     ,
-    // Canvas bookmark search: whether to show bookmark or folder results
-    // Values: 'bookmark' | 'folder' | null (auto)
+    // Canvas bookmark search: whether to show bookmark / folder / domain results
+    // Values: 'bookmark' | 'folder' | 'domain' | null (auto)
     bookmarkTypeFilter: null,
+
+    // Cache for bookmark-domain grouping (per query)
+    domainIndexCache: null,
+    // Domain grouping level: 'root' (registrable) or 'host' (subdomain)
+    domainGrouping: 'host',
 
     // Search help menu state (click the left icon)
     isHelpOpen: false
 };
+
+const DOMAIN_GROUP_PREF_KEY = 'canvas-search-domain-grouping';
+try {
+    const stored = localStorage.getItem(DOMAIN_GROUP_PREF_KEY);
+    if (stored === 'root' || stored === 'host') {
+        searchUiState.domainGrouping = stored;
+    }
+} catch (_) { }
 
 
 // ==================== 搜索上下文管理器 (Phase 4) ====================
@@ -427,11 +440,52 @@ function handleSearchKeydown(e) {
                         const counts = searchUiState.bookmarkModeCounts || {};
                         const bookmarkCount = Number(counts.bookmarkCount || 0);
                         const folderCount = Number(counts.folderCount || 0);
-                        if (bookmarkCount > 0 && folderCount > 0) {
+                        const domainCount = Number(counts.domainCount || 0);
+                        if (domainCount > 0) {
                             e.preventDefault();
+                            const hasBookmark = bookmarkCount > 0;
+                            const hasFolder = folderCount > 0;
                             const currentType = searchUiState.bookmarkTypeFilter;
-                            const nextType = currentType === 'folder' ? 'bookmark' : 'folder';
+                            const currentGrouping = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
+
+                            let nextType = currentType;
+                            let nextGrouping = currentGrouping;
+
+                            if (currentType === 'domain') {
+                                if (currentGrouping === 'host') {
+                                    nextGrouping = 'root';
+                                } else {
+                                    if (hasBookmark) {
+                                        nextType = 'bookmark';
+                                    } else if (hasFolder) {
+                                        nextType = 'folder';
+                                    } else {
+                                        nextGrouping = 'host';
+                                    }
+                                }
+                            } else if (currentType === 'bookmark') {
+                                if (hasFolder) {
+                                    nextType = 'folder';
+                                } else {
+                                    nextType = 'domain';
+                                    nextGrouping = 'host';
+                                }
+                            } else if (currentType === 'folder') {
+                                nextType = 'domain';
+                                nextGrouping = 'host';
+                            } else {
+                                nextType = 'domain';
+                                nextGrouping = 'host';
+                            }
+
                             searchUiState.bookmarkTypeFilter = nextType;
+                            if (nextType === 'domain') {
+                                searchUiState.domainGrouping = nextGrouping;
+                                if (nextGrouping !== currentGrouping) {
+                                    try { localStorage.setItem(DOMAIN_GROUP_PREF_KEY, nextGrouping); } catch (_) { }
+                                }
+                            }
+
                             const groups = searchUiState.bookmarkGroupModel;
                             if (Array.isArray(groups)) {
                                 const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
@@ -440,6 +494,26 @@ function handleSearchKeydown(e) {
                                 searchCanvasAndRender(searchUiState.query);
                             }
                             return;
+                        } else {
+                            const availableTypes = [];
+                            if (bookmarkCount > 0) availableTypes.push('bookmark');
+                            if (folderCount > 0) availableTypes.push('folder');
+
+                            if (availableTypes.length > 1) {
+                                e.preventDefault();
+                                const currentType = searchUiState.bookmarkTypeFilter;
+                                const idx = availableTypes.indexOf(currentType);
+                                const nextType = availableTypes[(idx >= 0 ? idx + 1 : 0) % availableTypes.length];
+                                searchUiState.bookmarkTypeFilter = nextType;
+                                const groups = searchUiState.bookmarkGroupModel;
+                                if (Array.isArray(groups)) {
+                                    const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
+                                    renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
+                                } else {
+                                    searchCanvasAndRender(searchUiState.query);
+                                }
+                                return;
+                            }
                         }
                     }
                 }
@@ -566,7 +640,7 @@ function handleSearchResultsPanelClick(e) {
         } catch (_) { }
 
         const type = String(typeBtn.dataset.type || '');
-        if (type !== 'bookmark' && type !== 'folder') return;
+        if (type !== 'bookmark' && type !== 'folder' && type !== 'domain') return;
 
         // Update filter and re-render (do NOT close panel)
         searchUiState.bookmarkTypeFilter = type;
@@ -576,6 +650,30 @@ function handleSearchResultsPanelClick(e) {
             renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
         } else {
             // Fallback: rerun search
+            searchCanvasAndRender(searchUiState.query);
+        }
+        return;
+    }
+
+    // 0b. Domain granularity toggle (Root / Subdomain)
+    const domainGranularityBtn = e.target.closest('.canvas-bookmark-domain-granularity-btn');
+    if (domainGranularityBtn) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+
+        const targetGroup = String(domainGranularityBtn.dataset.domainGroup || '');
+        const next = targetGroup === 'root' ? 'root' : 'host';
+        searchUiState.bookmarkTypeFilter = 'domain';
+        searchUiState.domainGrouping = next;
+        try { localStorage.setItem(DOMAIN_GROUP_PREF_KEY, next); } catch (_) { }
+
+        const groups = searchUiState.bookmarkGroupModel;
+        if (Array.isArray(groups)) {
+            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
+            renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
+        } else {
             searchCanvasAndRender(searchUiState.query);
         }
         return;
@@ -3208,13 +3306,13 @@ function renderCanvasSearchSuggestions() {
         ? '点左侧按钮切换模式'
         : 'Use the left button to switch mode';
     const hintHelpText = isZh
-        ? '模式切换：← 到左侧模式按钮，↑/↓ 切换并实时更新结果；空输入：↑/↓ 直接切换模式。书签模式：光标在输入末尾时，→ 切换书签/文件夹筛选。候选条目：↑/↓ 选择，Enter 跳转。'
-        : 'Mode: ← to the left mode button, ↑/↓ switches and updates results; empty: ↑/↓ switches modes directly. Bookmark mode: with cursor at end, → toggles bookmark/folder filter. Results: ↑/↓ to select, Enter to jump.';
+        ? '模式切换：← 到左侧模式按钮，↑/↓ 切换并实时更新结果；空输入：↑/↓ 直接切换模式。书签模式：光标在输入末尾时，→ 切换书签/文件夹/域名筛选。候选条目：↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。域名粒度：点击域名旁按钮切换主域名/子域名。'
+        : 'Mode: ← to the left mode button, ↑/↓ switches and updates results; empty: ↑/↓ switches modes directly. Bookmark mode: with cursor at end, → toggles bookmark/folder/domain filter. Results: ↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section. Domain granularity: click the domain pill to toggle root/subdomain.';
     const hintLabelWidth = isZh ? '5em' : '6ch';
     const hintLabelStyle = `display:inline-block; min-width:${hintLabelWidth};`;
     const hintHelpHtml = isZh
-        ? `<span style="${hintLabelStyle}">模式切换：</span><span>← 到左侧模式按钮，↑/↓ 切换并实时更新结果；</span><br><span style="${hintLabelStyle}"></span><span>空输入：↑/↓ 直接切换模式。</span><br>书签模式：光标在输入末尾时，→ 切换书签/文件夹筛选。<br>候选条目：↑/↓ 选择，Enter 跳转。`
-        : `<span style="${hintLabelStyle}">Mode:</span><span>← to the left mode button, ↑/↓ switches and updates results;</span><br><span style="${hintLabelStyle}"></span><span>Empty: ↑/↓ switches modes directly.</span><br>Bookmark mode: with cursor at end, → toggles bookmark/folder filter.<br>Results: ↑/↓ to select, Enter to jump.`;
+        ? `<span style="${hintLabelStyle}">模式切换：</span><span>← 到左侧模式按钮，↑/↓ 切换并实时更新结果；</span><br><span style="${hintLabelStyle}"></span><span>空输入：↑/↓ 直接切换模式。</span><br>书签模式：光标在输入末尾时，→ 切换书签/文件夹/域名筛选。<br>候选条目：↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。<br>域名粒度：点击域名旁按钮切换主域名/子域名。`
+        : `<span style="${hintLabelStyle}">Mode:</span><span>← to the left mode button, ↑/↓ switches and updates results;</span><br><span style="${hintLabelStyle}"></span><span>Empty: ↑/↓ switches modes directly.</span><br>Bookmark mode: with cursor at end, → toggles bookmark/folder/domain filter.<br>Results: ↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section.<br>Domain granularity: click the domain pill to toggle root/subdomain.`;
 
     panel.innerHTML = `
         <div class="search-suggestions-header" style="position:relative; padding:6px 10px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:flex-end; gap:10px;">
@@ -3347,6 +3445,150 @@ function renderCanvasSearchSuggestions() {
     } catch (_) { }
 }
 
+function getDomainCacheKey() {
+    const version = (typeof lastTreeSnapshotVersion !== 'undefined' && lastTreeSnapshotVersion !== null)
+        ? String(lastTreeSnapshotVersion)
+        : '';
+    const fingerprint = (typeof lastTreeFingerprint !== 'undefined' && lastTreeFingerprint)
+        ? String(lastTreeFingerprint.length)
+        : '';
+    return `${version}:${fingerprint}`;
+}
+
+const MULTI_LEVEL_SUFFIXES = new Set([
+    'co.uk', 'org.uk', 'gov.uk', 'ac.uk', 'net.uk', 'sch.uk', 'nhs.uk', 'police.uk', 'mod.uk', 'me.uk', 'plc.uk', 'ltd.uk',
+    'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'id.au', 'asn.au',
+    'com.br', 'net.br', 'org.br', 'gov.br',
+    'com.cn', 'net.cn', 'org.cn', 'gov.cn', 'edu.cn', 'ac.cn',
+    'co.jp', 'ne.jp', 'or.jp', 'ac.jp', 'go.jp', 'ad.jp', 'ed.jp',
+    'co.kr', 'ne.kr', 'or.kr', 'ac.kr', 'go.kr', 'pe.kr', 're.kr',
+    'co.in', 'net.in', 'org.in', 'gov.in', 'ac.in', 'edu.in', 'res.in',
+    'co.nz', 'net.nz', 'org.nz', 'gov.nz', 'ac.nz',
+    'com.hk', 'edu.hk', 'gov.hk', 'org.hk', 'net.hk',
+    'com.tw', 'edu.tw', 'gov.tw', 'org.tw', 'net.tw',
+    'com.sg', 'edu.sg', 'gov.sg', 'org.sg', 'net.sg',
+    'com.my', 'edu.my', 'gov.my', 'org.my', 'net.my',
+    'com.tr', 'edu.tr', 'gov.tr', 'org.tr', 'net.tr',
+    'com.sa', 'edu.sa', 'gov.sa', 'org.sa', 'net.sa',
+    'com.ar', 'edu.ar', 'gov.ar', 'org.ar', 'net.ar',
+    'com.mx', 'edu.mx', 'gob.mx', 'org.mx', 'net.mx',
+    'com.ru', 'net.ru', 'org.ru', 'edu.ru', 'gov.ru',
+    'com.id', 'net.id', 'org.id', 'go.id', 'ac.id', 'co.id',
+    'co.il', 'co.za', 'co.ke', 'co.ug', 'co.tz', 'co.th', 'co.ve'
+]);
+
+function extractBookmarkHost(url) {
+    if (!url) return '';
+    try {
+        const parsed = new URL(String(url));
+        const host = parsed.hostname || '';
+        return host ? host.toLowerCase().replace(/\.$/, '') : '';
+    } catch (_) {
+        return '';
+    }
+}
+
+function getRegistrableDomain(host) {
+    if (!host) return '';
+    const h = String(host).trim().toLowerCase().replace(/\.$/, '');
+    if (!h) return '';
+    if (h === 'localhost') return h;
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return h;
+    if (/^[0-9a-f:]+$/i.test(h) && h.includes(':')) return h;
+
+    const parts = h.split('.').filter(Boolean);
+    if (parts.length <= 2) return h;
+
+    const last2 = parts.slice(-2).join('.');
+    const last3 = parts.slice(-3).join('.');
+    if (MULTI_LEVEL_SUFFIXES.has(last2)) {
+        return parts.slice(-3).join('.');
+    }
+    if (MULTI_LEVEL_SUFFIXES.has(last3)) {
+        return parts.slice(-4).join('.');
+    }
+    return last2;
+}
+
+function getDomainGroupKey(url) {
+    const host = extractBookmarkHost(url);
+    if (!host) return '';
+    const level = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
+    return level === 'host' ? host : getRegistrableDomain(host);
+}
+
+function ensureDomainCacheForQuery(query) {
+    const q = String(query || '').trim().toLowerCase();
+    const treeKey = getDomainCacheKey();
+    const groupLevel = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
+    const cache = searchUiState.domainIndexCache;
+    if (cache && cache.query === q && cache.treeKey === treeKey && cache.groupLevel === groupLevel) return cache;
+
+    const db = buildCanvasSearchDb();
+    const items = Array.isArray(db.bookmarkIndex) ? db.bookmarkIndex : [];
+    const map = new Map();
+
+    for (const item of items) {
+        if (!item || item.source !== 'permanent' || item.nodeType !== 'bookmark') continue;
+
+        const domain = getDomainGroupKey(item.url);
+        if (!domain) continue;
+
+        let entry = map.get(domain);
+        if (!entry) {
+            entry = { domain, count: 0, items: [], match: false };
+            map.set(domain, entry);
+        }
+        entry.count += 1;
+        entry.items.push({ title: item.title, url: item.url, id: item.id });
+
+        if (q && !entry.match) {
+            if (domain.includes(q)) {
+                entry.match = true;
+            } else {
+                const t = String(item.__title || '');
+                const u = String(item.__url || '');
+                const p = String(item.__path || '');
+                if (t.includes(q) || u.includes(q) || p.includes(q)) {
+                    entry.match = true;
+                }
+            }
+        }
+    }
+
+    const results = Array.from(map.values())
+        .filter(entry => !q || entry.match)
+        .map(entry => ({
+            id: `domain:${entry.domain}`,
+            type: 'domain-group',
+            domain: entry.domain,
+            title: entry.domain,
+            count: entry.count,
+            color: '#0ea5e9'
+        }));
+
+    results.sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return String(a.domain || '').localeCompare(String(b.domain || ''));
+    });
+
+    const nextCache = { query: q, treeKey, groupLevel, map, results };
+    searchUiState.domainIndexCache = nextCache;
+    return nextCache;
+}
+
+function getDomainResultsForQuery(query) {
+    const cache = ensureDomainCacheForQuery(query);
+    return Array.isArray(cache.results) ? cache.results : [];
+}
+
+function getDomainItemsForTemp(domain, query) {
+    const cache = ensureDomainCacheForQuery(query);
+    const key = String(domain || '').trim().toLowerCase();
+    const entry = cache.map.get(key);
+    return entry && Array.isArray(entry.items) ? entry.items : [];
+}
+
 /**
  * 渲染画布搜索结果
  */
@@ -3370,10 +3612,12 @@ function renderCanvasSearchResults(results, options = {}) {
         if (currentQ !== q) return;
     } catch (_) { }
 
-    // Canvas Bookmark Mode: count + filter (bookmark vs folder)
+    // Canvas Bookmark Mode: count + filter (bookmark vs folder vs domain)
     const isBookmarkMode = searchUiState.activeMode === 'bookmark';
     let bookmarkModeCounts = null;
     let displayResults = results;
+    let domainResults = [];
+    let domainCount = 0;
 
     if (isBookmarkMode) {
         const countType = (nodeType) => (Array.isArray(results)
@@ -3382,15 +3626,30 @@ function renderCanvasSearchResults(results, options = {}) {
 
         const bookmarkCount = countType('bookmark');
         const folderCount = countType('folder');
-        bookmarkModeCounts = { bookmarkCount, folderCount };
+        try {
+            const q = options.query || searchUiState.query || '';
+            domainResults = getDomainResultsForQuery(q);
+            domainCount = domainResults.length;
+        } catch (_) { }
+
+        bookmarkModeCounts = { bookmarkCount, folderCount, domainCount };
         searchUiState.bookmarkModeCounts = bookmarkModeCounts;
 
         // Determine effective filter (auto fallback)
         let effectiveFilter = searchUiState.bookmarkTypeFilter;
         if (effectiveFilter === 'bookmark' && bookmarkCount === 0) effectiveFilter = null;
         if (effectiveFilter === 'folder' && folderCount === 0) effectiveFilter = null;
+        if (effectiveFilter === 'domain' && domainCount === 0) effectiveFilter = null;
         if (!effectiveFilter) {
-            effectiveFilter = bookmarkCount > 0 ? 'bookmark' : (folderCount > 0 ? 'folder' : null);
+            if (bookmarkCount > 0) {
+                effectiveFilter = 'bookmark';
+            } else if (folderCount > 0) {
+                effectiveFilter = 'folder';
+            } else if (domainCount > 0) {
+                effectiveFilter = 'domain';
+            } else {
+                effectiveFilter = null;
+            }
         }
         searchUiState.bookmarkTypeFilter = effectiveFilter;
 
@@ -3399,6 +3658,8 @@ function renderCanvasSearchResults(results, options = {}) {
             displayResults = results.filter(r => !(r && r.nodeType === 'folder'));
         } else if (effectiveFilter === 'folder') {
             displayResults = results.filter(r => !(r && r.nodeType === 'bookmark'));
+        } else if (effectiveFilter === 'domain') {
+            displayResults = domainResults;
         }
     }
 
@@ -3466,13 +3727,14 @@ function renderCanvasSearchResults(results, options = {}) {
 
     // Canvas Bookmark Mode: render a top toggle row (counts + click to switch)
     if (isBookmarkMode && bookmarkModeCounts) {
-        const { bookmarkCount, folderCount } = bookmarkModeCounts;
+        const { bookmarkCount, folderCount, domainCount } = bookmarkModeCounts;
         const active = searchUiState.bookmarkTypeFilter;
 
         const showBookmarkBtn = bookmarkCount > 0;
         const showFolderBtn = folderCount > 0;
+        const showDomainBtn = domainCount > 0;
 
-        if (showBookmarkBtn || showFolderBtn) {
+        if (showBookmarkBtn || showFolderBtn || showDomainBtn) {
             const makeBtn = ({ type, icon, color, count }) => {
                 const isActive = active === type;
                 const bg = isActive ? `${color}22` : 'transparent';
@@ -3490,15 +3752,36 @@ function renderCanvasSearchResults(results, options = {}) {
             const folderBtn = showFolderBtn
                 ? makeBtn({ type: 'folder', icon: 'fa-folder', color: '#2563eb', count: folderCount })
                 : '';
+            const domainBtn = showDomainBtn
+                ? makeBtn({ type: 'domain', icon: 'fa-globe', color: '#0ea5e9', count: domainCount })
+                : '';
+            const domainGrouping = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
+            const subdomainLabel = isZh ? '子域名' : 'Subdomain';
+            const rootDomainLabel = isZh ? '主域名' : 'Root';
+            const domainGroupingTitle = isZh
+                ? '域名粒度：点击切换 主域名 / 子域名'
+                : 'Domain granularity: click to toggle root/subdomain';
+            const subActive = active === 'domain' && domainGrouping === 'host';
+            const rootActive = active === 'domain' && domainGrouping === 'root';
+            const domainGranularityBtn = showDomainBtn
+                ? `<button class="canvas-bookmark-domain-granularity-btn ${subActive ? 'active' : ''}" type="button" data-domain-group="host" title="${escapeHtml(domainGroupingTitle)}">${escapeHtml(subdomainLabel)}</button>
+                   <button class="canvas-bookmark-domain-granularity-btn ${rootActive ? 'active' : ''}" type="button" data-domain-group="root" title="${escapeHtml(domainGroupingTitle)}">${escapeHtml(rootDomainLabel)}</button>`
+                : '';
 
             const visibleCount = displayResults.filter(r => r && (r.type === 'bookmark-group' || r.type === 'bookmark-item')).length;
             const exportLabel = isZh
                 ? `生成临时栏目${visibleCount ? ` (${visibleCount})` : ''}`
                 : `To Temp Section${visibleCount ? ` (${visibleCount})` : ''}`;
 
-            html += `<div class="canvas-bookmark-type-toggle" style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; border-bottom:1px solid var(--border-color);">
-                <div style="display:flex; align-items:center; gap:8px;">${bookmarkBtn}${folderBtn}</div>
-                <button class="canvas-bookmark-to-temp-btn" type="button">${escapeHtml(exportLabel)}</button>
+            const showExportBtn = active !== 'domain';
+            const exportBtnHtml = showExportBtn
+                ? `<button class="canvas-bookmark-to-temp-btn" type="button">${escapeHtml(exportLabel)}</button>`
+                : '';
+            const justifyStyle = showExportBtn ? 'space-between' : 'flex-start';
+
+            html += `<div class="canvas-bookmark-type-toggle" style="display:flex; align-items:center; justify-content:${justifyStyle}; gap:8px; padding:8px 12px; border-bottom:1px solid var(--border-color);">
+                <div style="display:flex; align-items:center; gap:8px;">${bookmarkBtn}${folderBtn}${domainBtn}${domainGranularityBtn}</div>
+                ${exportBtnHtml}
             </div>`;
         }
     }
@@ -3578,6 +3861,19 @@ function renderCanvasSearchResults(results, options = {}) {
                     : (isZh ? '永久栏目副本' : 'Permanent Copy');
                 badge = makeColoredBadge(isZh ? '永久' : 'Perm', 'permanent');
                 break;
+
+            case 'domain-group': {
+                const domainText = markQueryInText(item.domain || item.title || '');
+                const count = Number(item.count || 0);
+                const countLabel = isZh ? `${count} 个书签` : `${count} bookmarks`;
+                indexLabel = `<div style="display:flex; align-items:center; justify-content:center; width:24px; height:24px; flex-shrink:0; margin-right:2px;">
+                    <i class="fas fa-globe" style="color:#0ea5e9; font-size:16px;"></i>
+                </div>`;
+                title = `<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; color:var(--text-normal);">${domainText}</div>`;
+                descHtml = `<div class="search-result-match" style="margin-top:2px; color:var(--text-muted); font-size:11px;">${escapeHtml(countLabel)}</div>`;
+                badge = makeColoredBadge(isZh ? '域名' : 'Domain', 'domain');
+                break;
+            }
 
             case 'bookmark-group': {
                 // [Phase 3.7 Redesign] Card Layout
@@ -3921,6 +4217,7 @@ function renderCanvasSearchResults(results, options = {}) {
 
 function collectBookmarkItemsForTempSection() {
     const filter = searchUiState.bookmarkTypeFilter;
+    if (filter === 'domain') return [];
     let items = [];
     const groups = searchUiState.bookmarkGroupModel;
 
@@ -4055,6 +4352,71 @@ function createTempSectionFromSearchResults() {
             }
             return;
         }
+        if (typeof tempApi.createBookmark === 'function') {
+            const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
+            const safeUrl = item.url || 'https://';
+            tempApi.createBookmark(sectionId, '', safeTitle, safeUrl);
+        }
+    });
+
+    try {
+        if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
+            window.CanvasModule.scheduleDormancyUpdate();
+        }
+    } catch (_) { }
+
+    try {
+        if (window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
+            window.CanvasModule.locateSection(sectionId);
+        }
+    } catch (_) { }
+
+    try {
+        if (window.CanvasModule && window.CanvasModule.CanvasState) {
+            window.CanvasModule.CanvasState.tempStateTimestamp = Date.now();
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof showCanvasToast === 'function') {
+            showCanvasToast(isZh ? `已生成临时栏目（${items.length}）` : `Temp section created (${items.length})`, 'success');
+        }
+    } catch (_) { }
+}
+
+function createTempSectionFromDomainResult(domain) {
+    if (getCurrentViewSafe() !== 'canvas') return;
+    if (!window.CanvasModule || !window.CanvasModule.createEmptyTempSection || !window.CanvasModule.temp) return;
+
+    const isZh = currentLang === 'zh_CN';
+    const domainKey = String(domain || '').trim().toLowerCase();
+    if (!domainKey) return;
+
+    const items = getDomainItemsForTemp(domainKey, searchUiState.query || '');
+    if (!items.length) return;
+
+    const pos = getCanvasViewportCenterForTemp();
+    const sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, {
+        title: '',
+        label: isZh ? '搜索' : 'Search',
+        source: 'search-result',
+        colorLocked: true
+    });
+    if (!sectionId) return;
+
+    const tempApi = window.CanvasModule.temp;
+    const section = tempApi && typeof tempApi.getSection === 'function'
+        ? tempApi.getSection(sectionId)
+        : null;
+    if (section) {
+        section.title = isZh ? `域名: ${domainKey}` : `Domain: ${domainKey}`;
+        section.label = isZh ? '搜索' : 'Search';
+        section.colorLocked = true;
+        section.source = 'search-result';
+    }
+
+    items.forEach(item => {
+        if (!item) return;
         if (typeof tempApi.createBookmark === 'function') {
             const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
             const safeUrl = item.url || 'https://';
@@ -4908,6 +5270,11 @@ async function activateCanvasSearchResultAtIndex(index) {
             const inputEl = document.getElementById('searchInput');
             if (inputEl) inputEl.value = '';
         } catch (_) { }
+    }
+
+    if (item.type === 'domain-group') {
+        createTempSectionFromDomainResult(item.domain || item.title || '');
+        return;
     }
     // Case 1: Group Result (Aggregation Item)
     if (item.type === 'group-result') {
