@@ -818,6 +818,43 @@
     border-color: rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.6);
 }
 
+.permanent-bookmark-section .canvas-node-anchor[data-side="top"]::before,
+.permanent-bookmark-section .canvas-node-anchor[data-side="bottom"]::before {
+    width: 22px;
+    height: 11px;
+}
+
+.permanent-bookmark-section .canvas-node-anchor[data-side="top"]::before {
+    border-radius: 11px 11px 0 0;
+}
+
+.permanent-bookmark-section .canvas-node-anchor[data-side="bottom"]::before {
+    border-radius: 0 0 11px 11px;
+}
+
+.permanent-bookmark-section .canvas-node-anchor[data-side="left"]::before,
+.permanent-bookmark-section .canvas-node-anchor[data-side="right"]::before {
+    width: 11px;
+    height: 22px;
+}
+
+.permanent-bookmark-section .canvas-node-anchor[data-side="left"]::before {
+    border-radius: 11px 0 0 11px;
+}
+
+.permanent-bookmark-section .canvas-node-anchor[data-side="right"]::before {
+    border-radius: 0 11px 11px 0;
+}
+
+.permanent-bookmark-section .canvas-node-anchor:hover::before,
+.permanent-bookmark-section .zone-top:hover~.canvas-node-anchor[data-side="top"]::before,
+.permanent-bookmark-section .zone-bottom:hover~.canvas-node-anchor[data-side="bottom"]::before,
+.permanent-bookmark-section .zone-left:hover~.canvas-node-anchor[data-side="left"]::before,
+.permanent-bookmark-section .zone-right:hover~.canvas-node-anchor[data-side="right"]::before {
+    box-shadow: 0 0 0 2px rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.18),
+        0 4px 10px rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.28);
+}
+
 .permanent-bookmark-section .canvas-node-anchor:hover::before {
     background-color: rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.6);
     border-color: rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.85);
@@ -865,6 +902,15 @@
 [data-theme="dark"] .permanent-bookmark-section .canvas-node-anchor::before {
     background-color: rgba(52, 211, 153, 0.35);
     border-color: rgba(52, 211, 153, 0.55);
+}
+
+[data-theme="dark"] .permanent-bookmark-section .canvas-node-anchor:hover::before,
+[data-theme="dark"] .permanent-bookmark-section .zone-top:hover~.canvas-node-anchor[data-side="top"]::before,
+[data-theme="dark"] .permanent-bookmark-section .zone-bottom:hover~.canvas-node-anchor[data-side="bottom"]::before,
+[data-theme="dark"] .permanent-bookmark-section .zone-left:hover~.canvas-node-anchor[data-side="left"]::before,
+[data-theme="dark"] .permanent-bookmark-section .zone-right:hover~.canvas-node-anchor[data-side="right"]::before {
+    box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.22),
+        0 4px 10px rgba(52, 211, 153, 0.32);
 }
 
 [data-theme="dark"] .permanent-bookmark-section .canvas-node-anchor:hover::before {
