@@ -38,6 +38,39 @@
     display: block;
 }
 
+/* ==================== 空输入提示（Canvas Suggestions Header） ==================== */
+.search-empty-suggestions-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: calc(100% - 140px);
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--text-tertiary);
+}
+
+.search-empty-suggestions-hint .search-hint-text {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.search-hint-help-btn {
+    margin-left: 2px;
+}
+
+.perf-help-popover.search-hint-help-popover {
+    position: fixed;
+    z-index: 9999;
+    width: max-content;
+    max-width: 560px;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: normal;
+}
+
 /* ==================== 空结果提示 ==================== */
 .search-results-panel .search-results-empty {
     padding: 14px 12px;

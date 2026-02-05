@@ -3085,11 +3085,21 @@ function renderCanvasSearchSuggestions() {
     const hintText = isZh
         ? '点左侧按钮切换模式'
         : 'Use the left button to switch mode';
+    const hintHelpText = isZh
+        ? '空输入：↑/↓ 直接切换；或 ← 到左侧模式再 ↑/↓。有输入：← 移到左侧模式，↑/↓ 切换并实时更新结果。'
+        : 'Empty: ↑/↓ switches; or ← to focus mode then ↑/↓. With query: ← to focus mode, ↑/↓ switches and updates results.';
+    const hintHelpHtml = isZh
+        ? '空输入：↑/↓ 直接切换；或 ← 到左侧模式再 ↑/↓。<br>有输入：← 移到左侧模式，↑/↓ 切换并实时更新结果。'
+        : 'Empty: ↑/↓ switches; or ← to focus mode then ↑/↓.<br>With query: ← to focus mode, ↑/↓ switches and updates results.';
 
     panel.innerHTML = `
         <div class="search-suggestions-header" style="position:relative; padding:6px 10px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:flex-end; gap:10px;">
-            <div class="search-empty-suggestions-hint" style="position:absolute; left:16px; top:50%; transform:translateY(-50%); display:flex; align-items:center; gap:6px; max-width:calc(100% - 140px); font-size:11px; line-height:1.2; color:var(--text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none;">
-                <span style="display:inline-flex; position:relative; top:-1px;">${arrowUpSvg}</span><span>${escapeHtml(hintText)}</span>
+            <div class="search-empty-suggestions-hint" style="position:absolute; left:16px; top:50%; transform:translateY(-50%);">
+                <span class="search-hint-icon" style="display:inline-flex; position:relative; top:-1px;">${arrowUpSvg}</span>
+                <span class="search-hint-text">${escapeHtml(hintText)}</span>
+                <button type="button" class="search-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelpText)}">
+                    <i class="fas fa-question-circle"></i>
+                </button>
             </div>
             <button type="button" class="search-empty-suggestions-hide-btn canvas-suggestions-hide-btn" style="border:1px solid var(--border-color); background:var(--bg-secondary); padding:3px 10px; border-radius:999px; font-size:11px; color:var(--text-secondary); cursor:pointer; white-space:nowrap;">
                 ${escapeHtml(hideLabel)}
@@ -3126,6 +3136,71 @@ function renderCanvasSearchSuggestions() {
                 }
             });
         });
+        const helpBtn = panel.querySelector('.search-hint-help-btn');
+        if (helpBtn) {
+            const ensurePopover = () => {
+                let pop = document.getElementById('searchHintPopover');
+                if (!pop) {
+                    pop = document.createElement('div');
+                    pop.id = 'searchHintPopover';
+                    pop.className = 'perf-help-popover search-hint-help-popover';
+                    pop.innerHTML = '<div class="perf-help-popover-content"></div>';
+                    document.body.appendChild(pop);
+                }
+                return pop;
+            };
+
+            const helpPopover = ensurePopover();
+            const contentEl = helpPopover.querySelector('.perf-help-popover-content');
+            if (contentEl) contentEl.innerHTML = hintHelpHtml;
+
+            let hideTimer = null;
+            const cancelHide = () => {
+                if (hideTimer) {
+                    clearTimeout(hideTimer);
+                    hideTimer = null;
+                }
+            };
+            const showHelp = () => {
+                cancelHide();
+                helpPopover.classList.add('show');
+                helpPopover.style.visibility = 'hidden';
+                helpPopover.style.width = 'max-content';
+                helpPopover.style.maxWidth = '560px';
+
+                const rect = helpBtn.getBoundingClientRect();
+                const popRect = helpPopover.getBoundingClientRect();
+                const margin = 12;
+                let left = rect.left - 8;
+                const maxLeft = window.innerWidth - popRect.width - margin;
+                left = Math.max(margin, Math.min(maxLeft, left));
+
+                const top = Math.min(window.innerHeight - popRect.height - margin, rect.bottom + 8);
+
+                helpPopover.style.left = left + 'px';
+                helpPopover.style.top = top + 'px';
+                helpPopover.style.visibility = '';
+                helpPopover.classList.add('show');
+            };
+            const hideHelp = () => {
+                helpPopover.classList.remove('show');
+            };
+            const scheduleHide = () => {
+                cancelHide();
+                hideTimer = setTimeout(() => {
+                    hideHelp();
+                }, 120);
+            };
+
+            helpPopover.classList.remove('show');
+
+            helpBtn.onmouseenter = showHelp;
+            helpBtn.onmouseleave = scheduleHide;
+            helpBtn.onfocus = showHelp;
+            helpBtn.onblur = scheduleHide;
+            helpPopover.onmouseenter = cancelHide;
+            helpPopover.onmouseleave = scheduleHide;
+        }
     } catch (_) { }
 
     // Align the arrow (inside hint) to the center of the left search button.
