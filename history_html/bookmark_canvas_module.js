@@ -937,9 +937,12 @@ const ZOOM_CURVE_ABS_MAX_FACTOR = 2.4;
 const ZOOM_CURVE_EXPONENT = 1.35;
 const ZOOM_CURVE_RAW_MAX = Math.pow(ZOOM_CURVE_ABS_MAX_FACTOR / ZOOM_CURVE_MAX_FACTOR, 1 / ZOOM_CURVE_EXPONENT);
 const ZOOM_SPEED_GLOBAL_MULTIPLIER = 0.5;
+const TEMP_COLOR_LOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2a4 4 0 0 0-4 4v3H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1V6a4 4 0 0 0-4-4zm-2 7V6a2 2 0 1 1 4 0v3h-4z"/></svg>';
+const TEMP_COLOR_UNLOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M17 9h-1V7a4 4 0 0 0-7.4-2.2 1 1 0 1 0 1.7 1A2 2 0 0 1 14 7v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm0 9H7v-7h10v7z"/></svg>';
 const DEFAULT_CANVAS_OTHER_SETTINGS = {
     autoLinkSplit: false, // 临时栏目分裂后自动连接
     tempColorFollow: true, // 临时栏目颜色跟随
+    tempColorUnlockSync: false, // 解锁后立即继承父色
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
     zoomCurve: {
         p0: { x: 0, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) },
@@ -1101,6 +1104,7 @@ function normalizeCanvasOtherSettings(input) {
     if (!input || typeof input !== 'object') return out;
     if (typeof input.autoLinkSplit === 'boolean') out.autoLinkSplit = input.autoLinkSplit;
     if (typeof input.tempColorFollow === 'boolean') out.tempColorFollow = input.tempColorFollow;
+    if (typeof input.tempColorUnlockSync === 'boolean') out.tempColorUnlockSync = input.tempColorUnlockSync;
     if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
     out.zoomCurve = __normalizeZoomCurve(input.zoomCurve);
     out.magnetPoints = __normalizeMagnetPoints(input.magnetPoints);
@@ -1145,9 +1149,91 @@ function shouldAutoLinkTempSplit() {
     return !!(settings && settings.autoLinkSplit);
 }
 
-function isTempColorFollowEnabled() {
-    const settings = getCanvasOtherSettings();
+function isTempColorFollowEnabled(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
     return !(settings && settings.tempColorFollow === false);
+}
+
+function shouldTempColorUnlockSync(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return !(settings && settings.tempColorUnlockSync === false);
+}
+
+function __isTempSectionColorLocked(section) {
+    if (!section) return true;
+    return !!section.colorLocked;
+}
+
+function __isTempSectionManuallyLocked(section) {
+    return !!(section && section.colorLocked === true);
+}
+
+function __getDefaultTempColorLockedState() {
+    return !isTempColorFollowEnabled();
+}
+
+function __applyTempColorLockButtonState(lockBtn, section) {
+    if (!lockBtn || !section) return;
+    const locked = __isTempSectionColorLocked(section);
+    const isEn = typeof currentLang !== 'undefined' && (currentLang === 'en' || currentLang === 'en_US' || currentLang === 'en-GB' || String(currentLang).toLowerCase().startsWith('en'));
+    const lockLabel = isEn ? 'Lock color' : '锁定颜色';
+    const unlockLabel = isEn ? 'Unlock color' : '解除锁定';
+    lockBtn.classList.toggle('locked', locked);
+    lockBtn.innerHTML = locked ? TEMP_COLOR_LOCKED_SVG : TEMP_COLOR_UNLOCKED_SVG;
+    lockBtn.title = locked ? unlockLabel : lockLabel;
+    lockBtn.setAttribute('aria-label', lockBtn.title);
+    lockBtn.setAttribute('aria-pressed', locked ? 'true' : 'false');
+}
+
+function __syncTempColorFollowLocksInDom() {
+    document.querySelectorAll('.temp-color-lock-btn').forEach(btn => {
+        const node = btn.closest('.temp-canvas-node');
+        const sectionId = node && node.dataset ? node.dataset.sectionId : null;
+        if (!sectionId) return;
+        const section = getTempSection(sectionId);
+        if (!section) return;
+        __applyTempColorLockButtonState(btn, section);
+    });
+}
+
+function __resetAllTempSectionColorsToDefault() {
+    if (!Array.isArray(CanvasState.tempSections)) return;
+    const defaultColor = getTempSectionDefaultColor();
+    CanvasState.tempSections.forEach(section => {
+        if (!section) return;
+        updateTempSectionColor(section, defaultColor);
+    });
+    try { saveTempNodes(); } catch (_) { }
+    const isEn = typeof currentLang !== 'undefined' && (currentLang === 'en' || currentLang === 'en_US' || currentLang === 'en-GB' || String(currentLang).toLowerCase().startsWith('en'));
+    showCanvasToast(
+        isEn ? 'All temp colors reset to default.' : '已还原所有临时栏目为默认色。',
+        'success'
+    );
+}
+
+function __applyGlobalTempColorFollowSetting(enabled) {
+    const lockAll = !enabled;
+    if (!Array.isArray(CanvasState.tempSections)) return;
+    let changed = false;
+    CanvasState.tempSections.forEach(section => {
+        if (!section) return;
+        if (section.colorLocked !== lockAll) {
+            section.colorLocked = lockAll;
+            changed = true;
+        }
+    });
+    if (changed) {
+        __syncTempColorFollowLocksInDom();
+        try { saveTempNodes(); } catch (_) { }
+    }
+}
+
+function __updateOtherTempColorFollowLock(modal, enabled) {
+    const target = modal ? modal.querySelector('#otherTempColorFollowLock') : document.getElementById('otherTempColorFollowLock');
+    if (!target) return;
+    const isOn = !!enabled;
+    target.classList.toggle('is-enabled', isOn);
+    target.innerHTML = isOn ? '<i class="fas fa-unlock"></i>' : '<i class="fas fa-lock"></i>';
 }
 
 function shouldUseDefaultZoomCurve() {
@@ -2492,6 +2578,16 @@ function getParentLabel(label) {
     return '';
 }
 
+function getParentTempSection(section, labelMap = null) {
+    if (!section) return null;
+    const label = getTempSectionLabel(section);
+    if (!label) return null;
+    const parentLabel = getParentLabel(label);
+    if (!parentLabel) return null;
+    const map = labelMap || buildTempSectionLabelMap();
+    return map.get(parentLabel) || null;
+}
+
 function buildTempSectionLabelMap() {
     const map = new Map();
     CanvasState.tempSections.forEach(section => {
@@ -2506,7 +2602,7 @@ function hasLockedAncestor(parentLabel, candidateLabel, labelMap) {
     while (current) {
         if (current === parentLabel) return false;
         const section = labelMap.get(current);
-        if (section && section.colorLocked) return true;
+        if (section && __isTempSectionManuallyLocked(section)) return true;
         current = getParentLabel(current);
     }
     return false;
@@ -2524,7 +2620,6 @@ function updateTempSectionColor(section, color) {
 }
 
 function propagateTempSectionColor(parentSection, color) {
-    if (!isTempColorFollowEnabled()) return;
     if (!parentSection) return;
     const parentLabel = getTempSectionLabel(parentSection);
     if (!parentLabel) return;
@@ -2533,7 +2628,7 @@ function propagateTempSectionColor(parentSection, color) {
         if (!section || section.id === parentSection.id) return;
         const label = getTempSectionLabel(section);
         if (label && isDescendantLabel(parentLabel, label)) {
-            if (section.colorLocked) return;
+            if (__isTempSectionColorLocked(section)) return;
             if (hasLockedAncestor(parentLabel, label, labelMap)) return;
             updateTempSectionColor(section, color);
         }
@@ -2707,6 +2802,7 @@ function convertLegacyTempNode(legacyNode, index) {
         id: sectionId,
         title: (legacyNode.data && legacyNode.data.title) ? legacyNode.data.title : getDefaultTempSectionTitle(),
         color: pickTempSectionColor(),
+        colorLocked: __getDefaultTempColorLockedState(),
         x: legacyNode.x || 0,
         y: legacyNode.y || 0,
         width: legacyNode.width || baseSize.width,
@@ -3569,6 +3665,7 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         description: description,  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
         color: pickTempSectionColor(),
+        colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,
         y: dropY,
         width: baseSize.width,
@@ -3963,6 +4060,7 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
         title: getDefaultTempSectionTitle(),
         sequenceNumber: sequenceNumber,
         color: pickTempSectionColor(),
+        colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,
         y: dropY,
         width: baseSize.width,
@@ -4078,6 +4176,7 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
             title: getDefaultTempSectionTitle(),
             sequenceNumber: sequenceNumber,
             color: pickTempSectionColor(),
+            colorLocked: __getDefaultTempColorLockedState(),
             x: dropX,
             y: dropY,
             width: baseSize.width,
@@ -4174,6 +4273,7 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         description: description,  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
         color: pickTempSectionColor(),
+        colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,
         y: dropY,
         width: baseSize.width,
@@ -10850,9 +10950,14 @@ async function createTempNode(data, x, y) {
     let inheritedLabel = null;
     let inheritedTitle = null;
     let inheritedColor = null;
+    let explicitLock = null;
     let splitPayload = [];
     let originPermanent = null;
     let parentSection = null;
+
+    if (data && typeof data.colorLocked === 'boolean') {
+        explicitLock = data.colorLocked;
+    }
 
     if (isTempSplit) {
         parentSection = getTempSection(data.sectionId);
@@ -10863,7 +10968,9 @@ async function createTempNode(data, x, y) {
             if (inheritedLabel && parentTitle && parentLabel && parentTitle === parentLabel) {
                 inheritedTitle = inheritedLabel;
             }
-            inheritedColor = parentSection.color || getTempSectionDefaultColor();
+            if (!__isTempSectionColorLocked(parentSection)) {
+                inheritedColor = parentSection.color || getTempSectionDefaultColor();
+            }
             try {
                 const fallbackId = data.id || null;
                 let ids = [];
@@ -10921,6 +11028,7 @@ async function createTempNode(data, x, y) {
         title: resolvedTitle,
         sequenceNumber: sequenceNumber,
         color: inheritedColor || pickTempSectionColor(),
+        colorLocked: (typeof explicitLock === 'boolean') ? explicitLock : __getDefaultTempColorLockedState(),
         x,
         y,
         width: baseSize.width,
@@ -11041,6 +11149,7 @@ function createEmptyTempSection(x, y, options = {}) {
         title,
         sequenceNumber,
         color,
+        colorLocked: __getDefaultTempColorLockedState(),
         x: (typeof x === 'number' && isFinite(x)) ? x : 0,
         y: (typeof y === 'number' && isFinite(y)) ? y : 0,
         width: baseSize.width,
@@ -18093,17 +18202,8 @@ function renderTempNode(section, options = {}) {
     const lockBtn = document.createElement('button');
     lockBtn.type = 'button';
     lockBtn.className = 'temp-node-action-btn temp-color-lock-btn';
-    const lockLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Lock color' : '锁定颜色';
-    const unlockLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Unlock color' : '解除锁定';
-    const lockedSvg = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2a4 4 0 0 0-4 4v3H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1V6a4 4 0 0 0-4-4zm-2 7V6a2 2 0 1 1 4 0v3h-4z"/></svg>';
-    const unlockedSvg = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M17 9h-1V7a4 4 0 0 0-7.4-2.2 1 1 0 1 0 1.7 1A2 2 0 0 1 14 7v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm0 9H7v-7h10v7z"/></svg>';
     const updateLockBtn = () => {
-        const locked = !!section.colorLocked;
-        lockBtn.classList.toggle('locked', locked);
-        lockBtn.innerHTML = locked ? lockedSvg : unlockedSvg;
-        lockBtn.title = locked ? unlockLabel : lockLabel;
-        lockBtn.setAttribute('aria-label', lockBtn.title);
-        lockBtn.setAttribute('aria-pressed', locked ? 'true' : 'false');
+        __applyTempColorLockButtonState(lockBtn, section);
     };
     updateLockBtn();
 
@@ -18216,8 +18316,20 @@ function renderTempNode(section, options = {}) {
     lockBtn.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        section.colorLocked = !section.colorLocked;
+        const wasLocked = __isTempSectionColorLocked(section);
+        const nextLocked = !wasLocked;
+        section.colorLocked = nextLocked;
         updateLockBtn();
+        if (wasLocked && !nextLocked && shouldTempColorUnlockSync()) {
+            const parentSection = getParentTempSection(section);
+            if (parentSection && !__isTempSectionColorLocked(parentSection)) {
+                const nextColor = parentSection.color || getTempSectionDefaultColor();
+                section.color = nextColor;
+                applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
+                propagateTempSectionColor(section, nextColor);
+                updateColorHistory(nextColor);
+            }
+        }
         saveTempNodes();
     });
 
@@ -22319,19 +22431,20 @@ async function importHtmlBookmarks(html) {
     const baseSize = getTempSectionBaseSize();
     const position = findAvailablePositionInViewport(baseSize.width, baseSize.height);
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
-    const section = {
-        id: sectionId,
-        title: isEn
-            ? `Imported Bookmarks (${totalCount}) - ${formatTimestampForTitle()}`
-            : `导入的书签 (${totalCount}) - ${formatTimestampForTitle()}`,
-        color: pickTempSectionColor(),
-        x: position.x,
-        y: position.y,
-        width: baseSize.width,
-        height: baseSize.height,
-        createdAt: Date.now(),
-        items: []
-    };
+        const section = {
+            id: sectionId,
+            title: isEn
+                ? `Imported Bookmarks (${totalCount}) - ${formatTimestampForTitle()}`
+                : `导入的书签 (${totalCount}) - ${formatTimestampForTitle()}`,
+            color: pickTempSectionColor(),
+            colorLocked: __getDefaultTempColorLockedState(),
+            x: position.x,
+            y: position.y,
+            width: baseSize.width,
+            height: baseSize.height,
+            createdAt: Date.now(),
+            items: []
+        };
 
     // 递归转换为临时栏目格式
     const convertToTempItem = (node) => {
@@ -22662,6 +22775,7 @@ async function importJsonBookmarks(json) {
             ? `Imported Bookmarks (JSON, ${totalBookmarkCount}) - ${formatTimestampForTitle()}`
             : `导入的书签 (JSON, ${totalBookmarkCount}) - ${formatTimestampForTitle()}`,
         color: pickTempSectionColor(),
+        colorLocked: __getDefaultTempColorLockedState(),
         x: position.x,
         y: position.y,
         width: baseSize.width,
@@ -28700,10 +28814,13 @@ function openCanvasOtherSettingsModal() {
     const settings = getCanvasOtherSettings();
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
     const colorFollow = modal.querySelector('#otherTempColorFollow');
+    const unlockSync = modal.querySelector('#otherTempColorUnlockSync');
     const useDefaultCurve = !(settings && settings.useDefaultZoomCurve === false);
     const defaultCurveToggle = modal.querySelector('#otherUseDefaultZoomCurve');
     if (autoLink) autoLink.checked = !!settings.autoLinkSplit;
     if (colorFollow) colorFollow.checked = !(settings.tempColorFollow === false);
+    if (unlockSync) unlockSync.checked = !(settings.tempColorUnlockSync === false);
+    __updateOtherTempColorFollowLock(modal, colorFollow && colorFollow.checked);
     if (defaultCurveToggle) defaultCurveToggle.checked = useDefaultCurve;
     modal._useDefaultZoomCurve = useDefaultCurve;
     const baseCurve = __normalizeZoomCurve(settings.zoomCurve);
@@ -28738,8 +28855,11 @@ function closeCanvasOtherSettingsModal() {
 function saveCanvasOtherSettings() {
     const modal = document.getElementById('canvasOtherSettingsModal');
     if (!modal) return;
+    const prevSettings = getCanvasOtherSettings();
+    const prevFollow = isTempColorFollowEnabled(prevSettings);
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
     const colorFollow = modal.querySelector('#otherTempColorFollow');
+    const unlockSync = modal.querySelector('#otherTempColorUnlockSync');
     const useDefaultCurve = modal.querySelector('#otherUseDefaultZoomCurve');
     const useDefault = useDefaultCurve ? !!useDefaultCurve.checked : true;
     const defaultCurve = __cloneDefaultOtherSettings().zoomCurve;
@@ -28747,6 +28867,7 @@ function saveCanvasOtherSettings() {
     const settingsInput = {
         autoLinkSplit: !!(autoLink && autoLink.checked),
         tempColorFollow: !!(colorFollow && colorFollow.checked),
+        tempColorUnlockSync: !!(unlockSync && unlockSync.checked),
         useDefaultZoomCurve: useDefault,
         zoomCurve: useDefault ? defaultCurve : (modal._zoomCurve || getCanvasZoomCurveSettings()),
         magnetPoints: useDefault ? defaultMagnets : (modal._magnetPoints || getCanvasZoomMagnetPoints())
@@ -28756,6 +28877,10 @@ function saveCanvasOtherSettings() {
     try {
         localStorage.setItem(CANVAS_OTHER_SETTINGS_KEY, JSON.stringify(normalized));
     } catch (_) { }
+    const nextFollow = isTempColorFollowEnabled(normalized);
+    if (prevFollow !== nextFollow) {
+        __applyGlobalTempColorFollowSetting(nextFollow);
+    }
     if (useDefault) {
         __applyPerfDefaultBaselineToPerf();
     }
@@ -29404,7 +29529,7 @@ function createCanvasOtherSettingsModal() {
                 <div class="detail-section">
                     <div class="detail-section-title">${isEn ? 'Special' : '特殊'}</div>
                     <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Auto-link after split' : '临时栏目分裂后自动连接'}</div>
+                        <div class="appearance-row-label">${isEn ? 'Auto connect with edges after split' : '分裂后使用「连接线」自动连接'}</div>
                         <div class="appearance-row-content">
                             <label class="other-toggle-switch">
                                 <input type="checkbox" id="otherAutoLinkSplit">
@@ -29413,12 +29538,45 @@ function createCanvasOtherSettingsModal() {
                         </div>
                     </div>
                     <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</div>
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</span>
+                            <span class="temp-color-follow-lock" id="otherTempColorFollowLock" aria-hidden="true"></span>
+                            <button class="perf-help-btn" id="otherTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
                         <div class="appearance-row-content">
                             <label class="other-toggle-switch">
                                 <input type="checkbox" id="otherTempColorFollow">
                                 <span class="other-toggle-slider"></span>
                             </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Unlock sync to parent' : '解锁后继承父色'}</span>
+                            <button class="perf-help-btn" id="otherTempColorUnlockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherTempColorUnlockSync">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Reset all temp colors' : '全部还原默认色'}</span>
+                            <button class="perf-help-btn" id="otherTempColorResetHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <button class="perf-btn secondary other-mini-btn" id="otherTempColorResetBtn">
+                                ${isEn ? 'Reset to default' : '还原'}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -29493,6 +29651,27 @@ function createCanvasOtherSettingsModal() {
                     </div>
                 </div>
             </div>
+            <div class="perf-help-popover" id="otherTempColorHelpPopover">
+                <div class="perf-help-popover-content">
+                    ${isEn
+            ? '<b>Global switch</b>: one-tap unify all temp locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.'
+            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br>继承像链条一样：解锁会往下传，任何一处锁住都会在此处断链。<br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。'}
+                </div>
+            </div>
+            <div class="perf-help-popover" id="otherTempColorUnlockHelpPopover">
+                <div class="perf-help-popover-content">
+                    ${isEn
+            ? 'When enabled, unlocking immediately syncs to the parent color. Child items under the current section will follow only if they are unlocked; any locked node in between breaks the chain.'
+            : '开启时，解锁会立即同步父栏目颜色。当前栏目下的子栏目只有在解锁状态才会跟随；中间层若有锁住，会被阻断。'}
+                </div>
+            </div>
+            <div class="perf-help-popover" id="otherTempColorResetHelpPopover">
+                <div class="perf-help-popover-content">
+                    ${isEn
+            ? 'Reset button: resets colors only, without changing lock state.'
+            : '还原按钮：仅还原颜色，不改变锁状态。'}
+                </div>
+            </div>
             <div class="perf-modal-footer">
                 <button class="perf-btn secondary" id="otherCancelBtn">${isEn ? 'Cancel' : '取消'}</button>
                 <button class="perf-btn primary" id="otherSaveBtn">
@@ -29512,6 +29691,15 @@ function createCanvasOtherSettingsModal() {
     const saveBtn = modal.querySelector('#otherSaveBtn');
     if (saveBtn) saveBtn.addEventListener('click', saveCanvasOtherSettings);
     const defaultToggle = modal.querySelector('#otherUseDefaultZoomCurve');
+    const colorFollowToggle = modal.querySelector('#otherTempColorFollow');
+    const unlockSyncToggle = modal.querySelector('#otherTempColorUnlockSync');
+    const resetColorsBtn = modal.querySelector('#otherTempColorResetBtn');
+    const tempHelpBtn = modal.querySelector('#otherTempColorHelpBtn');
+    const tempHelpPopover = modal.querySelector('#otherTempColorHelpPopover');
+    const tempUnlockHelpBtn = modal.querySelector('#otherTempColorUnlockHelpBtn');
+    const tempUnlockHelpPopover = modal.querySelector('#otherTempColorUnlockHelpPopover');
+    const tempResetHelpBtn = modal.querySelector('#otherTempColorResetHelpBtn');
+    const tempResetHelpPopover = modal.querySelector('#otherTempColorResetHelpPopover');
     const jumpPerfBtn = modal.querySelector('#otherDefaultJumpPerfBtn');
     const safeToggle = modal.querySelector('#otherMagnetSafeToggle');
     const midToggle = modal.querySelector('#otherMagnetMidToggle');
@@ -29527,6 +29715,27 @@ function createCanvasOtherSettingsModal() {
             try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
         });
     }
+    if (colorFollowToggle) {
+        const applyGlobalToggle = (enabled) => {
+            __updateOtherTempColorFollowLock(modal, enabled);
+            __applyGlobalTempColorFollowSetting(enabled);
+            const settings = getCanvasOtherSettings();
+            if (settings) {
+                settings.tempColorFollow = !!enabled;
+                try { localStorage.setItem(CANVAS_OTHER_SETTINGS_KEY, JSON.stringify(settings)); } catch (_) { }
+            }
+        };
+        colorFollowToggle.addEventListener('change', () => {
+            applyGlobalToggle(!!colorFollowToggle.checked);
+        });
+    }
+    if (resetColorsBtn) {
+        resetColorsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            __resetAllTempSectionColorsToDefault();
+        });
+    }
     if (jumpPerfBtn) {
         jumpPerfBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -29535,6 +29744,35 @@ function createCanvasOtherSettingsModal() {
             openCanvasPerfSettingsModal();
         });
     }
+    const bindOtherHelpPopover = (btn, popover) => {
+        if (!btn || !popover) return;
+        const showHelp = () => {
+            const rect = btn.getBoundingClientRect();
+            const modalRect = modal.querySelector('.modal-content').getBoundingClientRect();
+            popover.style.top = (rect.bottom - modalRect.top + 8) + 'px';
+            popover.style.left = (rect.left - modalRect.left) + 'px';
+            popover.classList.add('show');
+        };
+        const hideHelp = () => {
+            popover.classList.remove('show');
+        };
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (popover.classList.contains('show')) {
+                hideHelp();
+            } else {
+                showHelp();
+            }
+        });
+        modal.addEventListener('click', (e) => {
+            if (!btn.contains(e.target) && !popover.contains(e.target)) {
+                hideHelp();
+            }
+        });
+    };
+    bindOtherHelpPopover(tempHelpBtn, tempHelpPopover);
+    bindOtherHelpPopover(tempUnlockHelpBtn, tempUnlockHelpPopover);
+    bindOtherHelpPopover(tempResetHelpBtn, tempResetHelpPopover);
     const syncMagnetSettingsFromOther = () => {
         const cur = getCanvasZoomMagnetSettings();
         const next = {

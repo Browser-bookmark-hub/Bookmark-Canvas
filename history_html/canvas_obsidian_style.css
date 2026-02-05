@@ -1446,14 +1446,17 @@
     border-radius: 50%;
     background: transparent;
     color: var(--text-tertiary);
+    opacity: 0.45;
     cursor: pointer;
     transition: all 0.15s ease;
     font-size: 13px;
 }
 
-.perf-help-btn:hover {
+.perf-help-btn:hover,
+.perf-help-btn:focus-visible {
     color: var(--accent-primary);
     background: var(--accent-primary-light, rgba(37, 99, 235, 0.1));
+    opacity: 1;
 }
 
 .perf-help-btn i {
@@ -1701,6 +1704,49 @@
     color: var(--text-secondary);
     padding-top: 2px;
     text-align: left;
+}
+
+.appearance-row-label-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.other-sub-row .appearance-row-label {
+    position: relative;
+    padding-left: 16px;
+}
+
+.other-sub-row .appearance-row-label::before {
+    content: "-";
+    position: absolute;
+    left: 4px;
+    top: 0;
+    color: var(--text-tertiary);
+}
+
+.other-mini-btn {
+    height: 20px;
+    min-height: 20px;
+    padding: 0 10px;
+    font-size: 10px;
+    border-radius: 999px;
+    line-height: 20px;
+}
+
+.temp-color-follow-lock {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    line-height: 1;
+}
+
+.temp-color-follow-lock.is-enabled {
+    color: var(--accent-primary);
 }
 
 .appearance-row-content {
@@ -2010,6 +2056,8 @@
 
 .other-curve-axis-letter {
     display: inline-block;
+    transform: rotate(-90deg);
+    transform-origin: center;
 }
 
 .other-curve-axis-paren {
