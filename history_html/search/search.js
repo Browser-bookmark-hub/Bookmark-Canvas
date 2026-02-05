@@ -3967,7 +3967,12 @@ function createTempSectionFromSearchResults() {
     const isZh = currentLang === 'zh_CN';
     const query = String(searchUiState.query || '').trim();
     const pos = getCanvasViewportCenterForTemp();
-    const sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, { title: '' });
+    const sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, {
+        title: '',
+        label: isZh ? '搜索' : 'Search',
+        source: 'search-result',
+        colorLocked: true
+    });
     if (!sectionId) return;
 
     const tempApi = window.CanvasModule.temp;

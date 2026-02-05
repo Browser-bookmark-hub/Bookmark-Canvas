@@ -915,6 +915,7 @@ const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
     sizes: {
         permanent: { mode: 'manual', width: 600, height: 600 },
         temp: { mode: 'auto', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT },
+        specialTemp: { mode: 'manual', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT },
         mdNode: { width: MD_NODE_DEFAULT_WIDTH, height: MD_NODE_DEFAULT_HEIGHT }
     },
     colors: {
@@ -1064,16 +1065,21 @@ function normalizeCanvasAppearanceSettings(input) {
     const sizes = input.sizes || {};
     const permSize = sizes.permanent || {};
     const tempSize = sizes.temp || {};
+    const specialTempSize = sizes.specialTemp || {};
     const mdSize = sizes.mdNode || {};
 
     out.sizes.permanent.mode = (permSize.mode === 'auto') ? 'auto' : 'manual';
     out.sizes.temp.mode = (tempSize.mode === 'auto') ? 'auto' : 'manual';
+    out.sizes.specialTemp.mode = (specialTempSize.mode === 'auto') ? 'auto' : 'manual';
 
     out.sizes.permanent.width = __clampNumber(permSize.width, 300, 3000, out.sizes.permanent.width);
     out.sizes.permanent.height = __clampNumber(permSize.height, 200, 4000, out.sizes.permanent.height);
 
     out.sizes.temp.width = __clampNumber(tempSize.width, 200, 2400, out.sizes.temp.width);
     out.sizes.temp.height = __clampNumber(tempSize.height, 150, 3000, out.sizes.temp.height);
+
+    out.sizes.specialTemp.width = __clampNumber(specialTempSize.width, 200, 2400, out.sizes.specialTemp.width);
+    out.sizes.specialTemp.height = __clampNumber(specialTempSize.height, 150, 3000, out.sizes.specialTemp.height);
 
     out.sizes.mdNode.width = __clampNumber(mdSize.width, 180, 2000, out.sizes.mdNode.width);
     out.sizes.mdNode.height = __clampNumber(mdSize.height, 140, 2000, out.sizes.mdNode.height);
@@ -1537,9 +1543,17 @@ function __syncPerfSettingsFromOtherMagnetPoints(magnetPoints) {
     __applyPerfLinkedStyles();
 }
 
-function getTempSectionBaseSize() {
+function __getTempSectionSizeSettings(section) {
     const settings = getCanvasAppearanceSettings();
-    const size = settings.sizes && settings.sizes.temp ? settings.sizes.temp : DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.temp;
+    const sizes = settings.sizes || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes;
+    if (section && __isSpecialTempSection(section)) {
+        return sizes.specialTemp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.specialTemp || sizes.temp;
+    }
+    return sizes.temp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.temp;
+}
+
+function getTempSectionBaseSize(section = null) {
+    const size = __getTempSectionSizeSettings(section);
     return { width: size.width, height: size.height, mode: size.mode || 'manual' };
 }
 
@@ -2018,7 +2032,7 @@ function __computeTempSectionAutoSize(section, nodeElement, baseSize) {
 
 function applyTempSectionAutoSize(section, options = {}) {
     if (!section) return;
-    const baseSize = getTempSectionBaseSize();
+    const baseSize = getTempSectionBaseSize(section);
     const el = document.getElementById(section.id);
     if (!el) return;
     const size = __computeTempSectionAutoSize(section, el, baseSize);
@@ -2039,26 +2053,23 @@ function applyTempSectionAutoSize(section, options = {}) {
 
 function applyTempSectionAutoSizeIfNeeded(section) {
     if (!section) return;
-    const settings = getCanvasAppearanceSettings();
-    const mode = settings && settings.sizes && settings.sizes.temp ? settings.sizes.temp.mode : 'manual';
-    if (mode !== 'auto') return;
+    const baseSize = getTempSectionBaseSize(section);
+    if (baseSize.mode !== 'auto') return;
     requestAnimationFrame(() => {
         applyTempSectionAutoSize(section, { save: true });
     });
 }
 
 function applyTempSectionAutoSizeAll() {
-    const settings = getCanvasAppearanceSettings();
-    const mode = settings && settings.sizes && settings.sizes.temp ? settings.sizes.temp.mode : 'manual';
-    if (mode !== 'auto') return;
     const sections = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections : [];
     if (!sections.length) return;
 
     requestAnimationFrame(() => {
         let updated = false;
-        const baseSize = getTempSectionBaseSize();
         sections.forEach(section => {
             if (!section || !section.id) return;
+            const baseSize = getTempSectionBaseSize(section);
+            if (baseSize.mode !== 'auto') return;
             const el = document.getElementById(section.id);
             if (!el) return;
             const size = __computeTempSectionAutoSize(section, el, baseSize);
@@ -2821,7 +2832,6 @@ function convertLegacyTempNode(legacyNode, index) {
         ? legacyNode.id
         : `temp-section-${index + 1}`;
 
-    const baseSize = getTempSectionBaseSize();
     const section = {
         id: sectionId,
         title: (legacyNode.data && legacyNode.data.title) ? legacyNode.data.title : getDefaultTempSectionTitle(),
@@ -2829,11 +2839,20 @@ function convertLegacyTempNode(legacyNode, index) {
         colorLocked: __getDefaultTempColorLockedState(),
         x: legacyNode.x || 0,
         y: legacyNode.y || 0,
-        width: legacyNode.width || baseSize.width,
-        height: legacyNode.height || baseSize.height,
+        width: legacyNode.width || 0,
+        height: legacyNode.height || 0,
         createdAt: Date.now(),
         items: []
     };
+    if (legacyNode && typeof legacyNode.label === 'string' && legacyNode.label.trim()) {
+        section.label = legacyNode.label.trim();
+    }
+    if (legacyNode && typeof legacyNode.source === 'string' && legacyNode.source.trim()) {
+        section.source = legacyNode.source.trim();
+    }
+    const baseSize = getTempSectionBaseSize(section);
+    if (!legacyNode.width) section.width = baseSize.width;
+    if (!legacyNode.height) section.height = baseSize.height;
 
     if (legacyNode.data) {
         const mapped = convertBookmarkNodeToTempItem(legacyNode.data, sectionId);
@@ -3681,7 +3700,6 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         : '';
 
     // 创建临时栏目
-    const baseSize = getTempSectionBaseSize();
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
     const section = {
         id: sectionId,
@@ -3692,8 +3710,8 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         colorLocked: true,
         x: dropX,
         y: dropY,
-        width: baseSize.width,
-        height: baseSize.height,
+        width: 0,
+        height: 0,
         createdAt: Date.now(),
         source: 'browser-drop',  // 标记来源
         items: bookmarks.map((bm, index) => ({
@@ -3706,6 +3724,9 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
             createdAt: Date.now()
         }))
     };
+    const baseSize = getTempSectionBaseSize(section);
+    section.width = baseSize.width;
+    section.height = baseSize.height;
 
     CanvasState.tempSections.push(section);
     renderTempNode(section);
@@ -4088,12 +4109,15 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
         colorLocked: true,
         x: dropX,
         y: dropY,
-        width: baseSize.width,
-        height: baseSize.height,
+        width: 0,
+        height: 0,
         createdAt: Date.now(),
         source: 'browser-drop',  // 标记来源
         items: items
     };
+    const specialBaseSize = getTempSectionBaseSize(section);
+    section.width = specialBaseSize.width;
+    section.height = specialBaseSize.height;
 
     CanvasState.tempSections.push(section);
     renderTempNode(section);
@@ -4194,7 +4218,6 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
         const totalCount = countBookmarks(children);
 
         // 创建临时栏目（使用默认标题格式）
-        const baseSize = getTempSectionBaseSize();
         const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
         const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
         const section = {
@@ -4206,12 +4229,15 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
             colorLocked: true,
             x: dropX,
             y: dropY,
-            width: baseSize.width,
-            height: baseSize.height,
+            width: 0,
+            height: 0,
             createdAt: Date.now(),
             source: 'browser-drop',  // 标记来源
             items: []
         };
+        const specialBaseSize = getTempSectionBaseSize(section);
+        section.width = specialBaseSize.width;
+        section.height = specialBaseSize.height;
 
         // 递归转换为临时栏目格式
         const convertToTempItem = (node) => {
@@ -4304,8 +4330,8 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         colorLocked: true,
         x: dropX,
         y: dropY,
-        width: baseSize.width,
-        height: baseSize.height,
+        width: 0,
+        height: 0,
         createdAt: Date.now(),
         source: 'browser-drop',  // 标记来源
         items: [{
@@ -4318,6 +4344,9 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
             createdAt: Date.now()
         }]
     };
+    const baseSize = getTempSectionBaseSize(section);
+    section.width = baseSize.width;
+    section.height = baseSize.height;
 
     CanvasState.tempSections.push(section);
     renderTempNode(section);
@@ -6152,13 +6181,13 @@ function getCanvasViewportDataStats() {
     let visibleFolderCount = 0;
     let loadedSectionCount = 0; // count of sections with DOM loaded
 
-    const baseSize = getTempSectionBaseSize();
     for (const section of (CanvasState.tempSections || [])) {
         if (!section || !section.id) continue;
+        const baseSize = getTempSectionBaseSize(section);
         const x = Number(section.x);
         const y = Number(section.y);
-        const w = Number(section.width || 360);
-        const h = Number(section.height || 280);
+        const w = Number(section.width || baseSize.width);
+        const h = Number(section.height || baseSize.height);
         if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
 
         // 检测是否在视口内（有任意交集即算可见）
@@ -6565,11 +6594,11 @@ function runCanvasVirtualizationUpdate(options = {}) {
     const viewportCenterX = (rect.width / 2 - panX) / zoom;
     const viewportCenterY = (rect.height / 2 - panY) / zoom;
 
-    const baseSize = getTempSectionBaseSize();
     const candidates = [];
     const mustLoad = new Set(); // 视界内：必须保持树内容加载（减少“可见区域闪烁”）
     for (const section of (CanvasState.tempSections || [])) {
         if (!section || !section.id) continue;
+        const baseSize = getTempSectionBaseSize(section);
         const x = Number(section.x);
         const y = Number(section.y);
         const w = Number(section.width || baseSize.width);
@@ -6734,7 +6763,7 @@ function __getCanvasBlockDormancyActiveRange(workspaceRect) {
 
 function __isTempSectionInBlockRange(section, range) {
     if (!section || !section.id || !range) return false;
-    const baseSize = getTempSectionBaseSize();
+    const baseSize = getTempSectionBaseSize(section);
     const x = Number(section.x);
     const y = Number(section.y);
     const w = Number(section.width || baseSize.width);
@@ -9345,8 +9374,8 @@ function computeCanvasContentBounds() {
         hasContent = true;
     });
 
-    const tempBaseSize = getTempSectionBaseSize();
     CanvasState.tempSections.forEach(section => {
+        const tempBaseSize = getTempSectionBaseSize(section);
         const width = section.width || tempBaseSize.width;
         const height = section.height || tempBaseSize.height;
         minX = Math.min(minX, section.x);
@@ -11029,7 +11058,6 @@ async function createTempNode(data, x, y) {
         } catch (_) { }
     }
 
-    const baseSize = getTempSectionBaseSize();
     const tempNameMode = (getCanvasAppearanceSettings().names && getCanvasAppearanceSettings().names.temp)
         ? getCanvasAppearanceSettings().names.temp.mode
         : 'timestamp';
@@ -11059,8 +11087,8 @@ async function createTempNode(data, x, y) {
         colorLocked: (typeof explicitLock === 'boolean') ? explicitLock : __getDefaultTempColorLockedState(),
         x,
         y,
-        width: baseSize.width,
-        height: baseSize.height,
+        width: 0,
+        height: 0,
         createdAt: Date.now(),
         pinned: !!(data && data.pinned),
         items: []
@@ -11109,6 +11137,10 @@ async function createTempNode(data, x, y) {
             } catch (_) { }
         }
     }
+
+    const finalBaseSize = getTempSectionBaseSize(section);
+    section.width = finalBaseSize.width;
+    section.height = finalBaseSize.height;
 
     try {
         let payload = Array.isArray(splitPayload) ? splitPayload : [];
@@ -11159,7 +11191,6 @@ async function createTempNode(data, x, y) {
 function createEmptyTempSection(x, y, options = {}) {
     // Ensure new sequenceNumber continues from existing sections
     try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
-    const baseSize = getTempSectionBaseSize();
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
     const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
     const title = (options && typeof options.title === 'string' && options.title.trim())
@@ -11168,20 +11199,26 @@ function createEmptyTempSection(x, y, options = {}) {
     const label = (options && typeof options.label === 'string' && options.label.trim())
         ? options.label.trim()
         : '';
+    const source = (options && typeof options.source === 'string' && options.source.trim())
+        ? options.source.trim()
+        : '';
     const color = (options && typeof options.color === 'string' && options.color.trim())
         ? options.color.trim()
         : pickTempSectionColor();
+    const colorLocked = (options && typeof options.colorLocked === 'boolean')
+        ? options.colorLocked
+        : __getDefaultTempColorLockedState();
 
     const section = {
         id: sectionId,
         title,
         sequenceNumber,
         color,
-        colorLocked: __getDefaultTempColorLockedState(),
+        colorLocked: colorLocked,
         x: (typeof x === 'number' && isFinite(x)) ? x : 0,
         y: (typeof y === 'number' && isFinite(y)) ? y : 0,
-        width: baseSize.width,
-        height: baseSize.height,
+        width: 0,
+        height: 0,
         createdAt: Date.now(),
         pinned: !!(options && options.pinned),
         items: []
@@ -11190,6 +11227,13 @@ function createEmptyTempSection(x, y, options = {}) {
     if (label) {
         section.label = label;
     }
+    if (source) {
+        section.source = source;
+    }
+
+    const baseSize = getTempSectionBaseSize(section);
+    section.width = baseSize.width;
+    section.height = baseSize.height;
 
     CanvasState.tempSections.push(section);
     renderTempNode(section);
@@ -18103,7 +18147,7 @@ function renderTempNode(section, options = {}) {
     }
 
     section.color = section.color || getTempSectionDefaultColor();
-    const baseSize = getTempSectionBaseSize();
+    const baseSize = getTempSectionBaseSize(section);
 
     let nodeElement = document.getElementById(section.id);
     const isNew = !nodeElement;
@@ -26768,9 +26812,9 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
     suppressScrollSync = true;
     try {
         shouldRenderShellOnly = isCanvasVirtualizationEnabled() || isCanvasBlockDormancyEnabled();
-        const baseSize = getTempSectionBaseSize();
         const mdBaseSize = getBlankNodeDefaultSize();
         CanvasState.tempSections.forEach(section => {
+            const baseSize = getTempSectionBaseSize(section);
             section.width = section.width || baseSize.width;
             section.height = section.height || baseSize.height;
             // 大数据/极限模式 / 区块休眠：先渲染“壳体”，树内容按需加载（避免启动即卡死/一上来全量加载）
@@ -28539,14 +28583,19 @@ function openCanvasAppearanceSettingsModal() {
     const names = settings.names || DEFAULT_CANVAS_APPEARANCE_SETTINGS.names;
 
     __setAppearanceRadioGroup(modal, 'appearance-temp-size-mode', sizes.temp.mode || 'manual');
+    __setAppearanceRadioGroup(modal, 'appearance-special-temp-size-mode', (sizes.specialTemp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.specialTemp).mode || 'manual');
 
     const tempW = modal.querySelector('#appearanceTempWidth');
     const tempH = modal.querySelector('#appearanceTempHeight');
+    const specialTempW = modal.querySelector('#appearanceSpecialTempWidth');
+    const specialTempH = modal.querySelector('#appearanceSpecialTempHeight');
     const blankW = modal.querySelector('#appearanceBlankWidth');
     const blankH = modal.querySelector('#appearanceBlankHeight');
 
     if (tempW) tempW.value = sizes.temp.width;
     if (tempH) tempH.value = sizes.temp.height;
+    if (specialTempW) specialTempW.value = (sizes.specialTemp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.specialTemp).width;
+    if (specialTempH) specialTempH.value = (sizes.specialTemp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.specialTemp).height;
     if (blankW) blankW.value = sizes.mdNode.width;
     if (blankH) blankH.value = sizes.mdNode.height;
 
@@ -28569,6 +28618,7 @@ function openCanvasAppearanceSettingsModal() {
     if (edgeNameManual) edgeNameManual.value = names.edge.manualValue || '';
 
     __updateAppearanceSizeMode(modal, 'appearance-temp-size-mode', 'appearanceTempSizeInputs');
+    __updateAppearanceSizeMode(modal, 'appearance-special-temp-size-mode', 'appearanceSpecialTempSizeInputs');
     __updateAppearanceNameMode(modal, 'appearanceTempNameMode', 'appearanceTempNameManualWrap');
     __updateAppearanceNameMode(modal, 'appearanceEdgeNameMode', 'appearanceEdgeNameManualWrap');
 
@@ -28602,6 +28652,11 @@ function saveCanvasAppearanceSettings(options = {}) {
                 mode: __getAppearanceRadioValue(modal, 'appearance-temp-size-mode', 'manual'),
                 width: readNumber('appearanceTempWidth', (currentSizes.temp || {}).width),
                 height: readNumber('appearanceTempHeight', (currentSizes.temp || {}).height)
+            },
+            specialTemp: {
+                mode: __getAppearanceRadioValue(modal, 'appearance-special-temp-size-mode', 'manual'),
+                width: readNumber('appearanceSpecialTempWidth', (currentSizes.specialTemp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.specialTemp).width),
+                height: readNumber('appearanceSpecialTempHeight', (currentSizes.specialTemp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.specialTemp).height)
             },
             mdNode: {
                 width: readNumber('appearanceBlankWidth', (currentSizes.mdNode || {}).width),
@@ -28685,6 +28740,32 @@ function createCanvasAppearanceSettingsModal() {
                                 <input type="number" id="appearanceTempWidth" min="200" max="2400" step="10">
                                 <span>×</span>
                                 <input type="number" id="appearanceTempHeight" min="150" max="3000" step="10">
+                                <span>px</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Temp (special)' : '特殊临时栏目'}</span>
+                            <button class="perf-help-btn" id="appearanceSpecialTempHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content appearance-row-content-inline">
+                            <div class="appearance-mode-toggle">
+                                <label class="appearance-radio">
+                                    <input type="radio" name="appearance-special-temp-size-mode" value="manual">
+                                    <span>${isEn ? 'Manual' : '手动输入'}</span>
+                                </label>
+                                <label class="appearance-radio">
+                                    <input type="radio" name="appearance-special-temp-size-mode" value="auto">
+                                    <span>${isEn ? 'Auto-fit tree' : '自适应'}</span>
+                                </label>
+                            </div>
+                            <div class="appearance-size-inputs" id="appearanceSpecialTempSizeInputs">
+                                <input type="number" id="appearanceSpecialTempWidth" min="200" max="2400" step="10">
+                                <span>×</span>
+                                <input type="number" id="appearanceSpecialTempHeight" min="150" max="3000" step="10">
                                 <span>px</span>
                             </div>
                         </div>
@@ -28778,6 +28859,13 @@ function createCanvasAppearanceSettingsModal() {
                 </div>
             </div>
         </div>
+        <div class="perf-help-popover" id="appearanceSpecialTempHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Special temp sections</b>: Drop / Search / Batch.<br><b>Tip</b>: Auto-fit is not recommended when you have many of these sections.'
+            : '<b>特殊临时栏目</b>：拖入 / 搜索 / 批量。<br><b>提示</b>：数量很多时不建议使用自适应。'}
+            </div>
+        </div>
     `;
 
     document.body.appendChild(modal);
@@ -28797,6 +28885,36 @@ function createCanvasAppearanceSettingsModal() {
         __updateAppearanceSizeMode(modal, 'appearance-temp-size-mode', 'appearanceTempSizeInputs');
         scheduleAppearanceSave();
     }));
+
+    const specialTempRadios = modal.querySelectorAll('input[name="appearance-special-temp-size-mode"]');
+    specialTempRadios.forEach(radio => radio.addEventListener('change', () => {
+        __updateAppearanceSizeMode(modal, 'appearance-special-temp-size-mode', 'appearanceSpecialTempSizeInputs');
+        scheduleAppearanceSave();
+    }));
+
+    const specialTempHelpBtn = modal.querySelector('#appearanceSpecialTempHelpBtn');
+    const specialTempHelpPopover = modal.querySelector('#appearanceSpecialTempHelpPopover');
+    const showPopover = (btn, popover) => {
+        modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
+        const rect = btn.getBoundingClientRect();
+        const modalRect = modal.querySelector('.modal-content').getBoundingClientRect();
+        popover.style.top = (rect.top - modalRect.top) + 'px';
+        popover.style.left = (rect.right - modalRect.left + 8) + 'px';
+        popover.classList.add('show');
+    };
+    const hidePopovers = () => {
+        modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
+    };
+    if (specialTempHelpBtn && specialTempHelpPopover) {
+        specialTempHelpBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (specialTempHelpPopover.classList.contains('show')) {
+                hidePopovers();
+            } else {
+                showPopover(specialTempHelpBtn, specialTempHelpPopover);
+            }
+        });
+    }
 
     const tempNameSelect = modal.querySelector('#appearanceTempNameMode');
     if (tempNameSelect) tempNameSelect.addEventListener('change', () => {
@@ -28830,9 +28948,17 @@ function createCanvasAppearanceSettingsModal() {
         scheduleAppearanceSave();
     });
 
+    modal.addEventListener('click', (e) => {
+        if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
+            hidePopovers();
+        }
+    });
+
     const appearanceInputs = [
         '#appearanceTempWidth',
         '#appearanceTempHeight',
+        '#appearanceSpecialTempWidth',
+        '#appearanceSpecialTempHeight',
         '#appearanceBlankWidth',
         '#appearanceBlankHeight',
         '#appearanceTempNameManual',

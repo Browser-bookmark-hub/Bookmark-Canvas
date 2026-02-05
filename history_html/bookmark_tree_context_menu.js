@@ -6100,6 +6100,8 @@ async function batchToTempSection(triggerEvent) {
             newSectionId = canvas.createEmptyTempSection(canvasX, canvasY, {
                 title: sectionTitle,
                 label: sectionLabel,
+                source: 'batch',
+                colorLocked: true,
                 pinned: true
             });
         } else {
