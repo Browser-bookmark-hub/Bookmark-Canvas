@@ -3278,15 +3278,8 @@ function renderCanvasSearchSuggestions() {
             const contentEl = helpPopover.querySelector('.perf-help-popover-content');
             if (contentEl) contentEl.innerHTML = hintHelpHtml;
 
-            let hideTimer = null;
-            const cancelHide = () => {
-                if (hideTimer) {
-                    clearTimeout(hideTimer);
-                    hideTimer = null;
-                }
-            };
+            let outsideHandler = null;
             const showHelp = () => {
-                cancelHide();
                 helpPopover.classList.add('show');
                 helpPopover.style.visibility = 'hidden';
                 helpPopover.style.width = 'max-content';
@@ -3305,25 +3298,34 @@ function renderCanvasSearchSuggestions() {
                 helpPopover.style.top = top + 'px';
                 helpPopover.style.visibility = '';
                 helpPopover.classList.add('show');
+
+                if (!outsideHandler) {
+                    outsideHandler = (ev) => {
+                        if (helpBtn.contains(ev.target) || helpPopover.contains(ev.target)) return;
+                        hideHelp();
+                    };
+                    document.addEventListener('mousedown', outsideHandler, true);
+                }
             };
             const hideHelp = () => {
                 helpPopover.classList.remove('show');
-            };
-            const scheduleHide = () => {
-                cancelHide();
-                hideTimer = setTimeout(() => {
-                    hideHelp();
-                }, 120);
+                if (outsideHandler) {
+                    document.removeEventListener('mousedown', outsideHandler, true);
+                    outsideHandler = null;
+                }
             };
 
             helpPopover.classList.remove('show');
 
-            helpBtn.onmouseenter = showHelp;
-            helpBtn.onmouseleave = scheduleHide;
-            helpBtn.onfocus = showHelp;
-            helpBtn.onblur = scheduleHide;
-            helpPopover.onmouseenter = cancelHide;
-            helpPopover.onmouseleave = scheduleHide;
+            helpBtn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (helpPopover.classList.contains('show')) {
+                    hideHelp();
+                } else {
+                    showHelp();
+                }
+            };
         }
     } catch (_) { }
 

@@ -28905,16 +28905,18 @@ function createCanvasAppearanceSettingsModal() {
     const hidePopovers = () => {
         modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
     };
-    if (specialTempHelpBtn && specialTempHelpPopover) {
-        specialTempHelpBtn.addEventListener('click', (e) => {
+    const bindClickHelpPopover = (btn, popover) => {
+        if (!btn || !popover) return;
+        btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (specialTempHelpPopover.classList.contains('show')) {
+            if (popover.classList.contains('show')) {
                 hidePopovers();
             } else {
-                showPopover(specialTempHelpBtn, specialTempHelpPopover);
+                showPopover(btn, popover);
             }
         });
-    }
+    };
+    bindClickHelpPopover(specialTempHelpBtn, specialTempHelpPopover);
 
     const tempNameSelect = modal.querySelector('#appearanceTempNameMode');
     if (tempNameSelect) tempNameSelect.addEventListener('change', () => {
@@ -29942,32 +29944,30 @@ function createCanvasOtherSettingsModal() {
     const bindOtherHelpPopover = (btn, popover) => {
         if (!btn || !popover) return;
         const showHelp = () => {
+            modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
             const rect = btn.getBoundingClientRect();
             const modalRect = modal.querySelector('.modal-content').getBoundingClientRect();
             popover.style.top = (rect.bottom - modalRect.top + 8) + 'px';
             popover.style.left = (rect.left - modalRect.left) + 'px';
             popover.classList.add('show');
         };
-        const hideHelp = () => {
-            popover.classList.remove('show');
-        };
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             if (popover.classList.contains('show')) {
-                hideHelp();
+                popover.classList.remove('show');
             } else {
                 showHelp();
-            }
-        });
-        modal.addEventListener('click', (e) => {
-            if (!btn.contains(e.target) && !popover.contains(e.target)) {
-                hideHelp();
             }
         });
     };
     bindOtherHelpPopover(tempHelpBtn, tempHelpPopover);
     bindOtherHelpPopover(tempUnlockHelpBtn, tempUnlockHelpPopover);
     bindOtherHelpPopover(tempResetHelpBtn, tempResetHelpPopover);
+    modal.addEventListener('click', (e) => {
+        if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
+            modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
+        }
+    });
     const syncMagnetSettingsFromOther = () => {
         const cur = getCanvasZoomMagnetSettings();
         const next = {
@@ -30801,60 +30801,22 @@ function createCanvasPerfSettingsModal() {
         modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
     }
 
-    if (safeZoneHelpBtn && safeZoneHelpPopover) {
-        safeZoneHelpBtn.addEventListener('click', (e) => {
+    const bindPerfHelpPopover = (btn, popover) => {
+        if (!btn || !popover) return;
+        btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (safeZoneHelpPopover.classList.contains('show')) {
+            if (popover.classList.contains('show')) {
                 hidePopovers();
             } else {
-                showPopover(safeZoneHelpBtn, safeZoneHelpPopover);
+                showPopover(btn, popover);
             }
         });
-    }
-
-    if (triggerHelpBtn && triggerHelpPopover) {
-        triggerHelpBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (triggerHelpPopover.classList.contains('show')) {
-                hidePopovers();
-            } else {
-                showPopover(triggerHelpBtn, triggerHelpPopover);
-            }
-        });
-    }
-
-    if (zoomHelpBtn && zoomHelpPopover) {
-        zoomHelpBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (zoomHelpPopover.classList.contains('show')) {
-                hidePopovers();
-            } else {
-                showPopover(zoomHelpBtn, zoomHelpPopover);
-            }
-        });
-    }
-
-    if (totalAlwaysHelpBtn && totalAlwaysHelpPopover) {
-        totalAlwaysHelpBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (totalAlwaysHelpPopover.classList.contains('show')) {
-                hidePopovers();
-            } else {
-                showPopover(totalAlwaysHelpBtn, totalAlwaysHelpPopover);
-            }
-        });
-    }
-
-    if (magnetHelpBtn && magnetHelpPopover) {
-        magnetHelpBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (magnetHelpPopover.classList.contains('show')) {
-                hidePopovers();
-            } else {
-                showPopover(magnetHelpBtn, magnetHelpPopover);
-            }
-        });
-    }
+    };
+    bindPerfHelpPopover(safeZoneHelpBtn, safeZoneHelpPopover);
+    bindPerfHelpPopover(triggerHelpBtn, triggerHelpPopover);
+    bindPerfHelpPopover(zoomHelpBtn, zoomHelpPopover);
+    bindPerfHelpPopover(totalAlwaysHelpBtn, totalAlwaysHelpPopover);
+    bindPerfHelpPopover(magnetHelpBtn, magnetHelpPopover);
 
     if (sourceSafeBtn) {
         sourceSafeBtn.addEventListener('click', (e) => {
