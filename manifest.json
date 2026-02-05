@@ -15,6 +15,9 @@
     "default_title": "__MSG_actionTitle__",
     "default_popup": "popup.html"
   },
+  "side_panel": {
+    "default_path": "history_html/history.html?view=canvas"
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -31,6 +34,7 @@
     }
   },
   "permissions": [
+    "sidePanel",
     "bookmarks",
     "storage",
     "downloads",

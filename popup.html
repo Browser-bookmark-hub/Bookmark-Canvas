@@ -478,6 +478,13 @@
         <span id="pageTitleElement">书签画布</span>
       </h2>
       <div style="display: flex; align-items: center;">
+        <button id="openSidePanelBtn"
+          style="font-size: 14px; padding: 5px 8px; margin-right: 8px; background-color: var(--theme-bg-tertiary); border: 1px solid var(--theme-border-primary); border-radius: 4px; color: var(--theme-text-secondary); cursor: pointer; position: relative;">
+          <i class="fas fa-columns"></i>
+          <span class="tooltip"
+            style="position: absolute; background-color: var(--theme-tooltip-bg, rgba(0,0,0,0.7)); color: var(--theme-tooltip-text, white); padding: 2px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; visibility: hidden; opacity: 0; transition: opacity 0.3s; pointer-events: none; top: 100%; margin-top: 6px; left: 50%; transform: translateX(-50%);"
+            id="sidePanelTooltip">打开侧边栏</span>
+        </button>
         <button id="openSourceInfoBtn"
           style="font-size: 14px; padding: 5px 8px; margin-right: 8px; background-color: var(--theme-bg-tertiary); border: 1px solid var(--theme-border-primary); border-radius: 4px; color: var(--theme-text-secondary); cursor: pointer; position: relative;">
           <i class="fab fa-github"></i>

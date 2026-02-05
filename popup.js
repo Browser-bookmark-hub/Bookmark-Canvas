@@ -13,6 +13,7 @@ const popupI18n = {
     openSourceGithubLabel: 'GitHub 仓库:',
     openSourceIssueLabel: '问题反馈:',
     openSourceIssueText: '提交问题',
+    sidePanelOpen: '打开侧边栏',
     shortcutsTitle: '快捷键',
     shortcutsOpenCanvas: '打开画布',
     shortcutsSettings: '在浏览器中管理快捷键'
@@ -28,6 +29,7 @@ const popupI18n = {
     openSourceGithubLabel: 'GitHub repo:',
     openSourceIssueLabel: 'Issue tracker:',
     openSourceIssueText: 'Report issue',
+    sidePanelOpen: 'Open side panel',
     shortcutsTitle: 'Shortcuts',
     shortcutsOpenCanvas: 'Open canvas',
     shortcutsSettings: 'Manage shortcuts in browser'
@@ -150,6 +152,14 @@ function updateOpenSourceText(lang) {
   if (openSourceIssueText) openSourceIssueText.textContent = strings.openSourceIssueText;
 }
 
+function updateSidePanelText(lang) {
+  const strings = getLangStrings(lang);
+  const tooltip = document.getElementById('sidePanelTooltip');
+  if (tooltip) tooltip.textContent = strings.sidePanelOpen;
+  const btn = document.getElementById('openSidePanelBtn');
+  if (btn) btn.setAttribute('aria-label', strings.sidePanelOpen);
+}
+
 function renderShortcutsList(lang, shortcut) {
   const list = document.getElementById('shortcutsList');
   const title = document.getElementById('shortcutsTitle');
@@ -238,6 +248,50 @@ function setupShortcutsSettingsButton() {
   });
 }
 
+function setupSidePanelButton() {
+  const btn = document.getElementById('openSidePanelBtn');
+  const tooltip = document.getElementById('sidePanelTooltip');
+  if (!btn) return;
+
+  if (tooltip) {
+    btn.addEventListener('mouseenter', () => {
+      tooltip.style.visibility = 'visible';
+      tooltip.style.opacity = '1';
+    });
+    btn.addEventListener('mouseleave', () => {
+      tooltip.style.visibility = 'hidden';
+      tooltip.style.opacity = '0';
+    });
+  }
+
+  const hasSidePanel = !!browserAPI?.sidePanel?.open;
+  if (!hasSidePanel) {
+    btn.style.opacity = '0.65';
+  }
+
+  btn.addEventListener('click', async () => {
+    if (browserAPI?.sidePanel?.open) {
+      try {
+        const win = await new Promise((resolve) => {
+          if (!browserAPI?.windows?.getCurrent) return resolve(null);
+          browserAPI.windows.getCurrent((w) => resolve(w || null));
+        });
+        const windowId = win && typeof win.id === 'number' ? win.id : undefined;
+        if (windowId != null) {
+          browserAPI.sidePanel.open({ windowId }, () => {});
+        } else {
+          browserAPI.sidePanel.open({}, () => {});
+        }
+        return;
+      } catch (_) {}
+    }
+    // Fallback: open canvas in a normal tab
+    try {
+      await focusOrCreateCanvasTabInCurrentWindow();
+    } catch (_) {}
+  });
+}
+
 function setupLanguageToggle() {
   const langToggleButton = document.getElementById('lang-toggle-btn');
   if (!langToggleButton) return;
@@ -267,6 +321,7 @@ function applyLanguage(lang) {
   }
   updateCanvasHintText(lang, currentShortcut);
   updateOpenSourceText(lang);
+  updateSidePanelText(lang);
   renderShortcutsList(lang, currentShortcut);
 }
 
@@ -286,6 +341,7 @@ function initializeBookmarkCanvasPopup() {
 
   setupOpenSourceDialog();
   setupShortcutsSettingsButton();
+  setupSidePanelButton();
   setupLanguageToggle();
 
   loadPreferredLang().then(async (lang) => {

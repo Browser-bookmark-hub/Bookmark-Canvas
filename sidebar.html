@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bookmark Canvas Side Panel</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="app-header">
+      <div class="app-title">Bookmark Canvas</div>
+      <div class="app-subtitle">侧边栏</div>
+    </header>
+
+    <section class="card">
+      <div class="section-title">当前栏目</div>
+      <div class="segmented" role="tablist" aria-label="栏目选择">
+        <button class="segment" type="button" data-mode="permanent" role="tab" aria-selected="false">永久栏目及副本</button>
+        <button class="segment" type="button" data-mode="temporary" role="tab" aria-selected="false">临时栏目</button>
+        <button class="segment" type="button" data-mode="blank" role="tab" aria-selected="false">空白栏目</button>
+      </div>
+      <p class="section-desc" id="modeDescription"></p>
+    </section>
+
+    <section class="card">
+      <div class="section-title">画布入口</div>
+      <p class="section-desc">侧边栏可以作为系统级入口，画布依旧可独立打开。</p>
+      <div class="actions">
+        <button id="openCanvasTab" class="primary" type="button">在新标签页打开画布</button>
+        <button id="openSidePanelPage" class="ghost" type="button">重新加载侧边栏</button>
+      </div>
+    </section>
+
+    <section class="card subtle">
+      <div class="section-title">状态</div>
+      <div class="status-row">
+        <span>Side Panel API</span>
+        <span id="sidePanelStatus" class="status-pill">检测中…</span>
+      </div>
+    </section>
+  </div>
+  <script src="sidebar.js"></script>
+</body>
+</html>

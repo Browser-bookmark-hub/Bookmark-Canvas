@@ -8,6 +8,22 @@ const browserAPI = (function () {
   throw new Error('Unsupported browser');
 })();
 
+function initSidePanel() {
+  if (!browserAPI?.sidePanel?.setPanelBehavior) return;
+  try {
+    // Keep popup as the default action; side panel opens via explicit button.
+    browserAPI.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }, () => {});
+  } catch (_) {}
+}
+
+if (browserAPI?.runtime?.onInstalled) {
+  browserAPI.runtime.onInstalled.addListener(() => {
+    initSidePanel();
+  });
+}
+
+initSidePanel();
+
 const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
 const RECENT_MOVED_MAX = 2000;
 const CANVAS_CHANGE_LOG_KEY = 'canvas_change_log_v1';
