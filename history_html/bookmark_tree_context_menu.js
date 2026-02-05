@@ -5330,7 +5330,15 @@ async function refreshBookmarkTree() {
 
     if (typeof renderTreeView === 'function') {
         // 临时清空旧数据，避免显示变更标记
-        await chrome.storage.local.set({ lastBookmarkData: null });
+        await chrome.storage.local.set({
+            lastBookmarkData: null,
+            canvas_change_log_v1: {
+                updatedAt: Date.now(),
+                changes: {},
+                version: 1,
+                reason: 'batch-refresh'
+            }
+        });
         console.log('[批量操作] 已临时清除旧数据，避免diff');
 
         // 渲染当前书签树（不会检测变更）
@@ -5343,6 +5351,12 @@ async function refreshBookmarkTree() {
                 lastBookmarkData: {
                     bookmarkTree,
                     updatedAt: Date.now(),
+                    reason: 'batch-refresh'
+                },
+                canvas_change_log_v1: {
+                    updatedAt: Date.now(),
+                    changes: {},
+                    version: 1,
                     reason: 'batch-refresh'
                 }
             });

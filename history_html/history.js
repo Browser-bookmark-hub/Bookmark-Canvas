@@ -135,6 +135,7 @@ function resetPermanentSectionChangeMarkers() {
 // =============================================================================
 
 const MARKER_SETTINGS_KEY = 'canvas_marker_settings_v1';
+const CANVAS_CHANGE_LOG_KEY = 'canvas_change_log_v1';
 const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
 const MARKER_PRESET_MINUTES = [60, 180, 360, 720, 1440, 4320, 10080];
 const DEFAULT_MARKER_SETTINGS = {
@@ -148,6 +149,46 @@ let canvasMarkerSettings = { ...DEFAULT_MARKER_SETTINGS };
 let markerAutoClearTimer = null;
 let persistMovedTimer = null;
 let lastMarkerBaselineWriteAt = 0;
+let cachedChangeLog = { updatedAt: 0, changes: new Map(), version: 1 };
+
+function normalizeChangeLog(raw) {
+    const base = { updatedAt: 0, changes: new Map(), version: 1 };
+    if (!raw || typeof raw !== 'object') return base;
+    const changesObj = raw.changes && typeof raw.changes === 'object' ? raw.changes : {};
+    const changes = new Map();
+    Object.keys(changesObj).forEach((id) => {
+        if (!id) return;
+        const entry = changesObj[id];
+        if (!entry || typeof entry !== 'object') return;
+        changes.set(String(id), entry);
+    });
+    return {
+        updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
+        changes,
+        version: raw.version || 1
+    };
+}
+
+async function loadCanvasChangeLog() {
+    try {
+        if (!browserAPI || !browserAPI.storage || !browserAPI.storage.local) return cachedChangeLog;
+        const data = await browserAPI.storage.local.get([CANVAS_CHANGE_LOG_KEY]);
+        cachedChangeLog = normalizeChangeLog(data && data[CANVAS_CHANGE_LOG_KEY]);
+        return cachedChangeLog;
+    } catch (_) {
+        return cachedChangeLog;
+    }
+}
+
+async function clearCanvasChangeLog(reason = 'baseline') {
+    try {
+        const payload = { updatedAt: Date.now(), changes: {}, version: 1, reason };
+        cachedChangeLog = { updatedAt: payload.updatedAt, changes: new Map(), version: 1 };
+        if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
+            await browserAPI.storage.local.set({ [CANVAS_CHANGE_LOG_KEY]: payload });
+        }
+    } catch (_) { }
+}
 
 function normalizeMarkerSettings(input) {
     const out = { ...DEFAULT_MARKER_SETTINGS };
@@ -364,8 +405,15 @@ async function clearMarkersAndSetBaseline(reason = 'manual') {
                     bookmarkTree: tree,
                     updatedAt: now,
                     reason
+                },
+                [CANVAS_CHANGE_LOG_KEY]: {
+                    updatedAt: now,
+                    changes: {},
+                    version: 1,
+                    reason: 'baseline-reset'
                 }
             });
+            cachedChangeLog = { updatedAt: now, changes: new Map(), version: 1 };
             lastMarkerBaselineWriteAt = now;
         }
         explicitMovedIds = new Map();
@@ -2258,6 +2306,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 恢复移动蓝标（避免 Canvas 懒加载模式下“刷新后移动效果消失”）
     await restoreExplicitMovedIdsFromStorage();
+    // 加载后台变动日志（页面关闭期间的变动）
+    await loadCanvasChangeLog();
 
     // 先加载基础数据
     console.log('[初始化] 加载基础数据...');
@@ -4256,6 +4306,10 @@ async function renderTreeViewSync() {
             treeChangeMap = new Map();
         }
 
+        if (isMarkerEnabled()) {
+            applyChangeLogToTreeChangeMap();
+        }
+
         // 合并旧树和新树，显示删除的节点
         let treeToRender = currentTree;
         if (oldTree && oldTree[0] && treeChangeMap && treeChangeMap.size > 0) {
@@ -4337,6 +4391,9 @@ async function ensureChangesPreviewTreeDataLoaded() {
             treeChangeMap = await detectTreeChangesFast(oldTree, currentTree);
         } else {
             treeChangeMap = new Map();
+        }
+        if (isMarkerEnabled()) {
+            applyChangeLogToTreeChangeMap();
         }
     } catch (e) {
         console.warn('[ensureChangesPreviewTreeDataLoaded] Failed:', e);
@@ -4679,6 +4736,10 @@ async function renderTreeView(forceRefresh = false) {
         } else {
             treeChangeMap = new Map(); // 无上次快照数据，不显示任何变化标记
             console.log('[renderTreeView] 无上次快照数据，不显示变化标记');
+        }
+
+        if (markerEnabled) {
+            applyChangeLogToTreeChangeMap();
         }
 
         // Canvas 懒加载：使用轻量变化提示缓存（用于显示四类图例/标识）
@@ -5956,6 +6017,41 @@ function updateTreeChangeMapForMove(id, moveInfo) {
         };
     }
     map.set(key, next);
+}
+
+function applyChangeLogToTreeChangeMap(changeLog) {
+    if (!isMarkerEnabled()) return;
+    const log = changeLog || cachedChangeLog;
+    if (lastMarkerBaselineWriteAt && log && log.updatedAt && log.updatedAt < lastMarkerBaselineWriteAt) return;
+    if (!log || !(log.changes instanceof Map) || log.changes.size === 0) return;
+    log.changes.forEach((entry, id) => {
+        if (!id || !entry || !entry.type) return;
+        const type = String(entry.type);
+        if (type.includes('deleted')) {
+            const del = entry.deleted || {};
+            updateTreeChangeMapForRemove(id, {
+                parentId: del.oldParentId,
+                index: del.oldIndex,
+                node: { parentId: del.oldParentId, index: del.oldIndex }
+            });
+            return;
+        }
+        if (type.includes('added')) {
+            updateTreeChangeMapForCreate(id);
+        }
+        if (type.includes('modified')) {
+            updateTreeChangeMapForChange(id);
+        }
+        if (type.includes('moved')) {
+            const mv = entry.moved || {};
+            updateTreeChangeMapForMove(id, {
+                oldParentId: mv.oldParentId,
+                oldIndex: mv.oldIndex,
+                parentId: mv.newParentId,
+                index: mv.newIndex
+            });
+        }
+    });
 }
 
 let pendingPathBadgeRefreshTimer = null;
@@ -7469,6 +7565,12 @@ function handleStorageChange(changes, namespace) {
         } catch (_) { }
     }
 
+    if (changes[CANVAS_CHANGE_LOG_KEY]) {
+        try {
+            cachedChangeLog = normalizeChangeLog(changes[CANVAS_CHANGE_LOG_KEY].newValue);
+        } catch (_) { }
+    }
+
     // 主题变化（只在没有覆盖设置时跟随主UI）
     if (changes.currentTheme && !hasThemeOverride()) {
         const newTheme = changes.currentTheme.newValue;
@@ -7509,6 +7611,8 @@ function handleStorageChange(changes, namespace) {
         try {
             const updatedAt = changes.lastBookmarkData.newValue && changes.lastBookmarkData.newValue.updatedAt;
             if (updatedAt && updatedAt === lastMarkerBaselineWriteAt) return;
+            if (updatedAt) lastMarkerBaselineWriteAt = updatedAt;
+            cachedChangeLog = { updatedAt: updatedAt || 0, changes: new Map(), version: 1 };
             // 清空显式移动标识，避免残留蓝标
             explicitMovedIds = new Map();
             try { window.__canvasPermanentHintSet = null; } catch (_) { }

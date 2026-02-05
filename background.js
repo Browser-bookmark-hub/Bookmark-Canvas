@@ -10,6 +10,8 @@ const browserAPI = (function () {
 
 const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
 const RECENT_MOVED_MAX = 2000;
+const CANVAS_CHANGE_LOG_KEY = 'canvas_change_log_v1';
+const CHANGE_LOG_MAX = 10000;
 
 // Favicon broadcast (align with reference project)
 const processedFavicons = new Map();
@@ -82,23 +84,163 @@ async function recordRecentMovedId(id) {
   } catch (_) {}
 }
 
+function __normalizeChangeLog(raw) {
+  const base = { updatedAt: 0, changes: {}, version: 1 };
+  if (!raw || typeof raw !== 'object') return base;
+  const changes = raw.changes && typeof raw.changes === 'object' ? raw.changes : {};
+  return {
+    updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
+    changes,
+    version: raw.version || 1
+  };
+}
+
+async function __loadChangeLog() {
+  try {
+    const data = await browserAPI.storage.local.get([CANVAS_CHANGE_LOG_KEY]);
+    return __normalizeChangeLog(data && data[CANVAS_CHANGE_LOG_KEY]);
+  } catch (_) {
+    return { updatedAt: 0, changes: {}, version: 1 };
+  }
+}
+
+async function __saveChangeLog(log) {
+  try {
+    await browserAPI.storage.local.set({ [CANVAS_CHANGE_LOG_KEY]: log });
+  } catch (_) { }
+}
+
+function __mergeType(existingType, nextType) {
+  const types = new Set(String(existingType || '').split('+').filter(Boolean));
+  types.add(nextType);
+  return Array.from(types).join('+');
+}
+
+async function __updateChangeLogForCreate(id) {
+  if (!id) return;
+  const key = String(id);
+  const log = await __loadChangeLog();
+  log.changes[key] = { type: 'added', ts: Date.now() };
+  log.updatedAt = Date.now();
+  if (Object.keys(log.changes).length > CHANGE_LOG_MAX) {
+    // Soft cap: drop oldest by timestamp
+    const entries = Object.entries(log.changes);
+    entries.sort((a, b) => (a[1]?.ts || 0) - (b[1]?.ts || 0));
+    const overflow = entries.length - CHANGE_LOG_MAX;
+    if (overflow > 0) {
+      for (let i = 0; i < overflow; i++) {
+        delete log.changes[entries[i][0]];
+      }
+    }
+  }
+  await __saveChangeLog(log);
+}
+
+async function __updateChangeLogForRemove(id, removeInfo) {
+  if (!id) return;
+  const key = String(id);
+  const log = await __loadChangeLog();
+  const existing = log.changes[key];
+  if (existing && existing.type && String(existing.type).includes('added')) {
+    delete log.changes[key];
+    log.updatedAt = Date.now();
+    await __saveChangeLog(log);
+    return;
+  }
+  const oldParentId = (removeInfo && typeof removeInfo.parentId !== 'undefined')
+    ? removeInfo.parentId
+    : (removeInfo && removeInfo.node && typeof removeInfo.node.parentId !== 'undefined' ? removeInfo.node.parentId : null);
+  const oldIndex = (removeInfo && typeof removeInfo.index === 'number')
+    ? removeInfo.index
+    : (removeInfo && removeInfo.node && typeof removeInfo.node.index === 'number' ? removeInfo.node.index : null);
+  log.changes[key] = {
+    type: 'deleted',
+    deleted: {
+      oldParentId: oldParentId != null ? oldParentId : null,
+      oldIndex: oldIndex != null ? oldIndex : null
+    },
+    ts: Date.now()
+  };
+  log.updatedAt = Date.now();
+  await __saveChangeLog(log);
+}
+
+async function __updateChangeLogForChange(id) {
+  if (!id) return;
+  const key = String(id);
+  const log = await __loadChangeLog();
+  const existing = log.changes[key];
+  if (existing && existing.type && (String(existing.type).includes('deleted') || String(existing.type).includes('added'))) {
+    return;
+  }
+  const next = existing ? { ...existing } : { type: '' };
+  next.type = __mergeType(next.type, 'modified');
+  next.ts = Date.now();
+  log.changes[key] = next;
+  log.updatedAt = Date.now();
+  await __saveChangeLog(log);
+}
+
+async function __updateChangeLogForMove(id, moveInfo) {
+  if (!id) return;
+  const key = String(id);
+  const log = await __loadChangeLog();
+  const existing = log.changes[key];
+  if (existing && existing.type && (String(existing.type).includes('deleted') || String(existing.type).includes('added'))) {
+    return;
+  }
+  const next = existing ? { ...existing } : { type: '' };
+  next.type = __mergeType(next.type, 'moved');
+  if (moveInfo && typeof moveInfo === 'object') {
+    next.moved = {
+      oldParentId: moveInfo.oldParentId,
+      oldIndex: moveInfo.oldIndex,
+      newParentId: moveInfo.parentId,
+      newIndex: moveInfo.index
+    };
+  }
+  next.ts = Date.now();
+  log.changes[key] = next;
+  log.updatedAt = Date.now();
+  await __saveChangeLog(log);
+}
+
 if (browserAPI.bookmarks && browserAPI.bookmarks.onMoved) {
-  browserAPI.bookmarks.onMoved.addListener(async (id) => {
+  browserAPI.bookmarks.onMoved.addListener(async (id, moveInfo) => {
     try {
       await recordRecentMovedId(id);
       browserAPI.runtime.sendMessage({ action: 'recentMovedBroadcast', id }).catch(() => {});
+      await __updateChangeLogForMove(id, moveInfo);
     } catch (_) {}
   });
 }
 
 if (browserAPI.bookmarks && browserAPI.bookmarks.onChanged) {
   browserAPI.bookmarks.onChanged.addListener((id, changeInfo) => {
-    if (!changeInfo || !changeInfo.url) return;
     try {
-      browserAPI.runtime.sendMessage({
-        action: 'clearFaviconCache',
-        url: changeInfo.url
-      }).catch(() => {});
+      if (changeInfo && changeInfo.url) {
+        browserAPI.runtime.sendMessage({
+          action: 'clearFaviconCache',
+          url: changeInfo.url
+        }).catch(() => {});
+      }
+      __updateChangeLogForChange(id).catch(() => {});
+    } catch (_) {}
+  });
+}
+
+if (browserAPI.bookmarks && browserAPI.bookmarks.onCreated) {
+  browserAPI.bookmarks.onCreated.addListener((id) => {
+    try {
+      __updateChangeLogForCreate(id).catch(() => {});
+    } catch (_) {}
+  });
+}
+
+if (browserAPI.bookmarks && browserAPI.bookmarks.onRemoved) {
+  browserAPI.bookmarks.onRemoved.addListener((id, removeInfo) => {
+    try {
+      __updateChangeLogForRemove(id, removeInfo).catch(() => {});
     } catch (_) {}
   });
 }
