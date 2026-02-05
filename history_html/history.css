@@ -5812,6 +5812,43 @@ a.tree-label.tree-bookmark-link:hover {
     box-shadow: var(--shadow-lg);
 }
 
+/* Maximize tweaks: hide certain controls + reposition toolbars/popovers */
+.permanent-bookmark-section.canvas-node-maximized .permanent-section-copy-btn,
+.permanent-bookmark-section.canvas-node-maximized .permanent-section-pin-btn {
+    display: none !important;
+}
+
+.temp-canvas-node.canvas-node-maximized .temp-node-pin-btn {
+    display: none !important;
+}
+
+.temp-canvas-node.canvas-node-maximized .temp-node-actions {
+    position: relative;
+    left: auto;
+    right: auto;
+    top: auto;
+    bottom: auto;
+    transform: none;
+    z-index: 5;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+.temp-canvas-node.canvas-node-maximized .temp-node-color-wrap .temp-color-popover {
+    top: calc(100% + 6px);
+    bottom: auto;
+    left: auto;
+    right: 0;
+    transform: none;
+}
+
+.md-canvas-node.canvas-node-maximized .md-node-toolbar {
+    top: auto;
+    bottom: 12px;
+}
+
 /* Hide canvas scrollbars + floating zoom tools while a node is maximized */
 body.canvas-node-maximized-active .canvas-scrollbar,
 body.canvas-node-maximized-active .canvas-zoom-indicator {
