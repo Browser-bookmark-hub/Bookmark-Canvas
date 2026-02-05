@@ -6,31 +6,48 @@ function updateShortcutsDisplay() {
     if (!shortcutsContent && !canvasShortcutsList && !canvasHelpShortcutsList) return;
 
     const lang = typeof currentLang === 'string' ? currentLang : 'zh_CN';
-    const isMac = navigator.platform?.toUpperCase().includes('MAC') || 
-                  navigator.userAgent?.toUpperCase().includes('MAC');
+    const platform = navigator.platform || '';
+    const ua = navigator.userAgent || '';
+    const isMac = /MAC/i.test(platform) || /MAC/i.test(ua);
+    const isWindows = /WIN/i.test(platform) || /WINDOWS/i.test(ua);
+    const isLinux = /LINUX/i.test(platform) && !/ANDROID/i.test(ua);
 
-    // 格式化快捷键显示（Mac上Alt显示为⌥）
+    const osLabel = (() => {
+        if (isMac) return 'macOS';
+        if (isWindows) return 'Windows';
+        if (isLinux) return 'Linux';
+        return 'Other';
+    })();
+
+    // 格式化快捷键显示（Mac上Alt显示为Option）
     const formatKey = (key) => {
-        if (!key) return key;
-        if (isMac) {
-            return key.replace(/Alt\+/gi, '⌥');
+        if (!key) {
+            return i18n.shortcutsUnset?.[lang] || (lang === 'zh_CN' ? '未设置' : 'Not set');
         }
-        return key;
+        let text = String(key);
+        if (isMac) {
+            text = text.replace(/Alt/gi, 'Option');
+        }
+        return text.replace(/\+/g, ' + ');
     };
 
     const renderShortcutsModal = (shortcuts) => {
         if (!shortcutsContent) return;
         const safe = (value, fallback) => (value && typeof value === 'string') ? value : fallback;
-        const defaultPrefix = isMac ? '⌥' : 'Alt+';
-        const key3 = formatKey(safe(shortcuts.open_canvas_view, defaultPrefix + '3'));
+        const key1 = formatKey(safe(shortcuts._execute_action, ''));
+        const key2 = formatKey(safe(shortcuts.open_side_panel, ''));
+        const key3 = formatKey(safe(shortcuts.open_canvas_view, ''));
 
         const rows = [];
+        rows.push({ key: key1, label: i18n.shortcutActivateExtension[lang] });
+        rows.push({ key: key2, label: i18n.shortcutSidePanel[lang] });
         rows.push({ key: key3, label: i18n.shortcutCanvas[lang] });
+        const titleText = `${i18n.shortcutsTitle[lang]} (${osLabel})`;
         shortcutsContent.innerHTML = `
             <div class="shortcuts-card">
                 <div class="shortcuts-section">
                     <div class="shortcuts-header-row">
-                        <div>${i18n.shortcutsTitle[lang]}</div>
+                        <div>${titleText}</div>
                         <button class="shortcuts-settings-btn open-shortcuts-settings-btn"
                             title="${i18n.shortcutsSettingsTooltip[lang]}">
                             <i class="fas fa-external-link-alt"></i>
@@ -56,16 +73,19 @@ function updateShortcutsDisplay() {
     const renderCanvasShortcuts = (container, shortcuts) => {
         if (!container) return;
         const safe = (value, fallback) => (value && typeof value === 'string') ? value : fallback;
-        const defaultPrefix = isMac ? '⌥' : 'Alt+';
-        const key3 = formatKey(safe(shortcuts.open_canvas_view, defaultPrefix + '3'));
+        const key1 = formatKey(safe(shortcuts._execute_action, ''));
+        const key2 = formatKey(safe(shortcuts.open_side_panel, ''));
+        const key3 = formatKey(safe(shortcuts.open_canvas_view, ''));
 
         const rows = [];
+        rows.push({ key: key1, label: i18n.shortcutActivateExtension[lang] });
+        rows.push({ key: key2, label: i18n.shortcutSidePanel[lang] });
         rows.push({ key: key3, label: i18n.shortcutCanvas[lang] });
 
         container.innerHTML = `
             <div class="canvas-help-section-header canvas-shortcuts-open-header">
                 <div class="canvas-help-section-header-left">
-                    <span class="canvas-help-section-title">${i18n.shortcutsOpenTitle[lang]}</span>
+                    <span class="canvas-help-section-title">${i18n.shortcutsOpenTitle[lang]} (${osLabel})</span>
                 </div>
                 <button class="canvas-shortcuts-jump-btn open-shortcuts-settings-btn"
                     title="${i18n.shortcutsSettingsTooltip[lang]}">
@@ -109,20 +129,32 @@ function updateShortcutsDisplay() {
                 if (Array.isArray(commands)) {
                     commands.forEach((c) => {
                         if (!c || !c.name) return;
-                        if (c.shortcut) {
+                        if (typeof c.shortcut === 'string') {
                             map[c.name] = c.shortcut;
                         }
                     });
                 }
-                renderShortcutsModal({ open_canvas_view: map.open_canvas_view });
-                renderCanvasShortcuts(canvasShortcutsList, { open_canvas_view: map.open_canvas_view });
-                renderCanvasShortcuts(canvasHelpShortcutsList, { open_canvas_view: map.open_canvas_view });
+                renderShortcutsModal({
+                    _execute_action: map._execute_action,
+                    open_side_panel: map.open_side_panel,
+                    open_canvas_view: map.open_canvas_view
+                });
+                renderCanvasShortcuts(canvasShortcutsList, {
+                    _execute_action: map._execute_action,
+                    open_side_panel: map.open_side_panel,
+                    open_canvas_view: map.open_canvas_view
+                });
+                renderCanvasShortcuts(canvasHelpShortcutsList, {
+                    _execute_action: map._execute_action,
+                    open_side_panel: map.open_side_panel,
+                    open_canvas_view: map.open_canvas_view
+                });
                 bindOpenSettings(shortcutsContent);
                 bindOpenSettings(canvasShortcutsList);
                 bindOpenSettings(canvasHelpShortcutsList);
             });
         } catch (e) {
-            console.warn('[Shortcuts] 读取快捷键失败，使用默认值:', e);
+            console.warn('[Shortcuts] 读取快捷键失败，显示未设置:', e);
             renderShortcutsModal({});
             renderCanvasShortcuts(canvasShortcutsList, {});
             renderCanvasShortcuts(canvasHelpShortcutsList, {});

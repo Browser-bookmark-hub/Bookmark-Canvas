@@ -23,14 +23,31 @@
     "type": "module"
   },
   "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+1",
+        "mac": "Option+1",
+        "windows": "Alt+1",
+        "linux": "Alt+1"
+      }
+    },
+    "open_side_panel": {
+      "suggested_key": {
+        "default": "Alt+2",
+        "mac": "Option+2",
+        "windows": "Alt+2",
+        "linux": "Alt+2"
+      },
+      "description": "__MSG_commandOpenSidePanel__"
+    },
     "open_canvas_view": {
       "suggested_key": {
         "default": "Alt+3",
-        "mac": "Alt+3",
+        "mac": "Option+3",
         "windows": "Alt+3",
         "linux": "Alt+3"
       },
-      "description": "Open 'Bookmark Canvas' view"
+      "description": "__MSG_commandOpenCanvasView__"
     }
   },
   "permissions": [

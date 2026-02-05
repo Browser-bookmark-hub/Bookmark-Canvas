@@ -2120,6 +2120,18 @@ const i18n = {
         'zh_CN': '打开「书签画布」视图',
         'en': 'Open "Bookmark Canvas" view'
     },
+    shortcutActivateExtension: {
+        'zh_CN': '打开主 UI（Activate the extension）',
+        'en': 'Activate the extension'
+    },
+    shortcutSidePanel: {
+        'zh_CN': '打开侧边栏',
+        'en': 'Open side panel'
+    },
+    shortcutsUnset: {
+        'zh_CN': '未设置',
+        'en': 'Not set'
+    },
     closeShortcutsText: {
         'zh_CN': '关闭',
         'en': 'Close'

@@ -10,5 +10,13 @@
   "actionTitle": {
     "message": "书签画布",
     "description": "工具栏悬浮标题"
+  },
+  "commandOpenSidePanel": {
+    "message": "打开侧边栏",
+    "description": "打开侧边栏的快捷键描述"
+  },
+  "commandOpenCanvasView": {
+    "message": "打开「书签画布」视图",
+    "description": "打开画布视图的快捷键描述"
   }
 }

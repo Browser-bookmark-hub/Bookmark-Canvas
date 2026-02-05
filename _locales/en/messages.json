@@ -10,5 +10,13 @@
   "actionTitle": {
     "message": "Bookmark Canvas",
     "description": "Toolbar tooltip title"
+  },
+  "commandOpenSidePanel": {
+    "message": "Open side panel",
+    "description": "Command description for opening the side panel"
+  },
+  "commandOpenCanvasView": {
+    "message": "Open \"Bookmark Canvas\" view",
+    "description": "Command description for opening the canvas view"
   }
 }

@@ -471,10 +471,41 @@ function openCanvasViewFromCommand() {
   browserAPI.tabs.create({ url });
 }
 
+function openSidePanelFromCommand() {
+  if (!browserAPI?.sidePanel?.open) {
+    openCanvasViewFromCommand();
+    return;
+  }
+  try {
+    if (browserAPI?.windows?.getCurrent) {
+      browserAPI.windows.getCurrent((win) => {
+        const windowId = win && typeof win.id === 'number' ? win.id : null;
+        if (windowId == null) {
+          openCanvasViewFromCommand();
+          return;
+        }
+        try {
+          browserAPI.sidePanel.open({ windowId }, () => {});
+        } catch (_) {
+          openCanvasViewFromCommand();
+        }
+      });
+      return;
+    }
+    openCanvasViewFromCommand();
+  } catch (_) {
+    openCanvasViewFromCommand();
+  }
+}
+
 if (browserAPI.commands && browserAPI.commands.onCommand) {
   browserAPI.commands.onCommand.addListener((command) => {
     if (command === 'open_canvas_view') {
       openCanvasViewFromCommand();
+      return;
+    }
+    if (command === 'open_side_panel') {
+      openSidePanelFromCommand();
     }
   });
 }

@@ -15,8 +15,11 @@ const popupI18n = {
     openSourceIssueText: '提交问题',
     sidePanelOpen: '打开侧边栏',
     shortcutsTitle: '快捷键',
+    shortcutsActivateExtension: '打开主 UI（Activate the extension）',
+    shortcutsOpenSidePanel: '打开侧边栏',
     shortcutsOpenCanvas: '打开画布',
-    shortcutsSettings: '在浏览器中管理快捷键'
+    shortcutsSettings: '在浏览器中管理快捷键',
+    shortcutsUnset: '未设置'
   },
   en: {
     pageTitle: 'Bookmark Canvas',
@@ -31,13 +34,50 @@ const popupI18n = {
     openSourceIssueText: 'Report issue',
     sidePanelOpen: 'Open side panel',
     shortcutsTitle: 'Shortcuts',
+    shortcutsActivateExtension: 'Activate the extension',
+    shortcutsOpenSidePanel: 'Open side panel',
     shortcutsOpenCanvas: 'Open canvas',
-    shortcutsSettings: 'Manage shortcuts in browser'
+    shortcutsSettings: 'Manage shortcuts in browser',
+    shortcutsUnset: 'Not set'
   }
 };
 
 let currentLang = 'en';
-let currentShortcut = 'Alt+3';
+let currentCanvasShortcut = '';
+let currentShortcuts = {
+  _execute_action: '',
+  open_side_panel: '',
+  open_canvas_view: ''
+};
+
+const osInfo = (() => {
+  const platform = navigator.platform || '';
+  const ua = navigator.userAgent || '';
+  const isMac = /Mac/i.test(platform) || /Mac/i.test(ua);
+  const isWindows = /Win/i.test(platform) || /Windows/i.test(ua);
+  const isLinux = /Linux/i.test(platform) && !/Android/i.test(ua);
+  return { isMac, isWindows, isLinux };
+})();
+
+function getOsLabel() {
+  if (osInfo.isMac) return 'macOS';
+  if (osInfo.isWindows) return 'Windows';
+  if (osInfo.isLinux) return 'Linux';
+  return 'Other';
+}
+
+function formatShortcutDisplay(value, lang) {
+  const strings = getLangStrings(lang);
+  if (!value || typeof value !== 'string') {
+    return strings.shortcutsUnset;
+  }
+  let text = value;
+  if (osInfo.isMac) {
+    text = text.replace(/Alt/gi, 'Option');
+  }
+  text = text.replace(/\+/g, ' + ');
+  return text || strings.shortcutsUnset;
+}
 
 function detectDefaultLang() {
   try {
@@ -126,9 +166,10 @@ function updateCanvasHintText(lang, shortcut) {
   const hint = document.getElementById('canvasHint');
   if (!hint) return;
   const strings = getLangStrings(lang);
+  const displayShortcut = formatShortcutDisplay(shortcut, lang);
   const shortcutText = (typeof strings.canvasHintShortcut === 'function')
-    ? strings.canvasHintShortcut(shortcut)
-    : `Shortcut ${shortcut}`;
+    ? strings.canvasHintShortcut(displayShortcut)
+    : `Shortcut ${displayShortcut}`;
   const actionText = strings.canvasHintAction || 'Click to open Canvas';
   hint.innerHTML = `
     <div class="canvas-hint-content" aria-hidden="true">
@@ -160,42 +201,59 @@ function updateSidePanelText(lang) {
   if (btn) btn.setAttribute('aria-label', strings.sidePanelOpen);
 }
 
-function renderShortcutsList(lang, shortcut) {
+function renderShortcutsList(lang, shortcuts) {
   const list = document.getElementById('shortcutsList');
   const title = document.getElementById('shortcutsTitle');
   const settingsBtn = document.getElementById('openShortcutsSettingsBtn');
-  if (title) title.textContent = getLangStrings(lang).shortcutsTitle;
-  if (settingsBtn) settingsBtn.textContent = getLangStrings(lang).shortcutsSettings;
+  const strings = getLangStrings(lang);
+  if (title) title.textContent = `${strings.shortcutsTitle} (${getOsLabel()})`;
+  if (settingsBtn) settingsBtn.textContent = strings.shortcutsSettings;
   if (!list) return;
   list.innerHTML = '';
-  const row = document.createElement('div');
-  row.className = 'shortcuts-row';
-  const label = document.createElement('span');
-  label.textContent = getLangStrings(lang).shortcutsOpenCanvas;
-  const key = document.createElement('kbd');
-  key.textContent = shortcut;
-  row.appendChild(label);
-  row.appendChild(key);
-  list.appendChild(row);
+  const map = shortcuts && typeof shortcuts === 'object' ? shortcuts : {};
+  const rows = [
+    { label: strings.shortcutsActivateExtension, key: map._execute_action },
+    { label: strings.shortcutsOpenSidePanel, key: map.open_side_panel },
+    { label: strings.shortcutsOpenCanvas, key: map.open_canvas_view }
+  ];
+  rows.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'shortcuts-row';
+    const label = document.createElement('span');
+    label.textContent = item.label;
+    const key = document.createElement('kbd');
+    key.textContent = formatShortcutDisplay(item.key, lang);
+    row.appendChild(label);
+    row.appendChild(key);
+    list.appendChild(row);
+  });
 }
 
-function getCanvasShortcut() {
-  const fallbackShortcut = 'Alt+3';
+function getCommandShortcuts() {
+  const fallbackShortcuts = {
+    _execute_action: '',
+    open_side_panel: '',
+    open_canvas_view: ''
+  };
   if (!browserAPI?.commands?.getAll) {
-    return Promise.resolve(fallbackShortcut);
+    return Promise.resolve({ ...fallbackShortcuts });
   }
   return new Promise((resolve) => {
     try {
       browserAPI.commands.getAll((commands) => {
-        let shortcut = fallbackShortcut;
+        const shortcutMap = { ...fallbackShortcuts };
         if (Array.isArray(commands)) {
-          const cmd = commands.find(c => c.name === 'open_canvas_view');
-          if (cmd && cmd.shortcut) shortcut = cmd.shortcut;
+          commands.forEach((cmd) => {
+            if (!cmd || !cmd.name) return;
+            if (typeof cmd.shortcut === 'string') {
+              shortcutMap[cmd.name] = cmd.shortcut;
+            }
+          });
         }
-        resolve(shortcut);
+        resolve(shortcutMap);
       });
     } catch (_) {
-      resolve(fallbackShortcut);
+      resolve({ ...fallbackShortcuts });
     }
   });
 }
@@ -319,10 +377,10 @@ function applyLanguage(lang) {
     }
     placeholder.textContent = strings.noThumbnail;
   }
-  updateCanvasHintText(lang, currentShortcut);
+  updateCanvasHintText(lang, currentCanvasShortcut);
   updateOpenSourceText(lang);
   updateSidePanelText(lang);
-  renderShortcutsList(lang, currentShortcut);
+  renderShortcutsList(lang, currentShortcuts);
 }
 
 function initializeBookmarkCanvasPopup() {
@@ -346,7 +404,8 @@ function initializeBookmarkCanvasPopup() {
 
   loadPreferredLang().then(async (lang) => {
     currentLang = lang || 'zh_CN';
-    currentShortcut = await getCanvasShortcut();
+    currentShortcuts = await getCommandShortcuts();
+    currentCanvasShortcut = currentShortcuts.open_canvas_view || '';
     applyLanguage(currentLang);
   });
 
@@ -374,7 +433,7 @@ function initializeBookmarkCanvasPopup() {
       canvasThumbnailContainer.appendChild(placeholder);
       if (hint) {
         hint.style.display = '';
-        updateCanvasHintText(lang, currentShortcut);
+        updateCanvasHintText(lang, currentCanvasShortcut);
         canvasThumbnailContainer.appendChild(hint);
       }
     }
@@ -400,7 +459,7 @@ function initializeBookmarkCanvasPopup() {
           canvasThumbnailContainer.appendChild(wrapper);
           if (hint) {
             hint.style.display = '';
-            updateCanvasHintText(currentLang, currentShortcut);
+            updateCanvasHintText(currentLang, currentCanvasShortcut);
           }
         }
         if (hint) canvasThumbnailContainer.appendChild(hint);
