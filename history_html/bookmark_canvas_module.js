@@ -28543,17 +28543,19 @@ function closeCanvasAppearanceSettingsModal() {
     if (modal) modal.style.display = 'none';
 }
 
-function saveCanvasAppearanceSettings() {
+function saveCanvasAppearanceSettings(options = {}) {
     const modal = document.getElementById('canvasAppearanceSettingsModal');
     if (!modal) return;
+    const closeAfterSave = options && options.close !== false;
 
     const current = getCanvasAppearanceSettings();
     const currentSizes = current.sizes || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes;
 
-    const readNumber = (id) => {
+    const readNumber = (id, fallback) => {
         const el = modal.querySelector(`#${id}`);
-        if (!el) return NaN;
-        return parseInt(el.value, 10);
+        if (!el) return fallback;
+        const n = parseInt(el.value, 10);
+        return Number.isFinite(n) ? n : fallback;
     };
 
     const settingsInput = {
@@ -28561,12 +28563,12 @@ function saveCanvasAppearanceSettings() {
             permanent: currentSizes.permanent || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.permanent,
             temp: {
                 mode: __getAppearanceRadioValue(modal, 'appearance-temp-size-mode', 'manual'),
-                width: readNumber('appearanceTempWidth'),
-                height: readNumber('appearanceTempHeight')
+                width: readNumber('appearanceTempWidth', (currentSizes.temp || {}).width),
+                height: readNumber('appearanceTempHeight', (currentSizes.temp || {}).height)
             },
             mdNode: {
-                width: readNumber('appearanceBlankWidth'),
-                height: readNumber('appearanceBlankHeight')
+                width: readNumber('appearanceBlankWidth', (currentSizes.mdNode || {}).width),
+                height: readNumber('appearanceBlankHeight', (currentSizes.mdNode || {}).height)
             }
         },
         colors: {
@@ -28595,7 +28597,7 @@ function saveCanvasAppearanceSettings() {
 
     applyCanvasAppearanceSettings(normalized, { applyPermanentSize: false });
     applyTempSectionAutoSizeAll();
-    closeCanvasAppearanceSettingsModal();
+    if (closeAfterSave) closeCanvasAppearanceSettingsModal();
 }
 
 function createCanvasAppearanceSettingsModal() {
@@ -28738,13 +28740,6 @@ function createCanvasAppearanceSettingsModal() {
                     </div>
                 </div>
             </div>
-            <div class="perf-modal-footer">
-                <button class="perf-btn secondary" id="appearanceCancelBtn">${isEn ? 'Cancel' : '取消'}</button>
-                <button class="perf-btn primary" id="appearanceSaveBtn">
-                    <i class="fas fa-check"></i>
-                    <span>${isEn ? 'Save' : '保存'}</span>
-                </button>
-            </div>
         </div>
     `;
 
@@ -28752,23 +28747,29 @@ function createCanvasAppearanceSettingsModal() {
 
     const closeBtn = modal.querySelector('#appearanceModalCloseBtn');
     if (closeBtn) closeBtn.addEventListener('click', closeCanvasAppearanceSettingsModal);
-    const cancelBtn = modal.querySelector('#appearanceCancelBtn');
-    if (cancelBtn) cancelBtn.addEventListener('click', closeCanvasAppearanceSettingsModal);
-    const saveBtn = modal.querySelector('#appearanceSaveBtn');
-    if (saveBtn) saveBtn.addEventListener('click', saveCanvasAppearanceSettings);
+    const scheduleAppearanceSave = (() => {
+        let timer = null;
+        return () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => saveCanvasAppearanceSettings({ close: false }), 180);
+        };
+    })();
 
     const tempRadios = modal.querySelectorAll('input[name="appearance-temp-size-mode"]');
     tempRadios.forEach(radio => radio.addEventListener('change', () => {
         __updateAppearanceSizeMode(modal, 'appearance-temp-size-mode', 'appearanceTempSizeInputs');
+        scheduleAppearanceSave();
     }));
 
     const tempNameSelect = modal.querySelector('#appearanceTempNameMode');
     if (tempNameSelect) tempNameSelect.addEventListener('change', () => {
         __updateAppearanceNameMode(modal, 'appearanceTempNameMode', 'appearanceTempNameManualWrap');
+        scheduleAppearanceSave();
     });
     const edgeNameSelect = modal.querySelector('#appearanceEdgeNameMode');
     if (edgeNameSelect) edgeNameSelect.addEventListener('change', () => {
         __updateAppearanceNameMode(modal, 'appearanceEdgeNameMode', 'appearanceEdgeNameManualWrap');
+        scheduleAppearanceSave();
     });
 
     modal.querySelectorAll('.appearance-color-input').forEach(input => {
@@ -28777,6 +28778,7 @@ function createCanvasAppearanceSettingsModal() {
             if (!row) return;
             const valueEl = row.querySelector('.appearance-color-value');
             if (valueEl) valueEl.textContent = input.value;
+            scheduleAppearanceSave();
         });
     });
 
@@ -28788,6 +28790,22 @@ function createCanvasAppearanceSettingsModal() {
         const color = chip.getAttribute('data-color');
         if (!color) return;
         __syncAppearanceColorRow(row, color);
+        scheduleAppearanceSave();
+    });
+
+    const appearanceInputs = [
+        '#appearanceTempWidth',
+        '#appearanceTempHeight',
+        '#appearanceBlankWidth',
+        '#appearanceBlankHeight',
+        '#appearanceTempNameManual',
+        '#appearanceEdgeNameManual'
+    ];
+    appearanceInputs.forEach(selector => {
+        const el = modal.querySelector(selector);
+        if (!el) return;
+        el.addEventListener('input', scheduleAppearanceSave);
+        el.addEventListener('change', scheduleAppearanceSave);
     });
 }
 
@@ -28852,9 +28870,10 @@ function closeCanvasOtherSettingsModal() {
     if (modal) modal.style.display = 'none';
 }
 
-function saveCanvasOtherSettings() {
+function saveCanvasOtherSettings(options = {}) {
     const modal = document.getElementById('canvasOtherSettingsModal');
     if (!modal) return;
+    const closeAfterSave = options && options.close !== false;
     const prevSettings = getCanvasOtherSettings();
     const prevFollow = isTempColorFollowEnabled(prevSettings);
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
@@ -28884,7 +28903,7 @@ function saveCanvasOtherSettings() {
     if (useDefault) {
         __applyPerfDefaultBaselineToPerf();
     }
-    closeCanvasOtherSettingsModal();
+    if (closeAfterSave) closeCanvasOtherSettingsModal();
 }
 
 function __updateOtherMagnetLegend(modal, meta) {
@@ -29269,7 +29288,7 @@ function __getOtherCurveLayout(modal, canvas) {
     };
 }
 
-function __bindOtherCurveInteractions(modal) {
+function __bindOtherCurveInteractions(modal, onChange) {
     const canvas = modal ? modal.querySelector('#otherZoomMagnetCurve') : null;
     if (!canvas) return;
     const dragState = { active: false, point: null, pointerId: null };
@@ -29453,6 +29472,7 @@ function __bindOtherCurveInteractions(modal) {
             __syncPerfSettingsFromOtherMagnetPoints(magnets);
         }
         __renderOtherZoomMagnetCurve(modal);
+        if (typeof onChange === 'function') onChange();
     };
 
     canvas.addEventListener('pointerdown', (e) => {
@@ -29499,6 +29519,7 @@ function __bindOtherCurveInteractions(modal) {
         dragState.pointerId = null;
         canvas.style.cursor = 'default';
         __renderOtherZoomMagnetCurve(modal);
+        if (typeof onChange === 'function') onChange();
     };
 
     canvas.addEventListener('pointerup', endDrag);
@@ -29672,13 +29693,6 @@ function createCanvasOtherSettingsModal() {
             : '还原按钮：仅还原颜色，不改变锁状态。'}
                 </div>
             </div>
-            <div class="perf-modal-footer">
-                <button class="perf-btn secondary" id="otherCancelBtn">${isEn ? 'Cancel' : '取消'}</button>
-                <button class="perf-btn primary" id="otherSaveBtn">
-                    <i class="fas fa-check"></i>
-                    <span>${isEn ? 'Save' : '保存'}</span>
-                </button>
-            </div>
         </div>
     `;
 
@@ -29686,13 +29700,19 @@ function createCanvasOtherSettingsModal() {
 
     const closeBtn = modal.querySelector('#otherModalCloseBtn');
     if (closeBtn) closeBtn.addEventListener('click', closeCanvasOtherSettingsModal);
-    const cancelBtn = modal.querySelector('#otherCancelBtn');
-    if (cancelBtn) cancelBtn.addEventListener('click', closeCanvasOtherSettingsModal);
-    const saveBtn = modal.querySelector('#otherSaveBtn');
-    if (saveBtn) saveBtn.addEventListener('click', saveCanvasOtherSettings);
+    const createDebouncedSaver = (delay) => {
+        let timer = null;
+        return () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => saveCanvasOtherSettings({ close: false }), delay);
+        };
+    };
+    const scheduleOtherSave = createDebouncedSaver(180);
+    const scheduleOtherCurveSave = createDebouncedSaver(320);
     const defaultToggle = modal.querySelector('#otherUseDefaultZoomCurve');
     const colorFollowToggle = modal.querySelector('#otherTempColorFollow');
     const unlockSyncToggle = modal.querySelector('#otherTempColorUnlockSync');
+    const autoLinkToggle = modal.querySelector('#otherAutoLinkSplit');
     const resetColorsBtn = modal.querySelector('#otherTempColorResetBtn');
     const tempHelpBtn = modal.querySelector('#otherTempColorHelpBtn');
     const tempHelpPopover = modal.querySelector('#otherTempColorHelpPopover');
@@ -29713,6 +29733,12 @@ function createCanvasOtherSettingsModal() {
             }
             modal._useDefaultZoomCurve = nextUseDefault;
             try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+            scheduleOtherSave();
+        });
+    }
+    if (autoLinkToggle) {
+        autoLinkToggle.addEventListener('change', () => {
+            scheduleOtherSave();
         });
     }
     if (colorFollowToggle) {
@@ -29727,6 +29753,12 @@ function createCanvasOtherSettingsModal() {
         };
         colorFollowToggle.addEventListener('change', () => {
             applyGlobalToggle(!!colorFollowToggle.checked);
+            scheduleOtherSave();
+        });
+    }
+    if (unlockSyncToggle) {
+        unlockSyncToggle.addEventListener('change', () => {
+            scheduleOtherSave();
         });
     }
     if (resetColorsBtn) {
@@ -29783,10 +29815,11 @@ function createCanvasOtherSettingsModal() {
         const merged = __writeCanvasZoomMagnetSettings(next);
         __syncPerfMagnetTogglesFromSettings(merged);
         try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+        scheduleOtherSave();
     };
     if (safeToggle) safeToggle.addEventListener('change', syncMagnetSettingsFromOther);
     if (midToggle) midToggle.addEventListener('change', syncMagnetSettingsFromOther);
-    __bindOtherCurveInteractions(modal);
+    __bindOtherCurveInteractions(modal, scheduleOtherCurveSave);
 }
 
 // =============================================================================
@@ -30074,7 +30107,10 @@ function updateCanvasPerfSettingsUI() {
     }
 }
 
-function saveCanvasPerfSettings() {
+function saveCanvasPerfSettings(options = {}) {
+    const modal = document.getElementById('canvasPerfSettingsModal');
+    if (!modal) return;
+    const closeAfterSave = options && options.close !== false;
     const visSec = parseInt(document.getElementById('perfInputVisSec').value, 10);
     const visBm = parseInt(document.getElementById('perfInputVisBm').value, 10);
     const avg = parseInt(document.getElementById('perfInputAvg').value, 10);
@@ -30186,7 +30222,7 @@ function saveCanvasPerfSettings() {
             });
         }
     } catch (_) { }
-    closeCanvasPerfSettingsModal();
+    if (closeAfterSave) closeCanvasPerfSettingsModal();
 
     // Show toast? simple alert for now or custom toast if available
     // alert('设置已保存');
@@ -30256,7 +30292,7 @@ function createCanvasPerfSettingsModal() {
                 <h3>${isEn ? 'Performance' : '性能'}</h3>
                 <button class="perf-modal-close" id="perfModalCloseBtn"><i class="fas fa-times"></i></button>
             </div>
-            <div class="modal-body" style="padding: 20px; padding-bottom: 78px; overflow-y: auto; flex: 1;">
+            <div class="modal-body" style="padding: 20px; padding-bottom: 20px; overflow-y: auto; flex: 1;">
                 
                 <!-- [Redesigned Viewport Stats] -->
                 <div class="perf-stats-hero" style="display: flex; justify-content: space-around; gap: 10px; margin-bottom: 20px; padding: 0 4px;">
@@ -30477,12 +30513,6 @@ function createCanvasPerfSettingsModal() {
                 </div>
                  
             </div>
-            <div class="perf-modal-footer">
-                <button class="perf-btn secondary" id="perfCancelBtn" style="min-width: 80px;">${isEn ? 'Cancel' : '取消'}</button>
-                <button class="perf-btn primary" id="perfSaveBtn" style="min-width: 120px;">
-                    <i class="fas fa-check" style="margin-right: 6px;"></i><span>${isEn ? 'Confirm' : '确认'}</span>
-                </button>
-            </div>
         </div>
         </div>
         
@@ -30538,23 +30568,37 @@ function createCanvasPerfSettingsModal() {
     const closeBtn = modal.querySelector('#perfModalCloseBtn');
     if (closeBtn) closeBtn.addEventListener('click', closeCanvasPerfSettingsModal);
 
-    const cancelBtn = modal.querySelector('#perfCancelBtn');
-    if (cancelBtn) cancelBtn.addEventListener('click', closeCanvasPerfSettingsModal);
-
-    const saveBtn = modal.querySelector('#perfSaveBtn');
-    if (saveBtn) saveBtn.addEventListener('click', saveCanvasPerfSettings);
+    const schedulePerfSave = (() => {
+        let timer = null;
+        return () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => saveCanvasPerfSettings({ close: false }), 220);
+        };
+    })();
 
     const restoreBtn = modal.querySelector('#perfRestoreDefaultsBtn');
-    if (restoreBtn) restoreBtn.addEventListener('click', restoreDefaultTriggerSettings);
+    if (restoreBtn) restoreBtn.addEventListener('click', () => {
+        restoreDefaultTriggerSettings();
+        schedulePerfSave();
+    });
 
     const restoreZoomBtn = modal.querySelector('#perfRestoreZoomDefaultsBtn');
-    if (restoreZoomBtn) restoreZoomBtn.addEventListener('click', restoreDefaultZoomSettings);
+    if (restoreZoomBtn) restoreZoomBtn.addEventListener('click', () => {
+        restoreDefaultZoomSettings();
+        schedulePerfSave();
+    });
 
     const restoreSafeZoneBtn = modal.querySelector('#perfRestoreSafeZoneBtn');
-    if (restoreSafeZoneBtn) restoreSafeZoneBtn.addEventListener('click', restoreDefaultSafeZoneSettings);
+    if (restoreSafeZoneBtn) restoreSafeZoneBtn.addEventListener('click', () => {
+        restoreDefaultSafeZoneSettings();
+        schedulePerfSave();
+    });
 
     const restoreMagnetBtn = modal.querySelector('#perfRestoreMagnetDefaultsBtn');
-    if (restoreMagnetBtn) restoreMagnetBtn.addEventListener('click', restoreDefaultZoomMagnetSettings);
+    if (restoreMagnetBtn) restoreMagnetBtn.addEventListener('click', () => {
+        restoreDefaultZoomMagnetSettings();
+        schedulePerfSave();
+    });
 
     // 帮助按钮弹层逻辑
     const safeZoneHelpBtn = modal.querySelector('#perfSafeZoneHelpBtn');
@@ -30708,11 +30752,48 @@ function createCanvasPerfSettingsModal() {
         toggleMagnet.addEventListener('change', () => {
             applyMagnetToggleState();
             syncMagnetSettingsFromPerf();
+            schedulePerfSave();
         });
     }
-    if (toggleSafe) toggleSafe.addEventListener('change', syncMagnetSettingsFromPerf);
-    if (toggleMid) toggleMid.addEventListener('change', syncMagnetSettingsFromPerf);
+    if (toggleSafe) toggleSafe.addEventListener('change', () => {
+        syncMagnetSettingsFromPerf();
+        schedulePerfSave();
+    });
+    if (toggleMid) toggleMid.addEventListener('change', () => {
+        syncMagnetSettingsFromPerf();
+        schedulePerfSave();
+    });
     applyMagnetToggleState();
+
+    const perfInputs = [
+        '#perfInputSafeZone',
+        '#perfInputMinZoom',
+        '#perfInputVisSec',
+        '#perfInputVisBm',
+        '#perfInputAvg',
+        '#perfInputExitLowDetail',
+        '#perfInputEnterLowDetail',
+        '#perfInputTotalAlwaysBm',
+        '#perfInputTotalAlwaysFolder'
+    ];
+    perfInputs.forEach(selector => {
+        const el = modal.querySelector(selector);
+        if (!el) return;
+        el.addEventListener('input', schedulePerfSave);
+        el.addEventListener('change', schedulePerfSave);
+    });
+
+    const perfToggles = [
+        '#perfToggleSafeZone',
+        '#perfToggleDataIntensive',
+        '#perfToggleLowDetail',
+        '#perfToggleTotalAlways'
+    ];
+    perfToggles.forEach(selector => {
+        const el = modal.querySelector(selector);
+        if (!el) return;
+        el.addEventListener('change', schedulePerfSave);
+    });
 }
 
 function restoreDefaultPerfSettings() {
