@@ -9,6 +9,11 @@ const getCanvasExportFolder = () => (typeof currentLang !== 'undefined' && curre
 // Canvas状态管理
 const CANVAS_BASE_ZOOM_DEFAULT = 0.6; // 新默认基准缩放：旧 60% 视图 = 新 100%
 const NODE_MAXIMIZED_STORAGE_KEY = 'canvas-node-maximized-v1';
+const NODE_LAYOUT_ZOOM_STORAGE_KEY = 'canvas-node-layout-zoom-v1';
+const NODE_LAYOUT_ZOOM_DEFAULT = 150;
+const NODE_LAYOUT_ZOOM_MIN = 50;
+const NODE_LAYOUT_ZOOM_MAX = 200;
+const NODE_LAYOUT_ZOOM_STEP = 5;
 
 // 统一的首屏初始缩放：让 HTML 不需要再手动同步数值
 try {
@@ -8488,6 +8493,223 @@ function getFullscreenLabel(key, lang) {
     return lang === 'en' ? 'Fullscreen' : '全屏';
 }
 
+function getLayoutZoomLabel(kind, lang) {
+    const isEn = lang === 'en';
+    if (kind === 'in') return isEn ? 'Increase layout zoom' : '放大排版';
+    if (kind === 'out') return isEn ? 'Decrease layout zoom' : '缩小排版';
+    if (kind === 'value') return isEn ? 'Layout zoom' : '排版比例';
+    return '';
+}
+
+function __getNodeLayoutZoomKey(element) {
+    const descriptor = __serializeMaximizedNode(element);
+    if (!descriptor) return null;
+    if (descriptor.type === 'permanent-copy') {
+        return `permanent-copy:${descriptor.copyId || ''}`;
+    }
+    if (descriptor.id) {
+        return `${descriptor.type || 'node'}:${descriptor.id}`;
+    }
+    return descriptor.type ? `type:${descriptor.type}` : null;
+}
+
+function __normalizeLayoutZoomPercent(value, fallback) {
+    const safe = __clampNumber(value, NODE_LAYOUT_ZOOM_MIN, NODE_LAYOUT_ZOOM_MAX, fallback);
+    return Math.round(safe);
+}
+
+function __parseLayoutZoomInput(value, fallback) {
+    const raw = String(value || '').trim().replace(/%/g, '');
+    const num = Number(raw);
+    if (!Number.isFinite(num)) return fallback;
+    return __normalizeLayoutZoomPercent(num, fallback);
+}
+
+function __getNodeLayoutZoomPercent(element) {
+    const fallback = (() => {
+        if (element && element.dataset && element.dataset.layoutZoomPercent) {
+            const parsed = Number(element.dataset.layoutZoomPercent);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+        return NODE_LAYOUT_ZOOM_DEFAULT;
+    })();
+    const key = __getNodeLayoutZoomKey(element);
+    if (!key) return __normalizeLayoutZoomPercent(fallback, NODE_LAYOUT_ZOOM_DEFAULT);
+    const map = __readJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, {});
+    const raw = map && typeof map === 'object' ? map[key] : null;
+    return __normalizeLayoutZoomPercent(raw, fallback);
+}
+
+function __applyNodeLayoutZoom(element, percent) {
+    if (!element) return;
+    const safe = __normalizeLayoutZoomPercent(
+        typeof percent === 'number' ? percent : __getNodeLayoutZoomPercent(element),
+        NODE_LAYOUT_ZOOM_DEFAULT
+    );
+    try {
+        element.style.setProperty('--canvas-node-layout-zoom', String(safe / 100));
+    } catch (_) { }
+    if (element.dataset) {
+        element.dataset.layoutZoomPercent = String(safe);
+    }
+    __updateNodeLayoutZoomDisplay(element, safe);
+}
+
+function __setNodeLayoutZoomPercent(element, percent) {
+    if (!element) return;
+    const safe = __normalizeLayoutZoomPercent(percent, NODE_LAYOUT_ZOOM_DEFAULT);
+    const key = __getNodeLayoutZoomKey(element);
+    if (key) {
+        const map = __readJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, {});
+        const nextMap = map && typeof map === 'object' ? map : {};
+        nextMap[key] = safe;
+        __writeJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, nextMap);
+    }
+    __applyNodeLayoutZoom(element, safe);
+}
+
+function __updateNodeLayoutZoomDisplay(element, percent) {
+    if (!element) return;
+    const display = element.querySelector('.canvas-layout-zoom-input, .canvas-layout-zoom-value');
+    if (!display) return;
+    const safe = __normalizeLayoutZoomPercent(
+        typeof percent === 'number' ? percent : __getNodeLayoutZoomPercent(element),
+        NODE_LAYOUT_ZOOM_DEFAULT
+    );
+    if (display.tagName === 'INPUT') {
+        if (document.activeElement === display) return;
+        display.value = `${safe}%`;
+    } else {
+        display.textContent = `${safe}%`;
+    }
+}
+
+function __updateNodeLayoutZoomControls(element, lang) {
+    if (!element) return;
+    const zoomInLabel = getLayoutZoomLabel('in', lang);
+    const zoomOutLabel = getLayoutZoomLabel('out', lang);
+    const zoomValueLabel = getLayoutZoomLabel('value', lang);
+    const zoomInBtn = element.querySelector('.canvas-layout-zoom-btn[data-action="layout-zoom-in"]');
+    const zoomOutBtn = element.querySelector('.canvas-layout-zoom-btn[data-action="layout-zoom-out"]');
+    const zoomValue = element.querySelector('.canvas-layout-zoom-input, .canvas-layout-zoom-value');
+
+    if (zoomInBtn) {
+        zoomInBtn.setAttribute('title', zoomInLabel);
+        zoomInBtn.setAttribute('aria-label', zoomInLabel);
+        zoomInBtn.setAttribute('data-tooltip', zoomInLabel);
+    }
+    if (zoomOutBtn) {
+        zoomOutBtn.setAttribute('title', zoomOutLabel);
+        zoomOutBtn.setAttribute('aria-label', zoomOutLabel);
+        zoomOutBtn.setAttribute('data-tooltip', zoomOutLabel);
+    }
+    if (zoomValue) {
+        zoomValue.setAttribute('title', zoomValueLabel);
+        zoomValue.setAttribute('data-tooltip', zoomValueLabel);
+    }
+    __applyNodeLayoutZoom(element);
+    __bindNodeLayoutZoomInput(element);
+}
+
+function __adjustNodeLayoutZoom(element, delta) {
+    if (!element) return;
+    const current = __getNodeLayoutZoomPercent(element);
+    const next = __normalizeLayoutZoomPercent(current + delta, current);
+    if (next === current) return;
+    __setNodeLayoutZoomPercent(element, next);
+}
+
+function __handleLayoutZoomAction(element, action) {
+    if (!element || !action) return false;
+    if (action === 'layout-zoom-in') {
+        __adjustNodeLayoutZoom(element, NODE_LAYOUT_ZOOM_STEP);
+        return true;
+    }
+    if (action === 'layout-zoom-out') {
+        __adjustNodeLayoutZoom(element, -NODE_LAYOUT_ZOOM_STEP);
+        return true;
+    }
+    return false;
+}
+
+function __bindNodeLayoutZoomInput(element) {
+    if (!element) return;
+    const input = element.querySelector('.canvas-layout-zoom-input');
+    if (!input || input.dataset.layoutZoomBound === 'true') return;
+    input.dataset.layoutZoomBound = 'true';
+
+    input.addEventListener('focus', () => {
+        const current = __getNodeLayoutZoomPercent(element);
+        input.value = String(current);
+        try { input.select(); } catch (_) { }
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            input.blur();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            input.value = `${__getNodeLayoutZoomPercent(element)}%`;
+            input.blur();
+        }
+    });
+
+    input.addEventListener('blur', () => {
+        const current = __getNodeLayoutZoomPercent(element);
+        const next = __parseLayoutZoomInput(input.value, current);
+        __setNodeLayoutZoomPercent(element, next);
+        input.value = `${next}%`;
+    });
+
+    ['mousedown', 'click'].forEach((evt) => {
+        input.addEventListener(evt, (e) => e.stopPropagation());
+    });
+}
+
+function __createLayoutZoomControls(buttonClass, lang) {
+    const controls = document.createElement('div');
+    controls.className = 'canvas-layout-zoom-controls';
+    controls.setAttribute('data-layout-zoom-controls', 'true');
+
+    const zoomOutLabel = getLayoutZoomLabel('out', lang);
+    const zoomInLabel = getLayoutZoomLabel('in', lang);
+    const zoomValueLabel = getLayoutZoomLabel('value', lang);
+
+    const zoomOutBtn = document.createElement('button');
+    zoomOutBtn.type = 'button';
+    zoomOutBtn.className = `${buttonClass} canvas-layout-zoom-btn canvas-layout-zoom-out-btn`;
+    zoomOutBtn.setAttribute('data-action', 'layout-zoom-out');
+    zoomOutBtn.setAttribute('title', zoomOutLabel);
+    zoomOutBtn.setAttribute('aria-label', zoomOutLabel);
+    zoomOutBtn.setAttribute('data-tooltip', zoomOutLabel);
+    zoomOutBtn.innerHTML = '<i class="fas fa-minus"></i>';
+
+    const zoomValue = document.createElement('input');
+    zoomValue.type = 'text';
+    zoomValue.inputMode = 'numeric';
+    zoomValue.className = 'canvas-layout-zoom-value canvas-layout-zoom-input';
+    zoomValue.setAttribute('data-layout-zoom-value', 'true');
+    zoomValue.setAttribute('title', zoomValueLabel);
+    zoomValue.setAttribute('data-tooltip', zoomValueLabel);
+    zoomValue.setAttribute('aria-label', zoomValueLabel);
+    zoomValue.value = `${NODE_LAYOUT_ZOOM_DEFAULT}%`;
+
+    const zoomInBtn = document.createElement('button');
+    zoomInBtn.type = 'button';
+    zoomInBtn.className = `${buttonClass} canvas-layout-zoom-btn canvas-layout-zoom-in-btn`;
+    zoomInBtn.setAttribute('data-action', 'layout-zoom-in');
+    zoomInBtn.setAttribute('title', zoomInLabel);
+    zoomInBtn.setAttribute('aria-label', zoomInLabel);
+    zoomInBtn.setAttribute('data-tooltip', zoomInLabel);
+    zoomInBtn.innerHTML = '<i class="fas fa-plus"></i>';
+
+    controls.appendChild(zoomOutBtn);
+    controls.appendChild(zoomValue);
+    controls.appendChild(zoomInBtn);
+    return controls;
+}
+
 function getCurrentFullscreenElement() {
     return document.fullscreenElement ||
         document.webkitFullscreenElement ||
@@ -8643,6 +8865,7 @@ function maximizeCanvasNode(element) {
     element.style.zIndex = '10000';
     __updateNodeMaximizedState();
     __saveMaximizedNodeToStorage(element);
+    __applyNodeLayoutZoom(element);
     updateNodeFullscreenButtons();
 }
 
@@ -8704,6 +8927,7 @@ function updateNodeFullscreenButtons() {
         const isFullscreen = __isNodeMaximized(target);
         const labelKey = isFullscreen ? 'canvasFullscreenExit' : 'canvasFullscreenEnter';
         const label = getFullscreenLabel(labelKey, lang);
+        __updateNodeLayoutZoomControls(target, lang);
         btn.setAttribute('title', label);
         btn.setAttribute('aria-label', label);
         btn.setAttribute('data-tooltip', label);
@@ -10092,6 +10316,17 @@ function __ensurePermanentSectionCopyControlsBound() {
     canvasContent.dataset.permanentCopyControlsBound = 'true';
 
     canvasContent.addEventListener('click', (e) => {
+        const zoomBtn = e && e.target && e.target.closest ? e.target.closest('.canvas-layout-zoom-btn') : null;
+        if (zoomBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const sectionEl = zoomBtn.closest('.permanent-bookmark-section');
+            if (sectionEl) {
+                __handleLayoutZoomAction(sectionEl, zoomBtn.getAttribute('data-action'));
+            }
+            return;
+        }
+
         const copyBtn = e && e.target && e.target.closest ? e.target.closest('.permanent-section-copy-btn') : null;
         if (copyBtn) {
             e.preventDefault();
@@ -11687,16 +11922,31 @@ function renderMdNode(node) {
     const editTitle = lang === 'en' ? 'Edit' : '编辑';
     const formatTitle = lang === 'en' ? 'Format toolbar' : '格式工具栏';
     const fullscreenTitle = getFullscreenLabel('canvasFullscreenEnter', lang);
+    const layoutZoomOutTitle = getLayoutZoomLabel('out', lang);
+    const layoutZoomInTitle = getLayoutZoomLabel('in', lang);
+    const layoutZoomValueTitle = getLayoutZoomLabel('value', lang);
 
     // 多语言：import-container 的两个删除按钮
     const deleteFrameTitle = lang === 'en' ? 'Delete Frame Only' : '仅删除框体';
     const deleteAllTitle = lang === 'en' ? 'Delete All Content' : '删除全部内容';
+    const layoutZoomControlsHtml = `
+        <div class="canvas-layout-zoom-controls md-node-layout-zoom-controls" data-layout-zoom-controls="true">
+            <button class="md-node-toolbar-btn canvas-layout-zoom-btn" data-action="layout-zoom-out" data-tooltip="${layoutZoomOutTitle}" title="${layoutZoomOutTitle}">
+                <i class="fas fa-minus"></i>
+            </button>
+            <input class="canvas-layout-zoom-value canvas-layout-zoom-input" data-layout-zoom-value title="${layoutZoomValueTitle}" data-tooltip="${layoutZoomValueTitle}" aria-label="${layoutZoomValueTitle}" value="${NODE_LAYOUT_ZOOM_DEFAULT}%" />
+            <button class="md-node-toolbar-btn canvas-layout-zoom-btn" data-action="layout-zoom-in" data-tooltip="${layoutZoomInTitle}" title="${layoutZoomInTitle}">
+                <i class="fas fa-plus"></i>
+            </button>
+        </div>
+    `;
 
     // 根据节点类型生成不同的工具栏
     if (node.subtype === 'import-container') {
         // import-container 使用两个独立的删除按钮
         // data-tooltip 用于自定义快速气泡，移除 title 属性以禁用原生提示
         toolbar.innerHTML = `
+            ${layoutZoomControlsHtml}
             <button class="md-node-toolbar-btn" data-action="md-delete-frame-only" data-tooltip="${deleteFrameTitle}">
                 <div class="icon-frame-delete">
                     <i class="far fa-square"></i>
@@ -11716,6 +11966,7 @@ function renderMdNode(node) {
     } else {
         // 普通节点使用标准工具栏
         toolbar.innerHTML = `
+            ${layoutZoomControlsHtml}
             <button class="md-node-toolbar-btn" data-action="md-delete" data-tooltip="${deleteTitle}"><i class="far fa-trash-alt"></i></button>
             <button class="md-node-toolbar-btn" data-action="md-color-toggle" data-tooltip="${colorTitle}"><i class="fas fa-palette"></i></button>
             <button class="md-node-toolbar-btn" data-action="md-format-toggle" data-tooltip="${formatTitle}"><i class="fas fa-font"></i></button>
@@ -15103,7 +15354,7 @@ function renderMdNode(node) {
             : (e.target && e.target.parentElement ? e.target.parentElement : null);
         if (!target) return;
         // 忽略在resize、小工具栏按钮、链接上的按下
-        if (target.closest('.resize-handle') || target.closest('.md-node-toolbar-btn') || target.closest('a')) return;
+        if (target.closest('.resize-handle') || target.closest('.md-node-toolbar-btn') || target.closest('.canvas-layout-zoom-controls') || target.closest('a')) return;
 
         // 按住Ctrl键时，暂停编辑模式，允许拖动和调整大小
         if (isSectionCtrlModeEvent(e)) {
@@ -15141,7 +15392,7 @@ function renderMdNode(node) {
             ? e.target
             : (e.target && e.target.parentElement ? e.target.parentElement : null);
         if (!target) return;
-        if (target.closest('.resize-handle') || target.closest('.md-node-toolbar-btn')) return;
+        if (target.closest('.resize-handle') || target.closest('.md-node-toolbar-btn') || target.closest('.canvas-layout-zoom-controls')) return;
         e.preventDefault();
         e.stopPropagation();
     }, true);
@@ -15161,6 +15412,9 @@ function renderMdNode(node) {
         e.preventDefault();
         e.stopPropagation();
         const action = btn.getAttribute('data-action');
+        if (__handleLayoutZoomAction(el, action)) {
+            return;
+        }
         const shouldEnterEditForAction = (() => {
             if (!action) return false;
             if (action.startsWith('md-insert-')) return true;
@@ -18508,6 +18762,15 @@ function renderTempNode(section, options = {}) {
 
     const actions = document.createElement('div');
     actions.className = 'temp-node-actions';
+    const tempZoomControls = __createLayoutZoomControls('temp-node-action-btn', getCanvasLanguage());
+    tempZoomControls.addEventListener('click', (event) => {
+        const btn = event.target.closest('.canvas-layout-zoom-btn');
+        if (!btn) return;
+        event.preventDefault();
+        event.stopPropagation();
+        __handleLayoutZoomAction(nodeElement, btn.getAttribute('data-action'));
+    });
+    actions.appendChild(tempZoomControls);
 
     const renameBtn = document.createElement('button');
     renameBtn.type = 'button';
@@ -20383,6 +20646,7 @@ function makeNodeDraggable(element, section) {
         if (element.classList.contains('canvas-node-maximized')) return;
 
         if (target.closest('.temp-node-action-btn') ||
+            target.closest('.canvas-layout-zoom-controls') ||
             target.closest('.temp-color-popover') ||
             target.classList.contains('temp-node-color-input') ||
             (target.classList.contains('temp-node-title') && target.classList.contains('editing')) ||
@@ -22233,6 +22497,20 @@ async function addToPermanentBookmarks(payload, parentIdOverride = null) {
 function setupCanvasEventListeners() {
     // 初始蒙版同步
     refreshSectionCtrlOverlays();
+
+    // Layout zoom controls (delegated for all node types)
+    if (document && document.body && document.body.dataset.layoutZoomDelegateBound !== 'true') {
+        document.body.dataset.layoutZoomDelegateBound = 'true';
+        document.addEventListener('click', (e) => {
+            const btn = e.target && e.target.closest ? e.target.closest('.canvas-layout-zoom-btn') : null;
+            if (!btn) return;
+            const target = btn.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
+            if (!target) return;
+            e.preventDefault();
+            e.stopPropagation();
+            __handleLayoutZoomAction(target, btn.getAttribute('data-action'));
+        }, true);
+    }
 
     // Ctrl 按下/松开切换专属模式
     document.addEventListener('keydown', (e) => {

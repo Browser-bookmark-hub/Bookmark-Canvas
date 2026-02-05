@@ -5812,6 +5812,89 @@ a.tree-label.tree-bookmark-link:hover {
     box-shadow: var(--shadow-lg);
 }
 
+/* Layout zoom controls (fullscreen only) */
+.canvas-layout-zoom-controls {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.canvas-node-maximized .canvas-layout-zoom-controls {
+    display: inline-flex;
+}
+
+.canvas-layout-zoom-value {
+    width: 32px;
+    max-width: 32px;
+    min-width: 20px;
+    height: 24px;
+    padding: 0 2px;
+    box-sizing: border-box;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.2px;
+    user-select: none;
+    cursor: default;
+    text-align: center;
+    outline: none;
+    background: transparent;
+}
+
+.canvas-layout-zoom-input {
+    appearance: none;
+    border: none;
+    user-select: text;
+    cursor: text;
+}
+
+.canvas-layout-zoom-input:focus {
+    outline: 2px solid rgba(56, 139, 253, 0.6);
+    outline-offset: 1px;
+}
+
+.permanent-section-actions .canvas-layout-zoom-controls,
+.temp-node-actions .canvas-layout-zoom-controls,
+.md-node-toolbar .canvas-layout-zoom-controls {
+    margin-right: 6px;
+}
+
+.permanent-section-actions .canvas-layout-zoom-value,
+.temp-node-actions .canvas-layout-zoom-value {
+    color: rgba(255, 255, 255, 0.92);
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.md-node-toolbar .canvas-layout-zoom-value {
+    color: #57606a;
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(27, 31, 36, 0.2);
+}
+
+[data-theme="dark"] .md-node-toolbar .canvas-layout-zoom-value {
+    color: #c9d1d9;
+    background: rgba(15, 23, 42, 0.35);
+    border-color: rgba(201, 209, 217, 0.3);
+}
+
+/* Layout zoom target (content only) */
+.permanent-bookmark-section.canvas-node-maximized .permanent-section-header,
+.permanent-bookmark-section.canvas-node-maximized .permanent-section-body,
+.temp-canvas-node.canvas-node-maximized .temp-node-header,
+.temp-canvas-node.canvas-node-maximized .temp-node-description-container,
+.temp-canvas-node.canvas-node-maximized .temp-node-body,
+.md-canvas-node.canvas-node-maximized .md-node-toolbar,
+.md-canvas-node.canvas-node-maximized .md-canvas-editor {
+    zoom: var(--canvas-node-layout-zoom, 1);
+}
+
 /* Maximize tweaks: hide certain controls + reposition toolbars/popovers */
 .permanent-bookmark-section.canvas-node-maximized .permanent-section-copy-btn,
 .permanent-bookmark-section.canvas-node-maximized .permanent-section-pin-btn {
