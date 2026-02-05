@@ -216,6 +216,19 @@ body {
     align-items: center;
 }
 
+/* Cursor hints for top header controls */
+.history-header .tool-btn,
+.history-header .search-container,
+.history-header .search-mode-trigger,
+.history-header .search-mode-menu-item,
+.history-header .search-filter-indicator {
+    cursor: pointer;
+}
+
+.history-header .search-container input {
+    cursor: text;
+}
+
 /* Search Container - Flex Layout */
 .search-container {
     position: relative;
@@ -296,6 +309,7 @@ body {
     font-size: 14px;
     outline: none;
     height: 32px;
+    cursor: text;
 }
 
 .search-container input:focus {
@@ -6972,6 +6986,13 @@ a.tree-label.tree-bookmark-link:hover {
     font-size: 12px;
     min-width: max-content;
     transition: all 0.2s ease;
+}
+
+.canvas-zoom-indicator button,
+.canvas-zoom-indicator [role="button"],
+.canvas-manage-modal button,
+.canvas-manage-modal [role="button"] {
+    cursor: pointer;
 }
 
 .canvas-zoom-header {
