@@ -416,6 +416,31 @@ function handleSearchKeydown(e) {
         const panelVisible = !!(panel && panel.classList.contains('visible'));
         const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
 
+        if (e.key === 'ArrowRight') {
+            const view = getCurrentViewSafe();
+            if (view === 'canvas' && searchUiState && searchUiState.activeMode === 'bookmark') {
+                if (panelVisible && panelType === 'results') {
+                    const counts = searchUiState.bookmarkModeCounts || {};
+                    const bookmarkCount = Number(counts.bookmarkCount || 0);
+                    const folderCount = Number(counts.folderCount || 0);
+                    if (bookmarkCount > 0 && folderCount > 0) {
+                        e.preventDefault();
+                        const currentType = searchUiState.bookmarkTypeFilter;
+                        const nextType = currentType === 'folder' ? 'bookmark' : 'folder';
+                        searchUiState.bookmarkTypeFilter = nextType;
+                        const groups = searchUiState.bookmarkGroupModel;
+                        if (Array.isArray(groups)) {
+                            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
+                            renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
+                        } else {
+                            searchCanvasAndRender(searchUiState.query);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
         if (e.key === 'ArrowLeft') {
             const view = getCurrentViewSafe();
             const input = e.target;
@@ -3169,11 +3194,11 @@ function renderCanvasSearchSuggestions() {
         ? '点左侧按钮切换模式'
         : 'Use the left button to switch mode';
     const hintHelpText = isZh
-        ? '空输入：↑/↓ 直接切换；或 ← 到左侧模式再 ↑/↓。有输入：← 移到左侧模式，↑/↓ 切换并实时更新结果。'
-        : 'Empty: ↑/↓ switches; or ← to focus mode then ↑/↓. With query: ← to focus mode, ↑/↓ switches and updates results.';
+        ? '空输入：↑/↓ 直接切换；或 ← 到左侧模式再 ↑/↓。有输入：← 移到左侧模式，↑/↓ 切换并实时更新结果。书签模式：→ 直接切换书签/文件夹筛选；↑/↓ 选择候选，Enter 确认。'
+        : 'Empty: ↑/↓ switches; or ← to focus mode then ↑/↓. With query: ← to focus mode, ↑/↓ switches and updates results. Bookmark mode: → toggles bookmark/folder filter; ↑/↓ select, Enter apply.';
     const hintHelpHtml = isZh
-        ? '空输入：↑/↓ 直接切换；或 ← 到左侧模式再 ↑/↓。<br>有输入：← 移到左侧模式，↑/↓ 切换并实时更新结果。'
-        : 'Empty: ↑/↓ switches; or ← to focus mode then ↑/↓.<br>With query: ← to focus mode, ↑/↓ switches and updates results.';
+        ? '空输入：↑/↓ 直接切换；或 ← 到左侧模式再 ↑/↓。<br>有输入：← 移到左侧模式，↑/↓ 切换并实时更新结果。<br>书签模式：→ 直接切换书签/文件夹筛选；↑/↓ 选择候选，Enter 确认。'
+        : 'Empty: ↑/↓ switches; or ← to focus mode then ↑/↓.<br>With query: ← to focus mode, ↑/↓ switches and updates results.<br>Bookmark mode: → toggles bookmark/folder filter; ↑/↓ select, Enter apply.';
 
     panel.innerHTML = `
         <div class="search-suggestions-header" style="position:relative; padding:6px 10px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:flex-end; gap:10px;">
@@ -3340,6 +3365,7 @@ function renderCanvasSearchResults(results, options = {}) {
         const bookmarkCount = countType('bookmark');
         const folderCount = countType('folder');
         bookmarkModeCounts = { bookmarkCount, folderCount };
+        searchUiState.bookmarkModeCounts = bookmarkModeCounts;
 
         // Determine effective filter (auto fallback)
         let effectiveFilter = searchUiState.bookmarkTypeFilter;
@@ -3866,6 +3892,7 @@ function renderCanvasSearchResults(results, options = {}) {
     panel.innerHTML = html;
     showSearchResultsPanel();
     updateSearchResultSelection(searchUiState.selectedIndex);
+
 }
 
 // ==================== Phase 3: 定位与高亮 ====================
