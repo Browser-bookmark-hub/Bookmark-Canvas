@@ -3250,18 +3250,81 @@ function switchView(view) {
     renderCurrentView();
 }
 
+const CANVAS_THUMB_MAX_WIDTH = 640;
+const CANVAS_THUMB_MAX_HEIGHT = 360;
+const CANVAS_THUMB_JPEG_QUALITY = 0.85;
+
+function saveCanvasThumbnailDataUrl(dataUrl, fallbackDataUrl = '') {
+    try {
+        if (!browserAPI || !browserAPI.storage || !browserAPI.storage.local) return;
+        browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => {
+            const err = browserAPI.runtime && browserAPI.runtime.lastError;
+            if (err && fallbackDataUrl && fallbackDataUrl !== dataUrl) {
+                console.warn('[Canvas Thumbnail] 保存失败，尝试压缩:', err.message || err);
+                browserAPI.storage.local.set({ bookmarkCanvasThumbnail: fallbackDataUrl }, () => { });
+            }
+        });
+    } catch (_) { }
+}
+
+function renderCompressedThumbnailDataUrl(sourceCanvas) {
+    try {
+        if (!sourceCanvas) return '';
+        const sw = sourceCanvas.width || 0;
+        const sh = sourceCanvas.height || 0;
+        if (!sw || !sh) return '';
+        const scale = Math.min(1, CANVAS_THUMB_MAX_WIDTH / sw, CANVAS_THUMB_MAX_HEIGHT / sh);
+        const outW = Math.max(1, Math.round(sw * scale));
+        const outH = Math.max(1, Math.round(sh * scale));
+        const out = document.createElement('canvas');
+        out.width = outW;
+        out.height = outH;
+        const ctx = out.getContext('2d');
+        if (!ctx) return '';
+        ctx.drawImage(sourceCanvas, 0, 0, sw, sh, 0, 0, outW, outH);
+        return out.toDataURL('image/jpeg', CANVAS_THUMB_JPEG_QUALITY);
+    } catch (_) {
+        return '';
+    }
+}
+
+function isCanvasCaptureVisible() {
+    try {
+        if (document.visibilityState && document.visibilityState !== 'visible') return false;
+        if (typeof document.hasFocus === 'function' && !document.hasFocus()) return false;
+    } catch (_) { }
+    return true;
+}
+
 // 捕获当前窗口中 Bookmark Canvas 页面的可见区域，并保存为主界面缩略图
 // 注意：为了实现「只截画布容器」，这里采用两级方案：
 // 1）优先在页面内按 .canvas-main-container 的 rect 进行裁剪；
 // 2）若裁剪失败，则退回整页截图（保持兼容性）。
-function captureCanvasThumbnail() {
+function captureCanvasThumbnail(attempt = 0) {
     try {
         // 仅在 Canvas 视图下尝试截屏
         if (currentView !== 'canvas') return;
         if (!browserAPI || !browserAPI.tabs || !browserAPI.tabs.captureVisibleTab) return;
+        if (!isCanvasCaptureVisible()) return;
 
-        // 使用 tabs.captureVisibleTab 先拿整页截图，再在内容页内裁剪
-        browserAPI.tabs.captureVisibleTab(null, { format: 'png' }, (dataUrl) => {
+        const containerProbe = document.querySelector('.canvas-main-container');
+        if (!containerProbe) {
+            if (attempt < 2) {
+                setTimeout(() => captureCanvasThumbnail(attempt + 1), 400);
+            }
+            return;
+        }
+        const probeRect = containerProbe.getBoundingClientRect();
+        if (probeRect.width < 10 || probeRect.height < 10) {
+            if (attempt < 2) {
+                setTimeout(() => captureCanvasThumbnail(attempt + 1), 400);
+            }
+            return;
+        }
+
+        const startCapture = (windowId = null) => {
+            // 使用 tabs.captureVisibleTab 先拿整页截图，再在内容页内裁剪
+            browserAPI.tabs.captureVisibleTab(windowId, { format: 'png' }, (dataUrl) => {
             try {
                 const captureError = browserAPI.runtime && browserAPI.runtime.lastError;
                 if (captureError) {
@@ -3275,8 +3338,6 @@ function captureCanvasThumbnail() {
                 try {
                     const container = document.querySelector('.canvas-main-container');
                     if (!container) {
-                        // 找不到容器，直接保存整页截图作为兜底
-                        browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
                         return;
                     }
 
@@ -3289,8 +3350,7 @@ function captureCanvasThumbnail() {
                             const canvas = document.createElement('canvas');
                             const ctx = canvas.getContext('2d');
                             if (!ctx) {
-                                console.warn('[Canvas Thumbnail] 无法获取 2D 上下文，退回整页截图');
-                                browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
+                                console.warn('[Canvas Thumbnail] 无法获取 2D 上下文，跳过保存');
                                 return;
                             }
 
@@ -3310,8 +3370,7 @@ function captureCanvasThumbnail() {
                             const ih = Math.max(0, Math.min(img.height - iy, sh - (iy - sy)));
 
                             if (iw <= 1 || ih <= 1) {
-                                console.warn('[Canvas Thumbnail] 裁剪区域无效，退回整页截图');
-                                browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
+                                console.warn('[Canvas Thumbnail] 裁剪区域无效，跳过保存');
                                 return;
                             }
 
@@ -3321,27 +3380,37 @@ function captureCanvasThumbnail() {
                             ctx.drawImage(img, ix, iy, iw, ih, 0, 0, canvas.width, canvas.height);
 
                             const croppedDataUrl = canvas.toDataURL('image/png');
-                            browserAPI.storage.local.set({ bookmarkCanvasThumbnail: croppedDataUrl }, () => {
-                                // 静默保存，不输出日志
-                            });
+                            const compressedDataUrl = renderCompressedThumbnailDataUrl(canvas);
+                            saveCanvasThumbnailDataUrl(croppedDataUrl, compressedDataUrl);
                         } catch (e) {
-                            console.warn('[Canvas Thumbnail] 裁剪缩略图时出错，退回整页截图:', e);
-                            browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
+                            console.warn('[Canvas Thumbnail] 裁剪缩略图时出错，跳过保存:', e);
                         }
                     };
                     img.onerror = () => {
-                        console.warn('[Canvas Thumbnail] 缩略图图片加载失败，退回整页截图');
-                        browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
+                        console.warn('[Canvas Thumbnail] 缩略图图片加载失败，跳过保存');
                     };
                     img.src = dataUrl;
                 } catch (cropError) {
-                    console.warn('[Canvas Thumbnail] 裁剪逻辑异常，退回整页截图:', cropError);
-                    browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => { });
+                    console.warn('[Canvas Thumbnail] 裁剪逻辑异常，跳过保存:', cropError);
                 }
             } catch (e) {
                 console.warn('[Canvas Thumbnail] 保存缩略图时出错:', e);
             }
-        });
+            });
+        };
+
+        if (browserAPI.tabs.getCurrent) {
+            browserAPI.tabs.getCurrent((tab) => {
+                try {
+                    if (tab && tab.active === false) return;
+                    const windowId = (tab && Number.isFinite(tab.windowId)) ? tab.windowId : null;
+                    startCapture(windowId);
+                } catch (_) { }
+            });
+            return;
+        }
+
+        startCapture(null);
     } catch (error) {
         console.warn('[Canvas Thumbnail] 截图失败:', error);
     }
