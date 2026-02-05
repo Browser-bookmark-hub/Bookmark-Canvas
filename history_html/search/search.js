@@ -518,9 +518,92 @@ function handleSearchResultsPanelClick(e) {
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results') return;
 
-    const item = e && e.target ? e.target.closest('.search-result-item') : null;
-    if (!item) return;
-    const idx = parseInt(item.getAttribute('data-index') || '-1', 10);
+    // 0. Canvas Bookmark Mode: type toggles (Bookmark / Folder)
+    const typeBtn = e.target.closest('.canvas-bookmark-type-btn');
+    if (typeBtn) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+
+        const type = String(typeBtn.dataset.type || '');
+        if (type !== 'bookmark' && type !== 'folder') return;
+
+        // Update filter and re-render (do NOT close panel)
+        searchUiState.bookmarkTypeFilter = type;
+        const groups = searchUiState.bookmarkGroupModel;
+        if (Array.isArray(groups)) {
+            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
+            renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
+        } else {
+            // Fallback: rerun search
+            searchCanvasAndRender(searchUiState.query);
+        }
+        return;
+    }
+
+    // 1. Handle Copy-Jump Badges AND Location Chips (Unified)
+    // .search-result-badge-interactive (Legacy or direct Permanent badges)
+    // .search-loc-chip, .search-loc-chip-row (New Bookmark Group Location chips)
+    const interactive = e.target.closest('.search-result-badge-interactive, .search-loc-chip, .search-loc-chip-row');
+    if (interactive) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // 1a. Extract Item Context
+        const itemEl = interactive.closest('.search-result-item');
+        if (!itemEl) return;
+        const index = parseInt(itemEl.getAttribute('data-index') || '-1', 10);
+        const item = searchUiState.results[index];
+        if (!item) return;
+
+        // 1b. Determine Action
+        hideSearchResultsPanel();
+
+        // Default options
+        const opts = { color: item.color || '#3b82f6' };
+
+        // Is it a "Location Chip" with explicit instructions?
+        const locId = interactive.dataset.locId;
+        const locSource = interactive.dataset.locSource;
+        const locSection = interactive.dataset.locSection;
+        const copyId = interactive.dataset.copyId;
+
+        if (copyId && copyId !== 'null') opts.copyId = copyId;
+
+        // Priority 1: Location Chip specific ID
+        if (locId) {
+            if (locSource === 'temporary') {
+                locateBookmarkItemInTempTree(locSection, locId, opts);
+            } else {
+                locateBookmarkItemInPermanentTree(locId, opts);
+            }
+            return;
+        }
+
+        // Priority 2: Direct Jump Badge (on a normal Permanent search result)
+        if (item.type === 'bookmark-item' && item.source === 'permanent') {
+            locateBookmarkItemInPermanentTree(item.id, opts);
+            return;
+        }
+
+        return;
+    }
+
+    const itemEl = e.target.closest('.search-result-item');
+    if (!itemEl) return;
+
+    try {
+        const selection = window.getSelection();
+        if (selection && selection.toString().length > 0) {
+            e.stopPropagation();
+            return;
+        }
+        e.preventDefault();
+        e.stopImmediatePropagation();
+    } catch (_) { }
+
+    const idx = parseInt(itemEl.getAttribute('data-index') || '-1', 10);
     if (Number.isNaN(idx)) return;
     activateSearchResult(idx);
 }
@@ -4552,8 +4635,28 @@ async function activateCanvasSearchResultAtIndex(index) {
     const item = searchUiState.results[idx];
     if (!item) return;
 
-    // Canvas Bookmark Mode: section-group toggle (do NOT close panel)
+    // Canvas Bookmark Mode: flat group card
     if (item.type === 'bookmark-group') {
+        const locations = Array.isArray(item.locations) ? item.locations : [];
+        if (locations.length > 0) {
+            // Jump to the best-matched location (first in list)
+            try {
+                hideSearchResultsPanel();
+                const inputEl = document.getElementById('searchInput');
+                if (inputEl) inputEl.value = '';
+            } catch (_) { }
+
+            const loc = locations[0];
+            const opts = { color: loc.color || item.color || '#3b82f6' };
+            if (loc.source === 'temporary') {
+                await locateBookmarkItemInTempTree(loc.sectionId, loc.id, opts);
+            } else {
+                await locateBookmarkItemInPermanentTree(loc.id, opts);
+            }
+            return;
+        }
+
+        // Fallback: keep legacy toggle behavior (if any data exists)
         const groupId = String(item.id || '');
         if (groupId) {
             const prev = searchUiState.bookmarkGroupCollapse.get(groupId);
