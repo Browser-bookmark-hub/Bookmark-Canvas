@@ -1159,12 +1159,28 @@ function shouldTempColorUnlockSync(settingsOverride = null) {
     return !(settings && settings.tempColorUnlockSync === false);
 }
 
+const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch']);
+
+function __isSpecialTempSection(section) {
+    if (!section) return false;
+    const sourceRaw = (typeof section.source === 'string') ? section.source.trim() : '';
+    const source = sourceRaw.toLowerCase();
+    if (source && SPECIAL_TEMP_SOURCE_SET.has(source)) return true;
+    const labelRaw = (typeof section.label === 'string') ? section.label.trim() : '';
+    if (!labelRaw) return false;
+    if (labelRaw === '拖入' || labelRaw === '搜索' || labelRaw === '批量') return true;
+    const label = labelRaw.toLowerCase();
+    return label === 'drop' || label === 'search' || label === 'batch';
+}
+
 function __isTempSectionColorLocked(section) {
     if (!section) return true;
+    if (__isSpecialTempSection(section)) return true;
     return !!section.colorLocked;
 }
 
 function __isTempSectionManuallyLocked(section) {
+    if (__isSpecialTempSection(section)) return true;
     return !!(section && section.colorLocked === true);
 }
 
@@ -1192,6 +1208,10 @@ function __syncTempColorFollowLocksInDom() {
         if (!sectionId) return;
         const section = getTempSection(sectionId);
         if (!section) return;
+        if (__isSpecialTempSection(section)) {
+            try { btn.remove(); } catch (_) { }
+            return;
+        }
         __applyTempColorLockButtonState(btn, section);
     });
 }
@@ -1201,6 +1221,7 @@ function __resetAllTempSectionColorsToDefault() {
     const defaultColor = getTempSectionDefaultColor();
     CanvasState.tempSections.forEach(section => {
         if (!section) return;
+        if (__isSpecialTempSection(section)) return;
         updateTempSectionColor(section, defaultColor);
     });
     try { saveTempNodes(); } catch (_) { }
@@ -1217,6 +1238,7 @@ function __applyGlobalTempColorFollowSetting(enabled) {
     let changed = false;
     CanvasState.tempSections.forEach(section => {
         if (!section) return;
+        if (__isSpecialTempSection(section)) return;
         if (section.colorLocked !== lockAll) {
             section.colorLocked = lockAll;
             changed = true;
@@ -2621,11 +2643,13 @@ function updateTempSectionColor(section, color) {
 
 function propagateTempSectionColor(parentSection, color) {
     if (!parentSection) return;
+    if (__isSpecialTempSection(parentSection)) return;
     const parentLabel = getTempSectionLabel(parentSection);
     if (!parentLabel) return;
     const labelMap = buildTempSectionLabelMap();
     CanvasState.tempSections.forEach(section => {
         if (!section || section.id === parentSection.id) return;
+        if (__isSpecialTempSection(section)) return;
         const label = getTempSectionLabel(section);
         if (label && isDescendantLabel(parentLabel, label)) {
             if (__isTempSectionColorLocked(section)) return;
@@ -3665,7 +3689,7 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         description: description,  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
         color: pickTempSectionColor(),
-        colorLocked: __getDefaultTempColorLockedState(),
+        colorLocked: true,
         x: dropX,
         y: dropY,
         width: baseSize.width,
@@ -4059,13 +4083,15 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
         id: sectionId,
         title: getDefaultTempSectionTitle(),
         sequenceNumber: sequenceNumber,
+        label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
         color: pickTempSectionColor(),
-        colorLocked: __getDefaultTempColorLockedState(),
+        colorLocked: true,
         x: dropX,
         y: dropY,
         width: baseSize.width,
         height: baseSize.height,
         createdAt: Date.now(),
+        source: 'browser-drop',  // 标记来源
         items: items
     };
 
@@ -4175,13 +4201,15 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
             id: sectionId,
             title: getDefaultTempSectionTitle(),
             sequenceNumber: sequenceNumber,
+            label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
             color: pickTempSectionColor(),
-            colorLocked: __getDefaultTempColorLockedState(),
+            colorLocked: true,
             x: dropX,
             y: dropY,
             width: baseSize.width,
             height: baseSize.height,
             createdAt: Date.now(),
+            source: 'browser-drop',  // 标记来源
             items: []
         };
 
@@ -4273,7 +4301,7 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         description: description,  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
         color: pickTempSectionColor(),
-        colorLocked: __getDefaultTempColorLockedState(),
+        colorLocked: true,
         x: dropX,
         y: dropY,
         width: baseSize.width,
@@ -18199,13 +18227,18 @@ function renderTempNode(section, options = {}) {
     colorInput.value = section.color || getTempSectionDefaultColor();
     colorInput.title = colorLabel;
 
-    const lockBtn = document.createElement('button');
-    lockBtn.type = 'button';
-    lockBtn.className = 'temp-node-action-btn temp-color-lock-btn';
-    const updateLockBtn = () => {
-        __applyTempColorLockButtonState(lockBtn, section);
-    };
-    updateLockBtn();
+    const isSpecialSource = __isSpecialTempSection(section);
+    let lockBtn = null;
+    let updateLockBtn = null;
+    if (!isSpecialSource) {
+        lockBtn = document.createElement('button');
+        lockBtn.type = 'button';
+        lockBtn.className = 'temp-node-action-btn temp-color-lock-btn';
+        updateLockBtn = () => {
+            __applyTempColorLockButtonState(lockBtn, section);
+        };
+        updateLockBtn();
+    }
 
     const colorBtn = document.createElement('button');
     colorBtn.type = 'button';
@@ -18259,7 +18292,9 @@ function renderTempNode(section, options = {}) {
         syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor());
     };
     syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor());
-    chipRow.appendChild(lockBtn);
+    if (lockBtn) {
+        chipRow.appendChild(lockBtn);
+    }
     colorPopover.appendChild(chipRow);
     colorPopover.appendChild(colorInput);
     colorWrap.appendChild(colorBtn);
@@ -18313,25 +18348,27 @@ function renderTempNode(section, options = {}) {
         saveTempNodes();
     });
 
-    lockBtn.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const wasLocked = __isTempSectionColorLocked(section);
-        const nextLocked = !wasLocked;
-        section.colorLocked = nextLocked;
-        updateLockBtn();
-        if (wasLocked && !nextLocked && shouldTempColorUnlockSync()) {
-            const parentSection = getParentTempSection(section);
-            if (parentSection && !__isTempSectionColorLocked(parentSection)) {
-                const nextColor = parentSection.color || getTempSectionDefaultColor();
-                section.color = nextColor;
-                applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
-                propagateTempSectionColor(section, nextColor);
-                updateColorHistory(nextColor);
+    if (lockBtn) {
+        lockBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const wasLocked = __isTempSectionColorLocked(section);
+            const nextLocked = !wasLocked;
+            section.colorLocked = nextLocked;
+            updateLockBtn();
+            if (wasLocked && !nextLocked && shouldTempColorUnlockSync()) {
+                const parentSection = getParentTempSection(section);
+                if (parentSection && !__isTempSectionColorLocked(parentSection)) {
+                    const nextColor = parentSection.color || getTempSectionDefaultColor();
+                    section.color = nextColor;
+                    applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
+                    propagateTempSectionColor(section, nextColor);
+                    updateColorHistory(nextColor);
+                }
             }
-        }
-        saveTempNodes();
-    });
+            saveTempNodes();
+        });
+    }
 
     colorPopover.addEventListener('click', (event) => {
         const btn = event.target.closest('.md-color-chip, .md-color-picker-btn');
@@ -29673,10 +29710,10 @@ function createCanvasOtherSettingsModal() {
                 </div>
             </div>
             <div class="perf-help-popover" id="otherTempColorHelpPopover">
-                <div class="perf-help-popover-content">
-                    ${isEn
-            ? '<b>Global switch</b>: one-tap unify all temp locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.'
-            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。'}
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Global switch</b>: one-tap unify all temp locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special sources</b>: Drop / Search / Batch are excluded from this color system.'
+            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊来源</b>：拖入 / 搜索 / 批量不属于这套颜色系统。'}
                 </div>
             </div>
             <div class="perf-help-popover" id="otherTempColorUnlockHelpPopover">

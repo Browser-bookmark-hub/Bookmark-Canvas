@@ -6093,6 +6093,7 @@ async function batchToTempSection(triggerEvent) {
                 originPermanent,
                 title: sectionTitle,
                 label: sectionLabel,
+                colorLocked: true,
                 pinned: true
             }, canvasX, canvasY);
         } else if (typeof canvas.createEmptyTempSection === 'function') {
@@ -6112,6 +6113,17 @@ async function batchToTempSection(triggerEvent) {
     }
 
     if (!newSectionId) return;
+
+    try {
+        const tempApi = canvas.temp;
+        const section = tempApi && typeof tempApi.getSection === 'function'
+            ? tempApi.getSection(newSectionId)
+            : null;
+        if (section) {
+            section.source = 'batch';
+            section.colorLocked = true;
+        }
+    } catch (_) { }
 
     // 将已选的临时栏目节点也加入新栏目（以 payload 方式复制进去）
     if (tempNodes.length && canvas.temp && typeof canvas.temp.extractPayload === 'function' && typeof canvas.temp.insertFromPayload === 'function') {

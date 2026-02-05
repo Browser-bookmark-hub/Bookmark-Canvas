@@ -60,6 +60,28 @@
     margin-left: 2px;
 }
 
+.canvas-bookmark-to-temp-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+
+.canvas-bookmark-to-temp-btn:hover {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    background: var(--accent-primary-light, rgba(37, 99, 235, 0.08));
+}
+
 .perf-help-popover.search-hint-help-popover {
     position: fixed;
     z-index: 9999;

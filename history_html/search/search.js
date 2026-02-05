@@ -548,6 +548,15 @@ function handleSearchResultsPanelClick(e) {
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results') return;
 
+    const exportBtn = e.target.closest('.canvas-bookmark-to-temp-btn');
+    if (exportBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        try { createTempSectionFromSearchResults(); } catch (_) { }
+        try { hideSearchResultsPanel(); } catch (_) { }
+        return;
+    }
+
     // 0. Canvas Bookmark Mode: type toggles (Bookmark / Folder)
     const typeBtn = e.target.closest('.canvas-bookmark-type-btn');
     if (typeBtn) {
@@ -3480,8 +3489,14 @@ function renderCanvasSearchResults(results, options = {}) {
                 ? makeBtn({ type: 'folder', icon: 'fa-folder', color: '#2563eb', count: folderCount })
                 : '';
 
-            html += `<div class="canvas-bookmark-type-toggle" style="display:flex; align-items:center; justify-content:flex-start; padding:8px 12px; border-bottom:1px solid var(--border-color);">
+            const visibleCount = displayResults.filter(r => r && (r.type === 'bookmark-group' || r.type === 'bookmark-item')).length;
+            const exportLabel = isZh
+                ? `生成临时栏目${visibleCount ? ` (${visibleCount})` : ''}`
+                : `To Temp Section${visibleCount ? ` (${visibleCount})` : ''}`;
+
+            html += `<div class="canvas-bookmark-type-toggle" style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; border-bottom:1px solid var(--border-color);">
                 <div style="display:flex; align-items:center; gap:8px;">${bookmarkBtn}${folderBtn}</div>
+                <button class="canvas-bookmark-to-temp-btn" type="button">${escapeHtml(exportLabel)}</button>
             </div>`;
         }
     }
@@ -3900,6 +3915,109 @@ function renderCanvasSearchResults(results, options = {}) {
     showSearchResultsPanel();
     updateSearchResultSelection(searchUiState.selectedIndex);
 
+}
+
+function collectBookmarkItemsForTempSection() {
+    const filter = searchUiState.bookmarkTypeFilter;
+    let items = [];
+    const groups = searchUiState.bookmarkGroupModel;
+
+    if (Array.isArray(groups) && groups.length) {
+        groups.forEach(g => {
+            if (!g || !Array.isArray(g.children) || !g.children.length) return;
+            const item = g.children[0].item;
+            if (!item) return;
+            if (filter === 'bookmark' && item.nodeType !== 'bookmark') return;
+            if (filter === 'folder' && item.nodeType !== 'folder') return;
+            items.push(item);
+        });
+        return items;
+    }
+
+    items = (searchUiState.results || []).filter(r => r && r.type === 'bookmark-item');
+    if (filter === 'bookmark') {
+        items = items.filter(r => r.nodeType === 'bookmark');
+    } else if (filter === 'folder') {
+        items = items.filter(r => r.nodeType === 'folder');
+    }
+    return items;
+}
+
+function getCanvasViewportCenterForTemp() {
+    const workspace = document.getElementById('canvasWorkspace');
+    const state = (window.CanvasModule && window.CanvasModule.CanvasState) ? window.CanvasModule.CanvasState : (typeof CanvasState !== 'undefined' ? CanvasState : null);
+    if (!workspace || !state) return { x: 100, y: 100 };
+
+    const rect = workspace.getBoundingClientRect();
+    const zoom = state.zoom || 1;
+    const panX = state.panOffsetX || 0;
+    const panY = state.panOffsetY || 0;
+    const x = (rect.width / 2 - panX) / zoom;
+    const y = (rect.height / 2 - panY) / zoom;
+    return { x, y };
+}
+
+function createTempSectionFromSearchResults() {
+    if (getCurrentViewSafe() !== 'canvas') return;
+    if (!window.CanvasModule || !window.CanvasModule.createEmptyTempSection || !window.CanvasModule.temp) return;
+
+    const items = collectBookmarkItemsForTempSection();
+    if (!items.length) return;
+
+    const isZh = currentLang === 'zh_CN';
+    const query = String(searchUiState.query || '').trim();
+    const pos = getCanvasViewportCenterForTemp();
+    const sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, { title: '' });
+    if (!sectionId) return;
+
+    const tempApi = window.CanvasModule.temp;
+    const section = tempApi && typeof tempApi.getSection === 'function'
+        ? tempApi.getSection(sectionId)
+        : null;
+    if (section) {
+        section.title = isZh ? '搜索结果' : 'Search Results';
+        section.label = isZh ? '搜索' : 'Search';
+        section.colorLocked = true;
+        section.source = 'search-result';
+    }
+    items.forEach(item => {
+        if (!item) return;
+        if (item.nodeType === 'folder') {
+            if (typeof tempApi.createFolder === 'function') {
+                tempApi.createFolder(sectionId, '', item.title || (isZh ? '文件夹' : 'Folder'));
+            }
+        } else {
+            if (typeof tempApi.createBookmark === 'function') {
+                const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
+                const safeUrl = item.url || 'https://';
+                tempApi.createBookmark(sectionId, '', safeTitle, safeUrl);
+            }
+        }
+    });
+
+    try {
+        if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
+            window.CanvasModule.scheduleDormancyUpdate();
+        }
+    } catch (_) { }
+
+    try {
+        if (window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
+            window.CanvasModule.locateSection(sectionId);
+        }
+    } catch (_) { }
+
+    try {
+        if (window.CanvasModule && window.CanvasModule.CanvasState) {
+            window.CanvasModule.CanvasState.tempStateTimestamp = Date.now();
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof showCanvasToast === 'function') {
+            showCanvasToast(isZh ? `已生成临时栏目（${items.length}）` : `Temp section created (${items.length})`, 'success');
+        }
+    } catch (_) { }
 }
 
 // ==================== Phase 3: 定位与高亮 ====================
