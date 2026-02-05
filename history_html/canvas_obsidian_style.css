@@ -1463,6 +1463,11 @@
     font-size: inherit;
 }
 
+.temp-color-chain-key {
+    color: #f59e0b;
+    font-weight: 600;
+}
+
 /* 恢复默认按钮样式 */
 .perf-restore-btn {
     display: inline-flex;
