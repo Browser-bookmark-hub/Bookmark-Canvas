@@ -3954,7 +3954,8 @@ function getCanvasViewportCenterForTemp() {
     const zoom = state.zoom || 1;
     const panX = state.panOffsetX || 0;
     const panY = state.panOffsetY || 0;
-    const x = (rect.width / 2 - panX) / zoom;
+    const rightShiftPx = Math.min(rect.width * 0.12, 180);
+    const x = (rect.width / 2 + rightShiftPx - panX) / zoom;
     const y = (rect.height / 2 - panY) / zoom;
     return { x, y };
 }
@@ -3987,18 +3988,77 @@ function createTempSectionFromSearchResults() {
         section.colorLocked = true;
         section.source = 'search-result';
     }
+    const getPermanentTreeRoot = () => {
+        try {
+            if (typeof cachedCurrentTree !== 'undefined' && Array.isArray(cachedCurrentTree)) return cachedCurrentTree[0] || null;
+        } catch (_) { }
+        try {
+            if (typeof window !== 'undefined' && Array.isArray(window.cachedCurrentTree)) return window.cachedCurrentTree[0] || null;
+        } catch (_) { }
+        return null;
+    };
+    const findPermanentNodeById = (targetId) => {
+        const root = getPermanentTreeRoot();
+        if (!root || !targetId) return null;
+        const stack = [root];
+        const idStr = String(targetId);
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node || typeof node.id === 'undefined' || node.id === null) continue;
+            if (String(node.id) === idStr) return node;
+            if (Array.isArray(node.children) && node.children.length) {
+                for (let i = node.children.length - 1; i >= 0; i--) {
+                    stack.push(node.children[i]);
+                }
+            }
+        }
+        return null;
+    };
+    const buildPayloadFromPermanentNode = (node) => {
+        if (!node) return null;
+        const url = typeof node.url === 'string' ? node.url : '';
+        const rawTitle = typeof node.title === 'string' ? node.title : '';
+        if (url) {
+            return {
+                title: rawTitle || url || (isZh ? '书签' : 'Bookmark'),
+                url,
+                type: 'bookmark',
+                children: []
+            };
+        }
+        const children = Array.isArray(node.children) ? node.children.map(child => buildPayloadFromPermanentNode(child)).filter(Boolean) : [];
+        return {
+            title: rawTitle || (isZh ? '文件夹' : 'Folder'),
+            url: '',
+            type: 'folder',
+            children
+        };
+    };
+
     items.forEach(item => {
         if (!item) return;
         if (item.nodeType === 'folder') {
+            let payload = null;
+            if (item.source === 'temporary' && item.sectionId && typeof tempApi.extractPayload === 'function') {
+                try { payload = tempApi.extractPayload(item.sectionId, [item.id]); } catch (_) { }
+            } else if (item.source === 'permanent') {
+                const node = findPermanentNodeById(item.id);
+                const built = buildPayloadFromPermanentNode(node);
+                if (built) payload = [built];
+            }
+            if (payload && payload.length && typeof tempApi.insertFromPayload === 'function') {
+                tempApi.insertFromPayload(sectionId, null, payload);
+                return;
+            }
             if (typeof tempApi.createFolder === 'function') {
                 tempApi.createFolder(sectionId, '', item.title || (isZh ? '文件夹' : 'Folder'));
             }
-        } else {
-            if (typeof tempApi.createBookmark === 'function') {
-                const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
-                const safeUrl = item.url || 'https://';
-                tempApi.createBookmark(sectionId, '', safeTitle, safeUrl);
-            }
+            return;
+        }
+        if (typeof tempApi.createBookmark === 'function') {
+            const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
+            const safeUrl = item.url || 'https://';
+            tempApi.createBookmark(sectionId, '', safeTitle, safeUrl);
         }
     });
 
