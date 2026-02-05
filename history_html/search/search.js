@@ -416,32 +416,50 @@ function handleSearchKeydown(e) {
         const panelVisible = !!(panel && panel.classList.contains('visible'));
         const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
 
-        if (e.key === 'ArrowDown') {
-            if (panelVisible && panelType === 'results') {
-                e.preventDefault();
-                updateSearchResultSelection(searchUiState.selectedIndex + 1);
-            } else if (panelVisible && panelType === 'canvas-suggestions') {
-                e.preventDefault();
-                cycleSearchMode(1);
-            } else if (searchUiState.isMenuOpen) {
-                e.preventDefault();
-                cycleSearchMode(1);
+        if (e.key === 'ArrowLeft') {
+            const view = getCurrentViewSafe();
+            const input = e.target;
+            if (view === 'canvas' && input && typeof input.selectionStart === 'number') {
+                if (input.selectionStart === 0 && input.selectionEnd === 0) {
+                    const trigger = document.getElementById('searchModeTrigger');
+                    if (trigger) {
+                        e.preventDefault();
+                        trigger.focus();
+                    }
+                    return;
+                }
             }
-            return;
         }
 
-        if (e.key === 'ArrowUp') {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            const view = getCurrentViewSafe();
+            const input = e.target;
+            const q = (input && typeof input.value === 'string') ? input.value.trim() : '';
+            const dir = (e.key === 'ArrowDown') ? 1 : -1;
+
             if (panelVisible && panelType === 'results') {
                 e.preventDefault();
-                updateSearchResultSelection(searchUiState.selectedIndex - 1);
-            } else if (panelVisible && panelType === 'canvas-suggestions') {
-                e.preventDefault();
-                cycleSearchMode(-1);
-            } else if (searchUiState.isMenuOpen) {
-                e.preventDefault();
-                cycleSearchMode(-1);
+                updateSearchResultSelection(searchUiState.selectedIndex + dir);
+                return;
             }
-            return;
+
+            if (view === 'canvas' && !q) {
+                e.preventDefault();
+                cycleSearchMode(dir);
+                return;
+            }
+
+            if (panelVisible && panelType === 'canvas-suggestions') {
+                e.preventDefault();
+                cycleSearchMode(dir);
+                return;
+            }
+
+            if (searchUiState.isMenuOpen) {
+                e.preventDefault();
+                cycleSearchMode(dir);
+                return;
+            }
         }
 
         if (e.key === 'Enter') {
@@ -1256,11 +1274,15 @@ function setSearchMode(modeKey) {
 
         // Refresh search if there is query
         if (input.value.trim()) {
-            // [User Request] Clear old results when switching mode
-            hideSearchResultsPanel();
+            const q = input.value.trim();
+            const isCanvas = getCurrentViewSafe() === 'canvas';
 
-            if (typeof handleSearchInputFocus === 'function') {
+            if (isCanvas && typeof searchCanvasAndRender === 'function') {
+                searchCanvasAndRender(q);
+            } else if (typeof handleSearchInputFocus === 'function') {
                 handleSearchInputFocus({ target: input });
+            } else if (typeof performSearch === 'function') {
+                try { performSearch(q.toLowerCase()); } catch (_) { }
             }
         }
     }
@@ -1546,8 +1568,17 @@ function initSearchModeUI() {
         trigger.addEventListener('focus', () => {
             try {
                 if (getCurrentViewSafe() !== 'canvas') return;
-                hideSearchResultsPanel();
+                const input = document.getElementById('searchInput');
+                const hasQuery = !!(input && String(input.value || '').trim());
                 toggleSearchHelpMenu(false);
+
+                if (hasQuery) {
+                    // Keep results visible when a query exists; don't open the mode menu.
+                    toggleSearchModeMenu(false);
+                    return;
+                }
+
+                hideSearchResultsPanel();
                 toggleSearchModeMenu(true);
             } catch (_) { }
         });
@@ -1568,13 +1599,24 @@ function initSearchModeUI() {
         // [Fixed] Allow cycling mode even when button has focus
         trigger.addEventListener('keydown', (e) => {
             if (getCurrentViewSafe() === 'canvas') {
+                const input = document.getElementById('searchInput');
+                const hasQuery = !!(input && String(input.value || '').trim());
+
                 if (e.key === 'ArrowUp') {
                     e.preventDefault();
-                    toggleSearchModeMenu(true);
+                    if (!hasQuery) {
+                        toggleSearchModeMenu(true);
+                    } else {
+                        toggleSearchModeMenu(false);
+                    }
                     cycleSearchMode(-1);
                 } else if (e.key === 'ArrowDown') {
                     e.preventDefault();
-                    toggleSearchModeMenu(true);
+                    if (!hasQuery) {
+                        toggleSearchModeMenu(true);
+                    } else {
+                        toggleSearchModeMenu(false);
+                    }
                     cycleSearchMode(1);
                 } else if (e.key === 'ArrowRight') {
                     // [User Request] Arrow Right to return to input
