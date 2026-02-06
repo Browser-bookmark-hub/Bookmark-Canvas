@@ -1246,9 +1246,20 @@ button *,
     transform: translateY(-50%);
 }
 
+.sidebar.compact .sidebar-toggle::before {
+    content: "";
+    position: absolute;
+    left: -8px;
+    top: -10px;
+    width: 44px;
+    height: 44px;
+    background: transparent;
+    pointer-events: auto;
+}
+
 .sidebar.compact .sidebar-toggle:hover,
 .sidebar.compact .sidebar-toggle:focus-visible {
-    left: 8px;
+    left: 0;
     width: 32px;
     height: 32px;
     border-radius: 50%;
