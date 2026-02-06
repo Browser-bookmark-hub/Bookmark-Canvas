@@ -45,6 +45,48 @@ let currentView = (() => {
     }
 })();
 
+const isSidePanelMode = (() => {
+    try {
+        const params = new URLSearchParams(window.location.search);
+        const flag = params.get('sidepanel') || params.get('side_panel') || params.get('panel');
+        return flag === '1' || flag === 'true';
+    } catch (_) {
+        return false;
+    }
+})();
+
+window.__SIDE_PANEL_MODE__ = isSidePanelMode;
+try {
+    if (isSidePanelMode && document && document.documentElement) {
+        document.documentElement.classList.add('side-panel-mode');
+    }
+} catch (_) { }
+
+const SIDE_PANEL_FLOATING_TOOLS_KEY = 'sidepanelFloatingToolsVisible';
+
+function isSidePanelFloatingToolsVisible() {
+    if (!isSidePanelMode) return true;
+    try {
+        return localStorage.getItem(SIDE_PANEL_FLOATING_TOOLS_KEY) === 'true';
+    } catch (_) {
+        return false;
+    }
+}
+
+function setSidePanelFloatingToolsVisible(visible) {
+    if (!isSidePanelMode) return;
+    try {
+        localStorage.setItem(SIDE_PANEL_FLOATING_TOOLS_KEY, visible ? 'true' : 'false');
+    } catch (_) { }
+}
+
+function updateSidePanelFloatingToolsDisplay() {
+    const zoomIndicator = document.getElementById('canvasZoomIndicator');
+    if (!zoomIndicator) return;
+    const shouldShow = currentView === 'canvas' && (!isSidePanelMode || isSidePanelFloatingToolsVisible());
+    zoomIndicator.style.display = shouldShow ? 'block' : 'none';
+}
+
 // 用于避免重复在一次快照后多次重置（基于最近一条记录的指纹或时间）
 window.__lastResetFingerprint = window.__lastResetFingerprint || null;
 
@@ -1668,6 +1710,62 @@ const i18n = {
         'zh_CN': '开源信息与快捷键',
         'en': 'Open Source Info & Shortcuts'
     },
+    settingsTooltip: {
+        'zh_CN': '设置',
+        'en': 'Settings'
+    },
+    settingsThemeText: {
+        'zh_CN': '主题切换',
+        'en': 'Toggle Theme'
+    },
+    settingsLanguageText: {
+        'zh_CN': '切换语言',
+        'en': 'Switch Language'
+    },
+    settingsHelpText: {
+        'zh_CN': '说明与快捷键',
+        'en': 'Info & Shortcuts'
+    },
+    settingsFloatText: {
+        'zh_CN': '悬浮工具窗',
+        'en': 'Floating Tools'
+    },
+    quickAddTooltip: {
+        'zh_CN': '添加',
+        'en': 'Add'
+    },
+    quickAddCurrentTitle: {
+        'zh_CN': '当前页面',
+        'en': 'Current Page'
+    },
+    quickAddWindowTitle: {
+        'zh_CN': '当前窗口全部',
+        'en': 'Current Window'
+    },
+    quickAddCurrentTempText: {
+        'zh_CN': '添加到临时栏目',
+        'en': 'Add to Temp Section'
+    },
+    quickAddCurrentPermanentText: {
+        'zh_CN': '添加到永久栏目',
+        'en': 'Add to Permanent'
+    },
+    quickAddCurrentBlankText: {
+        'zh_CN': '添加到空白栏目 (MD)',
+        'en': 'Add to Blank (MD)'
+    },
+    quickAddWindowTempText: {
+        'zh_CN': '全部加入临时栏目',
+        'en': 'Add All to Temp'
+    },
+    quickAddWindowPermanentText: {
+        'zh_CN': '全部加入永久栏目',
+        'en': 'Add All to Permanent'
+    },
+    quickAddWindowBlankText: {
+        'zh_CN': '全部加入空白栏目 (MD)',
+        'en': 'Add All to Blank (MD)'
+    },
     navCanvas: {
         'zh_CN': '书签画布',
         'en': 'Bookmark Canvas'
@@ -2746,6 +2844,40 @@ function applyLanguage() {
     if (langTooltip) langTooltip.textContent = i18n.langTooltip[currentLang];
     const helpTooltip = document.getElementById('helpTooltip');
     if (helpTooltip) helpTooltip.textContent = i18n.helpTooltip[currentLang];
+    const settingsTooltip = document.getElementById('settingsTooltip');
+    if (settingsTooltip) settingsTooltip.textContent = i18n.settingsTooltip[currentLang];
+    const settingsToggle = document.getElementById('settingsToggle');
+    if (settingsToggle) settingsToggle.setAttribute('aria-label', i18n.settingsTooltip[currentLang]);
+
+    const settingsThemeText = document.getElementById('settingsThemeText');
+    if (settingsThemeText) settingsThemeText.textContent = i18n.settingsThemeText[currentLang];
+    const settingsLanguageText = document.getElementById('settingsLanguageText');
+    if (settingsLanguageText) settingsLanguageText.textContent = i18n.settingsLanguageText[currentLang];
+    const settingsHelpText = document.getElementById('settingsHelpText');
+    if (settingsHelpText) settingsHelpText.textContent = i18n.settingsHelpText[currentLang];
+    const settingsFloatText = document.getElementById('settingsFloatText');
+    if (settingsFloatText) settingsFloatText.textContent = i18n.settingsFloatText[currentLang];
+
+    const quickAddTooltip = document.getElementById('quickAddTooltip');
+    if (quickAddTooltip) quickAddTooltip.textContent = i18n.quickAddTooltip[currentLang];
+    const quickAddToggle = document.getElementById('quickAddToggle');
+    if (quickAddToggle) quickAddToggle.setAttribute('aria-label', i18n.quickAddTooltip[currentLang]);
+    const quickAddCurrentTitle = document.getElementById('quickAddCurrentTitle');
+    if (quickAddCurrentTitle) quickAddCurrentTitle.textContent = i18n.quickAddCurrentTitle[currentLang];
+    const quickAddWindowTitle = document.getElementById('quickAddWindowTitle');
+    if (quickAddWindowTitle) quickAddWindowTitle.textContent = i18n.quickAddWindowTitle[currentLang];
+    const quickAddCurrentTempText = document.getElementById('quickAddCurrentTempText');
+    if (quickAddCurrentTempText) quickAddCurrentTempText.textContent = i18n.quickAddCurrentTempText[currentLang];
+    const quickAddCurrentPermanentText = document.getElementById('quickAddCurrentPermanentText');
+    if (quickAddCurrentPermanentText) quickAddCurrentPermanentText.textContent = i18n.quickAddCurrentPermanentText[currentLang];
+    const quickAddCurrentBlankText = document.getElementById('quickAddCurrentBlankText');
+    if (quickAddCurrentBlankText) quickAddCurrentBlankText.textContent = i18n.quickAddCurrentBlankText[currentLang];
+    const quickAddWindowTempText = document.getElementById('quickAddWindowTempText');
+    if (quickAddWindowTempText) quickAddWindowTempText.textContent = i18n.quickAddWindowTempText[currentLang];
+    const quickAddWindowPermanentText = document.getElementById('quickAddWindowPermanentText');
+    if (quickAddWindowPermanentText) quickAddWindowPermanentText.textContent = i18n.quickAddWindowPermanentText[currentLang];
+    const quickAddWindowBlankText = document.getElementById('quickAddWindowBlankText');
+    if (quickAddWindowBlankText) quickAddWindowBlankText.textContent = i18n.quickAddWindowBlankText[currentLang];
 
     const shortcutsModalTitle = document.getElementById('shortcutsModalTitle');
     if (shortcutsModalTitle) shortcutsModalTitle.textContent = i18n.shortcutsModalTitle[currentLang];
@@ -2768,6 +2900,10 @@ function applyLanguage() {
     if (themeIcon) {
         themeIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
     }
+    const settingsThemeIcon = document.querySelector('#settingsMenu [data-action="toggle-theme"] i');
+    if (settingsThemeIcon) {
+        settingsThemeIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
 
     const canvasPerfSettingsText = document.getElementById('canvasPerfSettingsText');
     if (canvasPerfSettingsText) canvasPerfSettingsText.textContent = i18n.canvasPerfSettingsText[currentLang];
@@ -2778,6 +2914,410 @@ function applyLanguage() {
 // =============================================================================
 // UI 初始化
 // =============================================================================
+
+function setupSidePanelSettingsMenu() {
+    if (!isSidePanelMode) return;
+    const toggle = document.getElementById('settingsToggle');
+    const menu = document.getElementById('settingsMenu');
+    if (!toggle || !menu) return;
+    if (menu.dataset.bound === 'true') return;
+    menu.dataset.bound = 'true';
+
+    const closeMenu = () => {
+        if (!menu.hasAttribute('hidden')) menu.setAttribute('hidden', '');
+    };
+
+    const openMenu = () => {
+        menu.removeAttribute('hidden');
+    };
+
+    toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (menu.hasAttribute('hidden')) {
+            openMenu();
+        } else {
+            closeMenu();
+        }
+    });
+
+    menu.addEventListener('click', (e) => {
+        const item = e.target && e.target.closest ? e.target.closest('.settings-menu-item') : null;
+        if (!item) return;
+        const action = item.dataset.action || '';
+        closeMenu();
+        if (action === 'toggle-theme') {
+            const themeToggle = document.getElementById('themeToggle');
+            if (themeToggle) themeToggle.click();
+            return;
+        }
+        if (action === 'toggle-language') {
+            const langToggle = document.getElementById('langToggle');
+            if (langToggle) langToggle.click();
+            return;
+        }
+        if (action === 'open-help') {
+            const helpToggle = document.getElementById('helpToggle');
+            if (helpToggle) helpToggle.click();
+            return;
+        }
+        if (action === 'open-floating-toolbar') {
+            if (isSidePanelMode) {
+                const next = !isSidePanelFloatingToolsVisible();
+                setSidePanelFloatingToolsVisible(next);
+                updateSidePanelFloatingToolsDisplay();
+                const msg = next
+                    ? (currentLang === 'en' ? 'Floating tools shown' : '悬浮工具窗已显示')
+                    : (currentLang === 'en' ? 'Floating tools hidden' : '悬浮工具窗已隐藏');
+                try { showToast(msg); } catch (_) { }
+                return;
+            }
+            try {
+                if (typeof showBatchPanel === 'function') {
+                    showBatchPanel();
+                    return;
+                }
+            } catch (_) { }
+            try {
+                if (typeof window.showBatchPanel === 'function') {
+                    window.showBatchPanel();
+                }
+            } catch (_) { }
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (menu.contains(e.target) || toggle.contains(e.target)) return;
+        closeMenu();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeMenu();
+    });
+}
+
+function setupQuickAddMenu() {
+    if (!isSidePanelMode) return;
+    const toggle = document.getElementById('quickAddToggle');
+    const menu = document.getElementById('quickAddMenu');
+    if (!toggle || !menu) return;
+    if (menu.dataset.bound === 'true') return;
+    menu.dataset.bound = 'true';
+
+    const closeMenu = () => {
+        if (!menu.hasAttribute('hidden')) menu.setAttribute('hidden', '');
+    };
+
+    const openMenu = () => {
+        menu.removeAttribute('hidden');
+    };
+
+    toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (menu.hasAttribute('hidden')) {
+            openMenu();
+        } else {
+            closeMenu();
+        }
+    });
+
+    menu.addEventListener('click', async (e) => {
+        const item = e.target && e.target.closest ? e.target.closest('.quick-add-menu-item') : null;
+        if (!item) return;
+        const action = item.dataset.action || '';
+        closeMenu();
+        try {
+            await handleQuickAddAction(action);
+        } catch (err) {
+            const msg = currentLang === 'en' ? 'Add failed' : '添加失败';
+            try { showToast(`${msg}: ${err && err.message ? err.message : String(err)}`); } catch (_) { }
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (menu.contains(e.target) || toggle.contains(e.target)) return;
+        closeMenu();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeMenu();
+    });
+}
+
+async function handleQuickAddAction(action) {
+    if (!action) return;
+    const scope = action.includes('window') ? 'window' : 'current';
+    const target = action.includes('permanent') ? 'permanent'
+        : (action.includes('blank') ? 'blank' : 'temp');
+
+    const tabs = scope === 'window'
+        ? await getCurrentWindowTabs()
+        : await getActiveTabList();
+
+    const items = normalizeTabs(tabs);
+    if (!items.length) {
+        const msg = currentLang === 'en' ? 'No valid pages to add' : '没有可添加的页面';
+        try { showToast(msg); } catch (_) { }
+        return;
+    }
+
+    if (target === 'permanent') {
+        await addTabsToPermanent(items, scope);
+        return;
+    }
+    if (target === 'blank') {
+        await addTabsToBlankNode(items, scope);
+        return;
+    }
+    await addTabsToTempSection(items, scope);
+}
+
+function queryTabs(params) {
+    return new Promise((resolve) => {
+        if (!browserAPI || !browserAPI.tabs || typeof browserAPI.tabs.query !== 'function') {
+            resolve([]);
+            return;
+        }
+        browserAPI.tabs.query(params, (tabs) => {
+            const err = browserAPI.runtime && browserAPI.runtime.lastError;
+            if (err) {
+                console.warn('[QuickAdd] tabs.query failed:', err.message);
+                resolve([]);
+                return;
+            }
+            resolve(Array.isArray(tabs) ? tabs : []);
+        });
+    });
+}
+
+async function getActiveTabList() {
+    const tabs = await queryTabs({ active: true, currentWindow: true });
+    return tabs.slice(0, 1);
+}
+
+async function getCurrentWindowTabs() {
+    return await queryTabs({ currentWindow: true, windowType: 'normal' });
+}
+
+function normalizeTabs(tabs) {
+    const out = [];
+    const seen = new Set();
+    (Array.isArray(tabs) ? tabs : []).forEach(tab => {
+        const url = tab && (tab.url || tab.pendingUrl);
+        if (!url || !isAddableUrl(url)) return;
+        if (seen.has(url)) return;
+        seen.add(url);
+        out.push({
+            title: (tab && tab.title) ? String(tab.title) : String(url),
+            url: String(url)
+        });
+    });
+    return out;
+}
+
+function isAddableUrl(url) {
+    const u = String(url || '').trim();
+    if (!u) return false;
+    if (/^(chrome|edge|about|devtools|chrome-extension):/i.test(u)) return false;
+    return /^(https?|file):/i.test(u);
+}
+
+function pad2(num) {
+    return String(num).padStart(2, '0');
+}
+
+function formatDateTimeShort() {
+    const d = new Date();
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function getCanvasCenterPoint() {
+    const workspace = document.getElementById('canvasWorkspace');
+    const state = window.CanvasModule && window.CanvasModule.CanvasState ? window.CanvasModule.CanvasState : null;
+    if (!workspace || !state) return { x: 0, y: 0 };
+    const rect = workspace.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const zoom = state.zoom || 1;
+    const canvasX = (centerX - rect.left - (state.panOffsetX || 0)) / zoom;
+    const canvasY = (centerY - rect.top - (state.panOffsetY || 0)) / zoom;
+    return { x: canvasX, y: canvasY };
+}
+
+function getMaximizedTempSectionId() {
+    const el = document.querySelector('.temp-canvas-node.canvas-node-maximized');
+    if (!el) return null;
+    return (el.dataset && el.dataset.sectionId) ? el.dataset.sectionId : (el.id || null);
+}
+
+function getMaximizedMdNodeId() {
+    const el = document.querySelector('.md-canvas-node.canvas-node-maximized');
+    return el ? el.id : null;
+}
+
+function buildSectionTitle(tabs, scope) {
+    if (tabs.length === 1) {
+        return tabs[0].title || tabs[0].url;
+    }
+    const dt = formatDateTimeShort();
+    if (currentLang === 'en') {
+        return scope === 'window' ? `Window Tabs ${dt}` : `Pages ${dt}`;
+    }
+    return scope === 'window' ? `窗口标签 ${dt}` : `页面 ${dt}`;
+}
+
+function buildMarkdownFromTabs(tabs, heading) {
+    const lines = [];
+    if (heading) {
+        lines.push(`# ${heading}`, '');
+    }
+    tabs.forEach(item => {
+        const title = escapeMarkdownText(item.title || item.url);
+        const url = item.url;
+        lines.push(`- [${title}](${url})`);
+    });
+    return lines.join('\n');
+}
+
+function escapeMarkdownText(text) {
+    return String(text || '')
+        .replace(/\\/g, '\\\\')
+        .replace(/\[/g, '\\[')
+        .replace(/\]/g, '\\]')
+        .replace(/\*/g, '\\*')
+        .replace(/_/g, '\\_');
+}
+
+function buildHtmlFromTabs(tabs, heading) {
+    const titleHtml = heading ? `<p><strong>${escapeHtml(heading)}</strong></p>` : '';
+    const items = tabs.map(item => {
+        const safeTitle = escapeHtml(item.title || item.url);
+        const safeUrl = escapeHtml(item.url);
+        return `<li><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeTitle}</a></li>`;
+    }).join('');
+    return `${titleHtml}<ul>${items}</ul>`;
+}
+
+function stripHtmlToText(html) {
+    const div = document.createElement('div');
+    div.innerHTML = html || '';
+    return div.textContent || div.innerText || '';
+}
+
+async function addTabsToTempSection(tabs, scope) {
+    if (!window.CanvasModule || !window.CanvasModule.createEmptyTempSection || !window.CanvasModule.temp) {
+        const msg = currentLang === 'en' ? 'Temp section is unavailable' : '临时栏目不可用';
+        try { showToast(msg); } catch (_) { }
+        return;
+    }
+    const targetId = getMaximizedTempSectionId();
+    let sectionId = targetId;
+    if (!sectionId) {
+        const pos = getCanvasCenterPoint();
+        const title = buildSectionTitle(tabs, scope);
+        sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, { title, source: 'quick-add' });
+    }
+    tabs.forEach(item => {
+        window.CanvasModule.temp.createBookmark(sectionId, '', item.title, item.url);
+    });
+    if (window.CanvasModule.temp.ensureRendered) {
+        window.CanvasModule.temp.ensureRendered(sectionId);
+    }
+    const msg = currentLang === 'en'
+        ? `Added ${tabs.length} item${tabs.length > 1 ? 's' : ''} to temp section`
+        : `已加入临时栏目：${tabs.length} 项`;
+    try { showToast(msg); } catch (_) { }
+}
+
+async function addTabsToBlankNode(tabs, scope) {
+    if (!window.CanvasModule || !window.CanvasModule.createMdNode || !window.CanvasModule.CanvasState) {
+        const msg = currentLang === 'en' ? 'Blank node is unavailable' : '空白栏目不可用';
+        try { showToast(msg); } catch (_) { }
+        return;
+    }
+    const heading = tabs.length > 1 ? buildSectionTitle(tabs, scope) : '';
+    const markdown = buildMarkdownFromTabs(tabs, heading);
+    const html = buildHtmlFromTabs(tabs, heading);
+
+    const targetId = getMaximizedMdNodeId();
+    if (targetId) {
+        const node = window.CanvasModule.CanvasState.mdNodes.find(n => n && n.id === targetId);
+        if (node) {
+            if (node.html && node.html.trim()) {
+                const existingText = (typeof node.text === 'string' && node.text.trim())
+                    ? node.text
+                    : stripHtmlToText(node.html);
+                node.html = `${node.html}${node.html.trim() ? '<hr>' : ''}${html}`;
+                node.text = `${existingText}${existingText ? '\n\n' : ''}${markdown}`;
+            } else {
+                const base = (typeof node.text === 'string') ? node.text.trim() : '';
+                node.text = base ? `${base}\n\n${markdown}` : markdown;
+                node.html = '';
+            }
+            if (typeof renderMdNode === 'function') renderMdNode(node);
+            if (typeof saveTempNodes === 'function') saveTempNodes();
+            try {
+                const msg = currentLang === 'en' ? 'Added to current blank node' : '已添加到当前空白栏目';
+                showToast(msg);
+            } catch (_) { }
+            return;
+        }
+    }
+
+    const pos = getCanvasCenterPoint();
+    await window.CanvasModule.createMdNode(pos.x, pos.y, markdown);
+    const msg = currentLang === 'en'
+        ? `Created blank node with ${tabs.length} item${tabs.length > 1 ? 's' : ''}`
+        : `已创建空白栏目，包含 ${tabs.length} 项`;
+    try { showToast(msg); } catch (_) { }
+}
+
+function bookmarksCreate(info) {
+    return new Promise((resolve, reject) => {
+        if (!browserAPI || !browserAPI.bookmarks || typeof browserAPI.bookmarks.create !== 'function') {
+            reject(new Error('bookmarks API not available'));
+            return;
+        }
+        browserAPI.bookmarks.create(info, (node) => {
+            const err = browserAPI.runtime && browserAPI.runtime.lastError;
+            if (err) {
+                reject(new Error(err.message || 'bookmarks.create failed'));
+                return;
+            }
+            resolve(node);
+        });
+    });
+}
+
+async function getBookmarksBarId() {
+    if (!browserAPI || !browserAPI.bookmarks || typeof browserAPI.bookmarks.getTree !== 'function') return null;
+    const tree = await new Promise(resolve => browserAPI.bookmarks.getTree(resolve));
+    const root = Array.isArray(tree) ? tree[0] : null;
+    if (!root || !Array.isArray(root.children)) return null;
+    const bar = root.children.find(child => child && (child.id === '1' || /书签栏|Bookmarks Bar/i.test(child.title)));
+    return bar ? bar.id : null;
+}
+
+async function addTabsToPermanent(tabs, scope) {
+    const barId = await getBookmarksBarId();
+    if (!barId) {
+        const msg = currentLang === 'en' ? 'Bookmarks bar not found' : '找不到书签栏';
+        try { showToast(msg); } catch (_) { }
+        return;
+    }
+    if (tabs.length === 1) {
+        await bookmarksCreate({ parentId: barId, title: tabs[0].title, url: tabs[0].url });
+    } else {
+        const title = buildSectionTitle(tabs, scope);
+        const folder = await bookmarksCreate({ parentId: barId, title });
+        for (const item of tabs) {
+            await bookmarksCreate({ parentId: folder.id, title: item.title, url: item.url });
+        }
+    }
+    const msg = currentLang === 'en'
+        ? `Added ${tabs.length} item${tabs.length > 1 ? 's' : ''} to bookmarks`
+        : `已加入永久栏目：${tabs.length} 项`;
+    try { showToast(msg); } catch (_) { }
+}
 
 function initializeUI() {
     // 导航标签切换
@@ -2814,6 +3354,9 @@ function initializeUI() {
             }
         });
     }
+
+    setupSidePanelSettingsMenu();
+    setupQuickAddMenu();
 
     // 搜索
     const searchInputEl = document.getElementById('searchInput');
@@ -3162,7 +3705,8 @@ function initSidebarToggle() {
     const LEGACY_COLLAPSED_KEY = 'sidebarCollapsed';
     const SIDEBAR_STATES = ['expanded', 'collapsed', 'compact'];
     const AUTO_COLLAPSE_WIDTH = 1024;
-    const SIDEBAR_TRANSITION_MS = 360;
+    const SIDEBAR_TRANSITION_MS = 220;
+    const persistEnabled = !isSidePanelMode;
 
     let refreshRaf = null;
 
@@ -3239,6 +3783,7 @@ function initSidebarToggle() {
     }
 
     function persistSidebarState(state) {
+        if (!persistEnabled) return;
         const safeState = normalizeSidebarState(state) || 'expanded';
         localStorage.setItem(SIDEBAR_STATE_KEY, safeState);
         const legacyValue = safeState === 'expanded' ? 'false' : 'true';
@@ -3246,6 +3791,7 @@ function initSidebarToggle() {
     }
 
     function readSidebarState() {
+        if (!persistEnabled) return 'compact';
         const savedState = normalizeSidebarState(localStorage.getItem(SIDEBAR_STATE_KEY));
         if (savedState) return savedState;
         const legacy = localStorage.getItem(LEGACY_COLLAPSED_KEY);
@@ -3254,6 +3800,7 @@ function initSidebarToggle() {
     }
 
     function readManualOverride() {
+        if (!persistEnabled) return true;
         const raw = localStorage.getItem(SIDEBAR_MANUAL_KEY);
         if (raw === 'true') return true;
         if (raw === 'false') return false;
@@ -3264,6 +3811,7 @@ function initSidebarToggle() {
     }
 
     function setManualOverride(isManual) {
+        if (!persistEnabled) return;
         localStorage.setItem(SIDEBAR_MANUAL_KEY, isManual ? 'true' : 'false');
     }
 
@@ -3282,6 +3830,7 @@ function initSidebarToggle() {
     }
 
     function applyAutoState() {
+        if (!persistEnabled) return;
         if (readManualOverride()) return;
         const targetState = getAutoState();
         if (targetState !== currentState) {
@@ -3292,13 +3841,20 @@ function initSidebarToggle() {
     }
 
     let currentState = readSidebarState();
-    if (readManualOverride()) {
-        currentState = setSidebarState(currentState, { manual: true });
+    if (persistEnabled) {
+        if (readManualOverride()) {
+            currentState = setSidebarState(currentState, { manual: true });
+        } else {
+            currentState = setSidebarState(getAutoState(), { manual: false });
+        }
+        if (currentState !== 'expanded') {
+            console.log('[侧边栏] 恢复收起状态:', currentState);
+        }
     } else {
-        currentState = setSidebarState(getAutoState(), { manual: false });
-    }
-    if (currentState !== 'expanded') {
-        console.log('[侧边栏] 恢复收起状态:', currentState);
+        currentState = applySidebarState('compact');
+        syncSidebarWidth();
+        scheduleMaximizedRefresh();
+        console.log('[侧边栏] 侧边栏模式默认完全收起');
     }
 
     // 点击圆形按钮：展开 -> 收起；完全收起 -> 二级收起
@@ -3631,14 +4187,7 @@ function renderCurrentView() {
     }
 
     // 控制缩放控制器的显示/隐藏
-    const zoomIndicator = document.getElementById('canvasZoomIndicator');
-    if (zoomIndicator) {
-        if (currentView === 'canvas') {
-            zoomIndicator.style.display = 'block';
-        } else {
-            zoomIndicator.style.display = 'none';
-        }
-    }
+    updateSidePanelFloatingToolsDisplay();
 
     switch (currentView) {
         case 'canvas':
@@ -3687,6 +4236,7 @@ function renderCurrentView() {
                         if (window.CanvasModule) {
                             window.CanvasModule.init();
                         }
+                        updateSidePanelFloatingToolsDisplay();
 
                         // 标记Canvas已初始化
                         if (canvasView) {
@@ -3718,6 +4268,7 @@ function renderCurrentView() {
                             if (window.CanvasModule) {
                                 window.CanvasModule.init();
                             }
+                            updateSidePanelFloatingToolsDisplay();
                             if (canvasView) {
                                 canvasView.dataset.initialized = 'true';
                                 canvasView.dataset.initTime = Date.now().toString();
@@ -7648,6 +8199,10 @@ function toggleTheme() {
     const icon = document.querySelector('#themeToggle i');
     if (icon) {
         icon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
+    const settingsIcon = document.querySelector('#settingsMenu [data-action="toggle-theme"] i');
+    if (settingsIcon) {
+        settingsIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
     }
 }
 

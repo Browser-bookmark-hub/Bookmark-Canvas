@@ -8,11 +8,20 @@ const browserAPI = (function () {
   throw new Error('Unsupported browser');
 })();
 
+const SIDE_PANEL_CANVAS_PATH = 'history_html/history.html?view=canvas&sidepanel=1';
+
 function initSidePanel() {
-  if (!browserAPI?.sidePanel?.setPanelBehavior) return;
+  if (!browserAPI?.sidePanel) return;
   try {
     // Keep popup as the default action; side panel opens via explicit button.
-    browserAPI.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }, () => {});
+    if (browserAPI.sidePanel.setPanelBehavior) {
+      browserAPI.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }, () => {});
+    }
+  } catch (_) {}
+  try {
+    if (browserAPI.sidePanel.setOptions) {
+      browserAPI.sidePanel.setOptions({ path: SIDE_PANEL_CANVAS_PATH, enabled: true }, () => {});
+    }
   } catch (_) {}
 }
 

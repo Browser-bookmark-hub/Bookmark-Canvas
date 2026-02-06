@@ -47,6 +47,37 @@ const searchUiState = {
     isHelpOpen: false
 };
 
+function isSidePanelModeInSearch() {
+    try {
+        if (window.__SIDE_PANEL_MODE__ === true) return true;
+        if (document && document.documentElement && document.documentElement.classList.contains('side-panel-mode')) return true;
+        const params = new URLSearchParams(window.location.search);
+        const flag = params.get('sidepanel') || params.get('side_panel') || params.get('panel');
+        return flag === '1' || flag === 'true';
+    } catch (_) {
+        return false;
+    }
+}
+
+function getCurrentLangSafe() {
+    try {
+        if (typeof currentLang !== 'undefined' && currentLang) return currentLang;
+    } catch (_) { }
+    if (typeof window !== 'undefined' && window.currentLang) return window.currentLang;
+    return 'zh_CN';
+}
+
+function setSidePanelSearchExpanded(expanded) {
+    const container = document.querySelector('.search-container');
+    if (!container) return;
+    container.classList.toggle('side-panel-search-expanded', !!expanded);
+}
+
+function isSidePanelSearchExpanded() {
+    const container = document.querySelector('.search-container');
+    return !!(container && container.classList.contains('side-panel-search-expanded'));
+}
+
 const DOMAIN_GROUP_PREF_KEY = 'canvas-search-domain-grouping';
 try {
     const stored = localStorage.getItem(DOMAIN_GROUP_PREF_KEY);
@@ -581,6 +612,11 @@ function handleSearchKeydown(e) {
             }
             toggleSearchModeMenu(false);
             toggleSearchHelpMenu(false);
+            if (isSidePanelModeInSearch()) {
+                const input = document.getElementById('searchInput');
+                const hasQuery = !!(input && String(input.value || '').trim());
+                if (!hasQuery) setSidePanelSearchExpanded(false);
+            }
         }
     } catch (_) { }
 }
@@ -592,6 +628,9 @@ function handleSearchInputFocus(e) {
     try {
         const input = e && e.target ? e.target : document.getElementById('searchInput');
         if (!input) return;
+        if (isSidePanelModeInSearch()) {
+            setSidePanelSearchExpanded(true);
+        }
         const q = (input.value || '').trim().toLowerCase();
 
         if (!q) {
@@ -771,6 +810,11 @@ function handleSearchOutsideClick(e) {
     hideSearchResultsPanel();
     toggleSearchModeMenu(false);
     toggleSearchHelpMenu(false);
+    if (isSidePanelModeInSearch()) {
+        const input = document.getElementById('searchInput');
+        const hasQuery = !!(input && String(input.value || '').trim());
+        if (!hasQuery) setSidePanelSearchExpanded(false);
+    }
 }
 
 // ==================== Robust Date Parser ====================
@@ -1320,6 +1364,11 @@ function initSearchEvents() {
         searchInput.addEventListener('keydown', handleSearchKeydown);
         // Suggestions / auto search on focus
         searchInput.addEventListener('focus', handleSearchInputFocus);
+        searchInput.addEventListener('blur', () => {
+            if (!isSidePanelModeInSearch()) return;
+            const hasQuery = !!(searchInput && String(searchInput.value || '').trim());
+            if (!hasQuery) setSidePanelSearchExpanded(false);
+        });
 
         searchInput.setAttribute('data-search-bound', 'true');
     }
@@ -1468,7 +1517,7 @@ function setSearchMode(modeKey) {
     // [Modified] Update input placeholder with mode description
     const input = document.getElementById('searchInput');
     if (input) {
-        const isZh = currentLang === 'zh_CN';
+        const isZh = getCurrentLangSafe() === 'zh_CN';
         // Use the description as placeholder
         if (getCurrentViewSafe() === 'canvas') {
             input.placeholder = isZh ? mode.desc : mode.descEn;
@@ -1723,9 +1772,22 @@ function renderSearchModeUI() {
     if (getCurrentViewSafe() !== 'canvas') return;
 
     // Interactive Mode UI (Canvas)
-    const label = currentLang === 'zh_CN' ? mode.label : mode.labelEn;
+    if (trigger) {
+        const colorClasses = ['mode-color-blue', 'mode-color-orange', 'mode-color-green'];
+        trigger.classList.remove(...colorClasses);
+        if (mode && mode.color) trigger.classList.add(mode.color);
+    }
+    const label = getCurrentLangSafe() === 'zh_CN' ? mode.label : mode.labelEn;
+    if (isSidePanelModeInSearch()) {
+        trigger.innerHTML = `<i class="fas fa-search ${mode.color}"></i><span class="search-mode-label ${mode.color}">${label}</span>`;
+        trigger.title = getCurrentLangSafe() === 'zh_CN' ? `搜索（模式：${label}）` : `Search (Mode: ${label})`;
+        trigger.style.cursor = 'pointer';
+        trigger.classList.add('active-mode-trigger');
+        return;
+    }
+
     trigger.innerHTML = `<i class="fas ${mode.icon} ${mode.color}"></i><span class="search-mode-label ${mode.color}">${label}</span>`;
-    trigger.title = currentLang === 'zh_CN' ? `切换模式: ${label}` : `Mode: ${label}`;
+    trigger.title = getCurrentLangSafe() === 'zh_CN' ? `切换模式: ${label}` : `Mode: ${label}`;
     trigger.style.cursor = 'pointer';
     trigger.classList.add('active-mode-trigger');
 
@@ -1806,6 +1868,18 @@ function initSearchModeUI() {
         trigger.addEventListener('click', (e) => {
             if (getCurrentViewSafe() !== 'canvas') return;
             e.stopPropagation();
+
+            if (isSidePanelModeInSearch()) {
+                const input = document.getElementById('searchInput');
+                if (!isSidePanelSearchExpanded()) {
+                    setSidePanelSearchExpanded(true);
+                    try {
+                        if (input) requestAnimationFrame(() => input.focus());
+                    } catch (_) { }
+                    return;
+                }
+            }
+
             toggleSearchHelpMenu(false);
             toggleSearchModeMenu();
 

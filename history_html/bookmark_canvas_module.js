@@ -3727,10 +3727,18 @@ function initCanvasView() {
     // 初始化连接线层
     setupCanvasEdgesLayer();
 
-    // 显示缩放控制器
+    // 显示缩放控制器（侧边栏模式下默认隐藏，按设置显示）
     const zoomIndicator = document.getElementById('canvasZoomIndicator');
     if (zoomIndicator) {
-        zoomIndicator.style.display = 'block';
+        let shouldShow = true;
+        if (window.__SIDE_PANEL_MODE__ === true) {
+            try {
+                shouldShow = localStorage.getItem('sidepanelFloatingToolsVisible') === 'true';
+            } catch (_) {
+                shouldShow = false;
+            }
+        }
+        zoomIndicator.style.display = shouldShow ? 'block' : 'none';
     }
 
     // 注意：永久栏目已经在renderCurrentView中从template创建并添加到canvas-content

@@ -311,6 +311,14 @@ function setupSidePanelButton() {
   const tooltip = document.getElementById('sidePanelTooltip');
   if (!btn) return;
 
+  const ensureSidePanelPath = () => {
+    try {
+      if (browserAPI?.sidePanel?.setOptions) {
+        browserAPI.sidePanel.setOptions({ path: 'history_html/history.html?view=canvas&sidepanel=1', enabled: true }, () => {});
+      }
+    } catch (_) {}
+  };
+
   if (tooltip) {
     btn.addEventListener('mouseenter', () => {
       tooltip.style.visibility = 'visible';
@@ -330,6 +338,7 @@ function setupSidePanelButton() {
   btn.addEventListener('click', async () => {
     if (browserAPI?.sidePanel?.open) {
       try {
+        ensureSidePanelPath();
         const win = await new Promise((resolve) => {
           if (!browserAPI?.windows?.getCurrent) return resolve(null);
           browserAPI.windows.getCurrent((w) => resolve(w || null));

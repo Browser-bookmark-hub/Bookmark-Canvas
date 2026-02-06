@@ -16,7 +16,7 @@
     "default_popup": "popup.html"
   },
   "side_panel": {
-    "default_path": "history_html/history.html?view=canvas"
+    "default_path": "history_html/history.html?view=canvas&sidepanel=1"
   },
   "background": {
     "service_worker": "background.js",

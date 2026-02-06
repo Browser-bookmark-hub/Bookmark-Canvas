@@ -65,6 +65,66 @@
                     <i class="fab fa-github"></i>
                     <span class="btn-tooltip" id="helpTooltip"></span>
                 </button>
+                <!-- 侧边栏模式：快捷添加 -->
+                <button id="quickAddToggle" class="tool-btn quick-add-btn" aria-label="Add">
+                    <i class="fas fa-plus"></i>
+                    <span class="btn-tooltip" id="quickAddTooltip"></span>
+                </button>
+                <!-- 侧边栏模式：统一设置按钮 -->
+                <button id="settingsToggle" class="tool-btn settings-btn" aria-label="Settings">
+                    <i class="fas fa-cog"></i>
+                    <span class="btn-tooltip" id="settingsTooltip"></span>
+                </button>
+            </div>
+            <!-- 侧边栏模式：快捷添加菜单 -->
+            <div id="quickAddMenu" class="quick-add-menu" hidden>
+                <div class="quick-add-menu-title" id="quickAddCurrentTitle"></div>
+                <button class="quick-add-menu-item" data-action="add-current-temp" type="button">
+                    <i class="fas fa-layer-group"></i>
+                    <span id="quickAddCurrentTempText"></span>
+                </button>
+                <button class="quick-add-menu-item" data-action="add-current-permanent" type="button">
+                    <i class="fas fa-bookmark"></i>
+                    <span id="quickAddCurrentPermanentText"></span>
+                </button>
+                <button class="quick-add-menu-item" data-action="add-current-blank" type="button">
+                    <i class="fas fa-sticky-note"></i>
+                    <span id="quickAddCurrentBlankText"></span>
+                </button>
+                <div class="quick-add-menu-divider"></div>
+                <div class="quick-add-menu-title" id="quickAddWindowTitle"></div>
+                <button class="quick-add-menu-item" data-action="add-window-temp" type="button">
+                    <i class="fas fa-layer-group"></i>
+                    <span id="quickAddWindowTempText"></span>
+                </button>
+                <button class="quick-add-menu-item" data-action="add-window-permanent" type="button">
+                    <i class="fas fa-bookmark"></i>
+                    <span id="quickAddWindowPermanentText"></span>
+                </button>
+                <button class="quick-add-menu-item" data-action="add-window-blank" type="button">
+                    <i class="fas fa-sticky-note"></i>
+                    <span id="quickAddWindowBlankText"></span>
+                </button>
+            </div>
+            <!-- 侧边栏模式：设置菜单 -->
+            <div id="settingsMenu" class="settings-menu" hidden>
+                <button class="settings-menu-item" data-action="open-floating-toolbar" type="button">
+                    <i class="fas fa-window-restore"></i>
+                    <span id="settingsFloatText"></span>
+                </button>
+                <div class="settings-menu-divider" aria-hidden="true"></div>
+                <button class="settings-menu-item" data-action="toggle-theme" type="button">
+                    <i class="fas fa-moon"></i>
+                    <span id="settingsThemeText"></span>
+                </button>
+                <button class="settings-menu-item" data-action="toggle-language" type="button">
+                    <i class="fas fa-language"></i>
+                    <span id="settingsLanguageText"></span>
+                </button>
+                <button class="settings-menu-item" data-action="open-help" type="button">
+                    <i class="fas fa-info-circle"></i>
+                    <span id="settingsHelpText"></span>
+                </button>
             </div>
         </div>
     </header>
