@@ -3951,7 +3951,7 @@ a.tree-label.tree-bookmark-link:hover {
 .permanent-section-header {
     background: linear-gradient(135deg, var(--permanent-section-color, #10b981) 0%, var(--permanent-section-color-dark, #059669) 100%);
     color: white;
-    padding: 14px 18px 0;
+    padding: 10px 18px 0;
     cursor: move;
     user-select: none;
     border-bottom: 1px solid rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.2);
@@ -3968,7 +3968,8 @@ a.tree-label.tree-bookmark-link:hover {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 6px;
+    margin-bottom: 0;
+    transform: translateY(-1.5px);
 }
 
 .permanent-section-title-left {
@@ -4312,11 +4313,24 @@ a.tree-label.tree-bookmark-link:hover {
     box-sizing: border-box;
     background: var(--canvas-tip-bg);
     border-top: 1px solid var(--canvas-tip-border);
-    border-bottom: 1px solid var(--canvas-tip-border);
+    border-bottom: 0;
+    background-clip: padding-box;
     border-top-left-radius: 0;
     border-top-right-radius: 0;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+}
+
+.permanent-section-tip-container::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1px;
+    background: var(--section-color, #10b981);
+    opacity: 0.7;
+    pointer-events: none;
 }
 
 .permanent-section-tip-content {
