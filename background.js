@@ -16,13 +16,71 @@ function initSidePanel() {
   } catch (_) {}
 }
 
+const SIDE_PANEL_CONTEXT = browserAPI?.runtime?.ContextType?.SIDE_PANEL || 'SIDE_PANEL';
+const sidePanelOpenWindows = new Set();
+
+function registerSidePanelStateListeners() {
+  if (browserAPI?.sidePanel?.onOpened?.addListener) {
+    browserAPI.sidePanel.onOpened.addListener((info) => {
+      if (info && typeof info.windowId === 'number') {
+        sidePanelOpenWindows.add(info.windowId);
+      }
+    });
+  }
+  if (browserAPI?.sidePanel?.onClosed?.addListener) {
+    browserAPI.sidePanel.onClosed.addListener((info) => {
+      if (info && typeof info.windowId === 'number') {
+        sidePanelOpenWindows.delete(info.windowId);
+      }
+    });
+  }
+}
+
+async function getSidePanelContexts() {
+  if (!browserAPI?.runtime?.getContexts) return null;
+  try {
+    const filter = { contextTypes: [SIDE_PANEL_CONTEXT] };
+    const result = browserAPI.runtime.getContexts(filter);
+    if (result && typeof result.then === 'function') {
+      return await result;
+    }
+    return await new Promise((resolve) => {
+      try {
+        browserAPI.runtime.getContexts(filter, (contexts) => {
+          resolve(Array.isArray(contexts) ? contexts : []);
+        });
+      } catch (_) {
+        resolve([]);
+      }
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
+async function refreshSidePanelOpenWindows() {
+  const contexts = await getSidePanelContexts();
+  if (!contexts) return null;
+  sidePanelOpenWindows.clear();
+  contexts.forEach((ctx) => {
+    if (ctx && typeof ctx.windowId === 'number') {
+      sidePanelOpenWindows.add(ctx.windowId);
+    }
+  });
+  return contexts;
+}
+
 if (browserAPI?.runtime?.onInstalled) {
   browserAPI.runtime.onInstalled.addListener(() => {
     initSidePanel();
+    registerSidePanelStateListeners();
+    refreshSidePanelOpenWindows().catch(() => {});
   });
 }
 
 initSidePanel();
+registerSidePanelStateListeners();
+refreshSidePanelOpenWindows().catch(() => {});
 
 const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
 const RECENT_MOVED_MAX = 2000;
@@ -476,6 +534,7 @@ function openSidePanelFromCommand() {
     openCanvasViewFromCommand();
     return;
   }
+
   try {
     if (browserAPI?.windows?.getCurrent) {
       browserAPI.windows.getCurrent((win) => {
@@ -484,8 +543,28 @@ function openSidePanelFromCommand() {
           openCanvasViewFromCommand();
           return;
         }
+
+        const canClose = typeof browserAPI?.sidePanel?.close === 'function';
+        if (canClose && sidePanelOpenWindows.has(windowId)) {
+          try {
+            browserAPI.sidePanel.close({ windowId }, () => {
+              const err = browserAPI?.runtime?.lastError;
+              if (!err) {
+                sidePanelOpenWindows.delete(windowId);
+              }
+            });
+          } catch (_) {}
+          return;
+        }
+
         try {
-          browserAPI.sidePanel.open({ windowId }, () => {});
+          browserAPI.sidePanel.open({ windowId }, () => {
+            if (browserAPI?.runtime?.lastError) {
+              openCanvasViewFromCommand();
+              return;
+            }
+            sidePanelOpenWindows.add(windowId);
+          });
         } catch (_) {
           openCanvasViewFromCommand();
         }

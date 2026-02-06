@@ -12,8 +12,8 @@
     "description": "Toolbar tooltip title"
   },
   "commandOpenSidePanel": {
-    "message": "Open side panel",
-    "description": "Command description for opening the side panel"
+    "message": "Toggle side panel",
+    "description": "Command description for toggling the side panel"
   },
   "commandOpenCanvasView": {
     "message": "Open \"Bookmark Canvas\" view",

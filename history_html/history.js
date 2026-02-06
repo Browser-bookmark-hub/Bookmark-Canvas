@@ -2133,8 +2133,8 @@ const i18n = {
         'en': 'Activate the extension'
     },
     shortcutSidePanel: {
-        'zh_CN': '打开侧边栏',
-        'en': 'Open side panel'
+        'zh_CN': '打开/关闭侧边栏',
+        'en': 'Toggle side panel'
     },
     shortcutsUnset: {
         'zh_CN': '未设置',
