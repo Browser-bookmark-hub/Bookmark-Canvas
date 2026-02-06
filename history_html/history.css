@@ -4308,7 +4308,7 @@ a.tree-label.tree-bookmark-link:hover {
     width: calc(100% + 36px);
     margin-left: -18px;
     margin-right: -18px;
-    padding: 8px 16px;
+    padding: 8px 16px 8px 0;
     box-sizing: border-box;
     background: var(--canvas-tip-bg);
     border-top: 1px solid var(--canvas-tip-border);
@@ -4330,8 +4330,17 @@ a.tree-label.tree-bookmark-link:hover {
     margin: 0;
     font-size: 15px;
     opacity: 0.95;
-    line-height: 1.4;
+    line-height: var(--desc-line-height, 1.4);
     flex: 1;
+    padding-left: 16px;
+    padding-right: 12px;
+    box-sizing: border-box;
+}
+
+.permanent-section-tip-container.desc-display-fixed:not(.editing) .permanent-section-tip {
+    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-display-rows, 4) * 1em);
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 /* 永久栏目说明：复用 WYSIWYG 的 placeholder 机制 */
@@ -4463,9 +4472,19 @@ a.tree-label.tree-bookmark-link:hover {
     align-items: center;
     gap: 2px;
     position: relative;
+    margin-right: 16px;
 }
 
-.permanent-section-tip-edit-btn {
+.permanent-section-tip-container:not(.editing) .permanent-section-tip-controls {
+    display: none;
+}
+
+.permanent-section-tip-container.editing .permanent-section-tip-controls {
+    display: flex;
+}
+
+.permanent-section-tip-edit-btn,
+.permanent-section-tip-height-btn {
     background: rgba(255, 255, 255, 0.25);
     border: none;
     color: white;
@@ -4519,16 +4538,9 @@ a.tree-label.tree-bookmark-link:hover {
     pointer-events: none;
 }
 
-/* hover在容器上时显示编辑和关闭按钮 */
-.permanent-section-tip-container:hover .permanent-section-tip-edit-btn,
-.permanent-section-tip-container:hover .permanent-section-tip-format-btn,
-.permanent-section-tip-container:hover .permanent-section-tip-close {
-    opacity: 1;
-    pointer-events: auto;
-}
-
 .permanent-section-tip-container.editing .permanent-section-tip-edit-btn,
 .permanent-section-tip-container.editing .permanent-section-tip-format-btn,
+.permanent-section-tip-container.editing .permanent-section-tip-height-btn,
 .permanent-section-tip-container.editing .permanent-section-tip-close {
     opacity: 1;
     pointer-events: auto;
@@ -4536,13 +4548,21 @@ a.tree-label.tree-bookmark-link:hover {
 
 .permanent-section-tip-edit-btn:hover,
 .permanent-section-tip-format-btn:hover,
+.permanent-section-tip-height-btn:hover,
 .permanent-section-tip-close:hover {
     background: rgba(255, 255, 255, 0.4);
     transform: scale(1.15);
 }
 
+.permanent-section-tip-height-btn.active {
+    background: rgba(255, 255, 255, 0.55);
+    color: #ffffff;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
 .permanent-section-tip-edit-btn:active,
 .permanent-section-tip-format-btn:active,
+.permanent-section-tip-height-btn:active,
 .permanent-section-tip-close:active {
     transform: scale(0.9);
 }
@@ -4555,11 +4575,20 @@ a.tree-label.tree-bookmark-link:hover {
     color: white;
     font-size: 15px;
     font-family: inherit;
-    line-height: 1.4;
+    line-height: var(--desc-line-height, 1.4);
     min-height: 50px;
-    max-height: 120px;
-    overflow: auto;
+    max-height: none;
+    overflow: visible;
     transition: all 0.2s ease;
+    padding-left: 16px;
+    padding-right: 12px;
+    box-sizing: border-box;
+}
+
+.permanent-section-tip-container.editing.desc-edit-fixed .permanent-section-tip {
+    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-edit-rows, 5) * 1em);
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .permanent-section-tip-container.editing .permanent-section-tip:focus {
@@ -4612,12 +4641,22 @@ a.tree-label.tree-bookmark-link:hover {
     pointer-events: none;
 }
 
+[data-theme="dark"] .permanent-section-tip-height-btn {
+    opacity: 0;
+    pointer-events: none;
+}
+
+[data-theme="dark"] .permanent-section-tip-height-btn.active {
+    background: rgba(255, 255, 255, 0.45);
+}
+
 [data-theme="dark"] .permanent-section-tip-close {
     background: rgba(255, 255, 255, 0.2);
 }
 
 [data-theme="dark"] .permanent-section-tip-edit-btn:hover,
 [data-theme="dark"] .permanent-section-tip-format-btn:hover,
+[data-theme="dark"] .permanent-section-tip-height-btn:hover,
 [data-theme="dark"] .permanent-section-tip-close:hover {
     background: rgba(255, 255, 255, 0.35);
 }
@@ -5142,7 +5181,7 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .temp-node-description-container {
-    padding: 8px 8px 8px 16px;
+    padding: 8px 0 8px 16px;
     /* Right padding reduced to 8px to allow growth */
     background: var(--canvas-tip-bg);
     border-top: 1px solid var(--canvas-tip-border);
@@ -5187,6 +5226,14 @@ a.tree-label.tree-bookmark-link:hover {
     color: rgba(0, 0, 0, 0.65);
     line-height: 1.4;
     word-wrap: break-word;
+    padding-right: 8px;
+    box-sizing: border-box;
+}
+
+.temp-node-description-container.desc-display-fixed:not(.editing) .temp-node-description {
+    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-display-rows, 4) * 1em);
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 /* Markdown 渲染样式 */
@@ -5335,8 +5382,14 @@ a.tree-label.tree-bookmark-link:hover {
     font-family: inherit;
     line-height: 1.4;
     min-height: 40px;
-    max-height: 120px;
-    overflow: auto;
+    max-height: none;
+    overflow: visible;
+}
+
+.temp-node-description-container.editing.desc-edit-fixed .temp-node-description {
+    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-edit-rows, 5) * 1em);
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .temp-node-description-container.editing .temp-node-description:focus {
@@ -5357,9 +5410,17 @@ a.tree-label.tree-bookmark-link:hover {
     pointer-events: none;
     transition: opacity 0.2s ease;
     z-index: 1;
+    margin-right: 8px;
 }
 
-.temp-node-description-container:hover .temp-node-description-controls,
+.temp-node-description-container:not(.editing) .temp-node-description-controls {
+    display: none;
+}
+
+.temp-node-description-container.editing .temp-node-description-controls {
+    display: flex;
+}
+
 .temp-node-description-container.editing .temp-node-description-controls {
     opacity: 1;
     pointer-events: auto;
@@ -5437,6 +5498,12 @@ a.tree-label.tree-bookmark-link:hover {
     transform: scale(0.9);
 }
 
+.temp-node-desc-height-btn.active {
+    color: rgba(37, 99, 235, 0.95);
+    background: rgba(37, 99, 235, 0.18);
+    border-radius: 3px;
+}
+
 [data-theme="dark"] .temp-node-description {
     color: rgba(255, 255, 255, 0.65);
 }
@@ -5466,6 +5533,7 @@ a.tree-label.tree-bookmark-link:hover {
 [data-theme="dark"] .temp-node-desc-action-btn:hover {
     color: rgba(255, 255, 255, 0.65);
 }
+
 
 .temp-node-type-badge {
     display: inline-block;
@@ -5790,7 +5858,9 @@ a.tree-label.tree-bookmark-link:hover {
 .canvas-workspace::-webkit-scrollbar,
 .permanent-section-body::-webkit-scrollbar,
 .temp-node-body::-webkit-scrollbar,
-.md-canvas-text::-webkit-scrollbar {
+.md-canvas-text::-webkit-scrollbar,
+.permanent-section-tip::-webkit-scrollbar,
+.temp-node-description::-webkit-scrollbar {
     width: 12px;
     height: 12px;
 }
@@ -5798,7 +5868,9 @@ a.tree-label.tree-bookmark-link:hover {
 .canvas-workspace::-webkit-scrollbar-track,
 .permanent-section-body::-webkit-scrollbar-track,
 .temp-node-body::-webkit-scrollbar-track,
-.md-canvas-text::-webkit-scrollbar-track {
+.md-canvas-text::-webkit-scrollbar-track,
+.permanent-section-tip::-webkit-scrollbar-track,
+.temp-node-description::-webkit-scrollbar-track {
     background: var(--bg-tertiary);
     border-radius: 6px;
 }
@@ -5806,7 +5878,9 @@ a.tree-label.tree-bookmark-link:hover {
 .canvas-workspace::-webkit-scrollbar-thumb,
 .permanent-section-body::-webkit-scrollbar-thumb,
 .temp-node-body::-webkit-scrollbar-thumb,
-.md-canvas-text::-webkit-scrollbar-thumb {
+.md-canvas-text::-webkit-scrollbar-thumb,
+.permanent-section-tip::-webkit-scrollbar-thumb,
+.temp-node-description::-webkit-scrollbar-thumb {
     background: var(--border-hover);
     border-radius: 6px;
     border: 2px solid var(--bg-tertiary);
@@ -5815,7 +5889,9 @@ a.tree-label.tree-bookmark-link:hover {
 .canvas-workspace::-webkit-scrollbar-thumb:hover,
 .permanent-section-body::-webkit-scrollbar-thumb:hover,
 .temp-node-body::-webkit-scrollbar-thumb:hover,
-.md-canvas-text::-webkit-scrollbar-thumb:hover {
+.md-canvas-text::-webkit-scrollbar-thumb:hover,
+.permanent-section-tip::-webkit-scrollbar-thumb:hover,
+.temp-node-description::-webkit-scrollbar-thumb:hover {
     background: var(--text-tertiary);
 }
 
@@ -10094,6 +10170,177 @@ body.canvas-popover-active .md-list-popover {
 [data-theme="dark"] .click-to-clear-confirm-popup {
     background: rgba(36, 37, 38, 0.98);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* 说明框清空确认弹窗（小型） */
+.desc-clear-confirm-popover {
+    position: fixed;
+    transform: translateX(-50%);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px 12px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+    z-index: 100002;
+    min-width: 160px;
+    animation: popupSlideDown 0.18s ease-out;
+}
+
+.desc-clear-confirm-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.desc-clear-confirm-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
+.desc-clear-confirm-btn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+}
+
+.desc-clear-confirm-btn.cancel {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.desc-clear-confirm-btn.cancel:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.desc-clear-confirm-btn.confirm {
+    background: var(--error);
+    border-color: var(--error);
+    color: white;
+}
+
+.desc-clear-confirm-btn.confirm:hover {
+    background: #dc2626;
+    border-color: #dc2626;
+}
+
+[data-theme="dark"] .desc-clear-confirm-popover {
+    background: rgba(36, 37, 38, 0.98);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* 说明框高度设置弹窗（小型） */
+.desc-height-settings-popover {
+    position: fixed;
+    transform: translateX(-50%);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px 12px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+    z-index: 100002;
+    min-width: 320px;
+    max-width: 380px;
+    animation: popupSlideDown 0.18s ease-out;
+}
+
+.desc-height-settings-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.desc-height-settings-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    min-width: 36px;
+    white-space: nowrap;
+}
+
+.desc-height-settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: nowrap;
+}
+
+.desc-height-settings-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+}
+
+.desc-height-settings-btn {
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.desc-height-settings-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.desc-height-settings-btn.active {
+    background: var(--accent-light);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.desc-height-settings-input-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    white-space: nowrap;
+}
+
+.desc-height-settings-input-wrap.disabled {
+    opacity: 0.45;
+}
+
+.desc-height-settings-input {
+    width: 48px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 11px;
+}
+
+.desc-height-settings-unit {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.desc-height-settings-input[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+
+[data-theme="dark"] .desc-height-settings-popover {
+    background: rgba(36, 37, 38, 0.98);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
 }
 
 /* ==================== 全局导出弹窗样式优化 ==================== */

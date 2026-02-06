@@ -237,13 +237,347 @@ function updateCanvasPopoverState(isActive) {
     } else {
         // 延时一帧检查，确保 DOM 状态已更新
         requestAnimationFrame(() => {
-            const hasOpen = document.querySelector('.md-format-popover.open, .temp-color-popover.open, .md-color-popover.open, .md-delete-options-popover.open, .marker-dropdown-menu.open');
+            const hasOpen = document.querySelector('.md-format-popover.open, .temp-color-popover.open, .md-color-popover.open, .md-delete-options-popover.open, .marker-dropdown-menu.open, .desc-clear-confirm-popover, .desc-height-settings-popover');
             if (!hasOpen) {
                 document.body.classList.remove('canvas-popover-active');
             }
         });
     }
 }
+
+const DESC_CLEAR_CONFIRM_POPOVER_ID = 'descClearConfirmPopover';
+const DESC_HEIGHT_SETTINGS_POPOVER_ID = 'descHeightSettingsPopover';
+
+function __showDescClearConfirmPopover(anchorEl, options = {}) {
+    if (!anchorEl) return;
+    const existing = document.getElementById(DESC_CLEAR_CONFIRM_POPOVER_ID);
+    if (existing) existing.remove();
+
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+    const title = options.title || (isEn ? 'Clear this description?' : '确认清空说明？');
+    const confirmLabel = options.confirmLabel || (isEn ? 'Clear' : '清空');
+    const cancelLabel = options.cancelLabel || (isEn ? 'Cancel' : '取消');
+
+    const pop = document.createElement('div');
+    pop.id = DESC_CLEAR_CONFIRM_POPOVER_ID;
+    pop.className = 'desc-clear-confirm-popover';
+    pop.innerHTML = `
+        <div class="desc-clear-confirm-title">${title}</div>
+        <div class="desc-clear-confirm-actions">
+            <button class="desc-clear-confirm-btn cancel" type="button">${cancelLabel}</button>
+            <button class="desc-clear-confirm-btn confirm" type="button">${confirmLabel}</button>
+        </div>
+    `;
+
+    document.body.appendChild(pop);
+
+    const rect = anchorEl.getBoundingClientRect();
+    const popRect = pop.getBoundingClientRect();
+    let left = rect.left + rect.width / 2;
+    let top = rect.bottom + 8;
+    if (top + popRect.height > window.innerHeight - 8) {
+        top = rect.top - popRect.height - 8;
+    }
+    const minLeft = 8 + popRect.width / 2;
+    const maxLeft = window.innerWidth - 8 - popRect.width / 2;
+    left = Math.min(maxLeft, Math.max(minLeft, left));
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+
+    updateCanvasPopoverState(true);
+
+    const cleanup = () => {
+        try { pop.remove(); } catch (_) { }
+        updateCanvasPopoverState(false);
+        document.removeEventListener('mousedown', onDocDown, true);
+        document.removeEventListener('keydown', onKeyDown, true);
+    };
+
+    const onConfirm = () => {
+        cleanup();
+        if (typeof options.onConfirm === 'function') options.onConfirm();
+    };
+
+    const onCancel = () => {
+        cleanup();
+        if (typeof options.onCancel === 'function') options.onCancel();
+    };
+
+    const cancelBtn = pop.querySelector('.desc-clear-confirm-btn.cancel');
+    const confirmBtn = pop.querySelector('.desc-clear-confirm-btn.confirm');
+    if (cancelBtn) cancelBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); onCancel(); });
+    if (confirmBtn) confirmBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); onConfirm(); });
+
+    const onDocDown = (e) => {
+        if (!pop.contains(e.target) && e.target !== anchorEl && !anchorEl.contains(e.target)) {
+            cleanup();
+        }
+    };
+    const onKeyDown = (e) => {
+        if (e.key === 'Escape') cleanup();
+    };
+
+    setTimeout(() => {
+        document.addEventListener('mousedown', onDocDown, true);
+        document.addEventListener('keydown', onKeyDown, true);
+    }, 0);
+}
+
+function __showDescHeightSettingsPopover(anchorEl, options = {}) {
+    if (!anchorEl) return;
+    const existing = document.getElementById(DESC_HEIGHT_SETTINGS_POPOVER_ID);
+    if (existing) {
+        const prevAnchorId = existing.dataset.anchorId || '';
+        const nextAnchorId = anchorEl.dataset.descHeightAnchorId || '';
+        if (prevAnchorId && nextAnchorId && prevAnchorId === nextAnchorId) {
+            if (typeof existing.__cleanup === 'function') existing.__cleanup();
+            else existing.remove();
+            return;
+        }
+        if (typeof existing.__cleanup === 'function') existing.__cleanup();
+        else existing.remove();
+    }
+
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+    const title = options.title || (isEn ? 'Height settings' : '高度设置');
+    const heightLabel = options.heightLabel || (isEn ? 'Height' : '高度');
+    const rowsModeLabel = options.rowsModeLabel || (isEn ? 'Rows' : '限制行数');
+    const fullLabel = options.fullLabel || (isEn ? 'Full' : '完整');
+    const rowsLabel = options.rowsLabel || (isEn ? 'Rows' : '行');
+
+    const defaults = options.defaults || {};
+    const defaultDisplayRows = Number.isFinite(defaults.displayRows) ? defaults.displayRows : 4;
+    const defaultEditRows = Number.isFinite(defaults.editRows) ? defaults.editRows : 5;
+
+    const getSettings = typeof options.getSettings === 'function'
+        ? options.getSettings
+        : () => ({ displayMode: 'rows', displayRows: defaultDisplayRows, editMode: 'full', editRows: defaultEditRows });
+
+    let settings = getSettings() || {};
+    const normalizeMode = (mode) => (mode === 'full' ? 'full' : 'rows');
+    const baseMode = normalizeMode(settings.displayMode || settings.editMode);
+    const baseRows = Number.isFinite(settings.displayRows)
+        ? settings.displayRows
+        : (Number.isFinite(settings.editRows) ? settings.editRows : defaultDisplayRows);
+    settings = {
+        displayMode: baseMode || 'rows',
+        displayRows: baseRows,
+        editMode: baseMode || 'rows',
+        editRows: baseRows
+    };
+
+    const pop = document.createElement('div');
+    pop.id = DESC_HEIGHT_SETTINGS_POPOVER_ID;
+    pop.className = 'desc-height-settings-popover';
+    pop.dataset.anchorId = anchorEl.dataset.descHeightAnchorId || `${Date.now()}-${Math.random()}`;
+    anchorEl.dataset.descHeightAnchorId = pop.dataset.anchorId;
+    pop.innerHTML = `
+        <div class="desc-height-settings-title">${title}</div>
+        <div class="desc-height-settings-row" data-scope="both">
+            <div class="desc-height-settings-label">${heightLabel}</div>
+            <div class="desc-height-settings-actions">
+                <button type="button" class="desc-height-settings-btn" data-mode="full">${fullLabel}</button>
+                <button type="button" class="desc-height-settings-btn" data-mode="rows">${rowsModeLabel}</button>
+                <div class="desc-height-settings-input-wrap">
+                    <input class="desc-height-settings-input" data-input="both" type="number" min="1" max="20" step="1" />
+                    <span class="desc-height-settings-unit">${rowsLabel}</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(pop);
+
+    const rect = anchorEl.getBoundingClientRect();
+    const popRect = pop.getBoundingClientRect();
+    let left = rect.left + rect.width / 2;
+    let top = rect.bottom + 8;
+    if (top + popRect.height > window.innerHeight - 8) {
+        top = rect.top - popRect.height - 8;
+    }
+    const minLeft = 8 + popRect.width / 2;
+    const maxLeft = window.innerWidth - 8 - popRect.width / 2;
+    left = Math.min(maxLeft, Math.max(minLeft, left));
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+
+    anchorEl.classList.add('active');
+    anchorEl.setAttribute('aria-expanded', 'true');
+    updateCanvasPopoverState(true);
+
+    const normalizeRows = (value, fallback) => {
+        const num = parseInt(value, 10);
+        return Number.isFinite(num) && num > 0 ? num : fallback;
+    };
+
+    const applySettings = (next) => {
+        settings = {
+            displayMode: normalizeMode(next.displayMode || settings.displayMode),
+            displayRows: Number.isFinite(next.displayRows) ? next.displayRows : settings.displayRows,
+            editMode: normalizeMode(next.editMode || settings.editMode),
+            editRows: Number.isFinite(next.editRows) ? next.editRows : settings.editRows
+        };
+        if (typeof options.onChange === 'function') options.onChange(settings);
+        render();
+    };
+
+    const render = () => {
+        const displayGroup = pop.querySelector('.desc-height-settings-row[data-scope="both"]');
+        const updateGroup = (groupEl, mode, rows) => {
+            if (!groupEl) return;
+            const buttons = groupEl.querySelectorAll('.desc-height-settings-btn');
+            buttons.forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+            const input = groupEl.querySelector('.desc-height-settings-input');
+            if (input) {
+                input.value = rows;
+                input.disabled = mode !== 'rows';
+                const wrap = input.closest('.desc-height-settings-input-wrap');
+                if (wrap) wrap.classList.toggle('disabled', mode !== 'rows');
+            }
+        };
+        updateGroup(displayGroup, settings.displayMode, settings.displayRows);
+    };
+
+    const handleModeClick = (scope, mode) => {
+        let rows = settings.displayRows;
+        if (mode === 'rows') rows = normalizeRows(settings.displayRows, defaultDisplayRows);
+        applySettings({
+            displayMode: mode,
+            displayRows: rows,
+            editMode: mode,
+            editRows: rows
+        });
+    };
+
+    pop.addEventListener('click', (e) => {
+        const btn = e.target.closest('.desc-height-settings-btn');
+        if (!btn) return;
+        const group = btn.closest('.desc-height-settings-row');
+        if (!group) return;
+        const scope = group.dataset.scope;
+        const mode = btn.dataset.mode;
+        handleModeClick(scope, mode);
+    });
+
+    pop.addEventListener('input', (e) => {
+        const input = e.target.closest('.desc-height-settings-input');
+        if (!input) return;
+        const scope = input.dataset.input;
+        const value = normalizeRows(input.value, defaultDisplayRows);
+        applySettings({
+            displayMode: 'rows',
+            displayRows: value,
+            editMode: 'rows',
+            editRows: value
+        });
+    });
+
+    render();
+
+
+    const cleanup = () => {
+        try { pop.remove(); } catch (_) { }
+        anchorEl.classList.remove('active');
+        anchorEl.setAttribute('aria-expanded', 'false');
+        updateCanvasPopoverState(false);
+        document.removeEventListener('mousedown', onDocDown, true);
+        document.removeEventListener('keydown', onKeyDown, true);
+        if (typeof options.onClose === 'function') options.onClose();
+    };
+
+    pop.__cleanup = cleanup;
+
+    const onDocDown = (e) => {
+        if (!pop.contains(e.target) && e.target !== anchorEl && !anchorEl.contains(e.target)) {
+            cleanup();
+        }
+    };
+    const onKeyDown = (e) => {
+        if (e.key === 'Escape') cleanup();
+    };
+
+    setTimeout(() => {
+        document.addEventListener('mousedown', onDocDown, true);
+        document.addEventListener('keydown', onKeyDown, true);
+    }, 0);
+}
+
+function __setupDescAutoScroll(editorEl, isEditing) {
+    if (!editorEl || editorEl.__descAutoScrollBound) return;
+    editorEl.__descAutoScrollBound = true;
+
+    let rafId = null;
+    let lastEvent = null;
+    let active = false;
+
+    const tick = () => {
+        if (!active) {
+            rafId = null;
+            return;
+        }
+        if (typeof isEditing === 'function' && !isEditing()) {
+            active = false;
+            rafId = null;
+            return;
+        }
+        if (!lastEvent) {
+            rafId = requestAnimationFrame(tick);
+            return;
+        }
+        if (editorEl.scrollHeight <= editorEl.clientHeight) {
+            rafId = requestAnimationFrame(tick);
+            return;
+        }
+        const rect = editorEl.getBoundingClientRect();
+        const baseZone = Math.max(48, Math.min(Math.round(rect.height * 0.18), 140));
+        const speed = 16;
+        let delta = 0;
+        if (lastEvent.clientY > rect.top && lastEvent.clientY < rect.top + baseZone) {
+            delta = -speed * ((rect.top + baseZone - lastEvent.clientY) / baseZone);
+        } else if (lastEvent.clientY < rect.bottom && lastEvent.clientY > rect.bottom - baseZone) {
+            delta = speed * ((lastEvent.clientY - (rect.bottom - baseZone)) / baseZone);
+        }
+        if (delta !== 0) editorEl.scrollTop += delta;
+        rafId = requestAnimationFrame(tick);
+    };
+
+    const start = (e) => {
+        if (typeof isEditing === 'function' && !isEditing()) return;
+        lastEvent = e;
+        if (!active) {
+            active = true;
+            rafId = requestAnimationFrame(tick);
+        }
+    };
+
+    const move = (e) => {
+        if (typeof isEditing === 'function' && !isEditing()) return;
+        lastEvent = e;
+        if (!active) {
+            active = true;
+            rafId = requestAnimationFrame(tick);
+        }
+    };
+
+    const stop = () => {
+        active = false;
+        lastEvent = null;
+        if (rafId) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+        }
+    };
+
+    editorEl.addEventListener('mouseenter', start);
+    editorEl.addEventListener('mousemove', move);
+    editorEl.addEventListener('mouseleave', stop);
+    editorEl.addEventListener('blur', stop);
+}
+
 
 // 阻止 Canvas 事件冒泡 (防止 UI 内部拖动触发父级 Drag/Resize)
 function preventCanvasEventsPropagation(element) {
@@ -8987,16 +9321,15 @@ function shouldHandleCustomScroll(event) {
         return false;
     }
 
-    // 在临时栏目说明区域编辑时，不拦截滚轮，让其自身滚动
-    // 检测是否为正在编辑的说明区域（contentEditable 为 true）
+    // 在临时/永久栏目说明区域内：默认让说明自身滚动
+    // 但如果触控板正在进行画布级滚动（快速滚动），则交给画布处理，避免被打断
     const descTarget = event.target.closest('.temp-node-description');
-    if (descTarget && descTarget.isContentEditable) {
-        return false;
-    }
-
-    // 在永久栏目说明区域编辑时，不拦截滚轮，让其自身滚动
-    const tipTarget = event.target.closest('#permanentSectionTip');
-    if (tipTarget && tipTarget.isContentEditable) {
+    const tipTarget = event.target.closest('.permanent-section-tip');
+    if (descTarget || tipTarget) {
+        const isTouchpad = (Math.abs(event.deltaX) < 50 || Math.abs(event.deltaY) < 50) && event.deltaMode === 0;
+        if (isTouchpad && CanvasState.touchpadState.isScrolling) {
+            return true;
+        }
         return false;
     }
 
@@ -19266,7 +19599,7 @@ function renderTempNode(section, options = {}) {
     // 获取编辑提示（支持多语言）
     const getEditTitle = () => {
         const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
-        return lang === 'en' ? 'Double-click to edit' : '双击编辑说明';
+        return lang === 'en' ? 'Click to edit' : '点击编辑说明';
     };
 
     const getAddTitle = () => {
@@ -19282,6 +19615,58 @@ function renderTempNode(section, options = {}) {
     if (Number.isFinite(savedDescFontSize) && savedDescFontSize > 0) {
         descriptionText.style.fontSize = savedDescFontSize + 'px';
     }
+    const descHeightDefaults = {
+        displayMode: 'rows',
+        displayRows: 4,
+        editMode: 'rows',
+        editRows: 4
+    };
+    const normalizeMode = (mode) => (mode === 'full' ? 'full' : 'rows');
+    const normalizeRows = (value, fallback) => {
+        const num = parseInt(value, 10);
+        return Number.isFinite(num) && num > 0 ? num : fallback;
+    };
+    let isEditingDesc = false;
+    const descHeightSettings = (() => {
+        let displayMode = section && section.descDisplayMode;
+        if (!displayMode && typeof section.descFixedHeight === 'boolean') {
+            displayMode = section.descFixedHeight ? 'fixed' : 'full';
+        }
+        displayMode = normalizeMode(displayMode || descHeightDefaults.displayMode);
+        const displayRows = normalizeRows(section && section.descDisplayRows, descHeightDefaults.displayRows);
+        const editMode = normalizeMode((section && section.descEditMode) || descHeightDefaults.editMode);
+        const editRows = normalizeRows(section && section.descEditRows, descHeightDefaults.editRows);
+        return {
+            displayMode,
+            displayRows,
+            editMode: displayMode,
+            editRows: displayRows
+        };
+    })();
+
+    const applyDescHeightSettings = () => {
+        const displayFixed = descHeightSettings.displayMode !== 'full';
+        descriptionContainer.classList.toggle('desc-display-fixed', displayFixed);
+        descriptionContainer.style.setProperty('--desc-display-rows', String(descHeightSettings.displayRows));
+        const editFixed = descHeightSettings.editMode !== 'full';
+        if (isEditingDesc && editFixed) {
+            descriptionContainer.classList.add('desc-edit-fixed');
+        } else {
+            descriptionContainer.classList.remove('desc-edit-fixed');
+        }
+        descriptionContainer.style.setProperty('--desc-edit-rows', String(descHeightSettings.editRows));
+    };
+
+    applyDescHeightSettings();
+
+    const persistDescHeightSettings = () => {
+        section.descDisplayMode = descHeightSettings.displayMode;
+        section.descDisplayRows = descHeightSettings.displayRows;
+        section.descEditMode = descHeightSettings.editMode;
+        section.descEditRows = descHeightSettings.editRows;
+        section.descFixedHeight = descHeightSettings.displayMode !== 'full';
+        saveTempNodes();
+    };
 
     // 双击编辑功能
     descriptionText.addEventListener('dblclick', (e) => {
@@ -19296,7 +19681,6 @@ function renderTempNode(section, options = {}) {
 
     const descriptionControls = document.createElement('div');
     descriptionControls.className = 'temp-node-description-controls';
-    descriptionControls.style.display = 'flex';
     descriptionControls.style.opacity = '0'; // 默认隐藏，点击进入输入框时显示
     descriptionControls.style.pointerEvents = 'none';
     descriptionControls.style.transition = 'opacity 0.2s';
@@ -19310,6 +19694,16 @@ function renderTempNode(section, options = {}) {
     formatDescBtn.setAttribute('data-action', 'md-format-toggle');
     formatDescBtn.innerHTML = '<i class="fas fa-font"></i>';
     descriptionControls.appendChild(formatDescBtn);
+
+    const heightSettingsBtn = document.createElement('button');
+    heightSettingsBtn.type = 'button';
+    heightSettingsBtn.className = 'temp-node-desc-action-btn temp-node-desc-height-btn';
+    const heightLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Height settings' : '高度设置';
+    heightSettingsBtn.title = heightLabel;
+    heightSettingsBtn.setAttribute('aria-label', heightLabel);
+    heightSettingsBtn.setAttribute('aria-expanded', 'false');
+    heightSettingsBtn.innerHTML = '<i class="fas fa-text-height"></i>';
+    descriptionControls.appendChild(heightSettingsBtn);
 
     // editDescBtn removed as per request
 
@@ -19325,7 +19719,6 @@ function renderTempNode(section, options = {}) {
     descriptionContainer.appendChild(descriptionControls);
 
     // --- WYSIWYG 编辑（复用空白栏目格式工具 + 实时渲染规则） ---
-    let isEditingDesc = false;
     let beforeEditStored = String(section.description || '');
 
     const applyPlaceholder = () => {
@@ -19362,6 +19755,9 @@ function renderTempNode(section, options = {}) {
         isEditingDesc = false;
         descriptionContainer.classList.remove('editing');
         descriptionText.contentEditable = 'false';
+        applyDescHeightSettings();
+        const heightPopover = document.getElementById(DESC_HEIGHT_SETTINGS_POPOVER_ID);
+        if (heightPopover && typeof heightPopover.__cleanup === 'function') heightPopover.__cleanup();
 
         if (commit) {
             try {
@@ -19397,6 +19793,7 @@ function renderTempNode(section, options = {}) {
         descriptionText.contentEditable = 'true';
         descriptionText.focus();
         __placeCaretAtEnd(descriptionText);
+        applyDescHeightSettings();
         if (descEditorApi && typeof descEditorApi.recordSnapshot === 'function') {
             // 确保初始状态被记录，以便可以撤销回初始状态
             //由于 reset 会清空栈，我们需要一个新的起点
@@ -19422,9 +19819,7 @@ function renderTempNode(section, options = {}) {
     // editDescBtn listener removed
 
 
-    delDescBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    const clearTempDescription = () => {
         section.description = '';
         descriptionText.innerHTML = '';
         saveTempNodes();
@@ -19437,10 +19832,41 @@ function renderTempNode(section, options = {}) {
             descriptionContainer.classList.remove('editing');
             descriptionText.contentEditable = 'false';
         }
-
-
         try { if (descEditorApi) descEditorApi.closeAllPopovers(); } catch (_) { }
         updateDescMeta();
+    };
+
+    delDescBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        __showDescClearConfirmPopover(delDescBtn, {
+            onConfirm: clearTempDescription
+        });
+    });
+
+    heightSettingsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        __showDescHeightSettingsPopover(heightSettingsBtn, {
+            defaults: {
+                displayRows: descHeightDefaults.displayRows,
+                editRows: descHeightDefaults.editRows
+            },
+            getSettings: () => ({
+                displayMode: descHeightSettings.displayMode,
+                displayRows: descHeightSettings.displayRows,
+                editMode: descHeightSettings.editMode,
+                editRows: descHeightSettings.editRows
+            }),
+            onChange: (next) => {
+                descHeightSettings.displayMode = next.displayMode;
+                descHeightSettings.displayRows = next.displayRows;
+                descHeightSettings.editMode = next.editMode;
+                descHeightSettings.editRows = next.editRows;
+                applyDescHeightSettings();
+                persistDescHeightSettings();
+            }
+        });
     });
 
     descriptionText.addEventListener('keydown', (e) => {
@@ -19459,6 +19885,8 @@ function renderTempNode(section, options = {}) {
         // Clicking toolbar/popovers should not end editing
         setTimeout(() => {
             if (!isEditingDesc) return;
+            if (document.getElementById(DESC_CLEAR_CONFIRM_POPOVER_ID)) return;
+            if (document.getElementById(DESC_HEIGHT_SETTINGS_POPOVER_ID)) return;
             if (descriptionContainer && descriptionContainer.contains(document.activeElement)) return;
             exitEditingDescription({ commit: true });
         }, 0);
@@ -19557,6 +19985,8 @@ function renderTempNode(section, options = {}) {
             }
         }
     });
+
+    __setupDescAutoScroll(descriptionText, () => isEditingDesc);
 
     const body = document.createElement('div');
     body.className = 'temp-node-body';
@@ -22066,6 +22496,8 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         return 'canvas-permanent-tip-text';
     };
     const getFontSizeStorageKey = () => `${getStorageKey()}-font-size`;
+    const getLegacyFixedHeightStorageKey = () => `${getStorageKey()}-fixed-height`;
+    const getHeightSettingsStorageKey = () => `${getStorageKey()}-height-settings`;
 
     const savedTipRaw = (() => {
         try { return localStorage.getItem(getStorageKey()) || ''; } catch (_) { return ''; }
@@ -22083,6 +22515,65 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     if (Number.isFinite(savedTipFontSize) && savedTipFontSize > 0) {
         tipText.style.fontSize = savedTipFontSize + 'px';
     }
+    const descHeightDefaults = {
+        displayMode: 'rows',
+        displayRows: 4,
+        editMode: 'rows',
+        editRows: 4
+    };
+    const normalizeMode = (mode) => (mode === 'full' ? 'full' : 'rows');
+    const normalizeRows = (value, fallback) => {
+        const num = parseInt(value, 10);
+        return Number.isFinite(num) && num > 0 ? num : fallback;
+    };
+    let isEditingTip = false;
+    const descHeightSettings = (() => {
+        const stored = __readJSON(getHeightSettingsStorageKey(), null) || {};
+        let displayMode = stored.displayMode;
+        if (!displayMode) {
+            try {
+                const raw = localStorage.getItem(getLegacyFixedHeightStorageKey());
+                if (raw !== null) displayMode = raw === 'true' ? 'fixed' : 'full';
+            } catch (_) { }
+        }
+        displayMode = normalizeMode(displayMode || descHeightDefaults.displayMode);
+        const displayRows = normalizeRows(stored.displayRows, descHeightDefaults.displayRows);
+        const editMode = normalizeMode(stored.editMode || descHeightDefaults.editMode);
+        const editRows = normalizeRows(stored.editRows, descHeightDefaults.editRows);
+        return {
+            displayMode,
+            displayRows,
+            editMode: displayMode,
+            editRows: displayRows
+        };
+    })();
+
+    const applyTipHeightSettings = () => {
+        const displayFixed = descHeightSettings.displayMode !== 'full';
+        tipContainer.classList.toggle('desc-display-fixed', displayFixed);
+        tipContainer.style.setProperty('--desc-display-rows', String(descHeightSettings.displayRows));
+        const editFixed = descHeightSettings.editMode !== 'full';
+        if (isEditingTip && editFixed) {
+            tipContainer.classList.add('desc-edit-fixed');
+        } else {
+            tipContainer.classList.remove('desc-edit-fixed');
+        }
+        tipContainer.style.setProperty('--desc-edit-rows', String(descHeightSettings.editRows));
+    };
+
+    applyTipHeightSettings();
+
+    const persistTipHeightSettings = () => {
+        __writeJSON(getHeightSettingsStorageKey(), {
+            displayMode: descHeightSettings.displayMode,
+            displayRows: descHeightSettings.displayRows,
+            editMode: descHeightSettings.editMode,
+            editRows: descHeightSettings.editRows
+        });
+        try {
+            localStorage.setItem(getLegacyFixedHeightStorageKey(), descHeightSettings.displayMode !== 'full' ? 'true' : 'false');
+        } catch (_) { }
+    };
     applyPlaceholder();
 
     const updateTipMeta = () => {
@@ -22110,6 +22601,23 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         tipControls.insertBefore(formatBtn, closeBtn);
     }
 
+    let heightBtn = tipControls ? tipControls.querySelector('.permanent-section-tip-height-btn') : null;
+    if (tipControls) {
+        const legacyFixedBtn = tipControls.querySelector('.permanent-section-tip-fixed-btn');
+        if (legacyFixedBtn) legacyFixedBtn.remove();
+        if (!heightBtn) {
+            heightBtn = document.createElement('button');
+            heightBtn.type = 'button';
+            heightBtn.className = 'permanent-section-tip-height-btn';
+            const heightLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Height settings' : '高度设置';
+            heightBtn.title = heightLabel;
+            heightBtn.setAttribute('aria-label', heightLabel);
+            heightBtn.setAttribute('aria-expanded', 'false');
+            heightBtn.innerHTML = '<i class="fas fa-text-height"></i>';
+            tipControls.insertBefore(heightBtn, closeBtn);
+        }
+    }
+
     closeBtn.innerHTML = CANVAS_BROOM_SVG;
     const clearLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Clear input' : '清空输入框';
     closeBtn.title = clearLabel;
@@ -22119,7 +22627,11 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     const newCloseBtn = closeBtn.cloneNode(true);
     closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
 
-    let isEditingTip = false;
+    let newHeightBtn = heightBtn;
+    if (heightBtn && heightBtn.parentNode) {
+        newHeightBtn = heightBtn.cloneNode(true);
+        heightBtn.parentNode.replaceChild(newHeightBtn, heightBtn);
+    }
     let beforeEditStored = savedTipRaw;
 
     const persistTip = ({ normalizeEditorHtml = false } = {}) => {
@@ -22140,6 +22652,9 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         isEditingTip = false;
         tipContainer.classList.remove('editing');
         tipText.contentEditable = 'false';
+        applyTipHeightSettings();
+        const heightPopover = document.getElementById(DESC_HEIGHT_SETTINGS_POPOVER_ID);
+        if (heightPopover && typeof heightPopover.__cleanup === 'function') heightPopover.__cleanup();
 
         if (commit) {
             try {
@@ -22179,6 +22694,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         tipText.contentEditable = 'true';
         tipText.focus();
         __placeCaretAtEnd(tipText);
+        applyTipHeightSettings();
 
         if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.recordSnapshot === 'function') {
             tipEditorApi.recordSnapshot('init');
@@ -22198,9 +22714,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         enterEditingTip();
     });
 
-    newCloseBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    const clearPermanentTip = () => {
         tipText.innerHTML = '';
         try { localStorage.removeItem(getStorageKey()); } catch (_) { }
         updateTipMeta();
@@ -22209,7 +22723,42 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         if (isEditingTip) {
             tipText.focus();
         }
+    };
+
+    newCloseBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        __showDescClearConfirmPopover(newCloseBtn, {
+            onConfirm: clearPermanentTip
+        });
     });
+
+    if (newHeightBtn) {
+        newHeightBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            __showDescHeightSettingsPopover(newHeightBtn, {
+                defaults: {
+                    displayRows: descHeightDefaults.displayRows,
+                    editRows: descHeightDefaults.editRows
+                },
+                getSettings: () => ({
+                    displayMode: descHeightSettings.displayMode,
+                    displayRows: descHeightSettings.displayRows,
+                    editMode: descHeightSettings.editMode,
+                    editRows: descHeightSettings.editRows
+                }),
+                onChange: (next) => {
+                    descHeightSettings.displayMode = next.displayMode;
+                    descHeightSettings.displayRows = next.displayRows;
+                    descHeightSettings.editMode = next.editMode;
+                    descHeightSettings.editRows = next.editRows;
+                    applyTipHeightSettings();
+                    persistTipHeightSettings();
+                }
+            });
+        });
+    }
 
     tipText.addEventListener('keydown', (e) => {
         if (!isEditingTip) return;
@@ -22218,7 +22767,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             exitEditingTip({ commit: true });
         } else if (e.key === 'Escape') {
             e.preventDefault();
-            const hasPopover = document.querySelector('.md-toolbar-popover.open');
+            const hasPopover = document.querySelector('.md-toolbar-popover.open, .desc-clear-confirm-popover, .desc-height-settings-popover');
             if (hasPopover) return;
             exitEditingTip({ commit: true });
         }
@@ -22228,6 +22777,8 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         if (!isEditingTip) return;
         if (tipContainer.contains(e.target)) return;
         if (e.target.closest('.md-toolbar-popover')) return;
+        if (e.target.closest('.desc-clear-confirm-popover')) return;
+        if (e.target.closest('.desc-height-settings-popover')) return;
         exitEditingTip({ commit: true });
     }, true);
 
@@ -22322,6 +22873,8 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             }
         }
     });
+
+    __setupDescAutoScroll(tipText, () => isEditingTip);
 }
 
 function setupPermanentSectionPinButton() {
