@@ -17024,10 +17024,49 @@ function __fullScanRenderDescriptionEditor(editorEl) {
     try { __applyHeadingCollapse(editorEl); } catch (_) { }
 }
 
-function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isEditing, enterEdit, save, nodeId }) {
+function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isEditing, enterEdit, save, nodeId, fontSizeConfig }) {
     if (!editor || !toolbar || !formatToggleBtn) return null;
 
     const getLang = () => (typeof currentLang !== 'undefined' ? currentLang : 'zh');
+    const fontSizeCfg = fontSizeConfig || {};
+    const minFontSize = Number.isFinite(fontSizeCfg.min) ? fontSizeCfg.min : 10;
+    const maxFontSize = Number.isFinite(fontSizeCfg.max) ? fontSizeCfg.max : 28;
+    const fontSizeStep = Number.isFinite(fontSizeCfg.step) ? fontSizeCfg.step : 2;
+
+    const resolveFontSize = () => {
+        const cfgVal = (typeof fontSizeCfg.get === 'function') ? fontSizeCfg.get() : fontSizeCfg.value;
+        if (Number.isFinite(cfgVal)) {
+            return { value: cfgVal, fromStorage: true };
+        }
+        try {
+            const computed = window.getComputedStyle(editor);
+            const parsed = parseInt(computed && computed.fontSize ? computed.fontSize : '', 10);
+            if (Number.isFinite(parsed)) return { value: parsed, fromStorage: false };
+        } catch (_) { }
+        return { value: 15, fromStorage: false };
+    };
+
+    const resolvedFontSize = resolveFontSize();
+    let currentFontSize = resolvedFontSize.value;
+    if (resolvedFontSize.fromStorage && Number.isFinite(currentFontSize)) {
+        editor.style.fontSize = currentFontSize + 'px';
+    }
+
+    const syncFontSizeValue = () => {
+        const sizeValue = toolbar.querySelector('.md-format-size-value');
+        if (sizeValue) sizeValue.textContent = currentFontSize + 'px';
+    };
+
+    const applyFontSize = (nextSize) => {
+        if (!Number.isFinite(nextSize)) return;
+        const clamped = Math.min(maxFontSize, Math.max(minFontSize, nextSize));
+        currentFontSize = clamped;
+        editor.style.fontSize = clamped + 'px';
+        syncFontSizeValue();
+        if (typeof fontSizeCfg.set === 'function') {
+            try { fontSizeCfg.set(clamped); } catch (_) { }
+        }
+    };
 
     const __insertTextAtSelection = (text) => {
         const val = String(text || '');
@@ -17972,6 +18011,8 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         preventCanvasEventsPropagation(pop);
 
         const lang = getLang();
+        const sizeDecreaseTitle = lang === 'en' ? 'Decrease font size' : '减小字号';
+        const sizeIncreaseTitle = lang === 'en' ? 'Increase font size' : '增大字号';
         const boldTitle = lang === 'en' ? 'Bold' : '加粗';
         const italicTitle = lang === 'en' ? 'Italic' : '斜体';
         const underlineTitle = lang === 'en' ? 'Underline' : '下划线';
@@ -17986,6 +18027,10 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         pop.innerHTML = `
             <div class="md-format-row">
+                <button class="md-format-btn md-format-btn-sm" data-action="md-font-decrease" title="${sizeDecreaseTitle}"><i class="fas fa-minus"></i></button>
+                <span class="md-format-size-value">${currentFontSize}px</span>
+                <button class="md-format-btn md-format-btn-sm" data-action="md-font-increase" title="${sizeIncreaseTitle}"><i class="fas fa-plus"></i></button>
+                <span class="md-format-sep"></span>
                 <button class="md-format-btn md-format-heading-btn" data-action="md-heading-toggle" title="${headingTitle}"><i class="fas fa-heading"></i></button>
                 <button class="md-format-btn md-format-align-btn" data-action="md-align-toggle" title="${alignTitle}"><i class="fas fa-align-left"></i></button>
                 <span class="md-format-sep"></span>
@@ -18280,6 +18325,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             pop.classList.add('open');
             formatToggleBtn.classList.add('active');
             updateCanvasPopoverState(true);
+            syncFontSizeValue();
 
             // -----------------------------------------------------------
             // 定位优化：出现在当前输入框（editor）的上边缘居中位置
@@ -18603,6 +18649,14 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         if (action === 'md-format-toggle') {
             toggleFormatPopover();
+            return;
+        }
+        if (action === 'md-font-increase') {
+            applyFontSize(currentFontSize + fontSizeStep);
+            return;
+        }
+        if (action === 'md-font-decrease') {
+            applyFontSize(currentFontSize - fontSizeStep);
             return;
         }
 
@@ -19206,6 +19260,10 @@ function renderTempNode(section, options = {}) {
     const initialHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(section.description || ''));
     descriptionText.innerHTML = initialHtml;
     try { __applyHeadingCollapse(descriptionText); } catch (_) { }
+    const savedDescFontSize = Number(section && section.descFontSize);
+    if (Number.isFinite(savedDescFontSize) && savedDescFontSize > 0) {
+        descriptionText.style.fontSize = savedDescFontSize + 'px';
+    }
 
     // 双击编辑功能
     descriptionText.addEventListener('dblclick', (e) => {
@@ -19464,7 +19522,22 @@ function renderTempNode(section, options = {}) {
             if (!isEditingDesc) return;
             persistDesc({ normalizeEditorHtml: false });
         },
-        nodeId: section.id
+        nodeId: section.id,
+        fontSizeConfig: {
+            min: 10,
+            max: 28,
+            step: 2,
+            get: () => {
+                const val = Number(section && section.descFontSize);
+                return Number.isFinite(val) ? val : null;
+            },
+            set: (val) => {
+                if (Number.isFinite(val)) {
+                    section.descFontSize = val;
+                    saveTempNodes();
+                }
+            }
+        }
     });
 
     const body = document.createElement('div');
@@ -21974,6 +22047,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         }
         return 'canvas-permanent-tip-text';
     };
+    const getFontSizeStorageKey = () => `${getStorageKey()}-font-size`;
 
     const savedTipRaw = (() => {
         try { return localStorage.getItem(getStorageKey()) || ''; } catch (_) { return ''; }
@@ -21981,6 +22055,16 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     const savedTipHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(savedTipRaw));
     tipText.innerHTML = savedTipHtml;
     try { __applyHeadingCollapse(tipText); } catch (_) { }
+    const savedTipFontSize = (() => {
+        try {
+            const raw = localStorage.getItem(getFontSizeStorageKey());
+            const parsed = parseInt(raw, 10);
+            return Number.isFinite(parsed) ? parsed : null;
+        } catch (_) { return null; }
+    })();
+    if (Number.isFinite(savedTipFontSize) && savedTipFontSize > 0) {
+        tipText.style.fontSize = savedTipFontSize + 'px';
+    }
     applyPlaceholder();
 
     const updateTipMeta = () => {
@@ -22202,7 +22286,23 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             if (!isEditingTip) return;
             persistTip({ normalizeEditorHtml: false });
         },
-        nodeId: sectionEl.id || sectionEl.dataset.permanentSectionCopyId || 'permanentSection'
+        nodeId: sectionEl.id || sectionEl.dataset.permanentSectionCopyId || 'permanentSection',
+        fontSizeConfig: {
+            min: 10,
+            max: 28,
+            step: 2,
+            get: () => {
+                try {
+                    const raw = localStorage.getItem(getFontSizeStorageKey());
+                    const parsed = parseInt(raw, 10);
+                    return Number.isFinite(parsed) ? parsed : null;
+                } catch (_) { return null; }
+            },
+            set: (val) => {
+                if (!Number.isFinite(val)) return;
+                try { localStorage.setItem(getFontSizeStorageKey(), String(val)); } catch (_) { }
+            }
+        }
     });
 }
 

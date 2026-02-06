@@ -4322,7 +4322,7 @@ a.tree-label.tree-bookmark-link:hover {
 
 .permanent-section-tip {
     margin: 0;
-    font-size: 11px;
+    font-size: 15px;
     opacity: 0.95;
     line-height: 1.4;
     flex: 1;
@@ -4346,7 +4346,7 @@ a.tree-label.tree-bookmark-link:hover {
 .permanent-section-tip h5,
 .permanent-section-tip h6 {
     margin: 4px 0;
-    font-size: 11px;
+    font-size: 15px;
     font-weight: 600;
 }
 
@@ -4547,7 +4547,7 @@ a.tree-label.tree-bookmark-link:hover {
     border-radius: 4px;
     background: transparent;
     color: white;
-    font-size: 11px;
+    font-size: 15px;
     font-family: inherit;
     line-height: 1.4;
     min-height: 50px;
@@ -4570,7 +4570,7 @@ a.tree-label.tree-bookmark-link:hover {
     border-radius: 4px;
     background: transparent;
     color: white;
-    font-size: 11px;
+    font-size: 15px;
     font-family: inherit;
     line-height: 1.4;
     resize: vertical;
@@ -5177,7 +5177,7 @@ a.tree-label.tree-bookmark-link:hover {
     /* Match Permanent Section layout */
     margin: 0;
     padding: 0;
-    font-size: 11px;
+    font-size: 15px;
     color: rgba(0, 0, 0, 0.65);
     line-height: 1.4;
     word-wrap: break-word;
@@ -5196,7 +5196,7 @@ a.tree-label.tree-bookmark-link:hover {
 .temp-node-description h5,
 .temp-node-description h6 {
     margin: 4px 0;
-    font-size: 11px;
+    font-size: 15px;
     font-weight: 600;
 }
 
@@ -5325,7 +5325,7 @@ a.tree-label.tree-bookmark-link:hover {
     border-radius: 3px;
     background: transparent;
     color: rgba(0, 0, 0, 0.7);
-    font-size: 11px;
+    font-size: 15px;
     font-family: inherit;
     line-height: 1.4;
     min-height: 40px;
