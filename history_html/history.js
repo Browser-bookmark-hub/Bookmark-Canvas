@@ -3162,6 +3162,9 @@ function initSidebarToggle() {
     const LEGACY_COLLAPSED_KEY = 'sidebarCollapsed';
     const SIDEBAR_STATES = ['expanded', 'collapsed', 'compact'];
     const AUTO_COLLAPSE_WIDTH = 1024;
+    const SIDEBAR_TRANSITION_MS = 360;
+
+    let refreshRaf = null;
 
     // 根据当前实际 DOM 宽度更新侧边栏宽度 CSS 变量
     function syncSidebarWidth() {
@@ -3171,6 +3174,33 @@ function initSidebarToggle() {
         const rect = sidebar.getBoundingClientRect();
         const widthPx = rect && rect.width ? `${rect.width}px` : '260px';
         document.documentElement.style.setProperty('--sidebar-width', widthPx);
+    }
+
+    function refreshMaximizedNodesSafe() {
+        try {
+            if (document.body && document.body.classList.contains('canvas-node-maximized-active') &&
+                typeof refreshMaximizedNodes === 'function') {
+                refreshMaximizedNodes();
+            }
+        } catch (_) { }
+    }
+
+    function scheduleMaximizedRefresh() {
+        refreshMaximizedNodesSafe();
+        if (refreshRaf) {
+            cancelAnimationFrame(refreshRaf);
+            refreshRaf = null;
+        }
+        const start = performance.now();
+        const tick = (now) => {
+            refreshMaximizedNodesSafe();
+            if (now - start < SIDEBAR_TRANSITION_MS) {
+                refreshRaf = requestAnimationFrame(tick);
+            } else {
+                refreshRaf = null;
+            }
+        };
+        refreshRaf = requestAnimationFrame(tick);
     }
 
     function normalizeSidebarState(raw) {
@@ -3247,6 +3277,7 @@ function initSidebarToggle() {
         if (options.manual === false) setManualOverride(false);
         persistSidebarState(nextState);
         syncSidebarWidth();
+        scheduleMaximizedRefresh();
         return nextState;
     }
 
@@ -3301,10 +3332,19 @@ function initSidebarToggle() {
     window.addEventListener('resize', () => {
         applyAutoState();
         syncSidebarWidth();
+        scheduleMaximizedRefresh();
     });
 
     // 初次加载后应用一次自动规则（若允许）
     applyAutoState();
+
+    // 侧边栏动画结束后再补一次，避免过渡期间尺寸未更新
+    sidebar.addEventListener('transitionend', (e) => {
+        if (!e || !e.propertyName) return;
+        if (e.propertyName === 'width' || e.propertyName.startsWith('padding')) {
+            scheduleMaximizedRefresh();
+        }
+    });
 }
 
 // =============================================================================
