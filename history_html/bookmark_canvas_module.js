@@ -913,7 +913,7 @@ const TEMP_SECTION_STORAGE_KEY = 'bookmark-canvas-temp-sections';
 const LEGACY_TEMP_NODE_STORAGE_KEY = 'bookmark-canvas-temp-nodes';
 const TEMP_SECTION_STORAGE_CHROME_MARKER = 'chrome.storage.local';
 const TEMP_SECTION_STORAGE_CHROME_MARKER_VERSION = 1;
-const TEMP_SECTION_DEFAULT_WIDTH = 420;
+const TEMP_SECTION_DEFAULT_WIDTH = 525;
 const TEMP_SECTION_DEFAULT_HEIGHT = 380;
 const TEMP_SECTION_DEFAULT_COLOR = '#2563eb';
 // Obsidian Canvas 文本节点默认尺寸（参考 sample.canvas）
@@ -922,6 +922,9 @@ const MD_NODE_DEFAULT_HEIGHT = 300;
 
 // Canvas 外观设置（默认值）
 const CANVAS_APPEARANCE_SETTINGS_KEY = 'canvas-appearance-settings-v1';
+const CANVAS_APPEARANCE_SETTINGS_VERSION = 3;
+const LEGACY_TEMP_SECTION_DEFAULT_WIDTH = 420;
+const LEGACY_TEMP_SECTION_DEFAULT_WIDTH_V2 = 500;
 const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
     sizes: {
         permanent: { mode: 'manual', width: 600, height: 600 },
@@ -1078,6 +1081,20 @@ function normalizeCanvasAppearanceSettings(input) {
     const tempSize = sizes.temp || {};
     const specialTempSize = sizes.specialTemp || {};
     const mdSize = sizes.mdNode || {};
+    const inputVersion = Number(input.version || 0);
+
+    if (inputVersion < CANVAS_APPEARANCE_SETTINGS_VERSION) {
+        const tempWidth = Number(tempSize.width);
+        const specialWidth = Number(specialTempSize.width);
+        const isLegacyWidth = (value) => Number.isFinite(value) &&
+            (value === LEGACY_TEMP_SECTION_DEFAULT_WIDTH || value === LEGACY_TEMP_SECTION_DEFAULT_WIDTH_V2);
+        if (isLegacyWidth(tempWidth)) {
+            tempSize.width = TEMP_SECTION_DEFAULT_WIDTH;
+        }
+        if (isLegacyWidth(specialWidth)) {
+            specialTempSize.width = TEMP_SECTION_DEFAULT_WIDTH;
+        }
+    }
 
     out.sizes.permanent.mode = (permSize.mode === 'auto') ? 'auto' : 'manual';
     out.sizes.temp.mode = (tempSize.mode === 'auto') ? 'auto' : 'manual';
@@ -1113,6 +1130,7 @@ function normalizeCanvasAppearanceSettings(input) {
     out.names.edge.mode = ['manual', 'timestamp', 'parent', 'child', 'blank'].includes(edgeMode) ? edgeMode : out.names.edge.mode;
     out.names.edge.manualValue = typeof edgeNames.manualValue === 'string' ? edgeNames.manualValue : out.names.edge.manualValue;
 
+    out.version = CANVAS_APPEARANCE_SETTINGS_VERSION;
     return out;
 }
 
@@ -29407,6 +29425,7 @@ function saveCanvasAppearanceSettings(options = {}) {
     };
 
     const settingsInput = {
+        version: CANVAS_APPEARANCE_SETTINGS_VERSION,
         sizes: {
             permanent: currentSizes.permanent || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.permanent,
             temp: {

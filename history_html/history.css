@@ -1617,6 +1617,12 @@ a.tree-label.tree-bookmark-link:hover {
     box-shadow: var(--shadow-lg);
 }
 
+/* 外观设置弹窗：横向稍微更宽 */
+.modal-content.appearance-settings-modal {
+    width: 70%;
+    max-width: 700px;
+}
+
 /* 专门给快捷键二级 UI 使用：覆盖默认宽度为“按内容自适应” */
 .modal-content.shortcuts-modal {
     width: auto;
