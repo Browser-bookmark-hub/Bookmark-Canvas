@@ -3149,11 +3149,19 @@ function buildChangeSummary(diffMeta, stats, lang) {
 function initSidebarToggle() {
     const sidebar = document.getElementById('sidebar');
     const toggleBtn = document.getElementById('sidebarToggle');
+    const compactBtn = document.getElementById('sidebarToggleCompact');
+    const expandBtn = document.getElementById('sidebarToggleExpand');
 
-    if (!sidebar || !toggleBtn) {
+    if (!sidebar || !toggleBtn || !compactBtn || !expandBtn) {
         console.warn('[侧边栏] 找不到侧边栏或切换按钮');
         return;
     }
+
+    const SIDEBAR_STATE_KEY = 'sidebarCollapseState';
+    const SIDEBAR_MANUAL_KEY = 'sidebarManualOverride';
+    const LEGACY_COLLAPSED_KEY = 'sidebarCollapsed';
+    const SIDEBAR_STATES = ['expanded', 'collapsed', 'compact'];
+    const AUTO_COLLAPSE_WIDTH = 1024;
 
     // 根据当前实际 DOM 宽度更新侧边栏宽度 CSS 变量
     function syncSidebarWidth() {
@@ -3165,32 +3173,138 @@ function initSidebarToggle() {
         document.documentElement.style.setProperty('--sidebar-width', widthPx);
     }
 
-    // 从 localStorage 恢复侧边栏状态
-    const savedState = localStorage.getItem('sidebarCollapsed');
-    if (savedState === 'true') {
-        sidebar.classList.add('collapsed');
-        console.log('[侧边栏] 恢复收起状态');
+    function normalizeSidebarState(raw) {
+        const value = String(raw || '').toLowerCase();
+        return SIDEBAR_STATES.includes(value) ? value : null;
     }
-    // 恢复完状态后，同步一次真实宽度
-    syncSidebarWidth();
-    // 点击切换按钮
+
+    function updateToggleLabel(state) {
+        const isEn = currentLang === 'en';
+        const collapseTitle = isEn ? 'Collapse sidebar' : '收起菜单栏';
+        const expandTitle = isEn ? 'Expand sidebar' : '展开菜单栏';
+        const compactTitle = isEn ? 'Fully collapse sidebar' : '完全收起菜单栏';
+        const circleTitle = state === 'expanded' ? collapseTitle : expandTitle;
+
+        toggleBtn.setAttribute('title', circleTitle);
+        toggleBtn.setAttribute('aria-label', circleTitle);
+        toggleBtn.setAttribute('aria-expanded', state === 'expanded' ? 'true' : 'false');
+        toggleBtn.dataset.collapseState = state;
+
+        compactBtn.setAttribute('title', compactTitle);
+        compactBtn.setAttribute('aria-label', compactTitle);
+        expandBtn.setAttribute('title', expandTitle);
+        expandBtn.setAttribute('aria-label', expandTitle);
+    }
+
+    function applySidebarState(state) {
+        const nextState = normalizeSidebarState(state) || 'expanded';
+        sidebar.classList.toggle('collapsed', nextState === 'collapsed');
+        sidebar.classList.toggle('compact', nextState === 'compact');
+        if (nextState === 'compact') {
+            sidebar.classList.remove('collapsed');
+        }
+        sidebar.dataset.collapseState = nextState;
+        updateToggleLabel(nextState);
+        return nextState;
+    }
+
+    function persistSidebarState(state) {
+        const safeState = normalizeSidebarState(state) || 'expanded';
+        localStorage.setItem(SIDEBAR_STATE_KEY, safeState);
+        const legacyValue = safeState === 'expanded' ? 'false' : 'true';
+        localStorage.setItem(LEGACY_COLLAPSED_KEY, legacyValue);
+    }
+
+    function readSidebarState() {
+        const savedState = normalizeSidebarState(localStorage.getItem(SIDEBAR_STATE_KEY));
+        if (savedState) return savedState;
+        const legacy = localStorage.getItem(LEGACY_COLLAPSED_KEY);
+        if (legacy === 'true') return 'collapsed';
+        return 'expanded';
+    }
+
+    function readManualOverride() {
+        const raw = localStorage.getItem(SIDEBAR_MANUAL_KEY);
+        if (raw === 'true') return true;
+        if (raw === 'false') return false;
+        const stored = normalizeSidebarState(localStorage.getItem(SIDEBAR_STATE_KEY));
+        if (stored && stored !== 'expanded') return true;
+        const legacy = localStorage.getItem(LEGACY_COLLAPSED_KEY);
+        return legacy === 'true';
+    }
+
+    function setManualOverride(isManual) {
+        localStorage.setItem(SIDEBAR_MANUAL_KEY, isManual ? 'true' : 'false');
+    }
+
+    function getAutoState() {
+        return window.innerWidth <= AUTO_COLLAPSE_WIDTH ? 'collapsed' : 'expanded';
+    }
+
+    function setSidebarState(state, options = {}) {
+        const nextState = applySidebarState(state);
+        if (options.manual === true) setManualOverride(true);
+        if (options.manual === false) setManualOverride(false);
+        persistSidebarState(nextState);
+        syncSidebarWidth();
+        return nextState;
+    }
+
+    function applyAutoState() {
+        if (readManualOverride()) return;
+        const targetState = getAutoState();
+        if (targetState !== currentState) {
+            currentState = setSidebarState(targetState, { manual: false });
+        } else {
+            updateToggleLabel(currentState);
+        }
+    }
+
+    let currentState = readSidebarState();
+    if (readManualOverride()) {
+        currentState = setSidebarState(currentState, { manual: true });
+    } else {
+        currentState = setSidebarState(getAutoState(), { manual: false });
+    }
+    if (currentState !== 'expanded') {
+        console.log('[侧边栏] 恢复收起状态:', currentState);
+    }
+
+    // 点击圆形按钮：展开 -> 收起；完全收起 -> 二级收起
     toggleBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        sidebar.classList.toggle('collapsed');
-
-        // 保存状态到 localStorage
-        const isCollapsed = sidebar.classList.contains('collapsed');
-        localStorage.setItem('sidebarCollapsed', isCollapsed.toString());
-
-        // 更新 CSS 变量（用于弹窗定位）
-        syncSidebarWidth();
-        console.log('[侧边栏]', isCollapsed ? '已收起' : '已展开');
+        if (currentState === 'expanded') {
+            currentState = setSidebarState('collapsed', { manual: true });
+        } else if (currentState === 'compact') {
+            currentState = setSidebarState('collapsed', { manual: true });
+        } else {
+            currentState = setSidebarState('expanded', { manual: false });
+        }
+        console.log('[侧边栏] 状态切换:', currentState);
     });
 
-    // 窗口尺寸变化时，侧边栏可能被 CSS 自动收缩/展开，这里也同步一次宽度
+    // 二级收起按钮：完全收起
+    compactBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        currentState = setSidebarState('compact', { manual: true });
+        console.log('[侧边栏] 状态切换:', currentState);
+    });
+
+    // 二级展开按钮：回到展开状态（恢复自动）
+    expandBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        currentState = setSidebarState('expanded', { manual: false });
+        console.log('[侧边栏] 状态切换:', currentState);
+    });
+
+    // 窗口尺寸变化时，按自动规则收缩/展开（仅在非手动状态）
     window.addEventListener('resize', () => {
+        applyAutoState();
         syncSidebarWidth();
     });
+
+    // 初次加载后应用一次自动规则（若允许）
+    applyAutoState();
 }
 
 // =============================================================================

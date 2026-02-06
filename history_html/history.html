@@ -74,9 +74,18 @@
         <!-- 左侧导航栏 -->
         <aside class="sidebar" id="sidebar">
             <!-- 侧边栏收起按钮 -->
-            <button class="sidebar-toggle" id="sidebarToggle" title="收起/展开侧边栏">
+            <button class="sidebar-toggle" id="sidebarToggle" title="收起菜单栏" aria-label="收起菜单栏">
                 <i class="fas fa-chevron-left"></i>
             </button>
+            <div class="sidebar-toggle-rect" id="sidebarToggleRect" role="group" aria-label="菜单栏收起控制">
+                <button class="sidebar-toggle-rect-btn" id="sidebarToggleCompact" title="完全收起菜单栏" aria-label="完全收起菜单栏" type="button">
+                    <i class="fas fa-angle-double-left"></i>
+                </button>
+                <span class="sidebar-toggle-rect-divider" aria-hidden="true"></span>
+                <button class="sidebar-toggle-rect-btn" id="sidebarToggleExpand" title="展开菜单栏" aria-label="展开菜单栏" type="button">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
 
             <nav class="nav-tabs">
                 <div class="nav-group">

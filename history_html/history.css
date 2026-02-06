@@ -43,6 +43,9 @@
 
     /* Layout constants */
     --sidebar-collapsed-width: 60px;
+    --sidebar-compact-width: 0px;
+    --search-container-width: 420px;
+    --search-container-min-width: 220px;
 
     /* Canvas appearance */
     --permanent-section-color: #10b981;
@@ -220,6 +223,9 @@ body {
     display: flex;
     gap: 16px;
     align-items: center;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    min-width: 0;
 }
 
 /* Cursor hints for top header controls */
@@ -243,9 +249,10 @@ body {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 20px;
-    /* [User Request] Fixed width, no animation */
-    /* width: 280px; -> changed to expanded width 320px -> Standardized to Canvas width 420px */
-    width: 420px;
+    width: 100%;
+    max-width: min(var(--search-container-width), 100%);
+    min-width: min(var(--search-container-min-width), 100%);
+    flex: 1 1 var(--search-container-min-width);
     padding: 2px;
     /* transition: all 0.3s ease; -> Removed width transition */
     transition: border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
@@ -260,9 +267,7 @@ body {
 
 /* [User Request] Wider search box in Canvas View (Fixed) - Now global standard */
 .search-container.canvas-search-active {
-    /* width: 380px; -> changed to expanded width 420px */
-    /* width: 420px; Default is now 420px, so this is redundant but harmless to keep for specificity if needed */
-    width: 420px;
+    max-width: min(var(--search-container-width), 100%);
 }
 
 .search-container.canvas-search-active:focus-within {
@@ -871,6 +876,19 @@ button *,
     padding: 16px 4px;
 }
 
+/* 二级收起：仅保留折叠按钮 */
+.sidebar.compact {
+    width: var(--sidebar-compact-width);
+    padding: 0;
+    border-right: none;
+    background: transparent;
+    overflow: visible;
+}
+
+.sidebar.compact .nav-tabs {
+    display: none;
+}
+
 /* 收起状态：nav-tabs 的负 margin/内 padding 需要匹配新的 sidebar padding，避免左右留白不一致 */
 .sidebar.collapsed .nav-tabs {
     margin-left: -4px;
@@ -902,12 +920,13 @@ button *,
     margin: 0;
 }
 
-/* 侧边栏切换按钮 - 圆形设计，水平居中靠近底部 */
+/* 侧边栏切换按钮 - 单按钮 */
 .sidebar-toggle {
     position: absolute;
     left: 50%;
-    bottom: 20px;
-    transform: translateX(-50%);
+    top: 65%;
+    bottom: auto;
+    transform: translate(-50%, -50%);
     width: 32px;
     height: 32px;
     background: var(--bg-secondary);
@@ -917,16 +936,66 @@ button *,
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 10;
-    transition: all 0.2s ease;
+    transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease;
     color: var(--text-secondary);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    z-index: 10;
+}
+
+.sidebar-toggle-rect {
+    position: absolute;
+    left: 50%;
+    top: 65%;
+    bottom: auto;
+    transform: translate(-50%, -50%) translateY(6px) scale(0.96);
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 2px;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    overflow: hidden;
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.12);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s ease;
+    z-index: 10;
+}
+
+.sidebar-toggle-rect-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    border-radius: 999px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.sidebar-toggle-rect-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
+
+.sidebar-toggle-rect-divider {
+    width: 1px;
+    height: 12px;
+    background: var(--border-color);
+    opacity: 0.8;
+    border-radius: 999px;
+    margin: 0 5px;
 }
 
 .sidebar-toggle:hover {
     background: var(--hover-bg);
     color: var(--primary-color);
-    transform: translateX(-50%) scale(1.1);
+    transform: translate(-50%, -50%) scale(1.1);
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
 }
 
@@ -938,9 +1007,39 @@ button *,
 }
 
 /* 收起状态时旋转图标 */
-.sidebar.collapsed .sidebar-toggle i {
+.sidebar.collapsed .sidebar-toggle i,
+.sidebar.compact .sidebar-toggle i {
     /* translateX 在 rotate 前执行，旋转后会自然变成反方向的微调 */
     transform: rotate(180deg) translateX(0.5px);
+}
+
+/* 二级收起：矩形控制显示 */
+.sidebar.collapsed .sidebar-toggle {
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -50%) translateY(4px) scale(0.9);
+}
+
+.sidebar.collapsed .sidebar-toggle-rect {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, -50%) translateY(0) scale(1);
+}
+
+/* 完全收起时：按钮贴边悬浮 */
+.sidebar.compact .sidebar-toggle {
+    left: 8px;
+    transform: translateY(-50%);
+}
+
+.sidebar.compact .sidebar-toggle:hover {
+    transform: translateY(-50%) scale(1.1);
+}
+
+.sidebar.compact .sidebar-toggle-rect {
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -50%) translateY(6px) scale(0.9);
 }
 
 .nav-tabs {
@@ -1897,31 +1996,6 @@ a.tree-label.tree-bookmark-link:hover {
 /* ==================== 响应式设计 ==================== */
 /* 在中等屏幕（1024px以下）时，自动收缩侧边栏 */
 @media (max-width: 1024px) {
-    .sidebar {
-        width: var(--sidebar-collapsed-width);
-        padding: 16px 4px;
-    }
-
-    .sidebar .nav-tab span,
-    .sidebar .nav-group-title {
-        display: none;
-    }
-
-    .sidebar .nav-group {
-        border-bottom: none;
-        margin-bottom: 8px;
-        padding-bottom: 8px;
-    }
-
-    .sidebar .nav-tab {
-        justify-content: center;
-        padding: 12px 0;
-    }
-
-    .sidebar .nav-tab i {
-        margin: 0;
-    }
-
     /* widget removed in canvas-only */
 }
 
@@ -1934,43 +2008,14 @@ a.tree-label.tree-bookmark-link:hover {
     }
 
     /* 自动收缩侧边栏，而不是占满宽度 */
-    .sidebar {
-        width: var(--sidebar-collapsed-width);
-        /* 自动收缩到最小宽度 */
-        padding: 16px 4px;
-        border-right: 1px solid var(--border-color);
-        border-bottom: none;
-    }
-
-    /* 在小屏幕上自动隐藏侧边栏文字（相当于自动收起） */
-    .sidebar .nav-tab span,
-    .sidebar .nav-group-title {
-        display: none;
-    }
-
-    .sidebar .nav-group {
-        border-bottom: none;
-        margin-bottom: 8px;
-        padding-bottom: 8px;
-    }
-
-    .sidebar .nav-tab {
-        justify-content: center;
-        padding: 12px 0;
-    }
-
-    .sidebar .nav-tab i {
-        margin: 0;
-    }
-
     /* widget removed in canvas-only */
 
     .search-container input {
-        width: 200px;
+        width: 100%;
     }
 
     .search-container input:focus {
-        width: 240px;
+        width: 100%;
     }
 }
 
