@@ -2181,7 +2181,7 @@
 
 .other-curve-axis-letter {
     display: inline-block;
-    transform: rotate(-90deg);
+    transform: none;
     transform-origin: center;
 }
 
