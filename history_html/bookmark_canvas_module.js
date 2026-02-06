@@ -14,6 +14,8 @@ const NODE_LAYOUT_ZOOM_DEFAULT = 150;
 const NODE_LAYOUT_ZOOM_MIN = 50;
 const NODE_LAYOUT_ZOOM_MAX = 200;
 const NODE_LAYOUT_ZOOM_STEP = 5;
+const MD_NODE_DEFAULT_FONT_SIZE = 20;
+const MD_NODE_LEGACY_DEFAULT_FONT_SIZE = 14;
 
 // 统一的首屏初始缩放：让 HTML 不需要再手动同步数值
 try {
@@ -1738,7 +1740,7 @@ function createInitialDemoTemplate() {
         text: '',
         html: bookmarkGuideHtml,
         color: '4', // 绿色
-        fontSize: 14,
+        fontSize: MD_NODE_LEGACY_DEFAULT_FONT_SIZE,
         createdAt: Date.now()
     };
 
@@ -1752,7 +1754,7 @@ function createInitialDemoTemplate() {
         text: '',
         html: shortcutGuideHtml,
         color: '5', // 蓝色
-        fontSize: 14,
+        fontSize: MD_NODE_LEGACY_DEFAULT_FONT_SIZE,
         createdAt: Date.now()
     };
 
@@ -1812,7 +1814,7 @@ function createInitialDemoTemplate() {
         text: '',
         html: batchFeatureHtml,
         color: '5', // 蓝色
-        fontSize: 14,
+        fontSize: MD_NODE_LEGACY_DEFAULT_FONT_SIZE,
         createdAt: Date.now()
     };
 
@@ -11982,7 +11984,7 @@ function renderMdNode(node) {
     }
 
     // 初始化字体大小（从节点数据或默认值）
-    const defaultFontSize = 14;
+    const defaultFontSize = MD_NODE_DEFAULT_FONT_SIZE;
     const minFontSize = 10;
     const maxFontSize = 28;
     if (typeof node.fontSize !== 'number') {
@@ -14414,7 +14416,7 @@ function renderMdNode(node) {
 
             const snapshot = () => ({
                 html: editor.innerHTML,
-                fontSize: typeof node.fontSize === 'number' ? node.fontSize : 14,
+                fontSize: typeof node.fontSize === 'number' ? node.fontSize : MD_NODE_DEFAULT_FONT_SIZE,
                 selection: captureSelection(),
                 scrollTop: editor.scrollTop || 0,
                 scrollLeft: editor.scrollLeft || 0
@@ -14665,6 +14667,17 @@ function renderMdNode(node) {
     // 实时渲染：监听输入事件（带防抖，避免输入时频繁渲染）
     let renderDebounceTimer = null;
     const RENDER_DEBOUNCE_DELAY = 250; // 降低到 250ms：减少手动输入到渲染的等待，但仍避免“还没打完就被渲染”
+    let suppressBlurExit = false;
+    let suppressBlurExitTimer = null;
+    const markToolbarInteraction = () => {
+        suppressBlurExit = true;
+        if (suppressBlurExitTimer) {
+            clearTimeout(suppressBlurExitTimer);
+        }
+        suppressBlurExitTimer = setTimeout(() => {
+            suppressBlurExit = false;
+        }, 200);
+    };
 
     editor.addEventListener('input', (e) => {
         if (undoManager && undoManager.isRestoring) return;
@@ -14718,7 +14731,14 @@ function renderMdNode(node) {
     // 编辑器失去焦点时退出编辑状态并重新渲染展开的内容
     editor.addEventListener('blur', () => {
         reRenderExpanded();
-        exitEdit();
+        if (el.classList.contains('canvas-node-maximized') || fullscreenEditLock) {
+            return;
+        }
+        setTimeout(() => {
+            if (suppressBlurExit) return;
+            if (document.activeElement && el.contains(document.activeElement)) return;
+            exitEdit();
+        }, 0);
     });
 
     // 鼠标/输入法/键盘：只要光标离开展开源码就重渲染
@@ -15283,18 +15303,21 @@ function renderMdNode(node) {
         }, 50);
     });
 
-    // 选择逻辑：单击选中（可拖动），快速双击进入编辑
-    // 使用自定义双击检测，时间窗口 200ms（更严格）
-    let lastClickTime = 0;
-    const DOUBLE_CLICK_THRESHOLD = 200;
+    // 选择逻辑：单击选中（可拖动），再次单击进入编辑
 
     // 标记是否在编辑模式
     let isInEditMode = false;
     let ctrlPausedEdit = false; // Ctrl暂停编辑标记
+    let justSelectedOnClick = false;
+    let fullscreenEditLock = false;
+    let wasEditingBeforeFullscreen = false;
 
     const enterEditMode = () => {
         isInEditMode = true;
         ctrlPausedEdit = false;
+        if (!node.isEditing) {
+            enterEdit();
+        }
         node.isEditing = true;
         el.setAttribute('data-editing', 'true');
         editor.focus();
@@ -15303,6 +15326,9 @@ function renderMdNode(node) {
     const exitEditMode = () => {
         isInEditMode = false;
         ctrlPausedEdit = false;
+        if (node.isEditing) {
+            exitEdit();
+        }
         node.isEditing = false;
         el.removeAttribute('data-editing');
         // 退出栏目卡片时：清空撤销/反撤销栈（每次进入编辑都从当前内容开始）
@@ -15337,8 +15363,10 @@ function renderMdNode(node) {
     editor.addEventListener('blur', () => {
         // 如果是Ctrl暂停的，不退出编辑模式
         if (ctrlPausedEdit) return;
+        if (el.classList.contains('canvas-node-maximized') || fullscreenEditLock) return;
         // 延迟检查，避免点击工具栏时误退出
         setTimeout(() => {
+            if (suppressBlurExit) return;
             if (document.activeElement !== editor && !el.contains(document.activeElement)) {
                 // Finalize deferred auto-links (e.g. bare URL at end) before leaving edit mode
                 try { __finalizeInlinePatternsInEditor(editor); } catch (_) { }
@@ -15364,26 +15392,77 @@ function renderMdNode(node) {
             return; // 让Ctrl模式的逻辑处理
         }
 
-        // 如果在编辑模式中（非Ctrl暂停），允许正常编辑操作
-        if (isInEditMode && !ctrlPausedEdit) return;
-
-        const now = Date.now();
-        const timeSinceLastClick = now - lastClickTime;
-
-        // 快速双击检测（200ms内）：进入编辑模式
-        if (timeSinceLastClick < DOUBLE_CLICK_THRESHOLD && timeSinceLastClick > 30) {
-            e.preventDefault();
-            e.stopPropagation();
-            lastClickTime = 0;
-            selectMdNode(node.id);
-            enterEditMode();
+        // 全屏时单击直接进入编辑（保持可输入）
+        if (el.classList.contains('canvas-node-maximized')) {
+            if (!isInEditMode) {
+                try { selectMdNode(node.id); } catch (_) { }
+                enterEditMode();
+            }
             return;
         }
 
-        // 单击：选中节点
-        lastClickTime = now;
-        e.preventDefault(); // 阻止编辑器自动聚焦
-        selectMdNode(node.id);
+        // 如果在编辑模式中（非Ctrl暂停），允许正常编辑操作
+        if (isInEditMode && !ctrlPausedEdit) return;
+
+        if (CanvasState.selectedMdNodeId !== node.id) {
+            // 单击：选中节点（不立刻进入编辑）
+            e.preventDefault(); // 阻止编辑器自动聚焦
+            selectMdNode(node.id);
+            justSelectedOnClick = true;
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const onMove = (ev) => {
+                const dx = Math.abs(ev.clientX - startX);
+                const dy = Math.abs(ev.clientY - startY);
+                if (dx + dy > 3) {
+                    justSelectedOnClick = false;
+                    cleanup();
+                }
+            };
+            const cleanup = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', cleanup);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', cleanup);
+            return;
+        }
+
+        // 已选中：允许拖动/后续点击进入编辑
+        justSelectedOnClick = false;
+    }, true);
+
+    el.addEventListener('click', (e) => {
+        const target = (e.target && e.target.nodeType === Node.ELEMENT_NODE)
+            ? e.target
+            : (e.target && e.target.parentElement ? e.target.parentElement : null);
+        if (!target) return;
+        if (target.closest('.resize-handle') ||
+            target.closest('.md-node-toolbar-btn') ||
+            target.closest('.canvas-layout-zoom-controls') ||
+            target.closest('.md-format-btn') ||
+            target.closest('.md-color-chip') ||
+            target.closest('.md-color-custom') ||
+            target.closest('.md-color-picker-btn') ||
+            target.closest('.md-fontcolor-chip') ||
+            target.closest('.md-align-option') ||
+            target.closest('.md-heading-option') ||
+            target.closest('.md-list-option') ||
+            target.closest('a')) {
+            return;
+        }
+
+        if (el.classList.contains('canvas-node-maximized')) return;
+        if (ctrlPausedEdit || isInEditMode) return;
+        if (justSelectedOnClick) {
+            justSelectedOnClick = false;
+            return;
+        }
+        if (CanvasState.selectedMdNodeId === node.id) {
+            e.preventDefault();
+            e.stopPropagation();
+            enterEditMode();
+        }
     }, true);
 
     // 禁用原生双击
@@ -15397,8 +15476,37 @@ function renderMdNode(node) {
         e.stopPropagation();
     }, true);
 
+    const syncFullscreenEditing = () => {
+        const isMax = el.classList.contains('canvas-node-maximized');
+        if (isMax) {
+            if (!fullscreenEditLock) {
+                fullscreenEditLock = true;
+                wasEditingBeforeFullscreen = isInEditMode;
+                if (!isInEditMode) {
+                    try { selectMdNode(node.id); } catch (_) { }
+                    enterEditMode();
+                } else {
+                    editor.focus();
+                }
+            }
+        } else if (fullscreenEditLock) {
+            fullscreenEditLock = false;
+            if (!wasEditingBeforeFullscreen) {
+                exitEditMode();
+            }
+            wasEditingBeforeFullscreen = false;
+        }
+    };
+
+    const fullscreenObserver = new MutationObserver(syncFullscreenEditing);
+    fullscreenObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+    syncFullscreenEditing();
+
     // 工具栏mousedown：阻止默认行为防止编辑器失焦
     toolbar.addEventListener('mousedown', (e) => {
+        if (toolbar.contains(e.target)) {
+            markToolbarInteraction();
+        }
         const btn = e.target.closest('button');
         if (btn && toolbar.contains(btn)) {
             e.preventDefault(); // 防止 editor 失焦 / 编辑态被动退出
