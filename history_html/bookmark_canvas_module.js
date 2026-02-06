@@ -240,7 +240,7 @@ function updateCanvasPopoverState(isActive) {
     } else {
         // 延时一帧检查，确保 DOM 状态已更新
         requestAnimationFrame(() => {
-            const hasOpen = document.querySelector('.md-format-popover.open, .temp-color-popover.open, .md-color-popover.open, .md-delete-options-popover.open, .marker-dropdown-menu.open, .desc-clear-confirm-popover, .desc-height-settings-popover');
+            const hasOpen = document.querySelector('.md-format-popover.open, .temp-color-popover.open, .md-color-popover.open, .md-delete-options-popover.open, .marker-dropdown-menu.open, .desc-clear-confirm-popover, .desc-height-settings-popover, .canvas-sidepanel-popover');
             if (!hasOpen) {
                 document.body.classList.remove('canvas-popover-active');
             }
@@ -250,6 +250,7 @@ function updateCanvasPopoverState(isActive) {
 
 const DESC_CLEAR_CONFIRM_POPOVER_ID = 'descClearConfirmPopover';
 const DESC_HEIGHT_SETTINGS_POPOVER_ID = 'descHeightSettingsPopover';
+const CANVAS_SIDE_PANEL_POPOVER_ID = 'canvasSidePanelPopover';
 
 function __showDescClearConfirmPopover(anchorEl, options = {}) {
     if (!anchorEl) return;
@@ -508,6 +509,144 @@ function __showDescHeightSettingsPopover(anchorEl, options = {}) {
     };
 
     pop.__cleanup = cleanup;
+
+    const onDocDown = (e) => {
+        if (!pop.contains(e.target) && e.target !== anchorEl && !anchorEl.contains(e.target)) {
+            cleanup();
+        }
+    };
+    const onKeyDown = (e) => {
+        if (e.key === 'Escape') cleanup();
+    };
+
+    setTimeout(() => {
+        document.addEventListener('mousedown', onDocDown, true);
+        document.addEventListener('keydown', onKeyDown, true);
+    }, 0);
+}
+
+function __positionCanvasSidePanelPopover(pop, anchorEl, side) {
+    if (!pop || !anchorEl) return;
+    const rect = anchorEl.getBoundingClientRect();
+    const popRect = pop.getBoundingClientRect();
+    let left = rect.left + rect.width / 2 - popRect.width / 2;
+    if (side === 'left') left = rect.left;
+    if (side === 'right') left = rect.right - popRect.width;
+    const minLeft = 8;
+    const maxLeft = window.innerWidth - 8 - popRect.width;
+    left = Math.min(maxLeft, Math.max(minLeft, left));
+    let top = rect.bottom + 8;
+    if (top + popRect.height > window.innerHeight - 8) {
+        top = rect.top - popRect.height - 8;
+    }
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+}
+
+async function __getSidePanelLayout() {
+    try {
+        if (chrome && chrome.sidePanel && typeof chrome.sidePanel.getLayout === 'function') {
+            try {
+                const maybePromise = chrome.sidePanel.getLayout();
+                if (maybePromise && typeof maybePromise.then === 'function') {
+                    return await maybePromise;
+                }
+            } catch (_) { }
+            return await new Promise((resolve) => {
+                try {
+                    chrome.sidePanel.getLayout((layout) => resolve(layout));
+                } catch (_) {
+                    resolve(null);
+                }
+            });
+        }
+    } catch (_) { }
+    return null;
+}
+
+function __getSidePanelSettingsSearchMeta() {
+    const lang = (typeof currentLang !== 'undefined' && currentLang)
+        ? currentLang
+        : (navigator.language || '');
+    const langLower = String(lang).toLowerCase();
+    const isZh = langLower.startsWith('zh');
+    const keyword = isZh ? '侧边栏' : 'side panel';
+    const keywordAlt = isZh ? 'side panel' : '侧边栏';
+    return {
+        url: 'chrome://settings/?search=' + encodeURIComponent(keyword),
+        keyword,
+        keywordAlt,
+        isZh,
+        browser: 'chrome'
+    };
+}
+
+function __showCanvasSidePanelPopover(anchorEl) {
+    if (!anchorEl) return;
+    const existing = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
+    if (existing) existing.remove();
+
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+    const title = isEn ? 'Side panel settings' : '侧边栏管理';
+    const positionLabel = isEn ? 'Side panel position' : '侧边栏位置';
+    const detectingText = isEn ? 'Detecting...' : '检测中...';
+    const unknownText = isEn ? 'Unknown (open settings)' : '未知（打开设置查看）';
+    const leftText = isEn ? 'Left' : '左侧';
+    const rightText = isEn ? 'Right' : '右侧';
+    const openSettingsText = isEn ? 'Open browser settings' : '打开浏览器设置';
+    const hintText = '';
+
+    const pop = document.createElement('div');
+    pop.id = CANVAS_SIDE_PANEL_POPOVER_ID;
+    pop.className = 'canvas-sidepanel-popover';
+    pop.innerHTML = `
+        <div class="canvas-sidepanel-row">
+            <span class="canvas-sidepanel-label">${positionLabel}</span>
+            <span class="canvas-sidepanel-value" id="canvasSidePanelPositionValue">${detectingText}</span>
+        </div>
+        <div class="canvas-sidepanel-actions">
+            <button class="canvas-sidepanel-btn" id="canvasSidePanelOpenSettingsBtn" type="button">${openSettingsText}</button>
+        </div>
+        <div class="canvas-sidepanel-hint">${hintText}</div>
+    `;
+
+    document.body.appendChild(pop);
+    __positionCanvasSidePanelPopover(pop, anchorEl, null);
+    updateCanvasPopoverState(true);
+
+    const positionEl = pop.querySelector('#canvasSidePanelPositionValue');
+    __getSidePanelLayout().then((layout) => {
+        const side = layout && layout.side ? String(layout.side) : '';
+        if (positionEl) {
+            if (side === 'left') positionEl.textContent = leftText;
+            else if (side === 'right') positionEl.textContent = rightText;
+            else positionEl.textContent = unknownText;
+        }
+        pop.dataset.side = side || 'unknown';
+        __positionCanvasSidePanelPopover(pop, anchorEl, side);
+    });
+
+    const openBtn = pop.querySelector('#canvasSidePanelOpenSettingsBtn');
+    if (openBtn) {
+        openBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                if (chrome && chrome.tabs && typeof chrome.tabs.create === 'function') {
+                    const meta = __getSidePanelSettingsSearchMeta();
+                    chrome.tabs.create({ url: meta.url });
+                }
+            } catch (_) { }
+        });
+    }
+
+    const cleanup = () => {
+        try { pop.remove(); } catch (_) { }
+        updateCanvasPopoverState(false);
+        document.removeEventListener('mousedown', onDocDown, true);
+        document.removeEventListener('keydown', onKeyDown, true);
+    };
 
     const onDocDown = (e) => {
         if (!pop.contains(e.target) && e.target !== anchorEl && !anchorEl.contains(e.target)) {
@@ -5633,6 +5772,7 @@ function setupCanvasManageModal() {
 
     // 加载保存的快捷键设置
     loadCanvasShortcuts();
+    setupCanvasSidePanelSettingsBtn();
 
     manageBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -5644,6 +5784,8 @@ function setupCanvasManageModal() {
         manageModal.style.display = isVisible ? 'none' : 'block';
         if (isVisible) {
             stopShortcutRecording(null);
+            const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
+            if (pop) pop.remove();
         } else {
             updateShortcutDisplays();
             if (typeof updateShortcutsDisplay === 'function') {
@@ -5656,6 +5798,8 @@ function setupCanvasManageModal() {
         manageModalClose.addEventListener('click', () => {
             stopShortcutRecording(null);
             manageModal.style.display = 'none';
+            const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
+            if (pop) pop.remove();
         });
     }
 
@@ -5667,7 +5811,21 @@ function setupCanvasManageModal() {
             !manageBtn.contains(e.target)) {
             stopShortcutRecording(null);
             manageModal.style.display = 'none';
+            const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
+            if (pop) pop.remove();
         }
+    });
+}
+
+function setupCanvasSidePanelSettingsBtn() {
+    const btn = document.getElementById('canvasSidePanelSettingsBtn');
+    if (!btn || btn.dataset.bound === 'true') return;
+    btn.dataset.bound = 'true';
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
+        openCanvasSidePanelSettingsModal();
     });
 }
 
@@ -5690,6 +5848,158 @@ function setupCanvasShortcutsModal() {
     if (closeBtn) closeBtn.addEventListener('click', close);
     modal.addEventListener('click', (e) => {
         if (e.target === modal) close();
+    });
+}
+
+// =============================================================================
+// 侧边栏管理面板 (Side Panel Settings)
+// =============================================================================
+
+function openCanvasSidePanelSettingsModal() {
+    let modal = document.getElementById('canvasSidePanelSettingsModal');
+    if (modal) {
+        if (typeof modal.__cleanup === 'function') modal.__cleanup();
+        modal.remove();
+    }
+    createCanvasSidePanelSettingsModal();
+    modal = document.getElementById('canvasSidePanelSettingsModal');
+    if (!modal) return;
+
+    modal.style.display = 'flex';
+
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+    const unknownText = isEn ? 'Unknown (open settings)' : '未知（打开设置查看）';
+    const leftText = isEn ? 'Left' : '左侧';
+    const rightText = isEn ? 'Right' : '右侧';
+
+    const positionEl = modal.querySelector('#canvasSidePanelPositionValue');
+    if (positionEl) positionEl.textContent = isEn ? 'Detecting...' : '检测中...';
+    const updateLayout = () => {
+        __getSidePanelLayout().then((layout) => {
+            const side = layout && layout.side ? String(layout.side) : '';
+            if (!positionEl) return;
+            if (side === 'left') positionEl.textContent = leftText;
+            else if (side === 'right') positionEl.textContent = rightText;
+            else positionEl.textContent = unknownText;
+        });
+    };
+    updateLayout();
+
+    const pollTimer = setInterval(updateLayout, 800);
+    const onFocus = () => updateLayout();
+    const onVisibility = () => {
+        if (document.visibilityState === 'visible') updateLayout();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    modal.__cleanup = () => {
+        clearInterval(pollTimer);
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onVisibility);
+    };
+}
+
+function closeCanvasSidePanelSettingsModal() {
+    const modal = document.getElementById('canvasSidePanelSettingsModal');
+    if (modal) {
+        if (typeof modal.__cleanup === 'function') modal.__cleanup();
+        modal.style.display = 'none';
+    }
+}
+
+function createCanvasSidePanelSettingsModal() {
+    const modal = document.createElement('div');
+    modal.id = 'canvasSidePanelSettingsModal';
+    modal.className = 'modal';
+    modal.style.display = 'none';
+
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+    const title = isEn ? 'Side Panel' : '侧边栏管理';
+    const positionLabel = isEn ? 'Side panel position' : '侧边栏位置';
+    const detectingText = isEn ? 'Detecting...' : '检测中...';
+    const openSettingsText = isEn ? 'Open browser settings' : '打开浏览器设置';
+    modal.innerHTML = `
+        <div class="modal-content sidepanel-settings-modal">
+            <div class="modal-header">
+                <h3>${title}</h3>
+                <button class="perf-modal-close" id="sidePanelModalCloseBtn"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'System' : '系统设置'}</div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${positionLabel}</span>
+                            <button class="perf-help-btn" id="sidePanelHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content sidepanel-row-content">
+                            <div class="sidepanel-position-value" id="canvasSidePanelPositionValue">${detectingText}</div>
+                            <button class="sidepanel-settings-btn" id="canvasSidePanelOpenSettingsBtn" type="button">${openSettingsText}</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="perf-help-popover" id="sidePanelHelpPopover">
+                <div class="perf-help-popover-content">
+                    ${isEn
+                ? '<b>Edge</b>: The sidebar is fixed on the right by default and cannot be moved to the left.'
+                : '<b>Edge</b>：侧边栏默认固定在右侧，无法移动到左侧。'}
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const closeBtn = modal.querySelector('#sidePanelModalCloseBtn');
+    if (closeBtn) closeBtn.addEventListener('click', closeCanvasSidePanelSettingsModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeCanvasSidePanelSettingsModal();
+    });
+
+    const openBtn = modal.querySelector('#canvasSidePanelOpenSettingsBtn');
+    if (openBtn) {
+        openBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                if (chrome && chrome.tabs && typeof chrome.tabs.create === 'function') {
+                    const meta = __getSidePanelSettingsSearchMeta();
+                    chrome.tabs.create({ url: meta.url });
+                }
+            } catch (_) { }
+        });
+    }
+
+    const helpBtn = modal.querySelector('#sidePanelHelpBtn');
+    const helpPopover = modal.querySelector('#sidePanelHelpPopover');
+    const showPopover = (btn, popover) => {
+        if (!btn || !popover) return;
+        modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
+        const rect = btn.getBoundingClientRect();
+        const modalRect = modal.querySelector('.modal-content').getBoundingClientRect();
+        popover.style.top = (rect.bottom - modalRect.top + 8) + 'px';
+        popover.style.left = (rect.left - modalRect.left) + 'px';
+        popover.classList.add('show');
+    };
+    const hidePopovers = () => {
+        modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
+    };
+    if (helpBtn && helpPopover) {
+        helpBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (helpPopover.classList.contains('show')) hidePopovers();
+            else showPopover(helpBtn, helpPopover);
+        });
+    }
+    modal.addEventListener('click', (e) => {
+        if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
+            hidePopovers();
+        }
     });
 }
 

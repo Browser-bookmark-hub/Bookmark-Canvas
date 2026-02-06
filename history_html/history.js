@@ -1808,6 +1808,14 @@ const i18n = {
         'zh_CN': '画布管理',
         'en': 'Canvas Manage'
     },
+    canvasSidePanelSettingsText: {
+        'zh_CN': '侧边栏',
+        'en': 'Side Panel'
+    },
+    canvasSidePanelSettingsTitle: {
+        'zh_CN': '侧边栏管理',
+        'en': 'Side Panel'
+    },
     canvasPerfSettingsText: {
         'zh_CN': '性能',
         'en': 'Performance'
@@ -2595,6 +2603,10 @@ function applyLanguage() {
     if (canvasManageText) canvasManageText.textContent = i18n.canvasManageText[currentLang];
     const canvasManageBtn = document.getElementById('canvasManageBtn');
     if (canvasManageBtn) canvasManageBtn.title = i18n.canvasManageTitle[currentLang];
+    const canvasSidePanelSettingsText = document.getElementById('canvasSidePanelSettingsText');
+    if (canvasSidePanelSettingsText) canvasSidePanelSettingsText.textContent = i18n.canvasSidePanelSettingsText[currentLang];
+    const canvasSidePanelSettingsBtn = document.getElementById('canvasSidePanelSettingsBtn');
+    if (canvasSidePanelSettingsBtn) canvasSidePanelSettingsBtn.title = i18n.canvasSidePanelSettingsTitle[currentLang];
     const canvasAppearanceSettingsText = document.getElementById('canvasAppearanceSettingsText');
     if (canvasAppearanceSettingsText) canvasAppearanceSettingsText.textContent = i18n.canvasAppearanceSettingsText[currentLang];
     const canvasOtherSettingsText = document.getElementById('canvasOtherSettingsText');

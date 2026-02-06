@@ -8677,6 +8677,67 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     border-color: var(--error);
 }
 
+/* 侧边栏管理弹出层 */
+.canvas-sidepanel-popover {
+    position: fixed;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px 12px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+    z-index: 1002;
+    min-width: 220px;
+    max-width: 300px;
+}
+
+.canvas-sidepanel-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.canvas-sidepanel-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.canvas-sidepanel-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.canvas-sidepanel-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.canvas-sidepanel-btn {
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    transition: all 0.15s ease;
+}
+
+.canvas-sidepanel-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+}
+
+.canvas-sidepanel-hint {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+
 /* Canvas 清除按钮下拉菜单样式 */
 .canvas-clear-dropdown {
     position: relative;
@@ -8933,6 +8994,11 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
 }
 
 [data-theme="dark"] .canvas-manage-modal {
+    background: rgba(36, 37, 38, 0.98);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="dark"] .canvas-sidepanel-popover {
     background: rgba(36, 37, 38, 0.98);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }

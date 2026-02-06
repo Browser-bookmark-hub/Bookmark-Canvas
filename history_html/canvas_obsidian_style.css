@@ -1738,6 +1738,80 @@
     padding-bottom: 78px;
 }
 
+/* 侧边栏管理弹窗样式 */
+.sidepanel-settings-modal {
+    width: 460px;
+    max-width: 92vw;
+    position: relative;
+}
+
+.sidepanel-settings-modal .modal-body {
+    padding: 20px;
+}
+
+.sidepanel-position-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 64px;
+    height: 24px;
+    padding: 0 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    box-sizing: border-box;
+}
+
+.sidepanel-keyword-value {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.appearance-row-content.sidepanel-row-content {
+    display: flex;
+    flex-direction: row !important;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.sidepanel-position-value {
+    flex: 0 0 auto;
+}
+
+.sidepanel-settings-btn {
+    white-space: nowrap;
+}
+
+.sidepanel-settings-btn {
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 24px;
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    transition: all 0.15s ease;
+}
+
+.sidepanel-settings-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+}
+
+.sidepanel-settings-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    line-height: 1.5;
+}
+
 .appearance-row {
     display: flex;
     gap: 12px;
