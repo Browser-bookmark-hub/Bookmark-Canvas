@@ -10246,8 +10246,8 @@ body.canvas-popover-active .md-list-popover {
     padding: 10px 12px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
     z-index: 100002;
-    min-width: 320px;
-    max-width: 380px;
+    min-width: 280px;
+    max-width: 340px;
     animation: popupSlideDown 0.18s ease-out;
 }
 
@@ -10319,12 +10319,25 @@ body.canvas-popover-active .md-list-popover {
 }
 
 .desc-height-settings-input {
-    width: 48px;
+    width: 20px;
     padding: 0;
     border: none;
     background: transparent;
     color: var(--text-primary);
     font-size: 11px;
+    text-align: center;
+}
+
+/* 让 number 输入在视觉上真正居中 */
+.desc-height-settings-input::-webkit-outer-spin-button,
+.desc-height-settings-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.desc-height-settings-input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
 }
 
 .desc-height-settings-unit {

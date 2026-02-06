@@ -16,6 +16,8 @@ const NODE_LAYOUT_ZOOM_MAX = 200;
 const NODE_LAYOUT_ZOOM_STEP = 5;
 const MD_NODE_DEFAULT_FONT_SIZE = 20;
 const MD_NODE_LEGACY_DEFAULT_FONT_SIZE = 14;
+const TEMP_DESC_HEIGHT_SETTINGS_KEY = 'canvas-temp-desc-height-settings-v1';
+const PERMANENT_DESC_HEIGHT_SETTINGS_KEY = 'canvas-permanent-desc-height-settings-v1';
 const CANVAS_BROOM_SVG = '<svg class="canvas-broom-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3.55 21H6v-2q0-.425.288-.712T7 18t.713.288T8 19v2h3v-2q0-.425.288-.712T12 18t.713.288T13 19v2h3v-2q0-.425.288-.712T17 18t.713.288T18 19v2h2.45l-1-4H4.55zm16.9 2H3.55q-.975 0-1.575-.775t-.35-1.725L3 15v-2q0-.825.588-1.412T5 11h4V4q0-1.25.875-2.125T12 1t2.125.875T15 4v7h4q.825 0 1.413.588T21 13v2l1.375 5.5q.325.95-.288 1.725T20.45 23"/></svg>';
 
 // 统一的首屏初始缩放：让 HTML 不需要再手动同步数值
@@ -46,6 +48,7 @@ const CanvasState = {
         lastScrollTime: 0,
         scrollTimeout: null
     },
+    lastCanvasScrollTime: 0,
     // 自动滚动状态（拖动到边缘时）
     autoScrollState: {
         intervalId: null,
@@ -342,7 +345,8 @@ function __showDescHeightSettingsPopover(anchorEl, options = {}) {
     const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
     const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
     const title = options.title || (isEn ? 'Height settings' : '高度设置');
-    const heightLabel = options.heightLabel || (isEn ? 'Height' : '高度');
+    const displayLabel = options.displayLabel || (isEn ? 'Display' : '显示');
+    const editLabel = options.editLabel || (isEn ? 'Edit' : '编辑');
     const rowsModeLabel = options.rowsModeLabel || (isEn ? 'Rows' : '限制行数');
     const fullLabel = options.fullLabel || (isEn ? 'Full' : '完整');
     const rowsLabel = options.rowsLabel || (isEn ? 'Rows' : '行');
@@ -356,16 +360,16 @@ function __showDescHeightSettingsPopover(anchorEl, options = {}) {
         : () => ({ displayMode: 'rows', displayRows: defaultDisplayRows, editMode: 'full', editRows: defaultEditRows });
 
     let settings = getSettings() || {};
-    const normalizeMode = (mode) => (mode === 'full' ? 'full' : 'rows');
-    const baseMode = normalizeMode(settings.displayMode || settings.editMode);
-    const baseRows = Number.isFinite(settings.displayRows)
-        ? settings.displayRows
-        : (Number.isFinite(settings.editRows) ? settings.editRows : defaultDisplayRows);
+    const normalizeMode = (mode) => {
+        if (mode === 'full') return 'full';
+        if (mode === 'rows' || mode === 'fixed') return 'rows';
+        return null;
+    };
     settings = {
-        displayMode: baseMode || 'rows',
-        displayRows: baseRows,
-        editMode: baseMode || 'rows',
-        editRows: baseRows
+        displayMode: normalizeMode(settings.displayMode) || 'rows',
+        displayRows: Number.isFinite(settings.displayRows) ? settings.displayRows : defaultDisplayRows,
+        editMode: normalizeMode(settings.editMode) || 'full',
+        editRows: Number.isFinite(settings.editRows) ? settings.editRows : defaultEditRows
     };
 
     const pop = document.createElement('div');
@@ -375,13 +379,24 @@ function __showDescHeightSettingsPopover(anchorEl, options = {}) {
     anchorEl.dataset.descHeightAnchorId = pop.dataset.anchorId;
     pop.innerHTML = `
         <div class="desc-height-settings-title">${title}</div>
-        <div class="desc-height-settings-row" data-scope="both">
-            <div class="desc-height-settings-label">${heightLabel}</div>
+        <div class="desc-height-settings-row" data-scope="display">
+            <div class="desc-height-settings-label">${displayLabel}</div>
             <div class="desc-height-settings-actions">
                 <button type="button" class="desc-height-settings-btn" data-mode="full">${fullLabel}</button>
                 <button type="button" class="desc-height-settings-btn" data-mode="rows">${rowsModeLabel}</button>
                 <div class="desc-height-settings-input-wrap">
-                    <input class="desc-height-settings-input" data-input="both" type="number" min="1" max="20" step="1" />
+                    <input class="desc-height-settings-input" data-input="display" type="number" min="1" max="20" step="1" />
+                    <span class="desc-height-settings-unit">${rowsLabel}</span>
+                </div>
+            </div>
+        </div>
+        <div class="desc-height-settings-row" data-scope="edit">
+            <div class="desc-height-settings-label">${editLabel}</div>
+            <div class="desc-height-settings-actions">
+                <button type="button" class="desc-height-settings-btn" data-mode="full">${fullLabel}</button>
+                <button type="button" class="desc-height-settings-btn" data-mode="rows">${rowsModeLabel}</button>
+                <div class="desc-height-settings-input-wrap">
+                    <input class="desc-height-settings-input" data-input="edit" type="number" min="1" max="20" step="1" />
                     <span class="desc-height-settings-unit">${rowsLabel}</span>
                 </div>
             </div>
@@ -424,7 +439,8 @@ function __showDescHeightSettingsPopover(anchorEl, options = {}) {
     };
 
     const render = () => {
-        const displayGroup = pop.querySelector('.desc-height-settings-row[data-scope="both"]');
+        const displayGroup = pop.querySelector('.desc-height-settings-row[data-scope="display"]');
+        const editGroup = pop.querySelector('.desc-height-settings-row[data-scope="edit"]');
         const updateGroup = (groupEl, mode, rows) => {
             if (!groupEl) return;
             const buttons = groupEl.querySelectorAll('.desc-height-settings-btn');
@@ -440,17 +456,19 @@ function __showDescHeightSettingsPopover(anchorEl, options = {}) {
             }
         };
         updateGroup(displayGroup, settings.displayMode, settings.displayRows);
+        updateGroup(editGroup, settings.editMode, settings.editRows);
     };
 
     const handleModeClick = (scope, mode) => {
-        let rows = settings.displayRows;
-        if (mode === 'rows') rows = normalizeRows(settings.displayRows, defaultDisplayRows);
-        applySettings({
-            displayMode: mode,
-            displayRows: rows,
-            editMode: mode,
-            editRows: rows
-        });
+        if (scope === 'display') {
+            let rows = settings.displayRows;
+            if (mode === 'rows') rows = normalizeRows(settings.displayRows, defaultDisplayRows);
+            applySettings({ displayMode: mode, displayRows: rows });
+        } else {
+            let rows = settings.editRows;
+            if (mode === 'rows') rows = normalizeRows(settings.editRows, defaultEditRows);
+            applySettings({ editMode: mode, editRows: rows });
+        }
     };
 
     pop.addEventListener('click', (e) => {
@@ -467,13 +485,13 @@ function __showDescHeightSettingsPopover(anchorEl, options = {}) {
         const input = e.target.closest('.desc-height-settings-input');
         if (!input) return;
         const scope = input.dataset.input;
-        const value = normalizeRows(input.value, defaultDisplayRows);
-        applySettings({
-            displayMode: 'rows',
-            displayRows: value,
-            editMode: 'rows',
-            editRows: value
-        });
+        if (scope === 'display') {
+            const value = normalizeRows(input.value, defaultDisplayRows);
+            applySettings({ displayMode: 'rows', displayRows: value });
+        } else {
+            const value = normalizeRows(input.value, defaultEditRows);
+            applySettings({ editMode: 'rows', editRows: value });
+        }
     });
 
     render();
@@ -596,6 +614,36 @@ function __readJSON(key, fallback = null) {
 }
 function __writeJSON(key, obj) {
     try { localStorage.setItem(key, JSON.stringify(obj)); } catch (_) { }
+}
+
+function __normalizeDescHeightSettings(raw, defaults) {
+    const normalizeMode = (mode) => {
+        if (mode === 'full') return 'full';
+        if (mode === 'rows' || mode === 'fixed') return 'rows';
+        return null;
+    };
+    const normalizeRows = (value, fallback) => {
+        const num = parseInt(value, 10);
+        return Number.isFinite(num) && num > 0 ? num : fallback;
+    };
+    const input = raw || {};
+    return {
+        displayMode: normalizeMode(input.displayMode) || defaults.displayMode,
+        displayRows: normalizeRows(input.displayRows, defaults.displayRows),
+        editMode: normalizeMode(input.editMode) || defaults.editMode,
+        editRows: normalizeRows(input.editRows, defaults.editRows)
+    };
+}
+
+function __readDescHeightSettings(key, defaults, fallback = null) {
+    const stored = __readJSON(key, null);
+    if (stored) return __normalizeDescHeightSettings(stored, defaults);
+    if (fallback) return __normalizeDescHeightSettings(fallback, defaults);
+    return __normalizeDescHeightSettings({}, defaults);
+}
+
+function __writeDescHeightSettings(key, settings) {
+    __writeJSON(key, settings);
 }
 
 // 多次尝试恢复滚动，避免首次布局或字体加载导致的覆盖
@@ -5219,6 +5267,7 @@ function setupCanvasZoomAndPan() {
         // 拖动的元素会悬停在更高层级，滚轮滚动画布，松开后元素落下归位
         if (CanvasState.dragState.wheelScrollEnabled) {
             e.preventDefault();
+            CanvasState.lastCanvasScrollTime = Date.now();
 
             // 标记正在滚动
             markScrolling();
@@ -9326,8 +9375,10 @@ function shouldHandleCustomScroll(event) {
     const descTarget = event.target.closest('.temp-node-description');
     const tipTarget = event.target.closest('.permanent-section-tip');
     if (descTarget || tipTarget) {
+        const now = Date.now();
+        const recentCanvasScroll = CanvasState.lastCanvasScrollTime && (now - CanvasState.lastCanvasScrollTime < 180);
         const isTouchpad = (Math.abs(event.deltaX) < 50 || Math.abs(event.deltaY) < 50) && event.deltaMode === 0;
-        if (isTouchpad && CanvasState.touchpadState.isScrolling) {
+        if ((isTouchpad && CanvasState.touchpadState.isScrolling) || CanvasState.inertiaState.isActive || recentCanvasScroll) {
             return true;
         }
         return false;
@@ -9356,7 +9407,9 @@ function shouldHandleCustomScroll(event) {
         const isTouchpad = (Math.abs(event.deltaX) < 50 || Math.abs(event.deltaY) < 50) && event.deltaMode === 0;
 
         // 如果正在画布级滚动（双指滑动），拦截并让画布处理
-        if (isTouchpad && CanvasState.touchpadState.isScrolling) {
+        const now = Date.now();
+        const recentCanvasScroll = CanvasState.lastCanvasScrollTime && (now - CanvasState.lastCanvasScrollTime < 180);
+        if ((isTouchpad && CanvasState.touchpadState.isScrolling) || CanvasState.inertiaState.isActive || recentCanvasScroll) {
             return true; // 让画布处理滚动
         }
 
@@ -9378,6 +9431,8 @@ function handleCanvasCustomScroll(event) {
     if (!horizontalEnabled && !verticalEnabled) {
         return;
     }
+
+    CanvasState.lastCanvasScrollTime = Date.now();
 
     // 标记正在滚动
     markScrolling();
@@ -19618,54 +19673,51 @@ function renderTempNode(section, options = {}) {
     const descHeightDefaults = {
         displayMode: 'rows',
         displayRows: 4,
-        editMode: 'rows',
-        editRows: 4
-    };
-    const normalizeMode = (mode) => (mode === 'full' ? 'full' : 'rows');
-    const normalizeRows = (value, fallback) => {
-        const num = parseInt(value, 10);
-        return Number.isFinite(num) && num > 0 ? num : fallback;
+        editMode: 'full',
+        editRows: 5
     };
     let isEditingDesc = false;
-    const descHeightSettings = (() => {
-        let displayMode = section && section.descDisplayMode;
-        if (!displayMode && typeof section.descFixedHeight === 'boolean') {
-            displayMode = section.descFixedHeight ? 'fixed' : 'full';
+    const descHeightSettings = __readDescHeightSettings(
+        TEMP_DESC_HEIGHT_SETTINGS_KEY,
+        descHeightDefaults,
+        {
+            displayMode: section && section.descDisplayMode,
+            displayRows: section && section.descDisplayRows,
+            editMode: section && section.descEditMode,
+            editRows: section && section.descEditRows
         }
-        displayMode = normalizeMode(displayMode || descHeightDefaults.displayMode);
-        const displayRows = normalizeRows(section && section.descDisplayRows, descHeightDefaults.displayRows);
-        const editMode = normalizeMode((section && section.descEditMode) || descHeightDefaults.editMode);
-        const editRows = normalizeRows(section && section.descEditRows, descHeightDefaults.editRows);
-        return {
-            displayMode,
-            displayRows,
-            editMode: displayMode,
-            editRows: displayRows
-        };
-    })();
+    );
 
     const applyDescHeightSettings = () => {
-        const displayFixed = descHeightSettings.displayMode !== 'full';
+        const activeSettings = descriptionContainer.__descHeightSettings || descHeightSettings;
+        const displayFixed = activeSettings.displayMode !== 'full';
         descriptionContainer.classList.toggle('desc-display-fixed', displayFixed);
-        descriptionContainer.style.setProperty('--desc-display-rows', String(descHeightSettings.displayRows));
-        const editFixed = descHeightSettings.editMode !== 'full';
+        descriptionContainer.style.setProperty('--desc-display-rows', String(activeSettings.displayRows));
+        const editFixed = activeSettings.editMode !== 'full';
         if (isEditingDesc && editFixed) {
             descriptionContainer.classList.add('desc-edit-fixed');
         } else {
             descriptionContainer.classList.remove('desc-edit-fixed');
         }
-        descriptionContainer.style.setProperty('--desc-edit-rows', String(descHeightSettings.editRows));
+        descriptionContainer.style.setProperty('--desc-edit-rows', String(activeSettings.editRows));
     };
 
+    descriptionContainer.__descHeightSettings = descHeightSettings;
+    descriptionContainer.__applyDescHeightSettings = applyDescHeightSettings;
     applyDescHeightSettings();
 
     const persistDescHeightSettings = () => {
-        section.descDisplayMode = descHeightSettings.displayMode;
-        section.descDisplayRows = descHeightSettings.displayRows;
-        section.descEditMode = descHeightSettings.editMode;
-        section.descEditRows = descHeightSettings.editRows;
-        section.descFixedHeight = descHeightSettings.displayMode !== 'full';
-        saveTempNodes();
+        const payload = {
+            displayMode: descHeightSettings.displayMode,
+            displayRows: descHeightSettings.displayRows,
+            editMode: descHeightSettings.editMode,
+            editRows: descHeightSettings.editRows
+        };
+        __writeDescHeightSettings(TEMP_DESC_HEIGHT_SETTINGS_KEY, payload);
+        document.querySelectorAll('.temp-node-description-container').forEach((el) => {
+            el.__descHeightSettings = payload;
+            if (typeof el.__applyDescHeightSettings === 'function') el.__applyDescHeightSettings();
+        });
     };
 
     // 双击编辑功能
@@ -19863,6 +19915,7 @@ function renderTempNode(section, options = {}) {
                 descHeightSettings.displayRows = next.displayRows;
                 descHeightSettings.editMode = next.editMode;
                 descHeightSettings.editRows = next.editRows;
+                descriptionContainer.__descHeightSettings = descHeightSettings;
                 applyDescHeightSettings();
                 persistDescHeightSettings();
             }
@@ -22518,60 +22571,48 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     const descHeightDefaults = {
         displayMode: 'rows',
         displayRows: 4,
-        editMode: 'rows',
-        editRows: 4
-    };
-    const normalizeMode = (mode) => (mode === 'full' ? 'full' : 'rows');
-    const normalizeRows = (value, fallback) => {
-        const num = parseInt(value, 10);
-        return Number.isFinite(num) && num > 0 ? num : fallback;
+        editMode: 'full',
+        editRows: 5
     };
     let isEditingTip = false;
-    const descHeightSettings = (() => {
-        const stored = __readJSON(getHeightSettingsStorageKey(), null) || {};
-        let displayMode = stored.displayMode;
-        if (!displayMode) {
-            try {
-                const raw = localStorage.getItem(getLegacyFixedHeightStorageKey());
-                if (raw !== null) displayMode = raw === 'true' ? 'fixed' : 'full';
-            } catch (_) { }
-        }
-        displayMode = normalizeMode(displayMode || descHeightDefaults.displayMode);
-        const displayRows = normalizeRows(stored.displayRows, descHeightDefaults.displayRows);
-        const editMode = normalizeMode(stored.editMode || descHeightDefaults.editMode);
-        const editRows = normalizeRows(stored.editRows, descHeightDefaults.editRows);
-        return {
-            displayMode,
-            displayRows,
-            editMode: displayMode,
-            editRows: displayRows
-        };
-    })();
+    const descHeightSettings = __readDescHeightSettings(
+        PERMANENT_DESC_HEIGHT_SETTINGS_KEY,
+        descHeightDefaults,
+        __readJSON(getHeightSettingsStorageKey(), null)
+    );
 
     const applyTipHeightSettings = () => {
-        const displayFixed = descHeightSettings.displayMode !== 'full';
+        const activeSettings = tipContainer.__descHeightSettings || descHeightSettings;
+        const displayFixed = activeSettings.displayMode !== 'full';
         tipContainer.classList.toggle('desc-display-fixed', displayFixed);
-        tipContainer.style.setProperty('--desc-display-rows', String(descHeightSettings.displayRows));
-        const editFixed = descHeightSettings.editMode !== 'full';
+        tipContainer.style.setProperty('--desc-display-rows', String(activeSettings.displayRows));
+        const editFixed = activeSettings.editMode !== 'full';
         if (isEditingTip && editFixed) {
             tipContainer.classList.add('desc-edit-fixed');
         } else {
             tipContainer.classList.remove('desc-edit-fixed');
         }
-        tipContainer.style.setProperty('--desc-edit-rows', String(descHeightSettings.editRows));
+        tipContainer.style.setProperty('--desc-edit-rows', String(activeSettings.editRows));
     };
 
+    tipContainer.__descHeightSettings = descHeightSettings;
+    tipContainer.__applyDescHeightSettings = applyTipHeightSettings;
     applyTipHeightSettings();
 
     const persistTipHeightSettings = () => {
-        __writeJSON(getHeightSettingsStorageKey(), {
+        const payload = {
             displayMode: descHeightSettings.displayMode,
             displayRows: descHeightSettings.displayRows,
             editMode: descHeightSettings.editMode,
             editRows: descHeightSettings.editRows
+        };
+        __writeDescHeightSettings(PERMANENT_DESC_HEIGHT_SETTINGS_KEY, payload);
+        document.querySelectorAll('.permanent-section-tip-container').forEach((el) => {
+            el.__descHeightSettings = payload;
+            if (typeof el.__applyDescHeightSettings === 'function') el.__applyDescHeightSettings();
         });
         try {
-            localStorage.setItem(getLegacyFixedHeightStorageKey(), descHeightSettings.displayMode !== 'full' ? 'true' : 'false');
+            localStorage.setItem(getLegacyFixedHeightStorageKey(), payload.displayMode !== 'full' ? 'true' : 'false');
         } catch (_) { }
     };
     applyPlaceholder();
@@ -22748,16 +22789,17 @@ function bindPermanentSectionTipBehavior(sectionEl) {
                     editMode: descHeightSettings.editMode,
                     editRows: descHeightSettings.editRows
                 }),
-                onChange: (next) => {
-                    descHeightSettings.displayMode = next.displayMode;
-                    descHeightSettings.displayRows = next.displayRows;
-                    descHeightSettings.editMode = next.editMode;
-                    descHeightSettings.editRows = next.editRows;
-                    applyTipHeightSettings();
-                    persistTipHeightSettings();
-                }
-            });
+            onChange: (next) => {
+                descHeightSettings.displayMode = next.displayMode;
+                descHeightSettings.displayRows = next.displayRows;
+                descHeightSettings.editMode = next.editMode;
+                descHeightSettings.editRows = next.editRows;
+                tipContainer.__descHeightSettings = descHeightSettings;
+                applyTipHeightSettings();
+                persistTipHeightSettings();
+            }
         });
+    });
     }
 
     tipText.addEventListener('keydown', (e) => {
