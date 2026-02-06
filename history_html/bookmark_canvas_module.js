@@ -16,6 +16,7 @@ const NODE_LAYOUT_ZOOM_MAX = 200;
 const NODE_LAYOUT_ZOOM_STEP = 5;
 const MD_NODE_DEFAULT_FONT_SIZE = 20;
 const MD_NODE_LEGACY_DEFAULT_FONT_SIZE = 14;
+const CANVAS_BROOM_SVG = '<svg class="canvas-broom-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3.55 21H6v-2q0-.425.288-.712T7 18t.713.288T8 19v2h3v-2q0-.425.288-.712T12 18t.713.288T13 19v2h3v-2q0-.425.288-.712T17 18t.713.288T18 19v2h2.45l-1-4H4.55zm16.9 2H3.55q-.975 0-1.575-.775t-.35-1.725L3 15v-2q0-.825.588-1.412T5 11h4V4q0-1.25.875-2.125T12 1t2.125.875T15 4v7h4q.825 0 1.413.588T21 13v2l1.375 5.5q.325.95-.288 1.725T20.45 23"/></svg>';
 
 // 统一的首屏初始缩放：让 HTML 不需要再手动同步数值
 try {
@@ -19242,7 +19243,7 @@ function renderTempNode(section, options = {}) {
     delDescBtn.className = 'temp-node-desc-action-btn temp-node-desc-delete-btn';
     // Change to "Clear input" to match Permanent Section
     delDescBtn.title = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Clear input' : '清空输入框';
-    delDescBtn.innerHTML = '<i class="fas fa-times"></i>';
+    delDescBtn.innerHTML = CANVAS_BROOM_SVG;
     descriptionControls.appendChild(delDescBtn);
 
     descriptionContainer.appendChild(descriptionControls);
@@ -22007,7 +22008,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         tipControls.insertBefore(formatBtn, closeBtn);
     }
 
-    closeBtn.innerHTML = '<i class="fas fa-times"></i>';
+    closeBtn.innerHTML = CANVAS_BROOM_SVG;
     const clearLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Clear input' : '清空输入框';
     closeBtn.title = clearLabel;
     closeBtn.setAttribute('aria-label', clearLabel);

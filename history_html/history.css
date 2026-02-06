@@ -48,6 +48,9 @@
     --permanent-section-color: #10b981;
     --permanent-section-color-dark: #059669;
     --permanent-section-color-rgb: 16, 185, 129;
+    --canvas-tip-bg: rgba(255, 255, 255, 0.16);
+    --canvas-tip-border: rgba(255, 255, 255, 0.28);
+    --canvas-tip-blur: 6px;
 }
 
 [data-theme="dark"] {
@@ -80,6 +83,9 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+
+    --canvas-tip-bg: rgba(0, 0, 0, 0.3);
+    --canvas-tip-border: rgba(255, 255, 255, 0.18);
 
     --git-added: #3fb950;
     --git-added-bg: #1b3a1b;
@@ -3939,7 +3945,7 @@ a.tree-label.tree-bookmark-link:hover {
 .permanent-section-header {
     background: linear-gradient(135deg, var(--permanent-section-color, #10b981) 0%, var(--permanent-section-color-dark, #059669) 100%);
     color: white;
-    padding: 14px 18px;
+    padding: 14px 18px 0;
     cursor: move;
     user-select: none;
     border-bottom: 1px solid rgba(var(--permanent-section-color-rgb, 16, 185, 129), 0.2);
@@ -4293,13 +4299,25 @@ a.tree-label.tree-bookmark-link:hover {
     gap: 6px;
     margin-top: 6px;
     position: relative;
-    width: 100%;
+    width: calc(100% + 36px);
+    margin-left: -18px;
+    margin-right: -18px;
+    padding: 8px 16px;
+    box-sizing: border-box;
+    background: var(--canvas-tip-bg);
+    border-top: 1px solid var(--canvas-tip-border);
+    border-bottom: 1px solid var(--canvas-tip-border);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
 }
 
 .permanent-section-tip-content {
     display: flex;
     align-items: center;
     gap: 4px;
+    width: 100%;
 }
 
 .permanent-section-tip {
@@ -4527,7 +4545,7 @@ a.tree-label.tree-bookmark-link:hover {
     padding: 8px;
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
-    background: rgba(255, 255, 255, 0.1);
+    background: transparent;
     color: white;
     font-size: 11px;
     font-family: inherit;
@@ -4540,7 +4558,7 @@ a.tree-label.tree-bookmark-link:hover {
 
 .permanent-section-tip-container.editing .permanent-section-tip:focus {
     outline: none;
-    background: rgba(255, 255, 255, 0.15);
+    background: transparent;
     border-color: rgba(255, 255, 255, 0.5);
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
 }
@@ -4550,7 +4568,7 @@ a.tree-label.tree-bookmark-link:hover {
     padding: 8px;
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
-    background: rgba(255, 255, 255, 0.1);
+    background: transparent;
     color: white;
     font-size: 11px;
     font-family: inherit;
@@ -4563,9 +4581,19 @@ a.tree-label.tree-bookmark-link:hover {
 
 .permanent-section-tip-editor:focus {
     outline: none;
-    background: rgba(255, 255, 255, 0.15);
+    background: transparent;
     border-color: rgba(255, 255, 255, 0.5);
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+}
+
+[data-theme="dark"] .permanent-section-tip-container.editing .permanent-section-tip,
+[data-theme="dark"] .permanent-section-tip-editor {
+    background: transparent;
+}
+
+[data-theme="dark"] .permanent-section-tip-container.editing .permanent-section-tip:focus,
+[data-theme="dark"] .permanent-section-tip-editor:focus {
+    background: transparent;
 }
 
 [data-theme="dark"] .permanent-section-tip-edit-btn {
@@ -4589,27 +4617,27 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 [data-theme="dark"] .permanent-section-tip-container.editing .permanent-section-tip {
-    background: rgba(0, 0, 0, 0.3);
+    background: transparent;
     color: rgba(255, 255, 255, 0.8);
     border-color: rgba(255, 255, 255, 0.25);
 }
 
 [data-theme="dark"] .permanent-section-tip-container.editing .permanent-section-tip:focus {
     outline: none;
-    background: rgba(0, 0, 0, 0.5);
+    background: transparent;
     border-color: rgba(255, 255, 255, 0.4);
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
 }
 
 [data-theme="dark"] .permanent-section-tip-editor {
-    background: rgba(0, 0, 0, 0.3);
+    background: transparent;
     color: rgba(255, 255, 255, 0.8);
     border-color: rgba(255, 255, 255, 0.25);
 }
 
 [data-theme="dark"] .permanent-section-tip-editor:focus {
     outline: none;
-    background: rgba(0, 0, 0, 0.5);
+    background: transparent;
     border-color: rgba(255, 255, 255, 0.4);
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
 }
@@ -5110,12 +5138,14 @@ a.tree-label.tree-bookmark-link:hover {
 .temp-node-description-container {
     padding: 8px 8px 8px 16px;
     /* Right padding reduced to 8px to allow growth */
-    background: rgba(0, 0, 0, 0.05);
-    border-top: 1px solid rgba(0, 0, 0, 0.08);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    background: var(--canvas-tip-bg);
+    border-top: 1px solid var(--canvas-tip-border);
+    border-bottom: 1px solid var(--canvas-tip-border);
+    backdrop-filter: blur(var(--canvas-tip-blur));
+    -webkit-backdrop-filter: blur(var(--canvas-tip-blur));
     /* 稍微加深边框 */
-    border-top-left-radius: 9px;
-    border-top-right-radius: 9px;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -5281,7 +5311,7 @@ a.tree-label.tree-bookmark-link:hover {
     margin: 0;
     border: 1px solid rgba(0, 0, 0, 0.15);
     border-radius: 3px;
-    background: rgba(255, 255, 255, 0.8);
+    background: transparent;
     color: rgba(0, 0, 0, 0.7);
     font-size: 11px;
     font-family: inherit;
@@ -5294,7 +5324,7 @@ a.tree-label.tree-bookmark-link:hover {
 .temp-node-description-container.editing .temp-node-description:focus {
     outline: none;
     border-color: rgba(37, 99, 235, 0.5);
-    background: white;
+    background: transparent;
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
 }
 
@@ -5373,6 +5403,13 @@ a.tree-label.tree-bookmark-link:hover {
     transition: all 0.2s ease;
 }
 
+.canvas-broom-icon {
+    width: 13px;
+    height: 13px;
+    display: block;
+    fill: currentColor;
+}
+
 .temp-node-desc-action-btn:hover {
     color: rgba(0, 0, 0, 0.65);
     transform: scale(1.15);
@@ -5387,20 +5424,20 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 [data-theme="dark"] .temp-node-description-container {
-    background: rgba(255, 255, 255, 0.05);
-    border-top-color: rgba(255, 255, 255, 0.1);
-    border-bottom-color: rgba(255, 255, 255, 0.1);
+    background: var(--canvas-tip-bg);
+    border-top-color: var(--canvas-tip-border);
+    border-bottom-color: var(--canvas-tip-border);
 }
 
 [data-theme="dark"] .temp-node-description-container.editing .temp-node-description {
-    background: rgba(0, 0, 0, 0.3);
+    background: transparent;
     color: rgba(255, 255, 255, 0.7);
     border-color: rgba(255, 255, 255, 0.15);
 }
 
 [data-theme="dark"] .temp-node-description-container.editing .temp-node-description:focus {
     border-color: rgba(59, 130, 246, 0.5);
-    background: rgba(0, 0, 0, 0.5);
+    background: transparent;
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
 }
 
