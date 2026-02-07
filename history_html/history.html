@@ -19,6 +19,7 @@
     <script src="bookmark_canvas_module.js?v=3.7" defer></script>
     <script src="shortcuts_helpers.js" defer></script>
     <script src="search/search.js" defer></script>
+    <script src="sidepanel_toggle_bridge.js" defer></script>
     <script src="history.js" defer></script>
 </head>
 
@@ -26,7 +27,14 @@
     <!-- 头部导航 -->
     <header class="history-header">
         <div class="header-left">
-            <h1 id="pageTitle">书签画布</h1>
+            <div class="header-title-row">
+                <h1 id="pageTitle">书签画布</h1>
+                <button id="titleSidePanelToggleBtn" class="tool-btn title-sidepanel-toggle-btn"
+                    aria-label="Open/Close Side Panel" type="button">
+                    <span class="title-sidepanel-icon" aria-hidden="true"></span>
+                    <span class="btn-tooltip" id="titleSidePanelToggleTooltip"></span>
+                </button>
+            </div>
             <span class="header-subtitle" id="pageSubtitle"></span>
         </div>
         <div class="header-right">
@@ -75,6 +83,10 @@
                     <i class="fas fa-cog"></i>
                     <span class="btn-tooltip" id="settingsTooltip"></span>
                 </button>
+                <button id="openCanvasPageBtn" class="tool-btn open-html-btn" aria-label="Open HTML Page">
+                    <i class="fas fa-expand"></i>
+                    <span class="btn-tooltip" id="openCanvasPageTooltip"></span>
+                </button>
             </div>
             <!-- 侧边栏模式：快捷添加菜单 -->
             <div id="quickAddMenu" class="quick-add-menu" hidden>
@@ -108,9 +120,35 @@
             </div>
             <!-- 侧边栏模式：设置菜单 -->
             <div id="settingsMenu" class="settings-menu" hidden>
-                <button class="settings-menu-item" data-action="open-floating-toolbar" type="button">
-                    <i class="fas fa-window-restore"></i>
+                <button class="settings-menu-item settings-menu-item-expandable" data-action="open-floating-toolbar"
+                    id="settingsFloatingToolsToggle" type="button" aria-expanded="false">
+                    <i class="fas fa-tools"></i>
                     <span id="settingsFloatText"></span>
+                    <i class="fas fa-chevron-down settings-submenu-caret" aria-hidden="true"></i>
+                </button>
+                <div class="floating-tools-mode-panel" id="floatingToolsModePanel" hidden>
+                    <div class="floating-tools-mode-switch" id="floatingToolsModeSwitch" role="group"
+                        aria-label="显示/隐藏">
+                        <button class="floating-tools-mode-btn" id="floatingToolsModeNoneBtn"
+                            data-action="set-floating-toolbar-mode" data-mode="none" type="button"
+                            aria-pressed="false" title="不显示">
+                            <span id="floatingToolsModeNoneText" data-floating-mode-text="none">不显示</span>
+                        </button>
+                        <button class="floating-tools-mode-btn" id="floatingToolsModeHiddenBtn"
+                            data-action="set-floating-toolbar-mode" data-mode="hidden" type="button"
+                            aria-pressed="false" title="隐藏">
+                            <span id="floatingToolsModeHiddenText" data-floating-mode-text="hidden">隐藏</span>
+                        </button>
+                        <button class="floating-tools-mode-btn" id="floatingToolsModeShownBtn"
+                            data-action="set-floating-toolbar-mode" data-mode="shown" type="button"
+                            aria-pressed="false" title="显示">
+                            <span id="floatingToolsModeShownText" data-floating-mode-text="shown">显示</span>
+                        </button>
+                    </div>
+                </div>
+                <button class="settings-menu-item" data-action="open-sidepanel-settings" type="button">
+                    <i class="fas fa-columns"></i>
+                    <span id="settingsSidePanelText"></span>
                 </button>
                 <div class="settings-menu-divider" aria-hidden="true"></div>
                 <button class="settings-menu-item" data-action="toggle-theme" type="button">
@@ -350,21 +388,57 @@
                         <div class="canvas-grid-layer" id="canvasGridLayer" aria-hidden="true"></div>
                         <!-- 缩放控制器（固定在画布左上角） -->
                         <div class="canvas-zoom-indicator" id="canvasZoomIndicator" style="display: none;">
+                            <button class="canvas-floating-toggle-mini" id="canvasFloatingToggleMini" type="button"
+                                aria-label="显示悬浮工具窗" title="显示悬浮工具窗">
+                                <i class="fas fa-tools"></i>
+                            </button>
                             <div class="canvas-zoom-header">
                                 <button class="canvas-fullscreen-btn" id="canvasFullscreenBtn" aria-label="进入全屏"
                                     aria-pressed="false">全屏</button>
-                                <button class="canvas-help-btn" id="canvasHelpBtn" title="说明"><i
-                                        class="fas fa-question-circle"></i></button>
-                                <span class="canvas-zoom-label" id="canvasZoomLabel">缩放</span>
-                                <span class="zoom-value" id="zoomValue">100%</span>
+                                <div class="canvas-zoom-meter">
+                                    <button class="zoom-btn canvas-zoom-step-btn" id="zoomOutBtn" title="缩小 (10%)"
+                                        type="button">−</button>
+                                    <span class="zoom-value" id="zoomValue">100%</span>
+                                    <button class="zoom-btn canvas-zoom-step-btn" id="zoomInBtn" title="放大 (10%)"
+                                        type="button">+</button>
+                                </div>
                             </div>
                             <div class="canvas-zoom-controls">
-                                <button class="zoom-btn" id="canvasManageBtn" title="管理"><span
+                                <button class="zoom-btn" id="canvasManageBtn" title="管理" type="button"><span
                                         id="canvasManageText">管理</span></button>
-                                <button class="zoom-btn" id="zoomLocateBtn" title="定位到永久栏目"><span
+                                <button class="zoom-btn" id="zoomLocateBtn" title="定位到永久栏目" type="button"><span
                                         id="zoomLocateText">定位</span></button>
-                                <button class="zoom-btn" id="zoomOutBtn" title="缩小 (10%)">−</button>
-                                <button class="zoom-btn" id="zoomInBtn" title="放大 (10%)">+</button>
+                                <button class="zoom-btn canvas-help-icon-btn" id="canvasHelpBtn" title="说明"
+                                    aria-label="说明" type="button">
+                                    <i class="fas fa-question-circle" aria-hidden="true"></i>
+                                </button>
+                                <div class="canvas-floating-tools-inline" id="canvasFloatingToolsInline">
+                                    <button class="zoom-btn canvas-floating-tools-toggle-btn"
+                                        id="canvasFloatingToolsToggleBtn" type="button" aria-expanded="false"
+                                        title="显示/隐藏" aria-label="显示/隐藏">
+                                        <i class="fas fa-tools" aria-hidden="true"></i>
+                                    </button>
+                                    <div class="canvas-floating-tools-panel" id="canvasFloatingToolsPanel" hidden>
+                                        <div class="floating-tools-mode-switch canvas-floating-tools-mode-switch"
+                                            id="canvasFloatingToolsModeSwitch" role="group" aria-label="显示/隐藏">
+                                            <button class="floating-tools-mode-btn canvas-floating-tools-mode-btn"
+                                                data-action="set-floating-toolbar-mode" data-mode="none" type="button"
+                                                aria-pressed="false" title="不显示">
+                                                <span data-floating-mode-text="none">不显示</span>
+                                            </button>
+                                            <button class="floating-tools-mode-btn canvas-floating-tools-mode-btn"
+                                                data-action="set-floating-toolbar-mode" data-mode="hidden"
+                                                type="button" aria-pressed="false" title="隐藏">
+                                                <span data-floating-mode-text="hidden">隐藏</span>
+                                            </button>
+                                            <button class="floating-tools-mode-btn canvas-floating-tools-mode-btn"
+                                                data-action="set-floating-toolbar-mode" data-mode="shown"
+                                                type="button" aria-pressed="false" title="显示">
+                                                <span data-floating-mode-text="shown">显示</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

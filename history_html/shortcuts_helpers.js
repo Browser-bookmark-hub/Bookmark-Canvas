@@ -34,14 +34,14 @@ function updateShortcutsDisplay() {
     const renderShortcutsModal = (shortcuts) => {
         if (!shortcutsContent) return;
         const safe = (value, fallback) => (value && typeof value === 'string') ? value : fallback;
-        const key1 = formatKey(safe(shortcuts._execute_action, ''));
-        const key2 = formatKey(safe(shortcuts.open_side_panel, ''));
-        const key3 = formatKey(safe(shortcuts.open_canvas_view, ''));
+        const toggleSidePanelShortcut = safe(shortcuts._execute_action, '');
+        const openCanvasPageShortcut = safe(shortcuts.open_canvas_view, '');
+        const key1 = formatKey(toggleSidePanelShortcut);
+        const key2 = formatKey(openCanvasPageShortcut);
 
         const rows = [];
-        rows.push({ key: key1, label: i18n.shortcutActivateExtension[lang] });
-        rows.push({ key: key2, label: i18n.shortcutSidePanel[lang] });
-        rows.push({ key: key3, label: i18n.shortcutCanvas[lang] });
+        rows.push({ key: key1, label: i18n.shortcutSidePanel[lang] });
+        rows.push({ key: key2, label: i18n.shortcutCanvasPage[lang] });
         const titleText = `${i18n.shortcutsTitle[lang]} (${osLabel})`;
         shortcutsContent.innerHTML = `
             <div class="shortcuts-card">
@@ -73,14 +73,14 @@ function updateShortcutsDisplay() {
     const renderCanvasShortcuts = (container, shortcuts) => {
         if (!container) return;
         const safe = (value, fallback) => (value && typeof value === 'string') ? value : fallback;
-        const key1 = formatKey(safe(shortcuts._execute_action, ''));
-        const key2 = formatKey(safe(shortcuts.open_side_panel, ''));
-        const key3 = formatKey(safe(shortcuts.open_canvas_view, ''));
+        const toggleSidePanelShortcut = safe(shortcuts._execute_action, '');
+        const openCanvasPageShortcut = safe(shortcuts.open_canvas_view, '');
+        const key1 = formatKey(toggleSidePanelShortcut);
+        const key2 = formatKey(openCanvasPageShortcut);
 
         const rows = [];
-        rows.push({ key: key1, label: i18n.shortcutActivateExtension[lang] });
-        rows.push({ key: key2, label: i18n.shortcutSidePanel[lang] });
-        rows.push({ key: key3, label: i18n.shortcutCanvas[lang] });
+        rows.push({ key: key1, label: i18n.shortcutSidePanel[lang] });
+        rows.push({ key: key2, label: i18n.shortcutCanvasPage[lang] });
 
         container.innerHTML = `
             <div class="canvas-help-section-header canvas-shortcuts-open-header">
@@ -136,17 +136,14 @@ function updateShortcutsDisplay() {
                 }
                 renderShortcutsModal({
                     _execute_action: map._execute_action,
-                    open_side_panel: map.open_side_panel,
                     open_canvas_view: map.open_canvas_view
                 });
                 renderCanvasShortcuts(canvasShortcutsList, {
                     _execute_action: map._execute_action,
-                    open_side_panel: map.open_side_panel,
                     open_canvas_view: map.open_canvas_view
                 });
                 renderCanvasShortcuts(canvasHelpShortcutsList, {
                     _execute_action: map._execute_action,
-                    open_side_panel: map.open_side_panel,
                     open_canvas_view: map.open_canvas_view
                 });
                 bindOpenSettings(shortcutsContent);

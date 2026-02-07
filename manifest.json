@@ -12,8 +12,7 @@
     "default_icon": {
       "200": "icons/icon200.png"
     },
-    "default_title": "__MSG_actionTitle__",
-    "default_popup": "popup.html"
+    "default_title": "__MSG_actionTitle__"
   },
   "side_panel": {
     "default_path": "history_html/history.html?view=canvas&sidepanel=1"
@@ -25,20 +24,11 @@
   "commands": {
     "_execute_action": {
       "suggested_key": {
-        "default": "Alt+1",
-        "mac": "Option+1",
-        "windows": "Alt+1",
-        "linux": "Alt+1"
-      }
-    },
-    "open_side_panel": {
-      "suggested_key": {
         "default": "Alt+2",
         "mac": "Option+2",
         "windows": "Alt+2",
         "linux": "Alt+2"
-      },
-      "description": "__MSG_commandOpenSidePanel__"
+      }
     },
     "open_canvas_view": {
       "suggested_key": {
@@ -70,7 +60,6 @@
         "<all_urls>"
       ],
       "resources": [
-        "popup.html",
         "icons/icon200.png",
         "history_html/*"
       ]

@@ -2,8 +2,8 @@
 
 ## Load / Basics
 - Load the extension in chrome://extensions with Developer Mode enabled.
-- Click the toolbar icon and ensure popup renders without errors.
-- Use the popup to open the Canvas view.
+- Click the toolbar icon and ensure side panel opens without errors.
+- Verify Canvas view is rendered inside the side panel.
 
 ## Canvas View
 - Verify the canvas loads with grid, zoom controls, and scrollbars.

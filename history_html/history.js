@@ -63,28 +63,114 @@ try {
 } catch (_) { }
 
 const SIDE_PANEL_FLOATING_TOOLS_KEY = 'sidepanelFloatingToolsVisible';
+const SIDE_PANEL_FLOATING_TOOLS_MODE_KEY = 'sidepanelFloatingToolsMode';
+const CANVAS_FLOATING_TOOLS_MODE_KEY = 'canvasFloatingToolsMode';
+const SIDE_PANEL_FLOATING_TOOLS_MODES = {
+    NONE: 'none',
+    HIDDEN: 'hidden',
+    SHOWN: 'shown'
+};
 
-function isSidePanelFloatingToolsVisible() {
-    if (!isSidePanelMode) return true;
+function normalizeSidePanelFloatingToolsMode(mode) {
+    return mode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE
+        || mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN
+        || mode === SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN
+        ? mode
+        : SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+}
+
+function getSidePanelFloatingToolsMode() {
     try {
-        return localStorage.getItem(SIDE_PANEL_FLOATING_TOOLS_KEY) === 'true';
+        if (isSidePanelMode) {
+            const savedMode = localStorage.getItem(SIDE_PANEL_FLOATING_TOOLS_MODE_KEY);
+            if (savedMode) return normalizeSidePanelFloatingToolsMode(savedMode);
+
+            const legacy = localStorage.getItem(SIDE_PANEL_FLOATING_TOOLS_KEY);
+            if (legacy === 'true') return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
+            return SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+        }
+
+        const canvasMode = localStorage.getItem(CANVAS_FLOATING_TOOLS_MODE_KEY);
+        if (canvasMode) return normalizeSidePanelFloatingToolsMode(canvasMode);
+        return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
     } catch (_) {
-        return false;
+        return isSidePanelMode ? SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN : SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
     }
 }
 
-function setSidePanelFloatingToolsVisible(visible) {
-    if (!isSidePanelMode) return;
+function setSidePanelFloatingToolsMode(mode) {
+    let normalizedMode = normalizeSidePanelFloatingToolsMode(mode);
+    if (!isSidePanelMode && normalizedMode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE) {
+        normalizedMode = SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+    }
+
     try {
-        localStorage.setItem(SIDE_PANEL_FLOATING_TOOLS_KEY, visible ? 'true' : 'false');
+        if (isSidePanelMode) {
+            localStorage.setItem(SIDE_PANEL_FLOATING_TOOLS_MODE_KEY, normalizedMode);
+            localStorage.setItem(
+                SIDE_PANEL_FLOATING_TOOLS_KEY,
+                normalizedMode === SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN ? 'true' : 'false'
+            );
+        } else {
+            localStorage.setItem(CANVAS_FLOATING_TOOLS_MODE_KEY, normalizedMode);
+        }
     } catch (_) { }
+}
+
+function applySidePanelFloatingToolsMode(mode) {
+    const normalizedMode = normalizeSidePanelFloatingToolsMode(mode);
+    setSidePanelFloatingToolsMode(normalizedMode);
+    updateSidePanelFloatingToolsDisplay();
+}
+
+function updateFloatingToolsModeControlState() {
+    const mode = getSidePanelFloatingToolsMode();
+    document.querySelectorAll('.floating-tools-mode-switch').forEach((switchEl) => {
+        switchEl.querySelectorAll('.floating-tools-mode-btn').forEach((btn) => {
+            const isActive = btn.dataset.mode === mode;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
+    });
+}
+
+function isSidePanelFloatingToolsVisible() {
+    return getSidePanelFloatingToolsMode() === SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
+}
+
+function setSidePanelFloatingToolsVisible(visible) {
+    setSidePanelFloatingToolsMode(
+        visible ? SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN : SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN
+    );
 }
 
 function updateSidePanelFloatingToolsDisplay() {
     const zoomIndicator = document.getElementById('canvasZoomIndicator');
-    if (!zoomIndicator) return;
-    const shouldShow = currentView === 'canvas' && (!isSidePanelMode || isSidePanelFloatingToolsVisible());
-    zoomIndicator.style.display = shouldShow ? 'block' : 'none';
+    const miniToggle = document.getElementById('canvasFloatingToggleMini');
+    const inlinePanel = document.getElementById('canvasFloatingToolsPanel');
+    const inlineToggleBtn = document.getElementById('canvasFloatingToolsToggleBtn');
+    const mode = getSidePanelFloatingToolsMode();
+    const inCanvasView = currentView === 'canvas';
+
+    if (zoomIndicator) {
+        const shouldShowMain = inCanvasView && mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.NONE;
+        zoomIndicator.style.display = shouldShowMain ? 'block' : 'none';
+        zoomIndicator.classList.toggle('floating-tools-collapsed', mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN);
+    }
+
+    if (miniToggle) {
+        const shouldAttachMini = inCanvasView && mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.NONE;
+        miniToggle.style.display = shouldAttachMini ? 'inline-flex' : 'none';
+    }
+
+    if ((!inCanvasView || mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN) && inlinePanel && !inlinePanel.hasAttribute('hidden')) {
+        inlinePanel.setAttribute('hidden', '');
+    }
+    if (inlineToggleBtn && (!inCanvasView || mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN)) {
+        inlineToggleBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    updateFloatingToolsModeControlState();
 }
 
 // 用于避免重复在一次快照后多次重置（基于最近一条记录的指纹或时间）
@@ -1727,8 +1813,40 @@ const i18n = {
         'en': 'Info & Shortcuts'
     },
     settingsFloatText: {
-        'zh_CN': '悬浮工具窗',
-        'en': 'Floating Tools'
+        'zh_CN': '显示/隐藏',
+        'en': 'Show/Hide'
+    },
+    floatingToolsModeNoneText: {
+        'zh_CN': '不显示',
+        'en': 'Off'
+    },
+    floatingToolsModeHiddenText: {
+        'zh_CN': '隐藏',
+        'en': 'Hide'
+    },
+    floatingToolsModeShownText: {
+        'zh_CN': '显示',
+        'en': 'Show'
+    },
+    floatingToolsModeGroupLabel: {
+        'zh_CN': '显示/隐藏',
+        'en': 'Show/Hide'
+    },
+    floatingToolsMiniShowTitle: {
+        'zh_CN': '显示悬浮工具窗',
+        'en': 'Show floating tools'
+    },
+    settingsSidePanelText: {
+        'zh_CN': '侧边栏管理',
+        'en': 'Side Panel'
+    },
+    openCanvasPageTooltip: {
+        'zh_CN': 'HTML 页面',
+        'en': 'HTML Page'
+    },
+    titleSidePanelToggleTooltip: {
+        'zh_CN': '打开/关闭侧边栏',
+        'en': 'Open/Close Side Panel'
     },
     quickAddTooltip: {
         'zh_CN': '添加',
@@ -2222,17 +2340,13 @@ const i18n = {
         'zh_CN': '跳转',
         'en': 'Open'
     },
-    shortcutCanvas: {
-        'zh_CN': '打开「书签画布」视图',
-        'en': 'Open "Bookmark Canvas" view'
-    },
-    shortcutActivateExtension: {
-        'zh_CN': '打开主 UI（Activate the extension）',
-        'en': 'Activate the extension'
-    },
     shortcutSidePanel: {
         'zh_CN': '打开/关闭侧边栏',
         'en': 'Toggle side panel'
+    },
+    shortcutCanvasPage: {
+        'zh_CN': '打开 HTML 页面',
+        'en': 'Open HTML page'
     },
     shortcutsUnset: {
         'zh_CN': '未设置',
@@ -2701,6 +2815,16 @@ function applyLanguage() {
     if (canvasManageText) canvasManageText.textContent = i18n.canvasManageText[currentLang];
     const canvasManageBtn = document.getElementById('canvasManageBtn');
     if (canvasManageBtn) canvasManageBtn.title = i18n.canvasManageTitle[currentLang];
+    const canvasHelpBtn = document.getElementById('canvasHelpBtn');
+    if (canvasHelpBtn) {
+        canvasHelpBtn.title = i18n.canvasHelpBtnTitle[currentLang];
+        canvasHelpBtn.setAttribute('aria-label', i18n.canvasHelpBtnTitle[currentLang]);
+    }
+    const canvasFloatingToolsToggleBtn = document.getElementById('canvasFloatingToolsToggleBtn');
+    if (canvasFloatingToolsToggleBtn) {
+        canvasFloatingToolsToggleBtn.title = i18n.settingsFloatText[currentLang];
+        canvasFloatingToolsToggleBtn.setAttribute('aria-label', i18n.settingsFloatText[currentLang]);
+    }
     const canvasSidePanelSettingsText = document.getElementById('canvasSidePanelSettingsText');
     if (canvasSidePanelSettingsText) canvasSidePanelSettingsText.textContent = i18n.canvasSidePanelSettingsText[currentLang];
     const canvasSidePanelSettingsBtn = document.getElementById('canvasSidePanelSettingsBtn');
@@ -2711,8 +2835,6 @@ function applyLanguage() {
     if (canvasOtherSettingsText) canvasOtherSettingsText.textContent = i18n.canvasOtherSettingsText[currentLang];
     const canvasShortcutSettingsText = document.getElementById('canvasShortcutSettingsText');
     if (canvasShortcutSettingsText) canvasShortcutSettingsText.textContent = i18n.canvasShortcutSettingsText[currentLang];
-    const canvasHelpBtn = document.getElementById('canvasHelpBtn');
-    if (canvasHelpBtn) canvasHelpBtn.title = i18n.canvasHelpBtnTitle[currentLang];
 
     const canvasManageModalTitle = document.getElementById('canvasManageModalTitle');
     if (canvasManageModalTitle) canvasManageModalTitle.textContent = i18n.canvasManageTitle[currentLang];
@@ -2857,11 +2979,58 @@ function applyLanguage() {
     if (settingsHelpText) settingsHelpText.textContent = i18n.settingsHelpText[currentLang];
     const settingsFloatText = document.getElementById('settingsFloatText');
     if (settingsFloatText) settingsFloatText.textContent = i18n.settingsFloatText[currentLang];
+    const settingsFloatingToolsToggle = document.getElementById('settingsFloatingToolsToggle');
+    if (settingsFloatingToolsToggle) {
+        settingsFloatingToolsToggle.setAttribute('aria-label', i18n.settingsFloatText[currentLang]);
+    }
+    document.querySelectorAll('[data-floating-mode-text="none"]').forEach((el) => {
+        el.textContent = i18n.floatingToolsModeNoneText[currentLang];
+    });
+    document.querySelectorAll('[data-floating-mode-text="hidden"]').forEach((el) => {
+        el.textContent = i18n.floatingToolsModeHiddenText[currentLang];
+    });
+    document.querySelectorAll('[data-floating-mode-text="shown"]').forEach((el) => {
+        el.textContent = i18n.floatingToolsModeShownText[currentLang];
+    });
+    document.querySelectorAll('.floating-tools-mode-switch').forEach((switchEl) => {
+        switchEl.setAttribute('aria-label', i18n.floatingToolsModeGroupLabel[currentLang]);
+    });
+    document.querySelectorAll('.floating-tools-mode-btn[data-mode="none"]').forEach((btn) => {
+        btn.title = i18n.floatingToolsModeNoneText[currentLang];
+        btn.setAttribute('aria-label', i18n.floatingToolsModeNoneText[currentLang]);
+    });
+    document.querySelectorAll('.floating-tools-mode-btn[data-mode="hidden"]').forEach((btn) => {
+        btn.title = i18n.floatingToolsModeHiddenText[currentLang];
+        btn.setAttribute('aria-label', i18n.floatingToolsModeHiddenText[currentLang]);
+    });
+    document.querySelectorAll('.floating-tools-mode-btn[data-mode="shown"]').forEach((btn) => {
+        btn.title = i18n.floatingToolsModeShownText[currentLang];
+        btn.setAttribute('aria-label', i18n.floatingToolsModeShownText[currentLang]);
+    });
+    const settingsSidePanelText = document.getElementById('settingsSidePanelText');
+    if (settingsSidePanelText) settingsSidePanelText.textContent = i18n.settingsSidePanelText[currentLang];
+    const canvasFloatingToggleMini = document.getElementById('canvasFloatingToggleMini');
+    if (canvasFloatingToggleMini) {
+        canvasFloatingToggleMini.title = i18n.floatingToolsMiniShowTitle[currentLang];
+        canvasFloatingToggleMini.setAttribute('aria-label', i18n.floatingToolsMiniShowTitle[currentLang]);
+    }
 
     const quickAddTooltip = document.getElementById('quickAddTooltip');
     if (quickAddTooltip) quickAddTooltip.textContent = i18n.quickAddTooltip[currentLang];
     const quickAddToggle = document.getElementById('quickAddToggle');
     if (quickAddToggle) quickAddToggle.setAttribute('aria-label', i18n.quickAddTooltip[currentLang]);
+    const openCanvasPageTooltip = document.getElementById('openCanvasPageTooltip');
+    if (openCanvasPageTooltip) openCanvasPageTooltip.textContent = i18n.openCanvasPageTooltip[currentLang];
+    const openCanvasPageBtn = document.getElementById('openCanvasPageBtn');
+    if (openCanvasPageBtn) openCanvasPageBtn.setAttribute('aria-label', i18n.openCanvasPageTooltip[currentLang]);
+    const titleSidePanelToggleTooltip = document.getElementById('titleSidePanelToggleTooltip');
+    if (titleSidePanelToggleTooltip) titleSidePanelToggleTooltip.textContent = i18n.titleSidePanelToggleTooltip[currentLang];
+    const titleSidePanelToggleBtn = document.getElementById('titleSidePanelToggleBtn');
+    if (titleSidePanelToggleBtn) {
+        const label = i18n.titleSidePanelToggleTooltip[currentLang];
+        titleSidePanelToggleBtn.setAttribute('aria-label', label);
+        titleSidePanelToggleBtn.setAttribute('title', label);
+    }
     const quickAddCurrentTitle = document.getElementById('quickAddCurrentTitle');
     if (quickAddCurrentTitle) quickAddCurrentTitle.textContent = i18n.quickAddCurrentTitle[currentLang];
     const quickAddWindowTitle = document.getElementById('quickAddWindowTitle');
@@ -2919,16 +3088,47 @@ function setupSidePanelSettingsMenu() {
     if (!isSidePanelMode) return;
     const toggle = document.getElementById('settingsToggle');
     const menu = document.getElementById('settingsMenu');
+    const floatingToolsToggle = document.getElementById('settingsFloatingToolsToggle');
+    const floatingToolsPanel = document.getElementById('floatingToolsModePanel');
     if (!toggle || !menu) return;
     if (menu.dataset.bound === 'true') return;
     menu.dataset.bound = 'true';
 
+    const closeFloatingToolsPanel = () => {
+        if (floatingToolsPanel && !floatingToolsPanel.hasAttribute('hidden')) {
+            floatingToolsPanel.setAttribute('hidden', '');
+        }
+        if (floatingToolsToggle) {
+            floatingToolsToggle.setAttribute('aria-expanded', 'false');
+        }
+    };
+
+    const openFloatingToolsPanel = () => {
+        if (!floatingToolsPanel) return;
+        floatingToolsPanel.removeAttribute('hidden');
+        if (floatingToolsToggle) {
+            floatingToolsToggle.setAttribute('aria-expanded', 'true');
+        }
+        updateFloatingToolsModeControlState();
+    };
+
+    const toggleFloatingToolsPanel = () => {
+        if (!floatingToolsPanel) return;
+        if (floatingToolsPanel.hasAttribute('hidden')) {
+            openFloatingToolsPanel();
+        } else {
+            closeFloatingToolsPanel();
+        }
+    };
+
     const closeMenu = () => {
+        closeFloatingToolsPanel();
         if (!menu.hasAttribute('hidden')) menu.setAttribute('hidden', '');
     };
 
     const openMenu = () => {
         menu.removeAttribute('hidden');
+        closeFloatingToolsPanel();
     };
 
     toggle.addEventListener('click', (e) => {
@@ -2941,10 +3141,40 @@ function setupSidePanelSettingsMenu() {
     });
 
     menu.addEventListener('click', (e) => {
+        const modeBtn = e.target && e.target.closest ? e.target.closest('.floating-tools-mode-btn') : null;
+        if (modeBtn && menu.contains(modeBtn)) {
+            e.stopPropagation();
+            const mode = modeBtn.dataset.mode || SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+            applySidePanelFloatingToolsMode(mode);
+            return;
+        }
+
         const item = e.target && e.target.closest ? e.target.closest('.settings-menu-item') : null;
         if (!item) return;
         const action = item.dataset.action || '';
+
+        if (action === 'open-floating-toolbar') {
+            if (isSidePanelMode) {
+                toggleFloatingToolsPanel();
+                return;
+            }
+            closeMenu();
+            try {
+                if (typeof showBatchPanel === 'function') {
+                    showBatchPanel();
+                    return;
+                }
+            } catch (_) { }
+            try {
+                if (typeof window.showBatchPanel === 'function') {
+                    window.showBatchPanel();
+                }
+            } catch (_) { }
+            return;
+        }
+
         closeMenu();
+
         if (action === 'toggle-theme') {
             const themeToggle = document.getElementById('themeToggle');
             if (themeToggle) themeToggle.click();
@@ -2960,28 +3190,12 @@ function setupSidePanelSettingsMenu() {
             if (helpToggle) helpToggle.click();
             return;
         }
-        if (action === 'open-floating-toolbar') {
-            if (isSidePanelMode) {
-                const next = !isSidePanelFloatingToolsVisible();
-                setSidePanelFloatingToolsVisible(next);
-                updateSidePanelFloatingToolsDisplay();
-                const msg = next
-                    ? (currentLang === 'en' ? 'Floating tools shown' : '悬浮工具窗已显示')
-                    : (currentLang === 'en' ? 'Floating tools hidden' : '悬浮工具窗已隐藏');
-                try { showToast(msg); } catch (_) { }
-                return;
+        if (action === 'open-sidepanel-settings') {
+            const sidePanelBtn = document.getElementById('canvasSidePanelSettingsBtn');
+            if (sidePanelBtn && typeof sidePanelBtn.click === 'function') {
+                sidePanelBtn.click();
             }
-            try {
-                if (typeof showBatchPanel === 'function') {
-                    showBatchPanel();
-                    return;
-                }
-            } catch (_) { }
-            try {
-                if (typeof window.showBatchPanel === 'function') {
-                    window.showBatchPanel();
-                }
-            } catch (_) { }
+            return;
         }
     });
 
@@ -2995,6 +3209,249 @@ function setupSidePanelSettingsMenu() {
     });
 }
 
+function setupCanvasFloatingToolsMenu() {
+    const toggleBtn = document.getElementById('canvasFloatingToolsToggleBtn');
+    const panel = document.getElementById('canvasFloatingToolsPanel');
+    if (!toggleBtn || !panel) return;
+    if (toggleBtn.dataset.bound === 'true') return;
+    toggleBtn.dataset.bound = 'true';
+
+    const closePanel = () => {
+        if (!panel.hasAttribute('hidden')) panel.setAttribute('hidden', '');
+        toggleBtn.setAttribute('aria-expanded', 'false');
+    };
+
+    const openPanel = () => {
+        panel.removeAttribute('hidden');
+        toggleBtn.setAttribute('aria-expanded', 'true');
+        updateFloatingToolsModeControlState();
+    };
+
+    toggleBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (panel.hasAttribute('hidden')) {
+            openPanel();
+        } else {
+            closePanel();
+        }
+    });
+
+    panel.addEventListener('click', (e) => {
+        const modeBtn = e.target && e.target.closest ? e.target.closest('.floating-tools-mode-btn') : null;
+        if (!modeBtn || !panel.contains(modeBtn)) return;
+        e.stopPropagation();
+        const mode = modeBtn.dataset.mode || SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+        applySidePanelFloatingToolsMode(mode);
+        closePanel();
+    });
+
+    document.addEventListener('click', (e) => {
+        if (panel.contains(e.target) || toggleBtn.contains(e.target)) return;
+        closePanel();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closePanel();
+    });
+}
+
+function setupCanvasFloatingMiniToggle() {
+    const btn = document.getElementById('canvasFloatingToggleMini');
+    if (!btn || btn.dataset.bound === 'true') return;
+    btn.dataset.bound = 'true';
+
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        applySidePanelFloatingToolsMode(SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN);
+    });
+}
+
+function setupOpenCanvasPageButton() {
+    if (!isSidePanelMode) return;
+    const btn = document.getElementById('openCanvasPageBtn');
+    if (!btn || btn.dataset.bound === 'true') return;
+    btn.dataset.bound = 'true';
+
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+            const url = browserAPI?.runtime?.getURL
+                ? browserAPI.runtime.getURL('history_html/history.html?view=canvas')
+                : 'history_html/history.html?view=canvas';
+            if (browserAPI && browserAPI.tabs && browserAPI.tabs.create) {
+                browserAPI.tabs.create({ url });
+            }
+        } catch (_) { }
+    });
+}
+
+async function getCurrentWindowIdForSidePanelToggle() {
+    return await new Promise((resolve) => {
+        try {
+            if (!browserAPI?.windows?.getCurrent) {
+                resolve(null);
+                return;
+            }
+            browserAPI.windows.getCurrent((win) => {
+                resolve(win && typeof win.id === 'number' ? win.id : null);
+            });
+        } catch (_) {
+            resolve(null);
+        }
+    });
+}
+
+async function requestSidePanelToggle(action) {
+    const payload = { action };
+    const windowId = await getCurrentWindowIdForSidePanelToggle();
+    if (typeof windowId === 'number') payload.windowId = windowId;
+
+    return await new Promise((resolve) => {
+        try {
+            if (!browserAPI?.runtime?.sendMessage) {
+                resolve({ success: false, error: 'runtime_unavailable' });
+                return;
+            }
+
+            browserAPI.runtime.sendMessage(payload, (response) => {
+                try {
+                    const err = browserAPI?.runtime?.lastError;
+                    if (err) {
+                        resolve({ success: false, error: err.message || 'send_message_failed' });
+                        return;
+                    }
+                } catch (_) { }
+                resolve(response && typeof response === 'object' ? response : { success: false });
+            });
+        } catch (error) {
+            resolve({ success: false, error: error?.message || 'send_message_failed' });
+        }
+    });
+}
+
+async function openSidePanelDirectlyFromCanvasPage() {
+    const windowId = await getCurrentWindowIdForSidePanelToggle();
+    if (typeof windowId !== 'number') return { success: false, error: 'window_unavailable' };
+    if (!browserAPI?.sidePanel?.open) return { success: false, error: 'sidepanel_unavailable' };
+
+    try {
+        if (typeof browserAPI?.sidePanel?.setOptions === 'function') {
+            await new Promise((resolve) => {
+                try {
+                    browserAPI.sidePanel.setOptions({
+                        path: 'history_html/history.html?view=canvas&sidepanel=1',
+                        enabled: true,
+                        windowId
+                    }, () => {
+                        try {
+                            const err = browserAPI?.runtime?.lastError;
+                            if (err && err.message) {
+                                // ignore and continue open attempt
+                            }
+                        } catch (_) { }
+                        resolve();
+                    });
+                } catch (_) {
+                    resolve();
+                }
+            });
+        }
+    } catch (_) { }
+
+    return await new Promise((resolve) => {
+        try {
+            browserAPI.sidePanel.open({ windowId }, () => {
+                try {
+                    const err = browserAPI?.runtime?.lastError;
+                    if (err) {
+                        resolve({ success: false, error: err.message || 'open_failed' });
+                        return;
+                    }
+                } catch (_) { }
+                resolve({ success: true, isOpen: true });
+            });
+        } catch (error) {
+            resolve({ success: false, error: error?.message || 'open_failed' });
+        }
+    });
+}
+
+function applyTitleSidePanelToggleButtonState(isOpen) {
+    const btn = document.getElementById('titleSidePanelToggleBtn');
+    if (!btn) return;
+    const open = isOpen === true;
+    btn.setAttribute('aria-pressed', open ? 'true' : 'false');
+}
+
+function setupTitleSidePanelToggleButton() {
+    if (isSidePanelMode) return;
+    const btn = document.getElementById('titleSidePanelToggleBtn');
+    if (!btn || btn.dataset.bound === 'true') return;
+    btn.dataset.bound = 'true';
+
+    let stateSyncSeq = 0;
+
+    const syncButtonStateFromBackground = async () => {
+        const requestSeq = ++stateSyncSeq;
+        const result = await requestSidePanelToggle('getSidePanelStateFromCanvasPage');
+        if (requestSeq !== stateSyncSeq) {
+            return null;
+        }
+        if (result && result.success) {
+            const isOpen = result.isOpen === true;
+            applyTitleSidePanelToggleButtonState(isOpen);
+            return isOpen;
+        }
+        return null;
+    };
+
+    const bootstrapState = async () => {
+        await syncButtonStateFromBackground();
+    };
+    applyTitleSidePanelToggleButtonState(false);
+
+    btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (btn.dataset.loading === 'true') return;
+        btn.dataset.loading = 'true';
+
+        try {
+            const syncedState = await syncButtonStateFromBackground();
+            const currentlyOpen = typeof syncedState === 'boolean'
+                ? syncedState
+                : btn.getAttribute('aria-pressed') === 'true';
+
+            if (currentlyOpen) {
+                const result = await requestSidePanelToggle('closeSidePanelFromCanvasPage');
+                if (result && result.success) {
+                    applyTitleSidePanelToggleButtonState(false);
+                } else {
+                    const failMsg = currentLang === 'en' ? 'Failed to toggle side panel' : '侧边栏切换失败';
+                    try { showToast(failMsg); } catch (_) { }
+                }
+            } else {
+                const openResult = await openSidePanelDirectlyFromCanvasPage();
+                if (openResult && openResult.success) {
+                    applyTitleSidePanelToggleButtonState(true);
+                    try {
+                        requestSidePanelToggle('markSidePanelOpenFromCanvasPage');
+                    } catch (_) { }
+                } else {
+                    const failMsg = currentLang === 'en' ? 'Failed to toggle side panel' : '侧边栏切换失败';
+                    try { showToast(failMsg); } catch (_) { }
+                }
+            }
+        } finally {
+            btn.dataset.loading = 'false';
+        }
+    });
+
+    bootstrapState();
+}
 function setupQuickAddMenu() {
     if (!isSidePanelMode) return;
     const toggle = document.getElementById('quickAddToggle');
@@ -3356,7 +3813,11 @@ function initializeUI() {
     }
 
     setupSidePanelSettingsMenu();
+    setupCanvasFloatingToolsMenu();
+    setupCanvasFloatingMiniToggle();
     setupQuickAddMenu();
+    setupOpenCanvasPageButton();
+    setupTitleSidePanelToggleButton();
 
     // 搜索
     const searchInputEl = document.getElementById('searchInput');
@@ -3912,20 +4373,6 @@ function switchView(view) {
 
     const previousView = currentView;
 
-
-    // 当从 Canvas 视图切换到其他视图时，尝试更新一次缩略图
-    if (previousView === 'canvas' && view !== 'canvas') {
-        try {
-            if (typeof requestCanvasThumbnailUpdate === 'function') {
-                requestCanvasThumbnailUpdate('switch-view');
-            } else {
-                captureCanvasThumbnail();
-            }
-        } catch (e) {
-            console.warn('[Canvas Thumbnail] switchView 捕获失败:', e);
-        }
-    }
-
     // 更新全局变量
     currentView = view;
 
@@ -3986,199 +4433,6 @@ function switchView(view) {
     // 渲染当前视图
     renderCurrentView();
 }
-
-const CANVAS_THUMB_MAX_WIDTH = 640;
-const CANVAS_THUMB_MAX_HEIGHT = 360;
-const CANVAS_THUMB_JPEG_QUALITY = 0.85;
-
-function saveCanvasThumbnailDataUrl(dataUrl, fallbackDataUrl = '') {
-    try {
-        if (!browserAPI || !browserAPI.storage || !browserAPI.storage.local) return;
-        browserAPI.storage.local.set({ bookmarkCanvasThumbnail: dataUrl }, () => {
-            const err = browserAPI.runtime && browserAPI.runtime.lastError;
-            if (err && fallbackDataUrl && fallbackDataUrl !== dataUrl) {
-                console.warn('[Canvas Thumbnail] 保存失败，尝试压缩:', err.message || err);
-                browserAPI.storage.local.set({ bookmarkCanvasThumbnail: fallbackDataUrl }, () => { });
-            }
-        });
-    } catch (_) { }
-}
-
-function renderCompressedThumbnailDataUrl(sourceCanvas) {
-    try {
-        if (!sourceCanvas) return '';
-        const sw = sourceCanvas.width || 0;
-        const sh = sourceCanvas.height || 0;
-        if (!sw || !sh) return '';
-        const scale = Math.min(1, CANVAS_THUMB_MAX_WIDTH / sw, CANVAS_THUMB_MAX_HEIGHT / sh);
-        const outW = Math.max(1, Math.round(sw * scale));
-        const outH = Math.max(1, Math.round(sh * scale));
-        const out = document.createElement('canvas');
-        out.width = outW;
-        out.height = outH;
-        const ctx = out.getContext('2d');
-        if (!ctx) return '';
-        ctx.drawImage(sourceCanvas, 0, 0, sw, sh, 0, 0, outW, outH);
-        return out.toDataURL('image/jpeg', CANVAS_THUMB_JPEG_QUALITY);
-    } catch (_) {
-        return '';
-    }
-}
-
-function isCanvasCaptureVisible() {
-    try {
-        if (document.visibilityState && document.visibilityState !== 'visible') return false;
-        if (typeof document.hasFocus === 'function' && !document.hasFocus()) return false;
-    } catch (_) { }
-    return true;
-}
-
-// 捕获当前窗口中 Bookmark Canvas 页面的可见区域，并保存为主界面缩略图
-// 注意：为了实现「只截画布容器」，这里采用两级方案：
-// 1）优先在页面内按 .canvas-main-container 的 rect 进行裁剪；
-// 2）若裁剪失败，则退回整页截图（保持兼容性）。
-function captureCanvasThumbnail(attempt = 0) {
-    try {
-        // 仅在 Canvas 视图下尝试截屏
-        if (currentView !== 'canvas') return;
-        if (!browserAPI || !browserAPI.tabs || !browserAPI.tabs.captureVisibleTab) return;
-        if (!isCanvasCaptureVisible()) return;
-
-        const containerProbe = document.querySelector('.canvas-main-container');
-        if (!containerProbe) {
-            if (attempt < 2) {
-                setTimeout(() => captureCanvasThumbnail(attempt + 1), 400);
-            }
-            return;
-        }
-        const probeRect = containerProbe.getBoundingClientRect();
-        if (probeRect.width < 10 || probeRect.height < 10) {
-            if (attempt < 2) {
-                setTimeout(() => captureCanvasThumbnail(attempt + 1), 400);
-            }
-            return;
-        }
-
-        const startCapture = (windowId = null) => {
-            // 使用 tabs.captureVisibleTab 先拿整页截图，再在内容页内裁剪
-            browserAPI.tabs.captureVisibleTab(windowId, { format: 'png' }, (dataUrl) => {
-            try {
-                const captureError = browserAPI.runtime && browserAPI.runtime.lastError;
-                if (captureError) {
-                    console.warn('[Canvas Thumbnail] 截图失败:', captureError.message || captureError);
-                    return;
-                }
-
-                if (!dataUrl) return;
-
-                // 在当前页面内按书签画布主容器（不含标题栏）的 rect 进行裁剪
-                try {
-                    const container = document.querySelector('.canvas-main-container');
-                    if (!container) {
-                        return;
-                    }
-
-                    const rect = container.getBoundingClientRect();
-                    const pageWidth = window.innerWidth || document.documentElement.clientWidth;
-
-                    const img = new Image();
-                    img.onload = () => {
-                        try {
-                            const canvas = document.createElement('canvas');
-                            const ctx = canvas.getContext('2d');
-                            if (!ctx) {
-                                console.warn('[Canvas Thumbnail] 无法获取 2D 上下文，跳过保存');
-                                return;
-                            }
-
-                            // 计算截图和页面之间的缩放比（captureVisibleTab 生成的图片宽度 / 当前页面宽度）
-                            const ratio = img.width / pageWidth;
-
-                            // 先按容器 rect 获取截图中的源区域（像素坐标）
-                            let sx = rect.left * ratio;
-                            let sy = rect.top * ratio;
-                            let sw = rect.width * ratio;
-                            let sh = rect.height * ratio;
-
-                            // 安全处理：裁剪到截图可用范围（避免容器部分在可视区外时越界）
-                            const ix = Math.max(0, sx);
-                            const iy = Math.max(0, sy);
-                            const iw = Math.max(0, Math.min(img.width - ix, sw - (ix - sx)));
-                            const ih = Math.max(0, Math.min(img.height - iy, sh - (iy - sy)));
-
-                            if (iw <= 1 || ih <= 1) {
-                                console.warn('[Canvas Thumbnail] 裁剪区域无效，跳过保存');
-                                return;
-                            }
-
-                            // 使用源分辨率输出，避免缩放带来的模糊
-                            canvas.width = Math.round(iw);
-                            canvas.height = Math.round(ih);
-                            ctx.drawImage(img, ix, iy, iw, ih, 0, 0, canvas.width, canvas.height);
-
-                            const croppedDataUrl = canvas.toDataURL('image/png');
-                            const compressedDataUrl = renderCompressedThumbnailDataUrl(canvas);
-                            saveCanvasThumbnailDataUrl(croppedDataUrl, compressedDataUrl);
-                        } catch (e) {
-                            console.warn('[Canvas Thumbnail] 裁剪缩略图时出错，跳过保存:', e);
-                        }
-                    };
-                    img.onerror = () => {
-                        console.warn('[Canvas Thumbnail] 缩略图图片加载失败，跳过保存');
-                    };
-                    img.src = dataUrl;
-                } catch (cropError) {
-                    console.warn('[Canvas Thumbnail] 裁剪逻辑异常，跳过保存:', cropError);
-                }
-            } catch (e) {
-                console.warn('[Canvas Thumbnail] 保存缩略图时出错:', e);
-            }
-            });
-        };
-
-        if (browserAPI.tabs.getCurrent) {
-            browserAPI.tabs.getCurrent((tab) => {
-                try {
-                    if (tab && tab.active === false) return;
-                    const windowId = (tab && Number.isFinite(tab.windowId)) ? tab.windowId : null;
-                    startCapture(windowId);
-                } catch (_) { }
-            });
-            return;
-        }
-
-        startCapture(null);
-    } catch (error) {
-        console.warn('[Canvas Thumbnail] 截图失败:', error);
-    }
-}
-
-// 供 Canvas 模块调用的去抖更新入口
-let canvasThumbnailUpdateTimer = null;
-function requestCanvasThumbnailUpdate(reason) {
-    try {
-        // 提前检查：只在 Canvas 视图下调度截图
-        if (currentView !== 'canvas') return;
-
-        if (canvasThumbnailUpdateTimer) {
-            clearTimeout(canvasThumbnailUpdateTimer);
-        }
-        canvasThumbnailUpdateTimer = setTimeout(() => {
-            canvasThumbnailUpdateTimer = null;
-            try {
-                captureCanvasThumbnail();
-            } catch (e) {
-                // 静默处理错误
-            }
-        }, 1500); // 1.5 秒内合并多次修改
-    } catch (e) {
-        // 忽略去抖调度错误
-    }
-}
-
-// Canvas 滚动视图相关截图节流
-let canvasScrollThumbnailBound = false;
-let canvasScrollThumbnailTimer = null;
 
 function renderCurrentView() {
     // 离开 Canvas 时，停止永久栏目副本同步监听（减少无意义的 DOM 观察开销）
@@ -4291,33 +4545,6 @@ function renderCurrentView() {
                     }
                 }
 
-                // 4. 首次进入或刷新 Canvas 视图后，延迟截一次图
-                setTimeout(() => {
-                    try {
-                        if (currentView === 'canvas') {
-                            captureCanvasThumbnail();
-                        }
-                    } catch (_) { }
-                }, 800);
-
-                // 5. 绑定 Canvas 滚动截图逻辑（只绑定一次）
-                const workspace = document.getElementById('canvasWorkspace');
-                if (workspace && !canvasScrollThumbnailBound) {
-                    canvasScrollThumbnailBound = true;
-                    workspace.addEventListener('wheel', () => {
-                        try {
-                            if (currentView !== 'canvas') return;
-                            if (!requestCanvasThumbnailUpdate) return;
-                            if (canvasScrollThumbnailTimer) {
-                                clearTimeout(canvasScrollThumbnailTimer);
-                            }
-                            canvasScrollThumbnailTimer = setTimeout(() => {
-                                canvasScrollThumbnailTimer = null;
-                                requestCanvasThumbnailUpdate('scroll');
-                            }, 2500);
-                        } catch (_) { }
-                    }, { passive: true });
-                }
             }
             break;
     }
@@ -8210,9 +8437,7 @@ function toggleLanguage() {
     currentLang = currentLang === 'zh_CN' ? 'en' : 'zh_CN';
     window.currentLang = currentLang; // 同步到 window
 
-    // Sync with main UI:
-    // - popup.js uses localStorage.preferredLang
-    // - all pages follow chrome.storage.local.preferredLang
+    // Sync language preference in current page and extension storage.
     try {
         localStorage.setItem('preferredLang', currentLang);
         localStorage.removeItem('historyViewerHasCustomLang');
@@ -8599,15 +8824,6 @@ function setupRealtimeMessageListener() {
                 }).catch(() => {
                     // 静默处理错误
                 });
-            }
-        } else if (message.action === 'captureCanvasThumbnailNow') {
-            // 主 UI 请求当前 Canvas 立即截图
-            if (currentView === 'canvas') {
-                try {
-                    captureCanvasThumbnail();
-                } catch (e) {
-                    console.warn('[Canvas Thumbnail] 即时截图失败:', e);
-                }
             }
         } else if (message.action === 'clearExplicitMoved') {
             try {

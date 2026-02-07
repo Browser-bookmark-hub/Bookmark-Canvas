@@ -199,6 +199,13 @@ body {
     /* Ensure content clips */
 }
 
+.header-title-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
 .header-left h1 {
     font-size: 20px;
     font-weight: 600;
@@ -208,6 +215,57 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.title-sidepanel-toggle-btn {
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    min-height: 30px;
+    border-radius: 7px;
+    flex: 0 0 30px;
+}
+
+.title-sidepanel-icon {
+    position: relative;
+    display: inline-block;
+    width: 14px;
+    height: 12px;
+    border: 1.5px solid currentColor;
+    border-radius: 3px;
+    box-sizing: border-box;
+}
+
+.title-sidepanel-icon::before {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: -1.5px;
+    bottom: -1.5px;
+    width: 1.5px;
+    background: currentColor;
+}
+
+.title-sidepanel-icon::after {
+    content: '';
+    position: absolute;
+    right: 1.5px;
+    top: 2px;
+    width: 4px;
+    height: 6px;
+    border-radius: 1px;
+    background: currentColor;
+    opacity: 0.36;
+}
+
+.title-sidepanel-toggle-btn[aria-pressed="true"] {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.title-sidepanel-toggle-btn[aria-pressed="true"] .title-sidepanel-icon::after {
+    opacity: 0.36;
 }
 
 .header-subtitle {
@@ -242,6 +300,11 @@ html.side-panel-mode .tool-buttons #helpToggle {
 html.side-panel-mode .tool-buttons .settings-btn {
     display: inline-flex;
     order: 99;
+}
+
+html.side-panel-mode .tool-buttons .open-html-btn {
+    display: inline-flex;
+    order: 100;
 }
 
 html.side-panel-mode .search-container {
@@ -646,6 +709,10 @@ html.side-panel-mode .search-mode-trigger.mode-color-green {
     display: none;
 }
 
+.open-html-btn {
+    display: none;
+}
+
 html.side-panel-mode .tool-buttons .quick-add-btn {
     display: inline-flex;
 }
@@ -715,7 +782,7 @@ html.side-panel-mode .tool-buttons .quick-add-btn {
     position: absolute;
     top: calc(100% + 8px);
     right: 24px;
-    min-width: 220px;
+    min-width: 260px;
     background: var(--bg-elevated);
     border: 1px solid var(--border-color);
     border-radius: 10px;
@@ -742,6 +809,83 @@ html.side-panel-mode .tool-buttons .quick-add-btn {
     text-align: left;
     cursor: pointer;
     transition: background 0.15s ease;
+}
+
+.settings-menu-item.settings-menu-item-expandable {
+    justify-content: flex-start;
+}
+
+.settings-submenu-caret {
+    margin-left: auto;
+    width: auto !important;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    transition: transform 0.15s ease;
+}
+
+.settings-menu-item[aria-expanded="true"] .settings-submenu-caret {
+    transform: rotate(180deg);
+}
+
+.floating-tools-mode-panel {
+    display: flex;
+    justify-content: center;
+    padding: 4px 8px 8px;
+}
+
+.floating-tools-mode-panel[hidden] {
+    display: none;
+}
+
+.floating-tools-mode-switch {
+    display: inline-flex;
+    align-items: stretch;
+    width: min(100%, 192px);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg-secondary);
+}
+
+.floating-tools-mode-btn {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.floating-tools-mode-btn + .floating-tools-mode-btn {
+    border-left: 1px solid var(--border-color);
+}
+
+.floating-tools-mode-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.floating-tools-mode-btn.active {
+    background: #1877f2;
+    color: #fff;
+}
+
+.floating-tools-mode-btn span {
+    display: inline-block;
+    font-size: 11px;
+}
+
+.floating-tools-mode-btn:focus-visible {
+    outline: 2px solid #1877f2;
+    outline-offset: -2px;
 }
 
 .settings-menu-item i {
@@ -7544,7 +7688,93 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     z-index: 1000;
     font-size: 12px;
     min-width: max-content;
-    transition: all 0.2s ease;
+    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.22s ease, padding 0.22s ease, left 0.22s ease;
+    will-change: left, padding;
+}
+
+.canvas-floating-toggle-mini {
+    display: inline-flex;
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translate(-6px, -50%);
+    width: 24px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: 0 8px 8px 0;
+    background: linear-gradient(to bottom, #ffffff, #f8f9fa);
+    color: #57606a;
+    box-shadow: 1px 0 3px rgba(0, 0, 0, 0.08);
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.canvas-floating-toggle-mini i {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1;
+    transform: none;
+}
+
+.canvas-zoom-indicator.floating-tools-collapsed {
+    left: 0;
+    top: 20px;
+    width: 0;
+    min-width: 0;
+    height: 0;
+    min-height: 0;
+    border: none;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    overflow: visible;
+}
+
+.canvas-zoom-header,
+.canvas-zoom-controls {
+    transition: opacity 0.2s ease, transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+    transform-origin: left center;
+}
+
+.canvas-zoom-indicator.floating-tools-collapsed .canvas-zoom-header,
+.canvas-zoom-indicator.floating-tools-collapsed .canvas-zoom-controls {
+    opacity: 0;
+    transform: translateX(-8px) scale(0.98);
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.canvas-zoom-indicator.floating-tools-collapsed .canvas-floating-toggle-mini {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(0, -50%);
+}
+
+[data-theme="dark"] .canvas-floating-toggle-mini {
+    background: linear-gradient(to bottom, #3a3b3c, #2f3031);
+    color: #b0b3b8;
+    box-shadow: 1px 0 3px rgba(0, 0, 0, 0.45);
+}
+
+.canvas-floating-toggle-mini:hover {
+    background: linear-gradient(to bottom, #f6f8fa, #eaeef2);
+    color: #0969da;
+}
+
+[data-theme="dark"] .canvas-floating-toggle-mini:hover {
+    background: linear-gradient(to bottom, #4a4b4c, #3a3b3c);
+    color: #58a6ff;
 }
 
 .canvas-zoom-indicator button,
@@ -7558,21 +7788,41 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     display: flex;
     align-items: center;
     gap: 8px;
-    justify-content: space-between;
+    justify-content: flex-start;
     margin-bottom: 6px;
 }
 
-.canvas-zoom-label {
-    font-size: 11px;
-    color: #57606a;
-    font-weight: 500;
-    margin-left: 12px;
-    flex: 1;
-    white-space: nowrap;
+.canvas-zoom-meter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.canvas-zoom-header .canvas-zoom-step-btn {
+    flex: 0 0 30px;
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    min-height: 30px;
+    padding: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1;
 }
 
 .canvas-fullscreen-btn {
-    padding: 5px 10px;
+    height: 30px;
+    min-height: 30px;
+    padding: 0 10px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: linear-gradient(to bottom, #ffffff, #f8f9fa);
     border: 1px solid #d0d7de;
     border-radius: 6px;
@@ -7624,8 +7874,80 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
 
 .canvas-zoom-controls {
     display: flex;
+    align-items: stretch;
     gap: 6px;
     margin-top: 8px;
+}
+
+.canvas-zoom-controls > .zoom-btn,
+.canvas-floating-tools-toggle-btn {
+    height: 30px;
+}
+
+.canvas-floating-tools-inline {
+    position: relative;
+    flex: 0 0 auto;
+    margin-left: auto;
+    display: flex;
+    align-items: stretch;
+}
+
+.canvas-floating-tools-toggle-btn {
+    flex: 0 0 34px;
+    width: 34px;
+    min-width: 34px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.canvas-help-icon-btn {
+    flex: 0 0 34px;
+    width: 34px;
+    min-width: 34px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.canvas-help-icon-btn i,
+.canvas-floating-tools-toggle-btn .fa-tools {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.canvas-floating-tools-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    z-index: 12;
+    padding: 4px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow-lg);
+}
+
+.canvas-floating-tools-panel[hidden] {
+    display: none;
+}
+
+.canvas-floating-tools-mode-switch {
+    width: 186px;
+}
+
+.canvas-floating-tools-mode-btn {
+    height: 26px;
+    padding: 0 6px;
 }
 
 .zoom-btn {
@@ -7668,6 +7990,12 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
 }
 
 .zoom-value {
+    min-width: 52px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
     font-weight: 600;
     color: #0969da;
     font-size: 14px;

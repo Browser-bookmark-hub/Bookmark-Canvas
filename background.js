@@ -13,9 +13,9 @@ const SIDE_PANEL_CANVAS_PATH = 'history_html/history.html?view=canvas&sidepanel=
 function initSidePanel() {
   if (!browserAPI?.sidePanel) return;
   try {
-    // Keep popup as the default action; side panel opens via explicit button.
+    // Bind "Activate extension" action to the side panel.
     if (browserAPI.sidePanel.setPanelBehavior) {
-      browserAPI.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }, () => {});
+      browserAPI.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }, () => {});
     }
   } catch (_) {}
   try {
@@ -26,21 +26,135 @@ function initSidePanel() {
 }
 
 const SIDE_PANEL_CONTEXT = browserAPI?.runtime?.ContextType?.SIDE_PANEL || 'SIDE_PANEL';
+const SIDE_PANEL_TOGGLE_PORT = 'bookmark-canvas-sidepanel-toggle-v1';
 const sidePanelOpenWindows = new Set();
+const sidePanelTogglePortsByWindow = new Map();
+const sidePanelToggleUnboundPorts = new Set();
+let sidePanelTogglePortListenerRegistered = false;
 
-function registerSidePanelStateListeners() {
-  if (browserAPI?.sidePanel?.onOpened?.addListener) {
-    browserAPI.sidePanel.onOpened.addListener((info) => {
-      if (info && typeof info.windowId === 'number') {
-        sidePanelOpenWindows.add(info.windowId);
-      }
-    });
+function setSidePanelOpenWindowState(windowId, isOpen) {
+  if (typeof windowId !== 'number') return;
+  if (isOpen) {
+    sidePanelOpenWindows.add(windowId);
+    return;
   }
-  if (browserAPI?.sidePanel?.onClosed?.addListener) {
-    browserAPI.sidePanel.onClosed.addListener((info) => {
-      if (info && typeof info.windowId === 'number') {
-        sidePanelOpenWindows.delete(info.windowId);
+  sidePanelOpenWindows.delete(windowId);
+}
+
+function addUnboundSidePanelTogglePort(port) {
+  if (!port) return;
+  sidePanelToggleUnboundPorts.add(port);
+}
+
+function removeUnboundSidePanelTogglePort(port) {
+  if (!port) return;
+  sidePanelToggleUnboundPorts.delete(port);
+}
+
+function addSidePanelTogglePort(windowId, port) {
+  if (typeof windowId !== 'number' || !port) return;
+  removeUnboundSidePanelTogglePort(port);
+  let windowPorts = sidePanelTogglePortsByWindow.get(windowId);
+  if (!windowPorts) {
+    windowPorts = new Set();
+    sidePanelTogglePortsByWindow.set(windowId, windowPorts);
+  }
+  windowPorts.add(port);
+}
+
+function cleanupWindowPortSetIfEmpty(windowId, windowPorts) {
+  if (!windowPorts || windowPorts.size !== 0) return;
+  sidePanelTogglePortsByWindow.delete(windowId);
+}
+
+function removeSidePanelTogglePort(windowId, port) {
+  if (typeof windowId !== 'number' || !port) return;
+  const windowPorts = sidePanelTogglePortsByWindow.get(windowId);
+  if (!windowPorts) return;
+  windowPorts.delete(port);
+  cleanupWindowPortSetIfEmpty(windowId, windowPorts);
+}
+
+function removeSidePanelTogglePortEverywhere(port) {
+  if (!port) return;
+  removeUnboundSidePanelTogglePort(port);
+  for (const [windowId, windowPorts] of Array.from(sidePanelTogglePortsByWindow.entries())) {
+    if (!windowPorts.has(port)) continue;
+    windowPorts.delete(port);
+    cleanupWindowPortSetIfEmpty(windowId, windowPorts);
+  }
+}
+
+function registerSidePanelTogglePortListener() {
+  if (sidePanelTogglePortListenerRegistered) return;
+  if (!browserAPI?.runtime?.onConnect?.addListener) return;
+  sidePanelTogglePortListenerRegistered = true;
+
+  browserAPI.runtime.onConnect.addListener((port) => {
+    if (!port || port.name !== SIDE_PANEL_TOGGLE_PORT) return;
+
+    let trackedWindowId = null;
+    addUnboundSidePanelTogglePort(port);
+
+    const updateTrackedWindowId = (windowId) => {
+      if (typeof windowId !== 'number') return;
+      if (trackedWindowId === windowId) return;
+      if (typeof trackedWindowId === 'number') {
+        removeSidePanelTogglePort(trackedWindowId, port);
       }
+      trackedWindowId = windowId;
+      addSidePanelTogglePort(trackedWindowId, port);
+      setSidePanelOpenWindowState(trackedWindowId, true);
+    };
+
+    const senderWindowId = port?.sender?.tab?.windowId;
+    if (typeof senderWindowId === 'number') {
+      updateTrackedWindowId(senderWindowId);
+    }
+
+    const onMessage = (message) => {
+      if (!message || typeof message !== 'object') return;
+      if (message.type === 'sidepanel_toggle_bridge_hello') {
+        updateTrackedWindowId(message.windowId);
+        try {
+          port.postMessage({ type: 'sidepanel_toggle_bridge_ack', ts: Date.now() });
+        } catch (_) { }
+      }
+    };
+
+    const onDisconnect = () => {
+      try {
+        const err = browserAPI?.runtime?.lastError;
+        if (err && err.message) {
+          // touch lastError to avoid unchecked runtime.lastError noise.
+        }
+      } catch (_) { }
+
+      if (typeof trackedWindowId === 'number') {
+        setSidePanelOpenWindowState(trackedWindowId, false);
+      }
+      removeSidePanelTogglePortEverywhere(port);
+      try {
+        port.onMessage.removeListener(onMessage);
+        port.onDisconnect.removeListener(onDisconnect);
+      } catch (_) { }
+    };
+
+    try {
+      port.onMessage.addListener(onMessage);
+      port.onDisconnect.addListener(onDisconnect);
+    } catch (_) { }
+
+    try {
+      port.postMessage({ type: 'sidepanel_toggle_bridge_request_window_id', ts: Date.now() });
+    } catch (_) { }
+  });
+
+  if (browserAPI?.windows?.onRemoved?.addListener) {
+    browserAPI.windows.onRemoved.addListener((windowId) => {
+      if (typeof windowId !== 'number') return;
+      sidePanelTogglePortsByWindow.delete(windowId);
+      setSidePanelOpenWindowState(windowId, false);
     });
   }
 }
@@ -69,26 +183,164 @@ async function getSidePanelContexts() {
 
 async function refreshSidePanelOpenWindows() {
   const contexts = await getSidePanelContexts();
-  if (!contexts) return null;
+  if (!Array.isArray(contexts)) return null;
   sidePanelOpenWindows.clear();
   contexts.forEach((ctx) => {
     if (ctx && typeof ctx.windowId === 'number') {
-      sidePanelOpenWindows.add(ctx.windowId);
+      setSidePanelOpenWindowState(ctx.windowId, true);
     }
   });
   return contexts;
 }
 
+async function getCurrentWindowIdAsync() {
+  return await new Promise((resolve) => {
+    try {
+      if (!browserAPI?.windows?.getCurrent) {
+        resolve(null);
+        return;
+      }
+      browserAPI.windows.getCurrent((win) => {
+        resolve(win && typeof win.id === 'number' ? win.id : null);
+      });
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+async function resolveWindowIdForSidePanelAction(message, sender) {
+  const requestedWindowId = Number(message && message.windowId);
+  if (Number.isFinite(requestedWindowId) && requestedWindowId >= 0) {
+    return requestedWindowId;
+  }
+  const senderWindowId = sender && sender.tab && typeof sender.tab.windowId === 'number'
+    ? sender.tab.windowId
+    : null;
+  if (senderWindowId != null) return senderWindowId;
+  return await getCurrentWindowIdAsync();
+}
+
+async function getSidePanelOpenStateForWindow(windowId) {
+  if (typeof windowId !== 'number') return false;
+  const contexts = await refreshSidePanelOpenWindows();
+  if (Array.isArray(contexts)) {
+    if (sidePanelOpenWindows.has(windowId)) {
+      return true;
+    }
+  }
+
+  const windowPorts = sidePanelTogglePortsByWindow.get(windowId);
+  if (windowPorts && windowPorts.size > 0) {
+    return true;
+  }
+
+  return sidePanelOpenWindows.has(windowId);
+}
+
+async function setSidePanelOptionsForWindow(windowId, enabled = true) {
+  if (typeof browserAPI?.sidePanel?.setOptions !== 'function') {
+    return { success: true };
+  }
+
+  const baseOptions = enabled
+    ? { path: SIDE_PANEL_CANVAS_PATH, enabled: true }
+    : { enabled: false };
+
+  const candidates = [];
+  if (typeof windowId === 'number') {
+    candidates.push({ ...baseOptions, windowId });
+  }
+  candidates.push(baseOptions);
+
+  let last = { success: false, error: 'set_options_failed' };
+  for (const opts of candidates) {
+    const result = await new Promise((resolve) => {
+      try {
+        browserAPI.sidePanel.setOptions(opts, () => {
+          const err = browserAPI?.runtime?.lastError;
+          if (err) {
+            resolve({ success: false, error: err.message || 'set_options_failed' });
+            return;
+          }
+          resolve({ success: true });
+        });
+      } catch (error) {
+        resolve({ success: false, error: error?.message || 'set_options_failed' });
+      }
+    });
+
+    if (result && result.success) return result;
+    last = result || last;
+  }
+
+  return last;
+}
+
+async function openSidePanelInWindow(windowId) {
+  if (typeof windowId !== 'number') {
+    return { success: false, error: 'window_unavailable' };
+  }
+  if (typeof browserAPI?.sidePanel?.open !== 'function') {
+    return { success: false, error: 'open_unavailable' };
+  }
+
+  const configured = await setSidePanelOptionsForWindow(windowId, true);
+  if (!configured || configured.success !== true) {
+    return { success: false, error: configured?.error || 'set_options_failed' };
+  }
+
+  return await new Promise((resolve) => {
+    try {
+      browserAPI.sidePanel.open({ windowId }, () => {
+        const err = browserAPI?.runtime?.lastError;
+        if (err) {
+          resolve({ success: false, error: err.message || 'open_failed' });
+          return;
+        }
+        setSidePanelOpenWindowState(windowId, true);
+        resolve({ success: true, isOpen: true });
+      });
+    } catch (error) {
+      resolve({ success: false, error: error?.message || 'open_failed' });
+    }
+  });
+}
+
+async function closeSidePanelInWindow(windowId) {
+  if (typeof windowId !== 'number') {
+    return { success: false, error: 'window_unavailable' };
+  }
+  if (typeof browserAPI?.sidePanel?.close !== 'function') {
+    return { success: false, error: 'close_unavailable' };
+  }
+
+  return await new Promise((resolve) => {
+    try {
+      browserAPI.sidePanel.close({ windowId }, () => {
+        const err = browserAPI?.runtime?.lastError;
+        if (err) {
+          resolve({ success: false, error: err.message || 'close_failed' });
+          return;
+        }
+        setSidePanelOpenWindowState(windowId, false);
+        resolve({ success: true, isOpen: false });
+      });
+    } catch (error) {
+      resolve({ success: false, error: error?.message || 'close_failed' });
+    }
+  });
+}
+
 if (browserAPI?.runtime?.onInstalled) {
   browserAPI.runtime.onInstalled.addListener(() => {
     initSidePanel();
-    registerSidePanelStateListeners();
     refreshSidePanelOpenWindows().catch(() => {});
   });
 }
 
 initSidePanel();
-registerSidePanelStateListeners();
+registerSidePanelTogglePortListener();
 refreshSidePanelOpenWindows().catch(() => {});
 
 const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
@@ -538,70 +790,83 @@ function openCanvasViewFromCommand() {
   browserAPI.tabs.create({ url });
 }
 
-function openSidePanelFromCommand() {
-  if (!browserAPI?.sidePanel?.open) {
-    openCanvasViewFromCommand();
-    return;
-  }
-
-  try {
-    if (browserAPI?.windows?.getCurrent) {
-      browserAPI.windows.getCurrent((win) => {
-        const windowId = win && typeof win.id === 'number' ? win.id : null;
-        if (windowId == null) {
-          openCanvasViewFromCommand();
-          return;
-        }
-
-        const canClose = typeof browserAPI?.sidePanel?.close === 'function';
-        if (canClose && sidePanelOpenWindows.has(windowId)) {
-          try {
-            browserAPI.sidePanel.close({ windowId }, () => {
-              const err = browserAPI?.runtime?.lastError;
-              if (!err) {
-                sidePanelOpenWindows.delete(windowId);
-              }
-            });
-          } catch (_) {}
-          return;
-        }
-
-        try {
-          browserAPI.sidePanel.open({ windowId }, () => {
-            if (browserAPI?.runtime?.lastError) {
-              openCanvasViewFromCommand();
-              return;
-            }
-            sidePanelOpenWindows.add(windowId);
-          });
-        } catch (_) {
-          openCanvasViewFromCommand();
-        }
-      });
-      return;
-    }
-    openCanvasViewFromCommand();
-  } catch (_) {
-    openCanvasViewFromCommand();
-  }
-}
-
 if (browserAPI.commands && browserAPI.commands.onCommand) {
   browserAPI.commands.onCommand.addListener((command) => {
     if (command === 'open_canvas_view') {
       openCanvasViewFromCommand();
-      return;
-    }
-    if (command === 'open_side_panel') {
-      openSidePanelFromCommand();
     }
   });
 }
+
+async function handleGetSidePanelStateFromCanvasPage(message, sender) {
+  const windowId = await resolveWindowIdForSidePanelAction(message, sender);
+  if (windowId == null) {
+    return { success: false, error: 'window_unavailable' };
+  }
+  const isOpen = await getSidePanelOpenStateForWindow(windowId);
+  return { success: true, isOpen };
+}
+
+async function handleCloseSidePanelFromCanvasPage(message, sender) {
+  const windowId = await resolveWindowIdForSidePanelAction(message, sender);
+  const result = await closeSidePanelInWindow(windowId);
+  if (result && result.success) {
+    return { success: true, isOpen: false, state: 'closed' };
+  }
+  return { success: false, error: result?.error || 'close_failed' };
+}
+
+async function handleToggleSidePanelFromCanvasPage(message, sender) {
+  const windowId = await resolveWindowIdForSidePanelAction(message, sender);
+  if (windowId == null) {
+    return { success: false, error: 'window_unavailable' };
+  }
+
+  const isOpen = await getSidePanelOpenStateForWindow(windowId);
+  const result = isOpen
+    ? await closeSidePanelInWindow(windowId)
+    : await openSidePanelInWindow(windowId);
+
+  if (!result || result.success !== true) {
+    return { success: false, error: result?.error || 'toggle_failed' };
+  }
+
+  return {
+    success: true,
+    isOpen: result.isOpen === true,
+    state: result.isOpen === true ? 'opened' : 'closed'
+  };
+}
+
+async function handleMarkSidePanelOpenFromCanvasPage(message, sender) {
+  const windowId = await resolveWindowIdForSidePanelAction(message, sender);
+  if (windowId == null) {
+    return { success: false, error: 'window_unavailable' };
+  }
+  setSidePanelOpenWindowState(windowId, true);
+  return { success: true, isOpen: true, state: 'opened' };
+}
+
+const sidePanelCanvasMessageHandlers = {
+  getSidePanelStateFromCanvasPage: handleGetSidePanelStateFromCanvasPage,
+  closeSidePanelFromCanvasPage: handleCloseSidePanelFromCanvasPage,
+  toggleSidePanelFromCanvasPage: handleToggleSidePanelFromCanvasPage,
+  markSidePanelOpenFromCanvasPage: handleMarkSidePanelOpenFromCanvasPage
+};
 
 browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object' || !message.action) {
     sendResponse({ success: false, error: 'Invalid message' });
     return;
+  }
+
+  const sidePanelHandler = sidePanelCanvasMessageHandlers[message.action];
+  if (sidePanelHandler) {
+    (async () => {
+      const response = await sidePanelHandler(message, sender);
+      sendResponse(response);
+    })();
+    return true;
   }
 
   if (message.action === 'exportFileToClouds') {

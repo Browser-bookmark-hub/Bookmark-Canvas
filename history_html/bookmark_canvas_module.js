@@ -594,7 +594,7 @@ function __showCanvasSidePanelPopover(anchorEl) {
     const unknownText = isEn ? 'Unknown (open settings)' : '未知（打开设置查看）';
     const leftText = isEn ? 'Left' : '左侧';
     const rightText = isEn ? 'Right' : '右侧';
-    const openSettingsText = isEn ? 'Open browser settings' : '打开浏览器设置';
+    const openSettingsText = isEn ? 'Browser settings' : '浏览器设置';
     const hintText = '';
 
     const pop = document.createElement('div');
@@ -3727,16 +3727,24 @@ function initCanvasView() {
     // 初始化连接线层
     setupCanvasEdgesLayer();
 
-    // 显示缩放控制器（侧边栏模式下默认隐藏，按设置显示）
+    // 显示缩放控制器（侧边栏/主页面按各自三态设置显示）
     const zoomIndicator = document.getElementById('canvasZoomIndicator');
     if (zoomIndicator) {
         let shouldShow = true;
-        if (window.__SIDE_PANEL_MODE__ === true) {
-            try {
-                shouldShow = localStorage.getItem('sidepanelFloatingToolsVisible') === 'true';
-            } catch (_) {
+        try {
+            const modeKey = window.__SIDE_PANEL_MODE__ === true
+                ? 'sidepanelFloatingToolsMode'
+                : 'canvasFloatingToolsMode';
+            const mode = localStorage.getItem(modeKey);
+            if (mode === 'none') {
                 shouldShow = false;
+            } else if (mode === 'hidden' || mode === 'shown') {
+                shouldShow = true;
+            } else if (window.__SIDE_PANEL_MODE__ === true) {
+                shouldShow = localStorage.getItem('sidepanelFloatingToolsVisible') === 'true';
             }
+        } catch (_) {
+            shouldShow = window.__SIDE_PANEL_MODE__ !== true;
         }
         zoomIndicator.style.display = shouldShow ? 'block' : 'none';
     }
@@ -5926,8 +5934,10 @@ function createCanvasSidePanelSettingsModal() {
     const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
     const title = isEn ? 'Side Panel' : '侧边栏管理';
     const positionLabel = isEn ? 'Side panel position' : '侧边栏位置';
+    const shortcutLabel = isEn ? 'Side panel shortcut' : '侧边栏快捷键';
     const detectingText = isEn ? 'Detecting...' : '检测中...';
-    const openSettingsText = isEn ? 'Open browser settings' : '打开浏览器设置';
+    const openSettingsText = isEn ? 'Browser settings' : '浏览器设置';
+    const openShortcutSettingsText = isEn ? 'Shortcut settings' : '快捷键设置';
     modal.innerHTML = `
         <div class="modal-content sidepanel-settings-modal">
             <div class="modal-header">
@@ -5947,6 +5957,14 @@ function createCanvasSidePanelSettingsModal() {
                         <div class="appearance-row-content sidepanel-row-content">
                             <div class="sidepanel-position-value" id="canvasSidePanelPositionValue">${detectingText}</div>
                             <button class="sidepanel-settings-btn" id="canvasSidePanelOpenSettingsBtn" type="button">${openSettingsText}</button>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${shortcutLabel}</span>
+                        </div>
+                        <div class="appearance-row-content sidepanel-row-content">
+                            <button class="sidepanel-settings-btn" id="canvasSidePanelShortcutOpenSettingsBtnMain" type="button">${openShortcutSettingsText}</button>
                         </div>
                     </div>
                 </div>
@@ -5978,6 +5996,21 @@ function createCanvasSidePanelSettingsModal() {
                 if (chrome && chrome.tabs && typeof chrome.tabs.create === 'function') {
                     const meta = __getSidePanelSettingsSearchMeta();
                     chrome.tabs.create({ url: meta.url });
+                }
+            } catch (_) { }
+        });
+    }
+
+    const openShortcutBtn = modal.querySelector('#canvasSidePanelShortcutOpenSettingsBtnMain');
+    if (openShortcutBtn) {
+        openShortcutBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                if (chrome && chrome.tabs && typeof chrome.tabs.create === 'function') {
+                    const ua = navigator.userAgent || '';
+                    const url = ua.includes('Edg/') ? 'edge://extensions/shortcuts' : 'chrome://extensions/shortcuts';
+                    chrome.tabs.create({ url });
                 }
             } catch (_) { }
         });
@@ -28682,14 +28715,6 @@ function saveTempNodes() {
             }
         }
 
-        // 每次画布状态持久化后，尝试调度一次缩略图更新（带去抖）
-        if (typeof window !== 'undefined' && typeof window.requestCanvasThumbnailUpdate === 'function') {
-            try {
-                window.requestCanvasThumbnailUpdate('saveTempNodes');
-            } catch (e) {
-                // 缩略图更新失败不影响正常保存，静默处理
-            }
-        }
     } catch (error) {
         console.error('[Canvas] 保存临时栏目失败:', error);
     }
