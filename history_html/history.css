@@ -7718,10 +7718,10 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 12px;
-    height: 12px;
+    width: 13px;
+    height: 13px;
     margin: 0;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1;
     transform: none;
 }
@@ -7921,6 +7921,40 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     height: 12px;
     font-size: 12px;
     line-height: 1;
+}
+
+.canvas-help-icon-btn .fa-question-circle {
+    width: 15px;
+    height: 15px;
+    font-size: 15px;
+}
+
+.canvas-floating-tools-toggle-btn .floating-hide-tool-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.canvas-floating-tools-toggle-btn {
+    position: relative;
+}
+
+.canvas-floating-tools-toggle-btn::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 18px;
+    height: 18px;
+    transform: translate(-50%, -50%);
+    border: 1px dashed currentColor;
+    border-radius: 999px;
+    opacity: 0.58;
+    pointer-events: none;
 }
 
 .canvas-floating-tools-panel {

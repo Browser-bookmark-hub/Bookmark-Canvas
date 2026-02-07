@@ -1832,6 +1832,10 @@ const i18n = {
         'zh_CN': '显示/隐藏',
         'en': 'Show/Hide'
     },
+    floatingToolsHideTitle: {
+        'zh_CN': '隐藏悬浮工具窗',
+        'en': 'Hide floating tools'
+    },
     floatingToolsMiniShowTitle: {
         'zh_CN': '显示悬浮工具窗',
         'en': 'Show floating tools'
@@ -2822,8 +2826,8 @@ function applyLanguage() {
     }
     const canvasFloatingToolsToggleBtn = document.getElementById('canvasFloatingToolsToggleBtn');
     if (canvasFloatingToolsToggleBtn) {
-        canvasFloatingToolsToggleBtn.title = i18n.settingsFloatText[currentLang];
-        canvasFloatingToolsToggleBtn.setAttribute('aria-label', i18n.settingsFloatText[currentLang]);
+        canvasFloatingToolsToggleBtn.title = i18n.floatingToolsHideTitle[currentLang];
+        canvasFloatingToolsToggleBtn.setAttribute('aria-label', i18n.floatingToolsHideTitle[currentLang]);
     }
     const canvasSidePanelSettingsText = document.getElementById('canvasSidePanelSettingsText');
     if (canvasSidePanelSettingsText) canvasSidePanelSettingsText.textContent = i18n.canvasSidePanelSettingsText[currentLang];
@@ -3211,48 +3215,14 @@ function setupSidePanelSettingsMenu() {
 
 function setupCanvasFloatingToolsMenu() {
     const toggleBtn = document.getElementById('canvasFloatingToolsToggleBtn');
-    const panel = document.getElementById('canvasFloatingToolsPanel');
-    if (!toggleBtn || !panel) return;
+    if (!toggleBtn) return;
     if (toggleBtn.dataset.bound === 'true') return;
     toggleBtn.dataset.bound = 'true';
-
-    const closePanel = () => {
-        if (!panel.hasAttribute('hidden')) panel.setAttribute('hidden', '');
-        toggleBtn.setAttribute('aria-expanded', 'false');
-    };
-
-    const openPanel = () => {
-        panel.removeAttribute('hidden');
-        toggleBtn.setAttribute('aria-expanded', 'true');
-        updateFloatingToolsModeControlState();
-    };
 
     toggleBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (panel.hasAttribute('hidden')) {
-            openPanel();
-        } else {
-            closePanel();
-        }
-    });
-
-    panel.addEventListener('click', (e) => {
-        const modeBtn = e.target && e.target.closest ? e.target.closest('.floating-tools-mode-btn') : null;
-        if (!modeBtn || !panel.contains(modeBtn)) return;
-        e.stopPropagation();
-        const mode = modeBtn.dataset.mode || SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
-        applySidePanelFloatingToolsMode(mode);
-        closePanel();
-    });
-
-    document.addEventListener('click', (e) => {
-        if (panel.contains(e.target) || toggleBtn.contains(e.target)) return;
-        closePanel();
-    });
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closePanel();
+        applySidePanelFloatingToolsMode(SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN);
     });
 }
 

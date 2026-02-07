@@ -390,7 +390,7 @@
                         <div class="canvas-zoom-indicator" id="canvasZoomIndicator" style="display: none;">
                             <button class="canvas-floating-toggle-mini" id="canvasFloatingToggleMini" type="button"
                                 aria-label="显示悬浮工具窗" title="显示悬浮工具窗">
-                                <i class="fas fa-tools"></i>
+                                <i class="fas fa-wrench" aria-hidden="true"></i>
                             </button>
                             <div class="canvas-zoom-header">
                                 <button class="canvas-fullscreen-btn" id="canvasFullscreenBtn" aria-label="进入全屏"
@@ -414,30 +414,10 @@
                                 </button>
                                 <div class="canvas-floating-tools-inline" id="canvasFloatingToolsInline">
                                     <button class="zoom-btn canvas-floating-tools-toggle-btn"
-                                        id="canvasFloatingToolsToggleBtn" type="button" aria-expanded="false"
-                                        title="显示/隐藏" aria-label="显示/隐藏">
-                                        <i class="fas fa-tools" aria-hidden="true"></i>
+                                        id="canvasFloatingToolsToggleBtn" type="button"
+                                        title="隐藏悬浮工具窗" aria-label="隐藏悬浮工具窗">
+                                        <i class="fas fa-wrench floating-hide-tool-icon" aria-hidden="true"></i>
                                     </button>
-                                    <div class="canvas-floating-tools-panel" id="canvasFloatingToolsPanel" hidden>
-                                        <div class="floating-tools-mode-switch canvas-floating-tools-mode-switch"
-                                            id="canvasFloatingToolsModeSwitch" role="group" aria-label="显示/隐藏">
-                                            <button class="floating-tools-mode-btn canvas-floating-tools-mode-btn"
-                                                data-action="set-floating-toolbar-mode" data-mode="none" type="button"
-                                                aria-pressed="false" title="不显示">
-                                                <span data-floating-mode-text="none">不显示</span>
-                                            </button>
-                                            <button class="floating-tools-mode-btn canvas-floating-tools-mode-btn"
-                                                data-action="set-floating-toolbar-mode" data-mode="hidden"
-                                                type="button" aria-pressed="false" title="隐藏">
-                                                <span data-floating-mode-text="hidden">隐藏</span>
-                                            </button>
-                                            <button class="floating-tools-mode-btn canvas-floating-tools-mode-btn"
-                                                data-action="set-floating-toolbar-mode" data-mode="shown"
-                                                type="button" aria-pressed="false" title="显示">
-                                                <span data-floating-mode-text="shown">显示</span>
-                                            </button>
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
                         </div>
