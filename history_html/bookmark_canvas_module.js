@@ -5781,6 +5781,9 @@ function setupCanvasManageModal() {
     const manageBtn = document.getElementById('canvasManageBtn');
     const manageModal = document.getElementById('canvasManageModal');
     const manageModalClose = document.getElementById('canvasManageModalClose');
+    const otherManageModal = document.getElementById('canvasOtherManageModal');
+    const otherManageModalClose = document.getElementById('canvasOtherManageModalClose');
+    const openOtherManageBridgeBtn = document.getElementById('canvasOpenOtherManageBridgeBtn');
     const helpModal = document.getElementById('canvasHelpModal');
     const shortcutsModal = document.getElementById('canvasShortcutsModal');
 
@@ -5819,6 +5822,40 @@ function setupCanvasManageModal() {
         });
     }
 
+    const closeOtherManageModal = () => {
+        if (!otherManageModal) return;
+        otherManageModal.style.display = 'none';
+    };
+
+    const openOtherManageModal = () => {
+        if (!otherManageModal) return;
+        stopShortcutRecording(null);
+        manageModal.style.display = 'none';
+        if (helpModal) helpModal.style.display = 'none';
+        if (shortcutsModal) shortcutsModal.classList.remove('show');
+        const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
+        if (pop) pop.remove();
+
+        const isVisible = otherManageModal.style.display === 'block';
+        otherManageModal.style.display = isVisible ? 'none' : 'block';
+    };
+
+    if (openOtherManageBridgeBtn && openOtherManageBridgeBtn.dataset.bound !== 'true') {
+        openOtherManageBridgeBtn.dataset.bound = 'true';
+        openOtherManageBridgeBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openOtherManageModal();
+        });
+    }
+
+    if (otherManageModalClose && otherManageModalClose.dataset.bound !== 'true') {
+        otherManageModalClose.dataset.bound = 'true';
+        otherManageModalClose.addEventListener('click', () => {
+            closeOtherManageModal();
+        });
+    }
+
     // 点击其他地方关闭弹窗
     document.addEventListener('click', (e) => {
         if (manageModal.style.display === 'block' &&
@@ -5829,6 +5866,12 @@ function setupCanvasManageModal() {
             manageModal.style.display = 'none';
             const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
             if (pop) pop.remove();
+        }
+
+        if (otherManageModal && otherManageModal.style.display === 'block' &&
+            !otherManageModal.contains(e.target) &&
+            !(openOtherManageBridgeBtn && openOtherManageBridgeBtn.contains(e.target))) {
+            closeOtherManageModal();
         }
     });
 }
@@ -5852,6 +5895,14 @@ function setupCanvasShortcutsSettingsBtn() {
         try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
         openCanvasShortcutsModal();
     };
+
+    const otherBtn = document.getElementById('canvasOtherShortcutSettingsBtn');
+    if (otherBtn) {
+        otherBtn.onclick = () => {
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            openCanvasShortcutsModal();
+        };
+    }
 }
 
 function setupCanvasShortcutsModal() {
@@ -23766,14 +23817,33 @@ function setupCanvasEventListeners() {
     // 工具栏按钮
     const importBtn = document.getElementById('importCanvasBtn');
     const exportBtn = document.getElementById('exportCanvasBtn');
+    const importOtherBtn = document.getElementById('importCanvasOtherBtn');
+    const exportOtherBtn = document.getElementById('exportCanvasOtherBtn');
 
     if (importBtn) importBtn.addEventListener('click', showImportDialog);
     if (exportBtn) exportBtn.addEventListener('click', exportCanvas);
+    if (importOtherBtn) {
+        importOtherBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            showImportDialog();
+        });
+    }
+    if (exportOtherBtn) {
+        exportOtherBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            exportCanvas();
+        });
+    }
 
     // 清除菜单按钮 - 显示/隐藏下拉菜单
     const clearMenuBtn = document.getElementById('clearMenuBtn');
     const clearDropdown = document.getElementById('canvasClearDropdown');
     const clearDropdownMenu = document.getElementById('clearDropdownMenu');
+    const clearMenuOtherBtn = document.getElementById('clearMenuOtherBtn');
+    const clearOtherDropdown = document.getElementById('canvasOtherClearDropdown');
+    const clearOtherDropdownMenu = document.getElementById('clearDropdownOtherMenu');
 
     if (clearMenuBtn && clearDropdownMenu && clearDropdown) {
         clearMenuBtn.addEventListener('click', (e) => {
@@ -23797,6 +23867,26 @@ function setupCanvasEventListeners() {
         });
     }
 
+    if (clearMenuOtherBtn && clearOtherDropdownMenu && clearOtherDropdown) {
+        clearMenuOtherBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = clearOtherDropdownMenu.style.display === 'block';
+            clearOtherDropdownMenu.style.display = isVisible ? 'none' : 'block';
+            clearOtherDropdown.classList.toggle('open', !isVisible);
+        });
+
+        clearOtherDropdownMenu.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!clearOtherDropdown.contains(e.target)) {
+                clearOtherDropdownMenu.style.display = 'none';
+                clearOtherDropdown.classList.remove('open');
+            }
+        });
+    }
+
     // 清空未标注节点按钮 (原有功能)
     const clearBtn = document.getElementById('clearTempNodesBtn');
     if (clearBtn) {
@@ -23808,6 +23898,19 @@ function setupCanvasEventListeners() {
                 clearDropdown.classList.remove('open');
             }
             // 执行清除
+            clearAllTempNodes();
+        });
+    }
+
+    const clearOtherBtn = document.getElementById('clearTempNodesOtherBtn');
+    if (clearOtherBtn) {
+        clearOtherBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (clearOtherDropdownMenu) {
+                clearOtherDropdownMenu.style.display = 'none';
+                clearOtherDropdown.classList.remove('open');
+            }
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
             clearAllTempNodes();
         });
     }
@@ -23836,6 +23939,26 @@ function setupCanvasEventListeners() {
         });
     }
 
+    const clearOtherHelpBtn = document.getElementById('clearTempNodesOtherHelpBtn');
+    const clearOtherRulesTooltip = document.getElementById('clearRulesOtherTooltip');
+    if (clearOtherHelpBtn && clearOtherRulesTooltip) {
+        clearOtherHelpBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = clearOtherRulesTooltip.style.display === 'block';
+            clearOtherRulesTooltip.style.display = isVisible ? 'none' : 'block';
+        });
+
+        clearOtherRulesTooltip.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!clearOtherHelpBtn.contains(e.target) && !clearOtherRulesTooltip.contains(e.target)) {
+                clearOtherRulesTooltip.style.display = 'none';
+            }
+        });
+    }
+
     // 点击清除按钮
     const clearByClickBtn = document.getElementById('clearByClickBtn');
     if (clearByClickBtn) {
@@ -23851,6 +23974,19 @@ function setupCanvasEventListeners() {
         });
     }
 
+    const clearByClickOtherBtn = document.getElementById('clearByClickOtherBtn');
+    if (clearByClickOtherBtn) {
+        clearByClickOtherBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (clearOtherDropdownMenu) {
+                clearOtherDropdownMenu.style.display = 'none';
+                clearOtherDropdown.classList.remove('open');
+            }
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            startClickToClearMode();
+        });
+    }
+
     // 清除全部按钮
     const clearAllBtn = document.getElementById('clearAllBtn');
     if (clearAllBtn) {
@@ -23862,6 +23998,19 @@ function setupCanvasEventListeners() {
                 clearDropdown.classList.remove('open');
             }
             // 执行清除全部
+            clearAllExceptPermanent();
+        });
+    }
+
+    const clearAllOtherBtn = document.getElementById('clearAllOtherBtn');
+    if (clearAllOtherBtn) {
+        clearAllOtherBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (clearOtherDropdownMenu) {
+                clearOtherDropdownMenu.style.display = 'none';
+                clearOtherDropdown.classList.remove('open');
+            }
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
             clearAllExceptPermanent();
         });
     }
@@ -30240,6 +30389,14 @@ function setupCanvasAppearanceSettingsBtn() {
         try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
         openCanvasAppearanceSettingsModal();
     };
+
+    const otherBtn = document.getElementById('canvasOtherAppearanceSettingsBtn');
+    if (otherBtn) {
+        otherBtn.onclick = () => {
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            openCanvasAppearanceSettingsModal();
+        };
+    }
 }
 
 function __setAppearanceRadioGroup(modal, groupName, value) {
@@ -30703,6 +30860,14 @@ function setupCanvasOtherSettingsBtn() {
         try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
         openCanvasOtherSettingsModal();
     };
+
+    const otherBtn = document.getElementById('canvasOtherSettingsManageBtn');
+    if (otherBtn) {
+        otherBtn.onclick = () => {
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            openCanvasOtherSettingsModal();
+        };
+    }
 }
 
 function openCanvasOtherSettingsModal() {
@@ -31756,6 +31921,14 @@ function setupCanvasPerfSettingsBtn() {
         try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
         openCanvasPerfSettingsModal();
     };
+
+    const otherBtn = document.getElementById('canvasOtherPerfSettingsBtn');
+    if (otherBtn) {
+        otherBtn.onclick = () => {
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            openCanvasPerfSettingsModal();
+        };
+    }
 }
 
 let perfSettingsUpdateTimer = null;

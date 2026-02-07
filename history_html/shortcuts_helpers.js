@@ -48,10 +48,17 @@ function updateShortcutsDisplay() {
                 <div class="shortcuts-section">
                     <div class="shortcuts-header-row">
                         <div>${titleText}</div>
-                        <button class="shortcuts-settings-btn open-shortcuts-settings-btn"
-                            title="${i18n.shortcutsSettingsTooltip[lang]}">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
+                        <div class="shortcuts-header-actions">
+                            <button class="shortcuts-jump-btn open-canvas-shortcuts-manage-btn"
+                                title="${i18n.shortcutsManageTooltip[lang]}">
+                                <i class="fas fa-keyboard"></i>
+                                <span>${i18n.shortcutsManageButton[lang]}</span>
+                            </button>
+                            <button class="shortcuts-settings-btn open-shortcuts-settings-btn"
+                                title="${i18n.shortcutsSettingsTooltip[lang]}">
+                                <i class="fas fa-external-link-alt"></i>
+                            </button>
+                        </div>
                     </div>
                     <div class="shortcuts-columns-header">
                         <span class="shortcuts-key-header">${i18n.shortcutsTableHeaderKey[lang]}</span>
@@ -122,6 +129,46 @@ function updateShortcutsDisplay() {
         });
     };
 
+    const bindOpenManageShortcuts = (container) => {
+        if (!container) return;
+        container.querySelectorAll('.open-canvas-shortcuts-manage-btn').forEach((openBtn) => {
+            openBtn.addEventListener('click', () => {
+                try {
+                    const modal = document.getElementById('shortcutsModal');
+                    if (modal) modal.classList.remove('show');
+                } catch (_) { }
+
+                try {
+                    const manageBtn = document.getElementById('canvasShortcutSettingsBtn');
+                    if (manageBtn && typeof manageBtn.click === 'function') {
+                        manageBtn.click();
+                        return;
+                    }
+                } catch (_) { }
+
+                try {
+                    const otherManageBtn = document.getElementById('canvasOtherShortcutSettingsBtn');
+                    if (otherManageBtn && typeof otherManageBtn.click === 'function') {
+                        otherManageBtn.click();
+                        return;
+                    }
+                } catch (_) { }
+
+                try {
+                    const canvasShortcutsModal = document.getElementById('canvasShortcutsModal');
+                    if (canvasShortcutsModal) {
+                        canvasShortcutsModal.classList.add('show');
+                        if (window.CanvasModule && typeof window.CanvasModule.updateShortcutDisplays === 'function') {
+                            window.CanvasModule.updateShortcutDisplays();
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Shortcuts] 打开管理快捷键弹窗失败:', e);
+                }
+            });
+        });
+    };
+
     if (browserAPI && browserAPI.commands && browserAPI.commands.getAll) {
         try {
             browserAPI.commands.getAll((commands) => {
@@ -147,8 +194,11 @@ function updateShortcutsDisplay() {
                     open_canvas_view: map.open_canvas_view
                 });
                 bindOpenSettings(shortcutsContent);
+                bindOpenManageShortcuts(shortcutsContent);
                 bindOpenSettings(canvasShortcutsList);
+                bindOpenManageShortcuts(canvasShortcutsList);
                 bindOpenSettings(canvasHelpShortcutsList);
+                bindOpenManageShortcuts(canvasHelpShortcutsList);
             });
         } catch (e) {
             console.warn('[Shortcuts] 读取快捷键失败，显示未设置:', e);
@@ -156,15 +206,21 @@ function updateShortcutsDisplay() {
             renderCanvasShortcuts(canvasShortcutsList, {});
             renderCanvasShortcuts(canvasHelpShortcutsList, {});
             bindOpenSettings(shortcutsContent);
+            bindOpenManageShortcuts(shortcutsContent);
             bindOpenSettings(canvasShortcutsList);
+            bindOpenManageShortcuts(canvasShortcutsList);
             bindOpenSettings(canvasHelpShortcutsList);
+            bindOpenManageShortcuts(canvasHelpShortcutsList);
         }
     } else {
         renderShortcutsModal({});
         renderCanvasShortcuts(canvasShortcutsList, {});
         renderCanvasShortcuts(canvasHelpShortcutsList, {});
         bindOpenSettings(shortcutsContent);
+        bindOpenManageShortcuts(shortcutsContent);
         bindOpenSettings(canvasShortcutsList);
+        bindOpenManageShortcuts(canvasShortcutsList);
         bindOpenSettings(canvasHelpShortcutsList);
+        bindOpenManageShortcuts(canvasHelpShortcutsList);
     }
 }

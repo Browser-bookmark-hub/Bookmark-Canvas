@@ -29,11 +29,6 @@
         <div class="header-left">
             <div class="header-title-row">
                 <h1 id="pageTitle">书签画布</h1>
-                <button id="titleSidePanelToggleBtn" class="tool-btn title-sidepanel-toggle-btn"
-                    aria-label="Open/Close Side Panel" type="button">
-                    <span class="title-sidepanel-icon" aria-hidden="true"></span>
-                    <span class="btn-tooltip" id="titleSidePanelToggleTooltip"></span>
-                </button>
             </div>
             <span class="header-subtitle" id="pageSubtitle"></span>
         </div>
@@ -86,6 +81,23 @@
                 <button id="openCanvasPageBtn" class="tool-btn open-html-btn" aria-label="Open HTML Page">
                     <i class="fas fa-expand"></i>
                     <span class="btn-tooltip" id="openCanvasPageTooltip"></span>
+                </button>
+            </div>
+            <div class="title-side-tools" id="titleSideTools">
+                <button id="titleQuickAddToggleBtn" class="tool-btn title-row-tool-btn" aria-label="Add"
+                    type="button">
+                    <i class="fas fa-plus"></i>
+                    <span class="btn-tooltip" id="titleQuickAddTooltip"></span>
+                </button>
+                <button id="titleSettingsToggleBtn" class="tool-btn title-row-tool-btn" aria-label="Settings"
+                    type="button">
+                    <i class="fas fa-cog"></i>
+                    <span class="btn-tooltip" id="titleSettingsTooltip"></span>
+                </button>
+                <button id="titleSidePanelToggleBtn" class="tool-btn title-sidepanel-toggle-btn"
+                    aria-label="Open/Close Side Panel" type="button">
+                    <span class="title-sidepanel-icon" aria-hidden="true"></span>
+                    <span class="btn-tooltip" id="titleSidePanelToggleTooltip"></span>
                 </button>
             </div>
             <!-- 侧边栏模式：快捷添加菜单 -->
@@ -150,17 +162,21 @@
                     <i class="fas fa-columns"></i>
                     <span id="settingsSidePanelText"></span>
                 </button>
-                <div class="settings-menu-divider" aria-hidden="true"></div>
-                <button class="settings-menu-item" data-action="toggle-theme" type="button">
+                <button class="settings-menu-item" data-action="open-other-manage" type="button">
+                    <i class="fas fa-sliders-h"></i>
+                    <span id="settingsOtherManageText"></span>
+                </button>
+                <div class="settings-menu-divider sidepanel-settings-only" aria-hidden="true"></div>
+                <button class="settings-menu-item sidepanel-settings-only" data-action="toggle-theme" type="button">
                     <i class="fas fa-moon"></i>
                     <span id="settingsThemeText"></span>
                 </button>
-                <button class="settings-menu-item" data-action="toggle-language" type="button">
+                <button class="settings-menu-item sidepanel-settings-only" data-action="toggle-language" type="button">
                     <i class="fas fa-language"></i>
                     <span id="settingsLanguageText"></span>
                 </button>
-                <button class="settings-menu-item" data-action="open-help" type="button">
-                    <i class="fas fa-info-circle"></i>
+                <button class="settings-menu-item sidepanel-settings-only" data-action="open-help" type="button">
+                    <i class="fab fa-github"></i>
                     <span id="settingsHelpText"></span>
                 </button>
             </div>
@@ -634,6 +650,102 @@
                                 </div>
                             </div>
                         </div>
+
+                        <div class="canvas-manage-modal" id="canvasOtherManageModal" style="display: none;">
+                            <div class="canvas-manage-modal-header">
+                                <h4 id="canvasOtherManageModalTitle">其他管理</h4>
+                                <button class="canvas-manage-modal-close" id="canvasOtherManageModalClose"><i
+                                        class="fas fa-times"></i></button>
+                            </div>
+                            <div class="canvas-manage-modal-body">
+                                <div class="canvas-manage-actions">
+                                    <button id="canvasOtherPerfSettingsBtn" class="canvas-manage-btn"
+                                        style="margin-bottom: 8px;">
+                                        <i class="fas fa-tachometer-alt"></i>
+                                        <span id="canvasOtherPerfSettingsText">性能</span>
+                                    </button>
+                                    <button id="canvasOtherAppearanceSettingsBtn" class="canvas-manage-btn">
+                                        <i class="fas fa-palette"></i>
+                                        <span id="canvasOtherAppearanceSettingsText">外观</span>
+                                    </button>
+                                    <button id="canvasOtherSettingsManageBtn" class="canvas-manage-btn">
+                                        <i class="fas fa-sliders-h"></i>
+                                        <span id="canvasOtherSettingsManageText">其他</span>
+                                    </button>
+                                    <button id="canvasOtherShortcutSettingsBtn" class="canvas-manage-btn">
+                                        <i class="fas fa-keyboard"></i>
+                                        <span id="canvasOtherShortcutSettingsText">快捷键</span>
+                                    </button>
+                                    <button id="importCanvasOtherBtn" class="canvas-manage-btn">
+                                        <i class="fas fa-file-import"></i>
+                                        <span id="importCanvasOtherText">导入</span>
+                                    </button>
+                                    <button id="exportCanvasOtherBtn" class="canvas-manage-btn">
+                                        <i class="fas fa-file-export"></i>
+                                        <span id="exportCanvasOtherText">导出</span>
+                                    </button>
+                                    <div class="canvas-clear-dropdown" id="canvasOtherClearDropdown">
+                                        <button id="clearMenuOtherBtn" class="canvas-manage-btn danger">
+                                            <i class="fas fa-trash-alt"></i>
+                                            <span id="clearMenuOtherText">清除</span>
+                                            <i class="fas fa-chevron-down clear-dropdown-arrow"></i>
+                                        </button>
+                                        <div class="clear-dropdown-menu" id="clearDropdownOtherMenu" style="display: none;">
+                                            <button class="clear-dropdown-item" id="clearByClickOtherBtn">
+                                                <i class="fas fa-mouse-pointer"></i>
+                                                <span id="clearByClickOtherText">点击清除</span>
+                                            </button>
+                                            <div class="clear-dropdown-item-group">
+                                                <button class="clear-dropdown-item" id="clearTempNodesOtherBtn">
+                                                    <i class="fas fa-eraser"></i>
+                                                    <span id="clearTempNodesOtherText">清空未标注节点</span>
+                                                </button>
+                                                <button class="clear-dropdown-help-btn" id="clearTempNodesOtherHelpBtn"
+                                                    title="查看清除规则">
+                                                    <i class="fas fa-question-circle"></i>
+                                                </button>
+                                                <div class="clear-rules-tooltip" id="clearRulesOtherTooltip"
+                                                    style="display: none;">
+                                                    <div class="clear-rules-header">
+                                                        <i class="fas fa-info-circle"></i>
+                                                        <span id="clearRulesOtherTooltipTitle">清除规则</span>
+                                                    </div>
+                                                    <div class="clear-rules-content">
+                                                        <div class="clear-rules-section">
+                                                            <div class="clear-rules-section-title"
+                                                                id="clearRulesOtherWillClear">
+                                                                会被清除：
+                                                            </div>
+                                                            <ul>
+                                                                <li id="clearRuleOtherTemp"><strong>书签型临时栏目</strong>：无说明 + 默认标题 +
+                                                                    无连接线
+                                                                </li>
+                                                                <li id="clearRuleOtherMd"><strong>空白栏目</strong>：内容为空 + 无连接线</li>
+                                                            </ul>
+                                                        </div>
+                                                        <div class="clear-rules-section">
+                                                            <div class="clear-rules-section-title" id="clearRulesOtherWillKeep">
+                                                                会被保留：
+                                                            </div>
+                                                            <ul>
+                                                                <li id="clearRuleOtherKeepDesc"><i class="fas fa-check"></i> 有说明文字</li>
+                                                                <li id="clearRuleOtherKeepTitle"><i class="fas fa-check"></i> 标题被修改过</li>
+                                                                <li id="clearRuleOtherKeepEdge"><i class="fas fa-check"></i> 有连接线</li>
+                                                            </ul>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <button class="clear-dropdown-item danger" id="clearAllOtherBtn">
+                                                <i class="fas fa-broom"></i>
+                                                <span id="clearAllOtherText">清除全部（永久栏目除外）</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <button id="canvasOpenOtherManageBridgeBtn" type="button" hidden aria-hidden="true"></button>
 
                         <!-- Canvas内容容器（应用缩放和平移） -->
                         <div class="canvas-content" id="canvasContent">

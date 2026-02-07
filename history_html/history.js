@@ -1805,12 +1805,12 @@ const i18n = {
         'en': 'Toggle Theme'
     },
     settingsLanguageText: {
-        'zh_CN': '切换语言',
-        'en': 'Switch Language'
+        'zh_CN': '中文 / English',
+        'en': '中文 / English'
     },
     settingsHelpText: {
-        'zh_CN': '说明与快捷键',
-        'en': 'Info & Shortcuts'
+        'zh_CN': '开源信息与快捷键',
+        'en': 'Open Source Info & Shortcuts'
     },
     settingsFloatText: {
         'zh_CN': '悬浮工具窗状态',
@@ -1844,13 +1844,17 @@ const i18n = {
         'zh_CN': '侧边栏管理',
         'en': 'Side Panel'
     },
+    settingsOtherManageText: {
+        'zh_CN': '其他管理',
+        'en': 'Other Manage'
+    },
     openCanvasPageTooltip: {
         'zh_CN': 'HTML 页面',
         'en': 'HTML Page'
     },
     titleSidePanelToggleTooltip: {
-        'zh_CN': '打开/关闭侧边栏',
-        'en': 'Open/Close Side Panel'
+        'zh_CN': '侧边栏',
+        'en': 'Side Panel'
     },
     quickAddTooltip: {
         'zh_CN': '添加',
@@ -2027,6 +2031,10 @@ const i18n = {
     canvasManageTitle: {
         'zh_CN': '画布管理',
         'en': 'Canvas Manage'
+    },
+    canvasOtherManageTitle: {
+        'zh_CN': '其他管理',
+        'en': 'Other Manage'
     },
     canvasSidePanelSettingsText: {
         'zh_CN': '侧边栏',
@@ -2321,8 +2329,8 @@ const i18n = {
         'en': 'Submit Issue'
     },
     shortcutsTitle: {
-        'zh_CN': '当前可用快捷键',
-        'en': 'Available Shortcuts'
+        'zh_CN': '基础快捷键',
+        'en': 'Basic Shortcuts'
     },
     shortcutsTableHeaderKey: {
         'zh_CN': '按键',
@@ -2343,6 +2351,14 @@ const i18n = {
     shortcutsSettingsButton: {
         'zh_CN': '跳转',
         'en': 'Open'
+    },
+    shortcutsManageTooltip: {
+        'zh_CN': '跳转到管理里的快捷键',
+        'en': 'Open shortcut settings in manage panel'
+    },
+    shortcutsManageButton: {
+        'zh_CN': '管理快捷键',
+        'en': 'Manage Shortcuts'
     },
     shortcutSidePanel: {
         'zh_CN': '打开/关闭侧边栏',
@@ -2373,8 +2389,8 @@ const i18n = {
         'en': 'Toggle Theme'
     },
     langTooltip: {
-        'zh_CN': '切换语言',
-        'en': 'Switch Language'
+        'zh_CN': '中文 / English',
+        'en': '中文 / English'
     },
     bookmarkToolboxTitle: {
         'zh_CN': '书签工具箱',
@@ -2803,6 +2819,22 @@ function applyLanguage() {
     if (clearRuleKeepTitle) clearRuleKeepTitle.innerHTML = i18n.clearRuleKeepTitle[currentLang];
     const clearRuleKeepEdge = document.getElementById('clearRuleKeepEdge');
     if (clearRuleKeepEdge) clearRuleKeepEdge.innerHTML = i18n.clearRuleKeepEdge[currentLang];
+    const clearRulesOtherTooltipTitle = document.getElementById('clearRulesOtherTooltipTitle');
+    if (clearRulesOtherTooltipTitle) clearRulesOtherTooltipTitle.textContent = i18n.clearRulesTooltipTitle[currentLang];
+    const clearRulesOtherWillClear = document.getElementById('clearRulesOtherWillClear');
+    if (clearRulesOtherWillClear) clearRulesOtherWillClear.textContent = i18n.clearRulesWillClear[currentLang];
+    const clearRulesOtherWillKeep = document.getElementById('clearRulesOtherWillKeep');
+    if (clearRulesOtherWillKeep) clearRulesOtherWillKeep.textContent = i18n.clearRulesWillKeep[currentLang];
+    const clearRuleOtherTemp = document.getElementById('clearRuleOtherTemp');
+    if (clearRuleOtherTemp) clearRuleOtherTemp.innerHTML = i18n.clearRuleTemp[currentLang];
+    const clearRuleOtherMd = document.getElementById('clearRuleOtherMd');
+    if (clearRuleOtherMd) clearRuleOtherMd.innerHTML = i18n.clearRuleMd[currentLang];
+    const clearRuleOtherKeepDesc = document.getElementById('clearRuleOtherKeepDesc');
+    if (clearRuleOtherKeepDesc) clearRuleOtherKeepDesc.innerHTML = i18n.clearRuleKeepDesc[currentLang];
+    const clearRuleOtherKeepTitle = document.getElementById('clearRuleOtherKeepTitle');
+    if (clearRuleOtherKeepTitle) clearRuleOtherKeepTitle.innerHTML = i18n.clearRuleKeepTitle[currentLang];
+    const clearRuleOtherKeepEdge = document.getElementById('clearRuleOtherKeepEdge');
+    if (clearRuleOtherKeepEdge) clearRuleOtherKeepEdge.innerHTML = i18n.clearRuleKeepEdge[currentLang];
 
     const canvasZoomLabel = document.getElementById('canvasZoomLabel');
     if (canvasZoomLabel) canvasZoomLabel.textContent = i18n.canvasZoomLabel[currentLang];
@@ -2842,6 +2874,29 @@ function applyLanguage() {
 
     const canvasManageModalTitle = document.getElementById('canvasManageModalTitle');
     if (canvasManageModalTitle) canvasManageModalTitle.textContent = i18n.canvasManageTitle[currentLang];
+    const canvasOtherManageModalTitle = document.getElementById('canvasOtherManageModalTitle');
+    if (canvasOtherManageModalTitle) canvasOtherManageModalTitle.textContent = i18n.canvasOtherManageTitle[currentLang];
+
+    const canvasOtherPerfSettingsText = document.getElementById('canvasOtherPerfSettingsText');
+    if (canvasOtherPerfSettingsText) canvasOtherPerfSettingsText.textContent = i18n.canvasPerfSettingsText[currentLang];
+    const canvasOtherAppearanceSettingsText = document.getElementById('canvasOtherAppearanceSettingsText');
+    if (canvasOtherAppearanceSettingsText) canvasOtherAppearanceSettingsText.textContent = i18n.canvasAppearanceSettingsText[currentLang];
+    const canvasOtherSettingsManageText = document.getElementById('canvasOtherSettingsManageText');
+    if (canvasOtherSettingsManageText) canvasOtherSettingsManageText.textContent = i18n.canvasOtherSettingsText[currentLang];
+    const canvasOtherShortcutSettingsText = document.getElementById('canvasOtherShortcutSettingsText');
+    if (canvasOtherShortcutSettingsText) canvasOtherShortcutSettingsText.textContent = i18n.canvasShortcutSettingsText[currentLang];
+    const importCanvasOtherText = document.getElementById('importCanvasOtherText');
+    if (importCanvasOtherText) importCanvasOtherText.textContent = i18n.importCanvasText[currentLang];
+    const exportCanvasOtherText = document.getElementById('exportCanvasOtherText');
+    if (exportCanvasOtherText) exportCanvasOtherText.textContent = i18n.exportCanvasText[currentLang];
+    const clearMenuOtherText = document.getElementById('clearMenuOtherText');
+    if (clearMenuOtherText) clearMenuOtherText.textContent = i18n.clearMenuText[currentLang];
+    const clearByClickOtherText = document.getElementById('clearByClickOtherText');
+    if (clearByClickOtherText) clearByClickOtherText.textContent = i18n.clearByClickText[currentLang];
+    const clearTempNodesOtherText = document.getElementById('clearTempNodesOtherText');
+    if (clearTempNodesOtherText) clearTempNodesOtherText.textContent = i18n.clearTempNodesText[currentLang];
+    const clearAllOtherText = document.getElementById('clearAllOtherText');
+    if (clearAllOtherText) clearAllOtherText.textContent = i18n.clearAllText[currentLang];
 
     const canvasHelpModalTitle = document.getElementById('canvasHelpModalTitle');
     if (canvasHelpModalTitle) canvasHelpModalTitle.textContent = i18n.canvasHelpModalTitle[currentLang];
@@ -2975,12 +3030,11 @@ function applyLanguage() {
     const settingsToggle = document.getElementById('settingsToggle');
     if (settingsToggle) settingsToggle.setAttribute('aria-label', i18n.settingsTooltip[currentLang]);
 
-    const settingsThemeText = document.getElementById('settingsThemeText');
-    if (settingsThemeText) settingsThemeText.textContent = i18n.settingsThemeText[currentLang];
-    const settingsLanguageText = document.getElementById('settingsLanguageText');
-    if (settingsLanguageText) settingsLanguageText.textContent = i18n.settingsLanguageText[currentLang];
-    const settingsHelpText = document.getElementById('settingsHelpText');
-    if (settingsHelpText) settingsHelpText.textContent = i18n.settingsHelpText[currentLang];
+    const titleSettingsTooltip = document.getElementById('titleSettingsTooltip');
+    if (titleSettingsTooltip) titleSettingsTooltip.textContent = i18n.settingsTooltip[currentLang];
+    const titleSettingsToggleBtn = document.getElementById('titleSettingsToggleBtn');
+    if (titleSettingsToggleBtn) titleSettingsToggleBtn.setAttribute('aria-label', i18n.settingsTooltip[currentLang]);
+
     const settingsFloatText = document.getElementById('settingsFloatText');
     if (settingsFloatText) settingsFloatText.textContent = i18n.settingsFloatText[currentLang];
     const settingsFloatingToolsToggle = document.getElementById('settingsFloatingToolsToggle');
@@ -3013,6 +3067,14 @@ function applyLanguage() {
     });
     const settingsSidePanelText = document.getElementById('settingsSidePanelText');
     if (settingsSidePanelText) settingsSidePanelText.textContent = i18n.settingsSidePanelText[currentLang];
+    const settingsOtherManageText = document.getElementById('settingsOtherManageText');
+    if (settingsOtherManageText) settingsOtherManageText.textContent = i18n.settingsOtherManageText[currentLang];
+    const settingsThemeText = document.getElementById('settingsThemeText');
+    if (settingsThemeText) settingsThemeText.textContent = i18n.settingsThemeText[currentLang];
+    const settingsLanguageText = document.getElementById('settingsLanguageText');
+    if (settingsLanguageText) settingsLanguageText.textContent = i18n.settingsLanguageText[currentLang];
+    const settingsHelpText = document.getElementById('settingsHelpText');
+    if (settingsHelpText) settingsHelpText.textContent = i18n.settingsHelpText[currentLang];
     const canvasFloatingToggleMini = document.getElementById('canvasFloatingToggleMini');
     if (canvasFloatingToggleMini) {
         canvasFloatingToggleMini.title = i18n.floatingToolsMiniShowTitle[currentLang];
@@ -3023,6 +3085,10 @@ function applyLanguage() {
     if (quickAddTooltip) quickAddTooltip.textContent = i18n.quickAddTooltip[currentLang];
     const quickAddToggle = document.getElementById('quickAddToggle');
     if (quickAddToggle) quickAddToggle.setAttribute('aria-label', i18n.quickAddTooltip[currentLang]);
+    const titleQuickAddTooltip = document.getElementById('titleQuickAddTooltip');
+    if (titleQuickAddTooltip) titleQuickAddTooltip.textContent = i18n.quickAddTooltip[currentLang];
+    const titleQuickAddToggleBtn = document.getElementById('titleQuickAddToggleBtn');
+    if (titleQuickAddToggleBtn) titleQuickAddToggleBtn.setAttribute('aria-label', i18n.quickAddTooltip[currentLang]);
     const openCanvasPageTooltip = document.getElementById('openCanvasPageTooltip');
     if (openCanvasPageTooltip) openCanvasPageTooltip.textContent = i18n.openCanvasPageTooltip[currentLang];
     const openCanvasPageBtn = document.getElementById('openCanvasPageBtn');
@@ -3033,7 +3099,6 @@ function applyLanguage() {
     if (titleSidePanelToggleBtn) {
         const label = i18n.titleSidePanelToggleTooltip[currentLang];
         titleSidePanelToggleBtn.setAttribute('aria-label', label);
-        titleSidePanelToggleBtn.setAttribute('title', label);
     }
     const quickAddCurrentTitle = document.getElementById('quickAddCurrentTitle');
     if (quickAddCurrentTitle) quickAddCurrentTitle.textContent = i18n.quickAddCurrentTitle[currentLang];
@@ -3077,7 +3142,6 @@ function applyLanguage() {
     if (settingsThemeIcon) {
         settingsThemeIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
     }
-
     const canvasPerfSettingsText = document.getElementById('canvasPerfSettingsText');
     if (canvasPerfSettingsText) canvasPerfSettingsText.textContent = i18n.canvasPerfSettingsText[currentLang];
     if (typeof updateShortcutsDisplay === 'function') {
@@ -3089,7 +3153,6 @@ function applyLanguage() {
 // =============================================================================
 
 function setupSidePanelSettingsMenu() {
-    if (!isSidePanelMode) return;
     const toggle = document.getElementById('settingsToggle');
     const menu = document.getElementById('settingsMenu');
     const floatingToolsToggle = document.getElementById('settingsFloatingToolsToggle');
@@ -3158,22 +3221,7 @@ function setupSidePanelSettingsMenu() {
         const action = item.dataset.action || '';
 
         if (action === 'open-floating-toolbar') {
-            if (isSidePanelMode) {
-                toggleFloatingToolsPanel();
-                return;
-            }
-            closeMenu();
-            try {
-                if (typeof showBatchPanel === 'function') {
-                    showBatchPanel();
-                    return;
-                }
-            } catch (_) { }
-            try {
-                if (typeof window.showBatchPanel === 'function') {
-                    window.showBatchPanel();
-                }
-            } catch (_) { }
+            toggleFloatingToolsPanel();
             return;
         }
 
@@ -3181,30 +3229,51 @@ function setupSidePanelSettingsMenu() {
 
         if (action === 'toggle-theme') {
             const themeToggle = document.getElementById('themeToggle');
-            if (themeToggle) themeToggle.click();
+            if (themeToggle && typeof themeToggle.click === 'function') {
+                themeToggle.click();
+            }
             return;
         }
+
         if (action === 'toggle-language') {
             const langToggle = document.getElementById('langToggle');
-            if (langToggle) langToggle.click();
+            if (langToggle && typeof langToggle.click === 'function') {
+                langToggle.click();
+            }
             return;
         }
+
         if (action === 'open-help') {
             const helpToggle = document.getElementById('helpToggle');
-            if (helpToggle) helpToggle.click();
+            if (helpToggle && typeof helpToggle.click === 'function') {
+                helpToggle.click();
+            }
             return;
         }
+
         if (action === 'open-sidepanel-settings') {
             const sidePanelBtn = document.getElementById('canvasSidePanelSettingsBtn');
             if (sidePanelBtn && typeof sidePanelBtn.click === 'function') {
-                sidePanelBtn.click();
+                window.setTimeout(() => {
+                    try { sidePanelBtn.click(); } catch (_) { }
+                }, 0);
+            }
+            return;
+        }
+        if (action === 'open-other-manage') {
+            const otherBtn = document.getElementById('canvasOpenOtherManageBridgeBtn');
+            if (otherBtn && typeof otherBtn.click === 'function') {
+                window.setTimeout(() => {
+                    try { otherBtn.click(); } catch (_) { }
+                }, 0);
             }
             return;
         }
     });
 
     document.addEventListener('click', (e) => {
-        if (menu.contains(e.target) || toggle.contains(e.target)) return;
+        const titleSettingsBtn = document.getElementById('titleSettingsToggleBtn');
+        if (menu.contains(e.target) || toggle.contains(e.target) || (titleSettingsBtn && titleSettingsBtn.contains(e.target))) return;
         closeMenu();
     });
 
@@ -3256,6 +3325,33 @@ function setupOpenCanvasPageButton() {
             }
         } catch (_) { }
     });
+}
+
+function setupTitleSideTools() {
+    if (isSidePanelMode) return;
+
+    const titleSettingsBtn = document.getElementById('titleSettingsToggleBtn');
+    const settingsMenu = document.getElementById('settingsMenu');
+    if (titleSettingsBtn && settingsMenu && titleSettingsBtn.dataset.proxyBound !== 'true') {
+        titleSettingsBtn.dataset.proxyBound = 'true';
+        titleSettingsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const floatingToolsPanel = document.getElementById('floatingToolsModePanel');
+            const floatingToolsToggle = document.getElementById('settingsFloatingToolsToggle');
+            if (settingsMenu.hasAttribute('hidden')) {
+                settingsMenu.removeAttribute('hidden');
+                if (floatingToolsPanel && !floatingToolsPanel.hasAttribute('hidden')) {
+                    floatingToolsPanel.setAttribute('hidden', '');
+                }
+                if (floatingToolsToggle) {
+                    floatingToolsToggle.setAttribute('aria-expanded', 'false');
+                }
+            } else {
+                settingsMenu.setAttribute('hidden', '');
+            }
+        });
+    }
 }
 
 async function getCurrentWindowIdForSidePanelToggle() {
@@ -3423,29 +3519,57 @@ function setupTitleSidePanelToggleButton() {
     bootstrapState();
 }
 function setupQuickAddMenu() {
-    if (!isSidePanelMode) return;
     const toggle = document.getElementById('quickAddToggle');
+    const titleToggle = document.getElementById('titleQuickAddToggleBtn');
     const menu = document.getElementById('quickAddMenu');
     if (!toggle || !menu) return;
     if (menu.dataset.bound === 'true') return;
     menu.dataset.bound = 'true';
+
+    const quickAddCurrentTitle = document.getElementById('quickAddCurrentTitle');
+    const quickAddCurrentItems = menu.querySelectorAll('.quick-add-menu-item[data-action^="add-current-"]');
+    const quickAddDivider = menu.querySelector('.quick-add-menu-divider');
+
+    const syncQuickAddMenuSections = () => {
+        const hideCurrentGroup = !isSidePanelMode;
+        if (quickAddCurrentTitle) quickAddCurrentTitle.style.display = hideCurrentGroup ? 'none' : '';
+        quickAddCurrentItems.forEach((item) => {
+            item.style.display = hideCurrentGroup ? 'none' : '';
+        });
+        if (quickAddDivider) quickAddDivider.style.display = hideCurrentGroup ? 'none' : '';
+    };
 
     const closeMenu = () => {
         if (!menu.hasAttribute('hidden')) menu.setAttribute('hidden', '');
     };
 
     const openMenu = () => {
+        syncQuickAddMenuSections();
         menu.removeAttribute('hidden');
     };
 
-    toggle.addEventListener('click', (e) => {
-        e.stopPropagation();
+    syncQuickAddMenuSections();
+
+    const toggleMenu = () => {
         if (menu.hasAttribute('hidden')) {
             openMenu();
         } else {
             closeMenu();
         }
+    };
+
+    toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleMenu();
     });
+
+    if (titleToggle && titleToggle.dataset.bound !== 'true') {
+        titleToggle.dataset.bound = 'true';
+        titleToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleMenu();
+        });
+    }
 
     menu.addEventListener('click', async (e) => {
         const item = e.target && e.target.closest ? e.target.closest('.quick-add-menu-item') : null;
@@ -3461,7 +3585,8 @@ function setupQuickAddMenu() {
     });
 
     document.addEventListener('click', (e) => {
-        if (menu.contains(e.target) || toggle.contains(e.target)) return;
+        const inTitleToggle = titleToggle && titleToggle.contains(e.target);
+        if (menu.contains(e.target) || toggle.contains(e.target) || inTitleToggle) return;
         closeMenu();
     });
 
@@ -3788,6 +3913,7 @@ function initializeUI() {
     setupQuickAddMenu();
     setupOpenCanvasPageButton();
     setupTitleSidePanelToggleButton();
+    setupTitleSideTools();
 
     // 搜索
     const searchInputEl = document.getElementById('searchInput');

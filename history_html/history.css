@@ -195,8 +195,8 @@ body {
     flex-direction: column;
     justify-content: center;
     min-height: 0;
-    overflow: hidden;
-    /* Ensure content clips */
+    flex-shrink: 0;
+    overflow: visible;
 }
 
 .header-title-row {
@@ -204,6 +204,26 @@ body {
     align-items: center;
     gap: 8px;
     min-width: 0;
+    overflow: visible;
+}
+
+.title-side-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.title-row-tool-btn {
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    min-height: 30px;
+    border-radius: 7px;
+    flex: 0 0 30px;
+}
+
+html.side-panel-mode #titleSideTools {
+    display: none;
 }
 
 .header-left h1 {
@@ -294,6 +314,15 @@ html.side-panel-mode .header-left {
 html.side-panel-mode .tool-buttons #themeToggle,
 html.side-panel-mode .tool-buttons #langToggle,
 html.side-panel-mode .tool-buttons #helpToggle {
+    display: none;
+}
+
+html:not(.side-panel-mode) .tool-buttons #themeToggle,
+html:not(.side-panel-mode) .tool-buttons #langToggle,
+html:not(.side-panel-mode) .tool-buttons #helpToggle,
+html:not(.side-panel-mode) .tool-buttons #settingsToggle,
+html:not(.side-panel-mode) .tool-buttons #quickAddToggle,
+html:not(.side-panel-mode) .tool-buttons #openCanvasPageBtn {
     display: none;
 }
 
@@ -1053,10 +1082,39 @@ button *,
 .shortcuts-header-row {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: space-between;
     gap: 6px;
-    /* 文字与按钮之间稍微拉开一点，更明显 */
     margin-bottom: 4px;
+}
+
+.shortcuts-header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.shortcuts-jump-btn {
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--accent-primary);
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.shortcuts-jump-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+    color: var(--accent-hover);
+}
+
+.shortcuts-jump-btn i {
+    font-size: 11px;
 }
 
 .shortcuts-settings-btn {
