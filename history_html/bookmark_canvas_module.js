@@ -1456,6 +1456,7 @@ const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
     colors: {
         permanent: '#10b981',
         temp: TEMP_SECTION_DEFAULT_COLOR,
+        specialTemp: '#e9973f',
         mdNode: '#888888',
         edge: '#999999'
     },
@@ -1636,6 +1637,7 @@ function normalizeCanvasAppearanceSettings(input) {
     const colors = input.colors || {};
     out.colors.permanent = __normalizeAppearanceColor(colors.permanent, out.colors.permanent);
     out.colors.temp = __normalizeAppearanceColor(colors.temp, out.colors.temp);
+    out.colors.specialTemp = __normalizeAppearanceColor(colors.specialTemp, out.colors.specialTemp);
     out.colors.mdNode = __normalizeAppearanceColor(colors.mdNode, out.colors.mdNode);
     out.colors.edge = __normalizeAppearanceColor(colors.edge, out.colors.edge);
 
@@ -1715,6 +1717,13 @@ function shouldTempColorUnlockSync(settingsOverride = null) {
     return !(settings && settings.tempColorUnlockSync === false);
 }
 
+// [Special Temp 接入约定]
+// 新增“特殊临时栏目”时，建议只做这一步：为 section.source 分配稳定值，并加入下面集合。
+// 命中后会自动接入：
+// - 外观尺寸：sizes.specialTemp
+// - 外观颜色：colors.specialTemp
+// - 颜色锁行为：按特殊栏目规则处理
+// 兼容旧数据时，__isSpecialTempSection 仍会回退用 label 判定。
 const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add']);
 
 function __isSpecialTempSection(section) {
@@ -1774,11 +1783,9 @@ function __syncTempColorFollowLocksInDom() {
 
 function __resetAllTempSectionColorsToDefault() {
     if (!Array.isArray(CanvasState.tempSections)) return;
-    const defaultColor = getTempSectionDefaultColor();
     CanvasState.tempSections.forEach(section => {
         if (!section) return;
-        if (__isSpecialTempSection(section)) return;
-        updateTempSectionColor(section, defaultColor);
+        updateTempSectionColor(section, getTempSectionDefaultColor(section));
     });
     try { saveTempNodes(); } catch (_) { }
     const isEn = typeof currentLang !== 'undefined' && (currentLang === 'en' || currentLang === 'en_US' || currentLang === 'en-GB' || String(currentLang).toLowerCase().startsWith('en'));
@@ -2096,10 +2103,16 @@ function __syncPerfSettingsFromOtherMagnetPoints(magnetPoints) {
 function __getTempSectionSizeSettings(section) {
     const settings = getCanvasAppearanceSettings();
     const sizes = settings.sizes || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes;
+    // 只要被识别为“特殊临时栏目”，尺寸就自动切到 specialTemp。
     if (section && __isSpecialTempSection(section)) {
         return sizes.specialTemp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.specialTemp || sizes.temp;
     }
     return sizes.temp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.temp;
+}
+
+function getSpecialTempSectionDefaultColor() {
+    const settings = getCanvasAppearanceSettings();
+    return (settings.colors && settings.colors.specialTemp) ? settings.colors.specialTemp : '#e9973f';
 }
 
 function getTempSectionBaseSize(section = null) {
@@ -2119,7 +2132,11 @@ function getBlankNodeDefaultSize() {
     return { width: size.width, height: size.height };
 }
 
-function getTempSectionDefaultColor() {
+function getTempSectionDefaultColor(section = null) {
+    // 只要被识别为“特殊临时栏目”，默认颜色就自动切到 specialTemp。
+    if (section && __isSpecialTempSection(section)) {
+        return getSpecialTempSectionDefaultColor();
+    }
     const settings = getCanvasAppearanceSettings();
     return (settings.colors && settings.colors.temp) ? settings.colors.temp : TEMP_SECTION_DEFAULT_COLOR;
 }
@@ -3193,7 +3210,7 @@ function hasLockedAncestor(parentLabel, candidateLabel, labelMap) {
 
 function updateTempSectionColor(section, color) {
     if (!section) return;
-    section.color = color || getTempSectionDefaultColor();
+    section.color = color || getTempSectionDefaultColor(section);
     const element = document.getElementById(section.id);
     if (!element) return;
     const header = element.querySelector('.temp-node-header');
@@ -4276,7 +4293,7 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         title: sourceInfo,
         description: description,  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
-        color: pickTempSectionColor(),
+        color: getSpecialTempSectionDefaultColor(),
         colorLocked: true,
         x: dropX,
         y: dropY,
@@ -4675,7 +4692,7 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
         title: getDefaultTempSectionTitle(),
         sequenceNumber: sequenceNumber,
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
-        color: pickTempSectionColor(),
+        color: getSpecialTempSectionDefaultColor(),
         colorLocked: true,
         x: dropX,
         y: dropY,
@@ -4795,7 +4812,7 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
             title: getDefaultTempSectionTitle(),
             sequenceNumber: sequenceNumber,
             label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
-            color: pickTempSectionColor(),
+            color: getSpecialTempSectionDefaultColor(),
             colorLocked: true,
             x: dropX,
             y: dropY,
@@ -4896,7 +4913,7 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         title: sourceInfo,
         description: description,  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
-        color: pickTempSectionColor(),
+        color: getSpecialTempSectionDefaultColor(),
         colorLocked: true,
         x: dropX,
         y: dropY,
@@ -12318,7 +12335,7 @@ async function createTempNode(data, x, y) {
                 inheritedTitle = inheritedLabel;
             }
             if (!__isTempSectionColorLocked(parentSection)) {
-                inheritedColor = parentSection.color || getTempSectionDefaultColor();
+                inheritedColor = parentSection.color || getTempSectionDefaultColor(parentSection);
             }
             try {
                 const fallbackId = data.id || null;
@@ -12494,9 +12511,14 @@ function createEmptyTempSection(x, y, options = {}) {
     const source = (options && typeof options.source === 'string' && options.source.trim())
         ? options.source.trim()
         : '';
+    // 创建时按 source/label 先做一次特殊判定，确保默认颜色从一开始就正确。
+    const isSpecialSource = __isSpecialTempSection({
+        source: (options && typeof options.source === 'string') ? options.source : '',
+        label: (options && typeof options.label === 'string') ? options.label : ''
+    });
     const color = (options && typeof options.color === 'string' && options.color.trim())
         ? options.color.trim()
-        : pickTempSectionColor();
+        : (isSpecialSource ? getSpecialTempSectionDefaultColor() : pickTempSectionColor());
     const colorLocked = (options && typeof options.colorLocked === 'boolean')
         ? options.colorLocked
         : __getDefaultTempColorLockedState();
@@ -19625,7 +19647,7 @@ function renderTempNode(section, options = {}) {
         return;
     }
 
-    section.color = section.color || getTempSectionDefaultColor();
+    section.color = section.color || getTempSectionDefaultColor(section);
     const baseSize = getTempSectionBaseSize(section);
 
     let nodeElement = document.getElementById(section.id);
@@ -19684,12 +19706,12 @@ function renderTempNode(section, options = {}) {
     const pinnedState = section.pinned || false;
     nodeElement.style.zIndex = pinnedState ? '200' : '100';
     nodeElement.style.position = 'absolute'; // Ensure absolute positioning
-    nodeElement.style.setProperty('--section-color', section.color || getTempSectionDefaultColor());
+    nodeElement.style.setProperty('--section-color', section.color || getTempSectionDefaultColor(section));
 
     const header = document.createElement('div');
     header.className = 'temp-node-header';
     header.dataset.sectionId = section.id;
-    header.style.setProperty('--section-color', section.color || getTempSectionDefaultColor());
+    header.style.setProperty('--section-color', section.color || getTempSectionDefaultColor(section));
 
     // 创建标题容器（包含序号标签和标题输入框）
     const titleContainer = document.createElement('div');
@@ -19756,7 +19778,7 @@ function renderTempNode(section, options = {}) {
     const colorInput = document.createElement('input');
     colorInput.type = 'color';
     colorInput.className = 'temp-node-color-input md-color-input';
-    colorInput.value = section.color || getTempSectionDefaultColor();
+    colorInput.value = section.color || getTempSectionDefaultColor(section);
     colorInput.title = colorLabel;
 
     const isSpecialSource = __isSpecialTempSection(section);
@@ -19806,7 +19828,7 @@ function renderTempNode(section, options = {}) {
     const defaultChipEl = chipRow.querySelector('.temp-color-current-chip');
     const resolveHistoryColor = (value) => {
         const normalized = normalizeHexColor(value || '');
-        return normalized ? `#${normalized}` : getTempSectionDefaultColor();
+        return normalized ? `#${normalized}` : getTempSectionDefaultColor(section);
     };
     const syncHistoryChip = (value) => {
         if (!defaultChipEl) return;
@@ -19818,12 +19840,12 @@ function renderTempNode(section, options = {}) {
     };
     const updateColorHistory = (value) => {
         const safe = resolveHistoryColor(value);
-        const last = resolveHistoryColor(CanvasState.tempSectionLastColor || getTempSectionDefaultColor());
+        const last = resolveHistoryColor(CanvasState.tempSectionLastColor || getTempSectionDefaultColor(section));
         CanvasState.tempSectionPrevColor = last;
         CanvasState.tempSectionLastColor = safe;
-        syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor());
+        syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor(section));
     };
-    syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor());
+    syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor(section));
     if (lockBtn) {
         chipRow.appendChild(lockBtn);
     }
@@ -19849,7 +19871,7 @@ function renderTempNode(section, options = {}) {
             closeColorPopover();
             return;
         }
-        syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor());
+        syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor(section));
         colorPopover.classList.add('open');
         updateCanvasPopoverState(true);
 
@@ -19872,7 +19894,7 @@ function renderTempNode(section, options = {}) {
     closeBtn.addEventListener('click', () => removeTempNode(section.id));
 
     colorInput.addEventListener('input', (event) => {
-        const nextColor = event.target.value || getTempSectionDefaultColor();
+        const nextColor = event.target.value || getTempSectionDefaultColor(section);
         section.color = nextColor;
         applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
         propagateTempSectionColor(section, nextColor);
@@ -19891,7 +19913,7 @@ function renderTempNode(section, options = {}) {
             if (wasLocked && !nextLocked && shouldTempColorUnlockSync()) {
                 const parentSection = getParentTempSection(section);
                 if (parentSection && !__isTempSectionColorLocked(parentSection)) {
-                    const nextColor = parentSection.color || getTempSectionDefaultColor();
+                    const nextColor = parentSection.color || getTempSectionDefaultColor(parentSection);
                     section.color = nextColor;
                     applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
                     propagateTempSectionColor(section, nextColor);
@@ -19915,7 +19937,7 @@ function renderTempNode(section, options = {}) {
         }
 
         if (action === 'md-color-recent') {
-            const nextColor = (defaultChipEl && defaultChipEl.dataset.color) || getTempSectionDefaultColor();
+            const nextColor = (defaultChipEl && defaultChipEl.dataset.color) || getTempSectionDefaultColor(section);
             section.color = nextColor;
             applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
             propagateTempSectionColor(section, nextColor);
@@ -19927,7 +19949,7 @@ function renderTempNode(section, options = {}) {
 
         if (action === 'md-color-preset') {
             const preset = String(btn.getAttribute('data-color') || '').trim();
-            const nextColor = presetToHex(preset) || getTempSectionDefaultColor();
+            const nextColor = presetToHex(preset) || getTempSectionDefaultColor(section);
             section.color = nextColor;
             applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
             propagateTempSectionColor(section, nextColor);
@@ -20755,8 +20777,9 @@ function buildAdaptivePalette(baseColor, preferLightening) {
 
 function createTempSectionPalettes(color) {
     const normalizedValue = normalizeHexColor(color);
-    const normalizedColor = normalizedValue ? `#${normalizedValue}` : getTempSectionDefaultColor();
-    const sectionRgb = hexToRgb(normalizedColor) || hexToRgb(getTempSectionDefaultColor());
+    const fallbackColor = getTempSectionDefaultColor();
+    const normalizedColor = normalizedValue ? `#${normalizedValue}` : fallbackColor;
+    const sectionRgb = hexToRgb(normalizedColor) || hexToRgb(fallbackColor);
     const sectionLuminance = sectionRgb ? calculateRelativeLuminance(sectionRgb) : 0.5;
     const preferLightening = sectionLuminance < 0.45;
 
@@ -20767,9 +20790,9 @@ function createTempSectionPalettes(color) {
 }
 
 function applyTempSectionColor(section, nodeElement, header, colorButton, colorInput) {
-    const rawColor = section.color || getTempSectionDefaultColor();
+    const rawColor = section.color || getTempSectionDefaultColor(section);
     const normalizedValue = normalizeHexColor(rawColor);
-    const safeColor = normalizedValue ? `#${normalizedValue}` : getTempSectionDefaultColor();
+    const safeColor = normalizedValue ? `#${normalizedValue}` : getTempSectionDefaultColor(section);
     const palettes = createTempSectionPalettes(safeColor);
 
     if (nodeElement) {
@@ -30477,6 +30500,7 @@ function openCanvasAppearanceSettingsModal() {
         const target = row.dataset.colorTarget;
         if (target === 'permanent') __syncAppearanceColorRow(row, colors.permanent);
         if (target === 'temp') __syncAppearanceColorRow(row, colors.temp);
+        if (target === 'special-temp') __syncAppearanceColorRow(row, colors.specialTemp);
         if (target === 'blank') __syncAppearanceColorRow(row, colors.mdNode);
         if (target === 'edge') __syncAppearanceColorRow(row, colors.edge);
     });
@@ -30541,6 +30565,7 @@ function saveCanvasAppearanceSettings(options = {}) {
         colors: {
             permanent: (modal.querySelector('#appearanceColorPermanent') || {}).value,
             temp: (modal.querySelector('#appearanceColorTemp') || {}).value,
+            specialTemp: (modal.querySelector('#appearanceColorSpecialTemp') || {}).value,
             mdNode: (modal.querySelector('#appearanceColorBlank') || {}).value,
             edge: (modal.querySelector('#appearanceColorEdge') || {}).value
         },
@@ -30676,6 +30701,16 @@ function createCanvasAppearanceSettingsModal() {
                                 <div class="appearance-color-chips">${chipsHtml}</div>
                                 <span class="appearance-color-value" id="appearanceColorTempValue">#2563eb</span>
                                 <input type="color" id="appearanceColorTemp" class="appearance-color-input" data-color-target="temp">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Special Temp' : '特殊临时栏目'}</div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-color-row" data-color-target="special-temp">
+                                <div class="appearance-color-chips">${chipsHtml}</div>
+                                <span class="appearance-color-value" id="appearanceColorSpecialTempValue">#e9973f</span>
+                                <input type="color" id="appearanceColorSpecialTemp" class="appearance-color-input" data-color-target="special-temp">
                             </div>
                         </div>
                     </div>
@@ -31723,8 +31758,8 @@ function createCanvasOtherSettingsModal() {
             <div class="perf-help-popover" id="otherTempColorHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Global switch</b>: one-tap unify all temp locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special sources</b>: Drop / Search / Batch / Add are excluded from this color system.'
-            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊来源</b>：拖入 / 搜索 / 批量 / 添加不属于这套颜色系统。'}
+            ? '<b>Global switch</b>: one-tap unify normal temp locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special temp sections</b> (Drop / Search / Batch / Add) now use their own default color in Appearance.'
+            : '<b>全局开关</b>：一键统一普通临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加）现在使用外观中的独立默认颜色。'}
                 </div>
             </div>
             <div class="perf-help-popover" id="otherTempColorUnlockHelpPopover">
