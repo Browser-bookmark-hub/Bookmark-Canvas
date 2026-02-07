@@ -30384,6 +30384,7 @@ window.CanvasModule = {
     loadFolderChildren: loadFolderChildren,
     getTempSection: getTempSection,
     setZoom: setCanvasZoom,
+    getCanvasAppearanceSettings: getCanvasAppearanceSettings,
     temp: {
         getSection: getTempSection,
         findItem: findTempItemEntry,

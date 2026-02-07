@@ -3531,6 +3531,42 @@ function setupQuickAddMenu() {
     const quickAddAllItems = menu.querySelectorAll('.quick-add-menu-item');
     const quickAddDivider = menu.querySelector('.quick-add-menu-divider');
 
+    const setQuickAddMenuColorVars = () => {
+        try {
+            const appearanceGetter = window.CanvasModule && typeof window.CanvasModule.getCanvasAppearanceSettings === 'function'
+                ? window.CanvasModule.getCanvasAppearanceSettings
+                : null;
+            const settings = appearanceGetter ? appearanceGetter() : null;
+            const colors = settings && settings.colors ? settings.colors : null;
+            const tempColor = (colors && colors.specialTemp) || '#e9973f';
+            const permanentColor = (colors && colors.permanent) || '#10b981';
+            const blankColor = (colors && colors.mdNode) || '#888888';
+            menu.style.setProperty('--quick-add-special-temp-color', tempColor);
+            menu.style.setProperty('--quick-add-permanent-color', permanentColor);
+            menu.style.setProperty('--quick-add-blank-color', blankColor);
+        } catch (_) {
+            menu.style.setProperty('--quick-add-special-temp-color', '#e9973f');
+            menu.style.setProperty('--quick-add-permanent-color', '#10b981');
+            menu.style.setProperty('--quick-add-blank-color', '#888888');
+        }
+    };
+
+    quickAddAllItems.forEach((item) => {
+        const action = item && item.dataset ? item.dataset.action || '' : '';
+        if (!action) return;
+        if (action.endsWith('-temp')) {
+            item.dataset.kind = 'temp';
+            return;
+        }
+        if (action.endsWith('-permanent')) {
+            item.dataset.kind = 'permanent';
+            return;
+        }
+        if (action.endsWith('-blank')) {
+            item.dataset.kind = 'blank';
+        }
+    });
+
     const syncQuickAddMenuSections = (options = {}) => {
         const fromTitle = options && options.fromTitle === true;
         const hideCurrentGroup = fromTitle || !isSidePanelMode;
@@ -3554,10 +3590,12 @@ function setupQuickAddMenu() {
     };
 
     const openMenu = (options = {}) => {
+        setQuickAddMenuColorVars();
         syncQuickAddMenuSections(options);
         menu.removeAttribute('hidden');
     };
 
+    setQuickAddMenuColorVars();
     syncQuickAddMenuSections({ fromTitle: false });
 
     const toggleMenu = (options = {}) => {

@@ -792,9 +792,40 @@ html.side-panel-mode .tool-buttons .quick-add-btn {
     transition: background 0.15s ease;
 }
 
-.quick-add-menu-item i {
+.quick-add-menu-icon {
     width: 16px;
+    min-width: 16px;
     text-align: center;
+    font-weight: 700;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.quick-add-menu-icon-md {
+    font-size: 10px;
+    letter-spacing: 0.2px;
+}
+
+.quick-add-menu-icon-hash {
+    font-size: 14px;
+}
+
+.quick-add-menu-icon-special {
+    font-size: 13px;
+}
+
+.quick-add-menu-item[data-kind="temp"] {
+    color: var(--quick-add-special-temp-color, var(--text-primary));
+}
+
+.quick-add-menu-item[data-kind="permanent"] {
+    color: var(--quick-add-permanent-color, var(--text-primary));
+}
+
+.quick-add-menu-item[data-kind="blank"] {
+    color: var(--quick-add-blank-color, var(--text-primary));
 }
 
 .quick-add-menu-item:hover {
