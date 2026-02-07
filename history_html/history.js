@@ -1877,8 +1877,8 @@ const i18n = {
         'en': 'Add to Permanent'
     },
     quickAddCurrentBlankText: {
-        'zh_CN': '添加到空白栏目 (MD)',
-        'en': 'Add to Blank (MD)'
+        'zh_CN': '添加到空白栏目',
+        'en': 'Add to Blank'
     },
     quickAddWindowTempText: {
         'zh_CN': '全部加入特殊临时栏目',
@@ -1889,8 +1889,8 @@ const i18n = {
         'en': 'Add All to Permanent'
     },
     quickAddWindowBlankText: {
-        'zh_CN': '全部加入空白栏目 (MD)',
-        'en': 'Add All to Blank (MD)'
+        'zh_CN': '全部加入空白栏目',
+        'en': 'Add All to Blank'
     },
     navCanvas: {
         'zh_CN': '书签画布',
