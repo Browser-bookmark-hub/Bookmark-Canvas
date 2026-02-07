@@ -1869,8 +1869,8 @@ const i18n = {
         'en': 'Current Window'
     },
     quickAddCurrentTempText: {
-        'zh_CN': '添加到临时栏目',
-        'en': 'Add to Temp Section'
+        'zh_CN': '加入特殊临时栏目',
+        'en': 'Add to Special Temp'
     },
     quickAddCurrentPermanentText: {
         'zh_CN': '添加到永久栏目',
@@ -1881,8 +1881,8 @@ const i18n = {
         'en': 'Add to Blank (MD)'
     },
     quickAddWindowTempText: {
-        'zh_CN': '全部加入临时栏目',
-        'en': 'Add All to Temp'
+        'zh_CN': '全部加入特殊临时栏目',
+        'en': 'Add All to Special Temp'
     },
     quickAddWindowPermanentText: {
         'zh_CN': '全部加入永久栏目',
@@ -3528,13 +3528,23 @@ function setupQuickAddMenu() {
 
     const quickAddCurrentTitle = document.getElementById('quickAddCurrentTitle');
     const quickAddCurrentItems = menu.querySelectorAll('.quick-add-menu-item[data-action^="add-current-"]');
+    const quickAddAllItems = menu.querySelectorAll('.quick-add-menu-item');
     const quickAddDivider = menu.querySelector('.quick-add-menu-divider');
 
-    const syncQuickAddMenuSections = () => {
-        const hideCurrentGroup = !isSidePanelMode;
+    const syncQuickAddMenuSections = (options = {}) => {
+        const fromTitle = options && options.fromTitle === true;
+        const hideCurrentGroup = fromTitle || !isSidePanelMode;
         if (quickAddCurrentTitle) quickAddCurrentTitle.style.display = hideCurrentGroup ? 'none' : '';
         quickAddCurrentItems.forEach((item) => {
             item.style.display = hideCurrentGroup ? 'none' : '';
+        });
+        quickAddAllItems.forEach((item) => {
+            const action = item && item.dataset ? item.dataset.action || '' : '';
+            if (hideCurrentGroup && action.startsWith('add-current-')) {
+                item.style.display = 'none';
+                return;
+            }
+            item.style.display = '';
         });
         if (quickAddDivider) quickAddDivider.style.display = hideCurrentGroup ? 'none' : '';
     };
@@ -3543,16 +3553,16 @@ function setupQuickAddMenu() {
         if (!menu.hasAttribute('hidden')) menu.setAttribute('hidden', '');
     };
 
-    const openMenu = () => {
-        syncQuickAddMenuSections();
+    const openMenu = (options = {}) => {
+        syncQuickAddMenuSections(options);
         menu.removeAttribute('hidden');
     };
 
-    syncQuickAddMenuSections();
+    syncQuickAddMenuSections({ fromTitle: false });
 
-    const toggleMenu = () => {
+    const toggleMenu = (options = {}) => {
         if (menu.hasAttribute('hidden')) {
-            openMenu();
+            openMenu(options);
         } else {
             closeMenu();
         }
@@ -3560,14 +3570,14 @@ function setupQuickAddMenu() {
 
     toggle.addEventListener('click', (e) => {
         e.stopPropagation();
-        toggleMenu();
+        toggleMenu({ fromTitle: false });
     });
 
     if (titleToggle && titleToggle.dataset.bound !== 'true') {
         titleToggle.dataset.bound = 'true';
         titleToggle.addEventListener('click', (e) => {
             e.stopPropagation();
-            toggleMenu();
+            toggleMenu({ fromTitle: true });
         });
     }
 
@@ -3761,13 +3771,46 @@ async function addTabsToTempSection(tabs, scope) {
         try { showToast(msg); } catch (_) { }
         return;
     }
+
+    const isBatchMode = tabs.length > 1;
+    const specialSource = isBatchMode ? 'batch' : 'quick-add';
+    const specialLabel = isBatchMode
+        ? (currentLang === 'en' ? 'Batch' : '批量')
+        : (currentLang === 'en' ? 'Add' : '添加');
+
+    const isMatchingSpecialSection = (section) => {
+        if (!section) return false;
+        const source = typeof section.source === 'string' ? section.source.trim().toLowerCase() : '';
+        if (source === specialSource) return true;
+        const label = typeof section.label === 'string' ? section.label.trim().toLowerCase() : '';
+        if (isBatchMode) return label === '批量' || label === 'batch';
+        return label === '添加' || label === 'add';
+    };
+
     const targetId = getMaximizedTempSectionId();
-    let sectionId = targetId;
+    let sectionId = null;
+    if (targetId) {
+        try {
+            const sections = window.CanvasModule && window.CanvasModule.CanvasState && Array.isArray(window.CanvasModule.CanvasState.tempSections)
+                ? window.CanvasModule.CanvasState.tempSections
+                : [];
+            const targetSection = sections.find((section) => section && section.id === targetId);
+            if (isMatchingSpecialSection(targetSection)) {
+                sectionId = targetId;
+            }
+        } catch (_) { }
+    }
+
     if (!sectionId) {
         const pos = getCanvasCenterPoint();
         const title = buildSectionTitle(tabs, scope);
-        sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, { title, source: 'quick-add' });
+        sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, {
+            title,
+            label: specialLabel,
+            source: specialSource
+        });
     }
+
     tabs.forEach(item => {
         window.CanvasModule.temp.createBookmark(sectionId, '', item.title, item.url);
     });

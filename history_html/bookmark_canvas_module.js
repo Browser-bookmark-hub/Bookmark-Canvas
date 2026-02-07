@@ -1715,7 +1715,7 @@ function shouldTempColorUnlockSync(settingsOverride = null) {
     return !(settings && settings.tempColorUnlockSync === false);
 }
 
-const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch']);
+const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add']);
 
 function __isSpecialTempSection(section) {
     if (!section) return false;
@@ -1724,9 +1724,9 @@ function __isSpecialTempSection(section) {
     if (source && SPECIAL_TEMP_SOURCE_SET.has(source)) return true;
     const labelRaw = (typeof section.label === 'string') ? section.label.trim() : '';
     if (!labelRaw) return false;
-    if (labelRaw === '拖入' || labelRaw === '搜索' || labelRaw === '批量') return true;
+    if (labelRaw === '拖入' || labelRaw === '搜索' || labelRaw === '批量' || labelRaw === '添加') return true;
     const label = labelRaw.toLowerCase();
-    return label === 'drop' || label === 'search' || label === 'batch';
+    return label === 'drop' || label === 'search' || label === 'batch' || label === 'add';
 }
 
 function __isTempSectionColorLocked(section) {
@@ -30737,8 +30737,8 @@ function createCanvasAppearanceSettingsModal() {
         <div class="perf-help-popover" id="appearanceSpecialTempHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Special temp sections</b>: Drop / Search / Batch.<br><b>Tip</b>: Auto-fit is not recommended when you have many of these sections.'
-            : '<b>特殊临时栏目</b>：拖入 / 搜索 / 批量。<br><b>提示</b>：数量很多时不建议使用自适应。'}
+            ? '<b>Special temp sections</b>: Drop / Search / Batch / Add.<br><b>Tip</b>: Auto-fit is not recommended when you have many of these sections.'
+            : '<b>特殊临时栏目</b>：拖入 / 搜索 / 批量 / 添加。<br><b>提示</b>：数量很多时不建议使用自适应。'}
             </div>
         </div>
     `;
@@ -31723,8 +31723,8 @@ function createCanvasOtherSettingsModal() {
             <div class="perf-help-popover" id="otherTempColorHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Global switch</b>: one-tap unify all temp locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special sources</b>: Drop / Search / Batch are excluded from this color system.'
-            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊来源</b>：拖入 / 搜索 / 批量不属于这套颜色系统。'}
+            ? '<b>Global switch</b>: one-tap unify all temp locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special sources</b>: Drop / Search / Batch / Add are excluded from this color system.'
+            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊来源</b>：拖入 / 搜索 / 批量 / 添加不属于这套颜色系统。'}
                 </div>
             </div>
             <div class="perf-help-popover" id="otherTempColorUnlockHelpPopover">
