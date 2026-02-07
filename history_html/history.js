@@ -1813,8 +1813,8 @@ const i18n = {
         'en': 'Info & Shortcuts'
     },
     settingsFloatText: {
-        'zh_CN': '显示/隐藏',
-        'en': 'Show/Hide'
+        'zh_CN': '悬浮工具窗状态',
+        'en': 'Floating Tools Status'
     },
     floatingToolsModeNoneText: {
         'zh_CN': '不显示',
