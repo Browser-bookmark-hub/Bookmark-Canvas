@@ -3199,7 +3199,6 @@ function setupSidePanelSettingsMenu() {
     };
 
     toggle.addEventListener('click', (e) => {
-        e.stopPropagation();
         if (menu.hasAttribute('hidden')) {
             openMenu();
         } else {
@@ -3290,7 +3289,6 @@ function setupCanvasFloatingToolsMenu() {
 
     toggleBtn.addEventListener('click', (e) => {
         e.preventDefault();
-        e.stopPropagation();
         applySidePanelFloatingToolsMode(SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN);
     });
 }
@@ -3302,7 +3300,6 @@ function setupCanvasFloatingMiniToggle() {
 
     btn.addEventListener('click', (e) => {
         e.preventDefault();
-        e.stopPropagation();
         applySidePanelFloatingToolsMode(SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN);
     });
 }
@@ -3315,7 +3312,6 @@ function setupOpenCanvasPageButton() {
 
     btn.addEventListener('click', (e) => {
         e.preventDefault();
-        e.stopPropagation();
         try {
             const url = browserAPI?.runtime?.getURL
                 ? browserAPI.runtime.getURL('history_html/history.html?view=canvas')
@@ -3336,7 +3332,6 @@ function setupTitleSideTools() {
         titleSettingsBtn.dataset.proxyBound = 'true';
         titleSettingsBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            e.stopPropagation();
             const floatingToolsPanel = document.getElementById('floatingToolsModePanel');
             const floatingToolsToggle = document.getElementById('settingsFloatingToolsToggle');
             if (settingsMenu.hasAttribute('hidden')) {
@@ -3481,7 +3476,6 @@ function setupTitleSidePanelToggleButton() {
 
     btn.addEventListener('click', async (e) => {
         e.preventDefault();
-        e.stopPropagation();
         if (btn.dataset.loading === 'true') return;
         btn.dataset.loading = 'true';
 
@@ -3607,14 +3601,12 @@ function setupQuickAddMenu() {
     };
 
     toggle.addEventListener('click', (e) => {
-        e.stopPropagation();
         toggleMenu({ fromTitle: false });
     });
 
     if (titleToggle && titleToggle.dataset.bound !== 'true') {
         titleToggle.dataset.bound = 'true';
         titleToggle.addEventListener('click', (e) => {
-            e.stopPropagation();
             toggleMenu({ fromTitle: true });
         });
     }
