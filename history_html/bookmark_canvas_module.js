@@ -1443,7 +1443,9 @@ const MD_NODE_DEFAULT_HEIGHT = 300;
 
 // Canvas 外观设置（默认值）
 const CANVAS_APPEARANCE_SETTINGS_KEY = 'canvas-appearance-settings-v1';
+const CANVAS_MARKER_BADGE_COLOR_STORAGE_KEY = 'canvas_marker_badge_color_v1';
 const CANVAS_APPEARANCE_SETTINGS_VERSION = 3;
+const DEFAULT_MARKER_BADGE_COLOR = '#fbbc04';
 const LEGACY_TEMP_SECTION_DEFAULT_WIDTH = 420;
 const LEGACY_TEMP_SECTION_DEFAULT_WIDTH_V2 = 500;
 const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
@@ -1458,7 +1460,8 @@ const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
         temp: TEMP_SECTION_DEFAULT_COLOR,
         specialTemp: '#e9973f',
         mdNode: '#888888',
-        edge: '#999999'
+        edge: '#999999',
+        markerBadge: DEFAULT_MARKER_BADGE_COLOR
     },
     names: {
         temp: { mode: 'timestamp', manualValue: '' },
@@ -1640,6 +1643,7 @@ function normalizeCanvasAppearanceSettings(input) {
     out.colors.specialTemp = __normalizeAppearanceColor(colors.specialTemp, out.colors.specialTemp);
     out.colors.mdNode = __normalizeAppearanceColor(colors.mdNode, out.colors.mdNode);
     out.colors.edge = __normalizeAppearanceColor(colors.edge, out.colors.edge);
+    out.colors.markerBadge = __normalizeAppearanceColor(colors.markerBadge, out.colors.markerBadge);
 
     const names = input.names || {};
     const tempNames = names.temp || {};
@@ -2156,6 +2160,36 @@ function getPermanentSectionDefaultColor() {
     return (settings.colors && settings.colors.permanent) ? settings.colors.permanent : '#10b981';
 }
 
+function syncMarkerBadgeColorToBackgroundStorage(colorHex) {
+    try {
+        if (!browserAPI || !browserAPI.storage || !browserAPI.storage.local || typeof browserAPI.storage.local.set !== 'function') return;
+        browserAPI.storage.local.set({
+            [CANVAS_MARKER_BADGE_COLOR_STORAGE_KEY]: colorHex
+        }, () => {
+            try {
+                const err = browserAPI && browserAPI.runtime ? browserAPI.runtime.lastError : null;
+                if (err && err.message) {
+                    // ignore
+                }
+            } catch (_) { }
+        });
+    } catch (_) { }
+}
+
+function applyMarkerBadgeColorVars(color) {
+    const hex = __normalizeAppearanceColor(color, DEFAULT_MARKER_BADGE_COLOR);
+    const rgb = hexToRgb(hex) || { r: 251, g: 188, b: 4 };
+    const iconColor = lightenHexColor(hex, 0.22);
+    const iconColorDark = lightenHexColor(hex, 0.34);
+    const textColor = pickReadableTextColor(hex);
+    __setCssVar('--marker-badge-color', hex);
+    __setCssVar('--marker-badge-color-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+    __setCssVar('--marker-badge-icon-color', iconColor);
+    __setCssVar('--marker-badge-icon-color-dark', iconColorDark);
+    __setCssVar('--marker-badge-text-color', textColor);
+    syncMarkerBadgeColorToBackgroundStorage(hex);
+}
+
 function __setCssVar(name, value) {
     try {
         if (document && document.documentElement) {
@@ -2175,7 +2209,10 @@ function applyPermanentSectionColorVars(color) {
 
 function applyCanvasAppearanceSettings(settings, options = {}) {
     if (!settings) return;
+    const edgePreviewColor = __normalizeAppearanceColor(settings.colors && settings.colors.edge, '#999999');
     applyPermanentSectionColorVars(settings.colors && settings.colors.permanent);
+    applyMarkerBadgeColorVars(settings.colors && settings.colors.markerBadge);
+    __setCssVar('--appearance-edge-color-preview', edgePreviewColor);
     if (options && options.applyPermanentSize) {
         applyPermanentSectionSizeFromAppearance(settings, { force: true });
     }
@@ -30575,6 +30612,7 @@ function openCanvasAppearanceSettingsModal() {
         if (target === 'special-temp') __syncAppearanceColorRow(row, colors.specialTemp);
         if (target === 'blank') __syncAppearanceColorRow(row, colors.mdNode);
         if (target === 'edge') __syncAppearanceColorRow(row, colors.edge);
+        if (target === 'marker-badge') __syncAppearanceColorRow(row, colors.markerBadge || DEFAULT_MARKER_BADGE_COLOR);
     });
 
     const tempNameSelect = modal.querySelector('#appearanceTempNameMode');
@@ -30648,7 +30686,8 @@ function saveCanvasAppearanceSettings(options = {}) {
             temp: (modal.querySelector('#appearanceColorTemp') || {}).value,
             specialTemp: (modal.querySelector('#appearanceColorSpecialTemp') || {}).value,
             mdNode: (modal.querySelector('#appearanceColorBlank') || {}).value,
-            edge: (modal.querySelector('#appearanceColorEdge') || {}).value
+            edge: (modal.querySelector('#appearanceColorEdge') || {}).value,
+            markerBadge: (modal.querySelector('#appearanceColorMarkerBadge') || {}).value
         },
         names: {
             temp: {
@@ -30687,6 +30726,7 @@ function createCanvasAppearanceSettingsModal() {
         <span class="md-color-chip appearance-color-chip" data-color="#66bbff" style="background:#66bbff" title="${isEn ? 'Default Blue' : '默认蓝色'}"></span>
         <span class="md-color-chip appearance-color-chip" data-color="#fb464c" style="background:#fb464c"></span>
         <span class="md-color-chip appearance-color-chip" data-color="#e9973f" style="background:#e9973f"></span>
+        <span class="md-color-chip appearance-color-chip" data-color="#fbbc04" style="background:#fbbc04" title="${isEn ? 'Marker Yellow' : '标识黄色'}"></span>
         <span class="md-color-chip appearance-color-chip" data-color="#e0de71" style="background:#e0de71"></span>
         <span class="md-color-chip appearance-color-chip" data-color="#44cf6e" style="background:#44cf6e"></span>
         <span class="md-color-chip appearance-color-chip" data-color="#53dfdd" style="background:#53dfdd"></span>
@@ -30812,6 +30852,16 @@ function createCanvasAppearanceSettingsModal() {
                                 <div class="appearance-color-chips">${chipsHtml}</div>
                                 <span class="appearance-color-value" id="appearanceColorEdgeValue">#999999</span>
                                 <input type="color" id="appearanceColorEdge" class="appearance-color-input" data-color-target="edge">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Marker/Badge' : '标识/角标'}</div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-color-row" data-color-target="marker-badge">
+                                <div class="appearance-color-chips">${chipsHtml}</div>
+                                <span class="appearance-color-value" id="appearanceColorMarkerBadgeValue">${DEFAULT_MARKER_BADGE_COLOR}</span>
+                                <input type="color" id="appearanceColorMarkerBadge" class="appearance-color-input" data-color-target="marker-badge">
                             </div>
                         </div>
                     </div>

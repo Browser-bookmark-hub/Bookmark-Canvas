@@ -51,6 +51,12 @@
     --permanent-section-color: #10b981;
     --permanent-section-color-dark: #059669;
     --permanent-section-color-rgb: 16, 185, 129;
+    --marker-badge-color: #fbbc04;
+    --marker-badge-color-rgb: 251, 188, 4;
+    --marker-badge-icon-color: #fcd34d;
+    --marker-badge-icon-color-dark: #fde68a;
+    --marker-badge-text-color: #1f2937;
+    --appearance-edge-color-preview: #999999;
     --canvas-tip-bg: #e5e7eb;
     --canvas-tip-border: #d1d5db;
     --canvas-tip-blur: 0px;
@@ -5031,6 +5037,36 @@ html.side-panel-mode #editBookmarkModal .modal-body {
 .permanent-section-action-btn:hover {
     background: rgba(255, 255, 255, 0.3);
     transform: translateY(-1px);
+}
+
+.marker-action-btn.marker-has-markers {
+    background: rgba(var(--marker-badge-color-rgb, 251, 188, 4), 0.34);
+    border-color: rgba(var(--marker-badge-color-rgb, 251, 188, 4), 0.85);
+    box-shadow: 0 0 0 1px rgba(var(--marker-badge-color-rgb, 251, 188, 4), 0.65),
+        0 0 8px rgba(var(--marker-badge-color-rgb, 251, 188, 4), 0.38);
+    color: var(--marker-badge-icon-color, #fcd34d);
+}
+
+.marker-action-btn.marker-has-markers i {
+    color: inherit;
+    text-shadow: 0 0 4px rgba(var(--marker-badge-color-rgb, 251, 188, 4), 0.5);
+}
+
+.marker-action-btn.marker-has-markers:hover {
+    background: rgba(var(--marker-badge-color-rgb, 251, 188, 4), 0.5);
+    border-color: rgba(var(--marker-badge-color-rgb, 251, 188, 4), 1);
+}
+
+[data-theme="dark"] .marker-action-btn.marker-has-markers {
+    background: rgba(var(--marker-badge-color-rgb, 251, 188, 4), 0.4);
+    border-color: rgba(var(--marker-badge-color-rgb, 251, 188, 4), 0.95);
+    box-shadow: 0 0 0 1px rgba(var(--marker-badge-color-rgb, 251, 188, 4), 0.72),
+        0 0 10px rgba(var(--marker-badge-color-rgb, 251, 188, 4), 0.42);
+    color: var(--marker-badge-icon-color-dark, #fde68a);
+}
+
+[data-theme="dark"] .marker-action-btn.marker-has-markers i {
+    color: inherit;
 }
 
 .permanent-section-action-btn.pinned {

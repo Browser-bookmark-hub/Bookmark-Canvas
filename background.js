@@ -9,6 +9,186 @@ const browserAPI = (function () {
 })();
 
 const SIDE_PANEL_CANVAS_PATH = 'history_html/history.html?view=canvas&sidepanel=1';
+const MARKER_BADGE_TEXT_MAX = 99;
+const MARKER_BADGE_DEFAULT_BG = '#fbbc04';
+const MARKER_BADGE_COLOR_STORAGE_KEY = 'canvas_marker_badge_color_v1';
+const MARKER_SETTINGS_KEY = 'canvas_marker_settings_v1';
+
+function normalizeMarkerBadgeText(markerCount) {
+  const n = Number(markerCount);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n > MARKER_BADGE_TEXT_MAX) return `${MARKER_BADGE_TEXT_MAX}+`;
+  return String(Math.floor(n));
+}
+
+function normalizeHexColor(value, fallback = MARKER_BADGE_DEFAULT_BG) {
+  const raw = String(value || '').trim();
+  const six = raw.match(/^#?([0-9a-fA-F]{6})$/);
+  if (six) return `#${six[1].toUpperCase()}`;
+  const three = raw.match(/^#?([0-9a-fA-F]{3})$/);
+  if (three) {
+    const short = three[1].toUpperCase();
+    return `#${short[0]}${short[0]}${short[1]}${short[1]}${short[2]}${short[2]}`;
+  }
+  const fallbackSix = String(fallback || MARKER_BADGE_DEFAULT_BG).trim().match(/^#?([0-9a-fA-F]{6})$/);
+  if (fallbackSix) return `#${fallbackSix[1].toUpperCase()}`;
+  return MARKER_BADGE_DEFAULT_BG;
+}
+
+function hexToRgb(hex) {
+  const normalized = normalizeHexColor(hex);
+  const value = normalized.replace('#', '');
+  const num = Number.parseInt(value, 16);
+  if (!Number.isFinite(num)) return null;
+  return {
+    r: (num >> 16) & 0xff,
+    g: (num >> 8) & 0xff,
+    b: num & 0xff
+  };
+}
+
+function calculateRelativeLuminance(rgb) {
+  if (!rgb) return 1;
+  const toLinear = (channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : Math.pow((normalized + 0.055) / 1.055, 2.4);
+  };
+  const linearR = toLinear(rgb.r);
+  const linearG = toLinear(rgb.g);
+  const linearB = toLinear(rgb.b);
+  return (0.2126 * linearR) + (0.7152 * linearG) + (0.0722 * linearB);
+}
+
+function pickReadableTextColor(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return '#1F2937';
+  const luminance = calculateRelativeLuminance(rgb);
+  return luminance > 0.6 ? '#1F2937' : '#FFFFFF';
+}
+
+function setMarkerBadgeState(hasMarkers, markerCount, badgeColorHex = MARKER_BADGE_DEFAULT_BG) {
+  try {
+    if (!browserAPI?.action || typeof browserAPI.action.setBadgeText !== 'function') return;
+
+    const badgeBgColor = normalizeHexColor(badgeColorHex, MARKER_BADGE_DEFAULT_BG);
+    const badgeTextColor = pickReadableTextColor(badgeBgColor);
+    const text = hasMarkers ? normalizeMarkerBadgeText(markerCount) : '';
+    browserAPI.action.setBadgeText({ text }, () => {
+      try {
+        const err = browserAPI?.runtime?.lastError;
+        if (err && err.message) {
+          // ignore
+        }
+      } catch (_) { }
+    });
+
+    if (!text) return;
+
+    if (typeof browserAPI.action.setBadgeBackgroundColor === 'function') {
+      browserAPI.action.setBadgeBackgroundColor({ color: badgeBgColor }, () => {
+        try {
+          const err = browserAPI?.runtime?.lastError;
+          if (err && err.message) {
+            // ignore
+          }
+        } catch (_) { }
+      });
+    }
+    if (typeof browserAPI.action.setBadgeTextColor === 'function') {
+      browserAPI.action.setBadgeTextColor({ color: badgeTextColor }, () => {
+        try {
+          const err = browserAPI?.runtime?.lastError;
+          if (err && err.message) {
+            // ignore
+          }
+        } catch (_) { }
+      });
+    }
+  } catch (_) { }
+}
+
+let markerBadgeStateCache = { hasMarkers: null, markerCount: null, badgeColor: null };
+
+function countChangeLogEntries(rawLog) {
+  if (!rawLog || typeof rawLog !== 'object') return 0;
+  const changes = rawLog.changes;
+  if (!changes || typeof changes !== 'object') return 0;
+  return Object.keys(changes).length;
+}
+
+function countActiveRecentMovedEntries(rawList) {
+  if (!Array.isArray(rawList) || rawList.length === 0) return 0;
+  const now = Date.now();
+  const activeIds = new Set();
+  rawList.forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+    const key = item.id != null ? String(item.id) : '';
+    if (!key) return;
+    if (typeof item.expiry === 'number' && Number.isFinite(item.expiry) && item.expiry <= now) return;
+    activeIds.add(key);
+  });
+  return activeIds.size;
+}
+
+function evaluateMarkerBadgeStateFromStorageSnapshot(snapshot) {
+  const markerSettings = snapshot && snapshot[MARKER_SETTINGS_KEY];
+  const markerEnabled = !(markerSettings && typeof markerSettings === 'object' && markerSettings.enabled === false);
+  if (!markerEnabled) {
+    return { hasMarkers: false, markerCount: 0 };
+  }
+
+  const changeCount = countChangeLogEntries(snapshot && snapshot[CANVAS_CHANGE_LOG_KEY]);
+  if (changeCount > 0) {
+    return { hasMarkers: true, markerCount: changeCount };
+  }
+
+  const movedCount = countActiveRecentMovedEntries(snapshot && snapshot[RECENT_MOVED_IDS_KEY]);
+  if (movedCount > 0) {
+    return { hasMarkers: true, markerCount: movedCount };
+  }
+
+  return { hasMarkers: false, markerCount: 0 };
+}
+
+function applyMarkerBadgeStateIfNeeded(state) {
+  const normalized = {
+    hasMarkers: !!(state && state.hasMarkers),
+    markerCount: Math.max(0, Math.floor(Number(state && state.markerCount) || 0)),
+    badgeColor: normalizeHexColor(state && state.badgeColor, MARKER_BADGE_DEFAULT_BG)
+  };
+
+  if (!normalized.hasMarkers) {
+    normalized.markerCount = 0;
+  }
+
+  if (
+    markerBadgeStateCache.hasMarkers === normalized.hasMarkers
+    && markerBadgeStateCache.markerCount === normalized.markerCount
+    && markerBadgeStateCache.badgeColor === normalized.badgeColor
+  ) {
+    return;
+  }
+
+  markerBadgeStateCache = normalized;
+  setMarkerBadgeState(normalized.hasMarkers, normalized.markerCount, normalized.badgeColor);
+}
+
+async function refreshMarkerBadgeFromStorage() {
+  try {
+    if (!browserAPI?.storage?.local) return;
+    const snapshot = await browserAPI.storage.local.get([
+      MARKER_SETTINGS_KEY,
+      CANVAS_CHANGE_LOG_KEY,
+      RECENT_MOVED_IDS_KEY,
+      MARKER_BADGE_COLOR_STORAGE_KEY
+    ]);
+    const state = evaluateMarkerBadgeStateFromStorageSnapshot(snapshot || {});
+    state.badgeColor = normalizeHexColor(snapshot && snapshot[MARKER_BADGE_COLOR_STORAGE_KEY], MARKER_BADGE_DEFAULT_BG);
+    applyMarkerBadgeStateIfNeeded(state);
+  } catch (_) { }
+}
 
 function initSidePanel() {
   if (!browserAPI?.sidePanel) return;
@@ -336,8 +516,17 @@ if (browserAPI?.runtime?.onInstalled) {
   browserAPI.runtime.onInstalled.addListener(() => {
     initSidePanel();
     refreshSidePanelOpenWindows().catch(() => {});
+    refreshMarkerBadgeFromStorage().catch(() => {});
   });
 }
+
+try {
+  if (browserAPI?.runtime?.onStartup?.addListener) {
+    browserAPI.runtime.onStartup.addListener(() => {
+      refreshMarkerBadgeFromStorage().catch(() => {});
+    });
+  }
+} catch (_) { }
 
 initSidePanel();
 registerSidePanelTogglePortListener();
@@ -577,6 +766,18 @@ if (browserAPI.bookmarks && browserAPI.bookmarks.onRemoved) {
     try {
       __updateChangeLogForRemove(id, removeInfo).catch(() => {});
     } catch (_) {}
+  });
+}
+
+if (browserAPI?.storage?.onChanged?.addListener) {
+  browserAPI.storage.onChanged.addListener((changes, areaName) => {
+    try {
+      if (areaName !== 'local' || !changes || typeof changes !== 'object') return;
+      if (!changes[CANVAS_CHANGE_LOG_KEY] && !changes[RECENT_MOVED_IDS_KEY] && !changes[MARKER_SETTINGS_KEY] && !changes[MARKER_BADGE_COLOR_STORAGE_KEY]) {
+        return;
+      }
+      refreshMarkerBadgeFromStorage().catch(() => {});
+    } catch (_) { }
   });
 }
 
@@ -943,3 +1144,5 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   sendResponse({ success: false, error: 'Unsupported action' });
 });
+
+refreshMarkerBadgeFromStorage().catch(() => {});

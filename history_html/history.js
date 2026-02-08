@@ -265,6 +265,7 @@ function resetPermanentSectionChangeMarkers() {
 const MARKER_SETTINGS_KEY = 'canvas_marker_settings_v1';
 const CANVAS_CHANGE_LOG_KEY = 'canvas_change_log_v1';
 const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
+const MARKER_ACTIVE_BUTTON_CLASS = 'marker-has-markers';
 const MARKER_PRESET_MINUTES = [60, 180, 360, 720, 1440, 4320, 10080];
 const DEFAULT_MARKER_SETTINGS = {
     enabled: true,
@@ -338,6 +339,67 @@ function isMarkerEnabled() {
 
 function getMarkerSettings() {
     return { ...canvasMarkerSettings };
+}
+
+function getActiveExplicitMovedCount() {
+    try {
+        if (!(explicitMovedIds instanceof Map) || explicitMovedIds.size === 0) return 0;
+        const now = Date.now();
+        let count = 0;
+        for (const [, expiry] of explicitMovedIds.entries()) {
+            if (typeof expiry !== 'number' || expiry > now) count += 1;
+        }
+        return count;
+    } catch (_) {
+        return 0;
+    }
+}
+
+function getMarkerAttentionState() {
+    if (!isMarkerEnabled()) return { hasMarkers: false, markerCount: 0 };
+
+    let markerCount = 0;
+    let hasMarkers = false;
+
+    try {
+        if (treeChangeMap instanceof Map && treeChangeMap.size > 0) {
+            markerCount = treeChangeMap.size;
+            hasMarkers = true;
+        }
+    } catch (_) { }
+
+    if (!hasMarkers) {
+        const movedCount = getActiveExplicitMovedCount();
+        if (movedCount > 0) {
+            markerCount = movedCount;
+            hasMarkers = true;
+        }
+    }
+
+    if (!hasMarkers) {
+        try {
+            if (canvasLazyChangeHints && canvasLazyChangeHints.hasAny) {
+                markerCount = 1;
+                hasMarkers = true;
+            }
+        } catch (_) { }
+    }
+
+    if (!hasMarkers) return { hasMarkers: false, markerCount: 0 };
+    const safeCount = Math.max(1, Math.min(999, Number(markerCount) || 1));
+    return { hasMarkers: true, markerCount: safeCount };
+}
+
+function syncMarkerAttentionIndicators(reason = '') {
+    void reason;
+    const state = getMarkerAttentionState();
+
+    try {
+        document.querySelectorAll('.marker-action-btn').forEach((btn) => {
+            if (!btn) return;
+            btn.classList.toggle(MARKER_ACTIVE_BUTTON_CLASS, state.hasMarkers);
+        });
+    } catch (_) { }
 }
 
 async function saveMarkerSettings() {
@@ -519,6 +581,7 @@ function updateMarkerControlsUI() {
             const listEl = document.getElementById('markerAutoClearList');
             if (listEl) listEl.style.display = 'none';
         }
+        syncMarkerAttentionIndicators('marker-controls-ui');
     } catch (_) { }
 }
 
@@ -548,6 +611,7 @@ async function clearMarkersAndSetBaseline(reason = 'manual') {
         schedulePersistExplicitMovedIds();
         resetPermanentSectionChangeMarkers();
         await renderTreeView(true);
+        syncMarkerAttentionIndicators('clear-markers');
         console.log('[Marker] 已清除标识并设为新基准:', reason);
     } catch (e) {
         console.warn('[Marker] 清除标识失败:', e);
@@ -582,6 +646,7 @@ window.__canvasMarkerControl = {
             } catch (_) { }
         }
         await renderTreeView(true);
+        syncMarkerAttentionIndicators('marker-enabled-toggle');
         try {
             if (typeof showToast === 'function') {
                 const msg = nextEnabled
@@ -2535,6 +2600,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadUserSettings();
     // 加载变化标识设置（含自动清除调度）
     await loadMarkerSettings();
+    syncMarkerAttentionIndicators('after-load-marker-settings');
 
     // 初始化 UI（此时currentView已经是正确的值）
     initializeUI();
@@ -2572,6 +2638,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await restoreExplicitMovedIdsFromStorage();
     // 加载后台变动日志（页面关闭期间的变动）
     await loadCanvasChangeLog();
+    syncMarkerAttentionIndicators('after-restore-and-log');
 
     // 先加载基础数据
     console.log('[初始化] 加载基础数据...');
@@ -2583,6 +2650,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 根据当前视图渲染
     await renderCurrentView();
+    syncMarkerAttentionIndicators('after-render-current-view');
 
     // 如果通过 window_marker.html 传入了定位参数，则在 Canvas 视图渲染后执行一次定位
     try {
@@ -6012,6 +6080,7 @@ async function renderTreeView(forceRefresh = false) {
     if (!treeContainer) {
         console.error('[renderTreeView] 容器元素未找到');
         isRenderingTree = false;
+        syncMarkerAttentionIndicators('render-no-container');
         return;
     }
 
@@ -6113,6 +6182,7 @@ async function renderTreeView(forceRefresh = false) {
 
         // 重置渲染标志并处理合并请求
         isRenderingTree = false;
+        syncMarkerAttentionIndicators('render-cached-fast');
         if (pendingRenderRequest !== null) {
             const pending = pendingRenderRequest;
             pendingRenderRequest = null;
@@ -6146,6 +6216,7 @@ async function renderTreeView(forceRefresh = false) {
                 </div>
             `;
             isRenderingTree = false;
+            syncMarkerAttentionIndicators('render-empty-tree');
             if (pendingRenderRequest !== null) {
                 const pending = pendingRenderRequest;
                 pendingRenderRequest = null;
@@ -6176,6 +6247,7 @@ async function renderTreeView(forceRefresh = false) {
                     permBody.scrollLeft = permScrollLeft;
                 }
                 isRenderingTree = false;
+                syncMarkerAttentionIndicators('render-cached-nochange-inplace');
                 if (pendingRenderRequest !== null) {
                     const pending = pendingRenderRequest;
                     pendingRenderRequest = null;
@@ -6214,6 +6286,7 @@ async function renderTreeView(forceRefresh = false) {
 
             // 重置渲染标志并处理合并请求
             isRenderingTree = false;
+            syncMarkerAttentionIndicators('render-cached-nochange');
             if (pendingRenderRequest !== null) {
                 const pending = pendingRenderRequest;
                 pendingRenderRequest = null;
@@ -6439,6 +6512,7 @@ async function renderTreeView(forceRefresh = false) {
 
         // 重置渲染标志
         isRenderingTree = false;
+        syncMarkerAttentionIndicators('render-finished');
 
         // 如果有待处理的渲染请求，处理它
         if (pendingRenderRequest !== null) {
@@ -6454,6 +6528,7 @@ async function renderTreeView(forceRefresh = false) {
 
         // 重置渲染标志
         isRenderingTree = false;
+        syncMarkerAttentionIndicators('render-error');
         pendingRenderRequest = null;
     });
 }
@@ -7611,7 +7686,11 @@ function scheduleCanvasPathBadgeRefresh(reason = '') {
     }
     pendingPathBadgeRefreshTimer = setTimeout(() => {
         pendingPathBadgeRefreshTimer = null;
-        refreshCanvasPathBadges(reason).catch(() => { });
+        refreshCanvasPathBadges(reason)
+            .catch(() => { })
+            .finally(() => {
+                syncMarkerAttentionIndicators(`path-badge-refresh:${reason || 'unknown'}`);
+            });
     }, 80);
 }
 
