@@ -4481,6 +4481,8 @@ a.tree-label.tree-bookmark-link:hover {
     justify-content: space-between;
     margin-bottom: 0;
     transform: translateY(-1.5px);
+    position: relative;
+    z-index: 2;
 }
 
 .permanent-section-title-left {
@@ -4524,6 +4526,7 @@ a.tree-label.tree-bookmark-link:hover {
 .permanent-section-marker-dropdown {
     position: relative;
     display: inline-flex;
+    z-index: 3;
 }
 
 .marker-dropdown-menu {
@@ -4535,7 +4538,7 @@ a.tree-label.tree-bookmark-link:hover {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
-    z-index: 1100;
+    z-index: 1300;
     padding: 6px;
     animation: dropdownFadeIn 0.15s ease-out;
     transform-origin: right top;
@@ -4817,6 +4820,7 @@ a.tree-label.tree-bookmark-link:hover {
     gap: 6px;
     margin-top: 6px;
     position: relative;
+    z-index: 1;
     width: calc(100% + 36px);
     margin-left: -18px;
     margin-right: -18px;
