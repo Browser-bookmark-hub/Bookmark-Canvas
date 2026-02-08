@@ -887,10 +887,23 @@ html.side-panel-mode .tool-buttons .quick-add-btn {
     transform: rotate(180deg);
 }
 
+.settings-floating-tools-dropdown {
+    position: relative;
+}
+
 .floating-tools-mode-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
     display: flex;
     justify-content: center;
-    padding: 4px 8px 8px;
+    padding: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-lg);
+    z-index: 230;
 }
 
 .floating-tools-mode-panel[hidden] {
@@ -900,7 +913,7 @@ html.side-panel-mode .tool-buttons .quick-add-btn {
 .floating-tools-mode-switch {
     display: inline-flex;
     align-items: stretch;
-    width: min(100%, 192px);
+    width: 192px;
     border: 1px solid var(--border-color);
     border-radius: 8px;
     overflow: hidden;
@@ -961,6 +974,115 @@ html.side-panel-mode .tool-buttons .quick-add-btn {
     height: 1px;
     background: var(--border-color);
     margin: 6px 4px;
+}
+
+.settings-storage-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0;
+}
+
+.settings-storage-block .settings-storage-split {
+    display: flex;
+    align-items: stretch;
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+    background: transparent;
+}
+
+.settings-storage-block .settings-storage-split-btn {
+    flex: 1;
+    min-height: 32px;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    font-size: 13px;
+    color: var(--text-primary);
+    gap: 10px;
+    justify-content: flex-start;
+    align-items: center;
+}
+
+.settings-storage-block .settings-storage-split-btn i {
+    width: 16px;
+    text-align: center;
+    font-size: inherit;
+    line-height: 1;
+    color: var(--text-secondary);
+}
+
+.settings-storage-block #importCanvasOtherBtn i {
+    transform: translateX(-2px);
+}
+
+.settings-storage-block .settings-storage-split-btn:hover {
+    background: var(--bg-tertiary);
+}
+
+.settings-storage-block .settings-storage-split-btn + .settings-storage-split-btn {
+    border-left: 1px solid var(--border-color);
+    border-radius: 0 8px 8px 0;
+}
+
+.settings-storage-block .settings-storage-split-btn:first-child {
+    border-radius: 8px 0 0 8px;
+}
+
+.settings-storage-block #clearMenuOtherBtn {
+    position: relative;
+    padding-right: 30px;
+}
+
+.settings-storage-block .settings-storage-item {
+    justify-content: flex-start;
+}
+
+.settings-storage-block #clearMenuOtherBtn,
+.settings-storage-block #clearMenuOtherBtn:hover {
+    color: var(--error);
+}
+
+.settings-storage-block #clearMenuOtherBtn i:first-child,
+.settings-storage-block #clearMenuOtherBtn:hover i:first-child {
+    color: var(--error);
+}
+
+.settings-storage-block #clearMenuOtherBtn .clear-dropdown-arrow {
+    right: 10px;
+    color: var(--error);
+}
+
+.settings-storage-block .clear-dropdown-menu {
+    left: 0;
+    right: 0;
+    top: calc(100% + 4px);
+    min-width: 0;
+    border-radius: 10px;
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-lg);
+}
+
+.settings-storage-block .clear-dropdown-item {
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 8px;
+}
+
+.settings-storage-block .clear-dropdown-item i {
+    width: 16px;
+    font-size: 12px;
+}
+
+.settings-storage-block .clear-dropdown-help-btn:hover {
+    background: var(--bg-tertiary);
+}
+
+.settings-storage-block .clear-dropdown-item-group .clear-rules-tooltip {
+    left: auto;
+    right: calc(100% + 8px);
 }
 
 button {

@@ -2900,9 +2900,6 @@ function applyLanguage() {
     if (canvasOtherManageGeneralSectionText) canvasOtherManageGeneralSectionText.textContent = i18n.canvasManageSectionGeneralText[currentLang];
     const canvasOtherManageOtherSectionText = document.getElementById('canvasOtherManageOtherSectionText');
     if (canvasOtherManageOtherSectionText) canvasOtherManageOtherSectionText.textContent = i18n.canvasManageSectionOtherText[currentLang];
-    const canvasOtherManageStorageSectionText = document.getElementById('canvasOtherManageStorageSectionText');
-    if (canvasOtherManageStorageSectionText) canvasOtherManageStorageSectionText.textContent = i18n.canvasManageSectionStorageText[currentLang];
-
     const canvasOtherPerfSettingsText = document.getElementById('canvasOtherPerfSettingsText');
     if (canvasOtherPerfSettingsText) canvasOtherPerfSettingsText.textContent = i18n.canvasPerfSettingsText[currentLang];
     const canvasOtherAppearanceSettingsText = document.getElementById('canvasOtherAppearanceSettingsText');
@@ -3243,6 +3240,13 @@ function setupSidePanelSettingsMenu() {
             return;
         }
 
+        const storageBtn = e.target && e.target.closest ? e.target.closest('#settingsStorageSyncBlock button') : null;
+        if (storageBtn && menu.contains(storageBtn)) {
+            const keepOpen = storageBtn.id === 'clearMenuOtherBtn' || storageBtn.id === 'clearTempNodesOtherHelpBtn';
+            if (!keepOpen) closeMenu();
+            return;
+        }
+
         const item = e.target && e.target.closest ? e.target.closest('.settings-menu-item') : null;
         if (!item) return;
         const action = item.dataset.action || '';
@@ -3298,15 +3302,28 @@ function setupSidePanelSettingsMenu() {
         }
     });
 
+    if (floatingToolsPanel && floatingToolsPanel.dataset.modeBound !== 'true') {
+        floatingToolsPanel.dataset.modeBound = 'true';
+        floatingToolsPanel.addEventListener('click', (e) => {
+            const modeBtn = e.target && e.target.closest ? e.target.closest('.floating-tools-mode-btn') : null;
+            if (!modeBtn || !floatingToolsPanel.contains(modeBtn)) return;
+            e.stopPropagation();
+            const mode = modeBtn.dataset.mode || SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+            applySidePanelFloatingToolsMode(mode);
+        });
+    }
+
     document.addEventListener('click', (e) => {
         const titleSettingsBtn = document.getElementById('titleSettingsToggleBtn');
         if (menu.contains(e.target) || toggle.contains(e.target) || (titleSettingsBtn && titleSettingsBtn.contains(e.target))) return;
+        if (floatingToolsPanel && !floatingToolsPanel.hasAttribute('hidden') && floatingToolsPanel.contains(e.target)) return;
         closeMenu();
     });
 
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') closeMenu();
     });
+
 }
 
 function setupCanvasFloatingToolsMenu() {

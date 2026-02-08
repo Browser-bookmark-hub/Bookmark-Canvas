@@ -132,36 +132,106 @@
             </div>
             <!-- 侧边栏模式：设置菜单 -->
             <div id="settingsMenu" class="settings-menu" hidden>
-                <button class="settings-menu-item settings-menu-item-expandable" data-action="open-floating-toolbar"
-                    id="settingsFloatingToolsToggle" type="button" aria-expanded="false">
-                    <i class="fas fa-wrench"></i>
-                    <span id="settingsFloatText"></span>
-                    <i class="fas fa-chevron-down settings-submenu-caret" aria-hidden="true"></i>
-                </button>
-                <div class="floating-tools-mode-panel" id="floatingToolsModePanel" hidden>
-                    <div class="floating-tools-mode-switch" id="floatingToolsModeSwitch" role="group"
-                        aria-label="显示/隐藏">
-                        <button class="floating-tools-mode-btn" id="floatingToolsModeNoneBtn"
-                            data-action="set-floating-toolbar-mode" data-mode="none" type="button"
-                            aria-pressed="false" title="不显示">
-                            <span id="floatingToolsModeNoneText" data-floating-mode-text="none">不显示</span>
-                        </button>
-                        <button class="floating-tools-mode-btn" id="floatingToolsModeHiddenBtn"
-                            data-action="set-floating-toolbar-mode" data-mode="hidden" type="button"
-                            aria-pressed="false" title="隐藏">
-                            <span id="floatingToolsModeHiddenText" data-floating-mode-text="hidden">隐藏</span>
-                        </button>
-                        <button class="floating-tools-mode-btn" id="floatingToolsModeShownBtn"
-                            data-action="set-floating-toolbar-mode" data-mode="shown" type="button"
-                            aria-pressed="false" title="显示">
-                            <span id="floatingToolsModeShownText" data-floating-mode-text="shown">显示</span>
-                        </button>
+                <div class="settings-floating-tools-dropdown">
+                    <button class="settings-menu-item settings-menu-item-expandable" data-action="open-floating-toolbar"
+                        id="settingsFloatingToolsToggle" type="button" aria-expanded="false">
+                        <i class="fas fa-wrench"></i>
+                        <span id="settingsFloatText"></span>
+                        <i class="fas fa-chevron-down settings-submenu-caret" aria-hidden="true"></i>
+                    </button>
+                    <div class="floating-tools-mode-panel" id="floatingToolsModePanel" hidden>
+                        <div class="floating-tools-mode-switch" id="floatingToolsModeSwitch" role="group"
+                            aria-label="显示/隐藏">
+                            <button class="floating-tools-mode-btn" id="floatingToolsModeNoneBtn"
+                                data-action="set-floating-toolbar-mode" data-mode="none" type="button"
+                                aria-pressed="false" title="不显示">
+                                <span id="floatingToolsModeNoneText" data-floating-mode-text="none">不显示</span>
+                            </button>
+                            <button class="floating-tools-mode-btn" id="floatingToolsModeHiddenBtn"
+                                data-action="set-floating-toolbar-mode" data-mode="hidden" type="button"
+                                aria-pressed="false" title="隐藏">
+                                <span id="floatingToolsModeHiddenText" data-floating-mode-text="hidden">隐藏</span>
+                            </button>
+                            <button class="floating-tools-mode-btn" id="floatingToolsModeShownBtn"
+                                data-action="set-floating-toolbar-mode" data-mode="shown" type="button"
+                                aria-pressed="false" title="显示">
+                                <span id="floatingToolsModeShownText" data-floating-mode-text="shown">显示</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <button class="settings-menu-item" data-action="open-sidepanel-settings" type="button">
                     <i class="fas fa-columns"></i>
                     <span id="settingsSidePanelText"></span>
                 </button>
+                <div class="settings-menu-divider" aria-hidden="true"></div>
+                <div class="settings-storage-block" id="settingsStorageSyncBlock">
+                    <div class="settings-storage-split" role="group" aria-label="导入导出">
+                        <button id="importCanvasOtherBtn" class="settings-menu-item settings-storage-split-btn" type="button">
+                            <i class="fas fa-file-import"></i>
+                            <span id="importCanvasOtherText">导入</span>
+                        </button>
+                        <button id="exportCanvasOtherBtn" class="settings-menu-item settings-storage-split-btn" type="button">
+                            <i class="fas fa-file-export"></i>
+                            <span id="exportCanvasOtherText">导出</span>
+                        </button>
+                    </div>
+                    <div class="canvas-clear-dropdown" id="canvasOtherClearDropdown">
+                        <button id="clearMenuOtherBtn" class="settings-menu-item settings-storage-item danger" type="button">
+                            <i class="fas fa-trash-alt"></i>
+                            <span id="clearMenuOtherText">清除</span>
+                            <i class="fas fa-chevron-down clear-dropdown-arrow"></i>
+                        </button>
+                        <div class="clear-dropdown-menu" id="clearDropdownOtherMenu" style="display: none;">
+                            <button class="clear-dropdown-item" id="clearByClickOtherBtn">
+                                <i class="fas fa-mouse-pointer"></i>
+                                <span id="clearByClickOtherText">点击清除</span>
+                            </button>
+                            <div class="clear-dropdown-item-group">
+                                <button class="clear-dropdown-item" id="clearTempNodesOtherBtn">
+                                    <i class="fas fa-eraser"></i>
+                                    <span id="clearTempNodesOtherText">清空未标注节点</span>
+                                </button>
+                                <button class="clear-dropdown-help-btn" id="clearTempNodesOtherHelpBtn" title="查看清除规则">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                                <div class="clear-rules-tooltip" id="clearRulesOtherTooltip" style="display: none;">
+                                    <div class="clear-rules-header">
+                                        <i class="fas fa-info-circle"></i>
+                                        <span id="clearRulesOtherTooltipTitle">清除规则</span>
+                                    </div>
+                                    <div class="clear-rules-content">
+                                        <div class="clear-rules-section">
+                                            <div class="clear-rules-section-title" id="clearRulesOtherWillClear">
+                                                会被清除：
+                                            </div>
+                                            <ul>
+                                                <li id="clearRuleOtherTemp"><strong>书签型临时栏目</strong>：无说明 + 默认标题 +
+                                                    无连接线
+                                                </li>
+                                                <li id="clearRuleOtherMd"><strong>空白栏目</strong>：内容为空 + 无连接线</li>
+                                            </ul>
+                                        </div>
+                                        <div class="clear-rules-section">
+                                            <div class="clear-rules-section-title" id="clearRulesOtherWillKeep">
+                                                会被保留：
+                                            </div>
+                                            <ul>
+                                                <li id="clearRuleOtherKeepDesc"><i class="fas fa-check"></i> 有说明文字</li>
+                                                <li id="clearRuleOtherKeepTitle"><i class="fas fa-check"></i> 标题被修改过</li>
+                                                <li id="clearRuleOtherKeepEdge"><i class="fas fa-check"></i> 有连接线</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <button class="clear-dropdown-item danger" id="clearAllOtherBtn">
+                                <i class="fas fa-broom"></i>
+                                <span id="clearAllOtherText">清除全部（永久栏目除外）</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 <button class="settings-menu-item" data-action="open-other-manage" type="button">
                     <i class="fas fa-sliders-h"></i>
                     <span id="settingsOtherManageText"></span>
@@ -694,77 +764,6 @@
                                         <i class="fas fa-keyboard"></i>
                                         <span id="canvasOtherShortcutSettingsText">快捷键</span>
                                     </button>
-                                    <div class="canvas-manage-section-title">
-                                        <span id="canvasOtherManageStorageSectionText">存储与同步</span>
-                                    </div>
-                                    <div class="canvas-manage-split-group" role="group" aria-label="存储与同步">
-                                        <button id="importCanvasOtherBtn" class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-left">
-                                            <i class="fas fa-file-import"></i>
-                                            <span id="importCanvasOtherText">导入</span>
-                                        </button>
-                                        <button id="exportCanvasOtherBtn" class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-right">
-                                            <i class="fas fa-file-export"></i>
-                                            <span id="exportCanvasOtherText">导出</span>
-                                        </button>
-                                    </div>
-                                    <div class="canvas-clear-dropdown" id="canvasOtherClearDropdown">
-                                        <button id="clearMenuOtherBtn" class="canvas-manage-btn danger">
-                                            <i class="fas fa-trash-alt"></i>
-                                            <span id="clearMenuOtherText">清除</span>
-                                            <i class="fas fa-chevron-down clear-dropdown-arrow"></i>
-                                        </button>
-                                        <div class="clear-dropdown-menu" id="clearDropdownOtherMenu" style="display: none;">
-                                            <button class="clear-dropdown-item" id="clearByClickOtherBtn">
-                                                <i class="fas fa-mouse-pointer"></i>
-                                                <span id="clearByClickOtherText">点击清除</span>
-                                            </button>
-                                            <div class="clear-dropdown-item-group">
-                                                <button class="clear-dropdown-item" id="clearTempNodesOtherBtn">
-                                                    <i class="fas fa-eraser"></i>
-                                                    <span id="clearTempNodesOtherText">清空未标注节点</span>
-                                                </button>
-                                                <button class="clear-dropdown-help-btn" id="clearTempNodesOtherHelpBtn"
-                                                    title="查看清除规则">
-                                                    <i class="fas fa-question-circle"></i>
-                                                </button>
-                                                <div class="clear-rules-tooltip" id="clearRulesOtherTooltip"
-                                                    style="display: none;">
-                                                    <div class="clear-rules-header">
-                                                        <i class="fas fa-info-circle"></i>
-                                                        <span id="clearRulesOtherTooltipTitle">清除规则</span>
-                                                    </div>
-                                                    <div class="clear-rules-content">
-                                                        <div class="clear-rules-section">
-                                                            <div class="clear-rules-section-title"
-                                                                id="clearRulesOtherWillClear">
-                                                                会被清除：
-                                                            </div>
-                                                            <ul>
-                                                                <li id="clearRuleOtherTemp"><strong>书签型临时栏目</strong>：无说明 + 默认标题 +
-                                                                    无连接线
-                                                                </li>
-                                                                <li id="clearRuleOtherMd"><strong>空白栏目</strong>：内容为空 + 无连接线</li>
-                                                            </ul>
-                                                        </div>
-                                                        <div class="clear-rules-section">
-                                                            <div class="clear-rules-section-title" id="clearRulesOtherWillKeep">
-                                                                会被保留：
-                                                            </div>
-                                                            <ul>
-                                                                <li id="clearRuleOtherKeepDesc"><i class="fas fa-check"></i> 有说明文字</li>
-                                                                <li id="clearRuleOtherKeepTitle"><i class="fas fa-check"></i> 标题被修改过</li>
-                                                                <li id="clearRuleOtherKeepEdge"><i class="fas fa-check"></i> 有连接线</li>
-                                                            </ul>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <button class="clear-dropdown-item danger" id="clearAllOtherBtn">
-                                                <i class="fas fa-broom"></i>
-                                                <span id="clearAllOtherText">清除全部（永久栏目除外）</span>
-                                            </button>
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
                         </div>
