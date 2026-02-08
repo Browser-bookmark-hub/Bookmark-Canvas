@@ -2974,8 +2974,6 @@ function applyLanguage() {
     if (canvasOtherAppearanceSettingsText) canvasOtherAppearanceSettingsText.textContent = i18n.canvasAppearanceSettingsText[currentLang];
     const canvasOtherSettingsManageText = document.getElementById('canvasOtherSettingsManageText');
     if (canvasOtherSettingsManageText) canvasOtherSettingsManageText.textContent = i18n.canvasOtherSettingsText[currentLang];
-    const canvasOtherSidePanelSettingsText = document.getElementById('canvasOtherSidePanelSettingsText');
-    if (canvasOtherSidePanelSettingsText) canvasOtherSidePanelSettingsText.textContent = i18n.canvasSidePanelSettingsText[currentLang];
     const canvasOtherShortcutSettingsText = document.getElementById('canvasOtherShortcutSettingsText');
     if (canvasOtherShortcutSettingsText) canvasOtherShortcutSettingsText.textContent = i18n.canvasShortcutSettingsText[currentLang];
     const importCanvasOtherText = document.getElementById('importCanvasOtherText');

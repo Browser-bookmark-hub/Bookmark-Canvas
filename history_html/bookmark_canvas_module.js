@@ -6010,7 +6010,6 @@ function setupCanvasSidePanelSettingsBtn() {
     };
 
     bindSidePanelBtn('canvasSidePanelSettingsBtn', 'canvasManageModal');
-    bindSidePanelBtn('canvasOtherSidePanelSettingsBtn', 'canvasOtherManageModal');
 }
 
 function setupCanvasShortcutsSettingsBtn() {
