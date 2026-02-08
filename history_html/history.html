@@ -550,36 +550,45 @@
                             </div>
                             <div class="canvas-manage-modal-body">
                                 <div class="canvas-manage-actions">
-                                    <button id="canvasSidePanelSettingsBtn" class="canvas-manage-btn"
-                                        style="margin-bottom: 8px;">
-                                        <i class="fas fa-columns"></i>
-                                        <span id="canvasSidePanelSettingsText">侧边栏</span>
-                                    </button>
-                                    <button id="canvasPerfSettingsBtn" class="canvas-manage-btn"
-                                        style="margin-bottom: 8px;">
-                                        <i class="fas fa-tachometer-alt"></i>
-                                        <span id="canvasPerfSettingsText">性能</span>
-                                    </button>
+                                    <div class="canvas-manage-section-title">
+                                        <span id="canvasManageGeneralSectionText">常规</span>
+                                    </div>
                                     <button id="canvasAppearanceSettingsBtn" class="canvas-manage-btn">
                                         <i class="fas fa-palette"></i>
                                         <span id="canvasAppearanceSettingsText">外观</span>
                                     </button>
+                                    <button id="canvasPerfSettingsBtn" class="canvas-manage-btn">
+                                        <i class="fas fa-tachometer-alt"></i>
+                                        <span id="canvasPerfSettingsText">性能</span>
+                                    </button>
+                                    <div class="canvas-manage-section-title">
+                                        <span id="canvasManageOtherSectionText">其他</span>
+                                    </div>
                                     <button id="canvasOtherSettingsBtn" class="canvas-manage-btn">
                                         <i class="fas fa-sliders-h"></i>
                                         <span id="canvasOtherSettingsText">其他</span>
+                                    </button>
+                                    <button id="canvasSidePanelSettingsBtn" class="canvas-manage-btn">
+                                        <i class="fas fa-columns"></i>
+                                        <span id="canvasSidePanelSettingsText">侧边栏</span>
                                     </button>
                                     <button id="canvasShortcutSettingsBtn" class="canvas-manage-btn">
                                         <i class="fas fa-keyboard"></i>
                                         <span id="canvasShortcutSettingsText">快捷键</span>
                                     </button>
-                                    <button id="importCanvasBtn" class="canvas-manage-btn">
-                                        <i class="fas fa-file-import"></i>
-                                        <span id="importCanvasText">导入</span>
-                                    </button>
-                                    <button id="exportCanvasBtn" class="canvas-manage-btn">
-                                        <i class="fas fa-file-export"></i>
-                                        <span id="exportCanvasText">导出</span>
-                                    </button>
+                                    <div class="canvas-manage-section-title">
+                                        <span id="canvasManageStorageSectionText">存储与同步</span>
+                                    </div>
+                                    <div class="canvas-manage-split-group" role="group" aria-label="存储与同步">
+                                        <button id="importCanvasBtn" class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-left">
+                                            <i class="fas fa-file-import"></i>
+                                            <span id="importCanvasText">导入</span>
+                                        </button>
+                                        <button id="exportCanvasBtn" class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-right">
+                                            <i class="fas fa-file-export"></i>
+                                            <span id="exportCanvasText">导出</span>
+                                        </button>
+                                    </div>
                                     <!-- 清除按钮组（主按钮 + 下拉菜单） -->
                                     <div class="canvas-clear-dropdown" id="canvasClearDropdown">
                                         <button id="clearMenuBtn" class="canvas-manage-btn danger">
@@ -659,31 +668,45 @@
                             </div>
                             <div class="canvas-manage-modal-body">
                                 <div class="canvas-manage-actions">
-                                    <button id="canvasOtherPerfSettingsBtn" class="canvas-manage-btn"
-                                        style="margin-bottom: 8px;">
-                                        <i class="fas fa-tachometer-alt"></i>
-                                        <span id="canvasOtherPerfSettingsText">性能</span>
-                                    </button>
+                                    <div class="canvas-manage-section-title">
+                                        <span id="canvasOtherManageGeneralSectionText">常规</span>
+                                    </div>
                                     <button id="canvasOtherAppearanceSettingsBtn" class="canvas-manage-btn">
                                         <i class="fas fa-palette"></i>
                                         <span id="canvasOtherAppearanceSettingsText">外观</span>
                                     </button>
+                                    <button id="canvasOtherPerfSettingsBtn" class="canvas-manage-btn">
+                                        <i class="fas fa-tachometer-alt"></i>
+                                        <span id="canvasOtherPerfSettingsText">性能</span>
+                                    </button>
+                                    <div class="canvas-manage-section-title">
+                                        <span id="canvasOtherManageOtherSectionText">其他</span>
+                                    </div>
                                     <button id="canvasOtherSettingsManageBtn" class="canvas-manage-btn">
                                         <i class="fas fa-sliders-h"></i>
                                         <span id="canvasOtherSettingsManageText">其他</span>
+                                    </button>
+                                    <button id="canvasOtherSidePanelSettingsBtn" class="canvas-manage-btn">
+                                        <i class="fas fa-columns"></i>
+                                        <span id="canvasOtherSidePanelSettingsText">侧边栏</span>
                                     </button>
                                     <button id="canvasOtherShortcutSettingsBtn" class="canvas-manage-btn">
                                         <i class="fas fa-keyboard"></i>
                                         <span id="canvasOtherShortcutSettingsText">快捷键</span>
                                     </button>
-                                    <button id="importCanvasOtherBtn" class="canvas-manage-btn">
-                                        <i class="fas fa-file-import"></i>
-                                        <span id="importCanvasOtherText">导入</span>
-                                    </button>
-                                    <button id="exportCanvasOtherBtn" class="canvas-manage-btn">
-                                        <i class="fas fa-file-export"></i>
-                                        <span id="exportCanvasOtherText">导出</span>
-                                    </button>
+                                    <div class="canvas-manage-section-title">
+                                        <span id="canvasOtherManageStorageSectionText">存储与同步</span>
+                                    </div>
+                                    <div class="canvas-manage-split-group" role="group" aria-label="存储与同步">
+                                        <button id="importCanvasOtherBtn" class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-left">
+                                            <i class="fas fa-file-import"></i>
+                                            <span id="importCanvasOtherText">导入</span>
+                                        </button>
+                                        <button id="exportCanvasOtherBtn" class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-right">
+                                            <i class="fas fa-file-export"></i>
+                                            <span id="exportCanvasOtherText">导出</span>
+                                        </button>
+                                    </div>
                                     <div class="canvas-clear-dropdown" id="canvasOtherClearDropdown">
                                         <button id="clearMenuOtherBtn" class="canvas-manage-btn danger">
                                             <i class="fas fa-trash-alt"></i>

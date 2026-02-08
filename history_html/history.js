@@ -2056,6 +2056,18 @@ const i18n = {
         'zh_CN': '其他',
         'en': 'Other'
     },
+    canvasManageSectionGeneralText: {
+        'zh_CN': '常规',
+        'en': 'General'
+    },
+    canvasManageSectionOtherText: {
+        'zh_CN': '其他',
+        'en': 'Other'
+    },
+    canvasManageSectionStorageText: {
+        'zh_CN': '存储与同步',
+        'en': 'Storage & Sync'
+    },
     canvasHelpBtnTitle: {
         'zh_CN': '说明',
         'en': 'Help'
@@ -2872,10 +2884,24 @@ function applyLanguage() {
     const canvasShortcutSettingsText = document.getElementById('canvasShortcutSettingsText');
     if (canvasShortcutSettingsText) canvasShortcutSettingsText.textContent = i18n.canvasShortcutSettingsText[currentLang];
 
+    const canvasManageGeneralSectionText = document.getElementById('canvasManageGeneralSectionText');
+    if (canvasManageGeneralSectionText) canvasManageGeneralSectionText.textContent = i18n.canvasManageSectionGeneralText[currentLang];
+    const canvasManageOtherSectionText = document.getElementById('canvasManageOtherSectionText');
+    if (canvasManageOtherSectionText) canvasManageOtherSectionText.textContent = i18n.canvasManageSectionOtherText[currentLang];
+    const canvasManageStorageSectionText = document.getElementById('canvasManageStorageSectionText');
+    if (canvasManageStorageSectionText) canvasManageStorageSectionText.textContent = i18n.canvasManageSectionStorageText[currentLang];
+
     const canvasManageModalTitle = document.getElementById('canvasManageModalTitle');
     if (canvasManageModalTitle) canvasManageModalTitle.textContent = i18n.canvasManageTitle[currentLang];
     const canvasOtherManageModalTitle = document.getElementById('canvasOtherManageModalTitle');
     if (canvasOtherManageModalTitle) canvasOtherManageModalTitle.textContent = i18n.canvasOtherManageTitle[currentLang];
+
+    const canvasOtherManageGeneralSectionText = document.getElementById('canvasOtherManageGeneralSectionText');
+    if (canvasOtherManageGeneralSectionText) canvasOtherManageGeneralSectionText.textContent = i18n.canvasManageSectionGeneralText[currentLang];
+    const canvasOtherManageOtherSectionText = document.getElementById('canvasOtherManageOtherSectionText');
+    if (canvasOtherManageOtherSectionText) canvasOtherManageOtherSectionText.textContent = i18n.canvasManageSectionOtherText[currentLang];
+    const canvasOtherManageStorageSectionText = document.getElementById('canvasOtherManageStorageSectionText');
+    if (canvasOtherManageStorageSectionText) canvasOtherManageStorageSectionText.textContent = i18n.canvasManageSectionStorageText[currentLang];
 
     const canvasOtherPerfSettingsText = document.getElementById('canvasOtherPerfSettingsText');
     if (canvasOtherPerfSettingsText) canvasOtherPerfSettingsText.textContent = i18n.canvasPerfSettingsText[currentLang];
@@ -2883,6 +2909,8 @@ function applyLanguage() {
     if (canvasOtherAppearanceSettingsText) canvasOtherAppearanceSettingsText.textContent = i18n.canvasAppearanceSettingsText[currentLang];
     const canvasOtherSettingsManageText = document.getElementById('canvasOtherSettingsManageText');
     if (canvasOtherSettingsManageText) canvasOtherSettingsManageText.textContent = i18n.canvasOtherSettingsText[currentLang];
+    const canvasOtherSidePanelSettingsText = document.getElementById('canvasOtherSidePanelSettingsText');
+    if (canvasOtherSidePanelSettingsText) canvasOtherSidePanelSettingsText.textContent = i18n.canvasSidePanelSettingsText[currentLang];
     const canvasOtherShortcutSettingsText = document.getElementById('canvasOtherShortcutSettingsText');
     if (canvasOtherShortcutSettingsText) canvasOtherShortcutSettingsText.textContent = i18n.canvasShortcutSettingsText[currentLang];
     const importCanvasOtherText = document.getElementById('importCanvasOtherText');

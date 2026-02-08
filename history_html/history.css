@@ -9454,16 +9454,45 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
 }
 
 .canvas-manage-modal-body {
-    padding: 10px;
+    padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
 }
 
 .canvas-manage-actions {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+}
+
+.canvas-manage-section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 2px 0;
+}
+
+.canvas-manage-section-title::before,
+.canvas-manage-section-title::after {
+    content: '';
+    height: 1px;
+    background: var(--border-color);
+}
+
+.canvas-manage-section-title::before {
+    flex: 1;
+}
+
+.canvas-manage-section-title::after {
+    flex: 999;
+}
+
+.canvas-manage-section-title span {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    letter-spacing: 0.2px;
+    white-space: nowrap;
 }
 
 .canvas-shortcuts-panel {
@@ -9482,10 +9511,11 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     align-items: center;
     gap: 8px;
     width: 100%;
+    min-height: 38px;
     padding: 10px 12px;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: 8px;
     cursor: pointer;
     font-size: 13px;
     color: var(--text-primary);
@@ -9505,21 +9535,36 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     flex-shrink: 0;
 }
 
-/* 调整导入/导出图标位置，使SVG内部的文件部分对齐，同时保持文字左对齐 */
-#importCanvasBtn i.fa-file-import {
-    margin-left: -2px;
-    margin-right: 2px;
-}
-
-#exportCanvasBtn i.fa-file-export {
-    margin-left: 2px;
-    margin-right: -2px;
-}
-
 .canvas-manage-btn span {
     position: relative;
     top: 0;
-    /* 文字向下微调 */
+}
+
+.canvas-manage-split-group {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg-secondary);
+}
+
+.canvas-manage-btn.canvas-manage-btn-split {
+    flex: 1;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    justify-content: center;
+    gap: 6px;
+}
+
+.canvas-manage-btn.canvas-manage-btn-split + .canvas-manage-btn.canvas-manage-btn-split {
+    border-left: 1px solid var(--border-color);
+}
+
+.canvas-manage-btn.canvas-manage-btn-split:hover {
+    background: var(--bg-tertiary);
+    border-color: transparent;
 }
 
 .canvas-manage-btn.danger {
