@@ -1486,7 +1486,11 @@ const TEMP_COLOR_LOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" a
 const TEMP_COLOR_UNLOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M17 9h-1V7a4 4 0 0 0-7.4-2.2 1 1 0 1 0 1.7 1A2 2 0 0 1 14 7v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm0 9H7v-7h10v7z"/></svg>';
 const DEFAULT_CANVAS_OTHER_SETTINGS = {
     autoLinkSplit: false, // 临时栏目分裂后自动连接
-    menuColorSync: true, // 目录栏颜色同步（跟随画布手动改色）
+    menuColorSync: true, // 兼容旧配置：目录栏颜色同步
+    menuDefaultColorSync: true, // 目录栏默认颜色（基础样式）同步
+    menuLocatableColorSync: true, // 目录栏可定位条目颜色同步
+    directoryCollapseMode: 'auto', // 目录栏折叠模式：auto / manual
+    directoryAutoCollapseWidth: 600, // 自动折叠阈值（px）
     tempColorFollow: true, // 临时栏目颜色跟随
     tempColorUnlockSync: false, // 解锁后立即继承父色
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
@@ -1671,7 +1675,28 @@ function normalizeCanvasOtherSettings(input) {
     const out = __cloneDefaultOtherSettings();
     if (!input || typeof input !== 'object') return out;
     if (typeof input.autoLinkSplit === 'boolean') out.autoLinkSplit = input.autoLinkSplit;
-    if (typeof input.menuColorSync === 'boolean') out.menuColorSync = input.menuColorSync;
+    const legacyMenuSync = (typeof input.menuColorSync === 'boolean') ? input.menuColorSync : null;
+    if (typeof input.menuDefaultColorSync === 'boolean') {
+        out.menuDefaultColorSync = input.menuDefaultColorSync;
+    } else if (legacyMenuSync !== null) {
+        out.menuDefaultColorSync = legacyMenuSync;
+    }
+    if (typeof input.menuLocatableColorSync === 'boolean') {
+        out.menuLocatableColorSync = input.menuLocatableColorSync;
+    } else if (legacyMenuSync !== null) {
+        out.menuLocatableColorSync = legacyMenuSync;
+    }
+    if (typeof input.directoryCollapseMode === 'string') {
+        const mode = input.directoryCollapseMode.toLowerCase();
+        if (mode === 'auto' || mode === 'manual') out.directoryCollapseMode = mode;
+    }
+    out.directoryAutoCollapseWidth = __clampNumber(
+        input.directoryAutoCollapseWidth,
+        320,
+        2000,
+        out.directoryAutoCollapseWidth
+    );
+    out.menuColorSync = !!out.menuLocatableColorSync;
     if (typeof input.tempColorFollow === 'boolean') out.tempColorFollow = input.tempColorFollow;
     if (typeof input.tempColorUnlockSync === 'boolean') out.tempColorUnlockSync = input.tempColorUnlockSync;
     if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
@@ -1730,13 +1755,28 @@ function shouldTempColorUnlockSync(settingsOverride = null) {
 
 let __sidebarMenuColorSyncTimer = null;
 
-function isSidebarMenuColorSyncEnabled(settingsOverride = null) {
+function isSidebarMenuDefaultColorSyncEnabled(settingsOverride = null) {
     const settings = settingsOverride || getCanvasOtherSettings();
-    return !!(settings && settings.menuColorSync);
+    if (!settings || typeof settings !== 'object') return true;
+    if (typeof settings.menuDefaultColorSync === 'boolean') return settings.menuDefaultColorSync;
+    if (typeof settings.menuColorSync === 'boolean') return settings.menuColorSync;
+    return true;
+}
+
+function isSidebarMenuLocatableColorSyncEnabled(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    if (!settings || typeof settings !== 'object') return true;
+    if (typeof settings.menuLocatableColorSync === 'boolean') return settings.menuLocatableColorSync;
+    if (typeof settings.menuColorSync === 'boolean') return settings.menuColorSync;
+    return true;
+}
+
+function isSidebarMenuColorSyncEnabled(settingsOverride = null) {
+    return isSidebarMenuLocatableColorSyncEnabled(settingsOverride);
 }
 
 function requestSidebarMenuColorSyncRefresh() {
-    if (!isSidebarMenuColorSyncEnabled()) return;
+    if (!isSidebarMenuLocatableColorSyncEnabled()) return;
     if (__sidebarMenuColorSyncTimer) {
         clearTimeout(__sidebarMenuColorSyncTimer);
     }
@@ -1852,6 +1892,16 @@ function __updateOtherTempColorFollowLock(modal, enabled) {
     const isOn = !!enabled;
     target.classList.toggle('is-enabled', isOn);
     target.innerHTML = isOn ? '<i class="fas fa-unlock"></i>' : '<i class="fas fa-lock"></i>';
+}
+
+function __updateOtherSidebarCollapseMode(modal) {
+    if (!modal) return;
+    const inputs = modal.querySelector('#otherSidebarAutoCollapseInputs');
+    if (!inputs) return;
+    const mode = __getAppearanceRadioValue(modal, 'other-sidebar-collapse-mode', 'auto');
+    const useAuto = mode === 'auto';
+    inputs.classList.toggle('is-disabled', !useAuto);
+    inputs.classList.toggle('is-hidden', !useAuto);
 }
 
 function shouldUseDefaultZoomCurve() {
@@ -31783,13 +31833,25 @@ function openCanvasAppearanceSettingsModal() {
 
     const otherSettings = getCanvasOtherSettings();
     const otherAutoLink = modal.querySelector('#otherAutoLinkSplit');
-    const otherMenuColorSync = modal.querySelector('#otherMenuColorSync');
+    const otherMenuDefaultColorSync = modal.querySelector('#otherMenuDefaultColorSync');
+    const otherMenuLocatableColorSync = modal.querySelector('#otherMenuLocatableColorSync');
     const otherColorFollow = modal.querySelector('#otherTempColorFollow');
     const otherUnlockSync = modal.querySelector('#otherTempColorUnlockSync');
+    const otherSidebarAutoWidth = modal.querySelector('#otherSidebarAutoCollapseWidth');
     if (otherAutoLink) otherAutoLink.checked = !!otherSettings.autoLinkSplit;
-    if (otherMenuColorSync) otherMenuColorSync.checked = !!otherSettings.menuColorSync;
+    if (otherMenuDefaultColorSync) {
+        otherMenuDefaultColorSync.checked = isSidebarMenuDefaultColorSyncEnabled(otherSettings);
+    }
+    if (otherMenuLocatableColorSync) {
+        otherMenuLocatableColorSync.checked = isSidebarMenuLocatableColorSyncEnabled(otherSettings);
+    }
     if (otherColorFollow) otherColorFollow.checked = !(otherSettings.tempColorFollow === false);
     if (otherUnlockSync) otherUnlockSync.checked = !(otherSettings.tempColorUnlockSync === false);
+    __setAppearanceRadioGroup(modal, 'other-sidebar-collapse-mode', (otherSettings.directoryCollapseMode || 'auto'));
+    if (otherSidebarAutoWidth) {
+        otherSidebarAutoWidth.value = __clampNumber(otherSettings.directoryAutoCollapseWidth, 320, 2000, 600);
+    }
+    __updateOtherSidebarCollapseMode(modal);
     __updateOtherTempColorFollowLock(modal, otherColorFollow && otherColorFollow.checked);
 
     modal.style.display = 'flex';
@@ -31903,26 +31965,50 @@ function createCanvasAppearanceSettingsModal() {
                 <div class="detail-section">
                     <div class="detail-section-title">${isEn ? 'Special' : '特殊'}</div>
                     <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Auto connect with edges after split' : '分裂后使用「连接线」自动连接'}</div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherAutoLinkSplit">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
                         <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Directory color sync' : '目录栏颜色同步'}</span>
-                            <button class="perf-help-btn" id="otherMenuColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                            <span>${isEn ? 'Directory locatable item color sync' : '目录栏可定位条目颜色同步'}</span>
+                            <button class="perf-help-btn" id="otherMenuLocatableColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
                         </div>
                         <div class="appearance-row-content">
                             <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherMenuColorSync">
+                                <input type="checkbox" id="otherMenuLocatableColorSync">
                                 <span class="other-toggle-slider"></span>
                             </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Directory default color sync' : '目录栏其他颜色同步'}</span>
+                            <button class="perf-help-btn" id="otherMenuDefaultColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherMenuDefaultColorSync">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Directory collapse mode' : '目录栏折叠方式'}</div>
+                        <div class="appearance-row-content appearance-row-content-inline">
+                            <div class="appearance-mode-toggle">
+                                <label class="appearance-radio">
+                                    <input type="radio" name="other-sidebar-collapse-mode" value="manual">
+                                    <span>${isEn ? 'Manual' : '手动折叠'}</span>
+                                </label>
+                                <label class="appearance-radio">
+                                    <input type="radio" name="other-sidebar-collapse-mode" value="auto">
+                                    <span>${isEn ? 'Auto' : '自动折叠'}</span>
+                                </label>
+                            </div>
+                            <div class="appearance-size-inputs" id="otherSidebarAutoCollapseInputs">
+                                <input type="number" id="otherSidebarAutoCollapseWidth" min="320" max="2000" step="10">
+                                <span>px</span>
+                            </div>
                         </div>
                     </div>
                     <div class="appearance-row">
@@ -31965,6 +32051,15 @@ function createCanvasAppearanceSettingsModal() {
                             <button class="perf-btn secondary other-mini-btn" id="otherTempColorResetBtn">
                                 ${isEn ? 'Reset to default' : '还原'}
                             </button>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Auto connect with edges after temp split' : '临时栏目分裂后使用「连接线」自动连接'}</div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherAutoLinkSplit">
+                                <span class="other-toggle-slider"></span>
+                            </label>
                         </div>
                     </div>
                 </div>
@@ -32140,11 +32235,18 @@ function createCanvasAppearanceSettingsModal() {
             : '<b>全局开关</b>：一键统一普通临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加）现在使用外观中的独立默认颜色。'}
             </div>
         </div>
-        <div class="perf-help-popover" id="otherMenuColorSyncHelpPopover">
+        <div class="perf-help-popover" id="otherMenuDefaultColorSyncHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Default colors</b>: Icons and base styles use the default colors you choose manually or in Appearance settings.<br><b>Locatable item colors</b>: Directory item title/number can follow each locatable item/card color on canvas, so per-item color changes are shown here.'
-            : '<b>默认颜色</b>：图标与基础样式使用你手动选择或外观设置里的默认颜色。<br><b>可定位条目颜色</b>：目录栏可定位条目的标题/序号可跟随画布上对应可定位条目与栏目卡片的颜色变化，并在此处显示。'}
+            ? '<b>Non-locatable entries</b>: Manages directory entries that cannot be located/jumped. This switch controls all remaining non-locatable parts outside the locatable-item switch.'
+            : '<b>不可定位跳转条目</b>：管理目录中不能定位/跳转的条目。这个开关只负责第二个开关之外的其余内容。'}
+            </div>
+        </div>
+        <div class="perf-help-popover" id="otherMenuLocatableColorSyncHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Locatable entries</b>: Manages all directory entries that can be located/jumped.'
+            : '<b>可定位跳转条目</b>：管理目录里所有可以定位/跳转的条目。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherTempColorUnlockHelpPopover">
@@ -32221,20 +32323,26 @@ function createCanvasAppearanceSettingsModal() {
         };
     })();
     const otherAutoLinkToggle = modal.querySelector('#otherAutoLinkSplit');
-    const otherMenuColorSyncToggle = modal.querySelector('#otherMenuColorSync');
+    const otherMenuDefaultColorSyncToggle = modal.querySelector('#otherMenuDefaultColorSync');
+    const otherMenuLocatableColorSyncToggle = modal.querySelector('#otherMenuLocatableColorSync');
+    const otherSidebarModeRadios = modal.querySelectorAll('input[name="other-sidebar-collapse-mode"]');
+    const otherSidebarAutoWidthInput = modal.querySelector('#otherSidebarAutoCollapseWidth');
     const otherColorFollowToggle = modal.querySelector('#otherTempColorFollow');
     const otherUnlockSyncToggle = modal.querySelector('#otherTempColorUnlockSync');
     const otherResetBtn = modal.querySelector('#otherTempColorResetBtn');
     const otherTempHelpBtn = modal.querySelector('#otherTempColorHelpBtn');
     const otherTempHelpPopover = modal.querySelector('#otherTempColorHelpPopover');
-    const otherMenuColorSyncHelpBtn = modal.querySelector('#otherMenuColorSyncHelpBtn');
-    const otherMenuColorSyncHelpPopover = modal.querySelector('#otherMenuColorSyncHelpPopover');
+    const otherMenuDefaultColorSyncHelpBtn = modal.querySelector('#otherMenuDefaultColorSyncHelpBtn');
+    const otherMenuDefaultColorSyncHelpPopover = modal.querySelector('#otherMenuDefaultColorSyncHelpPopover');
+    const otherMenuLocatableColorSyncHelpBtn = modal.querySelector('#otherMenuLocatableColorSyncHelpBtn');
+    const otherMenuLocatableColorSyncHelpPopover = modal.querySelector('#otherMenuLocatableColorSyncHelpPopover');
     const otherTempUnlockHelpBtn = modal.querySelector('#otherTempColorUnlockHelpBtn');
     const otherTempUnlockHelpPopover = modal.querySelector('#otherTempColorUnlockHelpPopover');
     const otherTempResetHelpBtn = modal.querySelector('#otherTempColorResetHelpBtn');
     const otherTempResetHelpPopover = modal.querySelector('#otherTempColorResetHelpPopover');
     bindClickHelpPopover(otherTempHelpBtn, otherTempHelpPopover);
-    bindClickHelpPopover(otherMenuColorSyncHelpBtn, otherMenuColorSyncHelpPopover);
+    bindClickHelpPopover(otherMenuDefaultColorSyncHelpBtn, otherMenuDefaultColorSyncHelpPopover);
+    bindClickHelpPopover(otherMenuLocatableColorSyncHelpBtn, otherMenuLocatableColorSyncHelpPopover);
     bindClickHelpPopover(otherTempUnlockHelpBtn, otherTempUnlockHelpPopover);
     bindClickHelpPopover(otherTempResetHelpBtn, otherTempResetHelpPopover);
 
@@ -32243,10 +32351,32 @@ function createCanvasAppearanceSettingsModal() {
             scheduleOtherSave();
         });
     }
-    if (otherMenuColorSyncToggle) {
-        otherMenuColorSyncToggle.addEventListener('change', () => {
+    if (otherMenuDefaultColorSyncToggle) {
+        otherMenuDefaultColorSyncToggle.addEventListener('change', () => {
             scheduleOtherSave();
         });
+    }
+    if (otherMenuLocatableColorSyncToggle) {
+        otherMenuLocatableColorSyncToggle.addEventListener('change', () => {
+            scheduleOtherSave();
+        });
+    }
+    if (otherSidebarModeRadios && otherSidebarModeRadios.length) {
+        otherSidebarModeRadios.forEach(radio => radio.addEventListener('change', () => {
+            __updateOtherSidebarCollapseMode(modal);
+            scheduleOtherSave();
+        }));
+    }
+    if (otherSidebarAutoWidthInput) {
+        const scheduleSidebarWidthSave = () => {
+            const n = parseInt(otherSidebarAutoWidthInput.value, 10);
+            if (Number.isFinite(n)) {
+                otherSidebarAutoWidthInput.value = String(__clampNumber(n, 320, 2000, 600));
+            }
+            scheduleOtherSave();
+        };
+        otherSidebarAutoWidthInput.addEventListener('input', scheduleSidebarWidthSave);
+        otherSidebarAutoWidthInput.addEventListener('change', scheduleSidebarWidthSave);
     }
     if (otherColorFollowToggle) {
         const applyGlobalToggle = (enabled) => {
@@ -32409,7 +32539,22 @@ function saveCanvasOtherSettings(options = {}) {
     const prevSettings = normalizeCanvasOtherSettings(getCanvasOtherSettings());
     const prevFollow = isTempColorFollowEnabled(prevSettings);
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
-    const menuColorSync = modal.querySelector('#otherMenuColorSync');
+    const menuDefaultColorSync = modal.querySelector('#otherMenuDefaultColorSync');
+    const menuLocatableColorSync = modal.querySelector('#otherMenuLocatableColorSync');
+    const sidebarCollapseMode = __getAppearanceRadioValue(modal, 'other-sidebar-collapse-mode', prevSettings.directoryCollapseMode || 'auto');
+    const sidebarAutoCollapseWidthInput = modal.querySelector('#otherSidebarAutoCollapseWidth');
+    const sidebarAutoCollapseWidthRaw = sidebarAutoCollapseWidthInput
+        ? parseInt(sidebarAutoCollapseWidthInput.value, 10)
+        : prevSettings.directoryAutoCollapseWidth;
+    const sidebarAutoCollapseWidth = __clampNumber(
+        sidebarAutoCollapseWidthRaw,
+        320,
+        2000,
+        prevSettings.directoryAutoCollapseWidth
+    );
+    if (sidebarAutoCollapseWidthInput) {
+        sidebarAutoCollapseWidthInput.value = String(sidebarAutoCollapseWidth);
+    }
     const colorFollow = modal.querySelector('#otherTempColorFollow');
     const unlockSync = modal.querySelector('#otherTempColorUnlockSync');
     const useDefaultCurve = modal.querySelector('#otherUseDefaultZoomCurve');
@@ -32418,7 +32563,14 @@ function saveCanvasOtherSettings(options = {}) {
     const defaultMagnets = __getDefaultMagnetPointsFromPerf();
     const settingsInput = {
         autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
-        menuColorSync: menuColorSync ? !!menuColorSync.checked : !!prevSettings.menuColorSync,
+        menuDefaultColorSync: menuDefaultColorSync
+            ? !!menuDefaultColorSync.checked
+            : isSidebarMenuDefaultColorSyncEnabled(prevSettings),
+        menuLocatableColorSync: menuLocatableColorSync
+            ? !!menuLocatableColorSync.checked
+            : isSidebarMenuLocatableColorSyncEnabled(prevSettings),
+        directoryCollapseMode: (sidebarCollapseMode === 'manual') ? 'manual' : 'auto',
+        directoryAutoCollapseWidth: sidebarAutoCollapseWidth,
         tempColorFollow: colorFollow ? !!colorFollow.checked : !(prevSettings.tempColorFollow === false),
         tempColorUnlockSync: unlockSync ? !!unlockSync.checked : !(prevSettings.tempColorUnlockSync === false),
         useDefaultZoomCurve: useDefault,
@@ -32429,6 +32581,9 @@ function saveCanvasOtherSettings(options = {}) {
     CanvasState.otherSettings = normalized;
     try {
         localStorage.setItem(CANVAS_OTHER_SETTINGS_KEY, JSON.stringify(normalized));
+    } catch (_) { }
+    try {
+        window.dispatchEvent(new CustomEvent('canvas-other-settings-updated', { detail: normalized }));
     } catch (_) { }
     const nextFollow = isTempColorFollowEnabled(normalized);
     if (prevFollow !== nextFollow) {

@@ -14,6 +14,7 @@
     blank: '#888888',
     edge: '#999999'
   });
+  const DIRECTORY_LOCATABLE_NEUTRAL_COLOR = '#888888';
   const IMPORT_DIRECTORY_NEUTRAL_COLOR = '#9aa0a6';
 
   let initialized = false;
@@ -156,7 +157,41 @@
     return normalizeHexColor(byPreset, null);
   }
 
-  function getAppearanceBaseColorTokens() {
+  function getDirectoryColorSyncFlags() {
+    let defaultColorSync = true;
+    let locatableColorSync = true;
+    try {
+      const module = getCanvasModule();
+      if (module && typeof module.getCanvasOtherSettings === 'function') {
+        const otherSettings = module.getCanvasOtherSettings();
+        const legacySync = (otherSettings && typeof otherSettings.menuColorSync === 'boolean')
+          ? otherSettings.menuColorSync
+          : null;
+
+        if (otherSettings && typeof otherSettings.menuDefaultColorSync === 'boolean') {
+          defaultColorSync = otherSettings.menuDefaultColorSync;
+        } else if (legacySync !== null) {
+          defaultColorSync = legacySync;
+        }
+
+        if (otherSettings && typeof otherSettings.menuLocatableColorSync === 'boolean') {
+          locatableColorSync = otherSettings.menuLocatableColorSync;
+        } else if (legacySync !== null) {
+          locatableColorSync = legacySync;
+        }
+      }
+    } catch (_) {
+      defaultColorSync = true;
+      locatableColorSync = true;
+    }
+
+    return {
+      defaultColorSync: !!defaultColorSync,
+      locatableColorSync: !!locatableColorSync
+    };
+  }
+
+  function getAppearanceThemeColorTokens() {
     const defaults = DIRECTORY_COLOR_DEFAULTS;
     let colors = null;
     try {
@@ -176,6 +211,20 @@
       blank: normalizeHexColor(colors && colors.mdNode, defaults.blank),
       edge: normalizeHexColor(colors && colors.edge, defaults.edge)
     };
+  }
+
+  function getAppearanceBaseColorTokens() {
+    const syncFlags = getDirectoryColorSyncFlags();
+    if (!syncFlags.defaultColorSync) {
+      return {
+        permanent: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
+        temp: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
+        specialTemp: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
+        blank: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
+        edge: DIRECTORY_LOCATABLE_NEUTRAL_COLOR
+      };
+    }
+    return getAppearanceThemeColorTokens();
   }
 
   function getDirectoryColorTokens() {
@@ -753,7 +802,6 @@
     const state = (options && options.state && typeof options.state === 'object')
       ? options.state
       : getCanvasState();
-    const module = getCanvasModule();
     const tempSections = Array.isArray(state && state.tempSections) ? state.tempSections.filter(Boolean) : [];
     const mdNodes = Array.isArray(state && state.mdNodes) ? state.mdNodes.filter(Boolean) : [];
     const edges = Array.isArray(state && state.edges) ? state.edges.filter(Boolean) : [];
@@ -761,51 +809,136 @@
     const importedOnly = !!(options && options.importedOnly);
     const enableGroupDelete = !(options && options.enableGroupDelete === false);
     const colorTokens = getAppearanceBaseColorTokens();
+    const locatableThemeTokens = getAppearanceThemeColorTokens();
+    const syncFlags = getDirectoryColorSyncFlags();
+    const defaultColorSync = !!syncFlags.defaultColorSync;
+    const locatableColorSync = !!syncFlags.locatableColorSync;
+    const tempSectionById = new Map();
+    tempSections.forEach((section) => {
+      const sectionId = normalizeText(section && section.id);
+      if (!sectionId) return;
+      tempSectionById.set(sectionId, section);
+    });
+    const mdNodeById = new Map();
+    mdNodes.forEach((node) => {
+      const nodeId = normalizeText(node && node.id);
+      if (!nodeId) return;
+      mdNodeById.set(nodeId, node);
+    });
+    const edgeById = new Map();
+    edges.forEach((edge) => {
+      const edgeId = normalizeText(edge && edge.id);
+      if (!edgeId) return;
+      edgeById.set(edgeId, edge);
+    });
 
-    let menuColorSync = false;
-    try {
-      if (module && typeof module.getCanvasOtherSettings === 'function') {
-        const otherSettings = module.getCanvasOtherSettings();
-        menuColorSync = !!(otherSettings && otherSettings.menuColorSync);
+    const getLocatableThemeColorByTarget = (target) => {
+      if (!target || typeof target !== 'object') return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
+      const kind = normalizeText(target.kind);
+      if (kind === 'permanent-main' || kind === 'permanent-copy') {
+        return locatableThemeTokens.permanent;
       }
-    } catch (_) {
-      menuColorSync = false;
-    }
+      if (kind === 'temp-section') {
+        const sectionId = normalizeText(target.sectionId);
+        const section = sectionId ? tempSectionById.get(sectionId) : null;
+        return isSpecialTempSection(section) ? locatableThemeTokens.specialTemp : locatableThemeTokens.temp;
+      }
+      if (kind === 'md-node') return locatableThemeTokens.blank;
+      if (kind === 'edge') return locatableThemeTokens.edge;
+      return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
+    };
+
+    const getLocatableLiveColorByTarget = (target) => {
+      if (!target || typeof target !== 'object') return null;
+      const kind = normalizeText(target.kind);
+      if (kind === 'temp-section') {
+        const sectionId = normalizeText(target.sectionId);
+        const section = sectionId ? tempSectionById.get(sectionId) : null;
+        return normalizeHexColor(section && section.color, null);
+      }
+      if (kind === 'md-node') {
+        const nodeId = normalizeText(target.nodeId);
+        const node = nodeId ? mdNodeById.get(nodeId) : null;
+        return resolveNodeCustomColor(node);
+      }
+      if (kind === 'edge') {
+        const edgeId = normalizeText(target.edgeId);
+        const edge = edgeId ? edgeById.get(edgeId) : null;
+        return resolveNodeCustomColor(edge);
+      }
+      return null;
+    };
+
+    const applyDirectoryColorControl = (nodes) => {
+      const walk = (node) => {
+        if (!node || typeof node !== 'object') return;
+        const isLocatableNode = !!node.target && !node.placeholder;
+
+        if (isLocatableNode) {
+          const themeColor = getLocatableThemeColorByTarget(node.target);
+          if (!locatableColorSync) {
+            node.color = DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
+            node.defaultColor = DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
+          } else {
+            const liveColor = getLocatableLiveColorByTarget(node.target);
+            node.color = liveColor || themeColor;
+            node.defaultColor = themeColor;
+          }
+        } else if (!defaultColorSync) {
+          node.color = DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
+          node.defaultColor = DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
+        }
+
+        if (Array.isArray(node.children) && node.children.length) {
+          node.children.forEach(walk);
+        }
+      };
+
+      if (!Array.isArray(nodes)) return nodes;
+      nodes.forEach(walk);
+      return nodes;
+    };
 
     const resolveTempSectionColor = (section) => {
+      if (!locatableColorSync) return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
       const live = normalizeHexColor(section && section.color, null);
-      if (menuColorSync && live) return live;
-      return isSpecialTempSection(section) ? colorTokens.specialTemp : colorTokens.temp;
+      if (live) return live;
+      return isSpecialTempSection(section) ? locatableThemeTokens.specialTemp : locatableThemeTokens.temp;
     };
 
     const resolveMdNodeColor = (node) => {
+      if (!locatableColorSync) return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
       const live = resolveNodeCustomColor(node);
-      if (menuColorSync && live) return live;
-      return colorTokens.blank;
+      if (live) return live;
+      return locatableThemeTokens.blank;
     };
 
     const resolveEdgeColor = (edge) => {
+      if (!locatableColorSync) return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
       const live = resolveNodeCustomColor(edge);
-      if (menuColorSync && live) return live;
-      return colorTokens.edge;
+      if (live) return live;
+      return locatableThemeTokens.edge;
     };
 
     const importNeutralColor = IMPORT_DIRECTORY_NEUTRAL_COLOR;
     const resolveImportedTempSectionColor = (section) => {
+      if (!locatableColorSync) return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
       const live = normalizeHexColor(section && section.color, null);
       if (live) return live;
-      if (section && section.isSnapshot) return colorTokens.permanent;
-      return isSpecialTempSection(section) ? colorTokens.specialTemp : colorTokens.temp;
+      if (section && section.isSnapshot) return locatableThemeTokens.permanent;
+      return isSpecialTempSection(section) ? locatableThemeTokens.specialTemp : locatableThemeTokens.temp;
     };
     const resolveImportedMdNodeColor = (node) => {
+      if (!locatableColorSync) return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
       const live = resolveNodeCustomColor(node);
       if (live) return live;
-      return colorTokens.blank;
+      return locatableThemeTokens.blank;
     };
     const resolveImportedEdgeColor = (edge) => {
+      if (!locatableColorSync) return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
       const live = resolveNodeCustomColor(edge);
       if (live) return live;
-      return colorTokens.edge;
+      return locatableThemeTokens.edge;
     };
 
     const buildTemporaryFolder = (sections, config = {}) => {
@@ -1285,14 +1418,14 @@
     });
 
     if (importedOnly) {
-      return importedGroupFolders;
+      return applyDirectoryColorControl(importedGroupFolders);
     }
 
     const nodes = [permanentFolder, temporaryFolder, blankFolder, otherFolder];
     if (importedGroupFolders.length) {
       nodes.push(...importedGroupFolders);
     }
-    return nodes;
+    return applyDirectoryColorControl(nodes);
   }
 
   function buildDirectoryDataForPreview(previewState, options = {}) {

@@ -5234,10 +5234,9 @@ function buildChangeSummary(diffMeta, stats, lang) {
 function initSidebarToggle() {
     const sidebar = document.getElementById('sidebar');
     const toggleBtn = document.getElementById('sidebarToggle');
-    const compactBtn = document.getElementById('sidebarToggleCompact');
-    const expandBtn = document.getElementById('sidebarToggleExpand');
+    const resizeHandle = document.getElementById('sidebarResizeHandle');
 
-    if (!sidebar || !toggleBtn || !compactBtn || !expandBtn) {
+    if (!sidebar || !toggleBtn || !resizeHandle) {
         console.warn('[侧边栏] 找不到侧边栏或切换按钮');
         return;
     }
@@ -5245,21 +5244,286 @@ function initSidebarToggle() {
     const SIDEBAR_STATE_KEY = 'sidebarCollapseState';
     const SIDEBAR_MANUAL_KEY = 'sidebarManualOverride';
     const LEGACY_COLLAPSED_KEY = 'sidebarCollapsed';
-    const SIDEBAR_STATES = ['expanded', 'collapsed', 'compact'];
-    const AUTO_COLLAPSE_WIDTH = 1024;
+    const SIDEBAR_POSITION_KEY = 'sidebarDockSide';
+    const SIDEBAR_WIDTH_LEFT_KEY = 'sidebarExpandedWidthLeft';
+    const SIDEBAR_WIDTH_RIGHT_KEY = 'sidebarExpandedWidthRight';
+    const SIDEBAR_TOGGLE_TOP_RATIO_KEY = 'sidebarToggleTopRatio';
+    const SIDEBAR_STATES = ['expanded', 'compact'];
+    const SIDEBAR_POSITIONS = ['left', 'right'];
+    const AUTO_COLLAPSE_WIDTH_DEFAULT = 600;
+    const AUTO_COLLAPSE_WIDTH_MIN = 320;
+    const AUTO_COLLAPSE_WIDTH_MAX = 2000;
+    const SIDEBAR_COLLAPSE_MODE_AUTO = 'auto';
+    const SIDEBAR_COLLAPSE_MODE_MANUAL = 'manual';
+    const AUTO_RESIZE_DEBOUNCE_MS = 220;
     const SIDEBAR_TRANSITION_MS = 220;
+    const SIDEBAR_MIN_WIDTH = 180;
+    const SIDEBAR_MAX_WIDTH = 560;
+    const SIDEBAR_RESIZE_COMPACT_THRESHOLD = 56;
+    const TOGGLE_DRAG_ACTIVATE_THRESHOLD = 10;
+    const TOGGLE_HINT_HOLD_DELAY_MS = 160;
+    const TOGGLE_DRAG_DIRECTION_THRESHOLD = 8;
+    const TOGGLE_DRAG_SWITCH_THRESHOLD = 42;
+    const TOGGLE_VERTICAL_MARGIN_PX = 28;
+    const TOGGLE_DEFAULT_RATIO = 0.65;
+    const TOGGLE_RATIO_MIN = 0.08;
+    const TOGGLE_RATIO_MAX = 0.92;
+    const SIDEBAR_SIDE_SWITCH_ANIMATION_MS = 220;
     const persistEnabled = !isSidePanelMode;
+    const sidebarContainer = sidebar.closest('.main-container');
+    const contentArea = sidebarContainer
+        ? sidebarContainer.querySelector('.content-area')
+        : document.querySelector('.content-area');
 
     let refreshRaf = null;
+    let suppressToggleClick = false;
+    let toggleDragSession = null;
+    let resizeDragSession = null;
+    let sideSwitchAnimationCleanup = null;
+    let toggleHintUp = null;
+    let toggleHintDown = null;
+    let toggleHintOutward = null;
+    let toggleHintHoldTimer = null;
+    let toggleHoldVisualActive = false;
+    let toggleDragGuideDirection = null;
+    let autoResizeDebounceTimer = null;
+    let sidebarCollapseMode = SIDEBAR_COLLAPSE_MODE_AUTO;
+    let autoCollapseWidth = AUTO_COLLAPSE_WIDTH_DEFAULT;
+    let hasManualOverride = false;
+
+    function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+    }
+
+    function getCanvasOtherSettingsSafe() {
+        try {
+            if (window.CanvasModule && typeof window.CanvasModule.getCanvasOtherSettings === 'function') {
+                return window.CanvasModule.getCanvasOtherSettings();
+            }
+        } catch (_) { }
+        return null;
+    }
+
+    function normalizeCollapseMode(raw) {
+        const value = String(raw || '').toLowerCase();
+        if (value === SIDEBAR_COLLAPSE_MODE_MANUAL) return SIDEBAR_COLLAPSE_MODE_MANUAL;
+        return SIDEBAR_COLLAPSE_MODE_AUTO;
+    }
+
+    function normalizeAutoCollapseWidth(raw) {
+        const value = Number(raw);
+        if (!Number.isFinite(value)) return AUTO_COLLAPSE_WIDTH_DEFAULT;
+        return clamp(Math.round(value), AUTO_COLLAPSE_WIDTH_MIN, AUTO_COLLAPSE_WIDTH_MAX);
+    }
+
+    function readSidebarCollapsePrefs() {
+        const settings = getCanvasOtherSettingsSafe();
+        if (!settings || typeof settings !== 'object') {
+            return {
+                mode: SIDEBAR_COLLAPSE_MODE_AUTO,
+                width: AUTO_COLLAPSE_WIDTH_DEFAULT
+            };
+        }
+        return {
+            mode: normalizeCollapseMode(settings.directoryCollapseMode),
+            width: normalizeAutoCollapseWidth(settings.directoryAutoCollapseWidth)
+        };
+    }
+
+    function readStorage(key) {
+        try {
+            return localStorage.getItem(key);
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function writeStorage(key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch (_) { }
+    }
+
+    function normalizeSidebarPosition(raw) {
+        const value = String(raw || '').toLowerCase();
+        return SIDEBAR_POSITIONS.includes(value) ? value : null;
+    }
+
+    function normalizeSidebarWidth(raw) {
+        const value = Number(raw);
+        if (!Number.isFinite(value)) return null;
+        return clamp(Math.round(value), SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+    }
+
+    function normalizeToggleRatio(raw) {
+        const value = Number(raw);
+        if (!Number.isFinite(value)) return null;
+        return clamp(value, TOGGLE_RATIO_MIN, TOGGLE_RATIO_MAX);
+    }
+
+    const initialRect = sidebar.getBoundingClientRect();
+    const defaultExpandedWidth = normalizeSidebarWidth(initialRect && initialRect.width)
+        || normalizeSidebarWidth(getComputedStyle(sidebar).width)
+        || 260;
+
+    let expandedWidthBySide = {
+        left: normalizeSidebarWidth(readStorage(SIDEBAR_WIDTH_LEFT_KEY)) || defaultExpandedWidth,
+        right: normalizeSidebarWidth(readStorage(SIDEBAR_WIDTH_RIGHT_KEY)) || defaultExpandedWidth
+    };
+    let sidebarPosition = normalizeSidebarPosition(readStorage(SIDEBAR_POSITION_KEY)) || 'left';
+    let toggleTopRatio = normalizeToggleRatio(readStorage(SIDEBAR_TOGGLE_TOP_RATIO_KEY)) || TOGGLE_DEFAULT_RATIO;
+
+    function getExpandedWidth(position) {
+        const safePosition = normalizeSidebarPosition(position) || 'left';
+        const width = expandedWidthBySide[safePosition];
+        return normalizeSidebarWidth(width) || defaultExpandedWidth;
+    }
+
+    function setExpandedWidth(position, width, options = {}) {
+        const safePosition = normalizeSidebarPosition(position) || 'left';
+        const safeWidth = normalizeSidebarWidth(width) || defaultExpandedWidth;
+        expandedWidthBySide[safePosition] = safeWidth;
+        if (options && options.persist !== false) {
+            const key = safePosition === 'right' ? SIDEBAR_WIDTH_RIGHT_KEY : SIDEBAR_WIDTH_LEFT_KEY;
+            writeStorage(key, String(safeWidth));
+        }
+        if (options && options.apply === true && safePosition === sidebarPosition && currentState === 'expanded') {
+            sidebar.style.width = `${safeWidth}px`;
+        }
+        return safeWidth;
+    }
+
+    function setToggleTopRatio(ratio, options = {}) {
+        toggleTopRatio = clamp(ratio, TOGGLE_RATIO_MIN, TOGGLE_RATIO_MAX);
+        const pct = `${(toggleTopRatio * 100).toFixed(2)}%`;
+        toggleBtn.style.top = pct;
+        if (options && options.persist !== false) {
+            writeStorage(SIDEBAR_TOGGLE_TOP_RATIO_KEY, String(toggleTopRatio));
+        }
+        return toggleTopRatio;
+    }
+
+    function getToggleRatioFromClientY(clientY) {
+        const rect = sidebar.getBoundingClientRect();
+        if (!rect || !rect.height) return toggleTopRatio;
+        const minTop = TOGGLE_VERTICAL_MARGIN_PX;
+        const maxTop = Math.max(minTop, rect.height - TOGGLE_VERTICAL_MARGIN_PX);
+        const localY = clamp(clientY - rect.top, minTop, maxTop);
+        return localY / rect.height;
+    }
+
+    function ensureToggleDragHints() {
+        if (!toggleHintUp || !toggleHintUp.isConnected) {
+            toggleHintUp = toggleBtn.querySelector('.sidebar-toggle-hint-up');
+            if (!toggleHintUp) {
+                toggleHintUp = document.createElement('span');
+                toggleHintUp.className = 'sidebar-toggle-hint sidebar-toggle-hint-up';
+                toggleHintUp.setAttribute('aria-hidden', 'true');
+                toggleBtn.appendChild(toggleHintUp);
+            }
+        }
+
+        if (!toggleHintDown || !toggleHintDown.isConnected) {
+            toggleHintDown = toggleBtn.querySelector('.sidebar-toggle-hint-down');
+            if (!toggleHintDown) {
+                toggleHintDown = document.createElement('span');
+                toggleHintDown.className = 'sidebar-toggle-hint sidebar-toggle-hint-down';
+                toggleHintDown.setAttribute('aria-hidden', 'true');
+                toggleBtn.appendChild(toggleHintDown);
+            }
+        }
+
+        if (!toggleHintOutward || !toggleHintOutward.isConnected) {
+            toggleHintOutward = toggleBtn.querySelector('.sidebar-toggle-hint-outward');
+            if (!toggleHintOutward) {
+                toggleHintOutward = document.createElement('span');
+                toggleHintOutward.className = 'sidebar-toggle-hint sidebar-toggle-hint-outward';
+                toggleHintOutward.setAttribute('aria-hidden', 'true');
+                toggleBtn.appendChild(toggleHintOutward);
+            }
+        }
+    }
+
+    function updateToggleHintDirection() {
+        ensureToggleDragHints();
+        const outwardToRight = sidebarPosition === 'left';
+        toggleBtn.dataset.outwardDir = outwardToRight ? 'right' : 'left';
+        toggleHintUp.textContent = '';
+        toggleHintDown.textContent = '';
+        toggleHintOutward.textContent = '';
+    }
+
+    function setToggleHoldVisualActive(active) {
+        const nextActive = active === true;
+        if (toggleHoldVisualActive === nextActive) return;
+        toggleHoldVisualActive = nextActive;
+        toggleBtn.classList.toggle('sidebar-toggle-hold-active', nextActive);
+        updateToggleIcon(currentState);
+    }
+
+    function normalizeToggleDragGuideDirection(direction) {
+        if (direction === 'up' || direction === 'down' || direction === 'outward' || direction === 'inward') {
+            return direction;
+        }
+        return null;
+    }
+
+    function setToggleDragGuideDirection(direction) {
+        const safeDirection = normalizeToggleDragGuideDirection(direction);
+        if (toggleDragGuideDirection === safeDirection) return;
+        toggleDragGuideDirection = safeDirection;
+        updateToggleIcon(currentState);
+    }
+
+    function getToggleDragGuideDirection(dx, dy) {
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+
+        if (absDy >= TOGGLE_DRAG_DIRECTION_THRESHOLD && absDy > absDx) {
+            return dy < 0 ? 'up' : 'down';
+        }
+
+        if (absDx >= TOGGLE_DRAG_DIRECTION_THRESHOLD && absDx > absDy) {
+            const outward = (sidebarPosition === 'left' && dx > 0)
+                || (sidebarPosition === 'right' && dx < 0);
+            if (outward) return 'outward';
+            return 'inward';
+        }
+
+        return null;
+    }
+
+    function clearToggleHintHoldTimer() {
+        if (toggleHintHoldTimer == null) return;
+        window.clearTimeout(toggleHintHoldTimer);
+        toggleHintHoldTimer = null;
+    }
+
+    function scheduleToggleHintReveal() {
+        clearToggleHintHoldTimer();
+        toggleHintHoldTimer = window.setTimeout(() => {
+            toggleHintHoldTimer = null;
+            if (!toggleDragSession) return;
+            toggleBtn.classList.add('sidebar-toggle-show-hints');
+            setToggleHoldVisualActive(true);
+        }, TOGGLE_HINT_HOLD_DELAY_MS);
+    }
 
     // 根据当前实际 DOM 宽度更新侧边栏宽度 CSS 变量
     function syncSidebarWidth() {
-        // 直接读取 sidebar 实际渲染宽度，兼容：
-        // - 手动折叠/展开（.collapsed）
-        // - 响应式 CSS 自动收缩
         const rect = sidebar.getBoundingClientRect();
-        const widthPx = rect && rect.width ? `${rect.width}px` : '260px';
+        const actualWidth = rect && rect.width ? rect.width : 0;
+        const effectiveWidth = currentState === 'compact' ? 0 : actualWidth;
+        const widthPx = `${Math.max(0, Math.round(effectiveWidth))}px`;
+
         document.documentElement.style.setProperty('--sidebar-width', widthPx);
+        if (sidebarPosition === 'right') {
+            document.documentElement.style.setProperty('--content-area-left', '0px');
+            document.documentElement.style.setProperty('--content-area-right', widthPx);
+        } else {
+            document.documentElement.style.setProperty('--content-area-left', widthPx);
+            document.documentElement.style.setProperty('--content-area-right', '0px');
+        }
     }
 
     function refreshMaximizedNodesSafe() {
@@ -5289,35 +5553,200 @@ function initSidebarToggle() {
         refreshRaf = requestAnimationFrame(tick);
     }
 
+    function prefersReducedMotion() {
+        try {
+            return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function clearSideSwitchAnimation() {
+        if (typeof sideSwitchAnimationCleanup !== 'function') return;
+        sideSwitchAnimationCleanup();
+        sideSwitchAnimationCleanup = null;
+    }
+
+    function runSidebarSwitchFlipAnimation(mutateLayout) {
+        clearSideSwitchAnimation();
+
+        if (prefersReducedMotion()) {
+            mutateLayout();
+            return;
+        }
+
+        const targets = [sidebar, contentArea].filter((element) => element && element.isConnected);
+        if (!targets.length) {
+            mutateLayout();
+            return;
+        }
+
+        const records = targets.map((element) => ({
+            element,
+            beforeRect: element.getBoundingClientRect(),
+            prevTransition: element.style.transition,
+            prevTransform: element.style.transform,
+            prevWillChange: element.style.willChange
+        }));
+
+        mutateLayout();
+
+        const animatedRecords = [];
+        records.forEach((record) => {
+            const afterRect = record.element.getBoundingClientRect();
+            const dx = record.beforeRect.left - afterRect.left;
+            const dy = record.beforeRect.top - afterRect.top;
+            if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+            animatedRecords.push({
+                ...record,
+                dx,
+                dy
+            });
+        });
+
+        if (!animatedRecords.length) {
+            return;
+        }
+
+        animatedRecords.forEach((record) => {
+            record.element.classList.add('sidebar-side-switch-animating');
+            record.element.style.transition = 'none';
+            record.element.style.transform = `translate(${record.dx}px, ${record.dy}px)`;
+            record.element.style.willChange = 'transform';
+        });
+
+        void sidebar.offsetWidth;
+
+        const transitionValue = `transform ${SIDEBAR_SIDE_SWITCH_ANIMATION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1)`;
+        animatedRecords.forEach((record) => {
+            record.element.style.transition = transitionValue;
+            record.element.style.transform = '';
+        });
+
+        let cleaned = false;
+        const cleanup = () => {
+            if (cleaned) return;
+            cleaned = true;
+            animatedRecords.forEach((record) => {
+                record.element.classList.remove('sidebar-side-switch-animating');
+                record.element.style.transition = record.prevTransition;
+                record.element.style.transform = record.prevTransform;
+                record.element.style.willChange = record.prevWillChange;
+            });
+            if (sideSwitchAnimationCleanup === cleanup) {
+                sideSwitchAnimationCleanup = null;
+            }
+        };
+
+        sideSwitchAnimationCleanup = cleanup;
+        window.setTimeout(cleanup, SIDEBAR_SIDE_SWITCH_ANIMATION_MS + 80);
+    }
+
     function normalizeSidebarState(raw) {
         const value = String(raw || '').toLowerCase();
+        if (value === 'collapsed') return 'compact';
         return SIDEBAR_STATES.includes(value) ? value : null;
+    }
+
+    let currentState = readSidebarState();
+
+    function updateToggleIcon(state) {
+        const icon = toggleBtn.querySelector('i');
+        if (!icon) return;
+
+        const defaultPointTo = state === 'expanded'
+            ? (sidebarPosition === 'left' ? 'left' : 'right')
+            : (sidebarPosition === 'left' ? 'right' : 'left');
+
+        icon.textContent = '';
+
+        if (toggleHoldVisualActive) {
+            if (toggleDragGuideDirection === 'up') {
+                icon.className = 'fas fa-chevron-up';
+                return;
+            }
+            if (toggleDragGuideDirection === 'down') {
+                icon.className = 'fas fa-chevron-down';
+                return;
+            }
+
+            const outwardPointTo = sidebarPosition === 'left' ? 'right' : 'left';
+            if (toggleDragGuideDirection === 'outward') {
+                icon.className = `fas fa-chevron-${outwardPointTo}`;
+                return;
+            }
+
+            if (toggleDragGuideDirection === 'inward') {
+                icon.className = `fas fa-chevron-${defaultPointTo}`;
+                return;
+            }
+
+            icon.className = `fas fa-chevron-${outwardPointTo}`;
+            return;
+        }
+
+        icon.className = `fas fa-chevron-${defaultPointTo}`;
     }
 
     function updateToggleLabel(state) {
         const isEn = currentLang === 'en';
         const collapseTitle = isEn ? 'Collapse sidebar' : '收起菜单栏';
         const expandTitle = isEn ? 'Expand sidebar' : '展开菜单栏';
-        const compactTitle = isEn ? 'Fully collapse sidebar' : '完全收起菜单栏';
         const circleTitle = state === 'expanded' ? collapseTitle : expandTitle;
 
         toggleBtn.setAttribute('title', circleTitle);
         toggleBtn.setAttribute('aria-label', circleTitle);
         toggleBtn.setAttribute('aria-expanded', state === 'expanded' ? 'true' : 'false');
         toggleBtn.dataset.collapseState = state;
+        updateToggleIcon(state);
+        updateToggleHintDirection();
+    }
 
-        compactBtn.setAttribute('title', compactTitle);
-        compactBtn.setAttribute('aria-label', compactTitle);
-        expandBtn.setAttribute('title', expandTitle);
-        expandBtn.setAttribute('aria-label', expandTitle);
+    function applySidebarPosition(position, options = {}) {
+        const nextPosition = normalizeSidebarPosition(position) || 'left';
+        const sideChanged = nextPosition !== sidebarPosition;
+
+        const applyPositionState = () => {
+            sidebarPosition = nextPosition;
+
+            const onRight = nextPosition === 'right';
+            sidebar.classList.toggle('position-right', onRight);
+            sidebar.dataset.position = nextPosition;
+            document.documentElement.classList.toggle('sidebar-on-right', onRight);
+
+            if (currentState === 'expanded') {
+                sidebar.style.width = `${getExpandedWidth(nextPosition)}px`;
+            }
+
+            updateToggleLabel(currentState);
+            syncSidebarWidth();
+        };
+
+        if (sideChanged) {
+            runSidebarSwitchFlipAnimation(applyPositionState);
+        } else {
+            clearSideSwitchAnimation();
+            applyPositionState();
+        }
+
+        if (!options || options.persist !== false) {
+            writeStorage(SIDEBAR_POSITION_KEY, nextPosition);
+        }
+
+        if (!options || options.refresh !== false) {
+            scheduleMaximizedRefresh();
+        }
     }
 
     function applySidebarState(state) {
+        clearSideSwitchAnimation();
         const nextState = normalizeSidebarState(state) || 'expanded';
-        sidebar.classList.toggle('collapsed', nextState === 'collapsed');
         sidebar.classList.toggle('compact', nextState === 'compact');
-        if (nextState === 'compact') {
-            sidebar.classList.remove('collapsed');
+        sidebar.classList.remove('collapsed');
+        if (nextState === 'expanded') {
+            sidebar.style.width = `${getExpandedWidth(sidebarPosition)}px`;
+        } else {
+            sidebar.style.removeProperty('width');
         }
         sidebar.dataset.collapseState = nextState;
         updateToggleLabel(nextState);
@@ -5334,31 +5763,36 @@ function initSidebarToggle() {
 
     function readSidebarState() {
         if (!persistEnabled) return 'compact';
-        const savedState = normalizeSidebarState(localStorage.getItem(SIDEBAR_STATE_KEY));
+        const savedState = normalizeSidebarState(readStorage(SIDEBAR_STATE_KEY));
         if (savedState) return savedState;
-        const legacy = localStorage.getItem(LEGACY_COLLAPSED_KEY);
-        if (legacy === 'true') return 'collapsed';
+        const legacy = readStorage(LEGACY_COLLAPSED_KEY);
+        if (legacy === 'true') return 'compact';
         return 'expanded';
     }
 
     function readManualOverride() {
         if (!persistEnabled) return true;
-        const raw = localStorage.getItem(SIDEBAR_MANUAL_KEY);
-        if (raw === 'true') return true;
-        if (raw === 'false') return false;
-        const stored = normalizeSidebarState(localStorage.getItem(SIDEBAR_STATE_KEY));
-        if (stored && stored !== 'expanded') return true;
-        const legacy = localStorage.getItem(LEGACY_COLLAPSED_KEY);
-        return legacy === 'true';
+        const raw = readStorage(SIDEBAR_MANUAL_KEY);
+        if (raw === 'true') {
+            hasManualOverride = true;
+            return true;
+        }
+        if (raw === 'false') {
+            hasManualOverride = false;
+            return false;
+        }
+        hasManualOverride = false;
+        return false;
     }
 
     function setManualOverride(isManual) {
+        hasManualOverride = !!isManual;
         if (!persistEnabled) return;
         localStorage.setItem(SIDEBAR_MANUAL_KEY, isManual ? 'true' : 'false');
     }
 
     function getAutoState() {
-        return window.innerWidth <= AUTO_COLLAPSE_WIDTH ? 'collapsed' : 'expanded';
+        return window.innerWidth <= autoCollapseWidth ? 'compact' : 'expanded';
     }
 
     function setSidebarState(state, options = {}) {
@@ -5371,9 +5805,20 @@ function initSidebarToggle() {
         return nextState;
     }
 
-    function applyAutoState() {
+    function applyAutoState(options = {}) {
         if (!persistEnabled) return;
-        if (readManualOverride()) return;
+        if (sidebarCollapseMode === SIDEBAR_COLLAPSE_MODE_MANUAL) {
+            if (options && options.force === true) {
+                updateToggleLabel(currentState);
+            }
+            return;
+        }
+        const ignoreManualOverride = !!(options && options.ignoreManualOverride);
+        const isManualOverride = readManualOverride();
+        if (isManualOverride && !ignoreManualOverride) return;
+        if (isManualOverride && ignoreManualOverride) {
+            setManualOverride(false);
+        }
         const targetState = getAutoState();
         if (targetState !== currentState) {
             currentState = setSidebarState(targetState, { manual: false });
@@ -5382,9 +5827,57 @@ function initSidebarToggle() {
         }
     }
 
-    let currentState = readSidebarState();
+    function scheduleAutoStateOnResize() {
+        if (sidebarCollapseMode === SIDEBAR_COLLAPSE_MODE_MANUAL) return;
+        if (autoResizeDebounceTimer != null) {
+            window.clearTimeout(autoResizeDebounceTimer);
+        }
+
+        autoResizeDebounceTimer = window.setTimeout(() => {
+            autoResizeDebounceTimer = null;
+            applyAutoState({ ignoreManualOverride: true });
+            syncSidebarWidth();
+            scheduleMaximizedRefresh();
+        }, AUTO_RESIZE_DEBOUNCE_MS);
+    }
+
+    function applySidebarCollapsePrefs(nextPrefs, options = {}) {
+        const safePrefs = nextPrefs && typeof nextPrefs === 'object' ? nextPrefs : {};
+        const nextMode = normalizeCollapseMode(safePrefs.mode);
+        const nextWidth = normalizeAutoCollapseWidth(safePrefs.width);
+        const modeChanged = nextMode !== sidebarCollapseMode;
+        const widthChanged = nextWidth !== autoCollapseWidth;
+
+        sidebarCollapseMode = nextMode;
+        autoCollapseWidth = nextWidth;
+
+        if (modeChanged || widthChanged || (options && options.forceApply)) {
+            if (sidebarCollapseMode === SIDEBAR_COLLAPSE_MODE_AUTO) {
+                if (modeChanged && hasManualOverride) {
+                    setManualOverride(false);
+                }
+                applyAutoState({ ignoreManualOverride: true, force: true });
+            } else {
+                if (modeChanged) {
+                    setManualOverride(true);
+                }
+                updateToggleLabel(currentState);
+                syncSidebarWidth();
+                scheduleMaximizedRefresh();
+            }
+        }
+    }
+
+    applySidebarPosition(sidebarPosition, { persist: false, refresh: false });
+    setToggleTopRatio(toggleTopRatio, { persist: false });
+
+    const initialCollapsePrefs = readSidebarCollapsePrefs();
+    applySidebarCollapsePrefs(initialCollapsePrefs, { forceApply: true });
+
     if (persistEnabled) {
-        if (readManualOverride()) {
+        if (sidebarCollapseMode === SIDEBAR_COLLAPSE_MODE_MANUAL) {
+            currentState = setSidebarState(currentState, { manual: true });
+        } else if (readManualOverride()) {
             currentState = setSidebarState(currentState, { manual: true });
         } else {
             currentState = setSidebarState(getAutoState(), { manual: false });
@@ -5399,38 +5892,246 @@ function initSidebarToggle() {
         console.log('[侧边栏] 侧边栏模式默认完全收起');
     }
 
-    // 点击圆形按钮：展开 -> 收起；完全收起 -> 二级收起
+    // 点击圆形按钮：展开 <-> 完全收起
     toggleBtn.addEventListener('click', (e) => {
+        if (suppressToggleClick) {
+            suppressToggleClick = false;
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
         e.stopPropagation();
         if (currentState === 'expanded') {
-            currentState = setSidebarState('collapsed', { manual: true });
-        } else if (currentState === 'compact') {
-            currentState = setSidebarState('collapsed', { manual: true });
+            currentState = setSidebarState('compact', { manual: true });
         } else {
-            currentState = setSidebarState('expanded', { manual: false });
+            const manualFlag = sidebarCollapseMode === SIDEBAR_COLLAPSE_MODE_MANUAL;
+            currentState = setSidebarState('expanded', { manual: manualFlag ? true : false });
         }
         console.log('[侧边栏] 状态切换:', currentState);
     });
 
-    // 二级收起按钮：完全收起
-    compactBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        currentState = setSidebarState('compact', { manual: true });
-        console.log('[侧边栏] 状态切换:', currentState);
+    function clearToggleDragSession() {
+        clearToggleHintHoldTimer();
+        setToggleDragGuideDirection(null);
+
+        if (!toggleDragSession) {
+            toggleBtn.classList.remove('sidebar-toggle-dragging');
+            toggleBtn.classList.remove('sidebar-toggle-show-hints');
+            setToggleHoldVisualActive(false);
+            return;
+        }
+
+        const { pointerId } = toggleDragSession;
+        try {
+            if (toggleBtn.hasPointerCapture(pointerId)) {
+                toggleBtn.releasePointerCapture(pointerId);
+            }
+        } catch (_) { }
+        toggleBtn.classList.remove('sidebar-toggle-dragging');
+        toggleBtn.classList.remove('sidebar-toggle-show-hints');
+        setToggleHoldVisualActive(false);
+        toggleDragSession = null;
+    }
+
+    toggleBtn.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+
+        toggleDragSession = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            moved: false
+        };
+
+        try {
+            toggleBtn.setPointerCapture(event.pointerId);
+        } catch (_) { }
+
+        setToggleDragGuideDirection(null);
+        toggleBtn.classList.remove('sidebar-toggle-show-hints');
+        setToggleHoldVisualActive(false);
+        scheduleToggleHintReveal();
+        event.preventDefault();
     });
 
-    // 二级展开按钮：回到展开状态（恢复自动）
-    expandBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        currentState = setSidebarState('expanded', { manual: false });
-        console.log('[侧边栏] 状态切换:', currentState);
+    toggleBtn.addEventListener('pointermove', (event) => {
+        if (!toggleDragSession || event.pointerId !== toggleDragSession.pointerId) return;
+
+        const dx = event.clientX - toggleDragSession.startX;
+        const dy = event.clientY - toggleDragSession.startY;
+        const dragDistance = Math.hypot(dx, dy);
+        if (!toggleDragSession.moved && dragDistance >= TOGGLE_DRAG_ACTIVATE_THRESHOLD) {
+            toggleDragSession.moved = true;
+            clearToggleHintHoldTimer();
+            toggleBtn.classList.remove('sidebar-toggle-show-hints');
+            setToggleHoldVisualActive(true);
+            toggleBtn.classList.add('sidebar-toggle-dragging');
+        }
+        if (!toggleDragSession.moved) return;
+
+        setToggleDragGuideDirection(getToggleDragGuideDirection(dx, dy));
+
+        setToggleTopRatio(getToggleRatioFromClientY(event.clientY), { persist: false });
     });
 
-    // 窗口尺寸变化时，按自动规则收缩/展开（仅在非手动状态）
-    window.addEventListener('resize', () => {
-        applyAutoState();
+    function finishToggleDrag(event, canceled) {
+        if (!toggleDragSession || event.pointerId !== toggleDragSession.pointerId) return;
+
+        const dx = event.clientX - toggleDragSession.startX;
+        const dy = event.clientY - toggleDragSession.startY;
+        const dragDistance = Math.hypot(dx, dy);
+        const moved = toggleDragSession.moved || dragDistance >= TOGGLE_DRAG_ACTIVATE_THRESHOLD;
+        let consumed = false;
+        let switchedSide = false;
+
+        if (moved && !canceled) {
+            toggleBtn.classList.add('sidebar-toggle-dragging');
+            setToggleTopRatio(getToggleRatioFromClientY(event.clientY), { persist: true });
+            consumed = true;
+
+            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) >= TOGGLE_DRAG_SWITCH_THRESHOLD) {
+                const shouldSwitch = (sidebarPosition === 'left' && dx > 0)
+                    || (sidebarPosition === 'right' && dx < 0);
+                if (shouldSwitch) {
+                    const nextPosition = sidebarPosition === 'left' ? 'right' : 'left';
+                    applySidebarPosition(nextPosition, { persist: true, refresh: true });
+                    if (persistEnabled) {
+                        setManualOverride(true);
+                    }
+                    switchedSide = true;
+                }
+            }
+        }
+
+        clearToggleDragSession();
+
+        if (consumed || switchedSide) {
+            suppressToggleClick = true;
+            window.setTimeout(() => {
+                suppressToggleClick = false;
+            }, 0);
+        }
+    }
+
+    toggleBtn.addEventListener('pointerup', (event) => {
+        finishToggleDrag(event, false);
+    });
+    toggleBtn.addEventListener('pointercancel', (event) => {
+        finishToggleDrag(event, true);
+    });
+
+    function clearResizeDragSession() {
+        if (!resizeDragSession) return;
+        const { pointerId } = resizeDragSession;
+        try {
+            if (resizeHandle.hasPointerCapture(pointerId)) {
+                resizeHandle.releasePointerCapture(pointerId);
+            }
+        } catch (_) { }
+        resizeDragSession = null;
+        sidebar.classList.remove('is-resizing');
+        document.body.classList.remove('sidebar-resizing');
+    }
+
+    function widthFromDragDelta(startWidth, dx) {
+        return sidebarPosition === 'right' ? startWidth - dx : startWidth + dx;
+    }
+
+    resizeHandle.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+
+        const rect = sidebar.getBoundingClientRect();
+        const startWidth = currentState === 'compact'
+            ? 0
+            : (rect && rect.width ? rect.width : getExpandedWidth(sidebarPosition));
+
+        resizeDragSession = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth,
+            moved: false,
+            previewState: currentState,
+            previewWidth: getExpandedWidth(sidebarPosition)
+        };
+
+        sidebar.classList.add('is-resizing');
+        document.body.classList.add('sidebar-resizing');
+
+        try {
+            resizeHandle.setPointerCapture(event.pointerId);
+        } catch (_) { }
+
+        event.preventDefault();
+    });
+
+    resizeHandle.addEventListener('pointermove', (event) => {
+        if (!resizeDragSession || event.pointerId !== resizeDragSession.pointerId) return;
+
+        const dx = event.clientX - resizeDragSession.startX;
+        if (!resizeDragSession.moved && Math.abs(dx) > 1) {
+            resizeDragSession.moved = true;
+        }
+
+        const rawWidth = widthFromDragDelta(resizeDragSession.startWidth, dx);
+        if (rawWidth <= SIDEBAR_RESIZE_COMPACT_THRESHOLD) {
+            currentState = applySidebarState('compact');
+            resizeDragSession.previewState = 'compact';
+            syncSidebarWidth();
+            return;
+        }
+
+        const safeWidth = setExpandedWidth(sidebarPosition, rawWidth, { persist: false, apply: false });
+        currentState = applySidebarState('expanded');
+        sidebar.style.width = `${safeWidth}px`;
+        resizeDragSession.previewState = 'expanded';
+        resizeDragSession.previewWidth = safeWidth;
         syncSidebarWidth();
-        scheduleMaximizedRefresh();
+    });
+
+    function finishResizeDrag(event, canceled) {
+        if (!resizeDragSession || event.pointerId !== resizeDragSession.pointerId) return;
+
+        const moved = resizeDragSession.moved;
+        const previewState = resizeDragSession.previewState;
+        const previewWidth = resizeDragSession.previewWidth;
+
+        clearResizeDragSession();
+
+        if (!moved || canceled) {
+            currentState = setSidebarState(currentState, { manual: true });
+            return;
+        }
+
+        if (previewState === 'expanded') {
+            setExpandedWidth(sidebarPosition, previewWidth, { persist: true, apply: true });
+            currentState = setSidebarState('expanded', { manual: true });
+            return;
+        }
+
+        currentState = setSidebarState('compact', { manual: true });
+    }
+
+    resizeHandle.addEventListener('pointerup', (event) => {
+        finishResizeDrag(event, false);
+    });
+    resizeHandle.addEventListener('pointercancel', (event) => {
+        finishResizeDrag(event, true);
+    });
+
+    // 窗口尺寸变化时，按自动规则收缩/展开（仅自动模式）
+    window.addEventListener('resize', () => {
+        scheduleAutoStateOnResize();
+    });
+
+    window.addEventListener('canvas-other-settings-updated', (event) => {
+        const detail = event && event.detail;
+        const fallback = readSidebarCollapsePrefs();
+        const nextPrefs = {
+            mode: detail && typeof detail === 'object' ? detail.directoryCollapseMode : fallback.mode,
+            width: detail && typeof detail === 'object' ? detail.directoryAutoCollapseWidth : fallback.width
+        };
+        applySidebarCollapsePrefs(nextPrefs, { forceApply: true });
     });
 
     // 初次加载后应用一次自动规则（若允许）
