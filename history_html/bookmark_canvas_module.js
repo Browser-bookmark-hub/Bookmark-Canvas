@@ -1481,6 +1481,7 @@ const TEMP_COLOR_LOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" a
 const TEMP_COLOR_UNLOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M17 9h-1V7a4 4 0 0 0-7.4-2.2 1 1 0 1 0 1.7 1A2 2 0 0 1 14 7v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm0 9H7v-7h10v7z"/></svg>';
 const DEFAULT_CANVAS_OTHER_SETTINGS = {
     autoLinkSplit: false, // 临时栏目分裂后自动连接
+    menuColorSync: true, // 目录栏颜色同步（跟随画布手动改色）
     tempColorFollow: true, // 临时栏目颜色跟随
     tempColorUnlockSync: false, // 解锁后立即继承父色
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
@@ -1665,6 +1666,7 @@ function normalizeCanvasOtherSettings(input) {
     const out = __cloneDefaultOtherSettings();
     if (!input || typeof input !== 'object') return out;
     if (typeof input.autoLinkSplit === 'boolean') out.autoLinkSplit = input.autoLinkSplit;
+    if (typeof input.menuColorSync === 'boolean') out.menuColorSync = input.menuColorSync;
     if (typeof input.tempColorFollow === 'boolean') out.tempColorFollow = input.tempColorFollow;
     if (typeof input.tempColorUnlockSync === 'boolean') out.tempColorUnlockSync = input.tempColorUnlockSync;
     if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
@@ -1719,6 +1721,28 @@ function isTempColorFollowEnabled(settingsOverride = null) {
 function shouldTempColorUnlockSync(settingsOverride = null) {
     const settings = settingsOverride || getCanvasOtherSettings();
     return !(settings && settings.tempColorUnlockSync === false);
+}
+
+let __sidebarMenuColorSyncTimer = null;
+
+function isSidebarMenuColorSyncEnabled(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return !!(settings && settings.menuColorSync);
+}
+
+function requestSidebarMenuColorSyncRefresh() {
+    if (!isSidebarMenuColorSyncEnabled()) return;
+    if (__sidebarMenuColorSyncTimer) {
+        clearTimeout(__sidebarMenuColorSyncTimer);
+    }
+    __sidebarMenuColorSyncTimer = setTimeout(() => {
+        __sidebarMenuColorSyncTimer = null;
+        try {
+            if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.refresh === 'function') {
+                window.CanvasSidebarDirectory.refresh({ force: true });
+            }
+        } catch (_) { }
+    }, 80);
 }
 
 // [Special Temp 接入约定]
@@ -3248,6 +3272,7 @@ function hasLockedAncestor(parentLabel, candidateLabel, labelMap) {
 function updateTempSectionColor(section, color) {
     if (!section) return;
     section.color = color || getTempSectionDefaultColor(section);
+    requestSidebarMenuColorSyncRefresh();
     const element = document.getElementById(section.id);
     if (!element) return;
     const header = element.querySelector('.temp-node-header');
@@ -16549,6 +16574,7 @@ function renderMdNode(node) {
             const el2 = document.getElementById(node.id);
             if (el2) applyMdNodeColor(el2, node);
             saveTempNodes();
+            requestSidebarMenuColorSyncRefresh();
             closeMdColorPopover(toolbar);
         } else if (action === 'md-color-picker-toggle') {
             // RGB选择器切换由ensureMdColorPopover中的事件处理
@@ -16565,6 +16591,7 @@ function renderMdNode(node) {
                 const el2 = document.getElementById(node.id);
                 if (el2) applyMdNodeColor(el2, node);
                 saveTempNodes();
+                requestSidebarMenuColorSyncRefresh();
                 closeMdColorPopover(toolbar);
             }
         } else if (action === 'md-color-recent') {
@@ -16581,6 +16608,7 @@ function renderMdNode(node) {
                     CanvasState.mdNodePrevColor = oldColor;
                 }
                 saveTempNodes();
+                requestSidebarMenuColorSyncRefresh();
                 closeMdColorPopover(toolbar);
             }
         } else if (action === 'md-focus') {
@@ -16730,18 +16758,23 @@ function applyMdNodeColor(el, node) {
 
 function setMdNodeColor(node, presetOrHex) {
     if (!node) return;
+    const raw = String(presetOrHex || '').trim();
     // 支持预设编号或十六进制颜色
-    const isPreset = /^[1-6]$/.test(String(presetOrHex));
+    const isPreset = /^[1-6]$/.test(raw);
     if (isPreset) {
-        node.color = String(presetOrHex);
+        node.color = raw;
         node.colorHex = presetToHex(node.color);
-    } else if (typeof presetOrHex === 'string' && presetOrHex.startsWith('#')) {
+    } else if (raw.startsWith('#')) {
         node.color = null;
-        node.colorHex = presetOrHex;
+        node.colorHex = raw;
+    } else if (!raw) {
+        node.color = null;
+        node.colorHex = null;
     }
     const el = document.getElementById(node.id);
     if (el) applyMdNodeColor(el, node);
     saveTempNodes();
+    requestSidebarMenuColorSyncRefresh();
 }
 
 // 色盘弹层逻辑
@@ -20039,8 +20072,7 @@ function renderTempNode(section, options = {}) {
 
     colorInput.addEventListener('input', (event) => {
         const nextColor = event.target.value || getTempSectionDefaultColor(section);
-        section.color = nextColor;
-        applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
+        updateTempSectionColor(section, nextColor);
         propagateTempSectionColor(section, nextColor);
         updateColorHistory(nextColor);
         saveTempNodes();
@@ -20058,8 +20090,7 @@ function renderTempNode(section, options = {}) {
                 const parentSection = getParentTempSection(section);
                 if (parentSection && !__isTempSectionColorLocked(parentSection)) {
                     const nextColor = parentSection.color || getTempSectionDefaultColor(parentSection);
-                    section.color = nextColor;
-                    applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
+                    updateTempSectionColor(section, nextColor);
                     propagateTempSectionColor(section, nextColor);
                     updateColorHistory(nextColor);
                 }
@@ -20082,8 +20113,7 @@ function renderTempNode(section, options = {}) {
 
         if (action === 'md-color-recent') {
             const nextColor = (defaultChipEl && defaultChipEl.dataset.color) || getTempSectionDefaultColor(section);
-            section.color = nextColor;
-            applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
+            updateTempSectionColor(section, nextColor);
             propagateTempSectionColor(section, nextColor);
             updateColorHistory(nextColor);
             saveTempNodes();
@@ -20094,8 +20124,7 @@ function renderTempNode(section, options = {}) {
         if (action === 'md-color-preset') {
             const preset = String(btn.getAttribute('data-color') || '').trim();
             const nextColor = presetToHex(preset) || getTempSectionDefaultColor(section);
-            section.color = nextColor;
-            applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
+            updateTempSectionColor(section, nextColor);
             propagateTempSectionColor(section, nextColor);
             updateColorHistory(nextColor);
             saveTempNodes();
@@ -20105,8 +20134,7 @@ function renderTempNode(section, options = {}) {
         if (action === 'md-color-custom') {
             const customColor = btn.getAttribute('data-color');
             if (customColor) {
-                section.color = customColor;
-                applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
+                updateTempSectionColor(section, customColor);
                 propagateTempSectionColor(section, customColor);
                 updateColorHistory(customColor);
                 saveTempNodes();
@@ -30110,6 +30138,7 @@ function showEdgeToolbar(edgeId, x, y) {
                     currentEdge.colorHex = customColor;
                     renderEdges();
                     saveTempNodes();
+                    requestSidebarMenuColorSyncRefresh();
                     closeEdgeColorPopover(toolbar);
                 }
             } else if (action === 'edge-color-recent') {
@@ -30125,6 +30154,7 @@ function showEdgeToolbar(edgeId, x, y) {
                         CanvasState.edgePrevColor = oldColor;
                     }
                     saveTempNodes();
+                    requestSidebarMenuColorSyncRefresh();
                     closeEdgeColorPopover(toolbar);
                 }
             }
@@ -30336,6 +30366,7 @@ function setEdgeColor(edge, presetOrHex) {
 
     renderEdges();
     saveTempNodes();
+    requestSidebarMenuColorSyncRefresh();
 }
 
 // 方向弹层（与色盘风格一致）
@@ -30611,6 +30642,7 @@ window.CanvasModule = {
     getTempSection: getTempSection,
     setZoom: setCanvasZoom,
     getCanvasAppearanceSettings: getCanvasAppearanceSettings,
+    getCanvasOtherSettings: getCanvasOtherSettings,
     temp: {
         getSection: getTempSection,
         findItem: findTempItemEntry,
@@ -30750,9 +30782,11 @@ function openCanvasAppearanceSettingsModal() {
 
     const otherSettings = getCanvasOtherSettings();
     const otherAutoLink = modal.querySelector('#otherAutoLinkSplit');
+    const otherMenuColorSync = modal.querySelector('#otherMenuColorSync');
     const otherColorFollow = modal.querySelector('#otherTempColorFollow');
     const otherUnlockSync = modal.querySelector('#otherTempColorUnlockSync');
     if (otherAutoLink) otherAutoLink.checked = !!otherSettings.autoLinkSplit;
+    if (otherMenuColorSync) otherMenuColorSync.checked = !!otherSettings.menuColorSync;
     if (otherColorFollow) otherColorFollow.checked = !(otherSettings.tempColorFollow === false);
     if (otherUnlockSync) otherUnlockSync.checked = !(otherSettings.tempColorUnlockSync === false);
     __updateOtherTempColorFollowLock(modal, otherColorFollow && otherColorFollow.checked);
@@ -30827,6 +30861,11 @@ function saveCanvasAppearanceSettings(options = {}) {
 
     applyCanvasAppearanceSettings(normalized, { applyPermanentSize: false });
     applyTempSectionAutoSizeAll();
+    try {
+        if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.refresh === 'function') {
+            window.CanvasSidebarDirectory.refresh({ force: true });
+        }
+    } catch (_) { }
     if (closeAfterSave) closeCanvasAppearanceSettingsModal();
 }
 
@@ -30860,6 +30899,74 @@ function createCanvasAppearanceSettingsModal() {
                 <button class="perf-modal-close" id="appearanceModalCloseBtn"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body">
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'Special' : '特殊'}</div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Auto connect with edges after split' : '分裂后使用「连接线」自动连接'}</div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherAutoLinkSplit">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Directory color sync' : '目录栏颜色同步'}</span>
+                            <button class="perf-help-btn" id="otherMenuColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherMenuColorSync">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</span>
+                            <span class="temp-color-follow-lock" id="otherTempColorFollowLock" aria-hidden="true"></span>
+                            <button class="perf-help-btn" id="otherTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherTempColorFollow">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Unlock sync to parent' : '解锁后继承父色'}</span>
+                            <button class="perf-help-btn" id="otherTempColorUnlockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherTempColorUnlockSync">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Reset all temp colors' : '全部还原默认色'}</span>
+                            <button class="perf-help-btn" id="otherTempColorResetHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <button class="perf-btn secondary other-mini-btn" id="otherTempColorResetBtn">
+                                ${isEn ? 'Reset to default' : '还原'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 <div class="detail-section">
                     <div class="detail-section-title">${isEn ? 'Default Sizes' : '默认尺寸'}</div>
                     <div class="appearance-row">
@@ -31016,60 +31123,6 @@ function createCanvasAppearanceSettingsModal() {
                         </div>
                     </div>
                 </div>
-                <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? 'Special' : '特殊'}</div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Auto connect with edges after split' : '分裂后使用「连接线」自动连接'}</div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherAutoLinkSplit">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</span>
-                            <span class="temp-color-follow-lock" id="otherTempColorFollowLock" aria-hidden="true"></span>
-                            <button class="perf-help-btn" id="otherTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherTempColorFollow">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Unlock sync to parent' : '解锁后继承父色'}</span>
-                            <button class="perf-help-btn" id="otherTempColorUnlockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherTempColorUnlockSync">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Reset all temp colors' : '全部还原默认色'}</span>
-                            <button class="perf-help-btn" id="otherTempColorResetHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <button class="perf-btn secondary other-mini-btn" id="otherTempColorResetBtn">
-                                ${isEn ? 'Reset to default' : '还原'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
         <div class="perf-help-popover" id="appearanceSpecialTempHelpPopover">
@@ -31084,6 +31137,13 @@ function createCanvasAppearanceSettingsModal() {
                 ${isEn
             ? '<b>Global switch</b>: one-tap unify normal temp locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special temp sections</b> (Drop / Search / Batch / Add) now use their own default color in Appearance.'
             : '<b>全局开关</b>：一键统一普通临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加）现在使用外观中的独立默认颜色。'}
+            </div>
+        </div>
+        <div class="perf-help-popover" id="otherMenuColorSyncHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Default colors</b>: Icons and base styles use the default colors you choose manually or in Appearance settings.<br><b>Locatable item colors</b>: Directory item title/number can follow each locatable item/card color on canvas, so per-item color changes are shown here.'
+            : '<b>默认颜色</b>：图标与基础样式使用你手动选择或外观设置里的默认颜色。<br><b>可定位条目颜色</b>：目录栏可定位条目的标题/序号可跟随画布上对应可定位条目与栏目卡片的颜色变化，并在此处显示。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherTempColorUnlockHelpPopover">
@@ -31160,21 +31220,30 @@ function createCanvasAppearanceSettingsModal() {
         };
     })();
     const otherAutoLinkToggle = modal.querySelector('#otherAutoLinkSplit');
+    const otherMenuColorSyncToggle = modal.querySelector('#otherMenuColorSync');
     const otherColorFollowToggle = modal.querySelector('#otherTempColorFollow');
     const otherUnlockSyncToggle = modal.querySelector('#otherTempColorUnlockSync');
     const otherResetBtn = modal.querySelector('#otherTempColorResetBtn');
     const otherTempHelpBtn = modal.querySelector('#otherTempColorHelpBtn');
     const otherTempHelpPopover = modal.querySelector('#otherTempColorHelpPopover');
+    const otherMenuColorSyncHelpBtn = modal.querySelector('#otherMenuColorSyncHelpBtn');
+    const otherMenuColorSyncHelpPopover = modal.querySelector('#otherMenuColorSyncHelpPopover');
     const otherTempUnlockHelpBtn = modal.querySelector('#otherTempColorUnlockHelpBtn');
     const otherTempUnlockHelpPopover = modal.querySelector('#otherTempColorUnlockHelpPopover');
     const otherTempResetHelpBtn = modal.querySelector('#otherTempColorResetHelpBtn');
     const otherTempResetHelpPopover = modal.querySelector('#otherTempColorResetHelpPopover');
     bindClickHelpPopover(otherTempHelpBtn, otherTempHelpPopover);
+    bindClickHelpPopover(otherMenuColorSyncHelpBtn, otherMenuColorSyncHelpPopover);
     bindClickHelpPopover(otherTempUnlockHelpBtn, otherTempUnlockHelpPopover);
     bindClickHelpPopover(otherTempResetHelpBtn, otherTempResetHelpPopover);
 
     if (otherAutoLinkToggle) {
         otherAutoLinkToggle.addEventListener('change', () => {
+            scheduleOtherSave();
+        });
+    }
+    if (otherMenuColorSyncToggle) {
+        otherMenuColorSyncToggle.addEventListener('change', () => {
             scheduleOtherSave();
         });
     }
@@ -31339,6 +31408,7 @@ function saveCanvasOtherSettings(options = {}) {
     const prevSettings = normalizeCanvasOtherSettings(getCanvasOtherSettings());
     const prevFollow = isTempColorFollowEnabled(prevSettings);
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
+    const menuColorSync = modal.querySelector('#otherMenuColorSync');
     const colorFollow = modal.querySelector('#otherTempColorFollow');
     const unlockSync = modal.querySelector('#otherTempColorUnlockSync');
     const useDefaultCurve = modal.querySelector('#otherUseDefaultZoomCurve');
@@ -31347,6 +31417,7 @@ function saveCanvasOtherSettings(options = {}) {
     const defaultMagnets = __getDefaultMagnetPointsFromPerf();
     const settingsInput = {
         autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
+        menuColorSync: menuColorSync ? !!menuColorSync.checked : !!prevSettings.menuColorSync,
         tempColorFollow: colorFollow ? !!colorFollow.checked : !(prevSettings.tempColorFollow === false),
         tempColorUnlockSync: unlockSync ? !!unlockSync.checked : !(prevSettings.tempColorUnlockSync === false),
         useDefaultZoomCurve: useDefault,
@@ -31365,6 +31436,11 @@ function saveCanvasOtherSettings(options = {}) {
     if (useDefault) {
         __applyPerfDefaultBaselineToPerf();
     }
+    try {
+        if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.refresh === 'function') {
+            window.CanvasSidebarDirectory.refresh({ force: true });
+        }
+    } catch (_) { }
     if (closeAfterSave && isOtherModalSave) closeCanvasOtherSettingsModal();
 }
 

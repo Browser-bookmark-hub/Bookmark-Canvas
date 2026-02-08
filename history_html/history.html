@@ -20,6 +20,7 @@
     <script src="shortcuts_helpers.js" defer></script>
     <script src="search/search.js" defer></script>
     <script src="sidepanel_toggle_bridge.js" defer></script>
+    <script src="canvas_sidebar_directory.js?v=1.0" defer></script>
     <script src="history.js" defer></script>
 </head>
 
@@ -112,7 +113,7 @@
                     <span id="quickAddCurrentPermanentText"></span>
                 </button>
                 <button class="quick-add-menu-item" data-action="add-current-blank" type="button">
-                    <span class="quick-add-menu-icon quick-add-menu-icon-md" aria-hidden="true">MD</span>
+                    <span class="quick-add-menu-icon quick-add-menu-icon-md" aria-hidden="true">md</span>
                     <span id="quickAddCurrentBlankText"></span>
                 </button>
                 <div class="quick-add-menu-divider"></div>
@@ -126,7 +127,7 @@
                     <span id="quickAddWindowPermanentText"></span>
                 </button>
                 <button class="quick-add-menu-item" data-action="add-window-blank" type="button">
-                    <span class="quick-add-menu-icon quick-add-menu-icon-md" aria-hidden="true">MD</span>
+                    <span class="quick-add-menu-icon quick-add-menu-icon-md" aria-hidden="true">md</span>
                     <span id="quickAddWindowBlankText"></span>
                 </button>
             </div>
@@ -272,13 +273,7 @@
             </div>
 
             <nav class="nav-tabs">
-                <div class="nav-group">
-                    <div class="nav-group-title" id="bookmarkToolboxTitle"></div>
-                    <button class="nav-tab" data-view="canvas">
-                        <i class="fas fa-project-diagram"></i>
-                        <span id="navCanvasText">Bookmark Canvas</span>
-                    </button>
-                </div>
+                <div class="canvas-directory-tree" id="canvasDirectoryTree" aria-label="Canvas Directory"></div>
             </nav>
         </aside>
 

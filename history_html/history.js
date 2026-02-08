@@ -2868,7 +2868,10 @@ function applyLanguage() {
     const navCanvasText = document.getElementById('navCanvasText');
     if (navCanvasText) navCanvasText.textContent = i18n.navCanvas[currentLang];
     const bookmarkToolboxTitle = document.getElementById('bookmarkToolboxTitle');
-    if (bookmarkToolboxTitle) bookmarkToolboxTitle.textContent = i18n.bookmarkToolboxTitle[currentLang];
+    if (bookmarkToolboxTitle) bookmarkToolboxTitle.textContent = '';
+    if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.refresh === 'function') {
+        try { window.CanvasSidebarDirectory.refresh({ force: true }); } catch (_) { }
+    }
 
     // Canvas 视图按钮翻译
     const importCanvasText = document.getElementById('importCanvasText');
@@ -4850,6 +4853,10 @@ async function addTabsToPermanent(tabs, scope) {
 }
 
 function initializeUI() {
+    if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.init === 'function') {
+        try { window.CanvasSidebarDirectory.init(); } catch (_) { }
+    }
+
     // 导航标签切换
     document.querySelectorAll('.nav-tab').forEach(tab => {
         tab.addEventListener('click', () => switchView(tab.dataset.view));
@@ -5617,6 +5624,10 @@ function renderCurrentView() {
                             }, 50);
                         }
                     }
+                }
+
+                if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.refresh === 'function') {
+                    try { window.CanvasSidebarDirectory.refresh({ force: true }); } catch (_) { }
                 }
 
             }
