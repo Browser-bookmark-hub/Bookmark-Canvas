@@ -3355,12 +3355,68 @@ function setupOpenCanvasPageButton() {
     if (!btn || btn.dataset.bound === 'true') return;
     btn.dataset.bound = 'true';
 
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
         e.preventDefault();
         try {
             const url = browserAPI?.runtime?.getURL
                 ? browserAPI.runtime.getURL('history_html/history.html?view=canvas')
                 : 'history_html/history.html?view=canvas';
+
+            const canQueryTabs = !!(browserAPI && browserAPI.tabs && browserAPI.tabs.query && browserAPI.tabs.update);
+            if (canQueryTabs) {
+                const extensionOrigin = (() => {
+                    try {
+                        if (!browserAPI?.runtime?.getURL) return null;
+                        return new URL(browserAPI.runtime.getURL('')).origin;
+                    } catch (_) {
+                        return null;
+                    }
+                })();
+
+                const isMatchingCanvasPage = (rawUrl) => {
+                    if (!rawUrl || typeof rawUrl !== 'string') return false;
+                    try {
+                        const parsed = new URL(rawUrl);
+                        if (extensionOrigin && parsed.origin !== extensionOrigin) return false;
+                        if (!parsed.pathname.endsWith('/history_html/history.html')) return false;
+                        const view = parsed.searchParams.get('view');
+                        return !view || view === 'canvas';
+                    } catch (_) {
+                        return false;
+                    }
+                };
+
+                const currentWindowTabs = await new Promise((resolve) => {
+                    try {
+                        browserAPI.tabs.query({ currentWindow: true }, (tabs) => {
+                            resolve(Array.isArray(tabs) ? tabs : []);
+                        });
+                    } catch (_) {
+                        resolve([]);
+                    }
+                });
+
+                const candidates = currentWindowTabs
+                    .filter(tab => tab && typeof tab.id === 'number' && isMatchingCanvasPage(tab.url))
+                    .sort((a, b) => {
+                        const aId = typeof a.id === 'number' ? a.id : -1;
+                        const bId = typeof b.id === 'number' ? b.id : -1;
+                        return bId - aId;
+                    });
+
+                if (candidates.length > 0) {
+                    const targetTabId = candidates[0].id;
+                    await new Promise((resolve) => {
+                        try {
+                            browserAPI.tabs.update(targetTabId, { active: true }, () => resolve());
+                        } catch (_) {
+                            resolve();
+                        }
+                    });
+                    return;
+                }
+            }
+
             if (browserAPI && browserAPI.tabs && browserAPI.tabs.create) {
                 browserAPI.tabs.create({ url });
             }
