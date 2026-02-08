@@ -84,6 +84,64 @@
     user-select: none;
 }
 
+:root {
+    --canvas-scrollbar-horizontal-bottom: 30px;
+    --canvas-scrollbar-vertical-right: 20px;
+    --canvas-scrollbar-horizontal-track-bottom: 10.5px;
+    --canvas-scrollbar-horizontal-left: 20px;
+    --canvas-scrollbar-horizontal-width: calc(100% - 40px);
+    --canvas-scrollbar-horizontal-track-left: 52%;
+    --canvas-scrollbar-horizontal-track-right: auto;
+    --canvas-scrollbar-horizontal-track-transform: translateX(-50%);
+    --canvas-scrollbar-horizontal-controls-left: auto;
+    --canvas-scrollbar-horizontal-controls-right: auto;
+    --canvas-scrollbar-horizontal-controls-top-offset: 0px;
+    --canvas-scrollbar-horizontal-hint-right: 0px;
+    --canvas-scrollbar-horizontal-hint-top-offset: 0px;
+    --canvas-scrollbar-sidepanel-edge-offset: 0px;
+}
+
+html:not(.side-panel-mode) {
+    --canvas-scrollbar-horizontal-bottom: var(--canvas-scrollbar-vertical-right);
+    --canvas-scrollbar-horizontal-track-left: 50%;
+    --canvas-scrollbar-horizontal-track-right: auto;
+    --canvas-scrollbar-horizontal-track-transform: translateX(-50%);
+    --canvas-scrollbar-horizontal-controls-left: 0px;
+    --canvas-scrollbar-horizontal-controls-right: auto;
+    --canvas-scrollbar-horizontal-controls-top-offset: 0px;
+    --canvas-scrollbar-horizontal-hint-right: 0px;
+    --canvas-scrollbar-horizontal-hint-top-offset: 0px;
+}
+
+html.side-panel-mode {
+    --canvas-scrollbar-horizontal-bottom: var(--canvas-scrollbar-sidepanel-edge-offset);
+    --canvas-scrollbar-vertical-right: var(--canvas-scrollbar-sidepanel-edge-offset);
+    --canvas-scrollbar-horizontal-track-bottom: var(--canvas-scrollbar-sidepanel-edge-offset);
+    --canvas-scrollbar-horizontal-left: 20px;
+    --canvas-scrollbar-horizontal-width: calc(100% - 40px);
+    --canvas-scrollbar-horizontal-track-left: 50%;
+    --canvas-scrollbar-horizontal-track-right: auto;
+    --canvas-scrollbar-horizontal-track-transform: translateX(-50%);
+    --canvas-scrollbar-horizontal-controls-left: auto;
+    --canvas-scrollbar-horizontal-controls-right: auto;
+    --canvas-scrollbar-horizontal-controls-top-offset: 0px;
+    --canvas-scrollbar-horizontal-hint-right: 0px;
+    --canvas-scrollbar-horizontal-hint-top-offset: 0px;
+}
+
+html.side-panel-mode .canvas-scrollbar.vertical {
+    align-items: flex-end;
+}
+
+html.side-panel-mode .canvas-scrollbar.vertical .scrollbar-controls {
+    align-self: flex-end;
+}
+
+html.side-panel-mode .canvas-scrollbar.vertical .scrollbar-track {
+    margin-right: 0;
+    align-self: center;
+}
+
 .canvas-scrollbar {
     position: absolute;
     display: flex;
@@ -98,16 +156,16 @@
 
 .canvas-scrollbar.vertical {
     top: 20px;
-    right: 20px;
+    right: var(--canvas-scrollbar-vertical-right);
     height: calc(100% - 116px);
     flex-direction: column;
     align-items: center;
 }
 
 .canvas-scrollbar.horizontal {
-    left: 20px;
-    bottom: 36px;
-    width: calc(100% - 80px);
+    left: var(--canvas-scrollbar-horizontal-left);
+    bottom: var(--canvas-scrollbar-horizontal-bottom);
+    width: var(--canvas-scrollbar-horizontal-width);
     position: absolute;
 }
 
@@ -118,6 +176,7 @@
     opacity: 0;
     padding: 0;
     border-radius: 8px;
+    box-sizing: border-box;
     background: transparent;
     box-shadow: none;
     transition: opacity 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, padding 0.2s ease;
@@ -130,7 +189,7 @@
     align-self: center;
     order: -1;
     margin-bottom: 8px;
-    padding: 0;
+    padding: 6px 4px;
     background: transparent;
     box-shadow: none;
 }
@@ -143,6 +202,18 @@
     background: transparent;
     box-shadow: none;
     flex-shrink: 0;
+}
+
+html:not(.side-panel-mode) .canvas-scrollbar.horizontal .scrollbar-controls {
+    position: absolute;
+    left: var(--canvas-scrollbar-horizontal-controls-left);
+    right: var(--canvas-scrollbar-horizontal-controls-right);
+    top: calc(50% + var(--canvas-scrollbar-horizontal-controls-top-offset));
+    transform: translateY(-50%);
+}
+
+html:not(.side-panel-mode) .canvas-scrollbar.horizontal {
+    height: 26px;
 }
 
 .canvas-scrollbar.show-controls .scrollbar-controls {
@@ -173,6 +244,11 @@
 
 .canvas-scrollbar.vertical:hover .scrollbar-controls {
     padding: 6px 4px;
+}
+
+html:not(.side-panel-mode) .canvas-scrollbar.vertical .scrollbar-controls,
+html.side-panel-mode .canvas-scrollbar.vertical .scrollbar-controls {
+    transition: opacity 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .canvas-scrollbar.is-hidden.show-controls .scrollbar-track {
@@ -228,9 +304,22 @@
     min-width: 200px;
     max-width: 500px;
     position: absolute;
-    left: 52%;
-    transform: translateX(-50%);
-    bottom: 10.5px;
+    left: var(--canvas-scrollbar-horizontal-track-left);
+    right: var(--canvas-scrollbar-horizontal-track-right);
+    transform: var(--canvas-scrollbar-horizontal-track-transform);
+    bottom: var(--canvas-scrollbar-horizontal-track-bottom);
+}
+
+html:not(.side-panel-mode) .canvas-scrollbar.horizontal .scrollbar-track {
+    top: 50%;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+}
+
+html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
+    top: 50%;
+    bottom: auto;
+    transform: translate(-50%, -50%);
 }
 
 .canvas-scrollbar .scrollbar-thumb {
@@ -312,6 +401,11 @@
     color: #57606a;
     white-space: nowrap;
     flex-shrink: 0;
+    position: absolute;
+    right: var(--canvas-scrollbar-horizontal-hint-right);
+    top: calc(50% + var(--canvas-scrollbar-horizontal-hint-top-offset));
+    transform: translateY(-50%);
+    pointer-events: none;
 }
 
 .canvas-scrollbar.horizontal.show-controls .scrollbar-hint {
