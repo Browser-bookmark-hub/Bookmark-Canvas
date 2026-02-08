@@ -65,6 +65,11 @@ try {
 const SIDE_PANEL_FLOATING_TOOLS_KEY = 'sidepanelFloatingToolsVisible';
 const SIDE_PANEL_FLOATING_TOOLS_MODE_KEY = 'sidepanelFloatingToolsMode';
 const CANVAS_FLOATING_TOOLS_MODE_KEY = 'canvasFloatingToolsMode';
+const CANVAS_PAGE_FULLSCREEN_BRIDGE_ACTION = 'triggerCanvasPageFullscreenByTabId';
+const CANVAS_PAGE_FULLSCREEN_BRIDGE_STORAGE_KEY = 'canvas_page_fullscreen_bridge_request_v1';
+const CANVAS_PAGE_FULLSCREEN_BRIDGE_MAX_AGE_MS = 30000;
+const CANVAS_PAGE_FULLSCREEN_STATE_STORAGE_KEY = 'canvas_page_fullscreen_state_v1';
+const CANVAS_PAGE_FULLSCREEN_STATE_MAX_AGE_MS = 30000;
 const SIDE_PANEL_FLOATING_TOOLS_MODES = {
     NONE: 'none',
     HIDDEN: 'hidden',
@@ -1691,6 +1696,10 @@ function removeUrlFromBookmarkSet(url) {
 
 // 实时更新状态控制
 let messageListenerRegistered = false;
+let canvasFullscreenBridgeStorageListenerBound = false;
+let lastHandledCanvasFullscreenBridgeNonce = null;
+let sidePanelMirroredCanvasFullscreen = false;
+let pendingCanvasFullscreenBridgeNonces = new Set();
 // 显式移动集合（基于 onMoved 事件），用于同级移动标识，设置短期有效期
 let explicitMovedIds = new Map(); // id -> expiryTimestamp
 
@@ -3415,6 +3424,544 @@ function setupCanvasFloatingMiniToggle() {
     });
 }
 
+function getCanvasPageUrl() {
+    return browserAPI?.runtime?.getURL
+        ? browserAPI.runtime.getURL('history_html/history.html?view=canvas')
+        : 'history_html/history.html?view=canvas';
+}
+
+function getCanvasPageExtensionOrigin() {
+    try {
+        if (!browserAPI?.runtime?.getURL) return null;
+        return new URL(browserAPI.runtime.getURL('')).origin;
+    } catch (_) {
+        return null;
+    }
+}
+
+function isMatchingCanvasPageUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return false;
+
+    const extensionOrigin = getCanvasPageExtensionOrigin();
+    try {
+        const parsed = new URL(rawUrl);
+        if (extensionOrigin && parsed.origin !== extensionOrigin) return false;
+        if (!parsed.pathname.endsWith('/history_html/history.html')) return false;
+        const view = parsed.searchParams.get('view');
+        return !view || view === 'canvas';
+    } catch (_) {
+        return false;
+    }
+}
+
+async function findLatestCanvasPageTabInCurrentWindow() {
+    if (!browserAPI?.tabs?.query) return null;
+
+    const tabs = await new Promise((resolve) => {
+        try {
+            browserAPI.tabs.query({ currentWindow: true }, (items) => {
+                resolve(Array.isArray(items) ? items : []);
+            });
+        } catch (_) {
+            resolve([]);
+        }
+    });
+
+    const candidates = tabs
+        .filter(tab => tab && typeof tab.id === 'number' && isMatchingCanvasPageUrl(tab.url))
+        .sort((a, b) => {
+            const aId = typeof a.id === 'number' ? a.id : -1;
+            const bId = typeof b.id === 'number' ? b.id : -1;
+            return bId - aId;
+        });
+
+    return candidates.length ? candidates[0] : null;
+}
+
+async function activateTab(tabId) {
+    if (!browserAPI?.tabs?.update || typeof tabId !== 'number') return null;
+
+    return await new Promise((resolve) => {
+        try {
+            browserAPI.tabs.update(tabId, { active: true }, (tab) => {
+                resolve(tab || { id: tabId });
+            });
+        } catch (_) {
+            resolve({ id: tabId });
+        }
+    });
+}
+
+async function createCanvasPageTab(url) {
+    if (!browserAPI?.tabs?.create) return null;
+
+    return await new Promise((resolve) => {
+        try {
+            browserAPI.tabs.create({ url, active: true }, (tab) => {
+                resolve(tab || null);
+            });
+        } catch (_) {
+            resolve(null);
+        }
+    });
+}
+
+async function waitForTabComplete(tabId, timeoutMs = 5000) {
+    if (!browserAPI?.tabs?.onUpdated?.addListener || !browserAPI?.tabs?.get || typeof tabId !== 'number') {
+        return;
+    }
+
+    await new Promise((resolve) => {
+        let finished = false;
+        let timerId = null;
+
+        const done = () => {
+            if (finished) return;
+            finished = true;
+            try {
+                if (timerId) clearTimeout(timerId);
+            } catch (_) { }
+            try {
+                browserAPI.tabs.onUpdated.removeListener(onUpdated);
+            } catch (_) { }
+            resolve();
+        };
+
+        const onUpdated = (updatedTabId, changeInfo) => {
+            if (updatedTabId !== tabId) return;
+            if (changeInfo && changeInfo.status === 'complete') {
+                done();
+            }
+        };
+
+        try {
+            browserAPI.tabs.onUpdated.addListener(onUpdated);
+        } catch (_) {
+            resolve();
+            return;
+        }
+
+        timerId = setTimeout(done, timeoutMs);
+
+        try {
+            browserAPI.tabs.get(tabId, (tab) => {
+                if (tab && tab.status === 'complete') {
+                    done();
+                }
+            });
+        } catch (_) {
+            done();
+        }
+    });
+}
+
+function normalizeCanvasFullscreenIntent(intent) {
+    return intent === 'exit' || intent === 'status' ? intent : 'enter';
+}
+
+async function requestCanvasTabFullscreen(targetTabId, intent = 'enter') {
+    if (typeof targetTabId !== 'number') return;
+
+    const normalizedIntent = normalizeCanvasFullscreenIntent(intent);
+
+    const payload = {
+        targetTabId,
+        nonce: String(Date.now()) + '-' + Math.random().toString(36).slice(2, 10),
+        ts: Date.now(),
+        intent: normalizedIntent
+    };
+
+    const sendRequestOnce = (payload) => new Promise((resolve) => {
+        if (!browserAPI?.runtime?.sendMessage) {
+            resolve();
+            return;
+        }
+        try {
+            browserAPI.runtime.sendMessage({
+                action: CANVAS_PAGE_FULLSCREEN_BRIDGE_ACTION,
+                targetTabId: payload.targetTabId,
+                nonce: payload.nonce,
+                ts: payload.ts,
+                intent: payload.intent
+            }, () => {
+                try {
+                    const err = browserAPI?.runtime?.lastError;
+                    if (err && err.message) {
+                        // ignore: background may respond first.
+                    }
+                } catch (_) { }
+                resolve();
+            });
+        } catch (_) {
+            resolve();
+        }
+    });
+
+    const writeStorageBridgePayload = (payload) => new Promise((resolve) => {
+        if (!browserAPI?.storage?.local?.set) {
+            resolve();
+            return;
+        }
+        try {
+            browserAPI.storage.local.set({
+                [CANVAS_PAGE_FULLSCREEN_BRIDGE_STORAGE_KEY]: payload
+            }, () => {
+                resolve();
+            });
+        } catch (_) {
+            resolve();
+        }
+    });
+
+    const retryCount = normalizedIntent === 'enter' ? 4 : 1;
+
+    for (let i = 0; i < retryCount; i += 1) {
+        await Promise.all([
+            sendRequestOnce(payload),
+            writeStorageBridgePayload(payload)
+        ]);
+
+        if (i < retryCount - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 160));
+        }
+    }
+}
+
+async function getCurrentHistoryPageTabId() {
+    if (!browserAPI?.tabs?.getCurrent) return null;
+
+    return await new Promise((resolve) => {
+        try {
+            browserAPI.tabs.getCurrent((tab) => {
+                resolve(tab && typeof tab.id === 'number' ? tab.id : null);
+            });
+        } catch (_) {
+            resolve(null);
+        }
+    });
+}
+
+function getCanvasContainerFullscreenState() {
+    try {
+        const container = document.querySelector('.canvas-main-container');
+        const fullscreenElement = document.fullscreenElement
+            || document.webkitFullscreenElement
+            || document.mozFullScreenElement
+            || document.msFullscreenElement;
+        return {
+            container,
+            isFullscreen: Boolean(container && fullscreenElement === container)
+        };
+    } catch (_) {
+        return { container: null, isFullscreen: false };
+    }
+}
+
+function isCanvasFullscreenControlReady() {
+    try {
+        return Boolean(
+            window.CanvasModule
+            && window.CanvasModule.CanvasState
+            && window.CanvasModule.CanvasState.fullscreenHandlersBound === true
+        );
+    } catch (_) {
+        return false;
+    }
+}
+
+async function waitForCanvasFullscreenState(targetIsFullscreen, timeoutMs = 700) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        const { isFullscreen } = getCanvasContainerFullscreenState();
+        if (isFullscreen === targetIsFullscreen) return true;
+        await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+
+    const { isFullscreen } = getCanvasContainerFullscreenState();
+    return isFullscreen === targetIsFullscreen;
+}
+
+function setSidePanelMirroredCanvasFullscreen(nextState, options = {}) {
+    if (!isSidePanelMode) return;
+    const normalized = nextState === true;
+    const force = options && options.force === true;
+    if (!force && sidePanelMirroredCanvasFullscreen === normalized) return;
+
+    sidePanelMirroredCanvasFullscreen = normalized;
+
+    try {
+        if (window.CanvasModule && typeof window.CanvasModule.updateFullscreenButton === 'function') {
+            window.CanvasModule.updateFullscreenButton();
+        }
+    } catch (_) { }
+}
+
+function getSidePanelMirroredCanvasFullscreen() {
+    return sidePanelMirroredCanvasFullscreen === true;
+}
+
+function normalizeCanvasFullscreenStatePayload(rawPayload) {
+    if (!rawPayload || typeof rawPayload !== 'object') return null;
+
+    const tabId = Number(rawPayload.tabId);
+    const ts = Number(rawPayload.ts);
+    const isFullscreen = rawPayload.isFullscreen === true;
+
+    if (!Number.isFinite(tabId) || !Number.isFinite(ts)) return null;
+    if (Date.now() - ts > CANVAS_PAGE_FULLSCREEN_STATE_MAX_AGE_MS) return null;
+
+    return { tabId, ts, isFullscreen };
+}
+
+function applySidePanelFullscreenStatePayload(rawPayload, options = {}) {
+    if (!isSidePanelMode) return;
+    const payload = normalizeCanvasFullscreenStatePayload(rawPayload);
+    if (!payload) {
+        if (options && options.force === true) {
+            setSidePanelMirroredCanvasFullscreen(false, { force: true });
+        }
+        return;
+    }
+
+    setSidePanelMirroredCanvasFullscreen(payload.isFullscreen, options);
+}
+
+async function publishCanvasPageFullscreenState(isFullscreenOverride = null) {
+    if (isSidePanelMode) return;
+    if (!browserAPI?.storage?.local?.set) return;
+
+    const tabId = await getCurrentHistoryPageTabId();
+    if (typeof tabId !== 'number') return;
+
+    const isFullscreen = typeof isFullscreenOverride === 'boolean'
+        ? isFullscreenOverride
+        : getCanvasContainerFullscreenState().isFullscreen;
+
+    await new Promise((resolve) => {
+        try {
+            browserAPI.storage.local.set({
+                [CANVAS_PAGE_FULLSCREEN_STATE_STORAGE_KEY]: {
+                    tabId,
+                    isFullscreen,
+                    ts: Date.now()
+                }
+            }, () => {
+                resolve();
+            });
+        } catch (_) {
+            resolve();
+        }
+    });
+}
+
+async function refreshSidePanelFullscreenStateFromCanvasPage() {
+    if (!isSidePanelMode) return;
+
+    const targetTab = await findLatestCanvasPageTabInCurrentWindow();
+    if (!targetTab || typeof targetTab.id !== 'number') {
+        setSidePanelMirroredCanvasFullscreen(false, { force: true });
+        return;
+    }
+
+    await requestCanvasTabFullscreen(targetTab.id, 'status');
+}
+
+try {
+    window.__canvasSidePanelGetFullscreenState = getSidePanelMirroredCanvasFullscreen;
+    window.__canvasSyncFullscreenStateFromModule = (isFullscreen) => {
+        publishCanvasPageFullscreenState(isFullscreen).catch(() => { });
+    };
+} catch (_) { }
+
+function normalizeCanvasFullscreenBridgePayload(rawPayload) {
+    if (!rawPayload || typeof rawPayload !== 'object') return null;
+
+    const targetTabId = Number(rawPayload.targetTabId);
+    const ts = Number(rawPayload.ts);
+    const intent = normalizeCanvasFullscreenIntent(rawPayload.intent);
+    const nonce = typeof rawPayload.nonce === 'string'
+        ? rawPayload.nonce
+        : String(targetTabId) + '-' + String(ts);
+
+    if (!Number.isFinite(targetTabId) || !Number.isFinite(ts)) return null;
+    if (Date.now() - ts > CANVAS_PAGE_FULLSCREEN_BRIDGE_MAX_AGE_MS) return null;
+
+    return { targetTabId, ts, nonce, intent };
+}
+
+function tryHandleCanvasFullscreenBridgePayload(rawPayload) {
+    if (isSidePanelMode) return;
+
+    const payload = normalizeCanvasFullscreenBridgePayload(rawPayload);
+    if (!payload) return;
+    if (lastHandledCanvasFullscreenBridgeNonce === payload.nonce) return;
+    if (pendingCanvasFullscreenBridgeNonces.has(payload.nonce)) return;
+
+    pendingCanvasFullscreenBridgeNonces.add(payload.nonce);
+
+    getCurrentHistoryPageTabId().then((currentTabId) => {
+        if (typeof currentTabId !== 'number' || currentTabId !== payload.targetTabId) {
+            pendingCanvasFullscreenBridgeNonces.delete(payload.nonce);
+            return;
+        }
+
+        triggerCanvasFullscreenButtonFromBridge(payload.intent)
+            .then((handled) => {
+                if (handled) {
+                    lastHandledCanvasFullscreenBridgeNonce = payload.nonce;
+                }
+            })
+            .catch(() => { })
+            .finally(() => {
+                pendingCanvasFullscreenBridgeNonces.delete(payload.nonce);
+            });
+    }).catch(() => {
+        pendingCanvasFullscreenBridgeNonces.delete(payload.nonce);
+    });
+}
+
+function setupCanvasFullscreenBridgeStorageListener() {
+    if (canvasFullscreenBridgeStorageListenerBound) return;
+    canvasFullscreenBridgeStorageListenerBound = true;
+
+    if (browserAPI?.storage?.onChanged?.addListener) {
+        try {
+            browserAPI.storage.onChanged.addListener((changes, areaName) => {
+                if (areaName !== 'local' || !changes) return;
+
+                const bridgeChanged = changes[CANVAS_PAGE_FULLSCREEN_BRIDGE_STORAGE_KEY];
+                if (bridgeChanged && ('newValue' in bridgeChanged)) {
+                    tryHandleCanvasFullscreenBridgePayload(bridgeChanged.newValue);
+                }
+
+                const stateChanged = changes[CANVAS_PAGE_FULLSCREEN_STATE_STORAGE_KEY];
+                if (stateChanged && ('newValue' in stateChanged)) {
+                    applySidePanelFullscreenStatePayload(stateChanged.newValue, { force: true });
+                }
+            });
+        } catch (_) { }
+    }
+
+    if (browserAPI?.storage?.local?.get) {
+        try {
+            browserAPI.storage.local.get([
+                CANVAS_PAGE_FULLSCREEN_BRIDGE_STORAGE_KEY,
+                CANVAS_PAGE_FULLSCREEN_STATE_STORAGE_KEY
+            ], (data) => {
+                const bridgePayload = data && data[CANVAS_PAGE_FULLSCREEN_BRIDGE_STORAGE_KEY];
+                tryHandleCanvasFullscreenBridgePayload(bridgePayload);
+
+                const statePayload = data && data[CANVAS_PAGE_FULLSCREEN_STATE_STORAGE_KEY];
+                applySidePanelFullscreenStatePayload(statePayload, { force: true });
+            });
+        } catch (_) { }
+    }
+
+    if (!isSidePanelMode) {
+        publishCanvasPageFullscreenState().catch(() => { });
+    } else {
+        refreshSidePanelFullscreenStateFromCanvasPage().catch(() => { });
+    }
+}
+
+async function triggerCanvasFullscreenButtonFromBridge(intent = 'enter') {
+    if (isSidePanelMode) return false;
+
+    const normalizedIntent = normalizeCanvasFullscreenIntent(intent);
+    const maxAttempts = normalizedIntent === 'enter' ? 28 : 16;
+
+    if (currentView !== 'canvas' && typeof switchView === 'function') {
+        try {
+            switchView('canvas');
+        } catch (_) { }
+    }
+
+    for (let i = 0; i < maxAttempts; i += 1) {
+        const { isFullscreen } = getCanvasContainerFullscreenState();
+
+        if (normalizedIntent === 'status') {
+            publishCanvasPageFullscreenState(isFullscreen).catch(() => { });
+            return true;
+        }
+
+        if (normalizedIntent === 'enter' && isFullscreen) {
+            publishCanvasPageFullscreenState(true).catch(() => { });
+            return true;
+        }
+
+        if (normalizedIntent === 'exit' && !isFullscreen) {
+            publishCanvasPageFullscreenState(false).catch(() => { });
+            return true;
+        }
+
+        if (!isCanvasFullscreenControlReady()) {
+            await new Promise((resolve) => setTimeout(resolve, 120));
+            continue;
+        }
+
+        const fullscreenBtn = document.getElementById('canvasFullscreenBtn');
+        if (fullscreenBtn) {
+            try {
+                fullscreenBtn.click();
+                const targetIsFullscreen = normalizedIntent === 'enter';
+                const reached = await waitForCanvasFullscreenState(targetIsFullscreen, 700);
+                if (reached) {
+                    publishCanvasPageFullscreenState(targetIsFullscreen).catch(() => { });
+                    return true;
+                }
+            } catch (_) { }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+
+    publishCanvasPageFullscreenState().catch(() => { });
+    return false;
+}
+
+async function openOrFocusCanvasPage(options = {}) {
+    const { requestFullscreen = false, fullscreenIntent = 'enter' } = options;
+    const normalizedIntent = normalizeCanvasFullscreenIntent(fullscreenIntent);
+    const url = getCanvasPageUrl();
+    const shouldActivateExistingTab = !(requestFullscreen && normalizedIntent !== 'enter');
+
+    let targetTab = await findLatestCanvasPageTabInCurrentWindow();
+    if (targetTab && typeof targetTab.id === 'number') {
+        if (shouldActivateExistingTab) {
+            targetTab = await activateTab(targetTab.id);
+        }
+    } else if (requestFullscreen && normalizedIntent === 'exit') {
+        setSidePanelMirroredCanvasFullscreen(false, { force: true });
+        return null;
+    } else {
+        targetTab = await createCanvasPageTab(url);
+    }
+
+    const targetTabId = targetTab && typeof targetTab.id === 'number' ? targetTab.id : null;
+    if (typeof targetTabId !== 'number') {
+        if (requestFullscreen && normalizedIntent === 'exit') {
+            setSidePanelMirroredCanvasFullscreen(false, { force: true });
+            return null;
+        }
+        try {
+            window.open(url, '_blank');
+        } catch (_) { }
+        return null;
+    }
+
+    if (requestFullscreen) {
+        if (normalizedIntent === 'enter') {
+            await waitForTabComplete(targetTabId);
+        }
+        await requestCanvasTabFullscreen(targetTabId, normalizedIntent);
+    }
+
+    return targetTabId;
+}
+
+try {
+    window.__canvasSidePanelOpenOrFocusPage = openOrFocusCanvasPage;
+} catch (_) { }
+
 function setupOpenCanvasPageButton() {
     if (!isSidePanelMode) return;
     const btn = document.getElementById('openCanvasPageBtn');
@@ -3424,68 +3971,7 @@ function setupOpenCanvasPageButton() {
     btn.addEventListener('click', async (e) => {
         e.preventDefault();
         try {
-            const url = browserAPI?.runtime?.getURL
-                ? browserAPI.runtime.getURL('history_html/history.html?view=canvas')
-                : 'history_html/history.html?view=canvas';
-
-            const canQueryTabs = !!(browserAPI && browserAPI.tabs && browserAPI.tabs.query && browserAPI.tabs.update);
-            if (canQueryTabs) {
-                const extensionOrigin = (() => {
-                    try {
-                        if (!browserAPI?.runtime?.getURL) return null;
-                        return new URL(browserAPI.runtime.getURL('')).origin;
-                    } catch (_) {
-                        return null;
-                    }
-                })();
-
-                const isMatchingCanvasPage = (rawUrl) => {
-                    if (!rawUrl || typeof rawUrl !== 'string') return false;
-                    try {
-                        const parsed = new URL(rawUrl);
-                        if (extensionOrigin && parsed.origin !== extensionOrigin) return false;
-                        if (!parsed.pathname.endsWith('/history_html/history.html')) return false;
-                        const view = parsed.searchParams.get('view');
-                        return !view || view === 'canvas';
-                    } catch (_) {
-                        return false;
-                    }
-                };
-
-                const currentWindowTabs = await new Promise((resolve) => {
-                    try {
-                        browserAPI.tabs.query({ currentWindow: true }, (tabs) => {
-                            resolve(Array.isArray(tabs) ? tabs : []);
-                        });
-                    } catch (_) {
-                        resolve([]);
-                    }
-                });
-
-                const candidates = currentWindowTabs
-                    .filter(tab => tab && typeof tab.id === 'number' && isMatchingCanvasPage(tab.url))
-                    .sort((a, b) => {
-                        const aId = typeof a.id === 'number' ? a.id : -1;
-                        const bId = typeof b.id === 'number' ? b.id : -1;
-                        return bId - aId;
-                    });
-
-                if (candidates.length > 0) {
-                    const targetTabId = candidates[0].id;
-                    await new Promise((resolve) => {
-                        try {
-                            browserAPI.tabs.update(targetTabId, { active: true }, () => resolve());
-                        } catch (_) {
-                            resolve();
-                        }
-                    });
-                    return;
-                }
-            }
-
-            if (browserAPI && browserAPI.tabs && browserAPI.tabs.create) {
-                browserAPI.tabs.create({ url });
-            }
+            await openOrFocusCanvasPage({ requestFullscreen: false });
         } catch (_) { }
     });
 }
@@ -9406,6 +9892,8 @@ function setupRealtimeMessageListener() {
     if (messageListenerRegistered) return;
     messageListenerRegistered = true;
 
+    setupCanvasFullscreenBridgeStorageListener();
+
     browserAPI.runtime.onMessage.addListener((message) => {
         if (!message || !message.action) return;
 
@@ -9460,6 +9948,8 @@ function setupRealtimeMessageListener() {
                     }
                 } catch (_) { }
             }
+        } else if (message.action === CANVAS_PAGE_FULLSCREEN_BRIDGE_ACTION) {
+            tryHandleCanvasFullscreenBridgePayload(message);
         } else if (message.action === 'clearLocalStorage') {
             // 收到来自 background.js 的清除 localStorage 请求（"恢复到初始状态"功能）
             console.log('[history.js] 收到清除 localStorage 请求');

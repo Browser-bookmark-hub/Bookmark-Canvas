@@ -9334,11 +9334,12 @@ function setupCanvasFullscreenControls() {
     const container = document.querySelector('.canvas-main-container');
     if (!btn || !container) return;
 
+    const inSidePanelMode = window.__SIDE_PANEL_MODE__ === true;
     const canRequestFullscreen = container.requestFullscreen ||
         container.webkitRequestFullscreen ||
         container.mozRequestFullScreen ||
         container.msRequestFullscreen;
-    if (!canRequestFullscreen) {
+    if (!canRequestFullscreen && !inSidePanelMode) {
         btn.style.display = 'none';
         return;
     }
@@ -9353,6 +9354,29 @@ function setupCanvasFullscreenControls() {
 }
 
 function toggleCanvasFullscreen() {
+    if (window.__SIDE_PANEL_MODE__ === true) {
+        const bridgeOpenOrFocus = window.__canvasSidePanelOpenOrFocusPage;
+        const sidePanelFullscreenGetter = window.__canvasSidePanelGetFullscreenState;
+        const mirroredFullscreen = typeof sidePanelFullscreenGetter === 'function'
+            ? sidePanelFullscreenGetter() === true
+            : false;
+        const fullscreenIntent = mirroredFullscreen ? 'exit' : 'enter';
+
+        if (typeof bridgeOpenOrFocus === 'function') {
+            Promise.resolve(bridgeOpenOrFocus({ requestFullscreen: true, fullscreenIntent })).catch(error => {
+                console.warn('[Canvas] 侧边栏跳转 HTML 全屏失败:', error);
+            });
+        } else {
+            try {
+                const runtimeUrl = (typeof chrome !== 'undefined' && chrome?.runtime?.getURL)
+                    ? chrome.runtime.getURL('history_html/history.html?view=canvas')
+                    : 'history_html/history.html?view=canvas';
+                window.open(runtimeUrl, '_blank');
+            } catch (_) { }
+        }
+        return;
+    }
+
     const container = document.querySelector('.canvas-main-container');
     if (!container) return;
 
@@ -9386,6 +9410,13 @@ function handleCanvasFullscreenChange() {
     CanvasState.isFullscreen = getCurrentFullscreenElement() === container;
     updateFullscreenButtonState();
     updateNodeFullscreenButtons();
+
+    try {
+        const syncHandler = window.__canvasSyncFullscreenStateFromModule;
+        if (typeof syncHandler === 'function') {
+            syncHandler(CanvasState.isFullscreen);
+        }
+    } catch (_) { }
 }
 
 function updateFullscreenButtonState() {
@@ -9396,7 +9427,13 @@ function updateFullscreenButtonState() {
     const lang = getCanvasLanguage();
     const enterLabel = getFullscreenLabel('canvasFullscreenEnter', lang);
     const exitLabel = getFullscreenLabel('canvasFullscreenExit', lang);
-    const isFullscreen = getCurrentFullscreenElement() === container;
+    let isFullscreen = getCurrentFullscreenElement() === container;
+    if (window.__SIDE_PANEL_MODE__ === true) {
+        const sidePanelFullscreenGetter = window.__canvasSidePanelGetFullscreenState;
+        if (typeof sidePanelFullscreenGetter === 'function') {
+            isFullscreen = sidePanelFullscreenGetter() === true;
+        }
+    }
 
     CanvasState.isFullscreen = isFullscreen;
     const text = isFullscreen ? exitLabel : enterLabel;
