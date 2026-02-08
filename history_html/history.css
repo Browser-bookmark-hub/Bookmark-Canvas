@@ -1844,6 +1844,10 @@ button *,
     color: var(--canvas-dir-color-edge, var(--text-secondary));
 }
 
+.canvas-dir-folder[data-node-key^="folder-imported-group-"] > summary {
+    color: #9aa0a6;
+}
+
 .canvas-dir-folder > summary.canvas-dir-folder-summary-btn {
     list-style: none;
 }
@@ -1894,6 +1898,11 @@ button *,
     color: var(--canvas-dir-color-edge, var(--text-tertiary));
 }
 
+.canvas-dir-folder[data-node-key^="folder-imported-group-"] > summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key^="folder-imported-group-"] > summary .canvas-dir-count {
+    color: #9aa0a6;
+}
+
 .canvas-dir-icon-spacer {
     width: 18px;
     min-width: 18px;
@@ -1936,6 +1945,11 @@ button *,
 .canvas-dir-icon-badge-special {
     font-size: 13px;
     color: var(--quick-add-special-temp-color, var(--accent-primary));
+}
+
+.canvas-dir-icon-badge-neutral {
+    font-size: 12px;
+    color: #9aa0a6;
 }
 
 .canvas-dir-label {
@@ -2077,6 +2091,11 @@ button *,
     width: var(--canvas-tree-indent);
 }
 
+.canvas-dir-folder[data-node-variant="import-group-root"] > .canvas-dir-children > .canvas-dir-item > .canvas-dir-item-btn::before,
+.canvas-dir-folder[data-node-variant="import-group-root"] > .canvas-dir-children > .canvas-dir-folder > summary::before {
+    width: var(--canvas-tree-indent);
+}
+
 .canvas-dir-children > .canvas-dir-item:last-child::after,
 .canvas-dir-children > .canvas-dir-folder:last-child::after {
     content: "";
@@ -2121,6 +2140,86 @@ button *,
 .canvas-dir-folder-toggle:hover {
     background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
     color: var(--text-primary);
+}
+
+.canvas-dir-folder-delete-wrap {
+    margin-left: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.canvas-dir-folder-delete {
+    margin-left: 0;
+    width: 14px;
+    height: 14px;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    flex: 0 0 14px;
+}
+
+.canvas-dir-folder-delete i {
+    font-size: 9px;
+}
+
+.canvas-dir-folder-delete:hover {
+    background: color-mix(in srgb, var(--danger) 18%, transparent);
+    color: var(--danger);
+}
+
+.canvas-dir-folder-delete.is-armed {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+.canvas-dir-folder-delete.is-armed:hover {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+.canvas-dir-folder-delete-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.canvas-dir-folder-delete-confirm,
+.canvas-dir-folder-delete-cancel {
+    width: 13px;
+    height: 13px;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    flex: 0 0 13px;
+}
+
+.canvas-dir-folder-delete-confirm i,
+.canvas-dir-folder-delete-cancel i {
+    font-size: 8px;
+}
+
+.canvas-dir-folder-delete-confirm:hover {
+    color: var(--success, #22c55e);
+    background: color-mix(in srgb, var(--success, #22c55e) 18%, transparent);
+}
+
+.canvas-dir-folder-delete-cancel:hover {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 18%, transparent);
 }
 
 .canvas-dir-folder-summary-btn.active {
