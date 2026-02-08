@@ -30592,6 +30592,15 @@ function openCanvasAppearanceSettingsModal() {
     __updateAppearanceNameMode(modal, 'appearanceTempNameMode', 'appearanceTempNameManualWrap');
     __updateAppearanceNameMode(modal, 'appearanceEdgeNameMode', 'appearanceEdgeNameManualWrap');
 
+    const otherSettings = getCanvasOtherSettings();
+    const otherAutoLink = modal.querySelector('#otherAutoLinkSplit');
+    const otherColorFollow = modal.querySelector('#otherTempColorFollow');
+    const otherUnlockSync = modal.querySelector('#otherTempColorUnlockSync');
+    if (otherAutoLink) otherAutoLink.checked = !!otherSettings.autoLinkSplit;
+    if (otherColorFollow) otherColorFollow.checked = !(otherSettings.tempColorFollow === false);
+    if (otherUnlockSync) otherUnlockSync.checked = !(otherSettings.tempColorUnlockSync === false);
+    __updateOtherTempColorFollowLock(modal, otherColorFollow && otherColorFollow.checked);
+
     modal.style.display = 'flex';
 }
 
@@ -30839,6 +30848,60 @@ function createCanvasAppearanceSettingsModal() {
                         </div>
                     </div>
                 </div>
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'Special' : '特殊'}</div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Auto connect with edges after split' : '分裂后使用「连接线」自动连接'}</div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherAutoLinkSplit">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</span>
+                            <span class="temp-color-follow-lock" id="otherTempColorFollowLock" aria-hidden="true"></span>
+                            <button class="perf-help-btn" id="otherTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherTempColorFollow">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Unlock sync to parent' : '解锁后继承父色'}</span>
+                            <button class="perf-help-btn" id="otherTempColorUnlockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherTempColorUnlockSync">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Reset all temp colors' : '全部还原默认色'}</span>
+                            <button class="perf-help-btn" id="otherTempColorResetHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <button class="perf-btn secondary other-mini-btn" id="otherTempColorResetBtn">
+                                ${isEn ? 'Reset to default' : '还原'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="perf-help-popover" id="appearanceSpecialTempHelpPopover">
@@ -30846,6 +30909,27 @@ function createCanvasAppearanceSettingsModal() {
                 ${isEn
             ? '<b>Special temp sections</b>: Drop / Search / Batch / Add.<br><b>Tip</b>: Auto-fit is not recommended when you have many of these sections.'
             : '<b>特殊临时栏目</b>：拖入 / 搜索 / 批量 / 添加。<br><b>提示</b>：数量很多时不建议使用自适应。'}
+            </div>
+        </div>
+        <div class="perf-help-popover" id="otherTempColorHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Global switch</b>: one-tap unify normal temp locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special temp sections</b> (Drop / Search / Batch / Add) now use their own default color in Appearance.'
+            : '<b>全局开关</b>：一键统一普通临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加）现在使用外观中的独立默认颜色。'}
+            </div>
+        </div>
+        <div class="perf-help-popover" id="otherTempColorUnlockHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? 'When enabled, unlocking immediately syncs to the parent color. Child items under the current section will follow only if they are unlocked; any locked node in between breaks the chain.'
+            : '开启时，解锁会立即同步父栏目颜色。当前栏目下的子栏目只有在解锁状态才会跟随；中间层若有锁住，会被阻断。'}
+            </div>
+        </div>
+        <div class="perf-help-popover" id="otherTempColorResetHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? 'Reset button: resets colors only, without changing lock state.'
+            : '还原按钮：仅还原颜色，不改变锁状态。'}
             </div>
         </div>
     `;
@@ -30899,6 +30983,60 @@ function createCanvasAppearanceSettingsModal() {
         });
     };
     bindClickHelpPopover(specialTempHelpBtn, specialTempHelpPopover);
+
+    const scheduleOtherSave = (() => {
+        let timer = null;
+        return () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => saveCanvasOtherSettings({ close: false, modal }), 180);
+        };
+    })();
+    const otherAutoLinkToggle = modal.querySelector('#otherAutoLinkSplit');
+    const otherColorFollowToggle = modal.querySelector('#otherTempColorFollow');
+    const otherUnlockSyncToggle = modal.querySelector('#otherTempColorUnlockSync');
+    const otherResetBtn = modal.querySelector('#otherTempColorResetBtn');
+    const otherTempHelpBtn = modal.querySelector('#otherTempColorHelpBtn');
+    const otherTempHelpPopover = modal.querySelector('#otherTempColorHelpPopover');
+    const otherTempUnlockHelpBtn = modal.querySelector('#otherTempColorUnlockHelpBtn');
+    const otherTempUnlockHelpPopover = modal.querySelector('#otherTempColorUnlockHelpPopover');
+    const otherTempResetHelpBtn = modal.querySelector('#otherTempColorResetHelpBtn');
+    const otherTempResetHelpPopover = modal.querySelector('#otherTempColorResetHelpPopover');
+    bindClickHelpPopover(otherTempHelpBtn, otherTempHelpPopover);
+    bindClickHelpPopover(otherTempUnlockHelpBtn, otherTempUnlockHelpPopover);
+    bindClickHelpPopover(otherTempResetHelpBtn, otherTempResetHelpPopover);
+
+    if (otherAutoLinkToggle) {
+        otherAutoLinkToggle.addEventListener('change', () => {
+            scheduleOtherSave();
+        });
+    }
+    if (otherColorFollowToggle) {
+        const applyGlobalToggle = (enabled) => {
+            __updateOtherTempColorFollowLock(modal, enabled);
+            __applyGlobalTempColorFollowSetting(enabled);
+            const settings = getCanvasOtherSettings();
+            if (settings) {
+                settings.tempColorFollow = !!enabled;
+                try { localStorage.setItem(CANVAS_OTHER_SETTINGS_KEY, JSON.stringify(settings)); } catch (_) { }
+            }
+        };
+        otherColorFollowToggle.addEventListener('change', () => {
+            applyGlobalToggle(!!otherColorFollowToggle.checked);
+            scheduleOtherSave();
+        });
+    }
+    if (otherUnlockSyncToggle) {
+        otherUnlockSyncToggle.addEventListener('change', () => {
+            scheduleOtherSave();
+        });
+    }
+    if (otherResetBtn) {
+        otherResetBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            __resetAllTempSectionColorsToDefault();
+        });
+    }
 
     const tempNameSelect = modal.querySelector('#appearanceTempNameMode');
     if (tempNameSelect) tempNameSelect.addEventListener('change', () => {
@@ -31026,25 +31164,26 @@ function closeCanvasOtherSettingsModal() {
 }
 
 function saveCanvasOtherSettings(options = {}) {
-    const modal = document.getElementById('canvasOtherSettingsModal');
+    const modal = (options && options.modal) ? options.modal : document.getElementById('canvasOtherSettingsModal');
     if (!modal) return;
     const closeAfterSave = options && options.close !== false;
-    const prevSettings = getCanvasOtherSettings();
+    const isOtherModalSave = !(options && options.modal);
+    const prevSettings = normalizeCanvasOtherSettings(getCanvasOtherSettings());
     const prevFollow = isTempColorFollowEnabled(prevSettings);
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
     const colorFollow = modal.querySelector('#otherTempColorFollow');
     const unlockSync = modal.querySelector('#otherTempColorUnlockSync');
     const useDefaultCurve = modal.querySelector('#otherUseDefaultZoomCurve');
-    const useDefault = useDefaultCurve ? !!useDefaultCurve.checked : true;
+    const useDefault = useDefaultCurve ? !!useDefaultCurve.checked : !(prevSettings && prevSettings.useDefaultZoomCurve === false);
     const defaultCurve = __cloneDefaultOtherSettings().zoomCurve;
     const defaultMagnets = __getDefaultMagnetPointsFromPerf();
     const settingsInput = {
-        autoLinkSplit: !!(autoLink && autoLink.checked),
-        tempColorFollow: !!(colorFollow && colorFollow.checked),
-        tempColorUnlockSync: !!(unlockSync && unlockSync.checked),
+        autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
+        tempColorFollow: colorFollow ? !!colorFollow.checked : !(prevSettings.tempColorFollow === false),
+        tempColorUnlockSync: unlockSync ? !!unlockSync.checked : !(prevSettings.tempColorUnlockSync === false),
         useDefaultZoomCurve: useDefault,
-        zoomCurve: useDefault ? defaultCurve : (modal._zoomCurve || getCanvasZoomCurveSettings()),
-        magnetPoints: useDefault ? defaultMagnets : (modal._magnetPoints || getCanvasZoomMagnetPoints())
+        zoomCurve: useDefault ? defaultCurve : (modal._zoomCurve || prevSettings.zoomCurve || getCanvasZoomCurveSettings()),
+        magnetPoints: useDefault ? defaultMagnets : (modal._magnetPoints || prevSettings.magnetPoints || getCanvasZoomMagnetPoints())
     };
     const normalized = normalizeCanvasOtherSettings(settingsInput);
     CanvasState.otherSettings = normalized;
@@ -31058,7 +31197,7 @@ function saveCanvasOtherSettings(options = {}) {
     if (useDefault) {
         __applyPerfDefaultBaselineToPerf();
     }
-    if (closeAfterSave) closeCanvasOtherSettingsModal();
+    if (closeAfterSave && isOtherModalSave) closeCanvasOtherSettingsModal();
 }
 
 function __updateOtherMagnetLegend(modal, meta) {
@@ -31703,60 +31842,6 @@ function createCanvasOtherSettingsModal() {
             </div>
             <div class="modal-body">
                 <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? 'Special' : '特殊'}</div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Auto connect with edges after split' : '分裂后使用「连接线」自动连接'}</div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherAutoLinkSplit">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</span>
-                            <span class="temp-color-follow-lock" id="otherTempColorFollowLock" aria-hidden="true"></span>
-                            <button class="perf-help-btn" id="otherTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherTempColorFollow">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Unlock sync to parent' : '解锁后继承父色'}</span>
-                            <button class="perf-help-btn" id="otherTempColorUnlockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherTempColorUnlockSync">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Reset all temp colors' : '全部还原默认色'}</span>
-                            <button class="perf-help-btn" id="otherTempColorResetHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <button class="perf-btn secondary other-mini-btn" id="otherTempColorResetBtn">
-                                ${isEn ? 'Reset to default' : '还原'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div class="detail-section">
                     <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? 'Zoom Speed & Magnet' : '缩放速率与磁矩'}</div>
                     <div class="appearance-row">
                         <div class="appearance-row-label">${isEn ? 'Use default' : '使用默认'}</div>
@@ -31825,27 +31910,6 @@ function createCanvasOtherSettingsModal() {
                         </div>
                         <div class="other-curve-note">${isEn ? 'Default curve resets to standard values. Drag any point to switch to custom.' : '默认曲线会还原到标准数值，拖动任意点会自动切换为自定义。'}</div>
                     </div>
-                </div>
-            </div>
-            <div class="perf-help-popover" id="otherTempColorHelpPopover">
-            <div class="perf-help-popover-content">
-                ${isEn
-            ? '<b>Global switch</b>: one-tap unify normal temp locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special temp sections</b> (Drop / Search / Batch / Add) now use their own default color in Appearance.'
-            : '<b>全局开关</b>：一键统一普通临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加）现在使用外观中的独立默认颜色。'}
-                </div>
-            </div>
-            <div class="perf-help-popover" id="otherTempColorUnlockHelpPopover">
-                <div class="perf-help-popover-content">
-                    ${isEn
-            ? 'When enabled, unlocking immediately syncs to the parent color. Child items under the current section will follow only if they are unlocked; any locked node in between breaks the chain.'
-            : '开启时，解锁会立即同步父栏目颜色。当前栏目下的子栏目只有在解锁状态才会跟随；中间层若有锁住，会被阻断。'}
-                </div>
-            </div>
-            <div class="perf-help-popover" id="otherTempColorResetHelpPopover">
-                <div class="perf-help-popover-content">
-                    ${isEn
-            ? 'Reset button: resets colors only, without changing lock state.'
-            : '还原按钮：仅还原颜色，不改变锁状态。'}
                 </div>
             </div>
         </div>
