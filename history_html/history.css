@@ -2246,6 +2246,117 @@ a.tree-label.tree-bookmark-link:hover {
     flex: 1;
 }
 
+/* 编辑书签 / 重命名文件夹弹窗 */
+#editBookmarkModal {
+    background: transparent;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 覆盖 .modal.content-center：在 HTML 页面与侧边栏都保持全屏居中 */
+#editBookmarkModal.modal.content-center {
+    left: 0;
+    width: 100%;
+}
+
+#editBookmarkModal .modal-content {
+    width: min(92vw, 520px);
+    max-width: 520px;
+    max-height: min(84vh, 700px);
+    box-shadow: none;
+}
+
+#editBookmarkModal .modal-header.compact {
+    padding: 14px 18px;
+}
+
+#editBookmarkModal .modal-body {
+    padding: 18px;
+}
+
+/* 侧边栏模式：优化尺寸，更紧凑 */
+html.side-panel-mode #editBookmarkModal .modal-content {
+    width: min(94vw, 420px);
+    max-width: 420px;
+}
+
+html.side-panel-mode #editBookmarkModal .modal-header.compact {
+    padding: 12px 14px;
+}
+
+html.side-panel-mode #editBookmarkModal .modal-body {
+    padding: 14px;
+}
+
+.edit-bookmark-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.edit-bookmark-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.edit-bookmark-field label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.edit-bookmark-input {
+    width: 100%;
+    height: 38px;
+    padding: 0 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 14px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.edit-bookmark-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.edit-bookmark-actions {
+    margin-top: 16px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+#editBookmarkModal .modal-btn {
+    min-width: 84px;
+    height: 36px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+#editBookmarkModal .modal-btn:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-tertiary);
+}
+
+#editBookmarkModal .modal-btn.primary {
+    border-color: var(--accent-primary);
+    background: var(--accent-primary);
+    color: #fff;
+}
+
+#editBookmarkModal .modal-btn.primary:hover {
+    filter: brightness(0.95);
+}
+
 /* 详情内容样式 */
 .detail-section {
     margin-bottom: 24px;

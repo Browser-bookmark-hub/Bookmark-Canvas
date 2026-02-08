@@ -3509,10 +3509,11 @@ function serializeTempItemForClipboard(item) {
 
 function createTempItemFromPayload(sectionId, payload) {
     if (!payload) return null;
+    const hasExplicitTitle = typeof payload.title === 'string';
     const item = {
         id: allocateTempItemId(sectionId),
         sectionId,
-        title: payload.title || (payload.url || '未命名'),
+        title: hasExplicitTitle ? payload.title : (payload.url || '未命名'),
         url: payload.url || '',
         type: payload.type === 'folder' ? 'folder' : (payload.url ? 'bookmark' : 'folder'),
         children: [],
@@ -3703,21 +3704,23 @@ function insertTempItemsFromPayload(sectionId, parentId, payloadItems, index = n
 
 function createTempBookmark(sectionId, parentId, title, url) {
     const item = createTempItemFromPayload(sectionId, {
-        title: title || '新建书签',
-        url: url || 'https://',
+        title: typeof title === 'string' ? title : '新建书签',
+        url: (typeof url === 'string' && url) ? url : 'https://',
         type: 'bookmark',
         children: []
     });
     insertTempItems(sectionId, parentId, [item]);
+    return item && item.id ? item.id : null;
 }
 
 function createTempFolder(sectionId, parentId, title) {
     const item = createTempItemFromPayload(sectionId, {
-        title: title || '新建文件夹',
+        title: typeof title === 'string' ? title : '新建文件夹',
         type: 'folder',
         children: []
     });
     insertTempItems(sectionId, parentId, [item]);
+    return item && item.id ? item.id : null;
 }
 
 // =============================================================================
@@ -5370,7 +5373,7 @@ function createCanvasFolderItem(folder, isDraggable) {
     // 标题
     const title = document.createElement('span');
     title.className = 'canvas-folder-title';
-    title.textContent = folder.title || '未命名文件夹';
+    title.textContent = typeof folder.title === 'string' ? folder.title : '未命名文件夹';
 
     header.appendChild(icon);
     header.appendChild(title);
@@ -21149,7 +21152,7 @@ function buildTempTreeNode(section, item, level, options = {}) {
     } else {
         const span = document.createElement('span');
         span.className = 'tree-label';
-        span.textContent = item.title || '未命名文件夹';
+        span.textContent = typeof item.title === 'string' ? item.title : '未命名文件夹';
         label = span;
     }
 

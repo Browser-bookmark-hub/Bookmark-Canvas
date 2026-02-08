@@ -3645,22 +3645,25 @@ async function handleQuickAddAction(action) {
         ? await getCurrentWindowTabs()
         : await getActiveTabList();
 
-    const items = normalizeTabs(tabs);
-    if (!items.length) {
+    const normalized = await normalizeTabsForQuickAdd(tabs);
+    const flatItems = Array.isArray(normalized.flatItems) ? normalized.flatItems : [];
+    const structuredItems = Array.isArray(normalized.structuredItems) ? normalized.structuredItems : [];
+
+    if (!flatItems.length) {
         const msg = currentLang === 'en' ? 'No valid pages to add' : '没有可添加的页面';
         try { showToast(msg); } catch (_) { }
         return;
     }
 
     if (target === 'permanent') {
-        await addTabsToPermanent(items, scope);
+        await addTabsToPermanent(structuredItems.length ? structuredItems : flatItems, scope);
         return;
     }
     if (target === 'blank') {
-        await addTabsToBlankNode(items, scope);
+        await addTabsToBlankNode(structuredItems.length ? structuredItems : flatItems, scope);
         return;
     }
-    await addTabsToTempSection(items, scope);
+    await addTabsToTempSection(structuredItems.length ? structuredItems : flatItems, scope);
 }
 
 function queryTabs(params) {
@@ -3683,27 +3686,148 @@ function queryTabs(params) {
 
 async function getActiveTabList() {
     const tabs = await queryTabs({ active: true, currentWindow: true });
-    return tabs.slice(0, 1);
+    const activeTab = tabs[0];
+    if (!activeTab) return [];
+
+    const groupId = typeof activeTab.groupId === 'number' ? activeTab.groupId : -1;
+    if (groupId >= 0) {
+        const groupedTabs = await queryTabs({ currentWindow: true, groupId });
+        if (groupedTabs.length) {
+            return groupedTabs.sort((left, right) => {
+                const leftIndex = typeof left.index === 'number' ? left.index : 0;
+                const rightIndex = typeof right.index === 'number' ? right.index : 0;
+                return leftIndex - rightIndex;
+            });
+        }
+    }
+
+    return [activeTab];
 }
 
 async function getCurrentWindowTabs() {
-    return await queryTabs({ currentWindow: true, windowType: 'normal' });
+    const tabs = await queryTabs({ currentWindow: true, windowType: 'normal' });
+    return tabs.sort((left, right) => {
+        const leftIndex = typeof left.index === 'number' ? left.index : 0;
+        const rightIndex = typeof right.index === 'number' ? right.index : 0;
+        return leftIndex - rightIndex;
+    });
 }
 
-function normalizeTabs(tabs) {
-    const out = [];
+async function normalizeTabsForQuickAdd(tabs) {
+    const normalizedTabs = [];
+    const flatItems = [];
     const seen = new Set();
-    (Array.isArray(tabs) ? tabs : []).forEach(tab => {
+
+    (Array.isArray(tabs) ? tabs : []).forEach((tab) => {
         const url = tab && (tab.url || tab.pendingUrl);
         if (!url || !isAddableUrl(url)) return;
-        if (seen.has(url)) return;
-        seen.add(url);
-        out.push({
-            title: (tab && tab.title) ? String(tab.title) : String(url),
-            url: String(url)
+
+        const groupId = (tab && typeof tab.groupId === 'number') ? tab.groupId : -1;
+        const dedupKey = (tab && typeof tab.id === 'number')
+            ? `id:${tab.id}`
+            : `${String(url)}|${groupId}|${tab && typeof tab.index === 'number' ? tab.index : ''}`;
+        if (seen.has(dedupKey)) return;
+        seen.add(dedupKey);
+
+        const title = (tab && tab.title) ? String(tab.title) : String(url);
+        const item = {
+            type: 'bookmark',
+            title,
+            url: String(url),
+            groupId,
+            index: (tab && typeof tab.index === 'number') ? tab.index : Number.MAX_SAFE_INTEGER
+        };
+        normalizedTabs.push(item);
+        flatItems.push({ title: item.title, url: item.url });
+    });
+
+    if (!normalizedTabs.length) {
+        return { flatItems: [], structuredItems: [] };
+    }
+
+    const structuredItems = await buildStructuredItemsFromTabs(normalizedTabs);
+    return { flatItems, structuredItems };
+}
+
+async function buildStructuredItemsFromTabs(tabs) {
+    const groupIds = Array.from(new Set(
+        tabs
+            .map(tab => (tab && typeof tab.groupId === 'number') ? tab.groupId : -1)
+            .filter(groupId => groupId >= 0)
+    ));
+
+    const groupInfoMap = new Map();
+    await Promise.all(groupIds.map(async (groupId) => {
+        const group = await getTabGroupInfo(groupId);
+        groupInfoMap.set(groupId, group);
+    }));
+
+    const groupedFolderMap = new Map();
+    const structured = [];
+
+    tabs.forEach((tab) => {
+        if (!tab || tab.type !== 'bookmark') return;
+
+        if (typeof tab.groupId === 'number' && tab.groupId >= 0) {
+            let folder = groupedFolderMap.get(tab.groupId);
+            if (!folder) {
+                folder = {
+                    type: 'folder',
+                    title: resolveTabGroupFolderTitle(tab.groupId, groupInfoMap.get(tab.groupId)),
+                    children: []
+                };
+                groupedFolderMap.set(tab.groupId, folder);
+                structured.push(folder);
+            }
+            folder.children.push({
+                type: 'bookmark',
+                title: tab.title,
+                url: tab.url
+            });
+            return;
+        }
+
+        structured.push({
+            type: 'bookmark',
+            title: tab.title,
+            url: tab.url
         });
     });
-    return out;
+
+    return structured;
+}
+
+function getTabGroupInfo(groupId) {
+    return new Promise((resolve) => {
+        if (!browserAPI || !browserAPI.tabGroups || typeof browserAPI.tabGroups.get !== 'function') {
+            resolve(null);
+            return;
+        }
+
+        browserAPI.tabGroups.get(groupId, (group) => {
+            const err = browserAPI.runtime && browserAPI.runtime.lastError;
+            if (err) {
+                console.warn('[QuickAdd] tabGroups.get failed:', err.message);
+                resolve(null);
+                return;
+            }
+            resolve(group || null);
+        });
+    });
+}
+
+function resolveTabGroupFolderTitle(groupId, group) {
+    if (group && typeof group.title === 'string') {
+        return group.title.trim();
+    }
+    return '';
+}
+
+function resolveQuickAddFolderTitle(title) {
+    if (typeof title === 'string') {
+        return title.trim();
+    }
+    return currentLang === 'en' ? 'Folder' : '文件夹';
 }
 
 function isAddableUrl(url) {
@@ -3746,9 +3870,38 @@ function getMaximizedMdNodeId() {
     return el ? el.id : null;
 }
 
+function countQuickAddBookmarks(items) {
+    let count = 0;
+    (Array.isArray(items) ? items : []).forEach((item) => {
+        if (!item) return;
+        if (item.type === 'folder' || Array.isArray(item.children)) {
+            count += countQuickAddBookmarks(item.children || []);
+            return;
+        }
+        if (item.url) count += 1;
+    });
+    return count;
+}
+
+function findFirstQuickAddBookmark(items) {
+    const list = Array.isArray(items) ? items : [];
+    for (const item of list) {
+        if (!item) continue;
+        if (item.type === 'folder' || Array.isArray(item.children)) {
+            const found = findFirstQuickAddBookmark(item.children || []);
+            if (found) return found;
+            continue;
+        }
+        if (item.url) return item;
+    }
+    return null;
+}
+
 function buildSectionTitle(tabs, scope) {
-    if (tabs.length === 1) {
-        return tabs[0].title || tabs[0].url;
+    const bookmarkCount = countQuickAddBookmarks(tabs);
+    if (bookmarkCount <= 1) {
+        const firstItem = findFirstQuickAddBookmark(tabs);
+        if (firstItem) return firstItem.title || firstItem.url;
     }
     const dt = formatDateTimeShort();
     if (currentLang === 'en') {
@@ -3762,11 +3915,31 @@ function buildMarkdownFromTabs(tabs, heading) {
     if (heading) {
         lines.push(`# ${heading}`, '');
     }
-    tabs.forEach(item => {
-        const title = escapeMarkdownText(item.title || item.url);
-        const url = item.url;
-        lines.push(`- [${title}](${url})`);
-    });
+
+    const appendItems = (items, depth = 0) => {
+        const indent = '  '.repeat(depth);
+        (Array.isArray(items) ? items : []).forEach((item) => {
+            if (!item) return;
+
+            if (item.type === 'folder' || Array.isArray(item.children)) {
+                const folderTitle = resolveQuickAddFolderTitle(item.title);
+                if (folderTitle) {
+                    lines.push(`${indent}- 📁 **${escapeMarkdownText(folderTitle)}**`);
+                } else {
+                    lines.push(`${indent}- 📁`);
+                }
+                appendItems(item.children || [], depth + 1);
+                return;
+            }
+
+            const title = escapeMarkdownText(item.title || item.url);
+            const url = item.url;
+            if (!url) return;
+            lines.push(`${indent}- [${title}](${url})`);
+        });
+    };
+
+    appendItems(tabs, 0);
     return lines.join('\n');
 }
 
@@ -3781,12 +3954,48 @@ function escapeMarkdownText(text) {
 
 function buildHtmlFromTabs(tabs, heading) {
     const titleHtml = heading ? `<p><strong>${escapeHtml(heading)}</strong></p>` : '';
-    const items = tabs.map(item => {
-        const safeTitle = escapeHtml(item.title || item.url);
-        const safeUrl = escapeHtml(item.url);
-        return `<li><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeTitle}</a></li>`;
-    }).join('');
+
+    const buildList = (items) => {
+        return (Array.isArray(items) ? items : []).map((item) => {
+            if (!item) return '';
+
+            if (item.type === 'folder' || Array.isArray(item.children)) {
+                const folderTitle = resolveQuickAddFolderTitle(item.title);
+                const folderLabel = folderTitle ? `📁 ${escapeHtml(folderTitle)}` : '📁';
+                const childrenHtml = buildList(item.children || []);
+                return `<li><strong>${folderLabel}</strong>${childrenHtml ? `<ul>${childrenHtml}</ul>` : ''}</li>`;
+            }
+
+            const safeTitle = escapeHtml(item.title || item.url);
+            const safeUrl = escapeHtml(item.url);
+            if (!safeUrl) return '';
+            return `<li><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeTitle}</a></li>`;
+        }).join('');
+    };
+
+    const items = buildList(tabs);
     return `${titleHtml}<ul>${items}</ul>`;
+}
+
+function insertQuickAddItemsToTempSection(sectionId, items, parentId = '') {
+    if (!window.CanvasModule || !window.CanvasModule.temp) return;
+
+    (Array.isArray(items) ? items : []).forEach((item) => {
+        if (!item) return;
+
+        if (item.type === 'folder' || Array.isArray(item.children)) {
+            const folderTitle = resolveQuickAddFolderTitle(item.title);
+            const createdFolderId = (typeof window.CanvasModule.temp.createFolder === 'function')
+                ? window.CanvasModule.temp.createFolder(sectionId, parentId, folderTitle)
+                : null;
+            const nextParentId = createdFolderId || parentId;
+            insertQuickAddItemsToTempSection(sectionId, item.children || [], nextParentId);
+            return;
+        }
+
+        if (!item.url || typeof window.CanvasModule.temp.createBookmark !== 'function') return;
+        window.CanvasModule.temp.createBookmark(sectionId, parentId, item.title, item.url);
+    });
 }
 
 function stripHtmlToText(html) {
@@ -3802,7 +4011,8 @@ async function addTabsToTempSection(tabs, scope) {
         return;
     }
 
-    const isBatchMode = tabs.length > 1;
+    const bookmarkCount = countQuickAddBookmarks(tabs);
+    const isBatchMode = bookmarkCount > 1;
     const specialSource = isBatchMode ? 'batch' : 'quick-add';
     const specialLabel = isBatchMode
         ? (currentLang === 'en' ? 'Batch' : '批量')
@@ -3841,15 +4051,13 @@ async function addTabsToTempSection(tabs, scope) {
         });
     }
 
-    tabs.forEach(item => {
-        window.CanvasModule.temp.createBookmark(sectionId, '', item.title, item.url);
-    });
+    insertQuickAddItemsToTempSection(sectionId, tabs, '');
     if (window.CanvasModule.temp.ensureRendered) {
         window.CanvasModule.temp.ensureRendered(sectionId);
     }
     const msg = currentLang === 'en'
-        ? `Added ${tabs.length} item${tabs.length > 1 ? 's' : ''} to temp section`
-        : `已加入临时栏目：${tabs.length} 项`;
+        ? `Added ${bookmarkCount} item${bookmarkCount > 1 ? 's' : ''} to temp section`
+        : `已加入临时栏目：${bookmarkCount} 项`;
     try { showToast(msg); } catch (_) { }
 }
 
@@ -3859,7 +4067,8 @@ async function addTabsToBlankNode(tabs, scope) {
         try { showToast(msg); } catch (_) { }
         return;
     }
-    const heading = tabs.length > 1 ? buildSectionTitle(tabs, scope) : '';
+    const bookmarkCount = countQuickAddBookmarks(tabs);
+    const heading = bookmarkCount > 1 ? buildSectionTitle(tabs, scope) : '';
     const markdown = buildMarkdownFromTabs(tabs, heading);
     const html = buildHtmlFromTabs(tabs, heading);
 
@@ -3891,8 +4100,8 @@ async function addTabsToBlankNode(tabs, scope) {
     const pos = getCanvasCenterPoint();
     await window.CanvasModule.createMdNode(pos.x, pos.y, markdown);
     const msg = currentLang === 'en'
-        ? `Created blank node with ${tabs.length} item${tabs.length > 1 ? 's' : ''}`
-        : `已创建空白栏目，包含 ${tabs.length} 项`;
+        ? `Created blank node with ${bookmarkCount} item${bookmarkCount > 1 ? 's' : ''}`
+        : `已创建空白栏目，包含 ${bookmarkCount} 项`;
     try { showToast(msg); } catch (_) { }
 }
 
@@ -3922,6 +4131,34 @@ async function getBookmarksBarId() {
     return bar ? bar.id : null;
 }
 
+function isQuickAddFolderItem(item) {
+    return !!(item && (item.type === 'folder' || Array.isArray(item.children)));
+}
+
+function isQuickAddSingleBookmarkItem(items) {
+    if (!Array.isArray(items) || items.length !== 1) return false;
+    const item = items[0];
+    return !!(item && !isQuickAddFolderItem(item) && item.url);
+}
+
+async function insertQuickAddItemsToPermanent(parentId, items) {
+    const list = Array.isArray(items) ? items : [];
+    for (const item of list) {
+        if (!item) continue;
+
+        if (isQuickAddFolderItem(item)) {
+            const folderTitle = resolveQuickAddFolderTitle(item.title);
+            const folder = await bookmarksCreate({ parentId, title: folderTitle });
+            await insertQuickAddItemsToPermanent(folder.id, item.children || []);
+            continue;
+        }
+
+        if (!item.url) continue;
+        const bookmarkTitle = (typeof item.title === 'string') ? item.title : String(item.url);
+        await bookmarksCreate({ parentId, title: bookmarkTitle, url: item.url });
+    }
+}
+
 async function addTabsToPermanent(tabs, scope) {
     const barId = await getBookmarksBarId();
     if (!barId) {
@@ -3929,18 +4166,33 @@ async function addTabsToPermanent(tabs, scope) {
         try { showToast(msg); } catch (_) { }
         return;
     }
-    if (tabs.length === 1) {
-        await bookmarksCreate({ parentId: barId, title: tabs[0].title, url: tabs[0].url });
-    } else {
-        const title = buildSectionTitle(tabs, scope);
-        const folder = await bookmarksCreate({ parentId: barId, title });
-        for (const item of tabs) {
-            await bookmarksCreate({ parentId: folder.id, title: item.title, url: item.url });
-        }
+
+    const items = Array.isArray(tabs) ? tabs : [];
+    const bookmarkCount = countQuickAddBookmarks(items);
+    if (!bookmarkCount) {
+        const msg = currentLang === 'en' ? 'No valid pages to add' : '没有可添加的页面';
+        try { showToast(msg); } catch (_) { }
+        return;
     }
+
+    if (bookmarkCount === 1 && isQuickAddSingleBookmarkItem(items)) {
+        const item = items[0];
+        await bookmarksCreate({
+            parentId: barId,
+            title: (typeof item.title === 'string') ? item.title : String(item.url),
+            url: item.url
+        });
+    } else if (bookmarkCount === 1) {
+        await insertQuickAddItemsToPermanent(barId, items);
+    } else {
+        const title = buildSectionTitle(items, scope);
+        const folder = await bookmarksCreate({ parentId: barId, title });
+        await insertQuickAddItemsToPermanent(folder.id, items);
+    }
+
     const msg = currentLang === 'en'
-        ? `Added ${tabs.length} item${tabs.length > 1 ? 's' : ''} to bookmarks`
-        : `已加入永久栏目：${tabs.length} 项`;
+        ? `Added ${bookmarkCount} item${bookmarkCount > 1 ? 's' : ''} to bookmarks`
+        : `已加入永久栏目：${bookmarkCount} 项`;
     try { showToast(msg); } catch (_) { }
 }
 
