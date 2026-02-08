@@ -241,6 +241,62 @@
     return squeezeSpaces(`#${badge} ${title}`);
   }
 
+  function readPermanentCopiesFromStorage(storage) {
+    if (!storage || typeof storage !== 'object') return [];
+    const raw = storage[PERMANENT_COPIES_STORAGE_KEY];
+    const parsed = Array.isArray(raw)
+      ? raw
+      : (typeof raw === 'string' ? parseJSON(raw, []) : []);
+    const list = Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    list.sort((a, b) => {
+      const ai = toPositiveInt(a && a.displayIndex);
+      const bi = toPositiveInt(b && b.displayIndex);
+      if (ai && bi && ai !== bi) return ai - bi;
+      if (ai && !bi) return -1;
+      if (!ai && bi) return 1;
+      const at = toPositiveInt(a && a.createdAt);
+      const bt = toPositiveInt(b && b.createdAt);
+      if (at && bt && at !== bt) return at - bt;
+      return compareText(a && a.id, b && b.id);
+    });
+    return list;
+  }
+
+  function buildPreviewSnapshotSectionsFromStorage(storage) {
+    if (!storage || typeof storage !== 'object') return [];
+
+    const hasOriginal = !!storage['permanent-section-position'];
+    const copies = readPermanentCopiesFromStorage(storage);
+    if (!hasOriginal && !copies.length) return [];
+
+    const sections = [];
+    const baseTitle = t('[快照] 永久栏目', '[Snapshot] Permanent Sections');
+
+    if (hasOriginal) {
+      sections.push({
+        id: 'preview-permanent-section-original',
+        title: `${baseTitle} (#A)`,
+        label: '#A',
+        isSnapshot: true,
+        color: DIRECTORY_COLOR_DEFAULTS.permanent
+      });
+    }
+
+    copies.forEach((copy, orderIndex) => {
+      const displayIndex = getPermanentCopyDisplayIndex(copy, orderIndex);
+      const badge = `#${toAlphaLabel(displayIndex + 1)}`;
+      sections.push({
+        id: `preview-permanent-section-copy-${displayIndex}`,
+        title: `${baseTitle} (${badge})`,
+        label: badge,
+        isSnapshot: true,
+        color: DIRECTORY_COLOR_DEFAULTS.permanent
+      });
+    });
+
+    return sections;
+  }
+
   function getTempSectionLabel(section) {
     if (!section) return '';
     const explicit = normalizeText(section.label);
@@ -693,13 +749,17 @@
     });
   }
 
-  function buildDirectoryData() {
-    const state = getCanvasState();
+  function buildDirectoryData(options = {}) {
+    const state = (options && options.state && typeof options.state === 'object')
+      ? options.state
+      : getCanvasState();
     const module = getCanvasModule();
     const tempSections = Array.isArray(state && state.tempSections) ? state.tempSections.filter(Boolean) : [];
     const mdNodes = Array.isArray(state && state.mdNodes) ? state.mdNodes.filter(Boolean) : [];
     const edges = Array.isArray(state && state.edges) ? state.edges.filter(Boolean) : [];
-    const copies = readPermanentCopies();
+    const copies = (options && Array.isArray(options.copies)) ? options.copies : readPermanentCopies();
+    const importedOnly = !!(options && options.importedOnly);
+    const enableGroupDelete = !(options && options.enableGroupDelete === false);
     const colorTokens = getAppearanceBaseColorTokens();
 
     let menuColorSync = false;
@@ -1206,13 +1266,13 @@
         defaultColor: importNeutralColor,
         icon: 'fas fa-box',
         open: true,
-        showDeleteControl: true,
-        deleteAction: {
+        showDeleteControl: enableGroupDelete,
+        deleteAction: enableGroupDelete ? {
           kind: 'import-group',
           containerId: normalizeText(group.containerId),
           tempIds: group.tempSections.map((section) => section && section.id).filter(Boolean),
           mdIds: group.mdNodes.map((node) => node && node.id).filter(Boolean)
-        },
+        } : null,
         count: groupSnapshotSections.length + groupTemporarySections.length + group.mdNodes.length + groupEdgeCount,
         preview: groupPreview,
         children: [
@@ -1224,11 +1284,72 @@
       });
     });
 
+    if (importedOnly) {
+      return importedGroupFolders;
+    }
+
     const nodes = [permanentFolder, temporaryFolder, blankFolder, otherFolder];
     if (importedGroupFolders.length) {
       nodes.push(...importedGroupFolders);
     }
     return nodes;
+  }
+
+  function buildDirectoryDataForPreview(previewState, options = {}) {
+    const inputState = previewState && typeof previewState === 'object' ? previewState : {};
+    const storage = (options && options.storage && typeof options.storage === 'object') ? options.storage : null;
+    const groupName = normalizeText(options && options.groupName);
+
+    const tempSections = Array.isArray(inputState.tempSections)
+      ? inputState.tempSections.map((section) => section ? { ...section } : section).filter(Boolean)
+      : [];
+    const mdNodes = Array.isArray(inputState.mdNodes)
+      ? inputState.mdNodes.map((node) => node ? { ...node } : node).filter(Boolean)
+      : [];
+    const edges = Array.isArray(inputState.edges)
+      ? inputState.edges.map((edge) => edge ? { ...edge } : edge).filter(Boolean)
+      : [];
+
+    let hasImportContainer = mdNodes.some((node) => node && node.subtype === 'import-container');
+    if (!hasImportContainer) {
+      const containerId = `preview-import-container-${Date.now()}`;
+      mdNodes.unshift({
+        id: containerId,
+        type: 'md',
+        subtype: 'import-container',
+        groupLabel: groupName || t('导入区块 1', 'Imported 1'),
+        containedTempIds: tempSections.map((section) => section && section.id).filter(Boolean),
+        containedMdIds: mdNodes.map((node) => node && node.id).filter(Boolean)
+      });
+      hasImportContainer = true;
+    }
+
+    const hasSnapshot = tempSections.some((section) => !!(section && section.isSnapshot));
+    if (!hasSnapshot && storage) {
+      const syntheticSnapshots = buildPreviewSnapshotSectionsFromStorage(storage);
+      if (syntheticSnapshots.length) {
+        tempSections.unshift(...syntheticSnapshots);
+        const firstContainer = mdNodes.find((node) => node && node.subtype === 'import-container');
+        if (firstContainer) {
+          const existingTempIds = Array.isArray(firstContainer.containedTempIds) ? firstContainer.containedTempIds : [];
+          const extraIds = syntheticSnapshots.map((section) => section && section.id).filter(Boolean);
+          firstContainer.containedTempIds = Array.from(new Set(existingTempIds.concat(extraIds)));
+        }
+      }
+    }
+
+    const previewStatePrepared = {
+      tempSections,
+      mdNodes,
+      edges
+    };
+
+    return buildDirectoryData({
+      state: previewStatePrepared,
+      importedOnly: true,
+      enableGroupDelete: false,
+      copies: []
+    });
   }
 
   function serializeNodesForFingerprint(nodes) {
@@ -1759,6 +1880,24 @@
     root.addEventListener('click', handleRootClick);
   }
 
+  function renderPreviewDirectory(root, previewState, options = {}) {
+    if (!root) return;
+    applyDirectoryColorVars(root);
+    nodeActionMap = new Map();
+    nodeDeleteActionMap = new Map();
+
+    const openFolderKeys = new Set();
+    const previewNodes = buildDirectoryDataForPreview(previewState, options);
+
+    root.innerHTML = '';
+    const container = document.createElement('div');
+    container.className = 'canvas-dir-root';
+    previewNodes.forEach((node) => {
+      container.appendChild(renderNode(node, openFolderKeys));
+    });
+    root.appendChild(container);
+  }
+
   function refreshDirectory(options = {}) {
     const root = document.getElementById(ROOT_ID);
     if (!root) return;
@@ -1850,6 +1989,7 @@
 
   global.CanvasSidebarDirectory = {
     init,
-    refresh
+    refresh,
+    renderPreviewDirectory
   };
 })(window);

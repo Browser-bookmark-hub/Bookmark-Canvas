@@ -1434,6 +1434,11 @@ const TEMP_SECTION_STORAGE_KEY = 'bookmark-canvas-temp-sections';
 const LEGACY_TEMP_NODE_STORAGE_KEY = 'bookmark-canvas-temp-nodes';
 const TEMP_SECTION_STORAGE_CHROME_MARKER = 'chrome.storage.local';
 const TEMP_SECTION_STORAGE_CHROME_MARKER_VERSION = 1;
+const TEMP_SECTION_STORAGE_INDEXEDDB_MARKER = 'indexeddb';
+const TEMP_SECTION_STORAGE_INDEXEDDB_MARKER_VERSION = 1;
+const TEMP_SECTION_STORAGE_INDEXEDDB_DB_NAME = 'bookmark-canvas-state-db';
+const TEMP_SECTION_STORAGE_INDEXEDDB_STORE_NAME = 'canvas-temp-state';
+const TEMP_SECTION_STORAGE_INDEXEDDB_DATA_KEY = TEMP_SECTION_STORAGE_KEY;
 const TEMP_SECTION_DEFAULT_WIDTH = 525;
 const TEMP_SECTION_DEFAULT_HEIGHT = 380;
 const TEMP_SECTION_DEFAULT_COLOR = '#2563eb';
@@ -2737,6 +2742,8 @@ function showCanvasToast(message, type = 'info', duration = 3000) {
     const toast = document.createElement('div');
     toast.className = 'canvas-toast';
 
+    const oneLine = typeof message === 'string' && message.indexOf('\n') === -1 && message.length <= 120;
+
     // 基础样式 - 左上角，在悬浮工具窗下方
     toast.style.cssText = `
         position: fixed;
@@ -2747,10 +2754,13 @@ function showCanvasToast(message, type = 'info', duration = 3000) {
         font-size: 13px;
         z-index: 100000;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-        max-width: 320px;
-        word-break: break-word;
+        max-width: ${oneLine ? '520px' : '320px'};
+        word-break: ${oneLine ? 'normal' : 'break-word'};
+        white-space: ${oneLine ? 'nowrap' : 'normal'};
+        overflow: ${oneLine ? 'hidden' : 'visible'};
+        text-overflow: ${oneLine ? 'ellipsis' : 'clip'};
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         gap: 8px;
         animation: canvasToastSlideDown 0.3s ease;
         backdrop-filter: blur(8px);
@@ -2758,38 +2768,43 @@ function showCanvasToast(message, type = 'info', duration = 3000) {
 
     // 根据类型设置颜色和图标
     let icon = '';
+    const iconTopMargin = oneLine ? '0px' : '3px';
     switch (type) {
         case 'success':
             toast.style.backgroundColor = 'rgba(16, 185, 129, 0.95)';
             toast.style.color = '#ffffff';
             toast.style.border = '1px solid rgba(255, 255, 255, 0.2)';
-            icon = '<i class="fas fa-check-circle" style="font-size: 14px; margin-top: 3px;"></i>';
+            icon = `<i class="fas fa-check-circle" style="font-size: 14px; margin-top: ${iconTopMargin};"></i>`;
             break;
         case 'error':
             toast.style.backgroundColor = 'rgba(239, 68, 68, 0.95)';
             toast.style.color = '#ffffff';
             toast.style.border = '1px solid rgba(255, 255, 255, 0.2)';
-            icon = '<i class="fas fa-exclamation-circle" style="font-size: 14px; margin-top: 3px;"></i>';
+            icon = `<i class="fas fa-exclamation-circle" style="font-size: 14px; margin-top: ${iconTopMargin};"></i>`;
             break;
         case 'warning':
             toast.style.backgroundColor = 'rgba(245, 158, 11, 0.95)';
             toast.style.color = '#ffffff';
             toast.style.border = '1px solid rgba(255, 255, 255, 0.2)';
-            icon = '<i class="fas fa-exclamation-triangle" style="font-size: 14px; margin-top: 3px;"></i>';
+            icon = `<i class="fas fa-exclamation-triangle" style="font-size: 14px; margin-top: ${iconTopMargin};"></i>`;
             break;
         case 'info':
         default:
             toast.style.backgroundColor = 'rgba(59, 130, 246, 0.95)';
             toast.style.color = '#ffffff';
             toast.style.border = '1px solid rgba(255, 255, 255, 0.2)';
-            icon = '<i class="fas fa-info-circle" style="font-size: 14px; margin-top: 3px;"></i>';
+            icon = `<i class="fas fa-info-circle" style="font-size: 14px; margin-top: ${iconTopMargin};"></i>`;
             break;
     }
 
     toast.innerHTML = icon;
     const messageEl = document.createElement('div');
     messageEl.innerHTML = String(message ?? '');
-    messageEl.style.lineHeight = '1.5';
+    messageEl.style.lineHeight = oneLine ? '1.25' : '1.5';
+    messageEl.style.whiteSpace = oneLine ? 'nowrap' : 'normal';
+    messageEl.style.overflow = oneLine ? 'hidden' : 'visible';
+    messageEl.style.textOverflow = oneLine ? 'ellipsis' : 'clip';
+    messageEl.style.minWidth = '0';
     toast.appendChild(messageEl);
     toast.style.zIndex = '9999999'; // Ensure it's on top of everything including overlays
 
@@ -24361,6 +24376,634 @@ function setupCanvasEventListeners() {
 // 导入导出功能
 // =============================================================================
 
+function __trimImportPreviewText(value, max = 52) {
+    const text = String(value || '').replace(/\u200B/g, '').replace(/\r\n?/g, '\n').trim();
+    if (!text) return '';
+    if (text.length <= max) return text;
+    return `${text.slice(0, Math.max(1, max - 1))}…`;
+}
+
+function __extractImportPreviewTextFromHtml(html) {
+    const raw = String(html || '').trim();
+    if (!raw) return '';
+    try {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = raw;
+        const txt = String(tmp.textContent || '').replace(/\u200B/g, '').replace(/\r\n?/g, '\n').trim();
+        if (!txt) return '';
+        const lines = txt.split(/\n+/).map((line) => String(line || '').trim()).filter(Boolean);
+        return lines.length ? lines[0] : txt;
+    } catch (_) {
+        return '';
+    }
+}
+
+function __resolveImportPreviewMdTitle(node, index, isEn) {
+    if (!node || typeof node !== 'object') {
+        return isEn ? `Blank node ${index + 1}` : `空白栏目 ${index + 1}`;
+    }
+
+    let base = '';
+    if (typeof node.text === 'string' && node.text.trim()) {
+        const lines = node.text.replace(/\u200B/g, '').replace(/\r\n?/g, '\n').split(/\n+/).map((line) => String(line || '').trim()).filter(Boolean);
+        base = lines.length ? lines[0] : node.text;
+    }
+
+    if (!base && typeof node.html === 'string' && node.html.trim()) {
+        base = __extractImportPreviewTextFromHtml(node.html);
+    }
+
+    base = __trimImportPreviewText(base);
+    if (base) return base;
+    return isEn ? `Blank node ${index + 1}` : `空白栏目 ${index + 1}`;
+}
+
+function __resolveImportPreviewSectionTitle(section, index, isEn) {
+    const title = __trimImportPreviewText(section && section.title ? section.title : '');
+    if (title) return title;
+    return isEn ? `Section ${index + 1}` : `栏目 ${index + 1}`;
+}
+
+function __resolveImportPreviewSnapshotBadge(section, fallbackIndex = 1) {
+    if (section && typeof section === 'object') {
+        const presetBadge = String(section.previewBadge || '').trim();
+        if (presetBadge) return presetBadge;
+
+        const title = String(section.title || '');
+        const badgeMatch = title.match(/\(#\s*([A-Za-z]+)\s*\)/);
+        if (badgeMatch && badgeMatch[1]) {
+            return `#${String(badgeMatch[1]).toUpperCase()}`;
+        }
+    }
+
+    const idx = Number.isFinite(Number(fallbackIndex)) ? Number(fallbackIndex) : 1;
+    const alpha = toAlphaLabel(Math.max(1, idx));
+    return alpha ? `#${alpha}` : '';
+}
+
+function __buildImportPreviewSyntheticPermanentSections(fullStorage, isEn) {
+    if (!fullStorage || typeof fullStorage !== 'object') return [];
+
+    const hasOriginal = !!fullStorage['permanent-section-position'];
+    let copies = [];
+    try {
+        const rawCopies = fullStorage[PERMANENT_SECTION_COPIES_STORAGE_KEY];
+        copies = Array.isArray(rawCopies) ? rawCopies : [];
+    } catch (_) {
+        copies = [];
+    }
+
+    if (!hasOriginal && copies.length === 0) return [];
+
+    const snapshotSections = [];
+    const baseTitle = isEn ? '[Snapshot] Permanent Sections' : '[快照] 永久栏目';
+    const defaultColor = getPermanentSectionDefaultColor();
+
+    if (hasOriginal) {
+        snapshotSections.push({
+            id: 'preview-permanent-section-original',
+            title: `${baseTitle} (#A)`,
+            isSnapshot: true,
+            color: defaultColor,
+            previewBadge: '#A'
+        });
+    }
+
+    copies.forEach((copyPos, idx) => {
+        const displayIndex = __normalizePositiveInt(copyPos && copyPos.displayIndex) || (idx + 1);
+        const badge = `#${toAlphaLabel(displayIndex + 1)}`;
+        snapshotSections.push({
+            id: `preview-permanent-section-copy-${displayIndex}`,
+            title: `${baseTitle} (${badge})`,
+            isSnapshot: true,
+            color: defaultColor,
+            previewBadge: badge
+        });
+    });
+
+    return snapshotSections;
+}
+
+function __normalizeImportPreviewColorHex(raw) {
+    const value = String(raw || '').trim();
+    if (!value) return '';
+    const normalized = value.startsWith('#') ? value : `#${value}`;
+    return /^#[0-9a-fA-F]{6}$/.test(normalized) ? normalized : '';
+}
+
+function __convertPreviewTempStateToDirectoryState(tempState) {
+    const src = tempState && typeof tempState === 'object' ? tempState : {};
+    return {
+        tempSections: Array.isArray(src.sections) ? src.sections.map((section) => ({ ...section })) : [],
+        mdNodes: Array.isArray(src.mdNodes) ? src.mdNodes.map((node) => ({ ...node })) : [],
+        edges: Array.isArray(src.edges) ? src.edges.map((edge) => ({ ...edge })) : []
+    };
+}
+
+function __resolveImportPreviewSectionColor(section, fallbackColor = '') {
+    if (!section || typeof section !== 'object') {
+        return __normalizeImportPreviewColorHex(fallbackColor);
+    }
+
+    let color = __normalizeImportPreviewColorHex(section.colorHex || '');
+    if (!color && typeof section.color === 'string') {
+        color = __normalizeImportPreviewColorHex(section.color);
+    }
+    if (!color && typeof presetToHex === 'function') {
+        try { color = __normalizeImportPreviewColorHex(presetToHex(section.color)); } catch (_) { }
+    }
+    if (!color) {
+        color = __normalizeImportPreviewColorHex(fallbackColor);
+    }
+    return color;
+}
+
+function __resolveImportPreviewMdNodeColor(node, fallbackColor = '') {
+    if (!node || typeof node !== 'object') {
+        return __normalizeImportPreviewColorHex(fallbackColor);
+    }
+
+    let color = __normalizeImportPreviewColorHex(node.colorHex || '');
+    if (!color && typeof node.color === 'string') {
+        color = __normalizeImportPreviewColorHex(node.color);
+    }
+    if (!color && typeof presetToHex === 'function') {
+        try { color = __normalizeImportPreviewColorHex(presetToHex(node.color)); } catch (_) { }
+    }
+    if (!color) {
+        color = __normalizeImportPreviewColorHex(fallbackColor);
+    }
+    return color;
+}
+
+function __resolveImportPreviewEdgeColor(edge, fallbackColor = '') {
+    if (!edge || typeof edge !== 'object') {
+        return __normalizeImportPreviewColorHex(fallbackColor);
+    }
+    let color = __normalizeImportPreviewColorHex(edge.colorHex || '');
+    if (!color && typeof edge.color === 'string') {
+        color = __normalizeImportPreviewColorHex(edge.color);
+    }
+    if (!color && typeof presetToHex === 'function') {
+        try { color = __normalizeImportPreviewColorHex(presetToHex(edge.color)); } catch (_) { }
+    }
+    if (!color) color = __normalizeImportPreviewColorHex(fallbackColor);
+    return color;
+}
+
+function __buildImportPreviewDataFromTempState(tempState, options = {}) {
+    const { isEn } = __getLang();
+    const sourceLabel = String((options && options.sourceLabel) || '').trim();
+    const fullStorage = (options && options.fullStorage && typeof options.fullStorage === 'object') ? options.fullStorage : null;
+
+    const sections = (tempState && Array.isArray(tempState.sections)) ? tempState.sections : [];
+    const mdNodes = (tempState && Array.isArray(tempState.mdNodes)) ? tempState.mdNodes : [];
+    const edges = (tempState && Array.isArray(tempState.edges)) ? tempState.edges : [];
+
+    const sectionById = new Map();
+    sections.forEach((section) => {
+        const id = section && section.id ? String(section.id) : '';
+        if (id) sectionById.set(id, section);
+    });
+
+    const mdById = new Map();
+    mdNodes.forEach((node) => {
+        const id = node && node.id ? String(node.id) : '';
+        if (id) mdById.set(id, node);
+    });
+
+    const containers = mdNodes.filter((node) => !!(node && node.subtype === 'import-container'));
+    const hasSnapshotInTempState = sections.some((section) => !!(section && section.isSnapshot));
+    const syntheticPermanentSections = hasSnapshotInTempState
+        ? []
+        : __buildImportPreviewSyntheticPermanentSections(fullStorage, isEn);
+
+    const buildGroup = (container, index) => {
+        let groupTitle = '';
+        if (container) {
+            try {
+                groupTitle = __trimImportPreviewText(__getImportContainerLabelFromNode(container));
+            } catch (_) {
+                groupTitle = '';
+            }
+        }
+        if (!groupTitle) {
+            groupTitle = isEn ? `Imported Group ${index}` : `导入区块 ${index}`;
+        }
+
+        let groupTempSections = [];
+        let groupMdNodes = [];
+        let nodeIdSet = new Set();
+
+        if (container) {
+            const tempIds = Array.isArray(container.containedTempIds) ? container.containedTempIds : [];
+            const mdIds = Array.isArray(container.containedMdIds) ? container.containedMdIds : [];
+
+            groupTempSections = tempIds
+                .map((id) => sectionById.get(String(id || '')))
+                .filter(Boolean);
+
+            groupMdNodes = mdIds
+                .map((id) => mdById.get(String(id || '')))
+                .filter((node) => !!(node && node.subtype !== 'import-container'));
+
+            groupTempSections.forEach((section) => {
+                if (section && section.id) nodeIdSet.add(String(section.id));
+            });
+            groupMdNodes.forEach((node) => {
+                if (node && node.id) nodeIdSet.add(String(node.id));
+            });
+
+            if (!groupTempSections.length && !groupMdNodes.length && containers.length === 1) {
+                groupTempSections = sections.slice();
+                groupMdNodes = mdNodes.filter((node) => !!(node && node.subtype !== 'import-container'));
+                nodeIdSet = new Set();
+                groupTempSections.forEach((section) => {
+                    if (section && section.id) nodeIdSet.add(String(section.id));
+                });
+                groupMdNodes.forEach((node) => {
+                    if (node && node.id) nodeIdSet.add(String(node.id));
+                });
+            }
+        } else {
+            groupTempSections = sections.slice();
+            groupMdNodes = mdNodes.filter((node) => !!(node && node.subtype !== 'import-container'));
+            groupTempSections.forEach((section) => {
+                if (section && section.id) nodeIdSet.add(String(section.id));
+            });
+            groupMdNodes.forEach((node) => {
+                if (node && node.id) nodeIdSet.add(String(node.id));
+            });
+        }
+
+        if (index === 1 && syntheticPermanentSections.length) {
+            groupTempSections = groupTempSections.concat(syntheticPermanentSections);
+        }
+
+        const permanentSections = groupTempSections.filter((section) => !!(section && section.isSnapshot));
+        const temporarySections = groupTempSections.filter((section) => !(section && section.isSnapshot));
+        const splitSections = temporarySections.filter((section) => !__isSpecialTempSection(section));
+        const specialSections = temporarySections.filter((section) => __isSpecialTempSection(section));
+
+        const edgeEntries = edges
+            .filter((edge) => {
+                if (!edge || typeof edge !== 'object') return false;
+                const fromNode = String(edge.fromNode || '');
+                const toNode = String(edge.toNode || '');
+                if (!fromNode || !toNode) return false;
+                if (!nodeIdSet.has(fromNode) || !nodeIdSet.has(toNode)) return false;
+                return !!String(edge.label || '').trim();
+            })
+            .map((edge) => ({
+                title: __trimImportPreviewText(String(edge.label || '').trim()),
+                color: __resolveImportPreviewEdgeColor(edge, getEdgeDefaultColor())
+            }))
+            .filter((entry) => !!entry.title)
+            .filter(Boolean);
+
+        const MAX_ITEMS = 6;
+        const mapSectionItems = (list, fallbackColor, kind = 'temporary') => list
+            .map((section, idx) => {
+                const title = __resolveImportPreviewSectionTitle(section, idx, isEn);
+                let indexLabel = '';
+                if (kind === 'permanent') {
+                    indexLabel = __resolveImportPreviewSnapshotBadge(section, idx + 1);
+                } else {
+                    const sectionLabel = getTempSectionLabel(section);
+                    indexLabel = sectionLabel || String(idx + 1);
+                }
+                return {
+                    title,
+                    color: __resolveImportPreviewSectionColor(section, fallbackColor),
+                    active: true,
+                    indexLabel
+                };
+            })
+            .slice(0, MAX_ITEMS);
+        const mapMdItems = (list, fallbackColor) => list
+            .map((node, idx) => ({
+                title: __resolveImportPreviewMdTitle(node, idx, isEn),
+                color: __resolveImportPreviewMdNodeColor(node, fallbackColor),
+                active: true,
+                indexLabel: String(idx + 1)
+            }))
+            .slice(0, MAX_ITEMS);
+
+        const permanentItems = mapSectionItems(permanentSections, getPermanentSectionDefaultColor(), 'permanent');
+        const splitItems = mapSectionItems(splitSections, getTempSectionDefaultColor(), 'temporary');
+        const specialItems = mapSectionItems(specialSections, getSpecialTempSectionDefaultColor(), 'special');
+        const blankItems = mapMdItems(groupMdNodes, getBlankNodeDefaultColor());
+        const otherItems = edgeEntries.slice(0, MAX_ITEMS).map((entry, idx) => ({
+            ...entry,
+            indexLabel: String(idx + 1)
+        }));
+
+        const temporaryCount = splitSections.length + specialSections.length;
+        const totalCount = permanentSections.length + temporaryCount + groupMdNodes.length + edgeEntries.length;
+
+        return {
+            title: groupTitle,
+            totalCount,
+            permanent: {
+                count: permanentSections.length,
+                items: permanentItems
+            },
+            temporary: {
+                count: temporaryCount,
+                split: {
+                    count: splitSections.length,
+                    items: splitItems
+                },
+                special: {
+                    count: specialSections.length,
+                    items: specialItems
+                }
+            },
+            blank: {
+                count: groupMdNodes.length,
+                items: blankItems
+            },
+            other: {
+                count: edgeEntries.length,
+                items: otherItems
+            }
+        };
+    };
+
+    const groups = [];
+    if (containers.length) {
+        containers.forEach((container, index) => {
+            groups.push(buildGroup(container, index + 1));
+        });
+    } else {
+        groups.push(buildGroup(null, 1));
+    }
+
+    const visibleGroups = groups.filter((group) => {
+        if (!group || typeof group !== 'object') return false;
+        return (group.totalCount || 0) > 0
+            || (group.permanent && group.permanent.items && group.permanent.items.length)
+            || (group.temporary && ((group.temporary.split && group.temporary.split.items && group.temporary.split.items.length) || (group.temporary.special && group.temporary.special.items && group.temporary.special.items.length)))
+            || (group.blank && group.blank.items && group.blank.items.length)
+            || (group.other && group.other.items && group.other.items.length);
+    });
+
+    return {
+        sourceLabel,
+        groups: visibleGroups.length ? visibleGroups : groups,
+        hasContent: visibleGroups.length > 0,
+        __rawTempState: tempState && typeof tempState === 'object' ? tempState : null,
+        __rawStorage: fullStorage
+    };
+}
+
+function showImportStructurePreviewDialog(options = {}) {
+    const { isEn } = __getLang();
+    const sourceLabel = String((options && options.sourceLabel) || '').trim();
+    const mode = (options && options.mode === 'sandbox') ? 'sandbox' : 'permanent';
+    const previewData = (options && options.previewData && typeof options.previewData === 'object') ? options.previewData : null;
+    const previewTempState = (options && options.previewTempState && typeof options.previewTempState === 'object') ? options.previewTempState : null;
+    const previewStorage = (options && options.previewStorage && typeof options.previewStorage === 'object') ? options.previewStorage : null;
+
+    return new Promise((resolve) => {
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog import-preview-dialog';
+        dialog.id = 'canvasImportPreviewDialog';
+
+        const title = isEn ? 'Import Structure Preview' : '导入结构预览';
+        const closeText = isEn ? 'Close' : '关闭';
+        const modeBadge = mode === 'sandbox'
+            ? (isEn ? 'Sandbox Mode' : '沙箱模式')
+            : (isEn ? 'Permanent Mode' : '永久模式');
+        const sourceText = sourceLabel
+            ? (isEn ? `Source: ${sourceLabel}` : `来源：${sourceLabel}`)
+            : '';
+
+        const note = previewData && previewData.hasContent
+            ? (isEn
+                ? 'Imported permanent sections are converted to temporary snapshot sections to avoid conflicts.'
+                : '导入时，永久栏目会自动转换为临时快照栏目（避免冲突）。')
+            : (isEn ? 'No parse result yet. Confirm this mode first, then preview imported structure.' : '当前尚无解析结果，请先选定模式后再预览导入结构。');
+
+        dialog.innerHTML = `
+            <div class="import-dialog-content import-preview-dialog-content">
+                <div class="import-dialog-header">
+                    <h3>${title}</h3>
+                    <button class="import-dialog-close" id="closeImportPreviewDialog">&times;</button>
+                </div>
+                <div class="import-dialog-body import-preview-dialog-body">
+                    <div class="import-preview-meta">
+                        <span class="import-preview-mode-badge ${mode === 'sandbox' ? 'is-sandbox' : 'is-permanent'}">${modeBadge}</span>
+                        ${sourceText ? `<span class="import-preview-source">${sourceText}</span>` : ''}
+                    </div>
+                    <div class="import-preview-note">${note}</div>
+                    <div class="import-preview-tree canvas-directory-tree" id="canvasImportPreviewTree"></div>
+                    <div class="import-mode-actions import-preview-actions">
+                        <button type="button" class="import-mode-btn" id="importPreviewCloseBtn">${closeText}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(dialog);
+
+        try {
+            const previewTree = document.getElementById('canvasImportPreviewTree');
+            if (previewTree && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.renderPreviewDirectory === 'function') {
+                const previewState = __convertPreviewTempStateToDirectoryState(previewTempState || {});
+                window.CanvasSidebarDirectory.renderPreviewDirectory(previewTree, previewState, {
+                    storage: previewStorage,
+                    groupName: sourceLabel
+                });
+            }
+        } catch (err) {
+            console.warn('[Canvas] Failed to render preview directory with shared renderer:', err);
+        }
+
+        const cleanup = () => {
+            try { dialog.remove(); } catch (_) { }
+            resolve();
+        };
+
+        const closeBtn = document.getElementById('closeImportPreviewDialog');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', cleanup);
+        }
+
+        const footerCloseBtn = document.getElementById('importPreviewCloseBtn');
+        if (footerCloseBtn) {
+            footerCloseBtn.addEventListener('click', cleanup);
+        }
+
+        dialog.addEventListener('click', (event) => {
+            if (event.target === dialog) {
+                cleanup();
+            }
+        });
+
+        dialog.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                cleanup();
+            }
+        });
+    });
+}
+
+function showImportModeConfirmDialog(options = {}) {
+    const { isEn } = __getLang();
+    const defaultMode = (options && options.defaultMode === 'sandbox') ? 'sandbox' : 'permanent';
+    const sourceLabel = String((options && options.sourceLabel) || '').trim();
+    const onConfirm = (options && typeof options.onConfirm === 'function') ? options.onConfirm : null;
+    const previewData = (options && options.previewData && typeof options.previewData === 'object') ? options.previewData : null;
+
+    return new Promise((resolve) => {
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog import-mode-dialog';
+        dialog.id = 'canvasImportModeDialog';
+
+        const title = isEn ? 'Import Mode' : '导入模式';
+        const subtitle = isEn
+            ? 'Choose how this import should be handled.'
+            : '选择这次导入的处理方式。';
+        const sourceText = sourceLabel
+            ? (isEn ? `Source: ${sourceLabel}` : `来源：${sourceLabel}`)
+            : '';
+
+        const permanentTitle = isEn ? 'Permanent Import' : '永久导入';
+        const permanentDesc = isEn
+            ? 'Saved as normal canvas data. (Default)'
+            : '按普通画布数据保存（默认）。';
+        const sandboxTitle = isEn ? 'Temporary Sandbox Import' : '临时导入（沙箱）';
+        const sandboxDesc = isEn
+            ? 'Visible now, excluded from persisted data, and cleared after refresh.'
+            : '当前可见，不写入持久数据，刷新后会清除。';
+
+        const previewText = isEn ? 'Preview Directory' : '预览目录';
+        const confirmText = isEn ? 'Import' : '导入';
+        const cancelText = isEn ? 'Cancel' : '取消';
+
+        dialog.innerHTML = `
+            <div class="import-dialog-content import-mode-dialog-content">
+                <div class="import-dialog-header">
+                    <h3>${title}</h3>
+                    <button class="import-dialog-close" id="closeImportModeDialog">&times;</button>
+                </div>
+                <div class="import-dialog-body import-mode-dialog-body">
+                    <div class="import-mode-subtitle">${subtitle}</div>
+                    ${sourceText ? `<div class="import-mode-source">${sourceText}</div>` : ''}
+                    <div class="import-mode-options" id="importModeOptions">
+                        <button type="button" class="import-mode-option ${defaultMode === 'permanent' ? 'is-selected' : ''}" data-mode="permanent">
+                            <span class="import-mode-radio" aria-hidden="true"></span>
+                            <span class="import-mode-option-main">
+                                <span class="import-mode-option-title">${permanentTitle}</span>
+                                <span class="import-mode-option-desc">${permanentDesc}</span>
+                            </span>
+                        </button>
+                        <button type="button" class="import-mode-option ${defaultMode === 'sandbox' ? 'is-selected' : ''}" data-mode="sandbox">
+                            <span class="import-mode-radio" aria-hidden="true"></span>
+                            <span class="import-mode-option-main">
+                                <span class="import-mode-option-title">${sandboxTitle}</span>
+                                <span class="import-mode-option-desc">${sandboxDesc}</span>
+                            </span>
+                        </button>
+                    </div>
+                    <div class="import-mode-actions">
+                        <button type="button" class="import-mode-btn import-mode-btn-preview" id="importModePreviewBtn">${previewText}</button>
+                        <div class="import-mode-actions-right">
+                            <button type="button" class="import-mode-btn import-mode-btn-cancel" id="importModeCancelBtn">${cancelText}</button>
+                            <button type="button" class="import-mode-btn import-mode-btn-confirm" id="importModeConfirmBtn">${confirmText}</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(dialog);
+
+        let selectedMode = defaultMode;
+
+        const cleanup = (result) => {
+            try { dialog.remove(); } catch (_) { }
+            resolve(result);
+        };
+
+        const pickMode = (mode) => {
+            selectedMode = (mode === 'sandbox') ? 'sandbox' : 'permanent';
+            const optionsWrap = document.getElementById('importModeOptions');
+            if (!optionsWrap) return;
+            optionsWrap.querySelectorAll('.import-mode-option').forEach((el) => {
+                const elMode = String(el && el.dataset ? el.dataset.mode : '').toLowerCase();
+                if (elMode === selectedMode) {
+                    el.classList.add('is-selected');
+                } else {
+                    el.classList.remove('is-selected');
+                }
+            });
+        };
+
+        const optionsWrap = document.getElementById('importModeOptions');
+        if (optionsWrap) {
+            optionsWrap.addEventListener('click', (event) => {
+                const btn = event && event.target && event.target.closest
+                    ? event.target.closest('.import-mode-option')
+                    : null;
+                if (!btn) return;
+                event.preventDefault();
+                const mode = String(btn.dataset.mode || '').toLowerCase();
+                pickMode(mode);
+            });
+        }
+
+        const previewBtn = document.getElementById('importModePreviewBtn');
+        if (previewBtn) {
+            previewBtn.addEventListener('click', async (event) => {
+                event.preventDefault();
+                await showImportStructurePreviewDialog({
+                    sourceLabel,
+                    mode: selectedMode,
+                    previewData,
+                    previewTempState: (previewData && previewData.__rawTempState) ? previewData.__rawTempState : null,
+                    previewStorage: (previewData && previewData.__rawStorage) ? previewData.__rawStorage : null
+                });
+            });
+        }
+
+        const closeBtn = document.getElementById('closeImportModeDialog');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => cleanup(null));
+        }
+
+        const cancelBtn = document.getElementById('importModeCancelBtn');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => cleanup(null));
+        }
+
+        const confirmBtn = document.getElementById('importModeConfirmBtn');
+        if (confirmBtn) {
+            confirmBtn.addEventListener('click', () => {
+                if (onConfirm) {
+                    try { onConfirm(selectedMode); } catch (_) { }
+                }
+                cleanup(selectedMode);
+            });
+        }
+
+        dialog.addEventListener('click', (event) => {
+            if (event.target === dialog) {
+                cleanup(null);
+            }
+        });
+
+        dialog.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                cleanup(null);
+            }
+        });
+    });
+}
+
 function showImportDialog() {
     const { isEn } = __getLang();
     // 创建导入对话框
@@ -24468,31 +25111,39 @@ async function handleFileImport(e) {
 
     try {
         if (type === 'package-archive' || type === 'package-json') {
-            const { isEn } = __getLang();
-            const ok = confirm(isEn
-                ? 'Importing a canvas package will add content to the current canvas (sandboxed). Continue?'
-                : '导入画布包会将内容添加到当前画布（沙箱模式）。确定继续吗？');
-            if (!ok) {
+            let parsedTempState = null;
+            let parsedStorage = null;
+            let parsedPrimaryState = {};
+
+            if (type === 'package-archive') {
+                const parsed = await parseCanvasPackageFromZipFile(file);
+                parsedTempState = parsed.tempState;
+                parsedStorage = parsed.storage;
+                parsedPrimaryState = parsed.primaryState;
+            } else {
+                const parsed = await parseCanvasPackageFromJsonFile(file);
+                parsedTempState = parsed.tempState;
+                parsedStorage = parsed.storage;
+                parsedPrimaryState = parsed.primaryState;
+            }
+
+            const previewData = __buildImportPreviewDataFromTempState(parsedTempState, {
+                sourceLabel: file && file.name ? file.name : '',
+                fullStorage: parsedStorage
+            });
+
+            const mode = await showImportModeConfirmDialog({
+                defaultMode: 'permanent',
+                sourceLabel: file && file.name ? file.name : '',
+                previewData
+            });
+            if (!mode) {
                 e.target.value = '';
                 return;
             }
+            __setCanvasImportRuntimeMode(mode);
 
-            if (type === 'package-archive') {
-                // 根据文件扩展名选择处理方式
-                const fileName = file.name.toLowerCase();
-                if (fileName.endsWith('.zip')) {
-                    await importCanvasPackageZip(file);
-                } else if (fileName.endsWith('.7z')) {
-                    await importCanvasPackage7z(file);
-                } else {
-                    throw new Error(isEn
-                        ? 'Unsupported archive format. Please use .zip or .7z file.'
-                        : '不支持的压缩格式。请使用 .zip 或 .7z 文件。');
-                }
-            } else if (type === 'package-json') {
-                // JSON 单文件处理
-                await importCanvasPackageJson(file);
-            }
+            __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name);
         } else {
             const text = await file.text();
             if (type === 'html') {
@@ -24536,7 +25187,24 @@ async function handleFolderImport(e) {
             folderFiles.set(relativePath, content);
         }
 
-        await importCanvasPackageFolder(folderFiles, folderName);
+        const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName);
+        const previewData = __buildImportPreviewDataFromTempState(parsed.tempState, {
+            sourceLabel: folderName,
+            fullStorage: parsed.storage
+        });
+
+        const mode = await showImportModeConfirmDialog({
+            defaultMode: 'permanent',
+            sourceLabel: folderName,
+            previewData
+        });
+        if (!mode) {
+            e.target.value = '';
+            return;
+        }
+        __setCanvasImportRuntimeMode(mode);
+
+        __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName);
 
         document.getElementById('canvasImportDialog').remove();
     } catch (error) {
@@ -24551,7 +25219,7 @@ async function handleFolderImport(e) {
  * 3.4 格式适配器：导入 JSON 单文件
  * 直接读取并校验是否为合法的 Canvas State JSON
  */
-async function importCanvasPackageJson(file) {
+async function parseCanvasPackageFromJsonFile(file) {
     const { isEn } = __getLang();
     const text = await file.text();
     let primaryState;
@@ -24601,8 +25269,16 @@ async function importCanvasPackageJson(file) {
         throw new Error(isEn ? 'Invalid package state.' : '导入包状态无效');
     }
 
-    // 复用 zip 导入的后续逻辑
-    __processSandboxedImport(tempState, storage, primaryState, file.name);
+    return {
+        tempState,
+        storage,
+        primaryState
+    };
+}
+
+async function importCanvasPackageJson(file) {
+    const parsed = await parseCanvasPackageFromJsonFile(file);
+    __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, file.name);
 }
 
 /**
@@ -27629,8 +28305,13 @@ function __applyCanvasPackageMetaToObsidianTempState(tempState, meta) {
     } catch (_) { }
 }
 
-async function importCanvasPackageZip(file) {
+async function parseCanvasPackageFromZipFile(file) {
     const { isEn } = __getLang();
+    const lowerFileName = String((file && file.name) || '').toLowerCase();
+    if (lowerFileName.endsWith('.7z')) {
+        await importCanvasPackage7z(file);
+    }
+
     const buf = await file.arrayBuffer();
     const zipFiles = await __unzipStore(buf);
 
@@ -27930,8 +28611,22 @@ async function importCanvasPackageZip(file) {
         throw new Error(isEn ? 'Invalid package state.' : '导入包状态无效');
     }
 
-    // 调用共享的沙箱导入处理逻辑
-    __processSandboxedImport(tempState, storage, primaryState, file.name);
+    return {
+        tempState,
+        storage,
+        primaryState,
+        importFileName: file && file.name ? file.name : ''
+    };
+}
+
+async function importCanvasPackageZip(file) {
+    const parsed = await parseCanvasPackageFromZipFile(file);
+    __processImportedPackage(
+        parsed.tempState,
+        parsed.storage,
+        parsed.primaryState,
+        parsed.importFileName || (file && file.name ? file.name : '')
+    );
 }
 
 /**
@@ -27967,7 +28662,7 @@ async function importCanvasPackage7z(file) {
  * @param {Map<string, Uint8Array>} folderFiles - 文件夹中的文件 Map<路径, 内容>
  * @param {string} folderName - 文件夹名称
  */
-async function importCanvasPackageFolder(folderFiles, folderName) {
+async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
     const { isEn } = __getLang();
 
     // 4.2 数据信任链：
@@ -28198,7 +28893,22 @@ async function importCanvasPackageFolder(folderFiles, folderName) {
         throw new Error(isEn ? 'Invalid folder state.' : '文件夹状态无效');
     }
 
-    __processSandboxedImport(tempState, storage, primaryState, folderName);
+    return {
+        tempState,
+        storage,
+        primaryState,
+        importFileName: folderName || ''
+    };
+}
+
+async function importCanvasPackageFolder(folderFiles, folderName) {
+    const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName);
+    __processImportedPackage(
+        parsed.tempState,
+        parsed.storage,
+        parsed.primaryState,
+        parsed.importFileName || folderName || ''
+    );
 }
 
 /**
@@ -28209,8 +28919,9 @@ async function importCanvasPackageFolder(folderFiles, folderName) {
  * @param {Object} primaryState - 原始状态对象（用于获取书签树快照等）
  * @param {string} [importFileName] - 导入的文件名
  */
-function __processSandboxedImport(tempState, storage, primaryState, importFileName = '') {
+function __processImportedPackage(tempState, storage, primaryState, importFileName = '') {
     const { isEn } = __getLang();
+    const importMode = __getCanvasImportRuntimeMode();
 
     // 不再覆盖localStorage，而是直接进行沙箱导入
     // localStorage.setItem(TEMP_SECTION_STORAGE_KEY, JSON.stringify(tempState));
@@ -28332,6 +29043,7 @@ function __processSandboxedImport(tempState, storage, primaryState, importFileNa
         id: `import-group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         type: 'md',
         subtype: 'import-container', // Special flag
+        importMode,
         x: (targetBoundsMinX - PADDING),
         y: (targetBoundsMinY - PADDING),
         width: containerWidth,
@@ -28353,7 +29065,13 @@ function __processSandboxedImport(tempState, storage, primaryState, importFileNa
     remappedNodes.tempSections.forEach(s => { s.x += offsetX; s.y += offsetY; });
     remappedNodes.mdNodes.forEach(n => { n.x += offsetX; n.y += offsetY; });
 
-    console.log(`[Canvas] Sandboxed Import Stats:
+    if (importMode === 'sandbox') {
+        remappedNodes.tempSections.forEach((section) => __markNodeAsSandboxImported(section));
+        remappedNodes.mdNodes.forEach((node) => __markNodeAsSandboxImported(node));
+        __markNodeAsSandboxImported(containerNode);
+    }
+
+    console.log(`[Canvas] Import Stats:
         - Sections: ${remappedNodes.tempSections.length}
         - MdNodes: ${remappedNodes.mdNodes.length}
         - Edges: ${remappedEdges.length}
@@ -28371,7 +29089,9 @@ function __processSandboxedImport(tempState, storage, primaryState, importFileNa
 
     // 7. Restore Scrolls (Mapped to new IDs)
     Object.keys(remappedScrolls).forEach(scKey => {
-        localStorage.setItem(scKey, JSON.stringify(remappedScrolls[scKey]));
+        try {
+            localStorage.setItem(scKey, JSON.stringify(remappedScrolls[scKey]));
+        } catch (_) { }
     });
 
     // 8. Render & Persistence
@@ -28385,7 +29105,15 @@ function __processSandboxedImport(tempState, storage, primaryState, importFileNa
         try { renderMdNode(n); } catch (_) { }
     });
 
-    saveTempNodes();
+    if (importMode === 'sandbox') {
+        const tip = isEn
+            ? 'Temporary sandbox import: visible now, not persisted.'
+            : '临时导入（沙箱）：当前可见，不写入持久化。';
+        try { showCanvasToast(tip, 'info'); } catch (_) { }
+    } else {
+        // 导入属于正式内容，必须立即持久化，避免用户导入后立刻刷新导致丢失。
+        saveTempNodes({ immediate: true });
+    }
 
     // 边：大数据/极限模式下延后或跳过，优先保证交互流畅
     try { scheduleEdgesRender(); } catch (_) { }
@@ -28406,7 +29134,8 @@ function __processSandboxedImport(tempState, storage, primaryState, importFileNa
     // 导入后按需加载一次（只加载视口附近少量栏目）
     try { scheduleCanvasVirtualizationUpdate(60); } catch (_) { }
 
-    console.log('[Canvas] Import successful. ID Remapped, Offset applied, Group created.');
+    console.log(`[Canvas] Import successful. mode=${importMode}. ID Remapped, Offset applied, Group created.`);
+    __setCanvasImportRuntimeMode('permanent');
 }
 
 /**
@@ -28852,6 +29581,171 @@ let __canvasTempStatePreferChromeStorage = false;
 let __canvasTempStateChromeWriteTimer = null;
 let __canvasTempStateChromeWritePending = null;
 let __canvasTempStateChromeLoadInProgress = false;
+let __canvasTempStatePreferIndexedDb = false;
+let __canvasTempStateIndexedDbLoadInProgress = false;
+let __canvasImportRuntimeMode = 'permanent';
+
+function __setCanvasImportRuntimeMode(mode) {
+    __canvasImportRuntimeMode = (mode === 'sandbox') ? 'sandbox' : 'permanent';
+}
+
+function __getCanvasImportRuntimeMode() {
+    return __canvasImportRuntimeMode === 'sandbox' ? 'sandbox' : 'permanent';
+}
+
+function __markNodeAsSandboxImported(node) {
+    if (!node || typeof node !== 'object') return;
+    node.__importMode = 'sandbox';
+}
+
+function __isSandboxImportedNode(node) {
+    if (!node || typeof node !== 'object') return false;
+    if (String(node.__importMode || '') === 'sandbox') return true;
+    if (node.subtype === 'import-container' && String(node.importMode || '') === 'sandbox') return true;
+    return false;
+}
+
+function __buildPersistedCanvasState(state) {
+    const safe = (state && typeof state === 'object') ? state : {};
+
+    const sourceSections = Array.isArray(safe.sections) ? safe.sections : [];
+    const sourceMdNodes = Array.isArray(safe.mdNodes) ? safe.mdNodes : [];
+    const sourceEdges = Array.isArray(safe.edges) ? safe.edges : [];
+
+    const persistedSections = sourceSections.filter((section) => !__isSandboxImportedNode(section));
+    const persistedMdNodes = sourceMdNodes.filter((node) => !__isSandboxImportedNode(node));
+
+    const validIds = new Set();
+    persistedSections.forEach((section) => {
+        if (section && section.id) validIds.add(section.id);
+    });
+    persistedMdNodes.forEach((node) => {
+        if (node && node.id) validIds.add(node.id);
+    });
+
+    const persistedEdges = sourceEdges.filter((edge) => {
+        if (!edge || typeof edge !== 'object') return false;
+        const fromNode = String(edge.fromNode || '');
+        const toNode = String(edge.toNode || '');
+        if (!fromNode || !toNode) return false;
+        return validIds.has(fromNode) && validIds.has(toNode);
+    });
+
+    const persistedState = {
+        ...safe,
+        sections: persistedSections,
+        mdNodes: persistedMdNodes,
+        edges: persistedEdges,
+        timestamp: Date.now()
+    };
+
+    return persistedState;
+}
+
+function __openCanvasTempStateIndexedDb() {
+    return new Promise((resolve, reject) => {
+        try {
+            const request = indexedDB.open(TEMP_SECTION_STORAGE_INDEXEDDB_DB_NAME, 1);
+
+            request.onupgradeneeded = (event) => {
+                try {
+                    const db = event.target.result;
+                    if (!db.objectStoreNames.contains(TEMP_SECTION_STORAGE_INDEXEDDB_STORE_NAME)) {
+                        db.createObjectStore(TEMP_SECTION_STORAGE_INDEXEDDB_STORE_NAME, { keyPath: 'key' });
+                    }
+                } catch (_) { }
+            };
+
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+async function __saveCanvasTempStateToIndexedDb(state) {
+    const db = await __openCanvasTempStateIndexedDb();
+    await new Promise((resolve, reject) => {
+        try {
+            const tx = db.transaction([TEMP_SECTION_STORAGE_INDEXEDDB_STORE_NAME], 'readwrite');
+            const store = tx.objectStore(TEMP_SECTION_STORAGE_INDEXEDDB_STORE_NAME);
+            store.put({
+                key: TEMP_SECTION_STORAGE_INDEXEDDB_DATA_KEY,
+                payload: state,
+                timestamp: Date.now()
+            });
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
+            tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
+        } catch (e) {
+            reject(e);
+        }
+    });
+    try { db.close(); } catch (_) { }
+}
+
+async function __loadCanvasTempStateFromIndexedDb() {
+    const db = await __openCanvasTempStateIndexedDb();
+    try {
+        const result = await new Promise((resolve, reject) => {
+            try {
+                const tx = db.transaction([TEMP_SECTION_STORAGE_INDEXEDDB_STORE_NAME], 'readonly');
+                const store = tx.objectStore(TEMP_SECTION_STORAGE_INDEXEDDB_STORE_NAME);
+                const request = store.get(TEMP_SECTION_STORAGE_INDEXEDDB_DATA_KEY);
+                request.onsuccess = () => resolve(request.result || null);
+                request.onerror = () => reject(request.error || new Error('IndexedDB get failed'));
+            } catch (e) {
+                reject(e);
+            }
+        });
+        return result && result.payload ? result.payload : null;
+    } finally {
+        try { db.close(); } catch (_) { }
+    }
+}
+
+function __writeCanvasTempStateIndexedDbMarker(ts = null) {
+    try {
+        const marker = {
+            __storage: TEMP_SECTION_STORAGE_INDEXEDDB_MARKER,
+            __v: TEMP_SECTION_STORAGE_INDEXEDDB_MARKER_VERSION,
+            timestamp: ts || Date.now()
+        };
+        localStorage.setItem(TEMP_SECTION_STORAGE_KEY, JSON.stringify(marker));
+    } catch (_) { }
+}
+
+function __isCanvasTempStateIndexedDbMarker(state) {
+    return !!(state && typeof state === 'object' && state.__storage === TEMP_SECTION_STORAGE_INDEXEDDB_MARKER);
+}
+
+function __saveCanvasTempStateToIndexedDbQueued(state) {
+    // 一旦进入该通道，后续优先直接走 IndexedDB，避免反复触发 storage/localStorage 配额错误。
+    __canvasTempStatePreferIndexedDb = true;
+    __canvasTempStatePreferChromeStorage = false;
+
+    Promise.resolve()
+        .then(() => __saveCanvasTempStateToIndexedDb(state))
+        .then(() => {
+            __writeCanvasTempStateIndexedDbMarker(state && state.timestamp ? state.timestamp : Date.now());
+            console.warn('[Canvas] 已切换到 IndexedDB 持久化（storage/localStorage 配额已满）。');
+        })
+        .catch((e) => {
+            console.error('[Canvas] IndexedDB 写入失败，状态可能无法持久化:', e);
+        });
+}
+
+function __persistCanvasTempStateToLocalStorage(state) {
+    try {
+        localStorage.setItem(TEMP_SECTION_STORAGE_KEY, JSON.stringify(state));
+        return true;
+    } catch (e) {
+        console.warn('[Canvas] localStorage 写入失败:', e);
+        __saveCanvasTempStateToIndexedDbQueued(state);
+        return false;
+    }
+}
 
 function __getCanvasStorageLocalArea() {
     try {
@@ -28883,8 +29777,17 @@ function __writeCanvasTempStateChromeMarker(ts = null) {
 }
 
 function __saveCanvasTempStateToChromeStorage(state, { immediate = false } = {}) {
+    if (__canvasTempStatePreferIndexedDb) {
+        __saveCanvasTempStateToIndexedDbQueued(state);
+        return;
+    }
+
     const storage = __getCanvasStorageLocalArea();
-    if (!storage) return;
+    if (!storage) {
+        __canvasTempStatePreferChromeStorage = false;
+        __persistCanvasTempStateToLocalStorage(state);
+        return;
+    }
 
     if (!immediate) {
         __canvasTempStateChromeWritePending = state;
@@ -28899,20 +29802,49 @@ function __saveCanvasTempStateToChromeStorage(state, { immediate = false } = {})
         return;
     }
 
+    const fallbackToLocal = () => {
+        __canvasTempStatePreferChromeStorage = false;
+        __canvasTempStateChromeWritePending = null;
+        if (__canvasTempStateChromeWriteTimer) {
+            clearTimeout(__canvasTempStateChromeWriteTimer);
+            __canvasTempStateChromeWriteTimer = null;
+        }
+        const ok = __persistCanvasTempStateToLocalStorage(state);
+        if (ok) {
+            console.warn('[Canvas] chrome.storage.local 配额不足，已回退到 localStorage 持久化。');
+        } else {
+            __saveCanvasTempStateToIndexedDbQueued(state);
+        }
+    };
+
     try {
         const payload = { [TEMP_SECTION_STORAGE_KEY]: state };
         const maybePromise = storage.set(payload, () => {
             try {
                 if (typeof chrome !== 'undefined' && chrome && chrome.runtime && chrome.runtime.lastError) {
-                    console.warn('[Canvas] chrome.storage.local 写入失败:', chrome.runtime.lastError.message);
+                    const msg = chrome.runtime.lastError.message || '';
+                    console.warn('[Canvas] chrome.storage.local 写入失败:', msg);
+                    if (msg && /quota/i.test(msg)) {
+                        fallbackToLocal();
+                    }
                 }
             } catch (_) { }
         });
         if (maybePromise && typeof maybePromise.then === 'function') {
-            maybePromise.catch((e) => console.warn('[Canvas] storage.local.set failed:', e));
+            maybePromise.catch((e) => {
+                console.warn('[Canvas] storage.local.set failed:', e);
+                const msg = (e && (e.message || String(e))) || '';
+                if (msg && /quota/i.test(msg)) {
+                    fallbackToLocal();
+                }
+            });
         }
     } catch (e) {
         console.warn('[Canvas] 写入 chrome.storage.local 失败:', e);
+        const msg = (e && (e.message || String(e))) || '';
+        if (msg && /quota/i.test(msg)) {
+            fallbackToLocal();
+        }
     }
 }
 
@@ -29039,8 +29971,17 @@ function __tryRestoreTempNodesFromChromeStorage() {
         if (state && typeof state === 'object' && (Array.isArray(state.sections) || Array.isArray(state.mdNodes) || Array.isArray(state.edges))) {
             __canvasTempStatePreferChromeStorage = true;
             __writeCanvasTempStateChromeMarker(state.timestamp || Date.now());
+            try {
+                // 同步一份到 localStorage 作为回退，防止后续命中 storage.local 配额后出现刷新丢失。
+                __persistCanvasTempStateToLocalStorage(state);
+            } catch (_) { }
             __applyCanvasTempStateObject(state);
             __finalizeTempNodesLoad({ loadedFromStorage: true });
+            return;
+        }
+
+        // 当 chrome.storage.local 无可用数据时，继续尝试 IndexedDB（避免误回退到演示模板）。
+        if (__tryRestoreTempNodesFromIndexedDb()) {
             return;
         }
 
@@ -29107,7 +30048,52 @@ function __tryRestoreTempNodesFromChromeStorage() {
     return true;
 }
 
-function saveTempNodes() {
+function __tryRestoreTempNodesFromIndexedDb() {
+    if (__canvasTempStateIndexedDbLoadInProgress) return true;
+    __canvasTempStateIndexedDbLoadInProgress = true;
+
+    Promise.resolve()
+        .then(() => __loadCanvasTempStateFromIndexedDb())
+        .then((state) => {
+            __canvasTempStateIndexedDbLoadInProgress = false;
+            if (state && typeof state === 'object' && (Array.isArray(state.sections) || Array.isArray(state.mdNodes) || Array.isArray(state.edges))) {
+                __canvasTempStatePreferIndexedDb = true;
+                __canvasTempStatePreferChromeStorage = false;
+                __writeCanvasTempStateIndexedDbMarker(state.timestamp || Date.now());
+                __applyCanvasTempStateObject(state);
+                __finalizeTempNodesLoad({ loadedFromStorage: true });
+                return;
+            }
+
+            // IndexedDB 无数据时继续走原有首启流程
+            CanvasState.tempSections = [];
+            const demoTemplate = createInitialDemoTemplate();
+            CanvasState.mdNodes = demoTemplate.mdNodes;
+            CanvasState.mdNodeCounter = demoTemplate.mdNodeCounter;
+            CanvasState.edges = demoTemplate.edges;
+            CanvasState.edgeCounter = demoTemplate.edgeCounter;
+            console.log('[Canvas] 首次使用，加载演示模板');
+            __finalizeTempNodesLoad({ loadedFromStorage: false });
+        })
+        .catch((e) => {
+            __canvasTempStateIndexedDbLoadInProgress = false;
+            console.warn('[Canvas] 读取 IndexedDB 异常:', e);
+
+            CanvasState.tempSections = [];
+            const demoTemplate = createInitialDemoTemplate();
+            CanvasState.mdNodes = demoTemplate.mdNodes;
+            CanvasState.mdNodeCounter = demoTemplate.mdNodeCounter;
+            CanvasState.edges = demoTemplate.edges;
+            CanvasState.edgeCounter = demoTemplate.edgeCounter;
+            console.log('[Canvas] 首次使用，加载演示模板');
+            __finalizeTempNodesLoad({ loadedFromStorage: false });
+        });
+
+    return true;
+}
+
+function saveTempNodes(options = {}) {
+    const immediate = !!(options && options.immediate);
     // 保存前执行自动 resize
     autoResizeImportContainers();
 
@@ -29127,17 +30113,21 @@ function saveTempNodes() {
             edgeCounter: CanvasState.edgeCounter,
             timestamp: Date.now()
         };
+        const persistedState = __buildPersistedCanvasState(state);
+        if (__canvasTempStatePreferIndexedDb) {
+            __saveCanvasTempStateToIndexedDbQueued(persistedState);
+            return;
+        }
         if (__canvasTempStatePreferChromeStorage) {
-            __writeCanvasTempStateChromeMarker(state.timestamp);
-            __saveCanvasTempStateToChromeStorage(state);
+            __writeCanvasTempStateChromeMarker(persistedState.timestamp);
+            __saveCanvasTempStateToChromeStorage(persistedState, { immediate });
         } else {
-            try {
-                localStorage.setItem(TEMP_SECTION_STORAGE_KEY, JSON.stringify(state));
-            } catch (_) {
+            const savedToLocal = __persistCanvasTempStateToLocalStorage(persistedState);
+            if (!savedToLocal) {
                 // localStorage 超限时：立即切换到 chrome.storage.local，且写入 marker 避免刷新后回退到旧状态
                 __canvasTempStatePreferChromeStorage = true;
-                __writeCanvasTempStateChromeMarker(state.timestamp);
-                __saveCanvasTempStateToChromeStorage(state, { immediate: true });
+                __writeCanvasTempStateChromeMarker(persistedState.timestamp);
+                __saveCanvasTempStateToChromeStorage(persistedState, { immediate: true });
             }
         }
 
@@ -29168,6 +30158,12 @@ function loadTempNodes() {
                 __tryRestoreTempNodesFromChromeStorage();
                 return;
             }
+            if (__isCanvasTempStateIndexedDbMarker(state)) {
+                __canvasTempStatePreferIndexedDb = true;
+                __canvasTempStatePreferChromeStorage = false;
+                __tryRestoreTempNodesFromIndexedDb();
+                return;
+            }
             if (state && typeof state === 'object') {
                 __applyCanvasTempStateObject(state);
                 __finalizeTempNodesLoad({ loadedFromStorage: true });
@@ -29177,6 +30173,11 @@ function loadTempNodes() {
 
         // 如果 localStorage 没有数据或数据损坏：优先尝试从 chrome.storage.local 恢复
         if (__tryRestoreTempNodesFromChromeStorage()) {
+            return;
+        }
+
+        // 再尝试 IndexedDB 恢复（双配额超限时的后备持久化）
+        if (__tryRestoreTempNodesFromIndexedDb()) {
             return;
         }
 
