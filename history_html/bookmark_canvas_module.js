@@ -22406,11 +22406,89 @@ function clearAllTempNodes() {
 
     const total = removableTempIds.length + removableMdIds.length;
     if (!total) {
-        alert(text.noneToClear);
+        showCanvasToast(text.noneToClear, 'info');
         return;
     }
 
-    if (!confirm(text.confirmBody(removableTempIds.length, removableMdIds.length))) return;
+    const modal = document.getElementById('clearUnlabeledModal');
+    if (!modal) {
+        const fallbackMsg = text.confirmBody(removableTempIds.length, removableMdIds.length);
+        if (!window.confirm(fallbackMsg)) return;
+    } else {
+        const closeBtn = document.getElementById('clearUnlabeledModalClose');
+        const cancelBtn = document.getElementById('clearUnlabeledCancelBtn');
+        const confirmBtn = document.getElementById('clearUnlabeledConfirmBtn');
+        const statsDiv = document.getElementById('clearUnlabeledStats');
+        const titleEl = document.getElementById('clearUnlabeledModalTitle');
+        const descEl = document.getElementById('clearUnlabeledModalDesc');
+        const noteEl = document.getElementById('clearUnlabeledNote');
+
+        if (titleEl) titleEl.textContent = isEn ? 'Clear Unlabeled Content' : '清除未标注内容';
+        if (descEl) descEl.textContent = isEn ? 'Only the following unlabeled content will be removed:' : '仅会清除以下未标注内容：';
+        if (confirmBtn) confirmBtn.textContent = isEn ? 'Confirm Clear' : '确认清除';
+        if (cancelBtn) cancelBtn.textContent = isEn ? 'Cancel' : '取消';
+
+        if (statsDiv) {
+            const hl = (num) => `<span style="color: #2563eb; font-weight: bold; margin: 0 2px;">${num}</span>`;
+            statsDiv.innerHTML = isEn
+                ? `Will clear: ${hl(removableTempIds.length)} unlabeled temp section(s), ${hl(removableMdIds.length)} empty blank node(s).`
+                : `即将清除：${hl(removableTempIds.length)} 个未标注临时栏目、${hl(removableMdIds.length)} 个空白节点。`;
+        }
+        if (noteEl) {
+            noteEl.textContent = isEn
+                ? 'Items with descriptions, custom titles, or edges are kept. Permanent copies are never affected here.'
+                : '有说明、自定义标题或连接线的内容会被保留；此操作不会影响永久栏目副本。';
+        }
+
+        modal.style.display = 'flex';
+        requestAnimationFrame(() => modal.classList.add('open'));
+
+        const closeModal = () => {
+            modal.classList.remove('open');
+            modal.style.display = 'none';
+            if (closeBtn) closeBtn.onclick = null;
+            if (cancelBtn) cancelBtn.onclick = null;
+            if (confirmBtn) confirmBtn.onclick = null;
+        };
+
+        if (closeBtn) closeBtn.onclick = closeModal;
+        if (cancelBtn) cancelBtn.onclick = closeModal;
+
+        if (confirmBtn) {
+            confirmBtn.onclick = () => {
+                closeModal();
+
+                removableTempIds.forEach((id) => {
+                    const el = document.getElementById(id);
+                    if (el) el.remove();
+                });
+                removableMdIds.forEach((id) => {
+                    const el = document.getElementById(id);
+                    if (el) el.remove();
+                });
+
+                CanvasState.tempSections = CanvasState.tempSections.filter(section => section && !removableTempIdSet.has(section.id));
+                CanvasState.mdNodes = CanvasState.mdNodes.filter(node => node && !removableMdIdSet.has(node.id));
+
+                if (CanvasState.selectedTempSectionId && removableTempIdSet.has(CanvasState.selectedTempSectionId)) {
+                    CanvasState.selectedTempSectionId = null;
+                    try { if (typeof clearTempSelection === 'function') clearTempSelection(); } catch (_) { }
+                }
+                if (CanvasState.selectedMdNodeId && removableMdIdSet.has(CanvasState.selectedMdNodeId)) {
+                    CanvasState.selectedMdNodeId = null;
+                    try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
+                }
+
+                __resetTempSectionSequenceCounterIfEmpty();
+                saveTempNodes();
+                scheduleBoundsUpdate();
+                scheduleScrollbarUpdate();
+                scheduleDormancyUpdate();
+                showCanvasToast(isEn ? 'Unlabeled content cleared.' : '未标注内容已清除。', 'success');
+            };
+        }
+        return;
+    }
 
     // 删除 DOM
     removableTempIds.forEach((id) => {
@@ -22443,6 +22521,7 @@ function clearAllTempNodes() {
     scheduleBoundsUpdate();
     scheduleScrollbarUpdate();
     scheduleDormancyUpdate();
+    showCanvasToast(isEn ? 'Unlabeled content cleared.' : '未标注内容已清除。', 'success');
 }
 
 // =============================================================================
@@ -22468,7 +22547,7 @@ function clearAllExceptPermanent() {
     const total = tempCount + mdCount + edgeCount + copyCount;
 
     if (!total) {
-        alert(isEn ? 'Nothing to clear.' : '没有可清理的内容。');
+        showCanvasToast(isEn ? 'Nothing to clear.' : '没有可清理的内容。', 'info');
         return;
     }
 
@@ -22493,6 +22572,7 @@ function clearAllExceptPermanent() {
 
     const labelDefault = document.getElementById('clearCanvasLabelDefault');
     const labelCopies = document.getElementById('clearCanvasLabelCopies');
+    const copiesOption = document.getElementById('clearCanvasCopiesOption');
 
     // 国际化文本
     if (titleEl) titleEl.textContent = isEn ? 'Clear Canvas' : '清除画布';
@@ -22541,9 +22621,11 @@ function clearAllExceptPermanent() {
         if (copyCount === 0) {
             includeCopiesCheckbox.disabled = true;
             if (includeCopiesCheckbox.parentElement) includeCopiesCheckbox.parentElement.style.opacity = '0.5';
+            if (copiesOption) copiesOption.style.opacity = '0.58';
         } else {
             includeCopiesCheckbox.disabled = false;
             if (includeCopiesCheckbox.parentElement) includeCopiesCheckbox.parentElement.style.opacity = '1';
+            if (copiesOption) copiesOption.style.opacity = '1';
         }
     }
     updateStats();
@@ -22555,7 +22637,7 @@ function clearAllExceptPermanent() {
     // 绑定关闭事件
     const closeModal = () => {
         modal.classList.remove('open');
-        setTimeout(() => modal.style.display = 'none', 300);
+        modal.style.display = 'none';
         // 清理事件，避免内存泄漏
         if (closeBtn) closeBtn.onclick = null;
         if (cancelBtn) cancelBtn.onclick = null;

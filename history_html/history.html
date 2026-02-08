@@ -897,33 +897,30 @@
 
     <!-- 清除画布确认弹窗 -->
     <div id="clearCanvasModal" class="modal content-center">
-        <div class="modal-content" style="max-width: 450px;">
-            <div class="modal-header compact" style="padding-left: 20px; padding-right: 20px;">
-                <h3 id="clearCanvasModalTitle" style="margin-left: 0;">清除画布</h3>
-                <button class="modal-close" id="clearCanvasModalClose">
+        <div class="modal-content clear-canvas-modal-content">
+            <div class="modal-header compact clear-canvas-modal-header">
+                <h3 id="clearCanvasModalTitle" class="clear-canvas-modal-title">清除画布</h3>
+                <button class="modal-close clear-canvas-modal-close" id="clearCanvasModalClose" type="button">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <div class="modal-body" style="padding: 16px 20px;">
-                <p id="clearCanvasModalDesc" style="font-size: 14px; color: var(--text-primary); margin: 0 0 14px 0;">
+            <div class="modal-body clear-canvas-modal-body">
+                <p id="clearCanvasModalDesc" class="clear-canvas-modal-desc">
                     选择要清除的内容：
                 </p>
 
-                <div
-                    style="background: var(--bg-secondary); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div id="clearCanvasOptionsGrid" class="clear-canvas-options-grid">
                     <!-- 默认选中的项 (只读) -->
-                    <div>
-                        <label class="checkbox-label"
-                            style="display: flex; align-items: center; gap: 8px; cursor: not-allowed; opacity: 0.8;">
+                    <div class="clear-canvas-option" id="clearCanvasDefaultOption">
+                        <label class="checkbox-label clear-canvas-option-label clear-canvas-option-label-default">
                             <input type="checkbox" checked disabled>
                             <span id="clearCanvasLabelDefault">临时栏目、空白节点与连接线</span>
                         </label>
                     </div>
 
                     <!-- 选项：是否包含副本 -->
-                    <div>
-                        <label class="checkbox-label"
-                            style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <div class="clear-canvas-option" id="clearCanvasCopiesOption">
+                        <label class="checkbox-label clear-canvas-option-label">
                             <input type="checkbox" id="clearCanvasIncludeCopies">
                             <span id="clearCanvasLabelCopies">同时清除永久栏目副本</span>
                         </label>
@@ -931,15 +928,33 @@
                 </div>
 
                 <!-- 统计信息 -->
-                <div id="clearCanvasStats"
-                    style="margin-bottom: 15px; padding-top: 10px; border-top: 1px dashed var(--border-color); font-size: 13px; color: var(--text-secondary);">
+                <div id="clearCanvasStats" class="clear-canvas-stats">
                     <!-- 动态填充 -->
                 </div>
 
-                <div class="modal-footer"
-                    style="margin-top: 14px; display: flex; justify-content: flex-end; gap: 10px;">
-                    <button class="modal-btn" id="clearCanvasCancelBtn">取消</button>
-                    <button class="modal-btn danger" id="clearCanvasConfirmBtn">确认清除</button>
+                <div class="modal-footer clear-canvas-modal-footer">
+                    <button class="clear-canvas-btn cancel" id="clearCanvasCancelBtn" type="button">取消</button>
+                    <button class="clear-canvas-btn confirm" id="clearCanvasConfirmBtn" type="button">确认清除</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="clearUnlabeledModal" class="modal content-center">
+        <div class="modal-content clear-unlabeled-modal-content">
+            <div class="modal-header compact clear-unlabeled-modal-header">
+                <h3 id="clearUnlabeledModalTitle" class="clear-unlabeled-modal-title">清除未标注内容</h3>
+                <button class="modal-close clear-unlabeled-modal-close" id="clearUnlabeledModalClose" type="button">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body clear-unlabeled-modal-body">
+                <div class="clear-unlabeled-lead" id="clearUnlabeledModalDesc">仅会清除以下未标注内容：</div>
+                <div class="clear-unlabeled-stats" id="clearUnlabeledStats"></div>
+                <div class="clear-unlabeled-note" id="clearUnlabeledNote"></div>
+                <div class="modal-footer clear-unlabeled-modal-footer">
+                    <button class="clear-unlabeled-btn cancel" id="clearUnlabeledCancelBtn" type="button">取消</button>
+                    <button class="clear-unlabeled-btn confirm" id="clearUnlabeledConfirmBtn" type="button">确认清除</button>
                 </div>
             </div>
         </div>

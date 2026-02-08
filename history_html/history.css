@@ -2550,6 +2550,219 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     filter: brightness(0.95);
 }
 
+/* Clear Canvas secondary UI */
+#clearCanvasModal.modal.content-center {
+    left: 0;
+    width: 100%;
+}
+
+#clearCanvasModal .clear-canvas-modal-content {
+    width: min(92vw, 520px);
+    max-width: 520px;
+    max-height: min(86vh, 720px);
+    box-shadow: none;
+}
+
+#clearCanvasModal .clear-canvas-modal-header {
+    padding: 14px 18px;
+}
+
+#clearCanvasModal .clear-canvas-modal-title {
+    margin-left: 0;
+}
+
+#clearCanvasModal .clear-canvas-modal-close {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+#clearCanvasModal .clear-canvas-modal-close:hover {
+    color: var(--text-primary);
+    border-color: var(--border-hover);
+    background: var(--bg-tertiary);
+}
+
+#clearCanvasModal .clear-canvas-modal-body {
+    padding: 16px 20px;
+}
+
+#clearCanvasModal .clear-canvas-modal-desc {
+    font-size: 14px;
+    color: var(--text-primary);
+    margin: 0 0 14px;
+}
+
+#clearCanvasModal .clear-canvas-options-grid {
+    background: var(--bg-secondary);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    border: 1px solid var(--border-color);
+}
+
+#clearCanvasModal .clear-canvas-option-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+#clearCanvasModal .clear-canvas-option-label-default {
+    cursor: not-allowed;
+    opacity: 0.8;
+}
+
+#clearCanvasModal .clear-canvas-stats {
+    margin-bottom: 15px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-color);
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+#clearCanvasModal .clear-canvas-modal-footer {
+    margin-top: 14px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+#clearCanvasModal .clear-canvas-btn {
+    min-width: 88px;
+    height: 36px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+#clearCanvasModal .clear-canvas-btn:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-tertiary);
+}
+
+#clearCanvasModal .clear-canvas-btn.confirm {
+    border-color: var(--error);
+    background: var(--error);
+    color: #fff;
+}
+
+#clearCanvasModal .clear-canvas-btn.confirm:hover {
+    background: #dc2626;
+    border-color: #dc2626;
+}
+
+/* Clear unlabeled secondary UI (independent from clear-canvas modal) */
+#clearUnlabeledModal.modal.content-center {
+    left: 0;
+    width: 100%;
+}
+
+#clearUnlabeledModal .clear-unlabeled-modal-content {
+    width: min(90vw, 460px);
+    max-width: 460px;
+    max-height: min(84vh, 640px);
+    box-shadow: none;
+}
+
+#clearUnlabeledModal .clear-unlabeled-modal-header {
+    padding: 14px 18px;
+}
+
+#clearUnlabeledModal .clear-unlabeled-modal-title {
+    margin-left: 0;
+}
+
+#clearUnlabeledModal .clear-unlabeled-modal-close {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+#clearUnlabeledModal .clear-unlabeled-modal-close:hover {
+    color: var(--text-primary);
+    border-color: var(--border-hover);
+    background: var(--bg-tertiary);
+}
+
+#clearUnlabeledModal .clear-unlabeled-modal-body {
+    padding: 16px 20px;
+}
+
+#clearUnlabeledModal .clear-unlabeled-lead {
+    font-size: 14px;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}
+
+#clearUnlabeledModal .clear-unlabeled-stats {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+#clearUnlabeledModal .clear-unlabeled-note {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    line-height: 1.45;
+}
+
+#clearUnlabeledModal .clear-unlabeled-modal-footer {
+    margin-top: 14px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+#clearUnlabeledModal .clear-unlabeled-btn {
+    min-width: 88px;
+    height: 36px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+#clearUnlabeledModal .clear-unlabeled-btn:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-tertiary);
+}
+
+#clearUnlabeledModal .clear-unlabeled-btn.confirm {
+    border-color: var(--error);
+    background: var(--error);
+    color: #fff;
+}
+
+#clearUnlabeledModal .clear-unlabeled-btn.confirm:hover {
+    background: #dc2626;
+    border-color: #dc2626;
+}
+
 /* 详情内容样式 */
 .detail-section {
     margin-bottom: 24px;
