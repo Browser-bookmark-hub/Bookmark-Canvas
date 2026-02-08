@@ -47,6 +47,22 @@ const searchUiState = {
     isHelpOpen: false
 };
 
+const SIDE_PANEL_SEARCH_COLLAPSE_MS = 150;
+const SIDE_PANEL_SEARCH_EXPAND_MS = 180;
+let sidePanelSearchCollapseTimer = null;
+let sidePanelSearchExpandTimer = null;
+
+const TEMP_SECTION_BUILD_YIELD_EVERY = 180;
+const TEMP_SECTION_INSERT_CHUNK_THRESHOLD = 240;
+const TEMP_SECTION_INSERT_BATCH_SIZE = 120;
+const TEMP_SECTION_LARGE_FOLDER_NODE_THRESHOLD = 320;
+const TEMP_SECTION_LARGE_FOLDER_CHILD_THRESHOLD = 120;
+let isTempSectionCreationInProgress = false;
+const SEARCH_RESULT_HOVER_SUPPRESS_MS_AFTER_NAV = 180;
+const SEARCH_RESULT_HOVER_SUPPRESS_MS_AFTER_WHEEL = 120;
+let lastSearchResultKeyboardNavTs = 0;
+let lastSearchResultWheelTs = 0;
+
 function isSidePanelModeInSearch() {
     try {
         if (window.__SIDE_PANEL_MODE__ === true) return true;
@@ -70,7 +86,42 @@ function getCurrentLangSafe() {
 function setSidePanelSearchExpanded(expanded) {
     const container = document.querySelector('.search-container');
     if (!container) return;
-    container.classList.toggle('side-panel-search-expanded', !!expanded);
+
+    if (sidePanelSearchCollapseTimer) {
+        clearTimeout(sidePanelSearchCollapseTimer);
+        sidePanelSearchCollapseTimer = null;
+    }
+    if (sidePanelSearchExpandTimer) {
+        clearTimeout(sidePanelSearchExpandTimer);
+        sidePanelSearchExpandTimer = null;
+    }
+
+    const shouldExpand = !!expanded;
+    if (shouldExpand) {
+        container.classList.remove('side-panel-search-collapsing');
+        container.classList.add('side-panel-search-expanded');
+        container.classList.add('side-panel-search-expanding');
+
+        sidePanelSearchExpandTimer = setTimeout(() => {
+            container.classList.remove('side-panel-search-expanding');
+            sidePanelSearchExpandTimer = null;
+        }, SIDE_PANEL_SEARCH_EXPAND_MS);
+        return;
+    }
+
+    if (!container.classList.contains('side-panel-search-expanded')) {
+        container.classList.remove('side-panel-search-expanding');
+        container.classList.remove('side-panel-search-collapsing');
+        return;
+    }
+
+    container.classList.remove('side-panel-search-expanding');
+    container.classList.add('side-panel-search-collapsing');
+    sidePanelSearchCollapseTimer = setTimeout(() => {
+        container.classList.remove('side-panel-search-collapsing');
+        container.classList.remove('side-panel-search-expanded');
+        sidePanelSearchCollapseTimer = null;
+    }, SIDE_PANEL_SEARCH_COLLAPSE_MS);
 }
 
 function isSidePanelSearchExpanded() {
@@ -279,9 +330,32 @@ try {
 /**
  * 更新搜索结果选中项
  */
-function updateSearchResultSelection(nextIndex) {
+function ensureSelectedResultVisibleInPanel(panel, selectedEl) {
+    if (!panel || !selectedEl) return;
+
+    const toggleRow = panel.querySelector('.canvas-bookmark-type-toggle');
+    const topInset = toggleRow ? toggleRow.offsetHeight : 0;
+
+    const itemTop = selectedEl.offsetTop;
+    const itemBottom = itemTop + selectedEl.offsetHeight;
+    const visibleTop = panel.scrollTop + topInset;
+    const visibleBottom = panel.scrollTop + panel.clientHeight;
+
+    if (itemTop < visibleTop) {
+        panel.scrollTop = Math.max(0, itemTop - topInset);
+        return;
+    }
+
+    if (itemBottom > visibleBottom) {
+        panel.scrollTop = Math.max(0, itemBottom - panel.clientHeight);
+    }
+}
+
+function updateSearchResultSelection(nextIndex, options = {}) {
     const panel = getSearchResultsPanel();
     if (!panel) return;
+    const ensureVisible = options.ensureVisible !== false;
+
     const items = panel.querySelectorAll('.search-result-item');
     if (!items.length) {
         searchUiState.selectedIndex = -1;
@@ -294,10 +368,9 @@ function updateSearchResultSelection(nextIndex) {
     const selectedEl = items[clamped];
     if (selectedEl) {
         selectedEl.classList.add('selected');
-        // 仅在面板内滚动，不影响页面滚动
-        try {
-            selectedEl.scrollIntoView({ block: 'nearest' });
-        } catch (_) { }
+        if (ensureVisible) {
+            ensureSelectedResultVisibleInPanel(panel, selectedEl);
+        }
     }
     searchUiState.selectedIndex = clamped;
 }
@@ -574,6 +647,7 @@ function handleSearchKeydown(e) {
 
             if (panelVisible && panelType === 'results') {
                 e.preventDefault();
+                lastSearchResultKeyboardNavTs = Date.now();
                 updateSearchResultSelection(searchUiState.selectedIndex + dir);
                 return;
             }
@@ -792,11 +866,15 @@ function handleSearchResultsPanelMouseOver(e) {
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results') return;
 
+    const now = Date.now();
+    if (now - lastSearchResultKeyboardNavTs < SEARCH_RESULT_HOVER_SUPPRESS_MS_AFTER_NAV) return;
+    if (now - lastSearchResultWheelTs < SEARCH_RESULT_HOVER_SUPPRESS_MS_AFTER_WHEEL) return;
+
     const item = e && e.target ? e.target.closest('.search-result-item') : null;
     if (!item) return;
     const idx = parseInt(item.getAttribute('data-index') || '-1', 10);
     if (Number.isNaN(idx)) return;
-    updateSearchResultSelection(idx);
+    updateSearchResultSelection(idx, { ensureVisible: false });
 }
 
 /**
@@ -1366,8 +1444,22 @@ function initSearchEvents() {
         searchInput.addEventListener('focus', handleSearchInputFocus);
         searchInput.addEventListener('blur', () => {
             if (!isSidePanelModeInSearch()) return;
-            const hasQuery = !!(searchInput && String(searchInput.value || '').trim());
-            if (!hasQuery) setSidePanelSearchExpanded(false);
+
+            requestAnimationFrame(() => {
+                try {
+                    const container = document.querySelector('.search-container');
+                    const activeEl = document.activeElement;
+                    if (container && activeEl && container.contains(activeEl)) return;
+
+                    const hasQuery = !!(searchInput && String(searchInput.value || '').trim());
+                    if (hasQuery) return;
+
+                    hideSearchResultsPanel();
+                    toggleSearchModeMenu(false);
+                    toggleSearchHelpMenu(false);
+                    setSidePanelSearchExpanded(false);
+                } catch (_) { }
+            });
         });
 
         searchInput.setAttribute('data-search-bound', 'true');
@@ -1377,6 +1469,13 @@ function initSearchEvents() {
         searchResultsPanel.addEventListener('click', handleSearchResultsPanelClick);
         searchResultsPanel.addEventListener('mouseover', handleSearchResultsPanelMouseOver);
         searchResultsPanel.setAttribute('data-search-bound', 'true');
+    }
+
+    if (searchResultsPanel && !searchResultsPanel.hasAttribute('data-search-wheel-bound')) {
+        searchResultsPanel.addEventListener('wheel', () => {
+            lastSearchResultWheelTs = Date.now();
+        }, { passive: true });
+        searchResultsPanel.setAttribute('data-search-wheel-bound', 'true');
     }
 
     // Outside click: use the same capture+guard strategy as history.js
@@ -3608,13 +3707,18 @@ function ensureDomainCacheForQuery(query) {
         const domain = getDomainGroupKey(item.url);
         if (!domain) continue;
 
+        const host = extractBookmarkHost(item.url);
+
         let entry = map.get(domain);
         if (!entry) {
-            entry = { domain, count: 0, items: [], match: false };
+            entry = { domain, count: 0, items: [], match: false, hostSet: new Set() };
             map.set(domain, entry);
         }
         entry.count += 1;
         entry.items.push({ title: item.title, url: item.url, id: item.id });
+        if (host) {
+            entry.hostSet.add(host);
+        }
 
         if (q && !entry.match) {
             if (domain.includes(q)) {
@@ -3638,6 +3742,8 @@ function ensureDomainCacheForQuery(query) {
             domain: entry.domain,
             title: entry.domain,
             count: entry.count,
+            subdomainCount: entry.hostSet ? entry.hostSet.size : 0,
+            groupLevel,
             color: '#0ea5e9'
         }));
 
@@ -3661,6 +3767,64 @@ function getDomainItemsForTemp(domain, query) {
     const key = String(domain || '').trim().toLowerCase();
     const entry = cache.map.get(key);
     return entry && Array.isArray(entry.items) ? entry.items : [];
+}
+
+function getSubdomainFolderTitle(host, domainKey, isZh) {
+    const safeHost = String(host || '').trim().toLowerCase();
+    const safeDomain = String(domainKey || '').trim().toLowerCase();
+    if (!safeHost) return safeDomain || (isZh ? '未知域名' : 'Unknown host');
+    if (safeDomain && safeHost === safeDomain) {
+        return isZh ? `主域名 (${safeHost})` : `Root (${safeHost})`;
+    }
+    return safeHost;
+}
+
+async function buildDomainPayloadBySubdomain(items, domainKey, isZh) {
+    const hostMap = new Map();
+    let processed = 0;
+
+    for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        if (!item) continue;
+
+        const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
+        const safeUrl = item.url || 'https://';
+        const host = extractBookmarkHost(safeUrl) || domainKey || '';
+        const hostKey = String(host || '').trim().toLowerCase();
+        if (!hostKey) continue;
+
+        let entry = hostMap.get(hostKey);
+        if (!entry) {
+            entry = { host: hostKey, children: [] };
+            hostMap.set(hostKey, entry);
+        }
+
+        entry.children.push({
+            title: safeTitle,
+            url: safeUrl,
+            type: 'bookmark',
+            children: []
+        });
+
+        processed += 1;
+        if (processed % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {
+            await yieldToMainThread();
+        }
+    }
+
+    const payloadItems = Array.from(hostMap.values())
+        .sort((a, b) => {
+            if (b.children.length !== a.children.length) return b.children.length - a.children.length;
+            return String(a.host || '').localeCompare(String(b.host || ''));
+        })
+        .map(entry => ({
+            title: getSubdomainFolderTitle(entry.host, domainKey, isZh),
+            url: '',
+            type: 'folder',
+            children: entry.children
+        }));
+
+    return payloadItems;
 }
 
 /**
@@ -3837,7 +4001,8 @@ function renderCanvasSearchResults(results, options = {}) {
                 : 'Domain granularity: click to toggle root/subdomain';
             const subActive = active === 'domain' && domainGrouping === 'host';
             const rootActive = active === 'domain' && domainGrouping === 'root';
-            const domainGranularityBtn = showDomainBtn
+            const shouldShowDomainGranularity = showDomainBtn && active === 'domain';
+            const domainGranularityBtn = shouldShowDomainGranularity
                 ? `<button class="canvas-bookmark-domain-granularity-btn ${subActive ? 'active' : ''}" type="button" data-domain-group="host" title="${escapeHtml(domainGroupingTitle)}">${escapeHtml(subdomainLabel)}</button>
                    <button class="canvas-bookmark-domain-granularity-btn ${rootActive ? 'active' : ''}" type="button" data-domain-group="root" title="${escapeHtml(domainGroupingTitle)}">${escapeHtml(rootDomainLabel)}</button>`
                 : '';
@@ -3853,7 +4018,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 : '';
             const justifyStyle = showExportBtn ? 'space-between' : 'flex-start';
 
-            html += `<div class="canvas-bookmark-type-toggle" style="display:flex; align-items:center; justify-content:${justifyStyle}; gap:8px; padding:8px 12px; border-bottom:1px solid var(--border-color);">
+            html += `<div class="canvas-bookmark-type-toggle" style="display:flex; align-items:center; justify-content:${justifyStyle}; gap:8px; padding:8px 12px;">
                 <div style="display:flex; align-items:center; gap:8px;">${bookmarkBtn}${folderBtn}${domainBtn}${domainGranularityBtn}</div>
                 ${exportBtnHtml}
             </div>`;
@@ -3939,7 +4104,13 @@ function renderCanvasSearchResults(results, options = {}) {
             case 'domain-group': {
                 const domainText = markQueryInText(item.domain || item.title || '');
                 const count = Number(item.count || 0);
-                const countLabel = isZh ? `${count} 个书签` : `${count} bookmarks`;
+                const subdomainCount = Number(item.subdomainCount || 0);
+                const isRootGroup = String(item.groupLevel || '') === 'root';
+                const countLabel = isRootGroup
+                    ? (isZh
+                        ? `${count} 个书签 · ${subdomainCount} 个子域名`
+                        : `${count} bookmarks · ${subdomainCount} subdomains`)
+                    : (isZh ? `${count} 个书签` : `${count} bookmarks`);
                 indexLabel = `<div style="display:flex; align-items:center; justify-content:center; width:24px; height:24px; flex-shrink:0; margin-right:2px;">
                     <i class="fas fa-globe" style="color:#0ea5e9; font-size:16px;"></i>
                 </div>`;
@@ -4331,196 +4502,484 @@ function getCanvasViewportCenterForTemp() {
     return { x, y };
 }
 
-function createTempSectionFromSearchResults() {
-    if (getCurrentViewSafe() !== 'canvas') return;
-    if (!window.CanvasModule || !window.CanvasModule.createEmptyTempSection || !window.CanvasModule.temp) return;
-
-    const items = collectBookmarkItemsForTempSection();
-    if (!items.length) return;
-
-    const isZh = currentLang === 'zh_CN';
-    const query = String(searchUiState.query || '').trim();
-    const pos = getCanvasViewportCenterForTemp();
-    const sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, {
-        title: '',
-        label: isZh ? '搜索' : 'Search',
-        source: 'search-result',
-        colorLocked: true
-    });
-    if (!sectionId) return;
-
-    const tempApi = window.CanvasModule.temp;
-    const section = tempApi && typeof tempApi.getSection === 'function'
-        ? tempApi.getSection(sectionId)
-        : null;
-    if (section) {
-        section.title = isZh ? '搜索结果' : 'Search Results';
-        section.label = isZh ? '搜索' : 'Search';
-        section.colorLocked = true;
-        section.source = 'search-result';
-    }
-    const getPermanentTreeRoot = () => {
-        try {
-            if (typeof cachedCurrentTree !== 'undefined' && Array.isArray(cachedCurrentTree)) return cachedCurrentTree[0] || null;
-        } catch (_) { }
-        try {
-            if (typeof window !== 'undefined' && Array.isArray(window.cachedCurrentTree)) return window.cachedCurrentTree[0] || null;
-        } catch (_) { }
-        return null;
-    };
-    const findPermanentNodeById = (targetId) => {
-        const root = getPermanentTreeRoot();
-        if (!root || !targetId) return null;
-        const stack = [root];
-        const idStr = String(targetId);
-        while (stack.length) {
-            const node = stack.pop();
-            if (!node || typeof node.id === 'undefined' || node.id === null) continue;
-            if (String(node.id) === idStr) return node;
-            if (Array.isArray(node.children) && node.children.length) {
-                for (let i = node.children.length - 1; i >= 0; i--) {
-                    stack.push(node.children[i]);
-                }
-            }
-        }
-        return null;
-    };
-    const buildPayloadFromPermanentNode = (node) => {
-        if (!node) return null;
-        const url = typeof node.url === 'string' ? node.url : '';
-        const rawTitle = typeof node.title === 'string' ? node.title : '';
-        if (url) {
-            return {
-                title: rawTitle || url || (isZh ? '书签' : 'Bookmark'),
-                url,
-                type: 'bookmark',
-                children: []
-            };
-        }
-        const children = Array.isArray(node.children) ? node.children.map(child => buildPayloadFromPermanentNode(child)).filter(Boolean) : [];
-        return {
-            title: rawTitle || (isZh ? '文件夹' : 'Folder'),
-            url: '',
-            type: 'folder',
-            children
-        };
-    };
-
-    items.forEach(item => {
-        if (!item) return;
-        if (item.nodeType === 'folder') {
-            let payload = null;
-            if (item.source === 'temporary' && item.sectionId && typeof tempApi.extractPayload === 'function') {
-                try { payload = tempApi.extractPayload(item.sectionId, [item.id]); } catch (_) { }
-            } else if (item.source === 'permanent') {
-                const node = findPermanentNodeById(item.id);
-                const built = buildPayloadFromPermanentNode(node);
-                if (built) payload = [built];
-            }
-            if (payload && payload.length && typeof tempApi.insertFromPayload === 'function') {
-                tempApi.insertFromPayload(sectionId, null, payload);
-                return;
-            }
-            if (typeof tempApi.createFolder === 'function') {
-                tempApi.createFolder(sectionId, '', item.title || (isZh ? '文件夹' : 'Folder'));
-            }
-            return;
-        }
-        if (typeof tempApi.createBookmark === 'function') {
-            const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
-            const safeUrl = item.url || 'https://';
-            tempApi.createBookmark(sectionId, '', safeTitle, safeUrl);
-        }
-    });
-
-    try {
-        if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
-            window.CanvasModule.scheduleDormancyUpdate();
-        }
-    } catch (_) { }
-
-    try {
-        if (window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
-            window.CanvasModule.locateSection(sectionId);
-        }
-    } catch (_) { }
-
-    try {
-        if (window.CanvasModule && window.CanvasModule.CanvasState) {
-            window.CanvasModule.CanvasState.tempStateTimestamp = Date.now();
-        }
-    } catch (_) { }
-
+function showCanvasToastSafe(message, type = 'info', duration = 2200) {
     try {
         if (typeof showCanvasToast === 'function') {
-            showCanvasToast(isZh ? `已生成临时栏目（${items.length}）` : `Temp section created (${items.length})`, 'success');
+            showCanvasToast(message, type, duration);
         }
     } catch (_) { }
 }
 
-function createTempSectionFromDomainResult(domain) {
+function yieldToMainThread() {
+    return new Promise(resolve => {
+        try {
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => resolve());
+                return;
+            }
+        } catch (_) { }
+        setTimeout(resolve, 0);
+    });
+}
+
+async function buildPermanentNodeMap(root) {
+    const map = new Map();
+    if (!root) return map;
+
+    const stack = [root];
+    let scanned = 0;
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node || typeof node.id === 'undefined' || node.id === null) continue;
+
+        map.set(String(node.id), node);
+        scanned += 1;
+        if (scanned % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {
+            await yieldToMainThread();
+        }
+
+        if (Array.isArray(node.children) && node.children.length) {
+            for (let i = node.children.length - 1; i >= 0; i -= 1) {
+                stack.push(node.children[i]);
+            }
+        }
+    }
+    return map;
+}
+
+async function buildPayloadFromPermanentNode(node, isZh) {
+    if (!node) return null;
+
+    const nodeUrl = typeof node.url === 'string' ? node.url : '';
+    const nodeTitle = typeof node.title === 'string' ? node.title : '';
+    if (nodeUrl) {
+        return {
+            title: nodeTitle || nodeUrl || (isZh ? '书签' : 'Bookmark'),
+            url: nodeUrl,
+            type: 'bookmark',
+            children: []
+        };
+    }
+
+    const rootPayload = {
+        title: nodeTitle || (isZh ? '文件夹' : 'Folder'),
+        url: '',
+        type: 'folder',
+        children: []
+    };
+
+    const stack = [{ source: node, target: rootPayload, index: 0 }];
+    let scanned = 0;
+
+    while (stack.length) {
+        const frame = stack[stack.length - 1];
+        const children = Array.isArray(frame.source.children) ? frame.source.children : [];
+
+        if (frame.index >= children.length) {
+            stack.pop();
+            continue;
+        }
+
+        const child = children[frame.index];
+        frame.index += 1;
+        if (!child) continue;
+
+        const childUrl = typeof child.url === 'string' ? child.url : '';
+        const childTitle = typeof child.title === 'string' ? child.title : '';
+
+        if (childUrl) {
+            frame.target.children.push({
+                title: childTitle || childUrl || (isZh ? '书签' : 'Bookmark'),
+                url: childUrl,
+                type: 'bookmark',
+                children: []
+            });
+        } else {
+            const folderPayload = {
+                title: childTitle || (isZh ? '文件夹' : 'Folder'),
+                url: '',
+                type: 'folder',
+                children: []
+            };
+            frame.target.children.push(folderPayload);
+
+            if (Array.isArray(child.children) && child.children.length) {
+                stack.push({ source: child, target: folderPayload, index: 0 });
+            }
+        }
+
+        scanned += 1;
+        if (scanned % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {
+            await yieldToMainThread();
+        }
+    }
+
+    return rootPayload;
+}
+
+function getInsertBatchSize(total) {
+    const count = Number(total) || 0;
+    if (count <= TEMP_SECTION_INSERT_CHUNK_THRESHOLD) return count;
+    return TEMP_SECTION_INSERT_BATCH_SIZE;
+}
+
+async function insertPayloadWithBatches(tempApi, sectionId, payloadItems, parentId = null) {
+    if (!tempApi || !sectionId || !Array.isArray(payloadItems) || !payloadItems.length) return;
+
+    if (typeof tempApi.insertFromPayload !== 'function') {
+        return;
+    }
+
+    const total = payloadItems.length;
+    const batchSize = getInsertBatchSize(total);
+    if (!batchSize || batchSize >= total) {
+        tempApi.insertFromPayload(sectionId, parentId, payloadItems);
+        return;
+    }
+
+    for (let i = 0; i < total; i += batchSize) {
+        const chunk = payloadItems.slice(i, i + batchSize);
+        tempApi.insertFromPayload(sectionId, parentId, chunk);
+        if (i + batchSize < total) {
+            await yieldToMainThread();
+        }
+    }
+}
+
+function isLargeFolderPayload(payload) {
+    if (!payload || payload.type !== 'folder') return false;
+    const rootChildren = Array.isArray(payload.children) ? payload.children : [];
+    if (rootChildren.length >= TEMP_SECTION_LARGE_FOLDER_CHILD_THRESHOLD) return true;
+
+    const stack = [payload];
+    let count = 0;
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node) continue;
+        count += 1;
+        if (count >= TEMP_SECTION_LARGE_FOLDER_NODE_THRESHOLD) return true;
+
+        const children = Array.isArray(node.children) ? node.children : [];
+        for (let i = children.length - 1; i >= 0; i -= 1) {
+            stack.push(children[i]);
+        }
+    }
+    return false;
+}
+
+async function insertLargeFolderPayload(tempApi, sectionId, folderPayload, fallbackTitle) {
+    if (!tempApi || !sectionId || !folderPayload || folderPayload.type !== 'folder') return false;
+    if (typeof tempApi.createFolder !== 'function' || typeof tempApi.insertFromPayload !== 'function') return false;
+
+    const folderTitle = folderPayload.title || fallbackTitle || 'Folder';
+    const folderId = tempApi.createFolder(sectionId, '', folderTitle);
+    if (!folderId) return false;
+
+    const children = Array.isArray(folderPayload.children) ? folderPayload.children : [];
+    if (!children.length) return true;
+
+    await insertPayloadWithBatches(tempApi, sectionId, children, folderId);
+    return true;
+}
+
+async function createTempSectionFromSearchResults() {
+    if (getCurrentViewSafe() !== 'canvas') return;
+    if (!window.CanvasModule || !window.CanvasModule.createEmptyTempSection || !window.CanvasModule.temp) return;
+    if (isTempSectionCreationInProgress) {
+        const isZhBusy = currentLang === 'zh_CN';
+        showCanvasToastSafe(isZhBusy ? '正在生成临时栏目，请稍候…' : 'Creating temp section, please wait…', 'warning', 1800);
+        return;
+    }
+
+    isTempSectionCreationInProgress = true;
+    try {
+        const items = collectBookmarkItemsForTempSection();
+        if (!items.length) return;
+
+        const isZh = currentLang === 'zh_CN';
+        showCanvasToastSafe(isZh ? '正在生成临时栏目…' : 'Creating temp section…', 'info', 1800);
+
+        const pos = getCanvasViewportCenterForTemp();
+        const sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, {
+            title: '',
+            label: isZh ? '搜索' : 'Search',
+            source: 'search-result',
+            colorLocked: true
+        });
+        if (!sectionId) return;
+
+        const tempApi = window.CanvasModule.temp;
+        const section = tempApi && typeof tempApi.getSection === 'function'
+            ? tempApi.getSection(sectionId)
+            : null;
+        if (section) {
+            section.title = isZh ? '搜索结果' : 'Search Results';
+            section.label = isZh ? '搜索' : 'Search';
+            section.colorLocked = true;
+            section.source = 'search-result';
+        }
+
+        const getPermanentTreeRoot = () => {
+            try {
+                if (typeof cachedCurrentTree !== 'undefined' && Array.isArray(cachedCurrentTree)) return cachedCurrentTree[0] || null;
+            } catch (_) { }
+            try {
+                if (typeof window !== 'undefined' && Array.isArray(window.cachedCurrentTree)) return window.cachedCurrentTree[0] || null;
+            } catch (_) { }
+            return null;
+        };
+
+        const needsPermanentLookup = items.some(item => item && item.nodeType === 'folder' && item.source === 'permanent');
+        let permanentNodeMap = null;
+        if (needsPermanentLookup) {
+            showCanvasToastSafe(isZh ? '正在整理文件夹结构…' : 'Preparing folder structure…', 'info', 1600);
+            permanentNodeMap = await buildPermanentNodeMap(getPermanentTreeRoot());
+        }
+
+        const payloadItems = [];
+        let insertedDirectCount = 0;
+        let processed = 0;
+
+        for (let i = 0; i < items.length; i += 1) {
+            const item = items[i];
+            if (!item) continue;
+
+            if (item.nodeType === 'folder') {
+                let payload = null;
+                if (item.source === 'temporary' && item.sectionId && typeof tempApi.extractPayload === 'function') {
+                    try {
+                        payload = tempApi.extractPayload(item.sectionId, [item.id]);
+                    } catch (_) { }
+                } else if (item.source === 'permanent' && permanentNodeMap) {
+                    const node = permanentNodeMap.get(String(item.id));
+                    const built = await buildPayloadFromPermanentNode(node, isZh);
+                    if (built) payload = [built];
+                }
+
+                if (payload && payload.length) {
+                    for (let j = 0; j < payload.length; j += 1) {
+                        const payloadItem = payload[j];
+                        if (!payloadItem) continue;
+
+                        if (isLargeFolderPayload(payloadItem)) {
+                            const inserted = await insertLargeFolderPayload(
+                                tempApi,
+                                sectionId,
+                                payloadItem,
+                                item.title || (isZh ? '文件夹' : 'Folder')
+                            );
+                            if (inserted) {
+                                insertedDirectCount += 1;
+                                await yieldToMainThread();
+                                continue;
+                            }
+                        }
+
+                        payloadItems.push(payloadItem);
+                    }
+                } else {
+                    payloadItems.push({
+                        title: item.title || (isZh ? '文件夹' : 'Folder'),
+                        url: '',
+                        type: 'folder',
+                        children: []
+                    });
+                }
+            } else {
+                const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
+                const safeUrl = item.url || 'https://';
+                payloadItems.push({
+                    title: safeTitle,
+                    url: safeUrl,
+                    type: 'bookmark',
+                    children: []
+                });
+            }
+
+            processed += 1;
+            if (processed % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {
+                await yieldToMainThread();
+            }
+        }
+
+        showCanvasToastSafe(
+            isZh
+                ? `正在写入临时栏目…（${payloadItems.length + insertedDirectCount}）`
+                : `Writing temp section… (${payloadItems.length + insertedDirectCount})`,
+            'info',
+            1600
+        );
+
+        await insertPayloadWithBatches(tempApi, sectionId, payloadItems);
+
+        try {
+            if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
+                window.CanvasModule.scheduleDormancyUpdate();
+            }
+        } catch (_) { }
+
+        try {
+            if (window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
+                window.CanvasModule.locateSection(sectionId);
+            }
+        } catch (_) { }
+
+        try {
+            if (window.CanvasModule && window.CanvasModule.CanvasState) {
+                window.CanvasModule.CanvasState.tempStateTimestamp = Date.now();
+            }
+        } catch (_) { }
+
+        showCanvasToastSafe(
+            isZh
+                ? `已生成并定位临时栏目（${payloadItems.length + insertedDirectCount}）`
+                : `Temp section created and located (${payloadItems.length + insertedDirectCount})`,
+            'success',
+            2600
+        );
+    } catch (error) {
+        const isZh = currentLang === 'zh_CN';
+        showCanvasToastSafe(
+            isZh
+                ? `生成临时栏目失败：${error && error.message ? error.message : '未知错误'}`
+                : `Failed to create temp section: ${error && error.message ? error.message : 'Unknown error'}`,
+            'error',
+            3200
+        );
+    } finally {
+        isTempSectionCreationInProgress = false;
+    }
+}
+
+async function createTempSectionFromDomainResult(domain) {
     if (getCurrentViewSafe() !== 'canvas') return;
     if (!window.CanvasModule || !window.CanvasModule.createEmptyTempSection || !window.CanvasModule.temp) return;
 
-    const isZh = currentLang === 'zh_CN';
-    const domainKey = String(domain || '').trim().toLowerCase();
-    if (!domainKey) return;
-
-    const items = getDomainItemsForTemp(domainKey, searchUiState.query || '');
-    if (!items.length) return;
-
-    const pos = getCanvasViewportCenterForTemp();
-    const sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, {
-        title: '',
-        label: isZh ? '搜索' : 'Search',
-        source: 'search-result',
-        colorLocked: true
-    });
-    if (!sectionId) return;
-
-    const tempApi = window.CanvasModule.temp;
-    const section = tempApi && typeof tempApi.getSection === 'function'
-        ? tempApi.getSection(sectionId)
-        : null;
-    if (section) {
-        section.title = isZh ? `域名: ${domainKey}` : `Domain: ${domainKey}`;
-        section.label = isZh ? '搜索' : 'Search';
-        section.colorLocked = true;
-        section.source = 'search-result';
+    if (isTempSectionCreationInProgress) {
+        const isZhBusy = currentLang === 'zh_CN';
+        showCanvasToastSafe(isZhBusy ? '正在生成临时栏目，请稍候…' : 'Creating temp section, please wait…', 'warning', 1800);
+        return;
     }
 
-    items.forEach(item => {
-        if (!item) return;
-        if (typeof tempApi.createBookmark === 'function') {
-            const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
-            const safeUrl = item.url || 'https://';
-            tempApi.createBookmark(sectionId, '', safeTitle, safeUrl);
-        }
-    });
-
+    isTempSectionCreationInProgress = true;
     try {
-        if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
-            window.CanvasModule.scheduleDormancyUpdate();
-        }
-    } catch (_) { }
 
-    try {
-        if (window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
-            window.CanvasModule.locateSection(sectionId);
-        }
-    } catch (_) { }
+        const isZh = currentLang === 'zh_CN';
+        const domainKey = String(domain || '').trim().toLowerCase();
+        if (!domainKey) return;
+        const groupBySubdomainFolders = (searchUiState && searchUiState.domainGrouping === 'root');
 
-    try {
-        if (window.CanvasModule && window.CanvasModule.CanvasState) {
-            window.CanvasModule.CanvasState.tempStateTimestamp = Date.now();
-        }
-    } catch (_) { }
+        const items = getDomainItemsForTemp(domainKey, searchUiState.query || '');
+        if (!items.length) return;
 
-    try {
-        if (typeof showCanvasToast === 'function') {
-            showCanvasToast(isZh ? `已生成临时栏目（${items.length}）` : `Temp section created (${items.length})`, 'success');
+        showCanvasToastSafe(isZh ? '正在生成域名临时栏目…' : 'Creating domain temp section…', 'info', 1800);
+
+        const pos = getCanvasViewportCenterForTemp();
+        const sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, {
+            title: '',
+            label: isZh ? '搜索' : 'Search',
+            source: 'search-result',
+            colorLocked: true
+        });
+        if (!sectionId) return;
+
+        const tempApi = window.CanvasModule.temp;
+        const section = tempApi && typeof tempApi.getSection === 'function'
+            ? tempApi.getSection(sectionId)
+            : null;
+        if (section) {
+            section.title = groupBySubdomainFolders
+                ? (isZh ? `域名: ${domainKey}（子域名分组）` : `Domain: ${domainKey} (Subdomain groups)`)
+                : (isZh ? `域名: ${domainKey}` : `Domain: ${domainKey}`);
+            section.label = isZh ? '搜索' : 'Search';
+            section.colorLocked = true;
+            section.source = 'search-result';
         }
-    } catch (_) { }
+
+        let payloadItems = [];
+        if (groupBySubdomainFolders) {
+            payloadItems = await buildDomainPayloadBySubdomain(items, domainKey, isZh);
+        }
+
+        if (!payloadItems.length) {
+            let processed = 0;
+            for (let i = 0; i < items.length; i += 1) {
+                const item = items[i];
+                if (!item) continue;
+                const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
+                const safeUrl = item.url || 'https://';
+                payloadItems.push({
+                    title: safeTitle,
+                    url: safeUrl,
+                    type: 'bookmark',
+                    children: []
+                });
+
+                processed += 1;
+                if (processed % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {
+                    await yieldToMainThread();
+                }
+            }
+        }
+
+        const folderCount = payloadItems.filter(item => item && item.type === 'folder').length;
+        const bookmarkCount = items.length;
+
+        showCanvasToastSafe(
+            groupBySubdomainFolders
+                ? (isZh
+                    ? `正在按子域名写入…（${folderCount} 个文件夹 / ${bookmarkCount}）`
+                    : `Writing by subdomain… (${folderCount} folders / ${bookmarkCount})`)
+                : (isZh
+                    ? `正在写入域名结果…（${payloadItems.length}）`
+                    : `Writing domain results… (${payloadItems.length})`),
+            'info',
+            1600
+        );
+
+        await insertPayloadWithBatches(tempApi, sectionId, payloadItems);
+
+        try {
+            if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
+                window.CanvasModule.scheduleDormancyUpdate();
+            }
+        } catch (_) { }
+
+        try {
+            if (window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
+                window.CanvasModule.locateSection(sectionId);
+            }
+        } catch (_) { }
+
+        try {
+            if (window.CanvasModule && window.CanvasModule.CanvasState) {
+                window.CanvasModule.CanvasState.tempStateTimestamp = Date.now();
+            }
+        } catch (_) { }
+
+        showCanvasToastSafe(
+            groupBySubdomainFolders
+                ? (isZh
+                    ? `已按子域名生成并定位（${folderCount} 组 / ${bookmarkCount}）`
+                    : `Subdomain-grouped temp section created (${folderCount} groups / ${bookmarkCount})`)
+                : (isZh
+                    ? `已生成并定位域名栏目（${payloadItems.length}）`
+                    : `Domain temp section created and located (${payloadItems.length})`),
+            'success',
+            2600
+        );
+    } catch (error) {
+        const isZh = currentLang === 'zh_CN';
+        showCanvasToastSafe(
+            isZh
+                ? `生成域名临时栏目失败：${error && error.message ? error.message : '未知错误'}`
+                : `Failed to create domain temp section: ${error && error.message ? error.message : 'Unknown error'}`,
+            'error',
+            3200
+        );
+    } finally {
+        isTempSectionCreationInProgress = false;
+    }
 }
 
 // ==================== Phase 3: 定位与高亮 ====================

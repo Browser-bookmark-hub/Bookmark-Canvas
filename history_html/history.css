@@ -317,6 +317,10 @@ html.side-panel-mode .header-left {
     display: none;
 }
 
+html.side-panel-mode .header-right {
+    position: relative;
+}
+
 html.side-panel-mode .tool-buttons #themeToggle,
 html.side-panel-mode .tool-buttons #langToggle,
 html.side-panel-mode .tool-buttons #helpToggle {
@@ -349,6 +353,12 @@ html.side-panel-mode .search-container {
     flex: 0 0 auto;
     padding: 2px 6px;
     border-radius: 18px;
+    transform-origin: right center;
+    transition: border-color 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+        background 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.16s cubic-bezier(0.32, 0.72, 0, 1),
+        transform 0.18s cubic-bezier(0.24, 0.82, 0.2, 1);
 }
 
 html.side-panel-mode .search-container .search-input-wrapper {
@@ -356,14 +366,66 @@ html.side-panel-mode .search-container .search-input-wrapper {
 }
 
 html.side-panel-mode .search-container.side-panel-search-expanded {
-    max-width: min(320px, 100%);
-    min-width: 200px;
-    width: 100%;
-    flex: 1 1 auto;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%) scaleX(1);
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    flex: 0 0 auto;
+    z-index: 260;
+}
+
+html.side-panel-mode .search-container.side-panel-search-expanded.side-panel-search-expanding {
+    animation: side-panel-search-expand-overlay 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+html.side-panel-mode .search-container.side-panel-search-expanded.side-panel-search-collapsing {
+    animation: side-panel-search-collapse-overlay 150ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 html.side-panel-mode .search-container.side-panel-search-expanded .search-input-wrapper {
     display: flex;
+}
+
+html.side-panel-mode .search-container:not(.side-panel-search-expanded) .search-results-panel,
+html.side-panel-mode .search-container:not(.side-panel-search-expanded) .search-mode-menu {
+    display: none !important;
+}
+
+html.side-panel-mode .search-container.side-panel-search-expanded+.tool-buttons {
+    opacity: 0;
+    pointer-events: none;
+}
+
+html.side-panel-mode .tool-buttons {
+    transition: opacity 0.14s cubic-bezier(0.2, 0.72, 0, 1);
+}
+
+@keyframes side-panel-search-expand-overlay {
+    from {
+        opacity: 0.72;
+        transform: translateY(-50%) scaleX(0.92);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(-50%) scaleX(1);
+    }
+}
+
+@keyframes side-panel-search-collapse-overlay {
+    from {
+        opacity: 1;
+        transform: translateY(-50%) scaleX(1);
+    }
+
+    to {
+        opacity: 0.8;
+        transform: translateY(-50%) scaleX(0.96);
+    }
 }
 
 html.side-panel-mode .search-mode-trigger {
@@ -381,7 +443,10 @@ html.side-panel-mode .search-mode-label {
 }
 
 html.side-panel-mode .search-mode-menu {
-    width: 260px;
+    left: 0;
+    right: 0;
+    width: auto;
+    min-width: 260px;
 }
 
 html.side-panel-mode .search-mode-trigger {

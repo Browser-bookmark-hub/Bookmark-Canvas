@@ -110,6 +110,16 @@
     background: rgba(14, 165, 233, 0.14);
 }
 
+/* Keep bookmark/domain mode strip fixed at top while result list scrolls. */
+.canvas-bookmark-type-toggle {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-color);
+    backdrop-filter: saturate(1.05) blur(4px);
+}
+
 .perf-help-popover.search-hint-help-popover {
     position: fixed;
     z-index: 9999;
