@@ -65,6 +65,11 @@ try {
 const SIDE_PANEL_FLOATING_TOOLS_KEY = 'sidepanelFloatingToolsVisible';
 const SIDE_PANEL_FLOATING_TOOLS_MODE_KEY = 'sidepanelFloatingToolsMode';
 const CANVAS_FLOATING_TOOLS_MODE_KEY = 'canvasFloatingToolsMode';
+const HEADER_COLLAPSE_STATE_KEY = 'headerCollapseState';
+const HEADER_DOCK_SIDE_KEY = 'headerDockSide';
+const HEADER_COMPACT_LEFT_TOP_KEY = 'headerCompactToggleLeftTop';
+const HEADER_COMPACT_LEFT_BOTTOM_KEY = 'headerCompactToggleLeftBottom';
+const HEADER_COMPACT_LEFT_KEY = 'headerCompactToggleLeft';
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_ACTION = 'triggerCanvasPageFullscreenByTabId';
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_STORAGE_KEY = 'canvas_page_fullscreen_bridge_request_v1';
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_MAX_AGE_MS = 30000;
@@ -75,6 +80,49 @@ const SIDE_PANEL_FLOATING_TOOLS_MODES = {
     HIDDEN: 'hidden',
     SHOWN: 'shown'
 };
+
+let currentHeaderState = 'expanded';
+let currentHeaderDockSide = 'top';
+const LAYOUT_PRELOAD_CLASSES = [
+    'layout-preload-active',
+    'layout-preload-sidebar-compact',
+    'layout-preload-sidebar-right',
+    'layout-preload-header-compact',
+    'layout-preload-header-dock-bottom',
+    'layout-preload-floating-hidden',
+    'layout-preload-canvas-scrollbar-vertical-hidden',
+    'layout-preload-canvas-scrollbar-horizontal-hidden'
+];
+let layoutPreloadCleared = false;
+
+function clearLayoutPreloadState() {
+    if (layoutPreloadCleared) return;
+    try {
+        const root = document.documentElement;
+        if (!root) return;
+        LAYOUT_PRELOAD_CLASSES.forEach((name) => root.classList.remove(name));
+    } catch (_) { }
+    layoutPreloadCleared = true;
+}
+
+let canvasPreloadReleaseBound = false;
+function bindCanvasPreloadRelease() {
+    if (canvasPreloadReleaseBound) return;
+    canvasPreloadReleaseBound = true;
+
+    window.addEventListener('canvas-initial-layout-ready', () => {
+        window.setTimeout(() => {
+            requestAnimationFrame(() => {
+                clearLayoutPreloadState();
+            });
+        }, 160);
+    }, { once: true });
+
+    // 兜底：避免异常路径导致预置状态长期不释放
+    window.setTimeout(() => {
+        clearLayoutPreloadState();
+    }, 3200);
+}
 
 function normalizeSidePanelFloatingToolsMode(mode) {
     return mode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE
@@ -1930,6 +1978,14 @@ const i18n = {
         'zh_CN': '侧边栏',
         'en': 'Side Panel'
     },
+    headerToggleCollapseTooltip: {
+        'zh_CN': '收起标题栏',
+        'en': 'Collapse header'
+    },
+    headerToggleExpandTooltip: {
+        'zh_CN': '展开标题栏',
+        'en': 'Expand header'
+    },
     quickAddTooltip: {
         'zh_CN': '添加',
         'en': 'Add'
@@ -2616,6 +2672,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 初始化侧边栏收起功能
     initSidebarToggle();
+    initHeaderToggle();
     // Canvas-only：不初始化非画布功能
 
     // 初始化右键菜单和拖拽功能
@@ -3203,6 +3260,14 @@ function applyLanguage() {
         const label = i18n.titleSidePanelToggleTooltip[currentLang];
         titleSidePanelToggleBtn.setAttribute('aria-label', label);
     }
+    const headerToggleBtn = document.getElementById('headerToggleBtn');
+    const headerCollapsed = currentHeaderState === 'compact';
+    const headerLabel = headerCollapsed
+        ? i18n.headerToggleExpandTooltip[currentLang]
+        : i18n.headerToggleCollapseTooltip[currentLang];
+    if (headerToggleBtn) {
+        headerToggleBtn.setAttribute('aria-label', headerLabel);
+    }
     const quickAddCurrentTitle = document.getElementById('quickAddCurrentTitle');
     if (quickAddCurrentTitle) quickAddCurrentTitle.textContent = i18n.quickAddCurrentTitle[currentLang];
     const quickAddWindowTitle = document.getElementById('quickAddWindowTitle');
@@ -3297,6 +3362,9 @@ function setupSidePanelSettingsMenu() {
     };
 
     const openMenu = () => {
+        if (typeof currentHeaderDockSide === 'string') {
+            menu.dataset.dock = currentHeaderDockSide;
+        }
         menu.removeAttribute('hidden');
         closeFloatingToolsPanel();
     };
@@ -4242,6 +4310,9 @@ function setupQuickAddMenu() {
     const openMenu = (options = {}) => {
         setQuickAddMenuColorVars();
         syncQuickAddMenuSections(options);
+        if (typeof currentHeaderDockSide === 'string') {
+            menu.dataset.dock = currentHeaderDockSide;
+        }
         menu.removeAttribute('hidden');
     };
 
@@ -5290,6 +5361,7 @@ function initSidebarToggle() {
     let sidebarCollapseMode = SIDEBAR_COLLAPSE_MODE_AUTO;
     let autoCollapseWidth = AUTO_COLLAPSE_WIDTH_DEFAULT;
     let hasManualOverride = false;
+    let headerStateChangeAnchorY = null;
 
     function clamp(value, min, max) {
         return Math.min(max, Math.max(min, value));
@@ -5412,6 +5484,23 @@ function initSidebarToggle() {
         return localY / rect.height;
     }
 
+    function getToggleViewportCenterY() {
+        const rect = toggleBtn.getBoundingClientRect();
+        if (!rect || !Number.isFinite(rect.top) || !Number.isFinite(rect.height)) return null;
+        return rect.top + (rect.height / 2);
+    }
+
+    function preserveToggleViewportCenterY(anchorY, options = {}) {
+        if (!Number.isFinite(anchorY)) return;
+        const rect = sidebar.getBoundingClientRect();
+        if (!rect || !rect.height) return;
+        const minTop = TOGGLE_VERTICAL_MARGIN_PX;
+        const maxTop = Math.max(minTop, rect.height - TOGGLE_VERTICAL_MARGIN_PX);
+        const localY = clamp(anchorY - rect.top, minTop, maxTop);
+        const nextRatio = localY / rect.height;
+        setToggleTopRatio(nextRatio, { persist: options && options.persist !== false });
+    }
+
     function ensureToggleDragHints() {
         if (!toggleHintUp || !toggleHintUp.isConnected) {
             toggleHintUp = toggleBtn.querySelector('.sidebar-toggle-hint-up');
@@ -5472,6 +5561,7 @@ function initSidebarToggle() {
         const safeDirection = normalizeToggleDragGuideDirection(direction);
         if (toggleDragGuideDirection === safeDirection) return;
         toggleDragGuideDirection = safeDirection;
+        toggleBtn.dataset.dragGuide = safeDirection || '';
         updateToggleIcon(currentState);
     }
 
@@ -5845,6 +5935,7 @@ function initSidebarToggle() {
         const safePrefs = nextPrefs && typeof nextPrefs === 'object' ? nextPrefs : {};
         const nextMode = normalizeCollapseMode(safePrefs.mode);
         const nextWidth = normalizeAutoCollapseWidth(safePrefs.width);
+        const forceIgnoreManualOverride = !!(options && options.ignoreManualOverride === true);
         const modeChanged = nextMode !== sidebarCollapseMode;
         const widthChanged = nextWidth !== autoCollapseWidth;
 
@@ -5853,10 +5944,11 @@ function initSidebarToggle() {
 
         if (modeChanged || widthChanged || (options && options.forceApply)) {
             if (sidebarCollapseMode === SIDEBAR_COLLAPSE_MODE_AUTO) {
+                const shouldIgnoreManualOverride = forceIgnoreManualOverride || modeChanged;
                 if (modeChanged && hasManualOverride) {
                     setManualOverride(false);
                 }
-                applyAutoState({ ignoreManualOverride: true, force: true });
+                applyAutoState({ ignoreManualOverride: shouldIgnoreManualOverride, force: true });
             } else {
                 if (modeChanged) {
                     setManualOverride(true);
@@ -5964,7 +6056,7 @@ function initSidebarToggle() {
         if (!toggleDragSession.moved && dragDistance >= TOGGLE_DRAG_ACTIVATE_THRESHOLD) {
             toggleDragSession.moved = true;
             clearToggleHintHoldTimer();
-            toggleBtn.classList.remove('sidebar-toggle-show-hints');
+            toggleBtn.classList.add('sidebar-toggle-show-hints');
             setToggleHoldVisualActive(true);
             toggleBtn.classList.add('sidebar-toggle-dragging');
         }
@@ -6144,6 +6236,558 @@ function initSidebarToggle() {
             scheduleMaximizedRefresh();
         }
     });
+
+    window.addEventListener('header-compact-state-changed', () => {
+        const anchorY = headerStateChangeAnchorY;
+        headerStateChangeAnchorY = null;
+        if (Number.isFinite(anchorY)) {
+            preserveToggleViewportCenterY(anchorY, { persist: true });
+        }
+        syncSidebarWidth();
+        scheduleMaximizedRefresh();
+    });
+
+    window.addEventListener('header-compact-state-will-change', () => {
+        headerStateChangeAnchorY = getToggleViewportCenterY();
+    });
+}
+
+function initHeaderToggle() {
+    const header = document.querySelector('.history-header');
+    const toggleBtn = document.getElementById('headerToggleBtn');
+    if (!header || !toggleBtn) return;
+
+    const HEADER_STATES = ['expanded', 'compact'];
+    const HEADER_DOCK_SIDES = ['top', 'bottom'];
+    const TOGGLE_DRAG_ACTIVATE_THRESHOLD = 10;
+    const TOGGLE_HINT_HOLD_DELAY_MS = 160;
+    const TOGGLE_DRAG_DIRECTION_THRESHOLD = 8;
+    const TOGGLE_DOCK_SWITCH_THRESHOLD = 42;
+    const COMPACT_DRAG_ACTIVATE_THRESHOLD = 1;
+    const COMPACT_LEFT_DEFAULT = 18;
+    const COMPACT_LEFT_MIN = 0;
+
+    let suppressToggleClick = false;
+    let dragSession = null;
+    let hintUp = null;
+    let hintDown = null;
+    let hintHoldTimer = null;
+    let holdVisualActive = false;
+    let dragGuideDirection = null;
+    let compactLeft = COMPACT_LEFT_DEFAULT;
+    let compactLeftByDock = {
+        top: COMPACT_LEFT_DEFAULT,
+        bottom: COMPACT_LEFT_DEFAULT
+    };
+    let compactLeftHasStoredByDock = {
+        top: false,
+        bottom: false
+    };
+    let compactDragSession = null;
+
+    function normalizeHeaderState(raw) {
+        const value = String(raw || '').toLowerCase();
+        return HEADER_STATES.includes(value) ? value : null;
+    }
+
+    function normalizeHeaderDockSide(raw) {
+        const value = String(raw || '').toLowerCase();
+        return HEADER_DOCK_SIDES.includes(value) ? value : null;
+    }
+
+    function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+    }
+
+    function getCompactLeftMax() {
+        const width = Math.max(window.innerWidth || 0, 0);
+        return Math.max(COMPACT_LEFT_MIN, width - 40);
+    }
+
+    function normalizeCompactLeft(raw) {
+        const value = Number(raw);
+        if (!Number.isFinite(value)) return null;
+        return clamp(Math.round(value), COMPACT_LEFT_MIN, getCompactLeftMax());
+    }
+
+    function readStorage(key) {
+        try {
+            return localStorage.getItem(key);
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function writeStorage(key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch (_) { }
+    }
+
+    function getCompactLeftStorageKey(dockSide) {
+        return dockSide === 'bottom' ? HEADER_COMPACT_LEFT_BOTTOM_KEY : HEADER_COMPACT_LEFT_TOP_KEY;
+    }
+
+    function readCompactLeftByDock(dockSide) {
+        const key = getCompactLeftStorageKey(dockSide);
+        return normalizeCompactLeft(readStorage(key));
+    }
+
+    function setCompactToggleLeft(nextLeft, options = {}) {
+        compactLeft = clamp(Math.round(nextLeft), COMPACT_LEFT_MIN, getCompactLeftMax());
+        const dock = currentHeaderDockSide === 'bottom' ? 'bottom' : 'top';
+        compactLeftByDock[dock] = compactLeft;
+        document.documentElement.style.setProperty('--header-toggle-compact-left', `${compactLeft}px`);
+        if (!options || options.persist !== false) {
+            compactLeftHasStoredByDock[dock] = true;
+            writeStorage(getCompactLeftStorageKey(dock), String(compactLeft));
+            writeStorage(HEADER_COMPACT_LEFT_KEY, String(compactLeft));
+        }
+        return compactLeft;
+    }
+
+    function syncCompactLeftFromDock(dockSide, options = {}) {
+        const dock = dockSide === 'bottom' ? 'bottom' : 'top';
+        const dockLeft = normalizeCompactLeft(compactLeftByDock[dock]);
+        compactLeft = dockLeft == null
+            ? clamp(COMPACT_LEFT_DEFAULT, COMPACT_LEFT_MIN, getCompactLeftMax())
+            : dockLeft;
+        setCompactToggleLeft(compactLeft, { persist: options && options.persist === true });
+    }
+
+    function ensureToggleHints() {
+        if (!hintUp || !hintUp.isConnected) {
+            hintUp = toggleBtn.querySelector('.header-toggle-hint-up');
+            if (!hintUp) {
+                hintUp = document.createElement('span');
+                hintUp.className = 'header-toggle-hint header-toggle-hint-up';
+                hintUp.setAttribute('aria-hidden', 'true');
+                toggleBtn.appendChild(hintUp);
+            }
+        }
+
+        if (!hintDown || !hintDown.isConnected) {
+            hintDown = toggleBtn.querySelector('.header-toggle-hint-down');
+            if (!hintDown) {
+                hintDown = document.createElement('span');
+                hintDown.className = 'header-toggle-hint header-toggle-hint-down';
+                hintDown.setAttribute('aria-hidden', 'true');
+                toggleBtn.appendChild(hintDown);
+            }
+        }
+    }
+
+    function clearHintHoldTimer() {
+        if (hintHoldTimer == null) return;
+        window.clearTimeout(hintHoldTimer);
+        hintHoldTimer = null;
+    }
+
+    function scheduleHintReveal() {
+        clearHintHoldTimer();
+        hintHoldTimer = window.setTimeout(() => {
+            hintHoldTimer = null;
+            if (!dragSession) return;
+            toggleBtn.classList.add('header-toggle-show-hints');
+            setHoldVisualActive(true);
+        }, TOGGLE_HINT_HOLD_DELAY_MS);
+    }
+
+    function normalizeDragGuideDirection(direction) {
+        if (direction === 'up' || direction === 'down') return direction;
+        return null;
+    }
+
+    function setDragGuideDirection(direction) {
+        const next = normalizeDragGuideDirection(direction);
+        if (dragGuideDirection === next) return;
+        dragGuideDirection = next;
+        updateToggleIcon(currentHeaderState);
+    }
+
+    function setHoldVisualActive(active) {
+        const next = active === true;
+        if (holdVisualActive === next) return;
+        holdVisualActive = next;
+        toggleBtn.classList.toggle('header-toggle-hold-active', next);
+        updateToggleIcon(currentHeaderState);
+    }
+
+    function getDragGuideDirection(dx, dy) {
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+        if (absDy >= TOGGLE_DRAG_DIRECTION_THRESHOLD && absDy >= absDx) {
+            return dy < 0 ? 'up' : 'down';
+        }
+        return null;
+    }
+
+    function applyHeaderDockSide(dockSide, options = {}) {
+        const nextDock = normalizeHeaderDockSide(dockSide) || 'top';
+        const changed = nextDock !== currentHeaderDockSide;
+        currentHeaderDockSide = nextDock;
+        document.body.classList.toggle('header-dock-bottom', nextDock === 'bottom');
+        if (changed) {
+            syncCompactLeftFromDock(nextDock, { persist: false });
+        }
+        if (!options || options.persist !== false) {
+            writeStorage(HEADER_DOCK_SIDE_KEY, nextDock);
+        }
+        updateToggleLabel(currentHeaderState);
+    }
+
+    function applyHeaderState(state, options = {}) {
+        const prevCompact = currentHeaderState === 'compact';
+        const prevRect = toggleBtn.getBoundingClientRect();
+        const nextState = normalizeHeaderState(state) || 'expanded';
+        const prevState = currentHeaderState;
+        const isBootstrap = !!(options && options.bootstrap === true);
+        const dock = currentHeaderDockSide === 'bottom' ? 'bottom' : 'top';
+
+        if (typeof window !== 'undefined' && prevCompact !== (nextState === 'compact')) {
+            window.dispatchEvent(new CustomEvent('header-compact-state-will-change', {
+                detail: { nextCompact: nextState === 'compact' }
+            }));
+        }
+
+        currentHeaderState = nextState;
+        document.body.classList.toggle('header-compact', nextState === 'compact');
+        if (nextState === 'compact') {
+            if (prevState !== 'compact') {
+                if (isBootstrap || compactLeftHasStoredByDock[dock]) {
+                    const dockLeft = compactLeftByDock[dock];
+                    setCompactToggleLeft(dockLeft, { persist: false });
+                } else {
+                    const centerX = prevRect && Number.isFinite(prevRect.left)
+                        ? (prevRect.left + prevRect.width / 2)
+                        : compactLeft;
+                    if (Number.isFinite(centerX)) {
+                        const alignedLeft = centerX - 15;
+                        setCompactToggleLeft(alignedLeft, { persist: false });
+                    }
+                }
+            } else {
+                setCompactToggleLeft(compactLeft, { persist: false });
+            }
+        }
+        if (!options || options.persist !== false) {
+            writeStorage(HEADER_COLLAPSE_STATE_KEY, nextState);
+        }
+
+        if (typeof window !== 'undefined' && prevCompact !== (nextState === 'compact')) {
+            try {
+                window.dispatchEvent(new CustomEvent('header-compact-state-changed', {
+                    detail: { compact: nextState === 'compact' }
+                }));
+            } catch (_) { }
+        }
+
+        updateToggleLabel(nextState);
+        return nextState;
+    }
+
+    function updateToggleIcon(state) {
+        const icon = toggleBtn.querySelector('i');
+        if (!icon) return;
+
+        icon.textContent = '';
+
+        const defaultPointTo = state === 'expanded'
+            ? (currentHeaderDockSide === 'top' ? 'up' : 'down')
+            : (currentHeaderDockSide === 'top' ? 'down' : 'up');
+
+        if (holdVisualActive) {
+            if (dragGuideDirection === 'up') {
+                icon.className = 'fas fa-chevron-up';
+                return;
+            }
+            if (dragGuideDirection === 'down') {
+                icon.className = 'fas fa-chevron-down';
+                return;
+            }
+        }
+
+        icon.className = `fas fa-chevron-${defaultPointTo}`;
+    }
+
+    function getHeaderToggleLabel(state) {
+        const lang = currentLang === 'en' ? 'en' : 'zh_CN';
+        if (state === 'compact') {
+            return i18n.headerToggleExpandTooltip[lang];
+        }
+        return i18n.headerToggleCollapseTooltip[lang];
+    }
+
+    function updateToggleLabel(state) {
+        const label = getHeaderToggleLabel(state);
+        toggleBtn.setAttribute('aria-label', label);
+        toggleBtn.setAttribute('aria-expanded', state === 'expanded' ? 'true' : 'false');
+        toggleBtn.dataset.collapseState = state;
+        updateToggleIcon(state);
+    }
+
+    function clearDragSession() {
+        clearHintHoldTimer();
+        setDragGuideDirection(null);
+
+        if (!dragSession) {
+            setHoldVisualActive(false);
+            return;
+        }
+
+        const { pointerId } = dragSession;
+        try {
+            if (toggleBtn.hasPointerCapture(pointerId)) {
+                toggleBtn.releasePointerCapture(pointerId);
+            }
+        } catch (_) { }
+
+        toggleBtn.classList.remove('header-toggle-show-hints');
+        setHoldVisualActive(false);
+        dragSession = null;
+    }
+
+    function setHeaderState(state) {
+        return applyHeaderState(state, { persist: true });
+    }
+
+    function toggleHeaderState() {
+        if (currentHeaderState === 'expanded') {
+            setHeaderState('compact');
+        } else {
+            setHeaderState('expanded');
+        }
+    }
+
+    function finishDrag(event, canceled) {
+        if (!dragSession || event.pointerId !== dragSession.pointerId) return;
+
+        const dx = event.clientX - dragSession.startX;
+        const dy = event.clientY - dragSession.startY;
+        const dragDistance = Math.hypot(dx, dy);
+        const moved = dragSession.moved || dragDistance >= TOGGLE_DRAG_ACTIVATE_THRESHOLD;
+        let consumed = false;
+        let switchedDock = false;
+
+        if (moved && !canceled) {
+            consumed = true;
+
+            if (Math.abs(dy) >= Math.abs(dx) && Math.abs(dy) >= TOGGLE_DOCK_SWITCH_THRESHOLD) {
+                const shouldDockBottom = dy > 0;
+                const nextDock = shouldDockBottom ? 'bottom' : 'top';
+                if (nextDock !== currentHeaderDockSide) {
+                    applyHeaderDockSide(nextDock, { persist: true });
+                    switchedDock = true;
+                }
+            }
+        }
+
+        clearDragSession();
+
+        if (consumed || switchedDock) {
+            suppressToggleClick = true;
+            window.setTimeout(() => {
+                suppressToggleClick = false;
+            }, 0);
+        }
+    }
+
+    function clearCompactDragSession() {
+        if (!compactDragSession) return;
+        const { pointerId } = compactDragSession;
+        try {
+            if (toggleBtn.hasPointerCapture(pointerId)) {
+                toggleBtn.releasePointerCapture(pointerId);
+            }
+        } catch (_) { }
+        compactDragSession = null;
+        setDragGuideDirection(null);
+        toggleBtn.classList.remove('header-toggle-show-hints');
+        setHoldVisualActive(false);
+        toggleBtn.classList.remove('header-toggle-dragging');
+    }
+
+    function finishCompactDrag(event, canceled) {
+        if (!compactDragSession || event.pointerId !== compactDragSession.pointerId) return;
+
+        const dx = event.clientX - compactDragSession.startX;
+        const dy = event.clientY - compactDragSession.startY;
+        const dragDistance = Math.hypot(dx, dy);
+        const moved = compactDragSession.moved || dragDistance >= COMPACT_DRAG_ACTIVATE_THRESHOLD;
+        let consumed = false;
+
+        if (!canceled && moved) {
+            const verticalDominant = Math.abs(dy) >= Math.abs(dx);
+            const shouldSwitchDock = verticalDominant && Math.abs(dy) >= TOGGLE_DOCK_SWITCH_THRESHOLD;
+
+            if (shouldSwitchDock) {
+                const nextDock = dy > 0 ? 'bottom' : 'top';
+                applyHeaderDockSide(nextDock, { persist: true });
+                consumed = true;
+            } else {
+                const nextLeft = compactDragSession.lastAppliedLeft;
+                setCompactToggleLeft(nextLeft, { persist: true });
+                consumed = true;
+            }
+        }
+
+        clearCompactDragSession();
+
+        if (consumed) {
+            suppressToggleClick = true;
+            window.setTimeout(() => {
+                suppressToggleClick = false;
+            }, 0);
+        }
+    }
+
+    const savedDock = normalizeHeaderDockSide(readStorage(HEADER_DOCK_SIDE_KEY)) || 'top';
+    const savedState = normalizeHeaderState(readStorage(HEADER_COLLAPSE_STATE_KEY)) || 'expanded';
+    const legacyLeft = normalizeCompactLeft(readStorage(HEADER_COMPACT_LEFT_KEY));
+    const savedTopLeft = readCompactLeftByDock('top');
+    const savedBottomLeft = readCompactLeftByDock('bottom');
+    const fallbackLeft = legacyLeft == null
+        ? clamp(COMPACT_LEFT_DEFAULT, COMPACT_LEFT_MIN, getCompactLeftMax())
+        : legacyLeft;
+
+    compactLeftByDock.top = savedTopLeft == null ? fallbackLeft : savedTopLeft;
+    compactLeftByDock.bottom = savedBottomLeft == null ? fallbackLeft : savedBottomLeft;
+    compactLeftHasStoredByDock.top = savedTopLeft != null || legacyLeft != null;
+    compactLeftHasStoredByDock.bottom = savedBottomLeft != null || legacyLeft != null;
+    compactLeft = savedDock === 'bottom' ? compactLeftByDock.bottom : compactLeftByDock.top;
+
+    if (savedTopLeft == null) {
+        writeStorage(HEADER_COMPACT_LEFT_TOP_KEY, String(compactLeftByDock.top));
+    }
+    if (savedBottomLeft == null) {
+        writeStorage(HEADER_COMPACT_LEFT_BOTTOM_KEY, String(compactLeftByDock.bottom));
+    }
+
+    ensureToggleHints();
+    applyHeaderDockSide(savedDock, { persist: false });
+    applyHeaderState(savedState, { persist: false, bootstrap: true });
+    setCompactToggleLeft(compactLeft, { persist: false });
+
+    window.addEventListener('resize', () => {
+        setCompactToggleLeft(compactLeft, { persist: false });
+    });
+
+    toggleBtn.addEventListener('click', (event) => {
+        if (suppressToggleClick) {
+            suppressToggleClick = false;
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+
+        event.stopPropagation();
+        toggleHeaderState();
+    });
+
+    toggleBtn.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+
+        if (currentHeaderState === 'compact') {
+            compactDragSession = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                startLeft: compactLeft,
+                moved: false,
+                pendingLeft: compactLeft,
+                lastAppliedLeft: compactLeft
+            };
+
+            try {
+                toggleBtn.setPointerCapture(event.pointerId);
+            } catch (_) { }
+
+            toggleBtn.classList.remove('header-toggle-dragging');
+            event.preventDefault();
+            return;
+        }
+
+        dragSession = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            moved: false
+        };
+
+        try {
+            toggleBtn.setPointerCapture(event.pointerId);
+        } catch (_) { }
+
+        setDragGuideDirection(null);
+        toggleBtn.classList.remove('header-toggle-show-hints');
+        setHoldVisualActive(false);
+        scheduleHintReveal();
+        event.preventDefault();
+    });
+
+    toggleBtn.addEventListener('pointermove', (event) => {
+        if (compactDragSession && event.pointerId === compactDragSession.pointerId) {
+            const dx = event.clientX - compactDragSession.startX;
+            const dy = event.clientY - compactDragSession.startY;
+            const dragDistance = Math.hypot(dx, dy);
+            if (!compactDragSession.moved && dragDistance >= COMPACT_DRAG_ACTIVATE_THRESHOLD) {
+                compactDragSession.moved = true;
+                toggleBtn.classList.add('header-toggle-dragging');
+            }
+            if (!compactDragSession.moved) return;
+
+            const verticalDominant = Math.abs(dy) >= Math.abs(dx);
+            const switchingDock = verticalDominant && Math.abs(dy) >= TOGGLE_DOCK_SWITCH_THRESHOLD;
+            if (switchingDock) {
+                setDragGuideDirection(dy > 0 ? 'down' : 'up');
+                toggleBtn.classList.add('header-toggle-show-hints');
+                setHoldVisualActive(true);
+                event.preventDefault();
+                return;
+            }
+
+            setDragGuideDirection(null);
+            toggleBtn.classList.remove('header-toggle-show-hints');
+            setHoldVisualActive(false);
+
+            const targetLeft = compactDragSession.startLeft + dx;
+            compactDragSession.pendingLeft = targetLeft;
+            compactDragSession.lastAppliedLeft = setCompactToggleLeft(targetLeft, { persist: false });
+            event.preventDefault();
+            return;
+        }
+
+        if (!dragSession || event.pointerId !== dragSession.pointerId) return;
+
+        const dx = event.clientX - dragSession.startX;
+        const dy = event.clientY - dragSession.startY;
+        const dragDistance = Math.hypot(dx, dy);
+
+        if (!dragSession.moved && dragDistance >= TOGGLE_DRAG_ACTIVATE_THRESHOLD) {
+            dragSession.moved = true;
+            clearHintHoldTimer();
+            toggleBtn.classList.add('header-toggle-show-hints');
+            setHoldVisualActive(true);
+        }
+        if (!dragSession.moved) return;
+
+        setDragGuideDirection(getDragGuideDirection(dx, dy));
+    });
+
+    toggleBtn.addEventListener('pointerup', (event) => {
+        if (compactDragSession && event.pointerId === compactDragSession.pointerId) {
+            finishCompactDrag(event, false);
+            return;
+        }
+        finishDrag(event, false);
+    });
+    toggleBtn.addEventListener('pointercancel', (event) => {
+        if (compactDragSession && event.pointerId === compactDragSession.pointerId) {
+            finishCompactDrag(event, true);
+            return;
+        }
+        finishDrag(event, true);
+    });
 }
 
 // =============================================================================
@@ -6273,6 +6917,7 @@ function renderCurrentView() {
                             window.CanvasModule.init();
                         }
                         updateSidePanelFloatingToolsDisplay();
+                        bindCanvasPreloadRelease();
 
                         // 标记Canvas已初始化
                         if (canvasView) {
@@ -6305,6 +6950,7 @@ function renderCurrentView() {
                                 window.CanvasModule.init();
                             }
                             updateSidePanelFloatingToolsDisplay();
+                            bindCanvasPreloadRelease();
                             if (canvasView) {
                                 canvasView.dataset.initialized = 'true';
                                 canvasView.dataset.initTime = Date.now().toString();
@@ -6313,6 +6959,7 @@ function renderCurrentView() {
                             console.error('[Canvas] 重新初始化失败:', reinitError);
                         }
                     } else {
+                        bindCanvasPreloadRelease();
                         // 触发视口休眠管理，唤醒可见栏目
                         if (window.CanvasModule && window.CanvasModule.scheduleDormancyUpdate) {
                             // 延迟执行，确保视图切换完成
@@ -6332,6 +6979,9 @@ function renderCurrentView() {
                 }
 
             }
+            break;
+        default:
+            clearLayoutPreloadState();
             break;
     }
 }

@@ -22,6 +22,11 @@
     z-index: 200;
 }
 
+body.header-dock-bottom:not(.header-compact) .search-results-panel {
+    top: auto;
+    bottom: calc(100% + 10px);
+}
+
 /* [User Request] Fix scrollbar corner transition by adding track margin */
 .search-results-panel::-webkit-scrollbar {
     width: 10px;

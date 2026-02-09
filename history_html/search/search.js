@@ -1682,6 +1682,12 @@ function toggleSearchModeMenu(show) {
     const shouldShow = (typeof show === 'boolean') ? show : menu.hasAttribute('hidden');
 
     if (shouldShow) {
+        try {
+            const dock = document.body && document.body.classList.contains('header-dock-bottom')
+                ? 'bottom'
+                : 'top';
+            menu.dataset.dock = dock;
+        } catch (_) { }
         menu.removeAttribute('hidden');
         menu.dataset.menuType = 'mode';
         renderSearchModeMenu();
@@ -1699,6 +1705,12 @@ function toggleSearchHelpMenu(show) {
     const shouldShow = (typeof show === 'boolean') ? show : menu.hasAttribute('hidden');
 
     if (shouldShow) {
+        try {
+            const dock = document.body && document.body.classList.contains('header-dock-bottom')
+                ? 'bottom'
+                : 'top';
+            menu.dataset.dock = dock;
+        } catch (_) { }
         menu.removeAttribute('hidden');
         menu.dataset.menuType = 'help';
         renderSearchHelpMenu();

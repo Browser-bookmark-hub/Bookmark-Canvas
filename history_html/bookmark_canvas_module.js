@@ -18,6 +18,7 @@ const MD_NODE_DEFAULT_FONT_SIZE = 20;
 const MD_NODE_LEGACY_DEFAULT_FONT_SIZE = 14;
 const TEMP_DESC_HEIGHT_SETTINGS_KEY = 'canvas-temp-desc-height-settings-v1';
 const PERMANENT_DESC_HEIGHT_SETTINGS_KEY = 'canvas-permanent-desc-height-settings-v1';
+const CANVAS_SCROLLBAR_PRELOAD_KEY = 'canvas-scrollbar-preload-v1';
 const CANVAS_BROOM_SVG = '<svg class="canvas-broom-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3.55 21H6v-2q0-.425.288-.712T7 18t.713.288T8 19v2h3v-2q0-.425.288-.712T12 18t.713.288T13 19v2h3v-2q0-.425.288-.712T17 18t.713.288T18 19v2h2.45l-1-4H4.55zm16.9 2H3.55q-.975 0-1.575-.775t-.35-1.725L3 15v-2q0-.825.588-1.412T5 11h4V4q0-1.25.875-2.125T12 1t2.125.875T15 4v7h4q.825 0 1.413.588T21 13v2l1.375 5.5q.325.95-.288 1.725T20.45 23"/></svg>';
 
 // 统一的首屏初始缩放：让 HTML 不需要再手动同步数值
@@ -808,6 +809,7 @@ const CANVAS_SCROLL_MARGIN = 120;
 const CANVAS_SCROLL_EXTRA_SPACE = 2000; // 允许滚动到内容外2000px的空白区域
 let suppressScrollSync = false;
 let zoomSaveTimeout = null;
+let scrollbarPreloadSaveTimeout = null;
 let zoomUpdateFrame = null;
 let pendingZoomRequest = null;
 // 性能优化：滚动更新去抖（RAF）
@@ -9155,6 +9157,35 @@ function persistCanvasScrollPreferences() {
     }
 }
 
+function persistCanvasScrollbarPreloadState() {
+    try {
+        const payload = {
+            panX: Number.isFinite(CanvasState.panOffsetX) ? CanvasState.panOffsetX : 0,
+            panY: Number.isFinite(CanvasState.panOffsetY) ? CanvasState.panOffsetY : 0,
+            horizontal: {
+                min: Number.isFinite(CanvasState.scrollBounds.horizontal?.min) ? CanvasState.scrollBounds.horizontal.min : 0,
+                max: Number.isFinite(CanvasState.scrollBounds.horizontal?.max) ? CanvasState.scrollBounds.horizontal.max : 0
+            },
+            vertical: {
+                min: Number.isFinite(CanvasState.scrollBounds.vertical?.min) ? CanvasState.scrollBounds.vertical.min : 0,
+                max: Number.isFinite(CanvasState.scrollBounds.vertical?.max) ? CanvasState.scrollBounds.vertical.max : 0
+            },
+            ts: Date.now()
+        };
+        localStorage.setItem(CANVAS_SCROLLBAR_PRELOAD_KEY, JSON.stringify(payload));
+    } catch (_) { }
+}
+
+function persistCanvasScrollbarPreloadStateThrottled() {
+    if (scrollbarPreloadSaveTimeout) {
+        clearTimeout(scrollbarPreloadSaveTimeout);
+    }
+    scrollbarPreloadSaveTimeout = setTimeout(() => {
+        persistCanvasScrollbarPreloadState();
+        scrollbarPreloadSaveTimeout = null;
+    }, 120);
+}
+
 function setupCanvasScrollbars() {
     const verticalBar = document.getElementById('canvasVerticalScrollbar');
     const horizontalBar = document.getElementById('canvasHorizontalScrollbar');
@@ -10244,6 +10275,8 @@ function updateScrollbarThumbsLightweight() {
             }
         }
     }
+
+    persistCanvasScrollbarPreloadStateThrottled();
 }
 
 function adjustDragReferenceForPan(panDeltaX, panDeltaY, clientX, clientY) {
@@ -10995,6 +11028,8 @@ function updateScrollbarThumbs() {
             }
         }
     }
+
+    persistCanvasScrollbarPreloadStateThrottled();
 }
 
 // =============================================================================
@@ -29997,6 +30032,19 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
 
     // Restore maximized node state after all nodes are rendered
     __tryRestoreMaximizedNode({ clearIfMissing: true });
+
+    // 通知首屏预置：Canvas 初始布局（含滚动条位置）已经就绪
+    try {
+        requestAnimationFrame(() => {
+            try { updateCanvasScrollBounds({ initial: false, recomputeBounds: false }); } catch (_) { }
+            try { updateScrollbarThumbs(); } catch (_) { }
+            requestAnimationFrame(() => {
+                try { updateCanvasScrollBounds({ initial: false, recomputeBounds: false }); } catch (_) { }
+                try { updateScrollbarThumbs(); } catch (_) { }
+                try { window.dispatchEvent(new CustomEvent('canvas-initial-layout-ready')); } catch (_) { }
+            });
+        });
+    } catch (_) { }
 }
 
 function __tryRestoreTempNodesFromChromeStorage() {

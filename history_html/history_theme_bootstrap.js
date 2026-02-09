@@ -21,3 +21,263 @@
     else document.documentElement.removeAttribute('data-theme');
   } catch (_) {}
 })();
+
+// Apply layout state early to avoid sidebar/header/floating flash on refresh
+(function () {
+  try {
+    const root = document.documentElement;
+    if (!root) return;
+
+    const readStorage = (key) => {
+      try {
+        return localStorage.getItem(key);
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const clamp = (value, min, max) => {
+      return Math.min(max, Math.max(min, value));
+    };
+
+    const normalizeSidebarState = (raw) => {
+      const value = String(raw || '').toLowerCase();
+      if (value === 'collapsed') return 'compact';
+      return value === 'compact' ? 'compact' : (value === 'expanded' ? 'expanded' : null);
+    };
+
+    const normalizeHeaderState = (raw) => {
+      const value = String(raw || '').toLowerCase();
+      return value === 'compact' ? 'compact' : 'expanded';
+    };
+
+    const normalizeHeaderDock = (raw) => {
+      return String(raw || '').toLowerCase() === 'bottom' ? 'bottom' : 'top';
+    };
+
+    const normalizeSidebarDock = (raw) => {
+      return String(raw || '').toLowerCase() === 'right' ? 'right' : 'left';
+    };
+
+    const normalizeSidebarWidth = (raw) => {
+      const value = Number(raw);
+      if (!Number.isFinite(value)) return null;
+      return clamp(Math.round(value), 180, 560);
+    };
+
+    const normalizeAutoCollapseWidth = (raw) => {
+      const value = Number(raw);
+      if (!Number.isFinite(value)) return 600;
+      return clamp(Math.round(value), 320, 2000);
+    };
+
+    const normalizeCompactLeft = (raw) => {
+      const value = Number(raw);
+      if (!Number.isFinite(value)) return null;
+      const max = Math.max(0, (window.innerWidth || 0) - 40);
+      return clamp(Math.round(value), 0, max);
+    };
+
+    const SIDE_PANEL_FLOATING_TOOLS_MODES = {
+      NONE: 'none',
+      HIDDEN: 'hidden',
+      SHOWN: 'shown'
+    };
+
+    const normalizeFloatingToolsMode = (mode) => {
+      return mode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE
+        || mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN
+        || mode === SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN
+        ? mode
+        : SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+    };
+
+    const getInitialFloatingToolsMode = (isSidePanel) => {
+      try {
+        if (isSidePanel) {
+          const savedMode = readStorage('sidepanelFloatingToolsMode');
+          if (savedMode) return normalizeFloatingToolsMode(savedMode);
+          const legacy = readStorage('sidepanelFloatingToolsVisible');
+          return legacy === 'true'
+            ? SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN
+            : SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+        }
+        const canvasMode = readStorage('canvasFloatingToolsMode');
+        if (canvasMode) return normalizeFloatingToolsMode(canvasMode);
+        return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
+      } catch (_) {
+        return isSidePanel
+          ? SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN
+          : SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
+      }
+    };
+
+    const getInitialCanvasScrollbarHiddenState = () => {
+      const out = {
+        // 与 CanvasState.scrollState 默认值保持一致
+        verticalHidden: true,
+        horizontalHidden: true
+      };
+      try {
+        const raw = readStorage('canvas-scroll-preferences');
+        if (!raw) return out;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          const vertical = parsed.vertical;
+          const horizontal = parsed.horizontal;
+          if (vertical && typeof vertical === 'object' && typeof vertical.hidden === 'boolean') {
+            out.verticalHidden = vertical.hidden;
+          }
+          if (horizontal && typeof horizontal === 'object' && typeof horizontal.hidden === 'boolean') {
+            out.horizontalHidden = horizontal.hidden;
+          }
+        }
+      } catch (_) { }
+      return out;
+    };
+
+    const getInitialCanvasScrollbarThumbPositionState = () => {
+      const out = {
+        verticalRatio: null,
+        horizontalRatio: null
+      };
+
+      try {
+        const raw = readStorage('canvas-scrollbar-preload-v1');
+        if (!raw) return out;
+
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return out;
+
+        const ts = Number(parsed.ts || 0);
+        // 仅使用较新的状态，避免历史过旧数据导致错误预置
+        if (!Number.isFinite(ts) || (Date.now() - ts) > 7 * 24 * 60 * 60 * 1000) {
+          return out;
+        }
+
+        const panX = Number(parsed.panX);
+        const panY = Number(parsed.panY);
+        const hMin = Number(parsed.horizontal && parsed.horizontal.min);
+        const hMax = Number(parsed.horizontal && parsed.horizontal.max);
+        const vMin = Number(parsed.vertical && parsed.vertical.min);
+        const vMax = Number(parsed.vertical && parsed.vertical.max);
+
+        if (Number.isFinite(panX) && Number.isFinite(hMin) && Number.isFinite(hMax) && hMax !== hMin) {
+          const ratioX = (hMax - panX) / (hMax - hMin);
+          out.horizontalRatio = clamp(ratioX, 0, 1);
+        }
+
+        if (Number.isFinite(panY) && Number.isFinite(vMin) && Number.isFinite(vMax) && vMax !== vMin) {
+          const ratioY = (vMax - panY) / (vMax - vMin);
+          out.verticalRatio = clamp(ratioY, 0, 1);
+        }
+      } catch (_) { }
+
+      return out;
+    };
+
+    const params = new URLSearchParams(window.location.search || '');
+    const sidePanelFlag = params.get('sidepanel') || params.get('side_panel') || params.get('panel');
+    const isSidePanelMode = sidePanelFlag === '1' || sidePanelFlag === 'true';
+    if (isSidePanelMode) {
+      root.classList.add('side-panel-mode');
+    }
+
+    const viewFromUrl = params.get('view');
+    const viewFromStorage = readStorage('lastActiveView');
+    const initialView = viewFromUrl || viewFromStorage || 'canvas';
+    root.classList.toggle('canvas-view-active', initialView === 'canvas');
+
+    const initialFloatingMode = getInitialFloatingToolsMode(isSidePanelMode);
+    if (initialView === 'canvas' && initialFloatingMode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN) {
+      root.classList.add('layout-preload-floating-hidden');
+    }
+
+    if (initialView === 'canvas') {
+      const scrollbarHiddenState = getInitialCanvasScrollbarHiddenState();
+      if (scrollbarHiddenState.verticalHidden) {
+        root.classList.add('layout-preload-canvas-scrollbar-vertical-hidden');
+      }
+      if (scrollbarHiddenState.horizontalHidden) {
+        root.classList.add('layout-preload-canvas-scrollbar-horizontal-hidden');
+      }
+
+      const scrollbarThumbPosition = getInitialCanvasScrollbarThumbPositionState();
+      if (scrollbarThumbPosition.verticalRatio != null) {
+        root.style.setProperty('--canvas-scrollbar-preload-vertical-ratio', String(scrollbarThumbPosition.verticalRatio));
+      }
+      if (scrollbarThumbPosition.horizontalRatio != null) {
+        root.style.setProperty('--canvas-scrollbar-preload-horizontal-ratio', String(scrollbarThumbPosition.horizontalRatio));
+      }
+    }
+
+    const headerState = normalizeHeaderState(readStorage('headerCollapseState'));
+    const headerDock = normalizeHeaderDock(readStorage('headerDockSide'));
+    if (headerState === 'compact') root.classList.add('layout-preload-header-compact');
+    if (headerDock === 'bottom') root.classList.add('layout-preload-header-dock-bottom');
+
+    const legacyCompactLeft = normalizeCompactLeft(readStorage('headerCompactToggleLeft'));
+    const topCompactLeft = normalizeCompactLeft(readStorage('headerCompactToggleLeftTop'));
+    const bottomCompactLeft = normalizeCompactLeft(readStorage('headerCompactToggleLeftBottom'));
+    const fallbackCompactLeft = legacyCompactLeft == null ? 18 : legacyCompactLeft;
+    const dockCompactLeft = headerDock === 'bottom'
+      ? (bottomCompactLeft == null ? fallbackCompactLeft : bottomCompactLeft)
+      : (topCompactLeft == null ? fallbackCompactLeft : topCompactLeft);
+    root.style.setProperty('--header-toggle-compact-left', String(dockCompactLeft) + 'px');
+
+    let collapseMode = 'auto';
+    let autoCollapseWidth = 600;
+    try {
+      const otherRaw = readStorage('canvas-other-settings-v1');
+      if (otherRaw) {
+        const other = JSON.parse(otherRaw);
+        if (other && typeof other === 'object') {
+          const mode = String(other.directoryCollapseMode || '').toLowerCase();
+          if (mode === 'manual' || mode === 'auto') collapseMode = mode;
+          autoCollapseWidth = normalizeAutoCollapseWidth(other.directoryAutoCollapseWidth);
+        }
+      }
+    } catch (_) { }
+
+    const persistedSidebarState = (() => {
+      const savedState = normalizeSidebarState(readStorage('sidebarCollapseState'));
+      if (savedState) return savedState;
+      return readStorage('sidebarCollapsed') === 'true' ? 'compact' : 'expanded';
+    })();
+
+    const hasManualOverride = readStorage('sidebarManualOverride') === 'true';
+    const sidebarDock = normalizeSidebarDock(readStorage('sidebarDockSide'));
+
+    let initialSidebarState = 'compact';
+    if (!isSidePanelMode) {
+      if (collapseMode === 'manual') {
+        initialSidebarState = persistedSidebarState;
+      } else if (hasManualOverride) {
+        initialSidebarState = persistedSidebarState;
+      } else {
+        initialSidebarState = (window.innerWidth <= autoCollapseWidth) ? 'compact' : 'expanded';
+      }
+    }
+
+    const expandedWidthKey = sidebarDock === 'right'
+      ? 'sidebarExpandedWidthRight'
+      : 'sidebarExpandedWidthLeft';
+    const expandedWidth = normalizeSidebarWidth(readStorage(expandedWidthKey)) || 260;
+    const effectiveWidth = initialSidebarState === 'compact' ? 0 : expandedWidth;
+    const widthPx = String(Math.max(0, Math.round(effectiveWidth))) + 'px';
+
+    if (initialSidebarState === 'compact') root.classList.add('layout-preload-sidebar-compact');
+    if (sidebarDock === 'right') root.classList.add('layout-preload-sidebar-right');
+
+    root.style.setProperty('--sidebar-width', widthPx);
+    if (sidebarDock === 'right') {
+      root.style.setProperty('--content-area-left', '0px');
+      root.style.setProperty('--content-area-right', widthPx);
+    } else {
+      root.style.setProperty('--content-area-left', widthPx);
+      root.style.setProperty('--content-area-right', '0px');
+    }
+
+    root.classList.add('layout-preload-active');
+  } catch (_) { }
+})();
