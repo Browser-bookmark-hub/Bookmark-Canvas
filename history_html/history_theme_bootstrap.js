@@ -219,11 +219,15 @@
     const legacyCompactLeft = normalizeCompactLeft(readStorage('headerCompactToggleLeft'));
     const topCompactLeft = normalizeCompactLeft(readStorage('headerCompactToggleLeftTop'));
     const bottomCompactLeft = normalizeCompactLeft(readStorage('headerCompactToggleLeftBottom'));
-    const fallbackCompactLeft = legacyCompactLeft == null ? 18 : legacyCompactLeft;
-    const dockCompactLeft = headerDock === 'bottom'
-      ? (bottomCompactLeft == null ? fallbackCompactLeft : bottomCompactLeft)
-      : (topCompactLeft == null ? fallbackCompactLeft : topCompactLeft);
-    root.style.setProperty('--header-toggle-compact-left', String(dockCompactLeft) + 'px');
+    const fallbackCompactLeft = 18;
+    const preferredDockLeft = headerDock === 'bottom' ? bottomCompactLeft : topCompactLeft;
+    const alternateDockLeft = headerDock === 'bottom' ? topCompactLeft : bottomCompactLeft;
+    const mirroredCompactLeft = legacyCompactLeft != null
+      ? legacyCompactLeft
+      : (preferredDockLeft != null
+        ? preferredDockLeft
+        : (alternateDockLeft != null ? alternateDockLeft : fallbackCompactLeft));
+    root.style.setProperty('--header-toggle-compact-left', String(mirroredCompactLeft) + 'px');
 
     let collapseMode = 'auto';
     let autoCollapseWidth = 600;
