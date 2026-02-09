@@ -8,7 +8,7 @@
     try {
       localStorage.removeItem('historyViewerHasCustomTheme');
       localStorage.removeItem('historyViewerCustomTheme');
-    } catch (_) {}
+    } catch (_) { }
 
     const pref = localStorage.getItem('themePreference');
     const prefersDark = window.matchMedia
@@ -19,7 +19,7 @@
 
     if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
     else document.documentElement.removeAttribute('data-theme');
-  } catch (_) {}
+  } catch (_) { }
 })();
 
 // Apply layout state early to avoid sidebar/header/floating flash on refresh
@@ -281,6 +281,22 @@
       root.style.setProperty('--content-area-left', widthPx);
       root.style.setProperty('--content-area-right', '0px');
     }
+
+    try {
+      const dockRaw = readStorage('canvasFloatingToolsDockV1');
+      if (dockRaw) {
+        const parsed = JSON.parse(dockRaw);
+        if (parsed && parsed.edge) {
+          const edge = String(parsed.edge).toLowerCase();
+          if (['left', 'right', 'top', 'bottom'].includes(edge)) {
+            root.classList.add('preload-canvas-floating-dock-' + edge);
+            if (Number.isFinite(parsed.ratio)) {
+              root.style.setProperty('--preload-canvas-floating-dock-ratio', String(parsed.ratio));
+            }
+          }
+        }
+      }
+    } catch (_) { }
 
     root.classList.add('layout-preload-active');
   } catch (_) { }

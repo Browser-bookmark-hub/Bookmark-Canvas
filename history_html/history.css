@@ -272,23 +272,24 @@ html.layout-preload-active.layout-preload-header-compact .history-header .header
 
 html.layout-preload-active.layout-preload-header-compact .history-header .header-toggle-btn {
     position: fixed;
-    left: var(--header-toggle-compact-left, 18px);
-    top: 14px;
-    width: 30px;
-    height: 30px;
-    min-width: 30px;
-    min-height: 30px;
-    border-radius: 50%;
-    border: 1px solid var(--border-color);
-    background: var(--bg-secondary);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    left: var(--header-toggle-compact-left, 24px);
+    top: 0;
+    width: 24px;
+    height: 18px;
+    min-width: 0;
+    min-height: 0;
+    border-radius: 0 0 4px 4px;
+    border: none;
+    background: transparent;
+    box-shadow: none;
     pointer-events: auto;
     z-index: 320;
 }
 
 html.layout-preload-active.layout-preload-header-compact.layout-preload-header-dock-bottom .history-header .header-toggle-btn {
     top: auto;
-    bottom: 14px;
+    bottom: 0;
+    border-radius: 4px 4px 0 0;
 }
 
 html.layout-preload-active.layout-preload-header-dock-bottom:not(.layout-preload-header-compact) .history-header {
@@ -306,8 +307,9 @@ html.layout-preload-active.layout-preload-header-dock-bottom:not(.layout-preload
 
 html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden #canvasZoomIndicator {
     display: block !important;
+    /* Default: left dock, centered */
     left: 0;
-    top: 20px;
+    top: calc(100% * var(--preload-canvas-floating-dock-ratio, 0.5));
     width: 0;
     min-width: 0;
     height: 0;
@@ -320,6 +322,30 @@ html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden #ca
     overflow: visible;
 }
 
+/* Preload indicator position: Right Dock */
+html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden.preload-canvas-floating-dock-right #canvasZoomIndicator {
+    left: 100%;
+    top: calc(100% * var(--preload-canvas-floating-dock-ratio, 0.5));
+}
+
+/* Preload indicator position: Top Dock */
+html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden.preload-canvas-floating-dock-top #canvasZoomIndicator {
+    left: calc(100% * var(--preload-canvas-floating-dock-ratio, 0.5));
+    top: 0;
+}
+
+/* Preload indicator position: Bottom Dock */
+html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden.preload-canvas-floating-dock-bottom #canvasZoomIndicator {
+    left: calc(100% * var(--preload-canvas-floating-dock-ratio, 0.5));
+    top: 100%;
+}
+
+/* Preload indicator position: Left Dock (explicit) */
+html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden.preload-canvas-floating-dock-left #canvasZoomIndicator {
+    left: 0;
+    top: calc(100% * var(--preload-canvas-floating-dock-ratio, 0.5));
+}
+
 html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden #canvasZoomIndicator .canvas-zoom-header,
 html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden #canvasZoomIndicator .canvas-zoom-controls {
     opacity: 0;
@@ -328,11 +354,60 @@ html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden #ca
     pointer-events: none;
 }
 
-html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden #canvasFloatingToggleMini {
+html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden .canvas-floating-toggle-mini {
     display: inline-flex !important;
     opacity: 1;
     pointer-events: auto;
+    /* Default fallback: Left, Centered */
+    left: 4px;
+    top: 0;
+    width: 18px;
+    height: 24px;
     transform: translate(0, -50%);
+    border-radius: 0 4px 4px 0;
+}
+
+/* Preload mini toggle: Right Dock */
+html.layout-preload-active.canvas-view-active.preload-canvas-floating-dock-right .canvas-floating-toggle-mini {
+    left: auto;
+    right: 4px;
+    width: 18px;
+    height: 24px;
+    top: 0;
+    transform: translate(0, -50%);
+    border-radius: 4px 0 0 4px;
+}
+
+/* Preload mini toggle: Top Dock */
+html.layout-preload-active.canvas-view-active.preload-canvas-floating-dock-top .canvas-floating-toggle-mini {
+    top: 4px;
+    bottom: auto;
+    left: 0;
+    width: 24px;
+    height: 18px;
+    transform: translate(-50%, 0);
+    border-radius: 0 0 4px 4px;
+}
+
+/* Preload mini toggle: Bottom Dock */
+html.layout-preload-active.canvas-view-active.preload-canvas-floating-dock-bottom .canvas-floating-toggle-mini {
+    top: auto;
+    bottom: 4px;
+    left: 0;
+    width: 24px;
+    height: 18px;
+    transform: translate(-50%, 0);
+    border-radius: 4px 4px 0 0;
+}
+
+/* Preload mini toggle: Left Dock (explicit) */
+html.layout-preload-active.canvas-view-active.preload-canvas-floating-dock-left .canvas-floating-toggle-mini {
+    left: 4px;
+    width: 18px;
+    height: 24px;
+    top: 0;
+    transform: translate(0, -50%);
+    border-radius: 0 4px 4px 0;
 }
 
 html.layout-preload-active.canvas-view-active.layout-preload-canvas-scrollbar-vertical-hidden #canvasVerticalScrollbar {
@@ -576,23 +651,90 @@ body.header-compact .history-header .header-left {
 
 body.header-compact .history-header .header-toggle-btn {
     position: fixed;
-    left: var(--header-toggle-compact-left, 18px);
-    top: 14px;
-    width: 30px;
-    height: 30px;
-    min-width: 30px;
-    min-height: 30px;
-    border-radius: 50%;
-    border: 1px solid var(--border-color);
-    background: var(--bg-secondary);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    left: var(--header-toggle-compact-left, 24px);
+    top: 0;
+
+    width: 24px;
+    height: 18px;
+    min-width: 0;
+    min-height: 0;
+
+    border-radius: 0 0 4px 4px;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+
     pointer-events: auto;
     z-index: 320;
+
+    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        opacity 0.15s ease,
+        box-shadow 0.15s ease,
+        background 0.15s ease,
+        color 0.15s ease,
+        width 0.2s ease,
+        height 0.2s ease,
+        border-radius 0.2s ease,
+        border-color 0.2s ease,
+        top 0.2s ease,
+        bottom 0.2s ease;
+}
+
+body.header-compact .history-header .header-toggle-btn:hover,
+body.header-compact .history-header .header-toggle-btn:focus-visible {
+    top: 8px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
+
+    transform: scale(1.05);
+}
+
+body.header-compact .history-header .header-toggle-btn::before {
+    content: "";
+    position: absolute;
+    left: -16px;
+    top: -8px;
+    width: 56px;
+    height: 56px;
+    background: transparent;
+    pointer-events: auto;
+    border-radius: 0;
+}
+
+body.header-compact .history-header .header-toggle-btn:hover::before,
+body.header-compact .history-header .header-toggle-btn:focus-visible::before {
+    left: -12px;
+    top: -10px;
+    width: 56px;
+    height: 56px;
 }
 
 body.header-compact.header-dock-bottom .history-header .header-toggle-btn {
     top: auto;
-    bottom: 14px;
+    bottom: 0;
+    border-radius: 4px 4px 0 0;
+}
+
+body.header-compact.header-dock-bottom .history-header .header-toggle-btn:hover,
+body.header-compact.header-dock-bottom .history-header .header-toggle-btn:focus-visible {
+    top: auto;
+    bottom: 8px;
+}
+
+body.header-compact.header-dock-bottom .history-header .header-toggle-btn::before {
+    top: auto;
+    bottom: -8px;
+}
+
+body.header-compact.header-dock-bottom .history-header .header-toggle-btn:hover::before,
+body.header-compact.header-dock-bottom .history-header .header-toggle-btn:focus-visible::before {
+    top: auto;
+    bottom: -10px;
 }
 
 body.header-dock-bottom:not(.header-compact) .history-header {
@@ -1430,7 +1572,7 @@ body.header-dock-bottom:not(.header-compact) .floating-tools-mode-panel {
     transition: background 0.15s ease, color 0.15s ease;
 }
 
-.floating-tools-mode-btn + .floating-tools-mode-btn {
+.floating-tools-mode-btn+.floating-tools-mode-btn {
     border-left: 1px solid var(--border-color);
 }
 
@@ -1515,7 +1657,7 @@ body.header-dock-bottom:not(.header-compact) .floating-tools-mode-panel {
     background: var(--bg-tertiary);
 }
 
-.settings-storage-block .settings-storage-split-btn + .settings-storage-split-btn {
+.settings-storage-block .settings-storage-split-btn+.settings-storage-split-btn {
     border-left: 1px solid var(--border-color);
     border-radius: 0 8px 8px 0;
 }
@@ -2165,6 +2307,7 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 }
 
 @keyframes sidebar-toggle-hint-breathe {
+
     0%,
     100% {
         opacity: 0.86;
@@ -2184,6 +2327,7 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 }
 
 @keyframes sidebar-toggle-hint-ripple {
+
     0%,
     100% {
         opacity: 0.54;
@@ -2447,7 +2591,7 @@ body.sidebar-resizing * {
     gap: 1px;
 }
 
-.canvas-dir-root > .canvas-dir-folder + .canvas-dir-folder {
+.canvas-dir-root>.canvas-dir-folder+.canvas-dir-folder {
     margin-top: 8px;
     padding-top: 6px;
     border-top: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
@@ -2461,7 +2605,7 @@ body.sidebar-resizing * {
     position: relative;
 }
 
-.canvas-dir-folder > summary {
+.canvas-dir-folder>summary {
     list-style: none;
     display: flex;
     align-items: center;
@@ -2476,40 +2620,40 @@ body.sidebar-resizing * {
     position: relative;
 }
 
-.canvas-dir-folder[data-node-key="folder-permanent"] > summary {
+.canvas-dir-folder[data-node-key="folder-permanent"]>summary {
     color: var(--canvas-dir-color-permanent, var(--quick-add-permanent-color, var(--text-secondary)));
 }
 
-.canvas-dir-folder[data-node-key="folder-temporary"] > summary,
-.canvas-dir-folder[data-node-key="folder-temp-split"] > summary {
+.canvas-dir-folder[data-node-key="folder-temporary"]>summary,
+.canvas-dir-folder[data-node-key="folder-temp-split"]>summary {
     color: var(--canvas-dir-color-temp, var(--text-secondary));
 }
 
-.canvas-dir-folder[data-node-key="folder-temp-special"] > summary {
+.canvas-dir-folder[data-node-key="folder-temp-special"]>summary {
     color: var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, var(--text-secondary)));
 }
 
-.canvas-dir-folder[data-node-key="folder-blank"] > summary {
+.canvas-dir-folder[data-node-key="folder-blank"]>summary {
     color: var(--canvas-dir-color-blank, var(--quick-add-blank-color, var(--text-secondary)));
 }
 
-.canvas-dir-folder[data-node-key="folder-other"] > summary {
+.canvas-dir-folder[data-node-key="folder-other"]>summary {
     color: var(--canvas-dir-color-edge, var(--text-secondary));
 }
 
-.canvas-dir-folder[data-node-key^="folder-imported-group-"] > summary {
+.canvas-dir-folder[data-node-key^="folder-imported-group-"]>summary {
     color: #9aa0a6;
 }
 
-.canvas-dir-folder > summary.canvas-dir-folder-summary-btn {
+.canvas-dir-folder>summary.canvas-dir-folder-summary-btn {
     list-style: none;
 }
 
-.canvas-dir-folder > summary::-webkit-details-marker {
+.canvas-dir-folder>summary::-webkit-details-marker {
     display: none;
 }
 
-.canvas-dir-folder > summary:hover {
+.canvas-dir-folder>summary:hover {
     background: color-mix(in srgb, var(--bg-tertiary) 65%, transparent);
     color: var(--text-primary);
 }
@@ -2524,35 +2668,35 @@ body.sidebar-resizing * {
     flex: 0 0 18px;
 }
 
-.canvas-dir-folder[data-node-key="folder-permanent"] > summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key="folder-permanent"] > summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key="folder-permanent"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-permanent"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-permanent, var(--quick-add-permanent-color, var(--text-tertiary)));
 }
 
-.canvas-dir-folder[data-node-key="folder-temporary"] > summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key="folder-temporary"] > summary .canvas-dir-count,
-.canvas-dir-folder[data-node-key="folder-temp-split"] > summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key="folder-temp-split"] > summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key="folder-temporary"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-temporary"]>summary .canvas-dir-count,
+.canvas-dir-folder[data-node-key="folder-temp-split"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-temp-split"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-temp, var(--text-tertiary));
 }
 
-.canvas-dir-folder[data-node-key="folder-temp-special"] > summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key="folder-temp-special"] > summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key="folder-temp-special"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-temp-special"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, var(--text-tertiary)));
 }
 
-.canvas-dir-folder[data-node-key="folder-blank"] > summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key="folder-blank"] > summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key="folder-blank"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-blank"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-blank, var(--quick-add-blank-color, var(--text-tertiary)));
 }
 
-.canvas-dir-folder[data-node-key="folder-other"] > summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key="folder-other"] > summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key="folder-other"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-other"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-edge, var(--text-tertiary));
 }
 
-.canvas-dir-folder[data-node-key^="folder-imported-group-"] > summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key^="folder-imported-group-"] > summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key^="folder-imported-group-"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key^="folder-imported-group-"]>summary .canvas-dir-count {
     color: #9aa0a6;
 }
 
@@ -2648,7 +2792,7 @@ body.sidebar-resizing * {
 }
 
 /* 常规链式：垂直主线对齐到首字母轴 */
-.canvas-dir-folder[data-node-variant="chain"] > .canvas-dir-children {
+.canvas-dir-folder[data-node-variant="chain"]>.canvas-dir-children {
     margin-left: 0;
     --canvas-tree-indent: 10px;
     padding-left: var(--canvas-tree-indent);
@@ -2677,52 +2821,52 @@ body.sidebar-resizing * {
 }
 
 .canvas-dir-item-btn.canvas-dir-node-colored,
-.canvas-dir-folder > summary.canvas-dir-node-colored {
+.canvas-dir-folder>summary.canvas-dir-node-colored {
     color: var(--canvas-dir-node-color, var(--text-secondary));
 }
 
 .canvas-dir-item-btn.canvas-dir-node-colored .canvas-dir-count,
-.canvas-dir-folder > summary.canvas-dir-node-colored .canvas-dir-count {
+.canvas-dir-folder>summary.canvas-dir-node-colored .canvas-dir-count {
     color: var(--canvas-dir-node-color, var(--text-tertiary));
 }
 
 .canvas-dir-item-btn.canvas-dir-node-colored .canvas-dir-icon,
-.canvas-dir-folder > summary.canvas-dir-node-colored .canvas-dir-icon,
+.canvas-dir-folder>summary.canvas-dir-node-colored .canvas-dir-icon,
 .canvas-dir-item-btn.canvas-dir-node-colored .canvas-dir-icon-badge,
-.canvas-dir-folder > summary.canvas-dir-node-colored .canvas-dir-icon-badge {
+.canvas-dir-folder>summary.canvas-dir-node-colored .canvas-dir-icon-badge {
     color: var(--canvas-dir-node-default-color, var(--text-tertiary));
 }
 
-.canvas-dir-item[data-node-colored="true"] > .canvas-dir-item-btn::before,
-.canvas-dir-folder > .canvas-dir-children > .canvas-dir-item[data-node-colored="true"] > .canvas-dir-item-btn::before,
-.canvas-dir-folder > .canvas-dir-children > .canvas-dir-folder > summary.canvas-dir-node-colored::before {
+.canvas-dir-item[data-node-colored="true"]>.canvas-dir-item-btn::before,
+.canvas-dir-folder>.canvas-dir-children>.canvas-dir-item[data-node-colored="true"]>.canvas-dir-item-btn::before,
+.canvas-dir-folder>.canvas-dir-children>.canvas-dir-folder>summary.canvas-dir-node-colored::before {
     border-top-color: color-mix(in srgb, var(--border-color) 74%, transparent);
 }
 
 .canvas-dir-item-btn.canvas-dir-no-icon,
-.canvas-dir-folder > summary.canvas-dir-no-icon {
+.canvas-dir-folder>summary.canvas-dir-no-icon {
     gap: 1px;
     padding-left: 0;
 }
 
 /* 非常规链式：永久栏目所有条目缩进一致 */
-.canvas-dir-folder[data-node-key="folder-permanent"] > .canvas-dir-children > .canvas-dir-item > .canvas-dir-item-btn {
+.canvas-dir-folder[data-node-key="folder-permanent"]>.canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn {
     padding-left: 3px;
 }
 
 /* 非常规链式：特殊临时/空白/其他 的首条目再稍微加大缩进 */
-.canvas-dir-folder[data-node-key="folder-temp-special"] > .canvas-dir-children > .canvas-dir-item:first-child > .canvas-dir-item-btn,
-.canvas-dir-folder[data-node-key="folder-other"] > .canvas-dir-children > .canvas-dir-item:first-child > .canvas-dir-item-btn {
+.canvas-dir-folder[data-node-key="folder-temp-special"]>.canvas-dir-children>.canvas-dir-item:first-child>.canvas-dir-item-btn,
+.canvas-dir-folder[data-node-key="folder-other"]>.canvas-dir-children>.canvas-dir-item:first-child>.canvas-dir-item-btn {
     padding-left: 4px;
 }
 
-.canvas-dir-item-btn.canvas-dir-no-icon > .canvas-dir-label,
-.canvas-dir-folder > summary.canvas-dir-no-icon > .canvas-dir-label {
+.canvas-dir-item-btn.canvas-dir-no-icon>.canvas-dir-label,
+.canvas-dir-folder>summary.canvas-dir-no-icon>.canvas-dir-label {
     margin-left: 0;
 }
 
-.canvas-dir-children > .canvas-dir-item > .canvas-dir-item-btn::before,
-.canvas-dir-children > .canvas-dir-folder > summary::before {
+.canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn::before,
+.canvas-dir-children>.canvas-dir-folder>summary::before {
     content: "";
     position: absolute;
     left: calc(-1 * var(--canvas-tree-indent));
@@ -2734,29 +2878,29 @@ body.sidebar-resizing * {
 }
 
 /* 链式/特殊目录：水平引导线稍短，避免插入图标区域 */
-.canvas-dir-folder[data-node-key$="temp-split"] > summary::before,
-.canvas-dir-folder[data-node-key$="temp-special"] > summary::before {
+.canvas-dir-folder[data-node-key$="temp-split"]>summary::before,
+.canvas-dir-folder[data-node-key$="temp-special"]>summary::before {
     width: calc(var(--canvas-tree-indent) + var(--canvas-tree-toggle-center) - 4px);
 }
 
-.canvas-dir-children > .canvas-dir-item > .canvas-dir-item-btn.canvas-dir-no-icon::before,
-.canvas-dir-children > .canvas-dir-folder > summary.canvas-dir-no-icon::before {
+.canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn.canvas-dir-no-icon::before,
+.canvas-dir-children>.canvas-dir-folder>summary.canvas-dir-no-icon::before {
     width: calc(var(--canvas-tree-indent) - 1px);
 }
 
 /* 常规链式：连接目标精确对齐到首字母 */
-.canvas-dir-children > .canvas-dir-item[data-node-variant="chain-item"] > .canvas-dir-item-btn.canvas-dir-no-icon::before,
-.canvas-dir-children > .canvas-dir-folder[data-node-variant="chain"] > summary.canvas-dir-no-icon::before {
+.canvas-dir-children>.canvas-dir-item[data-node-variant="chain-item"]>.canvas-dir-item-btn.canvas-dir-no-icon::before,
+.canvas-dir-children>.canvas-dir-folder[data-node-variant="chain"]>summary.canvas-dir-no-icon::before {
     width: var(--canvas-tree-indent);
 }
 
-.canvas-dir-folder[data-node-variant="import-group-root"] > .canvas-dir-children > .canvas-dir-item > .canvas-dir-item-btn::before,
-.canvas-dir-folder[data-node-variant="import-group-root"] > .canvas-dir-children > .canvas-dir-folder > summary::before {
+.canvas-dir-folder[data-node-variant="import-group-root"]>.canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn::before,
+.canvas-dir-folder[data-node-variant="import-group-root"]>.canvas-dir-children>.canvas-dir-folder>summary::before {
     width: var(--canvas-tree-indent);
 }
 
-.canvas-dir-children > .canvas-dir-item:last-child::after,
-.canvas-dir-children > .canvas-dir-folder:last-child::after {
+.canvas-dir-children>.canvas-dir-item:last-child::after,
+.canvas-dir-children>.canvas-dir-folder:last-child::after {
     content: "";
     position: absolute;
     left: calc(-1 * var(--canvas-tree-indent));
@@ -2767,7 +2911,7 @@ body.sidebar-resizing * {
     pointer-events: none;
 }
 
-.canvas-dir-folder[data-node-variant="chain"] > summary {
+.canvas-dir-folder[data-node-variant="chain"]>summary {
     gap: 5px;
 }
 
@@ -2792,7 +2936,7 @@ body.sidebar-resizing * {
     transition: transform 0.16s ease;
 }
 
-.canvas-dir-folder[open] > summary .canvas-dir-folder-toggle i {
+.canvas-dir-folder[open]>summary .canvas-dir-folder-toggle i {
     transform: rotate(90deg);
 }
 
@@ -2892,7 +3036,7 @@ body.sidebar-resizing * {
     margin-top: -2px;
 }
 
-.canvas-dir-item-btn > .canvas-dir-label:first-child {
+.canvas-dir-item-btn>.canvas-dir-label:first-child {
     margin-left: 0;
 }
 
@@ -2902,14 +3046,14 @@ body.sidebar-resizing * {
 }
 
 .canvas-dir-item-btn.canvas-dir-node-colored:hover,
-.canvas-dir-folder > summary.canvas-dir-node-colored:hover {
+.canvas-dir-folder>summary.canvas-dir-node-colored:hover {
     color: color-mix(in srgb, var(--canvas-dir-node-color, var(--text-primary)) 88%, var(--text-primary));
 }
 
 .canvas-dir-item-btn.canvas-dir-node-colored:hover .canvas-dir-icon,
 .canvas-dir-item-btn.canvas-dir-node-colored:hover .canvas-dir-icon-badge,
-.canvas-dir-folder > summary.canvas-dir-node-colored:hover .canvas-dir-icon,
-.canvas-dir-folder > summary.canvas-dir-node-colored:hover .canvas-dir-icon-badge {
+.canvas-dir-folder>summary.canvas-dir-node-colored:hover .canvas-dir-icon,
+.canvas-dir-folder>summary.canvas-dir-node-colored:hover .canvas-dir-icon-badge {
     color: var(--canvas-dir-node-default-color, var(--text-tertiary));
 }
 
@@ -2950,7 +3094,7 @@ body.sidebar-resizing * {
     background: transparent;
 }
 
-.canvas-dir-folder .canvas-dir-folder > summary {
+.canvas-dir-folder .canvas-dir-folder>summary {
     font-size: 10px;
 }
 
@@ -3390,10 +3534,21 @@ a.tree-label.tree-bookmark-link:hover {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-.path-symbol.added { color: var(--git-added); }
-.path-symbol.deleted { color: var(--git-deleted); }
-.path-symbol.modified { color: var(--git-modified); }
-.path-symbol.moved { color: var(--git-moved); }
+.path-symbol.added {
+    color: var(--git-added);
+}
+
+.path-symbol.deleted {
+    color: var(--git-deleted);
+}
+
+.path-symbol.modified {
+    color: var(--git-modified);
+}
+
+.path-symbol.moved {
+    color: var(--git-moved);
+}
 
 .tree-children {
     margin-left: 12px;
@@ -6371,12 +6526,12 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     transition: transform 0.15s ease;
 }
 
-.marker-switch input:checked + .marker-switch-slider {
+.marker-switch input:checked+.marker-switch-slider {
     background: rgba(40, 167, 69, 0.18);
     border-color: rgba(40, 167, 69, 0.6);
 }
 
-.marker-switch input:checked + .marker-switch-slider:before {
+.marker-switch input:checked+.marker-switch-slider:before {
     transform: translate(18px, -50%);
 }
 
@@ -8308,7 +8463,7 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     padding: 0;
 }
 
-.import-preview-folder > summary {
+.import-preview-folder>summary {
     list-style: none;
     display: inline-flex;
     align-items: center;
@@ -8320,7 +8475,7 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     user-select: none;
 }
 
-.import-preview-folder > summary::before {
+.import-preview-folder>summary::before {
     content: '\f0da';
     font-family: 'Font Awesome 5 Free';
     font-weight: 900;
@@ -8332,7 +8487,7 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     flex: 0 0 auto;
 }
 
-.import-preview-folder[open] > summary::before {
+.import-preview-folder[open]>summary::before {
     transform: rotate(90deg);
 }
 
@@ -8344,11 +8499,11 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     margin-bottom: 0;
 }
 
-.import-preview-folder > summary::-webkit-details-marker {
+.import-preview-folder>summary::-webkit-details-marker {
     display: none;
 }
 
-.import-preview-folder > summary i,
+.import-preview-folder>summary i,
 .import-preview-leaf i {
     width: 12px;
     text-align: center;
@@ -9884,21 +10039,34 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     position: absolute;
     left: 0;
     top: 50%;
-    transform: translate(-6px, -50%);
-    width: 24px;
-    height: 32px;
+    transform: translate(0, -50%);
+    width: 30px;
+    height: 30px;
     padding: 0;
     border: none;
-    border-radius: 0 8px 8px 0;
-    background: linear-gradient(to bottom, #ffffff, #f8f9fa);
-    color: #57606a;
-    box-shadow: 1px 0 3px rgba(0, 0, 0, 0.08);
+    border-radius: 4px;
+    /* Default radius, will be overridden by edge specific rules */
+    background: transparent;
+    color: var(--text-secondary);
+    box-shadow: none;
     align-items: center;
     justify-content: center;
     z-index: 2;
     opacity: 0;
     pointer-events: none;
-    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease, background 0.2s ease, color 0.2s ease;
+    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        opacity 0.15s ease,
+        box-shadow 0.15s ease,
+        background 0.15s ease,
+        color 0.15s ease,
+        border-radius 0.2s ease,
+        border-color 0.2s ease,
+        width 0.2s ease,
+        height 0.2s ease,
+        left 0.2s ease,
+        right 0.2s ease,
+        top 0.2s ease,
+        bottom 0.2s ease;
 }
 
 .canvas-floating-toggle-mini i {
@@ -9913,9 +10081,211 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     transform: none;
 }
 
+.canvas-floating-toggle-mini,
+.canvas-floating-tools-toggle-btn {
+    touch-action: none;
+}
+
+.canvas-floating-toggle-mini .canvas-floating-drag-hint,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint {
+    --canvas-floating-hint-enter-curve: cubic-bezier(0.22, 1, 0.36, 1);
+    --canvas-floating-hint-breathe-curve: cubic-bezier(0.445, 0.05, 0.55, 0.95);
+    --canvas-floating-hint-phase-offset: -2.325s;
+    --canvas-floating-hint-base-transform: translateZ(0);
+    position: absolute;
+    pointer-events: none;
+    user-select: none;
+    opacity: 0;
+    color: var(--text-secondary);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+    filter: saturate(0.94) brightness(0.96);
+    transition: opacity 0.34s var(--canvas-floating-hint-enter-curve), transform 0.52s var(--canvas-floating-hint-enter-curve), filter 0.48s var(--canvas-floating-hint-enter-curve);
+    font-weight: 700;
+    line-height: 1;
+    will-change: opacity, transform, filter, border-color, box-shadow;
+}
+
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-up,
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-down,
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-left,
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-right,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-up,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-down,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-left,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-right {
+    display: block;
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid color-mix(in srgb, var(--text-secondary) 65%, var(--border-color) 35%);
+    border-right: none;
+    border-bottom: none;
+    border-radius: 16px 0 0 0;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+    background: transparent;
+}
+
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-up::after,
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-down::after,
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-left::after,
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-right::after,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-up::after,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-down::after,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-left::after,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-right::after {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border: 1.5px solid color-mix(in srgb, var(--text-secondary) 48%, transparent);
+    border-right: none;
+    border-bottom: none;
+    border-radius: 10px 0 0 0;
+    opacity: 0.56;
+    transform: scale(0.82);
+    transition: opacity 0.36s var(--canvas-floating-hint-enter-curve), transform 0.52s var(--canvas-floating-hint-enter-curve);
+    will-change: opacity, transform, border-color;
+}
+
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-up,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-up {
+    --canvas-floating-hint-base-transform: translateX(-50%) rotate(45deg);
+    left: 50%;
+    top: -24px;
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+}
+
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-down,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-down {
+    --canvas-floating-hint-base-transform: translateX(-50%) rotate(-135deg);
+    left: 50%;
+    top: calc(100% + 8px);
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+}
+
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-left,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-left {
+    --canvas-floating-hint-base-transform: translateY(-50%) rotate(-45deg);
+    top: 50%;
+    right: calc(100% + 8px);
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+}
+
+.canvas-floating-toggle-mini .canvas-floating-drag-hint-right,
+.canvas-floating-tools-toggle-btn .canvas-floating-drag-hint-right {
+    --canvas-floating-hint-base-transform: translateY(-50%) rotate(135deg);
+    top: 50%;
+    left: calc(100% + 8px);
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+}
+
+.canvas-floating-show-hints .canvas-floating-drag-hint {
+    opacity: 0.73;
+    transform: var(--canvas-floating-hint-base-transform) scale(0.96);
+    animation: canvas-floating-hint-breathe 3.1s var(--canvas-floating-hint-breathe-curve) var(--canvas-floating-hint-phase-offset) infinite;
+}
+
+.canvas-floating-show-hints[data-dock-edge="left"] .canvas-floating-drag-hint-left,
+.canvas-floating-show-hints[data-dock-edge="right"] .canvas-floating-drag-hint-right,
+.canvas-floating-show-hints[data-dock-edge="top"] .canvas-floating-drag-hint-up,
+.canvas-floating-show-hints[data-dock-edge="bottom"] .canvas-floating-drag-hint-down {
+    opacity: 0;
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+    animation: none;
+}
+
+.canvas-floating-show-hints[data-dock-edge="left"] .canvas-floating-drag-hint-left::after,
+.canvas-floating-show-hints[data-dock-edge="right"] .canvas-floating-drag-hint-right::after,
+.canvas-floating-show-hints[data-dock-edge="top"] .canvas-floating-drag-hint-up::after,
+.canvas-floating-show-hints[data-dock-edge="bottom"] .canvas-floating-drag-hint-down::after {
+    opacity: 0;
+    transform: scale(0.78);
+    animation: none;
+}
+
+.canvas-floating-show-hints[data-drag-guide="up"] .canvas-floating-drag-hint-down,
+.canvas-floating-show-hints[data-drag-guide="up"] .canvas-floating-drag-hint-left,
+.canvas-floating-show-hints[data-drag-guide="up"] .canvas-floating-drag-hint-right,
+.canvas-floating-show-hints[data-drag-guide="down"] .canvas-floating-drag-hint-up,
+.canvas-floating-show-hints[data-drag-guide="down"] .canvas-floating-drag-hint-left,
+.canvas-floating-show-hints[data-drag-guide="down"] .canvas-floating-drag-hint-right,
+.canvas-floating-show-hints[data-drag-guide="left"] .canvas-floating-drag-hint-up,
+.canvas-floating-show-hints[data-drag-guide="left"] .canvas-floating-drag-hint-down,
+.canvas-floating-show-hints[data-drag-guide="left"] .canvas-floating-drag-hint-right,
+.canvas-floating-show-hints[data-drag-guide="right"] .canvas-floating-drag-hint-up,
+.canvas-floating-show-hints[data-drag-guide="right"] .canvas-floating-drag-hint-down,
+.canvas-floating-show-hints[data-drag-guide="right"] .canvas-floating-drag-hint-left {
+    opacity: 0;
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+    animation: none;
+}
+
+.canvas-floating-show-hints[data-drag-guide="up"] .canvas-floating-drag-hint-up,
+.canvas-floating-show-hints[data-drag-guide="down"] .canvas-floating-drag-hint-down,
+.canvas-floating-show-hints[data-drag-guide="left"] .canvas-floating-drag-hint-left,
+.canvas-floating-show-hints[data-drag-guide="right"] .canvas-floating-drag-hint-right {
+    opacity: 0.82;
+    transform: var(--canvas-floating-hint-base-transform) scale(1);
+    animation: canvas-floating-hint-breathe 3.1s var(--canvas-floating-hint-breathe-curve) var(--canvas-floating-hint-phase-offset) infinite;
+}
+
+.canvas-floating-show-hints .canvas-floating-drag-hint::after {
+    opacity: 0.39;
+    transform: scale(0.91);
+    animation: sidebar-toggle-hint-ripple 3.1s var(--canvas-floating-hint-breathe-curve) var(--canvas-floating-hint-phase-offset) infinite;
+}
+
+.canvas-floating-show-hints[data-drag-guide="up"] .canvas-floating-drag-hint-down::after,
+.canvas-floating-show-hints[data-drag-guide="up"] .canvas-floating-drag-hint-left::after,
+.canvas-floating-show-hints[data-drag-guide="up"] .canvas-floating-drag-hint-right::after,
+.canvas-floating-show-hints[data-drag-guide="down"] .canvas-floating-drag-hint-up::after,
+.canvas-floating-show-hints[data-drag-guide="down"] .canvas-floating-drag-hint-left::after,
+.canvas-floating-show-hints[data-drag-guide="down"] .canvas-floating-drag-hint-right::after,
+.canvas-floating-show-hints[data-drag-guide="left"] .canvas-floating-drag-hint-up::after,
+.canvas-floating-show-hints[data-drag-guide="left"] .canvas-floating-drag-hint-down::after,
+.canvas-floating-show-hints[data-drag-guide="left"] .canvas-floating-drag-hint-right::after,
+.canvas-floating-show-hints[data-drag-guide="right"] .canvas-floating-drag-hint-up::after,
+.canvas-floating-show-hints[data-drag-guide="right"] .canvas-floating-drag-hint-down::after,
+.canvas-floating-show-hints[data-drag-guide="right"] .canvas-floating-drag-hint-left::after {
+    opacity: 0;
+    transform: scale(0.78);
+    animation: none;
+}
+
+.canvas-floating-show-hints[data-drag-guide="up"] .canvas-floating-drag-hint-up::after,
+.canvas-floating-show-hints[data-drag-guide="down"] .canvas-floating-drag-hint-down::after,
+.canvas-floating-show-hints[data-drag-guide="left"] .canvas-floating-drag-hint-left::after,
+.canvas-floating-show-hints[data-drag-guide="right"] .canvas-floating-drag-hint-right::after {
+    opacity: 0.46;
+    transform: scale(0.95);
+    animation: sidebar-toggle-hint-ripple 3.1s var(--canvas-floating-hint-breathe-curve) var(--canvas-floating-hint-phase-offset) infinite;
+}
+
+.canvas-floating-hold-active {
+    background: color-mix(in srgb, var(--bg-secondary) 78%, var(--hover-bg) 22%);
+    color: var(--text-primary);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-secondary) 14%, transparent), 0 3px 10px rgba(0, 0, 0, 0.1);
+}
+
+.canvas-floating-hold-active i {
+    transform: scale(0.96);
+}
+
+.canvas-floating-toggle-mini.canvas-floating-dragging,
+.canvas-floating-tools-toggle-btn.canvas-floating-dragging {
+    cursor: grabbing;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+    opacity: 0.96;
+    transition: none !important;
+}
+
+.canvas-zoom-indicator.canvas-floating-dragging {
+    transition: none !important;
+    will-change: left, top;
+}
+
 .canvas-zoom-indicator.floating-tools-collapsed {
     left: 0;
-    top: 20px;
+    top: 50%;
     width: 0;
     min-width: 0;
     height: 0;
@@ -9934,6 +10304,26 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     transform-origin: left center;
 }
 
+@keyframes canvas-floating-hint-breathe {
+
+    0%,
+    100% {
+        opacity: 0.86;
+        transform: var(--canvas-floating-hint-base-transform) scale(1.01);
+        border-color: color-mix(in srgb, var(--text-primary) 67%, var(--text-secondary) 33%);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-secondary) 12%, transparent), 0 2px 7px rgba(0, 0, 0, 0.11);
+        filter: saturate(1.01) brightness(1.04);
+    }
+
+    50% {
+        opacity: 0.6;
+        transform: var(--canvas-floating-hint-base-transform) scale(0.91);
+        border-color: color-mix(in srgb, var(--text-secondary) 58%, var(--border-color) 42%);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        filter: saturate(0.99) brightness(0.99);
+    }
+}
+
 .canvas-zoom-indicator.floating-tools-collapsed .canvas-zoom-header,
 .canvas-zoom-indicator.floating-tools-collapsed .canvas-zoom-controls {
     opacity: 0;
@@ -9945,23 +10335,173 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
 .canvas-zoom-indicator.floating-tools-collapsed .canvas-floating-toggle-mini {
     opacity: 1;
     pointer-events: auto;
-    transform: translate(0, -50%);
 }
 
+.canvas-floating-toggle-mini::before {
+    content: "";
+    position: absolute;
+    left: -16px;
+    top: -8px;
+    width: 56px;
+    height: 56px;
+    background: transparent;
+    pointer-events: auto;
+    border-radius: 0;
+    z-index: -1;
+}
+
+.canvas-floating-toggle-mini:hover::before,
+.canvas-floating-toggle-mini:focus-visible::before {
+    left: -12px;
+    top: -10px;
+    width: 56px;
+    height: 56px;
+}
+
+/* Base Hover State */
+.canvas-floating-toggle-mini:hover,
+.canvas-floating-toggle-mini:focus-visible {
+    width: 32px;
+    height: 32px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
+    color: var(--text-primary) !important;
+    border-radius: 50% !important;
+    /* Transforms handled per edge below */
+}
+
+/* Ensure Dark Mode is also transparent by default */
 [data-theme="dark"] .canvas-floating-toggle-mini {
-    background: linear-gradient(to bottom, #3a3b3c, #2f3031);
-    color: #b0b3b8;
-    box-shadow: 1px 0 3px rgba(0, 0, 0, 0.45);
+    background: transparent;
+    color: var(--text-secondary);
+    box-shadow: none;
 }
 
-.canvas-floating-toggle-mini:hover {
-    background: linear-gradient(to bottom, #f6f8fa, #eaeef2);
-    color: #0969da;
+[data-theme="dark"] .canvas-floating-toggle-mini:hover,
+[data-theme="dark"] .canvas-floating-toggle-mini:focus-visible {
+    background: var(--bg-secondary);
+    color: var(--text-primary) !important;
 }
 
-[data-theme="dark"] .canvas-floating-toggle-mini:hover {
-    background: linear-gradient(to bottom, #4a4b4c, #3a3b3c);
-    color: #58a6ff;
+/* --- Edge Specific Positioning & Hover Transforms --- */
+
+/* LEFT (Default) */
+.canvas-zoom-indicator:not([data-dock-edge]) .canvas-floating-toggle-mini,
+.canvas-zoom-indicator[data-dock-edge="left"] .canvas-floating-toggle-mini {
+    left: 4px;
+    top: 50%;
+    width: 18px;
+    height: 24px;
+    transform: translate(0, -50%);
+    border-radius: 0 4px 4px 0;
+}
+
+/* Hit area extends left */
+.canvas-zoom-indicator:not([data-dock-edge]) .canvas-floating-toggle-mini::after,
+.canvas-zoom-indicator[data-dock-edge="left"] .canvas-floating-toggle-mini::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    left: -16px;
+    top: -10px;
+    width: 60px;
+    height: calc(100% + 20px);
+    pointer-events: auto;
+}
+
+.canvas-zoom-indicator:not([data-dock-edge]) .canvas-floating-toggle-mini:hover,
+.canvas-zoom-indicator[data-dock-edge="left"] .canvas-floating-toggle-mini:hover {
+    width: 32px;
+    height: 32px;
+    transform: translate(0, -50%) scale(1.05);
+}
+
+/* RIGHT */
+.canvas-zoom-indicator[data-dock-edge="right"] .canvas-floating-toggle-mini {
+    left: auto;
+    right: 4px;
+    top: 50%;
+    width: 18px;
+    height: 24px;
+    transform: translate(0, -50%);
+    border-radius: 4px 0 0 4px;
+}
+
+/* Hit area extends right */
+.canvas-zoom-indicator[data-dock-edge="right"] .canvas-floating-toggle-mini::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    right: -16px;
+    top: -10px;
+    width: 60px;
+    height: calc(100% + 20px);
+    pointer-events: auto;
+}
+
+.canvas-zoom-indicator[data-dock-edge="right"] .canvas-floating-toggle-mini:hover {
+    width: 32px;
+    height: 32px;
+    transform: translate(0, -50%) scale(1.05);
+}
+
+/* TOP */
+.canvas-zoom-indicator[data-dock-edge="top"] .canvas-floating-toggle-mini {
+    left: 50%;
+    top: 4px;
+    bottom: auto;
+    width: 24px;
+    height: 18px;
+    transform: translate(-50%, 0);
+    border-radius: 0 0 4px 4px;
+}
+
+/* Hit area extends up */
+.canvas-zoom-indicator[data-dock-edge="top"] .canvas-floating-toggle-mini::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    left: -10px;
+    top: -16px;
+    width: calc(100% + 20px);
+    height: 60px;
+    pointer-events: auto;
+}
+
+.canvas-zoom-indicator[data-dock-edge="top"] .canvas-floating-toggle-mini:hover {
+    width: 32px;
+    height: 32px;
+    transform: translate(-50%, 0) scale(1.05);
+}
+
+/* BOTTOM */
+.canvas-zoom-indicator[data-dock-edge="bottom"] .canvas-floating-toggle-mini {
+    left: 50%;
+    top: auto;
+    bottom: 4px;
+    width: 24px;
+    height: 18px;
+    transform: translate(-50%, 0);
+    border-radius: 4px 4px 0 0;
+}
+
+/* Hit area extends down */
+.canvas-zoom-indicator[data-dock-edge="bottom"] .canvas-floating-toggle-mini::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    left: -10px;
+    bottom: -16px;
+    width: calc(100% + 20px);
+    height: 60px;
+    pointer-events: auto;
+}
+
+.canvas-zoom-indicator[data-dock-edge="bottom"] .canvas-floating-toggle-mini:hover {
+    width: 32px;
+    height: 32px;
+    transform: translate(-50%, 0) scale(1.05);
 }
 
 .canvas-zoom-indicator button,
@@ -10066,7 +10606,7 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     margin-top: 8px;
 }
 
-.canvas-zoom-controls > .zoom-btn,
+.canvas-zoom-controls>.zoom-btn,
 .canvas-floating-tools-toggle-btn {
     height: 30px;
 }
@@ -11541,7 +12081,7 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     gap: 6px;
 }
 
-.canvas-manage-btn.canvas-manage-btn-split + .canvas-manage-btn.canvas-manage-btn-split {
+.canvas-manage-btn.canvas-manage-btn-split+.canvas-manage-btn.canvas-manage-btn-split {
     border-left: 1px solid var(--border-color);
 }
 

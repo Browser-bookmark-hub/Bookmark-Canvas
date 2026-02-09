@@ -77,11 +77,25 @@ const CANVAS_PAGE_FULLSCREEN_BRIDGE_STORAGE_KEY = 'canvas_page_fullscreen_bridge
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_MAX_AGE_MS = 30000;
 const CANVAS_PAGE_FULLSCREEN_STATE_STORAGE_KEY = 'canvas_page_fullscreen_state_v1';
 const CANVAS_PAGE_FULLSCREEN_STATE_MAX_AGE_MS = 30000;
+const CANVAS_FLOATING_TOOLS_DOCK_KEY = 'canvasFloatingToolsDockV1';
 const SIDE_PANEL_FLOATING_TOOLS_MODES = {
     NONE: 'none',
     HIDDEN: 'hidden',
     SHOWN: 'shown'
 };
+const CANVAS_FLOATING_DOCK_EDGES = ['left', 'right', 'top', 'bottom'];
+const CANVAS_FLOATING_EDGE_MARGIN_PX = 10;
+const CANVAS_FLOATING_EDGE_TRACK_INSET_PX = 120;
+const CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD = 8;
+const CANVAS_FLOATING_HINT_HOLD_DELAY_MS = 160;
+const CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD = 42;
+const CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD = 0.08;
+
+let canvasFloatingToolsDockStateCache = null;
+let canvasFloatingToolsDragSession = null;
+let canvasFloatingToolsHintHoldTimer = null;
+let suppressCanvasFloatingToolsToggleClick = false;
+let canvasFloatingToolsResizeBound = false;
 
 let currentHeaderState = 'expanded';
 let currentHeaderDockSide = 'top';
@@ -199,6 +213,778 @@ function setSidePanelFloatingToolsVisible(visible) {
     );
 }
 
+function clampCanvasFloatingValue(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+}
+
+function normalizeCanvasFloatingDockEdge(edge) {
+    const value = String(edge || '').toLowerCase();
+    return CANVAS_FLOATING_DOCK_EDGES.includes(value) ? value : 'top';
+}
+
+function normalizeCanvasFloatingDockRatio(ratio) {
+    const value = Number(ratio);
+    if (!Number.isFinite(value)) return 0;
+    return clampCanvasFloatingValue(value, 0, 1);
+}
+
+function readCanvasFloatingToolsDockState() {
+    if (canvasFloatingToolsDockStateCache) {
+        return {
+            edge: canvasFloatingToolsDockStateCache.edge,
+            ratio: canvasFloatingToolsDockStateCache.ratio
+        };
+    }
+
+    let parsed = null;
+    try {
+        const raw = localStorage.getItem(CANVAS_FLOATING_TOOLS_DOCK_KEY);
+        if (raw) {
+            parsed = JSON.parse(raw);
+        }
+    } catch (_) { }
+
+    const fallbackEdge = 'top';
+    const state = {
+        edge: normalizeCanvasFloatingDockEdge(parsed && parsed.edge),
+        ratio: normalizeCanvasFloatingDockRatio(parsed && parsed.ratio)
+    };
+
+    if (!parsed || !parsed.edge) {
+        state.edge = fallbackEdge;
+    }
+
+    canvasFloatingToolsDockStateCache = state;
+    return { edge: state.edge, ratio: state.ratio };
+}
+
+function writeCanvasFloatingToolsDockState(state) {
+    const normalized = {
+        edge: normalizeCanvasFloatingDockEdge(state && state.edge),
+        ratio: normalizeCanvasFloatingDockRatio(state && state.ratio)
+    };
+
+    canvasFloatingToolsDockStateCache = normalized;
+    try {
+        localStorage.setItem(CANVAS_FLOATING_TOOLS_DOCK_KEY, JSON.stringify(normalized));
+    } catch (_) { }
+    return { edge: normalized.edge, ratio: normalized.ratio };
+}
+
+function cacheCanvasFloatingToolsDockState(state) {
+    const normalized = {
+        edge: normalizeCanvasFloatingDockEdge(state && state.edge),
+        ratio: normalizeCanvasFloatingDockRatio(state && state.ratio)
+    };
+    canvasFloatingToolsDockStateCache = normalized;
+    return { edge: normalized.edge, ratio: normalized.ratio };
+}
+
+function getCanvasFloatingToolsWorkspaceRect() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return null;
+    const rect = workspace.getBoundingClientRect();
+    if (!rect || !Number.isFinite(rect.width) || !Number.isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) {
+        return null;
+    }
+    return rect;
+}
+
+function getCanvasFloatingToolsIndicatorSize(mode) {
+    const zoomIndicator = document.getElementById('canvasZoomIndicator');
+    const miniToggle = document.getElementById('canvasFloatingToggleMini');
+    if (!zoomIndicator) {
+        return {
+            width: 0,
+            height: 0
+        };
+    }
+
+    if (mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN) {
+        if (miniToggle) {
+            const rect = miniToggle.getBoundingClientRect();
+            if (rect && Number.isFinite(rect.width) && rect.width > 0 && Number.isFinite(rect.height) && rect.height > 0) {
+                return {
+                    width: rect.width,
+                    height: rect.height
+                };
+            }
+        }
+        return {
+            width: 24,
+            height: 32
+        };
+    }
+
+    const rect = zoomIndicator.getBoundingClientRect();
+    const width = rect && Number.isFinite(rect.width) && rect.width > 0 ? rect.width : 250;
+    const height = rect && Number.isFinite(rect.height) && rect.height > 0 ? rect.height : 84;
+    return { width, height };
+}
+
+function buildCanvasFloatingHorizontalTrack(minX, maxX, restrictMiddle) {
+    const safeMin = Math.min(minX, maxX);
+    const safeMax = Math.max(minX, maxX);
+    const available = Math.max(0, safeMax - safeMin);
+
+    if (!restrictMiddle || available <= 0) {
+        return {
+            segmented: false,
+            minX: safeMin,
+            maxX: safeMax,
+            available
+        };
+    }
+
+    const segmentLength = Math.min(CANVAS_FLOATING_EDGE_TRACK_INSET_PX, available / 2);
+    if (segmentLength <= 0) {
+        return {
+            segmented: false,
+            minX: safeMin,
+            maxX: safeMax,
+            available
+        };
+    }
+
+    const leftEnd = safeMin + segmentLength;
+    const rightStart = safeMax - segmentLength;
+    if (rightStart <= leftEnd) {
+        return {
+            segmented: false,
+            minX: safeMin,
+            maxX: safeMax,
+            available
+        };
+    }
+
+    return {
+        segmented: true,
+        minX: safeMin,
+        maxX: safeMax,
+        available,
+        segmentLength,
+        leftEnd,
+        rightStart,
+        totalLength: segmentLength * 2
+    };
+}
+
+function getCanvasFloatingTrackXByRatio(track, ratio) {
+    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
+    if (!track.segmented) {
+        if (track.available <= 0) return track.minX;
+        return track.minX + (track.available * safeRatio);
+    }
+
+    const totalLength = track.totalLength;
+    if (!Number.isFinite(totalLength) || totalLength <= 0) {
+        return track.minX;
+    }
+
+    const progress = safeRatio * totalLength;
+    if (progress <= track.segmentLength) {
+        return track.minX + progress;
+    }
+
+    return track.rightStart + (progress - track.segmentLength);
+}
+
+function getCanvasFloatingTrackRatioByX(track, x) {
+    if (!track.segmented) {
+        if (track.available <= 0) return 0;
+        const clampedX = clampCanvasFloatingValue(x, track.minX, track.maxX);
+        return normalizeCanvasFloatingDockRatio((clampedX - track.minX) / track.available);
+    }
+
+    const xSafe = Number.isFinite(x) ? x : track.minX;
+    const leftDistance = xSafe < track.minX
+        ? (track.minX - xSafe)
+        : (xSafe > track.leftEnd ? (xSafe - track.leftEnd) : 0);
+    const rightDistance = xSafe < track.rightStart
+        ? (track.rightStart - xSafe)
+        : (xSafe > track.maxX ? (xSafe - track.maxX) : 0);
+
+    const pickLeft = leftDistance <= rightDistance;
+    let progress = 0;
+
+    if (pickLeft) {
+        const leftX = clampCanvasFloatingValue(xSafe, track.minX, track.leftEnd);
+        progress = leftX - track.minX;
+    } else {
+        const rightX = clampCanvasFloatingValue(xSafe, track.rightStart, track.maxX);
+        progress = track.segmentLength + (rightX - track.rightStart);
+    }
+
+    if (!Number.isFinite(track.totalLength) || track.totalLength <= 0) return 0;
+    return normalizeCanvasFloatingDockRatio(progress / track.totalLength);
+}
+
+function resolveCanvasFloatingIndicatorPosition(state, options = {}) {
+    const mode = normalizeSidePanelFloatingToolsMode(options.mode || getSidePanelFloatingToolsMode());
+    const dock = {
+        edge: normalizeCanvasFloatingDockEdge(state && state.edge),
+        ratio: normalizeCanvasFloatingDockRatio(state && state.ratio)
+    };
+
+    const workspaceRect = getCanvasFloatingToolsWorkspaceRect();
+    if (!workspaceRect) return null;
+
+    const hiddenMode = mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+    const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode);
+    const margin = hiddenMode ? 0 : CANVAS_FLOATING_EDGE_MARGIN_PX;
+    const maxLeft = hiddenMode
+        ? Math.max(0, workspaceRect.width)
+        : Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
+    const minLeft = hiddenMode ? 0 : margin;
+    const maxTop = hiddenMode
+        ? Math.max(0, workspaceRect.height)
+        : Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
+    const minTop = hiddenMode ? 0 : margin;
+
+    let left = minLeft;
+    let top = minTop;
+
+    if (dock.edge === 'left') {
+        left = minLeft;
+        top = minTop + ((maxTop - minTop) * dock.ratio);
+    } else if (dock.edge === 'right') {
+        left = maxLeft;
+        top = minTop + ((maxTop - minTop) * dock.ratio);
+    } else if (dock.edge === 'top' || dock.edge === 'bottom') {
+        const track = buildCanvasFloatingHorizontalTrack(minLeft, maxLeft, false);
+        left = getCanvasFloatingTrackXByRatio(track, dock.ratio);
+        top = dock.edge === 'top' ? minTop : maxTop;
+    }
+
+    return {
+        edge: dock.edge,
+        ratio: dock.ratio,
+        left: clampCanvasFloatingValue(left, minLeft, maxLeft),
+        top: clampCanvasFloatingValue(top, minTop, maxTop)
+    };
+}
+
+function applyCanvasFloatingToolsDockState(state, options = {}) {
+    const zoomIndicator = document.getElementById('canvasZoomIndicator');
+    if (!zoomIndicator) {
+        if (options && options.persist === true) {
+            return writeCanvasFloatingToolsDockState(state);
+        }
+        return cacheCanvasFloatingToolsDockState(state);
+    }
+
+    const mode = normalizeSidePanelFloatingToolsMode(options.mode || getSidePanelFloatingToolsMode());
+    const position = resolveCanvasFloatingIndicatorPosition(state, { mode });
+    const normalized = {
+        edge: normalizeCanvasFloatingDockEdge(position ? position.edge : (state && state.edge)),
+        ratio: normalizeCanvasFloatingDockRatio(position ? position.ratio : (state && state.ratio))
+    };
+
+    if (position) {
+        zoomIndicator.style.left = `${position.left}px`;
+        zoomIndicator.style.top = `${position.top}px`;
+    }
+    zoomIndicator.dataset.dockEdge = normalized.edge;
+
+    if (options && options.persist === true) {
+        return writeCanvasFloatingToolsDockState(normalized);
+    }
+    return cacheCanvasFloatingToolsDockState(normalized);
+}
+
+function resolveCanvasFloatingDockStateFromPointer(clientX, clientY, options = {}) {
+    const mode = normalizeSidePanelFloatingToolsMode(options.mode || getSidePanelFloatingToolsMode());
+    const workspaceRect = getCanvasFloatingToolsWorkspaceRect();
+    if (!workspaceRect) return null;
+
+    const hiddenMode = mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+    const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode);
+    const margin = hiddenMode ? 0 : CANVAS_FLOATING_EDGE_MARGIN_PX;
+    const maxLeft = hiddenMode
+        ? Math.max(0, workspaceRect.width)
+        : Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
+    const minLeft = hiddenMode ? 0 : margin;
+    const maxTop = hiddenMode
+        ? Math.max(0, workspaceRect.height)
+        : Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
+    const minTop = hiddenMode ? 0 : margin;
+
+    const localX = clampCanvasFloatingValue(clientX - workspaceRect.left, 0, workspaceRect.width);
+    const localY = clampCanvasFloatingValue(clientY - workspaceRect.top, 0, workspaceRect.height);
+
+    const edgeDistances = [
+        { edge: 'left', distance: localX },
+        { edge: 'right', distance: Math.abs(workspaceRect.width - localX) },
+        { edge: 'top', distance: localY },
+        { edge: 'bottom', distance: Math.abs(workspaceRect.height - localY) }
+    ];
+    edgeDistances.sort((a, b) => a.distance - b.distance);
+
+    let edge = normalizeCanvasFloatingDockEdge(options.forcedEdge || '');
+    if (!options.forcedEdge) {
+        edge = edgeDistances[0].edge;
+        const preferredEdge = normalizeCanvasFloatingDockEdge(options.currentEdge);
+        const preferredMatch = edgeDistances.find(item => item.edge === preferredEdge);
+        if (preferredMatch && (preferredMatch.distance - edgeDistances[0].distance) <= 10) {
+            edge = preferredEdge;
+        }
+    }
+
+    let ratio = 0;
+    if (edge === 'left' || edge === 'right') {
+        const trackHeight = Math.max(0, maxTop - minTop);
+        if (trackHeight > 0) {
+            ratio = normalizeCanvasFloatingDockRatio((clampCanvasFloatingValue(localY, minTop, maxTop) - minTop) / trackHeight);
+        }
+    } else {
+        const track = buildCanvasFloatingHorizontalTrack(minLeft, maxLeft, false);
+        ratio = getCanvasFloatingTrackRatioByX(track, localX);
+    }
+
+    return {
+        edge,
+        ratio
+    };
+}
+
+function isCanvasFloatingNearTopOrBottomCorner(edge, ratio) {
+    const safeEdge = normalizeCanvasFloatingDockEdge(edge);
+    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
+    if (safeEdge !== 'left' && safeEdge !== 'right') return false;
+    const thresholdRatio = normalizeCanvasFloatingDockRatio(CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD);
+    return safeRatio <= thresholdRatio || safeRatio >= (1 - thresholdRatio);
+}
+
+function isCanvasFloatingNearLeftOrRightCorner(edge, ratio) {
+    const safeEdge = normalizeCanvasFloatingDockEdge(edge);
+    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
+    if (safeEdge !== 'top' && safeEdge !== 'bottom') return false;
+    const thresholdRatio = normalizeCanvasFloatingDockRatio(CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD);
+    return safeRatio <= thresholdRatio || safeRatio >= (1 - thresholdRatio);
+}
+
+function getCanvasFloatingDragButtons() {
+    const miniToggle = document.getElementById('canvasFloatingToggleMini');
+    const inlineToggleBtn = document.getElementById('canvasFloatingToolsToggleBtn');
+    return [miniToggle, inlineToggleBtn].filter(Boolean);
+}
+
+function ensureCanvasFloatingDragHints(btn) {
+    if (!btn) return;
+    const hintDefs = [
+        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-up', selector: '.canvas-floating-drag-hint-up' },
+        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-down', selector: '.canvas-floating-drag-hint-down' },
+        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-left', selector: '.canvas-floating-drag-hint-left' },
+        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-right', selector: '.canvas-floating-drag-hint-right' }
+    ];
+
+    hintDefs.forEach((def) => {
+        let hint = btn.querySelector(def.selector);
+        if (!hint) {
+            hint = document.createElement('span');
+            hint.className = def.className;
+            hint.setAttribute('aria-hidden', 'true');
+            btn.appendChild(hint);
+        }
+    });
+}
+
+function clearCanvasFloatingHintHoldTimer() {
+    if (canvasFloatingToolsHintHoldTimer == null) return;
+    window.clearTimeout(canvasFloatingToolsHintHoldTimer);
+    canvasFloatingToolsHintHoldTimer = null;
+}
+
+function setCanvasFloatingDragGuide(edge) {
+    const normalized = edge === 'up' || edge === 'down' || edge === 'left' || edge === 'right'
+        ? edge
+        : '';
+    const buttons = getCanvasFloatingDragButtons();
+    buttons.forEach((btn) => {
+        if (!btn) return;
+        if (canvasFloatingToolsDragSession && btn === canvasFloatingToolsDragSession.sourceBtn && normalized) {
+            btn.dataset.dragGuide = normalized;
+        } else {
+            delete btn.dataset.dragGuide;
+        }
+    });
+}
+
+function getCanvasFloatingAllowedDragDirections(edge) {
+    return new Set(['left', 'right', 'up', 'down']);
+}
+
+function getCanvasFloatingDragGuideDirection(dx, dy, edge) {
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+    if (absDx < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD && absDy < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
+        return null;
+    }
+
+    const primary = absDx >= absDy
+        ? (dx >= 0 ? 'right' : 'left')
+        : (dy >= 0 ? 'down' : 'up');
+
+    const allowed = getCanvasFloatingAllowedDragDirections(edge);
+    if (allowed.has(primary)) return primary;
+    return null;
+}
+
+function getCanvasFloatingGuideDirectionAtCurrentDock(dx, dy, dockState) {
+    const edge = normalizeCanvasFloatingDockEdge(dockState && dockState.edge);
+    const ratio = normalizeCanvasFloatingDockRatio(dockState && dockState.ratio);
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+    if (absDx < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD && absDy < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
+        return null;
+    }
+
+    if (edge === 'left' || edge === 'right') {
+        const movingHorizontal = absDx >= absDy && absDx >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD;
+        if (movingHorizontal) {
+            return dx >= 0 ? 'right' : 'left';
+        }
+        return dy >= 0 ? 'down' : 'up';
+    }
+
+    if (edge === 'top' || edge === 'bottom') {
+        const movingVertical = absDy > absDx && absDy >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD;
+        if (movingVertical) {
+            return dy >= 0 ? 'down' : 'up';
+        }
+        return dx >= 0 ? 'right' : 'left';
+    }
+
+    return getCanvasFloatingDragGuideDirection(dx, dy, edge);
+}
+
+function resolveCanvasFloatingAdjacentEdgeFromCorner(currentEdge, ratio, dx, dy) {
+    const edge = normalizeCanvasFloatingDockEdge(currentEdge);
+    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
+    const nearStart = safeRatio <= CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD;
+    const nearEnd = safeRatio >= (1 - CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD);
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (edge === 'left' || edge === 'right') {
+        const towardInner = edge === 'left' ? dx > 0 : dx < 0;
+
+        // Allow sliding along perimeter (up/down past corners)
+        if (nearStart && dy < -CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'top';
+        if (nearEnd && dy > CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'bottom';
+
+        if (!towardInner || absDx < CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD || absDx < absDy) return null;
+        if (nearStart) return 'top';
+        if (nearEnd) return 'bottom';
+        return null;
+    }
+
+    if (edge === 'top' || edge === 'bottom') {
+        const towardInner = edge === 'top' ? dy > 0 : dy < 0;
+
+        // Allow sliding along perimeter (left/right past corners)
+        if (nearStart && dx < -CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'left';
+        if (nearEnd && dx > CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'right';
+
+        if (!towardInner || absDy < CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD || absDy <= absDx) return null;
+        if (nearStart) return 'left';
+        if (nearEnd) return 'right';
+        return null;
+    }
+
+    return null;
+}
+
+function resolveCanvasFloatingFinalEdgeFromRelease(edge, dx, dy) {
+    const currentEdge = normalizeCanvasFloatingDockEdge(edge);
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+    const horizontalDominant = absDx >= absDy;
+
+    // Only switch if dragging AWAY from the current edge.
+    // If we have already moved dragging to the new edge (e.g. Left -> Right),
+    // currentEdge will be 'right', and dx will be positive. We should NOT switch back to left.
+
+    if (currentEdge === 'left') {
+        if (horizontalDominant && dx >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'right';
+        return 'left';
+    }
+    if (currentEdge === 'right') {
+        if (horizontalDominant && dx <= -CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'left';
+        return 'right';
+    }
+    if (currentEdge === 'top') {
+        if (!horizontalDominant && dy >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'bottom';
+        return 'top';
+    }
+    if (currentEdge === 'bottom') {
+        if (!horizontalDominant && dy <= -CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'top';
+        return 'bottom';
+    }
+
+    return currentEdge;
+}
+
+function resolveCanvasFloatingFinalDockStateOnRelease(event, dragSession, dx, dy) {
+    const current = dragSession && dragSession.currentDockState
+        ? dragSession.currentDockState
+        : { edge: 'top', ratio: 0 };
+    const targetEdge = resolveCanvasFloatingFinalEdgeFromRelease(current.edge, dx, dy);
+    const targetX = event.clientX - (dragSession.dragOffsetX || 0);
+    const targetY = event.clientY - (dragSession.dragOffsetY || 0);
+
+    const next = resolveCanvasFloatingDockStateFromPointer(targetX, targetY, {
+        mode: dragSession ? dragSession.mode : undefined,
+        currentEdge: targetEdge,
+        forcedEdge: targetEdge
+    });
+    if (!next) {
+        return {
+            edge: normalizeCanvasFloatingDockEdge(targetEdge),
+            ratio: normalizeCanvasFloatingDockRatio(current.ratio)
+        };
+    }
+    return next;
+}
+
+function resolveCanvasFloatingDockStateDuringDrag(event, dragSession, dx, dy) {
+    const current = dragSession && dragSession.currentDockState
+        ? dragSession.currentDockState
+        : { edge: 'top', ratio: 0 };
+    const edge = normalizeCanvasFloatingDockEdge(current.edge);
+    const ratio = normalizeCanvasFloatingDockRatio(current.ratio);
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    let forcedEdge = edge;
+    const adjacent = resolveCanvasFloatingAdjacentEdgeFromCorner(edge, ratio, dx, dy);
+    if (adjacent) {
+        forcedEdge = adjacent;
+    }
+
+    const targetX = event.clientX - (dragSession.dragOffsetX || 0);
+    const targetY = event.clientY - (dragSession.dragOffsetY || 0);
+
+    const next = resolveCanvasFloatingDockStateFromPointer(targetX, targetY, {
+        mode: dragSession ? dragSession.mode : undefined,
+        currentEdge: forcedEdge,
+        forcedEdge
+    });
+
+    if (!next) {
+        return {
+            edge: forcedEdge,
+            ratio
+        };
+    }
+    return next;
+}
+
+function setCanvasFloatingHoldVisualActive(active) {
+    if (!canvasFloatingToolsDragSession || !canvasFloatingToolsDragSession.sourceBtn) return;
+    canvasFloatingToolsDragSession.sourceBtn.classList.toggle('canvas-floating-hold-active', active === true);
+}
+
+function scheduleCanvasFloatingHintReveal() {
+    clearCanvasFloatingHintHoldTimer();
+    canvasFloatingToolsHintHoldTimer = window.setTimeout(() => {
+        canvasFloatingToolsHintHoldTimer = null;
+        if (!canvasFloatingToolsDragSession || !canvasFloatingToolsDragSession.sourceBtn) return;
+        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-show-hints');
+        setCanvasFloatingHoldVisualActive(true);
+    }, CANVAS_FLOATING_HINT_HOLD_DELAY_MS);
+}
+
+function clearCanvasFloatingDragVisualState() {
+    const buttons = getCanvasFloatingDragButtons();
+    buttons.forEach((btn) => {
+        if (!btn) return;
+        btn.classList.remove('canvas-floating-show-hints');
+        btn.classList.remove('canvas-floating-hold-active');
+        btn.classList.remove('canvas-floating-dragging');
+        delete btn.dataset.dragGuide;
+    });
+
+    const zoomIndicator = document.getElementById('canvasZoomIndicator');
+    if (zoomIndicator) {
+        zoomIndicator.classList.remove('canvas-floating-dragging');
+    }
+}
+
+function clearCanvasFloatingToolsDragSession() {
+    clearCanvasFloatingHintHoldTimer();
+    if (!canvasFloatingToolsDragSession) {
+        clearCanvasFloatingDragVisualState();
+        return;
+    }
+
+    const { sourceBtn, pointerId } = canvasFloatingToolsDragSession;
+    try {
+        if (sourceBtn && sourceBtn.hasPointerCapture(pointerId)) {
+            sourceBtn.releasePointerCapture(pointerId);
+        }
+    } catch (_) { }
+
+    canvasFloatingToolsDragSession = null;
+    clearCanvasFloatingDragVisualState();
+}
+
+function beginCanvasFloatingToolsDrag(event, sourceBtn, mode) {
+    if (!sourceBtn) return;
+    if (event.button !== 0) return;
+
+    clearCanvasFloatingToolsDragSession();
+    ensureCanvasFloatingDragHints(sourceBtn);
+
+    const initialState = readCanvasFloatingToolsDockState();
+    canvasFloatingToolsDragSession = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+        sourceBtn,
+        mode,
+        currentDockState: {
+            edge: initialState.edge,
+            ratio: initialState.ratio
+        }
+    };
+    sourceBtn.dataset.dockEdge = initialState.edge;
+
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+    try {
+        const zoomIndicator = document.getElementById('canvasZoomIndicator');
+        if (zoomIndicator) {
+            const rect = zoomIndicator.getBoundingClientRect();
+            dragOffsetX = event.clientX - rect.left;
+            dragOffsetY = event.clientY - rect.top;
+        } else {
+            // Fallback to button if indicator not found (unlikely)
+            const rect = sourceBtn.getBoundingClientRect();
+            dragOffsetX = event.clientX - rect.left;
+            dragOffsetY = event.clientY - rect.top;
+        }
+    } catch (_) { }
+
+    canvasFloatingToolsDragSession.dragOffsetX = dragOffsetX;
+    canvasFloatingToolsDragSession.dragOffsetY = dragOffsetY;
+
+    try {
+        sourceBtn.setPointerCapture(event.pointerId);
+    } catch (_) { }
+
+    sourceBtn.classList.remove('canvas-floating-show-hints');
+    sourceBtn.classList.remove('canvas-floating-hold-active');
+    sourceBtn.classList.remove('canvas-floating-dragging');
+    setCanvasFloatingDragGuide(null);
+    scheduleCanvasFloatingHintReveal();
+    event.preventDefault();
+}
+
+function handleCanvasFloatingToolsDragMove(event) {
+    if (!canvasFloatingToolsDragSession || event.pointerId !== canvasFloatingToolsDragSession.pointerId) return;
+
+    const dx = event.clientX - canvasFloatingToolsDragSession.startX;
+    const dy = event.clientY - canvasFloatingToolsDragSession.startY;
+    const dragDistance = Math.hypot(dx, dy);
+
+    if (!canvasFloatingToolsDragSession.moved && dragDistance >= CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
+        canvasFloatingToolsDragSession.moved = true;
+        clearCanvasFloatingHintHoldTimer();
+        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-show-hints');
+        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-hold-active');
+        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-dragging');
+        const zoomIndicator = document.getElementById('canvasZoomIndicator');
+        if (zoomIndicator) {
+            zoomIndicator.classList.add('canvas-floating-dragging');
+        }
+    }
+
+    if (!canvasFloatingToolsDragSession.moved) return;
+
+    const nextState = resolveCanvasFloatingDockStateDuringDrag(
+        event,
+        canvasFloatingToolsDragSession,
+        dx,
+        dy
+    );
+
+    if (nextState) {
+        const applied = applyCanvasFloatingToolsDockState(nextState, {
+            persist: false,
+            mode: canvasFloatingToolsDragSession.mode
+        });
+        canvasFloatingToolsDragSession.currentDockState = {
+            edge: applied.edge,
+            ratio: applied.ratio
+        };
+        canvasFloatingToolsDragSession.sourceBtn.dataset.dockEdge = applied.edge;
+        setCanvasFloatingDragGuide(getCanvasFloatingGuideDirectionAtCurrentDock(dx, dy, applied));
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+}
+
+function finishCanvasFloatingToolsDrag(event, canceled) {
+    if (!canvasFloatingToolsDragSession || event.pointerId !== canvasFloatingToolsDragSession.pointerId) return;
+
+    const dx = event.clientX - canvasFloatingToolsDragSession.startX;
+    const dy = event.clientY - canvasFloatingToolsDragSession.startY;
+    const dragDistance = Math.hypot(dx, dy);
+    const moved = canvasFloatingToolsDragSession.moved || dragDistance >= CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD;
+    let consumed = false;
+
+    if (!canceled && moved) {
+        const finalState = resolveCanvasFloatingFinalDockStateOnRelease(
+            event,
+            canvasFloatingToolsDragSession,
+            dx,
+            dy
+        );
+
+        if (finalState) {
+            applyCanvasFloatingToolsDockState(finalState, {
+                persist: true,
+                mode: canvasFloatingToolsDragSession.mode
+            });
+            consumed = true;
+        }
+    }
+
+    clearCanvasFloatingToolsDragSession();
+
+    if (consumed) {
+        suppressCanvasFloatingToolsToggleClick = true;
+        window.setTimeout(() => {
+            suppressCanvasFloatingToolsToggleClick = false;
+        }, 0);
+    }
+}
+
+function bindCanvasFloatingToolsGlobalDragEvents() {
+    if (document.documentElement.hasAttribute('data-canvas-floating-global-drag-bound')) return;
+    document.documentElement.setAttribute('data-canvas-floating-global-drag-bound', 'true');
+
+    document.addEventListener('pointermove', handleCanvasFloatingToolsDragMove, true);
+    document.addEventListener('pointerup', (event) => {
+        finishCanvasFloatingToolsDrag(event, false);
+    }, true);
+    document.addEventListener('pointercancel', (event) => {
+        finishCanvasFloatingToolsDrag(event, true);
+    }, true);
+}
+
+function bindCanvasFloatingToolsResizeHandler() {
+    if (canvasFloatingToolsResizeBound) return;
+    canvasFloatingToolsResizeBound = true;
+    window.addEventListener('resize', () => {
+        if (currentView !== 'canvas') return;
+        applyCanvasFloatingToolsDockState(readCanvasFloatingToolsDockState(), { persist: false });
+    });
+}
+
 function updateSidePanelFloatingToolsDisplay() {
     const zoomIndicator = document.getElementById('canvasZoomIndicator');
     const miniToggle = document.getElementById('canvasFloatingToggleMini');
@@ -211,6 +997,7 @@ function updateSidePanelFloatingToolsDisplay() {
         const shouldShowMain = inCanvasView && mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.NONE;
         zoomIndicator.style.display = shouldShowMain ? 'block' : 'none';
         zoomIndicator.classList.toggle('floating-tools-collapsed', mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN);
+        zoomIndicator.dataset.floatingMode = mode;
     }
 
     if (miniToggle) {
@@ -223,6 +1010,17 @@ function updateSidePanelFloatingToolsDisplay() {
     }
     if (inlineToggleBtn && (!inCanvasView || mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN)) {
         inlineToggleBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    if (inCanvasView && mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.NONE) {
+        applyCanvasFloatingToolsDockState(readCanvasFloatingToolsDockState(), {
+            persist: false,
+            mode
+        });
+    }
+
+    if ((!inCanvasView || mode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE) && canvasFloatingToolsDragSession) {
+        clearCanvasFloatingToolsDragSession();
     }
 
     updateFloatingToolsModeControlState();
@@ -3480,7 +4278,21 @@ function setupCanvasFloatingToolsMenu() {
     if (toggleBtn.dataset.bound === 'true') return;
     toggleBtn.dataset.bound = 'true';
 
+    ensureCanvasFloatingDragHints(toggleBtn);
+    bindCanvasFloatingToolsGlobalDragEvents();
+    bindCanvasFloatingToolsResizeHandler();
+
+    toggleBtn.addEventListener('pointerdown', (e) => {
+        beginCanvasFloatingToolsDrag(e, toggleBtn, SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN);
+    });
+
     toggleBtn.addEventListener('click', (e) => {
+        if (suppressCanvasFloatingToolsToggleClick) {
+            suppressCanvasFloatingToolsToggleClick = false;
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
         e.preventDefault();
         applySidePanelFloatingToolsMode(SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN);
     });
@@ -3491,7 +4303,21 @@ function setupCanvasFloatingMiniToggle() {
     if (!btn || btn.dataset.bound === 'true') return;
     btn.dataset.bound = 'true';
 
+    ensureCanvasFloatingDragHints(btn);
+    bindCanvasFloatingToolsGlobalDragEvents();
+    bindCanvasFloatingToolsResizeHandler();
+
+    btn.addEventListener('pointerdown', (e) => {
+        beginCanvasFloatingToolsDrag(e, btn, SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN);
+    });
+
     btn.addEventListener('click', (e) => {
+        if (suppressCanvasFloatingToolsToggleClick) {
+            suppressCanvasFloatingToolsToggleClick = false;
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
         e.preventDefault();
         applySidePanelFloatingToolsMode(SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN);
     });
@@ -7653,13 +8479,13 @@ async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, star
                                     icon.classList.add('fa-folder-open');
                                 }
                                 // 如果这个节点也需要懒加载，递归加载
-                                 if (item.dataset.childrenLoaded === 'false' && item.dataset.hasChildren === 'true') {
-                                     setTimeout(() => {
-                                         loadPermanentFolderChildrenLazy(item.dataset.nodeId, children, 0, null, isReadOnly);
-                                     }, 10);
-                                 }
-                             }
-                         }
+                                if (item.dataset.childrenLoaded === 'false' && item.dataset.hasChildren === 'true') {
+                                    setTimeout(() => {
+                                        loadPermanentFolderChildrenLazy(item.dataset.nodeId, children, 0, null, isReadOnly);
+                                    }, 10);
+                                }
+                            }
+                        }
                     });
                 }
             }
@@ -9040,15 +9866,15 @@ function restoreTreeExpandState(treeContainer) {
         if (nodesToLazyLoad.length > 0) {
             console.log('[树状态] Canvas懒加载：需要加载', nodesToLazyLoad.length, '个文件夹的子节点');
             // 延迟加载，避免阻塞渲染
-                setTimeout(() => {
-                    nodesToLazyLoad.forEach(({ parentId, children }) => {
-                        try {
-                            loadPermanentFolderChildrenLazy(parentId, children, 0, null, isReadOnlyChangesPreview);
-                        } catch (e) {
-                            console.warn('[树状态] 懒加载子节点失败:', parentId, e);
-                        }
-                    });
-                }, 50);
+            setTimeout(() => {
+                nodesToLazyLoad.forEach(({ parentId, children }) => {
+                    try {
+                        loadPermanentFolderChildrenLazy(parentId, children, 0, null, isReadOnlyChangesPreview);
+                    } catch (e) {
+                        console.warn('[树状态] 懒加载子节点失败:', parentId, e);
+                    }
+                });
+            }, 50);
         }
 
         console.log('[树状态] 恢复展开节点:', expandedIds.length);
@@ -11187,19 +12013,19 @@ function setupBookmarkListener() {
     console.log('[书签监听] 设置书签API监听器');
 
     // 书签创建
-browserAPI.bookmarks.onCreated.addListener(async (id, bookmark) => {
+    browserAPI.bookmarks.onCreated.addListener(async (id, bookmark) => {
         console.log('[书签监听] 书签创建:', bookmark.title);
         try {
             addBookmarkToCache(bookmark);
-        // 支持 canvas 视图（包含永久栏目的书签树）
-        if (currentView === 'canvas') {
-            await applyIncrementalCreateToTree(id, bookmark);
-            applyIncrementalCreateToCachedCurrentTree(id, bookmark);
-            updateTreeChangeMapForCreate(id);
-            scheduleCanvasPathBadgeRefresh('onCreated');
-            scheduleCachedCurrentTreeSnapshotRefresh('onCreated');
-        }
-        clearCanvasLazyChangeHints('onCreated');
+            // 支持 canvas 视图（包含永久栏目的书签树）
+            if (currentView === 'canvas') {
+                await applyIncrementalCreateToTree(id, bookmark);
+                applyIncrementalCreateToCachedCurrentTree(id, bookmark);
+                updateTreeChangeMapForCreate(id);
+                scheduleCanvasPathBadgeRefresh('onCreated');
+                scheduleCachedCurrentTreeSnapshotRefresh('onCreated');
+            }
+            clearCanvasLazyChangeHints('onCreated');
         } catch (e) {
             // 仅记录错误，不触发完全刷新以避免页面闪烁和滚动位置丢失
             console.warn('[书签监听] onCreated 处理异常:', e);
@@ -11207,25 +12033,25 @@ browserAPI.bookmarks.onCreated.addListener(async (id, bookmark) => {
     });
 
     // 书签删除
-browserAPI.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
+    browserAPI.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
         console.log('[书签监听] 书签删除:', id);
         try {
             removeBookmarkFromCache(id);
-        // 删除对应的 favicon 缓存
-        // removeInfo.node 包含被删除书签的信息（包括 URL）
-        if (removeInfo.node && removeInfo.node.url) {
-            FaviconCache.clear(removeInfo.node.url);
-        }
+            // 删除对应的 favicon 缓存
+            // removeInfo.node 包含被删除书签的信息（包括 URL）
+            if (removeInfo.node && removeInfo.node.url) {
+                FaviconCache.clear(removeInfo.node.url);
+            }
 
-        // 支持 canvas 视图（包含永久栏目的书签树）
-        if (currentView === 'canvas') {
-            applyIncrementalRemoveFromTree(id);
-            applyIncrementalRemoveFromCachedCurrentTree(id, removeInfo);
-            updateTreeChangeMapForRemove(id, removeInfo);
-            scheduleCanvasPathBadgeRefresh('onRemoved');
-            scheduleCachedCurrentTreeSnapshotRefresh('onRemoved');
-        }
-        clearCanvasLazyChangeHints('onRemoved');
+            // 支持 canvas 视图（包含永久栏目的书签树）
+            if (currentView === 'canvas') {
+                applyIncrementalRemoveFromTree(id);
+                applyIncrementalRemoveFromCachedCurrentTree(id, removeInfo);
+                updateTreeChangeMapForRemove(id, removeInfo);
+                scheduleCanvasPathBadgeRefresh('onRemoved');
+                scheduleCachedCurrentTreeSnapshotRefresh('onRemoved');
+            }
+            clearCanvasLazyChangeHints('onRemoved');
         } catch (e) {
             // 仅记录错误，不触发完全刷新以避免页面闪烁和滚动位置丢失
             console.warn('[书签监听] onRemoved 处理异常:', e);
@@ -11233,7 +12059,7 @@ browserAPI.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
     });
 
     // 书签修改
-browserAPI.bookmarks.onChanged.addListener(async (id, changeInfo) => {
+    browserAPI.bookmarks.onChanged.addListener(async (id, changeInfo) => {
         console.log('[书签监听] 书签修改:', changeInfo);
         try {
             updateBookmarkInCache(id, changeInfo);
@@ -11254,7 +12080,7 @@ browserAPI.bookmarks.onChanged.addListener(async (id, changeInfo) => {
     });
 
     // 书签移动
-browserAPI.bookmarks.onMoved.addListener(async (id, moveInfo) => {
+    browserAPI.bookmarks.onMoved.addListener(async (id, moveInfo) => {
         console.log('[书签监听] 书签移动:', id);
 
         try {
@@ -11263,15 +12089,15 @@ browserAPI.bookmarks.onMoved.addListener(async (id, moveInfo) => {
             explicitMovedIds.set(id, Date.now() + Infinity);
             schedulePersistExplicitMovedIds();
 
-        // 支持 canvas 视图（包含永久栏目的书签树）
-        if (currentView === 'canvas') {
-            await applyIncrementalMoveToTree(id, moveInfo);
-            applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
-            updateTreeChangeMapForMove(id, moveInfo);
-            scheduleCanvasPathBadgeRefresh('onMoved');
-            scheduleCachedCurrentTreeSnapshotRefresh('onMoved');
-        }
-        clearCanvasLazyChangeHints('onMoved');
+            // 支持 canvas 视图（包含永久栏目的书签树）
+            if (currentView === 'canvas') {
+                await applyIncrementalMoveToTree(id, moveInfo);
+                applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
+                updateTreeChangeMapForMove(id, moveInfo);
+                scheduleCanvasPathBadgeRefresh('onMoved');
+                scheduleCachedCurrentTreeSnapshotRefresh('onMoved');
+            }
+            clearCanvasLazyChangeHints('onMoved');
         } catch (e) {
             // 仅记录错误，不触发完全刷新以避免页面闪烁和滚动位置丢失
             console.warn('[书签监听] onMoved 处理异常:', e);
