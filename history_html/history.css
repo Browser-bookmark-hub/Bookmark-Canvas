@@ -47,7 +47,7 @@
     --sidebar-width: 260px;
     --content-area-left: var(--sidebar-width);
     --content-area-right: 0px;
-    --sidebar-toggle-top: 65%;
+    --sidebar-toggle-top: 60%;
     --header-height: 60px;
     --search-container-width: 420px;
     --search-container-min-width: 220px;
@@ -307,9 +307,9 @@ html.layout-preload-active.layout-preload-header-dock-bottom:not(.layout-preload
 
 html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden #canvasZoomIndicator {
     display: block !important;
-    /* Default: left dock, centered */
-    left: 0;
-    top: calc(100% * var(--preload-canvas-floating-dock-ratio, 0.5));
+    transition: none !important;
+    left: calc(10px + (100% - 44px) * var(--preload-canvas-floating-dock-ratio, 0));
+    top: 10px;
     width: 0;
     min-width: 0;
     height: 0;
@@ -322,28 +322,32 @@ html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden #ca
     overflow: visible;
 }
 
+html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden #canvasZoomIndicator .canvas-floating-toggle-mini {
+    transition: none !important;
+}
+
 /* Preload indicator position: Right Dock */
 html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden.preload-canvas-floating-dock-right #canvasZoomIndicator {
-    left: 100%;
-    top: calc(100% * var(--preload-canvas-floating-dock-ratio, 0.5));
+    left: calc(100% - 28px);
+    top: calc(10px + (100% - 44px) * var(--preload-canvas-floating-dock-ratio, 0));
 }
 
 /* Preload indicator position: Top Dock */
 html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden.preload-canvas-floating-dock-top #canvasZoomIndicator {
-    left: calc(100% * var(--preload-canvas-floating-dock-ratio, 0.5));
-    top: 0;
+    left: calc(10px + (100% - 44px) * var(--preload-canvas-floating-dock-ratio, 0));
+    top: 10px;
 }
 
 /* Preload indicator position: Bottom Dock */
 html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden.preload-canvas-floating-dock-bottom #canvasZoomIndicator {
-    left: calc(100% * var(--preload-canvas-floating-dock-ratio, 0.5));
-    top: 100%;
+    left: calc(10px + (100% - 44px) * var(--preload-canvas-floating-dock-ratio, 0));
+    top: calc(100% - 28px);
 }
 
 /* Preload indicator position: Left Dock (explicit) */
 html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden.preload-canvas-floating-dock-left #canvasZoomIndicator {
-    left: 0;
-    top: calc(100% * var(--preload-canvas-floating-dock-ratio, 0.5));
+    left: 10px;
+    top: calc(10px + (100% - 44px) * var(--preload-canvas-floating-dock-ratio, 0));
 }
 
 html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden #canvasZoomIndicator .canvas-zoom-header,
@@ -358,13 +362,13 @@ html.layout-preload-active.canvas-view-active.layout-preload-floating-hidden .ca
     display: inline-flex !important;
     opacity: 1;
     pointer-events: auto;
-    /* Default fallback: Left, Centered */
-    left: 4px;
-    top: 0;
-    width: 18px;
-    height: 24px;
-    transform: translate(0, -50%);
-    border-radius: 0 4px 4px 0;
+    /* Default fallback: Top, Left anchored */
+    left: 12px;
+    top: 4px;
+    width: 24px;
+    height: 18px;
+    transform: translate(0, 0);
+    border-radius: 0 0 4px 4px;
 }
 
 /* Preload mini toggle: Right Dock */
@@ -382,10 +386,10 @@ html.layout-preload-active.canvas-view-active.preload-canvas-floating-dock-right
 html.layout-preload-active.canvas-view-active.preload-canvas-floating-dock-top .canvas-floating-toggle-mini {
     top: 4px;
     bottom: auto;
-    left: 0;
+    left: 12px;
     width: 24px;
     height: 18px;
-    transform: translate(-50%, 0);
+    transform: translate(0, 0);
     border-radius: 0 0 4px 4px;
 }
 
@@ -393,10 +397,10 @@ html.layout-preload-active.canvas-view-active.preload-canvas-floating-dock-top .
 html.layout-preload-active.canvas-view-active.preload-canvas-floating-dock-bottom .canvas-floating-toggle-mini {
     top: auto;
     bottom: 4px;
-    left: 0;
+    left: 12px;
     width: 24px;
     height: 18px;
-    transform: translate(-50%, 0);
+    transform: translate(0, 0);
     border-radius: 4px 4px 0 0;
 }
 
@@ -2126,7 +2130,7 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 .sidebar-toggle {
     position: absolute;
     left: 100%;
-    top: var(--sidebar-toggle-top, 65%);
+    top: var(--sidebar-toggle-top, 60%);
     bottom: auto;
     transform: translate(-50%, -50%);
     width: 30px;
@@ -10284,8 +10288,6 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
 }
 
 .canvas-zoom-indicator.floating-tools-collapsed {
-    left: 0;
-    top: 50%;
     width: 0;
     min-width: 0;
     height: 0;
@@ -10473,6 +10475,12 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     width: 32px;
     height: 32px;
     transform: translate(-50%, 0) scale(1.05);
+}
+
+.canvas-zoom-indicator.floating-tools-collapsed[data-dock-edge="top"] .canvas-floating-toggle-mini,
+.canvas-zoom-indicator.floating-tools-collapsed[data-dock-edge="bottom"] .canvas-floating-toggle-mini {
+    left: 12px;
+    transform: translate(0, 0);
 }
 
 /* BOTTOM */

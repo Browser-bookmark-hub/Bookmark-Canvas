@@ -100,15 +100,15 @@
           const legacy = readStorage('sidepanelFloatingToolsVisible');
           return legacy === 'true'
             ? SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN
-            : SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+            : (legacy === 'false'
+              ? SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN
+              : SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN);
         }
         const canvasMode = readStorage('canvasFloatingToolsMode');
         if (canvasMode) return normalizeFloatingToolsMode(canvasMode);
         return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
       } catch (_) {
-        return isSidePanel
-          ? SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN
-          : SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
+        return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
       }
     };
 
@@ -183,6 +183,44 @@
       root.classList.add('side-panel-mode');
     }
 
+    const headerLayoutKeys = isSidePanelMode
+      ? {
+        collapseState: 'sidepanelHeaderCollapseState',
+        dockSide: 'sidepanelHeaderDockSide',
+        compactLeftLegacy: 'sidepanelHeaderCompactToggleLeft',
+        compactLeftTop: 'sidepanelHeaderCompactToggleLeftTop',
+        compactLeftBottom: 'sidepanelHeaderCompactToggleLeftBottom'
+      }
+      : {
+        collapseState: 'headerCollapseState',
+        dockSide: 'headerDockSide',
+        compactLeftLegacy: 'headerCompactToggleLeft',
+        compactLeftTop: 'headerCompactToggleLeftTop',
+        compactLeftBottom: 'headerCompactToggleLeftBottom'
+      };
+
+    const sidebarLayoutKeys = isSidePanelMode
+      ? {
+        state: 'sidepanelSidebarCollapseState',
+        legacyCollapsed: 'sidepanelSidebarCollapsed',
+        manualOverride: 'sidepanelSidebarManualOverride',
+        dockSide: 'sidepanelSidebarDockSide',
+        expandedWidthLeft: 'sidepanelSidebarExpandedWidthLeft',
+        expandedWidthRight: 'sidepanelSidebarExpandedWidthRight'
+      }
+      : {
+        state: 'sidebarCollapseState',
+        legacyCollapsed: 'sidebarCollapsed',
+        manualOverride: 'sidebarManualOverride',
+        dockSide: 'sidebarDockSide',
+        expandedWidthLeft: 'sidebarExpandedWidthLeft',
+        expandedWidthRight: 'sidebarExpandedWidthRight'
+      };
+
+    const floatingDockStorageKey = isSidePanelMode
+      ? 'sidepanelFloatingToolsDockV1'
+      : 'canvasFloatingToolsDockV1';
+
     const viewFromUrl = params.get('view');
     const viewFromStorage = readStorage('lastActiveView');
     const initialView = viewFromUrl || viewFromStorage || 'canvas';
@@ -211,14 +249,14 @@
       }
     }
 
-    const headerState = normalizeHeaderState(readStorage('headerCollapseState'));
-    const headerDock = normalizeHeaderDock(readStorage('headerDockSide'));
+    const headerState = normalizeHeaderState(readStorage(headerLayoutKeys.collapseState));
+    const headerDock = normalizeHeaderDock(readStorage(headerLayoutKeys.dockSide));
     if (headerState === 'compact') root.classList.add('layout-preload-header-compact');
     if (headerDock === 'bottom') root.classList.add('layout-preload-header-dock-bottom');
 
-    const legacyCompactLeft = normalizeCompactLeft(readStorage('headerCompactToggleLeft'));
-    const topCompactLeft = normalizeCompactLeft(readStorage('headerCompactToggleLeftTop'));
-    const bottomCompactLeft = normalizeCompactLeft(readStorage('headerCompactToggleLeftBottom'));
+    const legacyCompactLeft = normalizeCompactLeft(readStorage(headerLayoutKeys.compactLeftLegacy));
+    const topCompactLeft = normalizeCompactLeft(readStorage(headerLayoutKeys.compactLeftTop));
+    const bottomCompactLeft = normalizeCompactLeft(readStorage(headerLayoutKeys.compactLeftBottom));
     const fallbackCompactLeft = 18;
     const preferredDockLeft = headerDock === 'bottom' ? bottomCompactLeft : topCompactLeft;
     const alternateDockLeft = headerDock === 'bottom' ? topCompactLeft : bottomCompactLeft;
@@ -236,36 +274,42 @@
       if (otherRaw) {
         const other = JSON.parse(otherRaw);
         if (other && typeof other === 'object') {
-          const mode = String(other.directoryCollapseMode || '').toLowerCase();
+          const modeKey = isSidePanelMode ? 'sidepanelDirectoryCollapseMode' : 'directoryCollapseMode';
+          const widthKey = isSidePanelMode ? 'sidepanelDirectoryAutoCollapseWidth' : 'directoryAutoCollapseWidth';
+          const modeRaw = other[modeKey] != null ? other[modeKey] : other.directoryCollapseMode;
+          const widthRaw = other[widthKey] != null ? other[widthKey] : other.directoryAutoCollapseWidth;
+          const mode = String(modeRaw || '').toLowerCase();
           if (mode === 'manual' || mode === 'auto') collapseMode = mode;
-          autoCollapseWidth = normalizeAutoCollapseWidth(other.directoryAutoCollapseWidth);
+          autoCollapseWidth = normalizeAutoCollapseWidth(widthRaw);
         }
       }
     } catch (_) { }
 
     const persistedSidebarState = (() => {
-      const savedState = normalizeSidebarState(readStorage('sidebarCollapseState'));
+      const savedState = normalizeSidebarState(readStorage(sidebarLayoutKeys.state));
       if (savedState) return savedState;
-      return readStorage('sidebarCollapsed') === 'true' ? 'compact' : 'expanded';
+      const legacy = readStorage(sidebarLayoutKeys.legacyCollapsed);
+      if (legacy === 'true') return 'compact';
+      if (legacy === 'false') return 'expanded';
+      return isSidePanelMode ? 'compact' : 'expanded';
     })();
 
-    const hasManualOverride = readStorage('sidebarManualOverride') === 'true';
-    const sidebarDock = normalizeSidebarDock(readStorage('sidebarDockSide'));
+    const hasManualOverride = readStorage(sidebarLayoutKeys.manualOverride) === 'true';
+    const sidebarDock = normalizeSidebarDock(readStorage(sidebarLayoutKeys.dockSide));
+    const hasStoredSidebarState = readStorage(sidebarLayoutKeys.state) != null
+      || readStorage(sidebarLayoutKeys.legacyCollapsed) != null;
 
-    let initialSidebarState = 'compact';
-    if (!isSidePanelMode) {
-      if (collapseMode === 'manual') {
-        initialSidebarState = persistedSidebarState;
-      } else if (hasManualOverride) {
-        initialSidebarState = persistedSidebarState;
-      } else {
-        initialSidebarState = (window.innerWidth <= autoCollapseWidth) ? 'compact' : 'expanded';
-      }
+    let initialSidebarState = persistedSidebarState;
+    if (collapseMode === 'auto' && !hasManualOverride) {
+      initialSidebarState = (window.innerWidth <= autoCollapseWidth) ? 'compact' : 'expanded';
+    }
+    if (!hasStoredSidebarState) {
+      initialSidebarState = isSidePanelMode ? 'compact' : 'expanded';
     }
 
     const expandedWidthKey = sidebarDock === 'right'
-      ? 'sidebarExpandedWidthRight'
-      : 'sidebarExpandedWidthLeft';
+      ? sidebarLayoutKeys.expandedWidthRight
+      : sidebarLayoutKeys.expandedWidthLeft;
     const expandedWidth = normalizeSidebarWidth(readStorage(expandedWidthKey)) || 260;
     const effectiveWidth = initialSidebarState === 'compact' ? 0 : expandedWidth;
     const widthPx = String(Math.max(0, Math.round(effectiveWidth))) + 'px';
@@ -283,7 +327,7 @@
     }
 
     try {
-      const dockRaw = readStorage('canvasFloatingToolsDockV1');
+      const dockRaw = readStorage(floatingDockStorageKey);
       if (dockRaw) {
         const parsed = JSON.parse(dockRaw);
         if (parsed && parsed.edge) {

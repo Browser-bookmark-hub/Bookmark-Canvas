@@ -1493,6 +1493,8 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     menuLocatableColorSync: true, // 目录栏可定位条目颜色同步
     directoryCollapseMode: 'auto', // 目录栏折叠模式：auto / manual
     directoryAutoCollapseWidth: 600, // 自动折叠阈值（px）
+    sidepanelDirectoryCollapseMode: 'auto', // 侧边栏目录栏折叠模式：auto / manual
+    sidepanelDirectoryAutoCollapseWidth: 600, // 侧边栏目录栏自动折叠阈值（px）
     tempColorFollow: true, // 临时栏目颜色跟随
     tempColorUnlockSync: false, // 解锁后立即继承父色
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
@@ -1698,6 +1700,24 @@ function normalizeCanvasOtherSettings(input) {
         2000,
         out.directoryAutoCollapseWidth
     );
+
+    if (typeof input.sidepanelDirectoryCollapseMode === 'string') {
+        const mode = input.sidepanelDirectoryCollapseMode.toLowerCase();
+        if (mode === 'auto' || mode === 'manual') out.sidepanelDirectoryCollapseMode = mode;
+    } else if (typeof input.directoryCollapseMode === 'string') {
+        out.sidepanelDirectoryCollapseMode = out.directoryCollapseMode;
+    }
+
+    out.sidepanelDirectoryAutoCollapseWidth = __clampNumber(
+        input.sidepanelDirectoryAutoCollapseWidth,
+        320,
+        2000,
+        out.sidepanelDirectoryAutoCollapseWidth
+    );
+    if (input.sidepanelDirectoryAutoCollapseWidth == null && input.directoryAutoCollapseWidth != null) {
+        out.sidepanelDirectoryAutoCollapseWidth = out.directoryAutoCollapseWidth;
+    }
+
     out.menuColorSync = !!out.menuLocatableColorSync;
     if (typeof input.tempColorFollow === 'boolean') out.tempColorFollow = input.tempColorFollow;
     if (typeof input.tempColorUnlockSync === 'boolean') out.tempColorUnlockSync = input.tempColorUnlockSync;
@@ -1719,6 +1739,78 @@ function getCanvasOtherSettings() {
         CanvasState.otherSettings = __cloneDefaultOtherSettings();
     }
     return CanvasState.otherSettings;
+}
+
+function __isCanvasInSidePanelMode() {
+    return window.__SIDE_PANEL_MODE__ === true;
+}
+
+function getCanvasDirectoryCollapsePrefs(settingsOverride = null, options = {}) {
+    const forSidePanel = options && options.forSidePanel === true;
+    const rawSettings = settingsOverride || getCanvasOtherSettings();
+    const settings = normalizeCanvasOtherSettings(rawSettings);
+
+    const modeRaw = forSidePanel
+        ? (settings.sidepanelDirectoryCollapseMode != null
+            ? settings.sidepanelDirectoryCollapseMode
+            : settings.directoryCollapseMode)
+        : settings.directoryCollapseMode;
+
+    const widthRaw = forSidePanel
+        ? (settings.sidepanelDirectoryAutoCollapseWidth != null
+            ? settings.sidepanelDirectoryAutoCollapseWidth
+            : settings.directoryAutoCollapseWidth)
+        : settings.directoryAutoCollapseWidth;
+
+    const mode = String(modeRaw || '').toLowerCase() === 'manual' ? 'manual' : 'auto';
+    const width = __clampNumber(widthRaw, 320, 2000, 600);
+    return { mode, width };
+}
+
+function setCanvasDirectoryCollapsePrefs(nextPrefs, options = {}) {
+    const prefs = nextPrefs && typeof nextPrefs === 'object' ? nextPrefs : {};
+    const forSidePanel = options && options.forSidePanel === true;
+    const dispatch = !(options && options.dispatch === false);
+
+    const mode = String(prefs.mode || '').toLowerCase() === 'manual' ? 'manual' : 'auto';
+    const width = __clampNumber(prefs.width, 320, 2000, 600);
+
+    let baseSettings = null;
+    try {
+        const raw = localStorage.getItem(CANVAS_OTHER_SETTINGS_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                baseSettings = parsed;
+            }
+        }
+    } catch (_) { }
+
+    if (!baseSettings) {
+        baseSettings = getCanvasOtherSettings();
+    }
+
+    const settings = normalizeCanvasOtherSettings(baseSettings);
+    if (forSidePanel) {
+        settings.sidepanelDirectoryCollapseMode = mode;
+        settings.sidepanelDirectoryAutoCollapseWidth = width;
+    } else {
+        settings.directoryCollapseMode = mode;
+        settings.directoryAutoCollapseWidth = width;
+    }
+
+    CanvasState.otherSettings = settings;
+    try {
+        localStorage.setItem(CANVAS_OTHER_SETTINGS_KEY, JSON.stringify(settings));
+    } catch (_) { }
+
+    if (dispatch) {
+        try {
+            window.dispatchEvent(new CustomEvent('canvas-other-settings-updated', { detail: settings }));
+        } catch (_) { }
+    }
+
+    return { mode, width, settings };
 }
 
 function loadCanvasAppearanceSettings() {
@@ -3890,10 +3982,11 @@ function initCanvasView() {
             } else if (mode === 'hidden' || mode === 'shown') {
                 shouldShow = true;
             } else if (window.__SIDE_PANEL_MODE__ === true) {
-                shouldShow = localStorage.getItem('sidepanelFloatingToolsVisible') === 'true';
+                const legacyVisible = localStorage.getItem('sidepanelFloatingToolsVisible');
+                shouldShow = legacyVisible == null ? true : legacyVisible === 'true';
             }
         } catch (_) {
-            shouldShow = window.__SIDE_PANEL_MODE__ !== true;
+            shouldShow = true;
         }
         zoomIndicator.style.display = shouldShow ? 'block' : 'none';
     }
@@ -6176,7 +6269,12 @@ function openCanvasSidePanelSettingsModal() {
     };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
+
+    const previousCleanup = typeof modal.__cleanup === 'function' ? modal.__cleanup : null;
     modal.__cleanup = () => {
+        if (previousCleanup) {
+            try { previousCleanup(); } catch (_) { }
+        }
         clearInterval(pollTimer);
         window.removeEventListener('focus', onFocus);
         document.removeEventListener('visibilitychange', onVisibility);
@@ -6202,6 +6300,10 @@ function createCanvasSidePanelSettingsModal() {
     const title = isEn ? 'Side Panel' : '侧边栏管理';
     const positionLabel = isEn ? 'Side panel position' : '侧边栏位置';
     const shortcutLabel = isEn ? 'Side panel shortcut' : '侧边栏快捷键';
+    const directoryCollapseLabel = isEn ? 'Directory collapse mode' : '目录栏折叠方式';
+    const manualText = isEn ? 'Manual' : '手动';
+    const autoText = isEn ? 'Auto' : '自动';
+    const autoWidthLabel = isEn ? 'Auto collapse width (px)' : '自动折叠阈值（px）';
     const detectingText = isEn ? 'Detecting...' : '检测中...';
     const openSettingsText = isEn ? 'Browser settings' : '浏览器设置';
     const openShortcutSettingsText = isEn ? 'Shortcut settings' : '快捷键设置';
@@ -6234,6 +6336,32 @@ function createCanvasSidePanelSettingsModal() {
                             <button class="sidepanel-settings-btn" id="canvasSidePanelShortcutOpenSettingsBtnMain" type="button">${openShortcutSettingsText}</button>
                         </div>
                     </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${directoryCollapseLabel}</span>
+                            <button class="perf-help-btn" id="sidePanelSidebarCollapseHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-mode-toggle" id="sidePanelSidebarCollapseModeGroup">
+                                <label class="appearance-radio">
+                                    <input type="radio" name="sidepanel-sidebar-collapse-mode" value="manual">
+                                    <span>${manualText}</span>
+                                </label>
+                                <label class="appearance-radio">
+                                    <input type="radio" name="sidepanel-sidebar-collapse-mode" value="auto">
+                                    <span>${autoText}</span>
+                                </label>
+                            </div>
+                            <div class="appearance-size-inputs" id="sidePanelSidebarAutoCollapseInputs">
+                                <label class="appearance-inline-input" for="sidePanelSidebarAutoCollapseWidth">
+                                    <span>${autoWidthLabel}</span>
+                                    <input type="number" id="sidePanelSidebarAutoCollapseWidth" min="320" max="2000" step="10">
+                                </label>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="perf-help-popover" id="sidePanelHelpPopover">
@@ -6241,6 +6369,13 @@ function createCanvasSidePanelSettingsModal() {
                     ${isEn
                 ? '<b>Edge</b>: The sidebar is fixed on the right by default and cannot be moved to the left.'
                 : '<b>Edge</b>：侧边栏默认固定在右侧，无法移动到左侧。'}
+                </div>
+            </div>
+            <div class="perf-help-popover" id="sidePanelSidebarCollapseHelpPopover">
+                <div class="perf-help-popover-content">
+                    ${isEn
+                ? '<b>Auto</b>: directory panel expands/collapses by the auto width threshold.<br><b>Manual takeover</b>: once you click the directory toggle (expand/collapse) in HTML page or side panel, it switches to Manual immediately.<br><b>Reset</b>: click <b>Auto</b> here to return to automatic mode.<br><b>Sync</b>: this setting is synchronized in both places.'
+                : '<b>自动</b>：目录栏会按“自动折叠阈值”自动展开/收起。<br><b>手动接管</b>：只要你在 HTML 页面或侧边栏手动点击目录栏开关（展开/收起），就会立即切到手动。<br><b>回正</b>：在这里点击<b>自动</b>按钮即可恢复自动模式。<br><b>同步</b>：侧边栏与html页面的这个开关是同步的。'}
                 </div>
             </div>
         </div>
@@ -6283,8 +6418,102 @@ function createCanvasSidePanelSettingsModal() {
         });
     }
 
+    const sidePanelCollapseModeRadios = modal.querySelectorAll('input[name="sidepanel-sidebar-collapse-mode"]');
+    const sidePanelAutoWidthInput = modal.querySelector('#sidePanelSidebarAutoCollapseWidth');
+    const sidePanelAutoInputs = modal.querySelector('#sidePanelSidebarAutoCollapseInputs');
+
+    const getSidePanelCollapseModeFromUI = () => {
+        let mode = 'auto';
+        sidePanelCollapseModeRadios.forEach((radio) => {
+            if (radio.checked) {
+                mode = radio.value === 'manual' ? 'manual' : 'auto';
+            }
+        });
+        return mode;
+    };
+
+    const updateSidePanelAutoInputs = () => {
+        if (!sidePanelAutoInputs) return;
+        const useAuto = getSidePanelCollapseModeFromUI() === 'auto';
+        sidePanelAutoInputs.classList.toggle('is-disabled', !useAuto);
+        sidePanelAutoInputs.classList.toggle('is-hidden', !useAuto);
+    };
+
+    const syncSidePanelCollapsePrefsToUI = (settingsOverride = null) => {
+        const prefs = getCanvasDirectoryCollapsePrefs(settingsOverride, {
+            forSidePanel: __isCanvasInSidePanelMode()
+        });
+        __setAppearanceRadioGroup(modal, 'sidepanel-sidebar-collapse-mode', prefs.mode || 'auto');
+        if (sidePanelAutoWidthInput) {
+            sidePanelAutoWidthInput.value = String(__clampNumber(prefs.width, 320, 2000, 600));
+        }
+        updateSidePanelAutoInputs();
+    };
+
+    let sidePanelCollapseSaveTimer = null;
+    const scheduleSidePanelCollapseSave = () => {
+        if (sidePanelCollapseSaveTimer) {
+            clearTimeout(sidePanelCollapseSaveTimer);
+        }
+        sidePanelCollapseSaveTimer = setTimeout(() => {
+            sidePanelCollapseSaveTimer = null;
+            const mode = getSidePanelCollapseModeFromUI();
+            const widthRaw = sidePanelAutoWidthInput ? parseInt(sidePanelAutoWidthInput.value, 10) : 600;
+            const width = __clampNumber(widthRaw, 320, 2000, 600);
+            if (sidePanelAutoWidthInput) {
+                sidePanelAutoWidthInput.value = String(width);
+            }
+            setCanvasDirectoryCollapsePrefs(
+                { mode, width },
+                {
+                    forSidePanel: __isCanvasInSidePanelMode(),
+                    dispatch: true
+                }
+            );
+        }, 120);
+    };
+
+    sidePanelCollapseModeRadios.forEach((radio) => {
+        radio.addEventListener('change', () => {
+            updateSidePanelAutoInputs();
+            scheduleSidePanelCollapseSave();
+        });
+    });
+
+    if (sidePanelAutoWidthInput) {
+        const onWidthChange = () => {
+            const width = __clampNumber(parseInt(sidePanelAutoWidthInput.value, 10), 320, 2000, 600);
+            sidePanelAutoWidthInput.value = String(width);
+            scheduleSidePanelCollapseSave();
+        };
+        sidePanelAutoWidthInput.addEventListener('input', onWidthChange);
+        sidePanelAutoWidthInput.addEventListener('change', onWidthChange);
+    }
+
+    const onCanvasOtherSettingsUpdated = (event) => {
+        const detail = event && event.detail;
+        if (!detail || typeof detail !== 'object') return;
+        syncSidePanelCollapsePrefsToUI(detail);
+    };
+    window.addEventListener('canvas-other-settings-updated', onCanvasOtherSettingsUpdated);
+    syncSidePanelCollapsePrefsToUI();
+
+    const previousCleanup = typeof modal.__cleanup === 'function' ? modal.__cleanup : null;
+    modal.__cleanup = () => {
+        if (previousCleanup) {
+            try { previousCleanup(); } catch (_) { }
+        }
+        if (sidePanelCollapseSaveTimer) {
+            clearTimeout(sidePanelCollapseSaveTimer);
+            sidePanelCollapseSaveTimer = null;
+        }
+        window.removeEventListener('canvas-other-settings-updated', onCanvasOtherSettingsUpdated);
+    };
+
     const helpBtn = modal.querySelector('#sidePanelHelpBtn');
     const helpPopover = modal.querySelector('#sidePanelHelpPopover');
+    const sidePanelSidebarCollapseHelpBtn = modal.querySelector('#sidePanelSidebarCollapseHelpBtn');
+    const sidePanelSidebarCollapseHelpPopover = modal.querySelector('#sidePanelSidebarCollapseHelpPopover');
     const showPopover = (btn, popover) => {
         if (!btn || !popover) return;
         modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
@@ -6297,13 +6526,16 @@ function createCanvasSidePanelSettingsModal() {
     const hidePopovers = () => {
         modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
     };
-    if (helpBtn && helpPopover) {
-        helpBtn.addEventListener('click', (e) => {
+    const bindSidePanelHelpPopover = (btn, popover) => {
+        if (!btn || !popover) return;
+        btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (helpPopover.classList.contains('show')) hidePopovers();
-            else showPopover(helpBtn, helpPopover);
+            if (popover.classList.contains('show')) hidePopovers();
+            else showPopover(btn, popover);
         });
-    }
+    };
+    bindSidePanelHelpPopover(helpBtn, helpPopover);
+    bindSidePanelHelpPopover(sidePanelSidebarCollapseHelpBtn, sidePanelSidebarCollapseHelpPopover);
     modal.addEventListener('click', (e) => {
         if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
             hidePopovers();
@@ -31742,6 +31974,8 @@ window.CanvasModule = {
     setZoom: setCanvasZoom,
     getCanvasAppearanceSettings: getCanvasAppearanceSettings,
     getCanvasOtherSettings: getCanvasOtherSettings,
+    getCanvasDirectoryCollapsePrefs: getCanvasDirectoryCollapsePrefs,
+    setCanvasDirectoryCollapsePrefs: setCanvasDirectoryCollapsePrefs,
     temp: {
         getSection: getTempSection,
         findItem: findTempItemEntry,
@@ -31886,6 +32120,9 @@ function openCanvasAppearanceSettingsModal() {
     const otherColorFollow = modal.querySelector('#otherTempColorFollow');
     const otherUnlockSync = modal.querySelector('#otherTempColorUnlockSync');
     const otherSidebarAutoWidth = modal.querySelector('#otherSidebarAutoCollapseWidth');
+    const otherCollapsePrefs = getCanvasDirectoryCollapsePrefs(otherSettings, {
+        forSidePanel: __isCanvasInSidePanelMode()
+    });
     if (otherAutoLink) otherAutoLink.checked = !!otherSettings.autoLinkSplit;
     if (otherMenuDefaultColorSync) {
         otherMenuDefaultColorSync.checked = isSidebarMenuDefaultColorSyncEnabled(otherSettings);
@@ -31895,9 +32132,9 @@ function openCanvasAppearanceSettingsModal() {
     }
     if (otherColorFollow) otherColorFollow.checked = !(otherSettings.tempColorFollow === false);
     if (otherUnlockSync) otherUnlockSync.checked = !(otherSettings.tempColorUnlockSync === false);
-    __setAppearanceRadioGroup(modal, 'other-sidebar-collapse-mode', (otherSettings.directoryCollapseMode || 'auto'));
+    __setAppearanceRadioGroup(modal, 'other-sidebar-collapse-mode', otherCollapsePrefs.mode || 'auto');
     if (otherSidebarAutoWidth) {
-        otherSidebarAutoWidth.value = __clampNumber(otherSettings.directoryAutoCollapseWidth, 320, 2000, 600);
+        otherSidebarAutoWidth.value = __clampNumber(otherCollapsePrefs.width, 320, 2000, 600);
     }
     __updateOtherSidebarCollapseMode(modal);
     __updateOtherTempColorFollowLock(modal, otherColorFollow && otherColorFollow.checked);
@@ -32041,7 +32278,12 @@ function createCanvasAppearanceSettingsModal() {
                         </div>
                     </div>
                     <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Directory collapse mode' : '目录栏折叠方式'}</div>
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Directory collapse mode' : '目录栏折叠方式'}</span>
+                            <button class="perf-help-btn" id="otherSidebarCollapseModeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
                         <div class="appearance-row-content appearance-row-content-inline">
                             <div class="appearance-mode-toggle">
                                 <label class="appearance-radio">
@@ -32297,6 +32539,13 @@ function createCanvasAppearanceSettingsModal() {
             : '<b>可定位跳转条目</b>：管理目录里所有可以定位/跳转的条目。'}
             </div>
         </div>
+        <div class="perf-help-popover" id="otherSidebarCollapseModeHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Auto</b>: directory panel expands/collapses by the auto width threshold.<br><b>Manual takeover</b>: once you click the directory toggle (expand/collapse) in HTML page or side panel, it switches to Manual immediately.<br><b>Reset</b>: click <b>Auto</b> here to return to automatic mode.<br><b>Sync</b>: this setting is synchronized in both places.'
+            : '<b>自动</b>：目录栏会按“自动折叠阈值”自动展开/收起。<br><b>手动接管</b>：只要你在 HTML 页面或侧边栏手动点击目录栏开关（展开/收起），就会立即切到手动。<br><b>回正</b>：在这里点击<b>自动</b>按钮即可恢复自动模式。<br><b>同步</b>：侧边栏与html页面的这个开关是同步的。'}
+            </div>
+        </div>
         <div class="perf-help-popover" id="otherTempColorUnlockHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
@@ -32384,6 +32633,8 @@ function createCanvasAppearanceSettingsModal() {
     const otherMenuDefaultColorSyncHelpPopover = modal.querySelector('#otherMenuDefaultColorSyncHelpPopover');
     const otherMenuLocatableColorSyncHelpBtn = modal.querySelector('#otherMenuLocatableColorSyncHelpBtn');
     const otherMenuLocatableColorSyncHelpPopover = modal.querySelector('#otherMenuLocatableColorSyncHelpPopover');
+    const otherSidebarCollapseModeHelpBtn = modal.querySelector('#otherSidebarCollapseModeHelpBtn');
+    const otherSidebarCollapseModeHelpPopover = modal.querySelector('#otherSidebarCollapseModeHelpPopover');
     const otherTempUnlockHelpBtn = modal.querySelector('#otherTempColorUnlockHelpBtn');
     const otherTempUnlockHelpPopover = modal.querySelector('#otherTempColorUnlockHelpPopover');
     const otherTempResetHelpBtn = modal.querySelector('#otherTempColorResetHelpBtn');
@@ -32391,6 +32642,7 @@ function createCanvasAppearanceSettingsModal() {
     bindClickHelpPopover(otherTempHelpBtn, otherTempHelpPopover);
     bindClickHelpPopover(otherMenuDefaultColorSyncHelpBtn, otherMenuDefaultColorSyncHelpPopover);
     bindClickHelpPopover(otherMenuLocatableColorSyncHelpBtn, otherMenuLocatableColorSyncHelpPopover);
+    bindClickHelpPopover(otherSidebarCollapseModeHelpBtn, otherSidebarCollapseModeHelpPopover);
     bindClickHelpPopover(otherTempUnlockHelpBtn, otherTempUnlockHelpPopover);
     bindClickHelpPopover(otherTempResetHelpBtn, otherTempResetHelpPopover);
 
@@ -32585,20 +32837,24 @@ function saveCanvasOtherSettings(options = {}) {
     const closeAfterSave = options && options.close !== false;
     const isOtherModalSave = !(options && options.modal);
     const prevSettings = normalizeCanvasOtherSettings(getCanvasOtherSettings());
+    const targetIsSidePanel = __isCanvasInSidePanelMode();
+    const prevCollapsePrefs = getCanvasDirectoryCollapsePrefs(prevSettings, {
+        forSidePanel: targetIsSidePanel
+    });
     const prevFollow = isTempColorFollowEnabled(prevSettings);
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
     const menuDefaultColorSync = modal.querySelector('#otherMenuDefaultColorSync');
     const menuLocatableColorSync = modal.querySelector('#otherMenuLocatableColorSync');
-    const sidebarCollapseMode = __getAppearanceRadioValue(modal, 'other-sidebar-collapse-mode', prevSettings.directoryCollapseMode || 'auto');
+    const sidebarCollapseMode = __getAppearanceRadioValue(modal, 'other-sidebar-collapse-mode', prevCollapsePrefs.mode || 'auto');
     const sidebarAutoCollapseWidthInput = modal.querySelector('#otherSidebarAutoCollapseWidth');
     const sidebarAutoCollapseWidthRaw = sidebarAutoCollapseWidthInput
         ? parseInt(sidebarAutoCollapseWidthInput.value, 10)
-        : prevSettings.directoryAutoCollapseWidth;
+        : prevCollapsePrefs.width;
     const sidebarAutoCollapseWidth = __clampNumber(
         sidebarAutoCollapseWidthRaw,
         320,
         2000,
-        prevSettings.directoryAutoCollapseWidth
+        prevCollapsePrefs.width
     );
     if (sidebarAutoCollapseWidthInput) {
         sidebarAutoCollapseWidthInput.value = String(sidebarAutoCollapseWidth);
@@ -32617,14 +32873,25 @@ function saveCanvasOtherSettings(options = {}) {
         menuLocatableColorSync: menuLocatableColorSync
             ? !!menuLocatableColorSync.checked
             : isSidebarMenuLocatableColorSyncEnabled(prevSettings),
-        directoryCollapseMode: (sidebarCollapseMode === 'manual') ? 'manual' : 'auto',
-        directoryAutoCollapseWidth: sidebarAutoCollapseWidth,
+        directoryCollapseMode: prevSettings.directoryCollapseMode,
+        directoryAutoCollapseWidth: prevSettings.directoryAutoCollapseWidth,
+        sidepanelDirectoryCollapseMode: prevSettings.sidepanelDirectoryCollapseMode,
+        sidepanelDirectoryAutoCollapseWidth: prevSettings.sidepanelDirectoryAutoCollapseWidth,
         tempColorFollow: colorFollow ? !!colorFollow.checked : !(prevSettings.tempColorFollow === false),
         tempColorUnlockSync: unlockSync ? !!unlockSync.checked : !(prevSettings.tempColorUnlockSync === false),
         useDefaultZoomCurve: useDefault,
         zoomCurve: useDefault ? defaultCurve : (modal._zoomCurve || prevSettings.zoomCurve || getCanvasZoomCurveSettings()),
         magnetPoints: useDefault ? defaultMagnets : (modal._magnetPoints || prevSettings.magnetPoints || getCanvasZoomMagnetPoints())
     };
+
+    if (targetIsSidePanel) {
+        settingsInput.sidepanelDirectoryCollapseMode = (sidebarCollapseMode === 'manual') ? 'manual' : 'auto';
+        settingsInput.sidepanelDirectoryAutoCollapseWidth = sidebarAutoCollapseWidth;
+    } else {
+        settingsInput.directoryCollapseMode = (sidebarCollapseMode === 'manual') ? 'manual' : 'auto';
+        settingsInput.directoryAutoCollapseWidth = sidebarAutoCollapseWidth;
+    }
+
     const normalized = normalizeCanvasOtherSettings(settingsInput);
     CanvasState.otherSettings = normalized;
     try {

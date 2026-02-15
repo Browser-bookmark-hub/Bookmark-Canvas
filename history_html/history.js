@@ -65,19 +65,40 @@ try {
 const SIDE_PANEL_FLOATING_TOOLS_KEY = 'sidepanelFloatingToolsVisible';
 const SIDE_PANEL_FLOATING_TOOLS_MODE_KEY = 'sidepanelFloatingToolsMode';
 const CANVAS_FLOATING_TOOLS_MODE_KEY = 'canvasFloatingToolsMode';
-const HEADER_COLLAPSE_STATE_KEY = 'headerCollapseState';
-const HEADER_DOCK_SIDE_KEY = 'headerDockSide';
-const HEADER_COMPACT_LEFT_TOP_KEY = 'headerCompactToggleLeftTop';
-const HEADER_COMPACT_LEFT_BOTTOM_KEY = 'headerCompactToggleLeftBottom';
-const HEADER_COMPACT_LEFT_KEY = 'headerCompactToggleLeft';
-const HEADER_COMPACT_LEFT_MOVED_TOP_KEY = 'headerCompactToggleLeftMovedTop';
-const HEADER_COMPACT_LEFT_MOVED_BOTTOM_KEY = 'headerCompactToggleLeftMovedBottom';
+const HEADER_LAYOUT_STORAGE_KEYS = isSidePanelMode
+    ? {
+        collapseState: 'sidepanelHeaderCollapseState',
+        dockSide: 'sidepanelHeaderDockSide',
+        compactLeftTop: 'sidepanelHeaderCompactToggleLeftTop',
+        compactLeftBottom: 'sidepanelHeaderCompactToggleLeftBottom',
+        compactLeftLegacy: 'sidepanelHeaderCompactToggleLeft',
+        compactLeftMovedTop: 'sidepanelHeaderCompactToggleLeftMovedTop',
+        compactLeftMovedBottom: 'sidepanelHeaderCompactToggleLeftMovedBottom'
+    }
+    : {
+        collapseState: 'headerCollapseState',
+        dockSide: 'headerDockSide',
+        compactLeftTop: 'headerCompactToggleLeftTop',
+        compactLeftBottom: 'headerCompactToggleLeftBottom',
+        compactLeftLegacy: 'headerCompactToggleLeft',
+        compactLeftMovedTop: 'headerCompactToggleLeftMovedTop',
+        compactLeftMovedBottom: 'headerCompactToggleLeftMovedBottom'
+    };
+const HEADER_COLLAPSE_STATE_KEY = HEADER_LAYOUT_STORAGE_KEYS.collapseState;
+const HEADER_DOCK_SIDE_KEY = HEADER_LAYOUT_STORAGE_KEYS.dockSide;
+const HEADER_COMPACT_LEFT_TOP_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftTop;
+const HEADER_COMPACT_LEFT_BOTTOM_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftBottom;
+const HEADER_COMPACT_LEFT_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftLegacy;
+const HEADER_COMPACT_LEFT_MOVED_TOP_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftMovedTop;
+const HEADER_COMPACT_LEFT_MOVED_BOTTOM_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftMovedBottom;
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_ACTION = 'triggerCanvasPageFullscreenByTabId';
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_STORAGE_KEY = 'canvas_page_fullscreen_bridge_request_v1';
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_MAX_AGE_MS = 30000;
 const CANVAS_PAGE_FULLSCREEN_STATE_STORAGE_KEY = 'canvas_page_fullscreen_state_v1';
 const CANVAS_PAGE_FULLSCREEN_STATE_MAX_AGE_MS = 30000;
-const CANVAS_FLOATING_TOOLS_DOCK_KEY = 'canvasFloatingToolsDockV1';
+const CANVAS_FLOATING_TOOLS_DOCK_KEY = isSidePanelMode
+    ? 'sidepanelFloatingToolsDockV1'
+    : 'canvasFloatingToolsDockV1';
 const SIDE_PANEL_FLOATING_TOOLS_MODES = {
     NONE: 'none',
     HIDDEN: 'hidden',
@@ -86,6 +107,8 @@ const SIDE_PANEL_FLOATING_TOOLS_MODES = {
 const CANVAS_FLOATING_DOCK_EDGES = ['left', 'right', 'top', 'bottom'];
 const CANVAS_FLOATING_EDGE_MARGIN_PX = 10;
 const CANVAS_FLOATING_EDGE_TRACK_INSET_PX = 120;
+const CANVAS_FLOATING_DEFAULT_DOCK_EDGE = 'top';
+const CANVAS_FLOATING_DEFAULT_DOCK_RATIO = 0;
 const CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD = 8;
 const CANVAS_FLOATING_HINT_HOLD_DELAY_MS = 160;
 const CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD = 42;
@@ -114,6 +137,11 @@ let layoutPreloadCleared = false;
 function clearLayoutPreloadState() {
     if (layoutPreloadCleared) return;
     try {
+        if (currentView === 'canvas') {
+            try {
+                updateSidePanelFloatingToolsDisplay();
+            } catch (_) { }
+        }
         const root = document.documentElement;
         if (!root) return;
         LAYOUT_PRELOAD_CLASSES.forEach((name) => root.classList.remove(name));
@@ -128,9 +156,7 @@ function bindCanvasPreloadRelease() {
 
     window.addEventListener('canvas-initial-layout-ready', () => {
         window.setTimeout(() => {
-            requestAnimationFrame(() => {
-                clearLayoutPreloadState();
-            });
+            clearLayoutPreloadState();
         }, 160);
     }, { once: true });
 
@@ -156,14 +182,15 @@ function getSidePanelFloatingToolsMode() {
 
             const legacy = localStorage.getItem(SIDE_PANEL_FLOATING_TOOLS_KEY);
             if (legacy === 'true') return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
-            return SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+            if (legacy === 'false') return SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+            return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
         }
 
         const canvasMode = localStorage.getItem(CANVAS_FLOATING_TOOLS_MODE_KEY);
         if (canvasMode) return normalizeSidePanelFloatingToolsMode(canvasMode);
         return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
     } catch (_) {
-        return isSidePanelMode ? SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN : SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
+        return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
     }
 }
 
@@ -244,14 +271,16 @@ function readCanvasFloatingToolsDockState() {
         }
     } catch (_) { }
 
-    const fallbackEdge = 'top';
+    const hasParsedRatio = parsed && Number.isFinite(Number(parsed.ratio));
     const state = {
         edge: normalizeCanvasFloatingDockEdge(parsed && parsed.edge),
-        ratio: normalizeCanvasFloatingDockRatio(parsed && parsed.ratio)
+        ratio: hasParsedRatio
+            ? normalizeCanvasFloatingDockRatio(parsed && parsed.ratio)
+            : CANVAS_FLOATING_DEFAULT_DOCK_RATIO
     };
 
     if (!parsed || !parsed.edge) {
-        state.edge = fallbackEdge;
+        state.edge = CANVAS_FLOATING_DEFAULT_DOCK_EDGE;
     }
 
     canvasFloatingToolsDockStateCache = state;
@@ -429,17 +458,12 @@ function resolveCanvasFloatingIndicatorPosition(state, options = {}) {
     const workspaceRect = getCanvasFloatingToolsWorkspaceRect();
     if (!workspaceRect) return null;
 
-    const hiddenMode = mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
     const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode);
-    const margin = hiddenMode ? 0 : CANVAS_FLOATING_EDGE_MARGIN_PX;
-    const maxLeft = hiddenMode
-        ? Math.max(0, workspaceRect.width)
-        : Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
-    const minLeft = hiddenMode ? 0 : margin;
-    const maxTop = hiddenMode
-        ? Math.max(0, workspaceRect.height)
-        : Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
-    const minTop = hiddenMode ? 0 : margin;
+    const margin = CANVAS_FLOATING_EDGE_MARGIN_PX;
+    const maxLeft = Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
+    const minLeft = margin;
+    const maxTop = Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
+    const minTop = margin;
 
     let left = minLeft;
     let top = minTop;
@@ -497,17 +521,12 @@ function resolveCanvasFloatingDockStateFromPointer(clientX, clientY, options = {
     const workspaceRect = getCanvasFloatingToolsWorkspaceRect();
     if (!workspaceRect) return null;
 
-    const hiddenMode = mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
     const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode);
-    const margin = hiddenMode ? 0 : CANVAS_FLOATING_EDGE_MARGIN_PX;
-    const maxLeft = hiddenMode
-        ? Math.max(0, workspaceRect.width)
-        : Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
-    const minLeft = hiddenMode ? 0 : margin;
-    const maxTop = hiddenMode
-        ? Math.max(0, workspaceRect.height)
-        : Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
-    const minTop = hiddenMode ? 0 : margin;
+    const margin = CANVAS_FLOATING_EDGE_MARGIN_PX;
+    const maxLeft = Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
+    const minLeft = margin;
+    const maxTop = Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
+    const minTop = margin;
 
     const localX = clampCanvasFloatingValue(clientX - workspaceRect.left, 0, workspaceRect.width);
     const localY = clampCanvasFloatingValue(clientY - workspaceRect.top, 0, workspaceRect.height);
@@ -6140,13 +6159,35 @@ function initSidebarToggle() {
         return;
     }
 
-    const SIDEBAR_STATE_KEY = 'sidebarCollapseState';
-    const SIDEBAR_MANUAL_KEY = 'sidebarManualOverride';
-    const LEGACY_COLLAPSED_KEY = 'sidebarCollapsed';
-    const SIDEBAR_POSITION_KEY = 'sidebarDockSide';
-    const SIDEBAR_WIDTH_LEFT_KEY = 'sidebarExpandedWidthLeft';
-    const SIDEBAR_WIDTH_RIGHT_KEY = 'sidebarExpandedWidthRight';
-    const SIDEBAR_TOGGLE_TOP_RATIO_KEY = 'sidebarToggleTopRatio';
+    const SIDEBAR_STORAGE_KEYS = isSidePanelMode
+        ? {
+            state: 'sidepanelSidebarCollapseState',
+            manual: 'sidepanelSidebarManualOverride',
+            legacyCollapsed: 'sidepanelSidebarCollapsed',
+            position: 'sidepanelSidebarDockSide',
+            widthLeft: 'sidepanelSidebarExpandedWidthLeft',
+            widthRight: 'sidepanelSidebarExpandedWidthRight',
+            toggleRatio: 'sidepanelSidebarToggleTopRatio',
+            toggleMoved: 'sidepanelSidebarToggleTopMoved'
+        }
+        : {
+            state: 'sidebarCollapseState',
+            manual: 'sidebarManualOverride',
+            legacyCollapsed: 'sidebarCollapsed',
+            position: 'sidebarDockSide',
+            widthLeft: 'sidebarExpandedWidthLeft',
+            widthRight: 'sidebarExpandedWidthRight',
+            toggleRatio: 'sidebarToggleTopRatio',
+            toggleMoved: 'sidebarToggleTopMoved'
+        };
+    const SIDEBAR_STATE_KEY = SIDEBAR_STORAGE_KEYS.state;
+    const SIDEBAR_MANUAL_KEY = SIDEBAR_STORAGE_KEYS.manual;
+    const LEGACY_COLLAPSED_KEY = SIDEBAR_STORAGE_KEYS.legacyCollapsed;
+    const SIDEBAR_POSITION_KEY = SIDEBAR_STORAGE_KEYS.position;
+    const SIDEBAR_WIDTH_LEFT_KEY = SIDEBAR_STORAGE_KEYS.widthLeft;
+    const SIDEBAR_WIDTH_RIGHT_KEY = SIDEBAR_STORAGE_KEYS.widthRight;
+    const SIDEBAR_TOGGLE_TOP_RATIO_KEY = SIDEBAR_STORAGE_KEYS.toggleRatio;
+    const SIDEBAR_TOGGLE_TOP_MOVED_KEY = SIDEBAR_STORAGE_KEYS.toggleMoved;
     const SIDEBAR_STATES = ['expanded', 'compact'];
     const SIDEBAR_POSITIONS = ['left', 'right'];
     const AUTO_COLLAPSE_WIDTH_DEFAULT = 600;
@@ -6164,11 +6205,11 @@ function initSidebarToggle() {
     const TOGGLE_DRAG_DIRECTION_THRESHOLD = 8;
     const TOGGLE_DRAG_SWITCH_THRESHOLD = 42;
     const TOGGLE_VERTICAL_MARGIN_PX = 28;
-    const TOGGLE_DEFAULT_RATIO = 0.65;
+    const TOGGLE_DEFAULT_RATIO = 0.6;
     const TOGGLE_RATIO_MIN = 0.08;
     const TOGGLE_RATIO_MAX = 0.92;
     const SIDEBAR_SIDE_SWITCH_ANIMATION_MS = 220;
-    const persistEnabled = !isSidePanelMode;
+    const persistEnabled = true;
     const sidebarContainer = sidebar.closest('.main-container');
     const contentArea = sidebarContainer
         ? sidebarContainer.querySelector('.content-area')
@@ -6216,18 +6257,89 @@ function initSidebarToggle() {
         return clamp(Math.round(value), AUTO_COLLAPSE_WIDTH_MIN, AUTO_COLLAPSE_WIDTH_MAX);
     }
 
-    function readSidebarCollapsePrefs() {
-        const settings = getCanvasOtherSettingsSafe();
+    function getDirectoryCollapsePrefsFromSettings(settings) {
         if (!settings || typeof settings !== 'object') {
             return {
                 mode: SIDEBAR_COLLAPSE_MODE_AUTO,
                 width: AUTO_COLLAPSE_WIDTH_DEFAULT
             };
         }
+
+        const modeKey = isSidePanelMode ? 'sidepanelDirectoryCollapseMode' : 'directoryCollapseMode';
+        const widthKey = isSidePanelMode ? 'sidepanelDirectoryAutoCollapseWidth' : 'directoryAutoCollapseWidth';
+        const modeRaw = settings[modeKey] != null
+            ? settings[modeKey]
+            : settings.directoryCollapseMode;
+        const widthRaw = settings[widthKey] != null
+            ? settings[widthKey]
+            : settings.directoryAutoCollapseWidth;
+
         return {
-            mode: normalizeCollapseMode(settings.directoryCollapseMode),
-            width: normalizeAutoCollapseWidth(settings.directoryAutoCollapseWidth)
+            mode: normalizeCollapseMode(modeRaw),
+            width: normalizeAutoCollapseWidth(widthRaw)
         };
+    }
+
+    function readSidebarCollapsePrefs() {
+        try {
+            const raw = localStorage.getItem('canvas-other-settings-v1');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object') {
+                    return getDirectoryCollapsePrefsFromSettings(parsed);
+                }
+            }
+        } catch (_) { }
+
+        const settings = getCanvasOtherSettingsSafe();
+        if (settings && typeof settings === 'object') {
+            return getDirectoryCollapsePrefsFromSettings(settings);
+        }
+
+        return getDirectoryCollapsePrefsFromSettings(null);
+    }
+
+    function persistSidebarCollapsePrefs(nextPrefs, options = {}) {
+        const safePrefs = nextPrefs && typeof nextPrefs === 'object' ? nextPrefs : {};
+        const mode = normalizeCollapseMode(safePrefs.mode);
+        const width = normalizeAutoCollapseWidth(safePrefs.width);
+        const dispatchEvent = !(options && options.dispatch === false);
+
+        try {
+            if (window.CanvasModule && typeof window.CanvasModule.setCanvasDirectoryCollapsePrefs === 'function') {
+                window.CanvasModule.setCanvasDirectoryCollapsePrefs(
+                    { mode, width },
+                    {
+                        forSidePanel: isSidePanelMode,
+                        dispatch: dispatchEvent
+                    }
+                );
+                return { mode, width };
+            }
+        } catch (_) { }
+
+        try {
+            const raw = localStorage.getItem('canvas-other-settings-v1');
+            const parsed = raw ? JSON.parse(raw) : {};
+            const nextSettings = (parsed && typeof parsed === 'object') ? parsed : {};
+
+            if (isSidePanelMode) {
+                nextSettings.sidepanelDirectoryCollapseMode = mode;
+                nextSettings.sidepanelDirectoryAutoCollapseWidth = width;
+            } else {
+                nextSettings.directoryCollapseMode = mode;
+                nextSettings.directoryAutoCollapseWidth = width;
+            }
+
+            localStorage.setItem('canvas-other-settings-v1', JSON.stringify(nextSettings));
+            if (dispatchEvent) {
+                window.dispatchEvent(new CustomEvent('canvas-other-settings-updated', {
+                    detail: nextSettings
+                }));
+            }
+        } catch (_) { }
+
+        return { mode, width };
     }
 
     function readStorage(key) {
@@ -6271,7 +6383,15 @@ function initSidebarToggle() {
         right: normalizeSidebarWidth(readStorage(SIDEBAR_WIDTH_RIGHT_KEY)) || defaultExpandedWidth
     };
     let sidebarPosition = normalizeSidebarPosition(readStorage(SIDEBAR_POSITION_KEY)) || 'left';
-    let toggleTopRatio = normalizeToggleRatio(readStorage(SIDEBAR_TOGGLE_TOP_RATIO_KEY)) || TOGGLE_DEFAULT_RATIO;
+    const storedToggleTopRatio = normalizeToggleRatio(readStorage(SIDEBAR_TOGGLE_TOP_RATIO_KEY));
+    const hasStoredToggleTopRatio = storedToggleTopRatio != null;
+    const hasToggleTopMoved = readStorage(SIDEBAR_TOGGLE_TOP_MOVED_KEY) === 'true';
+    let toggleTopRatio = hasStoredToggleTopRatio ? storedToggleTopRatio : TOGGLE_DEFAULT_RATIO;
+
+    if (isSidePanelMode && !hasToggleTopMoved) {
+        toggleTopRatio = TOGGLE_DEFAULT_RATIO;
+        writeStorage(SIDEBAR_TOGGLE_TOP_RATIO_KEY, String(toggleTopRatio));
+    }
 
     function getExpandedWidth(position) {
         const safePosition = normalizeSidebarPosition(position) || 'left';
@@ -6680,16 +6800,16 @@ function initSidebarToggle() {
     }
 
     function readSidebarState() {
-        if (!persistEnabled) return 'compact';
         const savedState = normalizeSidebarState(readStorage(SIDEBAR_STATE_KEY));
         if (savedState) return savedState;
         const legacy = readStorage(LEGACY_COLLAPSED_KEY);
         if (legacy === 'true') return 'compact';
-        return 'expanded';
+        if (legacy === 'false') return 'expanded';
+        return isSidePanelMode ? 'compact' : 'expanded';
     }
 
     function readManualOverride() {
-        if (!persistEnabled) return true;
+        if (!persistEnabled) return false;
         const raw = readStorage(SIDEBAR_MANUAL_KEY);
         if (raw === 'true') {
             hasManualOverride = true;
@@ -6715,8 +6835,22 @@ function initSidebarToggle() {
 
     function setSidebarState(state, options = {}) {
         const nextState = applySidebarState(state);
-        if (options.manual === true) setManualOverride(true);
-        if (options.manual === false) setManualOverride(false);
+
+        if (options.manual === true) {
+            if (sidebarCollapseMode === SIDEBAR_COLLAPSE_MODE_AUTO) {
+                sidebarCollapseMode = SIDEBAR_COLLAPSE_MODE_MANUAL;
+                setManualOverride(false);
+                persistSidebarCollapsePrefs({
+                    mode: SIDEBAR_COLLAPSE_MODE_MANUAL,
+                    width: autoCollapseWidth
+                });
+            } else {
+                setManualOverride(true);
+            }
+        } else if (options.manual === false) {
+            setManualOverride(false);
+        }
+
         persistSidebarState(nextState);
         syncSidebarWidth();
         scheduleMaximizedRefresh();
@@ -6825,8 +6959,7 @@ function initSidebarToggle() {
         if (currentState === 'expanded') {
             currentState = setSidebarState('compact', { manual: true });
         } else {
-            const manualFlag = sidebarCollapseMode === SIDEBAR_COLLAPSE_MODE_MANUAL;
-            currentState = setSidebarState('expanded', { manual: manualFlag ? true : false });
+            currentState = setSidebarState('expanded', { manual: true });
         }
         console.log('[侧边栏] 状态切换:', currentState);
     });
@@ -6908,6 +7041,7 @@ function initSidebarToggle() {
         if (moved && !canceled) {
             toggleBtn.classList.add('sidebar-toggle-dragging');
             setToggleTopRatio(getToggleRatioFromClientY(event.clientY), { persist: true });
+            writeStorage(SIDEBAR_TOGGLE_TOP_MOVED_KEY, 'true');
             consumed = true;
 
             if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) >= TOGGLE_DRAG_SWITCH_THRESHOLD) {
@@ -6916,9 +7050,6 @@ function initSidebarToggle() {
                 if (shouldSwitch) {
                     const nextPosition = sidebarPosition === 'left' ? 'right' : 'left';
                     applySidebarPosition(nextPosition, { persist: true, refresh: true });
-                    if (persistEnabled) {
-                        setManualOverride(true);
-                    }
                     switchedSide = true;
                 }
             }
@@ -7046,11 +7177,9 @@ function initSidebarToggle() {
 
     window.addEventListener('canvas-other-settings-updated', (event) => {
         const detail = event && event.detail;
-        const fallback = readSidebarCollapsePrefs();
-        const nextPrefs = {
-            mode: detail && typeof detail === 'object' ? detail.directoryCollapseMode : fallback.mode,
-            width: detail && typeof detail === 'object' ? detail.directoryAutoCollapseWidth : fallback.width
-        };
+        const nextPrefs = detail && typeof detail === 'object'
+            ? getDirectoryCollapsePrefsFromSettings(detail)
+            : readSidebarCollapsePrefs();
         applySidebarCollapsePrefs(nextPrefs, { forceApply: true });
     });
 
