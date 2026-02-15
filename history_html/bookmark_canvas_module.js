@@ -1889,9 +1889,9 @@ function requestSidebarMenuColorSyncRefresh() {
 // 命中后会自动接入：
 // - 外观尺寸：sizes.specialTemp
 // - 外观颜色：colors.specialTemp
-// - 颜色锁行为：按特殊栏目规则处理
+// - 颜色锁行为：与常规临时栏目共用同一套设置
 // 兼容旧数据时，__isSpecialTempSection 仍会回退用 label 判定。
-const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add']);
+const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add', 'file-import', 'import-html-bookmarks', 'import-json-bookmarks']);
 
 function __isSpecialTempSection(section) {
     if (!section) return false;
@@ -1900,19 +1900,17 @@ function __isSpecialTempSection(section) {
     if (source && SPECIAL_TEMP_SOURCE_SET.has(source)) return true;
     const labelRaw = (typeof section.label === 'string') ? section.label.trim() : '';
     if (!labelRaw) return false;
-    if (labelRaw === '拖入' || labelRaw === '搜索' || labelRaw === '批量' || labelRaw === '添加') return true;
+    if (labelRaw === '拖入' || labelRaw === '搜索' || labelRaw === '批量' || labelRaw === '添加' || labelRaw === '导入文件' || labelRaw === '导入') return true;
     const label = labelRaw.toLowerCase();
-    return label === 'drop' || label === 'search' || label === 'batch' || label === 'add';
+    return label === 'drop' || label === 'search' || label === 'batch' || label === 'add' || label === 'import file' || label === 'import';
 }
 
 function __isTempSectionColorLocked(section) {
     if (!section) return true;
-    if (__isSpecialTempSection(section)) return true;
     return !!section.colorLocked;
 }
 
 function __isTempSectionManuallyLocked(section) {
-    if (__isSpecialTempSection(section)) return true;
     return !!(section && section.colorLocked === true);
 }
 
@@ -1940,10 +1938,6 @@ function __syncTempColorFollowLocksInDom() {
         if (!sectionId) return;
         const section = getTempSection(sectionId);
         if (!section) return;
-        if (__isSpecialTempSection(section)) {
-            try { btn.remove(); } catch (_) { }
-            return;
-        }
         __applyTempColorLockButtonState(btn, section);
     });
 }
@@ -1968,7 +1962,6 @@ function __applyGlobalTempColorFollowSetting(enabled) {
     let changed = false;
     CanvasState.tempSections.forEach(section => {
         if (!section) return;
-        if (__isSpecialTempSection(section)) return;
         if (section.colorLocked !== lockAll) {
             section.colorLocked = lockAll;
             changed = true;
@@ -3442,13 +3435,11 @@ function updateTempSectionColor(section, color) {
 
 function propagateTempSectionColor(parentSection, color) {
     if (!parentSection) return;
-    if (__isSpecialTempSection(parentSection)) return;
     const parentLabel = getTempSectionLabel(parentSection);
     if (!parentLabel) return;
     const labelMap = buildTempSectionLabelMap();
     CanvasState.tempSections.forEach(section => {
         if (!section || section.id === parentSection.id) return;
-        if (__isSpecialTempSection(section)) return;
         const label = getTempSectionLabel(section);
         if (label && isDescendantLabel(parentLabel, label)) {
             if (__isTempSectionColorLocked(section)) return;
@@ -4519,7 +4510,7 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         description: description,  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
         color: getSpecialTempSectionDefaultColor(),
-        colorLocked: true,
+        colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,
         y: dropY,
         width: 0,
@@ -4918,7 +4909,7 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
         sequenceNumber: sequenceNumber,
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
         color: getSpecialTempSectionDefaultColor(),
-        colorLocked: true,
+        colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,
         y: dropY,
         width: 0,
@@ -5038,7 +5029,7 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
             sequenceNumber: sequenceNumber,
             label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
             color: getSpecialTempSectionDefaultColor(),
-            colorLocked: true,
+            colorLocked: __getDefaultTempColorLockedState(),
             x: dropX,
             y: dropY,
             width: 0,
@@ -5139,7 +5130,7 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         description: description,  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
         color: getSpecialTempSectionDefaultColor(),
-        colorLocked: true,
+        colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,
         y: dropY,
         width: 0,
@@ -20290,18 +20281,13 @@ function renderTempNode(section, options = {}) {
     colorInput.value = section.color || getTempSectionDefaultColor(section);
     colorInput.title = colorLabel;
 
-    const isSpecialSource = __isSpecialTempSection(section);
-    let lockBtn = null;
-    let updateLockBtn = null;
-    if (!isSpecialSource) {
-        lockBtn = document.createElement('button');
-        lockBtn.type = 'button';
-        lockBtn.className = 'temp-node-action-btn temp-color-lock-btn';
-        updateLockBtn = () => {
-            __applyTempColorLockButtonState(lockBtn, section);
-        };
-        updateLockBtn();
-    }
+    let lockBtn = document.createElement('button');
+    lockBtn.type = 'button';
+    lockBtn.className = 'temp-node-action-btn temp-color-lock-btn';
+    let updateLockBtn = () => {
+        __applyTempColorLockButtonState(lockBtn, section);
+    };
+    updateLockBtn();
 
     const colorBtn = document.createElement('button');
     colorBtn.type = 'button';
@@ -25464,9 +25450,9 @@ async function handleFileImport(e) {
         } else {
             const text = await file.text();
             if (type === 'html') {
-                await importHtmlBookmarks(text);
+                await importHtmlBookmarks(text, file && file.name ? file.name : '');
             } else {
-                await importJsonBookmarks(text);
+                await importJsonBookmarks(text, file && file.name ? file.name : '');
             }
         }
 
@@ -25610,7 +25596,7 @@ async function importCanvasPackageJson(file) {
  *    - 任何包含 <a href> 链接的 HTML 文件
  *    - 扁平化提取所有链接
  */
-async function importHtmlBookmarks(html) {
+async function importHtmlBookmarks(html, importFileName = '') {
     const { isEn } = __getLang();
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
@@ -25649,21 +25635,25 @@ async function importHtmlBookmarks(html) {
 
     // 创建一个新的临时栏目容器
     // 在当前视口中找一个空白位置
-    const baseSize = getTempSectionBaseSize();
+    const sectionMeta = { source: 'file-import', label: isEn ? 'Import' : '导入' };
+    const baseSize = getTempSectionBaseSize(sectionMeta);
     const position = findAvailablePositionInViewport(baseSize.width, baseSize.height);
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
-        const section = {
+    const fileNameTitle = String(importFileName || '').replace(/[\r\n]/g, ' ').trim();
+    const section = {
             id: sectionId,
-            title: isEn
+            title: fileNameTitle || (isEn
                 ? `Imported Bookmarks (${totalCount}) - ${formatTimestampForTitle()}`
-                : `导入的书签 (${totalCount}) - ${formatTimestampForTitle()}`,
-            color: pickTempSectionColor(),
+                : `导入的书签 (${totalCount}) - ${formatTimestampForTitle()}`),
+            color: getTempSectionDefaultColor(sectionMeta),
             colorLocked: __getDefaultTempColorLockedState(),
             x: position.x,
             y: position.y,
             width: baseSize.width,
             height: baseSize.height,
             createdAt: Date.now(),
+            source: sectionMeta.source,
+            label: sectionMeta.label,
             items: []
         };
 
@@ -25821,7 +25811,7 @@ function parseNetscapeBookmarkHtml(doc) {
  * 5. 单对象格式：{name/title, url/href/uri, children}
  * 6. 第三方插件常用格式（兼容各种字段名）
  */
-async function importJsonBookmarks(json) {
+async function importJsonBookmarks(json, importFileName = '') {
     const { isEn } = __getLang();
     let data;
     try {
@@ -25987,21 +25977,25 @@ async function importJsonBookmarks(json) {
 
     // 创建一个新的临时栏目容器
     // 在当前视口中找一个空白位置
-    const baseSize = getTempSectionBaseSize();
+    const sectionMeta = { source: 'file-import', label: isEn ? 'Import' : '导入' };
+    const baseSize = getTempSectionBaseSize(sectionMeta);
     const position = findAvailablePositionInViewport(baseSize.width, baseSize.height);
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
+    const fileNameTitle = String(importFileName || '').replace(/[\r\n]/g, ' ').trim();
     const section = {
         id: sectionId,
-        title: isEn
+        title: fileNameTitle || (isEn
             ? `Imported Bookmarks (JSON, ${totalBookmarkCount}) - ${formatTimestampForTitle()}`
-            : `导入的书签 (JSON, ${totalBookmarkCount}) - ${formatTimestampForTitle()}`,
-        color: pickTempSectionColor(),
+            : `导入的书签 (JSON, ${totalBookmarkCount}) - ${formatTimestampForTitle()}`),
+        color: getTempSectionDefaultColor(sectionMeta),
         colorLocked: __getDefaultTempColorLockedState(),
         x: position.x,
         y: position.y,
         width: baseSize.width,
         height: baseSize.height,
         createdAt: Date.now(),
+        source: sectionMeta.source,
+        label: sectionMeta.label,
         items: items.map(item => convertToTempItem(item, sectionId)).filter(Boolean)
     };
 
@@ -32514,15 +32508,15 @@ function createCanvasAppearanceSettingsModal() {
         <div class="perf-help-popover" id="appearanceSpecialTempHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Special temp sections</b>: Drop / Search / Batch / Add.<br><b>Tip</b>: Auto-fit is not recommended when you have many of these sections.'
-            : '<b>特殊临时栏目</b>：拖入 / 搜索 / 批量 / 添加。<br><b>提示</b>：数量很多时不建议使用自适应。'}
+            ? '<b>Special temp sections</b>: Drop / Search / Batch / Add / Import.<br><b>Tip</b>: Auto-fit is not recommended when you have many of these sections.'
+            : '<b>特殊临时栏目</b>：拖入 / 搜索 / 批量 / 添加 / 导入。<br><b>提示</b>：数量很多时不建议使用自适应。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherTempColorHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Global switch</b>: one-tap unify normal temp locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special temp sections</b> (Drop / Search / Batch / Add) now use their own default color in Appearance.'
-            : '<b>全局开关</b>：一键统一普通临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加）现在使用外观中的独立默认颜色。'}
+            ? '<b>Global switch</b>: one-tap unify all temp section locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special temp sections</b> (Drop / Search / Batch / Add / Import) now use their own default color in Appearance.'
+            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加 / 导入）现在使用外观中的独立默认颜色。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherMenuDefaultColorSyncHelpPopover">

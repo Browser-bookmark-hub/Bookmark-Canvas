@@ -6,7 +6,7 @@
   const REFRESH_INTERVAL_MS = 1200;
   const PREVIEW_LIMIT = 260;
   const PERMANENT_COPIES_STORAGE_KEY = 'permanent-section-copies';
-  const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add']);
+  const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add', 'file-import', 'import-html-bookmarks', 'import-json-bookmarks']);
   const DIRECTORY_COLOR_DEFAULTS = Object.freeze({
     permanent: '#10b981',
     temp: '#2563eb',
@@ -382,10 +382,10 @@
 
     const labelRaw = normalizeText(section.label);
     if (!labelRaw) return false;
-    if (labelRaw === '拖入' || labelRaw === '搜索' || labelRaw === '批量' || labelRaw === '添加') return true;
+    if (labelRaw === '拖入' || labelRaw === '搜索' || labelRaw === '批量' || labelRaw === '添加' || labelRaw === '导入文件' || labelRaw === '导入') return true;
 
     const label = labelRaw.toLowerCase();
-    return label === 'drop' || label === 'search' || label === 'batch' || label === 'add';
+    return label === 'drop' || label === 'search' || label === 'batch' || label === 'add' || label === 'import file' || label === 'import';
   }
 
   function isImportedNodeId(value) {
@@ -430,6 +430,7 @@
     if (section && section.isSnapshot) return true;
 
     const source = normalizeText(section && section.source).toLowerCase();
+    if (source === 'file-import' || source === 'import-html-bookmarks' || source === 'import-json-bookmarks') return false;
     if (source.startsWith('import')) return true;
 
     return isImportedNodeId(sectionId);
@@ -958,15 +959,37 @@
       const splitFolderIcon = config.splitFolderIcon || 'fas fa-sitemap';
       const specialFolderIcon = config.specialFolderIcon || 'fas fa-star';
 
+      const specialRootLabelSet = new Set();
       const specialTempSections = [];
       const splitTempSections = [];
+
+      const isSpecialLineageSection = (section) => {
+        const label = getTempSectionLabel(section);
+        if (!label) return false;
+        let parentLabel = getTempParentLabel(label);
+        while (parentLabel) {
+          if (specialRootLabelSet.has(parentLabel)) return true;
+          parentLabel = getTempParentLabel(parentLabel);
+        }
+        return false;
+      };
+
       sections.forEach((section) => {
-        if (isSpecialTempSection(section)) {
+        if (!section || !isSpecialTempSection(section)) return;
+        specialTempSections.push(section);
+        const label = normalizeText(getTempSectionLabel(section));
+        if (label) specialRootLabelSet.add(label);
+      });
+
+      sections.forEach((section) => {
+        if (!section || isSpecialTempSection(section)) return;
+        if (isSpecialLineageSection(section)) {
           specialTempSections.push(section);
         } else {
           splitTempSections.push(section);
         }
       });
+
       splitTempSections.sort(sortTempSections);
       specialTempSections.sort(sortTempSections);
 
@@ -989,21 +1012,11 @@
         ));
       }
 
-      const specialItems = specialTempSections.map((section) => {
-        const label = getTempSectionLabel(section);
-        const title = squeezeSpaces(`${label} ${getTempSectionTitle(section)}`.trim());
-        return makeItemNode({
-          key: `${keyPrefix}temp-special-${section.id}`,
-          code: '',
-          title,
-          color: sectionColorResolver(section),
-          defaultColor: specialColor,
-          icon: 'fas fa-star',
-          iconText: specialIconText,
-          iconTone: specialIconTone,
-          target: { kind: 'temp-section', sectionId: section.id },
-          preview: getTempSectionDescription(section)
-        });
+      const specialItems = buildSplitChainNodes(specialTempSections, {
+        resolveColor: sectionColorResolver,
+        fallbackColor: specialColor,
+        defaultColor: specialColor,
+        keyPrefix: `${keyPrefix}temp-special-`
       });
 
       if (!specialItems.length) {
