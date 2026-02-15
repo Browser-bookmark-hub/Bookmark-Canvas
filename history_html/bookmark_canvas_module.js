@@ -5987,8 +5987,30 @@ function setupCanvasZoomAndPan() {
         setCanvasZoom(CanvasState.zoom * factor);
     };
 
-    if (zoomInBtn) zoomInBtn.addEventListener('click', () => animateZoomStep(1.2));
-    if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => animateZoomStep(1 / 1.2));
+    const bindZoomStepButton = (btn, factor) => {
+        if (!btn || btn.dataset.zoomStepBound === 'true') return;
+        btn.dataset.zoomStepBound = 'true';
+
+        let lastPointerHandledAt = 0;
+
+        btn.addEventListener('pointerdown', (event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            lastPointerHandledAt = Date.now();
+            animateZoomStep(factor);
+        });
+
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if ((Date.now() - lastPointerHandledAt) < 260) return;
+            animateZoomStep(factor);
+        });
+    };
+
+    bindZoomStepButton(zoomInBtn, 1.2);
+    bindZoomStepButton(zoomOutBtn, 1 / 1.2);
     if (zoomLocateBtn) zoomLocateBtn.addEventListener('click', locateToPermanentSection);
 
     // [Fix] 窗口大小改变时，重新计算可视区域休眠状态
@@ -7181,7 +7203,13 @@ function getCanvasMinZoomLimit() {
         const saved = localStorage.getItem('canvasMinZoomLimit');
         if (saved) {
             const val = parseFloat(saved);
-            if (Number.isFinite(val)) return val;
+            if (Number.isFinite(val)) {
+                const normalized = Math.min(100, Math.max(1, val));
+                if (normalized !== val) {
+                    localStorage.setItem('canvasMinZoomLimit', String(normalized));
+                }
+                return normalized;
+            }
         }
     } catch (_) { }
     return 10; // Default 10%

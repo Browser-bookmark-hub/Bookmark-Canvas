@@ -10373,7 +10373,7 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     width: 56px;
     height: 56px;
     background: transparent;
-    pointer-events: auto;
+    pointer-events: none;
     border-radius: 0;
     z-index: -1;
 }
@@ -10435,7 +10435,7 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     top: -10px;
     width: 60px;
     height: calc(100% + 20px);
-    pointer-events: auto;
+    pointer-events: none;
 }
 
 .canvas-zoom-indicator:not([data-dock-edge]) .canvas-floating-toggle-mini:hover,
@@ -10465,7 +10465,7 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     top: -10px;
     width: 60px;
     height: calc(100% + 20px);
-    pointer-events: auto;
+    pointer-events: none;
 }
 
 .canvas-zoom-indicator[data-dock-edge="right"] .canvas-floating-toggle-mini:hover {
@@ -10494,7 +10494,7 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     top: -16px;
     width: calc(100% + 20px);
     height: 60px;
-    pointer-events: auto;
+    pointer-events: none;
 }
 
 .canvas-zoom-indicator[data-dock-edge="top"] .canvas-floating-toggle-mini:hover {
@@ -10529,6 +10529,11 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     bottom: -16px;
     width: calc(100% + 20px);
     height: 60px;
+    pointer-events: none;
+}
+
+.canvas-zoom-indicator.floating-tools-collapsed .canvas-floating-toggle-mini::before,
+.canvas-zoom-indicator.floating-tools-collapsed .canvas-floating-toggle-mini::after {
     pointer-events: auto;
 }
 
@@ -10551,6 +10556,8 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     gap: 8px;
     justify-content: flex-start;
     margin-bottom: 6px;
+    position: relative;
+    z-index: 3;
 }
 
 .canvas-zoom-meter {
@@ -10638,6 +10645,8 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     align-items: stretch;
     gap: 6px;
     margin-top: 8px;
+    position: relative;
+    z-index: 3;
 }
 
 .canvas-zoom-controls>.zoom-btn,
