@@ -1,5 +1,7 @@
 # Smoke Tests (Chrome MV3)
 
+> 返回文档索引：[docs/README.md](./README.md)
+
 ## Load / Basics
 - Load the extension in chrome://extensions with Developer Mode enabled.
 - Click the toolbar icon and ensure side panel opens without errors.

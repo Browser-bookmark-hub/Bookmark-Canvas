@@ -3998,6 +3998,12 @@ function initCanvasView() {
     // 加载临时节点
     loadTempNodes();
 
+    // [跨页面实时同步入口]
+    // 约定：凡是会修改持久化画布状态（sections / mdNodes / edges 等）的新功能，
+    // 在完成本地状态变更后都应调用 saveTempNodes()。
+    // 这里绑定监听后，其他标签页/窗口/侧边栏会通过 storage 事件拿到新快照并应用。
+    __bindCanvasTempStateRealtimeSync();
+
     // 初始化滚动条状态和事件
     loadCanvasScrollPreferences();
     setupCanvasScrollbars();
@@ -29922,6 +29928,12 @@ let __canvasTempStateChromeWritePending = null;
 let __canvasTempStateChromeLoadInProgress = false;
 let __canvasTempStatePreferIndexedDb = false;
 let __canvasTempStateIndexedDbLoadInProgress = false;
+let __canvasTempStateRealtimeSyncBound = false;
+let __canvasTempStateRealtimeSyncApplying = false;
+let __canvasTempStateRealtimeSyncTimer = null;
+let __canvasTempStateRealtimeSyncPending = null;
+let __canvasTempStateLastSavedTimestamp = 0;
+let __canvasTempStateLastAppliedTimestamp = 0;
 let __canvasImportRuntimeMode = 'permanent';
 
 function __setCanvasImportRuntimeMode(mode) {
@@ -30099,6 +30111,167 @@ function __getCanvasStorageLocalArea() {
     return null;
 }
 
+function __getCanvasStorageOnChangedArea() {
+    try {
+        if (typeof browserAPI !== 'undefined' && browserAPI && browserAPI.storage && browserAPI.storage.onChanged) {
+            return browserAPI.storage.onChanged;
+        }
+    } catch (_) { }
+    try {
+        if (typeof chrome !== 'undefined' && chrome && chrome.storage && chrome.storage.onChanged) {
+            return chrome.storage.onChanged;
+        }
+    } catch (_) { }
+    try {
+        if (typeof browser !== 'undefined' && browser && browser.storage && browser.storage.onChanged) {
+            return browser.storage.onChanged;
+        }
+    } catch (_) { }
+    return null;
+}
+
+function __extractCanvasTempStateTimestamp(state) {
+    const ts = Number(state && state.timestamp);
+    return Number.isFinite(ts) && ts > 0 ? ts : 0;
+}
+
+function __isCanvasTempStatePayload(state) {
+    if (!state || typeof state !== 'object') return false;
+    if (__isCanvasTempStateChromeMarker(state) || __isCanvasTempStateIndexedDbMarker(state)) return false;
+    return Array.isArray(state.sections) || Array.isArray(state.mdNodes) || Array.isArray(state.edges);
+}
+
+async function __readCanvasTempStateFromChromeStorage() {
+    const storage = __getCanvasStorageLocalArea();
+    if (!storage || typeof storage.get !== 'function') return null;
+
+    return await new Promise((resolve) => {
+        let settled = false;
+        const finish = (result) => {
+            if (settled) return;
+            settled = true;
+            resolve(result && typeof result === 'object' ? (result[TEMP_SECTION_STORAGE_KEY] || null) : null);
+        };
+
+        try {
+            const maybePromise = storage.get([TEMP_SECTION_STORAGE_KEY], (result) => {
+                finish(result);
+            });
+            if (maybePromise && typeof maybePromise.then === 'function') {
+                maybePromise.then((result) => finish(result)).catch(() => finish(null));
+            }
+        } catch (_) {
+            finish(null);
+        }
+    });
+}
+
+function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external') {
+    if (!__isCanvasTempStatePayload(state)) return;
+
+    const ts = __extractCanvasTempStateTimestamp(state);
+    if (ts > 0) {
+        if (ts <= __canvasTempStateLastAppliedTimestamp) return;
+        if (ts <= __canvasTempStateLastSavedTimestamp) return;
+    }
+
+    if (__canvasTempStateRealtimeSyncApplying) return;
+    __canvasTempStateRealtimeSyncApplying = true;
+    try {
+        __resetCanvasDomAndStateForImport();
+        __applyCanvasTempStateObject(state);
+        __finalizeTempNodesLoad({ loadedFromStorage: true });
+
+        if (ts > 0) {
+            __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, ts);
+        }
+
+        console.log('[Canvas] 已同步外部画布状态:', source, ts || 'no-ts');
+    } catch (error) {
+        console.warn('[Canvas] 外部画布状态同步失败:', error);
+    } finally {
+        __canvasTempStateRealtimeSyncApplying = false;
+    }
+}
+
+function __queueCanvasTempStateRealtimeSync(state, source = 'external') {
+    if (!__isCanvasTempStatePayload(state)) return;
+
+    __canvasTempStateRealtimeSyncPending = { state, source };
+    if (__canvasTempStateRealtimeSyncTimer) return;
+
+    __canvasTempStateRealtimeSyncTimer = setTimeout(() => {
+        __canvasTempStateRealtimeSyncTimer = null;
+        const pending = __canvasTempStateRealtimeSyncPending;
+        __canvasTempStateRealtimeSyncPending = null;
+        if (!pending || !pending.state) return;
+        __applyCanvasTempStateRealtimeSyncNow(pending.state, pending.source);
+    }, 140);
+}
+
+function __consumeCanvasTempStateRealtimeSignal(rawState, source = 'external') {
+    if (!rawState || typeof rawState !== 'object') return;
+
+    // 注意：当持久化后端是 chrome.storage / IndexedDB 时，
+    // localStorage 里可能先写入 marker（而非真实状态）。
+    // 收到 marker 后需二次读取对应后端，再把真实状态排队应用。
+    if (__isCanvasTempStateChromeMarker(rawState)) {
+        __readCanvasTempStateFromChromeStorage()
+            .then((state) => {
+                __queueCanvasTempStateRealtimeSync(state, `${source}:chrome-marker`);
+            })
+            .catch(() => { });
+        return;
+    }
+
+    if (__isCanvasTempStateIndexedDbMarker(rawState)) {
+        __loadCanvasTempStateFromIndexedDb()
+            .then((state) => {
+                __queueCanvasTempStateRealtimeSync(state, `${source}:indexeddb-marker`);
+            })
+            .catch(() => { });
+        return;
+    }
+
+    __queueCanvasTempStateRealtimeSync(rawState, source);
+}
+
+function __bindCanvasTempStateRealtimeSync() {
+    if (__canvasTempStateRealtimeSyncBound) return;
+    __canvasTempStateRealtimeSyncBound = true;
+
+    // localStorage 通道：覆盖当前页使用 localStorage 持久化的场景。
+    try {
+        if (typeof window !== 'undefined' && window && typeof window.addEventListener === 'function') {
+            window.addEventListener('storage', (event) => {
+                if (!event || event.key !== TEMP_SECTION_STORAGE_KEY) return;
+                if (typeof event.newValue !== 'string' || !event.newValue) return;
+                let state = null;
+                try {
+                    state = JSON.parse(event.newValue);
+                } catch (_) {
+                    state = null;
+                }
+                if (!state) return;
+                __consumeCanvasTempStateRealtimeSignal(state, 'localStorage');
+            });
+        }
+    } catch (_) { }
+
+    // chrome.storage 通道：覆盖扩展跨文档（标签页/窗口/侧边栏）同步主路径。
+    const onChanged = __getCanvasStorageOnChangedArea();
+    if (onChanged && typeof onChanged.addListener === 'function') {
+        try {
+            onChanged.addListener((changes, areaName) => {
+                if (areaName !== 'local' || !changes) return;
+                const entry = changes[TEMP_SECTION_STORAGE_KEY];
+                if (!entry || !Object.prototype.hasOwnProperty.call(entry, 'newValue')) return;
+                __consumeCanvasTempStateRealtimeSignal(entry.newValue, 'storage.onChanged');
+            });
+        } catch (_) { }
+    }
+}
+
 function __isCanvasTempStateChromeMarker(state) {
     return !!(state && typeof state === 'object' && state.__storage === TEMP_SECTION_STORAGE_CHROME_MARKER);
 }
@@ -30198,6 +30371,11 @@ function __applyCanvasTempStateObject(state) {
     CanvasState.mdNodeCounter = state.mdNodeCounter || CanvasState.mdNodes.length || 0;
     CanvasState.edges = Array.isArray(state.edges) ? state.edges : [];
     CanvasState.edgeCounter = state.edgeCounter || CanvasState.edges.length || 0;
+
+    const ts = __extractCanvasTempStateTimestamp(state);
+    if (ts > 0) {
+        __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, ts);
+    }
 
     // 区块休眠替代旧休眠：加载时不保留运行态 dormant 标记，避免“空白/隐藏栏目”
     try {
@@ -30445,6 +30623,12 @@ function __tryRestoreTempNodesFromIndexedDb() {
 }
 
 function saveTempNodes(options = {}) {
+    // [开发约定 - 新功能同步指南]
+    // 1) 先改 CanvasState（tempSections / mdNodes / edges 等）
+    // 2) 立即或节流后调用 saveTempNodes()
+    // 3) 本函数负责：持久化 + 触发跨页面同步信号
+    // 4) 若功能是“仅当前会话临时态”（如 sandbox 导入），不要调用本函数
+    if (__canvasTempStateRealtimeSyncApplying) return;
     const immediate = !!(options && options.immediate);
     // 保存前执行自动 resize
     autoResizeImportContainers();
@@ -30466,6 +30650,11 @@ function saveTempNodes(options = {}) {
             timestamp: Date.now()
         };
         const persistedState = __buildPersistedCanvasState(state);
+        const persistedTs = __extractCanvasTempStateTimestamp(persistedState);
+        if (persistedTs > 0) {
+            __canvasTempStateLastSavedTimestamp = Math.max(__canvasTempStateLastSavedTimestamp, persistedTs);
+            __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, persistedTs);
+        }
         if (__canvasTempStatePreferIndexedDb) {
             __saveCanvasTempStateToIndexedDbQueued(persistedState);
             return;
