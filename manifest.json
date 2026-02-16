@@ -15,7 +15,7 @@
     "default_title": "__MSG_actionTitle__"
   },
   "side_panel": {
-    "default_path": "history_html/history.html?view=canvas&sidepanel=1"
+    "default_path": "panel-shell.html"
   },
   "background": {
     "service_worker": "background.js",

@@ -8,7 +8,6 @@ const browserAPI = (function () {
   throw new Error('Unsupported browser');
 })();
 
-const SIDE_PANEL_CANVAS_PATH = 'history_html/history.html?view=canvas&sidepanel=1';
 const MARKER_BADGE_TEXT_MAX = 99;
 const MARKER_BADGE_DEFAULT_BG = '#fbbc04';
 const MARKER_BADGE_COLOR_STORAGE_KEY = 'canvas_marker_badge_color_v1';
@@ -196,11 +195,6 @@ function initSidePanel() {
     // Bind "Activate extension" action to the side panel.
     if (browserAPI.sidePanel.setPanelBehavior) {
       browserAPI.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }, () => {});
-    }
-  } catch (_) {}
-  try {
-    if (browserAPI.sidePanel.setOptions) {
-      browserAPI.sidePanel.setOptions({ path: SIDE_PANEL_CANVAS_PATH, enabled: true }, () => {});
     }
   } catch (_) {}
 }
@@ -418,56 +412,12 @@ async function getSidePanelOpenStateForWindow(windowId) {
   return sidePanelOpenWindows.has(windowId);
 }
 
-async function setSidePanelOptionsForWindow(windowId, enabled = true) {
-  if (typeof browserAPI?.sidePanel?.setOptions !== 'function') {
-    return { success: true };
-  }
-
-  const baseOptions = enabled
-    ? { path: SIDE_PANEL_CANVAS_PATH, enabled: true }
-    : { enabled: false };
-
-  const candidates = [];
-  if (typeof windowId === 'number') {
-    candidates.push({ ...baseOptions, windowId });
-  }
-  candidates.push(baseOptions);
-
-  let last = { success: false, error: 'set_options_failed' };
-  for (const opts of candidates) {
-    const result = await new Promise((resolve) => {
-      try {
-        browserAPI.sidePanel.setOptions(opts, () => {
-          const err = browserAPI?.runtime?.lastError;
-          if (err) {
-            resolve({ success: false, error: err.message || 'set_options_failed' });
-            return;
-          }
-          resolve({ success: true });
-        });
-      } catch (error) {
-        resolve({ success: false, error: error?.message || 'set_options_failed' });
-      }
-    });
-
-    if (result && result.success) return result;
-    last = result || last;
-  }
-
-  return last;
-}
-
 async function openSidePanelInWindow(windowId) {
   if (typeof windowId !== 'number') {
     return { success: false, error: 'window_unavailable' };
   }
   if (typeof browserAPI?.sidePanel?.open !== 'function') {
     return { success: false, error: 'open_unavailable' };
-  }
-
-  const configured = await setSidePanelOptionsForWindow(windowId, true);
-  if (!configured || configured.success !== true) {
-    return { success: false, error: configured?.error || 'set_options_failed' };
   }
 
   return await new Promise((resolve) => {

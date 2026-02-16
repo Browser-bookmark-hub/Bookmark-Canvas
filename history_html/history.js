@@ -55,6 +55,11 @@ const isSidePanelMode = (() => {
     }
 })();
 
+if (isSidePanelMode) {
+    const sidePanelFixedView = isViewAllowed('canvas') ? 'canvas' : DEFAULT_VIEW;
+    currentView = sidePanelFixedView;
+}
+
 window.__SIDE_PANEL_MODE__ = isSidePanelMode;
 try {
     if (isSidePanelMode && document && document.documentElement) {
@@ -1482,7 +1487,12 @@ async function clearMarkersAndSetBaseline(reason = 'manual') {
         explicitMovedIds = new Map();
         schedulePersistExplicitMovedIds();
         resetPermanentSectionChangeMarkers();
-        await renderTreeView(true);
+        const skipFullRender = isSidePanelMode && reason === 'auto';
+        if (skipFullRender) {
+            scheduleCanvasPathBadgeRefresh('marker-auto-clear');
+        } else {
+            await renderTreeView(true);
+        }
         syncMarkerAttentionIndicators('clear-markers');
         console.log('[Marker] 已清除标识并设为新基准:', reason);
     } catch (e) {
@@ -3416,7 +3426,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const viewParam = urlParams.get('view');
 
     // 优先级：URL参数 > localStorage > 默认值
-    if (viewParam && ALLOWED_VIEWS.includes(viewParam)) {
+    if (isSidePanelMode) {
+        const sidePanelFixedView = isViewAllowed('canvas') ? 'canvas' : DEFAULT_VIEW;
+        currentView = sidePanelFixedView;
+        console.log('[初始化] SidePanel 模式固定视图:', currentView);
+    } else if (viewParam && ALLOWED_VIEWS.includes(viewParam)) {
         currentView = viewParam;
         console.log('[初始化] 从URL参数设置视图:', currentView);
 
@@ -3463,7 +3477,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
         document.documentElement.classList.toggle('canvas-view-active', currentView === 'canvas');
     } catch (_) { }
-    localStorage.setItem('lastActiveView', currentView);
+    if (!isSidePanelMode) {
+        localStorage.setItem('lastActiveView', currentView);
+    }
     console.log('[初始化] 视图状态已应用完成');
 
     // [Search Context Boot] 首次加载时同步 SearchContextManager 的 view/tab/subTab。
@@ -4968,30 +4984,6 @@ async function openSidePanelDirectlyFromCanvasPage() {
     const windowId = await getCurrentWindowIdForSidePanelToggle();
     if (typeof windowId !== 'number') return { success: false, error: 'window_unavailable' };
     if (!browserAPI?.sidePanel?.open) return { success: false, error: 'sidepanel_unavailable' };
-
-    try {
-        if (typeof browserAPI?.sidePanel?.setOptions === 'function') {
-            await new Promise((resolve) => {
-                try {
-                    browserAPI.sidePanel.setOptions({
-                        path: 'history_html/history.html?view=canvas&sidepanel=1',
-                        enabled: true,
-                        windowId
-                    }, () => {
-                        try {
-                            const err = browserAPI?.runtime?.lastError;
-                            if (err && err.message) {
-                                // ignore and continue open attempt
-                            }
-                        } catch (_) { }
-                        resolve();
-                    });
-                } catch (_) {
-                    resolve();
-                }
-            });
-        }
-    } catch (_) { }
 
     return await new Promise((resolve) => {
         try {
@@ -7865,7 +7857,9 @@ function switchView(view) {
     } catch (_) { }
 
     // 保存到 localStorage
-    localStorage.setItem('lastActiveView', view);
+    if (!isSidePanelMode) {
+        localStorage.setItem('lastActiveView', view);
+    }
     console.log('[switchView] 已保存视图到localStorage:', view);
 
     // 渲染当前视图
