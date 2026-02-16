@@ -97,12 +97,7 @@
         if (isSidePanel) {
           const savedMode = readStorage('sidepanelFloatingToolsMode');
           if (savedMode) return normalizeFloatingToolsMode(savedMode);
-          const legacy = readStorage('sidepanelFloatingToolsVisible');
-          return legacy === 'true'
-            ? SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN
-            : (legacy === 'false'
-              ? SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN
-              : SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN);
+          return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
         }
         const canvasMode = readStorage('canvasFloatingToolsMode');
         if (canvasMode) return normalizeFloatingToolsMode(canvasMode);

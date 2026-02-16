@@ -136,6 +136,52 @@
             </div>
             <!-- 侧边栏模式：设置菜单 -->
             <div id="settingsMenu" class="settings-menu" hidden>
+                <div class="settings-view-sync-dropdown">
+                    <button class="settings-menu-item settings-menu-item-expandable" id="canvasViewSyncToggleBtn"
+                        type="button" aria-expanded="false">
+                        <i class="fas fa-sync-alt"></i>
+                        <span id="canvasViewSyncToggleText">视图同步（以当前窗口为准）</span>
+                        <i class="fas fa-chevron-down settings-submenu-caret" aria-hidden="true"></i>
+                    </button>
+                    <div class="settings-view-sync-panel" id="canvasViewSyncPanel" style="display: none;">
+                        <div class="settings-view-sync-note settings-view-sync-note-inline">
+                            <div class="settings-view-sync-note-main">
+                                <span class="settings-view-sync-note-label" id="canvasViewSyncHintViewLabel">视图类：</span>
+                                <span class="settings-view-sync-note-text" id="canvasViewSyncHintViewText">相机/展开/滚动按 标签页 与 侧边栏 分区独立。</span>
+                            </div>
+                            <button id="canvasViewSyncHintInfoBtn" class="settings-view-sync-info-btn" type="button"
+                                aria-label="查看说明">
+                                <i class="fas fa-question-circle" aria-hidden="true"></i>
+                                <div class="settings-view-sync-tooltip" id="canvasViewSyncHintTooltip" role="tooltip">
+                                    <div class="settings-view-sync-tooltip-line">
+                                        <span class="settings-view-sync-tooltip-key" id="canvasViewSyncHintCameraLabel">相机：</span>
+                                        <span class="settings-view-sync-tooltip-value" id="canvasViewSyncHintCameraText">相机就是我们当前的视图。</span>
+                                    </div>
+                                    <div class="settings-view-sync-tooltip-line">
+                                        <span class="settings-view-sync-tooltip-key" id="canvasViewSyncHintExpandScrollLabel">展开与滚动：</span>
+                                        <span class="settings-view-sync-tooltip-value" id="canvasViewSyncHintExpandScrollText">指永久栏目或临时栏目中文件夹的展开状态，以及垂直滚动条的滚动位置。</span>
+                                    </div>
+                                    <div class="settings-view-sync-tooltip-line">
+                                        <span class="settings-view-sync-tooltip-key" id="canvasViewSyncHintContentLabel">内容类：</span>
+                                        <span class="settings-view-sync-tooltip-value" id="canvasViewSyncHintContentText">主数据/外观/设置始终全局共享，标签页与侧边栏会看到同一份内容。</span>
+                                    </div>
+                                </div>
+                            </button>
+                        </div>
+                        <div class="settings-view-sync-actions">
+                            <button id="canvasViewSyncCameraBtn" class="settings-menu-item settings-view-sync-action"
+                                type="button">
+                                <i class="fas fa-camera"></i>
+                                <span id="canvasViewSyncCameraText">同步相机（pan/zoom）</span>
+                            </button>
+                            <button id="canvasViewSyncExpandScrollBtn"
+                                class="settings-menu-item settings-view-sync-action" type="button">
+                                <i class="fas fa-stream"></i>
+                                <span id="canvasViewSyncExpandScrollText">同步展开与滚动</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 <div class="settings-floating-tools-dropdown">
                     <button class="settings-menu-item settings-menu-item-expandable" data-action="open-floating-toolbar"
                         id="settingsFloatingToolsToggle" type="button" aria-expanded="false">

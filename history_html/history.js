@@ -67,7 +67,6 @@ try {
     }
 } catch (_) { }
 
-const SIDE_PANEL_FLOATING_TOOLS_KEY = 'sidepanelFloatingToolsVisible';
 const SIDE_PANEL_FLOATING_TOOLS_MODE_KEY = 'sidepanelFloatingToolsMode';
 const CANVAS_FLOATING_TOOLS_MODE_KEY = 'canvasFloatingToolsMode';
 const HEADER_LAYOUT_STORAGE_KEYS = isSidePanelMode
@@ -184,10 +183,6 @@ function getSidePanelFloatingToolsMode() {
         if (isSidePanelMode) {
             const savedMode = localStorage.getItem(SIDE_PANEL_FLOATING_TOOLS_MODE_KEY);
             if (savedMode) return normalizeSidePanelFloatingToolsMode(savedMode);
-
-            const legacy = localStorage.getItem(SIDE_PANEL_FLOATING_TOOLS_KEY);
-            if (legacy === 'true') return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
-            if (legacy === 'false') return SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
             return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
         }
 
@@ -207,13 +202,9 @@ function setSidePanelFloatingToolsMode(mode) {
 
     try {
         if (isSidePanelMode) {
-            localStorage.setItem(SIDE_PANEL_FLOATING_TOOLS_MODE_KEY, normalizedMode);
-            localStorage.setItem(
-                SIDE_PANEL_FLOATING_TOOLS_KEY,
-                normalizedMode === SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN ? 'true' : 'false'
-            );
+            __saveLocalStorageRaw(SIDE_PANEL_FLOATING_TOOLS_MODE_KEY, normalizedMode);
         } else {
-            localStorage.setItem(CANVAS_FLOATING_TOOLS_MODE_KEY, normalizedMode);
+            __saveLocalStorageRaw(CANVAS_FLOATING_TOOLS_MODE_KEY, normalizedMode);
         }
     } catch (_) { }
 }
@@ -300,7 +291,7 @@ function writeCanvasFloatingToolsDockState(state) {
 
     canvasFloatingToolsDockStateCache = normalized;
     try {
-        localStorage.setItem(CANVAS_FLOATING_TOOLS_DOCK_KEY, JSON.stringify(normalized));
+        __saveLocalStorageJSON(CANVAS_FLOATING_TOOLS_DOCK_KEY, normalized);
     } catch (_) { }
     return { edge: normalized.edge, ratio: normalized.ratio };
 }
@@ -1963,6 +1954,103 @@ const FaviconCache = {
 // 浏览器 API 兼容性
 const browserAPI = (typeof chrome !== 'undefined') ? chrome : browser;
 
+let __canvasViewSurfaceKeyInitPromise = null;
+
+function __buildCanvasViewSurfaceKey({ isSidePanel, tabId, windowId }) {
+    if (isSidePanel) {
+        return Number.isFinite(windowId) ? `sidepanel:${windowId}` : 'sidepanel:unknown';
+    }
+
+    if (Number.isFinite(tabId)) return `tab:${tabId}`;
+    if (Number.isFinite(windowId)) return `page-window:${windowId}`;
+    return 'page:unknown';
+}
+
+function __setCanvasViewSurfaceGlobals(payload) {
+    const safe = payload && typeof payload === 'object' ? payload : {};
+    const surfaceKey = typeof safe.surfaceKey === 'string' && safe.surfaceKey
+        ? safe.surfaceKey
+        : (isSidePanelMode ? 'sidepanel:unknown' : 'page:unknown');
+
+    try {
+        const mode = safe.mode === 'sidepanel' ? 'sidepanel' : 'page';
+        window.__CANVAS_VIEW_SURFACE_KEY__ = surfaceKey;
+        window.__CANVAS_VIEW_PARTITION_KEY__ = mode;
+        window.__CANVAS_VIEW_SURFACE_INFO__ = {
+            mode,
+            tabId: Number.isFinite(safe.tabId) ? safe.tabId : null,
+            windowId: Number.isFinite(safe.windowId) ? safe.windowId : null,
+            surfaceKey,
+            partitionKey: mode,
+            updatedAt: Date.now()
+        };
+    } catch (_) { }
+
+    return surfaceKey;
+}
+
+async function __initCanvasViewSurfaceKey() {
+    if (__canvasViewSurfaceKeyInitPromise) {
+        return __canvasViewSurfaceKeyInitPromise;
+    }
+
+    __canvasViewSurfaceKeyInitPromise = (async () => {
+        const payload = {
+            mode: isSidePanelMode ? 'sidepanel' : 'page',
+            tabId: null,
+            windowId: null,
+            surfaceKey: isSidePanelMode ? 'sidepanel:unknown' : 'page:unknown'
+        };
+
+        const tabIdPromise = (!isSidePanelMode && browserAPI?.tabs?.getCurrent)
+            ? new Promise((resolve) => {
+                try {
+                    browserAPI.tabs.getCurrent((tab) => {
+                        const id = tab && typeof tab.id === 'number' ? tab.id : null;
+                        resolve(id);
+                    });
+                } catch (_) {
+                    resolve(null);
+                }
+            })
+            : Promise.resolve(null);
+
+        const windowIdPromise = browserAPI?.windows?.getCurrent
+            ? new Promise((resolve) => {
+                try {
+                    browserAPI.windows.getCurrent((win) => {
+                        const id = win && typeof win.id === 'number' ? win.id : null;
+                        resolve(id);
+                    });
+                } catch (_) {
+                    resolve(null);
+                }
+            })
+            : Promise.resolve(null);
+
+        try {
+            const withTimeout = (promise, timeoutMs = 180) => Promise.race([
+                promise,
+                new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))
+            ]);
+            payload.tabId = await withTimeout(tabIdPromise);
+            payload.windowId = await withTimeout(windowIdPromise);
+        } catch (_) { }
+
+        payload.surfaceKey = __buildCanvasViewSurfaceKey({
+            isSidePanel: isSidePanelMode,
+            tabId: payload.tabId,
+            windowId: payload.windowId
+        });
+
+        return __setCanvasViewSurfaceGlobals(payload);
+    })();
+
+    return __canvasViewSurfaceKeyInitPromise;
+}
+
+__setCanvasViewSurfaceGlobals({ mode: isSidePanelMode ? 'sidepanel' : 'page' });
+
 function getCacheStorageArea() {
     try {
         if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
@@ -2078,6 +2166,18 @@ const __PERMANENT_SECTION_EXPANDED_KEY = (typeof PERMANENT_SECTION_EXPANDED_KEY 
     ? PERMANENT_SECTION_EXPANDED_KEY
     : 'permanent-section-expanded';
 
+const __CANVAS_VIEW_STATE_STORAGE_NS = 'canvas:view:v1';
+
+function __getCanvasViewStatePartitionKey() {
+    return isSidePanelMode ? 'sidepanel' : 'page';
+}
+
+function __buildCanvasPartitionedViewKey(kind, baseKey) {
+    if (!kind || !baseKey) return baseKey;
+    const partition = __getCanvasViewStatePartitionKey();
+    return `${__CANVAS_VIEW_STATE_STORAGE_NS}:${kind}:${partition}:${baseKey}`;
+}
+
 function __getTreeExpandStateStorageKey(treeContainer) {
     try {
         const previewRoot = treeContainer && treeContainer.closest ? treeContainer.closest('#changesTreePreviewInline') : null;
@@ -2087,14 +2187,15 @@ function __getTreeExpandStateStorageKey(treeContainer) {
         }
     } catch (_) { }
 
-    // Canvas 永久栏目：每个副本独立持久化展开状态（不做同步）
+    // Canvas 永久栏目：每个副本独立持久化展开状态（不做同步），
+    // 但按视图分区（page / sidepanel）分别记忆“最后一次状态”。
     try {
         if (currentView === 'canvas') {
             const section = treeContainer && treeContainer.closest ? treeContainer.closest('.permanent-bookmark-section') : null;
             if (section) {
                 const copyId = section.dataset ? section.dataset.permanentSectionCopyId : null;
-                if (copyId) return `${__PERMANENT_SECTION_EXPANDED_KEY}:${copyId}`;
-                return __PERMANENT_SECTION_EXPANDED_KEY;
+                const baseKey = copyId ? `${__PERMANENT_SECTION_EXPANDED_KEY}:${copyId}` : __PERMANENT_SECTION_EXPANDED_KEY;
+                return __buildCanvasPartitionedViewKey('expand', baseKey);
             }
         }
     } catch (_) { }
@@ -2107,14 +2208,6 @@ function __readTreeExpandStateFromStorage(treeContainer) {
         const raw = localStorage.getItem(key);
         if (raw) return raw;
     } catch (_) { }
-
-    // 兼容旧版本：主永久栏目历史上使用 treeExpandedNodeIds
-    if (key === __PERMANENT_SECTION_EXPANDED_KEY) {
-        try {
-            const legacy = localStorage.getItem('treeExpandedNodeIds');
-            if (legacy) return legacy;
-        } catch (_) { }
-    }
     return null;
 }
 
@@ -2122,18 +2215,53 @@ function __getPermanentSectionScrollStorageKeyFromTree(tree) {
     try {
         const section = tree && tree.closest ? tree.closest('.permanent-bookmark-section') : null;
         const copyId = section && section.dataset ? section.dataset.permanentSectionCopyId : null;
-        return copyId ? `permanent-section-scroll:${copyId}` : 'permanent-section-scroll';
+        const baseKey = copyId ? `permanent-section-scroll:${copyId}` : 'permanent-section-scroll';
+        return __buildCanvasPartitionedViewKey('scroll', baseKey);
     } catch (_) {
-        return 'permanent-section-scroll';
+        return __buildCanvasPartitionedViewKey('scroll', 'permanent-section-scroll');
     }
 }
 
 function __readLocalStorageJSON(key) {
+    if (!key) return null;
     try {
         const raw = localStorage.getItem(key);
         if (!raw) return null;
         return JSON.parse(raw);
-    } catch (_) { return null; }
+    } catch (_) {
+        return null;
+    }
+}
+
+// 统一写入入口（history.js）：
+// - 约束：除本入口外，业务代码不要直接调用 localStorage.setItem。
+function __saveLocalStorageRaw(key, value) {
+    if (!key) return false;
+    try {
+        localStorage.setItem(key, String(value));
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function __saveLocalStorageJSON(key, value) {
+    if (!key) return false;
+    try {
+        return __saveLocalStorageRaw(key, JSON.stringify(value));
+    } catch (_) {
+        return false;
+    }
+}
+
+function __removeLocalStorageKey(key) {
+    if (!key) return false;
+    try {
+        localStorage.removeItem(key);
+        return true;
+    } catch (_) {
+        return false;
+    }
 }
 
 function __lazyLoadExpandedFolders(tree, expandedNodeIds) {
@@ -2332,15 +2460,17 @@ function __debugPermanentCopyStates() {
             const tree = sec.querySelector('.bookmark-tree');
             const body = sec.querySelector('.permanent-section-body');
 
-            const scrollKey = copyId ? `permanent-section-scroll:${copyId}` : 'permanent-section-scroll';
+            const scrollKey = tree ? __getPermanentSectionScrollStorageKeyFromTree(tree) : (copyId ? `permanent-section-scroll:${copyId}` : 'permanent-section-scroll');
             const expandKey = tree ? __getTreeExpandStateStorageKey(tree) : null;
 
             let storedScroll = null;
             let storedExpandedCount = null;
-            try { storedScroll = __readLocalStorageJSON(scrollKey); } catch (_) { }
+            try {
+                storedScroll = __readLocalStorageJSON(scrollKey);
+            } catch (_) { }
             try {
                 if (expandKey) {
-                    const raw = localStorage.getItem(expandKey);
+                    let raw = localStorage.getItem(expandKey);
                     const parsed = raw ? JSON.parse(raw) : null;
                     storedExpandedCount = Array.isArray(parsed) ? parsed.length : null;
                 }
@@ -2405,7 +2535,7 @@ function writeCachedValue(key, value) {
         }
 
         try {
-            localStorage.setItem(key, JSON.stringify(value));
+            __saveLocalStorageJSON(key, value);
         } catch (error) {
             console.warn('[Cache] 写入 localStorage 失败:', error);
         }
@@ -3027,6 +3157,58 @@ const i18n = {
         'zh_CN': '存储与同步',
         'en': 'Storage & Sync'
     },
+    canvasManageSectionSyncText: {
+        'zh_CN': '视图同步',
+        'en': 'View Sync'
+    },
+    canvasViewSyncToggleText: {
+        'zh_CN': '视图同步（以当前窗口为准）',
+        'en': 'View Sync (Use Current View)'
+    },
+    canvasViewSyncCameraText: {
+        'zh_CN': '同步相机（pan/zoom）',
+        'en': 'Sync Camera (pan/zoom)'
+    },
+    canvasViewSyncExpandScrollText: {
+        'zh_CN': '同步展开与滚动',
+        'en': 'Sync Expand + Scroll'
+    },
+    canvasViewSyncHintGlobalText: {
+        'zh_CN': '相机：相机就是我们当前的视图。\n展开与滚动：指永久栏目或临时栏目中文件夹的展开状态，以及垂直滚动条的滚动位置。\n内容类：主数据/外观/设置始终全局共享，标签页与侧边栏会看到同一份内容。',
+        'en': 'Camera: The camera is the current viewport.\nExpand & Scroll: Folder expanded/collapsed state in permanent or temporary sections, plus the vertical scrollbar position.\nContent State: Main data / appearance / settings are globally shared across Tab and Side Panel.'
+    },
+    canvasViewSyncHintCameraLabel: {
+        'zh_CN': '相机：',
+        'en': 'Camera:'
+    },
+    canvasViewSyncHintCameraText: {
+        'zh_CN': '相机就是我们当前的视图。',
+        'en': 'The camera is the current viewport.'
+    },
+    canvasViewSyncHintExpandScrollLabel: {
+        'zh_CN': '展开与滚动：',
+        'en': 'Expand & Scroll:'
+    },
+    canvasViewSyncHintExpandScrollText: {
+        'zh_CN': '指永久栏目或临时栏目中文件夹的展开状态，以及垂直滚动条的滚动位置。',
+        'en': 'Folder expanded/collapsed state in permanent or temporary sections, plus the vertical scrollbar position.'
+    },
+    canvasViewSyncHintContentLabel: {
+        'zh_CN': '内容类：',
+        'en': 'Content State:'
+    },
+    canvasViewSyncHintContentText: {
+        'zh_CN': '主数据/外观/设置始终全局共享，标签页与侧边栏会看到同一份内容。',
+        'en': 'Main data / appearance / settings are globally shared across Tab and Side Panel.'
+    },
+    canvasViewSyncHintViewLabel: {
+        'zh_CN': '视图类：',
+        'en': 'View State:'
+    },
+    canvasViewSyncHintViewText: {
+        'zh_CN': '相机/展开/滚动按 标签页 与 侧边栏 分区独立。',
+        'en': 'Camera / expand / scroll are partitioned by Tab and Side Panel.'
+    },
     canvasHelpBtnTitle: {
         'zh_CN': '说明',
         'en': 'Help'
@@ -3478,7 +3660,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.documentElement.classList.toggle('canvas-view-active', currentView === 'canvas');
     } catch (_) { }
     if (!isSidePanelMode) {
-        localStorage.setItem('lastActiveView', currentView);
+        __saveLocalStorageRaw('lastActiveView', currentView);
     }
     console.log('[初始化] 视图状态已应用完成');
 
@@ -3544,6 +3726,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 先加载基础数据
     console.log('[初始化] 加载基础数据...');
     await loadAllData();
+
+    // 在渲染 Canvas 前确定当前视图分区信息（page / sidepanel），
+    // 供画布相机（pan/zoom）按逻辑分区持久化使用。
+    await __initCanvasViewSurfaceKey();
 
     // 使用智能等待：尝试渲染，如果数据不完整则等待后重试
     // 初始化时强制刷新缓存，确保显示最新数据
@@ -3686,10 +3872,10 @@ async function loadUserSettings() {
             // Keep History Viewer in sync with main UI.
             // Legacy: older versions supported per-page overrides, but that commonly caused "not linked" confusion.
             try {
-                localStorage.removeItem('historyViewerHasCustomTheme');
-                localStorage.removeItem('historyViewerCustomTheme');
-                localStorage.removeItem('historyViewerHasCustomLang');
-                localStorage.removeItem('historyViewerCustomLang');
+                __removeLocalStorageKey('historyViewerHasCustomTheme');
+                __removeLocalStorageKey('historyViewerCustomTheme');
+                __removeLocalStorageKey('historyViewerHasCustomLang');
+                __removeLocalStorageKey('historyViewerCustomLang');
             } catch (_) { }
 
             currentTheme = mainUITheme;
@@ -3862,6 +4048,36 @@ function applyLanguage() {
     if (canvasManageOtherSectionText) canvasManageOtherSectionText.textContent = i18n.canvasManageSectionOtherText[currentLang];
     const canvasManageStorageSectionText = document.getElementById('canvasManageStorageSectionText');
     if (canvasManageStorageSectionText) canvasManageStorageSectionText.textContent = i18n.canvasManageSectionStorageText[currentLang];
+    const canvasManageSyncSectionText = document.getElementById('canvasManageSyncSectionText');
+    if (canvasManageSyncSectionText) canvasManageSyncSectionText.textContent = i18n.canvasManageSectionSyncText[currentLang];
+
+    const canvasViewSyncToggleText = document.getElementById('canvasViewSyncToggleText');
+    if (canvasViewSyncToggleText) canvasViewSyncToggleText.textContent = i18n.canvasViewSyncToggleText[currentLang];
+    const canvasViewSyncCameraText = document.getElementById('canvasViewSyncCameraText');
+    if (canvasViewSyncCameraText) canvasViewSyncCameraText.textContent = i18n.canvasViewSyncCameraText[currentLang];
+    const canvasViewSyncExpandScrollText = document.getElementById('canvasViewSyncExpandScrollText');
+    if (canvasViewSyncExpandScrollText) canvasViewSyncExpandScrollText.textContent = i18n.canvasViewSyncExpandScrollText[currentLang];
+    const canvasViewSyncHintViewLabel = document.getElementById('canvasViewSyncHintViewLabel');
+    if (canvasViewSyncHintViewLabel) canvasViewSyncHintViewLabel.textContent = i18n.canvasViewSyncHintViewLabel[currentLang];
+    const canvasViewSyncHintViewText = document.getElementById('canvasViewSyncHintViewText');
+    if (canvasViewSyncHintViewText) canvasViewSyncHintViewText.textContent = i18n.canvasViewSyncHintViewText[currentLang];
+    const canvasViewSyncHintInfoBtn = document.getElementById('canvasViewSyncHintInfoBtn');
+    if (canvasViewSyncHintInfoBtn) {
+        const hint = i18n.canvasViewSyncHintGlobalText[currentLang];
+        canvasViewSyncHintInfoBtn.setAttribute('aria-label', hint);
+    }
+    const canvasViewSyncHintCameraLabel = document.getElementById('canvasViewSyncHintCameraLabel');
+    if (canvasViewSyncHintCameraLabel) canvasViewSyncHintCameraLabel.textContent = i18n.canvasViewSyncHintCameraLabel[currentLang];
+    const canvasViewSyncHintCameraText = document.getElementById('canvasViewSyncHintCameraText');
+    if (canvasViewSyncHintCameraText) canvasViewSyncHintCameraText.textContent = i18n.canvasViewSyncHintCameraText[currentLang];
+    const canvasViewSyncHintExpandScrollLabel = document.getElementById('canvasViewSyncHintExpandScrollLabel');
+    if (canvasViewSyncHintExpandScrollLabel) canvasViewSyncHintExpandScrollLabel.textContent = i18n.canvasViewSyncHintExpandScrollLabel[currentLang];
+    const canvasViewSyncHintExpandScrollText = document.getElementById('canvasViewSyncHintExpandScrollText');
+    if (canvasViewSyncHintExpandScrollText) canvasViewSyncHintExpandScrollText.textContent = i18n.canvasViewSyncHintExpandScrollText[currentLang];
+    const canvasViewSyncHintContentLabel = document.getElementById('canvasViewSyncHintContentLabel');
+    if (canvasViewSyncHintContentLabel) canvasViewSyncHintContentLabel.textContent = i18n.canvasViewSyncHintContentLabel[currentLang];
+    const canvasViewSyncHintContentText = document.getElementById('canvasViewSyncHintContentText');
+    if (canvasViewSyncHintContentText) canvasViewSyncHintContentText.textContent = i18n.canvasViewSyncHintContentText[currentLang];
 
     const canvasManageModalTitle = document.getElementById('canvasManageModalTitle');
     if (canvasManageModalTitle) canvasManageModalTitle.textContent = i18n.canvasManageTitle[currentLang];
@@ -4158,6 +4374,8 @@ function applyLanguage() {
 function setupSidePanelSettingsMenu() {
     const toggle = document.getElementById('settingsToggle');
     const menu = document.getElementById('settingsMenu');
+    const viewSyncToggle = document.getElementById('canvasViewSyncToggleBtn');
+    const viewSyncPanel = document.getElementById('canvasViewSyncPanel');
     const floatingToolsToggle = document.getElementById('settingsFloatingToolsToggle');
     const floatingToolsPanel = document.getElementById('floatingToolsModePanel');
     if (!toggle || !menu) return;
@@ -4170,6 +4388,15 @@ function setupSidePanelSettingsMenu() {
         }
         if (floatingToolsToggle) {
             floatingToolsToggle.setAttribute('aria-expanded', 'false');
+        }
+    };
+
+    const closeViewSyncPanel = () => {
+        if (viewSyncPanel) {
+            viewSyncPanel.style.display = 'none';
+        }
+        if (viewSyncToggle) {
+            viewSyncToggle.setAttribute('aria-expanded', 'false');
         }
     };
 
@@ -4193,6 +4420,7 @@ function setupSidePanelSettingsMenu() {
 
     const closeMenu = () => {
         closeFloatingToolsPanel();
+        closeViewSyncPanel();
         if (!menu.hasAttribute('hidden')) menu.setAttribute('hidden', '');
     };
 
@@ -4201,6 +4429,7 @@ function setupSidePanelSettingsMenu() {
             menu.dataset.dock = currentHeaderDockSide;
         }
         menu.removeAttribute('hidden');
+        closeViewSyncPanel();
         closeFloatingToolsPanel();
     };
 
@@ -4233,6 +4462,7 @@ function setupSidePanelSettingsMenu() {
         const action = item.dataset.action || '';
 
         if (action === 'open-floating-toolbar') {
+            closeViewSyncPanel();
             toggleFloatingToolsPanel();
             return;
         }
@@ -6323,7 +6553,7 @@ function initSidebarToggle() {
                 nextSettings.directoryAutoCollapseWidth = width;
             }
 
-            localStorage.setItem('canvas-other-settings-v1', JSON.stringify(nextSettings));
+            __saveLocalStorageJSON('canvas-other-settings-v1', nextSettings);
             if (dispatchEvent) {
                 window.dispatchEvent(new CustomEvent('canvas-other-settings-updated', {
                     detail: nextSettings
@@ -6344,7 +6574,7 @@ function initSidebarToggle() {
 
     function writeStorage(key, value) {
         try {
-            localStorage.setItem(key, value);
+            __saveLocalStorageRaw(key, value);
         } catch (_) { }
     }
 
@@ -6786,9 +7016,9 @@ function initSidebarToggle() {
     function persistSidebarState(state) {
         if (!persistEnabled) return;
         const safeState = normalizeSidebarState(state) || 'expanded';
-        localStorage.setItem(SIDEBAR_STATE_KEY, safeState);
+        writeStorage(SIDEBAR_STATE_KEY, safeState);
         const legacyValue = safeState === 'expanded' ? 'false' : 'true';
-        localStorage.setItem(LEGACY_COLLAPSED_KEY, legacyValue);
+        writeStorage(LEGACY_COLLAPSED_KEY, legacyValue);
     }
 
     function readSidebarState() {
@@ -6818,7 +7048,7 @@ function initSidebarToggle() {
     function setManualOverride(isManual) {
         hasManualOverride = !!isManual;
         if (!persistEnabled) return;
-        localStorage.setItem(SIDEBAR_MANUAL_KEY, isManual ? 'true' : 'false');
+        writeStorage(SIDEBAR_MANUAL_KEY, isManual ? 'true' : 'false');
     }
 
     function getAutoState() {
@@ -7273,7 +7503,7 @@ function initHeaderToggle() {
 
     function writeStorage(key, value) {
         try {
-            localStorage.setItem(key, value);
+            __saveLocalStorageRaw(key, value);
         } catch (_) { }
     }
 
@@ -7858,7 +8088,7 @@ function switchView(view) {
 
     // 保存到 localStorage
     if (!isSidePanelMode) {
-        localStorage.setItem('lastActiveView', view);
+        __saveLocalStorageRaw('lastActiveView', view);
     }
     console.log('[switchView] 已保存视图到localStorage:', view);
 
@@ -8919,7 +9149,8 @@ async function renderTreeView(forceRefresh = false) {
     // 页面刷新后，permScrollTop 是 0，需要从 localStorage 恢复
     if (permScrollTop === 0 && currentView === 'canvas') {
         try {
-            const persisted = JSON.parse(localStorage.getItem('permanent-section-scroll'));
+            const partitionedKey = __buildCanvasPartitionedViewKey('scroll', 'permanent-section-scroll');
+            const persisted = __readLocalStorageJSON(partitionedKey);
             if (persisted && typeof persisted.top === 'number') {
                 permScrollTop = persisted.top;
                 permScrollLeft = persisted.left || 0;
@@ -9850,7 +10081,7 @@ function saveJSONScrollPosition(jsonContainer) {
         const content = jsonContainer.querySelector('.json-diff-content');
         if (content) {
             const scrollTop = content.scrollTop;
-            localStorage.setItem('jsonScrollPosition', scrollTop.toString());
+            __saveLocalStorageRaw('jsonScrollPosition', scrollTop.toString());
             console.log('[JSON状态] 保存滚动位置:', scrollTop);
         }
     } catch (e) {
@@ -9888,7 +10119,7 @@ function __saveTreeExpandStateToStorage(treeContainer) {
             }
         });
         const key = __getTreeExpandStateStorageKey(treeContainer);
-        localStorage.setItem(key, JSON.stringify(expandedIds));
+        __saveLocalStorageJSON(key, expandedIds);
         console.log('[树状态] 保存展开节点:', expandedIds.length, 'key:', key);
     } catch (e) {
         console.error('[树状态] 保存失败:', e);
@@ -9914,7 +10145,8 @@ function saveTreeExpandState(treeContainer) {
         try {
             if (currentView === 'canvas') {
                 const key = __getTreeExpandStateStorageKey(treeContainer);
-                if (key && key.startsWith(`${__PERMANENT_SECTION_EXPANDED_KEY}:`)) {
+                const copyExpandPrefix = `${__CANVAS_VIEW_STATE_STORAGE_NS}:expand:${__getCanvasViewStatePartitionKey()}:${__PERMANENT_SECTION_EXPANDED_KEY}:`;
+                if (key && key.startsWith(copyExpandPrefix)) {
                     const prevTimer = _saveTreeExpandStateTimers.get(treeContainer);
                     if (prevTimer) {
                         clearTimeout(prevTimer);
@@ -11865,9 +12097,9 @@ function toggleTheme() {
     // - theme.js uses localStorage.themePreference
     // - History Viewer follows chrome.storage.local.currentTheme
     try {
-        localStorage.setItem('themePreference', currentTheme);
-        localStorage.removeItem('historyViewerHasCustomTheme');
-        localStorage.removeItem('historyViewerCustomTheme');
+        __saveLocalStorageRaw('themePreference', currentTheme);
+        __removeLocalStorageKey('historyViewerHasCustomTheme');
+        __removeLocalStorageKey('historyViewerCustomTheme');
     } catch (_) { }
     try {
         if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
@@ -11892,9 +12124,9 @@ function toggleLanguage() {
 
     // Sync language preference in current page and extension storage.
     try {
-        localStorage.setItem('preferredLang', currentLang);
-        localStorage.removeItem('historyViewerHasCustomLang');
-        localStorage.removeItem('historyViewerCustomLang');
+        __saveLocalStorageRaw('preferredLang', currentLang);
+        __removeLocalStorageKey('historyViewerHasCustomLang');
+        __removeLocalStorageKey('historyViewerCustomLang');
     } catch (_) { }
     try {
         if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
