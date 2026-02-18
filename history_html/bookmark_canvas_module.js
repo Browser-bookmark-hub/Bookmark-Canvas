@@ -10612,6 +10612,22 @@ function __updateNodeMaximizedState() {
     }
 }
 
+function __notifyNodeFullscreenContextChange(targetElement = null) {
+    try {
+        const applySearchMode = window.__canvasApplyFullscreenSearchDefault;
+        if (typeof applySearchMode === 'function') {
+            applySearchMode(targetElement, { onlyWhenInputEmpty: true });
+        }
+    } catch (_) { }
+
+    try {
+        const refreshCurrentViewAddBtn = window.__canvasRefreshCurrentViewAddButton;
+        if (typeof refreshCurrentViewAddBtn === 'function') {
+            refreshCurrentViewAddBtn();
+        }
+    } catch (_) { }
+}
+
 function __clearOtherMaximizedNodes(except) {
     document.querySelectorAll('.canvas-node-maximized').forEach((el) => {
         if (except && el === except) return;
@@ -10644,6 +10660,7 @@ function maximizeCanvasNode(element) {
     __saveMaximizedNodeToStorage(element);
     __applyNodeLayoutZoom(element);
     updateNodeFullscreenButtons();
+    __notifyNodeFullscreenContextChange(element);
 }
 
 function restoreCanvasNodeLayout(element) {
@@ -10667,6 +10684,7 @@ function restoreCanvasNodeLayout(element) {
         __clearMaximizedNodeStorage();
     }
     updateNodeFullscreenButtons();
+    __notifyNodeFullscreenContextChange(document.querySelector('.canvas-node-maximized'));
 }
 
 function toggleElementFullscreen(element) {
@@ -11755,6 +11773,9 @@ function locateToPermanentSection() {
 
     // 应用平移
     updateCanvasScrollBounds();
+    if (CanvasState.nodeMaximizedActive) {
+        refreshMaximizedNodes();
+    }
     savePanOffsetThrottled();
 
     console.log('[Canvas] 定位到永久栏目:', {
@@ -11826,6 +11847,9 @@ function locateToElement(el) {
     CanvasState.panOffsetX = wsW / 2 - centerX * CanvasState.zoom;
     CanvasState.panOffsetY = wsH / 2 - centerY * CanvasState.zoom;
     updateCanvasScrollBounds();
+    if (CanvasState.nodeMaximizedActive) {
+        refreshMaximizedNodes();
+    }
     savePanOffsetThrottled();
 }
 

@@ -1866,6 +1866,60 @@
     }
   }
 
+  function resolveTargetElementForFullscreenSwitch(target) {
+    if (!target || typeof target !== 'object') return null;
+
+    switch (target.kind) {
+      case 'permanent-main':
+        return document.getElementById('permanentSection');
+      case 'permanent-copy': {
+        const copyId = normalizeText(target.copyId);
+        if (!copyId) return null;
+        const escaped = escapeSelector(copyId);
+        if (!escaped) return null;
+        return document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${escaped}"]`)
+          || document.getElementById(`permanent-section-copy-${copyId}`);
+      }
+      case 'temp-section': {
+        const sectionId = normalizeText(target.sectionId);
+        if (!sectionId) return null;
+        return document.getElementById(sectionId);
+      }
+      case 'md-node': {
+        const nodeId = normalizeText(target.nodeId);
+        if (!nodeId) return null;
+        return document.getElementById(nodeId);
+      }
+      default:
+        return null;
+    }
+  }
+
+  function switchFullscreenNodeByDirectoryTarget(target) {
+    const currentMaximized = document.querySelector('.canvas-node-maximized');
+    if (!currentMaximized) return false;
+
+    const nextTarget = resolveTargetElementForFullscreenSwitch(target);
+    if (!nextTarget) return false;
+    if (nextTarget === currentMaximized) return true;
+
+    const isCanvasNode = nextTarget.classList
+      && (nextTarget.classList.contains('permanent-bookmark-section')
+        || nextTarget.classList.contains('temp-canvas-node')
+        || nextTarget.classList.contains('md-canvas-node'));
+    if (!isCanvasNode) return false;
+
+    const fullscreenBtn = nextTarget.querySelector('.canvas-node-fullscreen-btn');
+    if (!fullscreenBtn) return false;
+
+    try {
+      fullscreenBtn.click();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function clearPendingDeleteUi(options = {}) {
     if (!pendingDeleteUiKey) return;
     pendingDeleteUiKey = '';
@@ -2016,6 +2070,7 @@
     activeNodeKey = nodeKey;
     const root = document.getElementById(ROOT_ID);
     updateActiveState(root);
+    if (switchFullscreenNodeByDirectoryTarget(target)) return;
     locateTarget(target);
   }
 

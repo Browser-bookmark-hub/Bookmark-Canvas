@@ -1408,6 +1408,24 @@ body.header-dock-bottom:not(.header-compact) .quick-add-menu {
     display: none;
 }
 
+.quick-add-menu.quick-add-menu-fullscreen-only:not([hidden]) {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    min-width: 240px;
+}
+
+.quick-add-menu.quick-add-menu-fullscreen-only .quick-add-menu-item {
+    width: 100%;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.quick-add-menu.quick-add-menu-fullscreen-only .quick-add-menu-item span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .quick-add-menu-title {
     font-size: 11px;
     color: var(--text-tertiary);
@@ -9028,6 +9046,22 @@ html.side-panel-mode #editBookmarkModal .modal-body {
 body.canvas-node-maximized-active .canvas-scrollbar,
 body.canvas-node-maximized-active .canvas-zoom-indicator {
     display: none !important;
+}
+
+/* Fullscreen node isolation: keep only current maximized node visible */
+body.canvas-node-maximized-active #canvasContent > .permanent-bookmark-section:not(.canvas-node-maximized),
+body.canvas-node-maximized-active #canvasContent > .temp-canvas-node:not(.canvas-node-maximized),
+body.canvas-node-maximized-active #canvasContent > .md-canvas-node:not(.canvas-node-maximized) {
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+body.canvas-node-maximized-active #edgeSvg,
+body.canvas-node-maximized-active .edge-label,
+body.canvas-node-maximized-active .canvas-edge-label {
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 
 /* 编辑模式下禁用拖拽光标 */

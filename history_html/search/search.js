@@ -702,6 +702,7 @@ function handleSearchInputFocus(e) {
     try {
         const input = e && e.target ? e.target : document.getElementById('searchInput');
         if (!input) return;
+        applyFullscreenDefaultSearchMode({ onlyWhenInputEmpty: true });
         if (isSidePanelModeInSearch()) {
             setSidePanelSearchExpanded(true);
         }
@@ -1594,6 +1595,180 @@ function getCanvasModesInOrder() {
     return CANVAS_MODE_KEYS.map(k => map.get(k)).filter(Boolean);
 }
 
+function getCanvasFullscreenScopeFromElement(element) {
+    if (!element || !element.classList || !element.classList.contains('canvas-node-maximized')) return null;
+
+    if (element.classList.contains('permanent-bookmark-section')) {
+        const copyId = element.dataset ? String(element.dataset.permanentSectionCopyId || '').trim() : '';
+        return {
+            kind: 'permanent',
+            id: copyId || 'permanentSection',
+            copyId: copyId || null
+        };
+    }
+
+    if (element.classList.contains('temp-canvas-node')) {
+        const sectionId = element.dataset && element.dataset.sectionId
+            ? String(element.dataset.sectionId).trim()
+            : String(element.id || '').trim();
+        if (!sectionId) return null;
+        return {
+            kind: 'temp',
+            id: sectionId
+        };
+    }
+
+    if (element.classList.contains('md-canvas-node')) {
+        const nodeId = String(element.id || '').trim();
+        if (!nodeId) return null;
+        return {
+            kind: 'blank',
+            id: nodeId
+        };
+    }
+
+    return null;
+}
+
+function getCanvasFullscreenSearchScope() {
+    try {
+        const maximized = document.querySelector('.canvas-node-maximized');
+        return getCanvasFullscreenScopeFromElement(maximized);
+    } catch (_) {
+        return null;
+    }
+}
+
+function getPreferredSearchModeByFullscreenScope(scope) {
+    if (!scope || typeof scope !== 'object') return null;
+    if (scope.kind === 'blank') return 'description';
+    if (scope.kind === 'permanent' || scope.kind === 'temp') return 'bookmark';
+    return null;
+}
+
+function applyFullscreenDefaultSearchMode(options = {}) {
+    if (getCurrentViewSafe() !== 'canvas') return false;
+
+    const safeOptions = options && typeof options === 'object' ? options : {};
+    const targetElement = safeOptions.targetElement || null;
+    const onlyWhenInputEmpty = safeOptions.onlyWhenInputEmpty !== false;
+
+    const scope = targetElement
+        ? getCanvasFullscreenScopeFromElement(targetElement)
+        : getCanvasFullscreenSearchScope();
+    const preferredMode = getPreferredSearchModeByFullscreenScope(scope);
+    if (!preferredMode) return false;
+
+    const input = document.getElementById('searchInput');
+    if (onlyWhenInputEmpty && input && String(input.value || '').trim()) {
+        return false;
+    }
+
+    if (searchUiState.activeMode === preferredMode) return false;
+    setSearchMode(preferredMode);
+    return true;
+}
+
+function getCanvasScopePriorityForItem(item, scope) {
+    if (!item || !scope) return 0;
+
+    if (scope.kind === 'temp') {
+        const targetSectionId = String(scope.id || '');
+        if (!targetSectionId) return 0;
+
+        if (item.type === 'temp-section' && String(item.id || '') === targetSectionId) return 700;
+        if (item.type === 'bookmark-item' && item.source === 'temporary' && String(item.sectionId || '') === targetSectionId) return 620;
+        if (item.type === 'edge' && (String(item.fromId || '') === targetSectionId || String(item.toId || '') === targetSectionId)) return 240;
+        return 0;
+    }
+
+    if (scope.kind === 'permanent') {
+        if (item.type === 'permanent-section') {
+            if (scope.copyId && String(item.id || '') === String(scope.copyId)) return 720;
+            return 640;
+        }
+        if (item.type === 'bookmark-item' && item.source === 'permanent') return 600;
+        return 0;
+    }
+
+    if (scope.kind === 'blank') {
+        const targetNodeId = String(scope.id || '');
+        if (!targetNodeId) return 0;
+
+        if (item.type === 'md-node' && String(item.id || '') === targetNodeId) return 760;
+        if (item.type === 'edge' && (String(item.fromId || '') === targetNodeId || String(item.toId || '') === targetNodeId)) return 300;
+        return 0;
+    }
+
+    return 0;
+}
+
+function getCanvasScopePriorityForBookmarkLocation(location, scope) {
+    if (!location || !scope) return 0;
+
+    if (scope.kind === 'temp') {
+        const targetSectionId = String(scope.id || '');
+        if (!targetSectionId) return 0;
+        if (location.source === 'temporary' && String(location.sectionId || '') === targetSectionId) return 800;
+        if (location.source === 'temporary') return 200;
+        return 0;
+    }
+
+    if (scope.kind === 'permanent') {
+        return location.source === 'permanent' ? 800 : 0;
+    }
+
+    return 0;
+}
+
+function pickBestBookmarkLocationByScope(locations, scope) {
+    const list = Array.isArray(locations) ? locations : [];
+    if (!list.length) return null;
+    if (!scope) return list[0] || null;
+
+    let best = list[0] || null;
+    let bestScore = getCanvasScopePriorityForBookmarkLocation(best, scope);
+
+    for (let index = 1; index < list.length; index += 1) {
+        const candidate = list[index];
+        const score = getCanvasScopePriorityForBookmarkLocation(candidate, scope);
+        if (score > bestScore) {
+            best = candidate;
+            bestScore = score;
+        }
+    }
+
+    return best;
+}
+
+function getPreferredSearchResultIndexByScope(results, scope) {
+    const list = Array.isArray(results) ? results : [];
+    if (!list.length || !scope) return -1;
+
+    let bestIndex = -1;
+    let bestScore = 0;
+
+    for (let index = 0; index < list.length; index += 1) {
+        const item = list[index];
+        if (!item) continue;
+
+        let score = 0;
+        if (item.type === 'bookmark-group' && Array.isArray(item.locations)) {
+            const preferredLoc = pickBestBookmarkLocationByScope(item.locations, scope);
+            score = preferredLoc ? getCanvasScopePriorityForBookmarkLocation(preferredLoc, scope) : 0;
+        } else {
+            score = getCanvasScopePriorityForItem(item, scope);
+        }
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestIndex = index;
+        }
+    }
+
+    return bestIndex;
+}
+
 searchUiState.activeMode = 'bookmark';
 searchUiState.isMenuOpen = false;
 let autoHideMenuTimer = null;
@@ -1951,6 +2126,7 @@ function initSearchModeUI() {
 
     // [Fix] Ensure placeholder and UI are synced on init
     setSearchMode(searchUiState.activeMode);
+    applyFullscreenDefaultSearchMode({ onlyWhenInputEmpty: true });
 
     const trigger = document.getElementById('searchModeTrigger');
     if (trigger && !trigger.hasAttribute('data-mode-ui-bound')) {
@@ -3154,6 +3330,7 @@ function buildCanvasBookmarkGroupModel(scoredPairs) {
 function buildCanvasBookmarkGroupedResultsFromModel(groups) {
     const results = [];
     const isZh = currentLang === 'zh_CN';
+    const fullscreenScope = getCanvasFullscreenSearchScope();
 
     const MAX_GROUPS = 50;
 
@@ -3170,7 +3347,17 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
         // Instead, we pass the children data directly into the group header item.
         // The render function will use this 'locations' array to draw chips.
 
-        const locations = g.children.map(c => {
+        const sortedChildren = Array.isArray(g.children)
+            ? g.children.slice().sort((left, right) => {
+                const scopeDelta = getCanvasScopePriorityForItem(right.item, fullscreenScope)
+                    - getCanvasScopePriorityForItem(left.item, fullscreenScope);
+                if (scopeDelta !== 0) return scopeDelta;
+                if (right.s !== left.s) return right.s - left.s;
+                return 0;
+            })
+            : [];
+
+        const locations = sortedChildren.map(c => {
             const item = c.item;
             // Pre-calculate display props for efficiency
             const isPerm = item.source === 'permanent';
@@ -3263,6 +3450,7 @@ function searchCanvasAndRender(query) {
     clearCanvasSearchHighlight();
 
     const scored = [];
+    const fullscreenScope = getCanvasFullscreenSearchScope();
 
     // Aggregation buckets
     const groupAggregation = {
@@ -3335,9 +3523,10 @@ function searchCanvasAndRender(query) {
         // 特殊语法过滤
         if (isPermanentQuery && item.type !== 'permanent-section') continue;
 
-        const s = scoreCanvasSearchItem(item, trimmedQuery, { isGroupSearch });
-        if (s > -Infinity) {
-            scored.push({ item, s });
+        const rawScore = scoreCanvasSearchItem(item, trimmedQuery, { isGroupSearch });
+        if (rawScore > -Infinity) {
+            const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
+            scored.push({ item, s: rawScore + scopeBonus, rawScore });
 
             // Collect for Aggregation
             if (groupAggregation.type === 'permanent-group') {
@@ -3347,10 +3536,10 @@ function searchCanvasAndRender(query) {
                 }
             } else if (groupAggregation.type === 'time-range') {
                 // Item matches time search?
-                // scoreCanvasSearchItem returns > -Infinity if match, so we can trust `s`
+                // scoreCanvasSearchItem returns > -Infinity if match, so we can trust `rawScore`
                 // But we want to ensure it's a time match, not just text match.
                 // Ideally check `scoreCanvasSearchItem` logic, but here assume if it scored high enough and is temp section
-                if (item.type === 'temp-section' && s >= 100) { // arbitrary threshold for time match logic
+                if (item.type === 'temp-section' && rawScore >= 100) { // arbitrary threshold for time match logic
                     groupAggregation.ids.push(item.id);
                     groupAggregation.count++;
                 }
@@ -3392,7 +3581,12 @@ function searchCanvasAndRender(query) {
         const groups = buildCanvasBookmarkGroupModel(scored);
         searchUiState.bookmarkGroupModel = groups;
         const groupedResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
-        renderCanvasSearchResults(groupedResults, { view: 'canvas', query: trimmedQuery, selectedIndex: 0 });
+        const preferredIndex = getPreferredSearchResultIndexByScope(groupedResults, fullscreenScope);
+        renderCanvasSearchResults(groupedResults, {
+            view: 'canvas',
+            query: trimmedQuery,
+            selectedIndex: preferredIndex >= 0 ? preferredIndex : 0
+        });
         return;
     }
 
@@ -3414,7 +3608,12 @@ function searchCanvasAndRender(query) {
 
     // 渲染结果（使用画布专用渲染）
     searchUiState.bookmarkGroupModel = null;
-    renderCanvasSearchResults(finalResults, { view: 'canvas', query: trimmedQuery, isGroupSearch });
+    const preferredIndex = getPreferredSearchResultIndexByScope(finalResults, fullscreenScope);
+    const renderOptions = { view: 'canvas', query: trimmedQuery, isGroupSearch };
+    if (preferredIndex >= 0) {
+        renderOptions.selectedIndex = preferredIndex;
+    }
+    renderCanvasSearchResults(finalResults, renderOptions);
 }
 
 
@@ -5084,6 +5283,32 @@ function scrollTreeItemIntoView(treeItem) {
     } catch (_) { }
 }
 
+function isMaximizedTempSectionActive(sectionId) {
+    const sid = String(sectionId || '').trim();
+    if (!sid) return false;
+    const active = document.querySelector('.temp-canvas-node.canvas-node-maximized');
+    if (!active) return false;
+    const activeId = active.dataset && active.dataset.sectionId
+        ? String(active.dataset.sectionId).trim()
+        : String(active.id || '').trim();
+    return activeId === sid;
+}
+
+function isMaximizedPermanentSectionActive(copyId = null) {
+    const active = document.querySelector('.permanent-bookmark-section.canvas-node-maximized');
+    if (!active) return false;
+
+    const activeCopyId = active.dataset
+        ? String(active.dataset.permanentSectionCopyId || '').trim()
+        : '';
+    const targetCopyId = String(copyId || '').trim();
+
+    if (targetCopyId) {
+        return activeCopyId === targetCopyId;
+    }
+    return !activeCopyId;
+}
+
 async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
     const id = String(nodeId || '');
     if (!id) return false;
@@ -5091,8 +5316,10 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
     // 先把永久栏目卡片定位到视口（复用 Storage-first 的缩放/平移逻辑）
     try {
         if (typeof currentView !== 'undefined' && currentView === 'canvas') {
-            const targetId = options.copyId || 'permanentSection';
-            const targetClass = options.copyId ? 'permanent-bookmark-section' : 'permanent-section'; // locateCanvasElement class matching
+            const sameMaximizedTarget = isMaximizedPermanentSectionActive(options.copyId || null);
+            if (sameMaximizedTarget) {
+                // 当前就在目标全屏栏目，不触发画布平移，避免全屏层级抖动
+            } else {
             // locateCanvasElement(id, classPart, ...)
             // 'permanent-section' matches id="permanentSection" via helper or manual logic?
             // Actually locateCanvasElement's second arg is expected class substring or similar.
@@ -5101,13 +5328,14 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
             // locateToElement logic handles arbitrary element.
             // Let's manually find element if it's a copy.
 
-            if (options.copyId) {
-                const copyEl = document.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id="${CSS.escape(options.copyId)}"]`);
-                if (copyEl) {
-                    locateToElement(copyEl);
+                if (options.copyId) {
+                    const copyEl = document.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id="${CSS.escape(options.copyId)}"]`);
+                    if (copyEl) {
+                        locateToElement(copyEl);
+                    }
+                } else {
+                    await locateCanvasElement('permanentSection', 'permanent-section', { color: options.color || '#059669' });
                 }
-            } else {
-                await locateCanvasElement('permanentSection', 'permanent-section', { color: options.color || '#059669' });
             }
         }
     } catch (_) { }
@@ -5206,7 +5434,9 @@ async function locateBookmarkItemInTempTree(sectionId, itemId, options = {}) {
     // 先把临时栏目卡片定位到视口
     try {
         if (typeof currentView !== 'undefined' && currentView === 'canvas') {
-            await locateCanvasElement(sid, 'temp-section', { color: options.color || '#3b82f6' });
+            if (!isMaximizedTempSectionActive(sid)) {
+                await locateCanvasElement(sid, 'temp-section', { color: options.color || '#3b82f6' });
+            }
         }
     } catch (_) { }
 
@@ -5772,7 +6002,7 @@ async function activateCanvasSearchResultAtIndex(index) {
                 if (inputEl) inputEl.value = '';
             } catch (_) { }
 
-            const loc = locations[0];
+            const loc = pickBestBookmarkLocationByScope(locations, getCanvasFullscreenSearchScope()) || locations[0];
             const opts = { color: loc.color || item.color || '#3b82f6' };
             if (loc.source === 'temporary') {
                 await locateBookmarkItemInTempTree(loc.sectionId, loc.id, opts);
@@ -5980,6 +6210,11 @@ if (typeof window !== 'undefined') {
     window.setSearchMode = setSearchMode;
     window.cycleSearchMode = cycleSearchMode;
     window.toggleSearchModeMenu = toggleSearchModeMenu;
+    window.__canvasApplyFullscreenSearchDefault = function (targetElement, options = {}) {
+        const safeOptions = options && typeof options === 'object' ? Object.assign({}, options) : {};
+        if (targetElement) safeOptions.targetElement = targetElement;
+        return applyFullscreenDefaultSearchMode(safeOptions);
+    };
 
     // 初始化
     window.initSearchEvents = initSearchEvents;

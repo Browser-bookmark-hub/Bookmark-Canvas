@@ -2969,6 +2969,14 @@ const i18n = {
         'zh_CN': '添加到空白栏目',
         'en': 'Add to Blank'
     },
+    quickAddCurrentViewText: {
+        'zh_CN': '添加到当前栏目',
+        'en': 'Add to Current Column'
+    },
+    quickAddWindowViewText: {
+        'zh_CN': '当前窗口全部到当前栏目',
+        'en': 'Add Window Tabs to Current Column'
+    },
     quickAddWindowTempText: {
         'zh_CN': '全部加入特殊临时栏目',
         'en': 'Add All to Special Temp'
@@ -4329,6 +4337,10 @@ function applyLanguage() {
     if (quickAddCurrentPermanentText) quickAddCurrentPermanentText.textContent = i18n.quickAddCurrentPermanentText[currentLang];
     const quickAddCurrentBlankText = document.getElementById('quickAddCurrentBlankText');
     if (quickAddCurrentBlankText) quickAddCurrentBlankText.textContent = i18n.quickAddCurrentBlankText[currentLang];
+    const quickAddCurrentViewText = document.getElementById('quickAddCurrentViewText');
+    if (quickAddCurrentViewText) quickAddCurrentViewText.textContent = i18n.quickAddCurrentViewText[currentLang];
+    const quickAddWindowViewText = document.getElementById('quickAddWindowViewText');
+    if (quickAddWindowViewText) quickAddWindowViewText.textContent = i18n.quickAddWindowViewText[currentLang];
     const quickAddWindowTempText = document.getElementById('quickAddWindowTempText');
     if (quickAddWindowTempText) quickAddWindowTempText.textContent = i18n.quickAddWindowTempText[currentLang];
     const quickAddWindowPermanentText = document.getElementById('quickAddWindowPermanentText');
@@ -5314,6 +5326,9 @@ function setupQuickAddMenu() {
     menu.dataset.bound = 'true';
 
     const quickAddCurrentTitle = document.getElementById('quickAddCurrentTitle');
+    const quickAddWindowTitle = document.getElementById('quickAddWindowTitle');
+    const quickAddCurrentViewItem = document.getElementById('quickAddCurrentViewItem');
+    const quickAddWindowViewItem = document.getElementById('quickAddWindowViewItem');
     const quickAddCurrentItems = menu.querySelectorAll('.quick-add-menu-item[data-action^="add-current-"]');
     const quickAddAllItems = menu.querySelectorAll('.quick-add-menu-item');
     const quickAddDivider = menu.querySelector('.quick-add-menu-divider');
@@ -5357,12 +5372,36 @@ function setupQuickAddMenu() {
     const syncQuickAddMenuSections = (options = {}) => {
         const fromTitle = options && options.fromTitle === true;
         const hideCurrentGroup = fromTitle || !isSidePanelMode;
+        const isFullscreenQuickAdd = !!document.querySelector('.canvas-node-maximized');
+
+        if (isFullscreenQuickAdd) {
+            menu.classList.add('quick-add-menu-fullscreen-only');
+            if (quickAddCurrentTitle) quickAddCurrentTitle.style.display = 'none';
+            if (quickAddWindowTitle) quickAddWindowTitle.style.display = 'none';
+            if (quickAddDivider) quickAddDivider.style.display = 'none';
+            quickAddAllItems.forEach((item) => {
+                const action = item && item.dataset ? item.dataset.action || '' : '';
+                const visible = action === 'add-current-view' || action === 'add-window-view';
+                item.style.display = visible ? '' : 'none';
+            });
+            return;
+        }
+
+        menu.classList.remove('quick-add-menu-fullscreen-only');
+
+        if (quickAddCurrentViewItem) quickAddCurrentViewItem.style.display = 'none';
+        if (quickAddWindowViewItem) quickAddWindowViewItem.style.display = 'none';
+
         if (quickAddCurrentTitle) quickAddCurrentTitle.style.display = hideCurrentGroup ? 'none' : '';
+        if (quickAddWindowTitle) quickAddWindowTitle.style.display = '';
         quickAddCurrentItems.forEach((item) => {
+            const action = item && item.dataset ? item.dataset.action || '' : '';
+            if (action === 'add-current-view') return;
             item.style.display = hideCurrentGroup ? 'none' : '';
         });
         quickAddAllItems.forEach((item) => {
             const action = item && item.dataset ? item.dataset.action || '' : '';
+            if (action === 'add-current-view' || action === 'add-window-view') return;
             if (hideCurrentGroup && action.startsWith('add-current-')) {
                 item.style.display = 'none';
                 return;
@@ -5378,6 +5417,7 @@ function setupQuickAddMenu() {
 
     const openMenu = (options = {}) => {
         setQuickAddMenuColorVars();
+        menu.dataset.openFromTitle = options && options.fromTitle === true ? 'true' : 'false';
         syncQuickAddMenuSections(options);
         if (typeof currentHeaderDockSide === 'string') {
             menu.dataset.dock = currentHeaderDockSide;
@@ -5429,10 +5469,53 @@ function setupQuickAddMenu() {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') closeMenu();
     });
+
+    const refreshCurrentViewEntry = () => {
+        const fromTitle = menu.dataset.openFromTitle === 'true';
+        syncQuickAddMenuSections({ fromTitle });
+    };
+
+    if (document.body && document.documentElement.getAttribute('data-current-view-add-observer') !== 'true') {
+        const observer = new MutationObserver(() => {
+            refreshCurrentViewEntry();
+        });
+        observer.observe(document.body, {
+            attributes: true,
+            attributeFilter: ['class']
+        });
+        try {
+            window.__canvasCurrentViewAddObserver = observer;
+        } catch (_) { }
+        document.documentElement.setAttribute('data-current-view-add-observer', 'true');
+    }
+
+    try {
+        window.__canvasRefreshCurrentViewAddButton = refreshCurrentViewEntry;
+    } catch (_) { }
 }
 
 async function handleQuickAddAction(action) {
     if (!action) return;
+
+    if (action === 'add-current-view' || action === 'add-window-view') {
+        const viewScope = action === 'add-window-view' ? 'window' : 'current';
+        const tabsForCurrentView = viewScope === 'window'
+            ? await getCurrentWindowTabs()
+            : await getActiveTabList();
+        const normalizedForCurrentView = await normalizeTabsForQuickAdd(tabsForCurrentView);
+        const flatForCurrentView = Array.isArray(normalizedForCurrentView.flatItems) ? normalizedForCurrentView.flatItems : [];
+        const structuredForCurrentView = Array.isArray(normalizedForCurrentView.structuredItems) ? normalizedForCurrentView.structuredItems : [];
+
+        if (!flatForCurrentView.length) {
+            const msg = currentLang === 'en' ? 'No valid pages to add' : '没有可添加的页面';
+            try { showToast(msg); } catch (_) { }
+            return;
+        }
+
+        await addTabsToCurrentViewSection(structuredForCurrentView.length ? structuredForCurrentView : flatForCurrentView, viewScope);
+        return;
+    }
+
     const scope = action.includes('window') ? 'window' : 'current';
     const target = action.includes('permanent') ? 'permanent'
         : (action.includes('blank') ? 'blank' : 'temp');
@@ -5666,6 +5749,10 @@ function getMaximizedMdNodeId() {
     return el ? el.id : null;
 }
 
+function getMaximizedPermanentSectionElement() {
+    return document.querySelector('.permanent-bookmark-section.canvas-node-maximized');
+}
+
 function countQuickAddBookmarks(items) {
     let count = 0;
     (Array.isArray(items) ? items : []).forEach((item) => {
@@ -5798,6 +5885,47 @@ function stripHtmlToText(html) {
     const div = document.createElement('div');
     div.innerHTML = html || '';
     return div.textContent || div.innerText || '';
+}
+
+async function addTabsToCurrentViewSection(tabs, scope) {
+    const bookmarkCount = countQuickAddBookmarks(tabs);
+    if (!bookmarkCount) {
+        const msg = currentLang === 'en' ? 'No valid pages to add' : '没有可添加的页面';
+        try { showToast(msg); } catch (_) { }
+        return;
+    }
+
+    const tempTargetId = getMaximizedTempSectionId();
+    if (tempTargetId && window.CanvasModule && window.CanvasModule.temp) {
+        const sections = window.CanvasModule && window.CanvasModule.CanvasState && Array.isArray(window.CanvasModule.CanvasState.tempSections)
+            ? window.CanvasModule.CanvasState.tempSections
+            : [];
+        const targetSection = sections.find((section) => section && section.id === tempTargetId);
+        if (targetSection) {
+            insertQuickAddItemsToTempSection(tempTargetId, tabs, '');
+            if (window.CanvasModule.temp.ensureRendered) {
+                window.CanvasModule.temp.ensureRendered(tempTargetId);
+            }
+            const msg = currentLang === 'en'
+                ? `Added ${bookmarkCount} item${bookmarkCount > 1 ? 's' : ''} to current temp section`
+                : `已添加到当前临时栏目：${bookmarkCount} 项`;
+            try { showToast(msg); } catch (_) { }
+            return;
+        }
+    }
+
+    const mdTargetId = getMaximizedMdNodeId();
+    if (mdTargetId) {
+        await addTabsToBlankNode(tabs, scope);
+        return;
+    }
+
+    if (getMaximizedPermanentSectionElement()) {
+        await addTabsToPermanent(tabs, scope);
+        return;
+    }
+
+    await addTabsToTempSection(tabs, scope);
 }
 
 async function addTabsToTempSection(tabs, scope) {
