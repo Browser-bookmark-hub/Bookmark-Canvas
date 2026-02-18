@@ -9,6 +9,7 @@ const getCanvasExportFolder = () => (typeof currentLang !== 'undefined' && curre
 // Canvas状态管理
 const CANVAS_BASE_ZOOM_DEFAULT = 0.6; // 新默认基准缩放：旧 60% 视图 = 新 100%
 const NODE_MAXIMIZED_STORAGE_KEY = 'canvas-node-maximized-v1';
+const NODE_LAST_MAXIMIZED_STORAGE_KEY = 'canvas-node-last-maximized-v1';
 const NODE_LAYOUT_ZOOM_STORAGE_KEY = 'canvas-node-layout-zoom-v1';
 const NODE_LAYOUT_ZOOM_DEFAULT = 150;
 const NODE_LAYOUT_ZOOM_MIN = 50;
@@ -10554,6 +10555,14 @@ function __saveMaximizedNodeToStorage(element) {
     } catch (_) { }
 }
 
+function __saveLastMaximizedNodeToStorage(element) {
+    const payload = __serializeMaximizedNode(element);
+    if (!payload) return;
+    try {
+        saveSharedState(NODE_LAST_MAXIMIZED_STORAGE_KEY, payload);
+    } catch (_) { }
+}
+
 function __clearMaximizedNodeStorage() {
     try { localStorage.removeItem(NODE_MAXIMIZED_STORAGE_KEY); } catch (_) { }
 }
@@ -10561,6 +10570,18 @@ function __clearMaximizedNodeStorage() {
 function __loadMaximizedNodeFromStorage() {
     try {
         const raw = localStorage.getItem(NODE_MAXIMIZED_STORAGE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (!data || typeof data !== 'object') return null;
+        return data;
+    } catch (_) {
+        return null;
+    }
+}
+
+function __loadLastMaximizedNodeFromStorage() {
+    try {
+        const raw = localStorage.getItem(NODE_LAST_MAXIMIZED_STORAGE_KEY);
         if (!raw) return null;
         const data = JSON.parse(raw);
         if (!data || typeof data !== 'object') return null;
@@ -10599,6 +10620,40 @@ function __tryRestoreMaximizedNode({ clearIfMissing = false } = {}) {
         __clearMaximizedNodeStorage();
         __updateNodeMaximizedState();
     }
+}
+
+async function openLastMaximizedNode(options = {}) {
+    const parsedRetries = Number(options.retries);
+    const retries = Number.isFinite(parsedRetries) ? Math.max(0, Math.floor(parsedRetries)) : 18;
+    const parsedDelay = Number(options.retryDelayMs);
+    const retryDelayMs = Number.isFinite(parsedDelay) ? Math.max(16, Math.floor(parsedDelay)) : 100;
+    const descriptor = __loadLastMaximizedNodeFromStorage();
+
+    if (!descriptor) {
+        return { success: false, reason: 'empty' };
+    }
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        const target = __resolveMaximizedNode(descriptor);
+        if (target) {
+            if (__isNodeMaximized(target)) {
+                return { success: true, descriptor };
+            }
+            const rect = __getCanvasViewportRect();
+            if (rect && rect.width > 1 && rect.height > 1) {
+                maximizeCanvasNode(target);
+                if (__isNodeMaximized(target)) {
+                    return { success: true, descriptor };
+                }
+            }
+        }
+
+        if (attempt < retries) {
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        }
+    }
+
+    return { success: false, reason: 'not-found', descriptor };
 }
 
 function __updateNodeMaximizedState() {
@@ -10658,6 +10713,7 @@ function maximizeCanvasNode(element) {
     element.style.zIndex = '10000';
     __updateNodeMaximizedState();
     __saveMaximizedNodeToStorage(element);
+    __saveLastMaximizedNodeToStorage(element);
     __applyNodeLayoutZoom(element);
     updateNodeFullscreenButtons();
     __notifyNodeFullscreenContextChange(element);
@@ -33100,6 +33156,7 @@ window.CanvasModule = {
     clear: clearAllTempNodes,
     updateFullscreenButton: updateFullscreenButtonState,
     updateNodeFullscreenButtons: updateNodeFullscreenButtons,
+    openLastFullscreenNode: openLastMaximizedNode,
     updateShortcutDisplays: updateShortcutDisplays, // 更新快捷键显示
     CanvasState: CanvasState, // 导出状态供外部访问（如指针拖拽）
     createTempNode: createTempNode, // 导出创建临时节点函数

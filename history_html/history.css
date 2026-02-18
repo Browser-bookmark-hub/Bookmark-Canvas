@@ -869,8 +869,14 @@ html:not(.side-panel-mode) .tool-buttons #langToggle,
 html:not(.side-panel-mode) .tool-buttons #helpToggle,
 html:not(.side-panel-mode) .tool-buttons #settingsToggle,
 html:not(.side-panel-mode) .tool-buttons #quickAddToggle,
+html:not(.side-panel-mode) .tool-buttons #sideLastFullscreenBtn,
 html:not(.side-panel-mode) .tool-buttons #openCanvasPageBtn {
     display: none;
+}
+
+html.side-panel-mode .tool-buttons .last-fullscreen-btn {
+    display: inline-flex;
+    order: 98;
 }
 
 html.side-panel-mode .tool-buttons .settings-btn {
@@ -1378,6 +1384,10 @@ body.header-dock-bottom:not(.header-compact) .search-mode-menu {
     display: none;
 }
 
+.last-fullscreen-btn {
+    display: none;
+}
+
 .open-html-btn {
     display: none;
 }
@@ -1397,6 +1407,10 @@ html.side-panel-mode .tool-buttons .quick-add-btn {
     box-shadow: var(--shadow-lg);
     padding: 8px;
     z-index: 210;
+}
+
+html.side-panel-mode .quick-add-menu {
+    right: 104px;
 }
 
 body.header-dock-bottom:not(.header-compact) .quick-add-menu {
@@ -9045,6 +9059,11 @@ html.side-panel-mode #editBookmarkModal .modal-body {
 /* Hide canvas scrollbars + floating zoom tools while a node is maximized */
 body.canvas-node-maximized-active .canvas-scrollbar,
 body.canvas-node-maximized-active .canvas-zoom-indicator {
+    display: none !important;
+}
+
+body.canvas-node-maximized-active #titleLastFullscreenBtn,
+body.canvas-node-maximized-active #sideLastFullscreenBtn {
     display: none !important;
 }
 

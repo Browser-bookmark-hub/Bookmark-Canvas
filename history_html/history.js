@@ -2949,6 +2949,14 @@ const i18n = {
         'zh_CN': '添加',
         'en': 'Add'
     },
+    titleLastFullscreenTooltip: {
+        'zh_CN': '上次全屏卡片',
+        'en': 'Last Fullscreen Card'
+    },
+    titleLastFullscreenNoCardToast: {
+        'zh_CN': '未找到上次全屏卡片',
+        'en': 'No previous fullscreen card found'
+    },
     quickAddCurrentTitle: {
         'zh_CN': '当前页面',
         'en': 'Current Page'
@@ -4308,6 +4316,14 @@ function applyLanguage() {
     if (titleQuickAddTooltip) titleQuickAddTooltip.textContent = i18n.quickAddTooltip[currentLang];
     const titleQuickAddToggleBtn = document.getElementById('titleQuickAddToggleBtn');
     if (titleQuickAddToggleBtn) titleQuickAddToggleBtn.setAttribute('aria-label', i18n.quickAddTooltip[currentLang]);
+    const titleLastFullscreenTooltip = document.getElementById('titleLastFullscreenTooltip');
+    if (titleLastFullscreenTooltip) titleLastFullscreenTooltip.textContent = i18n.titleLastFullscreenTooltip[currentLang];
+    const titleLastFullscreenBtn = document.getElementById('titleLastFullscreenBtn');
+    if (titleLastFullscreenBtn) titleLastFullscreenBtn.setAttribute('aria-label', i18n.titleLastFullscreenTooltip[currentLang]);
+    const sideLastFullscreenTooltip = document.getElementById('sideLastFullscreenTooltip');
+    if (sideLastFullscreenTooltip) sideLastFullscreenTooltip.textContent = i18n.titleLastFullscreenTooltip[currentLang];
+    const sideLastFullscreenBtn = document.getElementById('sideLastFullscreenBtn');
+    if (sideLastFullscreenBtn) sideLastFullscreenBtn.setAttribute('aria-label', i18n.titleLastFullscreenTooltip[currentLang]);
     const openCanvasPageTooltip = document.getElementById('openCanvasPageTooltip');
     if (openCanvasPageTooltip) openCanvasPageTooltip.textContent = i18n.openCanvasPageTooltip[currentLang];
     const openCanvasPageBtn = document.getElementById('openCanvasPageBtn');
@@ -5152,8 +5168,52 @@ function setupOpenCanvasPageButton() {
     });
 }
 
+async function handleOpenLastFullscreenCard() {
+    const openLastFullscreenNode = window.CanvasModule && typeof window.CanvasModule.openLastFullscreenNode === 'function'
+        ? window.CanvasModule.openLastFullscreenNode
+        : null;
+    if (!openLastFullscreenNode) return;
+
+    const needSwitchToCanvas = currentView !== 'canvas';
+    if (needSwitchToCanvas && typeof switchView === 'function') {
+        try {
+            switchView('canvas');
+        } catch (_) { }
+    }
+
+    const result = await openLastFullscreenNode({
+        retries: needSwitchToCanvas ? 30 : 10,
+        retryDelayMs: 120
+    });
+    if (result && result.success) return;
+
+    const msg = i18n.titleLastFullscreenNoCardToast[currentLang];
+    try { showToast(msg); } catch (_) { }
+}
+
+function setupSideLastFullscreenButton() {
+    if (!isSidePanelMode) return;
+    const btn = document.getElementById('sideLastFullscreenBtn');
+    if (!btn || btn.dataset.bound === 'true') return;
+    btn.dataset.bound = 'true';
+
+    btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await handleOpenLastFullscreenCard();
+    });
+}
+
 function setupTitleSideTools() {
     if (isSidePanelMode) return;
+
+    const titleLastFullscreenBtn = document.getElementById('titleLastFullscreenBtn');
+    if (titleLastFullscreenBtn && titleLastFullscreenBtn.dataset.bound !== 'true') {
+        titleLastFullscreenBtn.dataset.bound = 'true';
+        titleLastFullscreenBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            await handleOpenLastFullscreenCard();
+        });
+    }
 
     const titleSettingsBtn = document.getElementById('titleSettingsToggleBtn');
     const settingsMenu = document.getElementById('settingsMenu');
@@ -6165,6 +6225,7 @@ function initializeUI() {
     setupCanvasFloatingMiniToggle();
     setupQuickAddMenu();
     setupOpenCanvasPageButton();
+    setupSideLastFullscreenButton();
     setupTitleSidePanelToggleButton();
     setupTitleSideTools();
 
