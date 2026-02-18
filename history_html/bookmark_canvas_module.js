@@ -10,6 +10,7 @@ const getCanvasExportFolder = () => (typeof currentLang !== 'undefined' && curre
 const CANVAS_BASE_ZOOM_DEFAULT = 0.6; // 新默认基准缩放：旧 60% 视图 = 新 100%
 const NODE_MAXIMIZED_STORAGE_KEY = 'canvas-node-maximized-v1';
 const NODE_LAST_MAXIMIZED_STORAGE_KEY = 'canvas-node-last-maximized-v1';
+const LAST_MAXIMIZED_NODE_UPDATED_EVENT = 'canvas-last-maximized-node-updated';
 const NODE_LAYOUT_ZOOM_STORAGE_KEY = 'canvas-node-layout-zoom-v1';
 const NODE_LAYOUT_ZOOM_DEFAULT = 150;
 const NODE_LAYOUT_ZOOM_MIN = 50;
@@ -176,6 +177,8 @@ const CanvasState = {
     fullscreenHandlersBound: false,
     nodeMaximizedActive: false,
     pendingMaximizedDescriptor: null,
+    maximizedNodeRemovalObserver: null,
+    maximizedNodeRemovalSyncFrame: null,
     temporaryRaisedNode: {
         element: null,
         previousZIndex: '',
@@ -10576,7 +10579,12 @@ function __saveLastMaximizedNodeToStorage(element) {
     const payload = __serializeMaximizedNode(element);
     if (!payload) return;
     try {
-        saveSharedState(NODE_LAST_MAXIMIZED_STORAGE_KEY, payload);
+        const saved = saveSharedState(NODE_LAST_MAXIMIZED_STORAGE_KEY, payload);
+        if (saved && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            window.dispatchEvent(new CustomEvent(LAST_MAXIMIZED_NODE_UPDATED_EVENT, {
+                detail: { descriptor: payload }
+            }));
+        }
     } catch (_) { }
 }
 
@@ -10697,6 +10705,75 @@ function __notifyNodeFullscreenContextChange(targetElement = null) {
         if (typeof refreshCurrentViewAddBtn === 'function') {
             refreshCurrentViewAddBtn();
         }
+    } catch (_) { }
+}
+
+function __mutationContainsRemovedMaximizedNode(mutationList) {
+    if (!Array.isArray(mutationList) || !mutationList.length) return false;
+
+    for (let i = 0; i < mutationList.length; i += 1) {
+        const mutation = mutationList[i];
+        if (!mutation || mutation.type !== 'childList' || !mutation.removedNodes || !mutation.removedNodes.length) {
+            continue;
+        }
+
+        for (let j = 0; j < mutation.removedNodes.length; j += 1) {
+            const removedNode = mutation.removedNodes[j];
+            if (!removedNode || removedNode.nodeType !== 1) continue;
+            if (removedNode.classList && removedNode.classList.contains('canvas-node-maximized')) return true;
+            if (removedNode.querySelector && removedNode.querySelector('.canvas-node-maximized')) return true;
+        }
+    }
+
+    return false;
+}
+
+function __syncNodeMaximizedStateAfterNodeRemoval() {
+    const hadMaximizedContext = !!CanvasState.nodeMaximizedActive
+        || !!(document && document.body && document.body.classList && document.body.classList.contains('canvas-node-maximized-active'));
+
+    __updateNodeMaximizedState();
+
+    if (!CanvasState.nodeMaximizedActive) {
+        __clearMaximizedNodeStorage();
+        CanvasState.pendingMaximizedDescriptor = null;
+    }
+
+    if (hadMaximizedContext && !CanvasState.nodeMaximizedActive) {
+        updateNodeFullscreenButtons();
+        __notifyNodeFullscreenContextChange(null);
+    }
+}
+
+function __scheduleNodeMaximizedStateSyncAfterRemoval() {
+    if (CanvasState.maximizedNodeRemovalSyncFrame) return;
+
+    const run = () => {
+        CanvasState.maximizedNodeRemovalSyncFrame = null;
+        __syncNodeMaximizedStateAfterNodeRemoval();
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        CanvasState.maximizedNodeRemovalSyncFrame = window.requestAnimationFrame(run);
+    } else {
+        CanvasState.maximizedNodeRemovalSyncFrame = setTimeout(run, 16);
+    }
+}
+
+function __bindMaximizedNodeRemovalSync() {
+    if (CanvasState.maximizedNodeRemovalObserver) return;
+    if (typeof MutationObserver === 'undefined') return;
+
+    const observeTarget = document.getElementById('canvasContent') || document.body || document.documentElement;
+    if (!observeTarget) return;
+
+    try {
+        const observer = new MutationObserver((mutationList) => {
+            if (!__mutationContainsRemovedMaximizedNode(mutationList)) return;
+            __scheduleNodeMaximizedStateSyncAfterRemoval();
+        });
+        observer.observe(observeTarget, { childList: true, subtree: true });
+        CanvasState.maximizedNodeRemovalObserver = observer;
     } catch (_) { }
 }
 
@@ -25017,6 +25094,7 @@ async function addToPermanentBookmarks(payload, parentIdOverride = null) {
 function setupCanvasEventListeners() {
     // 初始蒙版同步
     refreshSectionCtrlOverlays();
+    __bindMaximizedNodeRemovalSync();
 
     if (document && document.documentElement && document.documentElement.dataset.tempRaiseNodeBound !== 'true') {
         document.documentElement.dataset.tempRaiseNodeBound = 'true';

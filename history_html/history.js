@@ -100,6 +100,8 @@ const CANVAS_PAGE_FULLSCREEN_BRIDGE_STORAGE_KEY = 'canvas_page_fullscreen_bridge
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_MAX_AGE_MS = 30000;
 const CANVAS_PAGE_FULLSCREEN_STATE_STORAGE_KEY = 'canvas_page_fullscreen_state_v1';
 const CANVAS_PAGE_FULLSCREEN_STATE_MAX_AGE_MS = 30000;
+const CANVAS_NODE_LAST_MAXIMIZED_STORAGE_KEY = 'canvas-node-last-maximized-v1';
+const CANVAS_LAST_MAXIMIZED_UPDATED_EVENT = 'canvas-last-maximized-node-updated';
 const CANVAS_FLOATING_TOOLS_DOCK_KEY = isSidePanelMode
     ? 'sidepanelFloatingToolsDockV1'
     : 'canvasFloatingToolsDockV1';
@@ -5169,6 +5171,61 @@ function setupOpenCanvasPageButton() {
     });
 }
 
+let lastFullscreenButtonsVisibilitySyncBound = false;
+
+function hasStoredLastFullscreenNodeDescriptor() {
+    const descriptor = __readLocalStorageJSON(CANVAS_NODE_LAST_MAXIMIZED_STORAGE_KEY);
+    if (!descriptor || typeof descriptor !== 'object') {
+        return false;
+    }
+
+    if (descriptor.type === 'permanent') {
+        return true;
+    }
+
+    if (descriptor.type === 'permanent-copy') {
+        const copyId = descriptor.copyId == null ? '' : String(descriptor.copyId).trim();
+        return copyId.length > 0;
+    }
+
+    const id = descriptor.id == null ? '' : String(descriptor.id).trim();
+    return id.length > 0;
+}
+
+function refreshLastFullscreenButtonsVisibility() {
+    const hasStoredNode = hasStoredLastFullscreenNodeDescriptor();
+    const buttonIds = ['titleLastFullscreenBtn', 'sideLastFullscreenBtn'];
+
+    buttonIds.forEach((buttonId) => {
+        const button = document.getElementById(buttonId);
+        if (!button) return;
+
+        const shouldHide = !hasStoredNode;
+        if (shouldHide && document.activeElement === button) {
+            try { button.blur(); } catch (_) { }
+        }
+
+        button.hidden = shouldHide;
+        if (button.hasAttribute('aria-hidden')) {
+            button.removeAttribute('aria-hidden');
+        }
+    });
+}
+
+function bindLastFullscreenButtonsVisibilitySync() {
+    if (lastFullscreenButtonsVisibilitySyncBound) return;
+    lastFullscreenButtonsVisibilitySyncBound = true;
+
+    window.addEventListener(CANVAS_LAST_MAXIMIZED_UPDATED_EVENT, () => {
+        refreshLastFullscreenButtonsVisibility();
+    });
+
+    window.addEventListener('storage', (event) => {
+        if (!event || event.key !== CANVAS_NODE_LAST_MAXIMIZED_STORAGE_KEY) return;
+        refreshLastFullscreenButtonsVisibility();
+    });
+}
+
 async function handleOpenLastFullscreenCard() {
     const openLastFullscreenNode = window.CanvasModule && typeof window.CanvasModule.openLastFullscreenNode === 'function'
         ? window.CanvasModule.openLastFullscreenNode
@@ -5187,6 +5244,11 @@ async function handleOpenLastFullscreenCard() {
         retryDelayMs: 120
     });
     if (result && result.success) return;
+
+    if (!result || result.reason === 'empty' || result.reason === 'not-found') {
+        __removeLocalStorageKey(CANVAS_NODE_LAST_MAXIMIZED_STORAGE_KEY);
+        refreshLastFullscreenButtonsVisibility();
+    }
 
     const msg = i18n.titleLastFullscreenNoCardToast[currentLang];
     try { showToast(msg); } catch (_) { }
@@ -6224,6 +6286,8 @@ function initializeUI() {
     setupSidePanelSettingsMenu();
     setupCanvasFloatingToolsMenu();
     setupCanvasFloatingMiniToggle();
+    bindLastFullscreenButtonsVisibilitySync();
+    refreshLastFullscreenButtonsVisibility();
     setupQuickAddMenu();
     setupOpenCanvasPageButton();
     setupSideLastFullscreenButton();

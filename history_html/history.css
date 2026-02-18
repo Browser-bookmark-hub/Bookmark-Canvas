@@ -1414,6 +1414,11 @@ body.header-dock-bottom:not(.header-compact) .search-mode-menu {
     display: none;
 }
 
+#titleLastFullscreenBtn[hidden],
+#sideLastFullscreenBtn[hidden] {
+    display: none !important;
+}
+
 .open-html-btn {
     display: none;
 }
