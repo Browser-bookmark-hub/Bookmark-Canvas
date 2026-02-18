@@ -6073,11 +6073,23 @@ function setupCanvasZoomAndPan() {
     bindZoomStepButton(zoomOutBtn, 1 / 1.2);
     if (zoomLocateBtn) zoomLocateBtn.addEventListener('click', locateToPermanentSection);
 
-    // [Fix] 窗口大小改变时，重新计算可视区域休眠状态
-    // 使用 debounce (300ms) 防止高频触发导致连续闪烁
+    // [Fix] 窗口大小改变时：
+    // - 栏目全屏卡片实时跟随（rAF 节流到每帧）
+    // - 重计算边界/休眠逻辑继续 debounce（避免高频重计算）
     let resizeTimer = null;
+    let resizeSyncRaf = 0;
+    const refreshMaximizedNodesRealtime = () => {
+        if (resizeSyncRaf) return;
+        resizeSyncRaf = requestAnimationFrame(() => {
+            resizeSyncRaf = 0;
+            refreshMaximizedNodes();
+        });
+    };
+
     window.addEventListener('resize', () => {
         lastResizeTime = Date.now(); // 记录最后一次 Resize 时间
+        refreshMaximizedNodesRealtime();
+
         if (resizeTimer) clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
             scheduleDormancyUpdate(120);

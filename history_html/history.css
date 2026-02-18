@@ -177,6 +177,11 @@ html.layout-preload-active .sidebar,
 html.layout-preload-active .sidebar-toggle,
 html.layout-preload-active .history-header,
 html.layout-preload-active .header-toggle-btn,
+html.layout-preload-active .history-header .tool-btn,
+html.layout-preload-active .history-header .search-container,
+html.layout-preload-active .history-header .search-input-wrapper,
+html.layout-preload-active .history-header .search-container input,
+html.layout-preload-active .history-header .search-results-panel,
 html.layout-preload-active .canvas-zoom-indicator,
 html.layout-preload-active .canvas-zoom-header,
 html.layout-preload-active .canvas-zoom-controls,
@@ -448,6 +453,17 @@ html.layout-preload-active.canvas-view-active.layout-preload-canvas-scrollbar-ho
 
 html.layout-preload-active.canvas-view-active.layout-preload-canvas-scrollbar-horizontal-hidden #canvasHorizontalScrollbar .scrollbar-controls {
     pointer-events: auto;
+}
+
+html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active #canvasContent>.permanent-bookmark-section,
+html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active #canvasContent>.temp-canvas-node,
+html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active #canvasContent>.md-canvas-node,
+html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active #edgeSvg,
+html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active .edge-label,
+html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active .canvas-edge-label {
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 
 body {

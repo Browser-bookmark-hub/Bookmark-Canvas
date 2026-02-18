@@ -226,6 +226,25 @@
       root.classList.add('layout-preload-floating-hidden');
     }
 
+    const hasPendingNodeMaximizedState = (() => {
+      if (initialView !== 'canvas') return false;
+      try {
+        const raw = readStorage('canvas-node-maximized-v1');
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return false;
+        if (parsed.type === 'permanent') return true;
+        if (parsed.type === 'permanent-copy' && parsed.copyId) return true;
+        return !!parsed.id;
+      } catch (_) {
+        return false;
+      }
+    })();
+
+    if (hasPendingNodeMaximizedState) {
+      root.classList.add('layout-preload-node-maximized-active');
+    }
+
     if (initialView === 'canvas') {
       const scrollbarHiddenState = getInitialCanvasScrollbarHiddenState();
       if (scrollbarHiddenState.verticalHidden) {
@@ -336,6 +355,35 @@
         }
       }
     } catch (_) { }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      try {
+        const body = document.body;
+        if (body) {
+          body.classList.toggle('header-compact', headerState === 'compact');
+          body.classList.toggle('header-dock-bottom', headerDock === 'bottom');
+          if (hasPendingNodeMaximizedState) {
+            body.classList.add('canvas-node-maximized-active');
+          }
+        }
+
+        root.classList.toggle('sidebar-on-right', sidebarDock === 'right');
+
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) {
+          sidebar.classList.toggle('compact', initialSidebarState === 'compact');
+          sidebar.classList.remove('collapsed');
+          sidebar.classList.toggle('position-right', sidebarDock === 'right');
+          sidebar.dataset.position = sidebarDock;
+          sidebar.dataset.collapseState = initialSidebarState;
+          if (initialSidebarState === 'expanded') {
+            sidebar.style.width = `${expandedWidth}px`;
+          } else {
+            sidebar.style.removeProperty('width');
+          }
+        }
+      } catch (_) { }
+    }, { once: true });
 
     root.classList.add('layout-preload-active');
   } catch (_) { }

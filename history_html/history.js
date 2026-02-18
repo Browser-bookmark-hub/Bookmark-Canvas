@@ -132,6 +132,7 @@ const LAYOUT_PRELOAD_CLASSES = [
     'layout-preload-sidebar-right',
     'layout-preload-header-compact',
     'layout-preload-header-dock-bottom',
+    'layout-preload-node-maximized-active',
     'layout-preload-floating-hidden',
     'layout-preload-canvas-scrollbar-vertical-hidden',
     'layout-preload-canvas-scrollbar-horizontal-hidden'
@@ -7540,6 +7541,7 @@ function initSidebarToggle() {
             currentState = applySidebarState('compact');
             resizeDragSession.previewState = 'compact';
             syncSidebarWidth();
+            refreshMaximizedNodesSafe();
             return;
         }
 
@@ -7549,6 +7551,7 @@ function initSidebarToggle() {
         resizeDragSession.previewState = 'expanded';
         resizeDragSession.previewWidth = safeWidth;
         syncSidebarWidth();
+        refreshMaximizedNodesSafe();
     });
 
     function finishResizeDrag(event, canceled) {
