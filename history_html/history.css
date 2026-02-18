@@ -455,6 +455,12 @@ html.layout-preload-active.canvas-view-active.layout-preload-canvas-scrollbar-ho
     pointer-events: auto;
 }
 
+html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active #canvasVerticalScrollbar,
+html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active #canvasHorizontalScrollbar,
+html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active .canvas-zoom-indicator {
+    display: none !important;
+}
+
 html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active #canvasContent>.permanent-bookmark-section,
 html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active #canvasContent>.temp-canvas-node,
 html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-active #canvasContent>.md-canvas-node,
@@ -855,6 +861,10 @@ html.side-panel-mode #titleSideTools {
 }
 
 /* ==================== 侧边栏模式 ==================== */
+html.side-panel-mode {
+    --header-height: 42px;
+}
+
 html.side-panel-mode .header-left {
     display: flex;
     flex: 0 0 auto;
@@ -9073,6 +9083,8 @@ html.side-panel-mode #editBookmarkModal .modal-body {
 }
 
 /* Hide canvas scrollbars + floating zoom tools while a node is maximized */
+body.canvas-node-maximized-active #canvasVerticalScrollbar,
+body.canvas-node-maximized-active #canvasHorizontalScrollbar,
 body.canvas-node-maximized-active .canvas-scrollbar,
 body.canvas-node-maximized-active .canvas-zoom-indicator {
     display: none !important;

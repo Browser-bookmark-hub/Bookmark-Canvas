@@ -176,6 +176,11 @@ const CanvasState = {
     fullscreenHandlersBound: false,
     nodeMaximizedActive: false,
     pendingMaximizedDescriptor: null,
+    temporaryRaisedNode: {
+        element: null,
+        previousZIndex: '',
+        raisedZIndex: ''
+    },
     scrollState: {
         vertical: {
             hidden: true,
@@ -10704,6 +10709,7 @@ function __clearOtherMaximizedNodes(except) {
 
 function maximizeCanvasNode(element) {
     if (!element) return;
+    __restoreTemporaryRaisedCanvasNode();
     const rect = __getCanvasViewportRect();
     if (!rect) return;
     __clearOtherMaximizedNodes(element);
@@ -22896,6 +22902,101 @@ function updateSectionZIndex(sectionId, isPinned) {
     }
 }
 
+function __restoreTemporaryRaisedCanvasNode() {
+    const state = CanvasState.temporaryRaisedNode;
+    if (!state || !state.element) {
+        CanvasState.temporaryRaisedNode = {
+            element: null,
+            previousZIndex: '',
+            raisedZIndex: ''
+        };
+        return;
+    }
+
+    const element = state.element;
+    const canRestoreStyle = !!(element && element.style);
+    const shouldRestore = canRestoreStyle
+        && (state.raisedZIndex === '' || element.style.zIndex === state.raisedZIndex);
+
+    if (shouldRestore) {
+        if (state.previousZIndex === '' || state.previousZIndex == null) {
+            element.style.removeProperty('z-index');
+        } else {
+            element.style.zIndex = state.previousZIndex;
+        }
+    }
+
+    CanvasState.temporaryRaisedNode = {
+        element: null,
+        previousZIndex: '',
+        raisedZIndex: ''
+    };
+}
+
+function __getTemporaryRaiseZIndex() {
+    let maxZ = 220;
+    const nodes = document.querySelectorAll('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
+    nodes.forEach((node) => {
+        if (!node || (node.classList && node.classList.contains('canvas-node-maximized'))) return;
+        let value = Number(node.style && node.style.zIndex);
+        if (!Number.isFinite(value)) {
+            try {
+                value = Number(window.getComputedStyle(node).zIndex);
+            } catch (_) {
+                value = NaN;
+            }
+        }
+        if (Number.isFinite(value)) {
+            maxZ = Math.max(maxZ, value);
+        }
+    });
+    return Math.min(9999, maxZ + 1);
+}
+
+function __raiseCanvasNodeTemporarily(element) {
+    if (!element || !element.style || (element.classList && element.classList.contains('canvas-node-maximized'))) {
+        return;
+    }
+
+    const current = CanvasState.temporaryRaisedNode;
+    if (current && current.element === element) return;
+
+    __restoreTemporaryRaisedCanvasNode();
+
+    const previousZIndex = element.style.zIndex || '';
+    const raisedZIndex = String(__getTemporaryRaiseZIndex());
+    element.style.zIndex = raisedZIndex;
+
+    CanvasState.temporaryRaisedNode = {
+        element,
+        previousZIndex,
+        raisedZIndex
+    };
+}
+
+function __handleCanvasNodeTemporaryRaiseOnMouseDown(event) {
+    if (!event || event.button !== 0) return;
+    if (__isCanvasInSidePanelMode()) return;
+    if (CanvasState.nodeMaximizedActive) return;
+    if (CanvasState.dragState && CanvasState.dragState.isDragging) return;
+
+    const target = event.target;
+    if (!target || !target.closest) {
+        __restoreTemporaryRaisedCanvasNode();
+        return;
+    }
+
+    const node = target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
+    if (!node) {
+        __restoreTemporaryRaisedCanvasNode();
+        return;
+    }
+
+    if (node.classList && node.classList.contains('canvas-node-maximized')) return;
+
+    __raiseCanvasNodeTemporarily(node);
+}
+
 // =============================================================================
 // 栏目休眠管理（性能优化）- 基于视口可见性
 // =============================================================================
@@ -24916,6 +25017,14 @@ async function addToPermanentBookmarks(payload, parentIdOverride = null) {
 function setupCanvasEventListeners() {
     // 初始蒙版同步
     refreshSectionCtrlOverlays();
+
+    if (document && document.documentElement && document.documentElement.dataset.tempRaiseNodeBound !== 'true') {
+        document.documentElement.dataset.tempRaiseNodeBound = 'true';
+        document.addEventListener('mousedown', __handleCanvasNodeTemporaryRaiseOnMouseDown, true);
+        window.addEventListener('blur', () => {
+            __restoreTemporaryRaisedCanvasNode();
+        });
+    }
 
     // Layout zoom controls (delegated for all node types)
     if (document && document.body && document.body.dataset.layoutZoomDelegateBound !== 'true') {
