@@ -1431,7 +1431,7 @@ html.side-panel-mode .tool-buttons .quick-add-btn {
     position: absolute;
     top: calc(100% + 8px);
     right: 68px;
-    min-width: 240px;
+    min-width: 280px;
     background: var(--bg-elevated);
     border: 1px solid var(--border-color);
     border-radius: 10px;
@@ -1457,7 +1457,7 @@ body.header-dock-bottom:not(.header-compact) .quick-add-menu {
     display: grid;
     grid-template-columns: 1fr;
     gap: 8px;
-    min-width: 240px;
+    min-width: 280px;
 }
 
 .quick-add-menu.quick-add-menu-fullscreen-only .quick-add-menu-item {
@@ -1466,7 +1466,7 @@ body.header-dock-bottom:not(.header-compact) .quick-add-menu {
     white-space: nowrap;
 }
 
-.quick-add-menu.quick-add-menu-fullscreen-only .quick-add-menu-item span:last-child {
+.quick-add-menu.quick-add-menu-fullscreen-only .quick-add-menu-item > span:nth-child(2) {
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -1548,6 +1548,42 @@ body.header-dock-bottom:not(.header-compact) .quick-add-menu {
 
 .quick-add-menu-item:hover {
     background: var(--bg-tertiary);
+}
+
+.quick-add-menu-item-with-folder-toggle {
+    padding-right: 8px;
+}
+
+.quick-add-menu-item-with-folder-toggle > span:nth-child(2) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.quick-add-window-folder-option {
+    margin-left: auto;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding-left: 8px;
+    border-left: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1;
+}
+
+.quick-add-window-folder-checkbox {
+    margin: 0;
+    width: 13px;
+    height: 13px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.quick-add-window-folder-option-text {
+    white-space: nowrap;
 }
 
 .settings-btn i {
@@ -4145,6 +4181,263 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     filter: brightness(0.95);
 }
 
+#bookmarkAddSecondaryModal.modal.content-center {
+    left: 0;
+    width: 100%;
+    background: transparent;
+}
+
+#bookmarkAddSecondaryModal .modal-content {
+    width: min(92vw, 560px);
+    max-width: 560px;
+    max-height: min(84vh, 760px);
+    box-shadow: none;
+}
+
+#bookmarkAddSecondaryModal .modal-header.compact {
+    padding: 14px 18px;
+}
+
+#bookmarkAddSecondaryModal .modal-body {
+    padding: 16px 18px;
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-title-row {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-title-row h3 {
+    margin: 0;
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-help-btn {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    color: var(--text-tertiary);
+    cursor: pointer;
+    position: relative;
+    transition: all 0.15s ease;
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-help-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+    background: var(--bg-tertiary);
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-help-btn:focus-visible {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-help-tooltip {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 8px);
+    transform: translate(-50%, -2px);
+    width: min(340px, calc(100vw - 44px));
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.5;
+    text-align: left;
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.16s ease, transform 0.16s ease;
+    z-index: 240;
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-help-btn:hover .bookmark-add-secondary-help-tooltip,
+#bookmarkAddSecondaryModal .bookmark-add-secondary-help-btn:focus-visible .bookmark-add-secondary-help-tooltip {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+html.side-panel-mode #bookmarkAddSecondaryModal .modal-content {
+    width: min(94vw, 440px);
+    max-width: 440px;
+}
+
+html.side-panel-mode #bookmarkAddSecondaryModal .modal-header.compact {
+    padding: 12px 14px;
+}
+
+html.side-panel-mode #bookmarkAddSecondaryModal .modal-body {
+    padding: 14px;
+}
+
+.bookmark-add-secondary-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.bookmark-add-secondary-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.bookmark-add-secondary-field > label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.bookmark-add-secondary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.bookmark-add-secondary-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.bookmark-add-secondary-choice {
+    display: block;
+    cursor: pointer;
+}
+
+.bookmark-add-secondary-choice input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.bookmark-add-secondary-choice-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    min-height: 34px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    transition: border-color 0.18s ease, background-color 0.18s ease;
+    box-sizing: border-box;
+}
+
+.bookmark-add-secondary-choice-label i {
+    width: 14px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.bookmark-add-secondary-choice input[type="radio"]:checked + .bookmark-add-secondary-choice-label {
+    border-color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-light) 72%, var(--bg-secondary));
+}
+
+.bookmark-add-secondary-choice-window {
+    grid-column: 1 / -1;
+}
+
+.bookmark-add-secondary-choice-window .bookmark-add-secondary-choice-label {
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.bookmark-add-secondary-choice-main {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.bookmark-add-secondary-window-option {
+    margin-left: auto;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding-left: 8px;
+    border-left: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1;
+}
+
+.bookmark-add-secondary-window-option input[type="checkbox"] {
+    margin: 0;
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.bookmark-add-secondary-window-option span {
+    white-space: nowrap;
+}
+
+.bookmark-add-secondary-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn {
+    min-width: 88px;
+    height: 36px;
+    padding: 0 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.16s ease;
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-tertiary);
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn:focus-visible {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn.primary {
+    border-color: var(--accent-primary);
+    background: var(--accent-primary);
+    color: #fff;
+}
+
+#bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn.primary:hover {
+    filter: brightness(0.95);
+}
+
+html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn {
+    min-width: 82px;
+    height: 34px;
+    padding: 0 12px;
+}
+
 /* Clear Canvas secondary UI */
 #clearCanvasModal.modal.content-center {
     left: 0;
@@ -4804,6 +5097,36 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     flex-direction: column;
     gap: 2px;
     align-items: flex-start;
+    width: 100%;
+    min-width: 0;
+}
+
+.bookmark-context-menu .context-menu-item.add-entry-option .context-menu-item-label {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 8px;
+}
+
+.bookmark-context-menu .context-menu-item.add-entry-option .context-menu-item-label > .swsg-title {
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    font-size: 1em;
+    font-weight: 400;
+}
+
+.bookmark-context-menu .context-menu-item.add-entry-option .swsg-badge-row {
+    width: auto;
+    margin-left: auto;
+    flex: 0 0 auto;
+}
+
+.bookmark-context-menu .context-menu-item.add-entry-option .sub-badge {
+    margin-left: 0;
+    line-height: 1.4;
 }
 
 .bookmark-context-menu .context-menu-item.swsg-option {
@@ -4811,6 +5134,32 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     align-items: flex-start;
     font-size: 0.9em;
     line-height: 1.25;
+}
+
+.bookmark-context-menu .context-menu-item.swsg-option .context-menu-item-label {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 8px;
+}
+
+.bookmark-context-menu .context-menu-item.swsg-option .context-menu-item-label > .swsg-title {
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.bookmark-context-menu .context-menu-item.swsg-option .swsg-badge-row {
+    width: auto;
+    margin-left: auto;
+    flex: 0 0 auto;
+    gap: 4px;
+}
+
+.bookmark-context-menu .context-menu-item.swsg-option .swsg-badge-row .sub-badge {
+    margin-left: 0;
 }
 
 .bookmark-context-menu.horizontal-layout .context-menu-item.swsg-option {
@@ -4835,7 +5184,9 @@ html.side-panel-mode #editBookmarkModal .modal-body {
 
 .bookmark-context-menu .context-menu-item .swsg-badge-row {
     display: flex;
-    flex-wrap: wrap;
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
     gap: 6px;
 }
 
@@ -4864,6 +5215,21 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     background: var(--accent-light, rgba(0, 0, 0, 0.08));
     color: var(--accent-primary, var(--text-primary));
 }
+
+.bookmark-context-menu .context-menu-item .context-menu-item-label > span {
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.bookmark-context-menu .context-menu-item .context-menu-item-label > span .sub-badge {
+    margin-left: auto;
+    margin-right: 0;
+}
+
 
 .bookmark-context-menu.horizontal-layout .context-menu-item:hover {
     background: var(--accent-light);

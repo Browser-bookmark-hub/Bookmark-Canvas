@@ -101,6 +101,9 @@ const CANVAS_PAGE_FULLSCREEN_BRIDGE_MAX_AGE_MS = 30000;
 const CANVAS_PAGE_FULLSCREEN_STATE_STORAGE_KEY = 'canvas_page_fullscreen_state_v1';
 const CANVAS_PAGE_FULLSCREEN_STATE_MAX_AGE_MS = 30000;
 const CANVAS_NODE_LAST_MAXIMIZED_STORAGE_KEY = 'canvas-node-last-maximized-v1';
+const QUICK_ADD_WINDOW_FOLDER_OPTION_STORAGE_KEY = 'quickAddWindowAsFolderV1';
+const QUICK_ADD_BLANK_HEADING_OPTION_STORAGE_KEY = 'quickAddBlankHeadingV1';
+const QUICK_ADD_INLINE_OPTION_STATES_STORAGE_KEY = 'quickAddInlineOptionStatesV1';
 const CANVAS_LAST_MAXIMIZED_UPDATED_EVENT = 'canvas-last-maximized-node-updated';
 const CANVAS_FLOATING_TOOLS_DOCK_KEY = isSidePanelMode
     ? 'sidepanelFloatingToolsDockV1'
@@ -4366,6 +4369,9 @@ function applyLanguage() {
     if (quickAddWindowPermanentText) quickAddWindowPermanentText.textContent = i18n.quickAddWindowPermanentText[currentLang];
     const quickAddWindowBlankText = document.getElementById('quickAddWindowBlankText');
     if (quickAddWindowBlankText) quickAddWindowBlankText.textContent = i18n.quickAddWindowBlankText[currentLang];
+    if (typeof window.__refreshQuickAddWindowFolderOptionLabels === 'function') {
+        try { window.__refreshQuickAddWindowFolderOptionLabels(); } catch (_) { }
+    }
 
     const shortcutsModalTitle = document.getElementById('shortcutsModalTitle');
     if (shortcutsModalTitle) shortcutsModalTitle.textContent = i18n.shortcutsModalTitle[currentLang];
@@ -5492,6 +5498,78 @@ function setupQuickAddMenu() {
         }
     });
 
+    const getQuickAddInlineOptionMode = (action) => {
+        if (!action || !action.includes('window')) return '';
+        if (action === 'add-window-blank') return 'heading';
+        if (action === 'add-window-view' && !!getMaximizedMdNodeId()) return 'heading';
+        return 'folder';
+    };
+
+    const readQuickAddInlineOptionChecked = (action, mode) => {
+        return readQuickAddInlineActionOptionState(action, mode);
+    };
+
+    const writeQuickAddInlineOptionChecked = (action, mode, enabled) => {
+        writeQuickAddInlineActionOptionState(action, mode, enabled);
+    };
+
+    const refreshQuickAddWindowFolderControls = () => {
+        const lang = currentLang || 'zh_CN';
+        quickAddAllItems.forEach((item) => {
+            const action = item && item.dataset ? item.dataset.action || '' : '';
+            const optionMode = getQuickAddInlineOptionMode(action);
+            const existed = item.querySelector('.quick-add-window-folder-option');
+
+            if (!optionMode) {
+                item.classList.remove('quick-add-menu-item-with-folder-toggle');
+                if (existed) existed.remove();
+                return;
+            }
+
+            item.classList.add('quick-add-menu-item-with-folder-toggle');
+
+            let optionEl = existed;
+            if (!optionEl) {
+                optionEl = document.createElement('span');
+                optionEl.className = 'quick-add-window-folder-option';
+                optionEl.innerHTML = `
+                    <input type="checkbox" class="quick-add-window-folder-checkbox">
+                    <span class="quick-add-window-folder-option-text"></span>
+                `;
+                item.appendChild(optionEl);
+
+                const checkboxEl = optionEl.querySelector('.quick-add-window-folder-checkbox');
+                if (checkboxEl) {
+                    checkboxEl.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                    });
+                    checkboxEl.addEventListener('change', (event) => {
+                        event.stopPropagation();
+                        const actionValue = item && item.dataset ? item.dataset.action || '' : '';
+                        const nextMode = checkboxEl.dataset.mode || optionEl.dataset.mode || 'folder';
+                        const nextChecked = !!checkboxEl.checked;
+                        writeQuickAddInlineOptionChecked(actionValue, nextMode, nextChecked);
+                    });
+                }
+
+            }
+
+            optionEl.dataset.mode = optionMode;
+
+            const checkboxEl = optionEl.querySelector('.quick-add-window-folder-checkbox');
+            const textEl = optionEl.querySelector('.quick-add-window-folder-option-text');
+            if (checkboxEl) {
+                checkboxEl.dataset.mode = optionMode;
+                checkboxEl.checked = readQuickAddInlineOptionChecked(action, optionMode);
+            }
+            if (textEl) {
+                textEl.textContent = optionMode === 'heading'
+                    ? (lang === 'zh_CN' ? '一级标题' : 'Heading')
+                    : (lang === 'zh_CN' ? '文件夹' : 'Folder');
+            }
+        });
+    };
+
     const syncQuickAddMenuSections = (options = {}) => {
         const fromTitle = options && options.fromTitle === true;
         const hideCurrentGroup = fromTitle || !isSidePanelMode;
@@ -5504,7 +5582,8 @@ function setupQuickAddMenu() {
             if (quickAddDivider) quickAddDivider.style.display = 'none';
             quickAddAllItems.forEach((item) => {
                 const action = item && item.dataset ? item.dataset.action || '' : '';
-                const visible = action === 'add-current-view' || action === 'add-window-view';
+                const allowCurrentViewAction = isSidePanelMode && action === 'add-current-view';
+                const visible = allowCurrentViewAction || action === 'add-window-view';
                 item.style.display = visible ? '' : 'none';
             });
             return;
@@ -5542,6 +5621,7 @@ function setupQuickAddMenu() {
         setQuickAddMenuColorVars();
         menu.dataset.openFromTitle = options && options.fromTitle === true ? 'true' : 'false';
         syncQuickAddMenuSections(options);
+        refreshQuickAddWindowFolderControls();
         if (typeof currentHeaderDockSide === 'string') {
             menu.dataset.dock = currentHeaderDockSide;
         }
@@ -5550,6 +5630,10 @@ function setupQuickAddMenu() {
 
     setQuickAddMenuColorVars();
     syncQuickAddMenuSections({ fromTitle: false });
+    refreshQuickAddWindowFolderControls();
+    try {
+        window.__refreshQuickAddWindowFolderOptionLabels = refreshQuickAddWindowFolderControls;
+    } catch (_) { }
 
     const toggleMenu = (options = {}) => {
         if (menu.hasAttribute('hidden')) {
@@ -5571,6 +5655,9 @@ function setupQuickAddMenu() {
     }
 
     menu.addEventListener('click', async (e) => {
+        if (e.target && e.target.closest && e.target.closest('.quick-add-window-folder-checkbox')) {
+            return;
+        }
         const item = e.target && e.target.closest ? e.target.closest('.quick-add-menu-item') : null;
         if (!item) return;
         const action = item.dataset.action || '';
@@ -5596,6 +5683,7 @@ function setupQuickAddMenu() {
     const refreshCurrentViewEntry = () => {
         const fromTitle = menu.dataset.openFromTitle === 'true';
         syncQuickAddMenuSections({ fromTitle });
+        refreshQuickAddWindowFolderControls();
     };
 
     if (document.body && document.documentElement.getAttribute('data-current-view-add-observer') !== 'true') {
@@ -5617,8 +5705,103 @@ function setupQuickAddMenu() {
     } catch (_) { }
 }
 
+function readQuickAddWindowAsFolderOption() {
+    try {
+        const raw = localStorage.getItem(QUICK_ADD_WINDOW_FOLDER_OPTION_STORAGE_KEY);
+        if (raw === null) return true;
+        return raw === '1';
+    } catch (_) {
+        return true;
+    }
+}
+
+function writeQuickAddWindowAsFolderOption(enabled) {
+    try {
+        localStorage.setItem(QUICK_ADD_WINDOW_FOLDER_OPTION_STORAGE_KEY, enabled ? '1' : '0');
+    } catch (_) { }
+}
+
+function readQuickAddBlankHeadingOption() {
+    try {
+        const raw = localStorage.getItem(QUICK_ADD_BLANK_HEADING_OPTION_STORAGE_KEY);
+        if (raw === null) return true;
+        return raw === '1';
+    } catch (_) {
+        return true;
+    }
+}
+
+function writeQuickAddBlankHeadingOption(enabled) {
+    try {
+        localStorage.setItem(QUICK_ADD_BLANK_HEADING_OPTION_STORAGE_KEY, enabled ? '1' : '0');
+    } catch (_) { }
+}
+
+function normalizeQuickAddInlineOptionState(value, fallback = true) {
+    if (value === true || value === '1' || value === 1 || value === 'true') return true;
+    if (value === false || value === '0' || value === 0 || value === 'false') return false;
+    return !!fallback;
+}
+
+function readQuickAddInlineOptionStateMap() {
+    try {
+        const raw = localStorage.getItem(QUICK_ADD_INLINE_OPTION_STATES_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function writeQuickAddInlineOptionStateMap(map) {
+    try {
+        localStorage.setItem(QUICK_ADD_INLINE_OPTION_STATES_STORAGE_KEY, JSON.stringify(map || {}));
+    } catch (_) { }
+}
+
+function getQuickAddInlineOptionStateKey(action, mode) {
+    const actionKey = String(action || '').trim();
+    const modeKey = String(mode || '').trim() || 'folder';
+    return `${actionKey}::${modeKey}`;
+}
+
+function readQuickAddInlineActionOptionState(action, mode) {
+    const stateMap = readQuickAddInlineOptionStateMap();
+    const stateKey = getQuickAddInlineOptionStateKey(action, mode);
+    if (Object.prototype.hasOwnProperty.call(stateMap, stateKey)) {
+        return normalizeQuickAddInlineOptionState(stateMap[stateKey], true);
+    }
+    return true;
+}
+
+function writeQuickAddInlineActionOptionState(action, mode, enabled) {
+    const stateMap = readQuickAddInlineOptionStateMap();
+    const stateKey = getQuickAddInlineOptionStateKey(action, mode);
+    stateMap[stateKey] = !!enabled;
+    writeQuickAddInlineOptionStateMap(stateMap);
+}
+
+function buildQuickAddWindowFolderItems(items, scope = 'window') {
+    const list = Array.isArray(items) ? items : [];
+    if (!list.length) return [];
+    return [{
+        type: 'folder',
+        title: buildSectionTitle(list, scope),
+        children: list
+    }];
+}
+
 async function handleQuickAddAction(action) {
     if (!action) return;
+
+    const isWindowScopeAction = action.includes('window');
+    const isWindowViewAction = action === 'add-window-view';
+    const isBlankViewTarget = isWindowViewAction && !!getMaximizedMdNodeId();
+    const isBlankTargetAction = action.includes('blank') || isBlankViewTarget;
+    const blankUseHeading = isBlankTargetAction && readQuickAddInlineActionOptionState(action, 'heading');
+    const canUseWindowAsFolder = isWindowScopeAction && !isBlankTargetAction;
+    const windowAsFolder = canUseWindowAsFolder && readQuickAddInlineActionOptionState(action, 'folder');
 
     if (action === 'add-current-view' || action === 'add-window-view') {
         const viewScope = action === 'add-window-view' ? 'window' : 'current';
@@ -5635,11 +5818,23 @@ async function handleQuickAddAction(action) {
             return;
         }
 
-        await addTabsToCurrentViewSection(structuredForCurrentView.length ? structuredForCurrentView : flatForCurrentView, viewScope);
+        const baseItemsForCurrentView = structuredForCurrentView.length ? structuredForCurrentView : flatForCurrentView;
+        const itemsForCurrentView = (viewScope === 'window' && windowAsFolder)
+            ? buildQuickAddWindowFolderItems(baseItemsForCurrentView, viewScope)
+            : baseItemsForCurrentView;
+
+        const addToCurrentOptions = {
+            skipAutoSectionFolder: viewScope === 'window'
+        };
+        if (viewScope === 'window' && isBlankViewTarget) {
+            addToCurrentOptions.useBlankHeading = blankUseHeading;
+        }
+
+        await addTabsToCurrentViewSection(itemsForCurrentView, viewScope, addToCurrentOptions);
         return;
     }
 
-    const scope = action.includes('window') ? 'window' : 'current';
+    const scope = isWindowScopeAction ? 'window' : 'current';
     const target = action.includes('permanent') ? 'permanent'
         : (action.includes('blank') ? 'blank' : 'temp');
 
@@ -5657,15 +5852,20 @@ async function handleQuickAddAction(action) {
         return;
     }
 
+    const baseItems = structuredItems.length ? structuredItems : flatItems;
+    const itemsForTarget = (scope === 'window' && windowAsFolder)
+        ? buildQuickAddWindowFolderItems(baseItems, scope)
+        : baseItems;
+
     if (target === 'permanent') {
-        await addTabsToPermanent(structuredItems.length ? structuredItems : flatItems, scope);
+        await addTabsToPermanent(itemsForTarget, scope, { skipAutoSectionFolder: scope === 'window' });
         return;
     }
     if (target === 'blank') {
-        await addTabsToBlankNode(structuredItems.length ? structuredItems : flatItems, scope);
+        await addTabsToBlankNode(itemsForTarget, scope, { useHeading: blankUseHeading });
         return;
     }
-    await addTabsToTempSection(structuredItems.length ? structuredItems : flatItems, scope);
+    await addTabsToTempSection(itemsForTarget, scope);
 }
 
 function queryTabs(params) {
@@ -5916,10 +6116,19 @@ function buildSectionTitle(tabs, scope) {
     return scope === 'window' ? `窗口标签 ${dt}` : `页面 ${dt}`;
 }
 
-function buildMarkdownFromTabs(tabs, heading) {
+function resolveQuickAddGroupHeading(title, index = 1) {
+    const normalized = typeof title === 'string' ? title.trim() : '';
+    if (normalized) return normalized;
+    return currentLang === 'en' ? `Tab Group ${index}` : `标签组 ${index}`;
+}
+
+function buildMarkdownFromTabs(tabs, heading, options = {}) {
     const lines = [];
+    const rootItems = Array.isArray(tabs) ? tabs : [];
+    const groupAsSecondLevel = !!(options && options.groupAsSecondLevel);
+
     if (heading) {
-        lines.push(`# ${heading}`, '');
+        lines.push(`# ${escapeMarkdownText(heading)}`, '');
     }
 
     const appendItems = (items, depth = 0) => {
@@ -5927,7 +6136,7 @@ function buildMarkdownFromTabs(tabs, heading) {
         (Array.isArray(items) ? items : []).forEach((item) => {
             if (!item) return;
 
-            if (item.type === 'folder' || Array.isArray(item.children)) {
+            if (isQuickAddFolderItem(item)) {
                 const folderTitle = resolveQuickAddFolderTitle(item.title);
                 if (folderTitle) {
                     lines.push(`${indent}- 📁 **${escapeMarkdownText(folderTitle)}**`);
@@ -5945,7 +6154,44 @@ function buildMarkdownFromTabs(tabs, heading) {
         });
     };
 
-    appendItems(tabs, 0);
+    if (groupAsSecondLevel) {
+        const hasGroupedItem = rootItems.some((item) => isQuickAddFolderItem(item));
+        if (hasGroupedItem) {
+            let groupIndex = 0;
+            const pendingUngrouped = [];
+
+            const flushUngrouped = () => {
+                if (!pendingUngrouped.length) return;
+                appendItems(pendingUngrouped, 0);
+                pendingUngrouped.length = 0;
+            };
+
+            rootItems.forEach((item) => {
+                if (!item) return;
+
+                if (isQuickAddFolderItem(item)) {
+                    flushUngrouped();
+                    groupIndex += 1;
+                    const groupTitle = resolveQuickAddGroupHeading(item.title, groupIndex);
+                    lines.push(`## ${escapeMarkdownText(groupTitle)}`);
+                    appendItems(Array.isArray(item.children) ? item.children : [], 0);
+                    lines.push('');
+                    return;
+                }
+
+                pendingUngrouped.push(item);
+            });
+
+            flushUngrouped();
+
+            while (lines.length && lines[lines.length - 1] === '') {
+                lines.pop();
+            }
+            return lines.join('\n');
+        }
+    }
+
+    appendItems(rootItems, 0);
     return lines.join('\n');
 }
 
@@ -5958,14 +6204,16 @@ function escapeMarkdownText(text) {
         .replace(/_/g, '\\_');
 }
 
-function buildHtmlFromTabs(tabs, heading) {
-    const titleHtml = heading ? `<p><strong>${escapeHtml(heading)}</strong></p>` : '';
+function buildHtmlFromTabs(tabs, heading, options = {}) {
+    const rootItems = Array.isArray(tabs) ? tabs : [];
+    const groupAsSecondLevel = !!(options && options.groupAsSecondLevel);
+    const titleHtml = heading ? `<h1>${escapeHtml(heading)}</h1>` : '';
 
     const buildList = (items) => {
         return (Array.isArray(items) ? items : []).map((item) => {
             if (!item) return '';
 
-            if (item.type === 'folder' || Array.isArray(item.children)) {
+            if (isQuickAddFolderItem(item)) {
                 const folderTitle = resolveQuickAddFolderTitle(item.title);
                 const folderLabel = folderTitle ? `📁 ${escapeHtml(folderTitle)}` : '📁';
                 const childrenHtml = buildList(item.children || []);
@@ -5979,7 +6227,43 @@ function buildHtmlFromTabs(tabs, heading) {
         }).join('');
     };
 
-    const items = buildList(tabs);
+    if (groupAsSecondLevel) {
+        const hasGroupedItem = rootItems.some((item) => isQuickAddFolderItem(item));
+        if (hasGroupedItem) {
+            const chunks = [];
+            let groupIndex = 0;
+            const pendingUngrouped = [];
+
+            const flushUngrouped = () => {
+                if (!pendingUngrouped.length) return;
+                const listHtml = buildList(pendingUngrouped);
+                if (listHtml) {
+                    chunks.push(`<ul>${listHtml}</ul>`);
+                }
+                pendingUngrouped.length = 0;
+            };
+
+            rootItems.forEach((item) => {
+                if (!item) return;
+
+                if (isQuickAddFolderItem(item)) {
+                    flushUngrouped();
+                    groupIndex += 1;
+                    const groupTitle = resolveQuickAddGroupHeading(item.title, groupIndex);
+                    const childrenHtml = buildList(Array.isArray(item.children) ? item.children : []);
+                    chunks.push(`<h2>${escapeHtml(groupTitle)}</h2>${childrenHtml ? `<ul>${childrenHtml}</ul>` : ''}`);
+                    return;
+                }
+
+                pendingUngrouped.push(item);
+            });
+
+            flushUngrouped();
+            return `${titleHtml}${chunks.join('')}`;
+        }
+    }
+
+    const items = buildList(rootItems);
     return `${titleHtml}<ul>${items}</ul>`;
 }
 
@@ -6010,7 +6294,7 @@ function stripHtmlToText(html) {
     return div.textContent || div.innerText || '';
 }
 
-async function addTabsToCurrentViewSection(tabs, scope) {
+async function addTabsToCurrentViewSection(tabs, scope, options = {}) {
     const bookmarkCount = countQuickAddBookmarks(tabs);
     if (!bookmarkCount) {
         const msg = currentLang === 'en' ? 'No valid pages to add' : '没有可添加的页面';
@@ -6039,12 +6323,15 @@ async function addTabsToCurrentViewSection(tabs, scope) {
 
     const mdTargetId = getMaximizedMdNodeId();
     if (mdTargetId) {
-        await addTabsToBlankNode(tabs, scope);
+        const useBlankHeading = options && typeof options === 'object' && ('useBlankHeading' in options)
+            ? !!options.useBlankHeading
+            : true;
+        await addTabsToBlankNode(tabs, scope, { useHeading: useBlankHeading });
         return;
     }
 
     if (getMaximizedPermanentSectionElement()) {
-        await addTabsToPermanent(tabs, scope);
+        await addTabsToPermanent(tabs, scope, options);
         return;
     }
 
@@ -6108,16 +6395,17 @@ async function addTabsToTempSection(tabs, scope) {
     try { showToast(msg); } catch (_) { }
 }
 
-async function addTabsToBlankNode(tabs, scope) {
+async function addTabsToBlankNode(tabs, scope, options = {}) {
     if (!window.CanvasModule || !window.CanvasModule.createMdNode || !window.CanvasModule.CanvasState) {
         const msg = currentLang === 'en' ? 'Blank node is unavailable' : '空白栏目不可用';
         try { showToast(msg); } catch (_) { }
         return;
     }
     const bookmarkCount = countQuickAddBookmarks(tabs);
-    const heading = bookmarkCount > 1 ? buildSectionTitle(tabs, scope) : '';
-    const markdown = buildMarkdownFromTabs(tabs, heading);
-    const html = buildHtmlFromTabs(tabs, heading);
+    const useHeading = !!(options && options.useHeading);
+    const heading = useHeading ? buildSectionTitle(tabs, scope) : '';
+    const markdown = buildMarkdownFromTabs(tabs, heading, { groupAsSecondLevel: true });
+    const html = buildHtmlFromTabs(tabs, heading, { groupAsSecondLevel: true });
 
     const targetId = getMaximizedMdNodeId();
     if (targetId) {
@@ -6206,7 +6494,7 @@ async function insertQuickAddItemsToPermanent(parentId, items) {
     }
 }
 
-async function addTabsToPermanent(tabs, scope) {
+async function addTabsToPermanent(tabs, scope, options = {}) {
     const barId = await getBookmarksBarId();
     if (!barId) {
         const msg = currentLang === 'en' ? 'Bookmarks bar not found' : '找不到书签栏';
@@ -6222,7 +6510,11 @@ async function addTabsToPermanent(tabs, scope) {
         return;
     }
 
-    if (bookmarkCount === 1 && isQuickAddSingleBookmarkItem(items)) {
+    const skipAutoSectionFolder = !!(options && options.skipAutoSectionFolder);
+
+    if (skipAutoSectionFolder) {
+        await insertQuickAddItemsToPermanent(barId, items);
+    } else if (bookmarkCount === 1 && isQuickAddSingleBookmarkItem(items)) {
         const item = items[0];
         await bookmarksCreate({
             parentId: barId,

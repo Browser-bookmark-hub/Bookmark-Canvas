@@ -72,6 +72,7 @@ const SAME_WINDOW_SPECIFIC_GROUP_SCOPES_KEY = 'bookmarkSameWindowSpecificGroupSc
 
 // 超链接系统专用注册表键
 const HYPERLINK_WINDOW_REGISTRY_KEY = 'hyperlinkWindowsRegistry';
+const BOOKMARK_ADD_TEMPLATE_STORAGE_KEY = 'bookmarkContextAddTemplateV1';
 
 const LIVE_GROUP_SEED_CACHE_TTL = 1200; // ms
 
@@ -2595,13 +2596,18 @@ async function showContextMenu(e, node) {
     contextMenu.querySelectorAll('.sub-badge[data-sub-action]').forEach(badge => {
         badge.addEventListener('click', async (event) => {
             const subAction = badge.dataset.subAction;
-            if (!subAction || !context || !context.nodeUrl) return;
+            if (!subAction || !context) return;
             event.preventDefault();
             event.stopPropagation();
             try {
                 switch (subAction) {
+                    case 'add-template-run':
+                        hideContextMenu();
+                        await openBookmarkAddByTemplateAction(context);
+                        return;
                     case 'swsg-new-group':
                     case 'swsg-new-window':
+                        if (!context.nodeUrl) return;
                         await openInSameWindowSpecificGroup(context.nodeUrl, {
                             context,
                             forceNewGroup: subAction === 'swsg-new-group' || subAction === 'swsg-new-window',
@@ -2610,10 +2616,12 @@ async function showContextMenu(e, node) {
                         await setDefaultOpenMode('same-window-specific-group');
                         break;
                     case 'scoped-group-new':
+                        if (!context.nodeUrl) return;
                         await openInScopedTabGroup(context.nodeUrl, { context, forceNew: true });
                         await setDefaultOpenMode('scoped-group');
                         break;
                     case 'scoped-window-new':
+                        if (!context.nodeUrl) return;
                         await openInScopedWindow(context.nodeUrl, { context, forceNew: true });
                         await setDefaultOpenMode('scoped-window');
                         break;
@@ -2700,6 +2708,15 @@ function buildMenuItems(context) {
 
             // 编辑组 - 紧跟在select后面
             { action: 'rename', label: lang === 'zh_CN' ? '重命名' : 'Rename', icon: 'edit', group: 'select' },
+            {
+                action: 'add-entry',
+                labelHTML: `<span class="swsg-title">${lang === 'zh_CN' ? '添加' : 'Add'}</span><div class="swsg-badge-row"><span class="sub-badge" data-sub-action="add-template-run">${lang === 'zh_CN' ? '模版' : 'Template'}</span></div>`,
+                label: lang === 'zh_CN' ? '添加' : 'Add',
+                icon: 'plus-circle',
+                group: 'select',
+                className: 'add-entry-option',
+                hidden: false
+            },
             { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'select' },
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'select' },
             { action: 'paste', label: lang === 'zh_CN' ? '粘贴到文件夹内' : 'Paste into Folder', icon: 'paste', disabled: !hasClipboard(), group: 'select' },
@@ -2713,8 +2730,8 @@ function buildMenuItems(context) {
             { separator: true },
 
             // 结构/设置组（合并第三组）
-            { action: 'add-page', label: lang === 'zh_CN' ? '添加网页' : 'Add Page', icon: 'plus-circle', group: 'structure' },
-            { action: 'add-folder', label: lang === 'zh_CN' ? '添加文件夹' : 'Add Folder', icon: 'folder-plus', group: 'structure' },
+            { action: 'add-page', label: lang === 'zh_CN' ? '添加网页' : 'Add Page', icon: 'plus-circle', group: 'structure', hidden: true },
+            { action: 'add-folder', label: lang === 'zh_CN' ? '添加文件夹' : 'Add Folder', icon: 'folder-plus', group: 'structure', hidden: true },
             { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'structure' },
             { action: 'toggle-context-menu-layout', label: contextMenuHorizontal ? (lang === 'zh_CN' ? '纵向布局' : 'Vertical') : (lang === 'zh_CN' ? '横向布局' : 'Horizontal'), icon: 'exchange-alt', group: 'structure' }
         );
@@ -2726,6 +2743,15 @@ function buildMenuItems(context) {
 
             // 编辑组 - 紧跟在select后面
             { action: 'edit', label: lang === 'zh_CN' ? '编辑' : 'Edit', icon: 'edit', group: 'select' },
+            {
+                action: 'add-entry',
+                labelHTML: `<span class="swsg-title">${lang === 'zh_CN' ? '添加' : 'Add'}</span><div class="swsg-badge-row"><span class="sub-badge" data-sub-action="add-template-run">${lang === 'zh_CN' ? '模版' : 'Template'}</span></div>`,
+                label: lang === 'zh_CN' ? '添加' : 'Add',
+                icon: 'plus-circle',
+                group: 'select',
+                className: 'add-entry-option',
+                hidden: false
+            },
             { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'select' },
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'select' },
             // 将 Copy Link 放到 Copy 后面
@@ -2737,20 +2763,14 @@ function buildMenuItems(context) {
             { action: 'open-label', label: lang === 'zh_CN' ? '打开：' : 'Open:', icon: '', group: 'open', disabled: true },
             (() => {
                 const scope = getScopeFromContext(context);
-                const hasWindow = Number.isInteger(sameWindowSpecificGroupWindowId);
-                const scopeEntry = getSameWindowSpecificGroupEntry(scope.key);
-                const canShowNewGroup = hasWindow && scopeEntry && scopeEntry.windowId === sameWindowSpecificGroupWindowId && Number.isInteger(scopeEntry.groupId);
-                const badges = [];
-                if (canShowNewGroup) {
-                    badges.push(`<span class="sub-badge" data-sub-action="swsg-new-group">${lang === 'zh_CN' ? '新分组' : 'New Group'}</span>`);
-                }
-                if (hasWindow) {
-                    badges.push(`<span class="sub-badge" data-sub-action="swsg-new-window">${lang === 'zh_CN' ? '新窗口' : 'New Window'}</span>`);
-                }
+                const badges = [
+                    `<span class="sub-badge" data-sub-action="swsg-new-group">${lang === 'zh_CN' ? '新分组' : 'New Group'}</span>`,
+                    `<span class="sub-badge" data-sub-action="swsg-new-window">${lang === 'zh_CN' ? '新窗口' : 'New Window'}</span>`
+                ];
                 const scopeSuffix = scope && scope.prefix ? ` (${escapeHtml(scope.prefix)})` : '';
                 const baseLabelZh = `同窗专属组${scopeSuffix}`;
                 const baseLabelEn = `In Same Window & Exclusive Group${scopeSuffix}`;
-                const badgeHtml = badges.length ? `<div class="swsg-badge-row">${badges.join('')}</div>` : '';
+                const badgeHtml = `<div class="swsg-badge-row">${badges.join('')}</div>`;
                 const titleClass = lang === 'zh_CN' ? 'swsg-title' : 'swsg-title swsg-title-compact';
                 const titleHtml = `<span class="${titleClass}">${lang === 'zh_CN' ? baseLabelZh : baseLabelEn}</span>`;
                 return {
@@ -3526,6 +3546,12 @@ async function handleTempMenuAction(action, context) {
         case 'rename':
             await editTempNode(context);
             break;
+        case 'add-entry':
+            await openBookmarkAddMenuAction(context);
+            break;
+        case 'add-template-run':
+            await openBookmarkAddByTemplateAction(context);
+            break;
         case 'add-page':
             await addTempBookmarkAction(context);
             break;
@@ -3680,6 +3706,1010 @@ async function batchRenameTemp() {
         }
     }
 }
+
+function __normalizeBookmarkAddActionType(actionType) {
+    const value = String(actionType || '').trim();
+    const allowCurrentTab = __isSidePanelModeForAdd();
+
+    if (value === 'add-current-tab' && !allowCurrentTab) {
+        return 'add-page';
+    }
+
+    if (value === 'add-page' || value === 'add-folder' || value === 'add-current-window' || (allowCurrentTab && value === 'add-current-tab')) {
+        return value;
+    }
+
+    return 'add-page';
+}
+
+function __getBookmarkAddPositionOptions(context) {
+    const lang = currentLang || 'zh_CN';
+
+    if (context && context.blankRoot) {
+        return [
+            {
+                value: 'inside',
+                label: lang === 'zh_CN' ? '栏目内（默认）' : 'Inside Section (Default)'
+            }
+        ];
+    }
+
+    if (context && context.isFolder) {
+        return [
+            {
+                value: 'inside',
+                label: lang === 'zh_CN' ? '文件夹内（默认）' : 'Inside Folder (Default)'
+            },
+            {
+                value: 'before',
+                label: lang === 'zh_CN' ? '文件夹上方' : 'Above Folder'
+            },
+            {
+                value: 'after',
+                label: lang === 'zh_CN' ? '文件夹下方' : 'Below Folder'
+            }
+        ];
+    }
+
+    return [
+        {
+            value: 'after',
+            label: lang === 'zh_CN' ? '当前书签下方（默认）' : 'Below Bookmark (Default)'
+        },
+        {
+            value: 'before',
+            label: lang === 'zh_CN' ? '当前书签上方' : 'Above Bookmark'
+        }
+    ];
+}
+
+function __isSidePanelModeForAdd() {
+    try {
+        if (typeof window !== 'undefined' && typeof window.__SIDE_PANEL_MODE__ === 'boolean') {
+            return window.__SIDE_PANEL_MODE__;
+        }
+    } catch (_) { }
+
+    try {
+        const params = new URLSearchParams((window && window.location && window.location.search) || '');
+        const flag = params.get('sidepanel') || params.get('side_panel') || params.get('panel');
+        return flag === '1' || flag === 'true';
+    } catch (_) {
+        return false;
+    }
+}
+
+function __normalizeBookmarkAddPosition(context, position) {
+    const options = __getBookmarkAddPositionOptions(context);
+    const allowed = options.map((item) => item.value);
+    const normalized = String(position || '').trim();
+    if (allowed.includes(normalized)) return normalized;
+    return context && context.isFolder ? 'inside' : 'after';
+}
+
+function __normalizeBookmarkAddWindowAsFolder(value) {
+    return value === true || value === 'true' || value === 1 || value === '1';
+}
+
+function __formatBookmarkAddWindowFolderTitle() {
+    const lang = currentLang || 'zh_CN';
+    const now = new Date();
+    const pad = (num) => String(num).padStart(2, '0');
+    const dt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    return lang === 'zh_CN' ? `窗口标签 ${dt}` : `Window Tabs ${dt}`;
+}
+
+function __readBookmarkAddTemplate() {
+    try {
+        const raw = localStorage.getItem(BOOKMARK_ADD_TEMPLATE_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        const hasWindowAsFolder = Object.prototype.hasOwnProperty.call(parsed, 'windowAsFolder');
+        return {
+            actionType: __normalizeBookmarkAddActionType(parsed.actionType),
+            position: parsed.position || null,
+            windowAsFolder: hasWindowAsFolder
+                ? __normalizeBookmarkAddWindowAsFolder(parsed.windowAsFolder)
+                : true
+        };
+    } catch (_) {
+        return null;
+    }
+}
+
+function __writeBookmarkAddTemplate(config) {
+    if (!config || typeof config !== 'object') return;
+    const normalizedActionType = __normalizeBookmarkAddActionType(config.actionType);
+    const payload = {
+        actionType: normalizedActionType,
+        position: config.position || null,
+        windowAsFolder: normalizedActionType === 'add-current-window' && __normalizeBookmarkAddWindowAsFolder(config.windowAsFolder),
+        updatedAt: Date.now()
+    };
+    try {
+        localStorage.setItem(BOOKMARK_ADD_TEMPLATE_STORAGE_KEY, JSON.stringify(payload));
+    } catch (_) { }
+}
+
+function __queryCurrentWindowTabs(query = {}) {
+    return new Promise((resolve) => {
+        try {
+            if (!chrome || !chrome.tabs || typeof chrome.tabs.query !== 'function') {
+                resolve([]);
+                return;
+            }
+            chrome.tabs.query(query, (tabs) => {
+                resolve(Array.isArray(tabs) ? tabs : []);
+            });
+        } catch (_) {
+            resolve([]);
+        }
+    });
+}
+
+function __isTabUrlAddable(url) {
+    const value = String(url || '').trim();
+    if (!value) return false;
+    if (value.startsWith('chrome://') || value.startsWith('chrome-extension://')) return false;
+    if (value.startsWith('edge://') || value.startsWith('about:') || value.startsWith('devtools://')) return false;
+    return true;
+}
+
+function __resolveTempBookmarkAddTarget(context, preferredPosition = null) {
+    const manager = ensureTempManager();
+    const lang = currentLang || 'zh_CN';
+    const sectionId = context && context.sectionId ? context.sectionId : null;
+    if (!sectionId) {
+        throw new Error(lang === 'zh_CN' ? '未找到临时栏目' : 'Temporary section not found');
+    }
+
+    if (context && context.blankRoot) {
+        return {
+            scope: 'temporary',
+            sectionId,
+            parentId: null,
+            index: null,
+            position: 'inside'
+        };
+    }
+
+    const normalizedPosition = __normalizeBookmarkAddPosition(context, preferredPosition);
+    const entry = context && context.nodeId ? manager.findItem(sectionId, context.nodeId) : null;
+
+    if (context && context.isFolder) {
+        if (normalizedPosition === 'inside' || !entry || !entry.item) {
+            return {
+                scope: 'temporary',
+                sectionId,
+                parentId: context.nodeId,
+                index: null,
+                position: 'inside'
+            };
+        }
+
+        const baseIndex = Number.isFinite(entry.index) ? entry.index : null;
+        return {
+            scope: 'temporary',
+            sectionId,
+            parentId: entry.parent ? (entry.parent.id || null) : null,
+            index: Number.isFinite(baseIndex)
+                ? (normalizedPosition === 'before' ? baseIndex : baseIndex + 1)
+                : null,
+            position: normalizedPosition
+        };
+    }
+
+    if (!entry || !entry.item) {
+        return {
+            scope: 'temporary',
+            sectionId,
+            parentId: null,
+            index: null,
+            position: normalizedPosition
+        };
+    }
+
+    const baseIndex = Number.isFinite(entry.index) ? entry.index : null;
+    return {
+        scope: 'temporary',
+        sectionId,
+        parentId: entry.parent ? (entry.parent.id || null) : null,
+        index: Number.isFinite(baseIndex)
+            ? (normalizedPosition === 'before' ? baseIndex : baseIndex + 1)
+            : null,
+        position: normalizedPosition
+    };
+}
+
+async function __resolveBookmarkAddPermanentRootId(context = null) {
+    const preferredParentId = context && context.preferredParentId ? String(context.preferredParentId).trim() : '';
+    if (preferredParentId && preferredParentId !== '0') {
+        return preferredParentId;
+    }
+
+    if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.getTree !== 'function') {
+        throw new Error((currentLang || 'zh_CN') === 'zh_CN' ? '当前环境不支持书签操作' : 'Bookmark API unavailable');
+    }
+
+    const tree = await chrome.bookmarks.getTree();
+    const root = Array.isArray(tree) ? tree[0] : null;
+    const children = root && Array.isArray(root.children) ? root.children : [];
+
+    const bookmarkBar = children.find((child) => child && (child.id === '1' || child.title === '书签栏' || child.title === 'Bookmarks bar'));
+    const firstWritableFolder = children.find((child) => {
+        if (!child) return false;
+        if (child.url) return false;
+        const id = String(child.id || '').trim();
+        return !!id && id !== '0';
+    });
+
+    const target = bookmarkBar || firstWritableFolder;
+    if (!target || !target.id) {
+        throw new Error((currentLang || 'zh_CN') === 'zh_CN' ? '找不到可添加的根目录' : 'No writable root folder found');
+    }
+
+    return String(target.id);
+}
+
+function __convertBookmarkAddItemsToTempPayload(items) {
+    return (Array.isArray(items) ? items : []).map((item) => {
+        if (!item) return null;
+
+        if (item.type === 'folder' || Array.isArray(item.children)) {
+            return {
+                type: 'folder',
+                title: __resolveBookmarkAddTabGroupFolderTitle(item.title, 1),
+                children: __convertBookmarkAddItemsToTempPayload(item.children || [])
+            };
+        }
+
+        if (!__isTabUrlAddable(item.url)) return null;
+        return {
+            type: 'bookmark',
+            title: String(item.title || item.url || '').trim() || String(item.url || ''),
+            url: String(item.url || '').trim()
+        };
+    }).filter(Boolean);
+}
+
+function __insertBookmarkAddItemsToTemp(target, items) {
+    const manager = ensureTempManager();
+    const lang = currentLang || 'zh_CN';
+    const sectionId = target && target.sectionId ? target.sectionId : null;
+    if (!sectionId) {
+        throw new Error(lang === 'zh_CN' ? '未找到临时栏目' : 'Temporary section not found');
+    }
+
+    const payload = __convertBookmarkAddItemsToTempPayload(items);
+    if (!payload.length) return 0;
+
+    const index = Number.isFinite(target && target.index) ? target.index : null;
+    manager.insertFromPayload(sectionId, target && target.parentId ? target.parentId : null, payload, index);
+    return __collectBookmarkAddLeafTabs(payload).length;
+}
+
+async function __createTempBookmarkViaModal(target) {
+    const lang = currentLang || 'zh_CN';
+    const result = await showBookmarkEditorModal({
+        modalTitle: lang === 'zh_CN' ? '添加书签' : 'Add Bookmark',
+        titleLabel: lang === 'zh_CN' ? '书签名称' : 'Bookmark Name',
+        urlLabel: lang === 'zh_CN' ? '书签地址' : 'Bookmark URL',
+        saveText: lang === 'zh_CN' ? '添加' : 'Add',
+        cancelText: lang === 'zh_CN' ? '取消' : 'Cancel',
+        titlePlaceholder: lang === 'zh_CN' ? '输入书签名称...' : 'Enter bookmark name...',
+        urlPlaceholder: 'https://...',
+        titleValue: '',
+        urlValue: 'https://',
+        showUrl: true,
+        requireUrl: true,
+        requireTitle: true
+    });
+
+    if (!result) return false;
+
+    const createdCount = __insertBookmarkAddItemsToTemp(target, [{
+        type: 'bookmark',
+        title: result.title,
+        url: result.url
+    }]);
+    return createdCount > 0;
+}
+
+async function __createTempFolderViaModal(target) {
+    const lang = currentLang || 'zh_CN';
+    const result = await showBookmarkEditorModal({
+        modalTitle: lang === 'zh_CN' ? '添加文件夹' : 'Add Folder',
+        titleLabel: lang === 'zh_CN' ? '文件夹名称' : 'Folder Name',
+        saveText: lang === 'zh_CN' ? '添加' : 'Add',
+        cancelText: lang === 'zh_CN' ? '取消' : 'Cancel',
+        titlePlaceholder: lang === 'zh_CN' ? '输入文件夹名称...' : 'Enter folder name...',
+        titleValue: '',
+        urlValue: '',
+        showUrl: false,
+        requireTitle: true
+    });
+
+    if (!result) return false;
+
+    const createdCount = __insertBookmarkAddItemsToTemp(target, [{
+        type: 'folder',
+        title: result.title,
+        children: []
+    }]);
+    return createdCount > 0;
+}
+
+async function __resolveBookmarkAddTarget(context, preferredPosition = null) {
+    const isBlankRoot = !!(context && context.blankRoot);
+    if (!context || (!context.nodeId && !isBlankRoot)) {
+        throw new Error((currentLang || 'zh_CN') === 'zh_CN' ? '缺少目标节点' : 'Missing target node');
+    }
+
+    if (context && context.treeType === 'temporary') {
+        return __resolveTempBookmarkAddTarget(context, preferredPosition);
+    }
+
+    if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.get !== 'function') {
+        throw new Error((currentLang || 'zh_CN') === 'zh_CN' ? '当前环境不支持书签操作' : 'Bookmark API unavailable');
+    }
+
+    if (isBlankRoot) {
+        const parentId = await __resolveBookmarkAddPermanentRootId(context);
+        return { parentId, index: null, position: 'inside' };
+    }
+
+    const nodes = await chrome.bookmarks.get(context.nodeId);
+    const node = Array.isArray(nodes) ? nodes[0] : null;
+    if (!node) {
+        throw new Error((currentLang || 'zh_CN') === 'zh_CN' ? '目标节点不存在' : 'Target node not found');
+    }
+
+    const normalizedPosition = __normalizeBookmarkAddPosition(context, preferredPosition);
+
+    if (context.isFolder) {
+        if (normalizedPosition === 'inside') {
+            return { parentId: node.id, index: null, position: normalizedPosition };
+        }
+        if (!node.parentId) {
+            return { parentId: node.id, index: null, position: 'inside' };
+        }
+        const baseIndex = Number.isFinite(node.index) ? node.index : 0;
+        return {
+            parentId: node.parentId,
+            index: normalizedPosition === 'before' ? baseIndex : baseIndex + 1,
+            position: normalizedPosition
+        };
+    }
+
+    if (!node.parentId) {
+        throw new Error((currentLang || 'zh_CN') === 'zh_CN' ? '无法找到父文件夹' : 'Cannot resolve parent folder');
+    }
+
+    const baseIndex = Number.isFinite(node.index) ? node.index : 0;
+    return {
+        parentId: node.parentId,
+        index: normalizedPosition === 'before' ? baseIndex : baseIndex + 1,
+        position: normalizedPosition
+    };
+}
+
+async function __addTabsToBookmarkTree(target, tabs) {
+    if (!target || !target.parentId) return 0;
+    if (!Array.isArray(tabs) || !tabs.length) return 0;
+
+    let insertIndex = Number.isFinite(target.index) ? target.index : null;
+    let createdCount = 0;
+
+    for (const tab of tabs) {
+        if (!tab || !__isTabUrlAddable(tab.url)) continue;
+        const createPayload = {
+            parentId: target.parentId,
+            title: String(tab.title || tab.url || '').trim() || String(tab.url || ''),
+            url: String(tab.url || '').trim()
+        };
+        if (!createPayload.url) continue;
+        if (Number.isFinite(insertIndex)) {
+            createPayload.index = insertIndex;
+            insertIndex += 1;
+        }
+        await chrome.bookmarks.create(createPayload);
+        createdCount += 1;
+    }
+
+    return createdCount;
+}
+
+function __collectBookmarkAddLeafTabs(items, output = []) {
+    const result = Array.isArray(output) ? output : [];
+    (Array.isArray(items) ? items : []).forEach((item) => {
+        if (!item) return;
+        if (item.type === 'folder' || Array.isArray(item.children)) {
+            __collectBookmarkAddLeafTabs(item.children || [], result);
+            return;
+        }
+        if (!__isTabUrlAddable(item.url)) return;
+        result.push({
+            title: String(item.title || item.url || '').trim() || String(item.url || ''),
+            url: String(item.url || '').trim()
+        });
+    });
+    return result;
+}
+
+function __resolveBookmarkAddTabGroupFolderTitle(groupTitle, order) {
+    const normalized = String(groupTitle || '').trim();
+    if (normalized) return normalized;
+    const lang = currentLang || 'zh_CN';
+    const index = Number.isFinite(order) ? order : 1;
+    return lang === 'zh_CN' ? `标签组 ${index}` : `Tab Group ${index}`;
+}
+
+async function __queryBookmarkAddTabGroupTitleMap(groupIds) {
+    const map = new Map();
+    const ids = Array.from(new Set((Array.isArray(groupIds) ? groupIds : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isInteger(id) && id >= 0)));
+
+    if (!ids.length) return map;
+    if (!chrome || !chrome.tabGroups || typeof chrome.tabGroups.get !== 'function') {
+        return map;
+    }
+
+    await Promise.all(ids.map((groupId) => new Promise((resolve) => {
+        try {
+            chrome.tabGroups.get(groupId, (group) => {
+                try {
+                    if (!chrome.runtime || !chrome.runtime.lastError) {
+                        const title = group && typeof group.title === 'string' ? group.title.trim() : '';
+                        if (title) map.set(groupId, title);
+                    }
+                } catch (_) { }
+                resolve();
+            });
+        } catch (_) {
+            resolve();
+        }
+    })));
+
+    return map;
+}
+
+async function __buildBookmarkAddItemsFromTabs(tabs, options = {}) {
+    const sourceTabs = Array.isArray(tabs) ? tabs : [];
+    const groupByTabGroup = !!(options && options.groupByTabGroup);
+    if (!sourceTabs.length) return [];
+
+    if (!groupByTabGroup) {
+        return sourceTabs
+            .filter((tab) => tab && __isTabUrlAddable(tab.url))
+            .map((tab) => ({
+                type: 'bookmark',
+                title: String(tab.title || tab.url || '').trim() || String(tab.url || ''),
+                url: String(tab.url || '').trim()
+            }));
+    }
+
+    const groupIds = sourceTabs
+        .map((tab) => (tab && Number.isInteger(tab.groupId) && tab.groupId >= 0 ? tab.groupId : -1))
+        .filter((groupId) => groupId >= 0);
+    const groupTitleMap = await __queryBookmarkAddTabGroupTitleMap(groupIds);
+
+    const items = [];
+    const groupedFolderMap = new Map();
+    let unnamedGroupOrder = 0;
+
+    sourceTabs.forEach((tab) => {
+        if (!tab || !__isTabUrlAddable(tab.url)) return;
+
+        const bookmarkItem = {
+            type: 'bookmark',
+            title: String(tab.title || tab.url || '').trim() || String(tab.url || ''),
+            url: String(tab.url || '').trim()
+        };
+
+        const groupId = (Number.isInteger(tab.groupId) && tab.groupId >= 0) ? tab.groupId : -1;
+        if (groupId < 0) {
+            items.push(bookmarkItem);
+            return;
+        }
+
+        let groupFolder = groupedFolderMap.get(groupId);
+        if (!groupFolder) {
+            unnamedGroupOrder += 1;
+            groupFolder = {
+                type: 'folder',
+                title: __resolveBookmarkAddTabGroupFolderTitle(groupTitleMap.get(groupId), unnamedGroupOrder),
+                children: []
+            };
+            groupedFolderMap.set(groupId, groupFolder);
+            items.push(groupFolder);
+        }
+
+        groupFolder.children.push(bookmarkItem);
+    });
+
+    return items;
+}
+
+async function __addBookmarkAddItemsToTree(target, items) {
+    if (!target || !target.parentId) return 0;
+    const sourceItems = Array.isArray(items) ? items : [];
+    if (!sourceItems.length) return 0;
+
+    let insertIndex = Number.isFinite(target.index) ? target.index : null;
+    let createdCount = 0;
+
+    for (const item of sourceItems) {
+        if (!item) continue;
+
+        if (item.type === 'folder' || Array.isArray(item.children)) {
+            const folderPayload = {
+                parentId: target.parentId,
+                title: __resolveBookmarkAddTabGroupFolderTitle(item.title, 1)
+            };
+            if (Number.isFinite(insertIndex)) {
+                folderPayload.index = insertIndex;
+                insertIndex += 1;
+            }
+
+            let folderNode = null;
+            try {
+                folderNode = await chrome.bookmarks.create(folderPayload);
+            } catch (folderError) {
+                console.warn('[右键菜单] 创建分组文件夹失败，回退直插:', folderError);
+            }
+
+            if (folderNode && folderNode.id) {
+                createdCount += await __addBookmarkAddItemsToTree({
+                    parentId: folderNode.id,
+                    index: null,
+                    position: target.position
+                }, item.children || []);
+            } else {
+                const fallbackTabs = __collectBookmarkAddLeafTabs(item.children || []);
+                const fallbackTarget = {
+                    parentId: target.parentId,
+                    index: insertIndex,
+                    position: target.position
+                };
+                const fallbackCreated = await __addTabsToBookmarkTree(fallbackTarget, fallbackTabs);
+                createdCount += fallbackCreated;
+                if (Number.isFinite(insertIndex)) {
+                    insertIndex += fallbackCreated;
+                }
+            }
+
+            continue;
+        }
+
+        if (!__isTabUrlAddable(item.url)) continue;
+        const createPayload = {
+            parentId: target.parentId,
+            title: String(item.title || item.url || '').trim() || String(item.url || ''),
+            url: String(item.url || '').trim()
+        };
+        if (!createPayload.url) continue;
+
+        if (Number.isFinite(insertIndex)) {
+            createPayload.index = insertIndex;
+            insertIndex += 1;
+        }
+
+        await chrome.bookmarks.create(createPayload);
+        createdCount += 1;
+    }
+
+    return createdCount;
+}
+
+function __buildBookmarkAddSecondaryModal() {
+    const existing = document.getElementById('bookmarkAddSecondaryModal');
+    if (existing) return existing;
+
+    const modal = document.createElement('div');
+    modal.id = 'bookmarkAddSecondaryModal';
+    modal.className = 'modal content-center bookmark-add-secondary-modal';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header compact">
+                <div class="bookmark-add-secondary-title-row">
+                    <h3 id="bookmarkAddSecondaryTitle"></h3>
+                    <button class="bookmark-add-secondary-help-btn" id="bookmarkAddSecondaryHelpBtn" type="button" aria-label="">
+                        <i class="fas fa-question-circle"></i>
+                        <span class="bookmark-add-secondary-help-tooltip" id="bookmarkAddSecondaryHelpTooltip"></span>
+                    </button>
+                </div>
+                <button class="modal-close" id="bookmarkAddSecondaryClose" type="button">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="bookmark-add-secondary-form">
+                    <div class="bookmark-add-secondary-field">
+                        <label id="bookmarkAddSecondaryActionLabel"></label>
+                        <div class="bookmark-add-secondary-grid" id="bookmarkAddSecondaryActionOptions"></div>
+                    </div>
+                    <div class="bookmark-add-secondary-field">
+                        <label id="bookmarkAddSecondaryPositionLabel"></label>
+                        <div class="bookmark-add-secondary-options" id="bookmarkAddSecondaryPositionOptions"></div>
+                    </div>
+                </div>
+                <div class="bookmark-add-secondary-actions">
+                    <button id="bookmarkAddSecondaryCancel" class="modal-btn" type="button"></button>
+                    <button id="bookmarkAddSecondaryConfirm" class="modal-btn primary" type="button"></button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    return modal;
+}
+
+function __renderBookmarkAddActionOptions(container, lang, actionType, windowAsFolder = false) {
+    if (!container) return;
+
+    const options = [
+        {
+            value: 'add-page',
+            label: lang === 'zh_CN' ? '添加网页' : 'Add Page',
+            icon: 'plus-circle'
+        },
+        {
+            value: 'add-folder',
+            label: lang === 'zh_CN' ? '添加文件夹' : 'Add Folder',
+            icon: 'folder-plus'
+        }
+    ];
+
+    if (__isSidePanelModeForAdd()) {
+        options.push({
+            value: 'add-current-tab',
+            label: lang === 'zh_CN' ? '添加当前页' : 'Add Current Page',
+            icon: 'file'
+        });
+    }
+
+    options.push({
+        value: 'add-current-window',
+        label: lang === 'zh_CN' ? '添加当前窗口所有标签页' : 'Add All Current Window Tabs',
+        icon: 'window-maximize'
+    });
+
+    const selected = __normalizeBookmarkAddActionType(actionType);
+    const checkedWindowAsFolder = __normalizeBookmarkAddWindowAsFolder(windowAsFolder);
+
+    container.innerHTML = options.map((option) => {
+        const isWindowOption = option.value === 'add-current-window';
+        if (!isWindowOption) {
+            return `
+        <label class="bookmark-add-secondary-choice">
+            <input type="radio" name="bookmarkAddActionType" value="${option.value}" ${option.value === selected ? 'checked' : ''}>
+            <span class="bookmark-add-secondary-choice-label"><i class="fas fa-${option.icon}"></i>${option.label}</span>
+        </label>
+    `;
+        }
+
+        const folderLabel = lang === 'zh_CN' ? '文件夹' : 'Folder';
+        return `
+        <label class="bookmark-add-secondary-choice bookmark-add-secondary-choice-window">
+            <input type="radio" name="bookmarkAddActionType" value="${option.value}" ${option.value === selected ? 'checked' : ''}>
+            <span class="bookmark-add-secondary-choice-label">
+                <span class="bookmark-add-secondary-choice-main"><i class="fas fa-${option.icon}"></i><span>${option.label}</span></span>
+                <span class="bookmark-add-secondary-window-option">
+                    <input type="checkbox" id="bookmarkAddSecondaryWindowAsFolderInline" ${checkedWindowAsFolder ? 'checked' : ''}>
+                    <span>${folderLabel}</span>
+                </span>
+            </span>
+        </label>
+    `;
+    }).join('');
+}
+
+function __renderBookmarkAddPositionOptions(container, context, position) {
+    if (!container) return;
+    const options = __getBookmarkAddPositionOptions(context);
+    const selected = __normalizeBookmarkAddPosition(context, position);
+
+    container.innerHTML = options.map((option) => `
+        <label class="bookmark-add-secondary-choice">
+            <input type="radio" name="bookmarkAddPosition" value="${option.value}" ${option.value === selected ? 'checked' : ''}>
+            <span class="bookmark-add-secondary-choice-label">${option.label}</span>
+        </label>
+    `).join('');
+}
+
+function __readCheckedValue(root, selector, fallback = '') {
+    if (!root || !root.querySelector) return fallback;
+    const selected = root.querySelector(selector);
+    if (!selected) return fallback;
+    return String(selected.value || '').trim() || fallback;
+}
+
+function showBookmarkAddSecondaryModal(context, options = {}) {
+    const modal = __buildBookmarkAddSecondaryModal();
+    const lang = currentLang || 'zh_CN';
+
+    const titleEl = modal.querySelector('#bookmarkAddSecondaryTitle');
+    const helpBtn = modal.querySelector('#bookmarkAddSecondaryHelpBtn');
+    const helpTooltip = modal.querySelector('#bookmarkAddSecondaryHelpTooltip');
+    const closeBtn = modal.querySelector('#bookmarkAddSecondaryClose');
+    const actionLabelEl = modal.querySelector('#bookmarkAddSecondaryActionLabel');
+    const actionWrap = modal.querySelector('#bookmarkAddSecondaryActionOptions');
+    const positionLabelEl = modal.querySelector('#bookmarkAddSecondaryPositionLabel');
+    const positionWrap = modal.querySelector('#bookmarkAddSecondaryPositionOptions');
+    const cancelBtn = modal.querySelector('#bookmarkAddSecondaryCancel');
+    const confirmBtn = modal.querySelector('#bookmarkAddSecondaryConfirm');
+
+    let initialActionType = __normalizeBookmarkAddActionType(options.actionType);
+    if (initialActionType === 'add-current-tab' && !__isSidePanelModeForAdd()) {
+        initialActionType = 'add-page';
+    }
+    const initialPosition = __normalizeBookmarkAddPosition(context, options.position);
+    const initialWindowAsFolder = (options && options.windowAsFolder !== undefined && options.windowAsFolder !== null)
+        ? __normalizeBookmarkAddWindowAsFolder(options.windowAsFolder)
+        : true;
+
+    if (titleEl) titleEl.textContent = lang === 'zh_CN' ? '添加' : 'Add';
+    const templateHelpLabel = lang === 'zh_CN' ? '模版说明' : 'Template Help';
+    const templateHelpText = lang === 'zh_CN'
+        ? '模版会记住你在这里最后一次确认的“添加内容 + 位置”。点击右键菜单里的「模版」会直接按该组合执行（后改覆盖前改）。'
+        : 'Template remembers the latest confirmed "content + position" here. Clicking "Template" in the context menu runs that combination directly (last change wins).';
+    if (helpBtn) {
+        helpBtn.setAttribute('aria-label', templateHelpLabel);
+        helpBtn.title = templateHelpLabel;
+    }
+    if (helpTooltip) helpTooltip.textContent = templateHelpText;
+    if (actionLabelEl) actionLabelEl.textContent = lang === 'zh_CN' ? '添加内容' : 'Add Content';
+    if (positionLabelEl) positionLabelEl.textContent = lang === 'zh_CN' ? '位置' : 'Position';
+    if (cancelBtn) cancelBtn.textContent = lang === 'zh_CN' ? '取消' : 'Cancel';
+    if (confirmBtn) confirmBtn.textContent = lang === 'zh_CN' ? '确定' : 'Confirm';
+
+    __renderBookmarkAddActionOptions(actionWrap, lang, initialActionType, initialWindowAsFolder);
+    __renderBookmarkAddPositionOptions(positionWrap, context, initialPosition);
+
+    const inlineWindowFolderInput = modal.querySelector('#bookmarkAddSecondaryWindowAsFolderInline');
+    if (inlineWindowFolderInput) {
+        inlineWindowFolderInput.addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
+    }
+
+    modal.classList.add('show');
+
+    return new Promise((resolve) => {
+        let settled = false;
+
+        const closeModal = (result = null) => {
+            if (settled) return;
+            settled = true;
+            try {
+                modal.classList.remove('show');
+            } catch (_) { }
+            if (closeBtn) closeBtn.removeEventListener('click', onCancel);
+            if (cancelBtn) cancelBtn.removeEventListener('click', onCancel);
+            if (confirmBtn) confirmBtn.removeEventListener('click', onConfirm);
+            modal.removeEventListener('click', onBackdropClick);
+            document.removeEventListener('keydown', onKeydown, true);
+            resolve(result);
+        };
+
+        const onCancel = () => closeModal(null);
+        const onConfirm = () => {
+            const actionType = __readCheckedValue(modal, 'input[name="bookmarkAddActionType"]:checked', initialActionType);
+            const normalizedActionType = __normalizeBookmarkAddActionType(actionType);
+            const position = __readCheckedValue(modal, 'input[name="bookmarkAddPosition"]:checked', initialPosition);
+            const inlineWindowFolderInput = modal.querySelector('#bookmarkAddSecondaryWindowAsFolderInline');
+            const windowAsFolder = normalizedActionType === 'add-current-window' && !!(inlineWindowFolderInput && inlineWindowFolderInput.checked);
+            closeModal({
+                actionType: normalizedActionType,
+                position: __normalizeBookmarkAddPosition(context, position),
+                windowAsFolder
+            });
+        };
+        const onBackdropClick = (event) => {
+            if (event.target === modal) {
+                closeModal(null);
+            }
+        };
+        const onKeydown = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeModal(null);
+                return;
+            }
+            if (event.key === 'Enter') {
+                const target = event.target;
+                if (target && target.closest && target.closest('.bookmark-add-secondary-choice')) {
+                    event.preventDefault();
+                    onConfirm();
+                }
+            }
+        };
+
+        if (closeBtn) closeBtn.addEventListener('click', onCancel);
+        if (cancelBtn) cancelBtn.addEventListener('click', onCancel);
+        if (confirmBtn) confirmBtn.addEventListener('click', onConfirm);
+        modal.addEventListener('click', onBackdropClick);
+        document.addEventListener('keydown', onKeydown, true);
+    });
+}
+
+async function executeBookmarkAddAction(context, config, options = {}) {
+    const lang = currentLang || 'zh_CN';
+    const actionType = __normalizeBookmarkAddActionType(config && config.actionType);
+    const preferredPosition = __normalizeBookmarkAddPosition(context, config && config.position);
+    const windowAsFolder = actionType === 'add-current-window' && __normalizeBookmarkAddWindowAsFolder(config && config.windowAsFolder);
+    const saveTemplate = options && options.saveTemplate !== false;
+
+    const target = await __resolveBookmarkAddTarget(context, preferredPosition);
+    const isTemporaryTarget = !!(target && target.scope === 'temporary');
+    let success = false;
+
+    if (actionType === 'add-page') {
+        if (isTemporaryTarget) {
+            success = await __createTempBookmarkViaModal(target);
+        } else {
+            const created = await addBookmark(target.parentId, { index: target.index });
+            success = !!created;
+        }
+    } else if (actionType === 'add-folder') {
+        if (isTemporaryTarget) {
+            success = await __createTempFolderViaModal(target);
+        } else {
+            const created = await addFolder(target.parentId, { index: target.index });
+            success = !!created;
+        }
+    } else {
+        const tabs = await __queryCurrentWindowTabs(actionType === 'add-current-tab'
+            ? { currentWindow: true, active: true }
+            : { currentWindow: true });
+
+        const addableTabs = tabs.filter((tab) => tab && __isTabUrlAddable(tab.url));
+        if (!addableTabs.length) {
+            const message = lang === 'zh_CN' ? '没有可添加的页面。' : 'No valid pages to add.';
+            try { alert(message); } catch (_) { }
+            return false;
+        }
+
+        const shouldGroupByTabGroup = actionType === 'add-current-window';
+        const addItems = await __buildBookmarkAddItemsFromTabs(addableTabs, {
+            groupByTabGroup: shouldGroupByTabGroup
+        });
+
+        let createdCount = 0;
+        let usedFolderMode = false;
+
+        if (isTemporaryTarget) {
+            let itemsForTarget = addItems;
+            if (actionType === 'add-current-window' && windowAsFolder) {
+                itemsForTarget = [{
+                    type: 'folder',
+                    title: __formatBookmarkAddWindowFolderTitle(),
+                    children: addItems
+                }];
+                usedFolderMode = true;
+            }
+            createdCount = __insertBookmarkAddItemsToTemp(target, itemsForTarget);
+        } else if (actionType === 'add-current-window' && windowAsFolder) {
+            const folderPayload = {
+                parentId: target.parentId,
+                title: __formatBookmarkAddWindowFolderTitle()
+            };
+            if (Number.isFinite(target.index)) {
+                folderPayload.index = target.index;
+            }
+
+            let folderNode = null;
+            try {
+                folderNode = await chrome.bookmarks.create(folderPayload);
+            } catch (folderError) {
+                console.warn('[右键菜单] 创建窗口文件夹失败，回退直插:', folderError);
+            }
+
+            if (folderNode && folderNode.id) {
+                createdCount = await __addBookmarkAddItemsToTree({
+                    parentId: folderNode.id,
+                    index: null,
+                    position: target.position
+                }, addItems);
+                usedFolderMode = true;
+            } else {
+                createdCount = await __addBookmarkAddItemsToTree(target, addItems);
+            }
+        } else {
+            createdCount = await __addBookmarkAddItemsToTree(target, addItems);
+        }
+
+        success = createdCount > 0;
+
+        if (success && typeof showToast === 'function') {
+            const text = actionType === 'add-current-tab'
+                ? (lang === 'zh_CN' ? '已添加当前页。' : 'Current page added.')
+                : (usedFolderMode
+                    ? (lang === 'zh_CN' ? `已将当前窗口所有标签页添加到文件夹（${createdCount} 项）。` : `Current window tabs added to folder (${createdCount}).`)
+                    : (lang === 'zh_CN' ? `已添加当前窗口所有标签页（${createdCount} 项）。` : `Current window tabs added (${createdCount}).`));
+            try { showToast(text); } catch (_) { }
+        }
+    }
+
+    if (success && saveTemplate) {
+        __writeBookmarkAddTemplate({
+            actionType,
+            position: target.position,
+            windowAsFolder
+        });
+    }
+
+    return success;
+}
+
+async function openBookmarkAddMenuAction(context) {
+    const lang = currentLang || 'zh_CN';
+    const remembered = __readBookmarkAddTemplate();
+    let initialActionType = remembered && remembered.actionType
+        ? __normalizeBookmarkAddActionType(remembered.actionType)
+        : 'add-page';
+    if (initialActionType === 'add-current-tab' && !__isSidePanelModeForAdd()) {
+        initialActionType = 'add-page';
+    }
+
+    const initialPosition = __normalizeBookmarkAddPosition(
+        context,
+        remembered && remembered.position ? remembered.position : null
+    );
+
+    const selected = await showBookmarkAddSecondaryModal(context, {
+        actionType: initialActionType,
+        position: initialPosition,
+        windowAsFolder: remembered ? remembered.windowAsFolder : undefined
+    });
+
+    if (!selected) return false;
+
+    const normalizedSelection = {
+        actionType: __normalizeBookmarkAddActionType(selected.actionType),
+        position: __normalizeBookmarkAddPosition(context, selected.position),
+        windowAsFolder: __normalizeBookmarkAddActionType(selected.actionType) === 'add-current-window'
+            && __normalizeBookmarkAddWindowAsFolder(selected.windowAsFolder)
+    };
+
+    __writeBookmarkAddTemplate(normalizedSelection);
+
+    try {
+        return await executeBookmarkAddAction(context, normalizedSelection, { saveTemplate: false });
+    } catch (error) {
+        console.error('[右键菜单] 添加操作失败:', error);
+        alert(lang === 'zh_CN' ? `添加失败: ${error.message}` : `Add failed: ${error.message}`);
+        return false;
+    }
+}
+
+async function openBookmarkAddByTemplateAction(context) {
+    const lang = currentLang || 'zh_CN';
+    const template = __readBookmarkAddTemplate();
+
+    if (!template) {
+        return await openBookmarkAddMenuAction(context);
+    }
+
+    try {
+        return await executeBookmarkAddAction(context, {
+            actionType: template.actionType,
+            position: __normalizeBookmarkAddPosition(context, template.position),
+            windowAsFolder: __normalizeBookmarkAddWindowAsFolder(template.windowAsFolder)
+        }, { saveTemplate: false });
+    } catch (error) {
+        console.error('[右键菜单] 模版添加失败，回退二级菜单:', error);
+        const fallback = await openBookmarkAddMenuAction(context);
+        if (!fallback) {
+            alert(lang === 'zh_CN' ? `添加失败: ${error.message}` : `Add failed: ${error.message}`);
+        }
+        return fallback;
+    }
+}
+
 // 处理菜单操作
 async function handleMenuAction(action, context) {
     if (!context) return;
@@ -3827,13 +4857,21 @@ async function handleMenuAction(action, context) {
                 await editBookmark(nodeId, nodeTitle, nodeUrl, isFolder);
                 break;
 
-            case 'add-page':
-                await addBookmark(nodeId);
+            case 'add-entry':
+                await openBookmarkAddMenuAction(context);
                 break;
 
-            case 'add-folder':
-                await addFolder(nodeId);
+            case 'add-page': {
+                const target = await __resolveBookmarkAddTarget(context, __normalizeBookmarkAddPosition(context, context && context.isFolder ? 'inside' : 'after'));
+                await addBookmark(target.parentId, { index: target.index });
                 break;
+            }
+
+            case 'add-folder': {
+                const target = await __resolveBookmarkAddTarget(context, __normalizeBookmarkAddPosition(context, context && context.isFolder ? 'inside' : 'after'));
+                await addFolder(target.parentId, { index: target.index });
+                break;
+            }
 
             case 'cut':
                 await cutBookmark(nodeId, nodeTitle, isFolder);
@@ -4590,7 +5628,7 @@ async function editBookmark(nodeId, currentTitle, currentUrl, isFolder) {
 }
 
 // 添加书签 - 使用自定义模态框
-async function addBookmark(parentId) {
+async function addBookmark(parentId, options = {}) {
     const lang = currentLang || 'zh_CN';
 
     const result = await showBookmarkEditorModal({
@@ -4608,24 +5646,31 @@ async function addBookmark(parentId) {
         requireTitle: true
     });
 
-    if (!result) return;
+    if (!result) return null;
 
     try {
         if (chrome && chrome.bookmarks) {
-            await chrome.bookmarks.create({
-                parentId: parentId,
+            const payload = {
+                parentId,
                 title: result.title,
                 url: result.url
-            });
+            };
+            const index = Number(options && options.index);
+            if (Number.isFinite(index)) {
+                payload.index = Math.max(0, Math.floor(index));
+            }
+            return await chrome.bookmarks.create(payload);
         }
     } catch (error) {
         console.error('[添加书签] 失败:', error);
         alert(lang === 'zh_CN' ? `添加失败: ${error.message}` : `Add failed: ${error.message}`);
     }
+
+    return null;
 }
 
 // 添加文件夹 - 使用自定义模态框
-async function addFolder(parentId) {
+async function addFolder(parentId, options = {}) {
     const lang = currentLang || 'zh_CN';
 
     const result = await showBookmarkEditorModal({
@@ -4640,19 +5685,26 @@ async function addFolder(parentId) {
         requireTitle: true
     });
 
-    if (!result) return;
+    if (!result) return null;
 
     try {
         if (chrome && chrome.bookmarks) {
-            await chrome.bookmarks.create({
-                parentId: parentId,
+            const payload = {
+                parentId,
                 title: result.title
-            });
+            };
+            const index = Number(options && options.index);
+            if (Number.isFinite(index)) {
+                payload.index = Math.max(0, Math.floor(index));
+            }
+            return await chrome.bookmarks.create(payload);
         }
     } catch (error) {
         console.error('[添加文件夹] 失败:', error);
         alert(lang === 'zh_CN' ? `添加失败: ${error.message}` : `Add failed: ${error.message}`);
     }
+
+    return null;
 }
 
 // 复制URL
@@ -8498,12 +9550,41 @@ function restoreContextMenuLayout() {
 }
 
 // 显示空白区域右键菜单
+function __resolvePermanentBlankAddParentIdFromEvent(event) {
+    try {
+        const target = event && event.target ? event.target : null;
+        const section = target && target.closest ? target.closest('.permanent-bookmark-section') : null;
+        const scope = section || document.getElementById('permanentSection') || document.querySelector('.permanent-bookmark-section');
+        const tree = scope ? scope.querySelector('.bookmark-tree') : (document.getElementById('bookmarkTree') || document.querySelector('.bookmark-tree[data-tree-type="permanent"]'));
+        if (!tree) return null;
+
+        const level1Folder = tree.querySelector('.tree-item[data-node-type="folder"][data-node-level="1"][data-node-id]');
+        const level1Id = level1Folder && level1Folder.dataset ? String(level1Folder.dataset.nodeId || '').trim() : '';
+        if (level1Id && level1Id !== '0') return level1Id;
+
+        const level0Folder = tree.querySelector('.tree-item[data-node-type="folder"][data-node-level="0"][data-node-id]');
+        const level0Id = level0Folder && level0Folder.dataset ? String(level0Folder.dataset.nodeId || '').trim() : '';
+        if (level0Id && level0Id !== '0') return level0Id;
+    } catch (_) { }
+    return null;
+}
+
 function showBlankAreaContextMenu(e, sectionId, treeType) {
     e.preventDefault();
     e.stopPropagation();
 
     const lang = currentLang || 'zh_CN';
     const menuItems = [];
+    const preferredPermanentParentId = treeType === 'permanent' ? __resolvePermanentBlankAddParentIdFromEvent(e) : null;
+
+    menuItems.push({
+        action: 'add-entry-blank',
+        label: lang === 'zh_CN' ? '添加' : 'Add',
+        icon: 'plus-circle',
+        sectionId,
+        treeType,
+        preferredParentId: preferredPermanentParentId
+    });
 
     // 粘贴选项（如果剪贴板有内容）
     if (hasClipboard()) {
@@ -8516,27 +9597,8 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
         });
     }
 
-    // 新建文件夹选项
-    if (treeType === 'temporary') {
-        menuItems.push({
-            action: 'create-folder-blank',
-            label: lang === 'zh_CN' ? '新建文件夹' : 'New Folder',
-            icon: 'folder-plus',
-            sectionId
-        });
-        menuItems.push({
-            action: 'create-bookmark-blank',
-            label: lang === 'zh_CN' ? '新建书签' : 'New Bookmark',
-            icon: 'bookmark',
-            sectionId
-        });
-    } else if (treeType === 'permanent') {
-        // 永久栏目暂不支持在空白处创建，因为需要 parentId
-        // 用户可以右键文件夹来创建
-    }
-
     if (menuItems.length === 0) {
-        return; // 没有可用的菜单项
+        return;
     }
 
     // 渲染菜单
@@ -8546,7 +9608,7 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
     const menuHTML = menuItems.map(item => {
         const icon = item.icon ? `<i class="fas fa-${item.icon}"></i>` : '';
         return `
-            <div class="context-menu-item" data-action="${item.action}" data-section-id="${item.sectionId || ''}" data-tree-type="${item.treeType || ''}">
+            <div class="context-menu-item" data-action="${item.action}" data-section-id="${item.sectionId || ''}" data-tree-type="${item.treeType || ''}" data-parent-id="${item.preferredParentId || ''}">
                 ${icon}
                 <span>${item.label}</span>
             </div>
@@ -8562,34 +9624,29 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
             const action = item.dataset.action;
             const sid = item.dataset.sectionId;
             const ttype = item.dataset.treeType;
+            const preferredParentId = item.dataset.parentId;
 
             hideContextMenu();
 
-            if (action === 'paste-blank') {
+            if (action === 'add-entry-blank') {
+                const addContext = {
+                    treeType: ttype === 'temporary' ? 'temporary' : 'permanent',
+                    sectionId: ttype === 'temporary' ? sid : null,
+                    nodeId: null,
+                    isFolder: true,
+                    blankRoot: true,
+                    preferredParentId: ttype === 'permanent' && preferredParentId ? preferredParentId : null
+                };
+                await openBookmarkAddMenuAction(addContext);
+            } else if (action === 'paste-blank') {
                 if (ttype === 'temporary' && sid) {
                     await pasteIntoTemp({ sectionId: sid, parentId: null, index: null });
                 } else if (ttype === 'permanent') {
                     // 粘贴到书签栏根目录
                     if (chrome && chrome.bookmarks) {
-                        const tree = await chrome.bookmarks.getTree();
-                        const bookmarkBar = tree[0].children.find(child => child.title === '书签栏' || child.id === '1');
-                        if (bookmarkBar) {
-                            await pasteBookmark(bookmarkBar.id, true); // true 表示是文件夹
-                        }
+                        const parentId = await __resolveBookmarkAddPermanentRootId({ preferredParentId });
+                        await pasteBookmark(parentId, true);
                     }
-                }
-            } else if (action === 'create-folder-blank' && sid) {
-                const manager = ensureTempManager();
-                const title = prompt(lang === 'zh_CN' ? '文件夹名称:' : 'Folder name:');
-                if (title) {
-                    manager.createFolder(sid, null, title.trim());
-                }
-            } else if (action === 'create-bookmark-blank' && sid) {
-                const manager = ensureTempManager();
-                const title = prompt(lang === 'zh_CN' ? '书签名称:' : 'Bookmark name:');
-                const url = prompt(lang === 'zh_CN' ? '书签链接:' : 'Bookmark URL:', 'https://');
-                if (title && url) {
-                    manager.createBookmark(sid, null, title.trim(), url.trim());
                 }
             }
         });
