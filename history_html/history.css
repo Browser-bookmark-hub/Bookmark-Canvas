@@ -8794,6 +8794,57 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     border-color: var(--accent-primary);
 }
 
+#canvasExportModeDialog .canvas-export-current-target {
+    margin: 0 0 12px;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#canvasExportModeDialog .canvas-export-option-text {
+    text-align: left;
+    flex: 1;
+}
+
+#canvasExportModeDialog .canvas-export-option-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+#canvasExportModeDialog .canvas-export-option-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+#canvasExportModeDialog .canvas-export-option-subhint {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 1px;
+    opacity: 0.8;
+}
+
+#canvasExportModeDialog .canvas-export-primary-option {
+    border-width: 1px;
+}
+
+html[data-theme='light'] #canvasExportModeDialog .canvas-export-primary-option {
+    border-color: rgba(124, 58, 237, 0.28);
+    background: rgba(124, 58, 237, 0.05);
+}
+
+html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
+    border-color: rgba(167, 139, 250, 0.45);
+    background: rgba(124, 58, 237, 0.16);
+}
+
 .import-option-btn svg,
 .import-option-btn i {
     flex-shrink: 0;
@@ -9471,6 +9522,23 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
 body.canvas-node-maximized-active #titleLastFullscreenBtn,
 body.canvas-node-maximized-active #sideLastFullscreenBtn {
     display: none !important;
+}
+
+/* Fullscreen settings menu: keep only export */
+body.canvas-node-maximized-active #settingsStorageSyncBlock #importCanvasOtherBtn,
+body.canvas-node-maximized-active #settingsStorageSyncBlock #canvasOtherClearDropdown {
+    display: none !important;
+}
+
+body.canvas-node-maximized-active #settingsStorageSyncBlock .settings-storage-split {
+    display: block;
+}
+
+body.canvas-node-maximized-active #settingsStorageSyncBlock #exportCanvasOtherBtn {
+    display: flex;
+    width: 100%;
+    border-left: none !important;
+    border-radius: 8px !important;
 }
 
 /* Fullscreen node isolation: keep only current maximized node visible */

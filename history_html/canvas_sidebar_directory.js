@@ -83,6 +83,22 @@
     return lines[0];
   }
 
+  function getMdNodeFirstLineFromDom(nodeId) {
+    const normalizedId = normalizeText(nodeId);
+    if (!normalizedId) return '';
+
+    const nodeEl = document.getElementById(normalizedId);
+    if (!nodeEl) return '';
+
+    try {
+      const liveTextEl = nodeEl.querySelector('.md-canvas-editor, .md-canvas-text');
+      if (!liveTextEl) return '';
+      return getFirstLineText(liveTextEl.innerText || liveTextEl.textContent || '');
+    } catch (_) {
+      return '';
+    }
+  }
+
   function parseJSON(raw, fallback) {
     try {
       return JSON.parse(raw);
@@ -594,8 +610,8 @@
   }
 
   function getMdNodeTitle(node) {
-    const byTitle = getFirstLineText(node && node.title);
-    if (byTitle) return byTitle;
+    const byLiveText = getMdNodeFirstLineFromDom(node && node.id);
+    if (byLiveText) return byLiveText;
 
     const byText = getFirstLineText(node && node.text);
     if (byText) return byText;

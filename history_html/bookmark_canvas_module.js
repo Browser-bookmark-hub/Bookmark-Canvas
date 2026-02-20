@@ -18645,6 +18645,9 @@ function __getCleanHtmlForStorage(editorEl) {
     clone.querySelectorAll('.md-heading-hidden').forEach(el => {
         try { el.classList.remove('md-heading-hidden'); } catch (_) { }
     });
+    clone.querySelectorAll('br[data-md-auto-br]').forEach(el => {
+        try { el.remove(); } catch (_) { }
+    });
     return clone.innerHTML;
 }
 
@@ -26814,20 +26817,105 @@ async function importJsonBookmarks(json, importFileName = '') {
     );
 }
 
-function exportCanvas() {
-    // 双轨导出模式选择（2.1节）
-    showExportModeDialog();
+function __getCurrentFullscreenExportTarget() {
+    const maximizedNode = document.querySelector('.canvas-node-maximized');
+    if (!maximizedNode) return null;
+    const descriptor = __serializeMaximizedNode(maximizedNode);
+    if (!descriptor || typeof descriptor !== 'object') return null;
+    const supportedTypes = new Set(['permanent', 'permanent-copy', 'temp-node', 'md-node']);
+    if (!supportedTypes.has(descriptor.type)) return null;
+    return descriptor;
 }
 
-/**
- * 双轨模式选择对话框（简化版）
- * 模式 A: Obsidian 兼容模式 - 进入路径配置
- * 模式 B: 全量备份模式 - 进入确认页面
- */
-function showExportModeDialog() {
+function __getSingleLinePreview(text, fallback = '') {
+    const normalized = String(text || '').replace(/\u200B/g, '').replace(/\r\n?/g, '\n');
+    const first = normalized
+        .split('\n')
+        .map(line => line.trim())
+        .find(line => !!line);
+    return first || String(fallback || '').trim();
+}
+
+function __getFullscreenExportTargetLabel(descriptor) {
+    if (!descriptor || typeof descriptor !== 'object') return '';
     const { isEn } = __getLang();
 
-    // 移除已有对话框
+    if (descriptor.type === 'permanent') {
+        return isEn ? 'Permanent Section (#A)' : '永久栏目（#A）';
+    }
+
+    if (descriptor.type === 'permanent-copy') {
+        const copyId = String(descriptor.copyId || '').trim();
+        let copyTag = copyId;
+        try {
+            const copies = __ensurePermanentSectionCopyDisplayIndexes();
+            const matchedCopy = Array.isArray(copies)
+                ? copies.find((item) => item && String(item.id || '') === copyId)
+                : null;
+            const idx = matchedCopy ? __normalizePositiveInt(matchedCopy.displayIndex) : null;
+            const alpha = idx ? toAlphaLabel(idx + 1) : '';
+            if (alpha) copyTag = `#${alpha}`;
+        } catch (_) { }
+        return isEn
+            ? `Permanent Section Copy (${copyTag || copyId || 'copy'})`
+            : `永久栏目副本（${copyTag || copyId || '副本'}）`;
+    }
+
+    if (descriptor.type === 'temp-node') {
+        const sectionId = String(descriptor.id || '').trim();
+        const section = (CanvasState.tempSections || []).find((item) => item && item.id === sectionId);
+        if (!section) return isEn ? 'Temporary Section' : '临时栏目';
+        const label = getTempSectionLabel(section);
+        const title = __getSingleLinePreview(section.title, (isEn ? 'Temporary Section' : '临时栏目'));
+        return label ? `${label}. ${title}` : title;
+    }
+
+    if (descriptor.type === 'md-node') {
+        const nodeId = String(descriptor.id || '').trim();
+        const node = (CanvasState.mdNodes || []).find((item) => item && item.id === nodeId);
+        if (!node) return isEn ? 'Blank Section' : '空白栏目';
+        let title = '';
+        const nodeEl = document.getElementById(nodeId);
+        if (nodeEl) {
+            try {
+                const liveTextEl = nodeEl.querySelector('.md-canvas-editor, .md-canvas-text');
+                if (liveTextEl) {
+                    title = __getSingleLinePreview(liveTextEl.innerText || liveTextEl.textContent || '');
+                }
+            }
+            catch (_) { }
+        }
+        if (!title) {
+            title = __getSingleLinePreview(node.text);
+        }
+        if (!title && node.html) {
+            try {
+                const div = document.createElement('div');
+                div.innerHTML = node.html;
+                title = __getSingleLinePreview(div.innerText || div.textContent || '');
+            } catch (_) { }
+        }
+        return title || (isEn ? 'Blank Section' : '空白栏目');
+    }
+
+    return '';
+}
+
+
+function exportCanvas() {
+    const fullscreenTarget = __getCurrentFullscreenExportTarget();
+    showExportModeDialog({ fullscreenTarget });
+}
+
+function showExportModeDialog(options = {}) {
+    const { isEn } = __getLang();
+    const fullscreenTarget = (options && options.fullscreenTarget && typeof options.fullscreenTarget === 'object')
+        ? options.fullscreenTarget
+        : null;
+    const isFullscreenTarget = !!(fullscreenTarget && fullscreenTarget.type);
+    const isBlankFullscreenTarget = isFullscreenTarget && fullscreenTarget.type === 'md-node';
+    const showModeB = !isBlankFullscreenTarget;
+
     const existingDialog = document.getElementById('canvasExportModeDialog');
     if (existingDialog) existingDialog.remove();
 
@@ -26836,43 +26924,56 @@ function showExportModeDialog() {
     dialog.id = 'canvasExportModeDialog';
 
     const dialogTitle = isEn ? 'Export' : '导出';
-    const modeATitle = isEn ? 'Obsidian Compatible' : 'Obsidian 兼容';
-    const modeAHint = isEn ? 'For viewing in Obsidian' : '用于 Obsidian，但需注意格式（详见说明）';
-    const modeAHint2 = isEn ? '(some features may differ, see README)' : '';
-    const modeBTitle = isEn ? 'Full Backup' : '全量备份';
-    const modeBHint = isEn ? 'For import & recovery' : '用于导入与恢复';
+    const modeATitle = isFullscreenTarget
+        ? (isBlankFullscreenTarget ? (isEn ? 'Markdown (MD)' : 'Markdown（MD）') : (isEn ? 'HTML Bookmarks' : 'HTML 书签'))
+        : (isEn ? 'Obsidian Compatible' : 'Obsidian 兼容');
+    const modeAHint = isFullscreenTarget
+        ? (isBlankFullscreenTarget
+            ? (isEn ? 'Blank section exports as a single Markdown file' : '空白栏目导出为单个 Markdown 文件')
+            : (isEn ? 'Export as single HTML bookmark file' : '导出为单个 HTML 书签文件'))
+        : (isEn ? 'For viewing in Obsidian' : '用于 Obsidian，但需注意格式（详见说明）');
+    const modeAHint2 = isFullscreenTarget
+        ? ''
+        : (isEn ? '(some features may differ, see README)' : '');
+    const modeBTitle = isFullscreenTarget ? (isEn ? 'JSON Bookmarks' : 'JSON 书签') : (isEn ? 'Full Backup' : '全量备份');
+    const modeBHint = isFullscreenTarget
+        ? (isEn ? 'Export as single JSON bookmark file' : '导出为单个 JSON 书签文件')
+        : (isEn ? 'For import & recovery' : '用于导入与恢复');
+    const fullscreenTargetLabel = isFullscreenTarget ? __getFullscreenExportTargetLabel(fullscreenTarget) : '';
+    const fullscreenHintPrefix = isEn ? 'Current card:' : '当前栏目：';
 
     dialog.innerHTML = `
-        <div class="import-dialog-content" style="max-width: 420px; width: 90vw;">
+        <div class="import-dialog-content canvas-export-dialog-content" style="max-width: 430px; width: 90vw;">
             <div class="import-dialog-header" style="padding: 10px 16px;">
                 <h3 style="margin-left: 4px;">${dialogTitle}</h3>
                 <button class="import-dialog-close" id="closeExportModeDialog" style="margin-top: 1px;">&times;</button>
             </div>
             <div class="import-dialog-body" style="padding: 16px;">
+                ${fullscreenTargetLabel ? `<div class="canvas-export-current-target">${fullscreenHintPrefix} ${fullscreenTargetLabel}</div>` : ''}
                 <div class="import-options" style="gap: 12px;">
-                    <!-- 模式 A: Obsidian 兼容 -->
-                    <button class="import-option-btn" id="exportModeA" style="padding: 14px 16px; display: flex; align-items: center;">
+                    <button class="import-option-btn canvas-export-primary-option" id="exportModeA" style="padding: 14px 16px; display: flex; align-items: center;">
                         <div style="width: 32px; display: flex; justify-content: center; margin-right: 12px;">
-                            <i class="fab fa-markdown" style="font-size: 22px; color: #7c3aed;"></i>
+                            <i class="${(isFullscreenTarget && !isBlankFullscreenTarget) ? 'fas fa-code' : 'fab fa-markdown'}" style="font-size: ${(isFullscreenTarget && !isBlankFullscreenTarget) ? '20px' : '22px'}; color: #7c3aed;"></i>
                         </div>
-                        <div style="text-align: left; flex: 1;">
-                            <div style="font-size: 14px; font-weight: 600;">${modeATitle}</div>
-                            <div style="font-size: 12px; color: #888; margin-top: 2px;">${modeAHint}</div>
-                            ${modeAHint2 ? `<div style="font-size: 11px; color: #aaa; margin-top: 1px;">${modeAHint2}</div>` : ''}
+                        <div class="canvas-export-option-text">
+                            <div class="canvas-export-option-title">${modeATitle}</div>
+                            <div class="canvas-export-option-hint">${modeAHint}</div>
+                            ${modeAHint2 ? `<div class="canvas-export-option-subhint">${modeAHint2}</div>` : ''}
                         </div>
                         <i class="fas fa-chevron-right" style="color: #ccc;"></i>
                     </button>
-                    
-                    <!-- 模式 B: 全量备份 (直接导出) -->
+
+                    ${showModeB ? `
                     <button class="import-option-btn" id="exportModeB" style="padding: 14px 16px; display: flex; align-items: center;">
                         <div style="width: 32px; display: flex; justify-content: center; margin-right: 12px;">
                             <i class="fas fa-database" style="font-size: 20px; color: #059669;"></i>
                         </div>
-                        <div style="text-align: left; flex: 1;">
-                            <div style="font-size: 14px; font-weight: 600;">${modeBTitle}</div>
-                            <div style="font-size: 12px; color: #888; margin-top: 2px;">${modeBHint}</div>
+                        <div class="canvas-export-option-text">
+                            <div class="canvas-export-option-title">${modeBTitle}</div>
+                            <div class="canvas-export-option-hint">${modeBHint}</div>
                         </div>
                     </button>
+                    ` : ''}
                 </div>
             </div>
         </div>
@@ -26880,7 +26981,6 @@ function showExportModeDialog() {
 
     document.body.appendChild(dialog);
 
-    // 事件监听
     document.getElementById('closeExportModeDialog').addEventListener('click', () => {
         dialog.remove();
     });
@@ -26889,26 +26989,40 @@ function showExportModeDialog() {
         if (e.target === dialog) dialog.remove();
     });
 
-    // 模式 A: 进入 Obsidian 路径配置
     document.getElementById('exportModeA').addEventListener('click', () => {
         dialog.remove();
-        exportCanvasPackage({ mode: 'obsidian' }).catch((e) => {
+        const mode = isFullscreenTarget
+            ? (isBlankFullscreenTarget ? 'fullscreen-md' : 'fullscreen-html')
+            : 'obsidian';
+        exportCanvasPackage({
+            mode,
+            fullscreenTarget,
+            singleFile: isFullscreenTarget
+        }).catch((e) => {
             console.error('[Canvas] 导出失败:', e);
             const { isEn } = __getLang();
             alert((isEn ? 'Export failed: ' : '导出失败: ') + (e && e.message ? e.message : e));
         });
     });
 
-    // 模式 B: 直接进行全量备份导出，不再显示二级确认页
-    document.getElementById('exportModeB').addEventListener('click', () => {
-        dialog.remove();
-        exportCanvasPackage({ mode: 'full-backup' }).catch((e) => {
-            console.error('[Canvas] 导出失败:', e);
-            const { isEn } = __getLang();
-            alert((isEn ? 'Export failed: ' : '导出失败: ') + (e && e.message ? e.message : e));
+    const modeBButton = document.getElementById('exportModeB');
+    if (modeBButton) {
+        modeBButton.addEventListener('click', () => {
+            dialog.remove();
+            const mode = isFullscreenTarget ? 'fullscreen-json' : 'full-backup';
+            exportCanvasPackage({
+                mode,
+                fullscreenTarget,
+                singleFile: isFullscreenTarget
+            }).catch((e) => {
+                console.error('[Canvas] 导出失败:', e);
+                const { isEn } = __getLang();
+                alert((isEn ? 'Export failed: ' : '导出失败: ') + (e && e.message ? e.message : e));
+            });
         });
-    });
+    }
 }
+
 
 /**
  * 全量备份模式的二级确认对话框
@@ -27018,10 +27132,19 @@ function __stripZwsp(s) {
  * Convert HTML content to Markdown source code for Obsidian rendering.
  * This function traverses the DOM and converts HTML elements to their Markdown equivalents.
  */
-function __htmlToMarkdown(html) {
+function __htmlToMarkdown(html, options = {}) {
     if (!html || typeof html !== 'string') return '';
-    const stripped = __stripZwsp(html).trim();
-    if (!stripped) return '';
+    const {
+        trimResult = true,
+        compactNewlines = true,
+        paragraphBreaks = false,
+        hardLineBreaks = false
+    } = options;
+    const paragraphSeparator = paragraphBreaks ? '\n\n' : '\n';
+    const hardBreakSeparator = hardLineBreaks ? '  \n' : '\n';
+    const normalizedInput = __stripZwsp(html).replace(/\r\n?/g, '\n');
+    const stripped = trimResult ? normalizedInput.trim() : normalizedInput;
+    if (!stripped.trim()) return '';
 
     // If it doesn't look like HTML, return as-is (already Markdown)
     const looksLikeHtml = /<\s*(?:a|p|div|span|br|strong|em|b|i|u|del|s|mark|code|blockquote|ul|ol|li|hr|h[1-6]|font|center|pre|sup|sub)\b/i.test(stripped);
@@ -27042,18 +27165,28 @@ function __htmlToMarkdown(html) {
 
         switch (tag) {
             case 'br':
-                return '\n';
+                return hardBreakSeparator;
             case 'p':
             case 'div': {
                 const align = node.getAttribute('align');
                 const style = node.getAttribute('style');
+                const content = childContent();
+                const isVisuallyEmpty = !String(content || '').replace(/[\s\u00A0]+/g, '');
                 if (align || style) {
                     let attrs = '';
                     if (align) attrs += ` align="${align}"`;
                     if (style) attrs += ` style="${style}"`;
-                    return `<${tag}${attrs}>${childContent()}</${tag}>\n`;
+                    return `<${tag}${attrs}>${content}</${tag}>${paragraphSeparator}`;
                 }
-                return childContent() + '\n';
+                if (isVisuallyEmpty) {
+                    return paragraphBreaks ? paragraphSeparator : '\n';
+                }
+                if (!paragraphBreaks) {
+                    const blockSeparator = hardLineBreaks ? '  \n' : '\n';
+                    return content.endsWith('\n') ? content : (content + blockSeparator);
+                }
+                const trimmedContent = content.replace(/\n+$/g, '');
+                return trimmedContent ? (trimmedContent + paragraphSeparator) : paragraphSeparator;
             }
             case 'details':
                 return `<details>${childContent()}</details>\n`;
@@ -27148,9 +27281,84 @@ function __htmlToMarkdown(html) {
         }
     };
 
-    const result = Array.from(tmp.childNodes).map(processNode).join('');
-    // Clean up excessive newlines
-    return result.replace(/\n{3,}/g, '\n\n').trim();
+    const topNodes = Array.from(tmp.childNodes);
+    const isTopLevelBlockLike = (node) => {
+        if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+        const tag = String(node.tagName || '').toLowerCase();
+        return /^(p|div|h[1-6]|ul|ol|blockquote|pre|hr|details)$/.test(tag);
+    };
+
+    const rendered = topNodes.map((node, index) => {
+        let chunk = processNode(node);
+        if (node && node.nodeType === Node.TEXT_NODE) {
+            const text = String(node.textContent || '').replace(/\u200B/g, '');
+            const next = topNodes[index + 1] || null;
+            if (text.trim() && isTopLevelBlockLike(next) && chunk && !chunk.endsWith('\n')) {
+                chunk += '\n';
+            }
+        }
+        return chunk;
+    }).join('');
+
+    const result = rendered.replace(/\r\n?/g, '\n');
+    const compacted = compactNewlines
+        ? (paragraphBreaks ? result.replace(/\n{4,}/g, '\n\n\n') : result.replace(/\n{3,}/g, '\n\n'))
+        : result;
+    return trimResult ? compacted.trim() : compacted;
+}
+
+function __flushMdEditorsForExport() {
+    const editors = document.querySelectorAll('.md-canvas-node .md-canvas-editor');
+    if (!editors || !editors.length) return;
+
+    let changed = false;
+    editors.forEach((editor) => {
+        if (!editor) return;
+        const host = editor.closest('.md-canvas-node');
+        const nodeId = host && host.id ? String(host.id) : '';
+        if (!nodeId) return;
+        const node = (CanvasState.mdNodes || []).find((item) => item && item.id === nodeId);
+        if (!node) return;
+
+        try { __finalizeInlinePatternsInEditor(editor); } catch (_) { }
+
+        let cleanHtml = '';
+        try {
+            cleanHtml = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(editor));
+        } catch (_) {
+            cleanHtml = '';
+        }
+        if (!cleanHtml) {
+            try { cleanHtml = __normalizeCanvasRichHtml(editor.innerHTML) || ''; } catch (_) { cleanHtml = ''; }
+        }
+
+        if ((node.html || '') !== cleanHtml) {
+            node.html = cleanHtml;
+            changed = true;
+        } else {
+            node.html = cleanHtml;
+        }
+
+        let plainText = '';
+        try {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = cleanHtml;
+            plainText = (tmp.innerText || tmp.textContent || '').replace(/\u200B/g, '');
+        } catch (_) {
+            plainText = (editor.innerText || editor.textContent || '').replace(/\u200B/g, '');
+        }
+
+        if ((node.text || '') !== plainText) {
+            node.text = plainText;
+            changed = true;
+        } else {
+            node.text = plainText;
+        }
+    });
+
+    if (changed) {
+        try { saveTempNodes(); } catch (_) { }
+    }
 }
 
 function __isValidUrl(url) {
@@ -27467,14 +27675,19 @@ function __buildMdNodeMarkdown(node) {
         : ((node && typeof node.text === 'string') ? node.text : '');
 
     const stripped = __stripZwsp(rawContent || '');
-    const textMd = __htmlToMarkdown(stripped);
+    const textMd = __htmlToMarkdown(stripped, {
+        trimResult: false,
+        compactNewlines: false,
+        paragraphBreaks: false,
+        hardLineBreaks: true
+    });
 
     // Remove first line (used as filename) to avoid duplication in content
     const lines = textMd.split('\n');
     // REMOVED: lines.shift() to preserve first line content (title/content separation handled by filename only)
-    const finalMd = lines.join('\n').trim();
+    const finalMd = lines.join('\n').replace(/\r\n?/g, '\n').trimEnd();
 
-    return (finalMd + '\n').replace(/\r\n/g, '\n');
+    return finalMd ? (finalMd + '\n') : '\n';
 }
 
 
@@ -28087,6 +28300,7 @@ async function exportCanvasPackage(options = {}) {
         return;
     }
 
+    try { __flushMdEditorsForExport(); } catch (_) { }
     try { saveTempNodes(); } catch (_) { }
     try { savePermanentSectionPosition(); } catch (_) { }
 
@@ -28104,6 +28318,333 @@ async function exportCanvasPackage(options = {}) {
     const defaultExportRoot = isEn ? `bookmark-canvas-${ymd}` : `书签画布-${ymd}`;
 
     const files = [];
+    const fullscreenTarget = (options && options.fullscreenTarget && typeof options.fullscreenTarget === 'object')
+        ? options.fullscreenTarget
+        : null;
+    const fullscreenSingleFileMode = !!(options && options.singleFile && fullscreenTarget && fullscreenTarget.type);
+
+    const resolveMdNodeTitle = (node) => {
+        if (!node || typeof node !== 'object') return '';
+        let title = String(node.text || '').replace(/\u200B/g, '').trim();
+        if (!title && node.html) {
+            try {
+                const div = document.createElement('div');
+                div.innerHTML = node.html;
+                title = String(div.textContent || '').replace(/\u200B/g, '').trim();
+            } catch (_) { }
+        }
+        return title.split('\n')[0].trim();
+    };
+
+    const fallbackAnchorDownload = (url, fileName) => {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
+    const downloadSingleFile = (fileName, contentString, contentType) => {
+        const blob = new Blob([contentString], { type: contentType });
+        const url = URL.createObjectURL(blob);
+
+        if (chrome && chrome.downloads && typeof chrome.downloads.download === 'function') {
+            chrome.downloads.download({
+                url,
+                filename: `${downloadFolder}/${fileName}`,
+                saveAs: false,
+                conflictAction: 'uniquify'
+            }, () => {
+                if (chrome.runtime && chrome.runtime.lastError) {
+                    console.warn('[Canvas] chrome.downloads.download failed, fallback to <a> tag:', chrome.runtime.lastError);
+                    fallbackAnchorDownload(url, fileName);
+                }
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+            });
+            return;
+        }
+
+        fallbackAnchorDownload(url, fileName);
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+    };
+
+    const syncSingleFileToCloud = (fileName, contentString, contentType) => {
+        try {
+            if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+                chrome.runtime.sendMessage({
+                    action: 'exportFileToClouds',
+                    folderKey: 'canvas',
+                    lang: (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN'),
+                    fileName,
+                    content: contentString,
+                    contentType
+                }, () => { });
+            }
+        } catch (_) { }
+    };
+
+    if (fullscreenSingleFileMode) {
+        const descriptor = fullscreenTarget;
+        const targetType = String(descriptor.type || '').trim();
+        const namePrefix = isEn ? 'bookmark-canvas-fullscreen' : '书签画布-全屏';
+        const getSafeName = (value, fallback) => {
+            const fromValue = __sanitizeFilename(String(value || '').trim());
+            if (fromValue && fromValue !== 'Untitled') return fromValue;
+            return __sanitizeFilename(String(fallback || 'node'));
+        };
+        const buildDescriptionDataBookmark = ({ sequenceLabel, sectionTitle, descriptionHtml }) => {
+            const rawHtml = String(descriptionHtml || '').trim();
+            if (!rawHtml) return null;
+
+            const escapeHtml = (value) => String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+
+            const stripUnsafeScript = (value) => String(value || '')
+                .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+
+            const titleParts = [];
+            if (sequenceLabel) titleParts.push(String(sequenceLabel).trim());
+            if (sectionTitle) titleParts.push(String(sectionTitle).trim());
+            const baseTitle = titleParts.join('-') || (isEn ? 'Section' : '栏目');
+            const bookmarkTitle = `${baseTitle}-${isEn ? 'Description' : '说明'}`;
+
+            const sanitizedDescriptionHtml = stripUnsafeScript(rawHtml);
+            const htmlDoc = `<!DOCTYPE html>
+<html lang="${isEn ? 'en' : 'zh-CN'}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeHtml(bookmarkTitle)}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0;
+    padding: 24px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.65;
+    background: #ffffff;
+    color: #1f2937;
+  }
+  .desc-wrap {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .desc-title {
+    margin: 0 0 14px;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .desc-content {
+    font-size: 15px;
+    word-break: break-word;
+  }
+</style>
+</head>
+<body>
+  <div class="desc-wrap">
+    <h1 class="desc-title">${escapeHtml(bookmarkTitle)}</h1>
+    <div class="desc-content">${sanitizedDescriptionHtml}</div>
+  </div>
+</body>
+</html>`;
+
+            const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(htmlDoc)}`;
+            return {
+                title: bookmarkTitle,
+                url: dataUrl,
+                type: 'bookmark',
+                children: []
+            };
+        };
+        const toBookmarkNode = (node) => {
+            if (!node || typeof node !== 'object') return null;
+            const url = String(node.url || '').trim();
+            const rawTitle = String(node.title || node.name || '').trim();
+            if (url) {
+                return {
+                    title: rawTitle || url,
+                    url,
+                    type: 'bookmark',
+                    children: []
+                };
+            }
+            const childrenRaw = Array.isArray(node.children) ? node.children : [];
+            return {
+                title: rawTitle || (isEn ? 'Folder' : '文件夹'),
+                type: 'folder',
+                children: childrenRaw.map(toBookmarkNode).filter(Boolean)
+            };
+        };
+        const buildNetscapeBookmarkHtml = (treeNodes) => {
+            const escapeAttr = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const escapeText = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const renderNode = (node, depth = 1) => {
+                if (!node) return '';
+                const indent = '    '.repeat(depth);
+                const title = escapeText(node.title || '');
+                const url = String(node.url || '').trim();
+                if (url) {
+                    return `${indent}<DT><A HREF="${escapeAttr(url)}">${title}</A>\n`;
+                }
+                const children = Array.isArray(node.children) ? node.children : [];
+                let html = `${indent}<DT><H3>${title}</H3>\n`;
+                html += `${indent}<DL><p>\n`;
+                children.forEach((child) => {
+                    html += renderNode(child, depth + 1);
+                });
+                html += `${indent}</DL><p>\n`;
+                return html;
+            };
+
+            let html = '<!DOCTYPE NETSCAPE-Bookmark-file-1>\n';
+            html += '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n';
+            html += '<TITLE>Bookmarks</TITLE>\n';
+            html += '<H1>Bookmarks</H1>\n';
+            html += '<DL><p>\n';
+            (Array.isArray(treeNodes) ? treeNodes : []).forEach((node) => {
+                html += renderNode(node, 1);
+            });
+            html += '</DL><p>\n';
+            return html;
+        };
+        const normalizedMode = (() => {
+            if (exportMode === 'fullscreen-md' || exportMode === 'fullscreen-html' || exportMode === 'fullscreen-json') {
+                return exportMode;
+            }
+            if (exportMode === 'obsidian') return targetType === 'md-node' ? 'fullscreen-md' : 'fullscreen-html';
+            if (exportMode === 'full-backup') return targetType === 'md-node' ? 'fullscreen-md' : 'fullscreen-json';
+            return '';
+        })();
+
+        let fileName = '';
+        let contentString = '';
+        let contentType = 'text/plain;charset=utf-8';
+        let exportTypeLabel = '';
+        let exportTitle = '';
+        let exportSequence = '';
+        let exportDescription = '';
+        let contentNodes = [];
+
+        if (targetType === 'md-node') {
+            const nodeId = String(descriptor.id || '').trim();
+            const node = (CanvasState.mdNodes || []).find((item) => item && item.id === nodeId);
+            if (!node) {
+                alert(isEn ? 'Export failed: blank section not found.' : '导出失败：未找到当前空白栏目。');
+                return;
+            }
+            if (normalizedMode !== 'fullscreen-md') {
+                alert(isEn ? 'Blank section only supports Markdown export.' : '空白栏目仅支持 Markdown 导出。');
+                return;
+            }
+            exportTypeLabel = isEn ? 'Blank Section' : '空白栏目';
+            exportTitle = resolveMdNodeTitle(node) || exportTypeLabel;
+            contentString = __buildMdNodeMarkdown(node);
+            contentType = 'text/markdown;charset=utf-8';
+            fileName = `${namePrefix}-${getSafeName(exportTitle, node.id || 'blank')}-${ymd}.md`;
+        } else if (targetType === 'permanent' || targetType === 'permanent-copy') {
+            const bookmarkTree = await api.getTree();
+            const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
+            const roots = root && Array.isArray(root.children) ? root.children : [];
+            contentNodes = roots.map(toBookmarkNode).filter(Boolean);
+
+            const permanentTitleEl = document.getElementById('permanentSectionTitle');
+            const permanentTitle = permanentTitleEl
+                ? String(permanentTitleEl.textContent || '').trim()
+                : (isEn ? 'Permanent Section' : '永久栏目');
+
+            exportTypeLabel = isEn ? 'Permanent Section' : '永久栏目';
+            exportTitle = permanentTitle || exportTypeLabel;
+            exportSequence = '#A';
+            try {
+                exportDescription = localStorage.getItem('canvas-permanent-tip-text') || '';
+            } catch (_) {
+                exportDescription = '';
+            }
+
+            if (targetType === 'permanent-copy') {
+                const copyId = String(descriptor.copyId || '').trim();
+                let copyTag = copyId || (isEn ? 'copy' : '副本');
+                try {
+                    const copies = __ensurePermanentSectionCopyDisplayIndexes();
+                    const matchedCopy = Array.isArray(copies)
+                        ? copies.find((item) => item && String(item.id || '') === copyId)
+                        : null;
+                    const idx = matchedCopy ? __normalizePositiveInt(matchedCopy.displayIndex) : null;
+                    const alpha = idx ? toAlphaLabel(idx + 1) : '';
+                    if (alpha) copyTag = `#${alpha}`;
+                } catch (_) { }
+                exportTypeLabel = isEn ? 'Permanent Section Copy' : '永久栏目副本';
+                exportSequence = copyTag;
+                exportTitle = `${permanentTitle || exportTypeLabel} (${copyTag})`;
+                try {
+                    exportDescription = localStorage.getItem(`canvas-permanent-tip-text-copy-${copyId}`) || '';
+                } catch (_) {
+                    exportDescription = '';
+                }
+            }
+        } else if (targetType === 'temp-node') {
+            const sectionId = String(descriptor.id || '').trim();
+            const section = (CanvasState.tempSections || []).find((item) => item && item.id === sectionId);
+            if (!section) {
+                alert(isEn ? 'Export failed: temporary section not found.' : '导出失败：未找到当前临时栏目。');
+                return;
+            }
+            contentNodes = (Array.isArray(section.items) ? section.items : []).map(toBookmarkNode).filter(Boolean);
+            exportTypeLabel = isEn ? 'Temporary Section' : '临时栏目';
+            exportTitle = String(section.title || '').trim() || exportTypeLabel;
+            exportSequence = getTempSectionLabel(section) || '';
+            exportDescription = String(section.description || '');
+        } else {
+            alert(isEn ? 'Export failed: unsupported fullscreen card.' : '导出失败：不支持当前全屏卡片类型。');
+            return;
+        }
+
+        if (targetType !== 'md-node') {
+            if (normalizedMode !== 'fullscreen-html' && normalizedMode !== 'fullscreen-json') {
+                alert(isEn ? 'Export failed: unsupported export mode.' : '导出失败：不支持当前导出格式。');
+                return;
+            }
+            const payload = [];
+            const descriptionBookmark = buildDescriptionDataBookmark({
+                sequenceLabel: exportSequence,
+                sectionTitle: exportTitle,
+                descriptionHtml: exportDescription
+            });
+            if (descriptionBookmark) {
+                payload.push(descriptionBookmark);
+            }
+            payload.push(...contentNodes);
+            const namePart = exportSequence ? `${exportSequence}-${exportTitle}` : (exportTitle || exportTypeLabel);
+
+            if (normalizedMode === 'fullscreen-html') {
+                contentString = buildNetscapeBookmarkHtml(payload);
+                contentType = 'text/html;charset=utf-8';
+                fileName = `${namePrefix}-${getSafeName(namePart, exportTypeLabel || 'section')}-${ymd}.html`;
+            } else {
+                contentString = JSON.stringify(payload, null, 2);
+                contentType = 'application/json;charset=utf-8';
+                fileName = `${namePrefix}-${getSafeName(namePart, exportTypeLabel || 'section')}-${ymd}.json`;
+            }
+        }
+
+        if (!contentString || !fileName) {
+            alert(isEn ? 'Export failed: unsupported fullscreen card.' : '导出失败：不支持当前全屏卡片类型。');
+            return;
+        }
+
+        syncSingleFileToCloud(fileName, contentString, contentType);
+        downloadSingleFile(fileName, contentString, contentType);
+
+        alert(isEn
+            ? `Exported: ${fileName}`
+            : `已导出：${fileName}`);
+        return;
+    }
 
     // -------------------------------------------------------------------------
     // 模式 B: 全量备份 (Direct JSON Download)
