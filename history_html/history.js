@@ -5613,6 +5613,32 @@ function setupQuickAddMenu() {
         if (quickAddDivider) quickAddDivider.style.display = hideCurrentGroup ? 'none' : '';
     };
 
+    const positionQuickAddMenu = (options = {}) => {
+        if (!isSidePanelMode || menu.hasAttribute('hidden')) return;
+
+        const fromTitle = options && options.fromTitle === true;
+        const anchor = (fromTitle && titleToggle) ? titleToggle : toggle;
+        if (!anchor || typeof anchor.getBoundingClientRect !== 'function') return;
+
+        const host = menu.offsetParent || anchor.closest('.header-right') || menu.parentElement;
+        if (!host || typeof host.getBoundingClientRect !== 'function') return;
+
+        const hostRect = host.getBoundingClientRect();
+        const anchorRect = anchor.getBoundingClientRect();
+        const menuRect = menu.getBoundingClientRect();
+        const menuWidth = menuRect.width || menu.offsetWidth || 280;
+        const edgePadding = 8;
+        const sidePanelNudgeRight = 14;
+
+        const centeredLeft = anchorRect.left + (anchorRect.width / 2) - hostRect.left - (menuWidth / 2) + sidePanelNudgeRight;
+        const maxLeft = Math.max(edgePadding, hostRect.width - menuWidth - edgePadding);
+        const nextLeft = Math.min(Math.max(centeredLeft, edgePadding), maxLeft);
+
+        menu.style.left = `${Math.round(nextLeft)}px`;
+        menu.style.right = 'auto';
+        menu.style.transform = 'none';
+    };
+
     const closeMenu = () => {
         if (!menu.hasAttribute('hidden')) menu.setAttribute('hidden', '');
     };
@@ -5626,6 +5652,15 @@ function setupQuickAddMenu() {
             menu.dataset.dock = currentHeaderDockSide;
         }
         menu.removeAttribute('hidden');
+
+        if (isSidePanelMode) {
+            positionQuickAddMenu(options);
+            requestAnimationFrame(() => positionQuickAddMenu(options));
+        } else {
+            menu.style.left = '';
+            menu.style.right = '';
+            menu.style.transform = '';
+        }
     };
 
     setQuickAddMenuColorVars();
@@ -5684,6 +5719,9 @@ function setupQuickAddMenu() {
         const fromTitle = menu.dataset.openFromTitle === 'true';
         syncQuickAddMenuSections({ fromTitle });
         refreshQuickAddWindowFolderControls();
+        if (!menu.hasAttribute('hidden')) {
+            positionQuickAddMenu({ fromTitle });
+        }
     };
 
     if (document.body && document.documentElement.getAttribute('data-current-view-add-observer') !== 'true') {

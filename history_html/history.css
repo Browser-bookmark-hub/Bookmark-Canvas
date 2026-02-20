@@ -1441,7 +1441,7 @@ html.side-panel-mode .tool-buttons .quick-add-btn {
 }
 
 html.side-panel-mode .quick-add-menu {
-    right: 104px;
+    right: 84px;
 }
 
 body.header-dock-bottom:not(.header-compact) .quick-add-menu {
@@ -1500,9 +1500,16 @@ body.header-dock-bottom:not(.header-compact) .quick-add-menu {
     transition: background 0.15s ease;
 }
 
+.quick-add-menu-item > span:nth-child(2) {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: left;
+}
+
 .quick-add-menu-icon {
-    width: 16px;
-    min-width: 16px;
+    width: 18px;
+    min-width: 18px;
+    flex: 0 0 18px;
     text-align: center;
     font-weight: 700;
     line-height: 1;
@@ -1512,10 +1519,10 @@ body.header-dock-bottom:not(.header-compact) .quick-add-menu {
 }
 
 .quick-add-menu-icon-md {
-    width: auto;
+    width: 18px;
     min-width: 18px;
     height: 14px;
-    padding: 0 3px;
+    padding: 0 2px;
     font-size: 8px;
     font-weight: 500;
     letter-spacing: 0.1px;
