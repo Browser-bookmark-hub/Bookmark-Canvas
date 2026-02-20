@@ -23053,7 +23053,6 @@ function __raiseCanvasNodeTemporarily(element) {
 
 function __handleCanvasNodeTemporaryRaiseOnMouseDown(event) {
     if (!event || event.button !== 0) return;
-    if (__isCanvasInSidePanelMode()) return;
     if (CanvasState.nodeMaximizedActive) return;
     if (CanvasState.dragState && CanvasState.dragState.isDragging) return;
 
