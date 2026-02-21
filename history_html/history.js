@@ -3184,20 +3184,20 @@ const i18n = {
         'en': 'View Sync'
     },
     canvasViewSyncToggleText: {
-        'zh_CN': '视图同步（以当前窗口为准）',
-        'en': 'View Sync (Use Current View)'
+        'zh_CN': '视图同步',
+        'en': 'View Sync'
     },
     canvasViewSyncCameraText: {
-        'zh_CN': '同步相机（pan/zoom）',
-        'en': 'Sync Camera (pan/zoom)'
+        'zh_CN': '同步相机/模式',
+        'en': 'Sync Camera/Mode'
     },
     canvasViewSyncExpandScrollText: {
         'zh_CN': '同步展开与滚动',
         'en': 'Sync Expand + Scroll'
     },
     canvasViewSyncHintGlobalText: {
-        'zh_CN': '相机：相机就是我们当前的视图。\n展开与滚动：指永久栏目或临时栏目中文件夹的展开状态，以及垂直滚动条的滚动位置。\n内容类：主数据/外观/设置始终全局共享，标签页与侧边栏会看到同一份内容。',
-        'en': 'Camera: The camera is the current viewport.\nExpand & Scroll: Folder expanded/collapsed state in permanent or temporary sections, plus the vertical scrollbar position.\nContent State: Main data / appearance / settings are globally shared across Tab and Side Panel.'
+        'zh_CN': '相机：相机就是我们当前窗口的视图。\n全屏模式：指永久栏目/临时栏目/空白栏目卡片的全屏（最大化）状态。\n展开与滚动：指永久栏目或临时栏目中文件夹的展开状态，以及垂直滚动条的滚动位置。\n内容类：主数据/外观/设置始终全局共享，标签页与侧边栏会看到同一份内容。',
+        'en': 'Camera: The camera is the current window viewport.\nFullscreen Mode: Card fullscreen (maximized) state for permanent/temporary/blank cards.\nExpand & Scroll: Folder expanded/collapsed state in permanent or temporary sections, plus the vertical scrollbar position.\nContent State: Main data / appearance / settings are globally shared across Tab and Side Panel.'
     },
     canvasViewSyncHintCameraLabel: {
         'zh_CN': '相机：',
@@ -3228,8 +3228,8 @@ const i18n = {
         'en': 'View State:'
     },
     canvasViewSyncHintViewText: {
-        'zh_CN': '相机/展开/滚动按 标签页 与 侧边栏 分区独立。',
-        'en': 'Camera / expand / scroll are partitioned by Tab and Side Panel.'
+        'zh_CN': '例如相机、全屏模式、展开与滚动（<strong><u>以当前窗口为准</u></strong>），按 标签页 与 侧边栏 <strong><u>分区独立</u></strong>。',
+        'en': 'For example, camera/fullscreen mode/expand/scroll (<strong><u>using current window</u></strong>) are <strong><u>independent</u></strong> between Tab and Side Panel.'
     },
     canvasHelpBtnTitle: {
         'zh_CN': '说明',
@@ -4079,10 +4079,13 @@ function applyLanguage() {
     if (canvasViewSyncCameraText) canvasViewSyncCameraText.textContent = i18n.canvasViewSyncCameraText[currentLang];
     const canvasViewSyncExpandScrollText = document.getElementById('canvasViewSyncExpandScrollText');
     if (canvasViewSyncExpandScrollText) canvasViewSyncExpandScrollText.textContent = i18n.canvasViewSyncExpandScrollText[currentLang];
+    if (window.CanvasModule && typeof window.CanvasModule.updateViewSyncExpandScrollButtonText === 'function') {
+        window.CanvasModule.updateViewSyncExpandScrollButtonText();
+    }
     const canvasViewSyncHintViewLabel = document.getElementById('canvasViewSyncHintViewLabel');
     if (canvasViewSyncHintViewLabel) canvasViewSyncHintViewLabel.textContent = i18n.canvasViewSyncHintViewLabel[currentLang];
     const canvasViewSyncHintViewText = document.getElementById('canvasViewSyncHintViewText');
-    if (canvasViewSyncHintViewText) canvasViewSyncHintViewText.textContent = i18n.canvasViewSyncHintViewText[currentLang];
+    if (canvasViewSyncHintViewText) canvasViewSyncHintViewText.innerHTML = i18n.canvasViewSyncHintViewText[currentLang];
     const canvasViewSyncHintInfoBtn = document.getElementById('canvasViewSyncHintInfoBtn');
     if (canvasViewSyncHintInfoBtn) {
         const hint = i18n.canvasViewSyncHintGlobalText[currentLang];

@@ -9,6 +9,7 @@ const getCanvasExportFolder = () => (typeof currentLang !== 'undefined' && curre
 // Canvas状态管理
 const CANVAS_BASE_ZOOM_DEFAULT = 0.6; // 新默认基准缩放：旧 60% 视图 = 新 100%
 const NODE_MAXIMIZED_STORAGE_KEY = 'canvas-node-maximized-v1';
+const NODE_MAXIMIZED_VIEW_STATE_KIND = 'fullscreen';
 const NODE_LAST_MAXIMIZED_STORAGE_KEY = 'canvas-node-last-maximized-v1';
 const LAST_MAXIMIZED_NODE_UPDATED_EVENT = 'canvas-last-maximized-node-updated';
 const NODE_LAYOUT_ZOOM_STORAGE_KEY = 'canvas-node-layout-zoom-v1';
@@ -179,6 +180,7 @@ const CanvasState = {
     pendingMaximizedDescriptor: null,
     maximizedNodeRemovalObserver: null,
     maximizedNodeRemovalSyncFrame: null,
+    maximizedNodeRemovalObserverMuted: false,
     temporaryRaisedNode: {
         element: null,
         previousZIndex: '',
@@ -4097,7 +4099,7 @@ function initCanvasView() {
     setupCanvasOtherSettingsBtn();
     // 绑定快捷键设置按钮
     setupCanvasShortcutsSettingsBtn();
-    // 绑定视图同步按钮（相机 / 展开+滚动）
+    // 绑定视图同步按钮（相机〔含全屏模式〕/ 展开+滚动）
     setupCanvasViewSyncControls();
 
     // [数据密集模式] 初始化时计算一次视口数据量
@@ -6282,6 +6284,21 @@ function __toggleCanvasViewSyncPanel(toggleBtn, panelEl, forceOpen = null) {
     panelEl.style.display = nextOpen ? 'block' : 'none';
 }
 
+function __getExpandScrollSyncButtonText() {
+    const { isEn } = __getLang();
+    const activeDescriptor = __getActiveMaximizedNodeDescriptor();
+    if (activeDescriptor) {
+        return isEn ? 'Sync Expand + Scroll (Current Card)' : '同步展开与滚动（当前栏目）';
+    }
+    return isEn ? 'Sync Expand + Scroll' : '同步展开与滚动';
+}
+
+function __updateViewSyncExpandScrollButtonText() {
+    const textEl = document.getElementById('canvasViewSyncExpandScrollText');
+    if (!textEl) return;
+    textEl.textContent = __getExpandScrollSyncButtonText();
+}
+
 function __copyPartitionedViewStateKindToAllPartitions(kind, sourcePartition) {
     if (!kind || !sourcePartition) return { keyCount: 0, writeCount: 0 };
 
@@ -6335,6 +6352,213 @@ function __copyPartitionedViewStateKindToAllPartitions(kind, sourcePartition) {
         keyCount: sourceKeys.length,
         writeCount
     };
+}
+
+function __copyPartitionedViewStateBaseKeyToAllPartitions(kind, baseKey, sourcePartition) {
+    if (!kind || !baseKey || !sourcePartition) return { keyCount: 0, writeCount: 0 };
+
+    const sourceStorageKey = __buildCanvasPartitionedViewStateKey(kind, baseKey, sourcePartition);
+    if (!sourceStorageKey) return { keyCount: 0, writeCount: 0 };
+
+    let rawValue = null;
+    try {
+        rawValue = localStorage.getItem(sourceStorageKey);
+    } catch (_) {
+        rawValue = null;
+    }
+    if (rawValue == null) return { keyCount: 0, writeCount: 0 };
+
+    let value = rawValue;
+    let asJSON = false;
+    try {
+        value = JSON.parse(rawValue);
+        asJSON = true;
+    } catch (_) {
+        asJSON = false;
+        value = rawValue;
+    }
+
+    let writeCount = 0;
+    CANVAS_VIEW_PARTITIONS.forEach((partitionKey) => {
+        if (asJSON) {
+            saveViewState(kind, baseKey, value, { partitionKey });
+        } else {
+            saveViewState(kind, baseKey, value, { partitionKey, asJSON: false });
+        }
+        writeCount += 1;
+    });
+
+    return {
+        keyCount: 1,
+        writeCount
+    };
+}
+
+function __normalizeTempExpandStateForSync(rawState) {
+    const normalized = {
+        expanded: [],
+        collapsed: []
+    };
+
+    if (Array.isArray(rawState)) {
+        normalized.expanded = rawState.filter((id) => typeof id === 'string' && id);
+        return normalized;
+    }
+
+    if (!rawState || typeof rawState !== 'object') return normalized;
+
+    if (Array.isArray(rawState.expanded)) {
+        normalized.expanded = rawState.expanded.filter((id) => typeof id === 'string' && id);
+    }
+    if (Array.isArray(rawState.collapsed)) {
+        normalized.collapsed = rawState.collapsed.filter((id) => typeof id === 'string' && id);
+    }
+
+    const expandedSet = new Set(normalized.expanded);
+    normalized.expanded = Array.from(expandedSet);
+    normalized.collapsed = Array.from(new Set(normalized.collapsed.filter((id) => !expandedSet.has(id))));
+
+    return normalized;
+}
+
+function __mergeTempExpandStateBySection(sourceState, targetState, sectionId) {
+    const sectionPrefix = `${sectionId}-`;
+    const sourceExpandedSet = new Set(
+        (sourceState.expanded || []).filter((id) => typeof id === 'string' && id.startsWith(sectionPrefix))
+    );
+    const sourceCollapsedSet = new Set(
+        (sourceState.collapsed || []).filter((id) => typeof id === 'string' && id.startsWith(sectionPrefix))
+    );
+
+    const mergedExpanded = (targetState.expanded || []).filter(
+        (id) => typeof id === 'string' && !id.startsWith(sectionPrefix)
+    );
+    const mergedCollapsed = (targetState.collapsed || []).filter(
+        (id) => typeof id === 'string' && !id.startsWith(sectionPrefix)
+    );
+
+    sourceExpandedSet.forEach((id) => mergedExpanded.push(id));
+    sourceCollapsedSet.forEach((id) => mergedCollapsed.push(id));
+
+    const expandedSet = new Set(mergedExpanded);
+    return {
+        expanded: Array.from(expandedSet),
+        collapsed: Array.from(new Set(mergedCollapsed.filter((id) => !expandedSet.has(id))))
+    };
+}
+
+function __syncTempSectionExpandStateAcrossAllPartitions(sectionId, sourcePartition) {
+    if (!sectionId || !sourcePartition) return { keyCount: 0, writeCount: 0 };
+
+    const sourceKey = __buildCanvasPartitionedViewStateKey('expand', TEMP_EXPAND_STATE_KEY, sourcePartition);
+    const sourceRaw = sourceKey ? __readPartitionedViewJSON(sourceKey, null, 'expand') : null;
+    const sourceState = __normalizeTempExpandStateForSync(sourceRaw);
+
+    let writeCount = 0;
+    CANVAS_VIEW_PARTITIONS.forEach((partitionKey) => {
+        const targetKey = __buildCanvasPartitionedViewStateKey('expand', TEMP_EXPAND_STATE_KEY, partitionKey);
+        const targetRaw = targetKey ? __readPartitionedViewJSON(targetKey, null, 'expand') : null;
+        const targetState = __normalizeTempExpandStateForSync(targetRaw);
+        const mergedState = __mergeTempExpandStateBySection(sourceState, targetState, sectionId);
+        saveViewState('expand', TEMP_EXPAND_STATE_KEY, mergedState, { partitionKey });
+        writeCount += 1;
+    });
+
+    return {
+        keyCount: 1,
+        writeCount
+    };
+}
+
+function __syncExpandAndScrollForFullscreenCard(descriptor, sourcePartition) {
+    if (!descriptor || typeof descriptor !== 'object') return { expandKeyCount: 0, scrollKeyCount: 0 };
+
+    const target = __resolveMaximizedNode(descriptor);
+    const type = String(descriptor.type || '').toLowerCase();
+
+    if (type === 'permanent' || type === 'permanent-copy') {
+        let expandBaseKey = PERMANENT_SECTION_EXPANDED_KEY;
+        let scrollBaseKey = PERMANENT_SECTION_SCROLL_KEY;
+
+        if (target) {
+            if (__isPermanentSectionCopy(target)) {
+                const copyId = String(__getPermanentSectionCopyId(target) || '').trim();
+                if (!copyId) return { expandKeyCount: 0, scrollKeyCount: 0 };
+                expandBaseKey = `${PERMANENT_SECTION_EXPANDED_KEY}:${copyId}`;
+            } else {
+                expandBaseKey = PERMANENT_SECTION_EXPANDED_KEY;
+            }
+            scrollBaseKey = __getPermanentSectionScrollBaseKey(target);
+
+            try {
+                const tree = target.querySelector('.bookmark-tree');
+                if (tree) {
+                    if (typeof __saveTreeExpandStateToStorage === 'function') {
+                        __saveTreeExpandStateToStorage(tree);
+                    } else if (typeof saveTreeExpandState === 'function') {
+                        saveTreeExpandState(tree);
+                    }
+                }
+            } catch (_) { }
+
+            try {
+                const body = target.querySelector('.permanent-section-body');
+                if (body && scrollBaseKey) {
+                    saveViewState('scroll', scrollBaseKey, {
+                        top: body.scrollTop || 0,
+                        left: body.scrollLeft || 0
+                    }, { partitionKey: sourcePartition });
+                }
+            } catch (_) { }
+        } else if (type === 'permanent-copy') {
+            const copyId = String(descriptor.copyId || '').trim();
+            if (!copyId) return { expandKeyCount: 0, scrollKeyCount: 0 };
+            expandBaseKey = `${PERMANENT_SECTION_EXPANDED_KEY}:${copyId}`;
+            scrollBaseKey = `${PERMANENT_SECTION_SCROLL_KEY}:${copyId}`;
+        }
+
+        const expandResult = __copyPartitionedViewStateBaseKeyToAllPartitions('expand', expandBaseKey, sourcePartition);
+        const scrollResult = __copyPartitionedViewStateBaseKeyToAllPartitions('scroll', scrollBaseKey, sourcePartition);
+        return {
+            expandKeyCount: expandResult.keyCount || 0,
+            scrollKeyCount: scrollResult.keyCount || 0
+        };
+    }
+
+    if (type === 'temp-node') {
+        const sectionId = String(descriptor.id || '').trim();
+        if (!sectionId) return { expandKeyCount: 0, scrollKeyCount: 0 };
+
+        const scrollBaseKey = __getTempSectionScrollBaseKey(sectionId);
+        if (target && scrollBaseKey) {
+            try {
+                const body = target.querySelector('.temp-node-body');
+                if (body) {
+                    saveViewState('scroll', scrollBaseKey, {
+                        top: body.scrollTop || 0,
+                        left: body.scrollLeft || 0
+                    }, { partitionKey: sourcePartition });
+                }
+            } catch (_) { }
+        }
+
+        try {
+            const tempExpandState = {
+                expanded: Array.from(LAZY_LOAD_THRESHOLD.expandedFolders),
+                collapsed: Array.from(LAZY_LOAD_THRESHOLD.collapsedFolders)
+            };
+            saveViewState('expand', TEMP_EXPAND_STATE_KEY, tempExpandState, { partitionKey: sourcePartition });
+        } catch (_) { }
+
+        const expandResult = __syncTempSectionExpandStateAcrossAllPartitions(sectionId, sourcePartition);
+        const scrollResult = __copyPartitionedViewStateBaseKeyToAllPartitions('scroll', scrollBaseKey, sourcePartition);
+        return {
+            expandKeyCount: expandResult.keyCount || 0,
+            scrollKeyCount: scrollResult.keyCount || 0
+        };
+    }
+
+    return { expandKeyCount: 0, scrollKeyCount: 0 };
 }
 
 function __flushCurrentPartitionExpandAndScrollState(partitionKey) {
@@ -6439,6 +6663,31 @@ function __applyCurrentPartitionExpandAndScrollSnapshot() {
     } catch (_) { }
 }
 
+function __applyCurrentPartitionFullscreenSnapshot() {
+    const descriptor = __loadMaximizedNodeFromStorage();
+    const activeNode = document.querySelector('.canvas-node-maximized');
+
+    if (!descriptor) {
+        if (activeNode) {
+            try { restoreCanvasNodeLayout(activeNode); } catch (_) { }
+        }
+        CanvasState.pendingMaximizedDescriptor = null;
+        return;
+    }
+
+    const target = __resolveMaximizedNode(descriptor);
+    if (target) {
+        if (activeNode !== target) {
+            try { maximizeCanvasNode(target); } catch (_) { }
+        }
+        CanvasState.pendingMaximizedDescriptor = null;
+        return;
+    }
+
+    CanvasState.pendingMaximizedDescriptor = descriptor;
+    try { __tryRestoreMaximizedNode({ clearIfMissing: false }); } catch (_) { }
+}
+
 function __consumeCanvasViewSyncSignal(payload, source = 'external') {
     if (!payload || typeof payload !== 'object') return;
     const ts = Number(payload.timestamp || 0);
@@ -6454,6 +6703,11 @@ function __consumeCanvasViewSyncSignal(payload, source = 'external') {
 
     if (type === 'expand-scroll') {
         try { __applyCurrentPartitionExpandAndScrollSnapshot(); } catch (_) { }
+        return;
+    }
+
+    if (type === 'fullscreen') {
+        try { __applyCurrentPartitionFullscreenSnapshot(); } catch (_) { }
         return;
     }
 
@@ -6494,13 +6748,53 @@ function __syncCameraAcrossAllPartitions() {
         saveViewState('camera', 'pan', pan, { partitionKey });
     });
 
+    __syncFullscreenAcrossAllPartitions({ showToast: false });
+
     __emitCanvasViewSyncSignal('camera', sourcePartition, { zoom, pan });
 
     const { isEn } = __getLang();
     showCanvasToast(
         isEn
-            ? 'Camera view synced to page + sidepanel.'
-            : '已将相机视角同步到 标签页 + 侧边栏。',
+            ? 'Camera + fullscreen mode synced to page + sidepanel.'
+            : '已将相机 + 全屏模式同步到 标签页 + 侧边栏。',
+        'success',
+        2600
+    );
+}
+
+function __syncFullscreenAcrossAllPartitions(options = {}) {
+    const showToast = !(options && options.showToast === false);
+    const sourcePartition = __getCanvasViewPartitionKey();
+    const descriptor = __getActiveMaximizedNodeDescriptor();
+
+    CANVAS_VIEW_PARTITIONS.forEach((partitionKey) => {
+        const key = __getMaximizedNodeStorageKey(partitionKey);
+        if (!key) return;
+
+        if (descriptor) {
+            saveViewState(NODE_MAXIMIZED_VIEW_STATE_KIND, NODE_MAXIMIZED_STORAGE_KEY, descriptor, { partitionKey });
+            return;
+        }
+
+        try { localStorage.removeItem(key); } catch (_) { }
+    });
+
+    __emitCanvasViewSyncSignal('fullscreen', sourcePartition, {
+        hasFullscreen: !!descriptor,
+        descriptor
+    });
+
+    if (!showToast) return;
+
+    const { isEn } = __getLang();
+    showCanvasToast(
+        descriptor
+            ? (isEn
+                ? 'Fullscreen card synced to page + sidepanel.'
+                : '已将全屏栏目同步到 标签页 + 侧边栏。')
+            : (isEn
+                ? 'Fullscreen mode cleared on page + sidepanel.'
+                : '已清空 标签页 + 侧边栏 的全屏模式。'),
         'success',
         2600
     );
@@ -6508,6 +6802,39 @@ function __syncCameraAcrossAllPartitions() {
 
 function __syncExpandAndScrollAcrossAllPartitions() {
     const sourcePartition = __getCanvasViewPartitionKey();
+    const fullscreenDescriptor = __getActiveMaximizedNodeDescriptor();
+    if (fullscreenDescriptor) {
+        const scopedResult = __syncExpandAndScrollForFullscreenCard(fullscreenDescriptor, sourcePartition);
+        const scopedTotal = (scopedResult.expandKeyCount || 0) + (scopedResult.scrollKeyCount || 0);
+        const { isEn } = __getLang();
+
+        if (!scopedTotal) {
+            showCanvasToast(
+                isEn
+                    ? 'No expand/scroll snapshot found for current fullscreen card.'
+                    : '当前全屏栏目暂无可同步的展开/滚动状态。',
+                'warning',
+                2600
+            );
+            return;
+        }
+
+        __emitCanvasViewSyncSignal('expand-scroll', sourcePartition, {
+            scope: 'current-fullscreen-card',
+            expandKeyCount: scopedResult.expandKeyCount || 0,
+            scrollKeyCount: scopedResult.scrollKeyCount || 0
+        });
+
+        showCanvasToast(
+            isEn
+                ? `Current card expand + scroll synced (${scopedTotal} keys) to page + sidepanel.`
+                : `已将当前栏目的展开与滚动（${scopedTotal} 个键）同步到 标签页 + 侧边栏。`,
+            'success',
+            2800
+        );
+        return;
+    }
+
     __flushCurrentPartitionExpandAndScrollState(sourcePartition);
 
     const expandResult = __copyPartitionedViewStateKindToAllPartitions('expand', sourcePartition);
@@ -6582,6 +6909,8 @@ function setupCanvasViewSyncControls() {
         'canvasViewSyncCameraBtn',
         'canvasViewSyncExpandScrollBtn'
     );
+
+    __updateViewSyncExpandScrollButtonText();
 }
 
 function setupCanvasSidePanelSettingsBtn() {
@@ -10567,11 +10896,26 @@ function __serializeMaximizedNode(element) {
     return null;
 }
 
+function __getActiveMaximizedNodeDescriptor() {
+    const activeNode = document.querySelector('.canvas-node-maximized');
+    if (!activeNode) return null;
+    return __serializeMaximizedNode(activeNode);
+}
+
+function __getMaximizedNodeStorageKey(partitionKey = null) {
+    return __buildCanvasPartitionedViewStateKey(
+        NODE_MAXIMIZED_VIEW_STATE_KIND,
+        NODE_MAXIMIZED_STORAGE_KEY,
+        partitionKey || __getCanvasViewPartitionKey()
+    );
+}
+
 function __saveMaximizedNodeToStorage(element) {
     const payload = __serializeMaximizedNode(element);
     if (!payload) return;
     try {
-        saveSharedState(NODE_MAXIMIZED_STORAGE_KEY, payload);
+        const partitionKey = __getCanvasViewPartitionKey();
+        saveViewState(NODE_MAXIMIZED_VIEW_STATE_KIND, NODE_MAXIMIZED_STORAGE_KEY, payload, { partitionKey });
     } catch (_) { }
 }
 
@@ -10589,14 +10933,16 @@ function __saveLastMaximizedNodeToStorage(element) {
 }
 
 function __clearMaximizedNodeStorage() {
-    try { localStorage.removeItem(NODE_MAXIMIZED_STORAGE_KEY); } catch (_) { }
+    try {
+        localStorage.removeItem(__getMaximizedNodeStorageKey());
+    } catch (_) { }
 }
 
 function __loadMaximizedNodeFromStorage() {
     try {
-        const raw = localStorage.getItem(NODE_MAXIMIZED_STORAGE_KEY);
-        if (!raw) return null;
-        const data = JSON.parse(raw);
+        const key = __getMaximizedNodeStorageKey();
+        if (!key) return null;
+        const data = __readPartitionedViewJSON(key, null);
         if (!data || typeof data !== 'object') return null;
         return data;
     } catch (_) {
@@ -10729,6 +11075,8 @@ function __mutationContainsRemovedMaximizedNode(mutationList) {
 }
 
 function __syncNodeMaximizedStateAfterNodeRemoval() {
+    if (CanvasState.maximizedNodeRemovalObserverMuted) return;
+
     const hadMaximizedContext = !!CanvasState.nodeMaximizedActive
         || !!(document && document.body && document.body.classList && document.body.classList.contains('canvas-node-maximized-active'));
 
@@ -10750,6 +11098,7 @@ function __scheduleNodeMaximizedStateSyncAfterRemoval() {
 
     const run = () => {
         CanvasState.maximizedNodeRemovalSyncFrame = null;
+        if (CanvasState.maximizedNodeRemovalObserverMuted) return;
         __syncNodeMaximizedStateAfterNodeRemoval();
     };
 
@@ -10769,6 +11118,7 @@ function __bindMaximizedNodeRemovalSync() {
 
     try {
         const observer = new MutationObserver((mutationList) => {
+            if (CanvasState.maximizedNodeRemovalObserverMuted) return;
             if (!__mutationContainsRemovedMaximizedNode(mutationList)) return;
             __scheduleNodeMaximizedStateSyncAfterRemoval();
         });
@@ -10862,6 +11212,8 @@ function refreshMaximizedNodes() {
 }
 
 function updateNodeFullscreenButtons() {
+    __updateViewSyncExpandScrollButtonText();
+
     const buttons = document.querySelectorAll('.canvas-node-fullscreen-btn');
     if (!buttons.length) return;
     const lang = getCanvasLanguage();
@@ -21376,14 +21728,19 @@ function renderTempNode(section, options = {}) {
         descriptionText.title = hasContent ? getEditTitle() : (section.suppressPlaceholder ? '' : getAddTitle());
     };
 
-    const persistDesc = ({ normalizeEditorHtml = false } = {}) => {
+    const syncDescDraft = ({ normalizeEditorHtml = false } = {}) => {
         const normalized = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(descriptionText));
         section.description = normalized;
         if (normalizeEditorHtml) {
             descriptionText.innerHTML = normalized;
         }
-        saveTempNodes();
         updateDescMeta();
+        return normalized;
+    };
+
+    const persistDesc = ({ normalizeEditorHtml = false } = {}) => {
+        syncDescDraft({ normalizeEditorHtml });
+        saveTempNodes();
     };
 
     const exitEditingDescription = ({ commit }) => {
@@ -21603,7 +21960,7 @@ function renderTempNode(section, options = {}) {
         enterEdit: enterEditingDescription,
         save: () => {
             if (!isEditingDesc) return;
-            persistDesc({ normalizeEditorHtml: false });
+            syncDescDraft({ normalizeEditorHtml: false });
         },
         nodeId: section.id,
         fontSizeConfig: {
@@ -24452,17 +24809,22 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     }
     let beforeEditStored = savedTipRaw;
 
-    const persistTip = ({ normalizeEditorHtml = false } = {}) => {
+    const syncTipDraft = ({ normalizeEditorHtml = false } = {}) => {
         const normalized = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(tipText));
+        if (normalizeEditorHtml) {
+            tipText.innerHTML = normalized;
+        }
+        updateTipMeta();
+        return normalized;
+    };
+
+    const persistTip = ({ normalizeEditorHtml = false } = {}) => {
+        const normalized = syncTipDraft({ normalizeEditorHtml });
         const key = getStorageKey();
         try {
             if (normalized) saveSharedState(key, normalized, { asJSON: false });
             else localStorage.removeItem(key);
         } catch (_) { }
-        if (normalizeEditorHtml) {
-            tipText.innerHTML = normalized;
-        }
-        updateTipMeta();
     };
 
     const exitEditingTip = ({ commit }) => {
@@ -24672,7 +25034,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         enterEdit: enterEditingTip,
         save: () => {
             if (!isEditingTip) return;
-            persistTip({ normalizeEditorHtml: false });
+            syncTipDraft({ normalizeEditorHtml: false });
         },
         nodeId: sectionEl.id || sectionEl.dataset.permanentSectionCopyId || 'permanentSection',
         fontSizeConfig: {
@@ -31547,6 +31909,14 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external') {
     }
 
     if (__canvasTempStateRealtimeSyncApplying) return;
+
+    const maximizeDescriptor = __getActiveMaximizedNodeDescriptor();
+    const shouldEnableFullscreenGuard = !!maximizeDescriptor;
+    if (shouldEnableFullscreenGuard) {
+        CanvasState.pendingMaximizedDescriptor = maximizeDescriptor;
+        CanvasState.maximizedNodeRemovalObserverMuted = true;
+    }
+
     __canvasTempStateRealtimeSyncApplying = true;
     try {
         __resetCanvasDomAndStateForImport();
@@ -31562,6 +31932,16 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external') {
         console.warn('[Canvas] 外部画布状态同步失败:', error);
     } finally {
         __canvasTempStateRealtimeSyncApplying = false;
+        if (shouldEnableFullscreenGuard) {
+            const releaseGuard = () => {
+                CanvasState.maximizedNodeRemovalObserverMuted = false;
+            };
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(releaseGuard);
+            } else {
+                setTimeout(releaseGuard, 16);
+            }
+        }
     }
 }
 
@@ -33895,6 +34275,7 @@ window.CanvasModule = {
     clear: clearAllTempNodes,
     updateFullscreenButton: updateFullscreenButtonState,
     updateNodeFullscreenButtons: updateNodeFullscreenButtons,
+    updateViewSyncExpandScrollButtonText: __updateViewSyncExpandScrollButtonText,
     openLastFullscreenNode: openLastMaximizedNode,
     updateShortcutDisplays: updateShortcutDisplays, // 更新快捷键显示
     CanvasState: CanvasState, // 导出状态供外部访问（如指针拖拽）
