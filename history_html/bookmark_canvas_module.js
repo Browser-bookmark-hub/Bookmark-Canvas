@@ -6274,6 +6274,23 @@ function setupCanvasManageModal() {
 }
 
 let __canvasViewSyncLastSignalTimestamp = 0;
+let __canvasViewSyncConsumedSignalIds = [];
+const CANVAS_VIEW_SYNC_SIGNAL_ID_CACHE_MAX = 240;
+
+function __hasCanvasViewSyncSignalId(signalId) {
+    if (!signalId || !__canvasViewSyncConsumedSignalIds.length) return false;
+    return __canvasViewSyncConsumedSignalIds.includes(signalId);
+}
+
+function __rememberCanvasViewSyncSignalId(signalId) {
+    if (!signalId) return;
+    __canvasViewSyncConsumedSignalIds.push(signalId);
+    if (__canvasViewSyncConsumedSignalIds.length > CANVAS_VIEW_SYNC_SIGNAL_ID_CACHE_MAX) {
+        __canvasViewSyncConsumedSignalIds = __canvasViewSyncConsumedSignalIds.slice(
+            __canvasViewSyncConsumedSignalIds.length - CANVAS_VIEW_SYNC_SIGNAL_ID_CACHE_MAX
+        );
+    }
+}
 
 function __toggleCanvasViewSyncPanel(toggleBtn, panelEl, forceOpen = null) {
     if (!toggleBtn || !panelEl) return;
@@ -6690,10 +6707,18 @@ function __applyCurrentPartitionFullscreenSnapshot() {
 
 function __consumeCanvasViewSyncSignal(payload, source = 'external') {
     if (!payload || typeof payload !== 'object') return;
+    const signalId = (typeof payload.signalId === 'string' && payload.signalId)
+        ? payload.signalId
+        : '';
+    if (signalId && __hasCanvasViewSyncSignalId(signalId)) return;
+
     const ts = Number(payload.timestamp || 0);
     if (!Number.isFinite(ts) || ts <= 0) return;
-    if (ts <= __canvasViewSyncLastSignalTimestamp) return;
-    __canvasViewSyncLastSignalTimestamp = ts;
+    if (ts < __canvasViewSyncLastSignalTimestamp) return;
+    if (ts > __canvasViewSyncLastSignalTimestamp) {
+        __canvasViewSyncLastSignalTimestamp = ts;
+    }
+    if (signalId) __rememberCanvasViewSyncSignalId(signalId);
 
     const type = String(payload.type || '').toLowerCase();
     if (type === 'camera') {
@@ -6717,7 +6742,9 @@ function __consumeCanvasViewSyncSignal(payload, source = 'external') {
 }
 
 function __emitCanvasViewSyncSignal(type, sourcePartition, meta = null) {
+    const signalId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const payload = {
+        signalId,
         type,
         sourcePartition,
         sourceSurfaceKey: __getCanvasViewSurfaceKey(),
@@ -24821,10 +24848,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     const persistTip = ({ normalizeEditorHtml = false } = {}) => {
         const normalized = syncTipDraft({ normalizeEditorHtml });
         const key = getStorageKey();
-        try {
-            if (normalized) saveSharedState(key, normalized, { asJSON: false });
-            else localStorage.removeItem(key);
-        } catch (_) { }
+        __persistPermanentTipStorageValue(key, normalized);
     };
 
     const exitEditingTip = ({ commit }) => {
@@ -24844,11 +24868,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         } else {
             const restored = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(beforeEditStored));
             tipText.innerHTML = restored;
-            try {
-                const key = getStorageKey();
-                if (beforeEditStored) saveSharedState(key, beforeEditStored, { asJSON: false });
-                else localStorage.removeItem(key);
-            } catch (_) { }
+            __persistPermanentTipStorageValue(getStorageKey(), beforeEditStored);
             updateTipMeta();
         }
 
@@ -24896,7 +24916,6 @@ function bindPermanentSectionTipBehavior(sectionEl) {
 
     const clearPermanentTip = () => {
         tipText.innerHTML = '';
-        try { localStorage.removeItem(getStorageKey()); } catch (_) { }
         updateTipMeta();
         persistTip({ normalizeEditorHtml: true });
 
@@ -25050,7 +25069,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             },
             set: (val) => {
                 if (!Number.isFinite(val)) return;
-                try { saveSharedState(getFontSizeStorageKey(), String(val), { asJSON: false }); } catch (_) { }
+                __persistPermanentTipStorageValue(getFontSizeStorageKey(), String(val));
             }
         }
     });
@@ -32101,6 +32120,79 @@ function __applyCanvasOtherSettingsRealtimeSync(rawValue) {
     } catch (_) { }
 }
 
+const PERMANENT_TIP_TIMESTAMP_KEY_PREFIX = 'canvas-permanent-tip-updated-at:';
+const __permanentTipLastAppliedTimestamp = new Map();
+
+function __buildPermanentTipTimestampStorageKey(storageKey) {
+    if (typeof storageKey !== 'string' || !storageKey) return '';
+    return `${PERMANENT_TIP_TIMESTAMP_KEY_PREFIX}${storageKey}`;
+}
+
+function __readPermanentTipTimestamp(storageKey) {
+    const timestampKey = __buildPermanentTipTimestampStorageKey(storageKey);
+    if (!timestampKey) return 0;
+    try {
+        const raw = localStorage.getItem(timestampKey);
+        const parsed = parseInt(raw, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    } catch (_) {
+        return 0;
+    }
+}
+
+function __writePermanentTipTimestamp(storageKey, timestamp = null) {
+    const timestampKey = __buildPermanentTipTimestampStorageKey(storageKey);
+    if (!timestampKey) return 0;
+
+    const ts = (Number.isFinite(Number(timestamp)) && Number(timestamp) > 0)
+        ? Number(timestamp)
+        : Date.now();
+
+    try {
+        saveSharedState(timestampKey, String(ts), { asJSON: false });
+    } catch (_) { }
+
+    const prev = Number(__permanentTipLastAppliedTimestamp.get(storageKey) || 0);
+    if (ts > prev) {
+        __permanentTipLastAppliedTimestamp.set(storageKey, ts);
+    }
+
+    return ts;
+}
+
+function __shouldApplyPermanentTipRealtimeSync(storageKey) {
+    if (typeof storageKey !== 'string' || !storageKey) return false;
+
+    const nextTs = __readPermanentTipTimestamp(storageKey);
+    if (nextTs <= 0) return true;
+
+    const lastTs = Number(__permanentTipLastAppliedTimestamp.get(storageKey) || 0);
+    if (lastTs > 0 && nextTs < lastTs) {
+        return false;
+    }
+
+    __permanentTipLastAppliedTimestamp.set(storageKey, Math.max(lastTs, nextTs));
+    return true;
+}
+
+function __persistPermanentTipStorageValue(storageKey, value) {
+    if (typeof storageKey !== 'string' || !storageKey) return;
+
+    const ts = __writePermanentTipTimestamp(storageKey, Date.now());
+    try {
+        if (typeof value === 'string' && value) {
+            saveSharedState(storageKey, value, { asJSON: false });
+        } else {
+            localStorage.removeItem(storageKey);
+        }
+    } catch (_) { }
+
+    const prev = Number(__permanentTipLastAppliedTimestamp.get(storageKey) || 0);
+    if (ts > prev) {
+        __permanentTipLastAppliedTimestamp.set(storageKey, ts);
+    }
+}
+
 
 function __parsePermanentTipStorageKey(key) {
     if (typeof key !== 'string' || !key) return null;
@@ -32191,6 +32283,7 @@ function __applyPermanentTipFontSizeRealtimeSync(sectionEl, rawValue) {
 function __applyPermanentTipRealtimeSync(storageKey, rawValue) {
     const parsed = __parsePermanentTipStorageKey(storageKey);
     if (!parsed) return;
+    if (!__shouldApplyPermanentTipRealtimeSync(storageKey)) return;
 
     const sectionEl = __findPermanentTipSectionByStorageKey(parsed);
     if (!sectionEl) return;
@@ -32277,6 +32370,10 @@ function __handleCanvasRealtimeLocalStorageSync(key, rawValue) {
 
     if (key === TEMP_DESC_HEIGHT_SETTINGS_KEY || key === PERMANENT_DESC_HEIGHT_SETTINGS_KEY) {
         __applyDescHeightSettingsRealtimeSync(key, rawValue);
+        return;
+    }
+
+    if (typeof key === 'string' && key.startsWith(PERMANENT_TIP_TIMESTAMP_KEY_PREFIX)) {
         return;
     }
 
