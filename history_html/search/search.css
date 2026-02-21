@@ -18,7 +18,15 @@
     max-height: 360px;
     overflow-y: auto;
     overflow-x: hidden;
-    display: none;
+    scrollbar-gutter: stable both-edges;
+    display: block;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transform: none;
+    will-change: opacity;
+    contain: layout paint;
+    transition: opacity 0.16s ease, visibility 0s linear 0.16s;
     z-index: 200;
 }
 
@@ -40,7 +48,11 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
 }
 
 .search-results-panel.visible {
-    display: block;
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+    transition-delay: 0s;
 }
 
 /* ==================== 空输入提示（Canvas Suggestions Header） ==================== */

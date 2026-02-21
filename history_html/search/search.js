@@ -47,17 +47,15 @@ const searchUiState = {
     isHelpOpen: false
 };
 
-const SIDE_PANEL_SEARCH_COLLAPSE_MS = 150;
-const SIDE_PANEL_SEARCH_EXPAND_MS = 180;
-let sidePanelSearchCollapseTimer = null;
-let sidePanelSearchExpandTimer = null;
-
 const TEMP_SECTION_BUILD_YIELD_EVERY = 180;
 const TEMP_SECTION_INSERT_CHUNK_THRESHOLD = 240;
 const TEMP_SECTION_INSERT_BATCH_SIZE = 120;
 const TEMP_SECTION_LARGE_FOLDER_NODE_THRESHOLD = 320;
 const TEMP_SECTION_LARGE_FOLDER_CHILD_THRESHOLD = 120;
 let isTempSectionCreationInProgress = false;
+const SIDE_PANEL_SEARCH_COLLAPSE_FINISH_MS = 260;
+let sidePanelSearchCollapseCleanupTimer = null;
+let sidePanelSearchCollapseTransitionEndHandler = null;
 const SEARCH_RESULT_HOVER_SUPPRESS_MS_AFTER_NAV = 180;
 const SEARCH_RESULT_HOVER_SUPPRESS_MS_AFTER_WHEEL = 120;
 let lastSearchResultKeyboardNavTs = 0;
@@ -87,41 +85,68 @@ function setSidePanelSearchExpanded(expanded) {
     const container = document.querySelector('.search-container');
     if (!container) return;
 
-    if (sidePanelSearchCollapseTimer) {
-        clearTimeout(sidePanelSearchCollapseTimer);
-        sidePanelSearchCollapseTimer = null;
-    }
-    if (sidePanelSearchExpandTimer) {
-        clearTimeout(sidePanelSearchExpandTimer);
-        sidePanelSearchExpandTimer = null;
-    }
+    const inputWrap = container.querySelector('.search-input-wrapper');
 
     const shouldExpand = !!expanded;
-    if (shouldExpand) {
+    const isExpanded = container.classList.contains('side-panel-search-expanded');
+    const isCollapsing = container.classList.contains('side-panel-search-collapsing');
+
+    const clearCollapseCleanupTimer = () => {
+        if (sidePanelSearchCollapseCleanupTimer) {
+            clearTimeout(sidePanelSearchCollapseCleanupTimer);
+            sidePanelSearchCollapseCleanupTimer = null;
+        }
+    };
+
+    const clearCollapseTransitionEndHandler = () => {
+        if (inputWrap && sidePanelSearchCollapseTransitionEndHandler) {
+            inputWrap.removeEventListener('transitionend', sidePanelSearchCollapseTransitionEndHandler);
+        }
+        sidePanelSearchCollapseTransitionEndHandler = null;
+    };
+
+    const finishCollapse = () => {
+        if (!container.classList.contains('side-panel-search-collapsing')) return;
         container.classList.remove('side-panel-search-collapsing');
-        container.classList.add('side-panel-search-expanded');
-        container.classList.add('side-panel-search-expanding');
+        clearCollapseCleanupTimer();
+        clearCollapseTransitionEndHandler();
+    };
 
-        sidePanelSearchExpandTimer = setTimeout(() => {
-            container.classList.remove('side-panel-search-expanding');
-            sidePanelSearchExpandTimer = null;
-        }, SIDE_PANEL_SEARCH_EXPAND_MS);
-        return;
-    }
-
-    if (!container.classList.contains('side-panel-search-expanded')) {
-        container.classList.remove('side-panel-search-expanding');
-        container.classList.remove('side-panel-search-collapsing');
-        return;
-    }
-
+    // 清理旧动画类（兼容旧样式）
     container.classList.remove('side-panel-search-expanding');
+    if (shouldExpand) container.classList.remove('side-panel-search-collapsing');
+
+    if (shouldExpand) {
+        clearCollapseCleanupTimer();
+        clearCollapseTransitionEndHandler();
+        if (isExpanded && !isCollapsing) return;
+        container.classList.add('side-panel-search-expanded');
+        return;
+    }
+
+    if (!isExpanded && !isCollapsing) return;
+    if (isCollapsing) return;
+
+    clearCollapseCleanupTimer();
+    clearCollapseTransitionEndHandler();
     container.classList.add('side-panel-search-collapsing');
-    sidePanelSearchCollapseTimer = setTimeout(() => {
-        container.classList.remove('side-panel-search-collapsing');
+
+    requestAnimationFrame(() => {
         container.classList.remove('side-panel-search-expanded');
-        sidePanelSearchCollapseTimer = null;
-    }, SIDE_PANEL_SEARCH_COLLAPSE_MS);
+    });
+
+    if (inputWrap && typeof inputWrap.addEventListener === 'function') {
+        sidePanelSearchCollapseTransitionEndHandler = (event) => {
+            if (!event || (event.propertyName !== 'max-width' && event.propertyName !== 'opacity')) return;
+            clearCollapseTransitionEndHandler();
+            finishCollapse();
+        };
+        inputWrap.addEventListener('transitionend', sidePanelSearchCollapseTransitionEndHandler);
+    }
+
+    sidePanelSearchCollapseCleanupTimer = setTimeout(() => {
+        finishCollapse();
+    }, SIDE_PANEL_SEARCH_COLLAPSE_FINISH_MS);
 }
 
 function isSidePanelSearchExpanded() {
@@ -242,12 +267,25 @@ function getSearchResultsPanel() {
     return document.getElementById('searchResultsPanel');
 }
 
+let searchPanelShowFrame = null;
+
 /**
  * 显示搜索结果面板
  */
 function showSearchResultsPanel() {
     const panel = getSearchResultsPanel();
-    if (panel) panel.classList.add('visible');
+    if (!panel) return;
+    if (panel.classList.contains('visible')) return;
+
+    if (searchPanelShowFrame) {
+        cancelAnimationFrame(searchPanelShowFrame);
+        searchPanelShowFrame = null;
+    }
+
+    searchPanelShowFrame = requestAnimationFrame(() => {
+        searchPanelShowFrame = null;
+        panel.classList.add('visible');
+    });
 }
 
 /**
@@ -256,6 +294,10 @@ function showSearchResultsPanel() {
 function hideSearchResultsPanel() {
     const panel = getSearchResultsPanel();
     if (panel) {
+        if (searchPanelShowFrame) {
+            cancelAnimationFrame(searchPanelShowFrame);
+            searchPanelShowFrame = null;
+        }
         panel.classList.remove('visible');
         try { panel.dataset.panelType = ''; } catch (_) { }
     }
@@ -2141,6 +2183,13 @@ function initSearchModeUI() {
                 const hasQuery = !!(input && String(input.value || '').trim());
                 toggleSearchHelpMenu(false);
 
+                // Side Panel（折叠态）下，trigger 的职责是“展开搜索框”，
+                // 不应在 focus 阶段先弹出模式菜单，否则会出现一次额外弹层抖动。
+                if (isSidePanelModeInSearch() && !isSidePanelSearchExpanded()) {
+                    toggleSearchModeMenu(false);
+                    return;
+                }
+
                 if (hasQuery) {
                     // Keep results visible when a query exists; don't open the mode menu.
                     toggleSearchModeMenu(false);
@@ -3811,22 +3860,6 @@ function renderCanvasSearchSuggestions() {
         }
     } catch (_) { }
 
-    // Align the arrow (inside hint) to the center of the left search button.
-    try {
-        requestAnimationFrame(() => {
-            const trigger = document.getElementById('searchModeTrigger');
-            const hint = panel.querySelector('.search-empty-suggestions-hint');
-            if (!trigger || !hint) return;
-            const triggerRect = trigger.getBoundingClientRect();
-            const panelRect = panel.getBoundingClientRect();
-            const centerX = triggerRect.left + triggerRect.width / 2;
-            const arrowHalf = 8;
-            const arrowNudgeLeft = 2;
-            const left = centerX - panelRect.left - arrowHalf - arrowNudgeLeft;
-            const clamped = Math.max(10, Math.min(panelRect.width - 10, left));
-            hint.style.left = `${clamped}px`;
-        });
-    } catch (_) { }
 }
 
 function getDomainCacheKey() {
@@ -5269,18 +5302,87 @@ function highlightSearchTreeItemOutline(treeItem, color = '#3b82f6', doClear = t
 }
 
 function scrollTreeItemIntoView(treeItem) {
-    if (!treeItem || typeof treeItem.scrollIntoView !== 'function') return;
+    if (!treeItem) return;
+
+    const getScrollableContainer = (el) => {
+        if (!el || !el.closest) return null;
+
+        const preferred = el.closest('.permanent-section-body, .temp-node-body');
+        if (preferred) return preferred;
+
+        let current = el.parentElement;
+        while (current && current !== document.body && current !== document.documentElement) {
+            try {
+                const style = window.getComputedStyle(current);
+                const overflowY = style ? String(style.overflowY || '').toLowerCase() : '';
+                const canScrollY = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
+                    && current.scrollHeight > current.clientHeight + 1;
+                if (canScrollY) return current;
+            } catch (_) { }
+            current = current.parentElement;
+        }
+
+        return null;
+    };
+
+    const container = getScrollableContainer(treeItem);
+    if (container) {
+        try {
+            const itemRect = treeItem.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            const itemCenter = itemRect.top + itemRect.height / 2;
+            const containerCenter = containerRect.top + containerRect.height / 2;
+            const delta = itemCenter - containerCenter;
+            if (Math.abs(delta) > 1) {
+                container.scrollTop = Math.max(0, container.scrollTop + delta);
+            }
+            return;
+        } catch (_) { }
+    }
+
+    if (typeof treeItem.scrollIntoView !== 'function') return;
     try {
-        treeItem.scrollIntoView({ block: 'center', behavior: 'instant' });
+        treeItem.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
         return;
     } catch (_) { }
     try {
-        treeItem.scrollIntoView({ block: 'center' });
+        treeItem.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         return;
     } catch (_) { }
     try {
         treeItem.scrollIntoView();
     } catch (_) { }
+}
+
+function shouldSkipCanvasPanForMaximizedTarget(elementId, type) {
+    const targetId = String(elementId || '').trim();
+    if (!targetId) return false;
+
+    const active = document.querySelector('.canvas-node-maximized');
+    if (!active || !active.classList) return false;
+
+    if (type === 'temp-section' && active.classList.contains('temp-canvas-node')) {
+        const activeId = active.dataset && active.dataset.sectionId
+            ? String(active.dataset.sectionId).trim()
+            : String(active.id || '').trim();
+        return activeId === targetId;
+    }
+
+    if (type === 'md-node' && active.classList.contains('md-canvas-node')) {
+        return String(active.id || '').trim() === targetId;
+    }
+
+    if (type === 'permanent-section' && active.classList.contains('permanent-bookmark-section')) {
+        const activeCopyId = active.dataset
+            ? String(active.dataset.permanentSectionCopyId || '').trim()
+            : '';
+        if (activeCopyId) {
+            return activeCopyId === targetId;
+        }
+        return targetId === 'permanentSection';
+    }
+
+    return false;
 }
 
 function isMaximizedTempSectionActive(sectionId) {
@@ -5755,7 +5857,7 @@ async function locateCanvasElement(elementId, type, options = {}) {
                 targetY = pRect.y + pRect.h / 2;
                 foundLocation = true;
                 if (elementId === 'permanentSection') highlightSelector = '#permanentSection';
-                else highlightSelector = `.permanent-bookmark-section[data-copy-id="${elementId}"]`;
+                else highlightSelector = `.permanent-bookmark-section[data-permanent-section-copy-id="${elementId}"]`;
             }
             break;
     }
@@ -5775,61 +5877,64 @@ async function locateCanvasElement(elementId, type, options = {}) {
         if (typeof CanvasState !== 'undefined') {
             const container = document.querySelector('.canvas-main-container');
             if (container) {
-                let currentZoom = CanvasState.zoom || 1;
+                const skipPanForMaximizedTarget = shouldSkipCanvasPanForMaximizedTarget(elementId, type);
+                if (!skipPanForMaximizedTarget) {
+                    let currentZoom = CanvasState.zoom || 1;
 
-                // [Fix] Low Detail Mode / Card Sleep Safety check
-                // If zoom < 0.7, elements might be unloaded/hidden (Virtualization/LOD).
-                // Auto-zoom to 0.8 as requested to ensure visibility.
-                if (currentZoom < 0.7) {
-                    // Auto-zoom to 100% (baseZoom) as requested by user.
-                    currentZoom = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1.0;
-                    if (window.CanvasModule && typeof window.CanvasModule.setZoom === 'function') {
-                        window.CanvasModule.setZoom(currentZoom, null, null, { silent: true });
-                    } else {
-                        CanvasState.zoom = currentZoom;
+                    // [Fix] Low Detail Mode / Card Sleep Safety check
+                    // If zoom < 0.7, elements might be unloaded/hidden (Virtualization/LOD).
+                    // Auto-zoom to 0.8 as requested to ensure visibility.
+                    if (currentZoom < 0.7) {
+                        // Auto-zoom to 100% (baseZoom) as requested by user.
+                        currentZoom = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1.0;
+                        if (window.CanvasModule && typeof window.CanvasModule.setZoom === 'function') {
+                            window.CanvasModule.setZoom(currentZoom, null, null, { silent: true });
+                        } else {
+                            CanvasState.zoom = currentZoom;
+                        }
+                        // Sync CSS Variable immediately
+                        container.style.setProperty('--canvas-scale', currentZoom.toString());
                     }
-                    // Sync CSS Variable immediately
-                    container.style.setProperty('--canvas-scale', currentZoom.toString());
-                }
 
-                const containerRect = container.getBoundingClientRect();
-                const viewportCX = containerRect.width / 2;
-                const viewportCY = containerRect.height / 2;
+                    const containerRect = container.getBoundingClientRect();
+                    const viewportCX = containerRect.width / 2;
+                    const viewportCY = containerRect.height / 2;
 
-                // NewPan = ViewportCenter - Target * Zoom (Ensure Finite)
-                let newPanX = viewportCX - targetX * currentZoom;
-                let newPanY = viewportCY - targetY * currentZoom;
+                    // NewPan = ViewportCenter - Target * Zoom (Ensure Finite)
+                    let newPanX = viewportCX - targetX * currentZoom;
+                    let newPanY = viewportCY - targetY * currentZoom;
 
-                if (!Number.isFinite(newPanX)) newPanX = 0;
-                if (!Number.isFinite(newPanY)) newPanY = 0;
+                    if (!Number.isFinite(newPanX)) newPanX = 0;
+                    if (!Number.isFinite(newPanY)) newPanY = 0;
 
-                // Update State
-                CanvasState.panOffsetX = newPanX;
-                CanvasState.panOffsetY = newPanY;
+                    // Update State
+                    CanvasState.panOffsetX = newPanX;
+                    CanvasState.panOffsetY = newPanY;
 
-                // Apply Transform (Immediate)
-                const content = document.getElementById('canvasContent');
-                if (content) {
-                    if (typeof applyCanvasContentTransform === 'function') {
-                        applyCanvasContentTransform(content, newPanX, newPanY, currentZoom);
-                    } else {
-                        content.style.transform = `translate3d(${newPanX}px, ${newPanY}px, 0) scale(${currentZoom})`;
-                        if (typeof updateCanvasGridLayerTransform === 'function') {
-                            updateCanvasGridLayerTransform(newPanX, newPanY, currentZoom, true);
+                    // Apply Transform (Immediate)
+                    const content = document.getElementById('canvasContent');
+                    if (content) {
+                        if (typeof applyCanvasContentTransform === 'function') {
+                            applyCanvasContentTransform(content, newPanX, newPanY, currentZoom);
+                        } else {
+                            content.style.transform = `translate3d(${newPanX}px, ${newPanY}px, 0) scale(${currentZoom})`;
+                            if (typeof updateCanvasGridLayerTransform === 'function') {
+                                updateCanvasGridLayerTransform(newPanX, newPanY, currentZoom, true);
+                            }
                         }
                     }
-                }
 
-                // Update CSS Vars
-                container.style.setProperty('--canvas-pan-x', `${newPanX}px`);
-                container.style.setProperty('--canvas-pan-y', `${newPanY}px`);
+                    // Update CSS Vars
+                    container.style.setProperty('--canvas-pan-x', `${newPanX}px`);
+                    container.style.setProperty('--canvas-pan-y', `${newPanY}px`);
 
-                // Notify system (if needed)
-                if (typeof updateCanvasTransform === 'function') {
-                    // updateCanvasTransform might overwrite if we don't sync state first. 
-                    // We synced state above.
-                    // Doing rAF to ensure clean update cycle
-                    requestAnimationFrame(() => updateCanvasTransform(false));
+                    // Notify system (if needed)
+                    if (typeof updateCanvasTransform === 'function') {
+                        // updateCanvasTransform might overwrite if we don't sync state first.
+                        // We synced state above.
+                        // Doing rAF to ensure clean update cycle
+                        requestAnimationFrame(() => updateCanvasTransform(false));
+                    }
                 }
             }
         }
