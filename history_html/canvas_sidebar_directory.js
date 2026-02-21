@@ -720,6 +720,8 @@
       color: config.color || '',
       defaultColor: config.defaultColor || '',
       preview: config.preview || '',
+      deleteAction: config.deleteAction || null,
+      showDeleteControl: config.showDeleteControl === true,
       target: config.target || null,
       placeholder: !!config.placeholder
     };
@@ -775,6 +777,12 @@
           variant: 'chain',
           showIcon: false,
           showFoldControl: true,
+          showDeleteControl: true,
+          deleteAction: {
+            kind: 'temp-section',
+            sectionId: section.id,
+            scopeOptions: true
+          },
           target,
           preview,
           children: entry.children.map(toNode)
@@ -790,6 +798,12 @@
         icon: 'fas fa-code-branch',
         variant: 'chain-item',
         showIcon: false,
+        showDeleteControl: true,
+        deleteAction: {
+          kind: 'temp-section',
+          sectionId: section.id,
+          scopeOptions: false
+        },
         target,
         preview
       });
@@ -1116,6 +1130,14 @@
         iconText,
         iconTone,
         variant,
+        showDeleteControl: true,
+        deleteAction: {
+          kind: 'md-node',
+          nodeId: node.id,
+          scopeOptions: !!(node && node.subtype === 'import-container'),
+          currentTitle: t('仅删除框体', 'Delete frame only'),
+          allTitle: t('删除全部内容', 'Delete all content')
+        },
         target: { kind: 'md-node', nodeId: node.id },
         preview: ''
       }));
@@ -1177,6 +1199,11 @@
           color: edgeColorResolver(edge),
           defaultColor,
           icon: 'fas fa-link',
+          showDeleteControl: true,
+          deleteAction: {
+            kind: 'edge',
+            edgeId
+          },
           target: { kind: 'edge', edgeId, fromNode, toNode },
           preview
         });
@@ -1274,6 +1301,11 @@
         icon: 'fas fa-copy',
         iconText: '#',
         iconTone: 'hash',
+        showDeleteControl: true,
+        deleteAction: {
+          kind: 'permanent-copy',
+          copyId
+        },
         target: { kind: 'permanent-copy', copyId },
         preview: getPermanentDescription(copyId)
       }));
@@ -1337,6 +1369,12 @@
           icon: 'fas fa-copy',
           iconText: '#',
           iconTone: 'hash',
+          showDeleteControl: true,
+          deleteAction: {
+            kind: 'temp-section',
+            sectionId: section.id,
+            scopeOptions: false
+          },
           target: { kind: 'temp-section', sectionId: section.id },
           preview: getTempSectionDescription(section)
         }));
@@ -1576,6 +1614,147 @@
     return spacer;
   }
 
+  function getDeleteActionLabels(action) {
+    const fallbackDelete = t('删除', 'Delete');
+    const fallbackConfirm = t('确认删除', 'Confirm deletion');
+    const fallbackCancel = t('取消删除', 'Cancel deletion');
+    const fallbackCurrent = t('仅删除当前', 'Delete current only');
+    const fallbackAll = t('删除当前及子级', 'Delete current and children');
+    const kind = normalizeText(action && action.kind);
+
+    if (kind === 'import-group') {
+      return {
+        delete: t('删除导入区块', 'Delete imported group'),
+        confirm: t('确认删除导入区块', 'Confirm delete imported group'),
+        cancel: fallbackCancel,
+        current: fallbackCurrent,
+        all: fallbackAll
+      };
+    }
+
+    if (kind === 'permanent-copy') {
+      return {
+        delete: t('删除永久栏目副本', 'Delete permanent copy'),
+        confirm: t('确认删除永久栏目副本', 'Confirm delete permanent copy'),
+        cancel: fallbackCancel,
+        current: fallbackCurrent,
+        all: fallbackAll
+      };
+    }
+
+    if (kind === 'temp-section') {
+      return {
+        delete: t('删除临时栏目', 'Delete temporary section'),
+        confirm: t('确认删除临时栏目', 'Confirm delete temporary section'),
+        cancel: fallbackCancel,
+        current: (action && action.currentTitle) || fallbackCurrent,
+        all: (action && action.allTitle) || fallbackAll
+      };
+    }
+
+    if (kind === 'md-node') {
+      return {
+        delete: t('删除空白栏目', 'Delete blank card'),
+        confirm: t('确认删除空白栏目', 'Confirm delete blank card'),
+        cancel: fallbackCancel,
+        current: (action && action.currentTitle) || fallbackCurrent,
+        all: (action && action.allTitle) || fallbackAll
+      };
+    }
+
+    if (kind === 'edge') {
+      return {
+        delete: t('删除连接线', 'Delete edge'),
+        confirm: t('确认删除连接线', 'Confirm delete edge'),
+        cancel: fallbackCancel,
+        current: fallbackCurrent,
+        all: fallbackAll
+      };
+    }
+
+    return {
+      delete: fallbackDelete,
+      confirm: fallbackConfirm,
+      cancel: fallbackCancel,
+      current: fallbackCurrent,
+      all: fallbackAll
+    };
+  }
+
+  function appendNodeDeleteControl(containerEl, node) {
+    if (!containerEl || !node || !node.showDeleteControl || !node.deleteAction) return;
+
+    const action = node.deleteAction;
+    const labels = getDeleteActionLabels(action);
+    const deleteUiOpen = !!pendingDeleteUiKey && pendingDeleteUiKey === node.key;
+    const deleteWrap = document.createElement('span');
+    deleteWrap.className = 'canvas-dir-folder-delete-wrap';
+    if (deleteUiOpen) {
+      deleteWrap.classList.add('is-open');
+    }
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'canvas-dir-folder-delete';
+    if (deleteUiOpen) {
+      deleteBtn.classList.add('is-armed');
+    }
+    deleteBtn.dataset.nodeDeleteKey = node.key;
+    deleteBtn.setAttribute('aria-label', labels.delete);
+    deleteBtn.title = labels.delete;
+    deleteBtn.innerHTML = '<i class="fas fa-trash" aria-hidden="true"></i>';
+    deleteWrap.appendChild(deleteBtn);
+
+    nodeDeleteActionMap.set(node.key, action);
+
+    if (deleteUiOpen) {
+      const secondaryWrap = document.createElement('span');
+      secondaryWrap.className = 'canvas-dir-folder-delete-secondary';
+
+      if (action.scopeOptions) {
+        const currentBtn = document.createElement('button');
+        currentBtn.type = 'button';
+        currentBtn.className = 'canvas-dir-folder-delete-current';
+        currentBtn.dataset.nodeDeleteKey = node.key;
+        currentBtn.setAttribute('aria-label', labels.current);
+        currentBtn.dataset.tooltip = labels.current;
+        currentBtn.innerHTML = '<i class="fas fa-circle" aria-hidden="true"></i>';
+        secondaryWrap.appendChild(currentBtn);
+
+        const allBtn = document.createElement('button');
+        allBtn.type = 'button';
+        allBtn.className = 'canvas-dir-folder-delete-all';
+        allBtn.dataset.nodeDeleteKey = node.key;
+        allBtn.setAttribute('aria-label', labels.all);
+        allBtn.dataset.tooltip = labels.all;
+        allBtn.innerHTML = '<i class="fas fa-layer-group" aria-hidden="true"></i>';
+        secondaryWrap.appendChild(allBtn);
+      } else {
+        const confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.className = 'canvas-dir-folder-delete-confirm';
+        confirmBtn.dataset.nodeDeleteKey = node.key;
+        confirmBtn.title = labels.confirm;
+        confirmBtn.setAttribute('aria-label', labels.confirm);
+        confirmBtn.innerHTML = '<i class="fas fa-check" aria-hidden="true"></i>';
+        secondaryWrap.appendChild(confirmBtn);
+      }
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'canvas-dir-folder-delete-cancel';
+      cancelBtn.dataset.nodeDeleteKey = node.key;
+      cancelBtn.title = labels.cancel;
+      cancelBtn.setAttribute('aria-label', labels.cancel);
+      cancelBtn.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
+      secondaryWrap.appendChild(cancelBtn);
+
+      deleteWrap.appendChild(secondaryWrap);
+    }
+
+    containerEl.appendChild(deleteWrap);
+  }
+
   function renderNode(node, openFolderKeys) {
     if (node.type === 'folder') {
       const details = document.createElement('details');
@@ -1608,52 +1787,7 @@
         nodeActionMap.set(node.key, node.target);
       }
 
-      if (node.showDeleteControl && node.deleteAction) {
-        const deleteUiOpen = !!pendingDeleteUiKey && pendingDeleteUiKey === node.key;
-        const deleteWrap = document.createElement('span');
-        deleteWrap.className = 'canvas-dir-folder-delete-wrap';
-
-        const deleteBtn = document.createElement('button');
-        deleteBtn.type = 'button';
-        deleteBtn.className = 'canvas-dir-folder-delete';
-        if (deleteUiOpen) {
-          deleteBtn.classList.add('is-armed');
-        }
-        deleteBtn.dataset.nodeDeleteKey = node.key;
-        deleteBtn.setAttribute('aria-label', t('删除导入区块', 'Delete imported group'));
-        nodeDeleteActionMap.set(node.key, node.deleteAction);
-
-        deleteBtn.title = t('删除导入区块', 'Delete imported group');
-        deleteBtn.innerHTML = '<i class="fas fa-trash" aria-hidden="true"></i>';
-        deleteWrap.appendChild(deleteBtn);
-
-        if (deleteUiOpen) {
-          const secondaryWrap = document.createElement('span');
-          secondaryWrap.className = 'canvas-dir-folder-delete-secondary';
-
-          const confirmBtn = document.createElement('button');
-          confirmBtn.type = 'button';
-          confirmBtn.className = 'canvas-dir-folder-delete-confirm';
-          confirmBtn.dataset.nodeDeleteKey = node.key;
-          confirmBtn.title = t('确认删除导入区块', 'Confirm delete imported group');
-          confirmBtn.setAttribute('aria-label', t('确认删除导入区块', 'Confirm delete imported group'));
-          confirmBtn.innerHTML = '<i class="fas fa-check" aria-hidden="true"></i>';
-          secondaryWrap.appendChild(confirmBtn);
-
-          const cancelBtn = document.createElement('button');
-          cancelBtn.type = 'button';
-          cancelBtn.className = 'canvas-dir-folder-delete-cancel';
-          cancelBtn.dataset.nodeDeleteKey = node.key;
-          cancelBtn.title = t('取消删除', 'Cancel deletion');
-          cancelBtn.setAttribute('aria-label', t('取消删除', 'Cancel deletion'));
-          cancelBtn.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
-          secondaryWrap.appendChild(cancelBtn);
-
-          deleteWrap.appendChild(secondaryWrap);
-        }
-
-        summary.appendChild(deleteWrap);
-      }
+      appendNodeDeleteControl(summary, node);
 
       if (typeof node.count === 'number') {
         const count = document.createElement('span');
@@ -1732,8 +1866,19 @@
       btn.classList.add('canvas-dir-no-icon');
     }
     btn.appendChild(buildLabelElement(node));
+    if (node.showDeleteControl && node.deleteAction) {
+      btn.classList.add('canvas-dir-item-btn-has-delete');
+    }
 
     item.appendChild(btn);
+
+    if (node.showDeleteControl && node.deleteAction) {
+      appendNodeDeleteControl(item, node);
+      const maybeDeleteWrap = item.lastElementChild;
+      if (maybeDeleteWrap && maybeDeleteWrap.classList && maybeDeleteWrap.classList.contains('canvas-dir-folder-delete-wrap')) {
+        maybeDeleteWrap.classList.add('canvas-dir-item-delete-wrap');
+      }
+    }
 
     if (node.preview) {
       const preview = document.createElement('div');
@@ -2002,7 +2147,180 @@
     return removed;
   }
 
+  function collectTempSectionDeleteIds(sectionId, includeDescendants = false) {
+    const normalizedId = normalizeText(sectionId);
+    if (!normalizedId) return [];
+
+    const state = getCanvasState();
+    const sections = Array.isArray(state && state.tempSections)
+      ? state.tempSections.filter(Boolean)
+      : [];
+
+    if (!sections.length) return [normalizedId];
+
+    const sectionById = new Map();
+    const labelById = new Map();
+    sections.forEach((section) => {
+      const id = normalizeText(section && section.id);
+      if (!id) return;
+      sectionById.set(id, section);
+      labelById.set(id, normalizeText(getTempSectionLabel(section)));
+    });
+
+    const target = sectionById.get(normalizedId);
+    if (!target) return [normalizedId];
+
+    const targetLabel = labelById.get(normalizedId) || '';
+    const ids = new Set([normalizedId]);
+
+    if (includeDescendants && targetLabel) {
+      const prefix = `${targetLabel}-`;
+      labelById.forEach((label, id) => {
+        if (!label) return;
+        if (label === targetLabel || label.startsWith(prefix)) {
+          ids.add(id);
+        }
+      });
+    }
+
+    return Array.from(ids).sort((a, b) => {
+      const la = labelById.get(a) || '';
+      const lb = labelById.get(b) || '';
+      if (la.length !== lb.length) return lb.length - la.length;
+      return compareText(a, b);
+    });
+  }
+
+  function runDeleteTempSectionAction(action, mode = 'confirm') {
+    if (!action || action.kind !== 'temp-section') return false;
+    const sectionId = normalizeText(action.sectionId);
+    if (!sectionId || typeof global.removeTempNode !== 'function') return false;
+
+    const includeDescendants = !!(action.scopeOptions && mode === 'all');
+    const ids = collectTempSectionDeleteIds(sectionId, includeDescendants);
+    let removed = false;
+
+    ids.forEach((id) => {
+      try {
+        global.removeTempNode(id);
+        removed = true;
+      } catch (_) { }
+    });
+
+    return removed;
+  }
+
+  function runDeleteMdNodeAction(action, mode = 'confirm') {
+    if (!action || action.kind !== 'md-node') return false;
+    const nodeId = normalizeText(action.nodeId);
+    if (!nodeId || typeof global.removeMdNode !== 'function') return false;
+    const deleteChildren = !!(action.scopeOptions && mode === 'all');
+
+    try {
+      global.removeMdNode(nodeId, deleteChildren);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function runDeleteEdgeAction(action) {
+    if (!action || action.kind !== 'edge') return false;
+    const edgeId = normalizeText(action.edgeId);
+    if (!edgeId || typeof global.removeEdge !== 'function') return false;
+    try {
+      global.removeEdge(edgeId);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function runDeletePermanentCopyAction(action) {
+    if (!action || action.kind !== 'permanent-copy') return false;
+    const copyId = normalizeText(action.copyId);
+    if (!copyId || typeof global.removePermanentSectionCopy !== 'function') return false;
+
+    const escaped = escapeSelector(copyId);
+    const sectionEl = (escaped
+      ? document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${escaped}"]`)
+      : null)
+      || document.getElementById(`permanent-section-copy-${copyId}`);
+
+    if (!sectionEl) return false;
+
+    try {
+      global.removePermanentSectionCopy(sectionEl);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function runDirectoryDeleteAction(action, mode = 'confirm') {
+    if (!action || typeof action !== 'object') return false;
+
+    switch (normalizeText(action.kind)) {
+      case 'import-group':
+        return runDeleteImportedGroupAction(action);
+      case 'temp-section':
+        return runDeleteTempSectionAction(action, mode);
+      case 'md-node':
+        return runDeleteMdNodeAction(action, mode);
+      case 'edge':
+        return runDeleteEdgeAction(action);
+      case 'permanent-copy':
+        return runDeletePermanentCopyAction(action);
+      default:
+        return false;
+    }
+  }
+
   function handleRootClick(event) {
+    const deleteCurrentBtn = event && event.target && event.target.closest
+      ? event.target.closest('.canvas-dir-folder-delete-current')
+      : null;
+    if (deleteCurrentBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const nodeKey = normalizeText(deleteCurrentBtn.dataset && deleteCurrentBtn.dataset.nodeDeleteKey);
+      if (!nodeKey) return;
+
+      const action = nodeDeleteActionMap.get(nodeKey);
+      if (!action) {
+        clearPendingDeleteUi({ refresh: true });
+        return;
+      }
+
+      clearPendingDeleteUi();
+      runDirectoryDeleteAction(action, 'current');
+      queueRefresh({ force: true });
+      return;
+    }
+
+    const deleteAllBtn = event && event.target && event.target.closest
+      ? event.target.closest('.canvas-dir-folder-delete-all')
+      : null;
+    if (deleteAllBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const nodeKey = normalizeText(deleteAllBtn.dataset && deleteAllBtn.dataset.nodeDeleteKey);
+      if (!nodeKey) return;
+
+      const action = nodeDeleteActionMap.get(nodeKey);
+      if (!action) {
+        clearPendingDeleteUi({ refresh: true });
+        return;
+      }
+
+      clearPendingDeleteUi();
+      runDirectoryDeleteAction(action, 'all');
+      queueRefresh({ force: true });
+      return;
+    }
+
     const deleteConfirmBtn = event && event.target && event.target.closest
       ? event.target.closest('.canvas-dir-folder-delete-confirm')
       : null;
@@ -2020,7 +2338,7 @@
       }
 
       clearPendingDeleteUi();
-      runDeleteImportedGroupAction(action);
+      runDirectoryDeleteAction(action, 'confirm');
       queueRefresh({ force: true });
       return;
     }

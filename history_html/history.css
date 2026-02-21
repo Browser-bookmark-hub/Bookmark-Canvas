@@ -3101,6 +3101,19 @@ body.sidebar-resizing * {
     position: relative;
 }
 
+.canvas-dir-item-btn.canvas-dir-item-btn-has-delete {
+    padding-right: 56px;
+}
+
+.canvas-dir-item-delete-wrap {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 0;
+    z-index: 2;
+}
+
 .canvas-dir-item-btn.canvas-dir-node-colored,
 .canvas-dir-folder>summary.canvas-dir-node-colored {
     color: var(--canvas-dir-node-color, var(--text-secondary));
@@ -3232,6 +3245,18 @@ body.sidebar-resizing * {
     align-items: center;
     gap: 4px;
     flex: 0 0 auto;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.14s ease;
+}
+
+.canvas-dir-folder>summary:hover>.canvas-dir-folder-delete-wrap,
+.canvas-dir-folder>summary:focus-within>.canvas-dir-folder-delete-wrap,
+.canvas-dir-item:hover>.canvas-dir-item-delete-wrap,
+.canvas-dir-item:focus-within>.canvas-dir-item-delete-wrap,
+.canvas-dir-folder-delete-wrap.is-open {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .canvas-dir-folder-delete {
@@ -3276,6 +3301,8 @@ body.sidebar-resizing * {
 }
 
 .canvas-dir-folder-delete-confirm,
+.canvas-dir-folder-delete-current,
+.canvas-dir-folder-delete-all,
 .canvas-dir-folder-delete-cancel {
     width: 13px;
     height: 13px;
@@ -3292,6 +3319,8 @@ body.sidebar-resizing * {
 }
 
 .canvas-dir-folder-delete-confirm i,
+.canvas-dir-folder-delete-current i,
+.canvas-dir-folder-delete-all i,
 .canvas-dir-folder-delete-cancel i {
     font-size: 8px;
 }
@@ -3299,6 +3328,70 @@ body.sidebar-resizing * {
 .canvas-dir-folder-delete-confirm:hover {
     color: var(--success, #22c55e);
     background: color-mix(in srgb, var(--success, #22c55e) 18%, transparent);
+}
+
+.canvas-dir-folder-delete-current:hover {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+}
+
+.canvas-dir-folder-delete-all:hover {
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+}
+
+.canvas-dir-folder-delete-current,
+.canvas-dir-folder-delete-all {
+    position: relative;
+}
+
+.canvas-dir-folder-delete-current::before,
+.canvas-dir-folder-delete-current::after,
+.canvas-dir-folder-delete-all::before,
+.canvas-dir-folder-delete-all::after {
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+    left: 50%;
+    z-index: 48;
+    transition: opacity 0.08s ease, transform 0.08s ease;
+}
+
+.canvas-dir-folder-delete-current::after,
+.canvas-dir-folder-delete-all::after {
+    content: attr(data-tooltip);
+    bottom: calc(100% + 8px);
+    transform: translateX(-50%) translateY(3px);
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.15;
+    white-space: nowrap;
+    color: #fff;
+    background: rgba(20, 22, 28, 0.94);
+    box-shadow: 0 5px 16px rgba(0, 0, 0, 0.35);
+}
+
+.canvas-dir-folder-delete-current::before,
+.canvas-dir-folder-delete-all::before {
+    content: '';
+    bottom: calc(100% + 3px);
+    transform: translateX(-50%) translateY(3px);
+    border: 5px solid transparent;
+    border-top-color: rgba(20, 22, 28, 0.94);
+}
+
+.canvas-dir-folder-delete-current:hover::before,
+.canvas-dir-folder-delete-current:hover::after,
+.canvas-dir-folder-delete-current:focus-visible::before,
+.canvas-dir-folder-delete-current:focus-visible::after,
+.canvas-dir-folder-delete-all:hover::before,
+.canvas-dir-folder-delete-all:hover::after,
+.canvas-dir-folder-delete-all:focus-visible::before,
+.canvas-dir-folder-delete-all:focus-visible::after {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
 }
 
 .canvas-dir-folder-delete-cancel:hover {
@@ -5140,24 +5233,26 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .bookmark-context-menu .context-menu-item.swsg-option .context-menu-item-label {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
     flex-wrap: nowrap;
-    gap: 8px;
+    gap: 3px;
 }
 
 .bookmark-context-menu .context-menu-item.swsg-option .context-menu-item-label > .swsg-title {
-    width: auto;
+    width: 100%;
     flex: 1 1 auto;
     min-width: 0;
     white-space: nowrap;
 }
 
 .bookmark-context-menu .context-menu-item.swsg-option .swsg-badge-row {
-    width: auto;
-    margin-left: auto;
+    width: 100%;
+    margin-left: 0;
     flex: 0 0 auto;
+    justify-content: flex-start;
+    flex-wrap: wrap;
     gap: 4px;
 }
 
@@ -5167,7 +5262,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .bookmark-context-menu.horizontal-layout .context-menu-item.swsg-option {
     min-width: auto;
-    align-items: center;
+    align-items: flex-start;
 }
 
 .bookmark-context-menu .context-menu-item .swsg-title {
@@ -9435,7 +9530,10 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
 }
 
 .permanent-section-actions .canvas-layout-zoom-controls,
-.temp-node-actions .canvas-layout-zoom-controls,
+.temp-node-actions .canvas-layout-zoom-controls {
+    margin: 0;
+}
+
 .md-node-toolbar .canvas-layout-zoom-controls {
     margin-right: 6px;
 }
@@ -9492,6 +9590,14 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
     visibility: visible !important;
     opacity: 1 !important;
     pointer-events: auto !important;
+}
+
+.temp-canvas-node.canvas-node-maximized .temp-node-actions .temp-node-rename-btn {
+    order: -1;
+}
+
+.temp-canvas-node.canvas-node-maximized .temp-node-actions .canvas-layout-zoom-controls {
+    order: 0;
 }
 
 .temp-canvas-node.canvas-node-maximized .temp-node-color-wrap .temp-color-popover {

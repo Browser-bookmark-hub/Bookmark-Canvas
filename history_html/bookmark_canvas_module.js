@@ -14,9 +14,12 @@ const NODE_LAST_MAXIMIZED_STORAGE_KEY = 'canvas-node-last-maximized-v1';
 const LAST_MAXIMIZED_NODE_UPDATED_EVENT = 'canvas-last-maximized-node-updated';
 const NODE_LAYOUT_ZOOM_STORAGE_KEY = 'canvas-node-layout-zoom-v1';
 const NODE_LAYOUT_ZOOM_DEFAULT = 150;
+const NODE_LAYOUT_ZOOM_DEFAULT_SECTION = 125;
 const NODE_LAYOUT_ZOOM_MIN = 50;
 const NODE_LAYOUT_ZOOM_MAX = 200;
 const NODE_LAYOUT_ZOOM_STEP = 5;
+const NODE_LAYOUT_ZOOM_STABILIZE_DELAY_MS = 96;
+const nodeLayoutZoomStabilizeTimerMap = new WeakMap();
 const MD_NODE_DEFAULT_FONT_SIZE = 20;
 const MD_NODE_LEGACY_DEFAULT_FONT_SIZE = 14;
 const TEMP_DESC_HEIGHT_SETTINGS_KEY = 'canvas-temp-desc-height-settings-v1';
@@ -56,7 +59,9 @@ const CanvasState = {
     touchpadState: {
         isScrolling: false, // 是否正在画布级别的滚动
         lastScrollTime: 0,
-        scrollTimeout: null
+        scrollTimeout: null,
+        lastZoomDelta: 0,
+        zoomDeltaTimer: null
     },
     lastCanvasScrollTime: 0,
     // 自动滚动状态（拖动到边缘时）
@@ -1584,6 +1589,17 @@ const ZOOM_CURVE_ABS_MAX_FACTOR = 2.4;
 const ZOOM_CURVE_EXPONENT = 1.35;
 const ZOOM_CURVE_RAW_MAX = Math.pow(ZOOM_CURVE_ABS_MAX_FACTOR / ZOOM_CURVE_MAX_FACTOR, 1 / ZOOM_CURVE_EXPONENT);
 const ZOOM_SPEED_GLOBAL_MULTIPLIER = 0.5;
+const TRACKPAD_ZOOM_RATE_MIN = 0.4;
+const TRACKPAD_ZOOM_RATE_MAX = 3.0;
+const TRACKPAD_ZOOM_RATE_DEFAULT = 1.0;
+const TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER = 3.0;
+const TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR = 100;
+const TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER = 0.34;
+const TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN = 0.26;
+const TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX = 0.72;
+const TRACKPAD_ZOOM_STEP_CAP_MIN = 1.015;
+const TRACKPAD_ZOOM_STEP_CAP_MAX = 1.07;
+const TRACKPAD_ZOOM_IDLE_RESET_MS = 96;
 const TEMP_COLOR_LOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2a4 4 0 0 0-4 4v3H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1V6a4 4 0 0 0-4-4zm-2 7V6a2 2 0 1 1 4 0v3h-4z"/></svg>';
 const TEMP_COLOR_UNLOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M17 9h-1V7a4 4 0 0 0-7.4-2.2 1 1 0 1 0 1.7 1A2 2 0 0 1 14 7v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm0 9H7v-7h10v7z"/></svg>';
 const DEFAULT_CANVAS_OTHER_SETTINGS = {
@@ -1604,6 +1620,7 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
         p2: { x: 0.67, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) },
         p3: { x: 1, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) }
     },
+    trackpadZoomRate: TRACKPAD_ZOOM_RATE_DEFAULT,
     magnetPoints: {
         m1: { x: 0.67, y: 0.10 },
         m2: { x: 0.25, y: 0.10 }
@@ -1823,6 +1840,7 @@ function normalizeCanvasOtherSettings(input) {
     if (typeof input.tempColorUnlockSync === 'boolean') out.tempColorUnlockSync = input.tempColorUnlockSync;
     if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
     out.zoomCurve = __normalizeZoomCurve(input.zoomCurve);
+    out.trackpadZoomRate = __clampNumber(input.trackpadZoomRate, TRACKPAD_ZOOM_RATE_MIN, TRACKPAD_ZOOM_RATE_MAX, out.trackpadZoomRate);
     out.magnetPoints = __normalizeMagnetPoints(input.magnetPoints);
     return out;
 }
@@ -5858,19 +5876,14 @@ function setupCanvasZoomAndPan() {
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
 
-            // [FIX] 移除不稳定的阈值判断 (delta < 50)，防止快速滑动时系数突变导致的顿挫
+            // 基础缩放速率（滚轮）
             let zoomSpeed = 0.001;
 
             // 检测是否为触控板（delta 值较小通常意味着触控板或高精度输入设备）
             const isTouchpad = (Math.abs(e.deltaY) < 50 && Math.abs(e.deltaX) < 50) && e.deltaMode === 0;
-            if (isTouchpad) {
-                // 双指捏合缩放优化：参考滚轮缩放，提高触控板的缩放速率
-                // 触控板产生的 delta 通常较小（个位数），需要更高的系数才能达到舒适的缩放速度
-                zoomSpeed = 0.005;
-            }
 
             // Shift+滚轮在某些浏览器会变成横向滚动，需要使用 deltaX 或 deltaY
-            const delta = e.deltaY !== 0 ? -e.deltaY : -e.deltaX;
+            const rawDelta = e.deltaY !== 0 ? -e.deltaY : -e.deltaX;
 
             // [FIX] 核心修复：消除“钝感”和“阶梯感”
             // 如果有 pendingZoomRequest，说明上一帧的缩放还没渲染出来。
@@ -5880,21 +5893,27 @@ function setupCanvasZoomAndPan() {
             // 缩放磁矩：接近关键阈值时减速，离开附近恢复正常曲线
             const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
             const displayZoomForCalc = baseZoomForCalc / base;
-            const nextDisplayZoomNoMagnet = (baseZoomForCalc * Math.exp(delta * zoomSpeed)) / base;
-            const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
-            const speedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
-            const effectiveDelta = delta * magnet.factor * speedFactor * ZOOM_SPEED_GLOBAL_MULTIPLIER;
+            let zoomFactor = 1;
 
-            // 计算缩放因子：delta > 0 放大，delta < 0 缩小
-            // 使用 Math.exp 实现指数缩放，确保放大和缩小是对称的
-            let zoomFactor = Math.exp(effectiveDelta * zoomSpeed);
+            if (isTouchpad) {
+                zoomFactor = getCanvasTrackpadZoomFactor(rawDelta);
+            } else {
+                const nextDisplayZoomNoMagnet = (baseZoomForCalc * Math.exp(rawDelta * zoomSpeed)) / base;
+                const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
+                const wheelCurveSpeedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
+                const effectiveDelta = rawDelta * magnet.factor * wheelCurveSpeedFactor * ZOOM_SPEED_GLOBAL_MULTIPLIER;
 
-            // 快速缩放时避免“一步跨过磁矩区”：在磁矩附近对每次事件的最大步进做限制
-            // 这样高速/普通速度都能感受到“缓慢区”，同时避免普通速度出现明显“顿挫停顿”。
-            if (magnet && magnet.strength > 0) {
-                const cap = Math.max(1.02, Math.min(1.10, 1.10 - 0.08 * magnet.strength));
-                if (zoomFactor > cap) zoomFactor = cap;
-                if (zoomFactor < (1 / cap)) zoomFactor = 1 / cap;
+                // 计算缩放因子：delta > 0 放大，delta < 0 缩小
+                // 使用 Math.exp 实现指数缩放，确保放大和缩小是对称的
+                zoomFactor = Math.exp(effectiveDelta * zoomSpeed);
+
+                // 快速缩放时避免“一步跨过磁矩区”：在磁矩附近对每次事件的最大步进做限制
+                // 这样高速/普通速度都能感受到“缓慢区”，同时避免普通速度出现明显“顿挫停顿”。
+                if (magnet && magnet.strength > 0) {
+                    const cap = Math.max(1.02, Math.min(1.10, 1.10 - 0.08 * magnet.strength));
+                    if (zoomFactor > cap) zoomFactor = cap;
+                    if (zoomFactor < (1 / cap)) zoomFactor = 1 / cap;
+                }
             }
             let newZoom = baseZoomForCalc * zoomFactor;
 
@@ -6696,6 +6715,8 @@ function __applyCurrentPartitionFullscreenSnapshot() {
     if (target) {
         if (activeNode !== target) {
             try { maximizeCanvasNode(target); } catch (_) { }
+        } else {
+            try { __scheduleNodeLayoutZoomStabilize(target); } catch (_) { }
         }
         CanvasState.pendingMaximizedDescriptor = null;
         return;
@@ -7899,6 +7920,58 @@ function getCanvasZoomSpeedFactor(displayZoom) {
     if (shouldUseDefaultZoomCurve()) return 1;
     const curve = getCanvasZoomCurveSettings();
     return __getZoomSpeedFactorFromCurve(displayZoom, curve);
+}
+
+function getCanvasTrackpadZoomRate(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return __clampNumber(
+        settings && settings.trackpadZoomRate,
+        TRACKPAD_ZOOM_RATE_MIN,
+        TRACKPAD_ZOOM_RATE_MAX,
+        TRACKPAD_ZOOM_RATE_DEFAULT
+    );
+}
+
+function getCanvasTrackpadZoomFactor(rawDelta) {
+    const delta = Number(rawDelta);
+    if (!Number.isFinite(delta) || delta === 0) return 1;
+
+    const absDelta = Math.abs(delta);
+    const rateFactor = getCanvasTrackpadZoomRate() * TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER;
+
+    // 与 Chromium 的 pinch->wheel 映射保持一致：scale = exp(-deltaY / 100)
+    // 这里 rawDelta = -deltaY，因此 nativeLogDelta = rawDelta / 100
+    const nativeLogDelta = delta / TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR;
+    const targetLogDelta = nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER;
+
+    const prevLogDelta = Number.isFinite(CanvasState.touchpadState.lastZoomDelta)
+        ? CanvasState.touchpadState.lastZoomDelta
+        : 0;
+    const alpha = Math.max(
+        TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN,
+        Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, absDelta / 18)
+    );
+    const smoothedLogDelta = Math.abs(prevLogDelta) > 0.000001
+        ? prevLogDelta + (targetLogDelta - prevLogDelta) * alpha
+        : targetLogDelta;
+
+    CanvasState.touchpadState.lastZoomDelta = smoothedLogDelta;
+    if (CanvasState.touchpadState.zoomDeltaTimer) {
+        clearTimeout(CanvasState.touchpadState.zoomDeltaTimer);
+    }
+    CanvasState.touchpadState.zoomDeltaTimer = setTimeout(() => {
+        CanvasState.touchpadState.lastZoomDelta = 0;
+        CanvasState.touchpadState.zoomDeltaTimer = null;
+    }, TRACKPAD_ZOOM_IDLE_RESET_MS);
+
+    let zoomFactor = Math.exp(smoothedLogDelta);
+    const stepCap = Math.max(
+        TRACKPAD_ZOOM_STEP_CAP_MIN,
+        Math.min(TRACKPAD_ZOOM_STEP_CAP_MAX, 1.02 + Math.min(16, absDelta) / 320)
+    );
+    if (zoomFactor > stepCap) zoomFactor = stepCap;
+    if (zoomFactor < (1 / stepCap)) zoomFactor = 1 / stepCap;
+    return zoomFactor;
 }
 
 function getCanvasLowDetailDisplayZoomThreshold() {
@@ -10672,6 +10745,13 @@ function __normalizeLayoutZoomPercent(value, fallback) {
     return Math.round(safe);
 }
 
+function __getDefaultLayoutZoomPercentByElement(element) {
+    if (element && element.classList && element.classList.contains('md-canvas-node')) {
+        return NODE_LAYOUT_ZOOM_DEFAULT;
+    }
+    return NODE_LAYOUT_ZOOM_DEFAULT_SECTION;
+}
+
 function __parseLayoutZoomInput(value, fallback) {
     const raw = String(value || '').trim().replace(/%/g, '');
     const num = Number(raw);
@@ -10680,15 +10760,16 @@ function __parseLayoutZoomInput(value, fallback) {
 }
 
 function __getNodeLayoutZoomPercent(element) {
+    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
     const fallback = (() => {
         if (element && element.dataset && element.dataset.layoutZoomPercent) {
             const parsed = Number(element.dataset.layoutZoomPercent);
             if (Number.isFinite(parsed)) return parsed;
         }
-        return NODE_LAYOUT_ZOOM_DEFAULT;
+        return defaultPercent;
     })();
     const key = __getNodeLayoutZoomKey(element);
-    if (!key) return __normalizeLayoutZoomPercent(fallback, NODE_LAYOUT_ZOOM_DEFAULT);
+    if (!key) return __normalizeLayoutZoomPercent(fallback, defaultPercent);
     const map = __readJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, {});
     const raw = map && typeof map === 'object' ? map[key] : null;
     return __normalizeLayoutZoomPercent(raw, fallback);
@@ -10696,9 +10777,10 @@ function __getNodeLayoutZoomPercent(element) {
 
 function __applyNodeLayoutZoom(element, percent) {
     if (!element) return;
+    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
     const safe = __normalizeLayoutZoomPercent(
         typeof percent === 'number' ? percent : __getNodeLayoutZoomPercent(element),
-        NODE_LAYOUT_ZOOM_DEFAULT
+        defaultPercent
     );
     try {
         element.style.setProperty('--canvas-node-layout-zoom', String(safe / 100));
@@ -10711,7 +10793,8 @@ function __applyNodeLayoutZoom(element, percent) {
 
 function __setNodeLayoutZoomPercent(element, percent) {
     if (!element) return;
-    const safe = __normalizeLayoutZoomPercent(percent, NODE_LAYOUT_ZOOM_DEFAULT);
+    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
+    const safe = __normalizeLayoutZoomPercent(percent, defaultPercent);
     const key = __getNodeLayoutZoomKey(element);
     if (key) {
         const map = __readJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, {});
@@ -10726,9 +10809,10 @@ function __updateNodeLayoutZoomDisplay(element, percent) {
     if (!element) return;
     const display = element.querySelector('.canvas-layout-zoom-input, .canvas-layout-zoom-value');
     if (!display) return;
+    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
     const safe = __normalizeLayoutZoomPercent(
         typeof percent === 'number' ? percent : __getNodeLayoutZoomPercent(element),
-        NODE_LAYOUT_ZOOM_DEFAULT
+        defaultPercent
     );
     if (display.tagName === 'INPUT') {
         if (document.activeElement === display) return;
@@ -10736,6 +10820,36 @@ function __updateNodeLayoutZoomDisplay(element, percent) {
     } else {
         display.textContent = `${safe}%`;
     }
+}
+
+function __scheduleNodeLayoutZoomStabilize(element) {
+    if (!element) return;
+
+    const reapply = () => {
+        if (!element || !element.isConnected) return;
+        if (!__isNodeMaximized(element)) return;
+        __applyNodeLayoutZoom(element);
+    };
+
+    reapply();
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+            reapply();
+        });
+    }
+
+    const prevTimer = nodeLayoutZoomStabilizeTimerMap.get(element);
+    if (prevTimer) {
+        clearTimeout(prevTimer);
+    }
+
+    const timerId = setTimeout(() => {
+        nodeLayoutZoomStabilizeTimerMap.delete(element);
+        reapply();
+    }, NODE_LAYOUT_ZOOM_STABILIZE_DELAY_MS);
+
+    nodeLayoutZoomStabilizeTimerMap.set(element, timerId);
 }
 
 function __updateNodeLayoutZoomControls(element, lang) {
@@ -10762,6 +10876,9 @@ function __updateNodeLayoutZoomControls(element, lang) {
         zoomValue.setAttribute('data-tooltip', zoomValueLabel);
     }
     __applyNodeLayoutZoom(element);
+    if (__isNodeMaximized(element)) {
+        __scheduleNodeLayoutZoomStabilize(element);
+    }
     __bindNodeLayoutZoomInput(element);
 }
 
@@ -10821,7 +10938,7 @@ function __bindNodeLayoutZoomInput(element) {
     });
 }
 
-function __createLayoutZoomControls(buttonClass, lang) {
+function __createLayoutZoomControls(buttonClass, lang, defaultPercent = NODE_LAYOUT_ZOOM_DEFAULT_SECTION) {
     const controls = document.createElement('div');
     controls.className = 'canvas-layout-zoom-controls';
     controls.setAttribute('data-layout-zoom-controls', 'true');
@@ -10847,7 +10964,7 @@ function __createLayoutZoomControls(buttonClass, lang) {
     zoomValue.setAttribute('title', zoomValueLabel);
     zoomValue.setAttribute('data-tooltip', zoomValueLabel);
     zoomValue.setAttribute('aria-label', zoomValueLabel);
-    zoomValue.value = `${NODE_LAYOUT_ZOOM_DEFAULT}%`;
+    zoomValue.value = `${defaultPercent}%`;
 
     const zoomInBtn = document.createElement('button');
     zoomInBtn.type = 'button';
@@ -11187,6 +11304,7 @@ function maximizeCanvasNode(element) {
     __saveMaximizedNodeToStorage(element);
     __saveLastMaximizedNodeToStorage(element);
     __applyNodeLayoutZoom(element);
+    __scheduleNodeLayoutZoomStabilize(element);
     updateNodeFullscreenButtons();
     __notifyNodeFullscreenContextChange(element);
 }
@@ -11235,6 +11353,7 @@ function refreshMaximizedNodes() {
         element.style.top = `${rect.y}px`;
         element.style.width = `${rect.width}px`;
         element.style.height = `${rect.height}px`;
+        __scheduleNodeLayoutZoomStabilize(element);
     });
 }
 
@@ -18083,6 +18202,10 @@ function renderMdNode(node) {
 
     addAnchorsToNode(el, node.id);
 
+    if (__isNodeMaximized(el)) {
+        __scheduleNodeLayoutZoomStabilize(el);
+    }
+
     // Ctrl 蒙版同步
     registerSectionCtrlOverlay(el);
 }
@@ -20707,7 +20830,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             syncFontSizeValue();
 
             // -----------------------------------------------------------
-            // 定位优化：出现在当前输入框（editor）的上边缘居中位置
+            // 定位优化：普通模式在上方；全屏模式在下方（侧边栏空间更紧张）
             // -----------------------------------------------------------
             try {
                 // 确保 toolbar 设置了定位上下文
@@ -20719,10 +20842,17 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                 const editorRect = editor.getBoundingClientRect();
                 const toolbarRect = toolbar.getBoundingClientRect();
 
+                const ownerNode = editor.closest
+                    ? editor.closest('.permanent-bookmark-section, .temp-canvas-node')
+                    : null;
+                const isMaximized = (typeof __isNodeMaximized === 'function')
+                    ? __isNodeMaximized(ownerNode)
+                    : !!(ownerNode && ownerNode.classList && ownerNode.classList.contains('canvas-node-maximized'));
+
                 // 目标位置：Editor 右上角 (实现右对齐)
                 // 绝对坐标 (Viewport based)
                 const targetX = editorRect.right;
-                const targetY = editorRect.top;
+                const targetY = isMaximized ? editorRect.bottom : editorRect.top;
 
                 // 计算相对于 toolbar 的坐标 (pop 是 toolbar 的子元素，绝对定位)
                 const relX = targetX - toolbarRect.left;
@@ -20731,8 +20861,13 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                 pop.style.left = relX + 'px';
                 pop.style.top = relY + 'px';
 
-                // 向上偏移 (translateY -100% - 6px) 并 向左偏移 (translateX -100%) 以实现右对齐且微调垂直间距
-                pop.style.transform = 'translate(-100%, calc(-100% - 6px))';
+                if (isMaximized) {
+                    // 全屏：向下弹出，避免被上方区域挤压/遮挡
+                    pop.style.transform = 'translate(-100%, 6px)';
+                } else {
+                    // 普通：向上弹出
+                    pop.style.transform = 'translate(-100%, calc(-100% - 6px))';
+                }
             } catch (e) {
                 console.warn('Format popover positioning failed:', e);
                 // Fallback
@@ -22178,6 +22313,10 @@ function renderTempNode(section, options = {}) {
     }
 
     addAnchorsToNode(nodeElement, section.id);
+
+    if (__isNodeMaximized(nodeElement)) {
+        __scheduleNodeLayoutZoomStabilize(nodeElement);
+    }
 }
 
 /**
@@ -35213,11 +35352,16 @@ function openCanvasOtherSettingsModal() {
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
     const colorFollow = modal.querySelector('#otherTempColorFollow');
     const unlockSync = modal.querySelector('#otherTempColorUnlockSync');
+    const trackpadZoomRateInput = modal.querySelector('#otherTrackpadZoomRate');
     const useDefaultCurve = !(settings && settings.useDefaultZoomCurve === false);
     const defaultCurveToggle = modal.querySelector('#otherUseDefaultZoomCurve');
     if (autoLink) autoLink.checked = !!settings.autoLinkSplit;
     if (colorFollow) colorFollow.checked = !(settings.tempColorFollow === false);
     if (unlockSync) unlockSync.checked = !(settings.tempColorUnlockSync === false);
+    if (trackpadZoomRateInput) {
+        const trackpadPercent = Math.round(getCanvasTrackpadZoomRate(settings) * 100);
+        trackpadZoomRateInput.value = String(trackpadPercent);
+    }
     __updateOtherTempColorFollowLock(modal, colorFollow && colorFollow.checked);
     if (defaultCurveToggle) defaultCurveToggle.checked = useDefaultCurve;
     modal._useDefaultZoomCurve = useDefaultCurve;
@@ -35280,10 +35424,23 @@ function saveCanvasOtherSettings(options = {}) {
     }
     const colorFollow = modal.querySelector('#otherTempColorFollow');
     const unlockSync = modal.querySelector('#otherTempColorUnlockSync');
+    const trackpadZoomRateInput = modal.querySelector('#otherTrackpadZoomRate');
     const useDefaultCurve = modal.querySelector('#otherUseDefaultZoomCurve');
     const useDefault = useDefaultCurve ? !!useDefaultCurve.checked : !(prevSettings && prevSettings.useDefaultZoomCurve === false);
     const defaultCurve = __cloneDefaultOtherSettings().zoomCurve;
     const defaultMagnets = __getDefaultMagnetPointsFromPerf();
+    const trackpadRatePercentRaw = trackpadZoomRateInput
+        ? parseFloat(trackpadZoomRateInput.value)
+        : (getCanvasTrackpadZoomRate(prevSettings) * 100);
+    const trackpadRatePercent = __clampNumber(
+        trackpadRatePercentRaw,
+        TRACKPAD_ZOOM_RATE_MIN * 100,
+        TRACKPAD_ZOOM_RATE_MAX * 100,
+        getCanvasTrackpadZoomRate(prevSettings) * 100
+    );
+    if (trackpadZoomRateInput) {
+        trackpadZoomRateInput.value = String(Math.round(trackpadRatePercent));
+    }
     const settingsInput = {
         autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
         menuDefaultColorSync: menuDefaultColorSync
@@ -35300,6 +35457,7 @@ function saveCanvasOtherSettings(options = {}) {
         tempColorUnlockSync: unlockSync ? !!unlockSync.checked : !(prevSettings.tempColorUnlockSync === false),
         useDefaultZoomCurve: useDefault,
         zoomCurve: useDefault ? defaultCurve : (modal._zoomCurve || prevSettings.zoomCurve || getCanvasZoomCurveSettings()),
+        trackpadZoomRate: trackpadRatePercent / 100,
         magnetPoints: useDefault ? defaultMagnets : (modal._magnetPoints || prevSettings.magnetPoints || getCanvasZoomMagnetPoints())
     };
 
@@ -35395,7 +35553,7 @@ function __renderOtherZoomMagnetCurve(modal) {
         if (xTitle) xTitle.textContent = isEn ? 'Zoom Ratio (X)' : '缩放比例 (X)';
         const yTitle = modal.querySelector('#otherCurveYAxisTitle');
         if (yTitle) {
-            const label = isEn ? 'Zoom Speed' : '缩放速率';
+            const label = isEn ? 'Wheel Zoom Speed' : '滚轮缩放速率';
             yTitle.innerHTML = `<span class="other-curve-axis-label">${label}</span><span class="other-curve-axis-indicator"><span class="other-curve-axis-paren">(</span><span class="other-curve-axis-letter">Y</span><span class="other-curve-axis-paren">)</span></span>`;
         }
         const xTickLabels = modal.querySelectorAll('#otherCurveXAxisTicks .other-curve-tick-label');
@@ -35977,6 +36135,22 @@ function createCanvasOtherSettingsModal() {
             <div class="modal-body">
                 <div class="detail-section">
                     <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? 'Zoom Speed & Magnet' : '缩放速率与磁矩'}</div>
+                    <div class="other-zoom-input-title other-zoom-input-title-trackpad">${isEn ? '1. Trackpad' : '1. 触控板'} <span class="other-zoom-input-title-note">${isEn ? '(Independent from wheel curve and magnet points)' : '（独立于滚轮曲线与磁矩点）'}</span></div>
+                    <div class="appearance-row other-sub-row other-trackpad-speed-row">
+                        <div class="appearance-row-label">${isEn ? 'Smooth average speed' : '平滑平均速率'}</div>
+                        <div class="appearance-row-content appearance-row-content-inline">
+                            <input
+                                type="number"
+                                id="otherTrackpadZoomRate"
+                                class="other-trackpad-speed-input"
+                                min="${Math.round(TRACKPAD_ZOOM_RATE_MIN * 100)}"
+                                max="${Math.round(TRACKPAD_ZOOM_RATE_MAX * 100)}"
+                                step="5"
+                            >
+                            <span class="other-trackpad-speed-unit">%</span>
+                        </div>
+                    </div>
+                    <div class="other-zoom-input-title">${isEn ? '2. Wheel (curve)' : '2. 滚轮（曲线）'}</div>
                     <div class="appearance-row">
                         <div class="appearance-row-label">${isEn ? 'Use default' : '使用默认'}</div>
                         <div class="appearance-row-content">
@@ -36042,7 +36216,7 @@ function createCanvasOtherSettingsModal() {
                                 <div class="other-curve-axis-title" id="otherCurveXAxisTitle"></div>
                             </div>
                         </div>
-                        <div class="other-curve-note">${isEn ? 'Default curve resets to standard values. Drag any point to switch to custom.' : '默认曲线会还原到标准数值，拖动任意点会自动切换为自定义。'}</div>
+                        <div class="other-curve-note">${isEn ? 'Wheel curve resets to standard values. Drag any point to switch to custom.' : '滚轮曲线会还原到标准数值，拖动任意点会自动切换为自定义。'}</div>
                     </div>
                 </div>
             </div>
@@ -36076,6 +36250,7 @@ function createCanvasOtherSettingsModal() {
     const jumpPerfBtn = modal.querySelector('#otherDefaultJumpPerfBtn');
     const safeToggle = modal.querySelector('#otherMagnetSafeToggle');
     const midToggle = modal.querySelector('#otherMagnetMidToggle');
+    const trackpadZoomRateInput = modal.querySelector('#otherTrackpadZoomRate');
     if (defaultToggle) {
         defaultToggle.addEventListener('change', () => {
             const nextUseDefault = !!defaultToggle.checked;
@@ -36127,6 +36302,33 @@ function createCanvasOtherSettingsModal() {
             CanvasState.perfSettingsFocus = 'magnet';
             closeCanvasOtherSettingsModal();
             openCanvasPerfSettingsModal();
+        });
+    }
+    if (trackpadZoomRateInput) {
+        const normalizeTrackpadRateInput = () => {
+            const normalized = __clampNumber(
+                parseFloat(trackpadZoomRateInput.value),
+                TRACKPAD_ZOOM_RATE_MIN * 100,
+                TRACKPAD_ZOOM_RATE_MAX * 100,
+                TRACKPAD_ZOOM_RATE_DEFAULT * 100
+            );
+            trackpadZoomRateInput.value = String(Math.round(normalized));
+        };
+
+        trackpadZoomRateInput.addEventListener('change', () => {
+            normalizeTrackpadRateInput();
+            scheduleOtherSave();
+        });
+        trackpadZoomRateInput.addEventListener('blur', () => {
+            normalizeTrackpadRateInput();
+        });
+        trackpadZoomRateInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                normalizeTrackpadRateInput();
+                scheduleOtherSave();
+                trackpadZoomRateInput.blur();
+            }
         });
     }
     const bindOtherHelpPopover = (btn, popover) => {

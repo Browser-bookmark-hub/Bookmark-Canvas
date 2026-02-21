@@ -52,7 +52,10 @@
     };
 
     const normalizeHeaderDock = (raw) => {
-      return String(raw || '').toLowerCase() === 'bottom' ? 'bottom' : 'top';
+      const value = String(raw || '').toLowerCase();
+      if (value === 'bottom') return 'bottom';
+      if (value === 'top') return 'top';
+      return null;
     };
 
     const normalizeSidebarDock = (raw) => {
@@ -76,6 +79,16 @@
       if (!Number.isFinite(value)) return null;
       const max = Math.max(0, (window.innerWidth || 0) - 40);
       return clamp(Math.round(value), 0, max);
+    };
+
+    const TOGGLE_DEFAULT_RATIO = 0.6;
+    const TOGGLE_RATIO_MIN = 0.08;
+    const TOGGLE_RATIO_MAX = 0.92;
+
+    const normalizeToggleRatio = (raw) => {
+      const value = Number(raw);
+      if (!Number.isFinite(value)) return null;
+      return clamp(value, TOGGLE_RATIO_MIN, TOGGLE_RATIO_MAX);
     };
 
     const SIDE_PANEL_FLOATING_TOOLS_MODES = {
@@ -201,7 +214,9 @@
         manualOverride: 'sidepanelSidebarManualOverride',
         dockSide: 'sidepanelSidebarDockSide',
         expandedWidthLeft: 'sidepanelSidebarExpandedWidthLeft',
-        expandedWidthRight: 'sidepanelSidebarExpandedWidthRight'
+        expandedWidthRight: 'sidepanelSidebarExpandedWidthRight',
+        toggleRatio: 'sidepanelSidebarToggleTopRatio',
+        toggleMoved: 'sidepanelSidebarToggleTopMoved'
       }
       : {
         state: 'sidebarCollapseState',
@@ -209,7 +224,9 @@
         manualOverride: 'sidebarManualOverride',
         dockSide: 'sidebarDockSide',
         expandedWidthLeft: 'sidebarExpandedWidthLeft',
-        expandedWidthRight: 'sidebarExpandedWidthRight'
+        expandedWidthRight: 'sidebarExpandedWidthRight',
+        toggleRatio: 'sidebarToggleTopRatio',
+        toggleMoved: 'sidebarToggleTopMoved'
       };
 
     const floatingDockStorageKey = isSidePanelMode
@@ -264,7 +281,11 @@
     }
 
     const headerState = normalizeHeaderState(readStorage(headerLayoutKeys.collapseState));
-    const headerDock = normalizeHeaderDock(readStorage(headerLayoutKeys.dockSide));
+    const defaultHeaderDock = isSidePanelMode ? 'bottom' : 'top';
+    const savedHeaderDockRaw = readStorage(headerLayoutKeys.dockSide);
+    const headerDock = (savedHeaderDockRaw == null)
+      ? defaultHeaderDock
+      : (normalizeHeaderDock(savedHeaderDockRaw) || defaultHeaderDock);
     if (headerState === 'compact') root.classList.add('layout-preload-header-compact');
     if (headerDock === 'bottom') root.classList.add('layout-preload-header-dock-bottom');
 
@@ -312,6 +333,13 @@
     const sidebarDock = normalizeSidebarDock(readStorage(sidebarLayoutKeys.dockSide));
     const hasStoredSidebarState = readStorage(sidebarLayoutKeys.state) != null
       || readStorage(sidebarLayoutKeys.legacyCollapsed) != null;
+
+    const storedToggleTopRatio = normalizeToggleRatio(readStorage(sidebarLayoutKeys.toggleRatio));
+    const hasToggleTopMoved = readStorage(sidebarLayoutKeys.toggleMoved) === 'true';
+    const preloadToggleTopRatio = hasToggleTopMoved
+      ? (storedToggleTopRatio != null ? storedToggleTopRatio : TOGGLE_DEFAULT_RATIO)
+      : TOGGLE_DEFAULT_RATIO;
+    root.style.setProperty('--sidebar-toggle-top', `${(preloadToggleTopRatio * 100).toFixed(2)}%`);
 
     let initialSidebarState = persistedSidebarState;
     if (collapseMode === 'auto' && !hasManualOverride) {

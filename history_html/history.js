@@ -130,7 +130,7 @@ let suppressCanvasFloatingToolsToggleClick = false;
 let canvasFloatingToolsResizeBound = false;
 
 let currentHeaderState = 'expanded';
-let currentHeaderDockSide = 'top';
+let currentHeaderDockSide = isSidePanelMode ? 'bottom' : 'top';
 const LAYOUT_PRELOAD_CLASSES = [
     'layout-preload-active',
     'layout-preload-sidebar-compact',
@@ -7197,7 +7197,7 @@ function initSidebarToggle() {
     const hasToggleTopMoved = readStorage(SIDEBAR_TOGGLE_TOP_MOVED_KEY) === 'true';
     let toggleTopRatio = hasStoredToggleTopRatio ? storedToggleTopRatio : TOGGLE_DEFAULT_RATIO;
 
-    if (isSidePanelMode && !hasToggleTopMoved) {
+    if (!hasToggleTopMoved) {
         toggleTopRatio = TOGGLE_DEFAULT_RATIO;
         writeStorage(SIDEBAR_TOGGLE_TOP_RATIO_KEY, String(toggleTopRatio));
     }
@@ -8027,6 +8027,7 @@ function initHeaderToggle() {
 
     const HEADER_STATES = ['expanded', 'compact'];
     const HEADER_DOCK_SIDES = ['top', 'bottom'];
+    const DEFAULT_HEADER_DOCK_SIDE = isSidePanelMode ? 'bottom' : 'top';
     const TOGGLE_DRAG_ACTIVATE_THRESHOLD = 10;
     const TOGGLE_HINT_HOLD_DELAY_MS = 160;
     const TOGGLE_DRAG_DIRECTION_THRESHOLD = 8;
@@ -8205,7 +8206,7 @@ function initHeaderToggle() {
     }
 
     function applyHeaderDockSide(dockSide, options = {}) {
-        const nextDock = normalizeHeaderDockSide(dockSide) || 'top';
+        const nextDock = normalizeHeaderDockSide(dockSide) || DEFAULT_HEADER_DOCK_SIDE;
         const changed = nextDock !== currentHeaderDockSide;
         currentHeaderDockSide = nextDock;
         document.body.classList.toggle('header-dock-bottom', nextDock === 'bottom');
@@ -8452,7 +8453,7 @@ function initHeaderToggle() {
         }
     }
 
-    const savedDock = normalizeHeaderDockSide(readStorage(HEADER_DOCK_SIDE_KEY)) || 'top';
+    const savedDock = normalizeHeaderDockSide(readStorage(HEADER_DOCK_SIDE_KEY)) || DEFAULT_HEADER_DOCK_SIDE;
     const savedState = normalizeHeaderState(readStorage(HEADER_COLLAPSE_STATE_KEY)) || 'expanded';
     const legacyLeft = normalizeCompactLeft(readStorage(HEADER_COMPACT_LEFT_KEY));
     const savedTopLeft = readCompactLeftByDock('top');
