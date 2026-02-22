@@ -77,7 +77,8 @@
                     <i class="fas fa-plus"></i>
                     <span class="btn-tooltip" id="quickAddTooltip"></span>
                 </button>
-                <button id="sideLastFullscreenBtn" class="tool-btn last-fullscreen-btn" aria-label="Last Fullscreen Card" hidden>
+                <button id="sideLastFullscreenBtn" class="tool-btn last-fullscreen-btn"
+                    aria-label="Last Fullscreen Card" hidden>
                     <i class="fas fa-history"></i>
                     <span class="btn-tooltip" id="sideLastFullscreenTooltip"></span>
                 </button>
@@ -92,8 +93,7 @@
                 </button>
             </div>
             <div class="title-side-tools" id="titleSideTools">
-                <button id="titleQuickAddToggleBtn" class="tool-btn title-row-tool-btn" aria-label="Add"
-                    type="button">
+                <button id="titleQuickAddToggleBtn" class="tool-btn title-row-tool-btn" aria-label="Add" type="button">
                     <i class="fas fa-plus"></i>
                     <span class="btn-tooltip" id="titleQuickAddTooltip"></span>
                 </button>
@@ -166,23 +166,31 @@
                         <div class="settings-view-sync-note settings-view-sync-note-inline">
                             <div class="settings-view-sync-note-main">
                                 <span class="settings-view-sync-note-label" id="canvasViewSyncHintViewLabel">视图类：</span>
-                                <span class="settings-view-sync-note-text" id="canvasViewSyncHintViewText">例如相机、全屏模式、展开与滚动（<strong><u>以当前窗口为准</u></strong>），按 标签页 与 侧边栏 <strong><u>分区独立</u></strong>。</span>
+                                <span class="settings-view-sync-note-text"
+                                    id="canvasViewSyncHintViewText">例如相机、全屏模式、展开与滚动（<strong><u>以当前窗口为准</u></strong>），按
+                                    标签页 与 侧边栏 <strong><u>分区独立</u></strong>。</span>
                             </div>
                             <button id="canvasViewSyncHintInfoBtn" class="settings-view-sync-info-btn" type="button"
                                 aria-label="查看说明">
                                 <i class="fas fa-question-circle" aria-hidden="true"></i>
                                 <div class="settings-view-sync-tooltip" id="canvasViewSyncHintTooltip" role="tooltip">
                                     <div class="settings-view-sync-tooltip-line">
-                                        <span class="settings-view-sync-tooltip-key" id="canvasViewSyncHintCameraLabel">相机：</span>
-                                        <span class="settings-view-sync-tooltip-value" id="canvasViewSyncHintCameraText">相机就是我们当前的视图。</span>
+                                        <span class="settings-view-sync-tooltip-key"
+                                            id="canvasViewSyncHintCameraLabel">相机：</span>
+                                        <span class="settings-view-sync-tooltip-value"
+                                            id="canvasViewSyncHintCameraText">相机就是我们当前的视图。</span>
                                     </div>
                                     <div class="settings-view-sync-tooltip-line">
-                                        <span class="settings-view-sync-tooltip-key" id="canvasViewSyncHintExpandScrollLabel">展开与滚动：</span>
-                                        <span class="settings-view-sync-tooltip-value" id="canvasViewSyncHintExpandScrollText">指永久栏目或临时栏目中文件夹的展开状态，以及垂直滚动条的滚动位置。</span>
+                                        <span class="settings-view-sync-tooltip-key"
+                                            id="canvasViewSyncHintExpandScrollLabel">展开与滚动：</span>
+                                        <span class="settings-view-sync-tooltip-value"
+                                            id="canvasViewSyncHintExpandScrollText">指永久栏目或临时栏目中文件夹的展开状态，以及垂直滚动条的滚动位置。</span>
                                     </div>
                                     <div class="settings-view-sync-tooltip-line">
-                                        <span class="settings-view-sync-tooltip-key" id="canvasViewSyncHintContentLabel">内容类：</span>
-                                        <span class="settings-view-sync-tooltip-value" id="canvasViewSyncHintContentText">主数据/外观/设置始终全局共享，标签页与侧边栏会看到同一份内容。</span>
+                                        <span class="settings-view-sync-tooltip-key"
+                                            id="canvasViewSyncHintContentLabel">内容类：</span>
+                                        <span class="settings-view-sync-tooltip-value"
+                                            id="canvasViewSyncHintContentText">主数据/外观/设置始终全局共享，标签页与侧边栏会看到同一份内容。</span>
                                     </div>
                                 </div>
                             </button>
@@ -236,17 +244,20 @@
                 <div class="settings-menu-divider" aria-hidden="true"></div>
                 <div class="settings-storage-block" id="settingsStorageSyncBlock">
                     <div class="settings-storage-split" role="group" aria-label="导入导出">
-                        <button id="importCanvasOtherBtn" class="settings-menu-item settings-storage-split-btn" type="button">
+                        <button id="importCanvasOtherBtn" class="settings-menu-item settings-storage-split-btn"
+                            type="button">
                             <i class="fas fa-file-import"></i>
                             <span id="importCanvasOtherText">导入</span>
                         </button>
-                        <button id="exportCanvasOtherBtn" class="settings-menu-item settings-storage-split-btn" type="button">
+                        <button id="exportCanvasOtherBtn" class="settings-menu-item settings-storage-split-btn"
+                            type="button">
                             <i class="fas fa-file-export"></i>
                             <span id="exportCanvasOtherText">导出</span>
                         </button>
                     </div>
                     <div class="canvas-clear-dropdown" id="canvasOtherClearDropdown">
-                        <button id="clearMenuOtherBtn" class="settings-menu-item settings-storage-item danger" type="button">
+                        <button id="clearMenuOtherBtn" class="settings-menu-item settings-storage-item danger"
+                            type="button">
                             <i class="fas fa-trash-alt"></i>
                             <span id="clearMenuOtherText">清除</span>
                             <i class="fas fa-chevron-down clear-dropdown-arrow"></i>
@@ -287,7 +298,8 @@
                                             </div>
                                             <ul>
                                                 <li id="clearRuleOtherKeepDesc"><i class="fas fa-check"></i> 有说明文字</li>
-                                                <li id="clearRuleOtherKeepTitle"><i class="fas fa-check"></i> 标题被修改过</li>
+                                                <li id="clearRuleOtherKeepTitle"><i class="fas fa-check"></i> 标题被修改过
+                                                </li>
                                                 <li id="clearRuleOtherKeepEdge"><i class="fas fa-check"></i> 有连接线</li>
                                             </ul>
                                         </div>
@@ -411,7 +423,7 @@
                                     <div class="canvas-help-row">
                                         <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
                                                 data-shortcut-display="ctrl">Ctrl</kbd> + <span
-                                                id="canvasHelpCtrlWheel">滚轮</span></span>
+                                                id="canvasHelpCtrlWheel">滚轮 或 双指滑动</span></span>
                                         <span class="canvas-help-desc" id="canvasHelpCtrlWheelDesc">缩放</span>
                                     </div>
                                     <div class="canvas-help-row">
@@ -442,6 +454,13 @@
                                     <div class="canvas-help-row">
                                         <span class="canvas-help-key" id="canvasHelpTouchpadPinch">双指捏合</span>
                                         <span class="canvas-help-desc" id="canvasHelpTouchpadPinchDesc">缩放画布</span>
+                                    </div>
+                                    <div class="canvas-help-row">
+                                        <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                                data-shortcut-display="ctrl">Ctrl</kbd> + <span
+                                                id="canvasHelpTouchpadModifierSwipe">双指滑动（兼容侧边栏）</span></span>
+                                        <span class="canvas-help-desc"
+                                            id="canvasHelpTouchpadModifierSwipeDesc">缩放</span>
                                     </div>
                                     <div class="canvas-help-row">
                                         <span class="canvas-help-key" id="canvasHelpTouchpadScroll">双指滑动</span>
@@ -555,8 +574,8 @@
                                 </button>
                                 <div class="canvas-floating-tools-inline" id="canvasFloatingToolsInline">
                                     <button class="zoom-btn canvas-floating-tools-toggle-btn"
-                                        id="canvasFloatingToolsToggleBtn" type="button"
-                                        title="隐藏悬浮工具窗" aria-label="隐藏悬浮工具窗">
+                                        id="canvasFloatingToolsToggleBtn" type="button" title="隐藏悬浮工具窗"
+                                        aria-label="隐藏悬浮工具窗">
                                         <i class="fas fa-wrench floating-hide-tool-icon" aria-hidden="true"></i>
                                     </button>
                                 </div>
@@ -584,7 +603,8 @@
                                         <div class="canvas-help-panel-content" id="canvasHelpPanelShortcuts">
                                             <div class="canvas-shortcuts-panel canvas-shortcuts-panel-help">
                                                 <div class="canvas-help-modal-body">
-                                                    <div class="canvas-shortcuts-available" id="canvasHelpShortcutsList">
+                                                    <div class="canvas-shortcuts-available"
+                                                        id="canvasHelpShortcutsList">
                                                     </div>
                                                     <div class="canvas-help-section">
                                                         <div class="canvas-help-section-header">
@@ -597,21 +617,26 @@
                                                                     class="fas fa-edit"></i></button>
                                                         </div>
                                                         <div class="canvas-help-row">
-                                                            <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                                            <span class="canvas-help-key"><kbd
+                                                                    class="canvas-shortcut-key"
                                                                     data-shortcut-display="ctrl">Ctrl</kbd> + <span
                                                                     data-i18n-key="canvasHelpCtrlLeftClick">左键（按住）</span></span>
                                                             <span class="canvas-help-desc"
-                                                                data-i18n-key="canvasHelpCtrlLeftDesc">拖动画布 或 栏目卡片</span>
+                                                                data-i18n-key="canvasHelpCtrlLeftDesc">拖动画布 或
+                                                                栏目卡片</span>
                                                         </div>
                                                         <div class="canvas-help-row">
-                                                            <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                                            <span class="canvas-help-key"><kbd
+                                                                    class="canvas-shortcut-key"
                                                                     data-shortcut-display="ctrl">Ctrl</kbd> + <span
-                                                                    data-i18n-key="canvasHelpCtrlWheel">滚轮</span></span>
+                                                                    data-i18n-key="canvasHelpCtrlWheel">滚轮 或
+                                                                    双指滑动</span></span>
                                                             <span class="canvas-help-desc"
                                                                 data-i18n-key="canvasHelpCtrlWheelDesc">缩放</span>
                                                         </div>
                                                         <div class="canvas-help-row">
-                                                            <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                                            <span class="canvas-help-key"><kbd
+                                                                    class="canvas-shortcut-key"
                                                                     data-shortcut-display="ctrl">Ctrl</kbd> + <span
                                                                     data-i18n-key="canvasHelpCtrlRightClick">右键（单击）</span></span>
                                                             <span class="canvas-help-desc"
@@ -629,7 +654,8 @@
                                                                     class="fas fa-edit"></i></button>
                                                         </div>
                                                         <div class="canvas-help-row">
-                                                            <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                                            <span class="canvas-help-key"><kbd
+                                                                    class="canvas-shortcut-key"
                                                                     data-shortcut-display="space">空格</kbd> + <span
                                                                     data-i18n-key="canvasHelpSpaceLeftClick">左键（按住）</span></span>
                                                             <span class="canvas-help-desc"
@@ -644,6 +670,14 @@
                                                                 data-i18n-key="canvasHelpTouchpadPinch">双指捏合</span>
                                                             <span class="canvas-help-desc"
                                                                 data-i18n-key="canvasHelpTouchpadPinchDesc">缩放画布</span>
+                                                        </div>
+                                                        <div class="canvas-help-row">
+                                                            <span class="canvas-help-key"><kbd
+                                                                    class="canvas-shortcut-key"
+                                                                    data-shortcut-display="ctrl">Ctrl</kbd> + <span
+                                                                    data-i18n-key="canvasHelpTouchpadModifierSwipe">双指滑动（兼容侧边栏）</span></span>
+                                                            <span class="canvas-help-desc"
+                                                                data-i18n-key="canvasHelpTouchpadModifierSwipeDesc">缩放</span>
                                                         </div>
                                                         <div class="canvas-help-row">
                                                             <span class="canvas-help-key"
@@ -705,11 +739,13 @@
                                         <span id="canvasManageStorageSectionText">存储与同步</span>
                                     </div>
                                     <div class="canvas-manage-split-group" role="group" aria-label="存储与同步">
-                                        <button id="importCanvasBtn" class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-left">
+                                        <button id="importCanvasBtn"
+                                            class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-left">
                                             <i class="fas fa-file-import"></i>
                                             <span id="importCanvasText">导入</span>
                                         </button>
-                                        <button id="exportCanvasBtn" class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-right">
+                                        <button id="exportCanvasBtn"
+                                            class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-right">
                                             <i class="fas fa-file-export"></i>
                                             <span id="exportCanvasText">导出</span>
                                         </button>
@@ -752,14 +788,17 @@
                                                                 会被清除：
                                                             </div>
                                                             <ul>
-                                                                <li id="clearRuleTemp"><strong>书签型临时栏目</strong>：无说明 + 默认标题 +
+                                                                <li id="clearRuleTemp"><strong>书签型临时栏目</strong>：无说明 +
+                                                                    默认标题 +
                                                                     无连接线
                                                                 </li>
-                                                                <li id="clearRuleMd"><strong>空白栏目</strong>：内容为空 + 无连接线</li>
+                                                                <li id="clearRuleMd"><strong>空白栏目</strong>：内容为空 + 无连接线
+                                                                </li>
                                                             </ul>
                                                         </div>
                                                         <div class="clear-rules-section">
-                                                            <div class="clear-rules-section-title" id="clearRulesWillKeep">
+                                                            <div class="clear-rules-section-title"
+                                                                id="clearRulesWillKeep">
                                                                 会被保留：
                                                             </div>
                                                             <ul>
@@ -767,7 +806,8 @@
                                                                     有说明文字</li>
                                                                 <li id="clearRuleKeepTitle"><i class="fas fa-check"></i>
                                                                     标题被修改过</li>
-                                                                <li id="clearRuleKeepEdge"><i class="fas fa-check"></i> 有连接线
+                                                                <li id="clearRuleKeepEdge"><i class="fas fa-check"></i>
+                                                                    有连接线
                                                                 </li>
                                                             </ul>
                                                         </div>
@@ -844,16 +884,16 @@
                                         data-action="layout-zoom-out" title="缩小排版" aria-label="缩小排版">
                                         <i class="fas fa-minus"></i>
                                     </button>
-                                    <input class="canvas-layout-zoom-value canvas-layout-zoom-input" data-layout-zoom-value
-                                        title="排版比例" aria-label="排版比例" value="125%" />
+                                    <input class="canvas-layout-zoom-value canvas-layout-zoom-input"
+                                        data-layout-zoom-value title="排版比例" aria-label="排版比例" value="125%" />
                                     <button class="permanent-section-action-btn canvas-layout-zoom-btn" type="button"
                                         data-action="layout-zoom-in" title="放大排版" aria-label="放大排版">
                                         <i class="fas fa-plus"></i>
                                     </button>
                                 </div>
                                 <div class="permanent-section-marker-dropdown" id="markerDropdown">
-                                    <button class="permanent-section-action-btn marker-action-btn"
-                                        id="markerMenuBtn" title="标识管理">
+                                    <button class="permanent-section-action-btn marker-action-btn" id="markerMenuBtn"
+                                        title="标识管理">
                                         <i class="fas fa-tags"></i>
                                     </button>
                                     <div class="marker-dropdown-menu" id="markerDropdownMenu" style="display: none;">
@@ -872,11 +912,13 @@
                                             </span>
                                         </label>
                                         <div class="marker-dropdown-separator"></div>
-                                        <label class="marker-dropdown-item marker-auto-toggle" for="markerPathBadgesToggle">
+                                        <label class="marker-dropdown-item marker-auto-toggle"
+                                            for="markerPathBadgesToggle">
                                             <input type="checkbox" id="markerPathBadgesToggle">
                                             <span id="markerPathBadgesText">显示路径徽标</span>
                                         </label>
-                                        <label class="marker-dropdown-item marker-auto-toggle" for="markerAutoClearToggle">
+                                        <label class="marker-dropdown-item marker-auto-toggle"
+                                            for="markerAutoClearToggle">
                                             <input type="checkbox" id="markerAutoClearToggle">
                                             <span id="markerAutoClearText">自动定时清除</span>
                                         </label>
@@ -884,19 +926,28 @@
                                             <span id="markerAutoClearIntervalLabel">间隔</span>
                                             <div class="marker-interval-controls">
                                                 <div class="marker-combo" id="markerAutoClearCombo">
-                                                    <input type="text" id="markerAutoClearInput" value="1小时" autocomplete="off">
-                                                    <button type="button" class="marker-combo-toggle" id="markerAutoClearToggleBtn"
-                                                        title="选择预设">
+                                                    <input type="text" id="markerAutoClearInput" value="1小时"
+                                                        autocomplete="off">
+                                                    <button type="button" class="marker-combo-toggle"
+                                                        id="markerAutoClearToggleBtn" title="选择预设">
                                                         <i class="fas fa-chevron-down"></i>
                                                     </button>
-                                                    <div class="marker-combo-list" id="markerAutoClearList" style="display: none;">
-                                                        <button type="button" class="marker-combo-option" data-minutes="60">1小时</button>
-                                                        <button type="button" class="marker-combo-option" data-minutes="180">3小时</button>
-                                                        <button type="button" class="marker-combo-option" data-minutes="360">6小时</button>
-                                                        <button type="button" class="marker-combo-option" data-minutes="720">12小时</button>
-                                                        <button type="button" class="marker-combo-option" data-minutes="1440">1天</button>
-                                                        <button type="button" class="marker-combo-option" data-minutes="4320">3天</button>
-                                                        <button type="button" class="marker-combo-option" data-minutes="10080">7天</button>
+                                                    <div class="marker-combo-list" id="markerAutoClearList"
+                                                        style="display: none;">
+                                                        <button type="button" class="marker-combo-option"
+                                                            data-minutes="60">1小时</button>
+                                                        <button type="button" class="marker-combo-option"
+                                                            data-minutes="180">3小时</button>
+                                                        <button type="button" class="marker-combo-option"
+                                                            data-minutes="360">6小时</button>
+                                                        <button type="button" class="marker-combo-option"
+                                                            data-minutes="720">12小时</button>
+                                                        <button type="button" class="marker-combo-option"
+                                                            data-minutes="1440">1天</button>
+                                                        <button type="button" class="marker-combo-option"
+                                                            data-minutes="4320">3天</button>
+                                                        <button type="button" class="marker-combo-option"
+                                                            data-minutes="10080">7天</button>
                                                     </div>
                                                 </div>
                                             </div>
@@ -910,7 +961,8 @@
                                     id="permanentSectionPinBtn" title="置顶栏目">
                                     <i class="fas fa-thumbtack"></i>
                                 </button>
-                                <button class="permanent-section-action-btn permanent-section-fullscreen-btn canvas-node-fullscreen-btn"
+                                <button
+                                    class="permanent-section-action-btn permanent-section-fullscreen-btn canvas-node-fullscreen-btn"
                                     title="全屏" aria-label="全屏">
                                     <i class="fas fa-expand"></i>
                                 </button>
@@ -930,8 +982,10 @@
                                     </button>
                                     <button class="permanent-section-tip-close" id="permanentSectionTipClose"
                                         title="关闭提示">
-                                        <svg class="canvas-broom-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                            <path fill="currentColor" d="M3.55 21H6v-2q0-.425.288-.712T7 18t.713.288T8 19v2h3v-2q0-.425.288-.712T12 18t.713.288T13 19v2h3v-2q0-.425.288-.712T17 18t.713.288T18 19v2h2.45l-1-4H4.55zm16.9 2H3.55q-.975 0-1.575-.775t-.35-1.725L3 15v-2q0-.825.588-1.412T5 11h4V4q0-1.25.875-2.125T12 1t2.125.875T15 4v7h4q.825 0 1.413.588T21 13v2l1.375 5.5q.325.95-.288 1.725T20.45 23"/>
+                                        <svg class="canvas-broom-icon" viewBox="0 0 24 24" aria-hidden="true"
+                                            focusable="false">
+                                            <path fill="currentColor"
+                                                d="M3.55 21H6v-2q0-.425.288-.712T7 18t.713.288T8 19v2h3v-2q0-.425.288-.712T12 18t.713.288T13 19v2h3v-2q0-.425.288-.712T17 18t.713.288T18 19v2h2.45l-1-4H4.55zm16.9 2H3.55q-.975 0-1.575-.775t-.35-1.725L3 15v-2q0-.825.588-1.412T5 11h4V4q0-1.25.875-2.125T12 1t2.125.875T15 4v7h4q.825 0 1.413.588T21 13v2l1.375 5.5q.325.95-.288 1.725T20.45 23" />
                                         </svg>
                                     </button>
                                 </div>
@@ -1009,7 +1063,8 @@
                 <div class="clear-unlabeled-note" id="clearUnlabeledNote"></div>
                 <div class="modal-footer clear-unlabeled-modal-footer">
                     <button class="clear-unlabeled-btn cancel" id="clearUnlabeledCancelBtn" type="button">取消</button>
-                    <button class="clear-unlabeled-btn confirm" id="clearUnlabeledConfirmBtn" type="button">确认清除</button>
+                    <button class="clear-unlabeled-btn confirm" id="clearUnlabeledConfirmBtn"
+                        type="button">确认清除</button>
                 </div>
             </div>
         </div>

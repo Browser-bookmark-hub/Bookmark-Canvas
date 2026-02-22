@@ -3258,7 +3258,7 @@ const i18n = {
 <h3>Ctrl 键操作</h3>
 <ul>
 <li><strong>Ctrl + 左键（按住）</strong>：拖动画布 或 栏目卡片</li>
-<li><strong>Ctrl + 滚轮</strong>：缩放画布</li>
+<li><strong>Ctrl + 滚轮（或 触控板双指滑动）</strong>：缩放画布</li>
 <li><strong>Ctrl + 右键（单击）</strong>：更改栏目卡片的大小</li>
 </ul>
 <h3>空格键操作</h3>
@@ -3267,7 +3267,8 @@ const i18n = {
 </ul>
 <h3>触控板操作</h3>
 <ul>
-<li><strong>双指捏合</strong>：缩放画布</li>
+<li><strong>双指捏合（侧边栏不可用）</strong>：缩放画布</li>
+<li><strong>Ctrl 等按键 + 双指滑动（兼容侧边栏）</strong>：缩放</li>
 <li><strong>双指滑动</strong>：拖动画布</li>
 </ul>
 <hr>
@@ -3276,7 +3277,7 @@ const i18n = {
 <h3>Ctrl Key Operations</h3>
 <ul>
 <li><strong>Ctrl + Left Click (hold)</strong>: Drag canvas or section card</li>
-<li><strong>Ctrl + Scroll</strong>: Zoom canvas</li>
+<li><strong>Ctrl + Scroll (or Trackpad swipe)</strong>: Zoom canvas</li>
 <li><strong>Ctrl + Right Click</strong>: Resize section card</li>
 </ul>
 <h3>Space Key Operations</h3>
@@ -3285,7 +3286,8 @@ const i18n = {
 </ul>
 <h3>Touchpad Operations</h3>
 <ul>
-<li><strong>Pinch gesture</strong>: Zoom canvas</li>
+<li><strong>Pinch gesture (Unavailable in Side Panel)</strong>: Zoom canvas</li>
+<li><strong>Modifier (e.g., Ctrl) + swipe (Side Panel compatible)</strong>: Smooth zoom</li>
 <li><strong>Two-finger swipe</strong>: Drag canvas</li>
 </ul>
 <hr>
@@ -3304,7 +3306,7 @@ const i18n = {
 <li><strong>创建临时栏目</strong>：从书签树拖动书签到空白处</li>
 <li><strong>创建空白卡片</strong>：双击画布空白处</li>
 <li><strong>平移画布</strong>：空格+拖动 或 双指滑动</li>
-<li><strong>缩放画布</strong>：Ctrl+滚轮 或 双指捏合</li>
+<li><strong>缩放画布</strong>：Ctrl+滚轮 / 双指滑动 或 双指捏合（侧边栏不可用）</li>
 </ul>
 <h3>连接线</h3>
 <ul>
@@ -3325,7 +3327,7 @@ const i18n = {
 <li><strong>Create temp section</strong>: Drag bookmark from tree to blank area</li>
 <li><strong>Create blank card</strong>: Double-click on canvas blank area</li>
 <li><strong>Pan canvas</strong>: Space+drag or two-finger swipe</li>
-<li><strong>Zoom canvas</strong>: Ctrl+scroll or pinch gesture</li>
+<li><strong>Zoom canvas</strong>: Ctrl+scroll/swipe or pinch gesture (Unavailable in Side Panel)</li>
 </ul>
 <h3>Connection Lines</h3>
 <ul>
@@ -3390,8 +3392,8 @@ const i18n = {
         'en': 'Drag canvas or section card'
     },
     canvasHelpCtrlWheel: {
-        'zh_CN': '滚轮',
-        'en': 'Wheel'
+        'zh_CN': '滚轮 或 双指滑动',
+        'en': 'Scroll or Swipe'
     },
     canvasHelpCtrlWheelDesc: {
         'zh_CN': '缩放',
@@ -3426,12 +3428,20 @@ const i18n = {
         'en': 'Touchpad Actions'
     },
     canvasHelpTouchpadPinch: {
-        'zh_CN': '双指捏合',
-        'en': 'Pinch'
+        'zh_CN': '双指捏合 (侧边栏不可用)',
+        'en': 'Pinch (Unavailable in Side Panel)'
     },
     canvasHelpTouchpadPinchDesc: {
         'zh_CN': '缩放画布',
         'en': 'Zoom canvas'
+    },
+    canvasHelpTouchpadModifierSwipe: {
+        'zh_CN': '双指滑动（兼容侧边栏）',
+        'en': 'Two-finger Swipe (Side Panel compatible)'
+    },
+    canvasHelpTouchpadModifierSwipeDesc: {
+        'zh_CN': '缩放',
+        'en': 'Zoom'
     },
     canvasHelpTouchpadScroll: {
         'zh_CN': '双指滑动',
@@ -4178,6 +4188,11 @@ function applyLanguage() {
     if (canvasHelpTouchpadPinch) canvasHelpTouchpadPinch.textContent = i18n.canvasHelpTouchpadPinch[currentLang];
     const canvasHelpTouchpadPinchDesc = document.getElementById('canvasHelpTouchpadPinchDesc');
     if (canvasHelpTouchpadPinchDesc) canvasHelpTouchpadPinchDesc.textContent = i18n.canvasHelpTouchpadPinchDesc[currentLang];
+
+    const canvasHelpTouchpadModifierSwipe = document.getElementById('canvasHelpTouchpadModifierSwipe');
+    if (canvasHelpTouchpadModifierSwipe) canvasHelpTouchpadModifierSwipe.textContent = i18n.canvasHelpTouchpadModifierSwipe[currentLang];
+    const canvasHelpTouchpadModifierSwipeDesc = document.getElementById('canvasHelpTouchpadModifierSwipeDesc');
+    if (canvasHelpTouchpadModifierSwipeDesc) canvasHelpTouchpadModifierSwipeDesc.textContent = i18n.canvasHelpTouchpadModifierSwipeDesc[currentLang];
     const canvasHelpTouchpadScroll = document.getElementById('canvasHelpTouchpadScroll');
     if (canvasHelpTouchpadScroll) canvasHelpTouchpadScroll.textContent = i18n.canvasHelpTouchpadScroll[currentLang];
     const canvasHelpTouchpadScrollDesc = document.getElementById('canvasHelpTouchpadScrollDesc');

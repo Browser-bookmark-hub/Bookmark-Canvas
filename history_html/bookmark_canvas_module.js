@@ -2535,7 +2535,7 @@ function createInitialDemoTemplate() {
 <li><strong>创建临时栏目</strong>：从书签树拖动书签到空白处</li>
 <li><strong>创建空白卡片</strong>：双击画布空白处</li>
 <li><strong>平移画布</strong>：空格+拖动 或 双指滑动</li>
-<li><strong>缩放画布</strong>：Ctrl+滚轮 或 双指捏合</li>
+<li><strong>缩放画布</strong>：Ctrl+滚轮 / 双指滑动 或 双指捏合（侧边栏不可用）</li>
 </ul>
 <h3>连接线</h3>
 <ul>
@@ -2558,7 +2558,7 @@ function createInitialDemoTemplate() {
 <li><strong>Create temp section</strong>: Drag bookmark from tree to blank area</li>
 <li><strong>Create blank card</strong>: Double-click on canvas blank area</li>
 <li><strong>Pan canvas</strong>: Space+drag or two-finger swipe</li>
-<li><strong>Zoom canvas</strong>: Ctrl+scroll or pinch gesture</li>
+<li><strong>Zoom canvas</strong>: Ctrl+scroll/swipe or pinch gesture (Unavailable in Side Panel)</li>
 </ul>
 <h3>Connection Lines</h3>
 <ul>
@@ -2573,7 +2573,7 @@ function createInitialDemoTemplate() {
 <h3>Ctrl 键操作</h3>
 <ul>
 <li><strong>Ctrl + 左键（按住）</strong>：拖动画布 或 栏目卡片</li>
-<li><strong>Ctrl + 滚轮</strong>：缩放画布</li>
+<li><strong>Ctrl + 滚轮（或 触控板双指滑动）</strong>：缩放画布</li>
 <li><strong>Ctrl + 右键（单击）</strong>：更改栏目卡片的大小</li>
 </ul>
 <h3>空格键操作</h3>
@@ -2582,7 +2582,8 @@ function createInitialDemoTemplate() {
 </ul>
 <h3>触控板操作</h3>
 <ul>
-<li><strong>双指捏合</strong>：缩放画布</li>
+<li><strong>双指捏合（侧边栏不可用）</strong>：缩放画布</li>
+<li><strong>Ctrl 等按键 + 双指滑动（兼容侧边栏）</strong>：缩放</li>
 <li><strong>双指滑动</strong>：拖动画布</li>
 </ul>
 <hr>
@@ -2593,7 +2594,7 @@ function createInitialDemoTemplate() {
 <h3>Ctrl Key Operations</h3>
 <ul>
 <li><strong>Ctrl + Left Click (hold)</strong>: Drag canvas or section card</li>
-<li><strong>Ctrl + Scroll</strong>: Zoom canvas</li>
+<li><strong>Ctrl + Scroll (or Trackpad swipe)</strong>: Zoom canvas</li>
 <li><strong>Ctrl + Right Click</strong>: Resize section card</li>
 </ul>
 <h3>Space Key Operations</h3>
@@ -2602,7 +2603,8 @@ function createInitialDemoTemplate() {
 </ul>
 <h3>Touchpad Operations</h3>
 <ul>
-<li><strong>Pinch gesture</strong>: Zoom canvas</li>
+<li><strong>Pinch gesture (Unavailable in Side Panel)</strong>: Zoom canvas</li>
+<li><strong>Modifier (e.g., Ctrl) + swipe (Side Panel compatible)</strong>: Smooth zoom</li>
 <li><strong>Two-finger swipe</strong>: Drag canvas</li>
 </ul>
 <hr>
@@ -5903,7 +5905,7 @@ function setupCanvasZoomAndPan() {
             let zoomFactor = 1;
 
             if (isTouchpad) {
-                zoomFactor = getCanvasTrackpadZoomFactor(rawDelta);
+                zoomFactor = getCanvasTrackpadZoomFactor(rawDelta, displayZoomForCalc);
             } else {
                 const nextDisplayZoomNoMagnet = (baseZoomForCalc * Math.exp(rawDelta * zoomSpeed)) / base;
                 const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
@@ -7157,15 +7159,15 @@ function createCanvasSidePanelSettingsModal() {
             <div class="perf-help-popover" id="sidePanelHelpPopover">
                 <div class="perf-help-popover-content">
                     ${isEn
-                ? '<b>Edge</b>: The sidebar is fixed on the right by default and cannot be moved to the left.'
-                : '<b>Edge</b>：侧边栏默认固定在右侧，无法移动到左侧。'}
+            ? '<b>Edge</b>: The sidebar is fixed on the right by default and cannot be moved to the left.'
+            : '<b>Edge</b>：侧边栏默认固定在右侧，无法移动到左侧。'}
                 </div>
             </div>
             <div class="perf-help-popover" id="sidePanelSidebarCollapseHelpPopover">
                 <div class="perf-help-popover-content">
                     ${isEn
-                ? '<b>Auto</b>: directory panel expands/collapses by the auto width threshold.<br><b>Manual takeover</b>: once you click the directory toggle (expand/collapse) in HTML page or side panel, it switches to Manual immediately.<br><b>Reset</b>: click <b>Auto</b> here to return to automatic mode.<br><b>Sync</b>: this setting is synchronized in both places.'
-                : '<b>自动</b>：目录栏会按“自动折叠阈值”自动展开/收起。<br><b>手动接管</b>：只要你在 HTML 页面或侧边栏手动点击目录栏开关（展开/收起），就会立即切到手动。<br><b>回正</b>：在这里点击<b>自动</b>按钮即可恢复自动模式。<br><b>同步</b>：侧边栏与html页面的这个开关是同步的。'}
+            ? '<b>Auto</b>: directory panel expands/collapses by the auto width threshold.<br><b>Manual takeover</b>: once you click the directory toggle (expand/collapse) in HTML page or side panel, it switches to Manual immediately.<br><b>Reset</b>: click <b>Auto</b> here to return to automatic mode.<br><b>Sync</b>: this setting is synchronized in both places.'
+            : '<b>自动</b>：目录栏会按“自动折叠阈值”自动展开/收起。<br><b>手动接管</b>：只要你在 HTML 页面或侧边栏手动点击目录栏开关（展开/收起），就会立即切到手动。<br><b>回正</b>：在这里点击<b>自动</b>按钮即可恢复自动模式。<br><b>同步</b>：侧边栏与html页面的这个开关是同步的。'}
                 </div>
             </div>
         </div>
@@ -7943,17 +7945,6 @@ function resolveCanvasZoomInputMode(event) {
     if (!event || event.deltaMode !== 0) return 'wheel';
 
     const now = Date.now();
-    if (CanvasState && CanvasState.isCtrlPressed) {
-        CanvasState.touchpadState.lastZoomInputMode = 'wheel';
-        CanvasState.touchpadState.lastZoomInputTime = now;
-        return 'wheel';
-    }
-
-    if (event.metaKey) {
-        CanvasState.touchpadState.lastZoomInputMode = 'wheel';
-        CanvasState.touchpadState.lastZoomInputTime = now;
-        return 'wheel';
-    }
 
     const absDeltaX = Math.abs(Number(event.deltaX) || 0);
     const absDeltaY = Math.abs(Number(event.deltaY) || 0);
@@ -7999,17 +7990,27 @@ function resolveCanvasZoomInputMode(event) {
     return mode;
 }
 
-function getCanvasTrackpadZoomFactor(rawDelta) {
+function getCanvasTrackpadZoomFactor(rawDelta, displayZoom) {
     const delta = Number(rawDelta);
     if (!Number.isFinite(delta) || delta === 0) return 1;
 
     const absDelta = Math.abs(delta);
     const rateFactor = getCanvasTrackpadZoomRate() * TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER;
 
+    // 应用用户配置/默认的曲线缩放系数，保持与滚轮手感一致
+    const curveFactor = getCanvasZoomSpeedFactor(displayZoom || 1);
+
     // 与 Chromium 的 pinch->wheel 映射保持一致：scale = exp(-deltaY / 100)
     // 这里 rawDelta = -deltaY，因此 nativeLogDelta = rawDelta / 100
     const nativeLogDelta = delta / TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR;
-    const targetLogDelta = nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER;
+    let targetLogDelta = nativeLogDelta * rateFactor * curveFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER;
+
+    let magnet = null;
+    if (displayZoom) {
+        const nextDisplayZoomNoMagnet = displayZoom * Math.exp(targetLogDelta);
+        magnet = getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoomNoMagnet);
+        targetLogDelta *= magnet.factor;
+    }
 
     const prevLogDelta = Number.isFinite(CanvasState.touchpadState.lastZoomDelta)
         ? CanvasState.touchpadState.lastZoomDelta
@@ -8032,10 +8033,17 @@ function getCanvasTrackpadZoomFactor(rawDelta) {
     }, TRACKPAD_ZOOM_IDLE_RESET_MS);
 
     let zoomFactor = Math.exp(smoothedLogDelta);
-    const stepCap = Math.max(
+    let stepCap = Math.max(
         TRACKPAD_ZOOM_STEP_CAP_MIN,
         Math.min(TRACKPAD_ZOOM_STEP_CAP_MAX, 1.02 + Math.min(16, absDelta) / 320)
     );
+
+    // 如果靠近磁矩点，限制单次最大步进，避免“一步跨过缓慢区”
+    if (magnet && magnet.strength > 0) {
+        const magnetCap = Math.max(1.01, Math.min(1.06, 1.06 - 0.05 * magnet.strength));
+        if (stepCap > magnetCap) stepCap = magnetCap;
+    }
+
     if (zoomFactor > stepCap) zoomFactor = stepCap;
     if (zoomFactor < (1 / stepCap)) zoomFactor = 1 / stepCap;
     return zoomFactor;
@@ -25153,17 +25161,17 @@ function bindPermanentSectionTipBehavior(sectionEl) {
                     editMode: descHeightSettings.editMode,
                     editRows: descHeightSettings.editRows
                 }),
-            onChange: (next) => {
-                descHeightSettings.displayMode = next.displayMode;
-                descHeightSettings.displayRows = next.displayRows;
-                descHeightSettings.editMode = next.editMode;
-                descHeightSettings.editRows = next.editRows;
-                tipContainer.__descHeightSettings = descHeightSettings;
-                applyTipHeightSettings();
-                persistTipHeightSettings();
-            }
+                onChange: (next) => {
+                    descHeightSettings.displayMode = next.displayMode;
+                    descHeightSettings.displayRows = next.displayRows;
+                    descHeightSettings.editMode = next.editMode;
+                    descHeightSettings.editRows = next.editRows;
+                    tipContainer.__descHeightSettings = descHeightSettings;
+                    applyTipHeightSettings();
+                    persistTipHeightSettings();
+                }
+            });
         });
-    });
     }
 
     tipText.addEventListener('keydown', (e) => {
@@ -27017,21 +27025,21 @@ async function importHtmlBookmarks(html, importFileName = '') {
     const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
     const fileNameTitle = String(importFileName || '').replace(/[\r\n]/g, ' ').trim();
     const section = {
-            id: sectionId,
-            title: fileNameTitle || (isEn
-                ? `Imported Bookmarks (${totalCount}) - ${formatTimestampForTitle()}`
-                : `导入的书签 (${totalCount}) - ${formatTimestampForTitle()}`),
-            color: getTempSectionDefaultColor(sectionMeta),
-            colorLocked: __getDefaultTempColorLockedState(),
-            x: position.x,
-            y: position.y,
-            width: baseSize.width,
-            height: baseSize.height,
-            createdAt: Date.now(),
-            source: sectionMeta.source,
-            label: sectionMeta.label,
-            items: []
-        };
+        id: sectionId,
+        title: fileNameTitle || (isEn
+            ? `Imported Bookmarks (${totalCount}) - ${formatTimestampForTitle()}`
+            : `导入的书签 (${totalCount}) - ${formatTimestampForTitle()}`),
+        color: getTempSectionDefaultColor(sectionMeta),
+        colorLocked: __getDefaultTempColorLockedState(),
+        x: position.x,
+        y: position.y,
+        width: baseSize.width,
+        height: baseSize.height,
+        createdAt: Date.now(),
+        source: sectionMeta.source,
+        label: sectionMeta.label,
+        items: []
+    };
 
     // 递归转换为临时栏目格式
     const convertToTempItem = (node) => {
@@ -36202,7 +36210,7 @@ function createCanvasOtherSettingsModal() {
             <div class="modal-body">
                 <div class="detail-section">
                     <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? 'Zoom Speed & Magnet' : '缩放速率与磁矩'}</div>
-                    <div class="other-zoom-input-title other-zoom-input-title-trackpad">${isEn ? '1. Trackpad' : '1. 触控板'} <span class="other-zoom-input-title-note">${isEn ? '(Independent from wheel curve/magnets with isolated detection band)' : '（独立于滚轮曲线与磁矩点，并带隔离区判定）'}</span></div>
+                    <div class="other-zoom-input-title other-zoom-input-title-trackpad">${isEn ? '1. Trackpad' : '1. 触控板'} <span class="other-zoom-input-title-note" style="margin-left:8px;font-size:12px;color:rgba(var(--text-color-rgb),0.5);font-weight:normal;">${isEn ? '(Pinch)' : '（双指捏合）'}</span></div>
                     <div class="appearance-row other-sub-row other-trackpad-speed-row">
                         <div class="appearance-row-label">${isEn ? 'Smooth average speed' : '平滑平均速率'}</div>
                         <div class="appearance-row-content appearance-row-content-inline">
@@ -36217,7 +36225,7 @@ function createCanvasOtherSettingsModal() {
                             <span class="other-trackpad-speed-unit">%</span>
                         </div>
                     </div>
-                    <div class="other-zoom-input-title">${isEn ? '2. Wheel (curve)' : '2. 滚轮（曲线）'}</div>
+                    <div class="other-zoom-input-title">${isEn ? '2. Scrolling' : '2. 滚动'} <span class="other-zoom-input-title-note" style="margin-left:8px;font-size:12px;color:rgba(var(--text-color-rgb),0.5);font-weight:normal;">${isEn ? '(Wheel / Swipe zoom)' : '（滚轮 / 双指滑动缩放）'}</span></div>
                     <div class="appearance-row">
                         <div class="appearance-row-label">${isEn ? 'Use default' : '使用默认'}</div>
                         <div class="appearance-row-content">
