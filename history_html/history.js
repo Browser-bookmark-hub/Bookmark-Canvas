@@ -1482,6 +1482,7 @@ async function clearMarkersAndSetBaseline(reason = 'manual') {
             lastMarkerBaselineWriteAt = now;
         }
         explicitMovedIds = new Map();
+        clearIncrementalDeletedSnapshots('baseline-reset');
         schedulePersistExplicitMovedIds();
         resetPermanentSectionChangeMarkers();
         const skipFullRender = isSidePanelMode && reason === 'auto';
@@ -1518,6 +1519,7 @@ window.__canvasMarkerControl = {
             try {
                 resetPermanentSectionChangeMarkers();
                 treeChangeMap = new Map();
+                clearIncrementalDeletedSnapshots('marker-disabled');
                 try { window.__canvasPermanentHintSet = null; } catch (_) { }
                 try { window.__canvasPermanentAncestorBadges = null; } catch (_) { }
                 __canvasPermanentHintSet = null;
@@ -8858,6 +8860,9 @@ let canvasLazyChangeHints = {
     hasAny: false
 };
 let canvasLazyChangeHintsPromise = null;
+// Canvas 懒加载：增量删除时缓存被删节点快照（用于后续展开时仍能显示红色占位）
+let incrementalDeletedNodeSnapshots = new Map(); // id -> node snapshot
+let incrementalDeletedChildrenByParent = new Map(); // parentId -> Map<id, node snapshot>
 
 // 清除树缓存（供拖拽模块调用，防止缓存覆盖DOM更新）
 function clearTreeCache() {
@@ -8905,6 +8910,217 @@ function clearCanvasLazyChangeHints(reason = '') {
         hasAny: false
     };
     if (reason) console.log('[Canvas变化提示] 已清空:', reason);
+}
+
+function clearIncrementalDeletedSnapshots(reason = '') {
+    incrementalDeletedNodeSnapshots = new Map();
+    incrementalDeletedChildrenByParent = new Map();
+    if (reason) console.log('[Canvas删除快照] 已清空:', reason);
+}
+
+function cacheDeletedSnapshotForLazyRender(id, removeInfo) {
+    if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
+    if (!id || !removeInfo) return;
+
+    const sid = String(id);
+    const sourceNode = removeInfo.node || removeInfo.nodeSnapshot || null;
+    const raw = cloneBookmarkNodeSnapshot(sourceNode);
+    if (!raw) return;
+
+    raw.id = sid;
+    if (typeof raw.parentId === 'undefined' || raw.parentId === null) {
+        if (typeof removeInfo.parentId !== 'undefined' && removeInfo.parentId !== null) {
+            raw.parentId = String(removeInfo.parentId);
+        }
+    }
+    if (typeof raw.index !== 'number' && typeof removeInfo.index === 'number') {
+        raw.index = removeInfo.index;
+    }
+
+    try {
+        const previous = incrementalDeletedNodeSnapshots.get(sid);
+        const prevParentId = previous && typeof previous.parentId !== 'undefined' && previous.parentId !== null
+            ? String(previous.parentId)
+            : '';
+        if (prevParentId && incrementalDeletedChildrenByParent.has(prevParentId)) {
+            const prevBucket = incrementalDeletedChildrenByParent.get(prevParentId);
+            if (prevBucket) {
+                prevBucket.delete(sid);
+                if (prevBucket.size === 0) incrementalDeletedChildrenByParent.delete(prevParentId);
+            }
+        }
+    } catch (_) { }
+
+    incrementalDeletedNodeSnapshots.set(sid, raw);
+
+    const parentId = (typeof raw.parentId !== 'undefined' && raw.parentId !== null)
+        ? String(raw.parentId)
+        : '';
+    if (!parentId) return;
+
+    let bucket = incrementalDeletedChildrenByParent.get(parentId);
+    if (!bucket) {
+        bucket = new Map();
+        incrementalDeletedChildrenByParent.set(parentId, bucket);
+    }
+    bucket.set(sid, raw);
+}
+
+function mergeLazyChildrenWithDeletedSnapshots(parentId, baseChildren) {
+    const merged = Array.isArray(baseChildren) ? baseChildren.slice() : [];
+    if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return merged;
+    const key = String(parentId || '');
+    if (!key) return merged;
+
+    const bucket = incrementalDeletedChildrenByParent.get(key);
+    if (!(bucket instanceof Map) || bucket.size === 0) return merged;
+
+    const existingIds = new Set(merged.map((child) => String(child && child.id)).filter(Boolean));
+    const deletedNodes = Array.from(bucket.values())
+        .map(node => cloneBookmarkNodeSnapshot(node))
+        .filter(node => node && !existingIds.has(String(node.id)));
+
+    if (!deletedNodes.length) return merged;
+
+    deletedNodes.sort((a, b) => {
+        const ia = typeof a.index === 'number' ? a.index : Number.POSITIVE_INFINITY;
+        const ib = typeof b.index === 'number' ? b.index : Number.POSITIVE_INFINITY;
+        if (ia !== ib) return ia - ib;
+        return String(a.id).localeCompare(String(b.id));
+    });
+
+    deletedNodes.forEach((node) => {
+        const targetIndex = typeof node.index === 'number' ? node.index : Number.POSITIVE_INFINITY;
+        if (!Number.isFinite(targetIndex) || targetIndex < 0 || targetIndex >= merged.length) {
+            merged.push(node);
+            return;
+        }
+        let insertAt = merged.length;
+        for (let i = 0; i < merged.length; i++) {
+            const currentIndex = (typeof merged[i]?.index === 'number') ? merged[i].index : Number.POSITIVE_INFINITY;
+            if (currentIndex >= targetIndex) {
+                insertAt = i;
+                break;
+            }
+        }
+        merged.splice(insertAt, 0, node);
+    });
+
+    return merged;
+}
+
+function hydrateDeletedSnapshotCachesFromChangeMap(changeMap) {
+    if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
+    if (!(changeMap instanceof Map) || changeMap.size === 0) return;
+
+    try {
+        changeMap.forEach((change, id) => {
+            if (!id || !change || typeof change.type !== 'string' || !change.type.includes('deleted')) return;
+            const del = change.deleted || {};
+            const nodeSnapshot = del.nodeSnapshot || del.node || null;
+            if (!nodeSnapshot) return;
+
+            cacheDeletedSnapshotForLazyRender(id, {
+                parentId: del.oldParentId,
+                index: del.oldIndex,
+                nodeSnapshot
+            });
+        });
+    } catch (_) { }
+}
+
+function mergeDeletedSnapshotsIntoTreeForRender(tree, changeMap) {
+    if (!(changeMap instanceof Map) || changeMap.size === 0) return tree;
+    if (!tree || !Array.isArray(tree) || !tree[0]) return tree;
+
+    let hasDeletedSnapshot = false;
+    try {
+        changeMap.forEach((change) => {
+            if (hasDeletedSnapshot) return;
+            const type = change && typeof change.type === 'string' ? change.type : '';
+            const del = change && change.deleted ? change.deleted : null;
+            if (type.includes('deleted') && del && (del.nodeSnapshot || del.node)) {
+                hasDeletedSnapshot = true;
+            }
+        });
+    } catch (_) { }
+    if (!hasDeletedSnapshot) return tree;
+
+    let outTree = tree;
+    try {
+        outTree = JSON.parse(JSON.stringify(tree));
+    } catch (_) {
+        return tree;
+    }
+    if (!outTree || !Array.isArray(outTree) || !outTree[0]) return tree;
+
+    const idx = buildTreeIndexFromRoot(outTree[0]);
+    if (!(idx instanceof Map)) return tree;
+
+    const insertNodeIntoIndex = (node) => {
+        if (!node || typeof node.id === 'undefined' || node.id === null) return;
+        const sid = String(node.id);
+        idx.set(sid, node);
+        if (Array.isArray(node.children)) {
+            node.children.forEach((child) => {
+                if (child && (typeof child.parentId === 'undefined' || child.parentId === null)) {
+                    child.parentId = sid;
+                }
+                insertNodeIntoIndex(child);
+            });
+        }
+    };
+
+    try {
+        changeMap.forEach((change, id) => {
+            if (!id || !change || typeof change.type !== 'string' || !change.type.includes('deleted')) return;
+            const del = change.deleted || {};
+            const sourceNode = del.nodeSnapshot || del.node || null;
+            const snapshotNode = cloneBookmarkNodeSnapshot(sourceNode);
+            if (!snapshotNode) return;
+
+            const sid = String(id);
+            snapshotNode.id = sid;
+            if (typeof snapshotNode.parentId === 'undefined' || snapshotNode.parentId === null) {
+                if (del.oldParentId != null) snapshotNode.parentId = String(del.oldParentId);
+            }
+            if (typeof snapshotNode.index !== 'number' && typeof del.oldIndex === 'number') {
+                snapshotNode.index = del.oldIndex;
+            }
+
+            const parentId = (typeof snapshotNode.parentId !== 'undefined' && snapshotNode.parentId !== null)
+                ? String(snapshotNode.parentId)
+                : '';
+            if (!parentId) return;
+            const parent = idx.get(parentId);
+            if (!parent) return;
+            if (!Array.isArray(parent.children)) parent.children = [];
+            if (parent.children.some((child) => String(child?.id) === sid)) return;
+
+            const targetIndex = (typeof snapshotNode.index === 'number') ? snapshotNode.index : Number.POSITIVE_INFINITY;
+            if (!Number.isFinite(targetIndex) || targetIndex < 0 || targetIndex >= parent.children.length) {
+                parent.children.push(snapshotNode);
+            } else {
+                let insertAt = parent.children.length;
+                for (let i = 0; i < parent.children.length; i++) {
+                    const currentIndex = (typeof parent.children[i]?.index === 'number')
+                        ? parent.children[i].index
+                        : Number.POSITIVE_INFINITY;
+                    if (currentIndex >= targetIndex) {
+                        insertAt = i;
+                        break;
+                    }
+                }
+                parent.children.splice(insertAt, 0, snapshotNode);
+            }
+
+            insertNodeIntoIndex(snapshotNode);
+        });
+    } catch (_) {
+        return tree;
+    }
+
+    return outTree;
 }
 
 function buildFingerprintKeyFromChangeItem(item) {
@@ -9129,29 +9345,30 @@ async function refreshCachedCurrentTreeSnapshot(reason = '') {
     }
 }
 
-function scheduleCachedCurrentTreeSnapshotRefresh(reason = '') {
+function scheduleCachedCurrentTreeSnapshotRefresh(reason = '', delayMs = 300) {
     if (!((currentView === 'canvas') && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
     if (pendingTreeSnapshotRefreshTimer) clearTimeout(pendingTreeSnapshotRefreshTimer);
+    const safeDelay = Math.max(0, Number(delayMs) || 0);
     pendingTreeSnapshotRefreshTimer = setTimeout(() => {
         pendingTreeSnapshotRefreshTimer = null;
         refreshCachedCurrentTreeSnapshot(reason).catch(() => { });
-    }, 300);
+    }, safeDelay);
 }
 
 function applyIncrementalMoveToCachedCurrentTree(id, moveInfo) {
     try {
-        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
-        if (!id || !moveInfo || typeof moveInfo.parentId === 'undefined' || typeof moveInfo.oldParentId === 'undefined') return;
-        if (!cachedCurrentTree || !cachedCurrentTree[0]) return;
+        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return false;
+        if (!id || !moveInfo || typeof moveInfo.parentId === 'undefined' || typeof moveInfo.oldParentId === 'undefined') return false;
+        if (!cachedCurrentTree || !cachedCurrentTree[0]) return false;
 
         const index = getCachedCurrentTreeIndex();
-        if (!index) return;
+        if (!index) return false;
 
         const keyId = String(id);
         const movedNode = index.get(keyId);
         const oldParent = index.get(String(moveInfo.oldParentId));
         const newParent = index.get(String(moveInfo.parentId));
-        if (!movedNode || !oldParent || !newParent) return;
+        if (!movedNode || !oldParent || !newParent) return false;
 
         const oldChildren = Array.isArray(oldParent.children) ? oldParent.children : [];
         oldParent.children = oldChildren.filter(child => String(child?.id) !== keyId);
@@ -9169,22 +9386,24 @@ function applyIncrementalMoveToCachedCurrentTree(id, moveInfo) {
         if (typeof moveInfo.index === 'number') movedNode.index = moveInfo.index;
         cachedRenderTreeIndex = null;
         try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+        return true;
     } catch (_) {
         // 静默失败：最终会由 refreshCachedCurrentTreeSnapshot() 兜底
+        return false;
     }
 }
 
 function applyIncrementalCreateToCachedCurrentTree(id, bookmark) {
     try {
-        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
-        if (!id || !bookmark || typeof bookmark.parentId === 'undefined') return;
-        if (!cachedCurrentTree || !cachedCurrentTree[0]) return;
+        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return false;
+        if (!id || !bookmark || typeof bookmark.parentId === 'undefined') return false;
+        if (!cachedCurrentTree || !cachedCurrentTree[0]) return false;
 
         const index = getCachedCurrentTreeIndex();
-        if (!index) return;
+        if (!index) return false;
 
         const parent = index.get(String(bookmark.parentId));
-        if (!parent) return;
+        if (!parent) return false;
 
         const nodeId = String(id);
         const children = Array.isArray(parent.children) ? parent.children.filter(child => String(child?.id) !== nodeId) : [];
@@ -9209,19 +9428,21 @@ function applyIncrementalCreateToCachedCurrentTree(id, bookmark) {
         }
         cachedRenderTreeIndex = null;
         try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+        return true;
     } catch (_) {
         // 静默失败：最终会由 refreshCachedCurrentTreeSnapshot() 兜底
+        return false;
     }
 }
 
 function applyIncrementalRemoveFromCachedCurrentTree(id, removeInfo) {
     try {
-        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
-        if (!id) return;
-        if (!cachedCurrentTree || !cachedCurrentTree[0]) return;
+        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return false;
+        if (!id) return false;
+        if (!cachedCurrentTree || !cachedCurrentTree[0]) return false;
 
         const index = getCachedCurrentTreeIndex();
-        if (!index) return;
+        if (!index) return false;
 
         const key = String(id);
         const node = index.get(key);
@@ -9232,36 +9453,40 @@ function applyIncrementalRemoveFromCachedCurrentTree(id, removeInfo) {
                 : (removeInfo && removeInfo.node && typeof removeInfo.node.parentId !== 'undefined'
                     ? removeInfo.node.parentId
                     : null));
-        if (!parentId) return;
+        if (!parentId) return false;
         const parent = index.get(String(parentId));
-        if (!parent || !Array.isArray(parent.children)) return;
+        if (!parent || !Array.isArray(parent.children)) return false;
         parent.children = parent.children.filter(child => String(child?.id) !== key);
 
         cachedCurrentTreeIndex = null;
         cachedRenderTreeIndex = null;
         try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+        return true;
     } catch (_) {
         // 静默失败：最终会由 refreshCachedCurrentTreeSnapshot() 兜底
+        return false;
     }
 }
 
 function applyIncrementalChangeToCachedCurrentTree(id, changeInfo) {
     try {
-        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return;
-        if (!id || !changeInfo) return;
-        if (!cachedCurrentTree || !cachedCurrentTree[0]) return;
+        if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return false;
+        if (!id || !changeInfo) return false;
+        if (!cachedCurrentTree || !cachedCurrentTree[0]) return false;
 
         const index = getCachedCurrentTreeIndex();
-        if (!index) return;
+        if (!index) return false;
 
         const node = index.get(String(id));
-        if (!node) return;
+        if (!node) return false;
         if (typeof changeInfo.title !== 'undefined') node.title = changeInfo.title;
         if (typeof changeInfo.url !== 'undefined') node.url = changeInfo.url || undefined;
         cachedRenderTreeIndex = null;
         try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+        return true;
     } catch (_) {
         // 静默失败：最终会由 refreshCachedCurrentTreeSnapshot() 兜底
+        return false;
     }
 }
 
@@ -9299,8 +9524,17 @@ async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, star
             : ((currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)
                 ? (getCachedRenderTreeIndex() || getCachedCurrentTreeIndex())
                 : getCachedCurrentTreeIndex());
-        const parent = index ? index.get(String(parentId)) : null;
-        if (!parent || !Array.isArray(parent.children) || parent.children.length === 0) {
+        const parentKey = String(parentId);
+        let parent = index ? index.get(parentKey) : null;
+        if (!parent && !isReadOnly) {
+            parent = incrementalDeletedNodeSnapshots.get(parentKey) || null;
+        }
+        const baseChildren = (parent && Array.isArray(parent.children)) ? parent.children : [];
+        const childrenForRender = (!isReadOnly && currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)
+            ? mergeLazyChildrenWithDeletedSnapshots(parentKey, baseChildren)
+            : baseChildren;
+
+        if (!childrenForRender.length) {
             const item = treeRoot.querySelector(`.tree-item[data-node-id="${CSS.escape(String(parentId))}"]`);
             if (item) {
                 item.dataset.childrenLoaded = 'true';
@@ -9316,8 +9550,35 @@ async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, star
         const level = item ? (parseInt(item.dataset.nodeLevel, 10) || 0) : 0;
         const nextLevel = level + 1;
         const underDeletedAncestor = !!(item && item.classList && item.classList.contains('tree-change-deleted'));
+        const inheritedFolderChange = (() => {
+            if (!item) return '';
+            try {
+                let node = item.closest('.tree-node');
+                let hasAddedAncestor = false;
+                let guard = 0;
+                while (node && guard++ < 512) {
+                    const treeItem = node.querySelector(':scope > .tree-item');
+                    if (treeItem && treeItem.classList) {
+                        if (treeItem.classList.contains('tree-change-deleted')) return 'deleted';
+                        if (treeItem.classList.contains('tree-change-moved')
+                            || treeItem.classList.contains('tree-change-modified')
+                            || treeItem.classList.contains('tree-change-mixed')) {
+                            return '';
+                        }
+                        if (treeItem.classList.contains('tree-change-added')) hasAddedAncestor = true;
+                    }
+                    const parentNode = node.parentElement && node.parentElement.closest ? node.parentElement.closest('.tree-node') : null;
+                    node = parentNode;
+                }
+                return hasAddedAncestor ? 'added' : '';
+            } catch (_) {
+                if (item.classList && item.classList.contains('tree-change-deleted')) return 'deleted';
+                if (item.classList && item.classList.contains('tree-change-added')) return 'added';
+                return '';
+            }
+        })();
 
-        const slice = parent.children.slice(startIndex, startIndex + CANVAS_PERMANENT_TREE_CHILD_BATCH);
+        const slice = childrenForRender.slice(startIndex, startIndex + CANVAS_PERMANENT_TREE_CHILD_BATCH);
         const visited = new Set([String(parentId)]);
         let hintSet = null;
         if (isReadOnly && (window.__changesPreviewHintSet instanceof Set)) {
@@ -9326,7 +9587,7 @@ async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, star
             hintSet = window.__canvasPermanentHintSet;
         }
         const options = isReadOnly ? { forceExpandOverrideLazyStop: false } : undefined;
-        const html = slice.map(child => renderTreeNodeWithChanges(child, nextLevel, 50, visited, hintSet, options, underDeletedAncestor)).join('');
+        const html = slice.map(child => renderTreeNodeWithChanges(child, nextLevel, 50, visited, hintSet, options, underDeletedAncestor, inheritedFolderChange)).join('');
 
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = html;
@@ -9353,7 +9614,7 @@ async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, star
         }
 
         const nextStart = startIndex + slice.length;
-        const remaining = parent.children.length - nextStart;
+        const remaining = childrenForRender.length - nextStart;
 
         let loadMoreBtn = triggerBtn;
         if (remaining > 0) {
@@ -9598,6 +9859,7 @@ async function renderTreeViewSync() {
 
         if (isMarkerEnabled()) {
             applyChangeLogToTreeChangeMap();
+            hydrateDeletedSnapshotCachesFromChangeMap(treeChangeMap);
         }
 
         // 合并旧树和新树，显示删除的节点
@@ -9619,6 +9881,9 @@ async function renderTreeViewSync() {
                 }
             }
         }
+        try {
+            treeToRender = mergeDeletedSnapshotsIntoTreeForRender(treeToRender, treeChangeMap);
+        } catch (_) { }
 
         // 渲染树
         const fragment = document.createDocumentFragment();
@@ -9684,6 +9949,7 @@ async function ensureChangesPreviewTreeDataLoaded() {
         }
         if (isMarkerEnabled()) {
             applyChangeLogToTreeChangeMap();
+            hydrateDeletedSnapshotCachesFromChangeMap(treeChangeMap);
         }
     } catch (e) {
         console.warn('[ensureChangesPreviewTreeDataLoaded] Failed:', e);
@@ -10036,6 +10302,7 @@ async function renderTreeView(forceRefresh = false) {
 
         if (markerEnabled) {
             applyChangeLogToTreeChangeMap();
+            hydrateDeletedSnapshotCachesFromChangeMap(treeChangeMap);
         }
 
         // Canvas 懒加载：使用轻量变化提示缓存（用于显示四类图例/标识）
@@ -10065,6 +10332,9 @@ async function renderTreeView(forceRefresh = false) {
                 }
             }
         }
+        try {
+            treeToRender = mergeDeletedSnapshotsIntoTreeForRender(treeToRender, treeChangeMap);
+        } catch (_) { }
         console.log('[renderTreeView] 使用树:', treeToRender === currentTree ? 'currentTree' : 'rebuiltTree');
 
         // Canvas 懒加载：lazy-load 读取 children 数据时必须基于“实际渲染的树”。
@@ -11265,22 +11535,31 @@ function updateTreeChangeMapForRemove(id, removeInfo) {
     if (!id || !isMarkerEnabled()) return;
     const map = __ensureTreeChangeMap();
     const key = String(id);
-    const existing = map.get(key);
-    if (existing && existing.type && existing.type.includes('added')) {
-        map.delete(key);
-        return;
-    }
     const oldParentId = (removeInfo && typeof removeInfo.parentId !== 'undefined')
         ? removeInfo.parentId
         : (removeInfo && removeInfo.node && typeof removeInfo.node.parentId !== 'undefined' ? removeInfo.node.parentId : null);
     const oldIndex = (removeInfo && typeof removeInfo.index === 'number')
         ? removeInfo.index
         : (removeInfo && removeInfo.node && typeof removeInfo.node.index === 'number' ? removeInfo.node.index : null);
+    const sourceNode = (removeInfo && removeInfo.node)
+        ? removeInfo.node
+        : (removeInfo && removeInfo.nodeSnapshot ? removeInfo.nodeSnapshot : null);
+    const nodeSnapshot = sourceNode ? cloneBookmarkNodeSnapshot(sourceNode) : null;
+    if (nodeSnapshot) {
+        nodeSnapshot.id = key;
+        if ((typeof nodeSnapshot.parentId === 'undefined' || nodeSnapshot.parentId === null) && oldParentId != null) {
+            nodeSnapshot.parentId = String(oldParentId);
+        }
+        if (typeof nodeSnapshot.index !== 'number' && oldIndex != null) {
+            nodeSnapshot.index = oldIndex;
+        }
+    }
     map.set(key, {
         type: 'deleted',
         deleted: {
             oldParentId: oldParentId != null ? oldParentId : null,
-            oldIndex: oldIndex != null ? oldIndex : null
+            oldIndex: oldIndex != null ? oldIndex : null,
+            ...(nodeSnapshot ? { nodeSnapshot } : {})
         }
     });
 }
@@ -11328,10 +11607,11 @@ function applyChangeLogToTreeChangeMap(changeLog) {
         const type = String(entry.type);
         if (type.includes('deleted')) {
             const del = entry.deleted || {};
+            const delSnapshot = del.nodeSnapshot || del.node || null;
             updateTreeChangeMapForRemove(id, {
                 parentId: del.oldParentId,
                 index: del.oldIndex,
-                node: { parentId: del.oldParentId, index: del.oldIndex }
+                node: delSnapshot || { parentId: del.oldParentId, index: del.oldIndex }
             });
             return;
         }
@@ -11354,18 +11634,84 @@ function applyChangeLogToTreeChangeMap(changeLog) {
 }
 
 let pendingPathBadgeRefreshTimer = null;
+let pathBadgeRefreshInFlight = false;
+let queuedPathBadgeRefreshReason = '';
 function scheduleCanvasPathBadgeRefresh(reason = '') {
     if (pendingPathBadgeRefreshTimer) {
         try { clearTimeout(pendingPathBadgeRefreshTimer); } catch (_) { }
     }
     pendingPathBadgeRefreshTimer = setTimeout(() => {
         pendingPathBadgeRefreshTimer = null;
-        refreshCanvasPathBadges(reason)
+        const runReason = reason || '';
+        if (pathBadgeRefreshInFlight) {
+            queuedPathBadgeRefreshReason = runReason || queuedPathBadgeRefreshReason || 'queued';
+            return;
+        }
+        pathBadgeRefreshInFlight = true;
+        refreshCanvasPathBadges(runReason)
             .catch(() => { })
             .finally(() => {
-                syncMarkerAttentionIndicators(`path-badge-refresh:${reason || 'unknown'}`);
+                syncMarkerAttentionIndicators(`path-badge-refresh:${runReason || 'unknown'}`);
+                pathBadgeRefreshInFlight = false;
+                if (queuedPathBadgeRefreshReason) {
+                    const queued = queuedPathBadgeRefreshReason;
+                    queuedPathBadgeRefreshReason = '';
+                    scheduleCanvasPathBadgeRefresh(queued);
+                }
             });
     }, 80);
+}
+
+function captureBodyScrollAnchor(body) {
+    if (!body) return null;
+    try {
+        const viewport = body.getBoundingClientRect();
+        const items = body.querySelectorAll('.tree-item[data-node-id]');
+        let anchorId = '';
+        let anchorTop = null;
+        for (const item of items) {
+            const rect = item.getBoundingClientRect();
+            if (rect.bottom >= viewport.top + 1) {
+                anchorId = item.dataset && item.dataset.nodeId ? String(item.dataset.nodeId) : '';
+                anchorTop = rect.top;
+                break;
+            }
+        }
+        return {
+            scrollTop: body.scrollTop,
+            scrollLeft: body.scrollLeft,
+            anchorId,
+            anchorTop
+        };
+    } catch (_) {
+        return null;
+    }
+}
+
+function restoreBodyScrollAnchor(body, state) {
+    if (!body || !state) return;
+    try {
+        body.scrollLeft = typeof state.scrollLeft === 'number' ? state.scrollLeft : body.scrollLeft;
+        if (state.anchorId && typeof state.anchorTop === 'number') {
+            const anchor = body.querySelector(`.tree-item[data-node-id="${CSS.escape(state.anchorId)}"]`);
+            if (anchor) {
+                const nextTop = anchor.getBoundingClientRect().top;
+                const delta = nextTop - state.anchorTop;
+                if (Number.isFinite(delta) && Math.abs(delta) > 0.5) {
+                    body.scrollTop += delta;
+                    return;
+                }
+            }
+        }
+        if (typeof state.scrollTop === 'number') {
+            body.scrollTop = state.scrollTop;
+        }
+    } catch (_) {
+        try {
+            if (typeof state.scrollTop === 'number') body.scrollTop = state.scrollTop;
+            if (typeof state.scrollLeft === 'number') body.scrollLeft = state.scrollLeft;
+        } catch (_) { }
+    }
 }
 
 async function refreshCanvasPathBadges(reason = '') {
@@ -11381,6 +11727,16 @@ async function refreshCanvasPathBadges(reason = '') {
             });
         } catch (_) { }
         if (!trees.length) return;
+
+        const scrollStates = new Map();
+        try {
+            trees.forEach((tree) => {
+                const body = tree && tree.closest ? tree.closest('.permanent-section-body') : null;
+                if (body && !scrollStates.has(body)) {
+                    scrollStates.set(body, captureBodyScrollAnchor(body));
+                }
+            });
+        } catch (_) { }
 
         if (!shouldShowPathBadges()) {
             trees.forEach(tree => {
@@ -11479,18 +11835,26 @@ async function refreshCanvasPathBadges(reason = '') {
                     });
                 }
                 if (!nodeId || level <= 0) return;
+                if (item.classList.contains('tree-change-deleted')) return;
 
                 // Skip if any ancestor is deleted
                 let underDeletedAncestor = false;
+                let underAddedAncestor = false;
                 try {
                     let node = item.closest('.tree-node');
                     while (node) {
                         const parentNode = node.parentElement && node.parentElement.closest ? node.parentElement.closest('.tree-node') : null;
                         if (!parentNode) break;
                         const parentItem = parentNode.querySelector(':scope > .tree-item');
-                        if (parentItem && parentItem.classList.contains('tree-change-deleted')) {
-                            underDeletedAncestor = true;
-                            break;
+                        if (parentItem) {
+                            if (parentItem.classList.contains('tree-change-deleted')) {
+                                underDeletedAncestor = true;
+                                break;
+                            }
+                            if (parentItem.classList.contains('tree-change-added')) {
+                                underAddedAncestor = true;
+                                break;
+                            }
                         }
                         node = parentNode;
                     }
@@ -11498,20 +11862,36 @@ async function refreshCanvasPathBadges(reason = '') {
                 if (underDeletedAncestor) return;
 
                 const mask = badgeMap ? (badgeMap.get(String(nodeId)) || 0) : 0;
-                const hasDescendants = !!(mask || (hintSet && hintSet.has && hintSet.has(String(nodeId))));
+                const isAddedContext = item.classList.contains('tree-change-added') || underAddedAncestor;
+                const nonAddedMask = (mask & (2 | 4 | 8));
+                const hasDescendants = isAddedContext
+                    ? !!nonAddedMask
+                    : !!(mask || (hintSet && hintSet.has && hintSet.has(String(nodeId))));
                 if (!hasDescendants || !badges) return;
 
                 let html = `<span class="path-badges"><span class="path-dot" title="${escapeHtml(title)}">•</span>`;
-                if (mask) {
-                    if (mask & 1) html += '<span class="path-symbol added" title="+">+</span>';
-                    if (mask & 2) html += '<span class="path-symbol deleted" title="-">-</span>';
-                    if (mask & 4) html += '<span class="path-symbol modified" title="~">~</span>';
-                    if (mask & 8) html += '<span class="path-symbol moved" title=">>">>></span>';
+                const displayMask = isAddedContext ? nonAddedMask : mask;
+                if (displayMask) {
+                    if (displayMask & 1) html += '<span class="path-symbol added" title="+">+</span>';
+                    if (displayMask & 2) html += '<span class="path-symbol deleted" title="-">-</span>';
+                    if (displayMask & 4) html += '<span class="path-symbol modified" title="~">~</span>';
+                    if (displayMask & 8) html += '<span class="path-symbol moved" title=">>">>></span>';
                 }
                 html += '</span>';
                 badges.insertAdjacentHTML('beforeend', html);
             });
         });
+
+        try {
+            scrollStates.forEach((state, body) => {
+                restoreBodyScrollAnchor(body, state);
+            });
+            requestAnimationFrame(() => {
+                scrollStates.forEach((state, body) => {
+                    restoreBodyScrollAnchor(body, state);
+                });
+            });
+        } catch (_) { }
 
         if (reason) console.log('[PathBadges] refreshed', reason);
     } catch (_) { }
@@ -11844,7 +12224,7 @@ function computeForceExpandSet(nodes, changeMap, explicitMovedIdSet = null) {
     return set;
 }
 
-function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = new Set(), forceExpandSet = null, options = {}, underDeletedAncestor = false) {
+function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = new Set(), forceExpandSet = null, options = {}, underDeletedAncestor = false, inheritedFolderChange = '') {
     // 防止无限递归的保护机制
     const MAX_DEPTH = maxDepth;
     const MAX_NODES = 10000;
@@ -11873,13 +12253,24 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
     let statusIcon = '';
     let changeClass = '';
     const changeTypeStr = (change && typeof change.type === 'string') ? change.type : '';
+    const inheritedFolderChangeType = (inheritedFolderChange === 'added' || inheritedFolderChange === 'deleted')
+        ? inheritedFolderChange
+        : (underDeletedAncestor ? 'deleted' : '');
 
     if (node.url) {
         // 叶子（书签）
         if (node.url) {
             const isExplicitMovedOnly = markerEnabled && explicitMovedIdsForRender.has(node.id) && explicitMovedIdsForRender.get(node.id) > Date.now();
             const lazyHint = markerEnabled ? getCanvasLazyHintForBookmark(node) : null;
-            if (change) {
+            const hasOwnNonAddedChange = !!(change && typeof change.type === 'string' && change.type.split('+').some(t => t && t !== 'added'));
+            const useInheritedAddedForLeaf = inheritedFolderChangeType === 'added' && !hasOwnNonAddedChange && !isExplicitMovedOnly;
+            if (inheritedFolderChangeType === 'deleted') {
+                changeClass = 'tree-change-deleted';
+                statusIcon = '<span class="change-badge deleted"><span class="badge-symbol">-</span></span>';
+            } else if (useInheritedAddedForLeaf) {
+                changeClass = 'tree-change-added';
+                statusIcon = '<span class="change-badge added"><span class="badge-symbol">+</span></span>';
+            } else if (change) {
                 if (change.type === 'added') {
                     changeClass = 'tree-change-added';
                     statusIcon = '<span class="change-badge added"><span class="badge-symbol">+</span></span>';
@@ -11957,7 +12348,25 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
 
     // 文件夹
     const __isExplicitMovedOnlyFolder = markerEnabled && explicitMovedIdsForRender.has(node.id) && explicitMovedIdsForRender.get(node.id) > Date.now();
-    if (change) {
+    const folderTypes = changeTypeStr ? changeTypeStr.split('+') : [];
+    const folderHasDeleted = folderTypes.includes('deleted');
+    const folderHasAdded = folderTypes.includes('added');
+    const folderHasMoved = folderTypes.includes('moved');
+    const folderHasModified = folderTypes.includes('modified');
+    const hasOwnNonAddedFolderSignal = folderHasDeleted || folderHasMoved || folderHasModified || __isExplicitMovedOnlyFolder;
+    const useInheritedAddedForFolder = inheritedFolderChangeType === 'added' && !hasOwnNonAddedFolderSignal;
+    const effectiveFolderChangeType = inheritedFolderChangeType === 'deleted'
+        ? 'deleted'
+        : (useInheritedAddedForFolder
+            ? 'added'
+            : (folderHasDeleted ? 'deleted' : (folderHasAdded ? 'added' : '')));
+    if (effectiveFolderChangeType === 'added') {
+        changeClass = 'tree-change-added';
+        statusIcon = '<span class="change-badge added"><span class="badge-symbol">+</span></span>';
+    } else if (effectiveFolderChangeType === 'deleted') {
+        changeClass = 'tree-change-deleted';
+        statusIcon = '<span class="change-badge deleted"><span class="badge-symbol">-</span></span>';
+    } else if (change) {
         if (change.type === 'added') {
             changeClass = 'tree-change-added';
             statusIcon = '<span class="change-badge added"><span class="badge-symbol">+</span></span>';
@@ -12015,15 +12424,16 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
     const shouldOverrideLazyStop = allowOverrideLazyStop && shouldForceExpand;
     const isLazyEnabledInContext = CANVAS_PERMANENT_TREE_LAZY_ENABLED;
     const isLazyStop = !shouldOverrideLazyStop && isLazyEnabledInContext && (currentView === 'canvas') && level > 0;
-    const hasOwnChange = !!(change || __isExplicitMovedOnlyFolder);
     let hasChangesHintBadge = false;
-    const isDeletedFolder = !!(!node.url && node.children && changeTypeStr && changeTypeStr.split('+').includes('deleted'));
+    const isAddedFolder = effectiveFolderChangeType === 'added';
+    const isDeletedFolder = effectiveFolderChangeType === 'deleted';
+    const suppressPathBadgesForFolder = isDeletedFolder;
 
     // 并显示子树聚合徽标（+/-/~/>>）。
     //
     // 注意：聚合徽标来自 badgeMap，代表“子树中出现的变化类型”，不应被父节点自身的变化类型掩盖。
     // 例如：父=修改+移动，子树也有移动，仍应显示灰点 + 子树聚合移动标识。
-    if (!underDeletedAncestor && level > 0 && isLazyEnabledInContext && (currentView === 'canvas') && shouldShowPathBadges()) {
+    if (!underDeletedAncestor && !suppressPathBadgesForFolder && level > 0 && isLazyEnabledInContext && (currentView === 'canvas') && shouldShowPathBadges()) {
         try {
             // 祖先聚合徽标
             const badgeMap = (currentView === 'canvas'
@@ -12031,21 +12441,26 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                 : (window.__changesPreviewAncestorBadges instanceof Map ? window.__changesPreviewAncestorBadges : null));
 
             const mask = badgeMap ? (badgeMap.get(String(node.id)) || 0) : 0;
+            const isAddedContextFolder = isAddedFolder || inheritedFolderChangeType === 'added';
+            const nonAddedMask = (mask & (2 | 4 | 8));
             // Note: in this function the 5th param is historically used as the "hint set"
             // (ancestor path ids). Keep using it here to avoid adding a new parameter.
             const hintHasDescendants = !!(forceExpandSet && forceExpandSet.has && forceExpandSet.has(String(node.id)));
-            const hasDescendants = !!(mask || hintHasDescendants);
+            const hasDescendants = isAddedContextFolder
+                ? !!nonAddedMask
+                : !!(mask || hintHasDescendants);
             if (hasDescendants) {
                 const title = currentLang === 'zh_CN' ? '此文件夹下有变化' : 'Contains changes';
                 let pathBadges = `<span class="path-badges"><span class="path-dot" title="${escapeHtml(title)}">•</span>`;
                 hasChangesHintBadge = true;
 
+                const displayMask = isAddedContextFolder ? nonAddedMask : mask;
                 // 子树聚合徽标：即使与父自身类型重复，也保留（避免“被掩盖”）
-                if (mask) {
-                    if (mask & 1) pathBadges += '<span class="path-symbol added" title="+">+</span>';
-                    if (mask & 2) pathBadges += '<span class="path-symbol deleted" title="-">-</span>';
-                    if (mask & 4) pathBadges += '<span class="path-symbol modified" title="~">~</span>';
-                    if (mask & 8) pathBadges += '<span class="path-symbol moved" title=">>">>></span>';
+                if (displayMask) {
+                    if (displayMask & 1) pathBadges += '<span class="path-symbol added" title="+">+</span>';
+                    if (displayMask & 2) pathBadges += '<span class="path-symbol deleted" title="-">-</span>';
+                    if (displayMask & 4) pathBadges += '<span class="path-symbol modified" title="~">~</span>';
+                    if (displayMask & 8) pathBadges += '<span class="path-symbol moved" title=">>">>></span>';
                 }
                 pathBadges += '</span>';
                 statusIcon += pathBadges;
@@ -12072,6 +12487,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
     // 若文件夹本身无变化，但其子树存在变化，追加灰色“指引”标识。
     // 因此这里只在“非懒加载上下文”下才允许 descendant scan。
     if (!underDeletedAncestor &&
+        !suppressPathBadgesForFolder &&
         !hasChangesHintBadge &&
         !(isLazyEnabledInContext && (currentView === 'canvas')) &&
         shouldShowPathBadges()) {
@@ -12144,6 +12560,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
     });
 
     const nextUnderDeletedAncestor = underDeletedAncestor || isDeletedFolder;
+    const nextInheritedFolderChange = effectiveFolderChangeType || '';
 
     return `
             <div class="tree-node">
@@ -12154,7 +12571,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                     <span class="change-badges">${statusIcon}</span>
                 </div>
                 <div class="tree-children ${level === 0 ? 'expanded' : ''}">
-                    ${sortedChildren.map(child => renderTreeNodeWithChanges(child, level + 1, maxDepth, visitedIds, forceExpandSet, options, nextUnderDeletedAncestor)).join('')}
+                    ${sortedChildren.map(child => renderTreeNodeWithChanges(child, level + 1, maxDepth, visitedIds, forceExpandSet, options, nextUnderDeletedAncestor, nextInheritedFolderChange)).join('')}
                 </div>
             </div>
         `;
@@ -12168,6 +12585,10 @@ function ensureTreeLegendExists(container) {
     // 检查图例是否已存在
     const existingLegend = container.querySelector('.tree-legend');
     if (existingLegend) return; // 已存在，无需创建
+
+    const body = container.closest ? container.closest('.permanent-section-body') : null;
+    const firstNode = container.querySelector('.tree-node');
+    const beforeTop = (body && firstNode) ? firstNode.getBoundingClientRect().top : null;
 
     // 创建图例
     const legend = document.createElement('div');
@@ -12183,10 +12604,172 @@ function ensureTreeLegendExists(container) {
     // 插入到容器顶部
     container.insertBefore(legend, container.firstChild);
 
+    // 保持可视区域稳定：首次插入图例会把列表整体下推，补偿滚动避免“向上跳”
+    try {
+        if (body && firstNode && typeof beforeTop === 'number') {
+            const afterTop = firstNode.getBoundingClientRect().top;
+            const delta = afterTop - beforeTop;
+            if (Number.isFinite(delta) && Math.abs(delta) > 0.5) {
+                body.scrollTop += delta;
+            }
+        }
+    } catch (_) { }
+
     // 绑定点击事件
     setupLegendClickHandlers(container);
 
     console.log('[增量更新] 图例已创建');
+}
+
+const TREE_CHANGE_CLASSES = ['tree-change-added', 'tree-change-modified', 'tree-change-moved', 'tree-change-mixed', 'tree-change-deleted'];
+
+function getTreeChangeBadgeHTML(changeType) {
+    if (changeType === 'added') {
+        return '<span class="change-badge added"><span class="badge-symbol">+</span></span>';
+    }
+    if (changeType === 'deleted') {
+        return '<span class="change-badge deleted"><span class="badge-symbol">-</span></span>';
+    }
+    return '';
+}
+
+function applyTreeChangeLabelStyle(item, changeType) {
+    if (!item) return;
+    const labelLink = item.querySelector('.tree-bookmark-link');
+    const labelSpan = item.querySelector('.tree-label');
+    const targets = [labelLink, labelSpan].filter(Boolean);
+    if (!targets.length) return;
+
+    if (changeType === 'added') {
+        targets.forEach((el) => {
+            el.style.setProperty('color', '#28a745');
+            el.style.setProperty('font-weight', '500');
+            el.style.removeProperty('text-decoration');
+            el.style.removeProperty('opacity');
+        });
+        return;
+    }
+
+    if (changeType === 'deleted') {
+        targets.forEach((el) => {
+            el.style.setProperty('color', '#dc3545');
+            el.style.setProperty('font-weight', '500');
+            el.style.setProperty('text-decoration', 'line-through');
+            el.style.setProperty('opacity', '0.7');
+        });
+    }
+}
+
+function applyTreeChangeToItem(item, changeType) {
+    if (!item || (changeType !== 'added' && changeType !== 'deleted')) return;
+    const nextClass = changeType === 'added' ? 'tree-change-added' : 'tree-change-deleted';
+    TREE_CHANGE_CLASSES.forEach((cls) => item.classList.remove(cls));
+    item.classList.add(nextClass);
+    applyTreeChangeLabelStyle(item, changeType);
+
+    let badges = item.querySelector('.change-badges');
+    if (!badges) {
+        item.insertAdjacentHTML('beforeend', '<span class="change-badges"></span>');
+        badges = item.querySelector('.change-badges');
+    }
+    if (badges) {
+        badges.innerHTML = getTreeChangeBadgeHTML(changeType);
+    }
+}
+
+function applyTreeChangeToRenderedSubtree(rootItem, changeType) {
+    if (!rootItem) return;
+    applyTreeChangeToItem(rootItem, changeType);
+
+    const rootNode = rootItem.closest('.tree-node');
+    if (!rootNode) return;
+    rootNode.querySelectorAll('.tree-children .tree-item').forEach((childItem) => {
+        applyTreeChangeToItem(childItem, changeType);
+    });
+}
+
+function cloneBookmarkNodeSnapshot(node) {
+    if (!node || typeof node !== 'object') return null;
+    try {
+        return JSON.parse(JSON.stringify(node));
+    } catch (_) {
+        return null;
+    }
+}
+
+function enrichRemoveInfoWithSnapshot(id, removeInfo) {
+    const next = (removeInfo && typeof removeInfo === 'object') ? { ...removeInfo } : {};
+    if (!next.node) {
+        try {
+            const sid = String(id);
+            const renderIndex = getCachedRenderTreeIndex();
+            const currentIndex = getCachedCurrentTreeIndex();
+            const fromRender = renderIndex && renderIndex.get(sid);
+            const fromCurrent = currentIndex && currentIndex.get(sid);
+            next.node = cloneBookmarkNodeSnapshot(fromRender || fromCurrent);
+        } catch (_) { }
+    } else {
+        next.node = cloneBookmarkNodeSnapshot(next.node);
+    }
+
+    if (typeof next.parentId === 'undefined' && next.node && typeof next.node.parentId !== 'undefined') {
+        next.parentId = next.node.parentId;
+    }
+    if (typeof next.index !== 'number' && next.node && typeof next.node.index === 'number') {
+        next.index = next.node.index;
+    }
+    return next;
+}
+
+function tryInsertDeletedSnapshotNode(container, id, removeInfo) {
+    if (!container || !removeInfo || !removeInfo.node) return null;
+
+    const snapshotNode = cloneBookmarkNodeSnapshot(removeInfo.node);
+    if (!snapshotNode) return null;
+    snapshotNode.id = String(id);
+
+    const parentId = (typeof removeInfo.parentId !== 'undefined' && removeInfo.parentId !== null)
+        ? String(removeInfo.parentId)
+        : (typeof snapshotNode.parentId !== 'undefined' && snapshotNode.parentId !== null ? String(snapshotNode.parentId) : '');
+    if (!parentId) return null;
+
+    const parentItem = container.querySelector(`.tree-item[data-node-id="${CSS.escape(parentId)}"]`);
+    const parentTreeNode = parentItem ? parentItem.closest('.tree-node') : null;
+    const parentNode = parentTreeNode ? parentTreeNode.querySelector(':scope > .tree-children') : null;
+    if (!parentItem || !parentNode) return null;
+
+    const parentLevel = (() => {
+        try { return parseInt(parentItem.dataset.nodeLevel || '0', 10) || 0; } catch (_) { return 0; }
+    })();
+    const nodeLevel = parentLevel + 1;
+    const html = renderTreeNodeWithChanges(snapshotNode, nodeLevel, 50, new Set(), null, undefined, false, 'deleted');
+    if (!html) return null;
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+    const restoredNode = wrapper.firstElementChild;
+    if (!restoredNode) return null;
+
+    const siblingsAll = Array.from(parentNode.querySelectorAll(':scope > .tree-node'));
+    const presentSiblings = siblingsAll.filter(n => {
+        const treeItem = n.querySelector(':scope > .tree-item');
+        return !(treeItem && treeItem.classList.contains('tree-change-deleted'));
+    });
+
+    const targetIndex = (typeof removeInfo.index === 'number' && removeInfo.index >= 0)
+        ? removeInfo.index
+        : presentSiblings.length;
+    const anchor = presentSiblings[targetIndex] || null;
+
+    if (anchor) {
+        parentNode.insertBefore(restoredNode, anchor);
+    } else {
+        const firstDeleted = siblingsAll.find(n => n.querySelector(':scope > .tree-item')?.classList.contains('tree-change-deleted'));
+        if (firstDeleted) parentNode.insertBefore(restoredNode, firstDeleted); else parentNode.appendChild(restoredNode);
+    }
+
+    try { parentItem.dataset.hasChildren = 'true'; } catch (_) { }
+    return restoredNode.querySelector(':scope > .tree-item');
 }
 
 // ===== 增量更新：创建 =====
@@ -12278,6 +12861,8 @@ async function applyIncrementalCreateToTree(id, bookmark) {
     // 为新创建的节点绑定事件
     const newItem = newNodeEl?.querySelector('.tree-item');
     if (newItem) {
+        applyTreeChangeToRenderedSubtree(newItem, 'added');
+
         // 绑定右键菜单
         newItem.addEventListener('contextmenu', (e) => {
             if (typeof showContextMenu === 'function') {
@@ -12302,13 +12887,19 @@ async function applyIncrementalCreateToTree(id, bookmark) {
 }
 
 // ===== 增量更新：删除 =====
-function applyIncrementalRemoveFromTree(id) {
+function applyIncrementalRemoveFromTree(id, removeInfo = null) {
     const permBody = document.querySelector('.permanent-section-body');
     const permScrollTop = permBody ? permBody.scrollTop : null;
     const container = document.getElementById('bookmarkTree');
     if (!container) return;
     const item = container.querySelector(`.tree-item[data-node-id="${id}"]`);
-    if (!item) {
+
+    let targetItem = item;
+    if (!targetItem) {
+        targetItem = tryInsertDeletedSnapshotNode(container, id, removeInfo);
+    }
+
+    if (!targetItem) {
         // Canvas 懒加载：节点可能根本未渲染（所在父文件夹未展开）。
         // 这里不要触发全量重绘，否则在大量删除时会非常卡。
         const isCanvasLazyMode = currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED;
@@ -12318,32 +12909,7 @@ function applyIncrementalRemoveFromTree(id) {
         return;
     }
 
-    // 先添加红色标识和删除类
-    item.classList.add('tree-change-deleted');
-
-    // 直接设置标签的红色样式
-    const labelLink = item.querySelector('.tree-bookmark-link');
-    const labelSpan = item.querySelector('.tree-label');
-    if (labelLink) {
-        labelLink.style.color = '#dc3545';
-        labelLink.style.fontWeight = '500';
-        labelLink.style.textDecoration = 'line-through';
-        labelLink.style.opacity = '0.7';
-    }
-    if (labelSpan) {
-        labelSpan.style.color = '#dc3545';
-        labelSpan.style.fontWeight = '500';
-        labelSpan.style.textDecoration = 'line-through';
-        labelSpan.style.opacity = '0.7';
-    }
-
-    // 添加红色标识
-    const badges = item.querySelector('.change-badges');
-    if (badges) {
-        badges.innerHTML = '<span class="change-badge deleted"><span class="badge-symbol">-</span></span>';
-    } else {
-        item.insertAdjacentHTML('beforeend', '<span class="change-badges"><span class="change-badge deleted"><span class="badge-symbol">-</span></span></span>');
-    }
+    applyTreeChangeToRenderedSubtree(targetItem, 'deleted');
 
     // 保持删除标识在原位显示，不自动移除节点
     // 用户可以通过"清理变动标识"功能来清除这些已删除的项目
@@ -12933,6 +13499,7 @@ function handleStorageChange(changes, namespace) {
             cachedChangeLog = { updatedAt: updatedAt || 0, changes: new Map(), version: 1 };
             // 清空显式移动标识，避免残留蓝标
             explicitMovedIds = new Map();
+            clearIncrementalDeletedSnapshots('lastBookmarkData-changed');
             try { window.__canvasPermanentHintSet = null; } catch (_) { }
             try { window.__canvasPermanentAncestorBadges = null; } catch (_) { }
             __canvasPermanentHintSet = null;
@@ -12949,6 +13516,130 @@ function handleStorageChange(changes, namespace) {
 // 书签API监听（实时更新书签树）
 // =============================================================================
 
+const BULK_ADD_REMOVE_THRESHOLD = 300;
+const BULK_ADD_REMOVE_QUIET_MS = 220;
+
+let pendingAddRemoveEvents = [];
+let pendingAddRemoveTimer = null;
+let addRemoveFlushInProgress = false;
+let addRemoveFlushQueued = false;
+
+async function handleBookmarkCreateRealtime(id, bookmark) {
+    addBookmarkToCache(bookmark);
+
+    if (currentView === 'canvas') {
+        await applyIncrementalCreateToTree(id, bookmark);
+        const appliedToCachedTree = applyIncrementalCreateToCachedCurrentTree(id, bookmark);
+        if (!appliedToCachedTree) {
+            scheduleCachedCurrentTreeSnapshotRefresh('onCreated-fast-fallback', 40);
+        }
+        updateTreeChangeMapForCreate(id);
+        scheduleCanvasPathBadgeRefresh('onCreated');
+        scheduleCachedCurrentTreeSnapshotRefresh('onCreated');
+    }
+
+    clearCanvasLazyChangeHints('onCreated');
+}
+
+async function handleBookmarkRemoveRealtime(id, removeInfo) {
+    removeBookmarkFromCache(id);
+
+    const enrichedRemoveInfo = enrichRemoveInfoWithSnapshot(id, removeInfo);
+    cacheDeletedSnapshotForLazyRender(id, enrichedRemoveInfo);
+
+    if (enrichedRemoveInfo && enrichedRemoveInfo.node && enrichedRemoveInfo.node.url) {
+        FaviconCache.clear(enrichedRemoveInfo.node.url);
+    }
+
+    if (currentView === 'canvas') {
+        applyIncrementalRemoveFromTree(id, enrichedRemoveInfo);
+        const appliedToCachedTree = applyIncrementalRemoveFromCachedCurrentTree(id, enrichedRemoveInfo);
+        if (!appliedToCachedTree) {
+            scheduleCachedCurrentTreeSnapshotRefresh('onRemoved-fast-fallback', 40);
+        }
+        updateTreeChangeMapForRemove(id, enrichedRemoveInfo);
+        scheduleCanvasPathBadgeRefresh('onRemoved');
+        scheduleCachedCurrentTreeSnapshotRefresh('onRemoved');
+    }
+
+    clearCanvasLazyChangeHints('onRemoved');
+}
+
+function scheduleAddRemoveEventFlush() {
+    if (pendingAddRemoveTimer) {
+        clearTimeout(pendingAddRemoveTimer);
+    }
+    pendingAddRemoveTimer = setTimeout(() => {
+        pendingAddRemoveTimer = null;
+        flushPendingAddRemoveEvents('quiet-window').catch((e) => {
+            console.warn('[书签监听] 批处理 flush 失败:', e);
+        });
+    }, BULK_ADD_REMOVE_QUIET_MS);
+}
+
+function enqueueAddRemoveEvent(event) {
+    if (!event || !event.type || !event.id) return;
+    pendingAddRemoveEvents.push(event);
+    scheduleAddRemoveEventFlush();
+}
+
+async function flushPendingAddRemoveEvents(reason = '') {
+    if (addRemoveFlushInProgress) {
+        addRemoveFlushQueued = true;
+        return;
+    }
+
+    if (!pendingAddRemoveEvents.length) return;
+
+    addRemoveFlushInProgress = true;
+    const batch = pendingAddRemoveEvents;
+    pendingAddRemoveEvents = [];
+
+    try {
+        const isBulk = batch.length >= BULK_ADD_REMOVE_THRESHOLD;
+
+        if (isBulk) {
+            console.log(`[书签监听][批处理] 新增/删除事件数=${batch.length}，触发批处理 (${reason || 'unknown'})`);
+
+            batch.forEach((event) => {
+                if (event.type === 'created') {
+                    addBookmarkToCache(event.bookmark);
+                    return;
+                }
+
+                removeBookmarkFromCache(event.id);
+                if (event.removeInfo && event.removeInfo.node && event.removeInfo.node.url) {
+                    FaviconCache.clear(event.removeInfo.node.url);
+                }
+            });
+
+            if (currentView === 'canvas') {
+                await renderTreeView(true);
+                scheduleCachedCurrentTreeSnapshotRefresh('bulk-add-remove');
+                scheduleCanvasPathBadgeRefresh('bulk-add-remove');
+            }
+            clearCanvasLazyChangeHints('bulk-add-remove');
+            return;
+        }
+
+        for (const event of batch) {
+            if (event.type === 'created') {
+                await handleBookmarkCreateRealtime(event.id, event.bookmark);
+            } else if (event.type === 'removed') {
+                await handleBookmarkRemoveRealtime(event.id, event.removeInfo);
+            }
+        }
+    } finally {
+        addRemoveFlushInProgress = false;
+        if (addRemoveFlushQueued) {
+            addRemoveFlushQueued = false;
+            flushPendingAddRemoveEvents('queued').catch((e) => {
+                console.warn('[书签监听] queued flush 失败:', e);
+            });
+        }
+    }
+}
+
 function setupBookmarkListener() {
     if (!browserAPI.bookmarks) {
         console.warn('[书签监听] 书签API不可用');
@@ -12958,47 +13649,29 @@ function setupBookmarkListener() {
     console.log('[书签监听] 设置书签API监听器');
 
     // 书签创建
-    browserAPI.bookmarks.onCreated.addListener(async (id, bookmark) => {
+    browserAPI.bookmarks.onCreated.addListener((id, bookmark) => {
         console.log('[书签监听] 书签创建:', bookmark.title);
         try {
-            addBookmarkToCache(bookmark);
-            // 支持 canvas 视图（包含永久栏目的书签树）
-            if (currentView === 'canvas') {
-                await applyIncrementalCreateToTree(id, bookmark);
-                applyIncrementalCreateToCachedCurrentTree(id, bookmark);
-                updateTreeChangeMapForCreate(id);
-                scheduleCanvasPathBadgeRefresh('onCreated');
-                scheduleCachedCurrentTreeSnapshotRefresh('onCreated');
-            }
-            clearCanvasLazyChangeHints('onCreated');
+            enqueueAddRemoveEvent({
+                type: 'created',
+                id: String(id),
+                bookmark
+            });
         } catch (e) {
-            // 仅记录错误，不触发完全刷新以避免页面闪烁和滚动位置丢失
             console.warn('[书签监听] onCreated 处理异常:', e);
         }
     });
 
     // 书签删除
-    browserAPI.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
+    browserAPI.bookmarks.onRemoved.addListener((id, removeInfo) => {
         console.log('[书签监听] 书签删除:', id);
         try {
-            removeBookmarkFromCache(id);
-            // 删除对应的 favicon 缓存
-            // removeInfo.node 包含被删除书签的信息（包括 URL）
-            if (removeInfo.node && removeInfo.node.url) {
-                FaviconCache.clear(removeInfo.node.url);
-            }
-
-            // 支持 canvas 视图（包含永久栏目的书签树）
-            if (currentView === 'canvas') {
-                applyIncrementalRemoveFromTree(id);
-                applyIncrementalRemoveFromCachedCurrentTree(id, removeInfo);
-                updateTreeChangeMapForRemove(id, removeInfo);
-                scheduleCanvasPathBadgeRefresh('onRemoved');
-                scheduleCachedCurrentTreeSnapshotRefresh('onRemoved');
-            }
-            clearCanvasLazyChangeHints('onRemoved');
+            enqueueAddRemoveEvent({
+                type: 'removed',
+                id: String(id),
+                removeInfo
+            });
         } catch (e) {
-            // 仅记录错误，不触发完全刷新以避免页面闪烁和滚动位置丢失
             console.warn('[书签监听] onRemoved 处理异常:', e);
         }
     });
@@ -13007,12 +13680,16 @@ function setupBookmarkListener() {
     browserAPI.bookmarks.onChanged.addListener(async (id, changeInfo) => {
         console.log('[书签监听] 书签修改:', changeInfo);
         try {
+            await flushPendingAddRemoveEvents('before-onChanged');
             updateBookmarkInCache(id, changeInfo);
 
             // 支持 canvas 视图（包含永久栏目的书签树）
             if (currentView === 'canvas') {
                 await applyIncrementalChangeToTree(id, changeInfo);
-                applyIncrementalChangeToCachedCurrentTree(id, changeInfo);
+                const appliedToCachedTree = applyIncrementalChangeToCachedCurrentTree(id, changeInfo);
+                if (!appliedToCachedTree) {
+                    scheduleCachedCurrentTreeSnapshotRefresh('onChanged-fast-fallback', 40);
+                }
                 updateTreeChangeMapForChange(id);
                 scheduleCanvasPathBadgeRefresh('onChanged');
                 scheduleCachedCurrentTreeSnapshotRefresh('onChanged');
@@ -13029,6 +13706,7 @@ function setupBookmarkListener() {
         console.log('[书签监听] 书签移动:', id);
 
         try {
+            await flushPendingAddRemoveEvents('before-onMoved');
             moveBookmarkInCache(id, moveInfo);
             // 将本次移动记为显式主动移动，确保稳定显示蓝色标识
             explicitMovedIds.set(id, Date.now() + Infinity);
@@ -13037,7 +13715,10 @@ function setupBookmarkListener() {
             // 支持 canvas 视图（包含永久栏目的书签树）
             if (currentView === 'canvas') {
                 await applyIncrementalMoveToTree(id, moveInfo);
-                applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
+                const appliedToCachedTree = applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
+                if (!appliedToCachedTree) {
+                    scheduleCachedCurrentTreeSnapshotRefresh('onMoved-fast-fallback', 40);
+                }
                 updateTreeChangeMapForMove(id, moveInfo);
                 scheduleCanvasPathBadgeRefresh('onMoved');
                 scheduleCachedCurrentTreeSnapshotRefresh('onMoved');

@@ -10,6 +10,7 @@ const browserAPI = (function () {
 
 const MARKER_BADGE_TEXT_MAX = 99;
 const MARKER_BADGE_DEFAULT_BG = '#fbbc04';
+const MARKER_BADGE_TEXT_COLOR = '#000000';
 const MARKER_BADGE_COLOR_STORAGE_KEY = 'canvas_marker_badge_color_v1';
 const MARKER_SETTINGS_KEY = 'canvas_marker_settings_v1';
 
@@ -72,7 +73,7 @@ function setMarkerBadgeState(hasMarkers, markerCount, badgeColorHex = MARKER_BAD
     if (!browserAPI?.action || typeof browserAPI.action.setBadgeText !== 'function') return;
 
     const badgeBgColor = normalizeHexColor(badgeColorHex, MARKER_BADGE_DEFAULT_BG);
-    const badgeTextColor = pickReadableTextColor(badgeBgColor);
+    const badgeTextColor = MARKER_BADGE_TEXT_COLOR;
     const text = hasMarkers ? normalizeMarkerBadgeText(markerCount) : '';
     browserAPI.action.setBadgeText({ text }, () => {
       try {
@@ -590,6 +591,30 @@ function __mergeType(existingType, nextType) {
   return Array.from(types).join('+');
 }
 
+function __serializeRemovedNodeSnapshot(node) {
+  if (!node || typeof node !== 'object') return null;
+  const out = {
+    id: (typeof node.id !== 'undefined' && node.id !== null) ? String(node.id) : '',
+    title: typeof node.title === 'string' ? node.title : ''
+  };
+  if (typeof node.parentId !== 'undefined' && node.parentId !== null) {
+    out.parentId = String(node.parentId);
+  }
+  if (typeof node.index === 'number') {
+    out.index = node.index;
+  }
+  if (typeof node.url === 'string' && node.url) {
+    out.url = node.url;
+  }
+  if (Array.isArray(node.children) && node.children.length) {
+    const children = node.children
+      .map(child => __serializeRemovedNodeSnapshot(child))
+      .filter(Boolean);
+    if (children.length) out.children = children;
+  }
+  return out;
+}
+
 async function __updateChangeLogForCreate(id) {
   if (!id) return;
   const key = String(id);
@@ -614,24 +639,28 @@ async function __updateChangeLogForRemove(id, removeInfo) {
   if (!id) return;
   const key = String(id);
   const log = await __loadChangeLog();
-  const existing = log.changes[key];
-  if (existing && existing.type && String(existing.type).includes('added')) {
-    delete log.changes[key];
-    log.updatedAt = Date.now();
-    await __saveChangeLog(log);
-    return;
-  }
   const oldParentId = (removeInfo && typeof removeInfo.parentId !== 'undefined')
     ? removeInfo.parentId
     : (removeInfo && removeInfo.node && typeof removeInfo.node.parentId !== 'undefined' ? removeInfo.node.parentId : null);
   const oldIndex = (removeInfo && typeof removeInfo.index === 'number')
     ? removeInfo.index
     : (removeInfo && removeInfo.node && typeof removeInfo.node.index === 'number' ? removeInfo.node.index : null);
+  const nodeSnapshot = __serializeRemovedNodeSnapshot(removeInfo && removeInfo.node);
+  if (nodeSnapshot) {
+    nodeSnapshot.id = key;
+    if (typeof nodeSnapshot.parentId === 'undefined' && oldParentId != null) {
+      nodeSnapshot.parentId = String(oldParentId);
+    }
+    if (typeof nodeSnapshot.index !== 'number' && oldIndex != null) {
+      nodeSnapshot.index = oldIndex;
+    }
+  }
   log.changes[key] = {
     type: 'deleted',
     deleted: {
       oldParentId: oldParentId != null ? oldParentId : null,
-      oldIndex: oldIndex != null ? oldIndex : null
+      oldIndex: oldIndex != null ? oldIndex : null,
+      ...(nodeSnapshot ? { nodeSnapshot } : {})
     },
     ts: Date.now()
   };
