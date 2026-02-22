@@ -452,7 +452,13 @@
                                 <div class="canvas-help-section">
                                     <div class="canvas-help-section-title" id="canvasHelpTouchpadTitle">触控板操作</div>
                                     <div class="canvas-help-row">
-                                        <span class="canvas-help-key" id="canvasHelpTouchpadPinch">双指捏合</span>
+                                        <span class="canvas-help-key"
+                                            style="display:inline-flex;align-items:center;gap:4px;">
+                                            <span id="canvasHelpTouchpadPinch">双指捏合</span>
+                                            <button type="button" class="perf-help-btn" id="pinchHelpBtn1">
+                                                <i class="fas fa-question-circle"></i>
+                                            </button>
+                                        </span>
                                         <span class="canvas-help-desc" id="canvasHelpTouchpadPinchDesc">缩放画布</span>
                                     </div>
                                     <div class="canvas-help-row">
@@ -667,7 +673,14 @@
                                                             data-i18n-key="canvasHelpTouchpadTitle">触控板操作</div>
                                                         <div class="canvas-help-row">
                                                             <span class="canvas-help-key"
-                                                                data-i18n-key="canvasHelpTouchpadPinch">双指捏合</span>
+                                                                style="display:inline-flex;align-items:center;gap:4px;">
+                                                                <span
+                                                                    data-i18n-key="canvasHelpTouchpadPinch">双指捏合</span>
+                                                                <button type="button" class="perf-help-btn"
+                                                                    id="pinchHelpBtn2">
+                                                                    <i class="fas fa-question-circle"></i>
+                                                                </button>
+                                                            </span>
                                                             <span class="canvas-help-desc"
                                                                 data-i18n-key="canvasHelpTouchpadPinchDesc">缩放画布</span>
                                                         </div>
@@ -1099,6 +1112,12 @@
                 </div>
             </div>
         </div>
+    </div>
+    <div class="perf-help-popover" id="pinchHelpPopover1">
+        <div class="perf-help-popover-content" id="pinchHelpText1"></div>
+    </div>
+    <div class="perf-help-popover" id="pinchHelpPopover2">
+        <div class="perf-help-popover-content" id="pinchHelpText2"></div>
     </div>
 </body>
 

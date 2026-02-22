@@ -3431,6 +3431,10 @@ const i18n = {
         'zh_CN': '缩放画布',
         'en': 'Zoom canvas'
     },
+    canvasHelpTouchpadPinchTooltip: {
+        'zh_CN': '受浏览器底层限制：\n侧边栏原生拦截了捏合手势，\n请改用「按键+双指滑动」',
+        'en': 'Browser Limitation:\nSide panel natively intercepts pinch gestures,\nplease use "Modifier + Swipe" instead'
+    },
     canvasHelpTouchpadModifierSwipe: {
         'zh_CN': '双指滑动（兼容侧边栏）',
         'en': 'Two-finger Swipe (Side Panel compatible)'
@@ -4184,6 +4188,51 @@ function applyLanguage() {
     if (canvasHelpTouchpadPinch) canvasHelpTouchpadPinch.textContent = i18n.canvasHelpTouchpadPinch[currentLang];
     const canvasHelpTouchpadPinchDesc = document.getElementById('canvasHelpTouchpadPinchDesc');
     if (canvasHelpTouchpadPinchDesc) canvasHelpTouchpadPinchDesc.textContent = i18n.canvasHelpTouchpadPinchDesc[currentLang];
+
+    const pinchText1 = document.getElementById('pinchHelpText1');
+    if (pinchText1) pinchText1.innerHTML = i18n.canvasHelpTouchpadPinchTooltip[currentLang].replace(/\n/g, '<br>');
+    const pinchText2 = document.getElementById('pinchHelpText2');
+    if (pinchText2) pinchText2.innerHTML = i18n.canvasHelpTouchpadPinchTooltip[currentLang].replace(/\n/g, '<br>');
+
+    const setupPinchPopover = (btnId, popoverId) => {
+        const btn = document.getElementById(btnId);
+        const popover = document.getElementById(popoverId);
+        if (btn && popover) {
+            // Remove old title if any
+            btn.removeAttribute('title');
+
+            // Prevent multiple listeners if updateLanguageStrings is called multiple times
+            if (btn.dataset.popoverBound === 'true') return;
+            btn.dataset.popoverBound = 'true';
+
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const isShow = popover.classList.contains('show');
+                document.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
+                if (!isShow) {
+                    const rect = btn.getBoundingClientRect();
+                    const container = btn.closest('.modal-content') || document.body;
+                    const containerRect = container.getBoundingClientRect();
+                    // Basic position calculation relative to container
+                    popover.style.top = (rect.top - containerRect.top) + 'px';
+                    popover.style.left = (rect.right - containerRect.left + 8) + 'px';
+                    popover.classList.add('show');
+                }
+            });
+        }
+    };
+    setupPinchPopover('pinchHelpBtn1', 'pinchHelpPopover1');
+    setupPinchPopover('pinchHelpBtn2', 'pinchHelpPopover2');
+
+    if (!document.body.dataset.pinchPopoverGlobalBound) {
+        document.body.dataset.pinchPopoverGlobalBound = 'true';
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
+                document.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
+            }
+        });
+    }
 
     const canvasHelpTouchpadModifierSwipe = document.getElementById('canvasHelpTouchpadModifierSwipe');
     if (canvasHelpTouchpadModifierSwipe) canvasHelpTouchpadModifierSwipe.textContent = i18n.canvasHelpTouchpadModifierSwipe[currentLang];
