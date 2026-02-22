@@ -2523,7 +2523,7 @@ function createInitialDemoTemplate() {
     const isEnglish = lang !== 'zh_CN';
 
     // 中文版：永久栏目使用说明
-    const bookmarkGuideHtml_zh = `<h2>书签画布（v3.0） - 使用说明</h2>
+    const bookmarkGuideHtml_zh = `<h2>书签画布（dev） - 使用说明</h2>
 <ol>
 <li><strong>拖动书签/文件夹至空白处</strong>，创建书签型临时节点；</li>
 <li>临时节点的修改<strong>不计入核心数据</strong>，可用来对比查看/整理；</li>
@@ -2534,8 +2534,6 @@ function createInitialDemoTemplate() {
 <ul>
 <li><strong>创建临时栏目</strong>：从书签树拖动书签到空白处</li>
 <li><strong>创建空白卡片</strong>：双击画布空白处</li>
-<li><strong>平移画布</strong>：空格+拖动 或 双指滑动</li>
-<li><strong>缩放画布</strong>：Ctrl+滚轮 / 双指滑动 或 双指捏合（侧边栏不可用）</li>
 </ul>
 <h3>连接线</h3>
 <ul>
@@ -2546,7 +2544,7 @@ function createInitialDemoTemplate() {
 <p><em>提示：此卡片可自由编辑或删除</em></p>`;
 
     // 英文版：永久栏目使用说明
-    const bookmarkGuideHtml_en = `<h2>Bookmark Canvas (v3.0) - User Guide</h2>
+    const bookmarkGuideHtml_en = `<h2>Bookmark Canvas (dev) - User Guide</h2>
 <ol>
 <li><strong>Drag bookmarks/folders to blank area</strong> to create bookmark-type temp nodes;</li>
 <li>Temp node changes are <strong>not saved to core data</strong>, useful for comparison/organization;</li>
@@ -2557,8 +2555,6 @@ function createInitialDemoTemplate() {
 <ul>
 <li><strong>Create temp section</strong>: Drag bookmark from tree to blank area</li>
 <li><strong>Create blank card</strong>: Double-click on canvas blank area</li>
-<li><strong>Pan canvas</strong>: Space+drag or two-finger swipe</li>
-<li><strong>Zoom canvas</strong>: Ctrl+scroll/swipe or pinch gesture (Unavailable in Side Panel)</li>
 </ul>
 <h3>Connection Lines</h3>
 <ul>
