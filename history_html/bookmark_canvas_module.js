@@ -61,7 +61,9 @@ const CanvasState = {
         lastScrollTime: 0,
         scrollTimeout: null,
         lastZoomDelta: 0,
-        zoomDeltaTimer: null
+        zoomDeltaTimer: null,
+        lastZoomInputMode: 'wheel',
+        lastZoomInputTime: 0
     },
     lastCanvasScrollTime: 0,
     // 自动滚动状态（拖动到边缘时）
@@ -1600,6 +1602,10 @@ const TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX = 0.72;
 const TRACKPAD_ZOOM_STEP_CAP_MIN = 1.015;
 const TRACKPAD_ZOOM_STEP_CAP_MAX = 1.07;
 const TRACKPAD_ZOOM_IDLE_RESET_MS = 96;
+const ZOOM_INPUT_TOUCHPAD_DELTA_MAX = 10;
+const ZOOM_INPUT_WHEEL_DELTA_MIN = 24;
+const ZOOM_INPUT_MODE_STICKY_MS = 180;
+const ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX = 6;
 const TEMP_COLOR_LOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2a4 4 0 0 0-4 4v3H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1V6a4 4 0 0 0-4-4zm-2 7V6a2 2 0 1 1 4 0v3h-4z"/></svg>';
 const TEMP_COLOR_UNLOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M17 9h-1V7a4 4 0 0 0-7.4-2.2 1 1 0 1 0 1.7 1A2 2 0 0 1 14 7v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm0 9H7v-7h10v7z"/></svg>';
 const DEFAULT_CANVAS_OTHER_SETTINGS = {
@@ -5879,8 +5885,9 @@ function setupCanvasZoomAndPan() {
             // 基础缩放速率（滚轮）
             let zoomSpeed = 0.001;
 
-            // 检测是否为触控板（delta 值较小通常意味着触控板或高精度输入设备）
-            const isTouchpad = (Math.abs(e.deltaY) < 50 && Math.abs(e.deltaX) < 50) && e.deltaMode === 0;
+            // 触控板/滚轮隔离区：避免滚轮被误识别为触控板导致绕过曲线和磁矩点
+            const zoomInputMode = resolveCanvasZoomInputMode(e);
+            const isTouchpad = zoomInputMode === 'touchpad';
 
             // Shift+滚轮在某些浏览器会变成横向滚动，需要使用 deltaX 或 deltaY
             const rawDelta = e.deltaY !== 0 ? -e.deltaY : -e.deltaX;
@@ -7930,6 +7937,66 @@ function getCanvasTrackpadZoomRate(settingsOverride = null) {
         TRACKPAD_ZOOM_RATE_MAX,
         TRACKPAD_ZOOM_RATE_DEFAULT
     );
+}
+
+function resolveCanvasZoomInputMode(event) {
+    if (!event || event.deltaMode !== 0) return 'wheel';
+
+    const now = Date.now();
+    if (CanvasState && CanvasState.isCtrlPressed) {
+        CanvasState.touchpadState.lastZoomInputMode = 'wheel';
+        CanvasState.touchpadState.lastZoomInputTime = now;
+        return 'wheel';
+    }
+
+    if (event.metaKey) {
+        CanvasState.touchpadState.lastZoomInputMode = 'wheel';
+        CanvasState.touchpadState.lastZoomInputTime = now;
+        return 'wheel';
+    }
+
+    const absDeltaX = Math.abs(Number(event.deltaX) || 0);
+    const absDeltaY = Math.abs(Number(event.deltaY) || 0);
+    const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
+    if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return 'wheel';
+
+    if (canvasShortcuts && canvasShortcuts.ctrlKey === 'Control' && event.ctrlKey && !CanvasState.isCtrlPressed) {
+        const rawDeltaX = Number(event.deltaX);
+        const rawDeltaY = Number(event.deltaY);
+        const looksDiscreteWheel = Number.isFinite(rawDeltaX)
+            && Number.isFinite(rawDeltaY)
+            && Number.isInteger(rawDeltaX)
+            && Number.isInteger(rawDeltaY);
+
+        const mode = (looksDiscreteWheel && primaryDelta >= 1)
+            ? 'wheel'
+            : ((primaryDelta <= ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX
+                && absDeltaX <= ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX
+                && absDeltaY <= ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX)
+                ? 'touchpad'
+                : 'wheel');
+
+        CanvasState.touchpadState.lastZoomInputMode = mode;
+        CanvasState.touchpadState.lastZoomInputTime = now;
+        return mode;
+    }
+
+    const state = CanvasState.touchpadState || {};
+    let mode = 'wheel';
+
+    if (primaryDelta <= ZOOM_INPUT_TOUCHPAD_DELTA_MAX) {
+        mode = 'touchpad';
+    } else if (primaryDelta >= ZOOM_INPUT_WHEEL_DELTA_MIN) {
+        mode = 'wheel';
+    } else {
+        const hasRecentMode = typeof state.lastZoomInputMode === 'string'
+            && (now - (Number(state.lastZoomInputTime) || 0)) <= ZOOM_INPUT_MODE_STICKY_MS;
+        mode = hasRecentMode ? state.lastZoomInputMode : 'wheel';
+    }
+
+    CanvasState.touchpadState.lastZoomInputMode = mode;
+    CanvasState.touchpadState.lastZoomInputTime = now;
+    return mode;
 }
 
 function getCanvasTrackpadZoomFactor(rawDelta) {
@@ -36135,7 +36202,7 @@ function createCanvasOtherSettingsModal() {
             <div class="modal-body">
                 <div class="detail-section">
                     <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? 'Zoom Speed & Magnet' : '缩放速率与磁矩'}</div>
-                    <div class="other-zoom-input-title other-zoom-input-title-trackpad">${isEn ? '1. Trackpad' : '1. 触控板'} <span class="other-zoom-input-title-note">${isEn ? '(Independent from wheel curve and magnet points)' : '（独立于滚轮曲线与磁矩点）'}</span></div>
+                    <div class="other-zoom-input-title other-zoom-input-title-trackpad">${isEn ? '1. Trackpad' : '1. 触控板'} <span class="other-zoom-input-title-note">${isEn ? '(Independent from wheel curve/magnets with isolated detection band)' : '（独立于滚轮曲线与磁矩点，并带隔离区判定）'}</span></div>
                     <div class="appearance-row other-sub-row other-trackpad-speed-row">
                         <div class="appearance-row-label">${isEn ? 'Smooth average speed' : '平滑平均速率'}</div>
                         <div class="appearance-row-content appearance-row-content-inline">
