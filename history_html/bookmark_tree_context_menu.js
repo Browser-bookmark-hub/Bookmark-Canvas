@@ -8301,20 +8301,6 @@ async function batchExportHTML() {
         const exportPath = `${getTreeExportRootFolder()}/${getTreeExportFolder()}`;
         const filename = 'bookmarks.html';
 
-        // 同步导出到云端（云端1 WebDAV + 云端2 GitHub Repo）
-        try {
-            if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
-                chrome.runtime.sendMessage({
-                    action: 'exportFileToClouds',
-                    folderKey: 'backup',
-                    lang,
-                    fileName: filename,
-                    content: html,
-                    contentType: 'text/html;charset=utf-8'
-                }, () => { });
-            }
-        } catch (_) { }
-
         if (chrome && chrome.downloads && typeof chrome.downloads.download === 'function') {
             chrome.downloads.download({
                 url: url,
@@ -8407,20 +8393,6 @@ async function batchExportJSON() {
         const url = URL.createObjectURL(blob);
         const exportPath = `${getTreeExportRootFolder()}/${getTreeExportFolder()}`;
         const filename = 'bookmarks.json';
-
-        // 同步导出到云端（云端1 WebDAV + 云端2 GitHub Repo）
-        try {
-            if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
-                chrome.runtime.sendMessage({
-                    action: 'exportFileToClouds',
-                    folderKey: 'backup',
-                    lang,
-                    fileName: filename,
-                    content: json,
-                    contentType: 'application/json;charset=utf-8'
-                }, () => { });
-            }
-        } catch (_) { }
 
         if (chrome && chrome.downloads && typeof chrome.downloads.download === 'function') {
             chrome.downloads.download({

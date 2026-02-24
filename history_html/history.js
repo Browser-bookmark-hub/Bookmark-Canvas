@@ -3017,6 +3017,10 @@ const i18n = {
         'zh_CN': '导出',
         'en': 'Export'
     },
+    syncCanvasText: {
+        'zh_CN': '同步',
+        'en': 'Sync'
+    },
     markerMenuText: {
         'zh_CN': '标识',
         'en': 'Markers'
@@ -3144,6 +3148,314 @@ const i18n = {
     canvasManageTitle: {
         'zh_CN': '画布管理',
         'en': 'Canvas Manage'
+    },
+    canvasRemotelySyncTitle: {
+        'zh_CN': 'Obsidian Git 同步',
+        'en': 'Obsidian Git Sync'
+    },
+    canvasSyncTokenGuideBtnText: {
+        'zh_CN': '配置帮助',
+        'en': 'Setup Help'
+    },
+    canvasSyncTabRepo: {
+        'zh_CN': '仓库',
+        'en': 'Repository'
+    },
+    canvasSyncTabBehavior: {
+        'zh_CN': '策略',
+        'en': 'Strategy'
+    },
+    canvasSyncTabStatus: {
+        'zh_CN': '状态',
+        'en': 'Status'
+    },
+    canvasSyncSplitIntervalsLabel: {
+        'zh_CN': '分离定时器',
+        'en': 'Split timers for automatic commit and sync'
+    },
+    canvasSyncPullOnStartupLabel: {
+        'zh_CN': '启动时自动拉取',
+        'en': 'Pull on startup'
+    },
+    canvasSyncPushOnSyncLabel: {
+        'zh_CN': '提交并同步时推送',
+        'en': 'Push on commit-and-sync'
+    },
+    canvasSyncPullOnSyncLabel: {
+        'zh_CN': '提交并同步时拉取',
+        'en': 'Pull on commit-and-sync'
+    },
+    canvasSyncHideNoChangeNoticeLabel: {
+        'zh_CN': '无变更时隐藏通知',
+        'en': 'Hide notifications for no changes'
+    },
+    canvasSyncMethodLabel: {
+        'zh_CN': '合并策略',
+        'en': 'Merge strategy'
+    },
+    canvasSyncMethodMergeOption: {
+        'zh_CN': '合并',
+        'en': 'Merge'
+    },
+    canvasSyncMethodRebaseOption: {
+        'zh_CN': '变基',
+        'en': 'Rebase'
+    },
+    canvasSyncMethodResetOption: {
+        'zh_CN': '其他同步服务（仅更新 HEAD，不触碰工作区）',
+        'en': 'Other sync service (Only updates the HEAD without touching the working directory)'
+    },
+    canvasSyncMethodDesc: {
+        'zh_CN': '决定拉取远端提交到本地时如何整合历史（对应 Obsidian Git 的“合并策略”）。',
+        'en': 'Decides how remote commits are integrated into local history when pulling (same as Obsidian Git Merge strategy).'
+    },
+    canvasSyncConflictLabel: {
+        'zh_CN': '冲突合并策略',
+        'en': 'Merge strategy on conflicts'
+    },
+    canvasSyncConflictNoneOption: {
+        'zh_CN': '默认（Git）',
+        'en': 'None (git default)'
+    },
+    canvasSyncConflictOursOption: {
+        'zh_CN': '本地优先',
+        'en': 'Our changes'
+    },
+    canvasSyncConflictTheirsOption: {
+        'zh_CN': '远端优先',
+        'en': 'Their changes'
+    },
+    canvasSyncConflictDesc: {
+        'zh_CN': '当拉取发生冲突时，按此策略自动偏向本地或远端；默认为 Git 原生行为。',
+        'en': 'When pull conflicts happen, this auto-favors local or remote; default keeps native Git behavior.'
+    },
+    canvasSyncRepoEnabledLabel: {
+        'zh_CN': '启用 GitHub 仓库',
+        'en': 'Enable GitHub Repository'
+    },
+    canvasSyncRepoOwnerLabel: {
+        'zh_CN': '仓库所有者',
+        'en': 'Repository Owner'
+    },
+    canvasSyncRepoNameLabel: {
+        'zh_CN': '仓库名称',
+        'en': 'Repository Name'
+    },
+    canvasSyncRepoBranchLabel: {
+        'zh_CN': '分支',
+        'en': 'Branch'
+    },
+    canvasSyncRepoBasePathLabel: {
+        'zh_CN': '子目录路径',
+        'en': 'Base Path'
+    },
+    canvasSyncRepoTokenLabel: {
+        'zh_CN': '访问令牌',
+        'en': 'Access Token'
+    },
+    canvasSyncRepoSaveText: {
+        'zh_CN': '保存配置',
+        'en': 'Save Config'
+    },
+    canvasSyncRepoTestText: {
+        'zh_CN': '测试连接',
+        'en': 'Test Connection'
+    },
+    canvasSyncEnabledLabel: {
+        'zh_CN': '启用同步',
+        'en': 'Enable Sync'
+    },
+    canvasSyncAutoLabel: {
+        'zh_CN': '自动同步',
+        'en': 'Auto Sync'
+    },
+    canvasSyncIntervalLabel: {
+        'zh_CN': '自动同步间隔（分钟）',
+        'en': 'Auto Sync Interval (minutes)'
+    },
+    canvasSyncAutoPushIntervalLabel: {
+        'zh_CN': '自动推送间隔（分钟，0=关闭）',
+        'en': 'Auto Push Interval (minutes, 0=off)'
+    },
+    canvasSyncAutoPullIntervalLabel: {
+        'zh_CN': '自动拉取间隔（分钟，0=关闭）',
+        'en': 'Auto Pull Interval (minutes, 0=off)'
+    },
+    canvasSyncFilePathLabel: {
+        'zh_CN': '同步文件路径（可选）',
+        'en': 'Sync File Path (optional)'
+    },
+    canvasSyncObsidianFilePushLabel: {
+        'zh_CN': '同步时增量推送 Obsidian 文件',
+        'en': 'Incremental Push Obsidian Files on Sync'
+    },
+    canvasSyncObsidianExportFormatLabel: {
+        'zh_CN': '导出格式（为 Obsidian）',
+        'en': 'Export Format (for Obsidian)'
+    },
+    canvasSyncObsidianExportFormatVisualOption: {
+        'zh_CN': '视觉模式',
+        'en': 'Visual Mode'
+    },
+    canvasSyncObsidianExportFormatEditableOption: {
+        'zh_CN': '编辑模式',
+        'en': 'Editable Mode'
+    },
+    canvasSyncObsidianExportRootLabel: {
+        'zh_CN': '文件推送目录',
+        'en': 'File Push Directory'
+    },
+    canvasSyncDeleteThresholdLabel: {
+        'zh_CN': '删除保护阈值（%）',
+        'en': 'Deletion Protection Threshold (%)'
+    },
+    canvasSyncFirstSyncSubtitle: {
+        'zh_CN': '首次同步',
+        'en': 'First Sync'
+    },
+    canvasSyncFirstSyncModeLabel: {
+        'zh_CN': '永久栏目',
+        'en': 'Permanent Section'
+    },
+    canvasSyncFirstSyncModeAutoOption: {
+        'zh_CN': '自动',
+        'en': 'Auto'
+    },
+    canvasSyncFirstSyncModeCloudOption: {
+        'zh_CN': '以云端为准',
+        'en': 'Use cloud'
+    },
+    canvasSyncFirstSyncModeLocalOption: {
+        'zh_CN': '以本地为准',
+        'en': 'Use local'
+    },
+    canvasSyncPermanentTreeIntervalLabel: {
+        'zh_CN': '永久栏目快照上传节流',
+        'en': 'Permanent Section Snapshot Upload Throttle'
+    },
+    canvasSyncPermanentTreeInterval0Option: {
+        'zh_CN': '关闭',
+        'en': 'Off'
+    },
+    canvasSyncPermanentTreeInterval5Option: {
+        'zh_CN': '5 秒',
+        'en': '5 sec'
+    },
+    canvasSyncPermanentTreeInterval15Option: {
+        'zh_CN': '15 秒（推荐）',
+        'en': '15 sec (recommended)'
+    },
+    canvasSyncPermanentTreeInterval30Option: {
+        'zh_CN': '30 秒',
+        'en': '30 sec'
+    },
+    canvasSyncPermanentTreeInterval60Option: {
+        'zh_CN': '1 分钟',
+        'en': '1 min'
+    },
+    canvasSyncFirstSyncNote: {
+        'zh_CN': '系统会先检测云端：若云端为空可自动以本地初始化；若两端都有数据，请按“永久栏目”决定方向。\n\n说明：\n• 永久栏目：指 <span class="canvas-sync-help-highlight">浏览器书签树</span> 中的内容（包含层级结构与书签项），它是首次同步进行方向判断与核对的核心依据。\n\n选项说明：\n• 自动：云端为空时用本地初始化；云端不为空时会弹窗让你选择“以云端为准”或“以本地为准”。\n• 以云端为准：用云端覆盖本地。\n• 以本地为准：用本地覆盖云端。',
+        'en': 'The system checks cloud first: if cloud is empty, it can auto-initialize from local; if both sides have data, choose a direction using "Permanent Section".\n\nNotes:\n• Permanent Section: content from the <span class="canvas-sync-help-highlight">browser bookmarks tree</span> (including folder hierarchy and bookmark items), and it is the core basis for first-sync direction decisions and verification.\n\nOptions:\n• Auto: initialize from local when cloud is empty; when cloud is not empty, a dialog lets you choose "Use cloud" or "Use local".\n• Use cloud: cloud data overwrites local.\n• Use local: local data overwrites cloud.'
+    },
+    canvasSyncFirstSyncHelpBtnTitle: {
+        'zh_CN': '查看说明',
+        'en': 'View help'
+    },
+    canvasSyncFirstSyncStatus: {
+        'zh_CN': '等待执行首次同步',
+        'en': 'Waiting to run first sync'
+    },
+    canvasSyncFirstSyncOverwriteText: {
+        'zh_CN': '执行首次同步',
+        'en': 'Run First Sync'
+    },
+    canvasSyncNowText: {
+        'zh_CN': '立即同步',
+        'en': 'Sync Now'
+    },
+    canvasSyncPushOnlyText: {
+        'zh_CN': '仅上传',
+        'en': 'Push Only'
+    },
+    canvasSyncPullOnlyText: {
+        'zh_CN': '仅拉取',
+        'en': 'Pull Only'
+    },
+    canvasSyncRebuildText: {
+        'zh_CN': '重建同步索引',
+        'en': 'Rebuild Sync Index'
+    },
+    canvasSyncStatusRunningLabel: {
+        'zh_CN': '执行状态：',
+        'en': 'Status:'
+    },
+    canvasSyncStatusQueueLabel: {
+        'zh_CN': '队列长度：',
+        'en': 'Queue:'
+    },
+    canvasSyncStatusLastSuccessLabel: {
+        'zh_CN': '上次成功：',
+        'en': 'Last Success:'
+    },
+    canvasSyncStatusLastDirectionLabel: {
+        'zh_CN': '最后方向：',
+        'en': 'Last Direction:'
+    },
+    canvasSyncStatusObsidianPushAtLabel: {
+        'zh_CN': '最近文件推送：',
+        'en': 'Last File Push:'
+    },
+    canvasSyncStatusObsidianPushDeltaLabel: {
+        'zh_CN': '文件推送变更：',
+        'en': 'File Push Delta:'
+    },
+    canvasSyncStatusRemoteShaLabel: {
+        'zh_CN': '远端版本：',
+        'en': 'Remote Revision:'
+    },
+    canvasSyncStatusErrorLabel: {
+        'zh_CN': '最近错误：',
+        'en': 'Last Error:'
+    },
+    canvasSyncConflictTitle: {
+        'zh_CN': '检测到并发冲突',
+        'en': 'Concurrent Conflict Detected'
+    },
+    canvasSyncConflictSummaryDefault: {
+        'zh_CN': '请先选择处理策略，再继续自动同步。',
+        'en': 'Please choose a resolution strategy before continuing auto sync.'
+    },
+    canvasSyncConflictLocalTitle: {
+        'zh_CN': '本地',
+        'en': 'Local'
+    },
+    canvasSyncConflictRemoteTitle: {
+        'zh_CN': '远端',
+        'en': 'Remote'
+    },
+    canvasSyncConflictUpdatedLabel: {
+        'zh_CN': '更新时间',
+        'en': 'Updated At'
+    },
+    canvasSyncConflictSizeLabel: {
+        'zh_CN': '数据大小',
+        'en': 'Data Size'
+    },
+    canvasSyncConflictHashLabel: {
+        'zh_CN': '内容指纹',
+        'en': 'Content Hash'
+    },
+    canvasSyncConflictUseLocalText: {
+        'zh_CN': '保留本地并覆盖远端',
+        'en': 'Keep Local and Overwrite Remote'
+    },
+    canvasSyncConflictUseRemoteText: {
+        'zh_CN': '使用远端覆盖本地',
+        'en': 'Use Remote and Overwrite Local'
+    },
+    canvasSyncConflictDismissText: {
+        'zh_CN': '稍后处理',
+        'en': 'Resolve Later'
     },
     canvasOtherManageTitle: {
         'zh_CN': '其他管理',
@@ -3943,6 +4255,35 @@ async function loadUserSettings() {
     });
 }
 
+
+function applySyncIntervalUnitLine(labelEl) {
+    if (!labelEl) return;
+    const rawText = String(labelEl.textContent || '').trim();
+    if (!rawText) return;
+
+    const match = rawText.match(/^(.*?)([（(].*[）)])$/);
+    if (!match) {
+        labelEl.textContent = rawText;
+        return;
+    }
+
+    const mainText = String(match[1] || '').trim();
+    const unitText = String(match[2] || '').trim();
+
+    labelEl.textContent = '';
+
+    const mainSpan = document.createElement('span');
+    mainSpan.className = 'canvas-sync-label-main';
+    mainSpan.textContent = mainText;
+
+    const unitSpan = document.createElement('span');
+    unitSpan.className = 'canvas-sync-label-unit';
+    unitSpan.textContent = unitText;
+
+    labelEl.appendChild(mainSpan);
+    labelEl.appendChild(unitSpan);
+}
+
 function applyLanguage() {
     try {
         document.documentElement.lang = currentLang === 'zh_CN' ? 'zh' : 'en';
@@ -3990,6 +4331,8 @@ function applyLanguage() {
     if (importCanvasText) importCanvasText.textContent = i18n.importCanvasText[currentLang];
     const exportCanvasText = document.getElementById('exportCanvasText');
     if (exportCanvasText) exportCanvasText.textContent = i18n.exportCanvasText[currentLang];
+    const syncCanvasText = document.getElementById('syncCanvasText');
+    if (syncCanvasText) syncCanvasText.textContent = i18n.syncCanvasText[currentLang];
     const markerMenuBtn = document.getElementById('markerMenuBtn');
     if (markerMenuBtn) markerMenuBtn.title = i18n.markerMenuTitle[currentLang];
     updateMarkerControlsUI();
@@ -4118,6 +4461,197 @@ function applyLanguage() {
 
     const canvasManageModalTitle = document.getElementById('canvasManageModalTitle');
     if (canvasManageModalTitle) canvasManageModalTitle.textContent = i18n.canvasManageTitle[currentLang];
+    const canvasSyncModalTitle = document.getElementById('canvasSyncModalTitle');
+    if (canvasSyncModalTitle) canvasSyncModalTitle.textContent = i18n.canvasRemotelySyncTitle[currentLang];
+    const canvasSyncTokenGuideBtnText = document.getElementById('canvasSyncTokenGuideBtnText');
+    if (canvasSyncTokenGuideBtnText) canvasSyncTokenGuideBtnText.textContent = i18n.canvasSyncTokenGuideBtnText[currentLang];
+    const canvasSyncTabRepoBtn = document.getElementById('canvasSyncTabRepoBtn');
+    if (canvasSyncTabRepoBtn) canvasSyncTabRepoBtn.textContent = i18n.canvasSyncTabRepo[currentLang];
+    const canvasSyncTabBehaviorBtn = document.getElementById('canvasSyncTabBehaviorBtn');
+    if (canvasSyncTabBehaviorBtn) canvasSyncTabBehaviorBtn.textContent = i18n.canvasSyncTabBehavior[currentLang];
+    const canvasSyncTabStatusBtn = document.getElementById('canvasSyncTabStatusBtn');
+    if (canvasSyncTabStatusBtn) canvasSyncTabStatusBtn.textContent = i18n.canvasSyncTabStatus[currentLang];
+    const canvasSyncTabNav = document.getElementById('canvasSyncTabNav');
+    if (canvasSyncTabNav) {
+        const aria = currentLang === 'zh_CN'
+            ? (canvasSyncTabNav.dataset.labelZh || '同步设置菜单')
+            : (canvasSyncTabNav.dataset.labelEn || 'Sync Settings Menu');
+        canvasSyncTabNav.setAttribute('aria-label', aria);
+    }
+    const canvasSyncSplitIntervalsLabel = document.getElementById('canvasSyncSplitIntervalsLabel');
+    if (canvasSyncSplitIntervalsLabel) canvasSyncSplitIntervalsLabel.textContent = i18n.canvasSyncSplitIntervalsLabel[currentLang];
+    const canvasSyncPullOnStartupLabel = document.getElementById('canvasSyncPullOnStartupLabel');
+    if (canvasSyncPullOnStartupLabel) canvasSyncPullOnStartupLabel.textContent = i18n.canvasSyncPullOnStartupLabel[currentLang];
+    const canvasSyncPushOnSyncLabel = document.getElementById('canvasSyncPushOnSyncLabel');
+    if (canvasSyncPushOnSyncLabel) canvasSyncPushOnSyncLabel.textContent = i18n.canvasSyncPushOnSyncLabel[currentLang];
+    const canvasSyncPullOnSyncLabel = document.getElementById('canvasSyncPullOnSyncLabel');
+    if (canvasSyncPullOnSyncLabel) canvasSyncPullOnSyncLabel.textContent = i18n.canvasSyncPullOnSyncLabel[currentLang];
+    const canvasSyncHideNoChangeNoticeLabel = document.getElementById('canvasSyncHideNoChangeNoticeLabel');
+    if (canvasSyncHideNoChangeNoticeLabel) canvasSyncHideNoChangeNoticeLabel.textContent = i18n.canvasSyncHideNoChangeNoticeLabel[currentLang];
+    const canvasSyncMethodLabel = document.getElementById('canvasSyncMethodLabel');
+    if (canvasSyncMethodLabel) canvasSyncMethodLabel.textContent = i18n.canvasSyncMethodLabel[currentLang];
+    const canvasSyncMethodMergeOption = document.getElementById('canvasSyncMethodMergeOption');
+    if (canvasSyncMethodMergeOption) canvasSyncMethodMergeOption.textContent = i18n.canvasSyncMethodMergeOption[currentLang];
+    const canvasSyncMethodRebaseOption = document.getElementById('canvasSyncMethodRebaseOption');
+    if (canvasSyncMethodRebaseOption) canvasSyncMethodRebaseOption.textContent = i18n.canvasSyncMethodRebaseOption[currentLang];
+    const canvasSyncMethodResetOption = document.getElementById('canvasSyncMethodResetOption');
+    if (canvasSyncMethodResetOption) canvasSyncMethodResetOption.textContent = i18n.canvasSyncMethodResetOption[currentLang];
+    const canvasSyncMethodDesc = document.getElementById('canvasSyncMethodDesc');
+    if (canvasSyncMethodDesc) canvasSyncMethodDesc.textContent = i18n.canvasSyncMethodDesc[currentLang];
+    const canvasSyncConflictLabel = document.getElementById('canvasSyncConflictLabel');
+    if (canvasSyncConflictLabel) canvasSyncConflictLabel.textContent = i18n.canvasSyncConflictLabel[currentLang];
+    const canvasSyncConflictNoneOption = document.getElementById('canvasSyncConflictNoneOption');
+    if (canvasSyncConflictNoneOption) canvasSyncConflictNoneOption.textContent = i18n.canvasSyncConflictNoneOption[currentLang];
+    const canvasSyncConflictOursOption = document.getElementById('canvasSyncConflictOursOption');
+    if (canvasSyncConflictOursOption) canvasSyncConflictOursOption.textContent = i18n.canvasSyncConflictOursOption[currentLang];
+    const canvasSyncConflictTheirsOption = document.getElementById('canvasSyncConflictTheirsOption');
+    if (canvasSyncConflictTheirsOption) canvasSyncConflictTheirsOption.textContent = i18n.canvasSyncConflictTheirsOption[currentLang];
+    const canvasSyncConflictDesc = document.getElementById('canvasSyncConflictDesc');
+    if (canvasSyncConflictDesc) canvasSyncConflictDesc.textContent = i18n.canvasSyncConflictDesc[currentLang];
+
+    const canvasSyncRepoEnabledLabel = document.getElementById('canvasSyncRepoEnabledLabel');
+    if (canvasSyncRepoEnabledLabel) canvasSyncRepoEnabledLabel.textContent = i18n.canvasSyncRepoEnabledLabel[currentLang];
+    const canvasSyncRepoOwnerLabel = document.getElementById('canvasSyncRepoOwnerLabel');
+    if (canvasSyncRepoOwnerLabel) canvasSyncRepoOwnerLabel.textContent = i18n.canvasSyncRepoOwnerLabel[currentLang];
+    const canvasSyncRepoNameLabel = document.getElementById('canvasSyncRepoNameLabel');
+    if (canvasSyncRepoNameLabel) canvasSyncRepoNameLabel.textContent = i18n.canvasSyncRepoNameLabel[currentLang];
+    const canvasSyncRepoBranchLabel = document.getElementById('canvasSyncRepoBranchLabel');
+    if (canvasSyncRepoBranchLabel) canvasSyncRepoBranchLabel.textContent = i18n.canvasSyncRepoBranchLabel[currentLang];
+    const canvasSyncRepoBasePathLabel = document.getElementById('canvasSyncRepoBasePathLabel');
+    if (canvasSyncRepoBasePathLabel) canvasSyncRepoBasePathLabel.textContent = i18n.canvasSyncRepoBasePathLabel[currentLang];
+    const canvasSyncRepoTokenLabel = document.getElementById('canvasSyncRepoTokenLabel');
+    if (canvasSyncRepoTokenLabel) canvasSyncRepoTokenLabel.textContent = i18n.canvasSyncRepoTokenLabel[currentLang];
+    const canvasSyncRepoSaveText = document.getElementById('canvasSyncRepoSaveText');
+    if (canvasSyncRepoSaveText) canvasSyncRepoSaveText.textContent = i18n.canvasSyncRepoSaveText[currentLang];
+    const canvasSyncRepoTestText = document.getElementById('canvasSyncRepoTestText');
+    if (canvasSyncRepoTestText) canvasSyncRepoTestText.textContent = i18n.canvasSyncRepoTestText[currentLang];
+    const canvasSyncEnabledLabel = document.getElementById('canvasSyncEnabledLabel');
+    if (canvasSyncEnabledLabel) canvasSyncEnabledLabel.textContent = i18n.canvasSyncEnabledLabel[currentLang];
+    const canvasSyncAutoLabel = document.getElementById('canvasSyncAutoLabel');
+    if (canvasSyncAutoLabel) canvasSyncAutoLabel.textContent = i18n.canvasSyncAutoLabel[currentLang];
+    const canvasSyncIntervalLabel = document.getElementById('canvasSyncIntervalLabel');
+    if (canvasSyncIntervalLabel) {
+        canvasSyncIntervalLabel.textContent = i18n.canvasSyncIntervalLabel[currentLang];
+        applySyncIntervalUnitLine(canvasSyncIntervalLabel);
+    }
+    const canvasSyncAutoPushIntervalLabel = document.getElementById('canvasSyncAutoPushIntervalLabel');
+    if (canvasSyncAutoPushIntervalLabel) {
+        canvasSyncAutoPushIntervalLabel.textContent = i18n.canvasSyncAutoPushIntervalLabel[currentLang];
+        applySyncIntervalUnitLine(canvasSyncAutoPushIntervalLabel);
+    }
+    const canvasSyncAutoPullIntervalLabel = document.getElementById('canvasSyncAutoPullIntervalLabel');
+    if (canvasSyncAutoPullIntervalLabel) {
+        canvasSyncAutoPullIntervalLabel.textContent = i18n.canvasSyncAutoPullIntervalLabel[currentLang];
+        applySyncIntervalUnitLine(canvasSyncAutoPullIntervalLabel);
+    }
+    const canvasSyncFilePathLabel = document.getElementById('canvasSyncFilePathLabel');
+    if (canvasSyncFilePathLabel) canvasSyncFilePathLabel.textContent = i18n.canvasSyncFilePathLabel[currentLang];
+    const canvasSyncObsidianFilePushLabel = document.getElementById('canvasSyncObsidianFilePushLabel');
+    if (canvasSyncObsidianFilePushLabel) canvasSyncObsidianFilePushLabel.textContent = i18n.canvasSyncObsidianFilePushLabel[currentLang];
+    const canvasSyncObsidianExportFormatLabel = document.getElementById('canvasSyncObsidianExportFormatLabel');
+    if (canvasSyncObsidianExportFormatLabel) canvasSyncObsidianExportFormatLabel.textContent = i18n.canvasSyncObsidianExportFormatLabel[currentLang];
+    const canvasSyncObsidianExportFormatVisualOption = document.getElementById('canvasSyncObsidianExportFormatVisualOption');
+    if (canvasSyncObsidianExportFormatVisualOption) canvasSyncObsidianExportFormatVisualOption.textContent = i18n.canvasSyncObsidianExportFormatVisualOption[currentLang];
+    const canvasSyncObsidianExportFormatEditableOption = document.getElementById('canvasSyncObsidianExportFormatEditableOption');
+    if (canvasSyncObsidianExportFormatEditableOption) canvasSyncObsidianExportFormatEditableOption.textContent = i18n.canvasSyncObsidianExportFormatEditableOption[currentLang];
+    const canvasSyncObsidianExportRootLabel = document.getElementById('canvasSyncObsidianExportRootLabel');
+    if (canvasSyncObsidianExportRootLabel) canvasSyncObsidianExportRootLabel.textContent = i18n.canvasSyncObsidianExportRootLabel[currentLang];
+    const canvasSyncDeleteThresholdLabel = document.getElementById('canvasSyncDeleteThresholdLabel');
+    if (canvasSyncDeleteThresholdLabel) canvasSyncDeleteThresholdLabel.textContent = i18n.canvasSyncDeleteThresholdLabel[currentLang];
+    const canvasSyncFirstSyncSubtitle = document.getElementById('canvasSyncFirstSyncSubtitle');
+    if (canvasSyncFirstSyncSubtitle) canvasSyncFirstSyncSubtitle.textContent = i18n.canvasSyncFirstSyncSubtitle[currentLang];
+    const canvasSyncFirstSyncModeLabel = document.getElementById('canvasSyncFirstSyncModeLabel');
+    if (canvasSyncFirstSyncModeLabel) canvasSyncFirstSyncModeLabel.textContent = i18n.canvasSyncFirstSyncModeLabel[currentLang];
+    const canvasSyncFirstSyncModeAutoOption = document.getElementById('canvasSyncFirstSyncModeAutoOption');
+    if (canvasSyncFirstSyncModeAutoOption) canvasSyncFirstSyncModeAutoOption.textContent = i18n.canvasSyncFirstSyncModeAutoOption[currentLang];
+    const canvasSyncFirstSyncModeCloudOption = document.getElementById('canvasSyncFirstSyncModeCloudOption');
+    if (canvasSyncFirstSyncModeCloudOption) canvasSyncFirstSyncModeCloudOption.textContent = i18n.canvasSyncFirstSyncModeCloudOption[currentLang];
+    const canvasSyncFirstSyncModeLocalOption = document.getElementById('canvasSyncFirstSyncModeLocalOption');
+    if (canvasSyncFirstSyncModeLocalOption) canvasSyncFirstSyncModeLocalOption.textContent = i18n.canvasSyncFirstSyncModeLocalOption[currentLang];
+    const canvasSyncPermanentTreeIntervalLabel = document.getElementById('canvasSyncPermanentTreeIntervalLabel');
+    if (canvasSyncPermanentTreeIntervalLabel) canvasSyncPermanentTreeIntervalLabel.textContent = i18n.canvasSyncPermanentTreeIntervalLabel[currentLang];
+    const canvasSyncPermanentTreeInterval0Option = document.getElementById('canvasSyncPermanentTreeInterval0Option');
+    if (canvasSyncPermanentTreeInterval0Option) canvasSyncPermanentTreeInterval0Option.textContent = i18n.canvasSyncPermanentTreeInterval0Option[currentLang];
+    const canvasSyncPermanentTreeInterval5Option = document.getElementById('canvasSyncPermanentTreeInterval5Option');
+    if (canvasSyncPermanentTreeInterval5Option) canvasSyncPermanentTreeInterval5Option.textContent = i18n.canvasSyncPermanentTreeInterval5Option[currentLang];
+    const canvasSyncPermanentTreeInterval15Option = document.getElementById('canvasSyncPermanentTreeInterval15Option');
+    if (canvasSyncPermanentTreeInterval15Option) canvasSyncPermanentTreeInterval15Option.textContent = i18n.canvasSyncPermanentTreeInterval15Option[currentLang];
+    const canvasSyncPermanentTreeInterval30Option = document.getElementById('canvasSyncPermanentTreeInterval30Option');
+    if (canvasSyncPermanentTreeInterval30Option) canvasSyncPermanentTreeInterval30Option.textContent = i18n.canvasSyncPermanentTreeInterval30Option[currentLang];
+    const canvasSyncPermanentTreeInterval60Option = document.getElementById('canvasSyncPermanentTreeInterval60Option');
+    if (canvasSyncPermanentTreeInterval60Option) canvasSyncPermanentTreeInterval60Option.textContent = i18n.canvasSyncPermanentTreeInterval60Option[currentLang];
+    const canvasSyncFirstSyncHelpText = document.getElementById('canvasSyncFirstSyncHelpText');
+    if (canvasSyncFirstSyncHelpText) canvasSyncFirstSyncHelpText.innerHTML = i18n.canvasSyncFirstSyncNote[currentLang].replace(/\n/g, '<br>');
+    const canvasSyncFirstSyncHelpBtn = document.getElementById('canvasSyncFirstSyncHelpBtn');
+    if (canvasSyncFirstSyncHelpBtn) {
+        const title = i18n.canvasSyncFirstSyncHelpBtnTitle[currentLang];
+        canvasSyncFirstSyncHelpBtn.title = title;
+        canvasSyncFirstSyncHelpBtn.setAttribute('aria-label', title);
+    }
+    const canvasSyncFirstSyncOverwriteText = document.getElementById('canvasSyncFirstSyncOverwriteText');
+    if (canvasSyncFirstSyncOverwriteText) canvasSyncFirstSyncOverwriteText.textContent = i18n.canvasSyncFirstSyncOverwriteText[currentLang];
+    const canvasSyncNowText = document.getElementById('canvasSyncNowText');
+    if (canvasSyncNowText) canvasSyncNowText.textContent = i18n.canvasSyncNowText[currentLang];
+    const canvasSyncPushOnlyText = document.getElementById('canvasSyncPushOnlyText');
+    if (canvasSyncPushOnlyText) canvasSyncPushOnlyText.textContent = i18n.canvasSyncPushOnlyText[currentLang];
+    const canvasSyncPullOnlyText = document.getElementById('canvasSyncPullOnlyText');
+    if (canvasSyncPullOnlyText) canvasSyncPullOnlyText.textContent = i18n.canvasSyncPullOnlyText[currentLang];
+    const canvasSyncRebuildText = document.getElementById('canvasSyncRebuildText');
+    if (canvasSyncRebuildText) canvasSyncRebuildText.textContent = i18n.canvasSyncRebuildText[currentLang];
+    const canvasSyncStatusRunningLabel = document.getElementById('canvasSyncStatusRunningLabel');
+    if (canvasSyncStatusRunningLabel) canvasSyncStatusRunningLabel.textContent = i18n.canvasSyncStatusRunningLabel[currentLang];
+    const canvasSyncStatusQueueLabel = document.getElementById('canvasSyncStatusQueueLabel');
+    if (canvasSyncStatusQueueLabel) canvasSyncStatusQueueLabel.textContent = i18n.canvasSyncStatusQueueLabel[currentLang];
+    const canvasSyncStatusLastSuccessLabel = document.getElementById('canvasSyncStatusLastSuccessLabel');
+    if (canvasSyncStatusLastSuccessLabel) canvasSyncStatusLastSuccessLabel.textContent = i18n.canvasSyncStatusLastSuccessLabel[currentLang];
+    const canvasSyncStatusLastDirectionLabel = document.getElementById('canvasSyncStatusLastDirectionLabel');
+    if (canvasSyncStatusLastDirectionLabel) canvasSyncStatusLastDirectionLabel.textContent = i18n.canvasSyncStatusLastDirectionLabel[currentLang];
+    const canvasSyncStatusObsidianPushAtLabel = document.getElementById('canvasSyncStatusObsidianPushAtLabel');
+    if (canvasSyncStatusObsidianPushAtLabel) canvasSyncStatusObsidianPushAtLabel.textContent = i18n.canvasSyncStatusObsidianPushAtLabel[currentLang];
+    const canvasSyncStatusObsidianPushDeltaLabel = document.getElementById('canvasSyncStatusObsidianPushDeltaLabel');
+    if (canvasSyncStatusObsidianPushDeltaLabel) canvasSyncStatusObsidianPushDeltaLabel.textContent = i18n.canvasSyncStatusObsidianPushDeltaLabel[currentLang];
+    const canvasSyncStatusRemoteShaLabel = document.getElementById('canvasSyncStatusRemoteShaLabel');
+    if (canvasSyncStatusRemoteShaLabel) canvasSyncStatusRemoteShaLabel.textContent = i18n.canvasSyncStatusRemoteShaLabel[currentLang];
+    const canvasSyncStatusErrorLabel = document.getElementById('canvasSyncStatusErrorLabel');
+    if (canvasSyncStatusErrorLabel) canvasSyncStatusErrorLabel.textContent = i18n.canvasSyncStatusErrorLabel[currentLang];
+    const canvasSyncConflictTitle = document.getElementById('canvasSyncConflictTitle');
+    if (canvasSyncConflictTitle) canvasSyncConflictTitle.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${i18n.canvasSyncConflictTitle[currentLang]}`;
+    const canvasSyncConflictSummary = document.getElementById('canvasSyncConflictSummary');
+    if (canvasSyncConflictSummary && !canvasSyncConflictSummary.dataset.dynamicSummary) {
+        canvasSyncConflictSummary.textContent = i18n.canvasSyncConflictSummaryDefault[currentLang];
+    }
+    const canvasSyncConflictLocalTitle = document.getElementById('canvasSyncConflictLocalTitle');
+    if (canvasSyncConflictLocalTitle) canvasSyncConflictLocalTitle.textContent = i18n.canvasSyncConflictLocalTitle[currentLang];
+    const canvasSyncConflictRemoteTitle = document.getElementById('canvasSyncConflictRemoteTitle');
+    if (canvasSyncConflictRemoteTitle) canvasSyncConflictRemoteTitle.textContent = i18n.canvasSyncConflictRemoteTitle[currentLang];
+    const canvasSyncConflictLocalUpdatedLabel = document.getElementById('canvasSyncConflictLocalUpdatedLabel');
+    if (canvasSyncConflictLocalUpdatedLabel) canvasSyncConflictLocalUpdatedLabel.textContent = i18n.canvasSyncConflictUpdatedLabel[currentLang];
+    const canvasSyncConflictLocalSizeLabel = document.getElementById('canvasSyncConflictLocalSizeLabel');
+    if (canvasSyncConflictLocalSizeLabel) canvasSyncConflictLocalSizeLabel.textContent = i18n.canvasSyncConflictSizeLabel[currentLang];
+    const canvasSyncConflictLocalHashLabel = document.getElementById('canvasSyncConflictLocalHashLabel');
+    if (canvasSyncConflictLocalHashLabel) canvasSyncConflictLocalHashLabel.textContent = i18n.canvasSyncConflictHashLabel[currentLang];
+    const canvasSyncConflictRemoteUpdatedLabel = document.getElementById('canvasSyncConflictRemoteUpdatedLabel');
+    if (canvasSyncConflictRemoteUpdatedLabel) canvasSyncConflictRemoteUpdatedLabel.textContent = i18n.canvasSyncConflictUpdatedLabel[currentLang];
+    const canvasSyncConflictRemoteSizeLabel = document.getElementById('canvasSyncConflictRemoteSizeLabel');
+    if (canvasSyncConflictRemoteSizeLabel) canvasSyncConflictRemoteSizeLabel.textContent = i18n.canvasSyncConflictSizeLabel[currentLang];
+    const canvasSyncConflictRemoteHashLabel = document.getElementById('canvasSyncConflictRemoteHashLabel');
+    if (canvasSyncConflictRemoteHashLabel) canvasSyncConflictRemoteHashLabel.textContent = i18n.canvasSyncConflictHashLabel[currentLang];
+    const canvasSyncConflictUseLocalText = document.getElementById('canvasSyncConflictUseLocalText');
+    if (canvasSyncConflictUseLocalText) canvasSyncConflictUseLocalText.textContent = i18n.canvasSyncConflictUseLocalText[currentLang];
+    const canvasSyncConflictUseRemoteText = document.getElementById('canvasSyncConflictUseRemoteText');
+    if (canvasSyncConflictUseRemoteText) canvasSyncConflictUseRemoteText.textContent = i18n.canvasSyncConflictUseRemoteText[currentLang];
+    const canvasSyncConflictDismissText = document.getElementById('canvasSyncConflictDismissText');
+    if (canvasSyncConflictDismissText) canvasSyncConflictDismissText.textContent = i18n.canvasSyncConflictDismissText[currentLang];
+
+    const canvasSyncRepoOwnerInput = document.getElementById('canvasSyncRepoOwnerInput');
+    if (canvasSyncRepoOwnerInput) canvasSyncRepoOwnerInput.placeholder = currentLang === 'zh_CN' ? '例如：your-name' : 'e.g. your-name';
+    const canvasSyncRepoNameInput = document.getElementById('canvasSyncRepoNameInput');
+    if (canvasSyncRepoNameInput) canvasSyncRepoNameInput.placeholder = currentLang === 'zh_CN' ? '例如：bookmark-sync' : 'e.g. bookmark-sync';
+    const canvasSyncRepoBasePathInput = document.getElementById('canvasSyncRepoBasePathInput');
+    if (canvasSyncRepoBasePathInput) canvasSyncRepoBasePathInput.placeholder = currentLang === 'zh_CN' ? '可选，例如：sync-data' : 'Optional, e.g. sync-data';
+    const canvasSyncRepoTokenToggleBtn = document.getElementById('canvasSyncRepoTokenToggleBtn');
+    if (canvasSyncRepoTokenToggleBtn) canvasSyncRepoTokenToggleBtn.title = currentLang === 'zh_CN' ? '显示/隐藏 Token' : 'Show/Hide Token';
+
     const canvasOtherManageModalTitle = document.getElementById('canvasOtherManageModalTitle');
     if (canvasOtherManageModalTitle) canvasOtherManageModalTitle.textContent = i18n.canvasOtherManageTitle[currentLang];
 
@@ -4137,6 +4671,8 @@ function applyLanguage() {
     if (importCanvasOtherText) importCanvasOtherText.textContent = i18n.importCanvasText[currentLang];
     const exportCanvasOtherText = document.getElementById('exportCanvasOtherText');
     if (exportCanvasOtherText) exportCanvasOtherText.textContent = i18n.exportCanvasText[currentLang];
+    const syncCanvasOtherText = document.getElementById('syncCanvasOtherText');
+    if (syncCanvasOtherText) syncCanvasOtherText.textContent = i18n.syncCanvasText[currentLang];
     const clearMenuOtherText = document.getElementById('clearMenuOtherText');
     if (clearMenuOtherText) clearMenuOtherText.textContent = i18n.clearMenuText[currentLang];
     const clearByClickOtherText = document.getElementById('clearByClickOtherText');
@@ -4224,6 +4760,7 @@ function applyLanguage() {
     };
     setupPinchPopover('pinchHelpBtn1', 'pinchHelpPopover1');
     setupPinchPopover('pinchHelpBtn2', 'pinchHelpPopover2');
+    setupPinchPopover('canvasSyncFirstSyncHelpBtn', 'canvasSyncFirstSyncHelpPopover');
 
     if (!document.body.dataset.pinchPopoverGlobalBound) {
         document.body.dataset.pinchPopoverGlobalBound = 'true';
@@ -14062,12 +14599,14 @@ function showError(message) {
     }
 }
 
-function showToast(message) {
+function showToast(message, options = {}) {
     // 简单的提示功能
+    const position = options && options.position === 'top-right' ? 'top-right' : 'bottom-right';
+    const verticalPos = position === 'top-right' ? 'top: 20px;' : 'bottom: 20px;';
     const toast = document.createElement('div');
     toast.style.cssText = `
         position: fixed;
-        bottom: 20px;
+        ${verticalPos}
         right: 20px;
         padding: 12px 20px;
         background: var(--accent-primary);

@@ -1,6 +1,6 @@
 // Minimal background for Bookmark Canvas extension (MV3)
 
-import { upsertRepoFile } from './github/repo-api.js';
+import { getRepoFile, testRepoConnection, upsertRepoFile } from './github/repo-api.js';
 
 const browserAPI = (function () {
   if (typeof chrome !== 'undefined') return chrome;
@@ -760,166 +760,36 @@ if (browserAPI?.storage?.onChanged?.addListener) {
   });
 }
 
-async function getCurrentLang() {
-  try {
-    const { currentLang, preferredLang } = await browserAPI.storage.local.get(['currentLang', 'preferredLang']);
-    if (currentLang || preferredLang) return currentLang || preferredLang;
-    try {
-      const ui = (browserAPI?.i18n?.getUILanguage?.() || '').toLowerCase();
-      return ui.startsWith('zh') ? 'zh_CN' : 'en';
-    } catch (_) {}
-    return 'en';
-  } catch (_) {
-    try {
-      const ui = (browserAPI?.i18n?.getUILanguage?.() || '').toLowerCase();
-      return ui.startsWith('zh') ? 'zh_CN' : 'en';
-    } catch (_) {}
-    return 'en';
-  }
+const CANVAS_GIT_SYNC_FILE_NAME = 'bookmark-canvas-sync/state.json';
+
+function normalizeGitHubRepoPath(path) {
+  return String(path || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\/+/g, '/');
 }
 
-function getExportRootFolderByLang(lang) {
-  return lang === 'zh_CN' ? '书签画布' : 'Bookmark Canvas';
-}
-
-function getCanvasFolderByLang(lang) {
-  return lang === 'zh_CN' ? '书签画布' : 'Canvas';
-}
-
-function resolveExportSubFolderByKey(folderKey, lang) {
-  const key = String(folderKey || '').trim();
-  switch (key) {
-    case 'canvas':
-      return getCanvasFolderByLang(lang);
-    default:
-      return getCanvasFolderByLang(lang);
-  }
-}
-
-function safeBase64(str) {
-  try {
-    return btoa(str);
-  } catch (_) {
-    return btoa(unescape(encodeURIComponent(str)));
-  }
-}
-
-function sanitizeGitHubRepoPathPart(part) {
-  let s = String(part == null ? '' : part);
-  s = s.replace(/[\x00-\x1F\x7F]/g, '');
-  s = s.replace(/[\\/]/g, '_');
-  s = s.replace(/\s+/g, ' ').trim();
-  return s;
-}
-
-function buildGitHubRepoFilePath({ basePath, lang, folderKey, fileName }) {
-  const baseRaw = String(basePath || '').trim().replace(/^\/+/, '').replace(/\/+$/, '');
-  const baseParts = baseRaw
-    ? baseRaw.split('/').filter(Boolean).map(sanitizeGitHubRepoPathPart).filter(Boolean)
-    : [];
-  const root = sanitizeGitHubRepoPathPart(getExportRootFolderByLang(lang));
-  const sub = sanitizeGitHubRepoPathPart(resolveExportSubFolderByKey(folderKey, lang));
-  const leaf = sanitizeGitHubRepoPathPart(String(fileName || '').split('/').pop());
-  const joined = [...baseParts, root, sub, leaf].filter(Boolean).join('/');
-  return joined || 'export.txt';
-}
-
-function arrayBufferToBase64(arrayBuffer) {
-  const bytes = new Uint8Array(arrayBuffer);
-  const chunkSize = 0x2000;
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
+function buildCanvasGitSyncPath(basePath) {
+  const normalizedBasePath = normalizeGitHubRepoPath(basePath);
+  return normalizedBasePath
+    ? `${normalizedBasePath}/${CANVAS_GIT_SYNC_FILE_NAME}`
+    : CANVAS_GIT_SYNC_FILE_NAME;
 }
 
 function textToBase64(text) {
   const encoder = new TextEncoder();
-  const buf = encoder.encode(String(text ?? '')).buffer;
-  return arrayBufferToBase64(buf);
+  const bytes = encoder.encode(String(text ?? ''));
+  const chunkSize = 0x2000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
 }
 
-async function ensureWebDAVCollectionExists(url, authHeader, errorPrefix) {
-  const checkResponse = await fetch(url, {
-    method: 'PROPFIND',
-    headers: {
-      'Authorization': authHeader,
-      'Depth': '0',
-      'Content-Type': 'application/xml'
-    },
-    body: '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><prop><resourcetype/></prop></propfind>'
-  });
-
-  if (checkResponse.status === 401) {
-    throw new Error('WebDAV认证失败，请检查账号密码是否正确');
-  }
-
-  if (checkResponse.status === 404) {
-    const mkcolResponse = await fetch(url, {
-      method: 'MKCOL',
-      headers: { 'Authorization': authHeader }
-    });
-    if (!mkcolResponse.ok && mkcolResponse.status !== 405) {
-      throw new Error(`${errorPrefix}: ${mkcolResponse.status} - ${mkcolResponse.statusText}`);
-    }
-    return;
-  }
-
-  if (!checkResponse.ok) {
-    throw new Error(`${errorPrefix}: ${checkResponse.status} - ${checkResponse.statusText}`);
-  }
-}
-
-async function uploadExportFileToWebDAV({ lang, folderKey, fileName, content, contentArrayBuffer, contentType }) {
-  const config = await browserAPI.storage.local.get(['serverAddress', 'username', 'password', 'webDAVEnabled']);
-  if (!config.serverAddress || !config.username || !config.password) {
-    return { success: false, skipped: true, error: 'WebDAV 配置不完整' };
-  }
-  if (config.webDAVEnabled === false) {
-    return { success: false, skipped: true, error: 'WebDAV 已禁用' };
-  }
-
-  const serverAddress = config.serverAddress.replace(/\/+$/, '/');
-  const exportRootFolder = getExportRootFolderByLang(lang);
-  const exportSubFolder = resolveExportSubFolderByKey(folderKey, lang);
-  const folderPath = `${exportRootFolder}/${exportSubFolder}/`;
-
-  const fullUrl = `${serverAddress}${folderPath}${fileName}`;
-  const folderUrl = `${serverAddress}${folderPath}`;
-  const parentFolderUrl = `${serverAddress}${exportRootFolder}/`;
-
-  const authHeader = 'Basic ' + safeBase64(`${config.username}:${config.password}`);
-
-  try {
-    await ensureWebDAVCollectionExists(parentFolderUrl, authHeader, '创建父文件夹失败');
-    await ensureWebDAVCollectionExists(folderUrl, authHeader, '创建导出文件夹失败');
-
-    const response = await fetch(fullUrl, {
-      method: 'PUT',
-      headers: {
-        'Authorization': authHeader,
-        'Content-Type': contentType || 'application/json;charset=utf-8',
-        'Overwrite': 'T'
-      },
-      body: contentArrayBuffer ? contentArrayBuffer : String(content ?? '')
-    });
-
-    if (!response.ok) {
-      throw new Error(`上传失败: ${response.status} - ${response.statusText}`);
-    }
-
-    return { success: true };
-  } catch (error) {
-    if (String(error?.message || '').includes('Failed to fetch')) {
-      return { success: false, error: '无法连接到WebDAV服务器，请检查地址是否正确或网络是否正常' };
-    }
-    return { success: false, error: error?.message || '上传到WebDAV失败' };
-  }
-}
-
-async function uploadExportFileToGitHubRepo({ lang, folderKey, fileName, content, contentArrayBuffer }) {
+async function resolveCanvasGitConfig() {
   const config = await browserAPI.storage.local.get([
     'githubRepoToken',
     'githubRepoOwner',
@@ -929,40 +799,184 @@ async function uploadExportFileToGitHubRepo({ lang, folderKey, fileName, content
     'githubRepoEnabled'
   ]);
 
+  if (config.githubRepoEnabled === false) {
+    return { success: false, error: 'GitHub 仓库已禁用' };
+  }
   if (!config.githubRepoToken) {
-    return { success: false, skipped: true, error: 'GitHub Token 未配置' };
+    return { success: false, error: 'GitHub Token 未配置' };
   }
   if (!config.githubRepoOwner || !config.githubRepoName) {
-    return { success: false, skipped: true, error: '仓库未配置' };
-  }
-  if (config.githubRepoEnabled === false) {
-    return { success: false, skipped: true, error: 'GitHub 仓库已禁用' };
+    return { success: false, error: '仓库未配置' };
   }
 
-  const filePath = buildGitHubRepoFilePath({ basePath: config.githubRepoBasePath, lang, folderKey, fileName });
-  const leaf = String(fileName || '').split('/').pop() || 'export';
-  const commitMessage = `Bookmark Canvas: export ${folderKey} ${leaf}`;
-  const contentBase64 = contentArrayBuffer ? arrayBufferToBase64(contentArrayBuffer) : textToBase64(content);
+  return {
+    success: true,
+    token: config.githubRepoToken,
+    owner: config.githubRepoOwner,
+    repo: config.githubRepoName,
+    branch: config.githubRepoBranch,
+    basePath: config.githubRepoBasePath
+  };
+}
 
-  try {
-    const result = await upsertRepoFile({
-      token: config.githubRepoToken,
-      owner: config.githubRepoOwner,
-      repo: config.githubRepoName,
-      branch: config.githubRepoBranch,
-      path: filePath,
-      message: commitMessage,
-      contentBase64
-    });
+async function handleCanvasGitReadStateMessage(message) {
+  const gitConfig = await resolveCanvasGitConfig();
+  if (!gitConfig.success) {
+    return { success: false, error: gitConfig.error };
+  }
 
-    if (result && result.success === true) {
-      return { success: true, path: result.path || filePath, htmlUrl: result.htmlUrl || null };
+  const filePath = normalizeGitHubRepoPath(message.path) || buildCanvasGitSyncPath(gitConfig.basePath);
+
+  const result = await getRepoFile({
+    token: gitConfig.token,
+    owner: gitConfig.owner,
+    repo: gitConfig.repo,
+    branch: gitConfig.branch,
+    path: filePath
+  });
+
+  if (!result || result.success !== true) {
+    if (result && result.notFound === true) {
+      return { success: true, notFound: true, path: filePath };
     }
-
-    return { success: false, error: result?.error || '上传到 GitHub 仓库失败' };
-  } catch (error) {
-    return { success: false, error: error?.message || '上传到 GitHub 仓库失败' };
+    return { success: false, error: result?.error || '读取同步文件失败', path: filePath };
   }
+
+  return {
+    success: true,
+    path: result.path || filePath,
+    sha: result.sha || null,
+    encoding: result.encoding || 'base64',
+    contentBase64: result.contentBase64 || ''
+  };
+}
+
+async function handleCanvasGitWriteStateMessage(message) {
+  const gitConfig = await resolveCanvasGitConfig();
+  if (!gitConfig.success) {
+    return { success: false, error: gitConfig.error };
+  }
+
+  const filePath = normalizeGitHubRepoPath(message.path) || buildCanvasGitSyncPath(gitConfig.basePath);
+  const contentBase64 = String(message.contentBase64 || '').trim();
+  const contentText = message.content;
+  const resolvedContentBase64 = contentBase64 || textToBase64(contentText);
+
+  if (!resolvedContentBase64) {
+    return { success: false, error: '缺少同步内容', path: filePath };
+  }
+
+  const commitMessage = String(message.commitMessage || '').trim() || 'Bookmark Canvas Sync: update state';
+  const result = await upsertRepoFile({
+    token: gitConfig.token,
+    owner: gitConfig.owner,
+    repo: gitConfig.repo,
+    branch: gitConfig.branch,
+    path: filePath,
+    message: commitMessage,
+    contentBase64: resolvedContentBase64
+  });
+
+  if (!result || result.success !== true) {
+    return { success: false, error: result?.error || '写入同步文件失败', path: filePath };
+  }
+
+  return {
+    success: true,
+    path: result.path || filePath,
+    htmlUrl: result.htmlUrl || null,
+    fileSha: result.fileSha || null,
+    commitSha: result.commitSha || null,
+    created: result.created === true
+  };
+}
+
+async function handleCanvasGitWriteFileMessage(message) {
+  const gitConfig = await resolveCanvasGitConfig();
+  if (!gitConfig.success) {
+    return { success: false, error: gitConfig.error };
+  }
+
+  const rawPath = normalizeGitHubRepoPath(message.path);
+  if (!rawPath) {
+    return { success: false, error: '缺少文件路径' };
+  }
+
+  const repoPath = gitConfig.basePath
+    ? normalizeGitHubRepoPath(`${gitConfig.basePath}/${rawPath}`)
+    : rawPath;
+
+  const contentBase64 = String(message.contentBase64 || '').trim();
+  const contentText = message.content;
+  const resolvedContentBase64 = contentBase64 || textToBase64(contentText);
+
+  if (!resolvedContentBase64) {
+    return { success: false, error: '缺少同步内容', path: repoPath };
+  }
+
+  const commitMessage = String(message.commitMessage || '').trim() || `Bookmark Canvas Sync: update ${rawPath}`;
+  const result = await upsertRepoFile({
+    token: gitConfig.token,
+    owner: gitConfig.owner,
+    repo: gitConfig.repo,
+    branch: gitConfig.branch,
+    path: repoPath,
+    message: commitMessage,
+    contentBase64: resolvedContentBase64
+  });
+
+  if (!result || result.success !== true) {
+    return { success: false, error: result?.error || '写入同步文件失败', path: repoPath };
+  }
+
+  return {
+    success: true,
+    path: result.path || repoPath,
+    htmlUrl: result.htmlUrl || null,
+    fileSha: result.fileSha || null,
+    commitSha: result.commitSha || null,
+    created: result.created === true
+  };
+}
+
+async function handleCanvasGitTestConfigMessage(message) {
+  const incoming = message && typeof message.config === 'object' && message.config
+    ? message.config
+    : null;
+
+  const saved = await browserAPI.storage.local.get([
+    'githubRepoToken',
+    'githubRepoOwner',
+    'githubRepoName',
+    'githubRepoBranch',
+    'githubRepoBasePath',
+    'githubRepoEnabled'
+  ]);
+
+  const token = String(incoming?.token != null ? incoming.token : saved.githubRepoToken || '').trim();
+  const owner = String(incoming?.owner != null ? incoming.owner : saved.githubRepoOwner || '').trim();
+  const repo = String(incoming?.repo != null ? incoming.repo : saved.githubRepoName || '').trim();
+  const branch = String(incoming?.branch != null ? incoming.branch : saved.githubRepoBranch || '').trim();
+  const basePath = String(incoming?.basePath != null ? incoming.basePath : saved.githubRepoBasePath || '').trim();
+  const enabled = incoming && Object.prototype.hasOwnProperty.call(incoming, 'enabled')
+    ? incoming.enabled !== false
+    : saved.githubRepoEnabled !== false;
+
+  if (!enabled) {
+    return { success: false, error: 'GitHub 仓库已禁用' };
+  }
+
+  const result = await testRepoConnection({ token, owner, repo, branch, basePath });
+  if (!result || result.success !== true) {
+    return { success: false, error: result?.error || '连接测试失败' };
+  }
+
+  return {
+    success: true,
+    resolvedBranch: result.resolvedBranch || branch || null,
+    basePathExists: result.basePathExists,
+    repo: result.repo || null
+  };
 }
 
 function openCanvasViewFromCommand() {
@@ -1049,63 +1063,35 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.action === 'exportFileToClouds') {
+  if (message.action === 'canvasGitReadState') {
     (async () => {
-      try {
-        const fileName = String(message.fileName || '').trim();
-        const folderKey = String(message.folderKey || '').trim();
-        const contentType = message.contentType;
-        let contentArrayBuffer = message.contentArrayBuffer || null;
-
-        if (!contentArrayBuffer && message.contentBase64Binary) {
-          try {
-            const base64 = message.contentBase64Binary;
-            const binaryString = atob(base64);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-              bytes[i] = binaryString.charCodeAt(i);
-            }
-            contentArrayBuffer = bytes.buffer;
-          } catch (e) {
-            console.error('[exportFileToClouds] Base64 解码失败:', e);
-          }
-        }
-
-        const content = message.content;
-        if (!fileName) throw new Error('缺少文件名');
-        if (!folderKey) throw new Error('缺少导出类型');
-        if (!contentArrayBuffer && (content == null || content === '')) throw new Error('缺少导出内容');
-
-        const lang = message.lang || await getCurrentLang();
-
-        const [webdav, githubRepo] = await Promise.all([
-          uploadExportFileToWebDAV({
-            lang,
-            folderKey,
-            fileName,
-            content,
-            contentArrayBuffer,
-            contentType
-          }),
-          uploadExportFileToGitHubRepo({
-            lang,
-            folderKey,
-            fileName,
-            content,
-            contentArrayBuffer
-          })
-        ]);
-
-        const success =
-          (webdav && webdav.success === true) || (githubRepo && githubRepo.success === true);
-
-        sendResponse({ success, webdav, githubRepo });
-      } catch (error) {
-        sendResponse({ success: false, error: error?.message || '导出到云端失败' });
-      }
+      const response = await handleCanvasGitReadStateMessage(message);
+      sendResponse(response);
     })();
+    return true;
+  }
 
+  if (message.action === 'canvasGitTestConfig') {
+    (async () => {
+      const response = await handleCanvasGitTestConfigMessage(message);
+      sendResponse(response);
+    })();
+    return true;
+  }
+
+  if (message.action === 'canvasGitWriteState') {
+    (async () => {
+      const response = await handleCanvasGitWriteStateMessage(message);
+      sendResponse(response);
+    })();
+    return true;
+  }
+
+  if (message.action === 'canvasGitWriteFile') {
+    (async () => {
+      const response = await handleCanvasGitWriteFileMessage(message);
+      sendResponse(response);
+    })();
     return true;
   }
 

@@ -25792,11 +25792,38 @@ function setupCanvasEventListeners() {
     // 工具栏按钮
     const importBtn = document.getElementById('importCanvasBtn');
     const exportBtn = document.getElementById('exportCanvasBtn');
+    const syncBtn = document.getElementById('syncCanvasBtn');
     const importOtherBtn = document.getElementById('importCanvasOtherBtn');
     const exportOtherBtn = document.getElementById('exportCanvasOtherBtn');
+    const syncOtherBtn = document.getElementById('syncCanvasOtherBtn');
+
+    const openObsidianGitSyncPanel = (anchorEl = null) => {
+        try {
+            try {
+                const manageModal = document.getElementById('canvasManageModal');
+                if (manageModal) manageModal.style.display = 'none';
+            } catch (_) { }
+            try {
+                const otherManageModal = document.getElementById('canvasOtherManageModal');
+                if (otherManageModal) otherManageModal.style.display = 'none';
+            } catch (_) { }
+
+            const syncModule = window.CanvasObsidianGitSync;
+            if (syncModule && typeof syncModule.openPanel === 'function') {
+                syncModule.openPanel({ anchorEl });
+                return;
+            }
+        } catch (_) { }
+        try { showToast('同步模块尚未就绪，请稍后重试'); } catch (_) { }
+    };
 
     if (importBtn) importBtn.addEventListener('click', showImportDialog);
     if (exportBtn) exportBtn.addEventListener('click', exportCanvas);
+    if (syncBtn) {
+        syncBtn.addEventListener('click', (event) => {
+            openObsidianGitSyncPanel(event ? event.currentTarget : syncBtn);
+        });
+    }
     if (importOtherBtn) {
         importOtherBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -25809,6 +25836,12 @@ function setupCanvasEventListeners() {
             e.stopPropagation();
             try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
             exportCanvas();
+        });
+    }
+    if (syncOtherBtn) {
+        syncOtherBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openObsidianGitSyncPanel(e ? e.currentTarget : syncOtherBtn);
         });
     }
 
@@ -26728,6 +26761,13 @@ function showImportDialog() {
                             <span>${isEn ? 'JSON' : 'JSON 书签'}</span>
                         </button>
                     </div>
+                    <div class="import-section-label-large" style="margin-top: 12px;">${isEn ? 'Cloud Relay' : '云端中转'}</div>
+                    <div class="import-row import-row-2cols">
+                        <button class="import-option-btn-compact" id="importCloudTempBtn" title="${isEn ? 'Pull from cloud and apply import rules' : '从云端拉取并按导入规则处理'}">
+                            <i class="fas fa-cloud-download-alt"></i>
+                            <span>${isEn ? 'Cloud' : '云端'}</span>
+                        </button>
+                    </div>
                 </div>
                 <input type="file" id="canvasFileInput" accept=".zip,.7z,.html,.json" style="display: none;">
                 <input type="file" id="canvasFolderInput" webkitdirectory directory style="display: none;">
@@ -26782,8 +26822,181 @@ function showImportDialog() {
         input.click();
     });
 
+    document.getElementById('importCloudTempBtn').addEventListener('click', async () => {
+        const shouldImport = await showCloudImportConfirmDialog();
+        if (!shouldImport) return;
+
+        try {
+            await importCloudSnapshotAsTemporary();
+            dialog.remove();
+        } catch (error) {
+            const text = error && error.message ? error.message : String(error);
+            console.error('[Canvas] 云端导入失败:', error);
+
+            if (__isCloudImportRepoConfigError(text)) {
+                showCanvasToast(`导入失败：${text}`, 'error');
+                dialog.remove();
+                try {
+                    const syncModule = window.CanvasObsidianGitSync;
+                    if (syncModule && typeof syncModule.openPanel === 'function') {
+                        syncModule.openPanel({ activeTab: 'repo' });
+                    }
+                } catch (_) { }
+                return;
+            }
+
+            showCanvasToast((isEn ? 'Import failed: ' : '导入失败：') + text, 'error');
+        }
+    });
+
     document.getElementById('canvasFileInput').addEventListener('change', handleFileImport);
     document.getElementById('canvasFolderInput').addEventListener('change', handleFolderImport);
+}
+
+function showCloudImportConfirmDialog() {
+    const { isEn } = __getLang();
+    return new Promise((resolve) => {
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog import-mode-dialog';
+        dialog.id = 'canvasCloudImportConfirmDialog';
+
+        const title = isEn ? 'Cloud Import' : '云端导入';
+        const desc = isEn
+            ? 'This mode follows import rules: cloud permanent sections are converted into temporary snapshot sections and will not overwrite browser bookmarks.'
+            : '该模式沿用导入规则：云端永久栏目会自动降级为临时快照栏目，不会覆盖浏览器书签树。';
+        const hint = isEn
+            ? 'If repository is not configured, sync settings will open automatically.'
+            : '如果仓库未配置，将自动跳转到“同步”配置页。';
+
+        dialog.innerHTML = `
+            <div class="import-dialog-content import-mode-dialog-content">
+                <div class="import-dialog-header">
+                    <h3>${title}</h3>
+                    <button class="import-dialog-close" id="closeCloudImportConfirmDialog">&times;</button>
+                </div>
+                <div class="import-dialog-body import-mode-dialog-body">
+                    <div class="import-cloud-note">${desc}</div>
+                    <div class="import-mode-subtitle">${hint}</div>
+                    <div class="import-mode-actions">
+                        <button type="button" class="import-mode-btn import-mode-btn-cancel" id="cloudImportCancelBtn">${isEn ? 'Cancel' : '取消'}</button>
+                        <button type="button" class="import-mode-btn import-mode-btn-confirm" id="cloudImportConfirmBtn">${isEn ? 'Continue' : '继续导入'}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(dialog);
+
+        const cleanup = (result) => {
+            try { dialog.remove(); } catch (_) { }
+            resolve(result);
+        };
+
+        const closeBtn = document.getElementById('closeCloudImportConfirmDialog');
+        if (closeBtn) closeBtn.addEventListener('click', () => cleanup(false));
+
+        const cancelBtn = document.getElementById('cloudImportCancelBtn');
+        if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(false));
+
+        const confirmBtn = document.getElementById('cloudImportConfirmBtn');
+        if (confirmBtn) confirmBtn.addEventListener('click', () => cleanup(true));
+
+        dialog.addEventListener('click', (event) => {
+            if (event.target === dialog) {
+                cleanup(false);
+            }
+        });
+
+        dialog.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                cleanup(false);
+            }
+        });
+    });
+}
+
+function __isCloudImportRepoConfigError(message) {
+    const text = String(message || '');
+    return /仓库未就绪|Owner\s*\/\s*Repo 未配置|Token 未配置|仓库未配置|GitHub Token 未配置|GitHub 仓库已禁用/i.test(text);
+}
+
+function __parseCloudSnapshotStorageValue(rawValue) {
+    if (typeof rawValue !== 'string') return rawValue;
+    const parsed = __safeParseCanvasStorageJson(rawValue);
+    return parsed !== null ? parsed : rawValue;
+}
+
+function __buildImportPayloadFromCloudSnapshot(snapshot) {
+    const payload = snapshot && typeof snapshot === 'object' ? snapshot : null;
+    const data = payload && payload.data && typeof payload.data === 'object' ? payload.data : null;
+    if (!data) {
+        throw new Error('云端快照格式无效：缺少 data');
+    }
+
+    const parsedTempState = __parseCloudSnapshotStorageValue(data[TEMP_SECTION_STORAGE_KEY]);
+    if (!parsedTempState || typeof parsedTempState !== 'object') {
+        throw new Error('云端快照缺少画布临时栏目数据');
+    }
+
+    const storage = {};
+    Object.keys(data).forEach((key) => {
+        storage[key] = __parseCloudSnapshotStorageValue(data[key]);
+    });
+    storage[TEMP_SECTION_STORAGE_KEY] = parsedTempState;
+
+    const primaryState = {};
+    if (Array.isArray(payload.permanentTreeSnapshot) && payload.permanentTreeSnapshot.length) {
+        primaryState.permanentTreeSnapshot = payload.permanentTreeSnapshot;
+    }
+
+    return {
+        tempState: parsedTempState,
+        storage,
+        primaryState
+    };
+}
+
+async function importCloudSnapshotAsTemporary() {
+    const { isEn } = __getLang();
+    const syncModule = window.CanvasObsidianGitSync;
+    if (!syncModule || typeof syncModule.readRemoteSnapshotForImport !== 'function') {
+        throw new Error(isEn ? 'Sync module is not ready.' : '同步模块尚未就绪。');
+    }
+
+    showCanvasToast(isEn ? 'Loading cloud snapshot...' : '正在读取云端快照...', 'info');
+    const remote = await syncModule.readRemoteSnapshotForImport();
+    const importPayload = __buildImportPayloadFromCloudSnapshot(remote && remote.snapshot ? remote.snapshot : null);
+
+    __setCanvasImportRuntimeMode('permanent');
+
+    const sourceName = (remote && remote.path)
+        ? `Cloud Sync (${remote.path})`
+        : (isEn ? 'Cloud Sync Snapshot' : '云端同步快照');
+
+    __processImportedPackage(
+        importPayload.tempState,
+        importPayload.storage,
+        importPayload.primaryState,
+        sourceName
+    );
+
+    if (!importPayload.primaryState || !importPayload.primaryState.permanentTreeSnapshot) {
+        showCanvasToast(
+            isEn
+                ? 'Imported cloud data without permanent tree snapshot. Only temporary/layout data was applied.'
+                : '云端快照未包含永久栏目树，已仅导入临时栏目与布局数据。',
+            'warning'
+        );
+        return;
+    }
+
+    showCanvasToast(
+        isEn
+            ? 'Cloud snapshot imported as temporary sections.'
+            : '云端快照已按临时栏目导入。',
+        'success'
+    );
 }
 
 async function handleFileImport(e) {
@@ -27701,18 +27914,103 @@ function __getLang() {
 }
 
 function __frontmatter(meta) {
-    const safe = (v) => String(v == null ? '' : v).replace(/\r?\n/g, ' ').trim();
+    const obj = (meta && typeof meta === 'object') ? meta : {};
+    const lines = ['---'];
+    Object.keys(obj).forEach((key) => {
+        const value = obj[key];
+        if (value === undefined || value === null) return;
+        if (!key || /[^a-zA-Z0-9_.-]/.test(key)) return;
+
+        if (typeof value === 'number' && isFinite(value)) {
+            lines.push(`${key}: ${value}`);
+            return;
+        }
+        if (typeof value === 'boolean') {
+            lines.push(`${key}: ${value ? 'true' : 'false'}`);
+            return;
+        }
+
+        const text = String(value).replace(/\r?\n/g, ' ').trim();
+        lines.push(`${key}: ${JSON.stringify(text)}`);
+    });
+    lines.push('---');
+    lines.push('');
+    return lines.join('\n');
+}
+
+function __renderDescriptionMarkdownToHtml(rawDesc) {
+    const desc = String(rawDesc || '').trim();
+    if (!desc) return '';
+    if (typeof marked !== 'undefined') {
+        try {
+            return marked.parse(desc);
+        } catch (_) { }
+    }
+    return desc.split('\n').map((line) => `<p>${__escapeHtml(line)}</p>`).join('');
+}
+
+const __CANVAS_DESC_BLOCK_START = '<!-- BC_DESCRIPTION_START -->';
+const __CANVAS_DESC_BLOCK_END = '<!-- BC_DESCRIPTION_END -->';
+
+function __buildCanvasDescriptionCommentBlock(markdownText) {
+    const text = String(markdownText || '').trim();
+    if (!text) return '';
     return [
-        '---',
-        'exporter: bookmark-backup-canvas',
-        'exportVersion: 1',
-        `exportedAt: ${safe(meta.exportedAt)}`,
-        `source: ${safe(meta.source)}`,
-        `sourceId: ${safe(meta.sourceId)}`,
-        `title: ${safe(meta.title)}`,
-        '---',
-        ''
+        __CANVAS_DESC_BLOCK_START,
+        text,
+        __CANVAS_DESC_BLOCK_END
     ].join('\n');
+}
+
+function __extractCanvasDescriptionCommentBlock(bodyText) {
+    const body = String(bodyText || '').replace(/\r\n?/g, '\n');
+    const start = body.indexOf(__CANVAS_DESC_BLOCK_START);
+    if (start < 0) return { body, descriptionMarkdown: '' };
+
+    const searchStart = start + __CANVAS_DESC_BLOCK_START.length;
+    const end = body.indexOf(__CANVAS_DESC_BLOCK_END, searchStart);
+    if (end < 0) return { body, descriptionMarkdown: '' };
+
+    const descriptionMarkdown = body.slice(searchStart, end).trim();
+    const before = body.slice(0, start).replace(/[\t ]*\n?$/, '\n');
+    const after = body.slice(end + __CANVAS_DESC_BLOCK_END.length).replace(/^\n?/, '');
+    const merged = `${before}${after}`.replace(/\n{3,}/g, '\n\n').trim();
+    return {
+        body: merged,
+        descriptionMarkdown
+    };
+}
+
+function __parseCanvasMarkdownPayload(fileText) {
+    const rawBody = String(fileText || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+
+    const extractedDesc = __extractCanvasDescriptionCommentBlock(rawBody);
+    let workingBody = extractedDesc.body;
+    let descriptionMarkdown = extractedDesc.descriptionMarkdown;
+
+    const lines = workingBody.split('\n');
+    let firstNonEmptyIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+        if (String(lines[i] || '').trim()) {
+            firstNonEmptyIndex = i;
+            break;
+        }
+    }
+
+    const firstNonEmptyLine = firstNonEmptyIndex >= 0 ? String(lines[firstNonEmptyIndex] || '').trim() : '';
+    const looksLikeTreeLine = /^(#{2,}\s+|-\s+|<)/.test(firstNonEmptyLine);
+    const hasHeaderLine = !!firstNonEmptyLine && !looksLikeTreeLine;
+
+    const contentToParse = hasHeaderLine
+        ? lines.slice(firstNonEmptyIndex + 1).join('\n').trim()
+        : workingBody.trim();
+
+    return {
+        rawBody,
+        headerLine: hasHeaderLine ? firstNonEmptyLine : '',
+        descriptionHtml: __renderDescriptionMarkdownToHtml(descriptionMarkdown),
+        contentToParse
+    };
 }
 
 function __stripZwsp(s) {
@@ -28109,14 +28407,16 @@ function __toTreeMarkdownLines(items, depth = 0, options = {}) {
     return lines;
 }
 
-function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = null) {
+function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = null, metaOptions = null) {
     const { isEn } = __getLang();
-    const exportedAt = new Date().toISOString();
 
     // 1. Get Title from DOM (in case user modified it via CSS/hack, or just use translated default)
     const domTitleEl = document.getElementById('permanentSectionTitle');
     const domTitle = domTitleEl ? domTitleEl.textContent.trim() : '';
     const title = domTitle || (isEn ? 'Permanent Bookmarks' : '书签树 (永久栏目)');
+    const permanentSlot = __normalizePositiveInt(metaOptions && metaOptions.permanentSlot) || 1;
+    const slotLabel = toAlphaLabel(permanentSlot) || 'A';
+    const sectionHeaderLine = `#${slotLabel} ${title}`.trim();
 
     // 2. Get Description (Markdown) form LocalStorage
     let rawDesc = '';
@@ -28127,25 +28427,13 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
     }
     const descMd = __htmlToMarkdown(rawDesc);
 
-    // Frontmatter removed to hide properties in Obsidian Canvas
-    /* const header = __frontmatter({
-        exportedAt,
-        source: 'permanent',
-        sourceId: 'chrome-bookmarks',
-        title
-    }); */
-
-    const body = [];
-    // Title header removed
-    // body.push(`# ${title}`);
-    // body.push('');
+    const body = [sectionHeaderLine];
 
     if (descMd) {
-        body.push(descMd);
-        body.push('');
-        body.push('---');
-        body.push('');
+        body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
+
+    body.push('');
 
     const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
     const roots = root && Array.isArray(root.children) ? root.children : [];
@@ -28200,36 +28488,22 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
 
 function __buildTempSectionMarkdown(section) {
     const { isEn } = __getLang();
-    const exportedAt = new Date().toISOString();
 
     // 1. Title & Sequence
     const rawTitle = String((section && section.title) || (isEn ? 'Temp Section' : '临时栏目'));
     const seqLabel = getTempSectionLabel(section);
-    const fullTitle = seqLabel ? `${seqLabel}. ${rawTitle}` : rawTitle;
+    const fullTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
 
-    // Frontmatter removed
-    /* const header = __frontmatter({
-        exportedAt,
-        source: 'tempSection',
-        sourceId: section && section.id ? section.id : '',
-        title: fullTitle,
-        color: (section && section.color) ? section.color : ''
-    }); */
-
-    const body = [];
-    // Title header removed
-    // body.push(`# ${fullTitle}`);
-    // body.push('');
+    const body = [fullTitle.trim()];
 
     // 2. Description (Markdown)
     const descHtml = section && typeof section.description === 'string' ? section.description : '';
     const descMd = __htmlToMarkdown(descHtml);
     if (descMd) {
-        body.push(descMd);
-        body.push('');
-        body.push('---');
-        body.push('');
+        body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
+
+    body.push('');
 
     // 3. Items
     const items = section && Array.isArray(section.items) ? section.items : [];
@@ -28249,15 +28523,6 @@ function __buildTempSectionMarkdown(section) {
 }
 
 function __buildMdNodeMarkdown(node) {
-    const exportedAt = new Date().toISOString();
-    // Frontmatter removed
-    /* const header = __frontmatter({
-        exportedAt,
-        source: 'mdNode',
-        sourceId: node && node.id ? node.id : '',
-        title: '',
-        color: (node && node.color) ? node.color : ''
-    }); */
     // Convert HTML content to Markdown
     // Prefer node.html (rich text source) over node.text (plain text)
     // Legacy nodes might only have node.text
@@ -28285,10 +28550,16 @@ function __buildMdNodeMarkdown(node) {
 /**
  * [EDITABLE MODE] Build Permanent Sections Markdown (Headings + List)
  */
-function __buildPermanentBookmarksMarkdownEditable(bookmarkTree, descriptionOverride = null) {
+function __buildPermanentBookmarksMarkdownEditable(bookmarkTree, descriptionOverride = null, metaOptions = null) {
     const { isEn } = __getLang();
+    const domTitleEl = document.getElementById('permanentSectionTitle');
+    const domTitle = domTitleEl ? domTitleEl.textContent.trim() : '';
+    const title = domTitle || (isEn ? 'Permanent Bookmarks' : '书签树 (永久栏目)');
+    const permanentSlot = __normalizePositiveInt(metaOptions && metaOptions.permanentSlot) || 1;
+    const slotLabel = toAlphaLabel(permanentSlot) || 'A';
+    const sectionHeaderLine = `#${slotLabel} ${title}`.trim();
 
-    const body = [];
+    const body = [sectionHeaderLine];
 
     // 2. Description
     let rawDesc = '';
@@ -28299,11 +28570,10 @@ function __buildPermanentBookmarksMarkdownEditable(bookmarkTree, descriptionOver
     }
     const descMd = __htmlToMarkdown(rawDesc);
     if (descMd) {
-        body.push(descMd);
-        body.push('');
-        body.push('---');
-        body.push('');
+        body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
+
+    body.push('');
 
     const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
     const roots = root && Array.isArray(root.children) ? root.children : [];
@@ -28412,17 +28682,19 @@ function __buildPermanentBookmarksMarkdownEditable(bookmarkTree, descriptionOver
  */
 function __buildTempSectionMarkdownEditable(section) {
     const { isEn } = __getLang();
+    const rawTitle = String((section && section.title) || (isEn ? 'Temp Section' : '临时栏目'));
+    const seqLabel = getTempSectionLabel(section);
+    const fullTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
 
-    const body = [];
+    const body = [fullTitle.trim()];
 
     const descHtml = section && typeof section.description === 'string' ? section.description : '';
     const descMd = __htmlToMarkdown(descHtml);
     if (descMd) {
-        body.push(descMd);
-        body.push('');
-        body.push('---');
-        body.push('');
+        body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
+
+    body.push('');
 
     const items = section && Array.isArray(section.items) ? section.items : [];
 
@@ -28864,6 +29136,21 @@ function __sanitizeFilename(name) {
     return (name || '').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/^\.+/, '').trim() || 'Untitled';
 }
 
+function __getPermanentSectionDisplayTitle(isEn) {
+    const titleEl = document.getElementById('permanentSectionTitle');
+    const titleFromDom = titleEl ? String(titleEl.textContent || '').replace(/\u200B/g, '').trim() : '';
+    return titleFromDom || (isEn ? 'Permanent Bookmarks' : '书签树 (永久栏目)');
+}
+
+function __buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn) {
+    const slot = __normalizePositiveInt(permanentSlot) || 1;
+    const slotLabel = toAlphaLabel(slot) || 'A';
+    const title = __getPermanentSectionDisplayTitle(isEn);
+    const folder = isEn ? 'Permanent' : '永久栏目';
+    const fileName = __sanitizeFilename(`#${slotLabel} ${title}`);
+    return `${folder}/${fileName}.md`;
+}
+
 function __getImportContainerLabelFromNode(node) {
     if (!node || node.subtype !== 'import-container') return '';
     const direct = (typeof node.groupLabel === 'string') ? node.groupLabel.replace(/\u200B/g, '').trim() : '';
@@ -28879,6 +29166,294 @@ function __getImportContainerLabelFromNode(node) {
     } catch (_) {
         return '';
     }
+}
+
+
+function __normalizeObsidianSyncExportRoot(path, isEn) {
+    const fallback = isEn ? 'bookmark-canvas-sync' : '书签画布同步';
+    const normalized = String(path || fallback)
+        .trim()
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .replace(/\/+$/, '')
+        .replace(/\/+/g, '/');
+    return normalized || fallback;
+}
+
+function __joinSyncExportPath(root, rel) {
+    const normalizedRoot = String(root || '').replace(/^\/+/, '').replace(/\/+$/, '');
+    const normalizedRel = String(rel || '').replace(/^\/+/, '');
+    return normalizedRoot ? `${normalizedRoot}/${normalizedRel}` : normalizedRel;
+}
+
+function __buildObsidianSyncCanvasData({
+    exportRoot,
+    permanentMdRel,
+    copyFileMap,
+    tempSectionMdPaths,
+    mdNodeMdPaths
+}) {
+    const withPrefix = (relPath) => __joinSyncExportPath(exportRoot, relPath);
+    const canvasData = { nodes: [], edges: [] };
+
+    const permanentSectionEl = document.getElementById('permanentSection');
+    const permanentLeft = permanentSectionEl ? (parseFloat(permanentSectionEl.style.left) || 0) : 0;
+    const permanentTop = permanentSectionEl ? (parseFloat(permanentSectionEl.style.top) || 0) : 0;
+    const permanentW = permanentSectionEl ? (permanentSectionEl.offsetWidth || 600) : 600;
+    const permanentH = permanentSectionEl ? (permanentSectionEl.offsetHeight || 600) : 600;
+    canvasData.nodes.push({
+        id: 'permanent-section',
+        type: 'file',
+        x: Math.round(permanentLeft),
+        y: Math.round(permanentTop),
+        width: Math.round(permanentW),
+        height: Math.round(permanentH),
+        file: withPrefix(permanentMdRel),
+        color: '4'
+    });
+
+    try {
+        const canvasContent = document.getElementById('canvasContent');
+        const scope = canvasContent || document;
+        scope.querySelectorAll('.permanent-bookmark-section.permanent-section-copy').forEach((el) => {
+            if (!el) return;
+            const copyId = el.dataset ? el.dataset.permanentSectionCopyId : null;
+            if (!copyId) return;
+            const left = parseFloat(el.style.left) || 0;
+            const top = parseFloat(el.style.top) || 0;
+            const w = el.offsetWidth || permanentW;
+            const h = el.offsetHeight || permanentH;
+            canvasData.nodes.push({
+                id: `permanent-section-copy-${copyId}`,
+                type: 'file',
+                x: Math.round(left),
+                y: Math.round(top),
+                width: Math.round(w),
+                height: Math.round(h),
+                file: withPrefix((copyId && copyFileMap[copyId]) ? copyFileMap[copyId] : permanentMdRel),
+                color: '4'
+            });
+        });
+    } catch (_) { }
+
+    try {
+        const exportMdBase = getBlankNodeDefaultSize();
+        (CanvasState.mdNodes || [])
+            .filter(n => n && n.subtype === 'import-container')
+            .forEach((n) => {
+                const label = __getImportContainerLabelFromNode(n);
+                const color = n && (n.colorHex || n.color) ? (n.colorHex || n.color) : null;
+                canvasData.nodes.push({
+                    id: n.id,
+                    type: 'group',
+                    x: Math.round(n.x || 0),
+                    y: Math.round(n.y || 0),
+                    width: Math.round(n.width || exportMdBase.width),
+                    height: Math.round(n.height || exportMdBase.height),
+                    ...(label ? { label } : {}),
+                    ...(color ? { color } : {})
+                });
+            });
+    } catch (_) { }
+
+    const exportTempBase = getTempSectionBaseSize();
+    const exportMdBase = getBlankNodeDefaultSize();
+
+    tempSectionMdPaths.forEach(({ id, rel }) => {
+        const section = CanvasState.tempSections.find(s => s && s.id === id);
+        if (!section) return;
+        canvasData.nodes.push({
+            id,
+            type: 'file',
+            x: Math.round(section.x || 0),
+            y: Math.round(section.y || 0),
+            width: Math.round(section.width || exportTempBase.width),
+            height: Math.round(section.height || exportTempBase.height),
+            file: withPrefix(rel),
+            color: section.color || null
+        });
+    });
+
+    mdNodeMdPaths.forEach(({ id, rel }) => {
+        const node = (CanvasState.mdNodes || []).find(n => n && n.id === id);
+        if (!node) return;
+        const color = node.colorHex || node.color || null;
+        canvasData.nodes.push({
+            id,
+            type: 'file',
+            x: Math.round(node.x || 0),
+            y: Math.round(node.y || 0),
+            width: Math.round(node.width || exportMdBase.width),
+            height: Math.round(node.height || exportMdBase.height),
+            file: withPrefix(rel),
+            ...(color ? { color } : {})
+        });
+    });
+
+    if (Array.isArray(CanvasState.edges)) {
+        canvasData.edges = CanvasState.edges.map(edge => {
+            const dir = edge.direction || 'none';
+            const fromEnd = (dir === 'both') ? 'arrow' : 'none';
+            const toEnd = (dir === 'forward' || dir === 'both') ? 'arrow' : 'none';
+            const colorHex = edge.colorHex || presetToHex(edge.color) || null;
+            const base = {
+                id: edge.id,
+                fromNode: edge.fromNode,
+                fromSide: edge.fromSide || 'right',
+                toNode: edge.toNode,
+                toSide: edge.toSide || 'left',
+                fromEnd,
+                toEnd
+            };
+            if (edge.label && String(edge.label).trim()) base.label = edge.label;
+            if (colorHex) base.color = colorHex;
+            return base;
+        });
+    }
+
+    return canvasData;
+}
+
+async function __buildObsidianSyncFiles(options = {}) {
+    const { isEn } = __getLang();
+    const api = (typeof browserAPI !== 'undefined' && browserAPI.bookmarks)
+        ? browserAPI.bookmarks
+        : ((typeof chrome !== 'undefined' && chrome.bookmarks) ? chrome.bookmarks : null);
+
+    if (!api || typeof api.getTree !== 'function') {
+        throw new Error(isEn ? 'Bookmarks API not available.' : '当前环境不支持书签 API，无法生成同步文件。');
+    }
+
+    const exportFormat = options && options.exportFormat === 'editable' ? 'editable' : 'visual';
+    const exportRoot = __normalizeObsidianSyncExportRoot(options && options.exportRoot, isEn);
+
+    try { __flushMdEditorsForExport(); } catch (_) { }
+    try { saveTempNodes(); } catch (_) { }
+    try { savePermanentSectionPosition(); } catch (_) { }
+
+    const files = [];
+    const pushTextFile = (relPath, content) => {
+        files.push({
+            path: __joinSyncExportPath(exportRoot, relPath),
+            content: String(content == null ? '' : content)
+        });
+    };
+
+    const bookmarkTree = await api.getTree();
+    const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn);
+    const permanentBuilder = exportFormat === 'editable'
+        ? __buildPermanentBookmarksMarkdownEditable
+        : __buildPermanentBookmarksMarkdown;
+    pushTextFile(permanentMdRel, permanentBuilder(bookmarkTree, null, { permanentSlot: 1 }));
+
+    const copyFileMap = {};
+    try {
+        const copies = __ensurePermanentSectionCopyDisplayIndexes();
+        if (Array.isArray(copies)) {
+            copies.forEach(copy => {
+                const copyId = copy && copy.id;
+                const idx = __normalizePositiveInt(copy && copy.displayIndex);
+                if (!copyId) return;
+
+                const descKey = `canvas-permanent-tip-text-copy-${copyId}`;
+                let descObj = '';
+                try { descObj = localStorage.getItem(descKey) || ''; } catch (_) { }
+
+                const alpha = toAlphaLabel(idx + 1);
+                const copyMdRel = __buildPermanentSectionMarkdownRelativePath(idx + 1, isEn);
+
+                copyFileMap[copyId] = copyMdRel;
+                const slot = idx ? (idx + 1) : null;
+                pushTextFile(copyMdRel, permanentBuilder(bookmarkTree, descObj, { permanentSlot: slot, copyId }));
+            });
+        }
+    } catch (_) { }
+
+    const tempSectionMdPaths = [];
+    const usedTempRelPaths = new Set();
+    (CanvasState.tempSections || []).forEach((section) => {
+        if (!section || !section.id) return;
+
+        const seqLabel = getTempSectionLabel(section);
+        const rawTitle = section.title || (isEn ? 'Temp Section' : '临时栏目');
+        const fileTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
+        const safeTitle = __sanitizeFilename(fileTitle);
+        let rel = __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn);
+        if (usedTempRelPaths.has(rel)) {
+            const slashIndex = rel.lastIndexOf('/');
+            const relFolder = slashIndex >= 0 ? rel.slice(0, slashIndex) : '';
+            const relFile = slashIndex >= 0 ? rel.slice(slashIndex + 1) : rel;
+            const relStem = relFile.replace(/\.md$/i, '');
+            const uniqueSuffix = __sanitizeFilename(section.id || 'section');
+            const uniqueFile = `${relStem}_${uniqueSuffix}.md`;
+            rel = relFolder ? `${relFolder}/${uniqueFile}` : uniqueFile;
+        }
+        usedTempRelPaths.add(rel);
+
+        tempSectionMdPaths.push({ id: section.id, rel });
+
+        const tempBuilder = exportFormat === 'editable'
+            ? __buildTempSectionMarkdownEditable
+            : __buildTempSectionMarkdown;
+        pushTextFile(rel, tempBuilder(section));
+    });
+
+    const mdNodeMdPaths = [];
+    const mdNodeFolder = isEn ? 'Blank' : '空白栏目';
+    const usedNodePaths = new Set();
+
+    (CanvasState.mdNodes || []).forEach((node) => {
+        if (!node || !node.id) return;
+        if (node.subtype === 'import-container') return;
+
+        let titleCandidate = (node.text || '').replace(/\u200B/g, '').trim();
+        if (!titleCandidate && node.html) {
+            try {
+                const div = document.createElement('div');
+                div.innerHTML = node.html;
+                titleCandidate = (div.textContent || '').replace(/\u200B/g, '').trim();
+            } catch (_) { }
+        }
+        titleCandidate = titleCandidate.split('\n')[0].trim();
+
+        let safeName = __sanitizeFilename(titleCandidate);
+        if (!safeName || safeName === 'Untitled') safeName = node.id;
+
+        let rel = `${mdNodeFolder}/${safeName}.md`;
+        if (usedNodePaths.has(rel)) {
+            rel = `${mdNodeFolder}/${safeName}_${node.id}.md`;
+        }
+        usedNodePaths.add(rel);
+
+        mdNodeMdPaths.push({ id: node.id, rel });
+        pushTextFile(rel, __buildMdNodeMarkdown(node));
+    });
+
+    const canvasData = __buildObsidianSyncCanvasData({
+        exportRoot,
+        permanentMdRel,
+        copyFileMap,
+        tempSectionMdPaths,
+        mdNodeMdPaths
+    });
+
+    const exportRootLeaf = String(exportRoot).split('/').filter(Boolean).slice(-1)[0] || exportRoot;
+    const canvasFileName = `${exportRootLeaf}.canvas`;
+    pushTextFile(canvasFileName, JSON.stringify(canvasData, null, 2));
+
+    return {
+        exportRoot,
+        exportFormat,
+        canvasFileName,
+        files
+    };
+}
+
+if (typeof window !== 'undefined') {
+    if (!window.CanvasObsidianExportBridge || typeof window.CanvasObsidianExportBridge !== 'object') {
+        window.CanvasObsidianExportBridge = {};
+    }
+    window.CanvasObsidianExportBridge.buildSyncFiles = __buildObsidianSyncFiles;
 }
 
 async function exportCanvasPackage(options = {}) {
@@ -28958,21 +29533,6 @@ async function exportCanvasPackage(options = {}) {
 
         fallbackAnchorDownload(url, fileName);
         setTimeout(() => URL.revokeObjectURL(url), 10000);
-    };
-
-    const syncSingleFileToCloud = (fileName, contentString, contentType) => {
-        try {
-            if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
-                chrome.runtime.sendMessage({
-                    action: 'exportFileToClouds',
-                    folderKey: 'canvas',
-                    lang: (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN'),
-                    fileName,
-                    content: contentString,
-                    contentType
-                }, () => { });
-            }
-        } catch (_) { }
     };
 
     if (fullscreenSingleFileMode) {
@@ -29228,7 +29788,6 @@ async function exportCanvasPackage(options = {}) {
             return;
         }
 
-        syncSingleFileToCloud(fileName, contentString, contentType);
         downloadSingleFile(fileName, contentString, contentType);
 
         alert(isEn
@@ -29338,20 +29897,6 @@ async function exportCanvasPackage(options = {}) {
         const blob = new Blob([jsonString], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const filename = `bookmark-canvas-backup-${ymd}.json`;
-
-        // 同步导出到云端（云端1 WebDAV + 云端2 GitHub Repo）
-        try {
-            if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
-                chrome.runtime.sendMessage({
-                    action: 'exportFileToClouds',
-                    folderKey: 'canvas',
-                    lang: (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN'),
-                    fileName: filename,
-                    content: jsonString,
-                    contentType: 'application/json;charset=utf-8'
-                }, () => { });
-            }
-        } catch (_) { }
 
         if (chrome && chrome.downloads && typeof chrome.downloads.download === 'function') {
             chrome.downloads.download({
@@ -29610,11 +30155,11 @@ async function exportCanvasPackage(options = {}) {
     // 1) Markdown files
     // 1) Markdown files
     const bookmarkTree = await api.getTree();
-    const permanentMdRel = isEn ? 'Permanent Sections.md' : '永久栏目.md';
+    const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn);
 
     // Choose builder based on format
     const permanentBuilder = exportFormat === 'editable' ? __buildPermanentBookmarksMarkdownEditable : __buildPermanentBookmarksMarkdown;
-    files.push({ name: `${exportRoot}/${permanentMdRel}`, data: __toUint8(permanentBuilder(bookmarkTree)) });
+    files.push({ name: `${exportRoot}/${permanentMdRel}`, data: __toUint8(permanentBuilder(bookmarkTree, null, { permanentSlot: 1 })) });
 
     // Generate separate MD files for Permanent Section Copies (with their own descriptions)
     const copyFileMap = {}; // copyId -> relativePath
@@ -29634,34 +30179,42 @@ async function exportCanvasPackage(options = {}) {
                 let descObj = '';
                 try { descObj = localStorage.getItem(descKey) || ''; } catch (_) { }
 
-                // Determine Filename
-                // We want e.g. "Permanent Sections (#B).md"
+                // Determine filename based on sidebar naming.
                 const alpha = toAlphaLabel(idx + 1);
-                const suffix = alpha ? ` (#${alpha})` : ` (Copy ${idx})`;
-                // Remove chars that might be invalid in filenames
-                const safeSuffix = suffix.replace(/[\\/:*?"<>|]/g, '');
 
-                const copyMdRel = isEn ? `Permanent Sections${safeSuffix}.md` : `永久栏目${safeSuffix}.md`;
+                const copyMdRel = __buildPermanentSectionMarkdownRelativePath(idx + 1, isEn);
                 copyFileMap[copyId] = copyMdRel;
 
                 // Build separate MD file using same tree but different description
-                const fileContent = permanentBuilder(bookmarkTree, descObj);
+                const slot = idx ? (idx + 1) : null;
+                const fileContent = permanentBuilder(bookmarkTree, descObj, { permanentSlot: slot, copyId });
                 files.push({ name: `${exportRoot}/${copyMdRel}`, data: __toUint8(fileContent) });
             });
         }
     } catch (_) { }
 
     const tempSectionMdPaths = [];
-    const tempMdFolder = isEn ? 'Temporary Sections' : '临时栏目';
+    const usedTempRelPaths = new Set();
     CanvasState.tempSections.forEach((section) => {
         if (!section || !section.id) return;
 
         const seqLabel = getTempSectionLabel(section);
         const rawTitle = section.title || (isEn ? 'Temp Section' : '临时栏目');
-        const fileTitle = seqLabel ? `${seqLabel}. ${rawTitle}` : rawTitle;
+        const fileTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
         const safeTitle = __sanitizeFilename(fileTitle);
 
-        const rel = `${tempMdFolder}/${safeTitle}.md`;
+        let rel = __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn);
+        if (usedTempRelPaths.has(rel)) {
+            const slashIndex = rel.lastIndexOf('/');
+            const relFolder = slashIndex >= 0 ? rel.slice(0, slashIndex) : '';
+            const relFile = slashIndex >= 0 ? rel.slice(slashIndex + 1) : rel;
+            const relStem = relFile.replace(/\.md$/i, '');
+            const uniqueSuffix = __sanitizeFilename(section.id || 'section');
+            const uniqueFile = `${relStem}_${uniqueSuffix}.md`;
+            rel = relFolder ? `${relFolder}/${uniqueFile}` : uniqueFile;
+        }
+        usedTempRelPaths.add(rel);
+
         tempSectionMdPaths.push({ id: section.id, rel });
 
         // Choose builder based on format
@@ -29669,44 +30222,8 @@ async function exportCanvasPackage(options = {}) {
         files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(tempBuilder(section)) });
     });
 
-    // 1.1) Meta file (bookmark-canvas.meta.json)
-    // Used by this extension to restore numbering/origin data when importing an Obsidian package.
-    // Obsidian ignores this file.
-    try {
-        const tempSectionsMeta = {};
-        (CanvasState.tempSections || []).forEach((section) => {
-            if (!section || !section.id) return;
-            tempSectionsMeta[section.id] = {
-                sequenceNumber: (typeof section.sequenceNumber === 'number' && isFinite(section.sequenceNumber)) ? section.sequenceNumber : null,
-                label: (typeof section.label === 'string' && section.label.trim()) ? section.label.trim() : null,
-                originPermanent: (section.originPermanent && typeof section.originPermanent === 'object') ? section.originPermanent : null
-            };
-        });
-
-        const permanentCopiesMeta = [];
-        try {
-            const copies = __ensurePermanentSectionCopyDisplayIndexes();
-            if (Array.isArray(copies)) {
-                copies.forEach((c) => {
-                    if (!c || !c.id) return;
-                    const idx = __normalizePositiveInt(c.displayIndex);
-                    permanentCopiesMeta.push({ id: c.id, displayIndex: idx });
-                });
-            }
-        } catch (_) { }
-
-        const meta = {
-            exporter: 'bookmark-backup-canvas',
-            metaVersion: 1,
-            exportedAt,
-            permanentCopies: permanentCopiesMeta,
-            tempSections: tempSectionsMeta
-        };
-        files.push({ name: `${exportRoot}/bookmark-canvas.meta.json`, data: __toUint8(JSON.stringify(meta, null, 2)) });
-    } catch (_) { }
-
     const mdNodeMdPaths = [];
-    const mdNodeFolder = isEn ? 'Blank Sections' : '空白栏目';
+    const mdNodeFolder = isEn ? 'Blank' : '空白栏目';
     const usedNodePaths = new Set();
 
     (CanvasState.mdNodes || []).forEach((node) => {
@@ -29962,178 +30479,221 @@ async function exportCanvasPackage(options = {}) {
     // 4) Import guide for Obsidian
 
     const readmeName = isEn ? 'README_Import_Rules.md' : '说明_导入规则.md';
-    const compatText = isEn
-        ? `
-# Bookmark Canvas Export
-
-This package contains your Bookmark Canvas data, compatible with Obsidian.
-
-## 1. Permanent Columns
-- **Structure**: These are your main bookmark folders (Permanent Sections).
-- **Naming**: They are labeled alphabetically (e.g., \`#A\`, \`#B\`, \`#C\`...).
-- **Copies**: If you have created visual copies of a permanent column, they share the same content file (Permanent Sections.md) but differ in position on the canvas.
-
-## 2. Temporary Columns
-- **Structure**: These are temporary collections or "mind map" nodes created on the canvas.
-- **Naming**: They follow a hierarchical numbering based on their parent Permanent Column (e.g., \`A-1\`, \`A-1-1\`).
-- **Files**: Stored in the \`Temporary Sections/\` folder.
-
-## 3. Obsidian Usage
-- **Canvas**: Open the \`.canvas\` file in Obsidian to view the visual layout.
-- **Editing**: You can edit the Markdown files.
-  - **Bookmarks**: Can be edited, but structure changes might affect re-import.
-  - **Text**: Feel free to edit text content.
-- **Re-import**: This package can be re-imported into the Bookmark Canvas extension.
-
-## 4. Import Rules
-- **Full Restore**: Importing this package will restore the canvas layout.
-- **Colors**: Section colors are preserved.
-- **Connections**: Edges/Lines between cards are preserved.
-`
-        : `
-# 书签画布导出说明
-
-此数据包包含您的书签画布数据，兼容 Obsidian 打开。
-
-## 1. 永久栏目 (Permanent Columns)
-- **结构**：这些是您的主要书签文件夹。
-- **命名**：使用字母编号（如 \`#A\`, \`#B\`, \`#C\`...）。
-- **副本**：如果您创建了永久栏目的视觉“副本”，它们共享同一个 Markdown 文件内容（永久栏目.md），但在画布上有独立位置。
-
-## 2. 临时栏目 (Temporary Columns)
-- **结构**：这些是您在画布上创建的临时收集或类似思维导图的节点。
-- **命名**：采用基于源永久栏目的层级编号（如 \`A-1\`, \`A-1-1\`）。
-- **文件**：存储在 \`临时栏目/\` 文件夹中。
-
-## 3. Obsidian 使用
-- **Canvas**：用 Obsidian 打开 \`.canvas\` 文件即可查看完整布局。
-- **编辑**：您可以编辑 Markdown 文件。
-  - **书签**：可以编辑，但改变文件夹结构可能影响重新导入。
-  - **文本**：自由编辑文本内容。
-- **重新导入**：此数据包可以完整重新导入回书签画布扩展。
-
-## 4. 导入规则
-- **完整恢复**：导入将恢复画布布局、栏目位置和尺寸。
-- **颜色**：保留栏目和卡片的颜色设置。
-- **连接线**：保留卡片之间的连接线关系。
-`;
-
 
     const isVisualExport = exportFormat === 'visual';
-    const aiGuideText = isEn
+    let compatText = '';
+    let aiGuideText = '';
+
+    const modeTreeRulesEn = isVisualExport
         ? [
-            `## AI Editing / Import Guidelines(${isVisualExport ? 'Visual Export' : 'Editable Export'})`,
+            '- Visual mode keeps HTML-like tree blocks: `<details> / <summary> / <a href>`.',
+            '- Keep outer wrappers of visual cards; missing wrappers may drop nodes during import.'
+        ]
+        : [
+            '- Editable mode uses heading tree (`###` to `######`), then nested list (`- 📁 **Title**`) after H6.',
+            '- Bookmarks use `- [Title](URL)` and only safe URL schemes are guaranteed to import.'
+        ];
+
+    const modeTreeRulesZh = isVisualExport
+        ? [
+            '- 视觉模式保留 HTML 树结构：`<details> / <summary> / <a href>`。',
+            '- 可视化卡片请保留外层容器；删掉外层结构可能导致导入时节点丢失。'
+        ]
+        : [
+            '- 编辑模式使用标题树（`###` 到 `######`），超过 H6 后改为缩进列表（`- 📁 **标题**`）。',
+            '- 书签使用 `- [标题](URL)`；仅白名单协议可稳定导入。'
+        ];
+
+    compatText = isEn
+        ? [
+            '# Bookmark Canvas Import/Export Rules',
             '',
-            'The following rules are based on the current Obsidian-compatible import/export implementation to keep structure stable.',
+            'This document is intentionally split into two layers for stable import and future sync:',
+            '- Top: package structure + view structure.',
+            '- Bottom: skills-like change profiles (edit only what is needed).',
             '',
-            '### 0. General',
-            '- You **may** rename files or folders, **but** you must update the `.canvas` `file` paths to match the new `.md` locations.',
-            '- Group nodes are supported. Note: membership is inferred by geometry on import (smallest fully containing group).',
+            '## Part A. Package & View Structure',
             '',
-            '### 1. Permanent Section (`Permanent Sections.md`)',
-            '- Do **not** rename the permanent section file. Keep it as `Permanent Sections.md` so the importer can recognize it.',
-            ...(isVisualExport
-                ? [
-                    '- Bookmarks: keep `< a href > ` links.',
-                    '- Folders: keep `< details > / <summary>` structure.'
-                ]
-                : [
-                    '- Root groups use `##` (e.g., Bookmark Bar / Other Bookmarks).',
-                    '- Folder levels use headings `###` → `######` (H3–H6).',
-                    '- Deeper folders (beyond H6) must use nested list: `- 📁 **Title**` with indentation.',
-                    '- Bookmarks: `- [Title](URL)`.'
-                ]),
+            '### A0. Full Workflow Example (Export → Edit → Re-import)',
+            '1. Export in Visual or Editable mode.',
+            '2. Unzip into your Obsidian vault.',
+            `3. Open ${exportRoot}/${canvasFileName}.`,
+            '4. Edit files under Permanent/, Temporary/, Blank/.',
+            '5. If any file is renamed or moved, update .canvas file paths in sync.',
+            '6. Re-import via ZIP or folder.',
             '',
-            '### 2. Temporary Sections (`Temporary Sections/*.md`)',
-            '- If you rename files or add/remove sections, **synchronize the `.canvas` file** so `file` paths and node IDs match.',
-            ...(isVisualExport
-                ? [
-                    '- Bookmarks: keep `<a href>` links.',
-                    '- Folders: keep `<details> / <summary>` structure.'
-                ]
-                : [
-                    '- Folder levels use headings `###` → `######` (H3–H6).',
-                    '- Deeper folders (beyond H6) must use nested list: `- 📁 **Title**` with indentation.',
-                    '- Bookmarks: `- [Title](URL)`.'
-                ]),
+            '### A1. Package File Structure',
+            `- ${exportRoot}/${canvasFileName}: canvas entry (nodes/edges + file mapping).`,
+            `- ${exportRoot}/Permanent/#A <Permanent Title>.md: main permanent section file.`,
+            '- Optional copy files: Permanent/#B <Permanent Title>.md / #C <Permanent Title>.md ...',
+            '- Temporary/General Chain/*.md: general-chain temporary section files.',
+            '- Temporary/Special temporary/*.md: special temporary section files.',
+            '- Blank/*.md: blank section files.',
             '',
-            '### 3. Blank Sections (`Blank Sections/*.md`)',
-            '- Free-form text is allowed. If you rename files or add/remove nodes, **synchronize the `.canvas` file** so `file` paths and node IDs match.',
-            ...(isVisualExport
-                ? [
-                    '',
-                    '### 4. Visual Mode (HTML Cards)',
-                    '- Keep the structure: `<details> / <summary> / <a href>`.',
-                    '- Each node must keep its outer `<div>` wrapper, otherwise items may be lost.'
-                ]
-                : []),
+            '### A2. View File Structure (.canvas)',
+            '- Root keys must remain nodes[] and edges[].',
+            '- File nodes point to markdown files through the file field (vault-relative path).',
+            '- Group nodes are import containers; membership is inferred by geometry on import.',
+            '- Edge fromNode/toNode must reference existing node IDs.',
             '',
-            '### 5. Edges & Positions (`.canvas`)',
-            '- You may edit `x/y/width/height`. Import will preserve relative positions (batch offset applied).',
-            '- Edges must reference valid node IDs; if you change an ID, update edges too.',
-            '- Known limitation: Obsidian import mainly keeps basic connections; color/direction may be lost and some edges can be ignored.',
+            '### A3. Markdown Structure (all section files)',
+            '- Use the first non-empty line as section header text (`sequence + title` recommended).',
+            '- Optional description uses comment block: `<!-- BC_DESCRIPTION_START --> ... <!-- BC_DESCRIPTION_END -->`.',
+            '- Permanent/Temporary bookmark tree content is parsed from lines below the header/description block.',
+            '- Permanent slot recognition priority: header `#A/#B` > filename `(#B)` > file order fallback.',
+            '- Special temporary files are placed under `Special temporary/`.',
+            '- Blank section keeps free-form markdown body (no required metadata header).',
             '',
-            '### 6. URL Schemes',
-            '- Only these schemes are safely imported: `http/https/ftp/mailto/tel/obsidian/zotero/onenote/notion/vscode/raycast`.',
-            '- `chrome://`, `edge://`, `javascript:`, `data:` may be filtered or marked as `unsafe:`.',
+            '### A4. Mode-specific Content Grammar',
+            ...modeTreeRulesEn,
+            '',
+            '### A5. Import Recognition Priority',
+            '- Type recognition uses BOTH .canvas file references and folder paths.',
+            '- In normal import flow, permanent files are restored as snapshot sections (not direct browser-tree overwrite).'
+        ].join('\n')
+        : [
+            '# 书签画布导入/导出规则',
+            '',
+            '本文件刻意拆成上下两层，便于导入稳定与后续同步扩展：',
+            '- 上半部分：文件结构 + 视图结构（导入识别基准）。',
+            '- 下半部分：类似 Skills 的改动配置（只改被需求命中的部分）。',
+            '',
+            '## 第一部分：文件结构与视图结构（导入识别基准）',
+            '',
+            '### A0. 完整操作示例（导出 → 编辑 → 导入）',
+            '1. 在书签画布执行导出（视觉模式或编辑模式）。',
+            '2. 将 ZIP 解压到 Obsidian 仓库。',
+            `3. 打开 ${exportRoot}/${canvasFileName}。`,
+            '4. 按需编辑 永久栏目/、临时栏目/、空白栏目/ 下的 .md 文件。',
+            '5. 若重命名或移动文件，必须同步修改 .canvas 的 file 路径。',
+            '6. 回到扩展中，以 ZIP 或文件夹方式导入。',
+            '',
+            '### A1. 文件基本结构（目录层）',
+            `- ${exportRoot}/${canvasFileName}：画布入口文件（nodes/edges + 文件映射）。`,
+            `- ${exportRoot}/永久栏目/#A <永久栏目标题>.md：主永久栏目文件。`,
+            '- 可能存在永久副本文件：永久栏目/#B <永久栏目标题>.md / #C <永久栏目标题>.md ...',
+            '- 临时栏目/常规链式/*.md：常规链式临时栏目文件。',
+            '- 临时栏目/特殊临时栏目/*.md：特殊临时栏目文件。',
+            '- 空白栏目/*.md：空白栏目文件。',
+            '',
+            '### A2. 视图文件结构（.canvas）',
+            '- 顶层结构必须保持 nodes[] 与 edges[]。',
+            '- file 节点通过 file 字段指向 markdown 文件（vault 相对路径）。',
+            '- group 节点作为导入分组容器，导入时按几何包含关系识别归属。',
+            '- 边的 fromNode/toNode 必须引用存在的节点 ID。',
+            '',
+            '### A3. Markdown 文件结构（所有栏目）',
+            '- 首个非空行作为栏目头文本（建议“序号 + 标题”）。',
+            '- 说明区可选，采用注释块：`<!-- BC_DESCRIPTION_START --> ... <!-- BC_DESCRIPTION_END -->`。',
+            '- 永久/临时栏目的书签树内容从栏目头/说明区之后开始解析。',
+            '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名 `(#B)` > 文件顺序兜底。',
+            '- 特殊临时栏目文件统一放在 `临时栏目/特殊临时栏目/`。',
+            '- 空白栏目保持自由 Markdown 正文（不要求元数据头）。',
+            '',
+            '### A4. 模式内容语法（视觉 / 编辑）',
+            ...modeTreeRulesZh,
+            '',
+            '### A5. 导入识别优先级',
+            '- 类型识别同时依赖 .canvas 文件引用 与 目录路径命名。',
+            '- 常规导入流下，永久栏目按“快照栏目”恢复，不直接覆盖浏览器真实书签树。'
+        ].join('\n');
+
+    aiGuideText = isEn
+        ? [
+            `## Part B. Skills-like Change Profiles (${isVisualExport ? 'Visual Export' : 'Editable Export'})`,
+            '',
+            'Route principle: edit the minimum file set only ("change where used").',
+            '',
+            '### S1. File Routing (what to touch)',
+            '- Permanent content: `Permanent/#A <Permanent Title>.md` and optional copy files `Permanent/#B <Permanent Title>.md` ...',
+            '- Temporary content: `Temporary/General Chain/*.md` and `Temporary/Special temporary/*.md` + matching file nodes in `.canvas`.',
+            '- Blank content: `Blank/*.md` + matching file nodes in `.canvas`.',
+            '- Layout/links only: edit `.canvas` node geometry and edge fields.',
+            '',
+            '### S2. Header Line Contract (no required front matter)',
+            '- First non-empty line is the section header text.',
+            '- Temporary section header format: `A-1 Section Title`.',
+            '- Label can be derived from header prefix or filename prefix when restoring sequence mapping.',
+            '',
+            '### S3. Import Recognition & Merge Baseline',
+            '- Type recognition = `.canvas` file mapping + folder path names.',
+            '- Special temporary sections are recognized by folder + header/label semantics.',
+            '- For permanent/temp markdown, parser reads bookmark tree from lines below header/description block.',
+            '- In normal import flow, permanent files are restored as snapshot sections, not direct browser tree overwrite.',
+            '',
+            '### S4. Number / Title / Bookmark-count Priority',
+            '- Numbering is identity first; title is display second.',
+            '- Temp label priority: explicit label > header prefix > filename prefix (e.g., `A-1`).',
+            '- Legacy labels are normalized to dash scheme (e.g., A1 => A-1-...).',
+            '- Permanent slot baseline: main section is `#A`, copies follow display index/order.',
+            '- Permanent slot import priority: `#A/#B` header > `(#B)` filename > file order fallback.',
+            '- Bookmark count is statistical feedback and must not override identity mapping.',
+            '',
+            '### S5. Color Rules (chain inheritance)',
+            '- Keep existing `color`/`colorHex` unless explicit recolor is requested.',
+            '- Temp color follow works as chain inheritance: unlocked nodes follow parent; any lock breaks chain below.',
+            '- Split/new temp section rule: locked parent => default color, unlocked parent => follow parent color.',
+            '- Special temp sections (Drop/Search/Batch/Add/Import) follow appearance defaults.',
+            '',
+            '### S6. Basic Canvas Corrections',
+            '- Keep `.canvas` valid JSON and preserve top-level `nodes` + `edges` arrays.',
+            '- Node IDs must be unique; every edge endpoint must target an existing node.',
+            '- Keep `x/y/width/height` as stable numeric values; avoid random drift edits.',
+            '- Node order controls z-order (earlier lower, later higher).',
+            '',
+            '### S7. Minimal Pre-import Checklist',
+            '- Every renamed/moved `.md` path is synchronized into `.canvas`.',
+            '- Header line and optional description comment block are not corrupted.',
+            '- Links and node IDs remain referentially valid.',
             '',
             '### Import Steps'
         ].join('\n')
         : [
-            `## 修改/导入规范（AI专用）（${isVisualExport ? '可视化导出' : '编辑模式导出'}）`,
+            `## 第二部分：模型改动配置（类似 Skills，按需调用）（${isVisualExport ? '可视化导出' : '编辑模式导出'}）`,
             '',
-            '以下规范基于当前导入/导出实现（Obsidian 兼容模式），用于**保证结构稳定、可被正确导入**：',
+            '路由原则：只改最小必要文件集合（用到哪里改哪里），避免全量重写。',
             '',
-            '### 0. 总原则',
-            '- **允许**修改文件名或目录结构，但必须同步修改 `.canvas` 里的 `file` 路径，使其能找到对应 `.md`。',
-            '- 不要新增 Obsidian 的分组（Group）节点（v3.0 不支持）。',
+            '### S1. 文件路由（按需求定位）',
+            '- 永久栏目内容：修改 `永久栏目/#A <永久栏目标题>.md` 与可选副本 `永久栏目/#B <永久栏目标题>.md` ...。',
+            '- 临时栏目内容：修改 `临时栏目/常规链式/*.md` 与 `临时栏目/特殊临时栏目/*.md`，并同步 `.canvas` 对应 file 节点。',
+            '- 空白栏目内容：修改 `空白栏目/*.md`，并同步 `.canvas` 对应 file 节点。',
+            '- 仅布局/连线：只改 `.canvas` 的节点几何与边字段。',
             '',
-            '### 1. 永久栏目（`永久栏目.md`）',
-            '- 永久栏目文件名**不要改**（保持为 `永久栏目.md`），否则导入识别会失败。',
-            ...(isVisualExport
-                ? [
-                    '- 书签：保留 `<a href>` 链接。',
-                    '- 文件夹：保留 `<details> / <summary>` 结构。'
-                ]
-                : [
-                    '- 根分组使用 `##`（如：书签栏 / 其他书签）。',
-                    '- 文件夹层级使用标题 `###` → `######`（H3–H6）。',
-                    '- 超过 H6 的更深层文件夹使用缩进列表：`- 📁 **标题**`。',
-                    '- 书签：`- [标题](URL)`。'
-                ]),
+            '### S2. 栏目头文本合同（不要求 Front Matter）',
+            '- 首个非空行就是栏目头文本。',
+            '- 临时栏目建议格式：`A-1 标题`。',
+            '- 序号可由栏目头前缀或文件名前缀恢复，不再依赖 Properties。',
             '',
-            '### 2. 临时栏目（`临时栏目/*.md`）',
-            '- 若重命名或新增/删除临时栏目文件，请**同步修改 `.canvas`**，确保 `file` 路径与节点 ID 一致。',
-            ...(isVisualExport
-                ? [
-                    '- 书签：保留 `<a href>` 链接。',
-                    '- 文件夹：保留 `<details> / <summary>` 结构。'
-                ]
-                : [
-                    '- 文件夹层级使用标题 `###` → `######`（H3–H6）。',
-                    '- 超过 H6 的更深层文件夹使用缩进列表：`- 📁 **标题**`。',
-                    '- 书签：`- [标题](URL)`。'
-                ]),
+            '### S3. 导入识别与合并基线',
+            '- 类型识别 = `.canvas` 文件映射 + 目录路径命名（双条件）。',
+            '- 特殊临时栏目按目录 + 栏目头/标签语义识别。',
+            '- 永久/临时栏目改为“栏目头 +（可选说明注释块）+ 树内容”解析合同。',
+            '- 常规导入流下，永久栏目按快照栏目恢复，不直接覆盖浏览器真实书签树。',
             '',
-            '### 3. 空白栏目（`空白栏目/*.md`）',
-            '- 可自由编辑；若重命名或新增/删除空白栏目文件，请**同步修改 `.canvas`**，确保 `file` 路径与节点 ID 一致。',
-            ...(isVisualExport
-                ? [
-                    '',
-                    '### 4. 可视化模式（HTML 卡片）',
-                    '- 必须保留结构：`<details> / <summary> / <a href>`。',
-                    '- 每个节点必须保留外层 `<div>` 包裹，否则可能丢失节点。'
-                ]
-                : []),
+            '### S4. 编号 / 标题 / 书签数优先级',
+            '- 编号优先作为身份映射键，标题用于展示。',
+            '- 临时栏目编号优先级：显式 label > 栏目头前缀 > 文件名前缀（如 `A-1`）。',
+            '- 旧编号会归一到短横线方案（如 `A1` 会归一为 `A-1-...`）。',
+            '- 永久栏目槽位：主栏目默认 `#A`，副本按显示序号/顺序递增。',
+            '- 永久栏目导入槽位优先级：`#A/#B` 栏目头 > `(#B)` 文件名 > 文件顺序兜底。',
+            '- 书签数属于统计反馈，不得反向覆盖编号身份规则。',
             '',
-            '### 5. 连接线与位置（`.canvas`）',
-            '- 位置可改：`x/y/width/height` 会被导入（导入时会整体平移，保持相对位置）。',
-            '- 连接线需保证 `fromNode/toNode` 指向存在的节点 ID；改 ID 要同步改边。',
-            '- 已知限制：Obsidian 模式导入主要保留基础连线关系，颜色/方向等可能丢失，部分连线可能被忽略。',
+            '### S5. 颜色规则（链式继承）',
+            '- 未明确改色时，保留现有 `color` / `colorHex`。',
+            '- 临时栏目颜色跟随采用链式继承：解锁跟随父级，任何中间锁定都会断链。',
+            '- 分裂/新增临时栏目：父级锁住用默认色；父级解锁跟随父级色。',
+            '- 特殊临时栏目（拖入/搜索/批量/添加/导入）遵循外观设置中的默认颜色。',
             '',
-            '### 6. URL 协议限制',
-            '- 仅保证 `http/https/ftp/mailto/tel/obsidian/zotero/onenote/notion/vscode/raycast` 等协议安全导入。',
-            '- `chrome://`、`edge://`、`javascript:`、`data:` 可能被过滤或标记为 `unsafe:`。',
+            '### S6. 基础画布的改正',
+            '- `.canvas` 必须保持合法 JSON，且顶层保留 `nodes` 与 `edges`。',
+            '- 节点 ID 必须唯一；每条边的端点必须指向存在节点。',
+            '- `x/y/width/height` 保持稳定数值，避免无意义漂移。',
+            '- 节点数组顺序决定叠层顺序（前下后上）。',
+            '',
+            '### S7. 导入前最小自检清单',
+            '- 所有重命名/移动过的 `.md` 已同步到 `.canvas` 的 file 路径。',
+            '- 栏目头与说明注释块结构未损坏。',
+            '- 链接、节点 ID、连线引用关系全部有效。',
             '',
             '### 导入步骤'
         ].join('\n');
@@ -30167,31 +30727,6 @@ This package contains your Bookmark Canvas data, compatible with Obsidian.
     const zipBlob = __zipStore(files);
     const zipUrl = URL.createObjectURL(zipBlob);
     const zipName = `${exportRoot}.zip`;
-
-    // 同步导出到云端（云端1 WebDAV + 云端2 GitHub Repo）
-    try {
-        if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function' && zipBlob && typeof zipBlob.arrayBuffer === 'function') {
-            zipBlob.arrayBuffer().then((buf) => {
-                // Chrome sendMessage 不支持直接传递 ArrayBuffer，需转换为 Base64
-                const bytes = new Uint8Array(buf);
-                const chunkSize = 0x2000;
-                let binary = '';
-                for (let i = 0; i < bytes.length; i += chunkSize) {
-                    const chunk = bytes.subarray(i, i + chunkSize);
-                    binary += String.fromCharCode(...chunk);
-                }
-                const base64 = btoa(binary);
-                chrome.runtime.sendMessage({
-                    action: 'exportFileToClouds',
-                    folderKey: 'canvas',
-                    lang: (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN'),
-                    fileName: zipName,
-                    contentBase64Binary: base64,
-                    contentType: 'application/zip'
-                }, () => { });
-            }).catch(() => { });
-        }
-    } catch (_) { }
 
     // 优先使用 downloads API：支持子目录（浏览器默认下载目录下的 bookmark-canvas-export/）
     if (chrome && chrome.downloads && typeof chrome.downloads.download === 'function') {
@@ -30436,114 +30971,141 @@ function __parseTempSectionLabelAndTitleFromFilename(fileNameNoExt) {
     };
 
     if (!name) return { label: null, title: '' };
-    const idx = name.indexOf('. ');
-    if (idx > 0) {
-        let label = name.slice(0, idx).trim();
-        // Safety check again for label (e.g. "#A-1")
-        if (label.startsWith('#')) label = label.substring(1).trim();
 
-        const title = name.slice(idx + 2).trim();
+    // Format A: "A-1 Title"
+    const spaceMatch = name.match(/^([A-Za-z]+(?:-\d+)+)\s+(.+)$/);
+    if (spaceMatch) {
+        const label = spaceMatch[1].trim();
+        const title = spaceMatch[2].trim();
         return { label: label || null, title: restoreTimeFormat(title) || name };
     }
+
+    // Format B: "A-1" only
+    const labelOnlyMatch = name.match(/^([A-Za-z]+(?:-\d+)+)$/);
+    if (labelOnlyMatch) {
+        const label = labelOnlyMatch[1].trim();
+        return { label: label || null, title: '' };
+    }
+
     return { label: null, title: restoreTimeFormat(name) };
 }
 
-function __readCanvasPackageMetaFromFileMap(fileMap) {
-    try {
-        if (!fileMap || typeof fileMap.keys !== 'function' || typeof fileMap.get !== 'function') return null;
-        let metaName = null;
-        for (const name of fileMap.keys()) {
-            const base = String(name || '').split('/').pop();
-            if (base === 'bookmark-canvas.meta.json') {
-                metaName = name;
-                break;
-            }
-        }
-        if (!metaName) return null;
-        const bytes = fileMap.get(metaName);
-        if (!bytes) return null;
-        const text = new TextDecoder('utf-8').decode(bytes);
-        const parsed = JSON.parse(text);
-        return (parsed && typeof parsed === 'object') ? parsed : null;
-    } catch (_) {
-        return null;
-    }
+function __normalizeTempSectionSourceKey(sourceRaw) {
+    const source = String(sourceRaw || '').trim().toLowerCase();
+    if (!source) return '';
+    const normalized = source.replace(/[_\s]+/g, '-').replace(/-+/g, '-');
+
+    if (SPECIAL_TEMP_SOURCE_SET.has(normalized)) return normalized;
+
+    if (normalized === 'drop' || normalized === '拖入' || normalized === '拖放') return 'browser-drop';
+    if (normalized === 'search' || normalized === '搜索' || normalized === 'search-results') return 'search-result';
+    if (normalized === 'batch' || normalized === '批量') return 'batch';
+    if (normalized === 'add' || normalized === 'quickadd' || normalized === '添加') return 'quick-add';
+    if (normalized === 'import' || normalized === '导入') return 'file-import';
+    if (normalized === 'import-file' || normalized === 'importfile' || normalized === '导入文件') return 'file-import';
+    if (normalized === 'import-html' || normalized === 'html-bookmarks' || normalized === '导入html' || normalized === '导入html书签') return 'import-html-bookmarks';
+    if (normalized === 'import-json' || normalized === 'json-bookmarks' || normalized === '导入json' || normalized === '导入json书签') return 'import-json-bookmarks';
+
+    return normalized;
 }
 
-function __applyCanvasPackageMetaToObsidianTempState(tempState, meta) {
-    if (!tempState || !meta) return;
+function __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn) {
+    const tempRoot = isEn ? 'Temporary' : '临时栏目';
+    if (__isSpecialTempSection(section)) {
+        const specialRoot = isEn ? 'Special temporary' : '特殊临时栏目';
+        return `${tempRoot}/${specialRoot}/${safeTitle}.md`;
+    }
+    const regularRoot = isEn ? 'General Chain' : '常规链式';
+    return `${tempRoot}/${regularRoot}/${safeTitle}.md`;
+}
 
-    const tempSectionsMeta = (meta && meta.tempSections && typeof meta.tempSections === 'object') ? meta.tempSections : null;
-    const copyIndexMap = new Map();
-    try {
-        if (Array.isArray(meta.permanentCopies)) {
-            meta.permanentCopies.forEach((c) => {
-                if (!c || !c.id) return;
-                const idx = __normalizePositiveInt(c.displayIndex);
-                if (idx) copyIndexMap.set(c.id, idx);
-            });
-        }
-    } catch (_) { }
+function __inferTempSectionSourceFromFilePath(filePath) {
+    const normalizedPath = String(filePath || '')
+        .replace(/\\/g, '/')
+        .replace(/^\/+/g, '')
+        .replace(/\/+$/g, '');
+    if (!normalizedPath) return '';
 
-    const hasCopiesAtExport = copyIndexMap.size > 0;
+    const segments = normalizedPath.split('/').filter(Boolean);
+    if (!segments.length) return '';
 
-    // Apply to restored permanent snapshots (including copies)
-    try {
-        (tempState.sections || []).forEach((sec) => {
-            if (!sec || !sec.id || !sec.isSnapshot) return;
-            const id = String(sec.id);
-            const prefix = 'permanent-section-copy-';
-            if (id === 'permanent-section') {
-                // Original -> #A
-                const alphaLabel = toAlphaLabel(1);
-                const badge = `(#${alphaLabel})`;
-                if (hasCopiesAtExport && !String(sec.title || '').includes(badge)) {
-                    sec.title = `${String(sec.title || '[Restored] Permanent Sections')} ${badge}`;
-                }
-                return;
-            }
-            if (id.startsWith(prefix)) {
-                const copyId = id.slice(prefix.length);
-                const idx = copyIndexMap.get(copyId); // idx is 1-based index (copy 1, 2...)
-                if (idx) {
-                    // Copy 1 (idx=1) -> #B (toAlphaLabel(2))
-                    const alphaLabel = toAlphaLabel(idx + 1);
-                    const badge = `(#${alphaLabel})`;
-                    if (!String(sec.title || '').includes(badge)) {
-                        sec.title = `${String(sec.title || '[Restored] Permanent Sections')} ${badge}`;
-                    }
-                }
-            }
-        });
-    } catch (_) { }
+    const tempRootIndex = segments.findIndex(seg => seg === 'Temporary' || seg === 'Temporary Sections' || seg === '临时栏目');
+    if (tempRootIndex < 0) return '';
 
-    // Apply to temp sections (numbering + origin)
-    if (!tempSectionsMeta) return;
-    try {
-        (tempState.sections || []).forEach((sec) => {
-            if (!sec || !sec.id || sec.isSnapshot) return;
-            const metaEntry = tempSectionsMeta[sec.id];
-            if (!metaEntry || typeof metaEntry !== 'object') return;
+    const lv1 = segments[tempRootIndex + 1] || '';
+    const lv2 = segments[tempRootIndex + 2] || '';
+    const lv1Lower = lv1.toLowerCase();
 
-            if (typeof metaEntry.sequenceNumber === 'number' && isFinite(metaEntry.sequenceNumber)) {
-                sec.sequenceNumber = metaEntry.sequenceNumber;
-            }
+    if (lv1Lower === 'general chain' || lv1Lower === 'regular' || lv1 === '常规链式' || lv1 === '普通临时栏目') return '';
 
-            const label = (typeof metaEntry.label === 'string') ? metaEntry.label.trim() : '';
-            if (label) {
-                sec.label = label;
-            } else if (metaEntry.label === null && typeof metaEntry.sequenceNumber === 'number') {
-                // If the original section used auto A/B label, avoid forcing a hard-coded label.
-                try { delete sec.label; } catch (_) { sec.label = null; }
-            }
+    if (lv1Lower === 'special temporary' || lv1Lower === 'special' || lv1 === '特殊临时栏目') {
+        const source = __normalizeTempSectionSourceKey(lv2);
+        return SPECIAL_TEMP_SOURCE_SET.has(source) ? source : '';
+    }
 
-            if (metaEntry.originPermanent && typeof metaEntry.originPermanent === 'object') {
-                sec.originPermanent = metaEntry.originPermanent;
-            } else if (metaEntry.originPermanent === null) {
-                try { delete sec.originPermanent; } catch (_) { sec.originPermanent = null; }
-            }
-        });
-    } catch (_) { }
+    if (segments.length >= tempRootIndex + 3) {
+        const source = __normalizeTempSectionSourceKey(lv1);
+        if (SPECIAL_TEMP_SOURCE_SET.has(source)) return source;
+    }
+
+    return '';
+}
+
+function __getSpecialTempSectionLabelBySource(sourceKey, isEn) {
+    const source = __normalizeTempSectionSourceKey(sourceKey);
+    if (!SPECIAL_TEMP_SOURCE_SET.has(source)) return '';
+
+    const enMap = {
+        'browser-drop': 'Drop',
+        'search-result': 'Search',
+        'batch': 'Batch',
+        'quick-add': 'Add',
+        'file-import': 'Import File',
+        'import-html-bookmarks': 'Import HTML',
+        'import-json-bookmarks': 'Import JSON'
+    };
+    const zhMap = {
+        'browser-drop': '拖入',
+        'search-result': '搜索',
+        'batch': '批量',
+        'quick-add': '添加',
+        'file-import': '导入文件',
+        'import-html-bookmarks': '导入HTML',
+        'import-json-bookmarks': '导入JSON'
+    };
+
+    return isEn ? (enMap[source] || '') : (zhMap[source] || '');
+}
+
+function __parsePermanentSectionSlotFromHeaderLine(headerLine) {
+    const header = String(headerLine || '').trim();
+    if (!header) return null;
+    const match = header.match(/^#([A-Za-z]+)(?:\s+|$)/);
+    if (!match) return null;
+    return __alphaLabelToNumber(match[1]) || null;
+}
+
+function __parsePermanentSectionSlotFromFilename(fileNameNoExt) {
+    const name = String(fileNameNoExt || '').trim();
+    if (!name) return null;
+
+    let match = name.match(/^#([A-Za-z]+)(?:\s+|$)/);
+    if (!match) match = name.match(/\(#([A-Za-z]+)\)/i);
+    if (!match) return null;
+
+    return __alphaLabelToNumber(match[1]) || null;
+}
+
+function __resolvePermanentSectionSlotForImport(parsedMarkdown, filePath, fallbackSlot = 1) {
+    const headerSlot = __parsePermanentSectionSlotFromHeaderLine(parsedMarkdown && parsedMarkdown.headerLine);
+    if (headerSlot) return headerSlot;
+
+    const fileNameNoExt = String(filePath || '').split('/').pop().replace(/\.md$/i, '');
+    const fileSlot = __parsePermanentSectionSlotFromFilename(fileNameNoExt);
+    if (fileSlot) return fileSlot;
+
+    const n = parseInt(fallbackSlot, 10);
+    return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 async function parseCanvasPackageFromZipFile(file) {
@@ -30613,7 +31175,6 @@ async function parseCanvasPackageFromZipFile(file) {
         console.log(`[Canvas] Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(zipFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
-        const packageMeta = __readCanvasPackageMetaFromFileMap(zipFiles);
 
         // Reconstruct tempState from Canvas Data
         tempState = {
@@ -30691,28 +31252,14 @@ async function parseCanvasPackageFromZipFile(file) {
                 if (!fileBytes) return;
 
                 const fileText = new TextDecoder('utf-8').decode(fileBytes);
-
-                // Try to split description from content (YAML-like separator)
-                const fileSepMatch = fileText.match(/^---\s*$/m);
-                let descriptionHtml = '';
-                let contentToParse = fileText;
-
-                if (fileSepMatch) {
-                    const idx = fileSepMatch.index;
-                    const rawDesc = fileText.substring(0, idx).trim();
-                    if (rawDesc) {
-                        if (typeof marked !== 'undefined') {
-                            try { descriptionHtml = marked.parse(rawDesc); } catch (_) { }
-                        }
-                        if (!descriptionHtml) descriptionHtml = rawDesc.split('\n').map(l => `<p>${__escapeHtml(l)}</p>`).join('');
-                    }
-                    contentToParse = fileText.substring(idx + fileSepMatch[0].length).trim();
-                }
+                const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
+                const descriptionHtml = parsedMarkdown.descriptionHtml || '';
+                const contentToParse = parsedMarkdown.contentToParse || '';
 
                 // Identify type based on filename
-                const isPermanent = node.file.includes('Permanent Sections') || node.file.includes('永久栏目') || node.file.includes('Permanent Bookmarks') || node.file.includes('永久书签');
-                const isTempSection = node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
-                const isMdNode = node.file.includes('Blank Sections/') || node.file.includes('空白栏目/');
+                const isPermanent = node.file.includes('Permanent/') || node.file.includes('Permanent Sections') || node.file.includes('永久栏目') || node.file.includes('Permanent Bookmarks') || node.file.includes('永久书签');
+                const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
+                const isMdNode = node.file.includes('Blank/') || node.file.includes('Blank Sections/') || node.file.includes('空白栏目/');
 
                 if (isPermanent) {
                     // Reconstruct Snapshot Permanent Section
@@ -30723,7 +31270,9 @@ async function parseCanvasPackageFromZipFile(file) {
                     const items = __parseMarkdownAuto(contentToParse);
                     const sectionId = node.id; // 使用原始 node.id 以便边缘正确映射
                     importedPermanentCount++;
-                    const suffix = importedPermanentCount > 1 ? ` (#${toAlphaLabel(importedPermanentCount)})` : '';
+                    const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
+                    const slotLabel = toAlphaLabel(resolvedSlot) || '';
+                    const suffix = slotLabel ? ` (#${slotLabel})` : '';
                     const dateStr = new Date().toISOString().slice(0, 10);
                     const snapshotTitle = isEn
                         ? `[Snapshot] Permanent Sections (${dateStr})${suffix}`
@@ -30751,7 +31300,8 @@ async function parseCanvasPackageFromZipFile(file) {
                     // Filename: "A. Title.md"
                     const fileName = node.file.split('/').pop().replace('.md', '');
                     const parsed = __parseTempSectionLabelAndTitleFromFilename(fileName);
-                    const title = parsed.title;
+                    const headerParsed = __parseTempSectionLabelAndTitleFromFilename(parsedMarkdown.headerLine || '');
+                    const title = headerParsed.title || parsed.title || (isEn ? 'Temp Section' : '临时栏目');
 
                     // Sequence: map 'A' to number?
                     // Let's just generate new sequence or rely on import logic to reassign.
@@ -30767,14 +31317,32 @@ async function parseCanvasPackageFromZipFile(file) {
                         items: items,
                         description: descriptionHtml
                     };
-                    if (parsed.label) {
+                    if (headerParsed.label) {
+                        restored.label = headerParsed.label;
+                    } else if (parsed.label) {
                         restored.label = parsed.label;
-                        // Extract alpha part from label (e.g. "A-1" -> "A") to recover sequence number
+                    }
+                    if (headerParsed.label) {
+                        const alphaMatch = headerParsed.label.match(/^([A-Z]+)/i);
+                        const alphaPart = alphaMatch ? alphaMatch[1] : headerParsed.label;
+                        const seq = __alphaLabelToNumber(alphaPart);
+                        if (seq) restored.sequenceNumber = seq;
+                    } else if (parsed.label) {
                         const alphaMatch = parsed.label.match(/^([A-Z]+)/);
                         const alphaPart = alphaMatch ? alphaMatch[1] : parsed.label;
                         const seq = __alphaLabelToNumber(alphaPart);
                         if (seq) restored.sequenceNumber = seq;
                     }
+
+                    const inferredSource = __inferTempSectionSourceFromFilePath(node.file);
+                    if (inferredSource) {
+                        restored.source = inferredSource;
+                        if (!restored.label) {
+                            const sourceLabel = __getSpecialTempSectionLabelBySource(inferredSource, isEn);
+                            if (sourceLabel) restored.label = sourceLabel;
+                        }
+                    }
+
                     tempState.sections.push(restored);
                 } else if (isMdNode) {
                     // Restore Blank Section
@@ -30790,7 +31358,7 @@ async function parseCanvasPackageFromZipFile(file) {
                         height: node.height,
                         color: isHex ? null : node.color,
                         colorHex: isHex ? convertedColor : null,
-                        text: fileText // or html? markdown is fine, we render md
+                        text: parsedMarkdown.rawBody // 保留空白栏目的完整正文
                     });
                 }
             } else if (node.type === 'text') {
@@ -30839,8 +31407,6 @@ async function parseCanvasPackageFromZipFile(file) {
                 colorHex: isHex ? convertedColor : null
             };
         });
-
-        try { __applyCanvasPackageMetaToObsidianTempState(tempState, packageMeta); } catch (_) { }
 
     } else {
         throw new Error(isEn
@@ -30952,7 +31518,6 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
         console.log(`[Canvas] Folder Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(folderFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
-        const packageMeta = __readCanvasPackageMetaFromFileMap(folderFiles);
 
         tempState = {
             sections: [],
@@ -30978,6 +31543,7 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
 
         const nodes = canvasData.nodes || [];
         const edges = canvasData.edges || [];
+        let importedPermanentCount = 0;
 
         nodes.forEach(node => {
             if (node.type === 'group') {
@@ -31014,34 +31580,29 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
                 if (!fileBytes) return;
 
                 const fileText = new TextDecoder('utf-8').decode(fileBytes);
+                const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
+                const descriptionHtml = parsedMarkdown.descriptionHtml || '';
+                const contentToParse = parsedMarkdown.contentToParse || '';
 
-                const fileSepMatch = fileText.match(/^---\s*$/m);
-                let descriptionHtml = '';
-                let contentToParse = fileText;
-
-                if (fileSepMatch) {
-                    const idx = fileSepMatch.index;
-                    const rawDesc = fileText.substring(0, idx).trim();
-                    if (rawDesc) {
-                        if (typeof marked !== 'undefined') {
-                            try { descriptionHtml = marked.parse(rawDesc); } catch (_) { }
-                        }
-                        if (!descriptionHtml) descriptionHtml = rawDesc.split('\n').map(l => `<p>${__escapeHtml(l)}</p>`).join('');
-                    }
-                    contentToParse = fileText.substring(idx + fileSepMatch[0].length).trim();
-                }
-
-                const isPermanent = node.file.includes('Permanent Sections') || node.file.includes('永久栏目') || node.file.includes('Permanent Bookmarks') || node.file.includes('永久书签');
-                const isTempSection = node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
-                const isMdNode = node.file.includes('Blank Sections/') || node.file.includes('空白栏目/');
+                const isPermanent = node.file.includes('Permanent/') || node.file.includes('Permanent Sections') || node.file.includes('永久栏目') || node.file.includes('Permanent Bookmarks') || node.file.includes('永久书签');
+                const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
+                const isMdNode = node.file.includes('Blank/') || node.file.includes('Blank Sections/') || node.file.includes('空白栏目/');
 
                 if (isPermanent) {
                     const items = __parseMarkdownAuto(contentToParse);
                     const sectionId = node.id; // 使用原始 node.id 以便边缘正确映射
+                    importedPermanentCount++;
+                    const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
+                    const slotLabel = toAlphaLabel(resolvedSlot) || '';
+                    const suffix = slotLabel ? ` (#${slotLabel})` : '';
+                    const dateStr = new Date().toISOString().slice(0, 10);
+                    const snapshotTitle = isEn
+                        ? `[Snapshot] Permanent Sections (${dateStr})${suffix}`
+                        : `[快照] 永久栏目 (${dateStr})${suffix}`;
 
                     tempState.sections.push({
                         id: sectionId,
-                        title: '[Restored] Permanent Sections',
+                        title: snapshotTitle,
                         x: node.x,
                         y: node.y,
                         width: node.width,
@@ -31056,7 +31617,8 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
                     const sectionId = node.id;
                     const fileName = node.file.split('/').pop().replace('.md', '');
                     const parsed = __parseTempSectionLabelAndTitleFromFilename(fileName);
-                    const title = parsed.title;
+                    const headerParsed = __parseTempSectionLabelAndTitleFromFilename(parsedMarkdown.headerLine || '');
+                    const title = headerParsed.title || parsed.title || (isEn ? 'Temp Section' : '临时栏目');
 
                     const restored = {
                         id: sectionId,
@@ -31069,13 +31631,32 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
                         items: items,
                         description: descriptionHtml
                     };
-                    if (parsed.label) {
+                    if (headerParsed.label) {
+                        restored.label = headerParsed.label;
+                    } else if (parsed.label) {
                         restored.label = parsed.label;
+                    }
+                    if (headerParsed.label) {
+                        const alphaMatch = headerParsed.label.match(/^([A-Z]+)/i);
+                        const alphaPart = alphaMatch ? alphaMatch[1] : headerParsed.label;
+                        const seq = __alphaLabelToNumber(alphaPart);
+                        if (seq) restored.sequenceNumber = seq;
+                    } else if (parsed.label) {
                         const alphaMatch = parsed.label.match(/^([A-Z]+)/);
                         const alphaPart = alphaMatch ? alphaMatch[1] : parsed.label;
                         const seq = __alphaLabelToNumber(alphaPart);
                         if (seq) restored.sequenceNumber = seq;
                     }
+
+                    const inferredSource = __inferTempSectionSourceFromFilePath(node.file);
+                    if (inferredSource) {
+                        restored.source = inferredSource;
+                        if (!restored.label) {
+                            const sourceLabel = __getSpecialTempSectionLabelBySource(inferredSource, isEn);
+                            if (sourceLabel) restored.label = sourceLabel;
+                        }
+                    }
+
                     tempState.sections.push(restored);
                 } else if (isMdNode) {
                     const sectionId = node.id;
@@ -31089,7 +31670,7 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
                         height: node.height,
                         color: isHex ? null : node.color,
                         colorHex: isHex ? convertedColor : null,
-                        text: fileText
+                        text: parsedMarkdown.rawBody
                     });
                 }
             } else if (node.type === 'text') {
@@ -31121,8 +31702,6 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
                 colorHex: isHex ? convertedColor : null
             };
         });
-
-        try { __applyCanvasPackageMetaToObsidianTempState(tempState, packageMeta); } catch (_) { }
 
     } else {
         throw new Error(isEn
@@ -31517,19 +32096,10 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
         }
 
         const dateStr = new Date().toISOString().slice(0, 10);
-        const baseSnapshotTitle = isEn
-            ? `[Snapshot] Permanent Sections (${dateStr})`
-            : `[快照] 永久栏目 (${dateStr})`;
-        const hasCopiesAtExport = (() => {
-            try {
-                const copies = fullStorage && fullStorage[PERMANENT_SECTION_COPIES_STORAGE_KEY];
-                return Array.isArray(copies) && copies.length > 0;
-            } catch (_) {
-                return false;
-            }
-        })();
-        // Original -> #A (toAlphaLabel(1)) if copies exist
-        const snapshotTitle = hasCopiesAtExport ? `${baseSnapshotTitle} (#${toAlphaLabel(1)})` : baseSnapshotTitle;
+        const slotLabel = toAlphaLabel(1) || 'A';
+        const snapshotTitle = isEn
+            ? `[Snapshot] Permanent Sections (${dateStr}) (#${slotLabel})`
+            : `[快照] 永久栏目 (${dateStr}) (#${slotLabel})`;
 
         const originalTip = (fullStorage && fullStorage['canvas-permanent-tip-text']) || '';
 
@@ -33110,6 +33680,16 @@ function saveTempNodes(options = {}) {
 
     } catch (error) {
         console.error('[Canvas] 保存临时栏目失败:', error);
+    } finally {
+        try {
+            const syncModule = window.CanvasObsidianGitSync;
+            if (syncModule && typeof syncModule.markDirty === 'function') {
+                syncModule.markDirty('save', {
+                    immediate,
+                    bulk: !!(options && options.bulk)
+                });
+            }
+        } catch (_) { }
     }
 }
 

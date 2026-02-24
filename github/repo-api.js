@@ -1,10 +1,16 @@
 const GITHUB_API_BASE_URL = 'https://api.github.com';
 const GITHUB_API_VERSION = '2022-11-28';
 
+function normalizeGitHubToken(token) {
+  const raw = String(token || '').trim();
+  if (!raw) return '';
+  return raw.replace(/^(?:Bearer|token)\s+/i, '').trim();
+}
+
 function buildGitHubAuthHeader(token) {
-  const trimmedToken = (token || '').trim();
-  if (!trimmedToken) return null;
-  return `Bearer ${trimmedToken}`;
+  const normalizedToken = normalizeGitHubToken(token);
+  if (!normalizedToken) return null;
+  return `Bearer ${normalizedToken}`;
 }
 
 function normalizeGitHubError(error) {
@@ -30,35 +36,59 @@ function encodeGitHubPath(path) {
 }
 
 async function githubRequestJson(url, { method = 'GET', headers = {}, body } = {}) {
-  const response = await fetch(url, {
-    method,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': GITHUB_API_VERSION,
-      ...headers
-    },
-    body
-  });
+  const requestHeaders = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': GITHUB_API_VERSION,
+    ...headers
+  };
 
-  const text = await response.text();
-  let json = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch (_) {
-    json = null;
+  const doFetch = async (effectiveHeaders) => {
+    const response = await fetch(url, {
+      method,
+      headers: effectiveHeaders,
+      body
+    });
+
+    const text = await response.text();
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch (_) {
+      json = null;
+    }
+
+    return { response, text, json };
+  };
+
+  let result = await doFetch(requestHeaders);
+
+  const authHeader = typeof requestHeaders.Authorization === 'string'
+    ? requestHeaders.Authorization
+    : '';
+  const authToken = normalizeGitHubToken(authHeader);
+  const shouldRetryWithTokenHeader =
+    result.response.status === 401 &&
+    /^Bearer\s+/i.test(authHeader) &&
+    !!authToken;
+
+  if (shouldRetryWithTokenHeader) {
+    result = await doFetch({
+      ...requestHeaders,
+      Authorization: `token ${authToken}`
+    });
   }
 
-  if (!response.ok) {
+  if (!result.response.ok) {
     const error = new Error(
-      (json && typeof json.message === 'string' && json.message) ||
-        `${response.status} ${response.statusText}`.trim()
+      (result.json && typeof result.json.message === 'string' && result.json.message) ||
+        `${result.response.status} ${result.response.statusText}`.trim()
     );
-    error.status = response.status;
-    error.response = json || text;
+    error.status = result.response.status;
+    error.response = result.json || result.text;
     throw error;
   }
 
-  return json;
+  return result.json;
 }
 
 export async function getRepoInfo({ token, owner, repo }) {
@@ -246,9 +276,61 @@ export async function upsertRepoFile({ token, owner, repo, branch, path, message
       created: !existingSha,
       path: content && content.path ? String(content.path) : trimmedPath,
       htmlUrl: content && content.html_url ? String(content.html_url) : null,
+      fileSha: content && content.sha ? String(content.sha) : null,
       commitSha: commit && commit.sha ? String(commit.sha) : null
     };
   } catch (error) {
+    return { success: false, error: normalizeGitHubError(error) };
+  }
+}
+
+export async function getRepoFile({ token, owner, repo, branch, path }) {
+  const authHeader = buildGitHubAuthHeader(token);
+  if (!authHeader) {
+    return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
+  }
+
+  const trimmedOwner = String(owner || '').trim();
+  const trimmedRepo = String(repo || '').trim();
+  if (!trimmedOwner || !trimmedRepo) {
+    return { success: false, error: '仓库未配置', repoNotConfigured: true };
+  }
+
+  const trimmedPath = String(path || '').trim().replace(/^\/+/, '');
+  if (!trimmedPath) {
+    return { success: false, error: '缺少文件路径' };
+  }
+
+  const trimmedBranch = String(branch || '').trim();
+  const encodedPath = encodeGitHubPath(trimmedPath);
+  const url = trimmedBranch
+    ? `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/contents/${encodedPath}?ref=${encodeURIComponent(trimmedBranch)}`
+    : `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/contents/${encodedPath}`;
+
+  try {
+    const json = await githubRequestJson(url, {
+      headers: { Authorization: authHeader }
+    });
+
+    if (!json || typeof json !== 'object' || json.type !== 'file') {
+      return { success: false, error: '目标路径不是文件' };
+    }
+
+    const contentBase64 = typeof json.content === 'string'
+      ? json.content.replace(/\s+/g, '')
+      : '';
+
+    return {
+      success: true,
+      path: json.path ? String(json.path) : trimmedPath,
+      sha: json.sha ? String(json.sha) : null,
+      contentBase64,
+      encoding: json.encoding ? String(json.encoding) : 'base64'
+    };
+  } catch (error) {
+    if (Number(error?.status) === 404) {
+      return { success: false, notFound: true, error: '远端文件不存在' };
+    }
     return { success: false, error: normalizeGitHubError(error) };
   }
 }

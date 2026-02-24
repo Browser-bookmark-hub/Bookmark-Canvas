@@ -16,6 +16,7 @@
     <script src="bookmark_tree_context_menu.js" defer></script>
     <script src="bookmark_tree_drag_drop.js" defer></script>
     <script src="pointer_drag.js" defer></script>
+    <script src="sync/obsidian-git-sync.js" defer></script>
     <script src="bookmark_canvas_module.js?v=3.7" defer></script>
     <script src="shortcuts_helpers.js" defer></script>
     <script src="search/search.js" defer></script>
@@ -255,6 +256,10 @@
                             <span id="exportCanvasOtherText">导出</span>
                         </button>
                     </div>
+                    <button id="syncCanvasOtherBtn" class="settings-menu-item settings-storage-item" type="button">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <span id="syncCanvasOtherText">同步</span>
+                    </button>
                     <div class="canvas-clear-dropdown" id="canvasOtherClearDropdown">
                         <button id="clearMenuOtherBtn" class="settings-menu-item settings-storage-item danger"
                             type="button">
@@ -763,6 +768,10 @@
                                             <span id="exportCanvasText">导出</span>
                                         </button>
                                     </div>
+                                    <button id="syncCanvasBtn" class="canvas-manage-btn">
+                                        <i class="fas fa-cloud-upload-alt"></i>
+                                        <span id="syncCanvasText">同步</span>
+                                    </button>
                                     <!-- 清除按钮组（主按钮 + 下拉菜单） -->
                                     <div class="canvas-clear-dropdown" id="canvasClearDropdown">
                                         <button id="clearMenuBtn" class="canvas-manage-btn danger">
@@ -1083,6 +1092,271 @@
         </div>
     </div>
 
+    <div class="canvas-manage-modal canvas-sync-modal" id="canvasSyncModal" style="display: none;">
+        <div class="canvas-manage-modal-header">
+            <h4 id="canvasSyncModalTitle">Obsidian Git 同步</h4>
+            <button class="canvas-manage-modal-close" id="canvasSyncModalClose" type="button"><i
+                    class="fas fa-times"></i></button>
+        </div>
+        <div class="canvas-manage-modal-body">
+            <div class="canvas-sync-main-layout">
+                <div class="canvas-sync-tab-nav" role="tablist" aria-label="同步设置菜单" id="canvasSyncTabNav" data-label-zh="同步设置菜单" data-label-en="Sync Settings Menu">
+                    <button class="canvas-sync-tab-btn is-active" id="canvasSyncTabRepoBtn" type="button" role="tab" aria-selected="true" aria-controls="canvasSyncTabRepoPanel">仓库</button>
+                    <button class="canvas-sync-tab-btn" id="canvasSyncTabBehaviorBtn" type="button" role="tab" aria-selected="false" aria-controls="canvasSyncTabBehaviorPanel">策略</button>
+                    <button class="canvas-sync-tab-btn" id="canvasSyncTabStatusBtn" type="button" role="tab" aria-selected="false" aria-controls="canvasSyncTabStatusPanel">状态</button>
+                </div>
+
+                <div class="canvas-sync-tab-panels">
+                    <section class="canvas-sync-tab-panel" id="canvasSyncTabRepoPanel" role="tabpanel" aria-labelledby="canvasSyncTabRepoBtn">
+                        <label class="canvas-sync-row" for="canvasSyncRepoOwnerInput">
+                            <span id="canvasSyncRepoOwnerLabel">仓库所有者</span>
+                            <input id="canvasSyncRepoOwnerInput" type="text" placeholder="例如：your-name">
+                        </label>
+                        <label class="canvas-sync-row" for="canvasSyncRepoNameInput">
+                            <span id="canvasSyncRepoNameLabel">仓库名称</span>
+                            <input id="canvasSyncRepoNameInput" type="text" placeholder="例如：bookmark-sync">
+                        </label>
+                        <label class="canvas-sync-row" for="canvasSyncRepoBranchInput">
+                            <span id="canvasSyncRepoBranchLabel">分支</span>
+                            <input id="canvasSyncRepoBranchInput" type="text" value="main" placeholder="main">
+                        </label>
+                        <label class="canvas-sync-row" for="canvasSyncRepoBasePathInput">
+                            <span id="canvasSyncRepoBasePathLabel">子目录路径</span>
+                            <input id="canvasSyncRepoBasePathInput" type="text" placeholder="可选，例如：sync-data">
+                        </label>
+                        <div class="canvas-sync-row canvas-sync-row--token">
+                            <label id="canvasSyncRepoTokenLabel" for="canvasSyncRepoTokenInput">访问令牌</label>
+                            <div class="canvas-sync-token-control">
+                                <input id="canvasSyncRepoTokenInput" type="text" placeholder="ghp_xxx...">
+                            </div>
+                        </div>
+                        <div class="canvas-sync-intro--button" id="canvasSyncIntroText">
+                            <button id="canvasSyncTokenGuideBtn" class="canvas-manage-btn" type="button">
+                                <i class="fas fa-question-circle"></i>
+                                <span id="canvasSyncTokenGuideBtnText">配置帮助</span>
+                            </button>
+                        </div>
+                        <div class="canvas-sync-actions canvas-sync-actions--repo">
+                            <button id="canvasSyncRepoSaveBtn" class="canvas-manage-btn" type="button"><i class="fas fa-save"></i><span id="canvasSyncRepoSaveText">保存配置</span></button>
+                            <button id="canvasSyncRepoTestBtn" class="canvas-manage-btn" type="button"><i class="fas fa-plug"></i><span id="canvasSyncRepoTestText">测试连接</span></button>
+                        </div>
+
+                    </section>
+
+                    <section class="canvas-sync-tab-panel" id="canvasSyncTabBehaviorPanel" role="tabpanel" aria-labelledby="canvasSyncTabBehaviorBtn" hidden>
+                        <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncEnabledToggle">
+                            <span id="canvasSyncEnabledLabel">启用同步</span>
+                            <span class="canvas-sync-switch">
+                                <input id="canvasSyncEnabledToggle" type="checkbox">
+                                <span class="canvas-sync-switch-slider"></span>
+                            </span>
+                        </label>
+
+                        <div class="canvas-sync-fold" id="canvasSyncFirstSyncFold">
+                            <button class="canvas-sync-row canvas-sync-row--fold-toggle canvas-sync-fold-summary" id="canvasSyncFirstSyncFoldSummary" type="button" aria-expanded="false" aria-controls="canvasSyncFirstSyncPanel">
+                                <span class="canvas-sync-fold-title" id="canvasSyncFirstSyncSubtitle">首次同步</span>
+                                <i class="fas fa-chevron-down" aria-hidden="true"></i>
+                            </button>
+                            <div class="canvas-sync-subsection canvas-sync-first-standalone" id="canvasSyncFirstSyncPanel" hidden>
+                                <div class="canvas-sync-row canvas-sync-row--first-sync-mode">
+                                    <div class="canvas-sync-first-sync-mode-head">
+                                        <span id="canvasSyncFirstSyncModeLabel">永久栏目</span>
+                                        <button type="button" class="perf-help-btn canvas-sync-first-sync-help-btn" id="canvasSyncFirstSyncHelpBtn" title="查看说明" aria-label="查看说明">
+                                            <i class="fas fa-question-circle"></i>
+                                        </button>
+                                    </div>
+                                    <div class="canvas-sync-first-sync-options" role="radiogroup" aria-labelledby="canvasSyncFirstSyncModeLabel">
+                                        <label class="canvas-sync-first-sync-option">
+                                            <input id="canvasSyncFirstSyncModeAutoInput" name="canvasSyncFirstSyncMode" type="radio" value="auto" checked>
+                                            <span class="canvas-sync-first-sync-option-label" id="canvasSyncFirstSyncModeAutoOption">自动</span>
+                                        </label>
+                                        <label class="canvas-sync-first-sync-option">
+                                            <input id="canvasSyncFirstSyncModeCloudInput" name="canvasSyncFirstSyncMode" type="radio" value="cloud">
+                                            <span class="canvas-sync-first-sync-option-label" id="canvasSyncFirstSyncModeCloudOption">以云端为准</span>
+                                        </label>
+                                        <label class="canvas-sync-first-sync-option">
+                                            <input id="canvasSyncFirstSyncModeLocalInput" name="canvasSyncFirstSyncMode" type="radio" value="local">
+                                            <span class="canvas-sync-first-sync-option-label" id="canvasSyncFirstSyncModeLocalOption">以本地为准</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="canvas-sync-actions canvas-sync-actions--single">
+                                    <button id="canvasSyncFirstSyncOverwriteBtn" class="canvas-manage-btn" type="button">
+                                        <span id="canvasSyncFirstSyncOverwriteText">执行首次同步</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="canvas-sync-divider canvas-sync-divider--top-actions-sep" aria-hidden="true"></div>
+
+                        <div class="canvas-sync-actions canvas-sync-actions--top">
+                            <button id="canvasSyncNowBtn" class="canvas-manage-btn" type="button"><span id="canvasSyncNowText">立即同步</span></button>
+                            <button id="canvasSyncPushOnlyBtn" class="canvas-manage-btn" type="button"><span id="canvasSyncPushOnlyText">仅上传</span></button>
+                            <button id="canvasSyncPullOnlyBtn" class="canvas-manage-btn" type="button"><span id="canvasSyncPullOnlyText">仅拉取</span></button>
+                            <button id="canvasSyncRebuildBtn" class="canvas-manage-btn" type="button"><span id="canvasSyncRebuildText">重建同步索引</span></button>
+                        </div>
+
+                        <div class="canvas-sync-divider" aria-hidden="true"></div>
+
+                        <div class="canvas-sync-grid">
+                            <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncAutoToggle">
+                                <span id="canvasSyncAutoLabel">自动同步</span>
+                                <span class="canvas-sync-switch">
+                                    <input id="canvasSyncAutoToggle" type="checkbox" checked>
+                                    <span class="canvas-sync-switch-slider"></span>
+                                </span>
+                            </label>
+                            <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncSplitIntervalsToggle">
+                                <span id="canvasSyncSplitIntervalsLabel">分离定时器</span>
+                                <span class="canvas-sync-switch">
+                                    <input id="canvasSyncSplitIntervalsToggle" type="checkbox">
+                                    <span class="canvas-sync-switch-slider"></span>
+                                </span>
+                            </label>
+                            <label class="canvas-sync-row" for="canvasSyncIntervalInput">
+                                <span id="canvasSyncIntervalLabel">自动同步间隔（分钟）</span>
+                                <input id="canvasSyncIntervalInput" type="number" min="1" step="1" value="3">
+                            </label>
+                            <label class="canvas-sync-row" for="canvasSyncAutoPushIntervalInput">
+                                <span id="canvasSyncAutoPushIntervalLabel">自动推送间隔（分钟，0=关闭）</span>
+                                <input id="canvasSyncAutoPushIntervalInput" type="number" min="0" step="1" value="0">
+                            </label>
+                            <label class="canvas-sync-row" for="canvasSyncAutoPullIntervalInput">
+                                <span id="canvasSyncAutoPullIntervalLabel">自动拉取间隔（分钟，0=关闭）</span>
+                                <input id="canvasSyncAutoPullIntervalInput" type="number" min="0" step="1" value="0">
+                            </label>
+                            <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncPullOnStartupToggle">
+                                <span id="canvasSyncPullOnStartupLabel">启动时自动拉取</span>
+                                <span class="canvas-sync-switch">
+                                    <input id="canvasSyncPullOnStartupToggle" type="checkbox">
+                                    <span class="canvas-sync-switch-slider"></span>
+                                </span>
+                            </label>
+                            <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncPushOnSyncToggle">
+                                <span id="canvasSyncPushOnSyncLabel">提交并同步时推送</span>
+                                <span class="canvas-sync-switch">
+                                    <input id="canvasSyncPushOnSyncToggle" type="checkbox" checked>
+                                    <span class="canvas-sync-switch-slider"></span>
+                                </span>
+                            </label>
+                            <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncPullOnSyncToggle">
+                                <span id="canvasSyncPullOnSyncLabel">提交并同步时拉取</span>
+                                <span class="canvas-sync-switch">
+                                    <input id="canvasSyncPullOnSyncToggle" type="checkbox" checked>
+                                    <span class="canvas-sync-switch-slider"></span>
+                                </span>
+                            </label>
+                            <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncHideNoChangeNoticeToggle">
+                                <span id="canvasSyncHideNoChangeNoticeLabel">无变更时隐藏通知</span>
+                                <span class="canvas-sync-switch">
+                                    <input id="canvasSyncHideNoChangeNoticeToggle" type="checkbox">
+                                    <span class="canvas-sync-switch-slider"></span>
+                                </span>
+                            </label>
+                            <label class="canvas-sync-row" for="canvasSyncFilePathInput">
+                                <span id="canvasSyncFilePathLabel">同步文件路径（可选）</span>
+                                <input id="canvasSyncFilePathInput" type="text" placeholder="sync/bookmark-canvas/state.json">
+                            </label>
+                            <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncObsidianFilePushToggle">
+                                <span id="canvasSyncObsidianFilePushLabel">同步时增量推送 Obsidian 文件</span>
+                                <span class="canvas-sync-switch">
+                                    <input id="canvasSyncObsidianFilePushToggle" type="checkbox" checked>
+                                    <span class="canvas-sync-switch-slider"></span>
+                                </span>
+                            </label>
+                            <label class="canvas-sync-row" for="canvasSyncObsidianExportFormatSelect">
+                                <span id="canvasSyncObsidianExportFormatLabel">导出格式（为 Obsidian）</span>
+                                <select id="canvasSyncObsidianExportFormatSelect">
+                                    <option id="canvasSyncObsidianExportFormatVisualOption" value="visual">视觉模式</option>
+                                    <option id="canvasSyncObsidianExportFormatEditableOption" value="editable">编辑模式</option>
+                                </select>
+                            </label>
+                            <label class="canvas-sync-row" for="canvasSyncObsidianExportRootInput">
+                                <span id="canvasSyncObsidianExportRootLabel">文件推送目录</span>
+                                <input id="canvasSyncObsidianExportRootInput" type="text" placeholder="bookmark-canvas-sync">
+                            </label>
+                            <label class="canvas-sync-row" for="canvasSyncMethodSelect">
+                                <span id="canvasSyncMethodLabel">合并策略</span>
+                                <select id="canvasSyncMethodSelect">
+                                    <option id="canvasSyncMethodMergeOption" value="merge">合并</option>
+                                    <option id="canvasSyncMethodRebaseOption" value="rebase">变基</option>
+                                    <option id="canvasSyncMethodResetOption" value="reset">其他同步服务（仅更新 HEAD，不触碰工作区）</option>
+                                </select>
+                            </label>
+                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncMethodDesc">决定拉取远端提交到本地时如何整合历史（对应 Obsidian Git 的“合并策略”）。</div>
+                            <label class="canvas-sync-row" for="canvasSyncConflictSelect">
+                                <span id="canvasSyncConflictLabel">冲突合并策略</span>
+                                <select id="canvasSyncConflictSelect">
+                                    <option id="canvasSyncConflictNoneOption" value="none">默认（Git）</option>
+                                    <option id="canvasSyncConflictOursOption" value="ours">本地优先</option>
+                                    <option id="canvasSyncConflictTheirsOption" value="theirs">远端优先</option>
+                                </select>
+                            </label>
+                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictDesc">当拉取发生冲突时，按此策略自动偏向本地或远端；默认为 Git 原生行为。</div>
+                            <label class="canvas-sync-row" for="canvasSyncDeleteThresholdInput">
+                                <span id="canvasSyncDeleteThresholdLabel">删除保护阈值（%）</span>
+                                <input id="canvasSyncDeleteThresholdInput" type="number" min="1" max="100" step="1" value="20">
+                            </label>
+                        </div>
+
+                        <label class="canvas-sync-row" for="canvasSyncPermanentTreeIntervalSelect">
+                            <span id="canvasSyncPermanentTreeIntervalLabel">永久栏目快照上传节流</span>
+                            <select id="canvasSyncPermanentTreeIntervalSelect">
+                                <option id="canvasSyncPermanentTreeInterval0Option" value="0">关闭</option>
+                                <option id="canvasSyncPermanentTreeInterval5Option" value="5">5 秒</option>
+                                <option id="canvasSyncPermanentTreeInterval15Option" value="15">15 秒（推荐）</option>
+                                <option id="canvasSyncPermanentTreeInterval30Option" value="30">30 秒</option>
+                                <option id="canvasSyncPermanentTreeInterval60Option" value="60">1 分钟</option>
+                            </select>
+                        </label>
+
+                    </section>
+
+                    <section class="canvas-sync-tab-panel" id="canvasSyncTabStatusPanel" role="tabpanel" aria-labelledby="canvasSyncTabStatusBtn" hidden>
+                        <div class="canvas-sync-status" id="canvasSyncStatusPanel">
+                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusRunningLabel">执行状态：</span><strong id="canvasSyncStatusRunning">空闲</strong></div>
+                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusQueueLabel">队列长度：</span><strong id="canvasSyncStatusQueue">0</strong></div>
+                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusLastSuccessLabel">上次成功：</span><strong id="canvasSyncStatusLastSuccess">-</strong></div>
+                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusLastDirectionLabel">最后方向：</span><strong id="canvasSyncStatusLastDirection">-</strong></div>
+                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusObsidianPushAtLabel">最近文件推送：</span><strong id="canvasSyncStatusObsidianPushAt">-</strong></div>
+                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusObsidianPushDeltaLabel">文件推送变更：</span><strong id="canvasSyncStatusObsidianPushDelta">-</strong></div>
+                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusRemoteShaLabel">远端版本：</span><strong id="canvasSyncStatusRemoteSha">-</strong></div>
+                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusErrorLabel">最近错误：</span><strong id="canvasSyncStatusError">无</strong></div>
+                        </div>
+
+                        <div class="canvas-sync-conflict" id="canvasSyncConflictPanel" hidden>
+                            <div class="canvas-sync-conflict-head">
+                                <span class="canvas-sync-conflict-title" id="canvasSyncConflictTitle"><i class="fas fa-exclamation-triangle"></i> 检测到并发冲突</span>
+                                <span class="canvas-sync-conflict-time" id="canvasSyncConflictDetectedAt">-</span>
+                            </div>
+                            <div class="canvas-sync-conflict-summary" id="canvasSyncConflictSummary">请先选择处理策略，再继续自动同步。</div>
+                            <div class="canvas-sync-compare-grid">
+                                <div class="canvas-sync-compare-col">
+                                    <div class="canvas-sync-compare-head" id="canvasSyncConflictLocalTitle">本地</div>
+                                    <div class="canvas-sync-compare-line"><span id="canvasSyncConflictLocalUpdatedLabel">更新时间</span><strong id="canvasSyncConflictLocalUpdated">-</strong></div>
+                                    <div class="canvas-sync-compare-line"><span id="canvasSyncConflictLocalSizeLabel">数据大小</span><strong id="canvasSyncConflictLocalSize">-</strong></div>
+                                    <div class="canvas-sync-compare-line"><span id="canvasSyncConflictLocalHashLabel">内容指纹</span><strong id="canvasSyncConflictLocalHash">-</strong></div>
+                                </div>
+                                <div class="canvas-sync-compare-col">
+                                    <div class="canvas-sync-compare-head" id="canvasSyncConflictRemoteTitle">远端</div>
+                                    <div class="canvas-sync-compare-line"><span id="canvasSyncConflictRemoteUpdatedLabel">更新时间</span><strong id="canvasSyncConflictRemoteUpdated">-</strong></div>
+                                    <div class="canvas-sync-compare-line"><span id="canvasSyncConflictRemoteSizeLabel">数据大小</span><strong id="canvasSyncConflictRemoteSize">-</strong></div>
+                                    <div class="canvas-sync-compare-line"><span id="canvasSyncConflictRemoteHashLabel">内容指纹</span><strong id="canvasSyncConflictRemoteHash">-</strong></div>
+                                </div>
+                            </div>
+                            <div class="canvas-sync-conflict-actions">
+                                <button id="canvasSyncConflictUseLocalBtn" class="canvas-manage-btn" type="button"><i class="fas fa-upload"></i><span id="canvasSyncConflictUseLocalText">保留本地并覆盖远端</span></button>
+                                <button id="canvasSyncConflictUseRemoteBtn" class="canvas-manage-btn" type="button"><i class="fas fa-download"></i><span id="canvasSyncConflictUseRemoteText">使用远端覆盖本地</span></button>
+                                <button id="canvasSyncConflictDismissBtn" class="canvas-manage-btn" type="button"><i class="fas fa-clock"></i><span id="canvasSyncConflictDismissText">稍后处理</span></button>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </div>
+
 
 
 
@@ -1118,6 +1392,9 @@
     </div>
     <div class="perf-help-popover" id="pinchHelpPopover2">
         <div class="perf-help-popover-content" id="pinchHelpText2"></div>
+    </div>
+    <div class="perf-help-popover canvas-sync-help-popover" id="canvasSyncFirstSyncHelpPopover">
+        <div class="perf-help-popover-content" id="canvasSyncFirstSyncHelpText"></div>
     </div>
 </body>
 
