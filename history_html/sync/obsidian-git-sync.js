@@ -7,6 +7,7 @@
     const CLIENT_ID_KEY = 'canvas-obsidian-git-sync-client-id-v1';
     const TAB_ACTIVE_KEY = 'canvas-obsidian-git-sync-active-tab-v1';
     const OBSIDIAN_FILE_HASHES_KEY = 'canvas-obsidian-git-sync-obsidian-file-hashes-v1';
+    const LAST_UPLOADED_TEMP_STATE_KEY = 'canvas-obsidian-git-sync-last-uploaded-temp-state-v1';
 
     const REPO_CONFIG_KEYS = [
         'githubRepoToken',
@@ -18,6 +19,11 @@
 
     const SYNC_TAB_KEYS = ['repo', 'behavior', 'status'];
     const DEFAULT_ACTIVE_TAB = 'repo';
+    const BEHAVIOR_SUBNAV_CONFIG = [
+        { buttonId: 'canvasSyncBehaviorSubGeneralBtn', targetId: 'canvasSyncSectionGeneralTitle' },
+        { buttonId: 'canvasSyncBehaviorSubPluginBtn', targetId: 'canvasSyncPluginSectionTitle' },
+        { buttonId: 'canvasSyncBehaviorSubCompatBtn', targetId: 'canvasSyncSectionCompatTitle' }
+    ];
 
     const TEMP_SECTION_STORAGE_KEY = 'bookmark-canvas-temp-sections';
 
@@ -31,27 +37,36 @@
     ];
 
     const CONFLICT_POLICIES = new Set(['none', 'ours', 'theirs']);
+    const MISMATCH_POLICIES = new Set(['auto_pull', 'prompt']);
     const SYNC_METHODS = new Set(['merge', 'rebase', 'reset']);
     const FIRST_SYNC_MODES = new Set(['auto', 'cloud', 'local']);
     const MAX_RECOVERY_RECORDS = 5;
     const PERMANENT_TREE_UPLOAD_INTERVALS = new Set([0, 5, 15, 30, 60]);
     const OBSIDIAN_EXPORT_FORMATS = new Set(['visual', 'editable']);
+    const CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE = { min: 0, max: 24 * 60 * 60 };
 
     const DEFAULT_SETTINGS = {
         enabled: false,
         autoSync: true,
-        intervalSeconds: 180,
+        syncAfterEditStop: true,
+        intervalSeconds: 120,
         debounceMs: 800,
         batchDebounceMs: 5000,
         splitIntervalCommitAndSync: false,
-        autoPushIntervalMinutes: 0,
-        autoPullIntervalMinutes: 0,
+        autoPushIntervalMinutes: 2,
+        autoPullIntervalMinutes: 5,
+        mismatchPolicy: 'prompt',
+        backgroundCheckEnabled: true,
+        backgroundCheckIntervalMinutes: 2,
+        backgroundCooldownMinutes: 10,
         pullOnStartup: false,
         pushOnSync: true,
         pullOnSync: true,
-        hideNoChangeNotice: false,
+        hideNoChangeNotice: true,
         firstSyncMode: 'auto',
         permanentTreeUploadIntervalSeconds: 15,
+        tempSectionUploadIntervalSeconds: 5,
+        blankSectionUploadIntervalSeconds: 5,
         obsidianFilePushEnabled: true,
         obsidianExportFormat: 'editable',
         obsidianExportRoot: 'bookmark-canvas-sync',
@@ -73,10 +88,13 @@
         lastSyncMode: '',
         lastLocalMutationAt: 0,
         lastPermanentTreeSnapshotAt: 0,
+        lastTempSectionSnapshotAt: 0,
         lastObsidianPushAt: 0,
         lastObsidianPushChanged: 0,
         lastObsidianPushTotal: 0,
-        hasPendingConflict: false
+        hasPendingConflict: false,
+        pendingMismatch: false,
+        pendingMismatchAt: 0
     };
 
     let settings = null;
@@ -91,6 +109,10 @@
     let panelBound = false;
     let repoConfig = null;
     let activeTabKey = DEFAULT_ACTIVE_TAB;
+    let mismatchPromptShownOnInit = false;
+    let previewPanelMode = '';
+    let previewConflict = null;
+    let behaviorSubNavScrollRaf = null;
     const pendingReasons = new Set();
 
     function getRuntimeApi() {
@@ -137,6 +159,11 @@
         return FIRST_SYNC_MODES.has(value) ? value : DEFAULT_SETTINGS.firstSyncMode;
     }
 
+    function ensureMismatchPolicy(policy) {
+        const value = String(policy || '').trim().toLowerCase();
+        return MISMATCH_POLICIES.has(value) ? value : DEFAULT_SETTINGS.mismatchPolicy;
+    }
+
     function toSafeInt(value, fallback) {
         const parsed = Number.parseInt(value, 10);
         if (!Number.isFinite(parsed)) return fallback;
@@ -148,12 +175,37 @@
         return Math.max(0, Math.min(24 * 60, minutes));
     }
 
+    function normalizeSplitIntervalMinutes(value, fallback) {
+        const safeFallback = normalizeIntervalMinutes(fallback, 0);
+        const minutes = toSafeInt(value, safeFallback);
+        return Math.max(0, Math.min(24 * 60, minutes));
+    }
+
+    function normalizeBackgroundMinutes(value, fallback, min = 1) {
+        const safeMin = Math.max(1, toSafeInt(min, 1));
+        const safeFallback = Math.max(safeMin, Math.min(24 * 60, toSafeInt(fallback, safeMin)));
+        const minutes = toSafeInt(value, safeFallback);
+        return Math.max(safeMin, Math.min(24 * 60, minutes));
+    }
+
     function normalizePermanentTreeUploadIntervalSeconds(value, fallback = DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds) {
         const seconds = toSafeInt(value, fallback);
         if (PERMANENT_TREE_UPLOAD_INTERVALS.has(seconds)) {
             return seconds;
         }
         return fallback;
+    }
+
+    function normalizeCustomUploadIntervalSeconds(value, fallback = 5) {
+        const safeFallback = Math.max(
+            CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE.min,
+            Math.min(CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE.max, toSafeInt(fallback, 5))
+        );
+        const seconds = toSafeInt(value, safeFallback);
+        return Math.max(
+            CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE.min,
+            Math.min(CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE.max, seconds)
+        );
     }
 
     function normalizeObsidianExportFormat(value, fallback = DEFAULT_SETTINGS.obsidianExportFormat) {
@@ -173,15 +225,32 @@
         merged.conflictPolicy = ensureConflictPolicy(merged.conflictPolicy);
         merged.syncMethod = ensureSyncMethod(merged.syncMethod);
         merged.filePath = normalizeSyncPath(merged.filePath);
+        merged.syncAfterEditStop = merged.syncAfterEditStop !== false;
         merged.splitIntervalCommitAndSync = !!merged.splitIntervalCommitAndSync;
-        merged.autoPushIntervalMinutes = normalizeIntervalMinutes(merged.autoPushIntervalMinutes, DEFAULT_SETTINGS.autoPushIntervalMinutes);
-        merged.autoPullIntervalMinutes = normalizeIntervalMinutes(merged.autoPullIntervalMinutes, DEFAULT_SETTINGS.autoPullIntervalMinutes);
+        merged.autoPushIntervalMinutes = normalizeSplitIntervalMinutes(merged.autoPushIntervalMinutes, DEFAULT_SETTINGS.autoPushIntervalMinutes);
+        merged.autoPullIntervalMinutes = normalizeSplitIntervalMinutes(merged.autoPullIntervalMinutes, DEFAULT_SETTINGS.autoPullIntervalMinutes);
+        merged.intervalSeconds = Math.max(60, toSafeInt(merged.intervalSeconds, DEFAULT_SETTINGS.intervalSeconds));
+        if (merged.intervalSeconds === 180) {
+            merged.intervalSeconds = 120;
+        }
         merged.pullOnStartup = !!merged.pullOnStartup;
         merged.pushOnSync = merged.pushOnSync !== false;
         merged.pullOnSync = merged.pullOnSync !== false;
         merged.hideNoChangeNotice = !!merged.hideNoChangeNotice;
 
         merged.firstSyncMode = ensureFirstSyncMode(merged.firstSyncMode);
+        merged.mismatchPolicy = ensureMismatchPolicy(merged.mismatchPolicy);
+        merged.backgroundCheckEnabled = merged.backgroundCheckEnabled !== false;
+        merged.backgroundCheckIntervalMinutes = normalizeBackgroundMinutes(
+            merged.backgroundCheckIntervalMinutes,
+            DEFAULT_SETTINGS.backgroundCheckIntervalMinutes,
+            1
+        );
+        merged.backgroundCooldownMinutes = normalizeBackgroundMinutes(
+            merged.backgroundCooldownMinutes,
+            DEFAULT_SETTINGS.backgroundCooldownMinutes,
+            1
+        );
 
         if (typeof merged.permanentTreeUploadIntervalSeconds === 'undefined') {
             if (typeof merged.syncPermanentTreeOnPush === 'boolean') {
@@ -193,6 +262,14 @@
         merged.permanentTreeUploadIntervalSeconds = normalizePermanentTreeUploadIntervalSeconds(
             merged.permanentTreeUploadIntervalSeconds,
             DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds
+        );
+        merged.tempSectionUploadIntervalSeconds = normalizeCustomUploadIntervalSeconds(
+            merged.tempSectionUploadIntervalSeconds,
+            DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
+        );
+        merged.blankSectionUploadIntervalSeconds = normalizeCustomUploadIntervalSeconds(
+            merged.blankSectionUploadIntervalSeconds,
+            DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds
         );
         merged.obsidianFilePushEnabled = merged.obsidianFilePushEnabled !== false;
         merged.obsidianExportFormat = normalizeObsidianExportFormat(merged.obsidianExportFormat, DEFAULT_SETTINGS.obsidianExportFormat);
@@ -547,7 +624,7 @@
     async function overwriteLocalPermanentTreeFromSnapshot(treeSnapshot) {
         const remoteTree = normalizeBookmarkTreeSnapshot(treeSnapshot);
         if (!remoteTree) {
-            throw new Error(textByLang('远端未提供永久栏目快照，无法覆盖', 'Remote permanent section snapshot is missing; cannot overwrite'));
+            throw new Error(textByLang('云端未提供永久栏目快照，无法覆盖', 'Remote permanent section snapshot is missing; cannot overwrite'));
         }
 
         const localTree = await bookmarksGetTree();
@@ -793,18 +870,28 @@
         global.open(guideUrl, '_blank', 'noopener');
     }
 
+    function openOfficialPluginPage() {
+        const url = 'https://github.com/Vinzent03/obsidian-git';
+        const runtimeApi = getRuntimeApi();
+        if (runtimeApi && runtimeApi.tabs && typeof runtimeApi.tabs.create === 'function') {
+            runtimeApi.tabs.create({ url });
+            return;
+        }
+        global.open(url, '_blank', 'noopener');
+    }
+
     function formatSyncMethodForDisplay(method) {
         const value = ensureSyncMethod(method);
         if (value === 'rebase') return textByLang('变基', 'Rebase');
-        if (value === 'reset') return textByLang('其他同步服务', 'Other sync service');
+        if (value === 'reset') return textByLang('仅记云端版本', 'Track remote revision only');
         return textByLang('合并', 'Merge');
     }
 
     function formatConflictPolicyForDisplay(policy) {
         const value = ensureConflictPolicy(policy);
         if (value === 'ours') return textByLang('本地优先', 'Our changes');
-        if (value === 'theirs') return textByLang('远端优先', 'Their changes');
-        return textByLang('默认（Git）', 'None (git default)');
+        if (value === 'theirs') return textByLang('云端优先', 'Their changes');
+        return textByLang('手动处理冲突（Git 默认）', 'None (git default)');
     }
 
     function resolveFullSyncMode() {
@@ -860,12 +947,12 @@
     function getDirectionText(direction) {
         const raw = String(direction || '').trim();
         if (!raw) return '-';
-        if (raw === 'push') return textByLang('本地 → 远端', 'Local → Remote');
-        if (raw === 'pull') return textByLang('远端 → 本地', 'Remote → Local');
+        if (raw === 'push') return textByLang('本地 → 云端', 'Local → Remote');
+        if (raw === 'pull') return textByLang('云端 → 本地', 'Remote → Local');
         if (raw === 'noop') return textByLang('无变化', 'No Changes');
-        if (raw === 'reset-head') return textByLang('其他同步服务（仅更新 HEAD，不覆盖本地）', 'Other sync service (update HEAD only, keep local working tree)');
+        if (raw === 'reset-head') return textByLang('仅记云端版本（仅更新 HEAD，不覆盖本地）', 'Track remote revision only (update HEAD only, keep local working tree)');
         if (raw === 'conflict-local') return textByLang('冲突已选：本地优先', 'Conflict Resolved: Local Preferred');
-        if (raw === 'conflict-remote') return textByLang('冲突已选：远端优先', 'Conflict Resolved: Remote Preferred');
+        if (raw === 'conflict-remote') return textByLang('冲突已选：云端优先', 'Conflict Resolved: Remote Preferred');
         if (raw === 'conflict') return textByLang('等待冲突处理', 'Waiting for Conflict Resolution');
         return raw;
     }
@@ -878,6 +965,8 @@
         const obsidianPushAtEl = getElement('canvasSyncStatusObsidianPushAt');
         const obsidianPushDeltaEl = getElement('canvasSyncStatusObsidianPushDelta');
         const remoteShaEl = getElement('canvasSyncStatusRemoteSha');
+        const localHashEl = getElement('canvasSyncStatusLocalHash');
+        const pendingMismatchEl = getElement('canvasSyncStatusPendingMismatch');
         const errorEl = getElement('canvasSyncStatusError');
 
         if (runningEl) {
@@ -903,6 +992,12 @@
             obsidianPushDeltaEl.textContent = total > 0 ? `${changed}/${total}` : '-';
         }
         if (remoteShaEl) remoteShaEl.textContent = shortText(runtime.lastRemoteSha, '-');
+        if (localHashEl) localHashEl.textContent = shortText(runtime.lastLocalHash, '-');
+        if (pendingMismatchEl) {
+            pendingMismatchEl.textContent = runtime.pendingMismatch
+                ? textByLang('有（待处理）', 'Yes (pending)')
+                : textByLang('无', 'None');
+        }
         if (errorEl) {
             const missingReason = getRepoConfigMissingReason(repoConfig);
             const repoNotReadyText = missingReason
@@ -910,6 +1005,8 @@
                 : '';
             errorEl.textContent = runtime.lastError || repoNotReadyText || textByLang('无', 'None');
         }
+
+        renderMismatchPanel();
     }
 
     function secondsToMinutes(seconds) {
@@ -956,14 +1053,312 @@
         return ensureFirstSyncMode(fallbackMode);
     }
 
+    function isSyncEnabledToggleChecked() {
+        const enabledToggle = getElement('canvasSyncEnabledToggle');
+        return !!(enabledToggle && enabledToggle.checked);
+    }
+
+    function setControlDisabledState(controlEl, disabled, hint) {
+        if (!controlEl) return;
+
+        const disabledFlag = !!disabled;
+        controlEl.disabled = disabledFlag;
+        controlEl.title = disabledFlag ? (hint || '') : '';
+
+        const rowEl = typeof controlEl.closest === 'function'
+            ? controlEl.closest('.canvas-sync-row')
+            : null;
+        if (!rowEl) return;
+
+        rowEl.classList.toggle('canvas-sync-row--disabled', disabledFlag);
+        rowEl.setAttribute('aria-disabled', disabledFlag ? 'true' : 'false');
+        rowEl.title = disabledFlag ? (hint || '') : '';
+    }
+
+    function setActionDisabledState(buttonEl, disabled, hint) {
+        if (!buttonEl) return;
+        const disabledFlag = !!disabled;
+        buttonEl.disabled = disabledFlag;
+        buttonEl.title = disabledFlag ? (hint || '') : '';
+    }
+
+    function isMismatchPreviewActive() {
+        return previewPanelMode === 'mismatch' && !pendingConflict && !(runtime && runtime.pendingMismatch);
+    }
+
+    function isConflictPreviewActive() {
+        return previewPanelMode === 'conflict' && !pendingConflict;
+    }
+
+    function buildPreviewConflictPayload() {
+        const now = Date.now();
+        const localSnapshot = normalizeSnapshot({
+            updatedAt: now - 90 * 1000,
+            data: {
+                [TEMP_SECTION_STORAGE_KEY]: JSON.stringify({ cards: [{ id: 'preview-local-card', title: 'local card' }] }),
+                'canvas-permanent-tip-text': 'preview-local'
+            }
+        });
+        const remoteSnapshot = normalizeSnapshot({
+            updatedAt: now - 50 * 1000,
+            data: {
+                [TEMP_SECTION_STORAGE_KEY]: JSON.stringify({ cards: [{ id: 'preview-remote-card', title: 'remote card' }] }),
+                'canvas-permanent-tip-text': 'preview-remote'
+            }
+        });
+
+        return {
+            id: `preview-conflict-${now}`,
+            createdAt: now,
+            reason: 'preview',
+            remoteSha: 'preview-remote-sha',
+            remotePath: settings && settings.filePath ? String(settings.filePath) : '',
+            localSnapshot,
+            remoteSnapshot,
+            localMeta: buildSnapshotMeta(localSnapshot),
+            remoteMeta: buildSnapshotMeta(remoteSnapshot)
+        };
+    }
+
+    function updatePreviewActionButtonState() {
+        const enabledOn = isSyncEnabledToggleChecked();
+        const disabledByMaster = !enabledOn;
+        const disabledHint = textByLang(
+            '启用同步已关闭：此项不可用',
+            'Sync is disabled: this button is unavailable'
+        );
+        const previewHint = textByLang(
+            '预览模式：此按钮仅用于查看样式，不执行同步操作',
+            'Preview mode: this button is display-only and will not run sync actions'
+        );
+
+        const mismatchPreview = isMismatchPreviewActive();
+        const conflictPreview = isConflictPreviewActive();
+
+        const mismatchRemoteBtn = getElement('canvasSyncMismatchUseRemoteBtn');
+        setActionDisabledState(
+            mismatchRemoteBtn,
+            disabledByMaster || mismatchPreview,
+            disabledByMaster ? disabledHint : (mismatchPreview ? previewHint : '')
+        );
+
+        const mismatchLocalBtn = getElement('canvasSyncMismatchUseLocalBtn');
+        setActionDisabledState(
+            mismatchLocalBtn,
+            disabledByMaster || mismatchPreview,
+            disabledByMaster ? disabledHint : (mismatchPreview ? previewHint : '')
+        );
+
+        const conflictLocalBtn = getElement('canvasSyncConflictUseLocalBtn');
+        setActionDisabledState(
+            conflictLocalBtn,
+            disabledByMaster || conflictPreview,
+            disabledByMaster ? disabledHint : (conflictPreview ? previewHint : '')
+        );
+
+        const conflictRemoteBtn = getElement('canvasSyncConflictUseRemoteBtn');
+        setActionDisabledState(
+            conflictRemoteBtn,
+            disabledByMaster || conflictPreview,
+            disabledByMaster ? disabledHint : (conflictPreview ? previewHint : '')
+        );
+    }
+
+    function setPreviewPanelMode(mode) {
+        const targetMode = mode === 'mismatch' || mode === 'conflict' ? mode : '';
+        previewPanelMode = targetMode;
+
+        if (targetMode === 'conflict' && !pendingConflict) {
+            previewConflict = buildPreviewConflictPayload();
+        } else if (targetMode !== 'conflict') {
+            previewConflict = null;
+        }
+
+        renderStatus();
+        renderConflictPanel();
+        updatePreviewActionButtonState();
+    }
+
+    function scrollStatusPanelToPreview(mode) {
+        const statusPanel = getElement('canvasSyncTabStatusPanel');
+        if (!statusPanel) return;
+
+        const targetId = mode === 'conflict' ? 'canvasSyncConflictPanel' : 'canvasSyncMismatchPanel';
+        const targetPanel = getElement(targetId);
+        if (!targetPanel) return;
+
+        const doScroll = () => {
+            const top = Math.max(0, (targetPanel.offsetTop || 0) - 8);
+            if (typeof statusPanel.scrollTo === 'function') {
+                try {
+                    statusPanel.scrollTo({ top, behavior: 'smooth' });
+                    return;
+                } catch (_) { }
+            }
+            statusPanel.scrollTop = top;
+        };
+
+        global.requestAnimationFrame(() => {
+            global.requestAnimationFrame(doScroll);
+        });
+    }
+
+    function updateSyncEnabledDependentFieldState() {
+        const enabledOn = isSyncEnabledToggleChecked();
+        const disabledHint = textByLang(
+            '启用同步已关闭：此项不可用',
+            'Sync is disabled: this field is unavailable'
+        );
+        const shouldDisable = !enabledOn;
+
+        [
+            'canvasSyncAutoToggle',
+            'canvasSyncAutoAfterEditStopToggle',
+            'canvasSyncFirstSyncModeAutoInput',
+            'canvasSyncFirstSyncModeCloudInput',
+            'canvasSyncFirstSyncModeLocalInput',
+            'canvasSyncPermanentTreeIntervalSelect',
+            'canvasSyncTempSectionIntervalInput',
+            'canvasSyncMdNodeIntervalInput',
+            'canvasSyncSplitIntervalsToggle',
+            'canvasSyncMismatchPolicySelect',
+            'canvasSyncPullOnStartupToggle',
+            'canvasSyncPushOnSyncToggle',
+            'canvasSyncPullOnSyncToggle',
+            'canvasSyncHideNoChangeNoticeToggle',
+            'canvasSyncMethodSelect',
+            'canvasSyncConflictSelect',
+            'canvasSyncDeleteThresholdInput',
+            'canvasSyncFilePathInput',
+            'canvasSyncObsidianFilePushToggle',
+            'canvasSyncObsidianExportFormatSelect',
+            'canvasSyncObsidianExportRootInput'
+        ].forEach((id) => {
+            setControlDisabledState(getElement(id), shouldDisable, disabledHint);
+        });
+
+        [
+            'canvasSyncNowBtn',
+            'canvasSyncPushOnlyBtn',
+            'canvasSyncPullOnlyBtn',
+            'canvasSyncRebuildBtn',
+            'canvasSyncFirstSyncOverwriteBtn',
+            'canvasSyncRunBgCheckBtn',
+            'canvasSyncPreviewMismatchBtn',
+            'canvasSyncPreviewConflictBtn',
+            'canvasSyncMismatchUseRemoteBtn',
+            'canvasSyncMismatchUseLocalBtn',
+            'canvasSyncMismatchDismissBtn',
+            'canvasSyncConflictUseLocalBtn',
+            'canvasSyncConflictUseRemoteBtn',
+            'canvasSyncConflictDismissBtn'
+        ].forEach((id) => {
+            setActionDisabledState(getElement(id), shouldDisable, disabledHint);
+        });
+
+        updateBackgroundCheckFieldState();
+        updatePreviewActionButtonState();
+    }
+
+    function updateBackgroundCheckFieldState() {
+        const enabledOn = isSyncEnabledToggleChecked();
+        const backgroundCheckToggle = getElement('canvasSyncBackgroundCheckToggle');
+        const backgroundCheckIntervalInput = getElement('canvasSyncBackgroundCheckIntervalInput');
+        const backgroundCooldownInput = getElement('canvasSyncBackgroundCooldownInput');
+        const mismatchPolicySelect = getElement('canvasSyncMismatchPolicySelect');
+
+        const disabledByMasterHint = textByLang(
+            '启用同步已关闭：此项不可用',
+            'Sync is disabled: this field is unavailable'
+        );
+        const disabledByBackgroundCheckHint = textByLang(
+            '后台检测已关闭：此项不生效',
+            'Background check disabled: this field is inactive'
+        );
+
+        const backgroundCheckOn = !!(enabledOn && backgroundCheckToggle && backgroundCheckToggle.checked);
+        const fieldHint = !enabledOn ? disabledByMasterHint : disabledByBackgroundCheckHint;
+
+        setControlDisabledState(
+            backgroundCheckToggle,
+            !enabledOn,
+            disabledByMasterHint
+        );
+        setControlDisabledState(
+            backgroundCheckIntervalInput,
+            !backgroundCheckOn,
+            fieldHint
+        );
+        setControlDisabledState(
+            backgroundCooldownInput,
+            !backgroundCheckOn,
+            fieldHint
+        );
+        setControlDisabledState(
+            mismatchPolicySelect,
+            !backgroundCheckOn,
+            fieldHint
+        );
+    }
+
+    function updateTimerModeFieldState() {
+        const splitInterval = getElement('canvasSyncSplitIntervalsToggle');
+        const intervalInput = getElement('canvasSyncIntervalInput');
+        const pushIntervalInput = getElement('canvasSyncAutoPushIntervalInput');
+        const pullIntervalInput = getElement('canvasSyncAutoPullIntervalInput');
+
+        const enabledOn = isSyncEnabledToggleChecked();
+        const splitOn = !!(enabledOn && splitInterval && splitInterval.checked);
+        const disabledByMasterHint = textByLang(
+            '启用同步已关闭：此项不可用',
+            'Sync is disabled: this field is unavailable'
+        );
+        const intervalDisabledHint = textByLang(
+            '分离定时器已开启：此项不生效',
+            'Split timers enabled: this field is inactive'
+        );
+        const pushPullDisabledHint = textByLang(
+            '分离定时器未开启：此项不生效',
+            'Split timers disabled: this field is inactive'
+        );
+
+        const intervalDisabled = !enabledOn || splitOn;
+        const pushPullDisabled = !enabledOn || !splitOn;
+
+        setControlDisabledState(
+            intervalInput,
+            intervalDisabled,
+            !enabledOn ? disabledByMasterHint : intervalDisabledHint
+        );
+        setControlDisabledState(
+            pushIntervalInput,
+            pushPullDisabled,
+            !enabledOn ? disabledByMasterHint : pushPullDisabledHint
+        );
+        setControlDisabledState(
+            pullIntervalInput,
+            pushPullDisabled,
+            !enabledOn ? disabledByMasterHint : pushPullDisabledHint
+        );
+
+        updateBackgroundCheckFieldState();
+    }
+
     function applySettingsToForm() {
         const enabled = getElement('canvasSyncEnabledToggle');
         const auto = getElement('canvasSyncAutoToggle');
+        const syncAfterEditStop = getElement('canvasSyncAutoAfterEditStopToggle');
         const splitInterval = getElement('canvasSyncSplitIntervalsToggle');
         const permanentTreeUploadInterval = getElement('canvasSyncPermanentTreeIntervalSelect');
+        const tempSectionUploadInterval = getElement('canvasSyncTempSectionIntervalInput');
+        const blankSectionUploadInterval = getElement('canvasSyncMdNodeIntervalInput');
         const interval = getElement('canvasSyncIntervalInput');
         const pushInterval = getElement('canvasSyncAutoPushIntervalInput');
         const pullInterval = getElement('canvasSyncAutoPullIntervalInput');
+        const backgroundCheckEnabled = getElement('canvasSyncBackgroundCheckToggle');
+        const backgroundCheckInterval = getElement('canvasSyncBackgroundCheckIntervalInput');
+        const backgroundCooldown = getElement('canvasSyncBackgroundCooldownInput');
+        const mismatchPolicy = getElement('canvasSyncMismatchPolicySelect');
         const pullOnStartup = getElement('canvasSyncPullOnStartupToggle');
         const pushOnSync = getElement('canvasSyncPushOnSyncToggle');
         const pullOnSync = getElement('canvasSyncPullOnSyncToggle');
@@ -978,6 +1373,7 @@
 
         if (enabled) enabled.checked = !!settings.enabled;
         if (auto) auto.checked = !!settings.autoSync;
+        if (syncAfterEditStop) syncAfterEditStop.checked = settings.syncAfterEditStop !== false;
         if (splitInterval) splitInterval.checked = !!settings.splitIntervalCommitAndSync;
         setFirstSyncModeToForm(settings.firstSyncMode);
         if (permanentTreeUploadInterval) {
@@ -988,9 +1384,59 @@
                 )
             );
         }
+        if (tempSectionUploadInterval) {
+            tempSectionUploadInterval.value = String(
+                normalizeCustomUploadIntervalSeconds(
+                    settings.tempSectionUploadIntervalSeconds,
+                    DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
+                )
+            );
+        }
+        if (blankSectionUploadInterval) {
+            blankSectionUploadInterval.value = String(
+                normalizeCustomUploadIntervalSeconds(
+                    settings.blankSectionUploadIntervalSeconds,
+                    DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds
+                )
+            );
+        }
         if (interval) interval.value = String(secondsToMinutes(settings.intervalSeconds || DEFAULT_SETTINGS.intervalSeconds));
-        if (pushInterval) pushInterval.value = String(normalizeIntervalMinutes(settings.autoPushIntervalMinutes, 0));
-        if (pullInterval) pullInterval.value = String(normalizeIntervalMinutes(settings.autoPullIntervalMinutes, 0));
+        if (pushInterval) {
+            pushInterval.value = String(
+                normalizeSplitIntervalMinutes(
+                    settings.autoPushIntervalMinutes,
+                    DEFAULT_SETTINGS.autoPushIntervalMinutes
+                )
+            );
+        }
+        if (pullInterval) {
+            pullInterval.value = String(
+                normalizeSplitIntervalMinutes(
+                    settings.autoPullIntervalMinutes,
+                    DEFAULT_SETTINGS.autoPullIntervalMinutes
+                )
+            );
+        }
+        if (backgroundCheckEnabled) backgroundCheckEnabled.checked = settings.backgroundCheckEnabled !== false;
+        if (backgroundCheckInterval) {
+            backgroundCheckInterval.value = String(
+                normalizeBackgroundMinutes(
+                    settings.backgroundCheckIntervalMinutes,
+                    DEFAULT_SETTINGS.backgroundCheckIntervalMinutes,
+                    1
+                )
+            );
+        }
+        if (backgroundCooldown) {
+            backgroundCooldown.value = String(
+                normalizeBackgroundMinutes(
+                    settings.backgroundCooldownMinutes,
+                    DEFAULT_SETTINGS.backgroundCooldownMinutes,
+                    1
+                )
+            );
+        }
+        if (mismatchPolicy) mismatchPolicy.value = ensureMismatchPolicy(settings.mismatchPolicy);
         if (pullOnStartup) pullOnStartup.checked = !!settings.pullOnStartup;
         if (pushOnSync) pushOnSync.checked = settings.pushOnSync !== false;
         if (pullOnSync) pullOnSync.checked = settings.pullOnSync !== false;
@@ -1002,16 +1448,25 @@
         if (obsidianFilePushEnabled) obsidianFilePushEnabled.checked = settings.obsidianFilePushEnabled !== false;
         if (obsidianExportFormat) obsidianExportFormat.value = normalizeObsidianExportFormat(settings.obsidianExportFormat, DEFAULT_SETTINGS.obsidianExportFormat);
         if (obsidianExportRoot) obsidianExportRoot.value = settings.obsidianExportRoot || DEFAULT_SETTINGS.obsidianExportRoot;
+        updateSyncEnabledDependentFieldState();
+        updateTimerModeFieldState();
     }
 
     function pullSettingsFromForm() {
         const enabled = getElement('canvasSyncEnabledToggle');
         const auto = getElement('canvasSyncAutoToggle');
+        const syncAfterEditStop = getElement('canvasSyncAutoAfterEditStopToggle');
         const splitInterval = getElement('canvasSyncSplitIntervalsToggle');
         const permanentTreeUploadInterval = getElement('canvasSyncPermanentTreeIntervalSelect');
+        const tempSectionUploadInterval = getElement('canvasSyncTempSectionIntervalInput');
+        const blankSectionUploadInterval = getElement('canvasSyncMdNodeIntervalInput');
         const interval = getElement('canvasSyncIntervalInput');
         const pushInterval = getElement('canvasSyncAutoPushIntervalInput');
         const pullInterval = getElement('canvasSyncAutoPullIntervalInput');
+        const backgroundCheckEnabled = getElement('canvasSyncBackgroundCheckToggle');
+        const backgroundCheckInterval = getElement('canvasSyncBackgroundCheckIntervalInput');
+        const backgroundCooldown = getElement('canvasSyncBackgroundCooldownInput');
+        const mismatchPolicy = getElement('canvasSyncMismatchPolicySelect');
         const pullOnStartup = getElement('canvasSyncPullOnStartupToggle');
         const pushOnSync = getElement('canvasSyncPushOnSyncToggle');
         const pullOnSync = getElement('canvasSyncPullOnSyncToggle');
@@ -1026,18 +1481,49 @@
 
         settings.enabled = enabled ? !!enabled.checked : settings.enabled;
         settings.autoSync = auto ? !!auto.checked : settings.autoSync;
+        settings.syncAfterEditStop = syncAfterEditStop ? !!syncAfterEditStop.checked : settings.syncAfterEditStop;
         settings.splitIntervalCommitAndSync = splitInterval ? !!splitInterval.checked : settings.splitIntervalCommitAndSync;
         settings.firstSyncMode = getFirstSyncModeFromForm(settings.firstSyncMode);
         settings.permanentTreeUploadIntervalSeconds = normalizePermanentTreeUploadIntervalSeconds(
             permanentTreeUploadInterval ? permanentTreeUploadInterval.value : settings.permanentTreeUploadIntervalSeconds,
             DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds
         );
+        settings.tempSectionUploadIntervalSeconds = normalizeCustomUploadIntervalSeconds(
+            tempSectionUploadInterval ? tempSectionUploadInterval.value : settings.tempSectionUploadIntervalSeconds,
+            DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
+        );
+        settings.blankSectionUploadIntervalSeconds = normalizeCustomUploadIntervalSeconds(
+            blankSectionUploadInterval ? blankSectionUploadInterval.value : settings.blankSectionUploadIntervalSeconds,
+            DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds
+        );
 
         const intervalMinutes = Math.max(1, Number.parseInt(interval ? interval.value : `${secondsToMinutes(settings.intervalSeconds)}`, 10) || secondsToMinutes(DEFAULT_SETTINGS.intervalSeconds));
         settings.intervalSeconds = minutesToSeconds(intervalMinutes);
 
-        settings.autoPushIntervalMinutes = normalizeIntervalMinutes(pushInterval ? pushInterval.value : settings.autoPushIntervalMinutes, DEFAULT_SETTINGS.autoPushIntervalMinutes);
-        settings.autoPullIntervalMinutes = normalizeIntervalMinutes(pullInterval ? pullInterval.value : settings.autoPullIntervalMinutes, DEFAULT_SETTINGS.autoPullIntervalMinutes);
+        settings.autoPushIntervalMinutes = normalizeSplitIntervalMinutes(
+            pushInterval ? pushInterval.value : settings.autoPushIntervalMinutes,
+            DEFAULT_SETTINGS.autoPushIntervalMinutes
+        );
+        settings.autoPullIntervalMinutes = normalizeSplitIntervalMinutes(
+            pullInterval ? pullInterval.value : settings.autoPullIntervalMinutes,
+            DEFAULT_SETTINGS.autoPullIntervalMinutes
+        );
+        if (pushInterval) pushInterval.value = String(settings.autoPushIntervalMinutes);
+        if (pullInterval) pullInterval.value = String(settings.autoPullIntervalMinutes);
+        settings.backgroundCheckEnabled = backgroundCheckEnabled ? !!backgroundCheckEnabled.checked : settings.backgroundCheckEnabled;
+        settings.backgroundCheckIntervalMinutes = normalizeBackgroundMinutes(
+            backgroundCheckInterval ? backgroundCheckInterval.value : settings.backgroundCheckIntervalMinutes,
+            DEFAULT_SETTINGS.backgroundCheckIntervalMinutes,
+            1
+        );
+        settings.backgroundCooldownMinutes = normalizeBackgroundMinutes(
+            backgroundCooldown ? backgroundCooldown.value : settings.backgroundCooldownMinutes,
+            DEFAULT_SETTINGS.backgroundCooldownMinutes,
+            1
+        );
+        if (backgroundCheckInterval) backgroundCheckInterval.value = String(settings.backgroundCheckIntervalMinutes);
+        if (backgroundCooldown) backgroundCooldown.value = String(settings.backgroundCooldownMinutes);
+        settings.mismatchPolicy = ensureMismatchPolicy(mismatchPolicy ? mismatchPolicy.value : settings.mismatchPolicy);
         settings.pullOnStartup = pullOnStartup ? !!pullOnStartup.checked : settings.pullOnStartup;
         settings.pushOnSync = pushOnSync ? !!pushOnSync.checked : settings.pushOnSync;
         settings.pullOnSync = pullOnSync ? !!pullOnSync.checked : settings.pullOnSync;
@@ -1046,19 +1532,25 @@
         settings.syncMethod = ensureSyncMethod(syncMethod ? syncMethod.value : settings.syncMethod);
         settings.conflictPolicy = ensureConflictPolicy(conflict ? conflict.value : settings.conflictPolicy);
         settings.deleteThresholdPercent = Math.max(1, Math.min(100, Number.parseInt(threshold ? threshold.value : `${settings.deleteThresholdPercent}`, 10) || DEFAULT_SETTINGS.deleteThresholdPercent));
-        settings.filePath = normalizeSyncPath(filePath ? filePath.value : settings.filePath);
+        settings.filePath = normalizeSyncPath(filePath ? filePath.value : '');
         settings.obsidianFilePushEnabled = obsidianFilePushEnabled ? !!obsidianFilePushEnabled.checked : settings.obsidianFilePushEnabled;
         settings.obsidianExportFormat = normalizeObsidianExportFormat(
             obsidianExportFormat ? obsidianExportFormat.value : settings.obsidianExportFormat,
             DEFAULT_SETTINGS.obsidianExportFormat
         );
         settings.obsidianExportRoot = normalizeObsidianExportRoot(
-            obsidianExportRoot ? obsidianExportRoot.value : settings.obsidianExportRoot,
+            obsidianExportRoot ? obsidianExportRoot.value : DEFAULT_SETTINGS.obsidianExportRoot,
             DEFAULT_SETTINGS.obsidianExportRoot
         );
 
+        updateSyncEnabledDependentFieldState();
+        updateTimerModeFieldState();
         saveSettings();
         restartAutomationTimers();
+        void updateBackgroundSyncContext('settings-change');
+        if (runtime && runtime.pendingMismatch && ensureMismatchPolicy(settings.mismatchPolicy) === 'auto_pull') {
+            void maybeHandlePendingMismatchAutoPull();
+        }
     }
 
     function setActiveTab(tabKey, options = {}) {
@@ -1080,6 +1572,17 @@
             }
         });
 
+        setBehaviorSubNavVisible(nextTab === 'behavior');
+        if (nextTab === 'behavior') {
+            const currentActiveSubButton = getCurrentActiveBehaviorSubButtonId();
+            if (currentActiveSubButton) {
+                setBehaviorSubNavActive(currentActiveSubButton);
+            } else if (BEHAVIOR_SUBNAV_CONFIG.length > 0) {
+                setBehaviorSubNavActive(BEHAVIOR_SUBNAV_CONFIG[0].buttonId);
+            }
+            scheduleBehaviorSubNavSyncFromScroll();
+        }
+
         activeTabKey = nextTab;
         if (persist) {
             saveActiveTab(nextTab);
@@ -1094,6 +1597,124 @@
         buttonEl.dataset.bound = 'true';
         buttonEl.addEventListener('click', () => {
             setActiveTab(tabKey);
+        });
+    }
+
+    function setBehaviorSubNavVisible(visible) {
+        const subNavEl = getElement('canvasSyncBehaviorSubNav');
+        if (!subNavEl) return;
+        subNavEl.hidden = !visible;
+    }
+
+    function getCurrentActiveBehaviorSubButtonId() {
+        const subNavEl = getElement('canvasSyncBehaviorSubNav');
+        if (!subNavEl) return '';
+        const activeButton = subNavEl.querySelector('.canvas-sync-tab-subnav-btn.is-active, .canvas-sync-tab-subnav-btn[aria-current="true"]');
+        if (!activeButton || !activeButton.id) return '';
+        return activeButton.id;
+    }
+
+    function setBehaviorSubNavActive(buttonId) {
+        BEHAVIOR_SUBNAV_CONFIG.forEach((item) => {
+            const buttonEl = getElement(item.buttonId);
+            if (!buttonEl) return;
+            const isActive = item.buttonId === buttonId;
+            buttonEl.classList.toggle('is-active', isActive);
+            buttonEl.setAttribute('aria-current', isActive ? 'true' : 'false');
+        });
+    }
+
+    function scrollBehaviorSectionIntoView(targetId) {
+        const panelEl = getElement('canvasSyncTabBehaviorPanel');
+        const targetEl = getElement(targetId);
+        if (!panelEl || !targetEl) return;
+
+        if (typeof targetEl.scrollIntoView === 'function') {
+            targetEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            setTimeout(() => {
+                scheduleBehaviorSubNavSyncFromScroll();
+            }, 220);
+            return;
+        }
+
+        const top = targetEl.offsetTop;
+        if (Number.isFinite(top)) {
+            panelEl.scrollTop = Math.max(0, top - 8);
+            scheduleBehaviorSubNavSyncFromScroll();
+        }
+    }
+
+    function bindBehaviorSubNavButtons() {
+        BEHAVIOR_SUBNAV_CONFIG.forEach((item, index) => {
+            const buttonEl = getElement(item.buttonId);
+            if (!buttonEl) return;
+            if (buttonEl.dataset.bound === 'true') return;
+
+            buttonEl.dataset.bound = 'true';
+            buttonEl.addEventListener('click', () => {
+                setActiveTab('behavior');
+                setBehaviorSubNavActive(item.buttonId);
+                scrollBehaviorSectionIntoView(item.targetId);
+            });
+
+            if (index === 0) {
+                buttonEl.classList.add('is-active');
+                buttonEl.setAttribute('aria-current', 'true');
+            } else {
+                buttonEl.setAttribute('aria-current', 'false');
+            }
+        });
+
+        const panelEl = getElement('canvasSyncTabBehaviorPanel');
+        if (panelEl && panelEl.dataset.subnavScrollBound !== 'true') {
+            panelEl.dataset.subnavScrollBound = 'true';
+            panelEl.addEventListener('scroll', () => {
+                scheduleBehaviorSubNavSyncFromScroll();
+            }, { passive: true });
+        }
+    }
+
+    function findBehaviorSubNavButtonIdByScroll() {
+        const panelEl = getElement('canvasSyncTabBehaviorPanel');
+        if (!panelEl) return '';
+
+        const panelRect = panelEl.getBoundingClientRect();
+        const anchorTop = panelRect.top + 44;
+
+        let fallbackButtonId = '';
+        let matchedButtonId = '';
+
+        for (let i = 0; i < BEHAVIOR_SUBNAV_CONFIG.length; i++) {
+            const item = BEHAVIOR_SUBNAV_CONFIG[i];
+            const targetEl = getElement(item.targetId);
+            if (!targetEl) continue;
+
+            if (!fallbackButtonId) fallbackButtonId = item.buttonId;
+
+            const targetRect = targetEl.getBoundingClientRect();
+            if (targetRect.top <= anchorTop) {
+                matchedButtonId = item.buttonId;
+            }
+        }
+
+        return matchedButtonId || fallbackButtonId || '';
+    }
+
+    function syncBehaviorSubNavActiveByScrollPosition() {
+        if (activeTabKey !== 'behavior') return;
+        const nextButtonId = findBehaviorSubNavButtonIdByScroll();
+        if (!nextButtonId) return;
+
+        const currentButtonId = getCurrentActiveBehaviorSubButtonId();
+        if (currentButtonId === nextButtonId) return;
+        setBehaviorSubNavActive(nextButtonId);
+    }
+
+    function scheduleBehaviorSubNavSyncFromScroll() {
+        if (behaviorSubNavScrollRaf != null) return;
+        behaviorSubNavScrollRaf = global.requestAnimationFrame(() => {
+            behaviorSubNavScrollRaf = null;
+            syncBehaviorSubNavActiveByScrollPosition();
         });
     }
 
@@ -1231,6 +1852,73 @@
         return (Date.now() - lastTs) >= (intervalSeconds * 1000);
     }
 
+    function shouldIncludeTempSectionSnapshot(trigger, options = {}) {
+        if (options.includeTempSection === true) return true;
+        if (options.includeTempSection === false) return false;
+
+        const intervalSeconds = normalizeCustomUploadIntervalSeconds(
+            settings && settings.tempSectionUploadIntervalSeconds,
+            DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
+        );
+        if (intervalSeconds <= 0) return false;
+
+        const lastTs = Number(runtime && runtime.lastTempSectionSnapshotAt) || 0;
+        if (lastTs <= 0) return true;
+
+        const triggerText = String(trigger || '').toLowerCase();
+        const isStrictManual = triggerText.startsWith('manual');
+        if (isStrictManual) return true;
+
+        return (Date.now() - lastTs) >= (intervalSeconds * 1000);
+    }
+
+    function shouldPushBlankSectionFiles(trigger, options = {}) {
+        if (options.includeBlankSectionFiles === true) return true;
+        if (options.includeBlankSectionFiles === false) return false;
+
+        const intervalSeconds = normalizeCustomUploadIntervalSeconds(
+            settings && settings.blankSectionUploadIntervalSeconds,
+            DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds
+        );
+        if (intervalSeconds <= 0) return false;
+
+        const lastTs = Number(runtime && runtime.lastObsidianPushAt) || 0;
+        if (lastTs <= 0) return true;
+
+        const triggerText = String(trigger || '').toLowerCase();
+        const isStrictManual = triggerText.startsWith('manual');
+        if (isStrictManual) return true;
+
+        return (Date.now() - lastTs) >= (intervalSeconds * 1000);
+    }
+
+    function applyTempSectionSnapshotThrottle(data, trigger, options = {}) {
+        if (!data || typeof data !== 'object') {
+            return { includeTempSection: false };
+        }
+
+        const currentRaw = typeof data[TEMP_SECTION_STORAGE_KEY] === 'string'
+            ? data[TEMP_SECTION_STORAGE_KEY]
+            : '';
+
+        const includeTempSection = shouldIncludeTempSectionSnapshot(trigger, options);
+        if (includeTempSection) {
+            return { includeTempSection: true };
+        }
+
+        const cachedRaw = String(localStorage.getItem(LAST_UPLOADED_TEMP_STATE_KEY) || '');
+        if (cachedRaw) {
+            data[TEMP_SECTION_STORAGE_KEY] = cachedRaw;
+            return { includeTempSection: false, usedCachedTempSection: true };
+        }
+
+        if (currentRaw) {
+            return { includeTempSection: true, forcedIncludeWithoutCache: true };
+        }
+
+        return { includeTempSection: false };
+    }
+
     function hydratePermanentTreeFromRemote(localSnapshot, remoteSnapshot) {
         if (!localSnapshot || localSnapshot.permanentTreeSnapshot) {
             return false;
@@ -1256,6 +1944,8 @@
             }
         });
 
+        const tempSectionMeta = applyTempSectionSnapshotThrottle(data, trigger, options);
+
         const tempTs = readTempStateTimestampFromRaw(data[TEMP_SECTION_STORAGE_KEY]);
         const now = Date.now();
         const updatedAt = Math.max(now, Number(runtime.lastLocalMutationAt) || 0, tempTs);
@@ -1267,7 +1957,7 @@
             permanentTreeSnapshot = await getPermanentTreeSnapshotForSync();
         }
 
-        return {
+        const snapshot = {
             schemaVersion: 1,
             format: 'bookmark-canvas-sync-state',
             clientId: getClientId(),
@@ -1277,6 +1967,15 @@
             permanentTreeSnapshot,
             data
         };
+
+        Object.defineProperty(snapshot, '_syncMeta', {
+            value: Object.assign({}, tempSectionMeta),
+            enumerable: false,
+            configurable: true,
+            writable: true
+        });
+
+        return snapshot;
     }
 
     function decodeBase64ToText(base64) {
@@ -1327,6 +2026,183 @@
         });
     }
 
+    function buildBackgroundSyncSettingsPayload() {
+        const current = settings || DEFAULT_SETTINGS;
+        return {
+            enabled: current.enabled === true,
+            autoSync: current.autoSync !== false,
+            splitIntervalCommitAndSync: current.splitIntervalCommitAndSync === true,
+            intervalSeconds: Math.max(60, Number(current.intervalSeconds) || DEFAULT_SETTINGS.intervalSeconds),
+            autoPushIntervalMinutes: normalizeSplitIntervalMinutes(current.autoPushIntervalMinutes, DEFAULT_SETTINGS.autoPushIntervalMinutes),
+            autoPullIntervalMinutes: normalizeSplitIntervalMinutes(current.autoPullIntervalMinutes, DEFAULT_SETTINGS.autoPullIntervalMinutes),
+            backgroundCheckIntervalMinutes: normalizeBackgroundMinutes(current.backgroundCheckIntervalMinutes, DEFAULT_SETTINGS.backgroundCheckIntervalMinutes, 1),
+            backgroundCooldownMinutes: normalizeBackgroundMinutes(current.backgroundCooldownMinutes, DEFAULT_SETTINGS.backgroundCooldownMinutes, 1),
+            filePath: normalizeSyncPath(current.filePath || ''),
+            mismatchPolicy: ensureMismatchPolicy(current.mismatchPolicy),
+            backgroundCheckEnabled: current.backgroundCheckEnabled !== false
+        };
+    }
+
+    function buildBackgroundSyncRuntimePayload(runtimePatch) {
+        const mergedRuntime = Object.assign({}, runtime || DEFAULT_RUNTIME, runtimePatch || {});
+        return {
+            lastRemoteSha: String(mergedRuntime.lastRemoteSha || ''),
+            lastLocalHash: String(mergedRuntime.lastLocalHash || ''),
+            lastSuccessAt: Number(mergedRuntime.lastSuccessAt) || 0,
+            lastLocalMutationAt: Number(mergedRuntime.lastLocalMutationAt) || 0,
+            pendingMismatch: mergedRuntime.pendingMismatch === true,
+            pendingMismatchAt: Number(mergedRuntime.pendingMismatchAt) || 0,
+            queueLength: Number(mergedRuntime.queueLength) || 0,
+            isRunning: mergedRuntime.isRunning === true,
+            hasPendingWork: (mergedRuntime.isRunning === true)
+                || ((Number(mergedRuntime.queueLength) || 0) > 0)
+                || mergedRuntime.pendingMismatch === true,
+            localDirty: ((Number(mergedRuntime.queueLength) || 0) > 0)
+                || mergedRuntime.isRunning === true
+        };
+    }
+
+    async function updateBackgroundSyncContext(eventName, runtimePatch = null) {
+        try {
+            const response = await sendRuntimeMessage({
+                action: 'canvasGitSyncUpdateContext',
+                event: String(eventName || '').trim() || 'sync-context-update',
+                settings: buildBackgroundSyncSettingsPayload(),
+                runtime: buildBackgroundSyncRuntimePayload(runtimePatch)
+            }, 10000);
+            return response || null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    async function getBackgroundSyncState() {
+        try {
+            const response = await sendRuntimeMessage({
+                action: 'canvasGitSyncGetBackgroundState'
+            }, 10000);
+            if (!response || response.success !== true) return null;
+            return response;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    async function clearPendingMismatchInBackground() {
+        try {
+            await sendRuntimeMessage({
+                action: 'canvasGitSyncClearPendingMismatch'
+            }, 10000);
+        } catch (_) { }
+    }
+
+    function applyBackgroundRuntimeState(backgroundRuntime, options = {}) {
+        if (!backgroundRuntime || typeof backgroundRuntime !== 'object') return false;
+
+        const nextPendingMismatch = backgroundRuntime.pendingMismatch === true;
+        const nextMismatchAt = Number(backgroundRuntime.pendingMismatchUpdatedAt)
+            || Number(backgroundRuntime.pendingMismatchAt)
+            || 0;
+
+        let changed = false;
+        if (!!runtime.pendingMismatch !== nextPendingMismatch) {
+            runtime.pendingMismatch = nextPendingMismatch;
+            if (!nextPendingMismatch) {
+                mismatchPromptShownOnInit = false;
+            }
+            changed = true;
+        }
+
+        if (runtime.pendingMismatchAt !== nextMismatchAt) {
+            runtime.pendingMismatchAt = nextMismatchAt;
+            changed = true;
+        }
+
+        if (options.updateRemoteSha && typeof backgroundRuntime.lastRemoteSha === 'string' && backgroundRuntime.lastRemoteSha) {
+            if (runtime.lastRemoteSha !== backgroundRuntime.lastRemoteSha) {
+                runtime.lastRemoteSha = backgroundRuntime.lastRemoteSha;
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            saveRuntime();
+            renderStatus();
+        }
+
+        return changed;
+    }
+
+    async function refreshPendingMismatchFromBackground() {
+        const response = await getBackgroundSyncState();
+        if (!response || !response.runtime) return;
+        applyBackgroundRuntimeState(response.runtime, { updateRemoteSha: true });
+    }
+
+    async function resolvePendingMismatchBySync(mode, trigger) {
+        const beforeSuccessAt = Number(runtime.lastSuccessAt) || 0;
+
+        await runSync(mode, trigger);
+
+        const successAdvanced = (Number(runtime.lastSuccessAt) || 0) > beforeSuccessAt;
+        const hasError = !!String(runtime.lastError || '').trim();
+        const isSuccessful = successAdvanced && !hasError;
+
+        if (isSuccessful) {
+            runtime.pendingMismatch = false;
+            runtime.pendingMismatchAt = 0;
+            mismatchPromptShownOnInit = false;
+            saveRuntime();
+            renderStatus();
+            await clearPendingMismatchInBackground();
+            await updateBackgroundSyncContext('mismatch-cleared', {
+                pendingMismatch: false,
+                pendingMismatchAt: 0,
+                hasPendingWork: false,
+                localDirty: false
+            });
+        }
+
+        return isSuccessful;
+    }
+
+    async function maybeHandlePendingMismatchOnPanelOpen() {
+        if (!settings || ensureMismatchPolicy(settings.mismatchPolicy) !== 'prompt') return;
+        if (!runtime || !runtime.pendingMismatch) return;
+        if (runtime.isRunning) return;
+        if (hasPendingConflict()) return;
+
+        setActiveTab('status');
+        renderMismatchPanel();
+    }
+
+    function maybePromptPendingMismatchOnInit() {
+        if (mismatchPromptShownOnInit) return;
+        if (!settings || ensureMismatchPolicy(settings.mismatchPolicy) !== 'prompt') return;
+        if (!runtime || !runtime.pendingMismatch) return;
+        if (runtime.isRunning) return;
+        if (hasPendingConflict()) return;
+
+        mismatchPromptShownOnInit = true;
+        openPanel({ activeTab: 'status' });
+        toast(textByLang(
+            '前台关闭期间检测到云端更新，请在“状态”面板选择处理方式',
+            'Remote updates were detected while foreground was closed. Please choose an action in Status panel.'
+        ));
+    }
+
+    async function maybeHandlePendingMismatchAutoPull() {
+        if (!settings || ensureMismatchPolicy(settings.mismatchPolicy) !== 'auto_pull') return;
+        if (!runtime || !runtime.pendingMismatch) return;
+        if (runtime.isRunning) return;
+        if (hasPendingConflict()) return;
+
+        const ok = await resolvePendingMismatchBySync('pull', 'mismatch-policy-auto-pull');
+        if (!ok) {
+            toast(textByLang('后台检测到不一致，自动拉取失败，请稍后重试', 'Background mismatch detected; auto pull failed, please retry later'));
+        }
+    }
+
     async function readRemoteSnapshot() {
         const response = await sendRuntimeMessage({
             action: 'canvasGitReadState',
@@ -1334,7 +2210,7 @@
         });
 
         if (!response || response.success !== true) {
-            throw new Error((response && response.error) || textByLang('读取远端同步文件失败', 'Failed to read remote sync file'));
+            throw new Error((response && response.error) || textByLang('读取云端同步文件失败', 'Failed to read remote sync file'));
         }
 
         if (response.notFound === true) {
@@ -1355,7 +2231,7 @@
         try {
             parsed = JSON.parse(text);
         } catch (_) {
-            throw new Error(textByLang('远端同步文件不是合法 JSON', 'Remote sync file is not valid JSON'));
+            throw new Error(textByLang('云端同步文件不是合法 JSON', 'Remote sync file is not valid JSON'));
         }
 
         return {
@@ -1376,7 +2252,7 @@
 
         const response = await sendRuntimeMessage(payload);
         if (!response || response.success !== true) {
-            throw new Error((response && response.error) || textByLang('写入远端同步文件失败', 'Failed to write remote sync file'));
+            throw new Error((response && response.error) || textByLang('写入云端同步文件失败', 'Failed to write remote sync file'));
         }
 
         return response;
@@ -1515,57 +2391,148 @@
         const panel = getElement('canvasSyncConflictPanel');
         if (!panel) return;
 
-        if (!pendingConflict) {
+        const conflictPreview = isConflictPreviewActive();
+        if (conflictPreview && !previewConflict) {
+            previewConflict = buildPreviewConflictPayload();
+        }
+
+        const conflictData = pendingConflict || (conflictPreview ? previewConflict : null);
+
+        if (!conflictData) {
             panel.hidden = true;
             const summaryWhenHidden = getElement('canvasSyncConflictSummary');
             if (summaryWhenHidden) {
                 delete summaryWhenHidden.dataset.dynamicSummary;
             }
+            const dismissTextWhenHidden = getElement('canvasSyncConflictDismissText');
+            if (dismissTextWhenHidden) {
+                dismissTextWhenHidden.textContent = textByLang('稍后处理', 'Handle later');
+            }
+            updatePreviewActionButtonState();
             return;
         }
 
         panel.hidden = false;
 
         const detectedAt = getElement('canvasSyncConflictDetectedAt');
-        if (detectedAt) detectedAt.textContent = formatTime(pendingConflict.createdAt);
+        if (detectedAt) detectedAt.textContent = formatTime(conflictData.createdAt);
 
         const summary = getElement('canvasSyncConflictSummary');
         if (summary) {
-            const syncMethod = ensureSyncMethod(settings.syncMethod);
-            const methodText = formatSyncMethodForDisplay(syncMethod);
-            const policyText = formatConflictPolicyForDisplay(settings.conflictPolicy);
-            const remotePathZh = pendingConflict.remotePath ? `远端文件：${pendingConflict.remotePath}` : '远端文件：默认路径';
-            const remotePathEn = pendingConflict.remotePath ? `Remote file: ${pendingConflict.remotePath}` : 'Remote file: default path';
-            const resetHint = syncMethod === 'reset'
-                ? textByLang(
-                    '选择远端时只会更新 HEAD，不会覆盖本地工作区。',
-                    'Choosing remote will only update HEAD and will not overwrite the local working tree.'
-                )
-                : textByLang(
-                    '建议先导出全量备份，再选择本地或远端。',
-                    'Export a full backup first, then choose local or remote.'
+            if (conflictPreview) {
+                summary.textContent = textByLang(
+                    '这是“冲突面板”预览：用于展示两端都改时的对比信息与处理按钮。',
+                    'This is a conflict panel preview showing the comparison info and action buttons when both sides changed.'
                 );
+            } else {
+                const syncMethod = ensureSyncMethod(settings.syncMethod);
+                const methodText = formatSyncMethodForDisplay(syncMethod);
+                const policyText = formatConflictPolicyForDisplay(settings.conflictPolicy);
+                const remotePathZh = conflictData.remotePath ? `云端文件：${conflictData.remotePath}` : '云端文件：默认路径';
+                const remotePathEn = conflictData.remotePath ? `Remote file: ${conflictData.remotePath}` : 'Remote file: default path';
+                const resetHint = syncMethod === 'reset'
+                    ? textByLang(
+                        '选择云端时只会更新 HEAD，不会覆盖本地工作区。',
+                        'Choosing remote will only update HEAD and will not overwrite the local working tree.'
+                    )
+                    : textByLang(
+                        '建议先导出全量备份，再选择本地或云端。',
+                        'Export a full backup first, then choose local or remote.'
+                    );
 
-            summary.textContent = textByLang(
-                `检测到两端都已修改。${remotePathZh}。当前合并策略：${methodText}；冲突策略：${policyText}。${resetHint}`,
-                `Concurrent changes detected on both sides. ${remotePathEn}. Current merge strategy: ${methodText}; conflict strategy: ${policyText}. ${resetHint}`
-            );
+                summary.textContent = textByLang(
+                    `检测到两端都已修改。${remotePathZh}。当前合并策略：${methodText}；冲突策略：${policyText}。${resetHint}`,
+                    `Concurrent changes detected on both sides. ${remotePathEn}. Current merge strategy: ${methodText}; conflict strategy: ${policyText}. ${resetHint}`
+                );
+            }
             summary.dataset.dynamicSummary = 'true';
         }
 
         const localUpdated = getElement('canvasSyncConflictLocalUpdated');
         const localSize = getElement('canvasSyncConflictLocalSize');
         const localHash = getElement('canvasSyncConflictLocalHash');
-        if (localUpdated) localUpdated.textContent = formatTime(pendingConflict.localMeta.updatedAt);
-        if (localSize) localSize.textContent = formatBytes(pendingConflict.localMeta.bytes);
-        if (localHash) localHash.textContent = shortText(pendingConflict.localMeta.hash, '-');
+        if (localUpdated) localUpdated.textContent = formatTime(conflictData.localMeta.updatedAt);
+        if (localSize) localSize.textContent = formatBytes(conflictData.localMeta.bytes);
+        if (localHash) localHash.textContent = shortText(conflictData.localMeta.hash, '-');
 
         const remoteUpdated = getElement('canvasSyncConflictRemoteUpdated');
         const remoteSize = getElement('canvasSyncConflictRemoteSize');
         const remoteHash = getElement('canvasSyncConflictRemoteHash');
-        if (remoteUpdated) remoteUpdated.textContent = formatTime(pendingConflict.remoteMeta.updatedAt);
-        if (remoteSize) remoteSize.textContent = formatBytes(pendingConflict.remoteMeta.bytes);
-        if (remoteHash) remoteHash.textContent = shortText(pendingConflict.remoteMeta.hash || pendingConflict.remoteSha, '-');
+        if (remoteUpdated) remoteUpdated.textContent = formatTime(conflictData.remoteMeta.updatedAt);
+        if (remoteSize) remoteSize.textContent = formatBytes(conflictData.remoteMeta.bytes);
+        if (remoteHash) remoteHash.textContent = shortText(conflictData.remoteMeta.hash || conflictData.remoteSha, '-');
+
+        const dismissText = getElement('canvasSyncConflictDismissText');
+        if (dismissText) {
+            dismissText.textContent = conflictPreview
+                ? textByLang('关闭预览', 'Close Preview')
+                : textByLang('稍后处理', 'Handle later');
+        }
+
+        updatePreviewActionButtonState();
+    }
+
+    function renderMismatchPanel() {
+        const panel = getElement('canvasSyncMismatchPanel');
+        if (!panel) return;
+
+        const mismatchPreview = isMismatchPreviewActive();
+
+        const shouldShow = !!(
+            runtime
+            && runtime.pendingMismatch
+            && !pendingConflict
+            && settings
+            && ensureMismatchPolicy(settings.mismatchPolicy) === 'prompt'
+        ) || mismatchPreview;
+
+        if (!shouldShow) {
+            panel.hidden = true;
+            const summaryWhenHidden = getElement('canvasSyncMismatchSummary');
+            if (summaryWhenHidden) {
+                delete summaryWhenHidden.dataset.dynamicSummary;
+            }
+            const dismissTextWhenHidden = getElement('canvasSyncMismatchDismissText');
+            if (dismissTextWhenHidden) {
+                dismissTextWhenHidden.textContent = textByLang('稍后处理', 'Handle later');
+            }
+            updatePreviewActionButtonState();
+            return;
+        }
+
+        panel.hidden = false;
+
+        const detectedAt = getElement('canvasSyncMismatchDetectedAt');
+        if (detectedAt) {
+            detectedAt.textContent = formatTime(mismatchPreview ? Date.now() : (runtime.pendingMismatchAt || Date.now()));
+        }
+
+        const summary = getElement('canvasSyncMismatchSummary');
+        if (summary) {
+            if (mismatchPreview) {
+                summary.textContent = textByLang(
+                    '这是“云端不一致面板”预览：用于展示后台检测到版本不一致时的处理按钮。',
+                    'This is a remote mismatch panel preview showing actions when background detects a revision mismatch.'
+                );
+            } else {
+                const remoteSha = shortText(runtime.lastRemoteSha, '-');
+                const localHash = shortText(runtime.lastLocalHash, '-');
+                summary.textContent = textByLang(
+                    `后台在前台关闭期间检测到云端版本与本地基线不一致。当前已进入前台。云端版本：${remoteSha}；本地哈希：${localHash}。请选择处理方式。`,
+                    `Background detected mismatch while foreground was closed. You are now in foreground. Remote revision: ${remoteSha}; local hash: ${localHash}. Please choose an action.`
+                );
+            }
+            summary.dataset.dynamicSummary = 'true';
+        }
+
+        const dismissText = getElement('canvasSyncMismatchDismissText');
+        if (dismissText) {
+            dismissText.textContent = mismatchPreview
+                ? textByLang('关闭预览', 'Close Preview')
+                : textByLang('稍后处理', 'Handle later');
+        }
+
+        updatePreviewActionButtonState();
     }
 
     function setPendingConflict(conflict) {
@@ -1575,6 +2542,12 @@
         saveRuntime();
         renderStatus();
         renderConflictPanel();
+        void updateBackgroundSyncContext('sync-conflict-pending', {
+            hasPendingWork: true,
+            isRunning: runtime.isRunning,
+            queueLength: runtime.queueLength,
+            pendingMismatch: runtime.pendingMismatch
+        });
     }
 
     function clearPendingConflict() {
@@ -1584,6 +2557,12 @@
         saveRuntime();
         renderStatus();
         renderConflictPanel();
+        void updateBackgroundSyncContext('sync-conflict-cleared', {
+            hasPendingWork: runtime.pendingMismatch,
+            isRunning: runtime.isRunning,
+            queueLength: runtime.queueLength,
+            pendingMismatch: runtime.pendingMismatch
+        });
     }
 
     function backupSnapshotForRecovery(snapshot, reason) {
@@ -1607,7 +2586,7 @@
             : 0;
 
         if (deletePercent > settings.deleteThresholdPercent) {
-            throw new Error(textByLang(`远端删除比例 ${deletePercent.toFixed(1)}% 超过阈值 ${settings.deleteThresholdPercent}%`, `Remote deletion ratio ${deletePercent.toFixed(1)}% exceeds threshold ${settings.deleteThresholdPercent}%`));
+            throw new Error(textByLang(`云端删除比例 ${deletePercent.toFixed(1)}% 超过阈值 ${settings.deleteThresholdPercent}%`, `Remote deletion ratio ${deletePercent.toFixed(1)}% exceeds threshold ${settings.deleteThresholdPercent}%`));
         }
 
         SYNC_KEYS.forEach((key) => {
@@ -1725,8 +2704,8 @@
             renderStatus();
 
             toast(choice === 'local'
-                ? textByLang('冲突已处理：已保留本地并覆盖远端', 'Conflict resolved: kept local and overwrote remote')
-                : textByLang('冲突已处理：已使用远端覆盖本地（已生成本地恢复快照）', 'Conflict resolved: used remote to overwrite local (local recovery snapshot created)'));
+                ? textByLang('冲突已处理：已保留本地并覆盖云端', 'Conflict resolved: kept local and overwrote remote')
+                : textByLang('冲突已处理：已使用云端覆盖本地（已生成本地恢复快照）', 'Conflict resolved: used remote to overwrite local (local recovery snapshot created)'));
         } catch (error) {
             runtime.lastError = error && error.message ? error.message : String(error);
             saveRuntime();
@@ -1805,6 +2784,11 @@
         runtime.lastSyncMode = `${effectiveMode}:${syncMethod}`;
         saveRuntime();
         renderStatus();
+        void updateBackgroundSyncContext('sync-running', {
+            isRunning: true,
+            queueLength: runtime.queueLength,
+            pendingMismatch: runtime.pendingMismatch
+        });
 
         try {
             const localSnapshot = await buildLocalSnapshot(trigger);
@@ -1816,22 +2800,45 @@
                     `Bookmark Canvas Sync: ${reason}`
                 );
 
-                const obsidianPushResult = await pushObsidianFilesIncremental(trigger || reason || 'sync');
-                if (obsidianPushResult && obsidianPushResult.enabled) {
-                    runtime.lastObsidianPushAt = Date.now();
-                    runtime.lastObsidianPushChanged = Number(obsidianPushResult.changedCount) || 0;
-                    runtime.lastObsidianPushTotal = Number(obsidianPushResult.totalCount) || 0;
+                let obsidianPushResult = null;
+                const canPushBlankSectionFiles = shouldPushBlankSectionFiles(trigger || reason || 'sync');
+                if (settings.obsidianFilePushEnabled !== false && canPushBlankSectionFiles) {
+                    obsidianPushResult = await pushObsidianFilesIncremental(trigger || reason || 'sync');
+                    if (obsidianPushResult && obsidianPushResult.enabled) {
+                        runtime.lastObsidianPushAt = Date.now();
+                        runtime.lastObsidianPushChanged = Number(obsidianPushResult.changedCount) || 0;
+                        runtime.lastObsidianPushTotal = Number(obsidianPushResult.totalCount) || 0;
+                    }
+                } else if (settings.obsidianFilePushEnabled !== false && !canPushBlankSectionFiles) {
+                    obsidianPushResult = { enabled: false, skippedByThrottle: true };
                 }
 
                 runtime.lastLocalHash = localHash;
                 runtime.lastRemoteSha = writeResult.fileSha || writeResult.commitSha || runtime.lastRemoteSha;
+                const nowTs = Date.now();
                 if (localSnapshot && localSnapshot.permanentTreeSnapshot) {
-                    runtime.lastPermanentTreeSnapshotAt = Date.now();
+                    runtime.lastPermanentTreeSnapshotAt = nowTs;
+                }
+
+                const includeTempSection = !!(localSnapshot && localSnapshot._syncMeta && localSnapshot._syncMeta.includeTempSection);
+                if (includeTempSection) {
+                    runtime.lastTempSectionSnapshotAt = nowTs;
+                    const pushedTempStateRaw = localSnapshot
+                        && localSnapshot.data
+                        && typeof localSnapshot.data[TEMP_SECTION_STORAGE_KEY] === 'string'
+                        ? localSnapshot.data[TEMP_SECTION_STORAGE_KEY]
+                        : '';
+                    if (pushedTempStateRaw) {
+                        localStorage.setItem(LAST_UPLOADED_TEMP_STATE_KEY, pushedTempStateRaw);
+                    }
                 }
                 runtime.lastAppliedDirection = 'push';
 
                 if (obsidianPushResult && obsidianPushResult.enabled) {
                     return `push + files(${runtime.lastObsidianPushChanged}/${runtime.lastObsidianPushTotal})`;
+                }
+                if (obsidianPushResult && obsidianPushResult.skippedByThrottle) {
+                    return textByLang('push + 空白栏目文件节流中', 'push + blank-section files throttled');
                 }
                 return 'push';
             };
@@ -1848,7 +2855,7 @@
                 runtime.lastLocalHash = localHash;
                 runtime.lastRemoteSha = remoteState.sha || runtime.lastRemoteSha;
                 runtime.lastAppliedDirection = 'reset-head';
-                return reason || textByLang('其他同步服务（仅更新 HEAD）', 'Other sync service (only update HEAD)');
+                return reason || textByLang('仅记云端版本（仅更新 HEAD）', 'Track remote revision only (update HEAD)');
             };
 
             let actionText = 'noop';
@@ -1870,7 +2877,7 @@
                 const remoteState = await readRemoteSnapshot();
                 if (effectiveMode === 'pull') {
                     if (remoteState.notFound) {
-                        throw new Error(textByLang('远端同步文件不存在，无法仅拉取', 'Remote sync file does not exist; pull-only cannot continue'));
+                        throw new Error(textByLang('云端同步文件不存在，无法仅拉取', 'Remote sync file does not exist; pull-only cannot continue'));
                     }
                     if (syncMethod === 'reset') {
                         actionText = await doResetHead(remoteState);
@@ -1918,7 +2925,7 @@
                                 renderConflictPanel();
                                 openPanel({ activeTab: 'status' });
                                 toast(textByLang(
-                                    `检测到冲突：当前冲突策略=默认（Git），当前合并策略=${formatSyncMethodForDisplay(syncMethod)}，请手动选择本地或远端`,
+                                    `检测到冲突：当前冲突策略=手动处理冲突（Git 默认），当前合并策略=${formatSyncMethodForDisplay(syncMethod)}，请手动选择本地或云端`,
                                     `Conflict detected: conflict strategy is None (git default), merge strategy is ${formatSyncMethodForDisplay(syncMethod)}. Please choose local or remote manually.`
                                 ));
                                 return;
@@ -1938,7 +2945,7 @@
                                     renderStatus();
                                     renderConflictPanel();
                                     openPanel({ activeTab: 'status' });
-                                    toast(textByLang('检测到冲突：请在面板中选择本地或远端', 'Conflict detected: please choose local or remote in the panel'));
+                                    toast(textByLang('检测到冲突：请在面板中选择本地或云端', 'Conflict detected: please choose local or remote in the panel'));
                                     return;
                                 }
                                 if (winner === 'local') {
@@ -1968,8 +2975,21 @@
             runtime.queueLength = 0;
             runtime.lastError = '';
             runtime.lastSuccessAt = Date.now();
+            runtime.pendingMismatch = false;
+            runtime.pendingMismatchAt = 0;
             saveRuntime();
             renderStatus();
+            void updateBackgroundSyncContext('sync-success', {
+                isRunning: false,
+                queueLength: 0,
+                pendingMismatch: false,
+                pendingMismatchAt: 0,
+                hasPendingWork: false,
+                localDirty: false,
+                lastRemoteSha: runtime.lastRemoteSha,
+                lastLocalHash: runtime.lastLocalHash,
+                lastSuccessAt: runtime.lastSuccessAt
+            });
 
             const triggerText = trigger ? `（${trigger}）` : '';
             if (actionText === 'noop') {
@@ -1986,6 +3006,14 @@
             runtime.lastError = error && error.message ? error.message : String(error);
             saveRuntime();
             renderStatus();
+            void updateBackgroundSyncContext('sync-error', {
+                isRunning: false,
+                queueLength: runtime.queueLength,
+                pendingMismatch: runtime.pendingMismatch,
+                lastRemoteSha: runtime.lastRemoteSha,
+                lastLocalHash: runtime.lastLocalHash,
+                lastSuccessAt: runtime.lastSuccessAt
+            });
 
             const isRepoConfigError = /token 未配置|仓库未配置|仓库已禁用|owner\s*\/\s*repo 未配置|token not configured|repository not ready|repository disabled|owner\s*\/\s*repo not configured/i.test(runtime.lastError);
             if (!hasPendingConflict() && !isRepoConfigError) {
@@ -2002,6 +3030,14 @@
             runtime.isRunning = false;
             saveRuntime();
             renderStatus();
+            void updateBackgroundSyncContext('sync-idle', {
+                isRunning: false,
+                queueLength: runtime.queueLength,
+                pendingMismatch: runtime.pendingMismatch,
+                lastRemoteSha: runtime.lastRemoteSha,
+                lastLocalHash: runtime.lastLocalHash,
+                lastSuccessAt: runtime.lastSuccessAt
+            });
         }
     }
 
@@ -2047,6 +3083,15 @@
         runtime.lastLocalHash = getSnapshotHash(localSnapshot);
         runtime.lastRemoteSha = writeResult.fileSha || writeResult.commitSha || runtime.lastRemoteSha;
         runtime.lastPermanentTreeSnapshotAt = Date.now();
+        runtime.lastTempSectionSnapshotAt = Date.now();
+        const pushedTempStateRaw = localSnapshot
+            && localSnapshot.data
+            && typeof localSnapshot.data[TEMP_SECTION_STORAGE_KEY] === 'string'
+            ? localSnapshot.data[TEMP_SECTION_STORAGE_KEY]
+            : '';
+        if (pushedTempStateRaw) {
+            localStorage.setItem(LAST_UPLOADED_TEMP_STATE_KEY, pushedTempStateRaw);
+        }
         runtime.lastAppliedDirection = 'push-bootstrap';
         runtime.lastError = '';
         runtime.lastSuccessAt = Date.now();
@@ -2285,15 +3330,22 @@
         const delayMs = navigator.onLine === false ? 5000 : 2000;
         retryTimer = setTimeout(() => {
             retryTimer = null;
-            if (settings.enabled && settings.autoSync && !hasPendingConflict()) {
+            if (settings.enabled && settings.autoSync && !hasPendingConflict() && !shouldPauseAutoSyncForPendingMismatch()) {
                 runSync('full', 'retry');
             }
         }, delayMs);
     }
 
+    function shouldPauseAutoSyncForPendingMismatch() {
+        if (!runtime || !runtime.pendingMismatch) return false;
+        if (!settings) return false;
+        return ensureMismatchPolicy(settings.mismatchPolicy) === 'prompt';
+    }
+
     function scheduleSync(reason, options = {}) {
         if (!settings.enabled || !settings.autoSync) return;
         if (hasPendingConflict()) return;
+        if (shouldPauseAutoSyncForPendingMismatch()) return;
         if (getRepoConfigMissingReason(repoConfig || {})) return;
 
         runtime.lastLocalMutationAt = Date.now();
@@ -2302,6 +3354,11 @@
         runtime.queueLength = pendingReasons.size;
         saveRuntime();
         renderStatus();
+        void updateBackgroundSyncContext('local-dirty', {
+            queueLength: runtime.queueLength,
+            isRunning: runtime.isRunning,
+            pendingMismatch: runtime.pendingMismatch
+        });
 
         const wait = options.immediate
             ? 0
@@ -2327,6 +3384,7 @@
         if (!Number.isFinite(settings.intervalSeconds) || settings.intervalSeconds <= 0) return;
         fallbackTimer = setInterval(() => {
             if (hasPendingConflict()) return;
+            if (shouldPauseAutoSyncForPendingMismatch()) return;
             scheduleSync('fallback', { immediate: true });
         }, settings.intervalSeconds * 1000);
     }
@@ -2347,6 +3405,7 @@
         if (settings.autoPushIntervalMinutes > 0) {
             autoPushTimer = setInterval(() => {
                 if (hasPendingConflict()) return;
+                if (shouldPauseAutoSyncForPendingMismatch()) return;
                 runSync('push', 'auto-push-interval');
             }, settings.autoPushIntervalMinutes * 60 * 1000);
         }
@@ -2354,6 +3413,7 @@
         if (settings.autoPullIntervalMinutes > 0) {
             autoPullTimer = setInterval(() => {
                 if (hasPendingConflict()) return;
+                if (shouldPauseAutoSyncForPendingMismatch()) return;
                 runSync('pull', 'auto-pull-interval');
             }, settings.autoPullIntervalMinutes * 60 * 1000);
         }
@@ -2370,6 +3430,7 @@
             startupPullTimer = null;
         }
         if (!settings.enabled || !settings.autoSync) return;
+        if (shouldPauseAutoSyncForPendingMismatch()) return;
         if (!settings.pullOnStartup) return;
 
         startupPullTimer = setTimeout(() => {
@@ -2395,6 +3456,10 @@
         renderStatus();
         renderConflictPanel();
 
+        refreshPendingMismatchFromBackground()
+            .then(() => maybeHandlePendingMismatchOnPanelOpen())
+            .catch(() => { });
+
         const targetTab = options && options.activeTab ? options.activeTab : activeTabKey;
         setActiveTab(targetTab, { persist: false });
         setFirstSyncFoldOpen(false);
@@ -2402,6 +3467,7 @@
 
         global.requestAnimationFrame(() => {
             positionPanel();
+            scheduleBehaviorSubNavSyncFromScroll();
         });
 
         loadRepoConfigFromStorage().catch((error) => {
@@ -2412,6 +3478,12 @@
     function closePanel() {
         const modal = getElement('canvasSyncModal');
         if (!modal) return;
+        if (previewPanelMode) {
+            previewPanelMode = '';
+            previewConflict = null;
+            renderStatus();
+            renderConflictPanel();
+        }
         modal.style.display = 'none';
     }
 
@@ -2428,6 +3500,9 @@
         const tokenGuideBtn = getElement('canvasSyncTokenGuideBtn');
         if (tokenGuideBtn) tokenGuideBtn.addEventListener('click', openTokenGuidePage);
 
+        const officialPluginBtn = getElement('canvasSyncOfficialPluginBtn');
+        if (officialPluginBtn) officialPluginBtn.addEventListener('click', openOfficialPluginPage);
+
         const firstSyncFoldSummary = getElement('canvasSyncFirstSyncFoldSummary');
         if (firstSyncFoldSummary) {
             firstSyncFoldSummary.addEventListener('click', () => {
@@ -2440,6 +3515,7 @@
         bindTabButton('canvasSyncTabRepoBtn', 'repo');
         bindTabButton('canvasSyncTabBehaviorBtn', 'behavior');
         bindTabButton('canvasSyncTabStatusBtn', 'status');
+        bindBehaviorSubNavButtons();
         setActiveTab(activeTabKey, { persist: false });
 
         const repoSaveBtn = getElement('canvasSyncRepoSaveBtn');
@@ -2510,14 +3586,21 @@
         [
             'canvasSyncEnabledToggle',
             'canvasSyncAutoToggle',
+            'canvasSyncAutoAfterEditStopToggle',
             'canvasSyncIntervalInput',
             'canvasSyncSplitIntervalsToggle',
             'canvasSyncFirstSyncModeAutoInput',
             'canvasSyncFirstSyncModeCloudInput',
             'canvasSyncFirstSyncModeLocalInput',
             'canvasSyncPermanentTreeIntervalSelect',
+            'canvasSyncTempSectionIntervalInput',
+            'canvasSyncMdNodeIntervalInput',
             'canvasSyncAutoPushIntervalInput',
             'canvasSyncAutoPullIntervalInput',
+            'canvasSyncBackgroundCheckToggle',
+            'canvasSyncBackgroundCheckIntervalInput',
+            'canvasSyncBackgroundCooldownInput',
+            'canvasSyncMismatchPolicySelect',
             'canvasSyncPullOnStartupToggle',
             'canvasSyncPushOnSyncToggle',
             'canvasSyncPullOnSyncToggle',
@@ -2560,6 +3643,53 @@
             });
         }
 
+        const runBgCheckBtn = getElement('canvasSyncRunBgCheckBtn');
+        if (runBgCheckBtn) {
+            runBgCheckBtn.addEventListener('click', async () => {
+                try {
+                    runBgCheckBtn.disabled = true;
+                    await sendRuntimeMessage({ action: 'canvasGitSyncRunBackgroundCheckNow' }, 12000);
+                    await refreshPendingMismatchFromBackground();
+                    renderStatus();
+                    renderConflictPanel();
+                    if (runtime.pendingMismatch) {
+                        setActiveTab('status');
+                        await maybeHandlePendingMismatchOnPanelOpen();
+                        toast(textByLang('后台检查完成：检测到云端不一致', 'Background check completed: remote mismatch detected'));
+                    } else {
+                        toast(textByLang('后台检查完成：当前未检测到不一致', 'Background check completed: no mismatch detected'));
+                    }
+                } catch (error) {
+                    toast(textByLang(
+                        `后台检查失败：${error && error.message ? error.message : String(error)}`,
+                        `Background check failed: ${error && error.message ? error.message : String(error)}`
+                    ));
+                } finally {
+                    runBgCheckBtn.disabled = false;
+                }
+            });
+        }
+
+        const previewMismatchBtn = getElement('canvasSyncPreviewMismatchBtn');
+        if (previewMismatchBtn) {
+            previewMismatchBtn.addEventListener('click', () => {
+                setPreviewPanelMode('mismatch');
+                setActiveTab('status');
+                scrollStatusPanelToPreview('mismatch');
+                toast(textByLang('已打开“云端不一致面板”预览', 'Remote mismatch panel preview opened'));
+            });
+        }
+
+        const previewConflictBtn = getElement('canvasSyncPreviewConflictBtn');
+        if (previewConflictBtn) {
+            previewConflictBtn.addEventListener('click', () => {
+                setPreviewPanelMode('conflict');
+                setActiveTab('status');
+                scrollStatusPanelToPreview('conflict');
+                toast(textByLang('已打开“冲突面板”预览', 'Conflict panel preview opened'));
+            });
+        }
+
         const firstSyncOverwriteBtn = getElement('canvasSyncFirstSyncOverwriteBtn');
         if (firstSyncOverwriteBtn) {
             firstSyncOverwriteBtn.addEventListener('click', async () => {
@@ -2585,7 +3715,47 @@
         const conflictDismissBtn = getElement('canvasSyncConflictDismissBtn');
         if (conflictDismissBtn) {
             conflictDismissBtn.addEventListener('click', () => {
+                if (isConflictPreviewActive()) {
+                    setPreviewPanelMode('');
+                    toast(textByLang('已关闭“冲突面板”预览', 'Conflict panel preview closed'));
+                    return;
+                }
                 toast(textByLang('冲突已保留，自动同步暂停，待你手动选择后恢复', 'Conflict kept. Auto sync is paused until you resolve it manually'));
+                closePanel();
+            });
+        }
+
+        const mismatchUseRemoteBtn = getElement('canvasSyncMismatchUseRemoteBtn');
+        if (mismatchUseRemoteBtn) {
+            mismatchUseRemoteBtn.addEventListener('click', async () => {
+                const ok = await resolvePendingMismatchBySync('pull', 'mismatch-panel-pull');
+                if (!ok) {
+                    toast(textByLang('与云端对齐失败，请检查错误后重试', 'Failed to align with cloud; check errors and retry'));
+                }
+                renderMismatchPanel();
+            });
+        }
+
+        const mismatchUseLocalBtn = getElement('canvasSyncMismatchUseLocalBtn');
+        if (mismatchUseLocalBtn) {
+            mismatchUseLocalBtn.addEventListener('click', async () => {
+                const ok = await resolvePendingMismatchBySync('push', 'mismatch-panel-push');
+                if (!ok) {
+                    toast(textByLang('本地覆盖云端失败，请检查错误后重试', 'Failed to overwrite cloud with local; check errors and retry'));
+                }
+                renderMismatchPanel();
+            });
+        }
+
+        const mismatchDismissBtn = getElement('canvasSyncMismatchDismissBtn');
+        if (mismatchDismissBtn) {
+            mismatchDismissBtn.addEventListener('click', () => {
+                if (isMismatchPreviewActive()) {
+                    setPreviewPanelMode('');
+                    toast(textByLang('已关闭“云端不一致面板”预览', 'Remote mismatch panel preview closed'));
+                    return;
+                }
+                toast(textByLang('已保留“云端不一致待处理”状态', 'Pending remote mismatch is kept'));
                 closePanel();
             });
         }
@@ -2605,7 +3775,10 @@
         global.addEventListener('resize', () => {
             const currentModal = getElement('canvasSyncModal');
             if (!currentModal || currentModal.style.display !== 'block') return;
-            global.requestAnimationFrame(() => positionPanel());
+            global.requestAnimationFrame(() => {
+                positionPanel();
+                scheduleBehaviorSubNavSyncFromScroll();
+            });
         });
 
         global.addEventListener('online', () => {
@@ -2614,7 +3787,7 @@
         });
 
         global.addEventListener('offline', () => {
-            runtime.lastError = textByLang('当前离线，已暂停远端同步，恢复网络后自动重试', 'Offline now. Remote sync paused and will retry when network is back');
+            runtime.lastError = textByLang('当前离线，已暂停云端同步，恢复网络后自动重试', 'Offline now. Remote sync paused and will retry when network is back');
             saveRuntime();
             renderStatus();
         });
@@ -2623,6 +3796,8 @@
     function init() {
         settings = loadSettings();
         runtime = loadRuntime();
+        runtime.pendingMismatch = runtime.pendingMismatch === true;
+        runtime.pendingMismatchAt = Number(runtime.pendingMismatchAt) || 0;
         activeTabKey = loadActiveTab();
         repoConfig = normalizeRepoConfig({});
         pendingConflict = loadPendingConflict();
@@ -2636,6 +3811,21 @@
         renderStatus();
         restartAutomationTimers();
         scheduleStartupPull();
+
+        refreshPendingMismatchFromBackground()
+            .then(() => maybeHandlePendingMismatchAutoPull())
+            .then(() => maybePromptPendingMismatchOnInit())
+            .catch(() => { });
+
+        void updateBackgroundSyncContext('init', {
+            isRunning: runtime.isRunning,
+            queueLength: runtime.queueLength,
+            pendingMismatch: runtime.pendingMismatch,
+            pendingMismatchAt: runtime.pendingMismatchAt,
+            lastRemoteSha: runtime.lastRemoteSha,
+            lastLocalHash: runtime.lastLocalHash,
+            lastSuccessAt: runtime.lastSuccessAt
+        });
     }
 
     const syncApi = {
@@ -2644,16 +3834,35 @@
         requestSyncNow: (trigger) => runSync('full', trigger || 'manual'),
         runFirstSyncCloudOverwrite,
         readRemoteSnapshotForImport,
-        markDirty: (reason, options) => scheduleSync(reason || 'save', options || {}),
+        markDirty: (reason, options) => {
+            const effectiveSettings = settings || loadSettings();
+            if (!effectiveSettings || effectiveSettings.syncAfterEditStop === false) {
+                return;
+            }
+            scheduleSync(reason || 'save', options || {});
+        },
         getSettings: () => Object.assign({}, settings || loadSettings()),
         updateSettings: (patch) => {
             settings = Object.assign({}, settings || loadSettings(), patch || {});
             settings.conflictPolicy = ensureConflictPolicy(settings.conflictPolicy);
             settings.syncMethod = ensureSyncMethod(settings.syncMethod);
             settings.filePath = normalizeSyncPath(settings.filePath);
+            settings.syncAfterEditStop = settings.syncAfterEditStop !== false;
             settings.splitIntervalCommitAndSync = !!settings.splitIntervalCommitAndSync;
-            settings.autoPushIntervalMinutes = normalizeIntervalMinutes(settings.autoPushIntervalMinutes, DEFAULT_SETTINGS.autoPushIntervalMinutes);
-            settings.autoPullIntervalMinutes = normalizeIntervalMinutes(settings.autoPullIntervalMinutes, DEFAULT_SETTINGS.autoPullIntervalMinutes);
+            settings.autoPushIntervalMinutes = normalizeSplitIntervalMinutes(settings.autoPushIntervalMinutes, DEFAULT_SETTINGS.autoPushIntervalMinutes);
+            settings.autoPullIntervalMinutes = normalizeSplitIntervalMinutes(settings.autoPullIntervalMinutes, DEFAULT_SETTINGS.autoPullIntervalMinutes);
+            settings.mismatchPolicy = ensureMismatchPolicy(settings.mismatchPolicy);
+            settings.backgroundCheckEnabled = settings.backgroundCheckEnabled !== false;
+            settings.backgroundCheckIntervalMinutes = normalizeBackgroundMinutes(
+                settings.backgroundCheckIntervalMinutes,
+                DEFAULT_SETTINGS.backgroundCheckIntervalMinutes,
+                1
+            );
+            settings.backgroundCooldownMinutes = normalizeBackgroundMinutes(
+                settings.backgroundCooldownMinutes,
+                DEFAULT_SETTINGS.backgroundCooldownMinutes,
+                1
+            );
             settings.pullOnStartup = !!settings.pullOnStartup;
             settings.pushOnSync = settings.pushOnSync !== false;
             settings.pullOnSync = settings.pullOnSync !== false;
@@ -2662,6 +3871,14 @@
             settings.permanentTreeUploadIntervalSeconds = normalizePermanentTreeUploadIntervalSeconds(
                 settings.permanentTreeUploadIntervalSeconds,
                 DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds
+            );
+            settings.tempSectionUploadIntervalSeconds = normalizeCustomUploadIntervalSeconds(
+                settings.tempSectionUploadIntervalSeconds,
+                DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
+            );
+            settings.blankSectionUploadIntervalSeconds = normalizeCustomUploadIntervalSeconds(
+                settings.blankSectionUploadIntervalSeconds,
+                DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds
             );
             settings.obsidianFilePushEnabled = settings.obsidianFilePushEnabled !== false;
             settings.obsidianExportFormat = normalizeObsidianExportFormat(
@@ -2677,6 +3894,15 @@
             restartAutomationTimers();
             scheduleStartupPull();
             renderStatus();
+            void updateBackgroundSyncContext('settings-update', {
+                isRunning: runtime && runtime.isRunning,
+                queueLength: runtime && runtime.queueLength,
+                pendingMismatch: runtime && runtime.pendingMismatch,
+                pendingMismatchAt: runtime && runtime.pendingMismatchAt,
+                lastRemoteSha: runtime && runtime.lastRemoteSha,
+                lastLocalHash: runtime && runtime.lastLocalHash,
+                lastSuccessAt: runtime && runtime.lastSuccessAt
+            });
         }
     };
 

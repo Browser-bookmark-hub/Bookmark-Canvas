@@ -1,6 +1,6 @@
 // Minimal background for Bookmark Canvas extension (MV3)
 
-import { getRepoFile, testRepoConnection, upsertRepoFile } from './github/repo-api.js';
+import { getRepoFile, getRepoFileSignal, testRepoConnection, upsertRepoFile } from './github/repo-api.js';
 
 const browserAPI = (function () {
   if (typeof chrome !== 'undefined') return chrome;
@@ -9,10 +9,48 @@ const browserAPI = (function () {
 })();
 
 const MARKER_BADGE_TEXT_MAX = 99;
-const MARKER_BADGE_DEFAULT_BG = '#fbbc04';
+const MARKER_BADGE_IDLE_BG = '#3B82F6';
+const MARKER_BADGE_ATTENTION_BG = '#F59E0B';
+const MARKER_BADGE_DOT_TEXT = '•';
 const MARKER_BADGE_TEXT_COLOR = '#000000';
 const MARKER_BADGE_COLOR_STORAGE_KEY = 'canvas_marker_badge_color_v1';
 const MARKER_SETTINGS_KEY = 'canvas_marker_settings_v1';
+const CANVAS_GIT_SYNC_BG_STATE_KEY = 'canvas-obsidian-git-sync-background-state-v1';
+const CANVAS_GIT_SYNC_BACKGROUND_ALARM = 'canvas-obsidian-git-sync-background-check-v1';
+const CANVAS_GIT_SYNC_BG_IDLE_STREAK_LIMIT = 2;
+const CANVAS_GIT_SYNC_BG_DEFAULT_INTERVAL_MINUTES = 2;
+const CANVAS_GIT_SYNC_BG_COOLDOWN_MINUTES = 10;
+const CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT = {
+  enabled: false,
+  autoSync: true,
+  splitIntervalCommitAndSync: false,
+  intervalSeconds: 120,
+  autoPushIntervalMinutes: 2,
+  autoPullIntervalMinutes: 5,
+  filePath: '',
+  mismatchPolicy: 'prompt',
+  backgroundCheckEnabled: true,
+  backgroundCheckIntervalMinutes: CANVAS_GIT_SYNC_BG_DEFAULT_INTERVAL_MINUTES,
+  backgroundCooldownMinutes: CANVAS_GIT_SYNC_BG_COOLDOWN_MINUTES
+};
+
+const DEFAULT_CANVAS_GIT_SYNC_BG_RUNTIME = {
+  lastRemoteSha: '',
+  lastRemoteCommittedAt: 0,
+  lastLocalHash: '',
+  lastSuccessAt: 0,
+  lastLocalMutationAt: 0,
+  pendingMismatch: false,
+  pendingMismatchRemoteSha: '',
+  pendingMismatchUpdatedAt: 0,
+  hasPendingWork: false,
+  localDirty: false,
+  idleStreak: 0,
+  nextCheckAt: 0,
+  lastCheckAt: 0,
+  lastCheckRemoteSha: '',
+  lastCheckError: ''
+};
 
 function normalizeMarkerBadgeText(markerCount) {
   const n = Number(markerCount);
@@ -21,7 +59,7 @@ function normalizeMarkerBadgeText(markerCount) {
   return String(Math.floor(n));
 }
 
-function normalizeHexColor(value, fallback = MARKER_BADGE_DEFAULT_BG) {
+function normalizeHexColor(value, fallback = MARKER_BADGE_IDLE_BG) {
   const raw = String(value || '').trim();
   const six = raw.match(/^#?([0-9a-fA-F]{6})$/);
   if (six) return `#${six[1].toUpperCase()}`;
@@ -30,9 +68,9 @@ function normalizeHexColor(value, fallback = MARKER_BADGE_DEFAULT_BG) {
     const short = three[1].toUpperCase();
     return `#${short[0]}${short[0]}${short[1]}${short[1]}${short[2]}${short[2]}`;
   }
-  const fallbackSix = String(fallback || MARKER_BADGE_DEFAULT_BG).trim().match(/^#?([0-9a-fA-F]{6})$/);
+  const fallbackSix = String(fallback || MARKER_BADGE_IDLE_BG).trim().match(/^#?([0-9a-fA-F]{6})$/);
   if (fallbackSix) return `#${fallbackSix[1].toUpperCase()}`;
-  return MARKER_BADGE_DEFAULT_BG;
+  return MARKER_BADGE_IDLE_BG;
 }
 
 function hexToRgb(hex) {
@@ -68,13 +106,13 @@ function pickReadableTextColor(hex) {
   return luminance > 0.6 ? '#1F2937' : '#FFFFFF';
 }
 
-function setMarkerBadgeState(hasMarkers, markerCount, badgeColorHex = MARKER_BADGE_DEFAULT_BG) {
+function setMarkerBadgeState(badgeText, badgeColorHex = MARKER_BADGE_IDLE_BG, badgeTextColorHex = MARKER_BADGE_TEXT_COLOR) {
   try {
     if (!browserAPI?.action || typeof browserAPI.action.setBadgeText !== 'function') return;
 
-    const badgeBgColor = normalizeHexColor(badgeColorHex, MARKER_BADGE_DEFAULT_BG);
-    const badgeTextColor = MARKER_BADGE_TEXT_COLOR;
-    const text = hasMarkers ? normalizeMarkerBadgeText(markerCount) : '';
+    const badgeBgColor = normalizeHexColor(badgeColorHex, MARKER_BADGE_IDLE_BG);
+    const badgeTextColor = normalizeHexColor(badgeTextColorHex, MARKER_BADGE_TEXT_COLOR);
+    const text = String(badgeText == null ? '' : badgeText);
     browserAPI.action.setBadgeText({ text }, () => {
       try {
         const err = browserAPI?.runtime?.lastError;
@@ -109,7 +147,33 @@ function setMarkerBadgeState(hasMarkers, markerCount, badgeColorHex = MARKER_BAD
   } catch (_) { }
 }
 
-let markerBadgeStateCache = { hasMarkers: null, markerCount: null, badgeColor: null };
+let markerBadgeStateCache = { badgeText: null, badgeColor: null, badgeTextColor: null };
+
+function normalizeCanvasGitSyncBackgroundRuntime(runtimeRaw) {
+  const runtime = runtimeRaw && typeof runtimeRaw === 'object' ? runtimeRaw : {};
+  const pendingMismatchUpdatedAt = Number(runtime.pendingMismatchUpdatedAt);
+  const pendingMismatchAt = Number(runtime.pendingMismatchAt);
+  return {
+    isRunning: runtime.isRunning === true,
+    lastRemoteSha: typeof runtime.lastRemoteSha === 'string' ? runtime.lastRemoteSha : '',
+    lastRemoteCommittedAt: Number.isFinite(Number(runtime.lastRemoteCommittedAt)) ? Number(runtime.lastRemoteCommittedAt) : 0,
+    lastLocalHash: typeof runtime.lastLocalHash === 'string' ? runtime.lastLocalHash : '',
+    lastSuccessAt: Number.isFinite(Number(runtime.lastSuccessAt)) ? Number(runtime.lastSuccessAt) : 0,
+    lastLocalMutationAt: Number.isFinite(Number(runtime.lastLocalMutationAt)) ? Number(runtime.lastLocalMutationAt) : 0,
+    pendingMismatch: runtime.pendingMismatch === true,
+    pendingMismatchRemoteSha: typeof runtime.pendingMismatchRemoteSha === 'string' ? runtime.pendingMismatchRemoteSha : '',
+    pendingMismatchUpdatedAt: Number.isFinite(pendingMismatchUpdatedAt)
+      ? pendingMismatchUpdatedAt
+      : (Number.isFinite(pendingMismatchAt) ? pendingMismatchAt : 0),
+    hasPendingWork: runtime.hasPendingWork === true,
+    localDirty: runtime.localDirty === true,
+    idleStreak: Number.isFinite(Number(runtime.idleStreak)) ? Math.max(0, Number(runtime.idleStreak)) : 0,
+    nextCheckAt: Number.isFinite(Number(runtime.nextCheckAt)) ? Number(runtime.nextCheckAt) : 0,
+    lastCheckAt: Number.isFinite(Number(runtime.lastCheckAt)) ? Number(runtime.lastCheckAt) : 0,
+    lastCheckRemoteSha: typeof runtime.lastCheckRemoteSha === 'string' ? runtime.lastCheckRemoteSha : '',
+    lastCheckError: typeof runtime.lastCheckError === 'string' ? runtime.lastCheckError : ''
+  };
+}
 
 function countChangeLogEntries(rawLog) {
   if (!rawLog || typeof rawLog !== 'object') return 0;
@@ -134,45 +198,76 @@ function countActiveRecentMovedEntries(rawList) {
 
 function evaluateMarkerBadgeStateFromStorageSnapshot(snapshot) {
   const markerSettings = snapshot && snapshot[MARKER_SETTINGS_KEY];
-  const markerEnabled = !(markerSettings && typeof markerSettings === 'object' && markerSettings.enabled === false);
-  if (!markerEnabled) {
-    return { hasMarkers: false, markerCount: 0 };
+  const markerNumberEnabled = !(markerSettings && typeof markerSettings === 'object' && markerSettings.enabled === false);
+
+  const syncBgStateRaw = snapshot && snapshot[CANVAS_GIT_SYNC_BG_STATE_KEY];
+  const syncBgSettings = normalizeCanvasGitSyncBackgroundSettings(syncBgStateRaw && syncBgStateRaw.settings);
+  const syncEnabled = !!(syncBgSettings && syncBgSettings.enabled === true);
+
+  if (!syncEnabled) {
+    return {
+      badgeText: '',
+      badgeColor: MARKER_BADGE_IDLE_BG,
+      badgeTextColor: MARKER_BADGE_TEXT_COLOR
+    };
   }
 
   const changeCount = countChangeLogEntries(snapshot && snapshot[CANVAS_CHANGE_LOG_KEY]);
-  if (changeCount > 0) {
-    return { hasMarkers: true, markerCount: changeCount };
-  }
-
   const movedCount = countActiveRecentMovedEntries(snapshot && snapshot[RECENT_MOVED_IDS_KEY]);
-  if (movedCount > 0) {
-    return { hasMarkers: true, markerCount: movedCount };
+  const markerCount = Math.max(changeCount, movedCount, 0);
+
+  const syncBgRuntime = normalizeCanvasGitSyncBackgroundRuntime(syncBgStateRaw && syncBgStateRaw.runtime);
+  const hasCloudMismatch = syncBgRuntime.pendingMismatch === true;
+
+  if (hasCloudMismatch) {
+    return {
+      badgeText: MARKER_BADGE_DOT_TEXT,
+      badgeColor: MARKER_BADGE_ATTENTION_BG,
+      badgeTextColor: pickReadableTextColor(MARKER_BADGE_ATTENTION_BG)
+    };
   }
 
-  return { hasMarkers: false, markerCount: 0 };
+  if (markerNumberEnabled && markerCount > 0) {
+    return {
+      badgeText: normalizeMarkerBadgeText(markerCount),
+      badgeColor: MARKER_BADGE_IDLE_BG,
+      badgeTextColor: pickReadableTextColor(MARKER_BADGE_IDLE_BG)
+    };
+  }
+
+  const shouldShowBlueDot = markerNumberEnabled || syncBgRuntime.isRunning === true;
+  if (!shouldShowBlueDot) {
+    return {
+      badgeText: '',
+      badgeColor: MARKER_BADGE_IDLE_BG,
+      badgeTextColor: MARKER_BADGE_TEXT_COLOR
+    };
+  }
+
+  return {
+    badgeText: MARKER_BADGE_DOT_TEXT,
+    badgeColor: MARKER_BADGE_IDLE_BG,
+    badgeTextColor: pickReadableTextColor(MARKER_BADGE_IDLE_BG)
+  };
 }
 
 function applyMarkerBadgeStateIfNeeded(state) {
   const normalized = {
-    hasMarkers: !!(state && state.hasMarkers),
-    markerCount: Math.max(0, Math.floor(Number(state && state.markerCount) || 0)),
-    badgeColor: normalizeHexColor(state && state.badgeColor, MARKER_BADGE_DEFAULT_BG)
+    badgeText: String((state && state.badgeText) || ''),
+    badgeColor: normalizeHexColor(state && state.badgeColor, MARKER_BADGE_IDLE_BG),
+    badgeTextColor: normalizeHexColor(state && state.badgeTextColor, MARKER_BADGE_TEXT_COLOR)
   };
 
-  if (!normalized.hasMarkers) {
-    normalized.markerCount = 0;
-  }
-
   if (
-    markerBadgeStateCache.hasMarkers === normalized.hasMarkers
-    && markerBadgeStateCache.markerCount === normalized.markerCount
+    markerBadgeStateCache.badgeText === normalized.badgeText
     && markerBadgeStateCache.badgeColor === normalized.badgeColor
+    && markerBadgeStateCache.badgeTextColor === normalized.badgeTextColor
   ) {
     return;
   }
 
   markerBadgeStateCache = normalized;
-  setMarkerBadgeState(normalized.hasMarkers, normalized.markerCount, normalized.badgeColor);
+  setMarkerBadgeState(normalized.badgeText, normalized.badgeColor, normalized.badgeTextColor);
 }
 
 async function refreshMarkerBadgeFromStorage() {
@@ -182,10 +277,10 @@ async function refreshMarkerBadgeFromStorage() {
       MARKER_SETTINGS_KEY,
       CANVAS_CHANGE_LOG_KEY,
       RECENT_MOVED_IDS_KEY,
-      MARKER_BADGE_COLOR_STORAGE_KEY
+      MARKER_BADGE_COLOR_STORAGE_KEY,
+      CANVAS_GIT_SYNC_BG_STATE_KEY
     ]);
     const state = evaluateMarkerBadgeStateFromStorageSnapshot(snapshot || {});
-    state.badgeColor = normalizeHexColor(snapshot && snapshot[MARKER_BADGE_COLOR_STORAGE_KEY], MARKER_BADGE_DEFAULT_BG);
     applyMarkerBadgeStateIfNeeded(state);
   } catch (_) { }
 }
@@ -468,6 +563,7 @@ if (browserAPI?.runtime?.onInstalled) {
     initSidePanel();
     refreshSidePanelOpenWindows().catch(() => {});
     refreshMarkerBadgeFromStorage().catch(() => {});
+    restoreCanvasGitSyncBackgroundScheduling().catch(() => {});
   });
 }
 
@@ -475,6 +571,7 @@ try {
   if (browserAPI?.runtime?.onStartup?.addListener) {
     browserAPI.runtime.onStartup.addListener(() => {
       refreshMarkerBadgeFromStorage().catch(() => {});
+      restoreCanvasGitSyncBackgroundScheduling().catch(() => {});
     });
   }
 } catch (_) { }
@@ -482,6 +579,7 @@ try {
 initSidePanel();
 registerSidePanelTogglePortListener();
 refreshSidePanelOpenWindows().catch(() => {});
+restoreCanvasGitSyncBackgroundScheduling().catch(() => {});
 
 const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
 const RECENT_MOVED_MAX = 2000;
@@ -752,7 +850,11 @@ if (browserAPI?.storage?.onChanged?.addListener) {
   browserAPI.storage.onChanged.addListener((changes, areaName) => {
     try {
       if (areaName !== 'local' || !changes || typeof changes !== 'object') return;
-      if (!changes[CANVAS_CHANGE_LOG_KEY] && !changes[RECENT_MOVED_IDS_KEY] && !changes[MARKER_SETTINGS_KEY] && !changes[MARKER_BADGE_COLOR_STORAGE_KEY]) {
+      if (!changes[CANVAS_CHANGE_LOG_KEY]
+        && !changes[RECENT_MOVED_IDS_KEY]
+        && !changes[MARKER_SETTINGS_KEY]
+        && !changes[MARKER_BADGE_COLOR_STORAGE_KEY]
+        && !changes[CANVAS_GIT_SYNC_BG_STATE_KEY]) {
         return;
       }
       refreshMarkerBadgeFromStorage().catch(() => {});
@@ -817,6 +919,376 @@ async function resolveCanvasGitConfig() {
     branch: config.githubRepoBranch,
     basePath: config.githubRepoBasePath
   };
+}
+
+function toFiniteNumber(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return n;
+}
+
+function normalizeCanvasGitSyncMismatchPolicy(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return raw === 'auto_pull' ? 'auto_pull' : 'prompt';
+}
+
+function normalizeCanvasGitSyncBackgroundSettings(settingsRaw) {
+  const source = settingsRaw && typeof settingsRaw === 'object' ? settingsRaw : {};
+  return {
+    enabled: source.enabled === true,
+    autoSync: source.autoSync !== false,
+    splitIntervalCommitAndSync: source.splitIntervalCommitAndSync === true,
+    intervalSeconds: Math.max(60, Math.min(24 * 60 * 60, Math.round(toFiniteNumber(source.intervalSeconds, CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT.intervalSeconds)))),
+    autoPushIntervalMinutes: Math.max(0, Math.min(24 * 60, Math.round(toFiniteNumber(source.autoPushIntervalMinutes, CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT.autoPushIntervalMinutes)))),
+    autoPullIntervalMinutes: Math.max(0, Math.min(24 * 60, Math.round(toFiniteNumber(source.autoPullIntervalMinutes, CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT.autoPullIntervalMinutes)))),
+    filePath: normalizeGitHubRepoPath(source.filePath),
+    mismatchPolicy: normalizeCanvasGitSyncMismatchPolicy(source.mismatchPolicy),
+    backgroundCheckEnabled: source.backgroundCheckEnabled !== false,
+    backgroundCheckIntervalMinutes: Math.max(1, Math.min(24 * 60, Math.round(toFiniteNumber(source.backgroundCheckIntervalMinutes, CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT.backgroundCheckIntervalMinutes)))),
+    backgroundCooldownMinutes: Math.max(1, Math.min(24 * 60, Math.round(toFiniteNumber(source.backgroundCooldownMinutes, CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT.backgroundCooldownMinutes))))
+  };
+}
+
+function normalizeCanvasGitSyncBackgroundState(stateRaw) {
+  const raw = stateRaw && typeof stateRaw === 'object' ? stateRaw : {};
+  return {
+    settings: normalizeCanvasGitSyncBackgroundSettings(Object.assign({}, CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT, raw.settings || {})),
+    runtime: Object.assign({}, DEFAULT_CANVAS_GIT_SYNC_BG_RUNTIME, normalizeCanvasGitSyncBackgroundRuntime(raw.runtime)),
+    updatedAt: Number.isFinite(Number(raw.updatedAt)) ? Number(raw.updatedAt) : 0
+  };
+}
+
+function deriveCanvasGitSyncBaseCheckIntervalMinutes(settings) {
+  const normalizedSettings = normalizeCanvasGitSyncBackgroundSettings(settings);
+  return Math.max(
+    1,
+    Math.min(
+      24 * 60,
+      Math.round(
+        toFiniteNumber(
+          normalizedSettings.backgroundCheckIntervalMinutes,
+          CANVAS_GIT_SYNC_BG_DEFAULT_INTERVAL_MINUTES
+        )
+      )
+    )
+  );
+}
+
+function shouldRunCanvasGitSyncBackgroundCheck(state) {
+  const settings = state && state.settings
+    ? normalizeCanvasGitSyncBackgroundSettings(state.settings)
+    : normalizeCanvasGitSyncBackgroundSettings(CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT);
+
+  if (!settings.enabled) return false;
+  if (!settings.autoSync) return false;
+  if (!settings.backgroundCheckEnabled) return false;
+  return true;
+}
+
+async function loadCanvasGitSyncBackgroundState() {
+  try {
+    if (!browserAPI?.storage?.local) {
+      return normalizeCanvasGitSyncBackgroundState({});
+    }
+    const data = await browserAPI.storage.local.get([CANVAS_GIT_SYNC_BG_STATE_KEY]);
+    return normalizeCanvasGitSyncBackgroundState(data && data[CANVAS_GIT_SYNC_BG_STATE_KEY]);
+  } catch (_) {
+    return normalizeCanvasGitSyncBackgroundState({});
+  }
+}
+
+async function saveCanvasGitSyncBackgroundState(state) {
+  const normalized = normalizeCanvasGitSyncBackgroundState(state);
+  normalized.updatedAt = Date.now();
+  try {
+    if (browserAPI?.storage?.local) {
+      await browserAPI.storage.local.set({ [CANVAS_GIT_SYNC_BG_STATE_KEY]: normalized });
+    }
+  } catch (_) { }
+  return normalized;
+}
+
+async function clearCanvasGitSyncBackgroundAlarm() {
+  try {
+    if (!browserAPI?.alarms?.clear) return;
+    await browserAPI.alarms.clear(CANVAS_GIT_SYNC_BACKGROUND_ALARM);
+  } catch (_) { }
+}
+
+async function scheduleCanvasGitSyncBackgroundAlarm(stateInput, delayMinutesInput = null) {
+  const state = normalizeCanvasGitSyncBackgroundState(stateInput);
+
+  if (!shouldRunCanvasGitSyncBackgroundCheck(state)) {
+    if (state.runtime.nextCheckAt !== 0) {
+      state.runtime.nextCheckAt = 0;
+      await saveCanvasGitSyncBackgroundState(state);
+    }
+    await clearCanvasGitSyncBackgroundAlarm();
+    return state;
+  }
+
+  const baseDelay = deriveCanvasGitSyncBaseCheckIntervalMinutes(state.settings) || CANVAS_GIT_SYNC_BG_DEFAULT_INTERVAL_MINUTES;
+  const delayMinutes = Number.isFinite(Number(delayMinutesInput))
+    ? Math.max(1, Math.min(24 * 60, Math.round(Number(delayMinutesInput))))
+    : Math.max(1, Math.min(24 * 60, Math.round(baseDelay)));
+
+  const whenTs = Date.now() + (delayMinutes * 60 * 1000);
+  state.runtime.nextCheckAt = whenTs;
+  await saveCanvasGitSyncBackgroundState(state);
+
+  try {
+    if (browserAPI?.alarms?.create) {
+      browserAPI.alarms.create(CANVAS_GIT_SYNC_BACKGROUND_ALARM, { when: whenTs });
+    }
+  } catch (_) { }
+
+  return state;
+}
+
+async function readCanvasGitRemoteSignalForBackground(settings) {
+  const gitConfig = await resolveCanvasGitConfig();
+  if (!gitConfig.success) {
+    return { success: false, error: gitConfig.error || '仓库未就绪' };
+  }
+
+  const normalizedPath = normalizeGitHubRepoPath(settings && settings.filePath);
+  const filePath = normalizedPath || buildCanvasGitSyncPath(gitConfig.basePath);
+
+  const result = await getRepoFileSignal({
+    token: gitConfig.token,
+    owner: gitConfig.owner,
+    repo: gitConfig.repo,
+    branch: gitConfig.branch,
+    path: filePath
+  });
+
+  if (!result || result.success !== true) {
+    if (result && result.notFound === true) {
+      return { success: true, notFound: true, path: filePath, revisionSha: '', committedAt: 0 };
+    }
+    return { success: false, error: result?.error || '读取云端信号失败', path: filePath };
+  }
+
+  return {
+    success: true,
+    notFound: false,
+    path: result.path || filePath,
+    revisionSha: typeof result.revisionSha === 'string' ? result.revisionSha : '',
+    committedAt: Number.isFinite(Number(result.committedAt)) ? Number(result.committedAt) : 0
+  };
+}
+
+async function runCanvasGitSyncBackgroundCheck(reason = 'alarm') {
+  let state = await loadCanvasGitSyncBackgroundState();
+  if (!shouldRunCanvasGitSyncBackgroundCheck(state)) {
+    await scheduleCanvasGitSyncBackgroundAlarm(state);
+    return { success: false, skipped: true, reason: 'disabled' };
+  }
+
+  const now = Date.now();
+  const normalizedSettings = normalizeCanvasGitSyncBackgroundSettings(state.settings);
+  const runtime = Object.assign({}, state.runtime, { lastCheckAt: now, lastCheckError: '' });
+  const baseDelay = deriveCanvasGitSyncBaseCheckIntervalMinutes(normalizedSettings) || CANVAS_GIT_SYNC_BG_DEFAULT_INTERVAL_MINUTES;
+  const cooldownDelay = Math.max(
+    baseDelay,
+    Math.max(
+      1,
+      Math.round(
+        toFiniteNumber(
+          normalizedSettings.backgroundCooldownMinutes,
+          CANVAS_GIT_SYNC_BG_COOLDOWN_MINUTES
+        )
+      )
+    )
+  );
+  let nextDelay = baseDelay;
+
+  if (runtime.localDirty) {
+    runtime.hasPendingWork = true;
+    runtime.idleStreak = 0;
+  }
+
+  try {
+    const remote = await readCanvasGitRemoteSignalForBackground(state.settings);
+    if (!remote.success) {
+      runtime.lastCheckError = remote.error || '后台检查失败';
+      runtime.idleStreak = 0;
+      nextDelay = baseDelay;
+    } else {
+      const remoteSha = String(remote.revisionSha || '');
+      const remoteCommittedAt = Number(remote.committedAt) || 0;
+      const previousSha = String(runtime.lastRemoteSha || '');
+      const localHash = String(runtime.lastLocalHash || '');
+      const localSuccessAt = Number(runtime.lastSuccessAt) || 0;
+      const localMutationAt = Number(runtime.lastLocalMutationAt) || 0;
+      runtime.lastCheckRemoteSha = remoteSha;
+      if (remoteCommittedAt > 0) {
+        runtime.lastRemoteCommittedAt = remoteCommittedAt;
+      }
+
+      const remoteChangedBySha = !!(remoteSha && previousSha && remoteSha !== previousSha);
+      const remoteDeletedAfterKnown = !remoteSha && !!previousSha;
+      const remoteNewerByTime = !!(
+        remoteCommittedAt > 0
+        && localSuccessAt > 0
+        && remoteCommittedAt > (localSuccessAt + 1000)
+      );
+      const localEditedAfterLastSync = !!(
+        localMutationAt > 0
+        && localSuccessAt > 0
+        && localMutationAt > (localSuccessAt + 1000)
+      );
+      const hasComparableBaseline = !!(previousSha || localHash || localSuccessAt);
+      const hasMismatch = hasComparableBaseline && (
+        remoteChangedBySha
+        || remoteDeletedAfterKnown
+        || (remoteNewerByTime && !localEditedAfterLastSync)
+      );
+      if (hasMismatch) {
+        runtime.pendingMismatch = true;
+        runtime.pendingMismatchRemoteSha = remoteSha;
+        runtime.pendingMismatchUpdatedAt = now;
+        runtime.hasPendingWork = true;
+        runtime.idleStreak = 0;
+        nextDelay = baseDelay;
+      } else {
+        if (runtime.pendingMismatch && runtime.pendingMismatchRemoteSha && runtime.pendingMismatchRemoteSha === remoteSha) {
+          runtime.pendingMismatch = false;
+          runtime.pendingMismatchRemoteSha = '';
+          runtime.pendingMismatchUpdatedAt = 0;
+        }
+
+        if (!runtime.pendingMismatch && !runtime.localDirty) {
+          runtime.hasPendingWork = false;
+          runtime.idleStreak = Math.max(0, Number(runtime.idleStreak) || 0) + 1;
+        } else {
+          runtime.idleStreak = 0;
+        }
+
+        if (runtime.idleStreak >= CANVAS_GIT_SYNC_BG_IDLE_STREAK_LIMIT) {
+          nextDelay = cooldownDelay;
+        }
+      }
+    }
+  } catch (error) {
+    runtime.lastCheckError = error && error.message ? error.message : String(error || '后台检查失败');
+    runtime.idleStreak = 0;
+    nextDelay = baseDelay;
+  }
+
+  state = normalizeCanvasGitSyncBackgroundState({
+    settings: state.settings,
+    runtime,
+    updatedAt: Date.now(),
+    reason
+  });
+
+  await saveCanvasGitSyncBackgroundState(state);
+  await scheduleCanvasGitSyncBackgroundAlarm(state, nextDelay);
+  await refreshMarkerBadgeFromStorage();
+
+  return {
+    success: true,
+    pendingMismatch: state.runtime.pendingMismatch,
+    nextCheckAt: state.runtime.nextCheckAt
+  };
+}
+
+async function restoreCanvasGitSyncBackgroundScheduling() {
+  const state = await loadCanvasGitSyncBackgroundState();
+  await scheduleCanvasGitSyncBackgroundAlarm(state);
+  await refreshMarkerBadgeFromStorage();
+}
+
+async function handleCanvasGitSyncUpdateContextMessage(message) {
+  const state = await loadCanvasGitSyncBackgroundState();
+  const incomingSettings = message && typeof message.settings === 'object' ? message.settings : null;
+  const incomingRuntime = message && typeof message.runtime === 'object' ? message.runtime : null;
+  const eventName = String(message && message.event || '').trim().toLowerCase();
+
+  if (incomingSettings) {
+    state.settings = normalizeCanvasGitSyncBackgroundSettings(Object.assign({}, state.settings, incomingSettings));
+  }
+
+  if (incomingRuntime) {
+    state.runtime = Object.assign({}, state.runtime, normalizeCanvasGitSyncBackgroundRuntime(Object.assign({}, state.runtime, incomingRuntime)));
+  }
+
+  if (eventName === 'local-dirty') {
+    state.runtime.localDirty = true;
+    state.runtime.hasPendingWork = true;
+    state.runtime.idleStreak = 0;
+  } else if (eventName === 'sync-success') {
+    state.runtime.localDirty = false;
+    state.runtime.hasPendingWork = false;
+    state.runtime.pendingMismatch = false;
+    state.runtime.pendingMismatchRemoteSha = '';
+    state.runtime.pendingMismatchUpdatedAt = 0;
+    state.runtime.idleStreak = 0;
+  } else if (eventName === 'sync-idle') {
+    if (!state.runtime.pendingMismatch && !state.runtime.localDirty) {
+      state.runtime.hasPendingWork = false;
+    }
+  } else if (eventName === 'mismatch-cleared') {
+    state.runtime.pendingMismatch = false;
+    state.runtime.pendingMismatchRemoteSha = '';
+    state.runtime.pendingMismatchUpdatedAt = 0;
+    if (!state.runtime.localDirty) {
+      state.runtime.hasPendingWork = false;
+    }
+  }
+
+  state.runtime = normalizeCanvasGitSyncBackgroundRuntime(state.runtime);
+  const saved = await saveCanvasGitSyncBackgroundState(state);
+  await scheduleCanvasGitSyncBackgroundAlarm(saved);
+  await refreshMarkerBadgeFromStorage();
+
+  return {
+    success: true,
+    runtime: saved.runtime,
+    settings: saved.settings,
+    nextCheckAt: saved.runtime.nextCheckAt
+  };
+}
+
+async function handleCanvasGitSyncGetBackgroundStateMessage() {
+  const state = await loadCanvasGitSyncBackgroundState();
+  return {
+    success: true,
+    runtime: state.runtime,
+    settings: state.settings,
+    nextCheckAt: state.runtime.nextCheckAt
+  };
+}
+
+async function handleCanvasGitSyncClearPendingMismatchMessage() {
+  const state = await loadCanvasGitSyncBackgroundState();
+  state.runtime.pendingMismatch = false;
+  state.runtime.pendingMismatchRemoteSha = '';
+  state.runtime.pendingMismatchUpdatedAt = 0;
+  if (!state.runtime.localDirty) {
+    state.runtime.hasPendingWork = false;
+  }
+
+  const saved = await saveCanvasGitSyncBackgroundState(state);
+  await scheduleCanvasGitSyncBackgroundAlarm(saved);
+  await refreshMarkerBadgeFromStorage();
+
+  return {
+    success: true,
+    runtime: saved.runtime,
+    settings: saved.settings,
+    nextCheckAt: saved.runtime.nextCheckAt
+  };
+}
+
+if (browserAPI?.alarms?.onAlarm?.addListener) {
+  browserAPI.alarms.onAlarm.addListener((alarm) => {
+    try {
+      if (!alarm || alarm.name !== CANVAS_GIT_SYNC_BACKGROUND_ALARM) return;
+      runCanvasGitSyncBackgroundCheck('alarm').catch(() => {});
+    } catch (_) { }
+  });
 }
 
 async function handleCanvasGitReadStateMessage(message) {
@@ -1058,6 +1530,38 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sidePanelHandler) {
     (async () => {
       const response = await sidePanelHandler(message, sender);
+      sendResponse(response);
+    })();
+    return true;
+  }
+
+  if (message.action === 'canvasGitSyncUpdateContext') {
+    (async () => {
+      const response = await handleCanvasGitSyncUpdateContextMessage(message);
+      sendResponse(response);
+    })();
+    return true;
+  }
+
+  if (message.action === 'canvasGitSyncGetBackgroundState') {
+    (async () => {
+      const response = await handleCanvasGitSyncGetBackgroundStateMessage();
+      sendResponse(response);
+    })();
+    return true;
+  }
+
+  if (message.action === 'canvasGitSyncClearPendingMismatch') {
+    (async () => {
+      const response = await handleCanvasGitSyncClearPendingMismatchMessage();
+      sendResponse(response);
+    })();
+    return true;
+  }
+
+  if (message.action === 'canvasGitSyncRunBackgroundCheckNow') {
+    (async () => {
+      const response = await runCanvasGitSyncBackgroundCheck('manual-message');
       sendResponse(response);
     })();
     return true;

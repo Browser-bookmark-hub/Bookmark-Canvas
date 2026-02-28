@@ -6,6 +6,7 @@
 - [Obsidian 双向同步计划（V1）](./obsidian-sync-plan-v1.md)
 - [Remotely Save 同步计划书](./sync-plan-remotely-save.md)
 - [Obsidian Git 主同步计划书](./sync-plan-obsidian-git.md)
+- [Obsidian Git 对齐说明](./obsidian-git-alignment.md)
 - [Canvas 同步验收清单](./sync-validation-checklist.md)
 - [拆分对照全量报告](./report-split-audit-split-audit-20260201-214732.md)
 

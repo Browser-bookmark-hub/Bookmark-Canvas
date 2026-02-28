@@ -95,7 +95,7 @@
 ## 5.1 输入源
 
 - 本地当前状态（CanvasState + 白名单设置）
-- 远端当前状态（manifest + entries + tombstones）
+- 云端当前状态（manifest + entries + tombstones）
 - 本地上次成功同步状态（prevSync）
 
 ## 5.2 计划阶段（Sync Plan）

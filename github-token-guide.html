@@ -488,8 +488,8 @@
         <li>点击 <strong>Generate token</strong>，并复制 Token（只显示一次）（只显示一次）</li>
       </ol>
 
-      <h2>3) 在插件中填写配置（字段顺序与界面一致）</h2>
-      <p>在插件「Obsidian Git 同步：仓库配置」中按以下顺序填写：</p>
+      <h2>3) 在扩展中填写配置（字段顺序与界面一致）</h2>
+      <p>在扩展「GitHub 仓库同步（兼容 Obsidian Git）」的“仓库”页中按以下顺序填写：</p>
       <ul>
         <li><strong>Owner</strong>：GitHub 用户名/组织名</li>
         <li><strong>Repo</strong>：仓库名（例如 <code>bookmark-sync</code>）</li>
@@ -502,6 +502,14 @@
         </li>
       </ul>
       <p>然后点击“测试连接”，通过后点击“保存配置”。</p>
+
+      <h2>4) 与官方 Obsidian Git 插件对齐（重要）</h2>
+      <ul>
+        <li>本扩展通过 GitHub API 直接读写仓库文件；不会在浏览器里执行本地 Git 命令。</li>
+        <li>Obsidian 侧的官方 Obsidian Git 插件负责在 Vault 内执行 <code>commit / pull / push</code>。</li>
+        <li>请确保两端使用同一个 <strong>Owner / Repo / Branch</strong>。</li>
+        <li>本扩展的 <strong>Base Path</strong> 是云端仓库子目录；Obsidian Git 的 <strong>Custom base path</strong> 是本地仓库路径语义，二者不同。</li>
+      </ul>
 
       <h2>问答 (Q&A)</h2>
       <details>
@@ -651,7 +659,7 @@
       </ol>
 
       <h2>3) Fill the extension config (same order as the UI)</h2>
-      <p>In “Obsidian Git Sync: Repository Config”, fill in:</p>
+      <p>In “GitHub Repo Sync (Obsidian Git Compatible)” → “Repository”, fill in:</p>
       <ul>
         <li><strong>Owner</strong>: your GitHub username or org</li>
         <li><strong>Repo</strong>: repository name (e.g. <code>bookmark-sync</code>)</li>
@@ -664,6 +672,14 @@
         </li>
       </ul>
       <p>Then click “Test Connection”, and “Save Config”.</p>
+
+      <h2>4) Align with official Obsidian Git plugin (important)</h2>
+      <ul>
+        <li>This extension reads/writes repository files through GitHub API; it does not run local Git commands in browser.</li>
+        <li>The official Obsidian Git plugin on Obsidian side executes <code>commit / pull / push</code> inside your vault.</li>
+        <li>Make sure both sides use the same <strong>Owner / Repo / Branch</strong>.</li>
+        <li>This extension's <strong>Base Path</strong> means a remote repo subfolder; Obsidian Git's <strong>Custom base path</strong> refers to local repository-path semantics. They are not the same field.</li>
+      </ul>
 
       <h2>Q&A</h2>
       <details>

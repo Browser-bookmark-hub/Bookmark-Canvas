@@ -284,6 +284,64 @@ export async function upsertRepoFile({ token, owner, repo, branch, path, message
   }
 }
 
+export async function getRepoFileSignal({ token, owner, repo, branch, path }) {
+  const authHeader = buildGitHubAuthHeader(token);
+  if (!authHeader) {
+    return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
+  }
+
+  const trimmedOwner = String(owner || '').trim();
+  const trimmedRepo = String(repo || '').trim();
+  if (!trimmedOwner || !trimmedRepo) {
+    return { success: false, error: '仓库未配置', repoNotConfigured: true };
+  }
+
+  const trimmedPath = String(path || '').trim().replace(/^\/+/, '');
+  if (!trimmedPath) {
+    return { success: false, error: '缺少文件路径' };
+  }
+
+  const trimmedBranch = String(branch || '').trim();
+  const encodedPath = encodeGitHubPath(trimmedPath);
+  const branchParam = trimmedBranch ? `&sha=${encodeURIComponent(trimmedBranch)}` : '';
+  const url = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/commits?path=${encodedPath}&per_page=1${branchParam}`;
+
+  try {
+    const json = await githubRequestJson(url, {
+      headers: { Authorization: authHeader }
+    });
+
+    const list = Array.isArray(json) ? json : [];
+    if (list.length === 0) {
+      return {
+        success: true,
+        notFound: true,
+        path: trimmedPath,
+        revisionSha: '',
+        committedAt: 0
+      };
+    }
+
+    const latest = list[0] && typeof list[0] === 'object' ? list[0] : {};
+    const revisionSha = typeof latest.sha === 'string' ? latest.sha : '';
+    const commitInfo = latest && typeof latest.commit === 'object' ? latest.commit : {};
+    const committer = commitInfo && typeof commitInfo.committer === 'object' ? commitInfo.committer : {};
+    const author = commitInfo && typeof commitInfo.author === 'object' ? commitInfo.author : {};
+    const dateText = String(committer.date || author.date || '').trim();
+    const committedAt = dateText ? Date.parse(dateText) : 0;
+
+    return {
+      success: true,
+      notFound: false,
+      path: trimmedPath,
+      revisionSha,
+      committedAt: Number.isFinite(committedAt) ? committedAt : 0
+    };
+  } catch (error) {
+    return { success: false, error: normalizeGitHubError(error) };
+  }
+}
+
 export async function getRepoFile({ token, owner, repo, branch, path }) {
   const authHeader = buildGitHubAuthHeader(token);
   if (!authHeader) {
@@ -329,7 +387,7 @@ export async function getRepoFile({ token, owner, repo, branch, path }) {
     };
   } catch (error) {
     if (Number(error?.status) === 404) {
-      return { success: false, notFound: true, error: '远端文件不存在' };
+      return { success: false, notFound: true, error: '云端文件不存在' };
     }
     return { success: false, error: normalizeGitHubError(error) };
   }
