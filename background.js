@@ -1,6 +1,6 @@
 // Minimal background for Bookmark Canvas extension (MV3)
 
-import { getRepoFile, getRepoFileSignal, testRepoConnection, upsertRepoFile } from './github/repo-api.js';
+import { deleteRepoFile, getRepoFile, listRepoFiles, testRepoConnection, upsertRepoFile } from './github/repo-api.js';
 
 const browserAPI = (function () {
   if (typeof chrome !== 'undefined') return chrome;
@@ -27,7 +27,7 @@ const CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT = {
   intervalSeconds: 120,
   autoPushIntervalMinutes: 2,
   autoPullIntervalMinutes: 5,
-  filePath: '',
+  obsidianExportRoot: '书签画布',
   mismatchPolicy: 'prompt',
   backgroundCheckEnabled: true,
   backgroundCheckIntervalMinutes: CANVAS_GIT_SYNC_BG_DEFAULT_INTERVAL_MINUTES,
@@ -862,7 +862,8 @@ if (browserAPI?.storage?.onChanged?.addListener) {
   });
 }
 
-const CANVAS_GIT_SYNC_FILE_NAME = 'bookmark-canvas-sync/state.json';
+const GITHUB_SYNC_FILE_WARN_BYTES = 50 * 1024 * 1024;
+const GITHUB_SYNC_FILE_LIMIT_BYTES = 100 * 1024 * 1024;
 
 function normalizeGitHubRepoPath(path) {
   return String(path || '')
@@ -873,11 +874,55 @@ function normalizeGitHubRepoPath(path) {
     .replace(/\/+/g, '/');
 }
 
-function buildCanvasGitSyncPath(basePath) {
+function normalizeCanvasGitSyncExportRoot(path, options = {}) {
+  const allowEmpty = !!(options && options.allowEmpty);
+  const normalizedRaw = normalizeGitHubRepoPath(path);
+  const normalized = (normalizedRaw === 'bookmark-canvas-sync'
+    || normalizedRaw === 'bookmark-canvas'
+    || normalizedRaw === '书签画布同步')
+    ? '书签画布'
+    : normalizedRaw;
+  if (allowEmpty && typeof path === 'string' && !normalized) {
+    return '';
+  }
+  return normalized || CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT.obsidianExportRoot;
+}
+
+function hashString(raw) {
+  const text = String(raw || '');
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function buildCanvasGitRemoteRevision(files, basePath = '') {
   const normalizedBasePath = normalizeGitHubRepoPath(basePath);
-  return normalizedBasePath
-    ? `${normalizedBasePath}/${CANVAS_GIT_SYNC_FILE_NAME}`
-    : CANVAS_GIT_SYNC_FILE_NAME;
+  const basePrefix = normalizedBasePath ? `${normalizedBasePath}/` : '';
+  const sourceFiles = Array.isArray(files) ? files : [];
+  if (!sourceFiles.length) return '';
+
+  const canonical = sourceFiles
+    .map((entry) => {
+      const repoPath = normalizeGitHubRepoPath(entry && entry.path);
+      if (!repoPath) return null;
+      const relativePath = basePrefix && repoPath.startsWith(basePrefix)
+        ? repoPath.slice(basePrefix.length)
+        : repoPath;
+      return {
+        path: relativePath,
+        sha: String((entry && entry.sha) || '')
+      };
+    })
+    .filter((entry) => !!(entry && entry.path))
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .map((entry) => `${entry.path}:${entry.sha}`)
+    .join('\n');
+
+  if (!canonical) return '';
+  return `files:${hashString(canonical)}`;
 }
 
 function textToBase64(text) {
@@ -889,6 +934,18 @@ function textToBase64(text) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
   return btoa(binary);
+}
+
+function estimateBase64ByteLength(base64Content) {
+  const normalized = String(base64Content || '').replace(/\s+/g, '');
+  if (!normalized) return 0;
+  let padding = 0;
+  if (normalized.endsWith('==')) {
+    padding = 2;
+  } else if (normalized.endsWith('=')) {
+    padding = 1;
+  }
+  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
 }
 
 async function resolveCanvasGitConfig() {
@@ -941,7 +998,7 @@ function normalizeCanvasGitSyncBackgroundSettings(settingsRaw) {
     intervalSeconds: Math.max(60, Math.min(24 * 60 * 60, Math.round(toFiniteNumber(source.intervalSeconds, CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT.intervalSeconds)))),
     autoPushIntervalMinutes: Math.max(0, Math.min(24 * 60, Math.round(toFiniteNumber(source.autoPushIntervalMinutes, CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT.autoPushIntervalMinutes)))),
     autoPullIntervalMinutes: Math.max(0, Math.min(24 * 60, Math.round(toFiniteNumber(source.autoPullIntervalMinutes, CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT.autoPullIntervalMinutes)))),
-    filePath: normalizeGitHubRepoPath(source.filePath),
+    obsidianExportRoot: normalizeCanvasGitSyncExportRoot(source.obsidianExportRoot, { allowEmpty: true }),
     mismatchPolicy: normalizeCanvasGitSyncMismatchPolicy(source.mismatchPolicy),
     backgroundCheckEnabled: source.backgroundCheckEnabled !== false,
     backgroundCheckIntervalMinutes: Math.max(1, Math.min(24 * 60, Math.round(toFiniteNumber(source.backgroundCheckIntervalMinutes, CANVAS_GIT_SYNC_BG_SETTINGS_DEFAULT.backgroundCheckIntervalMinutes)))),
@@ -1051,30 +1108,35 @@ async function readCanvasGitRemoteSignalForBackground(settings) {
     return { success: false, error: gitConfig.error || '仓库未就绪' };
   }
 
-  const normalizedPath = normalizeGitHubRepoPath(settings && settings.filePath);
-  const filePath = normalizedPath || buildCanvasGitSyncPath(gitConfig.basePath);
+  const normalizedRootPath = normalizeCanvasGitSyncExportRoot(settings && settings.obsidianExportRoot, { allowEmpty: true });
+  const repoRootPath = gitConfig.basePath
+    ? normalizeGitHubRepoPath(`${gitConfig.basePath}/${normalizedRootPath}`)
+    : normalizedRootPath;
 
-  const result = await getRepoFileSignal({
+  const result = await listRepoFiles({
     token: gitConfig.token,
     owner: gitConfig.owner,
     repo: gitConfig.repo,
     branch: gitConfig.branch,
-    path: filePath
+    rootPath: repoRootPath
   });
 
   if (!result || result.success !== true) {
-    if (result && result.notFound === true) {
-      return { success: true, notFound: true, path: filePath, revisionSha: '', committedAt: 0 };
-    }
-    return { success: false, error: result?.error || '读取云端信号失败', path: filePath };
+    return { success: false, error: result?.error || '读取云端信号失败', path: normalizedRootPath };
   }
+
+  const files = Array.isArray(result.files) ? result.files : [];
+  const revisionSha = buildCanvasGitRemoteRevision(files, gitConfig.basePath);
+  const notFound = files.length === 0;
 
   return {
     success: true,
-    notFound: false,
-    path: result.path || filePath,
-    revisionSha: typeof result.revisionSha === 'string' ? result.revisionSha : '',
-    committedAt: Number.isFinite(Number(result.committedAt)) ? Number(result.committedAt) : 0
+    notFound,
+    path: normalizedRootPath,
+    revisionSha,
+    committedAt: 0,
+    fileCount: files.length,
+    truncated: result.truncated === true
   };
 }
 
@@ -1291,75 +1353,49 @@ if (browserAPI?.alarms?.onAlarm?.addListener) {
   });
 }
 
-async function handleCanvasGitReadStateMessage(message) {
+async function handleCanvasGitReadFileMessage(message) {
   const gitConfig = await resolveCanvasGitConfig();
   if (!gitConfig.success) {
     return { success: false, error: gitConfig.error };
   }
 
-  const filePath = normalizeGitHubRepoPath(message.path) || buildCanvasGitSyncPath(gitConfig.basePath);
+  const rawPath = normalizeGitHubRepoPath(message.path);
+  if (!rawPath) {
+    return { success: false, error: '缺少文件路径' };
+  }
+
+  const repoPath = gitConfig.basePath
+    ? normalizeGitHubRepoPath(`${gitConfig.basePath}/${rawPath}`)
+    : rawPath;
 
   const result = await getRepoFile({
     token: gitConfig.token,
     owner: gitConfig.owner,
     repo: gitConfig.repo,
     branch: gitConfig.branch,
-    path: filePath
+    path: repoPath
   });
 
   if (!result || result.success !== true) {
     if (result && result.notFound === true) {
-      return { success: true, notFound: true, path: filePath };
+      return { success: true, notFound: true, path: rawPath };
     }
-    return { success: false, error: result?.error || '读取同步文件失败', path: filePath };
+    return { success: false, error: result?.error || '读取同步文件失败', path: rawPath };
   }
+
+  const normalizedBasePath = normalizeGitHubRepoPath(gitConfig.basePath);
+  const basePrefix = normalizedBasePath ? `${normalizedBasePath}/` : '';
+  const resultPath = normalizeGitHubRepoPath(result.path || repoPath);
+  const relativePath = basePrefix && resultPath.startsWith(basePrefix)
+    ? resultPath.slice(basePrefix.length)
+    : resultPath;
 
   return {
     success: true,
-    path: result.path || filePath,
+    path: relativePath || rawPath,
     sha: result.sha || null,
     encoding: result.encoding || 'base64',
     contentBase64: result.contentBase64 || ''
-  };
-}
-
-async function handleCanvasGitWriteStateMessage(message) {
-  const gitConfig = await resolveCanvasGitConfig();
-  if (!gitConfig.success) {
-    return { success: false, error: gitConfig.error };
-  }
-
-  const filePath = normalizeGitHubRepoPath(message.path) || buildCanvasGitSyncPath(gitConfig.basePath);
-  const contentBase64 = String(message.contentBase64 || '').trim();
-  const contentText = message.content;
-  const resolvedContentBase64 = contentBase64 || textToBase64(contentText);
-
-  if (!resolvedContentBase64) {
-    return { success: false, error: '缺少同步内容', path: filePath };
-  }
-
-  const commitMessage = String(message.commitMessage || '').trim() || 'Bookmark Canvas Sync: update state';
-  const result = await upsertRepoFile({
-    token: gitConfig.token,
-    owner: gitConfig.owner,
-    repo: gitConfig.repo,
-    branch: gitConfig.branch,
-    path: filePath,
-    message: commitMessage,
-    contentBase64: resolvedContentBase64
-  });
-
-  if (!result || result.success !== true) {
-    return { success: false, error: result?.error || '写入同步文件失败', path: filePath };
-  }
-
-  return {
-    success: true,
-    path: result.path || filePath,
-    htmlUrl: result.htmlUrl || null,
-    fileSha: result.fileSha || null,
-    commitSha: result.commitSha || null,
-    created: result.created === true
   };
 }
 
@@ -1386,6 +1422,24 @@ async function handleCanvasGitWriteFileMessage(message) {
     return { success: false, error: '缺少同步内容', path: repoPath };
   }
 
+  const contentSizeBytes = estimateBase64ByteLength(resolvedContentBase64);
+  if (contentSizeBytes >= GITHUB_SYNC_FILE_LIMIT_BYTES) {
+    return {
+      success: false,
+      error: '同步文件超过 100MB，无法写入 GitHub。请拆分同步文件。',
+      errorCode: 'SYNC_FILE_TOO_LARGE',
+      path: repoPath,
+      sizeBytes: contentSizeBytes,
+      limitBytes: GITHUB_SYNC_FILE_LIMIT_BYTES
+    };
+  }
+  if (contentSizeBytes >= GITHUB_SYNC_FILE_WARN_BYTES) {
+    console.warn('[Canvas Sync] Large file write may be unstable:', {
+      path: repoPath,
+      sizeBytes: contentSizeBytes
+    });
+  }
+
   const commitMessage = String(message.commitMessage || '').trim() || `Bookmark Canvas Sync: update ${rawPath}`;
   const result = await upsertRepoFile({
     token: gitConfig.token,
@@ -1408,6 +1462,97 @@ async function handleCanvasGitWriteFileMessage(message) {
     fileSha: result.fileSha || null,
     commitSha: result.commitSha || null,
     created: result.created === true
+  };
+}
+
+async function handleCanvasGitDeleteFileMessage(message) {
+  const gitConfig = await resolveCanvasGitConfig();
+  if (!gitConfig.success) {
+    return { success: false, error: gitConfig.error };
+  }
+
+  const rawPath = normalizeGitHubRepoPath(message.path);
+  if (!rawPath) {
+    return { success: false, error: '缺少文件路径' };
+  }
+
+  const repoPath = gitConfig.basePath
+    ? normalizeGitHubRepoPath(`${gitConfig.basePath}/${rawPath}`)
+    : rawPath;
+
+  const commitMessage = String(message.commitMessage || '').trim() || `Bookmark Canvas Sync: delete ${rawPath}`;
+  const result = await deleteRepoFile({
+    token: gitConfig.token,
+    owner: gitConfig.owner,
+    repo: gitConfig.repo,
+    branch: gitConfig.branch,
+    path: repoPath,
+    message: commitMessage
+  });
+
+  if (!result || result.success !== true) {
+    return { success: false, error: result?.error || '删除同步文件失败', path: repoPath };
+  }
+
+  return {
+    success: true,
+    path: result.path || repoPath,
+    deleted: result.deleted === true,
+    notFound: result.notFound === true,
+    commitSha: result.commitSha || null
+  };
+}
+
+async function handleCanvasGitListFilesMessage(message) {
+  const gitConfig = await resolveCanvasGitConfig();
+  if (!gitConfig.success) {
+    return { success: false, error: gitConfig.error };
+  }
+
+  const rawRootPath = normalizeGitHubRepoPath(message.rootPath);
+  const repoRootPath = gitConfig.basePath
+    ? normalizeGitHubRepoPath(`${gitConfig.basePath}/${rawRootPath}`)
+    : rawRootPath;
+
+  const result = await listRepoFiles({
+    token: gitConfig.token,
+    owner: gitConfig.owner,
+    repo: gitConfig.repo,
+    branch: gitConfig.branch,
+    rootPath: repoRootPath
+  });
+
+  if (!result || result.success !== true) {
+    return { success: false, error: result?.error || '列出同步文件失败', rootPath: rawRootPath };
+  }
+
+  const normalizedBasePath = normalizeGitHubRepoPath(gitConfig.basePath);
+  const basePrefix = normalizedBasePath ? `${normalizedBasePath}/` : '';
+
+  const files = (Array.isArray(result.files) ? result.files : []).map((entry) => {
+    const repoPath = normalizeGitHubRepoPath(entry && entry.path);
+    let relativePath = repoPath;
+    if (basePrefix && repoPath.startsWith(basePrefix)) {
+      relativePath = repoPath.slice(basePrefix.length);
+    }
+    return {
+      path: relativePath,
+      repoPath,
+      sha: entry && entry.sha ? String(entry.sha) : '',
+      size: Number.isFinite(Number(entry && entry.size)) ? Number(entry.size) : 0
+    };
+  }).filter((entry) => {
+    if (!entry || !entry.path) return false;
+    if (!rawRootPath) return true;
+    return entry.path === rawRootPath || entry.path.startsWith(`${rawRootPath}/`);
+  });
+
+  return {
+    success: true,
+    rootPath: rawRootPath,
+    repoRootPath,
+    files,
+    truncated: result.truncated === true
   };
 }
 
@@ -1567,9 +1712,9 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.action === 'canvasGitReadState') {
+  if (message.action === 'canvasGitReadFile') {
     (async () => {
-      const response = await handleCanvasGitReadStateMessage(message);
+      const response = await handleCanvasGitReadFileMessage(message);
       sendResponse(response);
     })();
     return true;
@@ -1583,17 +1728,25 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.action === 'canvasGitWriteState') {
+  if (message.action === 'canvasGitWriteFile') {
     (async () => {
-      const response = await handleCanvasGitWriteStateMessage(message);
+      const response = await handleCanvasGitWriteFileMessage(message);
       sendResponse(response);
     })();
     return true;
   }
 
-  if (message.action === 'canvasGitWriteFile') {
+  if (message.action === 'canvasGitDeleteFile') {
     (async () => {
-      const response = await handleCanvasGitWriteFileMessage(message);
+      const response = await handleCanvasGitDeleteFileMessage(message);
+      sendResponse(response);
+    })();
+    return true;
+  }
+
+  if (message.action === 'canvasGitListFiles') {
+    (async () => {
+      const response = await handleCanvasGitListFilesMessage(message);
       sendResponse(response);
     })();
     return true;

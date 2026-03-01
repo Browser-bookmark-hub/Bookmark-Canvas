@@ -26134,6 +26134,26 @@ function __resolveImportPreviewMdTitle(node, index, isEn) {
     return isEn ? `Blank node ${index + 1}` : `空白栏目 ${index + 1}`;
 }
 
+function __resolveImportPreviewNativeCardTitle(node, index, isEn) {
+    if (!node || typeof node !== 'object') {
+        return isEn ? `Native card ${index + 1}` : `原生卡片 ${index + 1}`;
+    }
+
+    let base = '';
+    if (typeof node.text === 'string' && node.text.trim()) {
+        const lines = node.text.replace(/\u200B/g, '').replace(/\r\n?/g, '\n').split(/\n+/).map((line) => String(line || '').trim()).filter(Boolean);
+        base = lines.length ? lines[0] : node.text;
+    }
+
+    if (!base && typeof node.html === 'string' && node.html.trim()) {
+        base = __extractImportPreviewTextFromHtml(node.html);
+    }
+
+    base = __trimImportPreviewText(base);
+    if (base) return base;
+    return isEn ? `Native card ${index + 1}` : `原生卡片 ${index + 1}`;
+}
+
 function __resolveImportPreviewSectionTitle(section, index, isEn) {
     const title = __trimImportPreviewText(section && section.title ? section.title : '');
     if (title) return title;
@@ -26358,6 +26378,8 @@ function __buildImportPreviewDataFromTempState(tempState, options = {}) {
 
         const permanentSections = groupTempSections.filter((section) => !!(section && section.isSnapshot));
         const temporarySections = groupTempSections.filter((section) => !(section && section.isSnapshot));
+        const blankMdNodes = groupMdNodes.filter((node) => !__isCanvasNativeTextNode(node));
+        const nativeCardNodes = groupMdNodes.filter((node) => __isCanvasNativeTextNode(node));
         const splitSections = temporarySections.filter((section) => !__isSpecialTempSection(section));
         const specialSections = temporarySections.filter((section) => __isSpecialTempSection(section));
 
@@ -26408,11 +26430,25 @@ function __buildImportPreviewDataFromTempState(tempState, options = {}) {
         const permanentItems = mapSectionItems(permanentSections, getPermanentSectionDefaultColor(), 'permanent');
         const splitItems = mapSectionItems(splitSections, getTempSectionDefaultColor(), 'temporary');
         const specialItems = mapSectionItems(specialSections, getSpecialTempSectionDefaultColor(), 'special');
-        const blankItems = mapMdItems(groupMdNodes, getBlankNodeDefaultColor());
-        const otherItems = edgeEntries.slice(0, MAX_ITEMS).map((entry, idx) => ({
-            ...entry,
-            indexLabel: String(idx + 1)
-        }));
+        const blankItems = mapMdItems(blankMdNodes, getBlankNodeDefaultColor());
+        const nativeItems = nativeCardNodes
+            .map((node, idx) => ({
+                title: __resolveImportPreviewNativeCardTitle(node, idx, isEn),
+                color: __resolveImportPreviewMdNodeColor(node, getBlankNodeDefaultColor()),
+                active: true
+            }))
+            .slice(0, MAX_ITEMS);
+        const otherItems = nativeItems
+            .concat(edgeEntries.map((entry) => ({
+                ...entry,
+                active: true
+            })))
+            .slice(0, MAX_ITEMS)
+            .map((entry, idx) => ({
+                ...entry,
+                indexLabel: String(idx + 1)
+            }));
+        const otherCount = nativeCardNodes.length + edgeEntries.length;
 
         const temporaryCount = splitSections.length + specialSections.length;
         const totalCount = permanentSections.length + temporaryCount + groupMdNodes.length + edgeEntries.length;
@@ -26436,11 +26472,11 @@ function __buildImportPreviewDataFromTempState(tempState, options = {}) {
                 }
             },
             blank: {
-                count: groupMdNodes.length,
+                count: blankMdNodes.length,
                 items: blankItems
             },
             other: {
-                count: edgeEntries.length,
+                count: otherCount,
                 items: otherItems
             }
         };
@@ -27678,6 +27714,7 @@ function __getFullscreenExportTargetLabel(descriptor) {
         const nodeId = String(descriptor.id || '').trim();
         const node = (CanvasState.mdNodes || []).find((item) => item && item.id === nodeId);
         if (!node) return isEn ? 'Blank Section' : '空白栏目';
+        const isNativeCard = __isCanvasNativeTextNode(node);
         let title = '';
         const nodeEl = document.getElementById(nodeId);
         if (nodeEl) {
@@ -27699,7 +27736,7 @@ function __getFullscreenExportTargetLabel(descriptor) {
                 title = __getSingleLinePreview(div.innerText || div.textContent || '');
             } catch (_) { }
         }
-        return title || (isEn ? 'Blank Section' : '空白栏目');
+        return title || (isNativeCard ? (isEn ? 'Native Card' : '原生卡片') : (isEn ? 'Blank Section' : '空白栏目'));
     }
 
     return '';
@@ -29029,6 +29066,56 @@ function __toUint8(text) {
     return new TextEncoder().encode(String(text || ''));
 }
 
+function __buildCanvasImportRulesDocument(_options = {}) {
+    return [
+        '# 导入规则说明',
+        '',
+        '> 返回文档索引：[docs/README.md](./README.md)',
+        '',
+        '> 适用范围：Obsidian 导入/拉取到插件，以及插件推送到云端时的结构约束与编辑约束。',
+        '',
+        '## 1) 永久栏目与副本的关系',
+        '',
+        '### 定义',
+        '',
+        '- 永久栏目（主栏目）与永久副本在插件中共用同一套底层数据，属于共享关系。',
+        '- 可以把它们理解为同一份内容的“镜像视图”，核心内容应保持实时一致。',
+        '- 这套核心内容本质上是浏览器书签树（Bookmarks Tree）。',
+        '',
+        '### 修改时必须注意',
+        '',
+        '- 任何涉及书签树内容的修改（新增/删除/移动书签、文件夹结构变更）都应按“同一数据源”处理。',
+        '- 不要把永久副本当成独立正文源分别长期维护，否则会引入多源分叉。',
+        '- 若出现多处不一致，应以主栏目（通常 #A）作为统一收敛源，再回写其他副本。',
+        '',
+        '### 说明文本（Description）约束',
+        '',
+        '- 永久栏目允许保留说明文本；副本说明可存在独立差异。',
+        '- 但“说明差异”仅用于展示说明，不应改变其共享的书签树正文语义。',
+        '',
+        '## 2) 临时栏目（含特殊临时栏目）与空白栏目',
+        '',
+        '### 定义',
+        '',
+        '- 临时栏目可视为沙盒区，用于暂存、整理、分流、提示词化处理与中间态编辑。',
+        '- 特殊临时栏目（如拖入/搜索/批量/导入）属于功能流程中间层，强调操作过程而非最终真相源。',
+        '- 空白栏目用于自由文本/备注/结构化补充，不等同于永久书签树。',
+        '',
+        '### 修改时应遵循的规范',
+        '',
+        '- 临时栏目与空白栏目的编辑应聚焦“草稿与加工”，避免将其当成永久主数据替代源。',
+        '- 需要进入长期稳定结构的内容，应最终收敛到永久栏目（书签树）。',
+        '- 对临时栏目的大批量变动（拆分、合并、移动）应视为高频操作，优先保证结构清晰、命名清晰。',
+        '- 空白栏目建议仅承载说明、上下文和辅助信息，不承担永久书签树的主结构维护。',
+        '',
+        '## 3) 导入/同步时的结构理解（给用户）',
+        '',
+        '- 永久栏目/副本：共享一份书签树语义；副本主要提供不同视图位置与说明承载。',
+        '- 临时栏目/空白栏目：用于过程性内容与补充信息，不直接等价于永久主数据。',
+        '- 如需避免冲突：先确定“永久主数据源”，再处理临时/空白的合并与映射。'
+    ].join('\n');
+}
+
 const __crc32Table = (() => {
     const table = new Uint32Array(256);
     for (let i = 0; i < 256; i++) {
@@ -29133,7 +29220,84 @@ function __zipStore(files) {
 }
 
 function __sanitizeFilename(name) {
-    return (name || '').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/^\.+/, '').trim() || 'Untitled';
+    return (name || '').replace(/[<>:"/\\|?*#\x00-\x1F]/g, '_').replace(/^\.+/, '').trim() || 'Untitled';
+}
+
+const __OBSIDIAN_SAFE_FILENAME_MAX_BYTES = 120;
+const __OBSIDIAN_SAFE_FILENAME_MIN_BASE_BYTES = 24;
+
+function __getUtf8ByteLength(text) {
+    if (typeof TextEncoder === 'undefined') {
+        return String(text || '').length;
+    }
+    try {
+        return new TextEncoder().encode(String(text || '')).length;
+    } catch (_) {
+        return String(text || '').length;
+    }
+}
+
+function __truncateUtf8ByBytes(text, maxBytes) {
+    const input = String(text || '');
+    if (!input || maxBytes <= 0) return '';
+    if (typeof TextEncoder === 'undefined') {
+        return input.slice(0, maxBytes);
+    }
+    try {
+        const encoder = new TextEncoder();
+        let bytes = 0;
+        let output = '';
+        for (const ch of input) {
+            const size = encoder.encode(ch).length;
+            if (bytes + size > maxBytes) break;
+            output += ch;
+            bytes += size;
+        }
+        return output;
+    } catch (_) {
+        return input.slice(0, maxBytes);
+    }
+}
+
+function __hashFilenameSeed(seed) {
+    const input = String(seed || '');
+    let hash = 2166136261;
+    for (let index = 0; index < input.length; index += 1) {
+        hash ^= input.charCodeAt(index);
+        hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash.toString(36).slice(0, 8) || '0';
+}
+
+function __normalizeSafeFilenameStem(stem, fallback = 'Untitled') {
+    const normalized = __sanitizeFilename(stem).replace(/[. ]+$/g, '').trim();
+    if (normalized) return normalized;
+    return __sanitizeFilename(fallback).replace(/[. ]+$/g, '').trim() || 'Untitled';
+}
+
+function __buildObsidianSafeFilenameStem(name, fallback = 'Untitled', uniqueSeed = '') {
+    const base = __normalizeSafeFilenameStem(name, fallback);
+    if (__getUtf8ByteLength(base) <= __OBSIDIAN_SAFE_FILENAME_MAX_BYTES) {
+        return base;
+    }
+
+    const suffix = `_${__hashFilenameSeed(uniqueSeed || name || fallback || base)}`;
+    const allowedBytes = Math.max(
+        __OBSIDIAN_SAFE_FILENAME_MIN_BASE_BYTES,
+        __OBSIDIAN_SAFE_FILENAME_MAX_BYTES - __getUtf8ByteLength(suffix)
+    );
+    const truncated = __normalizeSafeFilenameStem(__truncateUtf8ByBytes(base, allowedBytes), fallback);
+    return `${truncated}${suffix}`;
+}
+
+function __appendObsidianFilenameSuffix(stem, uniqueSeed = 'dup') {
+    const suffix = `_${__hashFilenameSeed(uniqueSeed)}`;
+    const allowedBytes = Math.max(
+        __OBSIDIAN_SAFE_FILENAME_MIN_BASE_BYTES,
+        __OBSIDIAN_SAFE_FILENAME_MAX_BYTES - __getUtf8ByteLength(suffix)
+    );
+    const truncated = __normalizeSafeFilenameStem(__truncateUtf8ByBytes(stem, allowedBytes), stem);
+    return `${truncated}${suffix}`;
 }
 
 function __getPermanentSectionDisplayTitle(isEn) {
@@ -29145,9 +29309,11 @@ function __getPermanentSectionDisplayTitle(isEn) {
 function __buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn) {
     const slot = __normalizePositiveInt(permanentSlot) || 1;
     const slotLabel = toAlphaLabel(slot) || 'A';
-    const title = __getPermanentSectionDisplayTitle(isEn);
     const folder = isEn ? 'Permanent' : '永久栏目';
-    const fileName = __sanitizeFilename(`#${slotLabel} ${title}`);
+    const fixedBaseName = isEn
+        ? `${slotLabel}-PermanentBookmarks`
+        : `${slotLabel}书签树（永久栏目）`;
+    const fileName = __sanitizeFilename(fixedBaseName);
     return `${folder}/${fileName}.md`;
 }
 
@@ -29169,15 +29335,22 @@ function __getImportContainerLabelFromNode(node) {
 }
 
 
-function __normalizeObsidianSyncExportRoot(path, isEn) {
-    const fallback = isEn ? 'bookmark-canvas-sync' : '书签画布同步';
-    const normalized = String(path || fallback)
+function __normalizeObsidianSyncExportRoot(path, isEn, options = {}) {
+    const allowEmpty = !!(options && options.allowEmpty);
+    const fallback = '书签画布';
+    const normalized = String(path == null ? '' : path)
         .trim()
         .replace(/\\/g, '/')
         .replace(/^\/+/, '')
         .replace(/\/+$/, '')
         .replace(/\/+/g, '/');
-    return normalized || fallback;
+    const migrated = (normalized === 'bookmark-canvas-sync'
+        || normalized === 'bookmark-canvas'
+        || normalized === '书签画布同步')
+        ? '书签画布'
+        : normalized;
+    if (allowEmpty) return migrated;
+    return migrated || fallback;
 }
 
 function __joinSyncExportPath(root, rel) {
@@ -29186,14 +29359,45 @@ function __joinSyncExportPath(root, rel) {
     return normalizedRoot ? `${normalizedRoot}/${normalizedRel}` : normalizedRel;
 }
 
+function __isCanvasNativeTextNode(node) {
+    if (!node || typeof node !== 'object') return false;
+    const subtype = String(node.subtype || '').trim().toLowerCase();
+    const source = String(node.source || '').trim().toLowerCase();
+    return subtype === 'canvas-native-text' || source === 'obsidian-canvas-text';
+}
+
+function __resolveCanvasNativeTextNodeBody(node) {
+    if (!node || typeof node !== 'object') return '';
+    const directText = String(node.text == null ? '' : node.text);
+    if (directText.trim()) return directText;
+    const rawHtml = String(node.html == null ? '' : node.html).trim();
+    if (!rawHtml) return '';
+    try {
+        const div = document.createElement('div');
+        div.innerHTML = rawHtml;
+        return String(div.innerText || div.textContent || '').trim();
+    } catch (_) {
+        return '';
+    }
+}
+
 function __buildObsidianSyncCanvasData({
     exportRoot,
     permanentMdRel,
     copyFileMap,
     tempSectionMdPaths,
-    mdNodeMdPaths
+    mdNodeMdPaths,
+    nativeTextNodes
 }) {
-    const withPrefix = (relPath) => __joinSyncExportPath(exportRoot, relPath);
+    const normalizedExportRoot = String(exportRoot || '')
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .replace(/\/+$/, '')
+        .replace(/\/+/g, '/');
+    const withPrefix = (relPath) => {
+        const normalizedRel = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+        return normalizedExportRoot ? `${normalizedExportRoot}/${normalizedRel}` : normalizedRel;
+    };
     const canvasData = { nodes: [], edges: [] };
 
     const permanentSectionEl = document.getElementById('permanentSection');
@@ -29290,6 +29494,22 @@ function __buildObsidianSyncCanvasData({
         });
     });
 
+    (Array.isArray(nativeTextNodes) ? nativeTextNodes : []).forEach((node) => {
+        if (!node || !node.id) return;
+        const color = node.colorHex || node.color || null;
+        const body = __resolveCanvasNativeTextNodeBody(node);
+        canvasData.nodes.push({
+            id: node.id,
+            type: 'text',
+            x: Math.round(node.x || 0),
+            y: Math.round(node.y || 0),
+            width: Math.round(node.width || exportMdBase.width),
+            height: Math.round(node.height || exportMdBase.height),
+            text: body,
+            ...(color ? { color } : {})
+        });
+    });
+
     if (Array.isArray(CanvasState.edges)) {
         canvasData.edges = CanvasState.edges.map(edge => {
             const dir = edge.direction || 'none';
@@ -29325,18 +29545,22 @@ async function __buildObsidianSyncFiles(options = {}) {
     }
 
     const exportFormat = options && options.exportFormat === 'editable' ? 'editable' : 'visual';
-    const exportRoot = __normalizeObsidianSyncExportRoot(options && options.exportRoot, isEn);
+    const exportRoot = __normalizeObsidianSyncExportRoot(options && options.exportRoot, isEn, { allowEmpty: true });
 
     try { __flushMdEditorsForExport(); } catch (_) { }
-    try { saveTempNodes(); } catch (_) { }
+    try { saveTempNodes({ suppressSyncMarkDirty: true }); } catch (_) { }
     try { savePermanentSectionPosition(); } catch (_) { }
 
     const files = [];
-    const pushTextFile = (relPath, content) => {
-        files.push({
+    const pushTextFile = (relPath, content, meta = null) => {
+        const file = {
             path: __joinSyncExportPath(exportRoot, relPath),
             content: String(content == null ? '' : content)
-        });
+        };
+        if (meta && typeof meta === 'object') {
+            file.meta = Object.assign({}, meta);
+        }
+        files.push(file);
     };
 
     const bookmarkTree = await api.getTree();
@@ -29344,7 +29568,11 @@ async function __buildObsidianSyncFiles(options = {}) {
     const permanentBuilder = exportFormat === 'editable'
         ? __buildPermanentBookmarksMarkdownEditable
         : __buildPermanentBookmarksMarkdown;
-    pushTextFile(permanentMdRel, permanentBuilder(bookmarkTree, null, { permanentSlot: 1 }));
+    pushTextFile(
+        permanentMdRel,
+        permanentBuilder(bookmarkTree, null, { permanentSlot: 1 }),
+        { type: 'permanent', slot: 1 }
+    );
 
     const copyFileMap = {};
     try {
@@ -29364,7 +29592,11 @@ async function __buildObsidianSyncFiles(options = {}) {
 
                 copyFileMap[copyId] = copyMdRel;
                 const slot = idx ? (idx + 1) : null;
-                pushTextFile(copyMdRel, permanentBuilder(bookmarkTree, descObj, { permanentSlot: slot, copyId }));
+                pushTextFile(
+                    copyMdRel,
+                    permanentBuilder(bookmarkTree, descObj, { permanentSlot: slot, copyId }),
+                    { type: 'permanent', slot: slot || (idx + 1), copyId }
+                );
             });
         }
     } catch (_) { }
@@ -29377,15 +29609,19 @@ async function __buildObsidianSyncFiles(options = {}) {
         const seqLabel = getTempSectionLabel(section);
         const rawTitle = section.title || (isEn ? 'Temp Section' : '临时栏目');
         const fileTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
-        const safeTitle = __sanitizeFilename(fileTitle);
+        const safeTitle = __buildObsidianSafeFilenameStem(
+            fileTitle,
+            seqLabel || rawTitle || section.id || 'section',
+            section.id || fileTitle
+        );
         let rel = __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn);
         if (usedTempRelPaths.has(rel)) {
             const slashIndex = rel.lastIndexOf('/');
             const relFolder = slashIndex >= 0 ? rel.slice(0, slashIndex) : '';
             const relFile = slashIndex >= 0 ? rel.slice(slashIndex + 1) : rel;
             const relStem = relFile.replace(/\.md$/i, '');
-            const uniqueSuffix = __sanitizeFilename(section.id || 'section');
-            const uniqueFile = `${relStem}_${uniqueSuffix}.md`;
+            const uniqueStem = __appendObsidianFilenameSuffix(relStem, section.id || relStem || 'section');
+            const uniqueFile = `${uniqueStem}.md`;
             rel = relFolder ? `${relFolder}/${uniqueFile}` : uniqueFile;
         }
         usedTempRelPaths.add(rel);
@@ -29395,16 +29631,25 @@ async function __buildObsidianSyncFiles(options = {}) {
         const tempBuilder = exportFormat === 'editable'
             ? __buildTempSectionMarkdownEditable
             : __buildTempSectionMarkdown;
-        pushTextFile(rel, tempBuilder(section));
+        pushTextFile(rel, tempBuilder(section), {
+            type: 'temporary',
+            sectionId: section.id,
+            sectionSerial: seqLabel || ''
+        });
     });
 
     const mdNodeMdPaths = [];
+    const nativeTextNodes = [];
     const mdNodeFolder = isEn ? 'Blank' : '空白栏目';
     const usedNodePaths = new Set();
 
     (CanvasState.mdNodes || []).forEach((node) => {
         if (!node || !node.id) return;
         if (node.subtype === 'import-container') return;
+        if (__isCanvasNativeTextNode(node)) {
+            nativeTextNodes.push(node);
+            return;
+        }
 
         let titleCandidate = (node.text || '').replace(/\u200B/g, '').trim();
         if (!titleCandidate && node.html) {
@@ -29416,17 +29661,20 @@ async function __buildObsidianSyncFiles(options = {}) {
         }
         titleCandidate = titleCandidate.split('\n')[0].trim();
 
-        let safeName = __sanitizeFilename(titleCandidate);
+        let safeName = __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
         if (!safeName || safeName === 'Untitled') safeName = node.id;
 
         let rel = `${mdNodeFolder}/${safeName}.md`;
         if (usedNodePaths.has(rel)) {
-            rel = `${mdNodeFolder}/${safeName}_${node.id}.md`;
+            rel = `${mdNodeFolder}/${__appendObsidianFilenameSuffix(safeName, node.id)}.md`;
         }
         usedNodePaths.add(rel);
 
         mdNodeMdPaths.push({ id: node.id, rel });
-        pushTextFile(rel, __buildMdNodeMarkdown(node));
+        pushTextFile(rel, __buildMdNodeMarkdown(node), {
+            type: 'blank',
+            nodeId: node.id
+        });
     });
 
     const canvasData = __buildObsidianSyncCanvasData({
@@ -29434,12 +29682,23 @@ async function __buildObsidianSyncFiles(options = {}) {
         permanentMdRel,
         copyFileMap,
         tempSectionMdPaths,
-        mdNodeMdPaths
+        mdNodeMdPaths,
+        nativeTextNodes
     });
 
-    const exportRootLeaf = String(exportRoot).split('/').filter(Boolean).slice(-1)[0] || exportRoot;
+    const defaultCanvasName = isEn ? 'bookmark-canvas' : '书签画布';
+    const exportRootLeaf = String(exportRoot).split('/').filter(Boolean).slice(-1)[0] || defaultCanvasName;
     const canvasFileName = `${exportRootLeaf}.canvas`;
-    pushTextFile(canvasFileName, JSON.stringify(canvasData, null, 2));
+    pushTextFile(canvasFileName, JSON.stringify(canvasData, null, 2), { type: 'canvas' });
+    pushTextFile(
+        '说明导入规则.md',
+        __buildCanvasImportRulesDocument({
+            exportRoot: exportRootLeaf,
+            canvasFileName,
+            exportFormat
+        }),
+        { type: 'guide' }
+    );
 
     return {
         exportRoot,
@@ -29454,6 +29713,8 @@ if (typeof window !== 'undefined') {
         window.CanvasObsidianExportBridge = {};
     }
     window.CanvasObsidianExportBridge.buildSyncFiles = __buildObsidianSyncFiles;
+    window.CanvasObsidianExportBridge.parseSyncFolderFiles = parseCanvasPackageFromFolderFiles;
+    window.CanvasObsidianExportBridge.applySyncFilesReplace = __applyObsidianSyncFilesReplace;
 }
 
 async function exportCanvasPackage(options = {}) {
@@ -30201,7 +30462,11 @@ async function exportCanvasPackage(options = {}) {
         const seqLabel = getTempSectionLabel(section);
         const rawTitle = section.title || (isEn ? 'Temp Section' : '临时栏目');
         const fileTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
-        const safeTitle = __sanitizeFilename(fileTitle);
+        const safeTitle = __buildObsidianSafeFilenameStem(
+            fileTitle,
+            seqLabel || rawTitle || section.id || 'section',
+            section.id || fileTitle
+        );
 
         let rel = __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn);
         if (usedTempRelPaths.has(rel)) {
@@ -30209,8 +30474,8 @@ async function exportCanvasPackage(options = {}) {
             const relFolder = slashIndex >= 0 ? rel.slice(0, slashIndex) : '';
             const relFile = slashIndex >= 0 ? rel.slice(slashIndex + 1) : rel;
             const relStem = relFile.replace(/\.md$/i, '');
-            const uniqueSuffix = __sanitizeFilename(section.id || 'section');
-            const uniqueFile = `${relStem}_${uniqueSuffix}.md`;
+            const uniqueStem = __appendObsidianFilenameSuffix(relStem, section.id || relStem || 'section');
+            const uniqueFile = `${uniqueStem}.md`;
             rel = relFolder ? `${relFolder}/${uniqueFile}` : uniqueFile;
         }
         usedTempRelPaths.add(rel);
@@ -30223,6 +30488,7 @@ async function exportCanvasPackage(options = {}) {
     });
 
     const mdNodeMdPaths = [];
+    const nativeTextNodes = [];
     const mdNodeFolder = isEn ? 'Blank' : '空白栏目';
     const usedNodePaths = new Set();
 
@@ -30230,6 +30496,10 @@ async function exportCanvasPackage(options = {}) {
         if (!node || !node.id) return;
         // import-container 作为 Obsidian 的 group 节点导出（不生成 .md 文件）
         if (node.subtype === 'import-container') return;
+        if (__isCanvasNativeTextNode(node)) {
+            nativeTextNodes.push(node);
+            return;
+        }
 
         // Use first line of text as filename
         let titleCandidate = (node.text || '').replace(/\u200B/g, '').trim();
@@ -30240,13 +30510,13 @@ async function exportCanvasPackage(options = {}) {
         }
         titleCandidate = titleCandidate.split('\n')[0].trim();
 
-        let safeName = __sanitizeFilename(titleCandidate);
+        let safeName = __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
         if (!safeName || safeName === 'Untitled') safeName = node.id;
 
         let rel = `${mdNodeFolder}/${safeName}.md`;
         // Handle name collision
         if (usedNodePaths.has(rel)) {
-            rel = `${mdNodeFolder}/${safeName}_${node.id}.md`;
+            rel = `${mdNodeFolder}/${__appendObsidianFilenameSuffix(safeName, node.id)}.md`;
         }
         usedNodePaths.add(rel);
 
@@ -30355,6 +30625,22 @@ async function exportCanvasPackage(options = {}) {
                 width: Math.round(node.width || exportMdBase.width),
                 height: Math.round(node.height || exportMdBase.height),
                 file: withPrefix(rel),
+                ...(color ? { color } : {})
+            });
+        });
+
+        nativeTextNodes.forEach((node) => {
+            if (!node || !node.id) return;
+            const color = node.colorHex || node.color || null;
+            const body = __resolveCanvasNativeTextNodeBody(node);
+            canvasData.nodes.push({
+                id: node.id,
+                type: 'text',
+                x: Math.round(node.x || 0),
+                y: Math.round(node.y || 0),
+                width: Math.round(node.width || exportMdBase.width),
+                height: Math.round(node.height || exportMdBase.height),
+                text: body,
                 ...(color ? { color } : {})
             });
         });
@@ -30723,6 +31009,14 @@ async function exportCanvasPackage(options = {}) {
         ''
     ].join('\n');
     files.push({ name: `${exportRoot}/${readmeName}`, data: __toUint8(guide) });
+    files.push({
+        name: `${exportRoot}/说明导入规则.md`,
+        data: __toUint8(__buildCanvasImportRulesDocument({
+            exportRoot,
+            canvasFileName,
+            exportFormat
+        }))
+    });
 
     const zipBlob = __zipStore(files);
     const zipUrl = URL.createObjectURL(zipBlob);
@@ -31091,6 +31385,7 @@ function __parsePermanentSectionSlotFromFilename(fileNameNoExt) {
 
     let match = name.match(/^#([A-Za-z]+)(?:\s+|$)/);
     if (!match) match = name.match(/\(#([A-Za-z]+)\)/i);
+    if (!match) match = name.match(/^([A-Za-z]{1,4})(?![A-Za-z])/);
     if (!match) return null;
 
     return __alphaLabelToNumber(match[1]) || null;
@@ -31362,14 +31657,19 @@ async function parseCanvasPackageFromZipFile(file) {
                     });
                 }
             } else if (node.type === 'text') {
-                // Direct text nodes in canvas?
+                const convertedColor = convertObsidianColor(node.color);
+                const isHex = convertedColor && convertedColor.startsWith('#');
                 tempState.mdNodes.push({
                     id: node.id,
                     x: node.x,
                     y: node.y,
                     width: node.width,
                     height: node.height,
-                    text: node.text
+                    color: isHex ? null : node.color,
+                    colorHex: isHex ? convertedColor : null,
+                    text: String(node.text || ''),
+                    subtype: 'canvas-native-text',
+                    source: 'obsidian-canvas-text'
                 });
             }
         });
@@ -31674,13 +31974,19 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
                     });
                 }
             } else if (node.type === 'text') {
+                const convertedColor = convertObsidianColor(node.color);
+                const isHex = convertedColor && convertedColor.startsWith('#');
                 tempState.mdNodes.push({
                     id: node.id,
                     x: node.x,
                     y: node.y,
                     width: node.width,
                     height: node.height,
-                    text: node.text
+                    color: isHex ? null : node.color,
+                    colorHex: isHex ? convertedColor : null,
+                    text: String(node.text || ''),
+                    subtype: 'canvas-native-text',
+                    source: 'obsidian-canvas-text'
                 });
             }
         });
@@ -31729,6 +32035,115 @@ async function importCanvasPackageFolder(folderFiles, folderName) {
         parsed.primaryState,
         parsed.importFileName || folderName || ''
     );
+}
+
+function __normalizeImportFolderFilesMap(filesByPath) {
+    const output = new Map();
+    const normalizePath = (path) => String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
+
+    const assign = (path, value) => {
+        const normalizedPath = normalizePath(path);
+        if (!normalizedPath) return;
+
+        let bytes = null;
+        if (value instanceof Uint8Array) {
+            bytes = value;
+        } else if (value instanceof ArrayBuffer) {
+            bytes = new Uint8Array(value);
+        } else if (typeof value === 'string') {
+            bytes = new TextEncoder().encode(value);
+        } else if (value && typeof value === 'object') {
+            if (value.bytes instanceof Uint8Array) {
+                bytes = value.bytes;
+            } else if (value.bytes instanceof ArrayBuffer) {
+                bytes = new Uint8Array(value.bytes);
+            } else if (typeof value.content === 'string') {
+                bytes = new TextEncoder().encode(value.content);
+            }
+        }
+
+        if (!bytes) return;
+        output.set(normalizedPath, bytes);
+    };
+
+    if (filesByPath instanceof Map) {
+        for (const [path, value] of filesByPath.entries()) {
+            assign(path, value);
+        }
+        return output;
+    }
+
+    if (filesByPath && typeof filesByPath === 'object') {
+        Object.keys(filesByPath).forEach((path) => assign(path, filesByPath[path]));
+    }
+
+    return output;
+}
+
+async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
+    const normalizedFiles = __normalizeImportFolderFilesMap(filesByPath);
+    if (!normalizedFiles.size) {
+        throw new Error('同步文件为空，无法应用。');
+    }
+
+    const parsed = await parseCanvasPackageFromFolderFiles(normalizedFiles, folderName || 'sync-pull');
+    const parsedTempState = parsed && parsed.tempState && typeof parsed.tempState === 'object'
+        ? parsed.tempState
+        : {};
+
+    const nextState = __buildPersistedCanvasState({
+        sections: Array.isArray(parsedTempState.sections) ? parsedTempState.sections : [],
+        tempSectionCounter: parsedTempState.tempSectionCounter,
+        tempItemCounter: parsedTempState.tempItemCounter,
+        colorCursor: parsedTempState.colorCursor,
+        tempSectionLastColor: parsedTempState.tempSectionLastColor,
+        tempSectionPrevColor: parsedTempState.tempSectionPrevColor,
+        mdNodes: Array.isArray(parsedTempState.mdNodes) ? parsedTempState.mdNodes : [],
+        mdNodeCounter: parsedTempState.mdNodeCounter,
+        edges: Array.isArray(parsedTempState.edges) ? parsedTempState.edges : [],
+        edgeCounter: parsedTempState.edgeCounter,
+        timestamp: Date.now()
+    });
+
+    if (Array.isArray(CanvasState.tempSections)) {
+        CanvasState.tempSections.forEach((section) => {
+            if (!section || !section.id) return;
+            const element = document.getElementById(section.id);
+            if (element) element.remove();
+        });
+    }
+    if (Array.isArray(CanvasState.mdNodes)) {
+        CanvasState.mdNodes.forEach((node) => {
+            if (!node || !node.id) return;
+            const element = document.getElementById(node.id);
+            if (element) element.remove();
+        });
+    }
+
+    const svg = document.querySelector('.canvas-edges');
+    if (svg) {
+        Array.from(svg.querySelectorAll('.canvas-edge, .canvas-edge-label, .canvas-edge-label-bg, .canvas-edge-hit-area, foreignObject.edge-label-fo'))
+            .forEach((element) => element.remove());
+    }
+
+    CanvasState.selectedEdgeId = null;
+    CanvasState.selectedTempSectionId = null;
+    CanvasState.selectedMdNodeId = null;
+    try { if (typeof hideEdgeToolbar === 'function') hideEdgeToolbar(); } catch (_) { }
+    try { if (typeof clearTempSelection === 'function') clearTempSelection(); } catch (_) { }
+    try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
+
+    __applyCanvasTempStateObject(nextState);
+    __finalizeTempNodesLoad({ loadedFromStorage: true });
+
+    try { saveTempNodes({ immediate: true, suppressSyncMarkDirty: true }); } catch (_) { }
+
+    return {
+        success: true,
+        tempCount: Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0,
+        mdCount: Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.length : 0,
+        edgeCount: Array.isArray(CanvasState.edges) ? CanvasState.edges.length : 0
+    };
 }
 
 /**
@@ -33636,6 +34051,7 @@ function saveTempNodes(options = {}) {
     // 4) 若功能是“仅当前会话临时态”（如 sandbox 导入），不要调用本函数
     if (__canvasTempStateRealtimeSyncApplying) return;
     const immediate = !!(options && options.immediate);
+    const suppressSyncMarkDirty = !!(options && options.suppressSyncMarkDirty);
     // 保存前执行自动 resize
     autoResizeImportContainers();
 
@@ -33681,12 +34097,20 @@ function saveTempNodes(options = {}) {
     } catch (error) {
         console.error('[Canvas] 保存临时栏目失败:', error);
     } finally {
+        if (suppressSyncMarkDirty) {
+            return;
+        }
         try {
             const syncModule = window.CanvasObsidianGitSync;
             if (syncModule && typeof syncModule.markDirty === 'function') {
                 syncModule.markDirty('save', {
                     immediate,
-                    bulk: !!(options && options.bulk)
+                    bulk: !!(options && options.bulk),
+                    dirty: {
+                        canvasLayout: true,
+                        temporaryAll: true,
+                        blankAll: true
+                    }
                 });
             }
         } catch (_) { }

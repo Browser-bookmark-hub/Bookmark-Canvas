@@ -3202,16 +3202,20 @@ const i18n = {
         'en': 'Remote Mismatch Policy'
     },
     canvasSyncMismatchPolicyAutoPullOption: {
-        'zh_CN': '自动拉取',
-        'en': 'Auto Pull'
+        'zh_CN': '自动使用云端覆盖本地',
+        'en': 'Auto Use Cloud to Overwrite Local'
+    },
+    canvasSyncMismatchPolicyAutoPushOption: {
+        'zh_CN': '自动保留本地并覆盖云端',
+        'en': 'Auto Keep Local and Overwrite Cloud'
     },
     canvasSyncMismatchPolicyPromptOption: {
-        'zh_CN': '弹窗提示（与云端对齐 / 以本地覆盖云端）',
-        'en': 'Prompt (align with cloud / overwrite cloud with local)'
+        'zh_CN': '弹窗提示',
+        'en': 'Prompt'
     },
     canvasSyncMismatchPolicyDesc: {
-        'zh_CN': '前台关闭期间若后台检测到“云端版本与本地基线不一致”，会在前台再次打开后处理。\n自动拉取=按自动流程拉取；弹窗提示=让你选择与云端对齐或以本地覆盖云端。',
-        'en': 'If background detects cloud/local baseline mismatch while the foreground is closed, it will be handled when the foreground opens again.\nAuto pull = run pull by auto flow; Prompt = let you choose align with cloud or overwrite cloud with local.'
+        'zh_CN': '前台关闭期间若后台检测到“云端版本与本地基线不一致”，会在前台再次打开后处理。\n自动使用云端覆盖本地=前台再次打开后，自动拉取并以云端为准；自动保留本地并覆盖云端=前台再次打开后，自动上传并以本地为准；弹窗提示=手动选择“使用云端覆盖本地”或“保留本地并覆盖云端”。',
+        'en': 'If background detects cloud/local baseline mismatch while foreground is closed, it will be handled after foreground opens again.\nAuto Use Cloud to Overwrite Local = auto pull and align to cloud; Auto Keep Local and Overwrite Cloud = auto push and align to local; Prompt = manually choose "Use Cloud to Overwrite Local" or "Keep Local and Overwrite Cloud".'
     },
     canvasSyncPullOnStartupLabel: {
         'zh_CN': '打开页面时先拉取云端',
@@ -3366,8 +3370,8 @@ const i18n = {
         'en': 'Export Format (for Obsidian)'
     },
     canvasSyncObsidianExportFormatDesc: {
-        'zh_CN': '用于生成推送到仓库的 Obsidian 文件结构；默认“编辑模式”更适合继续编辑。',
-        'en': 'Controls the Obsidian file structure to push into repository; default Editable mode is better for continued editing.'
+        'zh_CN': '编辑模式：导出为易于编辑的文本结构。\n视觉模式：包含图标；当书签超过 20,000 个时，图标体积可能接近 100MB，达到 100MB 限制会报错。',
+        'en': 'Editable mode: exports an easy-to-edit text structure.\nVisual mode: includes icons; with over 20,000 bookmarks icon data may approach 100MB and fail at the 100MB limit.'
     },
     canvasSyncObsidianExportFormatVisualOption: {
         'zh_CN': '视觉模式',
@@ -3473,6 +3477,14 @@ const i18n = {
         'zh_CN': '等待执行首次同步',
         'en': 'Waiting to run first sync'
     },
+    canvasSyncFirstSyncPathCheckLabel: {
+        'zh_CN': '路径校验',
+        'en': 'Path Check'
+    },
+    canvasSyncFirstSyncPathCheckBtnText: {
+        'zh_CN': '校验',
+        'en': 'Validate'
+    },
     canvasSyncFirstSyncOverwriteText: {
         'zh_CN': '执行首次同步',
         'en': 'Run First Sync'
@@ -3490,8 +3502,8 @@ const i18n = {
         'en': 'Pull Only'
     },
     canvasSyncRebuildText: {
-        'zh_CN': '重建同步索引',
-        'en': 'Rebuild Sync Index'
+        'zh_CN': '刷新状态',
+        'en': 'Refresh State'
     },
     canvasSyncStatusRunningLabel: {
         'zh_CN': '执行状态：',
@@ -3518,12 +3530,16 @@ const i18n = {
         'en': 'File Push Delta:'
     },
     canvasSyncStatusRemoteShaLabel: {
-        'zh_CN': '云端版本：',
-        'en': 'Remote Revision:'
+        'zh_CN': '云端哈希：',
+        'en': 'Cloud Hash:'
     },
     canvasSyncStatusLocalHashLabel: {
         'zh_CN': '本地哈希：',
         'en': 'Local Hash:'
+    },
+    canvasSyncStatusOtherLabel: {
+        'zh_CN': '具体变更：',
+        'en': 'Detailed Changes:'
     },
     canvasSyncStatusPendingMismatchLabel: {
         'zh_CN': '云端不一致待处理：',
@@ -3589,9 +3605,13 @@ const i18n = {
         'zh_CN': '数据大小',
         'en': 'Data Size'
     },
-    canvasSyncConflictHashLabel: {
-        'zh_CN': '内容指纹',
-        'en': 'Content Hash'
+    canvasSyncConflictLocalHashLabel: {
+        'zh_CN': '本地哈希',
+        'en': 'Local Hash'
+    },
+    canvasSyncConflictRemoteHashLabel: {
+        'zh_CN': '云端哈希',
+        'en': 'Cloud Hash'
     },
     canvasSyncConflictUseLocalText: {
         'zh_CN': '保留本地并覆盖云端',
@@ -4644,6 +4664,8 @@ function applyLanguage() {
     if (canvasSyncMismatchPolicyLabel) canvasSyncMismatchPolicyLabel.textContent = i18n.canvasSyncMismatchPolicyLabel[currentLang];
     const canvasSyncMismatchPolicyAutoPullOption = document.getElementById('canvasSyncMismatchPolicyAutoPullOption');
     if (canvasSyncMismatchPolicyAutoPullOption) canvasSyncMismatchPolicyAutoPullOption.textContent = i18n.canvasSyncMismatchPolicyAutoPullOption[currentLang];
+    const canvasSyncMismatchPolicyAutoPushOption = document.getElementById('canvasSyncMismatchPolicyAutoPushOption');
+    if (canvasSyncMismatchPolicyAutoPushOption) canvasSyncMismatchPolicyAutoPushOption.textContent = i18n.canvasSyncMismatchPolicyAutoPushOption[currentLang];
     const canvasSyncMismatchPolicyPromptOption = document.getElementById('canvasSyncMismatchPolicyPromptOption');
     if (canvasSyncMismatchPolicyPromptOption) canvasSyncMismatchPolicyPromptOption.textContent = i18n.canvasSyncMismatchPolicyPromptOption[currentLang];
     const canvasSyncMismatchPolicyDesc = document.getElementById('canvasSyncMismatchPolicyDesc');
@@ -4798,6 +4820,10 @@ function applyLanguage() {
     }
     const canvasSyncFirstSyncOverwriteText = document.getElementById('canvasSyncFirstSyncOverwriteText');
     if (canvasSyncFirstSyncOverwriteText) canvasSyncFirstSyncOverwriteText.textContent = i18n.canvasSyncFirstSyncOverwriteText[currentLang];
+    const canvasSyncFirstSyncPathCheckLabel = document.getElementById('canvasSyncFirstSyncPathCheckLabel');
+    if (canvasSyncFirstSyncPathCheckLabel) canvasSyncFirstSyncPathCheckLabel.textContent = i18n.canvasSyncFirstSyncPathCheckLabel[currentLang];
+    const canvasSyncFirstSyncPathCheckBtnText = document.getElementById('canvasSyncFirstSyncPathCheckBtnText');
+    if (canvasSyncFirstSyncPathCheckBtnText) canvasSyncFirstSyncPathCheckBtnText.textContent = i18n.canvasSyncFirstSyncPathCheckBtnText[currentLang];
     const canvasSyncNowText = document.getElementById('canvasSyncNowText');
     if (canvasSyncNowText) canvasSyncNowText.textContent = i18n.canvasSyncNowText[currentLang];
     const canvasSyncPushOnlyText = document.getElementById('canvasSyncPushOnlyText');
@@ -4822,6 +4848,8 @@ function applyLanguage() {
     if (canvasSyncStatusRemoteShaLabel) canvasSyncStatusRemoteShaLabel.textContent = i18n.canvasSyncStatusRemoteShaLabel[currentLang];
     const canvasSyncStatusLocalHashLabel = document.getElementById('canvasSyncStatusLocalHashLabel');
     if (canvasSyncStatusLocalHashLabel) canvasSyncStatusLocalHashLabel.textContent = i18n.canvasSyncStatusLocalHashLabel[currentLang];
+    const canvasSyncStatusOtherLabel = document.getElementById('canvasSyncStatusOtherLabel');
+    if (canvasSyncStatusOtherLabel) canvasSyncStatusOtherLabel.textContent = i18n.canvasSyncStatusOtherLabel[currentLang];
     const canvasSyncStatusPendingMismatchLabel = document.getElementById('canvasSyncStatusPendingMismatchLabel');
     if (canvasSyncStatusPendingMismatchLabel) canvasSyncStatusPendingMismatchLabel.textContent = i18n.canvasSyncStatusPendingMismatchLabel[currentLang];
     const canvasSyncRunBgCheckText = document.getElementById('canvasSyncRunBgCheckText');
@@ -4836,10 +4864,35 @@ function applyLanguage() {
     if (canvasSyncMismatchSummary && !canvasSyncMismatchSummary.dataset.dynamicSummary) {
         canvasSyncMismatchSummary.textContent = i18n.canvasSyncMismatchSummary[currentLang];
     }
+    const formatSyncActionLabelHtml = (labelText) => {
+        const text = String(labelText || '');
+        if (!text) return '';
+
+        if (text.startsWith('使用云端')) {
+            return `<span class="canvas-sync-action-keyword">使用云端</span>${text.slice(4)}`;
+        }
+        if (text.startsWith('保留本地')) {
+            return `<span class="canvas-sync-action-keyword">保留本地</span>${text.slice(4)}`;
+        }
+
+        if (/^use\s+cloud/i.test(text)) {
+            return text.replace(/^((?:use\s+cloud))/i, '<span class="canvas-sync-action-keyword">$1</span>');
+        }
+        if (/^keep\s+local/i.test(text)) {
+            return text.replace(/^((?:keep\s+local))/i, '<span class="canvas-sync-action-keyword">$1</span>');
+        }
+
+        return text;
+    };
+
     const canvasSyncMismatchUseRemoteText = document.getElementById('canvasSyncMismatchUseRemoteText');
-    if (canvasSyncMismatchUseRemoteText) canvasSyncMismatchUseRemoteText.textContent = i18n.canvasSyncMismatchUseRemoteText[currentLang];
+    if (canvasSyncMismatchUseRemoteText) {
+        canvasSyncMismatchUseRemoteText.innerHTML = formatSyncActionLabelHtml(i18n.canvasSyncMismatchUseRemoteText[currentLang]);
+    }
     const canvasSyncMismatchUseLocalText = document.getElementById('canvasSyncMismatchUseLocalText');
-    if (canvasSyncMismatchUseLocalText) canvasSyncMismatchUseLocalText.textContent = i18n.canvasSyncMismatchUseLocalText[currentLang];
+    if (canvasSyncMismatchUseLocalText) {
+        canvasSyncMismatchUseLocalText.innerHTML = formatSyncActionLabelHtml(i18n.canvasSyncMismatchUseLocalText[currentLang]);
+    }
     const canvasSyncMismatchDismissText = document.getElementById('canvasSyncMismatchDismissText');
     if (canvasSyncMismatchDismissText) canvasSyncMismatchDismissText.textContent = i18n.canvasSyncMismatchDismissText[currentLang];
     const canvasSyncStatusErrorLabel = document.getElementById('canvasSyncStatusErrorLabel');
@@ -4859,17 +4912,21 @@ function applyLanguage() {
     const canvasSyncConflictLocalSizeLabel = document.getElementById('canvasSyncConflictLocalSizeLabel');
     if (canvasSyncConflictLocalSizeLabel) canvasSyncConflictLocalSizeLabel.textContent = i18n.canvasSyncConflictSizeLabel[currentLang];
     const canvasSyncConflictLocalHashLabel = document.getElementById('canvasSyncConflictLocalHashLabel');
-    if (canvasSyncConflictLocalHashLabel) canvasSyncConflictLocalHashLabel.textContent = i18n.canvasSyncConflictHashLabel[currentLang];
+    if (canvasSyncConflictLocalHashLabel) canvasSyncConflictLocalHashLabel.textContent = i18n.canvasSyncConflictLocalHashLabel[currentLang];
     const canvasSyncConflictRemoteUpdatedLabel = document.getElementById('canvasSyncConflictRemoteUpdatedLabel');
     if (canvasSyncConflictRemoteUpdatedLabel) canvasSyncConflictRemoteUpdatedLabel.textContent = i18n.canvasSyncConflictUpdatedLabel[currentLang];
     const canvasSyncConflictRemoteSizeLabel = document.getElementById('canvasSyncConflictRemoteSizeLabel');
     if (canvasSyncConflictRemoteSizeLabel) canvasSyncConflictRemoteSizeLabel.textContent = i18n.canvasSyncConflictSizeLabel[currentLang];
     const canvasSyncConflictRemoteHashLabel = document.getElementById('canvasSyncConflictRemoteHashLabel');
-    if (canvasSyncConflictRemoteHashLabel) canvasSyncConflictRemoteHashLabel.textContent = i18n.canvasSyncConflictHashLabel[currentLang];
+    if (canvasSyncConflictRemoteHashLabel) canvasSyncConflictRemoteHashLabel.textContent = i18n.canvasSyncConflictRemoteHashLabel[currentLang];
     const canvasSyncConflictUseLocalText = document.getElementById('canvasSyncConflictUseLocalText');
-    if (canvasSyncConflictUseLocalText) canvasSyncConflictUseLocalText.textContent = i18n.canvasSyncConflictUseLocalText[currentLang];
+    if (canvasSyncConflictUseLocalText) {
+        canvasSyncConflictUseLocalText.innerHTML = formatSyncActionLabelHtml(i18n.canvasSyncConflictUseLocalText[currentLang]);
+    }
     const canvasSyncConflictUseRemoteText = document.getElementById('canvasSyncConflictUseRemoteText');
-    if (canvasSyncConflictUseRemoteText) canvasSyncConflictUseRemoteText.textContent = i18n.canvasSyncConflictUseRemoteText[currentLang];
+    if (canvasSyncConflictUseRemoteText) {
+        canvasSyncConflictUseRemoteText.innerHTML = formatSyncActionLabelHtml(i18n.canvasSyncConflictUseRemoteText[currentLang]);
+    }
     const canvasSyncConflictDismissText = document.getElementById('canvasSyncConflictDismissText');
     if (canvasSyncConflictDismissText) canvasSyncConflictDismissText.textContent = i18n.canvasSyncConflictDismissText[currentLang];
 
@@ -5235,6 +5292,12 @@ function applyLanguage() {
     if (typeof updateShortcutsDisplay === 'function') {
         updateShortcutsDisplay();
     }
+
+    try {
+        if (window.CanvasObsidianGitSync && typeof window.CanvasObsidianGitSync.refreshI18n === 'function') {
+            window.CanvasObsidianGitSync.refreshI18n();
+        }
+    } catch (_) { }
 }
 // =============================================================================
 // UI 初始化

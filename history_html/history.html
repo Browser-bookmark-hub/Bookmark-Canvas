@@ -1214,7 +1214,25 @@
                                         </label>
                                     </div>
                                 </div>
-                                <div class="canvas-sync-actions canvas-sync-actions--single">
+                                <label class="canvas-sync-row" for="canvasSyncObsidianExportFormatSelect">
+                                    <span id="canvasSyncObsidianExportFormatLabel">导出格式（为 Obsidian）</span>
+                                    <select id="canvasSyncObsidianExportFormatSelect">
+                                        <option id="canvasSyncObsidianExportFormatVisualOption" value="visual">视觉模式</option>
+                                        <option id="canvasSyncObsidianExportFormatEditableOption" value="editable">编辑模式</option>
+                                    </select>
+                                </label>
+                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncObsidianExportFormatDesc">编辑模式：导出为易于编辑的文本结构。
+视觉模式：包含图标；当书签超过 20,000 个时，图标体积可能接近 100MB，达到 100MB 限制会报错。</div>
+
+                                <div class="canvas-sync-row canvas-sync-row--path-check-action">
+                                    <span id="canvasSyncFirstSyncPathCheckLabel">路径校验</span>
+                                    <button id="canvasSyncFirstSyncPathCheckBtn" class="canvas-manage-btn canvas-sync-inline-action-btn" type="button">
+                                        <span id="canvasSyncFirstSyncPathCheckBtnText">校验</span>
+                                    </button>
+                                </div>
+                                <input id="canvasSyncObsidianExportRootInput" type="hidden" value="书签画布">
+
+                                <div class="canvas-sync-actions canvas-sync-actions--single canvas-sync-actions--top">
                                     <button id="canvasSyncFirstSyncOverwriteBtn" class="canvas-manage-btn" type="button">
                                         <span id="canvasSyncFirstSyncOverwriteText">执行首次同步</span>
                                     </button>
@@ -1228,7 +1246,7 @@
                             <button id="canvasSyncNowBtn" class="canvas-manage-btn" type="button"><span id="canvasSyncNowText">立即同步</span></button>
                             <button id="canvasSyncPushOnlyBtn" class="canvas-manage-btn" type="button"><span id="canvasSyncPushOnlyText">仅上传</span></button>
                             <button id="canvasSyncPullOnlyBtn" class="canvas-manage-btn" type="button"><span id="canvasSyncPullOnlyText">仅拉取</span></button>
-                            <button id="canvasSyncRebuildBtn" class="canvas-manage-btn" type="button"><span id="canvasSyncRebuildText">重建同步索引</span></button>
+                            <button id="canvasSyncRebuildBtn" class="canvas-manage-btn" type="button"><span id="canvasSyncRebuildText">刷新状态</span></button>
                         </div>
 
                         <div class="canvas-sync-divider" aria-hidden="true"></div>
@@ -1243,16 +1261,6 @@
                                     <span class="canvas-sync-switch-slider"></span>
                                 </span>
                             </label>
-
-                            <label class="canvas-sync-row" for="canvasSyncObsidianExportFormatSelect">
-                                <span id="canvasSyncObsidianExportFormatLabel">导出格式（为 Obsidian）</span>
-                                <select id="canvasSyncObsidianExportFormatSelect">
-                                    <option id="canvasSyncObsidianExportFormatVisualOption" value="visual">视觉模式</option>
-                                    <option id="canvasSyncObsidianExportFormatEditableOption" value="editable">编辑模式</option>
-                                </select>
-                            </label>
-                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncObsidianExportFormatDesc">用于生成推送到仓库的 Obsidian 文件结构；默认“编辑模式”更适合继续编辑。</div>
-
                             <div class="canvas-sync-divider" aria-hidden="true"></div>
 
                             <label class="canvas-sync-row" for="canvasSyncPermanentTreeIntervalSelect">
@@ -1329,12 +1337,13 @@
                             <label class="canvas-sync-row" for="canvasSyncMismatchPolicySelect">
                                 <span id="canvasSyncMismatchPolicyLabel">云端不一致处理策略</span>
                                 <select id="canvasSyncMismatchPolicySelect">
-                                    <option id="canvasSyncMismatchPolicyAutoPullOption" value="auto_pull">自动拉取</option>
-                                    <option id="canvasSyncMismatchPolicyPromptOption" value="prompt">弹窗提示（与云端对齐 / 以本地覆盖云端）</option>
+                                    <option id="canvasSyncMismatchPolicyAutoPullOption" value="auto_pull">自动使用云端覆盖本地</option>
+                                    <option id="canvasSyncMismatchPolicyAutoPushOption" value="auto_push">自动保留本地并覆盖云端</option>
+                                    <option id="canvasSyncMismatchPolicyPromptOption" value="prompt">弹窗提示</option>
                                 </select>
                             </label>
                             <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncMismatchPolicyDesc">前台关闭期间若后台检测到“云端版本与本地基线不一致”，会在前台再次打开后处理。
-自动拉取=按自动流程拉取；弹窗提示=让你选择与云端对齐或以本地覆盖云端。</div>
+自动使用云端覆盖本地=前台再次打开后，自动拉取并以云端为准；自动保留本地并覆盖云端=前台再次打开后，自动上传并以本地为准；弹窗提示=手动选择“使用云端覆盖本地”或“保留本地并覆盖云端”。</div>
 
                             <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncPullOnStartupToggle">
                                 <span id="canvasSyncPullOnStartupLabel">打开页面时先拉取云端</span>
@@ -1414,8 +1423,9 @@
                             <div class="canvas-sync-status-line"><span id="canvasSyncStatusLastDirectionLabel">最后方向：</span><strong id="canvasSyncStatusLastDirection">-</strong></div>
                             <div class="canvas-sync-status-line"><span id="canvasSyncStatusObsidianPushAtLabel">最近文件推送：</span><strong id="canvasSyncStatusObsidianPushAt">-</strong></div>
                             <div class="canvas-sync-status-line"><span id="canvasSyncStatusObsidianPushDeltaLabel">文件推送变更：</span><strong id="canvasSyncStatusObsidianPushDelta">-</strong></div>
-                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusRemoteShaLabel">云端版本：</span><strong id="canvasSyncStatusRemoteSha">-</strong></div>
-                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusLocalHashLabel">本地哈希：</span><strong id="canvasSyncStatusLocalHash">-</strong></div>
+                            <div class="canvas-sync-status-line canvas-sync-status-line--hash"><span id="canvasSyncStatusRemoteShaLabel">云端哈希：</span><strong id="canvasSyncStatusRemoteSha">-</strong></div>
+                            <div class="canvas-sync-status-line canvas-sync-status-line--hash"><span id="canvasSyncStatusLocalHashLabel">本地哈希：</span><strong id="canvasSyncStatusLocalHash">-</strong></div>
+                            <div class="canvas-sync-status-line canvas-sync-status-line--other"><span id="canvasSyncStatusOtherLabel">具体变更：</span><strong id="canvasSyncStatusOther">-</strong></div>
                             <div class="canvas-sync-status-line"><span id="canvasSyncStatusPendingMismatchLabel">云端不一致待处理：</span><strong id="canvasSyncStatusPendingMismatch">无</strong></div>
                             <div class="canvas-sync-status-line"><span id="canvasSyncStatusErrorLabel">最近错误：</span><strong id="canvasSyncStatusError">无</strong></div>
                         </div>
@@ -1431,8 +1441,8 @@
                             </div>
                             <div class="canvas-sync-mismatch-summary" id="canvasSyncMismatchSummary">后台在前台关闭期间检测到云端版本与本地基线不一致。当前已进入前台，请选择处理方式。</div>
                             <div class="canvas-sync-conflict-actions">
-                                <button id="canvasSyncMismatchUseRemoteBtn" class="canvas-manage-btn" type="button"><i class="fas fa-download"></i><span id="canvasSyncMismatchUseRemoteText">使用云端覆盖本地</span></button>
-                                <button id="canvasSyncMismatchUseLocalBtn" class="canvas-manage-btn" type="button"><i class="fas fa-upload"></i><span id="canvasSyncMismatchUseLocalText">保留本地并覆盖云端</span></button>
+                                <button id="canvasSyncMismatchUseRemoteBtn" class="canvas-manage-btn" type="button"><i class="fas fa-download"></i><span id="canvasSyncMismatchUseRemoteText"><span class="canvas-sync-action-keyword">使用云端</span>覆盖本地</span></button>
+                                <button id="canvasSyncMismatchUseLocalBtn" class="canvas-manage-btn" type="button"><i class="fas fa-upload"></i><span id="canvasSyncMismatchUseLocalText"><span class="canvas-sync-action-keyword">保留本地</span>并覆盖云端</span></button>
                                 <button id="canvasSyncMismatchDismissBtn" class="canvas-manage-btn" type="button"><i class="fas fa-clock"></i><span id="canvasSyncMismatchDismissText">稍后处理</span></button>
                             </div>
                         </div>
@@ -1448,18 +1458,18 @@
                                     <div class="canvas-sync-compare-head" id="canvasSyncConflictLocalTitle">本地</div>
                                     <div class="canvas-sync-compare-line"><span id="canvasSyncConflictLocalUpdatedLabel">更新时间</span><strong id="canvasSyncConflictLocalUpdated">-</strong></div>
                                     <div class="canvas-sync-compare-line"><span id="canvasSyncConflictLocalSizeLabel">数据大小</span><strong id="canvasSyncConflictLocalSize">-</strong></div>
-                                    <div class="canvas-sync-compare-line"><span id="canvasSyncConflictLocalHashLabel">内容指纹</span><strong id="canvasSyncConflictLocalHash">-</strong></div>
+                                    <div class="canvas-sync-compare-line"><span id="canvasSyncConflictLocalHashLabel">本地哈希</span><strong id="canvasSyncConflictLocalHash">-</strong></div>
                                 </div>
                                 <div class="canvas-sync-compare-col">
                                     <div class="canvas-sync-compare-head" id="canvasSyncConflictRemoteTitle">云端</div>
                                     <div class="canvas-sync-compare-line"><span id="canvasSyncConflictRemoteUpdatedLabel">更新时间</span><strong id="canvasSyncConflictRemoteUpdated">-</strong></div>
                                     <div class="canvas-sync-compare-line"><span id="canvasSyncConflictRemoteSizeLabel">数据大小</span><strong id="canvasSyncConflictRemoteSize">-</strong></div>
-                                    <div class="canvas-sync-compare-line"><span id="canvasSyncConflictRemoteHashLabel">内容指纹</span><strong id="canvasSyncConflictRemoteHash">-</strong></div>
+                                    <div class="canvas-sync-compare-line"><span id="canvasSyncConflictRemoteHashLabel">云端哈希</span><strong id="canvasSyncConflictRemoteHash">-</strong></div>
                                 </div>
                             </div>
                             <div class="canvas-sync-conflict-actions">
-                                <button id="canvasSyncConflictUseLocalBtn" class="canvas-manage-btn" type="button"><i class="fas fa-upload"></i><span id="canvasSyncConflictUseLocalText">保留本地并覆盖云端</span></button>
-                                <button id="canvasSyncConflictUseRemoteBtn" class="canvas-manage-btn" type="button"><i class="fas fa-download"></i><span id="canvasSyncConflictUseRemoteText">使用云端覆盖本地</span></button>
+                                <button id="canvasSyncConflictUseRemoteBtn" class="canvas-manage-btn" type="button"><i class="fas fa-download"></i><span id="canvasSyncConflictUseRemoteText"><span class="canvas-sync-action-keyword">使用云端</span>覆盖本地</span></button>
+                                <button id="canvasSyncConflictUseLocalBtn" class="canvas-manage-btn" type="button"><i class="fas fa-upload"></i><span id="canvasSyncConflictUseLocalText"><span class="canvas-sync-action-keyword">保留本地</span>并覆盖云端</span></button>
                                 <button id="canvasSyncConflictDismissBtn" class="canvas-manage-btn" type="button"><i class="fas fa-clock"></i><span id="canvasSyncConflictDismissText">稍后处理</span></button>
                             </div>
                         </div>

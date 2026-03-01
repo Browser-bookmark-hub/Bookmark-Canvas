@@ -55,7 +55,7 @@
 
 ## 4. 同步数据协议（专用协议）
 
-同步目录统一为：`bookmark-canvas-sync/`
+同步目录统一为：`bookmark-canvas/`
 
 ## 4.1 目录结构
 

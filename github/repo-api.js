@@ -1,5 +1,7 @@
 const GITHUB_API_BASE_URL = 'https://api.github.com';
 const GITHUB_API_VERSION = '2022-11-28';
+const GITHUB_CONTENTS_JSON_MAX_BYTES = 1024 * 1024;
+const GITHUB_CONTENTS_HARD_LIMIT_BYTES = 100 * 1024 * 1024;
 
 function normalizeGitHubToken(token) {
   const raw = String(token || '').trim();
@@ -35,7 +37,19 @@ function encodeGitHubPath(path) {
     .join('/');
 }
 
-async function githubRequestJson(url, { method = 'GET', headers = {}, body } = {}) {
+function textToBase64(content) {
+  const text = String(content == null ? '' : content);
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+async function githubRequestRaw(url, { method = 'GET', headers = {}, body } = {}) {
   const requestHeaders = {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': GITHUB_API_VERSION,
@@ -78,6 +92,12 @@ async function githubRequestJson(url, { method = 'GET', headers = {}, body } = {
     });
   }
 
+  return result;
+}
+
+async function githubRequestJson(url, { method = 'GET', headers = {}, body } = {}) {
+  const result = await githubRequestRaw(url, { method, headers, body });
+
   if (!result.response.ok) {
     const error = new Error(
       (result.json && typeof result.json.message === 'string' && result.json.message) ||
@@ -89,6 +109,22 @@ async function githubRequestJson(url, { method = 'GET', headers = {}, body } = {
   }
 
   return result.json;
+}
+
+async function githubRequestText(url, { method = 'GET', headers = {}, body } = {}) {
+  const result = await githubRequestRaw(url, { method, headers, body });
+
+  if (!result.response.ok) {
+    const error = new Error(
+      (result.json && typeof result.json.message === 'string' && result.json.message) ||
+        `${result.response.status} ${result.response.statusText}`.trim()
+    );
+    error.status = result.response.status;
+    error.response = result.json || result.text;
+    throw error;
+  }
+
+  return result.text || '';
 }
 
 export async function getRepoInfo({ token, owner, repo }) {
@@ -284,64 +320,6 @@ export async function upsertRepoFile({ token, owner, repo, branch, path, message
   }
 }
 
-export async function getRepoFileSignal({ token, owner, repo, branch, path }) {
-  const authHeader = buildGitHubAuthHeader(token);
-  if (!authHeader) {
-    return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
-  }
-
-  const trimmedOwner = String(owner || '').trim();
-  const trimmedRepo = String(repo || '').trim();
-  if (!trimmedOwner || !trimmedRepo) {
-    return { success: false, error: '仓库未配置', repoNotConfigured: true };
-  }
-
-  const trimmedPath = String(path || '').trim().replace(/^\/+/, '');
-  if (!trimmedPath) {
-    return { success: false, error: '缺少文件路径' };
-  }
-
-  const trimmedBranch = String(branch || '').trim();
-  const encodedPath = encodeGitHubPath(trimmedPath);
-  const branchParam = trimmedBranch ? `&sha=${encodeURIComponent(trimmedBranch)}` : '';
-  const url = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/commits?path=${encodedPath}&per_page=1${branchParam}`;
-
-  try {
-    const json = await githubRequestJson(url, {
-      headers: { Authorization: authHeader }
-    });
-
-    const list = Array.isArray(json) ? json : [];
-    if (list.length === 0) {
-      return {
-        success: true,
-        notFound: true,
-        path: trimmedPath,
-        revisionSha: '',
-        committedAt: 0
-      };
-    }
-
-    const latest = list[0] && typeof list[0] === 'object' ? list[0] : {};
-    const revisionSha = typeof latest.sha === 'string' ? latest.sha : '';
-    const commitInfo = latest && typeof latest.commit === 'object' ? latest.commit : {};
-    const committer = commitInfo && typeof commitInfo.committer === 'object' ? commitInfo.committer : {};
-    const author = commitInfo && typeof commitInfo.author === 'object' ? commitInfo.author : {};
-    const dateText = String(committer.date || author.date || '').trim();
-    const committedAt = dateText ? Date.parse(dateText) : 0;
-
-    return {
-      success: true,
-      notFound: false,
-      path: trimmedPath,
-      revisionSha,
-      committedAt: Number.isFinite(committedAt) ? committedAt : 0
-    };
-  } catch (error) {
-    return { success: false, error: normalizeGitHubError(error) };
-  }
-}
-
 export async function getRepoFile({ token, owner, repo, branch, path }) {
   const authHeader = buildGitHubAuthHeader(token);
   if (!authHeader) {
@@ -374,21 +352,182 @@ export async function getRepoFile({ token, owner, repo, branch, path }) {
       return { success: false, error: '目标路径不是文件' };
     }
 
-    const contentBase64 = typeof json.content === 'string'
+    const inlineBase64 = typeof json.content === 'string'
       ? json.content.replace(/\s+/g, '')
       : '';
+    const fileSize = Number.isFinite(Number(json.size)) ? Number(json.size) : 0;
+
+    if (fileSize > GITHUB_CONTENTS_HARD_LIMIT_BYTES) {
+      return {
+        success: false,
+        error: '云端文件超过 100MB 限制，请拆分同步文件',
+        path: json.path ? String(json.path) : trimmedPath,
+        size: fileSize
+      };
+    }
+
+    let contentBase64 = inlineBase64;
+    let encoding = json.encoding ? String(json.encoding) : 'base64';
+    let fetchedVia = 'json';
+
+    const shouldFallbackToRaw = !contentBase64 && fileSize > 0;
+    if (shouldFallbackToRaw) {
+      const rawText = await githubRequestText(url, {
+        headers: {
+          Authorization: authHeader,
+          Accept: 'application/vnd.github.raw+json'
+        }
+      });
+      contentBase64 = textToBase64(rawText);
+      encoding = 'base64';
+      fetchedVia = 'raw';
+    }
 
     return {
       success: true,
       path: json.path ? String(json.path) : trimmedPath,
       sha: json.sha ? String(json.sha) : null,
       contentBase64,
-      encoding: json.encoding ? String(json.encoding) : 'base64'
+      encoding,
+      size: fileSize,
+      fetchedVia,
+      largeFileCompat: fileSize > GITHUB_CONTENTS_JSON_MAX_BYTES
     };
   } catch (error) {
     if (Number(error?.status) === 404) {
       return { success: false, notFound: true, error: '云端文件不存在' };
     }
+    return { success: false, error: normalizeGitHubError(error) };
+  }
+}
+
+export async function deleteRepoFile({ token, owner, repo, branch, path, message }) {
+  const authHeader = buildGitHubAuthHeader(token);
+  if (!authHeader) {
+    return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
+  }
+
+  const trimmedOwner = String(owner || '').trim();
+  const trimmedRepo = String(repo || '').trim();
+  if (!trimmedOwner || !trimmedRepo) {
+    return { success: false, error: '仓库未配置', repoNotConfigured: true };
+  }
+
+  const trimmedPath = String(path || '').trim().replace(/^\/+/, '');
+  if (!trimmedPath) {
+    return { success: false, error: '缺少文件路径' };
+  }
+
+  const trimmedBranch = String(branch || '').trim();
+  const encodedPath = encodeGitHubPath(trimmedPath);
+  const urlBase = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/contents/${encodedPath}`;
+
+  let existingSha = '';
+  try {
+    const existingUrl = trimmedBranch ? `${urlBase}?ref=${encodeURIComponent(trimmedBranch)}` : urlBase;
+    const existing = await githubRequestJson(existingUrl, {
+      headers: { Authorization: authHeader }
+    });
+
+    if (!existing || typeof existing !== 'object' || existing.type !== 'file' || !existing.sha) {
+      return { success: false, error: '目标路径不是文件' };
+    }
+
+    existingSha = String(existing.sha);
+  } catch (error) {
+    if (Number(error?.status) === 404) {
+      return { success: true, notFound: true, path: trimmedPath };
+    }
+    return { success: false, error: normalizeGitHubError(error) };
+  }
+
+  const safeMessage = String(message || '').trim() || `Bookmark Backup: delete ${trimmedPath}`;
+  const payload = {
+    message: safeMessage,
+    sha: existingSha
+  };
+  if (trimmedBranch) {
+    payload.branch = trimmedBranch;
+  }
+
+  try {
+    const json = await githubRequestJson(urlBase, {
+      method: 'DELETE',
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const commit = json && typeof json.commit === 'object' && json.commit ? json.commit : null;
+    return {
+      success: true,
+      deleted: true,
+      path: trimmedPath,
+      commitSha: commit && commit.sha ? String(commit.sha) : null
+    };
+  } catch (error) {
+    return { success: false, error: normalizeGitHubError(error) };
+  }
+}
+
+export async function listRepoFiles({ token, owner, repo, branch, rootPath }) {
+  const authHeader = buildGitHubAuthHeader(token);
+  if (!authHeader) {
+    return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
+  }
+
+  const trimmedOwner = String(owner || '').trim();
+  const trimmedRepo = String(repo || '').trim();
+  if (!trimmedOwner || !trimmedRepo) {
+    return { success: false, error: '仓库未配置', repoNotConfigured: true };
+  }
+
+  const trimmedBranch = String(branch || '').trim() || 'HEAD';
+  const normalizedRootPath = String(rootPath || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\/+/g, '/');
+
+  const treeUrl = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/git/trees/${encodeURIComponent(trimmedBranch)}?recursive=1`;
+
+  try {
+    const json = await githubRequestJson(treeUrl, {
+      headers: { Authorization: authHeader }
+    });
+
+    const treeItems = Array.isArray(json && json.tree) ? json.tree : [];
+    const rootPrefix = normalizedRootPath ? `${normalizedRootPath}/` : '';
+    const files = [];
+
+    treeItems.forEach((entry) => {
+      if (!entry || entry.type !== 'blob') return;
+      const pathText = String(entry.path || '').trim();
+      if (!pathText) return;
+
+      if (normalizedRootPath) {
+        if (pathText !== normalizedRootPath && !pathText.startsWith(rootPrefix)) {
+          return;
+        }
+      }
+
+      files.push({
+        path: pathText,
+        sha: entry.sha ? String(entry.sha) : '',
+        size: Number.isFinite(Number(entry.size)) ? Number(entry.size) : 0
+      });
+    });
+
+    return {
+      success: true,
+      rootPath: normalizedRootPath,
+      files,
+      truncated: json && json.truncated === true
+    };
+  } catch (error) {
     return { success: false, error: normalizeGitHubError(error) };
   }
 }

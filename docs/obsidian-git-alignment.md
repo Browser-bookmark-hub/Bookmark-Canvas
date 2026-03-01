@@ -43,7 +43,7 @@
 1. 使用同一个云端仓库（Owner/Repo 一致）。
 2. 使用同一分支（例如都使用 `main`）。
 3. 路径约定一致：
-   - Bookmark-Canvas 写入：`<Base Path>/bookmark-canvas-sync/...`
+   - Bookmark-Canvas 写入：`<Base Path>/bookmark-canvas/...`
    - Obsidian 端在 Vault 中保留并跟踪该目录。
 4. 两端都不要改写对方的目录约定（避免目录漂移造成“看似同步成功、实际不对齐”）。
 
@@ -54,7 +54,7 @@
 1. 先在 GitHub 创建同步仓库（建议私有仓库）。
 2. 在 Bookmark-Canvas 中填好 Owner/Repo/Token，点击“测试连接”通过。
 3. 在 Obsidian 安装官方 `Obsidian Git` 插件并连接同一仓库。
-4. 在 Obsidian 先执行一次手动 `pull`，确认能看到 `bookmark-canvas-sync/` 目录。
+4. 在 Obsidian 先执行一次手动 `pull`，确认能看到 `bookmark-canvas/` 目录。
 5. 再开启双方自动同步策略（先手动验证，再自动化）。
 
 ---
