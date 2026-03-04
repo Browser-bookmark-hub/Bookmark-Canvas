@@ -6610,7 +6610,8 @@ function __flushCurrentPartitionExpandAndScrollState(partitionKey) {
             expanded: Array.from(LAZY_LOAD_THRESHOLD.expandedFolders),
             collapsed: Array.from(LAZY_LOAD_THRESHOLD.collapsedFolders)
         };
-        saveViewState('expand', TEMP_EXPAND_STATE_KEY, tempExpandState, { partitionKey });
+        saveViewState('expand', TEMP_EXPAND_STATE_KEY, tempExpandState, { partitionKey: 'page' });
+        saveViewState('expand', TEMP_EXPAND_STATE_KEY, tempExpandState, { partitionKey: 'sidepanel' });
     } catch (_) { }
 
     try {
@@ -12173,6 +12174,16 @@ function finalizePermanentSectionDrag() {
         }
 
         savePermanentSectionPosition(element);
+        try {
+            const syncModule = window.CanvasObsidianGitSync;
+            if (syncModule && typeof syncModule.markDirty === 'function') {
+                syncModule.markDirty('permanent-layout', {
+                    dirty: {
+                        canvasLayout: true
+                    }
+                });
+            }
+        } catch (_) { }
         scheduleBoundsUpdate();
         scheduleScrollbarUpdate();
     } else {
@@ -13036,6 +13047,19 @@ function createPermanentSectionCopy(sourceSection) {
     try { bindPermanentSectionTipBehavior(copySection); } catch (_) { }
     updateNodeFullscreenButtons();
 
+    try {
+        const syncModule = window.CanvasObsidianGitSync;
+        if (syncModule && typeof syncModule.markDirty === 'function') {
+            syncModule.markDirty('permanent-copy-create', {
+                dirty: {
+                    canvasLayout: true,
+                    canvasFileRef: true,
+                    permanentAll: true
+                }
+            });
+        }
+    } catch (_) { }
+
     return copySection;
 }
 
@@ -13160,6 +13184,19 @@ function removePermanentSectionCopy(sectionEl) {
     try { __updatePermanentSectionIndexBadges(); } catch (_) { }
     try { updateCanvasScrollBounds(); } catch (_) { }
     try { updateScrollbarThumbs(); } catch (_) { }
+
+    try {
+        const syncModule = window.CanvasObsidianGitSync;
+        if (syncModule && typeof syncModule.markDirty === 'function') {
+            syncModule.markDirty('permanent-copy-remove', {
+                dirty: {
+                    canvasLayout: true,
+                    canvasFileRef: true,
+                    permanentAll: true
+                }
+            });
+        }
+    } catch (_) { }
 }
 
 function makePermanentSectionDraggable(permanentSection) {
@@ -13649,6 +13686,16 @@ function makePermanentSectionResizable(element) {
                     isResizing = false;
                     element.classList.remove('resizing');
                     savePermanentSectionPosition(element);
+                    try {
+                        const syncModule = window.CanvasObsidianGitSync;
+                        if (syncModule && typeof syncModule.markDirty === 'function') {
+                            syncModule.markDirty('permanent-layout', {
+                                dirty: {
+                                    canvasLayout: true
+                                }
+                            });
+                        }
+                    } catch (_) { }
                     updateCanvasScrollBounds();
                     updateScrollbarThumbs();
                     document.removeEventListener('mousemove', onMouseMove);
@@ -22802,7 +22849,10 @@ function saveTempExpandState() {
                 expanded: Array.from(LAZY_LOAD_THRESHOLD.expandedFolders),
                 collapsed: Array.from(LAZY_LOAD_THRESHOLD.collapsedFolders)
             };
-            saveViewState('expand', TEMP_EXPAND_STATE_KEY, state);
+            // Expand state is partitioned (page/sidepanel) but should behave like a shared user preference.
+            // Persist to both partitions so export/sync can see the latest state no matter where it was toggled.
+            saveViewState('expand', TEMP_EXPAND_STATE_KEY, state, { partitionKey: 'page' });
+            saveViewState('expand', TEMP_EXPAND_STATE_KEY, state, { partitionKey: 'sidepanel' });
         } catch (e) {
             console.warn('[Canvas] 保存临时栏目展开状态失败:', e);
         }
@@ -22811,8 +22861,17 @@ function saveTempExpandState() {
 
 function loadTempExpandState() {
     try {
-        const key = __getTempExpandStateStorageKey();
-        const state = __readPartitionedViewJSON(key, null, 'expand');
+        const currentPartition = __getCanvasViewPartitionKey();
+        let key = __buildCanvasPartitionedViewStateKey('expand', TEMP_EXPAND_STATE_KEY, currentPartition);
+        let state = __readPartitionedViewJSON(key, null, 'expand');
+        if (state == null) {
+            const otherPartition = currentPartition === 'sidepanel' ? 'page' : 'sidepanel';
+            const otherKey = __buildCanvasPartitionedViewStateKey('expand', TEMP_EXPAND_STATE_KEY, otherPartition);
+            state = __readPartitionedViewJSON(otherKey, null, 'expand');
+            if (state != null) {
+                try { saveViewState('expand', TEMP_EXPAND_STATE_KEY, state, { partitionKey: currentPartition }); } catch (_) { }
+            }
+        }
         if (state) {
             // 兼容旧格式（数组）和新格式（对象）
             if (Array.isArray(state)) {
@@ -23221,6 +23280,17 @@ function setupTempSectionTreeInteractions(treeContainer, section) {
             LAZY_LOAD_THRESHOLD.collapsedFolders.delete(folderId);
             saveTempExpandState();
         }
+
+        try {
+            const syncModule = window.CanvasObsidianGitSync;
+            if (syncModule && typeof syncModule.markDirty === 'function') {
+                syncModule.markDirty('temp-expand', {
+                    dirty: {
+                        temporaryIds: [section.id]
+                    }
+                });
+            }
+        } catch (_) { }
 
         e.preventDefault();
         e.stopImmediatePropagation(); // 阻止 attachTreeEvents 再次处理导致双重切换
@@ -27988,6 +28058,8 @@ function __renderDescriptionMarkdownToHtml(rawDesc) {
 
 const __CANVAS_DESC_BLOCK_START = '<!-- BC_DESCRIPTION_START -->';
 const __CANVAS_DESC_BLOCK_END = '<!-- BC_DESCRIPTION_END -->';
+const __CANVAS_FOLD_BLOCK_START = '<!-- BC_FOLD_STATE_START -->';
+const __CANVAS_FOLD_BLOCK_END = '<!-- BC_FOLD_STATE_END -->';
 
 function __buildCanvasDescriptionCommentBlock(markdownText) {
     const text = String(markdownText || '').trim();
@@ -28018,11 +28090,70 @@ function __extractCanvasDescriptionCommentBlock(bodyText) {
     };
 }
 
+function __normalizeCanvasFoldStateMeta(rawFoldState, options = {}) {
+    const source = rawFoldState && typeof rawFoldState === 'object' ? rawFoldState : {};
+    const mode = String(options.mode || '').trim().toLowerCase();
+    const normalizeIds = (value) => Array.from(new Set(
+        (Array.isArray(value) ? value : [])
+            .map((id) => String(id || '').trim())
+            .filter(Boolean)
+    ));
+
+    const expanded = normalizeIds(source.expanded);
+    const expandedSet = new Set(expanded);
+    const collapsed = mode === 'permanent'
+        ? []
+        : normalizeIds(source.collapsed).filter((id) => !expandedSet.has(id));
+
+    return { expanded, collapsed };
+}
+
+function __buildCanvasFoldStateCommentBlock(foldState, options = {}) {
+    const normalized = __normalizeCanvasFoldStateMeta(foldState, options);
+    const hasState = normalized.expanded.length > 0 || normalized.collapsed.length > 0;
+    if (!hasState && !options.force) return '';
+    return [
+        __CANVAS_FOLD_BLOCK_START,
+        JSON.stringify(normalized, null, 2),
+        __CANVAS_FOLD_BLOCK_END
+    ].join('\n');
+}
+
+function __extractCanvasFoldStateCommentBlock(bodyText, options = {}) {
+    const body = String(bodyText || '').replace(/\r\n?/g, '\n');
+    const start = body.indexOf(__CANVAS_FOLD_BLOCK_START);
+    if (start < 0) return { body, foldState: null };
+
+    const searchStart = start + __CANVAS_FOLD_BLOCK_START.length;
+    const end = body.indexOf(__CANVAS_FOLD_BLOCK_END, searchStart);
+    if (end < 0) return { body, foldState: null };
+
+    let foldState = null;
+    try {
+        const rawJson = body.slice(searchStart, end).trim();
+        if (rawJson) {
+            const parsed = JSON.parse(rawJson);
+            foldState = __normalizeCanvasFoldStateMeta(parsed, options);
+        }
+    } catch (_) {
+        foldState = null;
+    }
+
+    const before = body.slice(0, start).replace(/[\t ]*\n?$/, '\n');
+    const after = body.slice(end + __CANVAS_FOLD_BLOCK_END.length).replace(/^\n?/, '');
+    const merged = `${before}${after}`.replace(/\n{3,}/g, '\n\n').trim();
+    return {
+        body: merged,
+        foldState
+    };
+}
+
 function __parseCanvasMarkdownPayload(fileText) {
     const rawBody = String(fileText || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
 
     const extractedDesc = __extractCanvasDescriptionCommentBlock(rawBody);
-    let workingBody = extractedDesc.body;
+    const extractedFold = __extractCanvasFoldStateCommentBlock(extractedDesc.body);
+    let workingBody = extractedFold.body;
     let descriptionMarkdown = extractedDesc.descriptionMarkdown;
 
     const lines = workingBody.split('\n');
@@ -28046,6 +28177,7 @@ function __parseCanvasMarkdownPayload(fileText) {
         rawBody,
         headerLine: hasHeaderLine ? firstNonEmptyLine : '',
         descriptionHtml: __renderDescriptionMarkdownToHtml(descriptionMarkdown),
+        foldState: extractedFold.foldState,
         contentToParse
     };
 }
@@ -28313,14 +28445,20 @@ const __toAlphaLabel = (n) => {
     return s;
 };
 
-// Helper to get permanent expanded state
-const __getPermanentExpandedSet = () => {
+// Helper to get permanent expanded state (main or a copy by copyId).
+const __getPermanentExpandedSet = (copyId = null) => {
     try {
-        const partitionedKey = __buildCanvasPartitionedViewStateKey('expand', PERMANENT_SECTION_EXPANDED_KEY);
-        const expanded = __readPartitionedViewJSON(partitionedKey, null);
-        if (Array.isArray(expanded)) {
-            return new Set(expanded);
-        }
+        const safeCopyId = (typeof copyId === 'string' && copyId.trim()) ? copyId.trim() : '';
+        const baseKey = safeCopyId ? `${PERMANENT_SECTION_EXPANDED_KEY}:${safeCopyId}` : PERMANENT_SECTION_EXPANDED_KEY;
+        const currentPartition = __getCanvasViewPartitionKey();
+        const currentKey = __buildCanvasPartitionedViewStateKey('expand', baseKey, currentPartition);
+        const expanded = __readPartitionedViewJSON(currentKey, null);
+        if (Array.isArray(expanded)) return new Set(expanded);
+
+        const otherPartition = currentPartition === 'sidepanel' ? 'page' : 'sidepanel';
+        const otherKey = __buildCanvasPartitionedViewStateKey('expand', baseKey, otherPartition);
+        const expandedOther = __readPartitionedViewJSON(otherKey, null);
+        if (Array.isArray(expandedOther)) return new Set(expandedOther);
     } catch (_) { }
 
     return new Set();
@@ -28336,6 +28474,102 @@ const __getTempSectionCollapsedSet = (sectionId) => {
         return new Set();
     }
 };
+
+function __getPermanentFoldStateForExport(copyId = null) {
+    const expandedSet = __getPermanentExpandedSet(copyId);
+    return __normalizeCanvasFoldStateMeta({
+        expanded: Array.from(expandedSet)
+    }, { mode: 'permanent' });
+}
+
+function __getTempSectionFoldStateForExport(sectionId) {
+    const normalizedSectionId = String(sectionId || '').trim();
+    if (!normalizedSectionId) {
+        return __normalizeCanvasFoldStateMeta({ expanded: [], collapsed: [] });
+    }
+
+    let sourceState = null;
+    try {
+        const currentPartition = __getCanvasViewPartitionKey();
+        const currentKey = __buildCanvasPartitionedViewStateKey('expand', TEMP_EXPAND_STATE_KEY, currentPartition);
+        sourceState = __readPartitionedViewJSON(currentKey, null, 'expand');
+        if (sourceState == null) {
+            const otherPartition = currentPartition === 'sidepanel' ? 'page' : 'sidepanel';
+            const otherKey = __buildCanvasPartitionedViewStateKey('expand', TEMP_EXPAND_STATE_KEY, otherPartition);
+            sourceState = __readPartitionedViewJSON(otherKey, null, 'expand');
+        }
+    } catch (_) {
+        sourceState = null;
+    }
+
+    if (!sourceState) {
+        sourceState = {
+            expanded: Array.from(LAZY_LOAD_THRESHOLD && LAZY_LOAD_THRESHOLD.expandedFolders ? LAZY_LOAD_THRESHOLD.expandedFolders : []),
+            collapsed: Array.from(LAZY_LOAD_THRESHOLD && LAZY_LOAD_THRESHOLD.collapsedFolders ? LAZY_LOAD_THRESHOLD.collapsedFolders : [])
+        };
+    }
+
+    const normalized = __normalizeTempExpandStateForSync(sourceState);
+    const prefix = `${normalizedSectionId}-`;
+    const stripPrefix = (id) => {
+        const normalizedId = String(id || '').trim();
+        return normalizedId.startsWith(prefix) ? normalizedId.slice(prefix.length) : '';
+    };
+
+    return __normalizeCanvasFoldStateMeta({
+        expanded: normalized.expanded.map(stripPrefix).filter(Boolean),
+        collapsed: normalized.collapsed.map(stripPrefix).filter(Boolean)
+    });
+}
+
+function __buildTempSectionFoldStateForStorage(sectionId, foldState) {
+    const normalizedSectionId = String(sectionId || '').trim();
+    if (!normalizedSectionId) {
+        return __normalizeCanvasFoldStateMeta({ expanded: [], collapsed: [] });
+    }
+    const normalized = __normalizeCanvasFoldStateMeta(foldState);
+    const prefix = `${normalizedSectionId}-`;
+    return {
+        expanded: normalized.expanded.map((id) => `${prefix}${id}`),
+        collapsed: normalized.collapsed.map((id) => `${prefix}${id}`)
+    };
+}
+
+function __applyTempSectionFoldStateToStorage(sectionId, foldState) {
+    const normalizedSectionId = String(sectionId || '').trim();
+    if (!normalizedSectionId) return;
+
+    const sectionState = __buildTempSectionFoldStateForStorage(normalizedSectionId, foldState);
+    CANVAS_VIEW_PARTITIONS.forEach((partitionKey) => {
+        const targetKey = __buildCanvasPartitionedViewStateKey('expand', TEMP_EXPAND_STATE_KEY, partitionKey);
+        const targetRaw = targetKey ? __readPartitionedViewJSON(targetKey, null, 'expand') : null;
+        const targetState = __normalizeTempExpandStateForSync(targetRaw);
+        const mergedState = __mergeTempExpandStateBySection(sectionState, targetState, normalizedSectionId);
+        saveViewState('expand', TEMP_EXPAND_STATE_KEY, mergedState, { partitionKey });
+    });
+}
+
+function __applyPermanentFoldStateToStorage(copyId, foldState) {
+    const baseKey = copyId
+        ? `${PERMANENT_SECTION_EXPANDED_KEY}:${String(copyId).trim()}`
+        : PERMANENT_SECTION_EXPANDED_KEY;
+    const normalized = __normalizeCanvasFoldStateMeta(foldState, { mode: 'permanent' });
+    CANVAS_VIEW_PARTITIONS.forEach((partitionKey) => {
+        saveViewState('expand', baseKey, normalized.expanded, { partitionKey });
+    });
+}
+
+function __applyImportedSectionFoldStates(sections) {
+    let hasState = false;
+    (Array.isArray(sections) ? sections : []).forEach((section) => {
+        if (!section || !section.id || !section.foldState) return;
+        __applyTempSectionFoldStateToStorage(section.id, section.foldState);
+        hasState = true;
+    });
+    if (hasState) {
+        try { loadTempExpandState(); } catch (_) { }
+    }
+}
 
 /**
  * @param {Array} items
@@ -28361,7 +28595,7 @@ function __toTreeMarkdownLines(items, depth = 0, options = {}) {
     const summaryStyle = `cursor: pointer; list-style: none; display: flex; align-items: center; outline: none;`;
     const textStyle = `white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`;
 
-    const { checkType, permanentExpandedSet, tempSectionId } = options;
+    const { checkType, permanentExpandedSet, tempSectionId, forceCollapsed, bookmarkIconMode, bookmarkSymbol } = options;
 
     (items || []).forEach((item) => {
         if (!item) return;
@@ -28382,14 +28616,25 @@ function __toTreeMarkdownLines(items, depth = 0, options = {}) {
             const safeUrl = ok ? url : '#';
             const suffix = ok ? '' : ' <small style="color:red; opacity:0.7;">(invalid)</small>';
 
-            // Icon
-            let iconSrc = getFaviconUrl && getFaviconUrl(safeUrl);
-            if (!iconSrc) iconSrc = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZ3dCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOTE5MTkxIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiPjwvY2lyY2xlPjwvc3ZnPg==';
+            const iconMode = String(bookmarkIconMode || '').trim().toLowerCase();
+            const useFavicon = !(iconMode === 'text' || iconMode === 'none' || iconMode === 'no-icon');
+            const symbolRaw = (typeof bookmarkSymbol === 'string' && bookmarkSymbol) ? bookmarkSymbol : '-';
+            const symbolSafe = String(symbolRaw).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const symbolStyle = 'width:16px; text-align:center; flex-shrink:0; opacity:.75;';
+
+            let leadingIconHtml = '';
+            if (useFavicon) {
+                let iconSrc = getFaviconUrl && getFaviconUrl(safeUrl);
+                if (!iconSrc) iconSrc = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZ3dCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOTE5MTkxIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiPjwvY2lyY2xlPjwvc3ZnPg==';
+                leadingIconHtml = `<img src="${iconSrc}" style="width:16px; height:16px; object-fit:contain; border-radius:3px; flex-shrink: 0;" />`;
+            } else {
+                leadingIconHtml = `<span style="${symbolStyle}">${symbolSafe}</span>`;
+            }
 
             lines.push(`<div style="${itemWrapperStyle}">`);
             lines.push(`  ${connector}`);
             lines.push(`  <a href="${safeUrl}" target="_blank" style="${labelStyle}" title="${titleSafe}">`);
-            lines.push(`    <img src="${iconSrc}" style="width:16px; height:16px; object-fit:contain; border-radius:3px; flex-shrink: 0;" />`);
+            lines.push(`    ${leadingIconHtml}`);
             lines.push(`    <span style="${textStyle}">${titleSafe}</span>`);
             lines.push(`  </a>${suffix}`);
             lines.push(`</div>`);
@@ -28408,13 +28653,26 @@ function __toTreeMarkdownLines(items, depth = 0, options = {}) {
             }
         } else if (checkType === 'temp' && tempSectionId && item.id && typeof LAZY_LOAD_THRESHOLD !== 'undefined') {
             const folderId = `${tempSectionId}-${item.id}`;
-            const maxDepth = LAZY_LOAD_THRESHOLD.maxInitialDepth || 1;
+            let maxDepth = LAZY_LOAD_THRESHOLD.maxInitialDepth || 1;
+            try {
+                if (typeof getTempTreeMaxInitialDepth === 'function') {
+                    const v = getTempTreeMaxInitialDepth();
+                    if (typeof v === 'number' && isFinite(v)) {
+                        maxDepth = Math.max(0, v);
+                    }
+                }
+            } catch (_) { }
             const userCollapsed = LAZY_LOAD_THRESHOLD.collapsedFolders.has(folderId);
             const userExpanded = LAZY_LOAD_THRESHOLD.expandedFolders.has(folderId);
             const defaultExpanded = depth < maxDepth;
             isExpanded = userExpanded || (defaultExpanded && !userCollapsed);
         }
 
+        if (forceCollapsed) {
+            isExpanded = false;
+        }
+
+        const folderEmoji = isExpanded ? '📂' : '📁';
         const openAttr = isExpanded ? ' open' : '';
         const hasChildren = Array.isArray(item.children) && item.children.length > 0;
 
@@ -28426,7 +28684,7 @@ function __toTreeMarkdownLines(items, depth = 0, options = {}) {
         lines.push(`  <details${openAttr}>`);
         lines.push(`    <summary style="${summaryStyle}">`);
         lines.push(`      <span style="${labelStyle}" title="${folderName}">`);
-        lines.push(`        <span style="font-size:16px; line-height:1; flex-shrink: 0;">📁</span>`);
+        lines.push(`        <span style="font-size:16px; line-height:1; flex-shrink: 0;">${folderEmoji}</span>`);
         lines.push(`        <span style="${textStyle}">${folderName}</span>`);
         lines.push(`        ${emptyIndicator}`);
         lines.push(`      </span>`);
@@ -28434,7 +28692,10 @@ function __toTreeMarkdownLines(items, depth = 0, options = {}) {
 
         if (hasChildren) {
             lines.push(`    <div style="${containerStyle}">`);
-            lines.push(...__toTreeMarkdownLines(item.children, depth + 1, options));
+            const childLines = __toTreeMarkdownLines(item.children, depth + 1, options);
+            for (let i = 0; i < childLines.length; i++) {
+                lines.push(childLines[i]);
+            }
             lines.push(`    </div>`);
         }
 
@@ -28476,7 +28737,16 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
     const roots = root && Array.isArray(root.children) ? root.children : [];
 
     // Prepare options for expanded state
-    const permanentExpandedSet = __getPermanentExpandedSet();
+    const permanentExpandedSet = (metaOptions && metaOptions.permanentExpandedSet && typeof metaOptions.permanentExpandedSet.has === 'function')
+        ? metaOptions.permanentExpandedSet
+        : __getPermanentExpandedSet(metaOptions && metaOptions.copyId);
+    const foldBlock = __buildCanvasFoldStateCommentBlock({
+        expanded: Array.from(permanentExpandedSet)
+    }, { mode: 'permanent', force: true });
+    if (foldBlock) {
+        body.push(foldBlock);
+    }
+    body.push('');
     // Default roots (1, 2, 3) to expanded if the set is empty (fresh start)?? 
     // Actually, usually Bar (1) is expanded. If set is empty, maybe user never toggled anything or cleared data.
     // Let's stick to the set. If empty, everything collapsed (except maybe we want to force roots open?).
@@ -28513,7 +28783,9 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
 
         const lines = __toTreeMarkdownLines(children, 0, {
             checkType: 'permanent',
-            permanentExpandedSet
+            permanentExpandedSet,
+            forceCollapsed: !!(metaOptions && metaOptions.forceCollapsed),
+            bookmarkIconMode: metaOptions && metaOptions.bookmarkIconMode
         });
 
         if (lines.length) parts.push(lines.join('\n'));
@@ -28523,7 +28795,7 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
     return parts.join('\n').trimEnd() + '\n';
 }
 
-function __buildTempSectionMarkdown(section) {
+function __buildTempSectionMarkdown(section, metaOptions = null) {
     const { isEn } = __getLang();
 
     // 1. Title & Sequence
@@ -28540,6 +28812,14 @@ function __buildTempSectionMarkdown(section) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
 
+    const foldBlock = __buildCanvasFoldStateCommentBlock(
+        __getTempSectionFoldStateForExport(section ? section.id : ''),
+        { force: true }
+    );
+    if (foldBlock) {
+        body.push(foldBlock);
+    }
+
     body.push('');
 
     // 3. Items
@@ -28548,7 +28828,9 @@ function __buildTempSectionMarkdown(section) {
     // Pass temp section ID for collapsed state checking
     const lines = __toTreeMarkdownLines(items, 0, {
         checkType: 'temp',
-        tempSectionId: section ? section.id : null
+        tempSectionId: section ? section.id : null,
+        forceCollapsed: !!(metaOptions && metaOptions.forceCollapsed),
+        bookmarkIconMode: metaOptions && metaOptions.bookmarkIconMode
     });
 
     if (lines.length) {
@@ -28608,6 +28890,14 @@ function __buildPermanentBookmarksMarkdownEditable(bookmarkTree, descriptionOver
     const descMd = __htmlToMarkdown(rawDesc);
     if (descMd) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
+    }
+
+    const foldBlock = __buildCanvasFoldStateCommentBlock(
+        __getPermanentFoldStateForExport(metaOptions && metaOptions.copyId),
+        { mode: 'permanent', force: true }
+    );
+    if (foldBlock) {
+        body.push(foldBlock);
     }
 
     body.push('');
@@ -28715,9 +29005,83 @@ function __buildPermanentBookmarksMarkdownEditable(bookmarkTree, descriptionOver
 }
 
 /**
+ * Build Permanent Copy Markdown: description is per-copy, body is embedded from main #A file.
+ *
+ * Goal:
+ * - #A: A description + shared body
+ * - #B/#C/...: own description + embed A shared body
+ *
+ * Implementation:
+ * - Embed each root section (Bookmark Bar / Other Bookmarks / Mobile Bookmarks / etc.)
+ *   so we don't need to change #A's structure.
+ */
+function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptionOverride = null, metaOptions = null, embedTargetPath = '') {
+    const { isEn } = __getLang();
+    const domTitleEl = document.getElementById('permanentSectionTitle');
+    const domTitle = domTitleEl ? domTitleEl.textContent.trim() : '';
+    const title = domTitle || (isEn ? 'Permanent Bookmarks' : '书签树 (永久栏目)');
+    const permanentSlot = __normalizePositiveInt(metaOptions && metaOptions.permanentSlot) || 1;
+    const slotLabel = toAlphaLabel(permanentSlot) || 'A';
+    const sectionHeaderLine = `#${slotLabel} ${title}`.trim();
+
+    const body = [sectionHeaderLine];
+
+    // Description (HTML -> Markdown)
+    let rawDesc = '';
+    if (descriptionOverride !== null) {
+        rawDesc = descriptionOverride;
+    } else {
+        try { rawDesc = localStorage.getItem('canvas-permanent-tip-text') || ''; } catch (_) { }
+    }
+    const descMd = __htmlToMarkdown(rawDesc);
+    if (descMd) {
+        body.push(__buildCanvasDescriptionCommentBlock(descMd));
+    }
+
+    const foldBlock = __buildCanvasFoldStateCommentBlock(
+        __getPermanentFoldStateForExport(metaOptions && metaOptions.copyId),
+        { mode: 'permanent', force: true }
+    );
+    if (foldBlock) {
+        body.push(foldBlock);
+    }
+
+    body.push('');
+
+    const target = String(embedTargetPath || '').trim().replace(/\.md$/i, '');
+    if (!target) {
+        body.push(isEn ? '*Missing embed target.*' : '*缺少共享正文目标*');
+        body.push('');
+        return body.join('\n').trimEnd() + '\n';
+    }
+
+    const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
+    const roots = root && Array.isArray(root.children) ? root.children : [];
+
+    const getRootSectionName = (node) => {
+        if (!node) return 'Bookmarks';
+        if (node.id === '1') return isEn ? 'Bookmark Bar' : '书签栏';
+        if (node.id === '2') return isEn ? 'Other Bookmarks' : '其他书签';
+        if (node.id === '3') return isEn ? 'Mobile Bookmarks' : '移动设备书签';
+        const t = String(node.title || node.name || '').trim();
+        return t || (isEn ? 'Bookmarks' : '书签');
+    };
+
+    roots.forEach((r) => {
+        const sectionName = getRootSectionName(r);
+        if (!sectionName) return;
+        body.push(`![[${target}#${sectionName}]]`);
+    });
+
+    body.push('');
+
+    return body.join('\n').trimEnd() + '\n';
+}
+
+/**
  * [EDITABLE MODE] Build Temp Section Markdown (Headings + List)
  */
-function __buildTempSectionMarkdownEditable(section) {
+function __buildTempSectionMarkdownEditable(section, metaOptions = null) {
     const { isEn } = __getLang();
     const rawTitle = String((section && section.title) || (isEn ? 'Temp Section' : '临时栏目'));
     const seqLabel = getTempSectionLabel(section);
@@ -28729,6 +29093,14 @@ function __buildTempSectionMarkdownEditable(section) {
     const descMd = __htmlToMarkdown(descHtml);
     if (descMd) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
+    }
+
+    const foldBlock = __buildCanvasFoldStateCommentBlock(
+        __getTempSectionFoldStateForExport(section ? section.id : ''),
+        { force: true }
+    );
+    if (foldBlock) {
+        body.push(foldBlock);
     }
 
     body.push('');
@@ -28954,7 +29326,7 @@ function __parseEditableMarkdownToTree(mdContent) {
 
         // 3. Check for Folder in List (- 📁 **Title** or - **Title**)
         // Support both with and without folder icon
-        const boldFolderMatch = trimmed.match(/^-\s+(?:📁\s*)?\*\*(.*?)\*\*/);
+        const boldFolderMatch = trimmed.match(/^-\s+(?:(?:📁|📂)\s*)?\*\*(.*?)\*\*/);
         if (boldFolderMatch) {
             const title = boldFolderMatch[1].trim();
             const folderNode = {
@@ -29015,7 +29387,7 @@ function __parseVisualHtmlToTree(htmlContent) {
                 const summary = details.querySelector(':scope > summary');
                 const titleSpan = summary ? summary.querySelector('span span:last-child') : null;
                 const title = titleSpan ? titleSpan.textContent.trim() :
-                    (summary ? summary.textContent.trim().replace(/^📁\s*/, '') : 'Folder');
+                    (summary ? summary.textContent.trim().replace(/^[📁📂]\s*/, '') : 'Folder');
 
                 // Find children container (the div after summary with border-left style)
                 const childrenContainer = details.querySelector(':scope > div');
@@ -29060,6 +29432,152 @@ function __parseMarkdownAuto(content) {
     // Default to Editable Mode (Markdown)
     console.log('[Canvas Import] Detected Editable Mode (Markdown format)');
     return __parseEditableMarkdownToTree(trimmed);
+}
+
+function __convertImportedTreeItemsToBookmarkSnapshotNodes(items) {
+    const list = Array.isArray(items) ? items : [];
+
+    const walk = (nodes) => {
+        const output = [];
+        const input = Array.isArray(nodes) ? nodes : [];
+        input.forEach((node) => {
+            if (!node || typeof node !== 'object') return;
+            const title = String(node.title || node.name || '').trim();
+            const url = String(node.url || '').trim();
+
+            if (url) {
+                output.push({
+                    title: title || url,
+                    url
+                });
+                return;
+            }
+
+            const children = walk(node.children || node.items || []);
+            output.push({
+                title: title || 'Folder',
+                children
+            });
+        });
+        return output;
+    };
+
+    return walk(list);
+}
+
+function __buildBookmarkTreeSnapshotFromPermanentMarkdown(contentToParse) {
+    const body = String(contentToParse || '').replace(/\r\n?/g, '\n').trim();
+    if (!body) return null;
+
+    // Permanent markdown is organized by root headings:
+    // ## Bookmark Bar / Other Bookmarks / Mobile Bookmarks
+    const lines = body.split('\n');
+    const sections = [];
+    let currentTitle = '';
+    let currentLines = [];
+
+    const flush = () => {
+        const title = String(currentTitle || '').trim();
+        if (!title) return;
+        sections.push({
+            title,
+            body: currentLines.join('\n').trim()
+        });
+    };
+
+    lines.forEach((line) => {
+        const m = String(line || '').match(/^##\s+(.+?)\s*$/);
+        if (m) {
+            flush();
+            currentTitle = m[1];
+            currentLines = [];
+            return;
+        }
+        if (!currentTitle) return;
+        currentLines.push(line);
+    });
+    flush();
+
+    if (!sections.length) {
+        return null;
+    }
+
+    const rootNodes = sections.map((section) => {
+        const items = __parseMarkdownAuto(section.body || '');
+        const children = __convertImportedTreeItemsToBookmarkSnapshotNodes(items);
+        return {
+            title: String(section.title || '').trim() || 'Bookmarks',
+            children
+        };
+    }).filter(Boolean);
+
+    return [{
+        title: '',
+        children: rootNodes
+    }];
+}
+
+function __rebuildPermanentTreeSnapshotFromSyncFolderFiles(folderFiles) {
+    const files = folderFiles instanceof Map ? folderFiles : new Map();
+    const candidates = [];
+
+    for (const [name, bytes] of files.entries()) {
+        const path = String(name || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/g, '').replace(/\/+/g, '/');
+        if (!path || !/\.md$/i.test(path) || !__isPermanentMarkdownPath(path)) continue;
+        if (!(bytes instanceof Uint8Array) || !bytes.length) continue;
+        candidates.push({ path, bytes });
+    }
+
+    if (!candidates.length) {
+        return null;
+    }
+
+    const decodedCandidates = [];
+    candidates
+        .sort((left, right) => String(left.path || '').localeCompare(String(right.path || '')))
+        .forEach((entry, index) => {
+            try {
+                const fileText = new TextDecoder('utf-8').decode(entry.bytes);
+                const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
+                decodedCandidates.push({
+                    path: entry.path,
+                    slot: __resolvePermanentSectionSlotForImport(parsedMarkdown, entry.path, index + 1),
+                    contentToParse: parsedMarkdown && typeof parsedMarkdown.contentToParse === 'string'
+                        ? parsedMarkdown.contentToParse
+                        : ''
+                });
+            } catch (_) { }
+        });
+
+    if (!decodedCandidates.length) {
+        return null;
+    }
+
+    decodedCandidates.sort((left, right) => {
+        const leftSlot = Number(left && left.slot) || Number.MAX_SAFE_INTEGER;
+        const rightSlot = Number(right && right.slot) || Number.MAX_SAFE_INTEGER;
+        if (leftSlot !== rightSlot) return leftSlot - rightSlot;
+        return String(left && left.path || '').localeCompare(String(right && right.path || ''));
+    });
+
+    const tryBuildFromEntry = (entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(entry.contentToParse || '');
+        return snapshotTree || null;
+    };
+
+    for (const entry of decodedCandidates) {
+        if (Number(entry.slot) !== 1) continue;
+        const snapshotTree = tryBuildFromEntry(entry);
+        if (snapshotTree) return snapshotTree;
+    }
+
+    for (const entry of decodedCandidates) {
+        const snapshotTree = tryBuildFromEntry(entry);
+        if (snapshotTree) return snapshotTree;
+    }
+
+    return null;
 }
 
 function __toUint8(text) {
@@ -29417,16 +29935,70 @@ function __buildObsidianSyncCanvasData({
     });
 
     try {
-        const canvasContent = document.getElementById('canvasContent');
-        const scope = canvasContent || document;
-        scope.querySelectorAll('.permanent-bookmark-section.permanent-section-copy').forEach((el) => {
-            if (!el) return;
-            const copyId = el.dataset ? el.dataset.permanentSectionCopyId : null;
+        const copyIds = new Set();
+        const domPositions = new Map(); // copyId -> { left, top, width, height }
+        const storedPositions = new Map(); // copyId -> stored payload
+
+        try {
+            Object.keys((copyFileMap && typeof copyFileMap === 'object') ? copyFileMap : {}).forEach((id) => {
+                if (id) copyIds.add(String(id));
+            });
+        } catch (_) { }
+
+        try {
+            const stored = __readPermanentSectionCopies();
+            if (Array.isArray(stored)) {
+                stored.forEach((payload) => {
+                    if (!payload || !payload.id) return;
+                    const id = String(payload.id);
+                    if (!id) return;
+                    copyIds.add(id);
+                    storedPositions.set(id, payload);
+                });
+            }
+        } catch (_) { }
+
+        try {
+            const canvasContent = document.getElementById('canvasContent');
+            const scope = canvasContent || document;
+            scope.querySelectorAll('.permanent-bookmark-section.permanent-section-copy').forEach((el) => {
+                if (!el) return;
+                const copyId = el.dataset ? el.dataset.permanentSectionCopyId : null;
+                if (!copyId) return;
+                const id = String(copyId);
+                copyIds.add(id);
+                domPositions.set(id, {
+                    left: parseFloat(el.style.left) || 0,
+                    top: parseFloat(el.style.top) || 0,
+                    width: el.offsetWidth || permanentW,
+                    height: el.offsetHeight || permanentH
+                });
+            });
+        } catch (_) { }
+
+        const toNumber = (value, fallback) => {
+            const n = parseFloat(String(value == null ? '' : value));
+            return Number.isFinite(n) ? n : fallback;
+        };
+
+        Array.from(copyIds.values()).forEach((copyId) => {
             if (!copyId) return;
-            const left = parseFloat(el.style.left) || 0;
-            const top = parseFloat(el.style.top) || 0;
-            const w = el.offsetWidth || permanentW;
-            const h = el.offsetHeight || permanentH;
+            const domPos = domPositions.get(copyId) || null;
+            const storedPos = storedPositions.get(copyId) || null;
+
+            const left = domPos
+                ? domPos.left
+                : (storedPos ? toNumber(storedPos.left, permanentLeft) : permanentLeft);
+            const top = domPos
+                ? domPos.top
+                : (storedPos ? toNumber(storedPos.top, permanentTop) : permanentTop);
+            const w = domPos
+                ? domPos.width
+                : (storedPos ? toNumber(storedPos.width, permanentW) : permanentW);
+            const h = domPos
+                ? domPos.height
+                : (storedPos ? toNumber(storedPos.height, permanentH) : permanentH);
+
             canvasData.nodes.push({
                 id: `permanent-section-copy-${copyId}`,
                 type: 'file',
@@ -29434,7 +30006,7 @@ function __buildObsidianSyncCanvasData({
                 y: Math.round(top),
                 width: Math.round(w),
                 height: Math.round(h),
-                file: withPrefix((copyId && copyFileMap[copyId]) ? copyFileMap[copyId] : permanentMdRel),
+                file: withPrefix((copyId && copyFileMap && copyFileMap[copyId]) ? copyFileMap[copyId] : permanentMdRel),
                 color: '4'
             });
         });
@@ -29544,12 +30116,28 @@ async function __buildObsidianSyncFiles(options = {}) {
         throw new Error(isEn ? 'Bookmarks API not available.' : '当前环境不支持书签 API，无法生成同步文件。');
     }
 
-    const exportFormat = options && options.exportFormat === 'editable' ? 'editable' : 'visual';
+    const exportFormatRaw = String((options && options.exportFormat) || '').trim().toLowerCase();
+    const exportFormat = exportFormatRaw === 'editable'
+        ? 'editable'
+        : (exportFormatRaw === 'visual-no-icon' ? 'visual-no-icon' : 'visual');
+    const obsidianBookmarkIconMode = exportFormat === 'visual-no-icon' ? 'text' : 'favicon';
     const exportRoot = __normalizeObsidianSyncExportRoot(options && options.exportRoot, isEn, { allowEmpty: true });
 
     try { __flushMdEditorsForExport(); } catch (_) { }
     try { saveTempNodes({ suppressSyncMarkDirty: true }); } catch (_) { }
     try { savePermanentSectionPosition(); } catch (_) { }
+    // Keep expand/collapse state in-sync with storage before we generate markdown (<details open>).
+    // This avoids missing the latest folder toggle due to debounce.
+    try { loadTempExpandState(); } catch (_) { }
+    try {
+        const canvasContent = document.getElementById('canvasContent');
+        const scope = canvasContent || document;
+        const hasPermanentTree = !!(scope && scope.querySelector && scope.querySelector('.permanent-bookmark-section .bookmark-tree'));
+        const hasTempNodes = !!(scope && scope.querySelector && scope.querySelector('.temp-canvas-node'));
+        if (hasPermanentTree || hasTempNodes) {
+            __flushCurrentPartitionExpandAndScrollState(__getCanvasViewPartitionKey());
+        }
+    } catch (_) { }
 
     const files = [];
     const pushTextFile = (relPath, content, meta = null) => {
@@ -29568,9 +30156,10 @@ async function __buildObsidianSyncFiles(options = {}) {
     const permanentBuilder = exportFormat === 'editable'
         ? __buildPermanentBookmarksMarkdownEditable
         : __buildPermanentBookmarksMarkdown;
+    const forceCollapsedForObsidian = exportFormat !== 'editable';
     pushTextFile(
         permanentMdRel,
-        permanentBuilder(bookmarkTree, null, { permanentSlot: 1 }),
+        permanentBuilder(bookmarkTree, null, { permanentSlot: 1, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian }),
         { type: 'permanent', slot: 1 }
     );
 
@@ -29587,14 +30176,18 @@ async function __buildObsidianSyncFiles(options = {}) {
                 let descObj = '';
                 try { descObj = localStorage.getItem(descKey) || ''; } catch (_) { }
 
-                const alpha = toAlphaLabel(idx + 1);
                 const copyMdRel = __buildPermanentSectionMarkdownRelativePath(idx + 1, isEn);
 
                 copyFileMap[copyId] = copyMdRel;
                 const slot = idx ? (idx + 1) : null;
                 pushTextFile(
                     copyMdRel,
-                    permanentBuilder(bookmarkTree, descObj, { permanentSlot: slot, copyId }),
+                    __buildPermanentBookmarksMarkdownCopyEmbedMain(
+                        bookmarkTree,
+                        descObj,
+                        { permanentSlot: slot, copyId, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian },
+                        __joinSyncExportPath(exportRoot, permanentMdRel)
+                    ),
                     { type: 'permanent', slot: slot || (idx + 1), copyId }
                 );
             });
@@ -29631,7 +30224,7 @@ async function __buildObsidianSyncFiles(options = {}) {
         const tempBuilder = exportFormat === 'editable'
             ? __buildTempSectionMarkdownEditable
             : __buildTempSectionMarkdown;
-        pushTextFile(rel, tempBuilder(section), {
+        pushTextFile(rel, tempBuilder(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian }), {
             type: 'temporary',
             sectionId: section.id,
             sectionSerial: seqLabel || ''
@@ -29714,7 +30307,11 @@ if (typeof window !== 'undefined') {
     }
     window.CanvasObsidianExportBridge.buildSyncFiles = __buildObsidianSyncFiles;
     window.CanvasObsidianExportBridge.parseSyncFolderFiles = parseCanvasPackageFromFolderFiles;
+    window.CanvasObsidianExportBridge.parseSyncFolderFilesForSync = function (folderFiles, folderName) {
+        return parseCanvasPackageFromFolderFiles(folderFiles, folderName, { preferBackupJson: false });
+    };
     window.CanvasObsidianExportBridge.applySyncFilesReplace = __applyObsidianSyncFilesReplace;
+    window.CanvasObsidianExportBridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles = __rebuildPermanentTreeSnapshotFromSyncFolderFiles;
 }
 
 async function exportCanvasPackage(options = {}) {
@@ -30030,7 +30627,9 @@ async function exportCanvasPackage(options = {}) {
             if (descriptionBookmark) {
                 payload.push(descriptionBookmark);
             }
-            payload.push(...contentNodes);
+            for (let i = 0; i < contentNodes.length; i++) {
+                payload.push(contentNodes[i]);
+            }
             const namePart = exportSequence ? `${exportSequence}-${exportTitle}` : (exportTitle || exportTypeLabel);
 
             if (normalizedMode === 'fullscreen-html') {
@@ -30412,6 +31011,7 @@ async function exportCanvasPackage(options = {}) {
     }
 
     const exportRoot = vaultPrefix ? vaultPrefix.split('/').slice(-1)[0] : defaultExportRoot;
+    const forceCollapsedForObsidian = !isFullBackupMode && String(exportFormat || '').trim().toLowerCase() !== 'editable';
 
     // 1) Markdown files
     // 1) Markdown files
@@ -30420,7 +31020,7 @@ async function exportCanvasPackage(options = {}) {
 
     // Choose builder based on format
     const permanentBuilder = exportFormat === 'editable' ? __buildPermanentBookmarksMarkdownEditable : __buildPermanentBookmarksMarkdown;
-    files.push({ name: `${exportRoot}/${permanentMdRel}`, data: __toUint8(permanentBuilder(bookmarkTree, null, { permanentSlot: 1 })) });
+    files.push({ name: `${exportRoot}/${permanentMdRel}`, data: __toUint8(permanentBuilder(bookmarkTree, null, { permanentSlot: 1, forceCollapsed: forceCollapsedForObsidian })) });
 
     // Generate separate MD files for Permanent Section Copies (with their own descriptions)
     const copyFileMap = {}; // copyId -> relativePath
@@ -30448,7 +31048,7 @@ async function exportCanvasPackage(options = {}) {
 
                 // Build separate MD file using same tree but different description
                 const slot = idx ? (idx + 1) : null;
-                const fileContent = permanentBuilder(bookmarkTree, descObj, { permanentSlot: slot, copyId });
+                const fileContent = permanentBuilder(bookmarkTree, descObj, { permanentSlot: slot, copyId, forceCollapsed: forceCollapsedForObsidian });
                 files.push({ name: `${exportRoot}/${copyMdRel}`, data: __toUint8(fileContent) });
             });
         }
@@ -30484,7 +31084,7 @@ async function exportCanvasPackage(options = {}) {
 
         // Choose builder based on format
         const tempBuilder = exportFormat === 'editable' ? __buildTempSectionMarkdownEditable : __buildTempSectionMarkdown;
-        files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(tempBuilder(section)) });
+        files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(tempBuilder(section, { forceCollapsed: forceCollapsedForObsidian })) });
     });
 
     const mdNodeMdPaths = [];
@@ -30550,18 +31150,72 @@ async function exportCanvasPackage(options = {}) {
             color: '4'
         });
 
-        // 永久栏目副本：引用同一份 permanent-bookmarks.md，但拥有独立的 x/y/size
+        // 永久栏目副本：需要同步进 .canvas，即使该副本 DOM 未立即创建（性能模式/懒加载）。
         try {
-            const canvasContent = document.getElementById('canvasContent');
-            const scope = canvasContent || document;
-            scope.querySelectorAll('.permanent-bookmark-section.permanent-section-copy').forEach((el) => {
-                if (!el) return;
-                const copyId = el.dataset ? el.dataset.permanentSectionCopyId : null;
+            const copyIds = new Set();
+            const domPositions = new Map(); // copyId -> { left, top, width, height }
+            const storedPositions = new Map(); // copyId -> stored payload
+
+            try {
+                Object.keys((copyFileMap && typeof copyFileMap === 'object') ? copyFileMap : {}).forEach((id) => {
+                    if (id) copyIds.add(String(id));
+                });
+            } catch (_) { }
+
+            try {
+                const stored = __readPermanentSectionCopies();
+                if (Array.isArray(stored)) {
+                    stored.forEach((payload) => {
+                        if (!payload || !payload.id) return;
+                        const id = String(payload.id);
+                        if (!id) return;
+                        copyIds.add(id);
+                        storedPositions.set(id, payload);
+                    });
+                }
+            } catch (_) { }
+
+            try {
+                const canvasContent = document.getElementById('canvasContent');
+                const scope = canvasContent || document;
+                scope.querySelectorAll('.permanent-bookmark-section.permanent-section-copy').forEach((el) => {
+                    if (!el) return;
+                    const copyId = el.dataset ? el.dataset.permanentSectionCopyId : null;
+                    if (!copyId) return;
+                    const id = String(copyId);
+                    copyIds.add(id);
+                    domPositions.set(id, {
+                        left: parseFloat(el.style.left) || 0,
+                        top: parseFloat(el.style.top) || 0,
+                        width: el.offsetWidth || permanentW,
+                        height: el.offsetHeight || permanentH
+                    });
+                });
+            } catch (_) { }
+
+            const toNumber = (value, fallback) => {
+                const n = parseFloat(String(value == null ? '' : value));
+                return Number.isFinite(n) ? n : fallback;
+            };
+
+            Array.from(copyIds.values()).forEach((copyId) => {
                 if (!copyId) return;
-                const left = parseFloat(el.style.left) || 0;
-                const top = parseFloat(el.style.top) || 0;
-                const w = el.offsetWidth || permanentW;
-                const h = el.offsetHeight || permanentH;
+                const domPos = domPositions.get(copyId) || null;
+                const storedPos = storedPositions.get(copyId) || null;
+
+                const left = domPos
+                    ? domPos.left
+                    : (storedPos ? toNumber(storedPos.left, permanentLeft) : permanentLeft);
+                const top = domPos
+                    ? domPos.top
+                    : (storedPos ? toNumber(storedPos.top, permanentTop) : permanentTop);
+                const w = domPos
+                    ? domPos.width
+                    : (storedPos ? toNumber(storedPos.width, permanentW) : permanentW);
+                const h = domPos
+                    ? domPos.height
+                    : (storedPos ? toNumber(storedPos.height, permanentH) : permanentH);
+
                 canvasData.nodes.push({
                     id: `permanent-section-copy-${copyId}`,
                     type: 'file',
@@ -30569,7 +31223,7 @@ async function exportCanvasPackage(options = {}) {
                     y: Math.round(top),
                     width: Math.round(w),
                     height: Math.round(h),
-                    file: withPrefix((copyId && copyFileMap[copyId]) ? copyFileMap[copyId] : permanentMdRel),
+                    file: withPrefix((copyId && copyFileMap && copyFileMap[copyId]) ? copyFileMap[copyId] : permanentMdRel),
                     color: '4'
                 });
             });
@@ -30766,7 +31420,7 @@ async function exportCanvasPackage(options = {}) {
 
     const readmeName = isEn ? 'README_Import_Rules.md' : '说明_导入规则.md';
 
-    const isVisualExport = exportFormat === 'visual';
+    const isVisualExport = String(exportFormat || '').trim().toLowerCase() !== 'editable';
     let compatText = '';
     let aiGuideText = '';
 
@@ -30825,6 +31479,7 @@ async function exportCanvasPackage(options = {}) {
             '### A3. Markdown Structure (all section files)',
             '- Use the first non-empty line as section header text (`sequence + title` recommended).',
             '- Optional description uses comment block: `<!-- BC_DESCRIPTION_START --> ... <!-- BC_DESCRIPTION_END -->`.',
+            '- Optional folder fold-state uses comment block: `<!-- BC_FOLD_STATE_START --> ... <!-- BC_FOLD_STATE_END -->`.',
             '- Permanent/Temporary bookmark tree content is parsed from lines below the header/description block.',
             '- Permanent slot recognition priority: header `#A/#B` > filename `(#B)` > file order fallback.',
             '- Special temporary files are placed under `Special temporary/`.',
@@ -30871,6 +31526,7 @@ async function exportCanvasPackage(options = {}) {
             '### A3. Markdown 文件结构（所有栏目）',
             '- 首个非空行作为栏目头文本（建议“序号 + 标题”）。',
             '- 说明区可选，采用注释块：`<!-- BC_DESCRIPTION_START --> ... <!-- BC_DESCRIPTION_END -->`。',
+            '- 文件夹折叠态可选，采用注释块：`<!-- BC_FOLD_STATE_START --> ... <!-- BC_FOLD_STATE_END -->`。',
             '- 永久/临时栏目的书签树内容从栏目头/说明区之后开始解析。',
             '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名 `(#B)` > 文件顺序兜底。',
             '- 特殊临时栏目文件统一放在 `临时栏目/特殊临时栏目/`。',
@@ -31403,6 +32059,41 @@ function __resolvePermanentSectionSlotForImport(parsedMarkdown, filePath, fallba
     return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
+function __isPermanentMarkdownPath(path) {
+    const normalized = String(path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalized) return false;
+    if (/(^|\/)(永久栏目|Permanent)(\/|$)/i.test(normalized)) return true;
+    if (/Permanent\s*Sections/i.test(normalized)) return true;
+    if (/Permanent\s*Bookmarks/i.test(normalized)) return true;
+    if (/(^|\/)永久书签(\/|$)/.test(normalized)) return true;
+    return false;
+}
+
+function __isExportedPermanentCanvasNode(node) {
+    if (!node || typeof node !== 'object') return false;
+    const nodeId = String(node.id || '').trim();
+    if (!nodeId) return false;
+    return nodeId === 'permanent-section' || nodeId.startsWith('permanent-section-copy-');
+}
+
+function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, contentToParse, isEn) {
+    const headerLine = String(parsedMarkdown && parsedMarkdown.headerLine || '').trim();
+    const fallbackTitle = String(node && node.file || '').split('/').pop().replace(/\.md$/i, '').trim();
+    return {
+        id: node.id,
+        title: headerLine || fallbackTitle || (isEn ? 'Temp Section' : '临时栏目'),
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        color: convertObsidianColor(node.color) || '#fb464c',
+        items: __parseMarkdownAuto(contentToParse),
+        description: descriptionHtml,
+        foldState: parsedMarkdown.foldState || null,
+        source: 'obsidian-permanent-reference'
+    };
+}
+
 async function parseCanvasPackageFromZipFile(file) {
     const { isEn } = __getLang();
     const lowerFileName = String((file && file.name) || '').toLowerCase();
@@ -31552,11 +32243,12 @@ async function parseCanvasPackageFromZipFile(file) {
                 const contentToParse = parsedMarkdown.contentToParse || '';
 
                 // Identify type based on filename
-                const isPermanent = node.file.includes('Permanent/') || node.file.includes('Permanent Sections') || node.file.includes('永久栏目') || node.file.includes('Permanent Bookmarks') || node.file.includes('永久书签');
+                const isPermanent = __isPermanentMarkdownPath(node.file);
                 const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
                 const isMdNode = node.file.includes('Blank/') || node.file.includes('Blank Sections/') || node.file.includes('空白栏目/');
+                const isLivePermanentNode = isPermanent && __isExportedPermanentCanvasNode(node);
 
-                if (isPermanent) {
+                if (isLivePermanentNode) {
                     // Reconstruct Snapshot Permanent Section
                     // We don't have the tree data in Mode A, but we have position.
                     // Wait, in Editable Mode, do we parse the MD to get the list?
@@ -31583,9 +32275,14 @@ async function parseCanvasPackageFromZipFile(file) {
                         color: convertObsidianColor(node.color) || '#44cf6e',
                         items: items, // Restored items!
                         description: descriptionHtml,
+                        foldState: parsedMarkdown.foldState || null,
                         isSnapshot: true
                     });
                     // We need to map this in storage for scroll if possible, but IDs changed.
+                } else if (isPermanent) {
+                    tempState.sections.push(
+                        __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, contentToParse, isEn)
+                    );
                 } else if (isTempSection) {
                     // Restore Temp Section
                     const items = __parseMarkdownAuto(contentToParse);
@@ -31638,24 +32335,27 @@ async function parseCanvasPackageFromZipFile(file) {
                         }
                     }
 
+                    restored.foldState = parsedMarkdown.foldState || null;
+
                     tempState.sections.push(restored);
-                } else if (isMdNode) {
-                    // Restore Blank Section
-                    // MdNodes just need text content
-                    const sectionId = node.id;
-                    const convertedColor = convertObsidianColor(node.color);
-                    const isHex = convertedColor && convertedColor.startsWith('#');
-                    tempState.mdNodes.push({
-                        id: sectionId,
-                        x: node.x,
-                        y: node.y,
-                        width: node.width,
-                        height: node.height,
-                        color: isHex ? null : node.color,
-                        colorHex: isHex ? convertedColor : null,
-                        text: parsedMarkdown.rawBody // 保留空白栏目的完整正文
-                    });
-                }
+	                } else if (isMdNode) {
+	                    // Restore Blank Section
+	                    // MdNodes just need text content
+	                    const sectionId = node.id;
+	                    const convertedColor = convertObsidianColor(node.color);
+	                    const isHex = convertedColor && convertedColor.startsWith('#');
+	                    tempState.mdNodes.push({
+	                        id: sectionId,
+	                        x: node.x,
+	                        y: node.y,
+	                        width: node.width,
+	                        height: node.height,
+	                        color: isHex ? null : node.color,
+	                        colorHex: isHex ? convertedColor : null,
+	                        source: 'obsidian-canvas-file',
+	                        text: parsedMarkdown.rawBody // 保留空白栏目的完整正文
+	                    });
+	                }
             } else if (node.type === 'text') {
                 const convertedColor = convertObsidianColor(node.color);
                 const isHex = convertedColor && convertedColor.startsWith('#');
@@ -31769,8 +32469,9 @@ async function importCanvasPackage7z(file) {
  * @param {Map<string, Uint8Array>} folderFiles - 文件夹中的文件 Map<路径, 内容>
  * @param {string} folderName - 文件夹名称
  */
-async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
+async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, options = {}) {
     const { isEn } = __getLang();
+    const preferBackupJson = !(options && options.preferBackupJson === false);
 
     // 4.2 数据信任链：
     // 优先查找 bookmark-canvas.backup.json（全量备份模式）
@@ -31779,7 +32480,7 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
     let canvasFileName = null;
 
     for (const name of folderFiles.keys()) {
-        if (name.endsWith('/bookmark-canvas.backup.json') || name.endsWith('bookmark-canvas.backup.json')) {
+        if (preferBackupJson && (name.endsWith('/bookmark-canvas.backup.json') || name.endsWith('bookmark-canvas.backup.json'))) {
             backupJsonName = name;
         }
         if (name.endsWith('.canvas') && !name.includes('/')) {
@@ -31794,7 +32495,7 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
     let primaryState = {};
 
     // Mode A: Full Backup (JSON)
-    if (backupJsonName) {
+    if (preferBackupJson && backupJsonName) {
         console.log(`[Canvas] Folder Import using BACKUP mode: ${backupJsonName}`);
         const primaryJsonText = new TextDecoder('utf-8').decode(folderFiles.get(backupJsonName));
         primaryState = JSON.parse(primaryJsonText);
@@ -31884,11 +32585,12 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
                 const descriptionHtml = parsedMarkdown.descriptionHtml || '';
                 const contentToParse = parsedMarkdown.contentToParse || '';
 
-                const isPermanent = node.file.includes('Permanent/') || node.file.includes('Permanent Sections') || node.file.includes('永久栏目') || node.file.includes('Permanent Bookmarks') || node.file.includes('永久书签');
+                const isPermanent = __isPermanentMarkdownPath(node.file);
                 const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
                 const isMdNode = node.file.includes('Blank/') || node.file.includes('Blank Sections/') || node.file.includes('空白栏目/');
+                const isLivePermanentNode = isPermanent && __isExportedPermanentCanvasNode(node);
 
-                if (isPermanent) {
+                if (isLivePermanentNode) {
                     const items = __parseMarkdownAuto(contentToParse);
                     const sectionId = node.id; // 使用原始 node.id 以便边缘正确映射
                     importedPermanentCount++;
@@ -31910,8 +32612,24 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
                         color: convertObsidianColor(node.color) || '#44cf6e',
                         items: items,
                         description: descriptionHtml,
+                        foldState: parsedMarkdown.foldState || null,
                         isSnapshot: true
                     });
+
+                    // [Sync] Try to rebuild the real browser bookmark tree snapshot from Obsidian permanent markdown (#A).
+                    // This enables "Obsidian edits permanent section -> overwrite local browser bookmarks" workflow.
+                    try {
+                        if (!primaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
+                            const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(contentToParse);
+                            if (snapshotTree) {
+                                primaryState.permanentTreeSnapshot = snapshotTree;
+                            }
+                        }
+                    } catch (_) { }
+                } else if (isPermanent) {
+                    tempState.sections.push(
+                        __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, contentToParse, isEn)
+                    );
                 } else if (isTempSection) {
                     const items = __parseMarkdownAuto(contentToParse);
                     const sectionId = node.id;
@@ -31957,22 +32675,25 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName) {
                         }
                     }
 
+                    restored.foldState = parsedMarkdown.foldState || null;
+
                     tempState.sections.push(restored);
-                } else if (isMdNode) {
-                    const sectionId = node.id;
-                    const convertedColor = convertObsidianColor(node.color);
-                    const isHex = convertedColor && convertedColor.startsWith('#');
-                    tempState.mdNodes.push({
-                        id: sectionId,
-                        x: node.x,
-                        y: node.y,
-                        width: node.width,
-                        height: node.height,
-                        color: isHex ? null : node.color,
-                        colorHex: isHex ? convertedColor : null,
-                        text: parsedMarkdown.rawBody
-                    });
-                }
+	                } else if (isMdNode) {
+	                    const sectionId = node.id;
+	                    const convertedColor = convertObsidianColor(node.color);
+	                    const isHex = convertedColor && convertedColor.startsWith('#');
+	                    tempState.mdNodes.push({
+	                        id: sectionId,
+	                        x: node.x,
+	                        y: node.y,
+	                        width: node.width,
+	                        height: node.height,
+	                        color: isHex ? null : node.color,
+	                        colorHex: isHex ? convertedColor : null,
+	                        source: 'obsidian-canvas-file',
+	                        text: parsedMarkdown.rawBody
+	                    });
+	                }
             } else if (node.type === 'text') {
                 const convertedColor = convertObsidianColor(node.color);
                 const isHex = convertedColor && convertedColor.startsWith('#');
@@ -32086,13 +32807,210 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
         throw new Error('同步文件为空，无法应用。');
     }
 
-    const parsed = await parseCanvasPackageFromFolderFiles(normalizedFiles, folderName || 'sync-pull');
-    const parsedTempState = parsed && parsed.tempState && typeof parsed.tempState === 'object'
-        ? parsed.tempState
-        : {};
+    // Obsidian sync folder contains "permanent-section" cards exported as Markdown file nodes.
+    // These should NOT be imported as temporary snapshot sections, otherwise they show up under
+    // "导入区块" as fake temp sections (#A/#B...). Instead, map them back to:
+    // - permanent section position (`permanent-section-position`)
+    // - permanent copy positions (`permanent-section-copies`)
+    // - permanent tips (`canvas-permanent-tip-text*`)
+    const permanentNodeIdsToIgnoreInTempState = new Set();
+    const remotePermanentCopyIds = new Set();
+    let remoteHasAnyPermanentCopyNode = false;
+    const permanentTipUpdates = [];
+    const permanentFoldUpdates = [];
+
+    const normalizePath = (path) => String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
+    const findFileBytes = (relPath) => {
+        const normalizedRel = normalizePath(relPath);
+        if (!normalizedRel) return null;
+        if (normalizedFiles.has(normalizedRel)) return normalizedFiles.get(normalizedRel);
+
+        let bestMatch = null;
+        for (const [key, val] of normalizedFiles.entries()) {
+            const normalizedKey = normalizePath(key);
+            if (!normalizedKey) continue;
+            if (normalizedKey.endsWith(normalizedRel)) {
+                if (!bestMatch || normalizedKey.length < bestMatch.key.length) {
+                    bestMatch = { key: normalizedKey, bytes: val };
+                }
+            }
+        }
+        if (bestMatch) return bestMatch.bytes;
+
+        for (const [key, val] of normalizedFiles.entries()) {
+            const normalizedKey = normalizePath(key);
+            if (!normalizedKey) continue;
+            if (normalizedKey.includes(normalizedRel)) return val;
+        }
+        return null;
+    };
+
+    const isPermanentMarkdownPath = (path) => {
+        const normalized = normalizePath(path);
+        if (!normalized) return false;
+        if (/(^|\/)(永久栏目|Permanent)(\/|$)/i.test(normalized)) return true;
+        if (/Permanent\s*Sections/i.test(normalized)) return true;
+        if (/Permanent\s*Bookmarks/i.test(normalized)) return true;
+        if (/(^|\/)永久书签(\/|$)/.test(normalized)) return true;
+        return false;
+    };
+
+    const toPx = (value) => {
+        const n = parseFloat(String(value == null ? '' : value));
+        if (!Number.isFinite(n)) return '';
+        return `${Math.round(n)}px`;
+    };
+
+    const applyPermanentLayoutAndTipsFromCanvas = () => {
+        const canvasCandidates = Array.from(normalizedFiles.keys())
+            .map((key) => normalizePath(key))
+            .filter((key) => !!key && /\.canvas$/i.test(key));
+        if (!canvasCandidates.length) return;
+
+        let canvasData = null;
+        let canvasPath = '';
+        for (const candidate of canvasCandidates) {
+            const bytes = normalizedFiles.get(candidate);
+            if (!bytes) continue;
+            try {
+                const text = new TextDecoder('utf-8').decode(bytes);
+                const parsed = JSON.parse(text);
+                if (parsed && typeof parsed === 'object' && Array.isArray(parsed.nodes)) {
+                    canvasData = parsed;
+                    canvasPath = candidate;
+                    break;
+                }
+            } catch (_) { }
+        }
+        if (!canvasData) return;
+
+        const nodes = Array.isArray(canvasData.nodes) ? canvasData.nodes : [];
+
+        const nextPermanentCopies = [];
+        let permanentFallbackIndex = 0;
+
+	        nodes.forEach((node) => {
+	            if (!node || node.type !== 'file') return;
+	            const nodeId = String(node.id || '').trim();
+	            const filePath = String(node.file || '').trim();
+	            if (!nodeId || !filePath || !/\.md$/i.test(filePath)) return;
+
+	            const isPermanentNodeFile = isPermanentMarkdownPath(filePath);
+	            const isExportedPermanentNode = isPermanentNodeFile && __isExportedPermanentCanvasNode(node);
+	            if (isExportedPermanentNode) {
+	                permanentNodeIdsToIgnoreInTempState.add(nodeId);
+	            }
+	            if (!isExportedPermanentNode) return;
+	            if (nodeId.startsWith('permanent-section-copy-')) remoteHasAnyPermanentCopyNode = true;
+
+            const fileBytes = findFileBytes(filePath);
+            const fileText = fileBytes ? new TextDecoder('utf-8').decode(fileBytes) : '';
+            const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
+            permanentFallbackIndex += 1;
+            const slot = __resolvePermanentSectionSlotForImport(parsedMarkdown, filePath, permanentFallbackIndex);
+            const slotNumber = Number.isFinite(slot) && slot > 0 ? slot : 1;
+
+            const rawDescHtml = parsedMarkdown && typeof parsedMarkdown.descriptionHtml === 'string'
+                ? parsedMarkdown.descriptionHtml
+                : '';
+            const descHtml = __normalizeCanvasRichHtml(rawDescHtml);
+            const foldState = parsedMarkdown && parsedMarkdown.foldState ? parsedMarkdown.foldState : null;
+
+            if (nodeId === 'permanent-section' || slotNumber === 1) {
+                // Main permanent section layout
+                const position = {
+                    left: toPx(node.x),
+                    top: toPx(node.y),
+                    width: toPx(node.width),
+                    height: toPx(node.height)
+                };
+                try { saveSharedState('permanent-section-position', position); } catch (_) { }
+
+                try { __persistPermanentTipStorageValue('canvas-permanent-tip-text', descHtml); } catch (_) { }
+                permanentTipUpdates.push({ copyId: null, html: descHtml });
+                if (foldState) permanentFoldUpdates.push({ copyId: null, foldState });
+                return;
+            }
+
+            // Permanent copy layout (slot >= 2)
+            const copyId = nodeId.startsWith('permanent-section-copy-')
+                ? nodeId.slice('permanent-section-copy-'.length)
+                : '';
+            const displayIndex = Math.max(1, slotNumber - 1);
+            if (copyId) {
+                remotePermanentCopyIds.add(copyId);
+                nextPermanentCopies.push({
+                    id: copyId,
+                    displayIndex,
+                    left: toPx(node.x),
+                    top: toPx(node.y),
+                    width: toPx(node.width),
+                    height: toPx(node.height)
+                });
+
+                try { __persistPermanentTipStorageValue(`canvas-permanent-tip-text-copy-${copyId}`, descHtml); } catch (_) { }
+                permanentTipUpdates.push({ copyId, html: descHtml });
+                if (foldState) permanentFoldUpdates.push({ copyId, foldState });
+            }
+        });
+
+        if (nextPermanentCopies.length) {
+            try {
+                __writePermanentSectionCopies(nextPermanentCopies);
+                __ensurePermanentSectionCopyDisplayIndexes(nextPermanentCopies);
+            } catch (_) { }
+        } else if (permanentNodeIdsToIgnoreInTempState.size && !remoteHasAnyPermanentCopyNode) {
+            // If remote canvas explicitly has no copy nodes, clear local copies.
+            // (Don't call removePermanentSectionCopy here, it would mark dirty.)
+            try { __writePermanentSectionCopies([]); } catch (_) { }
+        }
+
+        // Avoid unused var lint (kept for future debug).
+        void canvasPath;
+    };
+
+    try { applyPermanentLayoutAndTipsFromCanvas(); } catch (e) { console.warn('[Canvas] apply permanent layout/tip from remote canvas failed:', e); }
+
+	    const parsed = await parseCanvasPackageFromFolderFiles(normalizedFiles, folderName || 'sync-pull', { preferBackupJson: false });
+	    const parsedTempState = parsed && parsed.tempState && typeof parsed.tempState === 'object'
+	        ? parsed.tempState
+	        : {};
+	    const parsedPrimaryState = parsed && parsed.primaryState && typeof parsed.primaryState === 'object'
+	        ? parsed.primaryState
+	        : {};
+	    const permanentTreeSnapshot = parsedPrimaryState && parsedPrimaryState.permanentTreeSnapshot
+	        ? parsedPrimaryState.permanentTreeSnapshot
+	        : null;
+
+    const nextSectionsRaw = Array.isArray(parsedTempState.sections) ? parsedTempState.sections : [];
+    const nextSections = permanentNodeIdsToIgnoreInTempState.size
+        ? nextSectionsRaw.filter((section) => {
+            const id = section && section.id ? String(section.id) : '';
+            return id ? !permanentNodeIdsToIgnoreInTempState.has(id) : true;
+        })
+        : nextSectionsRaw;
+
+    const nextEdgesRaw = Array.isArray(parsedTempState.edges) ? parsedTempState.edges : [];
+    const nextEdges = permanentNodeIdsToIgnoreInTempState.size
+        ? nextEdgesRaw.map((edge) => {
+            const nextEdge = edge && typeof edge === 'object' ? Object.assign({}, edge) : edge;
+            if (!nextEdge || typeof nextEdge !== 'object') return nextEdge;
+            const fromNode = String(nextEdge.fromNode || '').trim();
+            const toNode = String(nextEdge.toNode || '').trim();
+            if (fromNode && fromNode !== 'permanent-section' && permanentNodeIdsToIgnoreInTempState.has(fromNode)) {
+                nextEdge.fromNode = 'permanent-section';
+            }
+            if (toNode && toNode !== 'permanent-section' && permanentNodeIdsToIgnoreInTempState.has(toNode)) {
+                nextEdge.toNode = 'permanent-section';
+            }
+            return nextEdge;
+        })
+        : nextEdgesRaw;
+
+    try { __applyImportedSectionFoldStates(nextSections); } catch (_) { }
 
     const nextState = __buildPersistedCanvasState({
-        sections: Array.isArray(parsedTempState.sections) ? parsedTempState.sections : [],
+        sections: nextSections,
         tempSectionCounter: parsedTempState.tempSectionCounter,
         tempItemCounter: parsedTempState.tempItemCounter,
         colorCursor: parsedTempState.colorCursor,
@@ -32100,7 +33018,7 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
         tempSectionPrevColor: parsedTempState.tempSectionPrevColor,
         mdNodes: Array.isArray(parsedTempState.mdNodes) ? parsedTempState.mdNodes : [],
         mdNodeCounter: parsedTempState.mdNodeCounter,
-        edges: Array.isArray(parsedTempState.edges) ? parsedTempState.edges : [],
+        edges: nextEdges,
         edgeCounter: parsedTempState.edgeCounter,
         timestamp: Date.now()
     });
@@ -32138,13 +33056,73 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
 
     try { saveTempNodes({ immediate: true, suppressSyncMarkDirty: true }); } catch (_) { }
 
-    return {
-        success: true,
-        tempCount: Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0,
-        mdCount: Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.length : 0,
-        edgeCount: Array.isArray(CanvasState.edges) ? CanvasState.edges.length : 0
-    };
-}
+    try {
+        permanentFoldUpdates.forEach((update) => {
+            if (!update || !update.foldState) return;
+            __applyPermanentFoldStateToStorage(update.copyId || null, update.foldState);
+        });
+    } catch (_) { }
+
+    // Apply permanent layout and tips to DOM (localStorage updates do not fire storage events in same page).
+    try { loadPermanentSectionPosition(); } catch (_) { }
+    try {
+        // Remove extra copy DOM nodes that no longer exist on remote (silent, no markDirty).
+        const canvasContent = document.getElementById('canvasContent');
+        const scope = canvasContent || document;
+        const existingCopyEls = Array.from(scope.querySelectorAll('.permanent-bookmark-section.permanent-section-copy'));
+        existingCopyEls.forEach((el) => {
+            if (!el || !el.dataset) return;
+            const copyId = String(el.dataset.permanentSectionCopyId || '').trim();
+            if (!copyId) return;
+            if (remoteHasAnyPermanentCopyNode) {
+                if (!remotePermanentCopyIds.has(copyId)) {
+                    try { el.remove(); } catch (_) { }
+                }
+                return;
+            }
+            // Remote explicitly has no copy nodes -> clear all copies.
+            if (permanentNodeIdsToIgnoreInTempState.size) {
+                try { el.remove(); } catch (_) { }
+            }
+        });
+        try { __updatePermanentSectionIndexBadges(); } catch (_) { }
+    } catch (_) { }
+
+    try {
+        const mainEl = document.getElementById('permanentSection');
+        permanentTipUpdates.forEach((update) => {
+            if (!update) return;
+            const copyId = update.copyId ? String(update.copyId) : '';
+            const html = typeof update.html === 'string' ? update.html : '';
+            if (!copyId) {
+                if (mainEl) __applyPermanentTipContentRealtimeSync(mainEl, html);
+                return;
+            }
+            const canvasContent = document.getElementById('canvasContent');
+            const scope = canvasContent || document;
+            const target = scope.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${CSS.escape(copyId)}"]`);
+            if (target) __applyPermanentTipContentRealtimeSync(target, html);
+        });
+    } catch (_) { }
+
+    try {
+        if (typeof restoreTreeExpandState === 'function') {
+            const canvasContent = document.getElementById('canvasContent');
+            const scope = canvasContent || document;
+            scope.querySelectorAll('.permanent-bookmark-section .bookmark-tree').forEach((tree) => {
+                try { restoreTreeExpandState(tree); } catch (_) { }
+            });
+        }
+    } catch (_) { }
+
+	    return {
+	        success: true,
+	        tempCount: Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0,
+	        mdCount: Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.length : 0,
+	        edgeCount: Array.isArray(CanvasState.edges) ? CanvasState.edges.length : 0,
+	        permanentTreeSnapshot
+	    };
+	}
 
 /**
  * 沙箱导入核心处理逻辑
@@ -32165,6 +33143,7 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     // We must remap ALL IDs in the imported state to prevent collision with existing nodes.
     // Also converts the imported "permanent-section" into a "Snapshot Temp Section".
     const { remappedNodes, remappedEdges, remappedScrolls } = __remapImportedData(tempState, storage, primaryState);
+    try { __applyImportedSectionFoldStates(remappedNodes && remappedNodes.tempSections); } catch (_) { }
 
     // 2. Calculate Bounding Box of the imported batch
     const bounds = __calculateNodesBoundingBox(remappedNodes);

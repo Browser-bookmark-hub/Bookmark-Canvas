@@ -41,6 +41,12 @@
         { buttonId: 'canvasSyncBehaviorSubPluginBtn', targetId: 'canvasSyncPluginSectionTitle' },
         { buttonId: 'canvasSyncBehaviorSubCompatBtn', targetId: 'canvasSyncSectionCompatTitle' }
     ];
+    const BEHAVIOR_SUBNAV_COMPAT_CONFIG = [
+        { buttonId: 'canvasSyncBehaviorSubCompatDetail1Btn', targetId: 'canvasSyncSectionCompatDetectTitle' },
+        { buttonId: 'canvasSyncBehaviorSubCompatDetail2Btn', targetId: 'canvasSyncSectionCompatBgDetectTitle' },
+        { buttonId: 'canvasSyncBehaviorSubCompatDetail3Btn', targetId: 'canvasSyncSectionCompatMismatchTitle' },
+        { buttonId: 'canvasSyncBehaviorSubCompatDetail4Btn', targetId: 'canvasSyncSectionCompatMergeTitle' }
+    ];
 
     const TEMP_SECTION_STORAGE_KEY = 'bookmark-canvas-temp-sections';
 
@@ -57,9 +63,11 @@
     const MISMATCH_POLICIES = new Set(['auto_pull', 'auto_push', 'prompt']);
     const SYNC_METHODS = new Set(['merge', 'rebase', 'reset']);
     const FIRST_SYNC_MODES = new Set(['auto', 'cloud', 'local']);
+    const PERMANENT_PULL_MODES = new Set(['auto', 'overwrite', 'incremental']);
     const MAX_RECOVERY_RECORDS = 5;
+    const DEFAULT_PERMANENT_INCREMENTAL_MAX_LOGICAL_CHANGES_ABS = 200;
     const PERMANENT_TREE_UPLOAD_INTERVALS = new Set([0, 5, 15, 30, 60]);
-    const OBSIDIAN_EXPORT_FORMATS = new Set(['visual', 'editable']);
+    const OBSIDIAN_EXPORT_FORMATS = new Set(['visual-no-icon', 'visual', 'editable']);
     const CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE = { min: 0, max: 24 * 60 * 60 };
     const SYNC_FILE_TOO_LARGE_ERROR_CODE = 'SYNC_FILE_TOO_LARGE';
     const OVERSIZE_SYNC_DIALOG_COOLDOWN_MS = 30 * 1000;
@@ -75,19 +83,23 @@
         autoPushIntervalMinutes: 2,
         autoPullIntervalMinutes: 5,
         mismatchPolicy: 'prompt',
+        foregroundCheckEnabled: true,
+        foregroundCheckIntervalSeconds: 30,
         backgroundCheckEnabled: true,
-        backgroundCheckIntervalMinutes: 2,
-        backgroundCooldownMinutes: 10,
+        backgroundCheckIntervalMinutes: 1,
+        backgroundCooldownMinutes: 5,
         pullOnStartup: false,
         pushOnSync: true,
         pullOnSync: true,
         hideNoChangeNotice: true,
         firstSyncMode: 'auto',
+        permanentPullMode: 'auto',
+        permanentIncrementalMaxChanges: DEFAULT_PERMANENT_INCREMENTAL_MAX_LOGICAL_CHANGES_ABS,
         permanentTreeUploadIntervalSeconds: 15,
         tempSectionUploadIntervalSeconds: 5,
         blankSectionUploadIntervalSeconds: 5,
         obsidianFilePushEnabled: true,
-        obsidianExportFormat: 'editable',
+        obsidianExportFormat: 'visual-no-icon',
         obsidianExportRoot: '书签画布',
         firstSyncPathVerifiedRoot: '',
         firstSyncPathVerifiedAt: 0,
@@ -129,6 +141,7 @@
     let autoPushTimer = null;
     let autoPullTimer = null;
     let startupPullTimer = null;
+    let foregroundMismatchTimer = null;
     let panelBound = false;
     let repoConfig = null;
     let activeTabKey = DEFAULT_ACTIVE_TAB;
@@ -146,6 +159,14 @@
     let syncMetaPendingRemove = new Set();
     let syncMetaWriteTimer = null;
     const pendingReasons = new Set();
+    let floatingProgressEl = null;
+    let floatingProgressLabelEl = null;
+    let floatingProgressPercentEl = null;
+    let floatingProgressActive = false;
+    let floatingProgressMessage = '';
+    let floatingProgressPercent = null;
+    let syncUiProgressEnabled = false;
+    let syncUiProgressButtonEl = null;
 
     function getRuntimeApi() {
         return global.chrome || global.browser || null;
@@ -284,6 +305,16 @@
         return FIRST_SYNC_MODES.has(value) ? value : DEFAULT_SETTINGS.firstSyncMode;
     }
 
+    function ensurePermanentPullMode(mode) {
+        const value = String(mode || '').trim().toLowerCase();
+        return PERMANENT_PULL_MODES.has(value) ? value : DEFAULT_SETTINGS.permanentPullMode;
+    }
+
+    function normalizePermanentIncrementalMaxChanges(value, fallback = DEFAULT_SETTINGS.permanentIncrementalMaxChanges) {
+        const parsed = toSafeInt(value, fallback);
+        return Math.max(1, Math.min(20000, parsed));
+    }
+
     function ensureMismatchPolicy(policy) {
         const value = String(policy || '').trim().toLowerCase();
         return MISMATCH_POLICIES.has(value) ? value : DEFAULT_SETTINGS.mismatchPolicy;
@@ -311,6 +342,12 @@
         const safeFallback = Math.max(safeMin, Math.min(24 * 60, toSafeInt(fallback, safeMin)));
         const minutes = toSafeInt(value, safeFallback);
         return Math.max(safeMin, Math.min(24 * 60, minutes));
+    }
+
+    function normalizeForegroundCheckSeconds(value, fallback = 30) {
+        const safeFallback = Math.max(5, Math.min(3600, toSafeInt(fallback, 30)));
+        const seconds = toSafeInt(value, safeFallback);
+        return Math.max(5, Math.min(3600, seconds));
     }
 
     function normalizePermanentTreeUploadIntervalSeconds(value, fallback = DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds) {
@@ -378,7 +415,17 @@
         merged.hideNoChangeNotice = !!merged.hideNoChangeNotice;
 
         merged.firstSyncMode = ensureFirstSyncMode(merged.firstSyncMode);
+        merged.permanentPullMode = ensurePermanentPullMode(merged.permanentPullMode);
+        merged.permanentIncrementalMaxChanges = normalizePermanentIncrementalMaxChanges(
+            merged.permanentIncrementalMaxChanges,
+            DEFAULT_SETTINGS.permanentIncrementalMaxChanges
+        );
         merged.mismatchPolicy = ensureMismatchPolicy(merged.mismatchPolicy);
+        merged.foregroundCheckEnabled = merged.foregroundCheckEnabled !== false;
+        merged.foregroundCheckIntervalSeconds = normalizeForegroundCheckSeconds(
+            merged.foregroundCheckIntervalSeconds,
+            DEFAULT_SETTINGS.foregroundCheckIntervalSeconds
+        );
         merged.backgroundCheckEnabled = merged.backgroundCheckEnabled !== false;
         merged.backgroundCheckIntervalMinutes = normalizeBackgroundMinutes(
             merged.backgroundCheckIntervalMinutes,
@@ -1181,10 +1228,10 @@
         return String(title || '').trim().toLowerCase();
     }
 
-    function getBookmarkTreeStats(treeSnapshot) {
-        const roots = extractBookmarkRootFolders(treeSnapshot);
-        let folderCount = 0;
-        let bookmarkCount = 0;
+	    function getBookmarkTreeStats(treeSnapshot) {
+	        const roots = extractBookmarkRootFolders(treeSnapshot);
+	        let folderCount = 0;
+	        let bookmarkCount = 0;
 
         const walk = (nodes) => {
             if (!Array.isArray(nodes)) return;
@@ -1203,17 +1250,134 @@
             walk(rootNode.children);
         });
 
-        return {
-            roots: roots.length,
-            folders: folderCount,
-            bookmarks: bookmarkCount
-        };
-    }
+	        return {
+	            roots: roots.length,
+	            folders: folderCount,
+	            bookmarks: bookmarkCount
+	        };
+	    }
 
-    async function getPermanentTreeSnapshotForSync() {
-        const tree = await bookmarksGetTree();
-        const normalized = normalizeBookmarkTreeSnapshot(tree);
-        if (!normalized) {
+	    function getBookmarkTreeHash(treeSnapshot) {
+	        const normalized = normalizeBookmarkTreeSnapshot(treeSnapshot);
+	        if (!normalized) return '';
+	        try {
+	            return hashString(JSON.stringify(normalized));
+	        } catch (_) {
+	            return '';
+	        }
+	    }
+
+	    function shouldOverwriteLocalPermanentTreeFromRemote() {
+	        // Reuse firstSyncMode as a "permanent section ownership" policy for ongoing sync.
+	        // - cloud/auto: allow remote overwriting local permanent tree on pull
+	        // - local: never overwrite local permanent tree from remote
+	        const mode = ensureFirstSyncMode(settings && settings.firstSyncMode);
+	        return mode === 'cloud' || mode === 'auto';
+	    }
+
+	    // Permanent-section remote -> local overwrite entry (shared by pull-related flows).
+	    // Unified callers:
+	    // - pull-only (manual-pull)
+	    // - mismatch panel -> use remote
+	    // - full sync when winner resolves to remote pull
+	    // - conflict panel -> use remote (via force=true)
+	    async function maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(remoteTreeSnapshot, reason, options = {}) {
+	        const forceOverwrite = !!(options && options.force === true);
+	        if (!forceOverwrite && !shouldOverwriteLocalPermanentTreeFromRemote()) {
+	            return { applied: false, skipped: 'policy-local' };
+	        }
+
+	        const remoteTree = normalizeBookmarkTreeSnapshot(remoteTreeSnapshot);
+	        if (!remoteTree) {
+	            return { applied: false, skipped: 'remote-missing' };
+	        }
+
+	        const remoteStats = getBookmarkTreeStats(remoteTree);
+	        const remoteTotal = (remoteStats.folders || 0) + (remoteStats.bookmarks || 0);
+	        if (!remoteStats.roots || remoteTotal <= 0) {
+	            return { applied: false, skipped: 'remote-empty' };
+	        }
+
+	        const localTreeRaw = await bookmarksGetTree();
+	        const localTree = normalizeBookmarkTreeSnapshot(localTreeRaw);
+	        if (!localTree) {
+	            throw new Error(textByLang('读取本地永久栏目失败：书签树为空', 'Failed to read local permanent section: bookmark tree is empty'));
+	        }
+
+	        const localStats = getBookmarkTreeStats(localTree);
+	        const localHash = getBookmarkTreeHash(localTree);
+	        const remoteHash = getBookmarkTreeHash(remoteTree);
+	        if (localHash && remoteHash && localHash === remoteHash) {
+	            return { applied: false, skipped: 'same' };
+	        }
+
+	        try {
+	            const backup = normalizeSnapshot({
+	                schemaVersion: 1,
+	                format: 'bookmark-canvas-permanent-tree',
+	                updatedAt: Date.now(),
+	                generatedAt: Date.now(),
+	                trigger: String(reason || 'pull'),
+	                permanentTreeSnapshot: localTree,
+	                data: {}
+	            });
+	            backupSnapshotForRecovery(backup, `before-permanent-overwrite:${String(reason || 'pull')}`);
+	        } catch (_) { }
+
+	        const permanentPullMode = ensurePermanentPullMode(settings && settings.permanentPullMode);
+	        let applyMode = 'overwrite';
+	        let fallbackReason = '';
+	        let threshold = 0;
+	        let logicalChangeCount = 0;
+	
+	        if (permanentPullMode === 'incremental' || permanentPullMode === 'auto') {
+	            if (options && typeof options.onProgress === 'function') {
+	                try { options.onProgress(textByLang('正在分析永久栏目差异...', 'Analyzing permanent section changes...')); } catch (_) { }
+	            }
+	            const incrementalResult = await applyIncrementalPermanentTreeFromSnapshot(remoteTree, localTree, {
+	                reason: String(reason || 'pull'),
+	                respectThreshold: permanentPullMode === 'auto'
+	            });
+	            if (incrementalResult && incrementalResult.applied) {
+	                return {
+	                    applied: true,
+	                    counters: incrementalResult.counters,
+	                    localStats,
+	                    remoteStats,
+	                    mode: 'incremental',
+	                    threshold: incrementalResult.threshold,
+	                    logicalChangeCount: incrementalResult.logicalChangeCount
+	                };
+	            }
+	            fallbackReason = String(incrementalResult && (incrementalResult.fallback || incrementalResult.skipped) || 'fallback-overwrite');
+	            threshold = Number(incrementalResult && incrementalResult.threshold) || 0;
+	            logicalChangeCount = Number(incrementalResult && incrementalResult.logicalChangeCount) || 0;
+	        }
+
+	        if (options && typeof options.onProgress === 'function') {
+	            try { options.onProgress(textByLang('正在覆盖本地书签树...', 'Overwriting local bookmark tree...')); } catch (_) { }
+	        }
+
+	        const counters = await overwriteLocalPermanentTreeFromSnapshot(remoteTree, localTree, {
+	            reason: String(reason || 'pull')
+	        });
+
+	        return {
+	            applied: true,
+	            counters,
+	            localStats,
+	            remoteStats,
+	            mode: applyMode,
+	            fallbackReason,
+	            threshold,
+	            logicalChangeCount
+	        };
+	    }
+
+	    async function getPermanentTreeSnapshotForSync() {
+	        const tree = await bookmarksGetTree();
+	        const normalized = normalizeBookmarkTreeSnapshot(tree);
+	        if (!normalized) {
             throw new Error(textByLang('读取本地永久栏目失败：书签树为空', 'Failed to read local permanent section: bookmark tree is empty'));
         }
         return normalized;
@@ -1266,17 +1430,368 @@
         }
     }
 
-    async function overwriteLocalPermanentTreeFromSnapshot(treeSnapshot) {
-        const remoteTree = normalizeBookmarkTreeSnapshot(treeSnapshot);
-        if (!remoteTree) {
-            throw new Error(textByLang('云端未提供永久栏目快照，无法覆盖', 'Remote permanent section snapshot is missing; cannot overwrite'));
+    async function withPermanentTreeBulkMode(reason, task) {
+        const bulkMode = global.__canvasBookmarkBulkMode;
+        const bulkModeAvailable = !!(bulkMode
+            && typeof bulkMode.begin === 'function'
+            && typeof bulkMode.end === 'function');
+        const bulkReason = String(reason || 'sync-permanent-overwrite');
+        let bulkModeBegun = false;
+        let bulkSucceeded = false;
+
+        try {
+            if (bulkModeAvailable) {
+                await bulkMode.begin(bulkReason);
+                bulkModeBegun = true;
+            }
+            const result = await task();
+            bulkSucceeded = true;
+            return result;
+        } finally {
+            if (bulkModeBegun) {
+                try {
+                    if (bulkSucceeded && typeof bulkMode.noteMutation === 'function') {
+                        bulkMode.noteMutation(bulkReason);
+                    }
+                    await bulkMode.end(bulkReason, {
+                        resetBaseline: bulkSucceeded,
+                        refreshTree: true
+                    });
+                } catch (error) {
+                    console.warn('[Canvas Sync] bulk bookmark mode end failed:', error);
+                }
+            } else if (bulkSucceeded) {
+                try {
+                    if (typeof global.renderTreeView === 'function') {
+                        await global.renderTreeView(true);
+                    }
+                } catch (_) { }
+            }
+        }
+    }
+
+    function isPermanentBookmarkNode(node) {
+        return !!(node && typeof node.url === 'string' && node.url.trim());
+    }
+
+    function normalizePermanentNodeTitle(node, fallback = 'Folder') {
+        return String(node && (node.title || node.name) || fallback).trim() || fallback;
+    }
+
+    function buildPermanentIncrementalNodeKey(node) {
+        if (isPermanentBookmarkNode(node)) {
+            return `bookmark:${normalizePermanentNodeTitle(node, String(node && node.url || ''))}\u0001${String(node && node.url || '').trim()}`;
+        }
+        return `folder:${normalizePermanentNodeTitle(node)}`;
+    }
+
+    function countPermanentSubtreeStats(node) {
+        if (!node || typeof node !== 'object') {
+            return { folders: 0, bookmarks: 0 };
+        }
+        if (isPermanentBookmarkNode(node)) {
+            return { folders: 0, bookmarks: 1 };
+        }
+        let folders = 1;
+        let bookmarks = 0;
+        const children = Array.isArray(node.children) ? node.children : [];
+        children.forEach((child) => {
+            const childStats = countPermanentSubtreeStats(child);
+            folders += childStats.folders;
+            bookmarks += childStats.bookmarks;
+        });
+        return { folders, bookmarks };
+    }
+
+    function countPermanentSubtreeLogicalNodes(node) {
+        const stats = countPermanentSubtreeStats(node);
+        return (stats.folders || 0) + (stats.bookmarks || 0);
+    }
+
+    function buildPermanentComparableNodeSignature(node) {
+        const buildComparable = (input) => {
+            if (!input || typeof input !== 'object') return null;
+            if (isPermanentBookmarkNode(input)) {
+                return {
+                    type: 'bookmark',
+                    title: normalizePermanentNodeTitle(input, String(input.url || '')),
+                    url: String(input.url || '').trim()
+                };
+            }
+            return {
+                type: 'folder',
+                title: normalizePermanentNodeTitle(input),
+                children: (Array.isArray(input.children) ? input.children : []).map(buildComparable).filter(Boolean)
+            };
+        };
+        try {
+            return hashString(JSON.stringify(buildComparable(node)));
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function isNonDecreasingNumberList(values) {
+        let last = -Infinity;
+        for (let i = 0; i < values.length; i++) {
+            const next = Number(values[i]);
+            if (!Number.isFinite(next)) continue;
+            if (next < last) return false;
+            last = next;
+        }
+        return true;
+    }
+
+    function buildPermanentIncrementalThreshold(localTreeSnapshot, remoteTreeSnapshot) {
+        const localStats = getBookmarkTreeStats(localTreeSnapshot);
+        const remoteStats = getBookmarkTreeStats(remoteTreeSnapshot);
+        const total = Math.max(
+            (localStats.folders || 0) + (localStats.bookmarks || 0),
+            (remoteStats.folders || 0) + (remoteStats.bookmarks || 0),
+            0
+        );
+        const absoluteThreshold = normalizePermanentIncrementalMaxChanges(
+            settings && settings.permanentIncrementalMaxChanges,
+            DEFAULT_SETTINGS.permanentIncrementalMaxChanges
+        );
+        return absoluteThreshold;
+    }
+
+    function buildPermanentIncrementalPlan(parentId, localChildrenInput, remoteChildrenInput, ancestry = []) {
+        const localChildren = Array.isArray(localChildrenInput) ? localChildrenInput : [];
+        const remoteChildren = Array.isArray(remoteChildrenInput) ? remoteChildrenInput : [];
+
+        const localBuckets = new Map();
+        localChildren.forEach((node, index) => {
+            const key = buildPermanentIncrementalNodeKey(node);
+            if (!localBuckets.has(key)) localBuckets.set(key, []);
+            localBuckets.get(key).push({ node, index });
+        });
+
+        const remoteMatches = new Array(remoteChildren.length).fill(null);
+        const matchedLocalIndexes = new Set();
+        for (let remoteIndex = 0; remoteIndex < remoteChildren.length; remoteIndex++) {
+            const remoteNode = remoteChildren[remoteIndex];
+            const key = buildPermanentIncrementalNodeKey(remoteNode);
+            const bucket = localBuckets.get(key);
+            if (bucket && bucket.length) {
+                const localEntry = bucket.shift();
+                matchedLocalIndexes.add(localEntry.index);
+                remoteMatches[remoteIndex] = {
+                    remoteIndex,
+                    remoteNode,
+                    localIndex: localEntry.index,
+                    localNode: localEntry.node
+                };
+            }
         }
 
-        const localTree = await bookmarksGetTree();
+        const matchedLocalOrder = remoteMatches.filter(Boolean).map((entry) => entry.localIndex);
+        if (!isNonDecreasingNumberList(matchedLocalOrder)) {
+            return {
+                hasChanges: true,
+                logicalChangeCount: Number.POSITIVE_INFINITY,
+                complexReason: 'reorder-detected',
+                path: ancestry.join(' / ')
+            };
+        }
+
+        const deletes = localChildren
+            .map((node, index) => ({ node, index }))
+            .filter((entry) => !matchedLocalIndexes.has(entry.index))
+            .sort((left, right) => right.index - left.index)
+            .map((entry) => Object.assign({}, entry, {
+                logicalCount: countPermanentSubtreeLogicalNodes(entry.node)
+            }));
+
+        let logicalChangeCount = deletes.reduce((sum, entry) => sum + (entry.logicalCount || 0), 0);
+        const steps = [];
+
+        for (let remoteIndex = 0; remoteIndex < remoteChildren.length; remoteIndex++) {
+            const remoteNode = remoteChildren[remoteIndex];
+            const match = remoteMatches[remoteIndex];
+            if (!match) {
+                const logicalCount = countPermanentSubtreeLogicalNodes(remoteNode);
+                logicalChangeCount += logicalCount;
+                steps.push({
+                    kind: 'add',
+                    index: remoteIndex,
+                    node: remoteNode,
+                    logicalCount
+                });
+                continue;
+            }
+
+            if (!isPermanentBookmarkNode(remoteNode)) {
+                const localSignature = buildPermanentComparableNodeSignature(match.localNode);
+                const remoteSignature = buildPermanentComparableNodeSignature(remoteNode);
+                if (localSignature !== remoteSignature) {
+                    const childPlan = buildPermanentIncrementalPlan(
+                        String(match.localNode && match.localNode.id || ''),
+                        match.localNode && Array.isArray(match.localNode.children) ? match.localNode.children : [],
+                        Array.isArray(remoteNode.children) ? remoteNode.children : [],
+                        ancestry.concat(normalizePermanentNodeTitle(remoteNode))
+                    );
+                    if (childPlan && childPlan.complexReason) {
+                        return childPlan;
+                    }
+                    if (childPlan && childPlan.hasChanges) {
+                        logicalChangeCount += childPlan.logicalChangeCount || 0;
+                        steps.push({ kind: 'recurse', plan: childPlan });
+                    }
+                }
+            }
+        }
+
+        return {
+            parentId: String(parentId || ''),
+            deletes,
+            steps,
+            logicalChangeCount,
+            hasChanges: deletes.length > 0 || steps.length > 0
+        };
+    }
+
+    function buildPermanentIncrementalSyncPlan(localTreeSnapshot, remoteTreeSnapshot) {
+        const localRoots = extractBookmarkRootFolders(localTreeSnapshot);
+        const remoteRoots = extractBookmarkRootFolders(remoteTreeSnapshot);
+        const remoteByTitle = new Map();
+        remoteRoots.forEach((node) => {
+            const key = normalizeBookmarkRootTitle(node && node.title);
+            if (!key || remoteByTitle.has(key)) return;
+            remoteByTitle.set(key, node);
+        });
+
+        const plans = [];
+        let logicalChangeCount = 0;
+        for (let i = 0; i < localRoots.length; i++) {
+            const localRoot = localRoots[i];
+            if (!localRoot || !localRoot.id) continue;
+            const key = normalizeBookmarkRootTitle(localRoot.title);
+            const remoteRoot = (key && remoteByTitle.get(key)) || remoteRoots[i] || null;
+            const remoteChildren = remoteRoot && Array.isArray(remoteRoot.children) ? remoteRoot.children : [];
+            const rootPlan = buildPermanentIncrementalPlan(
+                String(localRoot.id || ''),
+                Array.isArray(localRoot.children) ? localRoot.children : [],
+                remoteChildren,
+                [normalizePermanentNodeTitle(remoteRoot || localRoot, textByLang('根目录', 'Root'))]
+            );
+            if (rootPlan && rootPlan.complexReason) {
+                return rootPlan;
+            }
+            if (rootPlan && rootPlan.hasChanges) {
+                plans.push(rootPlan);
+                logicalChangeCount += rootPlan.logicalChangeCount || 0;
+            }
+        }
+
+        return {
+            plans,
+            logicalChangeCount,
+            hasChanges: plans.length > 0
+        };
+    }
+
+    async function applyPermanentIncrementalPlan(plan, counters) {
+        if (!plan || !plan.hasChanges) return;
+        const deletes = Array.isArray(plan.deletes) ? plan.deletes : [];
+        for (let i = 0; i < deletes.length; i++) {
+            const entry = deletes[i];
+            const node = entry && entry.node;
+            if (!node || !node.id || node.unmodifiable) continue;
+            if (isPermanentBookmarkNode(node)) {
+                await bookmarksRemove(String(node.id));
+                if (counters) counters.removedBookmarks += 1;
+            } else {
+                const subtreeStats = countPermanentSubtreeStats(node);
+                await bookmarksRemoveTree(String(node.id));
+                if (counters) {
+                    counters.removedFolders += subtreeStats.folders || 0;
+                    counters.removedBookmarks += subtreeStats.bookmarks || 0;
+                }
+            }
+        }
+
+        const steps = Array.isArray(plan.steps) ? plan.steps : [];
+        for (let i = 0; i < steps.length; i++) {
+            const step = steps[i];
+            if (!step || typeof step !== 'object') continue;
+            if (step.kind === 'add') {
+                await createBookmarkSubtree(plan.parentId, step.node, step.index, counters);
+                continue;
+            }
+            if (step.kind === 'recurse') {
+                await applyPermanentIncrementalPlan(step.plan, counters);
+            }
+        }
+    }
+
+    async function applyIncrementalPermanentTreeFromSnapshot(treeSnapshot, localTreeSnapshot = null, options = {}) {
+        const remoteTree = normalizeBookmarkTreeSnapshot(treeSnapshot);
+        if (!remoteTree) {
+            return { applied: false, fallback: 'remote-missing' };
+        }
+
+        const localTree = localTreeSnapshot ? normalizeBookmarkTreeSnapshot(localTreeSnapshot) : await bookmarksGetTree();
         const localRoots = extractBookmarkRootFolders(localTree);
         if (!localRoots.length) {
-            throw new Error(textByLang('本地书签根目录不可用，无法覆盖', 'Local bookmark root is unavailable; cannot overwrite'));
+            throw new Error(textByLang('本地书签根目录不可用，无法增量同步', 'Local bookmark root is unavailable; cannot run incremental sync'));
         }
+
+        const plan = buildPermanentIncrementalSyncPlan(localTree, remoteTree);
+        const threshold = buildPermanentIncrementalThreshold(localTree, remoteTree);
+        const logicalChangeCount = Number(plan && plan.logicalChangeCount) || 0;
+        const respectThreshold = !(options && options.respectThreshold === false);
+
+        if (plan && plan.complexReason) {
+            return {
+                applied: false,
+                fallback: String(plan.complexReason || 'complex-change'),
+                threshold,
+                logicalChangeCount
+            };
+        }
+
+        if (!plan || !plan.hasChanges) {
+            return { applied: false, skipped: 'same', threshold, logicalChangeCount };
+        }
+
+        if (respectThreshold && logicalChangeCount > threshold) {
+            return {
+                applied: false,
+                fallback: 'threshold-exceeded',
+                threshold,
+                logicalChangeCount
+            };
+        }
+
+        const counters = { folders: 0, bookmarks: 0, removedFolders: 0, removedBookmarks: 0 };
+        await withPermanentTreeBulkMode(options && options.reason || 'sync-permanent-incremental', async () => {
+            const plans = Array.isArray(plan.plans) ? plan.plans : [];
+            for (let i = 0; i < plans.length; i++) {
+                await applyPermanentIncrementalPlan(plans[i], counters);
+            }
+        });
+
+        return {
+            applied: true,
+            counters,
+            threshold,
+            logicalChangeCount
+        };
+    }
+
+	    async function overwriteLocalPermanentTreeFromSnapshot(treeSnapshot, localTreeSnapshot = null, options = {}) {
+	        const remoteTree = normalizeBookmarkTreeSnapshot(treeSnapshot);
+	        if (!remoteTree) {
+	            throw new Error(textByLang('云端未提供永久栏目快照，无法覆盖', 'Remote permanent section snapshot is missing; cannot overwrite'));
+	        }
+
+	        const localTree = localTreeSnapshot ? normalizeBookmarkTreeSnapshot(localTreeSnapshot) : await bookmarksGetTree();
+	        const localRoots = extractBookmarkRootFolders(localTree);
+	        if (!localRoots.length) {
+	            throw new Error(textByLang('本地书签根目录不可用，无法覆盖', 'Local bookmark root is unavailable; cannot overwrite'));
+	        }
 
         const remoteRoots = extractBookmarkRootFolders(remoteTree);
         const remoteByTitle = new Map();
@@ -1286,22 +1801,23 @@
             remoteByTitle.set(key, node);
         });
 
-        const counters = { folders: 0, bookmarks: 0 };
-        for (let i = 0; i < localRoots.length; i++) {
-            const localRoot = localRoots[i];
-            if (!localRoot || !localRoot.id) continue;
+        return await withPermanentTreeBulkMode(options && options.reason || 'sync-permanent-overwrite', async () => {
+            const counters = { folders: 0, bookmarks: 0 };
+            for (let i = 0; i < localRoots.length; i++) {
+                const localRoot = localRoots[i];
+                if (!localRoot || !localRoot.id) continue;
 
-            const key = normalizeBookmarkRootTitle(localRoot.title);
-            const remoteRoot = (key && remoteByTitle.get(key)) || remoteRoots[i] || null;
-            const remoteChildren = remoteRoot && Array.isArray(remoteRoot.children) ? remoteRoot.children : [];
+                const key = normalizeBookmarkRootTitle(localRoot.title);
+                const remoteRoot = (key && remoteByTitle.get(key)) || remoteRoots[i] || null;
+                const remoteChildren = remoteRoot && Array.isArray(remoteRoot.children) ? remoteRoot.children : [];
 
-            await clearBookmarkChildren(localRoot.id);
-            for (let j = 0; j < remoteChildren.length; j++) {
-                await createBookmarkSubtree(localRoot.id, remoteChildren[j], j, counters);
+                await clearBookmarkChildren(localRoot.id);
+                for (let j = 0; j < remoteChildren.length; j++) {
+                    await createBookmarkSubtree(localRoot.id, remoteChildren[j], j, counters);
+                }
             }
-        }
-
-        return counters;
+            return counters;
+        });
     }
 
     function normalizeRepoBranch(branch) {
@@ -1420,10 +1936,41 @@
 
         const repoName = response.repo && response.repo.fullName ? response.repo.fullName : `${payload.owner}/${payload.repo}`;
         const branch = response.resolvedBranch || payload.branch || 'default';
-        const pathText = response.basePathExists === false ? textByLang('（Base Path 不存在，将在首次写入时创建）', '(Base Path does not exist; it will be created on first write)') : '';
-        setRepoStatus(textByLang(`连接成功：${repoName} @ ${branch} ${pathText}`, `Connected: ${repoName} @ ${branch} ${pathText}`).trim(), 'ok');
+        const extras = [];
+        if (response.basePathExists === false) {
+            extras.push(textByLang('Base Path 不存在，将在首次写入时创建', 'Base Path does not exist; it will be created on first write'));
+        }
+        if (response.branchWillBeCreated) {
+            extras.push(textByLang('分支不存在，将在首次同步写入时自动创建', 'Branch does not exist; it will be created automatically on first sync write'));
+        }
+        const extraText = extras.length ? `（${extras.join('；')}）` : '';
+        setRepoStatus(textByLang(`连接成功：${repoName} @ ${branch} ${extraText}`, `Connected: ${repoName} @ ${branch} ${extraText}`).trim(), 'ok');
+        return response;
     }
 
+    function confirmMissingBranchAutoCreate(response, config) {
+        if (!response || response.branchWillBeCreated !== true) return true;
+        const normalizedConfig = config && typeof config === 'object' ? config : collectRepoConfigFromForm();
+        const repoName = response.repo && response.repo.fullName
+            ? response.repo.fullName
+            : `${normalizedConfig.owner || ''}/${normalizedConfig.repo || ''}`.replace(/^\/+/, '');
+        const branch = response.resolvedBranch || normalizeRepoBranch(normalizedConfig.branch);
+        const message = textByLang(
+            `检测到分支「${branch}」当前不存在。
+
+确定：继续保存配置；首次同步写入时自动创建该分支。
+取消：先返回修改分支名。`,
+            `The branch "${branch}" does not exist yet.
+
+OK: keep saving this config and create the branch automatically on the first sync write.
+Cancel: go back and change the branch name first.`
+        );
+        try {
+            return global.confirm(message);
+        } catch (_) {
+            return true;
+        }
+    }
 
     async function persistVerifiedRepoConfigAndEnableSync(config) {
         const normalizedConfig = normalizeRepoConfig(config && typeof config === 'object' ? config : collectRepoConfigFromForm());
@@ -1693,7 +2240,12 @@
 
     function isManualSyncTrigger(_mode, trigger) {
         const triggerText = String(trigger || '').toLowerCase();
-        return triggerText.startsWith('manual') || triggerText === 'user';
+        if (!triggerText) return false;
+        // Explicit user-initiated actions should show determinate progress on the button,
+        // and should not be silently ignored.
+        if (triggerText.startsWith('manual') || triggerText === 'user') return true;
+        if (triggerText.startsWith('mismatch-panel-')) return true;
+        return false;
     }
 
     function getSyncLang() {
@@ -1788,6 +2340,24 @@
         return 'noop';
     }
 
+    // Triggers that should be treated as "user explicitly chose cloud -> local"
+    // for permanent-section overwrite semantics.
+    function isExplicitRemoteOverwriteTrigger(trigger) {
+        const text = String(trigger || '').trim().toLowerCase();
+        if (!text) return false;
+        return text === 'manual-pull' || text === 'mismatch-panel-pull';
+    }
+
+    function shouldBypassPullPlanConflictCheck(trigger) {
+        const text = String(trigger || '').trim().toLowerCase();
+        if (!text) return false;
+        return text === 'mismatch-panel-pull';
+    }
+
+    function isManualPushOnlyTrigger(trigger) {
+        return String(trigger || '').trim().toLowerCase() === 'manual-push';
+    }
+
     function getClientId() {
         let id = String(getSyncMetaRaw(CLIENT_ID_KEY) || '').trim();
         if (id) return id;
@@ -1808,6 +2378,171 @@
 
     function getElement(id) {
         return document.getElementById(id);
+    }
+
+    function normalizeProgressPercent(value) {
+        if (value == null) return null;
+        const n = Number(value);
+        if (!Number.isFinite(n)) return null;
+        return Math.max(0, Math.min(100, n));
+    }
+
+    function ensureButtonProgressLabel(buttonEl) {
+        if (!buttonEl) return null;
+        const existing = buttonEl.querySelector('.canvas-sync-progress-label');
+        if (existing) return existing;
+        const label = document.createElement('span');
+        label.className = 'canvas-sync-progress-label';
+        label.textContent = '';
+        buttonEl.appendChild(label);
+        return label;
+    }
+
+    function setButtonProgress(buttonEl, message, percent) {
+        if (!buttonEl) return;
+        const label = ensureButtonProgressLabel(buttonEl);
+        const normalized = normalizeProgressPercent(percent);
+        if (normalized == null) {
+            buttonEl.classList.remove('is-determinate');
+            buttonEl.style.removeProperty('--canvas-sync-btn-progress');
+            if (label) {
+                label.textContent = String(message || textByLang('同步中...', 'Syncing...'));
+            }
+            return;
+        }
+
+        buttonEl.classList.add('is-determinate');
+        buttonEl.style.setProperty('--canvas-sync-btn-progress', String(Math.max(0, Math.min(1, normalized / 100))));
+        if (label) {
+            label.textContent = `${Math.round(normalized)}%`;
+        }
+    }
+
+    function setButtonBusy(buttonEl, busy) {
+        if (!buttonEl) return;
+        buttonEl.classList.toggle('is-busy', !!busy);
+        if (busy) {
+            buttonEl.setAttribute('aria-busy', 'true');
+            setButtonProgress(buttonEl, textByLang('同步中...', 'Syncing...'), 0);
+            return;
+        }
+        setButtonProgress(buttonEl, '', null);
+        buttonEl.removeAttribute('aria-busy');
+        try {
+            const label = buttonEl.querySelector('.canvas-sync-progress-label');
+            if (label) label.remove();
+        } catch (_) { }
+    }
+
+    async function runWithButtonBusy(buttonEl, action) {
+        if (!buttonEl || typeof action !== 'function') return null;
+        const wasDisabled = !!buttonEl.disabled;
+        syncUiProgressButtonEl = buttonEl;
+        setButtonBusy(buttonEl, true);
+        buttonEl.disabled = true;
+        try {
+            return await action();
+        } finally {
+            setButtonBusy(buttonEl, false);
+            buttonEl.style.removeProperty('--canvas-sync-btn-progress');
+            try { buttonEl.blur(); } catch (_) { }
+            syncUiProgressButtonEl = null;
+            if (!wasDisabled) buttonEl.disabled = false;
+            updateSyncEnabledDependentFieldState();
+        }
+    }
+
+    function isSyncPanelOpen() {
+        const modal = getElement('canvasSyncModal');
+        return !!(modal && modal.style.display === 'block');
+    }
+
+    function ensureFloatingProgressElements() {
+        if (floatingProgressEl) return;
+        if (!document.body) return;
+        floatingProgressEl = document.createElement('div');
+        floatingProgressEl.id = 'canvasSyncFloatingProgress';
+        floatingProgressEl.className = 'canvas-sync-floating-progress';
+        floatingProgressEl.hidden = true;
+
+        const meta = document.createElement('div');
+        meta.className = 'canvas-sync-floating-progress-meta';
+
+        floatingProgressLabelEl = document.createElement('div');
+        floatingProgressLabelEl.className = 'canvas-sync-floating-progress-label';
+        floatingProgressLabelEl.textContent = textByLang('同步中...', 'Syncing...');
+
+        floatingProgressPercentEl = document.createElement('div');
+        floatingProgressPercentEl.className = 'canvas-sync-floating-progress-percent';
+        floatingProgressPercentEl.textContent = '';
+
+        meta.appendChild(floatingProgressLabelEl);
+        meta.appendChild(floatingProgressPercentEl);
+
+        const track = document.createElement('div');
+        track.className = 'canvas-sync-floating-progress-track';
+
+        const bar = document.createElement('div');
+        bar.className = 'canvas-sync-floating-progress-bar';
+
+        track.appendChild(bar);
+        floatingProgressEl.appendChild(meta);
+        floatingProgressEl.appendChild(track);
+        document.body.appendChild(floatingProgressEl);
+    }
+
+    function updateFloatingProgressVisibility() {
+        ensureFloatingProgressElements();
+        if (!floatingProgressEl) return;
+
+        const labelText = floatingProgressMessage || textByLang('同步中...', 'Syncing...');
+        if (floatingProgressLabelEl) floatingProgressLabelEl.textContent = labelText;
+
+        const normalized = normalizeProgressPercent(floatingProgressPercent);
+        const determinate = normalized != null;
+        floatingProgressEl.classList.toggle('is-determinate', determinate);
+        if (determinate) {
+            floatingProgressEl.style.setProperty('--canvas-sync-floating-progress', String(Math.max(0, Math.min(1, normalized / 100))));
+        } else {
+            floatingProgressEl.style.removeProperty('--canvas-sync-floating-progress');
+        }
+        if (floatingProgressPercentEl) {
+            floatingProgressPercentEl.textContent = determinate ? `${Math.round(normalized)}%` : '';
+        }
+
+        const shouldShow = floatingProgressActive && determinate && !isSyncPanelOpen();
+        floatingProgressEl.hidden = !shouldShow;
+    }
+
+    function setFloatingProgress(active, message = '', percent = null) {
+        floatingProgressActive = !!active;
+        floatingProgressMessage = String(message || '');
+        floatingProgressPercent = percent == null ? null : Number(percent);
+        updateFloatingProgressVisibility();
+    }
+
+    function updateSyncUiProgress(message, percent = null) {
+        if (!syncUiProgressEnabled) return;
+        const normalized = normalizeProgressPercent(percent);
+        setFloatingProgress(true, message, normalized);
+        setButtonProgress(syncUiProgressButtonEl, message, normalized);
+    }
+
+    function clearSyncUiProgress() {
+        setFloatingProgress(false, '', null);
+        setButtonProgress(syncUiProgressButtonEl, '', null);
+    }
+
+    function makeProgressRange(startPercent, endPercent) {
+        const start = normalizeProgressPercent(startPercent) ?? 0;
+        const end = normalizeProgressPercent(endPercent) ?? 100;
+        const span = end - start;
+        return (fraction, message) => {
+            if (!syncUiProgressEnabled) return;
+            const raw = Number(fraction);
+            const clamped = Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0;
+            updateSyncUiProgress(message, start + (span * clamped));
+        };
     }
 
     function formatTime(ts) {
@@ -2208,6 +2943,7 @@
 
         renderMismatchPanel();
         updateStatusPanelActionPlacement();
+        updateSyncEnabledDependentFieldState();
     }
 
     function secondsToMinutes(seconds) {
@@ -2226,33 +2962,63 @@
         return Math.max(60, Math.min(86400, Math.round(value * 60)));
     }
 
-    function setFirstSyncModeToForm(mode) {
-        const resolvedMode = ensureFirstSyncMode(mode);
-        const autoInput = getElement('canvasSyncFirstSyncModeAutoInput');
-        const cloudInput = getElement('canvasSyncFirstSyncModeCloudInput');
-        const localInput = getElement('canvasSyncFirstSyncModeLocalInput');
+	    function setFirstSyncModeToForm(mode) {
+	        const resolvedMode = ensureFirstSyncMode(mode);
+	        const autoInput = getElement('canvasSyncFirstSyncModeAutoInput');
+	        const cloudInput = getElement('canvasSyncFirstSyncModeCloudInput');
+	        const localInput = getElement('canvasSyncFirstSyncModeLocalInput');
+	        const autoInput2 = getElement('canvasSyncPermanentModeAutoInput');
+	        const cloudInput2 = getElement('canvasSyncPermanentModeCloudInput');
+	        const localInput2 = getElement('canvasSyncPermanentModeLocalInput');
 
-        if (autoInput) autoInput.checked = resolvedMode === 'auto';
-        if (cloudInput) cloudInput.checked = resolvedMode === 'cloud';
-        if (localInput) localInput.checked = resolvedMode === 'local';
+	        if (autoInput) autoInput.checked = resolvedMode === 'auto';
+	        if (cloudInput) cloudInput.checked = resolvedMode === 'cloud';
+	        if (localInput) localInput.checked = resolvedMode === 'local';
+	        if (autoInput2) autoInput2.checked = resolvedMode === 'auto';
+	        if (cloudInput2) cloudInput2.checked = resolvedMode === 'cloud';
+	        if (localInput2) localInput2.checked = resolvedMode === 'local';
 
-        const legacySelect = getElement('canvasSyncFirstSyncModeSelect');
-        if (legacySelect) legacySelect.value = resolvedMode;
-    }
+	        const legacySelect = getElement('canvasSyncFirstSyncModeSelect');
+	        if (legacySelect) legacySelect.value = resolvedMode;
+	    }
 
-    function getFirstSyncModeFromForm(fallbackMode) {
-        const autoInput = getElement('canvasSyncFirstSyncModeAutoInput');
-        const cloudInput = getElement('canvasSyncFirstSyncModeCloudInput');
-        const localInput = getElement('canvasSyncFirstSyncModeLocalInput');
-        const legacySelect = getElement('canvasSyncFirstSyncModeSelect');
+	    function getFirstSyncModeFromForm(fallbackMode) {
+	        const autoInput = getElement('canvasSyncFirstSyncModeAutoInput');
+	        const cloudInput = getElement('canvasSyncFirstSyncModeCloudInput');
+	        const localInput = getElement('canvasSyncFirstSyncModeLocalInput');
+	        const autoInput2 = getElement('canvasSyncPermanentModeAutoInput');
+	        const cloudInput2 = getElement('canvasSyncPermanentModeCloudInput');
+	        const localInput2 = getElement('canvasSyncPermanentModeLocalInput');
+	        const legacySelect = getElement('canvasSyncFirstSyncModeSelect');
 
-        if (autoInput && autoInput.checked) return 'auto';
-        if (cloudInput && cloudInput.checked) return 'cloud';
-        if (localInput && localInput.checked) return 'local';
-        if (legacySelect) return ensureFirstSyncMode(legacySelect.value);
+	        // Prefer the radio that just changed (avoids two groups being temporarily out of sync).
+	        try {
+	            const active = global.document && global.document.activeElement ? global.document.activeElement : null;
+	            const activeId = active && active.id ? String(active.id) : '';
+	            if (active && typeof active.value === 'string') {
+	                if (
+	                    activeId === 'canvasSyncFirstSyncModeAutoInput'
+	                    || activeId === 'canvasSyncFirstSyncModeCloudInput'
+	                    || activeId === 'canvasSyncFirstSyncModeLocalInput'
+	                    || activeId === 'canvasSyncPermanentModeAutoInput'
+	                    || activeId === 'canvasSyncPermanentModeCloudInput'
+	                    || activeId === 'canvasSyncPermanentModeLocalInput'
+	                ) {
+	                    return ensureFirstSyncMode(active.value);
+	                }
+	            }
+	        } catch (_) { }
 
-        return ensureFirstSyncMode(fallbackMode);
-    }
+	        if (autoInput && autoInput.checked) return 'auto';
+	        if (cloudInput && cloudInput.checked) return 'cloud';
+	        if (localInput && localInput.checked) return 'local';
+	        if (autoInput2 && autoInput2.checked) return 'auto';
+	        if (cloudInput2 && cloudInput2.checked) return 'cloud';
+	        if (localInput2 && localInput2.checked) return 'local';
+	        if (legacySelect) return ensureFirstSyncMode(legacySelect.value);
+
+	        return ensureFirstSyncMode(fallbackMode);
+	    }
 
     function isSyncEnabledToggleChecked() {
         const enabledToggle = getElement('canvasSyncEnabledToggle');
@@ -2324,6 +3090,7 @@
     function updatePreviewActionButtonState() {
         const enabledOn = isSyncEnabledToggleChecked();
         const disabledByMaster = !enabledOn;
+        const disabledByRunning = !!(runtime && runtime.isRunning);
         const disabledHint = textByLang(
             '启用同步已关闭：此项不可用',
             'Sync is disabled: this button is unavailable'
@@ -2332,6 +3099,10 @@
             '预览模式：此按钮仅用于查看样式，不执行同步操作',
             'Preview mode: this button is display-only and will not run sync actions'
         );
+        const runningHint = textByLang(
+            '正在同步：请等待当前同步完成',
+            'Sync is running: please wait for completion'
+        );
 
         const mismatchPreview = isMismatchPreviewActive();
         const conflictPreview = isConflictPreviewActive();
@@ -2339,29 +3110,29 @@
         const mismatchRemoteBtn = getElement('canvasSyncMismatchUseRemoteBtn');
         setActionDisabledState(
             mismatchRemoteBtn,
-            disabledByMaster || mismatchPreview,
-            disabledByMaster ? disabledHint : (mismatchPreview ? previewHint : '')
+            disabledByMaster || mismatchPreview || disabledByRunning,
+            disabledByMaster ? disabledHint : (mismatchPreview ? previewHint : (disabledByRunning ? runningHint : ''))
         );
 
         const mismatchLocalBtn = getElement('canvasSyncMismatchUseLocalBtn');
         setActionDisabledState(
             mismatchLocalBtn,
-            disabledByMaster || mismatchPreview,
-            disabledByMaster ? disabledHint : (mismatchPreview ? previewHint : '')
+            disabledByMaster || mismatchPreview || disabledByRunning,
+            disabledByMaster ? disabledHint : (mismatchPreview ? previewHint : (disabledByRunning ? runningHint : ''))
         );
 
         const conflictLocalBtn = getElement('canvasSyncConflictUseLocalBtn');
         setActionDisabledState(
             conflictLocalBtn,
-            disabledByMaster || conflictPreview,
-            disabledByMaster ? disabledHint : (conflictPreview ? previewHint : '')
+            disabledByMaster || conflictPreview || disabledByRunning,
+            disabledByMaster ? disabledHint : (conflictPreview ? previewHint : (disabledByRunning ? runningHint : ''))
         );
 
         const conflictRemoteBtn = getElement('canvasSyncConflictUseRemoteBtn');
         setActionDisabledState(
             conflictRemoteBtn,
-            disabledByMaster || conflictPreview,
-            disabledByMaster ? disabledHint : (conflictPreview ? previewHint : '')
+            disabledByMaster || conflictPreview || disabledByRunning,
+            disabledByMaster ? disabledHint : (conflictPreview ? previewHint : (disabledByRunning ? runningHint : ''))
         );
     }
 
@@ -2447,16 +3218,19 @@
         );
         const shouldDisable = !enabledOn;
 
-        [
-            'canvasSyncAutoToggle',
-            'canvasSyncAutoAfterEditStopToggle',
-            'canvasSyncFirstSyncModeAutoInput',
-            'canvasSyncFirstSyncModeCloudInput',
-            'canvasSyncFirstSyncModeLocalInput',
-            'canvasSyncPermanentTreeIntervalSelect',
-            'canvasSyncTempSectionIntervalInput',
-            'canvasSyncMdNodeIntervalInput',
-            'canvasSyncSplitIntervalsToggle',
+	        [
+	            'canvasSyncAutoToggle',
+	            'canvasSyncAutoAfterEditStopToggle',
+	            'canvasSyncFirstSyncModeAutoInput',
+	            'canvasSyncFirstSyncModeCloudInput',
+	            'canvasSyncFirstSyncModeLocalInput',
+	            'canvasSyncPermanentModeAutoInput',
+	            'canvasSyncPermanentModeCloudInput',
+	            'canvasSyncPermanentModeLocalInput',
+	            'canvasSyncPermanentTreeIntervalSelect',
+	            'canvasSyncTempSectionIntervalInput',
+	            'canvasSyncMdNodeIntervalInput',
+	            'canvasSyncSplitIntervalsToggle',
             'canvasSyncMismatchPolicySelect',
             'canvasSyncPullOnStartupToggle',
             'canvasSyncPushOnSyncToggle',
@@ -2465,12 +3239,20 @@
             'canvasSyncMethodSelect',
             'canvasSyncConflictSelect',
             'canvasSyncDeleteThresholdInput',
+            'canvasSyncPermanentPullModeSelect',
+            'canvasSyncPermanentIncrementalThresholdInput',
             'canvasSyncObsidianFilePushToggle',
             'canvasSyncObsidianExportFormatSelect',
             'canvasSyncObsidianExportRootInput'
         ].forEach((id) => {
             setControlDisabledState(getElement(id), shouldDisable, disabledHint);
         });
+
+        const disabledByRunning = !!(runtime && runtime.isRunning);
+        const runningHint = textByLang(
+            '正在同步：请等待当前同步完成',
+            'Sync is running: please wait for completion'
+        );
 
         [
             'canvasSyncNowBtn',
@@ -2489,15 +3271,47 @@
             'canvasSyncConflictUseRemoteBtn',
             'canvasSyncConflictDismissBtn'
         ].forEach((id) => {
-            setActionDisabledState(getElement(id), shouldDisable, disabledHint);
+            setActionDisabledState(
+                getElement(id),
+                shouldDisable || disabledByRunning,
+                shouldDisable ? disabledHint : (disabledByRunning ? runningHint : '')
+            );
         });
 
         updateBackgroundCheckFieldState();
+        updatePermanentPullModeFieldState();
         updatePreviewActionButtonState();
+    }
+
+
+    function updatePermanentPullModeFieldState() {
+        const enabledOn = isSyncEnabledToggleChecked();
+        const permanentPullMode = getElement('canvasSyncPermanentPullModeSelect');
+        const thresholdInput = getElement('canvasSyncPermanentIncrementalThresholdInput');
+
+        const disabledByMasterHint = textByLang(
+            '启用同步已关闭：此项不可用',
+            'Sync is disabled: this field is unavailable'
+        );
+        const disabledByModeHint = textByLang(
+            '当前非“自动”：此项仅在“自动”下可用',
+            'Current mode is not auto: this field is available only in auto mode'
+        );
+
+        const autoMode = !!(enabledOn && permanentPullMode && ensurePermanentPullMode(permanentPullMode.value) === 'auto');
+        const fieldHint = !enabledOn ? disabledByMasterHint : disabledByModeHint;
+
+        setControlDisabledState(
+            thresholdInput,
+            !autoMode,
+            fieldHint
+        );
     }
 
     function updateBackgroundCheckFieldState() {
         const enabledOn = isSyncEnabledToggleChecked();
+        const foregroundCheckToggle = getElement('canvasSyncForegroundCheckToggle');
+        const foregroundCheckIntervalInput = getElement('canvasSyncForegroundCheckIntervalInput');
         const backgroundCheckToggle = getElement('canvasSyncBackgroundCheckToggle');
         const backgroundCheckIntervalInput = getElement('canvasSyncBackgroundCheckIntervalInput');
         const backgroundCooldownInput = getElement('canvasSyncBackgroundCooldownInput');
@@ -2507,14 +3321,32 @@
             '启用同步已关闭：此项不可用',
             'Sync is disabled: this field is unavailable'
         );
+        const disabledByForegroundCheckHint = textByLang(
+            '前台检测已关闭：此项不生效',
+            'Foreground check disabled: this field is inactive'
+        );
         const disabledByBackgroundCheckHint = textByLang(
             '后台检测已关闭：此项不生效',
             'Background check disabled: this field is inactive'
         );
 
+        const foregroundCheckOn = !!(enabledOn && foregroundCheckToggle && foregroundCheckToggle.checked);
         const backgroundCheckOn = !!(enabledOn && backgroundCheckToggle && backgroundCheckToggle.checked);
-        const fieldHint = !enabledOn ? disabledByMasterHint : disabledByBackgroundCheckHint;
+        const mismatchFieldHint = !enabledOn ? disabledByMasterHint : textByLang(
+            '前台和后台检测都已关闭：此项不生效',
+            'Both foreground and background checks are disabled: this field is inactive'
+        );
 
+        setControlDisabledState(
+            foregroundCheckToggle,
+            !enabledOn,
+            disabledByMasterHint
+        );
+        setControlDisabledState(
+            foregroundCheckIntervalInput,
+            !foregroundCheckOn,
+            !enabledOn ? disabledByMasterHint : disabledByForegroundCheckHint
+        );
         setControlDisabledState(
             backgroundCheckToggle,
             !enabledOn,
@@ -2523,17 +3355,17 @@
         setControlDisabledState(
             backgroundCheckIntervalInput,
             !backgroundCheckOn,
-            fieldHint
+            !enabledOn ? disabledByMasterHint : disabledByBackgroundCheckHint
         );
         setControlDisabledState(
             backgroundCooldownInput,
             !backgroundCheckOn,
-            fieldHint
+            !enabledOn ? disabledByMasterHint : disabledByBackgroundCheckHint
         );
         setControlDisabledState(
             mismatchPolicySelect,
-            !backgroundCheckOn,
-            fieldHint
+            !(foregroundCheckOn || backgroundCheckOn),
+            mismatchFieldHint
         );
     }
 
@@ -2578,6 +3410,7 @@
         );
 
         updateBackgroundCheckFieldState();
+        updatePermanentPullModeFieldState();
     }
 
     function applySettingsToForm() {
@@ -2591,6 +3424,8 @@
         const interval = getElement('canvasSyncIntervalInput');
         const pushInterval = getElement('canvasSyncAutoPushIntervalInput');
         const pullInterval = getElement('canvasSyncAutoPullIntervalInput');
+        const foregroundCheckEnabled = getElement('canvasSyncForegroundCheckToggle');
+        const foregroundCheckInterval = getElement('canvasSyncForegroundCheckIntervalInput');
         const backgroundCheckEnabled = getElement('canvasSyncBackgroundCheckToggle');
         const backgroundCheckInterval = getElement('canvasSyncBackgroundCheckIntervalInput');
         const backgroundCooldown = getElement('canvasSyncBackgroundCooldownInput');
@@ -2602,6 +3437,8 @@
         const syncMethod = getElement('canvasSyncMethodSelect');
         const conflict = getElement('canvasSyncConflictSelect');
         const threshold = getElement('canvasSyncDeleteThresholdInput');
+        const permanentPullMode = getElement('canvasSyncPermanentPullModeSelect');
+        const permanentIncrementalThreshold = getElement('canvasSyncPermanentIncrementalThresholdInput');
         const obsidianFilePushEnabled = getElement('canvasSyncObsidianFilePushToggle');
         const obsidianExportFormat = getElement('canvasSyncObsidianExportFormatSelect');
         const obsidianExportRoot = getElement('canvasSyncObsidianExportRootInput');
@@ -2652,6 +3489,8 @@
                 )
             );
         }
+        if (foregroundCheckEnabled) foregroundCheckEnabled.checked = settings.foregroundCheckEnabled !== false;
+        if (foregroundCheckInterval) foregroundCheckInterval.value = String(normalizeForegroundCheckSeconds(settings.foregroundCheckIntervalSeconds, DEFAULT_SETTINGS.foregroundCheckIntervalSeconds));
         if (backgroundCheckEnabled) backgroundCheckEnabled.checked = settings.backgroundCheckEnabled !== false;
         if (backgroundCheckInterval) {
             backgroundCheckInterval.value = String(
@@ -2679,6 +3518,8 @@
         if (syncMethod) syncMethod.value = ensureSyncMethod(settings.syncMethod);
         if (conflict) conflict.value = settings.conflictPolicy || DEFAULT_SETTINGS.conflictPolicy;
         if (threshold) threshold.value = String(settings.deleteThresholdPercent || DEFAULT_SETTINGS.deleteThresholdPercent);
+        if (permanentPullMode) permanentPullMode.value = ensurePermanentPullMode(settings.permanentPullMode);
+        if (permanentIncrementalThreshold) permanentIncrementalThreshold.value = String(normalizePermanentIncrementalMaxChanges(settings.permanentIncrementalMaxChanges, DEFAULT_SETTINGS.permanentIncrementalMaxChanges));
         if (obsidianFilePushEnabled) obsidianFilePushEnabled.checked = settings.obsidianFilePushEnabled !== false;
         if (obsidianExportFormat) obsidianExportFormat.value = normalizeObsidianExportFormat(settings.obsidianExportFormat, DEFAULT_SETTINGS.obsidianExportFormat);
         if (obsidianExportRoot) {
@@ -2701,6 +3542,8 @@
         const interval = getElement('canvasSyncIntervalInput');
         const pushInterval = getElement('canvasSyncAutoPushIntervalInput');
         const pullInterval = getElement('canvasSyncAutoPullIntervalInput');
+        const foregroundCheckEnabled = getElement('canvasSyncForegroundCheckToggle');
+        const foregroundCheckInterval = getElement('canvasSyncForegroundCheckIntervalInput');
         const backgroundCheckEnabled = getElement('canvasSyncBackgroundCheckToggle');
         const backgroundCheckInterval = getElement('canvasSyncBackgroundCheckIntervalInput');
         const backgroundCooldown = getElement('canvasSyncBackgroundCooldownInput');
@@ -2712,19 +3555,22 @@
         const syncMethod = getElement('canvasSyncMethodSelect');
         const conflict = getElement('canvasSyncConflictSelect');
         const threshold = getElement('canvasSyncDeleteThresholdInput');
+        const permanentPullMode = getElement('canvasSyncPermanentPullModeSelect');
+        const permanentIncrementalThreshold = getElement('canvasSyncPermanentIncrementalThresholdInput');
         const obsidianFilePushEnabled = getElement('canvasSyncObsidianFilePushToggle');
         const obsidianExportFormat = getElement('canvasSyncObsidianExportFormatSelect');
         const obsidianExportRoot = getElement('canvasSyncObsidianExportRootInput');
 
-        settings.enabled = enabled ? !!enabled.checked : settings.enabled;
-        settings.autoSync = auto ? !!auto.checked : settings.autoSync;
-        settings.syncAfterEditStop = syncAfterEditStop ? !!syncAfterEditStop.checked : settings.syncAfterEditStop;
-        settings.splitIntervalCommitAndSync = splitInterval ? !!splitInterval.checked : settings.splitIntervalCommitAndSync;
-        settings.firstSyncMode = getFirstSyncModeFromForm(settings.firstSyncMode);
-        settings.permanentTreeUploadIntervalSeconds = normalizePermanentTreeUploadIntervalSeconds(
-            permanentTreeUploadInterval ? permanentTreeUploadInterval.value : settings.permanentTreeUploadIntervalSeconds,
-            DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds
-        );
+	        settings.enabled = enabled ? !!enabled.checked : settings.enabled;
+	        settings.autoSync = auto ? !!auto.checked : settings.autoSync;
+	        settings.syncAfterEditStop = syncAfterEditStop ? !!syncAfterEditStop.checked : settings.syncAfterEditStop;
+	        settings.splitIntervalCommitAndSync = splitInterval ? !!splitInterval.checked : settings.splitIntervalCommitAndSync;
+	        settings.firstSyncMode = getFirstSyncModeFromForm(settings.firstSyncMode);
+	        setFirstSyncModeToForm(settings.firstSyncMode);
+	        settings.permanentTreeUploadIntervalSeconds = normalizePermanentTreeUploadIntervalSeconds(
+	            permanentTreeUploadInterval ? permanentTreeUploadInterval.value : settings.permanentTreeUploadIntervalSeconds,
+	            DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds
+	        );
         settings.tempSectionUploadIntervalSeconds = normalizeCustomUploadIntervalSeconds(
             tempSectionUploadInterval ? tempSectionUploadInterval.value : settings.tempSectionUploadIntervalSeconds,
             DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
@@ -2747,6 +3593,12 @@
         );
         if (pushInterval) pushInterval.value = String(settings.autoPushIntervalMinutes);
         if (pullInterval) pullInterval.value = String(settings.autoPullIntervalMinutes);
+        settings.foregroundCheckEnabled = foregroundCheckEnabled ? !!foregroundCheckEnabled.checked : settings.foregroundCheckEnabled;
+        settings.foregroundCheckIntervalSeconds = normalizeForegroundCheckSeconds(
+            foregroundCheckInterval ? foregroundCheckInterval.value : settings.foregroundCheckIntervalSeconds,
+            DEFAULT_SETTINGS.foregroundCheckIntervalSeconds
+        );
+        if (foregroundCheckInterval) foregroundCheckInterval.value = String(settings.foregroundCheckIntervalSeconds);
         settings.backgroundCheckEnabled = backgroundCheckEnabled ? !!backgroundCheckEnabled.checked : settings.backgroundCheckEnabled;
         settings.backgroundCheckIntervalMinutes = normalizeBackgroundMinutes(
             backgroundCheckInterval ? backgroundCheckInterval.value : settings.backgroundCheckIntervalMinutes,
@@ -2769,6 +3621,11 @@
         settings.syncMethod = ensureSyncMethod(syncMethod ? syncMethod.value : settings.syncMethod);
         settings.conflictPolicy = ensureConflictPolicy(conflict ? conflict.value : settings.conflictPolicy);
         settings.deleteThresholdPercent = Math.max(1, Math.min(100, Number.parseInt(threshold ? threshold.value : `${settings.deleteThresholdPercent}`, 10) || DEFAULT_SETTINGS.deleteThresholdPercent));
+        settings.permanentPullMode = ensurePermanentPullMode(permanentPullMode ? permanentPullMode.value : settings.permanentPullMode);
+        settings.permanentIncrementalMaxChanges = normalizePermanentIncrementalMaxChanges(
+            permanentIncrementalThreshold ? permanentIncrementalThreshold.value : settings.permanentIncrementalMaxChanges,
+            DEFAULT_SETTINGS.permanentIncrementalMaxChanges
+        );
         settings.obsidianFilePushEnabled = obsidianFilePushEnabled ? !!obsidianFilePushEnabled.checked : settings.obsidianFilePushEnabled;
         settings.obsidianExportFormat = normalizeObsidianExportFormat(
             obsidianExportFormat ? obsidianExportFormat.value : settings.obsidianExportFormat,
@@ -2841,6 +3698,15 @@
         const subNavEl = getElement('canvasSyncBehaviorSubNav');
         if (!subNavEl) return;
         subNavEl.hidden = !visible;
+        if (!visible) {
+            setBehaviorCompatSubNavVisible(false);
+        }
+    }
+
+    function setBehaviorCompatSubNavVisible(visible) {
+        const subNavEl = getElement('canvasSyncBehaviorSubCompatNav');
+        if (!subNavEl) return;
+        subNavEl.hidden = !visible;
     }
 
     function getCurrentActiveBehaviorSubButtonId() {
@@ -2859,6 +3725,37 @@
             buttonEl.classList.toggle('is-active', isActive);
             buttonEl.setAttribute('aria-current', isActive ? 'true' : 'false');
         });
+        const compatActive = buttonId === 'canvasSyncBehaviorSubCompatBtn';
+        setBehaviorCompatSubNavVisible(compatActive);
+        if (!compatActive) {
+            setBehaviorCompatSubNavActive('');
+        } else {
+            const currentNested = getCurrentActiveBehaviorCompatSubButtonId();
+            if (currentNested) {
+                setBehaviorCompatSubNavActive(currentNested);
+            } else if (BEHAVIOR_SUBNAV_COMPAT_CONFIG.length > 0) {
+                setBehaviorCompatSubNavActive(BEHAVIOR_SUBNAV_COMPAT_CONFIG[0].buttonId);
+            }
+        }
+    }
+
+
+    function getCurrentActiveBehaviorCompatSubButtonId() {
+        const subNavEl = getElement('canvasSyncBehaviorSubCompatNav');
+        if (!subNavEl) return '';
+        const activeButton = subNavEl.querySelector('.canvas-sync-tab-subnav-btn.is-active, .canvas-sync-tab-subnav-btn[aria-current="true"]');
+        if (!activeButton || !activeButton.id) return '';
+        return activeButton.id;
+    }
+
+    function setBehaviorCompatSubNavActive(buttonId) {
+        BEHAVIOR_SUBNAV_COMPAT_CONFIG.forEach((item) => {
+            const buttonEl = getElement(item.buttonId);
+            if (!buttonEl) return;
+            const isActive = !!buttonId && item.buttonId === buttonId;
+            buttonEl.classList.toggle('is-active', isActive);
+            buttonEl.setAttribute('aria-current', isActive ? 'true' : 'false');
+        });
     }
 
     function scrollBehaviorSectionIntoView(targetId) {
@@ -2866,19 +3763,21 @@
         const targetEl = getElement(targetId);
         if (!panelEl || !targetEl) return;
 
-        if (typeof targetEl.scrollIntoView === 'function') {
-            targetEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
-            setTimeout(() => {
+        const panelRect = panelEl.getBoundingClientRect();
+        const targetRect = targetEl.getBoundingClientRect();
+        const currentTop = Number(panelEl.scrollTop) || 0;
+        const nextTop = Math.max(0, currentTop + (targetRect.top - panelRect.top) - 6);
+
+        if (typeof panelEl.scrollTo === 'function') {
+            try {
+                panelEl.scrollTo({ top: nextTop, behavior: 'auto' });
                 scheduleBehaviorSubNavSyncFromScroll();
-            }, 220);
-            return;
+                return;
+            } catch (_) { }
         }
 
-        const top = targetEl.offsetTop;
-        if (Number.isFinite(top)) {
-            panelEl.scrollTop = Math.max(0, top - 8);
-            scheduleBehaviorSubNavSyncFromScroll();
-        }
+        panelEl.scrollTop = nextTop;
+        scheduleBehaviorSubNavSyncFromScroll();
     }
 
     function bindBehaviorSubNavButtons() {
@@ -2891,12 +3790,36 @@
             buttonEl.addEventListener('click', () => {
                 setActiveTab('behavior');
                 setBehaviorSubNavActive(item.buttonId);
+                if (item.buttonId === 'canvasSyncBehaviorSubCompatBtn' && BEHAVIOR_SUBNAV_COMPAT_CONFIG.length > 0) {
+                    setBehaviorCompatSubNavVisible(true);
+                    setBehaviorCompatSubNavActive(BEHAVIOR_SUBNAV_COMPAT_CONFIG[0].buttonId);
+                }
                 scrollBehaviorSectionIntoView(item.targetId);
             });
 
             if (index === 0) {
                 buttonEl.classList.add('is-active');
                 buttonEl.setAttribute('aria-current', 'true');
+            } else {
+                buttonEl.setAttribute('aria-current', 'false');
+            }
+        });
+
+        BEHAVIOR_SUBNAV_COMPAT_CONFIG.forEach((item, index) => {
+            const buttonEl = getElement(item.buttonId);
+            if (!buttonEl) return;
+            if (buttonEl.dataset.bound === 'true') return;
+
+            buttonEl.dataset.bound = 'true';
+            buttonEl.addEventListener('click', () => {
+                setActiveTab('behavior');
+                setBehaviorSubNavActive('canvasSyncBehaviorSubCompatBtn');
+                setBehaviorCompatSubNavActive(item.buttonId);
+                scrollBehaviorSectionIntoView(item.targetId);
+            });
+
+            if (index === 0) {
+                buttonEl.setAttribute('aria-current', 'false');
             } else {
                 buttonEl.setAttribute('aria-current', 'false');
             }
@@ -2943,8 +3866,28 @@
         if (!nextButtonId) return;
 
         const currentButtonId = getCurrentActiveBehaviorSubButtonId();
-        if (currentButtonId === nextButtonId) return;
-        setBehaviorSubNavActive(nextButtonId);
+        if (currentButtonId !== nextButtonId) {
+            setBehaviorSubNavActive(nextButtonId);
+        }
+
+        if (nextButtonId === 'canvasSyncBehaviorSubCompatBtn') {
+            const panelEl = getElement('canvasSyncTabBehaviorPanel');
+            const anchorTop = panelEl ? panelEl.getBoundingClientRect().top + 44 : 0;
+            let matchedNested = '';
+            for (let i = 0; i < BEHAVIOR_SUBNAV_COMPAT_CONFIG.length; i++) {
+                const item = BEHAVIOR_SUBNAV_COMPAT_CONFIG[i];
+                const targetEl = getElement(item.targetId);
+                if (!targetEl) continue;
+                const rect = targetEl.getBoundingClientRect();
+                if (rect.top <= anchorTop) {
+                    matchedNested = item.buttonId;
+                }
+            }
+            if (!matchedNested && BEHAVIOR_SUBNAV_COMPAT_CONFIG.length > 0) {
+                matchedNested = BEHAVIOR_SUBNAV_COMPAT_CONFIG[0].buttonId;
+            }
+            setBehaviorCompatSubNavActive(matchedNested);
+        }
     }
 
     function scheduleBehaviorSubNavSyncFromScroll() {
@@ -3291,6 +4234,8 @@
                 { allowEmpty: true }
             ),
             mismatchPolicy: ensureMismatchPolicy(current.mismatchPolicy),
+            foregroundCheckEnabled: current.foregroundCheckEnabled !== false,
+            foregroundCheckIntervalSeconds: normalizeForegroundCheckSeconds(current.foregroundCheckIntervalSeconds, DEFAULT_SETTINGS.foregroundCheckIntervalSeconds),
             backgroundCheckEnabled: current.backgroundCheckEnabled !== false
         };
     }
@@ -3367,6 +4312,9 @@
             || 0;
         const nextMismatchRemoteSha = String(backgroundRuntime.pendingMismatchRemoteSha || '');
         const nextLastCheckRemoteSha = String(backgroundRuntime.lastCheckRemoteSha || '');
+        const nextIsRunning = backgroundRuntime.isRunning === true;
+        const nextQueueLength = Math.max(0, Number(backgroundRuntime.queueLength) || 0);
+        const nextHasPendingWork = backgroundRuntime.hasPendingWork === true;
 
         let changed = false;
         if (!!runtime.pendingMismatch !== nextPendingMismatch) {
@@ -3394,6 +4342,21 @@
             changed = true;
         }
 
+        if (!!runtime.isRunning !== nextIsRunning) {
+            runtime.isRunning = nextIsRunning;
+            changed = true;
+        }
+
+        if (runtime.queueLength !== nextQueueLength) {
+            runtime.queueLength = nextQueueLength;
+            changed = true;
+        }
+
+        if (!!runtime.hasPendingWork !== nextHasPendingWork) {
+            runtime.hasPendingWork = nextHasPendingWork;
+            changed = true;
+        }
+
         if (options.updateRemoteSha && typeof backgroundRuntime.lastRemoteSha === 'string' && backgroundRuntime.lastRemoteSha) {
             if (runtime.lastRemoteSha !== backgroundRuntime.lastRemoteSha) {
                 runtime.lastRemoteSha = backgroundRuntime.lastRemoteSha;
@@ -3404,6 +4367,16 @@
         if (changed) {
             saveRuntime();
             renderStatus();
+            if (nextPendingMismatch
+                && settings
+                && ensureMismatchPolicy(settings.mismatchPolicy) === 'prompt'
+                && !hasPendingConflict()
+                && !runtime.isRunning) {
+                ensureStatusPanelVisible('mismatch', textByLang(
+                    '检测到云端不一致，请在“状态”面板选择处理方式',
+                    'Remote mismatch detected. Choose an action in the Status panel.'
+                ));
+            }
         }
 
         return changed;
@@ -3558,7 +4531,12 @@
         }
 
         const bridge = global.CanvasObsidianExportBridge;
-        if (!bridge || typeof bridge.parseSyncFolderFiles !== 'function') {
+        const parseSyncFolderFiles = bridge && typeof bridge.parseSyncFolderFilesForSync === 'function'
+            ? bridge.parseSyncFolderFilesForSync.bind(bridge)
+            : (bridge && typeof bridge.parseSyncFolderFiles === 'function'
+                ? bridge.parseSyncFolderFiles.bind(bridge)
+                : null);
+        if (!bridge || typeof parseSyncFolderFiles !== 'function') {
             throw new Error(textByLang('云端同步解析器不可用', 'Cloud sync parser is unavailable'));
         }
 
@@ -3576,7 +4554,7 @@
         const folderName = (rootPath ? rootPath.split('/').filter(Boolean).slice(-1)[0] : '') || DEFAULT_SETTINGS.obsidianExportRoot;
         let parsed = null;
         try {
-            parsed = await bridge.parseSyncFolderFiles(fetched.folderFiles, folderName);
+            parsed = await parseSyncFolderFiles(fetched.folderFiles, folderName);
         } catch (error) {
             if (isMissingCanvasOrBackupInRemoteParseError(error)) {
                 return {
@@ -3590,6 +4568,19 @@
             throw error;
         }
         const snapshot = buildSnapshotFromRemoteFolderParsed(parsed, remoteRevision);
+
+        if (!normalizeBookmarkTreeSnapshot(snapshot.permanentTreeSnapshot)
+            && typeof bridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles === 'function') {
+            try {
+                const rebuiltPermanentTree = bridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles(fetched.folderFiles, folderName);
+                const normalizedPermanentTree = normalizeBookmarkTreeSnapshot(rebuiltPermanentTree);
+                if (normalizedPermanentTree) {
+                    snapshot.permanentTreeSnapshot = normalizedPermanentTree;
+                }
+            } catch (error) {
+                console.warn('[Canvas Sync] rebuild remote permanent tree snapshot failed:', error);
+            }
+        }
 
         return {
             notFound: false,
@@ -3646,8 +4637,39 @@
         return response;
     }
 
-    async function pushObsidianFilesIncremental(trigger) {
+    async function applyRemoteFilesBatch(changes, commitMessage) {
+        const payload = {
+            action: 'canvasGitApplyFilesBatch',
+            changes: Array.isArray(changes) ? changes : [],
+            commitMessage
+        };
+
+        if (!payload.changes.length) {
+            throw new Error(textByLang('缺少变更列表', 'Missing change list'));
+        }
+
+        const response = await sendRuntimeMessage(payload, 120000);
+        if (!response || response.success !== true) {
+            const message = (response && response.error) || textByLang('批量写入失败', 'Batch write failed');
+            const error = new Error(message);
+            if (response && response.errorCode) error.code = String(response.errorCode);
+            if (response && Number.isFinite(Number(response.sizeBytes))) error.sizeBytes = Number(response.sizeBytes);
+            if (response && Number.isFinite(Number(response.limitBytes))) error.limitBytes = Number(response.limitBytes);
+            if (response && response.path) error.path = String(response.path);
+            throw error;
+        }
+
+        return response;
+    }
+
+    async function pushObsidianFilesIncremental(trigger, onProgress = null) {
+        const reportProgress = (fraction, message) => {
+            if (typeof onProgress !== 'function') return;
+            try { onProgress(fraction, message); } catch (_) { }
+        };
+
         if (!settings || settings.obsidianFilePushEnabled === false) {
+            reportProgress(1, textByLang('已跳过文件推送', 'File push skipped'));
             return {
                 enabled: false,
                 changedCount: 0,
@@ -3659,6 +4681,7 @@
 
         const bridge = global.CanvasObsidianExportBridge;
         if (!bridge || typeof bridge.buildSyncFiles !== 'function') {
+            reportProgress(1, textByLang('导出桥不可用', 'Export bridge unavailable'));
             return {
                 enabled: false,
                 changedCount: 0,
@@ -3669,11 +4692,13 @@
             };
         }
 
+        reportProgress(0.05, textByLang('正在导出文件...', 'Exporting files...'));
         const bundle = await bridge.buildSyncFiles({
             exportFormat: settings.obsidianExportFormat,
             exportRoot: settings.obsidianExportRoot
         });
         const sourceFiles = Array.isArray(bundle && bundle.files) ? bundle.files : [];
+        reportProgress(0.25, textByLang(`导出完成：${sourceFiles.length} 个文件`, `Exported: ${sourceFiles.length} files`));
 
         const normalizedFiles = [];
         const filesByPath = {};
@@ -3696,6 +4721,7 @@
             }
         });
 
+        reportProgress(0.32, textByLang('计算差异...', 'Calculating diff...'));
         const dirtyState = loadDirtyState();
         const previousPathMap = loadPathMap();
         const nextPathMap = buildPathMapFromObsidianFiles(normalizedFiles);
@@ -3704,6 +4730,7 @@
         const forceTrackAll = shouldTrackAllFilesForPush(trigger);
         const forceWriteAll = shouldForceWriteAllFilesForPush(trigger);
         if (!forceTrackAll && !hasLocalDirtyWork(dirtyState)) {
+            reportProgress(1, textByLang('无变更，跳过推送', 'No changes, skipped push'));
             return {
                 enabled: true,
                 changedCount: 0,
@@ -3734,12 +4761,44 @@
             return !Object.prototype.hasOwnProperty.call(nextHashes, path);
         });
 
+        const prevSyncIndex = loadPrevSyncIndex();
+        const prevSyncFilesIndex = (prevSyncIndex && prevSyncIndex.files && typeof prevSyncIndex.files === 'object')
+            ? prevSyncIndex.files
+            : {};
+
         const candidateSet = forceTrackAll
             ? new Set(normalizedFiles.map((file) => file.path))
             : pathInfo.candidatePaths;
 
         if (!candidateSet.size && normalizedFiles.length) {
             normalizedFiles.forEach((file) => candidateSet.add(file.path));
+        }
+
+        // If a file was never pushed (no previous sha recorded), we must include it in the next push,
+        // otherwise `.canvas` may reference missing markdown files.
+        if (!forceTrackAll && normalizedFiles.length) {
+            normalizedFiles.forEach((file) => {
+                const path = file && file.path ? String(file.path) : '';
+                if (!path) return;
+                const prevEntry = prevSyncFilesIndex[path];
+                const prevSha = prevEntry ? String(prevEntry.sha || '') : '';
+                if (!prevEntry || !prevSha) {
+                    candidateSet.add(path);
+                }
+            });
+        }
+
+        // When tracking all files (usually manual triggers), preflight remote listing once:
+        // if a file is missing remotely, we must upload it even if local hash matches previous baseline.
+        let remoteFilesByPathForMissingCheck = null;
+        if (forceTrackAll && !forceWriteAll) {
+            try {
+                reportProgress(0.45, textByLang('检查云端缺失文件...', 'Checking remote missing files...'));
+                const remoteListRaw = await listRemoteObsidianFilesByPath(settings.obsidianExportRoot);
+                remoteFilesByPathForMissingCheck = remoteListRaw && remoteListRaw.filesByPath ? remoteListRaw.filesByPath : null;
+            } catch (_) {
+                remoteFilesByPathForMissingCheck = null;
+            }
         }
 
         const processedPaths = [];
@@ -3749,26 +4808,95 @@
             const file = filesByPath[normalizedPath];
             if (!file) return;
             processedPaths.push(normalizedPath);
-            if (forceWriteAll || previousHashes[normalizedPath] !== file.hash) {
+            const remoteMissing = !!(remoteFilesByPathForMissingCheck && !remoteFilesByPathForMissingCheck[normalizedPath]);
+            const prevEntry = prevSyncFilesIndex[normalizedPath];
+            const prevSha = prevEntry ? String(prevEntry.sha || '') : '';
+            const localUnsynced = !prevEntry || !prevSha;
+            if (forceWriteAll || remoteMissing || localUnsynced || previousHashes[normalizedPath] !== file.hash) {
                 changedFiles.push({ path: normalizedPath, content: file.content });
             }
         });
 
         const writeResultsByPath = {};
 
-        for (let i = 0; i < changedFiles.length; i++) {
-            const file = changedFiles[i];
-            const commitMessage = `Bookmark Canvas Sync: ${trigger || 'sync'} update ${file.path}`;
-            writeResultsByPath[file.path] = await writeRemoteFile(file.path, file.content, commitMessage);
+        // Prefer one single Git commit per push (Git Data API), instead of one commit per file (Contents API).
+        // This aligns better with Obsidian Git semantics: commit -> pull -> push.
+        const batchCommitMessage = `Bookmark Canvas Sync: ${trigger || 'sync'} batch update(${changedFiles.length}) delete(${removedPaths.length})`;
+
+        let batchDeletePaths = removedPaths.slice();
+        let fallbackDeletes = [];
+
+        // Git Trees API errors if we try to delete a path that does not exist, so we pre-filter deletes when possible.
+        if (batchDeletePaths.length) {
+            const applyRemoteDeleteFilter = (remoteFilesByPath) => {
+                const remote = (remoteFilesByPath && typeof remoteFilesByPath === 'object') ? remoteFilesByPath : {};
+                batchDeletePaths = batchDeletePaths.filter((path) => !!remote[path]);
+                const batchDeleteSet = new Set(batchDeletePaths);
+                fallbackDeletes = removedPaths.filter((path) => !batchDeleteSet.has(path));
+            };
+
+            if (remoteFilesByPathForMissingCheck) {
+                applyRemoteDeleteFilter(remoteFilesByPathForMissingCheck);
+            } else {
+                try {
+                    const remoteListRaw = await listRemoteObsidianFilesByPath(settings.obsidianExportRoot);
+                    applyRemoteDeleteFilter(remoteListRaw && remoteListRaw.filesByPath ? remoteListRaw.filesByPath : {});
+                } catch (_) {
+                    // If we cannot list remote, avoid batch deletes (updates still batched); fall back to Contents API deletes.
+                    fallbackDeletes = batchDeletePaths.slice();
+                    batchDeletePaths = [];
+                }
+            }
         }
 
-        for (let i = 0; i < removedPaths.length; i++) {
-            const removedPath = removedPaths[i];
+        const batchChanges = [];
+        changedFiles.forEach((file) => {
+            batchChanges.push({ path: file.path, content: file.content });
+        });
+        batchDeletePaths.forEach((path) => {
+            batchChanges.push({ path, delete: true });
+        });
+
+        if (batchChanges.length) {
+            reportProgress(0.65, textByLang('提交到云端...', 'Committing to cloud...'));
+            const batchResult = await applyRemoteFilesBatch(batchChanges, batchCommitMessage);
+            const fileShas = batchResult && typeof batchResult.fileShas === 'object' ? batchResult.fileShas : {};
+            Object.keys(fileShas || {}).forEach((path) => {
+                const sha = String(fileShas[path] || '');
+                if (!sha) return;
+                writeResultsByPath[path] = { fileSha: sha, commitSha: batchResult.commitSha || null };
+            });
+            reportProgress(0.9, textByLang('云端提交完成', 'Cloud commit completed'));
+        }
+
+        // Fallback deletions (rare): keep behavior compatible (and not block the whole batch commit).
+        for (let i = 0; i < fallbackDeletes.length; i++) {
+            const removedPath = fallbackDeletes[i];
             const commitMessage = `Bookmark Canvas Sync: ${trigger || 'sync'} delete ${removedPath}`;
             await deleteRemoteFile(removedPath, commitMessage);
+            reportProgress(
+                0.9 + (0.1 * ((i + 1) / Math.max(1, fallbackDeletes.length))),
+                textByLang(`清理远端文件 ${i + 1}/${fallbackDeletes.length}`, `Cleaning remote files ${i + 1}/${fallbackDeletes.length}`)
+            );
         }
 
-        saveObsidianFileHashes(nextHashes);
+        // Only advance the local hash baseline for paths we actually considered in this push.
+        // Otherwise, a missing/buggy dirty mark could make the baseline "ahead" of the remote,
+        // and the file would never be pushed (hash would look unchanged locally).
+        const mergedHashes = Object.assign({}, previousHashes || {});
+        processedPaths.forEach((path) => {
+            const normalizedPath = normalizeSyncPath(path);
+            if (!normalizedPath) return;
+            const hash = String(nextHashes[normalizedPath] || '');
+            if (!hash) return;
+            mergedHashes[normalizedPath] = hash;
+        });
+        removedPaths.forEach((path) => {
+            const normalizedPath = normalizeSyncPath(path);
+            if (!normalizedPath) return;
+            delete mergedHashes[normalizedPath];
+        });
+        saveObsidianFileHashes(mergedHashes);
 
         const syncedPaths = processedPaths.concat(removedPaths);
         if (syncedPaths.length) {
@@ -3776,7 +4904,6 @@
             saveDirtyState(nextDirty);
         }
 
-        const prevSyncIndex = loadPrevSyncIndex();
         const nextPrevSyncIndex = normalizePrevSyncIndex(prevSyncIndex);
         const nowTs = Date.now();
         const visiblePaths = new Set(normalizedFiles.map((file) => file.path));
@@ -3814,6 +4941,7 @@
         nextPrevSyncIndex.updatedAt = nowTs;
         savePrevSyncIndex(nextPrevSyncIndex);
 
+        reportProgress(1, textByLang('上传完成', 'Upload completed'));
         return {
             enabled: true,
             changedCount: changedFiles.length,
@@ -4251,23 +5379,30 @@
         };
     }
 
-    async function fetchRemoteObsidianFolderFiles(remoteList) {
+    async function fetchRemoteObsidianFolderFiles(remoteList, onProgress = null) {
         const files = remoteList && Array.isArray(remoteList.files) ? remoteList.files : [];
+        const reportProgress = (fraction, message) => {
+            if (typeof onProgress !== 'function') return;
+            try { onProgress(fraction, message); } catch (_) { }
+        };
+        const targets = files
+            .map((entry) => normalizeSyncPath(entry && entry.path))
+            .filter((path) => !!path && (/\.md$/i.test(path) || /\.canvas$/i.test(path) || /bookmark-canvas\.backup\.json$/i.test(path)));
+
+        reportProgress(0, textByLang(`拉取文件 0/${targets.length}`, `Downloading files 0/${targets.length}`));
         const folderFiles = new Map();
         let downloaded = 0;
 
-        for (let i = 0; i < files.length; i++) {
-            const entry = files[i];
-            const path = normalizeSyncPath(entry && entry.path);
-            if (!path) continue;
-            if (!(/\.md$/i.test(path) || /\.canvas$/i.test(path) || /bookmark-canvas\.backup\.json$/i.test(path))) {
-                continue;
-            }
-
+        for (let i = 0; i < targets.length; i++) {
+            const path = targets[i];
             const fileState = await readRemoteFileAtPath(path);
             if (fileState.notFound) continue;
             folderFiles.set(path, fileState.bytes);
             downloaded += 1;
+            reportProgress(
+                (i + 1) / Math.max(1, targets.length),
+                textByLang(`拉取文件 ${i + 1}/${targets.length}`, `Downloading files ${i + 1}/${targets.length}`)
+            );
         }
 
         return {
@@ -4276,7 +5411,7 @@
         };
     }
 
-    async function applyRemoteObsidianFilesReplace(remoteList, trigger) {
+    async function applyRemoteObsidianFilesReplace(remoteList, trigger, onProgress = null) {
         const bridge = global.CanvasObsidianExportBridge;
         if (!bridge || typeof bridge.applySyncFilesReplace !== 'function') {
             return {
@@ -4285,7 +5420,7 @@
             };
         }
 
-        const fetched = await fetchRemoteObsidianFolderFiles(remoteList);
+        const fetched = await fetchRemoteObsidianFolderFiles(remoteList, onProgress);
         if (!fetched.folderFiles.size) {
             return {
                 applied: false,
@@ -4299,14 +5434,15 @@
             trigger: String(trigger || 'pull')
         });
 
-        return {
-            applied: !!(applyResult && applyResult.success),
-            downloaded: fetched.downloaded,
-            tempCount: Number(applyResult && applyResult.tempCount) || 0,
-            mdCount: Number(applyResult && applyResult.mdCount) || 0,
-            edgeCount: Number(applyResult && applyResult.edgeCount) || 0
-        };
-    }
+	        return {
+	            applied: !!(applyResult && applyResult.success),
+	            downloaded: fetched.downloaded,
+	            tempCount: Number(applyResult && applyResult.tempCount) || 0,
+	            mdCount: Number(applyResult && applyResult.mdCount) || 0,
+	            edgeCount: Number(applyResult && applyResult.edgeCount) || 0,
+	            permanentTreeSnapshot: applyResult && applyResult.permanentTreeSnapshot ? applyResult.permanentTreeSnapshot : null
+	        };
+	    }
 
     function buildObsidianFileSyncPlan(localFiles, remoteFilesByPath, prevSyncIndex) {
         const localByPath = {};
@@ -4507,6 +5643,76 @@
         setSyncMetaRaw(PENDING_CONFLICT_KEY, JSON.stringify(pendingConflict));
     }
 
+
+    function evaluatePermanentPullDecision(localTreeSnapshot, remoteTreeSnapshot) {
+        const mode = ensurePermanentPullMode(settings && settings.permanentPullMode);
+        const localTree = normalizeBookmarkTreeSnapshot(localTreeSnapshot);
+        const remoteTree = normalizeBookmarkTreeSnapshot(remoteTreeSnapshot);
+        if (!localTree || !remoteTree) {
+            return { policy: mode, result: 'overwrite', reason: 'tree-missing', threshold: 0, logicalChangeCount: 0 };
+        }
+        if (mode === 'overwrite') {
+            return { policy: mode, result: 'overwrite', reason: 'fixed-overwrite', threshold: 0, logicalChangeCount: 0 };
+        }
+        if (mode === 'incremental') {
+            return { policy: mode, result: 'incremental', reason: 'fixed-incremental', threshold: 0, logicalChangeCount: 0 };
+        }
+        const plan = buildPermanentIncrementalSyncPlan(localTree, remoteTree);
+        const threshold = buildPermanentIncrementalThreshold(localTree, remoteTree);
+        const logicalChangeCount = Number(plan && plan.logicalChangeCount) || 0;
+        if (plan && plan.complexReason) {
+            return { policy: mode, result: 'overwrite', reason: String(plan.complexReason), threshold, logicalChangeCount };
+        }
+        if (!plan || !plan.hasChanges) {
+            return { policy: mode, result: 'incremental', reason: 'same', threshold, logicalChangeCount };
+        }
+        if (logicalChangeCount > threshold) {
+            return { policy: mode, result: 'overwrite', reason: 'threshold-exceeded', threshold, logicalChangeCount };
+        }
+        return { policy: mode, result: 'incremental', reason: 'within-threshold', threshold, logicalChangeCount };
+    }
+
+    function formatPermanentPullDecisionText(decision) {
+        const source = decision && typeof decision === 'object' ? decision : {};
+        const policy = ensurePermanentPullMode(source.policy);
+        const result = source.result === 'incremental' ? 'incremental' : 'overwrite';
+        const threshold = Number(source.threshold) || 0;
+        const logicalChangeCount = Number(source.logicalChangeCount) || 0;
+
+        if (policy === 'overwrite') {
+            return textByLang('永久栏目处理：覆盖恢复（固定）', 'Permanent section handling: overwrite restore (fixed)');
+        }
+        if (policy === 'incremental') {
+            return textByLang('永久栏目处理：增量同步（固定）', 'Permanent section handling: incremental sync (fixed)');
+        }
+        return result === 'incremental'
+            ? textByLang(`永久栏目处理：自动 → 本次使用增量同步（变更数 ${logicalChangeCount} / 阈值 ${threshold}）`, `Permanent section handling: auto → incremental sync this time (changes ${logicalChangeCount} / threshold ${threshold})`)
+            : textByLang(`永久栏目处理：自动 → 本次使用覆盖恢复（变更数 ${logicalChangeCount} / 阈值 ${threshold}）`, `Permanent section handling: auto → overwrite restore this time (changes ${logicalChangeCount} / threshold ${threshold})`);
+    }
+
+    let mismatchPermanentHintToken = 0;
+    async function refreshMismatchPermanentModeHint() {
+        const panel = getElement('canvasSyncMismatchPanel');
+        const hintEl = getElement('canvasSyncMismatchPermanentModeHint');
+        if (!panel || !hintEl || panel.hidden || !runtime || !runtime.pendingMismatch) return;
+        const token = ++mismatchPermanentHintToken;
+        hintEl.hidden = false;
+        hintEl.textContent = textByLang('永久栏目处理：正在计算...', 'Permanent section handling: calculating...');
+        try {
+            const localTree = await getPermanentTreeSnapshotForSync();
+            const remoteState = await readRemoteSnapshotWithPathRecovery({ interactive: false, continueAfterConfirm: false, throwWhenDetected: false });
+            const remoteTree = remoteState && !remoteState.notFound && remoteState.snapshot
+                ? remoteState.snapshot.permanentTreeSnapshot
+                : null;
+            const decision = evaluatePermanentPullDecision(localTree, remoteTree);
+            if (token !== mismatchPermanentHintToken) return;
+            hintEl.textContent = formatPermanentPullDecisionText(decision);
+        } catch (error) {
+            if (token !== mismatchPermanentHintToken) return;
+            hintEl.textContent = textByLang('永久栏目处理：无法计算，执行时将回退为覆盖恢复', 'Permanent section handling: unable to calculate, will fall back to overwrite restore');
+        }
+    }
+
     function renderConflictPanel() {
         const panel = getElement('canvasSyncConflictPanel');
         if (!panel) return;
@@ -4539,6 +5745,7 @@
         if (detectedAt) detectedAt.textContent = formatTime(conflictData.createdAt);
 
         const summary = getElement('canvasSyncConflictSummary');
+        const permanentHint = getElement('canvasSyncConflictPermanentModeHint');
         if (summary) {
             if (conflictPreview) {
                 summary.textContent = textByLang(
@@ -4587,6 +5794,13 @@
         if (remoteSize) remoteSize.textContent = formatBytes(conflictData.remoteMeta.bytes);
         if (remoteHash) remoteHash.textContent = shortText(getCurrentCloudHashForDisplay() || conflictData.remoteSha || conflictData.remoteMeta.hash, '-');
 
+        if (permanentHint) {
+            const localTree = conflictData && conflictData.localSnapshot ? conflictData.localSnapshot.permanentTreeSnapshot : null;
+            const remoteTree = conflictData && conflictData.remoteSnapshot ? conflictData.remoteSnapshot.permanentTreeSnapshot : null;
+            permanentHint.hidden = false;
+            permanentHint.textContent = formatPermanentPullDecisionText(evaluatePermanentPullDecision(localTree, remoteTree));
+        }
+
         const dismissText = getElement('canvasSyncConflictDismissText');
         if (dismissText) {
             dismissText.textContent = conflictPreview
@@ -4614,6 +5828,8 @@
 
         if (!shouldShow) {
             panel.hidden = true;
+            const permanentHintWhenHidden = getElement('canvasSyncMismatchPermanentModeHint');
+            if (permanentHintWhenHidden) permanentHintWhenHidden.hidden = true;
             const summaryWhenHidden = getElement('canvasSyncMismatchSummary');
             if (summaryWhenHidden) {
                 delete summaryWhenHidden.dataset.dynamicSummary;
@@ -4635,6 +5851,7 @@
         }
 
         const summary = getElement('canvasSyncMismatchSummary');
+        const permanentHint = getElement('canvasSyncMismatchPermanentModeHint');
         if (summary) {
             if (mismatchPreview) {
                 summary.textContent = textByLang(
@@ -4662,6 +5879,11 @@
                 );
             }
             summary.dataset.dynamicSummary = 'true';
+        }
+
+        if (permanentHint) {
+            permanentHint.hidden = false;
+            void refreshMismatchPermanentModeHint();
         }
 
         const dismissText = getElement('canvasSyncMismatchDismissText');
@@ -4708,6 +5930,36 @@
             isRunning: runtime.isRunning,
             queueLength: runtime.queueLength,
             pendingMismatch: runtime.pendingMismatch
+        });
+    }
+
+    async function setPendingMismatchState(remoteSha, message, options = {}) {
+        runtime.pendingMismatch = true;
+        runtime.pendingMismatchAt = Date.now();
+        runtime.pendingMismatchRemoteSha = String(remoteSha || '');
+        if (typeof message === 'string') {
+            runtime.lastError = message;
+        }
+
+        mismatchPromptShownOnInit = false;
+        saveRuntime();
+        renderStatus();
+
+        if (options && options.openPanel !== false && !hasPendingConflict()) {
+            ensureStatusPanelVisible('mismatch', String(message || textByLang(
+                '检测到云端不一致，请在“状态”面板选择处理方式',
+                'Remote mismatch detected. Choose an action in the Status panel.'
+            )));
+        }
+
+        await updateBackgroundSyncContext('pending-mismatch-foreground', {
+            pendingMismatch: true,
+            pendingMismatchAt: runtime.pendingMismatchAt,
+            pendingMismatchRemoteSha: runtime.pendingMismatchRemoteSha,
+            hasPendingWork: true,
+            isRunning: runtime.isRunning,
+            queueLength: runtime.queueLength,
+            localDirty: hasLocalDirtyWork()
         });
     }
 
@@ -4773,11 +6025,6 @@
             throw new Error(textByLang(`云端删除比例 ${deletePercent.toFixed(1)}% 超过阈值 ${settings.deleteThresholdPercent}%`, `Remote deletion ratio ${deletePercent.toFixed(1)}% exceeds threshold ${settings.deleteThresholdPercent}%`));
         }
         if (bypassDeleteThreshold && deletePercent > settings.deleteThresholdPercent) {
-            console.warn('[Canvas Sync] delete-threshold bypassed:', {
-                deletePercent,
-                threshold: settings.deleteThresholdPercent,
-                reason: bypassReason || 'manual-override'
-            });
         }
 
         SYNC_KEYS.forEach((key) => {
@@ -4804,6 +6051,66 @@
                 }
             }));
         } catch (_) { }
+    }
+
+
+    function buildSnapshotForRemoteLocalApply(snapshotInput) {
+        const snapshot = normalizeSnapshot(snapshotInput || { data: {} });
+        const nextData = Object.assign({}, snapshot.data || {});
+        const tempRaw = typeof nextData[TEMP_SECTION_STORAGE_KEY] === 'string'
+            ? nextData[TEMP_SECTION_STORAGE_KEY]
+            : '';
+        if (!tempRaw) return snapshot;
+
+        let tempState = null;
+        try {
+            tempState = JSON.parse(tempRaw);
+        } catch (_) {
+            tempState = null;
+        }
+        if (!tempState || typeof tempState !== 'object') return snapshot;
+
+        const sections = Array.isArray(tempState.sections) ? tempState.sections : [];
+        const filteredSections = sections.filter((section) => {
+            if (!section || typeof section !== 'object') return false;
+            const id = String(section.id || '').trim();
+            if (id === 'permanent-section' || id.startsWith('permanent-section-copy-')) return false;
+            if (section.isSnapshot === true) {
+                const title = String(section.title || '').trim();
+                if (/^\[(快照|Snapshot)\]/i.test(title)) return false;
+            }
+            return true;
+        });
+        if (filteredSections.length === sections.length) return snapshot;
+
+        const removedIds = new Set(sections
+            .filter((section) => !filteredSections.includes(section))
+            .map((section) => String(section && section.id || '').trim())
+            .filter(Boolean));
+        const edges = Array.isArray(tempState.edges) ? tempState.edges : [];
+        const filteredEdges = edges
+            .map((edge) => {
+                const nextEdge = edge && typeof edge === 'object' ? Object.assign({}, edge) : edge;
+                if (!nextEdge || typeof nextEdge !== 'object') return nextEdge;
+                const fromNode = String(nextEdge.fromNode || '').trim();
+                const toNode = String(nextEdge.toNode || '').trim();
+                if (fromNode && removedIds.has(fromNode)) nextEdge.fromNode = 'permanent-section';
+                if (toNode && removedIds.has(toNode)) nextEdge.toNode = 'permanent-section';
+                return nextEdge;
+            })
+            .filter((edge) => {
+                if (!edge || typeof edge !== 'object') return false;
+                const fromNode = String(edge.fromNode || '').trim();
+                const toNode = String(edge.toNode || '').trim();
+                return !removedIds.has(fromNode) && !removedIds.has(toNode);
+            });
+
+        nextData[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(Object.assign({}, tempState, {
+            sections: filteredSections,
+            edges: filteredEdges
+        }));
+
+        return Object.assign({}, snapshot, { data: nextData });
     }
 
     function decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged = false, remoteChanged = false, syncMethod = settings.syncMethod) {
@@ -4857,6 +6164,46 @@
         };
     }
 
+    function buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod = settings.syncMethod) {
+        const remoteExists = !!(remoteState && !remoteState.notFound);
+        const remoteSnapshot = remoteExists
+            ? normalizeSnapshot(remoteState.snapshot || {})
+            : normalizeSnapshot({ data: {} });
+
+        let nextLocalHash = localHash;
+        if (remoteExists && hydratePermanentTreeFromRemote(localSnapshot, remoteSnapshot)) {
+            nextLocalHash = getSnapshotHash(localSnapshot);
+        }
+
+        const remoteSha = String(remoteState && remoteState.sha || '');
+        const hasLocalBase = !!runtime.lastLocalHash;
+        const hasRemoteBase = !!runtime.lastRemoteSha;
+        const localDirty = hasLocalDirtyWork();
+        const localChanged = hasLocalBase && runtime.lastLocalHash !== nextLocalHash;
+        const remoteChanged = hasRemoteBase && !!remoteSha && runtime.lastRemoteSha !== remoteSha;
+        const concurrentChanged = localChanged && remoteChanged;
+        const localUntracked = !hasLocalBase && localDirty;
+        const remoteUntracked = !hasRemoteBase && !!remoteSha;
+        const winner = remoteExists
+            ? decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged, remoteChanged, syncMethod)
+            : 'local';
+
+        return {
+            remoteSnapshot,
+            localHash: nextLocalHash,
+            remoteSha,
+            hasLocalBase,
+            hasRemoteBase,
+            localDirty,
+            localChanged,
+            remoteChanged,
+            concurrentChanged,
+            localUntracked,
+            remoteUntracked,
+            winner
+        };
+    }
+
     async function resolvePendingConflict(choice) {
         if (!pendingConflict) {
             toast(textByLang('没有待处理冲突', 'No pending conflicts'));
@@ -4900,12 +6247,41 @@
                     changedCount: Number(pushResult && pushResult.changedCount) || 0
                 });
             } else if (choice === 'remote') {
+                // Conflict panel -> use remote:
+                // after applying snapshot data, permanent section must also go through
+                // the same overwrite helper used by other remote -> local flows.
                 const currentLocal = await buildLocalSnapshot('conflict-local-backup', { includePermanentTree: true });
                 recoverySnapshotSaved = backupSnapshotForRecovery(currentLocal, 'before-apply-remote-conflict');
-                applySnapshotToLocal(remoteSnapshot, {
+                applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot), {
                     bypassDeleteThreshold: true,
                     bypassReason: 'manual-conflict-use-remote'
                 });
+                try {
+                    let remotePermanentTreeSnapshot = remoteSnapshot && remoteSnapshot.permanentTreeSnapshot;
+                    if (!normalizeBookmarkTreeSnapshot(remotePermanentTreeSnapshot)) {
+                        try {
+                            const latestRemoteState = await readRemoteSnapshotWithPathRecovery({
+                                interactive: false,
+                                continueAfterConfirm: false,
+                                throwWhenDetected: false
+                            });
+                            if (latestRemoteState && !latestRemoteState.notFound && latestRemoteState.snapshot) {
+                                remotePermanentTreeSnapshot = latestRemoteState.snapshot.permanentTreeSnapshot;
+                            }
+                        } catch (_) { }
+                    }
+                    const overwriteResult = await maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(
+                        remotePermanentTreeSnapshot,
+                        'manual-conflict-use-remote',
+                        { force: true }
+                    );
+                    if (overwriteResult && overwriteResult.applied) {
+                        runtime.lastPermanentTreeSnapshotAt = Date.now();
+                    }
+                } catch (error) {
+                    console.warn('[Canvas Sync] overwrite local permanent tree from conflict(remote) failed:', error);
+                    throw error;
+                }
                 if (settings.obsidianFilePushEnabled !== false) {
                     try {
                         let remoteFilesByPath = null;
@@ -5094,6 +6470,11 @@
         }
 
         if (runtime.isRunning) {
+            if (isManualTrigger) {
+                toast(textByLang('正在同步，请等待当前同步完成', 'Sync is running. Please wait for completion.'));
+                renderStatus();
+                return;
+            }
             pendingReasons.add(`queued:${trigger || 'unknown'}`);
             runtime.queueLength = pendingReasons.size;
             saveRuntime();
@@ -5106,6 +6487,10 @@
         runtime.lastSyncMode = `${effectiveMode}:${syncMethod}`;
         saveRuntime();
         renderStatus();
+        syncUiProgressEnabled = isManualTrigger;
+        if (syncUiProgressEnabled) {
+            updateSyncUiProgress(textByLang('准备同步...', 'Preparing sync...'), 0);
+        }
         void updateBackgroundSyncContext('sync-running', {
             isRunning: true,
             queueLength: runtime.queueLength,
@@ -5116,12 +6501,14 @@
             const localSnapshot = await buildLocalSnapshot(trigger);
             let localHash = getSnapshotHash(localSnapshot);
             let abortedByPendingConflict = false;
+            updateSyncUiProgress(textByLang('已读取本地状态', 'Loaded local state'), 10);
 
             const doPush = async (reason) => {
                 let obsidianPushResult = null;
                 const canPushBlankSectionFiles = shouldPushBlankSectionFiles(trigger || reason || 'sync');
                 if (settings.obsidianFilePushEnabled !== false && canPushBlankSectionFiles) {
-                    obsidianPushResult = await pushObsidianFilesIncremental(trigger || reason || 'sync');
+                    const pushProgress = makeProgressRange(15, 85);
+                    obsidianPushResult = await pushObsidianFilesIncremental(trigger || reason || 'sync', pushProgress);
                     if (obsidianPushResult && obsidianPushResult.enabled) {
                         runtime.lastObsidianPushAt = Date.now();
                         runtime.lastObsidianPushChanged = Number(obsidianPushResult.changedCount) || 0;
@@ -5137,9 +6524,11 @@
                 let remoteRevision = '';
                 if (settings.obsidianFilePushEnabled !== false) {
                     try {
+                        updateSyncUiProgress(textByLang('校验云端状态...', 'Validating cloud state...'), 90);
                         const remoteListAfterPushRaw = await listRemoteObsidianFilesByPath(settings.obsidianExportRoot);
                         const remoteListAfterPush = filterRemoteListForManagedSyncFiles(remoteListAfterPushRaw, settings.obsidianExportRoot);
                         remoteRevision = buildRemoteObsidianRevisionFromList(remoteListAfterPush);
+                        updateSyncUiProgress(textByLang('云端状态已更新', 'Cloud state updated'), 95);
                     } catch (_) {
                         remoteRevision = '';
                     }
@@ -5176,7 +6565,13 @@
                 return 'push';
             };
 
+            // Shared remote -> local apply path for sync-related pull actions.
+            // Temp / blank sections are applied from sync files or snapshot data,
+            // while permanent section is overwritten via maybeOverwriteLocalPermanentTreeFromRemoteSnapshot().
             const doPull = async (remoteState, reason, preparedPullPlan = null) => {
+                const explicitRemoteOverride = isExplicitRemoteOverwriteTrigger(trigger);
+                const bypassPullPlanConflictCheck = shouldBypassPullPlanConflictCheck(trigger);
+                updateSyncUiProgress(textByLang('计算拉取计划...', 'Building pull plan...'), 20);
                 let pullPlanResult = preparedPullPlan;
                 if (!pullPlanResult && settings.obsidianFilePushEnabled !== false) {
                     try {
@@ -5189,6 +6584,7 @@
                 if (
                     pullPlanResult
                     && pullPlanResult.enabled
+                    && !bypassPullPlanConflictCheck
                     && settings.conflictPolicy === 'none'
                     && pullPlanResult.plan
                     && Array.isArray(pullPlanResult.plan.conflict)
@@ -5236,6 +6632,10 @@
                     return textByLang('冲突待处理', 'Conflict pending');
                 }
 
+                if (explicitRemoteOverride) {
+                    backupSnapshotForRecovery(localSnapshot, `before-${String(trigger || reason || 'pull')}-remote-overwrite`);
+                }
+
                 const remoteFilesByPath = pullPlanResult && pullPlanResult.remoteList
                     ? pullPlanResult.remoteList.filesByPath
                     : null;
@@ -5248,9 +6648,15 @@
                 );
 
                 let appliedByFiles = false;
+                let applyResult = null;
                 if (settings.obsidianFilePushEnabled !== false && hasRemoteFiles) {
                     try {
-                        const applyResult = await applyRemoteObsidianFilesReplace(pullPlanResult.remoteList, trigger || reason || 'pull');
+                        const pullFilesProgress = makeProgressRange(25, 75);
+                        applyResult = await applyRemoteObsidianFilesReplace(
+                            pullPlanResult.remoteList,
+                            trigger || reason || 'pull',
+                            pullFilesProgress
+                        );
                         appliedByFiles = !!(applyResult && applyResult.applied);
                     } catch (error) {
                         console.warn('[Canvas Sync] apply remote files replace failed:', error);
@@ -5258,9 +6664,9 @@
                 }
 
                 if (!appliedByFiles) {
+                    updateSyncUiProgress(textByLang('正在应用云端快照...', 'Applying remote snapshot...'), 75);
                     if (remoteState && !remoteState.notFound && remoteState.snapshot) {
-                        const explicitRemoteOverride = String(trigger || '').toLowerCase().includes('mismatch-panel-pull');
-                        applySnapshotToLocal(remoteState.snapshot, {
+                        applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteState.snapshot), {
                             bypassDeleteThreshold: explicitRemoteOverride,
                             bypassReason: explicitRemoteOverride ? 'mismatch-panel-use-remote' : ''
                         });
@@ -5271,8 +6677,33 @@
                     }
                 }
 
+                // Permanent section ownership: if remote provides a permanent tree snapshot (from Obsidian files or
+                // from the remote JSON snapshot), overwrite the local Chrome bookmarks tree.
+                try {
+                    // Unified permanent-section overwrite path for pull-related flows.
+                    const remotePermanentTreeSnapshot = (applyResult && applyResult.permanentTreeSnapshot)
+                        || (remoteState && !remoteState.notFound && remoteState.snapshot
+                            ? remoteState.snapshot.permanentTreeSnapshot
+                            : null);
+                    const overwriteResult = await maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(
+                        remotePermanentTreeSnapshot,
+                        trigger || reason || 'pull',
+                        {
+                            force: explicitRemoteOverride,
+                            onProgress: (message) => updateSyncUiProgress(message, 82)
+                        }
+                    );
+                    if (overwriteResult && overwriteResult.applied) {
+                        runtime.lastPermanentTreeSnapshotAt = Date.now();
+                    }
+                } catch (error) {
+                    console.warn('[Canvas Sync] overwrite local permanent tree from remote failed:', error);
+                    throw error;
+                }
+
                 if (settings.obsidianFilePushEnabled !== false) {
                     try {
+                        updateSyncUiProgress(textByLang('重建本地索引...', 'Rebuilding local index...'), 85);
                         const rebuiltIndex = await rebuildObsidianIndexesFromLocalSnapshot(`pull:${trigger || 'sync'}`, {
                             clearDirty: true,
                             syncedAt: Date.now(),
@@ -5291,6 +6722,7 @@
                 }
 
                 try {
+                    updateSyncUiProgress(textByLang('同步本地校验...', 'Verifying local state...'), 92);
                     const postPullSnapshot = await buildLocalSnapshot('post-pull-hash', {
                         includePermanentTree: false,
                         includeTempSection: true,
@@ -5330,12 +6762,77 @@
                 runtime.lastLocalFilesSha = buildLocalObsidianRevisionFromHashMap(loadObsidianFileHashes()) || runtime.lastLocalFilesSha;
                 actionText = 'noop';
             } else if (effectiveMode === 'push') {
-                actionText = await doPush('manual push');
+                const pushTriggerText = String(trigger || '').trim().toLowerCase();
+                const skipPushPreflight = pushTriggerText === 'mismatch-panel-push'
+                    || pushTriggerText === 'mismatch-policy-auto-push';
+                let allowPushOnly = true;
+
+                if (!skipPushPreflight) {
+                    updateSyncUiProgress(textByLang('校验云端基线...', 'Checking cloud baseline...'), 15);
+                    const remoteState = await readRemoteSnapshotWithPathRecovery({
+                        interactive: isManualTrigger,
+                        continueAfterConfirm: true
+                    });
+                    const pushPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
+                    localHash = pushPreflight.localHash;
+
+                    if (!pushPreflight.winner) {
+                        setPendingConflict(createPendingConflictPayload(localSnapshot, pushPreflight.remoteSnapshot, remoteState));
+                        storeConflictRecord(localSnapshot, pushPreflight.remoteSnapshot, 'pending-manual', {
+                            remoteSha: pushPreflight.remoteSha || remoteState.sha || '',
+                            strategy: settings.conflictPolicy,
+                            syncMethod
+                        });
+                        runtime.lastAppliedDirection = 'conflict';
+                        runtime.lastError = textByLang(
+                            '检测到并发修改，已暂停当前上传路径，请先在冲突面板选择处理方式',
+                            'Concurrent changes detected. The current upload path has been paused; resolve it in the conflict panel first.'
+                        );
+                        pendingReasons.clear();
+                        runtime.queueLength = 0;
+                        saveRuntime();
+                        renderStatus();
+                        toast(textByLang('检测到冲突：请先在面板中选择保留本地或使用云端', 'Conflict detected: choose keep local or use cloud in the panel first'));
+                        allowPushOnly = false;
+                    } else {
+                        const riskyRemoteOverwrite = pushPreflight.remoteChanged
+                            || pushPreflight.concurrentChanged
+                            || pushPreflight.remoteUntracked;
+
+                        if (isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
+                            if (!requestOneWayOverwriteConfirmation('push', pushPreflight)) {
+                                runtime.lastError = '';
+                                saveRuntime();
+                                renderStatus();
+                                toast(textByLang('已取消当前上传操作', 'Current upload action cancelled'));
+                                allowPushOnly = false;
+                            }
+                        } else if (!isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
+                            await setPendingMismatchState(
+                                pushPreflight.remoteSha || remoteState.sha || '',
+                                textByLang(
+                                    '检测到云端已有更新，已暂停当前自动上传路径，请在“状态”面板选择处理方式',
+                                    'Cloud updates were detected. The current automatic upload path has been paused; choose an action in Status.'
+                                ),
+                                { openPanel: document.visibilityState === 'visible' }
+                            );
+                            allowPushOnly = false;
+                        }
+                    }
+                }
+
+                if (!allowPushOnly) {
+                    return;
+                }
+
+                actionText = await doPush(isManualPushOnlyTrigger(trigger) ? 'manual push' : 'push');
             } else {
+                updateSyncUiProgress(textByLang('读取云端状态...', 'Reading cloud state...'), 15);
                 const remoteState = await readRemoteSnapshotWithPathRecovery({
                     interactive: isManualTrigger,
                     continueAfterConfirm: true
                 });
+                updateSyncUiProgress(textByLang('云端状态已读取', 'Cloud state loaded'), 18);
                 if (effectiveMode === 'pull') {
                     if (remoteState.notFound) {
                         let pullPlanWhenNoState = null;
@@ -5366,6 +6863,75 @@
                             runtime.lastAppliedDirection = 'reset-head';
                             actionText = textByLang('仅记云端文件版本（仅更新版本指针）', 'Track cloud file revision only (update revision pointer only)');
                         } else {
+                            let allowPullOnly = true;
+                            const pullPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
+                            localHash = pullPreflight.localHash;
+
+                            const riskyLocalOverwrite = pullPreflight.localChanged
+                                || pullPreflight.concurrentChanged
+                                || pullPreflight.localUntracked;
+
+                            if (!pullPreflight.winner) {
+                                setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState));
+                                storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
+                                    remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
+                                    strategy: settings.conflictPolicy,
+                                    syncMethod
+                                });
+                                runtime.lastAppliedDirection = 'conflict';
+                                runtime.lastError = textByLang(
+                                    '检测到并发修改，已暂停当前拉取路径，请先在冲突面板选择处理方式',
+                                    'Concurrent changes detected. The current pull path has been paused; resolve it in the conflict panel first.'
+                                );
+                                pendingReasons.clear();
+                                runtime.queueLength = 0;
+                                saveRuntime();
+                                renderStatus();
+                                toast(textByLang('检测到冲突：请先在面板中选择保留本地或使用云端', 'Conflict detected: choose keep local or use cloud in the panel first'));
+                                allowPullOnly = false;
+                            } else if (riskyLocalOverwrite && pullPreflight.winner !== 'remote' && pullPreflight.winner !== 'remote-reset') {
+                                if (isManualTrigger) {
+                                    if (!requestOneWayOverwriteConfirmation('pull', pullPreflight)) {
+                                        runtime.lastError = '';
+                                        saveRuntime();
+                                        renderStatus();
+                                        toast(textByLang('已取消当前拉取操作', 'Current pull action cancelled'));
+                                        allowPullOnly = false;
+                                    }
+                                } else {
+                                    if (pullPreflight.remoteChanged || pullPreflight.concurrentChanged || pullPreflight.remoteUntracked) {
+                                        await setPendingMismatchState(
+                                            pullPreflight.remoteSha || remoteState.sha || '',
+                                            textByLang(
+                                                '检测到本地与云端都有更新，已暂停当前自动拉取路径，请在“状态”面板选择处理方式',
+                                                'Both local and cloud changed. The current automatic pull path has been paused; choose an action in Status.'
+                                            ),
+                                            { openPanel: document.visibilityState === 'visible' }
+                                        );
+                                    } else {
+                                        runtime.lastError = textByLang(
+                                            '检测到本地未同步修改，已跳过当前自动拉取路径',
+                                            'Local unsynced changes detected; the current automatic pull path was skipped.'
+                                        );
+                                        saveRuntime();
+                                        renderStatus();
+                                    }
+                                    allowPullOnly = false;
+                                }
+                            }
+
+                            if (!allowPullOnly) {
+                                return;
+                            }
+
+                            if (!isExplicitRemoteOverwriteTrigger(trigger)
+                                && isManualTrigger
+                                && riskyLocalOverwrite
+                                && pullPreflight.winner !== 'remote'
+                                && pullPreflight.winner !== 'remote-reset') {
+                                backupSnapshotForRecovery(localSnapshot, `before-${String(trigger || 'pull')}-remote-overwrite`);
+                            }
+
                             actionText = await doPull(
                                 remoteState,
                                 syncMethod === 'rebase' ? 'pull (rebase mode, files)' : 'pull (files)',
@@ -5376,6 +6942,75 @@
                         actionText = await doResetHead(remoteState);
                     }
                     else {
+                        let allowPullOnly = true;
+                        const pullPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
+                        localHash = pullPreflight.localHash;
+
+                        const riskyLocalOverwrite = pullPreflight.localChanged
+                            || pullPreflight.concurrentChanged
+                            || pullPreflight.localUntracked;
+
+                        if (!pullPreflight.winner) {
+                            setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState));
+                            storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
+                                remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
+                                strategy: settings.conflictPolicy,
+                                syncMethod
+                            });
+                            runtime.lastAppliedDirection = 'conflict';
+                            runtime.lastError = textByLang(
+                                '检测到并发修改，已暂停当前拉取路径，请先在冲突面板选择处理方式',
+                                'Concurrent changes detected. The current pull path has been paused; resolve it in the conflict panel first.'
+                            );
+                            pendingReasons.clear();
+                            runtime.queueLength = 0;
+                            saveRuntime();
+                            renderStatus();
+                            toast(textByLang('检测到冲突：请先在面板中选择保留本地或使用云端', 'Conflict detected: choose keep local or use cloud in the panel first'));
+                            allowPullOnly = false;
+                        } else if (riskyLocalOverwrite && pullPreflight.winner !== 'remote' && pullPreflight.winner !== 'remote-reset') {
+                            if (isManualTrigger) {
+                                if (!requestOneWayOverwriteConfirmation('pull', pullPreflight)) {
+                                    runtime.lastError = '';
+                                    saveRuntime();
+                                    renderStatus();
+                                    toast(textByLang('已取消当前拉取操作', 'Current pull action cancelled'));
+                                    allowPullOnly = false;
+                                }
+                            } else {
+                                if (pullPreflight.remoteChanged || pullPreflight.concurrentChanged || pullPreflight.remoteUntracked) {
+                                    await setPendingMismatchState(
+                                        pullPreflight.remoteSha || remoteState.sha || '',
+                                        textByLang(
+                                            '检测到本地与云端都有更新，已暂停当前自动拉取路径，请在“状态”面板选择处理方式',
+                                            'Both local and cloud changed. The current automatic pull path has been paused; choose an action in Status.'
+                                        ),
+                                        { openPanel: document.visibilityState === 'visible' }
+                                    );
+                                } else {
+                                    runtime.lastError = textByLang(
+                                        '检测到本地未同步修改，已跳过当前自动拉取路径',
+                                        'Local unsynced changes detected; the current automatic pull path was skipped.'
+                                    );
+                                    saveRuntime();
+                                    renderStatus();
+                                }
+                                allowPullOnly = false;
+                            }
+                        }
+
+                        if (!allowPullOnly) {
+                            return;
+                        }
+
+                        if (!isExplicitRemoteOverwriteTrigger(trigger)
+                            && isManualTrigger
+                            && riskyLocalOverwrite
+                            && pullPreflight.winner !== 'remote'
+                            && pullPreflight.winner !== 'remote-reset') {
+                            backupSnapshotForRecovery(localSnapshot, `before-${String(trigger || 'pull')}-remote-overwrite`);
+                        }
+
                         actionText = await doPull(remoteState, syncMethod === 'rebase' ? 'pull (rebase mode)' : 'pull');
                     }
                 } else {
@@ -5515,7 +7150,7 @@
 
             const triggerText = trigger ? `（${trigger}）` : '';
             if (actionText === 'noop') {
-                if (!settings.hideNoChangeNotice) {
+                if (isManualTrigger || !settings.hideNoChangeNotice) {
                     toast(textByLang(`Obsidian Git 同步完成${triggerText}：无变更`, `Obsidian Git sync completed${triggerText}: no changes`));
                 }
             } else {
@@ -5565,6 +7200,8 @@
                 ensureStatusPanelVisible(panelMode);
             }
         } finally {
+            clearSyncUiProgress();
+            syncUiProgressEnabled = false;
             runtime.isRunning = false;
             saveRuntime();
             renderStatus();
@@ -5619,7 +7256,8 @@
         if (settings.obsidianFilePushEnabled === false) {
             throw new Error(textByLang('已关闭 Obsidian 文件推送，无法初始化云端', 'Obsidian file push is disabled, cannot initialize cloud'));
         }
-        const pushResult = await pushObsidianFilesIncremental(`manual-${reason || 'bootstrap-init'}`);
+        const bootstrapProgress = makeProgressRange(20, 85);
+        const pushResult = await pushObsidianFilesIncremental(`manual-${reason || 'bootstrap-init'}`, bootstrapProgress);
         const guidePaths = Array.isArray(pushResult && pushResult.guidePaths)
             ? pushResult.guidePaths.filter((path) => !!normalizeSyncPath(path))
             : [];
@@ -5632,21 +7270,30 @@
 
         let remoteRevision = '';
         try {
-            const remoteListRaw = await listRemoteObsidianFilesByPath(settings.obsidianExportRoot);
-            const remoteList = filterRemoteListForManagedSyncFiles(remoteListRaw, settings.obsidianExportRoot);
-            const remoteFilesByPath = remoteList && remoteList.filesByPath && typeof remoteList.filesByPath === 'object'
+            updateSyncUiProgress(textByLang('校验云端文件...', 'Validating cloud files...'), 90);
+            const root = settings.obsidianExportRoot;
+            let remoteListRaw = await listRemoteObsidianFilesByPath(root);
+            let remoteList = filterRemoteListForManagedSyncFiles(remoteListRaw, root);
+            let remoteFilesByPath = remoteList && remoteList.filesByPath && typeof remoteList.filesByPath === 'object'
                 ? remoteList.filesByPath
                 : {};
-            const hasGuideInRemote = guidePaths.some((path) => Object.prototype.hasOwnProperty.call(remoteFilesByPath, path));
+            let hasGuideInRemote = guidePaths.some((path) => Object.prototype.hasOwnProperty.call(remoteFilesByPath, path));
+
             if (!hasGuideInRemote) {
-                console.warn('[Canvas Sync] first sync guide not visible in immediate remote listing; continue without hard-fail', {
-                    guidePaths,
-                    root: settings.obsidianExportRoot || ''
-                });
+                // GitHub list endpoint could be eventually consistent right after a write.
+                // Retry once quietly to avoid noisy warnings.
+                await new Promise((resolve) => setTimeout(resolve, 800));
+                remoteListRaw = await listRemoteObsidianFilesByPath(root);
+                remoteList = filterRemoteListForManagedSyncFiles(remoteListRaw, root);
+                remoteFilesByPath = remoteList && remoteList.filesByPath && typeof remoteList.filesByPath === 'object'
+                    ? remoteList.filesByPath
+                    : {};
+                hasGuideInRemote = guidePaths.some((path) => Object.prototype.hasOwnProperty.call(remoteFilesByPath, path));
             }
+
             remoteRevision = buildRemoteObsidianRevisionFromList(remoteList);
-        } catch (error) {
-            console.warn('[Canvas Sync] first sync remote listing check skipped:', error);
+            updateSyncUiProgress(textByLang('云端文件校验完成', 'Cloud files validated'), 95);
+        } catch (_) {
             remoteRevision = '';
         }
 
@@ -5744,17 +7391,96 @@
         return String(keyword || '').trim().toUpperCase() === 'OVERWRITE';
     }
 
+    function requestOneWayOverwriteConfirmation(mode, summary = {}) {
+        const direction = mode === 'pull' ? 'pull' : 'push';
+        const concurrentChanged = summary && summary.concurrentChanged === true;
+        const localChanged = summary && summary.localChanged === true;
+        const remoteChanged = summary && summary.remoteChanged === true;
+        const localUntracked = summary && summary.localUntracked === true;
+        const remoteUntracked = summary && summary.remoteUntracked === true;
+
+        const detailLinesZh = [];
+        const detailLinesEn = [];
+
+        if (concurrentChanged) {
+            detailLinesZh.push('当前判断：本地和云端都已发生变化。');
+            detailLinesEn.push('Current assessment: both local and cloud changed.');
+        } else {
+            if (localChanged) {
+                detailLinesZh.push('当前判断：本地存在未同步的新变化。');
+                detailLinesEn.push('Current assessment: local has unsynced new changes.');
+            } else if (localUntracked) {
+                detailLinesZh.push('当前判断：本地已有变更，但当前缺少可靠共同基线。');
+                detailLinesEn.push('Current assessment: local already changed, but there is no reliable common baseline yet.');
+            }
+
+            if (remoteChanged) {
+                detailLinesZh.push('当前判断：云端存在较新的内容。');
+                detailLinesEn.push('Current assessment: cloud has newer content.');
+            } else if (remoteUntracked) {
+                detailLinesZh.push('当前判断：云端已有内容，但当前缺少可靠共同基线。');
+                detailLinesEn.push('Current assessment: cloud already has content, but there is no reliable common baseline yet.');
+            }
+        }
+
+        const confirmText = (direction === 'pull'
+            ? (getSyncLang() === 'en'
+                ? [
+                    'Pull-only is about to use cloud content to overwrite local data.',
+                    'A local recovery snapshot will be saved before overwrite.',
+                    ''
+                ].concat(detailLinesEn, [
+                    '',
+                    'Do you want to continue?'
+                ])
+                : [
+                    '“仅拉取”即将使用云端内容覆盖本地数据。',
+                    '执行前会自动保存一份本地恢复快照。',
+                    ''
+                ].concat(detailLinesZh, [
+                    '',
+                    '确定继续吗？'
+                ]))
+            : (getSyncLang() === 'en'
+                ? [
+                    'Push-only is about to use local content to overwrite cloud data.',
+                    'This operation does not pull cloud content first.',
+                    ''
+                ].concat(detailLinesEn, [
+                    '',
+                    'Do you want to continue?'
+                ])
+                : [
+                    '“仅上传”即将使用本地内容覆盖云端数据。',
+                    '该操作不会先拉取云端内容。',
+                    ''
+                ].concat(detailLinesZh, [
+                    '',
+                    '确定继续吗？'
+                ]))).join('\n');
+
+        if (!global.confirm(confirmText)) {
+            return false;
+        }
+
+        const keyword = global.prompt(textByLang('为防误操作，请输入 OVERWRITE 以继续：', 'Type OVERWRITE to continue:'), '');
+        return String(keyword || '').trim().toUpperCase() === 'OVERWRITE';
+    }
+
     async function requestFirstSyncPathValidation(options = {}) {
         setFirstSyncFoldOpen(true);
         const confirmed = await openFirstSyncPathValidationDialog(options);
         return !!confirmed;
     }
 
-    function resolveFirstSyncMode(preferredMode, hasRemotePermanentSnapshot) {
+    function resolveFirstSyncMode(preferredMode, hasRemotePermanentSnapshot, hasRemoteManagedFiles = false) {
         const mode = ensureFirstSyncMode(preferredMode);
         if (mode === 'auto') {
-            if (!hasRemotePermanentSnapshot) {
+            if (!hasRemoteManagedFiles) {
                 return 'local';
+            }
+            if (!hasRemotePermanentSnapshot) {
+                return 'remote-data-without-permanent';
             }
             const chooseCloud = global.confirm(textByLang(
                 '检测到云端已有永久栏目数据。\n\n确定 = 以云端为准（覆盖本地）\n取消 = 以本地为准（覆盖云端）',
@@ -5793,18 +7519,33 @@
         saveRuntime();
         renderStatus();
         setFirstSyncStatus(textByLang('首次同步进行中...', 'First sync is running...'), 'neutral');
+        syncUiProgressEnabled = isManualSyncTrigger(null, trigger);
+        updateSyncUiProgress(textByLang('首次同步中...', 'Running first sync...'), 0);
 
         try {
             const preferredMode = ensureFirstSyncMode(settings.firstSyncMode);
+            updateSyncUiProgress(textByLang('读取云端状态...', 'Reading cloud state...'), 10);
             const remoteState = await readRemoteSnapshotWithPathRecovery({
                 interactive: true,
                 continueAfterConfirm: true
             });
+            updateSyncUiProgress(textByLang('云端状态已读取', 'Cloud state loaded'), 18);
             const remoteSnapshot = remoteState.notFound ? null : normalizeSnapshot(remoteState.snapshot || {});
             const remotePermanentTree = remoteSnapshot ? normalizeBookmarkTreeSnapshot(remoteSnapshot.permanentTreeSnapshot) : null;
             const hasRemotePermanentSnapshot = !!remotePermanentTree;
+            const remoteManagedFiles = remoteState && remoteState.remoteList && Array.isArray(remoteState.remoteList.files)
+                ? remoteState.remoteList.files
+                : [];
+            const hasRemoteManagedFiles = remoteManagedFiles.length > 0;
 
-            const effectiveMode = resolveFirstSyncMode(preferredMode, hasRemotePermanentSnapshot);
+            const effectiveMode = resolveFirstSyncMode(preferredMode, hasRemotePermanentSnapshot, hasRemoteManagedFiles);
+
+            if (effectiveMode === 'remote-data-without-permanent') {
+                throw new Error(textByLang(
+                    '检测到云端已有同步文件，但未恢复出可用于首次同步的永久栏目快照。为避免误判为“云端为空”并覆盖云端，请先检查云端路径/文件，或明确切换到“以本地为准”。',
+                    'Cloud sync files were detected, but no permanent snapshot could be restored for first sync. To avoid treating the cloud as empty and overwriting it, verify the remote path/files first or explicitly switch to "Use local".'
+                ));
+            }
 
             if (effectiveMode === 'local') {
                 if (hasRemotePermanentSnapshot) {
@@ -5817,7 +7558,9 @@
                     }
                 }
 
+                updateSyncUiProgress(textByLang('正在以本地初始化云端...', 'Initializing cloud from local...'), 20);
                 await initializeRemoteSnapshotFromLocal(hasRemotePermanentSnapshot ? 'first-sync-local-overwrite-cloud' : 'first-sync-local-bootstrap-cloud');
+                updateSyncUiProgress(textByLang('云端初始化完成', 'Cloud initialized'), 95);
 
                 runtime.lastSyncMode = 'first-sync-local';
                 runtime.lastError = '';
@@ -5828,16 +7571,22 @@
                 setFirstSyncStatus(
                     hasRemotePermanentSnapshot
                         ? textByLang('首次同步完成：已按本地覆盖云端永久栏目', 'First sync completed: local permanent section overwrote cloud')
-                        : textByLang('首次同步完成：检测到云端为空，已按本地初始化云端', 'First sync completed: cloud was empty, initialized from local'),
+                        : (hasRemoteManagedFiles
+                            ? textByLang('首次同步完成：云端已有同步文件但缺少永久栏目快照，已按本地重建云端', 'First sync completed: cloud had sync files but no permanent snapshot; rebuilt from local')
+                            : textByLang('首次同步完成：检测到云端为空，已按本地初始化云端', 'First sync completed: cloud was empty, initialized from local')),
                     'ok'
                 );
                 toast(textByLang(
                     hasRemotePermanentSnapshot
                         ? '首次同步完成：已按本地覆盖云端永久栏目'
-                        : '首次同步完成：云端为空，已按本地初始化',
+                        : (hasRemoteManagedFiles
+                            ? '首次同步完成：云端已有同步文件但缺少永久栏目快照，已按本地重建'
+                            : '首次同步完成：云端为空，已按本地初始化'),
                     hasRemotePermanentSnapshot
                         ? 'First sync completed: local overwrote cloud permanent section'
-                        : 'First sync completed: cloud empty, initialized from local'
+                        : (hasRemoteManagedFiles
+                            ? 'First sync completed: cloud had sync files but no permanent snapshot; rebuilt from local'
+                            : 'First sync completed: cloud empty, initialized from local')
                 ));
                 setFirstSyncFoldOpen(false);
                 return true;
@@ -5845,8 +7594,12 @@
 
             if (!hasRemotePermanentSnapshot) {
                 throw new Error(textByLang(
-                    '云端没有可用永久栏目快照，无法以云端为准。请改用“自动”或“以本地为准”。',
-                    'Cloud has no permanent snapshot, cannot use cloud as source. Switch to "Auto" or "Use local".'
+                    hasRemoteManagedFiles
+                        ? '云端已有同步文件，但没有可用永久栏目快照，无法以云端为准。请先检查云端导出内容/同步路径，或改用“以本地为准”。'
+                        : '云端没有可用永久栏目快照，无法以云端为准。请改用“自动”或“以本地为准”。',
+                    hasRemoteManagedFiles
+                        ? 'Cloud has sync files but no usable permanent snapshot, so it cannot be used as the source of truth. Check the remote export/path first, or switch to "Use local".'
+                        : 'Cloud has no permanent snapshot, cannot use cloud as source. Switch to "Auto" or "Use local".'
                 ));
             }
 
@@ -5855,18 +7608,39 @@
                 throw new Error(textByLang('已取消首次覆盖操作', 'First overwrite cancelled'));
             }
 
+            updateSyncUiProgress(textByLang('备份本地数据...', 'Backing up local data...'), 25);
             const localBackupSnapshot = await buildLocalSnapshot('before-first-sync-overwrite', {
                 includePermanentTree: true
             });
             backupSnapshotForRecovery(localBackupSnapshot, 'before-first-sync-cloud-overwrite');
 
+            updateSyncUiProgress(textByLang('正在覆盖本地...', 'Overwriting local...'), 45);
+            // First sync (cloud as source): this is the baseline implementation for
+            // permanent-section overwrite into the real browser bookmark tree.
             await overwriteLocalPermanentTreeFromSnapshot(remotePermanentTree);
-            applySnapshotToLocal(remoteSnapshot, {
-                bypassDeleteThreshold: true,
-                bypassReason: 'first-sync-cloud-overwrite'
-            });
+
+            let firstSyncAppliedByFiles = false;
+            if (settings.obsidianFilePushEnabled !== false && remoteState && remoteState.remoteList && Array.isArray(remoteState.remoteList.files) && remoteState.remoteList.files.length > 0) {
+                try {
+                    const fileApplyResult = await applyRemoteObsidianFilesReplace(
+                        remoteState.remoteList,
+                        'first-sync-cloud-overwrite'
+                    );
+                    firstSyncAppliedByFiles = !!(fileApplyResult && fileApplyResult.applied);
+                } catch (error) {
+                    console.warn('[Canvas Sync] apply remote files replace in first-sync cloud overwrite failed:', error);
+                }
+            }
+
+            if (!firstSyncAppliedByFiles) {
+                applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot), {
+                    bypassDeleteThreshold: true,
+                    bypassReason: 'first-sync-cloud-overwrite'
+                });
+            }
             if (settings.obsidianFilePushEnabled !== false) {
                 try {
+                    updateSyncUiProgress(textByLang('重建本地索引...', 'Rebuilding local index...'), 75);
                     let remoteFilesByPath = null;
                     let rebuiltResult = null;
                     try {
@@ -5884,6 +7658,7 @@
                     if (rebuiltResult && rebuiltResult.enabled) {
                         runtime.lastLocalFilesSha = String(rebuiltResult.localRevision || runtime.lastLocalFilesSha || '');
                     }
+                    updateSyncUiProgress(textByLang('本地索引已更新', 'Local index updated'), 90);
                 } catch (error) {
                     console.warn('[Canvas Sync] rebuild local obsidian index after first-sync cloud overwrite failed:', error);
                 }
@@ -5909,6 +7684,7 @@
             );
             toast(textByLang(`首次同步完成：已按云端覆盖本地（书签 ${stats.bookmarks}，文件夹 ${stats.folders}）`, `First sync completed: cloud overwrote local (bookmarks ${stats.bookmarks}, folders ${stats.folders})`));
             setFirstSyncFoldOpen(false);
+            updateSyncUiProgress(textByLang('首次同步完成', 'First sync completed'), 100);
             return true;
         } catch (error) {
             runtime.lastError = error && error.message ? error.message : String(error);
@@ -5930,6 +7706,8 @@
             }
             return false;
         } finally {
+            clearSyncUiProgress();
+            syncUiProgressEnabled = false;
             runtime.isRunning = false;
             saveRuntime();
             renderStatus();
@@ -6059,6 +7837,27 @@
     function restartAutomationTimers() {
         restartFallbackTimer();
         restartPushPullTimers();
+        restartForegroundMismatchTimer();
+    }
+
+    function restartForegroundMismatchTimer() {
+        if (foregroundMismatchTimer) {
+            clearInterval(foregroundMismatchTimer);
+            foregroundMismatchTimer = null;
+        }
+        if (!settings || !settings.enabled) return;
+        if (settings.foregroundCheckEnabled === false) return;
+
+        const intervalMs = normalizeForegroundCheckSeconds(settings.foregroundCheckIntervalSeconds, DEFAULT_SETTINGS.foregroundCheckIntervalSeconds) * 1000;
+        foregroundMismatchTimer = setInterval(async () => {
+            try {
+                if (document.visibilityState !== 'visible') return;
+                if (runtime && runtime.isRunning) return;
+                if (hasPendingConflict()) return;
+                await sendRuntimeMessage({ action: 'canvasGitSyncRunBackgroundCheckNow' }, 12000);
+                await refreshPendingMismatchFromBackground();
+            } catch (_) { }
+        }, intervalMs);
     }
 
     function scheduleStartupPull() {
@@ -6101,6 +7900,7 @@
         setActiveTab(targetTab, { persist: false });
         setFirstSyncFoldOpen(false);
         modal.style.display = 'block';
+        updateFloatingProgressVisibility();
 
         global.requestAnimationFrame(() => {
             positionPanel();
@@ -6122,6 +7922,7 @@
             renderConflictPanel();
         }
         modal.style.display = 'none';
+        updateFloatingProgressVisibility();
     }
 
     function bindPanelEvents() {
@@ -6168,17 +7969,25 @@
 
                     setRepoStatus(textByLang('配置已保存，正在自动测试连接...', 'Configuration saved, testing connection automatically...'), 'neutral');
                     const config = collectRepoConfigFromForm();
-                    await testRepoConfig(config);
+                    const testResult = await testRepoConfig(config);
+                    if (!confirmMissingBranchAutoCreate(testResult, config)) {
+                        setRepoStatus(textByLang('已取消保存：请先修改分支名或保持当前配置', 'Save cancelled: update the branch name first or keep the current config'), 'neutral');
+                        return;
+                    }
                     const wasEnabled = await persistVerifiedRepoConfigAndEnableSync(config);
 
                     focusFirstSyncSetup();
                     toast(textByLang(
-                        wasEnabled
-                            ? '保存并测试成功，已跳转到首次同步策略'
-                            : '保存并测试成功，已启用同步并跳转到首次同步策略',
-                        wasEnabled
-                            ? 'Saved and tested successfully, redirected to first sync strategy'
-                            : 'Saved and tested successfully, sync enabled and redirected to first sync strategy'
+                        testResult && testResult.branchWillBeCreated
+                            ? '保存并测试成功：首次同步时将自动创建该分支，并已跳转到首次同步策略'
+                            : (wasEnabled
+                                ? '保存并测试成功，已跳转到首次同步策略'
+                                : '保存并测试成功，已启用同步并跳转到首次同步策略'),
+                        testResult && testResult.branchWillBeCreated
+                            ? 'Saved and tested successfully: the branch will be created automatically on first sync, and the first-sync setup is now focused'
+                            : (wasEnabled
+                                ? 'Saved and tested successfully, redirected to first sync strategy'
+                                : 'Saved and tested successfully, sync enabled and redirected to first sync strategy')
                     ));
                 } catch (error) {
                     const text = error && error.message ? error.message : String(error);
@@ -6198,16 +8007,24 @@
                     repoTestBtn.disabled = true;
                     setRepoStatus(textByLang('正在测试连接，请稍候...', 'Testing connection, please wait...'), 'neutral');
                     const config = collectRepoConfigFromForm();
-                    await testRepoConfig(config);
+                    const testResult = await testRepoConfig(config);
+                    if (!confirmMissingBranchAutoCreate(testResult, config)) {
+                        setRepoStatus(textByLang('已取消保存：请先修改分支名后再测试', 'Save cancelled: update the branch name first, then test again'), 'neutral');
+                        return;
+                    }
                     const wasEnabled = await persistVerifiedRepoConfigAndEnableSync(config);
 
                     toast(textByLang(
-                        wasEnabled
-                            ? '仓库连接测试成功'
-                            : '仓库连接测试成功，已自动启用同步',
-                        wasEnabled
-                            ? 'Repository connection test succeeded'
-                            : 'Repository connection test succeeded, sync has been enabled automatically'
+                        testResult && testResult.branchWillBeCreated
+                            ? '仓库连接测试成功：首次同步时将自动创建该分支'
+                            : (wasEnabled
+                                ? '仓库连接测试成功'
+                                : '仓库连接测试成功，已自动启用同步'),
+                        testResult && testResult.branchWillBeCreated
+                            ? 'Repository connection test succeeded: the branch will be created automatically on first sync'
+                            : (wasEnabled
+                                ? 'Repository connection test succeeded'
+                                : 'Repository connection test succeeded, sync has been enabled automatically')
                     ));
                 } catch (error) {
                     const text = error && error.message ? error.message : String(error);
@@ -6219,20 +8036,25 @@
             });
         }
 
-        [
-            'canvasSyncEnabledToggle',
-            'canvasSyncAutoToggle',
-            'canvasSyncAutoAfterEditStopToggle',
-            'canvasSyncIntervalInput',
-            'canvasSyncSplitIntervalsToggle',
-            'canvasSyncFirstSyncModeAutoInput',
-            'canvasSyncFirstSyncModeCloudInput',
-            'canvasSyncFirstSyncModeLocalInput',
-            'canvasSyncPermanentTreeIntervalSelect',
-            'canvasSyncTempSectionIntervalInput',
-            'canvasSyncMdNodeIntervalInput',
-            'canvasSyncAutoPushIntervalInput',
+	        [
+	            'canvasSyncEnabledToggle',
+	            'canvasSyncAutoToggle',
+	            'canvasSyncAutoAfterEditStopToggle',
+	            'canvasSyncIntervalInput',
+	            'canvasSyncSplitIntervalsToggle',
+	            'canvasSyncFirstSyncModeAutoInput',
+	            'canvasSyncFirstSyncModeCloudInput',
+	            'canvasSyncFirstSyncModeLocalInput',
+	            'canvasSyncPermanentModeAutoInput',
+	            'canvasSyncPermanentModeCloudInput',
+	            'canvasSyncPermanentModeLocalInput',
+	            'canvasSyncPermanentTreeIntervalSelect',
+	            'canvasSyncTempSectionIntervalInput',
+	            'canvasSyncMdNodeIntervalInput',
+	            'canvasSyncAutoPushIntervalInput',
             'canvasSyncAutoPullIntervalInput',
+            'canvasSyncForegroundCheckToggle',
+            'canvasSyncForegroundCheckIntervalInput',
             'canvasSyncBackgroundCheckToggle',
             'canvasSyncBackgroundCheckIntervalInput',
             'canvasSyncBackgroundCooldownInput',
@@ -6244,6 +8066,8 @@
             'canvasSyncMethodSelect',
             'canvasSyncConflictSelect',
             'canvasSyncDeleteThresholdInput',
+            'canvasSyncPermanentPullModeSelect',
+            'canvasSyncPermanentIncrementalThresholdInput',
             'canvasSyncObsidianFilePushToggle',
             'canvasSyncObsidianExportFormatSelect',
             'canvasSyncObsidianExportRootInput'
@@ -6257,24 +8081,38 @@
         });
 
         const syncNowBtn = getElement('canvasSyncNowBtn');
-        if (syncNowBtn) syncNowBtn.addEventListener('click', () => runSync('full', 'manual'));
+        if (syncNowBtn) {
+            syncNowBtn.addEventListener('click', () => {
+                void runWithButtonBusy(syncNowBtn, () => runSync('full', 'manual'));
+            });
+        }
 
         const pushOnlyBtn = getElement('canvasSyncPushOnlyBtn');
-        if (pushOnlyBtn) pushOnlyBtn.addEventListener('click', () => runSync('push', 'manual-push'));
+        if (pushOnlyBtn) {
+            pushOnlyBtn.addEventListener('click', () => {
+                void runWithButtonBusy(pushOnlyBtn, () => runSync('push', 'manual-push'));
+            });
+        }
 
         const pullOnlyBtn = getElement('canvasSyncPullOnlyBtn');
-        if (pullOnlyBtn) pullOnlyBtn.addEventListener('click', () => runSync('pull', 'manual-pull'));
+        if (pullOnlyBtn) {
+            pullOnlyBtn.addEventListener('click', () => {
+                void runWithButtonBusy(pullOnlyBtn, () => runSync('pull', 'manual-pull'));
+            });
+        }
 
         const rebuildBtn = getElement('canvasSyncRebuildBtn');
         if (rebuildBtn) {
             rebuildBtn.addEventListener('click', () => {
-                runtime = Object.assign({}, DEFAULT_RUNTIME);
-                clearPendingConflict();
-                setSyncMetaRaw(OBSIDIAN_FILE_HASHES_KEY, null);
-                saveRuntime();
-                renderStatus();
-                renderConflictPanel();
-                toast(textByLang('同步状态已刷新', 'Sync state refreshed'));
+                void runWithButtonBusy(rebuildBtn, async () => {
+                    runtime = Object.assign({}, DEFAULT_RUNTIME);
+                    clearPendingConflict();
+                    setSyncMetaRaw(OBSIDIAN_FILE_HASHES_KEY, null);
+                    saveRuntime();
+                    renderStatus();
+                    renderConflictPanel();
+                    toast(textByLang('同步状态已刷新', 'Sync state refreshed'));
+                });
             });
         }
 
@@ -6340,24 +8178,18 @@
         }
 
         if (firstSyncOverwriteBtn) {
-            firstSyncOverwriteBtn.addEventListener('click', async () => {
-                pullSettingsFromForm();
-                if (!isFirstSyncPathValidated()) {
-                    const pathConfirmed = await requestFirstSyncPathValidation({ continueAfterConfirm: true });
-                    if (!pathConfirmed) {
-                        toast(textByLang('请先完成路径校验后再执行首次同步', 'Please complete path validation before running first sync'));
-                        return;
+            firstSyncOverwriteBtn.addEventListener('click', () => {
+                void (async () => {
+                    pullSettingsFromForm();
+                    if (!isFirstSyncPathValidated()) {
+                        const pathConfirmed = await requestFirstSyncPathValidation({ continueAfterConfirm: true });
+                        if (!pathConfirmed) {
+                            toast(textByLang('请先完成路径校验后再执行首次同步', 'Please complete path validation before running first sync'));
+                            return;
+                        }
                     }
-                }
-                try {
-                    firstSyncOverwriteBtn.disabled = true;
-                    const success = await runFirstSyncCloudOverwrite();
-                    if (success) {
-                        toast(textByLang('首次同步已完成，已自动收起该区块', 'First sync completed, this section has been collapsed'));
-                    }
-                } finally {
-                    firstSyncOverwriteBtn.disabled = false;
-                }
+                    await runWithButtonBusy(firstSyncOverwriteBtn, () => runFirstSyncCloudOverwrite());
+                })();
             });
         }
 
@@ -6390,23 +8222,47 @@
 
         const mismatchUseRemoteBtn = getElement('canvasSyncMismatchUseRemoteBtn');
         if (mismatchUseRemoteBtn) {
-            mismatchUseRemoteBtn.addEventListener('click', async () => {
-                const ok = await resolvePendingMismatchBySync('pull', 'mismatch-panel-pull');
-                if (!ok) {
-                    toast(textByLang('与云端对齐失败，请检查错误后重试', 'Failed to align with cloud; check errors and retry'));
+            mismatchUseRemoteBtn.addEventListener('click', () => {
+                if (runtime.isRunning) {
+                    toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
+                    return;
                 }
-                renderMismatchPanel();
+                void runWithButtonBusy(mismatchUseRemoteBtn, async () => {
+                    if (runtime.isRunning) {
+                        toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
+                        renderMismatchPanel();
+                        return false;
+                    }
+                    const ok = await resolvePendingMismatchBySync('pull', 'mismatch-panel-pull');
+                    if (!ok) {
+                        toast(textByLang('与云端对齐失败，请检查错误后重试', 'Failed to align with cloud; check errors and retry'));
+                    }
+                    renderMismatchPanel();
+                    return ok;
+                });
             });
         }
 
         const mismatchUseLocalBtn = getElement('canvasSyncMismatchUseLocalBtn');
         if (mismatchUseLocalBtn) {
-            mismatchUseLocalBtn.addEventListener('click', async () => {
-                const ok = await resolvePendingMismatchBySync('push', 'mismatch-panel-push');
-                if (!ok) {
-                    toast(textByLang('本地覆盖云端失败，请检查错误后重试', 'Failed to overwrite cloud with local; check errors and retry'));
+            mismatchUseLocalBtn.addEventListener('click', () => {
+                if (runtime.isRunning) {
+                    toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
+                    return;
                 }
-                renderMismatchPanel();
+                void runWithButtonBusy(mismatchUseLocalBtn, async () => {
+                    if (runtime.isRunning) {
+                        toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
+                        renderMismatchPanel();
+                        return false;
+                    }
+                    const ok = await resolvePendingMismatchBySync('push', 'mismatch-panel-push');
+                    if (!ok) {
+                        toast(textByLang('本地覆盖云端失败，请检查错误后重试', 'Failed to overwrite cloud with local; check errors and retry'));
+                    }
+                    renderMismatchPanel();
+                    return ok;
+                });
             });
         }
 
@@ -6454,6 +8310,14 @@
             saveRuntime();
             renderStatus();
         });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'visible') return;
+            restartForegroundMismatchTimer();
+            void refreshPendingMismatchFromBackground()
+                .then(() => maybePromptPendingMismatchOnInit())
+                .catch(() => { });
+        });
     }
 
     async function init() {
@@ -6463,6 +8327,9 @@
 
         settings = loadSettings();
         runtime = loadRuntime();
+        // Foreground sync cannot survive a page reload; stale persisted running state would
+        // disable all action buttons and suppress mismatch prompts incorrectly.
+        runtime.isRunning = false;
         runtime.pendingMismatch = runtime.pendingMismatch === true;
         runtime.pendingMismatchAt = Number(runtime.pendingMismatchAt) || 0;
         runtime.pendingMismatchRemoteSha = String(runtime.pendingMismatchRemoteSha || '');
@@ -6538,6 +8405,11 @@
             settings.autoPushIntervalMinutes = normalizeSplitIntervalMinutes(settings.autoPushIntervalMinutes, DEFAULT_SETTINGS.autoPushIntervalMinutes);
             settings.autoPullIntervalMinutes = normalizeSplitIntervalMinutes(settings.autoPullIntervalMinutes, DEFAULT_SETTINGS.autoPullIntervalMinutes);
             settings.mismatchPolicy = ensureMismatchPolicy(settings.mismatchPolicy);
+            settings.foregroundCheckEnabled = settings.foregroundCheckEnabled !== false;
+            settings.foregroundCheckIntervalSeconds = normalizeForegroundCheckSeconds(
+                settings.foregroundCheckIntervalSeconds,
+                DEFAULT_SETTINGS.foregroundCheckIntervalSeconds
+            );
             settings.backgroundCheckEnabled = settings.backgroundCheckEnabled !== false;
             settings.backgroundCheckIntervalMinutes = normalizeBackgroundMinutes(
                 settings.backgroundCheckIntervalMinutes,
@@ -6554,6 +8426,11 @@
             settings.pullOnSync = settings.pullOnSync !== false;
             settings.hideNoChangeNotice = !!settings.hideNoChangeNotice;
             settings.firstSyncMode = ensureFirstSyncMode(settings.firstSyncMode);
+            settings.permanentPullMode = ensurePermanentPullMode(settings.permanentPullMode);
+            settings.permanentIncrementalMaxChanges = normalizePermanentIncrementalMaxChanges(
+                settings.permanentIncrementalMaxChanges,
+                DEFAULT_SETTINGS.permanentIncrementalMaxChanges
+            );
             settings.permanentTreeUploadIntervalSeconds = normalizePermanentTreeUploadIntervalSeconds(
                 settings.permanentTreeUploadIntervalSeconds,
                 DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds

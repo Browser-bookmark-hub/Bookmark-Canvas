@@ -147,6 +147,17 @@
     return module.CanvasState;
   }
 
+  function hasEnabledObsidianSync() {
+    try {
+      const syncApi = global.CanvasObsidianGitSync;
+      if (!syncApi || typeof syncApi.getSettings !== 'function') return false;
+      const settings = syncApi.getSettings();
+      return !!(settings && settings.enabled);
+    } catch (_) {
+      return false;
+    }
+  }
+
   function normalizeHexColor(value, fallback) {
     const raw = normalizeText(value);
     if (!raw) return fallback;
@@ -1120,33 +1131,97 @@
         return compareText(a && a.id, b && b.id);
       });
 
-      const blankItems = sortedMdNodes.map((node, index) => makeItemNode({
-        key: `${keyPrefix}blank-${node.id}`,
-        code: '',
-        title: `${index + 1}. ${getMdNodeTitle(node)}`,
-        color: nodeColorResolver(node),
-        defaultColor,
-        icon: itemIcon,
-        iconText,
-        iconTone,
-        variant,
-        showDeleteControl: true,
-        deleteAction: {
-          kind: 'md-node',
-          nodeId: node.id,
-          scopeOptions: !!(node && node.subtype === 'import-container'),
-          currentTitle: t('仅删除框体', 'Delete frame only'),
-          allTitle: t('删除全部内容', 'Delete all content')
-        },
-        target: { kind: 'md-node', nodeId: node.id },
-        preview: ''
-      }));
+      const isNativeCard = (node) => {
+        if (!node) return false;
+        const subtype = normalizeText(node && node.subtype).toLowerCase();
+        const source = normalizeText(node && node.source).toLowerCase();
+        return subtype === 'canvas-native-text' || source.startsWith('obsidian-canvas-');
+      };
 
-      if (!blankItems.length) {
-        blankItems.push(makePlaceholderItem(
-          config.emptyKey || `${keyPrefix}blank-empty`,
+      const nativeCards = sortedMdNodes.filter((node) => isNativeCard(node));
+      const pluginCards = sortedMdNodes.filter((node) => !isNativeCard(node));
+
+      const buildBlankItems = (list, groupKey) => {
+        const items = (Array.isArray(list) ? list : []).map((node, index) => makeItemNode({
+          key: `${keyPrefix}blank-${groupKey}-${node.id}`,
+          code: '',
+          title: `${index + 1}. ${getMdNodeTitle(node)}`,
+          color: nodeColorResolver(node),
+          defaultColor,
+          icon: itemIcon,
+          iconText,
+          iconTone,
+          variant,
+          showDeleteControl: true,
+          deleteAction: {
+            kind: 'md-node',
+            nodeId: node.id,
+            scopeOptions: !!(node && node.subtype === 'import-container'),
+            currentTitle: t('仅删除框体', 'Delete frame only'),
+            allTitle: t('删除全部内容', 'Delete all content')
+          },
+          target: { kind: 'md-node', nodeId: node.id },
+          preview: ''
+        }));
+        return items;
+      };
+
+      const showSyncSubfolders = hasEnabledObsidianSync();
+      const directItems = buildBlankItems(sortedMdNodes, 'all');
+      if (!showSyncSubfolders) {
+        if (!directItems.length) {
+          directItems.push(makePlaceholderItem(
+            config.emptyKey || `${keyPrefix}blank-empty`,
+            '',
+            t('暂无空白栏目', 'No blank cards'),
+            {
+              iconText,
+              iconTone,
+              variant,
+              color: folderColor,
+              defaultColor
+            }
+          ));
+        }
+
+        return makeFolderNode({
+          key: config.folderKey || 'folder-blank',
+          code: '',
+          title: config.title || t('空白栏目', 'Blank'),
+          color: folderColor,
+          defaultColor,
+          icon: folderIcon,
+          iconText,
+          iconTone,
+          variant,
+          open: config.open !== false,
+          count: typeof config.count === 'number' ? config.count : sortedMdNodes.length,
+          children: directItems
+        });
+      }
+
+      const nativeItems = buildBlankItems(nativeCards, 'native');
+      if (!nativeItems.length) {
+        nativeItems.push(makePlaceholderItem(
+          `${keyPrefix}blank-native-empty`,
           '',
-          t('暂无空白栏目', 'No blank nodes'),
+          t('暂无 Obsidian 原生卡片', 'No Obsidian native cards'),
+          {
+            iconText,
+            iconTone,
+            variant,
+            color: folderColor,
+            defaultColor
+          }
+        ));
+      }
+
+      const pluginItems = buildBlankItems(pluginCards, 'plugin');
+      if (!pluginItems.length) {
+        pluginItems.push(makePlaceholderItem(
+          `${keyPrefix}blank-plugin-empty`,
+          '',
+          t('暂无 插件空白卡片', 'No plugin blank cards'),
           {
             iconText,
             iconTone,
@@ -1169,7 +1244,34 @@
         variant,
         open: config.open !== false,
         count: typeof config.count === 'number' ? config.count : sortedMdNodes.length,
-        children: blankItems
+        children: [
+          makeFolderNode({
+            key: `${config.folderKey || 'folder-blank'}-native`,
+            code: '',
+            title: t('obsidian原生卡片', 'Obsidian native cards'),
+            color: folderColor,
+            defaultColor,
+            icon: 'fas fa-pen',
+            iconText,
+            iconTone,
+            variant,
+            count: nativeCards.length,
+            children: nativeItems
+          }),
+          makeFolderNode({
+            key: `${config.folderKey || 'folder-blank'}-plugin`,
+            code: '',
+            title: t('插件空白卡片', 'Plugin blank cards'),
+            color: folderColor,
+            defaultColor,
+            icon: 'fas fa-file-alt',
+            iconText,
+            iconTone,
+            variant,
+            count: pluginCards.length,
+            children: pluginItems
+          })
+        ]
       });
     };
 
