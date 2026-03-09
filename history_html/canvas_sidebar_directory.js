@@ -83,6 +83,20 @@
     return lines[0];
   }
 
+  function normalizeMdNodeTitleLine(raw) {
+    let line = squeezeSpaces(raw);
+    if (!line) return '';
+    while (/^#{1,6}\s+/.test(line)) {
+      line = line.replace(/^#{1,6}\s+/, '').trim();
+    }
+    line = line
+      .replace(/^>+\s*/, '')
+      .replace(/^[-*+]\s+/, '')
+      .replace(/^\d+[.)]\s+/, '')
+      .trim();
+    return squeezeSpaces(line);
+  }
+
   function getMdNodeFirstLineFromDom(nodeId) {
     const normalizedId = normalizeText(nodeId);
     if (!normalizedId) return '';
@@ -621,13 +635,13 @@
   }
 
   function getMdNodeTitle(node) {
-    const byLiveText = getMdNodeFirstLineFromDom(node && node.id);
+    const byLiveText = normalizeMdNodeTitleLine(getMdNodeFirstLineFromDom(node && node.id));
     if (byLiveText) return byLiveText;
 
-    const byText = getFirstLineText(node && node.text);
+    const byText = normalizeMdNodeTitleLine(getFirstLineText(node && node.text));
     if (byText) return byText;
 
-    const byHtml = getFirstLineText(node && node.html);
+    const byHtml = normalizeMdNodeTitleLine(getFirstLineText(node && node.html));
     if (byHtml) return byHtml;
 
     return t('未命名空白栏目', 'Untitled blank node');

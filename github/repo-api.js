@@ -147,17 +147,25 @@ function textToBase64(content) {
 }
 
 async function githubRequestRaw(url, { method = 'GET', headers = {}, body } = {}) {
+  const normalizedMethod = String(method || 'GET').trim().toUpperCase();
   const requestHeaders = {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': GITHUB_API_VERSION,
+    ...(normalizedMethod === 'GET'
+      ? {
+          'Cache-Control': 'no-cache, no-store, max-age=0',
+          Pragma: 'no-cache'
+        }
+      : {}),
     ...headers
   };
 
   const doFetch = async (effectiveHeaders) => {
     const response = await fetch(url, {
-      method,
+      method: normalizedMethod,
       headers: effectiveHeaders,
-      body
+      body,
+      cache: normalizedMethod === 'GET' ? 'no-store' : 'default'
     });
 
     const text = await response.text();
@@ -1311,6 +1319,20 @@ export async function applyRepoFilesBatch({ token, owner, repo, branch, message,
       const newTreeSha = treeJson && treeJson.sha ? String(treeJson.sha) : '';
       if (!newTreeSha) {
         return { success: false, error: '创建 Tree 失败' };
+      }
+
+      if (newTreeSha === baseTreeSha) {
+        return {
+          success: true,
+          branch: resolvedBranch,
+          baseSha: headSha,
+          treeSha: newTreeSha,
+          commitSha: headSha,
+          updated: 0,
+          deleted: 0,
+          fileShas,
+          noChanges: true
+        };
       }
 
       const newCommitJson = await createCommit(newTreeSha, headSha);

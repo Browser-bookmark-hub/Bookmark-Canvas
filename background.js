@@ -939,6 +939,61 @@ function buildCanvasGitRemoteRevision(files, basePath = '') {
   return `files:${hashString(canonical)}`;
 }
 
+function buildCanvasManagedCanvasFileNameCandidates(rootPath = '') {
+  const normalizedRoot = normalizeGitHubRepoPath(rootPath);
+  const rootLeaf = normalizedRoot
+    ? normalizedRoot.split('/').filter(Boolean).slice(-1)[0]
+    : '';
+  const candidates = new Set([
+    '书签画布.canvas',
+    'bookmark-canvas.canvas'
+  ]);
+  if (rootLeaf) {
+    candidates.add(`${rootLeaf}.canvas`);
+  }
+  return candidates;
+}
+
+function isCanvasManagedSyncRelativePath(relativePath, canvasFileNames) {
+  const relative = normalizeGitHubRepoPath(relativePath);
+  if (!relative) return false;
+  if (/^(永久栏目|Permanent|临时栏目|Temporary|空白栏目|Blank)\/.+\.md$/i.test(relative)) {
+    return true;
+  }
+  if (/^(说明导入规则\.md|README_Import_Rules\.md|说明_导入规则\.md)$/i.test(relative)) {
+    return true;
+  }
+  if (/^[^/]+\.canvas$/i.test(relative)) {
+    const fileName = relative.split('/').pop() || '';
+    return !!(canvasFileNames && canvasFileNames.has(fileName));
+  }
+  return false;
+}
+
+function filterCanvasManagedSyncFilesForRevision(filesInput, rootPath = '') {
+  const sourceFiles = Array.isArray(filesInput) ? filesInput : [];
+  const normalizedRoot = normalizeGitHubRepoPath(rootPath);
+  const rootPrefix = normalizedRoot ? `${normalizedRoot}/` : '';
+  const canvasFileNames = buildCanvasManagedCanvasFileNameCandidates(normalizedRoot);
+  const files = [];
+
+  sourceFiles.forEach((entry) => {
+    const repoPath = normalizeGitHubRepoPath(entry && entry.path);
+    if (!repoPath) return;
+
+    let relativePath = repoPath;
+    if (normalizedRoot) {
+      if (!repoPath.startsWith(rootPrefix)) return;
+      relativePath = repoPath.slice(rootPrefix.length);
+    }
+
+    if (!isCanvasManagedSyncRelativePath(relativePath, canvasFileNames)) return;
+    files.push(entry);
+  });
+
+  return files;
+}
+
 function textToBase64(text) {
   const encoder = new TextEncoder();
   const bytes = encoder.encode(String(text ?? ''));
@@ -1135,7 +1190,7 @@ function toFiniteNumber(value, fallback = 0) {
 
 function normalizeCanvasGitSyncMismatchPolicy(value) {
   const raw = String(value || '').trim().toLowerCase();
-  return raw === 'auto_pull' ? 'auto_pull' : 'prompt';
+  return raw === 'auto_pull' || raw === 'auto_push' ? raw : 'prompt';
 }
 
 function normalizeCanvasGitSyncBackgroundSettings(settingsRaw) {
@@ -1262,26 +1317,32 @@ async function readCanvasGitRemoteSignalForBackground(settings) {
   const repoRootPath = gitConfig.basePath
     ? normalizeGitHubRepoPath(`${gitConfig.basePath}/${normalizedRootPath}`)
     : normalizedRootPath;
-  const result = await getRepoBranchHeadSignal({
+
+  const listResult = await listRepoFiles({
     token: gitConfig.token,
     owner: gitConfig.owner,
     repo: gitConfig.repo,
     branch: gitConfig.branch,
-    path: repoRootPath
+    rootPath: repoRootPath
   });
 
-  if (!result || result.success !== true) {
-    return { success: false, error: result?.error || '读取云端信号失败', path: repoRootPath || normalizedRootPath };
+  if (!listResult || listResult.success !== true) {
+    return { success: false, error: listResult?.error || '读取云端信号失败', path: repoRootPath || normalizedRootPath };
   }
+
+  const sourceFiles = Array.isArray(listResult.files) ? listResult.files : [];
+  const files = filterCanvasManagedSyncFilesForRevision(sourceFiles, repoRootPath);
+  const revisionSha = buildCanvasGitRemoteRevision(files, gitConfig.basePath);
 
   return {
     success: true,
-    notFound: !String(result.revisionSha || '').trim(),
+    notFound: files.length === 0,
     path: repoRootPath || normalizedRootPath,
-    revisionSha: String(result.revisionSha || ''),
-    committedAt: Number(result.committedAt) || 0,
-    fileCount: 0,
-    truncated: false
+    revisionSha: String(revisionSha || ''),
+    committedAt: 0,
+    fileCount: files.length,
+    totalFileCount: sourceFiles.length,
+    truncated: listResult.truncated === true
   };
 }
 
@@ -1317,6 +1378,29 @@ async function runCanvasGitSyncBackgroundCheck(reason = 'alarm') {
     runtime.idleStreak = 0;
   }
 
+  if (runtime.isRunning) {
+    runtime.hasPendingWork = true;
+    runtime.idleStreak = 0;
+    state = normalizeCanvasGitSyncBackgroundState({
+      settings: state.settings,
+      runtime,
+      updatedAt: Date.now(),
+      reason
+    });
+
+    await saveCanvasGitSyncBackgroundState(state);
+    await scheduleCanvasGitSyncBackgroundAlarm(state, nextDelay);
+    await refreshMarkerBadgeFromStorage();
+
+    return {
+      success: true,
+      skipped: true,
+      reason: 'foreground-running',
+      pendingMismatch: state.runtime.pendingMismatch,
+      nextCheckAt: state.runtime.nextCheckAt
+    };
+  }
+
   try {
     const remote = await readCanvasGitRemoteSignalForBackground(state.settings);
     if (!remote.success) {
@@ -1336,7 +1420,7 @@ async function runCanvasGitSyncBackgroundCheck(reason = 'alarm') {
       }
 
       const remoteChangedBySha = !!(remoteSha && previousSha && remoteSha !== previousSha);
-      const remoteDeletedAfterKnown = !remoteSha && !!previousSha;
+      const remoteDeletedAfterKnown = remote.notFound === true && !!previousSha;
       const remoteNewerByTime = !!(
         remoteCommittedAt > 0
         && localSuccessAt > 0
@@ -1354,14 +1438,17 @@ async function runCanvasGitSyncBackgroundCheck(reason = 'alarm') {
         || (remoteNewerByTime && !localEditedAfterLastSync)
       );
       if (hasMismatch) {
+        const mismatchIdentityChanged = runtime.pendingMismatch !== true || String(runtime.pendingMismatchRemoteSha || '') !== remoteSha;
         runtime.pendingMismatch = true;
         runtime.pendingMismatchRemoteSha = remoteSha;
-        runtime.pendingMismatchUpdatedAt = now;
+        if (mismatchIdentityChanged || !(Number(runtime.pendingMismatchUpdatedAt) > 0)) {
+          runtime.pendingMismatchUpdatedAt = now;
+        }
         runtime.hasPendingWork = true;
         runtime.idleStreak = 0;
         nextDelay = baseDelay;
       } else {
-        if (runtime.pendingMismatch && runtime.pendingMismatchRemoteSha && runtime.pendingMismatchRemoteSha === remoteSha) {
+        if (runtime.pendingMismatch) {
           runtime.pendingMismatch = false;
           runtime.pendingMismatchRemoteSha = '';
           runtime.pendingMismatchUpdatedAt = 0;
@@ -1436,7 +1523,7 @@ async function handleCanvasGitSyncUpdateContextMessage(message) {
     state.runtime.pendingMismatchRemoteSha = '';
     state.runtime.pendingMismatchUpdatedAt = 0;
     state.runtime.idleStreak = 0;
-    state.runtime.lastCheckRemoteSha = '';
+    state.runtime.lastCheckRemoteSha = String(state.runtime.lastRemoteSha || '');
   } else if (eventName === 'sync-idle') {
     if (!state.runtime.pendingMismatch && !state.runtime.localDirty) {
       state.runtime.hasPendingWork = false;
@@ -1818,6 +1905,45 @@ async function handleCanvasGitListFilesMessage(message) {
   };
 }
 
+
+async function handleCanvasGitReadRemoteSignalMessage(message) {
+  const gitConfig = await resolveCanvasGitConfig();
+  if (!gitConfig.success) {
+    return { success: false, error: gitConfig.error || '仓库未就绪' };
+  }
+
+  const rawRootPath = normalizeGitHubRepoPath(message.rootPath);
+  const repoRootPath = gitConfig.basePath
+    ? normalizeGitHubRepoPath(`${gitConfig.basePath}/${rawRootPath}`)
+    : rawRootPath;
+
+  const result = await getRepoBranchHeadSignal({
+    token: gitConfig.token,
+    owner: gitConfig.owner,
+    repo: gitConfig.repo,
+    branch: gitConfig.branch,
+    path: repoRootPath
+  });
+
+  if (!result || result.success !== true) {
+    return {
+      success: false,
+      error: result?.error || '读取云端信号失败',
+      rootPath: rawRootPath,
+      repoRootPath
+    };
+  }
+
+  return {
+    success: true,
+    rootPath: rawRootPath,
+    repoRootPath,
+    notFound: !String(result.revisionSha || '').trim(),
+    revisionSha: String(result.revisionSha || ''),
+    committedAt: Number(result.committedAt) || 0
+  };
+}
+
 async function handleCanvasGitTestConfigMessage(message) {
   const incoming = message && typeof message.config === 'object' && message.config
     ? message.config
@@ -2027,6 +2153,14 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'canvasGitListFiles') {
     (async () => {
       const response = await handleCanvasGitListFilesMessage(message);
+      sendResponse(response);
+    })();
+    return true;
+  }
+
+  if (message.action === 'canvasGitReadRemoteSignal') {
+    (async () => {
+      const response = await handleCanvasGitReadRemoteSignalMessage(message);
       sendResponse(response);
     })();
     return true;

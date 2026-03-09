@@ -3283,16 +3283,16 @@ const i18n = {
         'en': 'Strategy'
     },
     canvasSyncTabStatus: {
-        'zh_CN': '状态',
-        'en': 'Status'
+        'zh_CN': '面板',
+        'en': 'Panel'
     },
     canvasSyncSplitIntervalsLabel: {
         'zh_CN': '分离定时器（高级）',
         'en': 'Split Timers (Advanced)'
     },
     canvasSyncSplitIntervalsDesc: {
-        'zh_CN': '互斥关系：分离定时器开启后，“自动同步间隔”不生效；关闭后，“定时推送/定时拉取”不生效（会灰显不可编辑）。\n自动同步：分离定时器关闭时，按“自动同步间隔”执行完整同步（默认包含上传+拉取）。\n开启后状态：改为“定时推送 + 定时拉取”分别执行；任一间隔填 0 表示关闭对应定时任务。',
-        'en': 'Mutual exclusion: when split timers are on, Auto Sync Interval is inactive; when split timers are off, Scheduled Push/Pull are inactive (greyed out and not editable).\nAuto sync: when split timers are off, full sync runs by Auto Sync Interval (includes upload + pull by default).\nWhen enabled: it switches to separate scheduled push and pull; entering 0 for either interval disables that scheduled task.'
+        'zh_CN': '互斥关系：分离定时器开启后，“自动同步间隔”不生效；关闭后，“定时推送/定时拉取”不生效（会灰显不可编辑）。\n自动同步：分离定时器关闭时，按“自动同步间隔”执行自动判断同步；系统会先判断当前状态，再决定上传、拉取、冲突处理或不执行。\n开启后状态：改为“定时推送 + 定时拉取”分别执行；任一间隔填 0 表示关闭对应定时任务。',
+        'en': 'Mutual exclusion: when split timers are on, Auto Sync Interval is inactive; when split timers are off, Scheduled Push/Pull are inactive (greyed out and not editable).\nAuto sync: when split timers are off, the Auto Sync Interval runs state-aware sync; the system checks the current state first, then decides whether to push, pull, resolve conflict, or do nothing.\nWhen enabled: it switches to separate scheduled push and pull; entering 0 for either interval disables that scheduled task.'
     },
     canvasSyncForegroundCheckLabel: {
         'zh_CN': '前台检测云端变更',
@@ -3343,28 +3343,36 @@ const i18n = {
         'en': 'When foreground or background detection finds a mismatch between the cloud revision and the local baseline, this policy decides how to handle it.\nAuto Use Cloud to Overwrite Local = automatically pull and align to cloud; Auto Keep Local and Overwrite Cloud = automatically push and align to local; Prompt = choose manually in the Status panel.'
     },
     canvasSyncPullOnStartupLabel: {
-        'zh_CN': '打开页面时先拉取云端',
-        'en': 'Pull Cloud on Open'
+        'zh_CN': '开页跟进后台变化',
+        'en': 'Follow Background Changes on Open'
     },
     canvasSyncPullOnStartupDesc: {
-        'zh_CN': '打开页面时会先执行一次“仅拉取”（不自动上传）；若本地和云端都改，按下方“合并策略/冲突合并策略”处理。',
-        'en': 'When opening the page, it runs one pull-only action (no auto upload). If both local and cloud changed, it follows merge/conflict policies below.'
+        'zh_CN': '进入前台约 1.2 秒后读取后台结果；若后台已检测到云端不一致，就按 3.3 继续处理。依赖“后台检测云端变更”。',
+        'en': 'About 1.2 seconds after the page becomes active, read the background result. If background already detected a cloud mismatch, continue via 3.3. Depends on background cloud detection.'
     },
-    canvasSyncPushOnSyncLabel: {
-        'zh_CN': '完整同步时包含上传',
-        'en': 'Include Upload in Full Sync'
+    canvasSyncToastToggleLabel: {
+        'zh_CN': '右上角普通通知',
+        'en': 'Top-right General Notifications'
     },
-    canvasSyncPullOnSyncLabel: {
-        'zh_CN': '完整同步时包含拉取',
-        'en': 'Include Pull in Full Sync'
+    canvasSyncToastToggleDesc: {
+        'zh_CN': '关闭后进入静默同步：只保留必要提示，例如失败、恢复、冲突、云端不一致等。',
+        'en': 'Turn this off for quiet sync. Only necessary notices remain, such as failures, recovery, conflicts, and cloud mismatch.'
     },
-    canvasSyncPushPullOnSyncDesc: {
-        'zh_CN': '控制“完整同步”（自动同步 / 立即同步）是否包含 上传/拉取。建议两项都开启；只有你明确需要“单向同步”时再关闭其中一项。',
-        'en': 'Controls whether Full Sync (auto sync / Sync Now) includes upload and pull. Keep both on in most cases; disable one only when you explicitly need one-way sync.'
+    canvasSyncEditAutoToastToggleLabel: {
+        'zh_CN': '「停止编辑后自动同步」通知',
+        'en': '“Auto Sync After Editing Stops” Notices'
     },
-    canvasSyncHideNoChangeNoticeLabel: {
-        'zh_CN': '无变更时隐藏通知（推荐）',
-        'en': 'Hide no-change notifications (Recommended)'
+    canvasSyncEditAutoToastToggleDesc: {
+        'zh_CN': '仅影响右上角这类「停止编辑后自动同步」通知；开启时保留默认节流提示，关闭时这类提示完全静默。手动同步、冲突、恢复、失败等必要提示不受影响。',
+        'en': 'Only affects top-right notices for “auto sync after editing stops”. When enabled, throttled informational notices remain; when disabled, those notices are fully silent. Manual sync, conflicts, recovery, and failures are not affected.'
+    },
+    canvasSyncQuietSyncHintDesc: {
+        'zh_CN': '低打扰说明：自动同步与停止编辑后同步会尽量避开你正在操作的时段；云端不一致只有在状态稳定一段时间后才提示，避免面板一闪而过。',
+        'en': 'Low-interruption note: auto sync and sync-after-edit try to avoid the moments when you are actively interacting; cloud mismatch is only surfaced after the state stays stable for a short period, to avoid flicker.'
+    },
+    canvasSyncSyncModeDesc: {
+        'zh_CN': '当前主路径只提供：同步、仅上传、仅拉取、本地覆盖云端、云端覆盖本地。插件不提供 Git Merge / Rebase / Reset；如需查看历史或手动回滚，请到 GitHub 处理。',
+        'en': 'The main flow only provides Sync, Push Only, Pull Only, Local Overwrites Cloud, and Cloud Overwrites Local. The extension does not expose Git Merge / Rebase / Reset here; use GitHub when you need to inspect history or roll back manually.'
     },
     canvasSyncMethodLabel: {
         'zh_CN': '合并策略',
@@ -3387,24 +3395,28 @@ const i18n = {
         'en': 'Decides how remote changes are integrated on pull (semantically aligned with Obsidian Git merge strategy).'
     },
     canvasSyncConflictLabel: {
-        'zh_CN': '冲突合并策略',
-        'en': 'Merge strategy on conflicts'
+        'zh_CN': '默认冲突处理',
+        'en': 'Default Conflict Handling'
     },
     canvasSyncConflictNoneOption: {
-        'zh_CN': '手动处理冲突（Git 默认）',
-        'en': 'None (git default)'
+        'zh_CN': '手动选择',
+        'en': 'Choose Manually'
     },
     canvasSyncConflictOursOption: {
         'zh_CN': '本地优先',
-        'en': 'Our changes'
+        'en': 'Prefer Local'
     },
     canvasSyncConflictTheirsOption: {
         'zh_CN': '云端优先',
-        'en': 'Their changes'
+        'en': 'Prefer Cloud'
+    },
+    canvasSyncConflictNewestOption: {
+        'zh_CN': '按最近修改时间决定',
+        'en': 'Use Latest Modification Time'
     },
     canvasSyncConflictDesc: {
-        'zh_CN': '当本地和云端都改、且拉取发生冲突时，按此策略处理：可自动偏向本地或云端；选择“手动处理冲突（Git 默认）”时会暂停并由你手动选择。',
-        'en': 'When pull conflicts happen, this auto-favors local or remote; default keeps native Git behavior.'
+        'zh_CN': '当本地和云端都改时，按此策略决定是否自动裁决。选择“手动选择”时会停在冲突面板；选择“按最近修改时间决定”时，谁更新更晚谁赢，时间相同或无法判断时回退为手动选择。',
+        'en': 'When both local and cloud changed, this decides whether the conflict is resolved automatically. “Choose Manually” stops in the conflict panel; “Use Latest Modification Time” lets the newer side win, and falls back to manual choice when timestamps tie or cannot be trusted.'
     },
     canvasSyncRepoEnabledLabel: {
         'zh_CN': '启用 GitHub 仓库',
@@ -3450,6 +3462,130 @@ const i18n = {
         'zh_CN': '1. 总开关与首次同步',
         'en': '1. General Switch & First Sync'
     },
+    canvasSyncTemplateLabel: {
+        'zh_CN': '同步模板',
+        'en': 'Sync Template'
+    },
+    canvasSyncTemplateCustomOption: {
+        'zh_CN': '当前为自定义',
+        'en': 'Current = Custom'
+    },
+    canvasSyncTemplateLiveOption: {
+        'zh_CN': '实时同步',
+        'en': 'Live Sync'
+    },
+    canvasSyncTemplateStandardOption: {
+        'zh_CN': '标准同步',
+        'en': 'Standard Sync'
+    },
+    canvasSyncTemplateBackupOption: {
+        'zh_CN': '备份优先',
+        'en': 'Backup First'
+    },
+    canvasSyncTemplateHelpBtnTitle: {
+        'zh_CN': '查看',
+        'en': 'View'
+    },
+    canvasSyncTemplateHelpPopoverTitle: {
+        'zh_CN': '同步模板值',
+        'en': 'Sync Template Values'
+    },
+    canvasSyncTemplateHelpCloseBtnTitle: {
+        'zh_CN': '关闭',
+        'en': 'Close'
+    },
+    canvasSyncTemplateHelpNote: {
+        'zh_CN': `<div class="canvas-sync-template-help-intro">这 3 个官方模板会一起改“同步节奏、检测频率、通知风格、3.3 云端不一致处理”，不改 3.4 冲突处理、首次同步方向。</div>
+<div class="canvas-sync-template-help-grid">
+  <section class="canvas-sync-template-help-card">
+    <div class="canvas-sync-template-help-card-title">实时同步</div>
+    <div class="canvas-sync-template-help-card-note">本地改动以“停止编辑后自动同步”为主；云端变更靠更积极的检测发现，适合希望更接近实时但不想被提示打扰的场景。</div>
+    <div class="canvas-sync-template-help-line"><b>本地改动主路径</b><span>停止编辑后自动同步</span></div>
+    <div class="canvas-sync-template-help-line"><b>分离定时器</b><span>关闭</span></div>
+    <div class="canvas-sync-template-help-line"><b>同步兜底间隔</b><span>60 秒</span></div>
+    <div class="canvas-sync-template-help-line"><b>前台检测云端变更</b><span>10 秒</span></div>
+    <div class="canvas-sync-template-help-line"><b>后台检测 / 冷却</b><span>1 分钟 / 2 分钟</span></div>
+    <div class="canvas-sync-template-help-line"><b>开页跟进后台变化</b><span>开启</span></div>
+    <div class="canvas-sync-template-help-line"><b>云端不一致处理（3.3）</b><span>自动使用云端覆盖本地</span></div>
+    <div class="canvas-sync-template-help-line"><b>右上角普通通知</b><span>关闭</span></div>
+    <div class="canvas-sync-template-help-line"><b>停止编辑后自动同步通知</b><span>关闭</span></div>
+    <div class="canvas-sync-template-help-line"><b>永久 / 临时 / 空白 上传截流</b><span>5 / 2 / 2 秒</span></div>
+  </section>
+  <section class="canvas-sync-template-help-card">
+    <div class="canvas-sync-template-help-card-title">标准同步</div>
+    <div class="canvas-sync-template-help-card-note">推荐默认值，兼顾同步及时性、稳定性和日常通知打扰。</div>
+    <div class="canvas-sync-template-help-line"><b>本地改动主路径</b><span>停止编辑后自动同步</span></div>
+    <div class="canvas-sync-template-help-line"><b>分离定时器</b><span>关闭</span></div>
+    <div class="canvas-sync-template-help-line"><b>同步兜底间隔</b><span>120 秒</span></div>
+    <div class="canvas-sync-template-help-line"><b>前台检测云端变更</b><span>30 秒</span></div>
+    <div class="canvas-sync-template-help-line"><b>后台检测 / 冷却</b><span>1 分钟 / 5 分钟</span></div>
+    <div class="canvas-sync-template-help-line"><b>开页跟进后台变化</b><span>开启</span></div>
+    <div class="canvas-sync-template-help-line"><b>云端不一致处理（3.3）</b><span>弹窗提示</span></div>
+    <div class="canvas-sync-template-help-line"><b>右上角普通通知</b><span>开启</span></div>
+    <div class="canvas-sync-template-help-line"><b>停止编辑后自动同步通知</b><span>关闭</span></div>
+    <div class="canvas-sync-template-help-line"><b>永久 / 临时 / 空白 上传截流</b><span>15 / 5 / 5 秒</span></div>
+  </section>
+  <section class="canvas-sync-template-help-card">
+    <div class="canvas-sync-template-help-card-title">备份优先</div>
+    <div class="canvas-sync-template-help-card-note">更偏向定时上传备份，并把普通通知静默化，减少自动拉取和高频打扰。</div>
+    <div class="canvas-sync-template-help-line"><b>本地改动主路径</b><span>定时推送为主</span></div>
+    <div class="canvas-sync-template-help-line"><b>分离定时器</b><span>开启</span></div>
+    <div class="canvas-sync-template-help-line"><b>定时推送 / 定时拉取</b><span>5 分钟 / 关闭</span></div>
+    <div class="canvas-sync-template-help-line"><b>前台检测云端变更</b><span>60 秒</span></div>
+    <div class="canvas-sync-template-help-line"><b>后台检测 / 冷却</b><span>5 分钟 / 15 分钟</span></div>
+    <div class="canvas-sync-template-help-line"><b>开页跟进后台变化</b><span>关闭</span></div>
+    <div class="canvas-sync-template-help-line"><b>云端不一致处理（3.3）</b><span>弹窗提示</span></div>
+    <div class="canvas-sync-template-help-line"><b>右上角普通通知</b><span>关闭</span></div>
+    <div class="canvas-sync-template-help-line"><b>停止编辑后自动同步通知</b><span>关闭</span></div>
+    <div class="canvas-sync-template-help-line"><b>永久 / 临时 / 空白 上传截流</b><span>30 / 30 / 30 秒</span></div>
+  </section>
+</div>`,
+        'en': `<div class="canvas-sync-template-help-intro">These 3 built-in templates change sync cadence, check frequency, notification style, and 3.3 mismatch handling together. They do not change 3.4 conflict handling or first-sync direction.</div>
+<div class="canvas-sync-template-help-grid">
+  <section class="canvas-sync-template-help-card">
+    <div class="canvas-sync-template-help-card-title">Live Sync</div>
+    <div class="canvas-sync-template-help-card-note">Local edits mainly rely on auto sync after editing stops, while cloud changes are found by more aggressive checks, without extra notification noise.</div>
+    <div class="canvas-sync-template-help-line"><b>Main local-edit path</b><span>Auto Sync After Editing Stops</span></div>
+    <div class="canvas-sync-template-help-line"><b>Split Timers</b><span>Off</span></div>
+    <div class="canvas-sync-template-help-line"><b>Fallback Sync Interval</b><span>60 sec</span></div>
+    <div class="canvas-sync-template-help-line"><b>Foreground Cloud Check</b><span>10 sec</span></div>
+    <div class="canvas-sync-template-help-line"><b>Background Check / Cooldown</b><span>1 min / 2 min</span></div>
+    <div class="canvas-sync-template-help-line"><b>Follow Background Changes on Open</b><span>On</span></div>
+    <div class="canvas-sync-template-help-line"><b>Mismatch Handling (3.3)</b><span>Auto Use Cloud to Overwrite Local</span></div>
+    <div class="canvas-sync-template-help-line"><b>Top-right General Notifications</b><span>Off</span></div>
+    <div class="canvas-sync-template-help-line"><b>Edit-stop Auto Sync Notifications</b><span>Off</span></div>
+    <div class="canvas-sync-template-help-line"><b>Permanent / Temp / Blank Upload Throttle</b><span>5 / 2 / 2 sec</span></div>
+  </section>
+  <section class="canvas-sync-template-help-card">
+    <div class="canvas-sync-template-help-card-title">Standard Sync</div>
+    <div class="canvas-sync-template-help-card-note">Recommended defaults that balance timeliness, stability, and everyday notification noise.</div>
+    <div class="canvas-sync-template-help-line"><b>Main local-edit path</b><span>Auto Sync After Editing Stops</span></div>
+    <div class="canvas-sync-template-help-line"><b>Split Timers</b><span>Off</span></div>
+    <div class="canvas-sync-template-help-line"><b>Fallback Sync Interval</b><span>120 sec</span></div>
+    <div class="canvas-sync-template-help-line"><b>Foreground Cloud Check</b><span>30 sec</span></div>
+    <div class="canvas-sync-template-help-line"><b>Background Check / Cooldown</b><span>1 min / 5 min</span></div>
+    <div class="canvas-sync-template-help-line"><b>Follow Background Changes on Open</b><span>On</span></div>
+    <div class="canvas-sync-template-help-line"><b>Mismatch Handling (3.3)</b><span>Prompt</span></div>
+    <div class="canvas-sync-template-help-line"><b>Top-right General Notifications</b><span>On</span></div>
+    <div class="canvas-sync-template-help-line"><b>Edit-stop Auto Sync Notifications</b><span>Off</span></div>
+    <div class="canvas-sync-template-help-line"><b>Permanent / Temp / Blank Upload Throttle</b><span>15 / 5 / 5 sec</span></div>
+  </section>
+  <section class="canvas-sync-template-help-card">
+    <div class="canvas-sync-template-help-card-title">Backup First</div>
+    <div class="canvas-sync-template-help-card-note">Leans toward scheduled push backup and quiets general notifications to reduce interruption.</div>
+    <div class="canvas-sync-template-help-line"><b>Main local-edit path</b><span>Scheduled Push First</span></div>
+    <div class="canvas-sync-template-help-line"><b>Split Timers</b><span>On</span></div>
+    <div class="canvas-sync-template-help-line"><b>Scheduled Push / Pull</b><span>5 min / Off</span></div>
+    <div class="canvas-sync-template-help-line"><b>Foreground Cloud Check</b><span>60 sec</span></div>
+    <div class="canvas-sync-template-help-line"><b>Background Check / Cooldown</b><span>5 min / 15 min</span></div>
+    <div class="canvas-sync-template-help-line"><b>Follow Background Changes on Open</b><span>Off</span></div>
+    <div class="canvas-sync-template-help-line"><b>Mismatch Handling (3.3)</b><span>Prompt</span></div>
+    <div class="canvas-sync-template-help-line"><b>Top-right General Notifications</b><span>Off</span></div>
+    <div class="canvas-sync-template-help-line"><b>Edit-stop Auto Sync Notifications</b><span>Off</span></div>
+    <div class="canvas-sync-template-help-line"><b>Permanent / Temp / Blank Upload Throttle</b><span>30 / 30 / 30 sec</span></div>
+  </section>
+</div>`
+    },
     canvasSyncEnabledLabel: {
         'zh_CN': '启用同步',
         'en': 'Enable Sync'
@@ -3457,6 +3593,14 @@ const i18n = {
     canvasSyncAutoLabel: {
         'zh_CN': '自动同步',
         'en': 'Auto Sync'
+    },
+    canvasSyncAutoHelpNote: {
+        'zh_CN': '自动同步不会固定先上传还是先拉取，而是先判断当前状态，再决定动作。\n\n四类判断：\n• 本地没变，云端没变：不执行同步。\n• 本地变了，云端没变：直接上传。\n• 本地没变，云端变了：按 <span class="canvas-sync-help-highlight">3.3 云端不一致处理</span> 自动使用云端覆盖本地，或弹出云端不一致面板。\n• 本地变了，云端也变了：按 <span class="canvas-sync-help-highlight">3.4 默认冲突处理</span> 自动裁决，或进入冲突面板。\n\n补充：\n• 「仅上传 / 仅拉取」是手动强制动作。\n• 自动同步主要决定何时检查、何时触发，不替代冲突判断。',
+        'en': 'Auto Sync does not always upload first or pull first. It checks the current state first, then decides what action to run.\n\nThe 4 cases:\n• Local unchanged, cloud unchanged: do nothing.\n• Local changed, cloud unchanged: upload directly.\n• Local unchanged, cloud changed: follow <span class="canvas-sync-help-highlight">3.3 Mismatch Handling</span> to either auto use cloud-overwrite-local or open the mismatch panel.\n• Local changed, cloud changed: follow <span class="canvas-sync-help-highlight">3.4 Default Conflict Handling</span> to either auto-resolve or enter the conflict panel.\n\nNotes:\n• “Push Only / Pull Only” are manual forced actions.\n• Auto Sync mainly decides when to check and when to trigger; it does not replace conflict judgment.'
+    },
+    canvasSyncAutoHelpBtnTitle: {
+        'zh_CN': '查看说明',
+        'en': 'View help'
     },
     canvasSyncAutoAfterEditStopLabel: {
         'zh_CN': '停止编辑后自动同步',
@@ -3467,8 +3611,8 @@ const i18n = {
         'en': 'Canvas edits (card content/position/edges) are debounced and batched; one sync runs after no new changes within the debounce window.'
     },
     canvasSyncIntervalLabel: {
-        'zh_CN': '自动同步间隔（分钟，分离定时器关闭时生效；自动同步包含上传+拉取）',
-        'en': 'Auto Sync Interval (minutes, active when split timers are off; full sync includes upload + pull)'
+        'zh_CN': '自动同步间隔（秒，分离定时器关闭时生效；按当前状态自动判断上传/拉取/冲突处理）',
+        'en': 'Auto Sync Interval (seconds, active when split timers are off; state-aware sync decides push/pull/conflict handling)'
     },
     canvasSyncAutoPushIntervalLabel: {
         'zh_CN': '定时推送间隔（分钟，分离定时器开启时生效，0=关闭）',
@@ -3507,8 +3651,8 @@ const i18n = {
         'en': '3.3 Mismatch Handling'
     },
     canvasSyncBehaviorSubCompatDetail4Text: {
-        'zh_CN': '3.4 合并与冲突策略',
-        'en': '3.4 Merge & Conflict'
+        'zh_CN': '3.4 同步方式与冲突处理',
+        'en': '3.4 Sync & Conflict Handling'
     },
     canvasSyncSectionCompatDetectTitle: {
         'zh_CN': '3.1 前台检测',
@@ -3523,8 +3667,8 @@ const i18n = {
         'en': '3.3 Mismatch Handling'
     },
     canvasSyncSectionCompatMergeTitle: {
-        'zh_CN': '3.4 合并与冲突策略',
-        'en': '3.4 Merge & Conflict'
+        'zh_CN': '3.4 同步方式与冲突处理',
+        'en': '3.4 Sync & Conflict Handling'
     },
     canvasSyncObsidianFilePushLabel: {
         'zh_CN': '同步时增量推送 Obsidian 文件',
@@ -3586,14 +3730,6 @@ const i18n = {
         'zh_CN': '可选。通常保持默认目录，仅在你想把文件放到仓库其他子目录时再改。',
         'en': 'Optional. Keep default in most cases; change only when you want another repository subdirectory.'
     },
-    canvasSyncDeleteThresholdLabel: {
-        'zh_CN': '删除保护阈值（%）',
-        'en': 'Deletion Protection Threshold (%)'
-    },
-    canvasSyncDeleteThresholdDesc: {
-        'zh_CN': '当检测到删除比例超过阈值时，会暂停本轮自动同步，避免误删覆盖。',
-        'en': 'When deletion ratio exceeds this threshold, current auto-sync round is paused to avoid accidental overwrite by mass deletion.'
-    },
     canvasSyncFirstSyncSubtitle: {
         'zh_CN': '首次同步',
         'en': 'First Sync'
@@ -3613,30 +3749,6 @@ const i18n = {
     canvasSyncFirstSyncModeLocalOption: {
         'zh_CN': '以本地为准',
         'en': 'Use local'
-    },
-    canvasSyncPermanentModeLabel: {
-        'zh_CN': '永久栏目',
-        'en': 'Permanent Section'
-    },
-    canvasSyncPermanentModeAutoOption: {
-        'zh_CN': '自动',
-        'en': 'Auto'
-    },
-    canvasSyncPermanentModeCloudOption: {
-        'zh_CN': '以云端为准',
-        'en': 'Use cloud'
-    },
-    canvasSyncPermanentModeLocalOption: {
-        'zh_CN': '以本地为准',
-        'en': 'Use local'
-    },
-    canvasSyncPermanentModeDesc: {
-        'zh_CN': '此处与“首次同步-永久栏目”共用同一策略：用于决定后续同步时永久栏目（浏览器书签树）的主权方向。',
-        'en': 'This shares the same strategy as "First Sync - Permanent Section": it controls who owns the permanent section (browser bookmarks tree) in subsequent sync.'
-    },
-    canvasSyncPermanentModeHelpBtnTitle: {
-        'zh_CN': '查看说明',
-        'en': 'View help'
     },
     canvasSyncPermanentTreeIntervalLabel: {
         'zh_CN': '永久栏目快照上传截流',
@@ -3722,10 +3834,6 @@ const i18n = {
         'zh_CN': '仅拉取',
         'en': 'Pull Only'
     },
-    canvasSyncRebuildText: {
-        'zh_CN': '刷新状态',
-        'en': 'Refresh State'
-    },
     canvasSyncStatusRunningLabel: {
         'zh_CN': '执行状态：',
         'en': 'Status:'
@@ -3794,6 +3902,10 @@ const i18n = {
         'zh_CN': '保留本地并覆盖云端',
         'en': 'Keep Local and Overwrite Cloud'
     },
+    canvasSyncMismatchGoPolicyText: {
+        'zh_CN': '跳转到 3.3 处理策略',
+        'en': 'Jump to 3.3 Policy Settings'
+    },
     canvasSyncMismatchDismissText: {
         'zh_CN': '稍后处理',
         'en': 'Handle later'
@@ -3841,6 +3953,10 @@ const i18n = {
     canvasSyncConflictUseRemoteText: {
         'zh_CN': '使用云端覆盖本地',
         'en': 'Use Cloud and Overwrite Local'
+    },
+    canvasSyncConflictGoPolicyText: {
+        'zh_CN': '跳转到 3.4 冲突处理',
+        'en': 'Jump to 3.4 Conflict Settings'
     },
     canvasSyncConflictDismissText: {
         'zh_CN': '稍后处理',
@@ -4673,10 +4789,156 @@ function applySyncIntervalUnitLine(labelEl) {
     labelEl.appendChild(unitSpan);
 }
 
+const CANVAS_SYNC_DISABLED_HINT_SELECTOR = '.canvas-sync-row--disabled[data-disabled-hint], .canvas-sync-template-help-line.is-disabled[data-disabled-hint]';
+let canvasSyncDisabledHintTooltipEl = null;
+let canvasSyncDisabledHintTarget = null;
+
+function getCanvasSyncDisabledHintTarget(target) {
+    if (!target || typeof target.closest !== 'function') return null;
+    return target.closest(CANVAS_SYNC_DISABLED_HINT_SELECTOR);
+}
+
+function ensureCanvasSyncDisabledHintTooltip() {
+    if (canvasSyncDisabledHintTooltipEl && document.body && document.body.contains(canvasSyncDisabledHintTooltipEl)) {
+        return canvasSyncDisabledHintTooltipEl;
+    }
+    if (!document.body) return null;
+
+    const tooltip = document.createElement('div');
+    tooltip.id = 'canvasSyncDisabledHintTooltip';
+    tooltip.className = 'canvas-sync-disabled-hint-tooltip';
+    tooltip.setAttribute('role', 'tooltip');
+    tooltip.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(tooltip);
+
+    canvasSyncDisabledHintTooltipEl = tooltip;
+    return tooltip;
+}
+
+function hideCanvasSyncDisabledHintTooltip() {
+    canvasSyncDisabledHintTarget = null;
+    if (!canvasSyncDisabledHintTooltipEl) return;
+    canvasSyncDisabledHintTooltipEl.classList.remove('is-visible');
+    canvasSyncDisabledHintTooltipEl.setAttribute('aria-hidden', 'true');
+    canvasSyncDisabledHintTooltipEl.removeAttribute('data-placement');
+}
+
+function positionCanvasSyncDisabledHintTooltip(target, clientX) {
+    const tooltip = ensureCanvasSyncDisabledHintTooltip();
+    if (!tooltip || !target || !document.documentElement || !document.documentElement.contains(target)) {
+        hideCanvasSyncDisabledHintTooltip();
+        return;
+    }
+
+    const rect = target.getBoundingClientRect();
+    if (!rect || (!rect.width && !rect.height)) {
+        hideCanvasSyncDisabledHintTooltip();
+        return;
+    }
+
+    const viewportPadding = 16;
+    const gap = 12;
+    const anchorX = rect.left + (rect.width / 2);
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const tooltipWidth = tooltipRect.width || 0;
+    const tooltipHeight = tooltipRect.height || 0;
+    const canPlaceAbove = rect.top >= tooltipHeight + gap + viewportPadding;
+
+    let left = anchorX - (tooltipWidth / 2);
+    left = Math.max(viewportPadding, Math.min(left, window.innerWidth - tooltipWidth - viewportPadding));
+
+    let top = canPlaceAbove ? rect.top - tooltipHeight - gap : rect.bottom + gap;
+    if (top + tooltipHeight > window.innerHeight - viewportPadding) {
+        top = Math.max(viewportPadding, window.innerHeight - tooltipHeight - viewportPadding);
+    }
+
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+    tooltip.setAttribute('data-placement', canPlaceAbove ? 'top' : 'bottom');
+}
+
+function showCanvasSyncDisabledHintTooltip(target, clientX) {
+    const hint = target ? String(target.getAttribute('data-disabled-hint') || '').trim() : '';
+    if (!hint) {
+        hideCanvasSyncDisabledHintTooltip();
+        return;
+    }
+
+    const tooltip = ensureCanvasSyncDisabledHintTooltip();
+    if (!tooltip) return;
+
+    if (tooltip.textContent !== hint) {
+        tooltip.textContent = hint;
+    }
+    canvasSyncDisabledHintTarget = target;
+    tooltip.classList.add('is-visible');
+    tooltip.setAttribute('aria-hidden', 'false');
+    positionCanvasSyncDisabledHintTooltip(target, clientX);
+}
+
+function bindCanvasSyncDisabledHintTooltip() {
+    if (!document.body || document.body.dataset.canvasSyncDisabledHintTooltipBound === 'true') return;
+    document.body.dataset.canvasSyncDisabledHintTooltipBound = 'true';
+
+    const handlePointerEvent = (event) => {
+        const target = getCanvasSyncDisabledHintTarget(event.target);
+        if (!target) {
+            hideCanvasSyncDisabledHintTooltip();
+            return;
+        }
+        showCanvasSyncDisabledHintTooltip(target, event.clientX);
+    };
+
+    document.addEventListener('pointerover', handlePointerEvent, true);
+    document.addEventListener('pointermove', handlePointerEvent, true);
+    document.addEventListener('pointerout', (event) => {
+        const currentTarget = getCanvasSyncDisabledHintTarget(event.target);
+        if (!currentTarget) return;
+        const relatedTarget = event.relatedTarget;
+        if (relatedTarget && currentTarget.contains(relatedTarget)) return;
+        if (canvasSyncDisabledHintTarget === currentTarget) {
+            hideCanvasSyncDisabledHintTooltip();
+        }
+    }, true);
+    document.addEventListener('pointerdown', () => {
+        hideCanvasSyncDisabledHintTooltip();
+    }, true);
+    document.addEventListener('focusin', (event) => {
+        const target = getCanvasSyncDisabledHintTarget(event.target);
+        if (!target) {
+            hideCanvasSyncDisabledHintTooltip();
+            return;
+        }
+        showCanvasSyncDisabledHintTooltip(target);
+    }, true);
+    document.addEventListener('focusout', () => {
+        window.requestAnimationFrame(() => {
+            const activeTarget = getCanvasSyncDisabledHintTarget(document.activeElement);
+            if (!activeTarget) {
+                hideCanvasSyncDisabledHintTooltip();
+                return;
+            }
+            showCanvasSyncDisabledHintTooltip(activeTarget);
+        });
+    }, true);
+    document.addEventListener('scroll', () => {
+        if (!canvasSyncDisabledHintTarget) return;
+        positionCanvasSyncDisabledHintTooltip(canvasSyncDisabledHintTarget);
+    }, true);
+    window.addEventListener('resize', () => {
+        if (!canvasSyncDisabledHintTarget) return;
+        positionCanvasSyncDisabledHintTooltip(canvasSyncDisabledHintTarget);
+    });
+    window.addEventListener('blur', () => {
+        hideCanvasSyncDisabledHintTooltip();
+    });
+}
+
 function applyLanguage() {
     try {
         document.documentElement.lang = currentLang === 'zh_CN' ? 'zh' : 'en';
     } catch (_) { }
+    bindCanvasSyncDisabledHintTooltip();
     document.getElementById('pageTitle').textContent = i18n.pageTitle[currentLang];
     const subtitleEl = document.getElementById('pageSubtitle');
     if (subtitleEl) {
@@ -4895,14 +5157,16 @@ function applyLanguage() {
     if (canvasSyncPullOnStartupLabel) canvasSyncPullOnStartupLabel.textContent = i18n.canvasSyncPullOnStartupLabel[currentLang];
     const canvasSyncPullOnStartupDesc = document.getElementById('canvasSyncPullOnStartupDesc');
     if (canvasSyncPullOnStartupDesc) canvasSyncPullOnStartupDesc.textContent = i18n.canvasSyncPullOnStartupDesc[currentLang];
-    const canvasSyncPushOnSyncLabel = document.getElementById('canvasSyncPushOnSyncLabel');
-    if (canvasSyncPushOnSyncLabel) canvasSyncPushOnSyncLabel.textContent = i18n.canvasSyncPushOnSyncLabel[currentLang];
-    const canvasSyncPullOnSyncLabel = document.getElementById('canvasSyncPullOnSyncLabel');
-    if (canvasSyncPullOnSyncLabel) canvasSyncPullOnSyncLabel.textContent = i18n.canvasSyncPullOnSyncLabel[currentLang];
-    const canvasSyncPushPullOnSyncDesc = document.getElementById('canvasSyncPushPullOnSyncDesc');
-    if (canvasSyncPushPullOnSyncDesc) canvasSyncPushPullOnSyncDesc.textContent = i18n.canvasSyncPushPullOnSyncDesc[currentLang];
-    const canvasSyncHideNoChangeNoticeLabel = document.getElementById('canvasSyncHideNoChangeNoticeLabel');
-    if (canvasSyncHideNoChangeNoticeLabel) canvasSyncHideNoChangeNoticeLabel.textContent = i18n.canvasSyncHideNoChangeNoticeLabel[currentLang];
+    const canvasSyncToastToggleLabel = document.getElementById('canvasSyncToastToggleLabel');
+    if (canvasSyncToastToggleLabel) canvasSyncToastToggleLabel.textContent = i18n.canvasSyncToastToggleLabel[currentLang];
+    const canvasSyncToastToggleDesc = document.getElementById('canvasSyncToastToggleDesc');
+    if (canvasSyncToastToggleDesc) canvasSyncToastToggleDesc.textContent = i18n.canvasSyncToastToggleDesc[currentLang];
+    const canvasSyncEditAutoToastToggleLabel = document.getElementById('canvasSyncEditAutoToastToggleLabel');
+    if (canvasSyncEditAutoToastToggleLabel) canvasSyncEditAutoToastToggleLabel.textContent = i18n.canvasSyncEditAutoToastToggleLabel[currentLang];
+    const canvasSyncEditAutoToastToggleDesc = document.getElementById('canvasSyncEditAutoToastToggleDesc');
+    if (canvasSyncEditAutoToastToggleDesc) canvasSyncEditAutoToastToggleDesc.textContent = i18n.canvasSyncEditAutoToastToggleDesc[currentLang];
+    const canvasSyncQuietSyncHintDesc = document.getElementById('canvasSyncQuietSyncHintDesc');
+    if (canvasSyncQuietSyncHintDesc) canvasSyncQuietSyncHintDesc.textContent = i18n.canvasSyncQuietSyncHintDesc[currentLang];
     const canvasSyncMethodLabel = document.getElementById('canvasSyncMethodLabel');
     if (canvasSyncMethodLabel) canvasSyncMethodLabel.textContent = i18n.canvasSyncMethodLabel[currentLang];
     const canvasSyncMethodMergeOption = document.getElementById('canvasSyncMethodMergeOption');
@@ -4921,6 +5185,10 @@ function applyLanguage() {
     if (canvasSyncConflictOursOption) canvasSyncConflictOursOption.textContent = i18n.canvasSyncConflictOursOption[currentLang];
     const canvasSyncConflictTheirsOption = document.getElementById('canvasSyncConflictTheirsOption');
     if (canvasSyncConflictTheirsOption) canvasSyncConflictTheirsOption.textContent = i18n.canvasSyncConflictTheirsOption[currentLang];
+    const canvasSyncConflictNewestOption = document.getElementById('canvasSyncConflictNewestOption');
+    if (canvasSyncConflictNewestOption) canvasSyncConflictNewestOption.textContent = i18n.canvasSyncConflictNewestOption[currentLang];
+    const canvasSyncSyncModeDesc = document.getElementById('canvasSyncSyncModeDesc');
+    if (canvasSyncSyncModeDesc) canvasSyncSyncModeDesc.textContent = i18n.canvasSyncSyncModeDesc[currentLang];
     const canvasSyncConflictDesc = document.getElementById('canvasSyncConflictDesc');
     if (canvasSyncConflictDesc) canvasSyncConflictDesc.textContent = i18n.canvasSyncConflictDesc[currentLang];
 
@@ -4944,10 +5212,46 @@ function applyLanguage() {
     if (canvasSyncSectionGeneralTitle) canvasSyncSectionGeneralTitle.textContent = i18n.canvasSyncSectionGeneralTitle[currentLang];
     const canvasSyncBehaviorSubGeneralText = document.getElementById('canvasSyncBehaviorSubGeneralText');
     if (canvasSyncBehaviorSubGeneralText) canvasSyncBehaviorSubGeneralText.textContent = i18n.canvasSyncSectionGeneralTitle[currentLang];
+    const canvasSyncTemplateLabel = document.getElementById('canvasSyncTemplateLabel');
+    if (canvasSyncTemplateLabel) canvasSyncTemplateLabel.textContent = i18n.canvasSyncTemplateLabel[currentLang];
+    const canvasSyncTemplateCustomOption = document.getElementById('canvasSyncTemplateCustomOption');
+    if (canvasSyncTemplateCustomOption) canvasSyncTemplateCustomOption.textContent = i18n.canvasSyncTemplateCustomOption[currentLang];
+    const canvasSyncTemplateLiveOption = document.getElementById('canvasSyncTemplateLiveOption');
+    if (canvasSyncTemplateLiveOption) canvasSyncTemplateLiveOption.textContent = i18n.canvasSyncTemplateLiveOption[currentLang];
+    const canvasSyncTemplateStandardOption = document.getElementById('canvasSyncTemplateStandardOption');
+    if (canvasSyncTemplateStandardOption) canvasSyncTemplateStandardOption.textContent = i18n.canvasSyncTemplateStandardOption[currentLang];
+    const canvasSyncTemplateBackupOption = document.getElementById('canvasSyncTemplateBackupOption');
+    if (canvasSyncTemplateBackupOption) canvasSyncTemplateBackupOption.textContent = i18n.canvasSyncTemplateBackupOption[currentLang];
+    const canvasSyncTemplateHelpBtn = document.getElementById('canvasSyncTemplateHelpBtn');
+    if (canvasSyncTemplateHelpBtn) {
+        const title = i18n.canvasSyncTemplateHelpBtnTitle[currentLang];
+        canvasSyncTemplateHelpBtn.title = title;
+        canvasSyncTemplateHelpBtn.setAttribute('aria-label', title);
+    }
+    const canvasSyncTemplateHelpBtnText = document.getElementById('canvasSyncTemplateHelpBtnText');
+    if (canvasSyncTemplateHelpBtnText) canvasSyncTemplateHelpBtnText.textContent = i18n.canvasSyncTemplateHelpBtnTitle[currentLang];
+    const canvasSyncTemplateHelpDialogTitle = document.getElementById('canvasSyncTemplateHelpDialogTitle');
+    if (canvasSyncTemplateHelpDialogTitle) canvasSyncTemplateHelpDialogTitle.textContent = i18n.canvasSyncTemplateHelpPopoverTitle[currentLang];
+    const canvasSyncTemplateHelpDialogBody = document.getElementById('canvasSyncTemplateHelpDialogBody');
+    if (canvasSyncTemplateHelpDialogBody) canvasSyncTemplateHelpDialogBody.innerHTML = buildCanvasSyncTemplateHelpBodyHtml();
+    const closeCanvasSyncTemplateHelpDialog = document.getElementById('closeCanvasSyncTemplateHelpDialog');
+    if (closeCanvasSyncTemplateHelpDialog) {
+        const title = i18n.canvasSyncTemplateHelpCloseBtnTitle[currentLang];
+        closeCanvasSyncTemplateHelpDialog.title = title;
+        closeCanvasSyncTemplateHelpDialog.setAttribute('aria-label', title);
+    }
     const canvasSyncEnabledLabel = document.getElementById('canvasSyncEnabledLabel');
     if (canvasSyncEnabledLabel) canvasSyncEnabledLabel.textContent = i18n.canvasSyncEnabledLabel[currentLang];
     const canvasSyncAutoLabel = document.getElementById('canvasSyncAutoLabel');
     if (canvasSyncAutoLabel) canvasSyncAutoLabel.textContent = i18n.canvasSyncAutoLabel[currentLang];
+    const canvasSyncAutoHelpBtn = document.getElementById('canvasSyncAutoHelpBtn');
+    if (canvasSyncAutoHelpBtn) {
+        const title = i18n.canvasSyncAutoHelpBtnTitle[currentLang];
+        canvasSyncAutoHelpBtn.title = title;
+        canvasSyncAutoHelpBtn.setAttribute('aria-label', title);
+    }
+    const canvasSyncAutoHelpText = document.getElementById('canvasSyncAutoHelpText');
+    if (canvasSyncAutoHelpText) canvasSyncAutoHelpText.innerHTML = i18n.canvasSyncAutoHelpNote[currentLang].replace(/\n/g, '<br>');
     const canvasSyncAutoAfterEditStopLabel = document.getElementById('canvasSyncAutoAfterEditStopLabel');
     if (canvasSyncAutoAfterEditStopLabel) canvasSyncAutoAfterEditStopLabel.textContent = i18n.canvasSyncAutoAfterEditStopLabel[currentLang];
     const canvasSyncAutoAfterEditStopDesc = document.getElementById('canvasSyncAutoAfterEditStopDesc');
@@ -5031,10 +5335,6 @@ function applyLanguage() {
     if (canvasSyncObsidianExportRootLabel) canvasSyncObsidianExportRootLabel.textContent = i18n.canvasSyncObsidianExportRootLabel[currentLang];
     const canvasSyncObsidianExportRootDesc = document.getElementById('canvasSyncObsidianExportRootDesc');
     if (canvasSyncObsidianExportRootDesc) canvasSyncObsidianExportRootDesc.textContent = i18n.canvasSyncObsidianExportRootDesc[currentLang];
-    const canvasSyncDeleteThresholdLabel = document.getElementById('canvasSyncDeleteThresholdLabel');
-    if (canvasSyncDeleteThresholdLabel) canvasSyncDeleteThresholdLabel.textContent = i18n.canvasSyncDeleteThresholdLabel[currentLang];
-    const canvasSyncDeleteThresholdDesc = document.getElementById('canvasSyncDeleteThresholdDesc');
-    if (canvasSyncDeleteThresholdDesc) canvasSyncDeleteThresholdDesc.textContent = i18n.canvasSyncDeleteThresholdDesc[currentLang];
     const canvasSyncFirstSyncSubtitle = document.getElementById('canvasSyncFirstSyncSubtitle');
     if (canvasSyncFirstSyncSubtitle) canvasSyncFirstSyncSubtitle.textContent = i18n.canvasSyncFirstSyncSubtitle[currentLang];
     const canvasSyncFirstSyncModeLabel = document.getElementById('canvasSyncFirstSyncModeLabel');
@@ -5045,16 +5345,6 @@ function applyLanguage() {
     if (canvasSyncFirstSyncModeCloudOption) canvasSyncFirstSyncModeCloudOption.textContent = i18n.canvasSyncFirstSyncModeCloudOption[currentLang];
     const canvasSyncFirstSyncModeLocalOption = document.getElementById('canvasSyncFirstSyncModeLocalOption');
     if (canvasSyncFirstSyncModeLocalOption) canvasSyncFirstSyncModeLocalOption.textContent = i18n.canvasSyncFirstSyncModeLocalOption[currentLang];
-    const canvasSyncPermanentModeLabel = document.getElementById('canvasSyncPermanentModeLabel');
-    if (canvasSyncPermanentModeLabel) canvasSyncPermanentModeLabel.textContent = i18n.canvasSyncPermanentModeLabel[currentLang];
-    const canvasSyncPermanentModeAutoOption = document.getElementById('canvasSyncPermanentModeAutoOption');
-    if (canvasSyncPermanentModeAutoOption) canvasSyncPermanentModeAutoOption.textContent = i18n.canvasSyncPermanentModeAutoOption[currentLang];
-    const canvasSyncPermanentModeCloudOption = document.getElementById('canvasSyncPermanentModeCloudOption');
-    if (canvasSyncPermanentModeCloudOption) canvasSyncPermanentModeCloudOption.textContent = i18n.canvasSyncPermanentModeCloudOption[currentLang];
-    const canvasSyncPermanentModeLocalOption = document.getElementById('canvasSyncPermanentModeLocalOption');
-    if (canvasSyncPermanentModeLocalOption) canvasSyncPermanentModeLocalOption.textContent = i18n.canvasSyncPermanentModeLocalOption[currentLang];
-    const canvasSyncPermanentModeDesc = document.getElementById('canvasSyncPermanentModeDesc');
-    if (canvasSyncPermanentModeDesc) canvasSyncPermanentModeDesc.textContent = i18n.canvasSyncPermanentModeDesc[currentLang];
     const canvasSyncPermanentTreeIntervalLabel = document.getElementById('canvasSyncPermanentTreeIntervalLabel');
     if (canvasSyncPermanentTreeIntervalLabel) canvasSyncPermanentTreeIntervalLabel.textContent = i18n.canvasSyncPermanentTreeIntervalLabel[currentLang];
     const canvasSyncPermanentTreeInterval0Option = document.getElementById('canvasSyncPermanentTreeInterval0Option');
@@ -5095,12 +5385,6 @@ function applyLanguage() {
         canvasSyncFirstSyncHelpBtn.title = title;
         canvasSyncFirstSyncHelpBtn.setAttribute('aria-label', title);
     }
-    const canvasSyncPermanentModeHelpBtn = document.getElementById('canvasSyncPermanentModeHelpBtn');
-    if (canvasSyncPermanentModeHelpBtn) {
-        const title = i18n.canvasSyncPermanentModeHelpBtnTitle[currentLang];
-        canvasSyncPermanentModeHelpBtn.title = title;
-        canvasSyncPermanentModeHelpBtn.setAttribute('aria-label', title);
-    }
     const canvasSyncFirstSyncOverwriteText = document.getElementById('canvasSyncFirstSyncOverwriteText');
     if (canvasSyncFirstSyncOverwriteText) canvasSyncFirstSyncOverwriteText.textContent = i18n.canvasSyncFirstSyncOverwriteText[currentLang];
     const canvasSyncFirstSyncPathCheckLabel = document.getElementById('canvasSyncFirstSyncPathCheckLabel');
@@ -5113,8 +5397,6 @@ function applyLanguage() {
     if (canvasSyncPushOnlyText) canvasSyncPushOnlyText.textContent = i18n.canvasSyncPushOnlyText[currentLang];
     const canvasSyncPullOnlyText = document.getElementById('canvasSyncPullOnlyText');
     if (canvasSyncPullOnlyText) canvasSyncPullOnlyText.textContent = i18n.canvasSyncPullOnlyText[currentLang];
-    const canvasSyncRebuildText = document.getElementById('canvasSyncRebuildText');
-    if (canvasSyncRebuildText) canvasSyncRebuildText.textContent = i18n.canvasSyncRebuildText[currentLang];
     const canvasSyncStatusRunningLabel = document.getElementById('canvasSyncStatusRunningLabel');
     if (canvasSyncStatusRunningLabel) canvasSyncStatusRunningLabel.textContent = i18n.canvasSyncStatusRunningLabel[currentLang];
     const canvasSyncStatusQueueLabel = document.getElementById('canvasSyncStatusQueueLabel');
@@ -5176,6 +5458,8 @@ function applyLanguage() {
     if (canvasSyncMismatchUseLocalText) {
         canvasSyncMismatchUseLocalText.innerHTML = formatSyncActionLabelHtml(i18n.canvasSyncMismatchUseLocalText[currentLang]);
     }
+    const canvasSyncMismatchGoPolicyText = document.getElementById('canvasSyncMismatchGoPolicyText');
+    if (canvasSyncMismatchGoPolicyText) canvasSyncMismatchGoPolicyText.textContent = i18n.canvasSyncMismatchGoPolicyText[currentLang];
     const canvasSyncMismatchDismissText = document.getElementById('canvasSyncMismatchDismissText');
     if (canvasSyncMismatchDismissText) canvasSyncMismatchDismissText.textContent = i18n.canvasSyncMismatchDismissText[currentLang];
     const canvasSyncStatusErrorLabel = document.getElementById('canvasSyncStatusErrorLabel');
@@ -5210,6 +5494,8 @@ function applyLanguage() {
     if (canvasSyncConflictUseRemoteText) {
         canvasSyncConflictUseRemoteText.innerHTML = formatSyncActionLabelHtml(i18n.canvasSyncConflictUseRemoteText[currentLang]);
     }
+    const canvasSyncConflictGoPolicyText = document.getElementById('canvasSyncConflictGoPolicyText');
+    if (canvasSyncConflictGoPolicyText) canvasSyncConflictGoPolicyText.textContent = i18n.canvasSyncConflictGoPolicyText[currentLang];
     const canvasSyncConflictDismissText = document.getElementById('canvasSyncConflictDismissText');
     if (canvasSyncConflictDismissText) canvasSyncConflictDismissText.textContent = i18n.canvasSyncConflictDismissText[currentLang];
 
@@ -5331,8 +5617,482 @@ function applyLanguage() {
     setupPinchPopover('pinchHelpBtn1', 'pinchHelpPopover1');
     setupPinchPopover('pinchHelpBtn2', 'pinchHelpPopover2');
     setupPinchPopover('canvasSyncFirstSyncHelpBtn', 'canvasSyncFirstSyncHelpPopover');
-    setupPinchPopover('canvasSyncPermanentModeHelpBtn', 'canvasSyncFirstSyncHelpPopover');
     setupPinchPopover('canvasSyncRepoBranchHelpBtn', 'canvasSyncRepoBranchHelpPopover');
+    setupPinchPopover('canvasSyncAutoHelpBtn', 'canvasSyncAutoHelpPopover');
+
+    const buildCanvasSyncTemplateHelpControlHtml = (card, row) => {
+        const cardKey = card && card.key ? String(card.key) : '';
+        const rowKey = row && row.key ? String(row.key) : '';
+        const controlType = row && row.controlType ? String(row.controlType) : 'number';
+        const label = row && row.label ? String(row.label) : '';
+        const disabled = !!(row && row.disabled);
+        const labelAttr = escapeHtml(label);
+        const cardAttr = escapeHtml(cardKey);
+        const rowAttr = escapeHtml(rowKey);
+        const typeAttr = escapeHtml(controlType);
+        const controlClass = disabled ? ' canvas-sync-template-help-control is-disabled' : ' canvas-sync-template-help-control';
+        const disabledAttr = disabled ? ' disabled' : '';
+
+        if (controlType === 'toggle') {
+            return `
+                <div class="${controlClass.trim()} canvas-sync-template-help-control--switch" data-row-key="${rowAttr}">
+                    <label class="canvas-sync-switch">
+                        <input
+                            type="checkbox"
+                            class="canvas-sync-template-help-field canvas-sync-template-help-field--toggle"
+                            data-card-key="${cardAttr}"
+                            data-row-key="${rowAttr}"
+                            data-control-type="${typeAttr}"
+                            aria-label="${labelAttr}"
+                            aria-disabled="${disabled ? 'true' : 'false'}"
+                            ${row && row.value ? 'checked' : ''}
+                            ${disabledAttr}
+                        >
+                        <span class="canvas-sync-switch-slider"></span>
+                    </label>
+                </div>
+            `;
+        }
+
+        if (controlType === 'select') {
+            const optionsHtml = Array.isArray(row && row.options)
+                ? row.options.map((option) => {
+                    const optionValue = option && Object.prototype.hasOwnProperty.call(option, 'value')
+                        ? String(option.value)
+                        : '';
+                    const selected = String(row && row.value != null ? row.value : '') === optionValue
+                        ? ' selected'
+                        : '';
+                    return `<option value="${escapeHtml(optionValue)}"${selected}>${escapeHtml(option && option.label ? option.label : optionValue)}</option>`;
+                }).join('')
+                : '';
+            return `
+                <div class="${controlClass.trim()}" data-row-key="${rowAttr}">
+                    <select
+                        class="canvas-sync-template-help-field canvas-sync-template-help-select"
+                        data-card-key="${cardAttr}"
+                        data-row-key="${rowAttr}"
+                        data-control-type="${typeAttr}"
+                        aria-label="${labelAttr}"
+                        aria-disabled="${disabled ? 'true' : 'false'}"
+                        ${disabledAttr}
+                    >${optionsHtml}</select>
+                </div>
+            `;
+        }
+
+        const minAttr = row && row.min != null ? ` min="${escapeHtml(String(row.min))}"` : '';
+        const stepAttr = row && row.step != null ? ` step="${escapeHtml(String(row.step))}"` : '';
+        const valueAttr = escapeHtml(String(row && row.value != null ? row.value : ''));
+        return `
+            <div class="${controlClass.trim()}" data-row-key="${rowAttr}">
+                <input
+                    type="number"
+                    class="canvas-sync-template-help-field canvas-sync-template-help-input"
+                    data-card-key="${cardAttr}"
+                    data-row-key="${rowAttr}"
+                    data-control-type="${typeAttr}"
+                    aria-label="${labelAttr}"
+                    aria-disabled="${disabled ? 'true' : 'false'}"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    value="${valueAttr}"${minAttr}${stepAttr}${disabledAttr}
+                >
+            </div>
+        `;
+    };
+
+    const setCanvasSyncTemplateHelpFieldValue = (field, controlType, value) => {
+        if (!field) return;
+        if (controlType === 'toggle') {
+            field.checked = !!value;
+            return;
+        }
+        field.value = value == null ? '' : String(value);
+    };
+
+    const getCanvasSyncTemplateHelpFieldValue = (field, controlType) => {
+        if (!field) return '';
+        if (controlType === 'toggle') {
+            return !!field.checked;
+        }
+        return String(field.value || '');
+    };
+
+    const readCanvasSyncTemplateHelpBoolData = (value, fallback = false) => {
+        if (value === true || value === 'true') return true;
+        if (value === false || value === 'false') return false;
+        return !!fallback;
+    };
+
+    const setCanvasSyncTemplateHelpDisabledHint = (element, hint) => {
+        if (!element) return;
+        if (hint) {
+            element.setAttribute('data-disabled-hint', hint);
+        } else {
+            element.removeAttribute('data-disabled-hint');
+        }
+    };
+
+    const getCanvasSyncTemplateHelpRowField = (cardEl, rowKey) => {
+        if (!cardEl || !rowKey) return null;
+        return cardEl.querySelector(`.canvas-sync-template-help-field[data-row-key="${rowKey}"]`);
+    };
+
+    const getCanvasSyncTemplateHelpToggleState = (cardEl, rowKey, fallback = false) => {
+        const field = getCanvasSyncTemplateHelpRowField(cardEl, rowKey);
+        if (!field) return !!fallback;
+        return !!field.checked;
+    };
+
+    const buildCanvasSyncTemplateHelpCardControlStateMap = (cardEl, enabledOn) => {
+        const disabledByMasterHint = currentLang === 'en'
+            ? 'Sync is disabled: this field is unavailable'
+            : '启用同步已关闭：此项不可用';
+        const intervalDisabledHint = currentLang === 'en'
+            ? 'Split timers enabled: turn off split timers to edit this field'
+            : '分离定时器已开启：关闭分离定时器后才可以更改';
+        const pushPullDisabledHint = currentLang === 'en'
+            ? 'Split timers disabled: turn on split timers to edit this field'
+            : '分离定时器未开启：打开分离定时器后才可以更改';
+        const foregroundCheckDisabledHint = currentLang === 'en'
+            ? 'Foreground check disabled: turn it on to edit this field'
+            : '前台检测已关闭：打开前台检测后才可以更改';
+        const backgroundCheckDisabledHint = currentLang === 'en'
+            ? 'Background check disabled: turn it on to edit this field'
+            : '后台检测已关闭：打开后台检测后才可以更改';
+        const toastDisabledHint = currentLang === 'en'
+            ? 'Top-right general notifications are disabled: turn them on to edit this field'
+            : '右上角普通通知已关闭：打开后才可以更改';
+        const mismatchDisabledHint = currentLang === 'en'
+            ? 'Foreground and background checks are disabled: turn on at least one to edit this field'
+            : '前台和后台检测都已关闭：至少开启一个检测后才可以更改';
+
+        const splitOn = !!(enabledOn && getCanvasSyncTemplateHelpToggleState(cardEl, 'splitIntervalCommitAndSync', false));
+        const toastOn = !!(enabledOn && getCanvasSyncTemplateHelpToggleState(cardEl, 'toastEnabled', true));
+        const foregroundCheckOn = !!(enabledOn && readCanvasSyncTemplateHelpBoolData(cardEl && cardEl.dataset ? cardEl.dataset.foregroundCheckEnabled : '', true));
+        const backgroundCheckOn = !!(enabledOn && readCanvasSyncTemplateHelpBoolData(cardEl && cardEl.dataset ? cardEl.dataset.backgroundCheckEnabled : '', true));
+
+        const stateMap = {};
+        const setState = (rowKey, disabled, hint = '') => {
+            stateMap[rowKey] = {
+                disabled: !!disabled,
+                hint: disabled ? String(hint || '') : ''
+            };
+        };
+
+        [
+            'autoSync',
+            'syncAfterEditStop',
+            'splitIntervalCommitAndSync',
+            'pullOnStartup',
+            'permanentTreeUploadIntervalSeconds',
+            'tempSectionUploadIntervalSeconds',
+            'blankSectionUploadIntervalSeconds',
+            'toastEnabled'
+        ].forEach((rowKey) => {
+            setState(rowKey, !enabledOn, disabledByMasterHint);
+        });
+
+        setState('intervalSeconds', !enabledOn || splitOn, !enabledOn ? disabledByMasterHint : intervalDisabledHint);
+        setState('autoPushIntervalMinutes', !enabledOn || !splitOn, !enabledOn ? disabledByMasterHint : pushPullDisabledHint);
+        setState('autoPullIntervalMinutes', !enabledOn || !splitOn, !enabledOn ? disabledByMasterHint : pushPullDisabledHint);
+        setState('editAutoToastEnabled', !enabledOn || !toastOn, !enabledOn ? disabledByMasterHint : toastDisabledHint);
+        setState('mismatchPolicy', !enabledOn || !(foregroundCheckOn || backgroundCheckOn), !enabledOn ? disabledByMasterHint : mismatchDisabledHint);
+        setState('foregroundCheckIntervalSeconds', !enabledOn || !foregroundCheckOn, !enabledOn ? disabledByMasterHint : foregroundCheckDisabledHint);
+        setState('backgroundCheckIntervalMinutes', !enabledOn || !backgroundCheckOn, !enabledOn ? disabledByMasterHint : backgroundCheckDisabledHint);
+        setState('backgroundCooldownMinutes', !enabledOn || !backgroundCheckOn, !enabledOn ? disabledByMasterHint : backgroundCheckDisabledHint);
+
+        return stateMap;
+    };
+
+    const applyCanvasSyncTemplateHelpLineState = (line, state) => {
+        if (!line) return;
+        const resolvedState = state && typeof state === 'object' ? state : {};
+        const disabled = !!resolvedState.disabled;
+        const hint = disabled && resolvedState.hint ? String(resolvedState.hint) : '';
+        const control = line.querySelector('.canvas-sync-template-help-control');
+        const field = line.querySelector('.canvas-sync-template-help-field');
+        const switchEl = line.querySelector('.canvas-sync-switch');
+
+        line.classList.toggle('is-disabled', disabled);
+        line.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+        setCanvasSyncTemplateHelpDisabledHint(line, hint);
+
+        if (control) {
+            control.classList.toggle('is-disabled', disabled);
+            control.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            setCanvasSyncTemplateHelpDisabledHint(control, hint);
+        }
+
+        if (switchEl) {
+            switchEl.classList.toggle('is-disabled', disabled);
+            switchEl.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            setCanvasSyncTemplateHelpDisabledHint(switchEl, hint);
+        }
+
+        if (field) {
+            field.disabled = disabled;
+            field.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            setCanvasSyncTemplateHelpDisabledHint(field, hint);
+        }
+    };
+
+    const applyCanvasSyncTemplateHelpControlStateMap = () => {
+        const dialog = document.getElementById('canvasSyncTemplateHelpDialog');
+        if (!dialog) return;
+
+        const syncApi = window.CanvasObsidianGitSync;
+        let enabledOn = true;
+        try {
+            if (syncApi && typeof syncApi.getSettings === 'function') {
+                const syncSettings = syncApi.getSettings();
+                enabledOn = !!(syncSettings && syncSettings.enabled);
+            }
+        } catch (_) { }
+
+        dialog.querySelectorAll('.canvas-sync-template-help-card[data-card-key]').forEach((cardEl) => {
+            const stateMap = buildCanvasSyncTemplateHelpCardControlStateMap(cardEl, enabledOn);
+            cardEl.querySelectorAll('.canvas-sync-template-help-line[data-row-key]').forEach((line) => {
+                const rowKey = String(line.getAttribute('data-row-key') || '').trim();
+                applyCanvasSyncTemplateHelpLineState(line, rowKey ? stateMap[rowKey] : null);
+            });
+        });
+    };
+
+    const buildCanvasSyncTemplateHelpBodyHtml = () => {
+        const fallbackHtml = i18n.canvasSyncTemplateHelpNote[currentLang];
+        const syncApi = window.CanvasObsidianGitSync;
+        if (!syncApi || typeof syncApi.getSyncTemplatePreviewData !== 'function') {
+            return fallbackHtml;
+        }
+
+        try {
+            const templateSelect = document.getElementById('canvasSyncTemplateSelect');
+            const selectedKey = templateSelect
+                ? String(templateSelect.value || '').trim().toLowerCase()
+                : '';
+            const previewData = syncApi.getSyncTemplatePreviewData(selectedKey);
+            if (!previewData || !Array.isArray(previewData.cards) || !previewData.cards.length) {
+                return fallbackHtml;
+            }
+
+            const resetText = currentLang === 'en' ? 'Restore Default' : '还原默认';
+            const resetTitle = currentLang === 'en'
+                ? 'Restore the built-in default values of the current template'
+                : '还原当前模板的内置默认值';
+            const introHtml = previewData.intro
+                ? `
+                    <div class="canvas-sync-template-help-head">
+                        <div class="canvas-sync-template-help-intro">${escapeHtml(previewData.intro)}</div>
+                        <button
+                            type="button"
+                            class="canvas-manage-btn canvas-sync-template-help-reset-btn"
+                            id="canvasSyncTemplateHelpResetBtn"
+                            data-restore-key="${escapeHtml(previewData.restoreKey || '')}"
+                            title="${escapeHtml(resetTitle)}"
+                            aria-label="${escapeHtml(resetTitle)}"
+                        >${escapeHtml(resetText)}</button>
+                    </div>
+                `
+                : `
+                    <div class="canvas-sync-template-help-head canvas-sync-template-help-head--actions-only">
+                        <span></span>
+                        <button
+                            type="button"
+                            class="canvas-manage-btn canvas-sync-template-help-reset-btn"
+                            id="canvasSyncTemplateHelpResetBtn"
+                            data-restore-key="${escapeHtml(previewData.restoreKey || '')}"
+                            title="${escapeHtml(resetTitle)}"
+                            aria-label="${escapeHtml(resetTitle)}"
+                        >${escapeHtml(resetText)}</button>
+                    </div>
+                `;
+            const cardsHtml = previewData.cards.map((card) => {
+                const rows = Array.isArray(card.rows) ? card.rows : [];
+                const linesHtml = rows.map((row) => {
+                    if (row && row.isGroupHeader) {
+                        const groupClass = row.groupKey ? ` canvas-sync-template-help-group--${escapeHtml(String(row.groupKey))}` : '';
+                        return `
+                            <div class="canvas-sync-template-help-group${groupClass}">
+                                <span>${escapeHtml(row && row.label ? row.label : '')}</span>
+                            </div>
+                        `;
+                    }
+                    return `
+                        <div
+                            class="canvas-sync-template-help-line${row && row.disabled ? ' is-disabled' : ''}"
+                            data-card-key="${escapeHtml(card && card.key ? String(card.key) : '')}"
+                            data-row-key="${escapeHtml(row && row.key ? String(row.key) : '')}"
+                            aria-disabled="${row && row.disabled ? 'true' : 'false'}"
+                            ${row && row.disabledHint ? `data-disabled-hint="${escapeHtml(String(row.disabledHint))}"` : ''}
+                        >
+                            <b>${escapeHtml(row && row.label ? row.label : '')}</b>
+                            ${buildCanvasSyncTemplateHelpControlHtml(card, row)}
+                        </div>
+                    `;
+                }).join('');
+                const noteHtml = card && card.note
+                    ? `<div class="canvas-sync-template-help-card-note">${escapeHtml(card.note)}</div>`
+                    : '';
+                const selectedClass = card && card.selected ? ' is-selected' : '';
+                return `
+                    <section
+                        class="canvas-sync-template-help-card${selectedClass}"
+                        data-card-key="${escapeHtml(card && card.key ? String(card.key) : '')}"
+                        data-foreground-check-enabled="${card && card.foregroundCheckEnabled === false ? 'false' : 'true'}"
+                        data-background-check-enabled="${card && card.backgroundCheckEnabled === false ? 'false' : 'true'}"
+                    >
+                        <div class="canvas-sync-template-help-card-title">${escapeHtml(card && card.label ? card.label : '')}</div>
+                        ${noteHtml}
+                        ${linesHtml}
+                    </section>
+                `;
+            }).join('');
+            return `${introHtml}<div class="canvas-sync-template-help-grid">${cardsHtml}</div>`;
+        } catch (_) {
+            return fallbackHtml;
+        }
+    };
+
+    const renderCanvasSyncTemplateHelpDialogBody = () => {
+        const body = document.getElementById('canvasSyncTemplateHelpDialogBody');
+        if (!body) return;
+        hideCanvasSyncDisabledHintTooltip();
+        body.innerHTML = buildCanvasSyncTemplateHelpBodyHtml();
+        applyCanvasSyncTemplateHelpControlStateMap();
+    };
+
+    const openCanvasSyncTemplateHelpDialog = () => {
+        const existing = document.getElementById('canvasSyncTemplateHelpDialog');
+        if (existing) {
+            try { existing.remove(); } catch (_) { }
+        }
+
+        const syncModal = document.getElementById('canvasSyncModal');
+        const mountRoot = syncModal || document.body;
+        const useSyncModalDialog = !!syncModal;
+        const triggerBtn = document.getElementById('canvasSyncTemplateHelpBtn');
+        const title = i18n.canvasSyncTemplateHelpPopoverTitle[currentLang];
+        const closeTitle = i18n.canvasSyncTemplateHelpCloseBtnTitle[currentLang];
+        const helpHtml = buildCanvasSyncTemplateHelpBodyHtml();
+        const dialog = document.createElement('div');
+        dialog.className = useSyncModalDialog ? 'import-dialog canvas-sync-secondary-dialog' : 'import-dialog';
+        dialog.id = 'canvasSyncTemplateHelpDialog';
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+        dialog.style.zIndex = useSyncModalDialog ? '40' : '2147483647';
+        dialog.innerHTML = `
+            <div class="import-dialog-content canvas-sync-template-help-dialog-content">
+                <div class="import-dialog-header">
+                    <h3 id="canvasSyncTemplateHelpDialogTitle">${title}</h3>
+                    <button class="import-dialog-close" id="closeCanvasSyncTemplateHelpDialog" type="button" title="${closeTitle}" aria-label="${closeTitle}">&times;</button>
+                </div>
+                <div class="import-dialog-body canvas-sync-template-help-dialog-body">
+                    <div class="canvas-sync-template-help" id="canvasSyncTemplateHelpDialogBody">${helpHtml}</div>
+                </div>
+            </div>
+        `;
+
+        let settled = false;
+        const cleanup = () => {
+            if (settled) return;
+            settled = true;
+            document.removeEventListener('keydown', handleKeydown, true);
+            hideCanvasSyncDisabledHintTooltip();
+            try { dialog.remove(); } catch (_) { }
+            if (triggerBtn) {
+                try { triggerBtn.focus(); } catch (_) { }
+            }
+        };
+
+        const handleKeydown = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                cleanup();
+            }
+        };
+
+        dialog.addEventListener('click', (event) => {
+            const resetBtn = event.target && event.target.closest
+                ? event.target.closest('#canvasSyncTemplateHelpResetBtn')
+                : null;
+            if (resetBtn) {
+                event.preventDefault();
+                event.stopPropagation();
+                try {
+                    const syncApi = window.CanvasObsidianGitSync;
+                    if (syncApi && typeof syncApi.restoreSyncTemplatePreviewDefaults === 'function') {
+                        const restoreKey = String(resetBtn.getAttribute('data-restore-key') || '').trim().toLowerCase();
+                        if (syncApi.restoreSyncTemplatePreviewDefaults(restoreKey)) {
+                            renderCanvasSyncTemplateHelpDialogBody();
+                        }
+                    }
+                } catch (_) { }
+                return;
+            }
+
+            if (event.target === dialog) cleanup();
+        });
+
+        dialog.addEventListener('change', (event) => {
+            const field = event.target && event.target.closest
+                ? event.target.closest('.canvas-sync-template-help-field')
+                : null;
+            if (!field) return;
+
+            const rowKey = String(field.getAttribute('data-row-key') || '').trim();
+            const controlType = String(field.getAttribute('data-control-type') || '').trim() || 'number';
+            if (!rowKey) return;
+
+            try {
+                const syncApi = window.CanvasObsidianGitSync;
+                if (!syncApi || typeof syncApi.updateSyncTemplatePreviewControl !== 'function') {
+                    return;
+                }
+                const result = syncApi.updateSyncTemplatePreviewControl(
+                    rowKey,
+                    getCanvasSyncTemplateHelpFieldValue(field, controlType)
+                );
+                if (!result || result.ok === false) {
+                    renderCanvasSyncTemplateHelpDialogBody();
+                    return;
+                }
+                setCanvasSyncTemplateHelpFieldValue(
+                    field,
+                    result.controlType || controlType,
+                    result.controlValue
+                );
+                applyCanvasSyncTemplateHelpControlStateMap();
+            } catch (_) {
+                renderCanvasSyncTemplateHelpDialogBody();
+            }
+        });
+
+        mountRoot.appendChild(dialog);
+        renderCanvasSyncTemplateHelpDialogBody();
+
+        const closeBtn = document.getElementById('closeCanvasSyncTemplateHelpDialog');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                cleanup();
+            });
+            try { closeBtn.focus(); } catch (_) { }
+        }
+
+        document.addEventListener('keydown', handleKeydown, true);
+    };
+
+    const canvasSyncTemplateHelpDialogBtn = document.getElementById('canvasSyncTemplateHelpBtn');
+    if (canvasSyncTemplateHelpDialogBtn && canvasSyncTemplateHelpDialogBtn.dataset.dialogBound !== 'true') {
+        canvasSyncTemplateHelpDialogBtn.dataset.dialogBound = 'true';
+        canvasSyncTemplateHelpDialogBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openCanvasSyncTemplateHelpDialog();
+        });
+    }
 
     if (!document.body.dataset.pinchPopoverGlobalBound) {
         document.body.dataset.pinchPopoverGlobalBound = 'true';

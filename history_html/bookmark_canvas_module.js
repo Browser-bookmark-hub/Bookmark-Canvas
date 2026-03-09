@@ -1368,7 +1368,7 @@ function __updateImportContainerMembershipAfterMove(nodeId) {
         changed = __addNodeToImportContainer(target, nodeId, nodeType) || changed;
     }
     if (changed) {
-        try { saveTempNodes(); } catch (_) { }
+        try { saveTempNodes({ suppressSyncMarkDirty }); } catch (_) { }
     }
 }
 
@@ -6215,18 +6215,27 @@ function setupCanvasManageModal() {
             return;
         }
 
+        modalEl.style.maxWidth = `calc(100vw - 16px)`;
+        modalEl.style.maxHeight = `calc(100vh - 16px)`;
+
         const anchorRect = anchorBtn.getBoundingClientRect();
         const modalRect = modalEl.getBoundingClientRect();
         const gap = 8;
-        const minLeft = 8;
-        const maxLeft = Math.max(minLeft, window.innerWidth - modalRect.width - 8);
+        const viewportPadding = 8;
+        const minLeft = viewportPadding;
+        const maxLeft = Math.max(minLeft, window.innerWidth - modalRect.width - viewportPadding);
         const targetCenterX = anchorRect.left + (anchorRect.width / 2);
         let left = targetCenterX - (modalRect.width / 2);
         left = Math.min(Math.max(left, minLeft), maxLeft);
 
-        const minTop = 8;
-        const maxTop = Math.max(minTop, window.innerHeight - modalRect.height - 8);
+        const spaceBelow = window.innerHeight - anchorRect.bottom - viewportPadding;
+        const spaceAbove = anchorRect.top - viewportPadding;
         let top = anchorRect.bottom + gap;
+        if (spaceBelow < modalRect.height && spaceAbove > spaceBelow) {
+            top = anchorRect.top - modalRect.height - gap;
+        }
+        const minTop = viewportPadding;
+        const maxTop = Math.max(minTop, window.innerHeight - modalRect.height - viewportPadding);
         top = Math.min(Math.max(top, minTop), maxTop);
 
         modalEl.style.position = 'fixed';
@@ -27052,8 +27061,9 @@ function __buildImportPayloadFromCloudSnapshot(snapshot) {
     storage[TEMP_SECTION_STORAGE_KEY] = parsedTempState;
 
     const primaryState = {};
-    if (Array.isArray(payload.permanentTreeSnapshot) && payload.permanentTreeSnapshot.length) {
-        primaryState.permanentTreeSnapshot = payload.permanentTreeSnapshot;
+    const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(payload.permanentTreeSnapshot);
+    if (normalizedPermanentTreeSnapshot && normalizedPermanentTreeSnapshot.length) {
+        primaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
     }
 
     return {
@@ -28060,6 +28070,305 @@ const __CANVAS_DESC_BLOCK_START = '<!-- BC_DESCRIPTION_START -->';
 const __CANVAS_DESC_BLOCK_END = '<!-- BC_DESCRIPTION_END -->';
 const __CANVAS_FOLD_BLOCK_START = '<!-- BC_FOLD_STATE_START -->';
 const __CANVAS_FOLD_BLOCK_END = '<!-- BC_FOLD_STATE_END -->';
+const __CANVAS_ROOT_META_BLOCK_START = '<!-- BC_ROOT_META_START -->';
+const __CANVAS_ROOT_META_BLOCK_END = '<!-- BC_ROOT_META_END -->';
+
+function __normalizeBookmarkFolderType(folderType) {
+    const raw = String(folderType || '').trim().toLowerCase().replace(/[_\s]+/g, '-');
+    if (!raw) return '';
+    if (raw === 'bookmarks-bar' || raw === 'bookmark-bar' || raw === 'favorites-bar') return 'bookmarks-bar';
+    if (raw === 'other' || raw === 'other-bookmarks' || raw === 'other-bookmark' || raw === 'other-favorites' || raw === 'other-favorite') return 'other';
+    if (raw === 'mobile' || raw === 'mobile-bookmarks' || raw === 'mobile-bookmark' || raw === 'mobile-favorites' || raw === 'mobile-favorite' || raw === 'synced') return 'mobile';
+    if (raw === 'managed' || raw === 'managed-bookmarks' || raw === 'managed-bookmark') return 'managed';
+    return raw;
+}
+
+function __normalizeBookmarkRootSyncing(value) {
+    if (value === true || value === 1) return true;
+    if (value === false || value === 0) return false;
+    const text = String(value ?? '').trim().toLowerCase();
+    if (!text) return null;
+    if (text === 'true' || text === '1') return true;
+    if (text === 'false' || text === '0') return false;
+    return null;
+}
+
+function __canPersistBookmarkRootSyncing(folderType) {
+    const normalized = __normalizeBookmarkFolderType(folderType);
+    return normalized === 'bookmarks-bar'
+        || normalized === 'other'
+        || normalized === 'mobile'
+        || normalized === 'managed';
+}
+
+function __folderTypeToPermanentRootKey(folderType) {
+    const normalized = __normalizeBookmarkFolderType(folderType);
+    if (!normalized) return '';
+    if (normalized === 'bookmarks-bar') return 'bookmark_bar';
+    if (normalized === 'other') return 'other';
+    if (normalized === 'mobile') return 'mobile';
+    if (normalized === 'managed') return 'managed';
+    return `custom:${normalized}`;
+}
+
+function __permanentRootKeyToFolderType(rootKey) {
+    const key = String(rootKey || '').trim().toLowerCase();
+    if (!key) return '';
+    if (key === 'bookmark_bar') return 'bookmarks-bar';
+    if (key === 'other') return 'other';
+    if (key === 'mobile') return 'mobile';
+    if (key === 'managed') return 'managed';
+    if (key.startsWith('custom:')) return key.slice('custom:'.length);
+    return '';
+}
+
+function __normalizePermanentRootTitleKey(title) {
+    const text = String(title || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!text) return '';
+    if (text === 'bookmark bar' || text === 'bookmarks bar' || text === 'favorites bar' || text === '书签栏' || text === '收藏夹栏') return 'bookmark_bar';
+    if (text === 'other bookmarks' || text === 'other bookmark' || text === 'other favorites' || text === 'other favorite' || text === '其他书签' || text === '其他收藏夹') return 'other';
+    if (text === 'mobile bookmarks' || text === 'mobile bookmark' || text === 'mobile favorites' || text === 'mobile favorite' || text === '移动设备书签' || text === '移动收藏夹' || text === '手机收藏夹' || text === '手机书签') return 'mobile';
+    if (text === 'managed bookmarks' || text === 'managed bookmark') return 'managed';
+    return `custom:${text}`;
+}
+
+function __getPermanentRootMatchKey(node) {
+    if (!node || typeof node !== 'object') return '';
+    const folderTypeKey = __folderTypeToPermanentRootKey(node.folderType || node.folder_type || '');
+    if (folderTypeKey) return folderTypeKey;
+    const nodeId = String(node.id || '').trim();
+    if (nodeId === '1') return 'bookmark_bar';
+    if (nodeId === '2') return 'other';
+    if (nodeId === '3') return 'mobile';
+    return __normalizePermanentRootTitleKey(node.title || node.name || '');
+}
+
+function __getDefaultPermanentRootSectionTitle(folderType) {
+    const { isEn } = __getLang();
+    const normalized = __normalizeBookmarkFolderType(folderType);
+    if (normalized === 'bookmarks-bar') return isEn ? 'Bookmarks Bar' : '书签栏';
+    if (normalized === 'other') return isEn ? 'Other Bookmarks' : '其他书签';
+    if (normalized === 'mobile') return isEn ? 'Mobile Bookmarks' : '移动设备书签';
+    if (normalized === 'managed') return isEn ? 'Managed Bookmarks' : '受管理书签';
+    return isEn ? 'Bookmarks' : '书签';
+}
+
+function __resolvePermanentRootSectionTitle(node) {
+    const explicitTitle = String(node && (node.title || node.name) || '').trim();
+    if (explicitTitle) return explicitTitle;
+    const folderType = node && (node.folderType || node.folder_type)
+        ? (node.folderType || node.folder_type)
+        : __permanentRootKeyToFolderType(__getPermanentRootMatchKey(node));
+    return __getDefaultPermanentRootSectionTitle(folderType);
+}
+
+function __normalizePermanentRootMeta(rawMeta) {
+    const source = rawMeta && typeof rawMeta === 'object' ? rawMeta : {};
+    const rawRoots = source.standardRoots && typeof source.standardRoots === 'object' ? source.standardRoots : {};
+    const rawDescriptors = Array.isArray(source.rootDescriptors) ? source.rootDescriptors : [];
+    const normalizedRoots = {};
+    const normalizedDescriptors = [];
+
+    Object.keys(rawRoots).forEach((rawKey) => {
+        const entry = rawRoots[rawKey];
+        if (!entry || typeof entry !== 'object') return;
+        const folderType = __normalizeBookmarkFolderType(entry.folderType || __permanentRootKeyToFolderType(rawKey));
+        const rootKey = __folderTypeToPermanentRootKey(folderType) || __normalizePermanentRootTitleKey(entry.sectionTitle || rawKey);
+        if (!rootKey) return;
+        const normalizedEntry = {
+            present: entry.present !== false,
+            sectionTitle: String(entry.sectionTitle || '').trim() || __getDefaultPermanentRootSectionTitle(folderType || __permanentRootKeyToFolderType(rootKey)),
+            folderType: folderType || __permanentRootKeyToFolderType(rootKey)
+        };
+        const syncing = __canPersistBookmarkRootSyncing(normalizedEntry.folderType)
+            ? __normalizeBookmarkRootSyncing(entry.syncing)
+            : null;
+        if (syncing !== null) {
+            normalizedEntry.syncing = syncing;
+        }
+        normalizedRoots[rootKey] = normalizedEntry;
+    });
+
+    rawDescriptors.forEach((entry) => {
+        if (!entry || typeof entry !== 'object') return;
+        const sectionTitle = String(entry.sectionTitle || entry.title || '').trim();
+        const folderType = __normalizeBookmarkFolderType(entry.folderType || '');
+        const rootKey = __folderTypeToPermanentRootKey(folderType) || __normalizePermanentRootTitleKey(sectionTitle);
+        if (!sectionTitle && !folderType && !rootKey) return;
+
+        const normalizedDescriptor = {
+            sectionTitle: sectionTitle || __getDefaultPermanentRootSectionTitle(folderType || __permanentRootKeyToFolderType(rootKey)),
+            folderType: folderType || __permanentRootKeyToFolderType(rootKey)
+        };
+        const syncing = __canPersistBookmarkRootSyncing(normalizedDescriptor.folderType)
+            ? __normalizeBookmarkRootSyncing(entry.syncing)
+            : null;
+        if (syncing !== null) {
+            normalizedDescriptor.syncing = syncing;
+        }
+        normalizedDescriptors.push(normalizedDescriptor);
+
+        if (!rootKey) return;
+        const existingRoot = normalizedRoots[rootKey];
+        if (existingRoot && existingRoot.present !== false) return;
+        const derivedRoot = {
+            present: true,
+            sectionTitle: normalizedDescriptor.sectionTitle,
+            folderType: normalizedDescriptor.folderType
+        };
+        if (syncing !== null) {
+            derivedRoot.syncing = syncing;
+        }
+        normalizedRoots[rootKey] = derivedRoot;
+    });
+
+    const hasSyncing = normalizedDescriptors.some((entry) => typeof entry.syncing === 'boolean')
+        || Object.keys(normalizedRoots).some((rootKey) => typeof normalizedRoots[rootKey].syncing === 'boolean');
+    const normalizedMeta = {
+        schemaVersion: Number(source.schemaVersion) || (hasSyncing ? 2 : 1),
+        standardRoots: normalizedRoots
+    };
+    if (normalizedDescriptors.length) {
+        normalizedMeta.rootDescriptors = normalizedDescriptors;
+    }
+    return normalizedMeta;
+}
+
+function __buildPermanentRootMeta(bookmarkTree) {
+    const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
+    const roots = root && Array.isArray(root.children) ? root.children : [];
+    const standardRoots = {
+        bookmark_bar: { present: false, sectionTitle: __getDefaultPermanentRootSectionTitle('bookmarks-bar'), folderType: 'bookmarks-bar' },
+        other: { present: false, sectionTitle: __getDefaultPermanentRootSectionTitle('other'), folderType: 'other' },
+        mobile: { present: false, sectionTitle: __getDefaultPermanentRootSectionTitle('mobile'), folderType: 'mobile' }
+    };
+    const rootDescriptors = [];
+
+    roots.forEach((node) => {
+        const rootKey = __getPermanentRootMatchKey(node);
+        const folderType = __normalizeBookmarkFolderType(node.folderType || node.folder_type || __permanentRootKeyToFolderType(rootKey));
+        const syncing = __canPersistBookmarkRootSyncing(folderType)
+            ? __normalizeBookmarkRootSyncing(node && node.syncing)
+            : null;
+        const descriptor = {
+            sectionTitle: __resolvePermanentRootSectionTitle(node),
+            folderType: folderType || __permanentRootKeyToFolderType(rootKey)
+        };
+        if (syncing !== null) {
+            descriptor.syncing = syncing;
+        }
+        if (descriptor.sectionTitle || descriptor.folderType) {
+            rootDescriptors.push(descriptor);
+        }
+
+        if (!rootKey || !Object.prototype.hasOwnProperty.call(standardRoots, rootKey)) return;
+        if (standardRoots[rootKey].present) return;
+        const standardRoot = {
+            present: true,
+            sectionTitle: __resolvePermanentRootSectionTitle(node),
+            folderType: folderType || __permanentRootKeyToFolderType(rootKey)
+        };
+        if (syncing !== null) {
+            standardRoot.syncing = syncing;
+        }
+        standardRoots[rootKey] = standardRoot;
+    });
+
+    return __normalizePermanentRootMeta({
+        schemaVersion: 2,
+        standardRoots,
+        rootDescriptors
+    });
+}
+
+function __buildCanvasRootMetaCommentBlock(rootMeta) {
+    const normalized = __normalizePermanentRootMeta(rootMeta);
+    const roots = normalized && normalized.standardRoots && typeof normalized.standardRoots === 'object'
+        ? normalized.standardRoots
+        : {};
+    if (!Object.keys(roots).length) return '';
+    return [
+        __CANVAS_ROOT_META_BLOCK_START,
+        JSON.stringify(normalized, null, 2),
+        __CANVAS_ROOT_META_BLOCK_END
+    ].join('\n');
+}
+
+function __normalizePermanentTreeSnapshotForProtocol(rawTree) {
+    const source = Array.isArray(rawTree)
+        ? rawTree
+        : ((rawTree && typeof rawTree === 'object' && Array.isArray(rawTree.children)) ? [rawTree] : null);
+    if (!source || !source.length) return null;
+
+    let snapshot = null;
+    try {
+        snapshot = JSON.parse(JSON.stringify(source));
+    } catch (_) {
+        return null;
+    }
+    if (!Array.isArray(snapshot) || !snapshot.length) return null;
+
+    const root = snapshot[0];
+    if (!root || !Array.isArray(root.children)) return snapshot;
+
+    root.children = root.children.map((node) => {
+        if (!node || typeof node !== 'object') return node;
+        const nextNode = Object.assign({}, node);
+        const rootKey = __getPermanentRootMatchKey(nextNode);
+        const folderType = __normalizeBookmarkFolderType(
+            nextNode.folderType
+            || nextNode.folder_type
+            || __permanentRootKeyToFolderType(rootKey)
+        );
+        if (folderType) {
+            nextNode.folderType = folderType;
+        }
+        const syncing = __canPersistBookmarkRootSyncing(folderType)
+            ? __normalizeBookmarkRootSyncing(nextNode.syncing)
+            : null;
+        if (syncing !== null) {
+            nextNode.syncing = syncing;
+        } else if (Object.prototype.hasOwnProperty.call(nextNode, 'syncing')) {
+            delete nextNode.syncing;
+        }
+        if (Object.prototype.hasOwnProperty.call(nextNode, 'folder_type')) {
+            delete nextNode.folder_type;
+        }
+        const title = String(nextNode.title || nextNode.name || '').trim();
+        if (!title) {
+            nextNode.title = __resolvePermanentRootSectionTitle(nextNode);
+        }
+        return nextNode;
+    });
+
+    return snapshot;
+}
+
+function __extractCanvasRootMetaCommentBlock(bodyText) {
+    const body = String(bodyText || '').replace(/\r\n?/g, '\n');
+    const start = body.indexOf(__CANVAS_ROOT_META_BLOCK_START);
+    if (start < 0) return { body, rootMeta: null };
+
+    const searchStart = start + __CANVAS_ROOT_META_BLOCK_START.length;
+    const end = body.indexOf(__CANVAS_ROOT_META_BLOCK_END, searchStart);
+    if (end < 0) return { body, rootMeta: null };
+
+    let rootMeta = null;
+    try {
+        const rawJson = body.slice(searchStart, end).trim();
+        if (rawJson) rootMeta = __normalizePermanentRootMeta(JSON.parse(rawJson));
+    } catch (_) {
+        rootMeta = null;
+    }
+
+    const before = body.slice(0, start).replace(/[\t ]*\n?$/, '\n');
+    const after = body.slice(end + __CANVAS_ROOT_META_BLOCK_END.length).replace(/^\n?/, '');
+    const merged = `${before}${after}`.replace(/\n{3,}/g, '\n\n').trim();
+    return {
+        body: merged,
+        rootMeta
+    };
+}
 
 function __buildCanvasDescriptionCommentBlock(markdownText) {
     const text = String(markdownText || '').trim();
@@ -28128,23 +28437,12 @@ function __extractCanvasFoldStateCommentBlock(bodyText, options = {}) {
     const end = body.indexOf(__CANVAS_FOLD_BLOCK_END, searchStart);
     if (end < 0) return { body, foldState: null };
 
-    let foldState = null;
-    try {
-        const rawJson = body.slice(searchStart, end).trim();
-        if (rawJson) {
-            const parsed = JSON.parse(rawJson);
-            foldState = __normalizeCanvasFoldStateMeta(parsed, options);
-        }
-    } catch (_) {
-        foldState = null;
-    }
-
     const before = body.slice(0, start).replace(/[\t ]*\n?$/, '\n');
     const after = body.slice(end + __CANVAS_FOLD_BLOCK_END.length).replace(/^\n?/, '');
     const merged = `${before}${after}`.replace(/\n{3,}/g, '\n\n').trim();
     return {
         body: merged,
-        foldState
+        foldState: null
     };
 }
 
@@ -28152,7 +28450,8 @@ function __parseCanvasMarkdownPayload(fileText) {
     const rawBody = String(fileText || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
 
     const extractedDesc = __extractCanvasDescriptionCommentBlock(rawBody);
-    const extractedFold = __extractCanvasFoldStateCommentBlock(extractedDesc.body);
+    const extractedRootMeta = __extractCanvasRootMetaCommentBlock(extractedDesc.body);
+    const extractedFold = __extractCanvasFoldStateCommentBlock(extractedRootMeta.body);
     let workingBody = extractedFold.body;
     let descriptionMarkdown = extractedDesc.descriptionMarkdown;
 
@@ -28177,7 +28476,8 @@ function __parseCanvasMarkdownPayload(fileText) {
         rawBody,
         headerLine: hasHeaderLine ? firstNonEmptyLine : '',
         descriptionHtml: __renderDescriptionMarkdownToHtml(descriptionMarkdown),
-        foldState: extractedFold.foldState,
+        foldState: null,
+        rootMeta: extractedRootMeta.rootMeta,
         contentToParse
     };
 }
@@ -28365,9 +28665,10 @@ function __htmlToMarkdown(html, options = {}) {
     return trimResult ? compacted.trim() : compacted;
 }
 
-function __flushMdEditorsForExport() {
+function __flushMdEditorsForExport(options = {}) {
     const editors = document.querySelectorAll('.md-canvas-node .md-canvas-editor');
     if (!editors || !editors.length) return;
+    const suppressSyncMarkDirty = !!(options && options.suppressSyncMarkDirty);
 
     let changed = false;
     editors.forEach((editor) => {
@@ -28708,7 +29009,6 @@ function __toTreeMarkdownLines(items, depth = 0, options = {}) {
 function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = null, metaOptions = null) {
     const { isEn } = __getLang();
 
-    // 1. Get Title from DOM (in case user modified it via CSS/hack, or just use translated default)
     const domTitleEl = document.getElementById('permanentSectionTitle');
     const domTitle = domTitleEl ? domTitleEl.textContent.trim() : '';
     const title = domTitle || (isEn ? 'Permanent Bookmarks' : '书签树 (永久栏目)');
@@ -28716,7 +29016,6 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
     const slotLabel = toAlphaLabel(permanentSlot) || 'A';
     const sectionHeaderLine = `#${slotLabel} ${title}`.trim();
 
-    // 2. Get Description (Markdown) form LocalStorage
     let rawDesc = '';
     if (descriptionOverride !== null) {
         rawDesc = descriptionOverride;
@@ -28726,40 +29025,16 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
     const descMd = __htmlToMarkdown(rawDesc);
 
     const body = [sectionHeaderLine];
-
     if (descMd) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
-
     body.push('');
 
     const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
     const roots = root && Array.isArray(root.children) ? root.children : [];
-
-    // Prepare options for expanded state
     const permanentExpandedSet = (metaOptions && metaOptions.permanentExpandedSet && typeof metaOptions.permanentExpandedSet.has === 'function')
         ? metaOptions.permanentExpandedSet
         : __getPermanentExpandedSet(metaOptions && metaOptions.copyId);
-    const foldBlock = __buildCanvasFoldStateCommentBlock({
-        expanded: Array.from(permanentExpandedSet)
-    }, { mode: 'permanent', force: true });
-    if (foldBlock) {
-        body.push(foldBlock);
-    }
-    body.push('');
-    // Default roots (1, 2, 3) to expanded if the set is empty (fresh start)?? 
-    // Actually, usually Bar (1) is expanded. If set is empty, maybe user never toggled anything or cleared data.
-    // Let's stick to the set. If empty, everything collapsed (except maybe we want to force roots open?).
-    // Obsidian usually likes clean md. <details> is good.
-
-    const getRootSectionName = (node) => {
-        if (!node) return 'Bookmarks';
-        if (node.id === '1') return isEn ? 'Bookmark Bar' : '书签栏';
-        if (node.id === '2') return isEn ? 'Other Bookmarks' : '其他书签';
-        if (node.id === '3') return isEn ? 'Mobile Bookmarks' : '移动设备书签';
-        const t = String(node.title || node.name || '').trim();
-        return t || (isEn ? 'Bookmarks' : '书签');
-    };
 
     const toPayload = (node) => {
         if (!node) return null;
@@ -28774,13 +29049,9 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
     parts.push(...body);
 
     roots.forEach((r) => {
-        const sectionName = getRootSectionName(r);
+        const sectionName = __resolvePermanentRootSectionTitle(r);
         parts.push(`## ${sectionName}`);
         const children = Array.isArray(r.children) ? r.children.map(toPayload).filter(Boolean) : [];
-
-        // For roots, we might want to just list them. But usually they are headers.
-        // The children of roots are the actual folders/bookmarks.
-
         const lines = __toTreeMarkdownLines(children, 0, {
             checkType: 'permanent',
             permanentExpandedSet,
@@ -28791,6 +29062,15 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
         if (lines.length) parts.push(lines.join('\n'));
         parts.push('');
     });
+
+    const shouldWriteRootMeta = permanentSlot === 1 && !String(metaOptions && metaOptions.copyId || '').trim();
+    if (shouldWriteRootMeta) {
+        const rootMetaBlock = __buildCanvasRootMetaCommentBlock(__buildPermanentRootMeta(bookmarkTree));
+        if (rootMetaBlock) {
+            parts.push(rootMetaBlock);
+            parts.push('');
+        }
+    }
 
     return parts.join('\n').trimEnd() + '\n';
 }
@@ -28810,14 +29090,6 @@ function __buildTempSectionMarkdown(section, metaOptions = null) {
     const descMd = __htmlToMarkdown(descHtml);
     if (descMd) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
-    }
-
-    const foldBlock = __buildCanvasFoldStateCommentBlock(
-        __getTempSectionFoldStateForExport(section ? section.id : ''),
-        { force: true }
-    );
-    if (foldBlock) {
-        body.push(foldBlock);
     }
 
     body.push('');
@@ -28865,6 +29137,25 @@ function __buildMdNodeMarkdown(node) {
     return finalMd ? (finalMd + '\n') : '\n';
 }
 
+function __extractMdNodeFilenameTitle(markdownText, fallback = 'Untitled') {
+    const lines = String(markdownText || '').replace(/\r\n?/g, '\n').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        let line = __stripZwsp(lines[i] || '').trim();
+        if (!line) continue;
+        while (/^#{1,6}\s+/.test(line)) {
+            line = line.replace(/^#{1,6}\s+/, '').trim();
+        }
+        line = line
+            .replace(/^>+\s*/, '')
+            .replace(/^[-*+]\s+/, '')
+            .replace(/^\d+[.)]\s+/, '')
+            .trim();
+        if (line) return line;
+    }
+    return String(fallback || 'Untitled').trim() || 'Untitled';
+}
+
+
 
 /**
  * [EDITABLE MODE] Build Permanent Sections Markdown (Headings + List)
@@ -28880,7 +29171,6 @@ function __buildPermanentBookmarksMarkdownEditable(bookmarkTree, descriptionOver
 
     const body = [sectionHeaderLine];
 
-    // 2. Description
     let rawDesc = '';
     if (descriptionOverride !== null) {
         rawDesc = descriptionOverride;
@@ -28892,47 +29182,25 @@ function __buildPermanentBookmarksMarkdownEditable(bookmarkTree, descriptionOver
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
 
-    const foldBlock = __buildCanvasFoldStateCommentBlock(
-        __getPermanentFoldStateForExport(metaOptions && metaOptions.copyId),
-        { mode: 'permanent', force: true }
-    );
-    if (foldBlock) {
-        body.push(foldBlock);
-    }
-
     body.push('');
 
     const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
     const roots = root && Array.isArray(root.children) ? root.children : [];
 
-    const getRootSectionName = (node) => {
-        if (!node) return 'Bookmarks';
-        if (node.id === '1') return isEn ? 'Bookmark Bar' : '书签栏';
-        if (node.id === '2') return isEn ? 'Other Bookmarks' : '其他书签';
-        if (node.id === '3') return isEn ? 'Mobile Bookmarks' : '移动设备书签';
-        const t = String(node.title || node.name || '').trim();
-        return t || (isEn ? 'Bookmarks' : '书签');
-    };
-
-    // Clean URL - remove newlines and extra spaces
     const cleanUrl = (url) => {
         if (!url) return '';
         return String(url).replace(/[\r\n\s]+/g, '').trim();
     };
 
-    // Clean title for markdown link
     const cleanTitle = (t) => {
         if (!t) return '';
-        // Remove newlines, escape brackets
-        return String(t).replace(/[\r\n]+/g, ' ').replace(/([[\]()])/g, '\\$1').trim();
+        return String(t).replace(/[\r\n]+/g, ' ').replace(/([\[\]\(\)])/g, '\\$1').trim();
     };
 
-    // Truncate long titles to prevent overly long lines in Obsidian
     const MAX_TITLE_LENGTH = 80;
-    const truncateTitle = (title, url) => {
-        if (!title) return '';
-        // If title is essentially a URL (starts with http/https or equals the URL)
-        const isUrlTitle = /^https?:\/\//i.test(title) || title === url;
+    const truncateTitle = (titleValue, url) => {
+        if (!titleValue) return '';
+        const isUrlTitle = /^https?:\/\//i.test(titleValue) || titleValue === url;
         if (isUrlTitle && url) {
             try {
                 const parsed = new URL(url);
@@ -28941,65 +29209,69 @@ function __buildPermanentBookmarksMarkdownEditable(bookmarkTree, descriptionOver
                 const shortTitle = domain + (pathPart ? pathPart + '...' : '');
                 return shortTitle.length > MAX_TITLE_LENGTH ? shortTitle.substring(0, MAX_TITLE_LENGTH) + '...' : shortTitle;
             } catch (_) {
-                // Fallback: just truncate
-                return title.length > MAX_TITLE_LENGTH ? title.substring(0, MAX_TITLE_LENGTH) + '...' : title;
+                return titleValue.length > MAX_TITLE_LENGTH ? titleValue.substring(0, MAX_TITLE_LENGTH) + '...' : titleValue;
             }
         }
-        // Normal title: truncate if too long
-        return title.length > MAX_TITLE_LENGTH ? title.substring(0, MAX_TITLE_LENGTH) + '...' : title;
+        return titleValue.length > MAX_TITLE_LENGTH ? titleValue.substring(0, MAX_TITLE_LENGTH) + '...' : titleValue;
     };
 
     roots.forEach((r) => {
-        const sectionName = getRootSectionName(r);
+        const sectionName = __resolvePermanentRootSectionTitle(r);
         body.push(`## ${sectionName}`);
         body.push('');
 
-        // Process nodes recursively, using headings for folders up to H6, then nested lists
         const processNodes = (nodes, headingLevel, listIndent = 0) => {
             if (!nodes) return;
-            const useListMode = headingLevel >= 6; // Switch to list mode when we would exceed H6
+            const useListMode = headingLevel >= 6;
 
-            nodes.forEach(node => {
+            nodes.forEach((node) => {
+                if (!node) return;
                 if (node.url) {
-                    // Bookmark - always as list item
                     const rawTitle = cleanTitle(node.title || node.name) || cleanUrl(node.url);
-                    const bmUrl = cleanUrl(node.url);
-                    const bmTitle = truncateTitle(rawTitle, bmUrl);
+                    const bookmarkUrl = cleanUrl(node.url);
+                    const bookmarkTitle = truncateTitle(rawTitle, bookmarkUrl);
                     const indent = useListMode ? '  '.repeat(listIndent) : '';
-                    body.push(`${indent}- [${bmTitle}](${bmUrl})`);
-                } else {
-                    // Folder
-                    const folderTitle = cleanTitle(node.title || node.name || (isEn ? 'Folder' : '文件夹'));
+                    body.push(`${indent}- [${bookmarkTitle}](${bookmarkUrl})`);
+                    return;
+                }
 
-                    if (useListMode) {
-                        // Deep folder: use nested list with 📁 icon
-                        const indent = '  '.repeat(listIndent);
-                        body.push(`${indent}- 📁 **${folderTitle}**`);
+                const folderTitle = cleanTitle(node.title || node.name || (isEn ? 'Folder' : '文件夹'));
+                const children = Array.isArray(node.children) ? node.children : [];
 
-                        if (node.children && node.children.length > 0) {
-                            processNodes(node.children, headingLevel, listIndent + 1);
-                        }
-                    } else {
-                        // Shallow folder: use heading
-                        const nextLevel = headingLevel + 1;
-                        body.push('');
-                        body.push(`${'#'.repeat(nextLevel)} ${folderTitle}`);
-                        body.push('');
-
-                        if (node.children && node.children.length > 0) {
-                            processNodes(node.children, nextLevel, 0);
-                        }
+                if (useListMode) {
+                    const indent = '  '.repeat(listIndent);
+                    body.push(`${indent}- 📁 **${folderTitle}**`);
+                    if (children.length > 0) {
+                        processNodes(children, headingLevel, listIndent + 1);
                     }
+                    return;
+                }
+
+                const nextLevel = headingLevel + 1;
+                body.push('');
+                body.push(`${'#'.repeat(nextLevel)} ${folderTitle}`);
+                body.push('');
+                if (children.length > 0) {
+                    processNodes(children, nextLevel, 0);
                 }
             });
         };
 
         if (r.children) {
-            processNodes(r.children, 2); // Start at H2 context, so first level folders become H3
+            processNodes(r.children, 2);
         }
 
         body.push('');
     });
+
+    const shouldWriteRootMeta = permanentSlot === 1 && !String(metaOptions && metaOptions.copyId || '').trim();
+    if (shouldWriteRootMeta) {
+        const rootMetaBlock = __buildCanvasRootMetaCommentBlock(__buildPermanentRootMeta(bookmarkTree));
+        if (rootMetaBlock) {
+            body.push(rootMetaBlock);
+            body.push('');
+        }
+    }
 
     return body.join('\n').trimEnd() + '\n';
 }
@@ -29026,7 +29298,6 @@ function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptio
 
     const body = [sectionHeaderLine];
 
-    // Description (HTML -> Markdown)
     let rawDesc = '';
     if (descriptionOverride !== null) {
         rawDesc = descriptionOverride;
@@ -29036,14 +29307,6 @@ function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptio
     const descMd = __htmlToMarkdown(rawDesc);
     if (descMd) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
-    }
-
-    const foldBlock = __buildCanvasFoldStateCommentBlock(
-        __getPermanentFoldStateForExport(metaOptions && metaOptions.copyId),
-        { mode: 'permanent', force: true }
-    );
-    if (foldBlock) {
-        body.push(foldBlock);
     }
 
     body.push('');
@@ -29058,17 +29321,8 @@ function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptio
     const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
     const roots = root && Array.isArray(root.children) ? root.children : [];
 
-    const getRootSectionName = (node) => {
-        if (!node) return 'Bookmarks';
-        if (node.id === '1') return isEn ? 'Bookmark Bar' : '书签栏';
-        if (node.id === '2') return isEn ? 'Other Bookmarks' : '其他书签';
-        if (node.id === '3') return isEn ? 'Mobile Bookmarks' : '移动设备书签';
-        const t = String(node.title || node.name || '').trim();
-        return t || (isEn ? 'Bookmarks' : '书签');
-    };
-
     roots.forEach((r) => {
-        const sectionName = getRootSectionName(r);
+        const sectionName = __resolvePermanentRootSectionTitle(r);
         if (!sectionName) return;
         body.push(`![[${target}#${sectionName}]]`);
     });
@@ -29093,14 +29347,6 @@ function __buildTempSectionMarkdownEditable(section, metaOptions = null) {
     const descMd = __htmlToMarkdown(descHtml);
     if (descMd) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
-    }
-
-    const foldBlock = __buildCanvasFoldStateCommentBlock(
-        __getTempSectionFoldStateForExport(section ? section.id : ''),
-        { force: true }
-    );
-    if (foldBlock) {
-        body.push(foldBlock);
     }
 
     body.push('');
@@ -29465,12 +29711,10 @@ function __convertImportedTreeItemsToBookmarkSnapshotNodes(items) {
     return walk(list);
 }
 
-function __buildBookmarkTreeSnapshotFromPermanentMarkdown(contentToParse) {
+function __buildBookmarkTreeSnapshotFromPermanentMarkdown(contentToParse, rootMeta = null) {
     const body = String(contentToParse || '').replace(/\r\n?/g, '\n').trim();
     if (!body) return null;
 
-    // Permanent markdown is organized by root headings:
-    // ## Bookmark Bar / Other Bookmarks / Mobile Bookmarks
     const lines = body.split('\n');
     const sections = [];
     let currentTitle = '';
@@ -29502,13 +29746,85 @@ function __buildBookmarkTreeSnapshotFromPermanentMarkdown(contentToParse) {
         return null;
     }
 
-    const rootNodes = sections.map((section) => {
+    const normalizedRootMeta = __normalizePermanentRootMeta(rootMeta);
+    const sectionKeyMap = new Map();
+    const rootDescriptors = Array.isArray(normalizedRootMeta && normalizedRootMeta.rootDescriptors)
+        ? normalizedRootMeta.rootDescriptors
+        : [];
+    const descriptorBuckets = new Map();
+    const usedDescriptorIndexes = new Set();
+    const standardRoots = normalizedRootMeta && normalizedRootMeta.standardRoots && typeof normalizedRootMeta.standardRoots === 'object'
+        ? normalizedRootMeta.standardRoots
+        : {};
+
+    rootDescriptors.forEach((entry, index) => {
+        if (!entry || typeof entry !== 'object') return;
+        const normalizedTitle = String(entry.sectionTitle || '').trim().toLowerCase().replace(/\s+/g, ' ').trim();
+        if (!normalizedTitle) return;
+        if (!descriptorBuckets.has(normalizedTitle)) {
+            descriptorBuckets.set(normalizedTitle, []);
+        }
+        descriptorBuckets.get(normalizedTitle).push({ entry, index });
+    });
+
+    Object.keys(standardRoots).forEach((rootKey) => {
+        const entry = standardRoots[rootKey];
+        if (!entry || entry.present === false) return;
+        const resolvedFolderType = __normalizeBookmarkFolderType(entry.folderType || __permanentRootKeyToFolderType(rootKey));
+        const sectionTitle = String(entry.sectionTitle || '').trim();
+        if (!sectionTitle) return;
+        const normalizedTitle = sectionTitle.toLowerCase().replace(/\s+/g, ' ').trim();
+        if (!normalizedTitle || sectionKeyMap.has(normalizedTitle)) return;
+        sectionKeyMap.set(normalizedTitle, {
+            rootKey,
+            folderType: resolvedFolderType,
+            syncing: __canPersistBookmarkRootSyncing(resolvedFolderType)
+                ? __normalizeBookmarkRootSyncing(entry.syncing)
+                : null
+        });
+    });
+
+    const takeDescriptorEntry = (sectionTitle, index) => {
+        const normalizedTitle = String(sectionTitle || '').trim().toLowerCase().replace(/\s+/g, ' ').trim();
+        const bucket = normalizedTitle ? descriptorBuckets.get(normalizedTitle) : null;
+        if (bucket && bucket.length) {
+            while (bucket.length) {
+                const next = bucket.shift();
+                if (!next || usedDescriptorIndexes.has(next.index)) continue;
+                usedDescriptorIndexes.add(next.index);
+                return next.entry;
+            }
+        }
+        if (index >= 0 && index < rootDescriptors.length && !usedDescriptorIndexes.has(index)) {
+            usedDescriptorIndexes.add(index);
+            return rootDescriptors[index];
+        }
+        return null;
+    };
+
+    const rootNodes = sections.map((section, index) => {
         const items = __parseMarkdownAuto(section.body || '');
         const children = __convertImportedTreeItemsToBookmarkSnapshotNodes(items);
-        return {
-            title: String(section.title || '').trim() || 'Bookmarks',
+        const sectionTitle = String(section.title || '').trim();
+        const normalizedTitle = sectionTitle.toLowerCase().replace(/\s+/g, ' ').trim();
+        const descriptorEntry = takeDescriptorEntry(sectionTitle, index);
+        const metaEntry = descriptorEntry || (normalizedTitle ? sectionKeyMap.get(normalizedTitle) : null);
+        const fallbackRootKey = metaEntry ? '' : __normalizePermanentRootTitleKey(sectionTitle);
+        const folderType = __normalizeBookmarkFolderType(
+            (metaEntry && metaEntry.folderType)
+            || __permanentRootKeyToFolderType(metaEntry && metaEntry.rootKey)
+            || __permanentRootKeyToFolderType(fallbackRootKey)
+        );
+        const syncing = __canPersistBookmarkRootSyncing(folderType)
+            ? __normalizeBookmarkRootSyncing(metaEntry && metaEntry.syncing)
+            : null;
+        const rootNode = {
+            title: sectionTitle || 'Bookmarks',
             children
         };
+        if (folderType) rootNode.folderType = folderType;
+        if (syncing !== null) rootNode.syncing = syncing;
+        return rootNode;
     }).filter(Boolean);
 
     return [{
@@ -29544,7 +29860,8 @@ function __rebuildPermanentTreeSnapshotFromSyncFolderFiles(folderFiles) {
                     slot: __resolvePermanentSectionSlotForImport(parsedMarkdown, entry.path, index + 1),
                     contentToParse: parsedMarkdown && typeof parsedMarkdown.contentToParse === 'string'
                         ? parsedMarkdown.contentToParse
-                        : ''
+                        : '',
+                    rootMeta: parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
                 });
             } catch (_) { }
         });
@@ -29562,7 +29879,7 @@ function __rebuildPermanentTreeSnapshotFromSyncFolderFiles(folderFiles) {
 
     const tryBuildFromEntry = (entry) => {
         if (!entry || typeof entry !== 'object') return null;
-        const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(entry.contentToParse || '');
+        const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(entry.contentToParse || '', entry.rootMeta || null);
         return snapshotTree || null;
     };
 
@@ -29740,6 +30057,16 @@ function __zipStore(files) {
 function __sanitizeFilename(name) {
     return (name || '').replace(/[<>:"/\\|?*#\x00-\x1F]/g, '_').replace(/^\.+/, '').trim() || 'Untitled';
 }
+
+function __getStableBuiltinBlankSectionFilename(nodeId) {
+    const id = String(nodeId || '').trim();
+    if (!id) return '';
+    if (id === 'md-node-demo-bookmark-guide') return 'Bookmark Canvas (dev) - User Guide';
+    if (id === 'md-node-demo-shortcut-guide') return 'Keyboard Shortcuts';
+    if (id === 'md-node-demo-batch-feature') return 'Open Mode Features';
+    return '';
+}
+
 
 const __OBSIDIAN_SAFE_FILENAME_MAX_BYTES = 120;
 const __OBSIDIAN_SAFE_FILENAME_MIN_BASE_BYTES = 24;
@@ -30106,6 +30433,30 @@ function __buildObsidianSyncCanvasData({
     return canvasData;
 }
 
+function __formatObsidianCanvasJson(canvasDataInput) {
+    const canvasData = (canvasDataInput && typeof canvasDataInput === 'object') ? canvasDataInput : { nodes: [], edges: [] };
+    const nodes = Array.isArray(canvasData.nodes) ? canvasData.nodes : [];
+    const edges = Array.isArray(canvasData.edges) ? canvasData.edges : [];
+    const lines = ['{', '	"nodes":['];
+
+    nodes.forEach((node, index) => {
+        const suffix = index < (nodes.length - 1) ? ',' : '';
+        lines.push(`		${JSON.stringify(node)}${suffix}`);
+    });
+
+    lines.push('	],', '	"edges":[');
+
+    edges.forEach((edge, index) => {
+        const suffix = index < (edges.length - 1) ? ',' : '';
+        lines.push(`		${JSON.stringify(edge)}${suffix}`);
+    });
+
+    lines.push('	]', '}');
+    return lines.join('\n');
+}
+
+
+
 async function __buildObsidianSyncFiles(options = {}) {
     const { isEn } = __getLang();
     const api = (typeof browserAPI !== 'undefined' && browserAPI.bookmarks)
@@ -30123,7 +30474,7 @@ async function __buildObsidianSyncFiles(options = {}) {
     const obsidianBookmarkIconMode = exportFormat === 'visual-no-icon' ? 'text' : 'favicon';
     const exportRoot = __normalizeObsidianSyncExportRoot(options && options.exportRoot, isEn, { allowEmpty: true });
 
-    try { __flushMdEditorsForExport(); } catch (_) { }
+    try { __flushMdEditorsForExport({ suppressSyncMarkDirty: true }); } catch (_) { }
     try { saveTempNodes({ suppressSyncMarkDirty: true }); } catch (_) { }
     try { savePermanentSectionPosition(); } catch (_) { }
     // Keep expand/collapse state in-sync with storage before we generate markdown (<details open>).
@@ -30244,17 +30595,13 @@ async function __buildObsidianSyncFiles(options = {}) {
             return;
         }
 
-        let titleCandidate = (node.text || '').replace(/\u200B/g, '').trim();
-        if (!titleCandidate && node.html) {
-            try {
-                const div = document.createElement('div');
-                div.innerHTML = node.html;
-                titleCandidate = (div.textContent || '').replace(/\u200B/g, '').trim();
-            } catch (_) { }
-        }
-        titleCandidate = titleCandidate.split('\n')[0].trim();
+        const mdContent = __buildMdNodeMarkdown(node);
+        const fixedBuiltinName = __getStableBuiltinBlankSectionFilename(node.id);
+        const titleCandidate = fixedBuiltinName || __extractMdNodeFilenameTitle(mdContent, node.id);
 
-        let safeName = __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
+        let safeName = fixedBuiltinName
+            ? fixedBuiltinName
+            : __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
         if (!safeName || safeName === 'Untitled') safeName = node.id;
 
         let rel = `${mdNodeFolder}/${safeName}.md`;
@@ -30264,7 +30611,7 @@ async function __buildObsidianSyncFiles(options = {}) {
         usedNodePaths.add(rel);
 
         mdNodeMdPaths.push({ id: node.id, rel });
-        pushTextFile(rel, __buildMdNodeMarkdown(node), {
+        pushTextFile(rel, mdContent, {
             type: 'blank',
             nodeId: node.id
         });
@@ -30282,7 +30629,7 @@ async function __buildObsidianSyncFiles(options = {}) {
     const defaultCanvasName = isEn ? 'bookmark-canvas' : '书签画布';
     const exportRootLeaf = String(exportRoot).split('/').filter(Boolean).slice(-1)[0] || defaultCanvasName;
     const canvasFileName = `${exportRootLeaf}.canvas`;
-    pushTextFile(canvasFileName, JSON.stringify(canvasData, null, 2), { type: 'canvas' });
+    pushTextFile(canvasFileName, __formatObsidianCanvasJson(canvasData), { type: 'canvas' });
     pushTextFile(
         '说明导入规则.md',
         __buildCanvasImportRulesDocument({
@@ -30302,13 +30649,89 @@ async function __buildObsidianSyncFiles(options = {}) {
 }
 
 if (typeof window !== 'undefined') {
+
+function __stripPermanentNodesFromParsedSyncFolderForProtocol(parsedInput, folderFiles, folderName = '') {
+    const parsed = parsedInput && typeof parsedInput === 'object' ? parsedInput : {};
+    const tempState = parsed && parsed.tempState && typeof parsed.tempState === 'object'
+        ? parsed.tempState
+        : null;
+    if (!tempState) return parsed;
+
+    const normalizedFiles = __normalizeImportFolderFilesMap(folderFiles);
+    if (!normalizedFiles || typeof normalizedFiles.size !== 'number' || normalizedFiles.size === 0) {
+        return parsed;
+    }
+
+    const permanentNodeIds = new Set();
+    const canvasCandidates = Array.from(normalizedFiles.keys())
+        .map((key) => String(key || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/'))
+        .filter((key) => !!key && /\.canvas$/i.test(key));
+
+    canvasCandidates.forEach((canvasPath) => {
+        const bytes = normalizedFiles.get(canvasPath);
+        if (!bytes) return;
+        try {
+            const canvasText = new TextDecoder('utf-8').decode(bytes);
+            const canvasData = JSON.parse(canvasText);
+            const nodes = Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [];
+            nodes.forEach((node) => {
+                if (!node || node.type !== 'file') return;
+                const nodeId = String(node.id || '').trim();
+                const filePath = String(node.file || '').trim();
+                if (!nodeId) return;
+                if (__isExportedPermanentCanvasNode(node) || __isPermanentMarkdownPath(filePath)) {
+                    permanentNodeIds.add(nodeId);
+                }
+            });
+        } catch (_) { }
+    });
+
+    if (!permanentNodeIds.size) return parsed;
+
+    const sections = Array.isArray(tempState.sections) ? tempState.sections : [];
+    const mdNodes = Array.isArray(tempState.mdNodes) ? tempState.mdNodes : [];
+    const edges = Array.isArray(tempState.edges) ? tempState.edges : [];
+
+    const filteredSections = sections.filter((section) => {
+        const id = String(section && section.id || '').trim();
+        return id ? !permanentNodeIds.has(id) : true;
+    });
+
+    const validIds = new Set();
+    filteredSections.forEach((section) => {
+        if (section && section.id) validIds.add(String(section.id));
+    });
+    mdNodes.forEach((node) => {
+        if (node && node.id) validIds.add(String(node.id));
+    });
+
+    const filteredEdges = edges.filter((edge) => {
+        if (!edge || typeof edge !== 'object') return false;
+        const fromNode = String(edge.fromNode || '').trim();
+        const toNode = String(edge.toNode || '').trim();
+        if (!fromNode || !toNode) return false;
+        const fromValid = validIds.has(fromNode) || __isPermanentCanvasNodeId(fromNode);
+        const toValid = validIds.has(toNode) || __isPermanentCanvasNodeId(toNode);
+        return fromValid && toValid;
+    });
+
+    return Object.assign({}, parsed, {
+        tempState: Object.assign({}, tempState, {
+            sections: filteredSections,
+            mdNodes,
+            edges: filteredEdges
+        })
+    });
+}
+
     if (!window.CanvasObsidianExportBridge || typeof window.CanvasObsidianExportBridge !== 'object') {
         window.CanvasObsidianExportBridge = {};
     }
     window.CanvasObsidianExportBridge.buildSyncFiles = __buildObsidianSyncFiles;
     window.CanvasObsidianExportBridge.parseSyncFolderFiles = parseCanvasPackageFromFolderFiles;
-    window.CanvasObsidianExportBridge.parseSyncFolderFilesForSync = function (folderFiles, folderName) {
-        return parseCanvasPackageFromFolderFiles(folderFiles, folderName, { preferBackupJson: false });
+    window.CanvasObsidianExportBridge.parseSyncFolderFilesForSync = async function (folderFiles, folderName) {
+        const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName, { preferBackupJson: false });
+        return __stripPermanentNodesFromParsedSyncFolderForProtocol(parsed, folderFiles, folderName);
     };
     window.CanvasObsidianExportBridge.applySyncFilesReplace = __applyObsidianSyncFilesReplace;
     window.CanvasObsidianExportBridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles = __rebuildPermanentTreeSnapshotFromSyncFolderFiles;
@@ -30688,14 +31111,6 @@ async function exportCanvasPackage(options = {}) {
                 scrollState[partitionedPermanentScrollKey] = JSON.parse(permanentScroll);
             } catch (_) { }
         }
-        const partitionedPermanentExpandedKey = __buildCanvasPartitionedViewStateKey('expand', PERMANENT_SECTION_EXPANDED_KEY);
-        const permanentExpanded = localStorage.getItem(partitionedPermanentExpandedKey);
-        if (permanentExpanded) {
-            try {
-                scrollState[partitionedPermanentExpandedKey] = JSON.parse(permanentExpanded);
-            } catch (_) { }
-        }
-
         // Collect Permanent Section Tips (Descriptions)
         const permanentTips = {};
         try {
@@ -30717,15 +31132,12 @@ async function exportCanvasPackage(options = {}) {
                 try {
                     scrollState[key] = JSON.parse(localStorage.getItem(key));
                 } catch (_) { }
-            } else if (key && (key.startsWith(`${PERMANENT_SECTION_EXPANDED_KEY}:`) || key.includes(`:${PERMANENT_SECTION_EXPANDED_KEY}:`) || key.endsWith(`:${PERMANENT_SECTION_EXPANDED_KEY}`))) {
-                try {
-                    scrollState[key] = JSON.parse(localStorage.getItem(key));
-                } catch (_) { }
             }
         }
 
         const bookmarkTree = await api.getTree();
 
+        const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(bookmarkTree) || bookmarkTree;
         const backupState = {
             exporter: 'bookmark-backup-canvas',
             exportVersion: 2,
@@ -30742,7 +31154,7 @@ async function exportCanvasPackage(options = {}) {
                 ...scrollState,
                 ...permanentTips
             },
-            permanentTreeSnapshot: bookmarkTree,
+            permanentTreeSnapshot: normalizedPermanentTreeSnapshot,
             canvasState: {
                 tempSections: CanvasState.tempSections,
                 mdNodes: CanvasState.mdNodes,
@@ -31011,7 +31423,7 @@ async function exportCanvasPackage(options = {}) {
     }
 
     const exportRoot = vaultPrefix ? vaultPrefix.split('/').slice(-1)[0] : defaultExportRoot;
-    const forceCollapsedForObsidian = !isFullBackupMode && String(exportFormat || '').trim().toLowerCase() !== 'editable';
+    const forceCollapsedForObsidian = String(exportFormat || '').trim().toLowerCase() !== 'editable';
 
     // 1) Markdown files
     // 1) Markdown files
@@ -31101,16 +31513,13 @@ async function exportCanvasPackage(options = {}) {
             return;
         }
 
-        // Use first line of text as filename
-        let titleCandidate = (node.text || '').replace(/\u200B/g, '').trim();
-        if (!titleCandidate && node.html) {
-            const div = document.createElement('div');
-            div.innerHTML = node.html;
-            titleCandidate = (div.textContent || '').replace(/\u200B/g, '').trim();
-        }
-        titleCandidate = titleCandidate.split('\n')[0].trim();
+        const mdContent = __buildMdNodeMarkdown(node);
+        const fixedBuiltinName = __getStableBuiltinBlankSectionFilename(node.id);
+        const titleCandidate = fixedBuiltinName || __extractMdNodeFilenameTitle(mdContent, node.id);
 
-        let safeName = __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
+        let safeName = fixedBuiltinName
+            ? fixedBuiltinName
+            : __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
         if (!safeName || safeName === 'Untitled') safeName = node.id;
 
         let rel = `${mdNodeFolder}/${safeName}.md`;
@@ -31121,7 +31530,7 @@ async function exportCanvasPackage(options = {}) {
         usedNodePaths.add(rel);
 
         mdNodeMdPaths.push({ id: node.id, rel });
-        files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(__buildMdNodeMarkdown(node)) });
+        files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(mdContent) });
     });
 
     const buildCanvasData = ({ vaultRelativePrefix }) => {
@@ -31330,7 +31739,7 @@ async function exportCanvasPackage(options = {}) {
     // - 独立 vault：留空（file 路径将是 permanent-bookmarks.md / temp-sections/...）
     const canvasForVault = buildCanvasData({ vaultRelativePrefix: vaultPrefix });
     const canvasFileName = `${exportRoot}.canvas`;
-    files.push({ name: `${exportRoot}/${canvasFileName}`, data: __toUint8(JSON.stringify(canvasForVault, null, 2)) });
+    files.push({ name: `${exportRoot}/${canvasFileName}`, data: __toUint8(__formatObsidianCanvasJson(canvasForVault)) });
 
     // 3) Full state json (for full import)
     const tempStateObj = {
@@ -31386,6 +31795,7 @@ async function exportCanvasPackage(options = {}) {
     // 3.2) Core data layer (bookmark-canvas.backup.json) - 核心数据层
     // 仅在"模式 B"（全量备份模式）下生成
     if (isFullBackupMode) {
+        const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(bookmarkTree) || bookmarkTree;
         const backupState = {
             exporter: 'bookmark-backup-canvas',
             exportVersion: 2, // 核心数据层使用版本2
@@ -31402,7 +31812,7 @@ async function exportCanvasPackage(options = {}) {
                 ...scrollState
             },
             // 核心数据层包含完整书签树快照
-            permanentTreeSnapshot: bookmarkTree,
+            permanentTreeSnapshot: normalizedPermanentTreeSnapshot,
             // 包含当前画布所有栏目的完整数据对象树
             canvasState: {
                 tempSections: CanvasState.tempSections,
@@ -31479,8 +31889,10 @@ async function exportCanvasPackage(options = {}) {
             '### A3. Markdown Structure (all section files)',
             '- Use the first non-empty line as section header text (`sequence + title` recommended).',
             '- Optional description uses comment block: `<!-- BC_DESCRIPTION_START --> ... <!-- BC_DESCRIPTION_END -->`.',
-            '- Optional folder fold-state uses comment block: `<!-- BC_FOLD_STATE_START --> ... <!-- BC_FOLD_STATE_END -->`.',
-            '- Permanent/Temporary bookmark tree content is parsed from lines below the header/description block.',
+            '- Permanent main markdown appends root metadata comment block: `<!-- BC_ROOT_META_START --> ... <!-- BC_ROOT_META_END -->`.',
+            '- This metadata identifies standard browser roots (`folderType`, optional `syncing`). Do not delete, move, or manually edit it unless you understand the protocol semantics.',
+            '- Legacy `BC_FOLD_STATE` blocks are ignored on import and are no longer written on export.',
+            '- Permanent/Temporary bookmark tree content is parsed from lines below the header/description/meta block.',
             '- Permanent slot recognition priority: header `#A/#B` > filename `(#B)` > file order fallback.',
             '- Special temporary files are placed under `Special temporary/`.',
             '- Blank section keeps free-form markdown body (no required metadata header).',
@@ -31526,8 +31938,10 @@ async function exportCanvasPackage(options = {}) {
             '### A3. Markdown 文件结构（所有栏目）',
             '- 首个非空行作为栏目头文本（建议“序号 + 标题”）。',
             '- 说明区可选，采用注释块：`<!-- BC_DESCRIPTION_START --> ... <!-- BC_DESCRIPTION_END -->`。',
-            '- 文件夹折叠态可选，采用注释块：`<!-- BC_FOLD_STATE_START --> ... <!-- BC_FOLD_STATE_END -->`。',
-            '- 永久/临时栏目的书签树内容从栏目头/说明区之后开始解析。',
+            '- 永久主 Markdown 文件末尾追加根目录元数据注释块：`<!-- BC_ROOT_META_START --> ... <!-- BC_ROOT_META_END -->`。',
+            '- 该元数据用于识别浏览器标准根目录（`folderType`，以及可选的 `syncing`），请勿随意删除、移动或手动改写，除非明确知道其协议含义。',
+            '- 历史 `BC_FOLD_STATE` 注释块在导入时会被忽略，导出时不再写出。',
+            '- 永久/临时栏目的书签树内容从栏目头/说明区/根元数据块之外的正文开始解析。',
             '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名 `(#B)` > 文件顺序兜底。',
             '- 特殊临时栏目文件统一放在 `临时栏目/特殊临时栏目/`。',
             '- 空白栏目保持自由 Markdown 正文（不要求元数据头）。',
@@ -32089,7 +32503,6 @@ function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, d
         color: convertObsidianColor(node.color) || '#fb464c',
         items: __parseMarkdownAuto(contentToParse),
         description: descriptionHtml,
-        foldState: parsedMarkdown.foldState || null,
         source: 'obsidian-permanent-reference'
     };
 }
@@ -32141,6 +32554,12 @@ async function parseCanvasPackageFromZipFile(file) {
         console.log(`[Canvas] Import using BACKUP mode: ${backupJsonName}`);
         const primaryJsonText = new TextDecoder('utf-8').decode(zipFiles.get(backupJsonName));
         primaryState = JSON.parse(primaryJsonText);
+        if (primaryState && primaryState.permanentTreeSnapshot) {
+            const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(primaryState.permanentTreeSnapshot);
+            if (normalizedPermanentTreeSnapshot) {
+                primaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
+            }
+        }
         storage = primaryState.storage || null;
 
         if (primaryState.canvasState) {
@@ -32275,9 +32694,20 @@ async function parseCanvasPackageFromZipFile(file) {
                         color: convertObsidianColor(node.color) || '#44cf6e',
                         items: items, // Restored items!
                         description: descriptionHtml,
-                        foldState: parsedMarkdown.foldState || null,
                         isSnapshot: true
                     });
+                    try {
+                        if (!primaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
+                            const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
+                                contentToParse,
+                                parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
+                            );
+                            const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
+                            if (normalizedPermanentTreeSnapshot) {
+                                primaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
+                            }
+                        }
+                    } catch (_) { }
                     // We need to map this in storage for scroll if possible, but IDs changed.
                 } else if (isPermanent) {
                     tempState.sections.push(
@@ -32334,8 +32764,6 @@ async function parseCanvasPackageFromZipFile(file) {
                             if (sourceLabel) restored.label = sourceLabel;
                         }
                     }
-
-                    restored.foldState = parsedMarkdown.foldState || null;
 
                     tempState.sections.push(restored);
 	                } else if (isMdNode) {
@@ -32499,6 +32927,12 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
         console.log(`[Canvas] Folder Import using BACKUP mode: ${backupJsonName}`);
         const primaryJsonText = new TextDecoder('utf-8').decode(folderFiles.get(backupJsonName));
         primaryState = JSON.parse(primaryJsonText);
+        if (primaryState && primaryState.permanentTreeSnapshot) {
+            const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(primaryState.permanentTreeSnapshot);
+            if (normalizedPermanentTreeSnapshot) {
+                primaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
+            }
+        }
         storage = primaryState.storage || null;
 
         if (primaryState.canvasState) {
@@ -32612,7 +33046,6 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
                         color: convertObsidianColor(node.color) || '#44cf6e',
                         items: items,
                         description: descriptionHtml,
-                        foldState: parsedMarkdown.foldState || null,
                         isSnapshot: true
                     });
 
@@ -32620,9 +33053,13 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
                     // This enables "Obsidian edits permanent section -> overwrite local browser bookmarks" workflow.
                     try {
                         if (!primaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
-                            const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(contentToParse);
-                            if (snapshotTree) {
-                                primaryState.permanentTreeSnapshot = snapshotTree;
+                            const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
+                                contentToParse,
+                                parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
+                            );
+                            const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
+                            if (normalizedPermanentTreeSnapshot) {
+                                primaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
                             }
                         }
                     } catch (_) { }
@@ -32674,8 +33111,6 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
                             if (sourceLabel) restored.label = sourceLabel;
                         }
                     }
-
-                    restored.foldState = parsedMarkdown.foldState || null;
 
                     tempState.sections.push(restored);
 	                } else if (isMdNode) {
@@ -32817,7 +33252,6 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
     const remotePermanentCopyIds = new Set();
     let remoteHasAnyPermanentCopyNode = false;
     const permanentTipUpdates = [];
-    const permanentFoldUpdates = [];
 
     const normalizePath = (path) => String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
     const findFileBytes = (relPath) => {
@@ -32914,8 +33348,6 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
                 ? parsedMarkdown.descriptionHtml
                 : '';
             const descHtml = __normalizeCanvasRichHtml(rawDescHtml);
-            const foldState = parsedMarkdown && parsedMarkdown.foldState ? parsedMarkdown.foldState : null;
-
             if (nodeId === 'permanent-section' || slotNumber === 1) {
                 // Main permanent section layout
                 const position = {
@@ -32928,7 +33360,6 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
 
                 try { __persistPermanentTipStorageValue('canvas-permanent-tip-text', descHtml); } catch (_) { }
                 permanentTipUpdates.push({ copyId: null, html: descHtml });
-                if (foldState) permanentFoldUpdates.push({ copyId: null, foldState });
                 return;
             }
 
@@ -32950,7 +33381,6 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
 
                 try { __persistPermanentTipStorageValue(`canvas-permanent-tip-text-copy-${copyId}`, descHtml); } catch (_) { }
                 permanentTipUpdates.push({ copyId, html: descHtml });
-                if (foldState) permanentFoldUpdates.push({ copyId, foldState });
             }
         });
 
@@ -33007,8 +33437,6 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
         })
         : nextEdgesRaw;
 
-    try { __applyImportedSectionFoldStates(nextSections); } catch (_) { }
-
     const nextState = __buildPersistedCanvasState({
         sections: nextSections,
         tempSectionCounter: parsedTempState.tempSectionCounter,
@@ -33055,13 +33483,6 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
     __finalizeTempNodesLoad({ loadedFromStorage: true });
 
     try { saveTempNodes({ immediate: true, suppressSyncMarkDirty: true }); } catch (_) { }
-
-    try {
-        permanentFoldUpdates.forEach((update) => {
-            if (!update || !update.foldState) return;
-            __applyPermanentFoldStateToStorage(update.copyId || null, update.foldState);
-        });
-    } catch (_) { }
 
     // Apply permanent layout and tips to DOM (localStorage updates do not fire storage events in same page).
     try { loadPermanentSectionPosition(); } catch (_) { }
@@ -33143,8 +33564,6 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     // We must remap ALL IDs in the imported state to prevent collision with existing nodes.
     // Also converts the imported "permanent-section" into a "Snapshot Temp Section".
     const { remappedNodes, remappedEdges, remappedScrolls } = __remapImportedData(tempState, storage, primaryState);
-    try { __applyImportedSectionFoldStates(remappedNodes && remappedNodes.tempSections); } catch (_) { }
-
     // 2. Calculate Bounding Box of the imported batch
     const bounds = __calculateNodesBoundingBox(remappedNodes);
 
@@ -33882,6 +34301,11 @@ function __isSandboxImportedNode(node) {
     return false;
 }
 
+function __isPermanentCanvasNodeId(nodeId) {
+    const id = String(nodeId || '').trim();
+    return !!(id && (id === 'permanent-section' || id.startsWith('permanent-section-copy-')));
+}
+
 function __buildPersistedCanvasState(state) {
     const safe = (state && typeof state === 'object') ? state : {};
 
@@ -33905,7 +34329,9 @@ function __buildPersistedCanvasState(state) {
         const fromNode = String(edge.fromNode || '');
         const toNode = String(edge.toNode || '');
         if (!fromNode || !toNode) return false;
-        return validIds.has(fromNode) && validIds.has(toNode);
+        const fromValid = validIds.has(fromNode) || __isPermanentCanvasNodeId(fromNode);
+        const toValid = validIds.has(toNode) || __isPermanentCanvasNodeId(toNode);
+        return fromValid && toValid;
     });
 
     const persistedState = {

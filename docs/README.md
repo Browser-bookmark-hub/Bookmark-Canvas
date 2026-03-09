@@ -7,9 +7,13 @@
 - [Obsidian 双向同步计划（V1）](./obsidian-sync-plan-v1.md)
 - [颗粒度同步计划书（V1）](./sync-plan-granular-dirty.md)
 - [Remotely Save 同步计划书](./sync-plan-remotely-save.md)
+- [简化同步与崩溃恢复规划书](./sync-plan-simplified-sync-and-crash-recovery.md)
+- [Markdown-First 同步数据模型规划书](./sync-plan-markdown-first-data-model.md)
 - [Obsidian Git 主同步计划书](./sync-plan-obsidian-git.md)
 - [Obsidian Git 对齐说明](./obsidian-git-alignment.md)
 - [永久栏目拉取方式（最终方案）](./permanent-pull-mode.md)
+- [永久栏目 `folderType` / 折叠态 / 首次同步计划（讨论稿）](./permanent-root-meta-plan.md)
+- [三个同步面板 UI 统一方案（首次同步 / 云端不一致 / 冲突）](./sync-panels-ui-plan.md)
 - [Canvas 同步验收清单](./sync-validation-checklist.md)
 - [拆分对照全量报告](./report-split-audit-split-audit-20260201-214732.md)
 
