@@ -3707,8 +3707,8 @@ const i18n = {
         'en': 'Export Format (for Obsidian)'
     },
     canvasSyncObsidianExportFormatDesc: {
-        'zh_CN': '视觉模式（无图标）：不包含 favicon 图标，用字符 "-" 代替，体积最小，推荐。\n视觉模式：包含 favicon 图标；当书签超过 20,000 个时，图标体积可能接近 100MB，达到 100MB 限制会报错。\n编辑模式：导出为易于编辑的文本结构。',
-        'en': 'Visual mode (no icons): does not include favicons, uses "-" as the link marker, smallest size (recommended).\nVisual mode: includes favicons; with over 20,000 bookmarks icon data may approach 100MB and fail at the 100MB limit.\nEditable mode: exports an easy-to-edit text structure.'
+        'zh_CN': '视觉模式：包含 favicon 图标，适合查看与存档。\n视觉模式（无图标）：不包含 favicon 图标，用字符 "-" 代替，体积更小。',
+        'en': 'Visual mode: includes favicons and is best for viewing and archiving.\nVisual mode (no icons): removes favicons, uses "-" as the link marker, and keeps a smaller size.'
     },
     canvasSyncObsidianExportFormatVisualNoIconOption: {
         'zh_CN': '视觉模式（无图标）',
@@ -3717,10 +3717,6 @@ const i18n = {
     canvasSyncObsidianExportFormatVisualOption: {
         'zh_CN': '视觉模式',
         'en': 'Visual Mode'
-    },
-    canvasSyncObsidianExportFormatEditableOption: {
-        'zh_CN': '编辑模式',
-        'en': 'Editable Mode'
     },
     canvasSyncObsidianExportRootLabel: {
         'zh_CN': '文件推送目录',
@@ -5329,8 +5325,6 @@ function applyLanguage() {
     if (canvasSyncObsidianExportFormatVisualNoIconOption) canvasSyncObsidianExportFormatVisualNoIconOption.textContent = i18n.canvasSyncObsidianExportFormatVisualNoIconOption[currentLang];
     const canvasSyncObsidianExportFormatVisualOption = document.getElementById('canvasSyncObsidianExportFormatVisualOption');
     if (canvasSyncObsidianExportFormatVisualOption) canvasSyncObsidianExportFormatVisualOption.textContent = i18n.canvasSyncObsidianExportFormatVisualOption[currentLang];
-    const canvasSyncObsidianExportFormatEditableOption = document.getElementById('canvasSyncObsidianExportFormatEditableOption');
-    if (canvasSyncObsidianExportFormatEditableOption) canvasSyncObsidianExportFormatEditableOption.textContent = i18n.canvasSyncObsidianExportFormatEditableOption[currentLang];
     const canvasSyncObsidianExportRootLabel = document.getElementById('canvasSyncObsidianExportRootLabel');
     if (canvasSyncObsidianExportRootLabel) canvasSyncObsidianExportRootLabel.textContent = i18n.canvasSyncObsidianExportRootLabel[currentLang];
     const canvasSyncObsidianExportRootDesc = document.getElementById('canvasSyncObsidianExportRootDesc');
@@ -8115,12 +8109,8 @@ function buildMarkdownFromTabs(tabs, heading, options = {}) {
             if (!item) return;
 
             if (isQuickAddFolderItem(item)) {
-                const folderTitle = resolveQuickAddFolderTitle(item.title);
-                if (folderTitle) {
-                    lines.push(`${indent}- 📁 **${escapeMarkdownText(folderTitle)}**`);
-                } else {
-                    lines.push(`${indent}- 📁`);
-                }
+                const folderTitle = resolveQuickAddFolderTitle(item.title) || (currentLang === 'en' ? 'Folder' : '文件夹');
+                lines.push(`${indent}- **${escapeMarkdownText(folderTitle)}**`);
                 appendItems(item.children || [], depth + 1);
                 return;
             }

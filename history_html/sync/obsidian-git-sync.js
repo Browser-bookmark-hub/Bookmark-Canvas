@@ -71,7 +71,7 @@
     const MAX_RECOVERY_RECORDS = 5;
     const DEFAULT_PERMANENT_INCREMENTAL_MAX_LOGICAL_CHANGES_ABS = 200;
     const PERMANENT_TREE_UPLOAD_INTERVALS = new Set([0, 5, 15, 30, 60]);
-    const OBSIDIAN_EXPORT_FORMATS = new Set(['visual-no-icon', 'visual', 'editable']);
+    const OBSIDIAN_EXPORT_FORMATS = new Set(['visual', 'visual-no-icon']);
     const CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE = { min: 0, max: 24 * 60 * 60 };
     const SYNC_FILE_TOO_LARGE_ERROR_CODE = 'SYNC_FILE_TOO_LARGE';
     const OVERSIZE_SYNC_DIALOG_COOLDOWN_MS = 30 * 1000;
@@ -101,9 +101,9 @@
         backgroundCheckEnabled: true,
         backgroundCheckIntervalMinutes: 1,
         backgroundCooldownMinutes: 5,
-        pullOnStartup: false,
+        pullOnStartup: true,
         toastEnabled: true,
-        editAutoToastEnabled: true,
+        editAutoToastEnabled: false,
         firstSyncMode: 'auto',
         permanentPullMode: 'auto',
         permanentIncrementalMaxChanges: DEFAULT_PERMANENT_INCREMENTAL_MAX_LOGICAL_CHANGES_ABS,
@@ -111,7 +111,7 @@
         tempSectionUploadIntervalSeconds: 5,
         blankSectionUploadIntervalSeconds: 5,
         obsidianFilePushEnabled: true,
-        obsidianExportFormat: 'visual-no-icon',
+        obsidianExportFormat: 'visual',
         obsidianExportRoot: '书签画布',
         firstSyncPathVerifiedRoot: '',
         firstSyncPathVerifiedAt: 0,

@@ -1241,14 +1241,12 @@
                                 <label class="canvas-sync-row" for="canvasSyncObsidianExportFormatSelect">
                                     <span id="canvasSyncObsidianExportFormatLabel">导出格式（为 Obsidian）</span>
                                     <select id="canvasSyncObsidianExportFormatSelect">
+                                        <option id="canvasSyncObsidianExportFormatVisualOption" value="visual" selected>视觉模式</option>
                                         <option id="canvasSyncObsidianExportFormatVisualNoIconOption" value="visual-no-icon">视觉模式（无图标）</option>
-                                        <option id="canvasSyncObsidianExportFormatVisualOption" value="visual">视觉模式</option>
-                                        <option id="canvasSyncObsidianExportFormatEditableOption" value="editable">编辑模式</option>
                                     </select>
                                 </label>
-                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncObsidianExportFormatDesc">视觉模式（无图标）：不包含 favicon 图标，用字符 "-" 代替，体积最小，推荐。
-视觉模式：包含 favicon 图标；当书签超过 20,000 个时，图标体积可能接近 100MB，达到 100MB 限制会报错。
-编辑模式：导出为易于编辑的文本结构。</div>
+                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncObsidianExportFormatDesc">视觉模式：包含 favicon 图标，适合查看与存档。
+视觉模式（无图标）：不包含 favicon 图标，用字符 "-" 代替，体积更小。</div>
 
                                 <div class="canvas-sync-row canvas-sync-row--path-check-action">
                                     <span id="canvasSyncFirstSyncPathCheckLabel">路径校验</span>
@@ -1309,7 +1307,7 @@
                             <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncEditAutoToastToggle">
                                 <span id="canvasSyncEditAutoToastToggleLabel">「停止编辑后自动同步」通知</span>
                                 <span class="canvas-sync-switch">
-                                    <input id="canvasSyncEditAutoToastToggle" type="checkbox" checked>
+                                    <input id="canvasSyncEditAutoToastToggle" type="checkbox">
                                     <span class="canvas-sync-switch-slider"></span>
                                 </span>
                             </label>
@@ -1408,7 +1406,7 @@
                             <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncPullOnStartupToggle">
                                 <span id="canvasSyncPullOnStartupLabel">开页跟进后台变化</span>
                                 <span class="canvas-sync-switch">
-                                    <input id="canvasSyncPullOnStartupToggle" type="checkbox">
+                                    <input id="canvasSyncPullOnStartupToggle" type="checkbox" checked>
                                     <span class="canvas-sync-switch-slider"></span>
                                 </span>
                             </label>
@@ -1484,7 +1482,7 @@
                                 <select id="canvasSyncTemplateSelect">
                                     <option id="canvasSyncTemplateCustomOption" value="custom" disabled>当前为自定义</option>
                                     <option id="canvasSyncTemplateLiveOption" value="live">实时同步</option>
-                                    <option id="canvasSyncTemplateStandardOption" value="standard">标准同步</option>
+                                    <option id="canvasSyncTemplateStandardOption" value="standard" selected>标准同步</option>
                                     <option id="canvasSyncTemplateBackupOption" value="backup">备份优先</option>
                                 </select>
                             </div>

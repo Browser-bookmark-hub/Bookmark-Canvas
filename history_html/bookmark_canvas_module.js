@@ -28072,6 +28072,8 @@ const __CANVAS_FOLD_BLOCK_START = '<!-- BC_FOLD_STATE_START -->';
 const __CANVAS_FOLD_BLOCK_END = '<!-- BC_FOLD_STATE_END -->';
 const __CANVAS_ROOT_META_BLOCK_START = '<!-- BC_ROOT_META_START -->';
 const __CANVAS_ROOT_META_BLOCK_END = '<!-- BC_ROOT_META_END -->';
+const __CANVAS_NATIVE_TEXT_META_BLOCK_START = '<!-- BC_NATIVE_TEXT_NODE_START -->';
+const __CANVAS_NATIVE_TEXT_META_BLOCK_END = '<!-- BC_NATIVE_TEXT_NODE_END -->';
 
 function __normalizeBookmarkFolderType(folderType) {
     const raw = String(folderType || '').trim().toLowerCase().replace(/[_\s]+/g, '-');
@@ -28399,6 +28401,45 @@ function __extractCanvasDescriptionCommentBlock(bodyText) {
     };
 }
 
+function __buildCanvasNativeTextMetaCommentBlock(nodeId) {
+    const normalizedId = String(nodeId || '').trim();
+    if (!normalizedId) return '';
+    return [
+        __CANVAS_NATIVE_TEXT_META_BLOCK_START,
+        JSON.stringify({ nodeId: normalizedId }, null, 2),
+        __CANVAS_NATIVE_TEXT_META_BLOCK_END
+    ].join('\n');
+}
+
+function __extractCanvasNativeTextMetaCommentBlock(bodyText) {
+    const body = String(bodyText || '').replace(/\r\n?/g, '\n');
+    const start = body.indexOf(__CANVAS_NATIVE_TEXT_META_BLOCK_START);
+    if (start < 0) return { body, nodeId: '' };
+
+    const searchStart = start + __CANVAS_NATIVE_TEXT_META_BLOCK_START.length;
+    const end = body.indexOf(__CANVAS_NATIVE_TEXT_META_BLOCK_END, searchStart);
+    if (end < 0) return { body, nodeId: '' };
+
+    let nodeId = '';
+    try {
+        const rawPayload = body.slice(searchStart, end).trim();
+        if (rawPayload) {
+            const parsed = JSON.parse(rawPayload);
+            nodeId = String(parsed && parsed.nodeId || '').trim();
+        }
+    } catch (_) {
+        nodeId = '';
+    }
+
+    const before = body.slice(0, start).replace(/[\t ]*\n?$/, '\n');
+    const after = body.slice(end + __CANVAS_NATIVE_TEXT_META_BLOCK_END.length).replace(/^\n?/, '');
+    const merged = `${before}${after}`.replace(/\n{3,}/g, '\n\n').trim();
+    return {
+        body: merged,
+        nodeId
+    };
+}
+
 function __normalizeCanvasFoldStateMeta(rawFoldState, options = {}) {
     const source = rawFoldState && typeof rawFoldState === 'object' ? rawFoldState : {};
     const mode = String(options.mode || '').trim().toLowerCase();
@@ -28465,7 +28506,7 @@ function __parseCanvasMarkdownPayload(fileText) {
     }
 
     const firstNonEmptyLine = firstNonEmptyIndex >= 0 ? String(lines[firstNonEmptyIndex] || '').trim() : '';
-    const looksLikeTreeLine = /^(#{2,}\s+|-\s+|<)/.test(firstNonEmptyLine);
+    const looksLikeTreeLine = /^(#{2,}\s+|<)/.test(firstNonEmptyLine);
     const hasHeaderLine = !!firstNonEmptyLine && !looksLikeTreeLine;
 
     const contentToParse = hasHeaderLine
@@ -29028,6 +29069,13 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
     if (descMd) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
+    const shouldWriteRootMeta = permanentSlot === 1 && !String(metaOptions && metaOptions.copyId || '').trim();
+    if (shouldWriteRootMeta) {
+        const rootMetaBlock = __buildCanvasRootMetaCommentBlock(__buildPermanentRootMeta(bookmarkTree));
+        if (rootMetaBlock) {
+            body.push(rootMetaBlock);
+        }
+    }
     body.push('');
 
     const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
@@ -29062,15 +29110,6 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
         if (lines.length) parts.push(lines.join('\n'));
         parts.push('');
     });
-
-    const shouldWriteRootMeta = permanentSlot === 1 && !String(metaOptions && metaOptions.copyId || '').trim();
-    if (shouldWriteRootMeta) {
-        const rootMetaBlock = __buildCanvasRootMetaCommentBlock(__buildPermanentRootMeta(bookmarkTree));
-        if (rootMetaBlock) {
-            parts.push(rootMetaBlock);
-            parts.push('');
-        }
-    }
 
     return parts.join('\n').trimEnd() + '\n';
 }
@@ -29158,125 +29197,6 @@ function __extractMdNodeFilenameTitle(markdownText, fallback = 'Untitled') {
 
 
 /**
- * [EDITABLE MODE] Build Permanent Sections Markdown (Headings + List)
- */
-function __buildPermanentBookmarksMarkdownEditable(bookmarkTree, descriptionOverride = null, metaOptions = null) {
-    const { isEn } = __getLang();
-    const domTitleEl = document.getElementById('permanentSectionTitle');
-    const domTitle = domTitleEl ? domTitleEl.textContent.trim() : '';
-    const title = domTitle || (isEn ? 'Permanent Bookmarks' : '书签树 (永久栏目)');
-    const permanentSlot = __normalizePositiveInt(metaOptions && metaOptions.permanentSlot) || 1;
-    const slotLabel = toAlphaLabel(permanentSlot) || 'A';
-    const sectionHeaderLine = `#${slotLabel} ${title}`.trim();
-
-    const body = [sectionHeaderLine];
-
-    let rawDesc = '';
-    if (descriptionOverride !== null) {
-        rawDesc = descriptionOverride;
-    } else {
-        try { rawDesc = localStorage.getItem('canvas-permanent-tip-text') || ''; } catch (_) { }
-    }
-    const descMd = __htmlToMarkdown(rawDesc);
-    if (descMd) {
-        body.push(__buildCanvasDescriptionCommentBlock(descMd));
-    }
-
-    body.push('');
-
-    const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
-    const roots = root && Array.isArray(root.children) ? root.children : [];
-
-    const cleanUrl = (url) => {
-        if (!url) return '';
-        return String(url).replace(/[\r\n\s]+/g, '').trim();
-    };
-
-    const cleanTitle = (t) => {
-        if (!t) return '';
-        return String(t).replace(/[\r\n]+/g, ' ').replace(/([\[\]\(\)])/g, '\\$1').trim();
-    };
-
-    const MAX_TITLE_LENGTH = 80;
-    const truncateTitle = (titleValue, url) => {
-        if (!titleValue) return '';
-        const isUrlTitle = /^https?:\/\//i.test(titleValue) || titleValue === url;
-        if (isUrlTitle && url) {
-            try {
-                const parsed = new URL(url);
-                const domain = parsed.hostname.replace(/^www\./, '');
-                const pathPart = parsed.pathname.length > 1 ? parsed.pathname.substring(0, 20) : '';
-                const shortTitle = domain + (pathPart ? pathPart + '...' : '');
-                return shortTitle.length > MAX_TITLE_LENGTH ? shortTitle.substring(0, MAX_TITLE_LENGTH) + '...' : shortTitle;
-            } catch (_) {
-                return titleValue.length > MAX_TITLE_LENGTH ? titleValue.substring(0, MAX_TITLE_LENGTH) + '...' : titleValue;
-            }
-        }
-        return titleValue.length > MAX_TITLE_LENGTH ? titleValue.substring(0, MAX_TITLE_LENGTH) + '...' : titleValue;
-    };
-
-    roots.forEach((r) => {
-        const sectionName = __resolvePermanentRootSectionTitle(r);
-        body.push(`## ${sectionName}`);
-        body.push('');
-
-        const processNodes = (nodes, headingLevel, listIndent = 0) => {
-            if (!nodes) return;
-            const useListMode = headingLevel >= 6;
-
-            nodes.forEach((node) => {
-                if (!node) return;
-                if (node.url) {
-                    const rawTitle = cleanTitle(node.title || node.name) || cleanUrl(node.url);
-                    const bookmarkUrl = cleanUrl(node.url);
-                    const bookmarkTitle = truncateTitle(rawTitle, bookmarkUrl);
-                    const indent = useListMode ? '  '.repeat(listIndent) : '';
-                    body.push(`${indent}- [${bookmarkTitle}](${bookmarkUrl})`);
-                    return;
-                }
-
-                const folderTitle = cleanTitle(node.title || node.name || (isEn ? 'Folder' : '文件夹'));
-                const children = Array.isArray(node.children) ? node.children : [];
-
-                if (useListMode) {
-                    const indent = '  '.repeat(listIndent);
-                    body.push(`${indent}- 📁 **${folderTitle}**`);
-                    if (children.length > 0) {
-                        processNodes(children, headingLevel, listIndent + 1);
-                    }
-                    return;
-                }
-
-                const nextLevel = headingLevel + 1;
-                body.push('');
-                body.push(`${'#'.repeat(nextLevel)} ${folderTitle}`);
-                body.push('');
-                if (children.length > 0) {
-                    processNodes(children, nextLevel, 0);
-                }
-            });
-        };
-
-        if (r.children) {
-            processNodes(r.children, 2);
-        }
-
-        body.push('');
-    });
-
-    const shouldWriteRootMeta = permanentSlot === 1 && !String(metaOptions && metaOptions.copyId || '').trim();
-    if (shouldWriteRootMeta) {
-        const rootMetaBlock = __buildCanvasRootMetaCommentBlock(__buildPermanentRootMeta(bookmarkTree));
-        if (rootMetaBlock) {
-            body.push(rootMetaBlock);
-            body.push('');
-        }
-    }
-
-    return body.join('\n').trimEnd() + '\n';
-}
-
-/**
  * Build Permanent Copy Markdown: description is per-copy, body is embedded from main #A file.
  *
  * Goal:
@@ -29333,113 +29253,6 @@ function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptio
 }
 
 /**
- * [EDITABLE MODE] Build Temp Section Markdown (Headings + List)
- */
-function __buildTempSectionMarkdownEditable(section, metaOptions = null) {
-    const { isEn } = __getLang();
-    const rawTitle = String((section && section.title) || (isEn ? 'Temp Section' : '临时栏目'));
-    const seqLabel = getTempSectionLabel(section);
-    const fullTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
-
-    const body = [fullTitle.trim()];
-
-    const descHtml = section && typeof section.description === 'string' ? section.description : '';
-    const descMd = __htmlToMarkdown(descHtml);
-    if (descMd) {
-        body.push(__buildCanvasDescriptionCommentBlock(descMd));
-    }
-
-    body.push('');
-
-    const items = section && Array.isArray(section.items) ? section.items : [];
-
-    // Clean URL - remove newlines and extra spaces
-    const cleanUrl = (url) => {
-        if (!url) return '';
-        return String(url).replace(/[\r\n\s]+/g, '').trim();
-    };
-
-    // Clean title for markdown link
-    const cleanTitle = (t) => {
-        if (!t) return '';
-        return String(t).replace(/[\r\n]+/g, ' ').replace(/([[\]()])/g, '\\$1').trim();
-    };
-
-    // Truncate long titles to prevent overly long lines in Obsidian
-    const MAX_TITLE_LENGTH = 80;
-    const truncateTitle = (title, url) => {
-        if (!title) return '';
-        // If title is essentially a URL (starts with http/https or equals the URL)
-        const isUrlTitle = /^https?:\/\//i.test(title) || title === url;
-        if (isUrlTitle && url) {
-            try {
-                const parsed = new URL(url);
-                const domain = parsed.hostname.replace(/^www\./, '');
-                const pathPart = parsed.pathname.length > 1 ? parsed.pathname.substring(0, 20) : '';
-                const shortTitle = domain + (pathPart ? pathPart + '...' : '');
-                return shortTitle.length > MAX_TITLE_LENGTH ? shortTitle.substring(0, MAX_TITLE_LENGTH) + '...' : shortTitle;
-            } catch (_) {
-                // Fallback: just truncate
-                return title.length > MAX_TITLE_LENGTH ? title.substring(0, MAX_TITLE_LENGTH) + '...' : title;
-            }
-        }
-        // Normal title: truncate if too long
-        return title.length > MAX_TITLE_LENGTH ? title.substring(0, MAX_TITLE_LENGTH) + '...' : title;
-    };
-
-    // Process nodes recursively, using headings for folders up to H6, then nested lists
-    const processNodes = (nodes, headingLevel, listIndent = 0) => {
-        if (!nodes) return;
-        const useListMode = headingLevel >= 6; // Switch to list mode when we would exceed H6
-
-        nodes.forEach(node => {
-            if (node.url) {
-                // Bookmark - always as list item
-                const rawTitle = cleanTitle(node.title || node.name) || cleanUrl(node.url);
-                const bmUrl = cleanUrl(node.url);
-                const bmTitle = truncateTitle(rawTitle, bmUrl);
-                const indent = useListMode ? '  '.repeat(listIndent) : '';
-                body.push(`${indent}- [${bmTitle}](${bmUrl})`);
-            } else if (node.children || node.items) {
-                // Folder
-                const folderTitle = cleanTitle(node.title || node.name || (isEn ? 'Folder' : '文件夹'));
-                const children = node.children || node.items || [];
-
-                if (useListMode) {
-                    // Deep folder: use nested list with 📁 icon
-                    const indent = '  '.repeat(listIndent);
-                    body.push(`${indent}- 📁 **${folderTitle}**`);
-
-                    if (children.length > 0) {
-                        processNodes(children, headingLevel, listIndent + 1);
-                    }
-                } else {
-                    // Shallow folder: use heading
-                    const nextLevel = headingLevel + 1;
-                    body.push('');
-                    body.push(`${'#'.repeat(nextLevel)} ${folderTitle}`);
-                    body.push('');
-
-                    if (children.length > 0) {
-                        processNodes(children, nextLevel, 0);
-                    }
-                }
-            } else {
-                // Empty folder or just text
-                const folderTitle = cleanTitle(node.title || node.name || (isEn ? 'Folder' : '文件夹'));
-                const indent = useListMode ? '  '.repeat(listIndent) : '';
-                body.push(`${indent}- 📁 **${folderTitle}**`);
-            }
-        });
-    };
-
-    processNodes(items, 1);
-
-    return body.join('\n').trimEnd() + '\n';
-}
-
-
-/**
  * [SECURITY] Sanitize Imported URL
  * Prevent XSS (javascript:) and other dangerous schemes.
  * Allow common productivity schemes (obsidian:, zotero:, etc.)
@@ -29476,122 +29289,6 @@ function __sanitizeImportUrl(url) {
         }
         return trimmed; // Return as is (maybe relative path)
     }
-}
-
-/**
- * [PARSER] Parse "Editable Mode" Markdown back to Tree Structure
- */
-function __parseEditableMarkdownToTree(mdContent) {
-    const lines = mdContent.split(/\r?\n/);
-    const rootChildren = [];
-
-    // Stack for Heading Hierarchy
-    // Stack[0] is always formatting root (Level 1/H1 context)
-    // When we see H2 (Level 2), we push to stack.
-    let headingStack = [{ level: 1, children: rootChildren }];
-
-    // Helper for List Indentation Hierarchy (within a heading block)
-    // This resets whenever a new Heading is encountered.
-    // Format: { indent: number, children: Array }
-    let listStack = [];
-
-    const getCurrentContainer = (lineIndent) => {
-        // 1. Prefer List Stack if active and indent matches deep nesting
-        if (listStack.length > 0) {
-            // Find parent in list stack with indent < lineIndent
-            while (listStack.length > 0 && listStack[listStack.length - 1].indent >= lineIndent) {
-                listStack.pop();
-            }
-            if (listStack.length > 0) {
-                return listStack[listStack.length - 1].children;
-            }
-        }
-        // 2. Fallback to Heading Stack (Current Heading Context)
-        return headingStack[headingStack.length - 1].children;
-    };
-
-    lines.forEach(line => {
-        if (!line.trim() || line.trim() === '---') return;
-
-        // 0. Detect Indentation (4 spaces = 1 level basically, or tabs)
-        const indentMatch = line.match(/^(\s*)/);
-        const indentStr = indentMatch ? indentMatch[1] : '';
-        // Approximate indent level: 2 spaces or 1 tab?
-        // Let's count length. '    ' is 4.
-        const indentLen = indentStr.replace(/\t/g, '    ').length;
-
-        const trimmed = line.trim();
-
-        // 1. Check for Headings (# Title) - Headings ALWAYS reset list context
-        const headingMatch = trimmed.match(/^(#+)\s+(.*)/);
-        if (headingMatch) {
-            listStack = []; // Reset list nesting on new heading
-
-            const hLevel = headingMatch[1].length;
-            const title = headingMatch[2].trim();
-
-            if (hLevel === 1) return; // Ignore H1 (File Title)
-
-            // Adjust Heading Stack
-            while (headingStack.length > 1 && headingStack[headingStack.length - 1].level >= hLevel) {
-                headingStack.pop();
-            }
-
-            const folderNode = {
-                id: `imported-folder-h-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-                type: 'folder',
-                title: title,
-                children: []
-            };
-
-            // Add to current heading parent
-            headingStack[headingStack.length - 1].children.push(folderNode);
-
-            // Push self as new context
-            headingStack.push({ level: hLevel, children: folderNode.children });
-            return;
-        }
-
-        // 2. Check for Bookmarks (- [Title](URL))
-        const linkMatch = trimmed.match(/^-\s+\[(.*?)\]\((.*?)\)/);
-        if (linkMatch) {
-            const title = linkMatch[1].trim();
-            const rawUrl = linkMatch[2].trim();
-            const url = __sanitizeImportUrl(rawUrl);
-
-            const bmNode = {
-                id: `imported-bm-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-                type: 'bookmark',
-                title: title || url,
-                url: url
-            };
-
-            getCurrentContainer(indentLen).push(bmNode);
-            return;
-        }
-
-        // 3. Check for Folder in List (- 📁 **Title** or - **Title**)
-        // Support both with and without folder icon
-        const boldFolderMatch = trimmed.match(/^-\s+(?:(?:📁|📂)\s*)?\*\*(.*?)\*\*/);
-        if (boldFolderMatch) {
-            const title = boldFolderMatch[1].trim();
-            const folderNode = {
-                id: `imported-folder-list-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-                type: 'folder',
-                title: title,
-                children: []
-            };
-
-            getCurrentContainer(indentLen).push(folderNode);
-
-            // Push to List Stack to capture children
-            // Logic: This item is at 'indentLen'. Its children will have specific indent > this.
-            listStack.push({ indent: indentLen, children: folderNode.children });
-            return;
-        }
-    });
-
-    return rootChildren;
 }
 
 /**
@@ -29656,16 +29353,13 @@ function __parseVisualHtmlToTree(htmlContent) {
 }
 
 /**
- * [AUTO PARSER] Detect format and parse accordingly
- * Visual Mode: Contains <details>, <a href=
- * Editable Mode: Contains Markdown headings (## ...) and lists (- [...](...)
+ * Parse the current visual Obsidian bookmark tree payload.
  */
 function __parseMarkdownAuto(content) {
     if (!content || typeof content !== 'string') return [];
 
     const trimmed = content.trim();
 
-    // Detect Visual Mode (HTML with <details> or styled <a href>)
     const hasDetails = /<details[\s>]/i.test(trimmed);
     const hasStyledAnchor = /<a\s+href=.*style=/i.test(trimmed);
     const hasHtmlDiv = /<div\s+style=/i.test(trimmed);
@@ -29675,9 +29369,8 @@ function __parseMarkdownAuto(content) {
         return __parseVisualHtmlToTree(trimmed);
     }
 
-    // Default to Editable Mode (Markdown)
-    console.log('[Canvas Import] Detected Editable Mode (Markdown format)');
-    return __parseEditableMarkdownToTree(trimmed);
+    console.warn('[Canvas Import] Unsupported bookmark tree payload; current versions only accept visual Obsidian structure.');
+    return [];
 }
 
 function __convertImportedTreeItemsToBookmarkSnapshotNodes(items) {
@@ -29901,7 +29594,22 @@ function __toUint8(text) {
     return new TextEncoder().encode(String(text || ''));
 }
 
-function __buildCanvasImportRulesDocument(_options = {}) {
+function __buildCanvasImportRulesDocument(options = {}) {
+    const exportRoot = String(options && options.exportRoot || '').trim() || '书签画布';
+    const canvasFileName = String(options && options.canvasFileName || '').trim() || '书签画布.canvas';
+    const exportFormatRaw = String(options && options.exportFormat || '').trim().toLowerCase();
+    const exportFormat = exportFormatRaw === 'visual-no-icon' ? 'visual-no-icon' : 'visual';
+    const modeLabel = exportFormat === 'visual-no-icon' ? '视觉模式（无图标）' : '视觉模式';
+    const modeRules = exportFormat === 'visual-no-icon'
+        ? [
+            '- 视觉模式（无图标）保留卡片结构，但书签行不显示 favicon，只保留纯文本链接。',
+            '- 请保留 `<details> / <summary> / <a>` 等外层结构，否则导入时可能丢节点。'
+        ]
+        : [
+            '- 视觉模式保留卡片结构与 favicon 展示，适合查看与存档。',
+            '- 请保留 `<details> / <summary> / <a>` 等外层结构，否则导入时可能丢节点。'
+        ];
+
     return [
         '# 导入规则说明',
         '',
@@ -29909,45 +29617,44 @@ function __buildCanvasImportRulesDocument(_options = {}) {
         '',
         '> 适用范围：Obsidian 导入/拉取到插件，以及插件推送到云端时的结构约束与编辑约束。',
         '',
-        '## 1) 永久栏目与副本的关系',
+        `> 当前导出根目录：\`${exportRoot}\``,
+        `> 当前画布文件：\`${exportRoot}/${canvasFileName}\``,
+        `> 当前内容格式：${modeLabel}`,
         '',
-        '### 定义',
+        '## 1) 永久栏目与副本',
         '',
-        '- 永久栏目（主栏目）与永久副本在插件中共用同一套底层数据，属于共享关系。',
-        '- 可以把它们理解为同一份内容的“镜像视图”，核心内容应保持实时一致。',
-        '- 这套核心内容本质上是浏览器书签树（Bookmarks Tree）。',
+        '- 永久栏目（主栏目）与永久副本共用同一套浏览器书签树数据。',
+        '- 副本是镜像视图，不应长期当成独立正文源维护。',
+        '- 若出现多处不一致，应以主栏目（通常 #A）统一收敛，再回写副本。',
+        '- 永久主 Markdown 会在标题区下方写入根元数据注释块（`BC_ROOT_META`），用于识别浏览器内建根信息。',
         '',
-        '### 修改时必须注意',
+        '## 2) 临时栏目与空白栏目',
         '',
-        '- 任何涉及书签树内容的修改（新增/删除/移动书签、文件夹结构变更）都应按“同一数据源”处理。',
-        '- 不要把永久副本当成独立正文源分别长期维护，否则会引入多源分叉。',
-        '- 若出现多处不一致，应以主栏目（通常 #A）作为统一收敛源，再回写其他副本。',
+        '- 临时栏目用于草稿、整理、分流和中间态操作，不是永久真相源。',
+        '- 特殊临时栏目统一放在 `临时栏目/特殊临时栏目/`。',
+        '- 常规链式临时栏目统一放在 `临时栏目/常规链式/`。',
+        '- 空白栏目现在拆成两类：',
+        '  - `空白栏目/插件空白卡片/`：插件自己的 Markdown 空白卡片。',
+        '  - `空白栏目/obsidian原生卡片/`：Obsidian Canvas 原生 text 节点对应的镜像 Markdown。',
+        '- 原生卡片的真实节点仍在 `.canvas` 里是 `type: "text"`；镜像 `.md` 只用于导入、同步和目录结构对齐。',
         '',
-        '### 说明文本（Description）约束',
+        '## 3) 内容格式',
         '',
-        '- 永久栏目允许保留说明文本；副本说明可存在独立差异。',
-        '- 但“说明差异”仅用于展示说明，不应改变其共享的书签树正文语义。',
+        ...modeRules,
         '',
-        '## 2) 临时栏目（含特殊临时栏目）与空白栏目',
+        '## 4) 导入识别基线',
         '',
-        '### 定义',
+        '- 类型识别同时依赖 `.canvas` 文件映射与目录路径命名。',
+        '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名槽位 > 文件顺序兜底。',
+        '- 普通空白卡片从 `空白栏目/插件空白卡片/*.md` 或兼容旧路径 `空白栏目/*.md` 恢复。',
+        '- 原生 text 卡片优先使用 `空白栏目/obsidian原生卡片/*.md` 里的镜像正文恢复；若不存在，再回退到 `.canvas` 里的 `text` 字段。',
         '',
-        '- 临时栏目可视为沙盒区，用于暂存、整理、分流、提示词化处理与中间态编辑。',
-        '- 特殊临时栏目（如拖入/搜索/批量/导入）属于功能流程中间层，强调操作过程而非最终真相源。',
-        '- 空白栏目用于自由文本/备注/结构化补充，不等同于永久书签树。',
+        '## 5) 编辑时注意',
         '',
-        '### 修改时应遵循的规范',
-        '',
-        '- 临时栏目与空白栏目的编辑应聚焦“草稿与加工”，避免将其当成永久主数据替代源。',
-        '- 需要进入长期稳定结构的内容，应最终收敛到永久栏目（书签树）。',
-        '- 对临时栏目的大批量变动（拆分、合并、移动）应视为高频操作，优先保证结构清晰、命名清晰。',
-        '- 空白栏目建议仅承载说明、上下文和辅助信息，不承担永久书签树的主结构维护。',
-        '',
-        '## 3) 导入/同步时的结构理解（给用户）',
-        '',
-        '- 永久栏目/副本：共享一份书签树语义；副本主要提供不同视图位置与说明承载。',
-        '- 临时栏目/空白栏目：用于过程性内容与补充信息，不直接等价于永久主数据。',
-        '- 如需避免冲突：先确定“永久主数据源”，再处理临时/空白的合并与映射。'
+        '- 重命名或移动 `.md` 文件后，必须同步修改 `.canvas` 里的 `file` 路径。',
+        '- 永久/临时栏目的树正文，请保持在栏目头、说明注释块、根元数据块之后。',
+        '- 空白栏目正文可以自由编辑；原生卡片镜像文件请保留其头部注释块，避免丢失节点匹配关系。',
+        '- 若需要避免冲突，应先确定永久主数据源，再处理临时与空白内容。'
     ].join('\n');
 }
 
@@ -30065,6 +29772,58 @@ function __getStableBuiltinBlankSectionFilename(nodeId) {
     if (id === 'md-node-demo-shortcut-guide') return 'Keyboard Shortcuts';
     if (id === 'md-node-demo-batch-feature') return 'Open Mode Features';
     return '';
+}
+
+function __getBlankMarkdownFolderRelativePath(isEn) {
+    return isEn ? 'Blank/Plugin blank cards' : '空白栏目/插件空白卡片';
+}
+
+function __getBlankNativeTextFolderRelativePath(isEn) {
+    return isEn ? 'Blank/Obsidian native cards' : '空白栏目/obsidian原生卡片';
+}
+
+function __normalizeCanvasArchivePath(path) {
+    return String(path || '')
+        .trim()
+        .replace(/\\/g, '/')
+        .replace(/^\/+/g, '')
+        .replace(/\/+$/g, '')
+        .replace(/\/+/g, '/');
+}
+
+function __splitCanvasArchivePath(path) {
+    return __normalizeCanvasArchivePath(path).split('/').filter(Boolean);
+}
+
+function __getBlankPathDescriptor(path) {
+    const segments = __splitCanvasArchivePath(path);
+    if (!segments.length) return null;
+
+    const rootIndex = segments.findIndex((segment) => segment === 'Blank' || segment === '空白栏目');
+    if (rootIndex < 0) return null;
+
+    const groupSegment = segments[rootIndex + 1] || '';
+    const normalizedGroup = String(groupSegment || '').trim().toLowerCase();
+    if (!groupSegment) {
+        return { kind: 'plugin', isLegacy: true };
+    }
+    if (normalizedGroup === 'plugin blank cards' || groupSegment === '插件空白卡片' || normalizedGroup === 'markdown') {
+        return { kind: 'plugin', isLegacy: false };
+    }
+    if (normalizedGroup === 'obsidian native cards' || groupSegment === 'obsidian原生卡片' || normalizedGroup === 'native text') {
+        return { kind: 'native', isLegacy: false };
+    }
+    return { kind: 'plugin', isLegacy: false };
+}
+
+function __isBlankMarkdownPath(path) {
+    const descriptor = __getBlankPathDescriptor(path);
+    return !!(descriptor && descriptor.kind === 'plugin');
+}
+
+function __isBlankNativeTextMirrorPath(path) {
+    const descriptor = __getBlankPathDescriptor(path);
+    return !!(descriptor && descriptor.kind === 'native');
 }
 
 
@@ -30224,6 +29983,37 @@ function __resolveCanvasNativeTextNodeBody(node) {
     } catch (_) {
         return '';
     }
+}
+
+function __buildCanvasNativeTextMirrorMarkdown(node) {
+    const metaBlock = __buildCanvasNativeTextMetaCommentBlock(node && node.id);
+    const body = __resolveCanvasNativeTextNodeBody(node);
+    const parts = [];
+    if (metaBlock) parts.push(metaBlock);
+    if (body) {
+        if (parts.length) parts.push('');
+        parts.push(body);
+    }
+    return parts.join('\n').trimEnd() + '\n';
+}
+
+function __collectCanvasNativeTextMirrorMap(fileMap) {
+    const files = fileMap instanceof Map ? fileMap : new Map();
+    const mirrorMap = new Map();
+
+    for (const [filePath, bytes] of files.entries()) {
+        if (!__isBlankNativeTextMirrorPath(filePath)) continue;
+        if (!(bytes instanceof Uint8Array) || !bytes.length) continue;
+        try {
+            const fileText = new TextDecoder('utf-8').decode(bytes);
+            const extracted = __extractCanvasNativeTextMetaCommentBlock(fileText);
+            const nodeId = String(extracted && extracted.nodeId || '').trim();
+            if (!nodeId) continue;
+            mirrorMap.set(nodeId, String(extracted && extracted.body != null ? extracted.body : ''));
+        } catch (_) { }
+    }
+
+    return mirrorMap;
 }
 
 function __buildObsidianSyncCanvasData({
@@ -30468,9 +30258,7 @@ async function __buildObsidianSyncFiles(options = {}) {
     }
 
     const exportFormatRaw = String((options && options.exportFormat) || '').trim().toLowerCase();
-    const exportFormat = exportFormatRaw === 'editable'
-        ? 'editable'
-        : (exportFormatRaw === 'visual-no-icon' ? 'visual-no-icon' : 'visual');
+    const exportFormat = exportFormatRaw === 'visual-no-icon' ? 'visual-no-icon' : 'visual';
     const obsidianBookmarkIconMode = exportFormat === 'visual-no-icon' ? 'text' : 'favicon';
     const exportRoot = __normalizeObsidianSyncExportRoot(options && options.exportRoot, isEn, { allowEmpty: true });
 
@@ -30504,13 +30292,10 @@ async function __buildObsidianSyncFiles(options = {}) {
 
     const bookmarkTree = await api.getTree();
     const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn);
-    const permanentBuilder = exportFormat === 'editable'
-        ? __buildPermanentBookmarksMarkdownEditable
-        : __buildPermanentBookmarksMarkdown;
-    const forceCollapsedForObsidian = exportFormat !== 'editable';
+    const forceCollapsedForObsidian = true;
     pushTextFile(
         permanentMdRel,
-        permanentBuilder(bookmarkTree, null, { permanentSlot: 1, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian }),
+        __buildPermanentBookmarksMarkdown(bookmarkTree, null, { permanentSlot: 1, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian }),
         { type: 'permanent', slot: 1 }
     );
 
@@ -30536,7 +30321,7 @@ async function __buildObsidianSyncFiles(options = {}) {
                     __buildPermanentBookmarksMarkdownCopyEmbedMain(
                         bookmarkTree,
                         descObj,
-                        { permanentSlot: slot, copyId, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian },
+                        { permanentSlot: slot, copyId, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat },
                         __joinSyncExportPath(exportRoot, permanentMdRel)
                     ),
                     { type: 'permanent', slot: slot || (idx + 1), copyId }
@@ -30572,10 +30357,7 @@ async function __buildObsidianSyncFiles(options = {}) {
 
         tempSectionMdPaths.push({ id: section.id, rel });
 
-        const tempBuilder = exportFormat === 'editable'
-            ? __buildTempSectionMarkdownEditable
-            : __buildTempSectionMarkdown;
-        pushTextFile(rel, tempBuilder(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian }), {
+        pushTextFile(rel, __buildTempSectionMarkdown(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian }), {
             type: 'temporary',
             sectionId: section.id,
             sectionSerial: seqLabel || ''
@@ -30584,14 +30366,34 @@ async function __buildObsidianSyncFiles(options = {}) {
 
     const mdNodeMdPaths = [];
     const nativeTextNodes = [];
-    const mdNodeFolder = isEn ? 'Blank' : '空白栏目';
+    const mdNodeFolder = __getBlankMarkdownFolderRelativePath(isEn);
+    const nativeTextFolder = __getBlankNativeTextFolderRelativePath(isEn);
     const usedNodePaths = new Set();
+    const usedNativeNodePaths = new Set();
 
     (CanvasState.mdNodes || []).forEach((node) => {
         if (!node || !node.id) return;
         if (node.subtype === 'import-container') return;
         if (__isCanvasNativeTextNode(node)) {
             nativeTextNodes.push(node);
+            const nativeBody = __resolveCanvasNativeTextNodeBody(node);
+            const fixedBuiltinName = __getStableBuiltinBlankSectionFilename(node.id);
+            const titleCandidate = fixedBuiltinName || __extractMdNodeFilenameTitle(nativeBody, node.id);
+            let safeName = fixedBuiltinName
+                ? fixedBuiltinName
+                : __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
+            if (!safeName || safeName === 'Untitled') safeName = node.id;
+
+            let rel = `${nativeTextFolder}/${safeName}.md`;
+            if (usedNativeNodePaths.has(rel)) {
+                rel = `${nativeTextFolder}/${__appendObsidianFilenameSuffix(safeName, node.id)}.md`;
+            }
+            usedNativeNodePaths.add(rel);
+
+            pushTextFile(rel, __buildCanvasNativeTextMirrorMarkdown(node), {
+                type: 'blank-native-text',
+                nodeId: node.id
+            });
             return;
         }
 
@@ -31267,8 +31069,8 @@ async function exportCanvasPackage(options = {}) {
         const formatLabel = isEn ? 'Content Format:' : '内容格式：';
         const formatOptionVisual = isEn ? 'Visual Cards (HTML)' : '视觉卡片 (HTML)';
         const formatOptionVisualDesc = isEn ? 'Best for viewing, looks like cards.' : '类似卡片网格，适合查看与存档。';
-        const formatOptionEdit = isEn ? 'Editable (Headings + List)' : '编辑模式 (标题 + 列表)';
-        const formatOptionEditDesc = isEn ? 'Best for editing, uses standard Markdown.' : '使用标准 Markdown，利于编辑和整理。';
+        const formatOptionVisualNoIcon = isEn ? 'Visual Cards (No Icon)' : '视觉卡片（无图标）';
+        const formatOptionVisualNoIconDesc = isEn ? 'Same visual layout, but bookmarks use text-only rows without favicons.' : '保持视觉卡片布局，但书签行不显示 favicon 图标。';
 
         const inputLabel = isEn
             ? 'Enter path'
@@ -31303,10 +31105,10 @@ async function exportCanvasPackage(options = {}) {
                                     </div>
                                 </label>
                                 <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
-                                    <input type="radio" name="canvasExportFormat" value="editable" style="margin-top: 4px;">
+                                    <input type="radio" name="canvasExportFormat" value="visual-no-icon" style="margin-top: 4px;">
                                     <div>
-                                        <div style="font-weight: 600; font-size: 13px;">${formatOptionEdit}</div>
-                                        <div style="font-size: 12px; color: #666;">${formatOptionEditDesc}</div>
+                                        <div style="font-weight: 600; font-size: 13px;">${formatOptionVisualNoIcon}</div>
+                                        <div style="font-size: 12px; color: #666;">${formatOptionVisualNoIconDesc}</div>
                                     </div>
                                 </label>
                             </div>
@@ -31389,7 +31191,7 @@ async function exportCanvasPackage(options = {}) {
     // 全量备份模式直接使用默认路径
     // 全量备份模式直接使用默认路径
     let vaultPrefixInput;
-    let exportFormat = 'visual'; // 'visual' | 'editable'
+    let exportFormat = 'visual'; // 'visual' | 'visual-no-icon'
 
     if (isFullBackupMode) {
         // 全量备份模式：直接使用默认值，不显示路径对话框
@@ -31405,6 +31207,8 @@ async function exportCanvasPackage(options = {}) {
 
     }
     const vaultPrefix = normalizeVaultPrefix(vaultPrefixInput);
+    const exportFormatRaw = String(exportFormat || '').trim().toLowerCase();
+    exportFormat = exportFormatRaw === 'visual-no-icon' ? 'visual-no-icon' : 'visual';
 
     const isValidFolderPath = (p) => {
         if (!p) return true;
@@ -31423,7 +31227,8 @@ async function exportCanvasPackage(options = {}) {
     }
 
     const exportRoot = vaultPrefix ? vaultPrefix.split('/').slice(-1)[0] : defaultExportRoot;
-    const forceCollapsedForObsidian = String(exportFormat || '').trim().toLowerCase() !== 'editable';
+    const forceCollapsedForObsidian = true;
+    const obsidianBookmarkIconMode = exportFormat === 'visual-no-icon' ? 'text' : 'favicon';
 
     // 1) Markdown files
     // 1) Markdown files
@@ -31431,8 +31236,7 @@ async function exportCanvasPackage(options = {}) {
     const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn);
 
     // Choose builder based on format
-    const permanentBuilder = exportFormat === 'editable' ? __buildPermanentBookmarksMarkdownEditable : __buildPermanentBookmarksMarkdown;
-    files.push({ name: `${exportRoot}/${permanentMdRel}`, data: __toUint8(permanentBuilder(bookmarkTree, null, { permanentSlot: 1, forceCollapsed: forceCollapsedForObsidian })) });
+    files.push({ name: `${exportRoot}/${permanentMdRel}`, data: __toUint8(__buildPermanentBookmarksMarkdown(bookmarkTree, null, { permanentSlot: 1, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian })) });
 
     // Generate separate MD files for Permanent Section Copies (with their own descriptions)
     const copyFileMap = {}; // copyId -> relativePath
@@ -31458,9 +31262,13 @@ async function exportCanvasPackage(options = {}) {
                 const copyMdRel = __buildPermanentSectionMarkdownRelativePath(idx + 1, isEn);
                 copyFileMap[copyId] = copyMdRel;
 
-                // Build separate MD file using same tree but different description
                 const slot = idx ? (idx + 1) : null;
-                const fileContent = permanentBuilder(bookmarkTree, descObj, { permanentSlot: slot, copyId, forceCollapsed: forceCollapsedForObsidian });
+                const fileContent = __buildPermanentBookmarksMarkdownCopyEmbedMain(
+                    bookmarkTree,
+                    descObj,
+                    { permanentSlot: slot, copyId, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat },
+                    __joinSyncExportPath(exportRoot, permanentMdRel)
+                );
                 files.push({ name: `${exportRoot}/${copyMdRel}`, data: __toUint8(fileContent) });
             });
         }
@@ -31495,14 +31303,15 @@ async function exportCanvasPackage(options = {}) {
         tempSectionMdPaths.push({ id: section.id, rel });
 
         // Choose builder based on format
-        const tempBuilder = exportFormat === 'editable' ? __buildTempSectionMarkdownEditable : __buildTempSectionMarkdown;
-        files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(tempBuilder(section, { forceCollapsed: forceCollapsedForObsidian })) });
+        files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(__buildTempSectionMarkdown(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian })) });
     });
 
     const mdNodeMdPaths = [];
     const nativeTextNodes = [];
-    const mdNodeFolder = isEn ? 'Blank' : '空白栏目';
+    const mdNodeFolder = __getBlankMarkdownFolderRelativePath(isEn);
+    const nativeTextFolder = __getBlankNativeTextFolderRelativePath(isEn);
     const usedNodePaths = new Set();
+    const usedNativeNodePaths = new Set();
 
     (CanvasState.mdNodes || []).forEach((node) => {
         if (!node || !node.id) return;
@@ -31510,6 +31319,22 @@ async function exportCanvasPackage(options = {}) {
         if (node.subtype === 'import-container') return;
         if (__isCanvasNativeTextNode(node)) {
             nativeTextNodes.push(node);
+            const nativeBody = __resolveCanvasNativeTextNodeBody(node);
+            const fixedBuiltinName = __getStableBuiltinBlankSectionFilename(node.id);
+            const titleCandidate = fixedBuiltinName || __extractMdNodeFilenameTitle(nativeBody, node.id);
+
+            let safeName = fixedBuiltinName
+                ? fixedBuiltinName
+                : __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
+            if (!safeName || safeName === 'Untitled') safeName = node.id;
+
+            let rel = `${nativeTextFolder}/${safeName}.md`;
+            if (usedNativeNodePaths.has(rel)) {
+                rel = `${nativeTextFolder}/${__appendObsidianFilenameSuffix(safeName, node.id)}.md`;
+            }
+            usedNativeNodePaths.add(rel);
+
+            files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(__buildCanvasNativeTextMirrorMarkdown(node)) });
             return;
         }
 
@@ -31830,28 +31655,30 @@ async function exportCanvasPackage(options = {}) {
 
     const readmeName = isEn ? 'README_Import_Rules.md' : '说明_导入规则.md';
 
-    const isVisualExport = String(exportFormat || '').trim().toLowerCase() !== 'editable';
+    const normalizedExportFormat = String(exportFormat || '').trim().toLowerCase();
+    const exportModeLabelEn = normalizedExportFormat === 'visual-no-icon' ? 'Visual Export (No Icon)' : 'Visual Export';
+    const exportModeLabelZh = normalizedExportFormat === 'visual-no-icon' ? '视觉模式导出（无图标）' : '视觉模式导出';
     let compatText = '';
     let aiGuideText = '';
 
-    const modeTreeRulesEn = isVisualExport
+    const modeTreeRulesEn = normalizedExportFormat === 'visual-no-icon'
         ? [
+            '- Visual mode (No Icon) keeps HTML-like tree blocks: `<details> / <summary> / <a href>`.',
+            '- Bookmark rows stay text-only and do not render favicon spans.'
+        ]
+        : [
             '- Visual mode keeps HTML-like tree blocks: `<details> / <summary> / <a href>`.',
             '- Keep outer wrappers of visual cards; missing wrappers may drop nodes during import.'
-        ]
-        : [
-            '- Editable mode uses heading tree (`###` to `######`), then nested list (`- 📁 **Title**`) after H6.',
-            '- Bookmarks use `- [Title](URL)` and only safe URL schemes are guaranteed to import.'
         ];
 
-    const modeTreeRulesZh = isVisualExport
+    const modeTreeRulesZh = normalizedExportFormat === 'visual-no-icon'
         ? [
-            '- 视觉模式保留 HTML 树结构：`<details> / <summary> / <a href>`。',
-            '- 可视化卡片请保留外层容器；删掉外层结构可能导致导入时节点丢失。'
+            '- 视觉模式（无图标）保留 HTML 树结构：`<details> / <summary> / <a href>`。',
+            '- 书签行只保留纯文本链接，不渲染 favicon 图标。'
         ]
         : [
-            '- 编辑模式使用标题树（`###` 到 `######`），超过 H6 后改为缩进列表（`- 📁 **标题**`）。',
-            '- 书签使用 `- [标题](URL)`；仅白名单协议可稳定导入。'
+            '- 视觉模式保留 HTML 树结构：`<details> / <summary> / <a href>`。',
+            '- 可视化卡片请保留外层容器；删掉外层结构可能导致导入时节点丢失。'
         ];
 
     compatText = isEn
@@ -31865,7 +31692,7 @@ async function exportCanvasPackage(options = {}) {
             '## Part A. Package & View Structure',
             '',
             '### A0. Full Workflow Example (Export → Edit → Re-import)',
-            '1. Export in Visual or Editable mode.',
+            '1. Export in Visual or Visual (No Icon) mode.',
             '2. Unzip into your Obsidian vault.',
             `3. Open ${exportRoot}/${canvasFileName}.`,
             '4. Edit files under Permanent/, Temporary/, Blank/.',
@@ -31878,30 +31705,35 @@ async function exportCanvasPackage(options = {}) {
             '- Optional copy files: Permanent/#B <Permanent Title>.md / #C <Permanent Title>.md ...',
             '- Temporary/General Chain/*.md: general-chain temporary section files.',
             '- Temporary/Special temporary/*.md: special temporary section files.',
-            '- Blank/*.md: blank section files.',
+            '- Blank/Plugin blank cards/*.md: plugin blank markdown cards.',
+            '- Blank/Obsidian native cards/*.md: mirror markdown for native text cards.',
             '',
             '### A2. View File Structure (.canvas)',
             '- Root keys must remain nodes[] and edges[].',
             '- File nodes point to markdown files through the file field (vault-relative path).',
             '- Group nodes are import containers; membership is inferred by geometry on import.',
             '- Edge fromNode/toNode must reference existing node IDs.',
+            '- Native blank cards remain `type: "text"` nodes inside `.canvas`.',
             '',
             '### A3. Markdown Structure (all section files)',
             '- Use the first non-empty line as section header text (`sequence + title` recommended).',
             '- Optional description uses comment block: `<!-- BC_DESCRIPTION_START --> ... <!-- BC_DESCRIPTION_END -->`.',
-            '- Permanent main markdown appends root metadata comment block: `<!-- BC_ROOT_META_START --> ... <!-- BC_ROOT_META_END -->`.',
+            '- Permanent main markdown places root metadata comment block directly under the header area: `<!-- BC_ROOT_META_START --> ... <!-- BC_ROOT_META_END -->`.',
             '- This metadata identifies standard browser roots (`folderType`, optional `syncing`). Do not delete, move, or manually edit it unless you understand the protocol semantics.',
+            '- Native text mirror markdown contains `BC_NATIVE_TEXT_META` at the top; keep it so importer can match the original text node.',
             '- Legacy `BC_FOLD_STATE` blocks are ignored on import and are no longer written on export.',
             '- Permanent/Temporary bookmark tree content is parsed from lines below the header/description/meta block.',
             '- Permanent slot recognition priority: header `#A/#B` > filename `(#B)` > file order fallback.',
             '- Special temporary files are placed under `Special temporary/`.',
-            '- Blank section keeps free-form markdown body (no required metadata header).',
+            '- Plugin blank cards keep free-form markdown body; native text mirrors keep metadata header + body text.',
             '',
             '### A4. Mode-specific Content Grammar',
             ...modeTreeRulesEn,
             '',
             '### A5. Import Recognition Priority',
             '- Type recognition uses BOTH .canvas file references and folder paths.',
+            '- Plugin blank cards recognize both new `Blank/Plugin blank cards/` and legacy `Blank/` paths.',
+            '- Native text cards prefer mirror markdown content when `Blank/Obsidian native cards/` exists.',
             '- In normal import flow, permanent files are restored as snapshot sections (not direct browser-tree overwrite).'
         ].join('\n')
         : [
@@ -31914,7 +31746,7 @@ async function exportCanvasPackage(options = {}) {
             '## 第一部分：文件结构与视图结构（导入识别基准）',
             '',
             '### A0. 完整操作示例（导出 → 编辑 → 导入）',
-            '1. 在书签画布执行导出（视觉模式或编辑模式）。',
+            '1. 在书签画布执行导出（视觉模式或视觉模式无图标）。',
             '2. 将 ZIP 解压到 Obsidian 仓库。',
             `3. 打开 ${exportRoot}/${canvasFileName}。`,
             '4. 按需编辑 永久栏目/、临时栏目/、空白栏目/ 下的 .md 文件。',
@@ -31927,43 +31759,49 @@ async function exportCanvasPackage(options = {}) {
             '- 可能存在永久副本文件：永久栏目/#B <永久栏目标题>.md / #C <永久栏目标题>.md ...',
             '- 临时栏目/常规链式/*.md：常规链式临时栏目文件。',
             '- 临时栏目/特殊临时栏目/*.md：特殊临时栏目文件。',
-            '- 空白栏目/*.md：空白栏目文件。',
+            '- 空白栏目/插件空白卡片/*.md：插件空白 Markdown 卡片。',
+            '- 空白栏目/obsidian原生卡片/*.md：原生 text 卡片的镜像 Markdown。',
             '',
             '### A2. 视图文件结构（.canvas）',
             '- 顶层结构必须保持 nodes[] 与 edges[]。',
             '- file 节点通过 file 字段指向 markdown 文件（vault 相对路径）。',
             '- group 节点作为导入分组容器，导入时按几何包含关系识别归属。',
             '- 边的 fromNode/toNode 必须引用存在的节点 ID。',
+            '- 原生空白卡片在 `.canvas` 中仍然是 `type: "text"` 节点。',
             '',
             '### A3. Markdown 文件结构（所有栏目）',
             '- 首个非空行作为栏目头文本（建议“序号 + 标题”）。',
             '- 说明区可选，采用注释块：`<!-- BC_DESCRIPTION_START --> ... <!-- BC_DESCRIPTION_END -->`。',
-            '- 永久主 Markdown 文件末尾追加根目录元数据注释块：`<!-- BC_ROOT_META_START --> ... <!-- BC_ROOT_META_END -->`。',
+            '- 永久主 Markdown 文件会在标题区下方写入根目录元数据注释块：`<!-- BC_ROOT_META_START --> ... <!-- BC_ROOT_META_END -->`。',
             '- 该元数据用于识别浏览器标准根目录（`folderType`，以及可选的 `syncing`），请勿随意删除、移动或手动改写，除非明确知道其协议含义。',
+            '- 原生 text 镜像 Markdown 顶部会写入 `BC_NATIVE_TEXT_META` 注释块，请保留它以便导入时匹配回原节点。',
             '- 历史 `BC_FOLD_STATE` 注释块在导入时会被忽略，导出时不再写出。',
             '- 永久/临时栏目的书签树内容从栏目头/说明区/根元数据块之外的正文开始解析。',
             '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名 `(#B)` > 文件顺序兜底。',
             '- 特殊临时栏目文件统一放在 `临时栏目/特殊临时栏目/`。',
-            '- 空白栏目保持自由 Markdown 正文（不要求元数据头）。',
+            '- 插件空白卡片保持自由 Markdown 正文；原生 text 镜像文件则为“元数据头 + 正文”。',
             '',
-            '### A4. 模式内容语法（视觉 / 编辑）',
+            '### A4. 模式内容语法（视觉 / 视觉无图标）',
             ...modeTreeRulesZh,
             '',
             '### A5. 导入识别优先级',
             '- 类型识别同时依赖 .canvas 文件引用 与 目录路径命名。',
+            '- 插件空白卡片兼容新路径 `空白栏目/插件空白卡片/` 与旧路径 `空白栏目/`。',
+            '- 原生 text 卡片若存在 `空白栏目/obsidian原生卡片/` 镜像文件，则优先读取镜像正文。',
             '- 常规导入流下，永久栏目按“快照栏目”恢复，不直接覆盖浏览器真实书签树。'
         ].join('\n');
 
     aiGuideText = isEn
         ? [
-            `## Part B. Skills-like Change Profiles (${isVisualExport ? 'Visual Export' : 'Editable Export'})`,
+            `## Part B. Skills-like Change Profiles (${exportModeLabelEn})`,
             '',
             'Route principle: edit the minimum file set only ("change where used").',
             '',
             '### S1. File Routing (what to touch)',
             '- Permanent content: `Permanent/#A <Permanent Title>.md` and optional copy files `Permanent/#B <Permanent Title>.md` ...',
             '- Temporary content: `Temporary/General Chain/*.md` and `Temporary/Special temporary/*.md` + matching file nodes in `.canvas`.',
-            '- Blank content: `Blank/*.md` + matching file nodes in `.canvas`.',
+            '- Blank content: `Blank/Plugin blank cards/*.md` + matching file nodes in `.canvas`.',
+            '- Native text content: edit `Blank/Obsidian native cards/*.md`; the actual canvas node still lives in `.canvas` as `type: "text"`.',
             '- Layout/links only: edit `.canvas` node geometry and edge fields.',
             '',
             '### S2. Header Line Contract (no required front matter)',
@@ -31975,6 +31813,7 @@ async function exportCanvasPackage(options = {}) {
             '- Type recognition = `.canvas` file mapping + folder path names.',
             '- Special temporary sections are recognized by folder + header/label semantics.',
             '- For permanent/temp markdown, parser reads bookmark tree from lines below header/description block.',
+            '- Native text cards are matched by `BC_NATIVE_TEXT_META.nodeId`; keep that block intact.',
             '- In normal import flow, permanent files are restored as snapshot sections, not direct browser tree overwrite.',
             '',
             '### S4. Number / Title / Bookmark-count Priority',
@@ -32005,14 +31844,15 @@ async function exportCanvasPackage(options = {}) {
             '### Import Steps'
         ].join('\n')
         : [
-            `## 第二部分：模型改动配置（类似 Skills，按需调用）（${isVisualExport ? '可视化导出' : '编辑模式导出'}）`,
+            `## 第二部分：模型改动配置（类似 Skills，按需调用）（${exportModeLabelZh}）`,
             '',
             '路由原则：只改最小必要文件集合（用到哪里改哪里），避免全量重写。',
             '',
             '### S1. 文件路由（按需求定位）',
             '- 永久栏目内容：修改 `永久栏目/#A <永久栏目标题>.md` 与可选副本 `永久栏目/#B <永久栏目标题>.md` ...。',
             '- 临时栏目内容：修改 `临时栏目/常规链式/*.md` 与 `临时栏目/特殊临时栏目/*.md`，并同步 `.canvas` 对应 file 节点。',
-            '- 空白栏目内容：修改 `空白栏目/*.md`，并同步 `.canvas` 对应 file 节点。',
+            '- 插件空白卡片：修改 `空白栏目/插件空白卡片/*.md`，并同步 `.canvas` 对应 file 节点。',
+            '- 原生 text 卡片：修改 `空白栏目/obsidian原生卡片/*.md`；真实节点仍在 `.canvas` 的 `type: "text"` 中。',
             '- 仅布局/连线：只改 `.canvas` 的节点几何与边字段。',
             '',
             '### S2. 栏目头文本合同（不要求 Front Matter）',
@@ -32024,6 +31864,7 @@ async function exportCanvasPackage(options = {}) {
             '- 类型识别 = `.canvas` 文件映射 + 目录路径命名（双条件）。',
             '- 特殊临时栏目按目录 + 栏目头/标签语义识别。',
             '- 永久/临时栏目改为“栏目头 +（可选说明注释块）+ 树内容”解析合同。',
+            '- 原生 text 卡片按 `BC_NATIVE_TEXT_META.nodeId` 匹配；请保留这个注释块。',
             '- 常规导入流下，永久栏目按快照栏目恢复，不直接覆盖浏览器真实书签树。',
             '',
             '### S4. 编号 / 标题 / 书签数优先级',
@@ -32507,6 +32348,160 @@ function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, d
     };
 }
 
+function __normalizeCanvasMarkdownPath(path) {
+    return String(path || '')
+        .trim()
+        .replace(/\\/g, '/')
+        .replace(/^\/+/g, '')
+        .replace(/\/+/g, '/')
+        .replace(/\/+$/g, '');
+}
+
+function __buildCanvasMarkdownEmbedLookupCandidates(targetPath, currentFilePath = '') {
+    const normalizedTarget = __normalizeCanvasMarkdownPath(targetPath).replace(/\.md$/i, '');
+    if (!normalizedTarget) return [];
+
+    const normalizedCurrentPath = __normalizeCanvasMarkdownPath(currentFilePath);
+    const currentDir = normalizedCurrentPath.includes('/')
+        ? normalizedCurrentPath.slice(0, normalizedCurrentPath.lastIndexOf('/'))
+        : '';
+
+    const candidates = [];
+    const seen = new Set();
+
+    const pushCandidate = (value) => {
+        const normalized = __normalizeCanvasMarkdownPath(value);
+        if (!normalized) return;
+
+        if (!seen.has(normalized)) {
+            seen.add(normalized);
+            candidates.push(normalized);
+        }
+
+        const withMd = /\.md$/i.test(normalized) ? normalized : `${normalized}.md`;
+        if (!seen.has(withMd)) {
+            seen.add(withMd);
+            candidates.push(withMd);
+        }
+    };
+
+    pushCandidate(normalizedTarget);
+    if (currentDir) {
+        pushCandidate(`${currentDir}/${normalizedTarget}`);
+        const fileName = normalizedTarget.split('/').pop();
+        if (fileName) {
+            pushCandidate(`${currentDir}/${fileName}`);
+        }
+    }
+
+    return candidates;
+}
+
+function __parseCanvasMarkdownEmbedReference(line) {
+    const match = String(line || '').trim().match(/^!\[\[([^\]]+)\]\]$/);
+    if (!match) return null;
+
+    let inner = String(match[1] || '').trim();
+    if (!inner) return null;
+
+    const aliasIndex = inner.indexOf('|');
+    if (aliasIndex >= 0) {
+        inner = inner.slice(0, aliasIndex).trim();
+    }
+    if (!inner) return null;
+
+    const hashIndex = inner.indexOf('#');
+    const targetPath = hashIndex >= 0 ? inner.slice(0, hashIndex).trim() : inner;
+    const sectionTitle = hashIndex >= 0 ? inner.slice(hashIndex + 1).trim() : '';
+    if (!targetPath || !sectionTitle) return null;
+
+    return {
+        targetPath,
+        sectionTitle
+    };
+}
+
+function __normalizeCanvasMarkdownHeadingKey(value) {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function __extractCanvasMarkdownSectionBody(markdownText, sectionTitle) {
+    const body = String(markdownText || '').replace(/\r\n?/g, '\n');
+    const targetKey = __normalizeCanvasMarkdownHeadingKey(sectionTitle);
+    if (!body.trim() || !targetKey) return '';
+
+    const lines = body.split('\n');
+    const collected = [];
+    let isInsideSection = false;
+    let targetLevel = 0;
+
+    for (const line of lines) {
+        const headingMatch = String(line || '').match(/^(#{1,6})\s+(.+?)\s*$/);
+        if (headingMatch) {
+            const level = headingMatch[1].length;
+            const headingKey = __normalizeCanvasMarkdownHeadingKey(headingMatch[2]);
+
+            if (!isInsideSection) {
+                if (headingKey === targetKey) {
+                    isInsideSection = true;
+                    targetLevel = level;
+                }
+                continue;
+            }
+
+            if (level <= targetLevel) {
+                break;
+            }
+        }
+
+        if (isInsideSection) {
+            collected.push(line);
+        }
+    }
+
+    return isInsideSection ? collected.join('\n').trim() : '';
+}
+
+function __resolveCanvasMarkdownEmbeddedContent(contentToParse, currentFilePath, readFileTextByPath) {
+    const body = String(contentToParse || '').replace(/\r\n?/g, '\n').trim();
+    if (!body || typeof readFileTextByPath !== 'function') return body;
+
+    const embedRefs = body
+        .split('\n')
+        .map(__parseCanvasMarkdownEmbedReference)
+        .filter(Boolean);
+
+    if (!embedRefs.length) {
+        return body;
+    }
+
+    const resolvedLines = [];
+    let resolvedCount = 0;
+
+    embedRefs.forEach((embedRef) => {
+        const targetFileText = readFileTextByPath(embedRef.targetPath, currentFilePath);
+        if (!targetFileText) return;
+
+        const parsedTarget = __parseCanvasMarkdownPayload(targetFileText);
+        const sectionBody = __extractCanvasMarkdownSectionBody(
+            parsedTarget && parsedTarget.contentToParse ? parsedTarget.contentToParse : '',
+            embedRef.sectionTitle
+        );
+        if (!sectionBody) return;
+
+        resolvedLines.push(`## ${embedRef.sectionTitle}`);
+        resolvedLines.push(sectionBody);
+        resolvedLines.push('');
+        resolvedCount += 1;
+    });
+
+    if (!resolvedCount) {
+        return body;
+    }
+
+    return resolvedLines.join('\n').trim();
+}
+
 async function parseCanvasPackageFromZipFile(file) {
     const { isEn } = __getLang();
     const lowerFileName = String((file && file.name) || '').toLowerCase();
@@ -32614,9 +32609,21 @@ async function parseCanvasPackageFromZipFile(file) {
             }
             return null;
         };
+        const readFileTextByPath = (targetPath, currentFilePath = '') => {
+            const candidates = __buildCanvasMarkdownEmbedLookupCandidates(targetPath, currentFilePath);
+            for (const candidate of candidates) {
+                const bytes = findFile(candidate);
+                if (!bytes) continue;
+                try {
+                    return new TextDecoder('utf-8').decode(bytes);
+                } catch (_) { }
+            }
+            return '';
+        };
 
         const nodes = canvasData.nodes || [];
         const edges = canvasData.edges || [];
+        const nativeTextMirrorMap = __collectCanvasNativeTextMirrorMap(zipFiles);
 
         // Map Canvas ID to our ID
         const idMap = {};
@@ -32664,16 +32671,18 @@ async function parseCanvasPackageFromZipFile(file) {
                 // Identify type based on filename
                 const isPermanent = __isPermanentMarkdownPath(node.file);
                 const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
-                const isMdNode = node.file.includes('Blank/') || node.file.includes('Blank Sections/') || node.file.includes('空白栏目/');
+                const isMdNode = __isBlankMarkdownPath(node.file);
                 const isLivePermanentNode = isPermanent && __isExportedPermanentCanvasNode(node);
+                const resolvedContentToParse = isPermanent
+                    ? __resolveCanvasMarkdownEmbeddedContent(contentToParse, node.file, readFileTextByPath)
+                    : contentToParse;
 
                 if (isLivePermanentNode) {
                     // Reconstruct Snapshot Permanent Section
                     // We don't have the tree data in Mode A, but we have position.
-                    // Wait, in Editable Mode, do we parse the MD to get the list?
-                    // YES! If user edited it, we can recover it as a snapshot list!
+                    // Visual Obsidian tree files can still reconstruct bookmark items here.
 
-                    const items = __parseMarkdownAuto(contentToParse);
+                    const items = __parseMarkdownAuto(resolvedContentToParse);
                     const sectionId = node.id; // 使用原始 node.id 以便边缘正确映射
                     importedPermanentCount++;
                     const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
@@ -32699,7 +32708,7 @@ async function parseCanvasPackageFromZipFile(file) {
                     try {
                         if (!primaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
                             const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
-                                contentToParse,
+                                resolvedContentToParse,
                                 parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
                             );
                             const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
@@ -32711,7 +32720,7 @@ async function parseCanvasPackageFromZipFile(file) {
                     // We need to map this in storage for scroll if possible, but IDs changed.
                 } else if (isPermanent) {
                     tempState.sections.push(
-                        __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, contentToParse, isEn)
+                        __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, resolvedContentToParse, isEn)
                     );
                 } else if (isTempSection) {
                     // Restore Temp Section
@@ -32785,6 +32794,10 @@ async function parseCanvasPackageFromZipFile(file) {
 	                    });
 	                }
             } else if (node.type === 'text') {
+                const normalizedNodeId = String(node.id || '').trim();
+                const mirroredText = normalizedNodeId && nativeTextMirrorMap.has(normalizedNodeId)
+                    ? nativeTextMirrorMap.get(normalizedNodeId)
+                    : null;
                 const convertedColor = convertObsidianColor(node.color);
                 const isHex = convertedColor && convertedColor.startsWith('#');
                 tempState.mdNodes.push({
@@ -32795,7 +32808,7 @@ async function parseCanvasPackageFromZipFile(file) {
                     height: node.height,
                     color: isHex ? null : node.color,
                     colorHex: isHex ? convertedColor : null,
-                    text: String(node.text || ''),
+                    text: mirroredText != null ? String(mirroredText) : String(node.text || ''),
                     subtype: 'canvas-native-text',
                     source: 'obsidian-canvas-text'
                 });
@@ -32975,9 +32988,21 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
             }
             return null;
         };
+        const readFileTextByPath = (targetPath, currentFilePath = '') => {
+            const candidates = __buildCanvasMarkdownEmbedLookupCandidates(targetPath, currentFilePath);
+            for (const candidate of candidates) {
+                const bytes = findFile(candidate);
+                if (!bytes) continue;
+                try {
+                    return new TextDecoder('utf-8').decode(bytes);
+                } catch (_) { }
+            }
+            return '';
+        };
 
         const nodes = canvasData.nodes || [];
         const edges = canvasData.edges || [];
+        const nativeTextMirrorMap = __collectCanvasNativeTextMirrorMap(folderFiles);
         let importedPermanentCount = 0;
 
         nodes.forEach(node => {
@@ -33021,11 +33046,14 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
 
                 const isPermanent = __isPermanentMarkdownPath(node.file);
                 const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
-                const isMdNode = node.file.includes('Blank/') || node.file.includes('Blank Sections/') || node.file.includes('空白栏目/');
+                const isMdNode = __isBlankMarkdownPath(node.file);
                 const isLivePermanentNode = isPermanent && __isExportedPermanentCanvasNode(node);
+                const resolvedContentToParse = isPermanent
+                    ? __resolveCanvasMarkdownEmbeddedContent(contentToParse, node.file, readFileTextByPath)
+                    : contentToParse;
 
                 if (isLivePermanentNode) {
-                    const items = __parseMarkdownAuto(contentToParse);
+                    const items = __parseMarkdownAuto(resolvedContentToParse);
                     const sectionId = node.id; // 使用原始 node.id 以便边缘正确映射
                     importedPermanentCount++;
                     const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
@@ -33054,7 +33082,7 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
                     try {
                         if (!primaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
                             const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
-                                contentToParse,
+                                resolvedContentToParse,
                                 parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
                             );
                             const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
@@ -33065,7 +33093,7 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
                     } catch (_) { }
                 } else if (isPermanent) {
                     tempState.sections.push(
-                        __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, contentToParse, isEn)
+                        __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, resolvedContentToParse, isEn)
                     );
                 } else if (isTempSection) {
                     const items = __parseMarkdownAuto(contentToParse);
@@ -33130,6 +33158,10 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
 	                    });
 	                }
             } else if (node.type === 'text') {
+                const normalizedNodeId = String(node.id || '').trim();
+                const mirroredText = normalizedNodeId && nativeTextMirrorMap.has(normalizedNodeId)
+                    ? nativeTextMirrorMap.get(normalizedNodeId)
+                    : null;
                 const convertedColor = convertObsidianColor(node.color);
                 const isHex = convertedColor && convertedColor.startsWith('#');
                 tempState.mdNodes.push({
@@ -33140,7 +33172,7 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
                     height: node.height,
                     color: isHex ? null : node.color,
                     colorHex: isHex ? convertedColor : null,
-                    text: String(node.text || ''),
+                    text: mirroredText != null ? String(mirroredText) : String(node.text || ''),
                     subtype: 'canvas-native-text',
                     source: 'obsidian-canvas-text'
                 });
