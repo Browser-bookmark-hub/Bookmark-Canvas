@@ -2,6 +2,8 @@ const GITHUB_API_BASE_URL = 'https://api.github.com';
 const GITHUB_API_VERSION = '2022-11-28';
 const GITHUB_CONTENTS_JSON_MAX_BYTES = 1024 * 1024;
 const GITHUB_CONTENTS_HARD_LIMIT_BYTES = 100 * 1024 * 1024;
+const GITHUB_BLOB_CREATE_CONCURRENCY = 4;
+const GITHUB_REQUEST_TIMEOUT_MS = 60 * 1000;
 
 function normalizeGitHubToken(token) {
   const raw = String(token || '').trim();
@@ -23,7 +25,9 @@ const GITHUB_ERROR_STAGE_LABELS_ZH = {
   'create-tree': '创建 Tree',
   'create-commit': '创建 Commit',
   'create-ref': '创建分支引用',
-  'update-ref': '更新分支引用'
+  'update-ref': '更新分支引用',
+  'merge-branches': '合并分支',
+  'delete-ref': '删除分支引用'
 };
 
 function formatGitHubErrorStage(stage) {
@@ -101,6 +105,71 @@ function buildGitHubValidationFailureDetails(error) {
   return details.length ? details.join(' | ') : (message || 'Validation Failed');
 }
 
+function toHeaderMap(headers) {
+  const map = {};
+  if (!headers || typeof headers.forEach !== 'function') return map;
+  headers.forEach((value, key) => {
+    const normalizedKey = String(key || '').trim().toLowerCase();
+    if (!normalizedKey) return;
+    map[normalizedKey] = String(value || '').trim();
+  });
+  return map;
+}
+
+function parseGitHubRateLimitContext(error) {
+  const headers = (error && error.headers && typeof error.headers === 'object')
+    ? error.headers
+    : {};
+  const remainingRaw = headers['x-ratelimit-remaining'];
+  const resetRaw = headers['x-ratelimit-reset'];
+  const retryAfterRaw = headers['retry-after'];
+
+  const remaining = Number(remainingRaw);
+  const resetEpoch = Number(resetRaw);
+  const retryAfter = Number(retryAfterRaw);
+
+  const responseParts = extractGitHubErrorMessagesFromResponse(error && error.response);
+  const responseText = responseParts.join(' | ');
+  const messageText = String(
+    responseText || (error && error.message) || ''
+  ).toLowerCase();
+
+  const secondaryLimited = /secondary rate limit|abuse detection/i.test(messageText);
+  const primaryLimited = Number.isFinite(remaining) && remaining === 0;
+  const hasRetryAfter = Number.isFinite(retryAfter) && retryAfter > 0;
+
+  const resetAtMs = Number.isFinite(resetEpoch) && resetEpoch > 0 ? (resetEpoch * 1000) : 0;
+  const waitSecondsByReset = resetAtMs > 0
+    ? Math.max(0, Math.ceil((resetAtMs - Date.now()) / 1000))
+    : 0;
+  const waitSeconds = hasRetryAfter
+    ? Math.max(1, Math.ceil(retryAfter))
+    : waitSecondsByReset;
+
+  return {
+    isRateLimited: secondaryLimited || primaryLimited || hasRetryAfter,
+    secondaryLimited,
+    primaryLimited,
+    remaining: Number.isFinite(remaining) ? remaining : null,
+    waitSeconds
+  };
+}
+
+function buildGitHub403AccessDetail(error) {
+  const responseParts = extractGitHubErrorMessagesFromResponse(error && error.response);
+  const detail = responseParts.find((text) => {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) return false;
+    if (normalized === 'forbidden') return false;
+    if (normalized.includes('secondary rate limit')) return false;
+    if (normalized.includes('abuse detection')) return false;
+    return true;
+  }) || '';
+
+  if (!detail) return '';
+  return detail.length > 160 ? `${detail.slice(0, 157)}...` : detail;
+}
+
 function normalizeGitHubError(error) {
   if (!error) return '未知错误';
 
@@ -108,9 +177,43 @@ function normalizeGitHubError(error) {
   const stageLabel = formatGitHubErrorStage(stage);
   const stagePrefix = stageLabel ? `${stageLabel}失败：` : '';
 
+  if (String(error && error.code || '') === 'GITHUB_FETCH_TIMEOUT') {
+    const timeoutMs = Number(error && error.timeoutMs);
+    const timeoutHint = Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? `（>${Math.round(timeoutMs / 1000)} 秒）`
+      : '';
+    return `${stagePrefix}GitHub 请求超时${timeoutHint}，请检查网络后重试`;
+  }
+
   const status = Number(error.status);
   if (status === 401) return `${stagePrefix}GitHub Token 无效或无权限（401）`;
-  if (status === 403) return `${stagePrefix}GitHub 拒绝访问或触发速率限制（403）`;
+  if (status === 403) {
+    const rateLimit = parseGitHubRateLimitContext(error);
+    if (rateLimit.isRateLimited) {
+      if (rateLimit.secondaryLimited) {
+        if (rateLimit.waitSeconds > 0) {
+          return `${stagePrefix}GitHub 次级速率限制（403），请约 ${rateLimit.waitSeconds} 秒后重试`;
+        }
+        return `${stagePrefix}GitHub 次级速率限制（403），请降低请求频率后重试`;
+      }
+      if (rateLimit.primaryLimited) {
+        if (rateLimit.waitSeconds > 0) {
+          return `${stagePrefix}GitHub 主速率限制（403），剩余配额=0，请约 ${rateLimit.waitSeconds} 秒后重试`;
+        }
+        return `${stagePrefix}GitHub 主速率限制（403），剩余配额=0`;
+      }
+      if (rateLimit.waitSeconds > 0) {
+        return `${stagePrefix}GitHub 速率限制（403），请约 ${rateLimit.waitSeconds} 秒后重试`;
+      }
+      return `${stagePrefix}GitHub 速率限制（403）`;
+    }
+
+    const accessDetail = buildGitHub403AccessDetail(error);
+    if (accessDetail) {
+      return `${stagePrefix}GitHub 拒绝访问（403）：${accessDetail}`;
+    }
+    return `${stagePrefix}GitHub 拒绝访问（403）`;
+  }
   if (status === 404) {
     if (stage === 'read-ref') return `${stagePrefix}分支不存在（404）`;
     if (stage === 'create-ref') return `${stagePrefix}默认分支不存在或仓库为空（404）`;
@@ -146,7 +249,7 @@ function textToBase64(content) {
   return btoa(binary);
 }
 
-async function githubRequestRaw(url, { method = 'GET', headers = {}, body } = {}) {
+async function githubRequestRaw(url, { method = 'GET', headers = {}, body, timeoutMs = GITHUB_REQUEST_TIMEOUT_MS } = {}) {
   const normalizedMethod = String(method || 'GET').trim().toUpperCase();
   const requestHeaders = {
     Accept: 'application/vnd.github+json',
@@ -161,12 +264,43 @@ async function githubRequestRaw(url, { method = 'GET', headers = {}, body } = {}
   };
 
   const doFetch = async (effectiveHeaders) => {
-    const response = await fetch(url, {
-      method: normalizedMethod,
-      headers: effectiveHeaders,
-      body,
-      cache: normalizedMethod === 'GET' ? 'no-store' : 'default'
-    });
+    const controller = (typeof AbortController === 'function')
+      ? new AbortController()
+      : null;
+    const requestTimeoutMs = Math.max(1000, Number(timeoutMs) || GITHUB_REQUEST_TIMEOUT_MS);
+    let timeoutId = null;
+    if (controller) {
+      timeoutId = setTimeout(() => {
+        try {
+          controller.abort();
+        } catch (_) {
+          // Ignore abort errors; fetch handles final rejection.
+        }
+      }, requestTimeoutMs);
+    }
+
+    let response = null;
+    try {
+      response = await fetch(url, {
+        method: normalizedMethod,
+        headers: effectiveHeaders,
+        body,
+        cache: normalizedMethod === 'GET' ? 'no-store' : 'default',
+        signal: controller ? controller.signal : undefined
+      });
+    } catch (error) {
+      if (error && error.name === 'AbortError') {
+        const timeoutError = new Error('GitHub request timed out');
+        timeoutError.code = 'GITHUB_FETCH_TIMEOUT';
+        timeoutError.timeoutMs = requestTimeoutMs;
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
 
     const text = await response.text();
     let json = null;
@@ -176,7 +310,7 @@ async function githubRequestRaw(url, { method = 'GET', headers = {}, body } = {}
       json = null;
     }
 
-    return { response, text, json };
+    return { response, text, json, headers: toHeaderMap(response.headers) };
   };
 
   let result = await doFetch(requestHeaders);
@@ -210,6 +344,7 @@ async function githubRequestJson(url, { method = 'GET', headers = {}, body } = {
     );
     error.status = result.response.status;
     error.response = result.json || result.text;
+    error.headers = result.headers || {};
     throw error;
   }
 
@@ -226,6 +361,7 @@ async function githubRequestText(url, { method = 'GET', headers = {}, body } = {
     );
     error.status = result.response.status;
     error.response = result.json || result.text;
+    error.headers = result.headers || {};
     throw error;
   }
 
@@ -942,6 +1078,62 @@ function shouldRetryGitHubRefUpdate(error) {
     combined.includes('cannot lock ref');
 }
 
+function isGitHubProtectedBranchMergeError(error) {
+  const status = Number(error && error.status);
+  if (status !== 403 && status !== 405 && status !== 422) return false;
+
+  const message = String((error && error.message) || '').toLowerCase();
+  const responseParts = extractGitHubErrorMessagesFromResponse(error && error.response);
+  const combined = `${message} ${responseParts.join(' ')}`.toLowerCase();
+
+  if (status === 405) return true;
+  if (!combined) return false;
+  if (combined.includes('protected branch')) return true;
+  if (combined.includes('branch is protected')) return true;
+  if (combined.includes('required status checks')) return true;
+  if (combined.includes('pull request')) return true;
+  return false;
+}
+
+function shouldFallbackInlineTreeContent(error) {
+  const status = Number(error && error.status);
+  if (status === 413) return true;
+  if (status !== 422) return false;
+
+  const message = String((error && error.message) || '').toLowerCase();
+  const responseParts = extractGitHubErrorMessagesFromResponse(error && error.response);
+  const combined = `${message} ${responseParts.join(' ')}`.toLowerCase();
+
+  if (!combined) return false;
+  return combined.includes('too large')
+    || combined.includes('too_large')
+    || combined.includes('maximum')
+    || combined.includes('exceed')
+    || combined.includes('content is too long')
+    || combined.includes('payload');
+}
+
+function normalizeTempBranchPrefix(prefixRaw) {
+  const raw = String(prefixRaw || '').trim().replace(/^\/+|\/+$/g, '');
+  const normalized = raw
+    .split('/')
+    .map((segment) => String(segment || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, ''))
+    .filter(Boolean)
+    .join('/');
+  return normalized || 'canvas-sync';
+}
+
+function buildTempBranchName(prefixRaw) {
+  const prefix = normalizeTempBranchPrefix(prefixRaw);
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+  const nonce = Math.random().toString(36).slice(2, 8);
+  return `${prefix}/${stamp}-${nonce}`;
+}
+
 export async function applyRepoFilesBatch({ token, owner, repo, branch, message, changes }) {
   const authHeader = buildGitHubAuthHeader(token);
   if (!authHeader) {
@@ -1008,6 +1200,7 @@ export async function applyRepoFilesBatch({ token, owner, repo, branch, message,
     }
 
     const repoApiBase = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}`;
+    const branchInfoUrl = `${repoApiBase}/branches/${encodeURIComponent(resolvedBranch)}`;
     const refReadUrl = `${repoApiBase}/git/ref/heads/${encodeURIComponent(resolvedBranch)}`;
     const refUpdateUrl = `${repoApiBase}/git/refs/heads/${encodeURIComponent(resolvedBranch)}`;
     const refsUrl = `${repoApiBase}/git/refs`;
@@ -1015,57 +1208,121 @@ export async function applyRepoFilesBatch({ token, owner, repo, branch, message,
     const treesUrl = `${repoApiBase}/git/trees`;
 
     const fileShas = {};
-    const treeEntries = [];
+    const blobShaByPath = {};
+    const uploadEntries = [];
     let updatedCount = 0;
     let deletedCount = 0;
 
-    for (let i = 0; i < normalizedChanges.length; i += 1) {
-      const entry = normalizedChanges[i];
+    normalizedChanges.forEach((entry) => {
       if (entry.delete) {
         deletedCount += 1;
-        treeEntries.push({
+        return;
+      }
+      updatedCount += 1;
+      uploadEntries.push(entry);
+    });
+    let preferInlineTreeContent = uploadEntries.length > 0;
+    let blobShasPrepared = false;
+
+    const ensureBlobShas = async () => {
+      if (blobShasPrepared || !uploadEntries.length) return;
+
+      let cursor = 0;
+      const workerCount = Math.max(1, Math.min(GITHUB_BLOB_CREATE_CONCURRENCY, uploadEntries.length));
+      const workers = Array.from({ length: workerCount }, async () => {
+        while (true) {
+          const index = cursor;
+          cursor += 1;
+          if (index >= uploadEntries.length) break;
+
+          const entry = uploadEntries[index];
+          let blobJson = null;
+          try {
+            blobJson = await githubRequestJson(
+              `${repoApiBase}/git/blobs`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: authHeader,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  content: entry.content || '',
+                  encoding: 'utf-8'
+                })
+              }
+            );
+          } catch (error) {
+            throw annotateStage(error, 'create-blob', { path: entry.path });
+          }
+
+          const blobSha = blobJson && blobJson.sha ? String(blobJson.sha) : '';
+          if (!blobSha) {
+            const failed = new Error('创建 Blob 失败');
+            failed.path = entry.path;
+            failed.stage = 'create-blob';
+            throw failed;
+          }
+
+          blobShaByPath[entry.path] = blobSha;
+          fileShas[entry.path] = blobSha;
+        }
+      });
+
+      await Promise.all(workers);
+      blobShasPrepared = true;
+    };
+
+    const buildTreeEntries = (mode = 'inline') => normalizedChanges.map((entry) => {
+      if (entry.delete) {
+        return {
           path: entry.path,
           mode: '100644',
           type: 'blob',
           sha: null
-        });
-        continue;
+        };
       }
 
-      updatedCount += 1;
-      let blobJson = null;
-      try {
-        blobJson = await githubRequestJson(
-          `${repoApiBase}/git/blobs`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: authHeader,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              content: entry.content || '',
-              encoding: 'utf-8'
-            })
-          }
-        );
-      } catch (error) {
-        throw annotateStage(error, 'create-blob', { path: entry.path });
+      if (mode === 'inline') {
+        return {
+          path: entry.path,
+          mode: '100644',
+          type: 'blob',
+          content: entry.content || ''
+        };
       }
 
-      const blobSha = blobJson && blobJson.sha ? String(blobJson.sha) : '';
+      const blobSha = String(blobShaByPath[entry.path] || '');
       if (!blobSha) {
-        return { success: false, error: '创建 Blob 失败', path: entry.path };
+        throw annotateStage(new Error('创建 Blob 失败'), 'create-blob', { path: entry.path });
       }
-
-      fileShas[entry.path] = blobSha;
-      treeEntries.push({
+      return {
         path: entry.path,
         mode: '100644',
         type: 'blob',
         sha: blobSha
+      };
+    });
+
+    const fillFileShasFromTree = (treeJson) => {
+      const treeEntries = Array.isArray(treeJson && treeJson.tree) ? treeJson.tree : [];
+      if (!treeEntries.length || !uploadEntries.length) return;
+
+      const shaByPath = {};
+      treeEntries.forEach((entry) => {
+        const path = String(entry && entry.path || '').trim();
+        const sha = String(entry && entry.sha || '').trim();
+        if (!path || !sha) return;
+        if (String(entry && entry.type || '') !== 'blob') return;
+        shaByPath[path] = sha;
       });
-    }
+
+      uploadEntries.forEach((entry) => {
+        const sha = String(shaByPath[entry.path] || '').trim();
+        if (!sha) return;
+        fileShas[entry.path] = sha;
+      });
+    };
 
     const readCommitTreeSha = async (headSha) => {
       let commitJson = null;
@@ -1081,11 +1338,12 @@ export async function applyRepoFilesBatch({ token, owner, repo, branch, message,
       return commitJson && commitJson.tree && commitJson.tree.sha ? String(commitJson.tree.sha) : '';
     };
 
-    const createTree = async (baseTreeSha = '') => {
+    const createTree = async (baseTreeSha = '', treeEntriesInput = []) => {
+      const entries = Array.isArray(treeEntriesInput) ? treeEntriesInput : [];
       const payload = {
         tree: baseTreeSha
-          ? treeEntries
-          : treeEntries.filter((entry) => entry && entry.sha)
+          ? entries
+          : entries.filter((entry) => entry && (entry.sha || typeof entry.content === 'string'))
       };
       if (baseTreeSha) {
         payload.base_tree = baseTreeSha;
@@ -1179,7 +1437,45 @@ export async function applyRepoFilesBatch({ token, owner, repo, branch, message,
       }
     };
 
-    const ensureBranchHead = async () => {
+    const tryReadBranchHeadFromBranchApi = async () => {
+      try {
+        const branchJson = await githubRequestJson(branchInfoUrl, {
+          headers: { Authorization: authHeader }
+        });
+
+        const commitInfo = branchJson && typeof branchJson.commit === 'object'
+          ? branchJson.commit
+          : null;
+        const headSha = commitInfo && commitInfo.sha ? String(commitInfo.sha) : '';
+        if (!headSha) return null;
+
+        const nestedTreeSha = commitInfo
+          && commitInfo.commit
+          && commitInfo.commit.tree
+          && commitInfo.commit.tree.sha
+          ? String(commitInfo.commit.tree.sha)
+          : '';
+        const baseTreeSha = nestedTreeSha || await readCommitTreeSha(headSha);
+        if (!baseTreeSha) return null;
+
+        return {
+          headSha,
+          baseTreeSha,
+          initialCommit: false,
+          branchCreated: false
+        };
+      } catch (error) {
+        if (Number(error && error.status) === 404) return null;
+        throw annotateStage(error, 'read-ref');
+      }
+    };
+
+    const ensureBranchHead = async (initialTreeEntries = []) => {
+      const branchApiHeadInfo = await tryReadBranchHeadFromBranchApi();
+      if (branchApiHeadInfo) {
+        return branchApiHeadInfo;
+      }
+
       let refJson = null;
       try {
         refJson = await githubRequestJson(refReadUrl, {
@@ -1233,7 +1529,8 @@ export async function applyRepoFilesBatch({ token, owner, repo, branch, message,
         }
 
         if (!refJson) {
-          const initialTreeJson = await createTree('');
+          const initialTreeJson = await createTree('', initialTreeEntries);
+          fillFileShasFromTree(initialTreeJson);
           const initialTreeSha = initialTreeJson && initialTreeJson.sha ? String(initialTreeJson.sha) : '';
           if (!initialTreeSha) {
             return { headSha: '', baseTreeSha: '', initialCommit: false, branchCreated: false };
@@ -1290,7 +1587,24 @@ export async function applyRepoFilesBatch({ token, owner, repo, branch, message,
         await sleep(backoffMs + jitterMs);
       }
 
-      const headInfo = await ensureBranchHead();
+      let treeMode = preferInlineTreeContent ? 'inline' : 'blob-sha';
+      let treeEntriesForAttempt = [];
+      if (treeMode === 'blob-sha') {
+        await ensureBlobShas();
+      }
+      treeEntriesForAttempt = buildTreeEntries(treeMode);
+
+      let headInfo = null;
+      try {
+        headInfo = await ensureBranchHead(treeEntriesForAttempt);
+      } catch (error) {
+        if (treeMode === 'inline' && shouldFallbackInlineTreeContent(error)) {
+          preferInlineTreeContent = false;
+          attempt -= 1;
+          continue;
+        }
+        throw error;
+      }
       if (headInfo && headInfo.initialCommit) {
         return {
           success: true,
@@ -1315,7 +1629,18 @@ export async function applyRepoFilesBatch({ token, owner, repo, branch, message,
         return { success: false, error: '读取分支 Tree 失败' };
       }
 
-      const treeJson = await createTree(baseTreeSha);
+      let treeJson = null;
+      try {
+        treeJson = await createTree(baseTreeSha, treeEntriesForAttempt);
+      } catch (error) {
+        if (treeMode === 'inline' && shouldFallbackInlineTreeContent(error)) {
+          preferInlineTreeContent = false;
+          attempt -= 1;
+          continue;
+        }
+        throw error;
+      }
+      fillFileShasFromTree(treeJson);
       const newTreeSha = treeJson && treeJson.sha ? String(treeJson.sha) : '';
       if (!newTreeSha) {
         return { success: false, error: '创建 Tree 失败' };
@@ -1366,5 +1691,302 @@ export async function applyRepoFilesBatch({ token, owner, repo, branch, message,
     return { success: false, error: '更新分支引用失败' };
   } catch (error) {
     return { success: false, error: normalizeGitHubError(error) };
+  }
+}
+
+export async function mergeRepoFilesViaTempBranch({ token, owner, repo, branch, message, changes, tempBranchPrefix = 'canvas-sync' }) {
+  const authHeader = buildGitHubAuthHeader(token);
+  if (!authHeader) {
+    return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
+  }
+
+  const trimmedOwner = String(owner || '').trim();
+  const trimmedRepo = String(repo || '').trim();
+  if (!trimmedOwner || !trimmedRepo) {
+    return { success: false, error: '仓库未配置', repoNotConfigured: true };
+  }
+
+  const rawChanges = Array.isArray(changes) ? changes : [];
+  if (!rawChanges.length) {
+    return { success: false, error: '缺少变更列表' };
+  }
+
+  const changeByPath = new Map();
+  rawChanges.forEach((entry) => {
+    if (!entry || typeof entry !== 'object') return;
+    const rawPath = String(entry.path || '').trim().replace(/^\/+/, '');
+    if (!rawPath) return;
+    const isDelete = entry.delete === true || entry.deleted === true;
+    changeByPath.set(rawPath, {
+      path: rawPath,
+      delete: isDelete,
+      content: isDelete ? null : String(entry.content == null ? '' : entry.content)
+    });
+  });
+
+  const normalizedChanges = Array.from(changeByPath.values());
+  if (!normalizedChanges.length) {
+    return { success: false, error: '缺少有效文件路径' };
+  }
+
+  const safeMessage = String(message || '').trim() || `Bookmark Canvas Sync: cloud merge apply (${normalizedChanges.length})`;
+
+  const annotateStage = (error, stage, extra = null) => {
+    if (!error || typeof error !== 'object') return error;
+    error.stage = stage;
+    if (extra && typeof extra === 'object') {
+      Object.keys(extra).forEach((key) => {
+        try { error[key] = extra[key]; } catch (_) { }
+      });
+    }
+    return error;
+  };
+
+  let resolvedBranch = '';
+  let tempBranchName = '';
+  let tempCommitSha = '';
+  let tempBranchDeleted = false;
+  let tempBranchDeleteWarning = '';
+
+  try {
+    try {
+      resolvedBranch = await resolveGitHubBranchOrDefault({
+        authHeader,
+        owner: trimmedOwner,
+        repo: trimmedRepo,
+        branch
+      });
+    } catch (error) {
+      throw annotateStage(error, 'resolve-branch');
+    }
+
+    if (!resolvedBranch) {
+      return { success: false, error: '分支未配置' };
+    }
+
+    const repoApiBase = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}`;
+    const targetRefUrl = `${repoApiBase}/git/ref/heads/${encodeURIComponent(resolvedBranch)}`;
+    const refsUrl = `${repoApiBase}/git/refs`;
+    const mergesUrl = `${repoApiBase}/merges`;
+
+    let targetRefJson = null;
+    try {
+      targetRefJson = await githubRequestJson(targetRefUrl, {
+        headers: { Authorization: authHeader }
+      });
+    } catch (error) {
+      throw annotateStage(error, 'read-ref', { branch: resolvedBranch });
+    }
+
+    const targetHeadSha = targetRefJson && targetRefJson.object && targetRefJson.object.sha
+      ? String(targetRefJson.object.sha)
+      : '';
+    if (!targetHeadSha) {
+      return { success: false, error: '读取目标分支 HEAD 失败' };
+    }
+
+    const createTempBranchRef = async (branchName, baseSha) => {
+      try {
+        await githubRequestJson(
+          refsUrl,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: authHeader,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              ref: `refs/heads/${branchName}`,
+              sha: baseSha
+            })
+          }
+        );
+      } catch (error) {
+        throw annotateStage(error, 'create-ref', { branch: branchName });
+      }
+    };
+
+    const deleteTempBranchRef = async (branchName) => {
+      const refDeleteUrl = `${repoApiBase}/git/refs/heads/${encodeURIComponent(branchName)}`;
+      try {
+        await githubRequestJson(refDeleteUrl, {
+          method: 'DELETE',
+          headers: { Authorization: authHeader }
+        });
+        return { ok: true };
+      } catch (error) {
+        if (Number(error && error.status) === 404) {
+          return { ok: true };
+        }
+        return {
+          ok: false,
+          error: normalizeGitHubError(annotateStage(error, 'delete-ref', { branch: branchName }))
+        };
+      }
+    };
+
+    let tempCreated = false;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      tempBranchName = buildTempBranchName(tempBranchPrefix);
+      try {
+        await createTempBranchRef(tempBranchName, targetHeadSha);
+        tempCreated = true;
+        break;
+      } catch (error) {
+        if (isGitHubReferenceAlreadyExistsError(error) && attempt < 4) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!tempCreated || !tempBranchName) {
+      return { success: false, error: '创建临时分支失败' };
+    }
+
+    const tempCommitResult = await applyRepoFilesBatch({
+      token,
+      owner: trimmedOwner,
+      repo: trimmedRepo,
+      branch: tempBranchName,
+      message: `${safeMessage} [temp:${tempBranchName}]`,
+      changes: normalizedChanges
+    });
+
+    if (!tempCommitResult || tempCommitResult.success !== true) {
+      const error = new Error(String(tempCommitResult && tempCommitResult.error ? tempCommitResult.error : '提交临时分支失败'));
+      error.stage = 'create-commit';
+      throw error;
+    }
+
+    tempCommitSha = String(tempCommitResult.commitSha || '');
+
+    if (tempCommitResult.noChanges === true) {
+      const deleteResult = await deleteTempBranchRef(tempBranchName);
+      tempBranchDeleted = !!deleteResult.ok;
+      tempBranchDeleteWarning = deleteResult.ok ? '' : String(deleteResult.error || '');
+      return {
+        success: true,
+        branch: resolvedBranch,
+        tempBranch: tempBranchName,
+        tempCommitSha,
+        commitSha: tempCommitSha || null,
+        noChanges: true,
+        merged: false,
+        updated: 0,
+        deleted: 0,
+        fileShas: tempCommitResult.fileShas || {},
+        tempBranchDeleted,
+        tempBranchDeleteWarning
+      };
+    }
+
+    let mergeJson = null;
+    try {
+      mergeJson = await githubRequestJson(
+        mergesUrl,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: authHeader,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            base: resolvedBranch,
+            head: tempBranchName,
+            commit_message: safeMessage
+          })
+        }
+      );
+    } catch (error) {
+      const status = Number(error && error.status);
+      const mergeErrorText = normalizeGitHubError(annotateStage(error, 'merge-branches', {
+        base: resolvedBranch,
+        head: tempBranchName
+      }));
+      const deleteResult = await deleteTempBranchRef(tempBranchName);
+      tempBranchDeleted = !!deleteResult.ok;
+      tempBranchDeleteWarning = deleteResult.ok ? '' : String(deleteResult.error || '');
+
+      if (status === 409) {
+        return {
+          success: false,
+          error: mergeErrorText,
+          errorCode: 'MERGE_CONFLICT',
+          conflict: true,
+          branch: resolvedBranch,
+          tempBranch: tempBranchName,
+          tempCommitSha,
+          tempBranchDeleted,
+          tempBranchDeleteWarning
+        };
+      }
+
+      if (isGitHubProtectedBranchMergeError(error)) {
+        return {
+          success: false,
+          error: mergeErrorText,
+          errorCode: 'MERGE_PROTECTED_BRANCH',
+          protectedBranch: true,
+          branch: resolvedBranch,
+          tempBranch: tempBranchName,
+          tempCommitSha,
+          tempBranchDeleted,
+          tempBranchDeleteWarning
+        };
+      }
+
+      return {
+        success: false,
+        error: mergeErrorText,
+        errorCode: 'MERGE_FAILED',
+        branch: resolvedBranch,
+        tempBranch: tempBranchName,
+        tempCommitSha,
+        tempBranchDeleted,
+        tempBranchDeleteWarning
+      };
+    }
+
+    const deleteResult = await deleteTempBranchRef(tempBranchName);
+    tempBranchDeleted = !!deleteResult.ok;
+    tempBranchDeleteWarning = deleteResult.ok ? '' : String(deleteResult.error || '');
+
+    const mergeSha = mergeJson && mergeJson.sha ? String(mergeJson.sha) : '';
+    return {
+      success: true,
+      branch: resolvedBranch,
+      tempBranch: tempBranchName,
+      tempCommitSha,
+      mergeSha,
+      commitSha: mergeSha || tempCommitSha || null,
+      merged: true,
+      updated: Number(tempCommitResult.updated) || 0,
+      deleted: Number(tempCommitResult.deleted) || 0,
+      fileShas: tempCommitResult.fileShas || {},
+      tempBranchDeleted,
+      tempBranchDeleteWarning
+    };
+  } catch (error) {
+    if (tempBranchName) {
+      try {
+        const repoApiBase = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}`;
+        const refDeleteUrl = `${repoApiBase}/git/refs/heads/${encodeURIComponent(tempBranchName)}`;
+        await githubRequestJson(refDeleteUrl, {
+          method: 'DELETE',
+          headers: { Authorization: authHeader }
+        });
+        tempBranchDeleted = true;
+      } catch (_) { }
+    }
+    return {
+      success: false,
+      error: normalizeGitHubError(error),
+      branch: resolvedBranch || String(branch || '').trim() || null,
+      tempBranch: tempBranchName || null,
+      tempCommitSha: tempCommitSha || null,
+      tempBranchDeleted,
+      tempBranchDeleteWarning
+    };
   }
 }

@@ -291,6 +291,7 @@ function handlePointerUp(e) {
     // 重新检测落点位置（确保最准确）
     const target = document.elementFromPoint(e.clientX, e.clientY);
     const targetTreeItem = target?.closest('.tree-item[data-node-id]');
+    const permanentSection = target?.closest('.permanent-bookmark-section');
 
     // 恢复覆盖层显示（准备清理）
     if (pointerDragState.dragOverlay) {
@@ -303,14 +304,33 @@ function handlePointerUp(e) {
     if (targetTreeItem && targetTreeItem !== pointerDragState.draggedElement && treeContainer) {
         // 在树内放置
         performDrop(pointerDragState.draggedElement, targetTreeItem, e);
+    } else if (!targetTreeItem && permanentSection) {
+        const draggedElement = pointerDragState.draggedElement;
+        const sourceId = draggedElement?.dataset?.nodeId || '';
+        const sourceTreeType = draggedElement?.dataset?.treeType || 'permanent';
+        const sourceSectionId = draggedElement?.dataset?.sectionId || null;
+        const targetParentId = (typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.resolvePermanentBlankDropParentId === 'function')
+            ? window.__treeDnd.resolvePermanentBlankDropParentId(permanentSection)
+            : null;
+
+        if (sourceId && targetParentId && typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.performMove === 'function') {
+            window.__treeDnd.performMove(sourceId, targetParentId, true, {
+                sourceTreeType,
+                sourceSectionId,
+                targetTreeType: 'permanent',
+                targetSectionId: null,
+                position: 'inside',
+                event: e
+            });
+        }
     } else if (!treeContainer) {
         // 可能拖到Canvas外，检查是否需要创建临时栏目
         const canvasWorkspace = document.getElementById('canvasWorkspace');
-        const permanentSection = document.getElementById('permanentSection');
+        const primaryPermanentSection = document.getElementById('permanentSection');
 
-        if (canvasWorkspace && permanentSection) {
+        if (canvasWorkspace && primaryPermanentSection) {
             const workspaceRect = canvasWorkspace.getBoundingClientRect();
-            const permanentRect = permanentSection.getBoundingClientRect();
+            const permanentRect = primaryPermanentSection.getBoundingClientRect();
 
             const inWorkspace = e.clientX >= workspaceRect.left &&
                 e.clientX <= workspaceRect.right &&
@@ -496,8 +516,18 @@ async function handleDropToCanvas(event, workspaceRect) {
     if (dragData.source === 'permanent') {
         try {
             const originSection = draggedElement && draggedElement.closest ? draggedElement.closest('.permanent-bookmark-section') : null;
-            const copyId = originSection && originSection.dataset ? originSection.dataset.permanentSectionCopyId : null;
-            const displayIndex = originSection && originSection.dataset ? originSection.dataset.permanentSectionDisplayIndex : null;
+            const protocolBridge = window.CanvasProtocolBridge && typeof window.CanvasProtocolBridge.resolvePermanentSectionContext === 'function'
+                ? window.CanvasProtocolBridge
+                : null;
+            const sectionContext = originSection && protocolBridge
+                ? protocolBridge.resolvePermanentSectionContext(originSection)
+                : null;
+            const copyId = sectionContext && sectionContext.copyId
+                ? sectionContext.copyId
+                : (originSection && originSection.dataset ? originSection.dataset.permanentSectionCopyId : null);
+            const displayIndex = sectionContext && sectionContext.displayIndex
+                ? sectionContext.displayIndex
+                : (originSection && originSection.dataset ? originSection.dataset.permanentSectionDisplayIndex : null);
             if (copyId) {
                 dragData.permanentCopyId = copyId;
             } else if (originSection) {

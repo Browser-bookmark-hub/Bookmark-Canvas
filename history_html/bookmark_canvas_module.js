@@ -3214,19 +3214,8 @@ function __getMdNodeTitleText(node) {
     if (typeof node.title === 'string' && node.title.trim()) {
         return __extractFirstLine(node.title);
     }
-    if (typeof node.text === 'string' && node.text.trim()) {
-        return __extractFirstLine(node.text);
-    }
-    if (typeof node.html === 'string' && node.html.trim()) {
-        try {
-            const tmp = document.createElement('div');
-            tmp.innerHTML = node.html;
-            const text = tmp.textContent || '';
-            return __extractFirstLine(text);
-        } catch (_) {
-            return __extractFirstLine(node.html);
-        }
-    }
+    const previewText = __resolveMdNodeReadableText(node);
+    if (previewText) return __extractFirstLine(previewText);
     return '';
 }
 
@@ -3766,6 +3755,36 @@ function refreshTempSectionCounters() {
     CanvasState.tempItemCounter = Math.max(CanvasState.tempItemCounter, maxItem);
 }
 
+function __refreshCanvasNodeCounters() {
+    let maxMdNode = Math.max(Number(CanvasState.mdNodeCounter) || 0, Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.length : 0);
+    let maxEdge = Math.max(Number(CanvasState.edgeCounter) || 0, Array.isArray(CanvasState.edges) ? CanvasState.edges.length : 0);
+
+    (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : []).forEach((node) => {
+        const nodeId = String(node && node.id || '').trim();
+        if (!nodeId) return;
+        const match = nodeId.match(/^md-node-(\d+)$/i);
+        if (!match) return;
+        const numericId = parseInt(match[1], 10);
+        if (!Number.isNaN(numericId)) {
+            maxMdNode = Math.max(maxMdNode, numericId);
+        }
+    });
+
+    (Array.isArray(CanvasState.edges) ? CanvasState.edges : []).forEach((edge) => {
+        const edgeId = String(edge && edge.id || '').trim();
+        if (!edgeId) return;
+        const match = edgeId.match(/^edge\s*-\s*(\d+)\s*-/i);
+        if (!match) return;
+        const numericId = parseInt(match[1], 10);
+        if (!Number.isNaN(numericId)) {
+            maxEdge = Math.max(maxEdge, numericId);
+        }
+    });
+
+    CanvasState.mdNodeCounter = Math.max(Number(CanvasState.mdNodeCounter) || 0, maxMdNode);
+    CanvasState.edgeCounter = Math.max(Number(CanvasState.edgeCounter) || 0, maxEdge);
+}
+
 function getTempSection(sectionId) {
     if (!sectionId) return null;
     return CanvasState.tempSections.find(section => section.id === sectionId) || null;
@@ -4240,8 +4259,15 @@ function setupCanvasDropFeedback() {
             ? __normalizeCanvasRichHtml(html)
             : String(html || '');
 
+        if (typeof text === 'string') node.markdownSource = String(text || '');
         if (normalized) node.html = normalized;
-        if (typeof text === 'string') node.text = text;
+        if (typeof __ensureMdNodeMarkdownProtocol === 'function') {
+            __ensureMdNodeMarkdownProtocol(node, {
+                refreshCachesFromMarkdown: !!(typeof text === 'string' && String(text || '').trim())
+            });
+        } else {
+            if (typeof text === 'string') node.text = text;
+        }
         renderMdNode(node);
         saveTempNodes();
         return id;
@@ -5716,6 +5742,71 @@ function createCanvasFolderItem(folder, isDraggable) {
     return item;
 }
 
+let __canvasFloatingSyncUiPollTimer = null;
+let __canvasFloatingSyncUiLastEnabled = null;
+
+function __resolveCanvasFloatingSyncEnabled() {
+    try {
+        const syncModule = window.CanvasObsidianGitSync;
+        if (!syncModule || typeof syncModule.getSettings !== 'function') {
+            return false;
+        }
+        const settings = syncModule.getSettings() || {};
+        return settings.enabled === true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function __updateCanvasFloatingSyncUi(force = false) {
+    const zoomIndicator = document.getElementById('canvasZoomIndicator');
+    const zoomHeader = zoomIndicator ? zoomIndicator.querySelector('.canvas-zoom-header') : null;
+    const zoomMeter = zoomHeader ? zoomHeader.querySelector('.canvas-zoom-meter') : null;
+    const zoomControls = zoomIndicator ? zoomIndicator.querySelector('.canvas-zoom-controls') : null;
+    const floatingSyncBtn = document.getElementById('canvasFloatingSyncBtn');
+    const helpBtn = document.getElementById('canvasHelpBtn');
+    const toolsInline = document.getElementById('canvasFloatingToolsInline');
+    if (!zoomIndicator || !zoomHeader || !zoomControls || !floatingSyncBtn || !helpBtn) return;
+
+    const enabled = __resolveCanvasFloatingSyncEnabled();
+    if (!force && __canvasFloatingSyncUiLastEnabled === enabled) return;
+    __canvasFloatingSyncUiLastEnabled = enabled;
+
+    zoomIndicator.classList.toggle('canvas-sync-enabled-layout', enabled);
+    floatingSyncBtn.style.display = enabled ? '' : 'none';
+    floatingSyncBtn.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+
+    if (enabled) {
+        if (zoomMeter && zoomMeter.parentElement === zoomHeader) {
+            if (helpBtn.parentElement !== zoomHeader || helpBtn.nextSibling !== zoomMeter) {
+                zoomHeader.insertBefore(helpBtn, zoomMeter);
+            }
+        } else if (helpBtn.parentElement !== zoomHeader) {
+            zoomHeader.appendChild(helpBtn);
+        }
+        return;
+    }
+
+    const targetBefore = (toolsInline && toolsInline.parentElement === zoomControls) ? toolsInline : null;
+    if (targetBefore) {
+        if (helpBtn.parentElement !== zoomControls || helpBtn.nextSibling !== targetBefore) {
+            zoomControls.insertBefore(helpBtn, targetBefore);
+        }
+        return;
+    }
+    if (helpBtn.parentElement !== zoomControls) {
+        zoomControls.appendChild(helpBtn);
+    }
+}
+
+function __ensureCanvasFloatingSyncUiPolling() {
+    __updateCanvasFloatingSyncUi(true);
+    if (__canvasFloatingSyncUiPollTimer) return;
+    __canvasFloatingSyncUiPollTimer = setInterval(() => {
+        __updateCanvasFloatingSyncUi(false);
+    }, 1000);
+}
+
 // =============================================================================
 // Canvas 缩放和平移功能
 // =============================================================================
@@ -6070,6 +6161,8 @@ function setupCanvasZoomAndPan() {
     const zoomInBtn = document.getElementById('zoomInBtn');
     const zoomOutBtn = document.getElementById('zoomOutBtn');
     const zoomLocateBtn = document.getElementById('zoomLocateBtn');
+    const floatingSyncBtn = document.getElementById('canvasFloatingSyncBtn');
+    __ensureCanvasFloatingSyncUiPolling();
 
     // [OPT] 优化缩放手感：添加平滑动画，使用 1.2 倍指数缩放
     const animateZoomStep = (factor) => {
@@ -6106,6 +6199,27 @@ function setupCanvasZoomAndPan() {
     bindZoomStepButton(zoomInBtn, 1.2);
     bindZoomStepButton(zoomOutBtn, 1 / 1.2);
     if (zoomLocateBtn) zoomLocateBtn.addEventListener('click', locateToPermanentSection);
+    if (floatingSyncBtn && floatingSyncBtn.dataset.syncBound !== 'true') {
+        floatingSyncBtn.dataset.syncBound = 'true';
+        floatingSyncBtn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (floatingSyncBtn.disabled) return;
+            const syncModule = window.CanvasObsidianGitSync;
+            if (!syncModule || typeof syncModule.requestSyncNow !== 'function') {
+                try { showCanvasToast('同步模块尚未就绪', 'warning'); } catch (_) { }
+                return;
+            }
+            floatingSyncBtn.disabled = true;
+            try {
+                await syncModule.requestSyncNow('manual');
+            } catch (error) {
+                try { showCanvasToast(error && error.message ? error.message : String(error), 'error'); } catch (_) { }
+            } finally {
+                floatingSyncBtn.disabled = false;
+            }
+        });
+    }
 
     // [Fix] 窗口大小改变时：
     // - 栏目全屏卡片实时跟随（rAF 节流到每帧）
@@ -12614,6 +12728,510 @@ function __normalizePositiveInt(value) {
     return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function __parsePermanentViewNumericValue(value) {
+    const n = parseFloat(String(value == null ? '' : value).trim());
+    return Number.isFinite(n) ? Math.round(n) : null;
+}
+
+function __normalizePermanentViewCardState(rawState) {
+    const source = rawState && typeof rawState === 'object' ? rawState : {};
+    const out = {};
+    ['left', 'top', 'width', 'height'].forEach((key) => {
+        const normalized = __parsePermanentViewNumericValue(source[key]);
+        if (normalized !== null) out[key] = normalized;
+    });
+    return out;
+}
+
+function __toPermanentViewCardStateStoragePayload(cardState) {
+    const normalized = __normalizePermanentViewCardState(cardState);
+    const out = {};
+    ['left', 'top', 'width', 'height'].forEach((key) => {
+        if (typeof normalized[key] === 'number' && isFinite(normalized[key])) {
+            out[key] = `${normalized[key]}px`;
+        }
+    });
+    return out;
+}
+
+function __normalizePermanentSectionPositionStoragePayload(position) {
+    return __toPermanentViewCardStateStoragePayload(position);
+}
+
+function __normalizePermanentSectionCopyStoragePayload(copy) {
+    if (!copy || typeof copy !== 'object') return null;
+    const copyId = String(copy.id || '').trim();
+    if (!copyId) return null;
+
+    const out = {
+        id: copyId,
+        ...__toPermanentViewCardStateStoragePayload(copy.cardState || copy)
+    };
+    const displayIndex = __normalizePositiveInt(copy.displayIndex);
+    if (displayIndex) out.displayIndex = displayIndex;
+    return out;
+}
+
+function __buildPermanentViewShellViewId(copyId = null) {
+    const safeCopyId = (typeof copyId === 'string' && copyId.trim()) ? copyId.trim() : '';
+    return safeCopyId ? `permanent-section-copy-${safeCopyId}` : 'permanent-section';
+}
+
+function __getPermanentViewTipStorageKey(copyId = null) {
+    const safeCopyId = (typeof copyId === 'string' && copyId.trim()) ? copyId.trim() : '';
+    return safeCopyId ? `canvas-permanent-tip-text-copy-${safeCopyId}` : 'canvas-permanent-tip-text';
+}
+
+function __normalizePermanentViewDescriptionMarkdown(source) {
+    const raw = String(source == null ? '' : source);
+    if (!raw.trim()) return '';
+    const looksLikeHtml = /<\s*(?:a|p|div|span|br|strong|em|b|i|u|del|s|mark|code|blockquote|ul|ol|li|hr|h[1-6]|font|center|input)\b/i.test(raw);
+    return looksLikeHtml
+        ? __normalizeCanvasMarkdownSource(__htmlToMarkdown(__normalizeCanvasRichHtml(raw))).trim()
+        : __normalizeCanvasMarkdownSource(raw).trim();
+}
+
+function __readPermanentViewShellRawValue(sourceData, key, options = {}) {
+    const hasExplicitSource = !!(sourceData && typeof sourceData === 'object');
+    if (hasExplicitSource && Object.prototype.hasOwnProperty.call(sourceData, key)) {
+        return sourceData[key];
+    }
+    if (hasExplicitSource && options.allowLiveFallback !== true) {
+        return null;
+    }
+    try {
+        return localStorage.getItem(key);
+    } catch (_) {
+        return null;
+    }
+}
+
+function __readPermanentViewShellJsonValue(sourceData, key, fallback = null, options = {}) {
+    const raw = __readPermanentViewShellRawValue(sourceData, key, options);
+    if (raw == null || raw === '') return fallback;
+    if (raw && typeof raw === 'object') return raw;
+    try {
+        return JSON.parse(raw);
+    } catch (_) {
+        return fallback;
+    }
+}
+
+function __normalizePermanentViewScrollPartitionState(raw) {
+    const source = raw && typeof raw === 'object' ? raw : {};
+    const top = __parsePermanentViewNumericValue(source.top);
+    const left = __parsePermanentViewNumericValue(source.left);
+    if (top === null && left === null) return null;
+    return {
+        top: top === null ? 0 : top,
+        left: left === null ? 0 : left
+    };
+}
+
+function __normalizePermanentViewScrollState(raw) {
+    const source = raw && typeof raw === 'object' ? raw : {};
+    const out = {};
+    CANVAS_VIEW_PARTITIONS.forEach((partitionKey) => {
+        const normalized = __normalizePermanentViewScrollPartitionState(source[partitionKey]);
+        if (normalized) out[partitionKey] = normalized;
+    });
+    return out;
+}
+
+function __normalizePermanentViewFoldPartitionState(raw) {
+    let expanded = [];
+    if (Array.isArray(raw)) {
+        expanded = raw;
+    } else if (raw && typeof raw === 'object' && Array.isArray(raw.expanded)) {
+        expanded = raw.expanded;
+    }
+    const normalizedExpanded = Array.from(new Set(
+        expanded
+            .map((id) => String(id || '').trim())
+            .filter(Boolean)
+    )).sort();
+    return { expanded: normalizedExpanded };
+}
+
+function __normalizePermanentViewFoldState(raw) {
+    const source = raw && typeof raw === 'object' ? raw : {};
+    const out = {};
+    CANVAS_VIEW_PARTITIONS.forEach((partitionKey) => {
+        const normalized = __normalizePermanentViewFoldPartitionState(source[partitionKey]);
+        if (normalized.expanded.length) out[partitionKey] = normalized;
+    });
+    return out;
+}
+
+function __collectPermanentViewScrollState(copyId = null, sourceData = null, options = {}) {
+    const safeCopyId = (typeof copyId === 'string' && copyId.trim()) ? copyId.trim() : '';
+    const baseKey = safeCopyId ? `${PERMANENT_SECTION_SCROLL_KEY}:${safeCopyId}` : PERMANENT_SECTION_SCROLL_KEY;
+    const out = {};
+
+    CANVAS_VIEW_PARTITIONS.forEach((partitionKey) => {
+        const key = __buildCanvasPartitionedViewStateKey('scroll', baseKey, partitionKey);
+        const normalized = __normalizePermanentViewScrollPartitionState(__readPermanentViewShellJsonValue(sourceData, key, null, options));
+        if (normalized) out[partitionKey] = normalized;
+    });
+
+    if (!Object.keys(out).length) {
+        const legacy = __normalizePermanentViewScrollPartitionState(__readPermanentViewShellJsonValue(sourceData, baseKey, null, options));
+        if (legacy) out.page = legacy;
+    }
+
+    return out;
+}
+
+function __collectPermanentViewFoldState(copyId = null, sourceData = null, options = {}) {
+    const safeCopyId = (typeof copyId === 'string' && copyId.trim()) ? copyId.trim() : '';
+    const baseKey = safeCopyId ? `${PERMANENT_SECTION_EXPANDED_KEY}:${safeCopyId}` : PERMANENT_SECTION_EXPANDED_KEY;
+    const out = {};
+
+    CANVAS_VIEW_PARTITIONS.forEach((partitionKey) => {
+        const key = __buildCanvasPartitionedViewStateKey('expand', baseKey, partitionKey);
+        const normalized = __normalizePermanentViewFoldPartitionState(__readPermanentViewShellJsonValue(sourceData, key, null, options));
+        if (normalized.expanded.length) out[partitionKey] = normalized;
+    });
+
+    if (!Object.keys(out).length) {
+        const legacy = __normalizePermanentViewFoldPartitionState(__readPermanentViewShellJsonValue(sourceData, baseKey, null, options));
+        if (legacy.expanded.length) out.page = legacy;
+    }
+
+    return out;
+}
+
+function __collectPermanentViewDescriptionMarkdown(copyId = null, sourceData = null, options = {}) {
+    const key = __getPermanentViewTipStorageKey(copyId);
+    const raw = __readPermanentViewShellRawValue(sourceData, key, options);
+    return __normalizePermanentViewDescriptionMarkdown(raw);
+}
+
+function __sortPermanentViewShells(shells) {
+    const list = Array.isArray(shells) ? shells.slice() : [];
+    list.sort((a, b) => {
+        const aIsCopy = !!(a && a.copyId);
+        const bIsCopy = !!(b && b.copyId);
+        if (aIsCopy !== bIsCopy) return aIsCopy ? 1 : -1;
+        const aIndex = __normalizePositiveInt(a && a.displayIndex) || Number.MAX_SAFE_INTEGER;
+        const bIndex = __normalizePositiveInt(b && b.displayIndex) || Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+        const aId = String(a && a.copyId || '');
+        const bId = String(b && b.copyId || '');
+        return aId.localeCompare(bId);
+    });
+    return list;
+}
+
+function __normalizePermanentViewShellProtocol(rawInput) {
+    const source = rawInput && typeof rawInput === 'object' ? rawInput : {};
+    const copyIdRaw = (typeof source.copyId === 'string') ? source.copyId.trim() : '';
+    const copyId = copyIdRaw ? copyIdRaw : null;
+    const displayIndex = copyId ? __normalizePositiveInt(source.displayIndex) : null;
+
+    const shell = {
+        viewId: __buildPermanentViewShellViewId(copyId),
+        copyId,
+        descriptionMd: __normalizePermanentViewDescriptionMarkdown(
+            Object.prototype.hasOwnProperty.call(source, 'descriptionMd')
+                ? source.descriptionMd
+                : source.description
+        ),
+        scrollState: __normalizePermanentViewScrollState(source.scrollState),
+        foldState: __normalizePermanentViewFoldState(source.foldState),
+        cardState: __normalizePermanentViewCardState(source.cardState || source)
+    };
+
+    if (displayIndex) shell.displayIndex = displayIndex;
+    return shell;
+}
+
+function __buildPermanentViewShellProtocolFromStorage(copyId = null, options = {}) {
+    const sourceData = options && typeof options.sourceData === 'object' ? options.sourceData : null;
+    const safeCopyId = (typeof copyId === 'string' && copyId.trim()) ? copyId.trim() : '';
+    const readOptions = sourceData ? { allowLiveFallback: options && options.allowLiveFallback === true } : {};
+
+    let rawCardState = {};
+    if (safeCopyId) {
+        const copies = Array.isArray(options && options.copies)
+            ? options.copies
+            : (sourceData
+                ? __readPermanentViewShellJsonValue(sourceData, PERMANENT_SECTION_COPIES_STORAGE_KEY, [], readOptions)
+                : __readPermanentSectionCopies());
+        const matched = Array.isArray(copies)
+            ? copies.find((entry) => entry && String(entry.id || '').trim() === safeCopyId)
+            : null;
+        rawCardState = matched || {};
+    } else {
+        rawCardState = __readPermanentViewShellJsonValue(sourceData, 'permanent-section-position', {}, readOptions) || {};
+    }
+
+    return __normalizePermanentViewShellProtocol({
+        copyId: safeCopyId || null,
+        displayIndex: rawCardState && rawCardState.displayIndex,
+        cardState: rawCardState,
+        descriptionMd: __collectPermanentViewDescriptionMarkdown(safeCopyId || null, sourceData, readOptions),
+        scrollState: __collectPermanentViewScrollState(safeCopyId || null, sourceData, readOptions),
+        foldState: __collectPermanentViewFoldState(safeCopyId || null, sourceData, readOptions)
+    });
+}
+
+function __normalizePermanentViewShellSnapshotProtocol(snapshotInput) {
+    if (!snapshotInput || typeof snapshotInput !== 'object') {
+        return {
+            version: 1,
+            views: __sortPermanentViewShells([
+                __buildPermanentViewShellProtocolFromStorage(null)
+            ])
+        };
+    }
+
+    if (Array.isArray(snapshotInput.views)) {
+        const deduped = new Map();
+        snapshotInput.views.forEach((view) => {
+            const normalized = __normalizePermanentViewShellProtocol(view);
+            const key = normalized && normalized.viewId ? normalized.viewId : '';
+            if (!key) return;
+            deduped.set(key, normalized);
+        });
+
+        if (!deduped.has('permanent-section')) {
+            deduped.set('permanent-section', __normalizePermanentViewShellProtocol({ copyId: null }));
+        }
+
+        return {
+            version: Number(snapshotInput.version) || 1,
+            views: __sortPermanentViewShells(Array.from(deduped.values()))
+        };
+    }
+
+    const sourceData = snapshotInput && typeof snapshotInput === 'object'
+        ? (snapshotInput.storage && typeof snapshotInput.storage === 'object'
+            ? snapshotInput.storage
+            : snapshotInput)
+        : null;
+
+    return __buildPermanentViewShellSnapshotProtocol(sourceData);
+}
+
+function __buildPermanentViewShellSnapshotProtocol(sourceData = null) {
+    const views = [];
+    views.push(__buildPermanentViewShellProtocolFromStorage(null, { sourceData }));
+
+    const rawCopies = sourceData
+        ? __readPermanentViewShellJsonValue(sourceData, PERMANENT_SECTION_COPIES_STORAGE_KEY, [], { allowLiveFallback: false })
+        : __readPermanentSectionCopies();
+    const copies = Array.isArray(rawCopies) ? rawCopies.filter(Boolean) : [];
+    copies.forEach((copy) => {
+        const copyId = String(copy && copy.id || '').trim();
+        if (!copyId) return;
+        views.push(__buildPermanentViewShellProtocolFromStorage(copyId, {
+            sourceData,
+            copies
+        }));
+    });
+
+    return {
+        version: 1,
+        views: __sortPermanentViewShells(views)
+    };
+}
+
+function __applyPermanentViewShellScrollState(copyId = null, scrollState = null) {
+    const safeCopyId = (typeof copyId === 'string' && copyId.trim()) ? copyId.trim() : '';
+    const baseKey = safeCopyId ? `${PERMANENT_SECTION_SCROLL_KEY}:${safeCopyId}` : PERMANENT_SECTION_SCROLL_KEY;
+    __removeCanvasPartitionedViewStateKey('scroll', baseKey);
+
+    const normalized = __normalizePermanentViewScrollState(scrollState);
+    Object.keys(normalized).forEach((partitionKey) => {
+        saveViewState('scroll', baseKey, normalized[partitionKey], { partitionKey });
+    });
+}
+
+function __applyPermanentViewShellFoldState(copyId = null, foldState = null) {
+    const safeCopyId = (typeof copyId === 'string' && copyId.trim()) ? copyId.trim() : '';
+    const baseKey = safeCopyId ? `${PERMANENT_SECTION_EXPANDED_KEY}:${safeCopyId}` : PERMANENT_SECTION_EXPANDED_KEY;
+    __removeCanvasPartitionedViewStateKey('expand', baseKey);
+
+    const normalized = __normalizePermanentViewFoldState(foldState);
+    Object.keys(normalized).forEach((partitionKey) => {
+        saveViewState('expand', baseKey, normalized[partitionKey].expanded, { partitionKey });
+    });
+}
+
+function __applyPermanentViewShellSnapshotProtocol(snapshotInput) {
+    const snapshot = __normalizePermanentViewShellSnapshotProtocol(snapshotInput);
+    const views = Array.isArray(snapshot && snapshot.views) ? snapshot.views : [];
+    const mainShell = views.find((view) => !(view && view.copyId))
+        || __normalizePermanentViewShellProtocol({ copyId: null });
+    const copyShells = __sortPermanentViewShells(views.filter((view) => view && view.copyId));
+    const previousCopyIds = new Set(
+        (__readPermanentSectionCopies() || [])
+            .map((copy) => String(copy && copy.id || '').trim())
+            .filter(Boolean)
+    );
+
+    const mainPositionPayload = __normalizePermanentSectionPositionStoragePayload(mainShell.cardState);
+    try { saveSharedState('permanent-section-position', mainPositionPayload); } catch (_) { }
+    try { __persistPermanentTipStorageValue(__getPermanentViewTipStorageKey(null), mainShell.descriptionMd || ''); } catch (_) { }
+    try { __applyPermanentViewShellScrollState(null, mainShell.scrollState); } catch (_) { }
+    try { __applyPermanentViewShellFoldState(null, mainShell.foldState); } catch (_) { }
+
+    const copyStorageList = copyShells
+        .map((shell) => __normalizePermanentSectionCopyStoragePayload({
+            id: shell.copyId,
+            displayIndex: shell.displayIndex,
+            cardState: shell.cardState
+        }))
+        .filter(Boolean);
+    try { __writePermanentSectionCopies(copyStorageList); } catch (_) { }
+
+    const nextCopyIds = new Set();
+    copyShells.forEach((shell) => {
+        const copyId = String(shell && shell.copyId || '').trim();
+        if (!copyId) return;
+        nextCopyIds.add(copyId);
+        try { __persistPermanentTipStorageValue(__getPermanentViewTipStorageKey(copyId), shell.descriptionMd || ''); } catch (_) { }
+        try { __applyPermanentViewShellScrollState(copyId, shell.scrollState); } catch (_) { }
+        try { __applyPermanentViewShellFoldState(copyId, shell.foldState); } catch (_) { }
+    });
+
+    previousCopyIds.forEach((copyId) => {
+        if (!copyId || nextCopyIds.has(copyId)) return;
+        try { __persistPermanentTipStorageValue(__getPermanentViewTipStorageKey(copyId), ''); } catch (_) { }
+        try { __applyPermanentViewShellScrollState(copyId, null); } catch (_) { }
+        try { __applyPermanentViewShellFoldState(copyId, null); } catch (_) { }
+    });
+
+    try { __applyPermanentSectionPositionRealtimeSync(JSON.stringify(mainPositionPayload)); } catch (_) { }
+    try { __applyPermanentSectionCopiesRealtimeSync(JSON.stringify(copyStorageList)); } catch (_) { }
+
+    const applyDomShellState = (sectionEl, shell) => {
+        if (!sectionEl || !shell) return;
+        try { __applyPermanentTipContentRealtimeSync(sectionEl, shell.descriptionMd || ''); } catch (_) { }
+        try {
+            const body = sectionEl.querySelector('.permanent-section-body');
+            const partitionKey = __getCanvasViewPartitionKey();
+            const scrollState = (shell.scrollState && shell.scrollState[partitionKey])
+                || (shell.scrollState && shell.scrollState.page)
+                || (shell.scrollState && shell.scrollState.sidepanel)
+                || null;
+            if (body && scrollState) {
+                body.scrollTop = Number(scrollState.top) || 0;
+                body.scrollLeft = Number(scrollState.left) || 0;
+            }
+        } catch (_) { }
+        try {
+            const tree = sectionEl.querySelector('.bookmark-tree');
+            if (tree && typeof restoreTreeExpandState === 'function') {
+                restoreTreeExpandState(tree);
+            }
+        } catch (_) { }
+    };
+
+    try {
+        const mainSection = document.getElementById('permanentSection');
+        applyDomShellState(mainSection, mainShell);
+    } catch (_) { }
+
+    copyShells.forEach((shell) => {
+        const copyId = String(shell && shell.copyId || '').trim();
+        if (!copyId) return;
+        try {
+            const target = document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${CSS.escape(copyId)}"]`);
+            applyDomShellState(target, shell);
+        } catch (_) { }
+    });
+
+    try { __updatePermanentSectionIndexBadges(); } catch (_) { }
+    try { updateCanvasScrollBounds(); } catch (_) { }
+    try { updateScrollbarThumbs(); } catch (_) { }
+    return snapshot;
+}
+
+function __applyPermanentViewShellToSectionElement(sectionEl, shell) {
+    if (!sectionEl || !shell || typeof shell !== 'object') return;
+
+    const cardState = __toPermanentViewCardStateStoragePayload(shell.cardState);
+    sectionEl.style.transition = 'none';
+    sectionEl.style.transform = 'none';
+    if (cardState.left) sectionEl.style.left = cardState.left;
+    if (cardState.top) sectionEl.style.top = cardState.top;
+    if (cardState.width) sectionEl.style.width = cardState.width;
+    if (cardState.height) sectionEl.style.height = cardState.height;
+    sectionEl.offsetHeight;
+    sectionEl.style.transition = '';
+
+    const safeCopyId = (typeof shell.copyId === 'string' && shell.copyId.trim()) ? shell.copyId.trim() : '';
+    if (safeCopyId) {
+        sectionEl.dataset.permanentSectionCopyId = safeCopyId;
+    }
+    const displayIndex = __normalizePositiveInt(shell.displayIndex);
+    if (displayIndex) {
+        __setPermanentSectionCopyDisplayIndexToElement(sectionEl, displayIndex);
+    }
+
+    const tipText = sectionEl.querySelector('.permanent-section-tip');
+    if (tipText) {
+        tipText.innerHTML = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(shell.descriptionMd || ''));
+    }
+}
+
+function __resolvePermanentViewShell(copyId = null, sourceInput = null) {
+    const snapshot = __normalizePermanentViewShellSnapshotProtocol(sourceInput);
+    const views = Array.isArray(snapshot && snapshot.views) ? snapshot.views : [];
+    const safeCopyId = (typeof copyId === 'string' && copyId.trim()) ? copyId.trim() : '';
+    if (!safeCopyId) {
+        return views.find((view) => !(view && view.copyId))
+            || __normalizePermanentViewShellProtocol({ copyId: null });
+    }
+    return views.find((view) => view && String(view.copyId || '').trim() === safeCopyId)
+        || null;
+}
+
+function __resolvePermanentSectionElement(copyId = null, options = {}) {
+    const scope = options && options.scope && typeof options.scope.querySelector === 'function'
+        ? options.scope
+        : document;
+    const safeCopyId = (typeof copyId === 'string' && copyId.trim()) ? copyId.trim() : '';
+
+    if (!safeCopyId) {
+        return document.getElementById('permanentSection');
+    }
+
+    try {
+        const escaped = CSS.escape(safeCopyId);
+        const scopedMatch = scope.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${escaped}"]`)
+            || scope.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id="${escaped}"]`);
+        if (scopedMatch) return scopedMatch;
+    } catch (_) { }
+
+    try {
+        const byId = document.getElementById(`permanent-section-copy-${safeCopyId}`);
+        if (byId) return byId;
+    } catch (_) { }
+
+    return null;
+}
+
+function __resolvePermanentSectionContext(sectionEl, options = {}) {
+    if (!sectionEl || !sectionEl.classList) return null;
+    const isCopy = !!sectionEl.classList.contains('permanent-section-copy');
+    const copyId = isCopy ? __getPermanentSectionCopyId(sectionEl) : null;
+    const shell = __resolvePermanentViewShell(copyId, options && options.sourceInput ? options.sourceInput : null);
+    const displayIndex = __normalizePositiveInt(shell && shell.displayIndex)
+        || __normalizePositiveInt(sectionEl && sectionEl.dataset ? sectionEl.dataset.permanentSectionDisplayIndex : null)
+        || null;
+
+    return {
+        isCopy,
+        copyId: copyId || null,
+        viewId: shell && shell.viewId ? shell.viewId : __buildPermanentViewShellViewId(copyId),
+        displayIndex,
+        shell: shell || null
+    };
+}
+
 function __getPermanentSectionCopyDisplayIndexFromElement(sectionEl) {
     if (!sectionEl || !sectionEl.dataset) return null;
     return __normalizePositiveInt(sectionEl.dataset.permanentSectionDisplayIndex);
@@ -12855,7 +13473,10 @@ function __readPermanentSectionCopies() {
         const raw = localStorage.getItem(PERMANENT_SECTION_COPIES_STORAGE_KEY);
         if (!raw) return [];
         const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .map((copy) => __normalizePermanentSectionCopyStoragePayload(copy))
+            .filter(Boolean);
     } catch (_) {
         return [];
     }
@@ -12863,7 +13484,11 @@ function __readPermanentSectionCopies() {
 
 function __writePermanentSectionCopies(copies) {
     try {
-        const list = Array.isArray(copies) ? copies.filter(Boolean) : [];
+        const list = Array.isArray(copies)
+            ? copies
+                .map((copy) => __normalizePermanentSectionCopyStoragePayload(copy))
+                .filter(Boolean)
+            : [];
         saveSharedState(PERMANENT_SECTION_COPIES_STORAGE_KEY, list);
     } catch (_) { }
 }
@@ -12935,6 +13560,33 @@ function __ensurePermanentSectionCopyControlsBound() {
     }, true);
 }
 
+function __renderPermanentSectionCopyTree(tree) {
+    if (!tree) return false;
+    if (typeof window.__renderPermanentTreeIntoTree === 'function') {
+        try {
+            return !!window.__renderPermanentTreeIntoTree(tree);
+        } catch (_) { }
+    }
+
+    setTimeout(() => {
+        try {
+            if (typeof window.__renderPermanentTreeIntoTree === 'function') {
+                window.__renderPermanentTreeIntoTree(tree);
+                return;
+            }
+            if (typeof schedulePermanentTreeCopySync === 'function') {
+                schedulePermanentTreeCopySync();
+                return;
+            }
+            if (typeof syncPermanentTreeCopiesFromPrimary === 'function') {
+                syncPermanentTreeCopiesFromPrimary();
+            }
+        } catch (_) { }
+    }, 0);
+
+    return false;
+}
+
 function createPermanentSectionCopy(sourceSection) {
     const canvasContent = document.getElementById('canvasContent');
     const template = document.getElementById('permanentSectionTemplate');
@@ -12972,20 +13624,6 @@ function createPermanentSectionCopy(sourceSection) {
         const originTitle = origin.querySelector('.permanent-section-title h3');
         const targetTitle = copySection.querySelector('.permanent-section-title h3');
         if (originTitle && targetTitle) targetTitle.textContent = originTitle.textContent;
-    } catch (_) { }
-    try {
-        const originTip = origin.querySelector('.permanent-section-tip');
-        const targetTip = copySection.querySelector('.permanent-section-tip');
-        if (originTip && targetTip) targetTip.innerHTML = originTip.innerHTML;
-    } catch (_) { }
-
-    // Copy tree markup (diff/move badges etc.) from origin
-    try {
-        const originTree = origin.querySelector('.bookmark-tree');
-        const targetTree = copySection.querySelector('.bookmark-tree');
-        if (originTree && targetTree) {
-            targetTree.innerHTML = originTree.innerHTML;
-        }
     } catch (_) { }
 
     // Init canvas position near source
@@ -13028,14 +13666,24 @@ function createPermanentSectionCopy(sourceSection) {
     } catch (_) { }
     if (!Number.isFinite(targetLeft)) targetLeft = baseLeft + GAP;
     if (!Number.isFinite(targetTop)) targetTop = baseTop;
-    copySection.style.transition = 'none';
-    copySection.style.transform = 'none';
-    copySection.style.left = `${targetLeft}px`;
-    copySection.style.top = `${targetTop}px`;
-    copySection.style.width = baseW;
-    copySection.style.height = baseH;
-    copySection.offsetHeight;
-    copySection.style.transition = '';
+
+    const originCopyId = __isPermanentSectionCopy(origin) ? __getPermanentSectionCopyId(origin) : null;
+    const shell = __normalizePermanentViewShellProtocol({
+        copyId,
+        displayIndex,
+        descriptionMd: __collectPermanentViewDescriptionMarkdown(originCopyId),
+        cardState: {
+            left: targetLeft,
+            top: targetTop,
+            width: parseFloat(baseW),
+            height: parseFloat(baseH)
+        }
+    });
+
+    try {
+        __persistPermanentTipStorageValue(__getPermanentViewTipStorageKey(copyId), shell.descriptionMd || '');
+    } catch (_) { }
+    __applyPermanentViewShellToSectionElement(copySection, shell);
 
     canvasContent.appendChild(copySection);
 
@@ -13043,6 +13691,7 @@ function createPermanentSectionCopy(sourceSection) {
     try { makePermanentSectionDraggable(copySection); } catch (_) { }
     try {
         const tree = copySection.querySelector('.bookmark-tree');
+        if (tree) __renderPermanentSectionCopyTree(tree);
         if (tree && typeof attachTreeEvents === 'function') attachTreeEvents(tree);
     } catch (_) { }
 
@@ -13082,29 +13731,24 @@ function __createPermanentSectionCopyFromStorage(copyData) {
     // Avoid duplicate creation
     const existed = canvasContent.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${CSS.escape(copyData.id)}"]`);
     if (existed) {
-        const toStyle = (value) => {
-            if (typeof value === 'number' && isFinite(value)) return `${value}px`;
-            return (value === null || typeof value === 'undefined') ? '' : String(value);
-        };
+        const shell = __normalizePermanentViewShellProtocol({
+            copyId: copyData.id,
+            displayIndex: copyData.displayIndex,
+            descriptionMd: __collectPermanentViewDescriptionMarkdown(copyData.id),
+            cardState: copyData,
+            scrollState: __collectPermanentViewScrollState(copyData.id),
+            foldState: __collectPermanentViewFoldState(copyData.id)
+        });
         try {
             existed.classList.add('permanent-section-copy');
-            existed.dataset.permanentSectionCopyId = copyData.id;
-            __setPermanentSectionCopyDisplayIndexToElement(existed, copyData.displayIndex);
-            existed.style.transition = 'none';
-            existed.style.transform = 'none';
-            if (copyData.left) existed.style.left = toStyle(copyData.left);
-            if (copyData.top) existed.style.top = toStyle(copyData.top);
-            if (copyData.width) existed.style.width = toStyle(copyData.width);
-            if (copyData.height) existed.style.height = toStyle(copyData.height);
-            existed.offsetHeight;
-            existed.style.transition = '';
+            __applyPermanentViewShellToSectionElement(existed, shell);
         } catch (_) { }
         try { makePermanentSectionDraggable(existed); } catch (_) { }
         try {
             const tree = existed.querySelector('.bookmark-tree');
+            if (tree) __renderPermanentSectionCopyTree(tree);
             if (tree && typeof attachTreeEvents === 'function') attachTreeEvents(tree);
         } catch (_) { }
-        try { __updatePermanentSectionIndexBadges(); } catch (_) { }
         try { __updatePermanentSectionIndexBadges(); } catch (_) { }
         try { bindPermanentSectionTipBehavior(existed); } catch (_) { }
         updateNodeFullscreenButtons();
@@ -13126,30 +13770,15 @@ function __createPermanentSectionCopyFromStorage(copyData) {
         const targetTitle = copySection.querySelector('.permanent-section-title h3');
         if (originTitle && targetTitle) targetTitle.textContent = originTitle.textContent;
     } catch (_) { }
-    try {
-        const originTip = origin.querySelector('.permanent-section-tip');
-        const targetTip = copySection.querySelector('.permanent-section-tip');
-        if (originTip && targetTip) targetTip.innerHTML = originTip.innerHTML;
-    } catch (_) { }
-    try {
-        const originTree = origin.querySelector('.bookmark-tree');
-        const targetTree = copySection.querySelector('.bookmark-tree');
-        if (originTree && targetTree) targetTree.innerHTML = originTree.innerHTML;
-    } catch (_) { }
-
-    const toStyle = (value) => {
-        if (typeof value === 'number' && isFinite(value)) return `${value}px`;
-        return (value === null || typeof value === 'undefined') ? '' : String(value);
-    };
-
-    copySection.style.transition = 'none';
-    copySection.style.transform = 'none';
-    if (copyData.left) copySection.style.left = toStyle(copyData.left);
-    if (copyData.top) copySection.style.top = toStyle(copyData.top);
-    if (copyData.width) copySection.style.width = toStyle(copyData.width);
-    if (copyData.height) copySection.style.height = toStyle(copyData.height);
-    copySection.offsetHeight;
-    copySection.style.transition = '';
+    const shell = __normalizePermanentViewShellProtocol({
+        copyId: copyData.id,
+        displayIndex: copyData.displayIndex,
+        descriptionMd: __collectPermanentViewDescriptionMarkdown(copyData.id),
+        cardState: copyData,
+        scrollState: __collectPermanentViewScrollState(copyData.id),
+        foldState: __collectPermanentViewFoldState(copyData.id)
+    });
+    __applyPermanentViewShellToSectionElement(copySection, shell);
 
     canvasContent.appendChild(copySection);
 
@@ -13157,10 +13786,10 @@ function __createPermanentSectionCopyFromStorage(copyData) {
     try { makePermanentSectionDraggable(copySection); } catch (_) { }
     try {
         const tree = copySection.querySelector('.bookmark-tree');
+        if (tree) __renderPermanentSectionCopyTree(tree);
         if (tree && typeof attachTreeEvents === 'function') attachTreeEvents(tree);
     } catch (_) { }
 
-    try { __updatePermanentSectionIndexBadges(); } catch (_) { }
     try { __updatePermanentSectionIndexBadges(); } catch (_) { }
     try { bindPermanentSectionTipBehavior(copySection); } catch (_) { }
     updateNodeFullscreenButtons();
@@ -13376,20 +14005,21 @@ function savePermanentSectionPosition(sectionEl) {
     const permanentSection = sectionEl || document.getElementById('permanentSection');
     if (!permanentSection) return;
 
-    const position = {
+    const position = __normalizePermanentSectionPositionStoragePayload({
         left: permanentSection.style.left,
         top: permanentSection.style.top,
         width: permanentSection.style.width,
         height: permanentSection.style.height
-    };
+    });
 
     if (__isPermanentSectionCopy(permanentSection)) {
         const copyId = __getPermanentSectionCopyId(permanentSection);
         if (!copyId) return;
         const copies = __readPermanentSectionCopies();
         const existingIndex = copies.findIndex(c => c && c.id === copyId);
-        const payload = { id: copyId, ...position };
+        const payload = __normalizePermanentSectionCopyStoragePayload({ id: copyId, ...position });
         const displayIndex = __getPermanentSectionCopyDisplayIndexFromElement(permanentSection);
+        if (!payload) return;
         if (displayIndex) payload.displayIndex = displayIndex;
         if (existingIndex >= 0) {
             copies[existingIndex] = { ...copies[existingIndex], ...payload };
@@ -13412,7 +14042,7 @@ function loadPermanentSectionPosition() {
         if (!permanentSection) return;
 
         if (saved) {
-            const position = JSON.parse(saved);
+            const position = __normalizePermanentSectionPositionStoragePayload(JSON.parse(saved));
             permanentSection.style.transition = 'none';
             permanentSection.style.transform = 'none';
             permanentSection.style.left = position.left;
@@ -14373,6 +15003,7 @@ function duplicateMdNode(nodeId) {
     if (!node) return null;
     const id = `md-node-${++CanvasState.mdNodeCounter}`;
     const baseSize = getBlankNodeDefaultSize();
+    const markdownSource = __deriveMdNodeMarkdownSource(node);
     const copy = {
         id,
         x: (node.x || 0) + 24,
@@ -14380,10 +15011,13 @@ function duplicateMdNode(nodeId) {
         width: node.width || baseSize.width,
         height: node.height || baseSize.height,
         text: node.text || '',
+        html: node.html || '',
+        markdownSource,
         color: node.color || null,
         colorHex: node.colorHex || null,
         createdAt: Date.now()
     };
+    __ensureMdNodeMarkdownProtocol(copy, { refreshCachesFromMarkdown: true });
     CanvasState.mdNodes.push(copy);
     renderMdNode(copy);
     scheduleBoundsUpdate();
@@ -14494,6 +15128,10 @@ function makeMdNodeDraggable(element, node) {
 function renderMdNode(node) {
     const container = document.getElementById('canvasContent');
     if (!container) return;
+
+    if (!(node && node.subtype === 'import-container') && !__isCanvasNativeTextNode(node)) {
+        __ensureMdNodeMarkdownProtocol(node, { refreshCachesFromMarkdown: true });
+    }
 
     let el = document.getElementById(node.id);
     const isNew = !el;
@@ -14849,8 +15487,7 @@ function renderMdNode(node) {
         sel.removeAllRanges();
         sel.addRange(range);
 
-        node.html = editor.innerHTML;
-        node.text = editor.innerText;
+        __syncMdNodeFromEditor(node, editor);
         saveTempNodes();
 
         currentFontColor = color;
@@ -15127,8 +15764,7 @@ function renderMdNode(node) {
         sel.removeAllRanges();
         sel.addRange(range);
 
-        node.html = editor.innerHTML;
-        node.text = editor.innerText;
+        __syncMdNodeFromEditor(node, editor);
         saveTempNodes();
 
         editor.focus();
@@ -15303,8 +15939,7 @@ function renderMdNode(node) {
             sel.addRange(range);
 
             // 保存内容
-            node.html = editor.innerHTML;
-            node.text = editor.innerText;
+            __syncMdNodeFromEditor(node, editor);
             saveTempNodes();
             try { if (undoManager) undoManager.scheduleRecord('tool-insert'); } catch (_) { }
         }
@@ -15327,18 +15962,18 @@ function renderMdNode(node) {
     editor.setAttribute('data-placeholder', mdPlaceholder);
     editor.setAttribute('aria-label', mdPlaceholder);
 
-    // 初始化编辑器内容：优先使用保存的 HTML，否则从 text 渲染
-    if (node.html) {
-        editor.innerHTML = node.html;
-    } else {
-        const raw = typeof node.text === 'string' ? node.text : '';
-        if (raw) {
-            if (typeof marked !== 'undefined') {
-                try { editor.innerHTML = __renderMarkdownToCanvasRichHtml(raw); } catch { editor.textContent = raw; }
-            } else {
-                editor.textContent = raw;
-            }
+    // 初始化编辑器内容：插件空白卡片优先从 markdownSource 渲染，html 只作为运行时缓存。
+    const rawMarkdownSource = typeof node.markdownSource === 'string' ? node.markdownSource : '';
+    if (rawMarkdownSource) {
+        if (typeof marked !== 'undefined') {
+            try { editor.innerHTML = __renderMarkdownToCanvasRichHtml(rawMarkdownSource); } catch { editor.textContent = rawMarkdownSource; }
+        } else {
+            editor.textContent = rawMarkdownSource;
         }
+    } else if (node.html) {
+        editor.innerHTML = node.html;
+    } else if (typeof node.text === 'string' && node.text) {
+        editor.textContent = node.text;
     }
     try { __applyHeadingCollapse(editor); } catch (_) { }
 
@@ -16939,17 +17574,7 @@ function renderMdNode(node) {
 
     // 保存编辑器内容
     const saveEditorContent = () => {
-        try { __applyHeadingCollapse(editor); } catch (_) { }
-        const cleanHtml = __getCleanHtmlForStorage(editor);
-        node.html = cleanHtml;
-        // 保存时清除零宽空格（从干净副本获取完整文本，避免折叠状态丢失内容）
-        try {
-            const tmp = document.createElement('div');
-            tmp.innerHTML = cleanHtml;
-            node.text = (tmp.innerText || tmp.textContent || '').replace(/\u200B/g, '');
-        } catch (_) {
-            node.text = editor.innerText.replace(/\u200B/g, '');
-        }
+        __syncMdNodeFromEditor(node, editor);
         saveTempNodes();
         try { if (undoManager) undoManager.scheduleRecord('save'); } catch (_) { }
     };
@@ -19278,6 +19903,161 @@ function __getCleanHtmlForStorage(editorEl) {
         try { el.remove(); } catch (_) { }
     });
     return clone.innerHTML;
+}
+
+function __cloneCanvasProtocolJson(value) {
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (_) {
+        return null;
+    }
+}
+
+function __normalizeCanvasMarkdownSource(value) {
+    return String(value == null ? '' : value)
+        .replace(/\u200B/g, '')
+        .replace(/\r\n?/g, '\n');
+}
+
+function __extractPlainTextFromCanvasRichHtml(rawHtml) {
+    const html = String(rawHtml == null ? '' : rawHtml).trim();
+    if (!html) return '';
+    try {
+        const div = document.createElement('div');
+        div.innerHTML = html;
+        return String(div.innerText || div.textContent || '').replace(/\u200B/g, '');
+    } catch (_) {
+        return '';
+    }
+}
+
+function __renderMarkdownSourceToCanvasHtml(markdownSource) {
+    const normalized = __normalizeCanvasMarkdownSource(markdownSource);
+    if (!normalized.trim()) return '';
+
+    let html = '';
+    try {
+        html = __renderMarkdownToCanvasRichHtml(normalized);
+    } catch (_) {
+        html = '';
+    }
+
+    if (!html) {
+        try {
+            const div = document.createElement('div');
+            div.textContent = normalized;
+            html = div.innerHTML;
+        } catch (_) {
+            html = normalized;
+        }
+    }
+
+    return __normalizeCanvasRichHtml(html) || '';
+}
+
+function __deriveMdNodeMarkdownSource(node) {
+    if (!node || typeof node !== 'object') return '';
+    if (node.subtype === 'import-container' || __isCanvasNativeTextNode(node)) return '';
+
+    const direct = __normalizeCanvasMarkdownSource(node.markdownSource);
+    if (direct.trim()) return direct;
+
+    const rawContent = (typeof node.html === 'string' && node.html)
+        ? node.html
+        : ((typeof node.text === 'string') ? node.text : '');
+    const stripped = __stripZwsp(rawContent || '');
+    if (!stripped.trim()) return '';
+
+    return __normalizeCanvasMarkdownSource(__htmlToMarkdown(stripped, {
+        trimResult: false,
+        compactNewlines: false,
+        paragraphBreaks: false,
+        hardLineBreaks: true
+    }));
+}
+
+function __ensureMdNodeMarkdownProtocol(node, options = {}) {
+    if (!node || typeof node !== 'object') return node;
+    if (node.subtype === 'import-container' || __isCanvasNativeTextNode(node)) return node;
+
+    const markdownSource = __deriveMdNodeMarkdownSource(node);
+    node.markdownSource = markdownSource;
+
+    const shouldRefreshCaches = options.refreshCachesFromMarkdown === true
+        || (options.refreshCachesFromMarkdown !== false && !(typeof node.html === 'string' && node.html.trim()));
+
+    if (shouldRefreshCaches) {
+        node.html = markdownSource ? __renderMarkdownSourceToCanvasHtml(markdownSource) : '';
+    } else if (typeof node.html === 'string') {
+        node.html = __normalizeCanvasRichHtml(node.html) || '';
+    }
+
+    const plainText = node.html
+        ? __extractPlainTextFromCanvasRichHtml(node.html)
+        : __extractPlainTextFromCanvasRichHtml(__renderMarkdownSourceToCanvasHtml(markdownSource));
+    node.text = plainText;
+    return node;
+}
+
+function __syncMdNodeFromEditor(node, editor) {
+    if (!node || typeof node !== 'object' || !editor) return false;
+
+    try { __finalizeInlinePatternsInEditor(editor); } catch (_) { }
+
+    let cleanHtml = '';
+    try {
+        cleanHtml = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(editor));
+    } catch (_) {
+        cleanHtml = '';
+    }
+    if (!cleanHtml) {
+        try { cleanHtml = __normalizeCanvasRichHtml(editor.innerHTML) || ''; } catch (_) { cleanHtml = ''; }
+    }
+
+    const markdownSource = cleanHtml
+        ? __normalizeCanvasMarkdownSource(__htmlToMarkdown(cleanHtml, {
+            trimResult: false,
+            compactNewlines: false,
+            paragraphBreaks: false,
+            hardLineBreaks: true
+        }))
+        : '';
+    const plainText = cleanHtml
+        ? __extractPlainTextFromCanvasRichHtml(cleanHtml)
+        : '';
+
+    const changed = (node.html || '') !== cleanHtml
+        || (node.text || '') !== plainText
+        || (__normalizeCanvasMarkdownSource(node.markdownSource) !== markdownSource);
+
+    node.html = cleanHtml;
+    node.text = plainText;
+    node.markdownSource = markdownSource;
+    return changed;
+}
+
+function __resolveMdNodeReadableText(node) {
+    if (!node || typeof node !== 'object') return '';
+    if (__isCanvasNativeTextNode(node)) {
+        return String(__resolveCanvasNativeTextNodeBody(node) || '').replace(/\u200B/g, '');
+    }
+
+    const markdownSource = __deriveMdNodeMarkdownSource(node);
+    if (markdownSource.trim()) {
+        const renderedHtml = __renderMarkdownSourceToCanvasHtml(markdownSource);
+        const renderedText = __extractPlainTextFromCanvasRichHtml(renderedHtml);
+        if (renderedText.trim()) return renderedText;
+    }
+
+    const plainText = String(node.text == null ? '' : node.text).replace(/\u200B/g, '');
+    if (plainText.trim()) return plainText;
+
+    if (typeof node.html === 'string' && node.html.trim()) {
+        const htmlText = __extractPlainTextFromCanvasRichHtml(node.html);
+        if (htmlText.trim()) return htmlText;
+    }
+
+    return '';
 }
 
 function __isSelectionAll(editorEl, selection) {
@@ -24156,8 +24936,13 @@ function clearAllTempNodes() {
 
     const isEmptyMdNode = (node) => {
         if (!node) return true;
-        const t = (typeof node.text === 'string') ? node.text : '';
-        return t.replace(/\u200B/g, '').trim().length === 0;
+        if (node.subtype === 'import-container') return false;
+        if (__isCanvasNativeTextNode(node)) {
+            const textBody = __resolveCanvasNativeTextNodeBody(node);
+            return String(textBody || '').replace(/\u200B/g, '').trim().length === 0;
+        }
+        const markdownSource = __deriveMdNodeMarkdownSource(node);
+        return String(markdownSource || '').replace(/\u200B/g, '').trim().length === 0;
     };
 
     // 判断标题是否为自动生成的默认格式（用户未修改）
@@ -26198,15 +26983,9 @@ function __resolveImportPreviewMdTitle(node, index, isEn) {
         return isEn ? `Blank node ${index + 1}` : `空白栏目 ${index + 1}`;
     }
 
-    let base = '';
-    if (typeof node.text === 'string' && node.text.trim()) {
-        const lines = node.text.replace(/\u200B/g, '').replace(/\r\n?/g, '\n').split(/\n+/).map((line) => String(line || '').trim()).filter(Boolean);
-        base = lines.length ? lines[0] : node.text;
-    }
-
-    if (!base && typeof node.html === 'string' && node.html.trim()) {
-        base = __extractImportPreviewTextFromHtml(node.html);
-    }
+    const readable = __resolveMdNodeReadableText(node);
+    const lines = readable.replace(/\r\n?/g, '\n').split(/\n+/).map((line) => String(line || '').trim()).filter(Boolean);
+    let base = lines.length ? lines[0] : readable;
 
     base = __trimImportPreviewText(base);
     if (base) return base;
@@ -27042,6 +27821,110 @@ function __parseCloudSnapshotStorageValue(rawValue) {
     return parsed !== null ? parsed : rawValue;
 }
 
+function __normalizeCanvasTempStatePayloadForImport(stateInput) {
+    const parsedState = typeof stateInput === 'string'
+        ? __safeParseCanvasStorageJson(stateInput)
+        : stateInput;
+    if (!parsedState || typeof parsedState !== 'object') return null;
+
+    const hasPayload = (
+        Array.isArray(parsedState.sections)
+        || Array.isArray(parsedState.tempSections)
+        || Array.isArray(parsedState.mdNodes)
+        || Array.isArray(parsedState.cards)
+        || Array.isArray(parsedState.edges)
+    );
+    if (!hasPayload) return null;
+
+    const sections = Array.isArray(parsedState.sections)
+        ? parsedState.sections
+        : (Array.isArray(parsedState.tempSections) ? parsedState.tempSections : []);
+    const mdNodes = Array.isArray(parsedState.mdNodes)
+        ? parsedState.mdNodes
+        : (Array.isArray(parsedState.cards) ? parsedState.cards : []);
+    const edges = Array.isArray(parsedState.edges) ? parsedState.edges : [];
+
+    return __buildCanvasTempStateProtocolView({
+        ...parsedState,
+        sections,
+        tempSectionCounter: Number(parsedState.tempSectionCounter) || sections.length || 0,
+        tempItemCounter: Number(parsedState.tempItemCounter) || 0,
+        colorCursor: Number(parsedState.colorCursor) || 0,
+        tempSectionLastColor: parsedState.tempSectionLastColor || getTempSectionDefaultColor(),
+        tempSectionPrevColor: parsedState.tempSectionPrevColor || null,
+        mdNodes,
+        mdNodeCounter: Number(parsedState.mdNodeCounter) || mdNodes.length || 0,
+        edges,
+        edgeCounter: Number(parsedState.edgeCounter) || edges.length || 0,
+        timestamp: Number(parsedState.timestamp) || Date.now()
+    });
+}
+
+function __collectCanvasTempStateForExport() {
+    return __buildCanvasTempStateProtocolView({
+        sections: Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections : [],
+        tempSectionCounter: CanvasState.tempSectionCounter,
+        tempItemCounter: CanvasState.tempItemCounter,
+        colorCursor: CanvasState.colorCursor,
+        tempSectionLastColor: CanvasState.tempSectionLastColor || getTempSectionDefaultColor(),
+        tempSectionPrevColor: CanvasState.tempSectionPrevColor || null,
+        mdNodes: Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : [],
+        mdNodeCounter: CanvasState.mdNodeCounter,
+        edges: Array.isArray(CanvasState.edges) ? CanvasState.edges : [],
+        edgeCounter: CanvasState.edgeCounter,
+        timestamp: Date.now()
+    });
+}
+
+function __buildCanvasStateBackupView(tempStateInput = null) {
+    const state = tempStateInput && typeof tempStateInput === 'object'
+        ? tempStateInput
+        : __collectCanvasTempStateForExport();
+    if (!state || typeof state !== 'object') {
+        return {
+            tempSections: [],
+            mdNodes: [],
+            edges: [],
+            tempSectionCounter: 0,
+            tempItemCounter: 0,
+            colorCursor: 0,
+            tempSectionLastColor: getTempSectionDefaultColor(),
+            tempSectionPrevColor: null,
+            mdNodeCounter: 0,
+            edgeCounter: 0,
+            timestamp: Date.now()
+        };
+    }
+
+    return {
+        tempSections: Array.isArray(state.sections) ? state.sections : [],
+        mdNodes: Array.isArray(state.mdNodes) ? state.mdNodes : [],
+        edges: Array.isArray(state.edges) ? state.edges : [],
+        tempSectionCounter: Number(state.tempSectionCounter) || 0,
+        tempItemCounter: Number(state.tempItemCounter) || 0,
+        colorCursor: Number(state.colorCursor) || 0,
+        tempSectionLastColor: state.tempSectionLastColor || getTempSectionDefaultColor(),
+        tempSectionPrevColor: state.tempSectionPrevColor || null,
+        mdNodeCounter: Number(state.mdNodeCounter) || 0,
+        edgeCounter: Number(state.edgeCounter) || 0,
+        timestamp: Number(state.timestamp) || Date.now()
+    };
+}
+
+function __extractCanvasTempStateFromBackupPayload(primaryState, storage) {
+    if (primaryState && primaryState.canvasState) {
+        const normalizedFromCanvasState = __normalizeCanvasTempStatePayloadForImport(primaryState.canvasState);
+        if (normalizedFromCanvasState) return normalizedFromCanvasState;
+    }
+
+    if (storage && Object.prototype.hasOwnProperty.call(storage, TEMP_SECTION_STORAGE_KEY)) {
+        const normalizedFromStorage = __normalizeCanvasTempStatePayloadForImport(storage[TEMP_SECTION_STORAGE_KEY]);
+        if (normalizedFromStorage) return normalizedFromStorage;
+    }
+
+    return null;
+}
+
 function __buildImportPayloadFromCloudSnapshot(snapshot) {
     const payload = snapshot && typeof snapshot === 'object' ? snapshot : null;
     const data = payload && payload.data && typeof payload.data === 'object' ? payload.data : null;
@@ -27050,7 +27933,8 @@ function __buildImportPayloadFromCloudSnapshot(snapshot) {
     }
 
     const parsedTempState = __parseCloudSnapshotStorageValue(data[TEMP_SECTION_STORAGE_KEY]);
-    if (!parsedTempState || typeof parsedTempState !== 'object') {
+    const normalizedTempState = __normalizeCanvasTempStatePayloadForImport(parsedTempState);
+    if (!normalizedTempState) {
         throw new Error('云端快照缺少画布临时栏目数据');
     }
 
@@ -27058,7 +27942,7 @@ function __buildImportPayloadFromCloudSnapshot(snapshot) {
     Object.keys(data).forEach((key) => {
         storage[key] = __parseCloudSnapshotStorageValue(data[key]);
     });
-    storage[TEMP_SECTION_STORAGE_KEY] = parsedTempState;
+    storage[TEMP_SECTION_STORAGE_KEY] = normalizedTempState;
 
     const primaryState = {};
     const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(payload.permanentTreeSnapshot);
@@ -27067,7 +27951,7 @@ function __buildImportPayloadFromCloudSnapshot(snapshot) {
     }
 
     return {
-        tempState: parsedTempState,
+        tempState: normalizedTempState,
         storage,
         primaryState
     };
@@ -27263,19 +28147,9 @@ async function parseCanvasPackageFromJsonFile(file) {
     const storage = primaryState.storage || {};
 
     // 提取 tempState
-    let tempState = null;
-    if (isBackupMode && primaryState.canvasState) {
-        tempState = {
-            sections: primaryState.canvasState.tempSections || [],
-            mdNodes: primaryState.canvasState.mdNodes || [],
-            edges: primaryState.canvasState.edges || [],
-            tempSectionCounter: primaryState.canvasState.tempSectionCounter || 0,
-            mdNodeCounter: primaryState.canvasState.mdNodeCounter || 0,
-            edgeCounter: primaryState.canvasState.edgeCounter || 0
-        };
-    } else {
-        tempState = storage[TEMP_SECTION_STORAGE_KEY] || null;
-    }
+    const tempState = isBackupMode
+        ? __extractCanvasTempStateFromBackupPayload(primaryState, storage)
+        : __normalizeCanvasTempStatePayloadForImport(storage[TEMP_SECTION_STORAGE_KEY] || null);
 
     if (!tempState) {
         throw new Error(isEn ? 'Invalid package state.' : '导入包状态无效');
@@ -27807,14 +28681,7 @@ function __getFullscreenExportTargetLabel(descriptor) {
             catch (_) { }
         }
         if (!title) {
-            title = __getSingleLinePreview(node.text);
-        }
-        if (!title && node.html) {
-            try {
-                const div = document.createElement('div');
-                div.innerHTML = node.html;
-                title = __getSingleLinePreview(div.innerText || div.textContent || '');
-            } catch (_) { }
+            title = __getSingleLinePreview(__resolveMdNodeReadableText(node));
         }
         return title || (isNativeCard ? (isEn ? 'Native Card' : '原生卡片') : (isEn ? 'Blank Section' : '空白栏目'));
     }
@@ -28066,14 +28933,193 @@ function __renderDescriptionMarkdownToHtml(rawDesc) {
     return desc.split('\n').map((line) => `<p>${__escapeHtml(line)}</p>`).join('');
 }
 
-const __CANVAS_DESC_BLOCK_START = '<!-- BC_DESCRIPTION_START -->';
-const __CANVAS_DESC_BLOCK_END = '<!-- BC_DESCRIPTION_END -->';
-const __CANVAS_FOLD_BLOCK_START = '<!-- BC_FOLD_STATE_START -->';
-const __CANVAS_FOLD_BLOCK_END = '<!-- BC_FOLD_STATE_END -->';
-const __CANVAS_ROOT_META_BLOCK_START = '<!-- BC_ROOT_META_START -->';
-const __CANVAS_ROOT_META_BLOCK_END = '<!-- BC_ROOT_META_END -->';
-const __CANVAS_NATIVE_TEXT_META_BLOCK_START = '<!-- BC_NATIVE_TEXT_NODE_START -->';
-const __CANVAS_NATIVE_TEXT_META_BLOCK_END = '<!-- BC_NATIVE_TEXT_NODE_END -->';
+const __CANVAS_SECTION_JSON_FORMAT = 'bookmark-canvas-section';
+const __CANVAS_SECTION_JSON_SCHEMA_VERSION = 1;
+const __CANVAS_OBSIDIAN_EXPORT_FORMATS = new Set(['visual', 'visual-no-icon', 'json']);
+const __CANVAS_COMPACT_TAG_DESCRIPTION = '1';
+const __CANVAS_COMPACT_TAG_FOLD_STATE = '2';
+const __CANVAS_COMPACT_TAG_ROOT_META = '3';
+const __CANVAS_COMPACT_TAG_NATIVE_TEXT_META = '4';
+const __CANVAS_COMPACT_TAG_EXPORT_FORMAT = '9';
+
+function __normalizeCanvasObsidianExportFormat(value, fallback = 'json') {
+    const format = String(value || '').trim().toLowerCase();
+    if (__CANVAS_OBSIDIAN_EXPORT_FORMATS.has(format)) return format;
+    const normalizedFallback = String(fallback || '').trim().toLowerCase();
+    return __CANVAS_OBSIDIAN_EXPORT_FORMATS.has(normalizedFallback) ? normalizedFallback : 'json';
+}
+
+function __escapeCanvasRegexLiteral(text) {
+    return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function __encodeCanvasCompactPayload(rawValue) {
+    const text = String(rawValue == null ? '' : rawValue);
+    if (!text) return '';
+    try {
+        if (typeof TextEncoder !== 'undefined' && typeof btoa === 'function') {
+            const bytes = new TextEncoder().encode(text);
+            let binary = '';
+            const chunkSize = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+                binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+            }
+            return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+        }
+    } catch (_) { }
+    try {
+        if (typeof Buffer !== 'undefined') {
+            return Buffer.from(text, 'utf8')
+                .toString('base64')
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=+$/g, '');
+        }
+    } catch (_) { }
+    return '';
+}
+
+function __decodeCanvasCompactPayload(encodedValue) {
+    let encoded = String(encodedValue || '').trim();
+    if (!encoded) return '';
+    encoded = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    while (encoded.length % 4 !== 0) {
+        encoded += '=';
+    }
+    try {
+        if (typeof atob === 'function' && typeof TextDecoder !== 'undefined') {
+            const binary = atob(encoded);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return new TextDecoder('utf-8').decode(bytes);
+        }
+    } catch (_) { }
+    try {
+        if (typeof Buffer !== 'undefined') {
+            return Buffer.from(encoded, 'base64').toString('utf8');
+        }
+    } catch (_) { }
+    return '';
+}
+
+function __buildCanvasCompactComment(tag, rawPayload) {
+    const normalizedTag = String(tag || '').trim();
+    if (!normalizedTag) return '';
+    const encodedPayload = __encodeCanvasCompactPayload(rawPayload);
+    if (!encodedPayload) return '';
+    return `<!--bc:${normalizedTag}:${encodedPayload}-->`;
+}
+
+function __extractCanvasCompactComment(bodyText, tag) {
+    const body = String(bodyText || '').replace(/\r\n?/g, '\n');
+    const normalizedTag = String(tag || '').trim();
+    if (!normalizedTag) {
+        return { body, payload: '', found: false };
+    }
+    const pattern = new RegExp(`<!--\\s*bc:${__escapeCanvasRegexLiteral(normalizedTag)}:([A-Za-z0-9_-]+)\\s*-->`, 'i');
+    const match = body.match(pattern);
+    if (!match) {
+        return { body, payload: '', found: false };
+    }
+
+    const payload = __decodeCanvasCompactPayload(match[1]);
+    const index = Number(match.index) || 0;
+    const before = body.slice(0, index).replace(/[\t ]*\n?$/, '\n');
+    const after = body.slice(index + match[0].length).replace(/^\n?/, '');
+    const merged = `${before}${after}`.replace(/\n{3,}/g, '\n\n').trim();
+    return {
+        body: merged,
+        payload,
+        found: true
+    };
+}
+
+function __buildCanvasExportFormatCompactComment(exportFormatInput = '') {
+    const format = __normalizeCanvasObsidianExportFormat(exportFormatInput, '');
+    if (!format) return '';
+    return __buildCanvasCompactComment(__CANVAS_COMPACT_TAG_EXPORT_FORMAT, format);
+}
+
+function __extractCanvasExportFormatCompactComment(bodyText) {
+    const extracted = __extractCanvasCompactComment(bodyText, __CANVAS_COMPACT_TAG_EXPORT_FORMAT);
+    return {
+        body: extracted.body,
+        exportFormat: __normalizeCanvasObsidianExportFormat(extracted.payload, '')
+    };
+}
+
+function __parseCanvasProtocolDateValue(value) {
+    const numericValue = Number(value);
+    if (Number.isFinite(numericValue) && numericValue > 0) {
+        return numericValue;
+    }
+    if (typeof value === 'string') {
+        const parsed = Date.parse(value);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return parsed;
+        }
+    }
+    return 0;
+}
+
+function __formatCanvasProtocolDateValue(value) {
+    const ts = __parseCanvasProtocolDateValue(value);
+    if (!ts) return '';
+    try {
+        return new Date(ts).toISOString();
+    } catch (_) {
+        return '';
+    }
+}
+
+function __normalizeCanvasSectionJsonProtocolObject(rawProtocol) {
+    const source = __cloneCanvasProtocolJson(rawProtocol);
+    if (!source || typeof source !== 'object') return null;
+
+    const sectionType = String(source.sectionType || source.type || '').trim().toLowerCase();
+    if (sectionType !== 'permanent' && sectionType !== 'temporary') return null;
+
+    const tree = source.tree || source.bookmarkTree;
+    if (!tree || typeof tree !== 'object') return null;
+
+    return Object.assign({}, source, {
+        format: String(source.format || __CANVAS_SECTION_JSON_FORMAT).trim() || __CANVAS_SECTION_JSON_FORMAT,
+        schemaVersion: Number(source.schemaVersion) || __CANVAS_SECTION_JSON_SCHEMA_VERSION,
+        sectionType,
+        tree
+    });
+}
+
+function __buildCanvasSectionJsonCodeBlock(protocolInput) {
+    const normalized = __normalizeCanvasSectionJsonProtocolObject(protocolInput);
+    if (!normalized) return '';
+    return JSON.stringify(normalized, null, 2);
+}
+
+function __extractCanvasSectionJsonCodeBlock(bodyText) {
+    const body = String(bodyText || '').replace(/\r\n?/g, '\n');
+    const parseProtocol = (jsonText) => {
+        try {
+            return __normalizeCanvasSectionJsonProtocolObject(JSON.parse(String(jsonText || '').trim()));
+        } catch (_) {
+            return null;
+        }
+    };
+
+    const trimmed = body.trim();
+    if (!trimmed || !/^[\[{]/.test(trimmed)) {
+        return { jsonProtocol: null };
+    }
+    return { jsonProtocol: parseProtocol(trimmed) };
+}
+
+function __resolveCanvasSectionJsonDescriptionMarkdown(protocolInput) {
+    const protocol = __normalizeCanvasSectionJsonProtocolObject(protocolInput);
+    if (!protocol) return '';
+    return __normalizeCanvasMarkdownSource(protocol.descriptionMd).trim();
+}
 
 function __normalizeBookmarkFolderType(folderType) {
     const raw = String(folderType || '').trim().toLowerCase().replace(/[_\s]+/g, '-');
@@ -28289,11 +29335,7 @@ function __buildCanvasRootMetaCommentBlock(rootMeta) {
         ? normalized.standardRoots
         : {};
     if (!Object.keys(roots).length) return '';
-    return [
-        __CANVAS_ROOT_META_BLOCK_START,
-        JSON.stringify(normalized, null, 2),
-        __CANVAS_ROOT_META_BLOCK_END
-    ].join('\n');
+    return __buildCanvasCompactComment(__CANVAS_COMPACT_TAG_ROOT_META, JSON.stringify(normalized));
 }
 
 function __normalizePermanentTreeSnapshotForProtocol(rawTree) {
@@ -28347,96 +29389,72 @@ function __normalizePermanentTreeSnapshotForProtocol(rawTree) {
 }
 
 function __extractCanvasRootMetaCommentBlock(bodyText) {
-    const body = String(bodyText || '').replace(/\r\n?/g, '\n');
-    const start = body.indexOf(__CANVAS_ROOT_META_BLOCK_START);
-    if (start < 0) return { body, rootMeta: null };
-
-    const searchStart = start + __CANVAS_ROOT_META_BLOCK_START.length;
-    const end = body.indexOf(__CANVAS_ROOT_META_BLOCK_END, searchStart);
-    if (end < 0) return { body, rootMeta: null };
-
-    let rootMeta = null;
-    try {
-        const rawJson = body.slice(searchStart, end).trim();
-        if (rawJson) rootMeta = __normalizePermanentRootMeta(JSON.parse(rawJson));
-    } catch (_) {
-        rootMeta = null;
+    const compactExtracted = __extractCanvasCompactComment(bodyText, __CANVAS_COMPACT_TAG_ROOT_META);
+    if (compactExtracted.found) {
+        let rootMeta = null;
+        try {
+            rootMeta = __normalizePermanentRootMeta(JSON.parse(String(compactExtracted.payload || '').trim() || '{}'));
+        } catch (_) {
+            rootMeta = null;
+        }
+        return {
+            body: compactExtracted.body,
+            rootMeta
+        };
     }
 
-    const before = body.slice(0, start).replace(/[\t ]*\n?$/, '\n');
-    const after = body.slice(end + __CANVAS_ROOT_META_BLOCK_END.length).replace(/^\n?/, '');
-    const merged = `${before}${after}`.replace(/\n{3,}/g, '\n\n').trim();
     return {
-        body: merged,
-        rootMeta
+        body: String(bodyText || '').replace(/\r\n?/g, '\n'),
+        rootMeta: null
     };
 }
 
 function __buildCanvasDescriptionCommentBlock(markdownText) {
     const text = String(markdownText || '').trim();
     if (!text) return '';
-    return [
-        __CANVAS_DESC_BLOCK_START,
-        text,
-        __CANVAS_DESC_BLOCK_END
-    ].join('\n');
+    return __buildCanvasCompactComment(__CANVAS_COMPACT_TAG_DESCRIPTION, text);
 }
 
 function __extractCanvasDescriptionCommentBlock(bodyText) {
-    const body = String(bodyText || '').replace(/\r\n?/g, '\n');
-    const start = body.indexOf(__CANVAS_DESC_BLOCK_START);
-    if (start < 0) return { body, descriptionMarkdown: '' };
+    const compactExtracted = __extractCanvasCompactComment(bodyText, __CANVAS_COMPACT_TAG_DESCRIPTION);
+    if (compactExtracted.found) {
+        return {
+            body: compactExtracted.body,
+            descriptionMarkdown: String(compactExtracted.payload || '').trim()
+        };
+    }
 
-    const searchStart = start + __CANVAS_DESC_BLOCK_START.length;
-    const end = body.indexOf(__CANVAS_DESC_BLOCK_END, searchStart);
-    if (end < 0) return { body, descriptionMarkdown: '' };
-
-    const descriptionMarkdown = body.slice(searchStart, end).trim();
-    const before = body.slice(0, start).replace(/[\t ]*\n?$/, '\n');
-    const after = body.slice(end + __CANVAS_DESC_BLOCK_END.length).replace(/^\n?/, '');
-    const merged = `${before}${after}`.replace(/\n{3,}/g, '\n\n').trim();
     return {
-        body: merged,
-        descriptionMarkdown
+        body: String(bodyText || '').replace(/\r\n?/g, '\n'),
+        descriptionMarkdown: ''
     };
 }
 
 function __buildCanvasNativeTextMetaCommentBlock(nodeId) {
     const normalizedId = String(nodeId || '').trim();
     if (!normalizedId) return '';
-    return [
-        __CANVAS_NATIVE_TEXT_META_BLOCK_START,
-        JSON.stringify({ nodeId: normalizedId }, null, 2),
-        __CANVAS_NATIVE_TEXT_META_BLOCK_END
-    ].join('\n');
+    return __buildCanvasCompactComment(__CANVAS_COMPACT_TAG_NATIVE_TEXT_META, JSON.stringify({ nodeId: normalizedId }));
 }
 
 function __extractCanvasNativeTextMetaCommentBlock(bodyText) {
-    const body = String(bodyText || '').replace(/\r\n?/g, '\n');
-    const start = body.indexOf(__CANVAS_NATIVE_TEXT_META_BLOCK_START);
-    if (start < 0) return { body, nodeId: '' };
-
-    const searchStart = start + __CANVAS_NATIVE_TEXT_META_BLOCK_START.length;
-    const end = body.indexOf(__CANVAS_NATIVE_TEXT_META_BLOCK_END, searchStart);
-    if (end < 0) return { body, nodeId: '' };
-
-    let nodeId = '';
-    try {
-        const rawPayload = body.slice(searchStart, end).trim();
-        if (rawPayload) {
-            const parsed = JSON.parse(rawPayload);
+    const compactExtracted = __extractCanvasCompactComment(bodyText, __CANVAS_COMPACT_TAG_NATIVE_TEXT_META);
+    if (compactExtracted.found) {
+        let nodeId = '';
+        try {
+            const parsed = JSON.parse(String(compactExtracted.payload || '').trim() || '{}');
             nodeId = String(parsed && parsed.nodeId || '').trim();
+        } catch (_) {
+            nodeId = String(compactExtracted.payload || '').trim();
         }
-    } catch (_) {
-        nodeId = '';
+        return {
+            body: compactExtracted.body,
+            nodeId
+        };
     }
 
-    const before = body.slice(0, start).replace(/[\t ]*\n?$/, '\n');
-    const after = body.slice(end + __CANVAS_NATIVE_TEXT_META_BLOCK_END.length).replace(/^\n?/, '');
-    const merged = `${before}${after}`.replace(/\n{3,}/g, '\n\n').trim();
     return {
-        body: merged,
-        nodeId
+        body: String(bodyText || '').replace(/\r\n?/g, '\n'),
+        nodeId: ''
     };
 }
 
@@ -28462,39 +29480,275 @@ function __buildCanvasFoldStateCommentBlock(foldState, options = {}) {
     const normalized = __normalizeCanvasFoldStateMeta(foldState, options);
     const hasState = normalized.expanded.length > 0 || normalized.collapsed.length > 0;
     if (!hasState && !options.force) return '';
-    return [
-        __CANVAS_FOLD_BLOCK_START,
-        JSON.stringify(normalized, null, 2),
-        __CANVAS_FOLD_BLOCK_END
-    ].join('\n');
+    return __buildCanvasCompactComment(__CANVAS_COMPACT_TAG_FOLD_STATE, JSON.stringify(normalized));
 }
 
 function __extractCanvasFoldStateCommentBlock(bodyText, options = {}) {
-    const body = String(bodyText || '').replace(/\r\n?/g, '\n');
-    const start = body.indexOf(__CANVAS_FOLD_BLOCK_START);
-    if (start < 0) return { body, foldState: null };
+    const compactExtracted = __extractCanvasCompactComment(bodyText, __CANVAS_COMPACT_TAG_FOLD_STATE);
+    if (compactExtracted.found) {
+        let foldState = null;
+        try {
+            const parsed = JSON.parse(String(compactExtracted.payload || '').trim() || '{}');
+            foldState = __normalizeCanvasFoldStateMeta(parsed, options);
+        } catch (_) {
+            foldState = null;
+        }
+        return {
+            body: compactExtracted.body,
+            foldState
+        };
+    }
 
-    const searchStart = start + __CANVAS_FOLD_BLOCK_START.length;
-    const end = body.indexOf(__CANVAS_FOLD_BLOCK_END, searchStart);
-    if (end < 0) return { body, foldState: null };
-
-    const before = body.slice(0, start).replace(/[\t ]*\n?$/, '\n');
-    const after = body.slice(end + __CANVAS_FOLD_BLOCK_END.length).replace(/^\n?/, '');
-    const merged = `${before}${after}`.replace(/\n{3,}/g, '\n\n').trim();
     return {
-        body: merged,
+        body: String(bodyText || '').replace(/\r\n?/g, '\n'),
         foldState: null
     };
+}
+
+function __buildBookmarkItemsFromProtocolTree(treeInput, options = {}) {
+    const includeRootNode = options && options.includeRootNode === true;
+    const sourceNodes = Array.isArray(treeInput)
+        ? treeInput
+        : ((treeInput && typeof treeInput === 'object') ? [treeInput] : []);
+    const entryNodes = includeRootNode
+        ? sourceNodes
+        : sourceNodes.flatMap((node) => (Array.isArray(node && node.children) ? node.children : []));
+
+    const convertNode = (nodeInput) => {
+        if (!nodeInput || typeof nodeInput !== 'object') return null;
+
+        const rawUrl = String(nodeInput.url || '').trim();
+        const kind = rawUrl || String(nodeInput.kind || nodeInput.type || '').trim().toLowerCase() === 'bookmark'
+            ? 'bookmark'
+            : 'folder';
+        const title = String(nodeInput.title || nodeInput.name || rawUrl || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder')).trim()
+            || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder');
+        const normalizedId = String(nodeInput.id || '').trim();
+
+        if (kind === 'bookmark') {
+            return {
+                ...(normalizedId ? { id: normalizedId } : {}),
+                type: 'bookmark',
+                title,
+                url: rawUrl
+            };
+        }
+
+        return {
+            ...(normalizedId ? { id: normalizedId } : {}),
+            type: 'folder',
+            title,
+            children: (Array.isArray(nodeInput.children) ? nodeInput.children : []).map(convertNode).filter(Boolean)
+        };
+    };
+
+    return entryNodes.map(convertNode).filter(Boolean);
+}
+
+function __getPermanentJsonRootNodeId(node, index) {
+    const rootKey = __getPermanentRootMatchKey(node);
+    if (rootKey === 'bookmark_bar') return 'bar';
+    if (rootKey === 'other') return 'other';
+    if (rootKey === 'mobile') return 'mobile';
+    if (rootKey === 'managed') return 'managed';
+    const safeIndex = Number.isFinite(Number(index)) ? Number(index) + 1 : 1;
+    return `root/f${safeIndex}`;
+}
+
+function __buildPermanentJsonTreeChildren(nodes, parentId) {
+    const sourceNodes = Array.isArray(nodes) ? nodes : [];
+    const counters = { bookmark: 0, folder: 0 };
+
+    return sourceNodes.map((nodeInput) => {
+        if (!nodeInput || typeof nodeInput !== 'object') return null;
+
+        const rawUrl = String(nodeInput.url || '').trim();
+        const kind = rawUrl ? 'bookmark' : 'folder';
+        const childId = `${parentId}/${kind === 'bookmark' ? `b${++counters.bookmark}` : `f${++counters.folder}`}`;
+        const title = String(nodeInput.title || nodeInput.name || rawUrl || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder')).trim()
+            || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder');
+
+        if (kind === 'bookmark') {
+            return {
+                id: childId,
+                parentId,
+                kind,
+                title,
+                url: rawUrl
+            };
+        }
+
+        return {
+            id: childId,
+            parentId,
+            kind,
+            title,
+            children: __buildPermanentJsonTreeChildren(nodeInput.children, childId)
+        };
+    }).filter(Boolean);
+}
+
+function __buildPermanentJsonTreeProtocol(bookmarkTree) {
+    const normalizedTree = __normalizePermanentTreeSnapshotForProtocol(bookmarkTree) || bookmarkTree;
+    const sourceRoot = Array.isArray(normalizedTree) ? normalizedTree[0] : normalizedTree;
+    const sourceRootChildren = sourceRoot && Array.isArray(sourceRoot.children) ? sourceRoot.children : [];
+
+    return {
+        id: 'root',
+        parentId: null,
+        kind: 'folder',
+        title: 'Bookmarks Root',
+        children: sourceRootChildren.map((nodeInput, index) => {
+            if (!nodeInput || typeof nodeInput !== 'object') return null;
+            const nodeId = __getPermanentJsonRootNodeId(nodeInput, index);
+            const title = String(nodeInput.title || nodeInput.name || __resolvePermanentRootSectionTitle(nodeInput)).trim()
+                || __resolvePermanentRootSectionTitle(nodeInput);
+            const folderType = __normalizeBookmarkFolderType(
+                nodeInput.folderType
+                || nodeInput.folder_type
+                || __permanentRootKeyToFolderType(__getPermanentRootMatchKey(nodeInput))
+            );
+            const syncing = __canPersistBookmarkRootSyncing(folderType)
+                ? __normalizeBookmarkRootSyncing(nodeInput.syncing)
+                : null;
+            const rootNode = {
+                id: nodeId,
+                parentId: 'root',
+                kind: 'folder',
+                title,
+                children: __buildPermanentJsonTreeChildren(nodeInput.children, nodeId)
+            };
+            if (folderType) rootNode.folderType = folderType;
+            if (syncing !== null) rootNode.syncing = syncing;
+            return rootNode;
+        }).filter(Boolean)
+    };
+}
+
+function __buildBookmarkTreeSnapshotFromPermanentJsonProtocol(protocolInput) {
+    const normalizedProtocol = __normalizeCanvasSectionJsonProtocolObject(protocolInput);
+    if (!normalizedProtocol || normalizedProtocol.sectionType !== 'permanent') return null;
+
+    const sourceTree = normalizedProtocol.tree && typeof normalizedProtocol.tree === 'object'
+        ? normalizedProtocol.tree
+        : null;
+    const sourceRootChildren = sourceTree && Array.isArray(sourceTree.children) ? sourceTree.children : [];
+
+    const convertNode = (nodeInput, parentId = null, isRootChild = false) => {
+        if (!nodeInput || typeof nodeInput !== 'object') return null;
+
+        const rawUrl = String(nodeInput.url || '').trim();
+        const title = String(nodeInput.title || nodeInput.name || rawUrl || (rawUrl ? 'Untitled Bookmark' : 'Folder')).trim()
+            || (rawUrl ? 'Untitled Bookmark' : 'Folder');
+        const normalizedId = String(nodeInput.id || '').trim();
+        const nextParentId = parentId == null ? null : String(parentId);
+
+        if (rawUrl) {
+            return {
+                ...(normalizedId ? { id: normalizedId } : {}),
+                ...(nextParentId !== null ? { parentId: nextParentId } : {}),
+                title,
+                url: rawUrl
+            };
+        }
+
+        const nextNode = {
+            ...(normalizedId ? { id: normalizedId } : {}),
+            ...(nextParentId !== null ? { parentId: nextParentId } : {}),
+            title,
+            children: (Array.isArray(nodeInput.children) ? nodeInput.children : [])
+                .map((child) => convertNode(child, normalizedId || nextParentId, false))
+                .filter(Boolean)
+        };
+
+        if (isRootChild) {
+            const folderType = __normalizeBookmarkFolderType(nodeInput.folderType || nodeInput.folder_type);
+            const syncing = __canPersistBookmarkRootSyncing(folderType)
+                ? __normalizeBookmarkRootSyncing(nodeInput.syncing)
+                : null;
+            if (folderType) nextNode.folderType = folderType;
+            if (syncing !== null) nextNode.syncing = syncing;
+        }
+
+        return nextNode;
+    };
+
+    return __normalizePermanentTreeSnapshotForProtocol([{
+        title: '',
+        children: sourceRootChildren.map((child) => convertNode(child, 'root', true)).filter(Boolean)
+    }]);
+}
+
+function __buildPermanentSectionJsonProtocol(bookmarkTree, descriptionOverride = null, metaOptions = null) {
+    const { isEn } = __getLang();
+    const permanentSlot = __normalizePositiveInt(metaOptions && metaOptions.permanentSlot) || 1;
+    const slotLabel = toAlphaLabel(permanentSlot) || 'A';
+    const title = __getPermanentSectionDisplayTitle(isEn);
+
+    let rawDesc = '';
+    if (descriptionOverride !== null) {
+        rawDesc = descriptionOverride;
+    } else {
+        try { rawDesc = localStorage.getItem('canvas-permanent-tip-text') || ''; } catch (_) { }
+    }
+
+    return {
+        format: __CANVAS_SECTION_JSON_FORMAT,
+        schemaVersion: __CANVAS_SECTION_JSON_SCHEMA_VERSION,
+        sectionType: 'permanent',
+        slot: slotLabel,
+        title,
+        descriptionMd: __normalizeCanvasMarkdownSource(__htmlToMarkdown(rawDesc)).trim(),
+        tree: __buildPermanentJsonTreeProtocol(bookmarkTree)
+    };
+}
+
+function __buildPermanentSectionJsonMarkdown(bookmarkTree, descriptionOverride = null, metaOptions = null) {
+    return __buildCanvasSectionJsonCodeBlock(
+        __buildPermanentSectionJsonProtocol(bookmarkTree, descriptionOverride, metaOptions)
+    ) + '\n';
+}
+
+function __buildTempSectionJsonProtocol(section) {
+    const normalizedProtocol = __normalizeTempSectionProtocolObject(section) || __buildTempSectionProtocol(section);
+    const sectionMeta = normalizedProtocol && normalizedProtocol.sectionMeta ? normalizedProtocol.sectionMeta : {};
+    const createdAtIso = __formatCanvasProtocolDateValue(sectionMeta.createdAt || (section && section.createdAt));
+    const updatedAtIso = __formatCanvasProtocolDateValue(sectionMeta.updatedAt || (section && section.updatedAt));
+    const payload = {
+        format: __CANVAS_SECTION_JSON_FORMAT,
+        schemaVersion: __CANVAS_SECTION_JSON_SCHEMA_VERSION,
+        sectionType: 'temporary',
+        label: String(sectionMeta.label || getTempSectionLabel(section) || '').trim(),
+        title: String(sectionMeta.title || (section && section.title) || __getDefaultTempSectionProtocolTitle()).trim()
+            || __getDefaultTempSectionProtocolTitle(),
+        tempKind: __isSpecialTempSection(section) ? 'special' : 'regular',
+        source: String(sectionMeta.source || (section && section.source) || '').trim(),
+        descriptionMd: String(sectionMeta.descriptionMd || '').trim(),
+        tree: normalizedProtocol ? normalizedProtocol.bookmarkTree : __buildTempSectionBookmarkTreeProtocol(section)
+    };
+    if (createdAtIso) payload.createdAt = createdAtIso;
+    if (updatedAtIso) payload.updatedAt = updatedAtIso;
+    if (sectionMeta.originPermanent) payload.originPermanent = sectionMeta.originPermanent;
+    if (sectionMeta.sequenceNumber) payload.sequenceNumber = sectionMeta.sequenceNumber;
+    return payload;
+}
+
+function __buildTempSectionJsonMarkdown(section) {
+    return __buildCanvasSectionJsonCodeBlock(__buildTempSectionJsonProtocol(section)) + '\n';
 }
 
 function __parseCanvasMarkdownPayload(fileText) {
     const rawBody = String(fileText || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
 
-    const extractedDesc = __extractCanvasDescriptionCommentBlock(rawBody);
+    const extractedFormat = __extractCanvasExportFormatCompactComment(rawBody);
+    const extractedDesc = __extractCanvasDescriptionCommentBlock(extractedFormat.body);
     const extractedRootMeta = __extractCanvasRootMetaCommentBlock(extractedDesc.body);
     const extractedFold = __extractCanvasFoldStateCommentBlock(extractedRootMeta.body);
     let workingBody = extractedFold.body;
-    let descriptionMarkdown = extractedDesc.descriptionMarkdown;
+    const extractedJson = __extractCanvasSectionJsonCodeBlock(workingBody);
+    const jsonProtocol = extractedJson.jsonProtocol;
+    let descriptionMarkdown = extractedDesc.descriptionMarkdown
+        || __resolveCanvasSectionJsonDescriptionMarkdown(jsonProtocol);
 
     const lines = workingBody.split('\n');
     let firstNonEmptyIndex = -1;
@@ -28506,7 +29760,8 @@ function __parseCanvasMarkdownPayload(fileText) {
     }
 
     const firstNonEmptyLine = firstNonEmptyIndex >= 0 ? String(lines[firstNonEmptyIndex] || '').trim() : '';
-    const looksLikeTreeLine = /^(#{2,}\s+|<)/.test(firstNonEmptyLine);
+    const looksLikeTreeLine = !!jsonProtocol
+        || /^(#{2,}\s+|<|[\[{])/.test(firstNonEmptyLine);
     const hasHeaderLine = !!firstNonEmptyLine && !looksLikeTreeLine;
 
     const contentToParse = hasHeaderLine
@@ -28516,9 +29771,12 @@ function __parseCanvasMarkdownPayload(fileText) {
     return {
         rawBody,
         headerLine: hasHeaderLine ? firstNonEmptyLine : '',
+        descriptionMarkdown,
         descriptionHtml: __renderDescriptionMarkdownToHtml(descriptionMarkdown),
         foldState: null,
         rootMeta: extractedRootMeta.rootMeta,
+        exportFormatHint: extractedFormat.exportFormat || '',
+        jsonProtocol,
         contentToParse
     };
 }
@@ -28720,39 +29978,8 @@ function __flushMdEditorsForExport(options = {}) {
         const node = (CanvasState.mdNodes || []).find((item) => item && item.id === nodeId);
         if (!node) return;
 
-        try { __finalizeInlinePatternsInEditor(editor); } catch (_) { }
-
-        let cleanHtml = '';
-        try {
-            cleanHtml = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(editor));
-        } catch (_) {
-            cleanHtml = '';
-        }
-        if (!cleanHtml) {
-            try { cleanHtml = __normalizeCanvasRichHtml(editor.innerHTML) || ''; } catch (_) { cleanHtml = ''; }
-        }
-
-        if ((node.html || '') !== cleanHtml) {
-            node.html = cleanHtml;
+        if (__syncMdNodeFromEditor(node, editor)) {
             changed = true;
-        } else {
-            node.html = cleanHtml;
-        }
-
-        let plainText = '';
-        try {
-            const tmp = document.createElement('div');
-            tmp.innerHTML = cleanHtml;
-            plainText = (tmp.innerText || tmp.textContent || '').replace(/\u200B/g, '');
-        } catch (_) {
-            plainText = (editor.innerText || editor.textContent || '').replace(/\u200B/g, '');
-        }
-
-        if ((node.text || '') !== plainText) {
-            node.text = plainText;
-            changed = true;
-        } else {
-            node.text = plainText;
         }
     });
 
@@ -29048,6 +30275,11 @@ function __toTreeMarkdownLines(items, depth = 0, options = {}) {
 }
 
 function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = null, metaOptions = null) {
+    const exportFormat = __normalizeCanvasObsidianExportFormat(metaOptions && metaOptions.exportFormat, 'visual');
+    if (exportFormat === 'json') {
+        return __buildPermanentSectionJsonMarkdown(bookmarkTree, descriptionOverride, metaOptions);
+    }
+
     const { isEn } = __getLang();
 
     const domTitleEl = document.getElementById('permanentSectionTitle');
@@ -29066,6 +30298,10 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
     const descMd = __htmlToMarkdown(rawDesc);
 
     const body = [sectionHeaderLine];
+    const formatComment = __buildCanvasExportFormatCompactComment(exportFormat);
+    if (formatComment) {
+        body.push(formatComment);
+    }
     if (descMd) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
@@ -29115,18 +30351,28 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
 }
 
 function __buildTempSectionMarkdown(section, metaOptions = null) {
+    const exportFormat = __normalizeCanvasObsidianExportFormat(metaOptions && metaOptions.exportFormat, 'visual');
+    if (exportFormat === 'json') {
+        return __buildTempSectionJsonMarkdown(section);
+    }
+
+    const normalizedProtocol = __normalizeTempSectionProtocolObject(section) || __buildTempSectionProtocol(section);
     const { isEn } = __getLang();
 
     // 1. Title & Sequence
-    const rawTitle = String((section && section.title) || (isEn ? 'Temp Section' : '临时栏目'));
-    const seqLabel = getTempSectionLabel(section);
+    const sectionMeta = normalizedProtocol && normalizedProtocol.sectionMeta ? normalizedProtocol.sectionMeta : {};
+    const rawTitle = String(sectionMeta.title || (section && section.title) || (isEn ? 'Temp Section' : '临时栏目'));
+    const seqLabel = String(sectionMeta.label || getTempSectionLabel(section) || '').trim();
     const fullTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
 
     const body = [fullTitle.trim()];
+    const formatComment = __buildCanvasExportFormatCompactComment(exportFormat);
+    if (formatComment) {
+        body.push(formatComment);
+    }
 
     // 2. Description (Markdown)
-    const descHtml = section && typeof section.description === 'string' ? section.description : '';
-    const descMd = __htmlToMarkdown(descHtml);
+    const descMd = String(sectionMeta.descriptionMd || '').trim();
     if (descMd) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
@@ -29134,7 +30380,9 @@ function __buildTempSectionMarkdown(section, metaOptions = null) {
     body.push('');
 
     // 3. Items
-    const items = section && Array.isArray(section.items) ? section.items : [];
+    const items = normalizedProtocol
+        ? __buildTempItemPayloadsFromBookmarkTreeProtocol(normalizedProtocol.bookmarkTree)
+        : (section && Array.isArray(section.items) ? section.items : []);
 
     // Pass temp section ID for collapsed state checking
     const lines = __toTreeMarkdownLines(items, 0, {
@@ -29152,26 +30400,97 @@ function __buildTempSectionMarkdown(section, metaOptions = null) {
     return (body.join('\n')).trimEnd() + '\n';
 }
 
-function __buildMdNodeMarkdown(node) {
-    // Convert HTML content to Markdown
-    // Prefer node.html (rich text source) over node.text (plain text)
-    // Legacy nodes might only have node.text
-    const rawContent = (node && typeof node.html === 'string' && node.html)
-        ? node.html
-        : ((node && typeof node.text === 'string') ? node.text : '');
+function __buildImportedTempSectionFromVisualMarkdown(node, parsedMarkdown, contentToParse, isEn) {
+    const parsedJsonProtocol = parsedMarkdown && parsedMarkdown.jsonProtocol && parsedMarkdown.jsonProtocol.sectionType === 'temporary'
+        ? __normalizeTempSectionProtocolObject(parsedMarkdown.jsonProtocol)
+        : null;
+    const items = __parseMarkdownAuto(contentToParse);
+    const fileName = node.file.split('/').pop().replace(/\.(md|json)$/i, '');
+    const parsed = __parseTempSectionLabelAndTitleFromFilename(fileName);
+    const headerParsed = __parseTempSectionLabelAndTitleFromFilename(parsedMarkdown.headerLine || '');
+    const title = String(
+        (parsedJsonProtocol && parsedJsonProtocol.sectionMeta && parsedJsonProtocol.sectionMeta.title)
+        || headerParsed.title
+        || parsed.title
+        || (isEn ? 'Temp Section' : '临时栏目')
+    ).trim() || (isEn ? 'Temp Section' : '临时栏目');
 
-    const stripped = __stripZwsp(rawContent || '');
-    const textMd = __htmlToMarkdown(stripped, {
-        trimResult: false,
-        compactNewlines: false,
-        paragraphBreaks: false,
-        hardLineBreaks: true
+    let label = '';
+    if (parsedJsonProtocol && parsedJsonProtocol.sectionMeta && parsedJsonProtocol.sectionMeta.label) {
+        label = String(parsedJsonProtocol.sectionMeta.label || '').trim();
+    } else if (headerParsed.label) {
+        label = headerParsed.label;
+    } else if (parsed.label) {
+        label = parsed.label;
+    }
+
+    let sequenceNumber = parsedJsonProtocol && parsedJsonProtocol.sectionMeta
+        ? __normalizePositiveInt(parsedJsonProtocol.sectionMeta.sequenceNumber)
+        : null;
+    const labelForSeq = label || '';
+    if (!sequenceNumber && labelForSeq) {
+        const alphaMatch = labelForSeq.match(/^([A-Z]+)/i);
+        const alphaPart = alphaMatch ? alphaMatch[1] : labelForSeq;
+        const seq = __alphaLabelToNumber(alphaPart);
+        if (seq) sequenceNumber = seq;
+    }
+
+    const inferredSource = String(
+        (parsedJsonProtocol && parsedJsonProtocol.sectionMeta && parsedJsonProtocol.sectionMeta.source)
+        || __inferTempSectionSourceFromFilePath(node.file)
+        || ''
+    ).trim();
+    if (inferredSource && !label) {
+        const sourceLabel = __getSpecialTempSectionLabelBySource(inferredSource, isEn);
+        if (sourceLabel) label = sourceLabel;
+    }
+
+    const protocolInput = parsedJsonProtocol || {
+        sectionMeta: {
+            label,
+            title,
+            source: inferredSource,
+            sequenceNumber,
+            descriptionMd: __normalizeCanvasMarkdownSource(parsedMarkdown && parsedMarkdown.descriptionMarkdown || '').trim()
+        },
+        bookmarkTree: {
+            id: label ? `tmp/${__normalizeTempSectionLabelToDashScheme(label)}` : 'tmp/section',
+            parentId: null,
+            kind: 'folder',
+            title,
+            children: items
+        }
+    };
+
+    const restored = __buildRuntimeTempSectionFromProtocol(protocolInput, {
+        sectionId: node.id,
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        color: convertObsidianColor(node.color) || '#fb464c'
     });
 
-    // Remove first line (used as filename) to avoid duplication in content
-    const lines = textMd.split('\n');
-    // REMOVED: lines.shift() to preserve first line content (title/content separation handled by filename only)
-    const finalMd = lines.join('\n').replace(/\r\n?/g, '\n').trimEnd();
+    if (restored) return restored;
+
+    return {
+        id: node.id,
+        title,
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        color: convertObsidianColor(node.color) || '#fb464c',
+        items,
+        description: __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(parsedMarkdown && parsedMarkdown.descriptionMarkdown || '')),
+        label,
+        source: inferredSource || ''
+    };
+}
+
+function __buildMdNodeMarkdown(node) {
+    const markdownSource = __deriveMdNodeMarkdownSource(node);
+    const finalMd = markdownSource.replace(/\r\n?/g, '\n').trimEnd();
 
     return finalMd ? (finalMd + '\n') : '\n';
 }
@@ -29208,6 +30527,10 @@ function __extractMdNodeFilenameTitle(markdownText, fallback = 'Untitled') {
  *   so we don't need to change #A's structure.
  */
 function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptionOverride = null, metaOptions = null, embedTargetPath = '') {
+    const exportFormat = __normalizeCanvasObsidianExportFormat(metaOptions && metaOptions.exportFormat, 'visual');
+    if (exportFormat === 'json') {
+        return __buildPermanentSectionJsonMarkdown(bookmarkTree, descriptionOverride, metaOptions);
+    }
     const { isEn } = __getLang();
     const domTitleEl = document.getElementById('permanentSectionTitle');
     const domTitle = domTitleEl ? domTitleEl.textContent.trim() : '';
@@ -29217,6 +30540,10 @@ function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptio
     const sectionHeaderLine = `#${slotLabel} ${title}`.trim();
 
     const body = [sectionHeaderLine];
+    const formatComment = __buildCanvasExportFormatCompactComment(exportFormat);
+    if (formatComment) {
+        body.push(formatComment);
+    }
 
     let rawDesc = '';
     if (descriptionOverride !== null) {
@@ -29231,7 +30558,7 @@ function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptio
 
     body.push('');
 
-    const target = String(embedTargetPath || '').trim().replace(/\.md$/i, '');
+    const target = String(embedTargetPath || '').trim().replace(/\.(md|json)$/i, '');
     if (!target) {
         body.push(isEn ? '*Missing embed target.*' : '*缺少共享正文目标*');
         body.push('');
@@ -29359,6 +30686,11 @@ function __parseMarkdownAuto(content) {
     if (!content || typeof content !== 'string') return [];
 
     const trimmed = content.trim();
+    const extractedJson = __extractCanvasSectionJsonCodeBlock(trimmed);
+    if (extractedJson && extractedJson.jsonProtocol) {
+        console.log('[Canvas Import] Detected JSON Mode (code block)');
+        return __buildBookmarkItemsFromProtocolTree(extractedJson.jsonProtocol.tree || extractedJson.jsonProtocol.bookmarkTree);
+    }
 
     const hasDetails = /<details[\s>]/i.test(trimmed);
     const hasStyledAnchor = /<a\s+href=.*style=/i.test(trimmed);
@@ -29407,6 +30739,11 @@ function __convertImportedTreeItemsToBookmarkSnapshotNodes(items) {
 function __buildBookmarkTreeSnapshotFromPermanentMarkdown(contentToParse, rootMeta = null) {
     const body = String(contentToParse || '').replace(/\r\n?/g, '\n').trim();
     if (!body) return null;
+
+    const extractedJson = __extractCanvasSectionJsonCodeBlock(body);
+    if (extractedJson && extractedJson.jsonProtocol && extractedJson.jsonProtocol.sectionType === 'permanent') {
+        return __buildBookmarkTreeSnapshotFromPermanentJsonProtocol(extractedJson.jsonProtocol);
+    }
 
     const lines = body.split('\n');
     const sections = [];
@@ -29532,7 +30869,7 @@ function __rebuildPermanentTreeSnapshotFromSyncFolderFiles(folderFiles) {
 
     for (const [name, bytes] of files.entries()) {
         const path = String(name || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/g, '').replace(/\/+/g, '/');
-        if (!path || !/\.md$/i.test(path) || !__isPermanentMarkdownPath(path)) continue;
+        if (!path || !/\.(md|json)$/i.test(path) || !__isPermanentMarkdownPath(path)) continue;
         if (!(bytes instanceof Uint8Array) || !bytes.length) continue;
         candidates.push({ path, bytes });
     }
@@ -29597,10 +30934,29 @@ function __toUint8(text) {
 function __buildCanvasImportRulesDocument(options = {}) {
     const exportRoot = String(options && options.exportRoot || '').trim() || '书签画布';
     const canvasFileName = String(options && options.canvasFileName || '').trim() || '书签画布.canvas';
-    const exportFormatRaw = String(options && options.exportFormat || '').trim().toLowerCase();
-    const exportFormat = exportFormatRaw === 'visual-no-icon' ? 'visual-no-icon' : 'visual';
-    const modeLabel = exportFormat === 'visual-no-icon' ? '视觉模式（无图标）' : '视觉模式';
-    const modeRules = exportFormat === 'visual-no-icon'
+    const exportFormat = __normalizeCanvasObsidianExportFormat(options && options.exportFormat, 'json');
+    const modeLabel = exportFormat === 'json'
+        ? 'JSON模式（供AI）'
+        : (exportFormat === 'visual-no-icon' ? '视觉模式（无图标）' : '视觉模式');
+    const permanentRules = exportFormat === 'json'
+        ? [
+            '- 永久栏目（主栏目）与永久副本共用同一套浏览器书签树数据。',
+            '- 副本是镜像视图，不应长期当成独立正文源维护。',
+            '- 若出现多处不一致，应以主栏目（通常 #A）统一收敛，再回写副本。',
+            '- JSON模式下，浏览器标准根身份直接写在 JSON 正文里（`folderType`，以及可选的 `syncing`），不额外写根元数据隐藏注释。'
+        ]
+        : [
+            '- 永久栏目（主栏目）与永久副本共用同一套浏览器书签树数据。',
+            '- 副本是镜像视图，不应长期当成独立正文源维护。',
+            '- 若出现多处不一致，应以主栏目（通常 #A）统一收敛，再回写副本。',
+            '- 永久主 Markdown 会在标题区下方写入根元数据隐藏注释（`<!--bc:3:...-->`），用于识别浏览器内建根信息。'
+        ];
+    const modeRules = exportFormat === 'json'
+        ? [
+            '- JSON模式（供AI）使用单一 JSON 对象正文承载书签树（不使用代码围栏）。',
+            '- 永久栏目与临时栏目优先从该 JSON 正文恢复，不再依赖视觉 HTML 结构。'
+        ]
+        : (exportFormat === 'visual-no-icon'
         ? [
             '- 视觉模式（无图标）保留卡片结构，但书签行不显示 favicon，只保留纯文本链接。',
             '- 请保留 `<details> / <summary> / <a>` 等外层结构，否则导入时可能丢节点。'
@@ -29608,7 +30964,7 @@ function __buildCanvasImportRulesDocument(options = {}) {
         : [
             '- 视觉模式保留卡片结构与 favicon 展示，适合查看与存档。',
             '- 请保留 `<details> / <summary> / <a>` 等外层结构，否则导入时可能丢节点。'
-        ];
+        ]);
 
     return [
         '# 导入规则说明',
@@ -29623,10 +30979,7 @@ function __buildCanvasImportRulesDocument(options = {}) {
         '',
         '## 1) 永久栏目与副本',
         '',
-        '- 永久栏目（主栏目）与永久副本共用同一套浏览器书签树数据。',
-        '- 副本是镜像视图，不应长期当成独立正文源维护。',
-        '- 若出现多处不一致，应以主栏目（通常 #A）统一收敛，再回写副本。',
-        '- 永久主 Markdown 会在标题区下方写入根元数据注释块（`BC_ROOT_META`），用于识别浏览器内建根信息。',
+        ...permanentRules,
         '',
         '## 2) 临时栏目与空白栏目',
         '',
@@ -29652,7 +31005,9 @@ function __buildCanvasImportRulesDocument(options = {}) {
         '## 5) 编辑时注意',
         '',
         '- 重命名或移动 `.md` 文件后，必须同步修改 `.canvas` 里的 `file` 路径。',
-        '- 永久/临时栏目的树正文，请保持在栏目头、说明注释块、根元数据块之后。',
+        exportFormat === 'json'
+            ? '- JSON模式下，永久/临时栏目的树正文应保持为单一 JSON 对象正文（不使用代码围栏）；视觉模式旧结构不要混写进去。'
+            : '- 永久/临时栏目的树正文，请保持在栏目头、说明注释块、根元数据块之后。',
         '- 空白栏目正文可以自由编辑；原生卡片镜像文件请保留其头部注释块，避免丢失节点匹配关系。',
         '- 若需要避免冲突，应先确定永久主数据源，再处理临时与空白内容。'
     ].join('\n');
@@ -29904,13 +31259,17 @@ function __appendObsidianFilenameSuffix(stem, uniqueSeed = 'dup') {
     return `${truncated}${suffix}`;
 }
 
+function __resolveObsidianSyncDataFileExtension(exportFormatInput = 'visual') {
+    return __normalizeCanvasObsidianExportFormat(exportFormatInput, 'visual') === 'json' ? 'json' : 'md';
+}
+
 function __getPermanentSectionDisplayTitle(isEn) {
     const titleEl = document.getElementById('permanentSectionTitle');
     const titleFromDom = titleEl ? String(titleEl.textContent || '').replace(/\u200B/g, '').trim() : '';
     return titleFromDom || (isEn ? 'Permanent Bookmarks' : '书签树 (永久栏目)');
 }
 
-function __buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn) {
+function __buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn, exportFormat = 'visual') {
     const slot = __normalizePositiveInt(permanentSlot) || 1;
     const slotLabel = toAlphaLabel(slot) || 'A';
     const folder = isEn ? 'Permanent' : '永久栏目';
@@ -29918,7 +31277,8 @@ function __buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn) {
         ? `${slotLabel}-PermanentBookmarks`
         : `${slotLabel}书签树（永久栏目）`;
     const fileName = __sanitizeFilename(fixedBaseName);
-    return `${folder}/${fileName}.md`;
+    const fileExt = __resolveObsidianSyncDataFileExtension(exportFormat);
+    return `${folder}/${fileName}.${fileExt}`;
 }
 
 function __getImportContainerLabelFromNode(node) {
@@ -30257,8 +31617,7 @@ async function __buildObsidianSyncFiles(options = {}) {
         throw new Error(isEn ? 'Bookmarks API not available.' : '当前环境不支持书签 API，无法生成同步文件。');
     }
 
-    const exportFormatRaw = String((options && options.exportFormat) || '').trim().toLowerCase();
-    const exportFormat = exportFormatRaw === 'visual-no-icon' ? 'visual-no-icon' : 'visual';
+    const exportFormat = __normalizeCanvasObsidianExportFormat(options && options.exportFormat, 'json');
     const obsidianBookmarkIconMode = exportFormat === 'visual-no-icon' ? 'text' : 'favicon';
     const exportRoot = __normalizeObsidianSyncExportRoot(options && options.exportRoot, isEn, { allowEmpty: true });
 
@@ -30291,11 +31650,11 @@ async function __buildObsidianSyncFiles(options = {}) {
     };
 
     const bookmarkTree = await api.getTree();
-    const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn);
+    const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat);
     const forceCollapsedForObsidian = true;
     pushTextFile(
         permanentMdRel,
-        __buildPermanentBookmarksMarkdown(bookmarkTree, null, { permanentSlot: 1, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian }),
+        __buildPermanentBookmarksMarkdown(bookmarkTree, null, { permanentSlot: 1, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat }),
         { type: 'permanent', slot: 1 }
     );
 
@@ -30312,7 +31671,7 @@ async function __buildObsidianSyncFiles(options = {}) {
                 let descObj = '';
                 try { descObj = localStorage.getItem(descKey) || ''; } catch (_) { }
 
-                const copyMdRel = __buildPermanentSectionMarkdownRelativePath(idx + 1, isEn);
+                const copyMdRel = __buildPermanentSectionMarkdownRelativePath(idx + 1, isEn, exportFormat);
 
                 copyFileMap[copyId] = copyMdRel;
                 const slot = idx ? (idx + 1) : null;
@@ -30343,21 +31702,22 @@ async function __buildObsidianSyncFiles(options = {}) {
             seqLabel || rawTitle || section.id || 'section',
             section.id || fileTitle
         );
-        let rel = __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn);
+        let rel = __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn, exportFormat);
         if (usedTempRelPaths.has(rel)) {
             const slashIndex = rel.lastIndexOf('/');
             const relFolder = slashIndex >= 0 ? rel.slice(0, slashIndex) : '';
             const relFile = slashIndex >= 0 ? rel.slice(slashIndex + 1) : rel;
-            const relStem = relFile.replace(/\.md$/i, '');
+            const relStem = relFile.replace(/\.(md|json)$/i, '');
+            const relExt = /\.json$/i.test(relFile) ? 'json' : 'md';
             const uniqueStem = __appendObsidianFilenameSuffix(relStem, section.id || relStem || 'section');
-            const uniqueFile = `${uniqueStem}.md`;
+            const uniqueFile = `${uniqueStem}.${relExt}`;
             rel = relFolder ? `${relFolder}/${uniqueFile}` : uniqueFile;
         }
         usedTempRelPaths.add(rel);
 
         tempSectionMdPaths.push({ id: section.id, rel });
 
-        pushTextFile(rel, __buildTempSectionMarkdown(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian }), {
+        pushTextFile(rel, __buildTempSectionMarkdown(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat }), {
             type: 'temporary',
             sectionId: section.id,
             sectionSerial: seqLabel || ''
@@ -30450,6 +31810,123 @@ async function __buildObsidianSyncFiles(options = {}) {
     };
 }
 
+function __detectCanvasMarkdownExportFormatFromContent(fileText) {
+    const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
+    if (parsedMarkdown && parsedMarkdown.jsonProtocol) {
+        return 'json';
+    }
+    const formatHint = __normalizeCanvasObsidianExportFormat(parsedMarkdown && parsedMarkdown.exportFormatHint, '');
+    if (formatHint) {
+        return formatHint;
+    }
+
+    const content = String(
+        (parsedMarkdown && parsedMarkdown.contentToParse)
+        || (parsedMarkdown && parsedMarkdown.rawBody)
+        || fileText
+        || ''
+    ).replace(/\r\n?/g, '\n');
+
+    if (!content.trim()) return '';
+    if (/<img[\s>]/i.test(content)) return 'visual';
+    if (/<details[\s>]/i.test(content) || /<a\s+href=/i.test(content)) return 'visual-no-icon';
+    return '';
+}
+
+function __detectObsidianSyncExportFormatFromFolderFiles(folderFiles) {
+    const normalizedFiles = __normalizeImportFolderFilesMap(folderFiles);
+    if (!normalizedFiles.size) return '';
+
+    const normalizePath = (path) => String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
+    const isGuideMarkdownPath = (path) => /(^|\/)(说明导入规则\.md|README_Import_Rules\.md|说明_导入规则\.md)$/i.test(normalizePath(path));
+    const isPermanentMarkdownPath = (path) => {
+        const normalized = normalizePath(path);
+        if (!normalized || !/\.(md|json)$/i.test(normalized)) return false;
+        return /(^|\/)(永久栏目|Permanent)(\/|$)/i.test(normalized)
+            || /Permanent\s*Sections/i.test(normalized)
+            || /Permanent\s*Bookmarks/i.test(normalized)
+            || /(^|\/)永久书签(\/|$)/.test(normalized);
+    };
+    const isTemporaryMarkdownPath = (path) => {
+        const normalized = normalizePath(path);
+        if (!normalized || !/\.(md|json)$/i.test(normalized)) return false;
+        return /(^|\/)(临时栏目|Temporary)(\/|$)/i.test(normalized);
+    };
+
+    const candidates = [];
+    let fallbackIndex = 0;
+    let guideFormat = '';
+
+    const parseGuideFormat = (fileText) => {
+        const text = String(fileText || '').replace(/\r\n?/g, '\n');
+        if (!text.trim()) return '';
+        if (/当前内容格式[：:]\s*JSON模式|Current\s+content\s+format[：:]\s*JSON\s+mode/i.test(text)) return 'json';
+        if (/当前内容格式[：:]\s*视觉模式（无图标）|Current\s+content\s+format[：:]\s*Visual\s+mode\s*\(no\s*icon\)/i.test(text)) return 'visual-no-icon';
+        if (/当前内容格式[：:]\s*视觉模式|Current\s+content\s+format[：:]\s*Visual\s+mode/i.test(text)) return 'visual';
+        return '';
+    };
+
+    normalizedFiles.forEach((bytes, path) => {
+        const normalizedPath = normalizePath(path);
+        if (!normalizedPath || !/\.(md|json)$/i.test(normalizedPath)) {
+            return;
+        }
+
+        let fileText = '';
+        try {
+            fileText = new TextDecoder('utf-8').decode(bytes);
+        } catch (_) {
+            return;
+        }
+
+        if (isGuideMarkdownPath(normalizedPath)) {
+            if (!guideFormat) {
+                guideFormat = parseGuideFormat(fileText);
+            }
+            return;
+        }
+
+        const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
+        const format = __detectCanvasMarkdownExportFormatFromContent(fileText);
+        if (!format) return;
+
+        fallbackIndex += 1;
+        const isPermanent = isPermanentMarkdownPath(normalizedPath);
+        const isTemporary = isTemporaryMarkdownPath(normalizedPath);
+        const slot = isPermanent
+            ? __resolvePermanentSectionSlotForImport(parsedMarkdown, normalizedPath, fallbackIndex)
+            : Number.MAX_SAFE_INTEGER;
+        const priority = isPermanent
+            ? ((slot === 1) ? 0 : 1)
+            : (isTemporary ? 2 : 3);
+
+        candidates.push({
+            path: normalizedPath,
+            format,
+            priority,
+            slot: Number.isFinite(slot) ? slot : Number.MAX_SAFE_INTEGER
+        });
+    });
+
+    if (guideFormat) {
+        return guideFormat;
+    }
+
+    candidates.sort((left, right) => {
+        const leftPriority = Number.isFinite(left && left.priority) ? left.priority : Number.MAX_SAFE_INTEGER;
+        const rightPriority = Number.isFinite(right && right.priority) ? right.priority : Number.MAX_SAFE_INTEGER;
+        if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+
+        const leftSlot = Number.isFinite(left && left.slot) ? left.slot : Number.MAX_SAFE_INTEGER;
+        const rightSlot = Number.isFinite(right && right.slot) ? right.slot : Number.MAX_SAFE_INTEGER;
+        if (leftSlot !== rightSlot) return leftSlot - rightSlot;
+
+        return String(left && left.path || '').localeCompare(String(right && right.path || ''));
+    });
+
+    return candidates.length ? String(candidates[0].format || '') : '';
+}
+
 if (typeof window !== 'undefined') {
 
 function __stripPermanentNodesFromParsedSyncFolderForProtocol(parsedInput, folderFiles, folderName = '') {
@@ -30535,8 +32012,10 @@ function __stripPermanentNodesFromParsedSyncFolderForProtocol(parsedInput, folde
         const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName, { preferBackupJson: false });
         return __stripPermanentNodesFromParsedSyncFolderForProtocol(parsed, folderFiles, folderName);
     };
+    window.CanvasObsidianExportBridge.detectSyncFolderExportFormat = __detectObsidianSyncExportFormatFromFolderFiles;
     window.CanvasObsidianExportBridge.applySyncFilesReplace = __applyObsidianSyncFilesReplace;
     window.CanvasObsidianExportBridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles = __rebuildPermanentTreeSnapshotFromSyncFolderFiles;
+    window.CanvasObsidianExportBridge.rebuildPermanentViewShellSnapshotFromSyncFolderFiles = __rebuildPermanentViewShellSnapshotFromSyncFolderFiles;
 }
 
 async function exportCanvasPackage(options = {}) {
@@ -30574,14 +32053,7 @@ async function exportCanvasPackage(options = {}) {
 
     const resolveMdNodeTitle = (node) => {
         if (!node || typeof node !== 'object') return '';
-        let title = String(node.text || '').replace(/\u200B/g, '').trim();
-        if (!title && node.html) {
-            try {
-                const div = document.createElement('div');
-                div.innerHTML = node.html;
-                title = String(div.textContent || '').replace(/\u200B/g, '').trim();
-            } catch (_) { }
-        }
+        const title = String(__resolveMdNodeReadableText(node) || '').replace(/\u200B/g, '').trim();
         return title.split('\n')[0].trim();
     };
 
@@ -30828,11 +32300,18 @@ async function exportCanvasPackage(options = {}) {
                 alert(isEn ? 'Export failed: temporary section not found.' : '导出失败：未找到当前临时栏目。');
                 return;
             }
-            contentNodes = (Array.isArray(section.items) ? section.items : []).map(toBookmarkNode).filter(Boolean);
+            const normalizedProtocol = __normalizeTempSectionProtocolObject(section) || __buildTempSectionProtocol(section);
+            const sectionMeta = normalizedProtocol && normalizedProtocol.sectionMeta ? normalizedProtocol.sectionMeta : {};
+            const exportItems = normalizedProtocol
+                ? __buildTempItemPayloadsFromBookmarkTreeProtocol(normalizedProtocol.bookmarkTree)
+                : (Array.isArray(section.items) ? section.items : []);
+            contentNodes = exportItems.map(toBookmarkNode).filter(Boolean);
             exportTypeLabel = isEn ? 'Temporary Section' : '临时栏目';
-            exportTitle = String(section.title || '').trim() || exportTypeLabel;
-            exportSequence = getTempSectionLabel(section) || '';
-            exportDescription = String(section.description || '');
+            exportTitle = String(sectionMeta.title || section.title || '').trim() || exportTypeLabel;
+            exportSequence = String(sectionMeta.label || getTempSectionLabel(section) || '').trim();
+            exportDescription = (typeof sectionMeta.descriptionMd === 'string' && sectionMeta.descriptionMd.trim())
+                ? __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(sectionMeta.descriptionMd))
+                : String(section.description || '');
         } else {
             alert(isEn ? 'Export failed: unsupported fullscreen card.' : '导出失败：不支持当前全屏卡片类型。');
             return;
@@ -30887,19 +32366,8 @@ async function exportCanvasPackage(options = {}) {
     if (isFullBackupMode) {
         // Ensure permanent copy displayIndex (#1/#2/...) are present before exporting.
         try { __ensurePermanentSectionCopyDisplayIndexes(); } catch (_) { }
-        const tempStateObj = {
-            sections: CanvasState.tempSections,
-            tempSectionCounter: CanvasState.tempSectionCounter,
-            tempItemCounter: CanvasState.tempItemCounter,
-            colorCursor: CanvasState.colorCursor,
-            tempSectionLastColor: CanvasState.tempSectionLastColor || getTempSectionDefaultColor(),
-            tempSectionPrevColor: CanvasState.tempSectionPrevColor || null,
-            mdNodes: CanvasState.mdNodes,
-            mdNodeCounter: CanvasState.mdNodeCounter,
-            edges: CanvasState.edges,
-            edgeCounter: CanvasState.edgeCounter,
-            timestamp: Date.now()
-        };
+        const tempStateObj = __collectCanvasTempStateForExport();
+        const tempCanvasState = __buildCanvasStateBackupView(tempStateObj);
         const permanentPosRaw = localStorage.getItem('permanent-section-position');
         const permanentCopiesRaw = localStorage.getItem(PERMANENT_SECTION_COPIES_STORAGE_KEY);
         const perfMode = localStorage.getItem('canvas-performance-mode');
@@ -30957,14 +32425,7 @@ async function exportCanvasPackage(options = {}) {
                 ...permanentTips
             },
             permanentTreeSnapshot: normalizedPermanentTreeSnapshot,
-            canvasState: {
-                tempSections: CanvasState.tempSections,
-                mdNodes: CanvasState.mdNodes,
-                edges: CanvasState.edges,
-                tempSectionCounter: CanvasState.tempSectionCounter,
-                mdNodeCounter: CanvasState.mdNodeCounter,
-                edgeCounter: CanvasState.edgeCounter
-            }
+            canvasState: tempCanvasState
         };
 
         const jsonString = JSON.stringify(backupState, null, 2);
@@ -31071,6 +32532,10 @@ async function exportCanvasPackage(options = {}) {
         const formatOptionVisualDesc = isEn ? 'Best for viewing, looks like cards.' : '类似卡片网格，适合查看与存档。';
         const formatOptionVisualNoIcon = isEn ? 'Visual Cards (No Icon)' : '视觉卡片（无图标）';
         const formatOptionVisualNoIconDesc = isEn ? 'Same visual layout, but bookmarks use text-only rows without favicons.' : '保持视觉卡片布局，但书签行不显示 favicon 图标。';
+        const formatOptionJson = isEn ? 'JSON Mode (for AI)' : 'JSON模式（供AI）';
+        const formatOptionJsonDesc = isEn
+            ? 'Stores the bookmark tree as structured JSON inside the MD file, best for AI analysis and stable sync.'
+            : '在 MD 文件中用结构化 JSON 表示书签树，更适合 AI 分析、增删改移和稳定同步。';
 
         const inputLabel = isEn
             ? 'Enter path'
@@ -31098,7 +32563,14 @@ async function exportCanvasPackage(options = {}) {
                             <div style="margin: 0 0 8px; font-weight: 600;">${formatLabel}</div>
                             <div style="display: flex; gap: 12px; flex-direction: column;">
                                 <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
-                                    <input type="radio" name="canvasExportFormat" value="visual" checked style="margin-top: 4px;">
+                                    <input type="radio" name="canvasExportFormat" value="json" checked style="margin-top: 4px;">
+                                    <div>
+                                        <div style="font-weight: 600; font-size: 13px;">${formatOptionJson}</div>
+                                        <div style="font-size: 12px; color: #666;">${formatOptionJsonDesc}</div>
+                                    </div>
+                                </label>
+                                <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
+                                    <input type="radio" name="canvasExportFormat" value="visual" style="margin-top: 4px;">
                                     <div>
                                         <div style="font-weight: 600; font-size: 13px;">${formatOptionVisual}</div>
                                         <div style="font-size: 12px; color: #666;">${formatOptionVisualDesc}</div>
@@ -31152,7 +32624,7 @@ async function exportCanvasPackage(options = {}) {
 
         const getFormat = () => {
             const el = document.querySelector('input[name="canvasExportFormat"]:checked');
-            return el ? el.value : 'visual';
+            return el ? el.value : 'json';
         };
 
         const input = document.getElementById('canvasExportVaultPrefixInput');
@@ -31191,7 +32663,7 @@ async function exportCanvasPackage(options = {}) {
     // 全量备份模式直接使用默认路径
     // 全量备份模式直接使用默认路径
     let vaultPrefixInput;
-    let exportFormat = 'visual'; // 'visual' | 'visual-no-icon'
+    let exportFormat = 'json'; // 'json' | 'visual' | 'visual-no-icon'
 
     if (isFullBackupMode) {
         // 全量备份模式：直接使用默认值，不显示路径对话框
@@ -31203,12 +32675,11 @@ async function exportCanvasPackage(options = {}) {
             return;
         }
         vaultPrefixInput = result.path;
-        exportFormat = result.format || 'visual';
+        exportFormat = result.format || 'json';
 
     }
     const vaultPrefix = normalizeVaultPrefix(vaultPrefixInput);
-    const exportFormatRaw = String(exportFormat || '').trim().toLowerCase();
-    exportFormat = exportFormatRaw === 'visual-no-icon' ? 'visual-no-icon' : 'visual';
+    exportFormat = __normalizeCanvasObsidianExportFormat(exportFormat, 'json');
 
     const isValidFolderPath = (p) => {
         if (!p) return true;
@@ -31233,10 +32704,10 @@ async function exportCanvasPackage(options = {}) {
     // 1) Markdown files
     // 1) Markdown files
     const bookmarkTree = await api.getTree();
-    const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn);
+    const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat);
 
     // Choose builder based on format
-    files.push({ name: `${exportRoot}/${permanentMdRel}`, data: __toUint8(__buildPermanentBookmarksMarkdown(bookmarkTree, null, { permanentSlot: 1, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian })) });
+    files.push({ name: `${exportRoot}/${permanentMdRel}`, data: __toUint8(__buildPermanentBookmarksMarkdown(bookmarkTree, null, { permanentSlot: 1, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat })) });
 
     // Generate separate MD files for Permanent Section Copies (with their own descriptions)
     const copyFileMap = {}; // copyId -> relativePath
@@ -31259,7 +32730,7 @@ async function exportCanvasPackage(options = {}) {
                 // Determine filename based on sidebar naming.
                 const alpha = toAlphaLabel(idx + 1);
 
-                const copyMdRel = __buildPermanentSectionMarkdownRelativePath(idx + 1, isEn);
+                const copyMdRel = __buildPermanentSectionMarkdownRelativePath(idx + 1, isEn, exportFormat);
                 copyFileMap[copyId] = copyMdRel;
 
                 const slot = idx ? (idx + 1) : null;
@@ -31288,14 +32759,15 @@ async function exportCanvasPackage(options = {}) {
             section.id || fileTitle
         );
 
-        let rel = __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn);
+        let rel = __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn, exportFormat);
         if (usedTempRelPaths.has(rel)) {
             const slashIndex = rel.lastIndexOf('/');
             const relFolder = slashIndex >= 0 ? rel.slice(0, slashIndex) : '';
             const relFile = slashIndex >= 0 ? rel.slice(slashIndex + 1) : rel;
-            const relStem = relFile.replace(/\.md$/i, '');
+            const relStem = relFile.replace(/\.(md|json)$/i, '');
+            const relExt = /\.json$/i.test(relFile) ? 'json' : 'md';
             const uniqueStem = __appendObsidianFilenameSuffix(relStem, section.id || relStem || 'section');
-            const uniqueFile = `${uniqueStem}.md`;
+            const uniqueFile = `${uniqueStem}.${relExt}`;
             rel = relFolder ? `${relFolder}/${uniqueFile}` : uniqueFile;
         }
         usedTempRelPaths.add(rel);
@@ -31303,7 +32775,7 @@ async function exportCanvasPackage(options = {}) {
         tempSectionMdPaths.push({ id: section.id, rel });
 
         // Choose builder based on format
-        files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(__buildTempSectionMarkdown(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian })) });
+        files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(__buildTempSectionMarkdown(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat })) });
     });
 
     const mdNodeMdPaths = [];
@@ -31567,19 +33039,8 @@ async function exportCanvasPackage(options = {}) {
     files.push({ name: `${exportRoot}/${canvasFileName}`, data: __toUint8(__formatObsidianCanvasJson(canvasForVault)) });
 
     // 3) Full state json (for full import)
-    const tempStateObj = {
-        sections: CanvasState.tempSections,
-        tempSectionCounter: CanvasState.tempSectionCounter,
-        tempItemCounter: CanvasState.tempItemCounter,
-        colorCursor: CanvasState.colorCursor,
-        tempSectionLastColor: CanvasState.tempSectionLastColor || getTempSectionDefaultColor(),
-        tempSectionPrevColor: CanvasState.tempSectionPrevColor || null,
-        mdNodes: CanvasState.mdNodes,
-        mdNodeCounter: CanvasState.mdNodeCounter,
-        edges: CanvasState.edges,
-        edgeCounter: CanvasState.edgeCounter,
-        timestamp: Date.now()
-    };
+    const tempStateObj = __collectCanvasTempStateForExport();
+    const tempCanvasState = __buildCanvasStateBackupView(tempStateObj);
     const permanentPosRaw = localStorage.getItem('permanent-section-position');
     const permanentCopiesRaw = localStorage.getItem(PERMANENT_SECTION_COPIES_STORAGE_KEY);
     const perfMode = localStorage.getItem('canvas-performance-mode');
@@ -31639,14 +33100,7 @@ async function exportCanvasPackage(options = {}) {
             // 核心数据层包含完整书签树快照
             permanentTreeSnapshot: normalizedPermanentTreeSnapshot,
             // 包含当前画布所有栏目的完整数据对象树
-            canvasState: {
-                tempSections: CanvasState.tempSections,
-                mdNodes: CanvasState.mdNodes,
-                edges: CanvasState.edges,
-                tempSectionCounter: CanvasState.tempSectionCounter,
-                mdNodeCounter: CanvasState.mdNodeCounter,
-                edgeCounter: CanvasState.edgeCounter
-            }
+            canvasState: tempCanvasState
         };
         files.push({ name: `${exportRoot}/bookmark-canvas.backup.json`, data: __toUint8(JSON.stringify(backupState, null, 2)) });
     }
@@ -31655,13 +33109,22 @@ async function exportCanvasPackage(options = {}) {
 
     const readmeName = isEn ? 'README_Import_Rules.md' : '说明_导入规则.md';
 
-    const normalizedExportFormat = String(exportFormat || '').trim().toLowerCase();
-    const exportModeLabelEn = normalizedExportFormat === 'visual-no-icon' ? 'Visual Export (No Icon)' : 'Visual Export';
-    const exportModeLabelZh = normalizedExportFormat === 'visual-no-icon' ? '视觉模式导出（无图标）' : '视觉模式导出';
+    const normalizedExportFormat = __normalizeCanvasObsidianExportFormat(exportFormat, 'json');
+    const exportModeLabelEn = normalizedExportFormat === 'json'
+        ? 'JSON Mode (for AI)'
+        : (normalizedExportFormat === 'visual-no-icon' ? 'Visual Export (No Icon)' : 'Visual Export');
+    const exportModeLabelZh = normalizedExportFormat === 'json'
+        ? 'JSON模式（供AI）'
+        : (normalizedExportFormat === 'visual-no-icon' ? '视觉模式导出（无图标）' : '视觉模式导出');
     let compatText = '';
     let aiGuideText = '';
 
-    const modeTreeRulesEn = normalizedExportFormat === 'visual-no-icon'
+    const modeTreeRulesEn = normalizedExportFormat === 'json'
+        ? [
+            '- JSON Mode (for AI) stores the bookmark tree as a single plain JSON object body (no fenced code block).',
+            '- Permanent/temporary section imports prefer this JSON block and no longer depend on visual HTML wrappers.'
+        ]
+        : (normalizedExportFormat === 'visual-no-icon'
         ? [
             '- Visual mode (No Icon) keeps HTML-like tree blocks: `<details> / <summary> / <a href>`.',
             '- Bookmark rows stay text-only and do not render favicon spans.'
@@ -31669,9 +33132,14 @@ async function exportCanvasPackage(options = {}) {
         : [
             '- Visual mode keeps HTML-like tree blocks: `<details> / <summary> / <a href>`.',
             '- Keep outer wrappers of visual cards; missing wrappers may drop nodes during import.'
-        ];
+        ]);
 
-    const modeTreeRulesZh = normalizedExportFormat === 'visual-no-icon'
+    const modeTreeRulesZh = normalizedExportFormat === 'json'
+        ? [
+            '- JSON模式（供AI）使用单一 JSON 对象正文承载书签树（不使用代码围栏）。',
+            '- 永久栏目与临时栏目导入时优先读取这个 JSON 正文，不再依赖视觉 HTML 包裹结构。'
+        ]
+        : (normalizedExportFormat === 'visual-no-icon'
         ? [
             '- 视觉模式（无图标）保留 HTML 树结构：`<details> / <summary> / <a href>`。',
             '- 书签行只保留纯文本链接，不渲染 favicon 图标。'
@@ -31679,7 +33147,7 @@ async function exportCanvasPackage(options = {}) {
         : [
             '- 视觉模式保留 HTML 树结构：`<details> / <summary> / <a href>`。',
             '- 可视化卡片请保留外层容器；删掉外层结构可能导致导入时节点丢失。'
-        ];
+        ]);
 
     compatText = isEn
         ? [
@@ -31692,7 +33160,7 @@ async function exportCanvasPackage(options = {}) {
             '## Part A. Package & View Structure',
             '',
             '### A0. Full Workflow Example (Export → Edit → Re-import)',
-            '1. Export in Visual or Visual (No Icon) mode.',
+            '1. Export using the currently selected content format.',
             '2. Unzip into your Obsidian vault.',
             `3. Open ${exportRoot}/${canvasFileName}.`,
             '4. Edit files under Permanent/, Temporary/, Blank/.',
@@ -31701,10 +33169,10 @@ async function exportCanvasPackage(options = {}) {
             '',
             '### A1. Package File Structure',
             `- ${exportRoot}/${canvasFileName}: canvas entry (nodes/edges + file mapping).`,
-            `- ${exportRoot}/Permanent/#A <Permanent Title>.md: main permanent section file.`,
-            '- Optional copy files: Permanent/#B <Permanent Title>.md / #C <Permanent Title>.md ...',
-            '- Temporary/General Chain/*.md: general-chain temporary section files.',
-            '- Temporary/Special temporary/*.md: special temporary section files.',
+            `- ${exportRoot}/Permanent/#A <Permanent Title>.md/.json: main permanent section file.`,
+            '- Optional copy files: Permanent/#B <Permanent Title>.md/.json / #C <Permanent Title>.md/.json ...',
+            '- Temporary/General Chain/*.(md|json): general-chain temporary section files.',
+            '- Temporary/Special temporary/*.(md|json): special temporary section files.',
             '- Blank/Plugin blank cards/*.md: plugin blank markdown cards.',
             '- Blank/Obsidian native cards/*.md: mirror markdown for native text cards.',
             '',
@@ -31716,13 +33184,13 @@ async function exportCanvasPackage(options = {}) {
             '- Native blank cards remain `type: "text"` nodes inside `.canvas`.',
             '',
             '### A3. Markdown Structure (all section files)',
-            '- Use the first non-empty line as section header text (`sequence + title` recommended).',
-            '- Optional description uses comment block: `<!-- BC_DESCRIPTION_START --> ... <!-- BC_DESCRIPTION_END -->`.',
-            '- Permanent main markdown places root metadata comment block directly under the header area: `<!-- BC_ROOT_META_START --> ... <!-- BC_ROOT_META_END -->`.',
-            '- This metadata identifies standard browser roots (`folderType`, optional `syncing`). Do not delete, move, or manually edit it unless you understand the protocol semantics.',
-            '- Native text mirror markdown contains `BC_NATIVE_TEXT_META` at the top; keep it so importer can match the original text node.',
-            '- Legacy `BC_FOLD_STATE` blocks are ignored on import and are no longer written on export.',
-            '- Permanent/Temporary bookmark tree content is parsed from lines below the header/description/meta block.',
+            '- Visual modes use the first non-empty line as section header text (`sequence + title` recommended); JSON mode stores the tree as a single plain JSON object body (no fenced block).',
+            '- Optional description uses compact hidden comment marker: `<!--bc:1:...-->` (base64 payload).',
+            '- Visual-mode permanent main markdown places compact hidden root metadata marker directly under the header area: `<!--bc:3:...-->`.',
+            '- In JSON mode, standard browser root identity is kept inside the JSON body (`folderType`, optional `syncing`) instead of an extra header block.',
+            '- Native text mirror markdown contains compact hidden marker `<!--bc:4:...-->` at the top; keep it so importer can match the original text node.',
+            '- Fold metadata uses compact hidden marker `<!--bc:2:...-->` when needed.',
+            '- Visual modes parse permanent/temporary bookmark tree content from lines below the header/description/meta block; JSON mode parses the plain JSON body directly.',
             '- Permanent slot recognition priority: header `#A/#B` > filename `(#B)` > file order fallback.',
             '- Special temporary files are placed under `Special temporary/`.',
             '- Plugin blank cards keep free-form markdown body; native text mirrors keep metadata header + body text.',
@@ -31746,7 +33214,7 @@ async function exportCanvasPackage(options = {}) {
             '## 第一部分：文件结构与视图结构（导入识别基准）',
             '',
             '### A0. 完整操作示例（导出 → 编辑 → 导入）',
-            '1. 在书签画布执行导出（视觉模式或视觉模式无图标）。',
+            '1. 在书签画布执行导出，并使用当前选择的内容格式。',
             '2. 将 ZIP 解压到 Obsidian 仓库。',
             `3. 打开 ${exportRoot}/${canvasFileName}。`,
             '4. 按需编辑 永久栏目/、临时栏目/、空白栏目/ 下的 .md 文件。',
@@ -31771,11 +33239,11 @@ async function exportCanvasPackage(options = {}) {
             '',
             '### A3. Markdown 文件结构（所有栏目）',
             '- 首个非空行作为栏目头文本（建议“序号 + 标题”）。',
-            '- 说明区可选，采用注释块：`<!-- BC_DESCRIPTION_START --> ... <!-- BC_DESCRIPTION_END -->`。',
-            '- 永久主 Markdown 文件会在标题区下方写入根目录元数据注释块：`<!-- BC_ROOT_META_START --> ... <!-- BC_ROOT_META_END -->`。',
+            '- 说明区可选，采用紧凑隐藏注释：`<!--bc:1:...-->`（base64 载荷）。',
+            '- 永久主 Markdown 文件会在标题区下方写入根目录元数据隐藏注释：`<!--bc:3:...-->`。',
             '- 该元数据用于识别浏览器标准根目录（`folderType`，以及可选的 `syncing`），请勿随意删除、移动或手动改写，除非明确知道其协议含义。',
-            '- 原生 text 镜像 Markdown 顶部会写入 `BC_NATIVE_TEXT_META` 注释块，请保留它以便导入时匹配回原节点。',
-            '- 历史 `BC_FOLD_STATE` 注释块在导入时会被忽略，导出时不再写出。',
+            '- 原生 text 镜像 Markdown 顶部会写入隐藏注释 `<!--bc:4:...-->`，请保留它以便导入时匹配回原节点。',
+            '- 折叠元数据如需写出，使用紧凑隐藏注释 `<!--bc:2:...-->`。',
             '- 永久/临时栏目的书签树内容从栏目头/说明区/根元数据块之外的正文开始解析。',
             '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名 `(#B)` > 文件顺序兜底。',
             '- 特殊临时栏目文件统一放在 `临时栏目/特殊临时栏目/`。',
@@ -31798,22 +33266,22 @@ async function exportCanvasPackage(options = {}) {
             'Route principle: edit the minimum file set only ("change where used").',
             '',
             '### S1. File Routing (what to touch)',
-            '- Permanent content: `Permanent/#A <Permanent Title>.md` and optional copy files `Permanent/#B <Permanent Title>.md` ...',
-            '- Temporary content: `Temporary/General Chain/*.md` and `Temporary/Special temporary/*.md` + matching file nodes in `.canvas`.',
+            '- Permanent content: `Permanent/#A <Permanent Title>.md/.json` and optional copy files `Permanent/#B <Permanent Title>.md/.json` ...',
+            '- Temporary content: `Temporary/General Chain/*.(md|json)` and `Temporary/Special temporary/*.(md|json)` + matching file nodes in `.canvas`.',
             '- Blank content: `Blank/Plugin blank cards/*.md` + matching file nodes in `.canvas`.',
             '- Native text content: edit `Blank/Obsidian native cards/*.md`; the actual canvas node still lives in `.canvas` as `type: "text"`.',
             '- Layout/links only: edit `.canvas` node geometry and edge fields.',
             '',
             '### S2. Header Line Contract (no required front matter)',
-            '- First non-empty line is the section header text.',
-            '- Temporary section header format: `A-1 Section Title`.',
-            '- Label can be derived from header prefix or filename prefix when restoring sequence mapping.',
+            '- Visual modes: the first non-empty line is the section header text.',
+            '- JSON mode: the bookmark tree lives in a plain JSON object body, so no extra header line is required.',
+            '- Temporary section label can still be derived from explicit JSON fields, header prefix, or filename prefix when restoring sequence mapping.',
             '',
             '### S3. Import Recognition & Merge Baseline',
             '- Type recognition = `.canvas` file mapping + folder path names.',
-            '- Special temporary sections are recognized by folder + header/label semantics.',
-            '- For permanent/temp markdown, parser reads bookmark tree from lines below header/description block.',
-            '- Native text cards are matched by `BC_NATIVE_TEXT_META.nodeId`; keep that block intact.',
+            '- Special temporary sections are recognized by folder + JSON/header/label semantics.',
+            '- Visual modes parse bookmark tree from lines below the header/description block; JSON mode parses the plain JSON body directly.',
+            '- Native text cards are matched by compact marker `<!--bc:4:...-->` payload (`nodeId`); keep that marker intact.',
             '- In normal import flow, permanent files are restored as snapshot sections, not direct browser tree overwrite.',
             '',
             '### S4. Number / Title / Bookmark-count Priority',
@@ -31849,22 +33317,22 @@ async function exportCanvasPackage(options = {}) {
             '路由原则：只改最小必要文件集合（用到哪里改哪里），避免全量重写。',
             '',
             '### S1. 文件路由（按需求定位）',
-            '- 永久栏目内容：修改 `永久栏目/#A <永久栏目标题>.md` 与可选副本 `永久栏目/#B <永久栏目标题>.md` ...。',
-            '- 临时栏目内容：修改 `临时栏目/常规链式/*.md` 与 `临时栏目/特殊临时栏目/*.md`，并同步 `.canvas` 对应 file 节点。',
+            '- 永久栏目内容：修改 `永久栏目/#A <永久栏目标题>.md/.json` 与可选副本 `永久栏目/#B <永久栏目标题>.md/.json` ...。',
+            '- 临时栏目内容：修改 `临时栏目/常规链式/*.(md|json)` 与 `临时栏目/特殊临时栏目/*.(md|json)`，并同步 `.canvas` 对应 file 节点。',
             '- 插件空白卡片：修改 `空白栏目/插件空白卡片/*.md`，并同步 `.canvas` 对应 file 节点。',
             '- 原生 text 卡片：修改 `空白栏目/obsidian原生卡片/*.md`；真实节点仍在 `.canvas` 的 `type: "text"` 中。',
             '- 仅布局/连线：只改 `.canvas` 的节点几何与边字段。',
             '',
             '### S2. 栏目头文本合同（不要求 Front Matter）',
-            '- 首个非空行就是栏目头文本。',
-            '- 临时栏目建议格式：`A-1 标题`。',
-            '- 序号可由栏目头前缀或文件名前缀恢复，不再依赖 Properties。',
+            '- 视觉模式：首个非空行就是栏目头文本。',
+            '- JSON模式（供AI）：书签树正文直接放在单一 JSON 对象正文里（不使用代码围栏），不要求额外栏目头。',
+            '- 临时栏目序号仍可由显式 JSON 字段、栏目头前缀或文件名前缀恢复。',
             '',
             '### S3. 导入识别与合并基线',
             '- 类型识别 = `.canvas` 文件映射 + 目录路径命名（双条件）。',
-            '- 特殊临时栏目按目录 + 栏目头/标签语义识别。',
-            '- 永久/临时栏目改为“栏目头 +（可选说明注释块）+ 树内容”解析合同。',
-            '- 原生 text 卡片按 `BC_NATIVE_TEXT_META.nodeId` 匹配；请保留这个注释块。',
+            '- 特殊临时栏目按目录 + JSON/栏目头/标签语义识别。',
+            '- 视觉模式按“栏目头 +（可选说明注释块）+ 树内容”解析；JSON模式直接解析 JSON 正文。',
+            '- 原生 text 卡片按 `<!--bc:4:...-->` 中的 `nodeId` 匹配；请保留这个隐藏注释。',
             '- 常规导入流下，永久栏目按快照栏目恢复，不直接覆盖浏览器真实书签树。',
             '',
             '### S4. 编号 / 标题 / 书签数优先级',
@@ -32104,6 +33572,8 @@ function __resetCanvasDomAndStateForImport() {
     CanvasState.tempSectionCounter = 0;
     CanvasState.tempItemCounter = 0;
     CanvasState.colorCursor = 0;
+    CanvasState.tempSectionLastColor = getTempSectionDefaultColor();
+    CanvasState.tempSectionPrevColor = null;
     CanvasState.mdNodeCounter = 0;
     CanvasState.edgeCounter = 0;
     CanvasState.selectedTempSectionId = null;
@@ -32116,14 +33586,19 @@ function __resetCanvasDomAndStateForImport() {
 
 function __applyImportedTempState(state) {
     if (!state || typeof state !== 'object') throw new Error('导入失败：状态文件无效');
-    CanvasState.tempSections = Array.isArray(state.sections) ? state.sections : [];
-    CanvasState.tempSectionCounter = state.tempSectionCounter || CanvasState.tempSections.length;
-    CanvasState.tempItemCounter = state.tempItemCounter || 0;
-    CanvasState.colorCursor = state.colorCursor || 0;
-    CanvasState.mdNodes = Array.isArray(state.mdNodes) ? state.mdNodes : [];
-    CanvasState.mdNodeCounter = state.mdNodeCounter || CanvasState.mdNodes.length || 0;
-    CanvasState.edges = Array.isArray(state.edges) ? state.edges : [];
-    CanvasState.edgeCounter = state.edgeCounter || CanvasState.edges.length || 0;
+    const normalizedState = __normalizeCanvasTempStateForRuntime(state);
+    if (!normalizedState) throw new Error('导入失败：状态文件无效');
+
+    CanvasState.tempSections = Array.isArray(normalizedState.sections) ? normalizedState.sections : [];
+    CanvasState.tempSectionCounter = normalizedState.tempSectionCounter || CanvasState.tempSections.length;
+    CanvasState.tempItemCounter = normalizedState.tempItemCounter || 0;
+    CanvasState.colorCursor = normalizedState.colorCursor || 0;
+    CanvasState.tempSectionLastColor = normalizedState.tempSectionLastColor || getTempSectionDefaultColor();
+    CanvasState.tempSectionPrevColor = normalizedState.tempSectionPrevColor || null;
+    CanvasState.mdNodes = Array.isArray(normalizedState.mdNodes) ? normalizedState.mdNodes : [];
+    CanvasState.mdNodeCounter = normalizedState.mdNodeCounter || CanvasState.mdNodes.length || 0;
+    CanvasState.edges = Array.isArray(normalizedState.edges) ? normalizedState.edges : [];
+    CanvasState.edgeCounter = normalizedState.edgeCounter || CanvasState.edges.length || 0;
 
     // 区块休眠替代旧休眠：导入时不保留运行态 dormant 标记，避免“空白/隐藏栏目”
     try {
@@ -32146,6 +33621,8 @@ function __applyImportedTempState(state) {
 
     // 导入：不重排序号；仅同步全局计数器，保证新建栏目不会复用旧序号
     try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
+    try { refreshTempSectionCounters(); } catch (_) { }
+    try { __refreshCanvasNodeCounters(); } catch (_) { }
     try { updateCanvasScrollBounds(); } catch (_) { }
     try { updateScrollbarThumbs(); } catch (_) { }
     try { scheduleDormancyUpdate(60); } catch (_) { }
@@ -32214,14 +33691,15 @@ function __normalizeTempSectionSourceKey(sourceRaw) {
     return normalized;
 }
 
-function __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn) {
+function __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn, exportFormat = 'visual') {
     const tempRoot = isEn ? 'Temporary' : '临时栏目';
+    const fileExt = __resolveObsidianSyncDataFileExtension(exportFormat);
     if (__isSpecialTempSection(section)) {
         const specialRoot = isEn ? 'Special temporary' : '特殊临时栏目';
-        return `${tempRoot}/${specialRoot}/${safeTitle}.md`;
+        return `${tempRoot}/${specialRoot}/${safeTitle}.${fileExt}`;
     }
     const regularRoot = isEn ? 'General Chain' : '常规链式';
-    return `${tempRoot}/${regularRoot}/${safeTitle}.md`;
+    return `${tempRoot}/${regularRoot}/${safeTitle}.${fileExt}`;
 }
 
 function __inferTempSectionSourceFromFilePath(filePath) {
@@ -32306,7 +33784,7 @@ function __resolvePermanentSectionSlotForImport(parsedMarkdown, filePath, fallba
     const headerSlot = __parsePermanentSectionSlotFromHeaderLine(parsedMarkdown && parsedMarkdown.headerLine);
     if (headerSlot) return headerSlot;
 
-    const fileNameNoExt = String(filePath || '').split('/').pop().replace(/\.md$/i, '');
+    const fileNameNoExt = String(filePath || '').split('/').pop().replace(/\.(md|json)$/i, '');
     const fileSlot = __parsePermanentSectionSlotFromFilename(fileNameNoExt);
     if (fileSlot) return fileSlot;
 
@@ -32332,11 +33810,47 @@ function __isExportedPermanentCanvasNode(node) {
 }
 
 function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, contentToParse, isEn) {
+    const jsonProtocol = parsedMarkdown && parsedMarkdown.jsonProtocol && parsedMarkdown.jsonProtocol.sectionType === 'permanent'
+        ? parsedMarkdown.jsonProtocol
+        : null;
     const headerLine = String(parsedMarkdown && parsedMarkdown.headerLine || '').trim();
-    const fallbackTitle = String(node && node.file || '').split('/').pop().replace(/\.md$/i, '').trim();
+    const fallbackTitle = String(node && node.file || '').split('/').pop().replace(/\.(md|json)$/i, '').trim();
+    const title = String(
+        (jsonProtocol && jsonProtocol.title)
+        || headerLine
+        || fallbackTitle
+        || (isEn ? 'Temp Section' : '临时栏目')
+    ).trim() || (isEn ? 'Temp Section' : '临时栏目');
+    const protocolInput = {
+        sectionMeta: {
+            title,
+            source: 'obsidian-permanent-reference',
+            descriptionMd: __normalizeCanvasMarkdownSource(
+                (parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string')
+                    ? parsedMarkdown.descriptionMarkdown
+                    : __htmlToMarkdown(descriptionHtml)
+            ).trim()
+        },
+        bookmarkTree: __buildTempSectionBookmarkTreeProtocol({
+            id: node && node.id,
+            title,
+            items: __parseMarkdownAuto(contentToParse)
+        })
+    };
+
+    const restored = __buildRuntimeTempSectionFromProtocol(protocolInput, {
+        sectionId: node.id,
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        color: convertObsidianColor(node.color) || '#fb464c'
+    });
+    if (restored) return restored;
+
     return {
         id: node.id,
-        title: headerLine || fallbackTitle || (isEn ? 'Temp Section' : '临时栏目'),
+        title,
         x: node.x,
         y: node.y,
         width: node.width,
@@ -32358,7 +33872,7 @@ function __normalizeCanvasMarkdownPath(path) {
 }
 
 function __buildCanvasMarkdownEmbedLookupCandidates(targetPath, currentFilePath = '') {
-    const normalizedTarget = __normalizeCanvasMarkdownPath(targetPath).replace(/\.md$/i, '');
+    const normalizedTarget = __normalizeCanvasMarkdownPath(targetPath).replace(/\.(md|json)$/i, '');
     if (!normalizedTarget) return [];
 
     const normalizedCurrentPath = __normalizeCanvasMarkdownPath(currentFilePath);
@@ -32378,10 +33892,15 @@ function __buildCanvasMarkdownEmbedLookupCandidates(targetPath, currentFilePath 
             candidates.push(normalized);
         }
 
-        const withMd = /\.md$/i.test(normalized) ? normalized : `${normalized}.md`;
+        const withMd = /\.(md|json)$/i.test(normalized) ? normalized : `${normalized}.md`;
         if (!seen.has(withMd)) {
             seen.add(withMd);
             candidates.push(withMd);
+        }
+        const withJson = /\.(md|json)$/i.test(normalized) ? normalized.replace(/\.md$/i, '.json') : `${normalized}.json`;
+        if (!seen.has(withJson)) {
+            seen.add(withJson);
+            candidates.push(withJson);
         }
     };
 
@@ -32413,7 +33932,7 @@ function __parseCanvasMarkdownEmbedReference(line) {
     const hashIndex = inner.indexOf('#');
     const targetPath = hashIndex >= 0 ? inner.slice(0, hashIndex).trim() : inner;
     const sectionTitle = hashIndex >= 0 ? inner.slice(hashIndex + 1).trim() : '';
-    if (!targetPath || !sectionTitle) return null;
+    if (!targetPath) return null;
 
     return {
         targetPath,
@@ -32483,6 +34002,14 @@ function __resolveCanvasMarkdownEmbeddedContent(contentToParse, currentFilePath,
         if (!targetFileText) return;
 
         const parsedTarget = __parseCanvasMarkdownPayload(targetFileText);
+        if (!embedRef.sectionTitle) {
+            const targetBody = String(parsedTarget && parsedTarget.contentToParse || '').trim();
+            if (!targetBody) return;
+            resolvedLines.push(targetBody);
+            resolvedLines.push('');
+            resolvedCount += 1;
+            return;
+        }
         const sectionBody = __extractCanvasMarkdownSectionBody(
             parsedTarget && parsedTarget.contentToParse ? parsedTarget.contentToParse : '',
             embedRef.sectionTitle
@@ -32500,6 +34027,222 @@ function __resolveCanvasMarkdownEmbeddedContent(contentToParse, currentFilePath,
     }
 
     return resolvedLines.join('\n').trim();
+}
+
+function __buildCanvasPackageFileLookupHelpers(sourceFiles) {
+    const files = sourceFiles instanceof Map ? sourceFiles : new Map();
+    const normalizePath = (value) => String(value || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
+
+    const findFileBytes = (relPath) => {
+        const normalizedRel = normalizePath(relPath);
+        if (!normalizedRel) return null;
+        if (files.has(normalizedRel)) return files.get(normalizedRel);
+
+        for (const [key, val] of files.entries()) {
+            const normalizedKey = normalizePath(key);
+            if (!normalizedKey) continue;
+            if (normalizedKey === normalizedRel) return val;
+            if (normalizedKey.endsWith(`/${normalizedRel}`) || normalizedRel.endsWith(`/${normalizedKey}`)) return val;
+            if (normalizedKey.includes(normalizedRel)) return val;
+        }
+        return null;
+    };
+
+    const readFileTextByPath = (targetPath, currentFilePath = '') => {
+        const candidates = __buildCanvasMarkdownEmbedLookupCandidates(targetPath, currentFilePath);
+        for (const candidate of candidates) {
+            const bytes = findFileBytes(candidate);
+            if (!bytes) continue;
+            try {
+                return new TextDecoder('utf-8').decode(bytes);
+            } catch (_) { }
+        }
+        return '';
+    };
+
+    return {
+        findFileBytes,
+        readFileTextByPath
+    };
+}
+
+function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, primaryState, options = {}) {
+    const isEn = !!(options && options.isEn);
+    const tempState = {
+        sections: [],
+        mdNodes: [],
+        edges: [],
+        tempSectionCounter: 0,
+        mdNodeCounter: 0,
+        edgeCounter: 0
+    };
+    const safePrimaryState = primaryState && typeof primaryState === 'object' ? primaryState : {};
+    const { findFileBytes, readFileTextByPath } = __buildCanvasPackageFileLookupHelpers(sourceFiles);
+    const nodes = Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [];
+    const edges = Array.isArray(canvasData && canvasData.edges) ? canvasData.edges : [];
+    const nativeTextMirrorMap = __collectCanvasNativeTextMirrorMap(sourceFiles instanceof Map ? sourceFiles : new Map());
+    let importedPermanentCount = 0;
+
+    nodes.forEach((node) => {
+        if (node.type === 'group') {
+            const labelRaw = (typeof node.label === 'string') ? node.label : '';
+            const hintRaw = isEn ? 'Obsidian Group' : 'Obsidian 分组';
+            const safeLabel = __escapeHtml(labelRaw || (isEn ? 'Group' : '分组'));
+            const safeHint = __escapeHtml(hintRaw);
+            const convertedColor = convertObsidianColor(node.color);
+            const isHex = convertedColor && convertedColor.startsWith('#');
+
+            tempState.mdNodes.push({
+                id: node.id,
+                type: 'md',
+                subtype: 'import-container',
+                x: node.x,
+                y: node.y,
+                width: node.width,
+                height: node.height,
+                groupLabel: labelRaw || null,
+                groupHint: hintRaw,
+                containedTempIds: [],
+                containedMdIds: [],
+                _membershipInitialized: false,
+                text: '',
+                html: `<div class="import-group-label">${safeLabel}</div><div class="import-group-hint">${safeHint}</div>`,
+                color: 'transparent',
+                colorHex: isHex ? convertedColor : null,
+                style: 'border: 2px dashed #bbb; background: rgba(0,0,0,0.02);'
+            });
+            return;
+        }
+
+        if (node.type === 'file' && node.file && /\.(md|json)$/i.test(String(node.file || ''))) {
+            const fileBytes = findFileBytes(node.file);
+            if (!fileBytes) return;
+
+            const fileText = new TextDecoder('utf-8').decode(fileBytes);
+            const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
+            const descriptionHtml = parsedMarkdown.descriptionHtml || '';
+            const contentToParse = parsedMarkdown.contentToParse || '';
+            const isPermanent = __isPermanentMarkdownPath(node.file);
+            const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
+            const isMdNode = __isBlankMarkdownPath(node.file);
+            const isLivePermanentNode = isPermanent && __isExportedPermanentCanvasNode(node);
+            const resolvedContentToParse = isPermanent
+                ? __resolveCanvasMarkdownEmbeddedContent(contentToParse, node.file, readFileTextByPath)
+                : contentToParse;
+
+            if (isLivePermanentNode) {
+                const items = __parseMarkdownAuto(resolvedContentToParse);
+                const sectionId = node.id;
+                importedPermanentCount += 1;
+                const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
+                const slotLabel = toAlphaLabel(resolvedSlot) || '';
+                const suffix = slotLabel ? ` (#${slotLabel})` : '';
+                const dateStr = new Date().toISOString().slice(0, 10);
+                const snapshotTitle = isEn
+                    ? `[Snapshot] Permanent Sections (${dateStr})${suffix}`
+                    : `[快照] 永久栏目 (${dateStr})${suffix}`;
+
+                tempState.sections.push({
+                    id: sectionId,
+                    title: snapshotTitle,
+                    x: node.x,
+                    y: node.y,
+                    width: node.width,
+                    height: node.height,
+                    color: convertObsidianColor(node.color) || '#44cf6e',
+                    items,
+                    description: descriptionHtml,
+                    isSnapshot: true
+                });
+                try {
+                    if (!safePrimaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
+                        const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
+                            resolvedContentToParse,
+                            parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
+                        );
+                        const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
+                        if (normalizedPermanentTreeSnapshot) {
+                            safePrimaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
+                        }
+                    }
+                } catch (_) { }
+                return;
+            }
+
+            if (isPermanent) {
+                tempState.sections.push(
+                    __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, resolvedContentToParse, isEn)
+                );
+                return;
+            }
+
+            if (isTempSection) {
+                tempState.sections.push(
+                    __buildImportedTempSectionFromVisualMarkdown(node, parsedMarkdown, contentToParse, isEn)
+                );
+                return;
+            }
+
+            if (isMdNode) {
+                const convertedColor = convertObsidianColor(node.color);
+                const isHex = convertedColor && convertedColor.startsWith('#');
+                const restoredBlankNode = __ensureMdNodeMarkdownProtocol({
+                    id: node.id,
+                    x: node.x,
+                    y: node.y,
+                    width: node.width,
+                    height: node.height,
+                    color: isHex ? null : node.color,
+                    colorHex: isHex ? convertedColor : null,
+                    source: 'obsidian-canvas-file',
+                    markdownSource: parsedMarkdown.rawBody,
+                    text: parsedMarkdown.rawBody
+                }, { refreshCachesFromMarkdown: true });
+                tempState.mdNodes.push(restoredBlankNode);
+            }
+            return;
+        }
+
+        if (node.type === 'text') {
+            const normalizedNodeId = String(node.id || '').trim();
+            const mirroredText = normalizedNodeId && nativeTextMirrorMap.has(normalizedNodeId)
+                ? nativeTextMirrorMap.get(normalizedNodeId)
+                : null;
+            const convertedColor = convertObsidianColor(node.color);
+            const isHex = convertedColor && convertedColor.startsWith('#');
+            tempState.mdNodes.push({
+                id: node.id,
+                x: node.x,
+                y: node.y,
+                width: node.width,
+                height: node.height,
+                color: isHex ? null : node.color,
+                colorHex: isHex ? convertedColor : null,
+                text: mirroredText != null ? String(mirroredText) : String(node.text || ''),
+                subtype: 'canvas-native-text',
+                source: 'obsidian-canvas-text'
+            });
+        }
+    });
+
+    try { __recomputeImportContainerMembershipForTempState(tempState); } catch (_) { }
+
+    tempState.edges = edges.map((edge) => {
+        const convertedColor = convertObsidianColor(edge.color);
+        const isHex = convertedColor && convertedColor.startsWith('#');
+        return {
+            id: edge.id,
+            fromNode: edge.fromNode,
+            toNode: edge.toNode,
+            fromSide: edge.fromSide || '',
+            toSide: edge.toSide || '',
+            label: edge.label || '',
+            color: isHex ? null : edge.color,
+            colorHex: isHex ? convertedColor : null
+        };
+    });
+
+    return tempState;
 }
 
 async function parseCanvasPackageFromZipFile(file) {
@@ -32557,298 +34300,14 @@ async function parseCanvasPackageFromZipFile(file) {
         }
         storage = primaryState.storage || null;
 
-        if (primaryState.canvasState) {
-            tempState = {
-                sections: primaryState.canvasState.tempSections || [],
-                mdNodes: primaryState.canvasState.mdNodes || [],
-                edges: primaryState.canvasState.edges || [],
-                tempSectionCounter: primaryState.canvasState.tempSectionCounter || 0,
-                mdNodeCounter: primaryState.canvasState.mdNodeCounter || 0,
-                edgeCounter: primaryState.canvasState.edgeCounter || 0
-            };
-        } else if (storage && storage[TEMP_SECTION_STORAGE_KEY]) {
-            tempState = storage[TEMP_SECTION_STORAGE_KEY];
-        }
+        tempState = __extractCanvasTempStateFromBackupPayload(primaryState, storage);
     }
     // Mode B: Obsidian Canvas (Reconstruct from .canvas + .md)
     else if (canvasFileName) {
         console.log(`[Canvas] Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(zipFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
-
-        // Reconstruct tempState from Canvas Data
-        tempState = {
-            sections: [], // Will map Canvas Groups/Files to TempSections
-            mdNodes: [],
-            edges: [],
-            tempSectionCounter: 0,
-            mdNodeCounter: 0,
-            edgeCounter: 0
-        };
-
-        // Helper to find file in zip
-        const findFile = (relPath) => {
-            // relPath in canvas is relative to canvas file. 
-            // Zip keys might be "Root/Sub/File.md" or just "File.md".
-            // We try exact match first or fuzzy match.
-            // If canvasFileName is "Root/Board.canvas", then relPaths are relative to "Root/".
-
-            // Simplification: We search for suffix match because we control the export structure.
-            // Export structure: Root/File.md
-
-            // Try strict match first assuming flattened structure or standard export
-            if (zipFiles.has(relPath)) return zipFiles.get(relPath);
-
-            // Try finding by suffix (e.g. "Temporary Sections/A. Foo.md")
-            for (const [key, val] of zipFiles) {
-                if (key.endsWith(relPath) || relPath.endsWith(key)) return val;
-                // Handle path separators
-                const normKey = key.replace(/\\/g, '/');
-                const normRel = relPath.replace(/\\/g, '/');
-                if (normKey.includes(normRel)) return val;
-            }
-            return null;
-        };
-        const readFileTextByPath = (targetPath, currentFilePath = '') => {
-            const candidates = __buildCanvasMarkdownEmbedLookupCandidates(targetPath, currentFilePath);
-            for (const candidate of candidates) {
-                const bytes = findFile(candidate);
-                if (!bytes) continue;
-                try {
-                    return new TextDecoder('utf-8').decode(bytes);
-                } catch (_) { }
-            }
-            return '';
-        };
-
-        const nodes = canvasData.nodes || [];
-        const edges = canvasData.edges || [];
-        const nativeTextMirrorMap = __collectCanvasNativeTextMirrorMap(zipFiles);
-
-        // Map Canvas ID to our ID
-        const idMap = {};
-        let importedPermanentCount = 0;
-
-        nodes.forEach(node => {
-            if (node.type === 'group') {
-                const labelRaw = (typeof node.label === 'string') ? node.label : '';
-                const hintRaw = isEn ? 'Obsidian Group' : 'Obsidian 分组';
-                const safeLabel = __escapeHtml(labelRaw || (isEn ? 'Group' : '分组'));
-                const safeHint = __escapeHtml(hintRaw);
-                const convertedColor = convertObsidianColor(node.color);
-                const isHex = convertedColor && convertedColor.startsWith('#');
-
-                tempState.mdNodes.push({
-                    id: node.id,
-                    type: 'md',
-                    subtype: 'import-container',
-                    x: node.x,
-                    y: node.y,
-                    width: node.width,
-                    height: node.height,
-                    groupLabel: labelRaw || null,
-                    groupHint: hintRaw,
-                    containedTempIds: [],
-                    containedMdIds: [],
-                    _membershipInitialized: false,
-                    text: '',
-                    html: `<div class="import-group-label">${safeLabel}</div><div class="import-group-hint">${safeHint}</div>`,
-                    color: 'transparent',
-                    colorHex: isHex ? convertedColor : null,
-                    style: 'border: 2px dashed #bbb; background: rgba(0,0,0,0.02);'
-                });
-                return;
-            }
-            if (node.type === 'file' && node.file && node.file.endsWith('.md')) {
-                const fileBytes = findFile(node.file);
-                if (!fileBytes) return;
-
-                const fileText = new TextDecoder('utf-8').decode(fileBytes);
-                const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
-                const descriptionHtml = parsedMarkdown.descriptionHtml || '';
-                const contentToParse = parsedMarkdown.contentToParse || '';
-
-                // Identify type based on filename
-                const isPermanent = __isPermanentMarkdownPath(node.file);
-                const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
-                const isMdNode = __isBlankMarkdownPath(node.file);
-                const isLivePermanentNode = isPermanent && __isExportedPermanentCanvasNode(node);
-                const resolvedContentToParse = isPermanent
-                    ? __resolveCanvasMarkdownEmbeddedContent(contentToParse, node.file, readFileTextByPath)
-                    : contentToParse;
-
-                if (isLivePermanentNode) {
-                    // Reconstruct Snapshot Permanent Section
-                    // We don't have the tree data in Mode A, but we have position.
-                    // Visual Obsidian tree files can still reconstruct bookmark items here.
-
-                    const items = __parseMarkdownAuto(resolvedContentToParse);
-                    const sectionId = node.id; // 使用原始 node.id 以便边缘正确映射
-                    importedPermanentCount++;
-                    const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
-                    const slotLabel = toAlphaLabel(resolvedSlot) || '';
-                    const suffix = slotLabel ? ` (#${slotLabel})` : '';
-                    const dateStr = new Date().toISOString().slice(0, 10);
-                    const snapshotTitle = isEn
-                        ? `[Snapshot] Permanent Sections (${dateStr})${suffix}`
-                        : `[快照] 永久栏目 (${dateStr})${suffix}`;
-
-                    tempState.sections.push({
-                        id: sectionId,
-                        title: snapshotTitle,
-                        x: node.x,
-                        y: node.y,
-                        width: node.width,
-                        height: node.height,
-                        color: convertObsidianColor(node.color) || '#44cf6e',
-                        items: items, // Restored items!
-                        description: descriptionHtml,
-                        isSnapshot: true
-                    });
-                    try {
-                        if (!primaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
-                            const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
-                                resolvedContentToParse,
-                                parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
-                            );
-                            const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
-                            if (normalizedPermanentTreeSnapshot) {
-                                primaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
-                            }
-                        }
-                    } catch (_) { }
-                    // We need to map this in storage for scroll if possible, but IDs changed.
-                } else if (isPermanent) {
-                    tempState.sections.push(
-                        __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, resolvedContentToParse, isEn)
-                    );
-                } else if (isTempSection) {
-                    // Restore Temp Section
-                    const items = __parseMarkdownAuto(contentToParse);
-                    const sectionId = node.id; // Use canvas ID as base if possible, or gen new
-
-                    // Extract title from filename or md content?
-                    // Filename: "A. Title.md"
-                    const fileName = node.file.split('/').pop().replace('.md', '');
-                    const parsed = __parseTempSectionLabelAndTitleFromFilename(fileName);
-                    const headerParsed = __parseTempSectionLabelAndTitleFromFilename(parsedMarkdown.headerLine || '');
-                    const title = headerParsed.title || parsed.title || (isEn ? 'Temp Section' : '临时栏目');
-
-                    // Sequence: map 'A' to number?
-                    // Let's just generate new sequence or rely on import logic to reassign.
-
-                    const restored = {
-                        id: sectionId,
-                        title: title,
-                        x: node.x,
-                        y: node.y,
-                        width: node.width,
-                        height: node.height,
-                        color: convertObsidianColor(node.color) || '#fb464c',
-                        items: items,
-                        description: descriptionHtml
-                    };
-                    if (headerParsed.label) {
-                        restored.label = headerParsed.label;
-                    } else if (parsed.label) {
-                        restored.label = parsed.label;
-                    }
-                    if (headerParsed.label) {
-                        const alphaMatch = headerParsed.label.match(/^([A-Z]+)/i);
-                        const alphaPart = alphaMatch ? alphaMatch[1] : headerParsed.label;
-                        const seq = __alphaLabelToNumber(alphaPart);
-                        if (seq) restored.sequenceNumber = seq;
-                    } else if (parsed.label) {
-                        const alphaMatch = parsed.label.match(/^([A-Z]+)/);
-                        const alphaPart = alphaMatch ? alphaMatch[1] : parsed.label;
-                        const seq = __alphaLabelToNumber(alphaPart);
-                        if (seq) restored.sequenceNumber = seq;
-                    }
-
-                    const inferredSource = __inferTempSectionSourceFromFilePath(node.file);
-                    if (inferredSource) {
-                        restored.source = inferredSource;
-                        if (!restored.label) {
-                            const sourceLabel = __getSpecialTempSectionLabelBySource(inferredSource, isEn);
-                            if (sourceLabel) restored.label = sourceLabel;
-                        }
-                    }
-
-                    tempState.sections.push(restored);
-	                } else if (isMdNode) {
-	                    // Restore Blank Section
-	                    // MdNodes just need text content
-	                    const sectionId = node.id;
-	                    const convertedColor = convertObsidianColor(node.color);
-	                    const isHex = convertedColor && convertedColor.startsWith('#');
-	                    tempState.mdNodes.push({
-	                        id: sectionId,
-	                        x: node.x,
-	                        y: node.y,
-	                        width: node.width,
-	                        height: node.height,
-	                        color: isHex ? null : node.color,
-	                        colorHex: isHex ? convertedColor : null,
-	                        source: 'obsidian-canvas-file',
-	                        text: parsedMarkdown.rawBody // 保留空白栏目的完整正文
-	                    });
-	                }
-            } else if (node.type === 'text') {
-                const normalizedNodeId = String(node.id || '').trim();
-                const mirroredText = normalizedNodeId && nativeTextMirrorMap.has(normalizedNodeId)
-                    ? nativeTextMirrorMap.get(normalizedNodeId)
-                    : null;
-                const convertedColor = convertObsidianColor(node.color);
-                const isHex = convertedColor && convertedColor.startsWith('#');
-                tempState.mdNodes.push({
-                    id: node.id,
-                    x: node.x,
-                    y: node.y,
-                    width: node.width,
-                    height: node.height,
-                    color: isHex ? null : node.color,
-                    colorHex: isHex ? convertedColor : null,
-                    text: mirroredText != null ? String(mirroredText) : String(node.text || ''),
-                    subtype: 'canvas-native-text',
-                    source: 'obsidian-canvas-text'
-                });
-            }
-        });
-
-        // JSON Canvas spec does not store explicit group membership; infer by geometry.
-        try { __recomputeImportContainerMembershipForTempState(tempState); } catch (_) { }
-
-        // Restore Edges
-        /* 
-        edges.forEach(edge => {
-             // Map IDs and add to tempState.edges
-             // Canvas uses 'fromNode', 'fromSide', 'toNode', 'toSide'
-             // We use 'source', 'target'
-             tempState.edges.push({
-                 id: edge.id,
-                 source: edge.fromNode,
-                 target: edge.toNode,
-                 label: edge.label || ''
-             });
-        });
-        */
-        // Edges logic is complex due to ID matching, let's skip for MVP or try direct map
-        tempState.edges = edges.map(e => {
-            const convertedColor = convertObsidianColor(e.color);
-            // 如果是十六进制颜色，存储到 colorHex；如果是预设数字，存储到 color
-            const isHex = convertedColor && convertedColor.startsWith('#');
-            return {
-                id: e.id,
-                fromNode: e.fromNode,
-                toNode: e.toNode,
-                fromSide: e.fromSide || '',
-                toSide: e.toSide || '',
-                label: e.label || '',
-                color: isHex ? null : e.color,
-                colorHex: isHex ? convertedColor : null
-            };
-        });
-
+        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, zipFiles, primaryState, { isEn });
     } else {
         throw new Error(isEn
             ? 'Invalid Package: Missing both backup.json and .canvas file.'
@@ -32948,255 +34407,14 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
         }
         storage = primaryState.storage || null;
 
-        if (primaryState.canvasState) {
-            tempState = {
-                sections: primaryState.canvasState.tempSections || [],
-                mdNodes: primaryState.canvasState.mdNodes || [],
-                edges: primaryState.canvasState.edges || [],
-                tempSectionCounter: primaryState.canvasState.tempSectionCounter || 0,
-                mdNodeCounter: primaryState.canvasState.mdNodeCounter || 0,
-                edgeCounter: primaryState.canvasState.edgeCounter || 0
-            };
-        } else if (storage && storage[TEMP_SECTION_STORAGE_KEY]) {
-            tempState = storage[TEMP_SECTION_STORAGE_KEY];
-        }
+        tempState = __extractCanvasTempStateFromBackupPayload(primaryState, storage);
     }
     // Mode B: Obsidian Canvas (Reconstruct from .canvas + .md)
     else if (canvasFileName) {
         console.log(`[Canvas] Folder Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(folderFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
-
-        tempState = {
-            sections: [],
-            mdNodes: [],
-            edges: [],
-            tempSectionCounter: 0,
-            mdNodeCounter: 0,
-            edgeCounter: 0
-        };
-
-        // Helper to find file in folder
-        const findFile = (relPath) => {
-            if (folderFiles.has(relPath)) return folderFiles.get(relPath);
-
-            for (const [key, val] of folderFiles) {
-                if (key.endsWith(relPath) || relPath.endsWith(key)) return val;
-                const normKey = key.replace(/\\/g, '/');
-                const normRel = relPath.replace(/\\/g, '/');
-                if (normKey.includes(normRel)) return val;
-            }
-            return null;
-        };
-        const readFileTextByPath = (targetPath, currentFilePath = '') => {
-            const candidates = __buildCanvasMarkdownEmbedLookupCandidates(targetPath, currentFilePath);
-            for (const candidate of candidates) {
-                const bytes = findFile(candidate);
-                if (!bytes) continue;
-                try {
-                    return new TextDecoder('utf-8').decode(bytes);
-                } catch (_) { }
-            }
-            return '';
-        };
-
-        const nodes = canvasData.nodes || [];
-        const edges = canvasData.edges || [];
-        const nativeTextMirrorMap = __collectCanvasNativeTextMirrorMap(folderFiles);
-        let importedPermanentCount = 0;
-
-        nodes.forEach(node => {
-            if (node.type === 'group') {
-                const labelRaw = (typeof node.label === 'string') ? node.label : '';
-                const hintRaw = isEn ? 'Obsidian Group' : 'Obsidian 分组';
-                const safeLabel = __escapeHtml(labelRaw || (isEn ? 'Group' : '分组'));
-                const safeHint = __escapeHtml(hintRaw);
-                const convertedColor = convertObsidianColor(node.color);
-                const isHex = convertedColor && convertedColor.startsWith('#');
-
-                tempState.mdNodes.push({
-                    id: node.id,
-                    type: 'md',
-                    subtype: 'import-container',
-                    x: node.x,
-                    y: node.y,
-                    width: node.width,
-                    height: node.height,
-                    groupLabel: labelRaw || null,
-                    groupHint: hintRaw,
-                    containedTempIds: [],
-                    containedMdIds: [],
-                    _membershipInitialized: false,
-                    text: '',
-                    html: `<div class="import-group-label">${safeLabel}</div><div class="import-group-hint">${safeHint}</div>`,
-                    color: 'transparent',
-                    colorHex: isHex ? convertedColor : null,
-                    style: 'border: 2px dashed #bbb; background: rgba(0,0,0,0.02);'
-                });
-                return;
-            }
-            if (node.type === 'file' && node.file && node.file.endsWith('.md')) {
-                const fileBytes = findFile(node.file);
-                if (!fileBytes) return;
-
-                const fileText = new TextDecoder('utf-8').decode(fileBytes);
-                const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
-                const descriptionHtml = parsedMarkdown.descriptionHtml || '';
-                const contentToParse = parsedMarkdown.contentToParse || '';
-
-                const isPermanent = __isPermanentMarkdownPath(node.file);
-                const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
-                const isMdNode = __isBlankMarkdownPath(node.file);
-                const isLivePermanentNode = isPermanent && __isExportedPermanentCanvasNode(node);
-                const resolvedContentToParse = isPermanent
-                    ? __resolveCanvasMarkdownEmbeddedContent(contentToParse, node.file, readFileTextByPath)
-                    : contentToParse;
-
-                if (isLivePermanentNode) {
-                    const items = __parseMarkdownAuto(resolvedContentToParse);
-                    const sectionId = node.id; // 使用原始 node.id 以便边缘正确映射
-                    importedPermanentCount++;
-                    const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
-                    const slotLabel = toAlphaLabel(resolvedSlot) || '';
-                    const suffix = slotLabel ? ` (#${slotLabel})` : '';
-                    const dateStr = new Date().toISOString().slice(0, 10);
-                    const snapshotTitle = isEn
-                        ? `[Snapshot] Permanent Sections (${dateStr})${suffix}`
-                        : `[快照] 永久栏目 (${dateStr})${suffix}`;
-
-                    tempState.sections.push({
-                        id: sectionId,
-                        title: snapshotTitle,
-                        x: node.x,
-                        y: node.y,
-                        width: node.width,
-                        height: node.height,
-                        color: convertObsidianColor(node.color) || '#44cf6e',
-                        items: items,
-                        description: descriptionHtml,
-                        isSnapshot: true
-                    });
-
-                    // [Sync] Try to rebuild the real browser bookmark tree snapshot from Obsidian permanent markdown (#A).
-                    // This enables "Obsidian edits permanent section -> overwrite local browser bookmarks" workflow.
-                    try {
-                        if (!primaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
-                            const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
-                                resolvedContentToParse,
-                                parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
-                            );
-                            const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
-                            if (normalizedPermanentTreeSnapshot) {
-                                primaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
-                            }
-                        }
-                    } catch (_) { }
-                } else if (isPermanent) {
-                    tempState.sections.push(
-                        __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, resolvedContentToParse, isEn)
-                    );
-                } else if (isTempSection) {
-                    const items = __parseMarkdownAuto(contentToParse);
-                    const sectionId = node.id;
-                    const fileName = node.file.split('/').pop().replace('.md', '');
-                    const parsed = __parseTempSectionLabelAndTitleFromFilename(fileName);
-                    const headerParsed = __parseTempSectionLabelAndTitleFromFilename(parsedMarkdown.headerLine || '');
-                    const title = headerParsed.title || parsed.title || (isEn ? 'Temp Section' : '临时栏目');
-
-                    const restored = {
-                        id: sectionId,
-                        title: title,
-                        x: node.x,
-                        y: node.y,
-                        width: node.width,
-                        height: node.height,
-                        color: convertObsidianColor(node.color) || '#fb464c',
-                        items: items,
-                        description: descriptionHtml
-                    };
-                    if (headerParsed.label) {
-                        restored.label = headerParsed.label;
-                    } else if (parsed.label) {
-                        restored.label = parsed.label;
-                    }
-                    if (headerParsed.label) {
-                        const alphaMatch = headerParsed.label.match(/^([A-Z]+)/i);
-                        const alphaPart = alphaMatch ? alphaMatch[1] : headerParsed.label;
-                        const seq = __alphaLabelToNumber(alphaPart);
-                        if (seq) restored.sequenceNumber = seq;
-                    } else if (parsed.label) {
-                        const alphaMatch = parsed.label.match(/^([A-Z]+)/);
-                        const alphaPart = alphaMatch ? alphaMatch[1] : parsed.label;
-                        const seq = __alphaLabelToNumber(alphaPart);
-                        if (seq) restored.sequenceNumber = seq;
-                    }
-
-                    const inferredSource = __inferTempSectionSourceFromFilePath(node.file);
-                    if (inferredSource) {
-                        restored.source = inferredSource;
-                        if (!restored.label) {
-                            const sourceLabel = __getSpecialTempSectionLabelBySource(inferredSource, isEn);
-                            if (sourceLabel) restored.label = sourceLabel;
-                        }
-                    }
-
-                    tempState.sections.push(restored);
-	                } else if (isMdNode) {
-	                    const sectionId = node.id;
-	                    const convertedColor = convertObsidianColor(node.color);
-	                    const isHex = convertedColor && convertedColor.startsWith('#');
-	                    tempState.mdNodes.push({
-	                        id: sectionId,
-	                        x: node.x,
-	                        y: node.y,
-	                        width: node.width,
-	                        height: node.height,
-	                        color: isHex ? null : node.color,
-	                        colorHex: isHex ? convertedColor : null,
-	                        source: 'obsidian-canvas-file',
-	                        text: parsedMarkdown.rawBody
-	                    });
-	                }
-            } else if (node.type === 'text') {
-                const normalizedNodeId = String(node.id || '').trim();
-                const mirroredText = normalizedNodeId && nativeTextMirrorMap.has(normalizedNodeId)
-                    ? nativeTextMirrorMap.get(normalizedNodeId)
-                    : null;
-                const convertedColor = convertObsidianColor(node.color);
-                const isHex = convertedColor && convertedColor.startsWith('#');
-                tempState.mdNodes.push({
-                    id: node.id,
-                    x: node.x,
-                    y: node.y,
-                    width: node.width,
-                    height: node.height,
-                    color: isHex ? null : node.color,
-                    colorHex: isHex ? convertedColor : null,
-                    text: mirroredText != null ? String(mirroredText) : String(node.text || ''),
-                    subtype: 'canvas-native-text',
-                    source: 'obsidian-canvas-text'
-                });
-            }
-        });
-
-        // JSON Canvas spec does not store explicit group membership; infer by geometry.
-        try { __recomputeImportContainerMembershipForTempState(tempState); } catch (_) { }
-
-        tempState.edges = edges.map(e => {
-            const convertedColor = convertObsidianColor(e.color);
-            const isHex = convertedColor && convertedColor.startsWith('#');
-            return {
-                id: e.id,
-                fromNode: e.fromNode,
-                toNode: e.toNode,
-                fromSide: e.fromSide || '',
-                toSide: e.toSide || '',
-                label: e.label || '',
-                color: isHex ? null : e.color,
-                colorHex: isHex ? convertedColor : null
-            };
-        });
-
+        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, folderFiles, primaryState, { isEn });
     } else {
         throw new Error(isEn
             ? 'Invalid Folder: Missing both backup.json and .canvas file.'
@@ -33266,6 +34484,130 @@ function __normalizeImportFolderFilesMap(filesByPath) {
     }
 
     return output;
+}
+
+function __rebuildPermanentViewShellSnapshotFromSyncFolderFiles(filesByPath) {
+    const normalizedFiles = __normalizeImportFolderFilesMap(filesByPath);
+    const emptySnapshot = __normalizePermanentViewShellSnapshotProtocol({ version: 1, views: [] });
+    if (!normalizedFiles.size) {
+        return emptySnapshot;
+    }
+
+    const normalizePath = (path) => String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
+    const findFileBytes = (relPath) => {
+        const normalizedRel = normalizePath(relPath);
+        if (!normalizedRel) return null;
+        if (normalizedFiles.has(normalizedRel)) return normalizedFiles.get(normalizedRel);
+
+        let bestMatch = null;
+        for (const [key, val] of normalizedFiles.entries()) {
+            const normalizedKey = normalizePath(key);
+            if (!normalizedKey) continue;
+            if (normalizedKey.endsWith(normalizedRel)) {
+                if (!bestMatch || normalizedKey.length < bestMatch.key.length) {
+                    bestMatch = { key: normalizedKey, bytes: val };
+                }
+            }
+        }
+        if (bestMatch) return bestMatch.bytes;
+
+        for (const [key, val] of normalizedFiles.entries()) {
+            const normalizedKey = normalizePath(key);
+            if (!normalizedKey) continue;
+            if (normalizedKey.includes(normalizedRel)) return val;
+        }
+        return null;
+    };
+
+    const isPermanentMarkdownPath = (path) => {
+        const normalized = normalizePath(path);
+        if (!normalized) return false;
+        if (/(^|\/)(永久栏目|Permanent)(\/|$)/i.test(normalized)) return true;
+        if (/Permanent\s*Sections/i.test(normalized)) return true;
+        if (/Permanent\s*Bookmarks/i.test(normalized)) return true;
+        if (/(^|\/)永久书签(\/|$)/.test(normalized)) return true;
+        return false;
+    };
+
+    let canvasData = null;
+    for (const [key, bytes] of normalizedFiles.entries()) {
+        const normalizedKey = normalizePath(key);
+        if (!normalizedKey || !/\.canvas$/i.test(normalizedKey) || !bytes) continue;
+        try {
+            const text = new TextDecoder('utf-8').decode(bytes);
+            const parsed = JSON.parse(text);
+            if (parsed && typeof parsed === 'object' && Array.isArray(parsed.nodes)) {
+                canvasData = parsed;
+                break;
+            }
+        } catch (_) { }
+    }
+    if (!canvasData) {
+        return emptySnapshot;
+    }
+
+    const toPx = (value) => {
+        const n = parseFloat(String(value == null ? '' : value));
+        if (!Number.isFinite(n)) return '';
+        return `${Math.round(n)}px`;
+    };
+
+    const views = [];
+    let permanentFallbackIndex = 0;
+    const nodes = Array.isArray(canvasData.nodes) ? canvasData.nodes : [];
+
+    nodes.forEach((node) => {
+        if (!node || node.type !== 'file') return;
+        const nodeId = String(node.id || '').trim();
+        const filePath = String(node.file || '').trim();
+        if (!nodeId || !filePath || !/\.(md|json)$/i.test(filePath)) return;
+        if (!isPermanentMarkdownPath(filePath) || !__isExportedPermanentCanvasNode(node)) return;
+
+        const fileBytes = findFileBytes(filePath);
+        const fileText = fileBytes ? new TextDecoder('utf-8').decode(fileBytes) : '';
+        const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
+        permanentFallbackIndex += 1;
+        const slot = __resolvePermanentSectionSlotForImport(parsedMarkdown, filePath, permanentFallbackIndex);
+        const slotNumber = Number.isFinite(slot) && slot > 0 ? slot : 1;
+        const rawDescSource = parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string'
+            ? parsedMarkdown.descriptionMarkdown
+            : ((parsedMarkdown && typeof parsedMarkdown.descriptionHtml === 'string')
+                ? __htmlToMarkdown(parsedMarkdown.descriptionHtml)
+                : '');
+        const descriptionMd = __normalizeCanvasMarkdownSource(rawDescSource).trim();
+        const cardState = {
+            left: toPx(node.x),
+            top: toPx(node.y),
+            width: toPx(node.width),
+            height: toPx(node.height)
+        };
+
+        if (nodeId === 'permanent-section' || slotNumber === 1) {
+            views.push({
+                copyId: null,
+                descriptionMd,
+                cardState
+            });
+            return;
+        }
+
+        const copyId = nodeId.startsWith('permanent-section-copy-')
+            ? nodeId.slice('permanent-section-copy-'.length)
+            : '';
+        if (!copyId) return;
+
+        views.push({
+            copyId,
+            displayIndex: Math.max(1, slotNumber - 1),
+            descriptionMd,
+            cardState
+        });
+    });
+
+    return __normalizePermanentViewShellSnapshotProtocol({
+        version: 1,
+        views
+    });
 }
 
 async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
@@ -33359,7 +34701,7 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
 	            if (!node || node.type !== 'file') return;
 	            const nodeId = String(node.id || '').trim();
 	            const filePath = String(node.file || '').trim();
-	            if (!nodeId || !filePath || !/\.md$/i.test(filePath)) return;
+	            if (!nodeId || !filePath || !/\.(md|json)$/i.test(filePath)) return;
 
 	            const isPermanentNodeFile = isPermanentMarkdownPath(filePath);
 	            const isExportedPermanentNode = isPermanentNodeFile && __isExportedPermanentCanvasNode(node);
@@ -33376,10 +34718,12 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
             const slot = __resolvePermanentSectionSlotForImport(parsedMarkdown, filePath, permanentFallbackIndex);
             const slotNumber = Number.isFinite(slot) && slot > 0 ? slot : 1;
 
-            const rawDescHtml = parsedMarkdown && typeof parsedMarkdown.descriptionHtml === 'string'
-                ? parsedMarkdown.descriptionHtml
-                : '';
-            const descHtml = __normalizeCanvasRichHtml(rawDescHtml);
+            const rawDescSource = parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string'
+                ? parsedMarkdown.descriptionMarkdown
+                : ((parsedMarkdown && typeof parsedMarkdown.descriptionHtml === 'string')
+                    ? __htmlToMarkdown(parsedMarkdown.descriptionHtml)
+                    : '');
+            const descSource = __normalizeCanvasMarkdownSource(rawDescSource).trim();
             if (nodeId === 'permanent-section' || slotNumber === 1) {
                 // Main permanent section layout
                 const position = {
@@ -33390,8 +34734,8 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
                 };
                 try { saveSharedState('permanent-section-position', position); } catch (_) { }
 
-                try { __persistPermanentTipStorageValue('canvas-permanent-tip-text', descHtml); } catch (_) { }
-                permanentTipUpdates.push({ copyId: null, html: descHtml });
+                try { __persistPermanentTipStorageValue('canvas-permanent-tip-text', descSource); } catch (_) { }
+                permanentTipUpdates.push({ copyId: null, source: descSource });
                 return;
             }
 
@@ -33411,8 +34755,8 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
                     height: toPx(node.height)
                 });
 
-                try { __persistPermanentTipStorageValue(`canvas-permanent-tip-text-copy-${copyId}`, descHtml); } catch (_) { }
-                permanentTipUpdates.push({ copyId, html: descHtml });
+                try { __persistPermanentTipStorageValue(`canvas-permanent-tip-text-copy-${copyId}`, descSource); } catch (_) { }
+                permanentTipUpdates.push({ copyId, source: descSource });
             }
         });
 
@@ -33546,15 +34890,15 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
         permanentTipUpdates.forEach((update) => {
             if (!update) return;
             const copyId = update.copyId ? String(update.copyId) : '';
-            const html = typeof update.html === 'string' ? update.html : '';
+            const source = typeof update.source === 'string' ? update.source : '';
             if (!copyId) {
-                if (mainEl) __applyPermanentTipContentRealtimeSync(mainEl, html);
+                if (mainEl) __applyPermanentTipContentRealtimeSync(mainEl, source);
                 return;
             }
             const canvasContent = document.getElementById('canvasContent');
             const scope = canvasContent || document;
             const target = scope.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${CSS.escape(copyId)}"]`);
-            if (target) __applyPermanentTipContentRealtimeSync(target, html);
+            if (target) __applyPermanentTipContentRealtimeSync(target, source);
         });
     } catch (_) { }
 
@@ -34371,10 +35715,487 @@ function __buildPersistedCanvasState(state) {
         sections: persistedSections,
         mdNodes: persistedMdNodes,
         edges: persistedEdges,
-        timestamp: Date.now()
+        timestamp: (() => {
+            const rawTimestamp = Number(safe.timestamp);
+            return Number.isFinite(rawTimestamp) && rawTimestamp > 0
+                ? rawTimestamp
+                : Date.now();
+        })()
     };
 
     return persistedState;
+}
+
+function __normalizeTempSectionProtocolLabel(section) {
+    const rawLabel = getTempSectionLabel(section);
+    return __normalizeTempSectionLabelToDashScheme(rawLabel || '').trim();
+}
+
+function __normalizeTempSectionProtocolRootId(section) {
+    const label = __normalizeTempSectionProtocolLabel(section);
+    if (label) return `tmp/${label}`;
+
+    const sequenceNumber = __normalizePositiveInt(section && section.sequenceNumber);
+    if (sequenceNumber) {
+        const alpha = toAlphaLabel(sequenceNumber) || `S${sequenceNumber}`;
+        return `tmp/${alpha}-1`;
+    }
+
+    const rawSectionId = String(section && section.id || '').trim();
+    const safeSectionId = rawSectionId
+        .replace(/[^A-Za-z0-9._-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    if (safeSectionId) return `tmp/${safeSectionId}`;
+
+    return 'tmp/section';
+}
+
+function __normalizeTempSectionDescriptionMarkdown(section) {
+    if (!section || typeof section !== 'object') return '';
+
+    const rawValue = Object.prototype.hasOwnProperty.call(section, 'descriptionMd')
+        ? section.descriptionMd
+        : section.description;
+
+    if (rawValue == null) return '';
+    return __normalizeCanvasMarkdownSource(__htmlToMarkdown(String(rawValue || ''))).trim();
+}
+
+function __getDefaultTempSectionProtocolTitle() {
+    return (typeof currentLang !== 'undefined' && String(currentLang).toLowerCase().startsWith('en'))
+        ? 'Temp Section'
+        : '临时栏目';
+}
+
+function __resolveTempBookmarkTreeProtocolNodeKind(nodeInput) {
+    const rawUrl = String(nodeInput && nodeInput.url || '').trim();
+    const kindRaw = String(nodeInput && (nodeInput.kind || nodeInput.type) || '').trim().toLowerCase();
+    return (kindRaw === 'bookmark' || (rawUrl && kindRaw !== 'folder')) ? 'bookmark' : 'folder';
+}
+
+function __buildTempBookmarkTreeProtocolFallbackChildId(parentId, kind, counters) {
+    const safeParentId = String(parentId || '').trim() || 'tmp/section';
+    const counterBag = counters && typeof counters === 'object' ? counters : { bookmark: 0, folder: 0 };
+    if (!Number.isFinite(counterBag.bookmark)) counterBag.bookmark = 0;
+    if (!Number.isFinite(counterBag.folder)) counterBag.folder = 0;
+    const normalizedKind = kind === 'bookmark' ? 'bookmark' : 'folder';
+    const segment = normalizedKind === 'bookmark'
+        ? `b${++counterBag.bookmark}`
+        : `f${++counterBag.folder}`;
+    return `${safeParentId}/${segment}`;
+}
+
+function __buildTempSectionBookmarkTreeChildrenProtocol(items, parentId) {
+    const sourceItems = Array.isArray(items) ? items : [];
+    const counters = { folder: 0, bookmark: 0 };
+
+    return sourceItems.map((item) => {
+        if (!item || typeof item !== 'object') return null;
+
+        const rawUrl = String(item.url || '').trim();
+        const kind = __resolveTempBookmarkTreeProtocolNodeKind(item);
+        const id = __buildTempBookmarkTreeProtocolFallbackChildId(parentId, kind, counters);
+        const title = String(item.title || item.name || rawUrl || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder')).trim()
+            || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder');
+
+        if (kind === 'bookmark') {
+            return {
+                id,
+                parentId,
+                kind,
+                title,
+                url: rawUrl
+            };
+        }
+
+        return {
+            id,
+            parentId,
+            kind,
+            title,
+            children: __buildTempSectionBookmarkTreeChildrenProtocol(item.children, id)
+        };
+    }).filter(Boolean);
+}
+
+function __buildTempSectionBookmarkTreeProtocol(section) {
+    const rootId = __normalizeTempSectionProtocolRootId(section);
+    const fallbackTitle = __getDefaultTempSectionProtocolTitle();
+    const rootTitle = String(section && section.title || '').trim()
+        || __normalizeTempSectionProtocolLabel(section)
+        || fallbackTitle;
+
+    return {
+        id: rootId,
+        parentId: null,
+        kind: 'folder',
+        title: rootTitle,
+        children: __buildTempSectionBookmarkTreeChildrenProtocol(section && section.items, rootId)
+    };
+}
+
+function __buildTempSectionProtocolMeta(section) {
+    const normalizedSource = __normalizeTempSectionSourceKey(section && section.source);
+    const normalizedLabel = __normalizeTempSectionProtocolLabel(section);
+    const meta = {
+        tempKind: __isSpecialTempSection(section) ? 'special' : 'regular',
+        title: String(section && section.title || '').trim(),
+        descriptionMd: __normalizeTempSectionDescriptionMarkdown(section)
+    };
+
+    if (normalizedLabel) meta.label = normalizedLabel;
+    if (normalizedSource) meta.source = normalizedSource;
+
+    const sequenceNumber = __normalizePositiveInt(section && section.sequenceNumber);
+    if (sequenceNumber) meta.sequenceNumber = sequenceNumber;
+
+    const createdAt = __parseCanvasProtocolDateValue(section && section.createdAt);
+    if (createdAt > 0) meta.createdAt = createdAt;
+
+    const originPermanent = __normalizeOriginPermanentPayload(section && section.originPermanent);
+    if (originPermanent) meta.originPermanent = originPermanent;
+
+    return meta;
+}
+
+function __buildTempSectionProtocol(section) {
+    if (!section || typeof section !== 'object') return null;
+    return {
+        sectionMeta: __buildTempSectionProtocolMeta(section),
+        bookmarkTree: __buildTempSectionBookmarkTreeProtocol(section)
+    };
+}
+
+function __buildTempSectionProtocolSnapshot(stateInput) {
+    const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
+    const sections = Array.isArray(state.sections)
+        ? state.sections
+        : (Array.isArray(state.tempSections) ? state.tempSections : []);
+
+    return {
+        version: 1,
+        sections: sections
+            .filter((section) => section && typeof section === 'object' && !__isSandboxImportedNode(section))
+            .map((section) => __normalizeTempSectionProtocolObject(section) || __buildTempSectionProtocol(section))
+            .filter(Boolean)
+    };
+}
+
+function __normalizeTempBookmarkTreeProtocol(treeInput, options = {}) {
+    const fallbackRootId = String(options.rootId || 'tmp/section').trim() || 'tmp/section';
+    const fallbackRootTitle = String(options.rootTitle || __getDefaultTempSectionProtocolTitle()).trim()
+        || __getDefaultTempSectionProtocolTitle();
+
+    const normalizeNode = (nodeInput, parentId, fallbackId) => {
+        if (!nodeInput || typeof nodeInput !== 'object') return null;
+        const source = __cloneCanvasProtocolJson(nodeInput);
+        if (!source) return null;
+
+        const rawUrl = String(source.url || '').trim();
+        const kind = __resolveTempBookmarkTreeProtocolNodeKind(source);
+        let id = String(source.id || fallbackId || '').trim() || fallbackId;
+        if (parentId != null && id === String(parentId)) {
+            id = String(fallbackId || '').trim() || `${String(parentId)}/${kind === 'bookmark' ? 'b1' : 'f1'}`;
+        }
+        const title = String(source.title || source.name || rawUrl || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder')).trim()
+            || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder');
+
+        if (kind === 'bookmark') {
+            return {
+                id,
+                parentId: parentId == null ? null : String(parentId),
+                kind,
+                title,
+                url: rawUrl
+            };
+        }
+
+        const rawChildren = Array.isArray(source.children)
+            ? source.children
+            : (Array.isArray(source.items) ? source.items : []);
+        const counters = { folder: 0, bookmark: 0 };
+        const children = rawChildren.map((child) => {
+            if (!child || typeof child !== 'object') return null;
+            const childKind = __resolveTempBookmarkTreeProtocolNodeKind(child);
+            return normalizeNode(child, id, __buildTempBookmarkTreeProtocolFallbackChildId(id, childKind, counters));
+        }).filter(Boolean);
+
+        return {
+            id,
+            parentId: parentId == null ? null : String(parentId),
+            kind,
+            title,
+            children
+        };
+    };
+
+    if (Array.isArray(treeInput)) {
+        const counters = { folder: 0, bookmark: 0 };
+        return {
+            id: fallbackRootId,
+            parentId: null,
+            kind: 'folder',
+            title: fallbackRootTitle,
+            children: treeInput.map((child) => {
+                const childKind = __resolveTempBookmarkTreeProtocolNodeKind(child);
+                return normalizeNode(child, fallbackRootId, __buildTempBookmarkTreeProtocolFallbackChildId(fallbackRootId, childKind, counters));
+            }).filter(Boolean)
+        };
+    }
+
+    const normalizedRoot = normalizeNode(treeInput, null, fallbackRootId);
+    if (!normalizedRoot) {
+        return {
+            id: fallbackRootId,
+            parentId: null,
+            kind: 'folder',
+            title: fallbackRootTitle,
+            children: []
+        };
+    }
+
+    if (normalizedRoot.kind !== 'folder') {
+        const wrappedChild = normalizeNode(
+            treeInput,
+            fallbackRootId,
+            __buildTempBookmarkTreeProtocolFallbackChildId(
+                fallbackRootId,
+                normalizedRoot.kind,
+                { folder: 0, bookmark: 0 }
+            )
+        );
+        return {
+            id: fallbackRootId,
+            parentId: null,
+            kind: 'folder',
+            title: fallbackRootTitle,
+            children: wrappedChild ? [wrappedChild] : []
+        };
+    }
+
+    if (!normalizedRoot.title) normalizedRoot.title = fallbackRootTitle;
+    return normalizedRoot;
+}
+
+function __normalizeTempSectionProtocolObject(protocolInput) {
+    if (!protocolInput || typeof protocolInput !== 'object') return null;
+
+    const source = __cloneCanvasProtocolJson(protocolInput);
+    if (!source) return null;
+    if (
+        !source.sectionMeta
+        && !source.bookmarkTree
+        && !source.tree
+        && Array.isArray(source.items)
+    ) {
+        return __buildTempSectionProtocol(source);
+    }
+
+    const rawMeta = source.sectionMeta && typeof source.sectionMeta === 'object'
+        ? source.sectionMeta
+        : source;
+    const sectionLike = {
+        id: source.sectionId || source.id || null,
+        label: rawMeta.label,
+        title: rawMeta.title,
+        source: rawMeta.source,
+        sequenceNumber: rawMeta.sequenceNumber,
+        createdAt: rawMeta.createdAt,
+        descriptionMd: rawMeta.descriptionMd,
+        originPermanent: rawMeta.originPermanent
+    };
+    const sectionMeta = __buildTempSectionProtocolMeta(sectionLike);
+    const rawTreeInput = source.bookmarkTree || source.tree || source.items || [];
+    const rawTreeTitle = !Array.isArray(rawTreeInput) && rawTreeInput && typeof rawTreeInput === 'object'
+        ? String(rawTreeInput.title || rawTreeInput.name || '').trim()
+        : '';
+    const bookmarkTree = __normalizeTempBookmarkTreeProtocol(
+        rawTreeInput,
+        {
+            rootId: __normalizeTempSectionProtocolRootId(sectionLike),
+            rootTitle: String(sectionMeta.title || rawTreeTitle || __getDefaultTempSectionProtocolTitle()).trim()
+                || __getDefaultTempSectionProtocolTitle()
+        }
+    );
+    if (!sectionMeta.title && rawTreeTitle) {
+        sectionMeta.title = rawTreeTitle;
+    }
+
+    return {
+        sectionMeta,
+        bookmarkTree
+    };
+}
+
+function __buildTempItemPayloadsFromBookmarkTreeProtocol(treeInput) {
+    const normalizedRoot = __normalizeTempBookmarkTreeProtocol(treeInput);
+    const rootChildren = Array.isArray(normalizedRoot && normalizedRoot.children) ? normalizedRoot.children : [];
+
+    const convertNode = (node) => {
+        if (!node || typeof node !== 'object') return null;
+        const kind = String(node.kind || node.type || '').trim().toLowerCase() === 'bookmark' || node.url
+            ? 'bookmark'
+            : 'folder';
+        const title = String(node.title || node.name || node.url || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder')).trim()
+            || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder');
+        if (kind === 'bookmark') {
+            return {
+                title,
+                url: String(node.url || '').trim(),
+                type: 'bookmark'
+            };
+        }
+        return {
+            title,
+            type: 'folder',
+            children: (Array.isArray(node.children) ? node.children : []).map(convertNode).filter(Boolean)
+        };
+    };
+
+    return rootChildren.map(convertNode).filter(Boolean);
+}
+
+function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
+    const normalized = __normalizeTempSectionProtocolObject(protocolInput);
+    if (!normalized) return null;
+
+    const sectionMeta = normalized.sectionMeta || {};
+    __buildRuntimeTempSectionFromProtocol.__counter = (__buildRuntimeTempSectionFromProtocol.__counter || 0) + 1;
+    const sectionId = String(options.sectionId || '').trim()
+        || `temp-section-protocol-${Date.now()}-${__buildRuntimeTempSectionFromProtocol.__counter.toString(36)}`;
+    const payloads = __buildTempItemPayloadsFromBookmarkTreeProtocol(normalized.bookmarkTree);
+    let restoredItemCounter = 0;
+    const convertPayloadToRuntimeItem = (payload) => {
+        if (!payload || typeof payload !== 'object') return null;
+        const rawUrl = String(payload.url || '').trim();
+        const kind = __resolveTempBookmarkTreeProtocolNodeKind(payload);
+        const runtimeItem = {
+            id: `temp-${sectionId}-${++restoredItemCounter}`,
+            sectionId,
+            title: String(payload.title || payload.name || rawUrl || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder')).trim()
+                || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder'),
+            url: rawUrl,
+            type: kind,
+            children: [],
+            originalId: String(payload.originalId || payload.id || '').trim() || null
+        };
+        const payloadChildren = Array.isArray(payload.children) ? payload.children : [];
+        if (payloadChildren.length) {
+            runtimeItem.children = payloadChildren.map(convertPayloadToRuntimeItem).filter(Boolean);
+        }
+        return runtimeItem;
+    };
+    const items = payloads.map(convertPayloadToRuntimeItem).filter(Boolean);
+
+    const restored = {
+        id: sectionId,
+        title: String(sectionMeta.title || '').trim()
+            || __getDefaultTempSectionProtocolTitle(),
+        items,
+        x: Number.isFinite(Number(options.x)) ? Number(options.x) : 0,
+        y: Number.isFinite(Number(options.y)) ? Number(options.y) : 0,
+        width: Number.isFinite(Number(options.width)) ? Number(options.width) : 0,
+        height: Number.isFinite(Number(options.height)) ? Number(options.height) : 0,
+        color: String(options.color || '').trim() || getTempSectionDefaultColor(sectionMeta),
+        colorLocked: typeof options.colorLocked === 'boolean' ? options.colorLocked : __getDefaultTempColorLockedState(),
+        pinned: !!options.pinned
+    };
+    const restoredCreatedAt = Number(sectionMeta.createdAt || options.createdAt);
+    if (Number.isFinite(restoredCreatedAt) && restoredCreatedAt > 0) {
+        restored.createdAt = restoredCreatedAt;
+    }
+
+    if (sectionMeta.label) restored.label = sectionMeta.label;
+    if (sectionMeta.source) restored.source = sectionMeta.source;
+    if (sectionMeta.sequenceNumber) restored.sequenceNumber = sectionMeta.sequenceNumber;
+    if (sectionMeta.originPermanent) restored.originPermanent = __normalizeOriginPermanentPayload(sectionMeta.originPermanent);
+    if (typeof sectionMeta.descriptionMd === 'string' && sectionMeta.descriptionMd.trim()) {
+        restored.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(sectionMeta.descriptionMd));
+    }
+
+    return restored;
+}
+
+function __buildCanvasTempStateProtocolView(stateInput) {
+    const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
+    const sections = Array.isArray(state.sections)
+        ? state.sections
+        : (Array.isArray(state.tempSections) ? state.tempSections : []);
+    const mdNodes = Array.isArray(state.mdNodes)
+        ? state.mdNodes
+        : (Array.isArray(state.cards) ? state.cards : []);
+    const edges = Array.isArray(state.edges) ? state.edges : [];
+
+    const normalizedMdNodes = mdNodes
+        .map((node) => {
+            const cloned = __cloneCanvasProtocolJson(node);
+            if (!cloned) return null;
+            __ensureMdNodeMarkdownProtocol(cloned, {
+                refreshCachesFromMarkdown: !cloned.html
+            });
+            return cloned;
+        })
+        .filter(Boolean);
+
+    return __buildPersistedCanvasState({
+        ...state,
+        sections: sections.map((section) => __cloneCanvasProtocolJson(section)).filter(Boolean),
+        mdNodes: normalizedMdNodes,
+        edges: edges.map((edge) => __cloneCanvasProtocolJson(edge)).filter(Boolean)
+    });
+}
+
+if (typeof window !== 'undefined') {
+    window.CanvasProtocolBridge = Object.assign(window.CanvasProtocolBridge || {}, {
+        version: 1,
+        normalizeBlankMarkdownNode(node, options = {}) {
+            const cloned = __cloneCanvasProtocolJson(node);
+            if (!cloned) return null;
+            return __ensureMdNodeMarkdownProtocol(cloned, {
+                refreshCachesFromMarkdown: options.refreshCachesFromMarkdown === true
+            });
+        },
+        normalizeCanvasTempState(stateInput) {
+            return __buildCanvasTempStateProtocolView(stateInput);
+        },
+        normalizeTempSectionProtocol(sectionInput) {
+            return __normalizeTempSectionProtocolObject(sectionInput) || __buildTempSectionProtocol(sectionInput);
+        },
+        collectTempSectionProtocolSnapshot(stateInput) {
+            return __buildTempSectionProtocolSnapshot(stateInput);
+        },
+        buildTempBookmarkTreeFromItems(sectionInput) {
+            return __buildTempSectionBookmarkTreeProtocol(sectionInput);
+        },
+        buildTempItemPayloadsFromBookmarkTree(treeInput) {
+            return __buildTempItemPayloadsFromBookmarkTreeProtocol(treeInput);
+        },
+        restoreTempSectionFromProtocol(protocolInput, options = {}) {
+            return __buildRuntimeTempSectionFromProtocol(protocolInput, options);
+        },
+        normalizePermanentTreeSnapshot(treeInput) {
+            return __normalizePermanentTreeSnapshotForProtocol(treeInput);
+        },
+        collectPermanentViewShellSnapshot(sourceInput = null) {
+            return __buildPermanentViewShellSnapshotProtocol(sourceInput);
+        },
+        normalizePermanentViewShellSnapshot(snapshotInput) {
+            return __normalizePermanentViewShellSnapshotProtocol(snapshotInput);
+        },
+        resolvePermanentViewShell(copyId = null, sourceInput = null) {
+            return __resolvePermanentViewShell(copyId, sourceInput);
+        },
+        resolvePermanentSectionElement(copyId = null, options = {}) {
+            return __resolvePermanentSectionElement(copyId, options);
+        },
+        resolvePermanentSectionContext(sectionEl, options = {}) {
+            return __resolvePermanentSectionContext(sectionEl, options);
+        },
+        applyPermanentViewShellSnapshot(snapshotInput) {
+            return __applyPermanentViewShellSnapshotProtocol(snapshotInput);
+        }
+    });
 }
 
 function __openCanvasTempStateIndexedDb() {
@@ -34519,10 +36340,55 @@ function __extractCanvasTempStateTimestamp(state) {
     return Number.isFinite(ts) && ts > 0 ? ts : 0;
 }
 
+function __hasCanvasTempStatePayloadShape(state) {
+    return !!(
+        state
+        && typeof state === 'object'
+        && (
+            Array.isArray(state.sections)
+            || Array.isArray(state.tempSections)
+            || Array.isArray(state.mdNodes)
+            || Array.isArray(state.cards)
+            || Array.isArray(state.edges)
+        )
+    );
+}
+
+function __normalizeCanvasTempStateForRuntime(stateInput) {
+    const parsedState = typeof stateInput === 'string'
+        ? __safeParseCanvasStorageJson(stateInput)
+        : stateInput;
+    if (!__hasCanvasTempStatePayloadShape(parsedState)) return null;
+    if (__isCanvasTempStateChromeMarker(parsedState) || __isCanvasTempStateIndexedDbMarker(parsedState)) {
+        return null;
+    }
+
+    const sections = Array.isArray(parsedState.sections)
+        ? parsedState.sections
+        : (Array.isArray(parsedState.tempSections) ? parsedState.tempSections : []);
+    const mdNodes = Array.isArray(parsedState.mdNodes)
+        ? parsedState.mdNodes
+        : (Array.isArray(parsedState.cards) ? parsedState.cards : []);
+    const edges = Array.isArray(parsedState.edges) ? parsedState.edges : [];
+
+    return __buildCanvasTempStateProtocolView({
+        ...parsedState,
+        sections,
+        tempSectionCounter: Number(parsedState.tempSectionCounter) || sections.length || 0,
+        tempItemCounter: Number(parsedState.tempItemCounter) || 0,
+        colorCursor: Number(parsedState.colorCursor) || 0,
+        tempSectionLastColor: parsedState.tempSectionLastColor || getTempSectionDefaultColor(),
+        tempSectionPrevColor: parsedState.tempSectionPrevColor || null,
+        mdNodes,
+        mdNodeCounter: Number(parsedState.mdNodeCounter) || mdNodes.length || 0,
+        edges,
+        edgeCounter: Number(parsedState.edgeCounter) || edges.length || 0,
+        timestamp: Number(parsedState.timestamp) || Date.now()
+    });
+}
+
 function __isCanvasTempStatePayload(state) {
-    if (!state || typeof state !== 'object') return false;
-    if (__isCanvasTempStateChromeMarker(state) || __isCanvasTempStateIndexedDbMarker(state)) return false;
-    return Array.isArray(state.sections) || Array.isArray(state.mdNodes) || Array.isArray(state.edges);
+    return !!__normalizeCanvasTempStateForRuntime(state);
 }
 
 async function __readCanvasTempStateFromChromeStorage() {
@@ -34551,9 +36417,10 @@ async function __readCanvasTempStateFromChromeStorage() {
 }
 
 function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external') {
-    if (!__isCanvasTempStatePayload(state)) return;
+    const normalizedState = __normalizeCanvasTempStateForRuntime(state);
+    if (!normalizedState) return;
 
-    const ts = __extractCanvasTempStateTimestamp(state);
+    const ts = __extractCanvasTempStateTimestamp(normalizedState);
     if (ts > 0) {
         if (ts <= __canvasTempStateLastAppliedTimestamp) return;
         if (ts <= __canvasTempStateLastSavedTimestamp) return;
@@ -34571,7 +36438,7 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external') {
     __canvasTempStateRealtimeSyncApplying = true;
     try {
         __resetCanvasDomAndStateForImport();
-        __applyCanvasTempStateObject(state);
+        __applyCanvasTempStateObject(normalizedState);
         __finalizeTempNodesLoad({ loadedFromStorage: true });
 
         if (ts > 0) {
@@ -34597,9 +36464,10 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external') {
 }
 
 function __queueCanvasTempStateRealtimeSync(state, source = 'external') {
-    if (!__isCanvasTempStatePayload(state)) return;
+    const normalizedState = __normalizeCanvasTempStateForRuntime(state);
+    if (!normalizedState) return;
 
-    __canvasTempStateRealtimeSyncPending = { state, source };
+    __canvasTempStateRealtimeSyncPending = { state: normalizedState, source };
     if (__canvasTempStateRealtimeSyncTimer) return;
 
     __canvasTempStateRealtimeSyncTimer = setTimeout(() => {
@@ -34635,7 +36503,9 @@ function __consumeCanvasTempStateRealtimeSignal(rawState, source = 'external') {
         return;
     }
 
-    __queueCanvasTempStateRealtimeSync(rawState, source);
+    const normalizedState = __normalizeCanvasTempStateForRuntime(rawState);
+    if (!normalizedState) return;
+    __queueCanvasTempStateRealtimeSync(normalizedState, source);
 }
 
 function __safeParseCanvasStorageJson(raw) {
@@ -34810,10 +36680,20 @@ function __shouldApplyPermanentTipRealtimeSync(storageKey) {
 function __persistPermanentTipStorageValue(storageKey, value) {
     if (typeof storageKey !== 'string' || !storageKey) return;
 
+    const parsedKey = __parsePermanentTipStorageKey(storageKey);
+    let persistedValue = value;
+    if (parsedKey && parsedKey.type === 'content') {
+        const source = String(value == null ? '' : value);
+        const looksLikeHtml = /<\s*(?:a|p|div|span|br|strong|em|b|i|u|del|s|mark|code|blockquote|ul|ol|li|hr|h[1-6]|font|center|input)\b/i.test(source);
+        persistedValue = looksLikeHtml
+            ? __normalizeCanvasMarkdownSource(__htmlToMarkdown(__normalizeCanvasRichHtml(source)))
+            : __normalizeCanvasMarkdownSource(source).trim();
+    }
+
     const ts = __writePermanentTipTimestamp(storageKey, Date.now());
     try {
-        if (typeof value === 'string' && value) {
-            saveSharedState(storageKey, value, { asJSON: false });
+        if (typeof persistedValue === 'string' && persistedValue) {
+            saveSharedState(storageKey, persistedValue, { asJSON: false });
         } else {
             localStorage.removeItem(storageKey);
         }
@@ -35240,18 +37120,25 @@ function __saveCanvasTempStateToChromeStorage(state, { immediate = false } = {})
 }
 
 function __applyCanvasTempStateObject(state) {
-    CanvasState.tempSections = Array.isArray(state.sections) ? state.sections : [];
-    CanvasState.tempSectionCounter = state.tempSectionCounter || CanvasState.tempSections.length;
-    CanvasState.tempItemCounter = state.tempItemCounter || 0;
-    CanvasState.colorCursor = state.colorCursor || 0;
-    CanvasState.tempSectionLastColor = state.tempSectionLastColor || getTempSectionDefaultColor();
-    CanvasState.tempSectionPrevColor = state.tempSectionPrevColor || null;
-    CanvasState.mdNodes = Array.isArray(state.mdNodes) ? state.mdNodes : [];
-    CanvasState.mdNodeCounter = state.mdNodeCounter || CanvasState.mdNodes.length || 0;
-    CanvasState.edges = Array.isArray(state.edges) ? state.edges : [];
-    CanvasState.edgeCounter = state.edgeCounter || CanvasState.edges.length || 0;
+    const sourceState = __normalizeCanvasTempStateForRuntime(state)
+        || ((state && typeof state === 'object') ? state : {});
 
-    const ts = __extractCanvasTempStateTimestamp(state);
+    CanvasState.tempSections = Array.isArray(sourceState.sections)
+        ? sourceState.sections
+        : (Array.isArray(sourceState.tempSections) ? sourceState.tempSections : []);
+    CanvasState.tempSectionCounter = sourceState.tempSectionCounter || CanvasState.tempSections.length;
+    CanvasState.tempItemCounter = sourceState.tempItemCounter || 0;
+    CanvasState.colorCursor = sourceState.colorCursor || 0;
+    CanvasState.tempSectionLastColor = sourceState.tempSectionLastColor || getTempSectionDefaultColor();
+    CanvasState.tempSectionPrevColor = sourceState.tempSectionPrevColor || null;
+    CanvasState.mdNodes = Array.isArray(sourceState.mdNodes)
+        ? sourceState.mdNodes
+        : (Array.isArray(sourceState.cards) ? sourceState.cards : []);
+    CanvasState.mdNodeCounter = sourceState.mdNodeCounter || CanvasState.mdNodes.length || 0;
+    CanvasState.edges = Array.isArray(sourceState.edges) ? sourceState.edges : [];
+    CanvasState.edgeCounter = sourceState.edgeCounter || CanvasState.edges.length || 0;
+
+    const ts = __extractCanvasTempStateTimestamp(sourceState);
     if (ts > 0) {
         __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, ts);
     }
@@ -35265,11 +37152,21 @@ function __applyCanvasTempStateObject(state) {
             }
         });
     } catch (_) { }
+
+    try {
+        (CanvasState.mdNodes || []).forEach((node) => {
+            __ensureMdNodeMarkdownProtocol(node, {
+                refreshCachesFromMarkdown: !(typeof node.html === 'string' && node.html.trim())
+                    || typeof node.markdownSource === 'string'
+            });
+        });
+    } catch (_) { }
 }
 
 function __finalizeTempNodesLoad({ loadedFromStorage }) {
     // 根据已有ID刷新计数
     refreshTempSectionCounters();
+    __refreshCanvasNodeCounters();
 
     // 恢复序号计数器（找到最大的序号）
     let maxSequenceNumber = 0;
@@ -35377,14 +37274,15 @@ function __tryRestoreTempNodesFromChromeStorage() {
         } catch (_) { }
 
         const state = result ? result[TEMP_SECTION_STORAGE_KEY] : null;
-        if (state && typeof state === 'object' && (Array.isArray(state.sections) || Array.isArray(state.mdNodes) || Array.isArray(state.edges))) {
+        const normalizedState = __normalizeCanvasTempStateForRuntime(state);
+        if (normalizedState) {
             __canvasTempStatePreferChromeStorage = true;
-            __writeCanvasTempStateChromeMarker(state.timestamp || Date.now());
+            __writeCanvasTempStateChromeMarker(normalizedState.timestamp || Date.now());
             try {
                 // 同步一份到 localStorage 作为回退，防止后续命中 storage.local 配额后出现刷新丢失。
-                __persistCanvasTempStateToLocalStorage(state);
+                __persistCanvasTempStateToLocalStorage(normalizedState);
             } catch (_) { }
-            __applyCanvasTempStateObject(state);
+            __applyCanvasTempStateObject(normalizedState);
             __finalizeTempNodesLoad({ loadedFromStorage: true });
             return;
         }
@@ -35444,11 +37342,12 @@ function __tryRestoreTempNodesFromIndexedDb() {
         .then(() => __loadCanvasTempStateFromIndexedDb())
         .then((state) => {
             __canvasTempStateIndexedDbLoadInProgress = false;
-            if (state && typeof state === 'object' && (Array.isArray(state.sections) || Array.isArray(state.mdNodes) || Array.isArray(state.edges))) {
+            const normalizedState = __normalizeCanvasTempStateForRuntime(state);
+            if (normalizedState) {
                 __canvasTempStatePreferIndexedDb = true;
                 __canvasTempStatePreferChromeStorage = false;
-                __writeCanvasTempStateIndexedDbMarker(state.timestamp || Date.now());
-                __applyCanvasTempStateObject(state);
+                __writeCanvasTempStateIndexedDbMarker(normalizedState.timestamp || Date.now());
+                __applyCanvasTempStateObject(normalizedState);
                 __finalizeTempNodesLoad({ loadedFromStorage: true });
                 return;
             }
@@ -35491,6 +37390,14 @@ function saveTempNodes(options = {}) {
     const suppressSyncMarkDirty = !!(options && options.suppressSyncMarkDirty);
     // 保存前执行自动 resize
     autoResizeImportContainers();
+
+    try {
+        (CanvasState.mdNodes || []).forEach((node) => {
+            __ensureMdNodeMarkdownProtocol(node, {
+                refreshCachesFromMarkdown: typeof node.markdownSource === 'string' && !!node.markdownSource.trim()
+            });
+        });
+    } catch (_) { }
 
     try {
         const state = {
@@ -35582,8 +37489,9 @@ function loadTempNodes() {
                 __tryRestoreTempNodesFromIndexedDb();
                 return;
             }
-            if (state && typeof state === 'object') {
-                __applyCanvasTempStateObject(state);
+            const normalizedState = __normalizeCanvasTempStateForRuntime(state);
+            if (normalizedState) {
+                __applyCanvasTempStateObject(normalizedState);
                 __finalizeTempNodesLoad({ loadedFromStorage: true });
                 return;
             }

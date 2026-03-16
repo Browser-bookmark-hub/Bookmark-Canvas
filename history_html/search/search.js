@@ -81,6 +81,54 @@ function getCurrentLangSafe() {
     return 'zh_CN';
 }
 
+function toPositiveIntForSearch(value) {
+    const n = parseInt(value, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function collectPermanentViewShellSnapshotForSearch(sourceInput = null) {
+    const protocolBridge = window.CanvasProtocolBridge && typeof window.CanvasProtocolBridge.collectPermanentViewShellSnapshot === 'function'
+        ? window.CanvasProtocolBridge
+        : null;
+    if (!protocolBridge) return null;
+    try {
+        const snapshot = protocolBridge.collectPermanentViewShellSnapshot(sourceInput);
+        return snapshot && Array.isArray(snapshot.views) ? snapshot : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function getPermanentViewShellViewsForSearch(snapshotInput = null) {
+    const snapshot = snapshotInput && Array.isArray(snapshotInput.views)
+        ? snapshotInput
+        : collectPermanentViewShellSnapshotForSearch(snapshotInput);
+    return Array.isArray(snapshot && snapshot.views) ? snapshot.views : [];
+}
+
+function getPermanentMainShellForSearch(snapshotInput = null) {
+    return getPermanentViewShellViewsForSearch(snapshotInput).find((view) => !(view && view.copyId)) || null;
+}
+
+function getPermanentCopyShellsForSearch(snapshotInput = null) {
+    return getPermanentViewShellViewsForSearch(snapshotInput).filter((view) => view && view.copyId);
+}
+
+function getPermanentCopySearchDisplayIndex(shell, orderIndex = 0) {
+    const raw = toPositiveIntForSearch(shell && shell.displayIndex);
+    return raw ? (raw + 1) : (orderIndex + 2);
+}
+
+function getPermanentDescriptionTextForSearch(copyId = null, snapshotInput = null) {
+    const safeCopyId = String(copyId || '').trim();
+    const shell = safeCopyId
+        ? getPermanentCopyShellsForSearch(snapshotInput).find((view) => String(view && view.copyId || '').trim() === safeCopyId)
+        : getPermanentMainShellForSearch(snapshotInput);
+    return shell && typeof shell.descriptionMd === 'string'
+        ? squeezeSpaces(shell.descriptionMd)
+        : '';
+}
+
 function setSidePanelSearchExpanded(expanded) {
     const container = document.querySelector('.search-container');
     if (!container) return;
@@ -2365,9 +2413,9 @@ function getCanvasSearchSignature() {
             if (Array.isArray(s.items)) tempRootItemsCount = (tempRootItemsCount + s.items.length) % 100000;
         }
     }
-    // 加入永久栏目说明的 checksum (从 Storage 读取)
+    // 加入永久栏目说明的 checksum
     try {
-        const permDesc = localStorage.getItem('canvas-permanent-tip-text') || '';
+        const permDesc = getPermanentDescriptionTextForSearch(null);
         contentChecksum = (contentChecksum + permDesc.length) % 10000;
     } catch (_) { }
 
@@ -2378,8 +2426,7 @@ function getCanvasSearchSignature() {
     // Check permanent section copies count for cache invalidation
     let permanentCopiesLen = 0;
     try {
-        const copies = JSON.parse(localStorage.getItem('permanent-section-copies') || '[]');
-        permanentCopiesLen = Array.isArray(copies) ? copies.length : 0;
+        permanentCopiesLen = getPermanentCopyShellsForSearch().length;
     } catch (_) { }
 
     return `${tempCount}:${mdCount}:${edgeCount}:${tempCounter}:${tempItemCounter}:${mdCounter}:${edgeCounter}:${contentChecksum}:${permanentCopiesLen}:${tempRootItemsCount}:${tempStateTimestamp}:${treeVersion}:${treeFingerprintLen}`;
@@ -2521,10 +2568,9 @@ function buildCanvasSearchDb() {
     // then we are in multi-column mode and should show labels for A as well.
     let maxIndexFound = 1;
 
-    // 1. Check Copies (Raw check)
+    // 1. Check Copies
     try {
-        const copies = JSON.parse(localStorage.getItem('permanent-section-copies') || '[]');
-        if (Array.isArray(copies) && copies.length > 0) {
+        if (getPermanentCopyShellsForSearch().length > 0) {
             maxIndexFound = 2; // At least B exists
         }
     } catch (_) { }
@@ -2714,24 +2760,10 @@ function buildCanvasSearchDb() {
     }
 
     // 4. 永久栏目 (Permanent Section)
-    let permanentDescription = '';
-    try {
-        const rawDesc = localStorage.getItem('canvas-permanent-tip-text') || '';
-        permanentDescription = rawDesc.replace(/<[^>]+>/g, ' ').trim();
-    } catch (e) { }
-
-    // Check for copies to determine if main section needs #A label
-    let permanentCopies = [];
-    let hasCopies = false;
-    try {
-        const copiesRaw = localStorage.getItem('permanent-section-copies');
-        permanentCopies = JSON.parse(copiesRaw || '[]');
-        if (Array.isArray(permanentCopies) && permanentCopies.length > 0) {
-            hasCopies = true;
-        }
-    } catch (e) {
-        console.warn('[Search] Phase 3 permanent section copies read failed:', e);
-    }
+    const permanentShellSnapshot = collectPermanentViewShellSnapshotForSearch();
+    const permanentDescription = getPermanentDescriptionTextForSearch(null, permanentShellSnapshot);
+    const permanentCopies = getPermanentCopyShellsForSearch(permanentShellSnapshot);
+    const hasCopies = permanentCopies.length > 0;
 
     const permanentSectionId = 'permanentSection';
     // Permanent Default Green
@@ -2779,29 +2811,26 @@ function buildCanvasSearchDb() {
     // Permanent Copies
     if (hasCopies) {
         permanentCopies.forEach((copy, idx) => {
-            if (!copy || !copy.id) return;
+            const copyId = String(copy && copy.copyId || '').trim();
+            if (!copyId) return;
 
-            // Sanitize displayIndex: Copies usually shouldn't be 1 (A).
-            // If we find collision or invalid index, fallback to sequential (B, C...).
-            let dIndex = copy.displayIndex;
-            if (!Number.isFinite(dIndex) || dIndex <= 1) {
-                dIndex = 2 + idx; // 0->2(B), 1->3(C)...
-            }
+            const dIndex = getPermanentCopySearchDisplayIndex(copy, idx);
+            const copyDescription = getPermanentDescriptionTextForSearch(copyId, permanentShellSnapshot);
 
             const idxLabel = toAlpha(dIndex);
             const copyItem = {
-                id: copy.id,
+                id: copyId,
                 type: 'permanent-section',
                 title: (currentLang === 'en' ? `Permanent Copy #${idxLabel}` : `永久栏目副本 #${idxLabel}`),
-                description: permanentDescription,
-                copyIndex: copy.copyIndex,
-                displayIndex: dIndex, // Use sanitized index
+                description: copyDescription,
+                copyId,
+                displayIndex: dIndex,
                 hasCopies: true,
                 isMultiColumnMode: isMultiColumnMode,
                 color: permColor,
                 __title: (currentLang === 'en' ? `permanent copy #${idxLabel}` : `永久栏目副本 #${idxLabel}`).toLowerCase(),
                 __label: `#${idxLabel.toLowerCase()}`,
-                __description: permanentDescription.toLowerCase()
+                __description: copyDescription.toLowerCase()
             };
 
             const itemStructureCopy = Object.assign({}, copyItem);
@@ -4443,8 +4472,7 @@ function renderCanvasSearchResults(results, options = {}) {
                         let copyBadges = [];
 
                         try {
-                            const copiesStr = localStorage.getItem('permanent-section-copies');
-                            const copies = copiesStr ? JSON.parse(copiesStr) : [];
+                            const copies = getPermanentCopyShellsForSearch();
 
                             // #A
                             // Badge Click Attr
@@ -4454,11 +4482,11 @@ function renderCanvasSearchResults(results, options = {}) {
 
                             const toAlphaLocal = (num) => (num > 0 ? String.fromCharCode(64 + num) : '');
                             copies.forEach((c, idx) => {
-                                if (!c || !c.id) return;
-                                let dIdx = parseInt(c.displayIndex, 10);
-                                if (Number.isNaN(dIdx) || dIdx <= 1) dIdx = 2 + idx;
+                                const copyId = String(c && c.copyId || '').trim();
+                                if (!copyId) return;
+                                const dIdx = getPermanentCopySearchDisplayIndex(c, idx);
                                 const label = toAlphaLocal(dIdx);
-                                copyBadges.push(makeChip(`#${label}`, '#059669', `${clickAttrBase} data-copy-id="${c.id}"`));
+                                copyBadges.push(makeChip(`#${label}`, '#059669', `${clickAttrBase} data-copy-id="${copyId}"`));
                             });
                         } catch (_) { }
 
@@ -4542,8 +4570,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 // (无论是否为子项都显示，方便在聚合列表中跳转)
                 if (item.source === 'permanent') {
                     try {
-                        const copiesStr = localStorage.getItem('permanent-section-copies');
-                        const copies = copiesStr ? JSON.parse(copiesStr) : [];
+                        const copies = getPermanentCopyShellsForSearch();
                         // Only show interactive badges if there are ACTUALLY copies (B, C...)
                         if (Array.isArray(copies) && copies.length > 0) {
                             // Build interactive HTML
@@ -4562,15 +4589,13 @@ function renderCanvasSearchResults(results, options = {}) {
                             };
 
                             copies.forEach((c, idx) => {
-                                if (!c || !c.id) return;
+                                const copyId = String(c && c.copyId || '').trim();
+                                if (!copyId) return;
 
-                                let dIdx = parseInt(c.displayIndex, 10);
-                                if (Number.isNaN(dIdx) || dIdx <= 1) {
-                                    dIdx = 2 + idx;
-                                }
+                                const dIdx = getPermanentCopySearchDisplayIndex(c, idx);
 
                                 const label = toAlphaLocal(dIdx);
-                                buttonsHtml += `<span class="search-result-badge-interactive" data-copy-id="${escapeHtml(c.id)}" data-display-index="${dIdx}" style="${styleBase}" title="Jump to Copy #${label}">#${label}</span>`;
+                                buttonsHtml += `<span class="search-result-badge-interactive" data-copy-id="${escapeHtml(copyId)}" data-display-index="${dIdx}" style="${styleBase}" title="Jump to Copy #${label}">#${label}</span>`;
                             });
 
                             if (buttonsHtml) {
@@ -5411,6 +5436,28 @@ function isMaximizedPermanentSectionActive(copyId = null) {
     return !activeCopyId;
 }
 
+function resolvePermanentSectionElementForSearch(copyId = null) {
+    const protocolBridge = window.CanvasProtocolBridge && typeof window.CanvasProtocolBridge.resolvePermanentSectionElement === 'function'
+        ? window.CanvasProtocolBridge
+        : null;
+    if (protocolBridge) {
+        try {
+            const resolved = protocolBridge.resolvePermanentSectionElement(copyId);
+            if (resolved) return resolved;
+        } catch (_) { }
+    }
+
+    const safeCopyId = String(copyId || '').trim();
+    if (!safeCopyId) return document.getElementById('permanentSection');
+
+    try {
+        return document.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id="${CSS.escape(safeCopyId)}"]`)
+            || document.getElementById(`permanent-section-copy-${safeCopyId}`);
+    } catch (_) {
+        return document.getElementById(`permanent-section-copy-${safeCopyId}`);
+    }
+}
+
 async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
     const id = String(nodeId || '');
     if (!id) return false;
@@ -5431,7 +5478,7 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
             // Let's manually find element if it's a copy.
 
                 if (options.copyId) {
-                    const copyEl = document.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id="${CSS.escape(options.copyId)}"]`);
+                    const copyEl = resolvePermanentSectionElementForSearch(options.copyId);
                     if (copyEl) {
                         locateToElement(copyEl);
                     }
@@ -5442,12 +5489,7 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
         }
     } catch (_) { }
 
-    let permanentSection = null;
-    if (options.copyId) {
-        permanentSection = document.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id="${CSS.escape(options.copyId)}"]`);
-    } else {
-        permanentSection = document.getElementById('permanentSection');
-    }
+    const permanentSection = resolvePermanentSectionElementForSearch(options.copyId || null);
 
     const treeContainer = (permanentSection && permanentSection.querySelector('.bookmark-tree')) || (permanentSection && permanentSection.querySelector('#bookmarkTree')) || document.getElementById('bookmarkTree');
     if (!treeContainer) return false;
@@ -5717,8 +5759,8 @@ async function locateCanvasElement(elementId, type, options = {}) {
         // 3. Permanent Main
         if (id === 'permanentSection') {
             try {
-                const pos = JSON.parse(localStorage.getItem('permanent-section-position') || '{}');
-                // Ensure numeric values (parse strings like "100px")
+                const shell = getPermanentMainShellForSearch();
+                const pos = shell && shell.cardState ? shell.cardState : {};
                 const x = parseFloat(pos.left) || 0;
                 const y = parseFloat(pos.top) || 0;
                 const w = parseFloat(pos.width) || 340;
@@ -5729,13 +5771,13 @@ async function locateCanvasElement(elementId, type, options = {}) {
         // 4. Permanent Copy
         if (!typeHint || typeHint === 'permanent-section') {
             try {
-                const copies = JSON.parse(localStorage.getItem('permanent-section-copies') || '[]');
-                const copy = copies.find(c => c.id === id);
+                const copy = getPermanentCopyShellsForSearch().find((view) => String(view && view.copyId || '') === String(id || ''));
                 if (copy) {
-                    const x = parseFloat(copy.left) || parseFloat(copy.x) || 0;
-                    const y = parseFloat(copy.top) || parseFloat(copy.y) || 0;
-                    const w = parseFloat(copy.width) || parseFloat(copy.w) || 340;
-                    const h = parseFloat(copy.height) || parseFloat(copy.h) || 600;
+                    const cardState = copy.cardState || copy;
+                    const x = parseFloat(cardState.left) || parseFloat(cardState.x) || 0;
+                    const y = parseFloat(cardState.top) || parseFloat(cardState.y) || 0;
+                    const w = parseFloat(cardState.width) || parseFloat(cardState.w) || 340;
+                    const h = parseFloat(cardState.height) || parseFloat(cardState.h) || 600;
                     return { x, y, w, h };
                 }
             } catch (_) { }

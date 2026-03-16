@@ -2208,6 +2208,65 @@ function schedulePermanentTreeCopySync() {
 }
 window.schedulePermanentTreeCopySync = schedulePermanentTreeCopySync;
 
+function hasPermanentTreeCopyTargets() {
+    try {
+        if (currentView !== 'canvas') return false;
+    } catch (_) { return false; }
+
+    const canvasContent = document.getElementById('canvasContent');
+    if (!canvasContent) return false;
+    return !!canvasContent.querySelector('.permanent-bookmark-section.permanent-section-copy .bookmark-tree');
+}
+
+function refreshSharedPermanentTreeCopySourceData(reason = '') {
+    if (!hasPermanentTreeCopyTargets()) return false;
+    if (!cachedCurrentTree || !Array.isArray(cachedCurrentTree) || !cachedCurrentTree[0]) return false;
+
+    let nextRenderTree = cachedCurrentTree;
+    try {
+        let hasDeletedNodes = false;
+        if (treeChangeMap instanceof Map && treeChangeMap.size > 0) {
+            for (const [, change] of treeChangeMap) {
+                if (change && typeof change.type === 'string' && change.type.includes('deleted')) {
+                    hasDeletedNodes = true;
+                    break;
+                }
+            }
+        }
+        if (hasDeletedNodes) {
+            nextRenderTree = mergeDeletedSnapshotsIntoTreeForRender(cachedCurrentTree, treeChangeMap);
+        }
+    } catch (_) {
+        nextRenderTree = cachedCurrentTree;
+    }
+
+    try {
+        cachedRenderTreeIndex = null;
+        if (currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED && nextRenderTree && nextRenderTree[0]) {
+            const idx = buildTreeIndexFromRoot(nextRenderTree[0]);
+            if (idx) {
+                cachedRenderTreeIndex = idx;
+                try { window.__canvasRenderTreeIndex = idx; } catch (_) { }
+            } else {
+                try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+            }
+        } else {
+            try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+        }
+    } catch (_) { }
+
+    cachedTreeData = {
+        ...(cachedTreeData || {}),
+        currentTree: cachedCurrentTree,
+        renderTree: nextRenderTree
+    };
+
+    if (reason) {
+        console.log('[PermanentCopySync] 已刷新共享源数据:', reason);
+    }
+    return true;
+}
+
 function __captureTreeExpandedNodeIds(tree) {
     const expanded = new Set();
     if (!tree) return expanded;
@@ -2299,6 +2358,43 @@ function __buildCanvasPartitionedViewKey(kind, baseKey) {
     return `${__CANVAS_VIEW_STATE_STORAGE_NS}:${kind}:${partition}:${baseKey}`;
 }
 
+function __getOtherCanvasViewStatePartitionKey(partitionKey = __getCanvasViewStatePartitionKey()) {
+    return partitionKey === 'sidepanel' ? 'page' : 'sidepanel';
+}
+
+function __readCanvasPartitionedViewRawWithLegacyFallback(kind, baseKey, legacyKeys = []) {
+    if (!kind || !baseKey) return null;
+    const currentKey = __buildCanvasPartitionedViewKey(kind, baseKey);
+    try {
+        const rawCurrent = localStorage.getItem(currentKey);
+        if (rawCurrent) return rawCurrent;
+    } catch (_) { }
+
+    const otherKey = `${__CANVAS_VIEW_STATE_STORAGE_NS}:${kind}:${__getOtherCanvasViewStatePartitionKey()}:${baseKey}`;
+    try {
+        const rawOther = localStorage.getItem(otherKey);
+        if (rawOther) {
+            try { localStorage.setItem(currentKey, rawOther); } catch (_) { }
+            return rawOther;
+        }
+    } catch (_) { }
+
+    const fallbackKeys = Array.from(new Set(
+        (Array.isArray(legacyKeys) ? legacyKeys : [])
+            .map((key) => String(key || '').trim())
+            .filter(Boolean)
+    ));
+    for (const legacyKey of fallbackKeys) {
+        try {
+            const rawLegacy = localStorage.getItem(legacyKey);
+            if (!rawLegacy) continue;
+            try { localStorage.setItem(currentKey, rawLegacy); } catch (_) { }
+            return rawLegacy;
+        } catch (_) { }
+    }
+    return null;
+}
+
 function __getTreeExpandStateStorageKey(treeContainer) {
     try {
         const previewRoot = treeContainer && treeContainer.closest ? treeContainer.closest('#changesTreePreviewInline') : null;
@@ -2329,6 +2425,17 @@ function __readTreeExpandStateFromStorage(treeContainer) {
         const raw = localStorage.getItem(key);
         if (raw) return raw;
     } catch (_) { }
+
+    try {
+        if (currentView === 'canvas') {
+            const section = treeContainer && treeContainer.closest ? treeContainer.closest('.permanent-bookmark-section') : null;
+            if (section) {
+                const copyId = section.dataset ? section.dataset.permanentSectionCopyId : null;
+                const baseKey = copyId ? `${__PERMANENT_SECTION_EXPANDED_KEY}:${copyId}` : __PERMANENT_SECTION_EXPANDED_KEY;
+                return __readCanvasPartitionedViewRawWithLegacyFallback('expand', baseKey, [baseKey]);
+            }
+        }
+    } catch (_) { }
     return null;
 }
 
@@ -2340,6 +2447,28 @@ function __getPermanentSectionScrollStorageKeyFromTree(tree) {
         return __buildCanvasPartitionedViewKey('scroll', baseKey);
     } catch (_) {
         return __buildCanvasPartitionedViewKey('scroll', 'permanent-section-scroll');
+    }
+}
+
+function __readPermanentSectionScrollStateByCopyId(copyId = '') {
+    const normalizedCopyId = String(copyId || '').trim();
+    const baseKey = normalizedCopyId ? `permanent-section-scroll:${normalizedCopyId}` : 'permanent-section-scroll';
+    const raw = __readCanvasPartitionedViewRawWithLegacyFallback('scroll', baseKey, [baseKey]);
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw);
+    } catch (_) {
+        return null;
+    }
+}
+
+function __readPermanentSectionScrollStateFromTree(tree) {
+    try {
+        const section = tree && tree.closest ? tree.closest('.permanent-bookmark-section') : null;
+        const copyId = section && section.dataset ? section.dataset.permanentSectionCopyId : null;
+        return __readPermanentSectionScrollStateByCopyId(copyId || '');
+    } catch (_) {
+        return __readPermanentSectionScrollStateByCopyId('');
     }
 }
 
@@ -2407,6 +2536,204 @@ function __lazyLoadExpandedFolders(tree, expandedNodeIds) {
     } catch (_) { }
 }
 
+function __hasPermanentTreeSharedContentSource() {
+    const renderTree = cachedTreeData && Array.isArray(cachedTreeData.renderTree)
+        ? cachedTreeData.renderTree
+        : null;
+    if (renderTree && renderTree[0]) return true;
+
+    try {
+        const cachedFragment = cachedTreeData && cachedTreeData.treeFragment;
+        if (cachedFragment && cachedFragment.childNodes && cachedFragment.childNodes.length) {
+            return true;
+        }
+    } catch (_) { }
+
+    const primaryTree = document.getElementById('bookmarkTree');
+    if (!primaryTree) return false;
+    try {
+        return !!primaryTree.querySelector(':scope > .empty-state, :scope > .error');
+    } catch (_) {
+        return false;
+    }
+}
+
+function __appendClonedPermanentTreeFragment(targetFragment, sourceFragment) {
+    if (!targetFragment || !sourceFragment) return false;
+    try {
+        const cloned = sourceFragment.cloneNode(true);
+        if (!cloned) return false;
+        if (cloned.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+            while (cloned.firstChild) {
+                targetFragment.appendChild(cloned.firstChild);
+            }
+        } else {
+            targetFragment.appendChild(cloned);
+        }
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function __buildPermanentTreeSourceFragment() {
+    const fragment = document.createDocumentFragment();
+    const renderTree = cachedTreeData && Array.isArray(cachedTreeData.renderTree)
+        ? cachedTreeData.renderTree
+        : null;
+    const renderRoot = renderTree && renderTree[0] ? renderTree[0] : null;
+
+    if (renderRoot) {
+        try {
+            const hintSet = (currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED && window.__canvasPermanentHintSet instanceof Set)
+                ? window.__canvasPermanentHintSet
+                : null;
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = renderTreeNodeWithChanges(renderRoot, 0, 50, new Set(), hintSet);
+            while (tempDiv.firstChild) {
+                fragment.appendChild(tempDiv.firstChild);
+            }
+            return fragment;
+        } catch (_) { }
+    }
+
+    try {
+        const cachedFragment = cachedTreeData && cachedTreeData.treeFragment
+            ? cachedTreeData.treeFragment
+            : null;
+        if (__appendClonedPermanentTreeFragment(fragment, cachedFragment)) {
+            return fragment;
+        }
+    } catch (_) { }
+
+    const primaryTree = document.getElementById('bookmarkTree');
+    if (!primaryTree) return null;
+    try {
+        const specialState = primaryTree.querySelector(':scope > .empty-state, :scope > .error');
+        if (specialState) {
+            fragment.appendChild(specialState.cloneNode(true));
+            return fragment;
+        }
+    } catch (_) { }
+    return null;
+}
+
+function __renderCachedPermanentTreeIntoPrimary(tree) {
+    if (!tree) return false;
+    if (__renderPermanentTreeIntoTree(tree)) {
+        return true;
+    }
+
+    if (!(cachedTreeData && cachedTreeData.treeFragment)) {
+        return false;
+    }
+
+    try {
+        tree.innerHTML = '';
+        tree.appendChild(cachedTreeData.treeFragment.cloneNode(true));
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function __renderPermanentTreeIntoTree(tree) {
+    if (!tree) return false;
+
+    const sourceFragment = __buildPermanentTreeSourceFragment();
+    if (!sourceFragment) return false;
+
+    const body = tree.closest('.permanent-section-body');
+    const prevScrollTop = body ? body.scrollTop : null;
+    const prevScrollLeft = body ? body.scrollLeft : 0;
+    const prevExpanded = __captureTreeExpandedNodeIds(tree);
+    let persistedExpanded = null;
+    try {
+        const raw = __readTreeExpandStateFromStorage(tree);
+        if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr) && arr.length > 0) {
+                persistedExpanded = new Set(arr.map(String));
+            }
+        }
+    } catch (_) { }
+
+    let desiredScrollTop = prevScrollTop;
+    let desiredScrollLeft = prevScrollLeft;
+    try {
+        const persisted = __readPermanentSectionScrollStateFromTree(tree);
+        if (persisted && typeof persisted.top === 'number' && isFinite(persisted.top)) {
+            desiredScrollTop = persisted.top;
+            desiredScrollLeft = (typeof persisted.left === 'number' && isFinite(persisted.left)) ? persisted.left : 0;
+        }
+    } catch (_) { }
+
+    try {
+        tree.replaceChildren(sourceFragment);
+    } catch (_) {
+        tree.innerHTML = '';
+        try { tree.appendChild(sourceFragment); } catch (_) { }
+    }
+
+    // Shared-source rerender replaces all tree-item nodes. Rebind per-node drag handlers
+    // so permanent main/copies continue to support cross-column drag after sync/render.
+    try {
+        if (typeof attachDragEvents === 'function') {
+            attachDragEvents(tree);
+        }
+    } catch (_) { }
+
+    // 共享内容源重新渲染后，副本仍需保持自己的交互壳状态。
+    try {
+        tree.querySelectorAll('#bookmark-context-menu, .bookmark-context-menu').forEach(el => {
+            try { el.remove(); } catch (_) { }
+        });
+        tree.querySelectorAll('.tree-item.context-selected').forEach(el => {
+            try { el.classList.remove('context-selected'); } catch (_) { }
+        });
+    } catch (_) { }
+
+    try {
+        const hasTreeNodes = !!tree.querySelector('.tree-node');
+        if (hasTreeNodes && isMarkerEnabled() && treeChangeMap instanceof Map && treeChangeMap.size > 0) {
+            ensureTreeLegendExists(tree);
+        } else if (hasTreeNodes) {
+            ensureCanvasLazyLegend(tree);
+        }
+    } catch (_) { }
+
+    __resetTreeExpandedState(tree);
+    __ensureTreeRootExpanded(tree);
+    const expandedFallback = (persistedExpanded && persistedExpanded.size)
+        ? persistedExpanded
+        : prevExpanded;
+    if (expandedFallback && expandedFallback.size) {
+        __applyTreeExpandedNodeIds(tree, expandedFallback);
+        __lazyLoadExpandedFolders(tree, expandedFallback);
+    }
+
+    if (body && desiredScrollTop !== null) {
+        const restore = () => {
+            try {
+                const until = parseInt(body.dataset.scrollRestoreBlockUntil || '0', 10) || 0;
+                if (until && Date.now() < until) return;
+            } catch (_) { }
+            body.scrollTop = desiredScrollTop;
+            body.scrollLeft = desiredScrollLeft;
+        };
+        restore();
+        requestAnimationFrame(() => {
+            restore();
+            setTimeout(restore, 80);
+            setTimeout(restore, 180);
+            setTimeout(restore, 360);
+        });
+    }
+
+    return true;
+}
+window.__renderPermanentTreeIntoTree = __renderPermanentTreeIntoTree;
+
 function syncPermanentTreeCopiesFromPrimary() {
     try {
         if (currentView !== 'canvas') return;
@@ -2414,10 +2741,7 @@ function syncPermanentTreeCopiesFromPrimary() {
 
     const primaryTree = document.getElementById('bookmarkTree');
     if (!primaryTree) return;
-    // 主树尚未渲染完成时，避免把副本刷成“空树”导致闪烁（等主树真正有节点再同步）
-    try {
-        if (!primaryTree.querySelector('.tree-item, .empty-state, .error')) return;
-    } catch (_) { return; }
+    if (!__hasPermanentTreeSharedContentSource()) return;
 
     const canvasContent = document.getElementById('canvasContent');
     if (!canvasContent) return;
@@ -2426,89 +2750,8 @@ function syncPermanentTreeCopiesFromPrimary() {
     const copyTrees = trees.filter(t => t && t !== primaryTree);
     if (!copyTrees.length) return;
 
-    const primaryChildren = Array.from(primaryTree.childNodes);
-
     copyTrees.forEach((tree) => {
-        const body = tree.closest('.permanent-section-body');
-        const prevScrollTop = body ? body.scrollTop : null;
-        const prevScrollLeft = body ? body.scrollLeft : 0;
-        const prevExpanded = __captureTreeExpandedNodeIds(tree);
-        let persistedExpanded = null;
-        try {
-            const raw = __readTreeExpandStateFromStorage(tree);
-            if (raw) {
-                const arr = JSON.parse(raw);
-                if (Array.isArray(arr) && arr.length > 0) {
-                    persistedExpanded = new Set(arr.map(String));
-                }
-            }
-        } catch (_) { }
-
-        // 滚动位置：每个副本独立持久化（不做同步）；同步刷新时优先使用持久化值
-        let desiredScrollTop = prevScrollTop;
-        let desiredScrollLeft = prevScrollLeft;
-        try {
-            const key = __getPermanentSectionScrollStorageKeyFromTree(tree);
-            const persisted = __readLocalStorageJSON(key);
-            if (persisted && typeof persisted.top === 'number' && isFinite(persisted.top)) {
-                desiredScrollTop = persisted.top;
-                desiredScrollLeft = (typeof persisted.left === 'number' && isFinite(persisted.left)) ? persisted.left : 0;
-            }
-        } catch (_) { }
-
-        // 使用一次性替换，避免同步过程中短暂“清空”导致的可见闪烁
-        const frag = document.createDocumentFragment();
-        primaryChildren.forEach((child) => {
-            try { frag.appendChild(child.cloneNode(true)); } catch (_) { }
-        });
-        try {
-            tree.replaceChildren(frag);
-        } catch (_) {
-            tree.innerHTML = '';
-            try { tree.appendChild(frag); } catch (_) { }
-        }
-
-        // 右键菜单/临时选中态不应同步到副本：
-        // - 右键菜单会被“主树 -> 副本”cloneNode(true) 复制，导致所有副本同时出现菜单 UI
-        // - context-selected 仅应作用于当前用户交互的那一个树实例
-        try {
-            tree.querySelectorAll('#bookmark-context-menu, .bookmark-context-menu').forEach(el => {
-                try { el.remove(); } catch (_) { }
-            });
-            tree.querySelectorAll('.tree-item.context-selected').forEach(el => {
-                try { el.classList.remove('context-selected'); } catch (_) { }
-            });
-        } catch (_) { }
-
-        // 展开状态：每个副本独立，优先持久化；若无持久化则保留本副本当前展开状态
-        __resetTreeExpandedState(tree);
-        __ensureTreeRootExpanded(tree);
-        const expandedFallback = (persistedExpanded && persistedExpanded.size)
-            ? persistedExpanded
-            : prevExpanded;
-        if (expandedFallback && expandedFallback.size) {
-            __applyTreeExpandedNodeIds(tree, expandedFallback);
-            __lazyLoadExpandedFolders(tree, expandedFallback);
-        }
-
-        if (body && desiredScrollTop !== null) {
-            const restore = () => {
-                try {
-                    const until = parseInt(body.dataset.scrollRestoreBlockUntil || '0', 10) || 0;
-                    if (until && Date.now() < until) return;
-                } catch (_) { }
-                body.scrollTop = desiredScrollTop;
-                body.scrollLeft = desiredScrollLeft;
-            };
-            restore();
-            requestAnimationFrame(() => {
-                restore();
-                setTimeout(restore, 80);
-                setTimeout(restore, 180);
-                setTimeout(restore, 360);
-            });
-        }
-
+        __renderPermanentTreeIntoTree(tree);
     });
 }
 
@@ -3286,137 +3529,13 @@ const i18n = {
         'zh_CN': '面板',
         'en': 'Panel'
     },
-    canvasSyncSplitIntervalsLabel: {
-        'zh_CN': '分离定时器（高级）',
-        'en': 'Split Timers (Advanced)'
-    },
-    canvasSyncSplitIntervalsDesc: {
-        'zh_CN': '互斥关系：分离定时器开启后，“自动同步间隔”不生效；关闭后，“定时推送/定时拉取”不生效（会灰显不可编辑）。\n自动同步：分离定时器关闭时，按“自动同步间隔”执行自动判断同步；系统会先判断当前状态，再决定上传、拉取、冲突处理或不执行。\n开启后状态：改为“定时推送 + 定时拉取”分别执行；任一间隔填 0 表示关闭对应定时任务。',
-        'en': 'Mutual exclusion: when split timers are on, Auto Sync Interval is inactive; when split timers are off, Scheduled Push/Pull are inactive (greyed out and not editable).\nAuto sync: when split timers are off, the Auto Sync Interval runs state-aware sync; the system checks the current state first, then decides whether to push, pull, resolve conflict, or do nothing.\nWhen enabled: it switches to separate scheduled push and pull; entering 0 for either interval disables that scheduled task.'
-    },
-    canvasSyncForegroundCheckLabel: {
-        'zh_CN': '前台检测云端变更',
-        'en': 'Foreground Cloud Check'
-    },
-    canvasSyncForegroundCheckDesc: {
-        'zh_CN': '前台检测开关：当前页面可见时，轻量检查分支最新 SHA；检测到不一致后会自动刷新状态面板。',
-        'en': 'Foreground check switch: when the page is visible, it lightly checks the latest branch SHA and refreshes the status panel when mismatch is detected.'
-    },
-    canvasSyncForegroundCheckIntervalLabel: {
-        'zh_CN': '前台检测间隔（秒）',
-        'en': 'Foreground Check Interval (seconds)'
-    },
-    canvasSyncBackgroundCheckLabel: {
-        'zh_CN': '后台检测云端变更',
-        'en': 'Background Cloud Check'
-    },
-    canvasSyncBackgroundCheckDesc: {
-        'zh_CN': '后台检测开关：用于前台关闭时持续检测云端版本变化。连续 2 次检测一致会进入“后台冷却时间”（降低检测频率）；检测到不一致后会恢复常规频率。',
-        'en': 'Background check switch: keeps checking cloud revision changes while foreground is closed. After 2 consistent checks it enters cooldown (reduced cadence); once mismatch is detected, it returns to normal cadence.'
-    },
-    canvasSyncBackgroundCheckIntervalLabel: {
-        'zh_CN': '后台检测间隔（分钟）',
-        'en': 'Background Check Interval (minutes)'
-    },
-    canvasSyncBackgroundCooldownLabel: {
-        'zh_CN': '后台冷却时间（分钟）',
-        'en': 'Background Cooldown (minutes)'
-    },
-    canvasSyncMismatchPolicyLabel: {
-        'zh_CN': '云端不一致处理策略',
-        'en': 'Remote Mismatch Policy'
-    },
-    canvasSyncMismatchPolicyAutoPullOption: {
-        'zh_CN': '自动使用云端覆盖本地',
-        'en': 'Auto Use Cloud to Overwrite Local'
-    },
-    canvasSyncMismatchPolicyAutoPushOption: {
-        'zh_CN': '自动保留本地并覆盖云端',
-        'en': 'Auto Keep Local and Overwrite Cloud'
-    },
-    canvasSyncMismatchPolicyPromptOption: {
-        'zh_CN': '弹窗提示',
-        'en': 'Prompt'
-    },
-    canvasSyncMismatchPolicyDesc: {
-        'zh_CN': '当前台或后台检测到“云端版本与本地基线不一致”时，按此策略处理。\n自动使用云端覆盖本地=自动拉取并以云端为准；自动保留本地并覆盖云端=自动上传并以本地为准；弹窗提示=在状态面板手动选择“使用云端覆盖本地”或“保留本地并覆盖云端”。',
-        'en': 'When foreground or background detection finds a mismatch between the cloud revision and the local baseline, this policy decides how to handle it.\nAuto Use Cloud to Overwrite Local = automatically pull and align to cloud; Auto Keep Local and Overwrite Cloud = automatically push and align to local; Prompt = choose manually in the Status panel.'
-    },
-    canvasSyncPullOnStartupLabel: {
-        'zh_CN': '开页跟进后台变化',
-        'en': 'Follow Background Changes on Open'
-    },
-    canvasSyncPullOnStartupDesc: {
-        'zh_CN': '进入前台约 1.2 秒后读取后台结果；若后台已检测到云端不一致，就按 3.3 继续处理。依赖“后台检测云端变更”。',
-        'en': 'About 1.2 seconds after the page becomes active, read the background result. If background already detected a cloud mismatch, continue via 3.3. Depends on background cloud detection.'
-    },
     canvasSyncToastToggleLabel: {
         'zh_CN': '右上角普通通知',
         'en': 'Top-right General Notifications'
     },
     canvasSyncToastToggleDesc: {
-        'zh_CN': '关闭后进入静默同步：只保留必要提示，例如失败、恢复、冲突、云端不一致等。',
-        'en': 'Turn this off for quiet sync. Only necessary notices remain, such as failures, recovery, conflicts, and cloud mismatch.'
-    },
-    canvasSyncEditAutoToastToggleLabel: {
-        'zh_CN': '「停止编辑后自动同步」通知',
-        'en': '“Auto Sync After Editing Stops” Notices'
-    },
-    canvasSyncEditAutoToastToggleDesc: {
-        'zh_CN': '仅影响右上角这类「停止编辑后自动同步」通知；开启时保留默认节流提示，关闭时这类提示完全静默。手动同步、冲突、恢复、失败等必要提示不受影响。',
-        'en': 'Only affects top-right notices for “auto sync after editing stops”. When enabled, throttled informational notices remain; when disabled, those notices are fully silent. Manual sync, conflicts, recovery, and failures are not affected.'
-    },
-    canvasSyncQuietSyncHintDesc: {
-        'zh_CN': '低打扰说明：自动同步与停止编辑后同步会尽量避开你正在操作的时段；云端不一致只有在状态稳定一段时间后才提示，避免面板一闪而过。',
-        'en': 'Low-interruption note: auto sync and sync-after-edit try to avoid the moments when you are actively interacting; cloud mismatch is only surfaced after the state stays stable for a short period, to avoid flicker.'
-    },
-    canvasSyncSyncModeDesc: {
-        'zh_CN': '当前主路径只提供：同步、仅上传、仅拉取、本地覆盖云端、云端覆盖本地。插件不提供 Git Merge / Rebase / Reset；如需查看历史或手动回滚，请到 GitHub 处理。',
-        'en': 'The main flow only provides Sync, Push Only, Pull Only, Local Overwrites Cloud, and Cloud Overwrites Local. The extension does not expose Git Merge / Rebase / Reset here; use GitHub when you need to inspect history or roll back manually.'
-    },
-    canvasSyncMethodLabel: {
-        'zh_CN': '合并策略',
-        'en': 'Merge strategy'
-    },
-    canvasSyncMethodMergeOption: {
-        'zh_CN': '合并（Merge）',
-        'en': 'Merge'
-    },
-    canvasSyncMethodRebaseOption: {
-        'zh_CN': '变基（Rebase）',
-        'en': 'Rebase'
-    },
-    canvasSyncMethodResetOption: {
-        'zh_CN': '仅记云端版本（Reset）',
-        'en': 'Other sync service (Only updates the HEAD without touching the working directory)'
-    },
-    canvasSyncMethodDesc: {
-        'zh_CN': '合并（Merge）：把云端变更与本地变更合并，保留双方提交历史。\n变基（Rebase）：把本地提交移动到云端最新提交之后，历史更线性。\n仅记云端版本（Reset）：不改本地数据，只记录云端现在到哪个版本（仅更新版本指针 HEAD）。',
-        'en': 'Decides how remote changes are integrated on pull (semantically aligned with Obsidian Git merge strategy).'
-    },
-    canvasSyncConflictLabel: {
-        'zh_CN': '默认冲突处理',
-        'en': 'Default Conflict Handling'
-    },
-    canvasSyncConflictNoneOption: {
-        'zh_CN': '手动选择',
-        'en': 'Choose Manually'
-    },
-    canvasSyncConflictOursOption: {
-        'zh_CN': '本地优先',
-        'en': 'Prefer Local'
-    },
-    canvasSyncConflictTheirsOption: {
-        'zh_CN': '云端优先',
-        'en': 'Prefer Cloud'
-    },
-    canvasSyncConflictNewestOption: {
-        'zh_CN': '按最近修改时间决定',
-        'en': 'Use Latest Modification Time'
-    },
-    canvasSyncConflictDesc: {
-        'zh_CN': '当本地和云端都改时，按此策略决定是否自动裁决。选择“手动选择”时会停在冲突面板；选择“按最近修改时间决定”时，谁更新更晚谁赢，时间相同或无法判断时回退为手动选择。',
-        'en': 'When both local and cloud changed, this decides whether the conflict is resolved automatically. “Choose Manually” stops in the conflict panel; “Use Latest Modification Time” lets the newer side win, and falls back to manual choice when timestamps tie or cannot be trusted.'
+        'zh_CN': '关闭后进入静默同步：只保留必要提示，例如失败、恢复、冲突等。',
+        'en': 'Turn this off for quiet sync. Only necessary notices remain, such as failures, recovery, and conflicts.'
     },
     canvasSyncRepoEnabledLabel: {
         'zh_CN': '启用 GitHub 仓库',
@@ -3462,213 +3581,25 @@ const i18n = {
         'zh_CN': '1. 总开关与首次同步',
         'en': '1. General Switch & First Sync'
     },
-    canvasSyncTemplateLabel: {
-        'zh_CN': '同步模板',
-        'en': 'Sync Template'
+    canvasSyncStatusActionsSectionTitle: {
+        'zh_CN': '1. 基础操作',
+        'en': '1. Basic Actions'
     },
-    canvasSyncTemplateCustomOption: {
-        'zh_CN': '当前为自定义',
-        'en': 'Current = Custom'
+    canvasSyncStatusConfigSectionTitle: {
+        'zh_CN': '2. 备份',
+        'en': '2. Backup'
     },
-    canvasSyncTemplateLiveOption: {
-        'zh_CN': '实时同步',
-        'en': 'Live Sync'
-    },
-    canvasSyncTemplateStandardOption: {
-        'zh_CN': '标准同步',
-        'en': 'Standard Sync'
-    },
-    canvasSyncTemplateBackupOption: {
-        'zh_CN': '备份优先',
-        'en': 'Backup First'
-    },
-    canvasSyncTemplateHelpBtnTitle: {
-        'zh_CN': '查看',
-        'en': 'View'
-    },
-    canvasSyncTemplateHelpPopoverTitle: {
-        'zh_CN': '同步模板值',
-        'en': 'Sync Template Values'
-    },
-    canvasSyncTemplateHelpCloseBtnTitle: {
-        'zh_CN': '关闭',
-        'en': 'Close'
-    },
-    canvasSyncTemplateHelpNote: {
-        'zh_CN': `<div class="canvas-sync-template-help-intro">这 3 个官方模板会一起改“同步节奏、检测频率、通知风格、3.3 云端不一致处理”，不改 3.4 冲突处理、首次同步方向。</div>
-<div class="canvas-sync-template-help-grid">
-  <section class="canvas-sync-template-help-card">
-    <div class="canvas-sync-template-help-card-title">实时同步</div>
-    <div class="canvas-sync-template-help-card-note">本地改动以“停止编辑后自动同步”为主；云端变更靠更积极的检测发现，适合希望更接近实时但不想被提示打扰的场景。</div>
-    <div class="canvas-sync-template-help-line"><b>本地改动主路径</b><span>停止编辑后自动同步</span></div>
-    <div class="canvas-sync-template-help-line"><b>分离定时器</b><span>关闭</span></div>
-    <div class="canvas-sync-template-help-line"><b>同步兜底间隔</b><span>60 秒</span></div>
-    <div class="canvas-sync-template-help-line"><b>前台检测云端变更</b><span>10 秒</span></div>
-    <div class="canvas-sync-template-help-line"><b>后台检测 / 冷却</b><span>1 分钟 / 2 分钟</span></div>
-    <div class="canvas-sync-template-help-line"><b>开页跟进后台变化</b><span>开启</span></div>
-    <div class="canvas-sync-template-help-line"><b>云端不一致处理（3.3）</b><span>自动使用云端覆盖本地</span></div>
-    <div class="canvas-sync-template-help-line"><b>右上角普通通知</b><span>关闭</span></div>
-    <div class="canvas-sync-template-help-line"><b>停止编辑后自动同步通知</b><span>关闭</span></div>
-    <div class="canvas-sync-template-help-line"><b>永久 / 临时 / 空白 上传截流</b><span>5 / 2 / 2 秒</span></div>
-  </section>
-  <section class="canvas-sync-template-help-card">
-    <div class="canvas-sync-template-help-card-title">标准同步</div>
-    <div class="canvas-sync-template-help-card-note">推荐默认值，兼顾同步及时性、稳定性和日常通知打扰。</div>
-    <div class="canvas-sync-template-help-line"><b>本地改动主路径</b><span>停止编辑后自动同步</span></div>
-    <div class="canvas-sync-template-help-line"><b>分离定时器</b><span>关闭</span></div>
-    <div class="canvas-sync-template-help-line"><b>同步兜底间隔</b><span>120 秒</span></div>
-    <div class="canvas-sync-template-help-line"><b>前台检测云端变更</b><span>30 秒</span></div>
-    <div class="canvas-sync-template-help-line"><b>后台检测 / 冷却</b><span>1 分钟 / 5 分钟</span></div>
-    <div class="canvas-sync-template-help-line"><b>开页跟进后台变化</b><span>开启</span></div>
-    <div class="canvas-sync-template-help-line"><b>云端不一致处理（3.3）</b><span>弹窗提示</span></div>
-    <div class="canvas-sync-template-help-line"><b>右上角普通通知</b><span>开启</span></div>
-    <div class="canvas-sync-template-help-line"><b>停止编辑后自动同步通知</b><span>关闭</span></div>
-    <div class="canvas-sync-template-help-line"><b>永久 / 临时 / 空白 上传截流</b><span>15 / 5 / 5 秒</span></div>
-  </section>
-  <section class="canvas-sync-template-help-card">
-    <div class="canvas-sync-template-help-card-title">备份优先</div>
-    <div class="canvas-sync-template-help-card-note">更偏向定时上传备份，并把普通通知静默化，减少自动拉取和高频打扰。</div>
-    <div class="canvas-sync-template-help-line"><b>本地改动主路径</b><span>定时推送为主</span></div>
-    <div class="canvas-sync-template-help-line"><b>分离定时器</b><span>开启</span></div>
-    <div class="canvas-sync-template-help-line"><b>定时推送 / 定时拉取</b><span>5 分钟 / 关闭</span></div>
-    <div class="canvas-sync-template-help-line"><b>前台检测云端变更</b><span>60 秒</span></div>
-    <div class="canvas-sync-template-help-line"><b>后台检测 / 冷却</b><span>5 分钟 / 15 分钟</span></div>
-    <div class="canvas-sync-template-help-line"><b>开页跟进后台变化</b><span>关闭</span></div>
-    <div class="canvas-sync-template-help-line"><b>云端不一致处理（3.3）</b><span>弹窗提示</span></div>
-    <div class="canvas-sync-template-help-line"><b>右上角普通通知</b><span>关闭</span></div>
-    <div class="canvas-sync-template-help-line"><b>停止编辑后自动同步通知</b><span>关闭</span></div>
-    <div class="canvas-sync-template-help-line"><b>永久 / 临时 / 空白 上传截流</b><span>30 / 30 / 30 秒</span></div>
-  </section>
-</div>`,
-        'en': `<div class="canvas-sync-template-help-intro">These 3 built-in templates change sync cadence, check frequency, notification style, and 3.3 mismatch handling together. They do not change 3.4 conflict handling or first-sync direction.</div>
-<div class="canvas-sync-template-help-grid">
-  <section class="canvas-sync-template-help-card">
-    <div class="canvas-sync-template-help-card-title">Live Sync</div>
-    <div class="canvas-sync-template-help-card-note">Local edits mainly rely on auto sync after editing stops, while cloud changes are found by more aggressive checks, without extra notification noise.</div>
-    <div class="canvas-sync-template-help-line"><b>Main local-edit path</b><span>Auto Sync After Editing Stops</span></div>
-    <div class="canvas-sync-template-help-line"><b>Split Timers</b><span>Off</span></div>
-    <div class="canvas-sync-template-help-line"><b>Fallback Sync Interval</b><span>60 sec</span></div>
-    <div class="canvas-sync-template-help-line"><b>Foreground Cloud Check</b><span>10 sec</span></div>
-    <div class="canvas-sync-template-help-line"><b>Background Check / Cooldown</b><span>1 min / 2 min</span></div>
-    <div class="canvas-sync-template-help-line"><b>Follow Background Changes on Open</b><span>On</span></div>
-    <div class="canvas-sync-template-help-line"><b>Mismatch Handling (3.3)</b><span>Auto Use Cloud to Overwrite Local</span></div>
-    <div class="canvas-sync-template-help-line"><b>Top-right General Notifications</b><span>Off</span></div>
-    <div class="canvas-sync-template-help-line"><b>Edit-stop Auto Sync Notifications</b><span>Off</span></div>
-    <div class="canvas-sync-template-help-line"><b>Permanent / Temp / Blank Upload Throttle</b><span>5 / 2 / 2 sec</span></div>
-  </section>
-  <section class="canvas-sync-template-help-card">
-    <div class="canvas-sync-template-help-card-title">Standard Sync</div>
-    <div class="canvas-sync-template-help-card-note">Recommended defaults that balance timeliness, stability, and everyday notification noise.</div>
-    <div class="canvas-sync-template-help-line"><b>Main local-edit path</b><span>Auto Sync After Editing Stops</span></div>
-    <div class="canvas-sync-template-help-line"><b>Split Timers</b><span>Off</span></div>
-    <div class="canvas-sync-template-help-line"><b>Fallback Sync Interval</b><span>120 sec</span></div>
-    <div class="canvas-sync-template-help-line"><b>Foreground Cloud Check</b><span>30 sec</span></div>
-    <div class="canvas-sync-template-help-line"><b>Background Check / Cooldown</b><span>1 min / 5 min</span></div>
-    <div class="canvas-sync-template-help-line"><b>Follow Background Changes on Open</b><span>On</span></div>
-    <div class="canvas-sync-template-help-line"><b>Mismatch Handling (3.3)</b><span>Prompt</span></div>
-    <div class="canvas-sync-template-help-line"><b>Top-right General Notifications</b><span>On</span></div>
-    <div class="canvas-sync-template-help-line"><b>Edit-stop Auto Sync Notifications</b><span>Off</span></div>
-    <div class="canvas-sync-template-help-line"><b>Permanent / Temp / Blank Upload Throttle</b><span>15 / 5 / 5 sec</span></div>
-  </section>
-  <section class="canvas-sync-template-help-card">
-    <div class="canvas-sync-template-help-card-title">Backup First</div>
-    <div class="canvas-sync-template-help-card-note">Leans toward scheduled push backup and quiets general notifications to reduce interruption.</div>
-    <div class="canvas-sync-template-help-line"><b>Main local-edit path</b><span>Scheduled Push First</span></div>
-    <div class="canvas-sync-template-help-line"><b>Split Timers</b><span>On</span></div>
-    <div class="canvas-sync-template-help-line"><b>Scheduled Push / Pull</b><span>5 min / Off</span></div>
-    <div class="canvas-sync-template-help-line"><b>Foreground Cloud Check</b><span>60 sec</span></div>
-    <div class="canvas-sync-template-help-line"><b>Background Check / Cooldown</b><span>5 min / 15 min</span></div>
-    <div class="canvas-sync-template-help-line"><b>Follow Background Changes on Open</b><span>Off</span></div>
-    <div class="canvas-sync-template-help-line"><b>Mismatch Handling (3.3)</b><span>Prompt</span></div>
-    <div class="canvas-sync-template-help-line"><b>Top-right General Notifications</b><span>Off</span></div>
-    <div class="canvas-sync-template-help-line"><b>Edit-stop Auto Sync Notifications</b><span>Off</span></div>
-    <div class="canvas-sync-template-help-line"><b>Permanent / Temp / Blank Upload Throttle</b><span>30 / 30 / 30 sec</span></div>
-  </section>
-</div>`
+    canvasSyncStatusRuntimeSectionTitle: {
+        'zh_CN': '3. 执行状态',
+        'en': '3. Execution Status'
     },
     canvasSyncEnabledLabel: {
         'zh_CN': '启用同步',
         'en': 'Enable Sync'
     },
-    canvasSyncAutoLabel: {
-        'zh_CN': '自动同步',
-        'en': 'Auto Sync'
-    },
-    canvasSyncAutoHelpNote: {
-        'zh_CN': '自动同步不会固定先上传还是先拉取，而是先判断当前状态，再决定动作。\n\n四类判断：\n• 本地没变，云端没变：不执行同步。\n• 本地变了，云端没变：直接上传。\n• 本地没变，云端变了：按 <span class="canvas-sync-help-highlight">3.3 云端不一致处理</span> 自动使用云端覆盖本地，或弹出云端不一致面板。\n• 本地变了，云端也变了：按 <span class="canvas-sync-help-highlight">3.4 默认冲突处理</span> 自动裁决，或进入冲突面板。\n\n补充：\n• 「仅上传 / 仅拉取」是手动强制动作。\n• 自动同步主要决定何时检查、何时触发，不替代冲突判断。',
-        'en': 'Auto Sync does not always upload first or pull first. It checks the current state first, then decides what action to run.\n\nThe 4 cases:\n• Local unchanged, cloud unchanged: do nothing.\n• Local changed, cloud unchanged: upload directly.\n• Local unchanged, cloud changed: follow <span class="canvas-sync-help-highlight">3.3 Mismatch Handling</span> to either auto use cloud-overwrite-local or open the mismatch panel.\n• Local changed, cloud changed: follow <span class="canvas-sync-help-highlight">3.4 Default Conflict Handling</span> to either auto-resolve or enter the conflict panel.\n\nNotes:\n• “Push Only / Pull Only” are manual forced actions.\n• Auto Sync mainly decides when to check and when to trigger; it does not replace conflict judgment.'
-    },
-    canvasSyncAutoHelpBtnTitle: {
-        'zh_CN': '查看说明',
-        'en': 'View help'
-    },
-    canvasSyncAutoAfterEditStopLabel: {
-        'zh_CN': '停止编辑后自动同步',
-        'en': 'Auto sync after editing stops'
-    },
-    canvasSyncAutoAfterEditStopDesc: {
-        'zh_CN': '画布编辑（卡片内容/位置/连线等）会先防抖合并；在防抖窗口内无新改动时才触发一次同步。',
-        'en': 'Canvas edits (card content/position/edges) are debounced and batched; one sync runs after no new changes within the debounce window.'
-    },
-    canvasSyncIntervalLabel: {
-        'zh_CN': '自动同步间隔（秒，分离定时器关闭时生效；按当前状态自动判断上传/拉取/冲突处理）',
-        'en': 'Auto Sync Interval (seconds, active when split timers are off; state-aware sync decides push/pull/conflict handling)'
-    },
-    canvasSyncAutoPushIntervalLabel: {
-        'zh_CN': '定时推送间隔（分钟，分离定时器开启时生效，0=关闭）',
-        'en': 'Scheduled Push Interval (minutes, active when split timers are on, 0=off)'
-    },
-    canvasSyncAutoPullIntervalLabel: {
-        'zh_CN': '定时拉取间隔（分钟，分离定时器开启时生效，0=关闭）',
-        'en': 'Scheduled Pull Interval (minutes, active when split timers are on, 0=off)'
-    },
-    canvasSyncFilePathLabel: {
-        'zh_CN': '同步文件路径（可选）',
-        'en': 'Sync File Path (optional)'
-    },
-    canvasSyncFilePathDesc: {
-        'zh_CN': '可选。留空使用默认主状态文件路径（推荐），只有多环境隔离时才建议自定义。',
-        'en': 'Optional. Leave empty to use the default main state path (recommended). Customize only for multi-environment isolation.'
-    },
     canvasSyncPluginSectionTitle: {
         'zh_CN': '2. 插件专属',
         'en': '2. Plugin-Specific'
-    },
-    canvasSyncSectionCompatTitle: {
-        'zh_CN': '3. 高级',
-        'en': '3. Advanced'
-    },
-    canvasSyncBehaviorSubCompatDetail1Text: {
-        'zh_CN': '3.1 前台检测',
-        'en': '3.1 Foreground Check'
-    },
-    canvasSyncBehaviorSubCompatDetail2Text: {
-        'zh_CN': '3.2 后台检测',
-        'en': '3.2 Background Check'
-    },
-    canvasSyncBehaviorSubCompatDetail3Text: {
-        'zh_CN': '3.3 云端不一致处理',
-        'en': '3.3 Mismatch Handling'
-    },
-    canvasSyncBehaviorSubCompatDetail4Text: {
-        'zh_CN': '3.4 同步方式与冲突处理',
-        'en': '3.4 Sync & Conflict Handling'
-    },
-    canvasSyncSectionCompatDetectTitle: {
-        'zh_CN': '3.1 前台检测',
-        'en': '3.1 Foreground Check'
-    },
-    canvasSyncSectionCompatBgDetectTitle: {
-        'zh_CN': '3.2 后台检测',
-        'en': '3.2 Background Check'
-    },
-    canvasSyncSectionCompatMismatchTitle: {
-        'zh_CN': '3.3 云端不一致处理',
-        'en': '3.3 Mismatch Handling'
-    },
-    canvasSyncSectionCompatMergeTitle: {
-        'zh_CN': '3.4 同步方式与冲突处理',
-        'en': '3.4 Sync & Conflict Handling'
     },
     canvasSyncObsidianFilePushLabel: {
         'zh_CN': '同步时增量推送 Obsidian 文件',
@@ -3707,8 +3638,12 @@ const i18n = {
         'en': 'Export Format (for Obsidian)'
     },
     canvasSyncObsidianExportFormatDesc: {
-        'zh_CN': '视觉模式：包含 favicon 图标，适合查看与存档。\n视觉模式（无图标）：不包含 favicon 图标，用字符 "-" 代替，体积更小。',
-        'en': 'Visual mode: includes favicons and is best for viewing and archiving.\nVisual mode (no icons): removes favicons, uses "-" as the link marker, and keeps a smaller size.'
+        'zh_CN': '视觉模式：包含 favicon 图标，适合查看与存档。\n视觉模式（无图标）：不包含 favicon 图标，用字符 "-" 代替，体积更小。\nJSON模式（供AI）：在 MD 文件中用结构化 JSON 表示书签树，更适合 AI 分析、增删改移和稳定同步。',
+        'en': 'Visual mode: includes favicons and is best for viewing and archiving.\nVisual mode (no icons): removes favicons, uses "-" as the link marker, and keeps a smaller size.\nJSON mode (for AI): stores the bookmark tree as structured JSON inside the MD file, making AI analysis and stable sync easier.'
+    },
+    canvasSyncObsidianExportFormatJsonOption: {
+        'zh_CN': 'JSON模式（供AI）',
+        'en': 'JSON Mode (for AI)'
     },
     canvasSyncObsidianExportFormatVisualNoIconOption: {
         'zh_CN': '视觉模式（无图标）',
@@ -3759,20 +3694,20 @@ const i18n = {
         'en': 'Temp Section Snapshot Upload Throttle (sec)'
     },
     canvasSyncTempSectionIntervalDesc: {
-        'zh_CN': '书签树状态（临时栏目）：默认 5 秒，可手动输入。0 表示关闭此类自动上传。',
-        'en': 'Bookmark-tree state (temp sections): default 5 seconds, manually editable. 0 means disable this auto upload.'
+        'zh_CN': '书签树状态（临时栏目）：支持小数秒（如 1.5）。0 表示关闭此类自动上传。',
+        'en': 'Bookmark-tree state (temp sections): supports fractional seconds (for example 1.5). 0 disables this auto upload.'
     },
     canvasSyncMdNodeIntervalLabel: {
         'zh_CN': '空白栏目文本文件上传截流（秒）',
         'en': 'Blank Section Text File Upload Throttle (sec)'
     },
     canvasSyncUploadThrottleGroupDesc: {
-        'zh_CN': '均可手动输入秒数；填 0 表示关闭对应自动上传截流。',
-        'en': 'All are manually editable in seconds; set 0 to disable the corresponding automatic upload throttle.'
+        'zh_CN': '均可手动输入秒数（支持小数，如 1.5）；填 0 表示关闭对应自动上传截流。',
+        'en': 'All are manually editable in seconds (fractional values like 1.5 are supported); set 0 to disable the corresponding automatic upload throttle.'
     },
     canvasSyncMdNodeIntervalDesc: {
-        'zh_CN': '空白栏目（MD/文本文件）单独节流：默认 5 秒，可手动输入。0 表示关闭此类自动上传。',
-        'en': 'Blank sections (MD/text files) have separate throttling: default 5 seconds, manually editable. 0 means disable this auto upload.'
+        'zh_CN': '空白栏目（MD/文本文件）单独节流：支持小数秒（如 1.5）。0 表示关闭此类自动上传。',
+        'en': 'Blank sections (MD/text files) have separate throttling with fractional seconds support (for example 1.5). 0 disables this auto upload.'
     },
     canvasSyncPermanentTreeInterval0Option: {
         'zh_CN': '关闭',
@@ -3863,48 +3798,8 @@ const i18n = {
         'en': 'Local Hash:'
     },
     canvasSyncStatusOtherLabel: {
-        'zh_CN': '具体变更：',
-        'en': 'Detailed Changes:'
-    },
-    canvasSyncStatusPendingMismatchLabel: {
-        'zh_CN': '云端不一致待处理：',
-        'en': 'Pending Remote Mismatch:'
-    },
-    canvasSyncRunBgCheckText: {
-        'zh_CN': '立即后台检查',
-        'en': 'Run Background Check Now'
-    },
-    canvasSyncPreviewMismatchText: {
-        'zh_CN': '预览云端不一致面板',
-        'en': 'Preview Remote Mismatch Panel'
-    },
-    canvasSyncPreviewConflictText: {
-        'zh_CN': '预览冲突面板',
-        'en': 'Preview Conflict Panel'
-    },
-    canvasSyncMismatchTitle: {
-        'zh_CN': '检测到云端不一致',
-        'en': 'Remote Mismatch Detected'
-    },
-    canvasSyncMismatchSummary: {
-        'zh_CN': '后台在前台关闭期间检测到云端版本与本地基线不一致。当前已进入前台，请选择处理方式。',
-        'en': 'Background detected mismatch while foreground was closed. You are now in foreground; please choose how to proceed.'
-    },
-    canvasSyncMismatchUseRemoteText: {
-        'zh_CN': '使用云端覆盖本地',
-        'en': 'Use Cloud and Overwrite Local'
-    },
-    canvasSyncMismatchUseLocalText: {
-        'zh_CN': '保留本地并覆盖云端',
-        'en': 'Keep Local and Overwrite Cloud'
-    },
-    canvasSyncMismatchGoPolicyText: {
-        'zh_CN': '跳转到 3.3 处理策略',
-        'en': 'Jump to 3.3 Policy Settings'
-    },
-    canvasSyncMismatchDismissText: {
-        'zh_CN': '稍后处理',
-        'en': 'Handle later'
+        'zh_CN': '本地待同步变更：',
+        'en': 'Pending Local Changes:'
     },
     canvasSyncStatusErrorLabel: {
         'zh_CN': '最近错误：',
@@ -3915,8 +3810,8 @@ const i18n = {
         'en': 'Concurrent Conflict Detected'
     },
     canvasSyncConflictSummaryDefault: {
-        'zh_CN': '请先选择处理策略，再继续自动同步。',
-        'en': 'Please choose a resolution strategy before continuing auto sync.'
+        'zh_CN': '请先选择处理策略，再继续同步。',
+        'en': 'Please choose a resolution strategy before continuing sync.'
     },
     canvasSyncConflictLocalTitle: {
         'zh_CN': '本地',
@@ -4785,7 +4680,7 @@ function applySyncIntervalUnitLine(labelEl) {
     labelEl.appendChild(unitSpan);
 }
 
-const CANVAS_SYNC_DISABLED_HINT_SELECTOR = '.canvas-sync-row--disabled[data-disabled-hint], .canvas-sync-template-help-line.is-disabled[data-disabled-hint]';
+const CANVAS_SYNC_DISABLED_HINT_SELECTOR = '.canvas-sync-row--disabled[data-disabled-hint]';
 let canvasSyncDisabledHintTooltipEl = null;
 let canvasSyncDisabledHintTarget = null;
 
@@ -5127,67 +5022,10 @@ function applyLanguage() {
             : (canvasSyncTabNav.dataset.labelEn || 'Sync Settings Menu');
         canvasSyncTabNav.setAttribute('aria-label', aria);
     }
-    const canvasSyncSplitIntervalsLabel = document.getElementById('canvasSyncSplitIntervalsLabel');
-    if (canvasSyncSplitIntervalsLabel) canvasSyncSplitIntervalsLabel.textContent = i18n.canvasSyncSplitIntervalsLabel[currentLang];
-    const canvasSyncSplitIntervalsDesc = document.getElementById('canvasSyncSplitIntervalsDesc');
-    if (canvasSyncSplitIntervalsDesc) canvasSyncSplitIntervalsDesc.textContent = i18n.canvasSyncSplitIntervalsDesc[currentLang];
-    const canvasSyncBackgroundCheckLabel = document.getElementById('canvasSyncBackgroundCheckLabel');
-    if (canvasSyncBackgroundCheckLabel) canvasSyncBackgroundCheckLabel.textContent = i18n.canvasSyncBackgroundCheckLabel[currentLang];
-    const canvasSyncBackgroundCheckDesc = document.getElementById('canvasSyncBackgroundCheckDesc');
-    if (canvasSyncBackgroundCheckDesc) canvasSyncBackgroundCheckDesc.textContent = i18n.canvasSyncBackgroundCheckDesc[currentLang];
-    const canvasSyncBackgroundCheckIntervalLabel = document.getElementById('canvasSyncBackgroundCheckIntervalLabel');
-    if (canvasSyncBackgroundCheckIntervalLabel) canvasSyncBackgroundCheckIntervalLabel.textContent = i18n.canvasSyncBackgroundCheckIntervalLabel[currentLang];
-    const canvasSyncBackgroundCooldownLabel = document.getElementById('canvasSyncBackgroundCooldownLabel');
-    if (canvasSyncBackgroundCooldownLabel) canvasSyncBackgroundCooldownLabel.textContent = i18n.canvasSyncBackgroundCooldownLabel[currentLang];
-    const canvasSyncMismatchPolicyLabel = document.getElementById('canvasSyncMismatchPolicyLabel');
-    if (canvasSyncMismatchPolicyLabel) canvasSyncMismatchPolicyLabel.textContent = i18n.canvasSyncMismatchPolicyLabel[currentLang];
-    const canvasSyncMismatchPolicyAutoPullOption = document.getElementById('canvasSyncMismatchPolicyAutoPullOption');
-    if (canvasSyncMismatchPolicyAutoPullOption) canvasSyncMismatchPolicyAutoPullOption.textContent = i18n.canvasSyncMismatchPolicyAutoPullOption[currentLang];
-    const canvasSyncMismatchPolicyAutoPushOption = document.getElementById('canvasSyncMismatchPolicyAutoPushOption');
-    if (canvasSyncMismatchPolicyAutoPushOption) canvasSyncMismatchPolicyAutoPushOption.textContent = i18n.canvasSyncMismatchPolicyAutoPushOption[currentLang];
-    const canvasSyncMismatchPolicyPromptOption = document.getElementById('canvasSyncMismatchPolicyPromptOption');
-    if (canvasSyncMismatchPolicyPromptOption) canvasSyncMismatchPolicyPromptOption.textContent = i18n.canvasSyncMismatchPolicyPromptOption[currentLang];
-    const canvasSyncMismatchPolicyDesc = document.getElementById('canvasSyncMismatchPolicyDesc');
-    if (canvasSyncMismatchPolicyDesc) canvasSyncMismatchPolicyDesc.textContent = i18n.canvasSyncMismatchPolicyDesc[currentLang];
-    const canvasSyncPullOnStartupLabel = document.getElementById('canvasSyncPullOnStartupLabel');
-    if (canvasSyncPullOnStartupLabel) canvasSyncPullOnStartupLabel.textContent = i18n.canvasSyncPullOnStartupLabel[currentLang];
-    const canvasSyncPullOnStartupDesc = document.getElementById('canvasSyncPullOnStartupDesc');
-    if (canvasSyncPullOnStartupDesc) canvasSyncPullOnStartupDesc.textContent = i18n.canvasSyncPullOnStartupDesc[currentLang];
     const canvasSyncToastToggleLabel = document.getElementById('canvasSyncToastToggleLabel');
     if (canvasSyncToastToggleLabel) canvasSyncToastToggleLabel.textContent = i18n.canvasSyncToastToggleLabel[currentLang];
     const canvasSyncToastToggleDesc = document.getElementById('canvasSyncToastToggleDesc');
     if (canvasSyncToastToggleDesc) canvasSyncToastToggleDesc.textContent = i18n.canvasSyncToastToggleDesc[currentLang];
-    const canvasSyncEditAutoToastToggleLabel = document.getElementById('canvasSyncEditAutoToastToggleLabel');
-    if (canvasSyncEditAutoToastToggleLabel) canvasSyncEditAutoToastToggleLabel.textContent = i18n.canvasSyncEditAutoToastToggleLabel[currentLang];
-    const canvasSyncEditAutoToastToggleDesc = document.getElementById('canvasSyncEditAutoToastToggleDesc');
-    if (canvasSyncEditAutoToastToggleDesc) canvasSyncEditAutoToastToggleDesc.textContent = i18n.canvasSyncEditAutoToastToggleDesc[currentLang];
-    const canvasSyncQuietSyncHintDesc = document.getElementById('canvasSyncQuietSyncHintDesc');
-    if (canvasSyncQuietSyncHintDesc) canvasSyncQuietSyncHintDesc.textContent = i18n.canvasSyncQuietSyncHintDesc[currentLang];
-    const canvasSyncMethodLabel = document.getElementById('canvasSyncMethodLabel');
-    if (canvasSyncMethodLabel) canvasSyncMethodLabel.textContent = i18n.canvasSyncMethodLabel[currentLang];
-    const canvasSyncMethodMergeOption = document.getElementById('canvasSyncMethodMergeOption');
-    if (canvasSyncMethodMergeOption) canvasSyncMethodMergeOption.textContent = i18n.canvasSyncMethodMergeOption[currentLang];
-    const canvasSyncMethodRebaseOption = document.getElementById('canvasSyncMethodRebaseOption');
-    if (canvasSyncMethodRebaseOption) canvasSyncMethodRebaseOption.textContent = i18n.canvasSyncMethodRebaseOption[currentLang];
-    const canvasSyncMethodResetOption = document.getElementById('canvasSyncMethodResetOption');
-    if (canvasSyncMethodResetOption) canvasSyncMethodResetOption.textContent = i18n.canvasSyncMethodResetOption[currentLang];
-    const canvasSyncMethodDesc = document.getElementById('canvasSyncMethodDesc');
-    if (canvasSyncMethodDesc) canvasSyncMethodDesc.textContent = i18n.canvasSyncMethodDesc[currentLang];
-    const canvasSyncConflictLabel = document.getElementById('canvasSyncConflictLabel');
-    if (canvasSyncConflictLabel) canvasSyncConflictLabel.textContent = i18n.canvasSyncConflictLabel[currentLang];
-    const canvasSyncConflictNoneOption = document.getElementById('canvasSyncConflictNoneOption');
-    if (canvasSyncConflictNoneOption) canvasSyncConflictNoneOption.textContent = i18n.canvasSyncConflictNoneOption[currentLang];
-    const canvasSyncConflictOursOption = document.getElementById('canvasSyncConflictOursOption');
-    if (canvasSyncConflictOursOption) canvasSyncConflictOursOption.textContent = i18n.canvasSyncConflictOursOption[currentLang];
-    const canvasSyncConflictTheirsOption = document.getElementById('canvasSyncConflictTheirsOption');
-    if (canvasSyncConflictTheirsOption) canvasSyncConflictTheirsOption.textContent = i18n.canvasSyncConflictTheirsOption[currentLang];
-    const canvasSyncConflictNewestOption = document.getElementById('canvasSyncConflictNewestOption');
-    if (canvasSyncConflictNewestOption) canvasSyncConflictNewestOption.textContent = i18n.canvasSyncConflictNewestOption[currentLang];
-    const canvasSyncSyncModeDesc = document.getElementById('canvasSyncSyncModeDesc');
-    if (canvasSyncSyncModeDesc) canvasSyncSyncModeDesc.textContent = i18n.canvasSyncSyncModeDesc[currentLang];
-    const canvasSyncConflictDesc = document.getElementById('canvasSyncConflictDesc');
-    if (canvasSyncConflictDesc) canvasSyncConflictDesc.textContent = i18n.canvasSyncConflictDesc[currentLang];
-
     const canvasSyncRepoEnabledLabel = document.getElementById('canvasSyncRepoEnabledLabel');
     if (canvasSyncRepoEnabledLabel) canvasSyncRepoEnabledLabel.textContent = i18n.canvasSyncRepoEnabledLabel[currentLang];
     const canvasSyncRepoOwnerLabel = document.getElementById('canvasSyncRepoOwnerLabel');
@@ -5208,99 +5046,24 @@ function applyLanguage() {
     if (canvasSyncSectionGeneralTitle) canvasSyncSectionGeneralTitle.textContent = i18n.canvasSyncSectionGeneralTitle[currentLang];
     const canvasSyncBehaviorSubGeneralText = document.getElementById('canvasSyncBehaviorSubGeneralText');
     if (canvasSyncBehaviorSubGeneralText) canvasSyncBehaviorSubGeneralText.textContent = i18n.canvasSyncSectionGeneralTitle[currentLang];
-    const canvasSyncTemplateLabel = document.getElementById('canvasSyncTemplateLabel');
-    if (canvasSyncTemplateLabel) canvasSyncTemplateLabel.textContent = i18n.canvasSyncTemplateLabel[currentLang];
-    const canvasSyncTemplateCustomOption = document.getElementById('canvasSyncTemplateCustomOption');
-    if (canvasSyncTemplateCustomOption) canvasSyncTemplateCustomOption.textContent = i18n.canvasSyncTemplateCustomOption[currentLang];
-    const canvasSyncTemplateLiveOption = document.getElementById('canvasSyncTemplateLiveOption');
-    if (canvasSyncTemplateLiveOption) canvasSyncTemplateLiveOption.textContent = i18n.canvasSyncTemplateLiveOption[currentLang];
-    const canvasSyncTemplateStandardOption = document.getElementById('canvasSyncTemplateStandardOption');
-    if (canvasSyncTemplateStandardOption) canvasSyncTemplateStandardOption.textContent = i18n.canvasSyncTemplateStandardOption[currentLang];
-    const canvasSyncTemplateBackupOption = document.getElementById('canvasSyncTemplateBackupOption');
-    if (canvasSyncTemplateBackupOption) canvasSyncTemplateBackupOption.textContent = i18n.canvasSyncTemplateBackupOption[currentLang];
-    const canvasSyncTemplateHelpBtn = document.getElementById('canvasSyncTemplateHelpBtn');
-    if (canvasSyncTemplateHelpBtn) {
-        const title = i18n.canvasSyncTemplateHelpBtnTitle[currentLang];
-        canvasSyncTemplateHelpBtn.title = title;
-        canvasSyncTemplateHelpBtn.setAttribute('aria-label', title);
-    }
-    const canvasSyncTemplateHelpBtnText = document.getElementById('canvasSyncTemplateHelpBtnText');
-    if (canvasSyncTemplateHelpBtnText) canvasSyncTemplateHelpBtnText.textContent = i18n.canvasSyncTemplateHelpBtnTitle[currentLang];
-    const canvasSyncTemplateHelpDialogTitle = document.getElementById('canvasSyncTemplateHelpDialogTitle');
-    if (canvasSyncTemplateHelpDialogTitle) canvasSyncTemplateHelpDialogTitle.textContent = i18n.canvasSyncTemplateHelpPopoverTitle[currentLang];
-    const canvasSyncTemplateHelpDialogBody = document.getElementById('canvasSyncTemplateHelpDialogBody');
-    if (canvasSyncTemplateHelpDialogBody) canvasSyncTemplateHelpDialogBody.innerHTML = buildCanvasSyncTemplateHelpBodyHtml();
-    const closeCanvasSyncTemplateHelpDialog = document.getElementById('closeCanvasSyncTemplateHelpDialog');
-    if (closeCanvasSyncTemplateHelpDialog) {
-        const title = i18n.canvasSyncTemplateHelpCloseBtnTitle[currentLang];
-        closeCanvasSyncTemplateHelpDialog.title = title;
-        closeCanvasSyncTemplateHelpDialog.setAttribute('aria-label', title);
-    }
+    const canvasSyncStatusActionsSectionTitle = document.getElementById('canvasSyncStatusActionsSectionTitle');
+    if (canvasSyncStatusActionsSectionTitle) canvasSyncStatusActionsSectionTitle.textContent = i18n.canvasSyncStatusActionsSectionTitle[currentLang];
+    const canvasSyncStatusSubActionsText = document.getElementById('canvasSyncStatusSubActionsText');
+    if (canvasSyncStatusSubActionsText) canvasSyncStatusSubActionsText.textContent = i18n.canvasSyncStatusActionsSectionTitle[currentLang];
+    const canvasSyncStatusConfigSectionTitle = document.getElementById('canvasSyncStatusConfigSectionTitle');
+    if (canvasSyncStatusConfigSectionTitle) canvasSyncStatusConfigSectionTitle.textContent = i18n.canvasSyncStatusConfigSectionTitle[currentLang];
+    const canvasSyncStatusSubConfigText = document.getElementById('canvasSyncStatusSubConfigText');
+    if (canvasSyncStatusSubConfigText) canvasSyncStatusSubConfigText.textContent = i18n.canvasSyncStatusConfigSectionTitle[currentLang];
+    const canvasSyncStatusRuntimeSectionTitle = document.getElementById('canvasSyncStatusRuntimeSectionTitle');
+    if (canvasSyncStatusRuntimeSectionTitle) canvasSyncStatusRuntimeSectionTitle.textContent = i18n.canvasSyncStatusRuntimeSectionTitle[currentLang];
+    const canvasSyncStatusSubRuntimeText = document.getElementById('canvasSyncStatusSubRuntimeText');
+    if (canvasSyncStatusSubRuntimeText) canvasSyncStatusSubRuntimeText.textContent = i18n.canvasSyncStatusRuntimeSectionTitle[currentLang];
     const canvasSyncEnabledLabel = document.getElementById('canvasSyncEnabledLabel');
     if (canvasSyncEnabledLabel) canvasSyncEnabledLabel.textContent = i18n.canvasSyncEnabledLabel[currentLang];
-    const canvasSyncAutoLabel = document.getElementById('canvasSyncAutoLabel');
-    if (canvasSyncAutoLabel) canvasSyncAutoLabel.textContent = i18n.canvasSyncAutoLabel[currentLang];
-    const canvasSyncAutoHelpBtn = document.getElementById('canvasSyncAutoHelpBtn');
-    if (canvasSyncAutoHelpBtn) {
-        const title = i18n.canvasSyncAutoHelpBtnTitle[currentLang];
-        canvasSyncAutoHelpBtn.title = title;
-        canvasSyncAutoHelpBtn.setAttribute('aria-label', title);
-    }
-    const canvasSyncAutoHelpText = document.getElementById('canvasSyncAutoHelpText');
-    if (canvasSyncAutoHelpText) canvasSyncAutoHelpText.innerHTML = i18n.canvasSyncAutoHelpNote[currentLang].replace(/\n/g, '<br>');
-    const canvasSyncAutoAfterEditStopLabel = document.getElementById('canvasSyncAutoAfterEditStopLabel');
-    if (canvasSyncAutoAfterEditStopLabel) canvasSyncAutoAfterEditStopLabel.textContent = i18n.canvasSyncAutoAfterEditStopLabel[currentLang];
-    const canvasSyncAutoAfterEditStopDesc = document.getElementById('canvasSyncAutoAfterEditStopDesc');
-    if (canvasSyncAutoAfterEditStopDesc) canvasSyncAutoAfterEditStopDesc.textContent = i18n.canvasSyncAutoAfterEditStopDesc[currentLang];
-    const canvasSyncIntervalLabel = document.getElementById('canvasSyncIntervalLabel');
-    if (canvasSyncIntervalLabel) {
-        canvasSyncIntervalLabel.textContent = i18n.canvasSyncIntervalLabel[currentLang];
-        applySyncIntervalUnitLine(canvasSyncIntervalLabel);
-    }
-    const canvasSyncAutoPushIntervalLabel = document.getElementById('canvasSyncAutoPushIntervalLabel');
-    if (canvasSyncAutoPushIntervalLabel) {
-        canvasSyncAutoPushIntervalLabel.textContent = i18n.canvasSyncAutoPushIntervalLabel[currentLang];
-        applySyncIntervalUnitLine(canvasSyncAutoPushIntervalLabel);
-    }
-    const canvasSyncAutoPullIntervalLabel = document.getElementById('canvasSyncAutoPullIntervalLabel');
-    if (canvasSyncAutoPullIntervalLabel) {
-        canvasSyncAutoPullIntervalLabel.textContent = i18n.canvasSyncAutoPullIntervalLabel[currentLang];
-        applySyncIntervalUnitLine(canvasSyncAutoPullIntervalLabel);
-    }
-    const canvasSyncFilePathLabel = document.getElementById('canvasSyncFilePathLabel');
-    if (canvasSyncFilePathLabel) canvasSyncFilePathLabel.textContent = i18n.canvasSyncFilePathLabel[currentLang];
-    const canvasSyncFilePathDesc = document.getElementById('canvasSyncFilePathDesc');
-    if (canvasSyncFilePathDesc) canvasSyncFilePathDesc.textContent = i18n.canvasSyncFilePathDesc[currentLang];
     const canvasSyncPluginSectionTitle = document.getElementById('canvasSyncPluginSectionTitle');
     if (canvasSyncPluginSectionTitle) canvasSyncPluginSectionTitle.textContent = i18n.canvasSyncPluginSectionTitle[currentLang];
     const canvasSyncBehaviorSubPluginText = document.getElementById('canvasSyncBehaviorSubPluginText');
     if (canvasSyncBehaviorSubPluginText) canvasSyncBehaviorSubPluginText.textContent = i18n.canvasSyncPluginSectionTitle[currentLang];
-    const canvasSyncSectionCompatTitle = document.getElementById('canvasSyncSectionCompatTitle');
-    if (canvasSyncSectionCompatTitle) canvasSyncSectionCompatTitle.textContent = i18n.canvasSyncSectionCompatTitle[currentLang];
-    const canvasSyncBehaviorSubCompatText = document.getElementById('canvasSyncBehaviorSubCompatText');
-    if (canvasSyncBehaviorSubCompatText) canvasSyncBehaviorSubCompatText.textContent = i18n.canvasSyncSectionCompatTitle[currentLang];
-    const canvasSyncBehaviorSubCompatDetail1Text = document.getElementById('canvasSyncBehaviorSubCompatDetail1Text');
-    if (canvasSyncBehaviorSubCompatDetail1Text) canvasSyncBehaviorSubCompatDetail1Text.textContent = i18n.canvasSyncBehaviorSubCompatDetail1Text[currentLang];
-    const canvasSyncBehaviorSubCompatDetail2Text = document.getElementById('canvasSyncBehaviorSubCompatDetail2Text');
-    if (canvasSyncBehaviorSubCompatDetail2Text) canvasSyncBehaviorSubCompatDetail2Text.textContent = i18n.canvasSyncBehaviorSubCompatDetail2Text[currentLang];
-    const canvasSyncBehaviorSubCompatDetail3Text = document.getElementById('canvasSyncBehaviorSubCompatDetail3Text');
-    if (canvasSyncBehaviorSubCompatDetail3Text) canvasSyncBehaviorSubCompatDetail3Text.textContent = i18n.canvasSyncBehaviorSubCompatDetail3Text[currentLang];
-    const canvasSyncBehaviorSubCompatDetail4Text = document.getElementById('canvasSyncBehaviorSubCompatDetail4Text');
-    if (canvasSyncBehaviorSubCompatDetail4Text) canvasSyncBehaviorSubCompatDetail4Text.textContent = i18n.canvasSyncBehaviorSubCompatDetail4Text[currentLang];
-    const canvasSyncSectionCompatDetectTitle = document.getElementById('canvasSyncSectionCompatDetectTitle');
-    if (canvasSyncSectionCompatDetectTitle) canvasSyncSectionCompatDetectTitle.textContent = i18n.canvasSyncSectionCompatDetectTitle[currentLang];
-    const canvasSyncSectionCompatBgDetectTitle = document.getElementById('canvasSyncSectionCompatBgDetectTitle');
-    if (canvasSyncSectionCompatBgDetectTitle) canvasSyncSectionCompatBgDetectTitle.textContent = i18n.canvasSyncSectionCompatBgDetectTitle[currentLang];
-    const canvasSyncSectionCompatMismatchTitle = document.getElementById('canvasSyncSectionCompatMismatchTitle');
-    if (canvasSyncSectionCompatMismatchTitle) canvasSyncSectionCompatMismatchTitle.textContent = i18n.canvasSyncSectionCompatMismatchTitle[currentLang];
-    const canvasSyncSectionCompatMergeTitle = document.getElementById('canvasSyncSectionCompatMergeTitle');
-    if (canvasSyncSectionCompatMergeTitle) canvasSyncSectionCompatMergeTitle.textContent = i18n.canvasSyncSectionCompatMergeTitle[currentLang];
-    const canvasSyncForegroundCheckLabel = document.getElementById('canvasSyncForegroundCheckLabel');
-    if (canvasSyncForegroundCheckLabel) canvasSyncForegroundCheckLabel.textContent = i18n.canvasSyncForegroundCheckLabel[currentLang];
-    const canvasSyncForegroundCheckDesc = document.getElementById('canvasSyncForegroundCheckDesc');
-    if (canvasSyncForegroundCheckDesc) canvasSyncForegroundCheckDesc.textContent = i18n.canvasSyncForegroundCheckDesc[currentLang];
-    const canvasSyncForegroundCheckIntervalLabel = document.getElementById('canvasSyncForegroundCheckIntervalLabel');
-    if (canvasSyncForegroundCheckIntervalLabel) canvasSyncForegroundCheckIntervalLabel.textContent = i18n.canvasSyncForegroundCheckIntervalLabel[currentLang];
     const canvasSyncObsidianFilePushLabel = document.getElementById('canvasSyncObsidianFilePushLabel');
     if (canvasSyncObsidianFilePushLabel) canvasSyncObsidianFilePushLabel.textContent = i18n.canvasSyncObsidianFilePushLabel[currentLang];
     const canvasSyncPermanentPullModeLabel = document.getElementById('canvasSyncPermanentPullModeLabel');
@@ -5321,6 +5084,8 @@ function applyLanguage() {
     if (canvasSyncObsidianExportFormatLabel) canvasSyncObsidianExportFormatLabel.textContent = i18n.canvasSyncObsidianExportFormatLabel[currentLang];
     const canvasSyncObsidianExportFormatDesc = document.getElementById('canvasSyncObsidianExportFormatDesc');
     if (canvasSyncObsidianExportFormatDesc) canvasSyncObsidianExportFormatDesc.textContent = i18n.canvasSyncObsidianExportFormatDesc[currentLang];
+    const canvasSyncObsidianExportFormatJsonOption = document.getElementById('canvasSyncObsidianExportFormatJsonOption');
+    if (canvasSyncObsidianExportFormatJsonOption) canvasSyncObsidianExportFormatJsonOption.textContent = i18n.canvasSyncObsidianExportFormatJsonOption[currentLang];
     const canvasSyncObsidianExportFormatVisualNoIconOption = document.getElementById('canvasSyncObsidianExportFormatVisualNoIconOption');
     if (canvasSyncObsidianExportFormatVisualNoIconOption) canvasSyncObsidianExportFormatVisualNoIconOption.textContent = i18n.canvasSyncObsidianExportFormatVisualNoIconOption[currentLang];
     const canvasSyncObsidianExportFormatVisualOption = document.getElementById('canvasSyncObsidianExportFormatVisualOption');
@@ -5409,53 +5174,6 @@ function applyLanguage() {
     if (canvasSyncStatusLocalHashLabel) canvasSyncStatusLocalHashLabel.textContent = i18n.canvasSyncStatusLocalHashLabel[currentLang];
     const canvasSyncStatusOtherLabel = document.getElementById('canvasSyncStatusOtherLabel');
     if (canvasSyncStatusOtherLabel) canvasSyncStatusOtherLabel.textContent = i18n.canvasSyncStatusOtherLabel[currentLang];
-    const canvasSyncStatusPendingMismatchLabel = document.getElementById('canvasSyncStatusPendingMismatchLabel');
-    if (canvasSyncStatusPendingMismatchLabel) canvasSyncStatusPendingMismatchLabel.textContent = i18n.canvasSyncStatusPendingMismatchLabel[currentLang];
-    const canvasSyncRunBgCheckText = document.getElementById('canvasSyncRunBgCheckText');
-    if (canvasSyncRunBgCheckText) canvasSyncRunBgCheckText.textContent = i18n.canvasSyncRunBgCheckText[currentLang];
-    const canvasSyncPreviewMismatchText = document.getElementById('canvasSyncPreviewMismatchText');
-    if (canvasSyncPreviewMismatchText) canvasSyncPreviewMismatchText.textContent = i18n.canvasSyncPreviewMismatchText[currentLang];
-    const canvasSyncPreviewConflictText = document.getElementById('canvasSyncPreviewConflictText');
-    if (canvasSyncPreviewConflictText) canvasSyncPreviewConflictText.textContent = i18n.canvasSyncPreviewConflictText[currentLang];
-    const canvasSyncMismatchTitle = document.getElementById('canvasSyncMismatchTitle');
-    if (canvasSyncMismatchTitle) canvasSyncMismatchTitle.innerHTML = `<i class="fas fa-cloud-upload-alt"></i> ${i18n.canvasSyncMismatchTitle[currentLang]}`;
-    const canvasSyncMismatchSummary = document.getElementById('canvasSyncMismatchSummary');
-    if (canvasSyncMismatchSummary && !canvasSyncMismatchSummary.dataset.dynamicSummary) {
-        canvasSyncMismatchSummary.textContent = i18n.canvasSyncMismatchSummary[currentLang];
-    }
-    const formatSyncActionLabelHtml = (labelText) => {
-        const text = String(labelText || '');
-        if (!text) return '';
-
-        if (text.startsWith('使用云端')) {
-            return `<span class="canvas-sync-action-keyword">使用云端</span>${text.slice(4)}`;
-        }
-        if (text.startsWith('保留本地')) {
-            return `<span class="canvas-sync-action-keyword">保留本地</span>${text.slice(4)}`;
-        }
-
-        if (/^use\s+cloud/i.test(text)) {
-            return text.replace(/^((?:use\s+cloud))/i, '<span class="canvas-sync-action-keyword">$1</span>');
-        }
-        if (/^keep\s+local/i.test(text)) {
-            return text.replace(/^((?:keep\s+local))/i, '<span class="canvas-sync-action-keyword">$1</span>');
-        }
-
-        return text;
-    };
-
-    const canvasSyncMismatchUseRemoteText = document.getElementById('canvasSyncMismatchUseRemoteText');
-    if (canvasSyncMismatchUseRemoteText) {
-        canvasSyncMismatchUseRemoteText.innerHTML = formatSyncActionLabelHtml(i18n.canvasSyncMismatchUseRemoteText[currentLang]);
-    }
-    const canvasSyncMismatchUseLocalText = document.getElementById('canvasSyncMismatchUseLocalText');
-    if (canvasSyncMismatchUseLocalText) {
-        canvasSyncMismatchUseLocalText.innerHTML = formatSyncActionLabelHtml(i18n.canvasSyncMismatchUseLocalText[currentLang]);
-    }
-    const canvasSyncMismatchGoPolicyText = document.getElementById('canvasSyncMismatchGoPolicyText');
-    if (canvasSyncMismatchGoPolicyText) canvasSyncMismatchGoPolicyText.textContent = i18n.canvasSyncMismatchGoPolicyText[currentLang];
-    const canvasSyncMismatchDismissText = document.getElementById('canvasSyncMismatchDismissText');
-    if (canvasSyncMismatchDismissText) canvasSyncMismatchDismissText.textContent = i18n.canvasSyncMismatchDismissText[currentLang];
     const canvasSyncStatusErrorLabel = document.getElementById('canvasSyncStatusErrorLabel');
     if (canvasSyncStatusErrorLabel) canvasSyncStatusErrorLabel.textContent = i18n.canvasSyncStatusErrorLabel[currentLang];
     const canvasSyncConflictTitle = document.getElementById('canvasSyncConflictTitle');
@@ -5480,6 +5198,23 @@ function applyLanguage() {
     if (canvasSyncConflictRemoteSizeLabel) canvasSyncConflictRemoteSizeLabel.textContent = i18n.canvasSyncConflictSizeLabel[currentLang];
     const canvasSyncConflictRemoteHashLabel = document.getElementById('canvasSyncConflictRemoteHashLabel');
     if (canvasSyncConflictRemoteHashLabel) canvasSyncConflictRemoteHashLabel.textContent = i18n.canvasSyncConflictRemoteHashLabel[currentLang];
+    const formatSyncActionLabelHtml = (labelText) => {
+        const text = String(labelText || '');
+        if (!text) return '';
+        if (text.startsWith('使用云端')) {
+            return `<span class="canvas-sync-action-keyword">使用云端</span>${text.slice(4)}`;
+        }
+        if (text.startsWith('保留本地')) {
+            return `<span class="canvas-sync-action-keyword">保留本地</span>${text.slice(4)}`;
+        }
+        if (/^use\\s+cloud/i.test(text)) {
+            return text.replace(/^((?:use\\s+cloud))/i, '<span class="canvas-sync-action-keyword">$1</span>');
+        }
+        if (/^keep\\s+local/i.test(text)) {
+            return text.replace(/^((?:keep\\s+local))/i, '<span class="canvas-sync-action-keyword">$1</span>');
+        }
+        return text;
+    };
     const canvasSyncConflictUseLocalText = document.getElementById('canvasSyncConflictUseLocalText');
     if (canvasSyncConflictUseLocalText) {
         canvasSyncConflictUseLocalText.innerHTML = formatSyncActionLabelHtml(i18n.canvasSyncConflictUseLocalText[currentLang]);
@@ -5612,481 +5347,7 @@ function applyLanguage() {
     setupPinchPopover('pinchHelpBtn2', 'pinchHelpPopover2');
     setupPinchPopover('canvasSyncFirstSyncHelpBtn', 'canvasSyncFirstSyncHelpPopover');
     setupPinchPopover('canvasSyncRepoBranchHelpBtn', 'canvasSyncRepoBranchHelpPopover');
-    setupPinchPopover('canvasSyncAutoHelpBtn', 'canvasSyncAutoHelpPopover');
 
-    const buildCanvasSyncTemplateHelpControlHtml = (card, row) => {
-        const cardKey = card && card.key ? String(card.key) : '';
-        const rowKey = row && row.key ? String(row.key) : '';
-        const controlType = row && row.controlType ? String(row.controlType) : 'number';
-        const label = row && row.label ? String(row.label) : '';
-        const disabled = !!(row && row.disabled);
-        const labelAttr = escapeHtml(label);
-        const cardAttr = escapeHtml(cardKey);
-        const rowAttr = escapeHtml(rowKey);
-        const typeAttr = escapeHtml(controlType);
-        const controlClass = disabled ? ' canvas-sync-template-help-control is-disabled' : ' canvas-sync-template-help-control';
-        const disabledAttr = disabled ? ' disabled' : '';
-
-        if (controlType === 'toggle') {
-            return `
-                <div class="${controlClass.trim()} canvas-sync-template-help-control--switch" data-row-key="${rowAttr}">
-                    <label class="canvas-sync-switch">
-                        <input
-                            type="checkbox"
-                            class="canvas-sync-template-help-field canvas-sync-template-help-field--toggle"
-                            data-card-key="${cardAttr}"
-                            data-row-key="${rowAttr}"
-                            data-control-type="${typeAttr}"
-                            aria-label="${labelAttr}"
-                            aria-disabled="${disabled ? 'true' : 'false'}"
-                            ${row && row.value ? 'checked' : ''}
-                            ${disabledAttr}
-                        >
-                        <span class="canvas-sync-switch-slider"></span>
-                    </label>
-                </div>
-            `;
-        }
-
-        if (controlType === 'select') {
-            const optionsHtml = Array.isArray(row && row.options)
-                ? row.options.map((option) => {
-                    const optionValue = option && Object.prototype.hasOwnProperty.call(option, 'value')
-                        ? String(option.value)
-                        : '';
-                    const selected = String(row && row.value != null ? row.value : '') === optionValue
-                        ? ' selected'
-                        : '';
-                    return `<option value="${escapeHtml(optionValue)}"${selected}>${escapeHtml(option && option.label ? option.label : optionValue)}</option>`;
-                }).join('')
-                : '';
-            return `
-                <div class="${controlClass.trim()}" data-row-key="${rowAttr}">
-                    <select
-                        class="canvas-sync-template-help-field canvas-sync-template-help-select"
-                        data-card-key="${cardAttr}"
-                        data-row-key="${rowAttr}"
-                        data-control-type="${typeAttr}"
-                        aria-label="${labelAttr}"
-                        aria-disabled="${disabled ? 'true' : 'false'}"
-                        ${disabledAttr}
-                    >${optionsHtml}</select>
-                </div>
-            `;
-        }
-
-        const minAttr = row && row.min != null ? ` min="${escapeHtml(String(row.min))}"` : '';
-        const stepAttr = row && row.step != null ? ` step="${escapeHtml(String(row.step))}"` : '';
-        const valueAttr = escapeHtml(String(row && row.value != null ? row.value : ''));
-        return `
-            <div class="${controlClass.trim()}" data-row-key="${rowAttr}">
-                <input
-                    type="number"
-                    class="canvas-sync-template-help-field canvas-sync-template-help-input"
-                    data-card-key="${cardAttr}"
-                    data-row-key="${rowAttr}"
-                    data-control-type="${typeAttr}"
-                    aria-label="${labelAttr}"
-                    aria-disabled="${disabled ? 'true' : 'false'}"
-                    inputmode="numeric"
-                    autocomplete="off"
-                    value="${valueAttr}"${minAttr}${stepAttr}${disabledAttr}
-                >
-            </div>
-        `;
-    };
-
-    const setCanvasSyncTemplateHelpFieldValue = (field, controlType, value) => {
-        if (!field) return;
-        if (controlType === 'toggle') {
-            field.checked = !!value;
-            return;
-        }
-        field.value = value == null ? '' : String(value);
-    };
-
-    const getCanvasSyncTemplateHelpFieldValue = (field, controlType) => {
-        if (!field) return '';
-        if (controlType === 'toggle') {
-            return !!field.checked;
-        }
-        return String(field.value || '');
-    };
-
-    const readCanvasSyncTemplateHelpBoolData = (value, fallback = false) => {
-        if (value === true || value === 'true') return true;
-        if (value === false || value === 'false') return false;
-        return !!fallback;
-    };
-
-    const setCanvasSyncTemplateHelpDisabledHint = (element, hint) => {
-        if (!element) return;
-        if (hint) {
-            element.setAttribute('data-disabled-hint', hint);
-        } else {
-            element.removeAttribute('data-disabled-hint');
-        }
-    };
-
-    const getCanvasSyncTemplateHelpRowField = (cardEl, rowKey) => {
-        if (!cardEl || !rowKey) return null;
-        return cardEl.querySelector(`.canvas-sync-template-help-field[data-row-key="${rowKey}"]`);
-    };
-
-    const getCanvasSyncTemplateHelpToggleState = (cardEl, rowKey, fallback = false) => {
-        const field = getCanvasSyncTemplateHelpRowField(cardEl, rowKey);
-        if (!field) return !!fallback;
-        return !!field.checked;
-    };
-
-    const buildCanvasSyncTemplateHelpCardControlStateMap = (cardEl, enabledOn) => {
-        const disabledByMasterHint = currentLang === 'en'
-            ? 'Sync is disabled: this field is unavailable'
-            : '启用同步已关闭：此项不可用';
-        const intervalDisabledHint = currentLang === 'en'
-            ? 'Split timers enabled: turn off split timers to edit this field'
-            : '分离定时器已开启：关闭分离定时器后才可以更改';
-        const pushPullDisabledHint = currentLang === 'en'
-            ? 'Split timers disabled: turn on split timers to edit this field'
-            : '分离定时器未开启：打开分离定时器后才可以更改';
-        const foregroundCheckDisabledHint = currentLang === 'en'
-            ? 'Foreground check disabled: turn it on to edit this field'
-            : '前台检测已关闭：打开前台检测后才可以更改';
-        const backgroundCheckDisabledHint = currentLang === 'en'
-            ? 'Background check disabled: turn it on to edit this field'
-            : '后台检测已关闭：打开后台检测后才可以更改';
-        const toastDisabledHint = currentLang === 'en'
-            ? 'Top-right general notifications are disabled: turn them on to edit this field'
-            : '右上角普通通知已关闭：打开后才可以更改';
-        const mismatchDisabledHint = currentLang === 'en'
-            ? 'Foreground and background checks are disabled: turn on at least one to edit this field'
-            : '前台和后台检测都已关闭：至少开启一个检测后才可以更改';
-
-        const splitOn = !!(enabledOn && getCanvasSyncTemplateHelpToggleState(cardEl, 'splitIntervalCommitAndSync', false));
-        const toastOn = !!(enabledOn && getCanvasSyncTemplateHelpToggleState(cardEl, 'toastEnabled', true));
-        const foregroundCheckOn = !!(enabledOn && readCanvasSyncTemplateHelpBoolData(cardEl && cardEl.dataset ? cardEl.dataset.foregroundCheckEnabled : '', true));
-        const backgroundCheckOn = !!(enabledOn && readCanvasSyncTemplateHelpBoolData(cardEl && cardEl.dataset ? cardEl.dataset.backgroundCheckEnabled : '', true));
-
-        const stateMap = {};
-        const setState = (rowKey, disabled, hint = '') => {
-            stateMap[rowKey] = {
-                disabled: !!disabled,
-                hint: disabled ? String(hint || '') : ''
-            };
-        };
-
-        [
-            'autoSync',
-            'syncAfterEditStop',
-            'splitIntervalCommitAndSync',
-            'pullOnStartup',
-            'permanentTreeUploadIntervalSeconds',
-            'tempSectionUploadIntervalSeconds',
-            'blankSectionUploadIntervalSeconds',
-            'toastEnabled'
-        ].forEach((rowKey) => {
-            setState(rowKey, !enabledOn, disabledByMasterHint);
-        });
-
-        setState('intervalSeconds', !enabledOn || splitOn, !enabledOn ? disabledByMasterHint : intervalDisabledHint);
-        setState('autoPushIntervalMinutes', !enabledOn || !splitOn, !enabledOn ? disabledByMasterHint : pushPullDisabledHint);
-        setState('autoPullIntervalMinutes', !enabledOn || !splitOn, !enabledOn ? disabledByMasterHint : pushPullDisabledHint);
-        setState('editAutoToastEnabled', !enabledOn || !toastOn, !enabledOn ? disabledByMasterHint : toastDisabledHint);
-        setState('mismatchPolicy', !enabledOn || !(foregroundCheckOn || backgroundCheckOn), !enabledOn ? disabledByMasterHint : mismatchDisabledHint);
-        setState('foregroundCheckIntervalSeconds', !enabledOn || !foregroundCheckOn, !enabledOn ? disabledByMasterHint : foregroundCheckDisabledHint);
-        setState('backgroundCheckIntervalMinutes', !enabledOn || !backgroundCheckOn, !enabledOn ? disabledByMasterHint : backgroundCheckDisabledHint);
-        setState('backgroundCooldownMinutes', !enabledOn || !backgroundCheckOn, !enabledOn ? disabledByMasterHint : backgroundCheckDisabledHint);
-
-        return stateMap;
-    };
-
-    const applyCanvasSyncTemplateHelpLineState = (line, state) => {
-        if (!line) return;
-        const resolvedState = state && typeof state === 'object' ? state : {};
-        const disabled = !!resolvedState.disabled;
-        const hint = disabled && resolvedState.hint ? String(resolvedState.hint) : '';
-        const control = line.querySelector('.canvas-sync-template-help-control');
-        const field = line.querySelector('.canvas-sync-template-help-field');
-        const switchEl = line.querySelector('.canvas-sync-switch');
-
-        line.classList.toggle('is-disabled', disabled);
-        line.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-        setCanvasSyncTemplateHelpDisabledHint(line, hint);
-
-        if (control) {
-            control.classList.toggle('is-disabled', disabled);
-            control.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-            setCanvasSyncTemplateHelpDisabledHint(control, hint);
-        }
-
-        if (switchEl) {
-            switchEl.classList.toggle('is-disabled', disabled);
-            switchEl.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-            setCanvasSyncTemplateHelpDisabledHint(switchEl, hint);
-        }
-
-        if (field) {
-            field.disabled = disabled;
-            field.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-            setCanvasSyncTemplateHelpDisabledHint(field, hint);
-        }
-    };
-
-    const applyCanvasSyncTemplateHelpControlStateMap = () => {
-        const dialog = document.getElementById('canvasSyncTemplateHelpDialog');
-        if (!dialog) return;
-
-        const syncApi = window.CanvasObsidianGitSync;
-        let enabledOn = true;
-        try {
-            if (syncApi && typeof syncApi.getSettings === 'function') {
-                const syncSettings = syncApi.getSettings();
-                enabledOn = !!(syncSettings && syncSettings.enabled);
-            }
-        } catch (_) { }
-
-        dialog.querySelectorAll('.canvas-sync-template-help-card[data-card-key]').forEach((cardEl) => {
-            const stateMap = buildCanvasSyncTemplateHelpCardControlStateMap(cardEl, enabledOn);
-            cardEl.querySelectorAll('.canvas-sync-template-help-line[data-row-key]').forEach((line) => {
-                const rowKey = String(line.getAttribute('data-row-key') || '').trim();
-                applyCanvasSyncTemplateHelpLineState(line, rowKey ? stateMap[rowKey] : null);
-            });
-        });
-    };
-
-    const buildCanvasSyncTemplateHelpBodyHtml = () => {
-        const fallbackHtml = i18n.canvasSyncTemplateHelpNote[currentLang];
-        const syncApi = window.CanvasObsidianGitSync;
-        if (!syncApi || typeof syncApi.getSyncTemplatePreviewData !== 'function') {
-            return fallbackHtml;
-        }
-
-        try {
-            const templateSelect = document.getElementById('canvasSyncTemplateSelect');
-            const selectedKey = templateSelect
-                ? String(templateSelect.value || '').trim().toLowerCase()
-                : '';
-            const previewData = syncApi.getSyncTemplatePreviewData(selectedKey);
-            if (!previewData || !Array.isArray(previewData.cards) || !previewData.cards.length) {
-                return fallbackHtml;
-            }
-
-            const resetText = currentLang === 'en' ? 'Restore Default' : '还原默认';
-            const resetTitle = currentLang === 'en'
-                ? 'Restore the built-in default values of the current template'
-                : '还原当前模板的内置默认值';
-            const introHtml = previewData.intro
-                ? `
-                    <div class="canvas-sync-template-help-head">
-                        <div class="canvas-sync-template-help-intro">${escapeHtml(previewData.intro)}</div>
-                        <button
-                            type="button"
-                            class="canvas-manage-btn canvas-sync-template-help-reset-btn"
-                            id="canvasSyncTemplateHelpResetBtn"
-                            data-restore-key="${escapeHtml(previewData.restoreKey || '')}"
-                            title="${escapeHtml(resetTitle)}"
-                            aria-label="${escapeHtml(resetTitle)}"
-                        >${escapeHtml(resetText)}</button>
-                    </div>
-                `
-                : `
-                    <div class="canvas-sync-template-help-head canvas-sync-template-help-head--actions-only">
-                        <span></span>
-                        <button
-                            type="button"
-                            class="canvas-manage-btn canvas-sync-template-help-reset-btn"
-                            id="canvasSyncTemplateHelpResetBtn"
-                            data-restore-key="${escapeHtml(previewData.restoreKey || '')}"
-                            title="${escapeHtml(resetTitle)}"
-                            aria-label="${escapeHtml(resetTitle)}"
-                        >${escapeHtml(resetText)}</button>
-                    </div>
-                `;
-            const cardsHtml = previewData.cards.map((card) => {
-                const rows = Array.isArray(card.rows) ? card.rows : [];
-                const linesHtml = rows.map((row) => {
-                    if (row && row.isGroupHeader) {
-                        const groupClass = row.groupKey ? ` canvas-sync-template-help-group--${escapeHtml(String(row.groupKey))}` : '';
-                        return `
-                            <div class="canvas-sync-template-help-group${groupClass}">
-                                <span>${escapeHtml(row && row.label ? row.label : '')}</span>
-                            </div>
-                        `;
-                    }
-                    return `
-                        <div
-                            class="canvas-sync-template-help-line${row && row.disabled ? ' is-disabled' : ''}"
-                            data-card-key="${escapeHtml(card && card.key ? String(card.key) : '')}"
-                            data-row-key="${escapeHtml(row && row.key ? String(row.key) : '')}"
-                            aria-disabled="${row && row.disabled ? 'true' : 'false'}"
-                            ${row && row.disabledHint ? `data-disabled-hint="${escapeHtml(String(row.disabledHint))}"` : ''}
-                        >
-                            <b>${escapeHtml(row && row.label ? row.label : '')}</b>
-                            ${buildCanvasSyncTemplateHelpControlHtml(card, row)}
-                        </div>
-                    `;
-                }).join('');
-                const noteHtml = card && card.note
-                    ? `<div class="canvas-sync-template-help-card-note">${escapeHtml(card.note)}</div>`
-                    : '';
-                const selectedClass = card && card.selected ? ' is-selected' : '';
-                return `
-                    <section
-                        class="canvas-sync-template-help-card${selectedClass}"
-                        data-card-key="${escapeHtml(card && card.key ? String(card.key) : '')}"
-                        data-foreground-check-enabled="${card && card.foregroundCheckEnabled === false ? 'false' : 'true'}"
-                        data-background-check-enabled="${card && card.backgroundCheckEnabled === false ? 'false' : 'true'}"
-                    >
-                        <div class="canvas-sync-template-help-card-title">${escapeHtml(card && card.label ? card.label : '')}</div>
-                        ${noteHtml}
-                        ${linesHtml}
-                    </section>
-                `;
-            }).join('');
-            return `${introHtml}<div class="canvas-sync-template-help-grid">${cardsHtml}</div>`;
-        } catch (_) {
-            return fallbackHtml;
-        }
-    };
-
-    const renderCanvasSyncTemplateHelpDialogBody = () => {
-        const body = document.getElementById('canvasSyncTemplateHelpDialogBody');
-        if (!body) return;
-        hideCanvasSyncDisabledHintTooltip();
-        body.innerHTML = buildCanvasSyncTemplateHelpBodyHtml();
-        applyCanvasSyncTemplateHelpControlStateMap();
-    };
-
-    const openCanvasSyncTemplateHelpDialog = () => {
-        const existing = document.getElementById('canvasSyncTemplateHelpDialog');
-        if (existing) {
-            try { existing.remove(); } catch (_) { }
-        }
-
-        const syncModal = document.getElementById('canvasSyncModal');
-        const mountRoot = syncModal || document.body;
-        const useSyncModalDialog = !!syncModal;
-        const triggerBtn = document.getElementById('canvasSyncTemplateHelpBtn');
-        const title = i18n.canvasSyncTemplateHelpPopoverTitle[currentLang];
-        const closeTitle = i18n.canvasSyncTemplateHelpCloseBtnTitle[currentLang];
-        const helpHtml = buildCanvasSyncTemplateHelpBodyHtml();
-        const dialog = document.createElement('div');
-        dialog.className = useSyncModalDialog ? 'import-dialog canvas-sync-secondary-dialog' : 'import-dialog';
-        dialog.id = 'canvasSyncTemplateHelpDialog';
-        dialog.setAttribute('role', 'dialog');
-        dialog.setAttribute('aria-modal', 'true');
-        dialog.style.zIndex = useSyncModalDialog ? '40' : '2147483647';
-        dialog.innerHTML = `
-            <div class="import-dialog-content canvas-sync-template-help-dialog-content">
-                <div class="import-dialog-header">
-                    <h3 id="canvasSyncTemplateHelpDialogTitle">${title}</h3>
-                    <button class="import-dialog-close" id="closeCanvasSyncTemplateHelpDialog" type="button" title="${closeTitle}" aria-label="${closeTitle}">&times;</button>
-                </div>
-                <div class="import-dialog-body canvas-sync-template-help-dialog-body">
-                    <div class="canvas-sync-template-help" id="canvasSyncTemplateHelpDialogBody">${helpHtml}</div>
-                </div>
-            </div>
-        `;
-
-        let settled = false;
-        const cleanup = () => {
-            if (settled) return;
-            settled = true;
-            document.removeEventListener('keydown', handleKeydown, true);
-            hideCanvasSyncDisabledHintTooltip();
-            try { dialog.remove(); } catch (_) { }
-            if (triggerBtn) {
-                try { triggerBtn.focus(); } catch (_) { }
-            }
-        };
-
-        const handleKeydown = (event) => {
-            if (event.key === 'Escape') {
-                event.preventDefault();
-                cleanup();
-            }
-        };
-
-        dialog.addEventListener('click', (event) => {
-            const resetBtn = event.target && event.target.closest
-                ? event.target.closest('#canvasSyncTemplateHelpResetBtn')
-                : null;
-            if (resetBtn) {
-                event.preventDefault();
-                event.stopPropagation();
-                try {
-                    const syncApi = window.CanvasObsidianGitSync;
-                    if (syncApi && typeof syncApi.restoreSyncTemplatePreviewDefaults === 'function') {
-                        const restoreKey = String(resetBtn.getAttribute('data-restore-key') || '').trim().toLowerCase();
-                        if (syncApi.restoreSyncTemplatePreviewDefaults(restoreKey)) {
-                            renderCanvasSyncTemplateHelpDialogBody();
-                        }
-                    }
-                } catch (_) { }
-                return;
-            }
-
-            if (event.target === dialog) cleanup();
-        });
-
-        dialog.addEventListener('change', (event) => {
-            const field = event.target && event.target.closest
-                ? event.target.closest('.canvas-sync-template-help-field')
-                : null;
-            if (!field) return;
-
-            const rowKey = String(field.getAttribute('data-row-key') || '').trim();
-            const controlType = String(field.getAttribute('data-control-type') || '').trim() || 'number';
-            if (!rowKey) return;
-
-            try {
-                const syncApi = window.CanvasObsidianGitSync;
-                if (!syncApi || typeof syncApi.updateSyncTemplatePreviewControl !== 'function') {
-                    return;
-                }
-                const result = syncApi.updateSyncTemplatePreviewControl(
-                    rowKey,
-                    getCanvasSyncTemplateHelpFieldValue(field, controlType)
-                );
-                if (!result || result.ok === false) {
-                    renderCanvasSyncTemplateHelpDialogBody();
-                    return;
-                }
-                setCanvasSyncTemplateHelpFieldValue(
-                    field,
-                    result.controlType || controlType,
-                    result.controlValue
-                );
-                applyCanvasSyncTemplateHelpControlStateMap();
-            } catch (_) {
-                renderCanvasSyncTemplateHelpDialogBody();
-            }
-        });
-
-        mountRoot.appendChild(dialog);
-        renderCanvasSyncTemplateHelpDialogBody();
-
-        const closeBtn = document.getElementById('closeCanvasSyncTemplateHelpDialog');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', (event) => {
-                event.preventDefault();
-                cleanup();
-            });
-            try { closeBtn.focus(); } catch (_) { }
-        }
-
-        document.addEventListener('keydown', handleKeydown, true);
-    };
-
-    const canvasSyncTemplateHelpDialogBtn = document.getElementById('canvasSyncTemplateHelpBtn');
-    if (canvasSyncTemplateHelpDialogBtn && canvasSyncTemplateHelpDialogBtn.dataset.dialogBound !== 'true') {
-        canvasSyncTemplateHelpDialogBtn.dataset.dialogBound = 'true';
-        canvasSyncTemplateHelpDialogBtn.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            openCanvasSyncTemplateHelpDialog();
-        });
-    }
 
     if (!document.body.dataset.pinchPopoverGlobalBound) {
         document.body.dataset.pinchPopoverGlobalBound = 'true';
@@ -8379,16 +7640,26 @@ async function addTabsToBlankNode(tabs, scope, options = {}) {
     if (targetId) {
         const node = window.CanvasModule.CanvasState.mdNodes.find(n => n && n.id === targetId);
         if (node) {
-            if (node.html && node.html.trim()) {
-                const existingText = (typeof node.text === 'string' && node.text.trim())
-                    ? node.text
-                    : stripHtmlToText(node.html);
-                node.html = `${node.html}${node.html.trim() ? '<hr>' : ''}${html}`;
-                node.text = `${existingText}${existingText ? '\n\n' : ''}${markdown}`;
+            if (typeof __deriveMdNodeMarkdownSource === 'function' && typeof __ensureMdNodeMarkdownProtocol === 'function') {
+                const existingMarkdown = __deriveMdNodeMarkdownSource(node);
+                const normalizedExisting = String(existingMarkdown || '').replace(/\s+$/, '');
+                const normalizedAppend = String(markdown || '').replace(/^\s+/, '').replace(/\s+$/, '');
+                node.markdownSource = normalizedExisting
+                    ? `${normalizedExisting}\n\n---\n\n${normalizedAppend}`
+                    : normalizedAppend;
+                __ensureMdNodeMarkdownProtocol(node, { refreshCachesFromMarkdown: true });
             } else {
-                const base = (typeof node.text === 'string') ? node.text.trim() : '';
-                node.text = base ? `${base}\n\n${markdown}` : markdown;
-                node.html = '';
+                if (node.html && node.html.trim()) {
+                    const existingText = (typeof node.text === 'string' && node.text.trim())
+                        ? node.text
+                        : stripHtmlToText(node.html);
+                    node.html = `${node.html}${node.html.trim() ? '<hr>' : ''}${html}`;
+                    node.text = `${existingText}${existingText ? '\n\n' : ''}${markdown}`;
+                } else {
+                    const base = (typeof node.text === 'string') ? node.text.trim() : '';
+                    node.text = base ? `${base}\n\n${markdown}` : markdown;
+                    node.html = '';
+                }
             }
             if (typeof renderMdNode === 'function') renderMdNode(node);
             if (typeof saveTempNodes === 'function') saveTempNodes();
@@ -10788,6 +10059,149 @@ let canvasLazyChangeHintsPromise = null;
 // Canvas 懒加载：增量删除时缓存被删节点快照（用于后续展开时仍能显示红色占位）
 let incrementalDeletedNodeSnapshots = new Map(); // id -> node snapshot
 let incrementalDeletedChildrenByParent = new Map(); // parentId -> Map<id, node snapshot>
+const PERMANENT_MARKER_OP_TTL_MS = 20 * 1000;
+let pendingPermanentCreateSubtreeMembers = new Map(); // id -> expiry
+let pendingPermanentDerivedRemoveIds = new Map(); // id -> expiry
+
+function prunePermanentMarkerOpMap(map, now = Date.now()) {
+    if (!(map instanceof Map) || map.size === 0) return;
+    for (const [id, expiry] of map.entries()) {
+        if (typeof expiry !== 'number' || expiry <= now) {
+            map.delete(id);
+        }
+    }
+}
+
+function registerPermanentCreateSubtreeMember(id, ttlMs = PERMANENT_MARKER_OP_TTL_MS) {
+    if (!id) return;
+    prunePermanentMarkerOpMap(pendingPermanentCreateSubtreeMembers);
+    pendingPermanentCreateSubtreeMembers.set(String(id), Date.now() + Math.max(1000, Number(ttlMs) || PERMANENT_MARKER_OP_TTL_MS));
+}
+
+function registerPermanentDerivedRemoveRoots(nodes, ttlMs = PERMANENT_MARKER_OP_TTL_MS) {
+    const roots = Array.isArray(nodes) ? nodes.filter(Boolean) : [nodes].filter(Boolean);
+    if (!roots.length) return;
+
+    prunePermanentMarkerOpMap(pendingPermanentDerivedRemoveIds);
+    const expiry = Date.now() + Math.max(1000, Number(ttlMs) || PERMANENT_MARKER_OP_TTL_MS);
+    const directRootIds = new Set(
+        roots
+            .map(node => (node && typeof node.id !== 'undefined' && node.id !== null) ? String(node.id) : '')
+            .filter(Boolean)
+    );
+
+    const visit = (node, isRoot = false) => {
+        if (!node || typeof node.id === 'undefined' || node.id === null) return;
+        const sid = String(node.id);
+        if (!isRoot && !directRootIds.has(sid)) {
+            pendingPermanentDerivedRemoveIds.set(sid, expiry);
+        }
+        if (Array.isArray(node.children) && node.children.length) {
+            node.children.forEach(child => visit(child, false));
+        }
+    };
+
+    roots.forEach(root => visit(root, true));
+}
+
+function getPermanentCreateMarkerMode(id, bookmark) {
+    prunePermanentMarkerOpMap(pendingPermanentCreateSubtreeMembers);
+    const parentId = bookmark && typeof bookmark.parentId !== 'undefined' && bookmark.parentId !== null
+        ? String(bookmark.parentId)
+        : '';
+    if (!parentId || !pendingPermanentCreateSubtreeMembers.has(parentId)) {
+        return 'direct';
+    }
+    registerPermanentCreateSubtreeMember(id);
+    return 'derived';
+}
+
+function getPermanentRemoveMarkerMode(id) {
+    prunePermanentMarkerOpMap(pendingPermanentDerivedRemoveIds);
+    const sid = String(id || '');
+    if (!sid || !pendingPermanentDerivedRemoveIds.has(sid)) {
+        return 'direct';
+    }
+    pendingPermanentDerivedRemoveIds.delete(sid);
+    return 'derived';
+}
+
+function stripTreeChangeType(changeMap, id, typeToStrip) {
+    if (!(changeMap instanceof Map) || !id || !typeToStrip) return;
+    const key = String(id);
+    const existing = changeMap.get(key);
+    if (!existing || typeof existing.type !== 'string') return;
+
+    const nextTypes = existing.type.split('+').filter(type => type && type !== typeToStrip);
+    if (!nextTypes.length) {
+        changeMap.delete(key);
+        return;
+    }
+
+    const next = { ...existing, type: nextTypes.join('+') };
+    if (typeToStrip === 'added') delete next.added;
+    if (typeToStrip === 'deleted') delete next.deleted;
+    if (typeToStrip === 'modified') delete next.modified;
+    if (typeToStrip === 'moved') delete next.moved;
+    changeMap.set(key, next);
+}
+
+function compactStructuralRootChanges(changeMap, currentTree = null) {
+    if (!(changeMap instanceof Map) || changeMap.size === 0) return changeMap;
+
+    let currentIndex = null;
+    try {
+        if (currentTree && currentTree[0]) {
+            currentIndex = buildTreeIndexFromRoot(currentTree[0]);
+        } else if (cachedCurrentTree && cachedCurrentTree[0]) {
+            currentIndex = getCachedCurrentTreeIndex() || buildTreeIndexFromRoot(cachedCurrentTree[0]);
+        }
+    } catch (_) { currentIndex = null; }
+
+    if (currentIndex instanceof Map) {
+        try {
+            changeMap.forEach((change, id) => {
+                if (!change || typeof change.type !== 'string' || !change.type.includes('added')) return;
+                const rootNode = currentIndex.get(String(id));
+                if (!rootNode || !Array.isArray(rootNode.children) || rootNode.children.length === 0) return;
+                const stack = [...rootNode.children];
+                while (stack.length) {
+                    const child = stack.pop();
+                    if (!child || typeof child.id === 'undefined' || child.id === null) continue;
+                    stripTreeChangeType(changeMap, child.id, 'added');
+                    if (Array.isArray(child.children) && child.children.length) {
+                        stack.push(...child.children);
+                    }
+                }
+            });
+        } catch (_) { }
+    }
+
+    try {
+        changeMap.forEach((change) => {
+            if (!change || typeof change.type !== 'string' || !change.type.includes('deleted')) return;
+            const snapshotRoot = cloneBookmarkNodeSnapshot(change.deleted && (change.deleted.nodeSnapshot || change.deleted.node));
+            if (!snapshotRoot || !Array.isArray(snapshotRoot.children) || snapshotRoot.children.length === 0) return;
+            const stack = [...snapshotRoot.children];
+            while (stack.length) {
+                const child = stack.pop();
+                if (!child || typeof child.id === 'undefined' || child.id === null) continue;
+                stripTreeChangeType(changeMap, child.id, 'deleted');
+                if (Array.isArray(child.children) && child.children.length) {
+                    stack.push(...child.children);
+                }
+            }
+        });
+    } catch (_) { }
+
+    return changeMap;
+}
+
+if (typeof window !== 'undefined') {
+    window.__treeMarkerOps = window.__treeMarkerOps || {};
+    window.__treeMarkerOps.registerCreateSubtreeMember = registerPermanentCreateSubtreeMember;
+    window.__treeMarkerOps.registerDerivedRemoveRoots = registerPermanentDerivedRemoveRoots;
+}
 
 // 清除树缓存（供拖拽模块调用，防止缓存覆盖DOM更新）
 function clearTreeCache() {
@@ -11937,8 +11351,7 @@ async function renderTreeView(forceRefresh = false) {
     // 页面刷新后，permScrollTop 是 0，需要从 localStorage 恢复
     if (permScrollTop === 0 && currentView === 'canvas') {
         try {
-            const partitionedKey = __buildCanvasPartitionedViewKey('scroll', 'permanent-section-scroll');
-            const persisted = __readLocalStorageJSON(partitionedKey);
+            const persisted = __readPermanentSectionScrollStateByCopyId('');
             if (persisted && typeof persisted.top === 'number') {
                 permScrollTop = persisted.top;
                 permScrollLeft = persisted.left || 0;
@@ -11965,7 +11378,7 @@ async function renderTreeView(forceRefresh = false) {
     }
 
     // 如果已有缓存且不强制刷新，直接使用（快速路径）
-    if (!forceRefresh && cachedTreeData && cachedTreeData.treeFragment) {
+    if (!forceRefresh && cachedTreeData && (cachedTreeData.treeFragment || cachedTreeData.renderTree)) {
         console.log('[renderTreeView] 使用现有缓存（快速显示）');
         if (currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED) {
             await ensureCanvasLazyChangeHints(false);
@@ -11975,14 +11388,15 @@ async function renderTreeView(forceRefresh = false) {
             treeContainer.style.display = 'block';
             ensureCanvasLazyLegend(treeContainer);
         } else {
-            treeContainer.innerHTML = '';
-            treeContainer.appendChild(cachedTreeData.treeFragment.cloneNode(true));
+            __renderCachedPermanentTreeIntoPrimary(treeContainer);
             treeContainer.style.display = 'block';
             ensureCanvasLazyLegend(treeContainer);
         }
 
         // 重新绑定事件
         attachTreeEvents(treeContainer);
+
+        try { schedulePermanentTreeCopySync(); } catch (_) { }
 
         console.log('[renderTreeView] 缓存显示完成');
         // 恢复滚动位置（延迟确保展开状态恢复后再恢复滚动位置）
@@ -12086,6 +11500,7 @@ async function renderTreeView(forceRefresh = false) {
                     <div class="empty-state-title">${i18n.emptyTree[currentLang]}</div>
                 </div>
             `;
+            try { schedulePermanentTreeCopySync(); } catch (_) { }
             isRenderingTree = false;
             syncMarkerAttentionIndicators('render-empty-tree');
             if (pendingRenderRequest !== null) {
@@ -12128,8 +11543,7 @@ async function renderTreeView(forceRefresh = false) {
                 return;
             }
 
-            treeContainer.innerHTML = '';
-            treeContainer.appendChild(cachedTreeData.treeFragment.cloneNode(true));
+            __renderCachedPermanentTreeIntoPrimary(treeContainer);
             treeContainer.style.display = 'block';
             if (currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED) {
                 await ensureCanvasLazyChangeHints(false);
@@ -12138,6 +11552,7 @@ async function renderTreeView(forceRefresh = false) {
 
             // 重新绑定事件
             attachTreeEvents(treeContainer);
+            try { schedulePermanentTreeCopySync(); } catch (_) { }
             // 恢复滚动位置（延迟确保展开状态恢复后再恢复滚动位置）
             if (permBody && permScrollTop !== null) {
                 const restoreScroll = () => {
@@ -12367,6 +11782,7 @@ async function renderTreeView(forceRefresh = false) {
 
             // 绑定事件
             attachTreeEvents(treeContainer);
+            try { schedulePermanentTreeCopySync(); } catch (_) { }
 
             // 恢复滚动位置（延迟确保展开状态和懒加载完成后再恢复滚动位置）
             if (permBody && permScrollTop !== null) {
@@ -12400,6 +11816,7 @@ async function renderTreeView(forceRefresh = false) {
         console.error('[renderTreeView] 错误:', error);
         treeContainer.innerHTML = `<div class="error">加载失败: ${escapeHtml(error && error.message ? error.message : String(error))}</div>`;
         treeContainer.style.display = 'block';
+        try { schedulePermanentTreeCopySync(); } catch (_) { }
 
         // 重置渲染标志
         isRenderingTree = false;
@@ -13343,7 +12760,7 @@ async function detectTreeChangesFast(oldTree, newTree, options = {}) {
         });
     }
 
-    return changes;
+    return compactStructuralRootChanges(changes, newTree);
 }
 
 // 懒加载场景下的“包含变化”提示集合：
@@ -13384,6 +12801,20 @@ function computeChangesHintSetFast(changeMap, explicitMovedIdSet = null) {
                     addAncestorsFrom(String(oldParentId));
                 }
                 return;
+            }
+
+            // moved：旧父路径上的节点已经不在当前子树里，需要显式补上旧路径提示。
+            if (type.includes('moved')) {
+                const oldParentId = change && change.moved && change.moved.oldParentId != null
+                    ? String(change.moved.oldParentId)
+                    : '';
+                const newParentId = change && change.moved && change.moved.newParentId != null
+                    ? String(change.moved.newParentId)
+                    : '';
+                if (oldParentId && oldParentId !== newParentId) {
+                    out.add(oldParentId);
+                    addAncestorsFrom(oldParentId);
+                }
             }
 
             addAncestorsFrom(String(id));
@@ -13451,6 +12882,20 @@ function computeAncestorChangeBadgesFast(changeMap, explicitMovedIdSet = null) {
             if (type.includes('added')) masks.push(1);
             if (type.includes('modified')) masks.push(4);
             if (type.includes('moved')) masks.push(8);
+
+            if (type.includes('moved')) {
+                const oldParentId = change && change.moved && change.moved.oldParentId != null
+                    ? String(change.moved.oldParentId)
+                    : '';
+                const newParentId = change && change.moved && change.moved.newParentId != null
+                    ? String(change.moved.newParentId)
+                    : '';
+                if (oldParentId && oldParentId !== newParentId) {
+                    addMask(oldParentId, 8);
+                    bubbleUp(oldParentId, 8);
+                }
+            }
+
             // 注意：非 deleted 情况下，folderDiff / bookmarkDiff 的“数量变化”不在 treeChangeMap 里，
             // 这里只聚合结构变化（added/modified/moved）即可。
             masks.forEach(mask => bubbleUp(String(id), mask));
@@ -13587,6 +13032,7 @@ function applyChangeLogToTreeChangeMap(changeLog) {
             });
         }
     });
+    compactStructuralRootChanges(treeChangeMap, cachedCurrentTree);
 }
 
 let pendingPathBadgeRefreshTimer = null;
@@ -13896,11 +13342,16 @@ function rebuildTreeWithDeleted(oldTree, newTree, changeMap) {
         if (change && change.type === 'deleted') {
             // 节点被删除，保留但标记
             console.log('[树重建] 保留删除节点:', oldNode.title);
-            const deletedNodeCopy = JSON.parse(JSON.stringify(oldNode));
+            const snapshotNode = cloneBookmarkNodeSnapshot(change.deleted && (change.deleted.nodeSnapshot || change.deleted.node));
+            const deletedNodeCopy = snapshotNode || JSON.parse(JSON.stringify(oldNode));
 
-            // 递归处理子节点
-            if (oldNode.children && oldNode.children.length > 0) {
-                deletedNodeCopy.children = oldNode.children.map(child => rebuildNode(child, null, depth + 1)).filter(n => n !== null);
+            if ((!Array.isArray(deletedNodeCopy.children) || deletedNodeCopy.children.length === 0) &&
+                Array.isArray(oldNode.children) && oldNode.children.length > 0) {
+                try {
+                    deletedNodeCopy.children = JSON.parse(JSON.stringify(oldNode.children));
+                } catch (_) {
+                    deletedNodeCopy.children = oldNode.children.map(child => cloneBookmarkNodeSnapshot(child)).filter(Boolean);
+                }
             }
 
             return deletedNodeCopy;
@@ -14209,24 +13660,12 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
     let statusIcon = '';
     let changeClass = '';
     const changeTypeStr = (change && typeof change.type === 'string') ? change.type : '';
-    const inheritedFolderChangeType = (inheritedFolderChange === 'added' || inheritedFolderChange === 'deleted')
-        ? inheritedFolderChange
-        : (underDeletedAncestor ? 'deleted' : '');
-
     if (node.url) {
         // 叶子（书签）
         if (node.url) {
             const isExplicitMovedOnly = markerEnabled && explicitMovedIdsForRender.has(node.id) && explicitMovedIdsForRender.get(node.id) > Date.now();
             const lazyHint = markerEnabled ? getCanvasLazyHintForBookmark(node) : null;
-            const hasOwnNonAddedChange = !!(change && typeof change.type === 'string' && change.type.split('+').some(t => t && t !== 'added'));
-            const useInheritedAddedForLeaf = inheritedFolderChangeType === 'added' && !hasOwnNonAddedChange && !isExplicitMovedOnly;
-            if (inheritedFolderChangeType === 'deleted') {
-                changeClass = 'tree-change-deleted';
-                statusIcon = '<span class="change-badge deleted"><span class="badge-symbol">-</span></span>';
-            } else if (useInheritedAddedForLeaf) {
-                changeClass = 'tree-change-added';
-                statusIcon = '<span class="change-badge added"><span class="badge-symbol">+</span></span>';
-            } else if (change) {
+            if (change) {
                 if (change.type === 'added') {
                     changeClass = 'tree-change-added';
                     statusIcon = '<span class="change-badge added"><span class="badge-symbol">+</span></span>';
@@ -14309,13 +13748,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
     const folderHasAdded = folderTypes.includes('added');
     const folderHasMoved = folderTypes.includes('moved');
     const folderHasModified = folderTypes.includes('modified');
-    const hasOwnNonAddedFolderSignal = folderHasDeleted || folderHasMoved || folderHasModified || __isExplicitMovedOnlyFolder;
-    const useInheritedAddedForFolder = inheritedFolderChangeType === 'added' && !hasOwnNonAddedFolderSignal;
-    const effectiveFolderChangeType = inheritedFolderChangeType === 'deleted'
-        ? 'deleted'
-        : (useInheritedAddedForFolder
-            ? 'added'
-            : (folderHasDeleted ? 'deleted' : (folderHasAdded ? 'added' : '')));
+    const effectiveFolderChangeType = folderHasDeleted ? 'deleted' : (folderHasAdded ? 'added' : '');
     if (effectiveFolderChangeType === 'added') {
         changeClass = 'tree-change-added';
         statusIcon = '<span class="change-badge added"><span class="badge-symbol">+</span></span>';
@@ -14397,12 +13830,11 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                 : (window.__changesPreviewAncestorBadges instanceof Map ? window.__changesPreviewAncestorBadges : null));
 
             const mask = badgeMap ? (badgeMap.get(String(node.id)) || 0) : 0;
-            const isAddedContextFolder = isAddedFolder || inheritedFolderChangeType === 'added';
             const nonAddedMask = (mask & (2 | 4 | 8));
             // Note: in this function the 5th param is historically used as the "hint set"
             // (ancestor path ids). Keep using it here to avoid adding a new parameter.
             const hintHasDescendants = !!(forceExpandSet && forceExpandSet.has && forceExpandSet.has(String(node.id)));
-            const hasDescendants = isAddedContextFolder
+            const hasDescendants = isAddedFolder
                 ? !!nonAddedMask
                 : !!(mask || hintHasDescendants);
             if (hasDescendants) {
@@ -14410,7 +13842,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                 let pathBadges = `<span class="path-badges"><span class="path-dot" title="${escapeHtml(title)}">•</span>`;
                 hasChangesHintBadge = true;
 
-                const displayMask = isAddedContextFolder ? nonAddedMask : mask;
+                const displayMask = isAddedFolder ? nonAddedMask : mask;
                 // 子树聚合徽标：即使与父自身类型重复，也保留（避免“被掩盖”）
                 if (displayMask) {
                     if (displayMask & 1) pathBadges += '<span class="path-symbol added" title="+">+</span>';
@@ -14448,6 +13880,10 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
         !(isLazyEnabledInContext && (currentView === 'canvas')) &&
         shouldShowPathBadges()) {
         try {
+            const badgeMap = (currentView === 'canvas'
+                ? (window.__canvasPermanentAncestorBadges instanceof Map ? window.__canvasPermanentAncestorBadges : null)
+                : (window.__changesPreviewAncestorBadges instanceof Map ? window.__changesPreviewAncestorBadges : null));
+            const mask = badgeMap ? (badgeMap.get(String(node.id)) || 0) : 0;
             const hasDescendant = (function hasDescendantChangesFast(n) {
                 if (!n || !Array.isArray(n.children) || n.children.length === 0) return false;
                 const now = Date.now();
@@ -14462,11 +13898,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                 }
                 return false;
             })(node);
-            if (hasDescendant) {
-                const badgeMap = (currentView === 'canvas'
-                    ? (window.__canvasPermanentAncestorBadges instanceof Map ? window.__canvasPermanentAncestorBadges : null)
-                    : (window.__changesPreviewAncestorBadges instanceof Map ? window.__changesPreviewAncestorBadges : null));
-                const mask = badgeMap ? (badgeMap.get(String(node.id)) || 0) : 0;
+            if (hasDescendant || mask) {
                 const title = currentLang === 'zh_CN' ? '此文件夹下有变化' : 'Contains changes';
                 let pathBadges = `<span class="path-badges"><span class="path-dot" title="${escapeHtml(title)}">•</span>`;
                 if (mask) {
@@ -14516,7 +13948,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
     });
 
     const nextUnderDeletedAncestor = underDeletedAncestor || isDeletedFolder;
-    const nextInheritedFolderChange = effectiveFolderChangeType || '';
+    const nextInheritedFolderChange = '';
 
     return `
             <div class="tree-node">
@@ -14636,12 +14068,6 @@ function applyTreeChangeToItem(item, changeType) {
 function applyTreeChangeToRenderedSubtree(rootItem, changeType) {
     if (!rootItem) return;
     applyTreeChangeToItem(rootItem, changeType);
-
-    const rootNode = rootItem.closest('.tree-node');
-    if (!rootNode) return;
-    rootNode.querySelectorAll('.tree-children .tree-item').forEach((childItem) => {
-        applyTreeChangeToItem(childItem, changeType);
-    });
 }
 
 function cloneBookmarkNodeSnapshot(node) {
@@ -14729,11 +14155,13 @@ function tryInsertDeletedSnapshotNode(container, id, removeInfo) {
 }
 
 // ===== 增量更新：创建 =====
-async function applyIncrementalCreateToTree(id, bookmark) {
+async function applyIncrementalCreateToTree(id, bookmark, options = {}) {
     const permBody = document.querySelector('.permanent-section-body');
     const permScrollTop = permBody ? permBody.scrollTop : null;
     const container = document.getElementById('bookmarkTree');
     if (!container) return;
+    const markerMode = options && options.markerMode === 'derived' ? 'derived' : 'direct';
+    const showDirectMarker = markerMode === 'direct';
     // 获取父节点 DOM
     const parentId = bookmark.parentId;
     const parentItem = parentId
@@ -14761,31 +14189,34 @@ async function applyIncrementalCreateToTree(id, bookmark) {
     const nodeIndex = (typeof bookmark.index === 'number') ? bookmark.index : '';
     try { parentItem.dataset.hasChildren = 'true'; } catch (_) { }
 
-    // 生成新节点 HTML（添加绿色变更标记）
+    // 生成新节点 HTML
     const favicon = getFaviconUrl(bookmark.url || '');
-    const labelColor = 'color: #28a745;'; // 绿色
-    const labelFontWeight = 'font-weight: 500;';
+    const labelStyle = showDirectMarker ? 'color: #28a745; font-weight: 500;' : '';
+    const itemClass = showDirectMarker ? 'tree-item tree-change-added' : 'tree-item';
+    const changeBadgesHtml = showDirectMarker
+        ? '<span class="change-badges"><span class="change-badge added"><span class="badge-symbol">+</span></span></span>'
+        : '<span class="change-badges"></span>';
     const isBookmark = !!bookmark.url;
     const safeTitle = escapeHtml(bookmark.title || '');
     const safeUrl = escapeHtml(bookmark.url || '');
     const html = isBookmark
         ? `
         <div class="tree-node">
-            <div class="tree-item tree-change-added" data-node-id="${id}" data-node-title="${safeTitle}" data-node-url="${safeUrl}" data-node-type="bookmark" data-node-level="${nodeLevel}" data-node-index="${nodeIndex}">
+            <div class="${itemClass}" data-node-id="${id}" data-node-title="${safeTitle}" data-node-url="${safeUrl}" data-node-type="bookmark" data-node-level="${nodeLevel}" data-node-index="${nodeIndex}">
                 <span class="tree-toggle" style="opacity: 0"></span>
                 ${favicon ? `<img class="tree-icon" src="${favicon}" alt="">` : `<i class="tree-icon fas fa-bookmark"></i>`}
-                <a href="${safeUrl}" target="_blank" class="tree-label tree-bookmark-link" rel="noopener noreferrer" style="${labelColor} ${labelFontWeight}">${safeTitle}</a>
-                <span class="change-badges"><span class="change-badge added"><span class="badge-symbol">+</span></span></span>
+                <a href="${safeUrl}" target="_blank" class="tree-label tree-bookmark-link" rel="noopener noreferrer" style="${labelStyle}">${safeTitle}</a>
+                ${changeBadgesHtml}
             </div>
         </div>
         `
         : `
         <div class="tree-node">
-            <div class="tree-item tree-change-added" data-node-id="${id}" data-node-title="${safeTitle}" data-node-type="folder" data-node-level="${nodeLevel}" data-has-children="false" data-children-loaded="true" data-child-count="0" data-node-index="${nodeIndex}">
+            <div class="${itemClass}" data-node-id="${id}" data-node-title="${safeTitle}" data-node-type="folder" data-node-level="${nodeLevel}" data-has-children="false" data-children-loaded="true" data-child-count="0" data-node-index="${nodeIndex}">
                 <span class="tree-toggle"><i class="fas fa-chevron-right"></i></span>
                 <i class="tree-icon fas fa-folder"></i>
-                <span class="tree-label" style="${labelColor} ${labelFontWeight}">${safeTitle}</span>
-                <span class="change-badges"><span class="change-badge added"><span class="badge-symbol">+</span></span></span>
+                <span class="tree-label" style="${labelStyle}">${safeTitle}</span>
+                ${changeBadgesHtml}
             </div>
             <div class="tree-children"></div>
         </div>
@@ -14817,7 +14248,9 @@ async function applyIncrementalCreateToTree(id, bookmark) {
     // 为新创建的节点绑定事件
     const newItem = newNodeEl?.querySelector('.tree-item');
     if (newItem) {
-        applyTreeChangeToRenderedSubtree(newItem, 'added');
+        if (showDirectMarker) {
+            applyTreeChangeToRenderedSubtree(newItem, 'added');
+        }
 
         // 绑定右键菜单
         newItem.addEventListener('contextmenu', (e) => {
@@ -14951,7 +14384,7 @@ async function applyIncrementalMoveToTree(id, moveInfo) {
     const permBody = document.querySelector('.permanent-section-body');
     const permScrollTop = permBody ? permBody.scrollTop : null;
     const container = document.getElementById('bookmarkTree');
-    if (!container) return;
+    if (!container) return false;
     const item = container.querySelector(`.tree-item[data-node-id="${id}"]`);
     if (!item) {
         // Canvas 懒加载：节点可能未渲染（所在父文件夹未展开）。
@@ -14964,7 +14397,7 @@ async function applyIncrementalMoveToTree(id, moveInfo) {
                 renderTreeView(true).catch(e => console.error(e));
             }
         }
-        return;
+        return false;
     }
     const node = item.closest('.tree-node');
     const oldParentItem = container.querySelector(`.tree-item[data-node-id="${moveInfo.oldParentId}"]`);
@@ -14977,17 +14410,17 @@ async function applyIncrementalMoveToTree(id, moveInfo) {
         if (item.classList.contains('tree-change-moved')) {
             console.log('[增量移动] 节点已有移动标记，跳过DOM操作');
             if (permBody && permScrollTop !== null) permBody.scrollTop = permScrollTop;
-            return;
+            return false;
         }
         console.warn('[增量移动] 找不到新父容器，跳过');
-        return;
+        return false;
     }
 
     // 关键修复：同一父级内的“排序移动”时，node 仍在 newParentChildren 里，但位置需要更新。
     // 之前的 alreadyInPlace 逻辑会直接跳过，导致移动后视觉不跟随（只能依赖全量 renderTreeView 修正）。
     if (!node) {
         console.warn('[增量移动] 找不到tree-node容器，跳过');
-        return;
+        return false;
     }
     // 从旧位置移除并插入新父下（即使同父级也需要重排）
     try {
@@ -15030,7 +14463,7 @@ async function applyIncrementalMoveToTree(id, moveInfo) {
     if (item.classList.contains('tree-change-moved') && item.querySelector('.change-badge.moved')) {
         console.log('[增量移动] 节点已有移动徽标，跳过');
         if (permBody && permScrollTop !== null) permBody.scrollTop = permScrollTop;
-        return;
+        return true;
     }
 
     // 关键：仅对这个被拖拽的节点标记为蓝色"moved"
@@ -15073,6 +14506,7 @@ async function applyIncrementalMoveToTree(id, moveInfo) {
     ensureTreeLegendExists(container);
     // 恢复滚动位置
     if (permBody && permScrollTop !== null) permBody.scrollTop = permScrollTop;
+    return true;
 }
 
 
@@ -15486,15 +14920,22 @@ let addRemoveFlushQueued = false;
 
 async function handleBookmarkCreateRealtime(id, bookmark) {
     addBookmarkToCache(bookmark);
+    const markerMode = getPermanentCreateMarkerMode(id, bookmark);
 
     if (currentView === 'canvas') {
-        await applyIncrementalCreateToTree(id, bookmark);
+        await applyIncrementalCreateToTree(id, bookmark, { markerMode });
         const appliedToCachedTree = applyIncrementalCreateToCachedCurrentTree(id, bookmark);
         if (!appliedToCachedTree) {
             scheduleCachedCurrentTreeSnapshotRefresh('onCreated-fast-fallback', 40);
         }
-        updateTreeChangeMapForCreate(id);
-        scheduleCanvasPathBadgeRefresh('onCreated');
+        if (markerMode === 'direct') {
+            updateTreeChangeMapForCreate(id);
+            scheduleCanvasPathBadgeRefresh('onCreated');
+        }
+        const refreshedSharedSource = refreshSharedPermanentTreeCopySourceData('onCreated');
+        if (refreshedSharedSource) {
+            schedulePermanentTreeCopySync();
+        }
         scheduleCachedCurrentTreeSnapshotRefresh('onCreated');
     }
 
@@ -15503,6 +14944,7 @@ async function handleBookmarkCreateRealtime(id, bookmark) {
 
 async function handleBookmarkRemoveRealtime(id, removeInfo) {
     removeBookmarkFromCache(id);
+    const markerMode = getPermanentRemoveMarkerMode(id);
 
     const enrichedRemoveInfo = enrichRemoveInfoWithSnapshot(id, removeInfo);
     cacheDeletedSnapshotForLazyRender(id, enrichedRemoveInfo);
@@ -15512,13 +14954,21 @@ async function handleBookmarkRemoveRealtime(id, removeInfo) {
     }
 
     if (currentView === 'canvas') {
-        applyIncrementalRemoveFromTree(id, enrichedRemoveInfo);
+        if (markerMode === 'direct') {
+            applyIncrementalRemoveFromTree(id, enrichedRemoveInfo);
+        }
         const appliedToCachedTree = applyIncrementalRemoveFromCachedCurrentTree(id, enrichedRemoveInfo);
         if (!appliedToCachedTree) {
             scheduleCachedCurrentTreeSnapshotRefresh('onRemoved-fast-fallback', 40);
         }
-        updateTreeChangeMapForRemove(id, enrichedRemoveInfo);
-        scheduleCanvasPathBadgeRefresh('onRemoved');
+        if (markerMode === 'direct') {
+            updateTreeChangeMapForRemove(id, enrichedRemoveInfo);
+            scheduleCanvasPathBadgeRefresh('onRemoved');
+        }
+        const refreshedSharedSource = refreshSharedPermanentTreeCopySourceData('onRemoved');
+        if (refreshedSharedSource) {
+            schedulePermanentTreeCopySync();
+        }
         scheduleCachedCurrentTreeSnapshotRefresh('onRemoved');
     }
 
@@ -15671,6 +15121,10 @@ function setupBookmarkListener() {
                 }
                 updateTreeChangeMapForChange(id);
                 scheduleCanvasPathBadgeRefresh('onChanged');
+                const refreshedSharedSource = refreshSharedPermanentTreeCopySourceData('onChanged');
+                if (refreshedSharedSource) {
+                    schedulePermanentTreeCopySync();
+                }
                 scheduleCachedCurrentTreeSnapshotRefresh('onChanged');
             }
             clearCanvasLazyChangeHints('onChanged');
@@ -15697,7 +15151,7 @@ function setupBookmarkListener() {
 
             // 支持 canvas 视图（包含永久栏目的书签树）
             if (currentView === 'canvas') {
-                await applyIncrementalMoveToTree(id, moveInfo);
+                const appliedToDom = await applyIncrementalMoveToTree(id, moveInfo);
                 const appliedToCachedTree = applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
                 if (!appliedToCachedTree) {
                     scheduleCachedCurrentTreeSnapshotRefresh('onMoved-fast-fallback', 40);
@@ -15705,6 +15159,22 @@ function setupBookmarkListener() {
                 updateTreeChangeMapForMove(id, moveInfo);
                 scheduleCanvasPathBadgeRefresh('onMoved');
                 scheduleCachedCurrentTreeSnapshotRefresh('onMoved');
+
+                // 主体/副本共享树不能只依赖主树 DOM mutation。
+                // 当移动发生在副本可见层级、但主树对应父节点未展开时，
+                // 主树局部增量可能找不到目标容器；这里主动刷新共享源数据并触发副本同步。
+                const refreshedSharedSource = refreshSharedPermanentTreeCopySourceData('onMoved');
+                if (!appliedToDom && refreshedSharedSource) {
+                    try {
+                        const primaryTree = document.getElementById('bookmarkTree');
+                        if (primaryTree) {
+                            __renderCachedPermanentTreeIntoPrimary(primaryTree);
+                        }
+                    } catch (_) { }
+                }
+                if (refreshedSharedSource) {
+                    schedulePermanentTreeCopySync();
+                }
             }
             clearCanvasLazyChangeHints('onMoved');
         } catch (e) {

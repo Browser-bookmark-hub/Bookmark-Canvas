@@ -10,6 +10,7 @@
     const TAB_ACTIVE_KEY = 'canvas-obsidian-git-sync-active-tab-v1';
     const OBSIDIAN_FILE_HASHES_KEY = 'canvas-obsidian-git-sync-obsidian-file-hashes-v1';
     const LAST_UPLOADED_TEMP_STATE_KEY = 'canvas-obsidian-git-sync-last-uploaded-temp-state-v1';
+    const LAST_SYNC_EXPORT_FORMAT_KEY = 'canvas-obsidian-git-sync-last-export-format-v1';
     const DIRTY_STATE_KEY = 'canvas-obsidian-git-sync-dirty-v1';
     const PATH_MAP_KEY = 'canvas-obsidian-git-sync-path-map-v1';
     const PREV_SYNC_INDEX_KEY = 'canvas-obsidian-git-sync-prev-index-v1';
@@ -23,6 +24,7 @@
         TAB_ACTIVE_KEY,
         OBSIDIAN_FILE_HASHES_KEY,
         LAST_UPLOADED_TEMP_STATE_KEY,
+        LAST_SYNC_EXPORT_FORMAT_KEY,
         DIRTY_STATE_KEY,
         PATH_MAP_KEY,
         PREV_SYNC_INDEX_KEY,
@@ -42,14 +44,13 @@
     const DEFAULT_ACTIVE_TAB = 'repo';
     const BEHAVIOR_SUBNAV_CONFIG = [
         { buttonId: 'canvasSyncBehaviorSubGeneralBtn', targetId: 'canvasSyncSectionGeneralTitle' },
-        { buttonId: 'canvasSyncBehaviorSubPluginBtn', targetId: 'canvasSyncPluginSectionTitle' },
-        { buttonId: 'canvasSyncBehaviorSubCompatBtn', targetId: 'canvasSyncSectionCompatTitle' }
+        { buttonId: 'canvasSyncBehaviorSubPluginBtn', targetId: 'canvasSyncPluginSectionTitle' }
     ];
-    const BEHAVIOR_SUBNAV_COMPAT_CONFIG = [
-        { buttonId: 'canvasSyncBehaviorSubCompatDetail1Btn', targetId: 'canvasSyncSectionCompatDetectTitle' },
-        { buttonId: 'canvasSyncBehaviorSubCompatDetail2Btn', targetId: 'canvasSyncSectionCompatBgDetectTitle' },
-        { buttonId: 'canvasSyncBehaviorSubCompatDetail3Btn', targetId: 'canvasSyncSectionCompatMismatchTitle' },
-        { buttonId: 'canvasSyncBehaviorSubCompatDetail4Btn', targetId: 'canvasSyncSectionCompatMergeTitle' }
+    const BEHAVIOR_SUBNAV_COMPAT_CONFIG = [];
+    const STATUS_SUBNAV_CONFIG = [
+        { buttonId: 'canvasSyncStatusSubActionsBtn', targetId: 'canvasSyncStatusActionsSectionTitle' },
+        { buttonId: 'canvasSyncStatusSubConfigBtn', targetId: 'canvasSyncStatusConfigSectionTitle' },
+        { buttonId: 'canvasSyncStatusSubRuntimeBtn', targetId: 'canvasSyncStatusRuntimeSectionTitle' }
     ];
 
     const TEMP_SECTION_STORAGE_KEY = 'bookmark-canvas-temp-sections';
@@ -64,14 +65,15 @@
     ];
 
     const CONFLICT_POLICIES = new Set(['none', 'ours', 'theirs', 'newer']);
-    const MISMATCH_POLICIES = new Set(['auto_pull', 'auto_push', 'prompt']);
     const SYNC_METHODS = new Set(['merge', 'rebase', 'reset']);
     const FIRST_SYNC_MODES = new Set(['auto', 'cloud', 'local']);
     const PERMANENT_PULL_MODES = new Set(['auto', 'overwrite', 'incremental']);
-    const MAX_RECOVERY_RECORDS = 5;
+    const RECOVERY_SNAPSHOT_KEEP_LATEST = 1;
     const DEFAULT_PERMANENT_INCREMENTAL_MAX_LOGICAL_CHANGES_ABS = 200;
     const PERMANENT_TREE_UPLOAD_INTERVALS = new Set([0, 5, 15, 30, 60]);
-    const OBSIDIAN_EXPORT_FORMATS = new Set(['visual', 'visual-no-icon']);
+    const OBSIDIAN_EXPORT_FORMATS = new Set(['visual', 'visual-no-icon', 'json']);
+    const RECOVERY_SNAPSHOT_IDLE_REASON = 'idle-periodic-backup';
+    const RECOVERY_SNAPSHOT_MANUAL_REASON = 'manual-backup';
     const CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE = { min: 0, max: 24 * 60 * 60 };
     const SYNC_FILE_TOO_LARGE_ERROR_CODE = 'SYNC_FILE_TOO_LARGE';
     const OVERSIZE_SYNC_DIALOG_COOLDOWN_MS = 30 * 1000;
@@ -82,36 +84,21 @@
     const RECOVERY_BUNDLE_STORE_NAME = 'recovery-bundles';
     const RECOVERY_BUNDLE_ACTIVE_KEY = 'active';
     const RECOVERY_LOCK_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
-    const AUTO_SYNC_USER_IDLE_DELAY_MS = 3500;
-    const PENDING_MISMATCH_PROMPT_STABLE_MS = 4000;
+    const USER_INTERACTION_IDLE_GRACE_MS = 1200;
+    const FOREGROUND_ACTIVITY_THROTTLE_MS = 80;
+    const TEMP_STATE_CACHE_MAX_ENTRIES = 12;
 
     const DEFAULT_SETTINGS = {
         enabled: false,
-        autoSync: true,
-        syncAfterEditStop: true,
-        intervalSeconds: 120,
-        debounceMs: 800,
-        batchDebounceMs: 5000,
-        splitIntervalCommitAndSync: false,
-        autoPushIntervalMinutes: 2,
-        autoPullIntervalMinutes: 5,
-        mismatchPolicy: 'prompt',
-        foregroundCheckEnabled: true,
-        foregroundCheckIntervalSeconds: 30,
-        backgroundCheckEnabled: true,
-        backgroundCheckIntervalMinutes: 1,
-        backgroundCooldownMinutes: 5,
-        pullOnStartup: true,
         toastEnabled: true,
-        editAutoToastEnabled: false,
         firstSyncMode: 'auto',
         permanentPullMode: 'auto',
         permanentIncrementalMaxChanges: DEFAULT_PERMANENT_INCREMENTAL_MAX_LOGICAL_CHANGES_ABS,
         permanentTreeUploadIntervalSeconds: 15,
-        tempSectionUploadIntervalSeconds: 5,
-        blankSectionUploadIntervalSeconds: 5,
+        tempSectionUploadIntervalSeconds: 3,
+        blankSectionUploadIntervalSeconds: 3,
         obsidianFilePushEnabled: true,
-        obsidianExportFormat: 'visual',
+        obsidianExportFormat: 'json',
         obsidianExportRoot: '书签画布',
         firstSyncPathVerifiedRoot: '',
         firstSyncPathVerifiedAt: 0,
@@ -135,40 +122,34 @@
         lastSyncMode: '',
         lastLocalMutationAt: 0,
         lastRemoteCommittedAt: 0,
+        lastRemoteSignalSha: '',
         lastPermanentTreeSnapshotAt: 0,
         lastTempSectionSnapshotAt: 0,
         lastObsidianPushAt: 0,
+        lastBlankSectionFilePushAt: 0,
         lastObsidianPushChanged: 0,
         lastObsidianPushTotal: 0,
-        hasPendingConflict: false,
-        pendingMismatch: false,
-        pendingMismatchAt: 0,
-        pendingMismatchRemoteSha: ''
+        hasPendingConflict: false
     };
 
     let settings = null;
     let runtime = null;
     let pendingConflict = null;
-    let syncTimer = null;
-    let retryTimer = null;
-    let fallbackTimer = null;
-    let autoPushTimer = null;
-    let autoPullTimer = null;
-    let startupPullTimer = null;
-    let foregroundMismatchTimer = null;
-    let pendingMismatchPromptTimer = null;
+    let conflictFineModeEnabled = false;
+    let conflictFineChoiceByPath = {};
     let panelBound = false;
     let repoConfig = null;
     let activeTabKey = DEFAULT_ACTIVE_TAB;
-    let mismatchPromptShownOnInit = false;
     let conflictPromptShownOnInit = false;
     let previewPanelMode = '';
     let previewConflict = null;
     let behaviorSubNavScrollRaf = null;
+    let statusSubNavScrollRaf = null;
     let oversizeSyncDialogLastAt = 0;
     let oversizeSyncDialogLastKey = '';
     let lastRecoverySnapshotWarningAt = 0;
     let syncMetaStorageHydrated = false;
+    let syncMetaStorageChangeBound = false;
     let syncMetaStorageCache = Object.create(null);
     let syncMetaPendingSet = Object.create(null);
     let syncMetaPendingRemove = new Set();
@@ -187,9 +168,6 @@
     let syncUiProgressButtonEl = null;
     let lastUserDirtyAt = 0;
     let remoteCommittedAtRefreshPromise = null;
-    let mismatchCompareRefreshToken = 0;
-    let pendingMismatchAutoBaselinePromise = null;
-    let latestMismatchComparisonSummary = null;
     let latestConflictComparisonSummary = null;
     let syncActionStaleCheckTimer = null;
     let syncActionStaleCheckScheduled = false;
@@ -197,8 +175,9 @@
     let recoveryLockState = null;
     let recoveryLockResumeInFlight = false;
     let syncActionDialogCleanup = null;
-    let editAutoToastCounter = 0;
     let lastForegroundUserInteractionAt = 0;
+    const tempStateNormalizedRawCache = new Map();
+    const tempStateComparableCache = new Map();
 
     function getRuntimeApi() {
         return global.chrome || global.browser || null;
@@ -472,7 +451,7 @@
 
     function normalizeRecoveryLockSourcePanel(value) {
         const raw = String(value || '').trim().toLowerCase();
-        if (raw === 'mismatch' || raw === 'conflict' || raw === 'first-sync') {
+        if (raw === 'conflict' || raw === 'first-sync') {
             return raw;
         }
         return 'sync';
@@ -516,7 +495,6 @@
     function mapRecoveryLockSourcePanel(trigger, fallback = 'sync') {
         const text = String(trigger || '').trim().toLowerCase();
         if (text.includes('conflict')) return 'conflict';
-        if (text.includes('mismatch')) return 'mismatch';
         if (text.includes('first-sync')) return 'first-sync';
         return normalizeRecoveryLockSourcePanel(fallback);
     }
@@ -527,7 +505,6 @@
         if (!text) return false;
         if (text.includes('conflict')) return false;
         return text === 'manual-push'
-            || text === 'mismatch-panel-push'
             || text === 'manual-push-recovery'
             || text === 'auto-push-recovery';
     }
@@ -537,8 +514,8 @@
         if (!text) return false;
         if (text.startsWith('manual')) return true;
         if (text.startsWith('first-sync')) return true;
-        if (text.startsWith('mismatch-panel-')) return true;
         if (text.includes('conflict')) return true;
+        if (text.includes('format-migration')) return true;
         if (text.startsWith('recovery-')) return true;
         return false;
     }
@@ -716,8 +693,6 @@
 
 
     function handleRecoveryLockReleased() {
-        restartAutomationTimers();
-        renderMismatchPanel();
         renderConflictPanel();
         updateStatusPanelActionPlacement();
     }
@@ -812,7 +787,7 @@
         const serialized = [];
         for (let i = 0; i < files.length; i++) {
             const path = normalizeSyncPath(files[i] && files[i].path);
-            if (!path || (!/\.md$/i.test(path) && !/\.canvas$/i.test(path))) continue;
+            if (!path || (!/\.(md|json)$/i.test(path) && !/\.canvas$/i.test(path))) continue;
             const state = await readRemoteFileAtPath(path);
             if (state.notFound) continue;
             serialized.push({ path, contentBase64: encodeBytesToBase64(state.bytes) });
@@ -887,6 +862,30 @@
         return textByLang('继续上次操作', 'Continue previous action');
     }
 
+    function buildRecoveryLockRollbackText(lock) {
+        if (!lock) return textByLang('回滚到开始前状态', 'Rollback to start state');
+        if (lock.kind === 'conflict-choice') {
+            return textByLang('回滚到冲突处理前状态', 'Rollback to pre-conflict state');
+        }
+        if (isPullLikeRecoveryLock(lock)) {
+            return textByLang('回滚到最近可用快照', 'Rollback to latest available snapshot');
+        }
+        if (lock.mode === 'first-sync-cloud' || lock.sourcePanel === 'first-sync') {
+            return textByLang('回滚到最近可用快照', 'Rollback to latest available snapshot');
+        }
+        if (lock.mode === 'full') {
+            return textByLang('回滚到最近可用快照', 'Rollback to latest available snapshot');
+        }
+        return textByLang('回滚到开始前状态', 'Rollback to start state');
+    }
+
+    function canRollbackRecoveryLock(lock) {
+        if (!lock) return false;
+        if (lock.kind === 'pull-bundle') return true;
+        if (lock.kind === 'conflict-choice' && lock.choice === 'remote') return true;
+        return false;
+    }
+
     function buildRecoveryLockTitle(lock) {
         if (!lock) return textByLang('检测到未完成的同步恢复', 'Detected an unfinished sync recovery');
         if (lock.mode === 'first-sync-cloud' || lock.sourcePanel === 'first-sync') {
@@ -957,13 +956,11 @@
     function buildRecoveryLockDetailsHtml(lock) {
         if (!lock) return '';
         const details = [];
-        const sourceLabel = lock.sourcePanel === 'mismatch'
-            ? textByLang('云端不一致面板', 'Remote mismatch panel')
-            : (lock.sourcePanel === 'conflict'
-                ? textByLang('冲突面板', 'Conflict panel')
-                : (lock.sourcePanel === 'first-sync'
-                    ? textByLang('首次同步面板', 'First sync panel')
-                    : textByLang('同步主流程', 'Main sync flow')));
+        const sourceLabel = (lock.sourcePanel === 'conflict')
+            ? textByLang('冲突面板', 'Conflict panel')
+            : (lock.sourcePanel === 'first-sync'
+                ? textByLang('首次同步面板', 'First sync panel')
+                : textByLang('同步主流程', 'Main sync flow'));
         details.push(textByLang(`来源：${sourceLabel}`, `Source: ${sourceLabel}`));
         details.push(textByLang(`任务：${buildRecoveryLockTaskLabel(lock)}`, `Task: ${buildRecoveryLockTaskLabel(lock)}`));
         const phaseLabel = buildRecoveryLockPhaseLabel(lock);
@@ -1013,6 +1010,10 @@
         if (summary) summary.textContent = buildRecoveryLockSummary(lock);
         const details = getElement('canvasSyncRecoveryDetails');
         if (details) details.innerHTML = buildRecoveryLockDetailsHtml(lock);
+        const rollbackBtn = getElement('canvasSyncRecoveryRollbackBtn');
+        if (rollbackBtn) rollbackBtn.hidden = !canRollbackRecoveryLock(lock);
+        const rollbackText = getElement('canvasSyncRecoveryRollbackText');
+        if (rollbackText) rollbackText.textContent = buildRecoveryLockRollbackText(lock);
         const continueText = getElement('canvasSyncRecoveryContinueText');
         if (continueText) continueText.textContent = buildRecoveryLockContinueText(lock);
         const dismissText = getElement('canvasSyncRecoveryDismissText');
@@ -1051,7 +1052,6 @@
             return null;
         }
         renderRecoveryLockPanel();
-        renderMismatchPanel();
         renderConflictPanel();
         updateStatusPanelActionPlacement();
         return lock;
@@ -1068,6 +1068,7 @@
                 rootPath: String(bundlePayload && bundlePayload.rootPath || settings && settings.obsidianExportRoot || ''),
                 folderName: String(bundlePayload && bundlePayload.folderName || ''),
                 snapshot: bundlePayload && bundlePayload.snapshot ? normalizeSnapshot(bundlePayload.snapshot) : null,
+                rollbackLocalSnapshot: null,
                 folderFiles: serializedFolderFiles,
                 remoteFilesByPath: bundlePayload && bundlePayload.remoteFilesByPath && typeof bundlePayload.remoteFilesByPath === 'object'
                     ? bundlePayload.remoteFilesByPath
@@ -1097,7 +1098,6 @@
             return null;
         }
         renderRecoveryLockPanel();
-        renderMismatchPanel();
         renderConflictPanel();
         updateStatusPanelActionPlacement();
         return lock;
@@ -1120,7 +1120,6 @@
             updatedAt: Date.now()
         });
         renderRecoveryLockPanel();
-        renderMismatchPanel();
         renderConflictPanel();
         updateStatusPanelActionPlacement();
         return lock;
@@ -1140,16 +1139,10 @@
 
     async function clearRecoverySourceStateAfterSuccess(lock) {
         if (!lock) return;
-        if (lock.sourcePanel === 'mismatch') {
-            runtime.pendingMismatch = false;
-            runtime.pendingMismatchAt = 0;
-            runtime.pendingMismatchRemoteSha = '';
-            mismatchPromptShownOnInit = false;
-            try { await clearPendingMismatchInBackground(); } catch (_) { }
-        }
         if (lock.sourcePanel === 'conflict') {
             clearPendingConflict();
         }
+        clearRecoverySnapshotsByReasonKeywords(collectRecoverySnapshotReasonKeywordsForLock(lock));
     }
 
     function buildHashMapFromManagedEntries(entriesInput) {
@@ -1228,43 +1221,144 @@
         };
     }
 
+    function resolveRemotePermanentTreeSnapshotForApply(stagedBundle, folderFiles) {
+        const snapshotTree = normalizeBookmarkTreeSnapshot(
+            stagedBundle && stagedBundle.snapshot && stagedBundle.snapshot.permanentTreeSnapshot
+        );
+        if (snapshotTree) return snapshotTree;
+
+        const files = folderFiles instanceof Map ? folderFiles : new Map();
+        if (!files.size) return null;
+
+        const bridge = global.CanvasObsidianExportBridge;
+        if (!bridge || typeof bridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles !== 'function') {
+            return null;
+        }
+
+        try {
+            return normalizeBookmarkTreeSnapshot(
+                bridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles(files)
+            ) || null;
+        } catch (error) {
+            console.warn('[Canvas Sync] resolve remote permanent snapshot from folder files failed:', error);
+            return null;
+        }
+    }
+
+    async function rollbackRemoteLocalApplyFromSnapshot(snapshot, reason = 'remote-apply') {
+        const baseSnapshot = normalizeSnapshot(snapshot || null);
+        if (!baseSnapshot) {
+            return {
+                restored: false,
+                errors: [textByLang('缺少可回滚的本地快照', 'Missing local rollback snapshot')]
+            };
+        }
+
+        const errors = [];
+        const isPermanentOnlySnapshot = String(baseSnapshot && baseSnapshot.format || '').trim().toLowerCase() === 'bookmark-canvas-permanent-tree';
+
+        if (!isPermanentOnlySnapshot) {
+            try {
+                applySnapshotToLocal(baseSnapshot);
+            } catch (error) {
+                errors.push(error && error.message ? error.message : String(error));
+            }
+        }
+
+        const rollbackTree = normalizeBookmarkTreeSnapshot(baseSnapshot.permanentTreeSnapshot);
+        if (rollbackTree) {
+            try {
+                await overwriteLocalPermanentTreeFromSnapshot(rollbackTree, null, {
+                    reason: `rollback:${String(reason || 'remote-apply')}`
+                });
+            } catch (error) {
+                errors.push(error && error.message ? error.message : String(error));
+            }
+        }
+
+        return {
+            restored: errors.length <= 0,
+            errors
+        };
+    }
+
     async function applyPreparedRemoteBundleToLocal(stagedBundle, trigger = 'recovery-pull', options = {}) {
         const folderFiles = deserializeRemoteFolderFilesEntries(stagedBundle && stagedBundle.folderFiles);
         const hasRemoteFiles = folderFiles.size > 0;
+        const rollbackReason = String(trigger || 'recovery-pull');
+
+        let localRollbackSnapshot = normalizeSnapshot(options && options.localRollbackSnapshot);
+        if (!localRollbackSnapshot) {
+            localRollbackSnapshot = await buildLocalSnapshot(`before-${rollbackReason}-apply-remote-bundle`, {
+                includePermanentTree: true,
+                includeTempSection: true
+            });
+        }
+
         let applyResult = null;
+        let remotePermanentTreeSnapshot = resolveRemotePermanentTreeSnapshotForApply(stagedBundle, folderFiles);
+        let permanentApplied = false;
 
-        if (hasRemoteFiles && settings.obsidianFilePushEnabled !== false) {
-            const bridge = global.CanvasObsidianExportBridge;
-            if (bridge && typeof bridge.applySyncFilesReplace === 'function') {
-                const rootPath = normalizeSyncPath(stagedBundle && stagedBundle.rootPath);
-                const folderName = String(stagedBundle && stagedBundle.folderName || '').trim()
-                    || ((rootPath ? rootPath.split('/').filter(Boolean).slice(-1)[0] : '') || DEFAULT_SETTINGS.obsidianExportRoot);
-                const rawApplyResult = await bridge.applySyncFilesReplace(folderFiles, folderName, {
-                    trigger: String(trigger || 'recovery-pull')
+        try {
+            const overwriteResult = await maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(remotePermanentTreeSnapshot, trigger, {
+                force: true,
+                permanentPullMode: options && options.permanentPullMode,
+                onProgress: (message) => updateSyncUiProgress(message, 82)
+            });
+            permanentApplied = !!(overwriteResult && overwriteResult.applied);
+
+            if (hasRemoteFiles && settings.obsidianFilePushEnabled !== false) {
+                const bridge = global.CanvasObsidianExportBridge;
+                if (bridge && typeof bridge.applySyncFilesReplace === 'function') {
+                    const rootPath = normalizeSyncPath(stagedBundle && stagedBundle.rootPath);
+                    const folderName = String(stagedBundle && stagedBundle.folderName || '').trim()
+                        || ((rootPath ? rootPath.split('/').filter(Boolean).slice(-1)[0] : '') || DEFAULT_SETTINGS.obsidianExportRoot);
+                    const rawApplyResult = await bridge.applySyncFilesReplace(folderFiles, folderName, {
+                        trigger: rollbackReason
+                    });
+                    const applyPermanentTreeSnapshot = normalizeBookmarkTreeSnapshot(
+                        rawApplyResult && rawApplyResult.permanentTreeSnapshot
+                    );
+                    if (!remotePermanentTreeSnapshot && applyPermanentTreeSnapshot) {
+                        remotePermanentTreeSnapshot = applyPermanentTreeSnapshot;
+                    }
+                    applyResult = {
+                        applied: !!(rawApplyResult && rawApplyResult.success),
+                        permanentTreeSnapshot: applyPermanentTreeSnapshot
+                    };
+                }
+            }
+
+            if (!(applyResult && applyResult.applied)) {
+                const stagedSnapshot = stagedBundle && stagedBundle.snapshot ? normalizeSnapshot(stagedBundle.snapshot) : null;
+                if (!stagedSnapshot) {
+                    throw new Error(textByLang('恢复缓存缺少可用云端快照，无法继续覆盖本地', 'The staged recovery bundle is missing a usable remote snapshot; cannot continue overwriting local'));
+                }
+                applySnapshotToLocal(buildSnapshotForRemoteLocalApply(stagedSnapshot));
+            }
+
+            if (!permanentApplied && remotePermanentTreeSnapshot) {
+                const retryOverwrite = await maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(remotePermanentTreeSnapshot, trigger, {
+                    force: true,
+                    permanentPullMode: options && options.permanentPullMode,
+                    onProgress: (message) => updateSyncUiProgress(message, 82)
                 });
-                applyResult = {
-                    applied: !!(rawApplyResult && rawApplyResult.success),
-                    permanentTreeSnapshot: rawApplyResult && rawApplyResult.permanentTreeSnapshot ? rawApplyResult.permanentTreeSnapshot : null
-                };
+                permanentApplied = !!(retryOverwrite && retryOverwrite.applied);
             }
-        }
-
-        if (!(applyResult && applyResult.applied)) {
-            const stagedSnapshot = stagedBundle && stagedBundle.snapshot ? normalizeSnapshot(stagedBundle.snapshot) : null;
-            if (!stagedSnapshot) {
-                throw new Error(textByLang('恢复缓存缺少可用云端快照，无法继续覆盖本地', 'The staged recovery bundle is missing a usable remote snapshot; cannot continue overwriting local'));
+        } catch (error) {
+            const rollbackResult = await rollbackRemoteLocalApplyFromSnapshot(
+                localRollbackSnapshot,
+                `apply-prepared:${rollbackReason}`
+            );
+            if (rollbackResult && Array.isArray(rollbackResult.errors) && rollbackResult.errors.length > 0) {
+                const rollbackErrorText = rollbackResult.errors.join(' | ');
+                throw new Error(textByLang(
+                    `应用云端覆盖失败：${error && error.message ? error.message : String(error)}；自动回滚也失败：${rollbackErrorText}`,
+                    `Applying cloud overwrite failed: ${error && error.message ? error.message : String(error)}; automatic rollback also failed: ${rollbackErrorText}`
+                ));
             }
-            applySnapshotToLocal(buildSnapshotForRemoteLocalApply(stagedSnapshot));
+            throw error;
         }
-
-        const remotePermanentTreeSnapshot = (applyResult && applyResult.permanentTreeSnapshot)
-            || (stagedBundle && stagedBundle.snapshot && stagedBundle.snapshot.permanentTreeSnapshot)
-            || null;
-        await maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(remotePermanentTreeSnapshot, trigger, {
-            force: true,
-            permanentPullMode: options && options.permanentPullMode,
-            onProgress: (message) => updateSyncUiProgress(message, 82)
-        });
 
         if (settings.obsidianFilePushEnabled !== false) {
             const rebuiltIndex = await rebuildObsidianIndexesFromLocalSnapshot(`recovery:${trigger || 'pull'}`, {
@@ -1314,17 +1408,27 @@
         }
 
         try {
-            await setPendingMismatchState(remoteSha, safeMessage, {
-                openPanel: false
+            await setPendingConflictState(remoteSha, safeMessage, {
+                reason: 'recovery-handoff-conflict'
             });
         } catch (_) {
-            runtime.pendingMismatch = true;
-            runtime.pendingMismatchAt = Date.now();
-            runtime.pendingMismatchRemoteSha = String(remoteSha || '');
+            const localSnapshot = normalizeSnapshot(await buildLocalSnapshot('recovery-handoff-conflict', {
+                includePermanentTree: true,
+                includeTempSection: true,
+                includeBlankSectionFiles: true
+            }));
+            const remoteSnapshot = normalizeSnapshot({ updatedAt: Date.now(), data: {} });
+            setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, {
+                sha: String(remoteSha || ''),
+                path: String(settings && settings.obsidianExportRoot || ''),
+                snapshot: remoteSnapshot
+            }, {
+                reason: 'recovery-handoff-conflict-fallback'
+            }));
             runtime.lastError = safeMessage;
             saveRuntime();
             renderStatus();
-            notifyPendingMismatchWithoutForceOpen(safeMessage);
+            ensureStatusPanelVisible('conflict', safeMessage);
         }
 
         toast(safeMessage);
@@ -1397,6 +1501,418 @@
             remoteSha: currentRemoteSha,
             targetPackageHash: rebuiltTargetPackageHash
         };
+    }
+
+    function findLatestRecoverySnapshotByReasons(reasonKeywords = []) {
+        const keywords = Array.isArray(reasonKeywords)
+            ? reasonKeywords
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+            : [];
+        if (!keywords.length) return null;
+
+        const list = safeParse(getSyncMetaRaw(RECOVERY_KEY), []);
+        const records = Array.isArray(list) ? list : [];
+        for (let i = 0; i < records.length; i++) {
+            const record = records[i];
+            if (!record || typeof record !== 'object') continue;
+            const reason = String(record.reason || '').trim();
+            if (!reason) continue;
+            if (!keywords.some((keyword) => reason.includes(keyword))) continue;
+            const snapshot = normalizeSnapshot(record.snapshot || null);
+            if (!snapshot) continue;
+            return snapshot;
+        }
+        return null;
+    }
+
+    function getLatestRecoverySnapshotRecord(options = {}) {
+        const requireSnapshot = options && options.requireSnapshot !== false;
+        const list = safeParse(getSyncMetaRaw(RECOVERY_KEY), []);
+        const records = Array.isArray(list) ? list : [];
+        for (let i = 0; i < records.length; i++) {
+            const record = records[i];
+            if (!record || typeof record !== 'object') continue;
+            const reason = String(record.reason || '').trim();
+            const ts = Math.max(0, Number(record.ts) || 0);
+            const snapshot = normalizeSnapshot(record.snapshot || null);
+            if (requireSnapshot && !snapshot) continue;
+            const snapshotHash = String(record.snapshotHash || '').trim() || (snapshot ? getSnapshotHash(snapshot) : '');
+            return {
+                reason,
+                ts,
+                snapshot,
+                snapshotHash
+            };
+        }
+        return null;
+    }
+
+    function formatRecoverySnapshotReason(reason) {
+        const normalized = String(reason || '').trim().toLowerCase();
+        if (normalized === RECOVERY_SNAPSHOT_IDLE_REASON) {
+            return textByLang('空闲定时备份', 'Idle periodic backup');
+        }
+        if (normalized === RECOVERY_SNAPSHOT_MANUAL_REASON || normalized.startsWith('manual')) {
+            return textByLang('手动备份', 'Manual backup');
+        }
+        return String(reason || '').trim() || textByLang('未记录原因', 'No reason recorded');
+    }
+
+    function buildRecoverySnapshotDownloadFileName(record) {
+        const ts = Math.max(0, Number(record && record.ts) || Date.now());
+        const date = new Date(ts);
+        const pad2 = (num) => String(num).padStart(2, '0');
+        const stamp = `${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}-${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`;
+        const rawReason = String(record && record.reason || '').trim().toLowerCase();
+        const reasonToken = rawReason
+            ? rawReason.replace(/[^a-z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^[-_]+|[-_]+$/g, '')
+            : '';
+        const suffix = reasonToken ? `-${reasonToken.slice(0, 48)}` : '';
+        return `bookmark-canvas-recovery-${stamp}${suffix}.json`;
+    }
+
+    function renderRecoverySnapshotDownloadStatus() {
+        const hintEl = getElement('canvasSyncRecoverySnapshotHint');
+        if (!hintEl) return;
+
+        const latestRecord = getLatestRecoverySnapshotRecord({ requireSnapshot: true });
+        const purposeHintZh = '备份的是永久栏目快照（浏览器书签树快照），用于覆盖恢复流程中若浏览器崩溃时可回滚。恢复快照仅保留最近 1 份（永久保留，新备份会覆盖旧备份）。';
+        const purposeHintEn = 'This backup stores the permanent-section snapshot (browser bookmark tree snapshot) for rollback if the browser crashes during overwrite recovery. Only the latest snapshot is kept (retained indefinitely; each new backup replaces the previous one).';
+        if (!latestRecord) {
+            hintEl.textContent = textByLang(
+                purposeHintZh,
+                purposeHintEn
+            );
+            return;
+        }
+
+        const capturedAtText = formatTime(latestRecord.ts);
+        const reasonText = formatRecoverySnapshotReason(latestRecord.reason);
+        hintEl.textContent = textByLang(
+            `${purposeHintZh} 最近快照：${capturedAtText}（${reasonText}）。`,
+            `${purposeHintEn} Latest snapshot: ${capturedAtText} (${reasonText}).`
+        );
+    }
+
+    async function downloadLatestRecoverySnapshotAction() {
+        const latestRecord = getLatestRecoverySnapshotRecord({ requireSnapshot: true });
+        if (!latestRecord || !latestRecord.snapshot) {
+            toast(textByLang('当前没有可下载的恢复快照', 'No downloadable recovery snapshot is currently available.'));
+            return false;
+        }
+
+        const payload = {
+            schemaVersion: 1,
+            format: 'bookmark-canvas-recovery-export',
+            exportedAt: Date.now(),
+            exportedAtIso: new Date().toISOString(),
+            retentionPolicy: 'latest-only-unlimited',
+            source: {
+                reason: String(latestRecord.reason || ''),
+                capturedAt: Math.max(0, Number(latestRecord.ts) || 0),
+                capturedAtIso: latestRecord.ts ? new Date(latestRecord.ts).toISOString() : '',
+                snapshotHash: String(latestRecord.snapshotHash || '')
+            },
+            snapshot: latestRecord.snapshot
+        };
+
+        try {
+            const jsonText = JSON.stringify(payload, null, 2);
+            const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' });
+            const blobUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = buildRecoverySnapshotDownloadFileName(latestRecord);
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => {
+                try { URL.revokeObjectURL(blobUrl); } catch (_) { }
+            }, 2000);
+            toast(textByLang('恢复快照已开始下载', 'Recovery snapshot download started.'));
+            return true;
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            toast(textByLang(`下载恢复快照失败：${message}`, `Failed to download recovery snapshot: ${message}`));
+            return false;
+        }
+    }
+
+    async function createManualRecoverySnapshotAction() {
+        try {
+            const response = await sendRuntimeMessage({
+                action: 'canvasGitSyncRunRecoverySnapshotNow'
+            }, 15000);
+            const ok = !!(response && response.success === true);
+            const skipped = !!(response && response.skipped === true);
+            const reason = String(response && response.reason || '');
+            if (!ok) {
+                const message = response && response.error ? String(response.error) : textByLang('手动备份失败', 'Manual backup failed');
+                toast(textByLang(`手动备份失败：${message}`, `Manual backup failed: ${message}`));
+                return false;
+            }
+
+            if (skipped && reason === 'same-as-latest') {
+                toast(textByLang('手动备份完成：与最近快照一致，未重复保存', 'Manual backup completed: same as latest snapshot, skipped duplicate save.'));
+            } else if (skipped) {
+                toast(textByLang('手动备份已跳过', 'Manual backup was skipped.'));
+            } else {
+                toast(textByLang('手动备份完成', 'Manual backup completed.'));
+            }
+            renderRecoverySnapshotDownloadStatus();
+            renderStatus();
+            return true;
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            toast(textByLang(`手动备份失败：${message}`, `Manual backup failed: ${message}`));
+            return false;
+        }
+    }
+
+    function dedupeRecoverySnapshotReasonKeywords(reasonKeywords = []) {
+        const source = Array.isArray(reasonKeywords) ? reasonKeywords : [];
+        const normalized = [];
+        const seen = new Set();
+        source.forEach((item) => {
+            const keyword = String(item || '').trim();
+            if (!keyword || seen.has(keyword)) return;
+            seen.add(keyword);
+            normalized.push(keyword);
+        });
+        return normalized;
+    }
+
+    function clearRecoverySnapshotsByReasonKeywords(reasonKeywords = []) {
+        const keywords = dedupeRecoverySnapshotReasonKeywords(reasonKeywords);
+        if (!keywords.length) return 0;
+        const list = safeParse(getSyncMetaRaw(RECOVERY_KEY), []);
+        const records = Array.isArray(list) ? list : [];
+        if (!records.length) return 0;
+
+        const kept = [];
+        let removed = 0;
+        records.forEach((record) => {
+            const reason = String(record && record.reason || '').trim();
+            if (reason && keywords.some((keyword) => reason.includes(keyword))) {
+                removed += 1;
+                return;
+            }
+            kept.push(record);
+        });
+        if (!removed) return 0;
+
+        try {
+            if (kept.length > 0) {
+                setSyncMetaRaw(RECOVERY_KEY, JSON.stringify(kept.slice(0, RECOVERY_SNAPSHOT_KEEP_LATEST)));
+            } else {
+                setSyncMetaRaw(RECOVERY_KEY, null);
+            }
+        } catch (error) {
+            console.warn('[Canvas Sync] clear recovery snapshots by reason failed:', error);
+            return 0;
+        }
+        return removed;
+    }
+
+    function collectRecoverySnapshotReasonKeywordsForLock(lock) {
+        const source = lock && typeof lock === 'object' ? lock : null;
+        if (!source) return [];
+
+        const trigger = String(source.trigger || '').trim();
+        const keywords = [];
+        if (trigger) {
+            keywords.push(`before-${trigger}-remote-overwrite`);
+            keywords.push(`before-permanent-overwrite:${trigger}`);
+        }
+
+        if (source.kind === 'conflict-choice' && source.choice === 'remote') {
+            keywords.push('before-apply-remote-conflict');
+            keywords.push('before-permanent-overwrite:manual-conflict-use-remote');
+        }
+
+        if (source.mode === 'first-sync-cloud' || source.sourcePanel === 'first-sync') {
+            keywords.push('before-first-sync-cloud-overwrite');
+            keywords.push('before-permanent-overwrite:first-sync-cloud-overwrite');
+        }
+
+        return dedupeRecoverySnapshotReasonKeywords(keywords);
+    }
+
+    function resolveRecoveryLockRollbackSnapshot(lock, stagedBundle = null) {
+        const bundleSnapshot = normalizeSnapshot(stagedBundle && stagedBundle.rollbackLocalSnapshot);
+        if (bundleSnapshot) return bundleSnapshot;
+
+        if (lock && lock.kind === 'conflict-choice' && lock.choice === 'remote') {
+            const conflictLocalSnapshot = normalizeSnapshot(pendingConflict && pendingConflict.localSnapshot);
+            if (conflictLocalSnapshot) return conflictLocalSnapshot;
+            const conflictSnapshot = findLatestRecoverySnapshotByReasons(['before-apply-remote-conflict']);
+            if (conflictSnapshot) return conflictSnapshot;
+        }
+
+        if (lock && (lock.mode === 'first-sync-cloud' || lock.sourcePanel === 'first-sync')) {
+            const firstSyncSnapshot = findLatestRecoverySnapshotByReasons(['before-first-sync-cloud-overwrite']);
+            if (firstSyncSnapshot) return firstSyncSnapshot;
+        }
+
+        if (lock && lock.kind === 'pull-bundle') {
+            const triggerText = String(lock.trigger || '').trim();
+            const reasonKeywords = [];
+            if (triggerText) {
+                reasonKeywords.push(`before-${triggerText}-remote-overwrite`);
+            }
+            reasonKeywords.push('-remote-overwrite');
+            const pullSnapshot = findLatestRecoverySnapshotByReasons(reasonKeywords);
+            if (pullSnapshot) return pullSnapshot;
+        }
+
+        const latestRecord = getLatestRecoverySnapshotRecord({ requireSnapshot: true });
+        return latestRecord && latestRecord.snapshot ? latestRecord.snapshot : null;
+    }
+
+    async function rollbackRecoveryLockAction() {
+        const lock = normalizeRecoveryLockRecord(recoveryLockState || loadRecoveryLockState());
+        if (!lock || recoveryLockResumeInFlight) return false;
+        if (!canRollbackRecoveryLock(lock)) {
+            toast(textByLang(
+                '当前恢复锁不支持自动回滚，请手动处理。',
+                'The current recovery lock does not support automatic rollback. Handle it manually.'
+            ));
+            return false;
+        }
+
+        recoveryLockResumeInFlight = true;
+        syncUiProgressEnabled = true;
+        updateSyncUiProgress(textByLang('准备回滚未完成任务...', 'Preparing to rollback unfinished task...'), 0);
+        renderRecoveryLockPanel();
+        updateSyncEnabledDependentFieldState();
+
+        try {
+            openPanel({ activeTab: 'status' });
+            updateSyncUiProgress(textByLang('已进入恢复面板...', 'Recovery panel opened...'), 8);
+
+            let stagedBundle = null;
+            if (lock.kind === 'pull-bundle') {
+                updateSyncUiProgress(textByLang('读取恢复缓存...', 'Loading staged recovery bundle...'), 20);
+                const loadedBundle = await loadRecoveryBundlePayload();
+                if (loadedBundle && typeof loadedBundle === 'object' && loadedBundle.kind === 'remote-bundle') {
+                    stagedBundle = loadedBundle;
+                }
+            }
+
+            const rollbackSnapshot = resolveRecoveryLockRollbackSnapshot(lock, stagedBundle);
+            if (!rollbackSnapshot) {
+                throw new Error(textByLang(
+                    '未找到可用快照，无法自动回滚。请手动处理。',
+                    'No usable snapshot was found, so automatic rollback is unavailable. Handle it manually.'
+                ));
+            }
+
+            updateSyncUiProgress(textByLang('正在回滚本地状态...', 'Rolling back local state...'), 52);
+            const rollbackResult = await rollbackRemoteLocalApplyFromSnapshot(
+                rollbackSnapshot,
+                `manual-recovery-rollback:${String(lock.trigger || lock.mode || lock.kind || 'unknown')}`
+            );
+            if (rollbackResult && Array.isArray(rollbackResult.errors) && rollbackResult.errors.length > 0) {
+                const rollbackErrorText = rollbackResult.errors.join(' | ');
+                throw new Error(textByLang(
+                    `回滚失败：${rollbackErrorText}`,
+                    `Rollback failed: ${rollbackErrorText}`
+                ));
+            }
+
+            let effectiveRollbackSnapshot = rollbackSnapshot;
+            if (String(rollbackSnapshot && rollbackSnapshot.format || '').trim().toLowerCase() === 'bookmark-canvas-permanent-tree') {
+                try {
+                    effectiveRollbackSnapshot = await buildLocalSnapshot('recovery-rollback-post', {
+                        includePermanentTree: true,
+                        includeTempSection: true
+                    });
+                } catch (_) {
+                    effectiveRollbackSnapshot = rollbackSnapshot;
+                }
+            }
+
+            runtime.lastLocalHash = getSnapshotHash(effectiveRollbackSnapshot);
+            runtime.lastAppliedDirection = 'recovery-rollback';
+            runtime.lastError = '';
+            runtime.lastSuccessAt = Date.now();
+            if (normalizeBookmarkTreeSnapshot(effectiveRollbackSnapshot.permanentTreeSnapshot)) {
+                runtime.lastPermanentTreeSnapshotAt = Date.now();
+            }
+            updateRuntimeSectionBaselineHashes(effectiveRollbackSnapshot, {
+                forcePermanent: true,
+                forceOther: true
+            });
+            saveRuntime();
+
+            if (settings.obsidianFilePushEnabled !== false) {
+                try {
+                    const rebuiltIndex = await rebuildObsidianIndexesFromLocalSnapshot('recovery-rollback', {
+                        clearDirty: false,
+                        syncedAt: Date.now()
+                    });
+                    if (rebuiltIndex && rebuiltIndex.enabled) {
+                        runtime.lastLocalFilesSha = String(rebuiltIndex.localRevision || runtime.lastLocalFilesSha || '');
+                        saveRuntime();
+                    }
+                } catch (error) {
+                    console.warn('[Canvas Sync] rebuild local obsidian index after recovery rollback failed:', error);
+                }
+            }
+
+            await clearRecoveryLockCompletely();
+            clearActiveRunRecoveryRecord();
+            handleRecoveryLockReleased();
+            clearRecoverySnapshotsByReasonKeywords(collectRecoverySnapshotReasonKeywordsForLock(lock));
+
+            if (lock.sourcePanel === 'conflict' && hasPendingConflict()) {
+                const conflictMsg = textByLang(
+                    '已回滚到冲突处理前状态，请重新选择保留本地或使用云端。',
+                    'Rolled back to the pre-conflict state. Re-choose keep local or use cloud.'
+                );
+                runtime.lastError = conflictMsg;
+                saveRuntime();
+                renderStatus();
+                renderConflictPanel();
+                ensureStatusPanelVisible('conflict', conflictMsg);
+                toast(conflictMsg);
+            } else if (lock.sourcePanel === 'first-sync' || lock.mode === 'first-sync-cloud') {
+                setFirstSyncStatus(
+                    textByLang('首次同步已回滚到最近可用快照状态，请重新执行首次同步', 'First sync was rolled back to the latest available snapshot state. Run first sync again.'),
+                    'neutral'
+                );
+                runtime.lastError = '';
+                saveRuntime();
+                renderStatus();
+                toast(textByLang('已回滚到最近可用快照状态', 'Rolled back to the latest available snapshot state'));
+            } else {
+                const pendingMsg = textByLang(
+                    '已回滚到最近可用快照状态，请重新选择同步方向。',
+                    'Rolled back to the latest available snapshot state. Re-choose the sync direction.'
+                );
+                await setPendingConflictState(lock.targetRemoteSha || runtime.lastRemoteSha || '', pendingMsg, {
+                    reason: 'recovery-rollback-pending-conflict'
+                });
+                toast(pendingMsg);
+            }
+
+            updateSyncUiProgress(textByLang('回滚完成', 'Rollback completed'), 100);
+            return true;
+        } catch (error) {
+            runtime.lastError = error && error.message ? error.message : String(error);
+            saveRuntime();
+            renderStatus();
+            toast(textByLang(`回滚失败：${runtime.lastError}`, `Rollback failed: ${runtime.lastError}`));
+            return false;
+        } finally {
+            clearSyncUiProgress();
+            syncUiProgressEnabled = false;
+            recoveryLockResumeInFlight = false;
+            renderRecoveryLockPanel();
+            updateSyncEnabledDependentFieldState();
+        }
     }
 
     async function continueRecoveryLockAction() {
@@ -1691,7 +2207,6 @@
         renderRecoveryLockPanel();
         renderStatus();
         renderConflictPanel();
-        renderMismatchPanel();
         updateSyncEnabledDependentFieldState();
 
         toast(textByLang(
@@ -1786,6 +2301,45 @@
             ? state.mdNodes
             : (Array.isArray(state.cards) ? state.cards : []);
         const sourceEdges = Array.isArray(state.edges) ? state.edges : [];
+
+        const protocolBridge = global && global.CanvasProtocolBridge && typeof global.CanvasProtocolBridge.normalizeCanvasTempState === 'function'
+            ? global.CanvasProtocolBridge
+            : null;
+        if (protocolBridge) {
+            try {
+                const normalized = protocolBridge.normalizeCanvasTempState({
+                    ...state,
+                    sections: sourceSections,
+                    mdNodes: sourceMdNodes,
+                    edges: sourceEdges
+                });
+                if (normalized && typeof normalized === 'object') {
+                    const normalizedSections = Array.isArray(normalized.sections) ? normalized.sections : [];
+                    const normalizedMdNodes = Array.isArray(normalized.mdNodes) ? normalized.mdNodes : [];
+                    const normalizedEdges = Array.isArray(normalized.edges) ? normalized.edges : [];
+                    const timestamp = Number(normalized.timestamp) || Number(state.timestamp) || Number(fallbackState.timestamp) || 0;
+                    const tempSectionCounter = Number(normalized.tempSectionCounter) || Number(state.tempSectionCounter) || Number(fallbackState.tempSectionCounter) || normalizedSections.length;
+                    const tempItemCounter = Number(normalized.tempItemCounter) || Number(state.tempItemCounter) || Number(fallbackState.tempItemCounter) || 0;
+                    const colorCursor = Number(normalized.colorCursor) || Number(state.colorCursor) || Number(fallbackState.colorCursor) || 0;
+                    const mdNodeCounter = Number(normalized.mdNodeCounter) || Number(state.mdNodeCounter) || Number(fallbackState.mdNodeCounter) || normalizedMdNodes.length;
+                    const edgeCounter = Number(normalized.edgeCounter) || Number(state.edgeCounter) || Number(fallbackState.edgeCounter) || normalizedEdges.length;
+
+                    return {
+                        sections: normalizedSections,
+                        tempSectionCounter,
+                        tempItemCounter,
+                        colorCursor,
+                        tempSectionLastColor: normalized.tempSectionLastColor || state.tempSectionLastColor || fallbackState.tempSectionLastColor || null,
+                        tempSectionPrevColor: normalized.tempSectionPrevColor || state.tempSectionPrevColor || fallbackState.tempSectionPrevColor || null,
+                        mdNodes: normalizedMdNodes,
+                        mdNodeCounter,
+                        edges: normalizedEdges,
+                        edgeCounter,
+                        timestamp
+                    };
+                }
+            } catch (_) { }
+        }
 
         const persistedSections = sourceSections
             .map((section) => cloneSyncJsonValue(section))
@@ -1924,24 +2478,225 @@
         return null;
     }
 
-    function buildCanvasTempStateComparableString(rawInput = '') {
-        const parsedRaw = typeof rawInput === 'string' ? safeParse(rawInput, null) : rawInput;
-        if (!isCanvasTempStatePayloadForSync(parsedRaw)) {
-            return String(rawInput || '');
+    function normalizeCanvasTempStatePayloadForSync(stateInput, fallbackStateInput = null) {
+        const parsedState = typeof stateInput === 'string' ? safeParse(stateInput, null) : stateInput;
+        if (!isCanvasTempStatePayloadForSync(parsedState) || isCanvasTempStateMarkerForSync(parsedState)) {
+            return null;
         }
-        const payload = buildPersistedCanvasTempStateForSync(parsedRaw);
-        return JSON.stringify({
-            sections: payload.sections,
-            tempSectionCounter: payload.tempSectionCounter,
-            tempItemCounter: payload.tempItemCounter,
-            colorCursor: payload.colorCursor,
-            tempSectionLastColor: payload.tempSectionLastColor || null,
-            tempSectionPrevColor: payload.tempSectionPrevColor || null,
-            mdNodes: payload.mdNodes,
-            mdNodeCounter: payload.mdNodeCounter,
-            edges: payload.edges,
-            edgeCounter: payload.edgeCounter
+        return buildPersistedCanvasTempStateForSync(parsedState, fallbackStateInput);
+    }
+
+    function readLimitedCache(cacheMap, key) {
+        if (!(cacheMap instanceof Map)) return undefined;
+        if (!cacheMap.has(key)) return undefined;
+        const value = cacheMap.get(key);
+        cacheMap.delete(key);
+        cacheMap.set(key, value);
+        return value;
+    }
+
+    function writeLimitedCache(cacheMap, key, value, maxEntries = TEMP_STATE_CACHE_MAX_ENTRIES) {
+        if (!(cacheMap instanceof Map)) return;
+        if (cacheMap.has(key)) {
+            cacheMap.delete(key);
+        }
+        cacheMap.set(key, value);
+        const safeMax = Math.max(1, Number(maxEntries) || TEMP_STATE_CACHE_MAX_ENTRIES);
+        while (cacheMap.size > safeMax) {
+            const oldestKey = cacheMap.keys().next().value;
+            cacheMap.delete(oldestKey);
+        }
+    }
+
+    function buildNormalizedCanvasTempStateRawForSync(rawInput = '', fallbackStateInput = null) {
+        const canUseCache = typeof rawInput === 'string' && !fallbackStateInput;
+        if (canUseCache) {
+            const cached = readLimitedCache(tempStateNormalizedRawCache, rawInput);
+            if (typeof cached === 'string') return cached;
+        }
+        const normalizedState = normalizeCanvasTempStatePayloadForSync(rawInput, fallbackStateInput);
+        const normalizedRaw = normalizedState ? JSON.stringify(normalizedState) : '';
+        if (canUseCache) {
+            writeLimitedCache(tempStateNormalizedRawCache, rawInput, normalizedRaw);
+        }
+        return normalizedRaw;
+    }
+
+    function compareCanvasTempStateIdsForSync(left, right) {
+        return String(left || '').localeCompare(String(right || ''), undefined, {
+            numeric: true,
+            sensitivity: 'base'
         });
+    }
+
+    function normalizeCanvasTempStateNumberForSync(value) {
+        const normalized = Number(value);
+        return Number.isFinite(normalized) ? normalized : null;
+    }
+
+    function buildComparableTempSectionEntryForSync(sectionInput) {
+        const section = sectionInput && typeof sectionInput === 'object' ? sectionInput : null;
+        if (!section) return null;
+
+        const protocolBridge = global && global.CanvasProtocolBridge ? global.CanvasProtocolBridge : null;
+        let normalizedProtocol = null;
+        if (protocolBridge && typeof protocolBridge.normalizeTempSectionProtocol === 'function') {
+            try {
+                normalizedProtocol = protocolBridge.normalizeTempSectionProtocol(section);
+            } catch (_) {
+                normalizedProtocol = null;
+            }
+        }
+
+        const sectionMeta = normalizedProtocol && normalizedProtocol.sectionMeta && typeof normalizedProtocol.sectionMeta === 'object'
+            ? normalizedProtocol.sectionMeta
+            : {};
+        const bookmarkTree = normalizedProtocol && normalizedProtocol.bookmarkTree
+            ? cloneSyncJsonValue(normalizedProtocol.bookmarkTree)
+            : null;
+
+        return {
+            id: String(section.id || '').trim(),
+            x: normalizeCanvasTempStateNumberForSync(section.x),
+            y: normalizeCanvasTempStateNumberForSync(section.y),
+            width: normalizeCanvasTempStateNumberForSync(section.width),
+            height: normalizeCanvasTempStateNumberForSync(section.height),
+            color: String(section.color || '').trim(),
+            isSnapshot: section.isSnapshot === true,
+            sectionMeta: {
+                label: String(sectionMeta.label || '').trim(),
+                title: String(sectionMeta.title || section.title || '').trim(),
+                source: String(sectionMeta.source || '').trim(),
+                sequenceNumber: normalizeCanvasTempStateNumberForSync(sectionMeta.sequenceNumber),
+                descriptionMd: String(sectionMeta.descriptionMd || '').trim()
+            },
+            bookmarkTree
+        };
+    }
+
+    function buildComparableMdNodeEntryForSync(nodeInput) {
+        const node = nodeInput && typeof nodeInput === 'object' ? nodeInput : null;
+        if (!node) return null;
+
+        if (node.subtype === 'import-container') {
+            return {
+                id: String(node.id || '').trim(),
+                subtype: 'import-container',
+                x: normalizeCanvasTempStateNumberForSync(node.x),
+                y: normalizeCanvasTempStateNumberForSync(node.y),
+                width: normalizeCanvasTempStateNumberForSync(node.width),
+                height: normalizeCanvasTempStateNumberForSync(node.height),
+                groupLabel: String(node.groupLabel || '').trim(),
+                groupHint: String(node.groupHint || '').trim(),
+                color: String(node.color || '').trim(),
+                colorHex: String(node.colorHex || '').trim(),
+                style: String(node.style || '').trim(),
+                importMode: String(node.importMode || '').trim(),
+                containedTempIds: (Array.isArray(node.containedTempIds) ? node.containedTempIds : [])
+                    .map((id) => String(id || '').trim())
+                    .filter(Boolean)
+                    .sort(compareCanvasTempStateIdsForSync),
+                containedMdIds: (Array.isArray(node.containedMdIds) ? node.containedMdIds : [])
+                    .map((id) => String(id || '').trim())
+                    .filter(Boolean)
+                    .sort(compareCanvasTempStateIdsForSync)
+            };
+        }
+
+        const protocolBridge = global && global.CanvasProtocolBridge ? global.CanvasProtocolBridge : null;
+        let normalizedNode = node;
+        if (protocolBridge && typeof protocolBridge.normalizeBlankMarkdownNode === 'function') {
+            try {
+                normalizedNode = protocolBridge.normalizeBlankMarkdownNode(node, { refreshCachesFromMarkdown: true }) || node;
+            } catch (_) {
+                normalizedNode = node;
+            }
+        }
+
+        return {
+            id: String(normalizedNode.id || '').trim(),
+            subtype: String(normalizedNode.subtype || '').trim(),
+            source: String(normalizedNode.source || '').trim(),
+            x: normalizeCanvasTempStateNumberForSync(normalizedNode.x),
+            y: normalizeCanvasTempStateNumberForSync(normalizedNode.y),
+            width: normalizeCanvasTempStateNumberForSync(normalizedNode.width),
+            height: normalizeCanvasTempStateNumberForSync(normalizedNode.height),
+            color: String(normalizedNode.color || '').trim(),
+            colorHex: String(normalizedNode.colorHex || '').trim(),
+            markdownSource: String(normalizedNode.markdownSource || '').replace(/\r\n?/g, '\n'),
+            text: String(normalizedNode.text || '').replace(/\r\n?/g, '\n')
+        };
+    }
+
+    function buildComparableEdgeEntryForSync(edgeInput) {
+        const edge = edgeInput && typeof edgeInput === 'object' ? edgeInput : null;
+        if (!edge) return null;
+        return {
+            id: String(edge.id || '').trim(),
+            fromNode: String(edge.fromNode || '').trim(),
+            fromSide: String(edge.fromSide || '').trim(),
+            toNode: String(edge.toNode || '').trim(),
+            toSide: String(edge.toSide || '').trim(),
+            label: String(edge.label || '').trim(),
+            color: String(edge.color || '').trim(),
+            colorHex: String(edge.colorHex || '').trim(),
+            style: String(edge.style || '').trim()
+        };
+    }
+
+    function buildCanvasTempStateComparableString(rawInput = '') {
+        const canUseCache = typeof rawInput === 'string';
+        if (canUseCache) {
+            const cached = readLimitedCache(tempStateComparableCache, rawInput);
+            if (typeof cached === 'string') return cached;
+        }
+
+        let payload = null;
+        if (typeof rawInput === 'string') {
+            const normalizedRaw = buildNormalizedCanvasTempStateRawForSync(rawInput);
+            payload = normalizedRaw ? safeParse(normalizedRaw, null) : null;
+        } else {
+            payload = normalizeCanvasTempStatePayloadForSync(rawInput);
+        }
+
+        let comparable = '';
+        if (!payload) {
+            comparable = String(rawInput || '');
+            if (canUseCache) {
+                writeLimitedCache(tempStateComparableCache, rawInput, comparable);
+            }
+            return comparable;
+        }
+        const comparableSections = (Array.isArray(payload.sections) ? payload.sections : [])
+            .map(buildComparableTempSectionEntryForSync)
+            .filter(Boolean)
+            .sort((a, b) => compareCanvasTempStateIdsForSync(a.id, b.id));
+        const comparableMdNodes = (Array.isArray(payload.mdNodes) ? payload.mdNodes : [])
+            .map(buildComparableMdNodeEntryForSync)
+            .filter(Boolean)
+            .sort((a, b) => compareCanvasTempStateIdsForSync(a.id, b.id));
+        const comparableEdges = (Array.isArray(payload.edges) ? payload.edges : [])
+            .map(buildComparableEdgeEntryForSync)
+            .filter(Boolean)
+            .sort((a, b) => {
+                const byId = compareCanvasTempStateIdsForSync(a.id, b.id);
+                if (byId !== 0) return byId;
+                const byFrom = compareCanvasTempStateIdsForSync(a.fromNode, b.fromNode);
+                if (byFrom !== 0) return byFrom;
+                return compareCanvasTempStateIdsForSync(a.toNode, b.toNode);
+            });
+        // Compare only sync-semantic temp content here.
+        // Runtime allocators/cursors can legitimately diverge after protocol rebuilds
+        // and should not be treated as user-visible content changes.
+        comparable = JSON.stringify({
+            sections: comparableSections,
+            mdNodes: comparableMdNodes,
+            edges: comparableEdges
+        });
+        if (canUseCache) {
+            writeLimitedCache(tempStateComparableCache, rawInput, comparable);
+        }
+        return comparable;
     }
 
     function queueSyncMetaPersist(key, rawValue, remove = false) {
@@ -2037,6 +2792,40 @@
         syncMetaStorageCache = nextCache;
     }
 
+    function bindSyncMetaStorageChangeListener() {
+        if (syncMetaStorageChangeBound) return;
+        const api = getRuntimeApi();
+        if (!api || !api.storage || !api.storage.onChanged || typeof api.storage.onChanged.addListener !== 'function') {
+            return;
+        }
+
+        syncMetaStorageChangeBound = true;
+        api.storage.onChanged.addListener((changes, areaName) => {
+            if (areaName !== 'local' || !changes || typeof changes !== 'object') return;
+
+            let recoveryChanged = false;
+            SYNC_META_KEYS.forEach((key) => {
+                if (!Object.prototype.hasOwnProperty.call(changes, key)) return;
+                const change = changes[key];
+                if (!change || typeof change !== 'object') return;
+                const nextValue = change.newValue;
+                if (nextValue === null || typeof nextValue === 'undefined') {
+                    delete syncMetaStorageCache[key];
+                } else {
+                    syncMetaStorageCache[key] = String(nextValue);
+                }
+                if (key === RECOVERY_KEY) {
+                    recoveryChanged = true;
+                }
+            });
+
+            if (recoveryChanged) {
+                renderRecoverySnapshotDownloadStatus();
+                updateSyncEnabledDependentFieldState();
+            }
+        });
+    }
+
     function normalizeSyncPath(path) {
         return String(path || '')
             .trim()
@@ -2080,13 +2869,14 @@
         return Math.max(1, Math.min(20000, parsed));
     }
 
-    function ensureMismatchPolicy(policy) {
-        const value = String(policy || '').trim().toLowerCase();
-        return MISMATCH_POLICIES.has(value) ? value : DEFAULT_SETTINGS.mismatchPolicy;
-    }
-
     function toSafeInt(value, fallback) {
         const parsed = Number.parseInt(value, 10);
+        if (!Number.isFinite(parsed)) return fallback;
+        return parsed;
+    }
+
+    function toSafeNumber(value, fallback) {
+        const parsed = Number.parseFloat(value);
         if (!Number.isFinite(parsed)) return fallback;
         return parsed;
     }
@@ -2102,25 +2892,6 @@
         return Math.max(0, Math.min(24 * 60, minutes));
     }
 
-    function normalizeBackgroundMinutes(value, fallback, min = 1) {
-        const safeMin = Math.max(1, toSafeInt(min, 1));
-        const safeFallback = Math.max(safeMin, Math.min(24 * 60, toSafeInt(fallback, safeMin)));
-        const minutes = toSafeInt(value, safeFallback);
-        return Math.max(safeMin, Math.min(24 * 60, minutes));
-    }
-
-    function normalizeForegroundCheckSeconds(value, fallback = 30) {
-        const safeFallback = Math.max(5, Math.min(3600, toSafeInt(fallback, 30)));
-        const seconds = toSafeInt(value, safeFallback);
-        return Math.max(5, Math.min(3600, seconds));
-    }
-
-    function normalizeAutoSyncIntervalSeconds(value, fallback = DEFAULT_SETTINGS.intervalSeconds) {
-        const safeFallback = Math.max(10, Math.min(86400, toSafeInt(fallback, DEFAULT_SETTINGS.intervalSeconds)));
-        const seconds = toSafeInt(value, safeFallback);
-        return Math.max(10, Math.min(86400, seconds));
-    }
-
     function normalizePermanentTreeUploadIntervalSeconds(value, fallback = DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds) {
         const seconds = toSafeInt(value, fallback);
         if (PERMANENT_TREE_UPLOAD_INTERVALS.has(seconds)) {
@@ -2132,18 +2903,107 @@
     function normalizeCustomUploadIntervalSeconds(value, fallback = 5) {
         const safeFallback = Math.max(
             CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE.min,
-            Math.min(CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE.max, toSafeInt(fallback, 5))
+            Math.min(CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE.max, toSafeNumber(fallback, 5))
         );
-        const seconds = toSafeInt(value, safeFallback);
-        return Math.max(
+        const seconds = toSafeNumber(value, safeFallback);
+        const normalized = Math.max(
             CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE.min,
             Math.min(CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE.max, seconds)
         );
+        if (normalized <= 0) return 0;
+        return Math.round(normalized * 10) / 10;
     }
 
     function normalizeObsidianExportFormat(value, fallback = DEFAULT_SETTINGS.obsidianExportFormat) {
         const format = String(value || '').trim().toLowerCase();
         return OBSIDIAN_EXPORT_FORMATS.has(format) ? format : fallback;
+    }
+
+    function getCurrentObsidianExportFormatForSync() {
+        return normalizeObsidianExportFormat(
+            settings && settings.obsidianExportFormat,
+            DEFAULT_SETTINGS.obsidianExportFormat
+        );
+    }
+
+    function getStoredSyncedObsidianExportFormat() {
+        const raw = String(getSyncMetaRaw(LAST_SYNC_EXPORT_FORMAT_KEY) || '').trim();
+        return raw ? normalizeObsidianExportFormat(raw, '') : '';
+    }
+
+    function setStoredSyncedObsidianExportFormat(format) {
+        const normalized = normalizeObsidianExportFormat(format, '');
+        setSyncMetaRaw(LAST_SYNC_EXPORT_FORMAT_KEY, normalized || null);
+        return normalized;
+    }
+
+    function hasPendingLocalObsidianExportFormatChange() {
+        const currentFormat = getCurrentObsidianExportFormatForSync();
+        const storedFormat = getStoredSyncedObsidianExportFormat();
+        return !!(currentFormat && storedFormat && currentFormat !== storedFormat);
+    }
+
+    function formatObsidianExportFormatLabel(format) {
+        const normalized = normalizeObsidianExportFormat(format, '');
+        if (normalized === 'json') return textByLang('JSON模式（供AI）', 'JSON mode (for AI)');
+        if (normalized === 'visual-no-icon') return textByLang('视觉模式（无图标）', 'Visual mode (no icon)');
+        if (normalized === 'visual') return textByLang('视觉模式', 'Visual mode');
+        return '';
+    }
+
+    function resolveObsidianExportFormatMigration(remoteState) {
+        const currentFormat = getCurrentObsidianExportFormatForSync();
+        const remoteFormat = normalizeObsidianExportFormat(remoteState && remoteState.exportFormat, '');
+        const storedFormat = getStoredSyncedObsidianExportFormat();
+        const baseFormat = remoteFormat || storedFormat;
+        const hasRemoteFiles = !!(
+            remoteState
+            && remoteState.notFound !== true
+            && remoteState.remoteList
+            && Array.isArray(remoteState.remoteList.files)
+            && remoteState.remoteList.files.length > 0
+        );
+        const remoteMissing = !!(remoteState && remoteState.notFound === true);
+
+        if (!currentFormat || !baseFormat || baseFormat === currentFormat) {
+            return null;
+        }
+        if (!hasRemoteFiles && !remoteMissing && remoteState) {
+            return null;
+        }
+
+        return {
+            currentFormat,
+            baseFormat,
+            remoteFormat,
+            storedFormat,
+            remoteMissing,
+            source: remoteFormat ? 'remote' : 'local-meta'
+        };
+    }
+
+    function adoptRemoteObsidianExportFormat(remoteFormat, options = {}) {
+        const normalized = normalizeObsidianExportFormat(remoteFormat, '');
+        if (!normalized) return false;
+
+        let changed = false;
+        if (settings) {
+            const currentFormat = normalizeObsidianExportFormat(
+                settings.obsidianExportFormat,
+                DEFAULT_SETTINGS.obsidianExportFormat
+            );
+            if (currentFormat !== normalized) {
+                settings.obsidianExportFormat = normalized;
+                saveSettings();
+                if (options.applyForm !== false) {
+                    applySettingsToForm();
+                }
+                changed = true;
+            }
+        }
+
+        setStoredSyncedObsidianExportFormat(normalized);
+        return changed;
     }
 
     function normalizeObsidianExportRoot(path, fallback = DEFAULT_SETTINGS.obsidianExportRoot, options = {}) {
@@ -2174,14 +3034,7 @@
         // Main UI no longer exposes Git-style sync methods; normalize legacy values
         // back to the standard sync path to avoid hidden behavior changes.
         merged.syncMethod = DEFAULT_SETTINGS.syncMethod;
-        merged.syncAfterEditStop = merged.syncAfterEditStop !== false;
-        merged.splitIntervalCommitAndSync = !!merged.splitIntervalCommitAndSync;
-        merged.autoPushIntervalMinutes = normalizeSplitIntervalMinutes(merged.autoPushIntervalMinutes, DEFAULT_SETTINGS.autoPushIntervalMinutes);
-        merged.autoPullIntervalMinutes = normalizeSplitIntervalMinutes(merged.autoPullIntervalMinutes, DEFAULT_SETTINGS.autoPullIntervalMinutes);
-        merged.intervalSeconds = normalizeAutoSyncIntervalSeconds(merged.intervalSeconds, DEFAULT_SETTINGS.intervalSeconds);
-        merged.pullOnStartup = !!merged.pullOnStartup;
         merged.toastEnabled = merged.toastEnabled !== false;
-        merged.editAutoToastEnabled = merged.editAutoToastEnabled !== false;
         delete merged.pushOnSync;
         delete merged.pullOnSync;
 
@@ -2191,24 +3044,6 @@
             merged.permanentIncrementalMaxChanges,
             DEFAULT_SETTINGS.permanentIncrementalMaxChanges
         );
-        merged.mismatchPolicy = ensureMismatchPolicy(merged.mismatchPolicy);
-        merged.foregroundCheckEnabled = merged.foregroundCheckEnabled !== false;
-        merged.foregroundCheckIntervalSeconds = normalizeForegroundCheckSeconds(
-            merged.foregroundCheckIntervalSeconds,
-            DEFAULT_SETTINGS.foregroundCheckIntervalSeconds
-        );
-        merged.backgroundCheckEnabled = merged.backgroundCheckEnabled !== false;
-        merged.backgroundCheckIntervalMinutes = normalizeBackgroundMinutes(
-            merged.backgroundCheckIntervalMinutes,
-            DEFAULT_SETTINGS.backgroundCheckIntervalMinutes,
-            1
-        );
-        merged.backgroundCooldownMinutes = normalizeBackgroundMinutes(
-            merged.backgroundCooldownMinutes,
-            DEFAULT_SETTINGS.backgroundCooldownMinutes,
-            1
-        );
-
         if (typeof merged.permanentTreeUploadIntervalSeconds === 'undefined') {
             if (typeof merged.syncPermanentTreeOnPush === 'boolean') {
                 merged.permanentTreeUploadIntervalSeconds = merged.syncPermanentTreeOnPush ? 15 : 0;
@@ -2235,9 +3070,6 @@
             DEFAULT_SETTINGS.obsidianExportRoot,
             { allowEmpty: true }
         );
-        delete merged.customSyncTemplatePresets;
-        delete merged.customSyncTemplatePreset;
-        delete merged.savedSyncTemplatePreset;
         merged.firstSyncPathVerifiedRoot = normalizeSyncPath(merged.firstSyncPathVerifiedRoot);
         merged.firstSyncPathVerifiedAt = Math.max(0, toSafeInt(merged.firstSyncPathVerifiedAt, 0));
 
@@ -2591,14 +3423,14 @@
         const text = String(trigger || '').toLowerCase();
         if (!text) return false;
         if (text.startsWith('manual')) return true;
-        if (text.includes('mismatch-panel-push')) return true;
+        if (text.includes('format-migration')) return true;
         return text.includes('first-sync') || text.includes('bootstrap') || text.includes('startup');
     }
 
     function shouldForceWriteAllFilesForPush(trigger) {
         const text = String(trigger || '').toLowerCase();
         if (!text) return false;
-        return text.includes('first-sync') || text.includes('bootstrap');
+        return text.includes('first-sync') || text.includes('bootstrap') || text.includes('format-migration');
     }
 
     function collectCandidatePathsFromDirtyState(dirtyState, files, pathMap) {
@@ -2752,21 +3584,21 @@
 
         if (dirty.permanent.all) {
             const allPermanentPaths = uniqueStringList(typedPaths.allPermanentPaths, normalizeSyncPath);
-            if (allPermanentPaths.length && allPermanentPaths.every((path) => syncedSet.has(path))) {
+            if (!allPermanentPaths.length || allPermanentPaths.every((path) => syncedSet.has(path))) {
                 dirty.permanent.all = false;
             }
         }
 
         if (dirty.temporary.all) {
             const allTemporaryPaths = uniqueStringList(typedPaths.allTemporaryPaths, normalizeSyncPath);
-            if (allTemporaryPaths.length && allTemporaryPaths.every((path) => syncedSet.has(path))) {
+            if (!allTemporaryPaths.length || allTemporaryPaths.every((path) => syncedSet.has(path))) {
                 dirty.temporary.all = false;
             }
         }
 
         if (dirty.blank.all) {
             const allBlankPaths = uniqueStringList(typedPaths.allBlankPaths, normalizeSyncPath);
-            if (allBlankPaths.length && allBlankPaths.every((path) => syncedSet.has(path))) {
+            if (!allBlankPaths.length || allBlankPaths.every((path) => syncedSet.has(path))) {
                 dirty.blank.all = false;
             }
         }
@@ -3298,7 +4130,7 @@
 	    // Permanent-section remote -> local overwrite entry (shared by pull-related flows).
 	    // Unified callers:
 	    // - pull-only (manual-pull)
-	    // - mismatch panel -> use remote
+	    // - conflict panel -> use remote
 	    // - full sync when winner resolves to remote pull
 	    // - conflict panel -> use remote (via force=true)
 	    async function maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(remoteTreeSnapshot, reason, options = {}) {
@@ -3325,19 +4157,6 @@
 	        if (localHash && remoteHash && localHash === remoteHash) {
 	            return { applied: false, skipped: 'same' };
 	        }
-
-	        try {
-	            const backup = normalizeSnapshot({
-	                schemaVersion: 1,
-	                format: 'bookmark-canvas-permanent-tree',
-	                updatedAt: Date.now(),
-	                generatedAt: Date.now(),
-	                trigger: String(reason || 'pull'),
-	                permanentTreeSnapshot: localTree,
-	                data: {}
-	            });
-	            backupSnapshotForRecovery(backup, `before-permanent-overwrite:${String(reason || 'pull')}`);
-	        } catch (_) { }
 
 	        const permanentPullMode = ensurePermanentPullMode(
 	            options && options.permanentPullMode
@@ -3406,7 +4225,18 @@
 
 	    async function getPermanentTreeSnapshotForSync() {
 	        const tree = await bookmarksGetTree();
-	        const normalized = normalizeBookmarkTreeSnapshot(tree);
+	        let normalized = null;
+	        try {
+	            const protocolBridge = global && global.CanvasProtocolBridge && typeof global.CanvasProtocolBridge.normalizePermanentTreeSnapshot === 'function'
+	                ? global.CanvasProtocolBridge
+	                : null;
+	            if (protocolBridge) {
+	                normalized = protocolBridge.normalizePermanentTreeSnapshot(tree);
+	            }
+	        } catch (_) { }
+	        if (!normalized) {
+	            normalized = normalizeBookmarkTreeSnapshot(tree);
+	        }
 	        if (!normalized) {
             throw new Error(textByLang('读取本地永久栏目失败：书签树为空', 'Failed to read local permanent section: bookmark tree is empty'));
         }
@@ -4015,9 +4845,7 @@ Cancel: go back and change the branch name first.`
             settings.enabled = true;
             saveSettings();
             applySettingsToForm();
-            restartAutomationTimers();
-            scheduleStartupPull();
-        }
+                }
         renderStatus();
         return wasEnabled;
     }
@@ -4100,7 +4928,7 @@ Cancel: go back and change the branch name first.`
         return getSyncLang() === 'en'
             ? `
                 <div style="margin-bottom: 10px; line-height: 1.6;">
-                    <div style="margin-bottom: 8px;">Please follow the steps below to ensure Obsidian can locate the exported .md files.</div>
+                    <div style="margin-bottom: 8px;">Please follow the steps below to ensure Obsidian can locate the exported sync files (.md/.json).</div>
                     <div style="margin: 6px 0 10px; font-weight: 600;">Where will you place <code>${exampleFolderName}</code> inside your Obsidian vault?</div>
                     <div style="border-top:1px solid #e5e7eb;width:60%;margin: 6px 0 10px;"></div>
                     <div style="margin: 6px 0;">If you put it under an existing vault's ${hl('root')}, keep the default value and ${hl('click Confirm')}.</div>
@@ -4116,7 +4944,7 @@ Cancel: go back and change the branch name first.`
             `
             : `
                 <div style="margin-bottom: 10px; line-height: 1.6;">
-                    <div style="margin-bottom: 8px;">请按以下流程选择位置，确保 Obsidian 能正确找到导出的 .md 文件。</div>
+                    <div style="margin-bottom: 8px;">请按以下流程选择位置，确保 Obsidian 能正确找到导出的同步文件（.md/.json）。</div>
                     <div style="margin: 6px 0 10px; font-weight: 600;">把 <code>${exampleFolderName}</code> 放入 Obsidian vault（仓库）里的哪个位置。</div>
                     <div style="border-top:1px solid #e5e7eb;width:60%;margin: 6px 0 10px;"></div>
                     <div style="margin: 6px 0;">-若把它直接放在${hl('已有仓库的根目录')}下，请保持默认值，${hl('直接点击确认')}即可。</div>
@@ -4580,6 +5408,48 @@ Cancel: go back and change the branch name first.`
         return result === 'confirm';
     }
 
+    async function requestFormatMigrationLocalOverwriteConfirmationAsync(formatMigration, options = {}) {
+        const migration = formatMigration && typeof formatMigration === 'object' ? formatMigration : {};
+        const baseFormatLabel = formatObsidianExportFormatLabel(migration.baseFormat)
+            || String(migration.baseFormat || textByLang('旧格式', 'previous format'));
+        const currentFormatLabel = formatObsidianExportFormatLabel(migration.currentFormat)
+            || String(migration.currentFormat || textByLang('新格式', 'new format'));
+        const triggerText = String(options && options.trigger || '').trim();
+        const lines = (getSyncLang() === 'en'
+            ? [
+                'Detected an export format switch.',
+                `Format migration: ${baseFormatLabel} -> ${currentFormatLabel}`,
+                'To continue, this run must overwrite cloud with local in the new format.',
+                'Cloud content in the old format will be replaced.',
+                triggerText ? `Trigger: ${triggerText}` : ''
+            ]
+            : [
+                '检测到导出格式已切换。',
+                `格式迁移：${baseFormatLabel} -> ${currentFormatLabel}`,
+                '继续本次同步需要执行“本地覆盖云端（新格式）”。',
+                '云端旧格式内容会被替换。',
+                triggerText ? `触发来源：${triggerText}` : ''
+            ])
+            .filter((line) => !!String(line || '').trim());
+
+        const result = await openSyncActionDialog({
+            title: textByLang('格式迁移确认', 'Format Migration Confirmation'),
+            lines,
+            keywordExpected: 'OVERWRITE',
+            keywordLabel: textByLang('输入 OVERWRITE 后可执行“本地覆盖云端”', 'Type OVERWRITE to enable "Local Overwrite Cloud"'),
+            keywordHint: textByLang(
+                '确认后将按当前格式重新导出，并覆盖云端同步文件。',
+                'After confirmation, the current format will be re-exported and cloud sync files will be overwritten.'
+            ),
+            actions: [
+                { id: 'cancel', label: textByLang('取消', 'Cancel'), tone: 'secondary' },
+                { id: 'overwrite-cloud', label: textByLang('本地覆盖云端（格式迁移）', 'Local Overwrite Cloud (Format Migration)'), tone: 'primary' }
+            ],
+            dangerActionId: 'overwrite-cloud'
+        });
+        return result === 'overwrite-cloud';
+    }
+
     function getFirstSyncDataKeyLabel(key) {
         switch (String(key || '')) {
             case TEMP_SECTION_STORAGE_KEY:
@@ -4594,6 +5464,8 @@ Cancel: go back and change the branch name first.`
                 return textByLang('永久栏目副本', 'Permanent-section copies');
             case 'canvas-permanent-tip-text':
                 return textByLang('永久栏目说明', 'Permanent-section description');
+            case PERMANENT_VIEW_SHELL_COMPARE_KEY:
+                return textByLang('永久栏目视图壳', 'Permanent view shells');
             default:
                 return String(key || '') || textByLang('未知项', 'Unknown item');
         }
@@ -4651,10 +5523,17 @@ Cancel: go back and change the branch name first.`
                 same: localComparable === remoteComparable
             };
         });
+        keyStates.push({
+            key: PERMANENT_VIEW_SHELL_COMPARE_KEY,
+            label: getFirstSyncDataKeyLabel(PERMANENT_VIEW_SHELL_COMPARE_KEY),
+            same: buildPermanentViewShellComparableString(localSnapshot && localSnapshot.permanentViewShellSnapshot)
+                === buildPermanentViewShellComparableString(remoteSnapshot && remoteSnapshot.permanentViewShellSnapshot)
+        });
         const sameCount = keyStates.filter((item) => item.same).length;
         const differingKeys = keyStates.filter((item) => !item.same);
         const tempStateEntry = keyStates.find((item) => item.key === TEMP_SECTION_STORAGE_KEY);
-        const contentStructureSame = !!(tempStateEntry && tempStateEntry.same);
+        const shellEntry = keyStates.find((item) => item.key === PERMANENT_VIEW_SHELL_COMPARE_KEY);
+        const contentStructureSame = !!(tempStateEntry && tempStateEntry.same && (!shellEntry || shellEntry.same));
         return {
             same: contentStructureSame,
             contentStructureSame,
@@ -4662,7 +5541,9 @@ Cancel: go back and change the branch name first.`
             sameCount,
             diffCount: differingKeys.length,
             differingKeys,
-            hiddenSettingDiffCount: differingKeys.filter((item) => item.key !== TEMP_SECTION_STORAGE_KEY).length
+            hiddenSettingDiffCount: differingKeys.filter((item) =>
+                item.key !== TEMP_SECTION_STORAGE_KEY && item.key !== PERMANENT_VIEW_SHELL_COMPARE_KEY
+            ).length
         };
     }
 
@@ -4680,9 +5561,9 @@ Cancel: go back and change the branch name first.`
     function classifyManagedSyncRelativePath(relativePath) {
         const relative = normalizeSyncPath(relativePath);
         if (!relative) return '';
-        if (/^(永久栏目|Permanent)\/.+\.md$/i.test(relative)) return 'permanent';
-        if (/^(临时栏目|Temporary)\/.+\.md$/i.test(relative)) return 'temporary';
-        if (/^(空白栏目|Blank)\/.+\.md$/i.test(relative)) return 'blank';
+        if (/^(永久栏目|Permanent)\/.+\.(md|json)$/i.test(relative)) return 'permanent';
+        if (/^(临时栏目|Temporary)\/.+\.(md|json)$/i.test(relative)) return 'temporary';
+        if (/^(空白栏目|Blank)\/.+\.(md|json)$/i.test(relative)) return 'blank';
         if (/^[^/]+\.canvas$/i.test(relative)) return 'canvas';
         if (/^(说明导入规则\.md|README_Import_Rules\.md|说明_导入规则\.md)$/i.test(relative)) return 'guide';
         return 'other';
@@ -5401,7 +6282,7 @@ Cancel: go back and change the branch name first.`
         // Explicit user-initiated actions should show determinate progress on the button,
         // and should not be silently ignored.
         if (triggerText.startsWith('manual') || triggerText === 'user') return true;
-        if (triggerText.startsWith('mismatch-panel-')) return true;
+        if (triggerText === 'obsidian-export-format-change') return true;
         return false;
     }
 
@@ -5559,58 +6440,35 @@ Cancel: go back and change the branch name first.`
     function isExplicitRemoteOverwriteTrigger(trigger) {
         const text = String(trigger || '').trim().toLowerCase();
         if (!text) return false;
-        return text === 'manual-pull' || text === 'mismatch-panel-pull';
+        return text === 'manual-pull';
     }
 
     function shouldBypassPullPlanConflictCheck(trigger) {
-        const text = String(trigger || '').trim().toLowerCase();
-        if (!text) return false;
-        return text === 'mismatch-panel-pull';
+        return false;
     }
 
     function isManualPushOnlyTrigger(trigger) {
         return String(trigger || '').trim().toLowerCase() === 'manual-push';
     }
 
-    function isEditDrivenSyncTrigger(trigger) {
-        const text = String(trigger || '').trim().toLowerCase();
-        return text === 'save' || text === 'during-sync-local-edit';
-    }
-
-    function isNecessaryToastMessage(message) {
-        const text = String(message || '').trim().toLowerCase();
-        if (!text) return false;
-        return /失败|错误|冲突|不一致|恢复|无法|未完成|请先|未找到|离线|关闭|重试|取消|fail|error|conflict|mismatch|recovery|cannot|unable|unfinished|please|missing|offline|retry|cancel|disabled|running|wait/.test(text);
-    }
-
     function getSyncNotificationSettings() {
         const source = settings || loadSettings();
         return {
-            toastEnabled: !(source && source.toastEnabled === false),
-            editAutoToastEnabled: !(source && source.editAutoToastEnabled === false)
+            toastEnabled: !(source && source.toastEnabled === false)
         };
     }
 
-    function getEditAutoToastDecision() {
-        const enabled = getSyncNotificationSettings().editAutoToastEnabled;
-        if (!enabled) return false;
-        editAutoToastCounter += 1;
-        return editAutoToastCounter % 4 === 0;
-    }
-
     function getSyncToastOptionsByTrigger(trigger, options = {}) {
-        const base = Object.assign({}, options || {});
-        if (isEditDrivenSyncTrigger(trigger)) {
-            base.source = 'edit-auto';
-        }
-        return base;
+        return Object.assign({}, options || {});
     }
 
     function markForegroundUserInteraction() {
         try {
             if (document && document.visibilityState === 'hidden') return;
         } catch (_) { }
-        lastForegroundUserInteractionAt = Date.now();
+        const now = Date.now();
+        if ((now - (Number(lastForegroundUserInteractionAt) || 0)) < FOREGROUND_ACTIVITY_THROTTLE_MS) return;
+        lastForegroundUserInteractionAt = now;
     }
 
     function isForegroundUserInteractionBusy() {
@@ -5621,97 +6479,7 @@ Cancel: go back and change the branch name first.`
         }
         const lastTs = Number(lastForegroundUserInteractionAt) || 0;
         if (lastTs <= 0) return false;
-        return (Date.now() - lastTs) < AUTO_SYNC_USER_IDLE_DELAY_MS;
-    }
-
-    function isDocumentVisibleForPrompt() {
-        try {
-            return !!(document && document.visibilityState === 'visible');
-        } catch (_) {
-            return true;
-        }
-    }
-
-    function shouldDeferAutomaticSyncTrigger(trigger) {
-        const text = String(trigger || '').trim().toLowerCase();
-        if (!text) return false;
-        if (text.startsWith('manual')) return false;
-        if (text.startsWith('recovery-')) return false;
-        if (text.startsWith('first-sync')) return false;
-        if (text.startsWith('mismatch-panel-')) return false;
-        return isForegroundUserInteractionBusy();
-    }
-
-    function hasStablePendingMismatch() {
-        if (!runtime || runtime.pendingMismatch !== true) return false;
-        const ts = Number(runtime.pendingMismatchAt) || 0;
-        if (ts <= 0) return false;
-        return (Date.now() - ts) >= PENDING_MISMATCH_PROMPT_STABLE_MS;
-    }
-
-    function clearPendingMismatchPromptTimer() {
-        if (!pendingMismatchPromptTimer) return;
-        clearTimeout(pendingMismatchPromptTimer);
-        pendingMismatchPromptTimer = null;
-    }
-
-    function schedulePendingMismatchPromptCheck() {
-        clearPendingMismatchPromptTimer();
-        if (!runtime || runtime.pendingMismatch !== true) return;
-        if (!settings || ensureMismatchPolicy(settings.mismatchPolicy) !== 'prompt') return;
-
-        const ts = Number(runtime.pendingMismatchAt) || 0;
-        const remainingMs = ts > 0
-            ? Math.max(0, PENDING_MISMATCH_PROMPT_STABLE_MS - (Date.now() - ts))
-            : PENDING_MISMATCH_PROMPT_STABLE_MS;
-
-        pendingMismatchPromptTimer = setTimeout(async () => {
-            pendingMismatchPromptTimer = null;
-            if (!runtime || runtime.pendingMismatch !== true) return;
-            if (!settings || ensureMismatchPolicy(settings.mismatchPolicy) !== 'prompt') return;
-            if (!shouldAutoPromptPendingMismatchNow()) {
-                if (!isRecoveryLockActive() && !hasPendingConflict() && !runtime.isRunning) {
-                    pendingMismatchPromptTimer = setTimeout(() => {
-                        pendingMismatchPromptTimer = null;
-                        schedulePendingMismatchPromptCheck();
-                    }, 500);
-                }
-                return;
-            }
-            const autoHandled = await maybeAutoResolveBaselineOnlyPendingMismatch('prompt-timer');
-            if (autoHandled) return;
-            if (!runtime || runtime.pendingMismatch !== true) return;
-            if (mismatchPromptShownOnInit) return;
-            if (!shouldAutoPromptPendingMismatchNow()) return;
-            mismatchPromptShownOnInit = true;
-            notifyPendingMismatchWithoutForceOpen(textByLang(
-                '前台关闭期间检测到云端更新，请在“状态”面板选择处理方式',
-                'Remote updates were detected while foreground was closed. Please choose an action in Status panel.'
-            ));
-        }, remainingMs);
-    }
-
-    function shouldAutoPromptPendingMismatchNow() {
-        if (isRecoveryLockActive()) return false;
-        if (!runtime || runtime.pendingMismatch !== true) return false;
-        if (!hasStablePendingMismatch()) return false;
-        if (!isDocumentVisibleForPrompt()) return false;
-        if (runtime.isRunning) return false;
-        if (hasPendingConflict()) return false;
-        if (isForegroundUserInteractionBusy()) return false;
-        return true;
-    }
-
-    function notifyPendingMismatchWithoutForceOpen(message) {
-        const notice = String(message || textByLang(
-            '检测到云端不一致，请在“状态”面板选择处理方式',
-            'Remote mismatch detected. Choose an action in the Status panel.'
-        ));
-        if (!notice) return;
-        if (isSyncPanelOpen() && activeTabKey === 'status') {
-            renderMismatchPanel();
-        }
-        toast(notice, { optional: true });
+        return (Date.now() - lastTs) < USER_INTERACTION_IDLE_GRACE_MS;
     }
 
     function shouldAllowFloatingProgressForCurrentTrigger() {
@@ -5720,7 +6488,6 @@ Cancel: go back and change the branch name first.`
         const trigger = String(runtime && runtime.lastTrigger || '').trim().toLowerCase();
         if (!trigger) return false;
         return trigger.startsWith('manual')
-            || trigger.startsWith('mismatch-panel-')
             || trigger.startsWith('first-sync')
             || trigger.startsWith('recovery-');
     }
@@ -5733,6 +6500,12 @@ Cancel: go back and change the branch name first.`
         return id;
     }
 
+    function isNecessaryToastMessage(message) {
+        const text = String(message || '').trim().toLowerCase();
+        if (!text) return false;
+        return /error|fail|failed|forbidden|unauthorized|rate limit|403|401|conflict|protected|refused|拒绝|失败|错误|冲突|保护分支|限制/.test(text);
+    }
+
     function toast(message, options = {}) {
         const text = String(message || '').trim();
         if (!text) return;
@@ -5743,9 +6516,6 @@ Cancel: go back and change the branch name first.`
 
         if (!necessary) {
             if (!notificationSettings.toastEnabled) return;
-            if (String(normalizedOptions.source || '').trim().toLowerCase() === 'edit-auto') {
-                if (!getEditAutoToastDecision()) return;
-            }
         }
 
         if (typeof global.showToast === 'function') {
@@ -5833,6 +6603,10 @@ Cancel: go back and change the branch name first.`
             if (!wasDisabled) buttonEl.disabled = false;
             updateSyncEnabledDependentFieldState();
         }
+    }
+
+    async function requestManualSync(trigger = 'manual') {
+        return runSync('full', trigger || 'manual');
     }
 
     function isSyncPanelOpen() {
@@ -6050,9 +6824,20 @@ Cancel: go back and change the branch name first.`
             try {
                 const signal = await readRemoteObsidianSignal(rootPath || (settings && settings.obsidianExportRoot));
                 const committedAt = Math.max(0, Number(signal && signal.committedAt) || 0);
-                if (committedAt > 0 && runtime) {
-                    runtime.lastRemoteCommittedAt = committedAt;
-                    saveRuntime();
+                const signalSha = String(signal && signal.revisionSha || '').trim();
+                if (runtime) {
+                    let runtimeChanged = false;
+                    if (signalSha && runtime.lastRemoteSignalSha !== signalSha) {
+                        runtime.lastRemoteSignalSha = signalSha;
+                        runtimeChanged = true;
+                    }
+                    if (committedAt > 0 && runtime.lastRemoteCommittedAt !== committedAt) {
+                        runtime.lastRemoteCommittedAt = committedAt;
+                        runtimeChanged = true;
+                    }
+                    if (runtimeChanged) {
+                        saveRuntime();
+                    }
                 }
                 return committedAt;
             } catch (error) {
@@ -6063,144 +6848,6 @@ Cancel: go back and change the branch name first.`
             }
         })();
         return await remoteCommittedAtRefreshPromise;
-    }
-
-    async function buildMismatchComparisonSummaryData(reason = 'mismatch-compare') {
-        const localSnapshot = await buildLocalSnapshot(reason, { includePermanentTree: true, includeTempSection: true });
-        const remoteState = await readRemoteSnapshotWithPathRecovery({ interactive: false, continueAfterConfirm: false, throwWhenDetected: false });
-        const remoteSnapshot = remoteState && !remoteState.notFound
-            ? normalizeSnapshot(remoteState.snapshot || {})
-            : normalizeSnapshot({ data: {} });
-        const remoteCommittedAt = Math.max(
-            Number(runtime && runtime.lastRemoteCommittedAt) || 0,
-            await ensureLatestRemoteCommittedAt(remoteState && remoteState.path ? remoteState.path : (settings && settings.obsidianExportRoot))
-        );
-        const localLatestTs = Math.max(Number(runtime && runtime.lastLocalMutationAt) || 0, Number(localSnapshot && localSnapshot.updatedAt) || 0);
-        const managedFileComparison = await buildFirstSyncManagedFileComparison({
-            remoteManagedFiles: remoteState && remoteState.remoteList && Array.isArray(remoteState.remoteList.files)
-                ? remoteState.remoteList.files
-                : [],
-            remoteFolderFiles: remoteState && remoteState.folderFiles ? remoteState.folderFiles : null,
-            remoteRootPath: remoteState && remoteState.path ? remoteState.path : (settings && settings.obsidianExportRoot ? settings.obsidianExportRoot : '')
-        });
-        const comparisonSummary = buildFirstSyncModeComparisonSummary(localSnapshot, remoteSnapshot, {
-            remoteCommittedAt,
-            managedFileComparison
-        });
-        return {
-            comparisonSummary,
-            localLatestTs,
-            remoteLatestTs: remoteCommittedAt || Number(remoteSnapshot && remoteSnapshot.updatedAt) || 0
-        };
-    }
-
-    async function maybeAutoResolveBaselineOnlyPendingMismatch(reason = 'precheck') {
-        if (pendingMismatchAutoBaselinePromise) {
-            try {
-                return await pendingMismatchAutoBaselinePromise;
-            } catch (_) {
-                return false;
-            }
-        }
-
-        pendingMismatchAutoBaselinePromise = (async () => {
-            if (isRecoveryLockActive()) return false;
-            if (!settings || ensureMismatchPolicy(settings.mismatchPolicy) !== 'prompt') return false;
-            if (!runtime || runtime.pendingMismatch !== true) return false;
-            if (runtime.isRunning) return false;
-            if (hasPendingConflict()) return false;
-
-            try {
-                const comparison = await buildMismatchComparisonSummaryData(`mismatch-precheck:${reason}`);
-                const summary = comparison && comparison.comparisonSummary ? comparison.comparisonSummary : null;
-                if (summary) {
-                    latestMismatchComparisonSummary = summary;
-                }
-                if (!isBaselineOnlyComparisonSummary(summary)) return false;
-                const ok = await resolvePendingMismatchBySync('full', 'mismatch-auto-baseline');
-                if (ok) {
-                    clearPendingMismatchPromptTimer();
-                    mismatchPromptShownOnInit = false;
-                }
-                return ok;
-            } catch (error) {
-                console.warn('[Canvas Sync] mismatch baseline auto-resolve precheck failed:', error);
-                return false;
-            }
-        })();
-
-        try {
-            return await pendingMismatchAutoBaselinePromise;
-        } finally {
-            pendingMismatchAutoBaselinePromise = null;
-        }
-    }
-
-    async function refreshMismatchComparePanel(isPreview = false) {
-        const panel = getElement('canvasSyncMismatchPanel');
-        const compare = getElement('canvasSyncMismatchCompare');
-        const summary = getElement('canvasSyncMismatchSummary');
-        if (!panel || !compare || panel.hidden) return;
-        const token = ++mismatchCompareRefreshToken;
-
-        if (isPreview) {
-            const preview = buildPreviewConflictPayload();
-            const previewLocalTs = Number(preview && preview.localMeta && preview.localMeta.updatedAt) || 0;
-            const previewRemoteTs = Number(preview && preview.remoteMeta && preview.remoteMeta.updatedAt) || 0;
-            const previewSummary = buildFirstSyncModeComparisonSummary(
-                preview && preview.localSnapshot,
-                preview && preview.remoteSnapshot,
-                { remoteCommittedAt: previewRemoteTs }
-            );
-            if (token !== mismatchCompareRefreshToken) return;
-            if (summary) {
-                summary.textContent = textByLang(
-                    '这是“云端不一致面板”预览：用于展示后台检测到版本不一致时的处理方式。',
-                    'This is a remote mismatch panel preview showing how the UI looks when background detects a revision mismatch.'
-                );
-            }
-            renderStatusCompareSections('canvasSyncMismatchCompare', buildComparisonPanelSections(previewSummary, {
-                mode: 'change',
-                localUpdatedAt: previewLocalTs,
-                remoteUpdatedAt: previewRemoteTs
-            }));
-            updateMismatchPanelActionUi(previewSummary, true);
-            return;
-        }
-
-        if (summary) {
-            summary.textContent = textByLang(
-                '检测到云端不一致，请在比较结果就绪后选择处理方式。',
-                'Remote mismatch detected. Choose an action after comparison results are ready.'
-            );
-        }
-
-        try {
-            const comparison = await buildMismatchComparisonSummaryData('mismatch-panel-compare');
-            const comparisonSummary = comparison && comparison.comparisonSummary ? comparison.comparisonSummary : null;
-            const localLatestTs = Number(comparison && comparison.localLatestTs) || 0;
-            const remoteLatestTs = Number(comparison && comparison.remoteLatestTs) || 0;
-            if (token !== mismatchCompareRefreshToken) return;
-            if (summary) {
-                summary.textContent = buildComparisonPanelSummaryText(comparisonSummary, 'change');
-            }
-            renderStatusCompareSections('canvasSyncMismatchCompare', buildComparisonPanelSections(comparisonSummary, {
-                mode: 'change',
-                localUpdatedAt: localLatestTs,
-                remoteUpdatedAt: remoteLatestTs
-            }));
-            updateMismatchPanelActionUi(comparisonSummary, false);
-            void refreshMismatchPermanentModeHint();
-        } catch (error) {
-            if (token !== mismatchCompareRefreshToken) return;
-            console.warn('[Canvas Sync] refresh mismatch compare panel failed:', error);
-            if (summary) {
-                summary.textContent = textByLang(
-                    '检测结果：已检测到云端不一致，但当前无法完成详细比较。',
-                    'Detection: a cloud mismatch was found, but the detailed comparison is currently unavailable.'
-                );
-            }
-        }
     }
 
     function formatBytes(bytes) {
@@ -6280,7 +6927,8 @@ Cancel: go back and change the branch name first.`
             } else if (Array.isArray(global.CanvasState && global.CanvasState.tempSections)) {
                 sections = global.CanvasState.tempSections;
             } else {
-                const rawState = safeParse(localStorage.getItem(TEMP_SECTION_STORAGE_KEY), null);
+                const normalizedRaw = buildNormalizedCanvasTempStateRawForSync(localStorage.getItem(TEMP_SECTION_STORAGE_KEY) || '');
+                const rawState = normalizedRaw ? safeParse(normalizedRaw, null) : null;
                 if (rawState && typeof rawState === 'object' && Array.isArray(rawState.sections)) {
                     sections = rawState.sections;
                 }
@@ -6445,9 +7093,6 @@ Cancel: go back and change the branch name first.`
     }
 
     function getCurrentCloudHashForDisplay() {
-        const pendingCloud = String(runtime && runtime.pendingMismatchRemoteSha || '').trim();
-        if (pendingCloud) return pendingCloud;
-
         const checkedCloud = String(runtime && runtime.lastCheckRemoteSha || '').trim();
         if (checkedCloud) return checkedCloud;
 
@@ -6524,12 +7169,10 @@ Cancel: go back and change the branch name first.`
 
         const recoveryPanel = getElement('canvasSyncRecoveryPanel');
         const conflictPanel = getElement('canvasSyncConflictPanel');
-        const mismatchPanel = getElement('canvasSyncMismatchPanel');
 
         const hasVisiblePanel = !!(
             (recoveryPanel && !recoveryPanel.hidden)
             || (conflictPanel && !conflictPanel.hidden)
-            || (mismatchPanel && !mismatchPanel.hidden)
         );
 
         statusTabPanel.classList.toggle('canvas-sync-tab-status--has-panel', hasVisiblePanel);
@@ -6545,7 +7188,7 @@ Cancel: go back and change the branch name first.`
         const remoteShaEl = getElement('canvasSyncStatusRemoteSha');
         const localHashEl = getElement('canvasSyncStatusLocalHash');
         const otherEl = getElement('canvasSyncStatusOther');
-        const pendingMismatchEl = getElement('canvasSyncStatusPendingMismatch');
+        const recoverySnapshotAtEl = getElement('canvasSyncStatusRecoverySnapshotAt');
         const errorEl = getElement('canvasSyncStatusError');
 
         if (runningEl) {
@@ -6581,10 +7224,11 @@ Cancel: go back and change the branch name first.`
         if (otherEl) {
             otherEl.innerHTML = `<div class="canvas-sync-other-lines">${buildDirtySerialLinesHtml()}</div>`;
         }
-        if (pendingMismatchEl) {
-            pendingMismatchEl.textContent = runtime.pendingMismatch
-                ? textByLang('有（待处理）', 'Yes (pending)')
-                : textByLang('无', 'None');
+        if (recoverySnapshotAtEl) {
+            const latestRecord = getLatestRecoverySnapshotRecord({ requireSnapshot: true });
+            recoverySnapshotAtEl.textContent = latestRecord && Number(latestRecord.ts) > 0
+                ? formatTime(latestRecord.ts)
+                : '-';
         }
         if (errorEl) {
             const missingReason = getRepoConfigMissingReason(repoConfig);
@@ -6593,11 +7237,12 @@ Cancel: go back and change the branch name first.`
                 : '';
             errorEl.textContent = runtime.lastError || repoNotReadyText || textByLang('无', 'None');
         }
+        renderRecoverySnapshotDownloadStatus();
 
         renderRecoveryLockPanel();
-        renderMismatchPanel();
         updateStatusPanelActionPlacement();
         updateSyncEnabledDependentFieldState();
+        scheduleStatusSubNavSyncFromScroll();
     }
 
 	    function setFirstSyncModeToForm(mode) {
@@ -6683,7 +7328,7 @@ Cancel: go back and change the branch name first.`
     }
 
     function isMismatchPreviewActive() {
-        return previewPanelMode === 'mismatch' && !pendingConflict && !(runtime && runtime.pendingMismatch);
+        return false;
     }
 
     function isConflictPreviewActive() {
@@ -6692,10 +7337,25 @@ Cancel: go back and change the branch name first.`
 
     function buildPreviewConflictPayload() {
         const now = Date.now();
+        const localPreviewTempState = normalizeCanvasTempStatePayloadForSync({
+            sections: [{ id: 'preview-local-section', title: 'Local Temp' }],
+            mdNodes: [{ id: 'preview-local-card', title: 'local card' }],
+            edges: [],
+            timestamp: now - 90 * 1000
+        });
+        const remotePreviewTempState = normalizeCanvasTempStatePayloadForSync({
+            sections: [{ id: 'preview-remote-section', title: 'Remote Temp' }],
+            mdNodes: [
+                { id: 'preview-remote-card-1', title: 'remote card 1' },
+                { id: 'preview-remote-card-2', title: 'remote card 2' }
+            ],
+            edges: [],
+            timestamp: now - 50 * 1000
+        });
         const localSnapshot = normalizeSnapshot({
             updatedAt: now - 90 * 1000,
             data: {
-                [TEMP_SECTION_STORAGE_KEY]: JSON.stringify({
+                [TEMP_SECTION_STORAGE_KEY]: JSON.stringify(localPreviewTempState || {
                     sections: [{ id: 'preview-local-section', title: 'Local Temp' }],
                     mdNodes: [{ id: 'preview-local-card', title: 'local card' }],
                     edges: [],
@@ -6707,7 +7367,7 @@ Cancel: go back and change the branch name first.`
         const remoteSnapshot = normalizeSnapshot({
             updatedAt: now - 50 * 1000,
             data: {
-                [TEMP_SECTION_STORAGE_KEY]: JSON.stringify({
+                [TEMP_SECTION_STORAGE_KEY]: JSON.stringify(remotePreviewTempState || {
                     sections: [{ id: 'preview-remote-section', title: 'Remote Temp' }],
                     mdNodes: [
                         { id: 'preview-remote-card-1', title: 'remote card 1' },
@@ -6759,22 +7419,7 @@ Cancel: go back and change the branch name first.`
             'An unfinished sync recovery was detected: continue the previous action first'
         );
 
-        const mismatchPreview = isMismatchPreviewActive();
         const conflictPreview = isConflictPreviewActive();
-
-        const mismatchRemoteBtn = getElement('canvasSyncMismatchUseRemoteBtn');
-        setActionDisabledState(
-            mismatchRemoteBtn,
-            disabledByMaster || mismatchPreview || disabledByRunning || disabledByRecoveryLock,
-            disabledByMaster ? disabledHint : (mismatchPreview ? previewHint : (disabledByRunning ? runningHint : (disabledByRecoveryLock ? recoveryHint : '')))
-        );
-
-        const mismatchLocalBtn = getElement('canvasSyncMismatchUseLocalBtn');
-        setActionDisabledState(
-            mismatchLocalBtn,
-            disabledByMaster || mismatchPreview || disabledByRunning || disabledByRecoveryLock,
-            disabledByMaster ? disabledHint : (mismatchPreview ? previewHint : (disabledByRunning ? runningHint : (disabledByRecoveryLock ? recoveryHint : '')))
-        );
 
         const conflictLocalBtn = getElement('canvasSyncConflictUseLocalBtn');
         setActionDisabledState(
@@ -6789,10 +7434,17 @@ Cancel: go back and change the branch name first.`
             disabledByMaster || conflictPreview || disabledByRunning || disabledByRecoveryLock,
             disabledByMaster ? disabledHint : (conflictPreview ? previewHint : (disabledByRunning ? runningHint : (disabledByRecoveryLock ? recoveryHint : '')))
         );
+
+        const conflictRetryMergeBtn = getElement('canvasSyncConflictRetryMergeBtn');
+        setActionDisabledState(
+            conflictRetryMergeBtn,
+            disabledByMaster || conflictPreview || disabledByRunning || disabledByRecoveryLock,
+            disabledByMaster ? disabledHint : (conflictPreview ? previewHint : (disabledByRunning ? runningHint : (disabledByRecoveryLock ? recoveryHint : '')))
+        );
     }
 
     function setPreviewPanelMode(mode) {
-        const targetMode = mode === 'mismatch' || mode === 'conflict' ? mode : '';
+        const targetMode = mode === 'conflict' ? mode : '';
         previewPanelMode = targetMode;
 
         if (targetMode === 'conflict' && !pendingConflict) {
@@ -6809,20 +7461,26 @@ Cancel: go back and change the branch name first.`
     function scrollStatusPanelToPreview(mode) {
         const statusPanel = getElement('canvasSyncTabStatusPanel');
         if (!statusPanel) return;
+        const containerEl = getStatusScrollContainer() || statusPanel;
 
-        const targetId = mode === 'conflict' ? 'canvasSyncConflictPanel' : 'canvasSyncMismatchPanel';
+        const targetId = 'canvasSyncConflictPanel';
         const targetPanel = getElement(targetId);
         if (!targetPanel) return;
 
         const doScroll = () => {
-            const top = Math.max(0, (targetPanel.offsetTop || 0) - 8);
-            if (typeof statusPanel.scrollTo === 'function') {
+            const containerRect = containerEl.getBoundingClientRect();
+            const targetRect = targetPanel.getBoundingClientRect();
+            const currentTop = Number(containerEl.scrollTop) || 0;
+            const top = Math.max(0, currentTop + (targetRect.top - containerRect.top) - 8);
+            if (typeof containerEl.scrollTo === 'function') {
                 try {
-                    statusPanel.scrollTo({ top, behavior: 'smooth' });
+                    containerEl.scrollTo({ top, behavior: 'smooth' });
+                    scheduleStatusSubNavSyncFromScroll();
                     return;
                 } catch (_) { }
             }
-            statusPanel.scrollTop = top;
+            containerEl.scrollTop = top;
+            scheduleStatusSubNavSyncFromScroll();
         };
 
         global.requestAnimationFrame(() => {
@@ -6845,14 +7503,17 @@ Cancel: go back and change the branch name first.`
 
         const statusPanel = getElement('canvasSyncTabStatusPanel');
         if (statusPanel) {
+            const containerEl = getStatusScrollContainer() || statusPanel;
             const goTop = () => {
-                if (typeof statusPanel.scrollTo === 'function') {
+                if (typeof containerEl.scrollTo === 'function') {
                     try {
-                        statusPanel.scrollTo({ top: 0, behavior: 'auto' });
+                        containerEl.scrollTo({ top: 0, behavior: 'auto' });
+                        scheduleStatusSubNavSyncFromScroll();
                         return;
                     } catch (_) { }
                 }
-                statusPanel.scrollTop = 0;
+                containerEl.scrollTop = 0;
+                scheduleStatusSubNavSyncFromScroll();
             };
 
             global.requestAnimationFrame(() => {
@@ -6922,21 +7583,12 @@ Cancel: go back and change the branch name first.`
         const shouldDisable = !enabledOn;
 
         [
-            'canvasSyncTemplateSelect',
-            'canvasSyncAutoToggle',
-            'canvasSyncAutoAfterEditStopToggle',
             'canvasSyncFirstSyncModeAutoInput',
             'canvasSyncFirstSyncModeCloudInput',
             'canvasSyncFirstSyncModeLocalInput',
-            'canvasSyncPermanentTreeIntervalSelect',
-            'canvasSyncTempSectionIntervalInput',
-            'canvasSyncMdNodeIntervalInput',
-            'canvasSyncSplitIntervalsToggle',
-            'canvasSyncMismatchPolicySelect',
-            'canvasSyncPullOnStartupToggle',
             'canvasSyncToastToggle',
-            'canvasSyncEditAutoToastToggle',
             'canvasSyncConflictSelect',
+            'canvasSyncConflictFineToggle',
             'canvasSyncPermanentPullModeSelect',
             'canvasSyncPermanentIncrementalThresholdInput',
             'canvasSyncObsidianFilePushToggle',
@@ -6964,13 +7616,11 @@ Cancel: go back and change the branch name first.`
             'canvasSyncFirstSyncPathCheckBtn',
             'canvasSyncFirstSyncOverwriteBtn',
             'canvasSyncRunBgCheckBtn',
-            'canvasSyncPreviewMismatchBtn',
-            'canvasSyncPreviewConflictBtn',
-            'canvasSyncMismatchUseRemoteBtn',
-            'canvasSyncMismatchUseLocalBtn',
-            'canvasSyncMismatchDismissBtn',
             'canvasSyncConflictUseLocalBtn',
             'canvasSyncConflictUseRemoteBtn',
+            'canvasSyncConflictUseNewestBtn',
+            'canvasSyncConflictApplyFineBtn',
+            'canvasSyncConflictRetryMergeBtn',
             'canvasSyncConflictDismissBtn'
         ].forEach((id) => {
             setActionDisabledState(
@@ -6990,26 +7640,40 @@ Cancel: go back and change the branch name first.`
             !disabledByRecoveryLock || recoveryLockResumeInFlight,
             disabledByRecoveryLock ? '' : recoveryHint
         );
-
-        updateBackgroundCheckFieldState();
+        const activeRecoveryLock = normalizeRecoveryLockRecord(recoveryLockState || loadRecoveryLockState());
+        const canRollbackCurrentRecovery = disabledByRecoveryLock && canRollbackRecoveryLock(activeRecoveryLock);
+        setActionDisabledState(
+            getElement('canvasSyncRecoveryRollbackBtn'),
+            !canRollbackCurrentRecovery || recoveryLockResumeInFlight,
+            canRollbackCurrentRecovery
+                ? ''
+                : (disabledByRecoveryLock
+                    ? textByLang('当前恢复锁不支持自动回滚', 'The current recovery lock does not support automatic rollback')
+                    : recoveryHint)
+        );
+        const latestRecoverySnapshot = getLatestRecoverySnapshotRecord({ requireSnapshot: true });
+        const canDownloadRecoverySnapshot = !!(latestRecoverySnapshot && latestRecoverySnapshot.snapshot);
+        const canManualRecoverySnapshot = !disabledByRunning && !disabledByRecoveryLock;
+        setActionDisabledState(
+            getElement('canvasSyncDownloadRecoverySnapshotBtn'),
+            !canDownloadRecoverySnapshot,
+            canDownloadRecoverySnapshot
+                ? ''
+                : textByLang('暂无可下载的恢复快照', 'No downloadable recovery snapshot is available')
+        );
+        setActionDisabledState(
+            getElement('canvasSyncManualRecoverySnapshotBtn'),
+            !canManualRecoverySnapshot,
+            canManualRecoverySnapshot
+                ? ''
+                : (disabledByRunning
+                    ? runningHint
+                    : (disabledByRecoveryLock ? recoveryHint : ''))
+        );
         updatePermanentPullModeFieldState();
-        updateToastNotificationFieldState();
         updatePreviewActionButtonState();
-        updateSyncTemplateUi({ syncSelectionToState: false });
     }
 
-
-    function updateToastNotificationFieldState() {
-        const enabledOn = isSyncEnabledToggleChecked();
-        const toastToggle = getElement('canvasSyncToastToggle');
-        const editAutoToastToggle = getElement('canvasSyncEditAutoToastToggle');
-        const toastEnabled = !!(toastToggle && toastToggle.checked);
-        const disabled = !enabledOn || !toastEnabled;
-        const hint = !enabledOn
-            ? textByLang('启用同步已关闭：此项不可用', 'Sync is disabled: this field is unavailable')
-            : textByLang('右上角普通通知已关闭：此项不可用', 'Top-right general notifications are disabled: this field is unavailable');
-        setControlDisabledState(editAutoToastToggle, disabled, disabled ? hint : '');
-    }
 
     function updatePermanentPullModeFieldState() {
         const enabledOn = isSyncEnabledToggleChecked();
@@ -7034,847 +7698,9 @@ Cancel: go back and change the branch name first.`
             fieldHint
         );
     }
-
-    function updateBackgroundCheckFieldState() {
-        const enabledOn = isSyncEnabledToggleChecked();
-        const foregroundCheckToggle = getElement('canvasSyncForegroundCheckToggle');
-        const foregroundCheckIntervalInput = getElement('canvasSyncForegroundCheckIntervalInput');
-        const backgroundCheckToggle = getElement('canvasSyncBackgroundCheckToggle');
-        const backgroundCheckIntervalInput = getElement('canvasSyncBackgroundCheckIntervalInput');
-        const backgroundCooldownInput = getElement('canvasSyncBackgroundCooldownInput');
-        const mismatchPolicySelect = getElement('canvasSyncMismatchPolicySelect');
-        const pullOnStartupToggle = getElement('canvasSyncPullOnStartupToggle');
-
-        const disabledByMasterHint = textByLang(
-            '启用同步已关闭：此项不可用',
-            'Sync is disabled: this field is unavailable'
-        );
-        const disabledByForegroundCheckHint = textByLang(
-            '前台检测已关闭：此项不生效',
-            'Foreground check disabled: this field is inactive'
-        );
-        const disabledByBackgroundCheckHint = textByLang(
-            '后台检测已关闭：此项不生效',
-            'Background check disabled: this field is inactive'
-        );
-
-        const foregroundCheckOn = !!(enabledOn && foregroundCheckToggle && foregroundCheckToggle.checked);
-        const backgroundCheckOn = !!(enabledOn && backgroundCheckToggle && backgroundCheckToggle.checked);
-        const mismatchFieldHint = !enabledOn ? disabledByMasterHint : textByLang(
-            '前台和后台检测都已关闭：此项不生效',
-            'Both foreground and background checks are disabled: this field is inactive'
-        );
-
-        setControlDisabledState(
-            foregroundCheckToggle,
-            !enabledOn,
-            disabledByMasterHint
-        );
-        setControlDisabledState(
-            foregroundCheckIntervalInput,
-            !foregroundCheckOn,
-            !enabledOn ? disabledByMasterHint : disabledByForegroundCheckHint
-        );
-        setControlDisabledState(
-            backgroundCheckToggle,
-            !enabledOn,
-            disabledByMasterHint
-        );
-        setControlDisabledState(
-            backgroundCheckIntervalInput,
-            !backgroundCheckOn,
-            !enabledOn ? disabledByMasterHint : disabledByBackgroundCheckHint
-        );
-        setControlDisabledState(
-            backgroundCooldownInput,
-            !backgroundCheckOn,
-            !enabledOn ? disabledByMasterHint : disabledByBackgroundCheckHint
-        );
-        setControlDisabledState(
-            pullOnStartupToggle,
-            !backgroundCheckOn,
-            !enabledOn ? disabledByMasterHint : textByLang(
-                '后台检测已关闭：先打开后台检测',
-                'Background check disabled: turn on background check first'
-            )
-        );
-        setControlDisabledState(
-            mismatchPolicySelect,
-            !(foregroundCheckOn || backgroundCheckOn),
-            mismatchFieldHint
-        );
-    }
-
-    function updateTimerModeFieldState() {
-        const splitInterval = getElement('canvasSyncSplitIntervalsToggle');
-        const intervalInput = getElement('canvasSyncIntervalInput');
-        const pushIntervalInput = getElement('canvasSyncAutoPushIntervalInput');
-        const pullIntervalInput = getElement('canvasSyncAutoPullIntervalInput');
-
-        const enabledOn = isSyncEnabledToggleChecked();
-        const splitOn = !!(enabledOn && splitInterval && splitInterval.checked);
-        const disabledByMasterHint = textByLang(
-            '启用同步已关闭：此项不可用',
-            'Sync is disabled: this field is unavailable'
-        );
-        const intervalDisabledHint = textByLang(
-            '分离定时器已开启：此项不生效',
-            'Split timers enabled: this field is inactive'
-        );
-        const pushPullDisabledHint = textByLang(
-            '分离定时器未开启：此项不生效',
-            'Split timers disabled: this field is inactive'
-        );
-
-        const intervalDisabled = !enabledOn || splitOn;
-        const pushPullDisabled = !enabledOn || !splitOn;
-
-        setControlDisabledState(
-            intervalInput,
-            intervalDisabled,
-            !enabledOn ? disabledByMasterHint : intervalDisabledHint
-        );
-        setControlDisabledState(
-            pushIntervalInput,
-            pushPullDisabled,
-            !enabledOn ? disabledByMasterHint : pushPullDisabledHint
-        );
-        setControlDisabledState(
-            pullIntervalInput,
-            pushPullDisabled,
-            !enabledOn ? disabledByMasterHint : pushPullDisabledHint
-        );
-
-        updateBackgroundCheckFieldState();
-        updatePermanentPullModeFieldState();
-    }
-
-    function getSyncTemplatePresetMap() {
-        return {
-            live: {
-                autoSync: true,
-                syncAfterEditStop: true,
-                splitIntervalCommitAndSync: false,
-                intervalSeconds: 60,
-                autoPushIntervalMinutes: 1,
-                autoPullIntervalMinutes: 1,
-                foregroundCheckEnabled: true,
-                foregroundCheckIntervalSeconds: 10,
-                backgroundCheckEnabled: true,
-                backgroundCheckIntervalMinutes: 1,
-                backgroundCooldownMinutes: 2,
-                mismatchPolicy: 'auto_pull',
-                pullOnStartup: true,
-                toastEnabled: false,
-                editAutoToastEnabled: false,
-                permanentTreeUploadIntervalSeconds: 5,
-                tempSectionUploadIntervalSeconds: 2,
-                blankSectionUploadIntervalSeconds: 2
-            },
-            standard: {
-                autoSync: true,
-                syncAfterEditStop: true,
-                splitIntervalCommitAndSync: false,
-                intervalSeconds: 120,
-                autoPushIntervalMinutes: 2,
-                autoPullIntervalMinutes: 5,
-                foregroundCheckEnabled: true,
-                foregroundCheckIntervalSeconds: 30,
-                backgroundCheckEnabled: true,
-                backgroundCheckIntervalMinutes: 1,
-                backgroundCooldownMinutes: 5,
-                mismatchPolicy: 'prompt',
-                pullOnStartup: true,
-                toastEnabled: true,
-                editAutoToastEnabled: false,
-                permanentTreeUploadIntervalSeconds: 15,
-                tempSectionUploadIntervalSeconds: 5,
-                blankSectionUploadIntervalSeconds: 5
-            },
-            backup: {
-                autoSync: true,
-                syncAfterEditStop: false,
-                splitIntervalCommitAndSync: true,
-                intervalSeconds: 300,
-                autoPushIntervalMinutes: 5,
-                autoPullIntervalMinutes: 0,
-                foregroundCheckEnabled: true,
-                foregroundCheckIntervalSeconds: 60,
-                backgroundCheckEnabled: true,
-                backgroundCheckIntervalMinutes: 5,
-                backgroundCooldownMinutes: 15,
-                mismatchPolicy: 'prompt',
-                pullOnStartup: false,
-                toastEnabled: false,
-                editAutoToastEnabled: false,
-                permanentTreeUploadIntervalSeconds: 30,
-                tempSectionUploadIntervalSeconds: 30,
-                blankSectionUploadIntervalSeconds: 30
-            }
-        };
-    }
-
-    function getSyncTemplatePreset(templateKey) {
-        const normalizedKey = String(templateKey || '').trim().toLowerCase();
-        const presetMap = getSyncTemplatePresetMap();
-        return Object.prototype.hasOwnProperty.call(presetMap, normalizedKey)
-            ? Object.assign({}, presetMap[normalizedKey])
-            : null;
-    }
-
-    function getComparableSyncTemplateSettings(sourceSettings = null) {
-        const current = sourceSettings && typeof sourceSettings === 'object'
-            ? sourceSettings
-            : (settings || loadSettings());
-        return {
-            autoSync: current.autoSync !== false,
-            syncAfterEditStop: current.syncAfterEditStop !== false,
-            splitIntervalCommitAndSync: !!current.splitIntervalCommitAndSync,
-            intervalSeconds: normalizeAutoSyncIntervalSeconds(
-                current.intervalSeconds,
-                DEFAULT_SETTINGS.intervalSeconds
-            ),
-            autoPushIntervalMinutes: normalizeSplitIntervalMinutes(
-                current.autoPushIntervalMinutes,
-                DEFAULT_SETTINGS.autoPushIntervalMinutes
-            ),
-            autoPullIntervalMinutes: normalizeSplitIntervalMinutes(
-                current.autoPullIntervalMinutes,
-                DEFAULT_SETTINGS.autoPullIntervalMinutes
-            ),
-            foregroundCheckEnabled: current.foregroundCheckEnabled !== false,
-            foregroundCheckIntervalSeconds: normalizeForegroundCheckSeconds(
-                current.foregroundCheckIntervalSeconds,
-                DEFAULT_SETTINGS.foregroundCheckIntervalSeconds
-            ),
-            backgroundCheckEnabled: current.backgroundCheckEnabled !== false,
-            backgroundCheckIntervalMinutes: normalizeBackgroundMinutes(
-                current.backgroundCheckIntervalMinutes,
-                DEFAULT_SETTINGS.backgroundCheckIntervalMinutes,
-                1
-            ),
-            backgroundCooldownMinutes: normalizeBackgroundMinutes(
-                current.backgroundCooldownMinutes,
-                DEFAULT_SETTINGS.backgroundCooldownMinutes,
-                1
-            ),
-            mismatchPolicy: ensureMismatchPolicy(current.mismatchPolicy),
-            pullOnStartup: !!current.pullOnStartup,
-            toastEnabled: current.toastEnabled !== false,
-            editAutoToastEnabled: current.editAutoToastEnabled !== false,
-            permanentTreeUploadIntervalSeconds: normalizePermanentTreeUploadIntervalSeconds(
-                current.permanentTreeUploadIntervalSeconds,
-                DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds
-            ),
-            tempSectionUploadIntervalSeconds: normalizeCustomUploadIntervalSeconds(
-                current.tempSectionUploadIntervalSeconds,
-                DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
-            ),
-            blankSectionUploadIntervalSeconds: normalizeCustomUploadIntervalSeconds(
-                current.blankSectionUploadIntervalSeconds,
-                DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds
-            )
-        };
-    }
-
-    function detectSyncTemplateKey(sourceSettings = null) {
-        const comparableSettings = getComparableSyncTemplateSettings(sourceSettings);
-        const presetMap = getSyncTemplatePresetMap();
-        const matchedKey = Object.keys(presetMap).find((templateKey) => {
-            const preset = presetMap[templateKey];
-            return Object.keys(preset).every((fieldKey) => comparableSettings[fieldKey] === preset[fieldKey]);
-        });
-        return matchedKey || 'custom';
-    }
-
-    function formatSyncTemplateLabel(templateKey) {
-        const normalizedKey = String(templateKey || '').trim().toLowerCase();
-        if (normalizedKey === 'live') {
-            return textByLang('实时同步', 'Live Sync');
-        }
-        if (normalizedKey === 'standard') {
-            return textByLang('标准同步', 'Standard Sync');
-        }
-        if (normalizedKey === 'backup') {
-            return textByLang('备份优先', 'Backup First');
-        }
-        return textByLang('自定义', 'Custom');
-    }
-
-    function getSyncTemplateDescription(templateKey) {
-        const normalizedKey = String(templateKey || '').trim().toLowerCase();
-        if (normalizedKey === 'live') {
-            return textByLang(
-                '更积极检查云端变化，本地编辑停止后尽快同步，通知更少。',
-                'Checks the cloud more aggressively, syncs soon after editing stops, and keeps notifications quieter.'
-            );
-        }
-        if (normalizedKey === 'standard') {
-            return textByLang(
-                '默认平衡方案，兼顾及时性、稳定性和通知频率。',
-                'The balanced default for timeliness, stability, and notification frequency.'
-            );
-        }
-        if (normalizedKey === 'backup') {
-            return textByLang(
-                '偏向定时上传备份，减少自动拉取和通知打扰。',
-                'Leans toward scheduled backup uploads with fewer auto-pulls and less notification noise.'
-            );
-        }
-        return textByLang(
-            '来自当前设置；下面对应项仍可继续修改。',
-            'Based on the current settings; the matching fields below remain editable.'
-        );
-    }
-
-    function getSyncTemplateMismatchPolicyOptions() {
-        return [
-            {
-                value: 'auto_pull',
-                label: textByLang('自动使用云端覆盖本地', 'Auto Use Cloud to Overwrite Local')
-            },
-            {
-                value: 'auto_push',
-                label: textByLang('自动使用本地覆盖云端', 'Auto Use Local to Overwrite Cloud')
-            },
-            {
-                value: 'prompt',
-                label: textByLang('弹窗提示', 'Prompt')
-            }
-        ];
-    }
-
-    function getSyncTemplatePermanentUploadIntervalOptions() {
-        return [
-            {
-                value: '0',
-                label: textByLang('关闭', 'Off')
-            },
-            {
-                value: '5',
-                label: textByLang('5 秒', '5 sec')
-            },
-            {
-                value: '15',
-                label: textByLang('15 秒（推荐）', '15 sec (Recommended)')
-            },
-            {
-                value: '30',
-                label: textByLang('30 秒', '30 sec')
-            },
-            {
-                value: '60',
-                label: textByLang('1 分钟', '1 min')
-            }
-        ];
-    }
-
-    function getSyncTemplatePreviewSelectValue(rawValue, options, fallbackValue) {
-        const normalizedValue = String(rawValue || '').trim();
-        const safeOptions = Array.isArray(options) ? options : [];
-        if (safeOptions.some((option) => String(option.value) === normalizedValue)) {
-            return normalizedValue;
-        }
-        return String(fallbackValue || '');
-    }
-
-    function getSyncTemplatePreviewGroupLabel(groupKey) {
-        const normalizedKey = String(groupKey || '').trim().toLowerCase();
-        if (normalizedKey === 'plugin') {
-            return textByLang('插件专属', 'Plugin');
-        }
-        if (normalizedKey === 'sync') {
-            return textByLang('自动与同步', 'Automation');
-        }
-        if (normalizedKey === 'timing') {
-            return textByLang('时间与间隔', 'Timing');
-        }
-        if (normalizedKey === 'notifications') {
-            return textByLang('通知', 'Notifications');
-        }
-        return '';
-    }
-
-    function getSyncTemplatePreviewControlStateMap(sourceSettings = null) {
-        const current = sourceSettings && typeof sourceSettings === 'object'
-            ? sourceSettings
-            : (settings || loadSettings());
-        const enabledOn = current.enabled !== false;
-        const splitOn = !!(enabledOn && current.splitIntervalCommitAndSync);
-        const toastOn = !!(enabledOn && current.toastEnabled !== false);
-        const foregroundCheckOn = !!(enabledOn && current.foregroundCheckEnabled !== false);
-        const backgroundCheckOn = !!(enabledOn && current.backgroundCheckEnabled !== false);
-
-        const disabledByMasterHint = textByLang(
-            '启用同步已关闭：此项不可用',
-            'Sync is disabled: this field is unavailable'
-        );
-        const intervalDisabledHint = textByLang(
-            '分离定时器已开启：关闭分离定时器后才可以更改',
-            'Split timers enabled: turn off split timers to edit this field'
-        );
-        const pushPullDisabledHint = textByLang(
-            '分离定时器未开启：打开分离定时器后才可以更改',
-            'Split timers disabled: turn on split timers to edit this field'
-        );
-        const foregroundCheckDisabledHint = textByLang(
-            '前台检测已关闭：打开前台检测后才可以更改',
-            'Foreground check disabled: turn it on to edit this field'
-        );
-        const backgroundCheckDisabledHint = textByLang(
-            '后台检测已关闭：打开后台检测后才可以更改',
-            'Background check disabled: turn it on to edit this field'
-        );
-        const toastDisabledHint = textByLang(
-            '右上角普通通知已关闭：打开后才可以更改',
-            'Top-right general notifications are disabled: turn them on to edit this field'
-        );
-        const mismatchDisabledHint = textByLang(
-            '前台和后台检测都已关闭：至少开启一个检测后才可以更改',
-            'Foreground and background checks are disabled: turn on at least one to edit this field'
-        );
-
-        const stateMap = {};
-        const setState = (rowKey, disabled, hint = '') => {
-            stateMap[rowKey] = {
-                disabled: !!disabled,
-                hint: disabled ? String(hint || '') : ''
-            };
-        };
-
-        [
-            'autoSync',
-            'syncAfterEditStop',
-            'splitIntervalCommitAndSync',
-            'permanentTreeUploadIntervalSeconds',
-            'tempSectionUploadIntervalSeconds',
-            'blankSectionUploadIntervalSeconds',
-            'toastEnabled'
-        ].forEach((rowKey) => {
-            setState(rowKey, !enabledOn, disabledByMasterHint);
-        });
-
-        setState('pullOnStartup', !enabledOn || !backgroundCheckOn, !enabledOn
-            ? disabledByMasterHint
-            : textByLang(
-                '后台检测已关闭：先打开后台检测',
-                'Background check disabled: turn on background check first'
-            ));
-        setState('intervalSeconds', !enabledOn || splitOn, !enabledOn ? disabledByMasterHint : intervalDisabledHint);
-        setState('autoPushIntervalMinutes', !enabledOn || !splitOn, !enabledOn ? disabledByMasterHint : pushPullDisabledHint);
-        setState('autoPullIntervalMinutes', !enabledOn || !splitOn, !enabledOn ? disabledByMasterHint : pushPullDisabledHint);
-        setState('editAutoToastEnabled', !enabledOn || !toastOn, !enabledOn ? disabledByMasterHint : toastDisabledHint);
-        setState('mismatchPolicy', !enabledOn || !(foregroundCheckOn || backgroundCheckOn), !enabledOn ? disabledByMasterHint : mismatchDisabledHint);
-        setState('foregroundCheckIntervalSeconds', !enabledOn || !foregroundCheckOn, !enabledOn ? disabledByMasterHint : foregroundCheckDisabledHint);
-        setState('backgroundCheckIntervalMinutes', !enabledOn || !backgroundCheckOn, !enabledOn ? disabledByMasterHint : backgroundCheckDisabledHint);
-        setState('backgroundCooldownMinutes', !enabledOn || !backgroundCheckOn, !enabledOn ? disabledByMasterHint : backgroundCheckDisabledHint);
-
-        return stateMap;
-    }
-
-    function getSyncTemplatePreviewRowDefinitions() {
-        return [
-            {
-                key: 'autoSync',
-                groupKey: 'sync',
-                label: textByLang('自动同步', 'Auto Sync'),
-                controlType: 'toggle',
-                getControlValue: (current) => current.autoSync !== false,
-                getPatchFromControlValue: (rawValue) => ({ autoSync: !!rawValue })
-            },
-            {
-                key: 'syncAfterEditStop',
-                groupKey: 'sync',
-                label: textByLang('停止编辑后自动同步', 'Auto Sync After Editing Stops'),
-                controlType: 'toggle',
-                getControlValue: (current) => current.syncAfterEditStop !== false,
-                getPatchFromControlValue: (rawValue) => ({ syncAfterEditStop: !!rawValue })
-            },
-            {
-                key: 'splitIntervalCommitAndSync',
-                groupKey: 'sync',
-                label: textByLang('分离定时器', 'Split Timers'),
-                controlType: 'toggle',
-                getControlValue: (current) => !!current.splitIntervalCommitAndSync,
-                getPatchFromControlValue: (rawValue) => ({ splitIntervalCommitAndSync: !!rawValue })
-            },
-            {
-                key: 'mismatchPolicy',
-                groupKey: 'sync',
-                label: textByLang('云端不一致处理（3.3）', 'Mismatch Handling (3.3)'),
-                controlType: 'select',
-                getOptions: () => getSyncTemplateMismatchPolicyOptions(),
-                getControlValue: (current) => ensureMismatchPolicy(current.mismatchPolicy),
-                getPatchFromControlValue: (rawValue) => ({
-                    mismatchPolicy: getSyncTemplatePreviewSelectValue(
-                        rawValue,
-                        getSyncTemplateMismatchPolicyOptions(),
-                        'prompt'
-                    )
-                })
-            },
-            {
-                key: 'permanentTreeUploadIntervalSeconds',
-                groupKey: 'plugin',
-                label: textByLang('永久上传截流', 'Permanent Upload Throttle'),
-                controlType: 'select',
-                getOptions: () => getSyncTemplatePermanentUploadIntervalOptions(),
-                getControlValue: (current) => String(current.permanentTreeUploadIntervalSeconds),
-                getPatchFromControlValue: (rawValue) => ({
-                    permanentTreeUploadIntervalSeconds: toSafeInt(
-                        getSyncTemplatePreviewSelectValue(
-                            rawValue,
-                            getSyncTemplatePermanentUploadIntervalOptions(),
-                            String(DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds)
-                        ),
-                        DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds
-                    )
-                })
-            },
-            {
-                key: 'tempSectionUploadIntervalSeconds',
-                groupKey: 'plugin',
-                label: textByLang('临时上传截流（秒）', 'Temp Upload Throttle (sec)'),
-                controlType: 'number',
-                min: 0,
-                step: 1,
-                getControlValue: (current) => current.tempSectionUploadIntervalSeconds,
-                getPatchFromControlValue: (rawValue) => ({
-                    tempSectionUploadIntervalSeconds: Math.max(
-                        0,
-                        toSafeInt(rawValue, DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds)
-                    )
-                })
-            },
-            {
-                key: 'blankSectionUploadIntervalSeconds',
-                groupKey: 'plugin',
-                label: textByLang('空白上传截流（秒）', 'Blank Upload Throttle (sec)'),
-                controlType: 'number',
-                min: 0,
-                step: 1,
-                getControlValue: (current) => current.blankSectionUploadIntervalSeconds,
-                getPatchFromControlValue: (rawValue) => ({
-                    blankSectionUploadIntervalSeconds: Math.max(
-                        0,
-                        toSafeInt(rawValue, DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds)
-                    )
-                })
-            },
-            {
-                key: 'intervalSeconds',
-                groupKey: 'timing',
-                label: textByLang('自动同步间隔（秒）', 'Auto Sync Interval (sec)'),
-                controlType: 'number',
-                min: 10,
-                step: 1,
-                getControlValue: (current) => current.intervalSeconds,
-                getPatchFromControlValue: (rawValue) => ({
-                    intervalSeconds: normalizeAutoSyncIntervalSeconds(
-                        rawValue,
-                        DEFAULT_SETTINGS.intervalSeconds
-                    )
-                })
-            },
-            {
-                key: 'autoPushIntervalMinutes',
-                groupKey: 'timing',
-                label: textByLang('定时推送间隔（分钟）', 'Scheduled Push Interval (min)'),
-                controlType: 'number',
-                min: 0,
-                step: 1,
-                getControlValue: (current) => current.autoPushIntervalMinutes,
-                getPatchFromControlValue: (rawValue) => ({
-                    autoPushIntervalMinutes: Math.max(0, toSafeInt(rawValue, DEFAULT_SETTINGS.autoPushIntervalMinutes))
-                })
-            },
-            {
-                key: 'autoPullIntervalMinutes',
-                groupKey: 'timing',
-                label: textByLang('定时拉取间隔（分钟）', 'Scheduled Pull Interval (min)'),
-                controlType: 'number',
-                min: 0,
-                step: 1,
-                getControlValue: (current) => current.autoPullIntervalMinutes,
-                getPatchFromControlValue: (rawValue) => ({
-                    autoPullIntervalMinutes: Math.max(0, toSafeInt(rawValue, DEFAULT_SETTINGS.autoPullIntervalMinutes))
-                })
-            },
-            {
-                key: 'foregroundCheckIntervalSeconds',
-                groupKey: 'timing',
-                label: textByLang('前台检测间隔（秒）', 'Foreground Check Interval (sec)'),
-                controlType: 'number',
-                min: 5,
-                step: 1,
-                getControlValue: (current) => current.foregroundCheckIntervalSeconds,
-                getPatchFromControlValue: (rawValue) => ({
-                    foregroundCheckIntervalSeconds: Math.max(
-                        5,
-                        toSafeInt(rawValue, DEFAULT_SETTINGS.foregroundCheckIntervalSeconds)
-                    )
-                })
-            },
-            {
-                key: 'backgroundCheckIntervalMinutes',
-                groupKey: 'timing',
-                label: textByLang('后台检测间隔（分钟）', 'Background Check Interval (min)'),
-                controlType: 'number',
-                min: 1,
-                step: 1,
-                getControlValue: (current) => current.backgroundCheckIntervalMinutes,
-                getPatchFromControlValue: (rawValue) => ({
-                    backgroundCheckIntervalMinutes: Math.max(
-                        1,
-                        toSafeInt(rawValue, DEFAULT_SETTINGS.backgroundCheckIntervalMinutes)
-                    )
-                })
-            },
-            {
-                key: 'backgroundCooldownMinutes',
-                groupKey: 'timing',
-                label: textByLang('后台冷却时间（分钟）', 'Background Cooldown (min)'),
-                controlType: 'number',
-                min: 1,
-                step: 1,
-                getControlValue: (current) => current.backgroundCooldownMinutes,
-                getPatchFromControlValue: (rawValue) => ({
-                    backgroundCooldownMinutes: Math.max(
-                        1,
-                        toSafeInt(rawValue, DEFAULT_SETTINGS.backgroundCooldownMinutes)
-                    )
-                })
-            },
-            {
-                key: 'pullOnStartup',
-                groupKey: 'timing',
-                label: textByLang('开页跟进后台变化', 'Follow Background Changes on Open'),
-                controlType: 'toggle',
-                getControlValue: (current) => !!current.pullOnStartup,
-                getPatchFromControlValue: (rawValue) => ({ pullOnStartup: !!rawValue })
-            },
-            {
-                key: 'toastEnabled',
-                groupKey: 'notifications',
-                label: textByLang('右上角普通通知', 'Top-right General Notifications'),
-                controlType: 'toggle',
-                getControlValue: (current) => current.toastEnabled !== false,
-                getPatchFromControlValue: (rawValue) => ({ toastEnabled: !!rawValue })
-            },
-            {
-                key: 'editAutoToastEnabled',
-                groupKey: 'notifications',
-                label: textByLang('停止编辑后自动同步通知', 'Edit-stop Auto Sync Notifications'),
-                controlType: 'toggle',
-                getControlValue: (current) => current.editAutoToastEnabled !== false,
-                getPatchFromControlValue: (rawValue) => ({ editAutoToastEnabled: !!rawValue })
-            }
-        ];
-    }
-
-    function buildSyncTemplatePreviewRows(sourceSettings = null, controlStateMap = null) {
-        const comparableSettings = getComparableSyncTemplateSettings(sourceSettings);
-        const stateMap = controlStateMap && typeof controlStateMap === 'object'
-            ? controlStateMap
-            : getSyncTemplatePreviewControlStateMap(comparableSettings);
-        const rows = [];
-        let previousGroupKey = '';
-
-        getSyncTemplatePreviewRowDefinitions().forEach((definition) => {
-            const groupKey = String(definition.groupKey || '').trim().toLowerCase();
-            if (groupKey && groupKey !== previousGroupKey) {
-                rows.push({
-                    key: `__group__${groupKey}`,
-                    isGroupHeader: true,
-                    groupKey,
-                    label: getSyncTemplatePreviewGroupLabel(groupKey)
-                });
-                previousGroupKey = groupKey;
-            }
-
-            rows.push({
-                key: definition.key,
-                label: definition.label,
-                controlType: definition.controlType,
-                min: Object.prototype.hasOwnProperty.call(definition, 'min') ? definition.min : null,
-                step: Object.prototype.hasOwnProperty.call(definition, 'step') ? definition.step : null,
-                options: typeof definition.getOptions === 'function' ? definition.getOptions() : [],
-                disabled: !!(stateMap[definition.key] && stateMap[definition.key].disabled),
-                disabledHint: stateMap[definition.key] && stateMap[definition.key].hint
-                    ? stateMap[definition.key].hint
-                    : '',
-                value: typeof definition.getControlValue === 'function'
-                    ? definition.getControlValue(comparableSettings)
-                    : ''
-            });
-        });
-
-        return rows;
-    }
-
-    function getSyncTemplatePreviewRowDefinition(rowKey) {
-        return getSyncTemplatePreviewRowDefinitions().find((definition) => definition.key === rowKey) || null;
-    }
-
-    function updateSyncTemplatePreviewControl(rowKey, rawValue) {
-        const rowDefinition = getSyncTemplatePreviewRowDefinition(rowKey);
-        if (!rowDefinition || typeof rowDefinition.getPatchFromControlValue !== 'function') {
-            return { ok: false };
-        }
-        const patch = rowDefinition.getPatchFromControlValue(rawValue, getComparableSyncTemplateSettings(settings));
-        if (!patch || typeof patch !== 'object') {
-            return { ok: false };
-        }
-        syncApi.updateSettings(patch);
-        const normalizedSettings = getComparableSyncTemplateSettings(settings);
-        if (typeof toast === 'function') {
-            toast(textByLang(
-                `已更新：${rowDefinition.label}`,
-                `Updated: ${rowDefinition.label}`
-            ), { optional: true });
-        }
-        return {
-            ok: true,
-            controlType: rowDefinition.controlType,
-            controlValue: typeof rowDefinition.getControlValue === 'function'
-                ? rowDefinition.getControlValue(normalizedSettings)
-                : rawValue,
-            stateMap: getSyncTemplatePreviewControlStateMap()
-        };
-    }
-
-    function restoreSyncTemplatePreviewDefaults(templateKey) {
-        let normalizedKey = String(templateKey || '').trim().toLowerCase();
-        if (!getSyncTemplatePreset(normalizedKey)) {
-            normalizedKey = 'standard';
-        }
-        const preset = getSyncTemplatePreset(normalizedKey);
-        if (!preset) return false;
-        syncApi.updateSettings(preset);
-        if (typeof toast === 'function') {
-            const label = formatSyncTemplateLabel(normalizedKey);
-            toast(textByLang(
-                `已还原默认：${label}`,
-                `Restored defaults: ${label}`
-            ), { optional: true });
-        }
-        return true;
-    }
-
-    function getSyncTemplatePreviewData(templateKey = null) {
-        const selectedKey = String(templateKey || detectSyncTemplateKey(settings)).trim().toLowerCase() || 'custom';
-        const cards = ['live', 'standard', 'backup'].map((presetKey) => {
-            const presetSettings = getSyncTemplatePreset(presetKey);
-            const comparablePresetSettings = getComparableSyncTemplateSettings(presetSettings);
-            return {
-                key: presetKey,
-                label: formatSyncTemplateLabel(presetKey),
-                note: getSyncTemplateDescription(presetKey),
-                selected: presetKey === selectedKey,
-                foregroundCheckEnabled: comparablePresetSettings.foregroundCheckEnabled !== false,
-                backgroundCheckEnabled: comparablePresetSettings.backgroundCheckEnabled !== false,
-                rows: buildSyncTemplatePreviewRows(presetSettings)
-            };
-        });
-
-        return {
-            selectedKey,
-            restoreKey: getSyncTemplatePreset(selectedKey) ? selectedKey : 'standard',
-            intro: selectedKey === 'custom'
-                ? textByLang(
-                    '当前是自定义。直接改下面控件即可。',
-                    'Current settings are custom. Edit any control below directly.'
-                )
-                : textByLang(
-                    '这里是 3 个官方模板的实际值。直接改下面控件即可。',
-                    'These are the actual values of the 3 built-in templates. Edit any control below directly.'
-                ),
-            cards
-        };
-    }
-
-    function updateSyncTemplateUi(options = {}) {
-        const templateSelect = getElement('canvasSyncTemplateSelect');
-        if (!templateSelect) return;
-
-        const shouldSyncSelection = options.syncSelectionToState !== false;
-        if (shouldSyncSelection) {
-            templateSelect.value = detectSyncTemplateKey(settings);
-        }
-    }
-
-    function applySyncTemplateToForm(templateKey) {
-        const preset = getSyncTemplatePreset(templateKey);
-        if (!preset) return false;
-
-        const auto = getElement('canvasSyncAutoToggle');
-        const syncAfterEditStop = getElement('canvasSyncAutoAfterEditStopToggle');
-        const splitInterval = getElement('canvasSyncSplitIntervalsToggle');
-        const permanentTreeUploadInterval = getElement('canvasSyncPermanentTreeIntervalSelect');
-        const tempSectionUploadInterval = getElement('canvasSyncTempSectionIntervalInput');
-        const blankSectionUploadInterval = getElement('canvasSyncMdNodeIntervalInput');
-        const interval = getElement('canvasSyncIntervalInput');
-        const pushInterval = getElement('canvasSyncAutoPushIntervalInput');
-        const pullInterval = getElement('canvasSyncAutoPullIntervalInput');
-        const foregroundCheckEnabled = getElement('canvasSyncForegroundCheckToggle');
-        const foregroundCheckInterval = getElement('canvasSyncForegroundCheckIntervalInput');
-        const backgroundCheckEnabled = getElement('canvasSyncBackgroundCheckToggle');
-        const backgroundCheckInterval = getElement('canvasSyncBackgroundCheckIntervalInput');
-        const backgroundCooldown = getElement('canvasSyncBackgroundCooldownInput');
-        const mismatchPolicy = getElement('canvasSyncMismatchPolicySelect');
-        const pullOnStartup = getElement('canvasSyncPullOnStartupToggle');
-        const toastToggle = getElement('canvasSyncToastToggle');
-        const editAutoToastToggle = getElement('canvasSyncEditAutoToastToggle');
-
-        if (auto) auto.checked = !!preset.autoSync;
-        if (syncAfterEditStop) syncAfterEditStop.checked = !!preset.syncAfterEditStop;
-        if (splitInterval) splitInterval.checked = !!preset.splitIntervalCommitAndSync;
-        if (permanentTreeUploadInterval) permanentTreeUploadInterval.value = String(preset.permanentTreeUploadIntervalSeconds);
-        if (tempSectionUploadInterval) tempSectionUploadInterval.value = String(preset.tempSectionUploadIntervalSeconds);
-        if (blankSectionUploadInterval) blankSectionUploadInterval.value = String(preset.blankSectionUploadIntervalSeconds);
-        if (interval) {
-            interval.value = String(
-                normalizeAutoSyncIntervalSeconds(
-                    preset.intervalSeconds,
-                    DEFAULT_SETTINGS.intervalSeconds
-                )
-            );
-        }
-        if (pushInterval) pushInterval.value = String(preset.autoPushIntervalMinutes);
-        if (pullInterval) pullInterval.value = String(preset.autoPullIntervalMinutes);
-        if (foregroundCheckEnabled) foregroundCheckEnabled.checked = !!preset.foregroundCheckEnabled;
-        if (foregroundCheckInterval) foregroundCheckInterval.value = String(preset.foregroundCheckIntervalSeconds);
-        if (backgroundCheckEnabled) backgroundCheckEnabled.checked = !!preset.backgroundCheckEnabled;
-        if (backgroundCheckInterval) backgroundCheckInterval.value = String(preset.backgroundCheckIntervalMinutes);
-        if (backgroundCooldown) backgroundCooldown.value = String(preset.backgroundCooldownMinutes);
-        if (mismatchPolicy) mismatchPolicy.value = ensureMismatchPolicy(preset.mismatchPolicy);
-        if (pullOnStartup) pullOnStartup.checked = !!preset.pullOnStartup;
-        if (toastToggle) toastToggle.checked = !!preset.toastEnabled;
-        if (editAutoToastToggle) editAutoToastToggle.checked = !!preset.editAutoToastEnabled;
-
-        return true;
-    }
-
     function applySettingsToForm() {
         const enabled = getElement('canvasSyncEnabledToggle');
-        const auto = getElement('canvasSyncAutoToggle');
-        const syncAfterEditStop = getElement('canvasSyncAutoAfterEditStopToggle');
-        const splitInterval = getElement('canvasSyncSplitIntervalsToggle');
-        const permanentTreeUploadInterval = getElement('canvasSyncPermanentTreeIntervalSelect');
-        const tempSectionUploadInterval = getElement('canvasSyncTempSectionIntervalInput');
-        const blankSectionUploadInterval = getElement('canvasSyncMdNodeIntervalInput');
-        const interval = getElement('canvasSyncIntervalInput');
-        const pushInterval = getElement('canvasSyncAutoPushIntervalInput');
-        const pullInterval = getElement('canvasSyncAutoPullIntervalInput');
-        const foregroundCheckEnabled = getElement('canvasSyncForegroundCheckToggle');
-        const foregroundCheckInterval = getElement('canvasSyncForegroundCheckIntervalInput');
-        const backgroundCheckEnabled = getElement('canvasSyncBackgroundCheckToggle');
-        const backgroundCheckInterval = getElement('canvasSyncBackgroundCheckIntervalInput');
-        const backgroundCooldown = getElement('canvasSyncBackgroundCooldownInput');
-        const mismatchPolicy = getElement('canvasSyncMismatchPolicySelect');
-        const pullOnStartup = getElement('canvasSyncPullOnStartupToggle');
         const toastToggle = getElement('canvasSyncToastToggle');
-        const editAutoToastToggle = getElement('canvasSyncEditAutoToastToggle');
         const conflict = getElement('canvasSyncConflictSelect');
         const permanentPullMode = getElement('canvasSyncPermanentPullModeSelect');
         const permanentIncrementalThreshold = getElement('canvasSyncPermanentIncrementalThresholdInput');
@@ -7883,83 +7709,8 @@ Cancel: go back and change the branch name first.`
         const obsidianExportRoot = getElement('canvasSyncObsidianExportRootInput');
 
         if (enabled) enabled.checked = !!settings.enabled;
-        if (auto) auto.checked = !!settings.autoSync;
-        if (syncAfterEditStop) syncAfterEditStop.checked = settings.syncAfterEditStop !== false;
-        if (splitInterval) splitInterval.checked = !!settings.splitIntervalCommitAndSync;
         setFirstSyncModeToForm(settings.firstSyncMode);
-        if (permanentTreeUploadInterval) {
-            permanentTreeUploadInterval.value = String(
-                normalizePermanentTreeUploadIntervalSeconds(
-                    settings.permanentTreeUploadIntervalSeconds,
-                    DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds
-                )
-            );
-        }
-        if (tempSectionUploadInterval) {
-            tempSectionUploadInterval.value = String(
-                normalizeCustomUploadIntervalSeconds(
-                    settings.tempSectionUploadIntervalSeconds,
-                    DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
-                )
-            );
-        }
-        if (blankSectionUploadInterval) {
-            blankSectionUploadInterval.value = String(
-                normalizeCustomUploadIntervalSeconds(
-                    settings.blankSectionUploadIntervalSeconds,
-                    DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds
-                )
-            );
-        }
-        if (interval) {
-            interval.value = String(
-                normalizeAutoSyncIntervalSeconds(
-                    settings.intervalSeconds,
-                    DEFAULT_SETTINGS.intervalSeconds
-                )
-            );
-        }
-        if (pushInterval) {
-            pushInterval.value = String(
-                normalizeSplitIntervalMinutes(
-                    settings.autoPushIntervalMinutes,
-                    DEFAULT_SETTINGS.autoPushIntervalMinutes
-                )
-            );
-        }
-        if (pullInterval) {
-            pullInterval.value = String(
-                normalizeSplitIntervalMinutes(
-                    settings.autoPullIntervalMinutes,
-                    DEFAULT_SETTINGS.autoPullIntervalMinutes
-                )
-            );
-        }
-        if (foregroundCheckEnabled) foregroundCheckEnabled.checked = settings.foregroundCheckEnabled !== false;
-        if (foregroundCheckInterval) foregroundCheckInterval.value = String(normalizeForegroundCheckSeconds(settings.foregroundCheckIntervalSeconds, DEFAULT_SETTINGS.foregroundCheckIntervalSeconds));
-        if (backgroundCheckEnabled) backgroundCheckEnabled.checked = settings.backgroundCheckEnabled !== false;
-        if (backgroundCheckInterval) {
-            backgroundCheckInterval.value = String(
-                normalizeBackgroundMinutes(
-                    settings.backgroundCheckIntervalMinutes,
-                    DEFAULT_SETTINGS.backgroundCheckIntervalMinutes,
-                    1
-                )
-            );
-        }
-        if (backgroundCooldown) {
-            backgroundCooldown.value = String(
-                normalizeBackgroundMinutes(
-                    settings.backgroundCooldownMinutes,
-                    DEFAULT_SETTINGS.backgroundCooldownMinutes,
-                    1
-                )
-            );
-        }
-        if (mismatchPolicy) mismatchPolicy.value = ensureMismatchPolicy(settings.mismatchPolicy);
-        if (pullOnStartup) pullOnStartup.checked = !!settings.pullOnStartup;
         if (toastToggle) toastToggle.checked = settings.toastEnabled !== false;
-        if (editAutoToastToggle) editAutoToastToggle.checked = settings.editAutoToastEnabled !== false;
         if (conflict) conflict.value = ensureConflictPolicy(settings.conflictPolicy);
         if (permanentPullMode) permanentPullMode.value = ensurePermanentPullMode(settings.permanentPullMode);
         if (permanentIncrementalThreshold) permanentIncrementalThreshold.value = String(normalizePermanentIncrementalMaxChanges(settings.permanentIncrementalMaxChanges, DEFAULT_SETTINGS.permanentIncrementalMaxChanges));
@@ -7971,95 +7722,27 @@ Cancel: go back and change the branch name first.`
                 : DEFAULT_SETTINGS.obsidianExportRoot;
         }
         updateSyncEnabledDependentFieldState();
-        updateTimerModeFieldState();
-        updateSyncTemplateUi();
     }
 
-    function pullSettingsFromForm() {
+    function pullSettingsFromForm(options = {}) {
+        const silentFormatToast = !!(options && options.silentFormatToast === true);
         const enabled = getElement('canvasSyncEnabledToggle');
-        const auto = getElement('canvasSyncAutoToggle');
-        const syncAfterEditStop = getElement('canvasSyncAutoAfterEditStopToggle');
-        const splitInterval = getElement('canvasSyncSplitIntervalsToggle');
-        const permanentTreeUploadInterval = getElement('canvasSyncPermanentTreeIntervalSelect');
-        const tempSectionUploadInterval = getElement('canvasSyncTempSectionIntervalInput');
-        const blankSectionUploadInterval = getElement('canvasSyncMdNodeIntervalInput');
-        const interval = getElement('canvasSyncIntervalInput');
-        const pushInterval = getElement('canvasSyncAutoPushIntervalInput');
-        const pullInterval = getElement('canvasSyncAutoPullIntervalInput');
-        const foregroundCheckEnabled = getElement('canvasSyncForegroundCheckToggle');
-        const foregroundCheckInterval = getElement('canvasSyncForegroundCheckIntervalInput');
-        const backgroundCheckEnabled = getElement('canvasSyncBackgroundCheckToggle');
-        const backgroundCheckInterval = getElement('canvasSyncBackgroundCheckIntervalInput');
-        const backgroundCooldown = getElement('canvasSyncBackgroundCooldownInput');
-        const mismatchPolicy = getElement('canvasSyncMismatchPolicySelect');
-        const pullOnStartup = getElement('canvasSyncPullOnStartupToggle');
         const toastToggle = getElement('canvasSyncToastToggle');
-        const editAutoToastToggle = getElement('canvasSyncEditAutoToastToggle');
         const conflict = getElement('canvasSyncConflictSelect');
         const permanentPullMode = getElement('canvasSyncPermanentPullModeSelect');
         const permanentIncrementalThreshold = getElement('canvasSyncPermanentIncrementalThresholdInput');
         const obsidianFilePushEnabled = getElement('canvasSyncObsidianFilePushToggle');
         const obsidianExportFormat = getElement('canvasSyncObsidianExportFormatSelect');
         const obsidianExportRoot = getElement('canvasSyncObsidianExportRootInput');
-
-	        settings.enabled = enabled ? !!enabled.checked : settings.enabled;
-	        settings.autoSync = auto ? !!auto.checked : settings.autoSync;
-	        settings.syncAfterEditStop = syncAfterEditStop ? !!syncAfterEditStop.checked : settings.syncAfterEditStop;
-	        settings.splitIntervalCommitAndSync = splitInterval ? !!splitInterval.checked : settings.splitIntervalCommitAndSync;
-	        settings.firstSyncMode = getFirstSyncModeFromForm(settings.firstSyncMode);
-	        setFirstSyncModeToForm(settings.firstSyncMode);
-	        settings.permanentTreeUploadIntervalSeconds = normalizePermanentTreeUploadIntervalSeconds(
-	            permanentTreeUploadInterval ? permanentTreeUploadInterval.value : settings.permanentTreeUploadIntervalSeconds,
-	            DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds
-	        );
-        settings.tempSectionUploadIntervalSeconds = normalizeCustomUploadIntervalSeconds(
-            tempSectionUploadInterval ? tempSectionUploadInterval.value : settings.tempSectionUploadIntervalSeconds,
-            DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
-        );
-        settings.blankSectionUploadIntervalSeconds = normalizeCustomUploadIntervalSeconds(
-            blankSectionUploadInterval ? blankSectionUploadInterval.value : settings.blankSectionUploadIntervalSeconds,
-            DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds
+        const previousObsidianExportFormat = normalizeObsidianExportFormat(
+            settings && settings.obsidianExportFormat,
+            DEFAULT_SETTINGS.obsidianExportFormat
         );
 
-        settings.intervalSeconds = normalizeAutoSyncIntervalSeconds(
-            interval ? interval.value : settings.intervalSeconds,
-            DEFAULT_SETTINGS.intervalSeconds
-        );
-        if (interval) interval.value = String(settings.intervalSeconds);
-
-        settings.autoPushIntervalMinutes = normalizeSplitIntervalMinutes(
-            pushInterval ? pushInterval.value : settings.autoPushIntervalMinutes,
-            DEFAULT_SETTINGS.autoPushIntervalMinutes
-        );
-        settings.autoPullIntervalMinutes = normalizeSplitIntervalMinutes(
-            pullInterval ? pullInterval.value : settings.autoPullIntervalMinutes,
-            DEFAULT_SETTINGS.autoPullIntervalMinutes
-        );
-        if (pushInterval) pushInterval.value = String(settings.autoPushIntervalMinutes);
-        if (pullInterval) pullInterval.value = String(settings.autoPullIntervalMinutes);
-        settings.foregroundCheckEnabled = foregroundCheckEnabled ? !!foregroundCheckEnabled.checked : settings.foregroundCheckEnabled;
-        settings.foregroundCheckIntervalSeconds = normalizeForegroundCheckSeconds(
-            foregroundCheckInterval ? foregroundCheckInterval.value : settings.foregroundCheckIntervalSeconds,
-            DEFAULT_SETTINGS.foregroundCheckIntervalSeconds
-        );
-        if (foregroundCheckInterval) foregroundCheckInterval.value = String(settings.foregroundCheckIntervalSeconds);
-        settings.backgroundCheckEnabled = backgroundCheckEnabled ? !!backgroundCheckEnabled.checked : settings.backgroundCheckEnabled;
-        settings.backgroundCheckIntervalMinutes = normalizeBackgroundMinutes(
-            backgroundCheckInterval ? backgroundCheckInterval.value : settings.backgroundCheckIntervalMinutes,
-            DEFAULT_SETTINGS.backgroundCheckIntervalMinutes,
-            1
-        );
-        settings.backgroundCooldownMinutes = normalizeBackgroundMinutes(
-            backgroundCooldown ? backgroundCooldown.value : settings.backgroundCooldownMinutes,
-            DEFAULT_SETTINGS.backgroundCooldownMinutes,
-            1
-        );
-        if (backgroundCheckInterval) backgroundCheckInterval.value = String(settings.backgroundCheckIntervalMinutes);
-        if (backgroundCooldown) backgroundCooldown.value = String(settings.backgroundCooldownMinutes);
-        settings.mismatchPolicy = ensureMismatchPolicy(mismatchPolicy ? mismatchPolicy.value : settings.mismatchPolicy);
-        settings.pullOnStartup = pullOnStartup ? !!pullOnStartup.checked : settings.pullOnStartup;
+        settings.enabled = enabled ? !!enabled.checked : settings.enabled;
+        settings.firstSyncMode = getFirstSyncModeFromForm(settings.firstSyncMode);
+        setFirstSyncModeToForm(settings.firstSyncMode);
         settings.toastEnabled = toastToggle ? !!toastToggle.checked : settings.toastEnabled;
-        settings.editAutoToastEnabled = editAutoToastToggle ? !!editAutoToastToggle.checked : settings.editAutoToastEnabled;
 
         settings.syncMethod = DEFAULT_SETTINGS.syncMethod;
         settings.conflictPolicy = ensureConflictPolicy(conflict ? conflict.value : settings.conflictPolicy);
@@ -8080,17 +7763,28 @@ Cancel: go back and change the branch name first.`
         );
 
         updateSyncEnabledDependentFieldState();
-        updateTimerModeFieldState();
-        updateSyncTemplateUi();
         saveSettings();
-        restartAutomationTimers();
-        void updateBackgroundSyncContext('settings-change');
-        if (runtime && runtime.pendingMismatch) {
-            const mismatchPolicyValue = ensureMismatchPolicy(settings.mismatchPolicy);
-            if (mismatchPolicyValue === 'auto_pull' || mismatchPolicyValue === 'auto_push') {
-                void maybeHandlePendingMismatchAutoPull();
+
+        const currentObsidianExportFormat = getCurrentObsidianExportFormatForSync();
+        if (previousObsidianExportFormat !== currentObsidianExportFormat) {
+            updateDirtyStateByReason('obsidian-export-format-change', {
+                dirty: {
+                    permanentAll: true,
+                    temporaryAll: true,
+                    blankAll: true
+                }
+            });
+            if (!silentFormatToast) {
+                const previousFormatLabel = formatObsidianExportFormatLabel(previousObsidianExportFormat) || previousObsidianExportFormat;
+                const currentFormatLabel = formatObsidianExportFormatLabel(currentObsidianExportFormat) || currentObsidianExportFormat;
+                toast(textByLang(
+                    `已切换导出格式：${previousFormatLabel} -> ${currentFormatLabel}`,
+                    `Export format switched: ${previousFormatLabel} -> ${currentFormatLabel}`
+                ), { optional: true });
             }
         }
+
+        void updateBackgroundSyncContext('settings-change');
     }
 
     function setActiveTab(tabKey, options = {}) {
@@ -8113,6 +7807,7 @@ Cancel: go back and change the branch name first.`
         });
 
         setBehaviorSubNavVisible(nextTab === 'behavior');
+        setStatusSubNavVisible(nextTab === 'status');
         if (nextTab === 'behavior') {
             const currentActiveSubButton = getCurrentActiveBehaviorSubButtonId();
             if (currentActiveSubButton) {
@@ -8121,6 +7816,14 @@ Cancel: go back and change the branch name first.`
                 setBehaviorSubNavActive(BEHAVIOR_SUBNAV_CONFIG[0].buttonId);
             }
             scheduleBehaviorSubNavSyncFromScroll();
+        } else if (nextTab === 'status') {
+            const currentActiveSubButton = getCurrentActiveStatusSubButtonId();
+            if (currentActiveSubButton) {
+                setStatusSubNavActive(currentActiveSubButton);
+            } else if (STATUS_SUBNAV_CONFIG.length > 0) {
+                setStatusSubNavActive(STATUS_SUBNAV_CONFIG[0].buttonId);
+            }
+            scheduleStatusSubNavSyncFromScroll();
         }
 
         activeTabKey = nextTab;
@@ -8149,10 +7852,34 @@ Cancel: go back and change the branch name first.`
         }
     }
 
+    function setStatusSubNavVisible(visible) {
+        const subNavEl = getElement('canvasSyncStatusSubNav');
+        if (!subNavEl) return;
+        subNavEl.hidden = !visible;
+    }
+
     function setBehaviorCompatSubNavVisible(visible) {
         const subNavEl = getElement('canvasSyncBehaviorSubCompatNav');
         if (!subNavEl) return;
         subNavEl.hidden = !visible;
+    }
+
+    function getCurrentActiveStatusSubButtonId() {
+        const subNavEl = getElement('canvasSyncStatusSubNav');
+        if (!subNavEl) return '';
+        const activeButton = subNavEl.querySelector('.canvas-sync-tab-subnav-btn.is-active, .canvas-sync-tab-subnav-btn[aria-current="true"]');
+        if (!activeButton || !activeButton.id) return '';
+        return activeButton.id;
+    }
+
+    function setStatusSubNavActive(buttonId) {
+        STATUS_SUBNAV_CONFIG.forEach((item) => {
+            const buttonEl = getElement(item.buttonId);
+            if (!buttonEl) return;
+            const isActive = item.buttonId === buttonId;
+            buttonEl.classList.toggle('is-active', isActive);
+            buttonEl.setAttribute('aria-current', isActive ? 'true' : 'false');
+        });
     }
 
     function getCurrentActiveBehaviorSubButtonId() {
@@ -8249,35 +7976,41 @@ Cancel: go back and change the branch name first.`
         scheduleBehaviorSubNavSyncFromScroll();
     }
 
-    function jumpToBehaviorPolicySection({ nestedButtonId, targetId, focusId }) {
-        if (!nestedButtonId || !targetId) return;
+    function getStatusScrollContainer() {
+        const panelEl = getElement('canvasSyncTabStatusPanel');
+        if (!panelEl) return null;
+        if (document && document.documentElement && document.documentElement.classList.contains('side-panel-mode')) {
+            const modal = getElement('canvasSyncModal');
+            const bodyEl = modal && typeof modal.querySelector === 'function'
+                ? modal.querySelector('.canvas-manage-modal-body')
+                : null;
+            if (bodyEl) return bodyEl;
+        }
+        return panelEl;
+    }
 
-        setActiveTab('behavior');
-        setBehaviorSubNavActive('canvasSyncBehaviorSubCompatBtn');
-        setBehaviorCompatSubNavVisible(true);
-        setBehaviorCompatSubNavActive(nestedButtonId);
+    function scrollStatusSectionIntoView(targetId) {
+        const panelEl = getElement('canvasSyncTabStatusPanel');
+        const containerEl = getStatusScrollContainer();
+        const targetEl = getElement(targetId);
+        if (!panelEl || !containerEl || !targetEl) return;
 
-        const applyJump = () => {
-            scrollBehaviorSectionIntoView(targetId);
-            const focusEl = focusId ? getElement(focusId) : null;
-            if (!focusEl || typeof focusEl.focus !== 'function') return;
+        const containerRect = containerEl.getBoundingClientRect();
+        const targetRect = targetEl.getBoundingClientRect();
+        const currentTop = Number(containerEl.scrollTop) || 0;
+        const stickyOffset = getBehaviorStickyNavHeight();
+        const nextTop = Math.max(0, currentTop + (targetRect.top - containerRect.top) - stickyOffset - 6);
+
+        if (typeof containerEl.scrollTo === 'function') {
             try {
-                focusEl.focus({ preventScroll: true });
-            } catch (_) {
-                try {
-                    focusEl.focus();
-                } catch (_) { }
-            }
-        };
-
-        if (global && typeof global.requestAnimationFrame === 'function') {
-            global.requestAnimationFrame(() => {
-                global.requestAnimationFrame(applyJump);
-            });
-            return;
+                containerEl.scrollTo({ top: nextTop, behavior: 'auto' });
+                scheduleStatusSubNavSyncFromScroll();
+                return;
+            } catch (_) { }
         }
 
-        global.setTimeout(applyJump, 0);
+        containerEl.scrollTop = nextTop;
+        scheduleStatusSubNavSyncFromScroll();
     }
 
     function bindBehaviorSubNavButtons() {
@@ -8341,6 +8074,43 @@ Cancel: go back and change the branch name first.`
         }
     }
 
+    function bindStatusSubNavButtons() {
+        STATUS_SUBNAV_CONFIG.forEach((item, index) => {
+            const buttonEl = getElement(item.buttonId);
+            if (!buttonEl) return;
+            if (buttonEl.dataset.bound === 'true') return;
+
+            buttonEl.dataset.bound = 'true';
+            buttonEl.addEventListener('click', () => {
+                setActiveTab('status');
+                setStatusSubNavActive(item.buttonId);
+                scrollStatusSectionIntoView(item.targetId);
+            });
+
+            if (index === 0) {
+                buttonEl.classList.add('is-active');
+                buttonEl.setAttribute('aria-current', 'true');
+            } else {
+                buttonEl.setAttribute('aria-current', 'false');
+            }
+        });
+
+        const panelEl = getElement('canvasSyncTabStatusPanel');
+        const containerEl = getStatusScrollContainer();
+        if (panelEl && panelEl.dataset.statusSubnavScrollBound !== 'true') {
+            panelEl.dataset.statusSubnavScrollBound = 'true';
+            panelEl.addEventListener('scroll', () => {
+                scheduleStatusSubNavSyncFromScroll();
+            }, { passive: true });
+        }
+        if (containerEl && containerEl !== panelEl && containerEl.dataset.statusSubnavScrollBound !== 'true') {
+            containerEl.dataset.statusSubnavScrollBound = 'true';
+            containerEl.addEventListener('scroll', () => {
+                scheduleStatusSubNavSyncFromScroll();
+            }, { passive: true });
+        }
+    }
+
     function findBehaviorSubNavButtonIdByScroll() {
         const panelEl = getElement('canvasSyncTabBehaviorPanel');
         const containerEl = getBehaviorScrollContainer();
@@ -8354,6 +8124,33 @@ Cancel: go back and change the branch name first.`
 
         for (let i = 0; i < BEHAVIOR_SUBNAV_CONFIG.length; i++) {
             const item = BEHAVIOR_SUBNAV_CONFIG[i];
+            const targetEl = getElement(item.targetId);
+            if (!targetEl) continue;
+
+            if (!fallbackButtonId) fallbackButtonId = item.buttonId;
+
+            const targetRect = targetEl.getBoundingClientRect();
+            if (targetRect.top <= anchorTop) {
+                matchedButtonId = item.buttonId;
+            }
+        }
+
+        return matchedButtonId || fallbackButtonId || '';
+    }
+
+    function findStatusSubNavButtonIdByScroll() {
+        const panelEl = getElement('canvasSyncTabStatusPanel');
+        const containerEl = getStatusScrollContainer();
+        if (!panelEl || !containerEl) return '';
+
+        const containerRect = containerEl.getBoundingClientRect();
+        const anchorTop = containerRect.top + getBehaviorStickyNavHeight() + 6;
+
+        let fallbackButtonId = '';
+        let matchedButtonId = '';
+
+        for (let i = 0; i < STATUS_SUBNAV_CONFIG.length; i++) {
+            const item = STATUS_SUBNAV_CONFIG[i];
             const targetEl = getElement(item.targetId);
             if (!targetEl) continue;
 
@@ -8398,6 +8195,17 @@ Cancel: go back and change the branch name first.`
         }
     }
 
+    function syncStatusSubNavActiveByScrollPosition() {
+        if (activeTabKey !== 'status') return;
+        const nextButtonId = findStatusSubNavButtonIdByScroll();
+        if (!nextButtonId) return;
+
+        const currentButtonId = getCurrentActiveStatusSubButtonId();
+        if (currentButtonId !== nextButtonId) {
+            setStatusSubNavActive(nextButtonId);
+        }
+    }
+
     function scheduleBehaviorSubNavSyncFromScroll() {
         if (behaviorSubNavScrollRaf != null) return;
         behaviorSubNavScrollRaf = global.requestAnimationFrame(() => {
@@ -8406,10 +8214,20 @@ Cancel: go back and change the branch name first.`
         });
     }
 
+    function scheduleStatusSubNavSyncFromScroll() {
+        if (statusSubNavScrollRaf != null) return;
+        statusSubNavScrollRaf = global.requestAnimationFrame(() => {
+            statusSubNavScrollRaf = null;
+            syncStatusSubNavActiveByScrollPosition();
+        });
+    }
+
     function readTempStateTimestampFromRaw(raw) {
         if (!raw) return 0;
+        const normalizedRaw = buildNormalizedCanvasTempStateRawForSync(raw);
+        if (!normalizedRaw) return 0;
         try {
-            const parsed = JSON.parse(raw);
+            const parsed = JSON.parse(normalizedRaw);
             const ts = Number(parsed && parsed.timestamp);
             return Number.isFinite(ts) && ts > 0 ? ts : 0;
         } catch (_) {
@@ -8420,6 +8238,318 @@ Cancel: go back and change the branch name first.`
     const SNAPSHOT_COMPARABLE_DATA_KEYS = [
         TEMP_SECTION_STORAGE_KEY
     ];
+    const PERMANENT_VIEW_SHELL_COMPARE_KEY = 'permanent-view-shell-snapshot';
+
+    function parsePermanentViewNumericValueForSync(value) {
+        const n = parseFloat(String(value == null ? '' : value).trim());
+        return Number.isFinite(n) ? Math.round(n) : null;
+    }
+
+    function normalizePermanentViewCardStateForSync(raw) {
+        const source = raw && typeof raw === 'object' ? raw : {};
+        const out = {};
+        ['left', 'top', 'width', 'height'].forEach((key) => {
+            const normalized = parsePermanentViewNumericValueForSync(source[key]);
+            if (normalized !== null) out[key] = normalized;
+        });
+        return out;
+    }
+
+    function normalizePermanentViewScrollStateForSync(raw) {
+        const source = raw && typeof raw === 'object' ? raw : {};
+        const out = {};
+        ['page', 'sidepanel'].forEach((partitionKey) => {
+            const partition = source[partitionKey];
+            if (!partition || typeof partition !== 'object') return;
+            const top = parsePermanentViewNumericValueForSync(partition.top);
+            const left = parsePermanentViewNumericValueForSync(partition.left);
+            if (top === null && left === null) return;
+            out[partitionKey] = {
+                top: top === null ? 0 : top,
+                left: left === null ? 0 : left
+            };
+        });
+        return out;
+    }
+
+    function normalizePermanentViewFoldStateForSync(raw) {
+        const source = raw && typeof raw === 'object' ? raw : {};
+        const out = {};
+        ['page', 'sidepanel'].forEach((partitionKey) => {
+            const partition = source[partitionKey];
+            const expanded = Array.isArray(partition && partition.expanded)
+                ? partition.expanded
+                : (Array.isArray(partition) ? partition : []);
+            const normalizedExpanded = Array.from(new Set(
+                expanded
+                    .map((id) => String(id || '').trim())
+                    .filter(Boolean)
+            )).sort();
+            if (normalizedExpanded.length) {
+                out[partitionKey] = { expanded: normalizedExpanded };
+            }
+        });
+        return out;
+    }
+
+    function normalizePermanentViewShellEntryForSync(raw) {
+        const source = raw && typeof raw === 'object' ? raw : {};
+        const copyIdRaw = typeof source.copyId === 'string' ? source.copyId.trim() : '';
+        const copyId = copyIdRaw || null;
+        const displayIndexRaw = parseInt(source.displayIndex, 10);
+        const displayIndex = copyId && Number.isFinite(displayIndexRaw) && displayIndexRaw > 0
+            ? displayIndexRaw
+            : null;
+        const shell = {
+            viewId: copyId ? `permanent-section-copy-${copyId}` : 'permanent-section',
+            copyId,
+            descriptionMd: String(source.descriptionMd || source.description || '').trim(),
+            cardState: normalizePermanentViewCardStateForSync(source.cardState || source),
+            scrollState: normalizePermanentViewScrollStateForSync(source.scrollState),
+            foldState: normalizePermanentViewFoldStateForSync(source.foldState)
+        };
+        if (displayIndex) shell.displayIndex = displayIndex;
+        return shell;
+    }
+
+    function buildFallbackPermanentViewShellSnapshotForSync(sourceInput = null) {
+        const source = sourceInput && typeof sourceInput === 'object' ? sourceInput : {};
+
+        if (Array.isArray(source.views)) {
+            const deduped = new Map();
+            source.views.forEach((view) => {
+                const normalized = normalizePermanentViewShellEntryForSync(view);
+                if (!normalized || !normalized.viewId) return;
+                deduped.set(normalized.viewId, normalized);
+            });
+            if (!deduped.has('permanent-section')) {
+                deduped.set('permanent-section', normalizePermanentViewShellEntryForSync({ copyId: null }));
+            }
+            return {
+                version: Number(source.version) || 1,
+                views: Array.from(deduped.values()).sort((a, b) => {
+                    const aIsCopy = !!a.copyId;
+                    const bIsCopy = !!b.copyId;
+                    if (aIsCopy !== bIsCopy) return aIsCopy ? 1 : -1;
+                    const aIndex = Number(a.displayIndex) || Number.MAX_SAFE_INTEGER;
+                    const bIndex = Number(b.displayIndex) || Number.MAX_SAFE_INTEGER;
+                    if (aIndex !== bIndex) return aIndex - bIndex;
+                    return String(a.copyId || '').localeCompare(String(b.copyId || ''));
+                })
+            };
+        }
+
+        const readRaw = (key) => Object.prototype.hasOwnProperty.call(source, key) ? source[key] : '';
+        const readJson = (key, fallback = null) => {
+            const raw = readRaw(key);
+            if (raw == null || raw === '') return fallback;
+            if (raw && typeof raw === 'object') return raw;
+            try {
+                return JSON.parse(raw);
+            } catch (_) {
+                return fallback;
+            }
+        };
+        const normalizeDescription = (value) => String(value == null ? '' : value).trim();
+
+        const mainPosition = readJson('permanent-section-position', {});
+        const copies = Array.isArray(readJson('permanent-section-copies', []))
+            ? readJson('permanent-section-copies', []).filter(Boolean)
+            : [];
+        const views = [
+            normalizePermanentViewShellEntryForSync({
+                copyId: null,
+                descriptionMd: normalizeDescription(readRaw('canvas-permanent-tip-text')),
+                cardState: mainPosition
+            })
+        ];
+
+        copies.forEach((copy) => {
+            const copyId = String(copy && copy.id || '').trim();
+            if (!copyId) return;
+            views.push(normalizePermanentViewShellEntryForSync({
+                copyId,
+                displayIndex: copy.displayIndex,
+                descriptionMd: normalizeDescription(readRaw(`canvas-permanent-tip-text-copy-${copyId}`)),
+                cardState: copy
+            }));
+        });
+
+        return {
+            version: 1,
+            views: views.sort((a, b) => {
+                const aIsCopy = !!a.copyId;
+                const bIsCopy = !!b.copyId;
+                if (aIsCopy !== bIsCopy) return aIsCopy ? 1 : -1;
+                const aIndex = Number(a.displayIndex) || Number.MAX_SAFE_INTEGER;
+                const bIndex = Number(b.displayIndex) || Number.MAX_SAFE_INTEGER;
+                if (aIndex !== bIndex) return aIndex - bIndex;
+                return String(a.copyId || '').localeCompare(String(b.copyId || ''));
+            })
+        };
+    }
+
+    function collectLocalPermanentViewShellSnapshotForSync(dataInput = null) {
+        const data = dataInput && typeof dataInput === 'object' ? dataInput : {};
+        const source = {};
+        Object.keys(data).forEach((key) => {
+            source[key] = data[key];
+        });
+
+        const readLiveRaw = (key) => {
+            if (Object.prototype.hasOwnProperty.call(source, key)) return source[key];
+            try {
+                return localStorage.getItem(key);
+            } catch (_) {
+                return null;
+            }
+        };
+        const assignLiveRaw = (key) => {
+            const raw = readLiveRaw(key);
+            if (raw !== null && typeof raw !== 'undefined') {
+                source[key] = raw;
+            }
+        };
+        const readLiveJson = (key, fallback = null) => {
+            const raw = readLiveRaw(key);
+            if (raw == null || raw === '') return fallback;
+            if (raw && typeof raw === 'object') return raw;
+            try {
+                return JSON.parse(raw);
+            } catch (_) {
+                return fallback;
+            }
+        };
+
+        assignLiveRaw('permanent-section-position');
+        assignLiveRaw('permanent-section-copies');
+        assignLiveRaw('canvas-permanent-tip-text');
+
+        const copies = Array.isArray(readLiveJson('permanent-section-copies', []))
+            ? readLiveJson('permanent-section-copies', []).filter(Boolean)
+            : [];
+        copies.forEach((copy) => {
+            const copyId = String(copy && copy.id || '').trim();
+            if (!copyId) return;
+            assignLiveRaw(`canvas-permanent-tip-text-copy-${copyId}`);
+        });
+
+        return buildFallbackPermanentViewShellSnapshotForSync(source);
+    }
+
+    function mergeMissingPermanentViewShellStateForApply(snapshotInput = null) {
+        const nextSnapshot = normalizePermanentViewShellSnapshotForSync(snapshotInput);
+        if (!nextSnapshot || !Array.isArray(nextSnapshot.views)) return nextSnapshot;
+
+        const protocolBridge = global && global.CanvasProtocolBridge ? global.CanvasProtocolBridge : null;
+        if (!protocolBridge || typeof protocolBridge.collectPermanentViewShellSnapshot !== 'function') {
+            return nextSnapshot;
+        }
+
+        let localSnapshot = null;
+        try {
+            localSnapshot = protocolBridge.collectPermanentViewShellSnapshot();
+        } catch (_) {
+            localSnapshot = null;
+        }
+        if (!localSnapshot || !Array.isArray(localSnapshot.views)) {
+            return nextSnapshot;
+        }
+
+        const localByViewId = new Map();
+        localSnapshot.views.forEach((view) => {
+            const normalized = normalizePermanentViewShellEntryForSync(view);
+            if (!normalized || !normalized.viewId) return;
+            localByViewId.set(normalized.viewId, normalized);
+        });
+
+        const hasPartitions = (state) => !!(state && typeof state === 'object' && Object.keys(state).length);
+        const mergedViews = nextSnapshot.views.map((view) => {
+            const normalized = normalizePermanentViewShellEntryForSync(view);
+            const localView = localByViewId.get(normalized.viewId);
+            if (!localView) return normalized;
+            if (!hasPartitions(normalized.scrollState)) {
+                normalized.scrollState = localView.scrollState || {};
+            }
+            if (!hasPartitions(normalized.foldState)) {
+                normalized.foldState = localView.foldState || {};
+            }
+            return normalized;
+        });
+
+        mergedViews.sort((a, b) => {
+            const aIsCopy = !!a.copyId;
+            const bIsCopy = !!b.copyId;
+            if (aIsCopy !== bIsCopy) return aIsCopy ? 1 : -1;
+            const aIndex = Number(a.displayIndex) || Number.MAX_SAFE_INTEGER;
+            const bIndex = Number(b.displayIndex) || Number.MAX_SAFE_INTEGER;
+            if (aIndex !== bIndex) return aIndex - bIndex;
+            return String(a.copyId || '').localeCompare(String(b.copyId || ''));
+        });
+
+        return {
+            version: Number(nextSnapshot.version) || 1,
+            views: mergedViews
+        };
+    }
+
+    function normalizePermanentViewShellSnapshotForSync(snapshotInput = null, dataInput = null) {
+        const protocolBridge = global && global.CanvasProtocolBridge ? global.CanvasProtocolBridge : null;
+        if (snapshotInput && typeof protocolBridge?.normalizePermanentViewShellSnapshot === 'function') {
+            try {
+                const normalized = protocolBridge.normalizePermanentViewShellSnapshot(snapshotInput);
+                if (normalized && typeof normalized === 'object') return normalized;
+            } catch (_) { }
+        }
+
+        if (typeof protocolBridge?.collectPermanentViewShellSnapshot === 'function') {
+            try {
+                const collected = protocolBridge.collectPermanentViewShellSnapshot(
+                    dataInput && typeof dataInput === 'object'
+                        ? dataInput
+                        : (snapshotInput && !Array.isArray(snapshotInput?.views) ? snapshotInput : null)
+                );
+                if (collected && typeof collected === 'object') return collected;
+            } catch (_) { }
+        }
+
+        const fallbackSource = snapshotInput && typeof snapshotInput === 'object' && !Array.isArray(snapshotInput.views)
+            ? snapshotInput
+            : dataInput;
+        return buildFallbackPermanentViewShellSnapshotForSync(fallbackSource);
+    }
+
+    function buildPermanentViewShellComparableString(snapshotInput) {
+        const snapshot = normalizePermanentViewShellSnapshotForSync(snapshotInput);
+        if (!snapshot || !Array.isArray(snapshot.views)) return '';
+        try {
+            const canonicalViews = snapshot.views.map((view) => {
+                const normalized = normalizePermanentViewShellEntryForSync(view);
+                return {
+                    viewId: normalized.viewId,
+                    copyId: normalized.copyId || null,
+                    displayIndex: Number(normalized.displayIndex) || null,
+                    descriptionMd: String(normalized.descriptionMd || ''),
+                    cardState: normalizePermanentViewCardStateForSync(normalized.cardState)
+                };
+            });
+            canonicalViews.sort((a, b) => {
+                const aIsCopy = !!a.copyId;
+                const bIsCopy = !!b.copyId;
+                if (aIsCopy !== bIsCopy) return aIsCopy ? 1 : -1;
+                const aIndex = Number(a.displayIndex) || Number.MAX_SAFE_INTEGER;
+                const bIndex = Number(b.displayIndex) || Number.MAX_SAFE_INTEGER;
+                if (aIndex !== bIndex) return aIndex - bIndex;
+                return String(a.copyId || '').localeCompare(String(b.copyId || ''));
+            });
+            return JSON.stringify({
+                version: Number(snapshot.version) || 1,
+                views: canonicalViews
+            });
+        } catch (_) {
+            return '';
+        }
+    }
 
     function snapshotDataStableString(data) {
         const source = (data && typeof data === 'object') ? data : {};
@@ -8474,20 +8604,23 @@ Cancel: go back and change the branch name first.`
             data[key] = toSnapshotDataString(rawData[key]);
         });
 
-        if (isBackupPayload && (!data[TEMP_SECTION_STORAGE_KEY] || !String(data[TEMP_SECTION_STORAGE_KEY]).trim())) {
+        const normalizedSnapshotTempState = normalizeCanvasTempStatePayloadForSync(rawData[TEMP_SECTION_STORAGE_KEY]);
+        if (normalizedSnapshotTempState) {
+            data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(normalizedSnapshotTempState);
+        } else if (isBackupPayload && (!data[TEMP_SECTION_STORAGE_KEY] || !String(data[TEMP_SECTION_STORAGE_KEY]).trim())) {
             const canvasState = snapshot.canvasState && typeof snapshot.canvasState === 'object' ? snapshot.canvasState : null;
             if (canvasState) {
-                data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify({
-                    sections: Array.isArray(canvasState.tempSections) ? canvasState.tempSections : [],
-                    mdNodes: Array.isArray(canvasState.mdNodes) ? canvasState.mdNodes : [],
-                    edges: Array.isArray(canvasState.edges) ? canvasState.edges : [],
-                    tempSectionCounter: Number(canvasState.tempSectionCounter) || 0,
-                    mdNodeCounter: Number(canvasState.mdNodeCounter) || 0,
-                    edgeCounter: Number(canvasState.edgeCounter) || 0,
-                    timestamp: Date.now()
-                });
+                const normalizedCanvasTempState = normalizeCanvasTempStatePayloadForSync(canvasState);
+                if (normalizedCanvasTempState) {
+                    data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(normalizedCanvasTempState);
+                }
             }
         }
+
+        const permanentViewShellSnapshot = normalizePermanentViewShellSnapshotForSync(
+            snapshot.permanentViewShellSnapshot || snapshot.permanentViewShells || snapshot.permanentViewShell,
+            data
+        );
 
         return {
             schemaVersion: Number(snapshot.schemaVersion) || 1,
@@ -8497,12 +8630,20 @@ Cancel: go back and change the branch name first.`
             generatedAt: Number(snapshot.generatedAt) || Number(snapshot.exportedAt ? Date.parse(snapshot.exportedAt) : 0) || 0,
             trigger: String(snapshot.trigger || ''),
             permanentTreeSnapshot: normalizeBookmarkTreeSnapshot(snapshot.permanentTreeSnapshot || snapshot.permanentTree || snapshot.permanentTreeData),
+            permanentViewShellSnapshot,
             data
         };
     }
 
-    function snapshotComparableString(snapshot) {
+    function buildOtherSnapshotComparableString(snapshotInput) {
+        const snapshot = normalizeSnapshot(snapshotInput || { data: {} });
         const dataPart = snapshotDataStableString(snapshot && snapshot.data ? snapshot.data : {});
+        const permanentViewShellPart = buildPermanentViewShellComparableString(snapshot && snapshot.permanentViewShellSnapshot);
+        return `${dataPart}::${permanentViewShellPart}`;
+    }
+
+    function snapshotComparableString(snapshot) {
+        const dataPart = buildOtherSnapshotComparableString(snapshot);
         const permanentTreePart = (() => {
             const tree = snapshot && snapshot.permanentTreeSnapshot ? snapshot.permanentTreeSnapshot : null;
             if (!tree) return '';
@@ -8545,7 +8686,7 @@ Cancel: go back and change the branch name first.`
     function buildSnapshotSectionHashes(snapshotInput) {
         const snapshot = normalizeSnapshot(snapshotInput || { data: {} });
         const permanentComparable = buildPermanentTreeComparableString(snapshot.permanentTreeSnapshot);
-        const otherComparable = snapshotDataStableString(snapshot && snapshot.data ? snapshot.data : {});
+        const otherComparable = buildOtherSnapshotComparableString(snapshot);
         return {
             permanent: permanentComparable ? hashString(permanentComparable) : '',
             other: otherComparable ? hashString(otherComparable) : ''
@@ -8616,64 +8757,26 @@ Cancel: go back and change the branch name first.`
         };
     }
 
+    function isManualOnlySyncMode() {
+        return true;
+    }
+
     function shouldIncludePermanentTreeSnapshot(trigger, options = {}) {
         if (options.includePermanentTree === true) return true;
         if (options.includePermanentTree === false) return false;
-
-        const intervalSeconds = normalizePermanentTreeUploadIntervalSeconds(
-            settings && settings.permanentTreeUploadIntervalSeconds,
-            DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds
-        );
-        if (intervalSeconds <= 0) return false;
-
-        const lastTs = Number(runtime && runtime.lastPermanentTreeSnapshotAt) || 0;
-        if (lastTs <= 0) return true;
-
-        const triggerText = String(trigger || '').toLowerCase();
-        const isStrictManual = triggerText.startsWith('manual');
-        if (isStrictManual) return true;
-
-        return (Date.now() - lastTs) >= (intervalSeconds * 1000);
+        return true;
     }
 
     function shouldIncludeTempSectionSnapshot(trigger, options = {}) {
         if (options.includeTempSection === true) return true;
         if (options.includeTempSection === false) return false;
-
-        const intervalSeconds = normalizeCustomUploadIntervalSeconds(
-            settings && settings.tempSectionUploadIntervalSeconds,
-            DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
-        );
-        if (intervalSeconds <= 0) return false;
-
-        const lastTs = Number(runtime && runtime.lastTempSectionSnapshotAt) || 0;
-        if (lastTs <= 0) return true;
-
-        const triggerText = String(trigger || '').toLowerCase();
-        const isStrictManual = triggerText.startsWith('manual');
-        if (isStrictManual) return true;
-
-        return (Date.now() - lastTs) >= (intervalSeconds * 1000);
+        return true;
     }
 
     function shouldPushBlankSectionFiles(trigger, options = {}) {
         if (options.includeBlankSectionFiles === true) return true;
         if (options.includeBlankSectionFiles === false) return false;
-
-        const intervalSeconds = normalizeCustomUploadIntervalSeconds(
-            settings && settings.blankSectionUploadIntervalSeconds,
-            DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds
-        );
-        if (intervalSeconds <= 0) return false;
-
-        const lastTs = Number(runtime && runtime.lastObsidianPushAt) || 0;
-        if (lastTs <= 0) return true;
-
-        const triggerText = String(trigger || '').toLowerCase();
-        const isStrictManual = triggerText.startsWith('manual');
-        if (isStrictManual) return true;
-
-        return (Date.now() - lastTs) >= (intervalSeconds * 1000);
+        return true;
     }
 
     function applyTempSectionSnapshotThrottle(data, trigger, options = {}) {
@@ -8691,8 +8794,9 @@ Cancel: go back and change the branch name first.`
         }
 
         const cachedRaw = String(getSyncMetaRaw(LAST_UPLOADED_TEMP_STATE_KEY) || '');
-        if (cachedRaw) {
-            data[TEMP_SECTION_STORAGE_KEY] = cachedRaw;
+        const normalizedCachedRaw = cachedRaw ? buildNormalizedCanvasTempStateRawForSync(cachedRaw) : '';
+        if (normalizedCachedRaw) {
+            data[TEMP_SECTION_STORAGE_KEY] = normalizedCachedRaw;
             return { includeTempSection: false, usedCachedTempSection: true };
         }
 
@@ -8750,6 +8854,14 @@ Cancel: go back and change the branch name first.`
             permanentTreeSnapshot = await getPermanentTreeSnapshotForSync();
         }
 
+        let permanentViewShellSnapshot = null;
+        try {
+            permanentViewShellSnapshot = collectLocalPermanentViewShellSnapshotForSync(data);
+        } catch (error) {
+            console.warn('[Canvas Sync] collect local permanent view shell snapshot failed:', error);
+            permanentViewShellSnapshot = buildFallbackPermanentViewShellSnapshotForSync(data);
+        }
+
         const snapshot = {
             schemaVersion: 1,
             format: 'bookmark-canvas-state',
@@ -8758,6 +8870,7 @@ Cancel: go back and change the branch name first.`
             generatedAt: now,
             trigger: trigger || 'manual',
             permanentTreeSnapshot,
+            permanentViewShellSnapshot,
             data
         };
 
@@ -8834,25 +8947,11 @@ Cancel: go back and change the branch name first.`
         const current = settings || DEFAULT_SETTINGS;
         return {
             enabled: current.enabled === true,
-            autoSync: current.autoSync !== false,
-            splitIntervalCommitAndSync: current.splitIntervalCommitAndSync === true,
-            intervalSeconds: normalizeAutoSyncIntervalSeconds(
-                current.intervalSeconds,
-                DEFAULT_SETTINGS.intervalSeconds
-            ),
-            autoPushIntervalMinutes: normalizeSplitIntervalMinutes(current.autoPushIntervalMinutes, DEFAULT_SETTINGS.autoPushIntervalMinutes),
-            autoPullIntervalMinutes: normalizeSplitIntervalMinutes(current.autoPullIntervalMinutes, DEFAULT_SETTINGS.autoPullIntervalMinutes),
-            backgroundCheckIntervalMinutes: normalizeBackgroundMinutes(current.backgroundCheckIntervalMinutes, DEFAULT_SETTINGS.backgroundCheckIntervalMinutes, 1),
-            backgroundCooldownMinutes: normalizeBackgroundMinutes(current.backgroundCooldownMinutes, DEFAULT_SETTINGS.backgroundCooldownMinutes, 1),
             obsidianExportRoot: normalizeObsidianExportRoot(
                 current.obsidianExportRoot,
                 DEFAULT_SETTINGS.obsidianExportRoot,
                 { allowEmpty: true }
-            ),
-            mismatchPolicy: ensureMismatchPolicy(current.mismatchPolicy),
-            foregroundCheckEnabled: current.foregroundCheckEnabled !== false,
-            foregroundCheckIntervalSeconds: normalizeForegroundCheckSeconds(current.foregroundCheckIntervalSeconds, DEFAULT_SETTINGS.foregroundCheckIntervalSeconds),
-            backgroundCheckEnabled: current.backgroundCheckEnabled !== false
+            )
         };
     }
 
@@ -8867,7 +8966,6 @@ Cancel: go back and change the branch name first.`
 
         const queueLength = Number(mergedRuntime.queueLength) || 0;
         const isRunning = mergedRuntime.isRunning === true;
-        const pendingMismatch = mergedRuntime.pendingMismatch === true;
 
         return {
             lastRemoteSha: String(mergedRuntime.lastRemoteSha || ''),
@@ -8876,12 +8974,9 @@ Cancel: go back and change the branch name first.`
             lastSuccessAt: Number(mergedRuntime.lastSuccessAt) || 0,
             lastLocalMutationAt: Number(mergedRuntime.lastLocalMutationAt) || 0,
             lastRemoteCommittedAt: Number(mergedRuntime.lastRemoteCommittedAt) || 0,
-            pendingMismatch,
-            pendingMismatchAt: Number(mergedRuntime.pendingMismatchAt) || 0,
-            pendingMismatchRemoteSha: String(mergedRuntime.pendingMismatchRemoteSha || ''),
             queueLength,
             isRunning,
-            hasPendingWork: isRunning || queueLength > 0 || pendingMismatch || localDirty,
+            hasPendingWork: isRunning || queueLength > 0 || localDirty,
             localDirty: localDirty || queueLength > 0 || isRunning
         };
     }
@@ -8912,49 +9007,15 @@ Cancel: go back and change the branch name first.`
         }
     }
 
-    async function clearPendingMismatchInBackground() {
-        try {
-            await sendRuntimeMessage({
-                action: 'canvasGitSyncClearPendingMismatch'
-            }, 10000);
-        } catch (_) { }
-    }
-
     function applyBackgroundRuntimeState(backgroundRuntime, options = {}) {
         if (!backgroundRuntime || typeof backgroundRuntime !== 'object') return false;
 
-        const previousPendingMismatch = !!(runtime && runtime.pendingMismatch === true);
-        const previousPendingMismatchRemoteSha = String(runtime && runtime.pendingMismatchRemoteSha || '');
-        const nextPendingMismatch = backgroundRuntime.pendingMismatch === true;
-        const nextMismatchAt = Number(backgroundRuntime.pendingMismatchUpdatedAt)
-            || Number(backgroundRuntime.pendingMismatchAt)
-            || 0;
-        const nextMismatchRemoteSha = String(backgroundRuntime.pendingMismatchRemoteSha || '');
         const nextLastCheckRemoteSha = String(backgroundRuntime.lastCheckRemoteSha || '');
         const nextIsRunning = backgroundRuntime.isRunning === true;
         const nextQueueLength = Math.max(0, Number(backgroundRuntime.queueLength) || 0);
         const nextHasPendingWork = backgroundRuntime.hasPendingWork === true;
 
         let changed = false;
-        if (!!runtime.pendingMismatch !== nextPendingMismatch) {
-            runtime.pendingMismatch = nextPendingMismatch;
-            if (!nextPendingMismatch) {
-                mismatchPromptShownOnInit = false;
-            } else {
-                mismatchPromptShownOnInit = false;
-            }
-            changed = true;
-        }
-
-        if (runtime.pendingMismatchAt !== nextMismatchAt) {
-            runtime.pendingMismatchAt = nextMismatchAt;
-            changed = true;
-        }
-
-        if (runtime.pendingMismatchRemoteSha !== nextMismatchRemoteSha) {
-            runtime.pendingMismatchRemoteSha = nextMismatchRemoteSha;
-            changed = true;
-        }
 
         if (runtime.lastCheckRemoteSha !== nextLastCheckRemoteSha) {
             runtime.lastCheckRemoteSha = nextLastCheckRemoteSha;
@@ -8995,75 +9056,9 @@ Cancel: go back and change the branch name first.`
         if (changed) {
             saveRuntime();
             renderStatus();
-            if (!nextPendingMismatch) {
-                clearPendingMismatchPromptTimer();
-            } else if ((previousPendingMismatch !== nextPendingMismatch || previousPendingMismatchRemoteSha !== nextMismatchRemoteSha)
-                && settings
-                && ensureMismatchPolicy(settings.mismatchPolicy) === 'prompt'
-                && !hasPendingConflict()
-                && !runtime.isRunning) {
-                void maybeAutoResolveBaselineOnlyPendingMismatch('background-runtime').then((handled) => {
-                    if (!handled && runtime && runtime.pendingMismatch) {
-                        schedulePendingMismatchPromptCheck();
-                    }
-                }).catch(() => {
-                    if (runtime && runtime.pendingMismatch) {
-                        schedulePendingMismatchPromptCheck();
-                    }
-                });
-            }
         }
 
         return changed;
-    }
-
-    async function refreshPendingMismatchFromBackground() {
-        const response = await getBackgroundSyncState();
-        if (!response || !response.runtime) return;
-        applyBackgroundRuntimeState(response.runtime, { updateRemoteSha: true });
-    }
-
-    async function resolvePendingMismatchBySync(mode, trigger, options = {}) {
-        const beforeSuccessAt = Number(runtime.lastSuccessAt) || 0;
-
-        await runSync(mode, trigger, options);
-
-        const successAdvanced = (Number(runtime.lastSuccessAt) || 0) > beforeSuccessAt;
-        const hasError = !!String(runtime.lastError || '').trim();
-        const isSuccessful = successAdvanced && !hasError;
-
-        if (isSuccessful) {
-            runtime.pendingMismatch = false;
-            runtime.pendingMismatchAt = 0;
-            runtime.pendingMismatchRemoteSha = '';
-            mismatchPromptShownOnInit = false;
-            clearPendingMismatchPromptTimer();
-            saveRuntime();
-            renderStatus();
-            await clearPendingMismatchInBackground();
-            await updateBackgroundSyncContext('mismatch-cleared', {
-                pendingMismatch: false,
-                pendingMismatchAt: 0,
-                hasPendingWork: false,
-                localDirty: false
-            });
-        }
-
-        return isSuccessful;
-    }
-
-    async function maybeHandlePendingMismatchOnPanelOpen() {
-        if (!settings || ensureMismatchPolicy(settings.mismatchPolicy) !== 'prompt') return;
-        if (!runtime || !runtime.pendingMismatch) return;
-        if (!shouldAutoPromptPendingMismatchNow()) return;
-        const autoHandled = await maybeAutoResolveBaselineOnlyPendingMismatch('panel-open');
-        if (autoHandled) return;
-        if (!runtime || !runtime.pendingMismatch) return;
-        if (!shouldAutoPromptPendingMismatchNow()) return;
-
-        if (activeTabKey === 'status') {
-            renderMismatchPanel();
-        }
     }
 
     function maybePromptPendingConflictOnInit() {
@@ -9079,71 +9074,38 @@ Cancel: go back and change the branch name first.`
         ));
     }
 
-    async function maybePromptPendingMismatchOnInit() {
-        if (mismatchPromptShownOnInit) return;
-        if (!settings || ensureMismatchPolicy(settings.mismatchPolicy) !== 'prompt') return;
-        if (!shouldAutoPromptPendingMismatchNow()) {
-            if (runtime && runtime.pendingMismatch) {
-                schedulePendingMismatchPromptCheck();
-            }
-            return;
-        }
-        const autoHandled = await maybeAutoResolveBaselineOnlyPendingMismatch('prompt-init');
-        if (autoHandled) return;
-        if (!runtime || !runtime.pendingMismatch) return;
-        if (!shouldAutoPromptPendingMismatchNow()) return;
-
-        mismatchPromptShownOnInit = true;
-        notifyPendingMismatchWithoutForceOpen(textByLang(
-            '前台关闭期间检测到云端更新，请在“状态”面板选择处理方式',
-            'Remote updates were detected while foreground was closed. Please choose an action in Status panel.'
-        ));
-    }
-
-    async function maybeHandlePendingMismatchAutoPull() {
-        if (isRecoveryLockActive()) return;
-        if (!settings) return;
-        if (isForegroundUserInteractionBusy()) return;
-        const mismatchPolicy = ensureMismatchPolicy(settings.mismatchPolicy);
-        if (mismatchPolicy !== 'auto_pull' && mismatchPolicy !== 'auto_push') return;
-        if (!runtime || !runtime.pendingMismatch) return;
-        if (runtime.isRunning) return;
-        if (hasPendingConflict()) return;
-
-        const mode = mismatchPolicy === 'auto_push' ? 'push' : 'pull';
-        const trigger = mismatchPolicy === 'auto_push'
-            ? 'mismatch-policy-auto-push'
-            : 'mismatch-policy-auto-pull';
-
-        const ok = await resolvePendingMismatchBySync(mode, trigger);
-        if (!ok) {
-            toast(mismatchPolicy === 'auto_push'
-                ? textByLang('后台检测到不一致，自动按本地覆盖云端失败，请稍后重试', 'Background mismatch detected; auto local-overwrite-cloud failed, please retry later')
-                : textByLang('后台检测到不一致，自动使用云端覆盖本地失败，请稍后重试', 'Background mismatch detected; auto cloud-overwrite-local failed, please retry later'));
-        }
-    }
-
-    function buildSnapshotFromRemoteFolderParsed(parsedPayload, remoteRevision = '') {
+    function buildSnapshotFromRemoteFolderParsed(parsedPayload, remoteRevision = '', options = {}) {
         const parsed = parsedPayload && typeof parsedPayload === 'object' ? parsedPayload : {};
         const storage = parsed.storage && typeof parsed.storage === 'object' ? parsed.storage : {};
         const tempState = parsed.tempState && typeof parsed.tempState === 'object' ? parsed.tempState : null;
         const primaryState = parsed.primaryState && typeof parsed.primaryState === 'object' ? parsed.primaryState : {};
+        const remoteCommittedAt = Math.max(0, Number(options && options.remoteCommittedAt) || 0);
+        const fallbackCommittedAt = Math.max(0, Number(options && options.fallbackCommittedAt) || 0);
+        const snapshotTs = remoteCommittedAt
+            || Math.max(
+                0,
+                Number(primaryState && primaryState.updatedAt) || 0,
+                Number(primaryState && primaryState.generatedAt) || 0,
+                Number(primaryState && primaryState.exportedAt ? Date.parse(primaryState.exportedAt) : 0) || 0
+            )
+            || fallbackCommittedAt;
 
         const data = {};
         Object.keys(storage).forEach((key) => {
             data[key] = toSnapshotDataString(storage[key]);
         });
 
-        if (tempState && !data[TEMP_SECTION_STORAGE_KEY]) {
-            data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(tempState);
+        const normalizedTempState = normalizeCanvasTempStatePayloadForSync(tempState);
+        if (normalizedTempState) {
+            data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(normalizedTempState);
         }
 
         const normalized = normalizeSnapshot({
             schemaVersion: 1,
             format: 'bookmark-canvas-files',
             trigger: 'remote-files',
-            updatedAt: Date.now(),
-            generatedAt: Date.now(),
+            updatedAt: snapshotTs,
+            generatedAt: snapshotTs,
             permanentTreeSnapshot: normalizeBookmarkTreeSnapshot(primaryState.permanentTreeSnapshot),
             data
         });
@@ -9175,9 +9137,11 @@ Cancel: go back and change the branch name first.`
                 notFound: true,
                 path: rootPath,
                 sha: remoteRevision || '',
+                remoteSignalSha: '',
                 snapshot: normalizeSnapshot({ data: {} }),
                 remoteList,
-                folderFiles: new Map()
+                folderFiles: new Map(),
+                exportFormat: ''
             };
         }
 
@@ -9187,6 +9151,9 @@ Cancel: go back and change the branch name first.`
             : (bridge && typeof bridge.parseSyncFolderFiles === 'function'
                 ? bridge.parseSyncFolderFiles.bind(bridge)
                 : null);
+        const detectSyncFolderExportFormat = bridge && typeof bridge.detectSyncFolderExportFormat === 'function'
+            ? bridge.detectSyncFolderExportFormat.bind(bridge)
+            : null;
         if (!bridge || typeof parseSyncFolderFiles !== 'function') {
             throw new Error(textByLang('云端同步解析器不可用', 'Cloud sync parser is unavailable'));
         }
@@ -9197,13 +9164,26 @@ Cancel: go back and change the branch name first.`
                 notFound: true,
                 path: rootPath,
                 sha: remoteRevision || '',
+                remoteSignalSha: '',
                 snapshot: normalizeSnapshot({ data: {} }),
                 remoteList,
-                folderFiles: fetched.folderFiles || new Map()
+                folderFiles: fetched.folderFiles || new Map(),
+                exportFormat: ''
             };
         }
 
         const folderName = (rootPath ? rootPath.split('/').filter(Boolean).slice(-1)[0] : '') || DEFAULT_SETTINGS.obsidianExportRoot;
+        let remoteExportFormat = '';
+        if (typeof detectSyncFolderExportFormat === 'function') {
+            try {
+                remoteExportFormat = normalizeObsidianExportFormat(
+                    detectSyncFolderExportFormat(fetched.folderFiles, folderName),
+                    ''
+                );
+            } catch (error) {
+                console.warn('[Canvas Sync] detect remote export format failed:', error);
+            }
+        }
         let parsed = null;
         try {
             parsed = await parseSyncFolderFiles(fetched.folderFiles, folderName);
@@ -9213,14 +9193,42 @@ Cancel: go back and change the branch name first.`
                     notFound: true,
                     path: rootPath,
                     sha: remoteRevision || '',
+                    remoteSignalSha: '',
                     snapshot: normalizeSnapshot({ data: {} }),
                     remoteList,
-                    folderFiles: fetched.folderFiles || new Map()
+                    folderFiles: fetched.folderFiles || new Map(),
+                    exportFormat: remoteExportFormat
                 };
             }
             throw error;
         }
-        const snapshot = buildSnapshotFromRemoteFolderParsed(parsed, remoteRevision);
+        let remoteCommittedAt = 0;
+        let remoteSignalSha = '';
+        try {
+            const remoteSignal = await readRemoteObsidianSignal(rootPath);
+            remoteSignalSha = String(remoteSignal && remoteSignal.revisionSha || '').trim();
+            remoteCommittedAt = Math.max(0, Number(remoteSignal && remoteSignal.committedAt) || 0);
+            if (runtime) {
+                let runtimeChanged = false;
+                if (remoteCommittedAt > 0 && runtime.lastRemoteCommittedAt !== remoteCommittedAt) {
+                    runtime.lastRemoteCommittedAt = remoteCommittedAt;
+                    runtimeChanged = true;
+                }
+                if (remoteSignalSha && runtime.lastRemoteSignalSha !== remoteSignalSha) {
+                    runtime.lastRemoteSignalSha = remoteSignalSha;
+                    runtimeChanged = true;
+                }
+                if (runtimeChanged) {
+                    saveRuntime();
+                }
+            }
+        } catch (error) {
+            console.warn('[Canvas Sync] read remote signal for snapshot timestamp failed:', error);
+        }
+        const snapshot = buildSnapshotFromRemoteFolderParsed(parsed, remoteRevision, {
+            remoteCommittedAt,
+            fallbackCommittedAt: Number(runtime && runtime.lastRemoteCommittedAt) || 0
+        });
 
         if (!normalizeBookmarkTreeSnapshot(snapshot.permanentTreeSnapshot)
             && typeof bridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles === 'function') {
@@ -9235,15 +9243,32 @@ Cancel: go back and change the branch name first.`
             }
         }
 
+        if (typeof bridge.rebuildPermanentViewShellSnapshotFromSyncFolderFiles === 'function') {
+            try {
+                const rebuiltPermanentViewShell = bridge.rebuildPermanentViewShellSnapshotFromSyncFolderFiles(
+                    fetched.folderFiles,
+                    folderName
+                );
+                const normalizedPermanentViewShell = normalizePermanentViewShellSnapshotForSync(rebuiltPermanentViewShell);
+                if (normalizedPermanentViewShell) {
+                    snapshot.permanentViewShellSnapshot = normalizedPermanentViewShell;
+                }
+            } catch (error) {
+                console.warn('[Canvas Sync] rebuild remote permanent view shell snapshot failed:', error);
+            }
+        }
+
         const sanitizedSnapshot = buildSnapshotForRemoteLocalApply(snapshot);
 
         return {
             notFound: false,
             path: rootPath,
             sha: remoteRevision || '',
+            remoteSignalSha,
             snapshot: sanitizedSnapshot,
             remoteList,
-            folderFiles: fetched.folderFiles || new Map()
+            folderFiles: fetched.folderFiles || new Map(),
+            exportFormat: remoteExportFormat
         };
     }
 
@@ -9293,18 +9318,37 @@ Cancel: go back and change the branch name first.`
         return response;
     }
 
-    async function applyRemoteFilesBatch(changes, commitMessage) {
+    async function applyRemoteFilesBatch(changes, commitMessage, timeoutMs = 120000, options = {}) {
+        const mergeViaTempBranch = !!(options && options.mergeViaTempBranch === true);
+        const tempBranchPrefix = String(options && options.tempBranchPrefix ? options.tempBranchPrefix : '').trim() || 'canvas-sync';
         const payload = {
-            action: 'canvasGitApplyFilesBatch',
+            action: mergeViaTempBranch ? 'canvasGitMergeFilesViaTempBranch' : 'canvasGitApplyFilesBatch',
             changes: Array.isArray(changes) ? changes : [],
             commitMessage
         };
+        if (mergeViaTempBranch) {
+            payload.tempBranchPrefix = tempBranchPrefix;
+        }
 
         if (!payload.changes.length) {
             throw new Error(textByLang('缺少变更列表', 'Missing change list'));
         }
 
-        const response = await sendRuntimeMessage(payload, 120000);
+        const resolvedTimeoutMs = Math.max(30000, Number(timeoutMs) || 120000);
+        let response = null;
+        try {
+            response = await sendRuntimeMessage(payload, resolvedTimeoutMs);
+        } catch (error) {
+            const message = String(error && error.message ? error.message : error || '');
+            const isTimeout = /timeout|超时/i.test(message);
+            if (isTimeout) {
+                throw new Error(textByLang(
+                    `批量提交超时（已等待约 ${Math.ceil(resolvedTimeoutMs / 1000)} 秒），请检查网络或 GitHub 状态后重试`,
+                    `Batch commit timed out (waited about ${Math.ceil(resolvedTimeoutMs / 1000)}s). Check network/GitHub status and retry.`
+                ));
+            }
+            throw error;
+        }
         if (!response || response.success !== true) {
             const message = (response && response.error) || textByLang('批量写入失败', 'Batch write failed');
             const error = new Error(message);
@@ -9312,6 +9356,12 @@ Cancel: go back and change the branch name first.`
             if (response && Number.isFinite(Number(response.sizeBytes))) error.sizeBytes = Number(response.sizeBytes);
             if (response && Number.isFinite(Number(response.limitBytes))) error.limitBytes = Number(response.limitBytes);
             if (response && response.path) error.path = String(response.path);
+            if (response && response.conflict === true) error.conflict = true;
+            if (response && response.protectedBranch === true) error.protectedBranch = true;
+            if (response && response.branch) error.branch = String(response.branch);
+            if (response && response.tempBranch) error.tempBranch = String(response.tempBranch);
+            if (response && response.tempCommitSha) error.tempCommitSha = String(response.tempCommitSha);
+            if (response && response.tempBranchDeleteWarning) error.tempBranchDeleteWarning = String(response.tempBranchDeleteWarning);
             throw error;
         }
 
@@ -9446,8 +9496,12 @@ Cancel: go back and change the branch name first.`
 
         // When tracking all files (usually manual triggers), preflight remote listing once:
         // if a file is missing remotely, we must upload it even if local hash matches previous baseline.
-        let remoteFilesByPathForMissingCheck = null;
-        if (forceTrackAll && !forceWriteAll) {
+        let remoteFilesByPathForMissingCheck = (options
+            && options.remoteFilesByPathForMissingCheck
+            && typeof options.remoteFilesByPathForMissingCheck === 'object')
+            ? options.remoteFilesByPathForMissingCheck
+            : null;
+        if (forceTrackAll && !forceWriteAll && !remoteFilesByPathForMissingCheck) {
             try {
                 reportProgress(0.45, textByLang('检查云端缺失文件...', 'Checking remote missing files...'));
                 const remoteListRaw = await listRemoteObsidianFilesByPath(settings.obsidianExportRoot);
@@ -9528,13 +9582,57 @@ Cancel: go back and change the branch name first.`
         });
 
         let batchWriteNoChanges = false;
+        let remoteSignalSha = '';
         if (batchChanges.length) {
             if (recoveryLockState && recoveryLockState.kind === 'push-bundle') {
                 updateRecoveryLockState({ stage: 'uploading' });
             }
-            reportProgress(0.65, textByLang('提交到云端...', 'Committing to cloud...'));
-            const batchResult = await applyRemoteFilesBatch(batchChanges, batchCommitMessage);
+            let batchPayloadBytes = 0;
+            for (let i = 0; i < batchChanges.length; i += 1) {
+                const change = batchChanges[i];
+                if (!change || change.delete === true) continue;
+                batchPayloadBytes += getUtf8Size(change.content || '');
+            }
+            const batchFileCount = batchChanges.length;
+            const timeoutByBytes = Math.ceil(batchPayloadBytes / (512 * 1024)) * 20000;
+            const timeoutByCount = Math.ceil(batchFileCount / 50) * 10000;
+            const batchTimeoutMs = Math.min(10 * 60 * 1000, Math.max(120000, 120000 + timeoutByBytes + timeoutByCount));
+            reportProgress(
+                0.65,
+                textByLang(
+                    `提交到云端...（${batchFileCount} 个文件）`,
+                    `Committing to cloud... (${batchFileCount} files)`
+                )
+            );
+            const batchStartedAt = Date.now();
+            let batchHeartbeatTimer = null;
+            if (typeof onProgress === 'function') {
+                batchHeartbeatTimer = setInterval(() => {
+                    const elapsedMs = Math.max(0, Date.now() - batchStartedAt);
+                    const elapsedSec = Math.floor(elapsedMs / 1000);
+                    const creep = Math.min(0.22, elapsedMs / (3 * 60 * 1000) * 0.22);
+                    reportProgress(
+                        0.65 + creep,
+                        textByLang(
+                            `提交到云端...（${batchFileCount} 个文件，已等待 ${elapsedSec} 秒）`,
+                            `Committing to cloud... (${batchFileCount} files, waiting ${elapsedSec}s)`
+                        )
+                    );
+                }, 2000);
+            }
+            let batchResult = null;
+            try {
+                batchResult = await applyRemoteFilesBatch(batchChanges, batchCommitMessage, batchTimeoutMs, {
+                    mergeViaTempBranch: options && options.useTempBranchMerge === true,
+                    tempBranchPrefix: options && options.tempBranchPrefix
+                });
+            } finally {
+                if (batchHeartbeatTimer) {
+                    clearInterval(batchHeartbeatTimer);
+                }
+            }
             batchWriteNoChanges = !!(batchResult && batchResult.noChanges === true);
+            remoteSignalSha = String(batchResult && batchResult.commitSha ? batchResult.commitSha : '').trim();
             const fileShas = batchResult && typeof batchResult.fileShas === 'object' ? batchResult.fileShas : {};
             Object.keys(fileShas || {}).forEach((path) => {
                 const sha = String(fileShas[path] || '');
@@ -9581,6 +9679,20 @@ Cancel: go back and change the branch name first.`
             saveDirtyState(nextDirty);
         }
 
+        const exportRootForClassification = bundle && bundle.exportRoot
+            ? String(bundle.exportRoot)
+            : settings.obsidianExportRoot;
+        const isBlankManagedFilePath = (path) => {
+            const relativePath = getManagedSyncRelativePath(path, exportRootForClassification);
+            return classifyManagedSyncRelativePath(relativePath) === 'blank';
+        };
+        const rawBlankChangedCount = changedFiles.reduce((count, file) => (
+            isBlankManagedFilePath(file && file.path) ? count + 1 : count
+        ), 0);
+        const rawBlankDeletedCount = removedPaths.reduce((count, path) => (
+            isBlankManagedFilePath(path) ? count + 1 : count
+        ), 0);
+
         const nextPrevSyncIndex = normalizePrevSyncIndex(prevSyncIndex);
         const nowTs = Date.now();
         const visiblePaths = new Set(normalizedFiles.map((file) => file.path));
@@ -9618,16 +9730,44 @@ Cancel: go back and change the branch name first.`
         nextPrevSyncIndex.updatedAt = nowTs;
         savePrevSyncIndex(nextPrevSyncIndex);
 
+        let remoteRevision = '';
+        try {
+            const revisionFiles = [];
+            let complete = true;
+            normalizedFiles.forEach((file) => {
+                const path = normalizeSyncPath(file && file.path);
+                if (!path) return;
+                const entry = nextPrevSyncIndex.files && nextPrevSyncIndex.files[path]
+                    ? nextPrevSyncIndex.files[path]
+                    : null;
+                const sha = String(entry && entry.sha ? entry.sha : '').trim();
+                if (!sha) {
+                    complete = false;
+                    return;
+                }
+                revisionFiles.push({ path, sha });
+            });
+            if (complete && revisionFiles.length > 0) {
+                remoteRevision = buildRemoteObsidianRevisionFromList({ files: revisionFiles });
+            }
+        } catch (_) {
+            remoteRevision = '';
+        }
+
         reportProgress(1, textByLang('上传完成', 'Upload completed'));
         return {
             enabled: true,
             changedCount: batchWriteNoChanges ? 0 : changedFiles.length,
             deletedCount: batchWriteNoChanges ? 0 : removedPaths.length,
+            blankChangedCount: batchWriteNoChanges ? 0 : rawBlankChangedCount,
+            blankDeletedCount: batchWriteNoChanges ? 0 : rawBlankDeletedCount,
             totalCount: normalizedFiles.length,
             candidateCount: processedPaths.length,
             skippedNoDirty: false,
             noChanges: batchWriteNoChanges,
             localRevision: buildLocalObsidianRevisionFromHashMap(nextHashes),
+            remoteRevision,
+            remoteSignalSha,
             exportRoot: bundle && bundle.exportRoot ? String(bundle.exportRoot) : settings.obsidianExportRoot,
             paths: normalizedFiles.map((file) => file.path),
             guidePaths
@@ -9921,8 +10061,8 @@ Cancel: go back and change the branch name first.`
                     `Cloud path may have changed. Complete path validation before sync${suggestedRootLabel ? ` (suggested: ${suggestedRootLabel})` : ''}`
                 )
                 : textByLang(
-                    `后台检测到云端路径可能已变化，请前往同步设置重新校验路径${suggestedRootLabel ? `（建议：${suggestedRootLabel}）` : ''}`,
-                    `Background check detected cloud path change. Open sync settings and re-validate the path${suggestedRootLabel ? ` (suggested: ${suggestedRootLabel})` : ''}`
+                    `检测到云端路径可能已变化，请前往同步设置重新校验路径${suggestedRootLabel ? `（建议：${suggestedRootLabel}）` : ''}`,
+                    `Cloud path change detected. Open sync settings and re-validate the path${suggestedRootLabel ? ` (suggested: ${suggestedRootLabel})` : ''}`
                 ));
 
         const error = new Error(message);
@@ -9994,7 +10134,7 @@ Cancel: go back and change the branch name first.`
         const relative = normalizeSyncPath(relativePath);
         if (!relative) return false;
 
-        if (/^(永久栏目|Permanent|临时栏目|Temporary|空白栏目|Blank)\/.+\.md$/i.test(relative)) {
+        if (/^(永久栏目|Permanent|临时栏目|Temporary|空白栏目|Blank)\/.+\.(md|json)$/i.test(relative)) {
             return true;
         }
         if (/^(说明导入规则\.md|README_Import_Rules\.md|说明_导入规则\.md)$/i.test(relative)) {
@@ -10083,7 +10223,7 @@ Cancel: go back and change the branch name first.`
         };
         const targets = files
             .map((entry) => normalizeSyncPath(entry && entry.path))
-            .filter((path) => !!path && (/\.md$/i.test(path) || /\.canvas$/i.test(path)));
+            .filter((path) => !!path && (/\.(md|json)$/i.test(path) || /\.canvas$/i.test(path)));
 
         reportProgress(0, textByLang(`拉取文件 0/${targets.length}`, `Downloading files 0/${targets.length}`));
         const folderFiles = new Map();
@@ -10326,6 +10466,9 @@ Cancel: go back and change the branch name first.`
                 reason: String(parsed.reason || 'concurrent-change'),
                 remoteSha: String(parsed.remoteSha || ''),
                 remotePath: String(parsed.remotePath || ''),
+                mergeConflict: parsed.mergeConflict === true,
+                mergeApi: String(parsed.mergeApi || ''),
+                tempBranch: String(parsed.tempBranch || ''),
                 localSnapshot,
                 remoteSnapshot,
                 localMeta: parsed.localMeta || buildSnapshotMeta(localSnapshot),
@@ -10409,41 +10552,6 @@ Cancel: go back and change the branch name first.`
             : textByLang(`永久栏目处理：自动 → 本次使用覆盖恢复（变更数 ${logicalChangeCount} / 阈值 ${threshold}）`, `Permanent section handling: auto → overwrite restore this time (changes ${logicalChangeCount} / threshold ${threshold})`);
     }
 
-    let mismatchPermanentHintToken = 0;
-    async function refreshMismatchPermanentModeHint() {
-        const panel = getElement('canvasSyncMismatchPanel');
-        const hintEl = getElement('canvasSyncMismatchPermanentModeHint');
-        if (!panel || !hintEl || panel.hidden || !runtime || !runtime.pendingMismatch) return;
-        if (isBaselineOnlyComparisonSummary(latestMismatchComparisonSummary)) {
-            configureBaselineOnlyHint(hintEl, true);
-            return;
-        }
-        if (!canUseCloudSourceFromComparisonSummary(latestMismatchComparisonSummary)) {
-            hintEl.hidden = false;
-            hintEl.classList.remove('canvas-sync-note--baseline');
-            hintEl.textContent = buildEmptyCloudMismatchHintText();
-            return;
-        }
-        const token = ++mismatchPermanentHintToken;
-        hintEl.hidden = false;
-        hintEl.classList.remove('canvas-sync-note--baseline');
-        hintEl.textContent = textByLang('永久栏目处理：正在计算...', 'Permanent section handling: calculating...');
-        try {
-            const localTree = await getPermanentTreeSnapshotForSync();
-            const remoteState = await readRemoteSnapshotWithPathRecovery({ interactive: false, continueAfterConfirm: false, throwWhenDetected: false });
-            const remoteTree = remoteState && !remoteState.notFound && remoteState.snapshot
-                ? remoteState.snapshot.permanentTreeSnapshot
-                : null;
-            const decision = evaluatePermanentPullDecision(localTree, remoteTree);
-            if (token !== mismatchPermanentHintToken) return;
-            hintEl.textContent = formatPermanentPullDecisionText(decision);
-        } catch (error) {
-            if (token !== mismatchPermanentHintToken) return;
-            hintEl.textContent = textByLang('永久栏目处理：无法计算，执行时将回退为覆盖恢复', 'Permanent section handling: unable to calculate, will fall back to overwrite restore');
-        }
-    }
-
-
     function setSyncActionTextHtml(elementId, html) {
         const element = getElement(elementId);
         if (!element) return;
@@ -10460,46 +10568,6 @@ Cancel: go back and change the branch name first.`
         }
         hintEl.hidden = !fallbackText;
         hintEl.textContent = fallbackText || '';
-    }
-
-    function updateMismatchPanelActionUi(summaryInput, isPreview = false) {
-        latestMismatchComparisonSummary = summaryInput && typeof summaryInput === 'object' ? summaryInput : null;
-        const baselineOnly = !isPreview && isBaselineOnlyComparisonSummary(latestMismatchComparisonSummary);
-        const remoteAvailable = isPreview ? true : canUseCloudSourceFromComparisonSummary(latestMismatchComparisonSummary);
-        const remoteBtn = getElement('canvasSyncMismatchUseRemoteBtn');
-        const localBtn = getElement('canvasSyncMismatchUseLocalBtn');
-        const dismissText = getElement('canvasSyncMismatchDismissText');
-        const hintEl = getElement('canvasSyncMismatchPermanentModeHint');
-        if (remoteBtn) {
-            remoteBtn.dataset.syncActionMode = baselineOnly ? 'baseline' : 'remote';
-            remoteBtn.hidden = !baselineOnly && !remoteAvailable;
-        }
-        if (localBtn) {
-            localBtn.hidden = baselineOnly;
-            localBtn.dataset.syncActionMode = 'local';
-        }
-        setSyncActionTextHtml(
-            'canvasSyncMismatchUseRemoteText',
-            baselineOnly
-                ? escapeHtml(textByLang('校准基线', 'Align Baseline'))
-                : `<span class="canvas-sync-action-keyword">${escapeHtml(textByLang('使用云端', 'Use Cloud'))}</span>${escapeHtml(textByLang('覆盖本地', ' Overwrite Local'))}`
-        );
-        setSyncActionTextHtml(
-            'canvasSyncMismatchUseLocalText',
-            `<span class="canvas-sync-action-keyword">${escapeHtml(textByLang('保留本地', 'Keep Local'))}</span>${escapeHtml(textByLang('并覆盖云端', ' Overwrite Cloud'))}`
-        );
-        if (dismissText) {
-            dismissText.textContent = isPreview
-                ? textByLang('关闭预览', 'Close Preview')
-                : textByLang('稍后处理', 'Handle later');
-        }
-        if (baselineOnly) {
-            configureBaselineOnlyHint(hintEl, true);
-        } else if (!isPreview && !remoteAvailable && hintEl) {
-            hintEl.hidden = false;
-            hintEl.classList.remove('canvas-sync-note--baseline');
-            hintEl.textContent = buildEmptyCloudMismatchHintText();
-        }
     }
 
     function updateConflictPanelActionUi(summaryInput, isPreview = false, fallbackHintText = '') {
@@ -10539,6 +10607,207 @@ Cancel: go back and change the branch name first.`
                 : textByLang('稍后处理', 'Handle later');
         }
         configureBaselineOnlyHint(hintEl, baselineOnly, fallbackHintText);
+    }
+
+    function normalizeConflictFineChoice(value) {
+        return String(value || '').trim().toLowerCase() === 'remote' ? 'remote' : 'local';
+    }
+
+    function buildConflictFineChoices(conflictData) {
+        const source = conflictData && typeof conflictData === 'object' ? conflictData : {};
+        const fileConflicts = uniqueStringList(source.fileConflicts, normalizeSyncPath);
+        const latestDecision = decidePendingConflictByLatestModified(source);
+        const defaultChoice = latestDecision && latestDecision.choice
+            ? normalizeConflictFineChoice(latestDecision.choice)
+            : 'local';
+        const nextChoiceMap = {};
+        fileConflicts.forEach((path) => {
+            nextChoiceMap[path] = normalizeConflictFineChoice(conflictFineChoiceByPath[path] || defaultChoice);
+        });
+        conflictFineChoiceByPath = nextChoiceMap;
+        return {
+            fileConflicts,
+            choiceByPath: Object.assign({}, nextChoiceMap)
+        };
+    }
+
+    function renderConflictFinePanel(conflictData, conflictPreview = false) {
+        const toggleRow = getElement('canvasSyncConflictFineToggleRow');
+        const toggle = getElement('canvasSyncConflictFineToggle');
+        const hint = getElement('canvasSyncConflictFineHint');
+        const list = getElement('canvasSyncConflictFineList');
+        const applyBtn = getElement('canvasSyncConflictApplyFineBtn');
+
+        if (!toggleRow || !toggle || !hint || !list || !applyBtn) return;
+        if (!conflictData || conflictPreview) {
+            toggleRow.hidden = true;
+            hint.hidden = true;
+            list.hidden = true;
+            list.innerHTML = '';
+            applyBtn.hidden = true;
+            return;
+        }
+
+        const fineChoices = buildConflictFineChoices(conflictData);
+        const paths = fineChoices.fileConflicts;
+        const noFileConflicts = !paths.length;
+
+        toggleRow.hidden = noFileConflicts;
+        toggle.disabled = noFileConflicts;
+        if (noFileConflicts) {
+            toggle.checked = false;
+            conflictFineModeEnabled = false;
+            hint.hidden = false;
+            hint.textContent = textByLang(
+                '当前冲突没有可识别的文件级差异，请使用上方整体策略或“重试云端自动合并”。',
+                'No file-level conflicts were identified for this conflict. Use the overall strategy above or retry cloud auto-merge.'
+            );
+            list.hidden = true;
+            list.innerHTML = '';
+            applyBtn.hidden = true;
+            return;
+        }
+
+        toggle.checked = conflictFineModeEnabled === true;
+        hint.hidden = false;
+        hint.textContent = textByLang(
+            '逐文件模式会先把你选择“本地”的文件推到云端，再统一回拉本地对齐。',
+            'Fine-grained mode first pushes files you mark as local to cloud, then performs a unified pull to align local.'
+        );
+
+        if (!conflictFineModeEnabled) {
+            list.hidden = true;
+            list.innerHTML = '';
+            applyBtn.hidden = true;
+            return;
+        }
+
+        const rowsHtml = paths.map((path) => {
+            const choice = normalizeConflictFineChoice(conflictFineChoiceByPath[path] || 'local');
+            const localSelected = choice === 'local' ? ' selected' : '';
+            const remoteSelected = choice === 'remote' ? ' selected' : '';
+            return [
+                '<div class="canvas-sync-row">',
+                `<span title="${escapeHtml(path)}">${escapeHtml(path)}</span>`,
+                `<select data-conflict-fine-path="${escapeHtml(path)}">`,
+                `<option value="local"${localSelected}>${escapeHtml(textByLang('用本地版本', 'Use Local Version'))}</option>`,
+                `<option value="remote"${remoteSelected}>${escapeHtml(textByLang('用云端版本', 'Use Cloud Version'))}</option>`,
+                '</select>',
+                '</div>'
+            ].join('');
+        }).join('');
+
+        list.innerHTML = rowsHtml;
+        list.hidden = false;
+        applyBtn.hidden = false;
+    }
+
+    async function buildConflictFileSummaryFromCurrentPlan(reason = 'conflict-files-summary') {
+        try {
+            const pullPlanResult = await buildObsidianPullPlan(reason);
+            if (!pullPlanResult || pullPlanResult.enabled !== true || !pullPlanResult.plan) {
+                return { fileConflicts: [], filePlanSummary: null };
+            }
+            const plan = pullPlanResult.plan;
+            const fileConflicts = uniqueStringList(
+                (Array.isArray(plan.conflict) ? plan.conflict : []).map((entry) => entry && entry.path),
+                normalizeSyncPath
+            );
+            return {
+                fileConflicts,
+                filePlanSummary: {
+                    conflict: fileConflicts.length,
+                    download: Array.isArray(plan.download) ? plan.download.length : 0,
+                    deleteLocal: Array.isArray(plan.deleteLocal) ? plan.deleteLocal.length : 0,
+                    upload: Array.isArray(plan.upload) ? plan.upload.length : 0,
+                    deleteRemote: Array.isArray(plan.deleteRemote) ? plan.deleteRemote.length : 0,
+                    skip: Array.isArray(plan.skip) ? plan.skip.length : 0
+                }
+            };
+        } catch (_) {
+            return { fileConflicts: [], filePlanSummary: null };
+        }
+    }
+
+    async function resolvePendingConflictByFineChoices() {
+        if (shouldBlockOrdinarySyncActionsForRecoveryLock()) {
+            openPanel({ activeTab: 'status' });
+            toast(textByLang('检测到未完成的同步恢复：请先继续上次操作', 'An unfinished sync recovery was detected: continue the previous action first'));
+            return false;
+        }
+        if (!pendingConflict) {
+            toast(textByLang('没有待处理冲突', 'No pending conflicts'));
+            return false;
+        }
+        if (runtime.isRunning) {
+            toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
+            return false;
+        }
+
+        const conflictData = pendingConflict;
+        const desiredPaths = uniqueStringList(conflictData.fileConflicts, normalizeSyncPath);
+        if (!desiredPaths.length) {
+            toast(textByLang('当前冲突没有可处理的文件级差异', 'No file-level conflicts available to resolve'));
+            return false;
+        }
+
+        const pullPlanResult = await buildObsidianPullPlan('manual-conflict-fine-plan');
+        if (!pullPlanResult || pullPlanResult.enabled !== true) {
+            throw new Error(textByLang('无法读取文件级冲突计划，请稍后重试', 'Cannot load file-level conflict plan. Please retry.'));
+        }
+
+        const localByPath = {};
+        (Array.isArray(pullPlanResult.localFiles) ? pullPlanResult.localFiles : []).forEach((file) => {
+            const path = normalizeSyncPath(file && file.path);
+            if (!path) return;
+            localByPath[path] = file;
+        });
+        const conflictPathSet = new Set(
+            (Array.isArray(pullPlanResult.plan && pullPlanResult.plan.conflict) ? pullPlanResult.plan.conflict : [])
+                .map((entry) => normalizeSyncPath(entry && entry.path))
+                .filter(Boolean)
+        );
+        const targetPaths = desiredPaths.filter((path) => conflictPathSet.has(path));
+        if (!targetPaths.length) {
+            toast(textByLang('当前文件冲突已变化，请先重试“云端自动合并”或重新同步', 'File conflicts changed. Retry cloud auto-merge or sync again first.'));
+            return false;
+        }
+
+        const localApplyChanges = [];
+        targetPaths.forEach((path) => {
+            const choice = normalizeConflictFineChoice(conflictFineChoiceByPath[path] || 'local');
+            if (choice !== 'local') return;
+            const localFile = localByPath[path];
+            if (localFile) {
+                localApplyChanges.push({ path, content: String(localFile.content == null ? '' : localFile.content) });
+            } else {
+                localApplyChanges.push({ path, delete: true });
+            }
+        });
+
+        if (localApplyChanges.length) {
+            await applyRemoteFilesBatch(
+                localApplyChanges,
+                `Bookmark Canvas Sync: manual fine conflict resolution (${localApplyChanges.length})`,
+                120000,
+                { mergeViaTempBranch: true, tempBranchPrefix: 'canvas-sync' }
+            );
+        }
+
+        const preservedConflict = pendingConflict;
+        const beforeSuccessAt = Number(runtime.lastSuccessAt) || 0;
+        clearPendingConflict();
+        await runSync('pull', 'manual-conflict-fine-pull');
+        const successAdvanced = (Number(runtime.lastSuccessAt) || 0) > beforeSuccessAt;
+        if (successAdvanced && !hasPendingConflict()) {
+            toast(textByLang('逐文件冲突处理完成并已对齐本地', 'Fine-grained conflict resolution completed and local is aligned'));
+            return true;
+        }
+
+        if (!hasPendingConflict()) {
+            setPendingConflict(preservedConflict);
+        }
+        return false;
     }
 
     async function resolvePendingConflictByBaseline() {
@@ -10591,6 +10860,8 @@ Cancel: go back and change the branch name first.`
 
         if (!conflictData) {
             panel.hidden = true;
+            conflictFineModeEnabled = false;
+            conflictFineChoiceByPath = {};
             const compareWhenHidden = getElement('canvasSyncConflictCompare');
             if (compareWhenHidden) {
                 compareWhenHidden.innerHTML = '';
@@ -10603,6 +10874,7 @@ Cancel: go back and change the branch name first.`
             if (dismissTextWhenHidden) {
                 dismissTextWhenHidden.textContent = textByLang('稍后处理', 'Handle later');
             }
+            renderConflictFinePanel(null, false);
             updatePreviewActionButtonState();
             updateStatusPanelActionPlacement();
             return;
@@ -10649,13 +10921,27 @@ Cancel: go back and change the branch name first.`
                 otherState: normalizeComparisonSectionState(conflictSectionStates.other, 'change')
             }
         );
+        const cloudMergeConflictHint = !conflictPreview && conflictData && (conflictData.mergeConflict === true || conflictData.reason === 'cloud-merge-conflict')
+            ? textByLang(
+                '已尝试通过 GitHub 云端合并接口自动合并，但仍有冲突，请手动选择处理方式。',
+                'An automatic cloud merge via GitHub API was attempted but still conflicted. Please choose a manual resolution.'
+            )
+            : '';
+        const cloudMergeBranchHint = !conflictPreview && conflictData && conflictData.tempBranch
+            ? textByLang(
+                `临时分支：${String(conflictData.tempBranch)}`,
+                `Temporary branch: ${String(conflictData.tempBranch)}`
+            )
+            : '';
         if (summary) {
             summary.textContent = conflictPreview
                 ? textByLang(
                     '这是“冲突面板”预览：用于展示两端都改时的处理方式。',
                     'This is a conflict panel preview showing how the UI looks when both sides changed.'
                 )
-                : buildComparisonPanelSummaryText(comparisonSummary, 'conflict');
+                : [cloudMergeConflictHint, buildComparisonPanelSummaryText(comparisonSummary, 'conflict'), cloudMergeBranchHint]
+                    .filter((text) => !!String(text || '').trim())
+                    .join('\n');
             summary.dataset.dynamicSummary = 'true';
         }
         if (compare) {
@@ -10670,87 +10956,7 @@ Cancel: go back and change the branch name first.`
         const remoteTree = conflictData && conflictData.remoteSnapshot ? conflictData.remoteSnapshot.permanentTreeSnapshot : null;
         const permanentHintText = formatPermanentPullDecisionText(evaluatePermanentPullDecision(localTree, remoteTree));
         updateConflictPanelActionUi(comparisonSummary, conflictPreview, permanentHintText);
-
-        updatePreviewActionButtonState();
-        updateStatusPanelActionPlacement();
-    }
-
-    function renderMismatchPanel() {
-        const panel = getElement('canvasSyncMismatchPanel');
-        if (!panel) return;
-
-        if (isRecoveryLockActive()) {
-            panel.hidden = true;
-            updateStatusPanelActionPlacement();
-            return;
-        }
-
-        const mismatchPreview = isMismatchPreviewActive();
-
-        const shouldShow = !!(
-            runtime
-            && runtime.pendingMismatch
-            && !pendingConflict
-            && settings
-            && ensureMismatchPolicy(settings.mismatchPolicy) === 'prompt'
-        ) || mismatchPreview;
-
-        if (!shouldShow) {
-            panel.hidden = true;
-            const compareWhenHidden = getElement('canvasSyncMismatchCompare');
-            if (compareWhenHidden) {
-                compareWhenHidden.innerHTML = '';
-            }
-            const permanentHintWhenHidden = getElement('canvasSyncMismatchPermanentModeHint');
-            if (permanentHintWhenHidden) permanentHintWhenHidden.hidden = true;
-            const summaryWhenHidden = getElement('canvasSyncMismatchSummary');
-            if (summaryWhenHidden) {
-                delete summaryWhenHidden.dataset.dynamicSummary;
-            }
-            const dismissTextWhenHidden = getElement('canvasSyncMismatchDismissText');
-            if (dismissTextWhenHidden) {
-                dismissTextWhenHidden.textContent = textByLang('稍后处理', 'Handle later');
-            }
-            updatePreviewActionButtonState();
-            updateStatusPanelActionPlacement();
-            return;
-        }
-
-        panel.hidden = false;
-
-        const mismatchDetectedTs = mismatchPreview ? Date.now() : (runtime.pendingMismatchAt || Date.now());
-        const detectedAt = getElement('canvasSyncMismatchDetectedAt');
-        if (detectedAt) {
-            detectedAt.textContent = formatTime(mismatchDetectedTs);
-        }
-
-        const summary = getElement('canvasSyncMismatchSummary');
-        const compare = getElement('canvasSyncMismatchCompare');
-        const permanentHint = getElement('canvasSyncMismatchPermanentModeHint');
-        if (summary) {
-            summary.textContent = mismatchPreview
-                ? textByLang(
-                    '这是“云端不一致面板”预览：用于展示后台检测到版本不一致时的处理方式。',
-                    'This is a remote mismatch panel preview showing how the UI looks when background detects a revision mismatch.'
-                )
-                : textByLang(
-                    '检测到云端不一致，请在比较结果就绪后选择处理方式。',
-                    'Remote mismatch detected. Choose an action after comparison results are ready.'
-                );
-            summary.dataset.dynamicSummary = 'true';
-        }
-        if (compare && mismatchPreview) {
-            compare.innerHTML = '';
-        }
-        if (mismatchPreview) {
-            latestMismatchComparisonSummary = null;
-        }
-        if (permanentHint) {
-            permanentHint.hidden = true;
-            permanentHint.textContent = '';
-        }
-        updateMismatchPanelActionUi(null, mismatchPreview);
-        void refreshMismatchComparePanel(mismatchPreview);
+        renderConflictFinePanel(conflictData, conflictPreview);
 
         updatePreviewActionButtonState();
         updateStatusPanelActionPlacement();
@@ -10758,6 +10964,8 @@ Cancel: go back and change the branch name first.`
 
     function setPendingConflict(conflict) {
         pendingConflict = conflict;
+        conflictFineModeEnabled = false;
+        conflictFineChoiceByPath = {};
         runtime.hasPendingConflict = true;
         conflictPromptShownOnInit = false;
         persistPendingConflict();
@@ -10771,13 +10979,14 @@ Cancel: go back and change the branch name first.`
         void updateBackgroundSyncContext('sync-conflict-pending', {
             hasPendingWork: true,
             isRunning: runtime.isRunning,
-            queueLength: runtime.queueLength,
-            pendingMismatch: runtime.pendingMismatch
+            queueLength: runtime.queueLength
         });
     }
 
     function clearPendingConflict() {
         pendingConflict = null;
+        conflictFineModeEnabled = false;
+        conflictFineChoiceByPath = {};
         runtime.hasPendingConflict = false;
         conflictPromptShownOnInit = false;
         persistPendingConflict();
@@ -10785,45 +10994,69 @@ Cancel: go back and change the branch name first.`
         renderStatus();
         renderConflictPanel();
         void updateBackgroundSyncContext('sync-conflict-cleared', {
-            hasPendingWork: runtime.pendingMismatch,
+            hasPendingWork: hasLocalDirtyWork(),
             isRunning: runtime.isRunning,
-            queueLength: runtime.queueLength,
-            pendingMismatch: runtime.pendingMismatch
+            queueLength: runtime.queueLength
         });
     }
 
-    async function setPendingMismatchState(remoteSha, message, options = {}) {
-        runtime.pendingMismatch = true;
-        runtime.pendingMismatchAt = Date.now();
-        runtime.pendingMismatchRemoteSha = String(remoteSha || '');
-        if (typeof message === 'string') {
-            runtime.lastError = message;
+    async function setPendingConflictState(remoteSha, message, options = {}) {
+        const safeMessage = String(
+            message || textByLang(
+                '检测到本地与云端都有修改，已转入冲突面板，请选择处理方式',
+                'Both local and cloud changed. Moved to the conflict panel. Please choose a resolution.'
+            )
+        ).trim();
+
+        let localSnapshot = null;
+        let remoteState = null;
+        try {
+            localSnapshot = await buildLocalSnapshot('pending-upgrade-to-conflict', {
+                includePermanentTree: true,
+                includeTempSection: true,
+                includeBlankSectionFiles: true
+            });
+        } catch (_) {
+            localSnapshot = normalizeSnapshot({ data: {} });
         }
 
-        mismatchPromptShownOnInit = false;
-        clearPendingMismatchPromptTimer();
+        try {
+            remoteState = await readRemoteSnapshotWithPathRecovery({
+                interactive: false,
+                continueAfterConfirm: false,
+                throwWhenDetected: false
+            });
+        } catch (_) {
+            remoteState = null;
+        }
+
+        const fallbackRemoteState = {
+            notFound: false,
+            sha: String(remoteSha || ''),
+            path: String(settings && settings.obsidianExportRoot || ''),
+            snapshot: normalizeSnapshot({ updatedAt: Date.now(), data: {} })
+        };
+        const resolvedRemoteState = (remoteState && !remoteState.notFound && remoteState.snapshot)
+            ? remoteState
+            : fallbackRemoteState;
+        const fileConflictSummary = await buildConflictFileSummaryFromCurrentPlan('pending-upgrade-conflict');
+
+        setPendingConflict(createPendingConflictPayload(
+            normalizeSnapshot(localSnapshot || { data: {} }),
+            normalizeSnapshot(resolvedRemoteState.snapshot || { data: {} }),
+            resolvedRemoteState,
+            {
+                reason: String(options && options.reason || 'pending-upgraded'),
+                fileConflicts: fileConflictSummary.fileConflicts,
+                filePlanSummary: fileConflictSummary.filePlanSummary || undefined
+            }
+        ));
+
+        runtime.lastError = safeMessage;
         saveRuntime();
         renderStatus();
-
-        if (options && options.forceOpenPanel === true && !hasPendingConflict()) {
-            mismatchPromptShownOnInit = true;
-            ensureStatusPanelVisible('mismatch', String(message || textByLang(
-                '检测到云端不一致，请在“状态”面板选择处理方式',
-                'Remote mismatch detected. Choose an action in the Status panel.'
-            )));
-        } else if (!hasPendingConflict()) {
-            if (isDocumentVisibleForPrompt()) {
-                schedulePendingMismatchPromptCheck();
-            }
-            if (isSyncPanelOpen() && activeTabKey === 'status') {
-                renderMismatchPanel();
-            }
-        }
-
-        await updateBackgroundSyncContext('pending-mismatch-foreground', {
-            pendingMismatch: true,
-            pendingMismatchAt: runtime.pendingMismatchAt,
-            pendingMismatchRemoteSha: runtime.pendingMismatchRemoteSha,
+        ensureStatusPanelVisible('conflict', safeMessage);
+        await updateBackgroundSyncContext('pending-upgraded-to-conflict', {
             hasPendingWork: true,
             isRunning: runtime.isRunning,
             queueLength: runtime.queueLength,
@@ -10832,42 +11065,49 @@ Cancel: go back and change the branch name first.`
     }
 
     function backupSnapshotForRecovery(snapshot, reason) {
+        const nowTs = Date.now();
+        const normalizedReason = String(reason || 'manual').trim() || 'manual';
+        const snapshotHash = getSnapshotHash(snapshot);
         const record = {
-            ts: Date.now(),
-            reason: String(reason || 'manual'),
+            ts: nowTs,
+            reason: normalizedReason,
+            snapshotHash,
             snapshot
         };
 
         const warnQuota = (error) => {
-            const now = Date.now();
-            if (now - lastRecoverySnapshotWarningAt < 6000) return;
-            lastRecoverySnapshotWarningAt = now;
+            const warnTs = Date.now();
+            if (warnTs - lastRecoverySnapshotWarningAt < 6000) return;
+            lastRecoverySnapshotWarningAt = warnTs;
             console.warn('[Canvas Sync] save recovery snapshot skipped (storage quota):', error);
             toast(textByLang(
-                '本地存储空间不足：已跳过恢复快照备份，本次操作继续执行。',
-                'Storage quota exceeded: recovery snapshot backup skipped, operation continues.'
+                '本地存储空间不足：恢复快照备份失败，请释放空间后重试。',
+                'Storage quota exceeded: failed to save recovery snapshot. Free storage space and retry.'
             ));
         };
 
         try {
             const list = safeParse(getSyncMetaRaw(RECOVERY_KEY), []);
-            const arr = Array.isArray(list) ? list : [];
-            arr.unshift(record);
-
-            for (let keep = Math.min(MAX_RECOVERY_RECORDS, arr.length); keep >= 1; keep--) {
-                try {
-                    setSyncMetaRaw(RECOVERY_KEY, JSON.stringify(arr.slice(0, keep)));
+            const arr = (Array.isArray(list) ? list : [])
+                .filter((item) => item && typeof item === 'object')
+                .sort((a, b) => Math.max(0, Number(b && b.ts) || 0) - Math.max(0, Number(a && a.ts) || 0));
+            const latestRecord = arr[0] && typeof arr[0] === 'object' ? arr[0] : null;
+            if (latestRecord) {
+                const latestSnapshot = normalizeSnapshot(latestRecord.snapshot || null);
+                const latestHash = String(latestRecord.snapshotHash || '').trim() || (latestSnapshot ? getSnapshotHash(latestSnapshot) : '');
+                if (snapshotHash && latestHash && snapshotHash === latestHash) {
                     return true;
-                } catch (error) {
-                    if (keep === 1) throw error;
                 }
             }
+
+            setSyncMetaRaw(RECOVERY_KEY, JSON.stringify([record]));
+            return true;
         } catch (error) {
             try {
                 setSyncMetaRaw(RECOVERY_KEY, JSON.stringify([{
                     ts: record.ts,
                     reason: record.reason,
-                    snapshotHash: getSnapshotHash(snapshot),
+                    snapshotHash: snapshotHash || getSnapshotHash(snapshot),
                     snapshotOmitted: true
                 }]));
             } catch (_) { }
@@ -10876,6 +11116,13 @@ Cancel: go back and change the branch name first.`
         }
 
         return false;
+    }
+
+    function restartRecoverySnapshotTimer() {
+        // Recovery snapshots are now produced by background alarms.
+        // Foreground keeps only UI state in sync.
+        renderRecoverySnapshotDownloadStatus();
+        updateSyncEnabledDependentFieldState();
     }
 
     function applySnapshotToLocal(snapshot) {
@@ -10888,6 +11135,18 @@ Cancel: go back and change the branch name first.`
                 localStorage.removeItem(key);
             }
         });
+
+        try {
+            const protocolBridge = global && global.CanvasProtocolBridge && typeof global.CanvasProtocolBridge.applyPermanentViewShellSnapshot === 'function'
+                ? global.CanvasProtocolBridge
+                : null;
+            const permanentViewSnapshotForApply = snapshot && snapshot.permanentViewShellSnapshot
+                ? mergeMissingPermanentViewShellStateForApply(snapshot.permanentViewShellSnapshot)
+                : null;
+            if (protocolBridge && permanentViewSnapshotForApply) {
+                protocolBridge.applyPermanentViewShellSnapshot(permanentViewSnapshotForApply);
+            }
+        } catch (_) { }
 
         runtime.lastLocalMutationAt = Number(snapshot.updatedAt) || Date.now();
 
@@ -10916,13 +11175,8 @@ Cancel: go back and change the branch name first.`
             : '';
         if (!tempRaw) return snapshot;
 
-        let tempState = null;
-        try {
-            tempState = JSON.parse(tempRaw);
-        } catch (_) {
-            tempState = null;
-        }
-        if (!tempState || typeof tempState !== 'object') return snapshot;
+        const tempState = normalizeCanvasTempStatePayloadForSync(tempRaw);
+        if (!tempState) return snapshot;
 
         const sections = Array.isArray(tempState.sections) ? tempState.sections : [];
         const filteredSections = sections.filter((section) => {
@@ -10961,10 +11215,11 @@ Cancel: go back and change the branch name first.`
                 return !fromRemoved && !toRemoved;
             });
 
-        nextData[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(Object.assign({}, tempState, {
+        const nextTempState = buildPersistedCanvasTempStateForSync(Object.assign({}, tempState, {
             sections: filteredSections,
             edges: filteredEdges
-        }));
+        }), tempState);
+        nextData[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(nextTempState);
 
         return Object.assign({}, snapshot, { data: nextData });
     }
@@ -10992,6 +11247,12 @@ Cancel: go back and change the branch name first.`
         const localBytes = getSnapshotBytes(localSnapshot);
         const remoteBytes = getSnapshotBytes(remoteSnapshot);
 
+        if (!localTs || !remoteTs) {
+            if (localBytes === remoteBytes) return 'local';
+            // Timestamp is missing on at least one side; avoid auto-picking a winner by implicit 0.
+            return '';
+        }
+
         if (localTs === remoteTs) {
             if (localBytes === remoteBytes) return 'local';
             return localBytes > remoteBytes ? 'local' : 'remote';
@@ -11004,6 +11265,10 @@ Cancel: go back and change the branch name first.`
         const summarySource = extra && extra.filePlanSummary && typeof extra.filePlanSummary === 'object'
             ? extra.filePlanSummary
             : {};
+        const reason = String(extra && extra.reason || 'concurrent-change').trim() || 'concurrent-change';
+        const mergeConflict = extra && extra.mergeConflict === true;
+        const mergeApi = String(extra && extra.mergeApi || '').trim();
+        const tempBranch = String(extra && extra.tempBranch || '').trim();
         const sectionStates = (() => {
             const source = extra && extra.sectionStates && typeof extra.sectionStates === 'object'
                 ? extra.sectionStates
@@ -11016,9 +11281,12 @@ Cancel: go back and change the branch name first.`
         return {
             id: `conflict-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             createdAt: Date.now(),
-            reason: 'concurrent-change',
+            reason,
             remoteSha: String(remoteState && remoteState.sha || ''),
             remotePath: String(remoteState && remoteState.path || ''),
+            mergeConflict,
+            mergeApi,
+            tempBranch,
             localSnapshot,
             remoteSnapshot,
             localMeta: buildSnapshotMeta(localSnapshot),
@@ -11124,7 +11392,6 @@ Cancel: go back and change the branch name first.`
         try {
             const localSnapshot = normalizeSnapshot(pendingConflict.localSnapshot);
             const remoteSnapshot = normalizeSnapshot(pendingConflict.remoteSnapshot);
-            let recoverySnapshotSaved = true;
 
             if (resolvedChoice === 'local') {
                 if (settings.obsidianFilePushEnabled === false) {
@@ -11143,6 +11410,7 @@ Cancel: go back and change the branch name first.`
                 runtime.lastLocalHash = getSnapshotHash(localSnapshot);
                 runtime.lastLocalFilesSha = String(pushResult && pushResult.localRevision || buildLocalObsidianRevisionFromHashMap(loadObsidianFileHashes()) || runtime.lastLocalFilesSha || '');
                 runtime.lastRemoteSha = remoteRevision || runtime.lastRemoteSha;
+                runtime.lastRemoteSignalSha = String(pushResult && pushResult.remoteSignalSha || runtime.lastRemoteSignalSha || '').trim();
                 updateRuntimeSectionBaselineHashes(localSnapshot);
                 runtime.lastAppliedDirection = 'conflict-local';
                 storeConflictRecord(localSnapshot, remoteSnapshot, 'resolved-local', {
@@ -11152,11 +11420,9 @@ Cancel: go back and change the branch name first.`
                 });
             } else if (resolvedChoice === 'remote') {
                 // Conflict panel -> use remote:
-                // after applying snapshot data, permanent section must also go through
-                // the same overwrite helper used by other remote -> local flows.
+                // overwrite permanent section first, then apply snapshot data,
+                // so a permanent-overwrite failure won't leave temp/blank already switched.
                 const currentLocal = await buildLocalSnapshot('conflict-local-backup', { includePermanentTree: true });
-                recoverySnapshotSaved = backupSnapshotForRecovery(currentLocal, 'before-apply-remote-conflict');
-                applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot));
                 let remotePermanentTreeSnapshot = remoteSnapshot && remoteSnapshot.permanentTreeSnapshot;
                 try {
                     if (!normalizeBookmarkTreeSnapshot(remotePermanentTreeSnapshot)) {
@@ -11179,8 +11445,20 @@ Cancel: go back and change the branch name first.`
                     if (overwriteResult && overwriteResult.applied) {
                         runtime.lastPermanentTreeSnapshotAt = Date.now();
                     }
+                    applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot));
                 } catch (error) {
-                    console.warn('[Canvas Sync] overwrite local permanent tree from conflict(remote) failed:', error);
+                    console.warn('[Canvas Sync] apply conflict(remote) to local failed:', error);
+                    const rollbackResult = await rollbackRemoteLocalApplyFromSnapshot(
+                        currentLocal,
+                        'conflict-remote-overwrite'
+                    );
+                    if (rollbackResult && Array.isArray(rollbackResult.errors) && rollbackResult.errors.length > 0) {
+                        const rollbackErrorText = rollbackResult.errors.join(' | ');
+                        throw new Error(textByLang(
+                            `冲突处理失败：${error && error.message ? error.message : String(error)}；自动回滚也失败：${rollbackErrorText}`,
+                            `Conflict resolution failed: ${error && error.message ? error.message : String(error)}; automatic rollback also failed: ${rollbackErrorText}`
+                        ));
+                    }
                     throw error;
                 }
                 if (settings.obsidianFilePushEnabled !== false) {
@@ -11229,6 +11507,12 @@ Cancel: go back and change the branch name first.`
             runtime.queueLength = 0;
             runtime.lastError = '';
             runtime.lastSuccessAt = Date.now();
+            if (resolvedChoice === 'remote') {
+                clearRecoverySnapshotsByReasonKeywords([
+                    'before-apply-remote-conflict',
+                    'before-permanent-overwrite:manual-conflict-use-remote'
+                ]);
+            }
             await clearRecoveryLockCompletely();
             clearActiveRunRecoveryRecord();
             saveRuntime();
@@ -11237,15 +11521,11 @@ Cancel: go back and change the branch name first.`
             if (requestedChoice === 'newer') {
                 toast(resolvedChoice === 'local'
                     ? textByLang('冲突已处理：按最近修改时间决定，本地更新更晚，已保留本地并覆盖云端', 'Conflict resolved by latest modification time: local is newer, so local overwrote cloud')
-                    : (recoverySnapshotSaved
-                        ? textByLang('冲突已处理：按最近修改时间决定，云端更新更晚，已使用云端覆盖本地（已生成本地恢复快照）', 'Conflict resolved by latest modification time: cloud is newer, so cloud overwrote local (local recovery snapshot created)')
-                        : textByLang('冲突已处理：按最近修改时间决定，云端更新更晚，已使用云端覆盖本地（未保存恢复快照）', 'Conflict resolved by latest modification time: cloud is newer, so cloud overwrote local (recovery snapshot not saved)')));
+                    : textByLang('冲突已处理：按最近修改时间决定，云端更新更晚，已使用云端覆盖本地', 'Conflict resolved by latest modification time: cloud is newer, so cloud overwrote local'));
             } else {
                 toast(resolvedChoice === 'local'
                     ? textByLang('冲突已处理：已保留本地并覆盖云端', 'Conflict resolved: kept local and overwrote remote')
-                    : (recoverySnapshotSaved
-                        ? textByLang('冲突已处理：已使用云端覆盖本地（已生成本地恢复快照）', 'Conflict resolved: used remote to overwrite local (local recovery snapshot created)')
-                        : textByLang('冲突已处理：已使用云端覆盖本地（未保存恢复快照）', 'Conflict resolved: used remote to overwrite local (recovery snapshot not saved)')));
+                    : textByLang('冲突已处理：已使用云端覆盖本地', 'Conflict resolved: used remote to overwrite local'));
             }
         } catch (error) {
             const activeLock = normalizeRecoveryLockRecord(recoveryLockState || loadRecoveryLockState());
@@ -11262,7 +11542,6 @@ Cancel: go back and change the branch name first.`
             runtime.lastError = error && error.message ? error.message : String(error);
             saveRuntime();
             renderStatus();
-            scheduleRetry();
             toast(textByLang(`冲突处理失败：${runtime.lastError}`, `Conflict resolution failed: ${runtime.lastError}`));
         } finally {
             runtime.isRunning = false;
@@ -11270,6 +11549,49 @@ Cancel: go back and change the branch name first.`
             renderStatus();
             renderConflictPanel();
         }
+    }
+
+    async function retryPendingConflictCloudMerge() {
+        if (shouldBlockOrdinarySyncActionsForRecoveryLock()) {
+            openPanel({ activeTab: 'status' });
+            toast(textByLang('检测到未完成的同步恢复：请先继续上次操作', 'An unfinished sync recovery was detected: continue the previous action first'));
+            return false;
+        }
+        if (!pendingConflict) {
+            toast(textByLang('没有待处理冲突', 'No pending conflicts'));
+            return false;
+        }
+        if (runtime.isRunning) {
+            toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
+            return false;
+        }
+
+        const preservedConflict = pendingConflict;
+        const beforeSuccessAt = Number(runtime.lastSuccessAt) || 0;
+        clearPendingConflict();
+
+        await runSync('full', 'manual-conflict-cloud-merge-retry');
+
+        const successAdvanced = (Number(runtime.lastSuccessAt) || 0) > beforeSuccessAt;
+        if (successAdvanced && !hasPendingConflict()) {
+            toast(textByLang(
+                '已重试云端自动合并并完成同步',
+                'Cloud auto-merge retry succeeded and sync completed'
+            ));
+            return true;
+        }
+
+        if (!hasPendingConflict()) {
+            setPendingConflict(preservedConflict);
+            runtime.lastError = runtime.lastError || textByLang(
+                '重试云端自动合并未完成，请继续在冲突面板中手动处理',
+                'Cloud auto-merge retry did not complete. Continue manual handling in the conflict panel.'
+            );
+            saveRuntime();
+            renderStatus();
+            renderConflictPanel();
+        }
+        return false;
     }
 
     function isLikelyOfflineError(message) {
@@ -11308,7 +11630,7 @@ Cancel: go back and change the branch name first.`
 
         const message = textByLang(
             [
-                '检测到同步文件超过 100MB，本次推送/自动同步已停止。',
+                '检测到同步文件超过 100MB，本次推送已停止。',
                 sizeHint,
                 '',
                 '建议：',
@@ -11319,7 +11641,7 @@ Cancel: go back and change the branch name first.`
                 '处理后请再次执行同步。'
             ].join('\n'),
             [
-                'Sync file exceeded 100MB; this push/auto sync has been stopped.',
+                'Sync file exceeded 100MB; this push has been stopped.',
                 sizeHint,
                 '',
                 'Suggestions:',
@@ -11353,11 +11675,11 @@ Cancel: go back and change the branch name first.`
         }
 
         const isManualTrigger = isManualSyncTrigger(mode, trigger);
-        const normalizedTrigger = String(trigger || '').trim().toLowerCase();
-        const isSilentAutoPullTrigger = normalizedTrigger === 'startup-auto-pull'
-            || normalizedTrigger === 'auto-pull-interval';
+        const isSilentAutoPullTrigger = false;
+        const skipFormatMigrationSecondaryConfirm = !!(options && options.skipFormatMigrationSecondaryConfirm === true);
         const effectiveMode = mode;
         const syncMethod = DEFAULT_SETTINGS.syncMethod;
+        const hasPendingLocalFormatChange = hasPendingLocalObsidianExportFormatChange();
 
         try {
             const rawRepoConfig = await storageLocalGet(REPO_CONFIG_KEYS);
@@ -11392,8 +11714,8 @@ Cancel: go back and change the branch name first.`
 
         const shouldRequireLocalDirty = !isManualTrigger
             && (effectiveMode === 'push' || effectiveMode === 'full')
-            && !(runtime && runtime.pendingMismatch);
-        if (shouldRequireLocalDirty && !hasLocalDirtyWork()) {
+            ;
+        if (shouldRequireLocalDirty && !hasLocalDirtyWork() && !hasPendingLocalFormatChange) {
             pendingReasons.clear();
             runtime.queueLength = 0;
             runtime.lastError = '';
@@ -11401,7 +11723,7 @@ Cancel: go back and change the branch name first.`
             renderStatus();
             void updateBackgroundSyncContext('sync-skip-clean', {
                 queueLength: 0,
-                hasPendingWork: runtime.pendingMismatch === true,
+                hasPendingWork: false,
                 localDirty: false
             });
             return;
@@ -11434,8 +11756,7 @@ Cancel: go back and change the branch name first.`
         }
         void updateBackgroundSyncContext('sync-running', {
             isRunning: true,
-            queueLength: runtime.queueLength,
-            pendingMismatch: runtime.pendingMismatch
+            queueLength: runtime.queueLength
         });
 
         try {
@@ -11445,80 +11766,181 @@ Cancel: go back and change the branch name first.`
             let skipSuccessToast = false;
             updateSyncUiProgress(textByLang('已读取本地状态', 'Loaded local state'), 10);
 
-            const doPush = async (reason) => {
+            const doPush = async (reason, pushOptions = {}) => {
                 let obsidianPushResult = null;
-                const syncTrigger = String(trigger || reason || 'sync');
-                const canPushBlankSectionFiles = shouldPushBlankSectionFiles(syncTrigger);
+                const syncTrigger = String((pushOptions && pushOptions.syncTrigger) || trigger || reason || 'sync');
+                const formatMigration = pushOptions && pushOptions.formatMigration && typeof pushOptions.formatMigration === 'object'
+                    ? pushOptions.formatMigration
+                    : null;
+                const preflightRemoteFilesByPath = (pushOptions
+                    && pushOptions.remoteFilesByPathForMissingCheck
+                    && typeof pushOptions.remoteFilesByPathForMissingCheck === 'object')
+                    ? pushOptions.remoteFilesByPathForMissingCheck
+                    : null;
+                const preflightRemoteSignalSha = String(
+                    pushOptions && pushOptions.remoteSignalSha ? pushOptions.remoteSignalSha : ''
+                ).trim();
+                const canPushBlankSectionFiles = shouldPushBlankSectionFiles(syncTrigger, {
+                    includeBlankSectionFiles: formatMigration ? true : undefined
+                });
                 if (settings.obsidianFilePushEnabled !== false && canPushBlankSectionFiles) {
                     const pushProgress = makeProgressRange(15, 85);
                     obsidianPushResult = await pushObsidianFilesIncremental(syncTrigger, pushProgress, {
                         forceRecoveryLock: shouldForceRecoveryLockForTrigger(syncTrigger),
                         recoveryMode: effectiveMode,
                         sourcePanel: mapRecoveryLockSourcePanel(syncTrigger),
-                        baseRemoteSha: getCurrentCloudHashForDisplay()
+                        baseRemoteSha: getCurrentCloudHashForDisplay(),
+                        remoteFilesByPathForMissingCheck: preflightRemoteFilesByPath,
+                        useTempBranchMerge: !!(pushOptions && pushOptions.useTempBranchMerge === true),
+                        tempBranchPrefix: String((pushOptions && pushOptions.tempBranchPrefix) || '').trim() || 'canvas-sync'
                     });
                     if (obsidianPushResult && obsidianPushResult.enabled) {
-                        runtime.lastObsidianPushAt = Date.now();
+                        const pushedAt = Date.now();
+                        runtime.lastObsidianPushAt = pushedAt;
                         runtime.lastObsidianPushChanged = Number(obsidianPushResult.changedCount) || 0;
                         runtime.lastObsidianPushTotal = Number(obsidianPushResult.totalCount) || 0;
                         runtime.lastLocalFilesSha = String(obsidianPushResult.localRevision || runtime.lastLocalFilesSha || '');
+                        const pushedRemoteSignalSha = String(obsidianPushResult.remoteSignalSha || '').trim();
+                        if (pushedRemoteSignalSha) {
+                            runtime.lastRemoteSignalSha = pushedRemoteSignalSha;
+                        }
+                        const blankChangedCount = Number(obsidianPushResult.blankChangedCount) || 0;
+                        const blankDeletedCount = Number(obsidianPushResult.blankDeletedCount) || 0;
+                        if ((blankChangedCount + blankDeletedCount) > 0) {
+                            runtime.lastBlankSectionFilePushAt = pushedAt;
+                        }
                     }
-                } else if (settings.obsidianFilePushEnabled !== false && !canPushBlankSectionFiles) {
-                    obsidianPushResult = { enabled: false, skippedByThrottle: true };
                 } else if (settings.obsidianFilePushEnabled === false) {
                     throw new Error(textByLang('已关闭 Obsidian 文件推送，无法执行上传同步', 'Obsidian file push is disabled, cannot perform upload sync'));
+                } else {
+                    throw new Error(textByLang(
+                        '当前同步策略未启用文件推送，已中止本次上传',
+                        'File push is disabled by the current sync policy; this upload was aborted.'
+                    ));
                 }
 
                 let remoteRevision = '';
                 if (settings.obsidianFilePushEnabled !== false) {
-                    try {
-                        updateSyncUiProgress(textByLang('校验云端状态...', 'Validating cloud state...'), 90);
-                        const remoteListAfterPushRaw = await listRemoteObsidianFilesByPath(settings.obsidianExportRoot);
-                        const remoteListAfterPush = filterRemoteListForManagedSyncFiles(remoteListAfterPushRaw, settings.obsidianExportRoot);
-                        remoteRevision = buildRemoteObsidianRevisionFromList(remoteListAfterPush);
+                    remoteRevision = String(obsidianPushResult && obsidianPushResult.remoteRevision || '').trim();
+                    if (remoteRevision) {
                         updateSyncUiProgress(textByLang('云端状态已更新', 'Cloud state updated'), 95);
-                    } catch (_) {
-                        remoteRevision = '';
+                    } else {
+                        try {
+                            updateSyncUiProgress(textByLang('校验云端状态...', 'Validating cloud state...'), 90);
+                            const remoteListAfterPushRaw = await listRemoteObsidianFilesByPath(settings.obsidianExportRoot);
+                            const remoteListAfterPush = filterRemoteListForManagedSyncFiles(remoteListAfterPushRaw, settings.obsidianExportRoot);
+                            remoteRevision = buildRemoteObsidianRevisionFromList(remoteListAfterPush);
+                            updateSyncUiProgress(textByLang('云端状态已更新', 'Cloud state updated'), 95);
+                        } catch (_) {
+                            remoteRevision = '';
+                        }
                     }
                 }
 
-                runtime.lastLocalHash = localHash;
-                runtime.lastLocalFilesSha = buildLocalObsidianRevisionFromHashMap(loadObsidianFileHashes()) || runtime.lastLocalFilesSha;
-                runtime.lastRemoteSha = remoteRevision || runtime.lastRemoteSha;
-                updateRuntimeSectionBaselineHashes(localSnapshot);
-                const nowTs = Date.now();
-                if (localSnapshot && localSnapshot.permanentTreeSnapshot) {
-                    runtime.lastPermanentTreeSnapshotAt = nowTs;
-                }
-
-                const includeTempSection = !!(localSnapshot && localSnapshot._syncMeta && localSnapshot._syncMeta.includeTempSection);
-                if (includeTempSection) {
-                    runtime.lastTempSectionSnapshotAt = nowTs;
-                    const pushedTempStateRaw = localSnapshot
-                        && localSnapshot.data
-                        && typeof localSnapshot.data[TEMP_SECTION_STORAGE_KEY] === 'string'
-                        ? localSnapshot.data[TEMP_SECTION_STORAGE_KEY]
-                        : '';
-                    if (pushedTempStateRaw) {
-                        setSyncMetaRaw(LAST_UPLOADED_TEMP_STATE_KEY, pushedTempStateRaw);
+                if (true) {
+                    if (preflightRemoteSignalSha) {
+                        runtime.lastRemoteSignalSha = preflightRemoteSignalSha;
                     }
+                    runtime.lastLocalHash = localHash;
+                    runtime.lastLocalFilesSha = buildLocalObsidianRevisionFromHashMap(loadObsidianFileHashes()) || runtime.lastLocalFilesSha;
+                    runtime.lastRemoteSha = remoteRevision || runtime.lastRemoteSha;
+                    if (remoteRevision) {
+                        runtime.lastCheckRemoteSha = remoteRevision;
+                    }
+                    updateRuntimeSectionBaselineHashes(localSnapshot);
+                    const nowTs = Date.now();
+                    if (localSnapshot && localSnapshot.permanentTreeSnapshot) {
+                        runtime.lastPermanentTreeSnapshotAt = nowTs;
+                    }
+
+                    const includeTempSection = !!(localSnapshot && localSnapshot._syncMeta && localSnapshot._syncMeta.includeTempSection);
+                    if (includeTempSection) {
+                        runtime.lastTempSectionSnapshotAt = nowTs;
+                        const pushedTempStateRaw = localSnapshot
+                            && localSnapshot.data
+                            && typeof localSnapshot.data[TEMP_SECTION_STORAGE_KEY] === 'string'
+                            ? localSnapshot.data[TEMP_SECTION_STORAGE_KEY]
+                            : '';
+                        const normalizedPushedTempStateRaw = pushedTempStateRaw
+                            ? buildNormalizedCanvasTempStateRawForSync(pushedTempStateRaw)
+                            : '';
+                        if (normalizedPushedTempStateRaw) {
+                            setSyncMetaRaw(LAST_UPLOADED_TEMP_STATE_KEY, normalizedPushedTempStateRaw);
+                        }
+                    }
+                    setStoredSyncedObsidianExportFormat(getCurrentObsidianExportFormatForSync());
                 }
-                runtime.lastAppliedDirection = 'push';
+                runtime.lastAppliedDirection = formatMigration ? 'format-migration-push' : 'push';
+
+                if (formatMigration) {
+                    return textByLang(
+                        `格式迁移：${formatObsidianExportFormatLabel(formatMigration.baseFormat)} -> ${formatObsidianExportFormatLabel(formatMigration.currentFormat)}，已重导出并覆盖云端`,
+                        `Format migration: ${formatObsidianExportFormatLabel(formatMigration.baseFormat)} -> ${formatObsidianExportFormatLabel(formatMigration.currentFormat)}; re-exported and overwrote cloud`
+                    );
+                }
 
                 if (obsidianPushResult && obsidianPushResult.enabled) {
                     return `push + files(${runtime.lastObsidianPushChanged}/${runtime.lastObsidianPushTotal})`;
                 }
-                if (obsidianPushResult && obsidianPushResult.skippedByThrottle) {
-                    return textByLang('push + 空白栏目文件节流中', 'push + blank-section files throttled');
-                }
                 return 'push';
+            };
+
+            const tryHandleManualSignalFastPush = async (fastPushReason) => {
+                if (!isManualTrigger) return { handled: false, actionText: '' };
+                if (settings.obsidianFilePushEnabled === false) return { handled: false, actionText: '' };
+                if (hasPendingLocalFormatChange) return { handled: false, actionText: '' };
+
+                const baselineRemoteSignalSha = String(runtime && runtime.lastRemoteSignalSha || '').trim();
+                const baselineLocalHash = String(runtime && runtime.lastLocalHash || '').trim();
+                if (!baselineRemoteSignalSha || !baselineLocalHash) {
+                    return { handled: false, actionText: '' };
+                }
+
+                try {
+                    updateSyncUiProgress(textByLang('快速校验云端状态...', 'Quick checking cloud state...'), 13);
+                    const remoteSignal = await readRemoteObsidianSignal(settings && settings.obsidianExportRoot);
+                    const signalSha = String(remoteSignal && remoteSignal.revisionSha || '').trim();
+                    const committedAt = Math.max(0, Number(remoteSignal && remoteSignal.committedAt) || 0);
+                    if (committedAt > 0) {
+                        runtime.lastRemoteCommittedAt = committedAt;
+                    }
+                    if (!signalSha || signalSha !== baselineRemoteSignalSha) {
+                        return { handled: false, actionText: '' };
+                    }
+
+                    runtime.lastRemoteSignalSha = signalSha;
+                    const localChanged = baselineLocalHash !== localHash || hasLocalDirtyWork();
+                    if (!localChanged) {
+                        runtime.lastLocalHash = localHash;
+                        runtime.lastLocalFilesSha = buildLocalObsidianRevisionFromHashMap(loadObsidianFileHashes()) || runtime.lastLocalFilesSha;
+                        runtime.lastCheckRemoteSha = String(runtime.lastRemoteSha || runtime.lastCheckRemoteSha || '');
+                        updateRuntimeSectionBaselineHashes(localSnapshot);
+                        runtime.lastAppliedDirection = 'noop';
+                        updateSyncUiProgress(
+                            textByLang('云端未变化，跳过深度校验', 'Cloud unchanged, skipped deep validation'),
+                            92
+                        );
+                        return { handled: true, actionText: 'noop' };
+                    }
+
+                    updateSyncUiProgress(
+                        textByLang('云端未变化，执行快速上传...', 'Cloud unchanged, running fast upload...'),
+                        18
+                    );
+                    const actionText = await doPush(fastPushReason, {
+                        remoteSignalSha: signalSha
+                    });
+                    return { handled: true, actionText };
+                } catch (error) {
+                    console.warn('[Canvas Sync] signal fast path skipped:', error);
+                    return { handled: false, actionText: '' };
+                }
             };
 
             // Shared remote -> local apply path for sync-related pull actions.
             // Temp / blank sections are applied from sync files or snapshot data,
             // while permanent section is overwritten via maybeOverwriteLocalPermanentTreeFromRemoteSnapshot().
             const doPull = async (remoteState, reason, preparedPullPlan = null) => {
-                const explicitRemoteOverride = isExplicitRemoteOverwriteTrigger(trigger);
                 const bypassPullPlanConflictCheck = shouldBypassPullPlanConflictCheck(trigger);
                 updateSyncUiProgress(textByLang('计算拉取计划...', 'Building pull plan...'), 20);
                 let pullPlanResult = preparedPullPlan;
@@ -11586,10 +12008,6 @@ Cancel: go back and change the branch name first.`
                     return textByLang('冲突待处理', 'Conflict pending');
                 }
 
-                if (explicitRemoteOverride) {
-                    backupSnapshotForRecovery(localSnapshot, `before-${String(trigger || reason || 'pull')}-remote-overwrite`);
-                }
-
                 const remoteFilesByPath = pullPlanResult && pullPlanResult.remoteList
                     ? pullPlanResult.remoteList.filesByPath
                     : null;
@@ -11610,6 +12028,7 @@ Cancel: go back and change the branch name first.`
                     return (normalizedRoot ? normalizedRoot.split('/').filter(Boolean).slice(-1)[0] : '') || DEFAULT_SETTINGS.obsidianExportRoot;
                 })();
                 const shouldStagePullRecoveryLock = shouldForceRecoveryLockForTrigger(recoveryTrigger);
+                let pullRecoveryLockStagingFailed = false;
 
                 if (settings.obsidianFilePushEnabled !== false && hasRemoteFiles) {
                     try {
@@ -11617,7 +12036,7 @@ Cancel: go back and change the branch name first.`
                         const fetched = await fetchRemoteObsidianFolderFiles(pullPlanResult.remoteList, pullFilesProgress);
                         if (fetched.folderFiles.size) {
                             if (shouldStagePullRecoveryLock) {
-                                await stagePullRecoveryLock({
+                                const stagedPullLock = await stagePullRecoveryLock({
                                     rootPath: recoveryRootPath,
                                     folderName: recoveryFolderName,
                                     snapshot: remoteState && !remoteState.notFound ? remoteState.snapshot : null,
@@ -11630,6 +12049,9 @@ Cancel: go back and change the branch name first.`
                                     targetRemoteSha: remoteState && remoteState.sha ? remoteState.sha : buildRemoteObsidianRevisionFromList(pullPlanResult.remoteList),
                                     stage: 'downloaded'
                                 });
+                                if (!stagedPullLock) {
+                                    pullRecoveryLockStagingFailed = true;
+                                }
                             }
                             preparedRemoteBundle = {
                                 rootPath: recoveryRootPath,
@@ -11646,7 +12068,7 @@ Cancel: go back and change the branch name first.`
 
                 if (!preparedRemoteBundle && remoteState && !remoteState.notFound && remoteState.snapshot) {
                     if (shouldStagePullRecoveryLock) {
-                        await stagePullRecoveryLock({
+                        const stagedPullLock = await stagePullRecoveryLock({
                             rootPath: recoveryRootPath,
                             folderName: recoveryFolderName,
                             snapshot: remoteState.snapshot,
@@ -11659,6 +12081,9 @@ Cancel: go back and change the branch name first.`
                             targetRemoteSha: remoteState.sha || '',
                             stage: 'downloaded'
                         });
+                        if (!stagedPullLock) {
+                            pullRecoveryLockStagingFailed = true;
+                        }
                     }
                     preparedRemoteBundle = {
                         rootPath: recoveryRootPath,
@@ -11669,6 +12094,13 @@ Cancel: go back and change the branch name first.`
                     };
                 }
 
+                if (shouldStagePullRecoveryLock && pullRecoveryLockStagingFailed) {
+                    throw new Error(textByLang(
+                        '恢复保护创建失败：已取消本次云端覆盖本地，以保护本地永久栏目。请检查浏览器存储空间后重试。',
+                        'Recovery staging failed, so this cloud-overwrite-local action was cancelled to protect the local permanent section. Check browser storage space and retry.'
+                    ));
+                }
+
                 if (!preparedRemoteBundle) {
                     if (settings.obsidianFilePushEnabled !== false && hasRemoteFiles) {
                         throw new Error(textByLang('云端文件存在，但恢复缓存未准备完成，无法继续仅拉取', 'Cloud files exist, but the staged recovery bundle is not ready; pull-only cannot continue'));
@@ -11676,7 +12108,9 @@ Cancel: go back and change the branch name first.`
                     throw new Error(textByLang('云端同步目录为空，无法仅拉取', 'Cloud sync folder is empty; pull-only cannot continue'));
                 }
 
-                const pullApplyResult = await applyPreparedRemoteBundleToLocal(preparedRemoteBundle, recoveryTrigger);
+                const pullApplyResult = await applyPreparedRemoteBundleToLocal(preparedRemoteBundle, recoveryTrigger, {
+                    localRollbackSnapshot: localSnapshot
+                });
                 applyResult = pullApplyResult && pullApplyResult.remotePermanentTreeSnapshot
                     ? { permanentTreeSnapshot: pullApplyResult.remotePermanentTreeSnapshot }
                     : null;
@@ -11701,6 +12135,11 @@ Cancel: go back and change the branch name first.`
                         : null
                 );
                 runtime.lastRemoteSha = remoteState.sha || remoteRevisionFromFiles || runtime.lastRemoteSha;
+                runtime.lastRemoteSignalSha = String(
+                    remoteState && remoteState.remoteSignalSha
+                        ? remoteState.remoteSignalSha
+                        : runtime.lastRemoteSignalSha || ''
+                ).trim();
                 if (remoteState && !remoteState.notFound && remoteState.snapshot) {
                     const syncedRemoteSnapshot = normalizeSnapshot(remoteState.snapshot || { data: {} });
                     if (!syncedRemoteSnapshot.permanentTreeSnapshot) {
@@ -11711,96 +12150,212 @@ Cancel: go back and change the branch name first.`
                     }
                     updateRuntimeSectionBaselineHashes(syncedRemoteSnapshot);
                 }
-                runtime.lastAppliedDirection = 'pull';
-                return reason || (appliedByFiles
-                    ? textByLang('pull（文件集）', 'pull (files)')
-                    : 'pull');
+                const adoptedRemoteExportFormat = adoptRemoteObsidianExportFormat(remoteState && remoteState.exportFormat);
+                runtime.lastAppliedDirection = adoptedRemoteExportFormat ? 'pull-adopt-remote-format' : 'pull';
+
+                const adoptedLabel = formatObsidianExportFormatLabel(remoteState && remoteState.exportFormat);
+                const adoptedSuffix = adoptedRemoteExportFormat
+                    ? (adoptedLabel
+                        ? textByLang(`（已沿用远端${adoptedLabel}）`, ` (adopted remote ${adoptedLabel})`)
+                        : textByLang('（已沿用远端导出格式）', ' (adopted remote export format)'))
+                    : '';
+                if (reason) {
+                    return `${reason}${adoptedSuffix}`;
+                }
+                if (adoptedRemoteExportFormat) {
+                    return textByLang('pull（已沿用远端导出格式）', 'pull (adopted remote export format)');
+                }
+                return textByLang('pull（文件集）', 'pull (files)');
             };
 
             const doResetHead = async (remoteState, reason) => {
                 runtime.lastLocalHash = localHash;
                 runtime.lastLocalFilesSha = buildLocalObsidianRevisionFromHashMap(loadObsidianFileHashes()) || runtime.lastLocalFilesSha;
                 runtime.lastRemoteSha = remoteState.sha || runtime.lastRemoteSha;
+                runtime.lastRemoteSignalSha = String(
+                    remoteState && remoteState.remoteSignalSha
+                        ? remoteState.remoteSignalSha
+                        : runtime.lastRemoteSignalSha || ''
+                ).trim();
                 updateRuntimeSectionBaselineHashes(localSnapshot);
                 runtime.lastAppliedDirection = 'reset-head';
                 return reason || textByLang('仅记云端版本（仅更新 HEAD）', 'Track remote revision only (update HEAD)');
             };
 
+            const buildFormatMigrationPendingMessage = (formatMigration) => {
+                const migration = formatMigration && typeof formatMigration === 'object' ? formatMigration : {};
+                const baseFormatLabel = formatObsidianExportFormatLabel(migration.baseFormat)
+                    || String(migration.baseFormat || textByLang('旧格式', 'previous format'));
+                const currentFormatLabel = formatObsidianExportFormatLabel(migration.currentFormat)
+                    || String(migration.currentFormat || textByLang('新格式', 'new format'));
+                return textByLang(
+                    `检测到导出格式迁移（${baseFormatLabel} -> ${currentFormatLabel}），已暂停自动覆盖。请手动同步，并在二级确认中点击“本地覆盖云端（格式迁移）”。`,
+                    `Format migration detected (${baseFormatLabel} -> ${currentFormatLabel}). Automatic overwrite is paused. Run sync manually and click "Local Overwrite Cloud (Format Migration)" in the secondary confirmation.`
+                );
+            };
+
+            const maybeRunFormatMigrationPush = async (formatMigration, triggerFallback = 'sync', pushContext = null) => {
+                if (!formatMigration) {
+                    return { handled: false, blocked: false, actionText: 'noop' };
+                }
+                const migrationRemoteFilesByPath = (pushContext
+                    && pushContext.remoteFilesByPathForMissingCheck
+                    && typeof pushContext.remoteFilesByPathForMissingCheck === 'object')
+                    ? pushContext.remoteFilesByPathForMissingCheck
+                    : null;
+
+                if (skipFormatMigrationSecondaryConfirm) {
+                    const migrationActionText = await doPush('format migration local overwrite cloud', {
+                        syncTrigger: `${String(trigger || triggerFallback)}:format-migration`,
+                        formatMigration,
+                        remoteFilesByPathForMissingCheck: migrationRemoteFilesByPath
+                    });
+                    return { handled: true, blocked: false, actionText: migrationActionText };
+                }
+
+                const triggerText = String(trigger || '').trim().toLowerCase();
+                const shouldPromptSecondaryUi = isManualTrigger || triggerText === 'obsidian-export-format-change';
+
+                if (!shouldPromptSecondaryUi) {
+                    runtime.lastAppliedDirection = 'format-migration-pending';
+                    runtime.lastError = buildFormatMigrationPendingMessage(formatMigration);
+                    saveRuntime();
+                    renderStatus();
+                    return { handled: true, blocked: true, actionText: 'noop' };
+                }
+
+                const confirmed = await requestFormatMigrationLocalOverwriteConfirmationAsync(formatMigration, {
+                    trigger: trigger || triggerFallback
+                });
+                if (!confirmed) {
+                    runtime.lastError = '';
+                    saveRuntime();
+                    renderStatus();
+                    toast(textByLang('已取消格式迁移覆盖操作', 'Format migration overwrite cancelled'));
+                    return { handled: true, blocked: true, actionText: 'noop' };
+                }
+
+                const migrationActionText = await doPush('format migration local overwrite cloud', {
+                    syncTrigger: `${String(trigger || triggerFallback)}:format-migration`,
+                    formatMigration,
+                    remoteFilesByPathForMissingCheck: migrationRemoteFilesByPath
+                });
+                return { handled: true, blocked: false, actionText: migrationActionText };
+            };
+
             let actionText = 'noop';
 
             if (effectiveMode === 'push') {
-                const pushTriggerText = String(trigger || '').trim().toLowerCase();
-                const skipPushPreflight = pushTriggerText === 'mismatch-panel-push'
-                    || pushTriggerText === 'mismatch-policy-auto-push';
-                let allowPushOnly = true;
+                const fastPushResult = await tryHandleManualSignalFastPush(
+                    isManualPushOnlyTrigger(trigger) ? 'manual push (signal fast-path)' : 'push (signal fast-path)'
+                );
+                if (fastPushResult && fastPushResult.handled) {
+                    actionText = fastPushResult.actionText;
+                } else {
+                    let allowPushOnly = true;
 
-                if (!skipPushPreflight) {
                     updateSyncUiProgress(textByLang('校验云端基线...', 'Checking cloud baseline...'), 15);
                     const remoteState = await readRemoteSnapshotWithPathRecovery({
                         interactive: isManualTrigger,
                         continueAfterConfirm: true
                     });
-                    const pushPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
-                    localHash = pushPreflight.localHash;
-
-                    if (!pushPreflight.winner) {
-                        setPendingConflict(createPendingConflictPayload(localSnapshot, pushPreflight.remoteSnapshot, remoteState));
-                        storeConflictRecord(localSnapshot, pushPreflight.remoteSnapshot, 'pending-manual', {
-                            remoteSha: pushPreflight.remoteSha || remoteState.sha || '',
-                            strategy: settings.conflictPolicy,
-                            syncMethod
+                    const remoteFilesByPathForMissingCheck = remoteState
+                        && remoteState.remoteList
+                        && remoteState.remoteList.filesByPath
+                        ? remoteState.remoteList.filesByPath
+                        : null;
+                    const formatMigration = resolveObsidianExportFormatMigration(remoteState);
+                    if (formatMigration) {
+                        const migrationResult = await maybeRunFormatMigrationPush(formatMigration, 'push', {
+                            remoteFilesByPathForMissingCheck
                         });
-                        runtime.lastAppliedDirection = 'conflict';
-                        runtime.lastError = textByLang(
-                            '检测到并发修改，已暂停当前上传路径，请先在冲突面板选择处理方式',
-                            'Concurrent changes detected. The current upload path has been paused; resolve it in the conflict panel first.'
-                        );
-                        pendingReasons.clear();
-                        runtime.queueLength = 0;
-                        saveRuntime();
-                        renderStatus();
-                        toast(textByLang('检测到冲突：请先在面板中选择保留本地或使用云端', 'Conflict detected: choose keep local or use cloud in the panel first'));
-                        allowPushOnly = false;
+                        if (migrationResult.blocked) {
+                            allowPushOnly = false;
+                        } else {
+                            actionText = migrationResult.actionText;
+                        }
                     } else {
-                        const riskyRemoteOverwrite = pushPreflight.remoteChanged
-                            || pushPreflight.concurrentChanged
-                            || pushPreflight.remoteUntracked;
+                        const pushPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
+                        localHash = pushPreflight.localHash;
 
-                        if (isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
-                            if (!await requestOneWayOverwriteConfirmationAsync('push', pushPreflight)) {
-                                runtime.lastError = '';
-                                saveRuntime();
-                                renderStatus();
-                                toast(textByLang('已取消当前上传操作', 'Current upload action cancelled'));
+                        if (!pushPreflight.winner) {
+                            setPendingConflict(createPendingConflictPayload(localSnapshot, pushPreflight.remoteSnapshot, remoteState));
+                            storeConflictRecord(localSnapshot, pushPreflight.remoteSnapshot, 'pending-manual', {
+                                remoteSha: pushPreflight.remoteSha || remoteState.sha || '',
+                                strategy: settings.conflictPolicy,
+                                syncMethod
+                            });
+                            runtime.lastAppliedDirection = 'conflict';
+                            runtime.lastError = textByLang(
+                                '检测到并发修改，已暂停当前上传路径，请先在冲突面板选择处理方式',
+                                'Concurrent changes detected. The current upload path has been paused; resolve it in the conflict panel first.'
+                            );
+                            pendingReasons.clear();
+                            runtime.queueLength = 0;
+                            saveRuntime();
+                            renderStatus();
+                            toast(textByLang('检测到冲突：请先在面板中选择保留本地或使用云端', 'Conflict detected: choose keep local or use cloud in the panel first'));
+                            allowPushOnly = false;
+                        } else {
+                            const riskyRemoteOverwrite = pushPreflight.remoteChanged
+                                || pushPreflight.concurrentChanged
+                                || pushPreflight.remoteUntracked;
+
+                            if (isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
+                                if (!await requestOneWayOverwriteConfirmationAsync('push', pushPreflight)) {
+                                    runtime.lastError = '';
+                                    saveRuntime();
+                                    renderStatus();
+                                    toast(textByLang('已取消当前上传操作', 'Current upload action cancelled'));
+                                    allowPushOnly = false;
+                                }
+                            } else if (!isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
+                                await setPendingConflictState(
+                                    pushPreflight.remoteSha || remoteState.sha || '',
+                                    textByLang(
+                                        '检测到云端已有更新，已暂停当前自动上传路径，请在“状态”面板选择处理方式',
+                                        'Cloud updates were detected. The current automatic upload path has been paused; choose an action in Status.'
+                                    ),
+                                    { reason: 'auto-push-risk-pause' }
+                                );
                                 allowPushOnly = false;
                             }
-                        } else if (!isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
-                            await setPendingMismatchState(
-                                pushPreflight.remoteSha || remoteState.sha || '',
-                                textByLang(
-                                    '检测到云端已有更新，已暂停当前自动上传路径，请在“状态”面板选择处理方式',
-                                    'Cloud updates were detected. The current automatic upload path has been paused; choose an action in Status.'
-                                ),
-                                { openPanel: false }
-                            );
-                            allowPushOnly = false;
                         }
+                    }
+
+                    if (!allowPushOnly) {
+                        return;
+                    }
+
+                    if (actionText === 'noop') {
+                        actionText = await doPush(isManualPushOnlyTrigger(trigger) ? 'manual push' : 'push', {
+                            remoteFilesByPathForMissingCheck
+                        });
+                    }
+                }
+            } else {
+                let handledByFastFullPath = false;
+                if (effectiveMode === 'full') {
+                    const fastFullResult = await tryHandleManualSignalFastPush('local newer push (signal fast-path)');
+                    if (fastFullResult && fastFullResult.handled) {
+                        actionText = fastFullResult.actionText;
+                        handledByFastFullPath = true;
                     }
                 }
 
-                if (!allowPushOnly) {
-                    return;
-                }
-
-                actionText = await doPush(isManualPushOnlyTrigger(trigger) ? 'manual push' : 'push');
-            } else {
-                updateSyncUiProgress(textByLang('读取云端状态...', 'Reading cloud state...'), 15);
-                const remoteState = await readRemoteSnapshotWithPathRecovery({
-                    interactive: isManualTrigger,
-                    continueAfterConfirm: true
-                });
-                updateSyncUiProgress(textByLang('云端状态已读取', 'Cloud state loaded'), 18);
-                if (effectiveMode === 'pull') {
+                if (!handledByFastFullPath) {
+                    updateSyncUiProgress(textByLang('读取云端状态...', 'Reading cloud state...'), 15);
+                    const remoteState = await readRemoteSnapshotWithPathRecovery({
+                        interactive: isManualTrigger,
+                        continueAfterConfirm: true
+                    });
+                    const remoteFilesByPathForMissingCheck = remoteState
+                        && remoteState.remoteList
+                        && remoteState.remoteList.filesByPath
+                        ? remoteState.remoteList.filesByPath
+                        : null;
+                    updateSyncUiProgress(textByLang('云端状态已读取', 'Cloud state loaded'), 18);
+                    if (effectiveMode === 'pull') {
                     if (remoteState.notFound) {
                         let pullPlanWhenNoState = null;
                         if (settings.obsidianFilePushEnabled !== false) {
@@ -11874,13 +12429,13 @@ Cancel: go back and change the branch name first.`
                                     }
                                 } else {
                                     if (pullPreflight.remoteChanged || pullPreflight.concurrentChanged || pullPreflight.remoteUntracked) {
-                                        await setPendingMismatchState(
+                                        await setPendingConflictState(
                                             pullPreflight.remoteSha || remoteState.sha || '',
                                             textByLang(
                                                 '检测到本地与云端都有更新，已暂停当前自动拉取路径，请在“状态”面板选择处理方式',
                                                 'Both local and cloud changed. The current automatic pull path has been paused; choose an action in Status.'
                                             ),
-                                            { openPanel: false }
+                                            { reason: 'auto-pull-risk-pause' }
                                         );
                                     } else if (isSilentAutoPullTrigger) {
                                         runtime.lastError = '';
@@ -11900,14 +12455,6 @@ Cancel: go back and change the branch name first.`
 
                             if (!allowPullOnly) {
                                 return;
-                            }
-
-                            if (!isExplicitRemoteOverwriteTrigger(trigger)
-                                && isManualTrigger
-                                && riskyLocalOverwrite
-                                && pullPreflight.winner !== 'remote'
-                                && pullPreflight.winner !== 'remote-reset') {
-                                backupSnapshotForRecovery(localSnapshot, `before-${String(trigger || 'pull')}-remote-overwrite`);
                             }
 
                             actionText = await doPull(
@@ -11957,13 +12504,13 @@ Cancel: go back and change the branch name first.`
                                 }
                             } else {
                                 if (pullPreflight.remoteChanged || pullPreflight.concurrentChanged || pullPreflight.remoteUntracked) {
-                                    await setPendingMismatchState(
+                                    await setPendingConflictState(
                                         pullPreflight.remoteSha || remoteState.sha || '',
                                         textByLang(
                                             '检测到本地与云端都有更新，已暂停当前自动拉取路径，请在“状态”面板选择处理方式',
                                             'Both local and cloud changed. The current automatic pull path has been paused; choose an action in Status.'
                                         ),
-                                        { openPanel: false }
+                                        { reason: 'auto-pull-risk-pause' }
                                     );
                                 } else if (isSilentAutoPullTrigger) {
                                     runtime.lastError = '';
@@ -11985,39 +12532,42 @@ Cancel: go back and change the branch name first.`
                             return;
                         }
 
-                        if (!isExplicitRemoteOverwriteTrigger(trigger)
-                            && isManualTrigger
-                            && riskyLocalOverwrite
-                            && pullPreflight.winner !== 'remote'
-                            && pullPreflight.winner !== 'remote-reset') {
-                            backupSnapshotForRecovery(localSnapshot, `before-${String(trigger || 'pull')}-remote-overwrite`);
-                        }
-
                         actionText = await doPull(remoteState, syncMethod === 'rebase' ? 'pull (rebase mode)' : 'pull');
                     }
                 } else {
                     if (remoteState.notFound) {
-                        let pullPlanWhenNoState = null;
-                        if (settings.obsidianFilePushEnabled !== false) {
-                            try {
-                                pullPlanWhenNoState = await buildObsidianPullPlan(`${trigger || 'sync'}:remote-state-missing`);
-                            } catch (_) {
-                                pullPlanWhenNoState = null;
+                        const formatMigration = resolveObsidianExportFormatMigration(remoteState);
+                        if (formatMigration) {
+                            const migrationResult = await maybeRunFormatMigrationPush(formatMigration, 'sync', {
+                                remoteFilesByPathForMissingCheck
+                            });
+                            if (migrationResult.blocked) {
+                                return;
                             }
-                        }
-
-                        const hasRemoteFilesWhenNoState = !!(
-                            pullPlanWhenNoState
-                            && pullPlanWhenNoState.enabled
-                            && pullPlanWhenNoState.remoteList
-                            && Array.isArray(pullPlanWhenNoState.remoteList.files)
-                            && pullPlanWhenNoState.remoteList.files.length > 0
-                        );
-
-                        if (hasRemoteFilesWhenNoState) {
-                            actionText = await doPull(remoteState, 'pull (files-only remote)', pullPlanWhenNoState);
+                            actionText = migrationResult.actionText;
                         } else {
-                            actionText = await doPush('bootstrap push');
+                            let pullPlanWhenNoState = null;
+                            if (settings.obsidianFilePushEnabled !== false) {
+                                try {
+                                    pullPlanWhenNoState = await buildObsidianPullPlan(`${trigger || 'sync'}:remote-state-missing`);
+                                } catch (_) {
+                                    pullPlanWhenNoState = null;
+                                }
+                            }
+
+                            const hasRemoteFilesWhenNoState = !!(
+                                pullPlanWhenNoState
+                                && pullPlanWhenNoState.enabled
+                                && pullPlanWhenNoState.remoteList
+                                && Array.isArray(pullPlanWhenNoState.remoteList.files)
+                                && pullPlanWhenNoState.remoteList.files.length > 0
+                            );
+
+                            if (hasRemoteFilesWhenNoState) {
+                                actionText = await doPull(remoteState, 'pull (files-only remote)', pullPlanWhenNoState);
+                            } else {
+                                actionText = await doPush('bootstrap push');
+                            }
                         }
                     } else {
                         const remoteSnapshot = remoteState.snapshot;
@@ -12025,11 +12575,25 @@ Cancel: go back and change the branch name first.`
                             localHash = getSnapshotHash(localSnapshot);
                         }
                         const remoteHash = getSnapshotHash(remoteSnapshot);
+                        const formatMigration = resolveObsidianExportFormatMigration(remoteState);
 
-                        if (remoteHash === localHash) {
+                        if (formatMigration) {
+                            const migrationResult = await maybeRunFormatMigrationPush(formatMigration, 'sync', {
+                                remoteFilesByPathForMissingCheck
+                            });
+                            if (migrationResult.blocked) {
+                                return;
+                            }
+                            actionText = migrationResult.actionText;
+                        } else if (remoteHash === localHash) {
                             runtime.lastLocalHash = localHash;
                             runtime.lastLocalFilesSha = buildLocalObsidianRevisionFromHashMap(loadObsidianFileHashes()) || runtime.lastLocalFilesSha;
                             runtime.lastRemoteSha = remoteState.sha || runtime.lastRemoteSha;
+                            runtime.lastRemoteSignalSha = String(
+                                remoteState && remoteState.remoteSignalSha
+                                    ? remoteState.remoteSignalSha
+                                    : runtime.lastRemoteSignalSha || ''
+                            ).trim();
                             updateRuntimeSectionBaselineHashes(localSnapshot);
                             runtime.lastAppliedDirection = 'noop';
                             actionText = 'noop';
@@ -12039,33 +12603,99 @@ Cancel: go back and change the branch name first.`
                             const localChanged = hasLocalBase && runtime.lastLocalHash !== localHash;
                             const remoteChanged = hasRemoteBase && remoteState.sha && runtime.lastRemoteSha !== remoteState.sha;
                             const concurrentChanged = localChanged && remoteChanged;
+                            const canUseDirtyMatrix = hasLocalBase && hasRemoteBase && !!remoteState.sha;
 
-                            if (concurrentChanged && settings.conflictPolicy === 'none') {
-                                setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState));
-                                storeConflictRecord(localSnapshot, remoteSnapshot, 'pending-manual', {
-                                    remoteSha: remoteState.sha || '',
-                                    strategy: settings.conflictPolicy,
-                                    syncMethod
-                                });
-                                runtime.lastAppliedDirection = 'conflict';
-                                runtime.lastError = textByLang(
-                                    `检测到并发修改（默认冲突处理=${formatConflictPolicyForDisplay(settings.conflictPolicy)}），请在冲突面板中选择`,
-                                    `Concurrent changes detected (default conflict handling=${formatConflictPolicyForDisplay(settings.conflictPolicy)}). Resolve it in the conflict panel.`
+                            if (canUseDirtyMatrix && localChanged && !remoteChanged) {
+                                actionText = await doPush(
+                                    syncMethod === 'rebase' ? 'local newer push (rebase mode)' : 'local newer push',
+                                    { remoteFilesByPathForMissingCheck }
                                 );
-                                pendingReasons.clear();
-                                runtime.queueLength = 0;
-                                saveRuntime();
-                                renderStatus();
-                                renderConflictPanel();
-                                openPanel({ activeTab: 'status' });
-                                toast(textByLang(
-                                    '检测到冲突：当前默认冲突处理为“手动选择”，请手动选择本地或云端',
-                                    'Conflict detected: default conflict handling is "Choose manually". Please choose local or cloud manually.'
-                                ));
-                                return;
-                            }
+                            } else if (canUseDirtyMatrix && !localChanged && remoteChanged) {
+                                if (syncMethod === 'reset') {
+                                    actionText = await doResetHead(remoteState);
+                                } else {
+                                    actionText = await doPull(remoteState, syncMethod === 'rebase' ? 'remote newer pull (rebase mode)' : 'remote newer pull');
+                                }
+                            } else if (canUseDirtyMatrix && concurrentChanged) {
+                                try {
+                                    await doPush('dual-dirty cloud merge', {
+                                        syncTrigger: `${String(trigger || 'sync')}:dual-dirty-merge`,
+                                        useTempBranchMerge: true,
+                                        tempBranchPrefix: 'canvas-sync',
+                                        remoteFilesByPathForMissingCheck
+                                    });
+                                } catch (mergeError) {
+                                    const mergeErrorCode = String((mergeError && mergeError.code) || '');
+                                    if (mergeErrorCode === 'MERGE_CONFLICT') {
+                                        const fileConflictSummary = await buildConflictFileSummaryFromCurrentPlan('dual-dirty-cloud-merge-conflict');
+                                        setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
+                                            reason: 'cloud-merge-conflict',
+                                            mergeConflict: true,
+                                            mergeApi: 'github-merges',
+                                            tempBranch: String((mergeError && mergeError.tempBranch) || ''),
+                                            fileConflicts: fileConflictSummary.fileConflicts,
+                                            filePlanSummary: fileConflictSummary.filePlanSummary || undefined
+                                        }));
+                                        storeConflictRecord(localSnapshot, remoteSnapshot, 'pending-cloud-merge-conflict', {
+                                            remoteSha: remoteState.sha || '',
+                                            strategy: 'cloud-merge-api',
+                                            syncMethod,
+                                            tempBranch: String((mergeError && mergeError.tempBranch) || '')
+                                        });
+                                        runtime.lastAppliedDirection = 'conflict';
+                                        runtime.lastError = textByLang(
+                                            '检测到双向修改，且云端自动合并产生冲突，请在冲突面板中选择处理方式',
+                                            'Both local and cloud changed, and cloud auto-merge produced conflicts. Resolve in the conflict panel.'
+                                        );
+                                        pendingReasons.clear();
+                                        runtime.queueLength = 0;
+                                        saveRuntime();
+                                        renderStatus();
+                                        renderConflictPanel();
+                                        openPanel({ activeTab: 'status' });
+                                        toast(textByLang(
+                                            '云端自动合并冲突：请在冲突面板中选择本地或云端版本',
+                                            'Cloud auto-merge conflict: choose local or cloud version in the conflict panel.'
+                                        ));
+                                        return;
+                                    }
 
-                            if (!concurrentChanged && syncMethod === 'reset' && remoteChanged && !localChanged) {
+                                    if (mergeErrorCode === 'MERGE_PROTECTED_BRANCH') {
+                                        runtime.lastAppliedDirection = 'protected-branch-blocked';
+                                        runtime.lastError = textByLang(
+                                            '目标分支开启保护或禁止直接合并，无法自动完成双向同步。请改用“仅拉取/仅上传”或调整分支规则。',
+                                            'Target branch is protected or direct merge is blocked. Auto bidirectional sync cannot continue. Use pull-only/push-only or adjust branch rules.'
+                                        );
+                                        pendingReasons.clear();
+                                        runtime.queueLength = 0;
+                                        saveRuntime();
+                                        renderStatus();
+                                        openPanel({ activeTab: 'status' });
+                                        toast(textByLang(
+                                            '目标分支受保护，已停止自动合并；请手动选择仅拉取或仅上传',
+                                            'Target branch is protected; auto-merge stopped. Choose pull-only or push-only manually.'
+                                        ));
+                                        return;
+                                    }
+
+                                    throw mergeError;
+                                }
+
+                                const mergedRemoteState = await readRemoteSnapshotWithPathRecovery({
+                                    interactive: isManualTrigger,
+                                    continueAfterConfirm: true
+                                });
+                                if (mergedRemoteState.notFound) {
+                                    throw new Error(textByLang(
+                                        '云端合并后未找到同步目录，请检查同步路径配置',
+                                        'Sync directory not found after cloud merge. Check sync path settings.'
+                                    ));
+                                }
+                                actionText = await doPull(
+                                    mergedRemoteState,
+                                    textByLang('双向更新已完成云端合并并回拉本地', 'Dual-side updates merged in cloud and pulled back locally')
+                                );
+                            } else if (!concurrentChanged && syncMethod === 'reset' && remoteChanged && !localChanged) {
                                 actionText = await doResetHead(remoteState);
                             } else {
                                 const winner = decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged, remoteChanged, syncMethod);
@@ -12088,7 +12718,8 @@ Cancel: go back and change the branch name first.`
                                             ? `conflict resolved (local, ${settings.conflictPolicy}, ${syncMethod})`
                                             : syncMethod === 'rebase'
                                                 ? 'local newer push (rebase mode)'
-                                                : 'local newer push'
+                                                : 'local newer push',
+                                        { remoteFilesByPathForMissingCheck }
                                     );
                                 } else if (winner === 'remote-reset') {
                                     actionText = await doResetHead(remoteState);
@@ -12103,10 +12734,25 @@ Cancel: go back and change the branch name first.`
                         }
                     }
                 }
+                }
             }
 
             if (abortedByPendingConflict) {
                 return;
+            }
+
+            if (actionText === 'noop' && hasLocalDirtyWork()) {
+                try {
+                    const noopVerifySnapshot = await buildLocalSnapshot('post-noop-dirty-reconcile', {
+                        includePermanentTree: true,
+                        includeTempSection: true,
+                        includeBlankSectionFiles: true
+                    });
+                    const noopVerifyHash = getSnapshotHash(noopVerifySnapshot);
+                    if (!localHash || noopVerifyHash === localHash) {
+                        saveDirtyState(createDefaultDirtyState());
+                    }
+                } catch (_) { }
             }
 
             pendingReasons.clear();
@@ -12114,17 +12760,12 @@ Cancel: go back and change the branch name first.`
             runtime.lastError = '';
             runtime.lastSuccessAt = Date.now();
             syncCompletedSuccessfully = true;
-            runtime.pendingMismatch = false;
-            runtime.pendingMismatchAt = 0;
-            runtime.pendingMismatchRemoteSha = '';
+            runtime.lastCheckRemoteSha = String(runtime.lastRemoteSha || runtime.lastCheckRemoteSha || '');
             saveRuntime();
             renderStatus();
             void updateBackgroundSyncContext('sync-success', {
                 isRunning: false,
                 queueLength: 0,
-                pendingMismatch: false,
-                pendingMismatchAt: 0,
-                pendingMismatchRemoteSha: '',
                 hasPendingWork: false,
                 localDirty: false,
                 lastRemoteSha: runtime.lastRemoteSha,
@@ -12153,7 +12794,6 @@ Cancel: go back and change the branch name first.`
             void updateBackgroundSyncContext('sync-error', {
                 isRunning: false,
                 queueLength: runtime.queueLength,
-                pendingMismatch: runtime.pendingMismatch,
                 lastRemoteSha: runtime.lastRemoteSha,
                 lastLocalHash: runtime.lastLocalHash,
                 lastSuccessAt: runtime.lastSuccessAt
@@ -12168,8 +12808,7 @@ Cancel: go back and change the branch name first.`
             }
 
             if (!hasPendingConflict() && !isRepoConfigError && !isTooLargeError && !isPathValidationError) {
-                scheduleRetry();
-            }
+                }
 
             const offlineHint = isLikelyOfflineError(runtime.lastError)
                 ? textByLang('（检测到网络异常，将自动重试）', ' (Network issue detected; will retry automatically)')
@@ -12183,7 +12822,7 @@ Cancel: go back and change the branch name first.`
             } else {
                 const panelMode = hasPendingConflict()
                     ? 'conflict'
-                    : ((runtime && runtime.pendingMismatch) ? 'mismatch' : '');
+                    : '';
                 ensureStatusPanelVisible(panelMode);
             }
         } finally {
@@ -12191,6 +12830,10 @@ Cancel: go back and change the branch name first.`
             syncUiProgressEnabled = false;
             runtime.isRunning = false;
             if (syncCompletedSuccessfully && recoveryLockState && (recoveryLockState.kind === 'push-bundle' || recoveryLockState.kind === 'pull-bundle')) {
+                const completedRecoveryLock = normalizeRecoveryLockRecord(recoveryLockState);
+                if (completedRecoveryLock) {
+                    clearRecoverySnapshotsByReasonKeywords(collectRecoverySnapshotReasonKeywordsForLock(completedRecoveryLock));
+                }
                 await clearRecoveryLockCompletely();
                 clearActiveRunRecoveryRecord();
                 handleRecoveryLockReleased();
@@ -12203,7 +12846,6 @@ Cancel: go back and change the branch name first.`
             void updateBackgroundSyncContext('sync-idle', {
                 isRunning: false,
                 queueLength: runtime.queueLength,
-                pendingMismatch: runtime.pendingMismatch,
                 lastRemoteSha: runtime.lastRemoteSha,
                 lastLocalHash: runtime.lastLocalHash,
                 lastSuccessAt: runtime.lastSuccessAt
@@ -12263,38 +12905,27 @@ Cancel: go back and change the branch name first.`
             ));
         }
 
-        let remoteRevision = '';
-        try {
-            updateSyncUiProgress(textByLang('校验云端文件...', 'Validating cloud files...'), 90);
-            const root = settings.obsidianExportRoot;
-            let remoteListRaw = await listRemoteObsidianFilesByPath(root);
-            let remoteList = filterRemoteListForManagedSyncFiles(remoteListRaw, root);
-            let remoteFilesByPath = remoteList && remoteList.filesByPath && typeof remoteList.filesByPath === 'object'
-                ? remoteList.filesByPath
-                : {};
-            let hasGuideInRemote = guidePaths.some((path) => Object.prototype.hasOwnProperty.call(remoteFilesByPath, path));
-
-            if (!hasGuideInRemote) {
-                // GitHub list endpoint could be eventually consistent right after a write.
-                // Retry once quietly to avoid noisy warnings.
-                await new Promise((resolve) => setTimeout(resolve, 800));
-                remoteListRaw = await listRemoteObsidianFilesByPath(root);
-                remoteList = filterRemoteListForManagedSyncFiles(remoteListRaw, root);
-                remoteFilesByPath = remoteList && remoteList.filesByPath && typeof remoteList.filesByPath === 'object'
-                    ? remoteList.filesByPath
-                    : {};
-                hasGuideInRemote = guidePaths.some((path) => Object.prototype.hasOwnProperty.call(remoteFilesByPath, path));
-            }
-
-            remoteRevision = buildRemoteObsidianRevisionFromList(remoteList);
+        let remoteRevision = String(pushResult && pushResult.remoteRevision || '').trim();
+        if (remoteRevision) {
             updateSyncUiProgress(textByLang('云端文件校验完成', 'Cloud files validated'), 95);
-        } catch (_) {
-            remoteRevision = '';
+        } else {
+            try {
+                updateSyncUiProgress(textByLang('校验云端文件...', 'Validating cloud files...'), 90);
+                const root = settings.obsidianExportRoot;
+                const remoteListRaw = await listRemoteObsidianFilesByPath(root);
+                const remoteList = filterRemoteListForManagedSyncFiles(remoteListRaw, root);
+                remoteRevision = buildRemoteObsidianRevisionFromList(remoteList);
+                updateSyncUiProgress(textByLang('云端文件校验完成', 'Cloud files validated'), 95);
+            } catch (_) {
+                remoteRevision = '';
+            }
         }
 
         runtime.lastLocalHash = getSnapshotHash(localSnapshot);
         runtime.lastLocalFilesSha = String(pushResult && pushResult.localRevision || buildLocalObsidianRevisionFromHashMap(loadObsidianFileHashes()) || runtime.lastLocalFilesSha || '');
         runtime.lastRemoteSha = remoteRevision || runtime.lastRemoteSha;
+        runtime.lastRemoteSignalSha = String(pushResult && pushResult.remoteSignalSha || runtime.lastRemoteSignalSha || '').trim();
+        runtime.lastCheckRemoteSha = String(runtime.lastRemoteSha || runtime.lastCheckRemoteSha || '');
         updateRuntimeSectionBaselineHashes(localSnapshot);
         runtime.lastPermanentTreeSnapshotAt = Date.now();
         runtime.lastTempSectionSnapshotAt = Date.now();
@@ -12303,9 +12934,13 @@ Cancel: go back and change the branch name first.`
             && typeof localSnapshot.data[TEMP_SECTION_STORAGE_KEY] === 'string'
             ? localSnapshot.data[TEMP_SECTION_STORAGE_KEY]
             : '';
-        if (pushedTempStateRaw) {
-            setSyncMetaRaw(LAST_UPLOADED_TEMP_STATE_KEY, pushedTempStateRaw);
+        const normalizedPushedTempStateRaw = pushedTempStateRaw
+            ? buildNormalizedCanvasTempStateRawForSync(pushedTempStateRaw)
+            : '';
+        if (normalizedPushedTempStateRaw) {
+            setSyncMetaRaw(LAST_UPLOADED_TEMP_STATE_KEY, normalizedPushedTempStateRaw);
         }
+        setStoredSyncedObsidianExportFormat(getCurrentObsidianExportFormatForSync());
         runtime.lastAppliedDirection = 'push-bootstrap';
         runtime.lastError = '';
         runtime.lastSuccessAt = Date.now();
@@ -12440,11 +13075,18 @@ Cancel: go back and change the branch name first.`
                 runtime.lastLocalHash = getSnapshotHash(localBaselineSnapshot);
                 runtime.lastLocalFilesSha = buildLocalObsidianRevisionFromHashMap(loadObsidianFileHashes()) || runtime.lastLocalFilesSha;
                 runtime.lastRemoteSha = remoteState.sha || buildRemoteObsidianRevisionFromList(remoteState.remoteList) || runtime.lastRemoteSha;
+                runtime.lastRemoteSignalSha = String(
+                    remoteState && remoteState.remoteSignalSha
+                        ? remoteState.remoteSignalSha
+                        : runtime.lastRemoteSignalSha || ''
+                ).trim();
+                runtime.lastCheckRemoteSha = String(runtime.lastRemoteSha || runtime.lastCheckRemoteSha || '');
                 updateRuntimeSectionBaselineHashes(localBaselineSnapshot);
                 runtime.lastAppliedDirection = 'first-sync-baseline';
                 runtime.lastSyncMode = 'first-sync-baseline';
                 runtime.lastError = '';
                 runtime.lastSuccessAt = Date.now();
+                adoptRemoteObsidianExportFormat(remoteState && remoteState.exportFormat);
                 firstSyncCompletedSuccessfully = true;
                 pendingReasons.clear();
                 runtime.queueLength = 0;
@@ -12531,11 +13173,9 @@ Cancel: go back and change the branch name first.`
                 includePermanentTree: true
             });
             const localPermanentTree = normalizeBookmarkTreeSnapshot(localBackupSnapshot.permanentTreeSnapshot);
-            const remoteApplySnapshot = buildSnapshotForRemoteLocalApply(remoteSnapshot);
             const permanentDecision = evaluatePermanentPullDecision(localPermanentTree, remotePermanentTree, {
                 permanentPullMode: 'overwrite'
             });
-            const shouldBackupLocalSnapshot = getSnapshotHash(localBackupSnapshot) !== getSnapshotHash(remoteApplySnapshot);
             updateSyncUiProgress(formatPermanentPullDecisionText(permanentDecision), 22);
 
             const shouldConfirmPermanentApply = !(
@@ -12547,16 +13187,13 @@ Cancel: go back and change the branch name first.`
                 throw new Error(textByLang('已取消首次覆盖操作', 'First overwrite cancelled'));
             }
 
-            updateSyncUiProgress(textByLang('备份本地数据...', 'Backing up local data...'), 25);
-            if (shouldBackupLocalSnapshot) {
-                backupSnapshotForRecovery(localBackupSnapshot, 'before-first-sync-cloud-overwrite');
-            }
+            updateSyncUiProgress(textByLang('准备恢复保护...', 'Preparing recovery protection...'), 25);
 
             let stagedFirstSyncRemoteBundle = null;
             if (remoteState && remoteState.remoteList && Array.isArray(remoteState.remoteList.files) && remoteState.remoteList.files.length > 0) {
                 try {
                     const fetchedRemoteFiles = await fetchRemoteObsidianFolderFiles(remoteState.remoteList);
-                    await stagePullRecoveryLock({
+                    const stagedPullLock = await stagePullRecoveryLock({
                         rootPath: remoteState && remoteState.path ? remoteState.path : (settings && settings.obsidianExportRoot ? settings.obsidianExportRoot : ''),
                         folderName: (remoteState && remoteState.path ? remoteState.path : (settings && settings.obsidianExportRoot ? settings.obsidianExportRoot : '')).split('/').filter(Boolean).slice(-1)[0] || DEFAULT_SETTINGS.obsidianExportRoot,
                         snapshot: remoteSnapshot,
@@ -12570,14 +13207,14 @@ Cancel: go back and change the branch name first.`
                         targetRemoteSha: remoteState.sha || buildRemoteObsidianRevisionFromList(remoteState.remoteList),
                         stage: 'downloaded'
                     });
-                    stagedFirstSyncRemoteBundle = true;
+                    stagedFirstSyncRemoteBundle = !!stagedPullLock;
                 } catch (error) {
                     console.warn('[Canvas Sync] stage first-sync remote bundle failed:', error);
                     stagedFirstSyncRemoteBundle = false;
                 }
             } else if (remoteSnapshot) {
                 try {
-                    await stagePullRecoveryLock({
+                    const stagedPullLock = await stagePullRecoveryLock({
                         rootPath: remoteState && remoteState.path ? remoteState.path : (settings && settings.obsidianExportRoot ? settings.obsidianExportRoot : ''),
                         folderName: (remoteState && remoteState.path ? remoteState.path : (settings && settings.obsidianExportRoot ? settings.obsidianExportRoot : '')).split('/').filter(Boolean).slice(-1)[0] || DEFAULT_SETTINGS.obsidianExportRoot,
                         snapshot: remoteSnapshot,
@@ -12591,11 +13228,18 @@ Cancel: go back and change the branch name first.`
                         targetRemoteSha: remoteState.sha || '',
                         stage: 'downloaded'
                     });
-                    stagedFirstSyncRemoteBundle = true;
+                    stagedFirstSyncRemoteBundle = !!stagedPullLock;
                 } catch (error) {
                     console.warn('[Canvas Sync] stage first-sync snapshot bundle failed:', error);
                     stagedFirstSyncRemoteBundle = false;
                 }
+            }
+
+            if (!stagedFirstSyncRemoteBundle) {
+                throw new Error(textByLang(
+                    '首次同步恢复保护创建失败：已取消本次云端覆盖本地，以保护本地永久栏目。请检查浏览器存储空间后重试。',
+                    'First-sync recovery staging failed, so this cloud-overwrite-local action was cancelled to protect the local permanent section. Check browser storage space and retry.'
+                ));
             }
 
             updateSyncUiProgress(textByLang('正在应用永久栏目...', 'Applying permanent section...'), 45);
@@ -12665,11 +13309,18 @@ Cancel: go back and change the branch name first.`
             runtime.lastLocalHash = getSnapshotHash(remoteSnapshot);
             runtime.lastLocalFilesSha = runtime.lastLocalFilesSha || buildLocalObsidianRevisionFromHashMap(loadObsidianFileHashes());
             runtime.lastRemoteSha = remoteState.sha || runtime.lastRemoteSha;
+            runtime.lastRemoteSignalSha = String(
+                remoteState && remoteState.remoteSignalSha
+                    ? remoteState.remoteSignalSha
+                    : runtime.lastRemoteSignalSha || ''
+            ).trim();
+            runtime.lastCheckRemoteSha = String(runtime.lastRemoteSha || runtime.lastCheckRemoteSha || '');
             updateRuntimeSectionBaselineHashes(remoteSnapshot);
             runtime.lastAppliedDirection = 'first-sync-overwrite';
             runtime.lastSyncMode = 'first-sync-cloud';
             runtime.lastError = '';
             runtime.lastSuccessAt = Date.now();
+            adoptRemoteObsidianExportFormat(remoteState && remoteState.exportFormat);
             pendingReasons.clear();
             runtime.queueLength = 0;
             firstSyncCompletedSuccessfully = true;
@@ -12710,6 +13361,10 @@ Cancel: go back and change the branch name first.`
             syncUiProgressEnabled = false;
             runtime.isRunning = false;
             if (firstSyncCompletedSuccessfully && recoveryLockState && recoveryLockState.sourcePanel === 'first-sync') {
+                const completedRecoveryLock = normalizeRecoveryLockRecord(recoveryLockState);
+                if (completedRecoveryLock) {
+                    clearRecoverySnapshotsByReasonKeywords(collectRecoverySnapshotReasonKeywordsForLock(completedRecoveryLock));
+                }
                 await clearRecoveryLockCompletely();
                 clearActiveRunRecoveryRecord();
                 handleRecoveryLockReleased();
@@ -12746,255 +13401,10 @@ Cancel: go back and change the branch name first.`
         void updateBackgroundSyncContext('local-dirty', {
             queueLength: runtime.queueLength,
             isRunning: runtime.isRunning,
-            pendingMismatch: runtime.pendingMismatch,
             hasPendingWork: true,
             localDirty: true
         });
-        if (settings && settings.enabled && settings.autoSync && settings.syncAfterEditStop !== false && !hasPendingConflict() && !shouldPauseAutoSyncForPendingMismatch()) {
-            setTimeout(() => {
-                if (!runtime.isRunning) {
-                    scheduleSync('during-sync-local-edit', { immediate: true, skipDirtyCheck: true });
-                }
-            }, 0);
-        }
         return true;
-    }
-
-    function scheduleRetry() {
-
-        if (retryTimer) {
-            clearTimeout(retryTimer);
-            retryTimer = null;
-        }
-        if (isRecoveryLockActive()) return;
-        if (hasPendingConflict()) return;
-
-        const delayMs = navigator.onLine === false ? 5000 : 2000;
-        retryTimer = setTimeout(() => {
-            retryTimer = null;
-            const hasDirty = hasLocalDirtyWork();
-            const hasMismatch = !!(runtime && runtime.pendingMismatch);
-            if (isRecoveryLockActive()) return;
-            if (shouldDeferAutomaticSyncTrigger('retry')) {
-                scheduleRetry();
-                return;
-            }
-            if (settings.enabled && settings.autoSync && !hasPendingConflict() && !shouldPauseAutoSyncForPendingMismatch() && (hasDirty || hasMismatch)) {
-                runSync('full', 'retry');
-            }
-        }, delayMs);
-    }
-
-    function shouldPauseAutoSyncForPendingMismatch() {
-        if (!runtime || !runtime.pendingMismatch) return false;
-        if (!settings) return false;
-        return ensureMismatchPolicy(settings.mismatchPolicy) === 'prompt';
-    }
-
-    function scheduleSync(reason, options = {}) {
-        if (isRecoveryLockActive()) return;
-        if (shouldDeferAutomaticSyncTrigger(reason || 'auto')) {
-            if (syncTimer) {
-                clearTimeout(syncTimer);
-                syncTimer = null;
-            }
-            syncTimer = setTimeout(() => {
-                syncTimer = null;
-                scheduleSync(reason, options);
-            }, AUTO_SYNC_USER_IDLE_DELAY_MS);
-            return;
-        }
-        if (!settings.enabled || !settings.autoSync) return;
-        if (hasPendingConflict()) return;
-        if (shouldPauseAutoSyncForPendingMismatch()) return;
-        if (getRepoConfigMissingReason(repoConfig || {})) return;
-
-        const shouldCheckDirty = options && options.skipDirtyCheck === true ? false : true;
-        if (shouldCheckDirty && !hasLocalDirtyWork()) {
-            pendingReasons.clear();
-            runtime.queueLength = 0;
-            saveRuntime();
-            renderStatus();
-            void updateBackgroundSyncContext('local-clean', {
-                queueLength: 0,
-                isRunning: runtime.isRunning,
-                pendingMismatch: runtime.pendingMismatch,
-                hasPendingWork: runtime.pendingMismatch === true,
-                localDirty: false
-            });
-            return;
-        }
-
-        runtime.lastLocalMutationAt = Date.now();
-
-        pendingReasons.add(reason || 'unknown');
-        runtime.queueLength = pendingReasons.size;
-        saveRuntime();
-        renderStatus();
-        void updateBackgroundSyncContext('local-dirty', {
-            queueLength: runtime.queueLength,
-            isRunning: runtime.isRunning,
-            pendingMismatch: runtime.pendingMismatch
-        });
-
-        const wait = options.immediate
-            ? 0
-            : (options.bulk ? settings.batchDebounceMs : settings.debounceMs);
-
-        if (syncTimer) {
-            clearTimeout(syncTimer);
-            syncTimer = null;
-        }
-        syncTimer = setTimeout(() => {
-            syncTimer = null;
-            if (isRecoveryLockActive()) return;
-            if (shouldDeferAutomaticSyncTrigger(reason || 'auto')) {
-                scheduleSync(reason, options);
-                return;
-            }
-            if (!settings.enabled || !settings.autoSync) return;
-            if (hasPendingConflict()) return;
-            if (shouldPauseAutoSyncForPendingMismatch()) return;
-            if (getRepoConfigMissingReason(repoConfig || {})) return;
-            runSync('full', reason || 'auto');
-        }, Math.max(0, wait));
-    }
-
-    function restartFallbackTimer() {
-        if (fallbackTimer) {
-            clearInterval(fallbackTimer);
-            fallbackTimer = null;
-        }
-        if (isRecoveryLockActive()) return;
-        if (!settings.enabled || !settings.autoSync) return;
-        if (settings.splitIntervalCommitAndSync) return;
-        if (!Number.isFinite(settings.intervalSeconds) || settings.intervalSeconds <= 0) return;
-        fallbackTimer = setInterval(() => {
-            if (isRecoveryLockActive()) return;
-            if (shouldDeferAutomaticSyncTrigger('fallback')) return;
-            if (hasPendingConflict()) return;
-            if (shouldPauseAutoSyncForPendingMismatch()) return;
-            if (!hasLocalDirtyWork()) return;
-            scheduleSync('fallback', { immediate: true });
-        }, settings.intervalSeconds * 1000);
-    }
-
-    function restartPushPullTimers() {
-        if (autoPushTimer) {
-            clearInterval(autoPushTimer);
-            autoPushTimer = null;
-        }
-        if (autoPullTimer) {
-            clearInterval(autoPullTimer);
-            autoPullTimer = null;
-        }
-
-        if (isRecoveryLockActive()) return;
-        if (!settings.enabled || !settings.autoSync) return;
-        if (!settings.splitIntervalCommitAndSync) return;
-
-        if (settings.autoPushIntervalMinutes > 0) {
-            autoPushTimer = setInterval(() => {
-                if (isRecoveryLockActive()) return;
-                if (shouldDeferAutomaticSyncTrigger('auto-push-interval')) return;
-                if (hasPendingConflict()) return;
-                if (shouldPauseAutoSyncForPendingMismatch()) return;
-                if (!hasLocalDirtyWork()) return;
-                runSync('push', 'auto-push-interval');
-            }, settings.autoPushIntervalMinutes * 60 * 1000);
-        }
-
-        if (settings.autoPullIntervalMinutes > 0) {
-            autoPullTimer = setInterval(() => {
-                if (isRecoveryLockActive()) return;
-                if (shouldDeferAutomaticSyncTrigger('auto-pull-interval')) return;
-                if (hasPendingConflict()) return;
-                if (shouldPauseAutoSyncForPendingMismatch()) return;
-                if (hasLocalDirtyWork()) return;
-                runSync('pull', 'auto-pull-interval');
-            }, settings.autoPullIntervalMinutes * 60 * 1000);
-        }
-    }
-
-    function restartAutomationTimers() {
-        restartFallbackTimer();
-        restartPushPullTimers();
-        restartForegroundMismatchTimer();
-    }
-
-    function restartForegroundMismatchTimer() {
-        if (foregroundMismatchTimer) {
-            clearInterval(foregroundMismatchTimer);
-            foregroundMismatchTimer = null;
-        }
-        if (!settings || !settings.enabled) return;
-        if (settings.foregroundCheckEnabled === false) return;
-
-        const intervalMs = normalizeForegroundCheckSeconds(settings.foregroundCheckIntervalSeconds, DEFAULT_SETTINGS.foregroundCheckIntervalSeconds) * 1000;
-        foregroundMismatchTimer = setInterval(async () => {
-            try {
-                if (document.visibilityState !== 'visible') return;
-                if (isRecoveryLockActive()) return;
-                if (runtime && runtime.isRunning) return;
-                if (hasPendingConflict()) return;
-                await sendRuntimeMessage({ action: 'canvasGitSyncRunBackgroundCheckNow' }, 12000);
-                await refreshPendingMismatchFromBackground();
-            } catch (_) { }
-        }, intervalMs);
-    }
-
-    async function maybeHandleStartupBackgroundMismatch() {
-        if (isRecoveryLockActive()) return false;
-        if (!settings || !settings.enabled || !settings.autoSync || !settings.pullOnStartup) return false;
-        if (settings.backgroundCheckEnabled === false) return false;
-        if (runtime && runtime.isRunning) return false;
-        if (hasPendingConflict()) return false;
-        if (hasLocalDirtyWork()) return false;
-
-        try {
-            await refreshPendingMismatchFromBackground();
-        } catch (_) {
-            return false;
-        }
-
-        if (!runtime || runtime.pendingMismatch !== true) {
-            return false;
-        }
-
-        const mismatchPolicy = ensureMismatchPolicy(settings.mismatchPolicy);
-        if (mismatchPolicy === 'auto_pull' || mismatchPolicy === 'auto_push') {
-            await maybeHandlePendingMismatchAutoPull();
-        } else {
-            await maybePromptPendingMismatchOnInit();
-        }
-
-        return true;
-    }
-
-    function scheduleStartupPull() {
-        if (startupPullTimer) {
-            clearTimeout(startupPullTimer);
-            startupPullTimer = null;
-        }
-        if (isRecoveryLockActive()) return;
-        if (!settings.enabled || !settings.autoSync) return;
-        if (!settings.pullOnStartup) return;
-        if (settings.backgroundCheckEnabled === false) return;
-        if (hasLocalDirtyWork()) return;
-
-        startupPullTimer = setTimeout(() => {
-            startupPullTimer = null;
-            if (isRecoveryLockActive()) return;
-            if (shouldDeferAutomaticSyncTrigger('startup-auto-pull')) {
-                scheduleStartupPull();
-                return;
-            }
-            if (!settings.enabled || !settings.autoSync) return;
-            if (settings.backgroundCheckEnabled === false) return;
-            if (hasPendingConflict()) return;
-            if (hasLocalDirtyWork()) return;
-            void maybeHandleStartupBackgroundMismatch();
-        }, 1200);
     }
 
     function positionPanel() {
@@ -13015,12 +13425,6 @@ Cancel: go back and change the branch name first.`
         renderStatus();
         renderConflictPanel();
 
-        if (!isRecoveryLockActive()) {
-            refreshPendingMismatchFromBackground()
-                .then(() => maybeHandlePendingMismatchOnPanelOpen())
-                .catch(() => { });
-        }
-
         const openState = resolvePanelOpenState(options);
         setActiveTab(openState.tab, { persist: false });
         setFirstSyncFoldOpen(!!openState.openFirstSyncFold);
@@ -13030,6 +13434,7 @@ Cancel: go back and change the branch name first.`
         global.requestAnimationFrame(() => {
             positionPanel();
             scheduleBehaviorSubNavSyncFromScroll();
+            scheduleStatusSubNavSyncFromScroll();
         });
 
         loadRepoConfigFromStorage().catch((error) => {
@@ -13084,6 +13489,7 @@ Cancel: go back and change the branch name first.`
         bindTabButton('canvasSyncTabBehaviorBtn', 'behavior');
         bindTabButton('canvasSyncTabStatusBtn', 'status');
         bindBehaviorSubNavButtons();
+        bindStatusSubNavButtons();
         setActiveTab(activeTabKey, { persist: false });
 
         const repoSaveBtn = getElement('canvasSyncRepoSaveBtn');
@@ -13168,32 +13574,14 @@ Cancel: go back and change the branch name first.`
 
 	        [
 	            'canvasSyncEnabledToggle',
-	            'canvasSyncAutoToggle',
-	            'canvasSyncAutoAfterEditStopToggle',
-	            'canvasSyncIntervalInput',
-	            'canvasSyncSplitIntervalsToggle',
 	            'canvasSyncFirstSyncModeAutoInput',
 	            'canvasSyncFirstSyncModeCloudInput',
 	            'canvasSyncFirstSyncModeLocalInput',
-	            'canvasSyncPermanentTreeIntervalSelect',
-	            'canvasSyncTempSectionIntervalInput',
-	            'canvasSyncMdNodeIntervalInput',
-	            'canvasSyncAutoPushIntervalInput',
-            'canvasSyncAutoPullIntervalInput',
-            'canvasSyncForegroundCheckToggle',
-            'canvasSyncForegroundCheckIntervalInput',
-            'canvasSyncBackgroundCheckToggle',
-            'canvasSyncBackgroundCheckIntervalInput',
-            'canvasSyncBackgroundCooldownInput',
-            'canvasSyncMismatchPolicySelect',
-            'canvasSyncPullOnStartupToggle',
             'canvasSyncToastToggle',
-            'canvasSyncEditAutoToastToggle',
             'canvasSyncConflictSelect',
             'canvasSyncPermanentPullModeSelect',
             'canvasSyncPermanentIncrementalThresholdInput',
             'canvasSyncObsidianFilePushToggle',
-            'canvasSyncObsidianExportFormatSelect',
             'canvasSyncObsidianExportRootInput'
         ].forEach((id) => {
             const el = getElement(id);
@@ -13204,33 +13592,69 @@ Cancel: go back and change the branch name first.`
             });
         });
 
-        const syncTemplateSelect = getElement('canvasSyncTemplateSelect');
-        if (syncTemplateSelect) {
-            syncTemplateSelect.addEventListener('change', () => {
-                const selectedTemplateKey = syncTemplateSelect
-                    ? String(syncTemplateSelect.value || '').trim().toLowerCase()
-                    : '';
-                if (!selectedTemplateKey || selectedTemplateKey === 'custom') {
-                    updateSyncTemplateUi({ syncSelectionToState: false });
-                    return;
-                }
-                if (!applySyncTemplateToForm(selectedTemplateKey)) {
-                    updateSyncTemplateUi({ syncSelectionToState: false });
-                    return;
-                }
-                pullSettingsFromForm();
-                applySettingsToForm();
-                toast(textByLang(
-                    `已应用同步模板：${formatSyncTemplateLabel(selectedTemplateKey)}`,
-                    `Applied sync template: ${formatSyncTemplateLabel(selectedTemplateKey)}`
-                ), { optional: true });
+        const obsidianExportFormatSelect = getElement('canvasSyncObsidianExportFormatSelect');
+        if (obsidianExportFormatSelect) {
+            obsidianExportFormatSelect.addEventListener('change', () => {
+                void (async () => {
+                    const previousFormat = normalizeObsidianExportFormat(
+                        settings && settings.obsidianExportFormat,
+                        DEFAULT_SETTINGS.obsidianExportFormat
+                    );
+                    const nextFormat = normalizeObsidianExportFormat(
+                        obsidianExportFormatSelect.value,
+                        previousFormat
+                    );
+
+                    if (!nextFormat || nextFormat === previousFormat) {
+                        pullSettingsFromForm();
+                        toast(textByLang('同步设置已保存', 'Sync settings saved'), { optional: true });
+                        return;
+                    }
+
+                    if (!hasEstablishedSyncBaseline()) {
+                        pullSettingsFromForm({
+                            disableFormatAutoSync: true,
+                            silentFormatToast: true
+                        });
+                        toast(textByLang(
+                            '首次同步前：仅保存导出格式，不触发格式迁移覆盖。',
+                            'Before first sync: export format is saved only; format-migration overwrite is not triggered.'
+                        ), { optional: true });
+                        return;
+                    }
+
+                    const confirmed = await requestFormatMigrationLocalOverwriteConfirmationAsync({
+                        baseFormat: previousFormat,
+                        currentFormat: nextFormat,
+                        source: 'ui-switch'
+                    }, {
+                        trigger: 'manual-format-switch'
+                    });
+
+                    if (!confirmed) {
+                        obsidianExportFormatSelect.value = previousFormat;
+                        toast(textByLang('已取消格式切换', 'Format switch cancelled'), { optional: true });
+                        return;
+                    }
+
+                    pullSettingsFromForm({
+                        disableFormatAutoSync: true,
+                        silentFormatToast: true
+                    });
+                    toast(textByLang(
+                        '格式已切换，正在执行“本地覆盖云端（格式迁移）”...',
+                        'Format switched. Running "Local Overwrite Cloud (Format Migration)"...'
+                    ), { optional: true });
+                    void runSync('push', 'manual-format-switch', {
+                        skipFormatMigrationSecondaryConfirm: true
+                    });
+                })();
             });
         }
-
         const syncNowBtn = getElement('canvasSyncNowBtn');
         if (syncNowBtn) {
             syncNowBtn.addEventListener('click', () => {
-                void runWithButtonBusy(syncNowBtn, () => runSync('full', 'manual'));
+                void runWithButtonBusy(syncNowBtn, () => requestManualSync('manual'));
             });
         }
 
@@ -13247,54 +13671,6 @@ Cancel: go back and change the branch name first.`
                 void runWithButtonBusy(pullOnlyBtn, () => runSync('pull', 'manual-pull'));
             });
         }
-
-        const runBgCheckBtn = getElement('canvasSyncRunBgCheckBtn');
-        if (runBgCheckBtn) {
-            runBgCheckBtn.addEventListener('click', async () => {
-                try {
-                    runBgCheckBtn.disabled = true;
-                    await sendRuntimeMessage({ action: 'canvasGitSyncRunBackgroundCheckNow' }, 12000);
-                    await refreshPendingMismatchFromBackground();
-                    renderStatus();
-                    renderConflictPanel();
-                    if (runtime.pendingMismatch) {
-                        setActiveTab('status');
-                        await maybeHandlePendingMismatchOnPanelOpen();
-                        toast(textByLang('后台检查完成：检测到云端不一致', 'Background check completed: remote mismatch detected'), { optional: true });
-                    } else {
-                        toast(textByLang('后台检查完成：当前未检测到不一致', 'Background check completed: no mismatch detected'), { optional: true });
-                    }
-                } catch (error) {
-                    toast(textByLang(
-                        `后台检查失败：${error && error.message ? error.message : String(error)}`,
-                        `Background check failed: ${error && error.message ? error.message : String(error)}`
-                    ));
-                } finally {
-                    runBgCheckBtn.disabled = false;
-                }
-            });
-        }
-
-        const previewMismatchBtn = getElement('canvasSyncPreviewMismatchBtn');
-        if (previewMismatchBtn) {
-            previewMismatchBtn.addEventListener('click', () => {
-                setPreviewPanelMode('mismatch');
-                setActiveTab('status');
-                scrollStatusPanelToPreview('mismatch');
-                toast(textByLang('已打开“云端不一致面板”预览', 'Remote mismatch panel preview opened'), { optional: true });
-            });
-        }
-
-        const previewConflictBtn = getElement('canvasSyncPreviewConflictBtn');
-        if (previewConflictBtn) {
-            previewConflictBtn.addEventListener('click', () => {
-                setPreviewPanelMode('conflict');
-                setActiveTab('status');
-                scrollStatusPanelToPreview('conflict');
-                toast(textByLang('已打开“冲突面板”预览', 'Conflict panel preview opened'), { optional: true });
-            });
-        }
-
         const recoveryContinueBtn = getElement('canvasSyncRecoveryContinueBtn');
         if (recoveryContinueBtn) {
             recoveryContinueBtn.addEventListener('click', () => {
@@ -13305,6 +13681,24 @@ Cancel: go back and change the branch name first.`
         if (recoveryDismissBtn) {
             recoveryDismissBtn.addEventListener('click', () => {
                 void runWithButtonBusy(recoveryDismissBtn, () => dismissRecoveryLockManually());
+            });
+        }
+        const recoveryRollbackBtn = getElement('canvasSyncRecoveryRollbackBtn');
+        if (recoveryRollbackBtn) {
+            recoveryRollbackBtn.addEventListener('click', () => {
+                void runWithButtonBusy(recoveryRollbackBtn, () => rollbackRecoveryLockAction());
+            });
+        }
+        const downloadRecoverySnapshotBtn = getElement('canvasSyncDownloadRecoverySnapshotBtn');
+        if (downloadRecoverySnapshotBtn) {
+            downloadRecoverySnapshotBtn.addEventListener('click', () => {
+                void runWithButtonBusy(downloadRecoverySnapshotBtn, () => downloadLatestRecoverySnapshotAction());
+            });
+        }
+        const manualRecoverySnapshotBtn = getElement('canvasSyncManualRecoverySnapshotBtn');
+        if (manualRecoverySnapshotBtn) {
+            manualRecoverySnapshotBtn.addEventListener('click', () => {
+                void runWithButtonBusy(manualRecoverySnapshotBtn, () => createManualRecoverySnapshotAction());
             });
         }
 
@@ -13357,14 +13751,38 @@ Cancel: go back and change the branch name first.`
             });
         }
 
-        const conflictGoPolicyBtn = getElement('canvasSyncConflictGoPolicyBtn');
-        if (conflictGoPolicyBtn) {
-            conflictGoPolicyBtn.addEventListener('click', () => {
-                jumpToBehaviorPolicySection({
-                    nestedButtonId: 'canvasSyncBehaviorSubCompatDetail4Btn',
-                    targetId: 'canvasSyncSectionCompatMergeTitle',
-                    focusId: 'canvasSyncConflictSelect'
-                });
+        const conflictFineToggle = getElement('canvasSyncConflictFineToggle');
+        if (conflictFineToggle) {
+            conflictFineToggle.addEventListener('change', () => {
+                conflictFineModeEnabled = !!conflictFineToggle.checked;
+                renderConflictPanel();
+            });
+        }
+
+        const conflictFineList = getElement('canvasSyncConflictFineList');
+        if (conflictFineList) {
+            conflictFineList.addEventListener('change', (event) => {
+                const target = event && event.target && event.target.closest
+                    ? event.target.closest('select[data-conflict-fine-path]')
+                    : null;
+                if (!target) return;
+                const path = normalizeSyncPath(target.getAttribute('data-conflict-fine-path'));
+                if (!path) return;
+                conflictFineChoiceByPath[path] = normalizeConflictFineChoice(target.value);
+            });
+        }
+
+        const conflictApplyFineBtn = getElement('canvasSyncConflictApplyFineBtn');
+        if (conflictApplyFineBtn) {
+            conflictApplyFineBtn.addEventListener('click', () => {
+                void runWithButtonBusy(conflictApplyFineBtn, () => resolvePendingConflictByFineChoices());
+            });
+        }
+
+        const conflictRetryMergeBtn = getElement('canvasSyncConflictRetryMergeBtn');
+        if (conflictRetryMergeBtn) {
+            conflictRetryMergeBtn.addEventListener('click', () => {
+                void runWithButtonBusy(conflictRetryMergeBtn, () => retryPendingConflictCloudMerge());
             });
         }
 
@@ -13376,82 +13794,7 @@ Cancel: go back and change the branch name first.`
                     toast(textByLang('已关闭“冲突面板”预览', 'Conflict panel preview closed'), { optional: true });
                     return;
                 }
-                toast(textByLang('冲突已保留，自动同步暂停，待你手动选择后恢复', 'Conflict kept. Auto sync is paused until you resolve it manually'), { optional: true });
-                closePanel();
-            });
-        }
-
-        const mismatchUseRemoteBtn = getElement('canvasSyncMismatchUseRemoteBtn');
-        if (mismatchUseRemoteBtn) {
-            mismatchUseRemoteBtn.addEventListener('click', () => {
-                if (runtime.isRunning) {
-                    toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
-                    return;
-                }
-                void runWithButtonBusy(mismatchUseRemoteBtn, async () => {
-                    if (runtime.isRunning) {
-                        toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
-                        renderMismatchPanel();
-                        return false;
-                    }
-                    const actionMode = String(mismatchUseRemoteBtn.dataset.syncActionMode || 'remote');
-                    const ok = actionMode === 'baseline'
-                        ? await resolvePendingMismatchBySync('full', 'mismatch-panel-baseline')
-                        : await resolvePendingMismatchBySync('pull', 'mismatch-panel-pull');
-                    if (!ok) {
-                        toast(actionMode === 'baseline'
-                            ? textByLang('校准同步基线失败，请检查错误后重试', 'Failed to align sync baseline; check errors and retry')
-                            : textByLang('与云端对齐失败，请检查错误后重试', 'Failed to align with cloud; check errors and retry'));
-                    }
-                    renderMismatchPanel();
-                    return ok;
-                });
-            });
-        }
-
-        const mismatchUseLocalBtn = getElement('canvasSyncMismatchUseLocalBtn');
-        if (mismatchUseLocalBtn) {
-            mismatchUseLocalBtn.addEventListener('click', () => {
-                if (runtime.isRunning) {
-                    toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
-                    return;
-                }
-                void runWithButtonBusy(mismatchUseLocalBtn, async () => {
-                    if (runtime.isRunning) {
-                        toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
-                        renderMismatchPanel();
-                        return false;
-                    }
-                    const ok = await resolvePendingMismatchBySync('push', 'mismatch-panel-push');
-                    if (!ok) {
-                        toast(textByLang('本地覆盖云端失败，请检查错误后重试', 'Failed to overwrite cloud with local; check errors and retry'));
-                    }
-                    renderMismatchPanel();
-                    return ok;
-                });
-            });
-        }
-
-        const mismatchGoPolicyBtn = getElement('canvasSyncMismatchGoPolicyBtn');
-        if (mismatchGoPolicyBtn) {
-            mismatchGoPolicyBtn.addEventListener('click', () => {
-                jumpToBehaviorPolicySection({
-                    nestedButtonId: 'canvasSyncBehaviorSubCompatDetail3Btn',
-                    targetId: 'canvasSyncSectionCompatMismatchTitle',
-                    focusId: 'canvasSyncMismatchPolicySelect'
-                });
-            });
-        }
-
-        const mismatchDismissBtn = getElement('canvasSyncMismatchDismissBtn');
-        if (mismatchDismissBtn) {
-            mismatchDismissBtn.addEventListener('click', () => {
-                if (isMismatchPreviewActive()) {
-                    setPreviewPanelMode('');
-                    toast(textByLang('已关闭“云端不一致面板”预览', 'Remote mismatch panel preview closed'), { optional: true });
-                    return;
-                }
-                toast(textByLang('已保留“云端不一致待处理”状态', 'Pending remote mismatch is kept'), { optional: true });
+                toast(textByLang('冲突已保留，请手动选择处理方式后继续同步', 'Conflict kept. Resolve it manually and continue sync'), { optional: true });
                 closePanel();
             });
         }
@@ -13485,9 +13828,7 @@ Cancel: go back and change the branch name first.`
                 return;
             }
             if (scheduleActiveRunRecoveryResume('online')) return;
-            if (!settings.enabled || !settings.autoSync || hasPendingConflict()) return;
-            if (shouldDeferAutomaticSyncTrigger('online')) return;
-            scheduleSync('online', { immediate: true });
+            renderStatus();
         });
 
         global.addEventListener('offline', () => {
@@ -13505,10 +13846,7 @@ Cancel: go back and change the branch name first.`
                 return;
             }
             scheduleActiveRunRecoveryResume('visible');
-            restartForegroundMismatchTimer();
-            void refreshPendingMismatchFromBackground()
-                .then(() => maybePromptPendingMismatchOnInit())
-                .catch(() => { });
+            void maybePromptPendingConflictOnInit();
         });
 
         const markInterruptedSyncBeforePageExit = () => {
@@ -13521,7 +13859,7 @@ Cancel: go back and change the branch name first.`
         };
         if (document.body && document.body.dataset.syncUserActivityBound !== 'true') {
             document.body.dataset.syncUserActivityBound = 'true';
-            ['pointerdown', 'keydown', 'input', 'wheel', 'touchstart'].forEach((eventName) => {
+            ['pointerdown', 'pointermove', 'keydown', 'input', 'wheel', 'touchstart'].forEach((eventName) => {
                 document.addEventListener(eventName, markInteraction, { passive: true });
             });
         }
@@ -13533,18 +13871,17 @@ Cancel: go back and change the branch name first.`
     async function init() {
         try {
             await hydrateSyncMetaStorage();
+            bindSyncMetaStorageChangeListener();
         } catch (_) { }
 
         settings = loadSettings();
         runtime = loadRuntime();
         recoveryLockState = loadRecoveryLockState();
         // Foreground sync cannot survive a page reload; stale persisted running state would
-        // disable all action buttons and suppress mismatch prompts incorrectly.
+        // disable action buttons incorrectly.
         runtime.isRunning = false;
-        runtime.pendingMismatch = runtime.pendingMismatch === true;
-        runtime.pendingMismatchAt = Number(runtime.pendingMismatchAt) || 0;
-        runtime.pendingMismatchRemoteSha = String(runtime.pendingMismatchRemoteSha || '');
         runtime.lastRemoteCommittedAt = Number(runtime.lastRemoteCommittedAt) || 0;
+        runtime.lastBlankSectionFilePushAt = Number(runtime.lastBlankSectionFilePushAt) || 0;
         runtime.lastPermanentSectionHash = String(runtime.lastPermanentSectionHash || '');
         runtime.lastOtherSyncDataHash = String(runtime.lastOtherSyncDataHash || '');
         runtime.lastLocalFilesSha = String(runtime.lastLocalFilesSha || '');
@@ -13573,23 +13910,16 @@ Cancel: go back and change the branch name first.`
         loadRepoConfigFromStorage().catch(() => { });
         renderConflictPanel();
         renderStatus();
-        restartAutomationTimers();
-        scheduleStartupPull();
         await maybeHandleRecoveryLockOnInit();
         maybeRecoverInterruptedRunOnInit();
 
         if (!isRecoveryLockActive()) {
-            refreshPendingMismatchFromBackground()
-                .then(() => maybePromptPendingConflictOnInit())
-                .catch(() => { });
+            void maybePromptPendingConflictOnInit();
         }
 
         void updateBackgroundSyncContext('init', {
             isRunning: runtime.isRunning,
             queueLength: runtime.queueLength,
-            pendingMismatch: runtime.pendingMismatch,
-            pendingMismatchAt: runtime.pendingMismatchAt,
-            pendingMismatchRemoteSha: runtime.pendingMismatchRemoteSha,
             lastRemoteSha: runtime.lastRemoteSha,
             lastCheckRemoteSha: runtime.lastCheckRemoteSha,
             lastLocalHash: runtime.lastLocalHash,
@@ -13600,60 +13930,22 @@ Cancel: go back and change the branch name first.`
     const syncApi = {
         openPanel,
         closePanel,
-        requestSyncNow: (trigger) => runSync('full', trigger || 'manual'),
+        requestSyncNow: (trigger) => requestManualSync(trigger || 'manual'),
         runFirstSyncCloudOverwrite,
         readRemoteSnapshotForImport,
         markDirty: (reason, options) => {
             lastUserDirtyAt = Date.now();
             updateDirtyStateByReason(reason, options || {});
-            const effectiveSettings = settings || loadSettings();
-            if (!effectiveSettings || effectiveSettings.syncAfterEditStop === false) {
-                return;
-            }
-            scheduleSync(reason || 'save', options || {});
+            return;
         },
         getSettings: () => Object.assign({}, settings || loadSettings()),
-        getSyncTemplatePreviewData: (templateKey) => getSyncTemplatePreviewData(templateKey),
-        getSyncTemplatePreviewControlStateMap: () => getSyncTemplatePreviewControlStateMap(),
-        updateSyncTemplatePreviewControl: (rowKey, rawValue) => updateSyncTemplatePreviewControl(rowKey, rawValue),
-        restoreSyncTemplatePreviewDefaults: (templateKey) => restoreSyncTemplatePreviewDefaults(templateKey),
         updateSettings: (patch) => {
             settings = Object.assign({}, settings || loadSettings(), patch || {});
             settings.conflictPolicy = ensureConflictPolicy(settings.conflictPolicy);
             settings.syncMethod = DEFAULT_SETTINGS.syncMethod;
-            settings.syncAfterEditStop = settings.syncAfterEditStop !== false;
-            settings.splitIntervalCommitAndSync = !!settings.splitIntervalCommitAndSync;
-            settings.intervalSeconds = normalizeAutoSyncIntervalSeconds(
-                settings.intervalSeconds,
-                DEFAULT_SETTINGS.intervalSeconds
-            );
-            settings.autoPushIntervalMinutes = normalizeSplitIntervalMinutes(settings.autoPushIntervalMinutes, DEFAULT_SETTINGS.autoPushIntervalMinutes);
-            settings.autoPullIntervalMinutes = normalizeSplitIntervalMinutes(settings.autoPullIntervalMinutes, DEFAULT_SETTINGS.autoPullIntervalMinutes);
-            settings.mismatchPolicy = ensureMismatchPolicy(settings.mismatchPolicy);
-            settings.foregroundCheckEnabled = settings.foregroundCheckEnabled !== false;
-            settings.foregroundCheckIntervalSeconds = normalizeForegroundCheckSeconds(
-                settings.foregroundCheckIntervalSeconds,
-                DEFAULT_SETTINGS.foregroundCheckIntervalSeconds
-            );
-            settings.backgroundCheckEnabled = settings.backgroundCheckEnabled !== false;
-            settings.backgroundCheckIntervalMinutes = normalizeBackgroundMinutes(
-                settings.backgroundCheckIntervalMinutes,
-                DEFAULT_SETTINGS.backgroundCheckIntervalMinutes,
-                1
-            );
-            settings.backgroundCooldownMinutes = normalizeBackgroundMinutes(
-                settings.backgroundCooldownMinutes,
-                DEFAULT_SETTINGS.backgroundCooldownMinutes,
-                1
-            );
-            delete settings.customSyncTemplatePresets;
-            delete settings.customSyncTemplatePreset;
-            delete settings.savedSyncTemplatePreset;
-            settings.pullOnStartup = !!settings.pullOnStartup;
             delete settings.pushOnSync;
             delete settings.pullOnSync;
             settings.toastEnabled = settings.toastEnabled !== false;
-            settings.editAutoToastEnabled = settings.editAutoToastEnabled !== false;
             settings.firstSyncMode = ensureFirstSyncMode(settings.firstSyncMode);
             settings.permanentPullMode = ensurePermanentPullMode(settings.permanentPullMode);
             settings.permanentIncrementalMaxChanges = normalizePermanentIncrementalMaxChanges(
@@ -13684,14 +13976,10 @@ Cancel: go back and change the branch name first.`
             );
             saveSettings();
             applySettingsToForm();
-            restartAutomationTimers();
-            scheduleStartupPull();
             renderStatus();
             void updateBackgroundSyncContext('settings-update', {
                 isRunning: runtime && runtime.isRunning,
                 queueLength: runtime && runtime.queueLength,
-                pendingMismatch: runtime && runtime.pendingMismatch,
-                pendingMismatchAt: runtime && runtime.pendingMismatchAt,
                 lastRemoteSha: runtime && runtime.lastRemoteSha,
                 lastLocalHash: runtime && runtime.lastLocalHash,
                 lastSuccessAt: runtime && runtime.lastSuccessAt
@@ -13703,7 +13991,6 @@ Cancel: go back and change the branch name first.`
             renderRecoveryLockPanel();
             renderConflictPanel();
             updateStatusPanelActionPlacement();
-            updateSyncTemplateUi({ syncSelectionToState: false });
         }
     };
 

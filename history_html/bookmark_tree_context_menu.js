@@ -341,6 +341,23 @@ function __ctxMenuNormalizePositiveInt(value) {
 
 function __ctxMenuReadPermanentSectionCopies() {
     try {
+        const protocolBridge = window.CanvasProtocolBridge && typeof window.CanvasProtocolBridge.collectPermanentViewShellSnapshot === 'function'
+            ? window.CanvasProtocolBridge
+            : null;
+        if (protocolBridge) {
+            const snapshot = protocolBridge.collectPermanentViewShellSnapshot();
+            if (snapshot && Array.isArray(snapshot.views)) {
+                return snapshot.views
+                    .filter((view) => view && view.copyId)
+                    .map((view) => ({
+                        id: String(view.copyId || '').trim(),
+                        displayIndex: __ctxMenuNormalizePositiveInt(view.displayIndex)
+                    }))
+                    .filter((copy) => copy.id);
+            }
+        }
+    } catch (_) { }
+    try {
         const raw = localStorage.getItem(CTXMENU_PERMANENT_SECTION_COPIES_STORAGE_KEY);
         if (!raw) return [];
         const parsed = JSON.parse(raw);
@@ -1139,6 +1156,18 @@ function getPermanentColumnKeyFromElement(el) {
     if (!el || !el.closest) return null;
     const section = el.closest('.permanent-bookmark-section');
     if (!section) return null;
+    try {
+        const protocolBridge = window.CanvasProtocolBridge && typeof window.CanvasProtocolBridge.resolvePermanentSectionContext === 'function'
+            ? window.CanvasProtocolBridge
+            : null;
+        if (protocolBridge) {
+            const context = protocolBridge.resolvePermanentSectionContext(section);
+            if (context) {
+                if (context.isCopy && context.copyId) return String(context.copyId);
+                return 'origin';
+            }
+        }
+    } catch (_) { }
     const isCopy = section.classList && section.classList.contains('permanent-section-copy');
     if (!isCopy) return 'origin';
     const copyId = section.dataset && section.dataset.permanentSectionCopyId ? String(section.dataset.permanentSectionCopyId) : '';
@@ -1147,6 +1176,15 @@ function getPermanentColumnKeyFromElement(el) {
 
 function findPermanentColumnElementByKey(key) {
     const k = key || 'origin';
+    try {
+        const protocolBridge = window.CanvasProtocolBridge && typeof window.CanvasProtocolBridge.resolvePermanentSectionElement === 'function'
+            ? window.CanvasProtocolBridge
+            : null;
+        if (protocolBridge) {
+            const resolved = protocolBridge.resolvePermanentSectionElement(k === 'origin' ? null : k);
+            if (resolved) return resolved;
+        }
+    } catch (_) { }
     if (k === 'origin') {
         return document.querySelector('.permanent-bookmark-section:not(.permanent-section-copy)') ||
             document.getElementById('permanentSection') ||
@@ -2021,8 +2059,17 @@ function getNodeContext(node) {
 
     // Permanent copy context (for scoped group/window per-copy)
     try {
-        const sectionEl = node.closest ? node.closest('.permanent-bookmark-section.permanent-section-copy') : null;
-        if (sectionEl && sectionEl.dataset) {
+        const sectionEl = node.closest ? node.closest('.permanent-bookmark-section') : null;
+        const protocolBridge = window.CanvasProtocolBridge && typeof window.CanvasProtocolBridge.resolvePermanentSectionContext === 'function'
+            ? window.CanvasProtocolBridge
+            : null;
+        const permanentContext = sectionEl && protocolBridge
+            ? protocolBridge.resolvePermanentSectionContext(sectionEl)
+            : null;
+        if (permanentContext && permanentContext.isCopy) {
+            if (permanentContext.copyId) ctx.permanentCopyId = permanentContext.copyId;
+            if (permanentContext.displayIndex) ctx.permanentDisplayIndex = permanentContext.displayIndex;
+        } else if (sectionEl && sectionEl.dataset) {
             const copyIdRaw = sectionEl.dataset.permanentSectionCopyId;
             const copyId = (typeof copyIdRaw === 'string') ? copyIdRaw.trim() : '';
             if (copyId) ctx.permanentCopyId = copyId;
@@ -3452,6 +3499,10 @@ async function pasteIntoTemp(context) {
                 for (const id of bookmarkClipboard.nodeIds) {
                     try {
                         if (chrome && chrome.bookmarks) {
+                            const roots = await chrome.bookmarks.getSubTree(id);
+                            if (roots && roots[0]) {
+                                registerPermanentDerivedRemoveRootsRuntime([roots[0]]);
+                            }
                             await chrome.bookmarks.removeTree(id);
                         }
                     } catch (error) {
@@ -3479,6 +3530,26 @@ function serializeBookmarkNode(node) {
         type: node.url ? 'bookmark' : 'folder',
         children: (node.children || []).map(serializeBookmarkNode)
     };
+}
+
+function registerPermanentCreateSubtreeMemberRuntime(id) {
+    try {
+        if (typeof window !== 'undefined' &&
+            window.__treeMarkerOps &&
+            typeof window.__treeMarkerOps.registerCreateSubtreeMember === 'function') {
+            window.__treeMarkerOps.registerCreateSubtreeMember(id);
+        }
+    } catch (_) { }
+}
+
+function registerPermanentDerivedRemoveRootsRuntime(nodes) {
+    try {
+        if (typeof window !== 'undefined' &&
+            window.__treeMarkerOps &&
+            typeof window.__treeMarkerOps.registerDerivedRemoveRoots === 'function') {
+            window.__treeMarkerOps.registerDerivedRemoveRoots(nodes);
+        }
+    } catch (_) { }
 }
 
 async function handleTempMenuAction(action, context) {
@@ -5726,6 +5797,12 @@ async function copyUrl(url) {
 async function deleteBookmark(nodeId, nodeTitle, isFolder) {
     if (chrome && chrome.bookmarks) {
         if (isFolder) {
+            try {
+                const roots = await chrome.bookmarks.getSubTree(nodeId);
+                if (roots && roots[0]) {
+                    registerPermanentDerivedRemoveRootsRuntime([roots[0]]);
+                }
+            } catch (_) { }
             await chrome.bookmarks.removeTree(nodeId);
         } else {
             await chrome.bookmarks.remove(nodeId);
@@ -5879,6 +5956,7 @@ async function duplicateNode(node, parentId) {
 
     // 创建节点
     const created = await chrome.bookmarks.create(newNode);
+    registerPermanentCreateSubtreeMemberRuntime(created && created.id);
 
     // 如果有子节点，递归复制
     if (node.children) {
@@ -7008,6 +7086,18 @@ async function batchToTempSection(triggerEvent) {
                     ? clickedElement.closest('.permanent-bookmark-section')
                     : null;
                 if (permanentSection) {
+                    const protocolBridge = window.CanvasProtocolBridge && typeof window.CanvasProtocolBridge.resolvePermanentSectionContext === 'function'
+                        ? window.CanvasProtocolBridge
+                        : null;
+                    const context = protocolBridge
+                        ? protocolBridge.resolvePermanentSectionContext(permanentSection)
+                        : null;
+                    if (context) {
+                        if (!context.isCopy) return { copyId: null };
+                        const out = { copyId: context.copyId || null };
+                        if (context.displayIndex) out.displayIndex = context.displayIndex;
+                        return out;
+                    }
                     const isCopy = permanentSection.classList && permanentSection.classList.contains('permanent-section-copy');
                     if (!isCopy) return { copyId: null };
                     const copyId = (permanentSection.dataset && permanentSection.dataset.permanentSectionCopyId)
@@ -7032,6 +7122,18 @@ async function batchToTempSection(triggerEvent) {
 
             const permanentSection = el && el.closest ? el.closest('.permanent-bookmark-section') : null;
             if (!permanentSection) return null;
+            const protocolBridge = window.CanvasProtocolBridge && typeof window.CanvasProtocolBridge.resolvePermanentSectionContext === 'function'
+                ? window.CanvasProtocolBridge
+                : null;
+            const context = protocolBridge
+                ? protocolBridge.resolvePermanentSectionContext(permanentSection)
+                : null;
+            if (context) {
+                if (!context.isCopy) return { copyId: null };
+                const out = { copyId: context.copyId || null };
+                if (context.displayIndex) out.displayIndex = context.displayIndex;
+                return out;
+            }
             const isCopy = permanentSection.classList && permanentSection.classList.contains('permanent-section-copy');
             if (!isCopy) return { copyId: null };
             const copyId = (permanentSection.dataset && permanentSection.dataset.permanentSectionCopyId)
@@ -8080,10 +8182,14 @@ async function batchDelete() {
         }
 
         if (permanentIds.length) {
+            const permanentRoots = [];
             // 先收集所有要删除的节点的父ID
             for (const nodeId of permanentIds) {
                 try {
-                    const [node] = await chrome.bookmarks.get(nodeId);
+                    const roots = await chrome.bookmarks.getSubTree(nodeId);
+                    const node = roots && roots[0];
+                    if (!node) continue;
+                    permanentRoots.push(node);
                     if (node.parentId) {
                         affectedParentIds.add(node.parentId);
                     }
@@ -8092,18 +8198,21 @@ async function batchDelete() {
                 }
             }
 
+            if (permanentRoots.length) {
+                registerPermanentDerivedRemoveRootsRuntime(permanentRoots);
+            }
+
             // 执行永久书签删除
-            for (const nodeId of permanentIds) {
+            for (const rootNode of permanentRoots) {
                 try {
-                    const [node] = await chrome.bookmarks.get(nodeId);
-                    if (node.url) {
-                        await chrome.bookmarks.remove(nodeId);
+                    if (rootNode.url) {
+                        await chrome.bookmarks.remove(rootNode.id);
                     } else {
-                        await chrome.bookmarks.removeTree(nodeId);
+                        await chrome.bookmarks.removeTree(rootNode.id);
                     }
                     successCount++;
                 } catch (error) {
-                    console.error('[批量] 删除失败:', nodeId, error);
+                    console.error('[批量] 删除失败:', rootNode && rootNode.id, error);
                     failCount++;
                 }
             }

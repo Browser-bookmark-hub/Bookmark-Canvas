@@ -42,6 +42,34 @@
     return isEnglish() ? en : zh;
   }
 
+  function collectPermanentViewShellSnapshot() {
+    const protocolBridge = global.CanvasProtocolBridge && typeof global.CanvasProtocolBridge.collectPermanentViewShellSnapshot === 'function'
+      ? global.CanvasProtocolBridge
+      : null;
+    if (!protocolBridge) return null;
+    try {
+      const snapshot = protocolBridge.collectPermanentViewShellSnapshot();
+      return snapshot && Array.isArray(snapshot.views) ? snapshot : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function getPermanentViewShellViews(snapshotInput = null) {
+    const snapshot = snapshotInput && Array.isArray(snapshotInput.views)
+      ? snapshotInput
+      : collectPermanentViewShellSnapshot();
+    return Array.isArray(snapshot && snapshot.views) ? snapshot.views : [];
+  }
+
+  function getPermanentCopyShells(snapshotInput = null) {
+    return getPermanentViewShellViews(snapshotInput).filter((view) => view && view.copyId);
+  }
+
+  function getPermanentMainShell(snapshotInput = null) {
+    return getPermanentViewShellViews(snapshotInput).find((view) => !(view && view.copyId)) || null;
+  }
+
   function normalizeText(value) {
     if (typeof value !== 'string') return '';
     return value.replace(/\u200B/g, '').replace(/\r\n?/g, '\n').trim();
@@ -288,6 +316,19 @@
   }
 
   function readPermanentCopies() {
+    const shellCopies = getPermanentCopyShells();
+    if (shellCopies.length) {
+      return shellCopies.map((shell) => ({
+        id: normalizeText(shell.copyId),
+        displayIndex: toPositiveInt(shell.displayIndex),
+        left: shell.cardState && shell.cardState.left,
+        top: shell.cardState && shell.cardState.top,
+        width: shell.cardState && shell.cardState.width,
+        height: shell.cardState && shell.cardState.height,
+        descriptionMd: shell.descriptionMd || ''
+      })).filter((copy) => copy.id);
+    }
+
     let list = [];
     try {
       const raw = localStorage.getItem(PERMANENT_COPIES_STORAGE_KEY);
@@ -312,12 +353,15 @@
   }
 
   function getPermanentDescription(copyId = null) {
-    const key = copyId ? `canvas-permanent-tip-text-copy-${copyId}` : 'canvas-permanent-tip-text';
-    try {
-      return toPreviewText(localStorage.getItem(key) || '');
-    } catch (_) {
-      return '';
+    const safeCopyId = normalizeText(copyId);
+    const shell = safeCopyId
+      ? getPermanentCopyShells().find((view) => normalizeText(view && view.copyId) === safeCopyId)
+      : getPermanentMainShell();
+    if (shell && typeof shell.descriptionMd === 'string') {
+      return toPreviewText(shell.descriptionMd);
     }
+    const key = safeCopyId ? `canvas-permanent-tip-text-copy-${safeCopyId}` : 'canvas-permanent-tip-text';
+    try { return toPreviewText(localStorage.getItem(key) || ''); } catch (_) { return ''; }
   }
 
   function getPermanentCopyDisplayIndex(copy, orderIndex) {
@@ -2029,6 +2073,29 @@
     }
   }
 
+  function resolvePermanentSectionElement(copyId = null) {
+    const protocolBridge = global.CanvasProtocolBridge && typeof global.CanvasProtocolBridge.resolvePermanentSectionElement === 'function'
+      ? global.CanvasProtocolBridge
+      : null;
+    if (protocolBridge) {
+      try {
+        const resolved = protocolBridge.resolvePermanentSectionElement(copyId);
+        if (resolved) return resolved;
+      } catch (_) { }
+    }
+
+    const safeCopyId = normalizeText(copyId);
+    if (!safeCopyId) return document.getElementById('permanentSection');
+
+    const escaped = escapeSelector(safeCopyId);
+    if (escaped) {
+      const byDataset = document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id=\"${escaped}\"]`)
+        || document.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id=\"${escaped}\"]`);
+      if (byDataset) return byDataset;
+    }
+    return document.getElementById(`permanent-section-copy-${safeCopyId}`);
+  }
+
   function locatePermanentMain(module) {
     if (module && typeof module.locatePermanent === 'function') {
       try {
@@ -2036,24 +2103,15 @@
         return true;
       } catch (_) { }
     }
-    return locateElement(module, document.getElementById('permanentSection'));
+    return locateElement(module, resolvePermanentSectionElement(null));
   }
 
   function locatePermanentCopy(module, copyId) {
     if (!copyId) return false;
-    const escaped = escapeSelector(copyId);
-    if (!escaped) return false;
-
-    const sectionEl = document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id=\"${escaped}\"]`);
+    const sectionEl = resolvePermanentSectionElement(copyId);
     if (sectionEl) {
       return locateElement(module, sectionEl);
     }
-
-    const byId = document.getElementById(`permanent-section-copy-${copyId}`);
-    if (byId) {
-      return locateElement(module, byId);
-    }
-
     return false;
   }
 
@@ -2148,14 +2206,11 @@
 
     switch (target.kind) {
       case 'permanent-main':
-        return document.getElementById('permanentSection');
+        return resolvePermanentSectionElement(null);
       case 'permanent-copy': {
         const copyId = normalizeText(target.copyId);
         if (!copyId) return null;
-        const escaped = escapeSelector(copyId);
-        if (!escaped) return null;
-        return document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${escaped}"]`)
-          || document.getElementById(`permanent-section-copy-${copyId}`);
+        return resolvePermanentSectionElement(copyId);
       }
       case 'temp-section': {
         const sectionId = normalizeText(target.sectionId);

@@ -151,6 +151,38 @@ function serializeBookmarkNode(node) {
     };
 }
 
+function registerPermanentCreateSubtreeMemberRuntime(id) {
+    try {
+        if (typeof window !== 'undefined' &&
+            window.__treeMarkerOps &&
+            typeof window.__treeMarkerOps.registerCreateSubtreeMember === 'function') {
+            window.__treeMarkerOps.registerCreateSubtreeMember(id);
+        }
+    } catch (_) { }
+}
+
+function resolvePermanentBlankDropParentId(targetElement = null) {
+    try {
+        const section = targetElement && targetElement.closest
+            ? targetElement.closest('.permanent-bookmark-section')
+            : null;
+        const scope = section || document.getElementById('permanentSection') || document.querySelector('.permanent-bookmark-section');
+        const tree = scope
+            ? scope.querySelector('.bookmark-tree')
+            : (document.getElementById('bookmarkTree') || document.querySelector('.bookmark-tree[data-tree-type="permanent"]'));
+        if (!tree) return null;
+
+        const level1Folder = tree.querySelector('.tree-item[data-node-type="folder"][data-node-level="1"][data-node-id]');
+        const level1Id = level1Folder && level1Folder.dataset ? String(level1Folder.dataset.nodeId || '').trim() : '';
+        if (level1Id && level1Id !== '0') return level1Id;
+
+        const level0Folder = tree.querySelector('.tree-item[data-node-type="folder"][data-node-level="0"][data-node-id]');
+        const level0Id = level0Folder && level0Folder.dataset ? String(level0Folder.dataset.nodeId || '').trim() : '';
+        if (level0Id && level0Id !== '0') return level0Id;
+    } catch (_) { }
+    return null;
+}
+
 // 初始化拖拽功能
 function initDragDrop() {
     // 创建拖拽指示器
@@ -209,6 +241,39 @@ function attachDragEvents(treeContainer) {
             });
             scrollContainer.__autoScrollHooked = true;
             console.log('[拖拽] 已在滚动容器绑定 dragover 自动滚动监听');
+        }
+
+        const permanentBody = treeContainer.closest('.permanent-section-body');
+        if (permanentBody && !permanentBody.__blankDropHooked) {
+            permanentBody.addEventListener('dragover', (e) => {
+                const targetNode = e && e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
+                if (targetNode) return;
+                e.preventDefault();
+                e.stopPropagation();
+                hideDropIndicator();
+                updateAutoScroll(e);
+            });
+            permanentBody.addEventListener('drop', async (e) => {
+                const targetNode = e && e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
+                if (targetNode) return;
+                e.preventDefault();
+                e.stopPropagation();
+                hideDropIndicator();
+
+                const parentId = resolvePermanentBlankDropParentId(permanentBody);
+                if (!parentId || !draggedNodeId) return;
+
+                await moveBookmark(draggedNodeId, parentId, true, {
+                    sourceTreeType: draggedNodeTreeType,
+                    sourceSectionId: draggedNodeSectionId,
+                    targetTreeType: 'permanent',
+                    targetSectionId: null,
+                    position: 'inside',
+                    event: e
+                });
+            });
+            permanentBody.__blankDropHooked = true;
+            console.log('[拖拽] 已在永久栏目空白区域绑定 drop 监听');
         }
     } catch (_) { }
 }
@@ -557,6 +622,7 @@ async function createBookmarkFromPayload(parentId, index, payload) {
         createInfo.index = index;
     }
     const created = await chrome.bookmarks.create(createInfo);
+    registerPermanentCreateSubtreeMemberRuntime(created && created.id);
     if (payload.children && payload.children.length) {
         for (const child of payload.children) {
             await createBookmarkFromPayload(created.id, null, child);
@@ -737,6 +803,8 @@ if (typeof window !== 'undefined') {
 
         // 执行移动操作
         performMove: moveBookmark,
+
+        resolvePermanentBlankDropParentId,
 
         // 获取拖拽的节点信息
         getDraggedNodeInfo: function () {
