@@ -332,7 +332,7 @@ async function resetHyperlinkSpecificGroupInfo() {
 }
 
 
-const CTXMENU_PERMANENT_SECTION_COPIES_STORAGE_KEY = 'permanent-section-copies';
+const CTXMENU_PERMANENT_SECTION_COPIES_STORAGE_KEY = 'bcs:perm:copies';
 
 function __ctxMenuNormalizePositiveInt(value) {
     const n = parseInt(value, 10);

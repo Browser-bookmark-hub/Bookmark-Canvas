@@ -53,15 +53,18 @@
         { buttonId: 'canvasSyncStatusSubRuntimeBtn', targetId: 'canvasSyncStatusRuntimeSectionTitle' }
     ];
 
-    const TEMP_SECTION_STORAGE_KEY = 'bookmark-canvas-temp-sections';
+    const TEMP_SECTION_STORAGE_KEY = 'bcs:temp-state-snapshot';
+    const BCS_META_KEY = 'bcs:meta';
+    const BCS_CANVAS_KEY = 'bcs:canvas';
+    const BCS_SECTION_PREFIX = 'bcs:section:';
+    const BCS_MD_PREFIX = 'bcs:md:';
+    const BCS_PERM_MAIN_KEY = 'bcs:perm:main';
+    const BCS_PERM_COPY_PREFIX = 'bcs:perm:copy-';
 
     const SYNC_KEYS = [
         TEMP_SECTION_STORAGE_KEY,
         'canvas-appearance-settings-v1',
-        'canvas-other-settings-v1',
-        'permanent-section-position',
-        'permanent-section-copies',
-        'canvas-permanent-tip-text'
+        'canvas-other-settings-v1'
     ];
 
     const CONFLICT_POLICIES = new Set(['none', 'ours', 'theirs', 'newer']);
@@ -2229,13 +2232,6 @@
         return true;
     }
 
-
-    const TEMP_SECTION_STORAGE_CHROME_MARKER = 'chrome.storage.local';
-    const TEMP_SECTION_STORAGE_INDEXEDDB_MARKER = 'indexeddb';
-    const TEMP_SECTION_STORAGE_INDEXEDDB_DB_NAME = 'bookmark-canvas-state-db';
-    const TEMP_SECTION_STORAGE_INDEXEDDB_STORE_NAME = 'canvas-temp-state';
-    const TEMP_SECTION_STORAGE_INDEXEDDB_DATA_KEY = TEMP_SECTION_STORAGE_KEY;
-
     function cloneSyncJsonValue(value) {
         if (value == null) return value;
         try {
@@ -2252,17 +2248,6 @@
             }
             return value;
         }
-    }
-
-    function isCanvasTempStateMarkerForSync(state) {
-        return !!(
-            state
-            && typeof state === 'object'
-            && (
-                state.__storage === TEMP_SECTION_STORAGE_CHROME_MARKER
-                || state.__storage === TEMP_SECTION_STORAGE_INDEXEDDB_MARKER
-            )
-        );
     }
 
     function isCanvasTempStatePayloadForSync(state) {
@@ -2413,66 +2398,13 @@
         }, rawInput && typeof rawInput === 'object' ? rawInput : null);
     }
 
-    async function readCanvasTempStateFromIndexedDbForSync() {
-        if (!global.indexedDB || typeof global.indexedDB.open !== 'function') return null;
-        return await new Promise((resolve) => {
-            try {
-                const request = global.indexedDB.open(TEMP_SECTION_STORAGE_INDEXEDDB_DB_NAME, 1);
-                request.onerror = () => resolve(null);
-                request.onsuccess = () => {
-                    const db = request.result;
-                    try {
-                        const tx = db.transaction([TEMP_SECTION_STORAGE_INDEXEDDB_STORE_NAME], 'readonly');
-                        const store = tx.objectStore(TEMP_SECTION_STORAGE_INDEXEDDB_STORE_NAME);
-                        const getReq = store.get(TEMP_SECTION_STORAGE_INDEXEDDB_DATA_KEY);
-                        getReq.onerror = () => {
-                            try { db.close(); } catch (_) { }
-                            resolve(null);
-                        };
-                        getReq.onsuccess = () => {
-                            const result = getReq.result && typeof getReq.result === 'object'
-                                ? (getReq.result.value || null)
-                                : null;
-                            try { db.close(); } catch (_) { }
-                            resolve(result || null);
-                        };
-                    } catch (_) {
-                        try { db.close(); } catch (_) { }
-                        resolve(null);
-                    }
-                };
-            } catch (_) {
-                resolve(null);
-            }
-        });
-    }
-
     async function resolveCanvasTempStateForSync(rawInput = '') {
         const parsedRaw = safeParse(rawInput, null);
         const livePayload = getLiveCanvasTempStateForSync(parsedRaw);
         if (livePayload) return livePayload;
 
-        if (isCanvasTempStatePayloadForSync(parsedRaw) && !isCanvasTempStateMarkerForSync(parsedRaw)) {
+        if (isCanvasTempStatePayloadForSync(parsedRaw)) {
             return buildPersistedCanvasTempStateForSync(parsedRaw);
-        }
-
-        if (parsedRaw && parsedRaw.__storage === TEMP_SECTION_STORAGE_CHROME_MARKER) {
-            try {
-                const result = await storageLocalGet([TEMP_SECTION_STORAGE_KEY]);
-                const payload = result && result[TEMP_SECTION_STORAGE_KEY];
-                if (isCanvasTempStatePayloadForSync(payload)) {
-                    return buildPersistedCanvasTempStateForSync(payload, parsedRaw);
-                }
-            } catch (_) { }
-        }
-
-        if (parsedRaw && parsedRaw.__storage === TEMP_SECTION_STORAGE_INDEXEDDB_MARKER) {
-            try {
-                const payload = await readCanvasTempStateFromIndexedDbForSync();
-                if (isCanvasTempStatePayloadForSync(payload)) {
-                    return buildPersistedCanvasTempStateForSync(payload, parsedRaw);
-                }
-            } catch (_) { }
         }
 
         return null;
@@ -2480,7 +2412,7 @@
 
     function normalizeCanvasTempStatePayloadForSync(stateInput, fallbackStateInput = null) {
         const parsedState = typeof stateInput === 'string' ? safeParse(stateInput, null) : stateInput;
-        if (!isCanvasTempStatePayloadForSync(parsedState) || isCanvasTempStateMarkerForSync(parsedState)) {
+        if (!isCanvasTempStatePayloadForSync(parsedState)) {
             return null;
         }
         return buildPersistedCanvasTempStateForSync(parsedState, fallbackStateInput);
@@ -3078,6 +3010,13 @@
 
     function saveSettings() {
         setSyncMetaRaw(SETTINGS_KEY, JSON.stringify(settings));
+        try {
+            global.dispatchEvent(new CustomEvent('canvas-obsidian-git-sync-settings-updated', {
+                detail: {
+                    enabled: !!(settings && settings.enabled)
+                }
+            }));
+        } catch (_) { }
     }
 
     function loadRuntime() {
@@ -3303,8 +3242,10 @@
     function normalizeObsidianFileMeta(rawMeta) {
         if (!rawMeta || typeof rawMeta !== 'object') return null;
 
-        const type = String(rawMeta.type || '').trim().toLowerCase();
-        if (!type) return null;
+        const rawType = String(rawMeta.type || '').trim().toLowerCase();
+        if (!rawType) return null;
+        const isBlankType = rawType === 'blank' || rawType === 'blank-native-text' || rawType === 'md';
+        const type = isBlankType ? 'blank' : rawType;
 
         const meta = { type };
         if (type === 'temporary') {
@@ -3313,7 +3254,7 @@
             const sectionSerial = normalizeTemporarySerial(rawMeta.sectionSerial || rawMeta.sectionLabel);
             if (sectionSerial) meta.sectionSerial = sectionSerial;
         } else if (type === 'blank') {
-            const nodeId = String(rawMeta.nodeId || '').trim();
+            const nodeId = String(rawMeta.nodeId || rawMeta.id || '').trim();
             if (nodeId) meta.nodeId = nodeId;
         } else if (type === 'permanent') {
             const slot = Number.parseInt(rawMeta.slot, 10);
@@ -5451,23 +5392,37 @@ Cancel: go back and change the branch name first.`
     }
 
     function getFirstSyncDataKeyLabel(key) {
-        switch (String(key || '')) {
-            case TEMP_SECTION_STORAGE_KEY:
-                return textByLang('临时/空白画布状态', 'Temporary/blank canvas state');
+        const rawKey = String(key || '');
+        if (rawKey === TEMP_SECTION_STORAGE_KEY) {
+            return textByLang('临时/空白画布状态', 'Temporary/blank canvas state');
+        }
+        if (rawKey === BCS_META_KEY) {
+            return textByLang('画布元数据', 'Canvas metadata');
+        }
+        if (rawKey === BCS_CANVAS_KEY) {
+            return textByLang('画布布局(.canvas)', 'Canvas layout (.canvas)');
+        }
+        if (rawKey === BCS_PERM_MAIN_KEY) {
+            return textByLang('永久栏目说明', 'Permanent-section description');
+        }
+        if (rawKey.startsWith(BCS_PERM_COPY_PREFIX)) {
+            return textByLang('永久栏目副本说明', 'Permanent-section copy description');
+        }
+        if (rawKey.startsWith(BCS_SECTION_PREFIX)) {
+            return textByLang('临时栏目分片', 'Temporary section shard');
+        }
+        if (rawKey.startsWith(BCS_MD_PREFIX)) {
+            return textByLang('空白卡片分片', 'Blank card shard');
+        }
+        switch (rawKey) {
             case 'canvas-appearance-settings-v1':
                 return textByLang('外观设置', 'Appearance settings');
             case 'canvas-other-settings-v1':
                 return textByLang('其他设置', 'Other settings');
-            case 'permanent-section-position':
-                return textByLang('永久栏目位置', 'Permanent-section position');
-            case 'permanent-section-copies':
-                return textByLang('永久栏目副本', 'Permanent-section copies');
-            case 'canvas-permanent-tip-text':
-                return textByLang('永久栏目说明', 'Permanent-section description');
             case PERMANENT_VIEW_SHELL_COMPARE_KEY:
                 return textByLang('永久栏目视图壳', 'Permanent view shells');
             default:
-                return String(key || '') || textByLang('未知项', 'Unknown item');
+                return rawKey || textByLang('未知项', 'Unknown item');
         }
     }
 
@@ -7361,7 +7316,17 @@ Cancel: go back and change the branch name first.`
                     edges: [],
                     timestamp: now - 90 * 1000
                 }),
-                'canvas-permanent-tip-text': 'preview-local'
+                [PERMANENT_VIEW_SHELL_COMPARE_KEY]: JSON.stringify({
+                    version: 1,
+                    views: [{
+                        viewId: 'permanent-section',
+                        copyId: null,
+                        descriptionMd: 'preview-local',
+                        cardState: {},
+                        scrollState: {},
+                        foldState: {}
+                    }]
+                })
             }
         });
         const remoteSnapshot = normalizeSnapshot({
@@ -7376,7 +7341,17 @@ Cancel: go back and change the branch name first.`
                     edges: [],
                     timestamp: now - 50 * 1000
                 }),
-                'canvas-permanent-tip-text': 'preview-remote'
+                [PERMANENT_VIEW_SHELL_COMPARE_KEY]: JSON.stringify({
+                    version: 1,
+                    views: [{
+                        viewId: 'permanent-section',
+                        copyId: null,
+                        descriptionMd: 'preview-remote',
+                        cardState: {},
+                        scrollState: {},
+                        foldState: {}
+                    }]
+                })
             }
         });
 
@@ -8339,102 +8314,32 @@ Cancel: go back and change the branch name first.`
             };
         }
 
-        const readRaw = (key) => Object.prototype.hasOwnProperty.call(source, key) ? source[key] : '';
-        const readJson = (key, fallback = null) => {
-            const raw = readRaw(key);
-            if (raw == null || raw === '') return fallback;
-            if (raw && typeof raw === 'object') return raw;
-            try {
-                return JSON.parse(raw);
-            } catch (_) {
-                return fallback;
-            }
-        };
-        const normalizeDescription = (value) => String(value == null ? '' : value).trim();
-
-        const mainPosition = readJson('permanent-section-position', {});
-        const copies = Array.isArray(readJson('permanent-section-copies', []))
-            ? readJson('permanent-section-copies', []).filter(Boolean)
-            : [];
-        const views = [
-            normalizePermanentViewShellEntryForSync({
-                copyId: null,
-                descriptionMd: normalizeDescription(readRaw('canvas-permanent-tip-text')),
-                cardState: mainPosition
-            })
-        ];
-
-        copies.forEach((copy) => {
-            const copyId = String(copy && copy.id || '').trim();
-            if (!copyId) return;
-            views.push(normalizePermanentViewShellEntryForSync({
-                copyId,
-                displayIndex: copy.displayIndex,
-                descriptionMd: normalizeDescription(readRaw(`canvas-permanent-tip-text-copy-${copyId}`)),
-                cardState: copy
-            }));
-        });
-
         return {
             version: 1,
-            views: views.sort((a, b) => {
-                const aIsCopy = !!a.copyId;
-                const bIsCopy = !!b.copyId;
-                if (aIsCopy !== bIsCopy) return aIsCopy ? 1 : -1;
-                const aIndex = Number(a.displayIndex) || Number.MAX_SAFE_INTEGER;
-                const bIndex = Number(b.displayIndex) || Number.MAX_SAFE_INTEGER;
-                if (aIndex !== bIndex) return aIndex - bIndex;
-                return String(a.copyId || '').localeCompare(String(b.copyId || ''));
-            })
+            views: [normalizePermanentViewShellEntryForSync({ copyId: null })]
         };
     }
 
     function collectLocalPermanentViewShellSnapshotForSync(dataInput = null) {
         const data = dataInput && typeof dataInput === 'object' ? dataInput : {};
-        const source = {};
-        Object.keys(data).forEach((key) => {
-            source[key] = data[key];
-        });
-
-        const readLiveRaw = (key) => {
-            if (Object.prototype.hasOwnProperty.call(source, key)) return source[key];
+        if (data && data[PERMANENT_VIEW_SHELL_COMPARE_KEY]) {
             try {
-                return localStorage.getItem(key);
-            } catch (_) {
-                return null;
-            }
-        };
-        const assignLiveRaw = (key) => {
-            const raw = readLiveRaw(key);
-            if (raw !== null && typeof raw !== 'undefined') {
-                source[key] = raw;
-            }
-        };
-        const readLiveJson = (key, fallback = null) => {
-            const raw = readLiveRaw(key);
-            if (raw == null || raw === '') return fallback;
-            if (raw && typeof raw === 'object') return raw;
+                const parsed = typeof data[PERMANENT_VIEW_SHELL_COMPARE_KEY] === 'string'
+                    ? JSON.parse(data[PERMANENT_VIEW_SHELL_COMPARE_KEY])
+                    : data[PERMANENT_VIEW_SHELL_COMPARE_KEY];
+                const normalized = normalizePermanentViewShellSnapshotForSync(parsed);
+                if (normalized && Array.isArray(normalized.views)) return normalized;
+            } catch (_) { }
+        }
+        const protocolBridge = global && global.CanvasProtocolBridge ? global.CanvasProtocolBridge : null;
+        if (protocolBridge && typeof protocolBridge.collectPermanentViewShellSnapshot === 'function') {
             try {
-                return JSON.parse(raw);
-            } catch (_) {
-                return fallback;
-            }
-        };
-
-        assignLiveRaw('permanent-section-position');
-        assignLiveRaw('permanent-section-copies');
-        assignLiveRaw('canvas-permanent-tip-text');
-
-        const copies = Array.isArray(readLiveJson('permanent-section-copies', []))
-            ? readLiveJson('permanent-section-copies', []).filter(Boolean)
-            : [];
-        copies.forEach((copy) => {
-            const copyId = String(copy && copy.id || '').trim();
-            if (!copyId) return;
-            assignLiveRaw(`canvas-permanent-tip-text-copy-${copyId}`);
-        });
-
-        return buildFallbackPermanentViewShellSnapshotForSync(source);
+                const snapshot = protocolBridge.collectPermanentViewShellSnapshot();
+                const normalized = normalizePermanentViewShellSnapshotForSync(snapshot);
+                if (normalized && Array.isArray(normalized.views)) return normalized;
+            } catch (_) { }
+        }
+        return buildFallbackPermanentViewShellSnapshotForSync(null);
     }
 
     function mergeMissingPermanentViewShellStateForApply(snapshotInput = null) {
@@ -9433,9 +9338,116 @@ Cancel: go back and change the branch name first.`
         const nextPathMap = buildPathMapFromObsidianFiles(normalizedFiles);
         savePathMap(nextPathMap);
 
+
+        const resolveShardedDirtyInfo = async () => {
+            const candidateFn = bridge
+                ? (bridge.buildDirtySyncFilesFromShards
+                    || bridge.getShardedDirtyPatch
+                    || bridge.collectShardedDirtyInfo)
+                : null;
+            if (typeof candidateFn !== 'function') return null;
+            try {
+                return await candidateFn.call(bridge, {
+                    exportFormat: settings.obsidianExportFormat,
+                    exportRoot: settings.obsidianExportRoot,
+                    trigger: trigger || ''
+                });
+            } catch (error) {
+                console.warn('[Canvas Sync] resolve sharded dirty info failed:', error);
+                return null;
+            }
+        };
+
+        const applyDirtyPatchToState = (stateInput, patchInput, extraPaths) => {
+            const next = normalizeDirtyState(stateInput);
+            const patch = patchInput && typeof patchInput === 'object' ? patchInput : {};
+            const patchCanvas = patch.canvas && typeof patch.canvas === 'object' ? patch.canvas : {};
+
+            if (patch.canvasLayout === true || patchCanvas.layoutDirty === true) {
+                next.canvas.layoutDirty = true;
+            }
+            if (patch.canvasFileRef === true || patchCanvas.fileRefDirty === true) {
+                next.canvas.fileRefDirty = true;
+            }
+
+            if (patch.permanentAll === true) {
+                next.permanent.all = true;
+            }
+            if (Array.isArray(patch.permanentPaths)) {
+                next.permanent.paths = uniqueStringList([].concat(next.permanent.paths || [], patch.permanentPaths), normalizeSyncPath);
+            }
+
+            if (patch.temporaryAll === true) {
+                next.temporary.all = true;
+            }
+            if (Array.isArray(patch.temporaryIds)) {
+                next.temporary.ids = uniqueStringList([].concat(next.temporary.ids || [], patch.temporaryIds));
+            }
+
+            if (patch.blankAll === true) {
+                next.blank.all = true;
+            }
+            if (Array.isArray(patch.blankIds)) {
+                next.blank.ids = uniqueStringList([].concat(next.blank.ids || [], patch.blankIds));
+            }
+
+            if (Array.isArray(extraPaths) && extraPaths.length) {
+                next.paths = uniqueStringList([].concat(next.paths || [], extraPaths), normalizeSyncPath);
+            }
+
+            return normalizeDirtyState(next);
+        };
+
+        const shardedDirtyInfo = await resolveShardedDirtyInfo();
+        const shardedDirtySource = (shardedDirtyInfo && typeof shardedDirtyInfo === 'object') ? shardedDirtyInfo : null;
+        const shardedDirtyPaths = uniqueStringList(
+            (shardedDirtySource && (shardedDirtySource.dirtyPaths || shardedDirtySource.paths)) || [],
+            normalizeSyncPath
+        );
+        let effectiveDirtyState = dirtyState;
+        if (shardedDirtySource || shardedDirtyPaths.length) {
+            const patch = Object.assign(
+                {},
+                (shardedDirtySource && (shardedDirtySource.dirtyPatch || shardedDirtySource.dirty || shardedDirtySource.patch)) || {}
+            );
+            if (!Array.isArray(patch.temporaryIds) && Array.isArray(shardedDirtySource && shardedDirtySource.temporaryIds)) {
+                patch.temporaryIds = shardedDirtySource.temporaryIds;
+            }
+            if (!Array.isArray(patch.blankIds) && Array.isArray(shardedDirtySource && shardedDirtySource.blankIds)) {
+                patch.blankIds = shardedDirtySource.blankIds;
+            }
+            if (!Array.isArray(patch.permanentPaths) && Array.isArray(shardedDirtySource && shardedDirtySource.permanentPaths)) {
+                patch.permanentPaths = shardedDirtySource.permanentPaths;
+            }
+            if (typeof patch.canvasLayout !== 'boolean' && typeof shardedDirtySource.canvasLayout === 'boolean') {
+                patch.canvasLayout = shardedDirtySource.canvasLayout;
+            }
+            if (typeof patch.canvasFileRef !== 'boolean' && typeof shardedDirtySource.canvasFileRef === 'boolean') {
+                patch.canvasFileRef = shardedDirtySource.canvasFileRef;
+            }
+            if (typeof patch.temporaryAll !== 'boolean' && typeof shardedDirtySource.temporaryAll === 'boolean') {
+                patch.temporaryAll = shardedDirtySource.temporaryAll;
+            }
+            if (typeof patch.blankAll !== 'boolean' && typeof shardedDirtySource.blankAll === 'boolean') {
+                patch.blankAll = shardedDirtySource.blankAll;
+            }
+            if (typeof patch.permanentAll !== 'boolean' && typeof shardedDirtySource.permanentAll === 'boolean') {
+                patch.permanentAll = shardedDirtySource.permanentAll;
+            }
+
+            const preferSharded = !!(
+                shardedDirtySource.prefer === true
+                || shardedDirtySource.preferSharded === true
+                || shardedDirtySource.sharded === true
+            );
+            const baseState = preferSharded ? createDefaultDirtyState() : dirtyState;
+            effectiveDirtyState = applyDirtyPatchToState(baseState, patch, shardedDirtyPaths);
+        }
+
         const forceTrackAll = shouldTrackAllFilesForPush(trigger);
         const forceWriteAll = shouldForceWriteAllFilesForPush(trigger);
-        if (!forceTrackAll && !hasLocalDirtyWork(dirtyState)) {
+        const hasEffectiveDirty = hasLocalDirtyWork(effectiveDirtyState) || shardedDirtyPaths.length > 0;
+        if (!forceTrackAll && !hasEffectiveDirty) {
             reportProgress(1, textByLang('无变更，跳过推送', 'No changes, skipped push'));
             return {
                 enabled: true,
@@ -9450,7 +9462,7 @@ Cancel: go back and change the branch name first.`
         }
 
         const pathInfo = collectCandidatePathsFromDirtyState(
-            dirtyState,
+            effectiveDirtyState,
             normalizedFiles,
             Object.assign({}, previousPathMap, nextPathMap)
         );
@@ -9501,7 +9513,8 @@ Cancel: go back and change the branch name first.`
             && typeof options.remoteFilesByPathForMissingCheck === 'object')
             ? options.remoteFilesByPathForMissingCheck
             : null;
-        if (forceTrackAll && !forceWriteAll && !remoteFilesByPathForMissingCheck) {
+        const skipRemoteMissingPreflight = !!(options && options.skipRemoteMissingPreflight === true);
+        if (forceTrackAll && !forceWriteAll && !remoteFilesByPathForMissingCheck && !skipRemoteMissingPreflight) {
             try {
                 reportProgress(0.45, textByLang('检查云端缺失文件...', 'Checking remote missing files...'));
                 const remoteListRaw = await listRemoteObsidianFilesByPath(settings.obsidianExportRoot);
@@ -9675,8 +9688,31 @@ Cancel: go back and change the branch name first.`
 
         const syncedPaths = processedPaths.concat(removedPaths);
         if (syncedPaths.length) {
-            const nextDirty = clearDirtyStateBySyncedPaths(dirtyState, syncedPaths, filesByPath, pathInfo);
+            const nextDirty = clearDirtyStateBySyncedPaths(effectiveDirtyState, syncedPaths, filesByPath, pathInfo);
             saveDirtyState(nextDirty);
+            const clearShardedFn = bridge
+                ? (bridge.clearShardedDirtyBySyncedFiles
+                    || bridge.clearShardedDirtyBySyncedPaths
+                    || bridge.markShardedFilesSynced)
+                : null;
+            if (typeof clearShardedFn === 'function') {
+                const syncedFiles = syncedPaths
+                    .map((path) => filesByPath[path])
+                    .filter((file) => !!file)
+                    .map((file) => ({ path: file.path, meta: file.meta }));
+                try {
+                    await clearShardedFn.call(bridge, {
+                        files: syncedFiles,
+                        paths: syncedPaths.slice(),
+                        removedPaths: removedPaths.slice(),
+                        exportRoot: bundle && bundle.exportRoot ? String(bundle.exportRoot) : settings.obsidianExportRoot,
+                        exportFormat: bundle && bundle.exportFormat ? String(bundle.exportFormat) : settings.obsidianExportFormat,
+                        trigger: trigger || ''
+                    });
+                } catch (error) {
+                    console.warn('[Canvas Sync] clear sharded dirty failed:', error);
+                }
+            }
         }
 
         const exportRootForClassification = bundle && bundle.exportRoot
@@ -11791,6 +11827,7 @@ Cancel: go back and change the branch name first.`
                         sourcePanel: mapRecoveryLockSourcePanel(syncTrigger),
                         baseRemoteSha: getCurrentCloudHashForDisplay(),
                         remoteFilesByPathForMissingCheck: preflightRemoteFilesByPath,
+                        skipRemoteMissingPreflight: !!preflightRemoteSignalSha,
                         useTempBranchMerge: !!(pushOptions && pushOptions.useTempBranchMerge === true),
                         tempBranchPrefix: String((pushOptions && pushOptions.tempBranchPrefix) || '').trim() || 'canvas-sync'
                     });
@@ -11825,14 +11862,24 @@ Cancel: go back and change the branch name first.`
                     if (remoteRevision) {
                         updateSyncUiProgress(textByLang('云端状态已更新', 'Cloud state updated'), 95);
                     } else {
-                        try {
-                            updateSyncUiProgress(textByLang('校验云端状态...', 'Validating cloud state...'), 90);
-                            const remoteListAfterPushRaw = await listRemoteObsidianFilesByPath(settings.obsidianExportRoot);
-                            const remoteListAfterPush = filterRemoteListForManagedSyncFiles(remoteListAfterPushRaw, settings.obsidianExportRoot);
-                            remoteRevision = buildRemoteObsidianRevisionFromList(remoteListAfterPush);
+                        const noCloudWrite = !!(obsidianPushResult && (
+                            obsidianPushResult.noChanges === true
+                            || ((Number(obsidianPushResult.changedCount) || 0) === 0 && (Number(obsidianPushResult.deletedCount) || 0) === 0)
+                        ));
+                        const trustedBaselineRevision = String(runtime.lastRemoteSha || '').trim();
+                        if (preflightRemoteSignalSha && noCloudWrite && trustedBaselineRevision) {
+                            remoteRevision = trustedBaselineRevision;
                             updateSyncUiProgress(textByLang('云端状态已更新', 'Cloud state updated'), 95);
-                        } catch (_) {
-                            remoteRevision = '';
+                        } else {
+                            try {
+                                updateSyncUiProgress(textByLang('校验云端状态...', 'Validating cloud state...'), 90);
+                                const remoteListAfterPushRaw = await listRemoteObsidianFilesByPath(settings.obsidianExportRoot);
+                                const remoteListAfterPush = filterRemoteListForManagedSyncFiles(remoteListAfterPushRaw, settings.obsidianExportRoot);
+                                remoteRevision = buildRemoteObsidianRevisionFromList(remoteListAfterPush);
+                                updateSyncUiProgress(textByLang('云端状态已更新', 'Cloud state updated'), 95);
+                            } catch (_) {
+                                remoteRevision = '';
+                            }
                         }
                     }
                 }

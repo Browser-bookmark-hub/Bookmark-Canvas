@@ -3497,6 +3497,14 @@ const i18n = {
         'zh_CN': '定位',
         'en': 'Locate'
     },
+    canvasFloatingSyncText: {
+        'zh_CN': '同步',
+        'en': 'Sync'
+    },
+    canvasFloatingSyncTitle: {
+        'zh_CN': '同步',
+        'en': 'Sync now'
+    },
     canvasManageText: {
         'zh_CN': '管理',
         'en': 'Manage'
@@ -4935,6 +4943,10 @@ function applyLanguage() {
     if (zoomLocateBtn) zoomLocateBtn.title = i18n.zoomLocateTitle[currentLang];
     const zoomLocateText = document.getElementById('zoomLocateText');
     if (zoomLocateText) zoomLocateText.textContent = i18n.zoomLocateText[currentLang];
+    const canvasFloatingSyncBtn = document.getElementById('canvasFloatingSyncBtn');
+    if (canvasFloatingSyncBtn) canvasFloatingSyncBtn.title = i18n.canvasFloatingSyncTitle[currentLang];
+    const canvasFloatingSyncText = document.getElementById('canvasFloatingSyncText');
+    if (canvasFloatingSyncText) canvasFloatingSyncText.textContent = i18n.canvasFloatingSyncText[currentLang];
 
     const canvasManageText = document.getElementById('canvasManageText');
     if (canvasManageText) canvasManageText.textContent = i18n.canvasManageText[currentLang];
@@ -5430,7 +5442,7 @@ function applyLanguage() {
         } catch (_) { }
 
         let savedTip = '';
-        try { savedTip = localStorage.getItem('canvas-permanent-tip-text') || ''; } catch { }
+        try { savedTip = localStorage.getItem('bcs:perm:tip-main') || ''; } catch { }
         if (!savedTip.trim()) {
             const t = (permanentSectionTip.textContent || '').trim();
             const zh = i18n.permanentSectionTip['zh_CN'];

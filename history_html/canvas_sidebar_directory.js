@@ -5,7 +5,10 @@
   const CANVAS_CONTENT_ID = 'canvasContent';
   const REFRESH_INTERVAL_MS = 1200;
   const PREVIEW_LIMIT = 260;
-  const PERMANENT_COPIES_STORAGE_KEY = 'permanent-section-copies';
+  const PERMANENT_POSITION_STORAGE_KEY = 'bcs:perm:position';
+  const PERMANENT_COPIES_STORAGE_KEY = 'bcs:perm:copies';
+  const PERMANENT_MAIN_TIP_STORAGE_KEY = 'bcs:perm:tip-main';
+  const PERMANENT_COPY_TIP_STORAGE_PREFIX = 'bcs:perm:tip-copy-';
   const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add', 'file-import', 'import-html-bookmarks', 'import-json-bookmarks']);
   const DIRECTORY_COLOR_DEFAULTS = Object.freeze({
     permanent: '#10b981',
@@ -360,7 +363,7 @@
     if (shell && typeof shell.descriptionMd === 'string') {
       return toPreviewText(shell.descriptionMd);
     }
-    const key = safeCopyId ? `canvas-permanent-tip-text-copy-${safeCopyId}` : 'canvas-permanent-tip-text';
+    const key = safeCopyId ? `${PERMANENT_COPY_TIP_STORAGE_PREFIX}${safeCopyId}` : PERMANENT_MAIN_TIP_STORAGE_KEY;
     try { return toPreviewText(localStorage.getItem(key) || ''); } catch (_) { return ''; }
   }
 
@@ -399,7 +402,7 @@
   function buildPreviewSnapshotSectionsFromStorage(storage) {
     if (!storage || typeof storage !== 'object') return [];
 
-    const hasOriginal = !!storage['permanent-section-position'];
+    const hasOriginal = !!storage[PERMANENT_POSITION_STORAGE_KEY];
     const copies = readPermanentCopiesFromStorage(storage);
     if (!hasOriginal && !copies.length) return [];
 
