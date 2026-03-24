@@ -19940,31 +19940,83 @@ function __repairLegacyCanvasMarkdownSource(value) {
     let normalized = __normalizeCanvasMarkdownSource(value);
     if (!normalized.trim()) return normalized;
 
-    // Recover accidentally escaped rich-text snippets (&lt;br&gt;, &lt;strong&gt;, ...).
-    if (/&lt;\s*(?:br|strong|em|b|i|u|del|s|mark|code|blockquote|ul|ol|li|hr|h[1-6]|font|center|p|div)\b/i.test(normalized)) {
-        try {
-            const textarea = document.createElement('textarea');
-            textarea.innerHTML = normalized;
-            normalized = textarea.value || normalized;
-        } catch (_) { }
+    // Recover escaped rich-text snippets (&lt;br&gt;, &lt;strong&gt;, ...) even in nested/double-escaped payloads.
+    // Limit decode rounds to avoid pathological cases.
+    if (/&(?:lt|gt|amp|quot|#39|#x[0-9a-f]+|#\d+);/i.test(normalized)) {
+        for (let i = 0; i < 3; i++) {
+            const prev = normalized;
+            try {
+                const textarea = document.createElement('textarea');
+                textarea.innerHTML = normalized;
+                normalized = textarea.value || normalized;
+            } catch (_) {
+                break;
+            }
+            if (normalized === prev) break;
+            if (!/&(?:lt|gt|amp|quot|#39|#x[0-9a-f]+|#\d+);/i.test(normalized)) break;
+        }
     }
 
     // Recover legacy single-line markdown where line breaks were serialized as <br>.
-    const hasBrTags = /<br\s*\/?>/i.test(normalized);
-    const hasLineBreaks = /\n/.test(normalized);
-    const hasMarkdownTokens = /(^|<br\s*\/?>)\s*(#{1,6}\s+|>\s+|[-*]\s+(?:\[[ xX]\]\s+)?|\d+\.\s+|```)/i.test(normalized);
-    if (hasBrTags && (!hasLineBreaks || hasMarkdownTokens)) {
+    if (/<br\s*\/?>/i.test(normalized)) {
         normalized = normalized.replace(/<br\s*\/?>/gi, '\n');
     }
 
+    // Recover payloads that were accidentally wrapped as HTML headings/paragraphs
+    // while still carrying markdown syntax inside (e.g. <h2>## Title<br>1. ...</h2>).
+    const looksLikeWrappedMarkdown =
+        /<h[1-6][^>]*>\s*#{1,6}\s+/i.test(normalized)
+        || (/<h[1-6][^>]*>/i.test(normalized) && /(?:<br\s*\/?>|\n)\s*(?:#{1,6}\s+|[-*]\s+|\d+\.\s+)/i.test(normalized))
+        || (/<p[^>]*>/i.test(normalized) && /(?:^|\n)\s*#{1,6}\s+/m.test(normalized));
+    if (looksLikeWrappedMarkdown) {
+        try {
+            const converted = __htmlToMarkdown(normalized, {
+                trimResult: false,
+                compactNewlines: false,
+                paragraphBreaks: false,
+                hardLineBreaks: true
+            });
+            if (String(converted || '').trim()) {
+                normalized = __normalizeCanvasMarkdownSource(converted);
+            }
+        } catch (_) { }
+    }
+
     // Repair duplicated heading markers introduced by broken heading-source expansion ("## ## title").
-    normalized = normalized.replace(/^(#{1,6})\s+\1\s+/gm, '$1 ');
+    normalized = normalized.replace(/^[\u200B\s]*(#{1,6})\s+\1\s+/gm, '$1 ');
+    normalized = normalized.replace(/^[\u200B\s]*(#{1,6})(?:\s+#{1,6})+\s+/gm, '$1 ');
     return normalized;
+}
+
+function __looksLikeMixedMarkdownHtmlCache(rawHtml) {
+    const html = String(rawHtml == null ? '' : rawHtml).trim();
+    if (!html) return false;
+
+    if (/&lt;\s*(?:br|strong|em|b|i|u|del|s|mark|code|blockquote|ul|ol|li|hr|h[1-6]|font|center|p|div)\b/i.test(html)) {
+        return true;
+    }
+
+    // Broken cache pattern: raw heading/list markdown text leaked into html with <br> separators.
+    if (/(^|>|\n)\s*#{1,6}\s+[^<\n]+(?:<br\s*\/?>|&lt;\s*br\b)/i.test(html)) {
+        return true;
+    }
+    if (/(^|>|\n)\s*(?:[-*]\s+|\d+\.\s+)[^<\n]+(?:<br\s*\/?>|&lt;\s*br\b)/i.test(html)
+        && /<\s*(?:strong|em|b|i|u|del|s|mark|code|font)\b/i.test(html)) {
+        return true;
+    }
+    if (/(^|>|\n)\s*#{1,6}\s+#{1,6}\s+/m.test(html)) {
+        return true;
+    }
+    return false;
 }
 
 function __shouldRebuildMdNodeHtmlCacheFromMarkdown(rawHtml) {
     const html = String(rawHtml == null ? '' : rawHtml).trim();
     if (!html) return false;
+
+    if (__looksLikeMixedMarkdownHtmlCache(html)) {
+        return true;
+    }
 
     if (/&lt;\s*(?:br|strong|em|b|i|u|del|s|mark|code|blockquote|ul|ol|li|hr|h[1-6]|font|center|p|div)\b/i.test(html)) {
         return true;
@@ -19975,6 +20027,83 @@ function __shouldRebuildMdNodeHtmlCacheFromMarkdown(rawHtml) {
         return /(^|\n)\s*(#{1,6}\s+|>\s+|[-*]\s+(?:\[[ xX]\]\s+)?|\d+\.\s+|```)/m.test(html);
     }
     return false;
+}
+
+const __DEMO_PRESET_MD_NODE_IDS = new Set([
+    'md-node-demo-bookmark-guide',
+    'md-node-demo-shortcut-guide',
+    'md-node-demo-batch-feature'
+]);
+
+let __demoPresetMarkdownCacheLang = '';
+let __demoPresetMarkdownCache = null;
+
+function __collectDemoPresetCanonicalMarkdownMap() {
+    const langKey = String(
+        (typeof currentLang !== 'undefined' && currentLang)
+            ? currentLang
+            : ((typeof window !== 'undefined' && window && window.currentLang) ? window.currentLang : 'zh_CN')
+    );
+    if (__demoPresetMarkdownCache && __demoPresetMarkdownCacheLang === langKey) {
+        return __demoPresetMarkdownCache;
+    }
+
+    const nextMap = new Map();
+    try {
+        const template = createInitialDemoTemplate();
+        const nodes = Array.isArray(template && template.mdNodes) ? template.mdNodes : [];
+        nodes.forEach((node) => {
+            const id = String(node && node.id || '').trim();
+            if (!id || !__DEMO_PRESET_MD_NODE_IDS.has(id)) return;
+            const markdown = __normalizeCanvasMarkdownSource(node && node.markdownSource);
+            if (markdown.trim()) nextMap.set(id, markdown);
+        });
+    } catch (_) { }
+
+    __demoPresetMarkdownCacheLang = langKey;
+    __demoPresetMarkdownCache = nextMap;
+    return nextMap;
+}
+
+function __resolveDemoPresetCanonicalId(nodeId, sourceText) {
+    const id = String(nodeId || '').trim();
+    if (id && __DEMO_PRESET_MD_NODE_IDS.has(id)) return id;
+    const text = String(sourceText || '');
+    if (/书签画布|bookmark canvas/i.test(text)) return 'md-node-demo-bookmark-guide';
+    if (/快捷键说明|keyboard shortcuts/i.test(text)) return 'md-node-demo-shortcut-guide';
+    if (/打开方式特色功能|open mode features/i.test(text)) return 'md-node-demo-batch-feature';
+    return '';
+}
+
+function __isLikelyCorruptedDemoPresetMarkdown(nodeId, markdownSource) {
+    const source = String(markdownSource || '');
+    if (!source.trim()) return '';
+    const canonicalId = __resolveDemoPresetCanonicalId(nodeId, source);
+    if (!canonicalId) return '';
+
+    const hasCorruptionMarkers =
+        /<br\s*\/?>/i.test(source)
+        || /&lt;\s*(?:br|strong|em|b|i|u|del|s|mark|code)\b/i.test(source)
+        || /<\/?strong\b/i.test(source)
+        || /<h[1-6][^>]*>\s*#{1,6}\s+/i.test(source)
+        || /^[\u200B\s]*#{1,6}\s+#{1,6}\s+/m.test(source);
+    return hasCorruptionMarkers ? canonicalId : '';
+}
+
+function __isLikelyCorruptedDemoPresetHtml(nodeId, rawHtml) {
+    const html = String(rawHtml || '');
+    if (!html.trim()) return false;
+    if (!__looksLikeMixedMarkdownHtmlCache(html)) return false;
+
+    const plain = (__extractPlainTextFromCanvasRichHtml(html) || html).replace(/\u200B/g, '');
+    return !!__resolveDemoPresetCanonicalId(nodeId, plain);
+}
+
+function __repairDemoPresetMarkdownSourceIfNeeded(nodeId, markdownSource) {
+    const canonicalId = __isLikelyCorruptedDemoPresetMarkdown(nodeId, markdownSource);
+    if (!canonicalId) return '';
+    const map = __collectDemoPresetCanonicalMarkdownMap();
+    return map && map.get(canonicalId) ? map.get(canonicalId) : '';
 }
 
 function __extractPlainTextFromCanvasRichHtml(rawHtml) {
@@ -20038,10 +20167,24 @@ function __ensureMdNodeMarkdownProtocol(node, options = {}) {
     if (!node || typeof node !== 'object') return node;
     if (node.subtype === 'import-container' || __isCanvasNativeTextNode(node)) return node;
 
-    const markdownSource = __repairLegacyCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
+    let markdownSource = __repairLegacyCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
+    const demoPresetRepaired = __repairDemoPresetMarkdownSourceIfNeeded(node.id, markdownSource);
+    const demoPresetHtmlCorrupted = __isLikelyCorruptedDemoPresetHtml(node.id, node.html);
+    if (demoPresetRepaired) {
+        markdownSource = __normalizeCanvasMarkdownSource(demoPresetRepaired);
+    } else if (demoPresetHtmlCorrupted) {
+        const plain = (__extractPlainTextFromCanvasRichHtml(node.html) || String(node.html || '')).replace(/\u200B/g, '');
+        const canonicalId = __resolveDemoPresetCanonicalId(node.id, plain);
+        const canonical = canonicalId ? (__collectDemoPresetCanonicalMarkdownMap().get(canonicalId) || '') : '';
+        if (canonical) {
+            markdownSource = __normalizeCanvasMarkdownSource(canonical);
+        }
+    }
     node.markdownSource = markdownSource;
 
     const shouldRefreshCaches = options.refreshCachesFromMarkdown === true
+        || !!demoPresetRepaired
+        || demoPresetHtmlCorrupted
         || __shouldRebuildMdNodeHtmlCacheFromMarkdown(node.html)
         || (options.refreshCachesFromMarkdown !== false && !(typeof node.html === 'string' && node.html.trim()));
 
@@ -20049,6 +20192,24 @@ function __ensureMdNodeMarkdownProtocol(node, options = {}) {
         node.html = markdownSource ? __renderMarkdownSourceToCanvasHtml(markdownSource) : '';
     } else if (typeof node.html === 'string') {
         node.html = __normalizeCanvasRichHtml(node.html) || '';
+    }
+
+    // Final safeguard: if cache still looks like mixed markdown/html garbage,
+    // rebuild markdown from html once and re-render.
+    if (node.html && __looksLikeMixedMarkdownHtmlCache(node.html)) {
+        try {
+            const recovered = __repairLegacyCanvasMarkdownSource(__htmlToMarkdown(String(node.html || ''), {
+                trimResult: false,
+                compactNewlines: false,
+                paragraphBreaks: false,
+                hardLineBreaks: true
+            }));
+            if (String(recovered || '').trim() && recovered !== markdownSource) {
+                markdownSource = __normalizeCanvasMarkdownSource(recovered);
+                node.markdownSource = markdownSource;
+                node.html = __renderMarkdownSourceToCanvasHtml(markdownSource);
+            }
+        } catch (_) { }
     }
 
     const plainText = node.html
