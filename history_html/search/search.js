@@ -81,6 +81,10 @@ function getCurrentLangSafe() {
     return 'zh_CN';
 }
 
+function squeezeSpaces(value) {
+    return String(value || '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function toPositiveIntForSearch(value) {
     const n = parseInt(value, 10);
     return Number.isFinite(n) && n > 0 ? n : null;
@@ -2837,13 +2841,13 @@ function buildCanvasSearchDb() {
             itemStructureCopy.__description = '';
 
             structureIndex.push(itemStructureCopy);
-            if (permanentDescription) {
+            if (copyDescription) {
                 const itemDescCopy = Object.assign({}, copyItem);
                 itemDescCopy.__title = '';
                 itemDescCopy.__label = '';
                 descriptionIndex.push(itemDescCopy);
             }
-            itemById.set(copy.id, copyItem);
+            itemById.set(copyId, copyItem);
         });
     }
 

@@ -159,9 +159,11 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
 .search-result-item {
     /* Tighter vertical rhythm for candidates */
     padding: 8px 12px;
+    margin: 2px 0;
+    border-radius: 10px;
     cursor: default;
     /* Changed from pointer to default to imply mixed content */
-    border-bottom: 1px solid var(--border-color);
+    border: 1px solid transparent;
     /* user-select: none; -> Removed to allow copying text */
 }
 
@@ -182,12 +184,13 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
 }
 
 .search-result-item:last-child {
-    border-bottom: none;
+    margin-bottom: 8px;
 }
 
 .search-result-item:hover,
 .search-result-item.selected {
     background: var(--bg-tertiary);
+    border-color: var(--border-color);
 }
 
 /* ==================== Canvas Bookmark Mode: Group by Section ==================== */
