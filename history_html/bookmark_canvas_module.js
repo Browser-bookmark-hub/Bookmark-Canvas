@@ -4599,7 +4599,7 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
     const section = {
         id: sectionId,
         title: sourceInfo,
-        description: description,  // 添加说明
+        descriptionMd: __normalizeCanvasMarkdownSource(description).trim(),  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
         color: getSpecialTempSectionDefaultColor(),
         colorLocked: __getDefaultTempColorLockedState(),
@@ -5219,7 +5219,7 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
     const section = {
         id: sectionId,
         title: sourceInfo,
-        description: description,  // 添加说明
+        descriptionMd: __normalizeCanvasMarkdownSource(description).trim(),  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
         color: getSpecialTempSectionDefaultColor(),
         colorLocked: __getDefaultTempColorLockedState(),
@@ -18392,13 +18392,19 @@ function renderMdNode(node) {
         const htmlSource = isAll ? __getCleanHtmlForStorage(editor) : selectedHtml;
         if (!htmlSource) return;
 
-        // 转换为 Markdown 源码
-        const markdownSource = __htmlToMarkdown(htmlSource);
+        // 全选整卡时优先复制节点原始源码（markdownSource），确保保留原始 Markdown / HTML 标签。
+        let finalSource = '';
+        if (isAll) {
+            finalSource = __deriveMdNodeMarkdownSource(node);
+            if (!String(finalSource || '').trim()) {
+                finalSource = __htmlToMarkdown(htmlSource);
+            }
+        } else {
+            finalSource = __htmlToMarkdown(htmlSource);
+        }
 
-        // 设置剪贴板内容
-        // 智能优化：如果用户选中了整个块级元素（如列表项）的文本，自动补充 Markdown 语法结构（如 - ）
-        let finalSource = markdownSource;
-        if (selection.rangeCount > 0) {
+        // 局部选择时，选中整行自动补充 Markdown 符号（如 - / # / >）
+        if (!isAll && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
             const commonAncestor = range.commonAncestorContainer;
             const blockEl = (commonAncestor.nodeType === 1 ? commonAncestor : commonAncestor.parentNode).closest('li, h1, h2, h3, h4, h5, h6, blockquote');
@@ -22887,8 +22893,11 @@ function renderTempNode(section, options = {}) {
         return lang === 'en' ? 'Click to add description' : '点击添加说明';
     };
 
-    // 初始化内容：兼容旧的 Markdown 存储；编辑器内使用 HTML（与空白栏目一致）
-    const initialHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(section.description || ''));
+    // 初始化内容：descriptionMd 作为主存储，渲染时再转为 HTML
+    const initialDescSource = __normalizeTempSectionDescriptionMarkdown(section);
+    const initialHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(initialDescSource));
+    section.descriptionMd = initialDescSource;
+    section.description = initialHtml;
     descriptionText.innerHTML = initialHtml;
     try { __applyHeadingCollapse(descriptionText); } catch (_) { }
     const savedDescFontSize = Number(section && section.descFontSize);
@@ -22996,7 +23005,7 @@ function renderTempNode(section, options = {}) {
     descriptionContainer.appendChild(descriptionControls);
 
     // --- WYSIWYG 编辑（复用空白栏目格式工具 + 实时渲染规则） ---
-    let beforeEditStored = String(section.description || '');
+    let beforeEditStored = initialDescSource;
 
     const applyPlaceholder = () => {
         if (section.suppressPlaceholder) {
@@ -23018,13 +23027,18 @@ function renderTempNode(section, options = {}) {
     };
 
     const syncDescDraft = ({ normalizeEditorHtml = false } = {}) => {
-        const normalized = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(descriptionText));
-        section.description = normalized;
+        const normalizedHtml = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(descriptionText));
+        const normalizedSource = normalizedHtml
+            ? __normalizeCanvasMarkdownSource(__htmlToMarkdown(normalizedHtml)).trim()
+            : '';
+        const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(normalizedSource));
+        section.descriptionMd = normalizedSource;
+        section.description = renderedHtml;
         if (normalizeEditorHtml) {
-            descriptionText.innerHTML = normalized;
+            descriptionText.innerHTML = renderedHtml;
         }
         updateDescMeta();
-        return normalized;
+        return normalizedSource;
     };
 
     const persistDesc = ({ normalizeEditorHtml = false } = {}) => {
@@ -23047,8 +23061,9 @@ function renderTempNode(section, options = {}) {
             } catch (_) { }
             persistDesc({ normalizeEditorHtml: true });
         } else {
-            section.description = beforeEditStored;
+            section.descriptionMd = beforeEditStored;
             const restored = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(beforeEditStored));
+            section.description = restored;
             descriptionText.innerHTML = restored;
             saveTempNodes();
             updateDescMeta();
@@ -23070,7 +23085,7 @@ function renderTempNode(section, options = {}) {
     const enterEditingDescription = () => {
         if (isEditingDesc) return;
         isEditingDesc = true;
-        beforeEditStored = String(section.description || '');
+        beforeEditStored = __normalizeTempSectionDescriptionMarkdown(section);
         descriptionContainer.classList.add('editing');
         descriptionText.contentEditable = 'true';
         descriptionText.focus();
@@ -23102,6 +23117,7 @@ function renderTempNode(section, options = {}) {
 
 
     const clearTempDescription = () => {
+        section.descriptionMd = '';
         section.description = '';
         descriptionText.innerHTML = '';
         saveTempNodes();
@@ -23187,13 +23203,23 @@ function renderTempNode(section, options = {}) {
 
         const isAll = __isSelectionAll(descriptionText, selection);
         const htmlSource = isAll ? __getCleanHtmlForStorage(descriptionText) : selectedHtml;
-        if (!htmlSource) return;
-
-        const markdownSource = __htmlToMarkdown(htmlSource);
+        if (!htmlSource && !isAll) return;
 
         // 智能优化：选中整行自动补充 Markdown 符号
-        let finalSource = markdownSource;
-        if (selection.rangeCount > 0) {
+        let finalSource = '';
+        if (isAll) {
+            finalSource = isEditingDesc
+                ? __normalizeCanvasMarkdownSource(__htmlToMarkdown(htmlSource)).trim()
+                : __normalizeTempSectionDescriptionMarkdown(section);
+            if (!String(finalSource || '').trim() && htmlSource) {
+                finalSource = __htmlToMarkdown(htmlSource);
+            }
+        } else {
+            finalSource = __htmlToMarkdown(htmlSource);
+        }
+        if (!finalSource && !htmlSource) return;
+
+        if (!isAll && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
             const commonAncestor = range.commonAncestorContainer;
             const blockEl = (commonAncestor.nodeType === 1 ? commonAncestor : commonAncestor.parentNode).closest('li, h1, h2, h3, h4, h5, h6, blockquote');
@@ -25198,7 +25224,7 @@ function clearAllTempNodes() {
     // - 没有连接线
     // 注：即使有书签内容，只要没有标注也会被清除
     const removableTempIds = CanvasState.tempSections
-        .filter(section => section && section.id && isEmptyDesc(section.description) && isAutoGeneratedTitle(section.title) && !hasEdgeForNode(section.id))
+        .filter(section => section && section.id && isEmptyDesc(__normalizeTempSectionDescriptionMarkdown(section)) && isAutoGeneratedTitle(section.title) && !hasEdgeForNode(section.id))
         .map(section => section.id);
 
     const removableMdIds = CanvasState.mdNodes
@@ -26007,10 +26033,13 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     const getLegacyFixedHeightStorageKey = () => `${getStorageKey()}-fixed-height`;
     const getHeightSettingsStorageKey = () => `${getStorageKey()}-height-settings`;
 
-    const savedTipRaw = (() => {
-        try { return localStorage.getItem(getStorageKey()) || ''; } catch (_) { return ''; }
-    })();
-    const savedTipHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(savedTipRaw));
+    const readStoredTipSource = () => {
+        let raw = '';
+        try { raw = localStorage.getItem(getStorageKey()) || ''; } catch (_) { raw = ''; }
+        return __normalizePermanentViewDescriptionMarkdown(raw);
+    };
+    const savedTipSource = readStoredTipSource();
+    const savedTipHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(savedTipSource));
     tipText.innerHTML = savedTipHtml;
     try { __applyHeadingCollapse(tipText); } catch (_) { }
     const savedTipFontSize = (() => {
@@ -26128,15 +26157,19 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         newHeightBtn = heightBtn.cloneNode(true);
         heightBtn.parentNode.replaceChild(newHeightBtn, heightBtn);
     }
-    let beforeEditStored = savedTipRaw;
+    let beforeEditStored = savedTipSource;
 
     const syncTipDraft = ({ normalizeEditorHtml = false } = {}) => {
-        const normalized = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(tipText));
+        const normalizedHtml = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(tipText));
+        const normalizedSource = normalizedHtml
+            ? __normalizePermanentViewDescriptionMarkdown(__htmlToMarkdown(normalizedHtml))
+            : '';
+        const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(normalizedSource));
         if (normalizeEditorHtml) {
-            tipText.innerHTML = normalized;
+            tipText.innerHTML = renderedHtml;
         }
         updateTipMeta();
-        return normalized;
+        return normalizedSource;
     };
 
     const persistTip = ({ normalizeEditorHtml = false } = {}) => {
@@ -26182,7 +26215,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     const enterEditingTip = () => {
         if (isEditingTip) return;
         isEditingTip = true;
-        try { beforeEditStored = localStorage.getItem(getStorageKey()) || ''; } catch (_) { beforeEditStored = ''; }
+        beforeEditStored = readStoredTipSource();
 
         tipContainer.classList.add('editing');
         tipText.contentEditable = 'true';
@@ -26275,6 +26308,70 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         if (e.target.closest('.desc-height-settings-popover')) return;
         exitEditingTip({ commit: true });
     }, true);
+
+    // 复制时优先输出 Markdown 源码；全选时使用持久化 source
+    tipText.addEventListener('copy', (e) => {
+        const selection = window.getSelection();
+        if (!selection || !selection.rangeCount) return;
+
+        const range = selection.getRangeAt(0);
+        const container = document.createElement('div');
+        container.appendChild(range.cloneContents());
+        const selectedHtml = container.innerHTML;
+
+        const isAll = __isSelectionAll(tipText, selection);
+        const htmlSource = isAll ? __getCleanHtmlForStorage(tipText) : selectedHtml;
+        if (!htmlSource && !isAll) return;
+
+        let finalSource = '';
+        if (isAll) {
+            finalSource = isEditingTip
+                ? __normalizePermanentViewDescriptionMarkdown(__htmlToMarkdown(htmlSource))
+                : readStoredTipSource();
+            if (!String(finalSource || '').trim() && htmlSource) {
+                finalSource = __htmlToMarkdown(htmlSource);
+            }
+        } else {
+            finalSource = __htmlToMarkdown(htmlSource);
+        }
+        if (!finalSource && !htmlSource) return;
+
+        if (!isAll && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            const commonAncestor = range.commonAncestorContainer;
+            const blockEl = (commonAncestor.nodeType === 1 ? commonAncestor : commonAncestor.parentNode).closest('li, h1, h2, h3, h4, h5, h6, blockquote');
+            if (blockEl && tipText.contains(blockEl)) {
+                const blockText = blockEl.textContent.trim();
+                const selectedText = selection.toString().trim();
+                if (blockText && selectedText && blockText === selectedText) {
+                    const tag = blockEl.tagName;
+                    if (tag === 'LI') {
+                        const parent = blockEl.parentElement;
+                        if (parent && parent.tagName === 'OL') {
+                            const index = Array.from(parent.children).indexOf(blockEl) + 1;
+                            finalSource = `${index}. ${finalSource}`;
+                        } else {
+                            finalSource = (blockEl.classList.contains('md-task-item'))
+                                ? `- ${blockEl.querySelector('input') && blockEl.querySelector('input').checked ? '[x]' : '[ ]'} ${finalSource}`
+                                : `- ${finalSource}`;
+                        }
+                    } else if (tag === 'H1') finalSource = `# ${finalSource}`;
+                    else if (tag === 'H2') finalSource = `## ${finalSource}`;
+                    else if (tag === 'H3') finalSource = `### ${finalSource}`;
+                    else if (tag === 'BLOCKQUOTE') finalSource = `> ${finalSource}`;
+                }
+            }
+        }
+
+        const safeHtml = __normalizeCanvasRichHtml(htmlSource);
+        if (safeHtml) {
+            try { e.clipboardData.setData('text/html', safeHtml); } catch (_) { }
+            try { e.clipboardData.setData('application/x-bookmark-canvas-html', safeHtml); } catch (_) { }
+        }
+
+        e.preventDefault();
+        e.clipboardData.setData('text/plain', finalSource);
+    });
 
     tipText.addEventListener('paste', (e) => {
         if (!isEditingTip) return;
@@ -29922,7 +30019,7 @@ function __buildPermanentSectionJsonProtocol(bookmarkTree, descriptionOverride =
         sectionType: 'permanent',
         slot: slotLabel,
         title,
-        descriptionMd: __normalizeCanvasMarkdownSource(__htmlToMarkdown(rawDesc)).trim(),
+        descriptionMd: __normalizePermanentViewDescriptionMarkdown(rawDesc),
         tree: __buildPermanentJsonTreeProtocol(bookmarkTree)
     };
 }
@@ -30535,7 +30632,7 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
     } else {
         try { rawDesc = localStorage.getItem(PERMANENT_MAIN_TIP_STORAGE_KEY) || ''; } catch (_) { }
     }
-    const descMd = __htmlToMarkdown(rawDesc);
+    const descMd = __normalizePermanentViewDescriptionMarkdown(rawDesc);
 
     const body = [sectionHeaderLine];
     const formatComment = __buildCanvasExportFormatCompactComment(exportFormat);
@@ -30723,7 +30820,7 @@ function __buildImportedTempSectionFromVisualMarkdown(node, parsedMarkdown, cont
         height: node.height,
         color: convertObsidianColor(node.color) || '#fb464c',
         items,
-        description: __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(parsedMarkdown && parsedMarkdown.descriptionMarkdown || '')),
+        descriptionMd: __normalizeCanvasMarkdownSource(parsedMarkdown && parsedMarkdown.descriptionMarkdown || '').trim(),
         label,
         source: inferredSource || ''
     };
@@ -30792,7 +30889,7 @@ function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptio
     } else {
         try { rawDesc = localStorage.getItem(PERMANENT_MAIN_TIP_STORAGE_KEY) || ''; } catch (_) { }
     }
-    const descMd = __htmlToMarkdown(rawDesc);
+    const descMd = __normalizePermanentViewDescriptionMarkdown(rawDesc);
     if (descMd) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
@@ -32697,9 +32794,13 @@ async function exportCanvasPackage(options = {}) {
             exportTypeLabel = isEn ? 'Temporary Section' : '临时栏目';
             exportTitle = String(sectionMeta.title || section.title || '').trim() || exportTypeLabel;
             exportSequence = String(sectionMeta.label || getTempSectionLabel(section) || '').trim();
-            exportDescription = (typeof sectionMeta.descriptionMd === 'string' && sectionMeta.descriptionMd.trim())
-                ? __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(sectionMeta.descriptionMd))
-                : String(section.description || '');
+            exportDescription = __normalizeCanvasRichHtml(
+                __coerceDescriptionSourceToHtml(
+                    (typeof sectionMeta.descriptionMd === 'string' && sectionMeta.descriptionMd.trim())
+                        ? sectionMeta.descriptionMd
+                        : __normalizeTempSectionDescriptionMarkdown(section)
+                )
+            );
         } else {
             alert(isEn ? 'Export failed: unsupported fullscreen card.' : '导出失败：不支持当前全屏卡片类型。');
             return;
@@ -34241,7 +34342,11 @@ function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, d
         height: node.height,
         color: convertObsidianColor(node.color) || '#fb464c',
         items: __parseMarkdownAuto(contentToParse),
-        description: descriptionHtml,
+        descriptionMd: __normalizeCanvasMarkdownSource(
+            (parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string')
+                ? parsedMarkdown.descriptionMarkdown
+                : __htmlToMarkdown(descriptionHtml)
+        ).trim(),
         source: 'obsidian-permanent-reference'
     };
 }
@@ -34535,7 +34640,11 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                     height: node.height,
                     color: convertObsidianColor(node.color) || '#44cf6e',
                     items,
-                    description: descriptionHtml,
+                    descriptionMd: __normalizeCanvasMarkdownSource(
+                        (parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string')
+                            ? parsedMarkdown.descriptionMarkdown
+                            : __htmlToMarkdown(descriptionHtml)
+                    ).trim(),
                     isSnapshot: true
                 });
                 try {
@@ -35685,7 +35794,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
             height: parseFloat(permPos.height) || 600,
             color: '#44cf6e', // Greenish - 颜色区分
             items: snapshotItems,
-            description: __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(originalTip)),
+            descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
             isSnapshot: true // 标记为快照
         };
         newTempSections.push(snapshotSection);
@@ -35738,7 +35847,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
                     height: parseFloat(copyPos.height) || 600,
                     color: '#44cf6e',
                     items: snapshotItems,
-                    description: __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(originalTip)),
+                    descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
                     isSnapshot: true
                 };
                 newTempSections.push(snapshotSection);
@@ -36075,7 +36184,18 @@ function __buildPersistedCanvasState(state) {
     const sourceMdNodes = Array.isArray(safe.mdNodes) ? safe.mdNodes : [];
     const sourceEdges = Array.isArray(safe.edges) ? safe.edges : [];
 
-    const persistedSections = sourceSections.filter((section) => !__isSandboxImportedNode(section));
+    const persistedSections = sourceSections
+        .filter((section) => !__isSandboxImportedNode(section))
+        .map((section) => {
+            const cloned = __cloneCanvasProtocolJson(section);
+            if (!cloned || typeof cloned !== 'object') return null;
+            cloned.descriptionMd = __normalizeTempSectionDescriptionMarkdown(cloned);
+            if (Object.prototype.hasOwnProperty.call(cloned, 'description')) {
+                delete cloned.description;
+            }
+            return cloned;
+        })
+        .filter(Boolean);
     const persistedMdNodes = sourceMdNodes.filter((node) => !__isSandboxImportedNode(node));
 
     const validIds = new Set();
@@ -36485,7 +36605,7 @@ function __buildTempSectionDirtyPayloadKey(section) {
         label: String(section && section.label || ''),
         sequenceNumber: Number(section && section.sequenceNumber) || 0,
         source: String(section && section.source || ''),
-        description: String(section && section.description || ''),
+        descriptionMd: __normalizeTempSectionDescriptionMarkdown(section),
         items: Array.isArray(section && section.items) ? section.items : []
     });
 }
@@ -36711,12 +36831,22 @@ function __normalizeTempSectionProtocolRootId(section) {
 function __normalizeTempSectionDescriptionMarkdown(section) {
     if (!section || typeof section !== 'object') return '';
 
-    const rawValue = Object.prototype.hasOwnProperty.call(section, 'descriptionMd')
-        ? section.descriptionMd
-        : section.description;
+    const normalizeFromSource = (value) => __normalizeCanvasMarkdownSource(
+        __repairLegacyCanvasMarkdownSource(String(value == null ? '' : value))
+    ).trim();
 
-    if (rawValue == null) return '';
-    return __normalizeCanvasMarkdownSource(__htmlToMarkdown(String(rawValue || ''))).trim();
+    if (Object.prototype.hasOwnProperty.call(section, 'descriptionMd')) {
+        const direct = normalizeFromSource(section.descriptionMd);
+        if (direct) return direct;
+    }
+
+    const legacyRaw = String(section.description || '');
+    if (!legacyRaw.trim()) return '';
+    const looksLikeHtml = /<\s*(?:a|p|div|span|br|strong|em|b|i|u|del|s|mark|code|blockquote|ul|ol|li|hr|h[1-6]|font|center|input)\b/i.test(legacyRaw);
+    const fallbackSource = looksLikeHtml
+        ? __htmlToMarkdown(__normalizeCanvasRichHtml(legacyRaw))
+        : legacyRaw;
+    return normalizeFromSource(fallbackSource);
 }
 
 function __getDefaultTempSectionProtocolTitle() {
@@ -36863,9 +36993,9 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
     if (sectionMeta.source) restored.source = sectionMeta.source;
     if (sectionMeta.sequenceNumber) restored.sequenceNumber = sectionMeta.sequenceNumber;
     if (sectionMeta.originPermanent) restored.originPermanent = __normalizeOriginPermanentPayload(sectionMeta.originPermanent);
-    if (typeof sectionMeta.descriptionMd === 'string' && sectionMeta.descriptionMd.trim()) {
-        restored.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(sectionMeta.descriptionMd));
-    }
+    const restoredDescriptionMd = __normalizeCanvasMarkdownSource(sectionMeta.descriptionMd || '').trim();
+    restored.descriptionMd = restoredDescriptionMd;
+    restored.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(restoredDescriptionMd));
 
     return restored;
 }
