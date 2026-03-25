@@ -4079,6 +4079,16 @@
 	        if (!remoteTree) {
 	            return { applied: false, skipped: 'remote-missing' };
 	        }
+	        const persistRemoteRootMeta = () => {
+	            try {
+	                const protocolBridge = global && global.CanvasProtocolBridge && typeof global.CanvasProtocolBridge.persistPermanentRootMetaFromTree === 'function'
+	                    ? global.CanvasProtocolBridge
+	                    : null;
+	                if (protocolBridge) {
+	                    protocolBridge.persistPermanentRootMetaFromTree(remoteTree);
+	                }
+	            } catch (_) { }
+	        };
 
 	        const remoteStats = getBookmarkTreeStats(remoteTree);
 	        const remoteTotal = (remoteStats.folders || 0) + (remoteStats.bookmarks || 0);
@@ -4096,6 +4106,7 @@
 	        const localHash = getBookmarkTreeHash(localTree);
 	        const remoteHash = getBookmarkTreeHash(remoteTree);
 	        if (localHash && remoteHash && localHash === remoteHash) {
+	            persistRemoteRootMeta();
 	            return { applied: false, skipped: 'same' };
 	        }
 
@@ -4118,6 +4129,7 @@
 	                respectThreshold: permanentPullMode === 'auto'
 	            });
 	            if (incrementalResult && incrementalResult.applied) {
+	                persistRemoteRootMeta();
 	                return {
 	                    applied: true,
 	                    counters: incrementalResult.counters,
@@ -4129,6 +4141,7 @@
 	                };
 	            }
 	            if (incrementalResult && incrementalResult.skipped === 'same') {
+	                persistRemoteRootMeta();
 	                return {
 	                    applied: false,
 	                    skipped: 'same',
@@ -4151,6 +4164,7 @@
 	        const counters = await overwriteLocalPermanentTreeFromSnapshot(remoteTree, localTree, {
 	            reason: String(reason || 'pull')
 	        });
+	        persistRemoteRootMeta();
 
 	        return {
 	            applied: true,
@@ -4173,6 +4187,9 @@
 	                : null;
 	            if (protocolBridge) {
 	                normalized = protocolBridge.normalizePermanentTreeSnapshot(tree);
+	                if (normalized && typeof protocolBridge.persistPermanentRootMetaFromTree === 'function') {
+	                    try { protocolBridge.persistPermanentRootMetaFromTree(normalized); } catch (_) { }
+	                }
 	            }
 	        } catch (_) { }
 	        if (!normalized) {

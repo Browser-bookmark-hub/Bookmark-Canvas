@@ -12723,6 +12723,7 @@ const PERMANENT_SECTION_POSITION_STORAGE_KEY = 'bcs:perm:position';
 const PERMANENT_SECTION_COPIES_STORAGE_KEY = 'bcs:perm:copies';
 const PERMANENT_MAIN_TIP_STORAGE_KEY = 'bcs:perm:tip-main';
 const PERMANENT_COPY_TIP_STORAGE_PREFIX = 'bcs:perm:tip-copy-';
+const PERMANENT_ROOT_META_STORAGE_KEY = 'bcs:perm:root-meta';
 const PERMANENT_SECTION_SCROLL_KEY = 'permanent-section-scroll';
 const PERMANENT_SECTION_EXPANDED_KEY = 'permanent-section-expanded';
 
@@ -12766,13 +12767,167 @@ function __normalizePermanentSectionCopyStoragePayload(copy) {
     const copyId = String(copy.id || '').trim();
     if (!copyId) return null;
 
-    const out = {
-        id: copyId,
-        ...__toPermanentViewCardStateStoragePayload(copy.cardState || copy)
-    };
+    // Canonical layout source is bcs:canvas nodes. Keep this list as copy metadata only.
+    const out = { id: copyId };
     const displayIndex = __normalizePositiveInt(copy.displayIndex);
     if (displayIndex) out.displayIndex = displayIndex;
     return out;
+}
+
+function __readPermanentViewCardStateFromDom(copyId = null) {
+    const sectionEl = __resolvePermanentSectionElement(copyId);
+    if (!sectionEl) return {};
+    const fallbackWidth = Math.max(300, Math.round(sectionEl.offsetWidth || 0));
+    const fallbackHeight = Math.max(200, Math.round(sectionEl.offsetHeight || 0));
+    return __normalizePermanentViewCardState({
+        left: sectionEl.style.left,
+        top: sectionEl.style.top,
+        width: sectionEl.style.width || fallbackWidth,
+        height: sectionEl.style.height || fallbackHeight
+    });
+}
+
+function __extractPermanentLayoutFromCanvasNodes(nodesInput) {
+    const nodes = Array.isArray(nodesInput) ? nodesInput : [];
+    const out = { main: null, copiesById: {} };
+
+    nodes.forEach((node) => {
+        if (!node || node.type !== 'file') return;
+        const nodeId = String(node.id || '').trim();
+        if (!nodeId) return;
+
+        const cardState = __normalizePermanentViewCardState({
+            left: node.x,
+            top: node.y,
+            width: node.width,
+            height: node.height
+        });
+        if (!Object.keys(cardState).length) return;
+
+        if (nodeId === 'permanent-section') {
+            out.main = cardState;
+            return;
+        }
+        if (nodeId.startsWith('permanent-section-copy-')) {
+            const copyId = nodeId.slice('permanent-section-copy-'.length).trim();
+            if (!copyId) return;
+            out.copiesById[copyId] = cardState;
+        }
+    });
+
+    return out;
+}
+
+function __applyPermanentLayoutFromCanvasNodes(nodesInput, options = {}) {
+    const layout = __extractPermanentLayoutFromCanvasNodes(nodesInput);
+    const mainState = layout && layout.main ? layout.main : null;
+    const copyStateById = layout && layout.copiesById && typeof layout.copiesById === 'object'
+        ? layout.copiesById
+        : {};
+    const copyIds = Object.keys(copyStateById).filter(Boolean).sort();
+
+    const mainSection = document.getElementById('permanentSection');
+    if (mainSection && mainState) {
+        try {
+            __applyPermanentViewShellToSectionElement(mainSection, __normalizePermanentViewShellProtocol({
+                copyId: null,
+                descriptionMd: __collectPermanentViewDescriptionMarkdown(null),
+                cardState: mainState
+            }));
+        } catch (_) { }
+    }
+
+    const existingMeta = (__readPermanentSectionCopies() || []).filter((item) => item && item.id);
+    const existingIndexById = new Map();
+    let maxIndex = 0;
+    existingMeta.forEach((item) => {
+        const id = String(item.id || '').trim();
+        const idx = __normalizePositiveInt(item.displayIndex);
+        if (!id || !idx) return;
+        existingIndexById.set(id, idx);
+        if (idx > maxIndex) maxIndex = idx;
+    });
+
+    const nextMeta = [];
+    const nextIndexById = new Map();
+    copyIds.forEach((copyId) => {
+        let idx = existingIndexById.get(copyId) || null;
+        if (!idx) {
+            maxIndex += 1;
+            idx = maxIndex;
+        }
+        nextMeta.push({ id: copyId, displayIndex: idx });
+        nextIndexById.set(copyId, idx);
+    });
+
+    if (copyIds.length || options.removeMissingCopies === true) {
+        try { __writePermanentSectionCopies(nextMeta); } catch (_) { }
+    }
+
+    const canvasContent = document.getElementById('canvasContent');
+    const scope = canvasContent || document;
+    const existingElsById = new Map();
+    try {
+        scope.querySelectorAll('.permanent-bookmark-section.permanent-section-copy').forEach((el) => {
+            const id = String(__getPermanentSectionCopyId(el) || '').trim();
+            if (id) existingElsById.set(id, el);
+        });
+    } catch (_) { }
+
+    copyIds.forEach((copyId) => {
+        const cardState = copyStateById[copyId] || {};
+        const displayIndex = nextIndexById.get(copyId) || null;
+        const shell = __normalizePermanentViewShellProtocol({
+            copyId,
+            displayIndex,
+            descriptionMd: __collectPermanentViewDescriptionMarkdown(copyId),
+            cardState,
+            scrollState: __collectPermanentViewScrollState(copyId),
+            foldState: __collectPermanentViewFoldState(copyId)
+        });
+        const existingEl = existingElsById.get(copyId);
+        if (existingEl) {
+            try { __applyPermanentViewShellToSectionElement(existingEl, shell); } catch (_) { }
+            existingElsById.delete(copyId);
+            return;
+        }
+        try {
+            __createPermanentSectionCopyFromStorage({
+                id: copyId,
+                displayIndex,
+                ...cardState
+            });
+        } catch (_) { }
+    });
+
+    if (options.removeMissingCopies !== false) {
+        existingElsById.forEach((el) => {
+            try { el.remove(); } catch (_) { }
+        });
+    }
+
+    try { __updatePermanentSectionIndexBadges(); } catch (_) { }
+    try { updateCanvasScrollBounds(); } catch (_) { }
+    try { updateScrollbarThumbs(); } catch (_) { }
+    return !!(mainState || copyIds.length);
+}
+
+let __permanentLayoutFromBcsSyncToken = 0;
+function __syncPermanentLayoutFromBcsCanvasAsync(options = {}) {
+    const token = ++__permanentLayoutFromBcsSyncToken;
+    Promise.resolve()
+        .then(async () => {
+            const storage = await __bcsStorageGet([BCS_CANVAS_KEY]);
+            if (token !== __permanentLayoutFromBcsSyncToken) return;
+            const canvasRaw = storage ? storage[BCS_CANVAS_KEY] : null;
+            const canvas = canvasRaw && typeof canvasRaw === 'object'
+                ? __stripBcsGuardFields(canvasRaw)
+                : null;
+            const nodes = Array.isArray(canvas && canvas.nodes) ? canvas.nodes : [];
+            if (!nodes.length) return;
+            __applyPermanentLayoutFromCanvasNodes(nodes, options);
+        })
+        .catch(() => { });
 }
 
 function __buildPermanentViewShellViewId(copyId = null) {
@@ -12953,20 +13108,45 @@ function __buildPermanentViewShellProtocolFromStorage(copyId = null, options = {
     const sourceData = options && typeof options.sourceData === 'object' ? options.sourceData : null;
     const safeCopyId = (typeof copyId === 'string' && copyId.trim()) ? copyId.trim() : '';
     const readOptions = sourceData ? { allowLiveFallback: options && options.allowLiveFallback === true } : {};
+    const sourceCanvasLayout = (() => {
+        if (!sourceData) return null;
+        try {
+            const canvasRaw = sourceData[BCS_CANVAS_KEY];
+            const canvas = canvasRaw && typeof canvasRaw === 'object'
+                ? __stripBcsGuardFields(canvasRaw)
+                : null;
+            const nodes = Array.isArray(canvas && canvas.nodes) ? canvas.nodes : [];
+            return __extractPermanentLayoutFromCanvasNodes(nodes);
+        } catch (_) {
+            return null;
+        }
+    })();
 
     let rawCardState = {};
+    // Prefer live DOM card state when no explicit snapshot source is provided.
+    if (!sourceData) {
+        rawCardState = __readPermanentViewCardStateFromDom(safeCopyId || null);
+    }
     if (safeCopyId) {
-        const copies = Array.isArray(options && options.copies)
-            ? options.copies
-            : (sourceData
-                ? __readPermanentViewShellJsonValue(sourceData, PERMANENT_SECTION_COPIES_STORAGE_KEY, [], readOptions)
-                : __readPermanentSectionCopies());
-        const matched = Array.isArray(copies)
-            ? copies.find((entry) => entry && String(entry.id || '').trim() === safeCopyId)
-            : null;
-        rawCardState = matched || {};
+        if (!Object.keys(__normalizePermanentViewCardState(rawCardState)).length) {
+            const copies = Array.isArray(options && options.copies)
+                ? options.copies
+                : (sourceData
+                    ? __readPermanentViewShellJsonValue(sourceData, PERMANENT_SECTION_COPIES_STORAGE_KEY, [], readOptions)
+                    : __readPermanentSectionCopies());
+            const matched = Array.isArray(copies)
+                ? copies.find((entry) => entry && String(entry.id || '').trim() === safeCopyId)
+                : null;
+            rawCardState = sourceCanvasLayout && sourceCanvasLayout.copiesById && sourceCanvasLayout.copiesById[safeCopyId]
+                ? sourceCanvasLayout.copiesById[safeCopyId]
+                : (matched || {});
+        }
     } else {
-        rawCardState = __readPermanentViewShellJsonValue(sourceData, PERMANENT_SECTION_POSITION_STORAGE_KEY, {}, readOptions) || {};
+        if (!Object.keys(__normalizePermanentViewCardState(rawCardState)).length) {
+            rawCardState = sourceCanvasLayout && sourceCanvasLayout.main
+                ? sourceCanvasLayout.main
+                : {};
+        }
     }
 
     return __normalizePermanentViewShellProtocol({
@@ -13074,8 +13254,6 @@ function __applyPermanentViewShellSnapshotProtocol(snapshotInput) {
             .filter(Boolean)
     );
 
-    const mainPositionPayload = __normalizePermanentSectionPositionStoragePayload(mainShell.cardState);
-    try { saveSharedState(PERMANENT_SECTION_POSITION_STORAGE_KEY, mainPositionPayload); } catch (_) { }
     try { __persistPermanentTipStorageValue(__getPermanentViewTipStorageKey(null), mainShell.descriptionMd || ''); } catch (_) { }
     try { __applyPermanentViewShellScrollState(null, mainShell.scrollState); } catch (_) { }
     try { __applyPermanentViewShellFoldState(null, mainShell.foldState); } catch (_) { }
@@ -13106,11 +13284,9 @@ function __applyPermanentViewShellSnapshotProtocol(snapshotInput) {
         try { __applyPermanentViewShellFoldState(copyId, null); } catch (_) { }
     });
 
-    try { __applyPermanentSectionPositionRealtimeSync(JSON.stringify(mainPositionPayload)); } catch (_) { }
-    try { __applyPermanentSectionCopiesRealtimeSync(JSON.stringify(copyStorageList)); } catch (_) { }
-
     const applyDomShellState = (sectionEl, shell) => {
         if (!sectionEl || !shell) return;
+        try { __applyPermanentViewShellToSectionElement(sectionEl, shell); } catch (_) { }
         try { __applyPermanentTipContentRealtimeSync(sectionEl, shell.descriptionMd || ''); } catch (_) { }
         try {
             const body = sectionEl.querySelector('.permanent-section-body');
@@ -13137,6 +13313,34 @@ function __applyPermanentViewShellSnapshotProtocol(snapshotInput) {
         applyDomShellState(mainSection, mainShell);
     } catch (_) { }
 
+    try {
+        const canvasContent = document.getElementById('canvasContent');
+        const scope = canvasContent || document;
+        const expectedCopyIds = new Set(copyShells.map((shell) => String(shell && shell.copyId || '').trim()).filter(Boolean));
+        const existingEls = new Map();
+        scope.querySelectorAll('.permanent-bookmark-section.permanent-section-copy').forEach((sectionEl) => {
+            const copyId = String(__getPermanentSectionCopyId(sectionEl) || '').trim();
+            if (copyId) existingEls.set(copyId, sectionEl);
+        });
+        copyShells.forEach((shell) => {
+            const copyId = String(shell && shell.copyId || '').trim();
+            if (!copyId) return;
+            if (existingEls.has(copyId)) return;
+            try {
+                __createPermanentSectionCopyFromStorage({
+                    id: copyId,
+                    displayIndex: shell.displayIndex,
+                    ...(shell && shell.cardState && typeof shell.cardState === 'object' ? shell.cardState : {})
+                });
+            } catch (_) { }
+        });
+        existingEls.forEach((sectionEl, copyId) => {
+            if (!expectedCopyIds.has(copyId)) {
+                try { sectionEl.remove(); } catch (_) { }
+            }
+        });
+    } catch (_) { }
+
     copyShells.forEach((shell) => {
         const copyId = String(shell && shell.copyId || '').trim();
         if (!copyId) return;
@@ -13145,6 +13349,14 @@ function __applyPermanentViewShellSnapshotProtocol(snapshotInput) {
             applyDomShellState(target, shell);
         } catch (_) { }
     });
+
+    try {
+        saveTempNodes({
+            immediate: true,
+            suppressSyncMarkDirty: true,
+            syncDirty: { canvasLayout: true }
+        });
+    } catch (_) { }
 
     try { __updatePermanentSectionIndexBadges(); } catch (_) { }
     try { updateCanvasScrollBounds(); } catch (_) { }
@@ -14008,19 +14220,12 @@ function savePermanentSectionPosition(sectionEl) {
     const permanentSection = sectionEl || document.getElementById('permanentSection');
     if (!permanentSection) return;
 
-    const position = __normalizePermanentSectionPositionStoragePayload({
-        left: permanentSection.style.left,
-        top: permanentSection.style.top,
-        width: permanentSection.style.width,
-        height: permanentSection.style.height
-    });
-
     if (__isPermanentSectionCopy(permanentSection)) {
         const copyId = __getPermanentSectionCopyId(permanentSection);
         if (!copyId) return;
         const copies = __readPermanentSectionCopies();
         const existingIndex = copies.findIndex(c => c && c.id === copyId);
-        const payload = __normalizePermanentSectionCopyStoragePayload({ id: copyId, ...position });
+        const payload = __normalizePermanentSectionCopyStoragePayload({ id: copyId });
         const displayIndex = __getPermanentSectionCopyDisplayIndexFromElement(permanentSection);
         if (!payload) return;
         if (displayIndex) payload.displayIndex = displayIndex;
@@ -14030,34 +14235,24 @@ function savePermanentSectionPosition(sectionEl) {
             copies.push(payload);
         }
         __writePermanentSectionCopies(copies);
-        console.log('[Canvas] 保存永久栏目副本位置和大小:', copyId, payload);
-        return;
     }
+    try { localStorage.removeItem(PERMANENT_SECTION_POSITION_STORAGE_KEY); } catch (_) { }
 
-    saveSharedState(PERMANENT_SECTION_POSITION_STORAGE_KEY, position);
-    console.log('[Canvas] 保存永久栏目位置和大小:', position);
+    // Canonical layout persistence is bcs:canvas node geometry.
+    try {
+        saveTempNodes({
+            immediate: true,
+            suppressSyncMarkDirty: true,
+            syncDirty: { canvasLayout: true }
+        });
+    } catch (_) { }
 }
 
 function loadPermanentSectionPosition() {
     try {
-        const saved = localStorage.getItem(PERMANENT_SECTION_POSITION_STORAGE_KEY);
+        try { localStorage.removeItem(PERMANENT_SECTION_POSITION_STORAGE_KEY); } catch (_) { }
         const permanentSection = document.getElementById('permanentSection');
         if (!permanentSection) return;
-
-        if (saved) {
-            const position = __normalizePermanentSectionPositionStoragePayload(JSON.parse(saved));
-            permanentSection.style.transition = 'none';
-            permanentSection.style.transform = 'none';
-            permanentSection.style.left = position.left;
-            permanentSection.style.top = position.top;
-            if (position.width) permanentSection.style.width = position.width;
-            if (position.height) permanentSection.style.height = position.height;
-            console.log('[Canvas] 恢复永久栏目位置和大小:', position);
-
-            // 强制重排后恢复transition
-            permanentSection.offsetHeight;
-            permanentSection.style.transition = '';
-        }
 
         // 需求：永久栏目尺寸应始终“固定”，不要因为窗口 resize 而改变。
         // 旧默认值中 height 使用 vh（会随窗口高度变化），只有当用户手动 resize 后才变成 px。
@@ -14095,20 +14290,7 @@ function loadPermanentSectionPosition() {
             });
         }
 
-        // 恢复“永久栏目副本”（可删除，但不影响原始永久栏目）
-        try {
-            const copies = __ensurePermanentSectionCopyDisplayIndexes();
-            if (copies && copies.length) {
-                copies.forEach((copy) => {
-                    if (!copy || !copy.id) return;
-                    try { __createPermanentSectionCopyFromStorage(copy); } catch (_) { }
-                });
-            }
-        } catch (_) { }
-        try { __updatePermanentSectionIndexBadges(); } catch (_) { }
-
-        // 副本 UI 状态（展开/滚动）必须独立持久化：创建完副本后，补触发一次同步与恢复
-        // 目的：避免初次进入 Canvas 时「同步先跑、再创建副本」导致副本错过恢复时机
+        // 副本 UI 状态（展开/滚动）必须独立持久化：首次进入时补触发一次同步与恢复
         try {
             // 只触发一次“合并后的同步”（避免刷新时副本卡片/数量反复闪烁）
             if (typeof schedulePermanentTreeCopySync === 'function') {
@@ -14121,6 +14303,9 @@ function loadPermanentSectionPosition() {
                 }, 0);
             }
         } catch (_) { }
+
+        // Canonical permanent layout source: bcs:canvas.
+        __syncPermanentLayoutFromBcsCanvasAsync({ removeMissingCopies: true });
     } catch (error) {
         console.error('[Canvas] 加载永久栏目位置失败:', error);
     }
@@ -27352,25 +27537,102 @@ function __resolveImportPreviewSnapshotBadge(section, fallbackIndex = 1) {
     return alpha ? `#${alpha}` : '';
 }
 
-function __buildImportPreviewSyntheticPermanentSections(fullStorage, isEn) {
-    if (!fullStorage || typeof fullStorage !== 'object') return [];
+function __collectImportedPermanentLayoutFromStorage(fullStorage) {
+    const result = { main: null, copies: [] };
+    if (!fullStorage || typeof fullStorage !== 'object') return result;
 
-    const hasOriginal = !!fullStorage[PERMANENT_SECTION_POSITION_STORAGE_KEY];
-    let copies = [];
+    const copyDisplayIndexById = new Map();
     try {
         const rawCopies = fullStorage[PERMANENT_SECTION_COPIES_STORAGE_KEY];
-        copies = Array.isArray(rawCopies) ? rawCopies : [];
-    } catch (_) {
-        copies = [];
-    }
+        const copies = Array.isArray(rawCopies) ? rawCopies : [];
+        copies.forEach((copy, idx) => {
+            if (!copy || typeof copy !== 'object') return;
+            const copyId = String(copy.id || '').trim() || `copy-${idx + 1}`;
+            const displayIndex = __normalizePositiveInt(copy.displayIndex);
+            if (displayIndex) copyDisplayIndexById.set(copyId, displayIndex);
+        });
+    } catch (_) { }
 
-    if (!hasOriginal && copies.length === 0) return [];
+    const canvasLayout = (() => {
+        try {
+            const canvasRaw = fullStorage[BCS_CANVAS_KEY];
+            const canvas = canvasRaw && typeof canvasRaw === 'object'
+                ? __stripBcsGuardFields(canvasRaw)
+                : null;
+            return __extractPermanentLayoutFromCanvasNodes(
+                Array.isArray(canvas && canvas.nodes) ? canvas.nodes : []
+            );
+        } catch (_) {
+            return { main: null, copiesById: {} };
+        }
+    })();
+
+    const mainCardState = __normalizePermanentViewCardState(canvasLayout && canvasLayout.main);
+    result.main = Object.keys(mainCardState).length ? mainCardState : null;
+
+    const copyIds = new Set(
+        Object.keys((canvasLayout && canvasLayout.copiesById) || {}).filter(Boolean).map((id) => String(id))
+    );
+    try {
+        Array.from(copyIds).forEach((copyId, idx) => {
+            if (!copyDisplayIndexById.has(copyId)) {
+                copyDisplayIndexById.set(copyId, idx + 1);
+            }
+        });
+    } catch (_) { }
+
+    const usedDisplayIndexes = new Set();
+    copyDisplayIndexById.forEach((value) => {
+        if (value) usedDisplayIndexes.add(value);
+    });
+    let autoDisplayIndex = 1;
+    const getNextDisplayIndex = () => {
+        while (usedDisplayIndexes.has(autoDisplayIndex)) autoDisplayIndex += 1;
+        const next = autoDisplayIndex;
+        usedDisplayIndexes.add(next);
+        autoDisplayIndex += 1;
+        return next;
+    };
+
+    const sortedCopyIds = Array.from(copyIds.values())
+        .filter(Boolean)
+        .sort((a, b) => {
+            const idxA = copyDisplayIndexById.get(a) || 0;
+            const idxB = copyDisplayIndexById.get(b) || 0;
+            if (idxA && idxB && idxA !== idxB) return idxA - idxB;
+            if (idxA && !idxB) return -1;
+            if (!idxA && idxB) return 1;
+            return String(a).localeCompare(String(b));
+        });
+
+    sortedCopyIds.forEach((copyId) => {
+        const displayIndex = copyDisplayIndexById.get(copyId) || getNextDisplayIndex();
+        const cardState = __normalizePermanentViewCardState(
+            canvasLayout && canvasLayout.copiesById && canvasLayout.copiesById[copyId]
+        );
+        result.copies.push({
+            id: copyId,
+            displayIndex,
+            cardState
+        });
+    });
+
+    return result;
+}
+
+function __buildImportPreviewSyntheticPermanentSections(fullStorage, isEn) {
+    const importedPermanentLayout = __collectImportedPermanentLayoutFromStorage(fullStorage);
+    const hasMain = !!(importedPermanentLayout && importedPermanentLayout.main);
+    const copies = importedPermanentLayout && Array.isArray(importedPermanentLayout.copies)
+        ? importedPermanentLayout.copies
+        : [];
+    if (!hasMain && !copies.length) return [];
 
     const snapshotSections = [];
     const baseTitle = isEn ? '[Snapshot] Permanent Sections' : '[快照] 永久栏目';
     const defaultColor = getPermanentSectionDefaultColor();
 
-    if (hasOriginal) {
+    if (hasMain) {
         snapshotSections.push({
             id: 'preview-permanent-section-original',
             title: `${baseTitle} (#A)`,
@@ -29404,13 +29666,40 @@ function __normalizeCanvasSectionJsonProtocolObject(rawProtocol) {
 
     if (sectionType === 'permanent') {
         const tree = source.tree || source.bookmarkTree;
-        if (!tree || typeof tree !== 'object') return null;
-        return Object.assign({}, source, {
+        const hasTree = !!(tree && typeof tree === 'object');
+        const inheritFrom = __normalizeCanvasMarkdownPath(
+            source.inheritFrom || source.embedFrom || source.referencePath || source.reference || ''
+        );
+        const selfPath = __normalizeCanvasMarkdownPath(
+            source.selfPath || source.currentPath || ''
+        );
+        if (!hasTree && !inheritFrom) return null;
+        const normalized = Object.assign({}, source, {
             format,
             schemaVersion: hasSchemaVersion ? schemaVersionRaw : __CANVAS_SECTION_JSON_SCHEMA_VERSION,
-            sectionType,
-            tree
+            sectionType
         });
+        if (hasTree) {
+            normalized.tree = tree;
+        } else {
+            delete normalized.tree;
+        }
+        delete normalized.bookmarkTree;
+        if (inheritFrom) {
+            normalized.inheritFrom = inheritFrom;
+        } else {
+            delete normalized.inheritFrom;
+        }
+        if (selfPath) {
+            normalized.selfPath = selfPath;
+        } else {
+            delete normalized.selfPath;
+        }
+        delete normalized.currentPath;
+        delete normalized.embedFrom;
+        delete normalized.referencePath;
+        delete normalized.reference;
+        return normalized;
     }
 
     const items = Array.isArray(source.items) ? source.items : null;
@@ -29720,6 +30009,122 @@ function __normalizePermanentTreeSnapshotForProtocol(rawTree) {
     return snapshot;
 }
 
+function __readPermanentRootMetaStorageValue() {
+    try {
+        const raw = localStorage.getItem(PERMANENT_ROOT_META_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return __normalizePermanentRootMeta(parsed);
+    } catch (_) {
+        return null;
+    }
+}
+
+function __persistPermanentRootMetaStorageValue(rootMeta) {
+    const normalized = __normalizePermanentRootMeta(rootMeta);
+    if (!normalized) return null;
+    try { saveSharedState(PERMANENT_ROOT_META_STORAGE_KEY, normalized); } catch (_) { }
+    return normalized;
+}
+
+function __persistPermanentRootMetaFromTreeSnapshot(treeInput) {
+    const normalizedTree = __normalizePermanentTreeSnapshotForProtocol(treeInput);
+    if (!normalizedTree) return null;
+    const rootMeta = __buildPermanentRootMeta(normalizedTree);
+    return __persistPermanentRootMetaStorageValue(rootMeta);
+}
+
+function __applyPermanentRootMetaToTreeSnapshot(treeInput, rootMetaInput) {
+    const normalizedTree = __normalizePermanentTreeSnapshotForProtocol(treeInput);
+    if (!normalizedTree) return null;
+    const normalizedRootMeta = __normalizePermanentRootMeta(rootMetaInput);
+    if (!normalizedRootMeta) return normalizedTree;
+
+    const root = Array.isArray(normalizedTree) ? normalizedTree[0] : null;
+    const rootChildren = root && Array.isArray(root.children) ? root.children : [];
+    if (!root || !rootChildren.length) return normalizedTree;
+
+    const standardRoots = normalizedRootMeta && normalizedRootMeta.standardRoots && typeof normalizedRootMeta.standardRoots === 'object'
+        ? normalizedRootMeta.standardRoots
+        : {};
+    const descriptorBuckets = new Map();
+    const descriptors = Array.isArray(normalizedRootMeta && normalizedRootMeta.rootDescriptors)
+        ? normalizedRootMeta.rootDescriptors
+        : [];
+
+    descriptors.forEach((entry) => {
+        if (!entry || typeof entry !== 'object') return;
+        const titleKey = __normalizePermanentRootTitleKey(entry.sectionTitle || '');
+        if (!titleKey) return;
+        if (!descriptorBuckets.has(titleKey)) descriptorBuckets.set(titleKey, []);
+        descriptorBuckets.get(titleKey).push(entry);
+    });
+
+    const takeDescriptorByNode = (node) => {
+        const titleKey = __normalizePermanentRootTitleKey(__resolvePermanentRootSectionTitle(node));
+        if (!titleKey || !descriptorBuckets.has(titleKey)) return null;
+        const bucket = descriptorBuckets.get(titleKey);
+        while (bucket.length) {
+            const next = bucket.shift();
+            if (next && typeof next === 'object') return next;
+        }
+        return null;
+    };
+
+    root.children = rootChildren.map((nodeInput) => {
+        if (!nodeInput || typeof nodeInput !== 'object') return nodeInput;
+        const node = Object.assign({}, nodeInput);
+        const rootKey = __getPermanentRootMatchKey(node);
+        const standardEntry = (rootKey && standardRoots[rootKey] && standardRoots[rootKey].present !== false)
+            ? standardRoots[rootKey]
+            : null;
+        const descriptorEntry = takeDescriptorByNode(node);
+        const metaEntry = standardEntry || descriptorEntry;
+
+        const folderType = __normalizeBookmarkFolderType(
+            node.folderType
+            || node.folder_type
+            || (metaEntry && metaEntry.folderType)
+            || __permanentRootKeyToFolderType(rootKey)
+        );
+        if (folderType) {
+            node.folderType = folderType;
+        } else if (Object.prototype.hasOwnProperty.call(node, 'folderType')) {
+            delete node.folderType;
+        }
+        if (Object.prototype.hasOwnProperty.call(node, 'folder_type')) {
+            delete node.folder_type;
+        }
+
+        let syncing = __canPersistBookmarkRootSyncing(folderType)
+            ? __normalizeBookmarkRootSyncing(node.syncing)
+            : null;
+        if (syncing === null && __canPersistBookmarkRootSyncing(folderType)) {
+            syncing = __normalizeBookmarkRootSyncing(metaEntry && metaEntry.syncing);
+        }
+        if (syncing !== null) {
+            node.syncing = syncing;
+        } else if (Object.prototype.hasOwnProperty.call(node, 'syncing')) {
+            delete node.syncing;
+        }
+
+        const title = String(node.title || node.name || '').trim();
+        if (!title) {
+            node.title = __resolvePermanentRootSectionTitle(node);
+        }
+        return node;
+    });
+
+    return __normalizePermanentTreeSnapshotForProtocol(normalizedTree) || normalizedTree;
+}
+
+function __buildPermanentTreeSnapshotForJsonProtocol(rawTree) {
+    const normalizedTree = __normalizePermanentTreeSnapshotForProtocol(rawTree) || rawTree;
+    const storedRootMeta = __readPermanentRootMetaStorageValue();
+    const merged = __applyPermanentRootMetaToTreeSnapshot(normalizedTree, storedRootMeta);
+    return __normalizePermanentTreeSnapshotForProtocol(merged || normalizedTree) || normalizedTree;
+}
+
 function __extractCanvasRootMetaCommentBlock(bodyText) {
     const compactExtracted = __extractCanvasCompactComment(bodyText, __CANVAS_COMPACT_TAG_ROOT_META);
     if (compactExtracted.found) {
@@ -30005,6 +30410,12 @@ function __buildPermanentSectionJsonProtocol(bookmarkTree, descriptionOverride =
     const permanentSlot = __normalizePositiveInt(metaOptions && metaOptions.permanentSlot) || 1;
     const slotLabel = toAlphaLabel(permanentSlot) || 'A';
     const title = __getPermanentSectionDisplayTitle(isEn);
+    const inheritFrom = __normalizeCanvasMarkdownPath(
+        metaOptions && (metaOptions.inheritFrom || metaOptions.embedFrom || '')
+    );
+    const selfPath = __normalizeCanvasMarkdownPath(
+        metaOptions && (metaOptions.selfPath || metaOptions.currentPath || '')
+    );
 
     let rawDesc = '';
     if (descriptionOverride !== null) {
@@ -30013,15 +30424,30 @@ function __buildPermanentSectionJsonProtocol(bookmarkTree, descriptionOverride =
         try { rawDesc = localStorage.getItem(PERMANENT_MAIN_TIP_STORAGE_KEY) || ''; } catch (_) { }
     }
 
-    return {
+    const payload = {
         format: __CANVAS_SECTION_JSON_FORMAT,
         schemaVersion: 2,
         sectionType: 'permanent',
         slot: slotLabel,
         title,
-        descriptionMd: __normalizePermanentViewDescriptionMarkdown(rawDesc),
-        tree: __buildPermanentJsonTreeProtocol(bookmarkTree)
+        descriptionMd: __normalizePermanentViewDescriptionMarkdown(rawDesc)
     };
+    if (selfPath) payload.selfPath = selfPath;
+    if (inheritFrom) {
+        payload.fileRole = 'copy-anchor';
+        payload.anchorOnly = true;
+        payload.fileNote = isEn
+            ? 'Permanent copy anchor file: tree content is inherited from primary file; this file keeps per-copy description and canvas anchor.'
+            : '永久栏目副本锚点文件：树内容继承自主文件；此文件仅保留副本说明与画布锚点。';
+        payload.inheritFrom = inheritFrom;
+    } else {
+        payload.fileRole = 'primary';
+        payload.fileNote = isEn
+            ? 'Primary permanent file: canonical bookmark tree source.'
+            : '永久栏目主文件：书签树的规范真相源。';
+        payload.tree = __buildPermanentJsonTreeProtocol(bookmarkTree);
+    }
+    return payload;
 }
 
 function __buildPermanentSectionJsonMarkdown(bookmarkTree, descriptionOverride = null, metaOptions = null) {
@@ -30092,9 +30518,16 @@ function __parseCanvasMarkdownPayload(fileText) {
         || /^(#{2,}\s+|<|[\[{])/.test(firstNonEmptyLine);
     const hasHeaderLine = !!firstNonEmptyLine && !looksLikeTreeLine;
 
-    const contentToParse = hasHeaderLine
+    let contentToParse = hasHeaderLine
         ? lines.slice(firstNonEmptyIndex + 1).join('\n').trim()
         : workingBody.trim();
+    if (jsonProtocol && jsonProtocol.sectionType === 'permanent') {
+        const hasJsonTree = !!(jsonProtocol.tree && typeof jsonProtocol.tree === 'object');
+        const inheritFrom = __normalizeCanvasMarkdownPath(jsonProtocol.inheritFrom || '').replace(/\.(md|json)$/i, '');
+        if (!hasJsonTree && inheritFrom) {
+            contentToParse = `![[${inheritFrom}]]`;
+        }
+    }
 
     return {
         rawBody,
@@ -30867,7 +31300,14 @@ function __extractMdNodeFilenameTitle(markdownText, fallback = 'Untitled') {
 function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptionOverride = null, metaOptions = null, embedTargetPath = '') {
     const exportFormat = __normalizeCanvasObsidianExportFormat(metaOptions && metaOptions.exportFormat, 'visual');
     if (exportFormat === 'json') {
-        return __buildPermanentSectionJsonMarkdown(bookmarkTree, descriptionOverride, metaOptions);
+        const inheritFrom = __normalizeCanvasMarkdownPath(embedTargetPath);
+        return __buildPermanentSectionJsonMarkdown(
+            bookmarkTree,
+            descriptionOverride,
+            inheritFrom
+                ? Object.assign({}, metaOptions || {}, { inheritFrom })
+                : metaOptions
+        );
     }
     const { isEn } = __getLang();
     const domTitleEl = document.getElementById('permanentSectionTitle');
@@ -31206,6 +31646,10 @@ function __buildBookmarkTreeSnapshotFromPermanentMarkdown(contentToParse, rootMe
 
 function __rebuildPermanentTreeSnapshotFromSyncFolderFiles(folderFiles) {
     const files = folderFiles instanceof Map ? folderFiles : new Map();
+    const fileLookupHelpers = __buildCanvasPackageFileLookupHelpers(files);
+    const readFileTextByPath = fileLookupHelpers && typeof fileLookupHelpers.readFileTextByPath === 'function'
+        ? fileLookupHelpers.readFileTextByPath
+        : () => '';
     const candidates = [];
 
     for (const [name, bytes] of files.entries()) {
@@ -31250,7 +31694,12 @@ function __rebuildPermanentTreeSnapshotFromSyncFolderFiles(folderFiles) {
 
     const tryBuildFromEntry = (entry) => {
         if (!entry || typeof entry !== 'object') return null;
-        const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(entry.contentToParse || '', entry.rootMeta || null);
+        const resolvedContentToParse = __resolveCanvasMarkdownEmbeddedContent(
+            entry.contentToParse || '',
+            entry.path || '',
+            readFileTextByPath
+        );
+        const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(resolvedContentToParse, entry.rootMeta || null);
         return snapshotTree || null;
     };
 
@@ -31990,12 +32439,18 @@ async function __buildObsidianSyncFiles(options = {}) {
         files.push(file);
     };
 
-    const bookmarkTree = await api.getTree();
+    const bookmarkTree = __buildPermanentTreeSnapshotForJsonProtocol(await api.getTree());
     const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat);
     const forceCollapsedForObsidian = true;
     pushTextFile(
         permanentMdRel,
-        __buildPermanentBookmarksMarkdown(bookmarkTree, null, { permanentSlot: 1, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat }),
+        __buildPermanentBookmarksMarkdown(bookmarkTree, null, {
+            permanentSlot: 1,
+            bookmarkIconMode: obsidianBookmarkIconMode,
+            forceCollapsed: forceCollapsedForObsidian,
+            exportFormat,
+            selfPath: __joinSyncExportPath(exportRoot, permanentMdRel)
+        }),
         { type: 'permanent', slot: 1 }
     );
 
@@ -32021,7 +32476,14 @@ async function __buildObsidianSyncFiles(options = {}) {
                     __buildPermanentBookmarksMarkdownCopyEmbedMain(
                         bookmarkTree,
                         descObj,
-                        { permanentSlot: slot, copyId, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat },
+                        {
+                            permanentSlot: slot,
+                            copyId,
+                            bookmarkIconMode: obsidianBookmarkIconMode,
+                            forceCollapsed: forceCollapsedForObsidian,
+                            exportFormat,
+                            selfPath: __joinSyncExportPath(exportRoot, copyMdRel)
+                        },
                         __joinSyncExportPath(exportRoot, permanentMdRel)
                     ),
                     { type: 'permanent', slot: slot || (idx + 1), copyId }
@@ -32269,89 +32731,29 @@ function __detectObsidianSyncExportFormatFromFolderFiles(folderFiles) {
 }
 
 if (typeof window !== 'undefined') {
-
-function __stripPermanentNodesFromParsedSyncFolderForProtocol(parsedInput, folderFiles, folderName = '') {
-    const parsed = parsedInput && typeof parsedInput === 'object' ? parsedInput : {};
-    const tempState = parsed && parsed.tempState && typeof parsed.tempState === 'object'
-        ? parsed.tempState
-        : null;
-    if (!tempState) return parsed;
-
-    const normalizedFiles = __normalizeImportFolderFilesMap(folderFiles);
-    if (!normalizedFiles || typeof normalizedFiles.size !== 'number' || normalizedFiles.size === 0) {
-        return parsed;
-    }
-
-    const permanentNodeIds = new Set();
-    const canvasCandidates = Array.from(normalizedFiles.keys())
-        .map((key) => String(key || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/'))
-        .filter((key) => !!key && /\.canvas$/i.test(key));
-
-    canvasCandidates.forEach((canvasPath) => {
-        const bytes = normalizedFiles.get(canvasPath);
-        if (!bytes) return;
-        try {
-            const canvasText = new TextDecoder('utf-8').decode(bytes);
-            const canvasData = JSON.parse(canvasText);
-            const nodes = Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [];
-            nodes.forEach((node) => {
-                if (!node || node.type !== 'file') return;
-                const nodeId = String(node.id || '').trim();
-                const filePath = String(node.file || '').trim();
-                if (!nodeId) return;
-                if (__isExportedPermanentCanvasNode(node) || __isPermanentMarkdownPath(filePath)) {
-                    permanentNodeIds.add(nodeId);
-                }
-            });
-        } catch (_) { }
-    });
-
-    if (!permanentNodeIds.size) return parsed;
-
-    const sections = Array.isArray(tempState.sections) ? tempState.sections : [];
-    const mdNodes = Array.isArray(tempState.mdNodes) ? tempState.mdNodes : [];
-    const edges = Array.isArray(tempState.edges) ? tempState.edges : [];
-
-    const filteredSections = sections.filter((section) => {
-        const id = String(section && section.id || '').trim();
-        return id ? !permanentNodeIds.has(id) : true;
-    });
-
-    const validIds = new Set();
-    filteredSections.forEach((section) => {
-        if (section && section.id) validIds.add(String(section.id));
-    });
-    mdNodes.forEach((node) => {
-        if (node && node.id) validIds.add(String(node.id));
-    });
-
-    const filteredEdges = edges.filter((edge) => {
-        if (!edge || typeof edge !== 'object') return false;
-        const fromNode = String(edge.fromNode || '').trim();
-        const toNode = String(edge.toNode || '').trim();
-        if (!fromNode || !toNode) return false;
-        const fromValid = validIds.has(fromNode) || __isPermanentCanvasNodeId(fromNode);
-        const toValid = validIds.has(toNode) || __isPermanentCanvasNodeId(toNode);
-        return fromValid && toValid;
-    });
-
-    return Object.assign({}, parsed, {
-        tempState: Object.assign({}, tempState, {
-            sections: filteredSections,
-            mdNodes,
-            edges: filteredEdges
-        })
-    });
-}
-
     if (!window.CanvasObsidianExportBridge || typeof window.CanvasObsidianExportBridge !== 'object') {
         window.CanvasObsidianExportBridge = {};
     }
     window.CanvasObsidianExportBridge.buildSyncFiles = __buildObsidianSyncFiles;
     window.CanvasObsidianExportBridge.parseSyncFolderFiles = parseCanvasPackageFromFolderFiles;
     window.CanvasObsidianExportBridge.parseSyncFolderFilesForSync = async function (folderFiles, folderName) {
-        const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName, { preferBackupJson: false });
-        return __stripPermanentNodesFromParsedSyncFolderForProtocol(parsed, folderFiles, folderName);
+        const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName, {
+            preferBackupJson: false,
+            syncMode: true
+        });
+        const normalizedFiles = __normalizeImportFolderFilesMap(folderFiles);
+        const rebuiltPermanentTree = __normalizePermanentTreeSnapshotForProtocol(
+            __rebuildPermanentTreeSnapshotFromSyncFolderFiles(normalizedFiles)
+        );
+        if (rebuiltPermanentTree) {
+            const primaryState = parsed && parsed.primaryState && typeof parsed.primaryState === 'object'
+                ? parsed.primaryState
+                : {};
+            parsed.primaryState = Object.assign({}, primaryState, {
+                permanentTreeSnapshot: rebuiltPermanentTree
+            });
+        }
+        return parsed;
     };
     window.CanvasObsidianExportBridge.detectSyncFolderExportFormat = __detectObsidianSyncExportFormatFromFolderFiles;
     window.CanvasObsidianExportBridge.applySyncFilesReplace = __applyObsidianSyncFilesReplace;
@@ -32738,7 +33140,7 @@ async function exportCanvasPackage(options = {}) {
             contentType = 'text/markdown;charset=utf-8';
             fileName = `${namePrefix}-${getSafeName(exportTitle, node.id || 'blank')}-${ymd}.md`;
         } else if (targetType === 'permanent' || targetType === 'permanent-copy') {
-            const bookmarkTree = await api.getTree();
+            const bookmarkTree = __buildPermanentTreeSnapshotForJsonProtocol(await api.getTree());
             const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
             const roots = root && Array.isArray(root.children) ? root.children : [];
             contentNodes = roots.map(toBookmarkNode).filter(Boolean);
@@ -32857,9 +33259,23 @@ async function exportCanvasPackage(options = {}) {
         try { __ensurePermanentSectionCopyDisplayIndexes(); } catch (_) { }
         const tempStateObj = __collectCanvasTempStateForExport();
         const tempCanvasState = __buildCanvasStateBackupView(tempStateObj);
-        const permanentPosRaw = localStorage.getItem(PERMANENT_SECTION_POSITION_STORAGE_KEY);
         const permanentCopiesRaw = localStorage.getItem(PERMANENT_SECTION_COPIES_STORAGE_KEY);
         const perfMode = localStorage.getItem('canvas-performance-mode');
+        const parseJsonSafe = (raw) => {
+            if (!raw) return null;
+            try { return JSON.parse(raw); } catch (_) { return null; }
+        };
+        let bcsCanvas = null;
+        try {
+            const bcsStorage = await __bcsStorageGetAll();
+            const bcsFileRefs = __collectBcsFileRefsFromState(tempStateObj, {
+                exportRoot: __getBcsExportRootSync(),
+                exportFormat: __getBcsExportFormatSync()
+            });
+            bcsCanvas = __buildBcsCanvasDataFromState(tempStateObj, bcsFileRefs, { storageMap: bcsStorage });
+        } catch (_) {
+            bcsCanvas = null;
+        }
 
         // Collect scroll positions
         const scrollState = {};
@@ -32894,9 +33310,9 @@ async function exportCanvasPackage(options = {}) {
             }
         }
 
-        const bookmarkTree = await api.getTree();
+        const bookmarkTree = __buildPermanentTreeSnapshotForJsonProtocol(await api.getTree());
 
-        const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(bookmarkTree) || bookmarkTree;
+        const normalizedPermanentTreeSnapshot = __buildPermanentTreeSnapshotForJsonProtocol(bookmarkTree);
         const backupState = {
             exporter: 'bookmark-backup-canvas',
             exportVersion: 2,
@@ -32907,8 +33323,9 @@ async function exportCanvasPackage(options = {}) {
                 : '书签画布完整备份文件。包含完整的书签树（永久栏目 #A...）和所有画布数据（临时栏目 A-1...）。',
             storage: {
                 [TEMP_SECTION_STORAGE_KEY]: tempStateObj,
-                [PERMANENT_SECTION_POSITION_STORAGE_KEY]: permanentPosRaw ? JSON.parse(permanentPosRaw) : null,
-                [PERMANENT_SECTION_COPIES_STORAGE_KEY]: permanentCopiesRaw ? JSON.parse(permanentCopiesRaw) : null,
+                [PERMANENT_SECTION_COPIES_STORAGE_KEY]: parseJsonSafe(permanentCopiesRaw),
+                [PERMANENT_ROOT_META_STORAGE_KEY]: __readPermanentRootMetaStorageValue(),
+                [BCS_CANVAS_KEY]: bcsCanvas || null,
                 'canvas-performance-mode': perfMode || null,
                 ...scrollState,
                 ...permanentTips
@@ -33192,11 +33609,20 @@ async function exportCanvasPackage(options = {}) {
 
     // 1) Markdown files
     // 1) Markdown files
-    const bookmarkTree = await api.getTree();
+    const bookmarkTree = __buildPermanentTreeSnapshotForJsonProtocol(await api.getTree());
     const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat);
 
     // Choose builder based on format
-    files.push({ name: `${exportRoot}/${permanentMdRel}`, data: __toUint8(__buildPermanentBookmarksMarkdown(bookmarkTree, null, { permanentSlot: 1, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat })) });
+    files.push({
+        name: `${exportRoot}/${permanentMdRel}`,
+        data: __toUint8(__buildPermanentBookmarksMarkdown(bookmarkTree, null, {
+            permanentSlot: 1,
+            bookmarkIconMode: obsidianBookmarkIconMode,
+            forceCollapsed: forceCollapsedForObsidian,
+            exportFormat,
+            selfPath: __joinSyncExportPath(exportRoot, permanentMdRel)
+        }))
+    });
 
     // Generate separate MD files for Permanent Section Copies (with their own descriptions)
     const copyFileMap = {}; // copyId -> relativePath
@@ -33226,7 +33652,14 @@ async function exportCanvasPackage(options = {}) {
                 const fileContent = __buildPermanentBookmarksMarkdownCopyEmbedMain(
                     bookmarkTree,
                     descObj,
-                    { permanentSlot: slot, copyId, bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat },
+                    {
+                        permanentSlot: slot,
+                        copyId,
+                        bookmarkIconMode: obsidianBookmarkIconMode,
+                        forceCollapsed: forceCollapsedForObsidian,
+                        exportFormat,
+                        selfPath: __joinSyncExportPath(exportRoot, copyMdRel)
+                    },
                     __joinSyncExportPath(exportRoot, permanentMdRel)
                 );
                 files.push({ name: `${exportRoot}/${copyMdRel}`, data: __toUint8(fileContent) });
@@ -33530,9 +33963,12 @@ async function exportCanvasPackage(options = {}) {
     // 3) Full state json (for full import)
     const tempStateObj = __collectCanvasTempStateForExport();
     const tempCanvasState = __buildCanvasStateBackupView(tempStateObj);
-    const permanentPosRaw = localStorage.getItem(PERMANENT_SECTION_POSITION_STORAGE_KEY);
     const permanentCopiesRaw = localStorage.getItem(PERMANENT_SECTION_COPIES_STORAGE_KEY);
     const perfMode = localStorage.getItem('canvas-performance-mode');
+    const parseJsonSafe = (raw) => {
+        if (!raw) return null;
+        try { return JSON.parse(raw); } catch (_) { return null; }
+    };
 
     // Collect scroll positions
     const scrollState = {};
@@ -33570,7 +34006,18 @@ async function exportCanvasPackage(options = {}) {
     // 3.2) Core data layer (bookmark-canvas.backup.json) - 核心数据层
     // 仅在"模式 B"（全量备份模式）下生成
     if (isFullBackupMode) {
-        const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(bookmarkTree) || bookmarkTree;
+        let bcsCanvas = null;
+        try {
+            const bcsStorage = await __bcsStorageGetAll();
+            const bcsFileRefs = __collectBcsFileRefsFromState(tempStateObj, {
+                exportRoot: __getBcsExportRootSync(),
+                exportFormat: __getBcsExportFormatSync()
+            });
+            bcsCanvas = __buildBcsCanvasDataFromState(tempStateObj, bcsFileRefs, { storageMap: bcsStorage });
+        } catch (_) {
+            bcsCanvas = null;
+        }
+        const normalizedPermanentTreeSnapshot = __buildPermanentTreeSnapshotForJsonProtocol(bookmarkTree);
         const backupState = {
             exporter: 'bookmark-backup-canvas',
             exportVersion: 2, // 核心数据层使用版本2
@@ -33581,8 +34028,9 @@ async function exportCanvasPackage(options = {}) {
                 : '书签画布完整备份文件。包含完整的书签树和所有画布数据。',
             storage: {
                 [TEMP_SECTION_STORAGE_KEY]: tempStateObj,
-                [PERMANENT_SECTION_POSITION_STORAGE_KEY]: permanentPosRaw ? JSON.parse(permanentPosRaw) : null,
-                [PERMANENT_SECTION_COPIES_STORAGE_KEY]: permanentCopiesRaw ? JSON.parse(permanentCopiesRaw) : null,
+                [PERMANENT_SECTION_COPIES_STORAGE_KEY]: parseJsonSafe(permanentCopiesRaw),
+                [PERMANENT_ROOT_META_STORAGE_KEY]: __readPermanentRootMetaStorageValue(),
+                [BCS_CANVAS_KEY]: bcsCanvas || null,
                 'canvas-performance-mode': perfMode || null,
                 ...scrollState
             },
@@ -34557,6 +35005,7 @@ function __buildCanvasPackageFileLookupHelpers(sourceFiles) {
 
 function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, primaryState, options = {}) {
     const isEn = !!(options && options.isEn);
+    const syncMode = !!(options && options.syncMode);
     const tempState = {
         sections: [],
         mdNodes: [],
@@ -34620,10 +35069,27 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                 : contentToParse;
 
             if (isLivePermanentNode) {
-                const items = __parseMarkdownAuto(resolvedContentToParse);
-                const sectionId = node.id;
+                if (syncMode) {
+                    // Sync mode: permanent nodes are handled by dedicated permanent sync flow.
+                    return;
+                }
                 importedPermanentCount += 1;
                 const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
+                try {
+                    if (!safePrimaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
+                        const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
+                            resolvedContentToParse,
+                            parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
+                        );
+                        const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
+                        if (normalizedPermanentTreeSnapshot) {
+                            safePrimaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
+                        }
+                    }
+                } catch (_) { }
+
+                const items = __parseMarkdownAuto(resolvedContentToParse);
+                const sectionId = node.id;
                 const slotLabel = toAlphaLabel(resolvedSlot) || '';
                 const suffix = slotLabel ? ` (#${slotLabel})` : '';
                 const dateStr = new Date().toISOString().slice(0, 10);
@@ -34647,22 +35113,13 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                     ).trim(),
                     isSnapshot: true
                 });
-                try {
-                    if (!safePrimaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
-                        const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
-                            resolvedContentToParse,
-                            parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
-                        );
-                        const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
-                        if (normalizedPermanentTreeSnapshot) {
-                            safePrimaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
-                        }
-                    }
-                } catch (_) { }
                 return;
             }
 
             if (isPermanent) {
+                if (syncMode) {
+                    return;
+                }
                 tempState.sections.push(
                     __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, resolvedContentToParse, isEn)
                 );
@@ -34865,6 +35322,7 @@ async function importCanvasPackage7z(file) {
 async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, options = {}) {
     const { isEn } = __getLang();
     const preferBackupJson = !(options && options.preferBackupJson === false);
+    const syncMode = !!(options && options.syncMode);
 
     // 4.2 数据信任链：
     // 优先查找 bookmark-canvas.backup.json（全量备份模式）
@@ -34907,7 +35365,10 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
         console.log(`[Canvas] Folder Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(folderFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
-        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, folderFiles, primaryState, { isEn });
+        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, folderFiles, primaryState, {
+            isEn,
+            syncMode
+        });
     } else {
         throw new Error(isEn
             ? 'Invalid Folder: Missing both backup.json and .canvas file.'
@@ -35112,12 +35573,13 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
     // Obsidian sync folder contains "permanent-section" cards exported as Markdown file nodes.
     // These should NOT be imported as temporary snapshot sections, otherwise they show up under
     // "导入区块" as fake temp sections (#A/#B...). Instead, map them back to:
-    // - permanent section position (`bcs:perm:position`)
-    // - permanent copy positions (`bcs:perm:copies`)
+    // - canonical permanent layout in `bcs:canvas` (node x/y/width/height)
+    // - permanent copy metadata (`bcs:perm:copies`, only id/displayIndex)
     // - permanent tips (`bcs:perm:tip-*`)
-    const permanentNodeIdsToIgnoreInTempState = new Set();
+    let remoteHasAnyPermanentNode = false;
     const remotePermanentCopyIds = new Set();
     let remoteHasAnyPermanentCopyNode = false;
+    const remotePermanentLayoutNodes = [];
     const permanentTipUpdates = [];
 
     const normalizePath = (path) => String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
@@ -35196,12 +35658,20 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
 	            const filePath = String(node.file || '').trim();
 	            if (!nodeId || !filePath || !/\.(md|json)$/i.test(filePath)) return;
 
-	            const isPermanentNodeFile = isPermanentMarkdownPath(filePath);
-	            const isExportedPermanentNode = isPermanentNodeFile && __isExportedPermanentCanvasNode(node);
-	            if (isExportedPermanentNode) {
-	                permanentNodeIdsToIgnoreInTempState.add(nodeId);
-	            }
-	            if (!isExportedPermanentNode) return;
+		            const isPermanentNodeFile = isPermanentMarkdownPath(filePath);
+		            const isExportedPermanentNode = isPermanentNodeFile && __isExportedPermanentCanvasNode(node);
+		            if (isExportedPermanentNode) {
+                        remoteHasAnyPermanentNode = true;
+	                        remotePermanentLayoutNodes.push({
+	                            id: nodeId,
+	                            type: node.type,
+	                            x: node.x,
+                            y: node.y,
+                            width: node.width,
+                            height: node.height
+                        });
+		            }
+		            if (!isExportedPermanentNode) return;
 	            if (nodeId.startsWith('permanent-section-copy-')) remoteHasAnyPermanentCopyNode = true;
 
             const fileBytes = findFileBytes(filePath);
@@ -35217,20 +35687,12 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
                     ? __htmlToMarkdown(parsedMarkdown.descriptionHtml)
                     : '');
             const descSource = __normalizeCanvasMarkdownSource(rawDescSource).trim();
-            if (nodeId === 'permanent-section' || slotNumber === 1) {
-                // Main permanent section layout
-                const position = {
-                    left: toPx(node.x),
-                    top: toPx(node.y),
-                    width: toPx(node.width),
-                    height: toPx(node.height)
-                };
-                try { saveSharedState(PERMANENT_SECTION_POSITION_STORAGE_KEY, position); } catch (_) { }
-
-                try { __persistPermanentTipStorageValue(PERMANENT_MAIN_TIP_STORAGE_KEY, descSource); } catch (_) { }
-                permanentTipUpdates.push({ copyId: null, source: descSource });
-                return;
-            }
+	            if (nodeId === 'permanent-section' || slotNumber === 1) {
+	                // Main permanent section layout
+	                try { __persistPermanentTipStorageValue(PERMANENT_MAIN_TIP_STORAGE_KEY, descSource); } catch (_) { }
+	                permanentTipUpdates.push({ copyId: null, source: descSource });
+	                return;
+	            }
 
             // Permanent copy layout (slot >= 2)
             const copyId = nodeId.startsWith('permanent-section-copy-')
@@ -35253,16 +35715,16 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
             }
         });
 
-        if (nextPermanentCopies.length) {
-            try {
-                __writePermanentSectionCopies(nextPermanentCopies);
-                __ensurePermanentSectionCopyDisplayIndexes(nextPermanentCopies);
-            } catch (_) { }
-        } else if (permanentNodeIdsToIgnoreInTempState.size && !remoteHasAnyPermanentCopyNode) {
-            // If remote canvas explicitly has no copy nodes, clear local copies.
-            // (Don't call removePermanentSectionCopy here, it would mark dirty.)
-            try { __writePermanentSectionCopies([]); } catch (_) { }
-        }
+	        if (nextPermanentCopies.length) {
+	            try {
+	                __writePermanentSectionCopies(nextPermanentCopies);
+	                __ensurePermanentSectionCopyDisplayIndexes(nextPermanentCopies);
+	            } catch (_) { }
+	        } else if (remoteHasAnyPermanentNode && !remoteHasAnyPermanentCopyNode) {
+	            // If remote canvas explicitly has no copy nodes, clear local copies.
+	            // (Don't call removePermanentSectionCopy here, it would mark dirty.)
+	            try { __writePermanentSectionCopies([]); } catch (_) { }
+	        }
 
         // Avoid unused var lint (kept for future debug).
         void canvasPath;
@@ -35270,41 +35732,29 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
 
     try { applyPermanentLayoutAndTipsFromCanvas(); } catch (e) { console.warn('[Canvas] apply permanent layout/tip from remote canvas failed:', e); }
 
-	    const parsed = await parseCanvasPackageFromFolderFiles(normalizedFiles, folderName || 'sync-pull', { preferBackupJson: false });
-	    const parsedTempState = parsed && parsed.tempState && typeof parsed.tempState === 'object'
-	        ? parsed.tempState
-	        : {};
-	    const parsedPrimaryState = parsed && parsed.primaryState && typeof parsed.primaryState === 'object'
-	        ? parsed.primaryState
-	        : {};
-	    const permanentTreeSnapshot = parsedPrimaryState && parsedPrimaryState.permanentTreeSnapshot
-	        ? parsedPrimaryState.permanentTreeSnapshot
-	        : null;
+		    const parsed = await parseCanvasPackageFromFolderFiles(normalizedFiles, folderName || 'sync-pull', {
+                preferBackupJson: false,
+                syncMode: true
+            });
+		    const parsedTempState = parsed && parsed.tempState && typeof parsed.tempState === 'object'
+		        ? parsed.tempState
+		        : {};
+		    const parsedPrimaryState = parsed && parsed.primaryState && typeof parsed.primaryState === 'object'
+		        ? parsed.primaryState
+		        : {};
+		    const permanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(
+                __rebuildPermanentTreeSnapshotFromSyncFolderFiles(normalizedFiles)
+            ) || (parsedPrimaryState && parsedPrimaryState.permanentTreeSnapshot
+		        ? parsedPrimaryState.permanentTreeSnapshot
+		        : null);
+            try {
+                if (permanentTreeSnapshot) {
+                    __persistPermanentRootMetaFromTreeSnapshot(permanentTreeSnapshot);
+                }
+            } catch (_) { }
 
-    const nextSectionsRaw = Array.isArray(parsedTempState.sections) ? parsedTempState.sections : [];
-    const nextSections = permanentNodeIdsToIgnoreInTempState.size
-        ? nextSectionsRaw.filter((section) => {
-            const id = section && section.id ? String(section.id) : '';
-            return id ? !permanentNodeIdsToIgnoreInTempState.has(id) : true;
-        })
-        : nextSectionsRaw;
-
-    const nextEdgesRaw = Array.isArray(parsedTempState.edges) ? parsedTempState.edges : [];
-    const nextEdges = permanentNodeIdsToIgnoreInTempState.size
-        ? nextEdgesRaw.map((edge) => {
-            const nextEdge = edge && typeof edge === 'object' ? Object.assign({}, edge) : edge;
-            if (!nextEdge || typeof nextEdge !== 'object') return nextEdge;
-            const fromNode = String(nextEdge.fromNode || '').trim();
-            const toNode = String(nextEdge.toNode || '').trim();
-            if (fromNode && fromNode !== 'permanent-section' && permanentNodeIdsToIgnoreInTempState.has(fromNode)) {
-                nextEdge.fromNode = 'permanent-section';
-            }
-            if (toNode && toNode !== 'permanent-section' && permanentNodeIdsToIgnoreInTempState.has(toNode)) {
-                nextEdge.toNode = 'permanent-section';
-            }
-            return nextEdge;
-        })
-        : nextEdgesRaw;
+    const nextSections = Array.isArray(parsedTempState.sections) ? parsedTempState.sections : [];
+    const nextEdges = Array.isArray(parsedTempState.edges) ? parsedTempState.edges : [];
 
     const nextState = __buildPersistedCanvasState({
         sections: nextSections,
@@ -35351,6 +35801,12 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
     __applyCanvasTempStateObject(nextState);
     __finalizeTempNodesLoad({ loadedFromStorage: true });
 
+    try {
+        if (remotePermanentLayoutNodes.length) {
+            __applyPermanentLayoutFromCanvasNodes(remotePermanentLayoutNodes, { removeMissingCopies: true });
+        }
+    } catch (_) { }
+
     try { saveTempNodes({ immediate: true, suppressSyncMarkDirty: true }); } catch (_) { }
 
     // Apply permanent layout and tips to DOM (localStorage updates do not fire storage events in same page).
@@ -35371,10 +35827,10 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
                 return;
             }
             // Remote explicitly has no copy nodes -> clear all copies.
-            if (permanentNodeIdsToIgnoreInTempState.size) {
-                try { el.remove(); } catch (_) { }
-            }
-        });
+	            if (remoteHasAnyPermanentNode) {
+	                try { el.remove(); } catch (_) { }
+	            }
+	        });
         try { __updatePermanentSectionIndexBadges(); } catch (_) { }
     } catch (_) { }
 
@@ -35759,22 +36215,23 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
         return __buildCanvasPartitionedViewStateKey('scroll', baseKey);
     };
 
+    const importedPermanentLayout = __collectImportedPermanentLayoutFromStorage(fullStorage);
+    const toNumber = (value, fallback) => {
+        const parsed = parseFloat(String(value == null ? '' : value));
+        return Number.isFinite(parsed) ? parsed : fallback;
+    };
+
     // 1. Handle Permanent Section (Convert to Snapshot - 永久栏目降级策略)
     // 导入包中的"永久栏目"不可覆盖浏览器真实书签
     // 它将自动转换为一个"快照临时栏目"
-    if (fullStorage && fullStorage[PERMANENT_SECTION_POSITION_STORAGE_KEY]) {
-        const permPos = fullStorage[PERMANENT_SECTION_POSITION_STORAGE_KEY];
+    if (importedPermanentLayout && importedPermanentLayout.main) {
+        const permPos = importedPermanentLayout.main;
         const snapshotId = getNewId('permanent-section');
 
-        // 尝试从核心数据层获取书签树快照
         let snapshotItems = [];
-        let hasBookmarkData = false;
-
         if (primaryState && primaryState.permanentTreeSnapshot) {
-            // 核心数据层包含完整书签树，进行适配
             const bookmarkTree = primaryState.permanentTreeSnapshot;
             snapshotItems = __adaptChromeTreeToCanvasItems(bookmarkTree);
-            hasBookmarkData = snapshotItems.length > 0;
         }
 
         const dateStr = new Date().toISOString().slice(0, 10);
@@ -35782,24 +36239,21 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
         const snapshotTitle = isEn
             ? `[Snapshot] Permanent Sections (${dateStr}) (#${slotLabel})`
             : `[快照] 永久栏目 (${dateStr}) (#${slotLabel})`;
-
         const originalTip = (fullStorage && fullStorage[PERMANENT_MAIN_TIP_STORAGE_KEY]) || '';
 
-        const snapshotSection = {
+        newTempSections.push({
             id: snapshotId,
             title: snapshotTitle,
-            x: parseFloat(permPos.left) || 0,
-            y: parseFloat(permPos.top) || 0,
-            width: parseFloat(permPos.width) || 600,
-            height: parseFloat(permPos.height) || 600,
-            color: '#44cf6e', // Greenish - 颜色区分
+            x: toNumber(permPos.left, 0),
+            y: toNumber(permPos.top, 0),
+            width: toNumber(permPos.width, 600),
+            height: toNumber(permPos.height, 600),
+            color: '#44cf6e',
             items: snapshotItems,
             descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
-            isSnapshot: true // 标记为快照
-        };
-        newTempSections.push(snapshotSection);
+            isSnapshot: true
+        });
 
-        // Remap scroll
         const importedPermanentScroll = readImportedScrollState(PERMANENT_SECTION_SCROLL_KEY);
         const snapshotScrollKey = getImportedTempScrollTargetKey(snapshotId);
         if (importedPermanentScroll && snapshotScrollKey) {
@@ -35809,58 +36263,48 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
 
     // 1.1 Handle Permanent Section Copies (Convert to Snapshot - 永久栏目副本降级策略)
     // 副本同样不可覆盖浏览器真实书签，因此导入时也转换为“快照临时栏目”
-    if (fullStorage && fullStorage[PERMANENT_SECTION_COPIES_STORAGE_KEY]) {
-        const copies = fullStorage[PERMANENT_SECTION_COPIES_STORAGE_KEY];
-        if (Array.isArray(copies) && copies.length) {
-            // 尝试从核心数据层获取书签树快照（所有副本复用同一份快照）
-            let snapshotItems = [];
-            let hasBookmarkData = false;
-            if (primaryState && primaryState.permanentTreeSnapshot) {
-                try {
-                    snapshotItems = __adaptChromeTreeToCanvasItems(primaryState.permanentTreeSnapshot);
-                    hasBookmarkData = snapshotItems.length > 0;
-                } catch (_) { }
-            }
-
-            copies.forEach((copyPos, idx) => {
-                if (!copyPos) return;
-                const oldCopyId = copyPos.id || `copy-${idx}`;
-                const snapshotId = getNewId(`permanent-section-copy:${oldCopyId}`);
-
-                const displayIndex = __normalizePositiveInt(copyPos.displayIndex) || (idx + 1);
-                // Copy 1 (index 1) -> #B (toAlphaLabel(2))
-                const alphaBadge = toAlphaLabel(displayIndex + 1);
-                const dateStr = new Date().toISOString().slice(0, 10);
-                const snapshotTitle = isEn
-                    ? `[Snapshot] Permanent Sections (${dateStr}) (#${alphaBadge})`
-                    : `[快照] 永久栏目 (${dateStr}) (#${alphaBadge})`;
-
-                const copyTipKey = `${PERMANENT_COPY_TIP_STORAGE_PREFIX}${oldCopyId}`;
-                const originalTip = (fullStorage && fullStorage[copyTipKey]) || '';
-
-                const snapshotSection = {
-                    id: snapshotId,
-                    title: snapshotTitle,
-                    x: parseFloat(copyPos.left) || 0,
-                    y: parseFloat(copyPos.top) || 0,
-                    width: parseFloat(copyPos.width) || 600,
-                    height: parseFloat(copyPos.height) || 600,
-                    color: '#44cf6e',
-                    items: snapshotItems,
-                    descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
-                    isSnapshot: true
-                };
-                newTempSections.push(snapshotSection);
-
-                // Remap scroll
-                const oldScrollKey = `${PERMANENT_SECTION_SCROLL_KEY}:${oldCopyId}`;
-                const importedCopyScroll = readImportedScrollState(oldScrollKey);
-                const snapshotScrollKey = getImportedTempScrollTargetKey(snapshotId);
-                if (importedCopyScroll && snapshotScrollKey) {
-                    newScrolls[snapshotScrollKey] = importedCopyScroll;
-                }
-            });
+    if (importedPermanentLayout && Array.isArray(importedPermanentLayout.copies) && importedPermanentLayout.copies.length) {
+        let snapshotItems = [];
+        if (primaryState && primaryState.permanentTreeSnapshot) {
+            try {
+                snapshotItems = __adaptChromeTreeToCanvasItems(primaryState.permanentTreeSnapshot);
+            } catch (_) { }
         }
+
+        importedPermanentLayout.copies.forEach((copyPos, idx) => {
+            if (!copyPos) return;
+            const oldCopyId = String(copyPos.id || '').trim() || `copy-${idx + 1}`;
+            const snapshotId = getNewId(`permanent-section-copy:${oldCopyId}`);
+            const displayIndex = __normalizePositiveInt(copyPos.displayIndex) || (idx + 1);
+            const alphaBadge = toAlphaLabel(displayIndex + 1);
+            const dateStr = new Date().toISOString().slice(0, 10);
+            const snapshotTitle = isEn
+                ? `[Snapshot] Permanent Sections (${dateStr}) (#${alphaBadge})`
+                : `[快照] 永久栏目 (${dateStr}) (#${alphaBadge})`;
+            const copyTipKey = `${PERMANENT_COPY_TIP_STORAGE_PREFIX}${oldCopyId}`;
+            const originalTip = (fullStorage && fullStorage[copyTipKey]) || '';
+            const copyCardState = (copyPos.cardState && typeof copyPos.cardState === 'object') ? copyPos.cardState : {};
+
+            newTempSections.push({
+                id: snapshotId,
+                title: snapshotTitle,
+                x: toNumber(copyCardState.left, 0),
+                y: toNumber(copyCardState.top, 0),
+                width: toNumber(copyCardState.width, 600),
+                height: toNumber(copyCardState.height, 600),
+                color: '#44cf6e',
+                items: snapshotItems,
+                descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
+                isSnapshot: true
+            });
+
+            const oldScrollKey = `${PERMANENT_SECTION_SCROLL_KEY}:${oldCopyId}`;
+            const importedCopyScroll = readImportedScrollState(oldScrollKey);
+            const snapshotScrollKey = getImportedTempScrollTargetKey(snapshotId);
+            if (importedCopyScroll && snapshotScrollKey) {
+                newScrolls[snapshotScrollKey] = importedCopyScroll;
+            }
+        });
     }
 
     // 2. Remap Temp Sections
@@ -36382,8 +36826,11 @@ function __collectBcsFileRefsFromState(stateInput, options = {}) {
     };
 }
 
-function __buildBcsCanvasDataFromState(stateInput, fileRefs) {
+function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
     const normalizedRefs = fileRefs && typeof fileRefs === 'object' ? fileRefs : {};
+    const storageMap = options && options.storageMap && typeof options.storageMap === 'object'
+        ? options.storageMap
+        : null;
     const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
     const persisted = __buildPersistedCanvasState(state);
     const sections = Array.isArray(persisted.sections) ? persisted.sections : [];
@@ -36392,31 +36839,59 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs) {
 
     const canvasData = { nodes: [], edges: [] };
 
+    const existingCanvasLayout = __extractPermanentLayoutFromCanvasNodes(
+        (() => {
+            const canvasRaw = storageMap ? storageMap[BCS_CANVAS_KEY] : null;
+            const canvas = canvasRaw && typeof canvasRaw === 'object'
+                ? __stripBcsGuardFields(canvasRaw)
+                : null;
+            return Array.isArray(canvas && canvas.nodes) ? canvas.nodes : [];
+        })()
+    );
+    const existingMainCardState = existingCanvasLayout && existingCanvasLayout.main
+        ? existingCanvasLayout.main
+        : null;
+    const existingCopyCardStateById = existingCanvasLayout && existingCanvasLayout.copiesById && typeof existingCanvasLayout.copiesById === 'object'
+        ? existingCanvasLayout.copiesById
+        : {};
+
     const permanentSectionEl = document.getElementById('permanentSection');
-    const storedPermanentPos = (() => {
-        try {
-            const raw = localStorage.getItem(PERMANENT_SECTION_POSITION_STORAGE_KEY);
-            return raw ? JSON.parse(raw) : null;
-        } catch (_) {
-            return null;
-        }
-    })();
     const toNumber = (value, fallback) => {
         const n = parseFloat(String(value == null ? '' : value));
         return Number.isFinite(n) ? n : fallback;
     };
     const permanentLeft = permanentSectionEl
         ? (parseFloat(permanentSectionEl.style.left) || 0)
-        : toNumber(storedPermanentPos && storedPermanentPos.left, 0);
+        : toNumber(
+            existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'left')
+                ? existingMainCardState.left
+                : null,
+            0
+        );
     const permanentTop = permanentSectionEl
         ? (parseFloat(permanentSectionEl.style.top) || 0)
-        : toNumber(storedPermanentPos && storedPermanentPos.top, 0);
+        : toNumber(
+            existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'top')
+                ? existingMainCardState.top
+                : null,
+            0
+        );
     const permanentW = permanentSectionEl
         ? (permanentSectionEl.offsetWidth || 600)
-        : toNumber(storedPermanentPos && storedPermanentPos.width, 600);
+        : toNumber(
+            existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'width')
+                ? existingMainCardState.width
+                : null,
+            600
+        );
     const permanentH = permanentSectionEl
         ? (permanentSectionEl.offsetHeight || 600)
-        : toNumber(storedPermanentPos && storedPermanentPos.height, 600);
+        : toNumber(
+            existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'height')
+                ? existingMainCardState.height
+                : null,
+            600
+        );
 
     canvasData.nodes.push({
         id: 'permanent-section',
@@ -36432,9 +36907,13 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs) {
     try {
         const copyIds = new Set();
         const domPositions = new Map();
-        const storedPositions = new Map();
         try {
             Object.keys(normalizedRefs.copyFileMap || {}).forEach((id) => { if (id) copyIds.add(String(id)); });
+        } catch (_) { }
+        try {
+            Object.keys(existingCopyCardStateById).forEach((id) => {
+                if (id) copyIds.add(String(id));
+            });
         } catch (_) { }
         try {
             const stored = __readPermanentSectionCopies();
@@ -36444,7 +36923,6 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs) {
                     const id = String(payload.id);
                     if (!id) return;
                     copyIds.add(id);
-                    storedPositions.set(id, payload);
                 });
             }
         } catch (_) { }
@@ -36469,11 +36947,27 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs) {
         Array.from(copyIds.values()).forEach((copyId) => {
             if (!copyId) return;
             const domPos = domPositions.get(copyId) || null;
-            const storedPos = storedPositions.get(copyId) || null;
-            const left = domPos ? domPos.left : (storedPos ? toNumber(storedPos.left, permanentLeft) : permanentLeft);
-            const top = domPos ? domPos.top : (storedPos ? toNumber(storedPos.top, permanentTop) : permanentTop);
-            const w = domPos ? domPos.width : (storedPos ? toNumber(storedPos.width, permanentW) : permanentW);
-            const h = domPos ? domPos.height : (storedPos ? toNumber(storedPos.height, permanentH) : permanentH);
+            const canvasPos = existingCopyCardStateById[copyId] || null;
+            const left = domPos
+                ? domPos.left
+                : (canvasPos
+                    ? toNumber(canvasPos.left, permanentLeft)
+                    : permanentLeft);
+            const top = domPos
+                ? domPos.top
+                : (canvasPos
+                    ? toNumber(canvasPos.top, permanentTop)
+                    : permanentTop);
+            const w = domPos
+                ? domPos.width
+                : (canvasPos
+                    ? toNumber(canvasPos.width, permanentW)
+                    : permanentW);
+            const h = domPos
+                ? domPos.height
+                : (canvasPos
+                    ? toNumber(canvasPos.height, permanentH)
+                    : permanentH);
             canvasData.nodes.push({
                 id: `permanent-section-copy-${copyId}`,
                 type: 'file',
@@ -37052,7 +37546,16 @@ if (typeof window !== 'undefined') {
             return __buildRuntimeTempSectionFromProtocol(protocolInput, options);
         },
         normalizePermanentTreeSnapshot(treeInput) {
-            return __normalizePermanentTreeSnapshotForProtocol(treeInput);
+            return __buildPermanentTreeSnapshotForJsonProtocol(treeInput);
+        },
+        applyPermanentRootMetaToTreeSnapshot(treeInput, rootMetaInput) {
+            return __applyPermanentRootMetaToTreeSnapshot(treeInput, rootMetaInput);
+        },
+        persistPermanentRootMetaFromTree(treeInput) {
+            return __persistPermanentRootMetaFromTreeSnapshot(treeInput);
+        },
+        readPermanentRootMeta() {
+            return __readPermanentRootMetaStorageValue();
         },
         collectPermanentViewShellSnapshot(sourceInput = null) {
             return __buildPermanentViewShellSnapshotProtocol(sourceInput);
@@ -37376,7 +37879,12 @@ function __buildBcsPermanentPayload(copyId = null) {
     const payload = {
         descriptionMd: __normalizePermanentViewDescriptionMarkdown(raw)
     };
-    if (copyId) payload.copyId = String(copyId);
+    if (copyId) {
+        payload.copyId = String(copyId);
+    } else {
+        const rootMeta = __readPermanentRootMetaStorageValue();
+        if (rootMeta) payload.rootMeta = rootMeta;
+    }
     return payload;
 }
 
@@ -37409,13 +37917,13 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
             exportRoot: __getBcsExportRootSync(),
             exportFormat: __getBcsExportFormatSync()
         });
-        const canvasData = __buildBcsCanvasDataFromState(state, fileRefs);
+        const storage = await __bcsStorageGetAll();
+        const canvasData = __buildBcsCanvasDataFromState(state, fileRefs, { storageMap: storage });
         const dirtyPatch = (options && typeof options.dirtyPatch === 'object') ? options.dirtyPatch : null;
         const forceAll = !!(options && options.forceAll);
         const assumeClean = !!(options && options.assumeClean);
         const immediate = !!(options && options.immediate);
 
-        const storage = await __bcsStorageGetAll();
         const updates = {};
         const removals = [];
 
@@ -37584,6 +38092,15 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
         tempSectionPrevColor: Object.prototype.hasOwnProperty.call(meta, 'tempSectionPrevColor') ? meta.tempSectionPrevColor : null,
         timestamp: Number(meta.timestamp) || Date.now()
     };
+
+    try {
+        const permMainRaw = storage[BCS_PERM_MAIN_KEY];
+        const permMain = permMainRaw && typeof permMainRaw === 'object' ? __stripBcsGuardFields(permMainRaw) : null;
+        const rootMeta = __normalizePermanentRootMeta(permMain && permMain.rootMeta ? permMain.rootMeta : null);
+        if (rootMeta) {
+            __persistPermanentRootMetaStorageValue(rootMeta);
+        }
+    } catch (_) { }
 
     const mdNodeIds = new Set();
 
@@ -38090,67 +38607,11 @@ function __safeParseCanvasStorageJson(raw) {
     }
 }
 
-function __applyPermanentSectionPositionRealtimeSync(rawValue) {
-    if (typeof rawValue !== 'string' || !rawValue) return;
-    const position = __safeParseCanvasStorageJson(rawValue);
-    if (!position || typeof position !== 'object') return;
-
-    const permanentSection = document.getElementById('permanentSection');
-    if (!permanentSection) return;
-
-    const toStyle = (value) => {
-        if (typeof value === 'number' && isFinite(value)) return `${value}px`;
-        return (value === null || typeof value === 'undefined') ? '' : String(value);
-    };
-
-    try {
-        permanentSection.style.transition = 'none';
-        permanentSection.style.transform = 'none';
-        if (Object.prototype.hasOwnProperty.call(position, 'left')) permanentSection.style.left = toStyle(position.left);
-        if (Object.prototype.hasOwnProperty.call(position, 'top')) permanentSection.style.top = toStyle(position.top);
-        if (Object.prototype.hasOwnProperty.call(position, 'width')) permanentSection.style.width = toStyle(position.width);
-        if (Object.prototype.hasOwnProperty.call(position, 'height')) permanentSection.style.height = toStyle(position.height);
-        permanentSection.offsetHeight;
-        permanentSection.style.transition = '';
-    } catch (_) { }
-
-    try { updateCanvasScrollBounds(); } catch (_) { }
-    try { updateScrollbarThumbs(); } catch (_) { }
-    try { scheduleEdgesRender(); } catch (_) { }
-}
-
 function __applyPermanentSectionCopiesRealtimeSync(rawValue) {
     const parsed = __safeParseCanvasStorageJson(rawValue);
     const copies = Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-    const canvasContent = document.getElementById('canvasContent');
-    if (!canvasContent) return;
-
-    const validIds = new Set(copies.map((copy) => String(copy && copy.id || '')).filter(Boolean));
-
-    try {
-        canvasContent.querySelectorAll('.permanent-bookmark-section.permanent-section-copy').forEach((el) => {
-            const copyId = __getPermanentSectionCopyId(el);
-            if (!copyId || !validIds.has(copyId)) {
-                try { el.remove(); } catch (_) { }
-            }
-        });
-    } catch (_) { }
-
-    copies.forEach((copy) => {
-        if (!copy || !copy.id) return;
-        try { __createPermanentSectionCopyFromStorage(copy); } catch (_) { }
-    });
-
-    try { __updatePermanentSectionIndexBadges(); } catch (_) { }
-    try {
-        if (typeof schedulePermanentTreeCopySync === 'function') {
-            schedulePermanentTreeCopySync();
-        } else if (typeof syncPermanentTreeCopiesFromPrimary === 'function') {
-            syncPermanentTreeCopiesFromPrimary();
-        }
-    } catch (_) { }
-    try { updateCanvasScrollBounds(); } catch (_) { }
-    try { updateScrollbarThumbs(); } catch (_) { }
+    try { __writePermanentSectionCopies(copies); } catch (_) { }
+    __syncPermanentLayoutFromBcsCanvasAsync({ removeMissingCopies: true });
 }
 
 function __applyCanvasAppearanceRealtimeSync(rawValue) {
@@ -38448,11 +38909,6 @@ function __handleCanvasRealtimeLocalStorageSync(key, rawValue) {
         return;
     }
 
-    if (key === PERMANENT_SECTION_POSITION_STORAGE_KEY) {
-        __applyPermanentSectionPositionRealtimeSync(rawValue);
-        return;
-    }
-
     if (key === TEMP_DESC_HEIGHT_SETTINGS_KEY || key === PERMANENT_DESC_HEIGHT_SETTINGS_KEY) {
         __applyDescHeightSettingsRealtimeSync(key, rawValue);
         return;
@@ -38497,8 +38953,7 @@ function __debugCanvasSyncState() {
         BCS_SIGNAL_KEY,
         CANVAS_APPEARANCE_SETTINGS_KEY,
         CANVAS_OTHER_SETTINGS_KEY,
-        PERMANENT_SECTION_COPIES_STORAGE_KEY,
-        PERMANENT_SECTION_POSITION_STORAGE_KEY
+        PERMANENT_SECTION_COPIES_STORAGE_KEY
     ];
 
     const partitionKeys = [
