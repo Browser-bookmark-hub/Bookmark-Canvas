@@ -55,6 +55,12 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
     transition-delay: 0s;
 }
 
+html.side-panel-mode .search-container.side-panel-search-expanded .search-results-panel,
+html.side-panel-mode .search-container.side-panel-search-collapsing .search-results-panel {
+    left: -1px;
+    right: -1px;
+}
+
 /* ==================== 空输入提示（Canvas Suggestions Header） ==================== */
 .search-empty-suggestions-hint {
     display: flex;
@@ -125,6 +131,12 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
     color: #0ea5e9;
     border-color: #0ea5e9;
     background: rgba(14, 165, 233, 0.14);
+}
+
+.canvas-bookmark-domain-control-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
 /* Keep bookmark/domain mode strip fixed at top while result list scrolls. */
@@ -220,6 +232,20 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
     padding-left: 28px;
 }
 
+.search-result-item.domain-child {
+    position: relative;
+}
+
+.search-result-item.domain-child::before {
+    content: "";
+    position: absolute;
+    left: 18px;
+    top: 8px;
+    bottom: 8px;
+    width: 1px;
+    background: rgba(14, 165, 233, 0.18);
+}
+
 .search-result-item.bookmark-child .search-result-title {
     font-weight: 500;
     font-size: 12px;
@@ -254,6 +280,43 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.search-result-item.bookmark-group .search-result-title,
+.search-result-item[data-type="bookmark-item"] .search-result-title {
+    align-items: center;
+    white-space: normal;
+}
+
+.search-result-item.bookmark-group .search-result-title.search-result-title-multiline,
+.search-result-item[data-type="bookmark-item"] .search-result-title.search-result-title-multiline {
+    align-items: flex-start;
+}
+
+.search-result-bookmark-title-text {
+    min-width: 0;
+    flex: 1 1 auto;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    white-space: normal;
+    text-overflow: ellipsis;
+    line-height: 1.32;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.search-result-item.bookmark-child .search-result-bookmark-title-text {
+    font-weight: 500;
+}
+
+.search-result-badge-disabled,
+.search-loc-chip-disabled {
+    cursor: default !important;
+    pointer-events: none;
+    opacity: 0.72;
 }
 
 /* 序号徽章 */
@@ -355,6 +418,36 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.search-result-link-row {
+    margin-top: 3px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.search-result-external-link {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #2563eb;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.search-result-external-link:hover {
+    color: #1d4ed8;
+}
+
+[data-theme="dark"] .search-result-external-link {
+    color: #60a5fa;
+}
+
+[data-theme="dark"] .search-result-external-link:hover {
+    color: #93c5fd;
 }
 
 /* =============================================================================
@@ -528,6 +621,53 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
     color: #059669;
 }
 
+.search-domain-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.search-domain-toggle-btn {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(14, 165, 233, 0.22);
+    border-radius: 7px;
+    background: rgba(14, 165, 233, 0.08);
+    color: #0284c7;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.search-domain-toggle-btn:hover {
+    background: rgba(14, 165, 233, 0.14);
+    border-color: rgba(14, 165, 233, 0.38);
+    color: #0369a1;
+}
+
+.search-domain-toggle-btn i {
+    font-size: 11px;
+}
+
+.search-domain-host-line {
+    margin-top: 1px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.search-domain-children-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
 /* 暗色主题 badge 适配 */
 [data-theme="dark"] .search-result-badge.temp {
     background: rgba(59, 130, 246, 0.2);
@@ -552,6 +692,18 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
 [data-theme="dark"] .search-result-badge.permanent {
     background: rgba(16, 185, 129, 0.2);
     color: #34d399;
+}
+
+[data-theme="dark"] .search-domain-toggle-btn {
+    border-color: rgba(96, 165, 250, 0.28);
+    background: rgba(96, 165, 250, 0.12);
+    color: #7dd3fc;
+}
+
+[data-theme="dark"] .search-domain-toggle-btn:hover {
+    background: rgba(96, 165, 250, 0.18);
+    border-color: rgba(96, 165, 250, 0.4);
+    color: #bae6fd;
 }
 
 /* ==================== 画布元素高亮样式 ==================== */

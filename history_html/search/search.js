@@ -40,6 +40,7 @@ const searchUiState = {
 
     // Cache for bookmark-domain grouping (per query)
     domainIndexCache: null,
+    domainGroupCollapse: new Map(),
     // Domain grouping level: 'root' (registrable) or 'host' (subdomain)
     domainGrouping: 'host',
 
@@ -407,6 +408,7 @@ function resetMainSearchUI(options = {}) {
             searchUiState.selectedIndex = -1;
             searchUiState.bookmarkGroupModel = null;
             searchUiState.bookmarkGroupCollapse = new Map();
+            searchUiState.domainGroupCollapse = new Map();
         }
     } catch (_) { }
 
@@ -650,15 +652,15 @@ function handleSearchKeydown(e) {
                             let nextGrouping = currentGrouping;
 
                             if (currentType === 'domain') {
-                                if (currentGrouping === 'host') {
-                                    nextGrouping = 'root';
+                                if (currentGrouping === 'root') {
+                                    nextGrouping = 'host';
                                 } else {
                                     if (hasBookmark) {
                                         nextType = 'bookmark';
                                     } else if (hasFolder) {
                                         nextType = 'folder';
                                     } else {
-                                        nextGrouping = 'host';
+                                        nextGrouping = 'root';
                                     }
                                 }
                             } else if (currentType === 'bookmark') {
@@ -666,14 +668,14 @@ function handleSearchKeydown(e) {
                                     nextType = 'folder';
                                 } else {
                                     nextType = 'domain';
-                                    nextGrouping = 'host';
+                                    nextGrouping = 'root';
                                 }
                             } else if (currentType === 'folder') {
                                 nextType = 'domain';
-                                nextGrouping = 'host';
+                                nextGrouping = 'root';
                             } else {
                                 nextType = 'domain';
-                                nextGrouping = 'host';
+                                nextGrouping = 'root';
                             }
 
                             searchUiState.bookmarkTypeFilter = nextType;
@@ -830,6 +832,17 @@ function handleSearchResultsPanelClick(e) {
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results') return;
 
+    const externalLink = e.target.closest('.search-result-external-link');
+    if (externalLink) {
+        e.preventDefault();
+        e.stopPropagation();
+        const url = externalLink.dataset
+            ? String(externalLink.dataset.searchUrl || externalLink.getAttribute('href') || '').trim()
+            : String(externalLink.getAttribute('href') || '').trim();
+        openSearchResultExternalUrl(url);
+        return;
+    }
+
     const exportBtn = e.target.closest('.canvas-bookmark-to-temp-btn');
     if (exportBtn) {
         e.preventDefault();
@@ -852,6 +865,10 @@ function handleSearchResultsPanelClick(e) {
 
         // Update filter and re-render (do NOT close panel)
         searchUiState.bookmarkTypeFilter = type;
+        if (type === 'domain') {
+            searchUiState.domainGrouping = 'root';
+            try { localStorage.setItem(DOMAIN_GROUP_PREF_KEY, 'root'); } catch (_) { }
+        }
         const groups = searchUiState.bookmarkGroupModel;
         if (Array.isArray(groups)) {
             const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
@@ -887,11 +904,35 @@ function handleSearchResultsPanelClick(e) {
         return;
     }
 
+    const domainToggleBtn = e.target.closest('.search-domain-toggle-btn');
+    if (domainToggleBtn) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+
+        const itemEl = domainToggleBtn.closest('.search-result-item');
+        if (!itemEl) return;
+        const index = parseInt(itemEl.getAttribute('data-index') || '-1', 10);
+        const item = searchUiState.results[index];
+        if (!item || item.type !== 'domain-group') return;
+
+        const domainKey = String(item.domain || item.title || '').trim().toLowerCase();
+        if (!domainKey) return;
+
+        setDomainGroupCollapsed(domainKey, item.isExpanded === true);
+        rerenderCanvasBookmarkResults(index);
+        return;
+    }
+
     // 1. Handle Copy-Jump Badges AND Location Chips (Unified)
     // .search-result-badge-interactive (Legacy or direct Permanent badges)
     // .search-loc-chip, .search-loc-chip-row (New Bookmark Group Location chips)
     const interactive = e.target.closest('.search-result-badge-interactive, .search-loc-chip, .search-loc-chip-row');
     if (interactive) {
+        if (interactive.dataset && interactive.dataset.searchNavDisabled === 'true') {
+            return;
+        }
         e.preventDefault();
         e.stopPropagation();
 
@@ -2853,8 +2894,12 @@ function buildCanvasSearchDb() {
 
     // 5. 书签索引 (Bookmark Index)
     // 支持：永久栏目（cachedCurrentTree）+ 临时栏目（CanvasState.tempSections.items）
+    let bookmarkSearchOrder = 0;
     const pushBookmarkIndexItem = (bItem) => {
         if (!bItem || !bItem.id) return;
+        if (!Number.isFinite(Number(bItem.bookmarkSearchOrder))) {
+            bItem.bookmarkSearchOrder = bookmarkSearchOrder++;
+        }
         bookmarkIndex.push(bItem);
         itemById.set(String(bItem.id), bItem);
     };
@@ -2995,6 +3040,7 @@ function buildCanvasSearchDb() {
                         sectionId: String(section.id),
                         sectionLabel,
                         sectionTitle,
+                        sectionSource: typeof section.source === 'string' ? section.source : '',
                         originalId: item.originalId ? String(item.originalId) : '',
                         namedPath,
                         color: sectionColor,
@@ -3329,7 +3375,56 @@ function scoreCanvasSearchItem(item, query, options = {}) {
     return score;
 }
 
-function buildCanvasBookmarkGroupModel(scoredPairs) {
+function getCanvasBookmarkSearchOrderValue(item) {
+    const raw = Number(item && item.bookmarkSearchOrder);
+    return Number.isFinite(raw) ? raw : Number.POSITIVE_INFINITY;
+}
+
+function compareCanvasBookmarkSearchItems(leftItem, rightItem, scope = null) {
+    const left = leftItem || null;
+    const right = rightItem || null;
+    if (!left && !right) return 0;
+    if (!left) return 1;
+    if (!right) return -1;
+
+    const scopeDelta = getCanvasScopePriorityForItem(right, scope) - getCanvasScopePriorityForItem(left, scope);
+    if (scopeDelta !== 0) return scopeDelta;
+
+    const leftOrder = getCanvasBookmarkSearchOrderValue(left);
+    const rightOrder = getCanvasBookmarkSearchOrderValue(right);
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+
+    const titleDelta = String(left.title || '').localeCompare(String(right.title || ''));
+    if (titleDelta !== 0) return titleDelta;
+
+    return String(left.url || '').localeCompare(String(right.url || ''));
+}
+
+function compareCanvasBookmarkScoredPairs(leftPair, rightPair, scope = null) {
+    const itemDelta = compareCanvasBookmarkSearchItems(
+        leftPair && leftPair.item ? leftPair.item : null,
+        rightPair && rightPair.item ? rightPair.item : null,
+        scope
+    );
+    if (itemDelta !== 0) return itemDelta;
+
+    const leftRaw = Number(leftPair && leftPair.rawScore);
+    const rightRaw = Number(rightPair && rightPair.rawScore);
+    if (Number.isFinite(rightRaw) && Number.isFinite(leftRaw) && rightRaw !== leftRaw) {
+        return rightRaw - leftRaw;
+    }
+
+    const leftScore = Number(leftPair && leftPair.s);
+    const rightScore = Number(rightPair && rightPair.s);
+    if (Number.isFinite(rightScore) && Number.isFinite(leftScore) && rightScore !== leftScore) {
+        return rightScore - leftScore;
+    }
+
+    return 0;
+}
+
+function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
+    const scope = options && typeof options === 'object' ? (options.scope || null) : null;
     const groupsMap = new Map();
     const isZh = currentLang === 'zh_CN';
 
@@ -3357,6 +3452,7 @@ function buildCanvasBookmarkGroupModel(scoredPairs) {
     for (const pair of scoredPairs) {
         const item = pair ? pair.item : null;
         const s = pair ? pair.s : -Infinity;
+        const rawScore = pair ? pair.rawScore : -Infinity;
         if (!item || item.type !== 'bookmark-item') continue;
 
         // Generate Content Key
@@ -3377,32 +3473,22 @@ function buildCanvasBookmarkGroupModel(scoredPairs) {
         }
 
         const group = getOrCreateGroup(key, { title, url, nodeType });
-        group.children.push({ item, s });
+        group.children.push({ item, s, rawScore });
         group.bestScore = Math.max(group.bestScore, s);
     }
 
     const groups = Array.from(groupsMap.values());
 
     for (const g of groups) {
-        // Sort children by "relevance" (though they are same content, maybe sort by location/source?)
-        // For now, keep score sort (which might be identical) or sort by Source (Perm vs Temp)
-        g.children.sort((a, b) => {
-            if (b.s !== a.s) return b.s - a.s;
-            // Secondary sort: Permanent first?
-            const isAPerm = a.item.source === 'permanent';
-            const isBPerm = b.item.source === 'permanent';
-            if (isAPerm && !isBPerm) return -1;
-            if (!isAPerm && isBPerm) return 1;
-            return 0;
-        });
+        g.children.sort((a, b) => compareCanvasBookmarkScoredPairs(a, b, scope));
         g.header.matchesCount = g.children.length;
+        g.firstChild = g.children[0] || null;
+        g.firstOrder = g.firstChild ? getCanvasBookmarkSearchOrderValue(g.firstChild.item) : Number.POSITIVE_INFINITY;
     }
 
-    // Sort groups by best score
     groups.sort((a, b) => {
-        if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
-        // Secondary: Count
-        if (b.children.length !== a.children.length) return b.children.length - a.children.length;
+        const childDelta = compareCanvasBookmarkScoredPairs(a.firstChild, b.firstChild, scope);
+        if (childDelta !== 0) return childDelta;
         return String(a.header.title || '').localeCompare(String(b.header.title || ''));
     });
 
@@ -3430,13 +3516,7 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
         // The render function will use this 'locations' array to draw chips.
 
         const sortedChildren = Array.isArray(g.children)
-            ? g.children.slice().sort((left, right) => {
-                const scopeDelta = getCanvasScopePriorityForItem(right.item, fullscreenScope)
-                    - getCanvasScopePriorityForItem(left.item, fullscreenScope);
-                if (scopeDelta !== 0) return scopeDelta;
-                if (right.s !== left.s) return right.s - left.s;
-                return 0;
-            })
+            ? g.children.slice().sort((left, right) => compareCanvasBookmarkScoredPairs(left, right, fullscreenScope))
             : [];
 
         const locations = sortedChildren.map(c => {
@@ -3454,7 +3534,11 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
                 color = '#059669'; // Fixed Green for Perm
             } else {
                 // Temporary
-                locationName = item.sectionTitle || (isZh ? '临时栏目' : 'Temp Section');
+                if (String(item.sectionSource || '').trim() === 'search-result') {
+                    locationName = '';
+                } else {
+                    locationName = item.sectionTitle || (isZh ? '临时栏目' : 'Temp Section');
+                }
                 // Use section color if available 
                 // item.color should already be populated from buildCanvasSearchDb -> section.color
             }
@@ -3649,18 +3733,10 @@ function searchCanvasAndRender(query) {
         }
     }
 
-    // 按分数排序
-    scored.sort((a, b) => {
-        if (b.s !== a.s) return b.s - a.s;
-        // 稳定排序：按标题
-        const ta = a.item.title || a.item.label || '';
-        const tb = b.item.title || b.item.label || '';
-        return ta.localeCompare(tb);
-    });
-
     // Bookmark Mode: Group results by "section card" (永久栏目 / 临时栏目)
     if (mode === 'bookmark') {
-        const groups = buildCanvasBookmarkGroupModel(scored);
+        scored.sort((a, b) => compareCanvasBookmarkScoredPairs(a, b, fullscreenScope));
+        const groups = buildCanvasBookmarkGroupModel(scored, { scope: fullscreenScope });
         searchUiState.bookmarkGroupModel = groups;
         const groupedResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
         const preferredIndex = getPreferredSearchResultIndexByScope(groupedResults, fullscreenScope);
@@ -3671,6 +3747,15 @@ function searchCanvasAndRender(query) {
         });
         return;
     }
+
+    // 按分数排序
+    scored.sort((a, b) => {
+        if (b.s !== a.s) return b.s - a.s;
+        // 稳定排序：按标题
+        const ta = a.item.title || a.item.label || '';
+        const tb = b.item.title || b.item.label || '';
+        return ta.localeCompare(tb);
+    });
 
     const MAX_RESULTS = 20;
     const finalResults = scored.slice(0, MAX_RESULTS).map(x => x.item);
@@ -3967,6 +4052,27 @@ function getDomainGroupKey(url) {
     return level === 'host' ? host : getRegistrableDomain(host);
 }
 
+function getDomainCollapseKey(domain) {
+    const level = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
+    return `${level}:${String(domain || '').trim().toLowerCase()}`;
+}
+
+function isDomainGroupCollapsed(domain) {
+    const key = getDomainCollapseKey(domain);
+    if (!key) return true;
+    const stored = searchUiState && searchUiState.domainGroupCollapse
+        ? searchUiState.domainGroupCollapse.get(key)
+        : undefined;
+    if (typeof stored === 'boolean') return stored;
+    return true;
+}
+
+function setDomainGroupCollapsed(domain, collapsed) {
+    const key = getDomainCollapseKey(domain);
+    if (!key || !searchUiState || !searchUiState.domainGroupCollapse) return;
+    searchUiState.domainGroupCollapse.set(key, !!collapsed);
+}
+
 function ensureDomainCacheForQuery(query) {
     const q = String(query || '').trim().toLowerCase();
     const treeKey = getDomainCacheKey();
@@ -3992,7 +4098,20 @@ function ensureDomainCacheForQuery(query) {
             map.set(domain, entry);
         }
         entry.count += 1;
-        entry.items.push({ title: item.title, url: item.url, id: item.id });
+        entry.items.push({
+            id: item.id,
+            type: 'bookmark-item',
+            title: item.title,
+            url: item.url,
+            nodeType: item.nodeType || 'bookmark',
+            source: item.source || 'permanent',
+            sectionId: item.sectionId || null,
+            color: item.color || '#0ea5e9',
+            host: host || '',
+            __title: item.__title || '',
+            __url: item.__url || '',
+            __path: item.__path || ''
+        });
         if (host) {
             entry.hostSet.add(host);
         }
@@ -4037,6 +4156,59 @@ function ensureDomainCacheForQuery(query) {
 function getDomainResultsForQuery(query) {
     const cache = ensureDomainCacheForQuery(query);
     return Array.isArray(cache.results) ? cache.results : [];
+}
+
+function buildCanvasDomainDisplayResultsForQuery(query) {
+    const cache = ensureDomainCacheForQuery(query);
+    const parentResults = Array.isArray(cache.results) ? cache.results : [];
+    const displayResults = [];
+    const groupLevel = cache && cache.groupLevel === 'root' ? 'root' : 'host';
+
+    for (const parent of parentResults) {
+        if (!parent) continue;
+
+        const domainKey = String(parent.domain || parent.title || '').trim().toLowerCase();
+        const collapsed = isDomainGroupCollapsed(domainKey);
+        displayResults.push(Object.assign({}, parent, {
+            isCollapsed: collapsed,
+            isExpanded: !collapsed
+        }));
+
+        if (collapsed) continue;
+
+        const entry = cache.map instanceof Map ? cache.map.get(domainKey) : null;
+        const childItems = entry && Array.isArray(entry.items) ? entry.items.slice() : [];
+        childItems.sort((a, b) => {
+            if (groupLevel === 'root') {
+                const hostDelta = String(a && a.host || '').localeCompare(String(b && b.host || ''));
+                if (hostDelta !== 0) return hostDelta;
+            }
+            const titleDelta = String(a && a.title || a && a.url || '').localeCompare(String(b && b.title || b && b.url || ''));
+            if (titleDelta !== 0) return titleDelta;
+            return String(a && a.url || '').localeCompare(String(b && b.url || ''));
+        });
+
+        childItems.forEach((child) => {
+            if (!child) return;
+            displayResults.push({
+                id: child.id,
+                type: 'bookmark-item',
+                nodeType: 'bookmark',
+                title: child.title,
+                url: child.url,
+                source: child.source || 'permanent',
+                sectionId: child.sectionId || null,
+                color: child.color || parent.color || '#0ea5e9',
+                isChild: true,
+                domainChild: true,
+                domain: domainKey,
+                domainHost: child.host || '',
+                groupLevel
+            });
+        });
+    }
+
+    return displayResults;
 }
 
 function getDomainItemsForTemp(domain, query) {
@@ -4143,8 +4315,8 @@ function renderCanvasSearchResults(results, options = {}) {
         const folderCount = countType('folder');
         try {
             const q = options.query || searchUiState.query || '';
-            domainResults = getDomainResultsForQuery(q);
-            domainCount = domainResults.length;
+            domainResults = buildCanvasDomainDisplayResultsForQuery(q);
+            domainCount = getDomainResultsForQuery(q).length;
         } catch (_) { }
 
         bookmarkModeCounts = { bookmarkCount, folderCount, domainCount };
@@ -4228,6 +4400,9 @@ function renderCanvasSearchResults(results, options = {}) {
     };
 
     const queryText = String(searchUiState.query || '');
+    const fullscreenScope = getCanvasFullscreenSearchScope();
+    const disableLocationJumpBadges = Boolean(fullscreenScope);
+    const compactBookmarkToolbar = Boolean(fullscreenScope);
     const markQueryInText = (text) => {
         const safe = escapeHtml(String(text || ''));
         if (!queryText) return safe;
@@ -4238,6 +4413,12 @@ function renderCanvasSearchResults(results, options = {}) {
         } catch (_) {
             return safe;
         }
+    };
+    const renderExternalLinkHtml = (url, extraClass = '') => {
+        const safeUrl = String(url || '').trim();
+        if (!safeUrl) return '';
+        const className = ['search-result-external-link', extraClass].filter(Boolean).join(' ');
+        return `<a class="${className}" href="${escapeHtml(safeUrl)}" data-search-url="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${markQueryInText(safeUrl)}</a>`;
     };
 
     // Canvas Bookmark Mode: render a top toggle row (counts + click to switch)
@@ -4250,12 +4431,16 @@ function renderCanvasSearchResults(results, options = {}) {
         const showDomainBtn = domainCount > 0;
 
         if (showBookmarkBtn || showFolderBtn || showDomainBtn) {
-            const makeBtn = ({ type, icon, color, count }) => {
-                const isActive = active === type;
+            const makeBtn = ({ type, icon, color, count, isActiveOverride = null }) => {
+                const isActive = (typeof isActiveOverride === 'boolean') ? isActiveOverride : active === type;
                 const bg = isActive ? `${color}22` : 'transparent';
                 const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
                 const text = isActive ? color : 'var(--text-secondary)';
-                return `<button class="canvas-bookmark-type-btn" data-type="${type}" style="display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:8px; border:1px solid ${border}; background:${bg}; color:${text}; font-size:12px; font-weight:600; cursor:pointer;">
+                const gapPx = compactBookmarkToolbar ? 5 : 6;
+                const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
+                const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
+                const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
+                return `<button class="canvas-bookmark-type-btn${compactBookmarkToolbar ? ' canvas-bookmark-type-btn-compact' : ''}" data-type="${type}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
                         <i class="fas ${icon}" style="color:${color};"></i>
                         <span>${count}</span>
                     </button>`;
@@ -4267,36 +4452,40 @@ function renderCanvasSearchResults(results, options = {}) {
             const folderBtn = showFolderBtn
                 ? makeBtn({ type: 'folder', icon: 'fa-folder', color: '#2563eb', count: folderCount })
                 : '';
-            const domainBtn = showDomainBtn
-                ? makeBtn({ type: 'domain', icon: 'fa-globe', color: '#0ea5e9', count: domainCount })
-                : '';
             const domainGrouping = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
             const subdomainLabel = isZh ? '子域名' : 'Subdomain';
-            const rootDomainLabel = isZh ? '主域名' : 'Root';
             const domainGroupingTitle = isZh
                 ? '域名粒度：点击切换 主域名 / 子域名'
                 : 'Domain granularity: click to toggle root/subdomain';
             const subActive = active === 'domain' && domainGrouping === 'host';
             const rootActive = active === 'domain' && domainGrouping === 'root';
+            const domainBtn = showDomainBtn
+                ? makeBtn({ type: 'domain', icon: 'fa-globe', color: '#0ea5e9', count: domainCount, isActiveOverride: rootActive })
+                : '';
             const shouldShowDomainGranularity = showDomainBtn && active === 'domain';
             const domainGranularityBtn = shouldShowDomainGranularity
-                ? `<button class="canvas-bookmark-domain-granularity-btn ${subActive ? 'active' : ''}" type="button" data-domain-group="host" title="${escapeHtml(domainGroupingTitle)}">${escapeHtml(subdomainLabel)}</button>
-                   <button class="canvas-bookmark-domain-granularity-btn ${rootActive ? 'active' : ''}" type="button" data-domain-group="root" title="${escapeHtml(domainGroupingTitle)}">${escapeHtml(rootDomainLabel)}</button>`
+                ? `<button class="canvas-bookmark-domain-granularity-btn ${subActive ? 'active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-domain-granularity-btn-compact' : ''}" type="button" data-domain-group="host" title="${escapeHtml(domainGroupingTitle)}"${compactBookmarkToolbar ? ' style="padding:4px 7px; font-size:10px;"' : ''}>${escapeHtml(subdomainLabel)}</button>`
+                : '';
+            const domainControls = domainBtn
+                ? `<div class="canvas-bookmark-domain-control-group${compactBookmarkToolbar ? ' canvas-bookmark-domain-control-group-compact' : ''}">${domainBtn}${domainGranularityBtn}</div>`
                 : '';
 
             const visibleCount = displayResults.filter(r => r && (r.type === 'bookmark-group' || r.type === 'bookmark-item')).length;
             const exportLabel = isZh
                 ? `生成临时栏目${visibleCount ? ` (${visibleCount})` : ''}`
-                : `To Temp Section${visibleCount ? ` (${visibleCount})` : ''}`;
+                : `To Temp${visibleCount ? ` (${visibleCount})` : ''}`;
 
-            const showExportBtn = active !== 'domain';
+            const showExportBtn = !compactBookmarkToolbar && active !== 'domain';
             const exportBtnHtml = showExportBtn
-                ? `<button class="canvas-bookmark-to-temp-btn" type="button">${escapeHtml(exportLabel)}</button>`
+                ? `<button class="canvas-bookmark-to-temp-btn${compactBookmarkToolbar ? ' canvas-bookmark-to-temp-btn-compact' : ''}" type="button"${compactBookmarkToolbar ? ' style="padding:5px 8px; font-size:11px; border-radius:7px;"' : ''}>${escapeHtml(exportLabel)}</button>`
                 : '';
             const justifyStyle = showExportBtn ? 'space-between' : 'flex-start';
+            const toolbarGap = compactBookmarkToolbar ? 6 : 8;
+            const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
+            const controlGap = compactBookmarkToolbar ? 6 : 8;
 
-            html += `<div class="canvas-bookmark-type-toggle" style="display:flex; align-items:center; justify-content:${justifyStyle}; gap:8px; padding:8px 12px;">
-                <div style="display:flex; align-items:center; gap:8px;">${bookmarkBtn}${folderBtn}${domainBtn}${domainGranularityBtn}</div>
+            html += `<div class="canvas-bookmark-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:${justifyStyle}; gap:${toolbarGap}px; padding:${toolbarPadding};">
+                <div style="display:flex; align-items:center; gap:${controlGap}px;">${bookmarkBtn}${folderBtn}${domainControls}</div>
                 ${exportBtnHtml}
             </div>`;
         }
@@ -4383,6 +4572,10 @@ function renderCanvasSearchResults(results, options = {}) {
                 const count = Number(item.count || 0);
                 const subdomainCount = Number(item.subdomainCount || 0);
                 const isRootGroup = String(item.groupLevel || '') === 'root';
+                const isExpanded = item.isExpanded === true;
+                const toggleTitle = isExpanded
+                    ? (isZh ? '收起当前域名结果' : 'Collapse domain results')
+                    : (isZh ? '展开当前域名结果' : 'Expand domain results');
                 const countLabel = isRootGroup
                     ? (isZh
                         ? `${count} 个书签 · ${subdomainCount} 个子域名`
@@ -4393,7 +4586,12 @@ function renderCanvasSearchResults(results, options = {}) {
                 </div>`;
                 title = `<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; color:var(--text-normal);">${domainText}</div>`;
                 descHtml = `<div class="search-result-match" style="margin-top:2px; color:var(--text-muted); font-size:11px;">${escapeHtml(countLabel)}</div>`;
-                badge = makeColoredBadge(isZh ? '域名' : 'Domain', 'domain');
+                badge = `<div class="search-domain-actions">
+                    ${makeColoredBadge(isZh ? '域名' : 'Domain', 'domain')}
+                    <button class="search-domain-toggle-btn" type="button" data-domain="${escapeHtml(item.domain || item.title || '')}" aria-label="${escapeHtml(toggleTitle)}" title="${escapeHtml(toggleTitle)}">
+                        <i class="fas ${isExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i>
+                    </button>
+                </div>`;
                 break;
             }
 
@@ -4446,24 +4644,31 @@ function renderCanvasSearchResults(results, options = {}) {
                 indexLabel = iconHtml;
 
                 // 2. Title & URL
-                const titleText = escapeHtml(item.title || (isZh ? '（无标题）' : '(Untitled)'));
-                title = `<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; color:var(--text-normal);">${titleText}</div>`;
+                const titleText = markQueryInText(item.title || (isZh ? '（无标题）' : '(Untitled)'));
+                title = `<div class="search-result-bookmark-title-text">${titleText}</div>`;
 
                 let urlHtml = '';
                 if (item.url) {
-                    urlHtml = `<div style="color:var(--text-tertiary); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:0px;">${escapeHtml(item.url)}</div>`;
+                    urlHtml = `<div class="search-result-link-row">${renderExternalLinkHtml(item.url)}</div>`;
                 }
 
                 // 3. Location Chips (Grouped & Labeled)
                 let locationsHtml = '';
-                if (item.locations && item.locations.length > 0) {
+                if (!disableLocationJumpBadges && item.locations && item.locations.length > 0) {
 
                     const perms = item.locations.filter(l => l.source === 'permanent');
                     const temps = item.locations.filter(l => l.source !== 'permanent');
 
                     // Helper to make chip
                     const makeChip = (text, color, attr, extraStyle = '') => {
-                        return `<div class="search-loc-chip" ${attr} style="cursor:pointer; display:inline-flex; align-items:center; border:1px solid ${color}; color:${color}; background:${color}08; border-radius:4px; padding:0 5px; font-size:11px; height:18px; line-height:16px; box-sizing:border-box; ${extraStyle}" title="${escapeHtml(text)}"><div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;">${text}</div></div>`;
+                        const chipClass = disableLocationJumpBadges
+                            ? 'search-loc-chip search-loc-chip-disabled'
+                            : 'search-loc-chip';
+                        const chipAttr = disableLocationJumpBadges
+                            ? 'data-search-nav-disabled="true" aria-disabled="true"'
+                            : attr;
+                        const chipCursor = disableLocationJumpBadges ? 'cursor:default;' : 'cursor:pointer;';
+                        return `<div class="${chipClass}" ${chipAttr} style="${chipCursor} display:inline-flex; align-items:center; border:1px solid ${color}; color:${color}; background:${color}08; border-radius:4px; padding:0 5px; font-size:11px; height:18px; line-height:16px; box-sizing:border-box; ${extraStyle}" title="${escapeHtml(text)}"><div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;">${text}</div></div>`;
                     };
 
                     // A. Permanent Row
@@ -4514,10 +4719,16 @@ function renderCanvasSearchResults(results, options = {}) {
 
                         const tempBadges = temps.map(loc => {
                             const color = loc.color || '#3b82f6';
-                            const seq = loc.label ? loc.label : '';
-                            const htmlTitle = escapeHtml(loc.title);
-                            // Content: "A-1 Title"
-                            const content = seq ? `<b>${escapeHtml(seq)}</b> <span style="opacity:0.8; margin-left:3px;">${htmlTitle}</span>` : htmlTitle;
+                            const seq = loc.label ? String(loc.label).trim() : '';
+                            const rawTitle = String(loc.title || '').trim();
+                            const htmlTitle = escapeHtml(rawTitle);
+                            const shouldShowTitle = !!rawTitle && (!seq || rawTitle.toLowerCase() !== seq.toLowerCase());
+                            let content = htmlTitle;
+                            if (seq && shouldShowTitle) {
+                                content = `<b>${escapeHtml(seq)}</b> <span style="opacity:0.8; margin-left:3px;">${htmlTitle}</span>`;
+                            } else if (seq) {
+                                content = `<b>${escapeHtml(seq)}</b>`;
+                            }
                             const attr = `data-loc-id="${loc.id}" data-loc-source="${loc.source}" data-loc-section="${loc.sectionId || ''}"`;
                             return makeChip(content, color, attr);
                         });
@@ -4533,8 +4744,8 @@ function renderCanvasSearchResults(results, options = {}) {
                 }
 
                 descHtml = `<div class="search-result-match" style="display:flex; flex-direction:column; width:100%; min-width:0;">
-                    ${urlHtml}
                     ${locationsHtml}
+                    ${urlHtml}
                 </div>`;
 
                 badge = '';
@@ -4555,7 +4766,18 @@ function renderCanvasSearchResults(results, options = {}) {
                     indexLabel = `<span class="search-child-dot"><i class="fas ${icon}"></i></span>`;
                 }
 
-                title = escapeHtml(item.title || (isZh ? '（无标题）' : '(Untitled)'));
+                title = `<span class="search-result-bookmark-title-text">${markQueryInText(item.title || (isZh ? '（无标题）' : '(Untitled)'))}</span>`;
+                if (item.domainChild) {
+                    const hostText = String(item.domainHost || '').trim().toLowerCase();
+                    const showHost = hostText && (String(item.groupLevel || '') === 'root' || hostText !== String(item.domain || '').trim().toLowerCase());
+                    const hostLabel = showHost
+                        ? `<div class="search-domain-host-line">${escapeHtml(hostText)}</div>`
+                        : '';
+                    const linkHtml = item.url
+                        ? `<div class="search-result-link-row">${renderExternalLinkHtml(item.url)}</div>`
+                        : '';
+                    descHtml = `<div class="search-result-match search-domain-children-meta">${hostLabel}${linkHtml}</div>`;
+                }
 
                 // 子项不再显示右侧 badge（更像“折叠列表”）
                 if (!item.isChild) {
@@ -4572,7 +4794,7 @@ function renderCanvasSearchResults(results, options = {}) {
 
                 // [Feature] 如果是永久栏目书签，且存在副本 -> 显示跳转按钮 (#A, #B...)
                 // (无论是否为子项都显示，方便在聚合列表中跳转)
-                if (item.source === 'permanent') {
+                if (!disableLocationJumpBadges && item.source === 'permanent' && !item.domainChild) {
                     try {
                         const copies = getPermanentCopyShellsForSearch();
                         // Only show interactive badges if there are ACTUALLY copies (B, C...)
@@ -4582,10 +4804,18 @@ function renderCanvasSearchResults(results, options = {}) {
                             let buttonsHtml = '';
 
                             // Button A (Main)
-                            const styleBase = `cursor:pointer; margin-left:4px; padding:0 6px; font-family:monospace; font-weight:bold; color:var(--text-secondary); background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:4px; font-size:11px;`;
+                            const badgeCursor = disableLocationJumpBadges ? 'default' : 'pointer';
+                            const badgeClass = disableLocationJumpBadges
+                                ? 'search-result-badge-disabled'
+                                : 'search-result-badge-interactive';
+                            const styleBase = `cursor:${badgeCursor}; margin-left:4px; padding:0 6px; font-family:monospace; font-weight:bold; color:var(--text-secondary); background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:4px; font-size:11px;`;
 
                             // #A
-                            buttonsHtml += `<span class="search-result-badge-interactive" data-copy-id="null" data-display-index="1" style="${styleBase}" title="Jump to Copy #A">#A</span>`;
+                            const disabledAttrBase = `data-search-nav-disabled="true" aria-disabled="true"`;
+                            const mainAttr = disableLocationJumpBadges
+                                ? disabledAttrBase
+                                : `data-copy-id="null" data-display-index="1"`;
+                            buttonsHtml += `<span class="${badgeClass}" ${mainAttr} style="${styleBase}" title="Jump to Copy #A">#A</span>`;
 
                             const toAlphaLocal = (num) => {
                                 if (num <= 0) return '';
@@ -4599,7 +4829,10 @@ function renderCanvasSearchResults(results, options = {}) {
                                 const dIdx = getPermanentCopySearchDisplayIndex(c, idx);
 
                                 const label = toAlphaLocal(dIdx);
-                                buttonsHtml += `<span class="search-result-badge-interactive" data-copy-id="${escapeHtml(copyId)}" data-display-index="${dIdx}" style="${styleBase}" title="Jump to Copy #${label}">#${label}</span>`;
+                                const copyAttr = disableLocationJumpBadges
+                                    ? disabledAttrBase
+                                    : `data-copy-id="${escapeHtml(copyId)}" data-display-index="${dIdx}"`;
+                                buttonsHtml += `<span class="${badgeClass}" ${copyAttr} style="${styleBase}" title="Jump to Copy #${label}">#${label}</span>`;
                             });
 
                             if (buttonsHtml) {
@@ -4610,19 +4843,25 @@ function renderCanvasSearchResults(results, options = {}) {
                 }
 
                 // [Feature] 临时栏目跳转按钮 (Similar to Permanent Buttons)
-                if (item.source === 'temporary' && item.sectionId) {
+                if (!disableLocationJumpBadges && item.source === 'temporary' && item.sectionId && !item.domainChild) {
                     const sectionName = item.sectionLabel || item.sectionTitle || (isZh ? '临时' : 'Temp');
                     // Style: mimic permanent interactive badge but allow colored border
                     const sectionColor = item.color || '#3b82f6';
                     // Utilize the same robust style
-                    const styleBase = `cursor:pointer; margin-left:4px; padding:0 6px; font-family:monospace; font-weight:bold; color:var(--text-secondary); background:var(--bg-secondary); border:1px solid ${sectionColor}80; border-radius:4px; font-size:11px;`;
+                    const chipCursor = disableLocationJumpBadges ? 'default' : 'pointer';
+                    const chipClass = disableLocationJumpBadges
+                        ? 'search-loc-chip search-loc-chip-disabled'
+                        : 'search-loc-chip';
+                    const styleBase = `cursor:${chipCursor}; margin-left:4px; padding:0 6px; font-family:monospace; font-weight:bold; color:var(--text-secondary); background:var(--bg-secondary); border:1px solid ${sectionColor}80; border-radius:4px; font-size:11px;`;
 
                     // Use .search-loc-chip class as it triggers 'handleSearchResultsPanelClick' with data-loc-... attributes
-                    const attr = `data-loc-id="${item.id}" data-loc-source="temporary" data-loc-section="${item.sectionId}"`;
+                    const attr = disableLocationJumpBadges
+                        ? `data-search-nav-disabled="true" aria-disabled="true"`
+                        : `data-loc-id="${item.id}" data-loc-source="temporary" data-loc-section="${item.sectionId}"`;
                     // Use sectionTitle for tooltip
                     const tooltip = escapeHtml(item.sectionTitle || sectionName);
 
-                    const buttonsHtml = `<span class="search-loc-chip" ${attr} style="${styleBase}" title="${tooltip}">${escapeHtml(sectionName)}</span>`;
+                    const buttonsHtml = `<span class="${chipClass}" ${attr} style="${styleBase}" title="${tooltip}">${escapeHtml(sectionName)}</span>`;
 
                     badge = `<div style="display:flex; align-items:center; flex-shrink:0;">${buttonsHtml}</div><div style="width:8px;"></div>${badge}`;
                 }
@@ -4707,13 +4946,17 @@ function renderCanvasSearchResults(results, options = {}) {
 
         // Bookmark/Folder meta: show URL only (no path)
         if (item.type === 'bookmark-item' && item.url) {
-            descHtml = `<div class="search-result-match" style="margin-top:4px; color:var(--text-muted); font-size:11px; line-height:1.35; overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${markQueryInText(item.url)}</div>`;
+            descHtml = item.domainChild
+                ? descHtml
+                : `<div class="search-result-match search-result-link-row">${renderExternalLinkHtml(item.url)}</div>`;
         }
 
         const extraClasses = [];
         if (item.type === 'bookmark-group') extraClasses.push('bookmark-group');
         if (item.type === 'bookmark-group-more') extraClasses.push('bookmark-more');
+        if (item.type === 'domain-group') extraClasses.push('domain-group');
         if (item.isChild) extraClasses.push('bookmark-child');
+        if (item.domainChild) extraClasses.push('domain-child');
         const rowClassName = ['search-result-item', isSelected].concat(extraClasses).filter(Boolean).join(' ');
 
         html += `
@@ -4728,7 +4971,40 @@ function renderCanvasSearchResults(results, options = {}) {
     });
 
     panel.innerHTML = html;
+
+    const syncBookmarkResultTitleLayout = () => {
+        if (!panel || typeof panel.querySelectorAll !== 'function') return;
+        const titleEls = panel.querySelectorAll('.search-result-bookmark-title-text');
+        titleEls.forEach((el) => {
+            const row = el.closest('.search-result-title');
+            if (!row) return;
+
+            let lineHeight = 15.84;
+            try {
+                const computed = window.getComputedStyle ? window.getComputedStyle(el) : null;
+                const rawLineHeight = computed ? parseFloat(computed.lineHeight) : 0;
+                if (Number.isFinite(rawLineHeight) && rawLineHeight > 0) {
+                    lineHeight = rawLineHeight;
+                } else {
+                    const fontSize = computed ? parseFloat(computed.fontSize) : 12;
+                    if (Number.isFinite(fontSize) && fontSize > 0) {
+                        lineHeight = fontSize * 1.32;
+                    }
+                }
+            } catch (_) { }
+
+            const measuredHeight = Math.max(
+                Number(el.scrollHeight || 0),
+                Number(el.getBoundingClientRect ? el.getBoundingClientRect().height : 0)
+            );
+            const isMultiline = measuredHeight > (lineHeight * 1.5);
+            row.classList.toggle('search-result-title-multiline', isMultiline);
+        });
+    };
+
+    syncBookmarkResultTitleLayout();
     showSearchResultsPanel();
+    requestAnimationFrame(syncBookmarkResultTitleLayout);
     updateSearchResultSelection(searchUiState.selectedIndex);
 
 }
@@ -4793,6 +5069,40 @@ function yieldToMainThread() {
         } catch (_) { }
         setTimeout(resolve, 0);
     });
+}
+
+function rerenderCanvasBookmarkResults(selectedIndex = 0) {
+    const query = String(searchUiState && searchUiState.query || '').trim();
+    const groups = searchUiState ? searchUiState.bookmarkGroupModel : null;
+    if (Array.isArray(groups)) {
+        const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
+        renderCanvasSearchResults(nextResults, {
+            view: 'canvas',
+            query,
+            selectedIndex: Number.isFinite(selectedIndex) ? selectedIndex : 0
+        });
+        return;
+    }
+    searchCanvasAndRender(query);
+}
+
+function openSearchResultExternalUrl(url) {
+    const safeUrl = String(url || '').trim();
+    if (!safeUrl) return false;
+
+    try {
+        if (typeof window.openBookmarkNewTab === 'function') {
+            window.openBookmarkNewTab(safeUrl);
+            return true;
+        }
+    } catch (_) { }
+
+    try {
+        window.open(safeUrl, '_blank', 'noopener,noreferrer');
+        return true;
+    } catch (_) {
+        return false;
+    }
 }
 
 async function buildPermanentNodeMap(root) {
@@ -5330,57 +5640,283 @@ function highlightSearchTreeItemOutline(treeItem, color = '#3b82f6', doClear = t
     } catch (_) { }
 }
 
-function scrollTreeItemIntoView(treeItem) {
-    if (!treeItem) return;
+let searchTreeItemLocateCenterToken = 0;
 
-    const getScrollableContainer = (el) => {
-        if (!el || !el.closest) return null;
+function getTreeItemScrollableContainer(treeItem) {
+    if (!treeItem || !treeItem.closest) return null;
 
-        const preferred = el.closest('.permanent-section-body, .temp-node-body');
-        if (preferred) return preferred;
+    const preferred = treeItem.closest('.permanent-section-body, .temp-node-body');
+    if (preferred) return preferred;
 
-        let current = el.parentElement;
-        while (current && current !== document.body && current !== document.documentElement) {
-            try {
-                const style = window.getComputedStyle(current);
-                const overflowY = style ? String(style.overflowY || '').toLowerCase() : '';
-                const canScrollY = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
-                    && current.scrollHeight > current.clientHeight + 1;
-                if (canScrollY) return current;
-            } catch (_) { }
-            current = current.parentElement;
-        }
-
-        return null;
-    };
-
-    const container = getScrollableContainer(treeItem);
-    if (container) {
+    let current = treeItem.parentElement;
+    while (current && current !== document.body && current !== document.documentElement) {
         try {
-            const itemRect = treeItem.getBoundingClientRect();
-            const containerRect = container.getBoundingClientRect();
-            const itemCenter = itemRect.top + itemRect.height / 2;
-            const containerCenter = containerRect.top + containerRect.height / 2;
-            const delta = itemCenter - containerCenter;
-            if (Math.abs(delta) > 1) {
-                container.scrollTop = Math.max(0, container.scrollTop + delta);
-            }
-            return;
+            const style = window.getComputedStyle(current);
+            const overflowY = style ? String(style.overflowY || '').toLowerCase() : '';
+            const canScrollY = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
+                && current.scrollHeight > current.clientHeight + 1;
+            if (canScrollY) return current;
         } catch (_) { }
+        current = current.parentElement;
     }
 
-    if (typeof treeItem.scrollIntoView !== 'function') return;
+    return null;
+}
+
+function getScrollableTreeContainerScrollBaseKey(container) {
+    if (!container || !container.classList) return null;
+
     try {
-        treeItem.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+        if (container.classList.contains('permanent-section-body')) {
+            const sectionEl = container.closest('.permanent-bookmark-section');
+            if (sectionEl && typeof __getPermanentSectionScrollBaseKey === 'function') {
+                return __getPermanentSectionScrollBaseKey(sectionEl);
+            }
+        }
+    } catch (_) { }
+
+    try {
+        if (container.classList.contains('temp-node-body')) {
+            const nodeEl = container.closest('.temp-canvas-node');
+            const sectionId = nodeEl && nodeEl.dataset ? nodeEl.dataset.sectionId : null;
+            if (sectionId && typeof __getTempSectionScrollBaseKey === 'function') {
+                return __getTempSectionScrollBaseKey(sectionId);
+            }
+        }
+    } catch (_) { }
+
+    return null;
+}
+
+function persistScrollableTreeContainerPosition(container) {
+    if (!container || typeof saveViewState !== 'function') return;
+
+    const baseKey = getScrollableTreeContainerScrollBaseKey(container);
+    if (!baseKey) return;
+
+    try {
+        saveViewState('scroll', baseKey, {
+            top: Math.max(0, container.scrollTop || 0),
+            left: Math.max(0, container.scrollLeft || 0)
+        });
+    } catch (_) { }
+}
+
+function lockScrollableTreeContainerRestore(container, durationMs = 1800) {
+    if (!container || !container.dataset) return;
+    try {
+        container.dataset.scrollRestoreBlockUntil = String(Date.now() + Math.max(0, durationMs));
+    } catch (_) { }
+}
+
+function getScrollableTreeContainerVisualScale(container) {
+    if (!container || typeof container.getBoundingClientRect !== 'function') {
+        return { rect: null, scaleX: 1, scaleY: 1 };
+    }
+
+    try {
+        const rect = container.getBoundingClientRect();
+        const clientWidth = Math.max(1, Number(container.clientWidth) || 0);
+        const clientHeight = Math.max(1, Number(container.clientHeight) || 0);
+        let scaleX = rect && Number.isFinite(rect.width) && rect.width > 0
+            ? rect.width / clientWidth
+            : 1;
+        let scaleY = rect && Number.isFinite(rect.height) && rect.height > 0
+            ? rect.height / clientHeight
+            : 1;
+
+        if (!Number.isFinite(scaleX) || scaleX <= 0) scaleX = 1;
+        if (!Number.isFinite(scaleY) || scaleY <= 0) scaleY = 1;
+
+        return { rect, scaleX, scaleY };
+    } catch (_) {
+        return { rect: null, scaleX: 1, scaleY: 1 };
+    }
+}
+
+function centerTreeItemInScrollableContainer(treeItem, options = {}) {
+    if (!treeItem) return false;
+
+    const container = getTreeItemScrollableContainer(treeItem);
+    if (!container) return false;
+
+    try {
+        const itemRect = treeItem.getBoundingClientRect();
+        const scaleInfo = getScrollableTreeContainerVisualScale(container);
+        const containerRect = scaleInfo.rect || container.getBoundingClientRect();
+        const scaleY = Number.isFinite(scaleInfo.scaleY) && scaleInfo.scaleY > 0
+            ? scaleInfo.scaleY
+            : 1;
+        const viewportHeight = Math.max(1, Number(container.clientHeight) || 0);
+        const currentScrollTop = Math.max(0, Number(container.scrollTop) || 0);
+        const innerVisualTop = containerRect.top + ((Number(container.clientTop) || 0) * scaleY);
+        const itemVisualTop = Number.isFinite(itemRect.top) ? itemRect.top : innerVisualTop;
+        const itemVisualHeight = Number.isFinite(itemRect.height) && itemRect.height > 0
+            ? itemRect.height
+            : Math.max(1, (Number(treeItem.offsetHeight) || 0) * scaleY);
+        const itemTopInLayout = currentScrollTop + ((itemVisualTop - innerVisualTop) / scaleY);
+        const itemHeightInLayout = Math.max(1, itemVisualHeight / scaleY);
+        const rawTargetTop = itemTopInLayout - ((viewportHeight - itemHeightInLayout) / 2);
+        const maxScrollTop = Math.max(0, (container.scrollHeight || 0) - (container.clientHeight || 0));
+        const targetTop = Math.max(0, Math.min(maxScrollTop, rawTargetTop));
+        lockScrollableTreeContainerRestore(container, options.lockMs);
+        if (Math.abs((container.scrollTop || 0) - targetTop) > 0.5) {
+            container.scrollTop = targetTop;
+        }
+        if (options.persist !== false) {
+            persistScrollableTreeContainerPosition(container);
+        }
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function waitForSearchLocateAnimationFrame() {
+    return new Promise((resolve) => {
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => resolve());
+            return;
+        }
+        setTimeout(resolve, 16);
+    });
+}
+
+function waitForSearchLocateDelay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+async function waitForSearchLocateAnimationFrames(count = 1) {
+    const total = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+    for (let i = 0; i < total; i++) {
+        await waitForSearchLocateAnimationFrame();
+    }
+}
+
+async function waitForTreeMutationsToSettle(treeContainer, options = {}) {
+    const idleMs = Number.isFinite(options.idleMs) ? Math.max(0, options.idleMs) : 80;
+    const maxMs = Number.isFinite(options.maxMs) ? Math.max(idleMs, options.maxMs) : 700;
+
+    if (!treeContainer || typeof MutationObserver === 'undefined') {
+        await waitForSearchLocateDelay(idleMs);
         return;
+    }
+
+    await new Promise((resolve) => {
+        let finished = false;
+        let idleTimer = 0;
+        let maxTimer = 0;
+        let observer = null;
+
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            if (idleTimer) clearTimeout(idleTimer);
+            if (maxTimer) clearTimeout(maxTimer);
+            try {
+                if (observer) observer.disconnect();
+            } catch (_) { }
+            resolve();
+        };
+
+        const scheduleIdle = () => {
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(finish, idleMs);
+        };
+
+        try {
+            observer = new MutationObserver(() => {
+                scheduleIdle();
+            });
+            observer.observe(treeContainer, {
+                subtree: true,
+                childList: true,
+                attributes: true,
+                attributeFilter: ['class', 'data-children-loaded', 'data-start-index']
+            });
+        } catch (_) { }
+
+        scheduleIdle();
+        maxTimer = setTimeout(finish, maxMs);
+    });
+}
+
+function expandTreeFolderVisualState(treeItem) {
+    if (!treeItem) return null;
+    const treeNode = treeItem.closest('.tree-node');
+    const children = treeNode ? treeNode.querySelector(':scope > .tree-children') : null;
+    if (!children) return null;
+
+    try { children.classList.add('expanded'); } catch (_) { }
+    try {
+        const toggle = treeItem.querySelector('.tree-toggle');
+        if (toggle) toggle.classList.add('expanded');
     } catch (_) { }
     try {
-        treeItem.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-        return;
+        const folderIcon = treeItem.querySelector('.tree-icon.fas.fa-folder, .tree-icon.fas.fa-folder-open');
+        if (folderIcon) {
+            folderIcon.classList.remove('fa-folder');
+            folderIcon.classList.add('fa-folder-open');
+        }
     } catch (_) { }
-    try {
-        treeItem.scrollIntoView();
-    } catch (_) { }
+
+    return children;
+}
+
+async function finalizeTreeItemCentering(treeContainer, resolveTarget, token) {
+    await waitForSearchLocateAnimationFrames(2);
+    await waitForTreeMutationsToSettle(treeContainer, { idleMs: 90, maxMs: 900 });
+
+    if (token !== searchTreeItemLocateCenterToken) return null;
+    const currentTarget = (typeof resolveTarget === 'function') ? resolveTarget() : null;
+    if (!currentTarget) return null;
+
+    if (!centerTreeItemInScrollableContainer(currentTarget, { lockMs: 2200, persist: true })) {
+        if (typeof currentTarget.scrollIntoView === 'function') {
+            try {
+                currentTarget.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+            } catch (_) {
+                try { currentTarget.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (_) { }
+            }
+        }
+    }
+
+    await waitForSearchLocateAnimationFrames(1);
+    if (token !== searchTreeItemLocateCenterToken) return null;
+
+    const latestTarget = (typeof resolveTarget === 'function') ? resolveTarget() : null;
+    if (latestTarget) {
+        centerTreeItemInScrollableContainer(latestTarget, { lockMs: 2200, persist: true });
+    }
+    return latestTarget || currentTarget;
+}
+
+async function ensurePermanentSearchFolderExpanded(treeItem) {
+    if (!treeItem || treeItem.dataset.nodeType !== 'folder') return;
+    const children = expandTreeFolderVisualState(treeItem);
+    if (!children) return;
+
+    if (treeItem.dataset && treeItem.dataset.childrenLoaded === 'false' && treeItem.dataset.hasChildren === 'true') {
+        if (typeof loadPermanentFolderChildrenLazy === 'function') {
+            await loadPermanentFolderChildrenLazy(treeItem.dataset.nodeId, children, 0, null);
+        }
+    }
+}
+
+async function ensureTempSearchFolderExpanded(sectionObj, treeItem) {
+    if (!treeItem || treeItem.dataset.nodeType !== 'folder') return;
+    const children = expandTreeFolderVisualState(treeItem);
+    if (!children) return;
+
+    if (treeItem.dataset && treeItem.dataset.childrenLoaded === 'false' && treeItem.dataset.hasChildren === 'true') {
+        if (window.CanvasModule && typeof window.CanvasModule.loadFolderChildren === 'function') {
+            window.CanvasModule.loadFolderChildren(sectionObj, treeItem.dataset.nodeId, children);
+            return;
+        }
+        if (typeof loadFolderChildren === 'function') {
+            loadFolderChildren(sectionObj, treeItem.dataset.nodeId, children);
+        }
+    }
 }
 
 function shouldSkipCanvasPanForMaximizedTarget(elementId, type) {
@@ -5465,6 +6001,7 @@ function resolvePermanentSectionElementForSearch(copyId = null) {
 async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
     const id = String(nodeId || '');
     if (!id) return false;
+    const locateToken = ++searchTreeItemLocateCenterToken;
 
     // 先把永久栏目卡片定位到视口（复用 Storage-first 的缩放/平移逻辑）
     try {
@@ -5485,9 +6022,11 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
                     const copyEl = resolvePermanentSectionElementForSearch(options.copyId);
                     if (copyEl) {
                         locateToElement(copyEl);
+                        await waitForSearchLocateAnimationFrames(2);
                     }
                 } else {
                     await locateCanvasElement('permanentSection', 'permanent-section', { color: options.color || '#059669' });
+                    await waitForSearchLocateAnimationFrames(2);
                 }
             }
         }
@@ -5540,7 +6079,7 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
                 // 子节点未加载：先加载首批
                 if (folderEl.dataset && folderEl.dataset.childrenLoaded === 'false' && folderEl.dataset.hasChildren === 'true') {
                     if (typeof loadPermanentFolderChildrenLazy === 'function') {
-                        loadPermanentFolderChildrenLazy(folderId, children, 0, null);
+                        await loadPermanentFolderChildrenLazy(folderId, children, 0, null);
                     }
                 }
 
@@ -5552,7 +6091,7 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
                     if (!loadMoreBtn) break;
                     const startIndex = parseInt(loadMoreBtn.dataset.startIndex, 10) || 0;
                     if (typeof loadPermanentFolderChildrenLazy === 'function') {
-                        loadPermanentFolderChildrenLazy(folderId, children, startIndex, loadMoreBtn);
+                        await loadPermanentFolderChildrenLazy(folderId, children, startIndex, loadMoreBtn);
                     } else {
                         break;
                     }
@@ -5568,8 +6107,26 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
     if (!target) return false;
 
     try { expandAncestorsForTreeItem(target, treeContainer); } catch (_) { }
-    scrollTreeItemIntoView(target);
-    highlightSearchTreeItemOutline(target, options.color || '#3b82f6');
+    try { await ensurePermanentSearchFolderExpanded(target); } catch (_) { }
+    const resolvePermanentTarget = () => {
+        const latestSection = resolvePermanentSectionElementForSearch(options.copyId || null);
+        const latestTree = (latestSection && latestSection.querySelector('.bookmark-tree'))
+            || (latestSection && latestSection.querySelector('#bookmarkTree'))
+            || document.getElementById('bookmarkTree');
+        return latestTree
+            ? latestTree.querySelector(`.tree-item[data-node-id="${CSS.escape(id)}"]`)
+            : null;
+    };
+    const settledPermanentTarget = await finalizeTreeItemCentering(treeContainer, resolvePermanentTarget, locateToken);
+    highlightSearchTreeItemOutline(settledPermanentTarget || target, options.color || '#3b82f6');
+
+    const permanentHighlightColor = options.color || '#3b82f6';
+    setTimeout(() => {
+        if (locateToken !== searchTreeItemLocateCenterToken) return;
+        const freshTarget = resolvePermanentTarget();
+        if (!freshTarget) return;
+        highlightSearchTreeItemOutline(freshTarget, permanentHighlightColor, false);
+    }, 220);
 
     return true;
 }
@@ -5578,12 +6135,14 @@ async function locateBookmarkItemInTempTree(sectionId, itemId, options = {}) {
     const sid = String(sectionId || '');
     const id = String(itemId || '');
     if (!sid || !id) return false;
+    const locateToken = ++searchTreeItemLocateCenterToken;
 
     // 先把临时栏目卡片定位到视口
     try {
         if (typeof currentView !== 'undefined' && currentView === 'canvas') {
             if (!isMaximizedTempSectionActive(sid)) {
                 await locateCanvasElement(sid, 'temp-section', { color: options.color || '#3b82f6' });
+                await waitForSearchLocateAnimationFrames(2);
             }
         }
     } catch (_) { }
@@ -5694,26 +6253,35 @@ async function locateBookmarkItemInTempTree(sectionId, itemId, options = {}) {
     if (!target) return false;
 
     try { expandAncestorsForTreeItem(target, treeContainer); } catch (_) { }
-    scrollTreeItemIntoView(target);
-    highlightSearchTreeItemOutline(target, options.color || '#3b82f6');
+    try { await ensureTempSearchFolderExpanded(sectionObj, target); } catch (_) { }
+    const resolveTempTarget = () => {
+        const freshSection = document.getElementById(sid);
+        if (!freshSection) return null;
+        const freshTree = freshSection.querySelector('.temp-bookmark-tree');
+        return freshTree
+            ? freshTree.querySelector(`.tree-item[data-node-id="${CSS.escape(id)}"]`)
+            : null;
+    };
+    const settledTempTarget = await finalizeTreeItemCentering(treeContainer, resolveTempTarget, locateToken);
+    highlightSearchTreeItemOutline(settledTempTarget || target, options.color || '#3b82f6');
 
     // [Fix] Retry highlight to combat potential re-renders (anti-flash)
     // Re-query the container to ensure we are highlighting the FRESH DOM element
     const highlightColor = options.color || '#3b82f6';
     const retry = (delay) => {
         setTimeout(() => {
+            if (locateToken !== searchTreeItemLocateCenterToken) return;
             const freshSection = document.getElementById(sid);
             if (!freshSection) return;
             const freshTree = freshSection.querySelector('.temp-bookmark-tree');
             if (!freshTree) return;
             const t = freshTree.querySelector(`.tree-item[data-node-id="${CSS.escape(id)}"]`);
-            if (t) highlightSearchTreeItemOutline(t, highlightColor, false);
+            if (t) {
+                highlightSearchTreeItemOutline(t, highlightColor, false);
+            }
         }, delay);
     };
-    retry(100);
-    retry(300);
-    retry(600);
-    retry(1200); // Add one more late check
+    retry(220);
 
     return true;
 }
@@ -6188,6 +6756,24 @@ async function activateCanvasSearchResultAtIndex(index) {
         return;
     }
 
+    if (item.type === 'domain-group') {
+        const domainKey = String(item.domain || item.title || '').trim().toLowerCase();
+        const fullscreenScope = getCanvasFullscreenSearchScope();
+        if (fullscreenScope && domainKey) {
+            setDomainGroupCollapsed(domainKey, item.isExpanded === true);
+            rerenderCanvasBookmarkResults(idx);
+            return;
+        }
+
+        hideSearchResultsPanel();
+        try {
+            const inputEl = document.getElementById('searchInput');
+            if (inputEl) inputEl.value = '';
+        } catch (_) { }
+        createTempSectionFromDomainResult(item.domain || item.title || '');
+        return;
+    }
+
     hideSearchResultsPanel();
 
     // 清空输入框 (仅针对非群组结果，群组结果需保留文字以维持高亮状态)
@@ -6198,10 +6784,6 @@ async function activateCanvasSearchResultAtIndex(index) {
         } catch (_) { }
     }
 
-    if (item.type === 'domain-group') {
-        createTempSectionFromDomainResult(item.domain || item.title || '');
-        return;
-    }
     // Case 1: Group Result (Aggregation Item)
     if (item.type === 'group-result') {
         // DO NOT clear input for group search, as requested by user.
