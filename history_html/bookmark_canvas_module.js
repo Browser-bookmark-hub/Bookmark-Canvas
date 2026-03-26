@@ -12719,7 +12719,6 @@ function locateToTempSection(sectionId) {
 // 让永久栏目本身可以拖动
 // =============================================================================
 
-const PERMANENT_SECTION_POSITION_STORAGE_KEY = 'bcs:perm:position';
 const PERMANENT_SECTION_COPIES_STORAGE_KEY = 'bcs:perm:copies';
 const PERMANENT_MAIN_TIP_STORAGE_KEY = 'bcs:perm:tip-main';
 const PERMANENT_COPY_TIP_STORAGE_PREFIX = 'bcs:perm:tip-copy-';
@@ -12756,10 +12755,6 @@ function __toPermanentViewCardStateStoragePayload(cardState) {
         }
     });
     return out;
-}
-
-function __normalizePermanentSectionPositionStoragePayload(position) {
-    return __toPermanentViewCardStateStoragePayload(position);
 }
 
 function __normalizePermanentSectionCopyStoragePayload(copy) {
@@ -14236,8 +14231,6 @@ function savePermanentSectionPosition(sectionEl) {
         }
         __writePermanentSectionCopies(copies);
     }
-    try { localStorage.removeItem(PERMANENT_SECTION_POSITION_STORAGE_KEY); } catch (_) { }
-
     // Canonical layout persistence is bcs:canvas node geometry.
     try {
         saveTempNodes({
@@ -14250,7 +14243,6 @@ function savePermanentSectionPosition(sectionEl) {
 
 function loadPermanentSectionPosition() {
     try {
-        try { localStorage.removeItem(PERMANENT_SECTION_POSITION_STORAGE_KEY); } catch (_) { }
         const permanentSection = document.getElementById('permanentSection');
         if (!permanentSection) return;
 
@@ -35618,12 +35610,6 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
         return false;
     };
 
-    const toPx = (value) => {
-        const n = parseFloat(String(value == null ? '' : value));
-        if (!Number.isFinite(n)) return '';
-        return `${Math.round(n)}px`;
-    };
-
     const applyPermanentLayoutAndTipsFromCanvas = () => {
         const canvasCandidates = Array.from(normalizedFiles.keys())
             .map((key) => normalizePath(key))
@@ -35703,11 +35689,7 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
                 remotePermanentCopyIds.add(copyId);
                 nextPermanentCopies.push({
                     id: copyId,
-                    displayIndex,
-                    left: toPx(node.x),
-                    top: toPx(node.y),
-                    width: toPx(node.width),
-                    height: toPx(node.height)
+                    displayIndex
                 });
 
                 try { __persistPermanentTipStorageValue(`${PERMANENT_COPY_TIP_STORAGE_PREFIX}${copyId}`, descSource); } catch (_) { }

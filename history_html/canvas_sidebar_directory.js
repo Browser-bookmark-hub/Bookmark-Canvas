@@ -5,7 +5,7 @@
   const CANVAS_CONTENT_ID = 'canvasContent';
   const REFRESH_INTERVAL_MS = 1200;
   const PREVIEW_LIMIT = 260;
-  const PERMANENT_POSITION_STORAGE_KEY = 'bcs:perm:position';
+  const BCS_CANVAS_KEY = 'bcs:canvas';
   const PERMANENT_COPIES_STORAGE_KEY = 'bcs:perm:copies';
   const PERMANENT_MAIN_TIP_STORAGE_KEY = 'bcs:perm:tip-main';
   const PERMANENT_COPY_TIP_STORAGE_PREFIX = 'bcs:perm:tip-copy-';
@@ -399,10 +399,20 @@
     return list;
   }
 
+  function hasPermanentMainInCanvasStorage(storage) {
+    if (!storage || typeof storage !== 'object') return false;
+    const raw = storage[BCS_CANVAS_KEY];
+    const parsed = raw && typeof raw === 'object'
+      ? raw
+      : (typeof raw === 'string' ? parseJSON(raw, null) : null);
+    const nodes = parsed && Array.isArray(parsed.nodes) ? parsed.nodes : [];
+    return nodes.some((node) => node && String(node.id || '').trim() === 'permanent-section');
+  }
+
   function buildPreviewSnapshotSectionsFromStorage(storage) {
     if (!storage || typeof storage !== 'object') return [];
 
-    const hasOriginal = !!storage[PERMANENT_POSITION_STORAGE_KEY];
+    const hasOriginal = hasPermanentMainInCanvasStorage(storage);
     const copies = readPermanentCopiesFromStorage(storage);
     if (!hasOriginal && !copies.length) return [];
 
