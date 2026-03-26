@@ -3553,7 +3553,7 @@ body.sidebar-resizing * {
     padding: 6px 8px;
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.12s ease, color 0.12s ease;
     user-select: none;
 }
 
@@ -7836,6 +7836,8 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     /* 外层 overflow:hidden 会自动裁剪圆角，无需单独设置 */
     /* 背景色填充整个区域 */
     background: var(--bg-elevated);
+    overscroll-behavior: contain;
+    isolation: isolate;
 }
 
 /* 永久栏目内的书签树样式调整 */
@@ -8309,10 +8311,40 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     margin: 0;
     /* 背景色填充整个区域 */
     background: linear-gradient(to bottom, #ffffff 0%, #f8fafc 100%);
+    overscroll-behavior: contain;
+    isolation: isolate;
 }
 
 [data-theme="dark"] .temp-node-body {
     background: linear-gradient(to bottom, #1f242b 0%, #14171c 100%);
+}
+
+.permanent-section-body.canvas-scroll-perf-active,
+.temp-node-body.canvas-scroll-perf-active {
+    contain: paint;
+    will-change: scroll-position, transform;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+
+.permanent-bookmark-section.canvas-node-maximized .permanent-section-body,
+.temp-canvas-node.canvas-node-maximized .temp-node-body {
+    will-change: scroll-position, transform;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+
+.permanent-section-body.canvas-scroll-perf-active .bookmark-tree,
+.temp-node-body.canvas-scroll-perf-active .bookmark-tree,
+.temp-node-body.canvas-scroll-perf-active .temp-bookmark-tree,
+.permanent-bookmark-section.canvas-node-maximized .bookmark-tree,
+.temp-canvas-node.canvas-node-maximized .bookmark-tree,
+.temp-canvas-node.canvas-node-maximized .temp-bookmark-tree {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
 }
 
 .temp-node-description-container {

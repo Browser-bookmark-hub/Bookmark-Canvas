@@ -863,6 +863,165 @@ function __removeCanvasPartitionedViewStateKey(kind, baseKey) {
     try { localStorage.removeItem(baseKey); } catch (_) { }
 }
 
+const CANVAS_SECTION_SCROLL_SAVE_DEBOUNCE_MS = 160;
+const CANVAS_SECTION_SCROLL_PERF_ACTIVE_MS = 220;
+const __canvasSectionScrollRegistry = new WeakMap();
+
+function __getCanvasSectionScrollRegistryEntry(body) {
+    if (!body || typeof body !== 'object') return null;
+    let entry = __canvasSectionScrollRegistry.get(body);
+    if (!entry) {
+        entry = {
+            flushTimer: 0,
+            perfTimer: 0,
+            baseKey: '',
+            partitionKey: __getCanvasViewPartitionKey(),
+            latest: null
+        };
+        __canvasSectionScrollRegistry.set(body, entry);
+    }
+    return entry;
+}
+
+function __readCanvasSectionScrollPayload(body) {
+    if (!body) return { top: 0, left: 0 };
+    return {
+        top: Math.max(0, body.scrollTop || 0),
+        left: Math.max(0, body.scrollLeft || 0)
+    };
+}
+
+function __setCanvasSectionScrollPerfClass(body, enabled) {
+    if (!body || !body.classList) return;
+    body.classList.toggle('canvas-scroll-perf-active', !!enabled);
+}
+
+function __markCanvasSectionScrollPerfActive(body) {
+    const entry = __getCanvasSectionScrollRegistryEntry(body);
+    if (!entry) return;
+
+    __setCanvasSectionScrollPerfClass(body, true);
+
+    if (entry.perfTimer) clearTimeout(entry.perfTimer);
+    entry.perfTimer = setTimeout(() => {
+        entry.perfTimer = 0;
+        __setCanvasSectionScrollPerfClass(body, false);
+    }, CANVAS_SECTION_SCROLL_PERF_ACTIVE_MS);
+}
+
+function __flushCanvasSectionScrollPersistence(body, options = {}) {
+    if (!body) return false;
+    const entry = __getCanvasSectionScrollRegistryEntry(body);
+    if (!entry) return false;
+
+    const explicitBaseKey = String(options.baseKey || '').trim();
+    if (explicitBaseKey) entry.baseKey = explicitBaseKey;
+    const baseKey = String(entry.baseKey || '').trim();
+    if (!baseKey) return false;
+
+    if (entry.flushTimer) {
+        clearTimeout(entry.flushTimer);
+        entry.flushTimer = 0;
+    }
+
+    const partitionKey = (options && typeof options.partitionKey === 'string' && options.partitionKey)
+        ? options.partitionKey
+        : (entry.partitionKey || __getCanvasViewPartitionKey());
+    const payload = options.readFromDom === false && entry.latest
+        ? entry.latest
+        : __readCanvasSectionScrollPayload(body);
+
+    entry.partitionKey = partitionKey;
+    entry.latest = payload;
+
+    return saveViewState('scroll', baseKey, payload, { partitionKey });
+}
+
+function __scheduleCanvasSectionScrollPersistence(body, baseKey, options = {}) {
+    if (!body || !baseKey) return;
+    const entry = __getCanvasSectionScrollRegistryEntry(body);
+    if (!entry) return;
+
+    entry.baseKey = String(baseKey || '').trim();
+    entry.partitionKey = (options && typeof options.partitionKey === 'string' && options.partitionKey)
+        ? options.partitionKey
+        : __getCanvasViewPartitionKey();
+    entry.latest = __readCanvasSectionScrollPayload(body);
+
+    __markCanvasSectionScrollPerfActive(body);
+
+    if (entry.flushTimer) clearTimeout(entry.flushTimer);
+    const delayMs = Number.isFinite(options.delayMs)
+        ? Math.max(0, Math.round(options.delayMs))
+        : CANVAS_SECTION_SCROLL_SAVE_DEBOUNCE_MS;
+
+    entry.flushTimer = setTimeout(() => {
+        entry.flushTimer = 0;
+        __flushCanvasSectionScrollPersistence(body, {
+            partitionKey: entry.partitionKey,
+            readFromDom: true
+        });
+    }, delayMs);
+}
+
+function __canCanvasSectionBodyConsumeScroll(body, delta, axis) {
+    if (!body || !delta) return false;
+
+    if (axis === 'horizontal') {
+        const maxLeft = Math.max(0, (body.scrollWidth || 0) - (body.clientWidth || 0));
+        if (maxLeft <= 1) return false;
+        return delta < 0 ? (body.scrollLeft || 0) > 1 : (body.scrollLeft || 0) < (maxLeft - 1);
+    }
+
+    const maxTop = Math.max(0, (body.scrollHeight || 0) - (body.clientHeight || 0));
+    if (maxTop <= 1) return false;
+    return delta < 0 ? (body.scrollTop || 0) > 1 : (body.scrollTop || 0) < (maxTop - 1);
+}
+
+function __shouldPreferSectionBodyWheel(body, event) {
+    if (!body || !event) return false;
+
+    try {
+        const ownerNode = body.closest('.permanent-bookmark-section, .temp-canvas-node');
+        if (ownerNode && __isNodeMaximized(ownerNode)) {
+            const horizontalDelta = event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX;
+            if (__canCanvasSectionBodyConsumeScroll(body, horizontalDelta, 'horizontal')) return true;
+            if (__canCanvasSectionBodyConsumeScroll(body, event.deltaY, 'vertical')) return true;
+        }
+    } catch (_) { }
+
+    if (typeof shouldHandleCustomScroll === 'function') {
+        try {
+            return !shouldHandleCustomScroll(event);
+        } catch (_) {
+            return true;
+        }
+    }
+
+    return true;
+}
+
+function __bindCanvasSectionScrollPerformance(body) {
+    if (!body || !body.dataset) return;
+    if (body.dataset.canvasSectionScrollPerfBound === 'true') return;
+    body.dataset.canvasSectionScrollPerfBound = 'true';
+
+    const arm = () => {
+        __markCanvasSectionScrollPerfActive(body);
+    };
+
+    // 树容器自己的滚动不应再冒泡到画布级 wheel 总监听，否则高刷设备会先卡主线程。
+    body.addEventListener('wheel', (event) => {
+        arm();
+        if (__shouldPreferSectionBodyWheel(body, event)) {
+            event.stopPropagation();
+        }
+    }, { passive: true });
+    body.addEventListener('touchstart', arm, { passive: true });
+    body.addEventListener('touchmove', arm, { passive: true });
+    body.addEventListener('pointerdown', arm, { passive: true });
+}
+
 function __normalizeDescHeightSettings(raw, defaults) {
     const normalizeMode = (mode) => {
         if (mode === 'full') return 'full';
@@ -13662,31 +13821,47 @@ function __getTempSectionScrollKey(sectionId) {
     return __buildCanvasPartitionedViewStateKey('scroll', baseKey);
 }
 
-// 刷新/关闭前强制 flush 永久栏目滚动位置（避免 RAF 节流导致副本状态丢失）
-function __flushPermanentSectionScrollStates() {
+function __getCanvasSectionScrollBaseKeyFromBody(body) {
+    if (!body || !body.classList) return null;
+    if (body.classList.contains('permanent-section-body')) {
+        return __getPermanentSectionScrollBaseKey(body.closest('.permanent-bookmark-section'));
+    }
+    if (body.classList.contains('temp-node-body')) {
+        const nodeEl = body.closest('.temp-canvas-node');
+        const sectionId = nodeEl && nodeEl.dataset ? nodeEl.dataset.sectionId : null;
+        return __getTempSectionScrollBaseKey(sectionId);
+    }
+    return null;
+}
+
+// 刷新/关闭前强制 flush 树滚动位置，避免 debounce 尾帧丢失。
+function __flushCanvasSectionScrollStates() {
     try {
         const canvasContent = document.getElementById('canvasContent');
         const scope = canvasContent || document;
-        scope.querySelectorAll('.permanent-bookmark-section').forEach((section) => {
+        scope.querySelectorAll('.permanent-section-body, .temp-node-body').forEach((body) => {
             try {
-                const body = section.querySelector('.permanent-section-body');
-                if (!body) return;
-                const baseKey = __getPermanentSectionScrollBaseKey(section);
-                saveViewState('scroll', baseKey, {
-                    top: body.scrollTop || 0,
-                    left: body.scrollLeft || 0
+                const baseKey = __getCanvasSectionScrollBaseKeyFromBody(body);
+                if (!baseKey) return;
+                __flushCanvasSectionScrollPersistence(body, {
+                    baseKey,
+                    readFromDom: true
                 });
             } catch (_) { }
         });
     } catch (_) { }
 }
+
+function __flushPermanentSectionScrollStates() {
+    __flushCanvasSectionScrollStates();
+}
 if (!window.__permanentSectionScrollFlushBound) {
     window.__permanentSectionScrollFlushBound = true;
-    window.addEventListener('pagehide', __flushPermanentSectionScrollStates);
+    window.addEventListener('pagehide', __flushCanvasSectionScrollStates);
     document.addEventListener('visibilitychange', () => {
         try {
             if (document.visibilityState === 'hidden') {
-                __flushPermanentSectionScrollStates();
+                __flushCanvasSectionScrollStates();
             }
         } catch (_) { }
     });
@@ -14201,15 +14376,9 @@ function makePermanentSectionDraggable(permanentSection) {
         // 持久化滚动位置（永久栏目）
         const key = __getPermanentSectionScrollKey(permanentSection);
         const baseKey = __getPermanentSectionScrollBaseKey(permanentSection);
-        let rafId = 0;
+        __bindCanvasSectionScrollPerformance(permanentBody);
         permanentBody.addEventListener('scroll', () => {
-            if (rafId) cancelAnimationFrame(rafId);
-            rafId = requestAnimationFrame(() => {
-                saveViewState('scroll', baseKey, {
-                    top: permanentBody.scrollTop || 0,
-                    left: permanentBody.scrollLeft || 0
-                });
-            });
+            __scheduleCanvasSectionScrollPersistence(permanentBody, baseKey);
         }, { passive: true });
 
         // 避免“多次自动恢复滚动”与用户滚动产生抢夺：用户一旦开始滚动，短时间内停止自动恢复
@@ -23628,17 +23797,11 @@ function renderTempNode(section, options = {}) {
 
     // 持久化滚动：保存
     {
-        let rafId = 0;
         const scrollBaseKey = __getTempSectionScrollBaseKey(section.id);
+        __bindCanvasSectionScrollPerformance(body);
         body.addEventListener('scroll', () => {
-            if (rafId) cancelAnimationFrame(rafId);
-            rafId = requestAnimationFrame(() => {
-                if (!scrollBaseKey) return;
-                saveViewState('scroll', scrollBaseKey, {
-                    top: body.scrollTop || 0,
-                    left: body.scrollLeft || 0
-                });
-            });
+            if (!scrollBaseKey) return;
+            __scheduleCanvasSectionScrollPersistence(body, scrollBaseKey);
         }, { passive: true });
     }
 
