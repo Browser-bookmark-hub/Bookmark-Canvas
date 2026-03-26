@@ -20221,6 +20221,31 @@ const __DEMO_PRESET_MD_NODE_IDS = new Set([
 let __demoPresetMarkdownCacheLang = '';
 let __demoPresetMarkdownCache = null;
 
+function __isPristineDemoPresetCanvasState(stateInput = null) {
+    const state = stateInput && typeof stateInput === 'object' ? stateInput : CanvasState;
+    const tempSections = Array.isArray(state && state.tempSections)
+        ? state.tempSections
+        : (Array.isArray(state && state.sections) ? state.sections : []);
+    const mdNodes = Array.isArray(state && state.mdNodes) ? state.mdNodes : [];
+
+    if (tempSections.length) return false;
+    if (mdNodes.length !== __DEMO_PRESET_MD_NODE_IDS.size) return false;
+
+    return mdNodes.every((node) => {
+        const id = String(node && node.id || '').trim();
+        return !!(id && __DEMO_PRESET_MD_NODE_IDS.has(id));
+    });
+}
+
+function __hasSavedCameraPanForCurrentPartition() {
+    try {
+        const keys = __getCanvasCameraStorageKeys();
+        return !!__readCanvasCameraPanFromStorage(keys);
+    } catch (_) {
+        return false;
+    }
+}
+
 function __collectDemoPresetCanonicalMarkdownMap() {
     const langKey = String(
         (typeof currentLang !== 'undefined' && currentLang)
@@ -39156,14 +39181,27 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
         try { scheduleEdgesRender(); } catch (_) { }
     }
 
-    // 第一次打开 Canvas：把视口定位到「快捷键说明 + 使用说明 + 永久栏目」三卡片的中心
-    // 仅在“首次打开”且本次确实加载了演示模板（无保存数据）时触发，避免影响已有用户的布局。
+    // 初始预置卡片兼容：
+    // - 只要当前状态仍是“初始三张演示卡”的原始模板，并且当前视图分区还没有保存过镜头，
+    //   就强制把镜头定位到三卡中心，避免 sidepanel 首次打开时看起来像“卡片消失”。
+    // - 首次 fallback 到演示模板时，立即把模板持久化到 BCS，避免升级/重载后再次落回空状态。
     const openedKey = 'bookmark-canvas-has-opened';
     const hasOpenedCanvas = localStorage.getItem(openedKey) === 'true';
+    const isPristineDemoPreset = __isPristineDemoPresetCanvasState(CanvasState);
+    const hasSavedPartitionPan = __hasSavedCameraPanForCurrentPartition();
+    const shouldLocateIntroCards = isPristineDemoPreset && (!hasSavedPartitionPan || (!hasOpenedCanvas && !loadedFromStorage));
+
+    if (shouldLocateIntroCards) {
+        try { locateToIntroCardsCenter(); } catch (_) { }
+    } else if (!hasOpenedCanvas && !loadedFromStorage) {
+        try { locateToIntroCardsCenter(); } catch (_) { }
+    }
+
+    if (isPristineDemoPreset && !loadedFromStorage) {
+        try { saveTempNodes({ immediate: true, suppressSyncMarkDirty: true }); } catch (_) { }
+    }
+
     if (!hasOpenedCanvas) {
-        if (!loadedFromStorage) {
-            try { locateToIntroCardsCenter(); } catch (_) { }
-        }
         try { saveSharedState(openedKey, 'true', { asJSON: false }); } catch (_) { }
     }
 
