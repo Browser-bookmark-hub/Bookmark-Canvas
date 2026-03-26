@@ -30405,9 +30405,6 @@ function __buildPermanentSectionJsonProtocol(bookmarkTree, descriptionOverride =
     const inheritFrom = __normalizeCanvasMarkdownPath(
         metaOptions && (metaOptions.inheritFrom || metaOptions.embedFrom || '')
     );
-    const selfPath = __normalizeCanvasMarkdownPath(
-        metaOptions && (metaOptions.selfPath || metaOptions.currentPath || '')
-    );
 
     let rawDesc = '';
     if (descriptionOverride !== null) {
@@ -30424,7 +30421,6 @@ function __buildPermanentSectionJsonProtocol(bookmarkTree, descriptionOverride =
         title,
         descriptionMd: __normalizePermanentViewDescriptionMarkdown(rawDesc)
     };
-    if (selfPath) payload.selfPath = selfPath;
     if (inheritFrom) {
         payload.fileRole = 'copy-anchor';
         payload.anchorOnly = true;
@@ -32439,8 +32435,7 @@ async function __buildObsidianSyncFiles(options = {}) {
             permanentSlot: 1,
             bookmarkIconMode: obsidianBookmarkIconMode,
             forceCollapsed: forceCollapsedForObsidian,
-            exportFormat,
-            selfPath: __joinSyncExportPath(exportRoot, permanentMdRel)
+            exportFormat
         }),
         { type: 'permanent', slot: 1 }
     );
@@ -32472,8 +32467,7 @@ async function __buildObsidianSyncFiles(options = {}) {
                             copyId,
                             bookmarkIconMode: obsidianBookmarkIconMode,
                             forceCollapsed: forceCollapsedForObsidian,
-                            exportFormat,
-                            selfPath: __joinSyncExportPath(exportRoot, copyMdRel)
+                            exportFormat
                         },
                         __joinSyncExportPath(exportRoot, permanentMdRel)
                     ),
@@ -33610,8 +33604,7 @@ async function exportCanvasPackage(options = {}) {
             permanentSlot: 1,
             bookmarkIconMode: obsidianBookmarkIconMode,
             forceCollapsed: forceCollapsedForObsidian,
-            exportFormat,
-            selfPath: __joinSyncExportPath(exportRoot, permanentMdRel)
+            exportFormat
         }))
     });
 
@@ -33648,8 +33641,7 @@ async function exportCanvasPackage(options = {}) {
                         copyId,
                         bookmarkIconMode: obsidianBookmarkIconMode,
                         forceCollapsed: forceCollapsedForObsidian,
-                        exportFormat,
-                        selfPath: __joinSyncExportPath(exportRoot, copyMdRel)
+                        exportFormat
                     },
                     __joinSyncExportPath(exportRoot, permanentMdRel)
                 );
