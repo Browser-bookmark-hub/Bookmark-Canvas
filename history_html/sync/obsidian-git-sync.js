@@ -74,7 +74,9 @@
     const RECOVERY_SNAPSHOT_KEEP_LATEST = 1;
     const DEFAULT_PERMANENT_INCREMENTAL_MAX_LOGICAL_CHANGES_ABS = 200;
     const PERMANENT_TREE_UPLOAD_INTERVALS = new Set([0, 5, 15, 30, 60]);
-    const OBSIDIAN_EXPORT_FORMATS = new Set(['visual', 'visual-no-icon', 'json']);
+    // Sync pipeline keeps only conflict-stable formats.
+    // Legacy `visual` is auto-migrated to `visual-no-icon`.
+    const OBSIDIAN_EXPORT_FORMATS = new Set(['visual-no-icon', 'json']);
     const RECOVERY_SNAPSHOT_IDLE_REASON = 'idle-periodic-backup';
     const RECOVERY_SNAPSHOT_MANUAL_REASON = 'manual-backup';
     const CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE = { min: 0, max: 24 * 60 * 60 };
@@ -2848,7 +2850,12 @@
 
     function normalizeObsidianExportFormat(value, fallback = DEFAULT_SETTINGS.obsidianExportFormat) {
         const format = String(value || '').trim().toLowerCase();
-        return OBSIDIAN_EXPORT_FORMATS.has(format) ? format : fallback;
+        if (format === 'visual') return 'visual-no-icon';
+        if (OBSIDIAN_EXPORT_FORMATS.has(format)) return format;
+
+        const fallbackFormat = String(fallback || '').trim().toLowerCase();
+        if (fallbackFormat === 'visual') return 'visual-no-icon';
+        return OBSIDIAN_EXPORT_FORMATS.has(fallbackFormat) ? fallbackFormat : fallback;
     }
 
     function getCurrentObsidianExportFormatForSync() {
@@ -2879,8 +2886,20 @@
         const normalized = normalizeObsidianExportFormat(format, '');
         if (normalized === 'json') return textByLang('JSON模式（供AI）', 'JSON mode (for AI)');
         if (normalized === 'visual-no-icon') return textByLang('视觉模式（无图标）', 'Visual mode (no icon)');
-        if (normalized === 'visual') return textByLang('视觉模式', 'Visual mode');
         return '';
+    }
+
+    function sanitizeSyncExportFormatSelect(selectEl) {
+        const select = selectEl || getElement('canvasSyncObsidianExportFormatSelect');
+        if (!select) return;
+        try {
+            const visualOption = select.querySelector('option[value="visual"]');
+            if (visualOption) visualOption.remove();
+        } catch (_) { }
+        const current = normalizeObsidianExportFormat(select.value, DEFAULT_SETTINGS.obsidianExportFormat);
+        if (current && String(select.value || '').trim().toLowerCase() !== current) {
+            select.value = current;
+        }
     }
 
     function resolveObsidianExportFormatMigration(remoteState) {
@@ -7699,6 +7718,7 @@ Cancel: go back and change the branch name first.`
         const obsidianFilePushEnabled = getElement('canvasSyncObsidianFilePushToggle');
         const obsidianExportFormat = getElement('canvasSyncObsidianExportFormatSelect');
         const obsidianExportRoot = getElement('canvasSyncObsidianExportRootInput');
+        sanitizeSyncExportFormatSelect(obsidianExportFormat);
 
         if (enabled) enabled.checked = !!settings.enabled;
         setFirstSyncModeToForm(settings.firstSyncMode);
@@ -7726,6 +7746,7 @@ Cancel: go back and change the branch name first.`
         const obsidianFilePushEnabled = getElement('canvasSyncObsidianFilePushToggle');
         const obsidianExportFormat = getElement('canvasSyncObsidianExportFormatSelect');
         const obsidianExportRoot = getElement('canvasSyncObsidianExportRootInput');
+        sanitizeSyncExportFormatSelect(obsidianExportFormat);
         const previousObsidianExportFormat = normalizeObsidianExportFormat(
             settings && settings.obsidianExportFormat,
             DEFAULT_SETTINGS.obsidianExportFormat
@@ -13658,6 +13679,7 @@ Cancel: go back and change the branch name first.`
 
         const obsidianExportFormatSelect = getElement('canvasSyncObsidianExportFormatSelect');
         if (obsidianExportFormatSelect) {
+            sanitizeSyncExportFormatSelect(obsidianExportFormatSelect);
             obsidianExportFormatSelect.addEventListener('change', () => {
                 void (async () => {
                     const previousFormat = normalizeObsidianExportFormat(

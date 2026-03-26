@@ -30751,14 +30751,11 @@ function __flushMdEditorsForExport(options = {}) {
 }
 
 function __isValidUrl(url) {
-    const u = String(url || '').trim();
-    if (!u) return false;
-    try {
-        const parsed = new URL(u);
-        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-    } catch (_) {
-        return false;
-    }
+    const normalized = __sanitizeImportUrl(url);
+    if (!normalized) return false;
+    if (normalized === '#') return false;
+    if (String(normalized).startsWith('unsafe:')) return false;
+    return true;
 }
 
 function __escapeMarkdownLinkText(text) {
@@ -30943,8 +30940,9 @@ function __toTreeMarkdownLines(items, depth = 0, options = {}) {
 
         if (item.type === 'bookmark' || item.url) {
             const url = String(item.url || '').trim();
+            const normalizedUrl = __sanitizeImportUrl(url);
             const ok = __isValidUrl(url);
-            const safeUrl = ok ? url : '#';
+            const safeUrl = ok ? normalizedUrl : '#';
             const suffix = ok ? '' : ' <small style="color:red; opacity:0.7;">(invalid)</small>';
 
             const iconMode = String(bookmarkIconMode || '').trim().toLowerCase();
@@ -31369,10 +31367,11 @@ function __sanitizeImportUrl(url) {
         // Whitelist protocols
         // http, https, ftp, mailto, tel
         // obsidian, zotero, onenote, notion (productivity tools)
-        // chrome, edge, extension (browser internal? maybe risky if pointing to settings) -> let's allowed standard web + apps
+        // browser-local bookmark protocols used by users
         const allowed = [
             'http:', 'https:', 'ftp:', 'mailto:', 'tel:',
-            'obsidian:', 'zotero:', 'onenote:', 'notion:', 'vscode:', 'raycast:'
+            'obsidian:', 'zotero:', 'onenote:', 'notion:', 'vscode:', 'raycast:',
+            'chrome:', 'edge:', 'file:', 'chrome-extension:'
         ];
         if (allowed.includes(protocol)) return trimmed;
 

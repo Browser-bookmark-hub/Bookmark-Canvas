@@ -3646,8 +3646,8 @@ const i18n = {
         'en': 'Export Format (for Obsidian)'
     },
     canvasSyncObsidianExportFormatDesc: {
-        'zh_CN': '视觉模式：包含 favicon 图标，适合查看与存档。\n视觉模式（无图标）：不包含 favicon 图标，用字符 "-" 代替，体积更小。\nJSON模式（供AI）：在 MD 文件中用结构化 JSON 表示书签树，更适合 AI 分析、增删改移和稳定同步。',
-        'en': 'Visual mode: includes favicons and is best for viewing and archiving.\nVisual mode (no icons): removes favicons, uses "-" as the link marker, and keeps a smaller size.\nJSON mode (for AI): stores the bookmark tree as structured JSON inside the MD file, making AI analysis and stable sync easier.'
+        'zh_CN': '视觉模式（无图标）：不包含 favicon 图标，用字符 "-" 代替，体积更小，冲突更少。\nJSON模式（供AI）：在 MD 文件中用结构化 JSON 表示书签树，更适合 AI 分析、增删改移和稳定同步。',
+        'en': 'Visual mode (no icons): removes favicons, uses "-" as the link marker, keeps a smaller size, and reduces sync conflicts.\nJSON mode (for AI): stores the bookmark tree as structured JSON inside the MD file, making AI analysis and stable sync easier.'
     },
     canvasSyncObsidianExportFormatJsonOption: {
         'zh_CN': 'JSON模式（供AI）',
