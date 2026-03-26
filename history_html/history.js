@@ -2267,6 +2267,24 @@ function refreshSharedPermanentTreeCopySourceData(reason = '') {
     return true;
 }
 
+function refreshPermanentTreeSharedViewsAfterMutation(reason = '') {
+    const refreshedSharedSource = refreshSharedPermanentTreeCopySourceData(reason);
+    if (!refreshedSharedSource) return false;
+
+    // 永久栏目主体和副本是“共享内容 + 独立交互壳”。
+    // 实时增量事件如果只补主树局部 DOM，很容易在副本存在时把可见层级和共享源打散。
+    // 这里统一把主体回到共享源，再让副本按同一份共享源同步。
+    try {
+        const primaryTree = document.getElementById('bookmarkTree');
+        if (primaryTree) {
+            __renderCachedPermanentTreeIntoPrimary(primaryTree);
+        }
+    } catch (_) { }
+
+    try { schedulePermanentTreeCopySync(); } catch (_) { }
+    return true;
+}
+
 function __captureTreeExpandedNodeIds(tree) {
     const expanded = new Set();
     if (!tree) return expanded;
@@ -14944,10 +14962,7 @@ async function handleBookmarkCreateRealtime(id, bookmark) {
             updateTreeChangeMapForCreate(id);
             scheduleCanvasPathBadgeRefresh('onCreated');
         }
-        const refreshedSharedSource = refreshSharedPermanentTreeCopySourceData('onCreated');
-        if (refreshedSharedSource) {
-            schedulePermanentTreeCopySync();
-        }
+        refreshPermanentTreeSharedViewsAfterMutation('onCreated');
         scheduleCachedCurrentTreeSnapshotRefresh('onCreated');
     }
 
@@ -14977,10 +14992,7 @@ async function handleBookmarkRemoveRealtime(id, removeInfo) {
             updateTreeChangeMapForRemove(id, enrichedRemoveInfo);
             scheduleCanvasPathBadgeRefresh('onRemoved');
         }
-        const refreshedSharedSource = refreshSharedPermanentTreeCopySourceData('onRemoved');
-        if (refreshedSharedSource) {
-            schedulePermanentTreeCopySync();
-        }
+        refreshPermanentTreeSharedViewsAfterMutation('onRemoved');
         scheduleCachedCurrentTreeSnapshotRefresh('onRemoved');
     }
 
@@ -15133,10 +15145,7 @@ function setupBookmarkListener() {
                 }
                 updateTreeChangeMapForChange(id);
                 scheduleCanvasPathBadgeRefresh('onChanged');
-                const refreshedSharedSource = refreshSharedPermanentTreeCopySourceData('onChanged');
-                if (refreshedSharedSource) {
-                    schedulePermanentTreeCopySync();
-                }
+                refreshPermanentTreeSharedViewsAfterMutation('onChanged');
                 scheduleCachedCurrentTreeSnapshotRefresh('onChanged');
             }
             clearCanvasLazyChangeHints('onChanged');
@@ -15163,7 +15172,7 @@ function setupBookmarkListener() {
 
             // 支持 canvas 视图（包含永久栏目的书签树）
             if (currentView === 'canvas') {
-                const appliedToDom = await applyIncrementalMoveToTree(id, moveInfo);
+                await applyIncrementalMoveToTree(id, moveInfo);
                 const appliedToCachedTree = applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
                 if (!appliedToCachedTree) {
                     scheduleCachedCurrentTreeSnapshotRefresh('onMoved-fast-fallback', 40);
@@ -15172,21 +15181,9 @@ function setupBookmarkListener() {
                 scheduleCanvasPathBadgeRefresh('onMoved');
                 scheduleCachedCurrentTreeSnapshotRefresh('onMoved');
 
-                // 主体/副本共享树不能只依赖主树 DOM mutation。
-                // 当移动发生在副本可见层级、但主树对应父节点未展开时，
-                // 主树局部增量可能找不到目标容器；这里主动刷新共享源数据并触发副本同步。
-                const refreshedSharedSource = refreshSharedPermanentTreeCopySourceData('onMoved');
-                if (!appliedToDom && refreshedSharedSource) {
-                    try {
-                        const primaryTree = document.getElementById('bookmarkTree');
-                        if (primaryTree) {
-                            __renderCachedPermanentTreeIntoPrimary(primaryTree);
-                        }
-                    } catch (_) { }
-                }
-                if (refreshedSharedSource) {
-                    schedulePermanentTreeCopySync();
-                }
+                // 主体/副本共享树不能只依赖局部 DOM mutation。
+                // 无论移动发生在主体还是副本，都统一回到共享源再同步副本。
+                refreshPermanentTreeSharedViewsAfterMutation('onMoved');
             }
             clearCanvasLazyChangeHints('onMoved');
         } catch (e) {
