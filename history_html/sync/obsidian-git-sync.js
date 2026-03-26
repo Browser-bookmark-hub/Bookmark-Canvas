@@ -8318,8 +8318,9 @@ Cancel: go back and change the branch name first.`
             copyId,
             descriptionMd: String(source.descriptionMd || source.description || '').trim(),
             cardState: normalizePermanentViewCardStateForSync(source.cardState || source),
-            scrollState: normalizePermanentViewScrollStateForSync(source.scrollState),
-            foldState: normalizePermanentViewFoldStateForSync(source.foldState)
+            // 滚动/展开属于本地视图态，不进入云端同步快照。
+            scrollState: {},
+            foldState: {}
         };
         if (displayIndex) shell.displayIndex = displayIndex;
         return shell;

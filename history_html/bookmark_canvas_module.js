@@ -12904,6 +12904,13 @@ function __applyPermanentLayoutFromCanvasNodes(nodesInput, options = {}) {
     try { __updatePermanentSectionIndexBadges(); } catch (_) { }
     try { updateCanvasScrollBounds(); } catch (_) { }
     try { updateScrollbarThumbs(); } catch (_) { }
+    try {
+        __syncPermanentSectionSharedTreeViews({
+            includePrimary: false,
+            includeCopies: true,
+            reason: 'apply-layout'
+        });
+    } catch (_) { }
     return !!(mainState || copyIds.length);
 }
 
@@ -13356,6 +13363,13 @@ function __applyPermanentViewShellSnapshotProtocol(snapshotInput) {
     try { __updatePermanentSectionIndexBadges(); } catch (_) { }
     try { updateCanvasScrollBounds(); } catch (_) { }
     try { updateScrollbarThumbs(); } catch (_) { }
+    try {
+        __syncPermanentSectionSharedTreeViews({
+            includePrimary: false,
+            includeCopies: true,
+            reason: 'apply-shell-snapshot'
+        });
+    } catch (_) { }
     return snapshot;
 }
 
@@ -13778,10 +13792,37 @@ function __renderPermanentSectionCopyTree(tree) {
         } catch (_) { }
     }
 
+    return __syncPermanentSectionSharedTreeViews({
+        includePrimary: false,
+        includeCopies: true,
+        reason: 'copy-tree-mount'
+    });
+}
+
+function __syncPermanentSectionSharedTreeViews(options = {}) {
+    const includePrimary = options.includePrimary === true;
+    const includeCopies = options.includeCopies !== false;
+    const reason = String(options.reason || '').trim();
+
+    try {
+        if (typeof window.__renderPermanentTreeSharedViews === 'function') {
+            const rendered = !!window.__renderPermanentTreeSharedViews({
+                includePrimary,
+                includeCopies,
+                reason
+            });
+            if (rendered) return true;
+        }
+    } catch (_) { }
+
     setTimeout(() => {
         try {
-            if (typeof window.__renderPermanentTreeIntoTree === 'function') {
-                window.__renderPermanentTreeIntoTree(tree);
+            if (typeof window.__renderPermanentTreeSharedViews === 'function') {
+                window.__renderPermanentTreeSharedViews({
+                    includePrimary,
+                    includeCopies,
+                    reason
+                });
                 return;
             }
             if (typeof schedulePermanentTreeCopySync === 'function') {
@@ -14282,18 +14323,18 @@ function loadPermanentSectionPosition() {
             });
         }
 
-        // 副本 UI 状态（展开/滚动）必须独立持久化：首次进入时补触发一次同步与恢复
+        // 副本 UI 状态（展开/滚动）必须独立持久化：首次进入时仅补一次共享树同步。
+        // 这里不要再优先排旧的 copy-sync 定时器，否则首屏完成后很容易再出现一轮可见补刷。
         try {
-            // 只触发一次“合并后的同步”（避免刷新时副本卡片/数量反复闪烁）
-            if (typeof schedulePermanentTreeCopySync === 'function') {
-                setTimeout(() => {
-                    try { schedulePermanentTreeCopySync(); } catch (_) { }
-                }, 0);
-            } else if (typeof syncPermanentTreeCopiesFromPrimary === 'function') {
-                setTimeout(() => {
-                    try { syncPermanentTreeCopiesFromPrimary(); } catch (_) { }
-                }, 0);
-            }
+            setTimeout(() => {
+                try {
+                    __syncPermanentSectionSharedTreeViews({
+                        includePrimary: false,
+                        includeCopies: true,
+                        reason: 'load-position'
+                    });
+                } catch (_) { }
+            }, 0);
         } catch (_) { }
 
         // Canonical permanent layout source: bcs:canvas.
@@ -26378,6 +26419,16 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         const normalized = syncTipDraft({ normalizeEditorHtml });
         const key = getStorageKey();
         __persistPermanentTipStorageValue(key, normalized);
+        try {
+            const syncModule = window.CanvasObsidianGitSync;
+            if (syncModule && typeof syncModule.markDirty === 'function') {
+                syncModule.markDirty('permanent-description', {
+                    dirty: {
+                        permanentAll: true
+                    }
+                });
+            }
+        } catch (_) { }
     };
 
     const exitEditingTip = ({ commit }) => {
@@ -33287,15 +33338,6 @@ async function exportCanvasPackage(options = {}) {
             bcsCanvas = null;
         }
 
-        // Collect scroll positions
-        const scrollState = {};
-        const partitionedPermanentScrollKey = __buildCanvasPartitionedViewStateKey('scroll', 'permanent-section-scroll');
-        const permanentScroll = localStorage.getItem(partitionedPermanentScrollKey);
-        if (permanentScroll) {
-            try {
-                scrollState[partitionedPermanentScrollKey] = JSON.parse(permanentScroll);
-            } catch (_) { }
-        }
         // Collect Permanent Section Tips (Descriptions)
         const permanentTips = {};
         try {
@@ -33306,19 +33348,6 @@ async function exportCanvasPackage(options = {}) {
                 }
             }
         } catch (_) { }
-
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && (key.startsWith('temp-section-scroll:') || key.includes(':temp-section-scroll:'))) {
-                try {
-                    scrollState[key] = JSON.parse(localStorage.getItem(key));
-                } catch (_) { }
-            } else if (key && (key.startsWith(`${PERMANENT_SECTION_SCROLL_KEY}:`) || key.includes(`:${PERMANENT_SECTION_SCROLL_KEY}:`) || key.endsWith(`:${PERMANENT_SECTION_SCROLL_KEY}`))) {
-                try {
-                    scrollState[key] = JSON.parse(localStorage.getItem(key));
-                } catch (_) { }
-            }
-        }
 
         const bookmarkTree = __buildPermanentTreeSnapshotForJsonProtocol(await api.getTree());
 
@@ -33337,7 +33366,6 @@ async function exportCanvasPackage(options = {}) {
                 [PERMANENT_ROOT_META_STORAGE_KEY]: __readPermanentRootMetaStorageValue(),
                 [BCS_CANVAS_KEY]: bcsCanvas || null,
                 'canvas-performance-mode': perfMode || null,
-                ...scrollState,
                 ...permanentTips
             },
             permanentTreeSnapshot: normalizedPermanentTreeSnapshot,
@@ -33978,29 +34006,6 @@ async function exportCanvasPackage(options = {}) {
         try { return JSON.parse(raw); } catch (_) { return null; }
     };
 
-    // Collect scroll positions
-    const scrollState = {};
-    const partitionedPermanentScrollKey = __buildCanvasPartitionedViewStateKey('scroll', 'permanent-section-scroll');
-    const permanentScroll = localStorage.getItem(partitionedPermanentScrollKey);
-    if (permanentScroll) {
-        try {
-            scrollState[partitionedPermanentScrollKey] = JSON.parse(permanentScroll);
-        } catch (_) { }
-    }
-    // Collect temp section scroll positions
-    for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith('temp-section-scroll:') || key.includes(':temp-section-scroll:'))) {
-            try {
-                scrollState[key] = JSON.parse(localStorage.getItem(key));
-            } catch (_) { }
-        } else if (key && (key.startsWith(`${PERMANENT_SECTION_SCROLL_KEY}:`) || key.includes(`:${PERMANENT_SECTION_SCROLL_KEY}:`) || key.endsWith(`:${PERMANENT_SECTION_SCROLL_KEY}`))) {
-            try {
-                scrollState[key] = JSON.parse(localStorage.getItem(key));
-            } catch (_) { }
-        }
-    }
-
     // 3.1) Supplementary layer (bookmark-canvas.full.json) - 补充层
     // [CHANGED] We no longer export 'style-data.json' for Obsidian Mode.
     // Obsidian Mode relies purely on .canvas and .md files to ensure edits in Obsidian are preserved.
@@ -34039,8 +34044,7 @@ async function exportCanvasPackage(options = {}) {
                 [PERMANENT_SECTION_COPIES_STORAGE_KEY]: parseJsonSafe(permanentCopiesRaw),
                 [PERMANENT_ROOT_META_STORAGE_KEY]: __readPermanentRootMetaStorageValue(),
                 [BCS_CANVAS_KEY]: bcsCanvas || null,
-                'canvas-performance-mode': perfMode || null,
-                ...scrollState
+                'canvas-performance-mode': perfMode || null
             },
             // 核心数据层包含完整书签树快照
             permanentTreeSnapshot: normalizedPermanentTreeSnapshot,
