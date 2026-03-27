@@ -184,9 +184,24 @@
       return out;
     };
 
+    const CANVAS_VIEW_STATE_STORAGE_NS = 'canvas:view:v1';
+    const CANVAS_FULLSCREEN_VIEW_STATE_KIND = 'fullscreen';
+    const CANVAS_NODE_MAXIMIZED_STORAGE_KEY = 'canvas-node-maximized-v1';
+
+    const buildCanvasPartitionedViewStateKey = (kind, baseKey, partitionKey) => {
+      if (!kind || !baseKey || !partitionKey) return baseKey;
+      return `${CANVAS_VIEW_STATE_STORAGE_NS}:${kind}:${partitionKey}:${baseKey}`;
+    };
+
+    const readCanvasPartitionedViewState = (kind, baseKey, partitionKey) => {
+      const partitionedKey = buildCanvasPartitionedViewStateKey(kind, baseKey, partitionKey);
+      return readStorage(partitionedKey) || readStorage(baseKey);
+    };
+
     const params = new URLSearchParams(window.location.search || '');
     const sidePanelFlag = params.get('sidepanel') || params.get('side_panel') || params.get('panel');
     const isSidePanelMode = sidePanelFlag === '1' || sidePanelFlag === 'true';
+    const canvasViewPartitionKey = isSidePanelMode ? 'sidepanel' : 'page';
     if (isSidePanelMode) {
       root.classList.add('side-panel-mode');
     }
@@ -246,7 +261,11 @@
     const hasPendingNodeMaximizedState = (() => {
       if (initialView !== 'canvas') return false;
       try {
-        const raw = readStorage('canvas-node-maximized-v1');
+        const raw = readCanvasPartitionedViewState(
+          CANVAS_FULLSCREEN_VIEW_STATE_KIND,
+          CANVAS_NODE_MAXIMIZED_STORAGE_KEY,
+          canvasViewPartitionKey
+        );
         if (!raw) return false;
         const parsed = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object') return false;

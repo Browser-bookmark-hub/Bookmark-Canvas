@@ -164,16 +164,118 @@ function bindCanvasPreloadRelease() {
     if (canvasPreloadReleaseBound) return;
     canvasPreloadReleaseBound = true;
 
+    const releaseCanvasPreloadWhenReady = () => {
+        const root = document.documentElement;
+        if (!root || !root.classList.contains('layout-preload-node-maximized-active')) {
+            window.setTimeout(() => {
+                clearLayoutPreloadState();
+            }, 80);
+            return;
+        }
+
+        const startedAt = Date.now();
+        let finished = false;
+
+        const finish = (delayMs = 0) => {
+            if (finished) return;
+            finished = true;
+            window.setTimeout(() => {
+                clearLayoutPreloadState();
+            }, delayMs);
+        };
+
+        const hasReadyMaximizedNode = () => {
+            try {
+                return !!document.querySelector('.canvas-node-maximized[data-fullscreen-preload-ready="true"][data-fullscreen-body-ready="true"]');
+            } catch (_) {
+                return !!document.querySelector('.canvas-node-maximized');
+            }
+        };
+
+        const restorePendingMaximizedNode = () => {
+            try {
+                if (typeof window.__tryRestoreMaximizedNode === 'function') {
+                    window.__tryRestoreMaximizedNode({ clearIfMissing: false });
+                }
+            } catch (_) { }
+        };
+
+        const tick = () => {
+            if (finished) return;
+            if (hasReadyMaximizedNode()) {
+                finish(12);
+                return;
+            }
+
+            restorePendingMaximizedNode();
+
+            if (hasReadyMaximizedNode()) {
+                finish(12);
+                return;
+            }
+
+            if (Date.now() - startedAt >= 1400) {
+                finish(0);
+                return;
+            }
+
+            window.setTimeout(tick, 24);
+        };
+
+        window.addEventListener('canvas-maximized-node-ready', () => {
+            if (!hasReadyMaximizedNode()) return;
+            finish(12);
+        }, { once: true });
+
+        tick();
+    };
+
     window.addEventListener('canvas-initial-layout-ready', () => {
-        window.setTimeout(() => {
-            clearLayoutPreloadState();
-        }, 160);
+        releaseCanvasPreloadWhenReady();
     }, { once: true });
 
     // 兜底：避免异常路径导致预置状态长期不释放
     window.setTimeout(() => {
         clearLayoutPreloadState();
     }, 3200);
+}
+
+function __shouldSuppressCanvasBootstrapRestoreInHistory(target) {
+    try {
+        if (currentView !== 'canvas') return false;
+        return !!(typeof window.__shouldSuppressCanvasBootstrapRestore === 'function'
+            && window.__shouldSuppressCanvasBootstrapRestore(target));
+    } catch (_) {
+        return false;
+    }
+}
+
+function __isCanvasBodyScrollRestoreBlocked(body) {
+    if (!body) return false;
+    try {
+        const until = parseInt(body.dataset && body.dataset.scrollRestoreBlockUntil ? body.dataset.scrollRestoreBlockUntil : '0', 10) || 0;
+        if (until && Date.now() < until) return true;
+    } catch (_) { }
+    return __shouldSuppressCanvasBootstrapRestoreInHistory(body);
+}
+window.__isCanvasBodyScrollRestoreBlocked = __isCanvasBodyScrollRestoreBlocked;
+
+function __scheduleCanvasBodyScrollRestoreInHistory(body, payload, options = {}) {
+    if (!body || !payload || typeof payload !== 'object') return false;
+
+    const target = options && options.target ? options.target : body;
+    const suppressBootstrapRestore = __shouldSuppressCanvasBootstrapRestoreInHistory(target);
+
+    if (typeof window.__scheduleCanvasBodyScrollRestore === 'function') {
+        return !!window.__scheduleCanvasBodyScrollRestore(body, payload, Object.assign({}, options, {
+            target,
+            suppressBootstrapRestore
+        }));
+    }
+
+    if (typeof payload.top === 'number') body.scrollTop = payload.top || 0;
+    if (typeof payload.left === 'number') body.scrollLeft = payload.left || 0;
+    return true;
 }
 
 function normalizeSidePanelFloatingToolsMode(mode) {
@@ -2871,20 +2973,12 @@ function __renderPermanentTreeIntoTree(tree) {
     }
 
     if (body && desiredScrollTop !== null) {
-        const restore = () => {
-            try {
-                const until = parseInt(body.dataset.scrollRestoreBlockUntil || '0', 10) || 0;
-                if (until && Date.now() < until) return;
-            } catch (_) { }
-            body.scrollTop = desiredScrollTop;
-            body.scrollLeft = desiredScrollLeft;
-        };
-        restore();
-        requestAnimationFrame(() => {
-            restore();
-            setTimeout(restore, 80);
-            setTimeout(restore, 180);
-            setTimeout(restore, 360);
+        __scheduleCanvasBodyScrollRestoreInHistory(body, {
+            top: desiredScrollTop,
+            left: desiredScrollLeft
+        }, {
+            isBlocked: () => __isCanvasBodyScrollRestoreBlocked(body),
+            fallbackDelays: [80, 180, 360]
         });
     }
 
@@ -10143,6 +10237,12 @@ function renderCurrentView() {
                     console.log('[Canvas] 永久栏目已存在，跳过创建');
                 }
 
+                try {
+                    if (typeof window.__primePendingCanvasFullscreenShell === 'function') {
+                        window.__primePendingCanvasFullscreenShell();
+                    }
+                } catch (_) { }
+
                 // 2. 渲染书签树
                 // 即使是已初始化状态，也需要调用 renderTreeView 检查是否有数据更新（内部有缓存机制，开销很小）
                 renderTreeView().catch(e => console.error('[Canvas] 书签树渲染失败:', e));
@@ -11218,6 +11318,7 @@ async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, star
         try {
             const treeForState = childrenContainer && childrenContainer.closest ? childrenContainer.closest('.bookmark-tree') : null;
             const savedState = __readTreeExpandStateFromStorage(treeForState);
+            const suppressBootstrapRestore = __shouldSuppressCanvasBootstrapRestoreInHistory(treeForState || childrenContainer);
             if (savedState) {
                 const expandedIds = JSON.parse(savedState);
                 if (Array.isArray(expandedIds) && expandedIds.length > 0) {
@@ -11239,9 +11340,13 @@ async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, star
                                 }
                                 // 如果这个节点也需要懒加载，递归加载
                                 if (__shouldHydratePermanentFolderChildren(item, children)) {
-                                    setTimeout(() => {
+                                    if (suppressBootstrapRestore) {
                                         loadPermanentFolderChildrenLazy(item.dataset.nodeId, children, 0, null, isReadOnly);
-                                    }, 10);
+                                    } else {
+                                        setTimeout(() => {
+                                            loadPermanentFolderChildrenLazy(item.dataset.nodeId, children, 0, null, isReadOnly);
+                                        }, 10);
+                                    }
                                 }
                             }
                         }
@@ -11638,18 +11743,12 @@ async function renderTreeView(forceRefresh = false) {
         console.log('[renderTreeView] 缓存显示完成');
         // 恢复滚动位置（延迟确保展开状态恢复后再恢复滚动位置）
         if (permBody && permScrollTop !== null) {
-            const restoreScroll = () => {
-                if (isScrollRestoreBlocked()) return;
-                permBody.scrollTop = permScrollTop;
-                permBody.scrollLeft = permScrollLeft;
-            };
-            restoreScroll();
-            requestAnimationFrame(() => {
-                restoreScroll();
-                setTimeout(restoreScroll, 50);
-                setTimeout(restoreScroll, 150);
-                setTimeout(restoreScroll, 300);
-                setTimeout(restoreScroll, 500);
+            __scheduleCanvasBodyScrollRestoreInHistory(permBody, {
+                top: permScrollTop,
+                left: permScrollLeft
+            }, {
+                isBlocked: isScrollRestoreBlocked,
+                fallbackDelays: [50, 150, 300, 500]
             });
         }
 
@@ -11802,9 +11901,14 @@ async function renderTreeView(forceRefresh = false) {
                     }
                 }
                 // 恢复滚动位置
-                if (permBody && permScrollTop !== null && !isScrollRestoreBlocked()) {
-                    permBody.scrollTop = permScrollTop;
-                    permBody.scrollLeft = permScrollLeft;
+                if (permBody && permScrollTop !== null) {
+                    __scheduleCanvasBodyScrollRestoreInHistory(permBody, {
+                        top: permScrollTop,
+                        left: permScrollLeft
+                    }, {
+                        isBlocked: isScrollRestoreBlocked,
+                        scheduleFollowUps: false
+                    });
                 }
                 isRenderingTree = false;
                 syncMarkerAttentionIndicators('render-cached-nochange-inplace');
@@ -11838,18 +11942,12 @@ async function renderTreeView(forceRefresh = false) {
             }
             // 恢复滚动位置（延迟确保展开状态恢复后再恢复滚动位置）
             if (permBody && permScrollTop !== null) {
-                const restoreScroll = () => {
-                    if (isScrollRestoreBlocked()) return;
-                    permBody.scrollTop = permScrollTop;
-                    permBody.scrollLeft = permScrollLeft;
-                };
-                restoreScroll();
-                requestAnimationFrame(() => {
-                    restoreScroll();
-                    setTimeout(restoreScroll, 50);
-                    setTimeout(restoreScroll, 150);
-                    setTimeout(restoreScroll, 300);
-                    setTimeout(restoreScroll, 500);
+                __scheduleCanvasBodyScrollRestoreInHistory(permBody, {
+                    top: permScrollTop,
+                    left: permScrollLeft
+                }, {
+                    isBlocked: isScrollRestoreBlocked,
+                    fallbackDelays: [50, 150, 300, 500]
                 });
             }
 
@@ -12093,16 +12191,13 @@ async function renderTreeView(forceRefresh = false) {
 
             // 恢复滚动位置（延迟确保展开状态和懒加载完成后再恢复滚动位置）
             if (permBody && permScrollTop !== null) {
-                const restoreScroll = () => {
-                    if (isScrollRestoreBlocked()) return;
-                    permBody.scrollTop = permScrollTop;
-                    permBody.scrollLeft = permScrollLeft;
-                };
-                restoreScroll();
-                setTimeout(restoreScroll, 50);
-                setTimeout(restoreScroll, 150);
-                setTimeout(restoreScroll, 300); // 等待懒加载完成
-                setTimeout(restoreScroll, 500); // 最终确保
+                __scheduleCanvasBodyScrollRestoreInHistory(permBody, {
+                    top: permScrollTop,
+                    left: permScrollLeft
+                }, {
+                    isBlocked: isScrollRestoreBlocked,
+                    fallbackDelays: [50, 150, 300, 500]
+                });
             }
 
             console.log('[renderTreeView] 渲染完成');
@@ -12771,8 +12866,8 @@ function restoreTreeExpandState(treeContainer) {
         // Canvas 懒加载模式：批量加载需要展开的文件夹的子节点
         if (nodesToLazyLoad.length > 0) {
             console.log('[树状态] Canvas懒加载：需要加载', nodesToLazyLoad.length, '个文件夹的子节点');
-            // 延迟加载，避免阻塞渲染
-            setTimeout(() => {
+            const suppressBootstrapRestore = __shouldSuppressCanvasBootstrapRestoreInHistory(treeContainer);
+            const hydrate = () => {
                 nodesToLazyLoad.forEach(({ parentId, children }) => {
                     try {
                         loadPermanentFolderChildrenLazy(parentId, children, 0, null, isReadOnlyChangesPreview);
@@ -12780,7 +12875,13 @@ function restoreTreeExpandState(treeContainer) {
                         console.warn('[树状态] 懒加载子节点失败:', parentId, e);
                     }
                 });
-            }, 50);
+            };
+            // 启动全屏预恢复时不能再额外延迟 50ms，否则会在可见后继续跳。
+            if (suppressBootstrapRestore) {
+                hydrate();
+            } else {
+                setTimeout(hydrate, 50);
+            }
         }
 
         console.log('[树状态] 恢复展开节点:', expandedIds.length);
@@ -13357,6 +13458,9 @@ let pendingPathBadgeRefreshTimer = null;
 let pathBadgeRefreshInFlight = false;
 let queuedPathBadgeRefreshReason = '';
 function scheduleCanvasPathBadgeRefresh(reason = '') {
+    if (__isFullscreenPreloadRestoreBlockedByPathBadgeRefresh()) {
+        return;
+    }
     if (pendingPathBadgeRefreshTimer) {
         try { clearTimeout(pendingPathBadgeRefreshTimer); } catch (_) { }
     }
@@ -13380,6 +13484,16 @@ function scheduleCanvasPathBadgeRefresh(reason = '') {
                 }
             });
     }, 80);
+}
+
+function __isFullscreenPreloadRestoreBlockedByPathBadgeRefresh() {
+    try {
+        const root = document.documentElement;
+        if (!root || !root.classList || !root.classList.contains('layout-preload-node-maximized-active')) return false;
+        return !!document.querySelector('.canvas-node-maximized, [data-fullscreen-preload-ready="true"]');
+    } catch (_) {
+        return false;
+    }
 }
 
 function captureBodyScrollAnchor(body) {
@@ -13410,6 +13524,7 @@ function captureBodyScrollAnchor(body) {
 
 function restoreBodyScrollAnchor(body, state) {
     if (!body || !state) return;
+    if (__isCanvasBodyScrollRestoreBlocked(body)) return;
     try {
         body.scrollLeft = typeof state.scrollLeft === 'number' ? state.scrollLeft : body.scrollLeft;
         if (state.anchorId && typeof state.anchorTop === 'number') {
@@ -13604,10 +13719,12 @@ async function refreshCanvasPathBadges(reason = '') {
 
         try {
             scrollStates.forEach((state, body) => {
+                if (__isCanvasBodyScrollRestoreBlocked(body)) return;
                 restoreBodyScrollAnchor(body, state);
             });
             requestAnimationFrame(() => {
                 scrollStates.forEach((state, body) => {
+                    if (__isCanvasBodyScrollRestoreBlocked(body)) return;
                     restoreBodyScrollAnchor(body, state);
                 });
             });

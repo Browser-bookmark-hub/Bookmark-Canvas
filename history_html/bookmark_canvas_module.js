@@ -185,6 +185,7 @@ const CanvasState = {
     fullscreenHandlersBound: false,
     nodeMaximizedActive: false,
     pendingMaximizedDescriptor: null,
+    maximizedRestoreTaskKey: '',
     maximizedNodeRemovalObserver: null,
     maximizedNodeRemovalSyncFrame: null,
     maximizedNodeRemovalObserverMuted: false,
@@ -4223,6 +4224,7 @@ function initCanvasView() {
     // 我们只需要增强它的拖拽功能
 
     enhanceBookmarkTreeForCanvas();
+    try { __primePendingCanvasFullscreenShell(); } catch (_) { }
 
     // 让永久栏目可以拖动
     makePermanentSectionDraggable();
@@ -6957,6 +6959,7 @@ function __applyCurrentPartitionExpandAndScrollSnapshot() {
                 const key = __getTempSectionScrollKey(sectionId);
                 const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
                 if (!body || !persisted || typeof persisted.top !== 'number') return;
+                if (typeof window.__isCanvasBodyScrollRestoreBlocked === 'function' && window.__isCanvasBodyScrollRestoreBlocked(body)) return;
                 body.scrollTop = persisted.top || 0;
                 body.scrollLeft = typeof persisted.left === 'number' ? persisted.left : 0;
             } catch (_) { }
@@ -6972,6 +6975,7 @@ function __applyCurrentPartitionExpandAndScrollSnapshot() {
                 const key = __getPermanentSectionScrollKey(sectionEl);
                 const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
                 if (!body || !persisted || typeof persisted.top !== 'number') return;
+                if (typeof window.__isCanvasBodyScrollRestoreBlocked === 'function' && window.__isCanvasBodyScrollRestoreBlocked(body)) return;
                 body.scrollTop = persisted.top || 0;
                 body.scrollLeft = typeof persisted.left === 'number' ? persisted.left : 0;
             } catch (_) { }
@@ -7004,11 +7008,14 @@ function __applyCurrentPartitionFullscreenSnapshot() {
     const target = __resolveMaximizedNode(descriptor);
     if (target) {
         if (activeNode !== target) {
-            try { maximizeCanvasNode(target); } catch (_) { }
+            CanvasState.pendingMaximizedDescriptor = descriptor;
+            try { __tryRestoreMaximizedNode({ clearIfMissing: false }); } catch (_) { }
         } else {
             try { __scheduleNodeLayoutZoomStabilize(target); } catch (_) { }
         }
-        CanvasState.pendingMaximizedDescriptor = null;
+        if (activeNode === target) {
+            CanvasState.pendingMaximizedDescriptor = null;
+        }
         return;
     }
 
@@ -11085,6 +11092,11 @@ function getLayoutZoomLabel(kind, lang) {
 function __getNodeLayoutZoomKey(element) {
     const descriptor = __serializeMaximizedNode(element);
     if (!descriptor) return null;
+    return __getMaximizedDescriptorKey(descriptor);
+}
+
+function __getMaximizedDescriptorKey(descriptor) {
+    if (!descriptor || typeof descriptor !== 'object') return null;
     if (descriptor.type === 'permanent-copy') {
         return `permanent-copy:${descriptor.copyId || ''}`;
     }
@@ -11476,20 +11488,630 @@ function __resolveMaximizedNode(descriptor) {
     return null;
 }
 
+function __isFullscreenPreloadRestoreActive() {
+    try {
+        const root = document.documentElement;
+        return !!(root && root.classList && root.classList.contains('layout-preload-node-maximized-active'));
+    } catch (_) {
+        return false;
+    }
+}
+
+function __setFullscreenPreloadReady(element, ready = true) {
+    if (!element || !element.dataset) return;
+    if (ready) {
+        element.dataset.fullscreenPreloadReady = 'true';
+    } else {
+        try { delete element.dataset.fullscreenPreloadReady; } catch (_) {
+            element.dataset.fullscreenPreloadReady = '';
+        }
+    }
+}
+
+function __setFullscreenBodyReady(element, ready = true) {
+    if (!element || !element.dataset) return;
+    if (ready) {
+        element.dataset.fullscreenBodyReady = 'true';
+    } else {
+        try { delete element.dataset.fullscreenBodyReady; } catch (_) {
+            element.dataset.fullscreenBodyReady = '';
+        }
+    }
+}
+
+function __resolveFullscreenPreloadTargetElement(target) {
+    if (!target || !target.closest) return target || null;
+    if (target.classList && (
+        target.classList.contains('permanent-bookmark-section')
+        || target.classList.contains('temp-canvas-node')
+        || target.classList.contains('md-canvas-node')
+    )) {
+        return target;
+    }
+    return target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
+}
+
+function __beginCanvasFullscreenBodyRestoreLock(target) {
+    const element = __resolveFullscreenPreloadTargetElement(target);
+    if (!element || !element.classList || !element.classList.contains('canvas-node-maximized')) return null;
+    if (!element.dataset || element.dataset.fullscreenPreloadReady !== 'true') return null;
+    if (element.dataset.fullscreenBodyReady !== 'true') return null;
+    __setFullscreenBodyReady(element, false);
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        if (!element.isConnected) return;
+        __setFullscreenBodyReady(element, true);
+    };
+}
+window.__beginCanvasFullscreenBodyRestoreLock = __beginCanvasFullscreenBodyRestoreLock;
+
+function __shouldSuppressCanvasBootstrapRestore(target) {
+    const descriptor = CanvasState.pendingMaximizedDescriptor
+        || __getActiveMaximizedNodeDescriptor()
+        || __loadMaximizedNodeFromStorage();
+    if (!descriptor) return false;
+    const element = __resolveFullscreenPreloadTargetElement(target);
+    if (!element) return false;
+    const elementDescriptor = __serializeMaximizedNode(element);
+    if (!elementDescriptor) return false;
+    if (__getMaximizedDescriptorKey(descriptor) !== __getMaximizedDescriptorKey(elementDescriptor)) {
+        return false;
+    }
+    if (__isFullscreenPreloadRestoreActive()) return true;
+    try {
+        if (__isNodeMaximized(element)) return true;
+    } catch (_) { }
+    try {
+        if (element.dataset && element.dataset.fullscreenBodyReady !== 'true') return true;
+    } catch (_) { }
+    return false;
+}
+window.__shouldSuppressCanvasBootstrapRestore = __shouldSuppressCanvasBootstrapRestore;
+
+function __waitForNextAnimationFrame() {
+    return new Promise((resolve) => {
+        try {
+            requestAnimationFrame(() => resolve());
+        } catch (_) {
+            setTimeout(resolve, 16);
+        }
+    });
+}
+
+async function __waitForAnimationFrames(count = 1) {
+    const total = Number.isFinite(count) ? Math.max(1, Math.floor(count)) : 1;
+    for (let i = 0; i < total; i += 1) {
+        await __waitForNextAnimationFrame();
+    }
+}
+
+function __delayFullscreenRestore(ms) {
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+async function __waitForFullscreenPreloadRelease(maxMs = 900) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < maxMs) {
+        try {
+            const root = document.documentElement;
+            const preloadActive = !!(root && root.classList && (
+                root.classList.contains('layout-preload-active')
+                || root.classList.contains('layout-preload-node-maximized-active')
+            ));
+            if (!preloadActive) return;
+        } catch (_) {
+            return;
+        }
+        await __waitForAnimationFrames(1);
+        await __delayFullscreenRestore(16);
+    }
+}
+
+function __getFullscreenScrollableBody(target) {
+    if (!target || !target.querySelector) return null;
+    return target.querySelector('.permanent-section-body, .temp-node-body') || null;
+}
+
+function __shouldWaitForPermanentFullscreenQuiet() {
+    try {
+        if (typeof isRenderingTree !== 'undefined' && isRenderingTree) return true;
+    } catch (_) { }
+    try {
+        if (typeof pathBadgeRefreshInFlight !== 'undefined' && pathBadgeRefreshInFlight) return true;
+    } catch (_) { }
+    try {
+        if (typeof pendingPathBadgeRefreshTimer !== 'undefined' && pendingPathBadgeRefreshTimer) return true;
+    } catch (_) { }
+    return false;
+}
+
+async function __applyFullscreenScrollOnly(target, descriptor) {
+    if (!target || !descriptor) return;
+    const type = String(descriptor.type || '').toLowerCase();
+    const body = __getFullscreenScrollableBody(target);
+    if (!body) return;
+
+    if (type === 'permanent' || type === 'permanent-copy') {
+        try {
+            const key = __getPermanentSectionScrollKey(target);
+            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
+            if (persisted) {
+                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 2200 });
+            }
+        } catch (_) { }
+        return;
+    }
+
+    if (type === 'temp-node') {
+        try {
+            const sectionId = String(descriptor.id || target.id || '').trim();
+            const key = __getTempSectionScrollKey(sectionId);
+            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
+            if (persisted) {
+                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 1600 });
+            }
+        } catch (_) { }
+    }
+}
+
+async function __waitForFullscreenRevealStability(target, descriptor) {
+    if (!target || !descriptor) return;
+    const body = __getFullscreenScrollableBody(target);
+    const tree = target.querySelector ? target.querySelector('.bookmark-tree, .temp-bookmark-tree') : null;
+    const type = String(descriptor.type || '').toLowerCase();
+    const isPermanentTree = (type === 'permanent' || type === 'permanent-copy');
+    const idleMs = isPermanentTree ? 88 : 72;
+    const minDelayMs = isPermanentTree ? 108 : 84;
+    const maxMs = isPermanentTree ? 420 : 280;
+    const startedAt = Date.now();
+    let lastActivityAt = Date.now();
+    let observer = null;
+
+    const markActivity = () => {
+        lastActivityAt = Date.now();
+    };
+
+    try {
+        if (body && typeof body.addEventListener === 'function') {
+            body.addEventListener('scroll', markActivity, { passive: true });
+        }
+    } catch (_) { }
+
+    try {
+        if (tree && typeof MutationObserver !== 'undefined') {
+            observer = new MutationObserver(() => {
+                markActivity();
+            });
+            observer.observe(tree, {
+                subtree: true,
+                childList: true,
+                attributes: true,
+                attributeFilter: ['class', 'data-children-loaded', 'data-start-index']
+            });
+        }
+    } catch (_) { }
+
+    try {
+        await __delayFullscreenRestore(minDelayMs);
+        while (Date.now() - startedAt < maxMs) {
+            const quietEnough = (Date.now() - lastActivityAt) >= idleMs;
+            const permanentBusy = (type === 'permanent' || type === 'permanent-copy')
+                ? __shouldWaitForPermanentFullscreenQuiet()
+                : false;
+            if (quietEnough && !permanentBusy) {
+                break;
+            }
+            await __waitForAnimationFrames(1);
+            await __delayFullscreenRestore(16);
+        }
+    } finally {
+        try {
+            if (body && typeof body.removeEventListener === 'function') {
+                body.removeEventListener('scroll', markActivity);
+            }
+        } catch (_) { }
+        try {
+            if (observer) observer.disconnect();
+        } catch (_) { }
+    }
+}
+
+async function __waitForFullscreenBodyReveal(target, descriptor) {
+    if (!target || !descriptor) return;
+    const type = String(descriptor.type || '').toLowerCase();
+    const extraDelayMs = (type === 'permanent' || type === 'permanent-copy') ? 260 : 180;
+    const finalBufferMs = (type === 'permanent' || type === 'permanent-copy') ? 96 : 64;
+
+    await __delayFullscreenRestore(extraDelayMs);
+    await __waitForFullscreenPreloadRelease(1200);
+    await __waitForFullscreenRevealStability(target, descriptor);
+    await __applyFullscreenScrollOnly(target, descriptor);
+    await __delayFullscreenRestore(finalBufferMs);
+    await __waitForAnimationFrames(2);
+}
+
+function __applyPersistedScrollPayloadToBody(body, payload, options = {}) {
+    if (!body || !payload || typeof payload !== 'object') return false;
+    if (typeof payload.top === 'number') body.scrollTop = payload.top || 0;
+    if (typeof payload.left === 'number') body.scrollLeft = payload.left || 0;
+    if (options && options.guardMs && body.dataset) {
+        try {
+            body.dataset.scrollRestoreBlockUntil = String(Date.now() + Math.max(0, Number(options.guardMs) || 0));
+        } catch (_) { }
+    }
+    return true;
+}
+
+function __scheduleCanvasBodyScrollRestore(body, payload, options = {}) {
+    if (!body || !payload || typeof payload !== 'object') return false;
+
+    const target = options && options.target ? options.target : body;
+    const fallbackDelays = Array.isArray(options && options.fallbackDelays)
+        ? options.fallbackDelays
+            .map((delay) => Number(delay))
+            .filter((delay) => Number.isFinite(delay) && delay >= 0)
+        : [10, 50, 100];
+    const scheduleFollowUps = options && options.scheduleFollowUps === false ? false : true;
+    const isBlocked = (options && typeof options.isBlocked === 'function')
+        ? options.isBlocked
+        : () => {
+            try {
+                return !!(typeof window !== 'undefined'
+                    && typeof window.__isCanvasBodyScrollRestoreBlocked === 'function'
+                    && window.__isCanvasBodyScrollRestoreBlocked(body));
+            } catch (_) {
+                return false;
+            }
+        };
+    const apply = (force = false) => {
+        if (!force) {
+            try {
+                if (isBlocked()) return false;
+            } catch (_) { }
+        }
+        return __applyPersistedScrollPayloadToBody(body, payload, options);
+    };
+
+    let suppressBootstrapRestore = false;
+    if (options && Object.prototype.hasOwnProperty.call(options, 'suppressBootstrapRestore')) {
+        suppressBootstrapRestore = !!options.suppressBootstrapRestore;
+    } else {
+        try {
+            suppressBootstrapRestore = __shouldSuppressCanvasBootstrapRestore(target);
+        } catch (_) {
+            suppressBootstrapRestore = false;
+        }
+    }
+
+    let releaseBodyLock = null;
+    if (!(options && options.useFullscreenLock === false)) {
+        try {
+            releaseBodyLock = __beginCanvasFullscreenBodyRestoreLock(target);
+        } catch (_) {
+            releaseBodyLock = null;
+        }
+    }
+
+    if (releaseBodyLock) {
+        apply(true);
+        requestAnimationFrame(() => {
+            apply(true);
+            requestAnimationFrame(() => {
+                apply(true);
+                try { releaseBodyLock(); } catch (_) { }
+            });
+        });
+        return true;
+    }
+
+    apply();
+    if (!scheduleFollowUps || suppressBootstrapRestore) return true;
+
+    requestAnimationFrame(() => {
+        apply();
+        fallbackDelays.forEach((delay) => {
+            setTimeout(() => {
+                apply();
+            }, delay);
+        });
+    });
+
+    return true;
+}
+window.__scheduleCanvasBodyScrollRestore = __scheduleCanvasBodyScrollRestore;
+
+async function __settleFullscreenBodyScroll(body, payload, options = {}) {
+    if (!body || !payload || typeof payload !== 'object') return false;
+    const guardMs = Number.isFinite(options.guardMs) ? Math.max(0, Math.round(options.guardMs)) : 640;
+    __applyPersistedScrollPayloadToBody(body, payload, { guardMs });
+    await __waitForAnimationFrames(1);
+    __applyPersistedScrollPayloadToBody(body, payload, { guardMs });
+    return true;
+}
+
+async function __waitForPermanentTreeMaterialized(sectionEl) {
+    if (!sectionEl) return null;
+    const isCopy = __isPermanentSectionCopy(sectionEl);
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+        const tree = sectionEl.querySelector('.bookmark-tree');
+        if (tree && tree.querySelector('.tree-item[data-node-id]')) {
+            return tree;
+        }
+
+        try {
+            const renderSharedViews = window.__renderPermanentTreeSharedViews;
+            if (typeof renderSharedViews === 'function') {
+                renderSharedViews({
+                    includePrimary: !isCopy,
+                    includeCopies: isCopy,
+                    reason: 'fullscreen-preload-materialize'
+                });
+            }
+        } catch (_) { }
+
+        await __waitForAnimationFrames(1);
+        await __delayFullscreenRestore(16);
+    }
+
+    return sectionEl.querySelector('.bookmark-tree');
+}
+
+function __collectPermanentExpandedHydrationTargets(tree) {
+    if (!tree || typeof __shouldHydratePermanentFolderChildren !== 'function') return [];
+    const targets = [];
+    tree.querySelectorAll('.tree-item[data-node-id][data-node-type="folder"]').forEach((item) => {
+        try {
+            const node = item.closest('.tree-node');
+            const children = node ? node.querySelector(':scope > .tree-children') : null;
+            const toggle = item.querySelector(':scope > .tree-toggle');
+            if (!toggle || !toggle.classList.contains('expanded') || !children) return;
+            if (!__shouldHydratePermanentFolderChildren(item, children)) return;
+            targets.push({
+                nodeId: String(item.dataset.nodeId || ''),
+                children
+            });
+        } catch (_) { }
+    });
+    return targets.filter((entry) => !!entry.nodeId);
+}
+
+async function __hydratePermanentExpandedTreeForFullscreen(tree) {
+    if (!tree || typeof loadPermanentFolderChildrenLazy !== 'function') return;
+
+    for (let pass = 0; pass < 8; pass += 1) {
+        const targets = __collectPermanentExpandedHydrationTargets(tree);
+        if (!targets.length) break;
+
+        for (let i = 0; i < targets.length; i += 1) {
+            const entry = targets[i];
+            try {
+                await loadPermanentFolderChildrenLazy(entry.nodeId, entry.children, 0, null, false);
+            } catch (_) { }
+        }
+
+        await __waitForAnimationFrames(1);
+        await __delayFullscreenRestore(8);
+    }
+}
+
+async function __preparePermanentSectionForFullscreenRestore(sectionEl, options = {}) {
+    if (!sectionEl) return sectionEl;
+    const tree = await __waitForPermanentTreeMaterialized(sectionEl);
+    const includeScroll = options.includeScroll !== false;
+
+    if (tree && typeof restoreTreeExpandState === 'function') {
+        try { restoreTreeExpandState(tree); } catch (_) { }
+    }
+
+    await __hydratePermanentExpandedTreeForFullscreen(tree);
+    await __waitForAnimationFrames(1);
+
+    if (tree && typeof restoreTreeExpandState === 'function') {
+        try { restoreTreeExpandState(tree); } catch (_) { }
+    }
+
+    if (includeScroll) {
+        try {
+            const body = sectionEl.querySelector('.permanent-section-body');
+            const key = __getPermanentSectionScrollKey(sectionEl);
+            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
+            if (body && persisted) {
+                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 2200 });
+            }
+        } catch (_) { }
+    }
+
+    return sectionEl;
+}
+
+async function __prepareTempNodeForFullscreenRestore(nodeEl, descriptor, options = {}) {
+    if (!nodeEl || !descriptor) return nodeEl;
+    const sectionId = String(descriptor.id || nodeEl.id || '').trim();
+    if (!sectionId) return nodeEl;
+    const includeScroll = options.includeScroll !== false;
+
+    try {
+        const section = getTempSection(sectionId);
+        if (section) {
+            if (section.dormant && typeof wakeSection === 'function') {
+                try { wakeSection(section); } catch (_) { }
+            }
+            if (typeof __ensureTempSectionTreeLoadedInPlace === 'function') {
+                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
+            }
+            const refreshedNode = document.getElementById(sectionId) || nodeEl;
+            const refreshedTree = refreshedNode ? refreshedNode.querySelector('.temp-bookmark-tree') : null;
+            const treeLoaded = !!(refreshedTree && refreshedTree.querySelector('.tree-item[data-node-id], .tree-load-more'));
+            if (!treeLoaded && typeof renderTempNode === 'function') {
+                try { renderTempNode(section, { forceBuildTree: true }); } catch (_) { }
+            }
+        }
+    } catch (_) { }
+
+    const refreshedNode = document.getElementById(sectionId) || nodeEl;
+    if (includeScroll) {
+        try {
+            const body = refreshedNode ? refreshedNode.querySelector('.temp-node-body') : null;
+            const key = __getTempSectionScrollKey(sectionId);
+            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
+            if (body && persisted) {
+                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 1600 });
+            }
+        } catch (_) { }
+    }
+
+    return refreshedNode || nodeEl;
+}
+
+async function __prepareNodeForFullscreenRestore(target, descriptor, options = {}) {
+    if (!target || !descriptor) return target;
+    const type = String(descriptor.type || '').toLowerCase();
+
+    if (type === 'permanent' || type === 'permanent-copy') {
+        return __preparePermanentSectionForFullscreenRestore(target, options);
+    }
+
+    if (type === 'temp-node') {
+        return __prepareTempNodeForFullscreenRestore(target, descriptor, options);
+    }
+
+    return target;
+}
+
+function __runFullscreenPreloadRestore(target, descriptor) {
+    if (!target || !descriptor) return;
+    const taskKey = __getMaximizedDescriptorKey(descriptor) || '';
+    if (CanvasState.maximizedRestoreTaskKey && CanvasState.maximizedRestoreTaskKey === taskKey) {
+        return;
+    }
+    CanvasState.maximizedRestoreTaskKey = taskKey;
+
+    (async () => {
+        let resolvedTarget = target;
+        try {
+            __setFullscreenPreloadReady(resolvedTarget, false);
+            __setFullscreenBodyReady(resolvedTarget, false);
+            resolvedTarget = await __prepareNodeForFullscreenRestore(resolvedTarget, descriptor, { includeScroll: false });
+            resolvedTarget = __resolveMaximizedNode(descriptor) || resolvedTarget;
+            if (!resolvedTarget) return;
+            __setFullscreenPreloadReady(resolvedTarget, false);
+            __setFullscreenBodyReady(resolvedTarget, false);
+            maximizeCanvasNode(resolvedTarget, { suppressReadyNotify: true });
+            await __prepareNodeForFullscreenRestore(resolvedTarget, descriptor);
+            resolvedTarget = __resolveMaximizedNode(descriptor) || resolvedTarget;
+            if (!resolvedTarget) return;
+            await __waitForFullscreenRevealStability(resolvedTarget, descriptor);
+            await __applyFullscreenScrollOnly(resolvedTarget, descriptor);
+            await __waitForAnimationFrames(2);
+            resolvedTarget = __resolveMaximizedNode(descriptor) || resolvedTarget;
+            if (!resolvedTarget) return;
+            __setFullscreenBodyReady(resolvedTarget, true);
+            __notifyNodeFullscreenContextChange(resolvedTarget);
+            CanvasState.pendingMaximizedDescriptor = null;
+        } catch (_) {
+            try {
+                const fallbackTarget = __resolveMaximizedNode(descriptor) || resolvedTarget || target;
+                if (fallbackTarget) {
+                    maximizeCanvasNode(fallbackTarget);
+                    CanvasState.pendingMaximizedDescriptor = null;
+                }
+            } catch (_) { }
+        } finally {
+            if (CanvasState.maximizedRestoreTaskKey === taskKey) {
+                CanvasState.maximizedRestoreTaskKey = '';
+            }
+        }
+    })();
+}
+
 function __tryRestoreMaximizedNode({ clearIfMissing = false } = {}) {
     if (!CanvasState.pendingMaximizedDescriptor) return;
-    const target = __resolveMaximizedNode(CanvasState.pendingMaximizedDescriptor);
+    const descriptor = CanvasState.pendingMaximizedDescriptor;
+    const target = __resolveMaximizedNode(descriptor);
     if (target) {
+        if (__isFullscreenPreloadRestoreActive()) {
+            __runFullscreenPreloadRestore(target, descriptor);
+            return;
+        }
         maximizeCanvasNode(target);
         CanvasState.pendingMaximizedDescriptor = null;
+        CanvasState.maximizedRestoreTaskKey = '';
         return;
     }
     if (clearIfMissing) {
         CanvasState.pendingMaximizedDescriptor = null;
+        CanvasState.maximizedRestoreTaskKey = '';
         __clearMaximizedNodeStorage();
         __updateNodeMaximizedState();
     }
 }
+
+function __tryRestorePendingMaximizedNodeForElement(element) {
+    if (!element || !CanvasState.pendingMaximizedDescriptor) return false;
+    const pendingKey = __getMaximizedDescriptorKey(CanvasState.pendingMaximizedDescriptor);
+    if (!pendingKey) return false;
+
+    const elementDescriptor = __serializeMaximizedNode(element);
+    if (!elementDescriptor) return false;
+    if (__getMaximizedDescriptorKey(elementDescriptor) !== pendingKey) return false;
+
+    try { __tryRestoreMaximizedNode({ clearIfMissing: false }); } catch (_) { }
+    return __isNodeMaximized(element);
+}
+
+function __primePendingCanvasFullscreenShell() {
+    let descriptor = CanvasState.pendingMaximizedDescriptor;
+    if (!descriptor) {
+        try {
+            descriptor = __loadMaximizedNodeFromStorage();
+        } catch (_) {
+            descriptor = null;
+        }
+        if (descriptor) {
+            CanvasState.pendingMaximizedDescriptor = descriptor;
+        }
+    }
+
+    if (!descriptor || typeof descriptor !== 'object') return false;
+
+    const type = String(descriptor.type || '').toLowerCase();
+    if (type === 'permanent' || type === 'permanent-copy') {
+        try {
+            const mainSection = document.getElementById('permanentSection');
+            if (mainSection) {
+                const copyId = type === 'permanent-copy'
+                    ? String(descriptor.copyId || '').trim()
+                    : '';
+                const shell = __buildPermanentViewShellProtocolFromStorage(copyId || null);
+                if (copyId) {
+                    let copySection = __resolvePermanentSectionElement(copyId);
+                    if (!copySection) {
+                        copySection = __createPermanentSectionCopyFromStorage({
+                            id: copyId,
+                            displayIndex: shell.displayIndex,
+                            ...(shell && shell.cardState && typeof shell.cardState === 'object' ? shell.cardState : {})
+                        });
+                    }
+                    if (copySection) {
+                        __applyPermanentViewShellToSectionElement(copySection, shell);
+                    }
+                } else {
+                    __applyPermanentViewShellToSectionElement(mainSection, shell);
+                }
+            }
+        } catch (_) { }
+    }
+
+    const target = __resolveMaximizedNode(descriptor);
+    if (!target) return false;
+
+    try { __tryRestoreMaximizedNode({ clearIfMissing: false }); } catch (_) { }
+    return __isNodeMaximized(target);
+}
+window.__primePendingCanvasFullscreenShell = __primePendingCanvasFullscreenShell;
 
 async function openLastMaximizedNode(options = {}) {
     const parsedRetries = Number(options.retries);
@@ -11550,6 +12172,18 @@ function __notifyNodeFullscreenContextChange(targetElement = null) {
             refreshCurrentViewAddBtn();
         }
     } catch (_) { }
+
+    try {
+        if (targetElement && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            __setFullscreenPreloadReady(targetElement, true);
+            window.dispatchEvent(new CustomEvent('canvas-maximized-node-ready', {
+                detail: {
+                    id: String(targetElement.id || ''),
+                    descriptor: __serializeMaximizedNode(targetElement)
+                }
+            }));
+        }
+    } catch (_) { }
 }
 
 function __mutationContainsRemovedMaximizedNode(mutationList) {
@@ -11583,6 +12217,7 @@ function __syncNodeMaximizedStateAfterNodeRemoval() {
     if (!CanvasState.nodeMaximizedActive) {
         __clearMaximizedNodeStorage();
         CanvasState.pendingMaximizedDescriptor = null;
+        CanvasState.maximizedRestoreTaskKey = '';
     }
 
     if (hadMaximizedContext && !CanvasState.nodeMaximizedActive) {
@@ -11632,8 +12267,9 @@ function __clearOtherMaximizedNodes(except) {
     });
 }
 
-function maximizeCanvasNode(element) {
+function maximizeCanvasNode(element, options = {}) {
     if (!element) return;
+    const suppressReadyNotify = !!(options && options.suppressReadyNotify);
     __restoreTemporaryRaisedCanvasNode();
     const rect = __getCanvasViewportRect();
     if (!rect) return;
@@ -11648,6 +12284,8 @@ function maximizeCanvasNode(element) {
     element.dataset.maxPrevZ = element.style.zIndex || '';
 
     element.classList.add('canvas-node-maximized');
+    __setFullscreenPreloadReady(element, !suppressReadyNotify);
+    __setFullscreenBodyReady(element, !suppressReadyNotify);
     element.style.transform = 'none';
     element.style.left = `${rect.x}px`;
     element.style.top = `${rect.y}px`;
@@ -11660,12 +12298,16 @@ function maximizeCanvasNode(element) {
     __applyNodeLayoutZoom(element);
     __scheduleNodeLayoutZoomStabilize(element);
     updateNodeFullscreenButtons();
-    __notifyNodeFullscreenContextChange(element);
+    if (!suppressReadyNotify) {
+        __notifyNodeFullscreenContextChange(element);
+    }
 }
 
 function restoreCanvasNodeLayout(element) {
     if (!element || !element.dataset) return;
     if (!__isNodeMaximized(element)) return;
+    __setFullscreenPreloadReady(element, false);
+    __setFullscreenBodyReady(element, false);
     element.classList.remove('canvas-node-maximized');
     element.style.left = element.dataset.maxPrevLeft || '';
     element.style.top = element.dataset.maxPrevTop || '';
@@ -14178,6 +14820,7 @@ function __createPermanentSectionCopyFromStorage(copyData) {
         try { __updatePermanentSectionIndexBadges(); } catch (_) { }
         try { bindPermanentSectionTipBehavior(existed); } catch (_) { }
         updateNodeFullscreenButtons();
+        __tryRestorePendingMaximizedNodeForElement(existed);
         return existed;
     }
 
@@ -14219,6 +14862,7 @@ function __createPermanentSectionCopyFromStorage(copyData) {
     try { __updatePermanentSectionIndexBadges(); } catch (_) { }
     try { bindPermanentSectionTipBehavior(copySection); } catch (_) { }
     updateNodeFullscreenButtons();
+    __tryRestorePendingMaximizedNodeForElement(copySection);
     return copySection;
 }
 
@@ -14402,20 +15046,12 @@ function makePermanentSectionDraggable(permanentSection) {
         // 恢复滚动位置（多次尝试，确保树渲染后也能成功）
         const persisted = __readPartitionedViewJSON(key, null, 'scroll');
         if (persisted && typeof persisted.top === 'number') {
-            const restore = () => {
-                try {
-                    const until = parseInt(permanentBody.dataset.scrollRestoreBlockUntil || '0', 10) || 0;
-                    if (until && Date.now() < until) return;
-                } catch (_) { }
-                permanentBody.scrollTop = persisted.top || 0;
-                permanentBody.scrollLeft = persisted.left || 0;
-            };
-            restore();
-            requestAnimationFrame(() => {
-                restore();
-                setTimeout(restore, 10);
-                setTimeout(restore, 50);
-                setTimeout(restore, 100);
+            __scheduleCanvasBodyScrollRestore(permanentBody, {
+                top: persisted.top || 0,
+                left: typeof persisted.left === 'number' ? persisted.left : 0
+            }, {
+                target: permanentSection,
+                fallbackDelays: [10, 50, 100]
             });
         }
     }
@@ -19361,6 +19997,7 @@ function renderMdNode(node) {
     }
 
     addAnchorsToNode(el, node.id);
+    __tryRestorePendingMaximizedNodeForElement(el);
 
     if (__isNodeMaximized(el)) {
         __scheduleNodeLayoutZoomStabilize(el);
@@ -23833,26 +24470,17 @@ function renderTempNode(section, options = {}) {
     // 即使滚动位置是0也需要恢复，因为可能从非0位置变为0
     // 注意：滚动容器是 body (temp-node-body)，而不是 treeContainer
     if (!isNew || savedScrollTop) {
-        const restoreScroll = () => {
-            body.scrollTop = savedScrollTop;
-            body.scrollLeft = savedScrollLeft;
-            console.log('[Canvas] 恢复滚动位置:', {
-                sectionId: section.id,
-                target: { top: savedScrollTop, left: savedScrollLeft },
-                actual: { top: body.scrollTop, left: body.scrollLeft }
-            });
-        };
-
-        // 立即尝试
-        restoreScroll();
-
-        // 使用 requestAnimationFrame 延迟尝试
-        requestAnimationFrame(() => {
-            restoreScroll();
-            // 再次延迟尝试（确保 DOM 完全渲染和事件绑定完成）
-            setTimeout(restoreScroll, 10);
-            setTimeout(restoreScroll, 50);
-            setTimeout(restoreScroll, 100);
+        __scheduleCanvasBodyScrollRestore(body, {
+            top: savedScrollTop || 0,
+            left: savedScrollLeft || 0
+        }, {
+            target: nodeElement,
+            fallbackDelays: [10, 50, 100]
+        });
+        console.log('[Canvas] 恢复滚动位置:', {
+            sectionId: section.id,
+            target: { top: savedScrollTop, left: savedScrollLeft },
+            actual: { top: body.scrollTop, left: body.scrollLeft }
         });
     }
 
@@ -23872,6 +24500,7 @@ function renderTempNode(section, options = {}) {
     }
 
     addAnchorsToNode(nodeElement, section.id);
+    __tryRestorePendingMaximizedNodeForElement(nodeElement);
 
     if (__isNodeMaximized(nodeElement)) {
         __scheduleNodeLayoutZoomStabilize(nodeElement);
@@ -39373,7 +40002,7 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
     }
 
     // Restore maximized node state after all nodes are rendered
-    __tryRestoreMaximizedNode({ clearIfMissing: true });
+    __tryRestoreMaximizedNode({ clearIfMissing: false });
 
     // 通知首屏预置：Canvas 初始布局（含滚动条位置）已经就绪
     try {
