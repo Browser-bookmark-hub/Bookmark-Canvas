@@ -74,9 +74,8 @@
     const RECOVERY_SNAPSHOT_KEEP_LATEST = 1;
     const DEFAULT_PERMANENT_INCREMENTAL_MAX_LOGICAL_CHANGES_ABS = 200;
     const PERMANENT_TREE_UPLOAD_INTERVALS = new Set([0, 5, 15, 30, 60]);
-    // Sync pipeline keeps only conflict-stable formats.
-    // Legacy `visual` is auto-migrated to `visual-no-icon`.
-    const OBSIDIAN_EXPORT_FORMATS = new Set(['visual-no-icon', 'json']);
+    // Sync pipeline keeps only JSON compatibility mode.
+    const OBSIDIAN_EXPORT_FORMATS = new Set(['json']);
     const RECOVERY_SNAPSHOT_IDLE_REASON = 'idle-periodic-backup';
     const RECOVERY_SNAPSHOT_MANUAL_REASON = 'manual-backup';
     const CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE = { min: 0, max: 24 * 60 * 60 };
@@ -520,7 +519,6 @@
         if (text.startsWith('manual')) return true;
         if (text.startsWith('first-sync')) return true;
         if (text.includes('conflict')) return true;
-        if (text.includes('format-migration')) return true;
         if (text.startsWith('recovery-')) return true;
         return false;
     }
@@ -1264,7 +1262,7 @@
 
         if (!isPermanentOnlySnapshot) {
             try {
-                applySnapshotToLocal(baseSnapshot);
+                await applySnapshotToLocal(baseSnapshot);
             } catch (error) {
                 errors.push(error && error.message ? error.message : String(error));
             }
@@ -1339,7 +1337,7 @@
                 if (!stagedSnapshot) {
                     throw new Error(textByLang('恢复缓存缺少可用云端快照，无法继续覆盖本地', 'The staged recovery bundle is missing a usable remote snapshot; cannot continue overwriting local'));
                 }
-                applySnapshotToLocal(buildSnapshotForRemoteLocalApply(stagedSnapshot));
+                await applySnapshotToLocal(buildSnapshotForRemoteLocalApply(stagedSnapshot));
             }
 
             if (!permanentApplied && remotePermanentTreeSnapshot) {
@@ -2402,14 +2400,53 @@
 
     async function resolveCanvasTempStateForSync(rawInput = '') {
         const parsedRaw = safeParse(rawInput, null);
-        const livePayload = getLiveCanvasTempStateForSync(parsedRaw);
-        if (livePayload) return livePayload;
-
         if (isCanvasTempStatePayloadForSync(parsedRaw)) {
             return buildPersistedCanvasTempStateForSync(parsedRaw);
         }
 
+        const livePayload = getLiveCanvasTempStateForSync(parsedRaw);
+        if (livePayload) return livePayload;
+
         return null;
+    }
+
+    async function resolveCanvasTempStateRawForSync(rawInput = '') {
+        const raw = typeof rawInput === 'string' ? rawInput : '';
+        const parsedRaw = raw ? safeParse(raw, null) : null;
+        if (raw && isCanvasTempStatePayloadForSync(parsedRaw)) {
+            return raw;
+        }
+        const normalizedRaw = raw ? buildNormalizedCanvasTempStateRawForSync(raw) : '';
+        if (normalizedRaw) return normalizedRaw;
+        const resolvedPayload = await resolveCanvasTempStateForSync(raw);
+        return resolvedPayload ? JSON.stringify(resolvedPayload) : '';
+    }
+
+    async function resolveCanvasTempStateRawFromBcsForSync() {
+        const protocolBridge = global && global.CanvasProtocolBridge ? global.CanvasProtocolBridge : null;
+        if (!protocolBridge) return '';
+
+        if (typeof protocolBridge.buildCanvasTempStateRawForSyncFromBcs === 'function') {
+            try {
+                const bridgeRaw = await protocolBridge.buildCanvasTempStateRawForSyncFromBcs();
+                const parsedBridgeRaw = bridgeRaw ? safeParse(bridgeRaw, null) : null;
+                if (bridgeRaw && isCanvasTempStatePayloadForSync(parsedBridgeRaw)) {
+                    return bridgeRaw;
+                }
+            } catch (_) { }
+        }
+
+        if (typeof protocolBridge.loadCanvasTempStateFromBcs === 'function') {
+            try {
+                const bcsState = await protocolBridge.loadCanvasTempStateFromBcs();
+                const normalizedState = normalizeCanvasTempStatePayloadForSync(bcsState);
+                if (normalizedState) {
+                    return JSON.stringify(normalizedState);
+                }
+            } catch (_) { }
+        }
+
+        return '';
     }
 
     function normalizeCanvasTempStatePayloadForSync(stateInput, fallbackStateInput = null) {
@@ -2468,6 +2505,12 @@
         return Number.isFinite(normalized) ? normalized : null;
     }
 
+    function normalizeCanvasMarkdownSourceForSync(value) {
+        return String(value == null ? '' : value)
+            .replace(/\u200B/g, '')
+            .replace(/\r\n?/g, '\n');
+    }
+
     function buildComparableTempSectionEntryForSync(sectionInput) {
         const section = sectionInput && typeof sectionInput === 'object' ? sectionInput : null;
         if (!section) return null;
@@ -2502,7 +2545,7 @@
                 title: String(sectionMeta.title || section.title || '').trim(),
                 source: String(sectionMeta.source || '').trim(),
                 sequenceNumber: normalizeCanvasTempStateNumberForSync(sectionMeta.sequenceNumber),
-                descriptionMd: String(sectionMeta.descriptionMd || '').trim()
+                descriptionMd: normalizeCanvasMarkdownSourceForSync(sectionMeta.descriptionMd || '')
             },
             bookmarkTree
         };
@@ -2850,12 +2893,14 @@
 
     function normalizeObsidianExportFormat(value, fallback = DEFAULT_SETTINGS.obsidianExportFormat) {
         const format = String(value || '').trim().toLowerCase();
-        if (format === 'visual') return 'visual-no-icon';
+        if (format === 'visual' || format === 'visual-no-icon') return 'json';
         if (OBSIDIAN_EXPORT_FORMATS.has(format)) return format;
 
         const fallbackFormat = String(fallback || '').trim().toLowerCase();
-        if (fallbackFormat === 'visual') return 'visual-no-icon';
-        return OBSIDIAN_EXPORT_FORMATS.has(fallbackFormat) ? fallbackFormat : fallback;
+        if (fallbackFormat === 'visual' || fallbackFormat === 'visual-no-icon') return 'json';
+        if (OBSIDIAN_EXPORT_FORMATS.has(fallbackFormat)) return fallbackFormat;
+        if (typeof fallback === 'string' && !fallback.trim()) return '';
+        return DEFAULT_SETTINGS.obsidianExportFormat;
     }
 
     function getCurrentObsidianExportFormatForSync() {
@@ -2876,16 +2921,9 @@
         return normalized;
     }
 
-    function hasPendingLocalObsidianExportFormatChange() {
-        const currentFormat = getCurrentObsidianExportFormatForSync();
-        const storedFormat = getStoredSyncedObsidianExportFormat();
-        return !!(currentFormat && storedFormat && currentFormat !== storedFormat);
-    }
-
     function formatObsidianExportFormatLabel(format) {
         const normalized = normalizeObsidianExportFormat(format, '');
         if (normalized === 'json') return textByLang('JSON模式（供AI）', 'JSON mode (for AI)');
-        if (normalized === 'visual-no-icon') return textByLang('视觉模式（无图标）', 'Visual mode (no icon)');
         return '';
     }
 
@@ -2893,44 +2931,19 @@
         const select = selectEl || getElement('canvasSyncObsidianExportFormatSelect');
         if (!select) return;
         try {
-            const visualOption = select.querySelector('option[value="visual"]');
-            if (visualOption) visualOption.remove();
+            Array.from(select.options || []).forEach((option) => {
+                if (!option || String(option.value || '').trim().toLowerCase() === 'json') return;
+                option.remove();
+            });
         } catch (_) { }
-        const current = normalizeObsidianExportFormat(select.value, DEFAULT_SETTINGS.obsidianExportFormat);
-        if (current && String(select.value || '').trim().toLowerCase() !== current) {
-            select.value = current;
+        if (!select.querySelector('option[value="json"]')) {
+            const option = document.createElement('option');
+            option.id = 'canvasSyncObsidianExportFormatJsonOption';
+            option.value = 'json';
+            option.textContent = textByLang('JSON模式（供AI）', 'JSON mode (for AI)');
+            select.appendChild(option);
         }
-    }
-
-    function resolveObsidianExportFormatMigration(remoteState) {
-        const currentFormat = getCurrentObsidianExportFormatForSync();
-        const remoteFormat = normalizeObsidianExportFormat(remoteState && remoteState.exportFormat, '');
-        const storedFormat = getStoredSyncedObsidianExportFormat();
-        const baseFormat = remoteFormat || storedFormat;
-        const hasRemoteFiles = !!(
-            remoteState
-            && remoteState.notFound !== true
-            && remoteState.remoteList
-            && Array.isArray(remoteState.remoteList.files)
-            && remoteState.remoteList.files.length > 0
-        );
-        const remoteMissing = !!(remoteState && remoteState.notFound === true);
-
-        if (!currentFormat || !baseFormat || baseFormat === currentFormat) {
-            return null;
-        }
-        if (!hasRemoteFiles && !remoteMissing && remoteState) {
-            return null;
-        }
-
-        return {
-            currentFormat,
-            baseFormat,
-            remoteFormat,
-            storedFormat,
-            remoteMissing,
-            source: remoteFormat ? 'remote' : 'local-meta'
-        };
+        select.value = 'json';
     }
 
     function adoptRemoteObsidianExportFormat(remoteFormat, options = {}) {
@@ -3032,7 +3045,13 @@
         try {
             global.dispatchEvent(new CustomEvent('canvas-obsidian-git-sync-settings-updated', {
                 detail: {
-                    enabled: !!(settings && settings.enabled)
+                    enabled: !!(settings && settings.enabled),
+                    obsidianExportRoot: settings && typeof settings.obsidianExportRoot === 'string'
+                        ? settings.obsidianExportRoot
+                        : '',
+                    obsidianExportFormat: settings && typeof settings.obsidianExportFormat === 'string'
+                        ? settings.obsidianExportFormat
+                        : ''
                 }
             }));
         } catch (_) { }
@@ -3383,14 +3402,13 @@
         const text = String(trigger || '').toLowerCase();
         if (!text) return false;
         if (text.startsWith('manual')) return true;
-        if (text.includes('format-migration')) return true;
         return text.includes('first-sync') || text.includes('bootstrap') || text.includes('startup');
     }
 
     function shouldForceWriteAllFilesForPush(trigger) {
         const text = String(trigger || '').toLowerCase();
         if (!text) return false;
-        return text.includes('first-sync') || text.includes('bootstrap') || text.includes('format-migration');
+        return text.includes('first-sync') || text.includes('bootstrap');
     }
 
     function collectCandidatePathsFromDirtyState(dirtyState, files, pathMap) {
@@ -4201,11 +4219,12 @@
 	        const tree = await bookmarksGetTree();
 	        let normalized = null;
 	        try {
-	            const protocolBridge = global && global.CanvasProtocolBridge && typeof global.CanvasProtocolBridge.normalizePermanentTreeSnapshot === 'function'
+	            const protocolBridge = global && global.CanvasProtocolBridge
+	                && typeof global.CanvasProtocolBridge.normalizePermanentTreeSnapshot === 'function'
 	                ? global.CanvasProtocolBridge
 	                : null;
 	            if (protocolBridge) {
-	                normalized = protocolBridge.normalizePermanentTreeSnapshot(tree);
+	                normalized = protocolBridge.normalizePermanentTreeSnapshot(tree, { persistRootMeta: false });
 	                if (normalized && typeof protocolBridge.persistPermanentRootMetaFromTree === 'function') {
 	                    try { protocolBridge.persistPermanentRootMetaFromTree(normalized); } catch (_) { }
 	                }
@@ -5048,12 +5067,23 @@ Cancel: go back and change the branch name first.`
                 inputEl.addEventListener('keydown', (event) => {
                     if (event.key === 'Enter') {
                         event.preventDefault();
+                        const previousRoot = normalizeSyncPath(settings && settings.obsidianExportRoot);
                         const nextRoot = normalizeObsidianExportRoot(inputEl.value, DEFAULT_SETTINGS.obsidianExportRoot, { allowEmpty: true });
                         if (rootInput) rootInput.value = nextRoot;
                         settings.obsidianExportRoot = nextRoot;
                         settings.firstSyncPathVerifiedRoot = normalizeSyncPath(nextRoot);
                         settings.firstSyncPathVerifiedAt = Date.now();
                         saveSettings();
+                        if (normalizeSyncPath(nextRoot) !== previousRoot) {
+                            updateDirtyStateByReason('obsidian-export-root-change', {
+                                dirty: {
+                                    canvasFileRef: true,
+                                    permanentAll: true,
+                                    temporaryAll: true,
+                                    blankAll: true
+                                }
+                            });
+                        }
                         cleanup(true);
                     } else if (event.key === 'Escape') {
                         event.preventDefault();
@@ -5065,6 +5095,7 @@ Cancel: go back and change the branch name first.`
             const confirmBtn = document.getElementById('canvasSyncPathValidationConfirm');
             if (confirmBtn) {
                 confirmBtn.addEventListener('click', () => {
+                    const previousRoot = normalizeSyncPath(settings && settings.obsidianExportRoot);
                     const nextRoot = normalizeObsidianExportRoot(
                         inputEl ? inputEl.value : currentValue,
                         DEFAULT_SETTINGS.obsidianExportRoot,
@@ -5075,6 +5106,16 @@ Cancel: go back and change the branch name first.`
                     settings.firstSyncPathVerifiedRoot = normalizeSyncPath(nextRoot);
                     settings.firstSyncPathVerifiedAt = Date.now();
                     saveSettings();
+                    if (normalizeSyncPath(nextRoot) !== previousRoot) {
+                        updateDirtyStateByReason('obsidian-export-root-change', {
+                            dirty: {
+                                canvasFileRef: true,
+                                permanentAll: true,
+                                temporaryAll: true,
+                                blankAll: true
+                            }
+                        });
+                    }
                     cleanup(true);
                 });
             }
@@ -5383,48 +5424,6 @@ Cancel: go back and change the branch name first.`
             ]
         });
         return result === 'confirm';
-    }
-
-    async function requestFormatMigrationLocalOverwriteConfirmationAsync(formatMigration, options = {}) {
-        const migration = formatMigration && typeof formatMigration === 'object' ? formatMigration : {};
-        const baseFormatLabel = formatObsidianExportFormatLabel(migration.baseFormat)
-            || String(migration.baseFormat || textByLang('旧格式', 'previous format'));
-        const currentFormatLabel = formatObsidianExportFormatLabel(migration.currentFormat)
-            || String(migration.currentFormat || textByLang('新格式', 'new format'));
-        const triggerText = String(options && options.trigger || '').trim();
-        const lines = (getSyncLang() === 'en'
-            ? [
-                'Detected an export format switch.',
-                `Format migration: ${baseFormatLabel} -> ${currentFormatLabel}`,
-                'To continue, this run must overwrite cloud with local in the new format.',
-                'Cloud content in the old format will be replaced.',
-                triggerText ? `Trigger: ${triggerText}` : ''
-            ]
-            : [
-                '检测到导出格式已切换。',
-                `格式迁移：${baseFormatLabel} -> ${currentFormatLabel}`,
-                '继续本次同步需要执行“本地覆盖云端（新格式）”。',
-                '云端旧格式内容会被替换。',
-                triggerText ? `触发来源：${triggerText}` : ''
-            ])
-            .filter((line) => !!String(line || '').trim());
-
-        const result = await openSyncActionDialog({
-            title: textByLang('格式迁移确认', 'Format Migration Confirmation'),
-            lines,
-            keywordExpected: 'OVERWRITE',
-            keywordLabel: textByLang('输入 OVERWRITE 后可执行“本地覆盖云端”', 'Type OVERWRITE to enable "Local Overwrite Cloud"'),
-            keywordHint: textByLang(
-                '确认后将按当前格式重新导出，并覆盖云端同步文件。',
-                'After confirmation, the current format will be re-exported and cloud sync files will be overwritten.'
-            ),
-            actions: [
-                { id: 'cancel', label: textByLang('取消', 'Cancel'), tone: 'secondary' },
-                { id: 'overwrite-cloud', label: textByLang('本地覆盖云端（格式迁移）', 'Local Overwrite Cloud (Format Migration)'), tone: 'primary' }
-            ],
-            dangerActionId: 'overwrite-cloud'
-        });
-        return result === 'overwrite-cloud';
     }
 
     function getFirstSyncDataKeyLabel(key) {
@@ -6273,7 +6272,6 @@ Cancel: go back and change the branch name first.`
         // Explicit user-initiated actions should show determinate progress on the button,
         // and should not be silently ignored.
         if (triggerText.startsWith('manual') || triggerText === 'user') return true;
-        if (triggerText === 'obsidian-export-format-change') return true;
         return false;
     }
 
@@ -7445,13 +7443,6 @@ Cancel: go back and change the branch name first.`
             disabledByMaster || conflictPreview || disabledByRunning || disabledByRecoveryLock,
             disabledByMaster ? disabledHint : (conflictPreview ? previewHint : (disabledByRunning ? runningHint : (disabledByRecoveryLock ? recoveryHint : '')))
         );
-
-        const conflictRetryMergeBtn = getElement('canvasSyncConflictRetryMergeBtn');
-        setActionDisabledState(
-            conflictRetryMergeBtn,
-            disabledByMaster || conflictPreview || disabledByRunning || disabledByRecoveryLock,
-            disabledByMaster ? disabledHint : (conflictPreview ? previewHint : (disabledByRunning ? runningHint : (disabledByRecoveryLock ? recoveryHint : '')))
-        );
     }
 
     function setPreviewPanelMode(mode) {
@@ -7631,7 +7622,6 @@ Cancel: go back and change the branch name first.`
             'canvasSyncConflictUseRemoteBtn',
             'canvasSyncConflictUseNewestBtn',
             'canvasSyncConflictApplyFineBtn',
-            'canvasSyncConflictRetryMergeBtn',
             'canvasSyncConflictDismissBtn'
         ].forEach((id) => {
             setActionDisabledState(
@@ -7751,6 +7741,9 @@ Cancel: go back and change the branch name first.`
             settings && settings.obsidianExportFormat,
             DEFAULT_SETTINGS.obsidianExportFormat
         );
+        const previousObsidianExportRoot = normalizeSyncPath(
+            settings && settings.obsidianExportRoot
+        );
 
         settings.enabled = enabled ? !!enabled.checked : settings.enabled;
         settings.firstSyncMode = getFirstSyncModeFromForm(settings.firstSyncMode);
@@ -7779,6 +7772,7 @@ Cancel: go back and change the branch name first.`
         saveSettings();
 
         const currentObsidianExportFormat = getCurrentObsidianExportFormatForSync();
+        const currentObsidianExportRoot = normalizeSyncPath(settings && settings.obsidianExportRoot);
         if (previousObsidianExportFormat !== currentObsidianExportFormat) {
             updateDirtyStateByReason('obsidian-export-format-change', {
                 dirty: {
@@ -7795,6 +7789,16 @@ Cancel: go back and change the branch name first.`
                     `Export format switched: ${previousFormatLabel} -> ${currentFormatLabel}`
                 ), { optional: true });
             }
+        }
+        if (previousObsidianExportRoot !== currentObsidianExportRoot) {
+            updateDirtyStateByReason('obsidian-export-root-change', {
+                dirty: {
+                    canvasFileRef: true,
+                    permanentAll: true,
+                    temporaryAll: true,
+                    blankAll: true
+                }
+            });
         }
 
         void updateBackgroundSyncContext('settings-change');
@@ -8316,7 +8320,7 @@ Cancel: go back and change the branch name first.`
         const shell = {
             viewId: copyId ? `permanent-section-copy-${copyId}` : 'permanent-section',
             copyId,
-            descriptionMd: String(source.descriptionMd || source.description || '').trim(),
+            descriptionMd: normalizeCanvasMarkdownSourceForSync(source.descriptionMd || source.description || ''),
             cardState: normalizePermanentViewCardStateForSync(source.cardState || source),
             // 滚动/展开属于本地视图态，不进入云端同步快照。
             scrollState: {},
@@ -8548,15 +8552,29 @@ Cancel: go back and change the branch name first.`
             data[key] = toSnapshotDataString(rawData[key]);
         });
 
-        const normalizedSnapshotTempState = normalizeCanvasTempStatePayloadForSync(rawData[TEMP_SECTION_STORAGE_KEY]);
-        if (normalizedSnapshotTempState) {
-            data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(normalizedSnapshotTempState);
-        } else if (isBackupPayload && (!data[TEMP_SECTION_STORAGE_KEY] || !String(data[TEMP_SECTION_STORAGE_KEY]).trim())) {
-            const canvasState = snapshot.canvasState && typeof snapshot.canvasState === 'object' ? snapshot.canvasState : null;
-            if (canvasState) {
-                const normalizedCanvasTempState = normalizeCanvasTempStatePayloadForSync(canvasState);
-                if (normalizedCanvasTempState) {
-                    data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(normalizedCanvasTempState);
+        const rawSnapshotTempState = Object.prototype.hasOwnProperty.call(rawData, TEMP_SECTION_STORAGE_KEY)
+            ? rawData[TEMP_SECTION_STORAGE_KEY]
+            : '';
+        const rawSnapshotTempStateString = typeof rawSnapshotTempState === 'string'
+            ? rawSnapshotTempState
+            : '';
+        const parsedSnapshotTempState = rawSnapshotTempStateString
+            ? safeParse(rawSnapshotTempStateString, null)
+            : null;
+        if (rawSnapshotTempStateString && isCanvasTempStatePayloadForSync(parsedSnapshotTempState)) {
+            // Keep temp-state payload raw string unchanged when it is already valid.
+            data[TEMP_SECTION_STORAGE_KEY] = rawSnapshotTempStateString;
+        } else {
+            const normalizedSnapshotTempState = normalizeCanvasTempStatePayloadForSync(rawSnapshotTempState);
+            if (normalizedSnapshotTempState) {
+                data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(normalizedSnapshotTempState);
+            } else if (isBackupPayload && (!data[TEMP_SECTION_STORAGE_KEY] || !String(data[TEMP_SECTION_STORAGE_KEY]).trim())) {
+                const canvasState = snapshot.canvasState && typeof snapshot.canvasState === 'object' ? snapshot.canvasState : null;
+                if (canvasState) {
+                    const normalizedCanvasTempState = normalizeCanvasTempStatePayloadForSync(canvasState);
+                    if (normalizedCanvasTempState) {
+                        data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(normalizedCanvasTempState);
+                    }
                 }
             }
         }
@@ -8738,9 +8756,9 @@ Cancel: go back and change the branch name first.`
         }
 
         const cachedRaw = String(getSyncMetaRaw(LAST_UPLOADED_TEMP_STATE_KEY) || '');
-        const normalizedCachedRaw = cachedRaw ? buildNormalizedCanvasTempStateRawForSync(cachedRaw) : '';
-        if (normalizedCachedRaw) {
-            data[TEMP_SECTION_STORAGE_KEY] = normalizedCachedRaw;
+        const parsedCachedRaw = cachedRaw ? safeParse(cachedRaw, null) : null;
+        if (cachedRaw && isCanvasTempStatePayloadForSync(parsedCachedRaw)) {
+            data[TEMP_SECTION_STORAGE_KEY] = cachedRaw;
             return { includeTempSection: false, usedCachedTempSection: true };
         }
 
@@ -8770,19 +8788,34 @@ Cancel: go back and change the branch name first.`
     async function buildLocalSnapshot(trigger, options = {}) {
         const data = {};
         SYNC_KEYS.forEach((key) => {
+            if (key === TEMP_SECTION_STORAGE_KEY) return;
             const raw = localStorage.getItem(key);
             if (raw !== null && raw !== undefined) {
                 data[key] = raw;
             }
         });
 
+        let resolvedTempStateRaw = '';
         try {
-            const resolvedTempState = await resolveCanvasTempStateForSync(data[TEMP_SECTION_STORAGE_KEY] || '');
-            if (resolvedTempState) {
-                data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(resolvedTempState);
-            }
+            resolvedTempStateRaw = await resolveCanvasTempStateRawFromBcsForSync();
         } catch (error) {
-            console.warn('[Canvas Sync] resolve local temp-state for snapshot failed:', error);
+            console.warn('[Canvas Sync] resolve temp-state from BCS for snapshot failed:', error);
+            resolvedTempStateRaw = '';
+        }
+
+        if (!resolvedTempStateRaw) {
+            try {
+                resolvedTempStateRaw = await resolveCanvasTempStateRawForSync(localStorage.getItem(TEMP_SECTION_STORAGE_KEY) || '');
+            } catch (error) {
+                console.warn('[Canvas Sync] resolve local temp-state for snapshot failed:', error);
+                resolvedTempStateRaw = '';
+            }
+        }
+
+        if (resolvedTempStateRaw) {
+            data[TEMP_SECTION_STORAGE_KEY] = resolvedTempStateRaw;
+        } else if (Object.prototype.hasOwnProperty.call(data, TEMP_SECTION_STORAGE_KEY)) {
+            delete data[TEMP_SECTION_STORAGE_KEY];
         }
 
         const tempSectionMeta = applyTempSectionSnapshotThrottle(data, trigger, options);
@@ -9039,9 +9072,13 @@ Cancel: go back and change the branch name first.`
             data[key] = toSnapshotDataString(storage[key]);
         });
 
-        const normalizedTempState = normalizeCanvasTempStatePayloadForSync(tempState);
-        if (normalizedTempState) {
-            data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(normalizedTempState);
+        const hasTempStateRawInStorage = typeof data[TEMP_SECTION_STORAGE_KEY] === 'string'
+            && String(data[TEMP_SECTION_STORAGE_KEY]).trim();
+        if (!hasTempStateRawInStorage) {
+            const normalizedTempState = normalizeCanvasTempStatePayloadForSync(tempState);
+            if (normalizedTempState) {
+                data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(normalizedTempState);
+            }
         }
 
         const normalized = normalizeSnapshot({
@@ -9262,17 +9299,12 @@ Cancel: go back and change the branch name first.`
         return response;
     }
 
-    async function applyRemoteFilesBatch(changes, commitMessage, timeoutMs = 120000, options = {}) {
-        const mergeViaTempBranch = !!(options && options.mergeViaTempBranch === true);
-        const tempBranchPrefix = String(options && options.tempBranchPrefix ? options.tempBranchPrefix : '').trim() || 'canvas-sync';
+    async function applyRemoteFilesBatch(changes, commitMessage, timeoutMs = 120000) {
         const payload = {
-            action: mergeViaTempBranch ? 'canvasGitMergeFilesViaTempBranch' : 'canvasGitApplyFilesBatch',
+            action: 'canvasGitApplyFilesBatch',
             changes: Array.isArray(changes) ? changes : [],
             commitMessage
         };
-        if (mergeViaTempBranch) {
-            payload.tempBranchPrefix = tempBranchPrefix;
-        }
 
         if (!payload.changes.length) {
             throw new Error(textByLang('缺少变更列表', 'Missing change list'));
@@ -9303,9 +9335,6 @@ Cancel: go back and change the branch name first.`
             if (response && response.conflict === true) error.conflict = true;
             if (response && response.protectedBranch === true) error.protectedBranch = true;
             if (response && response.branch) error.branch = String(response.branch);
-            if (response && response.tempBranch) error.tempBranch = String(response.tempBranch);
-            if (response && response.tempCommitSha) error.tempCommitSha = String(response.tempCommitSha);
-            if (response && response.tempBranchDeleteWarning) error.tempBranchDeleteWarning = String(response.tempBranchDeleteWarning);
             throw error;
         }
 
@@ -9674,10 +9703,7 @@ Cancel: go back and change the branch name first.`
             }
             let batchResult = null;
             try {
-                batchResult = await applyRemoteFilesBatch(batchChanges, batchCommitMessage, batchTimeoutMs, {
-                    mergeViaTempBranch: options && options.useTempBranchMerge === true,
-                    tempBranchPrefix: options && options.tempBranchPrefix
-                });
+                batchResult = await applyRemoteFilesBatch(batchChanges, batchCommitMessage, batchTimeoutMs);
             } finally {
                 if (batchHeartbeatTimer) {
                     clearInterval(batchHeartbeatTimer);
@@ -10734,8 +10760,8 @@ Cancel: go back and change the branch name first.`
             conflictFineModeEnabled = false;
             hint.hidden = false;
             hint.textContent = textByLang(
-                '当前冲突没有可识别的文件级差异，请使用上方整体策略或“重试云端自动合并”。',
-                'No file-level conflicts were identified for this conflict. Use the overall strategy above or retry cloud auto-merge.'
+                '当前冲突没有可识别的文件级差异，请使用上方整体策略或稍后重新同步。',
+                'No file-level conflicts were identified for this conflict. Use the overall strategy above or sync again later.'
             );
             list.hidden = true;
             list.innerHTML = '';
@@ -10844,7 +10870,7 @@ Cancel: go back and change the branch name first.`
         );
         const targetPaths = desiredPaths.filter((path) => conflictPathSet.has(path));
         if (!targetPaths.length) {
-            toast(textByLang('当前文件冲突已变化，请先重试“云端自动合并”或重新同步', 'File conflicts changed. Retry cloud auto-merge or sync again first.'));
+            toast(textByLang('当前文件冲突已变化，请重新同步后再处理', 'File conflicts changed. Sync again before resolving.'));
             return false;
         }
 
@@ -10864,8 +10890,7 @@ Cancel: go back and change the branch name first.`
             await applyRemoteFilesBatch(
                 localApplyChanges,
                 `Bookmark Canvas Sync: manual fine conflict resolution (${localApplyChanges.length})`,
-                120000,
-                { mergeViaTempBranch: true, tempBranchPrefix: 'canvas-sync' }
+                120000
             );
         }
 
@@ -10996,27 +11021,13 @@ Cancel: go back and change the branch name first.`
                 otherState: normalizeComparisonSectionState(conflictSectionStates.other, 'change')
             }
         );
-        const cloudMergeConflictHint = !conflictPreview && conflictData && (conflictData.mergeConflict === true || conflictData.reason === 'cloud-merge-conflict')
-            ? textByLang(
-                '已尝试通过 GitHub 云端合并接口自动合并，但仍有冲突，请手动选择处理方式。',
-                'An automatic cloud merge via GitHub API was attempted but still conflicted. Please choose a manual resolution.'
-            )
-            : '';
-        const cloudMergeBranchHint = !conflictPreview && conflictData && conflictData.tempBranch
-            ? textByLang(
-                `临时分支：${String(conflictData.tempBranch)}`,
-                `Temporary branch: ${String(conflictData.tempBranch)}`
-            )
-            : '';
         if (summary) {
             summary.textContent = conflictPreview
                 ? textByLang(
                     '这是“冲突面板”预览：用于展示两端都改时的处理方式。',
                     'This is a conflict panel preview showing how the UI looks when both sides changed.'
                 )
-                : [cloudMergeConflictHint, buildComparisonPanelSummaryText(comparisonSummary, 'conflict'), cloudMergeBranchHint]
-                    .filter((text) => !!String(text || '').trim())
-                    .join('\n');
+                : buildComparisonPanelSummaryText(comparisonSummary, 'conflict');
             summary.dataset.dynamicSummary = 'true';
         }
         if (compare) {
@@ -11200,16 +11211,47 @@ Cancel: go back and change the branch name first.`
         updateSyncEnabledDependentFieldState();
     }
 
-    function applySnapshotToLocal(snapshot) {
+    async function applySnapshotToLocal(snapshot) {
         const nextData = snapshot && snapshot.data && typeof snapshot.data === 'object' ? snapshot.data : {};
 
         SYNC_KEYS.forEach((key) => {
+            if (key === TEMP_SECTION_STORAGE_KEY) return;
             if (Object.prototype.hasOwnProperty.call(nextData, key)) {
                 localStorage.setItem(key, String(nextData[key]));
             } else {
                 localStorage.removeItem(key);
             }
         });
+
+        try {
+            localStorage.removeItem(TEMP_SECTION_STORAGE_KEY);
+        } catch (_) { }
+
+        let tempStateAppliedViaBcs = false;
+        const tempRaw = typeof nextData[TEMP_SECTION_STORAGE_KEY] === 'string'
+            ? nextData[TEMP_SECTION_STORAGE_KEY]
+            : '';
+        if (tempRaw) {
+            const tempStatePayload = normalizeCanvasTempStatePayloadForSync(tempRaw);
+            if (tempStatePayload) {
+                const protocolBridge = global && global.CanvasProtocolBridge && typeof global.CanvasProtocolBridge.applyCanvasTempStateSnapshotToBcs === 'function'
+                    ? global.CanvasProtocolBridge
+                    : null;
+                if (protocolBridge) {
+                    try {
+                        tempStateAppliedViaBcs = await protocolBridge.applyCanvasTempStateSnapshotToBcs(tempStatePayload, {
+                            immediate: true,
+                            forceAll: true,
+                            assumeClean: true,
+                            reload: true
+                        }) === true;
+                    } catch (error) {
+                        console.warn('[Canvas Sync] apply temp-state snapshot to BCS failed:', error);
+                        tempStateAppliedViaBcs = false;
+                    }
+                }
+            }
+        }
 
         try {
             const protocolBridge = global && global.CanvasProtocolBridge && typeof global.CanvasProtocolBridge.applyPermanentViewShellSnapshot === 'function'
@@ -11225,11 +11267,13 @@ Cancel: go back and change the branch name first.`
 
         runtime.lastLocalMutationAt = Number(snapshot.updatedAt) || Date.now();
 
-        try {
-            if (typeof global.loadTempNodes === 'function') {
-                global.loadTempNodes();
-            }
-        } catch (_) { }
+        if (!tempStateAppliedViaBcs) {
+            try {
+                if (typeof global.loadTempNodes === 'function') {
+                    global.loadTempNodes();
+                }
+            } catch (_) { }
+        }
 
         try {
             global.dispatchEvent(new CustomEvent('canvas-obsidian-git-sync-applied', {
@@ -11243,60 +11287,7 @@ Cancel: go back and change the branch name first.`
 
 
     function buildSnapshotForRemoteLocalApply(snapshotInput) {
-        const snapshot = normalizeSnapshot(snapshotInput || { data: {} });
-        const nextData = Object.assign({}, snapshot.data || {});
-        const tempRaw = typeof nextData[TEMP_SECTION_STORAGE_KEY] === 'string'
-            ? nextData[TEMP_SECTION_STORAGE_KEY]
-            : '';
-        if (!tempRaw) return snapshot;
-
-        const tempState = normalizeCanvasTempStatePayloadForSync(tempRaw);
-        if (!tempState) return snapshot;
-
-        const sections = Array.isArray(tempState.sections) ? tempState.sections : [];
-        const filteredSections = sections.filter((section) => {
-            if (!section || typeof section !== 'object') return false;
-            const id = String(section.id || '').trim();
-            if (id === 'permanent-section' || id.startsWith('permanent-section-copy-')) return false;
-            if (section.isSnapshot === true) {
-                const title = String(section.title || '').trim();
-                if (/^\[(快照|Snapshot)\]/i.test(title)) return false;
-            }
-            return true;
-        });
-        if (filteredSections.length === sections.length) return snapshot;
-
-        const removedIds = new Set(sections
-            .filter((section) => !filteredSections.includes(section))
-            .map((section) => String(section && section.id || '').trim())
-            .filter(Boolean));
-        const edges = Array.isArray(tempState.edges) ? tempState.edges : [];
-        const filteredEdges = edges
-            .map((edge) => {
-                const nextEdge = edge && typeof edge === 'object' ? Object.assign({}, edge) : edge;
-                if (!nextEdge || typeof nextEdge !== 'object') return nextEdge;
-                const fromNode = String(nextEdge.fromNode || '').trim();
-                const toNode = String(nextEdge.toNode || '').trim();
-                if (fromNode && removedIds.has(fromNode)) nextEdge.fromNode = 'permanent-section';
-                if (toNode && removedIds.has(toNode)) nextEdge.toNode = 'permanent-section';
-                return nextEdge;
-            })
-            .filter((edge) => {
-                if (!edge || typeof edge !== 'object') return false;
-                const fromNode = String(edge.fromNode || '').trim();
-                const toNode = String(edge.toNode || '').trim();
-                const fromRemoved = removedIds.has(fromNode) && !isPermanentCanvasNodeIdForSync(fromNode);
-                const toRemoved = removedIds.has(toNode) && !isPermanentCanvasNodeIdForSync(toNode);
-                return !fromRemoved && !toRemoved;
-            });
-
-        const nextTempState = buildPersistedCanvasTempStateForSync(Object.assign({}, tempState, {
-            sections: filteredSections,
-            edges: filteredEdges
-        }), tempState);
-        nextData[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(nextTempState);
-
-        return Object.assign({}, snapshot, { data: nextData });
+        return normalizeSnapshot(snapshotInput || { data: {} });
     }
 
     function decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged = false, remoteChanged = false, syncMethod = settings.syncMethod) {
@@ -11472,7 +11463,7 @@ Cancel: go back and change the branch name first.`
                 if (settings.obsidianFilePushEnabled === false) {
                     throw new Error(textByLang('已关闭 Obsidian 文件推送，无法覆盖云端', 'Obsidian file push is disabled, cannot overwrite cloud'));
                 }
-                applySnapshotToLocal(localSnapshot);
+                await applySnapshotToLocal(localSnapshot);
                 const pushResult = await pushObsidianFilesIncremental('manual-conflict-keep-local', null, { forceRecoveryLock: true, recoveryMode: 'push', sourcePanel: 'conflict', baseRemoteSha: pendingConflict && pendingConflict.remoteSha ? pendingConflict.remoteSha : '' });
                 let remoteRevision = '';
                 try {
@@ -11520,7 +11511,7 @@ Cancel: go back and change the branch name first.`
                     if (overwriteResult && overwriteResult.applied) {
                         runtime.lastPermanentTreeSnapshotAt = Date.now();
                     }
-                    applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot));
+                    await applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot));
                 } catch (error) {
                     console.warn('[Canvas Sync] apply conflict(remote) to local failed:', error);
                     const rollbackResult = await rollbackRemoteLocalApplyFromSnapshot(
@@ -11626,49 +11617,6 @@ Cancel: go back and change the branch name first.`
         }
     }
 
-    async function retryPendingConflictCloudMerge() {
-        if (shouldBlockOrdinarySyncActionsForRecoveryLock()) {
-            openPanel({ activeTab: 'status' });
-            toast(textByLang('检测到未完成的同步恢复：请先继续上次操作', 'An unfinished sync recovery was detected: continue the previous action first'));
-            return false;
-        }
-        if (!pendingConflict) {
-            toast(textByLang('没有待处理冲突', 'No pending conflicts'));
-            return false;
-        }
-        if (runtime.isRunning) {
-            toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
-            return false;
-        }
-
-        const preservedConflict = pendingConflict;
-        const beforeSuccessAt = Number(runtime.lastSuccessAt) || 0;
-        clearPendingConflict();
-
-        await runSync('full', 'manual-conflict-cloud-merge-retry');
-
-        const successAdvanced = (Number(runtime.lastSuccessAt) || 0) > beforeSuccessAt;
-        if (successAdvanced && !hasPendingConflict()) {
-            toast(textByLang(
-                '已重试云端自动合并并完成同步',
-                'Cloud auto-merge retry succeeded and sync completed'
-            ));
-            return true;
-        }
-
-        if (!hasPendingConflict()) {
-            setPendingConflict(preservedConflict);
-            runtime.lastError = runtime.lastError || textByLang(
-                '重试云端自动合并未完成，请继续在冲突面板中手动处理',
-                'Cloud auto-merge retry did not complete. Continue manual handling in the conflict panel.'
-            );
-            saveRuntime();
-            renderStatus();
-            renderConflictPanel();
-        }
-        return false;
-    }
-
     function isLikelyOfflineError(message) {
         const text = String(message || '').toLowerCase();
         return text.includes('failed to fetch')
@@ -11751,10 +11699,8 @@ Cancel: go back and change the branch name first.`
 
         const isManualTrigger = isManualSyncTrigger(mode, trigger);
         const isSilentAutoPullTrigger = false;
-        const skipFormatMigrationSecondaryConfirm = !!(options && options.skipFormatMigrationSecondaryConfirm === true);
         const effectiveMode = mode;
         const syncMethod = DEFAULT_SETTINGS.syncMethod;
-        const hasPendingLocalFormatChange = hasPendingLocalObsidianExportFormatChange();
 
         try {
             const rawRepoConfig = await storageLocalGet(REPO_CONFIG_KEYS);
@@ -11790,7 +11736,7 @@ Cancel: go back and change the branch name first.`
         const shouldRequireLocalDirty = !isManualTrigger
             && (effectiveMode === 'push' || effectiveMode === 'full')
             ;
-        if (shouldRequireLocalDirty && !hasLocalDirtyWork() && !hasPendingLocalFormatChange) {
+        if (shouldRequireLocalDirty && !hasLocalDirtyWork()) {
             pendingReasons.clear();
             runtime.queueLength = 0;
             runtime.lastError = '';
@@ -11844,9 +11790,6 @@ Cancel: go back and change the branch name first.`
             const doPush = async (reason, pushOptions = {}) => {
                 let obsidianPushResult = null;
                 const syncTrigger = String((pushOptions && pushOptions.syncTrigger) || trigger || reason || 'sync');
-                const formatMigration = pushOptions && pushOptions.formatMigration && typeof pushOptions.formatMigration === 'object'
-                    ? pushOptions.formatMigration
-                    : null;
                 const preflightRemoteFilesByPath = (pushOptions
                     && pushOptions.remoteFilesByPathForMissingCheck
                     && typeof pushOptions.remoteFilesByPathForMissingCheck === 'object')
@@ -11855,9 +11798,7 @@ Cancel: go back and change the branch name first.`
                 const preflightRemoteSignalSha = String(
                     pushOptions && pushOptions.remoteSignalSha ? pushOptions.remoteSignalSha : ''
                 ).trim();
-                const canPushBlankSectionFiles = shouldPushBlankSectionFiles(syncTrigger, {
-                    includeBlankSectionFiles: formatMigration ? true : undefined
-                });
+                const canPushBlankSectionFiles = shouldPushBlankSectionFiles(syncTrigger);
                 if (settings.obsidianFilePushEnabled !== false && canPushBlankSectionFiles) {
                     const pushProgress = makeProgressRange(15, 85);
                     obsidianPushResult = await pushObsidianFilesIncremental(syncTrigger, pushProgress, {
@@ -11866,9 +11807,7 @@ Cancel: go back and change the branch name first.`
                         sourcePanel: mapRecoveryLockSourcePanel(syncTrigger),
                         baseRemoteSha: getCurrentCloudHashForDisplay(),
                         remoteFilesByPathForMissingCheck: preflightRemoteFilesByPath,
-                        skipRemoteMissingPreflight: !!preflightRemoteSignalSha,
-                        useTempBranchMerge: !!(pushOptions && pushOptions.useTempBranchMerge === true),
-                        tempBranchPrefix: String((pushOptions && pushOptions.tempBranchPrefix) || '').trim() || 'canvas-sync'
+                        skipRemoteMissingPreflight: !!preflightRemoteSignalSha
                     });
                     if (obsidianPushResult && obsidianPushResult.enabled) {
                         const pushedAt = Date.now();
@@ -11947,23 +11886,16 @@ Cancel: go back and change the branch name first.`
                             && typeof localSnapshot.data[TEMP_SECTION_STORAGE_KEY] === 'string'
                             ? localSnapshot.data[TEMP_SECTION_STORAGE_KEY]
                             : '';
-                        const normalizedPushedTempStateRaw = pushedTempStateRaw
-                            ? buildNormalizedCanvasTempStateRawForSync(pushedTempStateRaw)
-                            : '';
-                        if (normalizedPushedTempStateRaw) {
-                            setSyncMetaRaw(LAST_UPLOADED_TEMP_STATE_KEY, normalizedPushedTempStateRaw);
+                        const parsedPushedTempStateRaw = pushedTempStateRaw
+                            ? safeParse(pushedTempStateRaw, null)
+                            : null;
+                        if (pushedTempStateRaw && isCanvasTempStatePayloadForSync(parsedPushedTempStateRaw)) {
+                            setSyncMetaRaw(LAST_UPLOADED_TEMP_STATE_KEY, pushedTempStateRaw);
                         }
                     }
                     setStoredSyncedObsidianExportFormat(getCurrentObsidianExportFormatForSync());
                 }
-                runtime.lastAppliedDirection = formatMigration ? 'format-migration-push' : 'push';
-
-                if (formatMigration) {
-                    return textByLang(
-                        `格式迁移：${formatObsidianExportFormatLabel(formatMigration.baseFormat)} -> ${formatObsidianExportFormatLabel(formatMigration.currentFormat)}，已重导出并覆盖云端`,
-                        `Format migration: ${formatObsidianExportFormatLabel(formatMigration.baseFormat)} -> ${formatObsidianExportFormatLabel(formatMigration.currentFormat)}; re-exported and overwrote cloud`
-                    );
-                }
+                runtime.lastAppliedDirection = 'push';
 
                 if (obsidianPushResult && obsidianPushResult.enabled) {
                     return `push + files(${runtime.lastObsidianPushChanged}/${runtime.lastObsidianPushTotal})`;
@@ -11974,7 +11906,6 @@ Cancel: go back and change the branch name first.`
             const tryHandleManualSignalFastPush = async (fastPushReason) => {
                 if (!isManualTrigger) return { handled: false, actionText: '' };
                 if (settings.obsidianFilePushEnabled === false) return { handled: false, actionText: '' };
-                if (hasPendingLocalFormatChange) return { handled: false, actionText: '' };
 
                 const baselineRemoteSignalSha = String(runtime && runtime.lastRemoteSignalSha || '').trim();
                 const baselineLocalHash = String(runtime && runtime.lastLocalHash || '').trim();
@@ -12268,67 +12199,6 @@ Cancel: go back and change the branch name first.`
                 return reason || textByLang('仅记云端版本（仅更新 HEAD）', 'Track remote revision only (update HEAD)');
             };
 
-            const buildFormatMigrationPendingMessage = (formatMigration) => {
-                const migration = formatMigration && typeof formatMigration === 'object' ? formatMigration : {};
-                const baseFormatLabel = formatObsidianExportFormatLabel(migration.baseFormat)
-                    || String(migration.baseFormat || textByLang('旧格式', 'previous format'));
-                const currentFormatLabel = formatObsidianExportFormatLabel(migration.currentFormat)
-                    || String(migration.currentFormat || textByLang('新格式', 'new format'));
-                return textByLang(
-                    `检测到导出格式迁移（${baseFormatLabel} -> ${currentFormatLabel}），已暂停自动覆盖。请手动同步，并在二级确认中点击“本地覆盖云端（格式迁移）”。`,
-                    `Format migration detected (${baseFormatLabel} -> ${currentFormatLabel}). Automatic overwrite is paused. Run sync manually and click "Local Overwrite Cloud (Format Migration)" in the secondary confirmation.`
-                );
-            };
-
-            const maybeRunFormatMigrationPush = async (formatMigration, triggerFallback = 'sync', pushContext = null) => {
-                if (!formatMigration) {
-                    return { handled: false, blocked: false, actionText: 'noop' };
-                }
-                const migrationRemoteFilesByPath = (pushContext
-                    && pushContext.remoteFilesByPathForMissingCheck
-                    && typeof pushContext.remoteFilesByPathForMissingCheck === 'object')
-                    ? pushContext.remoteFilesByPathForMissingCheck
-                    : null;
-
-                if (skipFormatMigrationSecondaryConfirm) {
-                    const migrationActionText = await doPush('format migration local overwrite cloud', {
-                        syncTrigger: `${String(trigger || triggerFallback)}:format-migration`,
-                        formatMigration,
-                        remoteFilesByPathForMissingCheck: migrationRemoteFilesByPath
-                    });
-                    return { handled: true, blocked: false, actionText: migrationActionText };
-                }
-
-                const triggerText = String(trigger || '').trim().toLowerCase();
-                const shouldPromptSecondaryUi = isManualTrigger || triggerText === 'obsidian-export-format-change';
-
-                if (!shouldPromptSecondaryUi) {
-                    runtime.lastAppliedDirection = 'format-migration-pending';
-                    runtime.lastError = buildFormatMigrationPendingMessage(formatMigration);
-                    saveRuntime();
-                    renderStatus();
-                    return { handled: true, blocked: true, actionText: 'noop' };
-                }
-
-                const confirmed = await requestFormatMigrationLocalOverwriteConfirmationAsync(formatMigration, {
-                    trigger: trigger || triggerFallback
-                });
-                if (!confirmed) {
-                    runtime.lastError = '';
-                    saveRuntime();
-                    renderStatus();
-                    toast(textByLang('已取消格式迁移覆盖操作', 'Format migration overwrite cancelled'));
-                    return { handled: true, blocked: true, actionText: 'noop' };
-                }
-
-                const migrationActionText = await doPush('format migration local overwrite cloud', {
-                    syncTrigger: `${String(trigger || triggerFallback)}:format-migration`,
-                    formatMigration,
-                    remoteFilesByPathForMissingCheck: migrationRemoteFilesByPath
-                });
-                return { handled: true, blocked: false, actionText: migrationActionText };
-            };
-
             let actionText = 'noop';
 
             if (effectiveMode === 'push') {
@@ -12350,62 +12220,50 @@ Cancel: go back and change the branch name first.`
                         && remoteState.remoteList.filesByPath
                         ? remoteState.remoteList.filesByPath
                         : null;
-                    const formatMigration = resolveObsidianExportFormatMigration(remoteState);
-                    if (formatMigration) {
-                        const migrationResult = await maybeRunFormatMigrationPush(formatMigration, 'push', {
-                            remoteFilesByPathForMissingCheck
+                    const pushPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
+                    localHash = pushPreflight.localHash;
+
+                    if (!pushPreflight.winner) {
+                        setPendingConflict(createPendingConflictPayload(localSnapshot, pushPreflight.remoteSnapshot, remoteState));
+                        storeConflictRecord(localSnapshot, pushPreflight.remoteSnapshot, 'pending-manual', {
+                            remoteSha: pushPreflight.remoteSha || remoteState.sha || '',
+                            strategy: settings.conflictPolicy,
+                            syncMethod
                         });
-                        if (migrationResult.blocked) {
-                            allowPushOnly = false;
-                        } else {
-                            actionText = migrationResult.actionText;
-                        }
+                        runtime.lastAppliedDirection = 'conflict';
+                        runtime.lastError = textByLang(
+                            '检测到并发修改，已暂停当前上传路径，请先在冲突面板选择处理方式',
+                            'Concurrent changes detected. The current upload path has been paused; resolve it in the conflict panel first.'
+                        );
+                        pendingReasons.clear();
+                        runtime.queueLength = 0;
+                        saveRuntime();
+                        renderStatus();
+                        toast(textByLang('检测到冲突：请先在面板中选择保留本地或使用云端', 'Conflict detected: choose keep local or use cloud in the panel first'));
+                        allowPushOnly = false;
                     } else {
-                        const pushPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
-                        localHash = pushPreflight.localHash;
+                        const riskyRemoteOverwrite = pushPreflight.remoteChanged
+                            || pushPreflight.concurrentChanged
+                            || pushPreflight.remoteUntracked;
 
-                        if (!pushPreflight.winner) {
-                            setPendingConflict(createPendingConflictPayload(localSnapshot, pushPreflight.remoteSnapshot, remoteState));
-                            storeConflictRecord(localSnapshot, pushPreflight.remoteSnapshot, 'pending-manual', {
-                                remoteSha: pushPreflight.remoteSha || remoteState.sha || '',
-                                strategy: settings.conflictPolicy,
-                                syncMethod
-                            });
-                            runtime.lastAppliedDirection = 'conflict';
-                            runtime.lastError = textByLang(
-                                '检测到并发修改，已暂停当前上传路径，请先在冲突面板选择处理方式',
-                                'Concurrent changes detected. The current upload path has been paused; resolve it in the conflict panel first.'
-                            );
-                            pendingReasons.clear();
-                            runtime.queueLength = 0;
-                            saveRuntime();
-                            renderStatus();
-                            toast(textByLang('检测到冲突：请先在面板中选择保留本地或使用云端', 'Conflict detected: choose keep local or use cloud in the panel first'));
-                            allowPushOnly = false;
-                        } else {
-                            const riskyRemoteOverwrite = pushPreflight.remoteChanged
-                                || pushPreflight.concurrentChanged
-                                || pushPreflight.remoteUntracked;
-
-                            if (isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
-                                if (!await requestOneWayOverwriteConfirmationAsync('push', pushPreflight)) {
-                                    runtime.lastError = '';
-                                    saveRuntime();
-                                    renderStatus();
-                                    toast(textByLang('已取消当前上传操作', 'Current upload action cancelled'));
-                                    allowPushOnly = false;
-                                }
-                            } else if (!isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
-                                await setPendingConflictState(
-                                    pushPreflight.remoteSha || remoteState.sha || '',
-                                    textByLang(
-                                        '检测到云端已有更新，已暂停当前自动上传路径，请在“状态”面板选择处理方式',
-                                        'Cloud updates were detected. The current automatic upload path has been paused; choose an action in Status.'
-                                    ),
-                                    { reason: 'auto-push-risk-pause' }
-                                );
+                        if (isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
+                            if (!await requestOneWayOverwriteConfirmationAsync('push', pushPreflight)) {
+                                runtime.lastError = '';
+                                saveRuntime();
+                                renderStatus();
+                                toast(textByLang('已取消当前上传操作', 'Current upload action cancelled'));
                                 allowPushOnly = false;
                             }
+                        } else if (!isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
+                            await setPendingConflictState(
+                                pushPreflight.remoteSha || remoteState.sha || '',
+                                textByLang(
+                                    '检测到云端已有更新，已暂停当前自动上传路径，请在“状态”面板选择处理方式',
+                                    'Cloud updates were detected. The current automatic upload path has been paused; choose an action in Status.'
+                                ),
+                                { reason: 'auto-push-risk-pause' }
+                            );
+                            allowPushOnly = false;
                         }
                     }
 
@@ -12622,38 +12480,27 @@ Cancel: go back and change the branch name first.`
                     }
                 } else {
                     if (remoteState.notFound) {
-                        const formatMigration = resolveObsidianExportFormatMigration(remoteState);
-                        if (formatMigration) {
-                            const migrationResult = await maybeRunFormatMigrationPush(formatMigration, 'sync', {
-                                remoteFilesByPathForMissingCheck
-                            });
-                            if (migrationResult.blocked) {
-                                return;
+                        let pullPlanWhenNoState = null;
+                        if (settings.obsidianFilePushEnabled !== false) {
+                            try {
+                                pullPlanWhenNoState = await buildObsidianPullPlan(`${trigger || 'sync'}:remote-state-missing`);
+                            } catch (_) {
+                                pullPlanWhenNoState = null;
                             }
-                            actionText = migrationResult.actionText;
+                        }
+
+                        const hasRemoteFilesWhenNoState = !!(
+                            pullPlanWhenNoState
+                            && pullPlanWhenNoState.enabled
+                            && pullPlanWhenNoState.remoteList
+                            && Array.isArray(pullPlanWhenNoState.remoteList.files)
+                            && pullPlanWhenNoState.remoteList.files.length > 0
+                        );
+
+                        if (hasRemoteFilesWhenNoState) {
+                            actionText = await doPull(remoteState, 'pull (files-only remote)', pullPlanWhenNoState);
                         } else {
-                            let pullPlanWhenNoState = null;
-                            if (settings.obsidianFilePushEnabled !== false) {
-                                try {
-                                    pullPlanWhenNoState = await buildObsidianPullPlan(`${trigger || 'sync'}:remote-state-missing`);
-                                } catch (_) {
-                                    pullPlanWhenNoState = null;
-                                }
-                            }
-
-                            const hasRemoteFilesWhenNoState = !!(
-                                pullPlanWhenNoState
-                                && pullPlanWhenNoState.enabled
-                                && pullPlanWhenNoState.remoteList
-                                && Array.isArray(pullPlanWhenNoState.remoteList.files)
-                                && pullPlanWhenNoState.remoteList.files.length > 0
-                            );
-
-                            if (hasRemoteFilesWhenNoState) {
-                                actionText = await doPull(remoteState, 'pull (files-only remote)', pullPlanWhenNoState);
-                            } else {
-                                actionText = await doPush('bootstrap push');
-                            }
+                            actionText = await doPush('bootstrap push');
                         }
                     } else {
                         const remoteSnapshot = remoteState.snapshot;
@@ -12661,17 +12508,7 @@ Cancel: go back and change the branch name first.`
                             localHash = getSnapshotHash(localSnapshot);
                         }
                         const remoteHash = getSnapshotHash(remoteSnapshot);
-                        const formatMigration = resolveObsidianExportFormatMigration(remoteState);
-
-                        if (formatMigration) {
-                            const migrationResult = await maybeRunFormatMigrationPush(formatMigration, 'sync', {
-                                remoteFilesByPathForMissingCheck
-                            });
-                            if (migrationResult.blocked) {
-                                return;
-                            }
-                            actionText = migrationResult.actionText;
-                        } else if (remoteHash === localHash) {
+                        if (remoteHash === localHash) {
                             runtime.lastLocalHash = localHash;
                             runtime.lastLocalFilesSha = buildLocalObsidianRevisionFromHashMap(loadObsidianFileHashes()) || runtime.lastLocalFilesSha;
                             runtime.lastRemoteSha = remoteState.sha || runtime.lastRemoteSha;
@@ -12703,84 +12540,33 @@ Cancel: go back and change the branch name first.`
                                     actionText = await doPull(remoteState, syncMethod === 'rebase' ? 'remote newer pull (rebase mode)' : 'remote newer pull');
                                 }
                             } else if (canUseDirtyMatrix && concurrentChanged) {
-                                try {
-                                    await doPush('dual-dirty cloud merge', {
-                                        syncTrigger: `${String(trigger || 'sync')}:dual-dirty-merge`,
-                                        useTempBranchMerge: true,
-                                        tempBranchPrefix: 'canvas-sync',
-                                        remoteFilesByPathForMissingCheck
-                                    });
-                                } catch (mergeError) {
-                                    const mergeErrorCode = String((mergeError && mergeError.code) || '');
-                                    if (mergeErrorCode === 'MERGE_CONFLICT') {
-                                        const fileConflictSummary = await buildConflictFileSummaryFromCurrentPlan('dual-dirty-cloud-merge-conflict');
-                                        setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
-                                            reason: 'cloud-merge-conflict',
-                                            mergeConflict: true,
-                                            mergeApi: 'github-merges',
-                                            tempBranch: String((mergeError && mergeError.tempBranch) || ''),
-                                            fileConflicts: fileConflictSummary.fileConflicts,
-                                            filePlanSummary: fileConflictSummary.filePlanSummary || undefined
-                                        }));
-                                        storeConflictRecord(localSnapshot, remoteSnapshot, 'pending-cloud-merge-conflict', {
-                                            remoteSha: remoteState.sha || '',
-                                            strategy: 'cloud-merge-api',
-                                            syncMethod,
-                                            tempBranch: String((mergeError && mergeError.tempBranch) || '')
-                                        });
-                                        runtime.lastAppliedDirection = 'conflict';
-                                        runtime.lastError = textByLang(
-                                            '检测到双向修改，且云端自动合并产生冲突，请在冲突面板中选择处理方式',
-                                            'Both local and cloud changed, and cloud auto-merge produced conflicts. Resolve in the conflict panel.'
-                                        );
-                                        pendingReasons.clear();
-                                        runtime.queueLength = 0;
-                                        saveRuntime();
-                                        renderStatus();
-                                        renderConflictPanel();
-                                        openPanel({ activeTab: 'status' });
-                                        toast(textByLang(
-                                            '云端自动合并冲突：请在冲突面板中选择本地或云端版本',
-                                            'Cloud auto-merge conflict: choose local or cloud version in the conflict panel.'
-                                        ));
-                                        return;
-                                    }
-
-                                    if (mergeErrorCode === 'MERGE_PROTECTED_BRANCH') {
-                                        runtime.lastAppliedDirection = 'protected-branch-blocked';
-                                        runtime.lastError = textByLang(
-                                            '目标分支开启保护或禁止直接合并，无法自动完成双向同步。请改用“仅拉取/仅上传”或调整分支规则。',
-                                            'Target branch is protected or direct merge is blocked. Auto bidirectional sync cannot continue. Use pull-only/push-only or adjust branch rules.'
-                                        );
-                                        pendingReasons.clear();
-                                        runtime.queueLength = 0;
-                                        saveRuntime();
-                                        renderStatus();
-                                        openPanel({ activeTab: 'status' });
-                                        toast(textByLang(
-                                            '目标分支受保护，已停止自动合并；请手动选择仅拉取或仅上传',
-                                            'Target branch is protected; auto-merge stopped. Choose pull-only or push-only manually.'
-                                        ));
-                                        return;
-                                    }
-
-                                    throw mergeError;
-                                }
-
-                                const mergedRemoteState = await readRemoteSnapshotWithPathRecovery({
-                                    interactive: isManualTrigger,
-                                    continueAfterConfirm: true
+                                const fileConflictSummary = await buildConflictFileSummaryFromCurrentPlan('dual-dirty-direct-conflict');
+                                setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
+                                    reason: 'dual-dirty-conflict',
+                                    fileConflicts: fileConflictSummary.fileConflicts,
+                                    filePlanSummary: fileConflictSummary.filePlanSummary || undefined
+                                }));
+                                storeConflictRecord(localSnapshot, remoteSnapshot, 'pending-manual', {
+                                    remoteSha: remoteState.sha || '',
+                                    strategy: settings.conflictPolicy,
+                                    syncMethod
                                 });
-                                if (mergedRemoteState.notFound) {
-                                    throw new Error(textByLang(
-                                        '云端合并后未找到同步目录，请检查同步路径配置',
-                                        'Sync directory not found after cloud merge. Check sync path settings.'
-                                    ));
-                                }
-                                actionText = await doPull(
-                                    mergedRemoteState,
-                                    textByLang('双向更新已完成云端合并并回拉本地', 'Dual-side updates merged in cloud and pulled back locally')
+                                runtime.lastAppliedDirection = 'conflict';
+                                runtime.lastError = textByLang(
+                                    '检测到双向修改冲突，已停止自动云端合并；请在冲突面板中选择处理方式',
+                                    'Both local and cloud changed. Cloud auto-merge is disabled; resolve the conflict in the panel.'
                                 );
+                                pendingReasons.clear();
+                                runtime.queueLength = 0;
+                                saveRuntime();
+                                renderStatus();
+                                renderConflictPanel();
+                                openPanel({ activeTab: 'status' });
+                                toast(textByLang(
+                                    '检测到双向修改冲突：请在冲突面板中选择本地或云端版本',
+                                    'Concurrent conflict detected: choose local or cloud version in the conflict panel.'
+                                ));
+                                return;
                             } else if (!concurrentChanged && syncMethod === 'reset' && remoteChanged && !localChanged) {
                                 actionText = await doResetHead(remoteState);
                             } else {
@@ -13020,11 +12806,11 @@ Cancel: go back and change the branch name first.`
             && typeof localSnapshot.data[TEMP_SECTION_STORAGE_KEY] === 'string'
             ? localSnapshot.data[TEMP_SECTION_STORAGE_KEY]
             : '';
-        const normalizedPushedTempStateRaw = pushedTempStateRaw
-            ? buildNormalizedCanvasTempStateRawForSync(pushedTempStateRaw)
-            : '';
-        if (normalizedPushedTempStateRaw) {
-            setSyncMetaRaw(LAST_UPLOADED_TEMP_STATE_KEY, normalizedPushedTempStateRaw);
+        const parsedPushedTempStateRaw = pushedTempStateRaw
+            ? safeParse(pushedTempStateRaw, null)
+            : null;
+        if (pushedTempStateRaw && isCanvasTempStatePayloadForSync(parsedPushedTempStateRaw)) {
+            setSyncMetaRaw(LAST_UPLOADED_TEMP_STATE_KEY, pushedTempStateRaw);
         }
         setStoredSyncedObsidianExportFormat(getCurrentObsidianExportFormatForSync());
         runtime.lastAppliedDirection = 'push-bootstrap';
@@ -13362,7 +13148,7 @@ Cancel: go back and change the branch name first.`
             }
 
             if (!firstSyncAppliedByFiles) {
-                applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot));
+                await applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot));
             }
             if (settings.obsidianFilePushEnabled !== false) {
                 try {
@@ -13682,60 +13468,8 @@ Cancel: go back and change the branch name first.`
         if (obsidianExportFormatSelect) {
             sanitizeSyncExportFormatSelect(obsidianExportFormatSelect);
             obsidianExportFormatSelect.addEventListener('change', () => {
-                void (async () => {
-                    const previousFormat = normalizeObsidianExportFormat(
-                        settings && settings.obsidianExportFormat,
-                        DEFAULT_SETTINGS.obsidianExportFormat
-                    );
-                    const nextFormat = normalizeObsidianExportFormat(
-                        obsidianExportFormatSelect.value,
-                        previousFormat
-                    );
-
-                    if (!nextFormat || nextFormat === previousFormat) {
-                        pullSettingsFromForm();
-                        toast(textByLang('同步设置已保存', 'Sync settings saved'), { optional: true });
-                        return;
-                    }
-
-                    if (!hasEstablishedSyncBaseline()) {
-                        pullSettingsFromForm({
-                            disableFormatAutoSync: true,
-                            silentFormatToast: true
-                        });
-                        toast(textByLang(
-                            '首次同步前：仅保存导出格式，不触发格式迁移覆盖。',
-                            'Before first sync: export format is saved only; format-migration overwrite is not triggered.'
-                        ), { optional: true });
-                        return;
-                    }
-
-                    const confirmed = await requestFormatMigrationLocalOverwriteConfirmationAsync({
-                        baseFormat: previousFormat,
-                        currentFormat: nextFormat,
-                        source: 'ui-switch'
-                    }, {
-                        trigger: 'manual-format-switch'
-                    });
-
-                    if (!confirmed) {
-                        obsidianExportFormatSelect.value = previousFormat;
-                        toast(textByLang('已取消格式切换', 'Format switch cancelled'), { optional: true });
-                        return;
-                    }
-
-                    pullSettingsFromForm({
-                        disableFormatAutoSync: true,
-                        silentFormatToast: true
-                    });
-                    toast(textByLang(
-                        '格式已切换，正在执行“本地覆盖云端（格式迁移）”...',
-                        'Format switched. Running "Local Overwrite Cloud (Format Migration)"...'
-                    ), { optional: true });
-                    void runSync('push', 'manual-format-switch', {
-                        skipFormatMigrationSecondaryConfirm: true
-                    });
-                })();
+                pullSettingsFromForm();
+                toast(textByLang('同步设置已保存', 'Sync settings saved'), { optional: true });
             });
         }
         const syncNowBtn = getElement('canvasSyncNowBtn');
@@ -13863,13 +13597,6 @@ Cancel: go back and change the branch name first.`
         if (conflictApplyFineBtn) {
             conflictApplyFineBtn.addEventListener('click', () => {
                 void runWithButtonBusy(conflictApplyFineBtn, () => resolvePendingConflictByFineChoices());
-            });
-        }
-
-        const conflictRetryMergeBtn = getElement('canvasSyncConflictRetryMergeBtn');
-        if (conflictRetryMergeBtn) {
-            conflictRetryMergeBtn.addEventListener('click', () => {
-                void runWithButtonBusy(conflictRetryMergeBtn, () => retryPendingConflictCloudMerge());
             });
         }
 

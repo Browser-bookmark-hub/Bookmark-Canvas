@@ -3944,20 +3944,12 @@ const i18n = {
         'en': 'Export Format (for Obsidian)'
     },
     canvasSyncObsidianExportFormatDesc: {
-        'zh_CN': '视觉模式（无图标）：不包含 favicon 图标，用字符 "-" 代替，体积更小，冲突更少。\nJSON模式（供AI）：在 MD 文件中用结构化 JSON 表示书签树，更适合 AI 分析、增删改移和稳定同步。',
-        'en': 'Visual mode (no icons): removes favicons, uses "-" as the link marker, keeps a smaller size, and reduces sync conflicts.\nJSON mode (for AI): stores the bookmark tree as structured JSON inside the MD file, making AI analysis and stable sync easier.'
+        'zh_CN': 'JSON模式（供AI）：在 MD 文件中用结构化 JSON 表示书签树，便于 AI 分析、增删改移和稳定同步。',
+        'en': 'JSON mode (for AI): stores the bookmark tree as structured JSON inside the MD file for easier AI analysis, stable sync, and structural edits.'
     },
     canvasSyncObsidianExportFormatJsonOption: {
         'zh_CN': 'JSON模式（供AI）',
         'en': 'JSON Mode (for AI)'
-    },
-    canvasSyncObsidianExportFormatVisualNoIconOption: {
-        'zh_CN': '视觉模式（无图标）',
-        'en': 'Visual Mode (No Icons)'
-    },
-    canvasSyncObsidianExportFormatVisualOption: {
-        'zh_CN': '视觉模式',
-        'en': 'Visual Mode'
     },
     canvasSyncObsidianExportRootLabel: {
         'zh_CN': '文件推送目录',
@@ -5396,10 +5388,6 @@ function applyLanguage() {
     if (canvasSyncObsidianExportFormatDesc) canvasSyncObsidianExportFormatDesc.textContent = i18n.canvasSyncObsidianExportFormatDesc[currentLang];
     const canvasSyncObsidianExportFormatJsonOption = document.getElementById('canvasSyncObsidianExportFormatJsonOption');
     if (canvasSyncObsidianExportFormatJsonOption) canvasSyncObsidianExportFormatJsonOption.textContent = i18n.canvasSyncObsidianExportFormatJsonOption[currentLang];
-    const canvasSyncObsidianExportFormatVisualNoIconOption = document.getElementById('canvasSyncObsidianExportFormatVisualNoIconOption');
-    if (canvasSyncObsidianExportFormatVisualNoIconOption) canvasSyncObsidianExportFormatVisualNoIconOption.textContent = i18n.canvasSyncObsidianExportFormatVisualNoIconOption[currentLang];
-    const canvasSyncObsidianExportFormatVisualOption = document.getElementById('canvasSyncObsidianExportFormatVisualOption');
-    if (canvasSyncObsidianExportFormatVisualOption) canvasSyncObsidianExportFormatVisualOption.textContent = i18n.canvasSyncObsidianExportFormatVisualOption[currentLang];
     const canvasSyncObsidianExportRootLabel = document.getElementById('canvasSyncObsidianExportRootLabel');
     if (canvasSyncObsidianExportRootLabel) canvasSyncObsidianExportRootLabel.textContent = i18n.canvasSyncObsidianExportRootLabel[currentLang];
     const canvasSyncObsidianExportRootDesc = document.getElementById('canvasSyncObsidianExportRootDesc');

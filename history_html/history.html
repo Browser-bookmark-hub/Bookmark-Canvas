@@ -1215,12 +1215,10 @@
                                 <label class="canvas-sync-row" for="canvasSyncObsidianExportFormatSelect">
                                     <span id="canvasSyncObsidianExportFormatLabel">导出格式（为 Obsidian）</span>
                                     <select id="canvasSyncObsidianExportFormatSelect">
-                                        <option id="canvasSyncObsidianExportFormatVisualNoIconOption" value="visual-no-icon">视觉模式（无图标）</option>
                                         <option id="canvasSyncObsidianExportFormatJsonOption" value="json" selected>JSON模式（供AI）</option>
                                     </select>
                                 </label>
-                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncObsidianExportFormatDesc">视觉模式（无图标）：不包含 favicon 图标，用字符 "-" 代替，体积更小，冲突更少。
-JSON模式（供AI）：在 MD 文件中用结构化 JSON 表示书签树，更适合 AI 分析、增删改移和稳定同步。</div>
+                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncObsidianExportFormatDesc">JSON模式（供AI）：在 MD 文件中用结构化 JSON 表示书签树，便于 AI 分析、增删改移和稳定同步。</div>
 
                                 <div class="canvas-sync-row canvas-sync-row--path-check-action">
                                     <span id="canvasSyncFirstSyncPathCheckLabel">路径校验</span>
@@ -1356,7 +1354,6 @@ JSON模式（供AI）：在 MD 文件中用结构化 JSON 表示书签树，更�
                                 <button id="canvasSyncConflictUseLocalBtn" class="canvas-manage-btn" type="button"><i class="fas fa-upload"></i><span id="canvasSyncConflictUseLocalText"><span class="canvas-sync-action-keyword">保留本地</span>并覆盖云端</span></button>
                                 <button id="canvasSyncConflictUseNewestBtn" class="canvas-manage-btn" type="button"><i class="fas fa-clock"></i><span id="canvasSyncConflictUseNewestText"><span class="canvas-sync-action-keyword">按最近修改时间</span>决定</span></button>
                                 <button id="canvasSyncConflictApplyFineBtn" class="canvas-manage-btn" type="button" hidden><i class="fas fa-list-check"></i><span id="canvasSyncConflictApplyFineText">按逐文件决策提交</span></button>
-                                <button id="canvasSyncConflictRetryMergeBtn" class="canvas-manage-btn" type="button"><i class="fas fa-code-branch"></i><span id="canvasSyncConflictRetryMergeText">重试云端自动合并</span></button>
                                 <button id="canvasSyncConflictDismissBtn" class="canvas-manage-btn" type="button"><i class="fas fa-clock"></i><span id="canvasSyncConflictDismissText">稍后处理</span></button>
                             </div>
                         </div>

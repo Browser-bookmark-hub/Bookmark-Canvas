@@ -1,6 +1,6 @@
 // Minimal background for Bookmark Canvas extension (MV3)
 
-import { applyRepoFilesBatch, deleteRepoFile, getRepoBranchHeadSignal, getRepoFile, listRepoFiles, mergeRepoFilesViaTempBranch, testRepoConnection, upsertRepoFile } from './github/repo-api.js';
+import { applyRepoFilesBatch, deleteRepoFile, getRepoBranchHeadSignal, getRepoFile, listRepoFiles, testRepoConnection, upsertRepoFile } from './github/repo-api.js';
 
 const browserAPI = (function () {
   if (typeof chrome !== 'undefined') return chrome;
@@ -1675,121 +1675,6 @@ async function handleCanvasGitApplyFilesBatchMessage(message) {
   };
 }
 
-async function handleCanvasGitMergeFilesViaTempBranchMessage(message) {
-  const gitConfig = await resolveCanvasGitConfig();
-  if (!gitConfig.success) {
-    return { success: false, error: gitConfig.error };
-  }
-
-  const changesRaw = Array.isArray(message && message.changes) ? message.changes : [];
-  if (!changesRaw.length) {
-    return { success: false, error: '缺少变更列表' };
-  }
-
-  const commitMessage = String(message.commitMessage || '').trim()
-    || `Bookmark Canvas Sync: cloud merge apply (${changesRaw.length})`;
-  const tempBranchPrefix = String(message && message.tempBranchPrefix ? message.tempBranchPrefix : '').trim() || 'canvas-sync';
-
-  const repoChanges = [];
-  const repoPathToRawPath = {};
-
-  for (let i = 0; i < changesRaw.length; i += 1) {
-    const entry = changesRaw[i];
-    if (!entry || typeof entry !== 'object') continue;
-
-    const rawPath = normalizeGitHubRepoPath(entry.path);
-    if (!rawPath) {
-      return { success: false, error: '缺少文件路径' };
-    }
-
-    const repoPath = gitConfig.basePath
-      ? normalizeGitHubRepoPath(`${gitConfig.basePath}/${rawPath}`)
-      : rawPath;
-
-    repoPathToRawPath[repoPath] = rawPath;
-
-    const isDelete = entry.delete === true || entry.deleted === true;
-    if (isDelete) {
-      repoChanges.push({ path: repoPath, delete: true });
-      continue;
-    }
-
-    const contentText = String(entry.content == null ? '' : entry.content);
-    const bytes = new TextEncoder().encode(contentText);
-    if (bytes.length >= GITHUB_SYNC_FILE_LIMIT_BYTES) {
-      return {
-        success: false,
-        error: '同步文件超过 100MB，无法写入 GitHub。请拆分同步文件。',
-        errorCode: 'SYNC_FILE_TOO_LARGE',
-        path: repoPath,
-        sizeBytes: bytes.length,
-        limitBytes: GITHUB_SYNC_FILE_LIMIT_BYTES
-      };
-    }
-    if (bytes.length >= GITHUB_SYNC_FILE_WARN_BYTES) {
-      console.warn('[Canvas Sync] Large file write may be unstable:', {
-        path: repoPath,
-        sizeBytes: bytes.length
-      });
-    }
-
-    repoChanges.push({ path: repoPath, content: contentText });
-  }
-
-  if (!repoChanges.length) {
-    return { success: false, error: '缺少有效变更项' };
-  }
-
-  const result = await mergeRepoFilesViaTempBranch({
-    token: gitConfig.token,
-    owner: gitConfig.owner,
-    repo: gitConfig.repo,
-    branch: gitConfig.branch,
-    message: commitMessage,
-    changes: repoChanges,
-    tempBranchPrefix
-  });
-
-  if (!result || result.success !== true) {
-    return {
-      success: false,
-      error: result?.error || '云端合并失败',
-      errorCode: result?.errorCode || '',
-      conflict: result?.conflict === true,
-      protectedBranch: result?.protectedBranch === true,
-      branch: result?.branch || gitConfig.branch || null,
-      tempBranch: result?.tempBranch || null,
-      tempCommitSha: result?.tempCommitSha || null,
-      tempBranchDeleted: result?.tempBranchDeleted === true,
-      tempBranchDeleteWarning: result?.tempBranchDeleteWarning || ''
-    };
-  }
-
-  const rawFileShas = {};
-  const fileShas = result.fileShas && typeof result.fileShas === 'object' ? result.fileShas : {};
-  Object.keys(fileShas).forEach((repoPath) => {
-    const rawPath = repoPathToRawPath[repoPath];
-    if (!rawPath) return;
-    rawFileShas[rawPath] = String(fileShas[repoPath] || '');
-  });
-
-  return {
-    success: true,
-    branch: result.branch || gitConfig.branch || null,
-    commitSha: result.commitSha || result.mergeSha || result.tempCommitSha || null,
-    mergeSha: result.mergeSha || null,
-    tempBranch: result.tempBranch || null,
-    tempCommitSha: result.tempCommitSha || null,
-    merged: result.merged === true,
-    noChanges: result.noChanges === true,
-    updated: Number(result.updated) || 0,
-    deleted: Number(result.deleted) || 0,
-    fileShas: rawFileShas,
-    tempBranchDeleted: result.tempBranchDeleted === true,
-    tempBranchDeleteWarning: result.tempBranchDeleteWarning || ''
-  };
-}
-
 async function handleCanvasGitDeleteFileMessage(message) {
   const gitConfig = await resolveCanvasGitConfig();
   if (!gitConfig.success) {
@@ -2105,14 +1990,6 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'canvasGitApplyFilesBatch') {
     (async () => {
       const response = await handleCanvasGitApplyFilesBatchMessage(message);
-      sendResponse(response);
-    })();
-    return true;
-  }
-
-  if (message.action === 'canvasGitMergeFilesViaTempBranch') {
-    (async () => {
-      const response = await handleCanvasGitMergeFilesViaTempBranchMessage(message);
       sendResponse(response);
     })();
     return true;
