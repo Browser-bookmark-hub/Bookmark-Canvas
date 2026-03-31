@@ -31354,7 +31354,7 @@ function __buildTempSectionJsonProtocol(section) {
             || __getDefaultTempSectionProtocolTitle(),
         tempKind,
         source: normalizedSource,
-        descriptionMd: __normalizeCanvasMarkdownSource(sectionMeta.descriptionMd || ''),
+        descriptionMd: String(sectionMeta.descriptionMd == null ? '' : sectionMeta.descriptionMd),
         items
     };
     if (createdAtTs) payload.createdAt = createdAtTs;
@@ -31370,9 +31370,11 @@ function __buildTempSectionJsonMarkdown(section) {
 }
 
 function __parseCanvasMarkdownPayload(fileText) {
-    const rawBody = String(fileText || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+    const rawBody = String(fileText || '');
+    // Use normalized body only for parser robustness; keep rawBody unchanged for source round-trip.
+    const parseBody = rawBody.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
 
-    const extractedFormat = __extractCanvasExportFormatCompactComment(rawBody);
+    const extractedFormat = __extractCanvasExportFormatCompactComment(parseBody);
     const extractedDesc = __extractCanvasDescriptionCommentBlock(extractedFormat.body);
     const extractedRootMeta = __extractCanvasRootMetaCommentBlock(extractedDesc.body);
     const extractedFold = __extractCanvasFoldStateCommentBlock(extractedRootMeta.body);
@@ -32130,6 +32132,11 @@ function __buildImportedTempSectionFromVisualMarkdown(node, parsedMarkdown, cont
 }
 
 function __buildMdNodeMarkdown(node) {
+    const hasDirectSource = !!(node && typeof node === 'object' && Object.prototype.hasOwnProperty.call(node, 'markdownSource'));
+    if (hasDirectSource) {
+        const directSource = String(node.markdownSource == null ? '' : node.markdownSource);
+        if (directSource.trim()) return directSource;
+    }
     const markdownSource = __normalizeCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
     if (!markdownSource.trim()) return '\n';
     return markdownSource;

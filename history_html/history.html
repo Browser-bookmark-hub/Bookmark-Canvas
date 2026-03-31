@@ -1259,6 +1259,37 @@
 	                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncPermanentIncrementalThresholdDesc">按新增/删除的节点数计算。</div>
 	                            <div class="canvas-sync-divider" aria-hidden="true"></div>
 
+	                            <label class="canvas-sync-row" for="canvasSyncStructuredConflictPolicySelect">
+	                                <span id="canvasSyncStructuredConflictPolicyLabel">双端都改时（结构化）处理方式</span>
+	                                <select id="canvasSyncStructuredConflictPolicySelect">
+	                                    <option id="canvasSyncStructuredConflictPolicyNewerOption" value="newer">按最近修改时间决定（默认）</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyOursOption" value="ours">保留本地并覆盖云端</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyTheirsOption" value="theirs">使用云端覆盖本地</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyNoneOption" value="none">进入冲突面板手动选</option>
+	                                </select>
+	                            </label>
+	                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncStructuredConflictPolicyDesc">仅在本地和云端都改时生效；单边变化会自动同步。适用于永久树/临时树/.canvas。</div>
+	                            <label class="canvas-sync-row" for="canvasSyncDescriptionConflictPolicySelect">
+	                                <span id="canvasSyncDescriptionConflictPolicyLabel">双端都改时（说明类）处理方式</span>
+	                                <select id="canvasSyncDescriptionConflictPolicySelect">
+	                                    <option id="canvasSyncDescriptionConflictPolicyMergeOption" value="merge">尝试自动合并（默认）</option>
+	                                    <option id="canvasSyncDescriptionConflictPolicyLocalOption" value="local">优先本地说明</option>
+	                                    <option id="canvasSyncDescriptionConflictPolicyRemoteOption" value="remote">优先云端说明</option>
+	                                    <option id="canvasSyncDescriptionConflictPolicyCopyOption" value="conflict-copy">生成冲突副本卡片（放在源卡右侧）</option>
+	                                </select>
+	                            </label>
+	                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncDescriptionScopeDesc">说明类包括：永久栏目说明（descriptionMd）、临时栏目说明（descriptionMd）、空白栏目卡片 Markdown 源文（markdownSource）。</div>
+	                            <label class="canvas-sync-row" for="canvasSyncDescriptionMergeFallbackSelect">
+	                                <span id="canvasSyncDescriptionMergeFallbackLabel">说明类自动合并失败时</span>
+	                                <select id="canvasSyncDescriptionMergeFallbackSelect">
+	                                    <option id="canvasSyncDescriptionMergeFallbackCopyOption" value="conflict-copy">生成冲突副本卡片（默认）</option>
+	                                    <option id="canvasSyncDescriptionMergeFallbackManualOption" value="manual">进入冲突面板手动选</option>
+	                                </select>
+	                            </label>
+	                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncDescriptionConflictPolicyDesc">冲突副本不会改写原说明字段；会在对应源卡右侧新增一张“冲突副本卡片”。</div>
+	                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncDescriptionConflictCopyDesc">冲突副本卡片包含 source/scope/reason 元信息，以及 LOCAL/REMOTE 两段源码，便于后续人工整理。</div>
+	                            <div class="canvas-sync-divider" aria-hidden="true"></div>
+
 	                            <label class="canvas-sync-row canvas-sync-row--switch" for="canvasSyncObsidianFilePushToggle">
 	                                <span id="canvasSyncObsidianFilePushLabel">同步时增量推送 Obsidian 文件</span>
 	                                <span class="canvas-sync-switch">
@@ -1306,6 +1337,8 @@
                             <div class="canvas-sync-status-line"><span id="canvasSyncStatusQueueLabel">队列长度：</span><strong id="canvasSyncStatusQueue">0</strong></div>
                             <div class="canvas-sync-status-line"><span id="canvasSyncStatusLastSuccessLabel">上次成功：</span><strong id="canvasSyncStatusLastSuccess">-</strong></div>
                             <div class="canvas-sync-status-line"><span id="canvasSyncStatusLastDirectionLabel">最后方向：</span><strong id="canvasSyncStatusLastDirection">-</strong></div>
+                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusPolicySummaryLabel">策略摘要：</span><strong id="canvasSyncStatusPolicySummary">-</strong></div>
+                            <div class="canvas-sync-status-line"><span id="canvasSyncStatusDescriptionMergeLabel">说明类合并：</span><strong id="canvasSyncStatusDescriptionMerge">-</strong></div>
                             <div class="canvas-sync-status-line"><span id="canvasSyncStatusObsidianPushAtLabel">最近文件推送：</span><strong id="canvasSyncStatusObsidianPushAt">-</strong></div>
                             <div class="canvas-sync-status-line"><span id="canvasSyncStatusObsidianPushDeltaLabel">文件推送变更：</span><strong id="canvasSyncStatusObsidianPushDelta">-</strong></div>
                             <div class="canvas-sync-status-line canvas-sync-status-line--hash"><span id="canvasSyncStatusRemoteShaLabel">云端当前版本（检查结果）：</span><strong id="canvasSyncStatusRemoteSha">-</strong></div>
@@ -1338,7 +1371,15 @@
                                 </div>
                                 <div class="canvas-sync-conflict-summary" id="canvasSyncConflictSummary">请先选择处理策略，再继续同步。</div>
                                 <div class="canvas-sync-status-table-section" id="canvasSyncConflictCompare"></div>
-                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictPermanentModeHint" hidden></div>
+                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictDescriptionHint">说明类（永久/临时说明、空白卡 Markdown）优先走本地 merge，失败按兜底策略处理。</div>
+	                                <div class="canvas-sync-conflict-actions canvas-sync-panel-actions" id="canvasSyncConflictDescriptionActions">
+	                                    <button id="canvasSyncConflictDescUseLocalBtn" class="canvas-manage-btn" type="button"><i class="fas fa-align-left"></i><span id="canvasSyncConflictDescUseLocalText">说明类用本地</span></button>
+	                                    <button id="canvasSyncConflictDescUseRemoteBtn" class="canvas-manage-btn" type="button"><i class="fas fa-align-right"></i><span id="canvasSyncConflictDescUseRemoteText">说明类用云端</span></button>
+	                                    <button id="canvasSyncConflictDescUseCopyBtn" class="canvas-manage-btn" type="button"><i class="fas fa-copy"></i><span id="canvasSyncConflictDescUseCopyText">说明类生成冲突副本卡片</span></button>
+	                                </div>
+	                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictStructuredHint">结构化数据（永久树/临时树/.canvas）按“结构化冲突策略”执行。</div>
+	                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictFlowHint">操作顺序：先选上面的“说明类按钮”（可改策略），再点下方“使用云端/保留本地/按最近修改时间”提交结构化结果。</div>
+	                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictPermanentModeHint" hidden></div>
                                 <label class="canvas-sync-row canvas-sync-row--switch" id="canvasSyncConflictFineToggleRow" for="canvasSyncConflictFineToggle" hidden>
                                     <span id="canvasSyncConflictFineToggleLabel">逐文件精细处理（实验）</span>
                                     <span class="canvas-sync-switch">

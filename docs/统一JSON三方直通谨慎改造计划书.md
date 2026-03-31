@@ -1,6 +1,6 @@
 # 统一 JSON 三方直通执行计划书（无兼容版）
 
-更新时间：2026-03-30  
+更新时间：2026-03-31  
 阶段：测试阶段（未上线）  
 执行策略：不做旧版本兼容迁就，直接一次性收敛到新结构。
 
@@ -381,3 +381,235 @@ BCS 本地侧仅存说明 + rootMeta，树走 Chrome Bookmarks API。同步需�
 - 说明与源码稳定：`descriptionMd` 无语义变更时不产生额外重写。
 - 同步冲突面板行为保持可用（仅数据源收口，不改交互语义）。
 - 对比脚本通过：`temporaryProtocolsMatch === true`，并补充 `regular/special` 分组断言。
+
+---
+
+## 10. 同步冲突分层策略改造计划（2026-03-31 新增）
+
+目标：按“仅空白栏目卡片源码走 merge、其余一律结构化覆盖/时间优先”的规则收口，并把该规则显式体现在策略页与状态面板中。
+
+### 10.1 规则总览（本次新增的统一语义）
+
+1. 单边变化（仅本地变或仅云端变）：直接沿原方向同步，不触发冲突面板。  
+2. 双边变化：
+   - 空白栏目卡片源码（`markdownSource`）：优先走 merge。  
+   - 结构化数据（永久树、临时树、`.canvas`、永久/临时说明字段）：走覆盖决策。  
+3. 结构化默认策略：`按最近修改时间决定（newer）`。  
+4. 永久栏目在“云端 -> 本地”时继续保留阈值逻辑：  
+   - 先按结构化策略判方向；  
+   - 命中“使用云端覆盖本地”后，再由 `permanentPullMode=auto` 判“增量/覆盖”。  
+5. 首次同步方向（auto/cloud/local）保留现有机制，不与冲突策略混用。
+
+#### 10.1.1 冲突域分类硬规则（强制执行）
+
+1. `.canvas` 一律归类为“结构化数据”，不做 merge。  
+2. `.canvas` 中 `type:"text"` 节点归类为“结构化数据”，不做 merge。  
+3. 永久栏目（含副本）`descriptionMd` 归类为“结构化数据”，不做 merge。  
+4. 临时栏目 `descriptionMd` 归类为“结构化数据”，不做 merge。  
+5. 仅空白卡 `markdownSource` 进入 merge。  
+6. “右侧冲突副本卡片”仅允许用于空白卡 `markdownSource`；永久/临时说明冲突禁止生成右侧冲突卡片。
+
+### 10.2 策略页改造（Behavior）
+
+新增设置组（在“策略”页）：
+
+- [ ] `空白卡源码双端都改处理方式`（默认：`自动合并`）  
+  可选值：`merge` / `local` / `remote` / `conflict-copy`
+- [ ] `空白卡源码合并失败兜底`（默认：`conflict-copy`）  
+  可选值：`conflict-copy` / `manual`
+- [ ] `结构化冲突策略`（默认：`newer`）  
+  可选值：`newer` / `local` / `remote` / `manual`
+
+兼容与落盘：
+
+- [ ] 新增 settings 键并给默认值（老配置自动补默认值）。
+- [ ] 保留现有 `firstSyncMode`、`permanentPullMode`、阈值配置，不做破坏性迁移。
+- [ ] 旧 `conflictPolicy` 迁移为 `structuredConflictPolicy`（无值时默认 `newer`）。
+- [ ] 兼容迁移：若存在旧 `descriptionConflictPolicy/descriptionMergeFallback`，仅映射到空白卡源码策略键。
+
+### 10.3 状态页/冲突面板改造（Status）
+
+状态区新增摘要：
+
+- [ ] 新增“本轮策略摘要”行，展示：
+  - 空白卡源码：`merge x 条 / fallback y 条`
+  - 结构化：`newer/local/remote/manual`
+  - 永久栏目：`auto -> incremental/overwrite（含阈值与时间判据）`
+
+冲突面板分区：
+
+- [ ] 空白卡源码冲突区（仅 merge 失败或策略=manual 时显示）
+  - 动作：`用本地源码`、`用云端源码`、`生成冲突副本卡片`
+- [ ] 结构化冲突区（沿用现有 3 按钮）
+  - `使用云端覆盖本地`
+  - `保留本地并覆盖云端`
+  - `按最近修改时间决定`
+
+展示文案：
+
+- [ ] 明确标注“空白卡源码已自动 merge，以下仅为结构化冲突决策”。
+- [ ] 明确标注“永久栏目若选云端方向，仍会进入阈值判定（增量/覆盖）”。
+- [ ] 明确标注“永久/副本/临时说明字段归结构化覆盖，不生成右侧冲突副本卡片”。
+
+### 10.4 执行阶段（新增 F/G/H）
+
+#### 阶段 F：设置模型与默认值收口
+
+- [ ] F1. 增加 `blankCardSourceConflictPolicy`、`blankCardSourceMergeFallback`、`structuredConflictPolicy`。
+- [ ] F2. `loadSettings/saveSettings/applySettingsToForm/pullSettingsFromForm` 全链打通。
+- [ ] F3. 老字段迁移：`conflictPolicy -> structuredConflictPolicy`。
+
+验收：
+
+1. 新旧用户进入策略页后均能看到默认值。
+2. 刷新后设置不丢失，且不影响首次同步与永久栏目既有设置。
+
+#### 阶段 G：冲突决策器分层
+
+- [ ] G1. 冲突分类器：区分“空白卡源码冲突”与“结构化冲突”。
+- [ ] G2. 空白卡源码冲突先执行 merge（或按策略直接 local/remote）。
+- [ ] G3. merge 失败按 `blankCardSourceMergeFallback` 执行（冲突副本卡片或人工）。
+- [ ] G4. 结构化冲突走 `structuredConflictPolicy`，默认 `newer`。
+- [ ] G5. 永久栏目在结构化方向命中 remote->local 时，继续走 auto 阈值判定。
+
+验收：
+
+1. “双边都改”的场景下，空白卡源码先 merge，结构化再决策。
+2. 结构化默认行为为按时间优先，不再默认手动阻塞。
+3. 永久栏目仍保留“auto 阈值增量/覆盖”能力。
+
+#### 阶段 H：面板与可观测性
+
+- [ ] H1. 状态页加入策略摘要与分项统计。
+- [ ] H2. 冲突面板拆分“空白卡源码区”与“结构化区”。
+- [ ] H3. 成功/失败 toast 与运行日志补充“空白卡源码 merge 结果”。
+
+验收：
+
+1. 用户能看懂每次同步到底做了什么（merge 了哪些、覆盖了哪些）。
+2. 冲突面板操作与实际执行一致，不出现“按钮语义和结果不一致”。
+
+### 10.5 回归与脚本检查（新增）
+
+- [ ] 三类双边冲突样例：
+  - 仅空白卡源码冲突
+  - 仅结构化冲突
+  - 空白卡源码 + 结构化混合冲突
+- [ ] 校验默认策略：
+  - 结构化默认 `newer`
+  - 空白卡源码默认 `merge`
+  - 永久 auto 仅按阈值判定增量/覆盖（不再有独立“先看时间”开关）
+- [ ] 现有三方对齐脚本继续通过（不回退已完成的临时栏目对齐结果）。
+
+### 10.6 本节完成标记
+
+- [ ] F 完成
+- [ ] G 完成
+- [ ] H 完成
+
+说明：由于本节范围已收口为“仅空白卡源码 merge”，状态按新口径重置；最终签收以 10.7 门禁与对比脚本回归结果为准。
+
+### 10.7 强制门禁（哈希/变脏/时间/初始基线）
+
+以下 4 项为本次改造的硬门禁，任一不满足不得标记阶段完成：
+
+- [ ] 哈希门禁  
+  - 同步、推送、拉取成功结束后，必须持久化最新 `lastRemoteSha`。  
+  - `lastCheckRemoteSha` 与运行态展示保持一致。  
+  - 无改动二次 push 变更数必须为 0。
+
+- [ ] 变脏门禁  
+  - 仅在语义变更时置脏；纯格式/键序变化不得置脏。  
+  - 空白卡源码 merge 成功后，若合并结果与本地等价，不得产生额外脏标记。  
+  - 冲突处理中断/恢复后，dirty 状态不得“提前清空”或“长期脏死”。
+
+- [ ] 最新修改时间门禁  
+  - 结构化默认 `newer` 决策必须基于可靠 `updatedAt`。  
+  - `updatedAt` 缺失或相等时，不允许伪造“时间优先”结果，必须走降级策略（manual 或配置兜底）。  
+  - 永久栏目 `auto` 的时间判别仅用于方向辅助，不得绕过阈值增量/覆盖判定。
+
+- [ ] 初始情况门禁（首次同步/无基线）  
+  - 无共同基线时禁止静默自动覆盖，必须进入首次同步方向策略（auto/cloud/local）或显式确认。  
+  - 云端为空、云端有文件但快照缺失、路径待校验三类初始场景必须分流处理。  
+  - 建立首个基线后再允许常规“时间优先 + 分层冲突”路径。
+
+### 10.8 空白卡源码 Merge 与冲突副本卡片（2026-03-31 补充）
+
+目标：仅对空白卡 `markdownSource` 执行 merge；冲突副本卡片仅在空白卡源码冲突时生成，且不改写原字段。
+
+- [ ] M1. 空白卡源码 merge 入口使用三方语义 `mergeDescriptionTexts(base, local, remote)`。  
+  - 先判单边改动（`base===local` / `base===remote`）。  
+  - 再尝试 `diff_match_patch`（若运行时可用），失败后走保守兜底。  
+- [ ] M2. `policy=conflict-copy` 不把 `<<<<<<< LOCAL` 写回 `markdownSource`。  
+- [ ] M3. 空白卡源码 merge 失败且 fallback=`conflict-copy` 时，新建“冲突副本卡片”。  
+- [ ] M4. 冲突副本卡片默认放在源卡片右侧（无锚点时放到画布最右侧列）。  
+- [ ] M5. 冲突副本卡片内容包含：`source/scope/reason/generatedAt` + `LOCAL/REMOTE` 双源码块。  
+- [ ] M6. 永久/副本/临时说明字段冲突不走冲突副本卡片，统一归结构化策略。  
+- [ ] M7. 若需强制对齐 Google `diff-match-patch` 版本行为：下一轮把库内置到插件包并锁定版本（避免依赖运行时是否注入）。
+
+验收补充：
+
+- [ ] C1. 双端都改 + 空白卡源码 fallback=conflict-copy：源字段不变，且生成右侧冲突卡。  
+- [ ] C2. 双端都改 + 空白卡源码 policy=conflict-copy：源字段不变，且生成右侧冲突卡。  
+- [ ] C3. 双端都改 + 永久/临时说明字段：不生成右侧冲突卡，按结构化策略落地。  
+- [ ] C4. 生成冲突卡后：`mdNodeCounter`、`timestamp`、`dirty/hash` 行为符合 10.7 门禁。  
+- [ ] C5. 冲突卡导出/回拉后仍可正常渲染，不影响原空白栏目与临时栏目结构。
+
+### 10.9 GitHub BASE 三方 Merge 计划（v1，先不做本地 BASE）
+
+目标：在“双端都改”场景里，空白卡源码 merge 的 `base` 统一来自 **GitHub 上次已对齐版本**，不再用“当前快照值”充当伪 base。
+
+#### 10.9.1 共同基线来源（文件级）
+
+- `runtime.lastRemoteSha`：记录“最近一次已确认的云端总版本”。
+- `prevSyncIndex.files[path].sha`：记录“每个同步文件在上次对齐点的 GitHub blob sha”。
+- 当两端都改时，按 `path -> sha` 从 GitHub 回读 base 文件，再提取空白卡 `markdownSource` 字段做三方 merge。
+
+#### 10.9.2 流程图（GitHub-only BASE）
+
+```mermaid
+flowchart TD
+  A[开始同步] --> B[计算 localChanged / remoteChanged]
+  B --> C{是否双端都改?}
+  C -- 否 --> Z[走现有单边路径]
+  C -- 是 --> D[收集空白卡源码目标 key]
+  D --> E[key 映射到文件 path]
+  E --> F[从 prevSyncIndex 读取每个 path 的 base sha]
+  F --> G{base sha 是否齐全?}
+  G -- 否 --> H[按 fallback: conflict-copy 或 manual]
+  G -- 是 --> I[按 sha 从 GitHub 读取 base 文件内容]
+  I --> J[解析 base/local/remote 空白卡源码 map]
+  J --> K[mergeDescriptionTexts(base, local, remote)]
+  K --> L{merge 是否成功?}
+  L -- 否 --> H
+  L -- 是 --> M[写回合并结果到待应用快照]
+  M --> N[结构化冲突按 structuredConflictPolicy 决策]
+  N --> O[完成 push/pull]
+  O --> P[更新 runtime 哈希 + prevSyncIndex(path->sha)]
+```
+
+补充约束：
+
+- 仅提取并回写空白卡 `markdownSource` 字段。  
+- 永久/副本/临时说明字段不参与 merge，统一按结构化策略决策。
+
+#### 10.9.3 落地改造点（先做 GitHub）
+
+- [ ] GB1. `github/repo-api.js` 增加“按 blob sha 读取文件”API（直接走 `/git/blobs/{sha}`）。
+- [ ] GB2. `background.js` 增加消息动作：`canvasGitReadBlobBySha`（返回 `contentBase64`）。
+- [ ] GB3. `obsidian-git-sync.js` 增加 `fetchBaseFilesBySha(pathShaPairs)`。
+- [ ] GB4. 空白卡源码冲突入口新增 `baseMap` 覆盖参数：优先用 GitHub base map；无 base 才走 fallback。
+- [ ] GB5. 仅在 `provider=GitHub` 且 `path->sha` 可用时启用此逻辑；其余 provider 暂不启用。
+
+#### 10.9.4 失败降级策略（必须明确）
+
+- base sha 缺失 / 读取失败 / 文件已删除：不做静默自动 merge，走 `blankCardSourceMergeFallback`。
+- 默认 fallback 仍为 `conflict-copy`，保持“源字段不改写”。
+- 首次同步未建立基线时，不进入 GitHub BASE merge（沿用首次同步分流策略）。
+
+#### 10.9.5 验收清单
+
+- [ ] R1. 双端都改 + base 可用：空白卡源码三方 merge 结果稳定，且不再误用当前值作 base。
+- [ ] R2. 双端都改 + base 缺失：正确进入 `conflict-copy/manual`，不出现静默覆盖。
+- [ ] R3. 同步成功后 `prevSyncIndex.files[path].sha` 与 `runtime.lastRemoteSha` 正确推进。
+- [ ] R4. 第二次无改动 push 变更数为 0（哈希与基线一致）。

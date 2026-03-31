@@ -68,6 +68,8 @@
     ];
 
     const CONFLICT_POLICIES = new Set(['none', 'ours', 'theirs', 'newer']);
+    const DESCRIPTION_CONFLICT_POLICIES = new Set(['merge', 'local', 'remote', 'conflict-copy']);
+    const DESCRIPTION_MERGE_FALLBACKS = new Set(['conflict-copy', 'manual']);
     const SYNC_METHODS = new Set(['merge', 'rebase', 'reset']);
     const FIRST_SYNC_MODES = new Set(['auto', 'cloud', 'local']);
     const PERMANENT_PULL_MODES = new Set(['auto', 'overwrite', 'incremental']);
@@ -107,7 +109,11 @@
         firstSyncPathVerifiedRoot: '',
         firstSyncPathVerifiedAt: 0,
         syncMethod: 'merge',
-        conflictPolicy: 'none'
+        // keep legacy key for backward compatibility; structuredConflictPolicy is the canonical field.
+        conflictPolicy: 'newer',
+        structuredConflictPolicy: 'newer',
+        descriptionConflictPolicy: 'merge',
+        descriptionMergeFallback: 'conflict-copy'
     };
 
     const DEFAULT_RUNTIME = {
@@ -133,6 +139,9 @@
         lastBlankSectionFilePushAt: 0,
         lastObsidianPushChanged: 0,
         lastObsidianPushTotal: 0,
+        lastDescriptionMergeMerged: 0,
+        lastDescriptionMergeFallback: 0,
+        lastDescriptionMergeMode: '',
         hasPendingConflict: false
     };
 
@@ -1301,11 +1310,21 @@
         let applyResult = null;
         let remotePermanentTreeSnapshot = resolveRemotePermanentTreeSnapshotForApply(stagedBundle, folderFiles);
         let permanentApplied = false;
+        let stagedSnapshotForTiming = null;
+        try {
+            stagedSnapshotForTiming = stagedBundle && stagedBundle.snapshot ? normalizeSnapshot(stagedBundle.snapshot) : null;
+        } catch (_) {
+            stagedSnapshotForTiming = null;
+        }
+        const localUpdatedAtForPermanent = Math.max(0, Number(localRollbackSnapshot && localRollbackSnapshot.updatedAt) || Number(runtime && runtime.lastLocalMutationAt) || 0);
+        const remoteUpdatedAtForPermanent = Math.max(0, Number(stagedSnapshotForTiming && stagedSnapshotForTiming.updatedAt) || Number(runtime && runtime.lastRemoteCommittedAt) || 0);
 
         try {
             const overwriteResult = await maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(remotePermanentTreeSnapshot, trigger, {
-                force: true,
+                force: !!(options && options.forcePermanentOverwrite === true),
                 permanentPullMode: options && options.permanentPullMode,
+                localUpdatedAt: localUpdatedAtForPermanent,
+                remoteUpdatedAt: remoteUpdatedAtForPermanent,
                 onProgress: (message) => updateSyncUiProgress(message, 82)
             });
             permanentApplied = !!(overwriteResult && overwriteResult.applied);
@@ -1342,8 +1361,10 @@
 
             if (!permanentApplied && remotePermanentTreeSnapshot) {
                 const retryOverwrite = await maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(remotePermanentTreeSnapshot, trigger, {
-                    force: true,
+                    force: !!(options && options.forcePermanentOverwrite === true),
                     permanentPullMode: options && options.permanentPullMode,
+                    localUpdatedAt: localUpdatedAtForPermanent,
+                    remoteUpdatedAt: remoteUpdatedAtForPermanent,
                     onProgress: (message) => updateSyncUiProgress(message, 82)
                 });
                 permanentApplied = !!(retryOverwrite && retryOverwrite.applied);
@@ -2506,9 +2527,8 @@
     }
 
     function normalizeCanvasMarkdownSourceForSync(value) {
-        return String(value == null ? '' : value)
-            .replace(/\u200B/g, '')
-            .replace(/\r\n?/g, '\n');
+        // Sync path must keep source text as-is; no hidden cleanup here.
+        return String(value == null ? '' : value);
     }
 
     function buildComparableTempSectionEntryForSync(sectionInput) {
@@ -2532,6 +2552,12 @@
             ? cloneSyncJsonValue(normalizedProtocol.bookmarkTree)
             : null;
 
+        const rawSectionDescription = Object.prototype.hasOwnProperty.call(section, 'descriptionMd')
+            ? section.descriptionMd
+            : (sectionMeta && Object.prototype.hasOwnProperty.call(sectionMeta, 'descriptionMd')
+                ? sectionMeta.descriptionMd
+                : '');
+
         return {
             id: String(section.id || '').trim(),
             x: normalizeCanvasTempStateNumberForSync(section.x),
@@ -2545,7 +2571,7 @@
                 title: String(sectionMeta.title || section.title || '').trim(),
                 source: String(sectionMeta.source || '').trim(),
                 sequenceNumber: normalizeCanvasTempStateNumberForSync(sectionMeta.sequenceNumber),
-                descriptionMd: normalizeCanvasMarkdownSourceForSync(sectionMeta.descriptionMd || '')
+                descriptionMd: normalizeCanvasMarkdownSourceForSync(rawSectionDescription || '')
             },
             bookmarkTree
         };
@@ -2580,28 +2606,18 @@
             };
         }
 
-        const protocolBridge = global && global.CanvasProtocolBridge ? global.CanvasProtocolBridge : null;
-        let normalizedNode = node;
-        if (protocolBridge && typeof protocolBridge.normalizeBlankMarkdownNode === 'function') {
-            try {
-                normalizedNode = protocolBridge.normalizeBlankMarkdownNode(node, { refreshCachesFromMarkdown: true }) || node;
-            } catch (_) {
-                normalizedNode = node;
-            }
-        }
-
         return {
-            id: String(normalizedNode.id || '').trim(),
-            subtype: String(normalizedNode.subtype || '').trim(),
-            source: String(normalizedNode.source || '').trim(),
-            x: normalizeCanvasTempStateNumberForSync(normalizedNode.x),
-            y: normalizeCanvasTempStateNumberForSync(normalizedNode.y),
-            width: normalizeCanvasTempStateNumberForSync(normalizedNode.width),
-            height: normalizeCanvasTempStateNumberForSync(normalizedNode.height),
-            color: String(normalizedNode.color || '').trim(),
-            colorHex: String(normalizedNode.colorHex || '').trim(),
-            markdownSource: String(normalizedNode.markdownSource || '').replace(/\r\n?/g, '\n'),
-            text: String(normalizedNode.text || '').replace(/\r\n?/g, '\n')
+            id: String(node.id || '').trim(),
+            subtype: String(node.subtype || '').trim(),
+            source: String(node.source || '').trim(),
+            x: normalizeCanvasTempStateNumberForSync(node.x),
+            y: normalizeCanvasTempStateNumberForSync(node.y),
+            width: normalizeCanvasTempStateNumberForSync(node.width),
+            height: normalizeCanvasTempStateNumberForSync(node.height),
+            color: String(node.color || '').trim(),
+            colorHex: String(node.colorHex || '').trim(),
+            markdownSource: String(node.markdownSource || ''),
+            text: String(node.text || '')
         };
     }
 
@@ -2823,6 +2839,32 @@
         return CONFLICT_POLICIES.has(value) ? value : DEFAULT_SETTINGS.conflictPolicy;
     }
 
+    function ensureStructuredConflictPolicy(policy) {
+        return ensureConflictPolicy(policy);
+    }
+
+    function getEffectiveStructuredConflictPolicy(source = settings) {
+        const payload = source && typeof source === 'object' ? source : {};
+        const candidate = payload.structuredConflictPolicy || payload.conflictPolicy || DEFAULT_SETTINGS.structuredConflictPolicy;
+        return ensureStructuredConflictPolicy(candidate);
+    }
+
+    function ensureDescriptionConflictPolicy(policy) {
+        const value = String(policy || '').trim().toLowerCase();
+        if (value === 'auto' || value === 'automatic') return 'merge';
+        if (value === 'local-first' || value === 'ours') return 'local';
+        if (value === 'remote-first' || value === 'theirs') return 'remote';
+        if (value === 'copy' || value === 'conflict-copy') return 'conflict-copy';
+        return DESCRIPTION_CONFLICT_POLICIES.has(value) ? value : DEFAULT_SETTINGS.descriptionConflictPolicy;
+    }
+
+    function ensureDescriptionMergeFallback(policy) {
+        const value = String(policy || '').trim().toLowerCase();
+        if (value === 'conflict' || value === 'copy') return 'conflict-copy';
+        if (value === 'panel' || value === 'manual-panel') return 'manual';
+        return DESCRIPTION_MERGE_FALLBACKS.has(value) ? value : DEFAULT_SETTINGS.descriptionMergeFallback;
+    }
+
     function ensureSyncMethod(method) {
         const value = String(method || '').trim().toLowerCase();
         if (value === 'other_sync_service') {
@@ -2992,13 +3034,24 @@
 
     function loadSettings() {
         const parsed = safeParse(getSyncMetaRaw(SETTINGS_KEY), null);
-        const merged = Object.assign({}, DEFAULT_SETTINGS, parsed || {});
+        const parsedObject = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        const merged = Object.assign({}, DEFAULT_SETTINGS, parsedObject);
 
-        merged.conflictPolicy = ensureConflictPolicy(merged.conflictPolicy);
+        let structuredConflictCandidate = merged.structuredConflictPolicy || merged.conflictPolicy;
+        const hasStructuredPolicyInStorage = Object.prototype.hasOwnProperty.call(parsedObject, 'structuredConflictPolicy');
+        if (!hasStructuredPolicyInStorage && ensureConflictPolicy(structuredConflictCandidate) === 'none') {
+            // Old versions defaulted to manual conflict. New default should be time-priority.
+            structuredConflictCandidate = DEFAULT_SETTINGS.structuredConflictPolicy;
+        }
+        merged.structuredConflictPolicy = ensureStructuredConflictPolicy(structuredConflictCandidate);
+        // Keep legacy field in sync for old code paths and persisted old clients.
+        merged.conflictPolicy = merged.structuredConflictPolicy;
         // Main UI no longer exposes Git-style sync methods; normalize legacy values
         // back to the standard sync path to avoid hidden behavior changes.
         merged.syncMethod = DEFAULT_SETTINGS.syncMethod;
         merged.toastEnabled = merged.toastEnabled !== false;
+        merged.descriptionConflictPolicy = ensureDescriptionConflictPolicy(merged.descriptionConflictPolicy);
+        merged.descriptionMergeFallback = ensureDescriptionMergeFallback(merged.descriptionMergeFallback);
         delete merged.pushOnSync;
         delete merged.pullOnSync;
 
@@ -4147,11 +4200,14 @@
 	            return { applied: false, skipped: 'same' };
 	        }
 
-	        const permanentPullMode = ensurePermanentPullMode(
-	            options && options.permanentPullMode
-	                ? options.permanentPullMode
-	                : (settings && settings.permanentPullMode)
-	        );
+        const permanentPullMode = ensurePermanentPullMode(
+            options && options.permanentPullMode
+                ? options.permanentPullMode
+                : (settings && settings.permanentPullMode)
+        );
+        const autoDecision = evaluatePermanentPullDecision(localTree, remoteTree, {
+            permanentPullMode
+        });
 	        let applyMode = 'overwrite';
 	        let fallbackReason = '';
 	        let threshold = 0;
@@ -5599,9 +5655,8 @@ Cancel: go back and change the branch name first.`
     }
 
     function normalizeManagedSyncTextContent(content) {
-        return String(content == null ? '' : content)
-            .replace(/^\uFEFF/, '')
-            .replace(/\r\n?/g, '\n');
+        // Keep raw file text for sync comparison to avoid hidden normalization.
+        return String(content == null ? '' : content);
     }
 
     function buildStableComparableJsonValue(value) {
@@ -6390,11 +6445,25 @@ Cancel: go back and change the branch name first.`
     }
 
     function formatConflictPolicyForDisplay(policy) {
-        const value = ensureConflictPolicy(policy);
+        const value = ensureStructuredConflictPolicy(policy);
         if (value === 'ours') return textByLang('本地优先', 'Our changes');
         if (value === 'theirs') return textByLang('云端优先', 'Their changes');
         if (value === 'newer') return textByLang('按最近修改时间决定', 'Use the latest modification time');
         return textByLang('手动选择', 'Choose manually');
+    }
+
+    function formatDescriptionConflictPolicyForDisplay(policy) {
+        const value = ensureDescriptionConflictPolicy(policy);
+        if (value === 'local') return textByLang('说明类：优先本地', 'Description: prefer local');
+        if (value === 'remote') return textByLang('说明类：优先云端', 'Description: prefer cloud');
+        if (value === 'conflict-copy') return textByLang('说明类：冲突副本卡片', 'Description: conflict-copy card');
+        return textByLang('说明类：自动合并', 'Description: auto-merge');
+    }
+
+    function formatDescriptionMergeFallbackForDisplay(policy) {
+        const value = ensureDescriptionMergeFallback(policy);
+        if (value === 'manual') return textByLang('失败兜底：手动处理', 'Fallback: manual');
+        return textByLang('失败兜底：冲突副本卡片', 'Fallback: conflict-copy card');
     }
 
     function decideWinnerByLatestModified(localUpdatedAt, remoteUpdatedAt) {
@@ -7172,6 +7241,8 @@ Cancel: go back and change the branch name first.`
         const queueEl = getElement('canvasSyncStatusQueue');
         const lastEl = getElement('canvasSyncStatusLastSuccess');
         const directionEl = getElement('canvasSyncStatusLastDirection');
+        const policySummaryEl = getElement('canvasSyncStatusPolicySummary');
+        const descriptionMergeEl = getElement('canvasSyncStatusDescriptionMerge');
         const obsidianPushAtEl = getElement('canvasSyncStatusObsidianPushAt');
         const obsidianPushDeltaEl = getElement('canvasSyncStatusObsidianPushDelta');
         const remoteShaEl = getElement('canvasSyncStatusRemoteSha');
@@ -7192,6 +7263,17 @@ Cancel: go back and change the branch name first.`
         if (queueEl) queueEl.textContent = String(runtime.queueLength || 0);
         if (lastEl) lastEl.textContent = formatTime(runtime.lastSuccessAt);
         if (directionEl) directionEl.textContent = getDirectionText(runtime.lastAppliedDirection);
+        if (policySummaryEl) {
+            const structuredText = formatConflictPolicyForDisplay(getEffectiveStructuredConflictPolicy(settings));
+            policySummaryEl.textContent = structuredText;
+        }
+        if (descriptionMergeEl) {
+            const modeText = formatDescriptionConflictPolicyForDisplay(settings && settings.descriptionConflictPolicy);
+            const fallbackText = formatDescriptionMergeFallbackForDisplay(settings && settings.descriptionMergeFallback);
+            const mergedCount = Math.max(0, Number(runtime && runtime.lastDescriptionMergeMerged) || 0);
+            const fallbackCount = Math.max(0, Number(runtime && runtime.lastDescriptionMergeFallback) || 0);
+            descriptionMergeEl.textContent = `${modeText}，${fallbackText}（merged ${mergedCount} / fallback ${fallbackCount}）`;
+        }
         if (obsidianPushAtEl) {
             obsidianPushAtEl.textContent = runtime.lastObsidianPushAt
                 ? formatTime(runtime.lastObsidianPushAt)
@@ -7589,7 +7671,9 @@ Cancel: go back and change the branch name first.`
             'canvasSyncFirstSyncModeCloudInput',
             'canvasSyncFirstSyncModeLocalInput',
             'canvasSyncToastToggle',
-            'canvasSyncConflictSelect',
+            'canvasSyncStructuredConflictPolicySelect',
+            'canvasSyncDescriptionConflictPolicySelect',
+            'canvasSyncDescriptionMergeFallbackSelect',
             'canvasSyncConflictFineToggle',
             'canvasSyncPermanentPullModeSelect',
             'canvasSyncPermanentIncrementalThresholdInput',
@@ -7621,6 +7705,9 @@ Cancel: go back and change the branch name first.`
             'canvasSyncConflictUseLocalBtn',
             'canvasSyncConflictUseRemoteBtn',
             'canvasSyncConflictUseNewestBtn',
+            'canvasSyncConflictDescUseLocalBtn',
+            'canvasSyncConflictDescUseRemoteBtn',
+            'canvasSyncConflictDescUseCopyBtn',
             'canvasSyncConflictApplyFineBtn',
             'canvasSyncConflictDismissBtn'
         ].forEach((id) => {
@@ -7702,7 +7789,9 @@ Cancel: go back and change the branch name first.`
     function applySettingsToForm() {
         const enabled = getElement('canvasSyncEnabledToggle');
         const toastToggle = getElement('canvasSyncToastToggle');
-        const conflict = getElement('canvasSyncConflictSelect');
+        const structuredConflict = getElement('canvasSyncStructuredConflictPolicySelect');
+        const descriptionConflict = getElement('canvasSyncDescriptionConflictPolicySelect');
+        const descriptionFallback = getElement('canvasSyncDescriptionMergeFallbackSelect');
         const permanentPullMode = getElement('canvasSyncPermanentPullModeSelect');
         const permanentIncrementalThreshold = getElement('canvasSyncPermanentIncrementalThresholdInput');
         const obsidianFilePushEnabled = getElement('canvasSyncObsidianFilePushToggle');
@@ -7713,7 +7802,9 @@ Cancel: go back and change the branch name first.`
         if (enabled) enabled.checked = !!settings.enabled;
         setFirstSyncModeToForm(settings.firstSyncMode);
         if (toastToggle) toastToggle.checked = settings.toastEnabled !== false;
-        if (conflict) conflict.value = ensureConflictPolicy(settings.conflictPolicy);
+        if (structuredConflict) structuredConflict.value = getEffectiveStructuredConflictPolicy(settings);
+        if (descriptionConflict) descriptionConflict.value = ensureDescriptionConflictPolicy(settings.descriptionConflictPolicy);
+        if (descriptionFallback) descriptionFallback.value = ensureDescriptionMergeFallback(settings.descriptionMergeFallback);
         if (permanentPullMode) permanentPullMode.value = ensurePermanentPullMode(settings.permanentPullMode);
         if (permanentIncrementalThreshold) permanentIncrementalThreshold.value = String(normalizePermanentIncrementalMaxChanges(settings.permanentIncrementalMaxChanges, DEFAULT_SETTINGS.permanentIncrementalMaxChanges));
         if (obsidianFilePushEnabled) obsidianFilePushEnabled.checked = settings.obsidianFilePushEnabled !== false;
@@ -7730,7 +7821,9 @@ Cancel: go back and change the branch name first.`
         const silentFormatToast = !!(options && options.silentFormatToast === true);
         const enabled = getElement('canvasSyncEnabledToggle');
         const toastToggle = getElement('canvasSyncToastToggle');
-        const conflict = getElement('canvasSyncConflictSelect');
+        const structuredConflict = getElement('canvasSyncStructuredConflictPolicySelect');
+        const descriptionConflict = getElement('canvasSyncDescriptionConflictPolicySelect');
+        const descriptionFallback = getElement('canvasSyncDescriptionMergeFallbackSelect');
         const permanentPullMode = getElement('canvasSyncPermanentPullModeSelect');
         const permanentIncrementalThreshold = getElement('canvasSyncPermanentIncrementalThresholdInput');
         const obsidianFilePushEnabled = getElement('canvasSyncObsidianFilePushToggle');
@@ -7751,7 +7844,16 @@ Cancel: go back and change the branch name first.`
         settings.toastEnabled = toastToggle ? !!toastToggle.checked : settings.toastEnabled;
 
         settings.syncMethod = DEFAULT_SETTINGS.syncMethod;
-        settings.conflictPolicy = ensureConflictPolicy(conflict ? conflict.value : settings.conflictPolicy);
+        settings.structuredConflictPolicy = ensureStructuredConflictPolicy(
+            structuredConflict ? structuredConflict.value : getEffectiveStructuredConflictPolicy(settings)
+        );
+        settings.conflictPolicy = settings.structuredConflictPolicy;
+        settings.descriptionConflictPolicy = ensureDescriptionConflictPolicy(
+            descriptionConflict ? descriptionConflict.value : settings.descriptionConflictPolicy
+        );
+        settings.descriptionMergeFallback = ensureDescriptionMergeFallback(
+            descriptionFallback ? descriptionFallback.value : settings.descriptionMergeFallback
+        );
         settings.permanentPullMode = ensurePermanentPullMode(permanentPullMode ? permanentPullMode.value : settings.permanentPullMode);
         settings.permanentIncrementalMaxChanges = normalizePermanentIncrementalMaxChanges(
             permanentIncrementalThreshold ? permanentIncrementalThreshold.value : settings.permanentIncrementalMaxChanges,
@@ -10524,7 +10626,7 @@ Cancel: go back and change the branch name first.`
         arr.unshift({
             ts: Date.now(),
             reason,
-            policy: settings.conflictPolicy,
+            policy: getEffectiveStructuredConflictPolicy(settings),
             local: buildSnapshotMeta(localSnapshot),
             remote: buildSnapshotMeta(remoteSnapshot),
             extra
@@ -10677,6 +10779,9 @@ Cancel: go back and change the branch name first.`
         const remoteBtn = getElement('canvasSyncConflictUseRemoteBtn');
         const localBtn = getElement('canvasSyncConflictUseLocalBtn');
         const newestBtn = getElement('canvasSyncConflictUseNewestBtn');
+        const descHint = getElement('canvasSyncConflictDescriptionHint');
+        const structuredHint = getElement('canvasSyncConflictStructuredHint');
+        const descActions = getElement('canvasSyncConflictDescriptionActions');
         const dismissText = getElement('canvasSyncConflictDismissText');
         const hintEl = getElement('canvasSyncConflictPermanentModeHint');
         if (remoteBtn) remoteBtn.dataset.syncActionMode = baselineOnly ? 'baseline' : 'remote';
@@ -10706,6 +10811,24 @@ Cancel: go back and change the branch name first.`
             dismissText.textContent = isPreview
                 ? textByLang('关闭预览', 'Close Preview')
                 : textByLang('稍后处理', 'Handle later');
+        }
+        if (descActions) {
+            descActions.hidden = baselineOnly;
+        }
+        if (descHint) {
+            const modeText = formatDescriptionConflictPolicyForDisplay(settings && settings.descriptionConflictPolicy);
+            const fallbackText = formatDescriptionMergeFallbackForDisplay(settings && settings.descriptionMergeFallback);
+            descHint.textContent = textByLang(
+                `说明类仅在本地和云端都改时处理。当前：${modeText}，${fallbackText}。若使用“冲突副本”，会在对应源卡右侧新建冲突卡片，不会改写原说明字段。`,
+                `Description handling applies only when both local and cloud changed. Current: ${modeText}, ${fallbackText}. If conflict-copy is used, a conflict card is created to the right of the source card instead of rewriting source fields.`
+            );
+        }
+        if (structuredHint) {
+            const structuredText = formatConflictPolicyForDisplay(getEffectiveStructuredConflictPolicy(settings));
+            structuredHint.textContent = textByLang(
+                `结构化数据仅在双端都改时按策略处理。当前：${structuredText}。单边变化会自动同步。`,
+                `Structured data uses this policy only when both local and cloud changed. Current: ${structuredText}. One-sided changes sync automatically.`
+            );
         }
         configureBaselineOnlyHint(hintEl, baselineOnly, fallbackHintText);
     }
@@ -11040,7 +11163,10 @@ Cancel: go back and change the branch name first.`
 
         const localTree = conflictData && conflictData.localSnapshot ? conflictData.localSnapshot.permanentTreeSnapshot : null;
         const remoteTree = conflictData && conflictData.remoteSnapshot ? conflictData.remoteSnapshot.permanentTreeSnapshot : null;
-        const permanentHintText = formatPermanentPullDecisionText(evaluatePermanentPullDecision(localTree, remoteTree));
+        const permanentHintText = formatPermanentPullDecisionText(evaluatePermanentPullDecision(localTree, remoteTree, {
+            localUpdatedAt: localLatestTs,
+            remoteUpdatedAt: remoteLatestTs
+        }));
         updateConflictPanelActionUi(comparisonSummary, conflictPreview, permanentHintText);
         renderConflictFinePanel(conflictData, conflictPreview);
 
@@ -11290,11 +11416,528 @@ Cancel: go back and change the branch name first.`
         return normalizeSnapshot(snapshotInput || { data: {} });
     }
 
+    function normalizeDescriptionTextForMerge(value) {
+        // Keep source text raw for sync/merge transport. Do not normalize line endings here.
+        return String(value == null ? '' : value);
+    }
+
+    function getDescriptionMergeDmp() {
+        try {
+            if (typeof global.diff_match_patch === 'function') {
+                return new global.diff_match_patch();
+            }
+        } catch (_) { }
+        return null;
+    }
+
+    function tryMergeDescriptionTextsWithDmp(baseText, localText, remoteText) {
+        const dmp = getDescriptionMergeDmp();
+        if (!dmp || typeof dmp.patch_make !== 'function' || typeof dmp.patch_apply !== 'function') {
+            return null;
+        }
+        try {
+            const patchLocal = dmp.patch_make(baseText, localText);
+            const patchRemote = dmp.patch_make(baseText, remoteText);
+            const localOnRemoteResult = dmp.patch_apply(patchLocal, remoteText);
+            const remoteOnLocalResult = dmp.patch_apply(patchRemote, localText);
+
+            const localOnRemoteText = Array.isArray(localOnRemoteResult) ? String(localOnRemoteResult[0] || '') : '';
+            const remoteOnLocalText = Array.isArray(remoteOnLocalResult) ? String(remoteOnLocalResult[0] || '') : '';
+            const localOnRemoteFlags = Array.isArray(localOnRemoteResult) && Array.isArray(localOnRemoteResult[1])
+                ? localOnRemoteResult[1]
+                : [];
+            const remoteOnLocalFlags = Array.isArray(remoteOnLocalResult) && Array.isArray(remoteOnLocalResult[1])
+                ? remoteOnLocalResult[1]
+                : [];
+            const localOnRemoteAllApplied = localOnRemoteFlags.every((flag) => flag === true);
+            const remoteOnLocalAllApplied = remoteOnLocalFlags.every((flag) => flag === true);
+
+            if (localOnRemoteAllApplied && remoteOnLocalAllApplied) {
+                if (localOnRemoteText === remoteOnLocalText) {
+                    return { text: normalizeDescriptionTextForMerge(localOnRemoteText), merged: true, unresolved: false };
+                }
+                return null;
+            }
+            if (localOnRemoteAllApplied) {
+                return { text: normalizeDescriptionTextForMerge(localOnRemoteText), merged: true, unresolved: false };
+            }
+            if (remoteOnLocalAllApplied) {
+                return { text: normalizeDescriptionTextForMerge(remoteOnLocalText), merged: true, unresolved: false };
+            }
+        } catch (_) { }
+        return null;
+    }
+
+    function mergeDescriptionTexts(baseText, localText, remoteText) {
+        const base = normalizeDescriptionTextForMerge(baseText);
+        const local = normalizeDescriptionTextForMerge(localText);
+        const remote = normalizeDescriptionTextForMerge(remoteText);
+        if (local === remote) return { text: local, merged: false, unresolved: false };
+        if (base === local) return { text: remote, merged: false, unresolved: false };
+        if (base === remote) return { text: local, merged: false, unresolved: false };
+        if (!local) return { text: remote, merged: false, unresolved: false };
+        if (!remote) return { text: local, merged: false, unresolved: false };
+        if (local.includes(remote)) return { text: local, merged: true, unresolved: false };
+        if (remote.includes(local)) return { text: remote, merged: true, unresolved: false };
+
+        const dmpMerged = tryMergeDescriptionTextsWithDmp(base, local, remote);
+        if (dmpMerged && !dmpMerged.unresolved) return dmpMerged;
+
+        const localLines = local.split('\n');
+        const remoteLines = remote.split('\n');
+        const localSet = new Set(localLines);
+        const hasOverlap = remoteLines.some((line) => localSet.has(line));
+        if (!hasOverlap) {
+            return { text: '', merged: false, unresolved: true };
+        }
+        const mergedLines = localLines.slice();
+        remoteLines.forEach((line) => {
+            if (!localSet.has(line)) mergedLines.push(line);
+        });
+        return { text: mergedLines.join('\n'), merged: true, unresolved: false };
+    }
+
+    function buildDescriptionConflictScopeLabel(target) {
+        const safe = target && typeof target === 'object' ? target : {};
+        if (safe.kind === 'perm') return 'permanent.descriptionMd';
+        if (safe.kind === 'temp') return 'temporary.descriptionMd';
+        if (safe.kind === 'md') return 'blank.markdownSource';
+        return 'description';
+    }
+
+    function buildDescriptionConflictCardMarkdown(target, localText, remoteText, reason) {
+        const source = target && target.key ? String(target.key) : 'unknown';
+        const scope = buildDescriptionConflictScopeLabel(target);
+        const localPart = normalizeDescriptionTextForMerge(localText);
+        const remotePart = normalizeDescriptionTextForMerge(remoteText);
+        const reasonLabel = String(reason || 'conflict-copy').trim() || 'conflict-copy';
+        const generatedAt = new Date().toISOString();
+        return [
+            '# Sync Conflict Copy',
+            '',
+            `- source: \`${source}\``,
+            `- scope: \`${scope}\``,
+            `- reason: \`${reasonLabel}\``,
+            `- generatedAt: \`${generatedAt}\``,
+            '',
+            '## LOCAL',
+            '````md',
+            localPart,
+            '````',
+            '',
+            '## REMOTE',
+            '````md',
+            remotePart,
+            '````'
+        ].join('\n');
+    }
+
+    function normalizeDescriptionConflictAnchor(raw, fallbackWidth = 320, fallbackHeight = 220) {
+        const source = raw && typeof raw === 'object' ? raw : {};
+        const x = Number(source.x);
+        const y = Number(source.y);
+        const width = Number(source.width);
+        const height = Number(source.height);
+        return {
+            x: Number.isFinite(x) ? x : 0,
+            y: Number.isFinite(y) ? y : 0,
+            width: Number.isFinite(width) && width > 0 ? width : fallbackWidth,
+            height: Number.isFinite(height) && height > 0 ? height : fallbackHeight
+        };
+    }
+
+    function createDescriptionConflictCardContext(permanentShell, tempPayload) {
+        const payload = tempPayload && typeof tempPayload === 'object' ? tempPayload : null;
+        if (!payload) return null;
+        const sections = Array.isArray(payload.sections) ? payload.sections : [];
+        const mdNodes = Array.isArray(payload.mdNodes) ? payload.mdNodes : [];
+        const views = permanentShell && Array.isArray(permanentShell.views) ? permanentShell.views : [];
+
+        const sectionById = new Map();
+        const mdNodeById = new Map();
+        const permanentViewById = new Map();
+        const usedMdNodeIds = new Set();
+        let maxMdNodeCounter = Number(payload.mdNodeCounter) || 0;
+        let hasAnyAnchor = false;
+        let maxRight = 260;
+        let minTop = 0;
+        const considerAnchor = (anchor) => {
+            if (!anchor) return;
+            const safe = normalizeDescriptionConflictAnchor(anchor);
+            if (!hasAnyAnchor) {
+                minTop = safe.y;
+                maxRight = safe.x + safe.width;
+                hasAnyAnchor = true;
+                return;
+            }
+            minTop = Math.min(minTop, safe.y);
+            maxRight = Math.max(maxRight, safe.x + safe.width);
+        };
+
+        sections.forEach((section) => {
+            const id = String(section && section.id || '').trim();
+            if (!id) return;
+            sectionById.set(id, section);
+            considerAnchor(section);
+        });
+        mdNodes.forEach((node) => {
+            const id = String(node && node.id || '').trim();
+            if (!id) return;
+            mdNodeById.set(id, node);
+            usedMdNodeIds.add(id);
+            const match = id.match(/^md-node-(\d+)$/);
+            if (match) {
+                const parsed = Number(match[1]);
+                if (Number.isFinite(parsed) && parsed > maxMdNodeCounter) {
+                    maxMdNodeCounter = parsed;
+                }
+            }
+            considerAnchor(node);
+        });
+        views.forEach((view) => {
+            const viewId = String(view && view.viewId || '').trim();
+            if (!viewId) return;
+            permanentViewById.set(viewId, view);
+            considerAnchor(view && view.cardState ? {
+                x: view.cardState.left,
+                y: view.cardState.top,
+                width: view.cardState.width,
+                height: view.cardState.height
+            } : null);
+        });
+
+        return {
+            sectionById,
+            mdNodeById,
+            permanentViewById,
+            usedMdNodeIds,
+            nextMdNodeCounter: maxMdNodeCounter,
+            fallbackX: maxRight + 80,
+            fallbackY: minTop,
+            fallbackCursor: 0,
+            perTargetOffset: new Map()
+        };
+    }
+
+    function getDescriptionConflictAnchorForTarget(target, context) {
+        if (!target || !context) return null;
+        if (target.kind === 'temp') {
+            return normalizeDescriptionConflictAnchor(context.sectionById.get(target.refId));
+        }
+        if (target.kind === 'md') {
+            return normalizeDescriptionConflictAnchor(context.mdNodeById.get(target.refId));
+        }
+        if (target.kind === 'perm') {
+            const view = context.permanentViewById.get(target.refId);
+            return normalizeDescriptionConflictAnchor(view && view.cardState ? {
+                x: view.cardState.left,
+                y: view.cardState.top,
+                width: view.cardState.width,
+                height: view.cardState.height
+            } : null);
+        }
+        return null;
+    }
+
+    function allocDescriptionConflictMdNodeId(context) {
+        const safeContext = context && typeof context === 'object' ? context : null;
+        if (!safeContext) return '';
+        let nextCounter = Math.max(0, Number(safeContext.nextMdNodeCounter) || 0);
+        let nextId = '';
+        for (let i = 0; i < 100000; i += 1) {
+            nextCounter += 1;
+            nextId = `md-node-${nextCounter}`;
+            if (!safeContext.usedMdNodeIds.has(nextId)) {
+                safeContext.usedMdNodeIds.add(nextId);
+                safeContext.nextMdNodeCounter = nextCounter;
+                return nextId;
+            }
+        }
+        return '';
+    }
+
+    function buildDescriptionConflictPlacement(target, context) {
+        const anchor = getDescriptionConflictAnchorForTarget(target, context);
+        const targetKey = String(target && target.key || '');
+        const perTargetOffset = Number(context && context.perTargetOffset && context.perTargetOffset.get(targetKey)) || 0;
+        if (context && context.perTargetOffset) {
+            context.perTargetOffset.set(targetKey, perTargetOffset + 1);
+        }
+        if (anchor) {
+            return {
+                x: Math.round(anchor.x + Math.max(260, anchor.width) + 80),
+                y: Math.round(anchor.y + perTargetOffset * 36),
+                width: 420,
+                height: 280
+            };
+        }
+        const fallbackIndex = Number(context && context.fallbackCursor) || 0;
+        if (context) context.fallbackCursor = fallbackIndex + 1;
+        return {
+            x: Math.round(Number(context && context.fallbackX) || 260),
+            y: Math.round((Number(context && context.fallbackY) || 0) + fallbackIndex * 36),
+            width: 420,
+            height: 280
+        };
+    }
+
+    function appendDescriptionConflictCopyCard(tempPayload, target, localText, remoteText, reason, context) {
+        const payload = tempPayload && typeof tempPayload === 'object' ? tempPayload : null;
+        if (!payload) return false;
+        if (!Array.isArray(payload.mdNodes)) payload.mdNodes = [];
+        const safeContext = context && typeof context === 'object'
+            ? context
+            : createDescriptionConflictCardContext(null, payload);
+        if (!safeContext) return false;
+        const id = allocDescriptionConflictMdNodeId(safeContext);
+        if (!id) return false;
+
+        const placement = buildDescriptionConflictPlacement(target, safeContext);
+        const markdownSource = buildDescriptionConflictCardMarkdown(target, localText, remoteText, reason);
+        const now = Date.now();
+        payload.mdNodes.push({
+            id,
+            x: placement.x,
+            y: placement.y,
+            width: placement.width,
+            height: placement.height,
+            text: markdownSource,
+            source: 'obsidian-canvas-file',
+            subtype: 'sync-conflict-copy',
+            color: null,
+            colorHex: '#f59e0b',
+            markdownSource,
+            createdAt: now,
+            updatedAt: now
+        });
+        payload.mdNodeCounter = Math.max(Number(payload.mdNodeCounter) || 0, Number(safeContext.nextMdNodeCounter) || 0);
+        payload.timestamp = Math.max(Number(payload.timestamp) || 0, now);
+        return true;
+    }
+
+    function parseTempStatePayloadRawForDescriptionSync(rawInput = '') {
+        const raw = typeof rawInput === 'string' ? rawInput : '';
+        const parsed = raw ? safeParse(raw, null) : null;
+        if (isCanvasTempStatePayloadForSync(parsed)) return parsed;
+        return normalizeCanvasTempStatePayloadForSync(raw);
+    }
+
+    function collectDescriptionValueMapFromSnapshot(snapshotInput) {
+        const snapshot = normalizeSnapshot(snapshotInput || { data: {} });
+        const map = Object.create(null);
+        const hasOwn = Object.prototype.hasOwnProperty;
+
+        const tempRaw = snapshot && snapshot.data && typeof snapshot.data[TEMP_SECTION_STORAGE_KEY] === 'string'
+            ? snapshot.data[TEMP_SECTION_STORAGE_KEY]
+            : '';
+        const tempPayload = parseTempStatePayloadRawForDescriptionSync(tempRaw);
+        if (tempPayload) {
+            const mdNodes = Array.isArray(tempPayload.mdNodes) ? tempPayload.mdNodes : [];
+            mdNodes.forEach((node) => {
+                const id = String(node && node.id || '').trim();
+                if (!id) return;
+                if (String(node && node.subtype || '').trim() === 'sync-conflict-copy') return;
+                map[`md:${id}`] = normalizeDescriptionTextForMerge(node && node.markdownSource);
+            });
+        }
+
+        map.__hasOwn = hasOwn;
+        return map;
+    }
+
+    function replaceSnapshotInPlace(target, source) {
+        if (!target || !source || typeof target !== 'object' || typeof source !== 'object') return;
+        Object.keys(target).forEach((key) => {
+            delete target[key];
+        });
+        Object.keys(source).forEach((key) => {
+            target[key] = source[key];
+        });
+    }
+
+    function applyDescriptionPolicyToSnapshot(baseSnapshotInput, localSnapshotInput, remoteSnapshotInput, options = {}) {
+        const baseSnapshot = normalizeSnapshot(baseSnapshotInput || { data: {} });
+        const localSnapshot = normalizeSnapshot(localSnapshotInput || { data: {} });
+        const remoteSnapshot = normalizeSnapshot(remoteSnapshotInput || { data: {} });
+        const policy = ensureDescriptionConflictPolicy(
+            options && options.policy
+                ? options.policy
+                : (settings && settings.descriptionConflictPolicy)
+        );
+        const fallbackPolicy = ensureDescriptionMergeFallback(
+            options && options.fallback
+                ? options.fallback
+                : (settings && settings.descriptionMergeFallback)
+        );
+        const nextSnapshot = safeParse(JSON.stringify(baseSnapshot), null) || normalizeSnapshot(baseSnapshot);
+        const localMap = collectDescriptionValueMapFromSnapshot(localSnapshot);
+        const remoteMap = collectDescriptionValueMapFromSnapshot(remoteSnapshot);
+        const hasOwnLocal = localMap.__hasOwn || Object.prototype.hasOwnProperty;
+        const hasOwnRemote = remoteMap.__hasOwn || Object.prototype.hasOwnProperty;
+        delete localMap.__hasOwn;
+        delete remoteMap.__hasOwn;
+
+        const setTargets = [];
+        const permanentShell = normalizePermanentViewShellSnapshotForSync(nextSnapshot.permanentViewShellSnapshot);
+        nextSnapshot.permanentViewShellSnapshot = permanentShell;
+
+        let tempPayloadChanged = false;
+        const tempRaw = nextSnapshot && nextSnapshot.data && typeof nextSnapshot.data[TEMP_SECTION_STORAGE_KEY] === 'string'
+            ? nextSnapshot.data[TEMP_SECTION_STORAGE_KEY]
+            : '';
+        let tempPayload = parseTempStatePayloadRawForDescriptionSync(tempRaw);
+        if (tempPayload) {
+            const mdNodes = Array.isArray(tempPayload.mdNodes) ? tempPayload.mdNodes : [];
+            mdNodes.forEach((node) => {
+                const id = String(node && node.id || '').trim();
+                if (!id) return;
+                if (String(node && node.subtype || '').trim() === 'sync-conflict-copy') return;
+                setTargets.push({
+                    key: `md:${id}`,
+                    kind: 'md',
+                    refId: id,
+                    getCurrent: () => normalizeDescriptionTextForMerge(node && node.markdownSource),
+                    setValue: (value) => {
+                        node.markdownSource = normalizeDescriptionTextForMerge(value);
+                        tempPayloadChanged = true;
+                    }
+                });
+            });
+        }
+        let changed = false;
+        let mergedCount = 0;
+        let fallbackCount = 0;
+        let requiresManual = false;
+        let descriptionConflictCopyContext = null;
+
+        const ensureDescriptionConflictCopyContext = () => {
+            if (!tempPayload) {
+                if (!nextSnapshot || !nextSnapshot.data) return null;
+                tempPayload = {
+                    sections: [],
+                    tempSectionCounter: 0,
+                    tempItemCounter: 0,
+                    colorCursor: 0,
+                    tempSectionLastColor: null,
+                    tempSectionPrevColor: null,
+                    mdNodes: [],
+                    mdNodeCounter: 0,
+                    edges: [],
+                    edgeCounter: 0,
+                    timestamp: Date.now()
+                };
+                tempPayloadChanged = true;
+                changed = true;
+            }
+            if (!descriptionConflictCopyContext) {
+                descriptionConflictCopyContext = createDescriptionConflictCardContext(permanentShell, tempPayload);
+            }
+            return descriptionConflictCopyContext;
+        };
+        const appendConflictCopyCardByValues = (target, localValue, remoteValue, reason) => {
+            if (localValue === remoteValue) return true;
+            const cardContext = ensureDescriptionConflictCopyContext();
+            if (!cardContext) return false;
+            const appended = appendDescriptionConflictCopyCard(
+                tempPayload,
+                target,
+                localValue,
+                remoteValue,
+                reason,
+                cardContext
+            );
+            if (appended) {
+                tempPayloadChanged = true;
+                changed = true;
+            }
+            return appended;
+        };
+
+        setTargets.forEach((target) => {
+            const key = target.key;
+            const currentValue = target.getCurrent();
+            const localValue = hasOwnLocal.call(localMap, key) ? localMap[key] : currentValue;
+            const remoteValue = hasOwnRemote.call(remoteMap, key) ? remoteMap[key] : currentValue;
+            let nextValue = currentValue;
+
+            if (policy === 'local') {
+                nextValue = localValue;
+            } else if (policy === 'remote') {
+                nextValue = remoteValue;
+            } else if (policy === 'conflict-copy') {
+                if (localValue !== remoteValue) {
+                    const appended = appendConflictCopyCardByValues(target, localValue, remoteValue, 'policy-conflict-copy');
+                    if (!appended) {
+                        requiresManual = true;
+                        return;
+                    }
+                    fallbackCount += 1;
+                }
+                nextValue = currentValue;
+            } else {
+                const merged = mergeDescriptionTexts(currentValue, localValue, remoteValue);
+                if (merged.unresolved) {
+                    if (fallbackPolicy === 'manual') {
+                        requiresManual = true;
+                        return;
+                    }
+                    const appended = appendConflictCopyCardByValues(target, localValue, remoteValue, 'merge-fallback');
+                    if (!appended) {
+                        requiresManual = true;
+                        return;
+                    }
+                    nextValue = currentValue;
+                    fallbackCount += 1;
+                } else {
+                    nextValue = merged.text;
+                    if (merged.merged && localValue !== remoteValue) {
+                        mergedCount += 1;
+                    }
+                }
+            }
+
+            if (nextValue !== currentValue) {
+                target.setValue(nextValue);
+                changed = true;
+            }
+        });
+
+        if (requiresManual) {
+            return {
+                snapshot: baseSnapshot,
+                changed: false,
+                mergedCount,
+                fallbackCount,
+                requiresManual: true,
+                policy,
+                fallbackPolicy
+            };
+        }
+
+        if (tempPayload && tempPayloadChanged && nextSnapshot && nextSnapshot.data) {
+            nextSnapshot.data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(tempPayload);
+        }
+        if (changed) {
+            nextSnapshot.updatedAt = Math.max(Date.now(), Number(nextSnapshot.updatedAt) || 0);
+        }
+
+        return {
+            snapshot: nextSnapshot,
+            changed,
+            mergedCount,
+            fallbackCount,
+            requiresManual: false,
+            policy,
+            fallbackPolicy
+        };
+    }
+
     function decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged = false, remoteChanged = false, syncMethod = settings.syncMethod) {
+        const structuredPolicy = getEffectiveStructuredConflictPolicy(settings);
         if (concurrentChanged) {
-            if (settings.conflictPolicy === 'ours') return 'local';
-            if (settings.conflictPolicy === 'theirs') return 'remote';
-            if (settings.conflictPolicy === 'newer') {
+            if (structuredPolicy === 'ours') return 'local';
+            if (structuredPolicy === 'theirs') return 'remote';
+            if (structuredPolicy === 'newer') {
                 return decideWinnerByLatestModified(
                     Number(localSnapshot && localSnapshot.updatedAt) || 0,
                     Number(remoteSnapshot && remoteSnapshot.updatedAt) || 0
@@ -11456,8 +12099,42 @@ Cancel: go back and change the branch name first.`
         renderStatus();
 
         try {
-            const localSnapshot = normalizeSnapshot(pendingConflict.localSnapshot);
-            const remoteSnapshot = normalizeSnapshot(pendingConflict.remoteSnapshot);
+            let localSnapshot = normalizeSnapshot(pendingConflict.localSnapshot);
+            let remoteSnapshot = normalizeSnapshot(pendingConflict.remoteSnapshot);
+            let descriptionResolvedChoice = null;
+            if (resolvedChoice === 'local' || resolvedChoice === 'remote') {
+                const descriptionResolved = applyDescriptionPolicyToSnapshot(
+                    resolvedChoice === 'local' ? localSnapshot : remoteSnapshot,
+                    localSnapshot,
+                    remoteSnapshot
+                );
+                descriptionResolvedChoice = descriptionResolved;
+                runtime.lastDescriptionMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
+                runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
+                runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.fallbackCount) || 0);
+                if (descriptionResolved && descriptionResolved.requiresManual) {
+                    runtime.lastError = textByLang(
+                        '说明类自动合并失败：请先在冲突面板选择说明类策略，再继续结构化冲突处理',
+                        'Description auto-merge failed: choose a description strategy in the conflict panel first, then continue structured conflict resolution.'
+                    );
+                    if (options.bypassRecoveryLock !== true) {
+                        await clearRecoveryLockCompletely();
+                        clearActiveRunRecoveryRecord();
+                        handleRecoveryLockReleased();
+                    }
+                    saveRuntime();
+                    renderStatus();
+                    renderConflictPanel();
+                    return;
+                }
+                if (descriptionResolved && descriptionResolved.snapshot) {
+                    if (resolvedChoice === 'local') {
+                        localSnapshot = normalizeSnapshot(descriptionResolved.snapshot);
+                    } else {
+                        remoteSnapshot = normalizeSnapshot(descriptionResolved.snapshot);
+                    }
+                }
+            }
 
             if (resolvedChoice === 'local') {
                 if (settings.obsidianFilePushEnabled === false) {
@@ -11551,6 +12228,19 @@ Cancel: go back and change the branch name first.`
                     }
                 } else {
                     saveDirtyState(createDefaultDirtyState());
+                }
+                if (
+                    descriptionResolvedChoice
+                    && descriptionResolvedChoice.changed
+                    && ensureDescriptionConflictPolicy(descriptionResolvedChoice.policy) !== 'remote'
+                ) {
+                    updateDirtyStateByReason('conflict-remote-description-local-merge', {
+                        dirty: {
+                            permanentAll: true,
+                            temporaryAll: true,
+                            blankAll: true
+                        }
+                    });
                 }
                 runtime.lastLocalHash = getSnapshotHash(remoteSnapshot);
                 runtime.lastRemoteSha = pendingConflict.remoteSha || runtime.lastRemoteSha;
@@ -11701,6 +12391,7 @@ Cancel: go back and change the branch name first.`
         const isSilentAutoPullTrigger = false;
         const effectiveMode = mode;
         const syncMethod = DEFAULT_SETTINGS.syncMethod;
+        const structuredPolicy = getEffectiveStructuredConflictPolicy(settings);
 
         try {
             const rawRepoConfig = await storageLocalGet(REPO_CONFIG_KEYS);
@@ -11768,6 +12459,9 @@ Cancel: go back and change the branch name first.`
         runtime.isRunning = true;
         runtime.lastTrigger = trigger || 'manual';
         runtime.lastSyncMode = `${effectiveMode}:${syncMethod}`;
+        runtime.lastDescriptionMergeMode = ensureDescriptionConflictPolicy(settings && settings.descriptionConflictPolicy);
+        runtime.lastDescriptionMergeMerged = 0;
+        runtime.lastDescriptionMergeFallback = 0;
         beginActiveRunRecovery(effectiveMode, trigger, { manual: isManualTrigger });
         saveRuntime();
         renderStatus();
@@ -11973,7 +12667,7 @@ Cancel: go back and change the branch name first.`
                     pullPlanResult
                     && pullPlanResult.enabled
                     && !bypassPullPlanConflictCheck
-                    && settings.conflictPolicy === 'none'
+                    && structuredPolicy === 'none'
                     && pullPlanResult.plan
                     && Array.isArray(pullPlanResult.plan.conflict)
                     && pullPlanResult.plan.conflict.length > 0
@@ -12001,7 +12695,7 @@ Cancel: go back and change the branch name first.`
                     }));
                     storeConflictRecord(localSnapshot, remoteState.snapshot, 'pending-file-conflict', {
                         remoteSha: remoteState.sha || '',
-                        strategy: settings.conflictPolicy,
+                        strategy: structuredPolicy,
                         syncMethod,
                         filePlanSummary
                     });
@@ -12227,7 +12921,7 @@ Cancel: go back and change the branch name first.`
                         setPendingConflict(createPendingConflictPayload(localSnapshot, pushPreflight.remoteSnapshot, remoteState));
                         storeConflictRecord(localSnapshot, pushPreflight.remoteSnapshot, 'pending-manual', {
                             remoteSha: pushPreflight.remoteSha || remoteState.sha || '',
-                            strategy: settings.conflictPolicy,
+                            strategy: structuredPolicy,
                             syncMethod
                         });
                         runtime.lastAppliedDirection = 'conflict';
@@ -12348,7 +13042,7 @@ Cancel: go back and change the branch name first.`
                                 setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState));
                                 storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
                                     remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
-                                    strategy: settings.conflictPolicy,
+                                    strategy: structuredPolicy,
                                     syncMethod
                                 });
                                 runtime.lastAppliedDirection = 'conflict';
@@ -12423,7 +13117,7 @@ Cancel: go back and change the branch name first.`
                             setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState));
                             storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
                                 remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
-                                strategy: settings.conflictPolicy,
+                                strategy: structuredPolicy,
                                 syncMethod
                             });
                             runtime.lastAppliedDirection = 'conflict';
@@ -12540,33 +13234,135 @@ Cancel: go back and change the branch name first.`
                                     actionText = await doPull(remoteState, syncMethod === 'rebase' ? 'remote newer pull (rebase mode)' : 'remote newer pull');
                                 }
                             } else if (canUseDirtyMatrix && concurrentChanged) {
-                                const fileConflictSummary = await buildConflictFileSummaryFromCurrentPlan('dual-dirty-direct-conflict');
-                                setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
-                                    reason: 'dual-dirty-conflict',
-                                    fileConflicts: fileConflictSummary.fileConflicts,
-                                    filePlanSummary: fileConflictSummary.filePlanSummary || undefined
-                                }));
-                                storeConflictRecord(localSnapshot, remoteSnapshot, 'pending-manual', {
-                                    remoteSha: remoteState.sha || '',
-                                    strategy: settings.conflictPolicy,
+                                const dualDirtyWinner = decideWinner(
+                                    localSnapshot,
+                                    remoteSnapshot,
+                                    true,
+                                    localChanged,
+                                    remoteChanged,
                                     syncMethod
-                                });
-                                runtime.lastAppliedDirection = 'conflict';
-                                runtime.lastError = textByLang(
-                                    '检测到双向修改冲突，已停止自动云端合并；请在冲突面板中选择处理方式',
-                                    'Both local and cloud changed. Cloud auto-merge is disabled; resolve the conflict in the panel.'
                                 );
-                                pendingReasons.clear();
-                                runtime.queueLength = 0;
-                                saveRuntime();
-                                renderStatus();
-                                renderConflictPanel();
-                                openPanel({ activeTab: 'status' });
-                                toast(textByLang(
-                                    '检测到双向修改冲突：请在冲突面板中选择本地或云端版本',
-                                    'Concurrent conflict detected: choose local or cloud version in the conflict panel.'
-                                ));
-                                return;
+                                if (dualDirtyWinner === 'local') {
+                                    const descriptionResolved = applyDescriptionPolicyToSnapshot(
+                                        localSnapshot,
+                                        localSnapshot,
+                                        remoteSnapshot
+                                    );
+                                    runtime.lastDescriptionMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
+                                    runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
+                                    runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.fallbackCount) || 0);
+                                    if (descriptionResolved && descriptionResolved.requiresManual) {
+                                        const fileConflictSummary = await buildConflictFileSummaryFromCurrentPlan('dual-dirty-description-manual');
+                                        setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
+                                            reason: 'dual-dirty-description-manual',
+                                            fileConflicts: fileConflictSummary.fileConflicts,
+                                            filePlanSummary: fileConflictSummary.filePlanSummary || undefined
+                                        }));
+                                        runtime.lastAppliedDirection = 'conflict';
+                                        runtime.lastError = textByLang(
+                                            '说明类自动合并失败，已转入冲突面板：请先选择说明类策略',
+                                            'Description auto-merge failed. Switched to conflict panel: choose a description strategy first.'
+                                        );
+                                        pendingReasons.clear();
+                                        runtime.queueLength = 0;
+                                        saveRuntime();
+                                        renderStatus();
+                                        renderConflictPanel();
+                                        openPanel({ activeTab: 'status' });
+                                        return;
+                                    }
+                                    if (descriptionResolved && descriptionResolved.changed && descriptionResolved.snapshot) {
+                                        await applySnapshotToLocal(descriptionResolved.snapshot);
+                                        const nextLocalSnapshot = normalizeSnapshot(descriptionResolved.snapshot);
+                                        replaceSnapshotInPlace(localSnapshot, nextLocalSnapshot);
+                                        localHash = getSnapshotHash(nextLocalSnapshot);
+                                    }
+                                    actionText = await doPush(
+                                        `conflict resolved (local, ${structuredPolicy}, ${syncMethod})`,
+                                        { remoteFilesByPathForMissingCheck }
+                                    );
+                                } else if (dualDirtyWinner === 'remote-reset') {
+                                    actionText = await doResetHead(remoteState);
+                                } else if (dualDirtyWinner === 'remote') {
+                                    const descriptionResolved = applyDescriptionPolicyToSnapshot(
+                                        remoteSnapshot,
+                                        localSnapshot,
+                                        remoteSnapshot
+                                    );
+                                    runtime.lastDescriptionMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
+                                    runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
+                                    runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.fallbackCount) || 0);
+                                    if (descriptionResolved && descriptionResolved.requiresManual) {
+                                        const fileConflictSummary = await buildConflictFileSummaryFromCurrentPlan('dual-dirty-description-manual');
+                                        setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
+                                            reason: 'dual-dirty-description-manual',
+                                            fileConflicts: fileConflictSummary.fileConflicts,
+                                            filePlanSummary: fileConflictSummary.filePlanSummary || undefined
+                                        }));
+                                        runtime.lastAppliedDirection = 'conflict';
+                                        runtime.lastError = textByLang(
+                                            '说明类自动合并失败，已转入冲突面板：请先选择说明类策略',
+                                            'Description auto-merge failed. Switched to conflict panel: choose a description strategy first.'
+                                        );
+                                        pendingReasons.clear();
+                                        runtime.queueLength = 0;
+                                        saveRuntime();
+                                        renderStatus();
+                                        renderConflictPanel();
+                                        openPanel({ activeTab: 'status' });
+                                        return;
+                                    }
+                                    const remoteStateForMerge = (descriptionResolved && descriptionResolved.snapshot)
+                                        ? Object.assign({}, remoteState, { snapshot: normalizeSnapshot(descriptionResolved.snapshot) })
+                                        : remoteState;
+                                    actionText = await doPull(
+                                        remoteStateForMerge,
+                                        `conflict resolved (remote, ${structuredPolicy}, ${syncMethod})`
+                                    );
+                                    if (
+                                        descriptionResolved
+                                        && descriptionResolved.changed
+                                        && ensureDescriptionConflictPolicy(descriptionResolved.policy) !== 'remote'
+                                        && descriptionResolved.snapshot
+                                    ) {
+                                        await applySnapshotToLocal(descriptionResolved.snapshot);
+                                        updateDirtyStateByReason('dual-dirty-remote-description-merge', {
+                                            dirty: {
+                                                permanentAll: true,
+                                                temporaryAll: true,
+                                                blankAll: true
+                                            }
+                                        });
+                                    }
+                                } else {
+                                    const fileConflictSummary = await buildConflictFileSummaryFromCurrentPlan('dual-dirty-direct-conflict');
+                                    setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
+                                        reason: 'dual-dirty-conflict',
+                                        fileConflicts: fileConflictSummary.fileConflicts,
+                                        filePlanSummary: fileConflictSummary.filePlanSummary || undefined
+                                    }));
+                                    storeConflictRecord(localSnapshot, remoteSnapshot, 'pending-manual', {
+                                        remoteSha: remoteState.sha || '',
+                                        strategy: structuredPolicy,
+                                        syncMethod
+                                    });
+                                    runtime.lastAppliedDirection = 'conflict';
+                                    runtime.lastError = textByLang(
+                                        '检测到双向修改冲突，当前策略无法自动裁决；请在冲突面板中选择处理方式',
+                                        'Both local and cloud changed. The current policy cannot auto-resolve; choose a resolution in the conflict panel.'
+                                    );
+                                    pendingReasons.clear();
+                                    runtime.queueLength = 0;
+                                    saveRuntime();
+                                    renderStatus();
+                                    renderConflictPanel();
+                                    openPanel({ activeTab: 'status' });
+                                    toast(textByLang(
+                                        '检测到双向修改冲突：请在冲突面板中选择本地或云端版本',
+                                        'Concurrent conflict detected: choose local or cloud version in the conflict panel.'
+                                    ));
+                                    return;
+                                }
                             } else if (!concurrentChanged && syncMethod === 'reset' && remoteChanged && !localChanged) {
                                 actionText = await doResetHead(remoteState);
                             } else {
@@ -12587,7 +13383,7 @@ Cancel: go back and change the branch name first.`
                                 if (winner === 'local') {
                                     actionText = await doPush(
                                         concurrentChanged
-                                            ? `conflict resolved (local, ${settings.conflictPolicy}, ${syncMethod})`
+                                            ? `conflict resolved (local, ${structuredPolicy}, ${syncMethod})`
                                             : syncMethod === 'rebase'
                                                 ? 'local newer push (rebase mode)'
                                                 : 'local newer push',
@@ -12598,7 +13394,7 @@ Cancel: go back and change the branch name first.`
                                 } else {
                                     actionText = await doPull(remoteState,
                                         concurrentChanged
-                                            ? `conflict resolved (remote, ${settings.conflictPolicy}, ${syncMethod})`
+                                            ? `conflict resolved (remote, ${structuredPolicy}, ${syncMethod})`
                                             : 'remote newer pull'
                                     );
                                 }
@@ -13450,7 +14246,9 @@ Cancel: go back and change the branch name first.`
 	            'canvasSyncFirstSyncModeCloudInput',
 	            'canvasSyncFirstSyncModeLocalInput',
             'canvasSyncToastToggle',
-            'canvasSyncConflictSelect',
+            'canvasSyncStructuredConflictPolicySelect',
+            'canvasSyncDescriptionConflictPolicySelect',
+            'canvasSyncDescriptionMergeFallbackSelect',
             'canvasSyncPermanentPullModeSelect',
             'canvasSyncPermanentIncrementalThresholdInput',
             'canvasSyncObsidianFilePushToggle',
@@ -13569,6 +14367,43 @@ Cancel: go back and change the branch name first.`
         if (conflictUseNewestBtn) {
             conflictUseNewestBtn.addEventListener('click', () => {
                 resolvePendingConflict('newer');
+            });
+        }
+
+        const conflictDescUseLocalBtn = getElement('canvasSyncConflictDescUseLocalBtn');
+        if (conflictDescUseLocalBtn) {
+            conflictDescUseLocalBtn.addEventListener('click', () => {
+                settings.descriptionConflictPolicy = 'local';
+                saveSettings();
+                applySettingsToForm();
+                renderStatus();
+                renderConflictPanel();
+                toast(textByLang('说明类策略已切换为：优先本地说明', 'Description strategy switched to: prefer local'));
+            });
+        }
+
+        const conflictDescUseRemoteBtn = getElement('canvasSyncConflictDescUseRemoteBtn');
+        if (conflictDescUseRemoteBtn) {
+            conflictDescUseRemoteBtn.addEventListener('click', () => {
+                settings.descriptionConflictPolicy = 'remote';
+                saveSettings();
+                applySettingsToForm();
+                renderStatus();
+                renderConflictPanel();
+                toast(textByLang('说明类策略已切换为：优先云端说明', 'Description strategy switched to: prefer cloud'));
+            });
+        }
+
+        const conflictDescUseCopyBtn = getElement('canvasSyncConflictDescUseCopyBtn');
+        if (conflictDescUseCopyBtn) {
+            conflictDescUseCopyBtn.addEventListener('click', () => {
+                settings.descriptionConflictPolicy = 'conflict-copy';
+                settings.descriptionMergeFallback = 'conflict-copy';
+                saveSettings();
+                applySettingsToForm();
+                renderStatus();
+                renderConflictPanel();
+                toast(textByLang('说明类策略已切换为：冲突副本卡片', 'Description strategy switched to: conflict-copy card'));
             });
         }
 
@@ -13699,6 +14534,9 @@ Cancel: go back and change the branch name first.`
         runtime.lastPermanentSectionHash = String(runtime.lastPermanentSectionHash || '');
         runtime.lastOtherSyncDataHash = String(runtime.lastOtherSyncDataHash || '');
         runtime.lastLocalFilesSha = String(runtime.lastLocalFilesSha || '');
+        runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0);
+        runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0);
+        runtime.lastDescriptionMergeMode = ensureDescriptionConflictPolicy(runtime.lastDescriptionMergeMode || settings.descriptionConflictPolicy);
         if (!runtime.lastLocalFilesSha) {
             const prevSyncIndex = loadPrevSyncIndex();
             const prevFiles = prevSyncIndex && prevSyncIndex.files && typeof prevSyncIndex.files === 'object'
@@ -13755,11 +14593,16 @@ Cancel: go back and change the branch name first.`
         getSettings: () => Object.assign({}, settings || loadSettings()),
         updateSettings: (patch) => {
             settings = Object.assign({}, settings || loadSettings(), patch || {});
-            settings.conflictPolicy = ensureConflictPolicy(settings.conflictPolicy);
+            settings.structuredConflictPolicy = ensureStructuredConflictPolicy(
+                settings.structuredConflictPolicy || settings.conflictPolicy
+            );
+            settings.conflictPolicy = settings.structuredConflictPolicy;
             settings.syncMethod = DEFAULT_SETTINGS.syncMethod;
             delete settings.pushOnSync;
             delete settings.pullOnSync;
             settings.toastEnabled = settings.toastEnabled !== false;
+            settings.descriptionConflictPolicy = ensureDescriptionConflictPolicy(settings.descriptionConflictPolicy);
+            settings.descriptionMergeFallback = ensureDescriptionMergeFallback(settings.descriptionMergeFallback);
             settings.firstSyncMode = ensureFirstSyncMode(settings.firstSyncMode);
             settings.permanentPullMode = ensurePermanentPullMode(settings.permanentPullMode);
             settings.permanentIncrementalMaxChanges = normalizePermanentIncrementalMaxChanges(
