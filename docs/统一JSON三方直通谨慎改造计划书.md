@@ -22,6 +22,12 @@
    - 永久：保留双语义（手动导入=临时快照卡；同步 json 兼容=对齐永久树）。
 5. **编辑模型对齐 Obsidian**：`markdownSource/descriptionMd` 作为唯一真相源，HTML 仅作为渲染缓存。
 
+执行红线（本计划新增硬约束）：
+
+- **内部交互链**（编辑器 HTML 渲染 ↔ 运行态）允许做清洗/容错。
+- **外部交互链**（导入、导出、同步 push/pull）一律源码直通：以 `markdownSource/descriptionMd` 原文为准，不做隐式二次重写。
+- 外部链路允许“解析容错”，但**禁止把容错结果反向写回原文**（除非用户确实编辑了内容）。
+
 ---
 
 ## 2. 当前对齐状况（已用对比脚本验证）
@@ -77,6 +83,7 @@ BCS 存储侧缺失:   无（BCS payload 与导出 JSON 在结构上已经非常
 6. 导出 `.canvas` 的 `file` 路径前缀差异（`书签画布/` vs `书签画布-日期/`）不作为失败标准，本次不改。
 7. 永久副本 `inheritFrom` 的根路径前缀差异不作为失败标准，本次不改。
 8. 对齐 Obsidian 官方编辑模型：Markdown 源码优先，渲染与存储解耦（避免默认 HTML→Markdown 全量重写）。
+9. 外部链路（导入/导出/同步）保持源码直通，不做“先 normalize 再落盘/再推送”的隐式改写。
 
 ---
 
@@ -400,6 +407,11 @@ BCS 本地侧仅存说明 + rootMeta，树走 Chrome Bookmarks API。同步需�
    - 命中“使用云端覆盖本地”后，再由 `permanentPullMode=auto` 判“增量/覆盖”。  
 5. 首次同步方向（auto/cloud/local）保留现有机制，不与冲突策略混用。
 
+补充红线（与 1/3 节一致）：
+
+- 冲突决策只决定“采用哪份源码/是否生成冲突副本”，不对源码做额外格式重排。
+- 外部路径上的 `markdownSource/descriptionMd` 允许原样带回，渲染层差异不作为改写理由。
+
 #### 10.1.1 冲突域分类硬规则（强制执行）
 
 1. `.canvas` 一律归类为“结构化数据”，不做 merge。  
@@ -420,12 +432,10 @@ BCS 本地侧仅存说明 + rootMeta，树走 Chrome Bookmarks API。同步需�
 - [ ] `结构化冲突策略`（默认：`newer`）  
   可选值：`newer` / `local` / `remote` / `manual`
 
-兼容与落盘：
+落盘与默认值：
 
-- [ ] 新增 settings 键并给默认值（老配置自动补默认值）。
-- [ ] 保留现有 `firstSyncMode`、`permanentPullMode`、阈值配置，不做破坏性迁移。
-- [ ] 旧 `conflictPolicy` 迁移为 `structuredConflictPolicy`（无值时默认 `newer`）。
-- [ ] 兼容迁移：若存在旧 `descriptionConflictPolicy/descriptionMergeFallback`，仅映射到空白卡源码策略键。
+- [ ] 新增 settings 键并给默认值（仅按当前版本字段集生效）。
+- [ ] 保留现有 `firstSyncMode`、`permanentPullMode`、阈值配置。
 
 ### 10.3 状态页/冲突面板改造（Status）
 
@@ -457,11 +467,10 @@ BCS 本地侧仅存说明 + rootMeta，树走 Chrome Bookmarks API。同步需�
 
 - [ ] F1. 增加 `blankCardSourceConflictPolicy`、`blankCardSourceMergeFallback`、`structuredConflictPolicy`。
 - [ ] F2. `loadSettings/saveSettings/applySettingsToForm/pullSettingsFromForm` 全链打通。
-- [ ] F3. 老字段迁移：`conflictPolicy -> structuredConflictPolicy`。
 
 验收：
 
-1. 新旧用户进入策略页后均能看到默认值。
+1. 当前版本用户进入策略页后能看到默认值。
 2. 刷新后设置不丢失，且不影响首次同步与永久栏目既有设置。
 
 #### 阶段 G：冲突决策器分层

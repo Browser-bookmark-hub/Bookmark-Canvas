@@ -13747,7 +13747,11 @@ function __normalizePermanentViewDescriptionMarkdown(source) {
     if (!raw.trim()) return '';
     const looksLikeHtml = /<\s*(?:a|p|div|span|br|strong|em|b|i|u|del|s|mark|code|blockquote|ul|ol|li|hr|h[1-6]|font|center|input)\b/i.test(raw);
     if (looksLikeHtml) {
-        return __normalizeCanvasMarkdownSource(__htmlToMarkdown(__normalizeCanvasRichHtml(raw))).trim();
+        return __normalizeCanvasMarkdownSource(
+            __repairLegacyCanvasMarkdownSource(
+                __htmlToMarkdown(__normalizeCanvasRichHtml(raw))
+            )
+        ).trim();
     }
     return __normalizeCanvasMarkdownSource(__repairLegacyCanvasMarkdownSource(raw));
 }
@@ -13865,6 +13869,9 @@ function __collectPermanentViewFoldState(copyId = null, sourceData = null, optio
 function __collectPermanentViewDescriptionMarkdown(copyId = null, sourceData = null, options = {}) {
     const key = __getPermanentViewTipStorageKey(copyId);
     const raw = __readPermanentViewShellRawValue(sourceData, key, options);
+    if (options && options.preserveRawSource === true) {
+        return String(raw == null ? '' : raw);
+    }
     return __normalizePermanentViewDescriptionMarkdown(raw);
 }
 
@@ -13884,20 +13891,20 @@ function __sortPermanentViewShells(shells) {
     return list;
 }
 
-function __normalizePermanentViewShellProtocol(rawInput) {
+function __normalizePermanentViewShellProtocol(rawInput, options = {}) {
     const source = rawInput && typeof rawInput === 'object' ? rawInput : {};
     const copyIdRaw = (typeof source.copyId === 'string') ? source.copyId.trim() : '';
     const copyId = copyIdRaw ? copyIdRaw : null;
     const displayIndex = copyId ? __normalizePositiveInt(source.displayIndex) : null;
+    const rawDescription = source.descriptionMd;
+    const preserveDescriptionRaw = !!(options && options.preserveDescriptionRaw === true);
 
     const shell = {
         viewId: __buildPermanentViewShellViewId(copyId),
         copyId,
-        descriptionMd: __normalizePermanentViewDescriptionMarkdown(
-            Object.prototype.hasOwnProperty.call(source, 'descriptionMd')
-                ? source.descriptionMd
-                : source.description
-        ),
+        descriptionMd: preserveDescriptionRaw
+            ? String(rawDescription == null ? '' : rawDescription)
+            : __normalizePermanentViewDescriptionMarkdown(rawDescription),
         scrollState: __normalizePermanentViewScrollState(source.scrollState),
         foldState: __normalizePermanentViewFoldState(source.foldState),
         cardState: __normalizePermanentViewCardState(source.cardState || source)
@@ -13957,15 +13964,17 @@ function __buildPermanentViewShellProtocolFromStorage(copyId = null, options = {
         descriptionMd: __collectPermanentViewDescriptionMarkdown(safeCopyId || null, sourceData, readOptions),
         scrollState: __collectPermanentViewScrollState(safeCopyId || null, sourceData, readOptions),
         foldState: __collectPermanentViewFoldState(safeCopyId || null, sourceData, readOptions)
+    }, {
+        preserveDescriptionRaw: options && options.preserveDescriptionRaw === true
     });
 }
 
-function __normalizePermanentViewShellSnapshotProtocol(snapshotInput) {
+function __normalizePermanentViewShellSnapshotProtocol(snapshotInput, options = {}) {
     if (!snapshotInput || typeof snapshotInput !== 'object') {
         return {
             version: 1,
             views: __sortPermanentViewShells([
-                __buildPermanentViewShellProtocolFromStorage(null)
+                __buildPermanentViewShellProtocolFromStorage(null, options)
             ])
         };
     }
@@ -13973,14 +13982,14 @@ function __normalizePermanentViewShellSnapshotProtocol(snapshotInput) {
     if (Array.isArray(snapshotInput.views)) {
         const deduped = new Map();
         snapshotInput.views.forEach((view) => {
-            const normalized = __normalizePermanentViewShellProtocol(view);
+            const normalized = __normalizePermanentViewShellProtocol(view, options);
             const key = normalized && normalized.viewId ? normalized.viewId : '';
             if (!key) return;
             deduped.set(key, normalized);
         });
 
         if (!deduped.has('permanent-section')) {
-            deduped.set('permanent-section', __normalizePermanentViewShellProtocol({ copyId: null }));
+            deduped.set('permanent-section', __normalizePermanentViewShellProtocol({ copyId: null }, options));
         }
 
         return {
@@ -13995,12 +14004,15 @@ function __normalizePermanentViewShellSnapshotProtocol(snapshotInput) {
             : snapshotInput)
         : null;
 
-    return __buildPermanentViewShellSnapshotProtocol(sourceData);
+    return __buildPermanentViewShellSnapshotProtocol(sourceData, options);
 }
 
-function __buildPermanentViewShellSnapshotProtocol(sourceData = null) {
+function __buildPermanentViewShellSnapshotProtocol(sourceData = null, options = {}) {
     const views = [];
-    views.push(__buildPermanentViewShellProtocolFromStorage(null, { sourceData }));
+    views.push(__buildPermanentViewShellProtocolFromStorage(null, {
+        sourceData,
+        preserveDescriptionRaw: options && options.preserveDescriptionRaw === true
+    }));
 
     const rawCopies = sourceData
         ? __readPermanentViewShellJsonValue(sourceData, PERMANENT_SECTION_COPIES_STORAGE_KEY, [], { allowLiveFallback: false })
@@ -14011,7 +14023,8 @@ function __buildPermanentViewShellSnapshotProtocol(sourceData = null) {
         if (!copyId) return;
         views.push(__buildPermanentViewShellProtocolFromStorage(copyId, {
             sourceData,
-            copies
+            copies,
+            preserveDescriptionRaw: options && options.preserveDescriptionRaw === true
         }));
     });
 
@@ -14043,8 +14056,11 @@ function __applyPermanentViewShellFoldState(copyId = null, foldState = null) {
     });
 }
 
-function __applyPermanentViewShellSnapshotProtocol(snapshotInput) {
-    const snapshot = __normalizePermanentViewShellSnapshotProtocol(snapshotInput);
+function __applyPermanentViewShellSnapshotProtocol(snapshotInput, options = {}) {
+    const preserveDescriptionRaw = !!(options && options.preserveDescriptionRaw === true);
+    const snapshot = __normalizePermanentViewShellSnapshotProtocol(snapshotInput, {
+        preserveDescriptionRaw
+    });
     const views = Array.isArray(snapshot && snapshot.views) ? snapshot.views : [];
     const mainShell = views.find((view) => !(view && view.copyId))
         || __normalizePermanentViewShellProtocol({ copyId: null });
@@ -14055,7 +14071,13 @@ function __applyPermanentViewShellSnapshotProtocol(snapshotInput) {
             .filter(Boolean)
     );
 
-    try { __persistPermanentTipStorageValue(__getPermanentViewTipStorageKey(null), mainShell.descriptionMd || ''); } catch (_) { }
+    try {
+        __persistPermanentTipStorageValue(
+            __getPermanentViewTipStorageKey(null),
+            mainShell.descriptionMd || '',
+            preserveDescriptionRaw ? { preserveRawContent: true } : null
+        );
+    } catch (_) { }
     try { __applyPermanentViewShellScrollState(null, mainShell.scrollState); } catch (_) { }
     try { __applyPermanentViewShellFoldState(null, mainShell.foldState); } catch (_) { }
 
@@ -14073,14 +14095,26 @@ function __applyPermanentViewShellSnapshotProtocol(snapshotInput) {
         const copyId = String(shell && shell.copyId || '').trim();
         if (!copyId) return;
         nextCopyIds.add(copyId);
-        try { __persistPermanentTipStorageValue(__getPermanentViewTipStorageKey(copyId), shell.descriptionMd || ''); } catch (_) { }
+        try {
+            __persistPermanentTipStorageValue(
+                __getPermanentViewTipStorageKey(copyId),
+                shell.descriptionMd || '',
+                preserveDescriptionRaw ? { preserveRawContent: true } : null
+            );
+        } catch (_) { }
         try { __applyPermanentViewShellScrollState(copyId, shell.scrollState); } catch (_) { }
         try { __applyPermanentViewShellFoldState(copyId, shell.foldState); } catch (_) { }
     });
 
     previousCopyIds.forEach((copyId) => {
         if (!copyId || nextCopyIds.has(copyId)) return;
-        try { __persistPermanentTipStorageValue(__getPermanentViewTipStorageKey(copyId), ''); } catch (_) { }
+        try {
+            __persistPermanentTipStorageValue(
+                __getPermanentViewTipStorageKey(copyId),
+                '',
+                preserveDescriptionRaw ? { preserveRawContent: true } : null
+            );
+        } catch (_) { }
         try { __applyPermanentViewShellScrollState(copyId, null); } catch (_) { }
         try { __applyPermanentViewShellFoldState(copyId, null); } catch (_) { }
     });
@@ -17085,14 +17119,28 @@ function renderMdNode(node) {
     // 获取特殊格式元素的源码表示
     const getSourceCode = (el) => {
         const tagName = el.tagName;
-        const content = el.textContent;
-        const htmlContent = el.innerHTML; // 用于需要保留内部 HTML 的元素
+        const content = String(el.textContent || '');
+        const htmlContent = String(el.innerHTML || '');
+        const getInlineSource = (rawHtml, fallbackText = '') => {
+            const markdownLike = __htmlToMarkdown(String(rawHtml || ''), {
+                trimResult: false,
+                compactNewlines: false,
+                paragraphBreaks: false,
+                hardLineBreaks: true
+            });
+            return __normalizeCanvasMarkdownSource(
+                __repairLegacyCanvasMarkdownSource(
+                    String(markdownLike || fallbackText || '')
+                )
+            );
+        };
+        const inlineContent = getInlineSource(htmlContent, content);
 
         // font color: <font color="#xxx">text</font>（保留内部 HTML）
         if (tagName === 'FONT') {
             const color = el.getAttribute('color') || '#000000';
             return {
-                source: `<font color="${color}">${htmlContent}</font>`,
+                source: `<font color="${color}">${inlineContent}</font>`,
                 prefix: `<font color="${color}">`,
                 suffix: '</font>',
                 type: 'fontcolor'
@@ -17102,7 +17150,7 @@ function renderMdNode(node) {
         // center: <center>text</center>（保留内部 HTML）
         if (tagName === 'CENTER') {
             return {
-                source: `<center>${htmlContent}</center>`,
+                source: `<center>${inlineContent}</center>`,
                 prefix: '<center>',
                 suffix: '</center>',
                 type: 'align'
@@ -17113,7 +17161,7 @@ function renderMdNode(node) {
         if (tagName === 'P' && el.hasAttribute('align')) {
             const align = el.getAttribute('align');
             return {
-                source: `<p align="${align}">${htmlContent}</p>`,
+                source: `<p align="${align}">${inlineContent}</p>`,
                 prefix: `<p align="${align}">`,
                 suffix: '</p>',
                 type: 'align'
@@ -17132,8 +17180,9 @@ function renderMdNode(node) {
 
         // blockquote: > text（保留内部 HTML）
         if (tagName === 'BLOCKQUOTE') {
+            const quoteContent = getInlineSource(el.innerHTML, el.textContent).trim();
             return {
-                source: `> ${htmlContent}`,
+                source: `> ${quoteContent}`,
                 prefix: '> ',
                 suffix: '',
                 type: 'quote'
@@ -17143,10 +17192,10 @@ function renderMdNode(node) {
         // li: - item / 1. item（保留内部 HTML）
         if (tagName === 'LI') {
             const parent = el.parentElement;
-            const itemHtml = (el.innerHTML || '').trim();
+            const itemSource = getInlineSource(el.innerHTML, el.textContent).trim();
             if (parent && parent.tagName === 'UL') {
                 return {
-                    source: `- ${itemHtml}`,
+                    source: `- ${itemSource}`,
                     prefix: '- ',
                     suffix: '',
                     type: 'li-ul'
@@ -17157,7 +17206,7 @@ function renderMdNode(node) {
                 const idx = siblings.indexOf(el) + 1;
                 const n = idx > 0 ? idx : 1;
                 return {
-                    source: `${n}. ${itemHtml}`,
+                    source: `${n}. ${itemSource}`,
                     prefix: `${n}. `,
                     suffix: '',
                     type: 'li-ol'
@@ -17167,7 +17216,9 @@ function renderMdNode(node) {
 
         // ul: - item（保留内部 HTML）
         if (tagName === 'UL') {
-            const items = Array.from(el.querySelectorAll('li')).map(li => `- ${li.innerHTML}`).join('\n');
+            const items = Array.from(el.querySelectorAll('li'))
+                .map(li => `- ${getInlineSource(li.innerHTML, li.textContent).trim()}`)
+                .join('\n');
             return {
                 source: items,
                 prefix: '- ',
@@ -17178,7 +17229,9 @@ function renderMdNode(node) {
 
         // ol: 1. item（保留内部 HTML）
         if (tagName === 'OL') {
-            const items = Array.from(el.querySelectorAll('li')).map((li, i) => `${i + 1}. ${li.innerHTML}`).join('\n');
+            const items = Array.from(el.querySelectorAll('li'))
+                .map((li, i) => `${i + 1}. ${getInlineSource(li.innerHTML, li.textContent).trim()}`)
+                .join('\n');
             return {
                 source: items,
                 prefix: '1. ',
@@ -17195,9 +17248,9 @@ function renderMdNode(node) {
             const clone = el.cloneNode(true);
             const cb = clone.querySelector('input[type="checkbox"]');
             if (cb) cb.remove();
-            const taskHtml = clone.innerHTML.trim();
+            const taskSource = getInlineSource(clone.innerHTML, clone.textContent).trim();
             return {
-                source: checked ? `- [x] ${taskHtml}` : `- [ ] ${taskHtml}`,
+                source: checked ? `- [x] ${taskSource}` : `- [ ] ${taskSource}`,
                 prefix: checked ? '- [x] ' : '- [ ] ',
                 suffix: '',
                 type: 'task'
@@ -17246,7 +17299,7 @@ function renderMdNode(node) {
                 };
             }
             return {
-                source: `# ${htmlContent}`,
+                source: `# ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
                 prefix: '# ',
                 suffix: '',
                 type: 'heading'
@@ -17277,7 +17330,7 @@ function renderMdNode(node) {
                 };
             }
             return {
-                source: `## ${htmlContent}`,
+                source: `## ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
                 prefix: '## ',
                 suffix: '',
                 type: 'heading'
@@ -17285,7 +17338,7 @@ function renderMdNode(node) {
         }
         if (tagName === 'H3') {
             return {
-                source: `### ${htmlContent}`,
+                source: `### ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
                 prefix: '### ',
                 suffix: '',
                 type: 'heading'
@@ -17293,7 +17346,7 @@ function renderMdNode(node) {
         }
         if (tagName === 'H4') {
             return {
-                source: `#### ${htmlContent}`,
+                source: `#### ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
                 prefix: '#### ',
                 suffix: '',
                 type: 'heading'
@@ -17301,7 +17354,7 @@ function renderMdNode(node) {
         }
         if (tagName === 'H5') {
             return {
-                source: `##### ${htmlContent}`,
+                source: `##### ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
                 prefix: '##### ',
                 suffix: '',
                 type: 'heading'
@@ -17309,7 +17362,7 @@ function renderMdNode(node) {
         }
         if (tagName === 'H6') {
             return {
-                source: `###### ${htmlContent}`,
+                source: `###### ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
                 prefix: '###### ',
                 suffix: '',
                 type: 'heading'
@@ -20990,7 +21043,9 @@ function __resolveMarkdownSourceFromEditorHtml(cleanHtml, currentSource, options
     const convertedSource = conversionOptions
         ? __htmlToMarkdown(normalizedHtml, conversionOptions)
         : __htmlToMarkdown(normalizedHtml);
-    const normalizedConvertedSource = __normalizeCanvasMarkdownSource(convertedSource);
+    const normalizedConvertedSource = __normalizeCanvasMarkdownSource(
+        __repairLegacyCanvasMarkdownSource(convertedSource)
+    );
     return normalizedConvertedSource.trim() ? normalizedConvertedSource : '';
 }
 
@@ -22427,14 +22482,28 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     // 获取特殊格式元素的源码表示（与空白栏目 getSourceCode 功能一致）
     const getSourceCode = (el) => {
         const tagName = el.tagName;
-        const content = el.textContent;
-        const htmlContent = el.innerHTML; // 用于需要保留内部 HTML 的元素
+        const content = String(el.textContent || '');
+        const htmlContent = String(el.innerHTML || '');
+        const getInlineSource = (rawHtml, fallbackText = '') => {
+            const markdownLike = __htmlToMarkdown(String(rawHtml || ''), {
+                trimResult: false,
+                compactNewlines: false,
+                paragraphBreaks: false,
+                hardLineBreaks: true
+            });
+            return __normalizeCanvasMarkdownSource(
+                __repairLegacyCanvasMarkdownSource(
+                    String(markdownLike || fallbackText || '')
+                )
+            );
+        };
+        const inlineContent = getInlineSource(htmlContent, content);
 
         // font color: <font color="#xxx">text</font>（保留内部 HTML）
         if (tagName === 'FONT') {
             const color = el.getAttribute('color') || '#000000';
             return {
-                source: `<font color="${color}">${htmlContent}</font>`,
+                source: `<font color="${color}">${inlineContent}</font>`,
                 prefix: `<font color="${color}">`,
                 suffix: '</font>',
                 type: 'fontcolor'
@@ -22444,7 +22513,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         // center: <center>text</center>
         if (tagName === 'CENTER') {
             return {
-                source: `<center>${htmlContent}</center>`,
+                source: `<center>${inlineContent}</center>`,
                 prefix: '<center>',
                 suffix: '</center>',
                 type: 'align'
@@ -22455,7 +22524,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         if (tagName === 'P' && el.hasAttribute('align')) {
             const align = el.getAttribute('align');
             return {
-                source: `<p align="${align}">${htmlContent}</p>`,
+                source: `<p align="${align}">${inlineContent}</p>`,
                 prefix: `<p align="${align}">`,
                 suffix: '</p>',
                 type: 'align'
@@ -22474,8 +22543,9 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         // blockquote: > text （保留内部 HTML）
         if (tagName === 'BLOCKQUOTE') {
+            const quoteContent = getInlineSource(el.innerHTML, el.textContent).trim();
             return {
-                source: `> ${htmlContent}`,
+                source: `> ${quoteContent}`,
                 prefix: '> ',
                 suffix: '',
                 type: 'quote'
@@ -22485,10 +22555,10 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         // li: - item / 1. item （保留内部 HTML）
         if (tagName === 'LI') {
             const parent = el.parentElement;
-            const itemHtml = (el.innerHTML || '').trim();
+            const itemSource = getInlineSource(el.innerHTML, el.textContent).trim();
             if (parent && parent.tagName === 'UL') {
                 return {
-                    source: `- ${itemHtml}`,
+                    source: `- ${itemSource}`,
                     prefix: '- ',
                     suffix: '',
                     type: 'li-ul'
@@ -22499,7 +22569,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                 const idx = siblings.indexOf(el) + 1;
                 const n = idx > 0 ? idx : 1;
                 return {
-                    source: `${n}. ${itemHtml}`,
+                    source: `${n}. ${itemSource}`,
                     prefix: `${n}. `,
                     suffix: '',
                     type: 'li-ol'
@@ -22509,7 +22579,9 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         // ul: - item （保留内部 HTML）
         if (tagName === 'UL') {
-            const items = Array.from(el.querySelectorAll('li')).map(li => `- ${li.innerHTML}`).join('\n');
+            const items = Array.from(el.querySelectorAll('li'))
+                .map(li => `- ${getInlineSource(li.innerHTML, li.textContent).trim()}`)
+                .join('\n');
             return {
                 source: items,
                 prefix: '- ',
@@ -22520,7 +22592,9 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         // ol: 1. item （保留内部 HTML）
         if (tagName === 'OL') {
-            const items = Array.from(el.querySelectorAll('li')).map((li, i) => `${i + 1}. ${li.innerHTML}`).join('\n');
+            const items = Array.from(el.querySelectorAll('li'))
+                .map((li, i) => `${i + 1}. ${getInlineSource(li.innerHTML, li.textContent).trim()}`)
+                .join('\n');
             return {
                 source: items,
                 prefix: '1. ',
@@ -22537,9 +22611,9 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             const clone = el.cloneNode(true);
             const cb = clone.querySelector('input[type="checkbox"]');
             if (cb) cb.remove();
-            const taskHtml = clone.innerHTML.trim();
+            const taskSource = getInlineSource(clone.innerHTML, clone.textContent).trim();
             return {
-                source: checked ? `- [x] ${taskHtml}` : `- [ ] ${taskHtml}`,
+                source: checked ? `- [x] ${taskSource}` : `- [ ] ${taskSource}`,
                 prefix: checked ? '- [x] ' : '- [ ] ',
                 suffix: '',
                 type: 'task'
@@ -22562,22 +22636,22 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         // 标题: H1-H6 （保留内部 HTML）
         if (tagName === 'H1') {
-            return { source: `# ${htmlContent}`, prefix: '# ', suffix: '', type: 'heading' };
+            return { source: `# ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '# ', suffix: '', type: 'heading' };
         }
         if (tagName === 'H2') {
-            return { source: `## ${htmlContent}`, prefix: '## ', suffix: '', type: 'heading' };
+            return { source: `## ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '## ', suffix: '', type: 'heading' };
         }
         if (tagName === 'H3') {
-            return { source: `### ${htmlContent}`, prefix: '### ', suffix: '', type: 'heading' };
+            return { source: `### ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '### ', suffix: '', type: 'heading' };
         }
         if (tagName === 'H4') {
-            return { source: `#### ${htmlContent}`, prefix: '#### ', suffix: '', type: 'heading' };
+            return { source: `#### ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '#### ', suffix: '', type: 'heading' };
         }
         if (tagName === 'H5') {
-            return { source: `##### ${htmlContent}`, prefix: '##### ', suffix: '', type: 'heading' };
+            return { source: `##### ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '##### ', suffix: '', type: 'heading' };
         }
         if (tagName === 'H6') {
-            return { source: `###### ${htmlContent}`, prefix: '###### ', suffix: '', type: 'heading' };
+            return { source: `###### ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '###### ', suffix: '', type: 'heading' };
         }
 
 
@@ -30072,8 +30146,10 @@ async function importJsonBookmarks(json, importFileName = '') {
     const sectionUpdatedAt = (Number.isFinite(protocolUpdatedAt) && protocolUpdatedAt > 0)
         ? protocolUpdatedAt
         : 0;
-    const protocolDescriptionMd = __normalizeCanvasMarkdownSource(
-        tempProtocolMeta && tempProtocolMeta.descriptionMd || ''
+    const protocolDescriptionMd = String(
+        tempProtocolMeta && tempProtocolMeta.descriptionMd == null
+            ? ''
+            : tempProtocolMeta.descriptionMd
     );
     const protocolSequenceNumber = __normalizePositiveInt(tempProtocolMeta && tempProtocolMeta.sequenceNumber);
     const protocolOriginPermanent = __normalizeOriginPermanentPayload(tempProtocolMeta && tempProtocolMeta.originPermanent);
@@ -30603,7 +30679,7 @@ function __normalizeCanvasSectionJsonProtocolObject(rawProtocol) {
     const source = __cloneCanvasProtocolJson(rawProtocol);
     if (!source || typeof source !== 'object') return null;
 
-    const sectionType = String(source.sectionType || source.type || '').trim().toLowerCase();
+    const sectionType = String(source.sectionType || '').trim().toLowerCase();
     if (sectionType !== 'permanent' && sectionType !== 'temporary') return null;
 
     const format = String(source.format || __CANVAS_SECTION_JSON_FORMAT).trim() || __CANVAS_SECTION_JSON_FORMAT;
@@ -30611,14 +30687,10 @@ function __normalizeCanvasSectionJsonProtocolObject(rawProtocol) {
     const hasSchemaVersion = Number.isFinite(schemaVersionRaw) && schemaVersionRaw > 0;
 
     if (sectionType === 'permanent') {
-        const tree = source.tree || source.bookmarkTree;
+        const tree = source.tree;
         const hasTree = !!(tree && typeof tree === 'object');
-        const inheritFrom = __normalizeCanvasMarkdownPath(
-            source.inheritFrom || source.embedFrom || source.referencePath || source.reference || ''
-        );
-        const selfPath = __normalizeCanvasMarkdownPath(
-            source.selfPath || source.currentPath || ''
-        );
+        const inheritFrom = __normalizeCanvasMarkdownPath(source.inheritFrom || '');
+        const selfPath = __normalizeCanvasMarkdownPath(source.selfPath || '');
         if (!hasTree && !inheritFrom) return null;
         const normalized = Object.assign({}, source, {
             format,
@@ -30630,7 +30702,6 @@ function __normalizeCanvasSectionJsonProtocolObject(rawProtocol) {
         } else {
             delete normalized.tree;
         }
-        delete normalized.bookmarkTree;
         if (inheritFrom) {
             normalized.inheritFrom = inheritFrom;
         } else {
@@ -30641,10 +30712,6 @@ function __normalizeCanvasSectionJsonProtocolObject(rawProtocol) {
         } else {
             delete normalized.selfPath;
         }
-        delete normalized.currentPath;
-        delete normalized.embedFrom;
-        delete normalized.referencePath;
-        delete normalized.reference;
         return normalized;
     }
 
@@ -30685,7 +30752,7 @@ function __extractCanvasSectionJsonCodeBlock(bodyText) {
 function __resolveCanvasSectionJsonDescriptionMarkdown(protocolInput) {
     const protocol = __normalizeCanvasSectionJsonProtocolObject(protocolInput);
     if (!protocol) return '';
-    return __normalizeCanvasMarkdownSource(protocol.descriptionMd);
+    return String(protocol.descriptionMd == null ? '' : protocol.descriptionMd);
 }
 
 function __normalizeBookmarkFolderType(folderType) {
@@ -31108,7 +31175,7 @@ function __extractCanvasRootMetaCommentBlock(bodyText) {
 }
 
 function __buildCanvasDescriptionCommentBlock(markdownText) {
-    const text = __normalizeCanvasMarkdownSource(markdownText);
+    const text = String(markdownText == null ? '' : markdownText);
     if (!text.trim()) return '';
     return __buildCanvasCompactComment(__CANVAS_COMPACT_TAG_DESCRIPTION, text);
 }
@@ -31118,7 +31185,7 @@ function __extractCanvasDescriptionCommentBlock(bodyText) {
     if (compactExtracted.found) {
         return {
             body: compactExtracted.body,
-            descriptionMarkdown: __normalizeCanvasMarkdownSource(compactExtracted.payload || '')
+            descriptionMarkdown: String(compactExtracted.payload == null ? '' : compactExtracted.payload)
         };
     }
 
@@ -31275,13 +31342,19 @@ function __buildBookmarkTreeSnapshotFromPermanentJsonProtocol(protocolInput) {
 
 function __resolvePermanentSectionDescriptionMarkdown(copyId = null, descriptionOverride = null, options = {}) {
     if (descriptionOverride !== null) {
+        if (options && options.preserveRawSource === true) {
+            return String(descriptionOverride == null ? '' : descriptionOverride);
+        }
         return __normalizePermanentViewDescriptionMarkdown(descriptionOverride);
     }
     const sourceData = options && typeof options.sourceData === 'object' ? options.sourceData : null;
     const readOptions = sourceData
         ? { allowLiveFallback: options && options.allowLiveFallback === true }
         : {};
-    return __collectPermanentViewDescriptionMarkdown(copyId, sourceData, readOptions);
+    return __collectPermanentViewDescriptionMarkdown(copyId, sourceData, {
+        ...readOptions,
+        preserveRawSource: options && options.preserveRawSource === true
+    });
 }
 
 function __buildPermanentSectionJsonProtocol(bookmarkTree, descriptionOverride = null, metaOptions = null) {
@@ -31291,7 +31364,7 @@ function __buildPermanentSectionJsonProtocol(bookmarkTree, descriptionOverride =
     const title = __getPermanentSectionDisplayTitle(isEn);
     const copyId = String(metaOptions && metaOptions.copyId || '').trim() || null;
     const inheritFrom = __normalizeCanvasMarkdownPath(
-        metaOptions && (metaOptions.inheritFrom || metaOptions.embedFrom || '')
+        metaOptions && (metaOptions.inheritFrom || '')
     );
 
     const payload = {
@@ -31300,7 +31373,9 @@ function __buildPermanentSectionJsonProtocol(bookmarkTree, descriptionOverride =
         sectionType: 'permanent',
         slot: slotLabel,
         title,
-        descriptionMd: __resolvePermanentSectionDescriptionMarkdown(copyId, descriptionOverride)
+        descriptionMd: __resolvePermanentSectionDescriptionMarkdown(copyId, descriptionOverride, {
+            preserveRawSource: true
+        })
     };
     if (inheritFrom) {
         payload.fileRole = 'copy-anchor';
@@ -31937,7 +32012,9 @@ function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = n
     const slotLabel = toAlphaLabel(permanentSlot) || 'A';
     const sectionHeaderLine = `#${slotLabel} ${title}`.trim();
     const copyId = String(metaOptions && metaOptions.copyId || '').trim() || null;
-    const descMd = __resolvePermanentSectionDescriptionMarkdown(copyId, descriptionOverride);
+    const descMd = __resolvePermanentSectionDescriptionMarkdown(copyId, descriptionOverride, {
+        preserveRawSource: true
+    });
 
     const body = [sectionHeaderLine];
     const formatComment = __buildCanvasExportFormatCompactComment(exportFormat);
@@ -32014,7 +32091,7 @@ function __buildTempSectionMarkdown(section, metaOptions = null) {
     }
 
     // 2. Description (Markdown)
-    const descMd = __normalizeCanvasMarkdownSource(sectionMeta.descriptionMd || '');
+    const descMd = String(sectionMeta.descriptionMd == null ? '' : sectionMeta.descriptionMd);
     if (descMd.trim()) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
@@ -32100,7 +32177,11 @@ function __buildImportedTempSectionFromVisualMarkdown(node, parsedMarkdown, cont
             title,
             source: inferredSource,
             sequenceNumber,
-            descriptionMd: __normalizeCanvasMarkdownSource(parsedMarkdown && parsedMarkdown.descriptionMarkdown || '')
+            descriptionMd: String(
+                parsedMarkdown && parsedMarkdown.descriptionMarkdown == null
+                    ? ''
+                    : parsedMarkdown.descriptionMarkdown
+            )
         },
         items
     };
@@ -32125,7 +32206,11 @@ function __buildImportedTempSectionFromVisualMarkdown(node, parsedMarkdown, cont
         height: node.height,
         color: convertObsidianColor(node.color) || '#fb464c',
         items,
-        descriptionMd: __normalizeCanvasMarkdownSource(parsedMarkdown && parsedMarkdown.descriptionMarkdown || ''),
+        descriptionMd: String(
+            parsedMarkdown && parsedMarkdown.descriptionMarkdown == null
+                ? ''
+                : parsedMarkdown.descriptionMarkdown
+        ),
         label,
         source: inferredSource || ''
     };
@@ -32134,8 +32219,7 @@ function __buildImportedTempSectionFromVisualMarkdown(node, parsedMarkdown, cont
 function __buildMdNodeMarkdown(node) {
     const hasDirectSource = !!(node && typeof node === 'object' && Object.prototype.hasOwnProperty.call(node, 'markdownSource'));
     if (hasDirectSource) {
-        const directSource = String(node.markdownSource == null ? '' : node.markdownSource);
-        if (directSource.trim()) return directSource;
+        return String(node.markdownSource == null ? '' : node.markdownSource);
     }
     const markdownSource = __normalizeCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
     if (!markdownSource.trim()) return '\n';
@@ -32200,7 +32284,9 @@ function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptio
     }
 
     const copyId = String(metaOptions && metaOptions.copyId || '').trim() || null;
-    const descMd = __resolvePermanentSectionDescriptionMarkdown(copyId, descriptionOverride);
+    const descMd = __resolvePermanentSectionDescriptionMarkdown(copyId, descriptionOverride, {
+        preserveRawSource: true
+    });
     if (descMd) {
         body.push(__buildCanvasDescriptionCommentBlock(descMd));
     }
@@ -35585,11 +35671,11 @@ function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, d
         sectionMeta: {
             title,
             source: 'obsidian-permanent-reference',
-            descriptionMd: __normalizeCanvasMarkdownSource(
+            descriptionMd: String(
                 (parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string')
                     ? parsedMarkdown.descriptionMarkdown
                     : __htmlToMarkdown(descriptionHtml)
-            ).trim()
+            )
         },
         items: __parseMarkdownAuto(contentToParse)
     };
@@ -35613,11 +35699,11 @@ function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, d
         height: node.height,
         color: convertObsidianColor(node.color) || '#fb464c',
         items: __parseMarkdownAuto(contentToParse),
-        descriptionMd: __normalizeCanvasMarkdownSource(
+        descriptionMd: String(
             (parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string')
                 ? parsedMarkdown.descriptionMarkdown
                 : __htmlToMarkdown(descriptionHtml)
-        ).trim(),
+        ),
         source: 'obsidian-permanent-reference'
     };
 }
@@ -35929,11 +36015,11 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                     height: node.height,
                     color: convertObsidianColor(node.color) || '#44cf6e',
                     items,
-                    descriptionMd: __normalizeCanvasMarkdownSource(
+                    descriptionMd: String(
                         (parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string')
                             ? parsedMarkdown.descriptionMarkdown
                             : __htmlToMarkdown(descriptionHtml)
-                    ).trim(),
+                    ),
                     isSnapshot: true
                 });
                 return;
@@ -36351,7 +36437,7 @@ function __rebuildPermanentViewShellSnapshotFromSyncFolderFiles(filesByPath) {
             : ((parsedMarkdown && typeof parsedMarkdown.descriptionHtml === 'string')
                 ? __htmlToMarkdown(parsedMarkdown.descriptionHtml)
                 : '');
-        const descriptionMd = __normalizeCanvasMarkdownSource(rawDescSource);
+        const descriptionMd = String(rawDescSource == null ? '' : rawDescSource);
         const cardState = {
             left: toPx(node.x),
             top: toPx(node.y),
@@ -36384,6 +36470,8 @@ function __rebuildPermanentViewShellSnapshotFromSyncFolderFiles(filesByPath) {
     return __normalizePermanentViewShellSnapshotProtocol({
         version: 1,
         views
+    }, {
+        preserveDescriptionRaw: true
     });
 }
 
@@ -36503,10 +36591,10 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
                 : ((parsedMarkdown && typeof parsedMarkdown.descriptionHtml === 'string')
                     ? __htmlToMarkdown(parsedMarkdown.descriptionHtml)
                     : '');
-            const descSource = __normalizeCanvasMarkdownSource(rawDescSource);
+            const descSource = String(rawDescSource == null ? '' : rawDescSource);
 	            if (nodeId === 'permanent-section' || slotNumber === 1) {
 	                // Main permanent section layout
-	                try { __persistPermanentTipStorageValue(PERMANENT_MAIN_TIP_STORAGE_KEY, descSource); } catch (_) { }
+	                try { __persistPermanentTipStorageValue(PERMANENT_MAIN_TIP_STORAGE_KEY, descSource, { preserveRawContent: true }); } catch (_) { }
 	                permanentTipUpdates.push({ copyId: null, source: descSource });
 	                return;
 	            }
@@ -36523,7 +36611,7 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
                     displayIndex
                 });
 
-                try { __persistPermanentTipStorageValue(`${PERMANENT_COPY_TIP_STORAGE_PREFIX}${copyId}`, descSource); } catch (_) { }
+                try { __persistPermanentTipStorageValue(`${PERMANENT_COPY_TIP_STORAGE_PREFIX}${copyId}`, descSource, { preserveRawContent: true }); } catch (_) { }
                 permanentTipUpdates.push({ copyId, source: descSource });
             }
         });
@@ -38137,24 +38225,7 @@ function __normalizeTempSectionProtocolRootId(section) {
 
 function __normalizeTempSectionDescriptionMarkdown(section) {
     if (!section || typeof section !== 'object') return '';
-
-    const normalizeFromSource = (value) => __normalizeCanvasMarkdownSource(
-        __repairLegacyCanvasMarkdownSource(String(value == null ? '' : value))
-    );
-
-    if (Object.prototype.hasOwnProperty.call(section, 'descriptionMd')) {
-        const direct = normalizeFromSource(section.descriptionMd);
-        if (direct.trim()) return direct;
-    }
-
-    const legacyRaw = String(section.description || '');
-    if (!legacyRaw.trim()) return '';
-    const looksLikeHtml = /<\s*(?:a|p|div|span|br|strong|em|b|i|u|del|s|mark|code|blockquote|ul|ol|li|hr|h[1-6]|font|center|input)\b/i.test(legacyRaw);
-    const fallbackSource = looksLikeHtml
-        ? __htmlToMarkdown(__normalizeCanvasRichHtml(legacyRaw))
-        : legacyRaw;
-    const normalizedFallback = normalizeFromSource(fallbackSource);
-    return normalizedFallback.trim() ? normalizedFallback : '';
+    return String(section.descriptionMd == null ? '' : section.descriptionMd);
 }
 
 function __getDefaultTempSectionProtocolTitle() {
@@ -38431,7 +38502,7 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
     if (Number.isFinite(restoredUpdatedAt) && restoredUpdatedAt > 0) {
         restored.updatedAt = restoredUpdatedAt;
     }
-    const restoredDescriptionMd = __normalizeCanvasMarkdownSource(sectionMeta.descriptionMd || '');
+    const restoredDescriptionMd = String(sectionMeta.descriptionMd == null ? '' : sectionMeta.descriptionMd);
     restored.descriptionMd = restoredDescriptionMd;
     restored.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(restoredDescriptionMd));
 
@@ -38539,11 +38610,11 @@ if (typeof window !== 'undefined') {
         readPermanentRootMeta() {
             return __readPermanentRootMetaStorageValue();
         },
-        collectPermanentViewShellSnapshot(sourceInput = null) {
-            return __buildPermanentViewShellSnapshotProtocol(sourceInput);
+        collectPermanentViewShellSnapshot(sourceInput = null, options = {}) {
+            return __buildPermanentViewShellSnapshotProtocol(sourceInput, options);
         },
-        normalizePermanentViewShellSnapshot(snapshotInput) {
-            return __normalizePermanentViewShellSnapshotProtocol(snapshotInput);
+        normalizePermanentViewShellSnapshot(snapshotInput, options = {}) {
+            return __normalizePermanentViewShellSnapshotProtocol(snapshotInput, options);
         },
         resolvePermanentViewShell(copyId = null, sourceInput = null) {
             return __resolvePermanentViewShell(copyId, sourceInput);
@@ -38554,8 +38625,8 @@ if (typeof window !== 'undefined') {
         resolvePermanentSectionContext(sectionEl, options = {}) {
             return __resolvePermanentSectionContext(sectionEl, options);
         },
-        applyPermanentViewShellSnapshot(snapshotInput) {
-            return __applyPermanentViewShellSnapshotProtocol(snapshotInput);
+        applyPermanentViewShellSnapshot(snapshotInput, options = {}) {
+            return __applyPermanentViewShellSnapshotProtocol(snapshotInput, options);
         }
     });
 }
@@ -39998,14 +40069,17 @@ function __shouldApplyPermanentTipRealtimeSync(storageKey) {
     return true;
 }
 
-function __persistPermanentTipStorageValue(storageKey, value) {
+function __persistPermanentTipStorageValue(storageKey, value, options = {}) {
     if (typeof storageKey !== 'string' || !storageKey) return;
 
     const parsedKey = __parsePermanentTipStorageKey(storageKey);
     let persistedValue = value;
     if (parsedKey && parsedKey.type === 'content') {
         const source = String(value == null ? '' : value);
-        persistedValue = __normalizePermanentViewDescriptionMarkdown(source);
+        const preserveRawContent = !!(options && options.preserveRawContent === true);
+        persistedValue = preserveRawContent
+            ? source
+            : __normalizePermanentViewDescriptionMarkdown(source);
     }
 
     const ts = __writePermanentTipTimestamp(storageKey, Date.now());

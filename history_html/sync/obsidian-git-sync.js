@@ -109,11 +109,9 @@
         firstSyncPathVerifiedRoot: '',
         firstSyncPathVerifiedAt: 0,
         syncMethod: 'merge',
-        // keep legacy key for backward compatibility; structuredConflictPolicy is the canonical field.
-        conflictPolicy: 'newer',
         structuredConflictPolicy: 'newer',
-        descriptionConflictPolicy: 'merge',
-        descriptionMergeFallback: 'conflict-copy'
+        blankCardSourceConflictPolicy: 'merge',
+        blankCardSourceMergeFallback: 'conflict-copy'
     };
 
     const DEFAULT_RUNTIME = {
@@ -141,7 +139,7 @@
         lastObsidianPushTotal: 0,
         lastDescriptionMergeMerged: 0,
         lastDescriptionMergeFallback: 0,
-        lastDescriptionMergeMode: '',
+        lastBlankCardSourceMergeMode: '',
         hasPendingConflict: false
     };
 
@@ -2830,13 +2828,7 @@
 
     function ensureConflictPolicy(policy) {
         const value = String(policy || '').trim().toLowerCase();
-        if (value === 'keep_newer' || value === 'latest' || value === 'latest_modified') {
-            return 'newer';
-        }
-        if (value === 'manual_panel' || value === 'keep_larger' || value === 'keep_both') {
-            return 'none';
-        }
-        return CONFLICT_POLICIES.has(value) ? value : DEFAULT_SETTINGS.conflictPolicy;
+        return CONFLICT_POLICIES.has(value) ? value : DEFAULT_SETTINGS.structuredConflictPolicy;
     }
 
     function ensureStructuredConflictPolicy(policy) {
@@ -2845,31 +2837,22 @@
 
     function getEffectiveStructuredConflictPolicy(source = settings) {
         const payload = source && typeof source === 'object' ? source : {};
-        const candidate = payload.structuredConflictPolicy || payload.conflictPolicy || DEFAULT_SETTINGS.structuredConflictPolicy;
+        const candidate = payload.structuredConflictPolicy || DEFAULT_SETTINGS.structuredConflictPolicy;
         return ensureStructuredConflictPolicy(candidate);
     }
 
     function ensureDescriptionConflictPolicy(policy) {
         const value = String(policy || '').trim().toLowerCase();
-        if (value === 'auto' || value === 'automatic') return 'merge';
-        if (value === 'local-first' || value === 'ours') return 'local';
-        if (value === 'remote-first' || value === 'theirs') return 'remote';
-        if (value === 'copy' || value === 'conflict-copy') return 'conflict-copy';
-        return DESCRIPTION_CONFLICT_POLICIES.has(value) ? value : DEFAULT_SETTINGS.descriptionConflictPolicy;
+        return DESCRIPTION_CONFLICT_POLICIES.has(value) ? value : DEFAULT_SETTINGS.blankCardSourceConflictPolicy;
     }
 
     function ensureDescriptionMergeFallback(policy) {
         const value = String(policy || '').trim().toLowerCase();
-        if (value === 'conflict' || value === 'copy') return 'conflict-copy';
-        if (value === 'panel' || value === 'manual-panel') return 'manual';
-        return DESCRIPTION_MERGE_FALLBACKS.has(value) ? value : DEFAULT_SETTINGS.descriptionMergeFallback;
+        return DESCRIPTION_MERGE_FALLBACKS.has(value) ? value : DEFAULT_SETTINGS.blankCardSourceMergeFallback;
     }
 
     function ensureSyncMethod(method) {
         const value = String(method || '').trim().toLowerCase();
-        if (value === 'other_sync_service') {
-            return 'reset';
-        }
         return SYNC_METHODS.has(value) ? value : DEFAULT_SETTINGS.syncMethod;
     }
 
@@ -3014,21 +2997,14 @@
 
     function normalizeObsidianExportRoot(path, fallback = DEFAULT_SETTINGS.obsidianExportRoot, options = {}) {
         const allowEmpty = !!(options && options.allowEmpty);
-        const normalizeLegacyRoot = (value) => {
-            const normalized = normalizeSyncPath(value);
-            if (normalized === 'bookmark-canvas-sync') return '书签画布';
-            if (normalized === 'bookmark-canvas') return '书签画布';
-            if (normalized === '书签画布同步') return '书签画布';
-            return normalized;
-        };
         if (typeof path === 'string') {
-            const normalizedInput = normalizeLegacyRoot(path);
+            const normalizedInput = normalizeSyncPath(path);
             if (allowEmpty && !normalizedInput) return '';
             if (normalizedInput) return normalizedInput;
         }
         if (allowEmpty && typeof path === 'string') return '';
-        return normalizeLegacyRoot(fallback)
-            || normalizeLegacyRoot(DEFAULT_SETTINGS.obsidianExportRoot)
+        return normalizeSyncPath(fallback)
+            || normalizeSyncPath(DEFAULT_SETTINGS.obsidianExportRoot)
             || '书签画布';
     }
 
@@ -3036,24 +3012,12 @@
         const parsed = safeParse(getSyncMetaRaw(SETTINGS_KEY), null);
         const parsedObject = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
         const merged = Object.assign({}, DEFAULT_SETTINGS, parsedObject);
-
-        let structuredConflictCandidate = merged.structuredConflictPolicy || merged.conflictPolicy;
-        const hasStructuredPolicyInStorage = Object.prototype.hasOwnProperty.call(parsedObject, 'structuredConflictPolicy');
-        if (!hasStructuredPolicyInStorage && ensureConflictPolicy(structuredConflictCandidate) === 'none') {
-            // Old versions defaulted to manual conflict. New default should be time-priority.
-            structuredConflictCandidate = DEFAULT_SETTINGS.structuredConflictPolicy;
-        }
-        merged.structuredConflictPolicy = ensureStructuredConflictPolicy(structuredConflictCandidate);
-        // Keep legacy field in sync for old code paths and persisted old clients.
-        merged.conflictPolicy = merged.structuredConflictPolicy;
-        // Main UI no longer exposes Git-style sync methods; normalize legacy values
-        // back to the standard sync path to avoid hidden behavior changes.
+        merged.structuredConflictPolicy = ensureStructuredConflictPolicy(merged.structuredConflictPolicy);
+        // Main UI uses the standard sync path.
         merged.syncMethod = DEFAULT_SETTINGS.syncMethod;
         merged.toastEnabled = merged.toastEnabled !== false;
-        merged.descriptionConflictPolicy = ensureDescriptionConflictPolicy(merged.descriptionConflictPolicy);
-        merged.descriptionMergeFallback = ensureDescriptionMergeFallback(merged.descriptionMergeFallback);
-        delete merged.pushOnSync;
-        delete merged.pullOnSync;
+        merged.blankCardSourceConflictPolicy = ensureDescriptionConflictPolicy(merged.blankCardSourceConflictPolicy);
+        merged.blankCardSourceMergeFallback = ensureDescriptionMergeFallback(merged.blankCardSourceMergeFallback);
 
         merged.firstSyncMode = ensureFirstSyncMode(merged.firstSyncMode);
         merged.permanentPullMode = ensurePermanentPullMode(merged.permanentPullMode);
@@ -3062,11 +3026,7 @@
             DEFAULT_SETTINGS.permanentIncrementalMaxChanges
         );
         if (typeof merged.permanentTreeUploadIntervalSeconds === 'undefined') {
-            if (typeof merged.syncPermanentTreeOnPush === 'boolean') {
-                merged.permanentTreeUploadIntervalSeconds = merged.syncPermanentTreeOnPush ? 15 : 0;
-            } else {
-                merged.permanentTreeUploadIntervalSeconds = DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds;
-            }
+            merged.permanentTreeUploadIntervalSeconds = DEFAULT_SETTINGS.permanentTreeUploadIntervalSeconds;
         }
         merged.permanentTreeUploadIntervalSeconds = normalizePermanentTreeUploadIntervalSeconds(
             merged.permanentTreeUploadIntervalSeconds,
@@ -3089,12 +3049,25 @@
         );
         merged.firstSyncPathVerifiedRoot = normalizeSyncPath(merged.firstSyncPathVerifiedRoot);
         merged.firstSyncPathVerifiedAt = Math.max(0, toSafeInt(merged.firstSyncPathVerifiedAt, 0));
+        delete merged.conflictPolicy;
+        delete merged.pushOnSync;
+        delete merged.pullOnSync;
+        delete merged.syncPermanentTreeOnPush;
+        delete merged.descriptionConflictPolicy;
+        delete merged.descriptionMergeFallback;
 
         return merged;
     }
 
     function saveSettings() {
-        setSyncMetaRaw(SETTINGS_KEY, JSON.stringify(settings));
+        const persistPayload = Object.assign({}, settings || {});
+        delete persistPayload.conflictPolicy;
+        delete persistPayload.pushOnSync;
+        delete persistPayload.pullOnSync;
+        delete persistPayload.syncPermanentTreeOnPush;
+        delete persistPayload.descriptionConflictPolicy;
+        delete persistPayload.descriptionMergeFallback;
+        setSyncMetaRaw(SETTINGS_KEY, JSON.stringify(persistPayload));
         try {
             global.dispatchEvent(new CustomEvent('canvas-obsidian-git-sync-settings-updated', {
                 detail: {
@@ -3116,7 +3089,9 @@
     }
 
     function saveRuntime() {
-        setSyncMetaRaw(RUNTIME_KEY, JSON.stringify(runtime));
+        const persistPayload = Object.assign({}, runtime || {});
+        delete persistPayload.lastDescriptionMergeMode;
+        setSyncMetaRaw(RUNTIME_KEY, JSON.stringify(persistPayload));
     }
 
     function loadActiveTab() {
@@ -7268,8 +7243,8 @@ Cancel: go back and change the branch name first.`
             policySummaryEl.textContent = structuredText;
         }
         if (descriptionMergeEl) {
-            const modeText = formatDescriptionConflictPolicyForDisplay(settings && settings.descriptionConflictPolicy);
-            const fallbackText = formatDescriptionMergeFallbackForDisplay(settings && settings.descriptionMergeFallback);
+            const modeText = formatDescriptionConflictPolicyForDisplay(settings && settings.blankCardSourceConflictPolicy);
+            const fallbackText = formatDescriptionMergeFallbackForDisplay(settings && settings.blankCardSourceMergeFallback);
             const mergedCount = Math.max(0, Number(runtime && runtime.lastDescriptionMergeMerged) || 0);
             const fallbackCount = Math.max(0, Number(runtime && runtime.lastDescriptionMergeFallback) || 0);
             descriptionMergeEl.textContent = `${modeText}，${fallbackText}（merged ${mergedCount} / fallback ${fallbackCount}）`;
@@ -7803,8 +7778,8 @@ Cancel: go back and change the branch name first.`
         setFirstSyncModeToForm(settings.firstSyncMode);
         if (toastToggle) toastToggle.checked = settings.toastEnabled !== false;
         if (structuredConflict) structuredConflict.value = getEffectiveStructuredConflictPolicy(settings);
-        if (descriptionConflict) descriptionConflict.value = ensureDescriptionConflictPolicy(settings.descriptionConflictPolicy);
-        if (descriptionFallback) descriptionFallback.value = ensureDescriptionMergeFallback(settings.descriptionMergeFallback);
+        if (descriptionConflict) descriptionConflict.value = ensureDescriptionConflictPolicy(settings.blankCardSourceConflictPolicy);
+        if (descriptionFallback) descriptionFallback.value = ensureDescriptionMergeFallback(settings.blankCardSourceMergeFallback);
         if (permanentPullMode) permanentPullMode.value = ensurePermanentPullMode(settings.permanentPullMode);
         if (permanentIncrementalThreshold) permanentIncrementalThreshold.value = String(normalizePermanentIncrementalMaxChanges(settings.permanentIncrementalMaxChanges, DEFAULT_SETTINGS.permanentIncrementalMaxChanges));
         if (obsidianFilePushEnabled) obsidianFilePushEnabled.checked = settings.obsidianFilePushEnabled !== false;
@@ -7847,12 +7822,11 @@ Cancel: go back and change the branch name first.`
         settings.structuredConflictPolicy = ensureStructuredConflictPolicy(
             structuredConflict ? structuredConflict.value : getEffectiveStructuredConflictPolicy(settings)
         );
-        settings.conflictPolicy = settings.structuredConflictPolicy;
-        settings.descriptionConflictPolicy = ensureDescriptionConflictPolicy(
-            descriptionConflict ? descriptionConflict.value : settings.descriptionConflictPolicy
+        settings.blankCardSourceConflictPolicy = ensureDescriptionConflictPolicy(
+            descriptionConflict ? descriptionConflict.value : settings.blankCardSourceConflictPolicy
         );
-        settings.descriptionMergeFallback = ensureDescriptionMergeFallback(
-            descriptionFallback ? descriptionFallback.value : settings.descriptionMergeFallback
+        settings.blankCardSourceMergeFallback = ensureDescriptionMergeFallback(
+            descriptionFallback ? descriptionFallback.value : settings.blankCardSourceMergeFallback
         );
         settings.permanentPullMode = ensurePermanentPullMode(permanentPullMode ? permanentPullMode.value : settings.permanentPullMode);
         settings.permanentIncrementalMaxChanges = normalizePermanentIncrementalMaxChanges(
@@ -7869,6 +7843,12 @@ Cancel: go back and change the branch name first.`
             DEFAULT_SETTINGS.obsidianExportRoot,
             { allowEmpty: true }
         );
+        delete settings.conflictPolicy;
+        delete settings.pushOnSync;
+        delete settings.pullOnSync;
+        delete settings.syncPermanentTreeOnPush;
+        delete settings.descriptionConflictPolicy;
+        delete settings.descriptionMergeFallback;
 
         updateSyncEnabledDependentFieldState();
         saveSettings();
@@ -8422,7 +8402,7 @@ Cancel: go back and change the branch name first.`
         const shell = {
             viewId: copyId ? `permanent-section-copy-${copyId}` : 'permanent-section',
             copyId,
-            descriptionMd: normalizeCanvasMarkdownSourceForSync(source.descriptionMd || source.description || ''),
+            descriptionMd: normalizeCanvasMarkdownSourceForSync(source.descriptionMd || ''),
             cardState: normalizePermanentViewCardStateForSync(source.cardState || source),
             // 滚动/展开属于本地视图态，不进入云端同步快照。
             scrollState: {},
@@ -8479,7 +8459,9 @@ Cancel: go back and change the branch name first.`
         const protocolBridge = global && global.CanvasProtocolBridge ? global.CanvasProtocolBridge : null;
         if (protocolBridge && typeof protocolBridge.collectPermanentViewShellSnapshot === 'function') {
             try {
-                const snapshot = protocolBridge.collectPermanentViewShellSnapshot();
+                const snapshot = protocolBridge.collectPermanentViewShellSnapshot(null, {
+                    preserveDescriptionRaw: true
+                });
                 const normalized = normalizePermanentViewShellSnapshotForSync(snapshot);
                 if (normalized && Array.isArray(normalized.views)) return normalized;
             } catch (_) { }
@@ -8498,7 +8480,9 @@ Cancel: go back and change the branch name first.`
 
         let localSnapshot = null;
         try {
-            localSnapshot = protocolBridge.collectPermanentViewShellSnapshot();
+            localSnapshot = protocolBridge.collectPermanentViewShellSnapshot(null, {
+                preserveDescriptionRaw: true
+            });
         } catch (_) {
             localSnapshot = null;
         }
@@ -8547,7 +8531,9 @@ Cancel: go back and change the branch name first.`
         const protocolBridge = global && global.CanvasProtocolBridge ? global.CanvasProtocolBridge : null;
         if (snapshotInput && typeof protocolBridge?.normalizePermanentViewShellSnapshot === 'function') {
             try {
-                const normalized = protocolBridge.normalizePermanentViewShellSnapshot(snapshotInput);
+                const normalized = protocolBridge.normalizePermanentViewShellSnapshot(snapshotInput, {
+                    preserveDescriptionRaw: true
+                });
                 if (normalized && typeof normalized === 'object') return normalized;
             } catch (_) { }
         }
@@ -8557,7 +8543,10 @@ Cancel: go back and change the branch name first.`
                 const collected = protocolBridge.collectPermanentViewShellSnapshot(
                     dataInput && typeof dataInput === 'object'
                         ? dataInput
-                        : (snapshotInput && !Array.isArray(snapshotInput?.views) ? snapshotInput : null)
+                        : (snapshotInput && !Array.isArray(snapshotInput?.views) ? snapshotInput : null),
+                    {
+                        preserveDescriptionRaw: true
+                    }
                 );
                 if (collected && typeof collected === 'object') return collected;
             } catch (_) { }
@@ -10816,8 +10805,8 @@ Cancel: go back and change the branch name first.`
             descActions.hidden = baselineOnly;
         }
         if (descHint) {
-            const modeText = formatDescriptionConflictPolicyForDisplay(settings && settings.descriptionConflictPolicy);
-            const fallbackText = formatDescriptionMergeFallbackForDisplay(settings && settings.descriptionMergeFallback);
+            const modeText = formatDescriptionConflictPolicyForDisplay(settings && settings.blankCardSourceConflictPolicy);
+            const fallbackText = formatDescriptionMergeFallbackForDisplay(settings && settings.blankCardSourceMergeFallback);
             descHint.textContent = textByLang(
                 `说明类仅在本地和云端都改时处理。当前：${modeText}，${fallbackText}。若使用“冲突副本”，会在对应源卡右侧新建冲突卡片，不会改写原说明字段。`,
                 `Description handling applies only when both local and cloud changed. Current: ${modeText}, ${fallbackText}. If conflict-copy is used, a conflict card is created to the right of the source card instead of rewriting source fields.`
@@ -11387,7 +11376,9 @@ Cancel: go back and change the branch name first.`
                 ? mergeMissingPermanentViewShellStateForApply(snapshot.permanentViewShellSnapshot)
                 : null;
             if (protocolBridge && permanentViewSnapshotForApply) {
-                protocolBridge.applyPermanentViewShellSnapshot(permanentViewSnapshotForApply);
+                protocolBridge.applyPermanentViewShellSnapshot(permanentViewSnapshotForApply, {
+                    preserveDescriptionRaw: true
+                });
             }
         } catch (_) { }
 
@@ -11762,12 +11753,12 @@ Cancel: go back and change the branch name first.`
         const policy = ensureDescriptionConflictPolicy(
             options && options.policy
                 ? options.policy
-                : (settings && settings.descriptionConflictPolicy)
+                : (settings && settings.blankCardSourceConflictPolicy)
         );
         const fallbackPolicy = ensureDescriptionMergeFallback(
             options && options.fallback
                 ? options.fallback
-                : (settings && settings.descriptionMergeFallback)
+                : (settings && settings.blankCardSourceMergeFallback)
         );
         const nextSnapshot = safeParse(JSON.stringify(baseSnapshot), null) || normalizeSnapshot(baseSnapshot);
         const localMap = collectDescriptionValueMapFromSnapshot(localSnapshot);
@@ -12109,7 +12100,7 @@ Cancel: go back and change the branch name first.`
                     remoteSnapshot
                 );
                 descriptionResolvedChoice = descriptionResolved;
-                runtime.lastDescriptionMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
+                runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
                 runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
                 runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.fallbackCount) || 0);
                 if (descriptionResolved && descriptionResolved.requiresManual) {
@@ -12459,7 +12450,7 @@ Cancel: go back and change the branch name first.`
         runtime.isRunning = true;
         runtime.lastTrigger = trigger || 'manual';
         runtime.lastSyncMode = `${effectiveMode}:${syncMethod}`;
-        runtime.lastDescriptionMergeMode = ensureDescriptionConflictPolicy(settings && settings.descriptionConflictPolicy);
+        runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(settings && settings.blankCardSourceConflictPolicy);
         runtime.lastDescriptionMergeMerged = 0;
         runtime.lastDescriptionMergeFallback = 0;
         beginActiveRunRecovery(effectiveMode, trigger, { manual: isManualTrigger });
@@ -13248,7 +13239,7 @@ Cancel: go back and change the branch name first.`
                                         localSnapshot,
                                         remoteSnapshot
                                     );
-                                    runtime.lastDescriptionMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
+                                    runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
                                     runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
                                     runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.fallbackCount) || 0);
                                     if (descriptionResolved && descriptionResolved.requiresManual) {
@@ -13289,7 +13280,7 @@ Cancel: go back and change the branch name first.`
                                         localSnapshot,
                                         remoteSnapshot
                                     );
-                                    runtime.lastDescriptionMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
+                                    runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
                                     runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
                                     runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.fallbackCount) || 0);
                                     if (descriptionResolved && descriptionResolved.requiresManual) {
@@ -14373,7 +14364,7 @@ Cancel: go back and change the branch name first.`
         const conflictDescUseLocalBtn = getElement('canvasSyncConflictDescUseLocalBtn');
         if (conflictDescUseLocalBtn) {
             conflictDescUseLocalBtn.addEventListener('click', () => {
-                settings.descriptionConflictPolicy = 'local';
+                settings.blankCardSourceConflictPolicy = 'local';
                 saveSettings();
                 applySettingsToForm();
                 renderStatus();
@@ -14385,7 +14376,7 @@ Cancel: go back and change the branch name first.`
         const conflictDescUseRemoteBtn = getElement('canvasSyncConflictDescUseRemoteBtn');
         if (conflictDescUseRemoteBtn) {
             conflictDescUseRemoteBtn.addEventListener('click', () => {
-                settings.descriptionConflictPolicy = 'remote';
+                settings.blankCardSourceConflictPolicy = 'remote';
                 saveSettings();
                 applySettingsToForm();
                 renderStatus();
@@ -14397,8 +14388,8 @@ Cancel: go back and change the branch name first.`
         const conflictDescUseCopyBtn = getElement('canvasSyncConflictDescUseCopyBtn');
         if (conflictDescUseCopyBtn) {
             conflictDescUseCopyBtn.addEventListener('click', () => {
-                settings.descriptionConflictPolicy = 'conflict-copy';
-                settings.descriptionMergeFallback = 'conflict-copy';
+                settings.blankCardSourceConflictPolicy = 'conflict-copy';
+                settings.blankCardSourceMergeFallback = 'conflict-copy';
                 saveSettings();
                 applySettingsToForm();
                 renderStatus();
@@ -14536,7 +14527,8 @@ Cancel: go back and change the branch name first.`
         runtime.lastLocalFilesSha = String(runtime.lastLocalFilesSha || '');
         runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0);
         runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0);
-        runtime.lastDescriptionMergeMode = ensureDescriptionConflictPolicy(runtime.lastDescriptionMergeMode || settings.descriptionConflictPolicy);
+        runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(runtime.lastBlankCardSourceMergeMode || settings.blankCardSourceConflictPolicy);
+        delete runtime.lastDescriptionMergeMode;
         if (!runtime.lastLocalFilesSha) {
             const prevSyncIndex = loadPrevSyncIndex();
             const prevFiles = prevSyncIndex && prevSyncIndex.files && typeof prevSyncIndex.files === 'object'
@@ -14593,16 +14585,11 @@ Cancel: go back and change the branch name first.`
         getSettings: () => Object.assign({}, settings || loadSettings()),
         updateSettings: (patch) => {
             settings = Object.assign({}, settings || loadSettings(), patch || {});
-            settings.structuredConflictPolicy = ensureStructuredConflictPolicy(
-                settings.structuredConflictPolicy || settings.conflictPolicy
-            );
-            settings.conflictPolicy = settings.structuredConflictPolicy;
+            settings.structuredConflictPolicy = ensureStructuredConflictPolicy(settings.structuredConflictPolicy);
             settings.syncMethod = DEFAULT_SETTINGS.syncMethod;
-            delete settings.pushOnSync;
-            delete settings.pullOnSync;
             settings.toastEnabled = settings.toastEnabled !== false;
-            settings.descriptionConflictPolicy = ensureDescriptionConflictPolicy(settings.descriptionConflictPolicy);
-            settings.descriptionMergeFallback = ensureDescriptionMergeFallback(settings.descriptionMergeFallback);
+            settings.blankCardSourceConflictPolicy = ensureDescriptionConflictPolicy(settings.blankCardSourceConflictPolicy);
+            settings.blankCardSourceMergeFallback = ensureDescriptionMergeFallback(settings.blankCardSourceMergeFallback);
             settings.firstSyncMode = ensureFirstSyncMode(settings.firstSyncMode);
             settings.permanentPullMode = ensurePermanentPullMode(settings.permanentPullMode);
             settings.permanentIncrementalMaxChanges = normalizePermanentIncrementalMaxChanges(
@@ -14631,6 +14618,12 @@ Cancel: go back and change the branch name first.`
                 DEFAULT_SETTINGS.obsidianExportRoot,
                 { allowEmpty: true }
             );
+            delete settings.conflictPolicy;
+            delete settings.pushOnSync;
+            delete settings.pullOnSync;
+            delete settings.syncPermanentTreeOnPush;
+            delete settings.descriptionConflictPolicy;
+            delete settings.descriptionMergeFallback;
             saveSettings();
             applySettingsToForm();
             renderStatus();
