@@ -189,6 +189,7 @@
     let lastForegroundUserInteractionAt = 0;
     const tempStateNormalizedRawCache = new Map();
     const tempStateComparableCache = new Map();
+    const descriptionBaseBlobTextCache = new Map();
 
     function getRuntimeApi() {
         return global.chrome || global.browser || null;
@@ -11412,13 +11413,97 @@ Cancel: go back and change the branch name first.`
         return String(value == null ? '' : value);
     }
 
-    function getDescriptionMergeDmp() {
-        try {
-            if (typeof global.diff_match_patch === 'function') {
-                return new global.diff_match_patch();
+    function normalizeBlobShaForDescriptionMerge(value) {
+        const normalized = String(value || '').trim().toLowerCase();
+        return /^[0-9a-f]{40}$/i.test(normalized) ? normalized : '';
+    }
+
+    async function readRemoteBlobBySha(blobSha) {
+        const normalizedSha = normalizeBlobShaForDescriptionMerge(blobSha);
+        if (!normalizedSha) {
+            return { notFound: true, sha: '', text: '' };
+        }
+
+        const response = await sendRuntimeMessage({
+            action: 'canvasGitReadBlobBySha',
+            sha: normalizedSha
+        }, 30000);
+
+        if (!response || response.success !== true) {
+            throw new Error((response && response.error) || textByLang('读取云端 Blob 失败', 'Failed to read cloud blob'));
+        }
+        if (response.notFound === true) {
+            return {
+                notFound: true,
+                sha: normalizedSha,
+                text: ''
+            };
+        }
+
+        return {
+            notFound: false,
+            sha: normalizeBlobShaForDescriptionMerge(response.sha) || normalizedSha,
+            text: decodeBase64ToText(response.contentBase64 || '')
+        };
+    }
+
+    async function fetchBaseFilesBySha(pathShaPairs) {
+        const source = Array.isArray(pathShaPairs) ? pathShaPairs : [];
+        const normalizedPairs = [];
+        const dedup = new Set();
+        source.forEach((entry) => {
+            const path = normalizeSyncPath(entry && entry.path);
+            const sha = normalizeBlobShaForDescriptionMerge(entry && entry.sha);
+            if (!path || !sha) return;
+            const dedupKey = `${path}::${sha}`;
+            if (dedup.has(dedupKey)) return;
+            dedup.add(dedupKey);
+            normalizedPairs.push({ path, sha });
+        });
+
+        const result = new Map();
+        for (let i = 0; i < normalizedPairs.length; i += 1) {
+            const pair = normalizedPairs[i];
+            const cacheKey = `blob:${pair.sha}`;
+            let cached = readLimitedCache(descriptionBaseBlobTextCache, cacheKey);
+            if (typeof cached !== 'string') {
+                try {
+                    const blobState = await readRemoteBlobBySha(pair.sha);
+                    if (blobState.notFound) {
+                        cached = '';
+                    } else {
+                        cached = String(blobState.text || '');
+                    }
+                    writeLimitedCache(descriptionBaseBlobTextCache, cacheKey, cached, 64);
+                } catch (_) {
+                    continue;
+                }
             }
-        } catch (_) { }
-        return null;
+            if (typeof cached === 'string') {
+                result.set(pair.path, cached);
+            }
+        }
+
+        return result;
+    }
+
+    const DESCRIPTION_MERGE_DMP_CTOR = (() => {
+        try {
+            return typeof global.diff_match_patch === 'function'
+                ? global.diff_match_patch
+                : null;
+        } catch (_) {
+            return null;
+        }
+    })();
+
+    function getDescriptionMergeDmp() {
+        if (typeof DESCRIPTION_MERGE_DMP_CTOR !== 'function') return null;
+        try {
+            return new DESCRIPTION_MERGE_DMP_CTOR();
+        } catch (_) {
+            return null;
+        }
     }
 
     function tryMergeDescriptionTextsWithDmp(baseText, localText, remoteText) {
@@ -11736,6 +11821,75 @@ Cancel: go back and change the branch name first.`
         return map;
     }
 
+    async function resolveDescriptionBaseMapForGitHub(baseSnapshotInput, localSnapshotInput, remoteSnapshotInput, options = {}) {
+        const policy = ensureDescriptionConflictPolicy(
+            options && options.policy
+                ? options.policy
+                : (settings && settings.blankCardSourceConflictPolicy)
+        );
+        if (policy !== 'merge') return null;
+        if (!hasReadyRepoConfig(repoConfig || {})) return null;
+
+        const prevSyncIndex = loadPrevSyncIndex();
+        const prevFiles = prevSyncIndex && prevSyncIndex.files && typeof prevSyncIndex.files === 'object'
+            ? prevSyncIndex.files
+            : {};
+        if (!Object.keys(prevFiles).length) return null;
+
+        const pathMap = loadPathMap();
+        const blankById = pathMap && pathMap.blankById && typeof pathMap.blankById === 'object'
+            ? pathMap.blankById
+            : {};
+
+        const baseMap = collectDescriptionValueMapFromSnapshot(baseSnapshotInput || { data: {} });
+        const localMap = collectDescriptionValueMapFromSnapshot(localSnapshotInput || { data: {} });
+        const remoteMap = collectDescriptionValueMapFromSnapshot(remoteSnapshotInput || { data: {} });
+        const hasOwnBase = baseMap.__hasOwn || Object.prototype.hasOwnProperty;
+        const hasOwnLocal = localMap.__hasOwn || Object.prototype.hasOwnProperty;
+        const hasOwnRemote = remoteMap.__hasOwn || Object.prototype.hasOwnProperty;
+        delete baseMap.__hasOwn;
+        delete localMap.__hasOwn;
+        delete remoteMap.__hasOwn;
+
+        const pathShaByKey = new Map();
+        Object.keys(baseMap).forEach((key) => {
+            if (!/^md:/.test(key)) return;
+            const baseValue = hasOwnBase.call(baseMap, key) ? normalizeDescriptionTextForMerge(baseMap[key]) : '';
+            const localValue = hasOwnLocal.call(localMap, key) ? normalizeDescriptionTextForMerge(localMap[key]) : baseValue;
+            const remoteValue = hasOwnRemote.call(remoteMap, key) ? normalizeDescriptionTextForMerge(remoteMap[key]) : baseValue;
+            if (localValue === remoteValue) return;
+
+            const nodeId = String(key.slice(3) || '').trim();
+            if (!nodeId) return;
+            const mappedPath = normalizeSyncPath(blankById[nodeId]);
+            if (!mappedPath) return;
+            const prevEntry = prevFiles[mappedPath] && typeof prevFiles[mappedPath] === 'object'
+                ? prevFiles[mappedPath]
+                : null;
+            const baseSha = normalizeBlobShaForDescriptionMerge(prevEntry && prevEntry.sha);
+            if (!baseSha) return;
+            pathShaByKey.set(key, { path: mappedPath, sha: baseSha });
+        });
+
+        if (!pathShaByKey.size) return null;
+
+        const pathShaPairs = Array.from(pathShaByKey.values());
+        const baseFilesByPath = await fetchBaseFilesBySha(pathShaPairs);
+        if (!(baseFilesByPath instanceof Map) || baseFilesByPath.size === 0) return null;
+
+        const out = Object.create(null);
+        const hasOwn = Object.prototype.hasOwnProperty;
+        pathShaByKey.forEach((pair, key) => {
+            if (!pair || !pair.path) return;
+            if (!baseFilesByPath.has(pair.path)) return;
+            out[key] = normalizeDescriptionTextForMerge(baseFilesByPath.get(pair.path));
+        });
+
+        if (!Object.keys(out).length) return null;
+        out.__hasOwn = hasOwn;
+        return out;
+    }
+
     function replaceSnapshotInPlace(target, source) {
         if (!target || !source || typeof target !== 'object' || typeof source !== 'object') return;
         Object.keys(target).forEach((key) => {
@@ -11750,6 +11904,12 @@ Cancel: go back and change the branch name first.`
         const baseSnapshot = normalizeSnapshot(baseSnapshotInput || { data: {} });
         const localSnapshot = normalizeSnapshot(localSnapshotInput || { data: {} });
         const remoteSnapshot = normalizeSnapshot(remoteSnapshotInput || { data: {} });
+        const providedBaseMap = options && options.baseMap && typeof options.baseMap === 'object'
+            ? options.baseMap
+            : null;
+        const hasOwnProvidedBase = providedBaseMap
+            ? (providedBaseMap.__hasOwn || Object.prototype.hasOwnProperty)
+            : Object.prototype.hasOwnProperty;
         const policy = ensureDescriptionConflictPolicy(
             options && options.policy
                 ? options.policy
@@ -11847,8 +12007,15 @@ Cancel: go back and change the branch name first.`
         setTargets.forEach((target) => {
             const key = target.key;
             const currentValue = target.getCurrent();
-            const localValue = hasOwnLocal.call(localMap, key) ? localMap[key] : currentValue;
-            const remoteValue = hasOwnRemote.call(remoteMap, key) ? remoteMap[key] : currentValue;
+            const baseValue = providedBaseMap && hasOwnProvidedBase.call(providedBaseMap, key)
+                ? normalizeDescriptionTextForMerge(providedBaseMap[key])
+                : currentValue;
+            const localValue = hasOwnLocal.call(localMap, key)
+                ? normalizeDescriptionTextForMerge(localMap[key])
+                : baseValue;
+            const remoteValue = hasOwnRemote.call(remoteMap, key)
+                ? normalizeDescriptionTextForMerge(remoteMap[key])
+                : baseValue;
             let nextValue = currentValue;
 
             if (policy === 'local') {
@@ -11866,7 +12033,7 @@ Cancel: go back and change the branch name first.`
                 }
                 nextValue = currentValue;
             } else {
-                const merged = mergeDescriptionTexts(currentValue, localValue, remoteValue);
+                const merged = mergeDescriptionTexts(baseValue, localValue, remoteValue);
                 if (merged.unresolved) {
                     if (fallbackPolicy === 'manual') {
                         requiresManual = true;
@@ -12094,10 +12261,16 @@ Cancel: go back and change the branch name first.`
             let remoteSnapshot = normalizeSnapshot(pendingConflict.remoteSnapshot);
             let descriptionResolvedChoice = null;
             if (resolvedChoice === 'local' || resolvedChoice === 'remote') {
-                const descriptionResolved = applyDescriptionPolicyToSnapshot(
+                const descriptionBaseMap = await resolveDescriptionBaseMapForGitHub(
                     resolvedChoice === 'local' ? localSnapshot : remoteSnapshot,
                     localSnapshot,
                     remoteSnapshot
+                );
+                const descriptionResolved = applyDescriptionPolicyToSnapshot(
+                    resolvedChoice === 'local' ? localSnapshot : remoteSnapshot,
+                    localSnapshot,
+                    remoteSnapshot,
+                    { baseMap: descriptionBaseMap }
                 );
                 descriptionResolvedChoice = descriptionResolved;
                 runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
@@ -13234,10 +13407,16 @@ Cancel: go back and change the branch name first.`
                                     syncMethod
                                 );
                                 if (dualDirtyWinner === 'local') {
-                                    const descriptionResolved = applyDescriptionPolicyToSnapshot(
+                                    const descriptionBaseMap = await resolveDescriptionBaseMapForGitHub(
                                         localSnapshot,
                                         localSnapshot,
                                         remoteSnapshot
+                                    );
+                                    const descriptionResolved = applyDescriptionPolicyToSnapshot(
+                                        localSnapshot,
+                                        localSnapshot,
+                                        remoteSnapshot,
+                                        { baseMap: descriptionBaseMap }
                                     );
                                     runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
                                     runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
@@ -13275,10 +13454,16 @@ Cancel: go back and change the branch name first.`
                                 } else if (dualDirtyWinner === 'remote-reset') {
                                     actionText = await doResetHead(remoteState);
                                 } else if (dualDirtyWinner === 'remote') {
-                                    const descriptionResolved = applyDescriptionPolicyToSnapshot(
+                                    const descriptionBaseMap = await resolveDescriptionBaseMapForGitHub(
                                         remoteSnapshot,
                                         localSnapshot,
                                         remoteSnapshot
+                                    );
+                                    const descriptionResolved = applyDescriptionPolicyToSnapshot(
+                                        remoteSnapshot,
+                                        localSnapshot,
+                                        remoteSnapshot,
+                                        { baseMap: descriptionBaseMap }
                                     );
                                     runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
                                     runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);

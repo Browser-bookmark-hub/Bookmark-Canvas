@@ -755,6 +755,67 @@ export async function getRepoFile({ token, owner, repo, branch, path }) {
   }
 }
 
+export async function getRepoBlobBySha({ token, owner, repo, sha }) {
+  const authHeader = buildGitHubAuthHeader(token);
+  if (!authHeader) {
+    return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
+  }
+
+  const trimmedOwner = String(owner || '').trim();
+  const trimmedRepo = String(repo || '').trim();
+  if (!trimmedOwner || !trimmedRepo) {
+    return { success: false, error: '仓库未配置', repoNotConfigured: true };
+  }
+
+  const trimmedSha = String(sha || '').trim();
+  if (!trimmedSha) {
+    return { success: false, error: '缺少 Blob SHA' };
+  }
+
+  const blobUrl = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/git/blobs/${encodeURIComponent(trimmedSha)}`;
+  try {
+    const blobJson = await githubRequestJson(blobUrl, {
+      headers: { Authorization: authHeader }
+    });
+
+    const blobEncoding = blobJson && blobJson.encoding ? String(blobJson.encoding) : '';
+    const blobContent = blobJson && typeof blobJson.content === 'string'
+      ? blobJson.content.replace(/\s+/g, '')
+      : '';
+    const blobSize = Number.isFinite(Number(blobJson && blobJson.size)) ? Number(blobJson.size) : 0;
+
+    if (blobSize > GITHUB_CONTENTS_HARD_LIMIT_BYTES) {
+      return {
+        success: false,
+        error: '云端文件超过 100MB 限制，请拆分同步文件',
+        sha: trimmedSha,
+        size: blobSize
+      };
+    }
+
+    if (!blobContent || !/^base64$/i.test(blobEncoding || 'base64')) {
+      return {
+        success: false,
+        error: '无法读取 Blob 内容',
+        sha: trimmedSha
+      };
+    }
+
+    return {
+      success: true,
+      sha: trimmedSha,
+      contentBase64: blobContent,
+      encoding: 'base64',
+      size: blobSize
+    };
+  } catch (error) {
+    if (Number(error?.status) === 404) {
+      return { success: false, notFound: true, error: '云端 Blob 不存在' };
+    }
+    return { success: false, error: normalizeGitHubError(error) };
+  }
+}
+
 export async function deleteRepoFile({ token, owner, repo, branch, path, message }) {
   const authHeader = buildGitHubAuthHeader(token);
   if (!authHeader) {

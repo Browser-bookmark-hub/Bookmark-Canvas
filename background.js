@@ -1,6 +1,6 @@
 // Minimal background for Bookmark Canvas extension (MV3)
 
-import { applyRepoFilesBatch, deleteRepoFile, getRepoBranchHeadSignal, getRepoFile, listRepoFiles, testRepoConnection, upsertRepoFile } from './github/repo-api.js';
+import { applyRepoFilesBatch, deleteRepoFile, getRepoBlobBySha, getRepoBranchHeadSignal, getRepoFile, listRepoFiles, testRepoConnection, upsertRepoFile } from './github/repo-api.js';
 
 const browserAPI = (function () {
   if (typeof chrome !== 'undefined') return chrome;
@@ -1514,6 +1514,40 @@ async function handleCanvasGitReadFileMessage(message) {
   };
 }
 
+async function handleCanvasGitReadBlobByShaMessage(message) {
+  const gitConfig = await resolveCanvasGitConfig();
+  if (!gitConfig.success) {
+    return { success: false, error: gitConfig.error };
+  }
+
+  const blobSha = String(message && message.sha || '').trim();
+  if (!blobSha) {
+    return { success: false, error: '缺少 Blob SHA' };
+  }
+
+  const result = await getRepoBlobBySha({
+    token: gitConfig.token,
+    owner: gitConfig.owner,
+    repo: gitConfig.repo,
+    sha: blobSha
+  });
+
+  if (!result || result.success !== true) {
+    if (result && result.notFound === true) {
+      return { success: true, notFound: true, sha: blobSha };
+    }
+    return { success: false, error: result?.error || '读取 Blob 失败', sha: blobSha };
+  }
+
+  return {
+    success: true,
+    sha: String(result.sha || blobSha),
+    encoding: result.encoding || 'base64',
+    contentBase64: result.contentBase64 || '',
+    size: Math.max(0, Number(result.size) || 0)
+  };
+}
+
 async function handleCanvasGitWriteFileMessage(message) {
   const gitConfig = await resolveCanvasGitConfig();
   if (!gitConfig.success) {
@@ -1966,6 +2000,14 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'canvasGitReadFile') {
     (async () => {
       const response = await handleCanvasGitReadFileMessage(message);
+      sendResponse(response);
+    })();
+    return true;
+  }
+
+  if (message.action === 'canvasGitReadBlobBySha') {
+    (async () => {
+      const response = await handleCanvasGitReadBlobByShaMessage(message);
       sendResponse(response);
     })();
     return true;
