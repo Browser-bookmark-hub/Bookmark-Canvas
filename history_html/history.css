@@ -17386,6 +17386,13 @@ html:not(.side-panel-mode) .canvas-sync-tab-subnav-btn--nested > span {
     grid-template-columns: 1fr auto;
 }
 
+#canvasSyncTabBehaviorPanel .canvas-sync-row--child-policy {
+    margin-left: 14px;
+    width: calc(100% - 14px);
+    border-style: dashed;
+    background: color-mix(in srgb, var(--panel-bg) 92%, var(--bg-secondary));
+}
+
 .canvas-sync-switch {
     position: relative;
     width: 38px;

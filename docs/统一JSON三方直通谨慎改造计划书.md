@@ -362,6 +362,8 @@ BCS 本地侧仅存说明 + rootMeta，树走 Chrome Bookmarks API。同步需�
 
 - [x] D-Checkpoint-1（2026-03-30）：空白卡/临时说明/永久说明写入链路改为“等价内容保留原源码”，并去除同步链路中的 `descriptionMd.trim()` 被动重写点。  
   待你执行脚本 F/G 做下一步验收：重点看“无内容改动保存后源码字节稳定”。
+- [x] D-Checkpoint-2（2026-04-02）：GitHub BASE 路径（GB1~GB5）代码落地；补齐“base 缺失不静默自动 merge，改走 fallback”与“空 blob 可读”边界；策略键支持旧字段映射（`conflictPolicy/descriptionConflictPolicy/descriptionMergeFallback` -> 新字段）；说明类文案收口为“仅空白卡源码”。  
+  待执行 10.9.5（R1~R4）验收后，再标记 F/G/H 完成。
 
 ### 临时栏目专项补充（常规链式 + 特殊临时，2026-03-30）
 
@@ -604,11 +606,11 @@ flowchart TD
 
 #### 10.9.3 落地改造点（先做 GitHub）
 
-- [ ] GB1. `github/repo-api.js` 增加“按 blob sha 读取文件”API（直接走 `/git/blobs/{sha}`）。
-- [ ] GB2. `background.js` 增加消息动作：`canvasGitReadBlobBySha`（返回 `contentBase64`）。
-- [ ] GB3. `obsidian-git-sync.js` 增加 `fetchBaseFilesBySha(pathShaPairs)`。
-- [ ] GB4. 空白卡源码冲突入口新增 `baseMap` 覆盖参数：优先用 GitHub base map；无 base 才走 fallback。
-- [ ] GB5. 仅在 `provider=GitHub` 且 `path->sha` 可用时启用此逻辑；其余 provider 暂不启用。
+- [x] GB1. `github/repo-api.js` 增加“按 blob sha 读取文件”API（直接走 `/git/blobs/{sha}`）。
+- [x] GB2. `background.js` 增加消息动作：`canvasGitReadBlobBySha`（返回 `contentBase64`）。
+- [x] GB3. `obsidian-git-sync.js` 增加 `fetchBaseFilesBySha(pathShaPairs)`。
+- [x] GB4. 空白卡源码冲突入口新增 `baseMap` 覆盖参数：优先用 GitHub base map；无 base 才走 fallback。
+- [x] GB5. 仅在 `provider=GitHub` 且 `path->sha` 可用时启用此逻辑；其余 provider 暂不启用。
 
 #### 10.9.4 失败降级策略（必须明确）
 
@@ -622,3 +624,5 @@ flowchart TD
 - [ ] R2. 双端都改 + base 缺失：正确进入 `conflict-copy/manual`，不出现静默覆盖。
 - [ ] R3. 同步成功后 `prevSyncIndex.files[path].sha` 与 `runtime.lastRemoteSha` 正确推进。
 - [ ] R4. 第二次无改动 push 变更数为 0（哈希与基线一致）。
+
+验收记录：`docs/10.9-GitHub-BASE-验收记录-2026-04-02.md`

@@ -1263,13 +1263,41 @@
 	                            <label class="canvas-sync-row" for="canvasSyncStructuredConflictPolicySelect">
 	                                <span id="canvasSyncStructuredConflictPolicyLabel">双端都改时（结构化）处理方式</span>
 	                                <select id="canvasSyncStructuredConflictPolicySelect">
-	                                    <option id="canvasSyncStructuredConflictPolicyNewerOption" value="newer">按最近修改时间决定（默认）</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyNewerOption" value="newer">按时间决定（本地脏时间 vs 云端 commit 时间，默认）</option>
 	                                    <option id="canvasSyncStructuredConflictPolicyOursOption" value="ours">保留本地并覆盖云端</option>
 	                                    <option id="canvasSyncStructuredConflictPolicyTheirsOption" value="theirs">使用云端覆盖本地</option>
 	                                    <option id="canvasSyncStructuredConflictPolicyNoneOption" value="none">进入冲突面板手动选</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyCustomOption" value="custom">自定义（按下方三类子策略）</option>
 	                                </select>
 	                            </label>
-	                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncStructuredConflictPolicyDesc">仅在本地和云端都改时生效；单边变化会自动同步。适用于永久树/临时树/.canvas。</div>
+	                            <label class="canvas-sync-row canvas-sync-row--child-policy" for="canvasSyncStructuredConflictPolicyPermanentSelect">
+	                                <span id="canvasSyncStructuredConflictPolicyPermanentLabel">├─ 永久栏目及其副本</span>
+	                                <select id="canvasSyncStructuredConflictPolicyPermanentSelect">
+	                                    <option id="canvasSyncStructuredConflictPolicyPermanentNewerOption" value="newer">按时间决定</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyPermanentOursOption" value="ours">保留本地</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyPermanentTheirsOption" value="theirs">使用云端</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyPermanentNoneOption" value="none">手动选择</option>
+	                                </select>
+	                            </label>
+	                            <label class="canvas-sync-row canvas-sync-row--child-policy" for="canvasSyncStructuredConflictPolicyTemporarySelect">
+	                                <span id="canvasSyncStructuredConflictPolicyTemporaryLabel">├─ 临时栏目</span>
+	                                <select id="canvasSyncStructuredConflictPolicyTemporarySelect">
+	                                    <option id="canvasSyncStructuredConflictPolicyTemporaryNewerOption" value="newer">按时间决定</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyTemporaryOursOption" value="ours">保留本地</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyTemporaryTheirsOption" value="theirs">使用云端</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyTemporaryNoneOption" value="none">手动选择</option>
+	                                </select>
+	                            </label>
+	                            <label class="canvas-sync-row canvas-sync-row--child-policy" for="canvasSyncStructuredConflictPolicyCanvasSelect">
+	                                <span id="canvasSyncStructuredConflictPolicyCanvasLabel">└─ 画布文件（.canvas）</span>
+	                                <select id="canvasSyncStructuredConflictPolicyCanvasSelect">
+	                                    <option id="canvasSyncStructuredConflictPolicyCanvasNewerOption" value="newer">按时间决定</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyCanvasOursOption" value="ours">保留本地</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyCanvasTheirsOption" value="theirs">使用云端</option>
+	                                    <option id="canvasSyncStructuredConflictPolicyCanvasNoneOption" value="none">手动选择</option>
+	                                </select>
+	                            </label>
+	                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncStructuredConflictPolicyDesc">结构化范围包含：永久栏目、永久栏目副本、临时栏目、画布文件（.canvas）。仅在本地和云端都改时生效；单边变化会自动同步。按时间模式下：本地取该文件变脏时间，云端取该文件路径最近一次 GitHub commit（推送）时间。</div>
 	                            <label class="canvas-sync-row" for="canvasSyncDescriptionConflictPolicySelect">
 	                                <span id="canvasSyncDescriptionConflictPolicyLabel">双端都改时（说明类）处理方式</span>
 	                                <select id="canvasSyncDescriptionConflictPolicySelect">
@@ -1279,7 +1307,7 @@
 	                                    <option id="canvasSyncDescriptionConflictPolicyCopyOption" value="conflict-copy">生成冲突副本卡片（放在源卡右侧）</option>
 	                                </select>
 	                            </label>
-	                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncDescriptionScopeDesc">说明类包括：永久栏目说明（descriptionMd）、临时栏目说明（descriptionMd）、空白栏目卡片 Markdown 源文（markdownSource）。</div>
+	                            <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncDescriptionScopeDesc">说明类目前仅包含：空白栏目卡片 Markdown 源文（markdownSource）。</div>
 	                            <label class="canvas-sync-row" for="canvasSyncDescriptionMergeFallbackSelect">
 	                                <span id="canvasSyncDescriptionMergeFallbackLabel">说明类自动合并失败时</span>
 	                                <select id="canvasSyncDescriptionMergeFallbackSelect">
@@ -1372,14 +1400,14 @@
                                 </div>
                                 <div class="canvas-sync-conflict-summary" id="canvasSyncConflictSummary">请先选择处理策略，再继续同步。</div>
                                 <div class="canvas-sync-status-table-section" id="canvasSyncConflictCompare"></div>
-                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictDescriptionHint">说明类（永久/临时说明、空白卡 Markdown）优先走本地 merge，失败按兜底策略处理。</div>
+                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictDescriptionHint">空白卡源码（markdownSource）在“双端都改”时按当前策略处理。</div>
 	                                <div class="canvas-sync-conflict-actions canvas-sync-panel-actions" id="canvasSyncConflictDescriptionActions">
 	                                    <button id="canvasSyncConflictDescUseLocalBtn" class="canvas-manage-btn" type="button"><i class="fas fa-align-left"></i><span id="canvasSyncConflictDescUseLocalText">说明类用本地</span></button>
 	                                    <button id="canvasSyncConflictDescUseRemoteBtn" class="canvas-manage-btn" type="button"><i class="fas fa-align-right"></i><span id="canvasSyncConflictDescUseRemoteText">说明类用云端</span></button>
 	                                    <button id="canvasSyncConflictDescUseCopyBtn" class="canvas-manage-btn" type="button"><i class="fas fa-copy"></i><span id="canvasSyncConflictDescUseCopyText">说明类生成冲突副本卡片</span></button>
 	                                </div>
-	                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictStructuredHint">结构化数据（永久树/临时树/.canvas）按“结构化冲突策略”执行。</div>
-	                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictFlowHint">操作顺序：先选上面的“说明类按钮”（可改策略），再点下方“使用云端/保留本地/按最近修改时间”提交结构化结果。</div>
+	                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictStructuredHint">结构化数据（永久栏目及副本 / 临时栏目 / .canvas）按对应子策略执行。按时间模式下：本地=文件变脏时间，云端=该路径最近 commit 时间。</div>
+	                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictFlowHint">操作顺序：先选上面的“说明类按钮”（可改策略），再点下方“使用云端/保留本地/按时间”提交结构化结果。若仅部分分类设为手动，会只保留这些分类进入冲突待处理。</div>
 	                                <div class="canvas-sync-note canvas-sync-note--compact" id="canvasSyncConflictPermanentModeHint" hidden></div>
                                 <label class="canvas-sync-row canvas-sync-row--switch" id="canvasSyncConflictFineToggleRow" for="canvasSyncConflictFineToggle" hidden>
                                     <span id="canvasSyncConflictFineToggleLabel">逐文件精细处理（实验）</span>
@@ -1394,7 +1422,7 @@
                             <div class="canvas-sync-conflict-actions canvas-sync-panel-actions">
                                 <button id="canvasSyncConflictUseRemoteBtn" class="canvas-manage-btn" type="button"><i class="fas fa-download"></i><span id="canvasSyncConflictUseRemoteText"><span class="canvas-sync-action-keyword">使用云端</span>覆盖本地</span></button>
                                 <button id="canvasSyncConflictUseLocalBtn" class="canvas-manage-btn" type="button"><i class="fas fa-upload"></i><span id="canvasSyncConflictUseLocalText"><span class="canvas-sync-action-keyword">保留本地</span>并覆盖云端</span></button>
-                                <button id="canvasSyncConflictUseNewestBtn" class="canvas-manage-btn" type="button"><i class="fas fa-clock"></i><span id="canvasSyncConflictUseNewestText"><span class="canvas-sync-action-keyword">按最近修改时间</span>决定</span></button>
+                                <button id="canvasSyncConflictUseNewestBtn" class="canvas-manage-btn" type="button"><i class="fas fa-clock"></i><span id="canvasSyncConflictUseNewestText"><span class="canvas-sync-action-keyword">按时间规则</span>决定</span></button>
                                 <button id="canvasSyncConflictApplyFineBtn" class="canvas-manage-btn" type="button" hidden><i class="fas fa-list-check"></i><span id="canvasSyncConflictApplyFineText">按逐文件决策提交</span></button>
                                 <button id="canvasSyncConflictDismissBtn" class="canvas-manage-btn" type="button"><i class="fas fa-clock"></i><span id="canvasSyncConflictDismissText">稍后处理</span></button>
                             </div>

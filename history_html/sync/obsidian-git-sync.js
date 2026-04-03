@@ -68,6 +68,7 @@
     ];
 
     const CONFLICT_POLICIES = new Set(['none', 'ours', 'theirs', 'newer']);
+    const STRUCTURED_CONFLICT_POLICY_CUSTOM = 'custom';
     const DESCRIPTION_CONFLICT_POLICIES = new Set(['merge', 'local', 'remote', 'conflict-copy']);
     const DESCRIPTION_MERGE_FALLBACKS = new Set(['conflict-copy', 'manual']);
     const SYNC_METHODS = new Set(['merge', 'rebase', 'reset']);
@@ -110,6 +111,9 @@
         firstSyncPathVerifiedAt: 0,
         syncMethod: 'merge',
         structuredConflictPolicy: 'newer',
+        structuredConflictPolicyPermanent: 'newer',
+        structuredConflictPolicyTemporary: 'newer',
+        structuredConflictPolicyCanvas: 'newer',
         blankCardSourceConflictPolicy: 'merge',
         blankCardSourceMergeFallback: 'conflict-copy'
     };
@@ -2827,28 +2831,106 @@
             .replace(/\/+/g, '/');
     }
 
-    function ensureConflictPolicy(policy) {
+    function ensureConflictPolicy(policy, options = {}) {
         const value = String(policy || '').trim().toLowerCase();
+        const allowCustom = !!(options && options.allowCustom === true);
+        if (value === 'local') return 'ours';
+        if (value === 'remote') return 'theirs';
+        if (value === 'keep_newer' || value === 'latest' || value === 'latest_modified') {
+            return 'newer';
+        }
+        if (value === 'manual_panel' || value === 'keep_larger' || value === 'keep_both') {
+            return 'none';
+        }
+        if (allowCustom && value === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
+            return STRUCTURED_CONFLICT_POLICY_CUSTOM;
+        }
         return CONFLICT_POLICIES.has(value) ? value : DEFAULT_SETTINGS.structuredConflictPolicy;
     }
 
-    function ensureStructuredConflictPolicy(policy) {
-        return ensureConflictPolicy(policy);
+    function ensureStructuredConflictPolicy(policy, options = {}) {
+        return ensureConflictPolicy(policy, options);
+    }
+
+    function deriveStructuredConflictPolicySummary(permanentPolicy, temporaryPolicy, canvasPolicy) {
+        const permanent = ensureStructuredConflictPolicy(permanentPolicy);
+        const temporary = ensureStructuredConflictPolicy(temporaryPolicy);
+        const canvas = ensureStructuredConflictPolicy(canvasPolicy);
+        if (permanent === temporary && temporary === canvas) {
+            return permanent;
+        }
+        return STRUCTURED_CONFLICT_POLICY_CUSTOM;
+    }
+
+    function normalizeStructuredConflictPolicyByScope(source = settings) {
+        const payload = source && typeof source === 'object' ? source : {};
+        const basePolicy = ensureStructuredConflictPolicy(
+            payload.structuredConflictPolicy || payload.conflictPolicy || DEFAULT_SETTINGS.structuredConflictPolicy
+        );
+        const permanent = ensureStructuredConflictPolicy(
+            payload.structuredConflictPolicyPermanent || basePolicy
+        );
+        const temporary = ensureStructuredConflictPolicy(
+            payload.structuredConflictPolicyTemporary || basePolicy
+        );
+        const canvas = ensureStructuredConflictPolicy(
+            payload.structuredConflictPolicyCanvas || basePolicy
+        );
+        const summary = deriveStructuredConflictPolicySummary(permanent, temporary, canvas);
+        return {
+            permanent,
+            temporary,
+            canvas,
+            summary
+        };
+    }
+
+    function getStructuredConflictPolicySummary(source = settings) {
+        return normalizeStructuredConflictPolicyByScope(source).summary;
+    }
+
+    function getStructuredConflictPolicyByScope(scope, source = settings) {
+        const normalizedScope = String(scope || '').trim().toLowerCase();
+        const scoped = normalizeStructuredConflictPolicyByScope(source);
+        if (normalizedScope === 'permanent') return scoped.permanent;
+        if (normalizedScope === 'temporary') return scoped.temporary;
+        if (normalizedScope === 'canvas') return scoped.canvas;
+        return scoped.summary === STRUCTURED_CONFLICT_POLICY_CUSTOM
+            ? DEFAULT_SETTINGS.structuredConflictPolicy
+            : ensureStructuredConflictPolicy(scoped.summary);
+    }
+
+    function getStructuredConflictPolicyByPath(pathInput, source = settings, rootPath = '') {
+        const path = normalizeSyncPath(pathInput);
+        const relativePath = getManagedSyncRelativePath(path, rootPath || (source && source.obsidianExportRoot) || '');
+        const kind = classifyManagedSyncRelativePath(relativePath);
+        if (kind === 'permanent') return getStructuredConflictPolicyByScope('permanent', source);
+        if (kind === 'temporary') return getStructuredConflictPolicyByScope('temporary', source);
+        if (kind === 'canvas') return getStructuredConflictPolicyByScope('canvas', source);
+        return getStructuredConflictPolicyByScope('', source);
     }
 
     function getEffectiveStructuredConflictPolicy(source = settings) {
-        const payload = source && typeof source === 'object' ? source : {};
-        const candidate = payload.structuredConflictPolicy || DEFAULT_SETTINGS.structuredConflictPolicy;
-        return ensureStructuredConflictPolicy(candidate);
+        const summary = getStructuredConflictPolicySummary(source);
+        if (summary === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
+            return 'none';
+        }
+        return ensureStructuredConflictPolicy(summary);
     }
 
     function ensureDescriptionConflictPolicy(policy) {
         const value = String(policy || '').trim().toLowerCase();
+        if (value === 'auto' || value === 'automatic') return 'merge';
+        if (value === 'local-first' || value === 'ours') return 'local';
+        if (value === 'remote-first' || value === 'theirs') return 'remote';
+        if (value === 'copy' || value === 'conflict-copy') return 'conflict-copy';
         return DESCRIPTION_CONFLICT_POLICIES.has(value) ? value : DEFAULT_SETTINGS.blankCardSourceConflictPolicy;
     }
 
     function ensureDescriptionMergeFallback(policy) {
         const value = String(policy || '').trim().toLowerCase();
+        if (value === 'conflict' || value === 'copy') return 'conflict-copy';
+        if (value === 'panel' || value === 'manual-panel') return 'manual';
         return DESCRIPTION_MERGE_FALLBACKS.has(value) ? value : DEFAULT_SETTINGS.blankCardSourceMergeFallback;
     }
 
@@ -3013,12 +3095,39 @@
         const parsed = safeParse(getSyncMetaRaw(SETTINGS_KEY), null);
         const parsedObject = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
         const merged = Object.assign({}, DEFAULT_SETTINGS, parsedObject);
-        merged.structuredConflictPolicy = ensureStructuredConflictPolicy(merged.structuredConflictPolicy);
+        const hasOwn = Object.prototype.hasOwnProperty;
+        const structuredPolicyCandidate = hasOwn.call(parsedObject, 'structuredConflictPolicy')
+            ? parsedObject.structuredConflictPolicy
+            : parsedObject.conflictPolicy;
+        const structuredPermanentCandidate = hasOwn.call(parsedObject, 'structuredConflictPolicyPermanent')
+            ? parsedObject.structuredConflictPolicyPermanent
+            : structuredPolicyCandidate;
+        const structuredTemporaryCandidate = hasOwn.call(parsedObject, 'structuredConflictPolicyTemporary')
+            ? parsedObject.structuredConflictPolicyTemporary
+            : structuredPolicyCandidate;
+        const structuredCanvasCandidate = hasOwn.call(parsedObject, 'structuredConflictPolicyCanvas')
+            ? parsedObject.structuredConflictPolicyCanvas
+            : structuredPolicyCandidate;
+        const blankSourcePolicyCandidate = hasOwn.call(parsedObject, 'blankCardSourceConflictPolicy')
+            ? parsedObject.blankCardSourceConflictPolicy
+            : parsedObject.descriptionConflictPolicy;
+        const blankSourceFallbackCandidate = hasOwn.call(parsedObject, 'blankCardSourceMergeFallback')
+            ? parsedObject.blankCardSourceMergeFallback
+            : parsedObject.descriptionMergeFallback;
+
+        merged.structuredConflictPolicyPermanent = ensureStructuredConflictPolicy(structuredPermanentCandidate);
+        merged.structuredConflictPolicyTemporary = ensureStructuredConflictPolicy(structuredTemporaryCandidate);
+        merged.structuredConflictPolicyCanvas = ensureStructuredConflictPolicy(structuredCanvasCandidate);
+        merged.structuredConflictPolicy = deriveStructuredConflictPolicySummary(
+            merged.structuredConflictPolicyPermanent,
+            merged.structuredConflictPolicyTemporary,
+            merged.structuredConflictPolicyCanvas
+        );
         // Main UI uses the standard sync path.
         merged.syncMethod = DEFAULT_SETTINGS.syncMethod;
         merged.toastEnabled = merged.toastEnabled !== false;
-        merged.blankCardSourceConflictPolicy = ensureDescriptionConflictPolicy(merged.blankCardSourceConflictPolicy);
-        merged.blankCardSourceMergeFallback = ensureDescriptionMergeFallback(merged.blankCardSourceMergeFallback);
+        merged.blankCardSourceConflictPolicy = ensureDescriptionConflictPolicy(blankSourcePolicyCandidate);
+        merged.blankCardSourceMergeFallback = ensureDescriptionMergeFallback(blankSourceFallbackCandidate);
 
         merged.firstSyncMode = ensureFirstSyncMode(merged.firstSyncMode);
         merged.permanentPullMode = ensurePermanentPullMode(merged.permanentPullMode);
@@ -3153,8 +3262,22 @@
                 ids: []
             },
             paths: [],
+            pathUpdatedAt: {},
             updatedAt: 0
         };
+    }
+
+    function normalizePathTimestampMap(rawMap) {
+        const source = (rawMap && typeof rawMap === 'object' && !Array.isArray(rawMap)) ? rawMap : {};
+        const output = {};
+        Object.keys(source).forEach((pathKey) => {
+            const path = normalizeSyncPath(pathKey);
+            if (!path) return;
+            const ts = Math.max(0, Number(source[pathKey]) || 0);
+            if (!ts) return;
+            output[path] = ts;
+        });
+        return output;
     }
 
     function normalizeDirtyState(raw) {
@@ -3182,6 +3305,7 @@
                 ids: uniqueStringList(blankSource.ids)
             },
             paths: uniqueStringList(source.paths, normalizeSyncPath),
+            pathUpdatedAt: normalizePathTimestampMap(source.pathUpdatedAt || source.pathDirtyAt),
             updatedAt: Number(source.updatedAt) || 0
         };
     }
@@ -3207,15 +3331,96 @@
             || dirty.paths.length > 0;
     }
 
-    function updateDirtyState(mutator) {
+    function getLatestLocalDirtyTimestamp(dirtyStateInput = null) {
+        const dirty = dirtyStateInput ? normalizeDirtyState(dirtyStateInput) : loadDirtyState();
+        const pathUpdatedAt = (dirty.pathUpdatedAt && typeof dirty.pathUpdatedAt === 'object')
+            ? dirty.pathUpdatedAt
+            : {};
+        let latest = 0;
+
+        Object.keys(pathUpdatedAt).forEach((pathKey) => {
+            const normalizedPath = normalizeSyncPath(pathKey);
+            if (!normalizedPath) return;
+            const ts = Math.max(0, Number(pathUpdatedAt[pathKey]) || 0);
+            if (!ts) return;
+            if (ts > latest) latest = ts;
+        });
+
+        if (hasLocalDirtyWork(dirty)) {
+            latest = Math.max(
+                latest,
+                Math.max(0, Number(dirty.updatedAt) || 0),
+                Math.max(0, Number(runtime && runtime.lastLocalMutationAt) || 0)
+            );
+        }
+
+        return latest;
+    }
+
+    function updateDirtyState(mutator, timestamp = Date.now()) {
         const draft = loadDirtyState();
         if (typeof mutator === 'function') {
             mutator(draft);
         }
-        draft.updatedAt = Date.now();
+        draft.updatedAt = Math.max(0, Number(timestamp) || Date.now());
         const normalized = normalizeDirtyState(draft);
         saveDirtyState(normalized);
         return normalized;
+    }
+
+    function markDirtyPathTimestamps(dirtyStateDraft, pathsInput, timestamp = Date.now()) {
+        if (!dirtyStateDraft || typeof dirtyStateDraft !== 'object') return;
+        const paths = uniqueStringList(pathsInput, normalizeSyncPath);
+        if (!paths.length) return;
+        if (!dirtyStateDraft.pathUpdatedAt || typeof dirtyStateDraft.pathUpdatedAt !== 'object') {
+            dirtyStateDraft.pathUpdatedAt = {};
+        }
+        const ts = Math.max(0, Number(timestamp) || Date.now());
+        paths.forEach((path) => {
+            dirtyStateDraft.pathUpdatedAt[path] = ts;
+        });
+    }
+
+    function collectDirtyPathsFromPatch(patchInput, pathMapInput) {
+        const patch = (patchInput && typeof patchInput === 'object') ? patchInput : {};
+        const pathMap = normalizePathMap(pathMapInput);
+        const pathSet = new Set();
+        const addPath = (value) => {
+            const path = normalizeSyncPath(value);
+            if (path) pathSet.add(path);
+        };
+        const patchCanvas = (patch.canvas && typeof patch.canvas === 'object') ? patch.canvas : {};
+
+        if (patch.canvasLayout === true || patch.canvasFileRef === true || patchCanvas.layoutDirty === true || patchCanvas.fileRefDirty === true) {
+            addPath(pathMap.canvasPath);
+        }
+        if (patch.permanentAll === true) {
+            pathMap.permanentPaths.forEach((path) => addPath(path));
+        }
+        if (Array.isArray(patch.permanentPaths)) {
+            patch.permanentPaths.forEach((path) => addPath(path));
+        }
+        if (patch.temporaryAll === true) {
+            Object.keys(pathMap.temporaryById || {}).forEach((id) => addPath(pathMap.temporaryById[id]));
+        }
+        if (Array.isArray(patch.temporaryIds)) {
+            patch.temporaryIds.forEach((id) => addPath(pathMap.temporaryById[id]));
+        }
+        if (patch.blankAll === true) {
+            Object.keys(pathMap.blankById || {}).forEach((id) => addPath(pathMap.blankById[id]));
+        }
+        if (Array.isArray(patch.blankIds)) {
+            patch.blankIds.forEach((id) => addPath(pathMap.blankById[id]));
+        }
+
+        return Array.from(pathSet);
+    }
+
+    function getDirtyPathUpdatedAt(dirtyStateInput, pathInput) {
+        const dirty = normalizeDirtyState(dirtyStateInput || createDefaultDirtyState());
+        const path = normalizeSyncPath(pathInput);
+        if (!path) return 0;
+        return Math.max(0, Number(dirty.pathUpdatedAt && dirty.pathUpdatedAt[path]) || 0);
     }
 
     function createDefaultPathMap() {
@@ -3378,10 +3583,20 @@
         const trigger = String(reason || '').toLowerCase();
         const dirtyPatch = options && options.dirty && typeof options.dirty === 'object' ? options.dirty : null;
         const dirtyPaths = uniqueStringList(options && options.dirtyPaths, normalizeSyncPath);
+        const timestamp = Date.now();
+        const pathMap = loadPathMap();
 
         return updateDirtyState((dirty) => {
+            const touchedPathSet = new Set();
+            const appendTouchedPath = (pathInput) => {
+                const path = normalizeSyncPath(pathInput);
+                if (!path) return;
+                touchedPathSet.add(path);
+            };
+
             if (dirtyPaths.length) {
                 dirty.paths = uniqueStringList([].concat(dirty.paths || [], dirtyPaths), normalizeSyncPath);
+                dirtyPaths.forEach((path) => appendTouchedPath(path));
             }
 
             if (dirtyPatch) {
@@ -3413,18 +3628,28 @@
                 if (Array.isArray(dirtyPatch.blankIds)) {
                     dirty.blank.ids = uniqueStringList([].concat(dirty.blank.ids || [], dirtyPatch.blankIds));
                 }
+
+                collectDirtyPathsFromPatch(dirtyPatch, pathMap).forEach((path) => appendTouchedPath(path));
+                markDirtyPathTimestamps(dirty, Array.from(touchedPathSet), timestamp);
                 return;
             }
 
             if (trigger.includes('bookmark') || trigger.includes('permanent')) {
                 dirty.permanent.all = true;
+                pathMap.permanentPaths.forEach((path) => appendTouchedPath(path));
+                markDirtyPathTimestamps(dirty, Array.from(touchedPathSet), timestamp);
                 return;
             }
 
             dirty.canvas.layoutDirty = true;
             dirty.temporary.all = true;
             dirty.blank.all = true;
-        });
+            appendTouchedPath(pathMap.canvasPath);
+            pathMap.permanentPaths.forEach((path) => appendTouchedPath(path));
+            Object.keys(pathMap.temporaryById || {}).forEach((id) => appendTouchedPath(pathMap.temporaryById[id]));
+            Object.keys(pathMap.blankById || {}).forEach((id) => appendTouchedPath(pathMap.blankById[id]));
+            markDirtyPathTimestamps(dirty, Array.from(touchedPathSet), timestamp);
+        }, timestamp);
     }
 
     function shouldTrackAllFilesForPush(trigger) {
@@ -3578,6 +3803,18 @@
         dirty.permanent.paths = dirty.permanent.paths.filter((path) => !syncedSet.has(path));
         dirty.temporary.ids = dirty.temporary.ids.filter((id) => !syncedTemporaryIds.has(id));
         dirty.blank.ids = dirty.blank.ids.filter((id) => !syncedBlankIds.has(id));
+        const nextPathUpdatedAt = {};
+        const pathUpdatedAtSource = (dirty.pathUpdatedAt && typeof dirty.pathUpdatedAt === 'object')
+            ? dirty.pathUpdatedAt
+            : {};
+        Object.keys(pathUpdatedAtSource).forEach((pathKey) => {
+            const normalizedPath = normalizeSyncPath(pathKey);
+            if (!normalizedPath || syncedSet.has(normalizedPath)) return;
+            const ts = Math.max(0, Number(pathUpdatedAtSource[pathKey]) || 0);
+            if (!ts) return;
+            nextPathUpdatedAt[normalizedPath] = ts;
+        });
+        dirty.pathUpdatedAt = nextPathUpdatedAt;
 
         const temporaryById = (typedPaths.temporaryById && typeof typedPaths.temporaryById === 'object')
             ? typedPaths.temporaryById
@@ -5591,6 +5828,35 @@ Cancel: go back and change the branch name first.`
         return 'other';
     }
 
+    function buildConflictScopeCounts(pathsInput, rootPath = '') {
+        const counts = {
+            permanent: 0,
+            temporary: 0,
+            canvas: 0,
+            other: 0,
+            total: 0
+        };
+        const paths = uniqueStringList(pathsInput, normalizeSyncPath);
+        paths.forEach((path) => {
+            const relative = getManagedSyncRelativePath(path, rootPath);
+            const scope = classifyManagedSyncRelativePath(relative);
+            if (scope === 'permanent') counts.permanent += 1;
+            else if (scope === 'temporary') counts.temporary += 1;
+            else if (scope === 'canvas') counts.canvas += 1;
+            else counts.other += 1;
+            counts.total += 1;
+        });
+        return counts;
+    }
+
+    function formatConflictScopeCountsInline(countsInput) {
+        const counts = countsInput && typeof countsInput === 'object' ? countsInput : {};
+        return textByLang(
+            `永久 ${Number(counts.permanent) || 0} / 临时 ${Number(counts.temporary) || 0} / 画布 ${Number(counts.canvas) || 0} / 其他 ${Number(counts.other) || 0}`,
+            `Permanent ${Number(counts.permanent) || 0} / Temporary ${Number(counts.temporary) || 0} / Canvas ${Number(counts.canvas) || 0} / Other ${Number(counts.other) || 0}`
+        );
+    }
+
     function buildManagedSyncFileStats(filesInput, rootPath = '') {
         const stats = {
             total: 0,
@@ -6421,11 +6687,27 @@ Cancel: go back and change the branch name first.`
     }
 
     function formatConflictPolicyForDisplay(policy) {
-        const value = ensureStructuredConflictPolicy(policy);
+        const value = ensureStructuredConflictPolicy(policy, { allowCustom: true });
+        if (value === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
+            return textByLang('自定义（按三类子策略）', 'Custom (scope-specific policies)');
+        }
         if (value === 'ours') return textByLang('本地优先', 'Our changes');
         if (value === 'theirs') return textByLang('云端优先', 'Their changes');
-        if (value === 'newer') return textByLang('按最近修改时间决定', 'Use the latest modification time');
+        if (value === 'newer') {
+            return textByLang(
+                '按时间决定（本地脏时间 vs 云端 commit 时间）',
+                'Use time rule (local dirty time vs cloud commit time)'
+            );
+        }
         return textByLang('手动选择', 'Choose manually');
+    }
+
+    function formatStructuredPolicyScopeSummary(source = settings) {
+        const scoped = normalizeStructuredConflictPolicyByScope(source);
+        return textByLang(
+            `永久=${formatConflictPolicyForDisplay(scoped.permanent)}；临时=${formatConflictPolicyForDisplay(scoped.temporary)}；画布=${formatConflictPolicyForDisplay(scoped.canvas)}`,
+            `Permanent=${formatConflictPolicyForDisplay(scoped.permanent)}; Temporary=${formatConflictPolicyForDisplay(scoped.temporary)}; Canvas=${formatConflictPolicyForDisplay(scoped.canvas)}`
+        );
     }
 
     function formatDescriptionConflictPolicyForDisplay(policy) {
@@ -6449,19 +6731,30 @@ Cancel: go back and change the branch name first.`
         return localTs > remoteTs ? 'local' : 'remote';
     }
 
+    function getLatestRemoteTimestampForWinner(remoteSnapshotInput = null, options = {}) {
+        const remoteSnapshot = (remoteSnapshotInput && typeof remoteSnapshotInput === 'object')
+            ? remoteSnapshotInput
+            : null;
+        return Math.max(
+            0,
+            Number(options && options.remoteUpdatedAt) || 0,
+            Number(runtime && runtime.lastRemoteCommittedAt) || 0,
+            Number(remoteSnapshot && remoteSnapshot.updatedAt) || 0
+        );
+    }
+
     function decidePendingConflictByLatestModified(conflictData = pendingConflict) {
         const source = conflictData && typeof conflictData === 'object' ? conflictData : null;
         if (!source) {
             return { choice: '', localTs: 0, remoteTs: 0 };
         }
         const localTs = Math.max(
-            Number(source.localMeta && source.localMeta.updatedAt) || 0,
-            Number(runtime && runtime.lastLocalMutationAt) || 0
+            getLatestLocalDirtyTimestamp(),
+            Number(source.localMeta && source.localMeta.updatedAt) || 0
         );
-        const remoteTs = Math.max(
-            Number(source.remoteMeta && source.remoteMeta.updatedAt) || 0,
-            Number(runtime && runtime.lastRemoteCommittedAt) || 0
-        );
+        const remoteTs = getLatestRemoteTimestampForWinner(source && source.remoteMeta ? source.remoteMeta : null, {
+            remoteUpdatedAt: Number(source.remoteMeta && source.remoteMeta.updatedAt) || 0
+        });
         return {
             choice: decideWinnerByLatestModified(localTs, remoteTs),
             localTs,
@@ -7240,8 +7533,13 @@ Cancel: go back and change the branch name first.`
         if (lastEl) lastEl.textContent = formatTime(runtime.lastSuccessAt);
         if (directionEl) directionEl.textContent = getDirectionText(runtime.lastAppliedDirection);
         if (policySummaryEl) {
-            const structuredText = formatConflictPolicyForDisplay(getEffectiveStructuredConflictPolicy(settings));
-            policySummaryEl.textContent = structuredText;
+            const structuredSummaryPolicy = getStructuredConflictPolicySummary(settings);
+            const structuredText = formatConflictPolicyForDisplay(structuredSummaryPolicy);
+            if (structuredSummaryPolicy === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
+                policySummaryEl.textContent = `${structuredText}（${formatStructuredPolicyScopeSummary(settings)}）`;
+            } else {
+                policySummaryEl.textContent = structuredText;
+            }
         }
         if (descriptionMergeEl) {
             const modeText = formatDescriptionConflictPolicyForDisplay(settings && settings.blankCardSourceConflictPolicy);
@@ -7648,6 +7946,9 @@ Cancel: go back and change the branch name first.`
             'canvasSyncFirstSyncModeLocalInput',
             'canvasSyncToastToggle',
             'canvasSyncStructuredConflictPolicySelect',
+            'canvasSyncStructuredConflictPolicyPermanentSelect',
+            'canvasSyncStructuredConflictPolicyTemporarySelect',
+            'canvasSyncStructuredConflictPolicyCanvasSelect',
             'canvasSyncDescriptionConflictPolicySelect',
             'canvasSyncDescriptionMergeFallbackSelect',
             'canvasSyncConflictFineToggle',
@@ -7766,6 +8067,9 @@ Cancel: go back and change the branch name first.`
         const enabled = getElement('canvasSyncEnabledToggle');
         const toastToggle = getElement('canvasSyncToastToggle');
         const structuredConflict = getElement('canvasSyncStructuredConflictPolicySelect');
+        const structuredConflictPermanent = getElement('canvasSyncStructuredConflictPolicyPermanentSelect');
+        const structuredConflictTemporary = getElement('canvasSyncStructuredConflictPolicyTemporarySelect');
+        const structuredConflictCanvas = getElement('canvasSyncStructuredConflictPolicyCanvasSelect');
         const descriptionConflict = getElement('canvasSyncDescriptionConflictPolicySelect');
         const descriptionFallback = getElement('canvasSyncDescriptionMergeFallbackSelect');
         const permanentPullMode = getElement('canvasSyncPermanentPullModeSelect');
@@ -7778,7 +8082,11 @@ Cancel: go back and change the branch name first.`
         if (enabled) enabled.checked = !!settings.enabled;
         setFirstSyncModeToForm(settings.firstSyncMode);
         if (toastToggle) toastToggle.checked = settings.toastEnabled !== false;
-        if (structuredConflict) structuredConflict.value = getEffectiveStructuredConflictPolicy(settings);
+        const structuredScoped = normalizeStructuredConflictPolicyByScope(settings);
+        if (structuredConflict) structuredConflict.value = structuredScoped.summary;
+        if (structuredConflictPermanent) structuredConflictPermanent.value = structuredScoped.permanent;
+        if (structuredConflictTemporary) structuredConflictTemporary.value = structuredScoped.temporary;
+        if (structuredConflictCanvas) structuredConflictCanvas.value = structuredScoped.canvas;
         if (descriptionConflict) descriptionConflict.value = ensureDescriptionConflictPolicy(settings.blankCardSourceConflictPolicy);
         if (descriptionFallback) descriptionFallback.value = ensureDescriptionMergeFallback(settings.blankCardSourceMergeFallback);
         if (permanentPullMode) permanentPullMode.value = ensurePermanentPullMode(settings.permanentPullMode);
@@ -7795,9 +8103,13 @@ Cancel: go back and change the branch name first.`
 
     function pullSettingsFromForm(options = {}) {
         const silentFormatToast = !!(options && options.silentFormatToast === true);
+        const changedFieldId = String(options && options.changedFieldId || '').trim();
         const enabled = getElement('canvasSyncEnabledToggle');
         const toastToggle = getElement('canvasSyncToastToggle');
         const structuredConflict = getElement('canvasSyncStructuredConflictPolicySelect');
+        const structuredConflictPermanent = getElement('canvasSyncStructuredConflictPolicyPermanentSelect');
+        const structuredConflictTemporary = getElement('canvasSyncStructuredConflictPolicyTemporarySelect');
+        const structuredConflictCanvas = getElement('canvasSyncStructuredConflictPolicyCanvasSelect');
         const descriptionConflict = getElement('canvasSyncDescriptionConflictPolicySelect');
         const descriptionFallback = getElement('canvasSyncDescriptionMergeFallbackSelect');
         const permanentPullMode = getElement('canvasSyncPermanentPullModeSelect');
@@ -7820,9 +8132,41 @@ Cancel: go back and change the branch name first.`
         settings.toastEnabled = toastToggle ? !!toastToggle.checked : settings.toastEnabled;
 
         settings.syncMethod = DEFAULT_SETTINGS.syncMethod;
-        settings.structuredConflictPolicy = ensureStructuredConflictPolicy(
-            structuredConflict ? structuredConflict.value : getEffectiveStructuredConflictPolicy(settings)
+        const selectedStructuredTopPolicy = ensureStructuredConflictPolicy(
+            structuredConflict ? structuredConflict.value : getStructuredConflictPolicySummary(settings),
+            { allowCustom: true }
         );
+        let nextPermanentPolicy = ensureStructuredConflictPolicy(
+            structuredConflictPermanent ? structuredConflictPermanent.value : settings.structuredConflictPolicyPermanent
+        );
+        let nextTemporaryPolicy = ensureStructuredConflictPolicy(
+            structuredConflictTemporary ? structuredConflictTemporary.value : settings.structuredConflictPolicyTemporary
+        );
+        let nextCanvasPolicy = ensureStructuredConflictPolicy(
+            structuredConflictCanvas ? structuredConflictCanvas.value : settings.structuredConflictPolicyCanvas
+        );
+
+        const topPolicyChangedByUser = changedFieldId === 'canvasSyncStructuredConflictPolicySelect';
+        if (selectedStructuredTopPolicy !== STRUCTURED_CONFLICT_POLICY_CUSTOM && topPolicyChangedByUser) {
+            nextPermanentPolicy = ensureStructuredConflictPolicy(selectedStructuredTopPolicy);
+            nextTemporaryPolicy = ensureStructuredConflictPolicy(selectedStructuredTopPolicy);
+            nextCanvasPolicy = ensureStructuredConflictPolicy(selectedStructuredTopPolicy);
+            if (structuredConflictPermanent) structuredConflictPermanent.value = nextPermanentPolicy;
+            if (structuredConflictTemporary) structuredConflictTemporary.value = nextTemporaryPolicy;
+            if (structuredConflictCanvas) structuredConflictCanvas.value = nextCanvasPolicy;
+        }
+
+        settings.structuredConflictPolicyPermanent = nextPermanentPolicy;
+        settings.structuredConflictPolicyTemporary = nextTemporaryPolicy;
+        settings.structuredConflictPolicyCanvas = nextCanvasPolicy;
+        settings.structuredConflictPolicy = deriveStructuredConflictPolicySummary(
+            settings.structuredConflictPolicyPermanent,
+            settings.structuredConflictPolicyTemporary,
+            settings.structuredConflictPolicyCanvas
+        );
+        if (structuredConflict) {
+            structuredConflict.value = settings.structuredConflictPolicy;
+        }
         settings.blankCardSourceConflictPolicy = ensureDescriptionConflictPolicy(
             descriptionConflict ? descriptionConflict.value : settings.blankCardSourceConflictPolicy
         );
@@ -8912,9 +9256,11 @@ Cancel: go back and change the branch name first.`
 
         const tempSectionMeta = applyTempSectionSnapshotThrottle(data, trigger, options);
 
+        const dirtyStateForSnapshot = loadDirtyState();
+        const localDirtyTs = getLatestLocalDirtyTimestamp(dirtyStateForSnapshot);
         const tempTs = readTempStateTimestampFromRaw(data[TEMP_SECTION_STORAGE_KEY]);
         const now = Date.now();
-        const updatedAt = Math.max(now, Number(runtime.lastLocalMutationAt) || 0, tempTs);
+        const updatedAt = Math.max(localDirtyTs, Number(runtime.lastLocalMutationAt) || 0, tempTs);
 
         const includePermanentTree = shouldIncludePermanentTreeSnapshot(trigger, options);
 
@@ -10473,7 +10819,104 @@ Cancel: go back and change the branch name first.`
 	        };
 	    }
 
-    function buildObsidianFileSyncPlan(localFiles, remoteFilesByPath, prevSyncIndex) {
+    function resolveConflictPolicyForPath(path, options = {}) {
+        const source = options && typeof options === 'object' ? options : {};
+        if (typeof source.resolveConflictPolicyForPath === 'function') {
+            const resolvedByFunc = ensureStructuredConflictPolicy(
+                source.resolveConflictPolicyForPath(path),
+                { allowCustom: true }
+            );
+            if (resolvedByFunc && resolvedByFunc !== STRUCTURED_CONFLICT_POLICY_CUSTOM) {
+                return ensureStructuredConflictPolicy(resolvedByFunc);
+            }
+        }
+        const map = (source.conflictPolicyByPath && typeof source.conflictPolicyByPath === 'object')
+            ? source.conflictPolicyByPath
+            : {};
+        const fromMap = ensureStructuredConflictPolicy(
+            map[normalizeSyncPath(path)],
+            { allowCustom: true }
+        );
+        if (fromMap && fromMap !== STRUCTURED_CONFLICT_POLICY_CUSTOM) {
+            return ensureStructuredConflictPolicy(fromMap);
+        }
+        const fallbackPolicy = ensureStructuredConflictPolicy(
+            source.structuredConflictPolicy || source.conflictPolicy || DEFAULT_SETTINGS.structuredConflictPolicy,
+            { allowCustom: true }
+        );
+        if (fallbackPolicy !== STRUCTURED_CONFLICT_POLICY_CUSTOM) {
+            return ensureStructuredConflictPolicy(fallbackPolicy);
+        }
+        return ensureStructuredConflictPolicy(DEFAULT_SETTINGS.structuredConflictPolicy);
+    }
+
+    function resolveFileConflictByPolicy(path, localEntry, remoteEntry, options = {}) {
+        const policy = resolveConflictPolicyForPath(path, options);
+        if (policy === 'ours') {
+            return {
+                action: localEntry ? 'upload' : 'deleteRemote',
+                policy,
+                localDirtyAt: 0,
+                remoteCommittedAt: 0
+            };
+        }
+        if (policy === 'theirs') {
+            return {
+                action: remoteEntry ? 'download' : 'deleteLocal',
+                policy,
+                localDirtyAt: 0,
+                remoteCommittedAt: 0
+            };
+        }
+        if (policy !== 'newer') {
+            return {
+                action: '',
+                policy,
+                localDirtyAt: 0,
+                remoteCommittedAt: 0
+            };
+        }
+        if (!options || options.enableDualDirtyTimestampWinner !== true) {
+            return {
+                action: '',
+                policy,
+                localDirtyAt: 0,
+                remoteCommittedAt: 0
+            };
+        }
+        const localDirtyState = options.localDirtyState || null;
+        const remoteCommittedAtByPath = (options.remoteCommittedAtByPath && typeof options.remoteCommittedAtByPath === 'object')
+            ? options.remoteCommittedAtByPath
+            : {};
+        const localTs = getDirtyPathUpdatedAt(localDirtyState, path);
+        const remoteTs = Math.max(0, Number(remoteCommittedAtByPath[path]) || 0);
+        const winner = decideWinnerByLatestModified(localTs, remoteTs);
+        if (!winner) {
+            return {
+                action: '',
+                policy,
+                localDirtyAt: localTs,
+                remoteCommittedAt: remoteTs
+            };
+        }
+
+        if (winner === 'local') {
+            return {
+                action: localEntry ? 'upload' : 'deleteRemote',
+                policy,
+                localDirtyAt: localTs,
+                remoteCommittedAt: remoteTs
+            };
+        }
+        return {
+            action: remoteEntry ? 'download' : 'deleteLocal',
+            policy,
+            localDirtyAt: localTs,
+            remoteCommittedAt: remoteTs
+        };
+    }
+
+    function buildObsidianFileSyncPlan(localFiles, remoteFilesByPath, prevSyncIndex, options = {}) {
         const localByPath = {};
         const localList = Array.isArray(localFiles) ? localFiles : [];
         localList.forEach((file) => {
@@ -10552,10 +10995,93 @@ Cancel: go back and change the branch name first.`
                 return;
             }
 
-            plan.conflict.push({ path, reason: 'local-and-remote-changed' });
+            const resolvedByPolicy = resolveFileConflictByPolicy(path, localEntry, remoteEntry, options);
+            if (resolvedByPolicy.action === 'upload') {
+                plan.upload.push({
+                    path,
+                    reason: resolvedByPolicy.policy === 'ours'
+                        ? 'local-and-remote-changed:local-policy-ours'
+                        : 'local-and-remote-changed:local-newer-by-file-time'
+                });
+                return;
+            }
+            if (resolvedByPolicy.action === 'download') {
+                plan.download.push({
+                    path,
+                    reason: resolvedByPolicy.policy === 'theirs'
+                        ? 'local-and-remote-changed:remote-policy-theirs'
+                        : 'local-and-remote-changed:remote-newer-by-file-time'
+                });
+                return;
+            }
+            if (resolvedByPolicy.action === 'deleteRemote') {
+                plan.deleteRemote.push({
+                    path,
+                    reason: resolvedByPolicy.policy === 'ours'
+                        ? 'local-and-remote-changed:local-delete-policy-ours'
+                        : 'local-and-remote-changed:local-delete-newer-by-file-time'
+                });
+                return;
+            }
+            if (resolvedByPolicy.action === 'deleteLocal') {
+                plan.deleteLocal.push({
+                    path,
+                    reason: resolvedByPolicy.policy === 'theirs'
+                        ? 'local-and-remote-changed:remote-delete-policy-theirs'
+                        : 'local-and-remote-changed:remote-delete-newer-by-file-time'
+                });
+                return;
+            }
+
+            plan.conflict.push({
+                path,
+                reason: 'local-and-remote-changed',
+                policy: resolvedByPolicy.policy,
+                localDirtyAt: Math.max(
+                    0,
+                    Number(resolvedByPolicy.localDirtyAt) || getDirtyPathUpdatedAt(options.localDirtyState || null, path)
+                ),
+                remoteCommittedAt: Math.max(
+                    0,
+                    Number(resolvedByPolicy.remoteCommittedAt) || Number(options.remoteCommittedAtByPath && options.remoteCommittedAtByPath[path]) || 0
+                )
+            });
         });
 
         return plan;
+    }
+
+    async function readRemoteCommittedAtByPath(pathInput) {
+        const path = normalizeSyncPath(pathInput);
+        if (!path) return 0;
+        try {
+            const response = await sendRuntimeMessage({
+                action: 'canvasGitReadRemoteSignal',
+                rootPath: path
+            }, 30000);
+            if (!response || response.success !== true) return 0;
+            return Math.max(0, Number(response.committedAt) || 0);
+        } catch (_) {
+            return 0;
+        }
+    }
+
+    async function readRemoteCommittedAtMapByPaths(pathsInput) {
+        const paths = uniqueStringList(pathsInput, normalizeSyncPath);
+        const map = {};
+        if (!paths.length) return map;
+
+        const queue = paths.slice();
+        const workerCount = Math.max(1, Math.min(6, queue.length));
+        const workers = new Array(workerCount).fill(0).map(async () => {
+            while (queue.length) {
+                const path = queue.shift();
+                if (!path) continue;
+                map[path] = await readRemoteCommittedAtByPath(path);
+            }
+        });
+        await Promise.all(workers);
+        return map;
     }
 
     async function buildObsidianPullPlan(trigger) {
@@ -10599,15 +11125,84 @@ Cancel: go back and change the branch name first.`
         const remoteListRaw = await listRemoteObsidianFilesByPath(settings.obsidianExportRoot);
         const remoteList = filterRemoteListForManagedSyncFiles(remoteListRaw, settings.obsidianExportRoot);
         const prevSyncIndex = loadPrevSyncIndex();
-        const plan = buildObsidianFileSyncPlan(localFiles, remoteList.filesByPath, prevSyncIndex);
+        const localDirtyState = loadDirtyState();
+        const structuredPolicyResolver = (path) => getStructuredConflictPolicyByPath(path, settings, settings.obsidianExportRoot);
+        const rawPlan = buildObsidianFileSyncPlan(localFiles, remoteList.filesByPath, prevSyncIndex, {
+            localDirtyState,
+            structuredConflictPolicy: getStructuredConflictPolicySummary(settings),
+            resolveConflictPolicyForPath: structuredPolicyResolver
+        });
+        let plan = rawPlan;
+
+        const newerConflictPaths = uniqueStringList(
+            (Array.isArray(plan.conflict) ? plan.conflict : [])
+                .filter((entry) => ensureStructuredConflictPolicy(entry && entry.policy) === 'newer')
+                .map((entry) => entry && entry.path),
+            normalizeSyncPath
+        );
+        if (newerConflictPaths.length > 0) {
+            const remoteCommittedAtByPath = await readRemoteCommittedAtMapByPaths(newerConflictPaths);
+            plan = buildObsidianFileSyncPlan(localFiles, remoteList.filesByPath, prevSyncIndex, {
+                localDirtyState,
+                structuredConflictPolicy: getStructuredConflictPolicySummary(settings),
+                resolveConflictPolicyForPath: structuredPolicyResolver,
+                remoteCommittedAtByPath,
+                enableDualDirtyTimestampWinner: true
+            });
+        }
 
         return {
             enabled: true,
             trigger: String(trigger || 'pull-plan'),
             localFiles,
             remoteList,
+            rawPlan,
             plan
         };
+    }
+
+    function buildBlankDescriptionChangeHintsFromPullPlan(pullPlanResult) {
+        const result = {};
+        const source = pullPlanResult && typeof pullPlanResult === 'object' ? pullPlanResult : null;
+        if (!source) return result;
+        const plan = source.rawPlan && typeof source.rawPlan === 'object'
+            ? source.rawPlan
+            : (source.plan && typeof source.plan === 'object' ? source.plan : null);
+        if (!plan) return result;
+
+        const pathHintMap = {};
+        const markPathHint = (pathInput, hint) => {
+            const path = normalizeSyncPath(pathInput);
+            if (!path) return;
+            pathHintMap[path] = hint;
+        };
+        const markEntries = (entries, hint, reasonAllow = null) => {
+            const list = Array.isArray(entries) ? entries : [];
+            list.forEach((entry) => {
+                const reason = String(entry && entry.reason || '').trim();
+                if (typeof reasonAllow === 'function' && !reasonAllow(reason)) return;
+                markPathHint(entry && entry.path, hint);
+            });
+        };
+
+        markEntries(plan.upload, 'local-only', (reason) => reason === 'local-changed-only');
+        markEntries(plan.deleteRemote, 'local-only', (reason) => reason === 'local-deleted-only');
+        markEntries(plan.download, 'remote-only', (reason) => reason === 'remote-changed-only');
+        markEntries(plan.deleteLocal, 'remote-only', (reason) => reason === 'remote-deleted-only');
+        markEntries(plan.conflict, 'both');
+
+        const pathMap = loadPathMap();
+        const blankById = (pathMap && pathMap.blankById && typeof pathMap.blankById === 'object')
+            ? pathMap.blankById
+            : {};
+        Object.keys(blankById).forEach((id) => {
+            const path = normalizeSyncPath(blankById[id]);
+            if (!path) return;
+            const hint = pathHintMap[path];
+            if (!hint) return;
+            result[String(id)] = hint;
+        });
+        return result;
     }
 
     function storeConflictRecord(localSnapshot, remoteSnapshot, reason, extra = {}) {
@@ -10763,7 +11358,7 @@ Cancel: go back and change the branch name first.`
         hintEl.textContent = fallbackText || '';
     }
 
-    function updateConflictPanelActionUi(summaryInput, isPreview = false, fallbackHintText = '') {
+    function updateConflictPanelActionUi(summaryInput, isPreview = false, fallbackHintText = '', conflictData = null) {
         latestConflictComparisonSummary = summaryInput && typeof summaryInput === 'object' ? summaryInput : null;
         const baselineOnly = !isPreview && isBaselineOnlyComparisonSummary(latestConflictComparisonSummary);
         const remoteBtn = getElement('canvasSyncConflictUseRemoteBtn');
@@ -10795,7 +11390,7 @@ Cancel: go back and change the branch name first.`
         );
         setSyncActionTextHtml(
             'canvasSyncConflictUseNewestText',
-            `<span class="canvas-sync-action-keyword">${escapeHtml(textByLang('按最近修改时间', 'Use Latest Modified'))}</span>${escapeHtml(textByLang('决定', ' Decide'))}`
+            `<span class="canvas-sync-action-keyword">${escapeHtml(textByLang('按时间规则', 'Use Time Rule'))}</span>${escapeHtml(textByLang('决定', ' Decide'))}`
         );
         if (dismissText) {
             dismissText.textContent = isPreview
@@ -10809,15 +11404,20 @@ Cancel: go back and change the branch name first.`
             const modeText = formatDescriptionConflictPolicyForDisplay(settings && settings.blankCardSourceConflictPolicy);
             const fallbackText = formatDescriptionMergeFallbackForDisplay(settings && settings.blankCardSourceMergeFallback);
             descHint.textContent = textByLang(
-                `说明类仅在本地和云端都改时处理。当前：${modeText}，${fallbackText}。若使用“冲突副本”，会在对应源卡右侧新建冲突卡片，不会改写原说明字段。`,
-                `Description handling applies only when both local and cloud changed. Current: ${modeText}, ${fallbackText}. If conflict-copy is used, a conflict card is created to the right of the source card instead of rewriting source fields.`
+                `空白卡源码仅在本地和云端都改时处理。当前：${modeText}，${fallbackText}。若使用“冲突副本”，会在对应源卡右侧新建冲突卡片，不会改写原源码字段。`,
+                `Blank-card source handling applies only when both local and cloud changed. Current: ${modeText}, ${fallbackText}. If conflict-copy is used, a conflict card is created to the right of the source card instead of rewriting source content.`
             );
         }
         if (structuredHint) {
-            const structuredText = formatConflictPolicyForDisplay(getEffectiveStructuredConflictPolicy(settings));
+            const structuredSummaryPolicy = getStructuredConflictPolicySummary(settings);
+            const structuredText = formatConflictPolicyForDisplay(structuredSummaryPolicy);
+            const scopedText = formatStructuredPolicyScopeSummary(settings);
+            const conflictPaths = uniqueStringList(conflictData && conflictData.fileConflicts, normalizeSyncPath);
+            const scopeCounts = buildConflictScopeCounts(conflictPaths, settings && settings.obsidianExportRoot);
+            const scopeCountText = formatConflictScopeCountsInline(scopeCounts);
             structuredHint.textContent = textByLang(
-                `结构化数据仅在双端都改时按策略处理。当前：${structuredText}。单边变化会自动同步。`,
-                `Structured data uses this policy only when both local and cloud changed. Current: ${structuredText}. One-sided changes sync automatically.`
+                `结构化数据（永久栏目及副本 / 临时栏目 / .canvas）仅在双端都改时按策略处理。当前：${structuredText}；${scopedText}。当前待处理冲突分布：${scopeCountText}。按时间模式：本地=文件变脏时间，云端=该路径最近 commit 时间。单边变化会自动同步。`,
+                `Structured data (permanent+copies / temporary / .canvas) is handled only when both local and cloud changed. Current: ${structuredText}; ${scopedText}. Pending conflict distribution: ${scopeCountText}. In time mode: local=file dirty time, cloud=latest commit time on that path. One-sided changes sync automatically.`
             );
         }
         configureBaselineOnlyHint(hintEl, baselineOnly, fallbackHintText);
@@ -11099,12 +11699,12 @@ Cancel: go back and change the branch name first.`
         if (detectedAt) detectedAt.textContent = formatTime(conflictData.createdAt);
 
         const localLatestTs = Math.max(
-            Number(conflictData.localMeta && conflictData.localMeta.updatedAt) || 0,
-            Number(runtime && runtime.lastLocalMutationAt) || 0
+            getLatestLocalDirtyTimestamp(),
+            Number(conflictData.localMeta && conflictData.localMeta.updatedAt) || 0
         );
-        const remoteLatestTs = Math.max(
-            Number(runtime && runtime.lastRemoteCommittedAt) || 0,
-            Number(conflictData.remoteMeta && conflictData.remoteMeta.updatedAt) || 0
+        const remoteLatestTs = getLatestRemoteTimestampForWinner(
+            conflictData && conflictData.remoteMeta ? conflictData.remoteMeta : null,
+            { remoteUpdatedAt: Number(conflictData.remoteMeta && conflictData.remoteMeta.updatedAt) || 0 }
         );
         if (!conflictPreview && !(Number(runtime && runtime.lastRemoteCommittedAt) > 0)) {
             void ensureLatestRemoteCommittedAt(conflictData && conflictData.remotePath ? conflictData.remotePath : (settings && settings.obsidianExportRoot)).then((committedAt) => {
@@ -11157,7 +11757,7 @@ Cancel: go back and change the branch name first.`
             localUpdatedAt: localLatestTs,
             remoteUpdatedAt: remoteLatestTs
         }));
-        updateConflictPanelActionUi(comparisonSummary, conflictPreview, permanentHintText);
+        updateConflictPanelActionUi(comparisonSummary, conflictPreview, permanentHintText, conflictData);
         renderConflictFinePanel(conflictData, conflictPreview);
 
         updatePreviewActionButtonState();
@@ -11904,6 +12504,9 @@ Cancel: go back and change the branch name first.`
         const baseSnapshot = normalizeSnapshot(baseSnapshotInput || { data: {} });
         const localSnapshot = normalizeSnapshot(localSnapshotInput || { data: {} });
         const remoteSnapshot = normalizeSnapshot(remoteSnapshotInput || { data: {} });
+        const blankChangeHints = options && options.blankChangeHints && typeof options.blankChangeHints === 'object'
+            ? options.blankChangeHints
+            : null;
         const providedBaseMap = options && options.baseMap && typeof options.baseMap === 'object'
             ? options.baseMap
             : null;
@@ -12007,6 +12610,16 @@ Cancel: go back and change the branch name first.`
         setTargets.forEach((target) => {
             const key = target.key;
             const currentValue = target.getCurrent();
+            const hasResolvedBase = !!(providedBaseMap && hasOwnProvidedBase.call(providedBaseMap, key));
+            const hintForTarget = (() => {
+                if (!blankChangeHints) return '';
+                if (!target || target.kind !== 'md') return '';
+                const id = String(target.refId || '').trim();
+                if (!id) return '';
+                const raw = String(blankChangeHints[id] || '').trim().toLowerCase();
+                if (raw === 'local-only' || raw === 'remote-only' || raw === 'both') return raw;
+                return '';
+            })();
             const baseValue = providedBaseMap && hasOwnProvidedBase.call(providedBaseMap, key)
                 ? normalizeDescriptionTextForMerge(providedBaseMap[key])
                 : currentValue;
@@ -12033,23 +12646,43 @@ Cancel: go back and change the branch name first.`
                 }
                 nextValue = currentValue;
             } else {
-                const merged = mergeDescriptionTexts(baseValue, localValue, remoteValue);
-                if (merged.unresolved) {
-                    if (fallbackPolicy === 'manual') {
+                // Without a reliable BASE, never auto-merge divergent edits.
+                if (!hasResolvedBase && localValue !== remoteValue) {
+                    if (hintForTarget === 'local-only') {
+                        nextValue = localValue;
+                    } else if (hintForTarget === 'remote-only') {
+                        nextValue = remoteValue;
+                    } else if (fallbackPolicy === 'manual') {
                         requiresManual = true;
                         return;
+                    } else {
+                        const appended = appendConflictCopyCardByValues(target, localValue, remoteValue, 'merge-missing-base');
+                        if (!appended) {
+                            requiresManual = true;
+                            return;
+                        }
+                        nextValue = currentValue;
+                        fallbackCount += 1;
                     }
-                    const appended = appendConflictCopyCardByValues(target, localValue, remoteValue, 'merge-fallback');
-                    if (!appended) {
-                        requiresManual = true;
-                        return;
-                    }
-                    nextValue = currentValue;
-                    fallbackCount += 1;
                 } else {
-                    nextValue = merged.text;
-                    if (merged.merged && localValue !== remoteValue) {
-                        mergedCount += 1;
+                    const merged = mergeDescriptionTexts(baseValue, localValue, remoteValue);
+                    if (merged.unresolved) {
+                        if (fallbackPolicy === 'manual') {
+                            requiresManual = true;
+                            return;
+                        }
+                        const appended = appendConflictCopyCardByValues(target, localValue, remoteValue, 'merge-fallback');
+                        if (!appended) {
+                            requiresManual = true;
+                            return;
+                        }
+                        nextValue = currentValue;
+                        fallbackCount += 1;
+                    } else {
+                        nextValue = merged.text;
+                        if (merged.merged && localValue !== remoteValue) {
+                            mergedCount += 1;
+                        }
                     }
                 }
             }
@@ -12090,16 +12723,22 @@ Cancel: go back and change the branch name first.`
         };
     }
 
-    function decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged = false, remoteChanged = false, syncMethod = settings.syncMethod) {
+    function decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged = false, remoteChanged = false, syncMethod = settings.syncMethod, options = {}) {
         const structuredPolicy = getEffectiveStructuredConflictPolicy(settings);
+        const localTs = Math.max(
+            0,
+            Number(options && options.localUpdatedAt) || 0,
+            getLatestLocalDirtyTimestamp(options && options.localDirtyState ? options.localDirtyState : null)
+        );
+        const remoteTs = getLatestRemoteTimestampForWinner(remoteSnapshot, {
+            remoteUpdatedAt: Number(options && options.remoteUpdatedAt) || 0
+        });
+
         if (concurrentChanged) {
             if (structuredPolicy === 'ours') return 'local';
             if (structuredPolicy === 'theirs') return 'remote';
             if (structuredPolicy === 'newer') {
-                return decideWinnerByLatestModified(
-                    Number(localSnapshot && localSnapshot.updatedAt) || 0,
-                    Number(remoteSnapshot && remoteSnapshot.updatedAt) || 0
-                );
+                return decideWinnerByLatestModified(localTs, remoteTs);
             }
             return '';
         }
@@ -12109,8 +12748,6 @@ Cancel: go back and change the branch name first.`
         if (localChanged && !remoteChanged) return 'local';
         if (remoteChanged && !localChanged) return 'remote';
 
-        const localTs = Number(localSnapshot.updatedAt) || 0;
-        const remoteTs = Number(remoteSnapshot.updatedAt) || 0;
         const localBytes = getSnapshotBytes(localSnapshot);
         const remoteBytes = getSnapshotBytes(remoteSnapshot);
 
@@ -12122,7 +12759,8 @@ Cancel: go back and change the branch name first.`
 
         if (localTs === remoteTs) {
             if (localBytes === remoteBytes) return 'local';
-            return localBytes > remoteBytes ? 'local' : 'remote';
+            // Time rule requires a strict winner; same timestamp with different content must be manual.
+            return '';
         }
         return localTs > remoteTs ? 'local' : 'remote';
     }
@@ -12187,14 +12825,24 @@ Cancel: go back and change the branch name first.`
         const remoteSha = String(remoteState && remoteState.sha || '');
         const hasLocalBase = !!runtime.lastLocalHash;
         const hasRemoteBase = !!runtime.lastRemoteSha;
-        const localDirty = hasLocalDirtyWork();
-        const localChanged = !snapshotsMatch && hasLocalBase && runtime.lastLocalHash !== nextLocalHash;
+        const localDirtyState = loadDirtyState();
+        const localDirty = hasLocalDirtyWork(localDirtyState);
+        const localChangedByHash = !snapshotsMatch && hasLocalBase && runtime.lastLocalHash !== nextLocalHash;
+        const localChanged = localChangedByHash && localDirty;
         const remoteChanged = !snapshotsMatch && hasRemoteBase && !!remoteSha && runtime.lastRemoteSha !== remoteSha;
         const concurrentChanged = localChanged && remoteChanged;
         const localUntracked = !snapshotsMatch && !hasLocalBase && localDirty;
         const remoteUntracked = !snapshotsMatch && !hasRemoteBase && !!remoteSha;
+        const localUpdatedAtForWinner = getLatestLocalDirtyTimestamp(localDirtyState);
+        const remoteUpdatedAtForWinner = getLatestRemoteTimestampForWinner(remoteSnapshot, {
+            remoteUpdatedAt: Number(remoteSnapshot && remoteSnapshot.updatedAt) || 0
+        });
         const winner = remoteExists
-            ? decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged, remoteChanged, syncMethod)
+            ? decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged, remoteChanged, syncMethod, {
+                localUpdatedAt: localUpdatedAtForWinner,
+                remoteUpdatedAt: remoteUpdatedAtForWinner,
+                localDirtyState
+            })
             : 'local';
 
         return {
@@ -12206,11 +12854,14 @@ Cancel: go back and change the branch name first.`
             hasLocalBase,
             hasRemoteBase,
             localDirty,
+            localChangedByHash,
             localChanged,
             remoteChanged,
             concurrentChanged,
             localUntracked,
             remoteUntracked,
+            localUpdatedAtForWinner,
+            remoteUpdatedAtForWinner,
             winner
         };
     }
@@ -12237,8 +12888,8 @@ Cancel: go back and change the branch name first.`
             resolvedChoice = latestDecision.choice;
             if (!resolvedChoice) {
                 toast(textByLang(
-                    '无法按最近修改时间自动裁决：两边时间相同或时间信息不足，请手动选择本地或云端',
-                    'Cannot resolve by latest modification time: timestamps are tied or unavailable. Choose local or cloud manually.'
+                    '无法按时间规则自动裁决：两边时间相同或时间信息不足（本地脏时间/云端 commit 时间），请手动选择本地或云端',
+                    'Cannot resolve by time rule: timestamps are tied or unavailable (local dirty time / cloud commit time). Choose local or cloud manually.'
                 ));
                 renderConflictPanel();
                 return;
@@ -12260,6 +12911,13 @@ Cancel: go back and change the branch name first.`
             let localSnapshot = normalizeSnapshot(pendingConflict.localSnapshot);
             let remoteSnapshot = normalizeSnapshot(pendingConflict.remoteSnapshot);
             let descriptionResolvedChoice = null;
+            let descriptionBlankChangeHints = null;
+            try {
+                const conflictPullPlan = await buildObsidianPullPlan('manual-conflict-description-hints');
+                descriptionBlankChangeHints = buildBlankDescriptionChangeHintsFromPullPlan(conflictPullPlan);
+            } catch (_) {
+                descriptionBlankChangeHints = null;
+            }
             if (resolvedChoice === 'local' || resolvedChoice === 'remote') {
                 const descriptionBaseMap = await resolveDescriptionBaseMapForGitHub(
                     resolvedChoice === 'local' ? localSnapshot : remoteSnapshot,
@@ -12270,7 +12928,10 @@ Cancel: go back and change the branch name first.`
                     resolvedChoice === 'local' ? localSnapshot : remoteSnapshot,
                     localSnapshot,
                     remoteSnapshot,
-                    { baseMap: descriptionBaseMap }
+                    {
+                        baseMap: descriptionBaseMap,
+                        blankChangeHints: descriptionBlankChangeHints
+                    }
                 );
                 descriptionResolvedChoice = descriptionResolved;
                 runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
@@ -12440,8 +13101,8 @@ Cancel: go back and change the branch name first.`
 
             if (requestedChoice === 'newer') {
                 toast(resolvedChoice === 'local'
-                    ? textByLang('冲突已处理：按最近修改时间决定，本地更新更晚，已保留本地并覆盖云端', 'Conflict resolved by latest modification time: local is newer, so local overwrote cloud')
-                    : textByLang('冲突已处理：按最近修改时间决定，云端更新更晚，已使用云端覆盖本地', 'Conflict resolved by latest modification time: cloud is newer, so cloud overwrote local'));
+                    ? textByLang('冲突已处理：按时间规则决定（本地脏时间 vs 云端 commit 时间），本地更新更晚，已保留本地并覆盖云端', 'Conflict resolved by time rule (local dirty time vs cloud commit time): local is newer, so local overwrote cloud')
+                    : textByLang('冲突已处理：按时间规则决定（本地脏时间 vs 云端 commit 时间），云端更新更晚，已使用云端覆盖本地', 'Conflict resolved by time rule (local dirty time vs cloud commit time): cloud is newer, so cloud overwrote local'));
             } else {
                 toast(resolvedChoice === 'local'
                     ? textByLang('冲突已处理：已保留本地并覆盖云端', 'Conflict resolved: kept local and overwrote remote')
@@ -12556,6 +13217,7 @@ Cancel: go back and change the branch name first.`
         const effectiveMode = mode;
         const syncMethod = DEFAULT_SETTINGS.syncMethod;
         const structuredPolicy = getEffectiveStructuredConflictPolicy(settings);
+        const structuredPolicySummary = getStructuredConflictPolicySummary(settings);
 
         try {
             const rawRepoConfig = await storageLocalGet(REPO_CONFIG_KEYS);
@@ -12831,7 +13493,6 @@ Cancel: go back and change the branch name first.`
                     pullPlanResult
                     && pullPlanResult.enabled
                     && !bypassPullPlanConflictCheck
-                    && structuredPolicy === 'none'
                     && pullPlanResult.plan
                     && Array.isArray(pullPlanResult.plan.conflict)
                     && pullPlanResult.plan.conflict.length > 0
@@ -12859,7 +13520,7 @@ Cancel: go back and change the branch name first.`
                     }));
                     storeConflictRecord(localSnapshot, remoteState.snapshot, 'pending-file-conflict', {
                         remoteSha: remoteState.sha || '',
-                        strategy: structuredPolicy,
+                        strategy: structuredPolicySummary,
                         syncMethod,
                         filePlanSummary
                     });
@@ -13081,11 +13742,25 @@ Cancel: go back and change the branch name first.`
                     const pushPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
                     localHash = pushPreflight.localHash;
 
-                    if (!pushPreflight.winner) {
+                    if (!pushPreflight.localDirty && pushPreflight.remoteChanged) {
+                        runtime.lastError = textByLang(
+                            '检测到云端已更新且本地无未同步改动，已阻止上传以避免把云端回滚到旧版本；请改用“同步”或“仅拉取”刷新本地。',
+                            'Cloud is newer and local has no unsynced changes. Upload was blocked to avoid reverting cloud to an older state; run Sync or Pull instead.'
+                        );
+                        pendingReasons.clear();
+                        runtime.queueLength = 0;
+                        saveRuntime();
+                        renderStatus();
+                        toast(textByLang(
+                            '已阻止本次上传：云端更晚且本地未变脏，请先拉取',
+                            'Upload blocked: cloud is newer and local is clean. Pull first.'
+                        ));
+                        allowPushOnly = false;
+                    } else if (!pushPreflight.winner) {
                         setPendingConflict(createPendingConflictPayload(localSnapshot, pushPreflight.remoteSnapshot, remoteState));
                         storeConflictRecord(localSnapshot, pushPreflight.remoteSnapshot, 'pending-manual', {
                             remoteSha: pushPreflight.remoteSha || remoteState.sha || '',
-                            strategy: structuredPolicy,
+                            strategy: structuredPolicySummary,
                             syncMethod
                         });
                         runtime.lastAppliedDirection = 'conflict';
@@ -13137,12 +13812,10 @@ Cancel: go back and change the branch name first.`
                 }
             } else {
                 let handledByFastFullPath = false;
+                // Safety-first: full sync must always read cloud state and run conflict checks.
+                // Signal fast-push is kept for explicit push mode, but disabled for full mode.
                 if (effectiveMode === 'full') {
-                    const fastFullResult = await tryHandleManualSignalFastPush('local newer push (signal fast-path)');
-                    if (fastFullResult && fastFullResult.handled) {
-                        actionText = fastFullResult.actionText;
-                        handledByFastFullPath = true;
-                    }
+                    handledByFastFullPath = false;
                 }
 
                 if (!handledByFastFullPath) {
@@ -13206,7 +13879,7 @@ Cancel: go back and change the branch name first.`
                                 setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState));
                                 storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
                                     remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
-                                    strategy: structuredPolicy,
+                                    strategy: structuredPolicySummary,
                                     syncMethod
                                 });
                                 runtime.lastAppliedDirection = 'conflict';
@@ -13281,7 +13954,7 @@ Cancel: go back and change the branch name first.`
                             setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState));
                             storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
                                 remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
-                                strategy: structuredPolicy,
+                                strategy: structuredPolicySummary,
                                 syncMethod
                             });
                             runtime.lastAppliedDirection = 'conflict';
@@ -13379,12 +14052,104 @@ Cancel: go back and change the branch name first.`
                             runtime.lastAppliedDirection = 'noop';
                             actionText = 'noop';
                         } else {
+                            let handledByFilePlanGuard = false;
+                            if (effectiveMode === 'full' && settings.obsidianFilePushEnabled !== false) {
+                                try {
+                                    const fullModePullPlan = await buildObsidianPullPlan(`${trigger || 'sync'}:full-mode-guard`);
+                                    const guardPlan = fullModePullPlan && fullModePullPlan.enabled && fullModePullPlan.plan
+                                        ? fullModePullPlan.plan
+                                        : null;
+                                    if (guardPlan) {
+                                        const guardConflictCount = Array.isArray(guardPlan.conflict) ? guardPlan.conflict.length : 0;
+                                        const guardLocalOpCount = (Array.isArray(guardPlan.upload) ? guardPlan.upload.length : 0)
+                                            + (Array.isArray(guardPlan.deleteRemote) ? guardPlan.deleteRemote.length : 0);
+                                        const guardRemoteOpCount = (Array.isArray(guardPlan.download) ? guardPlan.download.length : 0)
+                                            + (Array.isArray(guardPlan.deleteLocal) ? guardPlan.deleteLocal.length : 0);
+
+                                        if (guardConflictCount > 0) {
+                                            actionText = await doPull(remoteState, 'pull (file-plan conflict)', fullModePullPlan);
+                                            handledByFilePlanGuard = true;
+                                        } else if (guardRemoteOpCount > 0 && guardLocalOpCount === 0) {
+                                            actionText = await doPull(remoteState, 'remote newer pull (file plan)', fullModePullPlan);
+                                            handledByFilePlanGuard = true;
+                                        } else if (guardLocalOpCount > 0 && guardRemoteOpCount === 0) {
+                                            actionText = await doPush('local newer push (file plan)', {
+                                                remoteFilesByPathForMissingCheck
+                                            });
+                                            handledByFilePlanGuard = true;
+                                        } else if (guardRemoteOpCount > 0 && guardLocalOpCount > 0) {
+                                            const mixedConflictPaths = uniqueStringList(
+                                                []
+                                                    .concat(Array.isArray(guardPlan.upload) ? guardPlan.upload.map((item) => item && item.path) : [])
+                                                    .concat(Array.isArray(guardPlan.deleteRemote) ? guardPlan.deleteRemote.map((item) => item && item.path) : [])
+                                                    .concat(Array.isArray(guardPlan.download) ? guardPlan.download.map((item) => item && item.path) : [])
+                                                    .concat(Array.isArray(guardPlan.deleteLocal) ? guardPlan.deleteLocal.map((item) => item && item.path) : []),
+                                                normalizeSyncPath
+                                            );
+                                            const mixedConflictEntries = mixedConflictPaths.map((path) => ({
+                                                path,
+                                                reason: 'mixed-file-plan-direction'
+                                            }));
+                                            const mixedPlanResult = Object.assign({}, fullModePullPlan, {
+                                                plan: Object.assign({}, guardPlan, {
+                                                    conflict: mixedConflictEntries
+                                                })
+                                            });
+                                            actionText = await doPull(remoteState, 'pull (file-plan mixed conflict)', mixedPlanResult);
+                                            handledByFilePlanGuard = true;
+                                        }
+                                    }
+                                } catch (error) {
+                                    console.warn('[Canvas Sync] full-mode file plan guard failed:', error);
+                                }
+                            }
+
+                            if (handledByFilePlanGuard) {
+                                // Already resolved by file-level guard (push/pull/conflict).
+                            } else {
                             const hasLocalBase = !!runtime.lastLocalHash;
                             const hasRemoteBase = !!runtime.lastRemoteSha;
-                            const localChanged = hasLocalBase && runtime.lastLocalHash !== localHash;
+                            const localDirtyState = loadDirtyState();
+                            const localDirty = hasLocalDirtyWork(localDirtyState);
+                            const localChanged = (hasLocalBase && runtime.lastLocalHash !== localHash) && localDirty;
                             const remoteChanged = hasRemoteBase && remoteState.sha && runtime.lastRemoteSha !== remoteState.sha;
                             const concurrentChanged = localChanged && remoteChanged;
                             const canUseDirtyMatrix = hasLocalBase && hasRemoteBase && !!remoteState.sha;
+                            const localUpdatedAtForWinner = getLatestLocalDirtyTimestamp(localDirtyState);
+                            const remoteUpdatedAtForWinner = getLatestRemoteTimestampForWinner(remoteSnapshot, {
+                                remoteUpdatedAt: Number(remoteSnapshot && remoteSnapshot.updatedAt) || 0
+                            });
+
+                            if (effectiveMode === 'full' && !canUseDirtyMatrix) {
+                                const uncertainFileSummary = await buildConflictFileSummaryFromCurrentPlan('full-mode-uncertain-baseline');
+                                setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
+                                    reason: 'full-mode-uncertain-baseline',
+                                    fileConflicts: uncertainFileSummary.fileConflicts,
+                                    filePlanSummary: uncertainFileSummary.filePlanSummary || undefined
+                                }));
+                                storeConflictRecord(localSnapshot, remoteSnapshot, 'pending-manual', {
+                                    remoteSha: remoteState.sha || '',
+                                    strategy: structuredPolicySummary,
+                                    syncMethod,
+                                    note: 'full-mode-uncertain-baseline'
+                                });
+                                runtime.lastAppliedDirection = 'conflict';
+                                runtime.lastError = textByLang(
+                                    '当前缺少可靠基线（本地或云端版本指针不足），已暂停自动裁决；请在冲突面板选择处理方式',
+                                    'Reliable baseline is unavailable (local or cloud revision pointer is insufficient). Auto resolution is paused; choose an action in the conflict panel.'
+                                );
+                                pendingReasons.clear();
+                                runtime.queueLength = 0;
+                                saveRuntime();
+                                renderStatus();
+                                renderConflictPanel();
+                                openPanel({ activeTab: 'status' });
+                                toast(textByLang(
+                                    '检测到基线不完整：为防止误覆盖，已转入冲突面板',
+                                    'Baseline is incomplete: switched to conflict panel to prevent accidental overwrite.'
+                                ));
+                                return;
+                            }
 
                             if (canUseDirtyMatrix && localChanged && !remoteChanged) {
                                 actionText = await doPush(
@@ -13404,8 +14169,20 @@ Cancel: go back and change the branch name first.`
                                     true,
                                     localChanged,
                                     remoteChanged,
-                                    syncMethod
+                                    syncMethod,
+                                    {
+                                        localUpdatedAt: localUpdatedAtForWinner,
+                                        remoteUpdatedAt: remoteUpdatedAtForWinner,
+                                        localDirtyState
+                                    }
                                 );
+                                let dualDirtyBlankChangeHints = null;
+                                try {
+                                    const dualDirtyPullPlan = await buildObsidianPullPlan('dual-dirty-description-hints');
+                                    dualDirtyBlankChangeHints = buildBlankDescriptionChangeHintsFromPullPlan(dualDirtyPullPlan);
+                                } catch (_) {
+                                    dualDirtyBlankChangeHints = null;
+                                }
                                 if (dualDirtyWinner === 'local') {
                                     const descriptionBaseMap = await resolveDescriptionBaseMapForGitHub(
                                         localSnapshot,
@@ -13416,7 +14193,10 @@ Cancel: go back and change the branch name first.`
                                         localSnapshot,
                                         localSnapshot,
                                         remoteSnapshot,
-                                        { baseMap: descriptionBaseMap }
+                                        {
+                                            baseMap: descriptionBaseMap,
+                                            blankChangeHints: dualDirtyBlankChangeHints
+                                        }
                                     );
                                     runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
                                     runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
@@ -13463,7 +14243,10 @@ Cancel: go back and change the branch name first.`
                                         remoteSnapshot,
                                         localSnapshot,
                                         remoteSnapshot,
-                                        { baseMap: descriptionBaseMap }
+                                        {
+                                            baseMap: descriptionBaseMap,
+                                            blankChangeHints: dualDirtyBlankChangeHints
+                                        }
                                     );
                                     runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
                                     runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
@@ -13519,7 +14302,7 @@ Cancel: go back and change the branch name first.`
                                     }));
                                     storeConflictRecord(localSnapshot, remoteSnapshot, 'pending-manual', {
                                         remoteSha: remoteState.sha || '',
-                                        strategy: structuredPolicy,
+                                        strategy: structuredPolicySummary,
                                         syncMethod
                                     });
                                     runtime.lastAppliedDirection = 'conflict';
@@ -13542,7 +14325,11 @@ Cancel: go back and change the branch name first.`
                             } else if (!concurrentChanged && syncMethod === 'reset' && remoteChanged && !localChanged) {
                                 actionText = await doResetHead(remoteState);
                             } else {
-                                const winner = decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged, remoteChanged, syncMethod);
+                                const winner = decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged, remoteChanged, syncMethod, {
+                                    localUpdatedAt: localUpdatedAtForWinner,
+                                    remoteUpdatedAt: remoteUpdatedAtForWinner,
+                                    localDirtyState
+                                });
                                 if (!winner) {
                                     setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState));
                                     runtime.lastAppliedDirection = 'conflict';
@@ -13574,6 +14361,7 @@ Cancel: go back and change the branch name first.`
                                             : 'remote newer pull'
                                     );
                                 }
+                            }
                             }
                         }
                     }
@@ -14423,6 +15211,9 @@ Cancel: go back and change the branch name first.`
 	            'canvasSyncFirstSyncModeLocalInput',
             'canvasSyncToastToggle',
             'canvasSyncStructuredConflictPolicySelect',
+            'canvasSyncStructuredConflictPolicyPermanentSelect',
+            'canvasSyncStructuredConflictPolicyTemporarySelect',
+            'canvasSyncStructuredConflictPolicyCanvasSelect',
             'canvasSyncDescriptionConflictPolicySelect',
             'canvasSyncDescriptionMergeFallbackSelect',
             'canvasSyncPermanentPullModeSelect',
@@ -14433,7 +15224,7 @@ Cancel: go back and change the branch name first.`
             const el = getElement(id);
             if (!el) return;
             el.addEventListener('change', () => {
-                pullSettingsFromForm();
+                pullSettingsFromForm({ changedFieldId: id });
                 toast(textByLang('同步设置已保存', 'Sync settings saved'), { optional: true });
             });
         });
@@ -14442,7 +15233,7 @@ Cancel: go back and change the branch name first.`
         if (obsidianExportFormatSelect) {
             sanitizeSyncExportFormatSelect(obsidianExportFormatSelect);
             obsidianExportFormatSelect.addEventListener('change', () => {
-                pullSettingsFromForm();
+                pullSettingsFromForm({ changedFieldId: 'canvasSyncObsidianExportFormatSelect' });
                 toast(textByLang('同步设置已保存', 'Sync settings saved'), { optional: true });
             });
         }
@@ -14769,12 +15560,49 @@ Cancel: go back and change the branch name first.`
         },
         getSettings: () => Object.assign({}, settings || loadSettings()),
         updateSettings: (patch) => {
-            settings = Object.assign({}, settings || loadSettings(), patch || {});
-            settings.structuredConflictPolicy = ensureStructuredConflictPolicy(settings.structuredConflictPolicy);
+            const patchObject = (patch && typeof patch === 'object') ? patch : {};
+            const hasOwnPatch = Object.prototype.hasOwnProperty;
+            settings = Object.assign({}, settings || loadSettings(), patchObject);
+            const structuredPolicyCandidate = hasOwnPatch.call(patchObject, 'structuredConflictPolicy')
+                ? patchObject.structuredConflictPolicy
+                : (hasOwnPatch.call(patchObject, 'conflictPolicy') ? patchObject.conflictPolicy : settings.structuredConflictPolicy);
+            const structuredPermanentCandidate = hasOwnPatch.call(patchObject, 'structuredConflictPolicyPermanent')
+                ? patchObject.structuredConflictPolicyPermanent
+                : settings.structuredConflictPolicyPermanent;
+            const structuredTemporaryCandidate = hasOwnPatch.call(patchObject, 'structuredConflictPolicyTemporary')
+                ? patchObject.structuredConflictPolicyTemporary
+                : settings.structuredConflictPolicyTemporary;
+            const structuredCanvasCandidate = hasOwnPatch.call(patchObject, 'structuredConflictPolicyCanvas')
+                ? patchObject.structuredConflictPolicyCanvas
+                : settings.structuredConflictPolicyCanvas;
+            const blankSourcePolicyCandidate = hasOwnPatch.call(patchObject, 'blankCardSourceConflictPolicy')
+                ? patchObject.blankCardSourceConflictPolicy
+                : (hasOwnPatch.call(patchObject, 'descriptionConflictPolicy') ? patchObject.descriptionConflictPolicy : settings.blankCardSourceConflictPolicy);
+            const blankSourceFallbackCandidate = hasOwnPatch.call(patchObject, 'blankCardSourceMergeFallback')
+                ? patchObject.blankCardSourceMergeFallback
+                : (hasOwnPatch.call(patchObject, 'descriptionMergeFallback') ? patchObject.descriptionMergeFallback : settings.blankCardSourceMergeFallback);
+
+            const normalizedStructuredTopPolicy = ensureStructuredConflictPolicy(structuredPolicyCandidate, { allowCustom: true });
+            let nextPermanentPolicy = ensureStructuredConflictPolicy(structuredPermanentCandidate);
+            let nextTemporaryPolicy = ensureStructuredConflictPolicy(structuredTemporaryCandidate);
+            let nextCanvasPolicy = ensureStructuredConflictPolicy(structuredCanvasCandidate);
+            if (normalizedStructuredTopPolicy !== STRUCTURED_CONFLICT_POLICY_CUSTOM) {
+                nextPermanentPolicy = ensureStructuredConflictPolicy(normalizedStructuredTopPolicy);
+                nextTemporaryPolicy = ensureStructuredConflictPolicy(normalizedStructuredTopPolicy);
+                nextCanvasPolicy = ensureStructuredConflictPolicy(normalizedStructuredTopPolicy);
+            }
+            settings.structuredConflictPolicyPermanent = nextPermanentPolicy;
+            settings.structuredConflictPolicyTemporary = nextTemporaryPolicy;
+            settings.structuredConflictPolicyCanvas = nextCanvasPolicy;
+            settings.structuredConflictPolicy = deriveStructuredConflictPolicySummary(
+                settings.structuredConflictPolicyPermanent,
+                settings.structuredConflictPolicyTemporary,
+                settings.structuredConflictPolicyCanvas
+            );
             settings.syncMethod = DEFAULT_SETTINGS.syncMethod;
             settings.toastEnabled = settings.toastEnabled !== false;
-            settings.blankCardSourceConflictPolicy = ensureDescriptionConflictPolicy(settings.blankCardSourceConflictPolicy);
-            settings.blankCardSourceMergeFallback = ensureDescriptionMergeFallback(settings.blankCardSourceMergeFallback);
+            settings.blankCardSourceConflictPolicy = ensureDescriptionConflictPolicy(blankSourcePolicyCandidate);
+            settings.blankCardSourceMergeFallback = ensureDescriptionMergeFallback(blankSourceFallbackCandidate);
             settings.firstSyncMode = ensureFirstSyncMode(settings.firstSyncMode);
             settings.permanentPullMode = ensurePermanentPullMode(settings.permanentPullMode);
             settings.permanentIncrementalMaxChanges = normalizePermanentIncrementalMaxChanges(

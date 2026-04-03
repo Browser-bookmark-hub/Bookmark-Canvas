@@ -793,7 +793,16 @@ export async function getRepoBlobBySha({ token, owner, repo, sha }) {
       };
     }
 
-    if (!blobContent || !/^base64$/i.test(blobEncoding || 'base64')) {
+    if (!/^base64$/i.test(blobEncoding || 'base64')) {
+      return {
+        success: false,
+        error: '无法读取 Blob 内容',
+        sha: trimmedSha
+      };
+    }
+
+    // Empty files are valid blobs: size can be 0 with empty base64 payload.
+    if (blobSize > 0 && !blobContent) {
       return {
         success: false,
         error: '无法读取 Blob 内容',

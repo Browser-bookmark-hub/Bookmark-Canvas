@@ -3944,12 +3944,12 @@ const i18n = {
         'en': 'When Both Sides Changed (Structured)'
     },
     canvasSyncStructuredConflictPolicyDesc: {
-        'zh_CN': '仅在本地和云端都改时生效；单边变化会自动同步。适用于永久树/临时树/.canvas。',
-        'en': 'Only applies when both local and cloud changed. One-sided changes sync automatically. Covers permanent tree/temp tree/.canvas.'
+        'zh_CN': '结构化范围包含：永久栏目、永久栏目副本、临时栏目、画布文件（.canvas）。仅在本地和云端都改时生效；单边变化会自动同步。按时间模式下：本地取该文件变脏时间，云端取该文件路径最近一次 GitHub commit（推送）时间。',
+        'en': 'Structured scope includes permanent section, permanent copies, temporary section, and .canvas. It applies only when both local and cloud changed; one-sided changes sync automatically. In time mode, local uses per-file dirty time and cloud uses the latest GitHub commit time on that file path.'
     },
     canvasSyncStructuredConflictPolicyNewerOption: {
-        'zh_CN': '按最近修改时间决定（默认）',
-        'en': 'Decide by latest modified time (default)'
+        'zh_CN': '按时间决定（本地脏时间 vs 云端 commit 时间，默认）',
+        'en': 'Decide by time (local dirty time vs cloud commit time, default)'
     },
     canvasSyncStructuredConflictPolicyOursOption: {
         'zh_CN': '保留本地并覆盖云端',
@@ -3962,6 +3962,70 @@ const i18n = {
     canvasSyncStructuredConflictPolicyNoneOption: {
         'zh_CN': '进入冲突面板手动选',
         'en': 'Open conflict panel and choose manually'
+    },
+    canvasSyncStructuredConflictPolicyCustomOption: {
+        'zh_CN': '自定义（按下方三类子策略）',
+        'en': 'Custom (use the three scope policies below)'
+    },
+    canvasSyncStructuredConflictPolicyPermanentLabel: {
+        'zh_CN': '├─ 永久栏目及其副本',
+        'en': '├─ Permanent section and copies'
+    },
+    canvasSyncStructuredConflictPolicyPermanentNewerOption: {
+        'zh_CN': '按时间决定',
+        'en': 'Use time rule'
+    },
+    canvasSyncStructuredConflictPolicyPermanentOursOption: {
+        'zh_CN': '保留本地',
+        'en': 'Keep local'
+    },
+    canvasSyncStructuredConflictPolicyPermanentTheirsOption: {
+        'zh_CN': '使用云端',
+        'en': 'Use cloud'
+    },
+    canvasSyncStructuredConflictPolicyPermanentNoneOption: {
+        'zh_CN': '手动选择',
+        'en': 'Choose manually'
+    },
+    canvasSyncStructuredConflictPolicyTemporaryLabel: {
+        'zh_CN': '├─ 临时栏目',
+        'en': '├─ Temporary section'
+    },
+    canvasSyncStructuredConflictPolicyTemporaryNewerOption: {
+        'zh_CN': '按时间决定',
+        'en': 'Use time rule'
+    },
+    canvasSyncStructuredConflictPolicyTemporaryOursOption: {
+        'zh_CN': '保留本地',
+        'en': 'Keep local'
+    },
+    canvasSyncStructuredConflictPolicyTemporaryTheirsOption: {
+        'zh_CN': '使用云端',
+        'en': 'Use cloud'
+    },
+    canvasSyncStructuredConflictPolicyTemporaryNoneOption: {
+        'zh_CN': '手动选择',
+        'en': 'Choose manually'
+    },
+    canvasSyncStructuredConflictPolicyCanvasLabel: {
+        'zh_CN': '└─ 画布文件（.canvas）',
+        'en': '└─ Canvas file (.canvas)'
+    },
+    canvasSyncStructuredConflictPolicyCanvasNewerOption: {
+        'zh_CN': '按时间决定',
+        'en': 'Use time rule'
+    },
+    canvasSyncStructuredConflictPolicyCanvasOursOption: {
+        'zh_CN': '保留本地',
+        'en': 'Keep local'
+    },
+    canvasSyncStructuredConflictPolicyCanvasTheirsOption: {
+        'zh_CN': '使用云端',
+        'en': 'Use cloud'
+    },
+    canvasSyncStructuredConflictPolicyCanvasNoneOption: {
+        'zh_CN': '手动选择',
+        'en': 'Choose manually'
     },
     canvasSyncDescriptionConflictPolicyLabel: {
         'zh_CN': '双端都改时（说明类）处理方式',
@@ -3984,8 +4048,8 @@ const i18n = {
         'en': 'Create conflict card (on the right side of source card)'
     },
     canvasSyncDescriptionScopeDesc: {
-        'zh_CN': '说明类包括：永久栏目说明（descriptionMd）、临时栏目说明（descriptionMd）、空白栏目卡片 Markdown 源文（markdownSource）。',
-        'en': 'Description fields include: permanent description (descriptionMd), temporary description (descriptionMd), and blank-card Markdown source (markdownSource).'
+        'zh_CN': '说明类目前仅包含：空白栏目卡片 Markdown 源文（markdownSource）。',
+        'en': 'Description scope currently includes only blank-card Markdown source (markdownSource).'
     },
     canvasSyncDescriptionMergeFallbackLabel: {
         'zh_CN': '说明类自动合并失败时',
@@ -4220,8 +4284,8 @@ const i18n = {
         'en': 'Use Cloud and Overwrite Local'
     },
     canvasSyncConflictDescriptionHint: {
-        'zh_CN': '说明类（永久/临时说明、空白卡 Markdown）在“双端都改”时按当前策略执行。',
-        'en': 'Description fields (permanent/temp descriptions, blank-card Markdown) follow the current rule only when both sides changed.'
+        'zh_CN': '空白卡源码（markdownSource）在“双端都改”时按当前策略执行。',
+        'en': 'Blank-card source (markdownSource) follows the current rule only when both sides changed.'
     },
     canvasSyncConflictDescUseLocalText: {
         'zh_CN': '说明类用本地',
@@ -4236,12 +4300,12 @@ const i18n = {
         'en': 'Create conflict card for description'
     },
     canvasSyncConflictStructuredHint: {
-        'zh_CN': '结构化数据（永久树/临时树/.canvas）在“双端都改”时按当前策略执行。',
-        'en': 'Structured data (permanent tree/temp tree/.canvas) follows the current rule only when both sides changed.'
+        'zh_CN': '结构化数据（永久栏目及副本 / 临时栏目 / .canvas）在“双端都改”时按当前策略执行。按时间模式：本地=文件变脏时间，云端=该路径最近 commit 时间。',
+        'en': 'Structured data (permanent section and copies / temporary section / .canvas) follows the current rule only when both sides changed. In time mode: local = file dirty time, cloud = latest commit time on that path.'
     },
     canvasSyncConflictFlowHint: {
-        'zh_CN': '操作顺序：先选上面的“说明类按钮”（可改策略），再点下方“使用云端/保留本地/按最近修改时间”提交结构化结果。',
-        'en': 'Order: first choose one description button above (can change strategy), then click cloud/local/latest below to submit the structured result.'
+        'zh_CN': '操作顺序：先选上面的“说明类按钮”（可改策略），再点下方“使用云端/保留本地/按时间（本地脏时间 vs 云端 commit 时间）”提交结构化结果。若仅部分分类设为手动，会只保留这些分类进入冲突待处理。',
+        'en': 'Order: first choose one description button above (can change strategy), then click cloud/local/time-rule (local dirty time vs cloud commit time) below. If only some scopes are set to manual, only those scopes remain as pending conflicts.'
     },
     canvasSyncConflictGoPolicyText: {
         'zh_CN': '跳转到 3.4 冲突处理',
@@ -5494,6 +5558,38 @@ function applyLanguage() {
     if (canvasSyncStructuredConflictPolicyTheirsOption) canvasSyncStructuredConflictPolicyTheirsOption.textContent = i18n.canvasSyncStructuredConflictPolicyTheirsOption[currentLang];
     const canvasSyncStructuredConflictPolicyNoneOption = document.getElementById('canvasSyncStructuredConflictPolicyNoneOption');
     if (canvasSyncStructuredConflictPolicyNoneOption) canvasSyncStructuredConflictPolicyNoneOption.textContent = i18n.canvasSyncStructuredConflictPolicyNoneOption[currentLang];
+    const canvasSyncStructuredConflictPolicyCustomOption = document.getElementById('canvasSyncStructuredConflictPolicyCustomOption');
+    if (canvasSyncStructuredConflictPolicyCustomOption) canvasSyncStructuredConflictPolicyCustomOption.textContent = i18n.canvasSyncStructuredConflictPolicyCustomOption[currentLang];
+    const canvasSyncStructuredConflictPolicyPermanentLabel = document.getElementById('canvasSyncStructuredConflictPolicyPermanentLabel');
+    if (canvasSyncStructuredConflictPolicyPermanentLabel) canvasSyncStructuredConflictPolicyPermanentLabel.textContent = i18n.canvasSyncStructuredConflictPolicyPermanentLabel[currentLang];
+    const canvasSyncStructuredConflictPolicyPermanentNewerOption = document.getElementById('canvasSyncStructuredConflictPolicyPermanentNewerOption');
+    if (canvasSyncStructuredConflictPolicyPermanentNewerOption) canvasSyncStructuredConflictPolicyPermanentNewerOption.textContent = i18n.canvasSyncStructuredConflictPolicyPermanentNewerOption[currentLang];
+    const canvasSyncStructuredConflictPolicyPermanentOursOption = document.getElementById('canvasSyncStructuredConflictPolicyPermanentOursOption');
+    if (canvasSyncStructuredConflictPolicyPermanentOursOption) canvasSyncStructuredConflictPolicyPermanentOursOption.textContent = i18n.canvasSyncStructuredConflictPolicyPermanentOursOption[currentLang];
+    const canvasSyncStructuredConflictPolicyPermanentTheirsOption = document.getElementById('canvasSyncStructuredConflictPolicyPermanentTheirsOption');
+    if (canvasSyncStructuredConflictPolicyPermanentTheirsOption) canvasSyncStructuredConflictPolicyPermanentTheirsOption.textContent = i18n.canvasSyncStructuredConflictPolicyPermanentTheirsOption[currentLang];
+    const canvasSyncStructuredConflictPolicyPermanentNoneOption = document.getElementById('canvasSyncStructuredConflictPolicyPermanentNoneOption');
+    if (canvasSyncStructuredConflictPolicyPermanentNoneOption) canvasSyncStructuredConflictPolicyPermanentNoneOption.textContent = i18n.canvasSyncStructuredConflictPolicyPermanentNoneOption[currentLang];
+    const canvasSyncStructuredConflictPolicyTemporaryLabel = document.getElementById('canvasSyncStructuredConflictPolicyTemporaryLabel');
+    if (canvasSyncStructuredConflictPolicyTemporaryLabel) canvasSyncStructuredConflictPolicyTemporaryLabel.textContent = i18n.canvasSyncStructuredConflictPolicyTemporaryLabel[currentLang];
+    const canvasSyncStructuredConflictPolicyTemporaryNewerOption = document.getElementById('canvasSyncStructuredConflictPolicyTemporaryNewerOption');
+    if (canvasSyncStructuredConflictPolicyTemporaryNewerOption) canvasSyncStructuredConflictPolicyTemporaryNewerOption.textContent = i18n.canvasSyncStructuredConflictPolicyTemporaryNewerOption[currentLang];
+    const canvasSyncStructuredConflictPolicyTemporaryOursOption = document.getElementById('canvasSyncStructuredConflictPolicyTemporaryOursOption');
+    if (canvasSyncStructuredConflictPolicyTemporaryOursOption) canvasSyncStructuredConflictPolicyTemporaryOursOption.textContent = i18n.canvasSyncStructuredConflictPolicyTemporaryOursOption[currentLang];
+    const canvasSyncStructuredConflictPolicyTemporaryTheirsOption = document.getElementById('canvasSyncStructuredConflictPolicyTemporaryTheirsOption');
+    if (canvasSyncStructuredConflictPolicyTemporaryTheirsOption) canvasSyncStructuredConflictPolicyTemporaryTheirsOption.textContent = i18n.canvasSyncStructuredConflictPolicyTemporaryTheirsOption[currentLang];
+    const canvasSyncStructuredConflictPolicyTemporaryNoneOption = document.getElementById('canvasSyncStructuredConflictPolicyTemporaryNoneOption');
+    if (canvasSyncStructuredConflictPolicyTemporaryNoneOption) canvasSyncStructuredConflictPolicyTemporaryNoneOption.textContent = i18n.canvasSyncStructuredConflictPolicyTemporaryNoneOption[currentLang];
+    const canvasSyncStructuredConflictPolicyCanvasLabel = document.getElementById('canvasSyncStructuredConflictPolicyCanvasLabel');
+    if (canvasSyncStructuredConflictPolicyCanvasLabel) canvasSyncStructuredConflictPolicyCanvasLabel.textContent = i18n.canvasSyncStructuredConflictPolicyCanvasLabel[currentLang];
+    const canvasSyncStructuredConflictPolicyCanvasNewerOption = document.getElementById('canvasSyncStructuredConflictPolicyCanvasNewerOption');
+    if (canvasSyncStructuredConflictPolicyCanvasNewerOption) canvasSyncStructuredConflictPolicyCanvasNewerOption.textContent = i18n.canvasSyncStructuredConflictPolicyCanvasNewerOption[currentLang];
+    const canvasSyncStructuredConflictPolicyCanvasOursOption = document.getElementById('canvasSyncStructuredConflictPolicyCanvasOursOption');
+    if (canvasSyncStructuredConflictPolicyCanvasOursOption) canvasSyncStructuredConflictPolicyCanvasOursOption.textContent = i18n.canvasSyncStructuredConflictPolicyCanvasOursOption[currentLang];
+    const canvasSyncStructuredConflictPolicyCanvasTheirsOption = document.getElementById('canvasSyncStructuredConflictPolicyCanvasTheirsOption');
+    if (canvasSyncStructuredConflictPolicyCanvasTheirsOption) canvasSyncStructuredConflictPolicyCanvasTheirsOption.textContent = i18n.canvasSyncStructuredConflictPolicyCanvasTheirsOption[currentLang];
+    const canvasSyncStructuredConflictPolicyCanvasNoneOption = document.getElementById('canvasSyncStructuredConflictPolicyCanvasNoneOption');
+    if (canvasSyncStructuredConflictPolicyCanvasNoneOption) canvasSyncStructuredConflictPolicyCanvasNoneOption.textContent = i18n.canvasSyncStructuredConflictPolicyCanvasNoneOption[currentLang];
     const canvasSyncDescriptionConflictPolicyLabel = document.getElementById('canvasSyncDescriptionConflictPolicyLabel');
     if (canvasSyncDescriptionConflictPolicyLabel) canvasSyncDescriptionConflictPolicyLabel.textContent = i18n.canvasSyncDescriptionConflictPolicyLabel[currentLang];
     const canvasSyncDescriptionConflictPolicyMergeOption = document.getElementById('canvasSyncDescriptionConflictPolicyMergeOption');
