@@ -6762,6 +6762,46 @@ Cancel: go back and change the branch name first.`
         };
     }
 
+    function decidePendingConflictByPathLatestModified(conflictData = pendingConflict) {
+        const source = conflictData && typeof conflictData === 'object' ? conflictData : null;
+        if (!source) {
+            return {
+                fileConflicts: [],
+                choiceByPath: {},
+                unresolvedPaths: [],
+                hasPathTimestamps: false
+            };
+        }
+
+        const fileConflicts = uniqueStringList(source.fileConflicts, normalizeSyncPath);
+        const conflictMetaByPath = normalizeConflictFileMetaMap(source.fileConflictByPath, fileConflicts);
+        const choiceByPath = {};
+        const unresolvedPaths = [];
+        let hasPathTimestamps = false;
+
+        fileConflicts.forEach((path) => {
+            const meta = (conflictMetaByPath && typeof conflictMetaByPath === 'object') ? conflictMetaByPath[path] : null;
+            const localTs = Math.max(0, Number(meta && meta.localDirtyAt) || 0);
+            const remoteTs = Math.max(0, Number(meta && meta.remoteCommittedAt) || 0);
+            if (localTs > 0 || remoteTs > 0) {
+                hasPathTimestamps = true;
+            }
+            const choice = decideWinnerByLatestModified(localTs, remoteTs);
+            if (!choice) {
+                unresolvedPaths.push(path);
+                return;
+            }
+            choiceByPath[path] = choice === 'remote' ? 'remote' : 'local';
+        });
+
+        return {
+            fileConflicts,
+            choiceByPath,
+            unresolvedPaths,
+            hasPathTimestamps
+        };
+    }
+
     // Triggers that should be treated as "user explicitly chose cloud -> local"
     // for permanent-section overwrite semantics.
     function isExplicitRemoteOverwriteTrigger(trigger) {
@@ -11051,6 +11091,102 @@ Cancel: go back and change the branch name first.`
         return plan;
     }
 
+    function normalizeConflictFileMetaMap(rawMap, pathsInput = null) {
+        const source = (rawMap && typeof rawMap === 'object' && !Array.isArray(rawMap)) ? rawMap : {};
+        const allowedPaths = Array.isArray(pathsInput) ? uniqueStringList(pathsInput, normalizeSyncPath) : [];
+        const allowedSet = allowedPaths.length ? new Set(allowedPaths) : null;
+        const output = {};
+
+        Object.keys(source).forEach((rawPath) => {
+            const path = normalizeSyncPath(rawPath);
+            if (!path) return;
+            if (allowedSet && !allowedSet.has(path)) return;
+            const entry = (source[rawPath] && typeof source[rawPath] === 'object') ? source[rawPath] : {};
+            const localDirtyAt = Math.max(0, Number(entry.localDirtyAt) || 0);
+            const remoteCommittedAt = Math.max(0, Number(entry.remoteCommittedAt) || 0);
+            const policy = ensureStructuredConflictPolicy(entry.policy, { allowCustom: true });
+            output[path] = {
+                localDirtyAt,
+                remoteCommittedAt,
+                policy: policy === STRUCTURED_CONFLICT_POLICY_CUSTOM ? '' : policy
+            };
+        });
+
+        return output;
+    }
+
+    function collectFileConflictMetaFromPlan(planInput, pathsInput = null) {
+        const plan = (planInput && typeof planInput === 'object') ? planInput : {};
+        const entries = Array.isArray(plan.conflict) ? plan.conflict : [];
+        const conflictPaths = pathsInput && Array.isArray(pathsInput)
+            ? uniqueStringList(pathsInput, normalizeSyncPath)
+            : uniqueStringList(entries.map((entry) => entry && entry.path), normalizeSyncPath);
+        const allowedSet = conflictPaths.length ? new Set(conflictPaths) : null;
+        const map = {};
+
+        entries.forEach((entry) => {
+            const path = normalizeSyncPath(entry && entry.path);
+            if (!path) return;
+            if (allowedSet && !allowedSet.has(path)) return;
+            const localDirtyAt = Math.max(0, Number(entry && entry.localDirtyAt) || 0);
+            const remoteCommittedAt = Math.max(0, Number(entry && entry.remoteCommittedAt) || 0);
+            const policy = ensureStructuredConflictPolicy(entry && entry.policy, { allowCustom: true });
+            map[path] = {
+                localDirtyAt,
+                remoteCommittedAt,
+                policy: policy === STRUCTURED_CONFLICT_POLICY_CUSTOM ? '' : policy
+            };
+        });
+
+        return normalizeConflictFileMetaMap(map, conflictPaths);
+    }
+
+    function buildFilePlanSummary(planInput, conflictCount = 0) {
+        const plan = (planInput && typeof planInput === 'object') ? planInput : {};
+        return {
+            conflict: Math.max(0, Number(conflictCount) || 0),
+            download: Array.isArray(plan.download) ? plan.download.length : 0,
+            deleteLocal: Array.isArray(plan.deleteLocal) ? plan.deleteLocal.length : 0,
+            upload: Array.isArray(plan.upload) ? plan.upload.length : 0,
+            deleteRemote: Array.isArray(plan.deleteRemote) ? plan.deleteRemote.length : 0,
+            skip: Array.isArray(plan.skip) ? plan.skip.length : 0
+        };
+    }
+
+    function summarizePlanDirectionState(planInput) {
+        const plan = (planInput && typeof planInput === 'object') ? planInput : {};
+        const fileConflicts = uniqueStringList(
+            (Array.isArray(plan.conflict) ? plan.conflict : []).map((entry) => entry && entry.path),
+            normalizeSyncPath
+        );
+        const fileConflictByPath = collectFileConflictMetaFromPlan(plan, fileConflicts);
+        const localPaths = uniqueStringList(
+            []
+                .concat(Array.isArray(plan.upload) ? plan.upload.map((entry) => entry && entry.path) : [])
+                .concat(Array.isArray(plan.deleteRemote) ? plan.deleteRemote.map((entry) => entry && entry.path) : []),
+            normalizeSyncPath
+        );
+        const remotePaths = uniqueStringList(
+            []
+                .concat(Array.isArray(plan.download) ? plan.download.map((entry) => entry && entry.path) : [])
+                .concat(Array.isArray(plan.deleteLocal) ? plan.deleteLocal.map((entry) => entry && entry.path) : []),
+            normalizeSyncPath
+        );
+        const remotePathSet = new Set(remotePaths);
+        const overlapPaths = localPaths.filter((path) => remotePathSet.has(path));
+
+        return {
+            fileConflicts,
+            fileConflictByPath,
+            filePlanSummary: buildFilePlanSummary(plan, fileConflicts.length),
+            localPaths,
+            remotePaths,
+            overlapPaths,
+            localOpCount: localPaths.length,
+            remoteOpCount: remotePaths.length
+        };
+    }
+
     async function readRemoteCommittedAtByPath(pathInput) {
         const path = normalizeSyncPath(pathInput);
         if (!path) return 0;
@@ -11234,6 +11370,7 @@ Cancel: go back and change the branch name first.`
                 return null;
             }
             const fileConflicts = uniqueStringList(parsed.fileConflicts, normalizeSyncPath);
+            const fileConflictByPath = normalizeConflictFileMetaMap(parsed.fileConflictByPath, fileConflicts);
             const filePlanSummaryRaw = (parsed.filePlanSummary && typeof parsed.filePlanSummary === 'object')
                 ? parsed.filePlanSummary
                 : {};
@@ -11266,6 +11403,7 @@ Cancel: go back and change the branch name first.`
                     other: normalizeComparisonSectionState(parsedSectionStates.other, 'change')
                 },
                 fileConflicts,
+                fileConflictByPath,
                 filePlanSummary
             };
         } catch (_) {
@@ -11520,26 +11658,16 @@ Cancel: go back and change the branch name first.`
         try {
             const pullPlanResult = await buildObsidianPullPlan(reason);
             if (!pullPlanResult || pullPlanResult.enabled !== true || !pullPlanResult.plan) {
-                return { fileConflicts: [], filePlanSummary: null };
+                return { fileConflicts: [], fileConflictByPath: {}, filePlanSummary: null };
             }
-            const plan = pullPlanResult.plan;
-            const fileConflicts = uniqueStringList(
-                (Array.isArray(plan.conflict) ? plan.conflict : []).map((entry) => entry && entry.path),
-                normalizeSyncPath
-            );
+            const planSummary = summarizePlanDirectionState(pullPlanResult.plan);
             return {
-                fileConflicts,
-                filePlanSummary: {
-                    conflict: fileConflicts.length,
-                    download: Array.isArray(plan.download) ? plan.download.length : 0,
-                    deleteLocal: Array.isArray(plan.deleteLocal) ? plan.deleteLocal.length : 0,
-                    upload: Array.isArray(plan.upload) ? plan.upload.length : 0,
-                    deleteRemote: Array.isArray(plan.deleteRemote) ? plan.deleteRemote.length : 0,
-                    skip: Array.isArray(plan.skip) ? plan.skip.length : 0
-                }
+                fileConflicts: planSummary.fileConflicts,
+                fileConflictByPath: planSummary.fileConflictByPath,
+                filePlanSummary: planSummary.filePlanSummary
             };
         } catch (_) {
-            return { fileConflicts: [], filePlanSummary: null };
+            return { fileConflicts: [], fileConflictByPath: {}, filePlanSummary: null };
         }
     }
 
@@ -11581,7 +11709,12 @@ Cancel: go back and change the branch name first.`
                 .map((entry) => normalizeSyncPath(entry && entry.path))
                 .filter(Boolean)
         );
-        const targetPaths = desiredPaths.filter((path) => conflictPathSet.has(path));
+        let targetPaths = desiredPaths.filter((path) => conflictPathSet.has(path));
+        if (!targetPaths.length) {
+            // The latest file-plan may have auto-resolved conflicts after timestamps were refreshed.
+            // Still allow explicit per-file decisions from the pending conflict payload.
+            targetPaths = desiredPaths.slice();
+        }
         if (!targetPaths.length) {
             toast(textByLang('当前文件冲突已变化，请重新同步后再处理', 'File conflicts changed. Sync again before resolving.'));
             return false;
@@ -11850,6 +11983,7 @@ Cancel: go back and change the branch name first.`
             {
                 reason: String(options && options.reason || 'pending-upgraded'),
                 fileConflicts: fileConflictSummary.fileConflicts,
+                fileConflictByPath: fileConflictSummary.fileConflictByPath,
                 filePlanSummary: fileConflictSummary.filePlanSummary || undefined
             }
         ));
@@ -12767,6 +12901,7 @@ Cancel: go back and change the branch name first.`
 
     function createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, extra = {}) {
         const fileConflicts = uniqueStringList(extra && extra.fileConflicts, normalizeSyncPath);
+        const fileConflictByPath = normalizeConflictFileMetaMap(extra && extra.fileConflictByPath, fileConflicts);
         const summarySource = extra && extra.filePlanSummary && typeof extra.filePlanSummary === 'object'
             ? extra.filePlanSummary
             : {};
@@ -12798,6 +12933,7 @@ Cancel: go back and change the branch name first.`
             remoteMeta: buildSnapshotMeta(remoteSnapshot),
             sectionStates,
             fileConflicts,
+            fileConflictByPath,
             filePlanSummary: {
                 conflict: Math.max(0, Number(summarySource.conflict) || fileConflicts.length),
                 download: Math.max(0, Number(summarySource.download) || 0),
@@ -12884,6 +13020,27 @@ Cancel: go back and change the branch name first.`
         const requestedChoice = String(choice || '').trim().toLowerCase();
         let resolvedChoice = requestedChoice;
         if (resolvedChoice === 'newer') {
+            const pathDecision = decidePendingConflictByPathLatestModified(pendingConflict);
+            if (pathDecision.fileConflicts.length > 0 && pathDecision.hasPathTimestamps) {
+                if (!pathDecision.unresolvedPaths.length) {
+                    conflictFineChoiceByPath = Object.assign({}, pathDecision.choiceByPath);
+                    conflictFineModeEnabled = true;
+                    await resolvePendingConflictByFineChoices();
+                    return;
+                }
+                const nextChoiceByPath = {};
+                pathDecision.fileConflicts.forEach((path) => {
+                    nextChoiceByPath[path] = pathDecision.choiceByPath[path] === 'remote' ? 'remote' : 'local';
+                });
+                conflictFineChoiceByPath = nextChoiceByPath;
+                conflictFineModeEnabled = true;
+                toast(textByLang(
+                    `按时间规则无法自动裁决全部文件：仍有 ${pathDecision.unresolvedPaths.length} 个文件时间相同或缺失，请在逐文件面板手动确认`,
+                    `Time rule cannot auto-resolve all files: ${pathDecision.unresolvedPaths.length} file(s) are tied or missing timestamps. Please review them in fine-grained mode.`
+                ));
+                renderConflictPanel();
+                return;
+            }
             const latestDecision = decidePendingConflictByLatestModified(pendingConflict);
             resolvedChoice = latestDecision.choice;
             if (!resolvedChoice) {
@@ -13502,20 +13659,13 @@ Cancel: go back and change the branch name first.`
                             : { data: {} }
                     )
                 ) {
-                    const conflictPaths = pullPlanResult.plan.conflict
-                        .map((item) => normalizeSyncPath(item && item.path))
-                        .filter(Boolean);
-                    const filePlanSummary = {
-                        conflict: conflictPaths.length,
-                        download: Array.isArray(pullPlanResult.plan.download) ? pullPlanResult.plan.download.length : 0,
-                        deleteLocal: Array.isArray(pullPlanResult.plan.deleteLocal) ? pullPlanResult.plan.deleteLocal.length : 0,
-                        upload: Array.isArray(pullPlanResult.plan.upload) ? pullPlanResult.plan.upload.length : 0,
-                        deleteRemote: Array.isArray(pullPlanResult.plan.deleteRemote) ? pullPlanResult.plan.deleteRemote.length : 0,
-                        skip: Array.isArray(pullPlanResult.plan.skip) ? pullPlanResult.plan.skip.length : 0
-                    };
+                    const planSummary = summarizePlanDirectionState(pullPlanResult.plan);
+                    const conflictPaths = planSummary.fileConflicts;
+                    const filePlanSummary = planSummary.filePlanSummary;
 
                     setPendingConflict(createPendingConflictPayload(localSnapshot, remoteState.snapshot, remoteState, {
                         fileConflicts: conflictPaths,
+                        fileConflictByPath: planSummary.fileConflictByPath,
                         filePlanSummary
                     }));
                     storeConflictRecord(localSnapshot, remoteState.snapshot, 'pending-file-conflict', {
@@ -13728,6 +13878,8 @@ Cancel: go back and change the branch name first.`
                     actionText = fastPushResult.actionText;
                 } else {
                     let allowPushOnly = true;
+                    let pushWinner = '';
+                    let customPushPlanSummary = null;
 
                     updateSyncUiProgress(textByLang('校验云端基线...', 'Checking cloud baseline...'), 15);
                     const remoteState = await readRemoteSnapshotWithPathRecovery({
@@ -13741,6 +13893,60 @@ Cancel: go back and change the branch name first.`
                         : null;
                     const pushPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
                     localHash = pushPreflight.localHash;
+                    pushWinner = pushPreflight.winner;
+
+                    if (settings.obsidianFilePushEnabled !== false && structuredPolicySummary === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
+                        try {
+                            const pushModePlanResult = await buildObsidianPullPlan(`${trigger || 'push'}:push-mode-custom`);
+                            const pushModePlan = pushModePlanResult && pushModePlanResult.enabled && pushModePlanResult.plan
+                                ? pushModePlanResult.plan
+                                : null;
+                            if (pushModePlan) {
+                                customPushPlanSummary = summarizePlanDirectionState(pushModePlan);
+                                if (customPushPlanSummary.fileConflicts.length > 0) {
+                                    setPendingConflict(createPendingConflictPayload(localSnapshot, pushPreflight.remoteSnapshot, remoteState, {
+                                        reason: 'push-mode-custom-file-conflict',
+                                        fileConflicts: customPushPlanSummary.fileConflicts,
+                                        fileConflictByPath: customPushPlanSummary.fileConflictByPath,
+                                        filePlanSummary: customPushPlanSummary.filePlanSummary
+                                    }));
+                                    storeConflictRecord(localSnapshot, pushPreflight.remoteSnapshot, 'pending-manual', {
+                                        remoteSha: pushPreflight.remoteSha || remoteState.sha || '',
+                                        strategy: structuredPolicySummary,
+                                        syncMethod,
+                                        filePlanSummary: customPushPlanSummary.filePlanSummary,
+                                        note: 'push-mode-custom-file-conflict'
+                                    });
+                                    runtime.lastAppliedDirection = 'conflict';
+                                    runtime.lastError = textByLang(
+                                        '检测到文件级并发修改，已暂停当前上传路径，请先在冲突面板选择处理方式',
+                                        'File-level concurrent changes were detected. Upload is paused; resolve it in the conflict panel first.'
+                                    );
+                                    pendingReasons.clear();
+                                    runtime.queueLength = 0;
+                                    saveRuntime();
+                                    renderStatus();
+                                    toast(textByLang(
+                                        `检测到文件级冲突：${customPushPlanSummary.fileConflicts.length} 个，请先处理`,
+                                        `File-level conflicts detected: ${customPushPlanSummary.fileConflicts.length}. Resolve them first.`
+                                    ));
+                                    allowPushOnly = false;
+                                } else if (customPushPlanSummary.localOpCount > 0 && customPushPlanSummary.remoteOpCount === 0) {
+                                    pushWinner = 'local';
+                                } else if (customPushPlanSummary.remoteOpCount > 0 && customPushPlanSummary.localOpCount === 0) {
+                                    pushWinner = 'remote';
+                                } else if (customPushPlanSummary.localOpCount > 0 && customPushPlanSummary.remoteOpCount > 0) {
+                                    pushWinner = '';
+                                }
+                            }
+                        } catch (error) {
+                            console.warn('[Canvas Sync] push-mode custom file-plan guard failed:', error);
+                        }
+                    }
+
+                    if (!allowPushOnly) {
+                        return;
+                    }
 
                     if (!pushPreflight.localDirty && pushPreflight.remoteChanged) {
                         runtime.lastError = textByLang(
@@ -13756,12 +13962,15 @@ Cancel: go back and change the branch name first.`
                             'Upload blocked: cloud is newer and local is clean. Pull first.'
                         ));
                         allowPushOnly = false;
-                    } else if (!pushPreflight.winner) {
+                    } else if (!pushWinner) {
                         setPendingConflict(createPendingConflictPayload(localSnapshot, pushPreflight.remoteSnapshot, remoteState));
                         storeConflictRecord(localSnapshot, pushPreflight.remoteSnapshot, 'pending-manual', {
                             remoteSha: pushPreflight.remoteSha || remoteState.sha || '',
                             strategy: structuredPolicySummary,
-                            syncMethod
+                            syncMethod,
+                            filePlanSummary: customPushPlanSummary && customPushPlanSummary.filePlanSummary
+                                ? customPushPlanSummary.filePlanSummary
+                                : undefined
                         });
                         runtime.lastAppliedDirection = 'conflict';
                         runtime.lastError = textByLang(
@@ -13779,7 +13988,7 @@ Cancel: go back and change the branch name first.`
                             || pushPreflight.concurrentChanged
                             || pushPreflight.remoteUntracked;
 
-                        if (isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
+                        if (isManualTrigger && riskyRemoteOverwrite && (pushWinner !== 'local' || pushPreflight.remoteUntracked)) {
                             if (!await requestOneWayOverwriteConfirmationAsync('push', pushPreflight)) {
                                 runtime.lastError = '';
                                 saveRuntime();
@@ -13787,7 +13996,7 @@ Cancel: go back and change the branch name first.`
                                 toast(textByLang('已取消当前上传操作', 'Current upload action cancelled'));
                                 allowPushOnly = false;
                             }
-                        } else if (!isManualTrigger && riskyRemoteOverwrite && (pushPreflight.winner !== 'local' || pushPreflight.remoteUntracked)) {
+                        } else if (!isManualTrigger && riskyRemoteOverwrite && (pushWinner !== 'local' || pushPreflight.remoteUntracked)) {
                             await setPendingConflictState(
                                 pushPreflight.remoteSha || remoteState.sha || '',
                                 textByLang(
@@ -13868,14 +14077,65 @@ Cancel: go back and change the branch name first.`
                             actionText = textByLang('仅记云端文件版本（仅更新版本指针）', 'Track cloud file revision only (update revision pointer only)');
                         } else {
                             let allowPullOnly = true;
+                            let pullWinner = '';
                             const pullPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
                             localHash = pullPreflight.localHash;
+                            pullWinner = pullPreflight.winner;
+
+                            if (
+                                settings.obsidianFilePushEnabled !== false
+                                && structuredPolicySummary === STRUCTURED_CONFLICT_POLICY_CUSTOM
+                                && pullPlanWhenNoState
+                                && pullPlanWhenNoState.enabled
+                                && pullPlanWhenNoState.plan
+                            ) {
+                                const customPullPlanSummary = summarizePlanDirectionState(pullPlanWhenNoState.plan);
+                                if (customPullPlanSummary.fileConflicts.length > 0) {
+                                    setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState, {
+                                        reason: 'pull-mode-custom-file-conflict',
+                                        fileConflicts: customPullPlanSummary.fileConflicts,
+                                        fileConflictByPath: customPullPlanSummary.fileConflictByPath,
+                                        filePlanSummary: customPullPlanSummary.filePlanSummary
+                                    }));
+                                    storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
+                                        remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
+                                        strategy: structuredPolicySummary,
+                                        syncMethod,
+                                        filePlanSummary: customPullPlanSummary.filePlanSummary,
+                                        note: 'pull-mode-custom-file-conflict'
+                                    });
+                                    runtime.lastAppliedDirection = 'conflict';
+                                    runtime.lastError = textByLang(
+                                        '检测到文件级并发修改，已暂停当前拉取路径，请先在冲突面板选择处理方式',
+                                        'File-level concurrent changes were detected. Pull is paused; resolve it in the conflict panel first.'
+                                    );
+                                    pendingReasons.clear();
+                                    runtime.queueLength = 0;
+                                    saveRuntime();
+                                    renderStatus();
+                                    toast(textByLang(
+                                        `检测到文件级冲突：${customPullPlanSummary.fileConflicts.length} 个，请先处理`,
+                                        `File-level conflicts detected: ${customPullPlanSummary.fileConflicts.length}. Resolve them first.`
+                                    ));
+                                    allowPullOnly = false;
+                                } else if (customPullPlanSummary.remoteOpCount > 0 && customPullPlanSummary.localOpCount === 0) {
+                                    pullWinner = 'remote';
+                                } else if (customPullPlanSummary.localOpCount > 0 && customPullPlanSummary.remoteOpCount === 0) {
+                                    pullWinner = 'local';
+                                } else if (customPullPlanSummary.localOpCount > 0 && customPullPlanSummary.remoteOpCount > 0) {
+                                    pullWinner = '';
+                                }
+                            }
+
+                            if (!allowPullOnly) {
+                                return;
+                            }
 
                             const riskyLocalOverwrite = pullPreflight.localChanged
                                 || pullPreflight.concurrentChanged
                                 || pullPreflight.localUntracked;
 
-                            if (!pullPreflight.winner) {
+                            if (!pullWinner) {
                                 setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState));
                                 storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
                                     remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
@@ -13893,7 +14153,7 @@ Cancel: go back and change the branch name first.`
                                 renderStatus();
                                 toast(textByLang('检测到冲突：请先在面板中选择保留本地或使用云端', 'Conflict detected: choose keep local or use cloud in the panel first'));
                                 allowPullOnly = false;
-                            } else if (riskyLocalOverwrite && pullPreflight.winner !== 'remote' && pullPreflight.winner !== 'remote-reset') {
+                            } else if (riskyLocalOverwrite && pullWinner !== 'remote' && pullWinner !== 'remote-reset') {
                                 if (isManualTrigger) {
                                     if (!await requestOneWayOverwriteConfirmationAsync('pull', pullPreflight)) {
                                         runtime.lastError = '';
@@ -13943,14 +14203,71 @@ Cancel: go back and change the branch name first.`
                     }
                     else {
                         let allowPullOnly = true;
+                        let pullWinner = '';
+                        let pullPlanForExecution = null;
                         const pullPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
                         localHash = pullPreflight.localHash;
+                        pullWinner = pullPreflight.winner;
+
+                        if (settings.obsidianFilePushEnabled !== false && structuredPolicySummary === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
+                            try {
+                                const pullModePlanResult = await buildObsidianPullPlan(`${trigger || 'pull'}:pull-mode-custom`);
+                                const pullModePlan = pullModePlanResult && pullModePlanResult.enabled && pullModePlanResult.plan
+                                    ? pullModePlanResult.plan
+                                    : null;
+                                if (pullModePlan) {
+                                    pullPlanForExecution = pullModePlanResult;
+                                    const customPullPlanSummary = summarizePlanDirectionState(pullModePlan);
+                                    if (customPullPlanSummary.fileConflicts.length > 0) {
+                                        setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState, {
+                                            reason: 'pull-mode-custom-file-conflict',
+                                            fileConflicts: customPullPlanSummary.fileConflicts,
+                                            fileConflictByPath: customPullPlanSummary.fileConflictByPath,
+                                            filePlanSummary: customPullPlanSummary.filePlanSummary
+                                        }));
+                                        storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
+                                            remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
+                                            strategy: structuredPolicySummary,
+                                            syncMethod,
+                                            filePlanSummary: customPullPlanSummary.filePlanSummary,
+                                            note: 'pull-mode-custom-file-conflict'
+                                        });
+                                        runtime.lastAppliedDirection = 'conflict';
+                                        runtime.lastError = textByLang(
+                                            '检测到文件级并发修改，已暂停当前拉取路径，请先在冲突面板选择处理方式',
+                                            'File-level concurrent changes were detected. Pull is paused; resolve it in the conflict panel first.'
+                                        );
+                                        pendingReasons.clear();
+                                        runtime.queueLength = 0;
+                                        saveRuntime();
+                                        renderStatus();
+                                        toast(textByLang(
+                                            `检测到文件级冲突：${customPullPlanSummary.fileConflicts.length} 个，请先处理`,
+                                            `File-level conflicts detected: ${customPullPlanSummary.fileConflicts.length}. Resolve them first.`
+                                        ));
+                                        allowPullOnly = false;
+                                    } else if (customPullPlanSummary.remoteOpCount > 0 && customPullPlanSummary.localOpCount === 0) {
+                                        pullWinner = 'remote';
+                                    } else if (customPullPlanSummary.localOpCount > 0 && customPullPlanSummary.remoteOpCount === 0) {
+                                        pullWinner = 'local';
+                                    } else if (customPullPlanSummary.localOpCount > 0 && customPullPlanSummary.remoteOpCount > 0) {
+                                        pullWinner = '';
+                                    }
+                                }
+                            } catch (error) {
+                                console.warn('[Canvas Sync] pull-mode custom file-plan guard failed:', error);
+                            }
+                        }
+
+                        if (!allowPullOnly) {
+                            return;
+                        }
 
                         const riskyLocalOverwrite = pullPreflight.localChanged
                             || pullPreflight.concurrentChanged
                             || pullPreflight.localUntracked;
 
-                        if (!pullPreflight.winner) {
+                        if (!pullWinner) {
                             setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState));
                             storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
                                 remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
@@ -13968,7 +14285,7 @@ Cancel: go back and change the branch name first.`
                             renderStatus();
                             toast(textByLang('检测到冲突：请先在面板中选择保留本地或使用云端', 'Conflict detected: choose keep local or use cloud in the panel first'));
                             allowPullOnly = false;
-                        } else if (riskyLocalOverwrite && pullPreflight.winner !== 'remote' && pullPreflight.winner !== 'remote-reset') {
+                        } else if (riskyLocalOverwrite && pullWinner !== 'remote' && pullWinner !== 'remote-reset') {
                             if (isManualTrigger) {
                                 if (!await requestOneWayOverwriteConfirmationAsync('pull', pullPreflight)) {
                                     runtime.lastError = '';
@@ -14007,7 +14324,11 @@ Cancel: go back and change the branch name first.`
                             return;
                         }
 
-                        actionText = await doPull(remoteState, syncMethod === 'rebase' ? 'pull (rebase mode)' : 'pull');
+                        actionText = await doPull(
+                            remoteState,
+                            syncMethod === 'rebase' ? 'pull (rebase mode)' : 'pull',
+                            pullPlanForExecution
+                        );
                     }
                 } else {
                     if (remoteState.notFound) {
@@ -14060,11 +14381,10 @@ Cancel: go back and change the branch name first.`
                                         ? fullModePullPlan.plan
                                         : null;
                                     if (guardPlan) {
-                                        const guardConflictCount = Array.isArray(guardPlan.conflict) ? guardPlan.conflict.length : 0;
-                                        const guardLocalOpCount = (Array.isArray(guardPlan.upload) ? guardPlan.upload.length : 0)
-                                            + (Array.isArray(guardPlan.deleteRemote) ? guardPlan.deleteRemote.length : 0);
-                                        const guardRemoteOpCount = (Array.isArray(guardPlan.download) ? guardPlan.download.length : 0)
-                                            + (Array.isArray(guardPlan.deleteLocal) ? guardPlan.deleteLocal.length : 0);
+                                        const guardPlanSummary = summarizePlanDirectionState(guardPlan);
+                                        const guardConflictCount = guardPlanSummary.fileConflicts.length;
+                                        const guardLocalOpCount = guardPlanSummary.localOpCount;
+                                        const guardRemoteOpCount = guardPlanSummary.remoteOpCount;
 
                                         if (guardConflictCount > 0) {
                                             actionText = await doPull(remoteState, 'pull (file-plan conflict)', fullModePullPlan);
@@ -14078,24 +14398,31 @@ Cancel: go back and change the branch name first.`
                                             });
                                             handledByFilePlanGuard = true;
                                         } else if (guardRemoteOpCount > 0 && guardLocalOpCount > 0) {
-                                            const mixedConflictPaths = uniqueStringList(
-                                                []
-                                                    .concat(Array.isArray(guardPlan.upload) ? guardPlan.upload.map((item) => item && item.path) : [])
-                                                    .concat(Array.isArray(guardPlan.deleteRemote) ? guardPlan.deleteRemote.map((item) => item && item.path) : [])
-                                                    .concat(Array.isArray(guardPlan.download) ? guardPlan.download.map((item) => item && item.path) : [])
-                                                    .concat(Array.isArray(guardPlan.deleteLocal) ? guardPlan.deleteLocal.map((item) => item && item.path) : []),
-                                                normalizeSyncPath
-                                            );
-                                            const mixedConflictEntries = mixedConflictPaths.map((path) => ({
-                                                path,
-                                                reason: 'mixed-file-plan-direction'
-                                            }));
-                                            const mixedPlanResult = Object.assign({}, fullModePullPlan, {
-                                                plan: Object.assign({}, guardPlan, {
-                                                    conflict: mixedConflictEntries
-                                                })
-                                            });
-                                            actionText = await doPull(remoteState, 'pull (file-plan mixed conflict)', mixedPlanResult);
+                                            if (guardPlanSummary.overlapPaths.length > 0) {
+                                                const mixedConflictEntries = guardPlanSummary.overlapPaths.map((path) => ({
+                                                    path,
+                                                    reason: 'mixed-file-plan-same-path-direction'
+                                                }));
+                                                const mixedPlanResult = Object.assign({}, fullModePullPlan, {
+                                                    plan: Object.assign({}, guardPlan, {
+                                                        conflict: mixedConflictEntries
+                                                    })
+                                                });
+                                                actionText = await doPull(remoteState, 'pull (file-plan mixed conflict)', mixedPlanResult);
+                                            } else {
+                                                const pushFirstActionText = await doPush('mixed-file-plan push-first', {
+                                                    remoteFilesByPathForMissingCheck
+                                                });
+                                                if (abortedByPendingConflict || hasPendingConflict()) {
+                                                    actionText = pushFirstActionText || textByLang('冲突待处理', 'Conflict pending');
+                                                } else {
+                                                    const refreshedRemoteState = await readRemoteSnapshotWithPathRecovery({
+                                                        interactive: isManualTrigger,
+                                                        continueAfterConfirm: true
+                                                    });
+                                                    actionText = await doPull(refreshedRemoteState, 'mixed-file-plan pull-second');
+                                                }
+                                            }
                                             handledByFilePlanGuard = true;
                                         }
                                     }
@@ -14125,6 +14452,7 @@ Cancel: go back and change the branch name first.`
                                 setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
                                     reason: 'full-mode-uncertain-baseline',
                                     fileConflicts: uncertainFileSummary.fileConflicts,
+                                    fileConflictByPath: uncertainFileSummary.fileConflictByPath,
                                     filePlanSummary: uncertainFileSummary.filePlanSummary || undefined
                                 }));
                                 storeConflictRecord(localSnapshot, remoteSnapshot, 'pending-manual', {
@@ -14206,6 +14534,7 @@ Cancel: go back and change the branch name first.`
                                         setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
                                             reason: 'dual-dirty-description-manual',
                                             fileConflicts: fileConflictSummary.fileConflicts,
+                                            fileConflictByPath: fileConflictSummary.fileConflictByPath,
                                             filePlanSummary: fileConflictSummary.filePlanSummary || undefined
                                         }));
                                         runtime.lastAppliedDirection = 'conflict';
@@ -14256,6 +14585,7 @@ Cancel: go back and change the branch name first.`
                                         setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
                                             reason: 'dual-dirty-description-manual',
                                             fileConflicts: fileConflictSummary.fileConflicts,
+                                            fileConflictByPath: fileConflictSummary.fileConflictByPath,
                                             filePlanSummary: fileConflictSummary.filePlanSummary || undefined
                                         }));
                                         runtime.lastAppliedDirection = 'conflict';
@@ -14298,6 +14628,7 @@ Cancel: go back and change the branch name first.`
                                     setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
                                         reason: 'dual-dirty-conflict',
                                         fileConflicts: fileConflictSummary.fileConflicts,
+                                        fileConflictByPath: fileConflictSummary.fileConflictByPath,
                                         filePlanSummary: fileConflictSummary.filePlanSummary || undefined
                                     }));
                                     storeConflictRecord(localSnapshot, remoteSnapshot, 'pending-manual', {
@@ -15563,9 +15894,18 @@ Cancel: go back and change the branch name first.`
             const patchObject = (patch && typeof patch === 'object') ? patch : {};
             const hasOwnPatch = Object.prototype.hasOwnProperty;
             settings = Object.assign({}, settings || loadSettings(), patchObject);
+            const hasStructuredTopPatch = hasOwnPatch.call(patchObject, 'structuredConflictPolicy')
+                || hasOwnPatch.call(patchObject, 'conflictPolicy');
+            const hasScopedStructuredPatch = hasOwnPatch.call(patchObject, 'structuredConflictPolicyPermanent')
+                || hasOwnPatch.call(patchObject, 'structuredConflictPolicyTemporary')
+                || hasOwnPatch.call(patchObject, 'structuredConflictPolicyCanvas');
             const structuredPolicyCandidate = hasOwnPatch.call(patchObject, 'structuredConflictPolicy')
                 ? patchObject.structuredConflictPolicy
-                : (hasOwnPatch.call(patchObject, 'conflictPolicy') ? patchObject.conflictPolicy : settings.structuredConflictPolicy);
+                : (hasOwnPatch.call(patchObject, 'conflictPolicy')
+                    ? patchObject.conflictPolicy
+                    : (hasScopedStructuredPatch && !hasStructuredTopPatch
+                        ? STRUCTURED_CONFLICT_POLICY_CUSTOM
+                        : settings.structuredConflictPolicy));
             const structuredPermanentCandidate = hasOwnPatch.call(patchObject, 'structuredConflictPolicyPermanent')
                 ? patchObject.structuredConflictPolicyPermanent
                 : settings.structuredConflictPolicyPermanent;
