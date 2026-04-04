@@ -920,7 +920,7 @@ function buildCanvasManagedCanvasFileNameCandidates(rootPath = '') {
 function isCanvasManagedSyncRelativePath(relativePath, canvasFileNames) {
   const relative = normalizeGitHubRepoPath(relativePath);
   if (!relative) return false;
-  if (/^(永久栏目|Permanent|临时栏目|Temporary|空白栏目|Blank)\/.+\.md$/i.test(relative)) {
+  if (/^(永久栏目|Permanent|临时栏目|Temporary)\/.+\.md$/i.test(relative)) {
     return true;
   }
   if (/^(说明导入规则\.md|README_Import_Rules\.md|说明_导入规则\.md)$/i.test(relative)) {

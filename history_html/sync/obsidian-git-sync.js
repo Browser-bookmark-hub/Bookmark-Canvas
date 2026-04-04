@@ -57,7 +57,6 @@
     const BCS_META_KEY = 'bcs:meta';
     const BCS_CANVAS_KEY = 'bcs:canvas';
     const BCS_SECTION_PREFIX = 'bcs:section:';
-    const BCS_MD_PREFIX = 'bcs:md:';
     const BCS_PERM_MAIN_KEY = 'bcs:perm:main';
     const BCS_PERM_COPY_PREFIX = 'bcs:perm:copy-';
 
@@ -68,9 +67,6 @@
     ];
 
     const CONFLICT_POLICIES = new Set(['none', 'ours', 'theirs', 'newer']);
-    const STRUCTURED_CONFLICT_POLICY_CUSTOM = 'custom';
-    const DESCRIPTION_CONFLICT_POLICIES = new Set(['merge', 'local', 'remote', 'conflict-copy']);
-    const DESCRIPTION_MERGE_FALLBACKS = new Set(['conflict-copy', 'manual']);
     const SYNC_METHODS = new Set(['merge', 'rebase', 'reset']);
     const FIRST_SYNC_MODES = new Set(['auto', 'cloud', 'local']);
     const PERMANENT_PULL_MODES = new Set(['auto', 'overwrite', 'incremental']);
@@ -103,19 +99,13 @@
         permanentIncrementalMaxChanges: DEFAULT_PERMANENT_INCREMENTAL_MAX_LOGICAL_CHANGES_ABS,
         permanentTreeUploadIntervalSeconds: 15,
         tempSectionUploadIntervalSeconds: 3,
-        blankSectionUploadIntervalSeconds: 3,
         obsidianFilePushEnabled: true,
         obsidianExportFormat: 'json',
         obsidianExportRoot: '书签画布',
         firstSyncPathVerifiedRoot: '',
         firstSyncPathVerifiedAt: 0,
         syncMethod: 'merge',
-        structuredConflictPolicy: 'newer',
-        structuredConflictPolicyPermanent: 'newer',
-        structuredConflictPolicyTemporary: 'newer',
-        structuredConflictPolicyCanvas: 'newer',
-        blankCardSourceConflictPolicy: 'merge',
-        blankCardSourceMergeFallback: 'conflict-copy'
+        structuredConflictPolicy: 'newer'
     };
 
     const DEFAULT_RUNTIME = {
@@ -124,6 +114,11 @@
         lastSuccessAt: 0,
         lastError: '',
         lastTrigger: '',
+        // Sync baseline pointers:
+        // - lastRemoteSha: current baseline revision on cloud side (GitHub uses remote tree/commit signal).
+        // - lastLocalHash: current baseline revision on local snapshot side.
+        // If we add non-GitHub providers later (WebDAV/Drive/OneDrive), keep this contract and
+        // map provider-native revision tokens (etag/rev/version/delta pointer) into these fields.
         lastRemoteSha: '',
         lastLocalHash: '',
         lastPermanentSectionHash: '',
@@ -138,20 +133,14 @@
         lastPermanentTreeSnapshotAt: 0,
         lastTempSectionSnapshotAt: 0,
         lastObsidianPushAt: 0,
-        lastBlankSectionFilePushAt: 0,
         lastObsidianPushChanged: 0,
         lastObsidianPushTotal: 0,
-        lastDescriptionMergeMerged: 0,
-        lastDescriptionMergeFallback: 0,
-        lastBlankCardSourceMergeMode: '',
         hasPendingConflict: false
     };
 
     let settings = null;
     let runtime = null;
     let pendingConflict = null;
-    let conflictFineModeEnabled = false;
-    let conflictFineChoiceByPath = {};
     let panelBound = false;
     let repoConfig = null;
     let activeTabKey = DEFAULT_ACTIVE_TAB;
@@ -193,7 +182,6 @@
     let lastForegroundUserInteractionAt = 0;
     const tempStateNormalizedRawCache = new Map();
     const tempStateComparableCache = new Map();
-    const descriptionBaseBlobTextCache = new Map();
 
     function getRuntimeApi() {
         return global.chrome || global.browser || null;
@@ -2831,9 +2819,8 @@
             .replace(/\/+/g, '/');
     }
 
-    function ensureConflictPolicy(policy, options = {}) {
+    function ensureConflictPolicy(policy) {
         const value = String(policy || '').trim().toLowerCase();
-        const allowCustom = !!(options && options.allowCustom === true);
         if (value === 'local') return 'ours';
         if (value === 'remote') return 'theirs';
         if (value === 'keep_newer' || value === 'latest' || value === 'latest_modified') {
@@ -2842,96 +2829,22 @@
         if (value === 'manual_panel' || value === 'keep_larger' || value === 'keep_both') {
             return 'none';
         }
-        if (allowCustom && value === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
-            return STRUCTURED_CONFLICT_POLICY_CUSTOM;
-        }
         return CONFLICT_POLICIES.has(value) ? value : DEFAULT_SETTINGS.structuredConflictPolicy;
     }
 
-    function ensureStructuredConflictPolicy(policy, options = {}) {
-        return ensureConflictPolicy(policy, options);
-    }
-
-    function deriveStructuredConflictPolicySummary(permanentPolicy, temporaryPolicy, canvasPolicy) {
-        const permanent = ensureStructuredConflictPolicy(permanentPolicy);
-        const temporary = ensureStructuredConflictPolicy(temporaryPolicy);
-        const canvas = ensureStructuredConflictPolicy(canvasPolicy);
-        if (permanent === temporary && temporary === canvas) {
-            return permanent;
-        }
-        return STRUCTURED_CONFLICT_POLICY_CUSTOM;
-    }
-
-    function normalizeStructuredConflictPolicyByScope(source = settings) {
-        const payload = source && typeof source === 'object' ? source : {};
-        const basePolicy = ensureStructuredConflictPolicy(
-            payload.structuredConflictPolicy || payload.conflictPolicy || DEFAULT_SETTINGS.structuredConflictPolicy
-        );
-        const permanent = ensureStructuredConflictPolicy(
-            payload.structuredConflictPolicyPermanent || basePolicy
-        );
-        const temporary = ensureStructuredConflictPolicy(
-            payload.structuredConflictPolicyTemporary || basePolicy
-        );
-        const canvas = ensureStructuredConflictPolicy(
-            payload.structuredConflictPolicyCanvas || basePolicy
-        );
-        const summary = deriveStructuredConflictPolicySummary(permanent, temporary, canvas);
-        return {
-            permanent,
-            temporary,
-            canvas,
-            summary
-        };
+    function ensureStructuredConflictPolicy(policy) {
+        return ensureConflictPolicy(policy);
     }
 
     function getStructuredConflictPolicySummary(source = settings) {
-        return normalizeStructuredConflictPolicyByScope(source).summary;
-    }
-
-    function getStructuredConflictPolicyByScope(scope, source = settings) {
-        const normalizedScope = String(scope || '').trim().toLowerCase();
-        const scoped = normalizeStructuredConflictPolicyByScope(source);
-        if (normalizedScope === 'permanent') return scoped.permanent;
-        if (normalizedScope === 'temporary') return scoped.temporary;
-        if (normalizedScope === 'canvas') return scoped.canvas;
-        return scoped.summary === STRUCTURED_CONFLICT_POLICY_CUSTOM
-            ? DEFAULT_SETTINGS.structuredConflictPolicy
-            : ensureStructuredConflictPolicy(scoped.summary);
-    }
-
-    function getStructuredConflictPolicyByPath(pathInput, source = settings, rootPath = '') {
-        const path = normalizeSyncPath(pathInput);
-        const relativePath = getManagedSyncRelativePath(path, rootPath || (source && source.obsidianExportRoot) || '');
-        const kind = classifyManagedSyncRelativePath(relativePath);
-        if (kind === 'permanent') return getStructuredConflictPolicyByScope('permanent', source);
-        if (kind === 'temporary') return getStructuredConflictPolicyByScope('temporary', source);
-        if (kind === 'canvas') return getStructuredConflictPolicyByScope('canvas', source);
-        return getStructuredConflictPolicyByScope('', source);
+        const payload = source && typeof source === 'object' ? source : {};
+        return ensureStructuredConflictPolicy(
+            payload.structuredConflictPolicy || DEFAULT_SETTINGS.structuredConflictPolicy
+        );
     }
 
     function getEffectiveStructuredConflictPolicy(source = settings) {
-        const summary = getStructuredConflictPolicySummary(source);
-        if (summary === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
-            return 'none';
-        }
-        return ensureStructuredConflictPolicy(summary);
-    }
-
-    function ensureDescriptionConflictPolicy(policy) {
-        const value = String(policy || '').trim().toLowerCase();
-        if (value === 'auto' || value === 'automatic') return 'merge';
-        if (value === 'local-first' || value === 'ours') return 'local';
-        if (value === 'remote-first' || value === 'theirs') return 'remote';
-        if (value === 'copy' || value === 'conflict-copy') return 'conflict-copy';
-        return DESCRIPTION_CONFLICT_POLICIES.has(value) ? value : DEFAULT_SETTINGS.blankCardSourceConflictPolicy;
-    }
-
-    function ensureDescriptionMergeFallback(policy) {
-        const value = String(policy || '').trim().toLowerCase();
-        if (value === 'conflict' || value === 'copy') return 'conflict-copy';
-        if (value === 'panel' || value === 'manual-panel') return 'manual';
-        return DESCRIPTION_MERGE_FALLBACKS.has(value) ? value : DEFAULT_SETTINGS.blankCardSourceMergeFallback;
+        return getStructuredConflictPolicySummary(source);
     }
 
     function ensureSyncMethod(method) {
@@ -3098,36 +3011,11 @@
         const hasOwn = Object.prototype.hasOwnProperty;
         const structuredPolicyCandidate = hasOwn.call(parsedObject, 'structuredConflictPolicy')
             ? parsedObject.structuredConflictPolicy
-            : parsedObject.conflictPolicy;
-        const structuredPermanentCandidate = hasOwn.call(parsedObject, 'structuredConflictPolicyPermanent')
-            ? parsedObject.structuredConflictPolicyPermanent
-            : structuredPolicyCandidate;
-        const structuredTemporaryCandidate = hasOwn.call(parsedObject, 'structuredConflictPolicyTemporary')
-            ? parsedObject.structuredConflictPolicyTemporary
-            : structuredPolicyCandidate;
-        const structuredCanvasCandidate = hasOwn.call(parsedObject, 'structuredConflictPolicyCanvas')
-            ? parsedObject.structuredConflictPolicyCanvas
-            : structuredPolicyCandidate;
-        const blankSourcePolicyCandidate = hasOwn.call(parsedObject, 'blankCardSourceConflictPolicy')
-            ? parsedObject.blankCardSourceConflictPolicy
-            : parsedObject.descriptionConflictPolicy;
-        const blankSourceFallbackCandidate = hasOwn.call(parsedObject, 'blankCardSourceMergeFallback')
-            ? parsedObject.blankCardSourceMergeFallback
-            : parsedObject.descriptionMergeFallback;
-
-        merged.structuredConflictPolicyPermanent = ensureStructuredConflictPolicy(structuredPermanentCandidate);
-        merged.structuredConflictPolicyTemporary = ensureStructuredConflictPolicy(structuredTemporaryCandidate);
-        merged.structuredConflictPolicyCanvas = ensureStructuredConflictPolicy(structuredCanvasCandidate);
-        merged.structuredConflictPolicy = deriveStructuredConflictPolicySummary(
-            merged.structuredConflictPolicyPermanent,
-            merged.structuredConflictPolicyTemporary,
-            merged.structuredConflictPolicyCanvas
-        );
+            : DEFAULT_SETTINGS.structuredConflictPolicy;
+        merged.structuredConflictPolicy = ensureStructuredConflictPolicy(structuredPolicyCandidate);
         // Main UI uses the standard sync path.
         merged.syncMethod = DEFAULT_SETTINGS.syncMethod;
         merged.toastEnabled = merged.toastEnabled !== false;
-        merged.blankCardSourceConflictPolicy = ensureDescriptionConflictPolicy(blankSourcePolicyCandidate);
-        merged.blankCardSourceMergeFallback = ensureDescriptionMergeFallback(blankSourceFallbackCandidate);
 
         merged.firstSyncMode = ensureFirstSyncMode(merged.firstSyncMode);
         merged.permanentPullMode = ensurePermanentPullMode(merged.permanentPullMode);
@@ -3146,10 +3034,6 @@
             merged.tempSectionUploadIntervalSeconds,
             DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
         );
-        merged.blankSectionUploadIntervalSeconds = normalizeCustomUploadIntervalSeconds(
-            merged.blankSectionUploadIntervalSeconds,
-            DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds
-        );
         merged.obsidianFilePushEnabled = merged.obsidianFilePushEnabled !== false;
         merged.obsidianExportFormat = normalizeObsidianExportFormat(merged.obsidianExportFormat, DEFAULT_SETTINGS.obsidianExportFormat);
         merged.obsidianExportRoot = normalizeObsidianExportRoot(
@@ -3159,24 +3043,12 @@
         );
         merged.firstSyncPathVerifiedRoot = normalizeSyncPath(merged.firstSyncPathVerifiedRoot);
         merged.firstSyncPathVerifiedAt = Math.max(0, toSafeInt(merged.firstSyncPathVerifiedAt, 0));
-        delete merged.conflictPolicy;
-        delete merged.pushOnSync;
-        delete merged.pullOnSync;
-        delete merged.syncPermanentTreeOnPush;
-        delete merged.descriptionConflictPolicy;
-        delete merged.descriptionMergeFallback;
 
         return merged;
     }
 
     function saveSettings() {
         const persistPayload = Object.assign({}, settings || {});
-        delete persistPayload.conflictPolicy;
-        delete persistPayload.pushOnSync;
-        delete persistPayload.pullOnSync;
-        delete persistPayload.syncPermanentTreeOnPush;
-        delete persistPayload.descriptionConflictPolicy;
-        delete persistPayload.descriptionMergeFallback;
         setSyncMetaRaw(SETTINGS_KEY, JSON.stringify(persistPayload));
         try {
             global.dispatchEvent(new CustomEvent('canvas-obsidian-git-sync-settings-updated', {
@@ -3200,7 +3072,6 @@
 
     function saveRuntime() {
         const persistPayload = Object.assign({}, runtime || {});
-        delete persistPayload.lastDescriptionMergeMode;
         setSyncMetaRaw(RUNTIME_KEY, JSON.stringify(persistPayload));
     }
 
@@ -3407,10 +3278,10 @@
             patch.temporaryIds.forEach((id) => addPath(pathMap.temporaryById[id]));
         }
         if (patch.blankAll === true) {
-            Object.keys(pathMap.blankById || {}).forEach((id) => addPath(pathMap.blankById[id]));
+            addPath(pathMap.canvasPath);
         }
         if (Array.isArray(patch.blankIds)) {
-            patch.blankIds.forEach((id) => addPath(pathMap.blankById[id]));
+            addPath(pathMap.canvasPath);
         }
 
         return Array.from(pathSet);
@@ -3429,7 +3300,6 @@
             permanentPaths: [],
             temporaryById: {},
             temporarySerialById: {},
-            blankById: {},
             updatedAt: 0
         };
     }
@@ -3457,7 +3327,6 @@
             permanentPaths: uniqueStringList(source.permanentPaths, normalizeSyncPath),
             temporaryById: normalizeStringMap(source.temporaryById, normalizeSyncPath),
             temporarySerialById: normalizeStringMap(source.temporarySerialById, normalizeTemporarySerial),
-            blankById: normalizeStringMap(source.blankById, normalizeSyncPath),
             updatedAt: Number(source.updatedAt) || 0
         };
     }
@@ -3516,8 +3385,7 @@
 
         const rawType = String(rawMeta.type || '').trim().toLowerCase();
         if (!rawType) return null;
-        const isBlankType = rawType === 'blank' || rawType === 'blank-native-text' || rawType === 'md';
-        const type = isBlankType ? 'blank' : rawType;
+        const type = rawType;
 
         const meta = { type };
         if (type === 'temporary') {
@@ -3525,9 +3393,6 @@
             if (sectionId) meta.sectionId = sectionId;
             const sectionSerial = normalizeTemporarySerial(rawMeta.sectionSerial || rawMeta.sectionLabel);
             if (sectionSerial) meta.sectionSerial = sectionSerial;
-        } else if (type === 'blank') {
-            const nodeId = String(rawMeta.nodeId || rawMeta.id || '').trim();
-            if (nodeId) meta.nodeId = nodeId;
         } else if (type === 'permanent') {
             const slot = Number.parseInt(rawMeta.slot, 10);
             if (Number.isFinite(slot) && slot > 0) meta.slot = slot;
@@ -3568,9 +3433,6 @@
                     next.temporarySerialById[meta.sectionId] = sectionSerial;
                 }
                 return;
-            }
-            if (meta.type === 'blank' && meta.nodeId) {
-                next.blankById[meta.nodeId] = path;
             }
         });
 
@@ -3647,7 +3509,6 @@
             appendTouchedPath(pathMap.canvasPath);
             pathMap.permanentPaths.forEach((path) => appendTouchedPath(path));
             Object.keys(pathMap.temporaryById || {}).forEach((id) => appendTouchedPath(pathMap.temporaryById[id]));
-            Object.keys(pathMap.blankById || {}).forEach((id) => appendTouchedPath(pathMap.blankById[id]));
             markDirtyPathTimestamps(dirty, Array.from(touchedPathSet), timestamp);
         }, timestamp);
     }
@@ -3674,7 +3535,6 @@
         const canvasPaths = [];
         const permanentPaths = [];
         const temporaryById = Object.assign({}, normalizedPathMap.temporaryById);
-        const blankById = Object.assign({}, normalizedPathMap.blankById);
 
         sourceFiles.forEach((file) => {
             const path = normalizeSyncPath(file && file.path);
@@ -3691,10 +3551,6 @@
             }
             if (meta && meta.type === 'temporary') {
                 if (meta.sectionId) temporaryById[meta.sectionId] = path;
-                return;
-            }
-            if (meta && meta.type === 'blank') {
-                if (meta.nodeId) blankById[meta.nodeId] = path;
                 return;
             }
             if (/\.canvas$/i.test(path)) {
@@ -3728,12 +3584,11 @@
         });
 
         if (dirty.blank.all) {
-            Object.values(blankById).forEach((path) => candidate.add(path));
+            canvasPaths.forEach((path) => candidate.add(path));
         }
-        dirty.blank.ids.forEach((id) => {
-            const mapped = normalizeSyncPath(blankById[id]);
-            if (mapped) candidate.add(mapped);
-        });
+        if (dirty.blank.ids.length) {
+            canvasPaths.forEach((path) => candidate.add(path));
+        }
 
         dirty.paths.forEach((path) => candidate.add(path));
 
@@ -3753,11 +3608,10 @@
         return {
             candidatePaths: candidate,
             allTemporaryPaths: uniqueStringList(Object.values(temporaryById), normalizeSyncPath),
-            allBlankPaths: uniqueStringList(Object.values(blankById), normalizeSyncPath),
+            allBlankPaths: uniqueStringList(canvasPaths, normalizeSyncPath),
             allPermanentPaths: uniqueStringList(permanentPaths, normalizeSyncPath),
             canvasPaths: uniqueStringList(canvasPaths, normalizeSyncPath),
-            temporaryById,
-            blankById
+            temporaryById
         };
     }
 
@@ -3771,7 +3625,6 @@
         const pathLookup = (filesByPath && typeof filesByPath === 'object') ? filesByPath : {};
         const typedPaths = pathInfo && typeof pathInfo === 'object' ? pathInfo : {};
         const syncedTemporaryIds = new Set();
-        const syncedBlankIds = new Set();
         let canvasSynced = false;
 
         syncedSet.forEach((path) => {
@@ -3785,10 +3638,6 @@
                 syncedTemporaryIds.add(meta.sectionId);
                 return;
             }
-            if (meta && meta.type === 'blank' && meta.nodeId) {
-                syncedBlankIds.add(meta.nodeId);
-                return;
-            }
             if (/\.canvas$/i.test(path)) {
                 canvasSynced = true;
             }
@@ -3797,12 +3646,13 @@
         if (canvasSynced) {
             dirty.canvas.layoutDirty = false;
             dirty.canvas.fileRefDirty = false;
+            dirty.blank.all = false;
+            dirty.blank.ids = [];
         }
 
         dirty.paths = dirty.paths.filter((path) => !syncedSet.has(path));
         dirty.permanent.paths = dirty.permanent.paths.filter((path) => !syncedSet.has(path));
         dirty.temporary.ids = dirty.temporary.ids.filter((id) => !syncedTemporaryIds.has(id));
-        dirty.blank.ids = dirty.blank.ids.filter((id) => !syncedBlankIds.has(id));
         const nextPathUpdatedAt = {};
         const pathUpdatedAtSource = (dirty.pathUpdatedAt && typeof dirty.pathUpdatedAt === 'object')
             ? dirty.pathUpdatedAt
@@ -3819,12 +3669,8 @@
         const temporaryById = (typedPaths.temporaryById && typeof typedPaths.temporaryById === 'object')
             ? typedPaths.temporaryById
             : {};
-        const blankById = (typedPaths.blankById && typeof typedPaths.blankById === 'object')
-            ? typedPaths.blankById
-            : {};
 
         dirty.temporary.ids = dirty.temporary.ids.filter((id) => !!normalizeSyncPath(temporaryById[id]));
-        dirty.blank.ids = dirty.blank.ids.filter((id) => !!normalizeSyncPath(blankById[id]));
 
         if (dirty.permanent.all) {
             const allPermanentPaths = uniqueStringList(typedPaths.allPermanentPaths, normalizeSyncPath);
@@ -5715,9 +5561,6 @@ Cancel: go back and change the branch name first.`
         if (rawKey.startsWith(BCS_SECTION_PREFIX)) {
             return textByLang('临时栏目分片', 'Temporary section shard');
         }
-        if (rawKey.startsWith(BCS_MD_PREFIX)) {
-            return textByLang('空白卡片分片', 'Blank card shard');
-        }
         switch (rawKey) {
             case 'canvas-appearance-settings-v1':
                 return textByLang('外观设置', 'Appearance settings');
@@ -5822,7 +5665,6 @@ Cancel: go back and change the branch name first.`
         if (!relative) return '';
         if (/^(永久栏目|Permanent)\/.+\.(md|json)$/i.test(relative)) return 'permanent';
         if (/^(临时栏目|Temporary)\/.+\.(md|json)$/i.test(relative)) return 'temporary';
-        if (/^(空白栏目|Blank)\/.+\.(md|json)$/i.test(relative)) return 'blank';
         if (/^[^/]+\.canvas$/i.test(relative)) return 'canvas';
         if (/^(说明导入规则\.md|README_Import_Rules\.md|说明_导入规则\.md)$/i.test(relative)) return 'guide';
         return 'other';
@@ -5862,7 +5704,6 @@ Cancel: go back and change the branch name first.`
             total: 0,
             permanent: 0,
             temporary: 0,
-            blank: 0,
             canvas: 0,
             guide: 0,
             other: 0
@@ -6028,7 +5869,6 @@ Cancel: go back and change the branch name first.`
             canvas: 0,
             guide: 0,
             temporary: 0,
-            blank: 0,
             permanent: 0,
             other: 0
         };
@@ -6049,7 +5889,6 @@ Cancel: go back and change the branch name first.`
 
         const parts = [];
         if (stats.canvas > 0) parts.push(textByLang(`画布文件 ${stats.canvas}`, `Canvas file ${stats.canvas}`));
-        if (stats.blank > 0) parts.push(textByLang(`空白栏目文件 ${stats.blank}`, `Blank files ${stats.blank}`));
         if (stats.temporary > 0) parts.push(textByLang(`临时栏目文件 ${stats.temporary}`, `Temporary files ${stats.temporary}`));
         if (stats.guide > 0) parts.push(textByLang(`说明文件 ${stats.guide}`, `Guide files ${stats.guide}`));
         if (stats.permanent > 0) parts.push(textByLang(`永久栏目文件 ${stats.permanent}`, `Permanent files ${stats.permanent}`));
@@ -6129,18 +5968,20 @@ Cancel: go back and change the branch name first.`
         const managedFileComparison = options && options.managedFileComparison && typeof options.managedFileComparison === 'object'
             ? options.managedFileComparison
             : null;
+        const localSnapshotOtherCounts = extractCanvasSectionCountsFromSnapshot(localSnapshot);
+        const remoteSnapshotOtherCounts = extractCanvasSectionCountsFromSnapshot(remoteSnapshot);
         const localOtherCounts = managedFileComparison && managedFileComparison.localStats
             ? {
                 temporary: Math.max(0, Number(managedFileComparison.localStats.temporary) || 0),
-                blank: Math.max(0, Number(managedFileComparison.localStats.blank) || 0)
+                blank: localSnapshotOtherCounts.blank
             }
-            : extractCanvasSectionCountsFromSnapshot(localSnapshot);
+            : localSnapshotOtherCounts;
         const remoteOtherCounts = managedFileComparison && managedFileComparison.remoteStats
             ? {
                 temporary: Math.max(0, Number(managedFileComparison.remoteStats.temporary) || 0),
-                blank: Math.max(0, Number(managedFileComparison.remoteStats.blank) || 0)
+                blank: remoteSnapshotOtherCounts.blank
             }
-            : extractCanvasSectionCountsFromSnapshot(remoteSnapshot);
+            : remoteSnapshotOtherCounts;
         const otherStateComparison = managedFileComparison
             ? Object.assign({}, fallbackOtherStateComparison, {
                 same: managedFileComparison.same === true,
@@ -6687,10 +6528,7 @@ Cancel: go back and change the branch name first.`
     }
 
     function formatConflictPolicyForDisplay(policy) {
-        const value = ensureStructuredConflictPolicy(policy, { allowCustom: true });
-        if (value === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
-            return textByLang('自定义（按三类子策略）', 'Custom (scope-specific policies)');
-        }
+        const value = ensureStructuredConflictPolicy(policy);
         if (value === 'ours') return textByLang('本地优先', 'Our changes');
         if (value === 'theirs') return textByLang('云端优先', 'Their changes');
         if (value === 'newer') {
@@ -6700,28 +6538,6 @@ Cancel: go back and change the branch name first.`
             );
         }
         return textByLang('手动选择', 'Choose manually');
-    }
-
-    function formatStructuredPolicyScopeSummary(source = settings) {
-        const scoped = normalizeStructuredConflictPolicyByScope(source);
-        return textByLang(
-            `永久=${formatConflictPolicyForDisplay(scoped.permanent)}；临时=${formatConflictPolicyForDisplay(scoped.temporary)}；画布=${formatConflictPolicyForDisplay(scoped.canvas)}`,
-            `Permanent=${formatConflictPolicyForDisplay(scoped.permanent)}; Temporary=${formatConflictPolicyForDisplay(scoped.temporary)}; Canvas=${formatConflictPolicyForDisplay(scoped.canvas)}`
-        );
-    }
-
-    function formatDescriptionConflictPolicyForDisplay(policy) {
-        const value = ensureDescriptionConflictPolicy(policy);
-        if (value === 'local') return textByLang('说明类：优先本地', 'Description: prefer local');
-        if (value === 'remote') return textByLang('说明类：优先云端', 'Description: prefer cloud');
-        if (value === 'conflict-copy') return textByLang('说明类：冲突副本卡片', 'Description: conflict-copy card');
-        return textByLang('说明类：自动合并', 'Description: auto-merge');
-    }
-
-    function formatDescriptionMergeFallbackForDisplay(policy) {
-        const value = ensureDescriptionMergeFallback(policy);
-        if (value === 'manual') return textByLang('失败兜底：手动处理', 'Fallback: manual');
-        return textByLang('失败兜底：冲突副本卡片', 'Fallback: conflict-copy card');
     }
 
     function decideWinnerByLatestModified(localUpdatedAt, remoteUpdatedAt) {
@@ -6735,6 +6551,9 @@ Cancel: go back and change the branch name first.`
         const remoteSnapshot = (remoteSnapshotInput && typeof remoteSnapshotInput === 'object')
             ? remoteSnapshotInput
             : null;
+        // GitHub path: remoteUpdatedAt / lastRemoteCommittedAt / snapshot.updatedAt usually come from
+        // commit timeline. For other providers, inject equivalent per-file/per-snapshot modification
+        // timestamps here; if none is trustworthy, caller must fall back to manual conflict resolution.
         return Math.max(
             0,
             Number(options && options.remoteUpdatedAt) || 0,
@@ -6759,46 +6578,6 @@ Cancel: go back and change the branch name first.`
             choice: decideWinnerByLatestModified(localTs, remoteTs),
             localTs,
             remoteTs
-        };
-    }
-
-    function decidePendingConflictByPathLatestModified(conflictData = pendingConflict) {
-        const source = conflictData && typeof conflictData === 'object' ? conflictData : null;
-        if (!source) {
-            return {
-                fileConflicts: [],
-                choiceByPath: {},
-                unresolvedPaths: [],
-                hasPathTimestamps: false
-            };
-        }
-
-        const fileConflicts = uniqueStringList(source.fileConflicts, normalizeSyncPath);
-        const conflictMetaByPath = normalizeConflictFileMetaMap(source.fileConflictByPath, fileConflicts);
-        const choiceByPath = {};
-        const unresolvedPaths = [];
-        let hasPathTimestamps = false;
-
-        fileConflicts.forEach((path) => {
-            const meta = (conflictMetaByPath && typeof conflictMetaByPath === 'object') ? conflictMetaByPath[path] : null;
-            const localTs = Math.max(0, Number(meta && meta.localDirtyAt) || 0);
-            const remoteTs = Math.max(0, Number(meta && meta.remoteCommittedAt) || 0);
-            if (localTs > 0 || remoteTs > 0) {
-                hasPathTimestamps = true;
-            }
-            const choice = decideWinnerByLatestModified(localTs, remoteTs);
-            if (!choice) {
-                unresolvedPaths.push(path);
-                return;
-            }
-            choiceByPath[path] = choice === 'remote' ? 'remote' : 'local';
-        });
-
-        return {
-            fileConflicts,
-            choiceByPath,
-            unresolvedPaths,
-            hasPathTimestamps
         };
     }
 
@@ -7411,17 +7190,13 @@ Cancel: go back and change the branch name first.`
 
         const blankCount = (() => {
             if (dirty.blank.all) {
-                const mappedCount = Object.keys(pathMap.blankById || {}).length;
                 const localCount = Array.isArray(global.CanvasState && global.CanvasState.mdNodes)
-                    ? global.CanvasState.mdNodes.filter((node) => node && node.subtype !== 'import-container' && !isCanvasNativeTextNode(node)).length
+                    ? global.CanvasState.mdNodes.filter((node) => node && node.subtype !== 'import-container').length
                     : 0;
-                return Math.max(mappedCount, dirty.blank.ids.length, localCount);
+                return Math.max(dirty.blank.ids.length, localCount);
             }
             return dirty.blank.ids.length;
         })();
-        const nativeCardCount = (dirty.blank.all && Array.isArray(global.CanvasState && global.CanvasState.mdNodes))
-            ? global.CanvasState.mdNodes.filter((node) => node && node.subtype !== 'import-container' && isCanvasNativeTextNode(node)).length
-            : 0;
 
         const lines = [];
         if (permanentTokens.length) {
@@ -7432,9 +7207,6 @@ Cancel: go back and change the branch name first.`
         }
         if (dirty.blank.all || blankCount > 0) {
             lines.push(textByLang(`空白：${blankCount}`, `Blank: ${blankCount}`));
-        }
-        if (nativeCardCount > 0) {
-            lines.push(textByLang(`其他：原生卡片 ${nativeCardCount}`, `Other: native cards ${nativeCardCount}`));
         }
         if (dirty.canvas.layoutDirty || dirty.canvas.fileRefDirty) {
             lines.push(textByLang('画布：已变更', 'Canvas: changed'));
@@ -7551,7 +7323,6 @@ Cancel: go back and change the branch name first.`
         const lastEl = getElement('canvasSyncStatusLastSuccess');
         const directionEl = getElement('canvasSyncStatusLastDirection');
         const policySummaryEl = getElement('canvasSyncStatusPolicySummary');
-        const descriptionMergeEl = getElement('canvasSyncStatusDescriptionMerge');
         const obsidianPushAtEl = getElement('canvasSyncStatusObsidianPushAt');
         const obsidianPushDeltaEl = getElement('canvasSyncStatusObsidianPushDelta');
         const remoteShaEl = getElement('canvasSyncStatusRemoteSha');
@@ -7574,19 +7345,7 @@ Cancel: go back and change the branch name first.`
         if (directionEl) directionEl.textContent = getDirectionText(runtime.lastAppliedDirection);
         if (policySummaryEl) {
             const structuredSummaryPolicy = getStructuredConflictPolicySummary(settings);
-            const structuredText = formatConflictPolicyForDisplay(structuredSummaryPolicy);
-            if (structuredSummaryPolicy === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
-                policySummaryEl.textContent = `${structuredText}（${formatStructuredPolicyScopeSummary(settings)}）`;
-            } else {
-                policySummaryEl.textContent = structuredText;
-            }
-        }
-        if (descriptionMergeEl) {
-            const modeText = formatDescriptionConflictPolicyForDisplay(settings && settings.blankCardSourceConflictPolicy);
-            const fallbackText = formatDescriptionMergeFallbackForDisplay(settings && settings.blankCardSourceMergeFallback);
-            const mergedCount = Math.max(0, Number(runtime && runtime.lastDescriptionMergeMerged) || 0);
-            const fallbackCount = Math.max(0, Number(runtime && runtime.lastDescriptionMergeFallback) || 0);
-            descriptionMergeEl.textContent = `${modeText}，${fallbackText}（merged ${mergedCount} / fallback ${fallbackCount}）`;
+            policySummaryEl.textContent = formatConflictPolicyForDisplay(structuredSummaryPolicy);
         }
         if (obsidianPushAtEl) {
             obsidianPushAtEl.textContent = runtime.lastObsidianPushAt
@@ -7986,12 +7745,6 @@ Cancel: go back and change the branch name first.`
             'canvasSyncFirstSyncModeLocalInput',
             'canvasSyncToastToggle',
             'canvasSyncStructuredConflictPolicySelect',
-            'canvasSyncStructuredConflictPolicyPermanentSelect',
-            'canvasSyncStructuredConflictPolicyTemporarySelect',
-            'canvasSyncStructuredConflictPolicyCanvasSelect',
-            'canvasSyncDescriptionConflictPolicySelect',
-            'canvasSyncDescriptionMergeFallbackSelect',
-            'canvasSyncConflictFineToggle',
             'canvasSyncPermanentPullModeSelect',
             'canvasSyncPermanentIncrementalThresholdInput',
             'canvasSyncObsidianFilePushToggle',
@@ -8022,10 +7775,6 @@ Cancel: go back and change the branch name first.`
             'canvasSyncConflictUseLocalBtn',
             'canvasSyncConflictUseRemoteBtn',
             'canvasSyncConflictUseNewestBtn',
-            'canvasSyncConflictDescUseLocalBtn',
-            'canvasSyncConflictDescUseRemoteBtn',
-            'canvasSyncConflictDescUseCopyBtn',
-            'canvasSyncConflictApplyFineBtn',
             'canvasSyncConflictDismissBtn'
         ].forEach((id) => {
             setActionDisabledState(
@@ -8107,11 +7856,6 @@ Cancel: go back and change the branch name first.`
         const enabled = getElement('canvasSyncEnabledToggle');
         const toastToggle = getElement('canvasSyncToastToggle');
         const structuredConflict = getElement('canvasSyncStructuredConflictPolicySelect');
-        const structuredConflictPermanent = getElement('canvasSyncStructuredConflictPolicyPermanentSelect');
-        const structuredConflictTemporary = getElement('canvasSyncStructuredConflictPolicyTemporarySelect');
-        const structuredConflictCanvas = getElement('canvasSyncStructuredConflictPolicyCanvasSelect');
-        const descriptionConflict = getElement('canvasSyncDescriptionConflictPolicySelect');
-        const descriptionFallback = getElement('canvasSyncDescriptionMergeFallbackSelect');
         const permanentPullMode = getElement('canvasSyncPermanentPullModeSelect');
         const permanentIncrementalThreshold = getElement('canvasSyncPermanentIncrementalThresholdInput');
         const obsidianFilePushEnabled = getElement('canvasSyncObsidianFilePushToggle');
@@ -8122,13 +7866,7 @@ Cancel: go back and change the branch name first.`
         if (enabled) enabled.checked = !!settings.enabled;
         setFirstSyncModeToForm(settings.firstSyncMode);
         if (toastToggle) toastToggle.checked = settings.toastEnabled !== false;
-        const structuredScoped = normalizeStructuredConflictPolicyByScope(settings);
-        if (structuredConflict) structuredConflict.value = structuredScoped.summary;
-        if (structuredConflictPermanent) structuredConflictPermanent.value = structuredScoped.permanent;
-        if (structuredConflictTemporary) structuredConflictTemporary.value = structuredScoped.temporary;
-        if (structuredConflictCanvas) structuredConflictCanvas.value = structuredScoped.canvas;
-        if (descriptionConflict) descriptionConflict.value = ensureDescriptionConflictPolicy(settings.blankCardSourceConflictPolicy);
-        if (descriptionFallback) descriptionFallback.value = ensureDescriptionMergeFallback(settings.blankCardSourceMergeFallback);
+        if (structuredConflict) structuredConflict.value = getStructuredConflictPolicySummary(settings);
         if (permanentPullMode) permanentPullMode.value = ensurePermanentPullMode(settings.permanentPullMode);
         if (permanentIncrementalThreshold) permanentIncrementalThreshold.value = String(normalizePermanentIncrementalMaxChanges(settings.permanentIncrementalMaxChanges, DEFAULT_SETTINGS.permanentIncrementalMaxChanges));
         if (obsidianFilePushEnabled) obsidianFilePushEnabled.checked = settings.obsidianFilePushEnabled !== false;
@@ -8143,15 +7881,9 @@ Cancel: go back and change the branch name first.`
 
     function pullSettingsFromForm(options = {}) {
         const silentFormatToast = !!(options && options.silentFormatToast === true);
-        const changedFieldId = String(options && options.changedFieldId || '').trim();
         const enabled = getElement('canvasSyncEnabledToggle');
         const toastToggle = getElement('canvasSyncToastToggle');
         const structuredConflict = getElement('canvasSyncStructuredConflictPolicySelect');
-        const structuredConflictPermanent = getElement('canvasSyncStructuredConflictPolicyPermanentSelect');
-        const structuredConflictTemporary = getElement('canvasSyncStructuredConflictPolicyTemporarySelect');
-        const structuredConflictCanvas = getElement('canvasSyncStructuredConflictPolicyCanvasSelect');
-        const descriptionConflict = getElement('canvasSyncDescriptionConflictPolicySelect');
-        const descriptionFallback = getElement('canvasSyncDescriptionMergeFallbackSelect');
         const permanentPullMode = getElement('canvasSyncPermanentPullModeSelect');
         const permanentIncrementalThreshold = getElement('canvasSyncPermanentIncrementalThresholdInput');
         const obsidianFilePushEnabled = getElement('canvasSyncObsidianFilePushToggle');
@@ -8172,47 +7904,12 @@ Cancel: go back and change the branch name first.`
         settings.toastEnabled = toastToggle ? !!toastToggle.checked : settings.toastEnabled;
 
         settings.syncMethod = DEFAULT_SETTINGS.syncMethod;
-        const selectedStructuredTopPolicy = ensureStructuredConflictPolicy(
-            structuredConflict ? structuredConflict.value : getStructuredConflictPolicySummary(settings),
-            { allowCustom: true }
-        );
-        let nextPermanentPolicy = ensureStructuredConflictPolicy(
-            structuredConflictPermanent ? structuredConflictPermanent.value : settings.structuredConflictPolicyPermanent
-        );
-        let nextTemporaryPolicy = ensureStructuredConflictPolicy(
-            structuredConflictTemporary ? structuredConflictTemporary.value : settings.structuredConflictPolicyTemporary
-        );
-        let nextCanvasPolicy = ensureStructuredConflictPolicy(
-            structuredConflictCanvas ? structuredConflictCanvas.value : settings.structuredConflictPolicyCanvas
-        );
-
-        const topPolicyChangedByUser = changedFieldId === 'canvasSyncStructuredConflictPolicySelect';
-        if (selectedStructuredTopPolicy !== STRUCTURED_CONFLICT_POLICY_CUSTOM && topPolicyChangedByUser) {
-            nextPermanentPolicy = ensureStructuredConflictPolicy(selectedStructuredTopPolicy);
-            nextTemporaryPolicy = ensureStructuredConflictPolicy(selectedStructuredTopPolicy);
-            nextCanvasPolicy = ensureStructuredConflictPolicy(selectedStructuredTopPolicy);
-            if (structuredConflictPermanent) structuredConflictPermanent.value = nextPermanentPolicy;
-            if (structuredConflictTemporary) structuredConflictTemporary.value = nextTemporaryPolicy;
-            if (structuredConflictCanvas) structuredConflictCanvas.value = nextCanvasPolicy;
-        }
-
-        settings.structuredConflictPolicyPermanent = nextPermanentPolicy;
-        settings.structuredConflictPolicyTemporary = nextTemporaryPolicy;
-        settings.structuredConflictPolicyCanvas = nextCanvasPolicy;
-        settings.structuredConflictPolicy = deriveStructuredConflictPolicySummary(
-            settings.structuredConflictPolicyPermanent,
-            settings.structuredConflictPolicyTemporary,
-            settings.structuredConflictPolicyCanvas
+        settings.structuredConflictPolicy = ensureStructuredConflictPolicy(
+            structuredConflict ? structuredConflict.value : getStructuredConflictPolicySummary(settings)
         );
         if (structuredConflict) {
             structuredConflict.value = settings.structuredConflictPolicy;
         }
-        settings.blankCardSourceConflictPolicy = ensureDescriptionConflictPolicy(
-            descriptionConflict ? descriptionConflict.value : settings.blankCardSourceConflictPolicy
-        );
-        settings.blankCardSourceMergeFallback = ensureDescriptionMergeFallback(
-            descriptionFallback ? descriptionFallback.value : settings.blankCardSourceMergeFallback
-        );
         settings.permanentPullMode = ensurePermanentPullMode(permanentPullMode ? permanentPullMode.value : settings.permanentPullMode);
         settings.permanentIncrementalMaxChanges = normalizePermanentIncrementalMaxChanges(
             permanentIncrementalThreshold ? permanentIncrementalThreshold.value : settings.permanentIncrementalMaxChanges,
@@ -8228,12 +7925,6 @@ Cancel: go back and change the branch name first.`
             DEFAULT_SETTINGS.obsidianExportRoot,
             { allowEmpty: true }
         );
-        delete settings.conflictPolicy;
-        delete settings.pushOnSync;
-        delete settings.pullOnSync;
-        delete settings.syncPermanentTreeOnPush;
-        delete settings.descriptionConflictPolicy;
-        delete settings.descriptionMergeFallback;
 
         updateSyncEnabledDependentFieldState();
         saveSettings();
@@ -9208,12 +8899,6 @@ Cancel: go back and change the branch name first.`
     function shouldIncludeTempSectionSnapshot(trigger, options = {}) {
         if (options.includeTempSection === true) return true;
         if (options.includeTempSection === false) return false;
-        return true;
-    }
-
-    function shouldPushBlankSectionFiles(trigger, options = {}) {
-        if (options.includeBlankSectionFiles === true) return true;
-        if (options.includeBlankSectionFiles === false) return false;
         return true;
     }
 
@@ -10258,19 +9943,8 @@ Cancel: go back and change the branch name first.`
             }
         }
 
-        const exportRootForClassification = bundle && bundle.exportRoot
-            ? String(bundle.exportRoot)
-            : settings.obsidianExportRoot;
-        const isBlankManagedFilePath = (path) => {
-            const relativePath = getManagedSyncRelativePath(path, exportRootForClassification);
-            return classifyManagedSyncRelativePath(relativePath) === 'blank';
-        };
-        const rawBlankChangedCount = changedFiles.reduce((count, file) => (
-            isBlankManagedFilePath(file && file.path) ? count + 1 : count
-        ), 0);
-        const rawBlankDeletedCount = removedPaths.reduce((count, path) => (
-            isBlankManagedFilePath(path) ? count + 1 : count
-        ), 0);
+        const rawBlankChangedCount = 0;
+        const rawBlankDeletedCount = 0;
 
         const nextPrevSyncIndex = normalizePrevSyncIndex(prevSyncIndex);
         const nowTs = Date.now();
@@ -10522,7 +10196,6 @@ Cancel: go back and change the branch name first.`
                     canvasNames: new Set(),
                     permanentCount: 0,
                     temporaryCount: 0,
-                    blankCount: 0,
                     score: 0
                 });
             }
@@ -10540,14 +10213,12 @@ Cancel: go back and change the branch name first.`
                 if (!relative) return;
                 if (/^(永久栏目|Permanent)(\/|$)/.test(relative)) stats.permanentCount += 1;
                 if (/^(临时栏目|Temporary)(\/|$)/.test(relative)) stats.temporaryCount += 1;
-                if (/^(空白栏目|Blank)(\/|$)/.test(relative)) stats.blankCount += 1;
             });
 
             const hasCanvas = stats.canvasNames.size > 0;
             const hasPermanent = stats.permanentCount > 0;
             const hasTemporary = stats.temporaryCount > 0;
-            const hasBlank = stats.blankCount > 0;
-            const hasCoreFolder = hasPermanent || hasTemporary || hasBlank;
+            const hasCoreFolder = hasPermanent || hasTemporary;
             const hasDefaultCanvasName = stats.canvasNames.has('书签画布.canvas') || stats.canvasNames.has('bookmark-canvas.canvas');
             const expectedLeaf = expected ? expected.split('/').filter(Boolean).slice(-1)[0] : '';
             const candidateLeaf = stats.root ? stats.root.split('/').filter(Boolean).slice(-1)[0] : '';
@@ -10557,7 +10228,6 @@ Cancel: go back and change the branch name first.`
             if (hasCanvas) stats.score += 5;
             if (hasPermanent) stats.score += 3;
             if (hasTemporary) stats.score += 2;
-            if (hasBlank) stats.score += 2;
             if (hasDefaultCanvasName) stats.score += 2;
             if (leafMatch) stats.score += 1;
             stats.hasCoreFolder = hasCoreFolder;
@@ -10713,7 +10383,7 @@ Cancel: go back and change the branch name first.`
         const relative = normalizeSyncPath(relativePath);
         if (!relative) return false;
 
-        if (/^(永久栏目|Permanent|临时栏目|Temporary|空白栏目|Blank)\/.+\.(md|json)$/i.test(relative)) {
+        if (/^(永久栏目|Permanent|临时栏目|Temporary)\/.+\.(md|json)$/i.test(relative)) {
             return true;
         }
         if (/^(说明导入规则\.md|README_Import_Rules\.md|说明_导入规则\.md)$/i.test(relative)) {
@@ -10859,39 +10529,12 @@ Cancel: go back and change the branch name first.`
 	        };
 	    }
 
-    function resolveConflictPolicyForPath(path, options = {}) {
-        const source = options && typeof options === 'object' ? options : {};
-        if (typeof source.resolveConflictPolicyForPath === 'function') {
-            const resolvedByFunc = ensureStructuredConflictPolicy(
-                source.resolveConflictPolicyForPath(path),
-                { allowCustom: true }
-            );
-            if (resolvedByFunc && resolvedByFunc !== STRUCTURED_CONFLICT_POLICY_CUSTOM) {
-                return ensureStructuredConflictPolicy(resolvedByFunc);
-            }
-        }
-        const map = (source.conflictPolicyByPath && typeof source.conflictPolicyByPath === 'object')
-            ? source.conflictPolicyByPath
-            : {};
-        const fromMap = ensureStructuredConflictPolicy(
-            map[normalizeSyncPath(path)],
-            { allowCustom: true }
-        );
-        if (fromMap && fromMap !== STRUCTURED_CONFLICT_POLICY_CUSTOM) {
-            return ensureStructuredConflictPolicy(fromMap);
-        }
-        const fallbackPolicy = ensureStructuredConflictPolicy(
-            source.structuredConflictPolicy || source.conflictPolicy || DEFAULT_SETTINGS.structuredConflictPolicy,
-            { allowCustom: true }
-        );
-        if (fallbackPolicy !== STRUCTURED_CONFLICT_POLICY_CUSTOM) {
-            return ensureStructuredConflictPolicy(fallbackPolicy);
-        }
-        return ensureStructuredConflictPolicy(DEFAULT_SETTINGS.structuredConflictPolicy);
-    }
-
     function resolveFileConflictByPolicy(path, localEntry, remoteEntry, options = {}) {
-        const policy = resolveConflictPolicyForPath(path, options);
+        const policy = ensureStructuredConflictPolicy(
+            options && options.structuredConflictPolicy
+                ? options.structuredConflictPolicy
+                : DEFAULT_SETTINGS.structuredConflictPolicy
+        );
         if (policy === 'ours') {
             return {
                 action: localEntry ? 'upload' : 'deleteRemote',
@@ -11104,11 +10747,11 @@ Cancel: go back and change the branch name first.`
             const entry = (source[rawPath] && typeof source[rawPath] === 'object') ? source[rawPath] : {};
             const localDirtyAt = Math.max(0, Number(entry.localDirtyAt) || 0);
             const remoteCommittedAt = Math.max(0, Number(entry.remoteCommittedAt) || 0);
-            const policy = ensureStructuredConflictPolicy(entry.policy, { allowCustom: true });
+            const policy = ensureStructuredConflictPolicy(entry.policy);
             output[path] = {
                 localDirtyAt,
                 remoteCommittedAt,
-                policy: policy === STRUCTURED_CONFLICT_POLICY_CUSTOM ? '' : policy
+                policy
             };
         });
 
@@ -11130,11 +10773,11 @@ Cancel: go back and change the branch name first.`
             if (allowedSet && !allowedSet.has(path)) return;
             const localDirtyAt = Math.max(0, Number(entry && entry.localDirtyAt) || 0);
             const remoteCommittedAt = Math.max(0, Number(entry && entry.remoteCommittedAt) || 0);
-            const policy = ensureStructuredConflictPolicy(entry && entry.policy, { allowCustom: true });
+            const policy = ensureStructuredConflictPolicy(entry && entry.policy);
             map[path] = {
                 localDirtyAt,
                 remoteCommittedAt,
-                policy: policy === STRUCTURED_CONFLICT_POLICY_CUSTOM ? '' : policy
+                policy
             };
         });
 
@@ -11262,11 +10905,9 @@ Cancel: go back and change the branch name first.`
         const remoteList = filterRemoteListForManagedSyncFiles(remoteListRaw, settings.obsidianExportRoot);
         const prevSyncIndex = loadPrevSyncIndex();
         const localDirtyState = loadDirtyState();
-        const structuredPolicyResolver = (path) => getStructuredConflictPolicyByPath(path, settings, settings.obsidianExportRoot);
         const rawPlan = buildObsidianFileSyncPlan(localFiles, remoteList.filesByPath, prevSyncIndex, {
             localDirtyState,
-            structuredConflictPolicy: getStructuredConflictPolicySummary(settings),
-            resolveConflictPolicyForPath: structuredPolicyResolver
+            structuredConflictPolicy: getStructuredConflictPolicySummary(settings)
         });
         let plan = rawPlan;
 
@@ -11281,7 +10922,6 @@ Cancel: go back and change the branch name first.`
             plan = buildObsidianFileSyncPlan(localFiles, remoteList.filesByPath, prevSyncIndex, {
                 localDirtyState,
                 structuredConflictPolicy: getStructuredConflictPolicySummary(settings),
-                resolveConflictPolicyForPath: structuredPolicyResolver,
                 remoteCommittedAtByPath,
                 enableDualDirtyTimestampWinner: true
             });
@@ -11295,50 +10935,6 @@ Cancel: go back and change the branch name first.`
             rawPlan,
             plan
         };
-    }
-
-    function buildBlankDescriptionChangeHintsFromPullPlan(pullPlanResult) {
-        const result = {};
-        const source = pullPlanResult && typeof pullPlanResult === 'object' ? pullPlanResult : null;
-        if (!source) return result;
-        const plan = source.rawPlan && typeof source.rawPlan === 'object'
-            ? source.rawPlan
-            : (source.plan && typeof source.plan === 'object' ? source.plan : null);
-        if (!plan) return result;
-
-        const pathHintMap = {};
-        const markPathHint = (pathInput, hint) => {
-            const path = normalizeSyncPath(pathInput);
-            if (!path) return;
-            pathHintMap[path] = hint;
-        };
-        const markEntries = (entries, hint, reasonAllow = null) => {
-            const list = Array.isArray(entries) ? entries : [];
-            list.forEach((entry) => {
-                const reason = String(entry && entry.reason || '').trim();
-                if (typeof reasonAllow === 'function' && !reasonAllow(reason)) return;
-                markPathHint(entry && entry.path, hint);
-            });
-        };
-
-        markEntries(plan.upload, 'local-only', (reason) => reason === 'local-changed-only');
-        markEntries(plan.deleteRemote, 'local-only', (reason) => reason === 'local-deleted-only');
-        markEntries(plan.download, 'remote-only', (reason) => reason === 'remote-changed-only');
-        markEntries(plan.deleteLocal, 'remote-only', (reason) => reason === 'remote-deleted-only');
-        markEntries(plan.conflict, 'both');
-
-        const pathMap = loadPathMap();
-        const blankById = (pathMap && pathMap.blankById && typeof pathMap.blankById === 'object')
-            ? pathMap.blankById
-            : {};
-        Object.keys(blankById).forEach((id) => {
-            const path = normalizeSyncPath(blankById[id]);
-            if (!path) return;
-            const hint = pathHintMap[path];
-            if (!hint) return;
-            result[String(id)] = hint;
-        });
-        return result;
     }
 
     function storeConflictRecord(localSnapshot, remoteSnapshot, reason, extra = {}) {
@@ -11536,122 +11132,23 @@ Cancel: go back and change the branch name first.`
                 : textByLang('稍后处理', 'Handle later');
         }
         if (descActions) {
-            descActions.hidden = baselineOnly;
+            descActions.hidden = true;
         }
         if (descHint) {
-            const modeText = formatDescriptionConflictPolicyForDisplay(settings && settings.blankCardSourceConflictPolicy);
-            const fallbackText = formatDescriptionMergeFallbackForDisplay(settings && settings.blankCardSourceMergeFallback);
-            descHint.textContent = textByLang(
-                `空白卡源码仅在本地和云端都改时处理。当前：${modeText}，${fallbackText}。若使用“冲突副本”，会在对应源卡右侧新建冲突卡片，不会改写原源码字段。`,
-                `Blank-card source handling applies only when both local and cloud changed. Current: ${modeText}, ${fallbackText}. If conflict-copy is used, a conflict card is created to the right of the source card instead of rewriting source content.`
-            );
+            descHint.hidden = true;
         }
         if (structuredHint) {
             const structuredSummaryPolicy = getStructuredConflictPolicySummary(settings);
             const structuredText = formatConflictPolicyForDisplay(structuredSummaryPolicy);
-            const scopedText = formatStructuredPolicyScopeSummary(settings);
             const conflictPaths = uniqueStringList(conflictData && conflictData.fileConflicts, normalizeSyncPath);
             const scopeCounts = buildConflictScopeCounts(conflictPaths, settings && settings.obsidianExportRoot);
             const scopeCountText = formatConflictScopeCountsInline(scopeCounts);
             structuredHint.textContent = textByLang(
-                `结构化数据（永久栏目及副本 / 临时栏目 / .canvas）仅在双端都改时按策略处理。当前：${structuredText}；${scopedText}。当前待处理冲突分布：${scopeCountText}。按时间模式：本地=文件变脏时间，云端=该路径最近 commit 时间。单边变化会自动同步。`,
-                `Structured data (permanent+copies / temporary / .canvas) is handled only when both local and cloud changed. Current: ${structuredText}; ${scopedText}. Pending conflict distribution: ${scopeCountText}. In time mode: local=file dirty time, cloud=latest commit time on that path. One-sided changes sync automatically.`
+                `结构化数据（永久栏目及副本 / 临时栏目 / .canvas）仅在双端都改时按策略处理。当前：${structuredText}。当前待处理冲突分布：${scopeCountText}。按时间模式：本地=文件变脏时间，云端=该路径最近 commit 时间。单边变化会自动同步。`,
+                `Structured data (permanent+copies / temporary / .canvas) is handled only when both local and cloud changed. Current: ${structuredText}. Pending conflict distribution: ${scopeCountText}. In time mode: local=file dirty time, cloud=latest commit time on that path. One-sided changes sync automatically.`
             );
         }
         configureBaselineOnlyHint(hintEl, baselineOnly, fallbackHintText);
-    }
-
-    function normalizeConflictFineChoice(value) {
-        return String(value || '').trim().toLowerCase() === 'remote' ? 'remote' : 'local';
-    }
-
-    function buildConflictFineChoices(conflictData) {
-        const source = conflictData && typeof conflictData === 'object' ? conflictData : {};
-        const fileConflicts = uniqueStringList(source.fileConflicts, normalizeSyncPath);
-        const latestDecision = decidePendingConflictByLatestModified(source);
-        const defaultChoice = latestDecision && latestDecision.choice
-            ? normalizeConflictFineChoice(latestDecision.choice)
-            : 'local';
-        const nextChoiceMap = {};
-        fileConflicts.forEach((path) => {
-            nextChoiceMap[path] = normalizeConflictFineChoice(conflictFineChoiceByPath[path] || defaultChoice);
-        });
-        conflictFineChoiceByPath = nextChoiceMap;
-        return {
-            fileConflicts,
-            choiceByPath: Object.assign({}, nextChoiceMap)
-        };
-    }
-
-    function renderConflictFinePanel(conflictData, conflictPreview = false) {
-        const toggleRow = getElement('canvasSyncConflictFineToggleRow');
-        const toggle = getElement('canvasSyncConflictFineToggle');
-        const hint = getElement('canvasSyncConflictFineHint');
-        const list = getElement('canvasSyncConflictFineList');
-        const applyBtn = getElement('canvasSyncConflictApplyFineBtn');
-
-        if (!toggleRow || !toggle || !hint || !list || !applyBtn) return;
-        if (!conflictData || conflictPreview) {
-            toggleRow.hidden = true;
-            hint.hidden = true;
-            list.hidden = true;
-            list.innerHTML = '';
-            applyBtn.hidden = true;
-            return;
-        }
-
-        const fineChoices = buildConflictFineChoices(conflictData);
-        const paths = fineChoices.fileConflicts;
-        const noFileConflicts = !paths.length;
-
-        toggleRow.hidden = noFileConflicts;
-        toggle.disabled = noFileConflicts;
-        if (noFileConflicts) {
-            toggle.checked = false;
-            conflictFineModeEnabled = false;
-            hint.hidden = false;
-            hint.textContent = textByLang(
-                '当前冲突没有可识别的文件级差异，请使用上方整体策略或稍后重新同步。',
-                'No file-level conflicts were identified for this conflict. Use the overall strategy above or sync again later.'
-            );
-            list.hidden = true;
-            list.innerHTML = '';
-            applyBtn.hidden = true;
-            return;
-        }
-
-        toggle.checked = conflictFineModeEnabled === true;
-        hint.hidden = false;
-        hint.textContent = textByLang(
-            '逐文件模式会先把你选择“本地”的文件推到云端，再统一回拉本地对齐。',
-            'Fine-grained mode first pushes files you mark as local to cloud, then performs a unified pull to align local.'
-        );
-
-        if (!conflictFineModeEnabled) {
-            list.hidden = true;
-            list.innerHTML = '';
-            applyBtn.hidden = true;
-            return;
-        }
-
-        const rowsHtml = paths.map((path) => {
-            const choice = normalizeConflictFineChoice(conflictFineChoiceByPath[path] || 'local');
-            const localSelected = choice === 'local' ? ' selected' : '';
-            const remoteSelected = choice === 'remote' ? ' selected' : '';
-            return [
-                '<div class="canvas-sync-row">',
-                `<span title="${escapeHtml(path)}">${escapeHtml(path)}</span>`,
-                `<select data-conflict-fine-path="${escapeHtml(path)}">`,
-                `<option value="local"${localSelected}>${escapeHtml(textByLang('用本地版本', 'Use Local Version'))}</option>`,
-                `<option value="remote"${remoteSelected}>${escapeHtml(textByLang('用云端版本', 'Use Cloud Version'))}</option>`,
-                '</select>',
-                '</div>'
-            ].join('');
-        }).join('');
-
-        list.innerHTML = rowsHtml;
-        list.hidden = false;
-        applyBtn.hidden = false;
     }
 
     async function buildConflictFileSummaryFromCurrentPlan(reason = 'conflict-files-summary') {
@@ -11669,91 +11166,6 @@ Cancel: go back and change the branch name first.`
         } catch (_) {
             return { fileConflicts: [], fileConflictByPath: {}, filePlanSummary: null };
         }
-    }
-
-    async function resolvePendingConflictByFineChoices() {
-        if (shouldBlockOrdinarySyncActionsForRecoveryLock()) {
-            openPanel({ activeTab: 'status' });
-            toast(textByLang('检测到未完成的同步恢复：请先继续上次操作', 'An unfinished sync recovery was detected: continue the previous action first'));
-            return false;
-        }
-        if (!pendingConflict) {
-            toast(textByLang('没有待处理冲突', 'No pending conflicts'));
-            return false;
-        }
-        if (runtime.isRunning) {
-            toast(textByLang('正在同步，请稍后', 'Sync is running, please wait'));
-            return false;
-        }
-
-        const conflictData = pendingConflict;
-        const desiredPaths = uniqueStringList(conflictData.fileConflicts, normalizeSyncPath);
-        if (!desiredPaths.length) {
-            toast(textByLang('当前冲突没有可处理的文件级差异', 'No file-level conflicts available to resolve'));
-            return false;
-        }
-
-        const pullPlanResult = await buildObsidianPullPlan('manual-conflict-fine-plan');
-        if (!pullPlanResult || pullPlanResult.enabled !== true) {
-            throw new Error(textByLang('无法读取文件级冲突计划，请稍后重试', 'Cannot load file-level conflict plan. Please retry.'));
-        }
-
-        const localByPath = {};
-        (Array.isArray(pullPlanResult.localFiles) ? pullPlanResult.localFiles : []).forEach((file) => {
-            const path = normalizeSyncPath(file && file.path);
-            if (!path) return;
-            localByPath[path] = file;
-        });
-        const conflictPathSet = new Set(
-            (Array.isArray(pullPlanResult.plan && pullPlanResult.plan.conflict) ? pullPlanResult.plan.conflict : [])
-                .map((entry) => normalizeSyncPath(entry && entry.path))
-                .filter(Boolean)
-        );
-        let targetPaths = desiredPaths.filter((path) => conflictPathSet.has(path));
-        if (!targetPaths.length) {
-            // The latest file-plan may have auto-resolved conflicts after timestamps were refreshed.
-            // Still allow explicit per-file decisions from the pending conflict payload.
-            targetPaths = desiredPaths.slice();
-        }
-        if (!targetPaths.length) {
-            toast(textByLang('当前文件冲突已变化，请重新同步后再处理', 'File conflicts changed. Sync again before resolving.'));
-            return false;
-        }
-
-        const localApplyChanges = [];
-        targetPaths.forEach((path) => {
-            const choice = normalizeConflictFineChoice(conflictFineChoiceByPath[path] || 'local');
-            if (choice !== 'local') return;
-            const localFile = localByPath[path];
-            if (localFile) {
-                localApplyChanges.push({ path, content: String(localFile.content == null ? '' : localFile.content) });
-            } else {
-                localApplyChanges.push({ path, delete: true });
-            }
-        });
-
-        if (localApplyChanges.length) {
-            await applyRemoteFilesBatch(
-                localApplyChanges,
-                `Bookmark Canvas Sync: manual fine conflict resolution (${localApplyChanges.length})`,
-                120000
-            );
-        }
-
-        const preservedConflict = pendingConflict;
-        const beforeSuccessAt = Number(runtime.lastSuccessAt) || 0;
-        clearPendingConflict();
-        await runSync('pull', 'manual-conflict-fine-pull');
-        const successAdvanced = (Number(runtime.lastSuccessAt) || 0) > beforeSuccessAt;
-        if (successAdvanced && !hasPendingConflict()) {
-            toast(textByLang('逐文件冲突处理完成并已对齐本地', 'Fine-grained conflict resolution completed and local is aligned'));
-            return true;
-        }
-
-        if (!hasPendingConflict()) {
-            setPendingConflict(preservedConflict);
-        }
-        return false;
     }
 
     async function resolvePendingConflictByBaseline() {
@@ -11806,8 +11218,6 @@ Cancel: go back and change the branch name first.`
 
         if (!conflictData) {
             panel.hidden = true;
-            conflictFineModeEnabled = false;
-            conflictFineChoiceByPath = {};
             const compareWhenHidden = getElement('canvasSyncConflictCompare');
             if (compareWhenHidden) {
                 compareWhenHidden.innerHTML = '';
@@ -11820,7 +11230,6 @@ Cancel: go back and change the branch name first.`
             if (dismissTextWhenHidden) {
                 dismissTextWhenHidden.textContent = textByLang('稍后处理', 'Handle later');
             }
-            renderConflictFinePanel(null, false);
             updatePreviewActionButtonState();
             updateStatusPanelActionPlacement();
             return;
@@ -11891,7 +11300,6 @@ Cancel: go back and change the branch name first.`
             remoteUpdatedAt: remoteLatestTs
         }));
         updateConflictPanelActionUi(comparisonSummary, conflictPreview, permanentHintText, conflictData);
-        renderConflictFinePanel(conflictData, conflictPreview);
 
         updatePreviewActionButtonState();
         updateStatusPanelActionPlacement();
@@ -11899,8 +11307,6 @@ Cancel: go back and change the branch name first.`
 
     function setPendingConflict(conflict) {
         pendingConflict = conflict;
-        conflictFineModeEnabled = false;
-        conflictFineChoiceByPath = {};
         runtime.hasPendingConflict = true;
         conflictPromptShownOnInit = false;
         persistPendingConflict();
@@ -11920,8 +11326,6 @@ Cancel: go back and change the branch name first.`
 
     function clearPendingConflict() {
         pendingConflict = null;
-        conflictFineModeEnabled = false;
-        conflictFineChoiceByPath = {};
         runtime.hasPendingConflict = false;
         conflictPromptShownOnInit = false;
         persistPendingConflict();
@@ -12142,721 +11546,6 @@ Cancel: go back and change the branch name first.`
         return normalizeSnapshot(snapshotInput || { data: {} });
     }
 
-    function normalizeDescriptionTextForMerge(value) {
-        // Keep source text raw for sync/merge transport. Do not normalize line endings here.
-        return String(value == null ? '' : value);
-    }
-
-    function normalizeBlobShaForDescriptionMerge(value) {
-        const normalized = String(value || '').trim().toLowerCase();
-        return /^[0-9a-f]{40}$/i.test(normalized) ? normalized : '';
-    }
-
-    async function readRemoteBlobBySha(blobSha) {
-        const normalizedSha = normalizeBlobShaForDescriptionMerge(blobSha);
-        if (!normalizedSha) {
-            return { notFound: true, sha: '', text: '' };
-        }
-
-        const response = await sendRuntimeMessage({
-            action: 'canvasGitReadBlobBySha',
-            sha: normalizedSha
-        }, 30000);
-
-        if (!response || response.success !== true) {
-            throw new Error((response && response.error) || textByLang('读取云端 Blob 失败', 'Failed to read cloud blob'));
-        }
-        if (response.notFound === true) {
-            return {
-                notFound: true,
-                sha: normalizedSha,
-                text: ''
-            };
-        }
-
-        return {
-            notFound: false,
-            sha: normalizeBlobShaForDescriptionMerge(response.sha) || normalizedSha,
-            text: decodeBase64ToText(response.contentBase64 || '')
-        };
-    }
-
-    async function fetchBaseFilesBySha(pathShaPairs) {
-        const source = Array.isArray(pathShaPairs) ? pathShaPairs : [];
-        const normalizedPairs = [];
-        const dedup = new Set();
-        source.forEach((entry) => {
-            const path = normalizeSyncPath(entry && entry.path);
-            const sha = normalizeBlobShaForDescriptionMerge(entry && entry.sha);
-            if (!path || !sha) return;
-            const dedupKey = `${path}::${sha}`;
-            if (dedup.has(dedupKey)) return;
-            dedup.add(dedupKey);
-            normalizedPairs.push({ path, sha });
-        });
-
-        const result = new Map();
-        for (let i = 0; i < normalizedPairs.length; i += 1) {
-            const pair = normalizedPairs[i];
-            const cacheKey = `blob:${pair.sha}`;
-            let cached = readLimitedCache(descriptionBaseBlobTextCache, cacheKey);
-            if (typeof cached !== 'string') {
-                try {
-                    const blobState = await readRemoteBlobBySha(pair.sha);
-                    if (blobState.notFound) {
-                        cached = '';
-                    } else {
-                        cached = String(blobState.text || '');
-                    }
-                    writeLimitedCache(descriptionBaseBlobTextCache, cacheKey, cached, 64);
-                } catch (_) {
-                    continue;
-                }
-            }
-            if (typeof cached === 'string') {
-                result.set(pair.path, cached);
-            }
-        }
-
-        return result;
-    }
-
-    const DESCRIPTION_MERGE_DMP_CTOR = (() => {
-        try {
-            return typeof global.diff_match_patch === 'function'
-                ? global.diff_match_patch
-                : null;
-        } catch (_) {
-            return null;
-        }
-    })();
-
-    function getDescriptionMergeDmp() {
-        if (typeof DESCRIPTION_MERGE_DMP_CTOR !== 'function') return null;
-        try {
-            return new DESCRIPTION_MERGE_DMP_CTOR();
-        } catch (_) {
-            return null;
-        }
-    }
-
-    function tryMergeDescriptionTextsWithDmp(baseText, localText, remoteText) {
-        const dmp = getDescriptionMergeDmp();
-        if (!dmp || typeof dmp.patch_make !== 'function' || typeof dmp.patch_apply !== 'function') {
-            return null;
-        }
-        try {
-            const patchLocal = dmp.patch_make(baseText, localText);
-            const patchRemote = dmp.patch_make(baseText, remoteText);
-            const localOnRemoteResult = dmp.patch_apply(patchLocal, remoteText);
-            const remoteOnLocalResult = dmp.patch_apply(patchRemote, localText);
-
-            const localOnRemoteText = Array.isArray(localOnRemoteResult) ? String(localOnRemoteResult[0] || '') : '';
-            const remoteOnLocalText = Array.isArray(remoteOnLocalResult) ? String(remoteOnLocalResult[0] || '') : '';
-            const localOnRemoteFlags = Array.isArray(localOnRemoteResult) && Array.isArray(localOnRemoteResult[1])
-                ? localOnRemoteResult[1]
-                : [];
-            const remoteOnLocalFlags = Array.isArray(remoteOnLocalResult) && Array.isArray(remoteOnLocalResult[1])
-                ? remoteOnLocalResult[1]
-                : [];
-            const localOnRemoteAllApplied = localOnRemoteFlags.every((flag) => flag === true);
-            const remoteOnLocalAllApplied = remoteOnLocalFlags.every((flag) => flag === true);
-
-            if (localOnRemoteAllApplied && remoteOnLocalAllApplied) {
-                if (localOnRemoteText === remoteOnLocalText) {
-                    return { text: normalizeDescriptionTextForMerge(localOnRemoteText), merged: true, unresolved: false };
-                }
-                return null;
-            }
-            if (localOnRemoteAllApplied) {
-                return { text: normalizeDescriptionTextForMerge(localOnRemoteText), merged: true, unresolved: false };
-            }
-            if (remoteOnLocalAllApplied) {
-                return { text: normalizeDescriptionTextForMerge(remoteOnLocalText), merged: true, unresolved: false };
-            }
-        } catch (_) { }
-        return null;
-    }
-
-    function mergeDescriptionTexts(baseText, localText, remoteText) {
-        const base = normalizeDescriptionTextForMerge(baseText);
-        const local = normalizeDescriptionTextForMerge(localText);
-        const remote = normalizeDescriptionTextForMerge(remoteText);
-        if (local === remote) return { text: local, merged: false, unresolved: false };
-        if (base === local) return { text: remote, merged: false, unresolved: false };
-        if (base === remote) return { text: local, merged: false, unresolved: false };
-        if (!local) return { text: remote, merged: false, unresolved: false };
-        if (!remote) return { text: local, merged: false, unresolved: false };
-        if (local.includes(remote)) return { text: local, merged: true, unresolved: false };
-        if (remote.includes(local)) return { text: remote, merged: true, unresolved: false };
-
-        const dmpMerged = tryMergeDescriptionTextsWithDmp(base, local, remote);
-        if (dmpMerged && !dmpMerged.unresolved) return dmpMerged;
-
-        const localLines = local.split('\n');
-        const remoteLines = remote.split('\n');
-        const localSet = new Set(localLines);
-        const hasOverlap = remoteLines.some((line) => localSet.has(line));
-        if (!hasOverlap) {
-            return { text: '', merged: false, unresolved: true };
-        }
-        const mergedLines = localLines.slice();
-        remoteLines.forEach((line) => {
-            if (!localSet.has(line)) mergedLines.push(line);
-        });
-        return { text: mergedLines.join('\n'), merged: true, unresolved: false };
-    }
-
-    function buildDescriptionConflictScopeLabel(target) {
-        const safe = target && typeof target === 'object' ? target : {};
-        if (safe.kind === 'perm') return 'permanent.descriptionMd';
-        if (safe.kind === 'temp') return 'temporary.descriptionMd';
-        if (safe.kind === 'md') return 'blank.markdownSource';
-        return 'description';
-    }
-
-    function buildDescriptionConflictCardMarkdown(target, localText, remoteText, reason) {
-        const source = target && target.key ? String(target.key) : 'unknown';
-        const scope = buildDescriptionConflictScopeLabel(target);
-        const localPart = normalizeDescriptionTextForMerge(localText);
-        const remotePart = normalizeDescriptionTextForMerge(remoteText);
-        const reasonLabel = String(reason || 'conflict-copy').trim() || 'conflict-copy';
-        const generatedAt = new Date().toISOString();
-        return [
-            '# Sync Conflict Copy',
-            '',
-            `- source: \`${source}\``,
-            `- scope: \`${scope}\``,
-            `- reason: \`${reasonLabel}\``,
-            `- generatedAt: \`${generatedAt}\``,
-            '',
-            '## LOCAL',
-            '````md',
-            localPart,
-            '````',
-            '',
-            '## REMOTE',
-            '````md',
-            remotePart,
-            '````'
-        ].join('\n');
-    }
-
-    function normalizeDescriptionConflictAnchor(raw, fallbackWidth = 320, fallbackHeight = 220) {
-        const source = raw && typeof raw === 'object' ? raw : {};
-        const x = Number(source.x);
-        const y = Number(source.y);
-        const width = Number(source.width);
-        const height = Number(source.height);
-        return {
-            x: Number.isFinite(x) ? x : 0,
-            y: Number.isFinite(y) ? y : 0,
-            width: Number.isFinite(width) && width > 0 ? width : fallbackWidth,
-            height: Number.isFinite(height) && height > 0 ? height : fallbackHeight
-        };
-    }
-
-    function createDescriptionConflictCardContext(permanentShell, tempPayload) {
-        const payload = tempPayload && typeof tempPayload === 'object' ? tempPayload : null;
-        if (!payload) return null;
-        const sections = Array.isArray(payload.sections) ? payload.sections : [];
-        const mdNodes = Array.isArray(payload.mdNodes) ? payload.mdNodes : [];
-        const views = permanentShell && Array.isArray(permanentShell.views) ? permanentShell.views : [];
-
-        const sectionById = new Map();
-        const mdNodeById = new Map();
-        const permanentViewById = new Map();
-        const usedMdNodeIds = new Set();
-        let maxMdNodeCounter = Number(payload.mdNodeCounter) || 0;
-        let hasAnyAnchor = false;
-        let maxRight = 260;
-        let minTop = 0;
-        const considerAnchor = (anchor) => {
-            if (!anchor) return;
-            const safe = normalizeDescriptionConflictAnchor(anchor);
-            if (!hasAnyAnchor) {
-                minTop = safe.y;
-                maxRight = safe.x + safe.width;
-                hasAnyAnchor = true;
-                return;
-            }
-            minTop = Math.min(minTop, safe.y);
-            maxRight = Math.max(maxRight, safe.x + safe.width);
-        };
-
-        sections.forEach((section) => {
-            const id = String(section && section.id || '').trim();
-            if (!id) return;
-            sectionById.set(id, section);
-            considerAnchor(section);
-        });
-        mdNodes.forEach((node) => {
-            const id = String(node && node.id || '').trim();
-            if (!id) return;
-            mdNodeById.set(id, node);
-            usedMdNodeIds.add(id);
-            const match = id.match(/^md-node-(\d+)$/);
-            if (match) {
-                const parsed = Number(match[1]);
-                if (Number.isFinite(parsed) && parsed > maxMdNodeCounter) {
-                    maxMdNodeCounter = parsed;
-                }
-            }
-            considerAnchor(node);
-        });
-        views.forEach((view) => {
-            const viewId = String(view && view.viewId || '').trim();
-            if (!viewId) return;
-            permanentViewById.set(viewId, view);
-            considerAnchor(view && view.cardState ? {
-                x: view.cardState.left,
-                y: view.cardState.top,
-                width: view.cardState.width,
-                height: view.cardState.height
-            } : null);
-        });
-
-        return {
-            sectionById,
-            mdNodeById,
-            permanentViewById,
-            usedMdNodeIds,
-            nextMdNodeCounter: maxMdNodeCounter,
-            fallbackX: maxRight + 80,
-            fallbackY: minTop,
-            fallbackCursor: 0,
-            perTargetOffset: new Map()
-        };
-    }
-
-    function getDescriptionConflictAnchorForTarget(target, context) {
-        if (!target || !context) return null;
-        if (target.kind === 'temp') {
-            return normalizeDescriptionConflictAnchor(context.sectionById.get(target.refId));
-        }
-        if (target.kind === 'md') {
-            return normalizeDescriptionConflictAnchor(context.mdNodeById.get(target.refId));
-        }
-        if (target.kind === 'perm') {
-            const view = context.permanentViewById.get(target.refId);
-            return normalizeDescriptionConflictAnchor(view && view.cardState ? {
-                x: view.cardState.left,
-                y: view.cardState.top,
-                width: view.cardState.width,
-                height: view.cardState.height
-            } : null);
-        }
-        return null;
-    }
-
-    function allocDescriptionConflictMdNodeId(context) {
-        const safeContext = context && typeof context === 'object' ? context : null;
-        if (!safeContext) return '';
-        let nextCounter = Math.max(0, Number(safeContext.nextMdNodeCounter) || 0);
-        let nextId = '';
-        for (let i = 0; i < 100000; i += 1) {
-            nextCounter += 1;
-            nextId = `md-node-${nextCounter}`;
-            if (!safeContext.usedMdNodeIds.has(nextId)) {
-                safeContext.usedMdNodeIds.add(nextId);
-                safeContext.nextMdNodeCounter = nextCounter;
-                return nextId;
-            }
-        }
-        return '';
-    }
-
-    function buildDescriptionConflictPlacement(target, context) {
-        const anchor = getDescriptionConflictAnchorForTarget(target, context);
-        const targetKey = String(target && target.key || '');
-        const perTargetOffset = Number(context && context.perTargetOffset && context.perTargetOffset.get(targetKey)) || 0;
-        if (context && context.perTargetOffset) {
-            context.perTargetOffset.set(targetKey, perTargetOffset + 1);
-        }
-        if (anchor) {
-            return {
-                x: Math.round(anchor.x + Math.max(260, anchor.width) + 80),
-                y: Math.round(anchor.y + perTargetOffset * 36),
-                width: 420,
-                height: 280
-            };
-        }
-        const fallbackIndex = Number(context && context.fallbackCursor) || 0;
-        if (context) context.fallbackCursor = fallbackIndex + 1;
-        return {
-            x: Math.round(Number(context && context.fallbackX) || 260),
-            y: Math.round((Number(context && context.fallbackY) || 0) + fallbackIndex * 36),
-            width: 420,
-            height: 280
-        };
-    }
-
-    function appendDescriptionConflictCopyCard(tempPayload, target, localText, remoteText, reason, context) {
-        const payload = tempPayload && typeof tempPayload === 'object' ? tempPayload : null;
-        if (!payload) return false;
-        if (!Array.isArray(payload.mdNodes)) payload.mdNodes = [];
-        const safeContext = context && typeof context === 'object'
-            ? context
-            : createDescriptionConflictCardContext(null, payload);
-        if (!safeContext) return false;
-        const id = allocDescriptionConflictMdNodeId(safeContext);
-        if (!id) return false;
-
-        const placement = buildDescriptionConflictPlacement(target, safeContext);
-        const markdownSource = buildDescriptionConflictCardMarkdown(target, localText, remoteText, reason);
-        const now = Date.now();
-        payload.mdNodes.push({
-            id,
-            x: placement.x,
-            y: placement.y,
-            width: placement.width,
-            height: placement.height,
-            text: markdownSource,
-            source: 'obsidian-canvas-file',
-            subtype: 'sync-conflict-copy',
-            color: null,
-            colorHex: '#f59e0b',
-            markdownSource,
-            createdAt: now,
-            updatedAt: now
-        });
-        payload.mdNodeCounter = Math.max(Number(payload.mdNodeCounter) || 0, Number(safeContext.nextMdNodeCounter) || 0);
-        payload.timestamp = Math.max(Number(payload.timestamp) || 0, now);
-        return true;
-    }
-
-    function parseTempStatePayloadRawForDescriptionSync(rawInput = '') {
-        const raw = typeof rawInput === 'string' ? rawInput : '';
-        const parsed = raw ? safeParse(raw, null) : null;
-        if (isCanvasTempStatePayloadForSync(parsed)) return parsed;
-        return normalizeCanvasTempStatePayloadForSync(raw);
-    }
-
-    function collectDescriptionValueMapFromSnapshot(snapshotInput) {
-        const snapshot = normalizeSnapshot(snapshotInput || { data: {} });
-        const map = Object.create(null);
-        const hasOwn = Object.prototype.hasOwnProperty;
-
-        const tempRaw = snapshot && snapshot.data && typeof snapshot.data[TEMP_SECTION_STORAGE_KEY] === 'string'
-            ? snapshot.data[TEMP_SECTION_STORAGE_KEY]
-            : '';
-        const tempPayload = parseTempStatePayloadRawForDescriptionSync(tempRaw);
-        if (tempPayload) {
-            const mdNodes = Array.isArray(tempPayload.mdNodes) ? tempPayload.mdNodes : [];
-            mdNodes.forEach((node) => {
-                const id = String(node && node.id || '').trim();
-                if (!id) return;
-                if (String(node && node.subtype || '').trim() === 'sync-conflict-copy') return;
-                map[`md:${id}`] = normalizeDescriptionTextForMerge(node && node.markdownSource);
-            });
-        }
-
-        map.__hasOwn = hasOwn;
-        return map;
-    }
-
-    async function resolveDescriptionBaseMapForGitHub(baseSnapshotInput, localSnapshotInput, remoteSnapshotInput, options = {}) {
-        const policy = ensureDescriptionConflictPolicy(
-            options && options.policy
-                ? options.policy
-                : (settings && settings.blankCardSourceConflictPolicy)
-        );
-        if (policy !== 'merge') return null;
-        if (!hasReadyRepoConfig(repoConfig || {})) return null;
-
-        const prevSyncIndex = loadPrevSyncIndex();
-        const prevFiles = prevSyncIndex && prevSyncIndex.files && typeof prevSyncIndex.files === 'object'
-            ? prevSyncIndex.files
-            : {};
-        if (!Object.keys(prevFiles).length) return null;
-
-        const pathMap = loadPathMap();
-        const blankById = pathMap && pathMap.blankById && typeof pathMap.blankById === 'object'
-            ? pathMap.blankById
-            : {};
-
-        const baseMap = collectDescriptionValueMapFromSnapshot(baseSnapshotInput || { data: {} });
-        const localMap = collectDescriptionValueMapFromSnapshot(localSnapshotInput || { data: {} });
-        const remoteMap = collectDescriptionValueMapFromSnapshot(remoteSnapshotInput || { data: {} });
-        const hasOwnBase = baseMap.__hasOwn || Object.prototype.hasOwnProperty;
-        const hasOwnLocal = localMap.__hasOwn || Object.prototype.hasOwnProperty;
-        const hasOwnRemote = remoteMap.__hasOwn || Object.prototype.hasOwnProperty;
-        delete baseMap.__hasOwn;
-        delete localMap.__hasOwn;
-        delete remoteMap.__hasOwn;
-
-        const pathShaByKey = new Map();
-        Object.keys(baseMap).forEach((key) => {
-            if (!/^md:/.test(key)) return;
-            const baseValue = hasOwnBase.call(baseMap, key) ? normalizeDescriptionTextForMerge(baseMap[key]) : '';
-            const localValue = hasOwnLocal.call(localMap, key) ? normalizeDescriptionTextForMerge(localMap[key]) : baseValue;
-            const remoteValue = hasOwnRemote.call(remoteMap, key) ? normalizeDescriptionTextForMerge(remoteMap[key]) : baseValue;
-            if (localValue === remoteValue) return;
-
-            const nodeId = String(key.slice(3) || '').trim();
-            if (!nodeId) return;
-            const mappedPath = normalizeSyncPath(blankById[nodeId]);
-            if (!mappedPath) return;
-            const prevEntry = prevFiles[mappedPath] && typeof prevFiles[mappedPath] === 'object'
-                ? prevFiles[mappedPath]
-                : null;
-            const baseSha = normalizeBlobShaForDescriptionMerge(prevEntry && prevEntry.sha);
-            if (!baseSha) return;
-            pathShaByKey.set(key, { path: mappedPath, sha: baseSha });
-        });
-
-        if (!pathShaByKey.size) return null;
-
-        const pathShaPairs = Array.from(pathShaByKey.values());
-        const baseFilesByPath = await fetchBaseFilesBySha(pathShaPairs);
-        if (!(baseFilesByPath instanceof Map) || baseFilesByPath.size === 0) return null;
-
-        const out = Object.create(null);
-        const hasOwn = Object.prototype.hasOwnProperty;
-        pathShaByKey.forEach((pair, key) => {
-            if (!pair || !pair.path) return;
-            if (!baseFilesByPath.has(pair.path)) return;
-            out[key] = normalizeDescriptionTextForMerge(baseFilesByPath.get(pair.path));
-        });
-
-        if (!Object.keys(out).length) return null;
-        out.__hasOwn = hasOwn;
-        return out;
-    }
-
-    function replaceSnapshotInPlace(target, source) {
-        if (!target || !source || typeof target !== 'object' || typeof source !== 'object') return;
-        Object.keys(target).forEach((key) => {
-            delete target[key];
-        });
-        Object.keys(source).forEach((key) => {
-            target[key] = source[key];
-        });
-    }
-
-    function applyDescriptionPolicyToSnapshot(baseSnapshotInput, localSnapshotInput, remoteSnapshotInput, options = {}) {
-        const baseSnapshot = normalizeSnapshot(baseSnapshotInput || { data: {} });
-        const localSnapshot = normalizeSnapshot(localSnapshotInput || { data: {} });
-        const remoteSnapshot = normalizeSnapshot(remoteSnapshotInput || { data: {} });
-        const blankChangeHints = options && options.blankChangeHints && typeof options.blankChangeHints === 'object'
-            ? options.blankChangeHints
-            : null;
-        const providedBaseMap = options && options.baseMap && typeof options.baseMap === 'object'
-            ? options.baseMap
-            : null;
-        const hasOwnProvidedBase = providedBaseMap
-            ? (providedBaseMap.__hasOwn || Object.prototype.hasOwnProperty)
-            : Object.prototype.hasOwnProperty;
-        const policy = ensureDescriptionConflictPolicy(
-            options && options.policy
-                ? options.policy
-                : (settings && settings.blankCardSourceConflictPolicy)
-        );
-        const fallbackPolicy = ensureDescriptionMergeFallback(
-            options && options.fallback
-                ? options.fallback
-                : (settings && settings.blankCardSourceMergeFallback)
-        );
-        const nextSnapshot = safeParse(JSON.stringify(baseSnapshot), null) || normalizeSnapshot(baseSnapshot);
-        const localMap = collectDescriptionValueMapFromSnapshot(localSnapshot);
-        const remoteMap = collectDescriptionValueMapFromSnapshot(remoteSnapshot);
-        const hasOwnLocal = localMap.__hasOwn || Object.prototype.hasOwnProperty;
-        const hasOwnRemote = remoteMap.__hasOwn || Object.prototype.hasOwnProperty;
-        delete localMap.__hasOwn;
-        delete remoteMap.__hasOwn;
-
-        const setTargets = [];
-        const permanentShell = normalizePermanentViewShellSnapshotForSync(nextSnapshot.permanentViewShellSnapshot);
-        nextSnapshot.permanentViewShellSnapshot = permanentShell;
-
-        let tempPayloadChanged = false;
-        const tempRaw = nextSnapshot && nextSnapshot.data && typeof nextSnapshot.data[TEMP_SECTION_STORAGE_KEY] === 'string'
-            ? nextSnapshot.data[TEMP_SECTION_STORAGE_KEY]
-            : '';
-        let tempPayload = parseTempStatePayloadRawForDescriptionSync(tempRaw);
-        if (tempPayload) {
-            const mdNodes = Array.isArray(tempPayload.mdNodes) ? tempPayload.mdNodes : [];
-            mdNodes.forEach((node) => {
-                const id = String(node && node.id || '').trim();
-                if (!id) return;
-                if (String(node && node.subtype || '').trim() === 'sync-conflict-copy') return;
-                setTargets.push({
-                    key: `md:${id}`,
-                    kind: 'md',
-                    refId: id,
-                    getCurrent: () => normalizeDescriptionTextForMerge(node && node.markdownSource),
-                    setValue: (value) => {
-                        node.markdownSource = normalizeDescriptionTextForMerge(value);
-                        tempPayloadChanged = true;
-                    }
-                });
-            });
-        }
-        let changed = false;
-        let mergedCount = 0;
-        let fallbackCount = 0;
-        let requiresManual = false;
-        let descriptionConflictCopyContext = null;
-
-        const ensureDescriptionConflictCopyContext = () => {
-            if (!tempPayload) {
-                if (!nextSnapshot || !nextSnapshot.data) return null;
-                tempPayload = {
-                    sections: [],
-                    tempSectionCounter: 0,
-                    tempItemCounter: 0,
-                    colorCursor: 0,
-                    tempSectionLastColor: null,
-                    tempSectionPrevColor: null,
-                    mdNodes: [],
-                    mdNodeCounter: 0,
-                    edges: [],
-                    edgeCounter: 0,
-                    timestamp: Date.now()
-                };
-                tempPayloadChanged = true;
-                changed = true;
-            }
-            if (!descriptionConflictCopyContext) {
-                descriptionConflictCopyContext = createDescriptionConflictCardContext(permanentShell, tempPayload);
-            }
-            return descriptionConflictCopyContext;
-        };
-        const appendConflictCopyCardByValues = (target, localValue, remoteValue, reason) => {
-            if (localValue === remoteValue) return true;
-            const cardContext = ensureDescriptionConflictCopyContext();
-            if (!cardContext) return false;
-            const appended = appendDescriptionConflictCopyCard(
-                tempPayload,
-                target,
-                localValue,
-                remoteValue,
-                reason,
-                cardContext
-            );
-            if (appended) {
-                tempPayloadChanged = true;
-                changed = true;
-            }
-            return appended;
-        };
-
-        setTargets.forEach((target) => {
-            const key = target.key;
-            const currentValue = target.getCurrent();
-            const hasResolvedBase = !!(providedBaseMap && hasOwnProvidedBase.call(providedBaseMap, key));
-            const hintForTarget = (() => {
-                if (!blankChangeHints) return '';
-                if (!target || target.kind !== 'md') return '';
-                const id = String(target.refId || '').trim();
-                if (!id) return '';
-                const raw = String(blankChangeHints[id] || '').trim().toLowerCase();
-                if (raw === 'local-only' || raw === 'remote-only' || raw === 'both') return raw;
-                return '';
-            })();
-            const baseValue = providedBaseMap && hasOwnProvidedBase.call(providedBaseMap, key)
-                ? normalizeDescriptionTextForMerge(providedBaseMap[key])
-                : currentValue;
-            const localValue = hasOwnLocal.call(localMap, key)
-                ? normalizeDescriptionTextForMerge(localMap[key])
-                : baseValue;
-            const remoteValue = hasOwnRemote.call(remoteMap, key)
-                ? normalizeDescriptionTextForMerge(remoteMap[key])
-                : baseValue;
-            let nextValue = currentValue;
-
-            if (policy === 'local') {
-                nextValue = localValue;
-            } else if (policy === 'remote') {
-                nextValue = remoteValue;
-            } else if (policy === 'conflict-copy') {
-                if (localValue !== remoteValue) {
-                    const appended = appendConflictCopyCardByValues(target, localValue, remoteValue, 'policy-conflict-copy');
-                    if (!appended) {
-                        requiresManual = true;
-                        return;
-                    }
-                    fallbackCount += 1;
-                }
-                nextValue = currentValue;
-            } else {
-                // Without a reliable BASE, never auto-merge divergent edits.
-                if (!hasResolvedBase && localValue !== remoteValue) {
-                    if (hintForTarget === 'local-only') {
-                        nextValue = localValue;
-                    } else if (hintForTarget === 'remote-only') {
-                        nextValue = remoteValue;
-                    } else if (fallbackPolicy === 'manual') {
-                        requiresManual = true;
-                        return;
-                    } else {
-                        const appended = appendConflictCopyCardByValues(target, localValue, remoteValue, 'merge-missing-base');
-                        if (!appended) {
-                            requiresManual = true;
-                            return;
-                        }
-                        nextValue = currentValue;
-                        fallbackCount += 1;
-                    }
-                } else {
-                    const merged = mergeDescriptionTexts(baseValue, localValue, remoteValue);
-                    if (merged.unresolved) {
-                        if (fallbackPolicy === 'manual') {
-                            requiresManual = true;
-                            return;
-                        }
-                        const appended = appendConflictCopyCardByValues(target, localValue, remoteValue, 'merge-fallback');
-                        if (!appended) {
-                            requiresManual = true;
-                            return;
-                        }
-                        nextValue = currentValue;
-                        fallbackCount += 1;
-                    } else {
-                        nextValue = merged.text;
-                        if (merged.merged && localValue !== remoteValue) {
-                            mergedCount += 1;
-                        }
-                    }
-                }
-            }
-
-            if (nextValue !== currentValue) {
-                target.setValue(nextValue);
-                changed = true;
-            }
-        });
-
-        if (requiresManual) {
-            return {
-                snapshot: baseSnapshot,
-                changed: false,
-                mergedCount,
-                fallbackCount,
-                requiresManual: true,
-                policy,
-                fallbackPolicy
-            };
-        }
-
-        if (tempPayload && tempPayloadChanged && nextSnapshot && nextSnapshot.data) {
-            nextSnapshot.data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(tempPayload);
-        }
-        if (changed) {
-            nextSnapshot.updatedAt = Math.max(Date.now(), Number(nextSnapshot.updatedAt) || 0);
-        }
-
-        return {
-            snapshot: nextSnapshot,
-            changed,
-            mergedCount,
-            fallbackCount,
-            requiresManual: false,
-            policy,
-            fallbackPolicy
-        };
-    }
-
     function decideWinner(localSnapshot, remoteSnapshot, concurrentChanged, localChanged = false, remoteChanged = false, syncMethod = settings.syncMethod, options = {}) {
         const structuredPolicy = getEffectiveStructuredConflictPolicy(settings);
         const localTs = Math.max(
@@ -12959,6 +11648,9 @@ Cancel: go back and change the branch name first.`
         const remoteHash = remoteExists ? getSnapshotHash(remoteSnapshot) : '';
         const snapshotsMatch = !!(remoteExists && nextLocalHash && remoteHash && nextLocalHash === remoteHash);
         const remoteSha = String(remoteState && remoteState.sha || '');
+        // Baseline presence check is the core safety gate for auto resolution.
+        // Any new sync backend must provide stable "last local baseline" and "last remote baseline"
+        // pointers before enabling auto winner selection; otherwise force manual conflict handling.
         const hasLocalBase = !!runtime.lastLocalHash;
         const hasRemoteBase = !!runtime.lastRemoteSha;
         const localDirtyState = loadDirtyState();
@@ -13020,27 +11712,6 @@ Cancel: go back and change the branch name first.`
         const requestedChoice = String(choice || '').trim().toLowerCase();
         let resolvedChoice = requestedChoice;
         if (resolvedChoice === 'newer') {
-            const pathDecision = decidePendingConflictByPathLatestModified(pendingConflict);
-            if (pathDecision.fileConflicts.length > 0 && pathDecision.hasPathTimestamps) {
-                if (!pathDecision.unresolvedPaths.length) {
-                    conflictFineChoiceByPath = Object.assign({}, pathDecision.choiceByPath);
-                    conflictFineModeEnabled = true;
-                    await resolvePendingConflictByFineChoices();
-                    return;
-                }
-                const nextChoiceByPath = {};
-                pathDecision.fileConflicts.forEach((path) => {
-                    nextChoiceByPath[path] = pathDecision.choiceByPath[path] === 'remote' ? 'remote' : 'local';
-                });
-                conflictFineChoiceByPath = nextChoiceByPath;
-                conflictFineModeEnabled = true;
-                toast(textByLang(
-                    `按时间规则无法自动裁决全部文件：仍有 ${pathDecision.unresolvedPaths.length} 个文件时间相同或缺失，请在逐文件面板手动确认`,
-                    `Time rule cannot auto-resolve all files: ${pathDecision.unresolvedPaths.length} file(s) are tied or missing timestamps. Please review them in fine-grained mode.`
-                ));
-                renderConflictPanel();
-                return;
-            }
             const latestDecision = decidePendingConflictByLatestModified(pendingConflict);
             resolvedChoice = latestDecision.choice;
             if (!resolvedChoice) {
@@ -13067,56 +11738,6 @@ Cancel: go back and change the branch name first.`
         try {
             let localSnapshot = normalizeSnapshot(pendingConflict.localSnapshot);
             let remoteSnapshot = normalizeSnapshot(pendingConflict.remoteSnapshot);
-            let descriptionResolvedChoice = null;
-            let descriptionBlankChangeHints = null;
-            try {
-                const conflictPullPlan = await buildObsidianPullPlan('manual-conflict-description-hints');
-                descriptionBlankChangeHints = buildBlankDescriptionChangeHintsFromPullPlan(conflictPullPlan);
-            } catch (_) {
-                descriptionBlankChangeHints = null;
-            }
-            if (resolvedChoice === 'local' || resolvedChoice === 'remote') {
-                const descriptionBaseMap = await resolveDescriptionBaseMapForGitHub(
-                    resolvedChoice === 'local' ? localSnapshot : remoteSnapshot,
-                    localSnapshot,
-                    remoteSnapshot
-                );
-                const descriptionResolved = applyDescriptionPolicyToSnapshot(
-                    resolvedChoice === 'local' ? localSnapshot : remoteSnapshot,
-                    localSnapshot,
-                    remoteSnapshot,
-                    {
-                        baseMap: descriptionBaseMap,
-                        blankChangeHints: descriptionBlankChangeHints
-                    }
-                );
-                descriptionResolvedChoice = descriptionResolved;
-                runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
-                runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
-                runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.fallbackCount) || 0);
-                if (descriptionResolved && descriptionResolved.requiresManual) {
-                    runtime.lastError = textByLang(
-                        '说明类自动合并失败：请先在冲突面板选择说明类策略，再继续结构化冲突处理',
-                        'Description auto-merge failed: choose a description strategy in the conflict panel first, then continue structured conflict resolution.'
-                    );
-                    if (options.bypassRecoveryLock !== true) {
-                        await clearRecoveryLockCompletely();
-                        clearActiveRunRecoveryRecord();
-                        handleRecoveryLockReleased();
-                    }
-                    saveRuntime();
-                    renderStatus();
-                    renderConflictPanel();
-                    return;
-                }
-                if (descriptionResolved && descriptionResolved.snapshot) {
-                    if (resolvedChoice === 'local') {
-                        localSnapshot = normalizeSnapshot(descriptionResolved.snapshot);
-                    } else {
-                        remoteSnapshot = normalizeSnapshot(descriptionResolved.snapshot);
-                    }
-                }
-            }
 
             if (resolvedChoice === 'local') {
                 if (settings.obsidianFilePushEnabled === false) {
@@ -13210,19 +11831,6 @@ Cancel: go back and change the branch name first.`
                     }
                 } else {
                     saveDirtyState(createDefaultDirtyState());
-                }
-                if (
-                    descriptionResolvedChoice
-                    && descriptionResolvedChoice.changed
-                    && ensureDescriptionConflictPolicy(descriptionResolvedChoice.policy) !== 'remote'
-                ) {
-                    updateDirtyStateByReason('conflict-remote-description-local-merge', {
-                        dirty: {
-                            permanentAll: true,
-                            temporaryAll: true,
-                            blankAll: true
-                        }
-                    });
                 }
                 runtime.lastLocalHash = getSnapshotHash(remoteSnapshot);
                 runtime.lastRemoteSha = pendingConflict.remoteSha || runtime.lastRemoteSha;
@@ -13442,9 +12050,6 @@ Cancel: go back and change the branch name first.`
         runtime.isRunning = true;
         runtime.lastTrigger = trigger || 'manual';
         runtime.lastSyncMode = `${effectiveMode}:${syncMethod}`;
-        runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(settings && settings.blankCardSourceConflictPolicy);
-        runtime.lastDescriptionMergeMerged = 0;
-        runtime.lastDescriptionMergeFallback = 0;
         beginActiveRunRecovery(effectiveMode, trigger, { manual: isManualTrigger });
         saveRuntime();
         renderStatus();
@@ -13475,8 +12080,7 @@ Cancel: go back and change the branch name first.`
                 const preflightRemoteSignalSha = String(
                     pushOptions && pushOptions.remoteSignalSha ? pushOptions.remoteSignalSha : ''
                 ).trim();
-                const canPushBlankSectionFiles = shouldPushBlankSectionFiles(syncTrigger);
-                if (settings.obsidianFilePushEnabled !== false && canPushBlankSectionFiles) {
+                if (settings.obsidianFilePushEnabled !== false) {
                     const pushProgress = makeProgressRange(15, 85);
                     obsidianPushResult = await pushObsidianFilesIncremental(syncTrigger, pushProgress, {
                         forceRecoveryLock: shouldForceRecoveryLockForTrigger(syncTrigger),
@@ -13496,19 +12100,9 @@ Cancel: go back and change the branch name first.`
                         if (pushedRemoteSignalSha) {
                             runtime.lastRemoteSignalSha = pushedRemoteSignalSha;
                         }
-                        const blankChangedCount = Number(obsidianPushResult.blankChangedCount) || 0;
-                        const blankDeletedCount = Number(obsidianPushResult.blankDeletedCount) || 0;
-                        if ((blankChangedCount + blankDeletedCount) > 0) {
-                            runtime.lastBlankSectionFilePushAt = pushedAt;
-                        }
                     }
                 } else if (settings.obsidianFilePushEnabled === false) {
                     throw new Error(textByLang('已关闭 Obsidian 文件推送，无法执行上传同步', 'Obsidian file push is disabled, cannot perform upload sync'));
-                } else {
-                    throw new Error(textByLang(
-                        '当前同步策略未启用文件推送，已中止本次上传',
-                        'File push is disabled by the current sync policy; this upload was aborted.'
-                    ));
                 }
 
                 let remoteRevision = '';
@@ -13677,8 +12271,8 @@ Cancel: go back and change the branch name first.`
 
                     runtime.lastAppliedDirection = 'conflict';
                     runtime.lastError = textByLang(
-                        `检测到文件级并发修改（${conflictPaths.length} 个），请在冲突面板处理`,
-                        `File-level concurrent changes detected (${conflictPaths.length}). Resolve them in the conflict panel.`
+                        `检测到并发修改（${conflictPaths.length} 个文件），请在冲突面板处理`,
+                        `Concurrent changes detected (${conflictPaths.length} files). Resolve them in the conflict panel.`
                     );
                     pendingReasons.clear();
                     runtime.queueLength = 0;
@@ -13687,8 +12281,8 @@ Cancel: go back and change the branch name first.`
                     renderConflictPanel();
                     openPanel({ activeTab: 'status' });
                     toast(textByLang(
-                        `检测到文件级冲突：${conflictPaths.length} 个，请先选择本地或云端`,
-                        `File-level conflicts detected: ${conflictPaths.length}. Please choose local or cloud first.`
+                        `检测到并发冲突：${conflictPaths.length} 个文件，请先选择本地或云端`,
+                        `Concurrent conflicts detected: ${conflictPaths.length} files. Please choose local or cloud first.`
                     ));
                     abortedByPendingConflict = true;
                     return textByLang('冲突待处理', 'Conflict pending');
@@ -13879,7 +12473,6 @@ Cancel: go back and change the branch name first.`
                 } else {
                     let allowPushOnly = true;
                     let pushWinner = '';
-                    let customPushPlanSummary = null;
 
                     updateSyncUiProgress(textByLang('校验云端基线...', 'Checking cloud baseline...'), 15);
                     const remoteState = await readRemoteSnapshotWithPathRecovery({
@@ -13894,55 +12487,6 @@ Cancel: go back and change the branch name first.`
                     const pushPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
                     localHash = pushPreflight.localHash;
                     pushWinner = pushPreflight.winner;
-
-                    if (settings.obsidianFilePushEnabled !== false && structuredPolicySummary === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
-                        try {
-                            const pushModePlanResult = await buildObsidianPullPlan(`${trigger || 'push'}:push-mode-custom`);
-                            const pushModePlan = pushModePlanResult && pushModePlanResult.enabled && pushModePlanResult.plan
-                                ? pushModePlanResult.plan
-                                : null;
-                            if (pushModePlan) {
-                                customPushPlanSummary = summarizePlanDirectionState(pushModePlan);
-                                if (customPushPlanSummary.fileConflicts.length > 0) {
-                                    setPendingConflict(createPendingConflictPayload(localSnapshot, pushPreflight.remoteSnapshot, remoteState, {
-                                        reason: 'push-mode-custom-file-conflict',
-                                        fileConflicts: customPushPlanSummary.fileConflicts,
-                                        fileConflictByPath: customPushPlanSummary.fileConflictByPath,
-                                        filePlanSummary: customPushPlanSummary.filePlanSummary
-                                    }));
-                                    storeConflictRecord(localSnapshot, pushPreflight.remoteSnapshot, 'pending-manual', {
-                                        remoteSha: pushPreflight.remoteSha || remoteState.sha || '',
-                                        strategy: structuredPolicySummary,
-                                        syncMethod,
-                                        filePlanSummary: customPushPlanSummary.filePlanSummary,
-                                        note: 'push-mode-custom-file-conflict'
-                                    });
-                                    runtime.lastAppliedDirection = 'conflict';
-                                    runtime.lastError = textByLang(
-                                        '检测到文件级并发修改，已暂停当前上传路径，请先在冲突面板选择处理方式',
-                                        'File-level concurrent changes were detected. Upload is paused; resolve it in the conflict panel first.'
-                                    );
-                                    pendingReasons.clear();
-                                    runtime.queueLength = 0;
-                                    saveRuntime();
-                                    renderStatus();
-                                    toast(textByLang(
-                                        `检测到文件级冲突：${customPushPlanSummary.fileConflicts.length} 个，请先处理`,
-                                        `File-level conflicts detected: ${customPushPlanSummary.fileConflicts.length}. Resolve them first.`
-                                    ));
-                                    allowPushOnly = false;
-                                } else if (customPushPlanSummary.localOpCount > 0 && customPushPlanSummary.remoteOpCount === 0) {
-                                    pushWinner = 'local';
-                                } else if (customPushPlanSummary.remoteOpCount > 0 && customPushPlanSummary.localOpCount === 0) {
-                                    pushWinner = 'remote';
-                                } else if (customPushPlanSummary.localOpCount > 0 && customPushPlanSummary.remoteOpCount > 0) {
-                                    pushWinner = '';
-                                }
-                            }
-                        } catch (error) {
-                            console.warn('[Canvas Sync] push-mode custom file-plan guard failed:', error);
-                        }
-                    }
 
                     if (!allowPushOnly) {
                         return;
@@ -13967,10 +12511,7 @@ Cancel: go back and change the branch name first.`
                         storeConflictRecord(localSnapshot, pushPreflight.remoteSnapshot, 'pending-manual', {
                             remoteSha: pushPreflight.remoteSha || remoteState.sha || '',
                             strategy: structuredPolicySummary,
-                            syncMethod,
-                            filePlanSummary: customPushPlanSummary && customPushPlanSummary.filePlanSummary
-                                ? customPushPlanSummary.filePlanSummary
-                                : undefined
+                            syncMethod
                         });
                         runtime.lastAppliedDirection = 'conflict';
                         runtime.lastError = textByLang(
@@ -14082,51 +12623,6 @@ Cancel: go back and change the branch name first.`
                             localHash = pullPreflight.localHash;
                             pullWinner = pullPreflight.winner;
 
-                            if (
-                                settings.obsidianFilePushEnabled !== false
-                                && structuredPolicySummary === STRUCTURED_CONFLICT_POLICY_CUSTOM
-                                && pullPlanWhenNoState
-                                && pullPlanWhenNoState.enabled
-                                && pullPlanWhenNoState.plan
-                            ) {
-                                const customPullPlanSummary = summarizePlanDirectionState(pullPlanWhenNoState.plan);
-                                if (customPullPlanSummary.fileConflicts.length > 0) {
-                                    setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState, {
-                                        reason: 'pull-mode-custom-file-conflict',
-                                        fileConflicts: customPullPlanSummary.fileConflicts,
-                                        fileConflictByPath: customPullPlanSummary.fileConflictByPath,
-                                        filePlanSummary: customPullPlanSummary.filePlanSummary
-                                    }));
-                                    storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
-                                        remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
-                                        strategy: structuredPolicySummary,
-                                        syncMethod,
-                                        filePlanSummary: customPullPlanSummary.filePlanSummary,
-                                        note: 'pull-mode-custom-file-conflict'
-                                    });
-                                    runtime.lastAppliedDirection = 'conflict';
-                                    runtime.lastError = textByLang(
-                                        '检测到文件级并发修改，已暂停当前拉取路径，请先在冲突面板选择处理方式',
-                                        'File-level concurrent changes were detected. Pull is paused; resolve it in the conflict panel first.'
-                                    );
-                                    pendingReasons.clear();
-                                    runtime.queueLength = 0;
-                                    saveRuntime();
-                                    renderStatus();
-                                    toast(textByLang(
-                                        `检测到文件级冲突：${customPullPlanSummary.fileConflicts.length} 个，请先处理`,
-                                        `File-level conflicts detected: ${customPullPlanSummary.fileConflicts.length}. Resolve them first.`
-                                    ));
-                                    allowPullOnly = false;
-                                } else if (customPullPlanSummary.remoteOpCount > 0 && customPullPlanSummary.localOpCount === 0) {
-                                    pullWinner = 'remote';
-                                } else if (customPullPlanSummary.localOpCount > 0 && customPullPlanSummary.remoteOpCount === 0) {
-                                    pullWinner = 'local';
-                                } else if (customPullPlanSummary.localOpCount > 0 && customPullPlanSummary.remoteOpCount > 0) {
-                                    pullWinner = '';
-                                }
-                            }
-
                             if (!allowPullOnly) {
                                 return;
                             }
@@ -14204,60 +12700,9 @@ Cancel: go back and change the branch name first.`
                     else {
                         let allowPullOnly = true;
                         let pullWinner = '';
-                        let pullPlanForExecution = null;
                         const pullPreflight = buildOneWaySyncPreflightState(localSnapshot, localHash, remoteState, syncMethod);
                         localHash = pullPreflight.localHash;
                         pullWinner = pullPreflight.winner;
-
-                        if (settings.obsidianFilePushEnabled !== false && structuredPolicySummary === STRUCTURED_CONFLICT_POLICY_CUSTOM) {
-                            try {
-                                const pullModePlanResult = await buildObsidianPullPlan(`${trigger || 'pull'}:pull-mode-custom`);
-                                const pullModePlan = pullModePlanResult && pullModePlanResult.enabled && pullModePlanResult.plan
-                                    ? pullModePlanResult.plan
-                                    : null;
-                                if (pullModePlan) {
-                                    pullPlanForExecution = pullModePlanResult;
-                                    const customPullPlanSummary = summarizePlanDirectionState(pullModePlan);
-                                    if (customPullPlanSummary.fileConflicts.length > 0) {
-                                        setPendingConflict(createPendingConflictPayload(localSnapshot, pullPreflight.remoteSnapshot, remoteState, {
-                                            reason: 'pull-mode-custom-file-conflict',
-                                            fileConflicts: customPullPlanSummary.fileConflicts,
-                                            fileConflictByPath: customPullPlanSummary.fileConflictByPath,
-                                            filePlanSummary: customPullPlanSummary.filePlanSummary
-                                        }));
-                                        storeConflictRecord(localSnapshot, pullPreflight.remoteSnapshot, 'pending-manual', {
-                                            remoteSha: pullPreflight.remoteSha || remoteState.sha || '',
-                                            strategy: structuredPolicySummary,
-                                            syncMethod,
-                                            filePlanSummary: customPullPlanSummary.filePlanSummary,
-                                            note: 'pull-mode-custom-file-conflict'
-                                        });
-                                        runtime.lastAppliedDirection = 'conflict';
-                                        runtime.lastError = textByLang(
-                                            '检测到文件级并发修改，已暂停当前拉取路径，请先在冲突面板选择处理方式',
-                                            'File-level concurrent changes were detected. Pull is paused; resolve it in the conflict panel first.'
-                                        );
-                                        pendingReasons.clear();
-                                        runtime.queueLength = 0;
-                                        saveRuntime();
-                                        renderStatus();
-                                        toast(textByLang(
-                                            `检测到文件级冲突：${customPullPlanSummary.fileConflicts.length} 个，请先处理`,
-                                            `File-level conflicts detected: ${customPullPlanSummary.fileConflicts.length}. Resolve them first.`
-                                        ));
-                                        allowPullOnly = false;
-                                    } else if (customPullPlanSummary.remoteOpCount > 0 && customPullPlanSummary.localOpCount === 0) {
-                                        pullWinner = 'remote';
-                                    } else if (customPullPlanSummary.localOpCount > 0 && customPullPlanSummary.remoteOpCount === 0) {
-                                        pullWinner = 'local';
-                                    } else if (customPullPlanSummary.localOpCount > 0 && customPullPlanSummary.remoteOpCount > 0) {
-                                        pullWinner = '';
-                                    }
-                                }
-                            } catch (error) {
-                                console.warn('[Canvas Sync] pull-mode custom file-plan guard failed:', error);
-                            }
-                        }
 
                         if (!allowPullOnly) {
                             return;
@@ -14327,7 +12772,7 @@ Cancel: go back and change the branch name first.`
                         actionText = await doPull(
                             remoteState,
                             syncMethod === 'rebase' ? 'pull (rebase mode)' : 'pull',
-                            pullPlanForExecution
+                            null
                         );
                     }
                 } else {
@@ -14373,67 +12818,6 @@ Cancel: go back and change the branch name first.`
                             runtime.lastAppliedDirection = 'noop';
                             actionText = 'noop';
                         } else {
-                            let handledByFilePlanGuard = false;
-                            if (effectiveMode === 'full' && settings.obsidianFilePushEnabled !== false) {
-                                try {
-                                    const fullModePullPlan = await buildObsidianPullPlan(`${trigger || 'sync'}:full-mode-guard`);
-                                    const guardPlan = fullModePullPlan && fullModePullPlan.enabled && fullModePullPlan.plan
-                                        ? fullModePullPlan.plan
-                                        : null;
-                                    if (guardPlan) {
-                                        const guardPlanSummary = summarizePlanDirectionState(guardPlan);
-                                        const guardConflictCount = guardPlanSummary.fileConflicts.length;
-                                        const guardLocalOpCount = guardPlanSummary.localOpCount;
-                                        const guardRemoteOpCount = guardPlanSummary.remoteOpCount;
-
-                                        if (guardConflictCount > 0) {
-                                            actionText = await doPull(remoteState, 'pull (file-plan conflict)', fullModePullPlan);
-                                            handledByFilePlanGuard = true;
-                                        } else if (guardRemoteOpCount > 0 && guardLocalOpCount === 0) {
-                                            actionText = await doPull(remoteState, 'remote newer pull (file plan)', fullModePullPlan);
-                                            handledByFilePlanGuard = true;
-                                        } else if (guardLocalOpCount > 0 && guardRemoteOpCount === 0) {
-                                            actionText = await doPush('local newer push (file plan)', {
-                                                remoteFilesByPathForMissingCheck
-                                            });
-                                            handledByFilePlanGuard = true;
-                                        } else if (guardRemoteOpCount > 0 && guardLocalOpCount > 0) {
-                                            if (guardPlanSummary.overlapPaths.length > 0) {
-                                                const mixedConflictEntries = guardPlanSummary.overlapPaths.map((path) => ({
-                                                    path,
-                                                    reason: 'mixed-file-plan-same-path-direction'
-                                                }));
-                                                const mixedPlanResult = Object.assign({}, fullModePullPlan, {
-                                                    plan: Object.assign({}, guardPlan, {
-                                                        conflict: mixedConflictEntries
-                                                    })
-                                                });
-                                                actionText = await doPull(remoteState, 'pull (file-plan mixed conflict)', mixedPlanResult);
-                                            } else {
-                                                const pushFirstActionText = await doPush('mixed-file-plan push-first', {
-                                                    remoteFilesByPathForMissingCheck
-                                                });
-                                                if (abortedByPendingConflict || hasPendingConflict()) {
-                                                    actionText = pushFirstActionText || textByLang('冲突待处理', 'Conflict pending');
-                                                } else {
-                                                    const refreshedRemoteState = await readRemoteSnapshotWithPathRecovery({
-                                                        interactive: isManualTrigger,
-                                                        continueAfterConfirm: true
-                                                    });
-                                                    actionText = await doPull(refreshedRemoteState, 'mixed-file-plan pull-second');
-                                                }
-                                            }
-                                            handledByFilePlanGuard = true;
-                                        }
-                                    }
-                                } catch (error) {
-                                    console.warn('[Canvas Sync] full-mode file plan guard failed:', error);
-                                }
-                            }
-
-                            if (handledByFilePlanGuard) {
-                                // Already resolved by file-level guard (push/pull/conflict).
-                            } else {
                             const hasLocalBase = !!runtime.lastLocalHash;
                             const hasRemoteBase = !!runtime.lastRemoteSha;
                             const localDirtyState = loadDirtyState();
@@ -14504,58 +12888,7 @@ Cancel: go back and change the branch name first.`
                                         localDirtyState
                                     }
                                 );
-                                let dualDirtyBlankChangeHints = null;
-                                try {
-                                    const dualDirtyPullPlan = await buildObsidianPullPlan('dual-dirty-description-hints');
-                                    dualDirtyBlankChangeHints = buildBlankDescriptionChangeHintsFromPullPlan(dualDirtyPullPlan);
-                                } catch (_) {
-                                    dualDirtyBlankChangeHints = null;
-                                }
                                 if (dualDirtyWinner === 'local') {
-                                    const descriptionBaseMap = await resolveDescriptionBaseMapForGitHub(
-                                        localSnapshot,
-                                        localSnapshot,
-                                        remoteSnapshot
-                                    );
-                                    const descriptionResolved = applyDescriptionPolicyToSnapshot(
-                                        localSnapshot,
-                                        localSnapshot,
-                                        remoteSnapshot,
-                                        {
-                                            baseMap: descriptionBaseMap,
-                                            blankChangeHints: dualDirtyBlankChangeHints
-                                        }
-                                    );
-                                    runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
-                                    runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
-                                    runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.fallbackCount) || 0);
-                                    if (descriptionResolved && descriptionResolved.requiresManual) {
-                                        const fileConflictSummary = await buildConflictFileSummaryFromCurrentPlan('dual-dirty-description-manual');
-                                        setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
-                                            reason: 'dual-dirty-description-manual',
-                                            fileConflicts: fileConflictSummary.fileConflicts,
-                                            fileConflictByPath: fileConflictSummary.fileConflictByPath,
-                                            filePlanSummary: fileConflictSummary.filePlanSummary || undefined
-                                        }));
-                                        runtime.lastAppliedDirection = 'conflict';
-                                        runtime.lastError = textByLang(
-                                            '说明类自动合并失败，已转入冲突面板：请先选择说明类策略',
-                                            'Description auto-merge failed. Switched to conflict panel: choose a description strategy first.'
-                                        );
-                                        pendingReasons.clear();
-                                        runtime.queueLength = 0;
-                                        saveRuntime();
-                                        renderStatus();
-                                        renderConflictPanel();
-                                        openPanel({ activeTab: 'status' });
-                                        return;
-                                    }
-                                    if (descriptionResolved && descriptionResolved.changed && descriptionResolved.snapshot) {
-                                        await applySnapshotToLocal(descriptionResolved.snapshot);
-                                        const nextLocalSnapshot = normalizeSnapshot(descriptionResolved.snapshot);
-                                        replaceSnapshotInPlace(localSnapshot, nextLocalSnapshot);
-                                        localHash = getSnapshotHash(nextLocalSnapshot);
-                                    }
                                     actionText = await doPush(
                                         `conflict resolved (local, ${structuredPolicy}, ${syncMethod})`,
                                         { remoteFilesByPathForMissingCheck }
@@ -14563,66 +12896,10 @@ Cancel: go back and change the branch name first.`
                                 } else if (dualDirtyWinner === 'remote-reset') {
                                     actionText = await doResetHead(remoteState);
                                 } else if (dualDirtyWinner === 'remote') {
-                                    const descriptionBaseMap = await resolveDescriptionBaseMapForGitHub(
-                                        remoteSnapshot,
-                                        localSnapshot,
-                                        remoteSnapshot
-                                    );
-                                    const descriptionResolved = applyDescriptionPolicyToSnapshot(
-                                        remoteSnapshot,
-                                        localSnapshot,
-                                        remoteSnapshot,
-                                        {
-                                            baseMap: descriptionBaseMap,
-                                            blankChangeHints: dualDirtyBlankChangeHints
-                                        }
-                                    );
-                                    runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(descriptionResolved && descriptionResolved.policy);
-                                    runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.mergedCount) || 0);
-                                    runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0) + Math.max(0, Number(descriptionResolved && descriptionResolved.fallbackCount) || 0);
-                                    if (descriptionResolved && descriptionResolved.requiresManual) {
-                                        const fileConflictSummary = await buildConflictFileSummaryFromCurrentPlan('dual-dirty-description-manual');
-                                        setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
-                                            reason: 'dual-dirty-description-manual',
-                                            fileConflicts: fileConflictSummary.fileConflicts,
-                                            fileConflictByPath: fileConflictSummary.fileConflictByPath,
-                                            filePlanSummary: fileConflictSummary.filePlanSummary || undefined
-                                        }));
-                                        runtime.lastAppliedDirection = 'conflict';
-                                        runtime.lastError = textByLang(
-                                            '说明类自动合并失败，已转入冲突面板：请先选择说明类策略',
-                                            'Description auto-merge failed. Switched to conflict panel: choose a description strategy first.'
-                                        );
-                                        pendingReasons.clear();
-                                        runtime.queueLength = 0;
-                                        saveRuntime();
-                                        renderStatus();
-                                        renderConflictPanel();
-                                        openPanel({ activeTab: 'status' });
-                                        return;
-                                    }
-                                    const remoteStateForMerge = (descriptionResolved && descriptionResolved.snapshot)
-                                        ? Object.assign({}, remoteState, { snapshot: normalizeSnapshot(descriptionResolved.snapshot) })
-                                        : remoteState;
                                     actionText = await doPull(
-                                        remoteStateForMerge,
+                                        remoteState,
                                         `conflict resolved (remote, ${structuredPolicy}, ${syncMethod})`
                                     );
-                                    if (
-                                        descriptionResolved
-                                        && descriptionResolved.changed
-                                        && ensureDescriptionConflictPolicy(descriptionResolved.policy) !== 'remote'
-                                        && descriptionResolved.snapshot
-                                    ) {
-                                        await applySnapshotToLocal(descriptionResolved.snapshot);
-                                        updateDirtyStateByReason('dual-dirty-remote-description-merge', {
-                                            dirty: {
-                                                permanentAll: true,
-                                                temporaryAll: true,
-                                                blankAll: true
-                                            }
-                                        });
-                                    }
                                 } else {
                                     const fileConflictSummary = await buildConflictFileSummaryFromCurrentPlan('dual-dirty-direct-conflict');
                                     setPendingConflict(createPendingConflictPayload(localSnapshot, remoteSnapshot, remoteState, {
@@ -14692,7 +12969,6 @@ Cancel: go back and change the branch name first.`
                                             : 'remote newer pull'
                                     );
                                 }
-                            }
                             }
                         }
                     }
@@ -14769,9 +13045,6 @@ Cancel: go back and change the branch name first.`
             if (isTooLargeError) {
                 showSyncFileTooLargeDialog(error);
             }
-
-            if (!hasPendingConflict() && !isRepoConfigError && !isTooLargeError && !isPathValidationError) {
-                }
 
             const offlineHint = isLikelyOfflineError(runtime.lastError)
                 ? textByLang('（检测到网络异常，将自动重试）', ' (Network issue detected; will retry automatically)')
@@ -15535,18 +13808,13 @@ Cancel: go back and change the branch name first.`
             });
         }
 
-	        [
+        [
 	            'canvasSyncEnabledToggle',
 	            'canvasSyncFirstSyncModeAutoInput',
 	            'canvasSyncFirstSyncModeCloudInput',
 	            'canvasSyncFirstSyncModeLocalInput',
             'canvasSyncToastToggle',
             'canvasSyncStructuredConflictPolicySelect',
-            'canvasSyncStructuredConflictPolicyPermanentSelect',
-            'canvasSyncStructuredConflictPolicyTemporarySelect',
-            'canvasSyncStructuredConflictPolicyCanvasSelect',
-            'canvasSyncDescriptionConflictPolicySelect',
-            'canvasSyncDescriptionMergeFallbackSelect',
             'canvasSyncPermanentPullModeSelect',
             'canvasSyncPermanentIncrementalThresholdInput',
             'canvasSyncObsidianFilePushToggle',
@@ -15668,71 +13936,6 @@ Cancel: go back and change the branch name first.`
             });
         }
 
-        const conflictDescUseLocalBtn = getElement('canvasSyncConflictDescUseLocalBtn');
-        if (conflictDescUseLocalBtn) {
-            conflictDescUseLocalBtn.addEventListener('click', () => {
-                settings.blankCardSourceConflictPolicy = 'local';
-                saveSettings();
-                applySettingsToForm();
-                renderStatus();
-                renderConflictPanel();
-                toast(textByLang('说明类策略已切换为：优先本地说明', 'Description strategy switched to: prefer local'));
-            });
-        }
-
-        const conflictDescUseRemoteBtn = getElement('canvasSyncConflictDescUseRemoteBtn');
-        if (conflictDescUseRemoteBtn) {
-            conflictDescUseRemoteBtn.addEventListener('click', () => {
-                settings.blankCardSourceConflictPolicy = 'remote';
-                saveSettings();
-                applySettingsToForm();
-                renderStatus();
-                renderConflictPanel();
-                toast(textByLang('说明类策略已切换为：优先云端说明', 'Description strategy switched to: prefer cloud'));
-            });
-        }
-
-        const conflictDescUseCopyBtn = getElement('canvasSyncConflictDescUseCopyBtn');
-        if (conflictDescUseCopyBtn) {
-            conflictDescUseCopyBtn.addEventListener('click', () => {
-                settings.blankCardSourceConflictPolicy = 'conflict-copy';
-                settings.blankCardSourceMergeFallback = 'conflict-copy';
-                saveSettings();
-                applySettingsToForm();
-                renderStatus();
-                renderConflictPanel();
-                toast(textByLang('说明类策略已切换为：冲突副本卡片', 'Description strategy switched to: conflict-copy card'));
-            });
-        }
-
-        const conflictFineToggle = getElement('canvasSyncConflictFineToggle');
-        if (conflictFineToggle) {
-            conflictFineToggle.addEventListener('change', () => {
-                conflictFineModeEnabled = !!conflictFineToggle.checked;
-                renderConflictPanel();
-            });
-        }
-
-        const conflictFineList = getElement('canvasSyncConflictFineList');
-        if (conflictFineList) {
-            conflictFineList.addEventListener('change', (event) => {
-                const target = event && event.target && event.target.closest
-                    ? event.target.closest('select[data-conflict-fine-path]')
-                    : null;
-                if (!target) return;
-                const path = normalizeSyncPath(target.getAttribute('data-conflict-fine-path'));
-                if (!path) return;
-                conflictFineChoiceByPath[path] = normalizeConflictFineChoice(target.value);
-            });
-        }
-
-        const conflictApplyFineBtn = getElement('canvasSyncConflictApplyFineBtn');
-        if (conflictApplyFineBtn) {
-            conflictApplyFineBtn.addEventListener('click', () => {
-                void runWithButtonBusy(conflictApplyFineBtn, () => resolvePendingConflictByFineChoices());
-            });
-        }
-
         const conflictDismissBtn = getElement('canvasSyncConflictDismissBtn');
         if (conflictDismissBtn) {
             conflictDismissBtn.addEventListener('click', () => {
@@ -15828,14 +14031,9 @@ Cancel: go back and change the branch name first.`
         // disable action buttons incorrectly.
         runtime.isRunning = false;
         runtime.lastRemoteCommittedAt = Number(runtime.lastRemoteCommittedAt) || 0;
-        runtime.lastBlankSectionFilePushAt = Number(runtime.lastBlankSectionFilePushAt) || 0;
         runtime.lastPermanentSectionHash = String(runtime.lastPermanentSectionHash || '');
         runtime.lastOtherSyncDataHash = String(runtime.lastOtherSyncDataHash || '');
         runtime.lastLocalFilesSha = String(runtime.lastLocalFilesSha || '');
-        runtime.lastDescriptionMergeMerged = Math.max(0, Number(runtime.lastDescriptionMergeMerged) || 0);
-        runtime.lastDescriptionMergeFallback = Math.max(0, Number(runtime.lastDescriptionMergeFallback) || 0);
-        runtime.lastBlankCardSourceMergeMode = ensureDescriptionConflictPolicy(runtime.lastBlankCardSourceMergeMode || settings.blankCardSourceConflictPolicy);
-        delete runtime.lastDescriptionMergeMode;
         if (!runtime.lastLocalFilesSha) {
             const prevSyncIndex = loadPrevSyncIndex();
             const prevFiles = prevSyncIndex && prevSyncIndex.files && typeof prevSyncIndex.files === 'object'
@@ -15892,57 +14090,10 @@ Cancel: go back and change the branch name first.`
         getSettings: () => Object.assign({}, settings || loadSettings()),
         updateSettings: (patch) => {
             const patchObject = (patch && typeof patch === 'object') ? patch : {};
-            const hasOwnPatch = Object.prototype.hasOwnProperty;
             settings = Object.assign({}, settings || loadSettings(), patchObject);
-            const hasStructuredTopPatch = hasOwnPatch.call(patchObject, 'structuredConflictPolicy')
-                || hasOwnPatch.call(patchObject, 'conflictPolicy');
-            const hasScopedStructuredPatch = hasOwnPatch.call(patchObject, 'structuredConflictPolicyPermanent')
-                || hasOwnPatch.call(patchObject, 'structuredConflictPolicyTemporary')
-                || hasOwnPatch.call(patchObject, 'structuredConflictPolicyCanvas');
-            const structuredPolicyCandidate = hasOwnPatch.call(patchObject, 'structuredConflictPolicy')
-                ? patchObject.structuredConflictPolicy
-                : (hasOwnPatch.call(patchObject, 'conflictPolicy')
-                    ? patchObject.conflictPolicy
-                    : (hasScopedStructuredPatch && !hasStructuredTopPatch
-                        ? STRUCTURED_CONFLICT_POLICY_CUSTOM
-                        : settings.structuredConflictPolicy));
-            const structuredPermanentCandidate = hasOwnPatch.call(patchObject, 'structuredConflictPolicyPermanent')
-                ? patchObject.structuredConflictPolicyPermanent
-                : settings.structuredConflictPolicyPermanent;
-            const structuredTemporaryCandidate = hasOwnPatch.call(patchObject, 'structuredConflictPolicyTemporary')
-                ? patchObject.structuredConflictPolicyTemporary
-                : settings.structuredConflictPolicyTemporary;
-            const structuredCanvasCandidate = hasOwnPatch.call(patchObject, 'structuredConflictPolicyCanvas')
-                ? patchObject.structuredConflictPolicyCanvas
-                : settings.structuredConflictPolicyCanvas;
-            const blankSourcePolicyCandidate = hasOwnPatch.call(patchObject, 'blankCardSourceConflictPolicy')
-                ? patchObject.blankCardSourceConflictPolicy
-                : (hasOwnPatch.call(patchObject, 'descriptionConflictPolicy') ? patchObject.descriptionConflictPolicy : settings.blankCardSourceConflictPolicy);
-            const blankSourceFallbackCandidate = hasOwnPatch.call(patchObject, 'blankCardSourceMergeFallback')
-                ? patchObject.blankCardSourceMergeFallback
-                : (hasOwnPatch.call(patchObject, 'descriptionMergeFallback') ? patchObject.descriptionMergeFallback : settings.blankCardSourceMergeFallback);
-
-            const normalizedStructuredTopPolicy = ensureStructuredConflictPolicy(structuredPolicyCandidate, { allowCustom: true });
-            let nextPermanentPolicy = ensureStructuredConflictPolicy(structuredPermanentCandidate);
-            let nextTemporaryPolicy = ensureStructuredConflictPolicy(structuredTemporaryCandidate);
-            let nextCanvasPolicy = ensureStructuredConflictPolicy(structuredCanvasCandidate);
-            if (normalizedStructuredTopPolicy !== STRUCTURED_CONFLICT_POLICY_CUSTOM) {
-                nextPermanentPolicy = ensureStructuredConflictPolicy(normalizedStructuredTopPolicy);
-                nextTemporaryPolicy = ensureStructuredConflictPolicy(normalizedStructuredTopPolicy);
-                nextCanvasPolicy = ensureStructuredConflictPolicy(normalizedStructuredTopPolicy);
-            }
-            settings.structuredConflictPolicyPermanent = nextPermanentPolicy;
-            settings.structuredConflictPolicyTemporary = nextTemporaryPolicy;
-            settings.structuredConflictPolicyCanvas = nextCanvasPolicy;
-            settings.structuredConflictPolicy = deriveStructuredConflictPolicySummary(
-                settings.structuredConflictPolicyPermanent,
-                settings.structuredConflictPolicyTemporary,
-                settings.structuredConflictPolicyCanvas
-            );
+            settings.structuredConflictPolicy = ensureStructuredConflictPolicy(settings.structuredConflictPolicy);
             settings.syncMethod = DEFAULT_SETTINGS.syncMethod;
             settings.toastEnabled = settings.toastEnabled !== false;
-            settings.blankCardSourceConflictPolicy = ensureDescriptionConflictPolicy(blankSourcePolicyCandidate);
-            settings.blankCardSourceMergeFallback = ensureDescriptionMergeFallback(blankSourceFallbackCandidate);
             settings.firstSyncMode = ensureFirstSyncMode(settings.firstSyncMode);
             settings.permanentPullMode = ensurePermanentPullMode(settings.permanentPullMode);
             settings.permanentIncrementalMaxChanges = normalizePermanentIncrementalMaxChanges(
@@ -15957,10 +14108,6 @@ Cancel: go back and change the branch name first.`
                 settings.tempSectionUploadIntervalSeconds,
                 DEFAULT_SETTINGS.tempSectionUploadIntervalSeconds
             );
-            settings.blankSectionUploadIntervalSeconds = normalizeCustomUploadIntervalSeconds(
-                settings.blankSectionUploadIntervalSeconds,
-                DEFAULT_SETTINGS.blankSectionUploadIntervalSeconds
-            );
             settings.obsidianFilePushEnabled = settings.obsidianFilePushEnabled !== false;
             settings.obsidianExportFormat = normalizeObsidianExportFormat(
                 settings.obsidianExportFormat,
@@ -15971,12 +14118,6 @@ Cancel: go back and change the branch name first.`
                 DEFAULT_SETTINGS.obsidianExportRoot,
                 { allowEmpty: true }
             );
-            delete settings.conflictPolicy;
-            delete settings.pushOnSync;
-            delete settings.pullOnSync;
-            delete settings.syncPermanentTreeOnPush;
-            delete settings.descriptionConflictPolicy;
-            delete settings.descriptionMergeFallback;
             saveSettings();
             applySettingsToForm();
             renderStatus();

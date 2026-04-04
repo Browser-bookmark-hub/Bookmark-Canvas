@@ -1705,7 +1705,6 @@ const BCS_META_KEY = 'bcs:meta';
 const BCS_CANVAS_KEY = 'bcs:canvas';
 const BCS_CANVAS_META_KEY = 'bcs:canvas:meta';
 const BCS_SECTION_PREFIX = 'bcs:section:';
-const BCS_MD_PREFIX = 'bcs:md:';
 const BCS_PERM_MAIN_KEY = 'bcs:perm:main';
 const BCS_PERM_COPY_PREFIX = 'bcs:perm:copy-';
 const BCS_SIGNAL_KEY = 'bcs:signal';
@@ -2698,7 +2697,7 @@ function createInitialDemoTemplate() {
 ### 连接线
 - **创建连接**：点击栏目边缘连接点，拖向另一栏目
 - **编辑连接**：点击连接线，可修改颜色、方向、标签
-- **预设颜色**：<font color="#ff6666">红</font> <font color="#66bbff">蓝</font> <font color="#ffdd66">黄</font> <font color="#66ffaa">绿</font> <font color="#ffaa66">橙</font> <font color="#bf66ff">紫</font>
+- **预设颜色**：红、蓝、黄、绿、橙、紫
 
 _提示：此卡片可自由编辑或删除_
 `;
@@ -2717,7 +2716,7 @@ _提示：此卡片可自由编辑或删除_
 ### Connection Lines
 - **Create connection**: Click a section edge anchor and drag to another section
 - **Edit connection**: Click a line to change color, direction, and label
-- **Preset colors**: <font color="#ff6666">Red</font> <font color="#66bbff">Blue</font> <font color="#ffdd66">Yellow</font> <font color="#66ffaa">Green</font> <font color="#ffaa66">Orange</font> <font color="#bf66ff">Purple</font>
+- **Preset colors**: Red, Blue, Yellow, Green, Orange, Purple
 
 _Tip: This card can be freely edited or deleted_
 `;
@@ -16061,20 +16060,32 @@ function duplicateMdNode(nodeId) {
     if (!node) return null;
     const id = `md-node-${++CanvasState.mdNodeCounter}`;
     const baseSize = getBlankNodeDefaultSize();
-    const markdownSource = __deriveMdNodeMarkdownSource(node);
+    const isCanvasNativeText = __isCanvasNativeTextNode(node);
+    const nativeTextBody = isCanvasNativeText
+        ? __repairLegacyCanvasMarkdownSource(
+            __resolveCanvasNativeTextNodeBody(node) || (typeof node.markdownSource === 'string' ? node.markdownSource : '')
+        )
+        : '';
+    const markdownSource = isCanvasNativeText
+        ? nativeTextBody
+        : __deriveMdNodeMarkdownSource(node);
     const copy = {
         id,
         x: (node.x || 0) + 24,
         y: (node.y || 0) + 24,
         width: node.width || baseSize.width,
         height: node.height || baseSize.height,
-        text: node.text || '',
+        text: isCanvasNativeText ? nativeTextBody : (node.text || ''),
         html: node.html || '',
         markdownSource,
         color: node.color || null,
         colorHex: node.colorHex || null,
         createdAt: Date.now()
     };
+    if (isCanvasNativeText) {
+        copy.subtype = 'canvas-native-text';
+        copy.source = 'obsidian-canvas-text';
+    }
     __ensureMdNodeMarkdownProtocol(copy, { refreshCachesFromMarkdown: true });
     CanvasState.mdNodes.push(copy);
     renderMdNode(copy);
@@ -16337,13 +16348,10 @@ function renderMdNode(node) {
                 <button class="md-format-btn md-format-btn-sm" data-action="md-font-increase" title="${sizeIncreaseTitle}"><i class="fas fa-plus"></i></button>
                 <span class="md-format-sep"></span>
                 <button class="md-format-btn md-format-heading-btn" data-action="md-heading-toggle" title="${headingTitle}"><i class="fas fa-heading"></i></button>
-                <button class="md-format-btn md-format-align-btn" data-action="md-align-toggle" title="${alignTitle}"><i class="fas fa-align-left"></i></button>
                 <span class="md-format-sep"></span>
                 <button class="md-format-btn" data-action="md-insert-bold" title="${boldTitle}"><b>B</b></button>
                 <button class="md-format-btn" data-action="md-insert-italic" title="${italicTitle}"><i>I</i></button>
-                <button class="md-format-btn" data-action="md-insert-underline" title="${underlineTitle}"><u>U</u></button>
                 <button class="md-format-btn" data-action="md-insert-highlight" title="${highlightTitle}"><span style="background:#fcd34d;color:#000;padding:0 3px;border-radius:2px;">H</span></button>
-                <button class="md-format-btn md-format-fontcolor-btn" data-action="md-fontcolor-toggle" title="${fontColorTitle}"><span style="border-bottom:2px solid #2DC26B;padding:0 2px;">A</span></button>
                 <button class="md-format-btn" data-action="md-insert-strike" title="${strikeTitle}"><s>S</s></button>
                 <button class="md-format-btn" data-action="md-insert-code" title="${codeTitle}"><code>&lt;/&gt;</code></button>
                 <span class="md-format-sep"></span>
@@ -16533,16 +16541,13 @@ function renderMdNode(node) {
         // 清除保存的选区
         savedSelection = null;
 
-        // 创建 font 标签
-        const wrapper = document.createElement('font');
-        wrapper.setAttribute('color', color);
-        wrapper.textContent = insertText;
-
+        // HTML color tags are disabled; keep plain text insertion.
+        const textNode = document.createTextNode(insertText);
         range.deleteContents();
-        range.insertNode(wrapper);
+        range.insertNode(textNode);
 
         const spacer = document.createTextNode('\u200B');
-        wrapper.parentNode.insertBefore(spacer, wrapper.nextSibling);
+        textNode.parentNode.insertBefore(spacer, textNode.nextSibling);
 
         range.setStart(spacer, 1);
         range.collapse(true);
@@ -16803,23 +16808,13 @@ function renderMdNode(node) {
         // 清除保存的选区
         savedSelection = null;
 
-        let wrapper;
-        if (alignType === 'center') {
-            // 使用 <center> 标签
-            wrapper = document.createElement('center');
-            wrapper.textContent = insertText;
-        } else {
-            // 使用 <p align="xxx"> 标签
-            wrapper = document.createElement('p');
-            wrapper.setAttribute('align', alignType);
-            wrapper.textContent = insertText;
-        }
-
+        // Alignment HTML tags are disabled; keep plain text insertion.
+        const textNode = document.createTextNode(insertText);
         range.deleteContents();
-        range.insertNode(wrapper);
+        range.insertNode(textNode);
 
         const spacer = document.createTextNode('\u200B');
-        wrapper.parentNode.insertBefore(spacer, wrapper.nextSibling);
+        textNode.parentNode.insertBefore(spacer, textNode.nextSibling);
 
         range.setStart(spacer, 1);
         range.collapse(true);
@@ -17024,10 +17019,20 @@ function renderMdNode(node) {
     editor.setAttribute('data-placeholder', mdPlaceholder);
     editor.setAttribute('aria-label', mdPlaceholder);
 
-    // 初始化编辑器内容：优先按 markdownSource 渲染，避免旧 html 缓存导致 #/##/### 被当纯文本。
-    const rawMarkdownSource = typeof node.markdownSource === 'string'
-        ? __repairLegacyCanvasMarkdownSource(node.markdownSource)
+    // 初始化编辑器内容：
+    // - Markdown 节点优先按 markdownSource 渲染；
+    // - Canvas 原生 text 节点按其 text body 作为 Markdown 渲染（避免显示源码）。
+    const isCanvasNativeText = __isCanvasNativeTextNode(node);
+    const nativeTextBody = isCanvasNativeText
+        ? __resolveCanvasNativeTextNodeBody(node)
         : '';
+    const rawMarkdownSource = isCanvasNativeText
+        ? __repairLegacyCanvasMarkdownSource(
+            nativeTextBody || (typeof node.markdownSource === 'string' ? node.markdownSource : '')
+        )
+        : (typeof node.markdownSource === 'string'
+            ? __repairLegacyCanvasMarkdownSource(node.markdownSource)
+            : '');
     if (rawMarkdownSource) {
         if (typeof marked !== 'undefined') {
             try { editor.innerHTML = __renderMarkdownToCanvasRichHtml(rawMarkdownSource); } catch { editor.textContent = rawMarkdownSource; }
@@ -17080,7 +17085,7 @@ function renderMdNode(node) {
         'EM': { prefix: '*', suffix: '*' },
         'I': { prefix: '*', suffix: '*' },
         // underline 使用 HTML 语法（便于“展开为源码/离开后重渲染”的体验）
-        'U': { prefix: '<u>', suffix: '</u>' },
+        'U': { prefix: '', suffix: '' },
         'DEL': { prefix: '~~', suffix: '~~' },
         'S': { prefix: '~~', suffix: '~~' },
         'MARK': { prefix: '==', suffix: '==' },
@@ -17136,35 +17141,33 @@ function renderMdNode(node) {
         };
         const inlineContent = getInlineSource(htmlContent, content);
 
-        // font color: <font color="#xxx">text</font>（保留内部 HTML）
+        // font color / align HTML syntax is deprecated: flatten to plain markdown text.
         if (tagName === 'FONT') {
-            const color = el.getAttribute('color') || '#000000';
             return {
-                source: `<font color="${color}">${inlineContent}</font>`,
-                prefix: `<font color="${color}">`,
-                suffix: '</font>',
-                type: 'fontcolor'
+                source: inlineContent,
+                prefix: '',
+                suffix: '',
+                type: 'plain'
             };
         }
 
-        // center: <center>text</center>（保留内部 HTML）
+        // center HTML syntax is deprecated
         if (tagName === 'CENTER') {
             return {
-                source: `<center>${inlineContent}</center>`,
-                prefix: '<center>',
-                suffix: '</center>',
-                type: 'align'
+                source: inlineContent,
+                prefix: '',
+                suffix: '',
+                type: 'plain'
             };
         }
 
-        // p with align: <p align="xxx">text</p>（保留内部 HTML）
+        // p align HTML syntax is deprecated
         if (tagName === 'P' && el.hasAttribute('align')) {
-            const align = el.getAttribute('align');
             return {
-                source: `<p align="${align}">${inlineContent}</p>`,
-                prefix: `<p align="${align}">`,
-                suffix: '</p>',
-                type: 'align'
+                source: inlineContent,
+                prefix: '',
+                suffix: '',
+                type: 'plain'
             };
         }
 
@@ -17714,13 +17717,7 @@ function renderMdNode(node) {
             }
         ];
 
-        // HTML 标签模式（font color, center, p align）
-        const htmlPatterns = [
-            { regex: /<font\s+color=["']?([^"'>]+)["']?>([^<]*)<\/font>/i, tag: 'font', attrName: 'color', attrIndex: 1, contentIndex: 2 },
-            { regex: /<center>([^<]*)<\/center>/i, tag: 'center', contentIndex: 1 },
-            { regex: /<p\s+align=["']?([^"'>]+)["']?>([^<]*)<\/p>/i, tag: 'p', attrName: 'align', attrIndex: 1, contentIndex: 2 },
-            { regex: /<u>([^<]*)<\/u>/i, tag: 'u', contentIndex: 1 },
-        ];
+        const htmlPatterns = [];
 
         // Setext 标题和水平分割线检测（回溯检测：当输入分隔符时，检测上一行是否为标题文本）
         const setextDashMatch = text.match(/^[\u200B]*(-{3,})\s*$/);    // --- → H1
@@ -18299,13 +18296,7 @@ function renderMdNode(node) {
             }
         }
 
-        // HTML 标签模式（font color, center, p align）
-        const htmlPatterns = [
-            { regex: /<font\s+color=["']?([^"'>]+)["']?>([^<]*)<\/font>/i, tag: 'font', attrName: 'color', attrIndex: 1, contentIndex: 2 },
-            { regex: /<center>([^<]*)<\/center>/i, tag: 'center', contentIndex: 1 },
-            { regex: /<p\s+align=["']?([^"'>]+)["']?>([^<]*)<\/p>/i, tag: 'p', attrName: 'align', attrIndex: 1, contentIndex: 2 },
-            { regex: /<u>([^<]*)<\/u>/i, tag: 'u', contentIndex: 1 },
-        ];
+        const htmlPatterns = [];
 
         // Setext 标题语法检测（处理两行结构：内容 + <br> + ---/===）
         // 标准规则: === → H1, --- → H2
@@ -18661,6 +18652,7 @@ function renderMdNode(node) {
         if (changed) {
             saveTempNodes({
                 syncDirty: {
+                    canvasLayout: true,
                     blankIds: [node.id]
                 }
             });
@@ -18791,10 +18783,6 @@ function renderMdNode(node) {
                         if (/^==[\s\S]+?==$/.test(text)) return true; // ==mark==
                         if (/^`[^`]+`$/.test(text)) return true; // `code`
                         if (/^\[\[[\s\S]+?\]\]$/.test(text)) return true; // [[wikilink]]
-                        if (/^<font\s+color=["']?[^"'>]+["']?>[\s\S]*<\/font>$/i.test(text)) return true;
-                        if (/^<center>[\s\S]*<\/center>$/i.test(text)) return true;
-                        if (/^<p\s+align=["']?[^"'>]+["']?>[\s\S]*<\/p>$/i.test(text)) return true;
-                        if (/^<u>[\s\S]*<\/u>$/i.test(text)) return true;
                         // Setext 标题分隔符行（--- / ===）
                         if (/^(-{3,}|={3,})$/.test(text)) return true;
                         // 列表项（展开后 <li> 会变成 UL/OL 内的 TextNode）
@@ -19779,8 +19767,6 @@ function renderMdNode(node) {
             target.closest('.md-color-chip') ||
             target.closest('.md-color-custom') ||
             target.closest('.md-color-picker-btn') ||
-            target.closest('.md-fontcolor-chip') ||
-            target.closest('.md-align-option') ||
             target.closest('.md-heading-option') ||
             target.closest('.md-list-option') ||
             target.closest('a')) {
@@ -19850,7 +19836,7 @@ function renderMdNode(node) {
 
     // 工具栏事件
     toolbar.addEventListener('click', (e) => {
-        const btn = e.target.closest('.md-node-toolbar-btn, .md-color-chip, .md-color-custom, .md-color-picker-btn, .md-format-btn, .md-fontcolor-chip, .md-align-option, .md-heading-option, .md-list-option');
+        const btn = e.target.closest('.md-node-toolbar-btn, .md-color-chip, .md-color-custom, .md-color-picker-btn, .md-format-btn, .md-heading-option, .md-list-option');
         if (!btn) return;
         e.preventDefault();
         e.stopPropagation();
@@ -19863,9 +19849,7 @@ function renderMdNode(node) {
             if (action.startsWith('md-insert-')) return true;
             if (action === 'md-format-toggle') return true;
             if (action === 'md-format-close') return true;
-            if (action === 'md-fontcolor-toggle' || action === 'md-fontcolor-apply') return true;
             if (action === 'md-heading-toggle' || action === 'md-heading-apply') return true;
-            if (action === 'md-align-toggle' || action === 'md-align-apply') return true;
             if (action === 'md-list-toggle' || action === 'md-list-apply') return true;
             return false;
         })();
@@ -19978,18 +19962,8 @@ function renderMdNode(node) {
             insertFormat('bold');
         } else if (action === 'md-insert-italic') {
             insertFormat('italic');
-        } else if (action === 'md-insert-underline') {
-            insertFormat('underline');
         } else if (action === 'md-insert-highlight') {
             insertFormat('highlight');
-        } else if (action === 'md-fontcolor-toggle') {
-            toggleFontColorPopover(btn);
-        } else if (action === 'md-fontcolor-apply') {
-            const color = btn.getAttribute('data-color');
-            if (color) {
-                insertFontColor(color);
-                closeFontColorPopover();
-            }
         } else if (action === 'md-insert-strike') {
             insertFormat('strike');
         } else if (action === 'md-insert-code') {
@@ -20001,14 +19975,6 @@ function renderMdNode(node) {
             if (level) {
                 insertFormat(level);
                 closeHeadingPopover();
-            }
-        } else if (action === 'md-align-toggle') {
-            toggleAlignPopover(btn);
-        } else if (action === 'md-align-apply') {
-            const alignType = btn.getAttribute('data-align');
-            if (alignType) {
-                insertAlign(alignType);
-                closeAlignPopover();
             }
         } else if (action === 'md-list-toggle') {
             toggleListPopover(btn);
@@ -20368,13 +20334,17 @@ async function createMdNode(x, y, text = '') {
     const baseSize = getBlankNodeDefaultSize();
     const defaultColor = getBlankNodeDefaultColor();
     const id = `md-node-${++CanvasState.mdNodeCounter}`;
+    const markdownSource = __repairLegacyCanvasMarkdownSource(String(text == null ? '' : text));
     const node = {
         id,
         x,
         y,
         width: baseSize.width,
         height: baseSize.height,
-        text,
+        text: markdownSource,
+        markdownSource,
+        subtype: 'canvas-native-text',
+        source: 'obsidian-canvas-text',
         color: null,
         colorHex: defaultColor || null,
         createdAt: Date.now()
@@ -20724,12 +20694,6 @@ function __tryConvertInlinePatternsInTextNode(editorEl, explicitNode = null) {
     };
 
     const patterns = [
-        // HTML-like explicit syntax
-        { type: 'font', regex: /<font\s+color=["']?([^"'>\s]+)["']?>([^<]*)<\/font>/i, tag: 'font', attrName: 'color', attrIndex: 1, contentIndex: 2 },
-        { type: 'center', regex: /<center>([^<]*)<\/center>/i, tag: 'center', contentIndex: 1 },
-        { type: 'pAlign', regex: /<p\s+align=["']?([^"'>\s]+)["']?>([^<]*)<\/p>/i, tag: 'p', attrName: 'align', attrIndex: 1, contentIndex: 2 },
-        { type: 'u', regex: /<u>([^<]*)<\/u>/i, tag: 'u', contentIndex: 1 },
-
         // Markdown-like implicit syntax
         { type: 'bold', regex: /\*\*(.+?)\*\*/, tag: 'strong', contentIndex: 1 },
         { type: 'italic', regex: /\*(.+?)\*/, tag: 'em', contentIndex: 1 },
@@ -21012,9 +20976,29 @@ function __cloneCanvasProtocolJson(value) {
 }
 
 function __normalizeCanvasMarkdownSource(value) {
-    return String(value == null ? '' : value)
+    const normalized = String(value == null ? '' : value)
         .replace(/\u200B/g, '')
         .replace(/\r\n?/g, '\n');
+    return __stripUnsupportedCanvasHtmlMarkdown(normalized);
+}
+
+function __stripUnsupportedCanvasHtmlMarkdown(value) {
+    let output = String(value == null ? '' : value);
+    const unwrap = (pattern) => {
+        let changed = true;
+        while (changed) {
+            const next = output.replace(pattern, '$1');
+            changed = next !== output;
+            output = next;
+        }
+    };
+    // No HTML formatting in markdown source: keep plain text payload only.
+    unwrap(/<\s*font\b[^>]*>([\s\S]*?)<\s*\/\s*font\s*>/gi);
+    unwrap(/<\s*center\b[^>]*>([\s\S]*?)<\s*\/\s*center\s*>/gi);
+    unwrap(/<\s*p\b[^>]*\balign\s*=\s*['"]?[^"' >]+['"]?[^>]*>([\s\S]*?)<\s*\/\s*p\s*>/gi);
+    unwrap(/<\s*u\b[^>]*>([\s\S]*?)<\s*\/\s*u\s*>/gi);
+    unwrap(/<\s*span\b[^>]*\bstyle\s*=\s*['"][^'"]*['"][^>]*>([\s\S]*?)<\s*\/\s*span\s*>/gi);
+    return output;
 }
 
 function __resolveMarkdownSourceFromEditorHtml(cleanHtml, currentSource, options = {}) {
@@ -21388,13 +21372,17 @@ function __syncMdNodeFromEditor(node, editor) {
     const plainText = cleanHtml
         ? __extractPlainTextFromCanvasRichHtml(cleanHtml)
         : '';
+    const isCanvasNativeText = __isCanvasNativeTextNode(node);
+    const nextNodeText = isCanvasNativeText
+        ? markdownSource
+        : plainText;
 
     const changed = (node.html || '') !== cleanHtml
-        || (node.text || '') !== plainText
+        || (node.text || '') !== nextNodeText
         || (__normalizeCanvasMarkdownSource(node.markdownSource) !== markdownSource);
 
     node.html = cleanHtml;
-    node.text = plainText;
+    node.text = nextNodeText;
     node.markdownSource = markdownSource;
     return changed;
 }
@@ -22193,7 +22181,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         'B': { prefix: '**', suffix: '**' },
         'EM': { prefix: '*', suffix: '*' },
         'I': { prefix: '*', suffix: '*' },
-        'U': { prefix: '<u>', suffix: '</u>' },
+        'U': { prefix: '', suffix: '' },
         'DEL': { prefix: '~~', suffix: '~~' },
         'S': { prefix: '~~', suffix: '~~' },
         'MARK': { prefix: '==', suffix: '==' },
@@ -22368,17 +22356,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             { regex: /^\*(.+?)\*$/, tag: 'em', contentIndex: 1 },
             { regex: /^~~(.+?)~~$/, tag: 'del', contentIndex: 1 },
             { regex: /^==(.+?)==$/, tag: 'mark', contentIndex: 1 },
-            { regex: /^`([^`]+)`$/, tag: 'code', contentIndex: 1 },
-            { regex: /^<u>([^<]*)<\/u>$/i, tag: 'u', contentIndex: 1 },
-            // font color: 支持带引号和不带引号的格式
-            { regex: /^<font\s+color="([^"]+)">([^<]*)<\/font>$/i, tag: 'font', attrName: 'color', attrIndex: 1, contentIndex: 2 },
-            { regex: /^<font\s+color='([^']+)'>([^<]*)<\/font>$/i, tag: 'font', attrName: 'color', attrIndex: 1, contentIndex: 2 },
-            { regex: /^<font\s+color=([^>\s]+)>([^<]*)<\/font>$/i, tag: 'font', attrName: 'color', attrIndex: 1, contentIndex: 2 },
-            { regex: /^<center>([^<]*)<\/center>$/i, tag: 'center', contentIndex: 1 },
-            // p align: 支持带引号和不带引号的格式
-            { regex: /^<p\s+align="([^"]+)">([^<]*)<\/p>$/i, tag: 'p', attrName: 'align', attrIndex: 1, contentIndex: 2 },
-            { regex: /^<p\s+align='([^']+)'>([^<]*)<\/p>$/i, tag: 'p', attrName: 'align', attrIndex: 1, contentIndex: 2 },
-            { regex: /^<p\s+align=([^>\s]+)>([^<]*)<\/p>$/i, tag: 'p', attrName: 'align', attrIndex: 1, contentIndex: 2 }
+            { regex: /^`([^`]+)`$/, tag: 'code', contentIndex: 1 }
         ];
 
         // 块级格式模式（ATX 标题、引用、列表、水平分割线等）
@@ -22499,35 +22477,33 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         };
         const inlineContent = getInlineSource(htmlContent, content);
 
-        // font color: <font color="#xxx">text</font>（保留内部 HTML）
+        // font color / align HTML syntax is deprecated: flatten to plain markdown text.
         if (tagName === 'FONT') {
-            const color = el.getAttribute('color') || '#000000';
             return {
-                source: `<font color="${color}">${inlineContent}</font>`,
-                prefix: `<font color="${color}">`,
-                suffix: '</font>',
-                type: 'fontcolor'
+                source: inlineContent,
+                prefix: '',
+                suffix: '',
+                type: 'plain'
             };
         }
 
-        // center: <center>text</center>
+        // center HTML syntax is deprecated
         if (tagName === 'CENTER') {
             return {
-                source: `<center>${inlineContent}</center>`,
-                prefix: '<center>',
-                suffix: '</center>',
-                type: 'align'
+                source: inlineContent,
+                prefix: '',
+                suffix: '',
+                type: 'plain'
             };
         }
 
-        // p with align: <p align="xxx">text</p>
+        // p align HTML syntax is deprecated
         if (tagName === 'P' && el.hasAttribute('align')) {
-            const align = el.getAttribute('align');
             return {
-                source: `<p align="${align}">${inlineContent}</p>`,
-                prefix: `<p align="${align}">`,
-                suffix: '</p>',
-                type: 'align'
+                source: inlineContent,
+                prefix: '',
+                suffix: '',
+                type: 'plain'
             };
         }
 
@@ -22738,7 +22714,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         // If clicked inside editor but not on text directly
         if (target !== editor && editor.contains(target)) {
             // Find closest formatted element (including block-level elements)
-            const formatted = target.closest('strong, b, em, i, u, del, s, mark, code, a, font, center, blockquote, h1, h2, h3, h4, h5, h6, hr, li, .md-task-item, p[align]');
+            const formatted = target.closest('strong, b, em, i, u, del, s, mark, code, a, blockquote, h1, h2, h3, h4, h5, h6, hr, li, .md-task-item');
 
             if (formatted && editor.contains(formatted)) {
                 const isBlockRestricted = formatted.tagName === 'LI' || formatted.tagName === 'BLOCKQUOTE';
@@ -22823,13 +22799,10 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                 <button class="md-format-btn md-format-btn-sm" data-action="md-font-increase" title="${sizeIncreaseTitle}"><i class="fas fa-plus"></i></button>
                 <span class="md-format-sep"></span>
                 <button class="md-format-btn md-format-heading-btn" data-action="md-heading-toggle" title="${headingTitle}"><i class="fas fa-heading"></i></button>
-                <button class="md-format-btn md-format-align-btn" data-action="md-align-toggle" title="${alignTitle}"><i class="fas fa-align-left"></i></button>
                 <span class="md-format-sep"></span>
                 <button class="md-format-btn" data-action="md-insert-bold" title="${boldTitle}"><b>B</b></button>
                 <button class="md-format-btn" data-action="md-insert-italic" title="${italicTitle}"><i>I</i></button>
-                <button class="md-format-btn" data-action="md-insert-underline" title="${underlineTitle}"><u>U</u></button>
                 <button class="md-format-btn" data-action="md-insert-highlight" title="${highlightTitle}"><span style="background:#fcd34d;color:#000;padding:0 3px;border-radius:2px;">H</span></button>
-                <button class="md-format-btn md-format-fontcolor-btn" data-action="md-fontcolor-toggle" title="${fontColorTitle}"><span style="border-bottom:2px solid ${currentFontColor};padding:0 2px;">A</span></button>
                 <button class="md-format-btn" data-action="md-insert-strike" title="${strikeTitle}"><s>S</s></button>
                 <button class="md-format-btn" data-action="md-insert-code" title="${codeTitle}"><code>&lt;/&gt;</code></button>
                 <span class="md-format-sep"></span>
@@ -23201,15 +23174,13 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         const insertText = selected || (lang === 'en' ? 'text' : '文本');
         savedSelection = null;
 
-        const wrapper = document.createElement('font');
-        wrapper.setAttribute('color', color);
-        wrapper.textContent = insertText;
-
+        // HTML color tags are disabled; keep plain text insertion.
+        const textNode = document.createTextNode(insertText);
         range.deleteContents();
-        range.insertNode(wrapper);
+        range.insertNode(textNode);
 
         const spacer = document.createTextNode('\u200B');
-        wrapper.parentNode.insertBefore(spacer, wrapper.nextSibling);
+        textNode.parentNode.insertBefore(spacer, textNode.nextSibling);
 
         range.setStart(spacer, 1);
         range.collapse(true);
@@ -23260,21 +23231,13 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         const insertText = selected || (lang === 'en' ? 'text' : '文本');
         savedSelection = null;
 
-        let wrapper;
-        if (alignType === 'center') {
-            wrapper = document.createElement('center');
-            wrapper.textContent = insertText;
-        } else {
-            wrapper = document.createElement('p');
-            wrapper.setAttribute('align', alignType);
-            wrapper.textContent = insertText;
-        }
-
+        // Alignment HTML tags are disabled; keep plain text insertion.
+        const textNode = document.createTextNode(insertText);
         range.deleteContents();
-        range.insertNode(wrapper);
+        range.insertNode(textNode);
 
         const spacer = document.createTextNode('\u200B');
-        wrapper.parentNode.insertBefore(spacer, wrapper.nextSibling);
+        textNode.parentNode.insertBefore(spacer, textNode.nextSibling);
 
         range.setStart(spacer, 1);
         range.collapse(true);
@@ -23463,19 +23426,6 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             return;
         }
 
-        if (action === 'md-fontcolor-toggle') {
-            toggleFontColorPopover(btn);
-            return;
-        }
-        if (action === 'md-fontcolor-apply') {
-            const color = btn.getAttribute('data-color');
-            if (color) {
-                insertFontColor(color);
-                closeFontColorPopover();
-            }
-            return;
-        }
-
         if (action === 'md-heading-toggle') {
             toggleHeadingPopover(btn);
             return;
@@ -23494,19 +23444,6 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             return;
         }
 
-        if (action === 'md-align-toggle') {
-            toggleAlignPopover(btn);
-            return;
-        }
-        if (action === 'md-align-apply') {
-            const alignType = btn.getAttribute('data-align');
-            if (alignType) {
-                insertAlign(alignType);
-                closeAlignPopover();
-            }
-            return;
-        }
-
         if (action === 'md-list-toggle') {
             toggleListPopover(btn);
             return;
@@ -23522,7 +23459,6 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         if (action === 'md-insert-bold') return insertFormat('bold');
         if (action === 'md-insert-italic') return insertFormat('italic');
-        if (action === 'md-insert-underline') return insertFormat('underline');
         if (action === 'md-insert-highlight') return insertFormat('highlight');
         if (action === 'md-insert-strike') return insertFormat('strike');
         if (action === 'md-insert-code') return insertFormat('code');
@@ -30217,7 +30153,7 @@ function __getCurrentFullscreenExportTarget() {
     if (!maximizedNode) return null;
     const descriptor = __serializeMaximizedNode(maximizedNode);
     if (!descriptor || typeof descriptor !== 'object') return null;
-    const supportedTypes = new Set(['permanent', 'permanent-copy', 'temp-node', 'md-node']);
+    const supportedTypes = new Set(['permanent', 'permanent-copy', 'temp-node']);
     if (!supportedTypes.has(descriptor.type)) return null;
     return descriptor;
 }
@@ -30302,8 +30238,6 @@ function showExportModeDialog(options = {}) {
         ? options.fullscreenTarget
         : null;
     const isFullscreenTarget = !!(fullscreenTarget && fullscreenTarget.type);
-    const isBlankFullscreenTarget = isFullscreenTarget && fullscreenTarget.type === 'md-node';
-    const showModeB = !isBlankFullscreenTarget;
 
     const existingDialog = document.getElementById('canvasExportModeDialog');
     if (existingDialog) existingDialog.remove();
@@ -30314,12 +30248,10 @@ function showExportModeDialog(options = {}) {
 
     const dialogTitle = isEn ? 'Export' : '导出';
     const modeATitle = isFullscreenTarget
-        ? (isBlankFullscreenTarget ? (isEn ? 'Markdown (MD)' : 'Markdown（MD）') : (isEn ? 'HTML Bookmarks' : 'HTML 书签'))
+        ? (isEn ? 'HTML Bookmarks' : 'HTML 书签')
         : (isEn ? 'Obsidian Compatible' : 'Obsidian 兼容');
     const modeAHint = isFullscreenTarget
-        ? (isBlankFullscreenTarget
-            ? (isEn ? 'Blank section exports as a single Markdown file' : '空白栏目导出为单个 Markdown 文件')
-            : (isEn ? 'Export as single HTML bookmark file' : '导出为单个 HTML 书签文件'))
+        ? (isEn ? 'Export as single HTML bookmark file' : '导出为单个 HTML 书签文件')
         : (isEn ? 'For viewing in Obsidian' : '用于 Obsidian，但需注意格式（详见说明）');
     const modeAHint2 = isFullscreenTarget
         ? ''
@@ -30342,7 +30274,7 @@ function showExportModeDialog(options = {}) {
                 <div class="import-options" style="gap: 12px;">
                     <button class="import-option-btn canvas-export-primary-option" id="exportModeA" style="padding: 14px 16px; display: flex; align-items: center;">
                         <div style="width: 32px; display: flex; justify-content: center; margin-right: 12px;">
-                            <i class="${(isFullscreenTarget && !isBlankFullscreenTarget) ? 'fas fa-code' : 'fab fa-markdown'}" style="font-size: ${(isFullscreenTarget && !isBlankFullscreenTarget) ? '20px' : '22px'}; color: #7c3aed;"></i>
+                            <i class="${isFullscreenTarget ? 'fas fa-code' : 'fab fa-markdown'}" style="font-size: ${isFullscreenTarget ? '20px' : '22px'}; color: #7c3aed;"></i>
                         </div>
                         <div class="canvas-export-option-text">
                             <div class="canvas-export-option-title">${modeATitle}</div>
@@ -30352,7 +30284,6 @@ function showExportModeDialog(options = {}) {
                         <i class="fas fa-chevron-right" style="color: #ccc;"></i>
                     </button>
 
-                    ${showModeB ? `
                     <button class="import-option-btn" id="exportModeB" style="padding: 14px 16px; display: flex; align-items: center;">
                         <div style="width: 32px; display: flex; justify-content: center; margin-right: 12px;">
                             <i class="fas fa-database" style="font-size: 20px; color: #059669;"></i>
@@ -30362,7 +30293,6 @@ function showExportModeDialog(options = {}) {
                             <div class="canvas-export-option-hint">${modeBHint}</div>
                         </div>
                     </button>
-                    ` : ''}
                 </div>
             </div>
         </div>
@@ -30381,7 +30311,7 @@ function showExportModeDialog(options = {}) {
     document.getElementById('exportModeA').addEventListener('click', () => {
         dialog.remove();
         const mode = isFullscreenTarget
-            ? (isBlankFullscreenTarget ? 'fullscreen-md' : 'fullscreen-html')
+            ? 'fullscreen-html'
             : 'obsidian';
         exportCanvasPackage({
             mode,
@@ -31542,16 +31472,8 @@ function __htmlToMarkdown(html, options = {}) {
                 return hardBreakSeparator;
             case 'p':
             case 'div': {
-                const align = node.getAttribute('align');
-                const style = node.getAttribute('style');
-                const content = (align || style) ? childHtml() : childContent();
+                const content = childContent();
                 const isVisuallyEmpty = !String(content || '').replace(/[\s\u00A0]+/g, '');
-                if (align || style) {
-                    let attrs = '';
-                    if (align) attrs += ` align="${align}"`;
-                    if (style) attrs += ` style="${style}"`;
-                    return `<${tag}${attrs}>${content}</${tag}>${paragraphSeparator}`;
-                }
                 if (isVisuallyEmpty) {
                     return paragraphBreaks ? paragraphSeparator : '\n';
                 }
@@ -31580,7 +31502,7 @@ function __htmlToMarkdown(html, options = {}) {
             case 'i':
                 return `*${childContent()}*`;
             case 'u':
-                return `<u>${childContent()}</u>`;
+                return childContent();
             case 'del':
             case 's':
             case 'strike':
@@ -31592,9 +31514,9 @@ function __htmlToMarkdown(html, options = {}) {
             case 'pre':
                 return '```\n' + childContent() + '\n```\n';
             case 'sup':
-                return `<sup>${childContent()}</sup>`;
+                return childContent();
             case 'sub':
-                return `<sub>${childContent()}</sub>`;
+                return childContent();
             case 'a': {
                 const href = node.getAttribute('href') || '';
                 const text = childContent() || href;
@@ -31634,22 +31556,13 @@ function __htmlToMarkdown(html, options = {}) {
                 return `![${alt}](${src})`;
             }
             case 'font': {
-                const color = node.getAttribute('color');
-                if (color) {
-                    return `<font color="${color}">${childHtml()}</font>`;
-                }
-                return childHtml();
+                return childContent();
             }
             case 'span': {
-                const style = node.getAttribute('style');
-                // Preserve span if it has style (e.g. color, background)
-                if (style) {
-                    return `<span style="${style}">${childHtml()}</span>`;
-                }
                 return childContent();
             }
             case 'center':
-                return `<center>${childHtml()}</center>`;
+                return childContent();
             default:
                 return childContent();
         }
@@ -32734,10 +32647,7 @@ function __buildCanvasImportRulesDocument(options = {}) {
         '- 临时栏目用于草稿、整理、分流和中间态操作，不是永久真相源。',
         '- 特殊临时栏目统一放在 `临时栏目/特殊临时栏目/`。',
         '- 常规链式临时栏目统一放在 `临时栏目/常规链式/`。',
-        '- 空白栏目现在拆成两类：',
-        '  - `空白栏目/插件空白卡片/`：插件自己的 Markdown 空白卡片。',
-        '  - `空白栏目/obsidian原生卡片/`：Obsidian Canvas 原生 text 节点对应的镜像 Markdown。',
-        '- 原生卡片的真实节点仍在 `.canvas` 里是 `type: "text"`；镜像 `.md` 只用于导入、同步和目录结构对齐。',
+        '- 空白栏目统一保存在 `.canvas` 的 `type: "text"` 节点中，不再导出或同步独立 `.md` 文件。',
         '',
         '## 3) 内容格式',
         '',
@@ -32747,8 +32657,7 @@ function __buildCanvasImportRulesDocument(options = {}) {
         '',
         '- 类型识别同时依赖 `.canvas` 文件映射与目录路径命名。',
         '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名槽位 > 文件顺序兜底。',
-        '- 普通空白卡片从 `空白栏目/插件空白卡片/*.md` 或兼容旧路径 `空白栏目/*.md` 恢复。',
-        '- 原生 text 卡片优先使用 `空白栏目/obsidian原生卡片/*.md` 里的镜像正文恢复；若不存在，再回退到 `.canvas` 里的 `text` 字段。',
+        '- 空白栏目以 `.canvas` 中的 `type: "text"` 节点为唯一来源。',
         '',
         '## 5) 编辑时注意',
         '',
@@ -32756,7 +32665,7 @@ function __buildCanvasImportRulesDocument(options = {}) {
         exportFormat === 'json'
             ? '- JSON模式下，永久/临时栏目的树正文应保持为单一 JSON 对象正文（不使用代码围栏）；视觉模式旧结构不要混写进去。'
             : '- 永久/临时栏目的树正文，请保持在栏目头、说明注释块、根元数据块之后。',
-        '- 空白栏目正文可以自由编辑；原生卡片镜像文件请保留其头部注释块，避免丢失节点匹配关系。',
+        '- 空白栏目正文请直接编辑 `.canvas` 节点里的 `text` 内容，不再维护空白栏目镜像 `.md` 文件。',
         '- 若需要避免冲突，应先确定永久主数据源，再处理临时与空白内容。'
     ].join('\n');
 }
@@ -32876,59 +32785,6 @@ function __getStableBuiltinBlankSectionFilename(nodeId) {
     if (id === 'md-node-demo-batch-feature') return 'Open Mode Features';
     return '';
 }
-
-function __getBlankMarkdownFolderRelativePath(isEn) {
-    return isEn ? 'Blank/Plugin blank cards' : '空白栏目/插件空白卡片';
-}
-
-function __getBlankNativeTextFolderRelativePath(isEn) {
-    return isEn ? 'Blank/Obsidian native cards' : '空白栏目/obsidian原生卡片';
-}
-
-function __normalizeCanvasArchivePath(path) {
-    return String(path || '')
-        .trim()
-        .replace(/\\/g, '/')
-        .replace(/^\/+/g, '')
-        .replace(/\/+$/g, '')
-        .replace(/\/+/g, '/');
-}
-
-function __splitCanvasArchivePath(path) {
-    return __normalizeCanvasArchivePath(path).split('/').filter(Boolean);
-}
-
-function __getBlankPathDescriptor(path) {
-    const segments = __splitCanvasArchivePath(path);
-    if (!segments.length) return null;
-
-    const rootIndex = segments.findIndex((segment) => segment === 'Blank' || segment === '空白栏目');
-    if (rootIndex < 0) return null;
-
-    const groupSegment = segments[rootIndex + 1] || '';
-    const normalizedGroup = String(groupSegment || '').trim().toLowerCase();
-    if (!groupSegment) {
-        return { kind: 'plugin', isLegacy: true };
-    }
-    if (normalizedGroup === 'plugin blank cards' || groupSegment === '插件空白卡片' || normalizedGroup === 'markdown') {
-        return { kind: 'plugin', isLegacy: false };
-    }
-    if (normalizedGroup === 'obsidian native cards' || groupSegment === 'obsidian原生卡片' || normalizedGroup === 'native text') {
-        return { kind: 'native', isLegacy: false };
-    }
-    return { kind: 'plugin', isLegacy: false };
-}
-
-function __isBlankMarkdownPath(path) {
-    const descriptor = __getBlankPathDescriptor(path);
-    return !!(descriptor && descriptor.kind === 'plugin');
-}
-
-function __isBlankNativeTextMirrorPath(path) {
-    const descriptor = __getBlankPathDescriptor(path);
-    return !!(descriptor && descriptor.kind === 'native');
-}
-
 
 const __OBSIDIAN_SAFE_FILENAME_MAX_BYTES = 120;
 const __OBSIDIAN_SAFE_FILENAME_MIN_BASE_BYTES = 24;
@@ -33093,44 +32949,12 @@ function __resolveCanvasNativeTextNodeBody(node) {
     }
 }
 
-function __buildCanvasNativeTextMirrorMarkdown(node) {
-    const metaBlock = __buildCanvasNativeTextMetaCommentBlock(node && node.id);
-    const body = __resolveCanvasNativeTextNodeBody(node);
-    const parts = [];
-    if (metaBlock) parts.push(metaBlock);
-    if (body) {
-        if (parts.length) parts.push('');
-        parts.push(body);
-    }
-    return parts.join('\n').trimEnd() + '\n';
-}
-
-function __collectCanvasNativeTextMirrorMap(fileMap) {
-    const files = fileMap instanceof Map ? fileMap : new Map();
-    const mirrorMap = new Map();
-
-    for (const [filePath, bytes] of files.entries()) {
-        if (!__isBlankNativeTextMirrorPath(filePath)) continue;
-        if (!(bytes instanceof Uint8Array) || !bytes.length) continue;
-        try {
-            const fileText = new TextDecoder('utf-8').decode(bytes);
-            const extracted = __extractCanvasNativeTextMetaCommentBlock(fileText);
-            const nodeId = String(extracted && extracted.nodeId || '').trim();
-            if (!nodeId) continue;
-            mirrorMap.set(nodeId, String(extracted && extracted.body != null ? extracted.body : ''));
-        } catch (_) { }
-    }
-
-    return mirrorMap;
-}
-
 function __buildObsidianSyncCanvasData({
     exportRoot,
     permanentMdRel,
     copyFileMap,
     tempSectionMdPaths,
-    mdNodeMdPaths,
-    nativeTextNodes
+    blankTextNodes
 }) {
     const normalizedExportRoot = String(exportRoot || '')
         .replace(/\\/g, '/')
@@ -33275,26 +33099,12 @@ function __buildObsidianSyncCanvasData({
         });
     });
 
-    mdNodeMdPaths.forEach(({ id, rel }) => {
-        const node = (CanvasState.mdNodes || []).find(n => n && n.id === id);
-        if (!node) return;
-        const color = node.colorHex || node.color || null;
-        canvasData.nodes.push({
-            id,
-            type: 'file',
-            x: Math.round(node.x || 0),
-            y: Math.round(node.y || 0),
-            width: Math.round(node.width || exportMdBase.width),
-            height: Math.round(node.height || exportMdBase.height),
-            file: withPrefix(rel),
-            ...(color ? { color } : {})
-        });
-    });
-
-    (Array.isArray(nativeTextNodes) ? nativeTextNodes : []).forEach((node) => {
+    (Array.isArray(blankTextNodes) ? blankTextNodes : []).forEach((node) => {
         if (!node || !node.id) return;
         const color = node.colorHex || node.color || null;
-        const body = __resolveCanvasNativeTextNodeBody(node);
+        const body = __isCanvasNativeTextNode(node)
+            ? __resolveCanvasNativeTextNodeBody(node)
+            : __deriveMdNodeMarkdownSource(node);
         canvasData.nodes.push({
             id: node.id,
             type: 'text',
@@ -33302,7 +33112,7 @@ function __buildObsidianSyncCanvasData({
             y: Math.round(node.y || 0),
             width: Math.round(node.width || exportMdBase.width),
             height: Math.round(node.height || exportMdBase.height),
-            text: body,
+            text: __normalizeCanvasMarkdownSource(body || ''),
             ...(color ? { color } : {})
         });
     });
@@ -33483,59 +33293,12 @@ async function __buildObsidianSyncFiles(options = {}) {
         });
     });
 
-    const mdNodeMdPaths = [];
-    const nativeTextNodes = [];
-    const mdNodeFolder = __getBlankMarkdownFolderRelativePath(isEn);
-    const nativeTextFolder = __getBlankNativeTextFolderRelativePath(isEn);
-    const usedNodePaths = new Set();
-    const usedNativeNodePaths = new Set();
+    const blankTextNodes = [];
 
     (CanvasState.mdNodes || []).forEach((node) => {
         if (!node || !node.id) return;
         if (node.subtype === 'import-container') return;
-        if (__isCanvasNativeTextNode(node)) {
-            nativeTextNodes.push(node);
-            const nativeBody = __resolveCanvasNativeTextNodeBody(node);
-            const fixedBuiltinName = __getStableBuiltinBlankSectionFilename(node.id);
-            const titleCandidate = fixedBuiltinName || __extractMdNodeFilenameTitle(nativeBody, node.id);
-            let safeName = fixedBuiltinName
-                ? fixedBuiltinName
-                : __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
-            if (!safeName || safeName === 'Untitled') safeName = node.id;
-
-            let rel = `${nativeTextFolder}/${safeName}.md`;
-            if (usedNativeNodePaths.has(rel)) {
-                rel = `${nativeTextFolder}/${__appendObsidianFilenameSuffix(safeName, node.id)}.md`;
-            }
-            usedNativeNodePaths.add(rel);
-
-            pushTextFile(rel, __buildCanvasNativeTextMirrorMarkdown(node), {
-                type: 'blank-native-text',
-                nodeId: node.id
-            });
-            return;
-        }
-
-        const mdContent = __buildMdNodeMarkdown(node);
-        const fixedBuiltinName = __getStableBuiltinBlankSectionFilename(node.id);
-        const titleCandidate = fixedBuiltinName || __extractMdNodeFilenameTitle(mdContent, node.id);
-
-        let safeName = fixedBuiltinName
-            ? fixedBuiltinName
-            : __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
-        if (!safeName || safeName === 'Untitled') safeName = node.id;
-
-        let rel = `${mdNodeFolder}/${safeName}.md`;
-        if (usedNodePaths.has(rel)) {
-            rel = `${mdNodeFolder}/${__appendObsidianFilenameSuffix(safeName, node.id)}.md`;
-        }
-        usedNodePaths.add(rel);
-
-        mdNodeMdPaths.push({ id: node.id, rel });
-        pushTextFile(rel, mdContent, {
-            type: 'blank',
-            nodeId: node.id
-        });
+        blankTextNodes.push(node);
     });
 
     const canvasData = __buildObsidianSyncCanvasData({
@@ -33543,8 +33306,7 @@ async function __buildObsidianSyncFiles(options = {}) {
         permanentMdRel,
         copyFileMap,
         tempSectionMdPaths,
-        mdNodeMdPaths,
-        nativeTextNodes
+        blankTextNodes
     });
 
     const defaultCanvasName = isEn ? 'bookmark-canvas' : '书签画布';
@@ -34062,11 +33824,11 @@ async function exportCanvasPackage(options = {}) {
             return html;
         };
         const normalizedMode = (() => {
-            if (exportMode === 'fullscreen-md' || exportMode === 'fullscreen-html' || exportMode === 'fullscreen-json') {
+            if (exportMode === 'fullscreen-html' || exportMode === 'fullscreen-json') {
                 return exportMode;
             }
-            if (exportMode === 'obsidian') return targetType === 'md-node' ? 'fullscreen-md' : 'fullscreen-html';
-            if (exportMode === 'full-backup') return targetType === 'md-node' ? 'fullscreen-md' : 'fullscreen-json';
+            if (exportMode === 'obsidian') return 'fullscreen-html';
+            if (exportMode === 'full-backup') return 'fullscreen-json';
             return '';
         })();
 
@@ -34079,23 +33841,7 @@ async function exportCanvasPackage(options = {}) {
         let exportDescription = '';
         let contentNodes = [];
 
-        if (targetType === 'md-node') {
-            const nodeId = String(descriptor.id || '').trim();
-            const node = (CanvasState.mdNodes || []).find((item) => item && item.id === nodeId);
-            if (!node) {
-                alert(isEn ? 'Export failed: blank section not found.' : '导出失败：未找到当前空白栏目。');
-                return;
-            }
-            if (normalizedMode !== 'fullscreen-md') {
-                alert(isEn ? 'Blank section only supports Markdown export.' : '空白栏目仅支持 Markdown 导出。');
-                return;
-            }
-            exportTypeLabel = isEn ? 'Blank Section' : '空白栏目';
-            exportTitle = resolveMdNodeTitle(node) || exportTypeLabel;
-            contentString = __buildMdNodeMarkdown(node);
-            contentType = 'text/markdown;charset=utf-8';
-            fileName = `${namePrefix}-${getSafeName(exportTitle, node.id || 'blank')}-${ymd}.md`;
-        } else if (targetType === 'permanent' || targetType === 'permanent-copy') {
+        if (targetType === 'permanent' || targetType === 'permanent-copy') {
             const bookmarkTree = __buildPermanentTreeSnapshotForJsonProtocol(await api.getTree());
             const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
             const roots = root && Array.isArray(root.children) ? root.children : [];
@@ -34631,56 +34377,13 @@ async function exportCanvasPackage(options = {}) {
         files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(__buildTempSectionMarkdown(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat })) });
     });
 
-    const mdNodeMdPaths = [];
-    const nativeTextNodes = [];
-    const mdNodeFolder = __getBlankMarkdownFolderRelativePath(isEn);
-    const nativeTextFolder = __getBlankNativeTextFolderRelativePath(isEn);
-    const usedNodePaths = new Set();
-    const usedNativeNodePaths = new Set();
+    const blankTextNodes = [];
 
     (CanvasState.mdNodes || []).forEach((node) => {
         if (!node || !node.id) return;
         // import-container 作为 Obsidian 的 group 节点导出（不生成 .md 文件）
         if (node.subtype === 'import-container') return;
-        if (__isCanvasNativeTextNode(node)) {
-            nativeTextNodes.push(node);
-            const nativeBody = __resolveCanvasNativeTextNodeBody(node);
-            const fixedBuiltinName = __getStableBuiltinBlankSectionFilename(node.id);
-            const titleCandidate = fixedBuiltinName || __extractMdNodeFilenameTitle(nativeBody, node.id);
-
-            let safeName = fixedBuiltinName
-                ? fixedBuiltinName
-                : __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
-            if (!safeName || safeName === 'Untitled') safeName = node.id;
-
-            let rel = `${nativeTextFolder}/${safeName}.md`;
-            if (usedNativeNodePaths.has(rel)) {
-                rel = `${nativeTextFolder}/${__appendObsidianFilenameSuffix(safeName, node.id)}.md`;
-            }
-            usedNativeNodePaths.add(rel);
-
-            files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(__buildCanvasNativeTextMirrorMarkdown(node)) });
-            return;
-        }
-
-        const mdContent = __buildMdNodeMarkdown(node);
-        const fixedBuiltinName = __getStableBuiltinBlankSectionFilename(node.id);
-        const titleCandidate = fixedBuiltinName || __extractMdNodeFilenameTitle(mdContent, node.id);
-
-        let safeName = fixedBuiltinName
-            ? fixedBuiltinName
-            : __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
-        if (!safeName || safeName === 'Untitled') safeName = node.id;
-
-        let rel = `${mdNodeFolder}/${safeName}.md`;
-        // Handle name collision
-        if (usedNodePaths.has(rel)) {
-            rel = `${mdNodeFolder}/${__appendObsidianFilenameSuffix(safeName, node.id)}.md`;
-        }
-        usedNodePaths.add(rel);
-
-        mdNodeMdPaths.push({ id: node.id, rel });
-        files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(mdContent) });
+        blankTextNodes.push(node);
     });
 
     const buildCanvasData = ({ vaultRelativePrefix }) => {
@@ -34826,26 +34529,12 @@ async function exportCanvasPackage(options = {}) {
             });
         });
 
-        mdNodeMdPaths.forEach(({ id, rel }) => {
-            const node = (CanvasState.mdNodes || []).find(n => n && n.id === id);
-            if (!node) return;
-            const color = node.colorHex || node.color || null;
-            canvasData.nodes.push({
-                id,
-                type: 'file',
-                x: Math.round(node.x || 0),
-                y: Math.round(node.y || 0),
-                width: Math.round(node.width || exportMdBase.width),
-                height: Math.round(node.height || exportMdBase.height),
-                file: withPrefix(rel),
-                ...(color ? { color } : {})
-            });
-        });
-
-        nativeTextNodes.forEach((node) => {
+        blankTextNodes.forEach((node) => {
             if (!node || !node.id) return;
             const color = node.colorHex || node.color || null;
-            const body = __resolveCanvasNativeTextNodeBody(node);
+            const body = __isCanvasNativeTextNode(node)
+                ? __resolveCanvasNativeTextNodeBody(node)
+                : __deriveMdNodeMarkdownSource(node);
             canvasData.nodes.push({
                 id: node.id,
                 type: 'text',
@@ -34853,7 +34542,7 @@ async function exportCanvasPackage(options = {}) {
                 y: Math.round(node.y || 0),
                 width: Math.round(node.width || exportMdBase.width),
                 height: Math.round(node.height || exportMdBase.height),
-                text: body,
+                text: __normalizeCanvasMarkdownSource(body || ''),
                 ...(color ? { color } : {})
             });
         });
@@ -35007,8 +34696,8 @@ async function exportCanvasPackage(options = {}) {
             '1. Export using the currently selected content format.',
             '2. Unzip into your Obsidian vault.',
             `3. Open ${exportRoot}/${canvasFileName}.`,
-            '4. Edit files under Permanent/, Temporary/, Blank/.',
-            '5. If any file is renamed or moved, update .canvas file paths in sync.',
+            '4. Edit files under Permanent/ and Temporary/, and edit blank sections directly in `.canvas` text nodes.',
+            '5. If any Permanent/Temporary file is renamed or moved, update .canvas file paths in sync.',
             '6. Re-import via ZIP or folder.',
             '',
             '### A1. Package File Structure',
@@ -35017,8 +34706,7 @@ async function exportCanvasPackage(options = {}) {
             '- Optional copy files: Permanent/#B <Permanent Title>.md/.json / #C <Permanent Title>.md/.json ...',
             '- Temporary/General Chain/*.(md|json): general-chain temporary section files.',
             '- Temporary/Special temporary/*.(md|json): special temporary section files.',
-            '- Blank/Plugin blank cards/*.md: plugin blank markdown cards.',
-            '- Blank/Obsidian native cards/*.md: mirror markdown for native text cards.',
+            '- Blank sections are stored directly in `.canvas` as `type: "text"` nodes.',
             '',
             '### A2. View File Structure (.canvas)',
             '- Root keys must remain nodes[] and edges[].',
@@ -35032,20 +34720,18 @@ async function exportCanvasPackage(options = {}) {
             '- Optional description uses compact hidden comment marker: `<!--bc:1:...-->` (base64 payload).',
             '- Visual-mode permanent main markdown can include compact hidden root metadata marker under the header area for compatibility: `<!--bc:3:...-->`.',
             '- In JSON mode, permanent tree content is stored as raw Chrome Bookmarks API root object (no synthetic root identity fields are injected).',
-            '- Native text mirror markdown contains compact hidden marker `<!--bc:4:...-->` at the top; keep it so importer can match the original text node.',
             '- Fold metadata uses compact hidden marker `<!--bc:2:...-->` when needed.',
             '- Visual modes parse permanent/temporary bookmark tree content from lines below the header/description/meta block; JSON mode parses the plain JSON body directly.',
             '- Permanent slot recognition priority: header `#A/#B` > filename `(#B)` > file order fallback.',
             '- Special temporary files are placed under `Special temporary/`.',
-            '- Plugin blank cards keep free-form markdown body; native text mirrors keep metadata header + body text.',
+            '- Blank sections are now stored directly as `.canvas` text nodes (no standalone blank `.md` files).',
             '',
             '### A4. Mode-specific Content Grammar',
             ...modeTreeRulesEn,
             '',
             '### A5. Import Recognition Priority',
             '- Type recognition uses BOTH .canvas file references and folder paths.',
-            '- Plugin blank cards recognize both new `Blank/Plugin blank cards/` and legacy `Blank/` paths.',
-            '- Native text cards prefer mirror markdown content when `Blank/Obsidian native cards/` exists.',
+            '- Blank sections are recognized only from `.canvas` text nodes.',
             '- In normal import flow, permanent files are restored as snapshot sections (not direct browser-tree overwrite).'
         ].join('\n')
         : [
@@ -35061,8 +34747,8 @@ async function exportCanvasPackage(options = {}) {
             '1. 在书签画布执行导出，并使用当前选择的内容格式。',
             '2. 将 ZIP 解压到 Obsidian 仓库。',
             `3. 打开 ${exportRoot}/${canvasFileName}。`,
-            '4. 按需编辑 永久栏目/、临时栏目/、空白栏目/ 下的 .md 文件。',
-            '5. 若重命名或移动文件，必须同步修改 .canvas 的 file 路径。',
+            '4. 按需编辑 永久栏目/、临时栏目/ 下的 .md 文件；空白栏目请直接编辑 `.canvas` 的 text 节点。',
+            '5. 若重命名或移动 永久/临时 栏目文件，必须同步修改 .canvas 的 file 路径。',
             '6. 回到扩展中，以 ZIP 或文件夹方式导入。',
             '',
             '### A1. 文件基本结构（目录层）',
@@ -35071,35 +34757,32 @@ async function exportCanvasPackage(options = {}) {
             '- 可能存在永久副本文件：永久栏目/#B <永久栏目标题>.md / #C <永久栏目标题>.md ...',
             '- 临时栏目/常规链式/*.md：常规链式临时栏目文件。',
             '- 临时栏目/特殊临时栏目/*.md：特殊临时栏目文件。',
-            '- 空白栏目/插件空白卡片/*.md：插件空白 Markdown 卡片。',
-            '- 空白栏目/obsidian原生卡片/*.md：原生 text 卡片的镜像 Markdown。',
+            '- 空白栏目统一存放在 `.canvas` 的 `type: "text"` 节点中（不再导出空白栏目 `.md` 镜像）。',
             '',
             '### A2. 视图文件结构（.canvas）',
             '- 顶层结构必须保持 nodes[] 与 edges[]。',
             '- file 节点通过 file 字段指向 markdown 文件（vault 相对路径）。',
             '- group 节点作为导入分组容器，导入时按几何包含关系识别归属。',
             '- 边的 fromNode/toNode 必须引用存在的节点 ID。',
-            '- 原生空白卡片在 `.canvas` 中仍然是 `type: "text"` 节点。',
+            '- 空白栏目以 `.canvas` 中的 `type: "text"` 节点为唯一真相源。',
             '',
             '### A3. Markdown 文件结构（所有栏目）',
             '- 视觉模式下，首个非空行作为栏目头文本（建议“序号 + 标题”）；JSON模式正文直接是单一 JSON 对象。',
             '- 说明区可选，采用紧凑隐藏注释：`<!--bc:1:...-->`（base64 载荷）。',
             '- 视觉模式下，永久主 Markdown 可能在标题区下方写入兼容用途的根目录元数据隐藏注释：`<!--bc:3:...-->`。',
             '- JSON模式下，永久树正文直接保存为 Chrome Bookmarks API 的根节点对象，不注入额外的根身份字段。',
-            '- 原生 text 镜像 Markdown 顶部会写入隐藏注释 `<!--bc:4:...-->`，请保留它以便导入时匹配回原节点。',
             '- 折叠元数据如需写出，使用紧凑隐藏注释 `<!--bc:2:...-->`。',
             '- 视觉模式下，永久/临时栏目的书签树内容从栏目头/说明区/根元数据块之外的正文开始解析；JSON模式直接解析 JSON 正文。',
             '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名 `(#B)` > 文件顺序兜底。',
             '- 特殊临时栏目文件统一放在 `临时栏目/特殊临时栏目/`。',
-            '- 插件空白卡片保持自由 Markdown 正文；原生 text 镜像文件则为“元数据头 + 正文”。',
+            '- 空白栏目正文直接存放在 `.canvas` 的 text 节点中，不再依赖空白栏目镜像文件。',
             '',
             '### A4. 模式内容语法（视觉 / 视觉无图标）',
             ...modeTreeRulesZh,
             '',
             '### A5. 导入识别优先级',
             '- 类型识别同时依赖 .canvas 文件引用 与 目录路径命名。',
-            '- 插件空白卡片兼容新路径 `空白栏目/插件空白卡片/` 与旧路径 `空白栏目/`。',
-            '- 原生 text 卡片若存在 `空白栏目/obsidian原生卡片/` 镜像文件，则优先读取镜像正文。',
+            '- 空白栏目仅从 `.canvas` 的 text 节点恢复。',
             '- 常规导入流下，永久栏目按“快照栏目”恢复，不直接覆盖浏览器真实书签树。'
         ].join('\n');
 
@@ -35112,8 +34795,7 @@ async function exportCanvasPackage(options = {}) {
             '### S1. File Routing (what to touch)',
             '- Permanent content: `Permanent/#A <Permanent Title>.md/.json` and optional copy files `Permanent/#B <Permanent Title>.md/.json` ...',
             '- Temporary content: `Temporary/General Chain/*.(md|json)` and `Temporary/Special temporary/*.(md|json)` + matching file nodes in `.canvas`.',
-            '- Blank content: `Blank/Plugin blank cards/*.md` + matching file nodes in `.canvas`.',
-            '- Native text content: edit `Blank/Obsidian native cards/*.md`; the actual canvas node still lives in `.canvas` as `type: "text"`.',
+            '- Blank content: edit `.canvas` `type: "text"` nodes directly (blank `.md` mirrors are removed).',
             '- Layout/links only: edit `.canvas` node geometry and edge fields.',
             '',
             '### S2. Header Line Contract (no required front matter)',
@@ -35126,7 +34808,6 @@ async function exportCanvasPackage(options = {}) {
             '- Special temporary sections are recognized by folder + JSON/header/label semantics.',
             '- Visual modes parse bookmark tree from lines below the header/description block; JSON mode parses the plain JSON body directly.',
             '- JSON-mode permanent files keep raw Chrome Bookmarks API tree shape in body (no synthetic root identity fields).',
-            '- Native text cards are matched by compact marker `<!--bc:4:...-->` payload (`nodeId`); keep that marker intact.',
             '- In normal import flow, permanent files are restored as snapshot sections, not direct browser tree overwrite.',
             '',
             '### S4. Number / Title / Bookmark-count Priority',
@@ -35150,7 +34831,7 @@ async function exportCanvasPackage(options = {}) {
             '- Node order controls z-order (earlier lower, later higher).',
             '',
             '### S7. Minimal Pre-import Checklist',
-            '- Every renamed/moved `.md` path is synchronized into `.canvas`.',
+            '- Every renamed/moved Permanent/Temporary `.md` path is synchronized into `.canvas`.',
             '- Header line and optional description comment block are not corrupted.',
             '- Links and node IDs remain referentially valid.',
             '',
@@ -35164,8 +34845,7 @@ async function exportCanvasPackage(options = {}) {
             '### S1. 文件路由（按需求定位）',
             '- 永久栏目内容：修改 `永久栏目/#A <永久栏目标题>.md/.json` 与可选副本 `永久栏目/#B <永久栏目标题>.md/.json` ...。',
             '- 临时栏目内容：修改 `临时栏目/常规链式/*.(md|json)` 与 `临时栏目/特殊临时栏目/*.(md|json)`，并同步 `.canvas` 对应 file 节点。',
-            '- 插件空白卡片：修改 `空白栏目/插件空白卡片/*.md`，并同步 `.canvas` 对应 file 节点。',
-            '- 原生 text 卡片：修改 `空白栏目/obsidian原生卡片/*.md`；真实节点仍在 `.canvas` 的 `type: "text"` 中。',
+            '- 空白栏目：直接修改 `.canvas` 的 `type: "text"` 节点（不再维护空白栏目独立 `.md` 文件）。',
             '- 仅布局/连线：只改 `.canvas` 的节点几何与边字段。',
             '',
             '### S2. 栏目头文本合同（不要求 Front Matter）',
@@ -35178,7 +34858,6 @@ async function exportCanvasPackage(options = {}) {
             '- 特殊临时栏目按目录 + JSON/栏目头/标签语义识别。',
             '- 视觉模式按“栏目头 +（可选说明注释块）+ 树内容”解析；JSON模式直接解析 JSON 正文。',
             '- JSON 模式下的永久文件正文保持 Chrome Bookmarks API 原始树结构，不注入额外根身份字段。',
-            '- 原生 text 卡片按 `<!--bc:4:...-->` 中的 `nodeId` 匹配；请保留这个隐藏注释。',
             '- 常规导入流下，永久栏目按快照栏目恢复，不直接覆盖浏览器真实书签树。',
             '',
             '### S4. 编号 / 标题 / 书签数优先级',
@@ -35202,7 +34881,7 @@ async function exportCanvasPackage(options = {}) {
             '- 节点数组顺序决定叠层顺序（前下后上）。',
             '',
             '### S7. 导入前最小自检清单',
-            '- 所有重命名/移动过的 `.md` 已同步到 `.canvas` 的 file 路径。',
+            '- 所有重命名/移动过的 永久/临时 `.md` 已同步到 `.canvas` 的 file 路径。',
             '- 栏目头与说明注释块结构未损坏。',
             '- 链接、节点 ID、连线引用关系全部有效。',
             '',
@@ -35927,7 +35606,6 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
     const { findFileBytes, readFileTextByPath } = __buildCanvasPackageFileLookupHelpers(sourceFiles);
     const nodes = Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [];
     const edges = Array.isArray(canvasData && canvasData.edges) ? canvasData.edges : [];
-    const nativeTextMirrorMap = __collectCanvasNativeTextMirrorMap(sourceFiles instanceof Map ? sourceFiles : new Map());
     let importedPermanentCount = 0;
 
     nodes.forEach((node) => {
@@ -35971,7 +35649,6 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
             const contentToParse = parsedMarkdown.contentToParse || '';
             const isPermanent = __isPermanentMarkdownPath(node.file);
             const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
-            const isMdNode = __isBlankMarkdownPath(node.file);
             const isLivePermanentNode = isPermanent && __isExportedPermanentCanvasNode(node);
             const resolvedContentToParse = isPermanent
                 ? __resolveCanvasMarkdownEmbeddedContent(contentToParse, node.file, readFileTextByPath)
@@ -36042,31 +35719,10 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                 return;
             }
 
-            if (isMdNode) {
-                const convertedColor = convertObsidianColor(node.color);
-                const isHex = convertedColor && convertedColor.startsWith('#');
-                const restoredBlankNode = __ensureMdNodeMarkdownProtocol({
-                    id: node.id,
-                    x: node.x,
-                    y: node.y,
-                    width: node.width,
-                    height: node.height,
-                    color: isHex ? null : node.color,
-                    colorHex: isHex ? convertedColor : null,
-                    source: 'obsidian-canvas-file',
-                    markdownSource: parsedMarkdown.rawBody,
-                    text: parsedMarkdown.rawBody
-                }, { refreshCachesFromMarkdown: true });
-                tempState.mdNodes.push(restoredBlankNode);
-            }
             return;
         }
 
         if (node.type === 'text') {
-            const normalizedNodeId = String(node.id || '').trim();
-            const mirroredText = normalizedNodeId && nativeTextMirrorMap.has(normalizedNodeId)
-                ? nativeTextMirrorMap.get(normalizedNodeId)
-                : null;
             const convertedColor = convertObsidianColor(node.color);
             const isHex = convertedColor && convertedColor.startsWith('#');
             tempState.mdNodes.push({
@@ -36077,7 +35733,7 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                 height: node.height,
                 color: isHex ? null : node.color,
                 colorHex: isHex ? convertedColor : null,
-                text: mirroredText != null ? String(mirroredText) : String(node.text || ''),
+                text: String(node.text || ''),
                 subtype: 'canvas-native-text',
                 source: 'obsidian-canvas-text'
             });
@@ -37608,7 +37264,6 @@ function __collectBcsFileRefsFromState(stateInput, options = {}) {
 
     const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
     const sections = Array.isArray(state.sections) ? state.sections : [];
-    const mdNodes = Array.isArray(state.mdNodes) ? state.mdNodes : [];
 
     const tempSectionPaths = [];
     const tempSectionPathById = {};
@@ -37641,56 +37296,6 @@ function __collectBcsFileRefsFromState(stateInput, options = {}) {
         tempSectionPathById[section.id] = path;
     });
 
-    const mdNodePaths = [];
-    const mdNodePathById = {};
-    const nativeTextNodes = [];
-    const nativeTextPaths = [];
-    const nativeTextPathById = {};
-    const mdNodeFolder = __getBlankMarkdownFolderRelativePath(isEn);
-    const nativeTextFolder = __getBlankNativeTextFolderRelativePath(isEn);
-    const usedNodePaths = new Set();
-    const usedNativeNodePaths = new Set();
-
-    mdNodes.forEach((node) => {
-        if (!node || !node.id) return;
-        if (node.subtype === 'import-container') return;
-        if (__isCanvasNativeTextNode(node)) {
-            nativeTextNodes.push(node);
-            const nativeBody = __resolveCanvasNativeTextNodeBody(node);
-            const fixedBuiltinName = __getStableBuiltinBlankSectionFilename(node.id);
-            const titleCandidate = fixedBuiltinName || __extractMdNodeFilenameTitle(nativeBody, node.id);
-            let safeName = fixedBuiltinName
-                ? fixedBuiltinName
-                : __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
-            if (!safeName || safeName === 'Untitled') safeName = node.id;
-            let rel = `${nativeTextFolder}/${safeName}.md`;
-            if (usedNativeNodePaths.has(rel)) {
-                rel = `${nativeTextFolder}/${__appendObsidianFilenameSuffix(safeName, node.id)}.md`;
-            }
-            usedNativeNodePaths.add(rel);
-            const path = __joinSyncExportPath(exportRoot, rel);
-            nativeTextPaths.push({ id: node.id, rel, path });
-            nativeTextPathById[node.id] = path;
-            return;
-        }
-
-        const mdContent = __deriveMdNodeMarkdownSource(node);
-        const fixedBuiltinName = __getStableBuiltinBlankSectionFilename(node.id);
-        const titleCandidate = fixedBuiltinName || __extractMdNodeFilenameTitle(mdContent, node.id);
-        let safeName = fixedBuiltinName
-            ? fixedBuiltinName
-            : __buildObsidianSafeFilenameStem(titleCandidate, node.id, node.id);
-        if (!safeName || safeName === 'Untitled') safeName = node.id;
-        let rel = `${mdNodeFolder}/${safeName}.md`;
-        if (usedNodePaths.has(rel)) {
-            rel = `${mdNodeFolder}/${__appendObsidianFilenameSuffix(safeName, node.id)}.md`;
-        }
-        usedNodePaths.add(rel);
-        const path = __joinSyncExportPath(exportRoot, rel);
-        mdNodePaths.push({ id: node.id, rel, path });
-        mdNodePathById[node.id] = path;
-    });
-
     const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat);
     const permanentPath = __joinSyncExportPath(exportRoot, permanentMdRel);
     const copyFileMap = {};
@@ -37720,12 +37325,7 @@ function __collectBcsFileRefsFromState(stateInput, options = {}) {
         copyFileMap,
         copyPathById,
         tempSectionPaths,
-        tempSectionPathById,
-        mdNodePaths,
-        mdNodePathById,
-        nativeTextPaths,
-        nativeTextPathById,
-        nativeTextNodes
+        tempSectionPathById
     };
 }
 
@@ -37922,27 +37522,10 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
     mdNodes.forEach((node) => {
         if (!node || !node.id) return;
         if (node.subtype === 'import-container') return;
-        if (__isCanvasNativeTextNode(node)) return;
-        const filePath = normalizedRefs.mdNodePathById && normalizedRefs.mdNodePathById[node.id];
-        if (!filePath) return;
         const color = node.colorHex || node.color || null;
-        canvasData.nodes.push({
-            id: node.id,
-            type: 'file',
-            x: Math.round(node.x || 0),
-            y: Math.round(node.y || 0),
-            width: Math.round(node.width || exportMdBase.width),
-            height: Math.round(node.height || exportMdBase.height),
-            file: String(filePath),
-            ...(color ? { color } : {})
-        });
-    });
-
-    mdNodes.forEach((node) => {
-        if (!node || !node.id) return;
-        if (!__isCanvasNativeTextNode(node)) return;
-        const color = node.colorHex || node.color || null;
-        const body = __resolveCanvasNativeTextNodeBody(node);
+        const body = __isCanvasNativeTextNode(node)
+            ? __resolveCanvasNativeTextNodeBody(node)
+            : __deriveMdNodeMarkdownSource(node);
         canvasData.nodes.push({
             id: node.id,
             type: 'text',
@@ -37950,7 +37533,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
             y: Math.round(node.y || 0),
             width: Math.round(node.width || exportMdBase.width),
             height: Math.round(node.height || exportMdBase.height),
-            text: body,
+            text: __normalizeCanvasMarkdownSource(body || ''),
             ...(color ? { color } : {})
         });
     });
@@ -38035,20 +37618,6 @@ function __buildTempSectionDirtyLayoutKey(section) {
     });
 }
 
-function __buildBlankNodeDirtyFileStem(node) {
-    if (!node || typeof node !== 'object') return '';
-    const fixedBuiltinName = __getStableBuiltinBlankSectionFilename(node.id);
-    if (fixedBuiltinName) return fixedBuiltinName;
-
-    const markdownText = __isCanvasNativeTextNode(node)
-        ? String(__resolveCanvasNativeTextNodeBody(node) || '')
-        : __buildMdNodeMarkdown(node);
-    const titleCandidate = __extractMdNodeFilenameTitle(markdownText, node.id || 'Untitled');
-    let safeName = __buildObsidianSafeFilenameStem(titleCandidate, node.id || titleCandidate || 'node', node.id || titleCandidate || 'node');
-    if (!safeName || safeName === 'Untitled') safeName = String(node.id || 'node');
-    return safeName;
-}
-
 function __buildBlankNodeDirtyPayloadKey(node) {
     if (!node || typeof node !== 'object') return '';
     if (node.subtype === 'import-container') return '';
@@ -38061,16 +37630,6 @@ function __buildBlankNodeDirtyPayloadKey(node) {
     return __toStableCanvasJson({
         type: 'blank',
         markdown: __buildMdNodeMarkdown(node)
-    });
-}
-
-function __buildBlankNodeDirtyRefKey(node) {
-    if (!node || typeof node !== 'object') return '';
-    if (node.subtype === 'import-container') return '';
-    if (__isCanvasNativeTextNode(node)) return '';
-    return __toStableCanvasJson({
-        id: String(node.id || ''),
-        fileStem: __buildBlankNodeDirtyFileStem(node)
     });
 }
 
@@ -38114,7 +37673,6 @@ function __buildCanvasTempStateDirtySnapshot(state) {
         blankOrder.push(id);
         blankById[id] = {
             payloadKey: __buildBlankNodeDirtyPayloadKey(node),
-            refKey: __buildBlankNodeDirtyRefKey(node),
             layoutKey: __buildBlankNodeDirtyLayoutKey(node)
         };
     });
@@ -38156,7 +37714,7 @@ function __deriveSyncDirtyFromTempSnapshotDiff(prevSnapshot, nextSnapshot) {
         });
         return {
             canvasLayout: allTempIds.length > 0 || allBlankIds.length > 0 || !!String(next.edgesKey || ''),
-            canvasFileRef: allTempIds.length > 0 || allBlankIds.length > 0,
+            canvasFileRef: allTempIds.length > 0,
             temporaryIds: allTempIds,
             blankIds: allBlankIds
         };
@@ -38180,10 +37738,9 @@ function __deriveSyncDirtyFromTempSnapshotDiff(prevSnapshot, nextSnapshot) {
     const edgesChanged = String(prev.edgesKey || '') !== String(next.edgesKey || '');
 
     const tempRefChanged = __collectDirtyIdsBySnapshotDiff(prev.tempById, next.tempById, 'refKey').length > 0;
-    const blankRefChanged = __collectDirtyIdsBySnapshotDiff(prev.blankById, next.blankById, 'refKey').length > 0;
 
-    const canvasLayout = tempLayoutChanged || blankLayoutChanged || edgesChanged;
-    const canvasFileRef = tempRefChanged || blankRefChanged;
+    const canvasLayout = tempLayoutChanged || blankLayoutChanged || edgesChanged || changedBlankIds.length > 0;
+    const canvasFileRef = tempRefChanged;
 
     const hasAnyDirty = canvasLayout || canvasFileRef || changedTemporaryIds.length > 0 || changedBlankIds.length > 0;
     if (!hasAnyDirty) {
@@ -38654,11 +38211,6 @@ function __buildBcsSectionKey(sectionId) {
     return id ? `${BCS_SECTION_PREFIX}${id}` : '';
 }
 
-function __buildBcsMdKey(nodeId) {
-    const id = String(nodeId || '').trim();
-    return id ? `${BCS_MD_PREFIX}${id}` : '';
-}
-
 function __buildBcsPermCopyKey(copyId) {
     const id = String(copyId || '').trim();
     return id ? `${BCS_PERM_COPY_PREFIX}${id}` : '';
@@ -39123,37 +38675,6 @@ function __buildBcsSectionPayloadFromSection(section) {
     return protocol;
 }
 
-function __buildBcsMdPayloadFromNode(node) {
-    if (!node || typeof node !== 'object') return null;
-    if (node.subtype === 'import-container') return null;
-    const id = String(node.id || '').trim();
-    if (!id) return null;
-    const isNativeText = __isCanvasNativeTextNode(node);
-
-    const payload = {
-        id,
-        markdownSource: isNativeText
-            ? __buildCanvasNativeTextMirrorMarkdown(node)
-            : __deriveMdNodeMarkdownSource(node)
-    };
-    if (!isNativeText && typeof node.fontSize === 'number' && Number.isFinite(node.fontSize)) {
-        payload.fontSize = node.fontSize;
-    }
-    if (node.source) {
-        payload.source = node.source;
-    } else if (isNativeText) {
-        payload.source = 'obsidian-canvas-text';
-    }
-    if (node.subtype) {
-        payload.subtype = node.subtype;
-    } else if (isNativeText) {
-        payload.subtype = 'canvas-native-text';
-    }
-    if (node.createdAt) payload.createdAt = node.createdAt;
-    if (node.updatedAt) payload.updatedAt = node.updatedAt;
-    return payload;
-}
-
 function __buildBcsPermanentPayload(copyId = null) {
     const payload = {
         descriptionMd: __resolvePermanentSectionDescriptionMarkdown(copyId)
@@ -39207,7 +38728,6 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
         const removals = [];
 
         const sections = Array.isArray(state.sections) ? state.sections : [];
-        const mdNodes = Array.isArray(state.mdNodes) ? state.mdNodes : [];
 
         const sectionById = new Map();
         const sectionIdSet = new Set();
@@ -39218,26 +38738,15 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
             sectionIdSet.add(id);
         });
 
-        const mdById = new Map();
-        const mdIdSet = new Set();
-        mdNodes.forEach((node) => {
-            if (!node || node.subtype === 'import-container') return;
-            const id = String(node.id || '').trim();
-            if (!id) return;
-            mdById.set(id, node);
-            mdIdSet.add(id);
-        });
-
         const updateAllSections = forceAll || !dirtyPatch || dirtyPatch.temporaryAll === true;
-        const updateAllMd = forceAll || !dirtyPatch || dirtyPatch.blankAll === true;
         const dirtySectionIds = updateAllSections
             ? Array.from(sectionIdSet.values())
             : (Array.isArray(dirtyPatch && dirtyPatch.temporaryIds) ? dirtyPatch.temporaryIds : []);
-        const dirtyMdIds = updateAllMd
-            ? Array.from(mdIdSet.values())
-            : (Array.isArray(dirtyPatch && dirtyPatch.blankIds) ? dirtyPatch.blankIds : []);
 
-        const canvasDirty = forceAll || !dirtyPatch || dirtyPatch.canvasLayout === true || dirtyPatch.canvasFileRef === true;
+        const canvasDirty = forceAll
+            || !dirtyPatch
+            || dirtyPatch.canvasLayout === true
+            || dirtyPatch.canvasFileRef === true;
 
         updates[BCS_META_KEY] = __buildBcsMetaPayloadFromState(state);
 
@@ -39269,23 +38778,6 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
             });
         });
 
-        dirtyMdIds.forEach((idInput) => {
-            const id = String(idInput || '').trim();
-            if (!id) return;
-            const node = mdById.get(id);
-            if (!node) return;
-            const payload = __buildBcsMdPayloadFromNode(node);
-            if (!payload) return;
-            const key = __buildBcsMdKey(id);
-            const prevPayload = storage ? storage[key] : null;
-            updates[key] = __buildBcsGuardedPayload(payload, prevPayload, {
-                filePath: (fileRefs && fileRefs.mdNodePathById && fileRefs.mdNodePathById[id])
-                    || (fileRefs && fileRefs.nativeTextPathById && fileRefs.nativeTextPathById[id])
-                    || '',
-                assumeClean
-            });
-        });
-
         const permPayload = __buildBcsPermanentPayload(null);
         const prevPerm = storage ? storage[BCS_PERM_MAIN_KEY] : null;
         updates[BCS_PERM_MAIN_KEY] = __buildBcsGuardedPayload(permPayload, prevPerm, {
@@ -39313,9 +38805,6 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
                 if (key.startsWith(BCS_SECTION_PREFIX)) {
                     const id = key.slice(BCS_SECTION_PREFIX.length);
                     if (!sectionIdSet.has(id)) removals.push(key);
-                } else if (key.startsWith(BCS_MD_PREFIX)) {
-                    const id = key.slice(BCS_MD_PREFIX.length);
-                    if (!mdIdSet.has(id)) removals.push(key);
                 } else if (key.startsWith(BCS_PERM_COPY_PREFIX)) {
                     const id = key.slice(BCS_PERM_COPY_PREFIX.length);
                     if (!copyIdSet.has(id)) removals.push(key);
@@ -39388,7 +38877,6 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
         }
     } catch (_) { }
 
-    const mdNodeIds = new Set();
     const sectionPayloadById = new Map();
     Object.keys(storage).forEach((key) => {
         if (!key || !key.startsWith(BCS_SECTION_PREFIX)) return;
@@ -39433,95 +38921,9 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
         if (section) tempState.sections.push(section);
     });
 
-    const mdBase = getBlankNodeDefaultSize();
-    const mdPayloadById = new Map();
-    Object.keys(storage).forEach((key) => {
-        if (!key || !key.startsWith(BCS_MD_PREFIX)) return;
-        const id = key.slice(BCS_MD_PREFIX.length);
-        if (!id) return;
-        const payload = __stripBcsGuardFields(storage[key]);
-        if (!payload || typeof payload !== 'object') return;
-        mdPayloadById.set(String(id), payload);
-    });
-
-    const orderedMdIds = [];
-    const seenMdIds = new Set();
-    nodes.forEach((node) => {
-        const id = String(node && node.id || '').trim();
-        if (!id || !mdPayloadById.has(id) || seenMdIds.has(id)) return;
-        seenMdIds.add(id);
-        orderedMdIds.push(id);
-    });
-    Array.from(mdPayloadById.keys())
-        .sort((a, b) => String(a).localeCompare(String(b)))
-        .forEach((id) => {
-            if (seenMdIds.has(id)) return;
-            seenMdIds.add(id);
-            orderedMdIds.push(id);
-        });
-
-    orderedMdIds.forEach((id) => {
-        const payload = mdPayloadById.get(id);
-        if (!payload) return;
-
-        const layout = nodeById.get(id) || null;
-        const convertedColor = layout && layout.color ? convertObsidianColor(layout.color) : null;
-        const isHex = convertedColor && convertedColor.startsWith('#');
-        const markdownSource = typeof payload.markdownSource === 'string' ? payload.markdownSource : '';
-        const isNativePayload = __isCanvasNativeTextNode(payload);
-
-        if (isNativePayload) {
-            const extractedNative = __extractCanvasNativeTextMetaCommentBlock(markdownSource);
-            const nativeNode = {
-                id,
-                x: layout ? layout.x : 0,
-                y: layout ? layout.y : 0,
-                width: layout ? layout.width : mdBase.width,
-                height: layout ? layout.height : mdBase.height,
-                color: isHex ? null : (layout ? layout.color : null),
-                colorHex: isHex ? convertedColor : null,
-                text: (extractedNative && typeof extractedNative.body === 'string')
-                    ? extractedNative.body
-                    : String(payload.text || ''),
-                subtype: 'canvas-native-text',
-                source: 'obsidian-canvas-text'
-            };
-            if (payload.createdAt) nativeNode.createdAt = payload.createdAt;
-            if (payload.updatedAt) nativeNode.updatedAt = payload.updatedAt;
-
-            tempState.mdNodes.push(nativeNode);
-            mdNodeIds.add(id);
-            return;
-        }
-
-        const node = {
-            id,
-            x: layout ? layout.x : 0,
-            y: layout ? layout.y : 0,
-            width: layout ? layout.width : mdBase.width,
-            height: layout ? layout.height : mdBase.height,
-            color: isHex ? null : (layout ? layout.color : null),
-            colorHex: isHex ? convertedColor : null,
-            markdownSource,
-            source: payload.source || 'obsidian-canvas-file'
-        };
-        if (typeof payload.fontSize === 'number' && Number.isFinite(payload.fontSize)) {
-            node.fontSize = payload.fontSize;
-        }
-        if (payload.subtype) node.subtype = payload.subtype;
-        if (payload.createdAt) node.createdAt = payload.createdAt;
-        if (payload.updatedAt) node.updatedAt = payload.updatedAt;
-
-        __ensureMdNodeMarkdownProtocol(node, { refreshCachesFromMarkdown: true });
-        tempState.mdNodes.push(node);
-        mdNodeIds.add(id);
-    });
-
     const { isEn } = __getLang();
     nodes.forEach((node) => {
         if (!node || !node.id) return;
-        const id = String(node.id);
-        if (mdNodeIds.has(id)) return;
 
         if (node.type === 'group') {
             const labelRaw = (typeof node.label === 'string') ? node.label : '';
@@ -39711,13 +39113,6 @@ function __collectBcsDirtyEntitiesFromStorage(storageMap) {
             return;
         }
 
-        if (key.startsWith(BCS_MD_PREFIX)) {
-            entry.type = 'md';
-            entry.id = key.slice(BCS_MD_PREFIX.length);
-            dirtyPatch.blankIds.push(entry.id);
-            dirtyPatch.canvasFileRef = true;
-            entities.push(entry);
-        }
     });
 
     return { dirtyPatch, entities };
@@ -39760,7 +39155,6 @@ async function __clearBcsDirtyByFileMeta(fileMetaList) {
             const type = String(meta.type);
             const id = String(meta.id);
             if (type === 'section') return __buildBcsSectionKey(id);
-            if (type === 'md') return __buildBcsMdKey(id);
             if (type === 'canvas') return resolveCanvasMetaKey() || BCS_CANVAS_META_KEY;
             if (type === 'permanent') return BCS_PERM_MAIN_KEY;
             if (type === 'permanent-copy') return __buildBcsPermCopyKey(id);

@@ -58,60 +58,10 @@
     return baseImage(safeHref, title, text);
   };
 
-  // 允许安全的HTML标签（Obsidian风格）
-  // 注：这里的白名单用于“Markdown 源码中的原生 HTML 片段”。
-  // Canvas 空白栏目（md-node）的格式工具会生成/提示一些 HTML 语法（如 <center>、<p align="">），
-  // 其它区域（如永久栏目/书签型临时栏目说明）也需要复用同一套语法与渲染规则。
-  const allowedTags = new Set([
-    'font',
-    'span',
-    'u',
-    'mark',
-    'strong',
-    'em',
-    'b',
-    'i',
-    'del',
-    's',
-    'sub',
-    'sup',
-    'br',
-    'center',
-    'p'
-  ]);
-  const allowedAttrs = new Set(['color', 'style', 'class', 'align']);
-  
+  // Disable raw HTML rendering in markdown body.
+  // HTML snippets are displayed as plain text so sync/output stays markdown-only.
   renderer.html = function safeHtml(html) {
-    // 简单的标签白名单过滤
-    const tagPattern = /<(\/?)([\w]+)([^>]*)>/g;
-    return html.replace(tagPattern, (match, slash, tag, attrs) => {
-      const tagLower = tag.toLowerCase();
-      if (!allowedTags.has(tagLower)) {
-        return escapeHtml(match);
-      }
-      
-      // 过滤属性，只保留安全的属性
-      if (attrs && !slash) {
-        const safeAttrs = attrs.replace(/(\w+)\s*=\s*["']([^"']*)["']/g, (attrMatch, name, value) => {
-          if (allowedAttrs.has(name.toLowerCase())) {
-            // 对于style和color属性，进行额外的安全检查
-            if (name.toLowerCase() === 'style' || name.toLowerCase() === 'color') {
-              // 移除可能的危险内容（如javascript:）
-              if (value.toLowerCase().includes('javascript:') || value.toLowerCase().includes('expression(')) {
-                return '';
-              }
-            }
-            // 不要双重转义，直接使用原始值
-            const safeValue = String(value).replace(/"/g, '&quot;');
-            return ` ${name}="${safeValue}"`;
-          }
-          return '';
-        });
-        return `<${slash}${tagLower}${safeAttrs}>`;
-      }
-      
-      return `<${slash}${tagLower}>`;
-    });
+    return escapeHtml(String(html || ''));
   };
 
   const CALL_OUT_ICONS = {

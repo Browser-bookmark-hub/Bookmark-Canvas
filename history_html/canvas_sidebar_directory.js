@@ -128,6 +128,42 @@
     return squeezeSpaces(line);
   }
 
+  function isCanvasNativeTextNode(node) {
+    if (!node || typeof node !== 'object') return false;
+    const subtype = normalizeText(node.subtype).toLowerCase();
+    const source = normalizeText(node.source).toLowerCase();
+    return subtype === 'canvas-native-text' || source === 'obsidian-canvas-text';
+  }
+
+  function stripInlineMarkdown(raw) {
+    let line = String(raw || '');
+    if (!line) return '';
+    line = line
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/__([^_]+)__/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/_([^_]+)_/g, '$1')
+      .replace(/~~([^~]+)~~/g, '$1')
+      .replace(/==([^=]+)==/g, '$1');
+    return line;
+  }
+
+  function getMdNodeTitleLineFromSource(node) {
+    const raw = isCanvasNativeTextNode(node)
+      ? normalizeText(node && node.text)
+      : normalizeText(node && node.markdownSource);
+    if (!raw) return '';
+    const lines = raw
+      .split(/\n+/)
+      .map((line) => squeezeSpaces(stripInlineMarkdown(line)))
+      .filter(Boolean);
+    if (!lines.length) return '';
+    return lines[0];
+  }
+
   function getMdNodeFirstLineFromDom(nodeId) {
     const normalizedId = normalizeText(nodeId);
     if (!normalizedId) return '';
@@ -190,17 +226,6 @@
     const module = getCanvasModule();
     if (!module || !module.CanvasState || typeof module.CanvasState !== 'object') return null;
     return module.CanvasState;
-  }
-
-  function hasEnabledObsidianSync() {
-    try {
-      const syncApi = global.CanvasObsidianGitSync;
-      if (!syncApi || typeof syncApi.getSettings !== 'function') return false;
-      const settings = syncApi.getSettings();
-      return !!(settings && settings.enabled);
-    } catch (_) {
-      return false;
-    }
   }
 
   function normalizeHexColor(value, fallback) {
@@ -694,6 +719,9 @@
   function getMdNodeTitle(node) {
     const byLiveText = normalizeMdNodeTitleLine(getMdNodeFirstLineFromDom(node && node.id));
     if (byLiveText) return byLiveText;
+
+    const bySourceLine = normalizeMdNodeTitleLine(getMdNodeTitleLineFromSource(node));
+    if (bySourceLine) return bySourceLine;
 
     const byText = normalizeMdNodeTitleLine(getFirstLineText(node && node.text));
     if (byText) return byText;
@@ -1202,19 +1230,9 @@
         return compareText(a && a.id, b && b.id);
       });
 
-      const isNativeCard = (node) => {
-        if (!node) return false;
-        const subtype = normalizeText(node && node.subtype).toLowerCase();
-        const source = normalizeText(node && node.source).toLowerCase();
-        return subtype === 'canvas-native-text' || source.startsWith('obsidian-canvas-');
-      };
-
-      const nativeCards = sortedMdNodes.filter((node) => isNativeCard(node));
-      const pluginCards = sortedMdNodes.filter((node) => !isNativeCard(node));
-
-      const buildBlankItems = (list, groupKey) => {
+      const buildBlankItems = (list) => {
         const items = (Array.isArray(list) ? list : []).map((node, index) => makeItemNode({
-          key: `${keyPrefix}blank-${groupKey}-${node.id}`,
+          key: `${keyPrefix}blank-${node.id}`,
           code: '',
           title: `${index + 1}. ${getMdNodeTitle(node)}`,
           color: nodeColorResolver(node),
@@ -1237,62 +1255,12 @@
         return items;
       };
 
-      const showSyncSubfolders = hasEnabledObsidianSync();
-      const directItems = buildBlankItems(sortedMdNodes, 'all');
-      if (!showSyncSubfolders) {
-        if (!directItems.length) {
-          directItems.push(makePlaceholderItem(
-            config.emptyKey || `${keyPrefix}blank-empty`,
-            '',
-            t('暂无空白栏目', 'No blank cards'),
-            {
-              iconText,
-              iconTone,
-              variant,
-              color: folderColor,
-              defaultColor
-            }
-          ));
-        }
-
-        return makeFolderNode({
-          key: config.folderKey || 'folder-blank',
-          code: '',
-          title: config.title || t('空白栏目', 'Blank'),
-          color: folderColor,
-          defaultColor,
-          icon: folderIcon,
-          iconText,
-          iconTone,
-          variant,
-          open: config.open !== false,
-          count: typeof config.count === 'number' ? config.count : sortedMdNodes.length,
-          children: directItems
-        });
-      }
-
-      const nativeItems = buildBlankItems(nativeCards, 'native');
-      if (!nativeItems.length) {
-        nativeItems.push(makePlaceholderItem(
-          `${keyPrefix}blank-native-empty`,
+      const directItems = buildBlankItems(sortedMdNodes);
+      if (!directItems.length) {
+        directItems.push(makePlaceholderItem(
+          config.emptyKey || `${keyPrefix}blank-empty`,
           '',
-          t('暂无 Obsidian 原生卡片', 'No Obsidian native cards'),
-          {
-            iconText,
-            iconTone,
-            variant,
-            color: folderColor,
-            defaultColor
-          }
-        ));
-      }
-
-      const pluginItems = buildBlankItems(pluginCards, 'plugin');
-      if (!pluginItems.length) {
-        pluginItems.push(makePlaceholderItem(
-          `${keyPrefix}blank-plugin-empty`,
-          '',
-          t('暂无 插件空白卡片', 'No plugin blank cards'),
+          t('暂无空白栏目', 'No blank cards'),
           {
             iconText,
             iconTone,
@@ -1315,34 +1283,7 @@
         variant,
         open: config.open !== false,
         count: typeof config.count === 'number' ? config.count : sortedMdNodes.length,
-        children: [
-          makeFolderNode({
-            key: `${config.folderKey || 'folder-blank'}-native`,
-            code: '',
-            title: t('obsidian原生卡片', 'Obsidian native cards'),
-            color: folderColor,
-            defaultColor,
-            icon: 'fas fa-pen',
-            iconText,
-            iconTone,
-            variant,
-            count: nativeCards.length,
-            children: nativeItems
-          }),
-          makeFolderNode({
-            key: `${config.folderKey || 'folder-blank'}-plugin`,
-            code: '',
-            title: t('插件空白卡片', 'Plugin blank cards'),
-            color: folderColor,
-            defaultColor,
-            icon: 'fas fa-file-alt',
-            iconText,
-            iconTone,
-            variant,
-            count: pluginCards.length,
-            children: pluginItems
-          })
-        ]
+        children: directItems
       });
     };
 
