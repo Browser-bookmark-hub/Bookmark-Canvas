@@ -2597,18 +2597,20 @@
             };
         }
 
+        const normalizedText = isCanvasNativeTextNode(node)
+            ? String(node.text || '')
+            : String(node.text || '');
         return {
             id: String(node.id || '').trim(),
-            subtype: String(node.subtype || '').trim(),
-            source: String(node.source || '').trim(),
+            subtype: 'canvas-native-text',
+            source: 'obsidian-canvas-text',
             x: normalizeCanvasTempStateNumberForSync(node.x),
             y: normalizeCanvasTempStateNumberForSync(node.y),
             width: normalizeCanvasTempStateNumberForSync(node.width),
             height: normalizeCanvasTempStateNumberForSync(node.height),
             color: String(node.color || '').trim(),
             colorHex: String(node.colorHex || '').trim(),
-            markdownSource: String(node.markdownSource || ''),
-            text: String(node.text || '')
+            text: normalizedText
         };
     }
 

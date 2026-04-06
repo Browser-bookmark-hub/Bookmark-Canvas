@@ -761,6 +761,35 @@ function __setupDescAutoScroll(editorEl, isEditing) {
     editorEl.addEventListener('blur', stop);
 }
 
+let __canvasDescSelectionClearBound = false;
+function __clearCanvasDescriptionSelection() {
+    try {
+        document
+            .querySelectorAll('.temp-node-description-container.desc-selected, .permanent-section-tip-container.desc-selected')
+            .forEach((el) => {
+                try { el.classList.remove('desc-selected'); } catch (_) { }
+            });
+    } catch (_) { }
+}
+
+function __selectCanvasDescriptionContainer(containerEl) {
+    if (!containerEl) return;
+    __clearCanvasDescriptionSelection();
+    try { containerEl.classList.add('desc-selected'); } catch (_) { }
+}
+
+function __bindCanvasDescriptionSelectionClear() {
+    if (__canvasDescSelectionClearBound) return;
+    __canvasDescSelectionClearBound = true;
+    document.addEventListener('mousedown', (event) => {
+        const target = event && event.target;
+        if (target && target.closest && target.closest('.temp-node-description-container, .permanent-section-tip-container')) {
+            return;
+        }
+        __clearCanvasDescriptionSelection();
+    }, true);
+}
+
 
 // 阻止 Canvas 事件冒泡 (防止 UI 内部拖动触发父级 Drag/Resize)
 function preventCanvasEventsPropagation(element) {
@@ -2772,9 +2801,10 @@ _Shortcuts can be customized in the "Manage" button at top-left_
         y: -190,  // 与永久栏目(top=-190)顶部对齐
         width: 420,
         height: 480,
-        text: '',
+        text: bookmarkGuideMarkdown,
         html: __renderMarkdownSourceToCanvasHtml(bookmarkGuideMarkdown),
-        markdownSource: bookmarkGuideMarkdown,
+        subtype: 'canvas-native-text',
+        source: 'obsidian-canvas-text',
         color: '4', // 绿色
         fontSize: MD_NODE_LEGACY_DEFAULT_FONT_SIZE,
         createdAt: Date.now()
@@ -2787,9 +2817,10 @@ _Shortcuts can be customized in the "Manage" button at top-left_
         y: -730,  // 使用说明顶部(y:-190) - 间距140 - 高度400 = -730
         width: 420,
         height: 400,
-        text: '',
+        text: shortcutGuideMarkdown,
         html: __renderMarkdownSourceToCanvasHtml(shortcutGuideMarkdown),
-        markdownSource: shortcutGuideMarkdown,
+        subtype: 'canvas-native-text',
+        source: 'obsidian-canvas-text',
         color: '5', // 蓝色
         fontSize: MD_NODE_LEGACY_DEFAULT_FONT_SIZE,
         createdAt: Date.now()
@@ -2844,9 +2875,10 @@ _Tip: This card can be freely edited or deleted_
         y: 430,  // 使用说明底部(y:-190+480=290) + 间距140 = 430
         width: 420,
         height: 420,  // 稍微增高以容纳更多内容
-        text: '',
+        text: batchFeatureMarkdown,
         html: __renderMarkdownSourceToCanvasHtml(batchFeatureMarkdown),
-        markdownSource: batchFeatureMarkdown,
+        subtype: 'canvas-native-text',
+        source: 'obsidian-canvas-text',
         color: '5', // 蓝色
         fontSize: MD_NODE_LEGACY_DEFAULT_FONT_SIZE,
         createdAt: Date.now()
@@ -4394,7 +4426,9 @@ function setupCanvasDropFeedback() {
             ? __normalizeCanvasRichHtml(html)
             : String(html || '');
 
-        if (typeof text === 'string') node.markdownSource = String(text || '');
+        if (typeof text === 'string') {
+            node.text = __repairLegacyCanvasMarkdownSource(String(text || ''));
+        }
         if (normalized) node.html = normalized;
         if (typeof __ensureMdNodeMarkdownProtocol === 'function') {
             __ensureMdNodeMarkdownProtocol(node, {
@@ -16060,32 +16094,25 @@ function duplicateMdNode(nodeId) {
     if (!node) return null;
     const id = `md-node-${++CanvasState.mdNodeCounter}`;
     const baseSize = getBlankNodeDefaultSize();
-    const isCanvasNativeText = __isCanvasNativeTextNode(node);
-    const nativeTextBody = isCanvasNativeText
-        ? __repairLegacyCanvasMarkdownSource(
-            __resolveCanvasNativeTextNodeBody(node) || (typeof node.markdownSource === 'string' ? node.markdownSource : '')
-        )
-        : '';
-    const markdownSource = isCanvasNativeText
-        ? nativeTextBody
-        : __deriveMdNodeMarkdownSource(node);
+    const body = __repairLegacyCanvasMarkdownSource(
+        __isCanvasNativeTextNode(node)
+            ? __resolveCanvasNativeTextNodeBody(node)
+            : __deriveMdNodeMarkdownSource(node)
+    );
     const copy = {
         id,
         x: (node.x || 0) + 24,
         y: (node.y || 0) + 24,
         width: node.width || baseSize.width,
         height: node.height || baseSize.height,
-        text: isCanvasNativeText ? nativeTextBody : (node.text || ''),
+        text: body,
         html: node.html || '',
-        markdownSource,
+        subtype: 'canvas-native-text',
+        source: 'obsidian-canvas-text',
         color: node.color || null,
         colorHex: node.colorHex || null,
         createdAt: Date.now()
     };
-    if (isCanvasNativeText) {
-        copy.subtype = 'canvas-native-text';
-        copy.source = 'obsidian-canvas-text';
-    }
     __ensureMdNodeMarkdownProtocol(copy, { refreshCachesFromMarkdown: true });
     CanvasState.mdNodes.push(copy);
     renderMdNode(copy);
@@ -16198,11 +16225,10 @@ function renderMdNode(node) {
     const container = document.getElementById('canvasContent');
     if (!container) return;
 
-    if (!(node && node.subtype === 'import-container') && !__isCanvasNativeTextNode(node)) {
-        const hasMarkdownSource = typeof node.markdownSource === 'string' && !!String(node.markdownSource).trim();
-        // Prefer markdownSource for markdown/file nodes so stale HTML cache won't break heading/list rendering.
+    if (!(node && node.subtype === 'import-container')) {
+        const shouldRefreshFromMarkdown = !__isCanvasNativeTextNode(node);
         __ensureMdNodeMarkdownProtocol(node, {
-            refreshCachesFromMarkdown: hasMarkdownSource
+            refreshCachesFromMarkdown: shouldRefreshFromMarkdown
         });
     }
 
@@ -17020,25 +17046,20 @@ function renderMdNode(node) {
     editor.setAttribute('aria-label', mdPlaceholder);
 
     // 初始化编辑器内容：
-    // - Markdown 节点优先按 markdownSource 渲染；
-    // - Canvas 原生 text 节点按其 text body 作为 Markdown 渲染（避免显示源码）。
+    // - 文本节点统一按 text body 渲染（官方 text node 对齐）。
     const isCanvasNativeText = __isCanvasNativeTextNode(node);
     const nativeTextBody = isCanvasNativeText
         ? __resolveCanvasNativeTextNodeBody(node)
         : '';
     const rawMarkdownSource = isCanvasNativeText
-        ? __repairLegacyCanvasMarkdownSource(
-            nativeTextBody || (typeof node.markdownSource === 'string' ? node.markdownSource : '')
-        )
-        : (typeof node.markdownSource === 'string'
-            ? __repairLegacyCanvasMarkdownSource(node.markdownSource)
-            : '');
+        ? __repairLegacyCanvasMarkdownSource(nativeTextBody)
+        : __repairLegacyCanvasMarkdownSource(typeof node.text === 'string' ? node.text : '');
     if (rawMarkdownSource) {
-        if (typeof marked !== 'undefined') {
-            try { editor.innerHTML = __renderMarkdownToCanvasRichHtml(rawMarkdownSource); } catch { editor.textContent = rawMarkdownSource; }
-        } else {
-            editor.textContent = rawMarkdownSource;
-        }
+        try {
+            editor.innerHTML = __renderMarkdownToCanvasRichHtml(rawMarkdownSource, {
+                forceLinePreserve: isCanvasNativeText
+            });
+        } catch { editor.textContent = rawMarkdownSource; }
     } else if (node.html) {
         editor.innerHTML = node.html;
     } else if (typeof node.text === 'string' && node.text) {
@@ -17278,7 +17299,7 @@ function renderMdNode(node) {
         // Setext 格式通过 dataset.setextType 标识
         // 标准规则: === → H1, --- → H2
         if (tagName === 'H1') {
-            // 检查是否为 Setext 格式（--- → H1）
+            // 检查是否为 Setext 格式（=== → H1）
             if (el.dataset && el.dataset.setextType) {
                 const separator = el.dataset.setextType;
                 // 从渲染的元素中提取标题文字
@@ -17309,7 +17330,7 @@ function renderMdNode(node) {
             };
         }
         if (tagName === 'H2') {
-            // 检查是否为 Setext 格式（=== → H2）
+            // 检查是否为 Setext 格式（--- → H2）
             if (el.dataset && el.dataset.setextType) {
                 const separator = el.dataset.setextType;
                 // 从渲染的元素中提取标题文字
@@ -17473,9 +17494,21 @@ function renderMdNode(node) {
         const format = formatMap[tagName];
         if (!format) return false;
 
-        // 使用 innerHTML 保留内部 HTML 格式
-        const innerHtml = formattedEl.innerHTML;
-        const markdown = format.prefix + innerHtml + format.suffix;
+        // 不直接拼 innerHTML，避免把 <em>/<strong> 等标签源码写回 markdown。
+        const inlineSource = __normalizeCanvasMarkdownSource(
+            __repairLegacyCanvasMarkdownSource(
+                __htmlToMarkdown(String(formattedEl.innerHTML || ''), {
+                    trimResult: false,
+                    compactNewlines: false,
+                    paragraphBreaks: false,
+                    hardLineBreaks: true
+                })
+            )
+        );
+        const markdownBody = String(
+            inlineSource || formattedEl.textContent || ''
+        ).replace(/\u00A0/g, ' ');
+        const markdown = format.prefix + markdownBody + format.suffix;
 
         // 创建文本节点替换格式化元素
         const textNode = document.createTextNode(markdown);
@@ -17498,7 +17531,7 @@ function renderMdNode(node) {
         } else {
             cursorPos = format.prefix.length + Math.floor(plainTextLen / 2);
         }
-        range.setStart(textNode, cursorPos);
+        range.setStart(textNode, Math.max(0, Math.min(cursorPos, textNode.length)));
         range.collapse(true);
         sel.removeAllRanges();
         sel.addRange(range);
@@ -17720,8 +17753,8 @@ function renderMdNode(node) {
         const htmlPatterns = [];
 
         // Setext 标题和水平分割线检测（回溯检测：当输入分隔符时，检测上一行是否为标题文本）
-        const setextDashMatch = text.match(/^[\u200B]*(-{3,})\s*$/);    // --- → H1
-        const setextEqualMatch = text.match(/^[\u200B]*(={3,})\s*$/);   // === → H2
+        const setextDashMatch = text.match(/^[\u200B]*(-{3,})\s*$/);    // --- → H2
+        const setextEqualMatch = text.match(/^[\u200B]*(={3,})\s*$/);   // === → H1
 
         if (setextDashMatch || setextEqualMatch) {
             const prevNode = findPrevLineNode(textNode);
@@ -17737,8 +17770,8 @@ function renderMdNode(node) {
                     // 确保上一行有有效内容且不是分隔符
                     if (headerText) {
                         // 标准规则: === → H1, --- → H2
-                        const level = setextDashMatch ? 'h1' : 'h2';
-                        const separator = setextDashMatch ? setextDashMatch[1] : setextEqualMatch[1];
+                        const level = setextEqualMatch ? 'h1' : 'h2';
+                        const separator = setextEqualMatch ? setextEqualMatch[1] : setextDashMatch[1];
 
                         const newEl = document.createElement(level);
                         // Setext 标题显示为：标题文字 + 换行 + 分隔符（两行，分隔符保持原始大小）
@@ -17880,8 +17913,15 @@ function renderMdNode(node) {
                 // 辅助函数：将内联 Markdown 语法转换为 HTML
                 const parseInlineMarkdown = (text) => {
                     if (!text) return text;
+                    // 先转义用户输入中的原始 HTML，避免把字面量 `<em>` 当真实标签吃掉
+                    const safe = String(text)
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;');
                     // 按顺序处理：粗体、斜体、删除线、高亮、代码
-                    return text
+                    return safe
                         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                         .replace(/\*(.+?)\*/g, '<em>$1</em>')
                         .replace(/~~(.+?)~~/g, '<del>$1</del>')
@@ -18227,7 +18267,13 @@ function renderMdNode(node) {
         // 辅助函数：将内联 Markdown 语法转换为 HTML
         const parseInlineMarkdown = (text) => {
             if (!text) return text;
-            return text
+            const safe = String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+            return safe
                 .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\*(.+?)\*/g, '<em>$1</em>')
                 .replace(/~~(.+?)~~/g, '<del>$1</del>')
@@ -18300,8 +18346,8 @@ function renderMdNode(node) {
 
         // Setext 标题语法检测（处理两行结构：内容 + <br> + ---/===）
         // 标准规则: === → H1, --- → H2
-        const setextH1Match = text.match(/^[\u200B]*(-{3,})\s*$/);  // --- → H1
-        const setextH2Match = text.match(/^[\u200B]*(={3,})\s*$/);  // === → H2
+        const setextH1Match = text.match(/^[\u200B]*(={3,})\s*$/);  // === → H1
+        const setextH2Match = text.match(/^[\u200B]*(-{3,})\s*$/);  // --- → H2
         const isSetextH1 = !!setextH1Match;
         const isSetextH2 = !!setextH2Match;
 
@@ -18377,7 +18423,7 @@ function renderMdNode(node) {
                     }
                     saveEditorContent();
                     return;
-                } else if (isSetextH1) {
+                } else if (isSetextH2) {
                     // 没有上一行内容，--- 变成水平分割线
                     const hrEl = document.createElement('hr');
 
@@ -18461,7 +18507,13 @@ function renderMdNode(node) {
                 // 辅助函数：将内联 Markdown 语法转换为 HTML
                 const parseInlineMarkdown = (text) => {
                     if (!text) return text;
-                    return text
+                    const safe = String(text)
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;');
+                    return safe
                         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                         .replace(/\*(.+?)\*/g, '<em>$1</em>')
                         .replace(/~~(.+?)~~/g, '<del>$1</del>')
@@ -18979,6 +19031,24 @@ function renderMdNode(node) {
         // 保存内容
         try { __finalizeInlinePatternsInEditor(editor); } catch (_) { }
         saveEditorContent();
+
+        // 退出编辑后按 canonical markdown 重新渲染，避免源码节点残留导致换行逐次折叠。
+        try {
+            const canonicalSource = __repairLegacyCanvasMarkdownSource(
+                isCanvasNativeText
+                    ? __resolveCanvasNativeTextNodeBody(node)
+                    : (typeof node.text === 'string' ? node.text : '')
+            );
+            if (String(canonicalSource || '').trim()) {
+                editor.innerHTML = __renderMarkdownToCanvasRichHtml(canonicalSource, {
+                    forceLinePreserve: isCanvasNativeText
+                });
+                try { __applyHeadingCollapse(editor); } catch (_) { }
+            }
+            expandedElement = null;
+            expandedMarkdown = null;
+            expandedType = null;
+        } catch (_) { }
     };
 
     // 实时渲染：监听输入事件（带防抖，避免输入时频繁渲染）
@@ -19454,10 +19524,10 @@ function renderMdNode(node) {
         const htmlSource = isAll ? __getCleanHtmlForStorage(editor) : selectedHtml;
         if (!htmlSource) return;
 
-        // 全选整卡时优先复制节点原始源码（markdownSource），确保保留原始 Markdown / HTML 标签。
+        // 全选整卡时优先复制节点 canonical markdown（统一来自 text）。
         let finalSource = '';
         if (isAll) {
-            finalSource = __deriveMdNodeMarkdownSource(node);
+            finalSource = __resolveCanvasNativeTextNodeBody(node);
             if (!String(finalSource || '').trim()) {
                 finalSource = __htmlToMarkdown(htmlSource);
             }
@@ -20334,15 +20404,14 @@ async function createMdNode(x, y, text = '') {
     const baseSize = getBlankNodeDefaultSize();
     const defaultColor = getBlankNodeDefaultColor();
     const id = `md-node-${++CanvasState.mdNodeCounter}`;
-    const markdownSource = __repairLegacyCanvasMarkdownSource(String(text == null ? '' : text));
+    const nativeText = __repairLegacyCanvasMarkdownSource(String(text == null ? '' : text));
     const node = {
         id,
         x,
         y,
         width: baseSize.width,
         height: baseSize.height,
-        text: markdownSource,
-        markdownSource,
+        text: nativeText,
         subtype: 'canvas-native-text',
         source: 'obsidian-canvas-text',
         color: null,
@@ -20779,7 +20848,13 @@ function __tryConvertInlinePatternsInTextNode(editorEl, explicitNode = null) {
 
         const parseInlineMarkdown = (text) => {
             if (!text) return text;
-            return text
+            const safe = String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+            return safe
                 .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\*(.+?)\*/g, '<em>$1</em>')
                 .replace(/~~(.+?)~~/g, '<del>$1</del>')
@@ -20883,12 +20958,156 @@ function __finalizeInlinePatternsInEditor(editorEl) {
     return changedOverall;
 }
 
-function __renderMarkdownToCanvasRichHtml(markdownText) {
+function __renderMarkdownToCanvasRichHtml(markdownText, options = {}) {
     const val = String(markdownText || '');
-    if (!val.trim()) return '';
-    if (typeof marked === 'undefined') return val;
+    if (!val.trim()) {
+        const normalized = String(val || '').replace(/\r\n?/g, '\n');
+        if (!normalized.length) return '';
+        const lineCount = normalized.split('\n').length;
+        if (lineCount <= 0) return '';
+        return Array.from({ length: lineCount }).map(() => '<div><br></div>').join('');
+    }
+    const forceLinePreserve = !!(options && options.forceLinePreserve);
+    const fallbackHtml = () => {
+        const escapeHtml = (text) => String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        const source = String(val || '').replace(/\r\n?/g, '\n');
+        const lines = source.split('\n');
+        const tmp = document.createElement('div');
+
+        let html = '';
+        let listMode = '';
+        let inCodeBlock = false;
+        const codeLines = [];
+
+        const closeList = () => {
+            if (listMode === 'ul') html += '</ul>';
+            else if (listMode === 'ol') html += '</ol>';
+            listMode = '';
+        };
+
+        lines.forEach((lineRaw) => {
+            const line = String(lineRaw || '');
+            const trimmed = line.trim();
+
+            if (/^```/.test(trimmed)) {
+                closeList();
+                if (!inCodeBlock) {
+                    inCodeBlock = true;
+                    codeLines.length = 0;
+                } else {
+                    html += `<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`;
+                    inCodeBlock = false;
+                    codeLines.length = 0;
+                }
+                return;
+            }
+
+            if (inCodeBlock) {
+                codeLines.push(line);
+                return;
+            }
+
+            if (!trimmed) {
+                closeList();
+                html += '<div><br></div>';
+                return;
+            }
+
+            const headingMatch = line.match(/^\s*(#{1,6})\s+(.+)$/);
+            if (headingMatch) {
+                closeList();
+                const level = Math.min(6, headingMatch[1].length);
+                html += `<h${level}>${escapeHtml(headingMatch[2])}</h${level}>`;
+                return;
+            }
+
+            if (/^\s*(?:-{3,}|={3,}|\*{3,})\s*$/.test(line)) {
+                closeList();
+                html += '<hr>';
+                return;
+            }
+
+            const quoteMatch = line.match(/^\s*>\s?(.*)$/);
+            if (quoteMatch) {
+                closeList();
+                html += `<blockquote>${escapeHtml(quoteMatch[1])}</blockquote>`;
+                return;
+            }
+
+            const ulMatch = line.match(/^\s*[-*+]\s+(.+)$/);
+            if (ulMatch) {
+                if (listMode !== 'ul') {
+                    closeList();
+                    html += '<ul>';
+                    listMode = 'ul';
+                }
+                html += `<li>${escapeHtml(ulMatch[1])}</li>`;
+                return;
+            }
+
+            const olMatch = line.match(/^\s*\d+\.\s+(.+)$/);
+            if (olMatch) {
+                if (listMode !== 'ol') {
+                    closeList();
+                    html += '<ol>';
+                    listMode = 'ol';
+                }
+                html += `<li>${escapeHtml(olMatch[1])}</li>`;
+                return;
+            }
+
+            closeList();
+            html += `<div>${escapeHtml(line)}</div>`;
+        });
+
+        if (inCodeBlock) {
+            html += `<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`;
+        }
+        closeList();
+
+        tmp.innerHTML = html;
+
+        let changed = true;
+        let loop = 0;
+        while (changed && loop++ < 10) {
+            changed = false;
+            const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_TEXT, null, false);
+            const textNodes = [];
+            let n;
+            while (n = walker.nextNode()) textNodes.push(n);
+            for (const tn of textNodes) {
+                if (!tn || !tn.parentNode) continue;
+                if (tn.parentNode.closest('code, pre, a')) continue;
+                if (__tryConvertInlinePatternsInTextNode(tmp, tn)) {
+                    changed = true;
+                }
+            }
+        }
+
+        return tmp.innerHTML;
+    };
+    const markedApi = (() => {
+        try {
+            if (typeof marked !== 'undefined' && marked && typeof marked.parse === 'function') {
+                return marked;
+            }
+        } catch (_) { }
+        try {
+            if (typeof window !== 'undefined' && window && window.marked && typeof window.marked.parse === 'function') {
+                return window.marked;
+            }
+        } catch (_) { }
+        return null;
+    })();
+    if (forceLinePreserve) return fallbackHtml();
+    if (!markedApi) return fallbackHtml();
     let parsedHtml = '';
-    try { parsedHtml = marked.parse(val); } catch (_) { return val; }
+    try { parsedHtml = markedApi.parse(val); } catch (_) { return fallbackHtml(); }
 
     // Post-process: Obsidian-style auto link for bare URLs / www.* (and keep editor inline rules consistent)
     const tmp = document.createElement('div');
@@ -20967,6 +21186,140 @@ function __getCleanHtmlForStorage(editorEl) {
     return clone.innerHTML;
 }
 
+function __extractCanvasNativeMarkdownFromEditor(editorEl) {
+    if (!editorEl) return '';
+
+    const clone = editorEl.cloneNode(true);
+    clone.querySelectorAll('.md-heading-hidden').forEach((el) => {
+        try { el.classList.remove('md-heading-hidden'); } catch (_) { }
+    });
+    clone.querySelectorAll('br[data-md-auto-br]').forEach((el) => {
+        try { el.remove(); } catch (_) { }
+    });
+
+    const normalizeText = (value) => String(value == null ? '' : value)
+        .replace(/\r\n?/g, '\n')
+        .replace(/\u200B/g, '')
+        .replace(/\u00A0/g, ' ');
+
+    const inlineHtmlToMarkdown = (html) => {
+        const converted = __htmlToMarkdown(String(html || ''), {
+            trimResult: false,
+            compactNewlines: false,
+            paragraphBreaks: false,
+            hardLineBreaks: true
+        });
+        return normalizeText(converted).replace(/  \n/g, '\n');
+    };
+
+    const lines = [];
+    const pushLine = (line = '') => {
+        lines.push(normalizeText(line));
+    };
+
+    const pushChunk = (chunk, options = {}) => {
+        const dropTrailingEmpty = !!(options && options.dropTrailingEmpty);
+        const normalized = normalizeText(chunk);
+        if (!normalized.length) {
+            pushLine('');
+            return;
+        }
+        const parts = normalized.split('\n');
+        if (dropTrailingEmpty && parts.length > 1 && parts[parts.length - 1] === '') {
+            parts.pop();
+        }
+        parts.forEach((part) => pushLine(part));
+    };
+
+    Array.from(clone.childNodes || []).forEach((child) => {
+        if (!child) return;
+
+        if (child.nodeType === Node.TEXT_NODE) {
+            pushChunk(child.textContent || '');
+            return;
+        }
+        if (child.nodeType !== Node.ELEMENT_NODE) return;
+
+        const tag = String(child.tagName || '').toLowerCase();
+
+        if (tag === 'br') {
+            pushLine('');
+            return;
+        }
+
+        if (/^h[1-6]$/.test(tag)) {
+            const level = Math.min(6, Math.max(1, parseInt(tag.slice(1), 10) || 1));
+            const content = inlineHtmlToMarkdown(child.innerHTML || '').trim();
+            pushLine(`${'#'.repeat(level)} ${content}`);
+            return;
+        }
+
+        if (tag === 'blockquote') {
+            const content = inlineHtmlToMarkdown(child.innerHTML || '');
+            const quoteLines = String(content || '').split('\n');
+            quoteLines.forEach((line) => {
+                pushLine(line ? `> ${line}` : '>');
+            });
+            return;
+        }
+
+        if (tag === 'ul' || tag === 'ol') {
+            const ordered = tag === 'ol';
+            const items = Array.from(child.children || []).filter((node) => {
+                return node && node.nodeType === Node.ELEMENT_NODE && String(node.tagName || '').toLowerCase() === 'li';
+            });
+            if (!items.length) {
+                pushLine('');
+                return;
+            }
+            items.forEach((item, index) => {
+                const content = inlineHtmlToMarkdown(item.innerHTML || '').trim();
+                const prefix = ordered ? `${index + 1}. ` : '- ';
+                pushLine(`${prefix}${content}`);
+            });
+            return;
+        }
+
+        if (tag === 'pre') {
+            const code = normalizeText(child.textContent || '');
+            pushLine('```');
+            if (code.length) {
+                String(code).split('\n').forEach((line) => pushLine(line));
+            }
+            pushLine('```');
+            return;
+        }
+
+        if (tag === 'hr') {
+            pushLine('---');
+            return;
+        }
+
+        if (tag === 'div' || tag === 'p') {
+            const inner = child.innerHTML || '';
+            const visible = normalizeText(child.textContent || '').trim();
+            const hasOnlyBreak =
+                !visible
+                && /^(?:\s|&nbsp;|<br\s*\/?>)*$/i.test(inner);
+            if (hasOnlyBreak) {
+                pushLine('');
+                return;
+            }
+            pushChunk(inlineHtmlToMarkdown(inner), { dropTrailingEmpty: true });
+            return;
+        }
+
+        pushChunk(__htmlToMarkdown(child.outerHTML || '', {
+            trimResult: false,
+            compactNewlines: false,
+            paragraphBreaks: false,
+            hardLineBreaks: true
+        }), { dropTrailingEmpty: true });
+    });
+
+    return lines.join('\n');
+}
+
 function __cloneCanvasProtocolJson(value) {
     try {
         return JSON.parse(JSON.stringify(value));
@@ -21011,6 +21364,9 @@ function __resolveMarkdownSourceFromEditorHtml(cleanHtml, currentSource, options
     const conversionOptions = (options && options.conversionOptions && typeof options.conversionOptions === 'object')
         ? options.conversionOptions
         : null;
+    const renderOptions = (options && options.renderOptions && typeof options.renderOptions === 'object')
+        ? options.renderOptions
+        : null;
     const normalizedCurrentSource = __normalizeCanvasMarkdownSource(
         __repairLegacyCanvasMarkdownSource(String(currentSource == null ? '' : currentSource))
     );
@@ -21018,7 +21374,7 @@ function __resolveMarkdownSourceFromEditorHtml(cleanHtml, currentSource, options
     if (normalizedCurrentSource.trim()) {
         const currentRenderedHtml = sourceMode === 'description'
             ? __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(normalizedCurrentSource))
-            : __normalizeCanvasRichHtml(__renderMarkdownSourceToCanvasHtml(normalizedCurrentSource));
+            : __normalizeCanvasRichHtml(__renderMarkdownSourceToCanvasHtml(normalizedCurrentSource, renderOptions));
         if (currentRenderedHtml === normalizedHtml) {
             return normalizedCurrentSource;
         }
@@ -21039,7 +21395,7 @@ function __repairLegacyCanvasMarkdownSource(value) {
 
     // Recover escaped rich-text snippets (&lt;br&gt;, &lt;strong&gt;, ...) even in nested/double-escaped payloads.
     // Limit decode rounds to avoid pathological cases.
-    if (/&(?:lt|gt|amp|quot|#39|#x[0-9a-f]+|#\d+);/i.test(normalized)) {
+    if (/&(?:[a-z][a-z0-9]+|#x[0-9a-f]+|#\d+);/i.test(normalized)) {
         for (let i = 0; i < 3; i++) {
             const prev = normalized;
             try {
@@ -21050,13 +21406,33 @@ function __repairLegacyCanvasMarkdownSource(value) {
                 break;
             }
             if (normalized === prev) break;
-            if (!/&(?:lt|gt|amp|quot|#39|#x[0-9a-f]+|#\d+);/i.test(normalized)) break;
+            if (!/&(?:[a-z][a-z0-9]+|#x[0-9a-f]+|#\d+);/i.test(normalized)) break;
         }
     }
+    normalized = normalized.replace(/\u00A0/g, ' ');
 
     // Recover legacy single-line markdown where line breaks were serialized as <br>.
     if (/<br\s*\/?>/i.test(normalized)) {
         normalized = normalized.replace(/<br\s*\/?>/gi, '\n');
+    }
+
+    // Recover payloads polluted by inline HTML tags (<em>/<strong>/...) and
+    // convert them back to canonical markdown source.
+    const hasResidualInlineHtml =
+        /<\s*(?:strong|em|b|i|del|s|mark|code|u|span|font|center)\b/i.test(normalized)
+        || /<\s*(?:p|div|blockquote|ul|ol|li|hr|h[1-6]|details|summary)\b/i.test(normalized);
+    if (hasResidualInlineHtml) {
+        try {
+            const converted = __htmlToMarkdown(normalized, {
+                trimResult: false,
+                compactNewlines: false,
+                paragraphBreaks: false,
+                hardLineBreaks: true
+            });
+            if (String(converted || '').trim()) {
+                normalized = __normalizeCanvasMarkdownSource(converted);
+            }
+        } catch (_) { }
     }
 
     // Recover payloads that were accidentally wrapped as HTML headings/paragraphs
@@ -21132,9 +21508,6 @@ const __DEMO_PRESET_MD_NODE_IDS = new Set([
     'md-node-demo-batch-feature'
 ]);
 
-let __demoPresetMarkdownCacheLang = '';
-let __demoPresetMarkdownCache = null;
-
 function __isPristineDemoPresetCanvasState(stateInput = null) {
     const state = stateInput && typeof stateInput === 'object' ? stateInput : CanvasState;
     const tempSections = Array.isArray(state && state.tempSections)
@@ -21160,74 +21533,6 @@ function __hasSavedCameraPanForCurrentPartition() {
     }
 }
 
-function __collectDemoPresetCanonicalMarkdownMap() {
-    const langKey = String(
-        (typeof currentLang !== 'undefined' && currentLang)
-            ? currentLang
-            : ((typeof window !== 'undefined' && window && window.currentLang) ? window.currentLang : 'zh_CN')
-    );
-    if (__demoPresetMarkdownCache && __demoPresetMarkdownCacheLang === langKey) {
-        return __demoPresetMarkdownCache;
-    }
-
-    const nextMap = new Map();
-    try {
-        const template = createInitialDemoTemplate();
-        const nodes = Array.isArray(template && template.mdNodes) ? template.mdNodes : [];
-        nodes.forEach((node) => {
-            const id = String(node && node.id || '').trim();
-            if (!id || !__DEMO_PRESET_MD_NODE_IDS.has(id)) return;
-            const markdown = __normalizeCanvasMarkdownSource(node && node.markdownSource);
-            if (markdown.trim()) nextMap.set(id, markdown);
-        });
-    } catch (_) { }
-
-    __demoPresetMarkdownCacheLang = langKey;
-    __demoPresetMarkdownCache = nextMap;
-    return nextMap;
-}
-
-function __resolveDemoPresetCanonicalId(nodeId, sourceText) {
-    const id = String(nodeId || '').trim();
-    if (id && __DEMO_PRESET_MD_NODE_IDS.has(id)) return id;
-    const text = String(sourceText || '');
-    if (/书签画布|bookmark canvas/i.test(text)) return 'md-node-demo-bookmark-guide';
-    if (/快捷键说明|keyboard shortcuts/i.test(text)) return 'md-node-demo-shortcut-guide';
-    if (/打开方式特色功能|open mode features/i.test(text)) return 'md-node-demo-batch-feature';
-    return '';
-}
-
-function __isLikelyCorruptedDemoPresetMarkdown(nodeId, markdownSource) {
-    const source = String(markdownSource || '');
-    if (!source.trim()) return '';
-    const canonicalId = __resolveDemoPresetCanonicalId(nodeId, source);
-    if (!canonicalId) return '';
-
-    const hasCorruptionMarkers =
-        /<br\s*\/?>/i.test(source)
-        || /&lt;\s*(?:br|strong|em|b|i|u|del|s|mark|code)\b/i.test(source)
-        || /<\/?strong\b/i.test(source)
-        || /<h[1-6][^>]*>\s*#{1,6}\s+/i.test(source)
-        || /^[\u200B\s]*#{1,6}\s+#{1,6}\s+/m.test(source);
-    return hasCorruptionMarkers ? canonicalId : '';
-}
-
-function __isLikelyCorruptedDemoPresetHtml(nodeId, rawHtml) {
-    const html = String(rawHtml || '');
-    if (!html.trim()) return false;
-    if (!__looksLikeMixedMarkdownHtmlCache(html)) return false;
-
-    const plain = (__extractPlainTextFromCanvasRichHtml(html) || html).replace(/\u200B/g, '');
-    return !!__resolveDemoPresetCanonicalId(nodeId, plain);
-}
-
-function __repairDemoPresetMarkdownSourceIfNeeded(nodeId, markdownSource) {
-    const canonicalId = __isLikelyCorruptedDemoPresetMarkdown(nodeId, markdownSource);
-    if (!canonicalId) return '';
-    const map = __collectDemoPresetCanonicalMarkdownMap();
-    return map && map.get(canonicalId) ? map.get(canonicalId) : '';
-}
-
 function __extractPlainTextFromCanvasRichHtml(rawHtml) {
     const html = String(rawHtml == null ? '' : rawHtml).trim();
     if (!html) return '';
@@ -21240,13 +21545,13 @@ function __extractPlainTextFromCanvasRichHtml(rawHtml) {
     }
 }
 
-function __renderMarkdownSourceToCanvasHtml(markdownSource) {
+function __renderMarkdownSourceToCanvasHtml(markdownSource, renderOptions = null) {
     const normalized = __repairLegacyCanvasMarkdownSource(markdownSource);
     if (!normalized.trim()) return '';
 
     let html = '';
     try {
-        html = __renderMarkdownToCanvasRichHtml(normalized);
+        html = __renderMarkdownToCanvasRichHtml(normalized, renderOptions || {});
     } catch (_) {
         html = '';
     }
@@ -21266,14 +21571,14 @@ function __renderMarkdownSourceToCanvasHtml(markdownSource) {
 
 function __deriveMdNodeMarkdownSource(node) {
     if (!node || typeof node !== 'object') return '';
-    if (node.subtype === 'import-container' || __isCanvasNativeTextNode(node)) return '';
+    if (node.subtype === 'import-container') return '';
 
-    const direct = __repairLegacyCanvasMarkdownSource(node.markdownSource);
-    if (direct.trim()) return direct;
+    const directText = __repairLegacyCanvasMarkdownSource(node.text);
+    if (directText.trim()) return directText;
 
     const rawContent = (typeof node.html === 'string' && node.html)
         ? node.html
-        : ((typeof node.text === 'string') ? node.text : '');
+        : '';
     const stripped = __stripZwsp(rawContent || '');
     if (!stripped.trim()) return '';
 
@@ -21285,66 +21590,71 @@ function __deriveMdNodeMarkdownSource(node) {
     }));
 }
 
-function __ensureMdNodeMarkdownProtocol(node, options = {}) {
+function __normalizeCanvasNativeTextNodeFields(node, options = {}) {
     if (!node || typeof node !== 'object') return node;
-    if (node.subtype === 'import-container' || __isCanvasNativeTextNode(node)) return node;
+    if (!__isCanvasNativeTextNode(node)) return node;
 
-    let markdownSource = __repairLegacyCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
-    const demoPresetRepaired = __repairDemoPresetMarkdownSourceIfNeeded(node.id, markdownSource);
-    const demoPresetHtmlCorrupted = __isLikelyCorruptedDemoPresetHtml(node.id, node.html);
-    if (demoPresetRepaired) {
-        markdownSource = __normalizeCanvasMarkdownSource(demoPresetRepaired);
-    } else if (demoPresetHtmlCorrupted) {
-        const plain = (__extractPlainTextFromCanvasRichHtml(node.html) || String(node.html || '')).replace(/\u200B/g, '');
-        const canonicalId = __resolveDemoPresetCanonicalId(node.id, plain);
-        const canonical = canonicalId ? (__collectDemoPresetCanonicalMarkdownMap().get(canonicalId) || '') : '';
-        if (canonical) {
-            markdownSource = __normalizeCanvasMarkdownSource(canonical);
-        }
-    }
-    node.markdownSource = markdownSource;
+    const markdownText = __normalizeCanvasMarkdownSource(
+        __repairLegacyCanvasMarkdownSource(__resolveCanvasNativeTextNodeBody(node))
+    );
+
+    node.text = markdownText;
+    try { delete node.markdownSource; } catch (_) { }
 
     const shouldRefreshCaches = options.refreshCachesFromMarkdown === true
-        || !!demoPresetRepaired
-        || demoPresetHtmlCorrupted
         || __shouldRebuildMdNodeHtmlCacheFromMarkdown(node.html)
-        || (options.refreshCachesFromMarkdown !== false && !(typeof node.html === 'string' && node.html.trim()));
+        || !(typeof node.html === 'string' && node.html.trim());
 
     if (shouldRefreshCaches) {
-        node.html = markdownSource ? __renderMarkdownSourceToCanvasHtml(markdownSource) : '';
+        node.html = markdownText
+            ? __renderMarkdownSourceToCanvasHtml(markdownText, { forceLinePreserve: true })
+            : '';
     } else if (typeof node.html === 'string') {
         node.html = __normalizeCanvasRichHtml(node.html) || '';
     }
 
-    // Final safeguard: if cache still looks like mixed markdown/html garbage,
-    // rebuild markdown from html once and re-render.
-    if (node.html && __looksLikeMixedMarkdownHtmlCache(node.html)) {
-        try {
-            const recovered = __repairLegacyCanvasMarkdownSource(__htmlToMarkdown(String(node.html || ''), {
-                trimResult: false,
-                compactNewlines: false,
-                paragraphBreaks: false,
-                hardLineBreaks: true
-            }));
-            if (String(recovered || '').trim() && recovered !== markdownSource) {
-                markdownSource = __normalizeCanvasMarkdownSource(recovered);
-                node.markdownSource = markdownSource;
-                node.html = __renderMarkdownSourceToCanvasHtml(markdownSource);
-            }
-        } catch (_) { }
+    return node;
+}
+
+function __ensureMdNodeMarkdownProtocol(node, options = {}) {
+    if (!node || typeof node !== 'object') return node;
+    if (node.subtype === 'import-container') return node;
+    if (!__isCanvasNativeTextNode(node)) {
+        node.text = __repairLegacyCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
+        node.subtype = 'canvas-native-text';
+        node.source = 'obsidian-canvas-text';
     }
 
-    const plainText = node.html
-        ? __extractPlainTextFromCanvasRichHtml(node.html)
-        : __extractPlainTextFromCanvasRichHtml(__renderMarkdownSourceToCanvasHtml(markdownSource));
-    node.text = plainText;
+    __normalizeCanvasNativeTextNodeFields(node, options);
     return node;
 }
 
 function __syncMdNodeFromEditor(node, editor) {
     if (!node || typeof node !== 'object' || !editor) return false;
+    const isCanvasNativeText = __isCanvasNativeTextNode(node);
 
     try { __finalizeInlinePatternsInEditor(editor); } catch (_) { }
+
+    if (isCanvasNativeText) {
+        const markdownSource = __normalizeCanvasMarkdownSource(
+            __repairLegacyCanvasMarkdownSource(__extractCanvasNativeMarkdownFromEditor(editor))
+        );
+        let canonicalHtml = '';
+        try {
+            canonicalHtml = __normalizeCanvasRichHtml(
+                __renderMarkdownSourceToCanvasHtml(markdownSource, { forceLinePreserve: true })
+            ) || '';
+        } catch (_) {
+            canonicalHtml = '';
+        }
+
+        const changed = (node.html || '') !== canonicalHtml
+            || (node.text || '') !== markdownSource;
+
+        node.html = canonicalHtml;
+        node.text = markdownSource;
+        return changed;
+    }
 
     let cleanHtml = '';
     try {
@@ -21358,9 +21668,10 @@ function __syncMdNodeFromEditor(node, editor) {
 
     const markdownSource = __resolveMarkdownSourceFromEditorHtml(
         cleanHtml,
-        node.markdownSource,
+        node.text,
         {
             sourceMode: 'markdown-node',
+            renderOptions: isCanvasNativeText ? { forceLinePreserve: true } : null,
             conversionOptions: {
                 trimResult: false,
                 compactNewlines: false,
@@ -21369,21 +21680,16 @@ function __syncMdNodeFromEditor(node, editor) {
             }
         }
     );
-    const plainText = cleanHtml
-        ? __extractPlainTextFromCanvasRichHtml(cleanHtml)
-        : '';
-    const isCanvasNativeText = __isCanvasNativeTextNode(node);
-    const nextNodeText = isCanvasNativeText
-        ? markdownSource
-        : plainText;
+    const nextNodeText = markdownSource;
 
     const changed = (node.html || '') !== cleanHtml
         || (node.text || '') !== nextNodeText
-        || (__normalizeCanvasMarkdownSource(node.markdownSource) !== markdownSource);
+        || !__isCanvasNativeTextNode(node);
 
     node.html = cleanHtml;
     node.text = nextNodeText;
-    node.markdownSource = markdownSource;
+    node.subtype = 'canvas-native-text';
+    node.source = 'obsidian-canvas-text';
     return changed;
 }
 
@@ -21634,7 +21940,13 @@ function __tryConvertBlockPatternsAtCaret(editorEl, explicitNode = null) {
 
     const parseInlineMarkdown = (text) => {
         if (!text) return text;
-        return text
+        const safe = String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        return safe
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.+?)\*/g, '<em>$1</em>')
             .replace(/~~(.+?)~~/g, '<del>$1</del>')
@@ -22275,7 +22587,13 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         // 辅助函数：将内联 Markdown 语法转换为 HTML
         const parseInlineMarkdown = (text) => {
             if (!text) return text;
-            return text
+            const safe = String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+            return safe
                 .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\*(.+?)\*/g, '<em>$1</em>')
                 .replace(/~~(.+?)~~/g, '<del>$1</del>')
@@ -22664,9 +22982,21 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         // 处理简单格式（粗体、斜体等，在 formatMap 中定义）
         const format = formatMap[tagName];
         if (format) {
-            // 使用 innerHTML 保留内部 HTML 格式
-            const innerHtml = formattedEl.innerHTML;
-            const markdown = format.prefix + innerHtml + format.suffix;
+            // 不直接拼 innerHTML，避免把 <em>/<strong> 等标签源码写回 markdown。
+            const inlineSource = __normalizeCanvasMarkdownSource(
+                __repairLegacyCanvasMarkdownSource(
+                    __htmlToMarkdown(String(formattedEl.innerHTML || ''), {
+                        trimResult: false,
+                        compactNewlines: false,
+                        paragraphBreaks: false,
+                        hardLineBreaks: true
+                    })
+                )
+            );
+            const markdownBody = String(
+                inlineSource || formattedEl.textContent || ''
+            ).replace(/\u00A0/g, ' ');
+            const markdown = format.prefix + markdownBody + format.suffix;
             const textNode = document.createTextNode(markdown);
             formattedEl.parentNode.replaceChild(textNode, formattedEl);
             expandedElement = textNode;
@@ -22677,7 +23007,8 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             const sel = window.getSelection();
             const range = document.createRange();
             const plainTextLen = formattedEl.textContent ? formattedEl.textContent.length : 0;
-            range.setStart(textNode, format.prefix.length + Math.floor(plainTextLen / 2));
+            const cursorPos = format.prefix.length + Math.floor(plainTextLen / 2);
+            range.setStart(textNode, Math.max(0, Math.min(cursorPos, textNode.length)));
             range.collapse(true);
             sel.removeAllRanges();
             sel.addRange(range);
@@ -24053,6 +24384,21 @@ function renderTempNode(section, options = {}) {
         enterEditingDescription();
     });
 
+    // 单击选中说明区；若已选中，再次单击进入编辑
+    descriptionText.addEventListener('click', (e) => {
+        if (e.defaultPrevented) return;
+        if (isEditingDesc) return;
+        if (e.target && e.target.closest && e.target.closest('a, input[type="checkbox"]')) return;
+        const alreadySelected = descriptionContainer.classList.contains('desc-selected');
+        e.stopPropagation();
+        if (alreadySelected) {
+            e.preventDefault();
+            enterEditingDescription();
+            return;
+        }
+        __selectCanvasDescriptionContainer(descriptionContainer);
+    });
+
     descriptionContent.appendChild(descriptionText);
 
     descriptionContainer.appendChild(descriptionContent);
@@ -24180,6 +24526,7 @@ function renderTempNode(section, options = {}) {
         if (isEditingDesc) return;
         isEditingDesc = true;
         beforeEditStored = __normalizeTempSectionDescriptionMarkdown(section);
+        __clearCanvasDescriptionSelection();
         descriptionContainer.classList.add('editing');
         descriptionText.contentEditable = 'true';
         descriptionText.focus();
@@ -24196,16 +24543,6 @@ function renderTempNode(section, options = {}) {
         }
 
     };
-
-    // 单击也可以编辑（当没有说明时）
-    // 单击进入编辑（只要不在编辑模式）
-    descriptionText.addEventListener('click', (e) => {
-        if (e.defaultPrevented) return;
-        if (isEditingDesc) return;
-        e.preventDefault();
-        e.stopPropagation();
-        enterEditingDescription();
-    });
 
     // editDescBtn listener removed
 
@@ -24389,6 +24726,7 @@ function renderTempNode(section, options = {}) {
         }
     });
 
+    __bindCanvasDescriptionSelectionClear();
     __setupDescAutoScroll(descriptionText, () => isEditingDesc);
 
     const body = document.createElement('div');
@@ -27309,6 +27647,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         isEditingTip = true;
         beforeEditStored = readStoredTipSource();
 
+        __clearCanvasDescriptionSelection();
         tipContainer.classList.add('editing');
         tipText.contentEditable = 'true';
         tipText.focus();
@@ -27325,12 +27664,25 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         }
     };
 
-    tipText.addEventListener('click', (e) => {
-        if (e.defaultPrevented) return;
-        if (isEditingTip) return;
+    tipText.addEventListener('dblclick', (e) => {
         e.preventDefault();
         e.stopPropagation();
         enterEditingTip();
+    });
+
+    // 单击选中说明区；若已选中，再次单击进入编辑
+    tipText.addEventListener('click', (e) => {
+        if (e.defaultPrevented) return;
+        if (isEditingTip) return;
+        if (e.target && e.target.closest && e.target.closest('a, input[type="checkbox"]')) return;
+        const alreadySelected = tipContainer.classList.contains('desc-selected');
+        e.stopPropagation();
+        if (alreadySelected) {
+            e.preventDefault();
+            enterEditingTip();
+            return;
+        }
+        __selectCanvasDescriptionContainer(tipContainer);
     });
 
     const clearPermanentTip = () => {
@@ -27557,6 +27909,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         }
     });
 
+    __bindCanvasDescriptionSelectionClear();
     __setupDescAutoScroll(tipText, () => isEditingTip);
 }
 
@@ -31459,7 +31812,9 @@ function __htmlToMarkdown(html, options = {}) {
     const processNode = (node) => {
         if (!node) return '';
         if (node.nodeType === Node.TEXT_NODE) {
-            return (node.textContent || '').replace(/\u200B/g, '');
+            return (node.textContent || '')
+                .replace(/\u200B/g, '')
+                .replace(/\u00A0/g, ' ');
         }
         if (node.nodeType !== Node.ELEMENT_NODE) return '';
 
@@ -31575,8 +31930,26 @@ function __htmlToMarkdown(html, options = {}) {
         return /^(p|div|h[1-6]|ul|ol|blockquote|pre|hr|details)$/.test(tag);
     };
 
-    const rendered = topNodes.map((node, index) => {
+    const renderedChunks = [];
+    topNodes.forEach((node, index) => {
         let chunk = processNode(node);
+        if (!chunk) {
+            renderedChunks.push(chunk);
+            return;
+        }
+
+        if (renderedChunks.length > 0) {
+            const prevChunk = renderedChunks[renderedChunks.length - 1] || '';
+            const prevNode = index > 0 ? topNodes[index - 1] : null;
+            const currentIsBlock = isTopLevelBlockLike(node);
+            const prevIsBlock = isTopLevelBlockLike(prevNode);
+            // Keep markdown block boundaries explicit to avoid token concatenation
+            // like "`code`## heading" after HTML -> markdown conversion.
+            if ((currentIsBlock || prevIsBlock) && prevChunk && !prevChunk.endsWith('\n')) {
+                renderedChunks[renderedChunks.length - 1] = prevChunk + '\n';
+            }
+        }
+
         if (node && node.nodeType === Node.TEXT_NODE) {
             const text = String(node.textContent || '').replace(/\u200B/g, '');
             const next = topNodes[index + 1] || null;
@@ -31584,8 +31957,11 @@ function __htmlToMarkdown(html, options = {}) {
                 chunk += '\n';
             }
         }
-        return chunk;
-    }).join('');
+
+        renderedChunks.push(chunk);
+    });
+
+    const rendered = renderedChunks.join('');
 
     const result = rendered.replace(/\r\n?/g, '\n');
     const compacted = compactNewlines
@@ -32130,11 +32506,7 @@ function __buildImportedTempSectionFromVisualMarkdown(node, parsedMarkdown, cont
 }
 
 function __buildMdNodeMarkdown(node) {
-    const hasDirectSource = !!(node && typeof node === 'object' && Object.prototype.hasOwnProperty.call(node, 'markdownSource'));
-    if (hasDirectSource) {
-        return String(node.markdownSource == null ? '' : node.markdownSource);
-    }
-    const markdownSource = __normalizeCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
+    const markdownSource = __normalizeCanvasMarkdownSource(__resolveCanvasNativeTextNodeBody(node));
     if (!markdownSource.trim()) return '\n';
     return markdownSource;
 }
@@ -32937,13 +33309,13 @@ function __isCanvasNativeTextNode(node) {
 function __resolveCanvasNativeTextNodeBody(node) {
     if (!node || typeof node !== 'object') return '';
     const directText = String(node.text == null ? '' : node.text);
-    if (directText.trim()) return directText;
+    if (directText.length) return directText;
     const rawHtml = String(node.html == null ? '' : node.html).trim();
     if (!rawHtml) return '';
     try {
         const div = document.createElement('div');
         div.innerHTML = rawHtml;
-        return String(div.innerText || div.textContent || '').trim();
+        return String(div.innerText || div.textContent || '');
     } catch (_) {
         return '';
     }
@@ -37199,7 +37571,20 @@ function __buildPersistedCanvasState(state) {
             return cloned;
         })
         .filter(Boolean);
-    const persistedMdNodes = sourceMdNodes.filter((node) => !__isSandboxImportedNode(node));
+    const persistedMdNodes = sourceMdNodes
+        .filter((node) => !__isSandboxImportedNode(node))
+        .map((node) => {
+            const cloned = __cloneCanvasProtocolJson(node);
+            if (!cloned || typeof cloned !== 'object') return null;
+            const refreshCachesFromMarkdown = !__isCanvasNativeTextNode(cloned)
+                || !(typeof cloned.html === 'string' && cloned.html.trim());
+            __ensureMdNodeMarkdownProtocol(cloned, {
+                refreshCachesFromMarkdown
+            });
+            try { delete cloned.markdownSource; } catch (_) { }
+            return cloned;
+        })
+        .filter(Boolean);
 
     const validIds = new Set();
     persistedSections.forEach((section) => {
@@ -38080,8 +38465,10 @@ function __buildCanvasTempStateProtocolView(stateInput) {
         .map((node) => {
             const cloned = __cloneCanvasProtocolJson(node);
             if (!cloned) return null;
+            const refreshCachesFromMarkdown = !__isCanvasNativeTextNode(cloned)
+                || !cloned.html;
             __ensureMdNodeMarkdownProtocol(cloned, {
-                refreshCachesFromMarkdown: !cloned.html
+                refreshCachesFromMarkdown
             });
             return cloned;
         })
@@ -39864,9 +40251,11 @@ function __applyCanvasTempStateObject(state) {
 
     try {
         (CanvasState.mdNodes || []).forEach((node) => {
+            const refreshCachesFromMarkdown = __isCanvasNativeTextNode(node)
+                ? !(typeof node.html === 'string' && node.html.trim())
+                : true;
             __ensureMdNodeMarkdownProtocol(node, {
-                refreshCachesFromMarkdown: !(typeof node.html === 'string' && node.html.trim())
-                    || typeof node.markdownSource === 'string'
+                refreshCachesFromMarkdown
             });
         });
     } catch (_) { }
@@ -40002,8 +40391,11 @@ function saveTempNodes(options = {}) {
 
     try {
         (CanvasState.mdNodes || []).forEach((node) => {
+            const refreshCachesFromMarkdown = __isCanvasNativeTextNode(node)
+                ? false
+                : true;
             __ensureMdNodeMarkdownProtocol(node, {
-                refreshCachesFromMarkdown: typeof node.markdownSource === 'string' && !!node.markdownSource.trim()
+                refreshCachesFromMarkdown
             });
         });
     } catch (_) { }

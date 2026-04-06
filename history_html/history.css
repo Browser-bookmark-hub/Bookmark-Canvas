@@ -7548,6 +7548,15 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     overflow-x: hidden;
 }
 
+/* 说明区选中态：单击后高亮，二次单击进入编辑 */
+.permanent-section-tip-container.desc-selected:not(.editing) {
+    outline: 2px solid color-mix(in srgb, var(--section-color, #10b981) 78%, #ffffff 22%);
+    outline-offset: -2px;
+    box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--section-color, #10b981) 42%, transparent),
+        0 0 0 3px color-mix(in srgb, var(--section-color, #10b981) 18%, transparent);
+}
+
 /* 永久栏目说明：复用 WYSIWYG 的 placeholder 机制 */
 .permanent-section-tip.md-wysiwyg-editor:empty::before {
     color: rgba(255, 255, 255, 0.7);
@@ -8471,6 +8480,15 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     max-height: calc(var(--desc-line-height, 1.4) * var(--desc-display-rows, 4) * 1em);
     overflow-y: auto;
     overflow-x: hidden;
+}
+
+/* 说明区选中态：单击后高亮，二次单击进入编辑 */
+.temp-node-description-container.desc-selected:not(.editing) {
+    outline: 2px solid color-mix(in srgb, var(--section-color, #2563eb) 78%, #ffffff 22%);
+    outline-offset: -2px;
+    box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--section-color, #2563eb) 42%, transparent),
+        0 0 0 3px color-mix(in srgb, var(--section-color, #2563eb) 18%, transparent);
 }
 
 /* Markdown 渲染样式 */
@@ -9977,9 +9995,9 @@ body.canvas-node-maximized-active .canvas-edge-label {
         0 0 8px 1px color-mix(in srgb, var(--node-glow-color) 40%, transparent);
 }
 
-/* 选中但未编辑时，编辑器区域不拦截鼠标事件，允许拖动整个卡片 */
+/* 选中但未编辑时：允许文本区域接收滚轮事件（可直接滚动），仍保留抓手光标 */
 .md-canvas-node.selected:not([data-editing="true"]) .md-canvas-editor {
-    pointer-events: none;
+    pointer-events: auto;
     cursor: grab;
 }
 
@@ -10006,11 +10024,17 @@ body.canvas-node-maximized-active .canvas-edge-label {
     line-height: 1.5;
     word-wrap: break-word;
     overflow-wrap: break-word;
+    white-space: pre-wrap;
 }
 
-/* 空白栏目非编辑模式时，文本区域不拦截鼠标事件（允许画布滚动穿透） */
-.md-canvas-node:not(.editing) .md-canvas-text {
+/* 空白栏目未选中且非编辑时，文本区域不拦截鼠标事件（允许画布滚动穿透） */
+.md-canvas-node:not(.editing):not(.selected) .md-canvas-text {
     pointer-events: none;
+}
+
+/* 空白栏目选中后（未编辑）即可直接滚动 */
+.md-canvas-node.selected:not(.editing) .md-canvas-text {
+    pointer-events: auto;
 }
 
 /* 非编辑模式下，仍允许链接接收鼠标事件（右键菜单、点击跳转），模仿Obsidian行为 */

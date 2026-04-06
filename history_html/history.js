@@ -7998,13 +7998,19 @@ async function addTabsToBlankNode(tabs, scope, options = {}) {
     if (targetId) {
         const node = window.CanvasModule.CanvasState.mdNodes.find(n => n && n.id === targetId);
         if (node) {
-            if (typeof __deriveMdNodeMarkdownSource === 'function' && typeof __ensureMdNodeMarkdownProtocol === 'function') {
-                const existingMarkdown = __deriveMdNodeMarkdownSource(node);
+            if (typeof __ensureMdNodeMarkdownProtocol === 'function') {
+                const existingMarkdown =
+                    typeof __resolveCanvasNativeTextNodeBody === 'function'
+                        ? __resolveCanvasNativeTextNodeBody(node)
+                        : String(node.text || '');
                 const normalizedExisting = String(existingMarkdown || '').replace(/\s+$/, '');
                 const normalizedAppend = String(markdown || '').replace(/^\s+/, '').replace(/\s+$/, '');
-                node.markdownSource = normalizedExisting
+                const mergedMarkdown = normalizedExisting
                     ? `${normalizedExisting}\n\n---\n\n${normalizedAppend}`
                     : normalizedAppend;
+                node.text = mergedMarkdown;
+                node.subtype = 'canvas-native-text';
+                node.source = 'obsidian-canvas-text';
                 __ensureMdNodeMarkdownProtocol(node, { refreshCachesFromMarkdown: true });
             } else {
                 if (node.html && node.html.trim()) {

@@ -154,7 +154,7 @@
   function getMdNodeTitleLineFromSource(node) {
     const raw = isCanvasNativeTextNode(node)
       ? normalizeText(node && node.text)
-      : normalizeText(node && node.markdownSource);
+      : normalizeText(node && node.text);
     if (!raw) return '';
     const lines = raw
       .split(/\n+/)
