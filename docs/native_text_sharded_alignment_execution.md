@@ -1,84 +1,40 @@
-# Native Text 分片对齐执行计划（立即实施）
+# Native Text 分片对齐执行说明（已归档）
 
-日期：2026-03-24
-范围：代码层改造（不依赖文档迁移）
-目标：补齐“空白栏目 native text 仍是双轨”的最后缺口，使其进入 BCS 分片主链路。
-
----
-
-## 1. 问题定义
-
-当前状态：
-- 临时栏目、永久栏目、画布结构基本已对齐。
-- 空白栏目中的普通 markdown 卡片已进入 `bcs:md:*`。
-- 空白栏目中的 native text 卡片仍主要依赖 `.canvas text` 节点 + 导出镜像，不在 `bcs:md:*` 主链路里稳定闭环。
-
-影响：
-- 本地存储与导出/同步模型仍存在双轨。
-- 审计脚本在 `md_ids_aligned` 一类检查中容易出现偏差。
+日期：2026-04-08  
+状态：**归档（不执行）**
 
 ---
 
-## 2. 实施目标
+## 1. 这份文档为什么归档
 
-1. native text 节点进入 `bcs:md:*` 分片读写链路。
-2. native text 的 `_filePath` 映射进入分片守门员，参与脏标记与清脏。
-3. 从 BCS 反序列化时可还原 native text 节点，不退化为普通 md 节点。
-4. 保持 `.canvas` 仍为布局/连线镜像承载，不破坏现有导出兼容。
+这份旧计划的核心目标是把空白栏目 / native text 拉回 `bcs:md:*` 分片主链路。  
+当前代码与产品路线已经不是这个方向，所以该计划不再作为实施依据。
 
 ---
 
-## 3. 代码改造点
+## 2. 当前真实实现（生效中）
 
-1. `__collectBcsFileRefsFromState`
-- 新增 `nativeTextPaths`、`nativeTextPathById` 输出。
-- native text 节点在计算文件名后写入 path 映射，而非仅加入 `nativeTextNodes`。
-
-2. `__buildBcsMdPayloadFromNode`
-- 不再把 native text 直接排除。
-- native text payload 使用：
-  - `id`
-  - `markdownSource`（由 `__buildCanvasNativeTextMirrorMarkdown` 生成）
-  - `subtype` / `source`
-  - 可选 `createdAt` / `updatedAt`
-
-3. `__saveCanvasTempStateToBcsStorage`
-- `mdIdSet/mdById` 包含 native text（仅排除 import-container）。
-- 写入 md 分片时，`filePath` 优先 `mdNodePathById`，再 fallback `nativeTextPathById`。
-
-4. `__buildCanvasTempStateFromBcsStorage`
-- md 分片恢复时识别 native payload（`subtype/source`）。
-- 对 native payload 的 `markdownSource` 执行 `__extractCanvasNativeTextMetaCommentBlock`，恢复 `text`。
-- 构造 `subtype: canvas-native-text`、`source: obsidian-canvas-text` 节点。
+1. 空白栏目和 native text 统一走 `.canvas` 的 `type: "text"` 节点。  
+2. 本地存储不再使用 `bcs:md:*` 作为空白栏目正文链路。  
+3. 导入 / 导出 / 同步都围绕同一份 `.canvas text` 数据运行。  
+4. 脏标记与清脏按 `blankIds -> .canvas 路径` 对齐。
 
 ---
 
-## 4. 验收标准（代码层）
+## 3. 当前验收口径
 
-1. 语法校验通过：
-- `node --check history_html/bookmark_canvas_module.js`
-
-2. 结构性验收：
-- native text 对应 ID 能出现在 `bcs:md:*`。
-- native text 对应 md 分片存在 `_filePath`。
-- 从 BCS 反序列化后 native text 节点仍为 `canvas-native-text`，且 `text` 正确。
-
-3. 同步链路验收：
-- `buildDirtySyncFilesFromShards()` 对 native text 的变更能给出路径。
-- `clearShardedDirtyBySyncedFiles()` 后 native text 对应分片可清脏。
+1. `bcs:md:*` 对空白栏目链路应为 0（或不参与）。  
+2. 导出包中不应出现空白栏目独立文件夹文件。  
+3. `.canvas` 里的 `text` 节点数量，应与运行时空白栏目数量一致。  
+4. JSON 导出与云同步产物应一致。
 
 ---
 
-## 5. 非目标
+## 4. 如果未来要重启 `bcs:md:*` 方案（仅备忘）
 
-1. 不改视觉模式/视觉无图标的 UI 表现。
-2. 不改永久栏目 API 真相源策略。
-3. 不做历史兼容层回退（按当前“仅新分片”方向执行）。
+必须先重新立项，并一次性定义清楚以下边界再动代码：
 
----
-
-## 6. 执行顺序
-
-1. 先改 `bookmark_canvas_module.js` 四个函数。
-2. 跑语法检查。
-3. 输出最小 F12 校验脚本（S1/S2/S3）用于你侧验证。
+1. 空白栏目正文主真相源改到哪里。  
+2. `.canvas` 与 `.md` 的职责拆分规则。  
+3. dirty / clear-dirty / 导入导出兼容策略。  
+4. 历史数据迁移与回滚策略。

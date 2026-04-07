@@ -2098,8 +2098,6 @@ button:disabled {
 .md-format-btn *,
 .md-color-chip *,
 .md-color-picker-btn *,
-.md-fontcolor-chip *,
-.md-align-option *,
 .md-heading-option *,
 .md-list-option *,
 .temp-node-action-btn *,
@@ -7611,11 +7609,6 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     font-style: italic;
 }
 
-/* 支持Obsidian风格的HTML标签（永久栏目说明） */
-.permanent-section-tip font {
-    /* font标签的color属性会自动应用 */
-}
-
 .permanent-section-tip u {
     text-decoration: underline;
 }
@@ -8538,11 +8531,6 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .temp-node-description em {
     font-style: italic;
-}
-
-/* 支持Obsidian风格的HTML标签（临时栏目描述） */
-.temp-node-description font {
-    /* font标签的color属性会自动应用 */
 }
 
 .temp-node-description u {
@@ -10281,155 +10269,12 @@ body.canvas-node-maximized-active .canvas-edge-label {
     font-family: monospace;
 }
 
-/* 字体颜色弹层样式 */
-.md-fontcolor-popover {
-    position: absolute;
-    top: -4px;
-    left: 0;
-    transform: translateX(-50%) translateY(-100%);
-    background: #ffffff;
-    border: 1px solid rgba(27, 31, 36, 0.25);
-    border-radius: 6px;
-    padding: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    z-index: 12200;
-    display: none;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 140px;
-}
-
-.md-fontcolor-popover.open {
-    display: flex;
-}
-
-[data-theme="dark"] .md-fontcolor-popover {
-    background: #2d2d2d;
-    border-color: rgba(255, 255, 255, 0.15);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-}
-
-.md-fontcolor-grid {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 4px;
-}
-
-.md-fontcolor-chip {
-    width: 20px;
-    height: 20px;
-    border-radius: 3px;
-    border: 1px solid rgba(0, 0, 0, 0.15);
-    cursor: pointer;
-    transition: transform 0.12s ease, box-shadow 0.12s ease;
-}
-
-.md-fontcolor-chip:hover {
-    transform: scale(1.15);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
-    z-index: 1;
-}
-
-[data-theme="dark"] .md-fontcolor-chip {
-    border-color: rgba(255, 255, 255, 0.2);
-}
-
-.md-fontcolor-custom {
-    display: flex;
-    justify-content: center;
-    padding-top: 4px;
-    border-top: 1px solid rgba(0, 0, 0, 0.1);
-}
-
-[data-theme="dark"] .md-fontcolor-custom {
-    border-top-color: rgba(255, 255, 255, 0.1);
-}
-
-.md-fontcolor-input {
-    width: 100%;
-    height: 24px;
-    border: 1px solid rgba(27, 31, 36, 0.25);
-    border-radius: 4px;
-    cursor: pointer;
-    padding: 0;
-}
-
-[data-theme="dark"] .md-fontcolor-input {
-    border-color: rgba(255, 255, 255, 0.2);
-}
-
-/* 对齐弹层样式 */
-.md-align-popover {
-    position: absolute;
-    top: -4px;
-    left: 0;
-    transform: translateX(-50%) translateY(-100%);
-    background: #ffffff;
-    border: 1px solid rgba(27, 31, 36, 0.25);
-    border-radius: 6px;
-    padding: 4px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    z-index: 12200;
-    display: none;
-    flex-direction: row;
-    gap: 2px;
-}
-
-.md-align-popover.open {
-    display: flex;
-}
-
-[data-theme="dark"] .md-align-popover {
-    background: #2d2d2d;
-    border-color: rgba(255, 255, 255, 0.15);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-}
-
-.md-align-option {
-    width: 28px;
-    height: 28px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    background: transparent;
-    color: #444;
-    cursor: pointer;
-    transition: all 0.12s ease;
-    font-size: 14px;
-}
-
-.md-align-option:hover {
-    background: rgba(9, 105, 218, 0.1);
-    border-color: rgba(9, 105, 218, 0.3);
-    color: #0969da;
-}
-
-.md-align-option:active {
-    transform: scale(0.92);
-}
-
-[data-theme="dark"] .md-align-option {
-    color: #e4e6eb;
-}
-
-[data-theme="dark"] .md-align-option:hover {
-    background: rgba(88, 166, 255, 0.15);
-    border-color: rgba(88, 166, 255, 0.3);
-    color: #58a6ff;
-}
-
-/* 字体颜色、对齐、标题按钮的激活状态 */
-.md-format-fontcolor-btn.active,
-.md-format-align-btn.active,
+/* 标题按钮的激活状态 */
 .md-format-heading-btn.active {
     background: rgba(9, 105, 218, 0.15);
     border-color: rgba(9, 105, 218, 0.4);
 }
 
-[data-theme="dark"] .md-format-fontcolor-btn.active,
-[data-theme="dark"] .md-format-align-btn.active,
 [data-theme="dark"] .md-format-heading-btn.active {
     background: rgba(88, 166, 255, 0.2);
     border-color: rgba(88, 166, 255, 0.4);
@@ -12387,11 +12232,6 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
     color: #000000;
 }
 
-/* 支持Obsidian风格的HTML标签 */
-.md-canvas-text font {
-    /* font标签的color属性会自动应用 */
-}
-
 .md-canvas-text u,
 .md-wysiwyg-editor u {
     text-decoration: underline;
@@ -14317,21 +14157,17 @@ body.canvas-popover-active .md-format-popover,
 body.canvas-popover-active .md-color-popover,
 body.canvas-popover-active .temp-color-popover,
 body.canvas-popover-active .md-delete-options-popover,
-body.canvas-popover-active .md-fontcolor-popover,
 body.canvas-popover-active .md-heading-popover,
-body.canvas-popover-active .md-align-popover,
 body.canvas-popover-active .md-list-popover {
     pointer-events: auto !important;
 }
 
 /* Popover Interaction Fixes: Reset cursor and stop drag propagation visual cues */
 .md-format-popover,
-.md-fontcolor-popover,
 .md-color-popover,
 .temp-color-popover,
 .md-delete-options-popover,
 .md-heading-popover,
-.md-align-popover,
 .md-list-popover {
     cursor: default !important;
 }
@@ -14339,7 +14175,6 @@ body.canvas-popover-active .md-list-popover {
 /* Ensure buttons inside have pointer cursor */
 .md-format-btn,
 .md-color-chip,
-.md-fontcolor-chip,
 .temp-node-action-btn {
     cursor: pointer;
 }
