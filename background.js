@@ -551,20 +551,85 @@ const CHANGE_LOG_MAX = 10000;
 const processedFavicons = new Map();
 const FAVICON_UPDATE_COOLDOWN = 5000;
 
-async function fetchImageAsDataUrl(url) {
-  if (!url) return null;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return await new Promise((resolve) => {
+async function blobToDataUrl(blob) {
+  if (!blob) return null;
+  return await new Promise((resolve) => {
+    try {
       const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
+      reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
       reader.onerror = () => resolve(null);
       reader.readAsDataURL(blob);
-    });
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+async function readBlobDimensions(blob) {
+  if (!blob) return null;
+  try {
+    if (typeof createImageBitmap !== 'function') {
+      return null;
+    }
+    const bitmap = await createImageBitmap(blob);
+    const width = Number(bitmap && bitmap.width) || 0;
+    const height = Number(bitmap && bitmap.height) || 0;
+    try {
+      if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+    } catch (_) { }
+    if (width > 0 && height > 0) {
+      return { width, height };
+    }
+    return null;
   } catch (_) {
     return null;
+  }
+}
+
+async function fetchImageAsDataUrl(url, options = {}) {
+  if (!url) return null;
+  const timeoutMs = Math.max(500, Number(options.timeoutMs) || 4000);
+  const maxBytes = Math.max(1024, Number(options.maxBytes) || (512 * 1024));
+  const minDimensionPx = Math.max(1, Number(options.minDimensionPx) || 1);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    try { controller.abort(); } catch (_) { }
+  }, timeoutMs);
+
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return null;
+
+    const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+    if (contentType && !contentType.startsWith('image/')) {
+      return null;
+    }
+
+    const declaredLength = Number(res.headers.get('content-length') || 0);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      return null;
+    }
+
+    const blob = await res.blob();
+    if (!blob || blob.size <= 0 || blob.size > maxBytes) {
+      return null;
+    }
+
+    const dimensions = await readBlobDimensions(blob);
+    if (!dimensions || dimensions.width < minDimensionPx || dimensions.height < minDimensionPx) {
+      return null;
+    }
+
+    const dataUrl = await blobToDataUrl(blob);
+    if (!dataUrl || !dataUrl.startsWith('data:image/')) {
+      return null;
+    }
+    return dataUrl;
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -586,13 +651,15 @@ if (browserAPI.tabs && browserAPI.tabs.onUpdated) {
       }
 
       const dataUrl = await fetchImageAsDataUrl(changeInfo.favIconUrl || tab.favIconUrl);
-      try {
-        browserAPI.runtime.sendMessage({
-          action: 'updateFaviconFromTab',
-          url: tab.url,
-          favIconUrl: dataUrl || changeInfo.favIconUrl || tab.favIconUrl
-        }).catch(() => {});
-      } catch (_) {}
+      if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
+        try {
+          browserAPI.runtime.sendMessage({
+            action: 'updateFaviconFromTab',
+            url: tab.url,
+            favIconUrl: dataUrl
+          }).catch(() => {});
+        } catch (_) {}
+      }
     } catch (_) {}
   });
 }
@@ -2057,6 +2124,26 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       const response = await handleCanvasGitReadRemoteSignalMessage(message);
       sendResponse(response);
+    })();
+    return true;
+  }
+
+  if (message.action === 'canvasFetchFaviconDataUrl') {
+    (async () => {
+      try {
+        const url = typeof message.url === 'string' ? message.url : '';
+        const dataUrl = await fetchImageAsDataUrl(url, {
+          minDimensionPx: Number(message.minDimensionPx) || 1,
+          maxBytes: Number(message.maxBytes) || (512 * 1024),
+          timeoutMs: Number(message.timeoutMs) || 4000
+        });
+        sendResponse({
+          success: true,
+          dataUrl: typeof dataUrl === 'string' ? dataUrl : ''
+        });
+      } catch (e) {
+        sendResponse({ success: false, error: e?.message || String(e) });
+      }
     })();
     return true;
   }

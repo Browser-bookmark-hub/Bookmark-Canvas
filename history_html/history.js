@@ -1809,7 +1809,21 @@ const FaviconCache = {
     dbVersion: 1,
     storeName: 'favicons',
     failureStoreName: 'failures',
-    memoryCache: new Map(), // {url: faviconDataUrl}
+    failureTtlMs: 24 * 60 * 60 * 1000,
+    requestTimeoutMs: 4000,
+    maxFetchedBytes: 512 * 1024,
+    minFaviconDimensionPx: 96,
+    minFallbackFaviconDimensionPx: 32,
+    browserFaviconSizeCandidates: [128, 96, 64],
+    publicFaviconSizeCandidates: [256, 192, 128, 96, 64],
+    googleS2SizeCandidates: [128, 64],
+    cacheQualityVersion: 8,
+    cacheQualityVersionKey: 'bb_favicon_quality_version',
+    firstInstallFastPathKey: 'bb_favicon_first_install_fast_path_done',
+    firstInstallSkipDbReadsRemaining: 0,
+    memoryCache: new Map(), // {domain: faviconDataUrl}
+    dimensionCache: new Map(), // {faviconDataUrl: {width, height}}
+    visualProfileCache: new Map(), // {faviconDataUrl: visual profile}
     failureCache: new Set(), // 失败的域名集合
     pendingRequests: new Map(), // 正在请求的URL，避免重复请求
 
@@ -1826,7 +1840,13 @@ const FaviconCache = {
 
             request.onsuccess = () => {
                 this.db = request.result;
-                resolve();
+                Promise.resolve()
+                    .then(() => this._ensureQualityCacheVersion())
+                    .then(() => this._initializeFirstInstallFastPath())
+                    .catch(() => {
+                        // ignore init errors
+                    })
+                    .finally(() => resolve());
             };
 
             request.onupgradeneeded = (event) => {
@@ -1845,6 +1865,90 @@ const FaviconCache = {
                 }
             };
         });
+    },
+
+    async _countStoreEntries(storeName) {
+        if (!this.db) return 0;
+        return new Promise((resolve) => {
+            try {
+                const tx = this.db.transaction([storeName], 'readonly');
+                const req = tx.objectStore(storeName).count();
+                req.onsuccess = () => resolve(Number(req.result) || 0);
+                req.onerror = () => resolve(0);
+            } catch (_) {
+                resolve(0);
+            }
+        });
+    },
+
+    async _initializeFirstInstallFastPath() {
+        let alreadyHandled = false;
+        try {
+            alreadyHandled = localStorage.getItem(this.firstInstallFastPathKey) === '1';
+        } catch (_) {
+            alreadyHandled = false;
+        }
+
+        if (alreadyHandled) {
+            this.firstInstallSkipDbReadsRemaining = 0;
+            return;
+        }
+
+        const [faviconCount, failureCount] = await Promise.all([
+            this._countStoreEntries(this.storeName),
+            this._countStoreEntries(this.failureStoreName)
+        ]);
+
+        // 仅首次安装：当持久化缓存完全为空时，仅跳过第 1 次 DB 读取。
+        this.firstInstallSkipDbReadsRemaining = (faviconCount === 0 && failureCount === 0) ? 1 : 0;
+
+        try {
+            localStorage.setItem(this.firstInstallFastPathKey, '1');
+        } catch (_) {
+            // ignore
+        }
+    },
+
+    async _ensureQualityCacheVersion() {
+        const currentVersion = Number(this.cacheQualityVersion) || 1;
+        let storedVersion = 0;
+
+        try {
+            storedVersion = Number(localStorage.getItem(this.cacheQualityVersionKey) || 0);
+            if (!Number.isFinite(storedVersion)) storedVersion = 0;
+        } catch (_) {
+            storedVersion = 0;
+        }
+
+        if (storedVersion >= currentVersion) {
+            return;
+        }
+
+        this.memoryCache.clear();
+        this.dimensionCache.clear();
+        this.visualProfileCache.clear();
+        this.failureCache.clear();
+
+        if (this.db) {
+            await new Promise((resolve) => {
+                try {
+                    const tx = this.db.transaction([this.storeName, this.failureStoreName], 'readwrite');
+                    tx.objectStore(this.storeName).clear();
+                    tx.objectStore(this.failureStoreName).clear();
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = () => resolve();
+                    tx.onabort = () => resolve();
+                } catch (_) {
+                    resolve();
+                }
+            });
+        }
+
+        try {
+            localStorage.setItem(this.cacheQualityVersionKey, String(currentVersion));
+        } catch (_) {
+            // ignore
+        }
     },
 
     // 检查URL是否为本地/内网/明显无效
@@ -1881,6 +1985,10 @@ const FaviconCache = {
         }
     },
 
+    isStoredFaviconData(dataUrl) {
+        return typeof dataUrl === 'string' && dataUrl.startsWith('data:image/');
+    },
+
     // 从缓存获取favicon
     async get(url) {
         if (this.isInvalidUrl(url)) {
@@ -1901,6 +2009,12 @@ const FaviconCache = {
                 return this.memoryCache.get(domain);
             }
 
+            // 首次安装快速路径：仅第 1 次读取跳过 IndexedDB，后续恢复正常。
+            if (this.firstInstallSkipDbReadsRemaining > 0) {
+                this.firstInstallSkipDbReadsRemaining -= 1;
+                return null;
+            }
+
             // 从 IndexedDB 读取
             if (!this.db) await this.init();
 
@@ -1913,9 +2027,9 @@ const FaviconCache = {
 
                 failureRequest.onsuccess = () => {
                     if (failureRequest.result) {
-                        // 检查失败缓存是否过期（7天）
+                        // 检查失败缓存是否过期（默认 24 小时）
                         const age = Date.now() - failureRequest.result.timestamp;
-                        if (age < 7 * 24 * 60 * 60 * 1000) {
+                        if (age < this.failureTtlMs) {
                             this.failureCache.add(domain);
                             resolve('failed');
                             return;
@@ -1927,10 +2041,18 @@ const FaviconCache = {
                     const request = store.get(domain);
 
                     request.onsuccess = () => {
-                        if (request.result) {
+                        if (request.result && this.isStoredFaviconData(request.result.dataUrl)) {
                             // 永久缓存，不检查过期（只有删除书签时才删除缓存）
                             this.memoryCache.set(domain, request.result.dataUrl);
                             resolve(request.result.dataUrl);
+                        } else if (request.result) {
+                            try {
+                                const cleanupTx = this.db.transaction([this.storeName], 'readwrite');
+                                cleanupTx.objectStore(this.storeName).delete(domain);
+                            } catch (_) {
+                                // ignore
+                            }
+                            resolve(null);
                         } else {
                             resolve(null);
                         }
@@ -1948,7 +2070,7 @@ const FaviconCache = {
 
     // 保存favicon到缓存
     async save(url, dataUrl) {
-        if (this.isInvalidUrl(url)) return;
+        if (this.isInvalidUrl(url) || !this.isStoredFaviconData(dataUrl)) return;
 
         try {
             const urlObj = new URL(url);
@@ -2028,6 +2150,8 @@ const FaviconCache = {
 
             // 清除内存缓存
             this.memoryCache.delete(domain);
+            this.dimensionCache.clear();
+            this.visualProfileCache.clear();
             this.failureCache.delete(domain);
 
             // 清除 IndexedDB
@@ -2042,8 +2166,199 @@ const FaviconCache = {
         }
     },
 
+    async getDataUrlDimensions(dataUrl) {
+        if (!this.isStoredFaviconData(dataUrl)) return null;
+        if (this.dimensionCache.has(dataUrl)) {
+            return this.dimensionCache.get(dataUrl);
+        }
+
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                const width = Number(img.naturalWidth || img.width || 0);
+                const height = Number(img.naturalHeight || img.height || 0);
+                if (width > 0 && height > 0) {
+                    const dimensions = { width, height };
+                    this.dimensionCache.set(dataUrl, dimensions);
+                    resolve(dimensions);
+                    return;
+                }
+                resolve(null);
+            };
+            img.onerror = () => resolve(null);
+            img.src = dataUrl;
+        });
+    },
+
+    async isDataUrlAtLeast(dataUrl, minDimensionPx = 1) {
+        const min = Math.max(1, Number(minDimensionPx) || 1);
+        if (!this.isStoredFaviconData(dataUrl)) return false;
+        const dimensions = await this.getDataUrlDimensions(dataUrl);
+        if (!dimensions) return false;
+        return Number(dimensions.width) >= min && Number(dimensions.height) >= min;
+    },
+
+    async getDataUrlVisualProfile(dataUrl) {
+        if (!this.isStoredFaviconData(dataUrl)) return null;
+        if (this.visualProfileCache.has(dataUrl)) {
+            return this.visualProfileCache.get(dataUrl);
+        }
+
+        const profile = await new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                const width = Number(img.naturalWidth || img.width || 0);
+                const height = Number(img.naturalHeight || img.height || 0);
+                if (width <= 0 || height <= 0) {
+                    resolve(null);
+                    return;
+                }
+
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) {
+                        resolve({
+                            width,
+                            height,
+                            minDimension: Math.min(width, height),
+                            sampleCount: 0,
+                            transparentRatio: 0,
+                            whiteOpaqueRatio: 0,
+                            nearWhiteOpaqueRatio: 0
+                        });
+                        return;
+                    }
+                    ctx.drawImage(img, 0, 0);
+                    const pixels = ctx.getImageData(0, 0, width, height).data;
+
+                    const step = Math.max(1, Math.floor(Math.min(width, height) / 64));
+                    let sampleCount = 0;
+                    let transparentCount = 0;
+                    let whiteOpaqueCount = 0;
+                    let nearWhiteOpaqueCount = 0;
+
+                    for (let y = 0; y < height; y += step) {
+                        for (let x = 0; x < width; x += step) {
+                            const idx = ((y * width) + x) * 4;
+                            const r = pixels[idx];
+                            const g = pixels[idx + 1];
+                            const b = pixels[idx + 2];
+                            const a = pixels[idx + 3];
+                            sampleCount += 1;
+
+                            if (a <= 8) {
+                                transparentCount += 1;
+                                continue;
+                            }
+
+                            if (a >= 245) {
+                                if (r >= 250 && g >= 250 && b >= 250) {
+                                    whiteOpaqueCount += 1;
+                                }
+                                if (r >= 240 && g >= 240 && b >= 240) {
+                                    nearWhiteOpaqueCount += 1;
+                                }
+                            }
+                        }
+                    }
+
+                    resolve({
+                        width,
+                        height,
+                        minDimension: Math.min(width, height),
+                        sampleCount,
+                        transparentRatio: sampleCount > 0 ? (transparentCount / sampleCount) : 0,
+                        whiteOpaqueRatio: sampleCount > 0 ? (whiteOpaqueCount / sampleCount) : 0,
+                        nearWhiteOpaqueRatio: sampleCount > 0 ? (nearWhiteOpaqueCount / sampleCount) : 0
+                    });
+                } catch (_) {
+                    resolve({
+                        width,
+                        height,
+                        minDimension: Math.min(width, height),
+                        sampleCount: 0,
+                        transparentRatio: 0,
+                        whiteOpaqueRatio: 0,
+                        nearWhiteOpaqueRatio: 0
+                    });
+                }
+            };
+            img.onerror = () => resolve(null);
+            img.src = dataUrl;
+        });
+
+        if (profile) {
+            this.visualProfileCache.set(dataUrl, profile);
+        }
+        return profile;
+    },
+
+    _classifyFaviconSource(sourceUrl = '') {
+        const safe = String(sourceUrl || '');
+        if (safe.includes('icons.duckduckgo.com/ip3/')) return 'duckduckgo';
+        if (safe.includes('faviconV2?client=SOCIAL')) return 'gstatic';
+        if (safe.includes('google.com/s2/favicons')) return 'google-s2';
+        if (safe.includes('/_favicon/')) return 'browser';
+        return 'other';
+    },
+
+    _isWhitePlateProfile(profile) {
+        if (!profile || typeof profile !== 'object') return false;
+        const nearWhite = Number(profile.nearWhiteOpaqueRatio || 0);
+        const transparent = Number(profile.transparentRatio || 0);
+        return nearWhite >= 0.22 && transparent <= 0.10;
+    },
+
+    _isTransparentPreferredProfile(profile) {
+        if (!profile || typeof profile !== 'object') return false;
+        const transparent = Number(profile.transparentRatio || 0);
+        return transparent >= 0.04;
+    },
+
+    _scoreFaviconCandidate(profile, sourceKind = '') {
+        if (!profile || typeof profile !== 'object') return -Infinity;
+        const minDimension = Math.max(0, Number(profile.minDimension || 0));
+        const transparentRatio = Math.max(0, Math.min(1, Number(profile.transparentRatio || 0)));
+        const nearWhiteRatio = Math.max(0, Math.min(1, Number(profile.nearWhiteOpaqueRatio || 0)));
+
+        let score = 0;
+        score += Math.min(200, minDimension);
+        score += transparentRatio * 60;
+        score -= nearWhiteRatio * 90;
+
+        if (sourceKind === 'duckduckgo') score += 8;
+        else if (sourceKind === 'gstatic') score += 4;
+        else if (sourceKind === 'google-s2') score += 3;
+        else if (sourceKind === 'browser') score += 1;
+
+        return score;
+    },
+
+    async _buildFaviconCandidate(dataUrl, sourceUrl, minDimensionPx) {
+        if (!this.isStoredFaviconData(dataUrl)) return null;
+        const profile = await this.getDataUrlVisualProfile(dataUrl);
+        if (!profile) return null;
+        const sourceKind = this._classifyFaviconSource(sourceUrl);
+        const isWhitePlate = this._isWhitePlateProfile(profile);
+        const score = this._scoreFaviconCandidate(profile, sourceKind);
+        const minDimension = Math.max(0, Number(profile.minDimension || 0));
+        const reachedMin = minDimension >= Math.max(1, Number(minDimensionPx) || 1);
+        return {
+            dataUrl,
+            sourceUrl,
+            sourceKind,
+            profile,
+            score,
+            isWhitePlate,
+            reachedMin
+        };
+    },
+
     // 获取favicon（带缓存和请求合并）
-    async fetch(url) {
+    async fetch(url, options = {}) {
         if (this.isInvalidUrl(url)) {
             return fallbackIcon;
         }
@@ -2051,6 +2366,19 @@ const FaviconCache = {
         try {
             const urlObj = new URL(url);
             const domain = urlObj.hostname;
+            const requestedMinDimension = Math.max(0, Number(options?.minDimensionPx) || 0);
+            const strictMinDimension = requestedMinDimension > 0
+                ? Math.max(Math.max(1, Number(this.minFaviconDimensionPx) || 96), requestedMinDimension)
+                : Math.max(1, Number(this.minFaviconDimensionPx) || 96);
+            const fallbackMinCandidate = Number(options?.fallbackMinDimensionPx);
+            const fallbackMinBase = Number.isFinite(fallbackMinCandidate) && fallbackMinCandidate > 0
+                ? fallbackMinCandidate
+                : (Number(this.minFallbackFaviconDimensionPx) || 32);
+            const fallbackMinDimension = Math.max(1, Math.min(strictMinDimension, fallbackMinBase));
+            const cacheMinDimension = requestedMinDimension > 0
+                ? Math.max(1, Number(options?.cacheMinDimensionPx) || fallbackMinDimension)
+                : 0;
+            const requestKey = `${domain}|${strictMinDimension}|${fallbackMinDimension}`;
 
             // 1. 检查缓存
             const cached = await this.get(url);
@@ -2058,23 +2386,28 @@ const FaviconCache = {
                 return fallbackIcon;
             }
             if (cached) {
-                return cached;
+                if (cacheMinDimension <= 0 || await this.isDataUrlAtLeast(cached, cacheMinDimension)) {
+                    return cached;
+                }
             }
 
             // 2. 检查是否已有相同请求在进行中（避免重复请求）
-            if (this.pendingRequests.has(domain)) {
-                return this.pendingRequests.get(domain);
+            if (this.pendingRequests.has(requestKey)) {
+                return this.pendingRequests.get(requestKey);
             }
 
             // 3. 发起新请求
-            const requestPromise = this._fetchFavicon(url);
-            this.pendingRequests.set(domain, requestPromise);
+            const requestPromise = this._fetchFavicon(url, {
+                strictMinDimensionPx: strictMinDimension,
+                fallbackMinDimensionPx: fallbackMinDimension
+            });
+            this.pendingRequests.set(requestKey, requestPromise);
 
             try {
                 const result = await requestPromise;
                 return result;
             } finally {
-                this.pendingRequests.delete(domain);
+                this.pendingRequests.delete(requestKey);
             }
 
         } catch (e) {
@@ -2083,33 +2416,118 @@ const FaviconCache = {
     },
 
     // 实际请求favicon - 多源降级策略
-    // 注意：不再直接请求网站的 /favicon.ico，因为某些网站（如需要认证的网站）
-    // 可能返回 HTML 页面而非图标，导致浏览器解析其中的 preload 标签并产生警告
-    async _fetchFavicon(url) {
+    // 注意：优先走公共高分辨率源，浏览器内置 /_favicon/ 仅做最后兜底。
+    // 不直接请求网站的 /favicon.ico，避免某些站点返回 HTML 或认证页。
+    async _fetchFavicon(url, options = {}) {
         return new Promise(async (resolve) => {
             try {
                 const urlObj = new URL(url);
                 const domain = urlObj.hostname;
 
-                // 定义多个 favicon 源，按优先级尝试
-                // 只使用第三方服务，避免直接请求可能返回 HTML 的网站
-                const faviconSources = [
-                    // 1. DuckDuckGo（全球可用，国内可访问，推荐首选）
-                    `https://icons.duckduckgo.com/ip3/${domain}.ico`,
-                    // 2. Google S2（功能强大，但中国大陆被墙）
-                    `https://www.google.com/s2/favicons?domain=${domain}&sz=32`
-                ];
+                const strictMinDimension = Math.max(
+                    1,
+                    Number(options?.strictMinDimensionPx) || Number(this.minFaviconDimensionPx) || 96
+                );
+                const fallbackMinCandidate = Number(options?.fallbackMinDimensionPx);
+                const fallbackMinDimension = Math.max(
+                    1,
+                    Math.min(
+                        strictMinDimension,
+                        (Number.isFinite(fallbackMinCandidate) && fallbackMinCandidate > 0)
+                            ? fallbackMinCandidate
+                            : (Number(this.minFallbackFaviconDimensionPx) || 32)
+                    )
+                );
 
-                // 尝试每个源
-                for (let i = 0; i < faviconSources.length; i++) {
-                    const faviconUrl = faviconSources[i];
-                    const sourceName = ['DuckDuckGo', 'Google S2'][i];
+                // 高质量优先策略（首轮）：
+                // gstatic.cn/faviconV2（大尺寸到小尺寸） -> DuckDuckGo -> Google S2 -> /_favicon/（最后兜底）
+                const strictFaviconSources = this._buildFaviconSourceList(url, domain, {
+                    includeGoogleS2: true,
+                    minDimensionPx: strictMinDimension,
+                    maxPublicSizes: 2,
+                    maxGoogleSizes: 1,
+                    maxBrowserSizes: 1
+                });
 
-                    const result = await this._tryLoadFavicon(faviconUrl, url, sourceName);
-                    if (result && result !== fallbackIcon) {
-                        resolve(result);
-                        return;
+                if (strictFaviconSources.length === 0) {
+                    this.saveFailure(url);
+                    resolve(fallbackIcon);
+                    return;
+                }
+
+                let bestTransparentCandidate = null;
+                let bestNonWhiteCandidate = null;
+                let bestAnyCandidate = null;
+                const attemptedSourceUrls = new Set();
+
+                const tryCandidateFromSource = async (faviconUrl, minDimensionPx) => {
+                    const minDimensionKey = Math.max(1, Number(minDimensionPx) || 1);
+                    const attemptKey = `${faviconUrl}|${minDimensionKey}`;
+                    if (!faviconUrl || attemptedSourceUrls.has(attemptKey)) {
+                        return false;
                     }
+                    attemptedSourceUrls.add(attemptKey);
+
+                    const result = await this._tryLoadFavicon(faviconUrl, minDimensionPx);
+                    if (!result || result === fallbackIcon) {
+                        return false;
+                    }
+
+                    const candidate = await this._buildFaviconCandidate(result, faviconUrl, minDimensionPx);
+                    if (!candidate || !candidate.reachedMin) {
+                        return false;
+                    }
+
+                    if (!bestAnyCandidate || candidate.score > bestAnyCandidate.score) {
+                        bestAnyCandidate = candidate;
+                    }
+
+                    if (candidate.isWhitePlate) {
+                        return false;
+                    }
+
+                    if (!bestNonWhiteCandidate || candidate.score > bestNonWhiteCandidate.score) {
+                        bestNonWhiteCandidate = candidate;
+                    }
+
+                    if (this._isTransparentPreferredProfile(candidate.profile)) {
+                        if (!bestTransparentCandidate || candidate.score > bestTransparentCandidate.score) {
+                            bestTransparentCandidate = candidate;
+                        }
+                        return true;
+                    }
+
+                    return false;
+                };
+
+                // 第一轮：质量优先（默认 >= 96）
+                for (const faviconUrl of strictFaviconSources) {
+                    const shouldStop = await tryCandidateFromSource(faviconUrl, strictMinDimension);
+                    if (shouldStop) break;
+                }
+
+                // 第二轮：放宽到兜底阈值（默认 >= 32，拒绝 16x16）
+                if (!bestTransparentCandidate && fallbackMinDimension < strictMinDimension) {
+                    // 兜底轮继续保持 Google S2 在 /_favicon/ 前，浏览器内置源最后尝试。
+                    const fallbackFaviconSources = this._buildFaviconSourceList(url, domain, {
+                        includeGoogleS2: true,
+                        preferDuckDuckGoFirst: true,
+                        minDimensionPx: fallbackMinDimension,
+                        maxPublicSizes: 1,
+                        maxGoogleSizes: 1,
+                        maxBrowserSizes: 1
+                    });
+                    for (const faviconUrl of fallbackFaviconSources) {
+                        const shouldStop = await tryCandidateFromSource(faviconUrl, fallbackMinDimension);
+                        if (shouldStop) break;
+                    }
+                }
+
+                const chosenCandidate = bestTransparentCandidate || bestNonWhiteCandidate || bestAnyCandidate;
+                if (chosenCandidate && chosenCandidate.dataUrl) {
+                    await this.save(url, chosenCandidate.dataUrl);
+                    resolve(chosenCandidate.dataUrl);
+                    return;
                 }
 
                 // 所有源都失败，记录失败并返回 fallback（静默）
@@ -2124,53 +2542,156 @@ const FaviconCache = {
         });
     },
 
-    // 尝试从单个源加载 favicon
-    async _tryLoadFavicon(faviconUrl, originalUrl, sourceName) {
-        return new Promise((resolve) => {
-            const img = new Image();
-            // 不设置 crossOrigin，避免 CORS 预检请求导致的错误
-            // img.crossOrigin = 'anonymous';
+    _pickCandidateSizes(candidates, minDimensionPx = 1, maxCount = 2) {
+        const min = Math.max(1, Number(minDimensionPx) || 1);
+        const limit = Math.max(1, Number(maxCount) || 1);
+        const list = Array.isArray(candidates)
+            ? candidates.map((size) => Number(size)).filter((size) => Number.isFinite(size) && size > 0)
+            : [];
+        if (list.length === 0) return [];
+        const filtered = list.filter((size) => size >= min);
+        const source = filtered.length > 0 ? filtered : list;
+        return source.slice(0, limit);
+    },
 
-            const timeout = setTimeout(() => {
-                img.src = '';
-                resolve(null); // 超时，尝试下一个源
-            }, 3000); // 每个源最多等待3秒
+    _buildFaviconSourceList(url, domain, options = {}) {
+        const includeGoogleS2 = !!(options && options.includeGoogleS2);
+        const preferDuckDuckGoFirst = !!(options && options.preferDuckDuckGoFirst);
+        const minDimensionPx = Math.max(1, Number(options?.minDimensionPx) || 1);
+        const maxPublicSizes = Math.max(1, Number(options?.maxPublicSizes) || 2);
+        const maxBrowserSizes = Math.max(1, Number(options?.maxBrowserSizes) || 1);
+        const maxGoogleSizes = Math.max(1, Number(options?.maxGoogleSizes) || 1);
+        const sources = [];
+        const seen = new Set();
+        const addSource = (sourceUrl) => {
+            if (!sourceUrl || seen.has(sourceUrl)) return;
+            seen.add(sourceUrl);
+            sources.push(sourceUrl);
+        };
 
-            img.onload = () => {
-                clearTimeout(timeout);
+        if (preferDuckDuckGoFirst) {
+            addSource(`https://icons.duckduckgo.com/ip3/${domain}.ico`);
+        }
 
-                // 检查是否是有效的图片（某些服务器返回1x1的占位图）
-                if (img.width < 8 || img.height < 8) {
-                    resolve(null);
+        const publicSizes = this._pickCandidateSizes(this.publicFaviconSizeCandidates, minDimensionPx, maxPublicSizes);
+        for (const size of publicSizes) {
+            addSource(this._getGstaticCnFaviconUrl(url, size));
+        }
+
+        if (!preferDuckDuckGoFirst) {
+            addSource(`https://icons.duckduckgo.com/ip3/${domain}.ico`);
+        }
+
+        if (includeGoogleS2) {
+            const googleSizes = this._pickCandidateSizes(this.googleS2SizeCandidates, minDimensionPx, maxGoogleSizes);
+            for (const size of googleSizes) {
+                addSource(this._getGoogleS2FaviconUrl(url, size));
+            }
+        }
+
+        // /_favicon/ 始终最后兜底，减少前序公共源成功后仍触发内置源的概率。
+        const browserSizes = this._pickCandidateSizes(this.browserFaviconSizeCandidates, minDimensionPx, maxBrowserSizes);
+        for (const size of browserSizes) {
+            addSource(this._getBrowserFaviconServiceUrl(url, size));
+        }
+
+        return sources;
+    },
+
+    _getBrowserFaviconServiceUrl(url, size = 64) {
+        try {
+            if (!browserAPI?.runtime?.getURL) return null;
+            const baseUrl = browserAPI.runtime.getURL('/_favicon/');
+            return `${baseUrl}?pageUrl=${encodeURIComponent(url)}&size=${encodeURIComponent(size)}`;
+        } catch (e) {
+            return null;
+        }
+    },
+
+    _getGstaticCnFaviconUrl(url, size = 128) {
+        return `https://t3.gstatic.cn/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&size=${encodeURIComponent(size)}&url=${encodeURIComponent(url)}`;
+    },
+
+    _getGoogleS2FaviconUrl(url, size = 64) {
+        return `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(url)}&sz=${encodeURIComponent(size)}`;
+    },
+
+    async _blobToDataUrl(blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                if (typeof reader.result === 'string' && reader.result.startsWith('data:image/')) {
+                    resolve(reader.result);
                     return;
                 }
+                reject(new Error('invalid_data_url'));
+            };
+            reader.onerror = () => reject(reader.error || new Error('read_failed'));
+            reader.readAsDataURL(blob);
+        });
+    },
 
-                // 尝试转换为 Base64（可能因 CORS 失败，但不显示错误）
+    async _readBlobDimensions(blob) {
+        return new Promise((resolve) => {
+            const objectUrl = URL.createObjectURL(blob);
+            const img = new Image();
+
+            const cleanup = () => {
                 try {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
-                    const dataUrl = canvas.toDataURL('image/png');
-
-                    // 保存到缓存
-                    this.save(originalUrl, dataUrl);
-                    resolve(dataUrl);
-                } catch (e) {
-                    // CORS 限制，直接使用原 URL（静默处理，不输出日志）
-                    this.save(originalUrl, faviconUrl);
-                    resolve(faviconUrl);
+                    URL.revokeObjectURL(objectUrl);
+                } catch (_) {
+                    // ignore
                 }
+            };
+
+            img.onload = () => {
+                const width = img.naturalWidth || img.width || 0;
+                const height = img.naturalHeight || img.height || 0;
+                cleanup();
+                resolve({ width, height });
             };
 
             img.onerror = () => {
-                clearTimeout(timeout);
-                resolve(null); // 失败，尝试下一个源
+                cleanup();
+                resolve(null);
             };
 
-            img.src = faviconUrl;
+            img.src = objectUrl;
         });
+    },
+
+    async _fetchImageAsDataUrl(faviconUrl, minDimensionPx = this.minFaviconDimensionPx) {
+        try {
+            if (!browserAPI?.runtime?.sendMessage) return null;
+            const requiredDimension = Math.max(1, Number(minDimensionPx) || this.minFaviconDimensionPx);
+            const response = await browserAPI.runtime.sendMessage({
+                action: 'canvasFetchFaviconDataUrl',
+                url: String(faviconUrl || ''),
+                minDimensionPx: requiredDimension,
+                maxBytes: Number(this.maxFetchedBytes) || (512 * 1024),
+                timeoutMs: Number(this.requestTimeoutMs) || 4000
+            });
+            const dataUrl = response && response.success ? response.dataUrl : '';
+            if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
+                return dataUrl;
+            }
+            return null;
+        } catch (e) {
+            return null;
+        }
+    },
+
+    // 尝试从单个源加载 favicon，仅返回 dataURL，不在此阶段写缓存
+    async _tryLoadFavicon(faviconUrl, minDimensionPx = this.minFaviconDimensionPx) {
+        try {
+            const dataUrl = await this._fetchImageAsDataUrl(faviconUrl, minDimensionPx);
+            if (!dataUrl) {
+                return null;
+            }
+            return dataUrl;
+        } catch (e) {
+            return null;
+        }
     }
 };
 
@@ -15235,12 +15756,14 @@ function setupRealtimeMessageListener() {
         } else if (message.action === 'updateFaviconFromTab') {
             // 从打开的 tab 更新 favicon（静默）
             if (message.url && message.favIconUrl) {
-                FaviconCache.save(message.url, message.favIconUrl).then(() => {
-                    // 更新页面上对应的 favicon 图标
-                    updateFaviconImages(message.url, message.favIconUrl);
-                }).catch(() => {
-                    // 静默处理错误
-                });
+                if (FaviconCache.isStoredFaviconData(message.favIconUrl)) {
+                    FaviconCache.save(message.url, message.favIconUrl).then(() => {
+                        // 更新页面上对应的 favicon 图标
+                        updateFaviconImages(message.url, message.favIconUrl);
+                    }).catch(() => {
+                        // 静默处理错误
+                    });
+                }
             }
         } else if (message.action === 'clearExplicitMoved') {
             try {
