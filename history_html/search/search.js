@@ -4073,6 +4073,22 @@ function setDomainGroupCollapsed(domain, collapsed) {
     searchUiState.domainGroupCollapse.set(key, !!collapsed);
 }
 
+function isDomainSearchItemMatched(domain, item, query) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return true;
+
+    const domainText = String(domain || '').trim().toLowerCase();
+    if (domainText.includes(q)) return true;
+
+    const titleText = String(item && item.__title || '').trim().toLowerCase();
+    if (titleText && titleText.includes(q)) return true;
+
+    const urlText = String(item && item.__url || '').trim().toLowerCase();
+    if (urlText && urlText.includes(q)) return true;
+
+    return false;
+}
+
 function ensureDomainCacheForQuery(query) {
     const q = String(query || '').trim().toLowerCase();
     const treeKey = getDomainCacheKey();
@@ -4094,9 +4110,19 @@ function ensureDomainCacheForQuery(query) {
 
         let entry = map.get(domain);
         if (!entry) {
-            entry = { domain, count: 0, items: [], match: false, hostSet: new Set() };
+            entry = {
+                domain,
+                count: 0,
+                items: [],
+                match: false,
+                hostSet: new Set(),
+                matchedCount: 0,
+                matchedHostSet: new Set()
+            };
             map.set(domain, entry);
         }
+        const itemMatched = isDomainSearchItemMatched(domain, item, q);
+
         entry.count += 1;
         entry.items.push({
             id: item.id,
@@ -4110,38 +4136,46 @@ function ensureDomainCacheForQuery(query) {
             host: host || '',
             __title: item.__title || '',
             __url: item.__url || '',
-            __path: item.__path || ''
+            __path: item.__path || '',
+            matched: !!itemMatched
         });
         if (host) {
             entry.hostSet.add(host);
         }
 
-        if (q && !entry.match) {
-            if (domain.includes(q)) {
-                entry.match = true;
-            } else {
-                const t = String(item.__title || '');
-                const u = String(item.__url || '');
-                const p = String(item.__path || '');
-                if (t.includes(q) || u.includes(q) || p.includes(q)) {
-                    entry.match = true;
-                }
+        if (itemMatched) {
+            entry.match = true;
+            entry.matchedCount += 1;
+            if (host) {
+                entry.matchedHostSet.add(host);
             }
         }
     }
 
+    const useMatchedStats = !!q;
     const results = Array.from(map.values())
         .filter(entry => !q || entry.match)
-        .map(entry => ({
-            id: `domain:${entry.domain}`,
-            type: 'domain-group',
-            domain: entry.domain,
-            title: entry.domain,
-            count: entry.count,
-            subdomainCount: entry.hostSet ? entry.hostSet.size : 0,
-            groupLevel,
-            color: '#0ea5e9'
-        }));
+        .map(entry => {
+            const totalCount = Number(entry.count || 0);
+            const totalSubdomainCount = entry.hostSet ? entry.hostSet.size : 0;
+            const matchedCount = Number(entry.matchedCount || 0);
+            const matchedSubdomainCount = entry.matchedHostSet ? entry.matchedHostSet.size : 0;
+            return {
+                id: `domain:${entry.domain}`,
+                type: 'domain-group',
+                domain: entry.domain,
+                title: entry.domain,
+                count: useMatchedStats ? matchedCount : totalCount,
+                subdomainCount: useMatchedStats ? matchedSubdomainCount : totalSubdomainCount,
+                totalCount,
+                totalSubdomainCount,
+                matchedCount,
+                matchedSubdomainCount,
+                statsMode: useMatchedStats ? 'matched' : 'total',
+                groupLevel,
+                color: '#0ea5e9'
+            };
+        });
 
     results.sort((a, b) => {
         if (b.count !== a.count) return b.count - a.count;
@@ -4163,6 +4197,7 @@ function buildCanvasDomainDisplayResultsForQuery(query) {
     const parentResults = Array.isArray(cache.results) ? cache.results : [];
     const displayResults = [];
     const groupLevel = cache && cache.groupLevel === 'root' ? 'root' : 'host';
+    const hasQuery = !!String(query || '').trim();
 
     for (const parent of parentResults) {
         if (!parent) continue;
@@ -4177,7 +4212,9 @@ function buildCanvasDomainDisplayResultsForQuery(query) {
         if (collapsed) continue;
 
         const entry = cache.map instanceof Map ? cache.map.get(domainKey) : null;
-        const childItems = entry && Array.isArray(entry.items) ? entry.items.slice() : [];
+        const childItems = entry && Array.isArray(entry.items)
+            ? entry.items.filter((child) => !hasQuery || child.matched === true).slice()
+            : [];
         childItems.sort((a, b) => {
             if (groupLevel === 'root') {
                 const hostDelta = String(a && a.host || '').localeCompare(String(b && b.host || ''));
@@ -4215,7 +4252,9 @@ function getDomainItemsForTemp(domain, query) {
     const cache = ensureDomainCacheForQuery(query);
     const key = String(domain || '').trim().toLowerCase();
     const entry = cache.map.get(key);
-    return entry && Array.isArray(entry.items) ? entry.items : [];
+    if (!entry || !Array.isArray(entry.items)) return [];
+    const hasQuery = !!String(query || '').trim();
+    return entry.items.filter((item) => !hasQuery || item.matched === true);
 }
 
 function getSubdomainFolderTitle(host, domainKey, isZh) {
@@ -4572,15 +4611,22 @@ function renderCanvasSearchResults(results, options = {}) {
                 const count = Number(item.count || 0);
                 const subdomainCount = Number(item.subdomainCount || 0);
                 const isRootGroup = String(item.groupLevel || '') === 'root';
+                const isMatchedStats = String(item.statsMode || 'total') === 'matched';
                 const isExpanded = item.isExpanded === true;
                 const toggleTitle = isExpanded
                     ? (isZh ? '收起当前域名结果' : 'Collapse domain results')
                     : (isZh ? '展开当前域名结果' : 'Expand domain results');
                 const countLabel = isRootGroup
                     ? (isZh
-                        ? `${count} 个书签 · ${subdomainCount} 个子域名`
-                        : `${count} bookmarks · ${subdomainCount} subdomains`)
-                    : (isZh ? `${count} 个书签` : `${count} bookmarks`);
+                        ? (isMatchedStats
+                            ? `${count} 个匹配书签 · ${subdomainCount} 个匹配子域名`
+                            : `${count} 个书签 · ${subdomainCount} 个子域名`)
+                        : (isMatchedStats
+                            ? `${count} matched bookmarks · ${subdomainCount} matched subdomains`
+                            : `${count} bookmarks · ${subdomainCount} subdomains`))
+                    : (isZh
+                        ? (isMatchedStats ? `${count} 个匹配书签` : `${count} 个书签`)
+                        : (isMatchedStats ? `${count} matched bookmarks` : `${count} bookmarks`));
                 indexLabel = `<div style="display:flex; align-items:center; justify-content:center; width:24px; height:24px; flex-shrink:0; margin-right:2px;">
                     <i class="fas fa-globe" style="color:#0ea5e9; font-size:16px;"></i>
                 </div>`;
