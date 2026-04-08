@@ -447,10 +447,19 @@
             || raw === 'applying-local'
             || raw === 'applying-permanent'
             || raw === 'finishing'
+            || raw === 'continue_failed'
+            || raw === 'rollback_failed'
+            || raw === 'locked_incident'
         ) {
             return raw;
         }
         return 'prepared';
+    }
+
+    function normalizeRecoveryLockFailureAction(value) {
+        const raw = String(value || '').trim().toLowerCase();
+        if (raw === 'continue' || raw === 'rollback') return raw;
+        return '';
     }
 
     function normalizeRecoveryLockSourcePanel(value) {
@@ -465,6 +474,12 @@
         const source = raw && typeof raw === 'object' ? raw : {};
         const kind = normalizeRecoveryLockKind(source.kind);
         if (!kind) return null;
+        const stage = normalizeRecoveryLockStage(source.stage);
+        const continueFailedAt = Math.max(0, Number(source.continueFailedAt) || 0);
+        const rollbackFailedAt = Math.max(0, Number(source.rollbackFailedAt) || 0);
+        const lockedIncident = source.lockedIncident === true
+            || stage === 'locked_incident'
+            || (continueFailedAt > 0 && rollbackFailedAt > 0);
         return {
             version: 1,
             id: String(source.id || '').trim() || `recovery-${Date.now().toString(36)}`,
@@ -473,14 +488,27 @@
             trigger: String(source.trigger || '').trim(),
             mode: normalizeActiveRunRecoveryMode(source.mode),
             choice: String(source.choice || '').trim().toLowerCase(),
-            stage: normalizeRecoveryLockStage(source.stage),
+            stage: lockedIncident ? 'locked_incident' : stage,
             targetPackageHash: String(source.targetPackageHash || '').trim(),
             baseRemoteSha: String(source.baseRemoteSha || '').trim(),
             targetRemoteSha: String(source.targetRemoteSha || '').trim(),
             summary: String(source.summary || '').trim(),
+            continueFailedAt,
+            rollbackFailedAt,
+            lockedIncident,
+            lastFailureAction: normalizeRecoveryLockFailureAction(source.lastFailureAction),
+            lastFailureStage: String(source.lastFailureStage || '').trim(),
+            lastFailureCode: String(source.lastFailureCode || '').trim(),
+            lastFailureMessage: String(source.lastFailureMessage || '').trim(),
+            lastFailureAt: Math.max(0, Number(source.lastFailureAt) || 0),
             createdAt: Math.max(0, Number(source.createdAt) || 0),
             updatedAt: Math.max(0, Number(source.updatedAt) || 0)
         };
+    }
+
+    function isRecoveryLockLockedIncident(lock) {
+        const normalized = normalizeRecoveryLockRecord(lock || null);
+        return !!(normalized && (normalized.lockedIncident === true || normalized.stage === 'locked_incident'));
     }
 
     function isRecoveryLockActive(lock = null) {
@@ -846,47 +874,130 @@
     }
 
     function buildRecoveryLockContinueText(lock) {
-        if (!lock) return textByLang('继续上次操作', 'Continue previous action');
-        if (lock.mode === 'first-sync-cloud' || lock.sourcePanel === 'first-sync') {
-            return textByLang('继续上次首次同步', 'Continue previous first sync');
-        }
-        if (lock.mode === 'full') {
-            return textByLang('继续上次同步', 'Continue previous sync');
+        if (!lock) return textByLang('按云端继续', 'Continue with cloud');
+        if (isPullLikeRecoveryLock(lock) || lock.mode === 'first-sync-cloud' || lock.sourcePanel === 'first-sync') {
+            return textByLang('按云端继续（到目标状态）', 'Continue with cloud (to target state)');
         }
         if (lock.kind === 'conflict-choice') {
+            if (lock.choice === 'remote') {
+                return textByLang('按云端继续（到目标状态）', 'Continue with cloud (to target state)');
+            }
             return textByLang('继续上次冲突处理', 'Continue previous conflict resolution');
         }
         if (isPushLikeRecoveryLock(lock)) {
             return textByLang('继续上次上传', 'Continue previous upload');
         }
-        if (isPullLikeRecoveryLock(lock)) {
-            return textByLang('继续上次拉取', 'Continue previous pull');
+        if (lock.mode === 'full') {
+            return textByLang('继续上次同步', 'Continue previous sync');
         }
         return textByLang('继续上次操作', 'Continue previous action');
     }
 
     function buildRecoveryLockRollbackText(lock) {
-        if (!lock) return textByLang('回滚到开始前状态', 'Rollback to start state');
+        if (!lock) return textByLang('回到覆盖前本地状态', 'Return to local state before overwrite');
         if (lock.kind === 'conflict-choice') {
-            return textByLang('回滚到冲突处理前状态', 'Rollback to pre-conflict state');
+            return textByLang('回到冲突处理前本地状态', 'Return to local state before conflict handling');
         }
-        if (isPullLikeRecoveryLock(lock)) {
-            return textByLang('回滚到最近可用快照', 'Rollback to latest available snapshot');
-        }
-        if (lock.mode === 'first-sync-cloud' || lock.sourcePanel === 'first-sync') {
-            return textByLang('回滚到最近可用快照', 'Rollback to latest available snapshot');
-        }
-        if (lock.mode === 'full') {
-            return textByLang('回滚到最近可用快照', 'Rollback to latest available snapshot');
+        if (isPullLikeRecoveryLock(lock) || lock.mode === 'first-sync-cloud' || lock.sourcePanel === 'first-sync') {
+            return textByLang('回到覆盖前本地状态', 'Return to local state before overwrite');
         }
         return textByLang('回滚到开始前状态', 'Rollback to start state');
     }
 
     function canRollbackRecoveryLock(lock) {
         if (!lock) return false;
+        if (isRecoveryLockLockedIncident(lock)) return false;
         if (lock.kind === 'pull-bundle') return true;
         if (lock.kind === 'conflict-choice' && lock.choice === 'remote') return true;
         return false;
+    }
+
+    function hasRecoveryLockFailureState(lock) {
+        if (!lock || typeof lock !== 'object') return false;
+        const stage = String(lock.stage || '').trim().toLowerCase();
+        return stage === 'continue_failed'
+            || stage === 'rollback_failed'
+            || stage === 'locked_incident';
+    }
+
+    function canExportRecoveryBackupPackage(lock) {
+        if (!lock || typeof lock !== 'object') return false;
+        if (!hasRecoveryLockFailureState(lock)) return false;
+        if (lock.kind === 'pull-bundle') return true;
+        if (lock.kind === 'conflict-choice' && lock.choice === 'remote') return true;
+        return false;
+    }
+
+    function buildRecoveryLockFailureReasonText(lock) {
+        const source = lock && typeof lock === 'object' ? lock : {};
+        const action = normalizeRecoveryLockFailureAction(source.lastFailureAction);
+        const stage = String(source.lastFailureStage || '').trim();
+        const code = String(source.lastFailureCode || '').trim();
+        const message = String(source.lastFailureMessage || '').trim();
+        const actionText = action === 'rollback'
+            ? textByLang('回滚', 'Rollback')
+            : (action === 'continue' ? textByLang('继续', 'Continue') : '');
+        const parts = [];
+        if (actionText) {
+            parts.push(actionText);
+        }
+        if (stage) {
+            parts.push(textByLang(`阶段=${stage}`, `stage=${stage}`));
+        }
+        if (code) {
+            parts.push(textByLang(`错误码=${code}`, `code=${code}`));
+        }
+        if (message) {
+            parts.push(textByLang(`错误=${message}`, `error=${message}`));
+        }
+        return parts.join(' | ');
+    }
+
+    function extractRecoveryFailureCode(error) {
+        if (!error || typeof error !== 'object') return '';
+        const direct = String(error.errorCode || error.code || '').trim();
+        if (direct) return direct;
+        if (error.errorDetails && typeof error.errorDetails === 'object') {
+            return String(error.errorDetails.errorCode || '').trim();
+        }
+        return '';
+    }
+
+    async function markRecoveryLockActionFailure(action, error, options = {}) {
+        const current = normalizeRecoveryLockRecord(recoveryLockState || loadRecoveryLockState());
+        if (!current || !isRecoveryLockActive(current)) return null;
+
+        const normalizedAction = normalizeRecoveryLockFailureAction(action) || 'continue';
+        const now = Date.now();
+        const stage = String(
+            options && options.stage
+                ? options.stage
+                : (error && error.errorDetails && error.errorDetails.phase)
+        ).trim() || String(current.stage || '').trim();
+        const code = extractRecoveryFailureCode(error);
+        const message = String(error && error.message ? error.message : error || '').trim();
+
+        const continueFailedAt = normalizedAction === 'continue'
+            ? now
+            : Math.max(0, Number(current.continueFailedAt) || 0);
+        const rollbackFailedAt = normalizedAction === 'rollback'
+            ? now
+            : Math.max(0, Number(current.rollbackFailedAt) || 0);
+        const lockedIncident = continueFailedAt > 0 && rollbackFailedAt > 0;
+
+        return updateRecoveryLockState({
+            stage: lockedIncident
+                ? 'locked_incident'
+                : (normalizedAction === 'continue' ? 'continue_failed' : 'rollback_failed'),
+            continueFailedAt,
+            rollbackFailedAt,
+            lockedIncident,
+            lastFailureAction: normalizedAction,
+            lastFailureStage: stage,
+            lastFailureCode: code,
+            lastFailureMessage: message,
+            lastFailureAt: now
+        });
     }
 
     function buildRecoveryLockTitle(lock) {
@@ -917,10 +1028,31 @@
 
     function buildRecoveryLockSummary(lock) {
         if (!lock) return '';
+        const stage = String(lock.stage || '').trim().toLowerCase();
+        const lockedIncident = isRecoveryLockLockedIncident(lock);
+        const failureReason = buildRecoveryLockFailureReasonText(lock);
+        if (lockedIncident) {
+            return textByLang(
+                `“按云端继续”和“回到覆盖前本地”都失败，当前已锁定。请先导出双快照备份，再决定后续处理。${failureReason ? ` ${failureReason}` : ''}`,
+                `Both "continue with cloud" and "return to pre-overwrite local" failed. This recovery is locked. Export the dual-snapshot backup first.${failureReason ? ` ${failureReason}` : ''}`
+            );
+        }
+        if (stage === 'continue_failed') {
+            return textByLang(
+                `上次“按云端继续”失败。你可以改选“回到覆盖前本地”，或先导出双快照备份。${failureReason ? ` ${failureReason}` : ''}`,
+                `The previous "continue with cloud" action failed. You can switch to "return to pre-overwrite local", or export the dual-snapshot backup first.${failureReason ? ` ${failureReason}` : ''}`
+            );
+        }
+        if (stage === 'rollback_failed') {
+            return textByLang(
+                `上次“回到覆盖前本地”失败。你可以改选“按云端继续”到目标状态，或先导出双快照备份。${failureReason ? ` ${failureReason}` : ''}`,
+                `The previous "return to pre-overwrite local" action failed. You can switch to "continue with cloud" to the target state, or export the dual-snapshot backup first.${failureReason ? ` ${failureReason}` : ''}`
+            );
+        }
         if (lock.mode === 'first-sync-cloud' || lock.sourcePanel === 'first-sync') {
             return textByLang(
-                '上次首次同步已进入“云端覆盖本地”阶段。为避免半写本地状态参与新的判断，请先继续完成该阶段。',
-                'The previous first sync had already entered the cloud-overwrite-local stage. Finish this stage first so a half-applied local state cannot affect a new decision.'
+                '上次首次同步已进入“云端覆盖本地”阶段。你可以选择“按云端继续”到目标状态，或“回到覆盖前本地状态”。',
+                'The previous first sync entered cloud-overwrite-local. Choose either "continue with cloud" to the target state, or "return to pre-overwrite local state".'
             );
         }
         if (lock.mode === 'full' && isPushLikeRecoveryLock(lock)) {
@@ -931,14 +1063,14 @@
         }
         if (lock.mode === 'full' && isPullLikeRecoveryLock(lock)) {
             return textByLang(
-                '上次同步在“云端覆盖本地”阶段中断。请先继续完成该阶段。',
-                'The previous sync was interrupted during the cloud-overwrite-local stage. Finish this stage first.'
+                '上次同步在“云端覆盖本地”阶段中断。你可以“按云端继续”到目标状态，或“回到覆盖前本地状态”。',
+                'The previous sync was interrupted during cloud-overwrite-local. Choose either "continue with cloud" to target state, or "return to pre-overwrite local state".'
             );
         }
         if (isPullLikeRecoveryLock(lock)) {
             return textByLang(
-                '上次已进入“使用云端覆盖本地”的执行阶段。为避免半写本地状态参与新的判断，请先继续完成这次覆盖。',
-                'The previous cloud-overwrite-local action had already entered execution. Finish this overwrite first so a half-applied local state cannot affect a new decision.'
+                '当前处于“云端覆盖本地”恢复阶段。你可以“按云端继续”到目标状态，或“回到覆盖前本地状态”。',
+                'The recovery is in cloud-overwrite-local stage. Choose either "continue with cloud" to target state, or "return to pre-overwrite local state".'
             );
         }
         if (isPushLikeRecoveryLock(lock)) {
@@ -982,6 +1114,13 @@
         if (lock.baseRemoteSha) {
             details.push(textByLang(`起始云端版本：${lock.baseRemoteSha}`, `Base remote revision: ${lock.baseRemoteSha}`));
         }
+        const failureReason = buildRecoveryLockFailureReasonText(lock);
+        if (failureReason) {
+            details.push(textByLang(`最近失败：${failureReason}`, `Last failure: ${failureReason}`));
+        }
+        if (Number(lock.lastFailureAt) > 0) {
+            details.push(textByLang(`失败时间：${formatTime(lock.lastFailureAt)}`, `Failure time: ${formatTime(lock.lastFailureAt)}`));
+        }
         return `<div class="canvas-sync-other-lines">${details.map((line) => `<span>${escapeHtml(line)}</span>`).join('')}</div>`;
     }
 
@@ -1019,8 +1158,10 @@
         if (rollbackText) rollbackText.textContent = buildRecoveryLockRollbackText(lock);
         const continueText = getElement('canvasSyncRecoveryContinueText');
         if (continueText) continueText.textContent = buildRecoveryLockContinueText(lock);
+        const exportText = getElement('canvasSyncRecoveryExportBackupText');
+        if (exportText) exportText.textContent = textByLang('导出双快照备份', 'Export Dual-Snapshot Backup');
         const dismissText = getElement('canvasSyncRecoveryDismissText');
-        if (dismissText) dismissText.textContent = textByLang('关闭恢复锁（手动处理）', 'Dismiss Recovery Lock (Manual Handling)');
+        if (dismissText) dismissText.textContent = textByLang('解锁并停止提示', 'Unlock and stop prompts');
     }
 
     async function stagePushRecoveryLock(bundlePayload, options = {}) {
@@ -1071,7 +1212,9 @@
                 rootPath: String(bundlePayload && bundlePayload.rootPath || settings && settings.obsidianExportRoot || ''),
                 folderName: String(bundlePayload && bundlePayload.folderName || ''),
                 snapshot: bundlePayload && bundlePayload.snapshot ? normalizeSnapshot(bundlePayload.snapshot) : null,
-                rollbackLocalSnapshot: null,
+                rollbackLocalSnapshot: bundlePayload && bundlePayload.rollbackLocalSnapshot
+                    ? normalizeSnapshot(bundlePayload.rollbackLocalSnapshot)
+                    : null,
                 folderFiles: serializedFolderFiles,
                 remoteFilesByPath: bundlePayload && bundlePayload.remoteFilesByPath && typeof bundlePayload.remoteFilesByPath === 'object'
                     ? bundlePayload.remoteFilesByPath
@@ -1296,6 +1439,21 @@
                 includePermanentTree: true,
                 includeTempSection: true
             });
+        }
+        const bundleRollbackSnapshot = normalizeSnapshot(stagedBundle && stagedBundle.rollbackLocalSnapshot);
+        if (!bundleRollbackSnapshot && localRollbackSnapshot && stagedBundle && stagedBundle.kind === 'remote-bundle') {
+            const activeRecoveryLock = normalizeRecoveryLockRecord(recoveryLockState || loadRecoveryLockState());
+            if (activeRecoveryLock && isRecoveryLockActive(activeRecoveryLock) && activeRecoveryLock.kind === 'pull-bundle') {
+                try {
+                    const patchedBundle = Object.assign({}, stagedBundle, {
+                        rollbackLocalSnapshot: localRollbackSnapshot
+                    });
+                    await saveRecoveryBundlePayload(patchedBundle);
+                    stagedBundle = patchedBundle;
+                } catch (error) {
+                    console.warn('[Canvas Sync] persist rollback snapshot into staged pull bundle failed:', error);
+                }
+            }
         }
 
         let applyResult = null;
@@ -1587,6 +1745,166 @@
         return `bookmark-canvas-recovery-${stamp}${suffix}.json`;
     }
 
+    function sanitizeRecoveryBackupPackageToken(value = '') {
+        const normalized = String(value || '').trim().replace(/[^a-zA-Z0-9_-]+/g, '_');
+        if (!normalized) return 'session';
+        return normalized.slice(0, 24);
+    }
+
+    function buildRecoveryBackupPackageBaseName(lock) {
+        const ts = Date.now();
+        const date = new Date(ts);
+        const pad2 = (num) => String(num).padStart(2, '0');
+        const stamp = `${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}-${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`;
+        const sessionToken = sanitizeRecoveryBackupPackageToken(lock && lock.id ? lock.id : '');
+        return `bookmark-canvas-recovery-package-${stamp}-${sessionToken}`;
+    }
+
+    function normalizeSnapshotForRecoveryBackupPackage(snapshotInput) {
+        if (!snapshotInput || typeof snapshotInput !== 'object') return null;
+        try {
+            return normalizeSnapshot(snapshotInput);
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function buildRecoveryBackupPackageHtml(snapshot, title, lock) {
+        const safeTitle = String(title || '').trim() || 'Recovery Snapshot';
+        const snapshotJson = JSON.stringify(snapshot, null, 2);
+        const lockData = lock && typeof lock === 'object' ? lock : {};
+        const lockMeta = {
+            id: String(lockData.id || ''),
+            kind: String(lockData.kind || ''),
+            sourcePanel: String(lockData.sourcePanel || ''),
+            mode: String(lockData.mode || ''),
+            stage: String(lockData.stage || ''),
+            lockedIncident: !!lockData.lockedIncident,
+            lastFailureAction: String(lockData.lastFailureAction || ''),
+            lastFailureStage: String(lockData.lastFailureStage || ''),
+            lastFailureCode: String(lockData.lastFailureCode || ''),
+            lastFailureAt: Math.max(0, Number(lockData.lastFailureAt) || 0)
+        };
+        const lockMetaJson = JSON.stringify(lockMeta, null, 2);
+        return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(safeTitle)}</title>
+  <style>
+    body { font-family: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; margin: 0; padding: 20px; background: #f8fafc; color: #0f172a; }
+    h1 { font-size: 18px; margin: 0 0 12px; }
+    h2 { font-size: 14px; margin: 16px 0 8px; }
+    pre { white-space: pre-wrap; word-break: break-word; border: 1px solid #cbd5e1; background: #ffffff; border-radius: 8px; padding: 12px; margin: 0; font-size: 12px; line-height: 1.5; }
+    .meta { margin-bottom: 14px; color: #334155; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(safeTitle)}</h1>
+  <div class="meta">Exported at ${escapeHtml(new Date().toISOString())}</div>
+  <h2>Recovery Lock Meta</h2>
+  <pre>${escapeHtml(lockMetaJson)}</pre>
+  <h2>Snapshot JSON</h2>
+  <pre>${escapeHtml(snapshotJson)}</pre>
+</body>
+</html>`;
+    }
+
+    function downloadRecoveryBackupPackageHtmlFile(fileName, htmlText) {
+        const blob = new Blob([String(htmlText || '')], { type: 'text/html;charset=utf-8' });
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = String(fileName || 'recovery-snapshot.html');
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => {
+            try { URL.revokeObjectURL(blobUrl); } catch (_) { }
+        }, 2000);
+    }
+
+    async function loadRecoveryBackupPackageSnapshots(lock) {
+        const activeLock = normalizeRecoveryLockRecord(lock || null);
+        if (!activeLock) {
+            return { startSnapshot: null, targetSnapshot: null };
+        }
+
+        if (activeLock.kind === 'pull-bundle') {
+            let stagedBundle = null;
+            try {
+                stagedBundle = await loadRecoveryBundlePayload();
+            } catch (_) {
+                stagedBundle = null;
+            }
+            if (!stagedBundle || typeof stagedBundle !== 'object' || stagedBundle.kind !== 'remote-bundle') {
+                return { startSnapshot: null, targetSnapshot: null };
+            }
+            const targetSnapshot = normalizeSnapshotForRecoveryBackupPackage(stagedBundle.snapshot);
+            let startSnapshot = normalizeSnapshotForRecoveryBackupPackage(stagedBundle.rollbackLocalSnapshot);
+            if (!startSnapshot) {
+                startSnapshot = normalizeSnapshotForRecoveryBackupPackage(
+                    resolveRecoveryLockRollbackSnapshot(activeLock, stagedBundle)
+                );
+            }
+            return { startSnapshot, targetSnapshot };
+        }
+
+        if (activeLock.kind === 'conflict-choice' && activeLock.choice === 'remote') {
+            const startSnapshot = normalizeSnapshotForRecoveryBackupPackage(pendingConflict && pendingConflict.localSnapshot);
+            const targetSnapshot = normalizeSnapshotForRecoveryBackupPackage(pendingConflict && pendingConflict.remoteSnapshot);
+            return { startSnapshot, targetSnapshot };
+        }
+
+        return { startSnapshot: null, targetSnapshot: null };
+    }
+
+    async function exportRecoveryBackupPackageAction() {
+        const lock = normalizeRecoveryLockRecord(recoveryLockState || loadRecoveryLockState());
+        if (!lock || !isRecoveryLockActive(lock)) {
+            toast(textByLang('未检测到可导出的恢复事务', 'No active recovery transaction to export.'));
+            return false;
+        }
+        if (!canExportRecoveryBackupPackage(lock)) {
+            toast(textByLang(
+                '当前恢复状态不支持导出双快照备份（仅在恢复失败后开放）',
+                'Dual-snapshot backup export is unavailable in the current recovery state (enabled only after a failed recovery action).'
+            ));
+            return false;
+        }
+
+        try {
+            const { startSnapshot, targetSnapshot } = await loadRecoveryBackupPackageSnapshots(lock);
+            if (!startSnapshot || !targetSnapshot) {
+                toast(textByLang(
+                    '当前恢复事务快照不可用，无法导出双快照备份',
+                    'Recovery snapshots are unavailable for this transaction, so dual-snapshot backup export is unavailable.'
+                ));
+                return false;
+            }
+
+            const baseName = buildRecoveryBackupPackageBaseName(lock);
+            const startFileName = `${baseName}-start_snapshot.html`;
+            const targetFileName = `${baseName}-target_snapshot.html`;
+            downloadRecoveryBackupPackageHtmlFile(
+                startFileName,
+                buildRecoveryBackupPackageHtml(startSnapshot, textByLang('恢复备份包-开始前快照', 'Recovery Backup Package - Start Snapshot'), lock)
+            );
+            downloadRecoveryBackupPackageHtmlFile(
+                targetFileName,
+                buildRecoveryBackupPackageHtml(targetSnapshot, textByLang('恢复备份包-目标快照', 'Recovery Backup Package - Target Snapshot'), lock)
+            );
+            toast(textByLang('双快照备份已导出（2个HTML）', 'Dual-snapshot backup exported (2 HTML files).'));
+            return true;
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            toast(textByLang(`导出双快照备份失败：${message}`, `Dual-snapshot backup export failed: ${message}`));
+            return false;
+        }
+    }
+
     function renderRecoverySnapshotDownloadStatus() {
         const hintEl = getElement('canvasSyncRecoverySnapshotHint');
         if (!hintEl) return;
@@ -1789,6 +2107,13 @@
     async function rollbackRecoveryLockAction() {
         const lock = normalizeRecoveryLockRecord(recoveryLockState || loadRecoveryLockState());
         if (!lock || recoveryLockResumeInFlight) return false;
+        if (isRecoveryLockLockedIncident(lock)) {
+            toast(textByLang(
+                '“按云端继续”和“回到覆盖前本地”都失败，当前已锁定。请先导出双快照备份，再手动处理。',
+                'Both "continue with cloud" and "return to pre-overwrite local" failed. This recovery is locked. Export the dual-snapshot backup first, then handle it manually.'
+            ));
+            return false;
+        }
         if (!canRollbackRecoveryLock(lock)) {
             toast(textByLang(
                 '当前恢复锁不支持自动回滚，请手动处理。',
@@ -1916,6 +2241,11 @@
             updateSyncUiProgress(textByLang('回滚完成', 'Rollback completed'), 100);
             return true;
         } catch (error) {
+            try {
+                await markRecoveryLockActionFailure('rollback', error, {
+                    stage: String((recoveryLockState && recoveryLockState.stage) || lock.stage || '').trim() || 'rollback'
+                });
+            } catch (_) { }
             runtime.lastError = error && error.message ? error.message : String(error);
             saveRuntime();
             renderStatus();
@@ -1933,6 +2263,13 @@
     async function continueRecoveryLockAction() {
         const lock = normalizeRecoveryLockRecord(recoveryLockState || loadRecoveryLockState());
         if (!lock || recoveryLockResumeInFlight) return false;
+        if (isRecoveryLockLockedIncident(lock)) {
+            toast(textByLang(
+                '“按云端继续”和“回到覆盖前本地”都失败，当前已锁定。请先导出双快照备份，再手动处理。',
+                'Both "continue with cloud" and "return to pre-overwrite local" failed. This recovery is locked. Export the dual-snapshot backup first, then handle it manually.'
+            ));
+            return false;
+        }
 
         recoveryLockResumeInFlight = true;
         syncUiProgressEnabled = true;
@@ -2187,6 +2524,11 @@
 
             throw new Error(textByLang('当前恢复锁类型暂不支持继续执行', 'The current recovery-lock type is not supported for continuation yet.'));
         } catch (error) {
+            try {
+                await markRecoveryLockActionFailure('continue', error, {
+                    stage: String((recoveryLockState && recoveryLockState.stage) || lock.stage || '').trim() || 'continue'
+                });
+            } catch (_) { }
             runtime.lastError = error && error.message ? error.message : String(error);
             saveRuntime();
             renderStatus();
@@ -2208,6 +2550,10 @@
         if (recoveryLockResumeInFlight || (runtime && runtime.isRunning)) {
             toast(textByLang('正在恢复，请等待当前流程结束后再关闭恢复锁', 'Recovery is running. Wait for the current flow to finish before dismissing the lock.'));
             return false;
+        }
+        if (!(options && options.skipConfirm === true)) {
+            const confirmed = await requestRecoveryUnlockConfirmationAsync(activeLock);
+            if (!confirmed) return false;
         }
 
         await clearRecoveryLockCompletely();
@@ -4130,6 +4476,289 @@
         return null;
     }
 
+    function uniqueBookmarkRootStringList(values = []) {
+        return Array.from(new Set(
+            (Array.isArray(values) ? values : [])
+                .map((value) => String(value || '').trim())
+                .filter(Boolean)
+        ));
+    }
+
+    function extractBookmarkRootFolderTypeFromMatchKey(value) {
+        const normalizedValue = String(value || '').trim().toLowerCase();
+        if (!normalizedValue) return '';
+
+        const preciseMatch = /^foldertype:([^|]+)\|syncing:(?:true|false)$/.exec(normalizedValue);
+        if (preciseMatch && preciseMatch[1]) {
+            return normalizeBookmarkRootFolderType(preciseMatch[1]);
+        }
+
+        const folderTypeMatch = /^foldertype:(.+)$/.exec(normalizedValue);
+        if (folderTypeMatch && folderTypeMatch[1]) {
+            return normalizeBookmarkRootFolderType(folderTypeMatch[1]);
+        }
+
+        if (normalizedValue === 'bookmark_bar' || normalizedValue === 'toolbar') return 'bookmarks-bar';
+        if (normalizedValue === 'other' || normalizedValue === 'menu' || normalizedValue === 'unfiled') return 'other';
+        if (normalizedValue === 'mobile') return 'mobile';
+        if (normalizedValue === 'managed') return 'managed';
+        return '';
+    }
+
+    function collectCandidateBookmarkRootFolderTypes(node, options = {}) {
+        return uniqueBookmarkRootStringList(
+            getBookmarkRootMatchKeys(node, options)
+                .map((key) => extractBookmarkRootFolderTypeFromMatchKey(key))
+                .filter(Boolean)
+        );
+    }
+
+    function buildBookmarkRootIdentityStats(nodes = []) {
+        const folderTypeCounts = new Map();
+        const preciseIdentityCounts = new Map();
+        const folderTypesMissingSyncing = new Set();
+
+        (Array.isArray(nodes) ? nodes : []).forEach((node) => {
+            const folderType = normalizeBookmarkRootFolderType(node && (node.folderType || node.folder_type) || '');
+            if (!folderType) return;
+            folderTypeCounts.set(folderType, (folderTypeCounts.get(folderType) || 0) + 1);
+            const preciseIdentityKey = buildBookmarkRootFolderTypeSyncingKey(folderType, node && node.syncing);
+            if (preciseIdentityKey) {
+                preciseIdentityCounts.set(preciseIdentityKey, (preciseIdentityCounts.get(preciseIdentityKey) || 0) + 1);
+            } else {
+                folderTypesMissingSyncing.add(folderType);
+            }
+        });
+
+        const multiRootFolderTypes = Array.from(folderTypeCounts.entries())
+            .filter(([, count]) => count > 1)
+            .map(([folderType]) => folderType);
+        const duplicatePreciseRootKeys = Array.from(preciseIdentityCounts.entries())
+            .filter(([, count]) => count > 1)
+            .map(([key]) => key);
+        const duplicatePreciseFolderTypes = uniqueBookmarkRootStringList(
+            duplicatePreciseRootKeys
+                .map((key) => extractBookmarkRootFolderTypeFromMatchKey(key))
+                .filter(Boolean)
+        );
+        const ambiguousFolderTypes = uniqueBookmarkRootStringList(
+            multiRootFolderTypes.filter((folderType) => folderTypesMissingSyncing.has(folderType))
+        );
+
+        return {
+            folderTypeCounts,
+            preciseIdentityCounts,
+            multiRootFolderTypes,
+            duplicatePreciseRootKeys,
+            duplicatePreciseFolderTypes,
+            folderTypesMissingSyncing: Array.from(folderTypesMissingSyncing),
+            ambiguousFolderTypes
+        };
+    }
+
+    function buildPermanentRootAssignmentPlanFailure(errorCode, error, errorDetails = null) {
+        return {
+            success: false,
+            errorCode: String(errorCode || '').trim() || 'root-mapping-failed',
+            error: String(error || 'Permanent root mapping failed'),
+            errorDetails: errorDetails && typeof errorDetails === 'object' ? errorDetails : null
+        };
+    }
+
+    function buildPermanentRootAssignmentPlan(localRootsInput, remoteRootsInput) {
+        const localRoots = (Array.isArray(localRootsInput) ? localRootsInput : []).filter(Boolean);
+        const remoteRoots = (Array.isArray(remoteRootsInput) ? remoteRootsInput : []).filter(Boolean);
+        const localRootIdentityStats = buildBookmarkRootIdentityStats(localRoots);
+        const remoteRootIdentityStats = buildBookmarkRootIdentityStats(remoteRoots);
+        const snapshotFolderTypesInUse = uniqueBookmarkRootStringList(
+            remoteRoots.flatMap((node) => collectCandidateBookmarkRootFolderTypes(node))
+        );
+
+        const duplicateRemoteFolderTypes = uniqueBookmarkRootStringList(
+            remoteRootIdentityStats.duplicatePreciseFolderTypes
+        );
+        const duplicateLocalFolderTypes = uniqueBookmarkRootStringList([
+            ...(Array.isArray(localRootIdentityStats.duplicatePreciseFolderTypes) ? localRootIdentityStats.duplicatePreciseFolderTypes : [])
+                .filter((folderType) => snapshotFolderTypesInUse.includes(folderType)),
+            ...(Array.isArray(localRootIdentityStats.ambiguousFolderTypes) ? localRootIdentityStats.ambiguousFolderTypes : [])
+                .filter((folderType) => snapshotFolderTypesInUse.includes(folderType))
+        ]);
+        if (duplicateRemoteFolderTypes.length > 0 || duplicateLocalFolderTypes.length > 0) {
+            return buildPermanentRootAssignmentPlanFailure(
+                'root-folder-type-conflict',
+                'Ambiguous top-level root folderType mapping.',
+                {
+                    duplicateRemoteFolderTypes,
+                    duplicateLocalFolderTypes,
+                    snapshotFolderTypesInUse
+                }
+            );
+        }
+
+        const localMultiRootFolderTypes = uniqueBookmarkRootStringList(
+            (Array.isArray(localRootIdentityStats.multiRootFolderTypes) ? localRootIdentityStats.multiRootFolderTypes : [])
+                .filter((folderType) => snapshotFolderTypesInUse.includes(folderType))
+        );
+        const remoteMultiRootFolderTypes = uniqueBookmarkRootStringList(
+            Array.isArray(remoteRootIdentityStats.multiRootFolderTypes)
+                ? remoteRootIdentityStats.multiRootFolderTypes
+                : []
+        );
+        const remoteFolderTypesMissingSyncing = uniqueBookmarkRootStringList(
+            remoteRoots
+                .filter((node) => normalizeBookmarkRootSyncing(node && node.syncing) === null)
+                .flatMap((node) => collectCandidateBookmarkRootFolderTypes(node))
+        );
+        const ambiguousFolderTypesMissingSyncing = uniqueBookmarkRootStringList(
+            remoteRoots
+                .filter((node) => normalizeBookmarkRootSyncing(node && node.syncing) === null)
+                .flatMap((node) => {
+                    const candidateFolderTypes = collectCandidateBookmarkRootFolderTypes(node);
+                    return candidateFolderTypes.filter((folderType) => (
+                        localMultiRootFolderTypes.includes(folderType)
+                        || remoteMultiRootFolderTypes.includes(folderType)
+                    ));
+                })
+        );
+        if (ambiguousFolderTypesMissingSyncing.length > 0) {
+            return buildPermanentRootAssignmentPlanFailure(
+                'root-syncing-required',
+                'Cannot map one or more duplicated root folderType values because syncing metadata is missing.',
+                {
+                    ambiguousFolderTypesMissingSyncing,
+                    localMultiRootFolderTypes,
+                    remoteMultiRootFolderTypes: uniqueBookmarkRootStringList(
+                        remoteMultiRootFolderTypes.filter((folderType) => ambiguousFolderTypesMissingSyncing.includes(folderType))
+                    ),
+                    remoteFolderTypesMissingSyncing,
+                    snapshotFolderTypesInUse
+                }
+            );
+        }
+
+        const localFolderTypeCounts = buildBookmarkRootFolderTypeCounts(localRoots);
+        const remoteFolderTypeCounts = buildBookmarkRootFolderTypeCounts(remoteRoots);
+        const remoteByKey = new Map();
+        remoteRoots.forEach((node) => {
+            setBookmarkRootMatchMapEntry(remoteByKey, node, node, {
+                generalKeyMode: 'unique_only',
+                folderTypeCounts: remoteFolderTypeCounts
+            });
+        });
+
+        const assignments = [];
+        const unresolvedLocalRoots = [];
+        const duplicateAssignments = [];
+        const assignedRemoteByRef = new Set();
+        for (let i = 0; i < localRoots.length; i++) {
+            const localRoot = localRoots[i];
+            if (!localRoot || !localRoot.id) continue;
+
+            let remoteRoot = getBookmarkRootMatchMapValue(remoteByKey, localRoot, {
+                generalKeyMode: 'unique_only',
+                folderTypeCounts: localFolderTypeCounts
+            });
+            const localFolderType = normalizeBookmarkRootFolderType(localRoot.folderType || localRoot.folder_type || '');
+            if (!remoteRoot && !localFolderType) {
+                const indexFallback = remoteRoots[i] || null;
+                const indexFallbackFolderType = normalizeBookmarkRootFolderType(indexFallback && (indexFallback.folderType || indexFallback.folder_type) || '');
+                if (indexFallback && !indexFallbackFolderType) {
+                    remoteRoot = indexFallback;
+                }
+            }
+            if (!remoteRoot) {
+                unresolvedLocalRoots.push({
+                    index: i,
+                    localRoot
+                });
+                continue;
+            }
+
+            if (assignedRemoteByRef.has(remoteRoot)) {
+                duplicateAssignments.push({
+                    index: i,
+                    localRoot,
+                    remoteRoot
+                });
+                continue;
+            }
+            assignedRemoteByRef.add(remoteRoot);
+            assignments.push({
+                localRoot,
+                remoteRoot,
+                localIndex: i
+            });
+        }
+
+        if (duplicateAssignments.length > 0) {
+            return buildPermanentRootAssignmentPlanFailure(
+                'root-folder-type-conflict',
+                'Multiple local roots resolved to the same remote root.',
+                {
+                    duplicateCount: duplicateAssignments.length,
+                    duplicateLocalFolderTypes: uniqueBookmarkRootStringList(
+                        duplicateAssignments.map((entry) => normalizeBookmarkRootFolderType(entry && entry.localRoot && (entry.localRoot.folderType || entry.localRoot.folder_type) || ''))
+                    ),
+                    duplicateRemoteFolderTypes: uniqueBookmarkRootStringList(
+                        duplicateAssignments.map((entry) => normalizeBookmarkRootFolderType(entry && entry.remoteRoot && (entry.remoteRoot.folderType || entry.remoteRoot.folder_type) || ''))
+                    ),
+                    snapshotFolderTypesInUse
+                }
+            );
+        }
+
+        const unresolvedRemoteRoots = remoteRoots.filter((node) => (
+            node
+            && !assignedRemoteByRef.has(node)
+            && !!normalizeBookmarkRootFolderType(node.folderType || node.folder_type || '')
+        ));
+        if (unresolvedLocalRoots.length > 0 || unresolvedRemoteRoots.length > 0) {
+            return buildPermanentRootAssignmentPlanFailure(
+                'root-mapping-missing',
+                'Cannot map one or more top-level roots between local and remote trees.',
+                {
+                    unresolvedLocalCount: unresolvedLocalRoots.length,
+                    unresolvedRemoteCount: unresolvedRemoteRoots.length,
+                    unresolvedLocalFolderTypes: uniqueBookmarkRootStringList(
+                        unresolvedLocalRoots.flatMap((entry) => collectCandidateBookmarkRootFolderTypes(entry && entry.localRoot))
+                    ),
+                    unresolvedRemoteFolderTypes: uniqueBookmarkRootStringList(
+                        unresolvedRemoteRoots.flatMap((entry) => collectCandidateBookmarkRootFolderTypes(entry))
+                    ),
+                    unresolvedLocalTitles: uniqueBookmarkRootStringList(
+                        unresolvedLocalRoots.map((entry) => String(entry && entry.localRoot && (entry.localRoot.title || entry.localRoot.name) || '').trim())
+                    ).slice(0, 10),
+                    unresolvedRemoteTitles: uniqueBookmarkRootStringList(
+                        unresolvedRemoteRoots.map((entry) => String(entry && (entry.title || entry.name) || '').trim())
+                    ).slice(0, 10),
+                    snapshotFolderTypesInUse
+                }
+            );
+        }
+
+        return {
+            success: true,
+            assignments,
+            localRootIdentityStats,
+            remoteRootIdentityStats,
+            snapshotFolderTypesInUse
+        };
+    }
+
+    function createPermanentRootAssignmentPlanError(planResult) {
+        const code = String(planResult && planResult.errorCode || 'root-mapping-failed').trim() || 'root-mapping-failed';
+        const message = textByLang(
+            `永久栏目根目录映射失败（${code}），已中止以避免写入错误根目录。`,
+            `Permanent root mapping failed (${code}); sync was stopped to avoid writing into the wrong roots.`
+        );
+        const error = new Error(message);
+        if (planResult && planResult.errorDetails && typeof planResult.errorDetails === 'object') {
+            error.errorDetails = planResult.errorDetails;
+        }
+        error.errorCode = code;
+        return error;
+    }
+
     function buildCanonicalBookmarkComparableNode(node) {
         if (!node || typeof node !== 'object') return null;
         if (typeof node.url === 'string' && node.url.trim()) {
@@ -4628,21 +5257,26 @@
     function buildPermanentIncrementalSyncPlan(localTreeSnapshot, remoteTreeSnapshot) {
         const localRoots = extractBookmarkRootFolders(localTreeSnapshot);
         const remoteRoots = extractBookmarkRootFolders(remoteTreeSnapshot);
-        const remoteFolderTypeCounts = buildBookmarkRootFolderTypeCounts(remoteRoots);
-        const remoteByTitle = new Map();
-        remoteRoots.forEach((node) => {
-            setBookmarkRootMatchMapEntry(remoteByTitle, node, node, {
-                generalKeyMode: 'unique_only',
-                folderTypeCounts: remoteFolderTypeCounts
-            });
-        });
+        const assignmentPlan = buildPermanentRootAssignmentPlan(localRoots, remoteRoots);
+        if (!assignmentPlan || assignmentPlan.success !== true) {
+            return {
+                hasChanges: true,
+                logicalChangeCount: Number.POSITIVE_INFINITY,
+                complexReason: String(assignmentPlan && assignmentPlan.errorCode || 'root-mapping-failed'),
+                rootAssignmentError: assignmentPlan && assignmentPlan.errorDetails
+                    ? assignmentPlan.errorDetails
+                    : null
+            };
+        }
 
         const plans = [];
         let logicalChangeCount = 0;
-        for (let i = 0; i < localRoots.length; i++) {
-            const localRoot = localRoots[i];
+        const assignments = Array.isArray(assignmentPlan.assignments) ? assignmentPlan.assignments : [];
+        for (let i = 0; i < assignments.length; i++) {
+            const assignment = assignments[i];
+            const localRoot = assignment && assignment.localRoot;
             if (!localRoot || !localRoot.id) continue;
-            const remoteRoot = getBookmarkRootMatchMapValue(remoteByTitle, localRoot) || remoteRoots[i] || null;
+            const remoteRoot = assignment && assignment.remoteRoot ? assignment.remoteRoot : null;
             const remoteChildren = remoteRoot && Array.isArray(remoteRoot.children) ? remoteRoot.children : [];
             const rootPlan = buildPermanentIncrementalPlan(
                 String(localRoot.id || ''),
@@ -4768,22 +5402,20 @@
 	        }
 
         const remoteRoots = extractBookmarkRootFolders(remoteTree);
-        const remoteFolderTypeCounts = buildBookmarkRootFolderTypeCounts(remoteRoots);
-        const remoteByTitle = new Map();
-        remoteRoots.forEach((node) => {
-            setBookmarkRootMatchMapEntry(remoteByTitle, node, node, {
-                generalKeyMode: 'unique_only',
-                folderTypeCounts: remoteFolderTypeCounts
-            });
-        });
+        const assignmentPlan = buildPermanentRootAssignmentPlan(localRoots, remoteRoots);
+        if (!assignmentPlan || assignmentPlan.success !== true) {
+            throw createPermanentRootAssignmentPlanError(assignmentPlan);
+        }
 
         return await withPermanentTreeBulkMode(options && options.reason || 'sync-permanent-overwrite', async () => {
             const counters = { folders: 0, bookmarks: 0 };
-            for (let i = 0; i < localRoots.length; i++) {
-                const localRoot = localRoots[i];
+            const assignments = Array.isArray(assignmentPlan.assignments) ? assignmentPlan.assignments : [];
+            for (let i = 0; i < assignments.length; i++) {
+                const assignment = assignments[i];
+                const localRoot = assignment && assignment.localRoot;
                 if (!localRoot || !localRoot.id) continue;
 
-                const remoteRoot = getBookmarkRootMatchMapValue(remoteByTitle, localRoot) || remoteRoots[i] || null;
+                const remoteRoot = assignment && assignment.remoteRoot ? assignment.remoteRoot : null;
                 const remoteChildren = remoteRoot && Array.isArray(remoteRoot.children) ? remoteRoot.children : [];
 
                 await clearBookmarkChildren(localRoot.id);
@@ -5541,6 +6173,54 @@ Cancel: go back and change the branch name first.`
             ]
         });
         return result === 'confirm';
+    }
+
+    async function requestRecoveryUnlockConfirmationAsync(lock = null) {
+        const activeLock = normalizeRecoveryLockRecord(lock || recoveryLockState || loadRecoveryLockState());
+        if (!activeLock || !isRecoveryLockActive(activeLock)) return true;
+
+        const canExportBackup = canExportRecoveryBackupPackage(activeLock);
+        const lines = (getSyncLang() === 'en'
+            ? [
+                'You are about to unlock and stop recovery prompts manually.',
+                'This will clear the current recovery lock and staged recovery bundle.',
+                'After unlock, automatic continuation/rollback will no longer be available for this unfinished flow.',
+                canExportBackup
+                    ? 'Recommended: export the dual-snapshot backup first (start snapshot + target snapshot).'
+                    : 'Dual-snapshot export is available only after a failed recovery action; if needed, keep a manual recovery snapshot first.'
+            ]
+            : [
+                '你即将手动解锁并停止恢复提示。',
+                '这会清除当前恢复锁和恢复缓存。',
+                '解锁后，这次未完成流程将无法再自动继续或自动回到覆盖前本地状态。',
+                canExportBackup
+                    ? '建议先导出双快照备份（开始前快照 + 目标快照）。'
+                    : '双快照导出仅在恢复失败后开放；如需留档，请先手动备份快照。'
+            ]);
+
+        while (true) {
+            const result = await openSyncActionDialog({
+                title: textByLang('手动解锁确认', 'Manual Unlock Confirmation'),
+                lines,
+                keywordExpected: 'UNLOCK',
+                keywordLabel: textByLang('输入 UNLOCK 以确认手动解锁', 'Type UNLOCK to confirm manual unlock'),
+                keywordHint: textByLang(
+                    '如果你还没导出双快照备份，建议先点“导出双快照备份”。',
+                    'If you have not exported dual snapshots yet, it is recommended to do so first.'
+                ),
+                actions: [
+                    { id: 'cancel', label: textByLang('取消', 'Cancel'), tone: 'secondary' },
+                    { id: 'export', label: textByLang('导出双快照备份', 'Export dual-snapshot backup'), tone: 'secondary' },
+                    { id: 'confirm', label: textByLang('确认解锁', 'Confirm unlock'), tone: 'primary' }
+                ]
+            });
+
+            if (result === 'export') {
+                await exportRecoveryBackupPackageAction();
+                continue;
+            }
+            return result === 'confirm';
+        }
     }
 
     function getFirstSyncDataKeyLabel(key) {
@@ -7766,6 +8446,10 @@ Cancel: go back and change the branch name first.`
             '正在同步：请等待当前同步完成',
             'Sync is running: please wait for completion'
         );
+        const recoveryInFlightHint = textByLang(
+            '恢复操作进行中：请等待当前恢复完成',
+            'Recovery action in progress: wait for completion'
+        );
 
         [
             'canvasSyncNowBtn',
@@ -7786,26 +8470,47 @@ Cancel: go back and change the branch name first.`
             );
         });
 
+        const activeRecoveryLock = normalizeRecoveryLockRecord(recoveryLockState || loadRecoveryLockState());
+        const canRollbackCurrentRecovery = disabledByRecoveryLock && canRollbackRecoveryLock(activeRecoveryLock);
+        const canExportCurrentRecoveryBackup = disabledByRecoveryLock && canExportRecoveryBackupPackage(activeRecoveryLock);
+        const isLockedIncidentRecovery = disabledByRecoveryLock && isRecoveryLockLockedIncident(activeRecoveryLock);
+        setActionDisabledState(
+            getElement('canvasSyncRecoveryRollbackBtn'),
+            !canRollbackCurrentRecovery || recoveryLockResumeInFlight,
+            recoveryLockResumeInFlight
+                ? recoveryInFlightHint
+                : (canRollbackCurrentRecovery
+                    ? ''
+                    : (disabledByRecoveryLock
+                        ? textByLang('当前任务不支持“回到覆盖前本地状态”', 'This task does not support "return to pre-overwrite local state"')
+                        : recoveryHint))
+        );
+        setActionDisabledState(
+            getElement('canvasSyncRecoveryExportBackupBtn'),
+            !canExportCurrentRecoveryBackup || recoveryLockResumeInFlight,
+            recoveryLockResumeInFlight
+                ? recoveryInFlightHint
+                : (canExportCurrentRecoveryBackup
+                    ? ''
+                    : (disabledByRecoveryLock
+                        ? textByLang('导出双快照仅在恢复失败后开放', 'Dual-snapshot export is enabled only after a failed recovery action.')
+                        : recoveryHint))
+        );
         setActionDisabledState(
             getElement('canvasSyncRecoveryContinueBtn'),
-            !disabledByRecoveryLock || recoveryLockResumeInFlight,
-            disabledByRecoveryLock ? '' : recoveryHint
+            !disabledByRecoveryLock || recoveryLockResumeInFlight || isLockedIncidentRecovery,
+            recoveryLockResumeInFlight
+                ? recoveryInFlightHint
+                : (isLockedIncidentRecovery
+                    ? textByLang('当前恢复已锁定：请先导出双快照备份', 'This recovery is locked. Export the dual-snapshot backup first.')
+                    : (disabledByRecoveryLock ? '' : recoveryHint))
         );
         setActionDisabledState(
             getElement('canvasSyncRecoveryDismissBtn'),
             !disabledByRecoveryLock || recoveryLockResumeInFlight,
-            disabledByRecoveryLock ? '' : recoveryHint
-        );
-        const activeRecoveryLock = normalizeRecoveryLockRecord(recoveryLockState || loadRecoveryLockState());
-        const canRollbackCurrentRecovery = disabledByRecoveryLock && canRollbackRecoveryLock(activeRecoveryLock);
-        setActionDisabledState(
-            getElement('canvasSyncRecoveryRollbackBtn'),
-            !canRollbackCurrentRecovery || recoveryLockResumeInFlight,
-            canRollbackCurrentRecovery
-                ? ''
-                : (disabledByRecoveryLock
-                    ? textByLang('当前恢复锁不支持自动回滚', 'The current recovery lock does not support automatic rollback')
-                    : recoveryHint)
+            recoveryLockResumeInFlight
+                ? recoveryInFlightHint
+                : (disabledByRecoveryLock ? '' : recoveryHint)
         );
         const latestRecoverySnapshot = getLatestRecoverySnapshotRecord({ requireSnapshot: true });
         const canDownloadRecoverySnapshot = !!(latestRecoverySnapshot && latestRecoverySnapshot.snapshot);
@@ -12322,6 +13027,7 @@ Cancel: go back and change the branch name first.`
                                     rootPath: recoveryRootPath,
                                     folderName: recoveryFolderName,
                                     snapshot: remoteState && !remoteState.notFound ? remoteState.snapshot : null,
+                                    rollbackLocalSnapshot: localSnapshot,
                                     folderFiles: fetched.folderFiles,
                                     remoteFilesByPath
                                 }, {
@@ -12354,6 +13060,7 @@ Cancel: go back and change the branch name first.`
                             rootPath: recoveryRootPath,
                             folderName: recoveryFolderName,
                             snapshot: remoteState.snapshot,
+                            rollbackLocalSnapshot: localSnapshot,
                             folderFiles: new Map(),
                             remoteFilesByPath
                         }, {
@@ -13435,6 +14142,7 @@ Cancel: go back and change the branch name first.`
                         rootPath: remoteState && remoteState.path ? remoteState.path : (settings && settings.obsidianExportRoot ? settings.obsidianExportRoot : ''),
                         folderName: (remoteState && remoteState.path ? remoteState.path : (settings && settings.obsidianExportRoot ? settings.obsidianExportRoot : '')).split('/').filter(Boolean).slice(-1)[0] || DEFAULT_SETTINGS.obsidianExportRoot,
                         snapshot: remoteSnapshot,
+                        rollbackLocalSnapshot: localBackupSnapshot,
                         folderFiles: fetchedRemoteFiles.folderFiles,
                         remoteFilesByPath: remoteState && remoteState.remoteList && remoteState.remoteList.filesByPath ? remoteState.remoteList.filesByPath : null
                     }, {
@@ -13456,6 +14164,7 @@ Cancel: go back and change the branch name first.`
                         rootPath: remoteState && remoteState.path ? remoteState.path : (settings && settings.obsidianExportRoot ? settings.obsidianExportRoot : ''),
                         folderName: (remoteState && remoteState.path ? remoteState.path : (settings && settings.obsidianExportRoot ? settings.obsidianExportRoot : '')).split('/').filter(Boolean).slice(-1)[0] || DEFAULT_SETTINGS.obsidianExportRoot,
                         snapshot: remoteSnapshot,
+                        rollbackLocalSnapshot: localBackupSnapshot,
                         folderFiles: new Map(),
                         remoteFilesByPath: remoteState && remoteState.remoteList && remoteState.remoteList.filesByPath ? remoteState.remoteList.filesByPath : null
                     }, {
@@ -13874,6 +14583,12 @@ Cancel: go back and change the branch name first.`
         if (recoveryRollbackBtn) {
             recoveryRollbackBtn.addEventListener('click', () => {
                 void runWithButtonBusy(recoveryRollbackBtn, () => rollbackRecoveryLockAction());
+            });
+        }
+        const recoveryExportBackupBtn = getElement('canvasSyncRecoveryExportBackupBtn');
+        if (recoveryExportBackupBtn) {
+            recoveryExportBackupBtn.addEventListener('click', () => {
+                void runWithButtonBusy(recoveryExportBackupBtn, () => exportRecoveryBackupPackageAction());
             });
         }
         const downloadRecoverySnapshotBtn = getElement('canvasSyncDownloadRecoverySnapshotBtn');
