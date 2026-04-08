@@ -865,7 +865,11 @@ if (browserAPI.tabs && browserAPI.tabs.onUpdated) {
         entries.slice(0, 500).forEach(([url]) => processedFavicons.delete(url));
       }
 
-      const dataUrl = await fetchImageAsDataUrl(changeInfo.favIconUrl || tab.favIconUrl);
+      const dataUrl = await fetchImageAsDataUrl(changeInfo.favIconUrl || tab.favIconUrl, {
+        minDimensionPx: 16,
+        maxBytes: 512 * 1024,
+        timeoutMs: 4000
+      });
       if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
         try {
           browserAPI.runtime.sendMessage({

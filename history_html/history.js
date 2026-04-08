@@ -2145,6 +2145,7 @@ const FaviconCache = {
     maxFetchedBytes: 512 * 1024,
     minFaviconDimensionPx: 96,
     minFallbackFaviconDimensionPx: 32,
+    minTerminalFallbackFaviconDimensionPx: 16,
     browserFaviconSizeCandidates: [128, 96, 64],
     publicFaviconSizeCandidates: [256, 192, 128, 96, 64],
     googleS2SizeCandidates: [128, 64],
@@ -2854,7 +2855,33 @@ const FaviconCache = {
                     }
                 }
 
-                const chosenCandidate = bestTransparentCandidate || bestNonWhiteCandidate || bestAnyCandidate;
+                let chosenCandidate = bestTransparentCandidate || bestNonWhiteCandidate || bestAnyCandidate;
+
+                // 第三轮（终极兜底）：仅在前两轮都拿不到任何可用候选时，放宽到 >=16。
+                if (!chosenCandidate) {
+                    const terminalFallbackMinDimension = Math.max(
+                        1,
+                        Math.min(
+                            fallbackMinDimension,
+                            Number(this.minTerminalFallbackFaviconDimensionPx) || 16
+                        )
+                    );
+                    if (terminalFallbackMinDimension < fallbackMinDimension) {
+                        const terminalFallbackSources = this._buildFaviconSourceList(url, domain, {
+                            includeGoogleS2: true,
+                            preferDuckDuckGoFirst: true,
+                            minDimensionPx: terminalFallbackMinDimension,
+                            maxPublicSizes: 1,
+                            maxGoogleSizes: 1,
+                            maxBrowserSizes: 1
+                        });
+                        for (const faviconUrl of terminalFallbackSources) {
+                            await tryCandidateFromSource(faviconUrl, terminalFallbackMinDimension);
+                        }
+                        chosenCandidate = bestTransparentCandidate || bestNonWhiteCandidate || bestAnyCandidate;
+                    }
+                }
+
                 if (chosenCandidate && chosenCandidate.dataUrl) {
                     await this.save(url, chosenCandidate.dataUrl);
                     resolve(chosenCandidate.dataUrl);
@@ -16170,9 +16197,36 @@ function setupRealtimeMessageListener() {
             // 从打开的 tab 更新 favicon（静默）
             if (message.url && message.favIconUrl) {
                 if (FaviconCache.isStoredFaviconData(message.favIconUrl)) {
-                    FaviconCache.save(message.url, message.favIconUrl).then(() => {
+                    const incomingDataUrl = message.favIconUrl;
+                    Promise.resolve().then(async () => {
+                        const incomingDimensions = await FaviconCache.getDataUrlDimensions(incomingDataUrl);
+                        const incomingMinDimension = incomingDimensions
+                            ? Math.min(
+                                Number(incomingDimensions.width) || 0,
+                                Number(incomingDimensions.height) || 0
+                            )
+                            : 0;
+                        if (incomingMinDimension > 0 && incomingMinDimension < 16) {
+                            return;
+                        }
+
+                        const existing = await FaviconCache.get(message.url);
+                        if (existing && existing !== 'failed' && FaviconCache.isStoredFaviconData(existing)) {
+                            const existingDimensions = await FaviconCache.getDataUrlDimensions(existing);
+                            const existingMinDimension = existingDimensions
+                                ? Math.min(
+                                    Number(existingDimensions.width) || 0,
+                                    Number(existingDimensions.height) || 0
+                                )
+                                : 0;
+                            if (existingMinDimension >= 32 && incomingMinDimension > 0 && incomingMinDimension < 32) {
+                                return;
+                            }
+                        }
+
+                        await FaviconCache.save(message.url, incomingDataUrl);
                         // 更新页面上对应的 favicon 图标
-                        updateFaviconImages(message.url, message.favIconUrl);
+                        updateFaviconImages(message.url, incomingDataUrl);
                     }).catch(() => {
                         // 静默处理错误
                     });
