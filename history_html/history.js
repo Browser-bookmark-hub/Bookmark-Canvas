@@ -1243,18 +1243,276 @@ const CANVAS_CHANGE_LOG_KEY = 'canvas_change_log_v1';
 const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
 const MARKER_ACTIVE_BUTTON_CLASS = 'marker-has-markers';
 const MARKER_PRESET_MINUTES = [60, 180, 360, 720, 1440, 4320, 10080];
+const MARKER_COMPARE_MODE_OPEN_ONCE = 'open_once';
+const MARKER_COMPARE_MODE_REALTIME_IDLE = 'realtime_idle';
+const MARKER_IDLE_TRACK_CHANGE_THRESHOLD = 200;
+const MARKER_IDLE_TRACK_BUSY_RETRY_MS = 260;
+const MARKER_IDLE_TRACK_IDLE_TIMEOUT_MS = 900;
+const MARKER_IDLE_TRACK_FALLBACK_DELAY_MS = 180;
+const MARKER_IDLE_TRACK_QUIET_MS = 420;
+const MARKER_IDLE_TRACK_LARGE_BATCH_QUIET_MS = 1200;
+const MARKER_AUTO_CLEAR_RECOVERY_THROTTLE_MS = 10 * 1000;
 const DEFAULT_MARKER_SETTINGS = {
     enabled: true,
     showPathBadges: true,
     autoClearEnabled: true,
     autoClearMinutes: 60,
-    nextAutoClearAt: 0
+    nextAutoClearAt: 0,
+    compareMode: MARKER_COMPARE_MODE_OPEN_ONCE
 };
 let canvasMarkerSettings = { ...DEFAULT_MARKER_SETTINGS };
-let markerAutoClearTimer = null;
+let markerAutoClearRecoveryInFlight = false;
+let markerAutoClearLastRecoveryCheckAt = 0;
 let persistMovedTimer = null;
 let lastMarkerBaselineWriteAt = 0;
 let cachedChangeLog = { updatedAt: 0, changes: new Map(), version: 1 };
+
+let permanentMarkerDiffComputedInCurrentCanvasSession = false;
+let markerIdleTrackScheduleTimer = null;
+let markerIdleTrackIdleCallbackId = null;
+let markerIdleTrackPendingCount = 0;
+let markerIdleTrackPendingReason = '';
+let markerIdleTrackNeedsForceRefresh = false;
+let markerIdleTrackInFlight = false;
+let markerIdleTrackQueued = false;
+let markerIdleTrackLastEnqueueAt = 0;
+let markerDiffBypassOnce = false;
+
+function normalizePermanentMarkerCompareMode(mode) {
+    return mode === MARKER_COMPARE_MODE_REALTIME_IDLE
+        ? MARKER_COMPARE_MODE_REALTIME_IDLE
+        : MARKER_COMPARE_MODE_OPEN_ONCE;
+}
+
+function getPermanentMarkerCompareMode() {
+    return normalizePermanentMarkerCompareMode(canvasMarkerSettings.compareMode);
+}
+
+function isPermanentMarkerRealtimeTrackingEnabled() {
+    return getPermanentMarkerCompareMode() === MARKER_COMPARE_MODE_REALTIME_IDLE;
+}
+
+function resetPermanentMarkerDiffComputationState(reason = '') {
+    permanentMarkerDiffComputedInCurrentCanvasSession = false;
+    if (reason) {
+        console.log('[Marker] 已重置“首轮比对”状态:', reason);
+    }
+}
+
+function markPermanentMarkerDiffComputed(reason = '') {
+    permanentMarkerDiffComputedInCurrentCanvasSession = true;
+    if (reason) {
+        console.log('[Marker] 已完成“首轮比对”并锁定本轮会话:', reason);
+    }
+}
+
+function shouldComputePermanentMarkerDiffNow() {
+    if (!isMarkerEnabled()) return false;
+    if (markerDiffBypassOnce) {
+        markerDiffBypassOnce = false;
+        return false;
+    }
+    if (isPermanentMarkerRealtimeTrackingEnabled()) return true;
+    return !permanentMarkerDiffComputedInCurrentCanvasSession;
+}
+
+function bypassNextPermanentMarkerDiff(reason = '') {
+    markerDiffBypassOnce = true;
+    if (reason) {
+        console.log('[Marker] 已设置下一次比对跳过:', reason);
+    }
+}
+
+function clearMarkerRealtimeIdleScheduling() {
+    if (markerIdleTrackScheduleTimer) {
+        clearTimeout(markerIdleTrackScheduleTimer);
+        markerIdleTrackScheduleTimer = null;
+    }
+    if (
+        markerIdleTrackIdleCallbackId !== null &&
+        typeof window !== 'undefined' &&
+        typeof window.cancelIdleCallback === 'function'
+    ) {
+        try {
+            window.cancelIdleCallback(markerIdleTrackIdleCallbackId);
+        } catch (_) { }
+    }
+    markerIdleTrackIdleCallbackId = null;
+}
+
+function isMarkerRealtimeTrackingSurfaceActive() {
+    try {
+        if (currentView !== 'canvas') return false;
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false;
+        return true;
+    } catch (_) {
+        return currentView === 'canvas';
+    }
+}
+
+function requestMarkerAutoClearDeadlineReset(reason = '') {
+    // 由后台统一计算并持久化 nextAutoClearAt，页面端只发起“重置请求”。
+    canvasMarkerSettings.nextAutoClearAt = 0;
+    if (reason) {
+        console.log('[Marker] 已请求后台重置自动清除计时:', reason);
+    }
+}
+
+function resetMarkerRealtimeIdleTracking(reason = '') {
+    clearMarkerRealtimeIdleScheduling();
+    markerIdleTrackPendingCount = 0;
+    markerIdleTrackPendingReason = '';
+    markerIdleTrackNeedsForceRefresh = false;
+    markerIdleTrackQueued = false;
+    markerIdleTrackLastEnqueueAt = 0;
+    markerDiffBypassOnce = false;
+    if (reason) {
+        console.log('[Marker] 已重置空闲追踪队列:', reason);
+    }
+}
+
+function shouldDelayMarkerRealtimeIdleRun() {
+    try {
+        if (isBookmarkBulkMuteActive()) return true;
+    } catch (_) { }
+    try {
+        if (isBookmarkBulkMuteRenderingBlocked()) return true;
+    } catch (_) { }
+    try {
+        if (isRenderingTree) return true;
+    } catch (_) { }
+    try {
+        if (addRemoveFlushInProgress || addRemoveFlushQueued) return true;
+    } catch (_) { }
+    try {
+        if (document.body && document.body.classList.contains('sidebar-resizing')) return true;
+        if (document.documentElement && document.documentElement.classList.contains('layout-resizing')) return true;
+    } catch (_) { }
+    return false;
+}
+
+async function runMarkerRealtimeIdleCompare(reason = 'marker-idle') {
+    if (markerIdleTrackInFlight) {
+        markerIdleTrackQueued = true;
+        return;
+    }
+    markerIdleTrackInFlight = true;
+
+    const pendingCount = markerIdleTrackPendingCount;
+    const shouldForceRefresh = markerIdleTrackNeedsForceRefresh;
+    markerIdleTrackPendingCount = 0;
+    markerIdleTrackPendingReason = '';
+    markerIdleTrackNeedsForceRefresh = false;
+
+    try {
+        if (!isMarkerEnabled() || !isPermanentMarkerRealtimeTrackingEnabled()) return;
+        if (!isMarkerRealtimeTrackingSurfaceActive()) return;
+        resetPermanentMarkerDiffComputationState(`idle:${reason}`);
+
+        if (currentView === 'canvas') {
+            await renderTreeView(shouldForceRefresh);
+        } else {
+            syncMarkerAttentionIndicators('marker-idle-offscreen');
+        }
+    } catch (e) {
+        console.warn('[Marker] 空闲追踪刷新失败:', reason, e);
+    } finally {
+        markerIdleTrackInFlight = false;
+        if (markerIdleTrackQueued || markerIdleTrackPendingCount > 0 || markerIdleTrackNeedsForceRefresh) {
+            markerIdleTrackQueued = false;
+            scheduleMarkerRealtimeIdleCompare(`queued:${reason}:${pendingCount}`);
+        }
+    }
+}
+
+function scheduleMarkerRealtimeIdleCompare(reason = '') {
+    if (!isMarkerEnabled() || !isPermanentMarkerRealtimeTrackingEnabled()) return;
+    if (!isMarkerRealtimeTrackingSurfaceActive()) return;
+    if (reason) markerIdleTrackPendingReason = String(reason);
+
+    if (markerIdleTrackInFlight) {
+        markerIdleTrackQueued = true;
+        return;
+    }
+    if (markerIdleTrackScheduleTimer || markerIdleTrackIdleCallbackId !== null) return;
+
+    const run = () => {
+        clearMarkerRealtimeIdleScheduling();
+        if (!isMarkerEnabled() || !isPermanentMarkerRealtimeTrackingEnabled()) {
+            markerIdleTrackPendingCount = 0;
+            markerIdleTrackPendingReason = '';
+            markerIdleTrackNeedsForceRefresh = false;
+            markerIdleTrackLastEnqueueAt = 0;
+            return;
+        }
+        if (markerIdleTrackPendingCount <= 0 && !markerIdleTrackNeedsForceRefresh) return;
+
+        const requiredQuietMs = markerIdleTrackNeedsForceRefresh
+            ? MARKER_IDLE_TRACK_LARGE_BATCH_QUIET_MS
+            : MARKER_IDLE_TRACK_QUIET_MS;
+        const elapsedSinceLastEnqueue = markerIdleTrackLastEnqueueAt > 0
+            ? (Date.now() - markerIdleTrackLastEnqueueAt)
+            : requiredQuietMs;
+        if (elapsedSinceLastEnqueue < requiredQuietMs) {
+            markerIdleTrackScheduleTimer = setTimeout(() => {
+                markerIdleTrackScheduleTimer = null;
+                scheduleMarkerRealtimeIdleCompare(`${markerIdleTrackPendingReason || 'marker-idle'}:wait-quiet`);
+            }, Math.max(40, requiredQuietMs - elapsedSinceLastEnqueue + 40));
+            return;
+        }
+
+        if (shouldDelayMarkerRealtimeIdleRun()) {
+            markerIdleTrackScheduleTimer = setTimeout(() => {
+                markerIdleTrackScheduleTimer = null;
+                scheduleMarkerRealtimeIdleCompare(`${markerIdleTrackPendingReason || 'marker-idle'}:retry-busy`);
+            }, MARKER_IDLE_TRACK_BUSY_RETRY_MS);
+            return;
+        }
+
+        runMarkerRealtimeIdleCompare(markerIdleTrackPendingReason || reason || 'marker-idle').catch(() => { });
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+        markerIdleTrackIdleCallbackId = window.requestIdleCallback(() => {
+            run();
+        }, { timeout: MARKER_IDLE_TRACK_IDLE_TIMEOUT_MS });
+        markerIdleTrackScheduleTimer = setTimeout(() => {
+            if (markerIdleTrackIdleCallbackId === null) return;
+            run();
+        }, MARKER_IDLE_TRACK_IDLE_TIMEOUT_MS + 120);
+        return;
+    }
+
+    markerIdleTrackScheduleTimer = setTimeout(() => {
+        run();
+    }, MARKER_IDLE_TRACK_FALLBACK_DELAY_MS);
+}
+
+function enqueueMarkerRealtimeIdleCompare(reason = '', changeCount = 1) {
+    if (!isMarkerEnabled()) return;
+    if (!isPermanentMarkerRealtimeTrackingEnabled()) return;
+
+    const nextCount = Number.isFinite(changeCount) ? Math.max(1, Math.floor(changeCount)) : 1;
+    if (!isMarkerRealtimeTrackingSurfaceActive()) {
+        markerIdleTrackPendingCount += nextCount;
+        markerIdleTrackLastEnqueueAt = Date.now();
+        if (reason) markerIdleTrackPendingReason = String(reason);
+        if (markerIdleTrackPendingCount >= MARKER_IDLE_TRACK_CHANGE_THRESHOLD) {
+            markerIdleTrackNeedsForceRefresh = true;
+        }
+        resetPermanentMarkerDiffComputationState('surface-inactive-change');
+        return;
+    }
+    markerIdleTrackPendingCount += nextCount;
+    markerIdleTrackLastEnqueueAt = Date.now();
+    if (reason) {
+        markerIdleTrackPendingReason = String(reason);
+    }
+    if (markerIdleTrackPendingCount >= MARKER_IDLE_TRACK_CHANGE_THRESHOLD) {
+        markerIdleTrackNeedsForceRefresh = true;
+    }
+    scheduleMarkerRealtimeIdleCompare(markerIdleTrackPendingReason || 'bookmark-event');
+}
 
 function normalizeChangeLog(raw) {
     const base = { updatedAt: 0, changes: new Map(), version: 1 };
@@ -1305,6 +1563,7 @@ function normalizeMarkerSettings(input) {
         if (Number.isFinite(mins) && mins > 0) out.autoClearMinutes = mins;
         const at = Number(input.nextAutoClearAt);
         if (Number.isFinite(at) && at > 0) out.nextAutoClearAt = at;
+        out.compareMode = normalizePermanentMarkerCompareMode(input.compareMode);
     }
     return out;
 }
@@ -1388,17 +1647,62 @@ async function saveMarkerSettings() {
     }
 }
 
+async function requestBackgroundMarkerAutoClear(action, payload = {}) {
+    try {
+        if (!browserAPI || !browserAPI.runtime || typeof browserAPI.runtime.sendMessage !== 'function') {
+            return { success: false, error: 'runtime-unavailable' };
+        }
+        const response = await browserAPI.runtime.sendMessage({
+            action,
+            ...payload
+        });
+        if (!response || typeof response !== 'object') {
+            return { success: false, error: 'invalid-response' };
+        }
+        return response;
+    } catch (e) {
+        return { success: false, error: e && e.message ? e.message : String(e || 'message-failed') };
+    }
+}
+
+async function runMarkerAutoClearRecoveryCheck(reason = '', options = {}) {
+    const force = !!(options && options.force);
+    const now = Date.now();
+    if (!force && (now - markerAutoClearLastRecoveryCheckAt) < MARKER_AUTO_CLEAR_RECOVERY_THROTTLE_MS) {
+        return false;
+    }
+    markerAutoClearLastRecoveryCheckAt = now;
+
+    if (markerAutoClearRecoveryInFlight) return false;
+    markerAutoClearRecoveryInFlight = true;
+
+    try {
+        const response = await requestBackgroundMarkerAutoClear('canvasMarkerAutoClearCheckNow', {
+            reason: String(reason || 'history-recovery-check'),
+            force
+        });
+        if (response && response.settings && typeof response.settings === 'object') {
+            canvasMarkerSettings = normalizeMarkerSettings(response.settings);
+        }
+        return !!(response && response.success === true && response.executed === true);
+    } catch (e) {
+        console.warn('[Marker] 自动清除恢复检查失败:', reason, e);
+        return false;
+    } finally {
+        markerAutoClearRecoveryInFlight = false;
+    }
+}
+
 async function loadMarkerSettings() {
     try {
         if (!browserAPI || !browserAPI.storage || !browserAPI.storage.local) return;
         const data = await browserAPI.storage.local.get([MARKER_SETTINGS_KEY]);
         canvasMarkerSettings = normalizeMarkerSettings(data && data[MARKER_SETTINGS_KEY]);
-        // 初始化自动清除下一次时间
-        if (canvasMarkerSettings.autoClearEnabled && (!canvasMarkerSettings.nextAutoClearAt || canvasMarkerSettings.nextAutoClearAt < Date.now())) {
-            canvasMarkerSettings.nextAutoClearAt = Date.now() + canvasMarkerSettings.autoClearMinutes * 60 * 1000;
-            await saveMarkerSettings();
+        if (!isPermanentMarkerRealtimeTrackingEnabled()) {
+            resetMarkerRealtimeIdleTracking('load-settings-open-once');
         }
         scheduleMarkerAutoClear();
+        runMarkerAutoClearRecoveryCheck('load-marker-settings', { force: true }).catch(() => { });
         updateMarkerControlsUI();
     } catch (e) {
         console.warn('[Marker] 读取设置失败:', e);
@@ -1406,42 +1710,14 @@ async function loadMarkerSettings() {
 }
 
 function scheduleMarkerAutoClear() {
-    if (markerAutoClearTimer) {
-        clearTimeout(markerAutoClearTimer);
-        markerAutoClearTimer = null;
-    }
-    // Master switch off -> auto clear is effectively disabled.
-    if (!isMarkerEnabled()) return;
-    if (!canvasMarkerSettings.autoClearEnabled) return;
-    const now = Date.now();
-    const targetAt = canvasMarkerSettings.nextAutoClearAt || (now + canvasMarkerSettings.autoClearMinutes * 60 * 1000);
-    const delay = Math.max(1000, targetAt - now);
-    markerAutoClearTimer = setTimeout(async () => {
-        if (!canvasMarkerSettings.autoClearEnabled) return;
-        if (!isMarkerEnabled()) return;
-        // If there are no markers to clear, don't refresh; just restart the timer.
-        let hasAny = false;
-        try {
-            if (treeChangeMap instanceof Map && treeChangeMap.size > 0) hasAny = true;
-        } catch (_) { }
-        try {
-            if (!hasAny && explicitMovedIds instanceof Map) {
-                const now2 = Date.now();
-                for (const [, expiry] of explicitMovedIds.entries()) {
-                    if (typeof expiry !== 'number' || expiry > now2) { hasAny = true; break; }
-                }
-            }
-        } catch (_) { }
-        try {
-            if (!hasAny && canvasLazyChangeHints && canvasLazyChangeHints.hasAny) hasAny = true;
-        } catch (_) { }
-        if (hasAny) {
-            await clearMarkersAndSetBaseline('auto');
+    requestBackgroundMarkerAutoClear('canvasMarkerAutoClearEnsureSchedule', {
+        reason: 'history-schedule'
+    }).then((response) => {
+        if (!response || typeof response !== 'object') return;
+        if (response.settings && typeof response.settings === 'object') {
+            canvasMarkerSettings = normalizeMarkerSettings(response.settings);
         }
-        canvasMarkerSettings.nextAutoClearAt = Date.now() + canvasMarkerSettings.autoClearMinutes * 60 * 1000;
-        await saveMarkerSettings();
-        scheduleMarkerAutoClear();
-    }, delay);
+    }).catch(() => { });
 }
 
 function schedulePersistExplicitMovedIds() {
@@ -1449,6 +1725,10 @@ function schedulePersistExplicitMovedIds() {
     persistMovedTimer = setTimeout(async () => {
         try {
             if (!browserAPI || !browserAPI.storage || !browserAPI.storage.local) return;
+            if (!isPermanentMarkerRealtimeTrackingEnabled()) {
+                await browserAPI.storage.local.set({ [RECENT_MOVED_IDS_KEY]: [] });
+                return;
+            }
             const list = [];
             explicitMovedIds.forEach((expiry, id) => {
                 if (!id) return;
@@ -1464,6 +1744,11 @@ function schedulePersistExplicitMovedIds() {
 async function restoreExplicitMovedIdsFromStorage() {
     try {
         if (!browserAPI || !browserAPI.storage || !browserAPI.storage.local) return;
+        if (!isPermanentMarkerRealtimeTrackingEnabled()) {
+            explicitMovedIds = new Map();
+            await browserAPI.storage.local.set({ [RECENT_MOVED_IDS_KEY]: [] });
+            return;
+        }
         const data = await browserAPI.storage.local.get([RECENT_MOVED_IDS_KEY]);
         const recentMovedIds = data && Array.isArray(data[RECENT_MOVED_IDS_KEY]) ? data[RECENT_MOVED_IDS_KEY] : [];
         // Always reset, so cross-window clears can take effect immediately.
@@ -1508,6 +1793,19 @@ function updateMarkerControlsUI() {
         if (masterText) masterText.textContent = i18n.markerMasterLabel[currentLang];
         const masterToggle = document.getElementById('markerMasterToggle');
         if (masterToggle) masterToggle.checked = masterEnabled;
+        const compareModeLabel = document.getElementById('markerCompareModeLabel');
+        if (compareModeLabel) compareModeLabel.textContent = i18n.markerCompareModeLabel[currentLang];
+        const compareModeSelect = document.getElementById('markerCompareModeSelect');
+        if (compareModeSelect) {
+            compareModeSelect.value = getPermanentMarkerCompareMode();
+            compareModeSelect.disabled = !masterEnabled;
+            const compareRow = compareModeSelect.closest('.marker-dropdown-item');
+            if (compareRow) compareRow.classList.toggle('is-disabled', !masterEnabled);
+        }
+        const compareModeOpenOnceOption = document.getElementById('markerCompareModeOpenOnceOption');
+        if (compareModeOpenOnceOption) compareModeOpenOnceOption.textContent = i18n.markerCompareModeOpenOnce[currentLang];
+        const compareModeRealtimeOption = document.getElementById('markerCompareModeRealtimeOption');
+        if (compareModeRealtimeOption) compareModeRealtimeOption.textContent = i18n.markerCompareModeRealtimeIdle[currentLang];
         const pathBadgeText = document.getElementById('markerPathBadgesText');
         if (pathBadgeText) pathBadgeText.textContent = i18n.markerPathBadgesText[currentLang];
         const pathBadgeToggle = document.getElementById('markerPathBadgesToggle');
@@ -1522,15 +1820,16 @@ function updateMarkerControlsUI() {
         const intervalLabel = document.getElementById('markerAutoClearIntervalLabel');
         if (intervalLabel) intervalLabel.textContent = i18n.markerAutoClearIntervalLabel[currentLang];
         const autoToggle = document.getElementById('markerAutoClearToggle');
+        const autoControlsAvailable = masterEnabled;
         if (autoToggle) {
-            autoToggle.checked = !!canvasMarkerSettings.autoClearEnabled;
-            autoToggle.disabled = !masterEnabled;
+            autoToggle.checked = autoControlsAvailable ? !!canvasMarkerSettings.autoClearEnabled : false;
+            autoToggle.disabled = !autoControlsAvailable;
             const label = autoToggle.closest('.marker-dropdown-item');
-            if (label) label.classList.toggle('is-disabled', !masterEnabled);
+            if (label) label.classList.toggle('is-disabled', !autoControlsAvailable);
         }
         const inputEl = document.getElementById('markerAutoClearInput');
         const minutes = Number(canvasMarkerSettings.autoClearMinutes) || 30;
-        const enabled = masterEnabled && !!canvasMarkerSettings.autoClearEnabled;
+        const enabled = autoControlsAvailable && !!canvasMarkerSettings.autoClearEnabled;
         const toggleBtn = document.getElementById('markerAutoClearToggleBtn');
         if (inputEl) {
             inputEl.value = formatLabel(minutes);
@@ -1616,6 +1915,7 @@ async function beginBookmarkBulkMute(reason = 'bulk-bookmark-operation') {
     bookmarkBulkMuteIgnoreUntil = 0;
     if (bookmarkBulkMuteDepth === 1) {
         clearBookmarkBulkQueuedEvents();
+        resetMarkerRealtimeIdleTracking('bulk-bookmark-begin');
         try { treeChangeMap = new Map(); } catch (_) { }
         try { explicitMovedIds = new Map(); } catch (_) { }
         try { clearIncrementalDeletedSnapshots('bulk-bookmark-begin'); } catch (_) { }
@@ -1698,6 +1998,8 @@ async function clearMarkersAndSetBaseline(reason = 'manual') {
         }
         explicitMovedIds = new Map();
         clearIncrementalDeletedSnapshots('baseline-reset');
+        resetPermanentMarkerDiffComputationState(`baseline:${reason}`);
+        resetMarkerRealtimeIdleTracking(`baseline:${reason}`);
         schedulePersistExplicitMovedIds();
         resetPermanentSectionChangeMarkers();
         const skipFullRender = isSidePanelMode && reason === 'auto';
@@ -1722,16 +2024,18 @@ function extractLastBookmarkTree(storageData) {
 window.__canvasMarkerControl = {
     getSettings: getMarkerSettings,
     updateUI: updateMarkerControlsUI,
+    getCompareMode: () => getPermanentMarkerCompareMode(),
     setEnabled: async (enabled) => {
         const nextEnabled = !!enabled;
         canvasMarkerSettings.enabled = nextEnabled;
         await saveMarkerSettings();
         updateMarkerControlsUI();
-        // Start/stop auto-clear timer depending on master switch.
+        // 自动清除由后台统一调度。
         scheduleMarkerAutoClear();
         // 关闭时先清空现有标识，保证即时生效
         if (!nextEnabled) {
             try {
+                resetMarkerRealtimeIdleTracking('marker-disabled');
                 resetPermanentSectionChangeMarkers();
                 treeChangeMap = new Map();
                 clearIncrementalDeletedSnapshots('marker-disabled');
@@ -1740,6 +2044,8 @@ window.__canvasMarkerControl = {
                 __canvasPermanentHintSet = null;
                 __canvasPermanentAncestorBadges = null;
             } catch (_) { }
+        } else {
+            resetPermanentMarkerDiffComputationState('marker-enabled');
         }
         await renderTreeView(true);
         syncMarkerAttentionIndicators('marker-enabled-toggle');
@@ -1752,6 +2058,31 @@ window.__canvasMarkerControl = {
             }
         } catch (_) { }
     },
+    setCompareMode: async (mode) => {
+        const nextMode = normalizePermanentMarkerCompareMode(mode);
+        const prevMode = getPermanentMarkerCompareMode();
+        if (prevMode === nextMode) {
+            updateMarkerControlsUI();
+            return;
+        }
+        canvasMarkerSettings.compareMode = nextMode;
+        resetPermanentMarkerDiffComputationState(`compare-mode:${nextMode}`);
+        if (nextMode !== MARKER_COMPARE_MODE_REALTIME_IDLE) {
+            explicitMovedIds = new Map();
+            resetMarkerRealtimeIdleTracking('compare-mode-open-once');
+            schedulePersistExplicitMovedIds();
+        } else {
+            if (canvasMarkerSettings.autoClearEnabled) requestMarkerAutoClearDeadlineReset('compare-mode-switch');
+            markerIdleTrackPendingCount = Math.max(1, markerIdleTrackPendingCount);
+            markerIdleTrackPendingReason = 'compare-mode-switch';
+            scheduleMarkerRealtimeIdleCompare('compare-mode-switch');
+        }
+        await saveMarkerSettings();
+        scheduleMarkerAutoClear();
+        updateMarkerControlsUI();
+        await renderTreeView(true);
+        syncMarkerAttentionIndicators('marker-compare-mode');
+    },
     setShowPathBadges: async (enabled) => {
         canvasMarkerSettings.showPathBadges = !!enabled;
         await saveMarkerSettings();
@@ -1761,7 +2092,7 @@ window.__canvasMarkerControl = {
     setAutoClearEnabled: async (enabled) => {
         canvasMarkerSettings.autoClearEnabled = !!enabled;
         if (canvasMarkerSettings.autoClearEnabled) {
-            canvasMarkerSettings.nextAutoClearAt = Date.now() + (canvasMarkerSettings.autoClearMinutes || 30) * 60 * 1000;
+            requestMarkerAutoClearDeadlineReset('toggle-auto-clear');
         }
         await saveMarkerSettings();
         scheduleMarkerAutoClear();
@@ -1772,7 +2103,7 @@ window.__canvasMarkerControl = {
         if (Number.isFinite(m) && m > 0) {
             canvasMarkerSettings.autoClearMinutes = m;
             if (canvasMarkerSettings.autoClearEnabled) {
-                canvasMarkerSettings.nextAutoClearAt = Date.now() + m * 60 * 1000;
+                requestMarkerAutoClearDeadlineReset('change-auto-clear-minutes');
             }
             await saveMarkerSettings();
             scheduleMarkerAutoClear();
@@ -4211,6 +4542,18 @@ const i18n = {
     markerMasterLabel: {
         'zh_CN': '标识显示',
         'en': 'Marker display'
+    },
+    markerCompareModeLabel: {
+        'zh_CN': '对比模式',
+        'en': 'Compare mode'
+    },
+    markerCompareModeOpenOnce: {
+        'zh_CN': '仅打开时对比',
+        'en': 'Compare on open only'
+    },
+    markerCompareModeRealtimeIdle: {
+        'zh_CN': '使用时追踪',
+        'en': 'Track while in use'
     },
     markerToggleOn: {
         'zh_CN': '开启标识显示',
@@ -10709,6 +11052,21 @@ function switchView(view) {
     // 更新全局变量
     currentView = view;
 
+    if (view === 'canvas' && previousView !== 'canvas') {
+        resetPermanentMarkerDiffComputationState('switch-enter-canvas');
+        treeChangeMap = new Map();
+        cachedTreeData = null;
+        lastTreeFingerprint = null;
+        lastTreeSnapshotVersion = null;
+        cachedCurrentTreeIndex = null;
+        if (isPermanentMarkerRealtimeTrackingEnabled() && (markerIdleTrackPendingCount > 0 || markerIdleTrackNeedsForceRefresh)) {
+            scheduleMarkerRealtimeIdleCompare('switch-enter-canvas-pending');
+        }
+        runMarkerAutoClearRecoveryCheck('switch-enter-canvas').catch(() => { });
+    } else if (view !== 'canvas' && previousView === 'canvas') {
+        clearMarkerRealtimeIdleScheduling();
+    }
+
     // 视图切换时隐藏搜索结果面板并清除搜索缓存（Phase 1 & 2 & 2.5）
     try {
         // [隔离增强] 确保清理搜索 UI 状态
@@ -12084,11 +12442,14 @@ async function renderTreeViewSync() {
         cachedCurrentTree = currentTree;
         cachedCurrentTreeIndex = null;
 
-        // 检测变动（标识关闭时跳过）
-        if (isMarkerEnabled() && oldTree && oldTree[0]) {
+        // 检测变动（open-only 模式只在进入 Canvas 后首轮执行）
+        if (isMarkerEnabled() && oldTree && oldTree[0] && shouldComputePermanentMarkerDiffNow()) {
             treeChangeMap = await detectTreeChangesFast(oldTree, currentTree);
+            markPermanentMarkerDiffComputed('renderTreeViewSync');
             console.log('[renderTreeViewSync] 检测到变动数量:', treeChangeMap.size);
-        } else {
+        } else if (!isMarkerEnabled()) {
+            treeChangeMap = new Map();
+        } else if (!(treeChangeMap instanceof Map)) {
             treeChangeMap = new Map();
         }
 
@@ -12177,9 +12538,12 @@ async function ensureChangesPreviewTreeDataLoaded() {
         cachedCurrentTreeIndex = null;
         lastTreeSnapshotVersion = snapshot ? snapshot.version : null;
 
-        if (isMarkerEnabled() && oldTree && oldTree[0]) {
+        if (isMarkerEnabled() && oldTree && oldTree[0] && shouldComputePermanentMarkerDiffNow()) {
             treeChangeMap = await detectTreeChangesFast(oldTree, currentTree);
-        } else {
+            markPermanentMarkerDiffComputed('changes-preview');
+        } else if (!isMarkerEnabled()) {
+            treeChangeMap = new Map();
+        } else if (!(treeChangeMap instanceof Map)) {
             treeChangeMap = new Map();
         }
         if (isMarkerEnabled()) {
@@ -12580,15 +12944,11 @@ async function renderTreeView(forceRefresh = false) {
 
         const markerEnabled = isMarkerEnabled();
 
-        if (markerEnabled && currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED) {
-            // [Modified] In lazy mode, we still need diff detection to show "Add/Reduce/Modify/Move" indicators
-            // previously we skipped it for performance, now we keep it but optimize rendering
-            // treeChangeMap = new Map(); // Don't skip!
-            console.log('[renderTreeView] Canvas lazy mode: executing diff detection to show indicators');
+        const shouldRunDiffThisRender = markerEnabled && oldTree && oldTree[0] && shouldComputePermanentMarkerDiffNow();
+        if (shouldRunDiffThisRender) {
+            console.log('[renderTreeView] 执行标识对比（本轮会话首轮）...');
             treeChangeMap = await detectTreeChangesFast(oldTree, currentTree);
-        } else if (markerEnabled && oldTree && oldTree[0]) {
-            console.log('[renderTreeView] 开始检测变动...');
-            treeChangeMap = await detectTreeChangesFast(oldTree, currentTree);
+            markPermanentMarkerDiffComputed('renderTreeView');
             console.log('[renderTreeView] 检测到的变动数量:', treeChangeMap.size);
 
             // 打印前5个变动
@@ -12598,9 +12958,14 @@ async function renderTreeView(forceRefresh = false) {
                     console.log('[renderTreeView] 变动:', id, change);
                 }
             }
-        } else {
+        } else if (!markerEnabled) {
+            treeChangeMap = new Map();
+            console.log('[renderTreeView] 标识功能关闭，不显示变动标记');
+        } else if (!(treeChangeMap instanceof Map)) {
             treeChangeMap = new Map(); // 无上次快照数据，不显示任何变化标记
             console.log('[renderTreeView] 无上次快照数据，不显示变化标记');
+        } else {
+            console.log('[renderTreeView] 标识采用会话锁定模式，复用当前标识结果');
         }
 
         if (markerEnabled) {
@@ -13490,6 +13855,22 @@ if (!window.__canvasPermanentSectionExpandStateFlushBound) {
         try {
             if (document.visibilityState === 'hidden') {
                 __flushCanvasPermanentSectionExpandState();
+                clearMarkerRealtimeIdleScheduling();
+                return;
+            }
+            if (document.visibilityState === 'visible'
+                && isPermanentMarkerRealtimeTrackingEnabled()
+                && currentView === 'canvas') {
+                if (!permanentMarkerDiffComputedInCurrentCanvasSession
+                    || markerIdleTrackPendingCount > 0
+                    || markerIdleTrackNeedsForceRefresh) {
+                    markerIdleTrackPendingCount = Math.max(1, markerIdleTrackPendingCount);
+                    markerIdleTrackPendingReason = markerIdleTrackPendingReason || 'visibility-visible';
+                    scheduleMarkerRealtimeIdleCompare('visibility-visible');
+                }
+            }
+            if (document.visibilityState === 'visible') {
+                runMarkerAutoClearRecoveryCheck('visibility-visible').catch(() => { });
             }
         } catch (_) { }
     });
@@ -13994,6 +14375,7 @@ function updateTreeChangeMapForMove(id, moveInfo) {
 
 function applyChangeLogToTreeChangeMap(changeLog) {
     if (!isMarkerEnabled()) return;
+    if (!isPermanentMarkerRealtimeTrackingEnabled()) return;
     const log = changeLog || cachedChangeLog;
     if (lastMarkerBaselineWriteAt && log && log.updatedAt && log.updatedAt < lastMarkerBaselineWriteAt) return;
     if (!log || !(log.changes instanceof Map) || log.changes.size === 0) return;
@@ -15375,9 +15757,24 @@ function handleStorageChange(changes, namespace) {
     // 标识设置变化（多窗口同步）
     if (changes[MARKER_SETTINGS_KEY]) {
         try {
+            const previousMode = getPermanentMarkerCompareMode();
             canvasMarkerSettings = normalizeMarkerSettings(changes[MARKER_SETTINGS_KEY].newValue);
+            const nextMode = getPermanentMarkerCompareMode();
+            if (nextMode !== MARKER_COMPARE_MODE_REALTIME_IDLE) {
+                explicitMovedIds = new Map();
+                resetMarkerRealtimeIdleTracking('storage-marker-settings-open-once');
+                schedulePersistExplicitMovedIds();
+            } else if (previousMode !== nextMode) {
+                markerIdleTrackPendingCount = Math.max(1, markerIdleTrackPendingCount);
+                markerIdleTrackPendingReason = 'storage-marker-settings-switch';
+                scheduleMarkerRealtimeIdleCompare('storage-marker-settings-switch');
+            }
+            if (previousMode !== nextMode) {
+                resetPermanentMarkerDiffComputationState('storage-marker-settings-mode-change');
+            }
             updateMarkerControlsUI();
             scheduleMarkerAutoClear();
+            runMarkerAutoClearRecoveryCheck('storage-marker-settings', { force: true }).catch(() => { });
             scheduleCanvasPathBadgeRefresh('marker-settings');
         } catch (_) { }
     }
@@ -15437,6 +15834,8 @@ function handleStorageChange(changes, namespace) {
             // 清空显式移动标识，避免残留蓝标
             explicitMovedIds = new Map();
             clearIncrementalDeletedSnapshots('lastBookmarkData-changed');
+            resetPermanentMarkerDiffComputationState('lastBookmarkData-changed');
+            resetMarkerRealtimeIdleTracking('lastBookmarkData-changed');
             try { window.__canvasPermanentHintSet = null; } catch (_) { }
             try { window.__canvasPermanentAncestorBadges = null; } catch (_) { }
             __canvasPermanentHintSet = null;
@@ -15463,15 +15862,16 @@ let addRemoveFlushQueued = false;
 
 async function handleBookmarkCreateRealtime(id, bookmark) {
     addBookmarkToCache(bookmark);
-    const markerMode = getPermanentCreateMarkerMode(id, bookmark);
+    // 维护“批量创建子树”运行时状态（供其他链路复用），标识刷新改为空闲队列触发。
+    getPermanentCreateMarkerMode(id, bookmark);
 
     if (currentView === 'canvas') {
         const appliedToCachedTree = applyIncrementalCreateToCachedCurrentTree(id, bookmark);
         if (!appliedToCachedTree) {
             scheduleCachedCurrentTreeSnapshotRefresh('onCreated-fast-fallback', 40);
         }
-        if (markerMode === 'direct') {
-            updateTreeChangeMapForCreate(id);
+        if (isPermanentMarkerRealtimeTrackingEnabled()) {
+            enqueueMarkerRealtimeIdleCompare('onCreated', 1);
         }
         schedulePermanentTreeSharedMutationRefresh('onCreated');
         scheduleCachedCurrentTreeSnapshotRefresh('onCreated');
@@ -15482,7 +15882,8 @@ async function handleBookmarkCreateRealtime(id, bookmark) {
 
 async function handleBookmarkRemoveRealtime(id, removeInfo) {
     removeBookmarkFromCache(id);
-    const markerMode = getPermanentRemoveMarkerMode(id);
+    // 维护“批量删除派生节点”运行时状态（供其他链路复用），标识刷新改为空闲队列触发。
+    getPermanentRemoveMarkerMode(id);
 
     const enrichedRemoveInfo = enrichRemoveInfoWithSnapshot(id, removeInfo);
     cacheDeletedSnapshotForLazyRender(id, enrichedRemoveInfo);
@@ -15496,8 +15897,8 @@ async function handleBookmarkRemoveRealtime(id, removeInfo) {
         if (!appliedToCachedTree) {
             scheduleCachedCurrentTreeSnapshotRefresh('onRemoved-fast-fallback', 40);
         }
-        if (markerMode === 'direct') {
-            updateTreeChangeMapForRemove(id, enrichedRemoveInfo);
+        if (isPermanentMarkerRealtimeTrackingEnabled()) {
+            enqueueMarkerRealtimeIdleCompare('onRemoved', 1);
         }
         schedulePermanentTreeSharedMutationRefresh('onRemoved');
         scheduleCachedCurrentTreeSnapshotRefresh('onRemoved');
@@ -15562,8 +15963,14 @@ async function flushPendingAddRemoveEvents(reason = '') {
             });
 
             if (currentView === 'canvas') {
+                if (isPermanentMarkerRealtimeTrackingEnabled()) {
+                    bypassNextPermanentMarkerDiff('bulk-add-remove-structural-refresh');
+                }
                 await renderTreeView(true);
                 scheduleCachedCurrentTreeSnapshotRefresh('bulk-add-remove');
+            }
+            if (isPermanentMarkerRealtimeTrackingEnabled()) {
+                enqueueMarkerRealtimeIdleCompare(`bulk-add-remove:${reason || 'unknown'}`, batch.length);
             }
             clearCanvasLazyChangeHints('bulk-add-remove');
             return;
@@ -15648,7 +16055,9 @@ function setupBookmarkListener() {
                 if (!appliedToCachedTree) {
                     scheduleCachedCurrentTreeSnapshotRefresh('onChanged-fast-fallback', 40);
                 }
-                updateTreeChangeMapForChange(id);
+                if (isPermanentMarkerRealtimeTrackingEnabled()) {
+                    enqueueMarkerRealtimeIdleCompare('onChanged', 1);
+                }
                 schedulePermanentTreeSharedMutationRefresh('onChanged');
                 scheduleCachedCurrentTreeSnapshotRefresh('onChanged');
             }
@@ -15670,9 +16079,11 @@ function setupBookmarkListener() {
             }
             await flushPendingAddRemoveEvents('before-onMoved');
             moveBookmarkInCache(id, moveInfo);
-            // 将本次移动记为显式主动移动，确保稳定显示蓝色标识
-            explicitMovedIds.set(id, Date.now() + Infinity);
-            schedulePersistExplicitMovedIds();
+            if (isPermanentMarkerRealtimeTrackingEnabled()) {
+                // 将本次移动记为显式主动移动，确保稳定显示蓝色标识
+                explicitMovedIds.set(id, Date.now() + Infinity);
+                schedulePersistExplicitMovedIds();
+            }
 
             // 支持 canvas 视图（包含永久栏目的书签树）
             if (currentView === 'canvas') {
@@ -15680,7 +16091,9 @@ function setupBookmarkListener() {
                 if (!appliedToCachedTree) {
                     scheduleCachedCurrentTreeSnapshotRefresh('onMoved-fast-fallback', 40);
                 }
-                updateTreeChangeMapForMove(id, moveInfo);
+                if (isPermanentMarkerRealtimeTrackingEnabled()) {
+                    enqueueMarkerRealtimeIdleCompare('onMoved', 1);
+                }
                 scheduleCachedCurrentTreeSnapshotRefresh('onMoved');
 
                 // 主体/副本共享树不能只依赖局部 DOM mutation。
@@ -15772,6 +16185,7 @@ function setupRealtimeMessageListener() {
                 resetPermanentSectionChangeMarkers();
             } catch (e) { /* 忽略 */ }
         } else if (message.action === 'recentMovedBroadcast' && message.id) {
+            if (!isPermanentMarkerRealtimeTrackingEnabled()) return;
             // 后台广播的最近被移动的ID，立即记入显式集合（仅标记这个节点）
             // 这确保用户拖拽的节点优先被标识为蓝色"moved"
             // 永久记录，不再有时间限制

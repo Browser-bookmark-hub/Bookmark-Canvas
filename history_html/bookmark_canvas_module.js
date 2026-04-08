@@ -27395,6 +27395,7 @@ function setupMarkerDropdownControls() {
     const menuBtn = document.getElementById('markerMenuBtn');
     const menu = document.getElementById('markerDropdownMenu');
     const clearBtn = document.getElementById('markerClearBtn');
+    const compareModeSelect = document.getElementById('markerCompareModeSelect');
     const pathToggle = document.getElementById('markerPathBadgesToggle');
     const autoToggle = document.getElementById('markerAutoClearToggle');
     const inputEl = document.getElementById('markerAutoClearInput');
@@ -27459,6 +27460,18 @@ function setupMarkerDropdownControls() {
                 await window.__canvasMarkerControl.setEnabled(!!masterToggle.checked);
             } catch (err) {
                 console.warn('[Marker] 切换标识显示失败:', err);
+            }
+        });
+    }
+
+    if (compareModeSelect) {
+        compareModeSelect.addEventListener('change', async (e) => {
+            e.stopPropagation();
+            try {
+                if (!window.__canvasMarkerControl || typeof window.__canvasMarkerControl.setCompareMode !== 'function') return;
+                await window.__canvasMarkerControl.setCompareMode(compareModeSelect.value);
+            } catch (err) {
+                console.warn('[Marker] 设置对比模式失败:', err);
             }
         });
     }

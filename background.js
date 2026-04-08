@@ -524,6 +524,7 @@ if (browserAPI?.runtime?.onInstalled) {
     initSidePanel();
     refreshSidePanelOpenWindows().catch(() => {});
     refreshMarkerBadgeFromStorage().catch(() => {});
+    ensureMarkerAutoClearSchedule('onInstalled').catch(() => {});
     restoreCanvasGitSyncBackgroundScheduling().catch(() => {});
   });
 }
@@ -532,6 +533,7 @@ try {
   if (browserAPI?.runtime?.onStartup?.addListener) {
     browserAPI.runtime.onStartup.addListener(() => {
       refreshMarkerBadgeFromStorage().catch(() => {});
+      ensureMarkerAutoClearSchedule('onStartup').catch(() => {});
       restoreCanvasGitSyncBackgroundScheduling().catch(() => {});
     });
   }
@@ -546,6 +548,219 @@ const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
 const RECENT_MOVED_MAX = 2000;
 const CANVAS_CHANGE_LOG_KEY = 'canvas_change_log_v1';
 const CHANGE_LOG_MAX = 10000;
+const LAST_BOOKMARK_DATA_KEY = 'lastBookmarkData';
+const MARKER_AUTO_CLEAR_ALARM_NAME = 'canvas-marker-auto-clear-v1';
+const MARKER_AUTO_CLEAR_DEFAULT_MINUTES = 60;
+const MARKER_AUTO_CLEAR_MIN_DELAY_MS = 1000;
+const MARKER_AUTO_CLEAR_RETRY_DELAY_MS = 30 * 1000;
+
+function normalizeMarkerSettingsForAutoClear(raw) {
+  const out = {
+    enabled: true,
+    autoClearEnabled: true,
+    autoClearMinutes: MARKER_AUTO_CLEAR_DEFAULT_MINUTES,
+    nextAutoClearAt: 0
+  };
+  if (!raw || typeof raw !== 'object') return out;
+  if (typeof raw.enabled === 'boolean') out.enabled = raw.enabled;
+  if (typeof raw.autoClearEnabled === 'boolean') out.autoClearEnabled = raw.autoClearEnabled;
+  const mins = Number(raw.autoClearMinutes);
+  if (Number.isFinite(mins) && mins > 0) out.autoClearMinutes = mins;
+  const nextAt = Number(raw.nextAutoClearAt);
+  if (Number.isFinite(nextAt) && nextAt > 0) out.nextAutoClearAt = nextAt;
+  return out;
+}
+
+function isMarkerAutoClearEnabled(settings) {
+  if (!settings || typeof settings !== 'object') return false;
+  if (settings.enabled === false) return false;
+  if (settings.autoClearEnabled === false) return false;
+  return true;
+}
+
+function resolveMarkerAutoClearMinutes(settings) {
+  const mins = Number(settings && settings.autoClearMinutes);
+  if (!Number.isFinite(mins) || mins <= 0) return MARKER_AUTO_CLEAR_DEFAULT_MINUTES;
+  return Math.max(1, Math.floor(mins));
+}
+
+function buildMarkerAutoClearDeadline(minutes, now = Date.now()) {
+  const mins = Number.isFinite(Number(minutes)) ? Math.max(1, Number(minutes)) : MARKER_AUTO_CLEAR_DEFAULT_MINUTES;
+  return now + (mins * 60 * 1000);
+}
+
+async function loadMarkerSettingsForAutoClearFromStorage() {
+  try {
+    if (!browserAPI?.storage?.local) return normalizeMarkerSettingsForAutoClear(null);
+    const data = await browserAPI.storage.local.get([MARKER_SETTINGS_KEY]);
+    return normalizeMarkerSettingsForAutoClear(data && data[MARKER_SETTINGS_KEY]);
+  } catch (_) {
+    return normalizeMarkerSettingsForAutoClear(null);
+  }
+}
+
+async function saveMarkerSettingsForAutoClearToStorage(settings) {
+  try {
+    if (!browserAPI?.storage?.local) return false;
+    await browserAPI.storage.local.set({ [MARKER_SETTINGS_KEY]: settings });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function clearMarkerAutoClearAlarm() {
+  try {
+    if (!browserAPI?.alarms?.clear) return false;
+    await new Promise((resolve) => {
+      browserAPI.alarms.clear(MARKER_AUTO_CLEAR_ALARM_NAME, () => resolve(true));
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function scheduleMarkerAutoClearAlarmAt(when) {
+  try {
+    if (!browserAPI?.alarms?.create) return false;
+    const target = Math.max(Date.now() + MARKER_AUTO_CLEAR_MIN_DELAY_MS, Number(when) || 0);
+    browserAPI.alarms.create(MARKER_AUTO_CLEAR_ALARM_NAME, { when: target });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function readBookmarkTreeForMarkerBaselineInBackground() {
+  return await new Promise((resolve, reject) => {
+    try {
+      if (!browserAPI?.bookmarks?.getTree) {
+        reject(new Error('bookmarks-unavailable'));
+        return;
+      }
+      browserAPI.bookmarks.getTree((tree) => {
+        const err = browserAPI?.runtime?.lastError;
+        if (err) {
+          reject(new Error(err.message || 'bookmarks-getTree-failed'));
+          return;
+        }
+        resolve(Array.isArray(tree) ? tree : []);
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function writeMarkerBaselineFromBackground(reason = 'auto') {
+  if (!browserAPI?.storage?.local) {
+    throw new Error('storage-unavailable');
+  }
+  const tree = await readBookmarkTreeForMarkerBaselineInBackground();
+  const now = Date.now();
+  await browserAPI.storage.local.set({
+    [LAST_BOOKMARK_DATA_KEY]: {
+      bookmarkTree: tree,
+      updatedAt: now,
+      reason: String(reason || 'auto')
+    },
+    [CANVAS_CHANGE_LOG_KEY]: {
+      updatedAt: now,
+      changes: {},
+      version: 1,
+      reason: 'baseline-reset'
+    },
+    [RECENT_MOVED_IDS_KEY]: []
+  });
+  return now;
+}
+
+async function runMarkerAutoClearCheckNow(options = {}) {
+  const reason = String((options && options.reason) || 'background-check');
+  const force = options && options.force === true;
+
+  let settings = await loadMarkerSettingsForAutoClearFromStorage();
+  if (!isMarkerAutoClearEnabled(settings)) {
+    await clearMarkerAutoClearAlarm();
+    return { success: true, executed: false, disabled: true, settings };
+  }
+
+  const minutes = resolveMarkerAutoClearMinutes(settings);
+  const now = Date.now();
+  let targetAt = Number(settings.nextAutoClearAt);
+  if (!Number.isFinite(targetAt) || targetAt <= 0) {
+    targetAt = buildMarkerAutoClearDeadline(minutes, now);
+    settings.nextAutoClearAt = targetAt;
+    await saveMarkerSettingsForAutoClearToStorage(settings);
+  }
+
+  if (!force && targetAt > now) {
+    await scheduleMarkerAutoClearAlarmAt(targetAt);
+    return { success: true, executed: false, nextAutoClearAt: targetAt, settings };
+  }
+  if (targetAt > now) {
+    await scheduleMarkerAutoClearAlarmAt(targetAt);
+    return { success: true, executed: false, nextAutoClearAt: targetAt, settings };
+  }
+
+  try {
+    await writeMarkerBaselineFromBackground(`auto:${reason}`);
+  } catch (error) {
+    await scheduleMarkerAutoClearAlarmAt(Date.now() + MARKER_AUTO_CLEAR_RETRY_DELAY_MS);
+    return {
+      success: false,
+      executed: false,
+      error: error && error.message ? error.message : String(error || 'auto-clear-failed'),
+      nextAutoClearAt: targetAt,
+      settings
+    };
+  }
+
+  const nextAutoClearAt = buildMarkerAutoClearDeadline(minutes, Date.now());
+  settings.nextAutoClearAt = nextAutoClearAt;
+  await saveMarkerSettingsForAutoClearToStorage(settings);
+  await scheduleMarkerAutoClearAlarmAt(nextAutoClearAt);
+  await refreshMarkerBadgeFromStorage();
+
+  return { success: true, executed: true, nextAutoClearAt, settings };
+}
+
+async function ensureMarkerAutoClearSchedule(reason = '') {
+  let settings = await loadMarkerSettingsForAutoClearFromStorage();
+  if (!isMarkerAutoClearEnabled(settings)) {
+    await clearMarkerAutoClearAlarm();
+    return { success: true, scheduled: false, disabled: true, settings };
+  }
+
+  const minutes = resolveMarkerAutoClearMinutes(settings);
+  const now = Date.now();
+  let targetAt = Number(settings.nextAutoClearAt);
+  if (!Number.isFinite(targetAt) || targetAt <= 0) {
+    targetAt = buildMarkerAutoClearDeadline(minutes, now);
+    settings.nextAutoClearAt = targetAt;
+    await saveMarkerSettingsForAutoClearToStorage(settings);
+  }
+
+  if (targetAt <= now) {
+    return await runMarkerAutoClearCheckNow({
+      reason: `${String(reason || 'ensure')}:overdue`,
+      force: true
+    });
+  }
+
+  await scheduleMarkerAutoClearAlarmAt(targetAt);
+  return { success: true, scheduled: true, nextAutoClearAt: targetAt, settings };
+}
+
+if (browserAPI?.alarms?.onAlarm?.addListener) {
+  browserAPI.alarms.onAlarm.addListener((alarm) => {
+    try {
+      if (!alarm || alarm.name !== MARKER_AUTO_CLEAR_ALARM_NAME) return;
+      runMarkerAutoClearCheckNow({ reason: 'alarm', force: true }).catch(() => {});
+    } catch (_) { }
+  });
+}
 
 // Favicon broadcast (align with reference project)
 const processedFavicons = new Map();
@@ -900,6 +1115,9 @@ if (browserAPI?.storage?.onChanged?.addListener) {
         && !changes[MARKER_BADGE_COLOR_STORAGE_KEY]
         && !changes[CANVAS_GIT_SYNC_BG_STATE_KEY]) {
         return;
+      }
+      if (changes[MARKER_SETTINGS_KEY]) {
+        ensureMarkerAutoClearSchedule('storage-marker-settings').catch(() => {});
       }
       refreshMarkerBadgeFromStorage().catch(() => {});
     } catch (_) { }
@@ -2048,6 +2266,25 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.action === 'canvasMarkerAutoClearEnsureSchedule') {
+    (async () => {
+      const response = await ensureMarkerAutoClearSchedule(String(message.reason || 'message-ensure-schedule'));
+      sendResponse(response);
+    })();
+    return true;
+  }
+
+  if (message.action === 'canvasMarkerAutoClearCheckNow') {
+    (async () => {
+      const response = await runMarkerAutoClearCheckNow({
+        reason: String(message.reason || 'message-check-now'),
+        force: message.force === true
+      });
+      sendResponse(response);
+    })();
+    return true;
+  }
+
   if (message.action === 'canvasGitSyncGetBackgroundState') {
     (async () => {
       const response = await handleCanvasGitSyncGetBackgroundStateMessage();
@@ -2164,3 +2401,4 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 refreshMarkerBadgeFromStorage().catch(() => {});
+ensureMarkerAutoClearSchedule('service-worker-load').catch(() => {});

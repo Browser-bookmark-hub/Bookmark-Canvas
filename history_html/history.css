@@ -7263,6 +7263,39 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     gap: 8px;
 }
 
+.marker-compare-mode {
+    justify-content: space-between;
+    gap: 10px;
+    cursor: default;
+}
+
+.marker-compare-mode:hover {
+    background: transparent;
+}
+
+.marker-compare-mode-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#markerCompareModeSelect {
+    flex: 0 0 auto;
+    width: 156px;
+    max-width: 156px;
+    padding: 4px 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 12px;
+}
+
+#markerCompareModeSelect:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 .marker-switch {
     position: relative;
     width: 38px;
