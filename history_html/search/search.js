@@ -26,6 +26,12 @@ const searchUiState = {
     query: '',
     selectedIndex: -1,
     results: [],
+    resultSource: [],
+    resultAll: [],
+    resultPagingKey: '',
+    resultVisibleCount: 0,
+    resultHasMore: false,
+    resultPageSize: 80,
     activeMode: 'bookmark',
     isMenuOpen: false,
     canvasSuggestionsVisible: false,
@@ -45,7 +51,10 @@ const searchUiState = {
     domainGrouping: 'host',
 
     // Search help menu state (click the left icon)
-    isHelpOpen: false
+    isHelpOpen: false,
+
+    // In fullscreen mode, user manual mode switch should win over auto-default.
+    fullscreenAutoModeLocked: false
 };
 
 const TEMP_SECTION_BUILD_YIELD_EVERY = 180;
@@ -59,6 +68,7 @@ let sidePanelSearchCollapseCleanupTimer = null;
 let sidePanelSearchCollapseTransitionEndHandler = null;
 const SEARCH_RESULT_HOVER_SUPPRESS_MS_AFTER_NAV = 180;
 const SEARCH_RESULT_HOVER_SUPPRESS_MS_AFTER_WHEEL = 120;
+const SEARCH_RESULT_MIN_PAGE_SIZE = 20;
 let lastSearchResultKeyboardNavTs = 0;
 let lastSearchResultWheelTs = 0;
 
@@ -357,6 +367,14 @@ function hideSearchResultsPanel() {
     try {
         if (typeof searchUiState === 'object' && searchUiState) {
             searchUiState.canvasSuggestionsVisible = false;
+            // 释放大结果缓存，避免长时间驻留内存（下次输入会重新计算）
+            searchUiState.results = [];
+            searchUiState.resultSource = [];
+            searchUiState.resultAll = [];
+            searchUiState.resultPagingKey = '';
+            searchUiState.resultVisibleCount = 0;
+            searchUiState.resultHasMore = false;
+            searchUiState.selectedIndex = -1;
         }
     } catch (_) { }
 }
@@ -405,6 +423,11 @@ function resetMainSearchUI(options = {}) {
             searchUiState.view = null;
             searchUiState.query = '';
             searchUiState.results = [];
+            searchUiState.resultSource = [];
+            searchUiState.resultAll = [];
+            searchUiState.resultPagingKey = '';
+            searchUiState.resultVisibleCount = 0;
+            searchUiState.resultHasMore = false;
             searchUiState.selectedIndex = -1;
             searchUiState.bookmarkGroupModel = null;
             searchUiState.bookmarkGroupCollapse = new Map();
@@ -798,7 +821,6 @@ function handleSearchInputFocus(e) {
     try {
         const input = e && e.target ? e.target : document.getElementById('searchInput');
         if (!input) return;
-        applyFullscreenDefaultSearchMode({ onlyWhenInputEmpty: true });
         if (isSidePanelModeInSearch()) {
             setSidePanelSearchExpanded(true);
         }
@@ -832,6 +854,16 @@ function handleSearchResultsPanelClick(e) {
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results') return;
 
+    const pathEllipsisToggle = e.target.closest('.search-result-path-ellipsis-toggle');
+    if (pathEllipsisToggle) {
+        e.preventDefault();
+        e.stopPropagation();
+        const hint = pathEllipsisToggle.closest('.search-result-path-hint');
+        if (!hint) return;
+        hint.classList.add('is-expanded');
+        return;
+    }
+
     const externalLink = e.target.closest('.search-result-external-link');
     if (externalLink) {
         e.preventDefault();
@@ -849,6 +881,16 @@ function handleSearchResultsPanelClick(e) {
         e.stopPropagation();
         try { createTempSectionFromSearchResults(); } catch (_) { }
         try { hideSearchResultsPanel(); } catch (_) { }
+        return;
+    }
+
+    const loadMoreBtn = e.target.closest('.search-load-more-btn');
+    if (loadMoreBtn) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+        appendCanvasSearchResultsPage();
         return;
     }
 
@@ -1791,6 +1833,12 @@ function applyFullscreenDefaultSearchMode(options = {}) {
     const scope = targetElement
         ? getCanvasFullscreenScopeFromElement(targetElement)
         : getCanvasFullscreenSearchScope();
+    if (!scope) {
+        searchUiState.fullscreenAutoModeLocked = false;
+        return false;
+    }
+    if (searchUiState.fullscreenAutoModeLocked) return false;
+
     const preferredMode = getPreferredSearchModeByFullscreenScope(scope);
     if (!preferredMode) return false;
 
@@ -1800,7 +1848,7 @@ function applyFullscreenDefaultSearchMode(options = {}) {
     }
 
     if (searchUiState.activeMode === preferredMode) return false;
-    setSearchMode(preferredMode);
+    setSearchMode(preferredMode, { source: 'auto' });
     return true;
 }
 
@@ -1915,9 +1963,21 @@ function getActiveSearchMode() {
     return SEARCH_MODES.find(m => m.key === searchUiState.activeMode) || SEARCH_MODES[0];
 }
 
-function setSearchMode(modeKey) {
+function setSearchMode(modeKey, options = {}) {
     const mode = SEARCH_MODES.find(m => m.key === modeKey);
     if (!mode) return;
+
+    const fullscreenScope = getCanvasFullscreenSearchScope();
+    if (!fullscreenScope) {
+        searchUiState.fullscreenAutoModeLocked = false;
+    }
+
+    const source = options && typeof options === 'object'
+        ? String(options.source || 'system')
+        : 'system';
+    if (source === 'user' && fullscreenScope) {
+        searchUiState.fullscreenAutoModeLocked = true;
+    }
 
     searchUiState.activeMode = modeKey;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
@@ -1977,7 +2037,7 @@ function cycleSearchMode(direction) {
     if (nextIndex >= ordered.length) nextIndex = 0;
     if (nextIndex < 0) nextIndex = ordered.length - 1;
 
-    setSearchMode(ordered[nextIndex].key);
+    setSearchMode(ordered[nextIndex].key, { source: 'user' });
 
     // [User Request] Sync menu UI if it is already open
     if (searchUiState.isMenuOpen) {
@@ -2382,7 +2442,7 @@ function initSearchModeUI() {
             if (item) {
                 const modeKey = item.getAttribute('data-mode-key');
                 if (modeKey) {
-                    setSearchMode(modeKey);
+                    setSearchMode(modeKey, { source: 'user' });
                     // Hide menu immediately on manual selection
                     toggleSearchModeMenu(false);
                 }
@@ -3361,6 +3421,10 @@ function scoreCanvasSearchItem(item, query, options = {}) {
                     else if (item.__title.includes(t)) tokenScore = Math.max(tokenScore, 110);
                 }
                 if (item.__url && !isSingleToken && item.__url.includes(t)) tokenScore = Math.max(tokenScore, 90);
+                if (item.__path) {
+                    if (item.__path.startsWith(t)) tokenScore = Math.max(tokenScore, 105);
+                    else if (!isSingleToken && item.__path.includes(t)) tokenScore = Math.max(tokenScore, 95);
+                }
 
                 if (tokenScore === 0) return -Infinity;
                 tokenScoreSum += tokenScore;
@@ -3401,13 +3465,6 @@ function compareCanvasBookmarkSearchItems(leftItem, rightItem, scope = null) {
 }
 
 function compareCanvasBookmarkScoredPairs(leftPair, rightPair, scope = null) {
-    const itemDelta = compareCanvasBookmarkSearchItems(
-        leftPair && leftPair.item ? leftPair.item : null,
-        rightPair && rightPair.item ? rightPair.item : null,
-        scope
-    );
-    if (itemDelta !== 0) return itemDelta;
-
     const leftRaw = Number(leftPair && leftPair.rawScore);
     const rightRaw = Number(rightPair && rightPair.rawScore);
     if (Number.isFinite(rightRaw) && Number.isFinite(leftRaw) && rightRaw !== leftRaw) {
@@ -3420,7 +3477,34 @@ function compareCanvasBookmarkScoredPairs(leftPair, rightPair, scope = null) {
         return rightScore - leftScore;
     }
 
+    const itemDelta = compareCanvasBookmarkSearchItems(
+        leftPair && leftPair.item ? leftPair.item : null,
+        rightPair && rightPair.item ? rightPair.item : null,
+        scope
+    );
+    if (itemDelta !== 0) return itemDelta;
+
     return 0;
+}
+
+function getBookmarkItemParentPathForSearch(item) {
+    const fullPath = String(item && item.namedPath || '').trim();
+    if (!fullPath) return '';
+
+    const title = String(item && item.title || '').trim();
+    const parts = fullPath.split('>').map((part) => String(part || '').trim()).filter(Boolean);
+    if (!parts.length) return '';
+
+    if (title) {
+        const last = String(parts[parts.length - 1] || '').trim();
+        if (last && last.toLowerCase() === title.toLowerCase()) {
+            parts.pop();
+        }
+    } else {
+        parts.pop();
+    }
+
+    return parts.join(' > ');
 }
 
 function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
@@ -3457,14 +3541,21 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
 
         // Generate Content Key
         // Bookmarks: Title + URL
-        // Folders: Title Only (marked as folder)
+        // Folders: unique by source bucket + folder id (avoid same-name merge)
         let key, title, url, nodeType;
+        let extra = null;
 
         if (item.nodeType === 'folder') {
             title = item.title;
             url = '';
             nodeType = 'folder';
-            key = `FOLDER::${title}`;
+            const parentPath = getBookmarkItemParentPathForSearch(item);
+            const sourcePart = item.source === 'temporary'
+                ? `temporary:${String(item.sectionId || '').trim()}`
+                : 'permanent';
+            const folderIdPart = String(item.id || '').trim();
+            key = `FOLDER::${sourcePart}::${folderIdPart}::${title}`;
+            extra = { parentPath };
         } else {
             title = item.title;
             url = item.url;
@@ -3472,7 +3563,7 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
             key = `BM::${url}::${title}`; // URL primary, title secondary
         }
 
-        const group = getOrCreateGroup(key, { title, url, nodeType });
+        const group = getOrCreateGroup(key, { title, url, nodeType, extra });
         group.children.push({ item, s, rawScore });
         group.bestScore = Math.max(group.bestScore, s);
     }
@@ -3484,6 +3575,19 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
         g.header.matchesCount = g.children.length;
         g.firstChild = g.children[0] || null;
         g.firstOrder = g.firstChild ? getCanvasBookmarkSearchOrderValue(g.firstChild.item) : Number.POSITIVE_INFINITY;
+        const uniqueParentPaths = [];
+        const parentPathSet = new Set();
+        for (let i = 0; i < g.children.length; i += 1) {
+            const child = g.children[i] && g.children[i].item ? g.children[i].item : null;
+            const rawPath = getBookmarkItemParentPathForSearch(child);
+            const key = rawPath ? rawPath.toLowerCase() : '__root__';
+            if (parentPathSet.has(key)) continue;
+            parentPathSet.add(key);
+            uniqueParentPaths.push(rawPath);
+        }
+        g.header.parentPaths = uniqueParentPaths;
+        g.header.parentPath = uniqueParentPaths.length > 0 ? uniqueParentPaths[0] : '';
+        g.header.hasMultipleParentPath = uniqueParentPaths.length > 1;
     }
 
     groups.sort((a, b) => {
@@ -3500,11 +3604,9 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
     const isZh = currentLang === 'zh_CN';
     const fullscreenScope = getCanvasFullscreenSearchScope();
 
-    const MAX_GROUPS = 50;
+    const sourceGroups = Array.isArray(groups) ? groups : [];
 
-    const limitedGroups = Array.isArray(groups) ? groups.slice(0, MAX_GROUPS) : [];
-
-    for (const g of limitedGroups) {
+    for (const g of sourceGroups) {
         if (!g || !g.header) continue;
 
         const groupId = String(g.id || g.header.id || '');
@@ -3682,6 +3784,22 @@ function searchCanvasAndRender(query) {
             // So we strictly filter. Since we have no bookmark items yet, this returns empty.
             // This matches the "Not done yet" state.
             if (item.type !== 'bookmark-item') { // Future type
+                continue;
+            }
+        }
+
+        if (mode === 'bookmark' && fullscreenScope && item.type === 'bookmark-item') {
+            const scopeKind = String(fullscreenScope.kind || '').trim();
+            if (scopeKind === 'temp') {
+                const targetSectionId = String(fullscreenScope.id || '').trim();
+                if (!(item.source === 'temporary' && String(item.sectionId || '') === targetSectionId)) {
+                    continue;
+                }
+            } else if (scopeKind === 'permanent') {
+                if (item.source !== 'permanent') {
+                    continue;
+                }
+            } else if (scopeKind === 'blank') {
                 continue;
             }
         }
@@ -3900,7 +4018,7 @@ function renderCanvasSearchSuggestions() {
                 ev.stopPropagation();
                 const key = el.getAttribute('data-mode-key');
                 if (key) {
-                    try { setSearchMode(key); } catch (_) { }
+                    try { setSearchMode(key, { source: 'user' }); } catch (_) { }
                     try { hideSearchResultsPanel(); } catch (_) { }
                     try {
                         const input = document.getElementById('searchInput');
@@ -4086,22 +4204,59 @@ function isDomainSearchItemMatched(domain, item, query) {
     const urlText = String(item && item.__url || '').trim().toLowerCase();
     if (urlText && urlText.includes(q)) return true;
 
+    const pathText = String(item && item.__path || '').trim().toLowerCase();
+    if (pathText && pathText.includes(q)) return true;
+
     return false;
 }
 
-function ensureDomainCacheForQuery(query) {
+function resolveDomainSearchScope(scopeInput = null) {
+    const scope = scopeInput && typeof scopeInput === 'object'
+        ? scopeInput
+        : getCanvasFullscreenSearchScope();
+    if (!scope || typeof scope !== 'object') return null;
+    const kind = String(scope.kind || '').trim();
+    if (kind === 'temp') {
+        const id = String(scope.id || '').trim();
+        if (!id) return null;
+        return { kind: 'temp', id, key: `temp:${id}` };
+    }
+    if (kind === 'permanent') {
+        const copyId = String(scope.copyId || '').trim();
+        return { kind: 'permanent', copyId: copyId || null, key: copyId ? `permanent:${copyId}` : 'permanent:main' };
+    }
+    if (kind === 'blank') {
+        const id = String(scope.id || '').trim();
+        return { kind: 'blank', id: id || '', key: id ? `blank:${id}` : 'blank' };
+    }
+    return null;
+}
+
+function ensureDomainCacheForQuery(query, scopeInput = null) {
     const q = String(query || '').trim().toLowerCase();
     const treeKey = getDomainCacheKey();
     const groupLevel = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
+    const scope = resolveDomainSearchScope(scopeInput);
+    const scopeKey = scope ? scope.key : 'global';
     const cache = searchUiState.domainIndexCache;
-    if (cache && cache.query === q && cache.treeKey === treeKey && cache.groupLevel === groupLevel) return cache;
+    if (cache && cache.query === q && cache.treeKey === treeKey && cache.groupLevel === groupLevel && cache.scopeKey === scopeKey) return cache;
 
     const db = buildCanvasSearchDb();
     const items = Array.isArray(db.bookmarkIndex) ? db.bookmarkIndex : [];
     const map = new Map();
 
     for (const item of items) {
-        if (!item || item.source !== 'permanent' || item.nodeType !== 'bookmark') continue;
+        if (!item || item.nodeType !== 'bookmark') continue;
+
+        if (scope && scope.kind === 'temp') {
+            if (!(item.source === 'temporary' && String(item.sectionId || '') === scope.id)) continue;
+        } else if (scope && scope.kind === 'permanent') {
+            if (item.source !== 'permanent') continue;
+        } else if (scope && scope.kind === 'blank') {
+            continue;
+        } else {
+            if (item.source !== 'permanent') continue;
+        }
 
         const domain = getDomainGroupKey(item.url);
         if (!domain) continue;
@@ -4182,18 +4337,18 @@ function ensureDomainCacheForQuery(query) {
         return String(a.domain || '').localeCompare(String(b.domain || ''));
     });
 
-    const nextCache = { query: q, treeKey, groupLevel, map, results };
+    const nextCache = { query: q, treeKey, groupLevel, scopeKey, map, results };
     searchUiState.domainIndexCache = nextCache;
     return nextCache;
 }
 
-function getDomainResultsForQuery(query) {
-    const cache = ensureDomainCacheForQuery(query);
+function getDomainResultsForQuery(query, scopeInput = null) {
+    const cache = ensureDomainCacheForQuery(query, scopeInput);
     return Array.isArray(cache.results) ? cache.results : [];
 }
 
-function buildCanvasDomainDisplayResultsForQuery(query) {
-    const cache = ensureDomainCacheForQuery(query);
+function buildCanvasDomainDisplayResultsForQuery(query, scopeInput = null) {
+    const cache = ensureDomainCacheForQuery(query, scopeInput);
     const parentResults = Array.isArray(cache.results) ? cache.results : [];
     const displayResults = [];
     const groupLevel = cache && cache.groupLevel === 'root' ? 'root' : 'host';
@@ -4248,8 +4403,8 @@ function buildCanvasDomainDisplayResultsForQuery(query) {
     return displayResults;
 }
 
-function getDomainItemsForTemp(domain, query) {
-    const cache = ensureDomainCacheForQuery(query);
+function getDomainItemsForTemp(domain, query, scopeInput = null) {
+    const cache = ensureDomainCacheForQuery(query, scopeInput);
     const key = String(domain || '').trim().toLowerCase();
     const entry = cache.map.get(key);
     if (!entry || !Array.isArray(entry.items)) return [];
@@ -4341,21 +4496,23 @@ function renderCanvasSearchResults(results, options = {}) {
     // Canvas Bookmark Mode: count + filter (bookmark vs folder vs domain)
     const isBookmarkMode = searchUiState.activeMode === 'bookmark';
     let bookmarkModeCounts = null;
-    let displayResults = results;
+    const sourceResults = Array.isArray(results) ? results : [];
+    let displayResults = sourceResults;
     let domainResults = [];
     let domainCount = 0;
 
     if (isBookmarkMode) {
-        const countType = (nodeType) => (Array.isArray(results)
-            ? results.filter(r => r && (r.type === 'bookmark-group' || r.type === 'bookmark-item') && r.nodeType === nodeType).length
+        const countType = (nodeType) => (Array.isArray(sourceResults)
+            ? sourceResults.filter(r => r && (r.type === 'bookmark-group' || r.type === 'bookmark-item') && r.nodeType === nodeType).length
             : 0);
 
         const bookmarkCount = countType('bookmark');
         const folderCount = countType('folder');
         try {
             const q = options.query || searchUiState.query || '';
-            domainResults = buildCanvasDomainDisplayResultsForQuery(q);
-            domainCount = getDomainResultsForQuery(q).length;
+            const scope = getCanvasFullscreenSearchScope();
+            domainResults = buildCanvasDomainDisplayResultsForQuery(q, scope);
+            domainCount = getDomainResultsForQuery(q, scope).length;
         } catch (_) { }
 
         bookmarkModeCounts = { bookmarkCount, folderCount, domainCount };
@@ -4381,9 +4538,9 @@ function renderCanvasSearchResults(results, options = {}) {
 
         // Apply filter only when we actually have a chosen filter
         if (effectiveFilter === 'bookmark') {
-            displayResults = results.filter(r => !(r && r.nodeType === 'folder'));
+            displayResults = sourceResults.filter(r => !(r && r.nodeType === 'folder'));
         } else if (effectiveFilter === 'folder') {
-            displayResults = results.filter(r => !(r && r.nodeType === 'bookmark'));
+            displayResults = sourceResults.filter(r => !(r && r.nodeType === 'bookmark'));
         } else if (effectiveFilter === 'domain') {
             displayResults = domainResults;
         }
@@ -4401,17 +4558,47 @@ function renderCanvasSearchResults(results, options = {}) {
         document.head.appendChild(style);
     }
 
+    const renderQuery = String(options.query || '');
+    const pageSize = Math.max(
+        SEARCH_RESULT_MIN_PAGE_SIZE,
+        Number(searchUiState.resultPageSize) || SEARCH_RESULT_MIN_PAGE_SIZE
+    );
+    const pagingKey = [
+        String(searchUiState.activeMode || ''),
+        renderQuery.trim().toLowerCase(),
+        String(searchUiState.bookmarkTypeFilter || ''),
+        String(searchUiState.domainGrouping || '')
+    ].join('|');
+    const appendPage = options && options.append === true;
+    const prevVisibleCount = Number(searchUiState.resultVisibleCount || 0);
+    const nextVisibleCount = appendPage && searchUiState.resultPagingKey === pagingKey
+        ? Math.min(displayResults.length, prevVisibleCount + pageSize)
+        : Math.min(displayResults.length, pageSize);
+    const visibleResults = displayResults.slice(0, nextVisibleCount);
+    const hasMoreResults = nextVisibleCount < displayResults.length;
+
     searchUiState.view = 'canvas';
-    searchUiState.query = options.query || '';
-    searchUiState.results = displayResults;
+    searchUiState.query = renderQuery;
+    searchUiState.resultSource = sourceResults;
+    searchUiState.resultAll = displayResults;
+    searchUiState.resultPagingKey = pagingKey;
+    searchUiState.resultVisibleCount = nextVisibleCount;
+    searchUiState.resultHasMore = hasMoreResults;
+    searchUiState.results = visibleResults;
     if (typeof options.selectedIndex === 'number' && Number.isFinite(options.selectedIndex)) {
-        const maxIdx = displayResults.length - 1;
+        const maxIdx = visibleResults.length - 1;
         searchUiState.selectedIndex = maxIdx >= 0 ? Math.max(0, Math.min(maxIdx, options.selectedIndex)) : -1;
+    } else if (appendPage) {
+        const maxIdx = visibleResults.length - 1;
+        const currentIdx = Number(searchUiState.selectedIndex);
+        searchUiState.selectedIndex = maxIdx >= 0
+            ? Math.max(0, Math.min(maxIdx, Number.isFinite(currentIdx) ? currentIdx : 0))
+            : -1;
     } else {
-        searchUiState.selectedIndex = displayResults.length > 0 ? 0 : -1;
+        searchUiState.selectedIndex = visibleResults.length > 0 ? 0 : -1;
     }
 
-    if (displayResults.length === 0) {
+    if (visibleResults.length === 0) {
         // [Modified] Customize empty message for Bookmark mode
         let msg = options.emptyText || (i18n.searchNoResults ? i18n.searchNoResults[currentLang] : '无结果');
         if (searchUiState.activeMode === 'bookmark') {
@@ -4452,6 +4639,89 @@ function renderCanvasSearchResults(results, options = {}) {
         } catch (_) {
             return safe;
         }
+    };
+    const parsePathParts = (pathText) => {
+        const raw = String(pathText || '').trim();
+        if (!raw) return [];
+        return raw.split('>').map((part) => String(part || '').trim()).filter(Boolean);
+    };
+    const renderPathTextWithFolderUnderline = (pathText) => {
+        const raw = String(pathText || '').trim();
+        if (!raw) return '';
+        const parts = parsePathParts(raw);
+        if (!parts.length) return escapeHtml(raw);
+        return parts.map((part, index) => {
+            const safePart = `<span class="search-result-path-part">${escapeHtml(part)}</span>`;
+            if (index >= parts.length - 1) return safePart;
+            return `${safePart}<span class="search-result-path-sep"> &gt; </span>`;
+        }).join('');
+    };
+    const renderPathListWithFolderUnderline = (paths, rootLabel) => {
+        const list = Array.isArray(paths) ? paths : [];
+        const normalized = list.length
+            ? list.map((p) => String(p || '').trim()).filter((p) => p !== '')
+            : [];
+        if (!normalized.length) return `<span class="search-result-path-part">${escapeHtml(rootLabel)}</span>`;
+        return normalized.map((path, idx) => {
+            const safe = renderPathTextWithFolderUnderline(path);
+            if (idx >= normalized.length - 1) return safe;
+            return `${safe}<span class="search-result-path-list-sep"> ｜ </span>`;
+        }).join('');
+    };
+    const renderCollapsedPathListWithTailPreview = (paths, rootLabel, maxDepth = 3) => {
+        const list = Array.isArray(paths) ? paths : [];
+        const normalized = list.length
+            ? list.map((p) => String(p || '').trim()).filter((p) => p !== '')
+            : [];
+        if (!normalized.length) {
+            return {
+                html: `<span class="search-result-path-part">${escapeHtml(rootLabel)}</span>`,
+                hasTruncated: false
+            };
+        }
+
+        const hasMultiplePath = normalized.length > 1;
+        const primaryPath = normalized[0];
+        const ellipsisTitle = isZh ? '展开完整路径' : 'Show full path';
+        const parts = parsePathParts(primaryPath);
+        if (!parts.length) {
+            return {
+                html: `<span class="search-result-path-part">${escapeHtml(rootLabel)}</span>`,
+                hasTruncated: hasMultiplePath
+            };
+        }
+
+        const isPathDeep = parts.length > maxDepth;
+        const needsEllipsis = isPathDeep || hasMultiplePath;
+        const visibleParts = isPathDeep ? parts.slice(parts.length - maxDepth) : parts;
+        const visibleHtml = visibleParts.map((part, partIdx) => {
+            const safePart = `<span class="search-result-path-part">${escapeHtml(part)}</span>`;
+            if (partIdx >= visibleParts.length - 1) return safePart;
+            return `${safePart}<span class="search-result-path-sep"> &gt; </span>`;
+        }).join('');
+
+            const ellipsisHtml = needsEllipsis
+            ? `<button class="search-result-path-ellipsis-toggle" type="button" title="${escapeHtml(ellipsisTitle)}" aria-label="${escapeHtml(ellipsisTitle)}">...</button><span class="search-result-path-sep"> &gt; </span>`
+            : '';
+
+        return {
+            html: `${ellipsisHtml}${visibleHtml}`,
+            hasTruncated: needsEllipsis
+        };
+    };
+    const renderPathHintWithTailPreview = (paths, rootLabel, pathHintTypeClass) => {
+        const collapsed = renderCollapsedPathListWithTailPreview(paths, rootLabel, 3);
+        if (!collapsed.hasTruncated) {
+            return `<div class="search-result-path-hint ${pathHintTypeClass}"><span class="search-result-path-text">${collapsed.html}</span></div>`;
+        }
+
+        const fullHtml = renderPathListWithFolderUnderline(paths, rootLabel);
+        return `<div class="search-result-path-hint ${pathHintTypeClass}" data-path-expandable="true">
+            <span class="search-result-path-text">
+                <span class="search-result-path-preview">${collapsed.html}</span>
+                <span class="search-result-path-full">${fullHtml}</span>
+            </span>
+        </div>`;
     };
     const renderExternalLinkHtml = (url, extraClass = '') => {
         const safeUrl = String(url || '').trim();
@@ -4530,7 +4800,7 @@ function renderCanvasSearchResults(results, options = {}) {
         }
     }
 
-    displayResults.forEach((item, index) => {
+    visibleResults.forEach((item, index) => {
         const isSelected = index === searchUiState.selectedIndex ? 'selected' : '';
         let title = '';
         let badge = '';
@@ -4627,10 +4897,10 @@ function renderCanvasSearchResults(results, options = {}) {
                     : (isZh
                         ? (isMatchedStats ? `${count} 个匹配书签` : `${count} 个书签`)
                         : (isMatchedStats ? `${count} matched bookmarks` : `${count} bookmarks`));
-                indexLabel = `<div style="display:flex; align-items:center; justify-content:center; width:24px; height:24px; flex-shrink:0; margin-right:2px;">
+                indexLabel = `<div class="search-domain-group-icon">
                     <i class="fas fa-globe" style="color:#0ea5e9; font-size:16px;"></i>
                 </div>`;
-                title = `<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; color:var(--text-normal);">${domainText}</div>`;
+                title = `<div class="search-result-domain-title-text">${domainText}</div>`;
                 descHtml = `<div class="search-result-match" style="margin-top:2px; color:var(--text-muted); font-size:11px;">${escapeHtml(countLabel)}</div>`;
                 badge = `<div class="search-domain-actions">
                     ${makeColoredBadge(isZh ? '域名' : 'Domain', 'domain')}
@@ -4644,6 +4914,7 @@ function renderCanvasSearchResults(results, options = {}) {
             case 'bookmark-group': {
                 // [Phase 3.7 Redesign] Card Layout
                 indexLabel = '';
+                const bookmarkIconWrapStyle = 'display:flex; align-items:center; justify-content:flex-start; width:18px; height:20px; flex-shrink:0;';
 
                 // 1. Icon (Folder=Blue, Bookmark=Gold or Favicon)
                 const isFolder = item.nodeType === 'folder';
@@ -4651,13 +4922,13 @@ function renderCanvasSearchResults(results, options = {}) {
                 let iconHtml = '';
                 if (isFolder) {
                     // 文件夹：使用蓝色文件夹图标
-                    iconHtml = `<div style="display:flex; align-items:center; justify-content:center; width:24px; height:24px; flex-shrink:0; margin-right:2px;">
+                    iconHtml = `<div style="${bookmarkIconWrapStyle}">
                         <i class="fas fa-folder" style="color:#2563eb; font-size:16px;"></i>
                     </div>`;
                 } else if (item.url) {
                     // 书签：优先尝试加载 favicon，fallback 到黄色书签图标
                     // [接入 FaviconCache 统一缓存系统]
-                    const bookmarkFallbackHtml = `<div class="search-result-icon-box-inline" style="display:flex; align-items:center; justify-content:center; width:24px; height:24px; flex-shrink:0; margin-right:2px;">
+                    const bookmarkFallbackHtml = `<div class="search-result-icon-box-inline" style="${bookmarkIconWrapStyle}">
                         <i class="fas fa-bookmark" style="color:#f59e0b; font-size:16px;"></i>
                     </div>`;
 
@@ -4666,12 +4937,12 @@ function renderCanvasSearchResults(results, options = {}) {
                         // 检查是否是真实 favicon（不是 SVG fallback 图标）
                         if (faviconSrc && !faviconSrc.startsWith('data:image/svg+xml')) {
                             // 真实 favicon（已缓存）
-                            iconHtml = `<div style="display:flex; align-items:center; justify-content:center; width:24px; height:24px; flex-shrink:0; margin-right:2px;">
+                            iconHtml = `<div style="${bookmarkIconWrapStyle}">
                                 <img class="search-result-favicon" src="${faviconSrc}" data-bookmark-url="${escapeHtml(item.url)}" style="width:16px; height:16px; object-fit:contain;" alt="">
                             </div>`;
                         } else {
                             // fallback 图标 + 隐藏的 img 用于后台加载后更新
-                            iconHtml = `<div style="display:flex; align-items:center; justify-content:center; width:24px; height:24px; flex-shrink:0; margin-right:2px; position:relative;">
+                            iconHtml = `<div style="${bookmarkIconWrapStyle} position:relative;">
                                 <i class="fas fa-bookmark search-result-icon-box-inline" style="color:#f59e0b; font-size:16px;"></i>
                                 <img class="search-result-favicon" src="${faviconSrc}" data-bookmark-url="${escapeHtml(item.url)}" style="display:none; width:16px; height:16px; object-fit:contain; position:absolute;" alt="">
                             </div>`;
@@ -4682,7 +4953,7 @@ function renderCanvasSearchResults(results, options = {}) {
                     }
                 } else {
                     // 没有 URL 的书签（异常情况），使用黄色书签图标
-                    iconHtml = `<div style="display:flex; align-items:center; justify-content:center; width:24px; height:24px; flex-shrink:0; margin-right:2px;">
+                    iconHtml = `<div style="${bookmarkIconWrapStyle}">
                         <i class="fas fa-bookmark" style="color:#f59e0b; font-size:16px;"></i>
                     </div>`;
                 }
@@ -4692,6 +4963,16 @@ function renderCanvasSearchResults(results, options = {}) {
                 // 2. Title & URL
                 const titleText = markQueryInText(item.title || (isZh ? '（无标题）' : '(Untitled)'));
                 title = `<div class="search-result-bookmark-title-text">${titleText}</div>`;
+                const rootLabel = isZh ? '根目录' : 'Root';
+                const parentPathListRaw = Array.isArray(item.parentPaths) ? item.parentPaths : [];
+                const parentPathList = parentPathListRaw.length
+                    ? parentPathListRaw
+                    : [String(item.parentPath || '').trim()].filter(Boolean);
+                const showPathHint = !!fullscreenScope;
+                const pathHintTypeClass = isFolder ? 'is-folder' : 'is-bookmark';
+                const parentPathHtml = showPathHint
+                    ? renderPathHintWithTailPreview(parentPathList, rootLabel, pathHintTypeClass)
+                    : '';
 
                 let urlHtml = '';
                 if (item.url) {
@@ -4790,6 +5071,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 }
 
                 descHtml = `<div class="search-result-match" style="display:flex; flex-direction:column; width:100%; min-width:0;">
+                    ${parentPathHtml}
                     ${locationsHtml}
                     ${urlHtml}
                 </div>`;
@@ -4809,7 +5091,8 @@ function renderCanvasSearchResults(results, options = {}) {
                 // Child item under a bookmark-group
                 if (item.isChild) {
                     const icon = item.nodeType === 'folder' ? 'fa-folder' : 'fa-bookmark';
-                    indexLabel = `<span class="search-child-dot"><i class="fas ${icon}"></i></span>`;
+                    const childDotClass = item.domainChild ? 'search-child-dot search-domain-child-dot' : 'search-child-dot';
+                    indexLabel = `<span class="${childDotClass}"><i class="fas ${icon}"></i></span>`;
                 }
 
                 title = `<span class="search-result-bookmark-title-text">${markQueryInText(item.title || (isZh ? '（无标题）' : '(Untitled)'))}</span>`;
@@ -5016,11 +5299,25 @@ function renderCanvasSearchResults(results, options = {}) {
         `;
     });
 
+    if (hasMoreResults) {
+        const remain = Math.max(0, displayResults.length - visibleResults.length);
+        const loadMoreText = isZh
+            ? `继续加载（剩余 ${remain}）`
+            : `Load More (${remain} left)`;
+        html += `
+            <div class="search-results-load-more-row" style="padding:10px 12px 12px; display:flex; justify-content:center;">
+                <button class="search-load-more-btn" type="button" style="border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-normal); padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer;">
+                    ${escapeHtml(loadMoreText)}
+                </button>
+            </div>
+        `;
+    }
+
     panel.innerHTML = html;
 
     const syncBookmarkResultTitleLayout = () => {
         if (!panel || typeof panel.querySelectorAll !== 'function') return;
-        const titleEls = panel.querySelectorAll('.search-result-bookmark-title-text');
+        const titleEls = panel.querySelectorAll('.search-result-bookmark-title-text, .search-result-domain-title-text');
         titleEls.forEach((el) => {
             const row = el.closest('.search-result-title');
             if (!row) return;
@@ -5130,6 +5427,21 @@ function rerenderCanvasBookmarkResults(selectedIndex = 0) {
         return;
     }
     searchCanvasAndRender(query);
+}
+
+function appendCanvasSearchResultsPage() {
+    const sourceResults = Array.isArray(searchUiState.resultSource) ? searchUiState.resultSource : [];
+    const query = String(searchUiState && searchUiState.query || '').trim();
+    if (!sourceResults.length) {
+        searchCanvasAndRender(query);
+        return;
+    }
+    renderCanvasSearchResults(sourceResults, {
+        view: 'canvas',
+        query,
+        append: true,
+        selectedIndex: searchUiState.selectedIndex
+    });
 }
 
 function openSearchResultExternalUrl(url) {
@@ -5996,6 +6308,85 @@ function shouldSkipCanvasPanForMaximizedTarget(elementId, type) {
     return false;
 }
 
+function getCanvasSearchFullscreenTargetElement(item) {
+    if (!item || !item.type) return null;
+    const type = String(item.type || '').trim();
+    if (!type) return null;
+
+    if (type === 'temp-section' || type === 'md-node') {
+        const id = String(item.id || '').trim();
+        if (!id) return null;
+        return document.getElementById(id);
+    }
+
+    if (type === 'permanent-section') {
+        const copyId = String(item.copyId || '').trim();
+        if (copyId) return resolvePermanentSectionElementForSearch(copyId);
+
+        const itemId = String(item.id || '').trim();
+        if (itemId && itemId !== 'permanentSection') {
+            const copyEl = resolvePermanentSectionElementForSearch(itemId);
+            if (copyEl) return copyEl;
+        }
+        return resolvePermanentSectionElementForSearch(null) || document.getElementById('permanentSection');
+    }
+
+    return null;
+}
+
+async function ensureCanvasSearchResultTargetFullscreen(item) {
+    if (!item || !item.type) return false;
+    const type = String(item.type || '').trim();
+    if (type !== 'temp-section' && type !== 'md-node' && type !== 'permanent-section') return false;
+
+    let target = getCanvasSearchFullscreenTargetElement(item);
+
+    if (!target && type === 'temp-section') {
+        try {
+            if (window.CanvasModule && typeof window.CanvasModule.forceWakeAndRender === 'function') {
+                window.CanvasModule.forceWakeAndRender(String(item.id || '').trim());
+            }
+        } catch (_) { }
+        await waitForSearchLocateAnimationFrames(1);
+        target = getCanvasSearchFullscreenTargetElement(item);
+    }
+
+    if (!target) {
+        try {
+            await locateCanvasElement(item.id, item.type, {
+                color: item.color || '#3b82f6',
+                disableAnimation: true
+            });
+        } catch (_) { }
+        target = getCanvasSearchFullscreenTargetElement(item);
+    }
+
+    if (!target || !target.classList) return false;
+    if (target.classList.contains('canvas-node-maximized')) return true;
+
+    const fullscreenBtn = target.querySelector('.canvas-node-fullscreen-btn, .permanent-section-fullscreen-btn, .temp-node-fullscreen-btn, .md-node-toolbar-btn[data-action="md-fullscreen"]');
+    if (!fullscreenBtn || typeof fullscreenBtn.click !== 'function') return false;
+
+    try {
+        // One search-triggered fullscreen switch may emit two fullscreen-context notifications:
+        // restore current maximized node, then maximize target node.
+        // We suppress both auto-mode applications to keep the user-selected mode stable.
+        window.__canvasSearchSuppressFullscreenAutoModeCounter = Math.max(
+            Number(window.__canvasSearchSuppressFullscreenAutoModeCounter || 0),
+            2
+        );
+    } catch (_) { }
+
+    try {
+        fullscreenBtn.click();
+    } catch (_) {
+        return false;
+    }
+
+    await waitForSearchLocateAnimationFrames(1);
+    return target.classList.contains('canvas-node-maximized') || !!document.querySelector('.canvas-node-maximized');
+}
+
 function isMaximizedTempSectionActive(sectionId) {
     const sid = String(sectionId || '').trim();
     if (!sid) return false;
@@ -6343,6 +6734,21 @@ async function locateCanvasBookmarkItem(item) {
     });
 }
 
+async function locateCanvasBookmarkTreeItem(target) {
+    if (!target || typeof target !== 'object') return false;
+    const source = String(target.source || '').trim();
+    const color = target.color || '#3b82f6';
+
+    if (source === 'temporary') {
+        return locateBookmarkItemInTempTree(target.sectionId, target.id, { color });
+    }
+
+    return locateBookmarkItemInPermanentTree(target.id, {
+        color,
+        copyId: target.copyId || null
+    });
+}
+
 /**
  * 定位画布元素 (Storage-First Approach)
  * 优先使用 CanvasState/LocalStorage 中的坐标数据进行定位，
@@ -6361,6 +6767,7 @@ async function locateCanvasElement(elementId, type, options = {}) {
 
     // [New] Dynamic Highlight Color
     const highlightColor = options.color || '#3b82f6';
+    const disableAnimation = options.disableAnimation === true;
 
     // Helper: 获取节点/栏目矩形 (从 Storage)
     const getRectFromStorage = (id, typeHint) => {
@@ -6422,7 +6829,7 @@ async function locateCanvasElement(elementId, type, options = {}) {
 
                 // Also force immediate Highlight if element exists
                 const mdEl = document.getElementById(elementId);
-                if (mdEl) {
+                if (mdEl && !disableAnimation) {
                     highlightCanvasElement(mdEl);
                 }
             }
@@ -6440,12 +6847,14 @@ async function locateCanvasElement(elementId, type, options = {}) {
 
             if (edgeDom) {
                 // [Fix] 直接高亮实体（SVG Path）
-                try {
-                    edgeDom.classList.add('canvas-search-highlight-edge');
-                    setTimeout(() => {
-                        try { edgeDom.classList.remove('canvas-search-highlight-edge'); } catch (_) { }
-                    }, 2500);
-                } catch (_) { }
+                if (!disableAnimation) {
+                    try {
+                        edgeDom.classList.add('canvas-search-highlight-edge');
+                        setTimeout(() => {
+                            try { edgeDom.classList.remove('canvas-search-highlight-edge'); } catch (_) { }
+                        }, 2500);
+                    } catch (_) { }
+                }
 
                 const rect = edgeDom.getBoundingClientRect();
                 if (rect && rect.width > 0 && rect.height > 0) {
@@ -6609,7 +7018,7 @@ async function locateCanvasElement(elementId, type, options = {}) {
     }
 
     // 2. 尝试高亮 DOM 元素 (Best Effort)
-    if (highlightSelector) {
+    if (highlightSelector && !disableAnimation) {
         const tryHighlight = () => {
             const el = document.querySelector(highlightSelector);
             if (el) {
@@ -6639,7 +7048,7 @@ async function locateCanvasElement(elementId, type, options = {}) {
     }
 
     // [Fix] Edges highlighting logic was partly inline in previous block, clean up here
-    if (foundLocation && type === 'edge' && !highlightSelector) {
+    if (!disableAnimation && foundLocation && type === 'edge' && !highlightSelector) {
         // If we found location via storage but selector failed (rare for edge if virtualized?)
         // Actually edge relies on DOM query selector in switch case. 
         // If logic fell through to just coords, we might need overlay? 
@@ -6820,6 +7229,16 @@ async function activateCanvasSearchResultAtIndex(index) {
         return;
     }
 
+    const fullscreenScope = getCanvasFullscreenSearchScope();
+    const shouldSwitchFullscreenTarget = !!fullscreenScope
+        && searchUiState.activeMode !== 'bookmark'
+        && (item.type === 'temp-section' || item.type === 'md-node' || item.type === 'permanent-section');
+    if (shouldSwitchFullscreenTarget) {
+        try {
+            await ensureCanvasSearchResultTargetFullscreen(item);
+        } catch (_) { }
+    }
+
     hideSearchResultsPanel();
 
     // 清空输入框 (仅针对非群组结果，群组结果需保留文字以维持高亮状态)
@@ -6961,7 +7380,11 @@ async function activateCanvasSearchResultAtIndex(index) {
     if (item.type === 'bookmark-item') {
         await locateCanvasBookmarkItem(item);
     } else {
-        await locateCanvasElement(item.id, item.type);
+        const disableAnimationForFullscreenCardSearch = !!fullscreenScope
+            && (searchUiState.activeMode === 'structure' || searchUiState.activeMode === 'description');
+        await locateCanvasElement(item.id, item.type, {
+            disableAnimation: disableAnimationForFullscreenCardSearch
+        });
     }
 }
 
@@ -6975,6 +7398,7 @@ if (typeof window !== 'undefined') {
     window.searchCanvasAndRender = searchCanvasAndRender;
     window.resetCanvasSearchDb = resetCanvasSearchDb;
     window.locateCanvasElement = locateCanvasElement;
+    window.locateCanvasBookmarkTreeItem = locateCanvasBookmarkTreeItem;
     window.clearCanvasSearchHighlight = clearCanvasSearchHighlight;
     window.activateCanvasSearchResultAtIndex = activateCanvasSearchResultAtIndex;
 

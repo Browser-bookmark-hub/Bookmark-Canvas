@@ -4463,6 +4463,34 @@ html.side-panel-mode #bookmarkAddSecondaryModal .modal-body {
     color: var(--text-secondary);
 }
 
+.bookmark-add-secondary-field-inline {
+    gap: 0;
+}
+
+.bookmark-add-secondary-inline-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+    cursor: pointer;
+    user-select: none;
+}
+
+.bookmark-add-secondary-inline-toggle input[type="checkbox"] {
+    margin: 0;
+    width: 14px;
+    height: 14px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.bookmark-add-secondary-inline-toggle span {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+
 .bookmark-add-secondary-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

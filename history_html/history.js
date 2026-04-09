@@ -5204,8 +5204,8 @@ const i18n = {
 </ul>
 <h3>触控板操作</h3>
 <ul>
-<li><strong>双指捏合（侧边栏不可用）</strong>：缩放画布</li>
-<li><strong>Ctrl 等按键 + 双指滑动（兼容侧边栏）</strong>：缩放</li>
+<li><strong>双指捏合</strong>：缩放画布</li>
+<li><strong>Ctrl 等按键 + 双指滑动</strong>：缩放（备用方式）</li>
 <li><strong>双指滑动</strong>：拖动画布</li>
 </ul>
 <hr>
@@ -5223,8 +5223,8 @@ const i18n = {
 </ul>
 <h3>Touchpad Operations</h3>
 <ul>
-<li><strong>Pinch gesture (Unavailable in Side Panel)</strong>: Zoom canvas</li>
-<li><strong>Modifier (e.g., Ctrl) + swipe (Side Panel compatible)</strong>: Smooth zoom</li>
+<li><strong>Pinch gesture</strong>: Zoom canvas</li>
+<li><strong>Modifier (e.g., Ctrl) + swipe</strong>: Zoom (fallback)</li>
 <li><strong>Two-finger swipe</strong>: Drag canvas</li>
 </ul>
 <hr>
@@ -5361,24 +5361,24 @@ const i18n = {
         'en': 'Touchpad Actions'
     },
     canvasHelpTouchpadPinch: {
-        'zh_CN': '双指捏合 (侧边栏不可用)',
-        'en': 'Pinch (Unavailable in Side Panel)'
+        'zh_CN': '双指捏合',
+        'en': 'Pinch'
     },
     canvasHelpTouchpadPinchDesc: {
         'zh_CN': '缩放画布',
         'en': 'Zoom canvas'
     },
     canvasHelpTouchpadPinchTooltip: {
-        'zh_CN': '受浏览器底层限制：\n侧边栏原生拦截了捏合手势，\n请改用「按键+双指滑动」',
-        'en': 'Browser Limitation:\nSide panel natively intercepts pinch gestures,\nplease use "Modifier + Swipe" instead'
+        'zh_CN': '若系统手势或设备设置与缩放冲突，\n请改用「按键 + 双指滑动」作为备用方式。',
+        'en': 'If system gestures or device settings conflict,\nuse "Modifier + Swipe" as a fallback zoom method.'
     },
     canvasHelpTouchpadModifierSwipe: {
-        'zh_CN': '双指滑动（兼容侧边栏）',
-        'en': 'Two-finger Swipe (Side Panel compatible)'
+        'zh_CN': '按键（如 Ctrl）+ 双指滑动',
+        'en': 'Modifier (e.g., Ctrl) + Swipe'
     },
     canvasHelpTouchpadModifierSwipeDesc: {
-        'zh_CN': '缩放',
-        'en': 'Zoom'
+        'zh_CN': '缩放（备用方式）',
+        'en': 'Zoom (fallback)'
     },
     canvasHelpTouchpadScroll: {
         'zh_CN': '双指滑动',

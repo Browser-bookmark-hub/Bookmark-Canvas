@@ -3862,6 +3862,10 @@ function __normalizeBookmarkAddWindowAsFolder(value) {
     return value === true || value === 'true' || value === 1 || value === '1';
 }
 
+function __normalizeBookmarkAddLocateAfterAction(value) {
+    return value === true || value === 'true' || value === 1 || value === '1';
+}
+
 function __formatBookmarkAddWindowFolderTitle() {
     const lang = currentLang || 'zh_CN';
     const now = new Date();
@@ -3877,11 +3881,15 @@ function __readBookmarkAddTemplate() {
         const parsed = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object') return null;
         const hasWindowAsFolder = Object.prototype.hasOwnProperty.call(parsed, 'windowAsFolder');
+        const hasLocateAfterAction = Object.prototype.hasOwnProperty.call(parsed, 'locateAfterAction');
         return {
             actionType: __normalizeBookmarkAddActionType(parsed.actionType),
             position: parsed.position || null,
             windowAsFolder: hasWindowAsFolder
                 ? __normalizeBookmarkAddWindowAsFolder(parsed.windowAsFolder)
+                : true,
+            locateAfterAction: hasLocateAfterAction
+                ? __normalizeBookmarkAddLocateAfterAction(parsed.locateAfterAction)
                 : true
         };
     } catch (_) {
@@ -3896,6 +3904,7 @@ function __writeBookmarkAddTemplate(config) {
         actionType: normalizedActionType,
         position: config.position || null,
         windowAsFolder: normalizedActionType === 'add-current-window' && __normalizeBookmarkAddWindowAsFolder(config.windowAsFolder),
+        locateAfterAction: __normalizeBookmarkAddLocateAfterAction(config.locateAfterAction),
         updatedAt: Date.now()
     };
     try {
@@ -4053,11 +4062,22 @@ function __insertBookmarkAddItemsToTemp(target, items) {
     }
 
     const payload = __convertBookmarkAddItemsToTempPayload(items);
-    if (!payload.length) return 0;
+    if (!payload.length) {
+        return { createdCount: 0, firstCreated: null };
+    }
 
     const index = Number.isFinite(target && target.index) ? target.index : null;
-    manager.insertFromPayload(sectionId, target && target.parentId ? target.parentId : null, payload, index);
-    return __collectBookmarkAddLeafTabs(payload).length;
+    const insertedItems = manager.insertFromPayload(sectionId, target && target.parentId ? target.parentId : null, payload, index);
+    const firstInserted = Array.isArray(insertedItems) && insertedItems.length ? insertedItems[0] : null;
+    return {
+        createdCount: __collectBookmarkAddLeafTabs(payload).length,
+        firstCreated: firstInserted && firstInserted.id
+            ? {
+                id: String(firstInserted.id),
+                type: firstInserted.type === 'folder' ? 'folder' : 'bookmark'
+            }
+            : null
+    };
 }
 
 async function __createTempBookmarkViaModal(target) {
@@ -4077,14 +4097,18 @@ async function __createTempBookmarkViaModal(target) {
         requireTitle: true
     });
 
-    if (!result) return false;
+    if (!result) return { success: false, createdCount: 0, firstCreated: null };
 
-    const createdCount = __insertBookmarkAddItemsToTemp(target, [{
+    const createResult = __insertBookmarkAddItemsToTemp(target, [{
         type: 'bookmark',
         title: result.title,
         url: result.url
     }]);
-    return createdCount > 0;
+    return {
+        success: !!(createResult && createResult.firstCreated && createResult.firstCreated.id),
+        createdCount: createResult && Number.isFinite(createResult.createdCount) ? createResult.createdCount : 0,
+        firstCreated: createResult ? createResult.firstCreated || null : null
+    };
 }
 
 async function __createTempFolderViaModal(target) {
@@ -4101,14 +4125,18 @@ async function __createTempFolderViaModal(target) {
         requireTitle: true
     });
 
-    if (!result) return false;
+    if (!result) return { success: false, createdCount: 0, firstCreated: null };
 
-    const createdCount = __insertBookmarkAddItemsToTemp(target, [{
+    const createResult = __insertBookmarkAddItemsToTemp(target, [{
         type: 'folder',
         title: result.title,
         children: []
     }]);
-    return createdCount > 0;
+    return {
+        success: !!(createResult && createResult.firstCreated && createResult.firstCreated.id),
+        createdCount: createResult && Number.isFinite(createResult.createdCount) ? createResult.createdCount : 0,
+        firstCreated: createResult ? createResult.firstCreated || null : null
+    };
 }
 
 async function __resolveBookmarkAddTarget(context, preferredPosition = null) {
@@ -4166,11 +4194,16 @@ async function __resolveBookmarkAddTarget(context, preferredPosition = null) {
 }
 
 async function __addTabsToBookmarkTree(target, tabs) {
-    if (!target || !target.parentId) return 0;
-    if (!Array.isArray(tabs) || !tabs.length) return 0;
+    if (!target || !target.parentId) {
+        return { createdCount: 0, firstCreated: null };
+    }
+    if (!Array.isArray(tabs) || !tabs.length) {
+        return { createdCount: 0, firstCreated: null };
+    }
 
     let insertIndex = Number.isFinite(target.index) ? target.index : null;
     let createdCount = 0;
+    let firstCreated = null;
 
     for (const tab of tabs) {
         if (!tab || !__isTabUrlAddable(tab.url)) continue;
@@ -4184,11 +4217,14 @@ async function __addTabsToBookmarkTree(target, tabs) {
             createPayload.index = insertIndex;
             insertIndex += 1;
         }
-        await chrome.bookmarks.create(createPayload);
+        const created = await chrome.bookmarks.create(createPayload);
         createdCount += 1;
+        if (!firstCreated && created && created.id) {
+            firstCreated = { id: String(created.id), type: 'bookmark' };
+        }
     }
 
-    return createdCount;
+    return { createdCount, firstCreated };
 }
 
 function __collectBookmarkAddLeafTabs(items, output = []) {
@@ -4304,12 +4340,26 @@ async function __buildBookmarkAddItemsFromTabs(tabs, options = {}) {
 }
 
 async function __addBookmarkAddItemsToTree(target, items) {
-    if (!target || !target.parentId) return 0;
+    if (!target || !target.parentId) {
+        return { createdCount: 0, firstCreated: null };
+    }
     const sourceItems = Array.isArray(items) ? items : [];
-    if (!sourceItems.length) return 0;
+    if (!sourceItems.length) {
+        return { createdCount: 0, firstCreated: null };
+    }
 
     let insertIndex = Number.isFinite(target.index) ? target.index : null;
     let createdCount = 0;
+    let firstCreated = null;
+
+    const rememberFirstCreated = (item) => {
+        if (!firstCreated && item && item.id) {
+            firstCreated = {
+                id: String(item.id),
+                type: item.type === 'folder' ? 'folder' : 'bookmark'
+            };
+        }
+    };
 
     for (const item of sourceItems) {
         if (!item) continue;
@@ -4332,11 +4382,16 @@ async function __addBookmarkAddItemsToTree(target, items) {
             }
 
             if (folderNode && folderNode.id) {
-                createdCount += await __addBookmarkAddItemsToTree({
+                rememberFirstCreated({ id: folderNode.id, type: 'folder' });
+                const nestedResult = await __addBookmarkAddItemsToTree({
                     parentId: folderNode.id,
                     index: null,
                     position: target.position
                 }, item.children || []);
+                createdCount += nestedResult.createdCount;
+                if (!firstCreated && nestedResult.firstCreated) {
+                    firstCreated = nestedResult.firstCreated;
+                }
             } else {
                 const fallbackTabs = __collectBookmarkAddLeafTabs(item.children || []);
                 const fallbackTarget = {
@@ -4344,10 +4399,13 @@ async function __addBookmarkAddItemsToTree(target, items) {
                     index: insertIndex,
                     position: target.position
                 };
-                const fallbackCreated = await __addTabsToBookmarkTree(fallbackTarget, fallbackTabs);
-                createdCount += fallbackCreated;
+                const fallbackResult = await __addTabsToBookmarkTree(fallbackTarget, fallbackTabs);
+                createdCount += fallbackResult.createdCount;
+                if (!firstCreated && fallbackResult.firstCreated) {
+                    firstCreated = fallbackResult.firstCreated;
+                }
                 if (Number.isFinite(insertIndex)) {
-                    insertIndex += fallbackCreated;
+                    insertIndex += fallbackResult.createdCount;
                 }
             }
 
@@ -4367,11 +4425,14 @@ async function __addBookmarkAddItemsToTree(target, items) {
             insertIndex += 1;
         }
 
-        await chrome.bookmarks.create(createPayload);
+        const created = await chrome.bookmarks.create(createPayload);
         createdCount += 1;
+        if (!firstCreated && created && created.id) {
+            firstCreated = { id: String(created.id), type: 'bookmark' };
+        }
     }
 
-    return createdCount;
+    return { createdCount, firstCreated };
 }
 
 function __buildBookmarkAddSecondaryModal() {
@@ -4404,6 +4465,12 @@ function __buildBookmarkAddSecondaryModal() {
                     <div class="bookmark-add-secondary-field">
                         <label id="bookmarkAddSecondaryPositionLabel"></label>
                         <div class="bookmark-add-secondary-options" id="bookmarkAddSecondaryPositionOptions"></div>
+                    </div>
+                    <div class="bookmark-add-secondary-field bookmark-add-secondary-field-inline">
+                        <label class="bookmark-add-secondary-inline-toggle" for="bookmarkAddSecondaryLocateAfterAction">
+                            <input type="checkbox" id="bookmarkAddSecondaryLocateAfterAction">
+                            <span id="bookmarkAddSecondaryLocateLabel"></span>
+                        </label>
                     </div>
                 </div>
                 <div class="bookmark-add-secondary-actions">
@@ -4510,6 +4577,8 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
     const actionWrap = modal.querySelector('#bookmarkAddSecondaryActionOptions');
     const positionLabelEl = modal.querySelector('#bookmarkAddSecondaryPositionLabel');
     const positionWrap = modal.querySelector('#bookmarkAddSecondaryPositionOptions');
+    const locateLabelEl = modal.querySelector('#bookmarkAddSecondaryLocateLabel');
+    const locateAfterActionInput = modal.querySelector('#bookmarkAddSecondaryLocateAfterAction');
     const cancelBtn = modal.querySelector('#bookmarkAddSecondaryCancel');
     const confirmBtn = modal.querySelector('#bookmarkAddSecondaryConfirm');
 
@@ -4521,12 +4590,15 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
     const initialWindowAsFolder = (options && options.windowAsFolder !== undefined && options.windowAsFolder !== null)
         ? __normalizeBookmarkAddWindowAsFolder(options.windowAsFolder)
         : true;
+    const initialLocateAfterAction = (options && options.locateAfterAction !== undefined && options.locateAfterAction !== null)
+        ? __normalizeBookmarkAddLocateAfterAction(options.locateAfterAction)
+        : true;
 
     if (titleEl) titleEl.textContent = lang === 'zh_CN' ? '添加' : 'Add';
     const templateHelpLabel = lang === 'zh_CN' ? '模版说明' : 'Template Help';
     const templateHelpText = lang === 'zh_CN'
-        ? '模版会记住你在这里最后一次确认的“添加内容 + 位置”。点击右键菜单里的「模版」会直接按该组合执行（后改覆盖前改）。'
-        : 'Template remembers the latest confirmed "content + position" here. Clicking "Template" in the context menu runs that combination directly (last change wins).';
+        ? '模版会记住你在这里最后一次确认的“添加内容 + 位置 + 动作结束后目标定位”。点击右键菜单里的「模版」会直接按该组合执行（后改覆盖前改）。'
+        : 'Template remembers the latest confirmed "content + position + locate target after action". Clicking "Template" in the context menu runs that combination directly (last change wins).';
     if (helpBtn) {
         helpBtn.setAttribute('aria-label', templateHelpLabel);
         helpBtn.title = templateHelpLabel;
@@ -4534,11 +4606,15 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
     if (helpTooltip) helpTooltip.textContent = templateHelpText;
     if (actionLabelEl) actionLabelEl.textContent = lang === 'zh_CN' ? '添加内容' : 'Add Content';
     if (positionLabelEl) positionLabelEl.textContent = lang === 'zh_CN' ? '位置' : 'Position';
+    if (locateLabelEl) locateLabelEl.textContent = lang === 'zh_CN' ? '动作结束后目标定位' : 'Locate Target After Action';
     if (cancelBtn) cancelBtn.textContent = lang === 'zh_CN' ? '取消' : 'Cancel';
     if (confirmBtn) confirmBtn.textContent = lang === 'zh_CN' ? '确定' : 'Confirm';
 
     __renderBookmarkAddActionOptions(actionWrap, lang, initialActionType, initialWindowAsFolder);
     __renderBookmarkAddPositionOptions(positionWrap, context, initialPosition);
+    if (locateAfterActionInput) {
+        locateAfterActionInput.checked = initialLocateAfterAction;
+    }
 
     const inlineWindowFolderInput = modal.querySelector('#bookmarkAddSecondaryWindowAsFolderInline');
     if (inlineWindowFolderInput) {
@@ -4573,10 +4649,12 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
             const position = __readCheckedValue(modal, 'input[name="bookmarkAddPosition"]:checked', initialPosition);
             const inlineWindowFolderInput = modal.querySelector('#bookmarkAddSecondaryWindowAsFolderInline');
             const windowAsFolder = normalizedActionType === 'add-current-window' && !!(inlineWindowFolderInput && inlineWindowFolderInput.checked);
+            const locateAfterAction = !!(locateAfterActionInput && locateAfterActionInput.checked);
             closeModal({
                 actionType: normalizedActionType,
                 position: __normalizeBookmarkAddPosition(context, position),
-                windowAsFolder
+                windowAsFolder,
+                locateAfterAction
             });
         };
         const onBackdropClick = (event) => {
@@ -4612,25 +4690,65 @@ async function executeBookmarkAddAction(context, config, options = {}) {
     const actionType = __normalizeBookmarkAddActionType(config && config.actionType);
     const preferredPosition = __normalizeBookmarkAddPosition(context, config && config.position);
     const windowAsFolder = actionType === 'add-current-window' && __normalizeBookmarkAddWindowAsFolder(config && config.windowAsFolder);
+    const locateAfterAction = __normalizeBookmarkAddLocateAfterAction(config && config.locateAfterAction);
     const saveTemplate = options && options.saveTemplate !== false;
+    const permanentCopyId = (context && context.permanentCopyId)
+        ? String(context.permanentCopyId).trim()
+        : '';
 
     const target = await __resolveBookmarkAddTarget(context, preferredPosition);
     const isTemporaryTarget = !!(target && target.scope === 'temporary');
     let success = false;
+    let locateTarget = null;
+
+    const rememberLocateTarget = (candidate) => {
+        if (locateTarget || !candidate || !candidate.id) return;
+        locateTarget = Object.assign({}, candidate);
+    };
 
     if (actionType === 'add-page') {
         if (isTemporaryTarget) {
-            success = await __createTempBookmarkViaModal(target);
+            const createResult = await __createTempBookmarkViaModal(target);
+            success = !!(createResult && createResult.success);
+            if (createResult && createResult.firstCreated && createResult.firstCreated.id) {
+                rememberLocateTarget({
+                    source: 'temporary',
+                    sectionId: target.sectionId,
+                    id: String(createResult.firstCreated.id)
+                });
+            }
         } else {
             const created = await addBookmark(target.parentId, { index: target.index });
             success = !!created;
+            if (created && created.id) {
+                rememberLocateTarget({
+                    source: 'permanent',
+                    id: String(created.id),
+                    copyId: permanentCopyId || null
+                });
+            }
         }
     } else if (actionType === 'add-folder') {
         if (isTemporaryTarget) {
-            success = await __createTempFolderViaModal(target);
+            const createResult = await __createTempFolderViaModal(target);
+            success = !!(createResult && createResult.success);
+            if (createResult && createResult.firstCreated && createResult.firstCreated.id) {
+                rememberLocateTarget({
+                    source: 'temporary',
+                    sectionId: target.sectionId,
+                    id: String(createResult.firstCreated.id)
+                });
+            }
         } else {
             const created = await addFolder(target.parentId, { index: target.index });
             success = !!created;
+            if (created && created.id) {
+                rememberLocateTarget({
+                    source: 'permanent',
+                    id: String(created.id),
+                    copyId: permanentCopyId || null
+                });
+            }
         }
     } else {
         const tabs = await __queryCurrentWindowTabs(actionType === 'add-current-tab'
@@ -4651,6 +4769,7 @@ async function executeBookmarkAddAction(context, config, options = {}) {
 
         let createdCount = 0;
         let usedFolderMode = false;
+        let firstCreated = null;
 
         if (isTemporaryTarget) {
             let itemsForTarget = addItems;
@@ -4662,7 +4781,13 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                 }];
                 usedFolderMode = true;
             }
-            createdCount = __insertBookmarkAddItemsToTemp(target, itemsForTarget);
+            const tempInsertResult = __insertBookmarkAddItemsToTemp(target, itemsForTarget);
+            createdCount = tempInsertResult && Number.isFinite(tempInsertResult.createdCount)
+                ? tempInsertResult.createdCount
+                : 0;
+            firstCreated = tempInsertResult && tempInsertResult.firstCreated
+                ? tempInsertResult.firstCreated
+                : null;
         } else if (actionType === 'add-current-window' && windowAsFolder) {
             const folderPayload = {
                 parentId: target.parentId,
@@ -4680,20 +4805,51 @@ async function executeBookmarkAddAction(context, config, options = {}) {
             }
 
             if (folderNode && folderNode.id) {
-                createdCount = await __addBookmarkAddItemsToTree({
+                const nestedResult = await __addBookmarkAddItemsToTree({
                     parentId: folderNode.id,
                     index: null,
                     position: target.position
                 }, addItems);
+                createdCount = nestedResult && Number.isFinite(nestedResult.createdCount)
+                    ? nestedResult.createdCount
+                    : 0;
+                firstCreated = { id: String(folderNode.id), type: 'folder' };
                 usedFolderMode = true;
             } else {
-                createdCount = await __addBookmarkAddItemsToTree(target, addItems);
+                const fallbackResult = await __addBookmarkAddItemsToTree(target, addItems);
+                createdCount = fallbackResult && Number.isFinite(fallbackResult.createdCount)
+                    ? fallbackResult.createdCount
+                    : 0;
+                firstCreated = fallbackResult && fallbackResult.firstCreated
+                    ? fallbackResult.firstCreated
+                    : null;
             }
         } else {
-            createdCount = await __addBookmarkAddItemsToTree(target, addItems);
+            const treeResult = await __addBookmarkAddItemsToTree(target, addItems);
+            createdCount = treeResult && Number.isFinite(treeResult.createdCount)
+                ? treeResult.createdCount
+                : 0;
+            firstCreated = treeResult && treeResult.firstCreated
+                ? treeResult.firstCreated
+                : null;
         }
 
         success = createdCount > 0;
+        if (success && firstCreated && firstCreated.id) {
+            if (isTemporaryTarget) {
+                rememberLocateTarget({
+                    source: 'temporary',
+                    sectionId: target.sectionId,
+                    id: String(firstCreated.id)
+                });
+            } else {
+                rememberLocateTarget({
+                    source: 'permanent',
+                    id: String(firstCreated.id),
+                    copyId: permanentCopyId || null
+                });
+            }
+        }
 
         if (success && typeof showToast === 'function') {
             const text = actionType === 'add-current-tab'
@@ -4709,8 +4865,25 @@ async function executeBookmarkAddAction(context, config, options = {}) {
         __writeBookmarkAddTemplate({
             actionType,
             position: target.position,
-            windowAsFolder
+            windowAsFolder,
+            locateAfterAction
         });
+    }
+
+    if (success && locateAfterAction && locateTarget) {
+        try {
+            if (typeof window !== 'undefined' && typeof window.locateCanvasBookmarkTreeItem === 'function') {
+                await window.locateCanvasBookmarkTreeItem(locateTarget);
+            } else if (typeof window !== 'undefined' && window.CanvasModule) {
+                if (locateTarget.source === 'temporary' && locateTarget.sectionId && typeof window.CanvasModule.locateSection === 'function') {
+                    window.CanvasModule.locateSection(locateTarget.sectionId);
+                } else if (locateTarget.source === 'permanent' && typeof window.CanvasModule.locatePermanent === 'function') {
+                    window.CanvasModule.locatePermanent();
+                }
+            }
+        } catch (locateError) {
+            console.warn('[右键菜单] 添加后定位失败:', locateError);
+        }
     }
 
     return success;
@@ -4734,7 +4907,8 @@ async function openBookmarkAddMenuAction(context) {
     const selected = await showBookmarkAddSecondaryModal(context, {
         actionType: initialActionType,
         position: initialPosition,
-        windowAsFolder: remembered ? remembered.windowAsFolder : undefined
+        windowAsFolder: remembered ? remembered.windowAsFolder : undefined,
+        locateAfterAction: remembered ? remembered.locateAfterAction : undefined
     });
 
     if (!selected) return false;
@@ -4743,7 +4917,8 @@ async function openBookmarkAddMenuAction(context) {
         actionType: __normalizeBookmarkAddActionType(selected.actionType),
         position: __normalizeBookmarkAddPosition(context, selected.position),
         windowAsFolder: __normalizeBookmarkAddActionType(selected.actionType) === 'add-current-window'
-            && __normalizeBookmarkAddWindowAsFolder(selected.windowAsFolder)
+            && __normalizeBookmarkAddWindowAsFolder(selected.windowAsFolder),
+        locateAfterAction: __normalizeBookmarkAddLocateAfterAction(selected.locateAfterAction)
     };
 
     __writeBookmarkAddTemplate(normalizedSelection);
@@ -4769,7 +4944,8 @@ async function openBookmarkAddByTemplateAction(context) {
         return await executeBookmarkAddAction(context, {
             actionType: template.actionType,
             position: __normalizeBookmarkAddPosition(context, template.position),
-            windowAsFolder: __normalizeBookmarkAddWindowAsFolder(template.windowAsFolder)
+            windowAsFolder: __normalizeBookmarkAddWindowAsFolder(template.windowAsFolder),
+            locateAfterAction: __normalizeBookmarkAddLocateAfterAction(template.locateAfterAction)
         }, { saveTemplate: false });
     } catch (error) {
         console.error('[右键菜单] 模版添加失败，回退二级菜单:', error);

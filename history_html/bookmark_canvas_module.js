@@ -1043,6 +1043,11 @@ function __bindCanvasSectionScrollPerformance(body) {
     // 树容器自己的滚动不应再冒泡到画布级 wheel 总监听，否则高刷设备会先卡主线程。
     body.addEventListener('wheel', (event) => {
         arm();
+        // 缩放手势（Ctrl/Meta + wheel，包括触控板捏合映射）必须放行到画布级监听，
+        // 否则会出现“空白区能缩放、卡片区不能缩放”的不一致。
+        if (isCustomCtrlKeyPressed(event) || event.metaKey) {
+            return;
+        }
         if (__shouldPreferSectionBodyWheel(body, event)) {
             event.stopPropagation();
         }
@@ -2761,8 +2766,8 @@ _Tip: This card can be freely edited or deleted_
 - **空格 + 左键（按住）**：拖动画布
 
 ### 触控板操作
-- **双指捏合（侧边栏不可用）**：缩放画布
-- **Ctrl 等按键 + 双指滑动（兼容侧边栏）**：缩放
+- **双指捏合**：缩放画布
+- **Ctrl 等按键 + 双指滑动**：缩放（备用方式）
 - **双指滑动**：拖动画布
 
 ---
@@ -2780,8 +2785,8 @@ _快捷键可在左上角「管理」中自定义_
 - **Space + Left Click (hold)**: Drag canvas
 
 ### Touchpad Operations
-- **Pinch gesture (Unavailable in Side Panel)**: Zoom canvas
-- **Modifier (e.g., Ctrl) + swipe (Side Panel compatible)**: Smooth zoom
+- **Pinch gesture**: Zoom canvas
+- **Modifier (e.g., Ctrl) + swipe**: Zoom (fallback)
 - **Two-finger swipe**: Drag canvas
 
 ---
@@ -4055,6 +4060,7 @@ function insertTempItems(sectionId, parentId, items, index = null) {
 
     renderTempNode(section);
     saveTempNodes();
+    return items;
 }
 
 function removeTempItemsById(sectionId, itemIds) {
@@ -4197,8 +4203,9 @@ function extractTempItemsPayload(sectionId, itemIds) {
 
 function insertTempItemsFromPayload(sectionId, parentId, payloadItems, index = null) {
     const items = (payloadItems || []).map(item => createTempItemFromPayload(sectionId, item)).filter(Boolean);
-    if (!items.length) return;
+    if (!items.length) return [];
     insertTempItems(sectionId, parentId, items, index);
+    return items;
 }
 
 function createTempBookmark(sectionId, parentId, title, url) {
@@ -12195,7 +12202,20 @@ function __updateNodeMaximizedState() {
 function __notifyNodeFullscreenContextChange(targetElement = null) {
     try {
         const applySearchMode = window.__canvasApplyFullscreenSearchDefault;
-        if (typeof applySearchMode === 'function') {
+        let suppressAutoMode = false;
+        try {
+            const pendingCount = Number(window.__canvasSearchSuppressFullscreenAutoModeCounter || 0);
+            if (Number.isFinite(pendingCount) && pendingCount > 0) {
+                suppressAutoMode = true;
+                const nextCount = pendingCount - 1;
+                if (nextCount > 0) {
+                    window.__canvasSearchSuppressFullscreenAutoModeCounter = nextCount;
+                } else {
+                    delete window.__canvasSearchSuppressFullscreenAutoModeCounter;
+                }
+            }
+        } catch (_) { }
+        if (!suppressAutoMode && typeof applySearchMode === 'function') {
             applySearchMode(targetElement, { onlyWhenInputEmpty: true });
         }
     } catch (_) { }
