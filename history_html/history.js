@@ -2140,15 +2140,29 @@ const FaviconCache = {
     dbVersion: 1,
     storeName: 'favicons',
     failureStoreName: 'failures',
-    failureTtlMs: 24 * 60 * 60 * 1000,
-    requestTimeoutMs: 4000,
+    failureTtlMs: 10 * 60 * 1000,
+    requestTimeoutMs: 2200,
     maxFetchedBytes: 512 * 1024,
-    minFaviconDimensionPx: 96,
-    minFallbackFaviconDimensionPx: 32,
+    minFaviconDimensionPx: 16,
+    minFallbackFaviconDimensionPx: 16,
     minTerminalFallbackFaviconDimensionPx: 16,
-    browserFaviconSizeCandidates: [128, 96, 64],
-    publicFaviconSizeCandidates: [256, 192, 128, 96, 64],
-    googleS2SizeCandidates: [128, 64],
+    browserFaviconSizeCandidates: [16, 32, 64, 96, 128],
+    publicFaviconSizeCandidates: [64, 96, 128, 192, 256],
+    googleS2SizeCandidates: [64, 128],
+    cravatarSizeCandidates: [64, 128],
+    domesticBranchProbeWindowSize: 12,
+    domesticBranchHardFailureThreshold: 8,
+    domesticBranchConsecutiveHardFailureThreshold: 5,
+    networkBranchMode: 'overseas',
+    networkBranchLocked: false,
+    networkBranchPendingReevaluation: true,
+    networkBranchWindow: [],
+    networkBranchHardFailureCount: 0,
+    networkBranchConsecutiveHardFailureCount: 0,
+    networkBranchLastReevaluationAt: 0,
+    networkBranchReevaluationCooldownMs: 3000,
+    networkBranchSwitchReason: '',
+    networkBranchLastReevaluationReason: '',
     cacheQualityVersion: 8,
     cacheQualityVersionKey: 'bb_favicon_quality_version',
     firstInstallFastPathKey: 'bb_favicon_first_install_fast_path_done',
@@ -2156,7 +2170,7 @@ const FaviconCache = {
     memoryCache: new Map(), // {domain: faviconDataUrl}
     dimensionCache: new Map(), // {faviconDataUrl: {width, height}}
     visualProfileCache: new Map(), // {faviconDataUrl: visual profile}
-    failureCache: new Set(), // 失败的域名集合
+    failureCache: new Map(), // {domain: timestamp}
     pendingRequests: new Map(), // 正在请求的URL，避免重复请求
 
     // 初始化 IndexedDB
@@ -2321,6 +2335,28 @@ const FaviconCache = {
         return typeof dataUrl === 'string' && dataUrl.startsWith('data:image/');
     },
 
+    _markFailureDomain(domain, timestamp = Date.now()) {
+        if (!domain) return;
+        const ts = Number(timestamp) || Date.now();
+        this.failureCache.set(domain, ts);
+    },
+
+    _clearFailureDomain(domain) {
+        if (!domain) return;
+        this.failureCache.delete(domain);
+    },
+
+    _isFailureDomainActive(domain) {
+        if (!domain) return false;
+        const ts = Number(this.failureCache.get(domain) || 0);
+        if (!ts) return false;
+        if ((Date.now() - ts) < this.failureTtlMs) {
+            return true;
+        }
+        this.failureCache.delete(domain);
+        return false;
+    },
+
     // 从缓存获取favicon
     async get(url) {
         if (this.isInvalidUrl(url)) {
@@ -2332,7 +2368,7 @@ const FaviconCache = {
             const domain = urlObj.hostname;
 
             // 检查失败缓存
-            if (this.failureCache.has(domain)) {
+            if (this._isFailureDomainActive(domain)) {
                 return 'failed';
             }
 
@@ -2362,7 +2398,7 @@ const FaviconCache = {
                         // 检查失败缓存是否过期（默认 24 小时）
                         const age = Date.now() - failureRequest.result.timestamp;
                         if (age < this.failureTtlMs) {
-                            this.failureCache.add(domain);
+                            this._markFailureDomain(domain, failureRequest.result.timestamp);
                             resolve('failed');
                             return;
                         }
@@ -2424,7 +2460,7 @@ const FaviconCache = {
             });
 
             // 从失败缓存中移除（如果存在）
-            this.failureCache.delete(domain);
+            this._clearFailureDomain(domain);
             this.removeFailure(domain);
 
         } catch (e) {
@@ -2441,7 +2477,7 @@ const FaviconCache = {
             const domain = urlObj.hostname;
 
             // 更新内存缓存
-            this.failureCache.add(domain);
+            this._markFailureDomain(domain);
 
             // 保存到 IndexedDB
             if (!this.db) await this.init();
@@ -2484,7 +2520,7 @@ const FaviconCache = {
             this.memoryCache.delete(domain);
             this.dimensionCache.clear();
             this.visualProfileCache.clear();
-            this.failureCache.delete(domain);
+            this._clearFailureDomain(domain);
 
             // 清除 IndexedDB
             if (!this.db) await this.init();
@@ -2632,9 +2668,22 @@ const FaviconCache = {
         const safe = String(sourceUrl || '');
         if (safe.includes('icons.duckduckgo.com/ip3/')) return 'duckduckgo';
         if (safe.includes('faviconV2?client=SOCIAL')) return 'gstatic';
+        if (safe.includes('cn.cravatar.com/favicon/')) return 'cravatar';
         if (safe.includes('google.com/s2/favicons')) return 'google-s2';
         if (safe.includes('/_favicon/')) return 'browser';
         return 'other';
+    },
+
+    _getSourceTimeoutMs(sourceUrl = '', minDimensionPx = this.minFaviconDimensionPx) {
+        const sourceKind = this._classifyFaviconSource(sourceUrl);
+        const baseTimeout = Math.max(500, Number(this.requestTimeoutMs) || 2200);
+
+        if (sourceKind === 'duckduckgo') return Math.min(baseTimeout, 1200);
+        if (sourceKind === 'google-s2') return Math.min(baseTimeout, 1300);
+        if (sourceKind === 'gstatic') return Math.min(baseTimeout, 1500);
+        if (sourceKind === 'cravatar') return Math.min(baseTimeout, 1200);
+        if (sourceKind === 'browser') return Math.min(baseTimeout, 1000);
+        return baseTimeout;
     },
 
     _isWhitePlateProfile(profile) {
@@ -2664,20 +2713,37 @@ const FaviconCache = {
         if (sourceKind === 'duckduckgo') score += 8;
         else if (sourceKind === 'gstatic') score += 4;
         else if (sourceKind === 'google-s2') score += 3;
+        else if (sourceKind === 'cravatar') score += 2;
         else if (sourceKind === 'browser') score += 1;
 
         return score;
     },
 
-    async _buildFaviconCandidate(dataUrl, sourceUrl, minDimensionPx) {
+    async _buildFaviconCandidate(dataUrl, sourceUrl, minDimensionPx, options = {}) {
         if (!this.isStoredFaviconData(dataUrl)) return null;
-        const profile = await this.getDataUrlVisualProfile(dataUrl);
-        if (!profile) return null;
-        const sourceKind = this._classifyFaviconSource(sourceUrl);
-        const isWhitePlate = this._isWhitePlateProfile(profile);
-        const score = this._scoreFaviconCandidate(profile, sourceKind);
-        const minDimension = Math.max(0, Number(profile.minDimension || 0));
+        const dimensions = await this.getDataUrlDimensions(dataUrl);
+        if (!dimensions) return null;
+
+        const minDimension = Math.max(0, Math.min(
+            Number(dimensions.width) || 0,
+            Number(dimensions.height) || 0
+        ));
         const reachedMin = minDimension >= Math.max(1, Number(minDimensionPx) || 1);
+        const sourceKind = this._classifyFaviconSource(sourceUrl);
+        const includeVisualProfile = !!(options && options.includeVisualProfile === true);
+
+        let profile = null;
+        let isWhitePlate = false;
+        let score = minDimension;
+
+        if (includeVisualProfile) {
+            profile = await this.getDataUrlVisualProfile(dataUrl);
+            if (profile) {
+                isWhitePlate = this._isWhitePlateProfile(profile);
+                score = this._scoreFaviconCandidate(profile, sourceKind);
+            }
+        }
+
         return {
             dataUrl,
             sourceUrl,
@@ -2685,8 +2751,137 @@ const FaviconCache = {
             profile,
             score,
             isWhitePlate,
-            reachedMin
+            reachedMin,
+            minDimension,
+            width: Number(dimensions.width) || 0,
+            height: Number(dimensions.height) || 0
         };
+    },
+
+    async _selectBestCandidateWithConflictRule(candidates = []) {
+        const validCandidates = Array.isArray(candidates)
+            ? candidates.filter((candidate) => candidate && candidate.reachedMin)
+            : [];
+        if (validCandidates.length === 0) return null;
+
+        let topMinDimension = 0;
+        for (const candidate of validCandidates) {
+            const candidateMin = Math.max(0, Number(candidate.minDimension) || 0);
+            if (candidateMin > topMinDimension) topMinDimension = candidateMin;
+        }
+
+        const topCandidates = validCandidates.filter((candidate) => {
+            const candidateMin = Math.max(0, Number(candidate.minDimension) || 0);
+            return candidateMin === topMinDimension;
+        });
+
+        if (topCandidates.length <= 1) {
+            return topCandidates[0] || validCandidates[0];
+        }
+
+        let bestTransparentCandidate = null;
+        let bestNonWhiteCandidate = null;
+        let bestAnyCandidate = null;
+
+        for (const rawCandidate of topCandidates) {
+            const candidate = await this._buildFaviconCandidate(
+                rawCandidate.dataUrl,
+                rawCandidate.sourceUrl,
+                1,
+                { includeVisualProfile: true }
+            ) || rawCandidate;
+
+            if (!bestAnyCandidate || candidate.score > bestAnyCandidate.score) {
+                bestAnyCandidate = candidate;
+            }
+
+            if (candidate.isWhitePlate) {
+                continue;
+            }
+
+            if (!bestNonWhiteCandidate || candidate.score > bestNonWhiteCandidate.score) {
+                bestNonWhiteCandidate = candidate;
+            }
+
+            if (this._isTransparentPreferredProfile(candidate.profile)) {
+                if (!bestTransparentCandidate || candidate.score > bestTransparentCandidate.score) {
+                    bestTransparentCandidate = candidate;
+                }
+            }
+        }
+
+        return bestTransparentCandidate || bestNonWhiteCandidate || bestAnyCandidate || topCandidates[0] || validCandidates[0];
+    },
+
+    _normalizeNetworkBranchMode(mode = '') {
+        return String(mode || '').toLowerCase() === 'domestic' ? 'domestic' : 'overseas';
+    },
+
+    _resolveNetworkLanguageBucket() {
+        const normalizedCurrentLang = String((typeof currentLang === 'string' ? currentLang : '') || '').toLowerCase();
+        if (normalizedCurrentLang.startsWith('zh')) return 'zh';
+        try {
+            const uiLang = String(chrome?.i18n?.getUILanguage?.() || navigator?.language || '').toLowerCase();
+            return uiLang.startsWith('zh') ? 'zh' : 'non_zh';
+        } catch (_) {
+            return 'non_zh';
+        }
+    },
+
+    _resetNetworkBranchProbeStats() {
+        this.networkBranchWindow = [];
+        this.networkBranchHardFailureCount = 0;
+        this.networkBranchConsecutiveHardFailureCount = 0;
+    },
+
+    markNetworkBranchReevaluation(reason = '') {
+        this.networkBranchLastReevaluationReason = String(reason || '');
+        // no-op: branch selection is language-driven now.
+    },
+
+    requestNetworkBranchReevaluation(reason = '') {
+        this.networkBranchLastReevaluationAt = Date.now();
+        this.markNetworkBranchReevaluation(reason);
+        return false;
+    },
+
+    _resolveNetworkBranchForFetch() {
+        const languageBucket = this._resolveNetworkLanguageBucket();
+        const branchMode = languageBucket === 'zh' ? 'domestic' : 'overseas';
+        this.networkBranchMode = branchMode;
+        return branchMode;
+    },
+
+    _isHardFailureStatus(statusCode) {
+        const code = Number(statusCode);
+        if (!Number.isFinite(code)) return false;
+        if (code === 0 || code === 408) return true;
+        return code >= 500 && code <= 599;
+    },
+
+    _isHardFailureMeta(meta) {
+        if (!meta || typeof meta !== 'object') return false;
+        if (meta.hardFailure === true) return true;
+        if (this._isHardFailureStatus(meta.statusCode)) return true;
+        const errorCode = String(meta.errorCode || '').toLowerCase();
+        return errorCode === 'timeout'
+            || errorCode === 'abort'
+            || errorCode === 'network_error'
+            || errorCode === 'fetch_failed'
+            || errorCode === 'proxy_error'
+            || errorCode === 'http_0';
+    },
+
+    _switchToDomesticBranch(reason = '') {
+        this.networkBranchMode = 'domestic';
+        this.networkBranchLocked = true;
+        this.networkBranchPendingReevaluation = false;
+        this.networkBranchSwitchReason = String(reason || '');
+    },
+
+    _recordBranchProbeResult({ branchMode = '', sourceUrl = '', meta = null } = {}) {
+        // no-op: probe-based branch switching is disabled.
+        return;
     },
 
     // 获取favicon（带缓存和请求合并）
@@ -2710,7 +2905,8 @@ const FaviconCache = {
             const cacheMinDimension = requestedMinDimension > 0
                 ? Math.max(1, Number(options?.cacheMinDimensionPx) || fallbackMinDimension)
                 : 0;
-            const requestKey = `${domain}|${strictMinDimension}|${fallbackMinDimension}`;
+            const branchMode = this._resolveNetworkBranchForFetch();
+            const requestKey = `${domain}|${branchMode}|${strictMinDimension}|${fallbackMinDimension}`;
 
             // 1. 检查缓存
             const cached = await this.get(url);
@@ -2731,7 +2927,8 @@ const FaviconCache = {
             // 3. 发起新请求
             const requestPromise = this._fetchFavicon(url, {
                 strictMinDimensionPx: strictMinDimension,
-                fallbackMinDimensionPx: fallbackMinDimension
+                fallbackMinDimensionPx: fallbackMinDimension,
+                branchMode
             });
             this.pendingRequests.set(requestKey, requestPromise);
 
@@ -2747,9 +2944,9 @@ const FaviconCache = {
         }
     },
 
-    // 实际请求favicon - 多源降级策略
-    // 注意：优先走公共高分辨率源，浏览器内置 /_favicon/ 仅做最后兜底。
-    // 不直接请求网站的 /favicon.ico，避免某些站点返回 HTML 或认证页。
+    // 实际请求favicon - 语言分支固定瀑布策略：
+    // 中文分支：Cravatar -> /_favicon -> Google S2
+    // 非中文分支：Google S2 -> DuckDuckGo -> t3.gstatic.cn -> /_favicon
     async _fetchFavicon(url, options = {}) {
         return new Promise(async (resolve) => {
             try {
@@ -2771,13 +2968,14 @@ const FaviconCache = {
                     )
                 );
 
-                // 高质量优先策略（首轮）：
-                // gstatic.cn/faviconV2（大尺寸到小尺寸） -> DuckDuckGo -> Google S2 -> /_favicon/（最后兜底）
+                let activeBranchMode = this._normalizeNetworkBranchMode(options?.branchMode || this._resolveNetworkBranchForFetch());
+
                 const strictFaviconSources = this._buildFaviconSourceList(url, domain, {
-                    includeGoogleS2: true,
+                    branchMode: activeBranchMode,
                     minDimensionPx: strictMinDimension,
-                    maxPublicSizes: 2,
-                    maxGoogleSizes: 1,
+                    maxDomesticGstaticSizes: 2,
+                    maxOverseasGoogleSizes: 1,
+                    maxDomesticCravatarSizes: 1,
                     maxBrowserSizes: 1
                 });
 
@@ -2787,12 +2985,10 @@ const FaviconCache = {
                     return;
                 }
 
-                let bestTransparentCandidate = null;
-                let bestNonWhiteCandidate = null;
-                let bestAnyCandidate = null;
                 const attemptedSourceUrls = new Set();
+                let sawHardFailure = false;
 
-                const tryCandidateFromSource = async (faviconUrl, minDimensionPx) => {
+                const tryCandidateFromSource = async (faviconUrl, minDimensionPx, candidateBucket) => {
                     const minDimensionKey = Math.max(1, Number(minDimensionPx) || 1);
                     const attemptKey = `${faviconUrl}|${minDimensionKey}`;
                     if (!faviconUrl || attemptedSourceUrls.has(attemptKey)) {
@@ -2800,8 +2996,23 @@ const FaviconCache = {
                     }
                     attemptedSourceUrls.add(attemptKey);
 
-                    const result = await this._tryLoadFavicon(faviconUrl, minDimensionPx);
+                    const loadResult = await this._tryLoadFavicon(faviconUrl, minDimensionPx, {
+                        timeoutMs: this._getSourceTimeoutMs(faviconUrl, minDimensionPx)
+                    });
+                    this._recordBranchProbeResult({
+                        branchMode: activeBranchMode,
+                        sourceUrl: faviconUrl,
+                        meta: loadResult && loadResult.meta ? loadResult.meta : null
+                    });
+                    if (this._isHardFailureMeta(loadResult && loadResult.meta ? loadResult.meta : null)) {
+                        sawHardFailure = true;
+                    }
+
+                    const result = loadResult && typeof loadResult.dataUrl === 'string' ? loadResult.dataUrl : '';
                     if (!result || result === fallbackIcon) {
+                        if (activeBranchMode === 'overseas' && this.networkBranchMode === 'domestic') {
+                            return 'switch_branch';
+                        }
                         return false;
                     }
 
@@ -2810,52 +3021,60 @@ const FaviconCache = {
                         return false;
                     }
 
-                    if (!bestAnyCandidate || candidate.score > bestAnyCandidate.score) {
-                        bestAnyCandidate = candidate;
+                    if (Array.isArray(candidateBucket)) {
+                        candidateBucket.push(candidate);
                     }
-
-                    if (candidate.isWhitePlate) {
-                        return false;
-                    }
-
-                    if (!bestNonWhiteCandidate || candidate.score > bestNonWhiteCandidate.score) {
-                        bestNonWhiteCandidate = candidate;
-                    }
-
-                    if (this._isTransparentPreferredProfile(candidate.profile)) {
-                        if (!bestTransparentCandidate || candidate.score > bestTransparentCandidate.score) {
-                            bestTransparentCandidate = candidate;
-                        }
-                        return true;
-                    }
-
                     return false;
                 };
 
-                // 第一轮：质量优先（默认 >= 96）
-                for (const faviconUrl of strictFaviconSources) {
-                    const shouldStop = await tryCandidateFromSource(faviconUrl, strictMinDimension);
-                    if (shouldStop) break;
-                }
+                const runCandidateRound = async (sourceList, minDimensionPx, candidateBucket, options = {}) => {
+                    const safeList = Array.isArray(sourceList) ? sourceList : [];
+                    const parallelCount = Math.max(1, Number(options.parallelCount) || 1);
+                    const stopOnFirstCandidate = options.stopOnFirstCandidate !== false;
+
+                    for (let i = 0; i < safeList.length; i += parallelCount) {
+                        const chunk = safeList.slice(i, i + parallelCount);
+                        if (chunk.length === 0) break;
+                        const results = await Promise.all(
+                            chunk.map((sourceUrl) => tryCandidateFromSource(sourceUrl, minDimensionPx, candidateBucket))
+                        );
+                        if (results.includes('switch_branch')) return 'switch_branch';
+                        if (stopOnFirstCandidate && candidateBucket.length > 0) return 'found';
+                    }
+
+                    return candidateBucket.length > 0 ? 'found' : 'none';
+                };
+
+                // 第一轮：默认走极速链路（>=16）；高分辨率请求会自动拉高 strictMinDimension。
+                const strictCandidates = [];
+                await runCandidateRound(strictFaviconSources, strictMinDimension, strictCandidates, {
+                    parallelCount: 3,
+                    stopOnFirstCandidate: true
+                });
+
+                activeBranchMode = this._normalizeNetworkBranchMode(this.networkBranchMode || activeBranchMode);
+                const useFastFirstCandidate = strictMinDimension <= Math.max(16, Number(this.minFaviconDimensionPx) || 16);
+                let chosenCandidate = useFastFirstCandidate
+                    ? (strictCandidates[0] || null)
+                    : await this._selectBestCandidateWithConflictRule(strictCandidates);
 
                 // 第二轮：放宽到兜底阈值（默认 >= 32，拒绝 16x16）
-                if (!bestTransparentCandidate && fallbackMinDimension < strictMinDimension) {
-                    // 兜底轮继续保持 Google S2 在 /_favicon/ 前，浏览器内置源最后尝试。
+                if (!chosenCandidate && fallbackMinDimension < strictMinDimension) {
                     const fallbackFaviconSources = this._buildFaviconSourceList(url, domain, {
-                        includeGoogleS2: true,
-                        preferDuckDuckGoFirst: true,
+                        branchMode: activeBranchMode,
                         minDimensionPx: fallbackMinDimension,
-                        maxPublicSizes: 1,
-                        maxGoogleSizes: 1,
+                        maxDomesticGstaticSizes: 1,
+                        maxOverseasGoogleSizes: 1,
+                        maxDomesticCravatarSizes: 1,
                         maxBrowserSizes: 1
                     });
-                    for (const faviconUrl of fallbackFaviconSources) {
-                        const shouldStop = await tryCandidateFromSource(faviconUrl, fallbackMinDimension);
-                        if (shouldStop) break;
-                    }
+                    const fallbackCandidates = [];
+                    await runCandidateRound(fallbackFaviconSources, fallbackMinDimension, fallbackCandidates, {
+                        parallelCount: 2,
+                        stopOnFirstCandidate: true
+                    });
+                    chosenCandidate = await this._selectBestCandidateWithConflictRule(fallbackCandidates);
                 }
-
-                let chosenCandidate = bestTransparentCandidate || bestNonWhiteCandidate || bestAnyCandidate;
 
                 // 第三轮（终极兜底）：仅在前两轮都拿不到任何可用候选时，放宽到 >=16。
                 if (!chosenCandidate) {
@@ -2868,17 +3087,19 @@ const FaviconCache = {
                     );
                     if (terminalFallbackMinDimension < fallbackMinDimension) {
                         const terminalFallbackSources = this._buildFaviconSourceList(url, domain, {
-                            includeGoogleS2: true,
-                            preferDuckDuckGoFirst: true,
+                            branchMode: activeBranchMode,
                             minDimensionPx: terminalFallbackMinDimension,
-                            maxPublicSizes: 1,
-                            maxGoogleSizes: 1,
+                            maxDomesticGstaticSizes: 1,
+                            maxOverseasGoogleSizes: 1,
+                            maxDomesticCravatarSizes: 1,
                             maxBrowserSizes: 1
                         });
-                        for (const faviconUrl of terminalFallbackSources) {
-                            await tryCandidateFromSource(faviconUrl, terminalFallbackMinDimension);
-                        }
-                        chosenCandidate = bestTransparentCandidate || bestNonWhiteCandidate || bestAnyCandidate;
+                        const terminalCandidates = [];
+                        await runCandidateRound(terminalFallbackSources, terminalFallbackMinDimension, terminalCandidates, {
+                            parallelCount: 2,
+                            stopOnFirstCandidate: true
+                        });
+                        chosenCandidate = await this._selectBestCandidateWithConflictRule(terminalCandidates);
                     }
                 }
 
@@ -2889,12 +3110,13 @@ const FaviconCache = {
                 }
 
                 // 所有源都失败，记录失败并返回 fallback（静默）
-                this.saveFailure(url);
+                if (!sawHardFailure) {
+                    this.saveFailure(url);
+                }
                 resolve(fallbackIcon);
 
             } catch (e) {
                 // 静默处理错误
-                this.saveFailure(url);
                 resolve(fallbackIcon);
             }
         });
@@ -2913,12 +3135,13 @@ const FaviconCache = {
     },
 
     _buildFaviconSourceList(url, domain, options = {}) {
-        const includeGoogleS2 = !!(options && options.includeGoogleS2);
-        const preferDuckDuckGoFirst = !!(options && options.preferDuckDuckGoFirst);
+        const branchMode = this._normalizeNetworkBranchMode(options?.branchMode || this._resolveNetworkBranchForFetch());
         const minDimensionPx = Math.max(1, Number(options?.minDimensionPx) || 1);
-        const maxPublicSizes = Math.max(1, Number(options?.maxPublicSizes) || 2);
         const maxBrowserSizes = Math.max(1, Number(options?.maxBrowserSizes) || 1);
-        const maxGoogleSizes = Math.max(1, Number(options?.maxGoogleSizes) || 1);
+        const maxOverseasGoogleSizes = Math.max(1, Number(options?.maxOverseasGoogleSizes) || 1);
+        const maxDomesticGstaticSizes = Math.max(1, Number(options?.maxDomesticGstaticSizes) || 2);
+        const maxDomesticCravatarSizes = Math.max(1, Number(options?.maxDomesticCravatarSizes) || 1);
+
         const sources = [];
         const seen = new Set();
         const addSource = (sourceUrl) => {
@@ -2927,30 +3150,32 @@ const FaviconCache = {
             sources.push(sourceUrl);
         };
 
-        if (preferDuckDuckGoFirst) {
-            addSource(`https://icons.duckduckgo.com/ip3/${domain}.ico`);
-        }
+        const gstaticSizes = this._pickCandidateSizes(this.publicFaviconSizeCandidates, minDimensionPx, maxDomesticGstaticSizes);
+        const googleSizes = this._pickCandidateSizes(this.googleS2SizeCandidates, minDimensionPx, maxOverseasGoogleSizes);
+        const cravatarSizes = this._pickCandidateSizes(this.cravatarSizeCandidates, minDimensionPx, maxDomesticCravatarSizes);
+        const browserSizes = this._pickCandidateSizes(this.browserFaviconSizeCandidates, minDimensionPx, maxBrowserSizes);
 
-        const publicSizes = this._pickCandidateSizes(this.publicFaviconSizeCandidates, minDimensionPx, maxPublicSizes);
-        for (const size of publicSizes) {
-            addSource(this._getGstaticCnFaviconUrl(url, size));
-        }
-
-        if (!preferDuckDuckGoFirst) {
-            addSource(`https://icons.duckduckgo.com/ip3/${domain}.ico`);
-        }
-
-        if (includeGoogleS2) {
-            const googleSizes = this._pickCandidateSizes(this.googleS2SizeCandidates, minDimensionPx, maxGoogleSizes);
+        if (branchMode === 'domestic') {
+            for (const size of cravatarSizes) {
+                addSource(this._getCravatarFaviconUrl(domain, size));
+            }
+            for (const size of browserSizes) {
+                addSource(this._getBrowserFaviconServiceUrl(url, size));
+            }
             for (const size of googleSizes) {
                 addSource(this._getGoogleS2FaviconUrl(url, size));
             }
-        }
-
-        // /_favicon/ 始终最后兜底，减少前序公共源成功后仍触发内置源的概率。
-        const browserSizes = this._pickCandidateSizes(this.browserFaviconSizeCandidates, minDimensionPx, maxBrowserSizes);
-        for (const size of browserSizes) {
-            addSource(this._getBrowserFaviconServiceUrl(url, size));
+        } else {
+            for (const size of googleSizes) {
+                addSource(this._getGoogleS2FaviconUrl(url, size));
+            }
+            addSource(`https://icons.duckduckgo.com/ip3/${domain}.ico`);
+            for (const size of gstaticSizes) {
+                addSource(this._getGstaticCnFaviconUrl(url, size));
+            }
+            for (const size of browserSizes) {
+                addSource(this._getBrowserFaviconServiceUrl(url, size));
+            }
         }
 
         return sources;
@@ -2968,6 +3193,10 @@ const FaviconCache = {
 
     _getGstaticCnFaviconUrl(url, size = 128) {
         return `https://t3.gstatic.cn/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&size=${encodeURIComponent(size)}&url=${encodeURIComponent(url)}`;
+    },
+
+    _getCravatarFaviconUrl(domain, size = 64) {
+        return `https://cn.cravatar.com/favicon/api/index.php?url=${encodeURIComponent(domain)}&size=${encodeURIComponent(size)}`;
     },
 
     _getGoogleS2FaviconUrl(url, size = 64) {
@@ -3018,37 +3247,139 @@ const FaviconCache = {
         });
     },
 
-    async _fetchImageAsDataUrl(faviconUrl, minDimensionPx = this.minFaviconDimensionPx) {
+    async _fetchImageAsDataUrl(faviconUrl, minDimensionPx = this.minFaviconDimensionPx, options = {}) {
         try {
-            if (!browserAPI?.runtime?.sendMessage) return null;
-            const requiredDimension = Math.max(1, Number(minDimensionPx) || this.minFaviconDimensionPx);
-            const response = await browserAPI.runtime.sendMessage({
-                action: 'canvasFetchFaviconDataUrl',
-                url: String(faviconUrl || ''),
-                minDimensionPx: requiredDimension,
-                maxBytes: Number(this.maxFetchedBytes) || (512 * 1024),
-                timeoutMs: Number(this.requestTimeoutMs) || 4000
-            });
-            const dataUrl = response && response.success ? response.dataUrl : '';
-            if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
-                return dataUrl;
+            const timeoutMs = Math.max(500, Number(options?.timeoutMs) || Number(this.requestTimeoutMs) || 3000);
+            if (browserAPI?.runtime?.sendMessage) {
+                const requiredDimension = Math.max(1, Number(minDimensionPx) || this.minFaviconDimensionPx);
+                const response = await browserAPI.runtime.sendMessage({
+                    action: 'canvasFetchFaviconDataUrl',
+                    url: String(faviconUrl || ''),
+                    minDimensionPx: requiredDimension,
+                    maxBytes: Number(this.maxFetchedBytes) || (512 * 1024),
+                    timeoutMs,
+                    includeMeta: true
+                });
+
+                const dataUrl = response && response.success ? response.dataUrl : '';
+                const safeMeta = response && response.meta && typeof response.meta === 'object'
+                    ? response.meta
+                    : null;
+
+                if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
+                    return {
+                        dataUrl,
+                        meta: safeMeta || { attempted: true, hardFailure: false, errorCode: '' }
+                    };
+                }
+
+                return {
+                    dataUrl: '',
+                    meta: safeMeta || {
+                        attempted: true,
+                        hardFailure: false,
+                        errorCode: response && response.success === false ? 'proxy_error' : 'proxy_empty_result'
+                    }
+                };
             }
-            return null;
+        } catch (_) {
+            // 若后台代理不可用，回退到页面内 fetch 路径
+        }
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const response = await fetch(faviconUrl, {
+                signal: controller.signal
+            });
+
+            if (!response.ok) {
+                const statusCode = Number(response.status) || 0;
+                return {
+                    dataUrl: '',
+                    meta: {
+                        attempted: true,
+                        statusCode,
+                        hardFailure: this._isHardFailureStatus(statusCode),
+                        errorCode: `http_${statusCode || 0}`
+                    }
+                };
+            }
+
+            const contentType = (response.headers.get('content-type') || '').toLowerCase();
+            if (contentType && !contentType.startsWith('image/')) {
+                return {
+                    dataUrl: '',
+                    meta: { attempted: true, hardFailure: false, errorCode: 'non_image_content' }
+                };
+            }
+
+            const declaredLength = Number(response.headers.get('content-length') || 0);
+            if (Number.isFinite(declaredLength) && declaredLength > this.maxFetchedBytes) {
+                return {
+                    dataUrl: '',
+                    meta: { attempted: true, hardFailure: false, errorCode: 'payload_too_large' }
+                };
+            }
+
+            const blob = await response.blob();
+            if (!blob || blob.size === 0 || blob.size > this.maxFetchedBytes) {
+                return {
+                    dataUrl: '',
+                    meta: { attempted: true, hardFailure: false, errorCode: 'invalid_blob' }
+                };
+            }
+
+            const dimensions = await this._readBlobDimensions(blob);
+            const requiredDimension = Math.max(1, Number(minDimensionPx) || this.minFaviconDimensionPx);
+            if (!dimensions || dimensions.width < requiredDimension || dimensions.height < requiredDimension) {
+                return {
+                    dataUrl: '',
+                    meta: { attempted: true, hardFailure: false, errorCode: 'dimension_too_small' }
+                };
+            }
+
+            const dataUrl = await this._blobToDataUrl(blob);
+            return {
+                dataUrl,
+                meta: { attempted: true, hardFailure: false, statusCode: Number(response.status) || 200, errorCode: '' }
+            };
         } catch (e) {
-            return null;
+            const errorCode = e && e.name === 'AbortError' ? 'timeout' : 'fetch_failed';
+            return {
+                dataUrl: '',
+                meta: {
+                    attempted: true,
+                    hardFailure: errorCode === 'timeout' || errorCode === 'fetch_failed',
+                    errorCode
+                }
+            };
+        } finally {
+            clearTimeout(timeout);
         }
     },
 
     // 尝试从单个源加载 favicon，仅返回 dataURL，不在此阶段写缓存
-    async _tryLoadFavicon(faviconUrl, minDimensionPx = this.minFaviconDimensionPx) {
+    async _tryLoadFavicon(faviconUrl, minDimensionPx = this.minFaviconDimensionPx, options = {}) {
         try {
-            const dataUrl = await this._fetchImageAsDataUrl(faviconUrl, minDimensionPx);
-            if (!dataUrl) {
-                return null;
+            const result = await this._fetchImageAsDataUrl(faviconUrl, minDimensionPx, options);
+            const dataUrl = result && typeof result.dataUrl === 'string' ? result.dataUrl : '';
+            if (!dataUrl || !this.isStoredFaviconData(dataUrl)) {
+                return {
+                    dataUrl: '',
+                    meta: result && result.meta ? result.meta : { attempted: true, hardFailure: false, errorCode: 'empty_data_url' }
+                };
             }
-            return dataUrl;
+            return {
+                dataUrl,
+                meta: result && result.meta ? result.meta : { attempted: true, hardFailure: false, errorCode: '' }
+            };
         } catch (e) {
-            return null;
+            return {
+                dataUrl: '',
+                meta: { attempted: true, hardFailure: true, errorCode: 'fetch_failed' }
+            };
         }
     }
 };
@@ -4282,7 +4613,7 @@ function getFaviconUrl(url) {
         }
 
         // 检查失败缓存
-        if (FaviconCache.failureCache.has(domain)) {
+        if (FaviconCache._isFailureDomainActive(domain)) {
             return fallbackIcon;
         }
 
@@ -16219,7 +16550,7 @@ function setupRealtimeMessageListener() {
                                     Number(existingDimensions.height) || 0
                                 )
                                 : 0;
-                            if (existingMinDimension >= 32 && incomingMinDimension > 0 && incomingMinDimension < 32) {
+                            if (existingMinDimension > 0 && incomingMinDimension > 0 && incomingMinDimension < existingMinDimension) {
                                 return;
                             }
                         }

@@ -802,10 +802,22 @@ async function readBlobDimensions(blob) {
 }
 
 async function fetchImageAsDataUrl(url, options = {}) {
-  if (!url) return null;
+  if (!url) {
+    return options.includeMeta === true
+      ? { dataUrl: '', meta: { attempted: false, hardFailure: false, errorCode: 'invalid_url' } }
+      : null;
+  }
   const timeoutMs = Math.max(500, Number(options.timeoutMs) || 4000);
   const maxBytes = Math.max(1024, Number(options.maxBytes) || (512 * 1024));
   const minDimensionPx = Math.max(1, Number(options.minDimensionPx) || 1);
+  const includeMeta = options.includeMeta === true;
+  const wrap = (dataUrl, meta) => includeMeta ? { dataUrl, meta } : dataUrl;
+  const isHardFailureStatus = (statusCode) => {
+    const code = Number(statusCode);
+    if (!Number.isFinite(code)) return false;
+    if (code === 0 || code === 408) return true;
+    return code >= 500 && code <= 599;
+  };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => {
@@ -814,35 +826,78 @@ async function fetchImageAsDataUrl(url, options = {}) {
 
   try {
     const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const statusCode = Number(res.status) || 0;
+      return wrap('', {
+        attempted: true,
+        statusCode,
+        hardFailure: isHardFailureStatus(statusCode),
+        errorCode: `http_${statusCode || 0}`
+      });
+    }
 
     const contentType = String(res.headers.get('content-type') || '').toLowerCase();
     if (contentType && !contentType.startsWith('image/')) {
-      return null;
+      return wrap('', {
+        attempted: true,
+        statusCode: Number(res.status) || 200,
+        hardFailure: false,
+        errorCode: 'non_image_content'
+      });
     }
 
     const declaredLength = Number(res.headers.get('content-length') || 0);
     if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-      return null;
+      return wrap('', {
+        attempted: true,
+        statusCode: Number(res.status) || 200,
+        hardFailure: false,
+        errorCode: 'payload_too_large'
+      });
     }
 
     const blob = await res.blob();
     if (!blob || blob.size <= 0 || blob.size > maxBytes) {
-      return null;
+      return wrap('', {
+        attempted: true,
+        statusCode: Number(res.status) || 200,
+        hardFailure: false,
+        errorCode: 'invalid_blob'
+      });
     }
 
     const dimensions = await readBlobDimensions(blob);
     if (!dimensions || dimensions.width < minDimensionPx || dimensions.height < minDimensionPx) {
-      return null;
+      return wrap('', {
+        attempted: true,
+        statusCode: Number(res.status) || 200,
+        hardFailure: false,
+        errorCode: 'dimension_too_small'
+      });
     }
 
     const dataUrl = await blobToDataUrl(blob);
     if (!dataUrl || !dataUrl.startsWith('data:image/')) {
-      return null;
+      return wrap('', {
+        attempted: true,
+        statusCode: Number(res.status) || 200,
+        hardFailure: false,
+        errorCode: 'invalid_data_url'
+      });
     }
-    return dataUrl;
-  } catch (_) {
-    return null;
+    return wrap(dataUrl, {
+      attempted: true,
+      statusCode: Number(res.status) || 200,
+      hardFailure: false,
+      errorCode: ''
+    });
+  } catch (error) {
+    const errorCode = error && error.name === 'AbortError' ? 'timeout' : 'fetch_failed';
+    return wrap('', {
+      attempted: true,
+      hardFailure: true,
+      errorCode
+    });
   } finally {
     clearTimeout(timeout);
   }
@@ -2373,14 +2428,20 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       try {
         const url = typeof message.url === 'string' ? message.url : '';
-        const dataUrl = await fetchImageAsDataUrl(url, {
+        const includeMeta = message.includeMeta === true;
+        const dataResult = await fetchImageAsDataUrl(url, {
           minDimensionPx: Number(message.minDimensionPx) || 1,
           maxBytes: Number(message.maxBytes) || (512 * 1024),
-          timeoutMs: Number(message.timeoutMs) || 4000
+          timeoutMs: Number(message.timeoutMs) || 4000,
+          includeMeta
         });
+        const dataUrl = includeMeta
+          ? (dataResult && typeof dataResult.dataUrl === 'string' ? dataResult.dataUrl : '')
+          : (typeof dataResult === 'string' ? dataResult : '');
         sendResponse({
           success: true,
-          dataUrl: typeof dataUrl === 'string' ? dataUrl : ''
+          dataUrl,
+          meta: includeMeta && dataResult && typeof dataResult.meta === 'object' ? dataResult.meta : null
         });
       } catch (e) {
         sendResponse({ success: false, error: e?.message || String(e) });
