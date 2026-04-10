@@ -4262,6 +4262,48 @@
         return null;
     }
 
+    function enrichPermanentTreeRootIdentity(treeInput, options = {}) {
+        const normalizedTree = normalizeBookmarkTreeSnapshot(treeInput);
+        if (!normalizedTree) return null;
+
+        const protocolBridge = global && global.CanvasProtocolBridge
+            && typeof global.CanvasProtocolBridge.applyPermanentRootMetaToTreeSnapshot === 'function'
+            ? global.CanvasProtocolBridge
+            : null;
+        if (!protocolBridge) return normalizedTree;
+
+        let rootMeta = options && options.rootMeta && typeof options.rootMeta === 'object'
+            ? options.rootMeta
+            : null;
+        if (!rootMeta && typeof protocolBridge.readPermanentRootMeta === 'function') {
+            try {
+                rootMeta = protocolBridge.readPermanentRootMeta();
+            } catch (_) {
+                rootMeta = null;
+            }
+        }
+
+        const localTree = options && options.localTree
+            ? normalizeBookmarkTreeSnapshot(options.localTree)
+            : null;
+        if (!rootMeta && localTree && typeof protocolBridge.persistPermanentRootMetaFromTree === 'function') {
+            try {
+                rootMeta = protocolBridge.persistPermanentRootMetaFromTree(localTree);
+            } catch (_) {
+                rootMeta = null;
+            }
+        }
+
+        if (!rootMeta) return normalizedTree;
+
+        try {
+            const patchedTree = protocolBridge.applyPermanentRootMetaToTreeSnapshot(normalizedTree, rootMeta);
+            return normalizeBookmarkTreeSnapshot(patchedTree) || normalizedTree;
+        } catch (_) {
+            return normalizedTree;
+        }
+    }
+
     function extractBookmarkRootFolders(tree) {
         const root = Array.isArray(tree) && tree.length ? tree[0] : null;
         const roots = root && Array.isArray(root.children) ? root.children : [];
@@ -4745,6 +4787,137 @@
         };
     }
 
+    function collectBookmarkRootKindsForMapping(node, options = {}) {
+        return uniqueBookmarkRootStringList(
+            getBookmarkRootMatchKeys(node, options)
+                .map((key) => extractBookmarkRootKindForSort(key))
+                .filter((kind) => !!kind && kind !== 'custom:root')
+        );
+    }
+
+    function buildPermanentRootAssignmentPlanForOverwrite(localRootsInput, remoteRootsInput) {
+        const strictPlan = buildPermanentRootAssignmentPlan(localRootsInput, remoteRootsInput);
+        if (strictPlan && strictPlan.success === true) {
+            return Object.assign({}, strictPlan, {
+                strategy: 'strict'
+            });
+        }
+
+        const localRoots = (Array.isArray(localRootsInput) ? localRootsInput : []).filter(Boolean);
+        const remoteRoots = (Array.isArray(remoteRootsInput) ? remoteRootsInput : []).filter(Boolean);
+        if (!localRoots.length) {
+            return buildPermanentRootAssignmentPlanFailure(
+                'root-mapping-missing',
+                'No local roots found for overwrite mapping.'
+            );
+        }
+
+        const localFolderTypeCounts = buildBookmarkRootFolderTypeCounts(localRoots);
+        const remoteFolderTypeCounts = buildBookmarkRootFolderTypeCounts(remoteRoots);
+        const remoteEntries = remoteRoots.map((remoteRoot, remoteIndex) => ({
+            remoteRoot,
+            remoteIndex,
+            assigned: false,
+            keys: getBookmarkRootMatchKeys(remoteRoot, {
+                generalKeyMode: 'always',
+                folderTypeCounts: remoteFolderTypeCounts
+            }),
+            kinds: collectBookmarkRootKindsForMapping(remoteRoot, {
+                generalKeyMode: 'always',
+                folderTypeCounts: remoteFolderTypeCounts
+            })
+        }));
+
+        const takeRemoteEntry = (predicate) => {
+            for (let i = 0; i < remoteEntries.length; i++) {
+                const entry = remoteEntries[i];
+                if (!entry || entry.assigned) continue;
+                if (!predicate(entry)) continue;
+                entry.assigned = true;
+                return entry;
+            }
+            return null;
+        };
+
+        const assignments = [];
+        const unresolvedLocals = [];
+        for (let i = 0; i < localRoots.length; i++) {
+            const localRoot = localRoots[i];
+            if (!localRoot || !localRoot.id) continue;
+            const localKeys = getBookmarkRootMatchKeys(localRoot, {
+                generalKeyMode: 'always',
+                folderTypeCounts: localFolderTypeCounts
+            });
+            const localKinds = collectBookmarkRootKindsForMapping(localRoot, {
+                generalKeyMode: 'always',
+                folderTypeCounts: localFolderTypeCounts
+            });
+
+            let matchedRemoteEntry = null;
+            for (let k = 0; k < localKeys.length; k++) {
+                const key = localKeys[k];
+                matchedRemoteEntry = takeRemoteEntry((entry) => entry.keys.includes(key));
+                if (matchedRemoteEntry) break;
+            }
+            if (!matchedRemoteEntry) {
+                for (let k = 0; k < localKinds.length; k++) {
+                    const kind = localKinds[k];
+                    matchedRemoteEntry = takeRemoteEntry((entry) => entry.kinds.includes(kind));
+                    if (matchedRemoteEntry) break;
+                }
+            }
+
+            if (matchedRemoteEntry) {
+                assignments.push({
+                    localRoot,
+                    remoteRoot: matchedRemoteEntry.remoteRoot,
+                    localIndex: i,
+                    remoteIndex: matchedRemoteEntry.remoteIndex,
+                    mappingMode: 'relaxed-match'
+                });
+                continue;
+            }
+
+            unresolvedLocals.push({
+                localRoot,
+                localIndex: i
+            });
+        }
+
+        for (let i = 0; i < unresolvedLocals.length; i++) {
+            const entry = unresolvedLocals[i];
+            let matchedRemoteEntry = takeRemoteEntry((candidate) => candidate.remoteIndex === entry.localIndex);
+            if (!matchedRemoteEntry) {
+                matchedRemoteEntry = takeRemoteEntry(() => true);
+            }
+            assignments.push({
+                localRoot: entry.localRoot,
+                remoteRoot: matchedRemoteEntry ? matchedRemoteEntry.remoteRoot : null,
+                localIndex: entry.localIndex,
+                remoteIndex: matchedRemoteEntry ? matchedRemoteEntry.remoteIndex : -1,
+                mappingMode: matchedRemoteEntry ? 'index-fallback' : 'empty-fallback'
+            });
+        }
+
+        assignments.sort((a, b) => Number(a.localIndex) - Number(b.localIndex));
+        const remainingRemoteRoots = remoteEntries.filter((entry) => entry && !entry.assigned);
+
+        return {
+            success: true,
+            assignments,
+            strategy: 'relaxed-overwrite',
+            strictErrorCode: String(strictPlan && strictPlan.errorCode || 'root-mapping-failed'),
+            strictErrorDetails: strictPlan && strictPlan.errorDetails && typeof strictPlan.errorDetails === 'object'
+                ? strictPlan.errorDetails
+                : null,
+            unresolvedLocalCount: unresolvedLocals.length,
+            unresolvedRemoteCount: remainingRemoteRoots.length,
+            unresolvedRemoteFolderTypes: uniqueBookmarkRootStringList(
+                remainingRemoteRoots.flatMap((entry) => collectCandidateBookmarkRootFolderTypes(entry && entry.remoteRoot))
+            )
+        };
+    }
+
     function createPermanentRootAssignmentPlanError(planResult) {
         const code = String(planResult && planResult.errorCode || 'root-mapping-failed').trim() || 'root-mapping-failed';
         const message = textByLang(
@@ -4855,7 +5028,7 @@
 	    // - full sync when winner resolves to remote pull
 	    // - conflict panel -> use remote (via force=true)
 	    async function maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(remoteTreeSnapshot, reason, options = {}) {
-	        const remoteTree = normalizeBookmarkTreeSnapshot(remoteTreeSnapshot);
+	        let remoteTree = normalizeBookmarkTreeSnapshot(remoteTreeSnapshot);
 	        if (!remoteTree) {
 	            return { applied: false, skipped: 'remote-missing' };
 	        }
@@ -4870,7 +5043,7 @@
 	            } catch (_) { }
 	        };
 
-	        const remoteStats = getBookmarkTreeStats(remoteTree);
+	        let remoteStats = getBookmarkTreeStats(remoteTree);
 	        const remoteTotal = (remoteStats.folders || 0) + (remoteStats.bookmarks || 0);
 	        if (!remoteStats.roots || remoteTotal <= 0) {
 	            return { applied: false, skipped: 'remote-empty' };
@@ -4881,6 +5054,11 @@
 	        if (!localTree) {
 	            throw new Error(textByLang('读取本地永久栏目失败：书签树为空', 'Failed to read local permanent section: bookmark tree is empty'));
 	        }
+
+	        remoteTree = enrichPermanentTreeRootIdentity(remoteTree, {
+	            localTree
+	        }) || remoteTree;
+	        remoteStats = getBookmarkTreeStats(remoteTree);
 
 	        const localStats = getBookmarkTreeStats(localTree);
 	        const localHash = getBookmarkTreeHash(localTree);
@@ -5335,7 +5513,7 @@
     }
 
     async function applyIncrementalPermanentTreeFromSnapshot(treeSnapshot, localTreeSnapshot = null, options = {}) {
-        const remoteTree = normalizeBookmarkTreeSnapshot(treeSnapshot);
+        let remoteTree = normalizeBookmarkTreeSnapshot(treeSnapshot);
         if (!remoteTree) {
             return { applied: false, fallback: 'remote-missing' };
         }
@@ -5345,6 +5523,10 @@
         if (!localRoots.length) {
             throw new Error(textByLang('本地书签根目录不可用，无法增量同步', 'Local bookmark root is unavailable; cannot run incremental sync'));
         }
+
+        remoteTree = enrichPermanentTreeRootIdentity(remoteTree, {
+            localTree
+        }) || remoteTree;
 
         const plan = buildPermanentIncrementalSyncPlan(localTree, remoteTree);
         const threshold = buildPermanentIncrementalThreshold(localTree, remoteTree);
@@ -5390,7 +5572,7 @@
     }
 
 	    async function overwriteLocalPermanentTreeFromSnapshot(treeSnapshot, localTreeSnapshot = null, options = {}) {
-	        const remoteTree = normalizeBookmarkTreeSnapshot(treeSnapshot);
+	        let remoteTree = normalizeBookmarkTreeSnapshot(treeSnapshot);
 	        if (!remoteTree) {
 	            throw new Error(textByLang('云端未提供永久栏目快照，无法覆盖', 'Remote permanent section snapshot is missing; cannot overwrite'));
 	        }
@@ -5401,14 +5583,27 @@
 	            throw new Error(textByLang('本地书签根目录不可用，无法覆盖', 'Local bookmark root is unavailable; cannot overwrite'));
 	        }
 
+        remoteTree = enrichPermanentTreeRootIdentity(remoteTree, {
+            localTree
+        }) || remoteTree;
+
         const remoteRoots = extractBookmarkRootFolders(remoteTree);
-        const assignmentPlan = buildPermanentRootAssignmentPlan(localRoots, remoteRoots);
+        const assignmentPlan = buildPermanentRootAssignmentPlanForOverwrite(localRoots, remoteRoots);
         if (!assignmentPlan || assignmentPlan.success !== true) {
             throw createPermanentRootAssignmentPlanError(assignmentPlan);
         }
 
         return await withPermanentTreeBulkMode(options && options.reason || 'sync-permanent-overwrite', async () => {
-            const counters = { folders: 0, bookmarks: 0 };
+            const counters = {
+                folders: 0,
+                bookmarks: 0,
+                assignmentStrategy: String(assignmentPlan && assignmentPlan.strategy || 'strict')
+            };
+            if (assignmentPlan && assignmentPlan.strategy === 'relaxed-overwrite') {
+                counters.assignmentFallbackReason = String(assignmentPlan.strictErrorCode || 'root-mapping-failed');
+                counters.unresolvedLocalCount = Number(assignmentPlan.unresolvedLocalCount) || 0;
+                counters.unresolvedRemoteCount = Number(assignmentPlan.unresolvedRemoteCount) || 0;
+            }
             const assignments = Array.isArray(assignmentPlan.assignments) ? assignmentPlan.assignments : [];
             for (let i = 0; i < assignments.length; i++) {
                 const assignment = assignments[i];

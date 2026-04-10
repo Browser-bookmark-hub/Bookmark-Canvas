@@ -32340,47 +32340,105 @@ function __rebuildPermanentTreeSnapshotFromSyncFolderFiles(folderFiles) {
     const readFileTextByPath = fileLookupHelpers && typeof fileLookupHelpers.readFileTextByPath === 'function'
         ? fileLookupHelpers.readFileTextByPath
         : () => '';
-    const candidates = [];
+    const permanentPathCandidates = [];
+    const genericCandidates = [];
 
     for (const [name, bytes] of files.entries()) {
         const path = String(name || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/g, '').replace(/\/+/g, '/');
-        if (!path || !/\.(md|json)$/i.test(path) || !__isPermanentMarkdownPath(path)) continue;
+        if (!path || !/\.(md|json)$/i.test(path)) continue;
         if (!(bytes instanceof Uint8Array) || !bytes.length) continue;
-        candidates.push({ path, bytes });
+        if (__isPermanentMarkdownPath(path)) {
+            permanentPathCandidates.push({ path, bytes, sourcePriority: 0 });
+            continue;
+        }
+        genericCandidates.push({ path, bytes, sourcePriority: 1 });
     }
 
-    if (!candidates.length) {
+    if (!permanentPathCandidates.length && !genericCandidates.length) {
         return null;
     }
 
-    const decodedCandidates = [];
-    candidates
-        .sort((left, right) => String(left.path || '').localeCompare(String(right.path || '')))
-        .forEach((entry, index) => {
-            try {
-                const fileText = new TextDecoder('utf-8').decode(entry.bytes);
-                const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
-                decodedCandidates.push({
-                    path: entry.path,
-                    slot: __resolvePermanentSectionSlotForImport(parsedMarkdown, entry.path, index + 1),
-                    contentToParse: parsedMarkdown && typeof parsedMarkdown.contentToParse === 'string'
-                        ? parsedMarkdown.contentToParse
-                        : '',
-                    rootMeta: parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
-                });
-            } catch (_) { }
-        });
+    const isLikelyPermanentPayload = (parsedMarkdown, path = '') => {
+        const jsonProtocol = parsedMarkdown && parsedMarkdown.jsonProtocol && typeof parsedMarkdown.jsonProtocol === 'object'
+            ? parsedMarkdown.jsonProtocol
+            : null;
+        if (jsonProtocol && jsonProtocol.sectionType === 'permanent') return true;
+        if (__isPermanentMarkdownPath(path)) return true;
 
+        const rootMeta = parsedMarkdown && parsedMarkdown.rootMeta && typeof parsedMarkdown.rootMeta === 'object'
+            ? parsedMarkdown.rootMeta
+            : null;
+        const hasRootMeta = !!(
+            rootMeta
+            && (
+                (Array.isArray(rootMeta.rootDescriptors) && rootMeta.rootDescriptors.length > 0)
+                || (rootMeta.standardRoots && typeof rootMeta.standardRoots === 'object' && Object.keys(rootMeta.standardRoots).length > 0)
+            )
+        );
+        if (hasRootMeta) return true;
+
+        const headerLine = String(parsedMarkdown && parsedMarkdown.headerLine || '').trim();
+        const hasPermanentSlotHeader = /^#[A-Za-z]+(?:\s+|$)/.test(headerLine);
+        const contentToParse = String(parsedMarkdown && parsedMarkdown.contentToParse || '');
+        const hasSectionHeading = /^##\s+.+$/m.test(contentToParse);
+        return hasPermanentSlotHeader && hasSectionHeading;
+    };
+
+    const decodeCandidates = (entries, options = {}) => {
+        const decoded = [];
+        const requireLikelyPermanent = !!(options && options.requireLikelyPermanent);
+        entries
+            .slice()
+            .sort((left, right) => String(left.path || '').localeCompare(String(right.path || '')))
+            .forEach((entry, index) => {
+                try {
+                    const fileText = new TextDecoder('utf-8').decode(entry.bytes);
+                    const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
+                    if (requireLikelyPermanent && !isLikelyPermanentPayload(parsedMarkdown, entry.path)) {
+                        return;
+                    }
+                    decoded.push({
+                        path: entry.path,
+                        sourcePriority: Number(entry.sourcePriority) || 0,
+                        slot: __resolvePermanentSectionSlotForImport(parsedMarkdown, entry.path, index + 1),
+                        contentToParse: parsedMarkdown && typeof parsedMarkdown.contentToParse === 'string'
+                            ? parsedMarkdown.contentToParse
+                            : '',
+                        rootMeta: parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
+                    });
+                } catch (_) { }
+            });
+        return decoded;
+    };
+
+    let decodedCandidates = decodeCandidates(permanentPathCandidates, {
+        requireLikelyPermanent: false
+    });
+    if (!decodedCandidates.length) {
+        decodedCandidates = decodeCandidates(genericCandidates, {
+            requireLikelyPermanent: true
+        });
+    }
+    if (!decodedCandidates.length) {
+        decodedCandidates = decodeCandidates(
+            permanentPathCandidates.concat(genericCandidates),
+            { requireLikelyPermanent: true }
+        );
+    }
     if (!decodedCandidates.length) {
         return null;
     }
 
-    decodedCandidates.sort((left, right) => {
-        const leftSlot = Number(left && left.slot) || Number.MAX_SAFE_INTEGER;
-        const rightSlot = Number(right && right.slot) || Number.MAX_SAFE_INTEGER;
-        if (leftSlot !== rightSlot) return leftSlot - rightSlot;
-        return String(left && left.path || '').localeCompare(String(right && right.path || ''));
-    });
+    decodedCandidates = decodedCandidates
+        .sort((left, right) => {
+            const leftPriority = Number(left && left.sourcePriority) || 0;
+            const rightPriority = Number(right && right.sourcePriority) || 0;
+            if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+            const leftSlot = Number(left && left.slot) || Number.MAX_SAFE_INTEGER;
+            const rightSlot = Number(right && right.slot) || Number.MAX_SAFE_INTEGER;
+            if (leftSlot !== rightSlot) return leftSlot - rightSlot;
+            return String(left && left.path || '').localeCompare(String(right && right.path || ''));
+        });
 
     const tryBuildFromEntry = (entry) => {
         if (!entry || typeof entry !== 'object') return null;
