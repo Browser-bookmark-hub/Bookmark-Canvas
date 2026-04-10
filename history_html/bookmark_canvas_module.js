@@ -1791,12 +1791,12 @@ const TRACKPAD_ZOOM_RATE_MAX = 3.0;
 const TRACKPAD_ZOOM_RATE_DEFAULT = 1.0;
 const TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER = 3.0;
 const TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR = 100;
-const TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER = 0.34;
-const TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN = 0.26;
-const TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX = 0.72;
-const TRACKPAD_ZOOM_STEP_CAP_MIN = 1.015;
-const TRACKPAD_ZOOM_STEP_CAP_MAX = 1.07;
-const TRACKPAD_ZOOM_IDLE_RESET_MS = 96;
+const TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER = 0.40;
+const TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN = 0.42;
+const TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX = 0.90;
+const TRACKPAD_ZOOM_STEP_CAP_MIN = 1.02;
+const TRACKPAD_ZOOM_STEP_CAP_MAX = 1.12;
+const TRACKPAD_ZOOM_IDLE_RESET_MS = 64;
 const ZOOM_INPUT_TOUCHPAD_DELTA_MAX = 10;
 const ZOOM_INPUT_WHEEL_DELTA_MIN = 24;
 const ZOOM_INPUT_MODE_STICKY_MS = 180;
@@ -8317,38 +8317,45 @@ function resolveCanvasZoomInputMode(event) {
     return mode;
 }
 
-function getCanvasTrackpadZoomFactor(rawDelta, displayZoom) {
+function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
     const delta = Number(rawDelta);
     if (!Number.isFinite(delta) || delta === 0) return 1;
 
     const absDelta = Math.abs(delta);
     const rateFactor = getCanvasTrackpadZoomRate() * TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER;
 
-    // 应用用户配置/默认的曲线缩放系数，保持与滚轮手感一致
-    const curveFactor = getCanvasZoomSpeedFactor(displayZoom || 1);
-
     // 与 Chromium 的 pinch->wheel 映射保持一致：scale = exp(-deltaY / 100)
     // 这里 rawDelta = -deltaY，因此 nativeLogDelta = rawDelta / 100
     const nativeLogDelta = delta / TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR;
-    let targetLogDelta = nativeLogDelta * rateFactor * curveFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER;
-
-    let magnet = null;
-    if (displayZoom) {
-        const nextDisplayZoomNoMagnet = displayZoom * Math.exp(targetLogDelta);
-        magnet = getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoomNoMagnet);
-        targetLogDelta *= magnet.factor;
-    }
+    // 触控板捏合保持独立：仅使用触控板速率 + 手感系数，不叠加滚轮曲线/磁矩
+    let targetLogDelta = nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER;
 
     const prevLogDelta = Number.isFinite(CanvasState.touchpadState.lastZoomDelta)
         ? CanvasState.touchpadState.lastZoomDelta
         : 0;
-    const alpha = Math.max(
+
+    // 方向切换时快速衰减残留，避免“反向捏合被黏住”的阻尼感
+    const hasPrev = Math.abs(prevLogDelta) > 0.000001;
+    const hasTarget = Math.abs(targetLogDelta) > 0.000001;
+    const directionFlip = hasPrev && hasTarget && ((prevLogDelta > 0) !== (targetLogDelta > 0));
+    const carriedPrev = directionFlip ? (prevLogDelta * 0.22) : prevLogDelta;
+
+    const alphaBase = Math.max(
         TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN,
-        Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, absDelta / 18)
+        Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, 0.42 + absDelta / 20)
     );
-    const smoothedLogDelta = Math.abs(prevLogDelta) > 0.000001
-        ? prevLogDelta + (targetLogDelta - prevLogDelta) * alpha
+    const alpha = directionFlip
+        ? Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, alphaBase + 0.16)
+        : alphaBase;
+
+    let smoothedLogDelta = hasPrev
+        ? carriedPrev + (targetLogDelta - carriedPrev) * alpha
         : targetLogDelta;
+
+    // 手势趋近停止时快速贴近目标，避免尾巴拖拽造成“粘手”
+    if (Math.abs(targetLogDelta) < 0.0025 && Math.abs(smoothedLogDelta) < 0.0045) {
+        smoothedLogDelta = targetLogDelta;
+    }
 
     CanvasState.touchpadState.lastZoomDelta = smoothedLogDelta;
     if (CanvasState.touchpadState.zoomDeltaTimer) {
@@ -8362,14 +8369,8 @@ function getCanvasTrackpadZoomFactor(rawDelta, displayZoom) {
     let zoomFactor = Math.exp(smoothedLogDelta);
     let stepCap = Math.max(
         TRACKPAD_ZOOM_STEP_CAP_MIN,
-        Math.min(TRACKPAD_ZOOM_STEP_CAP_MAX, 1.02 + Math.min(16, absDelta) / 320)
+        Math.min(TRACKPAD_ZOOM_STEP_CAP_MAX, 1.022 + Math.min(24, absDelta) / 260)
     );
-
-    // 如果靠近磁矩点，限制单次最大步进，避免“一步跨过缓慢区”
-    if (magnet && magnet.strength > 0) {
-        const magnetCap = Math.max(1.01, Math.min(1.06, 1.06 - 0.05 * magnet.strength));
-        if (stepCap > magnetCap) stepCap = magnetCap;
-    }
 
     if (zoomFactor > stepCap) zoomFactor = stepCap;
     if (zoomFactor < (1 / stepCap)) zoomFactor = 1 / stepCap;
@@ -43026,7 +43027,7 @@ function createCanvasOtherSettingsModal() {
                     <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? 'Zoom Speed & Magnet' : '缩放速率与磁矩'}</div>
                     <div class="other-zoom-input-title other-zoom-input-title-trackpad">${isEn ? '1. Trackpad' : '1. 触控板'} <span class="other-zoom-input-title-note" style="margin-left:8px;font-size:12px;color:rgba(var(--text-color-rgb),0.5);font-weight:normal;">${isEn ? '(Pinch)' : '（双指捏合）'}</span></div>
                     <div class="appearance-row other-sub-row other-trackpad-speed-row">
-                        <div class="appearance-row-label">${isEn ? 'Smooth average speed' : '平滑平均速率'}</div>
+                        <div class="appearance-row-label">${isEn ? 'Smooth average speed (independent)' : '平滑平均速率（独立于滚动曲线/磁矩）'}</div>
                         <div class="appearance-row-content appearance-row-content-inline">
                             <input
                                 type="number"
