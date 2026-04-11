@@ -4634,6 +4634,33 @@ function getFaviconUrl(url) {
     }
 }
 
+function resolveFaviconBindingUrlFromElement(element) {
+    if (!element) return '';
+
+    const readFrom = (node) => {
+        if (!node) return '';
+        if (node.dataset) {
+            if (node.dataset.bookmarkUrl) return node.dataset.bookmarkUrl;
+            if (node.dataset.nodeUrl) return node.dataset.nodeUrl;
+            if (node.dataset.url) return node.dataset.url;
+        }
+        if (typeof node.getAttribute === 'function') {
+            return node.getAttribute('data-bookmark-url')
+                || node.getAttribute('data-node-url')
+                || node.getAttribute('data-url')
+                || '';
+        }
+        return '';
+    };
+
+    let itemUrl = readFrom(element);
+    if (!itemUrl && typeof element.closest === 'function') {
+        const item = element.closest('[data-node-url], [data-bookmark-url], [data-url]');
+        itemUrl = readFrom(item);
+    }
+    return typeof itemUrl === 'string' ? itemUrl.trim() : '';
+}
+
 // 更新页面上所有指定URL的favicon图片
 function updateFaviconImages(url, dataUrl) {
     let updatedCount = 0;
@@ -4641,55 +4668,41 @@ function updateFaviconImages(url, dataUrl) {
         const urlObj = new URL(url);
         const domain = urlObj.hostname;
 
-        // 查找所有相关的img标签（通过data-favicon-domain或父元素的data-node-url/data-bookmark-url）
-        const allImages = document.querySelectorAll('img.tree-icon, img.canvas-bookmark-icon, img.search-result-favicon');
+        const allImages = document.querySelectorAll(
+            'img.tree-icon, img.canvas-bookmark-icon, img.search-result-favicon, img[data-bookmark-url], img[data-node-url], img[data-url]'
+        );
 
         allImages.forEach(img => {
-            // 优先检查 img 元素自身的 data-bookmark-url 属性（搜索结果场景）
-            let itemUrl = img.dataset.bookmarkUrl;
+            const itemUrl = resolveFaviconBindingUrlFromElement(img);
+            if (!itemUrl) return;
 
-            // 如果 img 自身没有，再检查父元素
-            if (!itemUrl) {
-                const item = img.closest('[data-node-url], [data-bookmark-url]');
-                if (item) {
-                    itemUrl = item.dataset.nodeUrl || item.dataset.bookmarkUrl;
-                }
-            }
+            try {
+                const itemDomain = new URL(itemUrl).hostname;
+                if (itemDomain !== domain) return;
 
-            if (itemUrl) {
-                try {
-                    const itemDomain = new URL(itemUrl).hostname;
-                    if (itemDomain === domain) {
-                        // 更新图标
-                        img.src = dataUrl;
-
-                        // 如果图片之前是隐藏的（被黄色书签图标替代），现在显示它
-                        if (img.style.display === 'none') {
-                            img.style.display = '';
-                            // 隐藏相邻的 fallback 图标（可能是 previousSibling 或在同一父容器中）
-                            const prevSibling = img.previousElementSibling;
-                            if (prevSibling && prevSibling.classList.contains('search-result-icon-box-inline')) {
-                                prevSibling.style.display = 'none';
-                            } else {
-                                // 在父容器中查找 fallback 图标
-                                const parent = img.parentElement;
-                                if (parent) {
-                                    const fallbackIcon = parent.querySelector('.search-result-icon-box-inline');
-                                    if (fallbackIcon) {
-                                        fallbackIcon.style.display = 'none';
-                                    }
-                                }
+                img.src = dataUrl;
+                if (img.style.display === 'none') {
+                    img.style.display = '';
+                    const prevSibling = img.previousElementSibling;
+                    if (prevSibling && prevSibling.classList.contains('search-result-icon-box-inline')) {
+                        prevSibling.style.display = 'none';
+                    } else {
+                        const parent = img.parentElement;
+                        if (parent) {
+                            const inlineFallbackIcon = parent.querySelector('.search-result-icon-box-inline');
+                            if (inlineFallbackIcon) {
+                                inlineFallbackIcon.style.display = 'none';
                             }
                         }
-
-                        updatedCount++;
                     }
-                } catch (e) {
-                    // 忽略无效URL
                 }
+
+                updatedCount++;
+            } catch (_) {
+                // 忽略无效URL
             }
         });
-    } catch (e) {
+    } catch (_) {
         // 静默处理
     }
     return updatedCount;
@@ -4830,8 +4843,8 @@ const i18n = {
         'en': 'No previous fullscreen card found'
     },
     quickAddCurrentTitle: {
-        'zh_CN': '当前页面',
-        'en': 'Current Page'
+        'zh_CN': '当前页 | 选中标签页',
+        'en': 'Current | Selected Tabs'
     },
     quickAddWindowTitle: {
         'zh_CN': '当前窗口全部',
@@ -8699,20 +8712,50 @@ function queryTabs(params) {
     });
 }
 
+function sortQuickAddTabsByIndex(tabs) {
+    const list = Array.isArray(tabs) ? tabs.slice() : [];
+    list.sort((left, right) => {
+        const leftIndex = (left && typeof left.index === 'number') ? left.index : Number.MAX_SAFE_INTEGER;
+        const rightIndex = (right && typeof right.index === 'number') ? right.index : Number.MAX_SAFE_INTEGER;
+        if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+        const leftId = (left && typeof left.id === 'number') ? left.id : Number.MAX_SAFE_INTEGER;
+        const rightId = (right && typeof right.id === 'number') ? right.id : Number.MAX_SAFE_INTEGER;
+        return leftId - rightId;
+    });
+    return list;
+}
+
+function dedupeQuickAddTabs(tabs) {
+    const sortedTabs = sortQuickAddTabsByIndex(tabs);
+    const seen = new Set();
+    const deduped = [];
+    sortedTabs.forEach((tab) => {
+        if (!tab) return;
+        const key = (typeof tab.id === 'number')
+            ? `id:${tab.id}`
+            : `${String(tab.url || tab.pendingUrl || '')}|${typeof tab.index === 'number' ? tab.index : ''}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        deduped.push(tab);
+    });
+    return deduped;
+}
+
 async function getActiveTabList() {
-    const tabs = await queryTabs({ active: true, currentWindow: true });
-    const activeTab = tabs[0];
+    const highlightedTabs = dedupeQuickAddTabs(await queryTabs({ highlighted: true, currentWindow: true }));
+    if (highlightedTabs.length > 1) {
+        return highlightedTabs;
+    }
+
+    const activeTabs = dedupeQuickAddTabs(await queryTabs({ active: true, currentWindow: true }));
+    const activeTab = activeTabs[0] || highlightedTabs[0] || null;
     if (!activeTab) return [];
 
     const groupId = typeof activeTab.groupId === 'number' ? activeTab.groupId : -1;
     if (groupId >= 0) {
-        const groupedTabs = await queryTabs({ currentWindow: true, groupId });
+        const groupedTabs = dedupeQuickAddTabs(await queryTabs({ currentWindow: true, groupId }));
         if (groupedTabs.length) {
-            return groupedTabs.sort((left, right) => {
-                const leftIndex = typeof left.index === 'number' ? left.index : 0;
-                const rightIndex = typeof right.index === 'number' ? right.index : 0;
-                return leftIndex - rightIndex;
-            });
+            return groupedTabs;
         }
     }
 
@@ -8721,11 +8764,7 @@ async function getActiveTabList() {
 
 async function getCurrentWindowTabs() {
     const tabs = await queryTabs({ currentWindow: true, windowType: 'normal' });
-    return tabs.sort((left, right) => {
-        const leftIndex = typeof left.index === 'number' ? left.index : 0;
-        const rightIndex = typeof right.index === 'number' ? right.index : 0;
-        return leftIndex - rightIndex;
-    });
+    return dedupeQuickAddTabs(tabs);
 }
 
 async function normalizeTabsForQuickAdd(tabs) {

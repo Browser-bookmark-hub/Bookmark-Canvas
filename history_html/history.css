@@ -4544,7 +4544,16 @@ html.side-panel-mode #bookmarkAddSecondaryModal .modal-body {
     grid-column: 1 / -1;
 }
 
+.bookmark-add-secondary-choice-current-tabs {
+    grid-column: 1 / -1;
+}
+
 .bookmark-add-secondary-choice-window .bookmark-add-secondary-choice-label {
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.bookmark-add-secondary-choice-current-tabs .bookmark-add-secondary-choice-label {
     justify-content: space-between;
     gap: 10px;
 }
@@ -4554,6 +4563,10 @@ html.side-panel-mode #bookmarkAddSecondaryModal .modal-body {
     display: inline-flex;
     align-items: center;
     gap: 7px;
+}
+
+.bookmark-add-secondary-choice-current-tabs .bookmark-add-secondary-choice-main span {
+    white-space: nowrap;
 }
 
 .bookmark-add-secondary-window-option {

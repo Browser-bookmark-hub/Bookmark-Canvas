@@ -3928,6 +3928,59 @@ function __queryCurrentWindowTabs(query = {}) {
     });
 }
 
+function __sortBookmarkAddTabsByIndex(tabs) {
+    const list = Array.isArray(tabs) ? tabs.slice() : [];
+    list.sort((left, right) => {
+        const leftIndex = (left && typeof left.index === 'number') ? left.index : Number.MAX_SAFE_INTEGER;
+        const rightIndex = (right && typeof right.index === 'number') ? right.index : Number.MAX_SAFE_INTEGER;
+        if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+        const leftId = (left && typeof left.id === 'number') ? left.id : Number.MAX_SAFE_INTEGER;
+        const rightId = (right && typeof right.id === 'number') ? right.id : Number.MAX_SAFE_INTEGER;
+        return leftId - rightId;
+    });
+    return list;
+}
+
+function __dedupeBookmarkAddTabs(tabs) {
+    const list = __sortBookmarkAddTabsByIndex(tabs);
+    const seen = new Set();
+    const deduped = [];
+    list.forEach((tab) => {
+        if (!tab) return;
+        const key = (typeof tab.id === 'number')
+            ? `id:${tab.id}`
+            : `${String(tab.url || tab.pendingUrl || '')}|${typeof tab.index === 'number' ? tab.index : ''}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        deduped.push(tab);
+    });
+    return deduped;
+}
+
+async function __queryCurrentTabActionTabs() {
+    const highlightedTabs = __dedupeBookmarkAddTabs(await __queryCurrentWindowTabs({ currentWindow: true, highlighted: true }));
+    if (highlightedTabs.length > 1) {
+        return highlightedTabs;
+    }
+
+    const activeTabs = __dedupeBookmarkAddTabs(await __queryCurrentWindowTabs({ currentWindow: true, active: true }));
+    const activeTab = activeTabs[0] || highlightedTabs[0] || null;
+    if (!activeTab) return [];
+
+    const activeGroupId = typeof activeTab.groupId === 'number' ? activeTab.groupId : -1;
+    if (activeGroupId >= 0) {
+        const groupedTabs = __dedupeBookmarkAddTabs(await __queryCurrentWindowTabs({
+            currentWindow: true,
+            groupId: activeGroupId
+        }));
+        if (groupedTabs.length) {
+            return groupedTabs;
+        }
+    }
+
+    return [activeTab];
+}
+
 function __isTabUrlAddable(url) {
     const value = String(url || '').trim();
     if (!value) return false;
@@ -4504,7 +4557,7 @@ function __renderBookmarkAddActionOptions(container, lang, actionType, windowAsF
     if (__isSidePanelModeForAdd()) {
         options.push({
             value: 'add-current-tab',
-            label: lang === 'zh_CN' ? '添加当前页' : 'Add Current Page',
+            label: lang === 'zh_CN' ? '添加当前页 | 选中标签页' : 'Add Current | Selected Tabs',
             icon: 'file'
         });
     }
@@ -4520,11 +4573,14 @@ function __renderBookmarkAddActionOptions(container, lang, actionType, windowAsF
 
     container.innerHTML = options.map((option) => {
         const isWindowOption = option.value === 'add-current-window';
+        const isCurrentTabsOption = option.value === 'add-current-tab';
         if (!isWindowOption) {
             return `
-        <label class="bookmark-add-secondary-choice">
+        <label class="bookmark-add-secondary-choice ${isCurrentTabsOption ? 'bookmark-add-secondary-choice-current-tabs' : ''}">
             <input type="radio" name="bookmarkAddActionType" value="${option.value}" ${option.value === selected ? 'checked' : ''}>
-            <span class="bookmark-add-secondary-choice-label"><i class="fas fa-${option.icon}"></i>${option.label}</span>
+            <span class="bookmark-add-secondary-choice-label">
+                <span class="bookmark-add-secondary-choice-main"><i class="fas fa-${option.icon}"></i><span>${option.label}</span></span>
+            </span>
         </label>
     `;
         }
@@ -4751,9 +4807,9 @@ async function executeBookmarkAddAction(context, config, options = {}) {
             }
         }
     } else {
-        const tabs = await __queryCurrentWindowTabs(actionType === 'add-current-tab'
-            ? { currentWindow: true, active: true }
-            : { currentWindow: true });
+        const tabs = actionType === 'add-current-tab'
+            ? await __queryCurrentTabActionTabs()
+            : __dedupeBookmarkAddTabs(await __queryCurrentWindowTabs({ currentWindow: true }));
 
         const addableTabs = tabs.filter((tab) => tab && __isTabUrlAddable(tab.url));
         if (!addableTabs.length) {
@@ -4853,7 +4909,11 @@ async function executeBookmarkAddAction(context, config, options = {}) {
 
         if (success && typeof showToast === 'function') {
             const text = actionType === 'add-current-tab'
-                ? (lang === 'zh_CN' ? '已添加当前页。' : 'Current page added.')
+                ? (createdCount > 1
+                    ? (lang === 'zh_CN'
+                        ? `已添加选中标签页（${createdCount} 项）。`
+                        : `Selected tabs added (${createdCount}).`)
+                    : (lang === 'zh_CN' ? '已添加当前页。' : 'Current page added.'))
                 : (usedFolderMode
                     ? (lang === 'zh_CN' ? `已将当前窗口所有标签页添加到文件夹（${createdCount} 项）。` : `Current window tabs added to folder (${createdCount}).`)
                     : (lang === 'zh_CN' ? `已添加当前窗口所有标签页（${createdCount} 项）。` : `Current window tabs added (${createdCount}).`));
