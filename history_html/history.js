@@ -2140,7 +2140,7 @@ const FaviconCache = {
     dbVersion: 1,
     storeName: 'favicons',
     failureStoreName: 'failures',
-    failureTtlMs: 10 * 60 * 1000,
+    failureTtlMs: 90 * 1000,
     requestTimeoutMs: 2200,
     maxFetchedBytes: 512 * 1024,
     minFaviconDimensionPx: 16,
