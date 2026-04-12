@@ -266,7 +266,7 @@ function updateCanvasPopoverState(isActive) {
     } else {
         // 延时一帧检查，确保 DOM 状态已更新
         requestAnimationFrame(() => {
-            const hasOpen = document.querySelector('.md-format-popover.open, .temp-color-popover.open, .md-color-popover.open, .md-delete-options-popover.open, .marker-dropdown-menu.open, .desc-clear-confirm-popover, .desc-height-settings-popover, .canvas-sidepanel-popover');
+            const hasOpen = document.querySelector('.md-format-popover.open, .temp-color-popover.open, .md-color-popover.open, .md-delete-options-popover.open, .desc-clear-confirm-popover, .desc-height-settings-popover, .canvas-sidepanel-popover');
             if (!hasOpen) {
                 document.body.classList.remove('canvas-popover-active');
             }
@@ -1752,9 +1752,7 @@ const MD_NODE_DEFAULT_HEIGHT = 300;
 
 // Canvas 外观设置（默认值）
 const CANVAS_APPEARANCE_SETTINGS_KEY = 'canvas-appearance-settings-v1';
-const CANVAS_MARKER_BADGE_COLOR_STORAGE_KEY = 'canvas_marker_badge_color_v1';
 const CANVAS_APPEARANCE_SETTINGS_VERSION = 3;
-const DEFAULT_MARKER_BADGE_COLOR = '#fbbc04';
 const LEGACY_TEMP_SECTION_DEFAULT_WIDTH = 420;
 const LEGACY_TEMP_SECTION_DEFAULT_WIDTH_V2 = 500;
 const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
@@ -1769,8 +1767,7 @@ const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
         temp: TEMP_SECTION_DEFAULT_COLOR,
         specialTemp: '#e9973f',
         mdNode: '#888888',
-        edge: '#999999',
-        markerBadge: DEFAULT_MARKER_BADGE_COLOR
+        edge: '#999999'
     },
     names: {
         temp: { mode: 'timestamp', manualValue: '' },
@@ -1975,7 +1972,6 @@ function normalizeCanvasAppearanceSettings(input) {
     out.colors.specialTemp = __normalizeAppearanceColor(colors.specialTemp, out.colors.specialTemp);
     out.colors.mdNode = __normalizeAppearanceColor(colors.mdNode, out.colors.mdNode);
     out.colors.edge = __normalizeAppearanceColor(colors.edge, out.colors.edge);
-    out.colors.markerBadge = __normalizeAppearanceColor(colors.markerBadge, out.colors.markerBadge);
 
     const names = input.names || {};
     const tempNames = names.temp || {};
@@ -2645,36 +2641,6 @@ function getPermanentSectionDefaultColor() {
     return (settings.colors && settings.colors.permanent) ? settings.colors.permanent : '#10b981';
 }
 
-function syncMarkerBadgeColorToBackgroundStorage(colorHex) {
-    try {
-        if (!browserAPI || !browserAPI.storage || !browserAPI.storage.local || typeof browserAPI.storage.local.set !== 'function') return;
-        browserAPI.storage.local.set({
-            [CANVAS_MARKER_BADGE_COLOR_STORAGE_KEY]: colorHex
-        }, () => {
-            try {
-                const err = browserAPI && browserAPI.runtime ? browserAPI.runtime.lastError : null;
-                if (err && err.message) {
-                    // ignore
-                }
-            } catch (_) { }
-        });
-    } catch (_) { }
-}
-
-function applyMarkerBadgeColorVars(color) {
-    const hex = __normalizeAppearanceColor(color, DEFAULT_MARKER_BADGE_COLOR);
-    const rgb = hexToRgb(hex) || { r: 251, g: 188, b: 4 };
-    const iconColor = lightenHexColor(hex, 0.22);
-    const iconColorDark = lightenHexColor(hex, 0.34);
-    const textColor = pickReadableTextColor(hex);
-    __setCssVar('--marker-badge-color', hex);
-    __setCssVar('--marker-badge-color-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
-    __setCssVar('--marker-badge-icon-color', iconColor);
-    __setCssVar('--marker-badge-icon-color-dark', iconColorDark);
-    __setCssVar('--marker-badge-text-color', textColor);
-    syncMarkerBadgeColorToBackgroundStorage(hex);
-}
-
 function __setCssVar(name, value) {
     try {
         if (document && document.documentElement) {
@@ -2696,7 +2662,6 @@ function applyCanvasAppearanceSettings(settings, options = {}) {
     if (!settings) return;
     const edgePreviewColor = __normalizeAppearanceColor(settings.colors && settings.colors.edge, '#999999');
     applyPermanentSectionColorVars(settings.colors && settings.colors.permanent);
-    applyMarkerBadgeColorVars(settings.colors && settings.colors.markerBadge);
     __setCssVar('--appearance-edge-color-preview', edgePreviewColor);
     if (options && options.applyPermanentSize) {
         applyPermanentSectionSizeFromAppearance(settings, { force: true });
@@ -4296,9 +4261,6 @@ function initCanvasView() {
 
     // 设置永久栏目置顶按钮
     setupPermanentSectionPinButton();
-    // 设置变化标识下拉
-    setupMarkerDropdownControls();
-
     // 设置连接线交互
     setupCanvasConnectionInteractions();
     addAnchorsToNode(document.getElementById('permanentSection'), 'permanent-section');
@@ -12447,13 +12409,6 @@ function shouldHandleCustomScroll(event) {
         return false;
     }
 
-    // 标识下拉列表/输入框内滚动：不拦截，让控件自身滚动
-    if (event.target.closest('.marker-dropdown-menu') ||
-        event.target.closest('.marker-combo-list') ||
-        event.target.closest('#markerAutoClearInput')) {
-        return false;
-    }
-
     // 在 Markdown 空白栏目内（查看/编辑区）时，不拦截滚轮，让其自身垂直滚动
     // - .md-canvas-text: 查看态的滚动容器
     // - .md-canvas-editor: 编辑态的文本域
@@ -15050,9 +15005,8 @@ function makePermanentSectionDraggable(permanentSection) {
             e.target.closest('.permanent-section-tip-container')) {
             return;
         }
-        // 不要在操作按钮/下拉菜单上触发拖动
-        if (e.target.closest('.permanent-section-actions') ||
-            e.target.closest('.marker-dropdown-menu')) {
+        // 不要在操作按钮上触发拖动
+        if (e.target.closest('.permanent-section-actions')) {
             return;
         }
 
@@ -23341,16 +23295,29 @@ function renderTempNode(section, options = {}) {
     // 注意：滚动容器是 temp-node-body，而不是 bookmark-tree
     let savedScrollTop = 0;
     let savedScrollLeft = 0;
+    let hasLiveScrollSnapshot = false;
     if (!isNew && nodeElement) {
         const existingBody = nodeElement.querySelector('.temp-node-body');
         if (existingBody) {
             savedScrollTop = existingBody.scrollTop || 0;
             savedScrollLeft = existingBody.scrollLeft || 0;
+            hasLiveScrollSnapshot = true;
+            try {
+                const scrollBaseKey = __getTempSectionScrollBaseKey(section.id);
+                if (scrollBaseKey && typeof __flushCanvasSectionScrollPersistence === 'function') {
+                    __flushCanvasSectionScrollPersistence(existingBody, {
+                        baseKey: scrollBaseKey,
+                        readFromDom: true
+                    });
+                }
+            } catch (_) { }
             console.log('[Canvas] 保存滚动位置:', { sectionId: section.id, scrollTop: savedScrollTop, scrollLeft: savedScrollLeft });
         }
     }
-    // 优先使用持久化的滚动位置
-    const persisted = __readPartitionedViewJSON(__getTempSectionScrollKey(section.id), null, 'scroll');
+    // 已有 DOM 的情况下，以实时滚动值为准；仅在首次创建/无现成 body 时回退到持久化值。
+    const persisted = hasLiveScrollSnapshot
+        ? null
+        : __readPartitionedViewJSON(__getTempSectionScrollKey(section.id), null, 'scroll');
     if (persisted && typeof persisted.top === 'number') {
         savedScrollTop = persisted.top;
         savedScrollLeft = typeof persisted.left === 'number' ? persisted.left : 0;
@@ -24875,7 +24842,7 @@ function buildTempTreeNode(section, item, level, options = {}) {
     }
 
     const badges = document.createElement('span');
-    badges.className = 'change-badges';
+    badges.className = 'tree-meta-badges';
 
     // 如果有未加载的子节点，显示数量提示
     if (hasChildren && !isExpanded) {
@@ -27404,252 +27371,6 @@ function updatePermanentSectionPinState(isPinned, pinBtn, permanentSection) {
         pinBtn.title = pinLabel;
         pinBtn.innerHTML = '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
         permanentSection.style.zIndex = '100';
-    }
-}
-
-function setupMarkerDropdownControls() {
-    const markerDropdown = document.getElementById('markerDropdown');
-    if (!markerDropdown) return;
-    if (markerDropdown.dataset.markerDropdownBound === 'true') return;
-    markerDropdown.dataset.markerDropdownBound = 'true';
-
-    const menuBtn = document.getElementById('markerMenuBtn');
-    const menu = document.getElementById('markerDropdownMenu');
-    const clearBtn = document.getElementById('markerClearBtn');
-    const compareModeSelect = document.getElementById('markerCompareModeSelect');
-    const pathToggle = document.getElementById('markerPathBadgesToggle');
-    const autoToggle = document.getElementById('markerAutoClearToggle');
-    const inputEl = document.getElementById('markerAutoClearInput');
-    const listEl = document.getElementById('markerAutoClearList');
-    const listToggleBtn = document.getElementById('markerAutoClearToggleBtn');
-
-    const closeMenu = () => {
-        if (!menu) return;
-        menu.style.display = 'none';
-        menu.classList.remove('open');
-        closeList();
-        updateCanvasPopoverState(false);
-    };
-    const openMenu = () => {
-        if (!menu) return;
-        menu.style.display = 'block';
-        menu.classList.add('open');
-        updateCanvasPopoverState(true);
-    };
-    const toggleMenu = () => {
-        if (!menu) return;
-        if (menu.classList.contains('open')) closeMenu();
-        else openMenu();
-    };
-
-    if (menuBtn) {
-        menuBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleMenu();
-        });
-    }
-    if (menu) {
-        preventCanvasEventsPropagation(menu);
-        menu.addEventListener('click', (e) => e.stopPropagation());
-    }
-    if (listEl) {
-        preventCanvasEventsPropagation(listEl);
-    }
-
-    if (clearBtn) {
-        clearBtn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            closeMenu();
-            try {
-                if (window.__canvasMarkerControl && typeof window.__canvasMarkerControl.clearAndSetBaseline === 'function') {
-                    await window.__canvasMarkerControl.clearAndSetBaseline('manual');
-                }
-            } catch (err) {
-                console.warn('[Marker] 清除标识失败:', err);
-            }
-        });
-    }
-
-    const masterToggle = document.getElementById('markerMasterToggle');
-    if (masterToggle) {
-        masterToggle.addEventListener('change', async (e) => {
-            e.stopPropagation();
-            try {
-                if (!window.__canvasMarkerControl || typeof window.__canvasMarkerControl.setEnabled !== 'function') return;
-                await window.__canvasMarkerControl.setEnabled(!!masterToggle.checked);
-            } catch (err) {
-                console.warn('[Marker] 切换标识显示失败:', err);
-            }
-        });
-    }
-
-    if (compareModeSelect) {
-        compareModeSelect.addEventListener('change', async (e) => {
-            e.stopPropagation();
-            try {
-                if (!window.__canvasMarkerControl || typeof window.__canvasMarkerControl.setCompareMode !== 'function') return;
-                await window.__canvasMarkerControl.setCompareMode(compareModeSelect.value);
-            } catch (err) {
-                console.warn('[Marker] 设置对比模式失败:', err);
-            }
-        });
-    }
-
-    if (autoToggle) {
-        autoToggle.addEventListener('change', async (e) => {
-            e.stopPropagation();
-            try {
-                if (window.__canvasMarkerControl && typeof window.__canvasMarkerControl.setAutoClearEnabled === 'function') {
-                    await window.__canvasMarkerControl.setAutoClearEnabled(!!autoToggle.checked);
-                }
-            } catch (err) {
-                console.warn('[Marker] 设置自动清除失败:', err);
-            }
-        });
-    }
-
-    if (pathToggle) {
-        pathToggle.addEventListener('change', async (e) => {
-            e.stopPropagation();
-            try {
-                if (window.__canvasMarkerControl && typeof window.__canvasMarkerControl.setShowPathBadges === 'function') {
-                    await window.__canvasMarkerControl.setShowPathBadges(!!pathToggle.checked);
-                }
-            } catch (err) {
-                console.warn('[Marker] 设置路径徽标显示失败:', err);
-            }
-        });
-    }
-
-    const openList = () => {
-        if (!listEl) return;
-        listEl.style.display = 'block';
-    };
-    const closeList = () => {
-        if (!listEl) return;
-        listEl.style.display = 'none';
-    };
-    const toggleList = () => {
-        if (!listEl) return;
-        const isOpen = listEl.style.display !== 'none';
-        if (isOpen) closeList();
-        else openList();
-    };
-
-    const parseMinutes = (text) => {
-        const raw = (text || '').toString().trim();
-        if (!raw) return null;
-        const lower = raw.toLowerCase();
-        const numMatch = lower.match(/(\d+(?:\.\d+)?)/);
-        if (!numMatch) return null;
-        const value = parseFloat(numMatch[1]);
-        if (!Number.isFinite(value) || value <= 0) return null;
-        let unit = 'min';
-        if (/(天|日|day|days|d)/i.test(lower)) unit = 'day';
-        else if (/(小时|时|hour|hours|hr|hrs|h)/i.test(lower)) unit = 'hour';
-        else if (/(分钟|分|min|mins|minute|minutes|m)/i.test(lower)) unit = 'min';
-        const minutes = unit === 'day' ? value * 1440 : unit === 'hour' ? value * 60 : value;
-        return Math.max(1, Math.round(minutes));
-    };
-
-    const formatMinutes = (minutes) => {
-        const m = Math.max(1, Math.round(minutes));
-        const isEn = (typeof currentLang !== 'undefined' && currentLang === 'en');
-        if (m % 1440 === 0) {
-            const v = Math.round(m / 1440);
-            return isEn ? `${v} day` : `${v}天`;
-        }
-        if (m % 60 === 0) {
-            const v = Math.round(m / 60);
-            return isEn ? `${v} hour` : `${v}小时`;
-        }
-        return isEn ? `${m} min` : `${m}分钟`;
-    };
-
-    if (inputEl) {
-        inputEl.addEventListener('focus', () => {
-            openList();
-        });
-        inputEl.addEventListener('change', async (e) => {
-            e.stopPropagation();
-            try {
-                if (!window.__canvasMarkerControl || typeof window.__canvasMarkerControl.setAutoClearMinutes !== 'function') return;
-                const minutes = parseMinutes(inputEl.value);
-                if (!minutes) return;
-                inputEl.value = formatMinutes(minutes);
-                await window.__canvasMarkerControl.setAutoClearMinutes(minutes);
-            } catch (err) {
-                console.warn('[Marker] 设置自动清除间隔失败:', err);
-            }
-        });
-        inputEl.addEventListener('keydown', async (e) => {
-            if (e.key !== 'Enter') return;
-            e.stopPropagation();
-            try {
-                if (!window.__canvasMarkerControl || typeof window.__canvasMarkerControl.setAutoClearMinutes !== 'function') return;
-                const minutes = parseMinutes(inputEl.value);
-                if (!minutes) return;
-                inputEl.value = formatMinutes(minutes);
-                await window.__canvasMarkerControl.setAutoClearMinutes(minutes);
-                closeList();
-            } catch (err) {
-                console.warn('[Marker] 设置自动清除间隔失败:', err);
-            }
-        });
-    }
-
-    if (listToggleBtn) {
-        listToggleBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleList();
-        });
-    }
-
-    if (listEl) {
-        listEl.addEventListener('mousedown', async (e) => {
-            const option = e.target.closest('.marker-combo-option');
-            if (!option) return;
-            e.preventDefault();
-            e.stopPropagation();
-            try {
-                const value = option.getAttribute('data-value') || option.textContent || '';
-                if (inputEl) inputEl.value = value.trim();
-                const minutes = parseMinutes(value);
-                if (minutes && window.__canvasMarkerControl && typeof window.__canvasMarkerControl.setAutoClearMinutes === 'function') {
-                    if (inputEl) inputEl.value = formatMinutes(minutes);
-                    await window.__canvasMarkerControl.setAutoClearMinutes(minutes);
-                }
-            } catch (err) {
-                console.warn('[Marker] 设置自动清除间隔失败:', err);
-            } finally {
-                closeList();
-            }
-        });
-    }
-
-    if (!document.documentElement.hasAttribute('data-marker-dropdown-outside-bound')) {
-        document.documentElement.setAttribute('data-marker-dropdown-outside-bound', 'true');
-        document.addEventListener('click', (e) => {
-            try {
-                if (listEl && listEl.style.display !== 'none' && !markerDropdown.contains(e.target)) {
-                    closeList();
-                }
-                if (!menu || !menu.classList.contains('open')) return;
-                if (markerDropdown.contains(e.target)) return;
-                closeMenu();
-            } catch (_) { }
-        });
-        document.addEventListener('keydown', (e) => {
-            try {
-                if (e.key === 'Escape') {
-                    closeList();
-                    closeMenu();
-                }
-            } catch (_) { }
-        }, true);
     }
 }
 
@@ -41601,7 +41322,6 @@ function openCanvasAppearanceSettingsModal() {
         if (target === 'special-temp') __syncAppearanceColorRow(row, colors.specialTemp);
         if (target === 'blank') __syncAppearanceColorRow(row, colors.mdNode);
         if (target === 'edge') __syncAppearanceColorRow(row, colors.edge);
-        if (target === 'marker-badge') __syncAppearanceColorRow(row, colors.markerBadge || DEFAULT_MARKER_BADGE_COLOR);
     });
 
     const tempNameSelect = modal.querySelector('#appearanceTempNameMode');
@@ -41692,8 +41412,7 @@ function saveCanvasAppearanceSettings(options = {}) {
             temp: (modal.querySelector('#appearanceColorTemp') || {}).value,
             specialTemp: (modal.querySelector('#appearanceColorSpecialTemp') || {}).value,
             mdNode: (modal.querySelector('#appearanceColorBlank') || {}).value,
-            edge: (modal.querySelector('#appearanceColorEdge') || {}).value,
-            markerBadge: (modal.querySelector('#appearanceColorMarkerBadge') || {}).value
+            edge: (modal.querySelector('#appearanceColorEdge') || {}).value
         },
         names: {
             temp: {
@@ -41737,7 +41456,7 @@ function createCanvasAppearanceSettingsModal() {
         <span class="md-color-chip appearance-color-chip" data-color="#66bbff" style="background:#66bbff" title="${isEn ? 'Default Blue' : '默认蓝色'}"></span>
         <span class="md-color-chip appearance-color-chip" data-color="#fb464c" style="background:#fb464c"></span>
         <span class="md-color-chip appearance-color-chip" data-color="#e9973f" style="background:#e9973f"></span>
-        <span class="md-color-chip appearance-color-chip" data-color="#fbbc04" style="background:#fbbc04" title="${isEn ? 'Marker Yellow' : '标识黄色'}"></span>
+        <span class="md-color-chip appearance-color-chip" data-color="#fbbc04" style="background:#fbbc04"></span>
         <span class="md-color-chip appearance-color-chip" data-color="#e0de71" style="background:#e0de71"></span>
         <span class="md-color-chip appearance-color-chip" data-color="#44cf6e" style="background:#44cf6e"></span>
         <span class="md-color-chip appearance-color-chip" data-color="#53dfdd" style="background:#53dfdd"></span>
@@ -41969,16 +41688,6 @@ function createCanvasAppearanceSettingsModal() {
                                 <div class="appearance-color-chips">${chipsHtml}</div>
                                 <span class="appearance-color-value" id="appearanceColorEdgeValue">#999999</span>
                                 <input type="color" id="appearanceColorEdge" class="appearance-color-input" data-color-target="edge">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Marker/Badge' : '标识/角标'}</div>
-                        <div class="appearance-row-content">
-                            <div class="appearance-color-row" data-color-target="marker-badge">
-                                <div class="appearance-color-chips">${chipsHtml}</div>
-                                <span class="appearance-color-value" id="appearanceColorMarkerBadgeValue">${DEFAULT_MARKER_BADGE_COLOR}</span>
-                                <input type="color" id="appearanceColorMarkerBadge" class="appearance-color-input" data-color-target="marker-badge">
                             </div>
                         </div>
                     </div>

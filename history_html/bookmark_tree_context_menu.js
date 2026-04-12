@@ -3499,10 +3499,6 @@ async function pasteIntoTemp(context) {
                 for (const id of bookmarkClipboard.nodeIds) {
                     try {
                         if (chrome && chrome.bookmarks) {
-                            const roots = await chrome.bookmarks.getSubTree(id);
-                            if (roots && roots[0]) {
-                                registerPermanentDerivedRemoveRootsRuntime([roots[0]]);
-                            }
                             await chrome.bookmarks.removeTree(id);
                         }
                     } catch (error) {
@@ -3530,26 +3526,6 @@ function serializeBookmarkNode(node) {
         type: node.url ? 'bookmark' : 'folder',
         children: (node.children || []).map(serializeBookmarkNode)
     };
-}
-
-function registerPermanentCreateSubtreeMemberRuntime(id) {
-    try {
-        if (typeof window !== 'undefined' &&
-            window.__treeMarkerOps &&
-            typeof window.__treeMarkerOps.registerCreateSubtreeMember === 'function') {
-            window.__treeMarkerOps.registerCreateSubtreeMember(id);
-        }
-    } catch (_) { }
-}
-
-function registerPermanentDerivedRemoveRootsRuntime(nodes) {
-    try {
-        if (typeof window !== 'undefined' &&
-            window.__treeMarkerOps &&
-            typeof window.__treeMarkerOps.registerDerivedRemoveRoots === 'function') {
-            window.__treeMarkerOps.registerDerivedRemoveRoots(nodes);
-        }
-    } catch (_) { }
 }
 
 async function handleTempMenuAction(action, context) {
@@ -6033,12 +6009,6 @@ async function copyUrl(url) {
 async function deleteBookmark(nodeId, nodeTitle, isFolder) {
     if (chrome && chrome.bookmarks) {
         if (isFolder) {
-            try {
-                const roots = await chrome.bookmarks.getSubTree(nodeId);
-                if (roots && roots[0]) {
-                    registerPermanentDerivedRemoveRootsRuntime([roots[0]]);
-                }
-            } catch (_) { }
             await chrome.bookmarks.removeTree(nodeId);
         } else {
             await chrome.bookmarks.remove(nodeId);
@@ -6192,7 +6162,6 @@ async function duplicateNode(node, parentId) {
 
     // 创建节点
     const created = await chrome.bookmarks.create(newNode);
-    registerPermanentCreateSubtreeMemberRuntime(created && created.id);
 
     // 如果有子节点，递归复制
     if (node.children) {
@@ -6606,42 +6575,10 @@ async function getSelectedUrls(nodeIdList) {
 
 // 刷新书签树（批量操作后专用，不显示变更标记）
 async function refreshBookmarkTree() {
-    console.log('[批量操作] 开始刷新书签树（无diff模式）');
+    console.log('[批量操作] 开始刷新书签树');
 
     if (typeof renderTreeView === 'function') {
-        // 临时清空旧数据，避免显示变更标记
-        await chrome.storage.local.set({
-            lastBookmarkData: null,
-            canvas_change_log_v1: {
-                updatedAt: Date.now(),
-                changes: {},
-                version: 1,
-                reason: 'batch-refresh'
-            }
-        });
-        console.log('[批量操作] 已临时清除旧数据，避免diff');
-
-        // 渲染当前书签树（不会检测变更）
         await renderTreeView(true);
-
-        // 获取当前书签数据并更新为新的基准数据（重要：这样下次对比就基于删除后的状态）
-        if (chrome && chrome.bookmarks) {
-            const bookmarkTree = await chrome.bookmarks.getTree();
-            await chrome.storage.local.set({
-                lastBookmarkData: {
-                    bookmarkTree,
-                    updatedAt: Date.now(),
-                    reason: 'batch-refresh'
-                },
-                canvas_change_log_v1: {
-                    updatedAt: Date.now(),
-                    changes: {},
-                    version: 1,
-                    reason: 'batch-refresh'
-                }
-            });
-            console.log('[批量操作] 已将当前状态设为新的基准数据，避免后续误标记为moved');
-        }
     } else {
         console.warn('[批量操作] renderTreeView 函数不存在');
     }
@@ -8432,10 +8369,6 @@ async function batchDelete() {
                 } catch (error) {
                     console.error('[批量] 获取节点信息失败:', nodeId, error);
                 }
-            }
-
-            if (permanentRoots.length) {
-                registerPermanentDerivedRemoveRootsRuntime(permanentRoots);
             }
 
             // 执行永久书签删除

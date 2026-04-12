@@ -41,7 +41,6 @@
     }
   },
   "permissions": [
-    "alarms",
     "sidePanel",
     "bookmarks",
     "storage",

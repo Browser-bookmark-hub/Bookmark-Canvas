@@ -151,16 +151,6 @@ function serializeBookmarkNode(node) {
     };
 }
 
-function registerPermanentCreateSubtreeMemberRuntime(id) {
-    try {
-        if (typeof window !== 'undefined' &&
-            window.__treeMarkerOps &&
-            typeof window.__treeMarkerOps.registerCreateSubtreeMember === 'function') {
-            window.__treeMarkerOps.registerCreateSubtreeMember(id);
-        }
-    } catch (_) { }
-}
-
 function resolvePermanentBlankDropParentId(targetElement = null) {
     try {
         const section = targetElement && targetElement.closest
@@ -622,7 +612,6 @@ async function createBookmarkFromPayload(parentId, index, payload) {
         createInfo.index = index;
     }
     const created = await chrome.bookmarks.create(createInfo);
-    registerPermanentCreateSubtreeMemberRuntime(created && created.id);
     if (payload.children && payload.children.length) {
         for (const child of payload.children) {
             await createBookmarkFromPayload(created.id, null, child);
@@ -686,14 +675,6 @@ async function moveBookmark(sourceId, targetId, targetIsFolder, context) {
             position,
             insertInfo
         });
-
-        // 【测试】只执行Chrome API，完全依赖 onMoved 事件来更新视觉
-        // 先标记
-        try {
-            if (typeof explicitMovedIds !== 'undefined') {
-                explicitMovedIds.set(sourceId, Date.now() + Infinity);
-            }
-        } catch (_) { }
 
         // 执行Chrome API移动
         await chrome.bookmarks.move(sourceId, {

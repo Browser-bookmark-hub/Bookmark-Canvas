@@ -8,14 +8,6 @@ const browserAPI = (function () {
   throw new Error('Unsupported browser');
 })();
 
-const MARKER_BADGE_TEXT_MAX = 99;
-const MARKER_BADGE_IDLE_BG = '#3B82F6';
-const MARKER_BADGE_ATTENTION_BG = '#F59E0B';
-const MARKER_BADGE_IDLE_SYMBOL_TEXT = '－';
-const MARKER_BADGE_ATTENTION_SYMBOL_TEXT = '≠';
-const MARKER_BADGE_TEXT_COLOR = '#000000';
-const MARKER_BADGE_COLOR_STORAGE_KEY = 'canvas_marker_badge_color_v1';
-const MARKER_SETTINGS_KEY = 'canvas_marker_settings_v1';
 const CANVAS_GIT_SYNC_BG_STATE_KEY = 'canvas-obsidian-git-sync-background-state-v1';
 const CANVAS_GIT_SYNC_RECOVERY_KEY = 'canvas-obsidian-git-sync-recovery-v1';
 const CANVAS_GIT_SYNC_RECOVERY_KEEP_LATEST = 1;
@@ -38,108 +30,6 @@ const DEFAULT_CANVAS_GIT_SYNC_BG_RUNTIME = {
   lastRecoverySnapshotError: ''
 };
 
-function normalizeMarkerBadgeText(markerCount) {
-  const n = Number(markerCount);
-  if (!Number.isFinite(n) || n <= 0) return '';
-  if (n > MARKER_BADGE_TEXT_MAX) return `${MARKER_BADGE_TEXT_MAX}+`;
-  return String(Math.floor(n));
-}
-
-function normalizeHexColor(value, fallback = MARKER_BADGE_IDLE_BG) {
-  const raw = String(value || '').trim();
-  const six = raw.match(/^#?([0-9a-fA-F]{6})$/);
-  if (six) return `#${six[1].toUpperCase()}`;
-  const three = raw.match(/^#?([0-9a-fA-F]{3})$/);
-  if (three) {
-    const short = three[1].toUpperCase();
-    return `#${short[0]}${short[0]}${short[1]}${short[1]}${short[2]}${short[2]}`;
-  }
-  const fallbackSix = String(fallback || MARKER_BADGE_IDLE_BG).trim().match(/^#?([0-9a-fA-F]{6})$/);
-  if (fallbackSix) return `#${fallbackSix[1].toUpperCase()}`;
-  return MARKER_BADGE_IDLE_BG;
-}
-
-function hexToRgb(hex) {
-  const normalized = normalizeHexColor(hex);
-  const value = normalized.replace('#', '');
-  const num = Number.parseInt(value, 16);
-  if (!Number.isFinite(num)) return null;
-  return {
-    r: (num >> 16) & 0xff,
-    g: (num >> 8) & 0xff,
-    b: num & 0xff
-  };
-}
-
-function calculateRelativeLuminance(rgb) {
-  if (!rgb) return 1;
-  const toLinear = (channel) => {
-    const normalized = channel / 255;
-    return normalized <= 0.03928
-      ? normalized / 12.92
-      : Math.pow((normalized + 0.055) / 1.055, 2.4);
-  };
-  const linearR = toLinear(rgb.r);
-  const linearG = toLinear(rgb.g);
-  const linearB = toLinear(rgb.b);
-  return (0.2126 * linearR) + (0.7152 * linearG) + (0.0722 * linearB);
-}
-
-function pickReadableTextColor(hex) {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return '#1F2937';
-  const luminance = calculateRelativeLuminance(rgb);
-  return luminance > 0.6 ? '#1F2937' : '#FFFFFF';
-}
-
-function setMarkerBadgeState(badgeText, badgeColorHex = MARKER_BADGE_IDLE_BG, badgeTextColorHex = MARKER_BADGE_TEXT_COLOR) {
-  try {
-    if (!browserAPI?.action || typeof browserAPI.action.setBadgeText !== 'function') return;
-
-    const badgeBgColor = normalizeHexColor(badgeColorHex, MARKER_BADGE_IDLE_BG);
-    const badgeTextColor = normalizeHexColor(badgeTextColorHex, MARKER_BADGE_TEXT_COLOR);
-    const text = String(badgeText == null ? '' : badgeText);
-    browserAPI.action.setBadgeText({ text }, () => {
-      try {
-        const err = browserAPI?.runtime?.lastError;
-        if (err && err.message) {
-          // ignore
-        }
-      } catch (_) { }
-    });
-
-    if (!text) return;
-
-    if (typeof browserAPI.action.setBadgeBackgroundColor === 'function') {
-      browserAPI.action.setBadgeBackgroundColor({ color: badgeBgColor }, () => {
-        try {
-          const err = browserAPI?.runtime?.lastError;
-          if (err && err.message) {
-            // ignore
-          }
-        } catch (_) { }
-      });
-    }
-    if (typeof browserAPI.action.setBadgeTextColor === 'function') {
-      browserAPI.action.setBadgeTextColor({ color: badgeTextColor }, () => {
-        try {
-          const err = browserAPI?.runtime?.lastError;
-          if (err && err.message) {
-            // ignore
-          }
-        } catch (_) { }
-      });
-    }
-  } catch (_) { }
-}
-
-let markerBadgeStateCache = { badgeText: null, badgeColor: null, badgeTextColor: null };
-let markerBulkMuteState = { enabled: false, reason: '', startedAt: 0, ignoreUntil: 0 };
-
-function isMarkerBulkMuteActive() {
-  return !!(markerBulkMuteState && (markerBulkMuteState.enabled === true || (Number(markerBulkMuteState.ignoreUntil) || 0) > Date.now()));
-}
-
 function normalizeCanvasGitSyncBackgroundRuntime(runtimeRaw) {
   const runtime = runtimeRaw && typeof runtimeRaw === 'object' ? runtimeRaw : {};
   return {
@@ -156,93 +46,18 @@ function normalizeCanvasGitSyncBackgroundRuntime(runtimeRaw) {
   };
 }
 
-function countChangeLogEntries(rawLog) {
-  if (!rawLog || typeof rawLog !== 'object') return 0;
-  const changes = rawLog.changes;
-  if (!changes || typeof changes !== 'object') return 0;
-  return Object.keys(changes).length;
-}
 
-function countActiveRecentMovedEntries(rawList) {
-  if (!Array.isArray(rawList) || rawList.length === 0) return 0;
-  const now = Date.now();
-  const activeIds = new Set();
-  rawList.forEach((item) => {
-    if (!item || typeof item !== 'object') return;
-    const key = item.id != null ? String(item.id) : '';
-    if (!key) return;
-    if (typeof item.expiry === 'number' && Number.isFinite(item.expiry) && item.expiry <= now) return;
-    activeIds.add(key);
-  });
-  return activeIds.size;
-}
-
-function evaluateMarkerBadgeStateFromStorageSnapshot(snapshot) {
-  const markerSettings = snapshot && snapshot[MARKER_SETTINGS_KEY];
-  const markerNumberEnabled = !(markerSettings && typeof markerSettings === 'object' && markerSettings.enabled === false);
-
-  const syncBgStateRaw = snapshot && snapshot[CANVAS_GIT_SYNC_BG_STATE_KEY];
-  const syncBgSettings = normalizeCanvasGitSyncBackgroundSettings(syncBgStateRaw && syncBgStateRaw.settings);
-  const syncEnabled = !!(syncBgSettings && syncBgSettings.enabled === true);
-
-  if (!syncEnabled) {
-    return {
-      badgeText: '',
-      badgeColor: MARKER_BADGE_IDLE_BG,
-      badgeTextColor: MARKER_BADGE_TEXT_COLOR
-    };
-  }
-
-  const changeCount = isMarkerBulkMuteActive() ? 0 : countChangeLogEntries(snapshot && snapshot[CANVAS_CHANGE_LOG_KEY]);
-  const movedCount = isMarkerBulkMuteActive() ? 0 : countActiveRecentMovedEntries(snapshot && snapshot[RECENT_MOVED_IDS_KEY]);
-  const markerCount = Math.max(changeCount, movedCount, 0);
-
-  if (markerNumberEnabled && markerCount > 0) {
-    return {
-      badgeText: normalizeMarkerBadgeText(markerCount),
-      badgeColor: MARKER_BADGE_IDLE_BG,
-      badgeTextColor: pickReadableTextColor(MARKER_BADGE_IDLE_BG)
-    };
-  }
-
-  return {
-    badgeText: MARKER_BADGE_IDLE_SYMBOL_TEXT,
-    badgeColor: MARKER_BADGE_IDLE_BG,
-    badgeTextColor: pickReadableTextColor(MARKER_BADGE_IDLE_BG)
-  };
-}
-
-function applyMarkerBadgeStateIfNeeded(state) {
-  const normalized = {
-    badgeText: String((state && state.badgeText) || ''),
-    badgeColor: normalizeHexColor(state && state.badgeColor, MARKER_BADGE_IDLE_BG),
-    badgeTextColor: normalizeHexColor(state && state.badgeTextColor, MARKER_BADGE_TEXT_COLOR)
-  };
-
-  if (
-    markerBadgeStateCache.badgeText === normalized.badgeText
-    && markerBadgeStateCache.badgeColor === normalized.badgeColor
-    && markerBadgeStateCache.badgeTextColor === normalized.badgeTextColor
-  ) {
-    return;
-  }
-
-  markerBadgeStateCache = normalized;
-  setMarkerBadgeState(normalized.badgeText, normalized.badgeColor, normalized.badgeTextColor);
-}
-
-async function refreshMarkerBadgeFromStorage() {
+function clearExtensionBadge() {
   try {
-    if (!browserAPI?.storage?.local) return;
-    const snapshot = await browserAPI.storage.local.get([
-      MARKER_SETTINGS_KEY,
-      CANVAS_CHANGE_LOG_KEY,
-      RECENT_MOVED_IDS_KEY,
-      MARKER_BADGE_COLOR_STORAGE_KEY,
-      CANVAS_GIT_SYNC_BG_STATE_KEY
-    ]);
-    const state = evaluateMarkerBadgeStateFromStorageSnapshot(snapshot || {});
-    applyMarkerBadgeStateIfNeeded(state);
+    if (!browserAPI?.action || typeof browserAPI.action.setBadgeText !== 'function') return;
+    browserAPI.action.setBadgeText({ text: '' }, () => {
+      try {
+        const err = browserAPI?.runtime?.lastError;
+        if (err && err.message) {
+          // ignore
+        }
+      } catch (_) { }
+    });
   } catch (_) { }
 }
 
@@ -523,8 +338,7 @@ if (browserAPI?.runtime?.onInstalled) {
   browserAPI.runtime.onInstalled.addListener(() => {
     initSidePanel();
     refreshSidePanelOpenWindows().catch(() => {});
-    refreshMarkerBadgeFromStorage().catch(() => {});
-    ensureMarkerAutoClearSchedule('onInstalled').catch(() => {});
+    clearExtensionBadge();
     restoreCanvasGitSyncBackgroundScheduling().catch(() => {});
   });
 }
@@ -532,8 +346,7 @@ if (browserAPI?.runtime?.onInstalled) {
 try {
   if (browserAPI?.runtime?.onStartup?.addListener) {
     browserAPI.runtime.onStartup.addListener(() => {
-      refreshMarkerBadgeFromStorage().catch(() => {});
-      ensureMarkerAutoClearSchedule('onStartup').catch(() => {});
+      clearExtensionBadge();
       restoreCanvasGitSyncBackgroundScheduling().catch(() => {});
     });
   }
@@ -542,225 +355,8 @@ try {
 initSidePanel();
 registerSidePanelTogglePortListener();
 refreshSidePanelOpenWindows().catch(() => {});
+clearExtensionBadge();
 restoreCanvasGitSyncBackgroundScheduling().catch(() => {});
-
-const RECENT_MOVED_IDS_KEY = 'canvas_recent_moved_ids_v1';
-const RECENT_MOVED_MAX = 2000;
-const CANVAS_CHANGE_LOG_KEY = 'canvas_change_log_v1';
-const CHANGE_LOG_MAX = 10000;
-const LAST_BOOKMARK_DATA_KEY = 'lastBookmarkData';
-const MARKER_AUTO_CLEAR_ALARM_NAME = 'canvas-marker-auto-clear-v1';
-const MARKER_AUTO_CLEAR_DEFAULT_MINUTES = 60;
-const MARKER_AUTO_CLEAR_MIN_DELAY_MS = 1000;
-const MARKER_AUTO_CLEAR_RETRY_DELAY_MS = 30 * 1000;
-
-function normalizeMarkerSettingsForAutoClear(raw) {
-  const out = {
-    enabled: true,
-    autoClearEnabled: true,
-    autoClearMinutes: MARKER_AUTO_CLEAR_DEFAULT_MINUTES,
-    nextAutoClearAt: 0
-  };
-  if (!raw || typeof raw !== 'object') return out;
-  if (typeof raw.enabled === 'boolean') out.enabled = raw.enabled;
-  if (typeof raw.autoClearEnabled === 'boolean') out.autoClearEnabled = raw.autoClearEnabled;
-  const mins = Number(raw.autoClearMinutes);
-  if (Number.isFinite(mins) && mins > 0) out.autoClearMinutes = mins;
-  const nextAt = Number(raw.nextAutoClearAt);
-  if (Number.isFinite(nextAt) && nextAt > 0) out.nextAutoClearAt = nextAt;
-  return out;
-}
-
-function isMarkerAutoClearEnabled(settings) {
-  if (!settings || typeof settings !== 'object') return false;
-  if (settings.enabled === false) return false;
-  if (settings.autoClearEnabled === false) return false;
-  return true;
-}
-
-function resolveMarkerAutoClearMinutes(settings) {
-  const mins = Number(settings && settings.autoClearMinutes);
-  if (!Number.isFinite(mins) || mins <= 0) return MARKER_AUTO_CLEAR_DEFAULT_MINUTES;
-  return Math.max(1, Math.floor(mins));
-}
-
-function buildMarkerAutoClearDeadline(minutes, now = Date.now()) {
-  const mins = Number.isFinite(Number(minutes)) ? Math.max(1, Number(minutes)) : MARKER_AUTO_CLEAR_DEFAULT_MINUTES;
-  return now + (mins * 60 * 1000);
-}
-
-async function loadMarkerSettingsForAutoClearFromStorage() {
-  try {
-    if (!browserAPI?.storage?.local) return normalizeMarkerSettingsForAutoClear(null);
-    const data = await browserAPI.storage.local.get([MARKER_SETTINGS_KEY]);
-    return normalizeMarkerSettingsForAutoClear(data && data[MARKER_SETTINGS_KEY]);
-  } catch (_) {
-    return normalizeMarkerSettingsForAutoClear(null);
-  }
-}
-
-async function saveMarkerSettingsForAutoClearToStorage(settings) {
-  try {
-    if (!browserAPI?.storage?.local) return false;
-    await browserAPI.storage.local.set({ [MARKER_SETTINGS_KEY]: settings });
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-async function clearMarkerAutoClearAlarm() {
-  try {
-    if (!browserAPI?.alarms?.clear) return false;
-    await new Promise((resolve) => {
-      browserAPI.alarms.clear(MARKER_AUTO_CLEAR_ALARM_NAME, () => resolve(true));
-    });
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-async function scheduleMarkerAutoClearAlarmAt(when) {
-  try {
-    if (!browserAPI?.alarms?.create) return false;
-    const target = Math.max(Date.now() + MARKER_AUTO_CLEAR_MIN_DELAY_MS, Number(when) || 0);
-    browserAPI.alarms.create(MARKER_AUTO_CLEAR_ALARM_NAME, { when: target });
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-async function readBookmarkTreeForMarkerBaselineInBackground() {
-  return await new Promise((resolve, reject) => {
-    try {
-      if (!browserAPI?.bookmarks?.getTree) {
-        reject(new Error('bookmarks-unavailable'));
-        return;
-      }
-      browserAPI.bookmarks.getTree((tree) => {
-        const err = browserAPI?.runtime?.lastError;
-        if (err) {
-          reject(new Error(err.message || 'bookmarks-getTree-failed'));
-          return;
-        }
-        resolve(Array.isArray(tree) ? tree : []);
-      });
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-async function writeMarkerBaselineFromBackground(reason = 'auto') {
-  if (!browserAPI?.storage?.local) {
-    throw new Error('storage-unavailable');
-  }
-  const tree = await readBookmarkTreeForMarkerBaselineInBackground();
-  const now = Date.now();
-  await browserAPI.storage.local.set({
-    [LAST_BOOKMARK_DATA_KEY]: {
-      bookmarkTree: tree,
-      updatedAt: now,
-      reason: String(reason || 'auto')
-    },
-    [CANVAS_CHANGE_LOG_KEY]: {
-      updatedAt: now,
-      changes: {},
-      version: 1,
-      reason: 'baseline-reset'
-    },
-    [RECENT_MOVED_IDS_KEY]: []
-  });
-  return now;
-}
-
-async function runMarkerAutoClearCheckNow(options = {}) {
-  const reason = String((options && options.reason) || 'background-check');
-  const force = options && options.force === true;
-
-  let settings = await loadMarkerSettingsForAutoClearFromStorage();
-  if (!isMarkerAutoClearEnabled(settings)) {
-    await clearMarkerAutoClearAlarm();
-    return { success: true, executed: false, disabled: true, settings };
-  }
-
-  const minutes = resolveMarkerAutoClearMinutes(settings);
-  const now = Date.now();
-  let targetAt = Number(settings.nextAutoClearAt);
-  if (!Number.isFinite(targetAt) || targetAt <= 0) {
-    targetAt = buildMarkerAutoClearDeadline(minutes, now);
-    settings.nextAutoClearAt = targetAt;
-    await saveMarkerSettingsForAutoClearToStorage(settings);
-  }
-
-  if (!force && targetAt > now) {
-    await scheduleMarkerAutoClearAlarmAt(targetAt);
-    return { success: true, executed: false, nextAutoClearAt: targetAt, settings };
-  }
-  if (targetAt > now) {
-    await scheduleMarkerAutoClearAlarmAt(targetAt);
-    return { success: true, executed: false, nextAutoClearAt: targetAt, settings };
-  }
-
-  try {
-    await writeMarkerBaselineFromBackground(`auto:${reason}`);
-  } catch (error) {
-    await scheduleMarkerAutoClearAlarmAt(Date.now() + MARKER_AUTO_CLEAR_RETRY_DELAY_MS);
-    return {
-      success: false,
-      executed: false,
-      error: error && error.message ? error.message : String(error || 'auto-clear-failed'),
-      nextAutoClearAt: targetAt,
-      settings
-    };
-  }
-
-  const nextAutoClearAt = buildMarkerAutoClearDeadline(minutes, Date.now());
-  settings.nextAutoClearAt = nextAutoClearAt;
-  await saveMarkerSettingsForAutoClearToStorage(settings);
-  await scheduleMarkerAutoClearAlarmAt(nextAutoClearAt);
-  await refreshMarkerBadgeFromStorage();
-
-  return { success: true, executed: true, nextAutoClearAt, settings };
-}
-
-async function ensureMarkerAutoClearSchedule(reason = '') {
-  let settings = await loadMarkerSettingsForAutoClearFromStorage();
-  if (!isMarkerAutoClearEnabled(settings)) {
-    await clearMarkerAutoClearAlarm();
-    return { success: true, scheduled: false, disabled: true, settings };
-  }
-
-  const minutes = resolveMarkerAutoClearMinutes(settings);
-  const now = Date.now();
-  let targetAt = Number(settings.nextAutoClearAt);
-  if (!Number.isFinite(targetAt) || targetAt <= 0) {
-    targetAt = buildMarkerAutoClearDeadline(minutes, now);
-    settings.nextAutoClearAt = targetAt;
-    await saveMarkerSettingsForAutoClearToStorage(settings);
-  }
-
-  if (targetAt <= now) {
-    return await runMarkerAutoClearCheckNow({
-      reason: `${String(reason || 'ensure')}:overdue`,
-      force: true
-    });
-  }
-
-  await scheduleMarkerAutoClearAlarmAt(targetAt);
-  return { success: true, scheduled: true, nextAutoClearAt: targetAt, settings };
-}
-
-if (browserAPI?.alarms?.onAlarm?.addListener) {
-  browserAPI.alarms.onAlarm.addListener((alarm) => {
-    try {
-      if (!alarm || alarm.name !== MARKER_AUTO_CLEAR_ALARM_NAME) return;
-      runMarkerAutoClearCheckNow({ reason: 'alarm', force: true }).catch(() => {});
-    } catch (_) { }
-  });
-}
 
 // Favicon broadcast (align with reference project)
 const processedFavicons = new Map();
@@ -938,247 +534,14 @@ if (browserAPI.tabs && browserAPI.tabs.onUpdated) {
   });
 }
 
-async function recordRecentMovedId(id) {
-  try {
-    const now = Date.now();
-    const data = await browserAPI.storage.local.get([RECENT_MOVED_IDS_KEY]);
-    const list = Array.isArray(data[RECENT_MOVED_IDS_KEY]) ? data[RECENT_MOVED_IDS_KEY] : [];
-    const filtered = list.filter(item => item && (typeof item.expiry !== 'number' || item.expiry > now));
-    const key = String(id);
-    const idx = filtered.findIndex(item => String(item.id) === key);
-    const entry = { id: key, expiry: Infinity, time: now };
-    if (idx >= 0) {
-      filtered[idx] = entry;
-    } else {
-      filtered.push(entry);
-    }
-    if (filtered.length > RECENT_MOVED_MAX) {
-      filtered.splice(0, filtered.length - RECENT_MOVED_MAX);
-    }
-    await browserAPI.storage.local.set({ [RECENT_MOVED_IDS_KEY]: filtered });
-  } catch (_) {}
-}
-
-function __normalizeChangeLog(raw) {
-  const base = { updatedAt: 0, changes: {}, version: 1 };
-  if (!raw || typeof raw !== 'object') return base;
-  const changes = raw.changes && typeof raw.changes === 'object' ? raw.changes : {};
-  return {
-    updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
-    changes,
-    version: raw.version || 1
-  };
-}
-
-async function __loadChangeLog() {
-  try {
-    const data = await browserAPI.storage.local.get([CANVAS_CHANGE_LOG_KEY]);
-    return __normalizeChangeLog(data && data[CANVAS_CHANGE_LOG_KEY]);
-  } catch (_) {
-    return { updatedAt: 0, changes: {}, version: 1 };
-  }
-}
-
-async function __saveChangeLog(log) {
-  try {
-    await browserAPI.storage.local.set({ [CANVAS_CHANGE_LOG_KEY]: log });
-  } catch (_) { }
-}
-
-function __mergeType(existingType, nextType) {
-  const types = new Set(String(existingType || '').split('+').filter(Boolean));
-  types.add(nextType);
-  return Array.from(types).join('+');
-}
-
-function __serializeRemovedNodeSnapshot(node) {
-  if (!node || typeof node !== 'object') return null;
-  const out = {
-    id: (typeof node.id !== 'undefined' && node.id !== null) ? String(node.id) : '',
-    title: typeof node.title === 'string' ? node.title : ''
-  };
-  if (typeof node.parentId !== 'undefined' && node.parentId !== null) {
-    out.parentId = String(node.parentId);
-  }
-  if (typeof node.index === 'number') {
-    out.index = node.index;
-  }
-  if (typeof node.url === 'string' && node.url) {
-    out.url = node.url;
-  }
-  if (Array.isArray(node.children) && node.children.length) {
-    const children = node.children
-      .map(child => __serializeRemovedNodeSnapshot(child))
-      .filter(Boolean);
-    if (children.length) out.children = children;
-  }
-  return out;
-}
-
-async function __updateChangeLogForCreate(id) {
-  if (isMarkerBulkMuteActive()) return;
-  if (!id) return;
-  const key = String(id);
-  const log = await __loadChangeLog();
-  log.changes[key] = { type: 'added', ts: Date.now() };
-  log.updatedAt = Date.now();
-  if (Object.keys(log.changes).length > CHANGE_LOG_MAX) {
-    // Soft cap: drop oldest by timestamp
-    const entries = Object.entries(log.changes);
-    entries.sort((a, b) => (a[1]?.ts || 0) - (b[1]?.ts || 0));
-    const overflow = entries.length - CHANGE_LOG_MAX;
-    if (overflow > 0) {
-      for (let i = 0; i < overflow; i++) {
-        delete log.changes[entries[i][0]];
-      }
-    }
-  }
-  await __saveChangeLog(log);
-}
-
-async function __updateChangeLogForRemove(id, removeInfo) {
-  if (isMarkerBulkMuteActive()) return;
-  if (!id) return;
-  const key = String(id);
-  const log = await __loadChangeLog();
-  const oldParentId = (removeInfo && typeof removeInfo.parentId !== 'undefined')
-    ? removeInfo.parentId
-    : (removeInfo && removeInfo.node && typeof removeInfo.node.parentId !== 'undefined' ? removeInfo.node.parentId : null);
-  const oldIndex = (removeInfo && typeof removeInfo.index === 'number')
-    ? removeInfo.index
-    : (removeInfo && removeInfo.node && typeof removeInfo.node.index === 'number' ? removeInfo.node.index : null);
-  const nodeSnapshot = __serializeRemovedNodeSnapshot(removeInfo && removeInfo.node);
-  if (nodeSnapshot) {
-    nodeSnapshot.id = key;
-    if (typeof nodeSnapshot.parentId === 'undefined' && oldParentId != null) {
-      nodeSnapshot.parentId = String(oldParentId);
-    }
-    if (typeof nodeSnapshot.index !== 'number' && oldIndex != null) {
-      nodeSnapshot.index = oldIndex;
-    }
-  }
-  log.changes[key] = {
-    type: 'deleted',
-    deleted: {
-      oldParentId: oldParentId != null ? oldParentId : null,
-      oldIndex: oldIndex != null ? oldIndex : null,
-      ...(nodeSnapshot ? { nodeSnapshot } : {})
-    },
-    ts: Date.now()
-  };
-  log.updatedAt = Date.now();
-  await __saveChangeLog(log);
-}
-
-async function __updateChangeLogForChange(id) {
-  if (isMarkerBulkMuteActive()) return;
-  if (!id) return;
-  const key = String(id);
-  const log = await __loadChangeLog();
-  const existing = log.changes[key];
-  if (existing && existing.type && (String(existing.type).includes('deleted') || String(existing.type).includes('added'))) {
-    return;
-  }
-  const next = existing ? { ...existing } : { type: '' };
-  next.type = __mergeType(next.type, 'modified');
-  next.ts = Date.now();
-  log.changes[key] = next;
-  log.updatedAt = Date.now();
-  await __saveChangeLog(log);
-}
-
-async function __updateChangeLogForMove(id, moveInfo) {
-  if (isMarkerBulkMuteActive()) return;
-  if (!id) return;
-  const key = String(id);
-  const log = await __loadChangeLog();
-  const existing = log.changes[key];
-  if (existing && existing.type && (String(existing.type).includes('deleted') || String(existing.type).includes('added'))) {
-    return;
-  }
-  const next = existing ? { ...existing } : { type: '' };
-  next.type = __mergeType(next.type, 'moved');
-  if (moveInfo && typeof moveInfo === 'object') {
-    next.moved = {
-      oldParentId: moveInfo.oldParentId,
-      oldIndex: moveInfo.oldIndex,
-      newParentId: moveInfo.parentId,
-      newIndex: moveInfo.index
-    };
-  }
-  next.ts = Date.now();
-  log.changes[key] = next;
-  log.updatedAt = Date.now();
-  await __saveChangeLog(log);
-}
-
-if (browserAPI.bookmarks && browserAPI.bookmarks.onMoved) {
-  browserAPI.bookmarks.onMoved.addListener(async (id, moveInfo) => {
-    try {
-      if (isMarkerBulkMuteActive()) return;
-      await recordRecentMovedId(id);
-      browserAPI.runtime.sendMessage({ action: 'recentMovedBroadcast', id }).catch(() => {});
-      await __updateChangeLogForMove(id, moveInfo);
-    } catch (_) {}
-  });
-}
-
-if (browserAPI.bookmarks && browserAPI.bookmarks.onChanged) {
-  browserAPI.bookmarks.onChanged.addListener((id, changeInfo) => {
-    try {
-      if (isMarkerBulkMuteActive()) return;
-      if (changeInfo && changeInfo.url) {
-        browserAPI.runtime.sendMessage({
-          action: 'clearFaviconCache',
-          url: changeInfo.url
-        }).catch(() => {});
-      }
-      __updateChangeLogForChange(id).catch(() => {});
-    } catch (_) {}
-  });
-}
-
-if (browserAPI.bookmarks && browserAPI.bookmarks.onCreated) {
-  browserAPI.bookmarks.onCreated.addListener((id) => {
-    try {
-      if (isMarkerBulkMuteActive()) return;
-      __updateChangeLogForCreate(id).catch(() => {});
-    } catch (_) {}
-  });
-}
-
-if (browserAPI.bookmarks && browserAPI.bookmarks.onRemoved) {
-  browserAPI.bookmarks.onRemoved.addListener((id, removeInfo) => {
-    try {
-      if (isMarkerBulkMuteActive()) return;
-      __updateChangeLogForRemove(id, removeInfo).catch(() => {});
-    } catch (_) {}
-  });
-}
-
 if (browserAPI?.storage?.onChanged?.addListener) {
   browserAPI.storage.onChanged.addListener((changes, areaName) => {
     try {
       if (areaName !== 'local' || !changes || typeof changes !== 'object') return;
 
       if (didCanvasGitSyncTargetStorageChange(changes)) {
-        ensureCanvasGitSyncBackgroundTargetState().then(async () => {
-          await refreshMarkerBadgeFromStorage();
-        }).catch(() => {});
-        return;
+        ensureCanvasGitSyncBackgroundTargetState().catch(() => {});
       }
-
-      if (!changes[CANVAS_CHANGE_LOG_KEY]
-        && !changes[RECENT_MOVED_IDS_KEY]
-        && !changes[MARKER_SETTINGS_KEY]
-        && !changes[MARKER_BADGE_COLOR_STORAGE_KEY]
-        && !changes[CANVAS_GIT_SYNC_BG_STATE_KEY]) {
-        return;
-      }
-      if (changes[MARKER_SETTINGS_KEY]) {
-        ensureMarkerAutoClearSchedule('storage-marker-settings').catch(() => {});
-      }
-      refreshMarkerBadgeFromStorage().catch(() => {});
     } catch (_) { }
   });
 }
@@ -1746,7 +1109,6 @@ async function restoreCanvasGitSyncBackgroundScheduling() {
   const loadedState = await loadCanvasGitSyncBackgroundState();
   const targetSync = await ensureCanvasGitSyncBackgroundTargetState(loadedState);
   void targetSync.state;
-  await refreshMarkerBadgeFromStorage();
 }
 
 async function handleCanvasGitSyncUpdateContextMessage(message) {
@@ -1777,7 +1139,6 @@ async function handleCanvasGitSyncUpdateContextMessage(message) {
 
   state.runtime = normalizeCanvasGitSyncBackgroundRuntime(state.runtime);
   const saved = await saveCanvasGitSyncBackgroundState(state);
-  await refreshMarkerBadgeFromStorage();
 
   return {
     success: true,
@@ -1792,23 +1153,6 @@ async function handleCanvasGitSyncGetBackgroundStateMessage() {
     success: true,
     runtime: state.runtime,
     settings: state.settings
-  };
-}
-
-async function handleCanvasMarkerBulkModeMessage(message) {
-  markerBulkMuteState = {
-    enabled: !!(message && message.enabled === true),
-    reason: String(message && message.reason || ''),
-    startedAt: message && message.enabled === true ? Date.now() : 0,
-    ignoreUntil: Math.max(0, Number(message && message.ignoreUntil) || 0)
-  };
-
-  await refreshMarkerBadgeFromStorage();
-
-  return {
-    success: true,
-    enabled: markerBulkMuteState.enabled,
-    reason: markerBulkMuteState.reason
   };
 }
 
@@ -2317,33 +1661,6 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.action === 'canvasMarkerBulkMode') {
-    (async () => {
-      const response = await handleCanvasMarkerBulkModeMessage(message);
-      sendResponse(response);
-    })();
-    return true;
-  }
-
-  if (message.action === 'canvasMarkerAutoClearEnsureSchedule') {
-    (async () => {
-      const response = await ensureMarkerAutoClearSchedule(String(message.reason || 'message-ensure-schedule'));
-      sendResponse(response);
-    })();
-    return true;
-  }
-
-  if (message.action === 'canvasMarkerAutoClearCheckNow') {
-    (async () => {
-      const response = await runMarkerAutoClearCheckNow({
-        reason: String(message.reason || 'message-check-now'),
-        force: message.force === true
-      });
-      sendResponse(response);
-    })();
-    return true;
-  }
-
   if (message.action === 'canvasGitSyncGetBackgroundState') {
     (async () => {
       const response = await handleCanvasGitSyncGetBackgroundStateMessage();
@@ -2465,5 +1782,4 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   sendResponse({ success: false, error: 'Unsupported action' });
 });
 
-refreshMarkerBadgeFromStorage().catch(() => {});
-ensureMarkerAutoClearSchedule('service-worker-load').catch(() => {});
+clearExtensionBadge();
