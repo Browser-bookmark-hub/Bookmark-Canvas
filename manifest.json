@@ -50,7 +50,8 @@
     "tabGroups",
     "windows",
     "commands",
-    "activeTab"
+    "activeTab",
+    "favicon"
   ],
   "host_permissions": [
     "<all_urls>"
