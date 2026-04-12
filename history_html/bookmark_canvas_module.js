@@ -4008,7 +4008,7 @@ function reassignTempItemIds(sectionId, item) {
     }
 }
 
-function insertTempItems(sectionId, parentId, items, index = null) {
+function insertTempItems(sectionId, parentId, items, index = null, options = {}) {
     const section = getTempSection(sectionId);
     if (!section) throw new Error('未找到临时栏目');
     const targetItems = parentId
@@ -4023,8 +4023,20 @@ function insertTempItems(sectionId, parentId, items, index = null) {
         targetItems.splice(index + offset, 0, item);
     });
 
+    if (options && options.defaultCollapseFolders && typeof LAZY_LOAD_THRESHOLD !== 'undefined') {
+        items.forEach((item) => {
+            if (!item || item.type !== 'folder' || !item.id) return;
+            const folderKey = `${sectionId}-${item.id}`;
+            LAZY_LOAD_THRESHOLD.expandedFolders.delete(folderKey);
+            LAZY_LOAD_THRESHOLD.collapsedFolders.add(folderKey);
+        });
+    }
+
     renderTempNode(section);
     saveTempNodes();
+    if (options && options.defaultCollapseFolders && typeof saveTempExpandState === 'function') {
+        try { saveTempExpandState(); } catch (_) { }
+    }
     return items;
 }
 
@@ -4166,10 +4178,10 @@ function extractTempItemsPayload(sectionId, itemIds) {
     return payload;
 }
 
-function insertTempItemsFromPayload(sectionId, parentId, payloadItems, index = null) {
+function insertTempItemsFromPayload(sectionId, parentId, payloadItems, index = null, options = {}) {
     const items = (payloadItems || []).map(item => createTempItemFromPayload(sectionId, item)).filter(Boolean);
     if (!items.length) return [];
-    insertTempItems(sectionId, parentId, items, index);
+    insertTempItems(sectionId, parentId, items, index, options);
     return items;
 }
 

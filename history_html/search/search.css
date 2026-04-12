@@ -846,6 +846,30 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
 }
 
+.tree-locate-group-outline {
+    position: fixed;
+    pointer-events: none;
+    z-index: 100001;
+    border: 2px solid var(--search-highlight-color, rgba(59, 130, 246, 0.9));
+    border-radius: 10px;
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12),
+        0 0 18px rgba(59, 130, 246, 0.18);
+    animation: tree-locate-group-outline-pulse 1.2s ease-in-out 2;
+}
+
+@keyframes tree-locate-group-outline-pulse {
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    50% {
+        transform: scale(1.01);
+        opacity: 0.92;
+    }
+}
+
 
 /* ==================== 搜索结果空状态 ==================== */
 .search-result-empty {

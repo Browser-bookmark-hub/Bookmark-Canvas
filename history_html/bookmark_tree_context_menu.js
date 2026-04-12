@@ -3935,26 +3935,271 @@ function __dedupeBookmarkAddTabs(tabs) {
 
 async function __queryCurrentTabActionTabs() {
     const highlightedTabs = __dedupeBookmarkAddTabs(await __queryCurrentWindowTabs({ currentWindow: true, highlighted: true }));
-    if (highlightedTabs.length > 1) {
+    if (highlightedTabs.length > 0) {
         return highlightedTabs;
     }
 
     const activeTabs = __dedupeBookmarkAddTabs(await __queryCurrentWindowTabs({ currentWindow: true, active: true }));
-    const activeTab = activeTabs[0] || highlightedTabs[0] || null;
-    if (!activeTab) return [];
+    const activeTab = activeTabs[0] || null;
+    return activeTab ? [activeTab] : [];
+}
 
-    const activeGroupId = typeof activeTab.groupId === 'number' ? activeTab.groupId : -1;
-    if (activeGroupId >= 0) {
-        const groupedTabs = __dedupeBookmarkAddTabs(await __queryCurrentWindowTabs({
-            currentWindow: true,
-            groupId: activeGroupId
-        }));
-        if (groupedTabs.length) {
-            return groupedTabs;
+function __waitBookmarkAddLocateDelay(delayMs) {
+    const safeDelay = Math.max(0, Number(delayMs) || 0);
+    return new Promise((resolve) => {
+        setTimeout(resolve, safeDelay);
+    });
+}
+
+async function __prepareBookmarkAddLocateTarget(target) {
+    if (!target || typeof target !== 'object') return;
+
+    if (target.source === 'temporary') {
+        try {
+            if (window.CanvasModule && typeof window.CanvasModule.forceWakeAndRender === 'function' && target.sectionId) {
+                window.CanvasModule.forceWakeAndRender(target.sectionId);
+            }
+        } catch (_) { }
+        try {
+            if (window.CanvasModule && window.CanvasModule.temp && typeof window.CanvasModule.temp.ensureRendered === 'function' && target.sectionId) {
+                window.CanvasModule.temp.ensureRendered(target.sectionId);
+            }
+        } catch (_) { }
+    } else {
+        try {
+            if (typeof flushPendingAddRemoveEvents === 'function') {
+                await flushPendingAddRemoveEvents('bookmark-add-locate');
+            }
+        } catch (_) { }
+        try {
+            if (typeof refreshCachedCurrentTreeSnapshot === 'function') {
+                await refreshCachedCurrentTreeSnapshot('bookmark-add-locate');
+            }
+        } catch (_) { }
+    }
+
+    await __waitBookmarkAddLocateDelay(0);
+}
+
+function __getBookmarkAddLocateTreeItem(target) {
+    if (!target || typeof target !== 'object' || !target.id) return null;
+
+    if (target.source === 'temporary') {
+        const sectionEl = document.getElementById(String(target.sectionId || '').trim());
+        const tree = sectionEl ? sectionEl.querySelector('.temp-bookmark-tree') : null;
+        return tree ? tree.querySelector(`.tree-item[data-node-id="${CSS.escape(String(target.id))}"]`) : null;
+    }
+
+    let sectionEl = null;
+    const copyId = String(target.copyId || '').trim();
+    if (copyId) {
+        try {
+            sectionEl = document.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id="${CSS.escape(copyId)}"]`);
+        } catch (_) {
+            sectionEl = null;
+        }
+        if (!sectionEl) {
+            sectionEl = document.getElementById(`permanent-section-copy-${copyId}`);
+        }
+    } else {
+        sectionEl = document.getElementById('permanentSection');
+    }
+    const tree = (sectionEl && sectionEl.querySelector('.bookmark-tree'))
+        || (sectionEl && sectionEl.querySelector('#bookmarkTree'))
+        || document.getElementById('bookmarkTree');
+    return tree ? tree.querySelector(`.tree-item[data-node-id="${CSS.escape(String(target.id))}"]`) : null;
+}
+
+function __applyBookmarkAddLocateOutline(treeItem, color = '#3b82f6') {
+    if (!treeItem) return false;
+    try {
+        treeItem.style.setProperty('--search-highlight-color', color);
+        treeItem.classList.add('search-locate-outline');
+        setTimeout(() => {
+            try {
+                treeItem.classList.remove('search-locate-outline');
+                treeItem.style.removeProperty('--search-highlight-color');
+            } catch (_) { }
+        }, 2000);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function __clearBookmarkAddLocateVisuals() {
+    try {
+        if (typeof clearSearchTreeItemOutline === 'function') {
+            clearSearchTreeItemOutline();
+            return;
+        }
+    } catch (_) { }
+
+    try {
+        document.querySelectorAll('.tree-item.search-locate-outline').forEach((el) => {
+            try {
+                el.classList.remove('search-locate-outline');
+                el.style.removeProperty('--search-highlight-color');
+            } catch (_) { }
+        });
+        document.querySelectorAll('.tree-locate-group-outline').forEach((el) => {
+            try { el.remove(); } catch (_) { }
+        });
+    } catch (_) { }
+}
+
+function __getBookmarkAddLocateGroupContainer(treeItem) {
+    if (!treeItem || typeof treeItem.closest !== 'function') return null;
+    return treeItem.closest('.permanent-section-body, .temp-node-body, .bookmark-tree, .temp-bookmark-tree') || null;
+}
+
+function __appendBookmarkAddLocateGroupOutline(treeItems, color = '#3b82f6') {
+    const list = (Array.isArray(treeItems) ? treeItems : []).filter(Boolean);
+    if (!list.length || !document || !document.body) return 0;
+
+    const rects = list
+        .map((item) => {
+            try { return item.getBoundingClientRect(); } catch (_) { return null; }
+        })
+        .filter((rect) => rect && Number.isFinite(rect.width) && Number.isFinite(rect.height) && rect.width > 0 && rect.height > 0);
+
+    if (!rects.length) return 0;
+
+    const padding = 6;
+    const minLeft = Math.max(0, Math.min(...rects.map((rect) => rect.left)) - padding);
+    const minTop = Math.max(0, Math.min(...rects.map((rect) => rect.top)) - padding);
+    const maxRight = Math.max(...rects.map((rect) => rect.right)) + padding;
+    const maxBottom = Math.max(...rects.map((rect) => rect.bottom)) + padding;
+
+    const outline = document.createElement('div');
+    outline.className = 'tree-locate-group-outline';
+    outline.style.setProperty('--search-highlight-color', color);
+    outline.style.left = `${minLeft}px`;
+    outline.style.top = `${minTop}px`;
+    outline.style.width = `${Math.max(0, maxRight - minLeft)}px`;
+    outline.style.height = `${Math.max(0, maxBottom - minTop)}px`;
+    document.body.appendChild(outline);
+
+    setTimeout(() => {
+        try { outline.remove(); } catch (_) { }
+    }, 2000);
+
+    return list.length;
+}
+
+function __highlightBookmarkAddLocateTargets(targets) {
+    const list = Array.isArray(targets) ? targets : [];
+    const groups = new Map();
+    list.forEach((target) => {
+        const treeItem = __getBookmarkAddLocateTreeItem(target);
+        if (!treeItem) return;
+        const container = __getBookmarkAddLocateGroupContainer(treeItem) || treeItem;
+        const color = target && target.color ? target.color : '#3b82f6';
+        let entry = groups.get(container);
+        if (!entry) {
+            entry = { items: [], color };
+            groups.set(container, entry);
+        }
+        entry.items.push(treeItem);
+        if (!entry.color && color) entry.color = color;
+    });
+
+    __clearBookmarkAddLocateVisuals();
+
+    let count = 0;
+    groups.forEach((entry) => {
+        const items = entry && Array.isArray(entry.items) ? entry.items : [];
+        const color = entry && entry.color ? entry.color : '#3b82f6';
+        if (!items.length) return;
+        if (items.length === 1) {
+            if (__applyBookmarkAddLocateOutline(items[0], color)) {
+                count += 1;
+            }
+            return;
+        }
+        count += __appendBookmarkAddLocateGroupOutline(items, color);
+    });
+
+    return count;
+}
+
+async function __locateBookmarkAddTargetWithRetry(target) {
+    if (!target || typeof target !== 'object') return false;
+
+    const attemptLocate = async () => {
+        if (typeof window !== 'undefined' && typeof window.locateCanvasBookmarkTreeItem === 'function') {
+            return !!(await window.locateCanvasBookmarkTreeItem(target));
+        }
+        if (typeof window === 'undefined' || !window.CanvasModule) return false;
+        if (target.source === 'temporary' && target.sectionId && typeof window.CanvasModule.locateSection === 'function') {
+            window.CanvasModule.locateSection(target.sectionId);
+            return true;
+        }
+        if (target.source === 'permanent' && typeof window.CanvasModule.locatePermanent === 'function') {
+            window.CanvasModule.locatePermanent();
+            return true;
+        }
+        return false;
+    };
+
+    const retryDelays = [0, 90, 180, 320, 520, 760];
+    for (let index = 0; index < retryDelays.length; index += 1) {
+        const delay = retryDelays[index];
+        if (delay > 0) {
+            await __waitBookmarkAddLocateDelay(delay);
+        }
+        await __prepareBookmarkAddLocateTarget(target);
+        const located = await attemptLocate();
+        if (located) return true;
+    }
+
+    return false;
+}
+
+function __dedupeBookmarkAddLocateTargets(targets) {
+    const list = Array.isArray(targets) ? targets : [];
+    const seen = new Set();
+    return list.filter((target) => {
+        if (!target || !target.id) return false;
+        const key = [
+            String(target.source || ''),
+            String(target.sectionId || ''),
+            String(target.copyId || ''),
+            String(target.id || '')
+        ].join('|');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+async function __locateBookmarkAddTargetsWithRetry(targets) {
+    const list = __dedupeBookmarkAddLocateTargets(targets);
+    if (!list.length) return false;
+
+    const anchor = (list.length > 1)
+        ? Object.assign({}, list[0], { suppressOutline: true })
+        : list[0];
+    const located = await __locateBookmarkAddTargetWithRetry(anchor);
+
+    if (list.length <= 1) {
+        return located;
+    }
+
+    const highlightRetryDelays = [0, 80, 180, 320];
+    let highlightedCount = 0;
+    for (let index = 0; index < highlightRetryDelays.length; index += 1) {
+        const delay = highlightRetryDelays[index];
+        if (delay > 0) {
+            await __waitBookmarkAddLocateDelay(delay);
+        }
+        highlightedCount = __highlightBookmarkAddLocateTargets(list);
+        if (highlightedCount >= list.length) {
+            break;
         }
     }
 
-    return [activeTab];
+    return located || highlightedCount > 0;
 }
 
 function __isTabUrlAddable(url) {
@@ -4096,8 +4341,21 @@ function __insertBookmarkAddItemsToTemp(target, items) {
     }
 
     const index = Number.isFinite(target && target.index) ? target.index : null;
-    const insertedItems = manager.insertFromPayload(sectionId, target && target.parentId ? target.parentId : null, payload, index);
+    const insertedItems = manager.insertFromPayload(
+        sectionId,
+        target && target.parentId ? target.parentId : null,
+        payload,
+        index,
+        { defaultCollapseFolders: true }
+    );
     const firstInserted = Array.isArray(insertedItems) && insertedItems.length ? insertedItems[0] : null;
+    const createdTargets = (Array.isArray(insertedItems) ? insertedItems : [])
+        .filter((item) => !!(item && item.id))
+        .map((item) => ({
+            id: String(item.id),
+            type: item.type === 'folder' ? 'folder' : 'bookmark',
+            expandTargetFolder: item.type === 'folder' ? false : true
+        }));
     return {
         createdCount: __collectBookmarkAddLeafTabs(payload).length,
         firstCreated: firstInserted && firstInserted.id
@@ -4105,7 +4363,8 @@ function __insertBookmarkAddItemsToTemp(target, items) {
                 id: String(firstInserted.id),
                 type: firstInserted.type === 'folder' ? 'folder' : 'bookmark'
             }
-            : null
+            : null,
+        createdTargets
     };
 }
 
@@ -4136,7 +4395,8 @@ async function __createTempBookmarkViaModal(target) {
     return {
         success: !!(createResult && createResult.firstCreated && createResult.firstCreated.id),
         createdCount: createResult && Number.isFinite(createResult.createdCount) ? createResult.createdCount : 0,
-        firstCreated: createResult ? createResult.firstCreated || null : null
+        firstCreated: createResult ? createResult.firstCreated || null : null,
+        createdTargets: createResult ? createResult.createdTargets || [] : []
     };
 }
 
@@ -4164,7 +4424,8 @@ async function __createTempFolderViaModal(target) {
     return {
         success: !!(createResult && createResult.firstCreated && createResult.firstCreated.id),
         createdCount: createResult && Number.isFinite(createResult.createdCount) ? createResult.createdCount : 0,
-        firstCreated: createResult ? createResult.firstCreated || null : null
+        firstCreated: createResult ? createResult.firstCreated || null : null,
+        createdTargets: createResult ? createResult.createdTargets || [] : []
     };
 }
 
@@ -4224,15 +4485,16 @@ async function __resolveBookmarkAddTarget(context, preferredPosition = null) {
 
 async function __addTabsToBookmarkTree(target, tabs) {
     if (!target || !target.parentId) {
-        return { createdCount: 0, firstCreated: null };
+        return { createdCount: 0, firstCreated: null, createdTargets: [] };
     }
     if (!Array.isArray(tabs) || !tabs.length) {
-        return { createdCount: 0, firstCreated: null };
+        return { createdCount: 0, firstCreated: null, createdTargets: [] };
     }
 
     let insertIndex = Number.isFinite(target.index) ? target.index : null;
     let createdCount = 0;
     let firstCreated = null;
+    const createdTargets = [];
 
     for (const tab of tabs) {
         if (!tab || !__isTabUrlAddable(tab.url)) continue;
@@ -4251,9 +4513,16 @@ async function __addTabsToBookmarkTree(target, tabs) {
         if (!firstCreated && created && created.id) {
             firstCreated = { id: String(created.id), type: 'bookmark' };
         }
+        if (created && created.id) {
+            createdTargets.push({
+                id: String(created.id),
+                type: 'bookmark',
+                expandTargetFolder: true
+            });
+        }
     }
 
-    return { createdCount, firstCreated };
+    return { createdCount, firstCreated, createdTargets };
 }
 
 function __collectBookmarkAddLeafTabs(items, output = []) {
@@ -4370,16 +4639,17 @@ async function __buildBookmarkAddItemsFromTabs(tabs, options = {}) {
 
 async function __addBookmarkAddItemsToTree(target, items) {
     if (!target || !target.parentId) {
-        return { createdCount: 0, firstCreated: null };
+        return { createdCount: 0, firstCreated: null, createdTargets: [] };
     }
     const sourceItems = Array.isArray(items) ? items : [];
     if (!sourceItems.length) {
-        return { createdCount: 0, firstCreated: null };
+        return { createdCount: 0, firstCreated: null, createdTargets: [] };
     }
 
     let insertIndex = Number.isFinite(target.index) ? target.index : null;
     let createdCount = 0;
     let firstCreated = null;
+    const createdTargets = [];
 
     const rememberFirstCreated = (item) => {
         if (!firstCreated && item && item.id) {
@@ -4412,6 +4682,11 @@ async function __addBookmarkAddItemsToTree(target, items) {
 
             if (folderNode && folderNode.id) {
                 rememberFirstCreated({ id: folderNode.id, type: 'folder' });
+                createdTargets.push({
+                    id: String(folderNode.id),
+                    type: 'folder',
+                    expandTargetFolder: false
+                });
                 const nestedResult = await __addBookmarkAddItemsToTree({
                     parentId: folderNode.id,
                     index: null,
@@ -4432,6 +4707,9 @@ async function __addBookmarkAddItemsToTree(target, items) {
                 createdCount += fallbackResult.createdCount;
                 if (!firstCreated && fallbackResult.firstCreated) {
                     firstCreated = fallbackResult.firstCreated;
+                }
+                if (Array.isArray(fallbackResult.createdTargets) && fallbackResult.createdTargets.length) {
+                    createdTargets.push(...fallbackResult.createdTargets);
                 }
                 if (Number.isFinite(insertIndex)) {
                     insertIndex += fallbackResult.createdCount;
@@ -4459,9 +4737,16 @@ async function __addBookmarkAddItemsToTree(target, items) {
         if (!firstCreated && created && created.id) {
             firstCreated = { id: String(created.id), type: 'bookmark' };
         }
+        if (created && created.id) {
+            createdTargets.push({
+                id: String(created.id),
+                type: 'bookmark',
+                expandTargetFolder: true
+            });
+        }
     }
 
-    return { createdCount, firstCreated };
+    return { createdCount, firstCreated, createdTargets };
 }
 
 function __buildBookmarkAddSecondaryModal() {
@@ -4732,10 +5017,22 @@ async function executeBookmarkAddAction(context, config, options = {}) {
     const isTemporaryTarget = !!(target && target.scope === 'temporary');
     let success = false;
     let locateTarget = null;
+    let locateTargets = [];
 
     const rememberLocateTarget = (candidate) => {
         if (locateTarget || !candidate || !candidate.id) return;
         locateTarget = Object.assign({}, candidate);
+    };
+
+    const rememberLocateTargets = (candidates, basePayload = {}) => {
+        (Array.isArray(candidates) ? candidates : []).forEach((candidate) => {
+            if (!candidate || !candidate.id) return;
+            const normalized = Object.assign({}, basePayload, candidate, {
+                id: String(candidate.id)
+            });
+            locateTargets.push(normalized);
+            rememberLocateTarget(normalized);
+        });
     };
 
     if (actionType === 'add-page') {
@@ -4746,7 +5043,8 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                 rememberLocateTarget({
                     source: 'temporary',
                     sectionId: target.sectionId,
-                    id: String(createResult.firstCreated.id)
+                    id: String(createResult.firstCreated.id),
+                    expandTargetFolder: createResult.firstCreated.type === 'folder' ? false : true
                 });
             }
         } else {
@@ -4756,7 +5054,8 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                 rememberLocateTarget({
                     source: 'permanent',
                     id: String(created.id),
-                    copyId: permanentCopyId || null
+                    copyId: permanentCopyId || null,
+                    expandTargetFolder: true
                 });
             }
         }
@@ -4768,7 +5067,8 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                 rememberLocateTarget({
                     source: 'temporary',
                     sectionId: target.sectionId,
-                    id: String(createResult.firstCreated.id)
+                    id: String(createResult.firstCreated.id),
+                    expandTargetFolder: false
                 });
             }
         } else {
@@ -4778,7 +5078,8 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                 rememberLocateTarget({
                     source: 'permanent',
                     id: String(created.id),
-                    copyId: permanentCopyId || null
+                    copyId: permanentCopyId || null,
+                    expandTargetFolder: false
                 });
             }
         }
@@ -4820,6 +5121,13 @@ async function executeBookmarkAddAction(context, config, options = {}) {
             firstCreated = tempInsertResult && tempInsertResult.firstCreated
                 ? tempInsertResult.firstCreated
                 : null;
+            rememberLocateTargets(
+                tempInsertResult ? tempInsertResult.createdTargets || [] : [],
+                {
+                    source: 'temporary',
+                    sectionId: target.sectionId
+                }
+            );
         } else if (actionType === 'add-current-window' && windowAsFolder) {
             const folderPayload = {
                 parentId: target.parentId,
@@ -4846,6 +5154,14 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                     ? nestedResult.createdCount
                     : 0;
                 firstCreated = { id: String(folderNode.id), type: 'folder' };
+                rememberLocateTargets([{
+                    id: String(folderNode.id),
+                    type: 'folder',
+                    expandTargetFolder: false
+                }], {
+                    source: 'permanent',
+                    copyId: permanentCopyId || null
+                });
                 usedFolderMode = true;
             } else {
                 const fallbackResult = await __addBookmarkAddItemsToTree(target, addItems);
@@ -4855,6 +5171,13 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                 firstCreated = fallbackResult && fallbackResult.firstCreated
                     ? fallbackResult.firstCreated
                     : null;
+                rememberLocateTargets(
+                    fallbackResult ? fallbackResult.createdTargets || [] : [],
+                    {
+                        source: 'permanent',
+                        copyId: permanentCopyId || null
+                    }
+                );
             }
         } else {
             const treeResult = await __addBookmarkAddItemsToTree(target, addItems);
@@ -4864,6 +5187,13 @@ async function executeBookmarkAddAction(context, config, options = {}) {
             firstCreated = treeResult && treeResult.firstCreated
                 ? treeResult.firstCreated
                 : null;
+            rememberLocateTargets(
+                treeResult ? treeResult.createdTargets || [] : [],
+                {
+                    source: 'permanent',
+                    copyId: permanentCopyId || null
+                }
+            );
         }
 
         success = createdCount > 0;
@@ -4872,13 +5202,15 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                 rememberLocateTarget({
                     source: 'temporary',
                     sectionId: target.sectionId,
-                    id: String(firstCreated.id)
+                    id: String(firstCreated.id),
+                    expandTargetFolder: firstCreated.type === 'folder' ? false : true
                 });
             } else {
                 rememberLocateTarget({
                     source: 'permanent',
                     id: String(firstCreated.id),
-                    copyId: permanentCopyId || null
+                    copyId: permanentCopyId || null,
+                    expandTargetFolder: firstCreated.type === 'folder' ? false : true
                 });
             }
         }
@@ -4906,17 +5238,10 @@ async function executeBookmarkAddAction(context, config, options = {}) {
         });
     }
 
-    if (success && locateAfterAction && locateTarget) {
+    if (success && locateAfterAction && (locateTarget || locateTargets.length)) {
         try {
-            if (typeof window !== 'undefined' && typeof window.locateCanvasBookmarkTreeItem === 'function') {
-                await window.locateCanvasBookmarkTreeItem(locateTarget);
-            } else if (typeof window !== 'undefined' && window.CanvasModule) {
-                if (locateTarget.source === 'temporary' && locateTarget.sectionId && typeof window.CanvasModule.locateSection === 'function') {
-                    window.CanvasModule.locateSection(locateTarget.sectionId);
-                } else if (locateTarget.source === 'permanent' && typeof window.CanvasModule.locatePermanent === 'function') {
-                    window.CanvasModule.locatePermanent();
-                }
-            }
+            const finalLocateTargets = locateTargets.length ? locateTargets : (locateTarget ? [locateTarget] : []);
+            await __locateBookmarkAddTargetsWithRetry(finalLocateTargets);
         } catch (locateError) {
             console.warn('[右键菜单] 添加后定位失败:', locateError);
         }

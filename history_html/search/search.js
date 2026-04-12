@@ -5969,6 +5969,9 @@ function clearSearchTreeItemOutline() {
                 el.style.removeProperty('--search-highlight-color');
             } catch (_) { }
         });
+        document.querySelectorAll('.tree-locate-group-outline').forEach(el => {
+            try { el.remove(); } catch (_) { }
+        });
         // Clear selected state (optional, but good for exclusive search selection)
         // Only clear those we marked? Or all? Standard tree might have its own selection.
         // Let's only clear ".selected" if we are sure we want to hijack selection.
@@ -6439,6 +6442,7 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
     const id = String(nodeId || '');
     if (!id) return false;
     const locateToken = ++searchTreeItemLocateCenterToken;
+    const shouldOutlineTarget = options.suppressOutline !== true;
 
     // 先把永久栏目卡片定位到视口（复用 Storage-first 的缩放/平移逻辑）
     try {
@@ -6544,7 +6548,9 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
     if (!target) return false;
 
     try { expandAncestorsForTreeItem(target, treeContainer); } catch (_) { }
-    try { await ensurePermanentSearchFolderExpanded(target); } catch (_) { }
+    if (options.expandTargetFolder !== false) {
+        try { await ensurePermanentSearchFolderExpanded(target); } catch (_) { }
+    }
     const resolvePermanentTarget = () => {
         const latestSection = resolvePermanentSectionElementForSearch(options.copyId || null);
         const latestTree = (latestSection && latestSection.querySelector('.bookmark-tree'))
@@ -6555,15 +6561,19 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
             : null;
     };
     const settledPermanentTarget = await finalizeTreeItemCentering(treeContainer, resolvePermanentTarget, locateToken);
-    highlightSearchTreeItemOutline(settledPermanentTarget || target, options.color || '#3b82f6');
+    if (shouldOutlineTarget) {
+        highlightSearchTreeItemOutline(settledPermanentTarget || target, options.color || '#3b82f6');
+    }
 
-    const permanentHighlightColor = options.color || '#3b82f6';
-    setTimeout(() => {
-        if (locateToken !== searchTreeItemLocateCenterToken) return;
-        const freshTarget = resolvePermanentTarget();
-        if (!freshTarget) return;
-        highlightSearchTreeItemOutline(freshTarget, permanentHighlightColor, false);
-    }, 220);
+    if (shouldOutlineTarget) {
+        const permanentHighlightColor = options.color || '#3b82f6';
+        setTimeout(() => {
+            if (locateToken !== searchTreeItemLocateCenterToken) return;
+            const freshTarget = resolvePermanentTarget();
+            if (!freshTarget) return;
+            highlightSearchTreeItemOutline(freshTarget, permanentHighlightColor, false);
+        }, 220);
+    }
 
     return true;
 }
@@ -6573,6 +6583,7 @@ async function locateBookmarkItemInTempTree(sectionId, itemId, options = {}) {
     const id = String(itemId || '');
     if (!sid || !id) return false;
     const locateToken = ++searchTreeItemLocateCenterToken;
+    const shouldOutlineTarget = options.suppressOutline !== true;
 
     // 先把临时栏目卡片定位到视口
     try {
@@ -6690,7 +6701,9 @@ async function locateBookmarkItemInTempTree(sectionId, itemId, options = {}) {
     if (!target) return false;
 
     try { expandAncestorsForTreeItem(target, treeContainer); } catch (_) { }
-    try { await ensureTempSearchFolderExpanded(sectionObj, target); } catch (_) { }
+    if (options.expandTargetFolder !== false) {
+        try { await ensureTempSearchFolderExpanded(sectionObj, target); } catch (_) { }
+    }
     const resolveTempTarget = () => {
         const freshSection = document.getElementById(sid);
         if (!freshSection) return null;
@@ -6700,25 +6713,29 @@ async function locateBookmarkItemInTempTree(sectionId, itemId, options = {}) {
             : null;
     };
     const settledTempTarget = await finalizeTreeItemCentering(treeContainer, resolveTempTarget, locateToken);
-    highlightSearchTreeItemOutline(settledTempTarget || target, options.color || '#3b82f6');
+    if (shouldOutlineTarget) {
+        highlightSearchTreeItemOutline(settledTempTarget || target, options.color || '#3b82f6');
+    }
 
-    // [Fix] Retry highlight to combat potential re-renders (anti-flash)
-    // Re-query the container to ensure we are highlighting the FRESH DOM element
-    const highlightColor = options.color || '#3b82f6';
-    const retry = (delay) => {
-        setTimeout(() => {
-            if (locateToken !== searchTreeItemLocateCenterToken) return;
-            const freshSection = document.getElementById(sid);
-            if (!freshSection) return;
-            const freshTree = freshSection.querySelector('.temp-bookmark-tree');
-            if (!freshTree) return;
-            const t = freshTree.querySelector(`.tree-item[data-node-id="${CSS.escape(id)}"]`);
-            if (t) {
-                highlightSearchTreeItemOutline(t, highlightColor, false);
-            }
-        }, delay);
-    };
-    retry(220);
+    if (shouldOutlineTarget) {
+        // [Fix] Retry highlight to combat potential re-renders (anti-flash)
+        // Re-query the container to ensure we are highlighting the FRESH DOM element
+        const highlightColor = options.color || '#3b82f6';
+        const retry = (delay) => {
+            setTimeout(() => {
+                if (locateToken !== searchTreeItemLocateCenterToken) return;
+                const freshSection = document.getElementById(sid);
+                if (!freshSection) return;
+                const freshTree = freshSection.querySelector('.temp-bookmark-tree');
+                if (!freshTree) return;
+                const t = freshTree.querySelector(`.tree-item[data-node-id="${CSS.escape(id)}"]`);
+                if (t) {
+                    highlightSearchTreeItemOutline(t, highlightColor, false);
+                }
+            }, delay);
+        };
+        retry(220);
+    }
 
     return true;
 }
@@ -6738,14 +6755,18 @@ async function locateCanvasBookmarkTreeItem(target) {
     if (!target || typeof target !== 'object') return false;
     const source = String(target.source || '').trim();
     const color = target.color || '#3b82f6';
+    const expandTargetFolder = target.expandTargetFolder !== false;
+    const suppressOutline = target.suppressOutline === true;
 
     if (source === 'temporary') {
-        return locateBookmarkItemInTempTree(target.sectionId, target.id, { color });
+        return locateBookmarkItemInTempTree(target.sectionId, target.id, { color, expandTargetFolder, suppressOutline });
     }
 
     return locateBookmarkItemInPermanentTree(target.id, {
         color,
-        copyId: target.copyId || null
+        copyId: target.copyId || null,
+        expandTargetFolder,
+        suppressOutline
     });
 }
 

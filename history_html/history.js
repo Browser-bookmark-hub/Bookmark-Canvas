@@ -7605,7 +7605,9 @@ async function handleQuickAddAction(action) {
         const tabsForCurrentView = viewScope === 'window'
             ? await getCurrentWindowTabs()
             : await getActiveTabList();
-        const normalizedForCurrentView = await normalizeTabsForQuickAdd(tabsForCurrentView);
+        const normalizedForCurrentView = await normalizeTabsForQuickAdd(tabsForCurrentView, {
+            groupByTabGroup: viewScope === 'window'
+        });
         const flatForCurrentView = Array.isArray(normalizedForCurrentView.flatItems) ? normalizedForCurrentView.flatItems : [];
         const structuredForCurrentView = Array.isArray(normalizedForCurrentView.structuredItems) ? normalizedForCurrentView.structuredItems : [];
 
@@ -7639,7 +7641,9 @@ async function handleQuickAddAction(action) {
         ? await getCurrentWindowTabs()
         : await getActiveTabList();
 
-    const normalized = await normalizeTabsForQuickAdd(tabs);
+    const normalized = await normalizeTabsForQuickAdd(tabs, {
+        groupByTabGroup: scope === 'window'
+    });
     const flatItems = Array.isArray(normalized.flatItems) ? normalized.flatItems : [];
     const structuredItems = Array.isArray(normalized.structuredItems) ? normalized.structuredItems : [];
 
@@ -7714,23 +7718,13 @@ function dedupeQuickAddTabs(tabs) {
 
 async function getActiveTabList() {
     const highlightedTabs = dedupeQuickAddTabs(await queryTabs({ highlighted: true, currentWindow: true }));
-    if (highlightedTabs.length > 1) {
+    if (highlightedTabs.length > 0) {
         return highlightedTabs;
     }
 
     const activeTabs = dedupeQuickAddTabs(await queryTabs({ active: true, currentWindow: true }));
-    const activeTab = activeTabs[0] || highlightedTabs[0] || null;
-    if (!activeTab) return [];
-
-    const groupId = typeof activeTab.groupId === 'number' ? activeTab.groupId : -1;
-    if (groupId >= 0) {
-        const groupedTabs = dedupeQuickAddTabs(await queryTabs({ currentWindow: true, groupId }));
-        if (groupedTabs.length) {
-            return groupedTabs;
-        }
-    }
-
-    return [activeTab];
+    const activeTab = activeTabs[0] || null;
+    return activeTab ? [activeTab] : [];
 }
 
 async function getCurrentWindowTabs() {
@@ -7738,10 +7732,11 @@ async function getCurrentWindowTabs() {
     return dedupeQuickAddTabs(tabs);
 }
 
-async function normalizeTabsForQuickAdd(tabs) {
+async function normalizeTabsForQuickAdd(tabs, options = {}) {
     const normalizedTabs = [];
     const flatItems = [];
     const seen = new Set();
+    const groupByTabGroup = !!(options && options.groupByTabGroup);
 
     (Array.isArray(tabs) ? tabs : []).forEach((tab) => {
         const url = tab && (tab.url || tab.pendingUrl);
@@ -7770,7 +7765,9 @@ async function normalizeTabsForQuickAdd(tabs) {
         return { flatItems: [], structuredItems: [] };
     }
 
-    const structuredItems = await buildStructuredItemsFromTabs(normalizedTabs);
+    const structuredItems = groupByTabGroup
+        ? await buildStructuredItemsFromTabs(normalizedTabs)
+        : [];
     return { flatItems, structuredItems };
 }
 
