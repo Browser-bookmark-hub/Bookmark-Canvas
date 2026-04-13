@@ -3580,9 +3580,10 @@ body.sidebar-resizing * {
     user-select: none;
 }
 
-/* 永久栏目（含副本）：多行标题时，让变化标识与第一行文本对齐 */
-.permanent-bookmark-section .tree-item {
-    align-items: flex-start;
+/* 永久栏目/副本/临时栏目：多行标题时仍按树行中线对齐图标 */
+.permanent-bookmark-section .tree-item,
+.temp-bookmark-tree .tree-item {
+    align-items: center;
 }
 
 .changes-tree-preview-inline .tree-item {
@@ -3609,6 +3610,13 @@ body.sidebar-resizing * {
 
 .permanent-bookmark-section .tree-toggle,
 .permanent-bookmark-section .tree-icon,
+.temp-bookmark-tree .tree-toggle,
+.temp-bookmark-tree .tree-icon {
+    align-self: center;
+    flex-shrink: 0;
+    margin-top: 0;
+}
+
 .changes-tree-preview-inline .tree-toggle,
 .changes-tree-preview-inline .tree-icon {
     margin-top: 2px;
@@ -3646,7 +3654,8 @@ body.sidebar-resizing * {
 }
 
 .tree-label {
-    flex: 1;
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 14px;
     color: var(--text-primary);
     /* 优化长文本换行，避免第一行很少字第二行很多字的情况 */
