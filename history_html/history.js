@@ -1301,7 +1301,7 @@ const FaviconCache = {
     dbVersion: 1,
     storeName: 'favicons',
     failureStoreName: 'failures',
-    failureTtlMs: 90 * 1000,
+    failureTtlMs: 60000,
     requestTimeoutMs: 2200,
     maxFetchedBytes: 512 * 1024,
     minFaviconDimensionPx: 16,
@@ -1321,21 +1321,21 @@ const FaviconCache = {
     networkBranchHardFailureCount: 0,
     networkBranchConsecutiveHardFailureCount: 0,
     networkBranchLastReevaluationAt: 0,
-    networkBranchReevaluationCooldownMs: 3000,
+    networkBranchReevaluationCooldownMs: 300000,
     networkBranchSwitchReason: '',
     networkBranchLastReevaluationReason: '',
     cacheQualityVersion: 8,
     cacheQualityVersionKey: 'bb_favicon_quality_version',
     firstInstallFastPathKey: 'bb_favicon_first_install_fast_path_done',
     firstInstallSkipDbReadsRemaining: 0,
-    memoryCache: new BoundedLruMap(4000), // {domain: faviconDataUrl}
+    memoryCache: new BoundedLruMap(4000), // {hostname: faviconDataUrl}
     dimensionCache: new BoundedLruMap(3000), // {faviconDataUrl: {width, height}}
     visualProfileCache: new BoundedLruMap(3000), // {faviconDataUrl: visual profile}
-    failureCache: new BoundedLruMap(4000), // {domain: timestamp}
+    failureCache: new BoundedLruMap(4000), // {hostname: timestamp}
     cravatarDefaultIconSha256: '2e30ff33270fd8687b0eb4d12652bfd967f23975f158bf8da93bece2ba4ab947',
     cravatarDefaultIconBytes: 492,
     cravatarDefaultCheckCache: new BoundedLruMap(1200), // {dataUrl: boolean}
-    pendingRequests: new Map(), // 正在请求的URL，避免重复请求
+    pendingRequests: new Map(), // inflight(hostname) 请求去重
 
     // 初始化 IndexedDB
     async init() {
@@ -1500,25 +1500,44 @@ const FaviconCache = {
         return typeof dataUrl === 'string' && dataUrl.startsWith('data:image/');
     },
 
+    _getHostnameKey(urlOrHostname) {
+        if (!urlOrHostname || typeof urlOrHostname !== 'string') return '';
+        const raw = String(urlOrHostname).trim();
+        if (!raw) return '';
+
+        if (raw.includes('://')) {
+            try {
+                return (new URL(raw).hostname || '').toLowerCase().replace(/\.$/, '');
+            } catch (_) {
+                return '';
+            }
+        }
+
+        return raw.toLowerCase().replace(/\.$/, '');
+    },
+
     _markFailureDomain(domain, timestamp = Date.now()) {
-        if (!domain) return;
+        const hostname = this._getHostnameKey(domain);
+        if (!hostname) return;
         const ts = Number(timestamp) || Date.now();
-        this.failureCache.set(domain, ts);
+        this.failureCache.set(hostname, ts);
     },
 
     _clearFailureDomain(domain) {
-        if (!domain) return;
-        this.failureCache.delete(domain);
+        const hostname = this._getHostnameKey(domain);
+        if (!hostname) return;
+        this.failureCache.delete(hostname);
     },
 
     _isFailureDomainActive(domain) {
-        if (!domain) return false;
-        const ts = Number(this.failureCache.get(domain) || 0);
+        const hostname = this._getHostnameKey(domain);
+        if (!hostname) return false;
+        const ts = Number(this.failureCache.get(hostname) || 0);
         if (!ts) return false;
         if ((Date.now() - ts) < this.failureTtlMs) {
             return true;
         }
-        this.failureCache.delete(domain);
+        this.failureCache.delete(hostname);
         return false;
     },
 
@@ -1529,8 +1548,8 @@ const FaviconCache = {
         }
 
         try {
-            const urlObj = new URL(url);
-            const domain = urlObj.hostname;
+            const domain = this._getHostnameKey(url);
+            if (!domain) return null;
 
             // 检查失败缓存
             if (this._isFailureDomainActive(domain)) {
@@ -1606,8 +1625,8 @@ const FaviconCache = {
         if (this.isInvalidUrl(url) || !this.isStoredFaviconData(dataUrl)) return;
 
         try {
-            const urlObj = new URL(url);
-            const domain = urlObj.hostname;
+            const domain = this._getHostnameKey(url);
+            if (!domain) return;
 
             // 更新内存缓存
             this.memoryCache.set(domain, dataUrl);
@@ -1638,8 +1657,8 @@ const FaviconCache = {
         if (this.isInvalidUrl(url)) return;
 
         try {
-            const urlObj = new URL(url);
-            const domain = urlObj.hostname;
+            const domain = this._getHostnameKey(url);
+            if (!domain) return;
 
             // 更新内存缓存
             this._markFailureDomain(domain);
@@ -1663,11 +1682,13 @@ const FaviconCache = {
     // 移除失败记录（当URL被修改时）
     async removeFailure(domain) {
         try {
+            const hostname = this._getHostnameKey(domain);
+            if (!hostname) return;
             if (!this.db) await this.init();
 
             const transaction = this.db.transaction([this.failureStoreName], 'readwrite');
             const store = transaction.objectStore(this.failureStoreName);
-            store.delete(domain);
+            store.delete(hostname);
         } catch (e) {
             // 静默失败
         }
@@ -1678,8 +1699,8 @@ const FaviconCache = {
         if (this.isInvalidUrl(url)) return;
 
         try {
-            const urlObj = new URL(url);
-            const domain = urlObj.hostname;
+            const domain = this._getHostnameKey(url);
+            if (!domain) return;
 
             // 清除内存缓存
             this.memoryCache.delete(domain);
@@ -2113,6 +2134,24 @@ const FaviconCache = {
         return;
     },
 
+    _ensureInFlightHostnameRequest(hostnameKey, url, options = {}) {
+        const requestKey = this._getHostnameKey(hostnameKey);
+        if (!requestKey) return Promise.resolve(fallbackIcon);
+
+        if (this.pendingRequests.has(requestKey)) {
+            return this.pendingRequests.get(requestKey);
+        }
+
+        const requestPromise = this._fetchFavicon(url, options)
+            .catch(() => fallbackIcon)
+            .finally(() => {
+                this.pendingRequests.delete(requestKey);
+            });
+
+        this.pendingRequests.set(requestKey, requestPromise);
+        return requestPromise;
+    },
+
     // 获取favicon（带缓存和请求合并）
     async fetch(url, options = {}) {
         if (this.isInvalidUrl(url)) {
@@ -2120,8 +2159,10 @@ const FaviconCache = {
         }
 
         try {
-            const urlObj = new URL(url);
-            const domain = urlObj.hostname;
+            const domain = this._getHostnameKey(url);
+            if (!domain) {
+                return fallbackIcon;
+            }
             const requestedMinDimension = Math.max(0, Number(options?.minDimensionPx) || 0);
             const strictMinDimension = requestedMinDimension > 0
                 ? Math.max(Math.max(1, Number(this.minFaviconDimensionPx) || 96), requestedMinDimension)
@@ -2135,9 +2176,39 @@ const FaviconCache = {
                 ? Math.max(1, Number(options?.cacheMinDimensionPx) || fallbackMinDimension)
                 : 0;
             const branchMode = this._resolveNetworkBranchForFetch();
-            const requestKey = `${domain}|${branchMode}|${strictMinDimension}|${fallbackMinDimension}`;
+            const speedFirst = options?.speedFirst === true;
 
-            // 1. 检查缓存
+            // 同步阶段优先返回当前可用值，避免前台阻塞。
+            if (this._isFailureDomainActive(domain)) {
+                return fallbackIcon;
+            }
+            if (this.memoryCache.has(domain)) {
+                const memoryHit = this.memoryCache.get(domain);
+                if (cacheMinDimension <= 0 || await this.isDataUrlAtLeast(memoryHit, cacheMinDimension)) {
+                    return memoryHit;
+                }
+            }
+
+            const requestOptions = {
+                strictMinDimensionPx: strictMinDimension,
+                fallbackMinDimensionPx: fallbackMinDimension,
+                branchMode
+            };
+
+            if (speedFirst) {
+                const networkPromise = this._ensureInFlightHostnameRequest(domain, url, requestOptions);
+                const cached = await this.get(url);
+                if (cached === 'failed') {
+                    return fallbackIcon;
+                }
+                if (cached) {
+                    if (cacheMinDimension <= 0 || await this.isDataUrlAtLeast(cached, cacheMinDimension)) {
+                        return cached;
+                    }
+                }
+                return await networkPromise;
+            }
+
             const cached = await this.get(url);
             if (cached === 'failed') {
                 return fallbackIcon;
@@ -2148,26 +2219,7 @@ const FaviconCache = {
                 }
             }
 
-            // 2. 检查是否已有相同请求在进行中（避免重复请求）
-            if (this.pendingRequests.has(requestKey)) {
-                return this.pendingRequests.get(requestKey);
-            }
-
-            // 3. 发起新请求
-            const requestPromise = this._fetchFavicon(url, {
-                strictMinDimensionPx: strictMinDimension,
-                fallbackMinDimensionPx: fallbackMinDimension,
-                branchMode
-            });
-            this.pendingRequests.set(requestKey, requestPromise);
-
-            try {
-                const result = await requestPromise;
-                return result;
-            } finally {
-                this.pendingRequests.delete(requestKey);
-            }
-
+            return await this._ensureInFlightHostnameRequest(domain, url, requestOptions);
         } catch (e) {
             return fallbackIcon;
         }
@@ -2179,8 +2231,11 @@ const FaviconCache = {
     async _fetchFavicon(url, options = {}) {
         return new Promise(async (resolve) => {
             try {
-                const urlObj = new URL(url);
-                const domain = urlObj.hostname;
+                const domain = this._getHostnameKey(url);
+                if (!domain) {
+                    resolve(fallbackIcon);
+                    return;
+                }
 
                 const strictMinDimension = Math.max(
                     1,
@@ -2215,8 +2270,6 @@ const FaviconCache = {
                 }
 
                 const attemptedSourceUrls = new Set();
-                let sawHardFailure = false;
-
                 const tryCandidateFromSource = async (faviconUrl, minDimensionPx, candidateBucket) => {
                     const minDimensionKey = Math.max(1, Number(minDimensionPx) || 1);
                     const attemptKey = `${faviconUrl}|${minDimensionKey}`;
@@ -2233,10 +2286,6 @@ const FaviconCache = {
                         sourceUrl: faviconUrl,
                         meta: loadResult && loadResult.meta ? loadResult.meta : null
                     });
-                    if (this._isHardFailureMeta(loadResult && loadResult.meta ? loadResult.meta : null)) {
-                        sawHardFailure = true;
-                    }
-
                     const result = loadResult && typeof loadResult.dataUrl === 'string' ? loadResult.dataUrl : '';
                     if (!result || result === fallbackIcon) {
                         if (activeBranchMode === 'overseas' && this.networkBranchMode === 'domestic') {
@@ -2338,10 +2387,8 @@ const FaviconCache = {
                     return;
                 }
 
-                // 所有源都失败，记录失败并返回 fallback（静默）
-                if (!sawHardFailure) {
-                    this.saveFailure(url);
-                }
+                // 所有源都失败，统一写入失败缓存（含 hard failure）
+                await this.saveFailure(url);
                 resolve(fallbackIcon);
 
             } catch (e) {
@@ -3757,8 +3804,8 @@ function getFaviconUrl(url) {
     }
 
     try {
-        const urlObj = new URL(url);
-        const domain = urlObj.hostname;
+        const domain = FaviconCache._getHostnameKey(url);
+        if (!domain) return fallbackIcon;
 
         // 【关键修复】先检查内存缓存（在 renderTreeView 时已预热）
         if (FaviconCache.memoryCache.has(domain)) {
@@ -3773,7 +3820,7 @@ function getFaviconUrl(url) {
         // 触发后台异步加载（不等待结果）
         // 注意：由于在 renderTreeView 时已经预热了缓存，
         // 这里只是作为兜底机制，处理动态添加的书签
-        FaviconCache.fetch(url).then(dataUrl => {
+        FaviconCache.fetch(url, { speedFirst: true }).then(dataUrl => {
             // 加载完成后，查找并更新所有使用这个URL的img标签
             if (dataUrl && dataUrl !== fallbackIcon) {
                 updateFaviconImages(url, dataUrl);
@@ -3818,8 +3865,8 @@ function resolveFaviconBindingUrlFromElement(element) {
 function updateFaviconImages(url, dataUrl) {
     let updatedCount = 0;
     try {
-        const urlObj = new URL(url);
-        const domain = urlObj.hostname;
+        const domain = FaviconCache._getHostnameKey(url);
+        if (!domain) return 0;
 
         const allImages = document.querySelectorAll(
             'img.tree-icon, img.canvas-bookmark-icon, img.search-result-favicon, img[data-bookmark-url], img[data-node-url], img[data-url]'
@@ -3830,7 +3877,7 @@ function updateFaviconImages(url, dataUrl) {
             if (!itemUrl) return;
 
             try {
-                const itemDomain = new URL(itemUrl).hostname;
+                const itemDomain = FaviconCache._getHostnameKey(itemUrl);
                 if (itemDomain !== domain) return;
 
                 img.src = dataUrl;
@@ -8640,7 +8687,8 @@ async function warmupFaviconCache(bookmarkUrls) {
         bookmarkUrls.forEach(url => {
             try {
                 if (!FaviconCache.isInvalidUrl(url)) {
-                    const domain = new URL(url).hostname;
+                    const domain = FaviconCache._getHostnameKey(url);
+                    if (!domain) return;
                     domains.add(domain);
                 }
             } catch (e) {
@@ -11975,8 +12023,8 @@ async function renderTreeView(forceRefresh = false) {
                         // 预热完成后，更新页面上所有使用fallback图标的img标签
                         allBookmarkUrls.forEach(url => {
                             try {
-                                const urlObj = new URL(url);
-                                const domain = urlObj.hostname;
+                                const domain = FaviconCache._getHostnameKey(url);
+                                if (!domain) return;
                                 const cachedFavicon = FaviconCache.memoryCache.get(domain);
                                 if (cachedFavicon && cachedFavicon !== fallbackIcon) {
                                     updateFaviconImages(url, cachedFavicon);
@@ -14066,27 +14114,31 @@ function setupRealtimeMessageListener() {
                 if (FaviconCache.isStoredFaviconData(message.favIconUrl)) {
                     const incomingDataUrl = message.favIconUrl;
                     Promise.resolve().then(async () => {
-                        const incomingDimensions = await FaviconCache.getDataUrlDimensions(incomingDataUrl);
-                        const incomingMinDimension = incomingDimensions
-                            ? Math.min(
-                                Number(incomingDimensions.width) || 0,
-                                Number(incomingDimensions.height) || 0
-                            )
-                            : 0;
-                        if (incomingMinDimension > 0 && incomingMinDimension < 16) {
-                            return;
-                        }
-
                         const existing = await FaviconCache.get(message.url);
-                        if (existing && existing !== 'failed' && FaviconCache.isStoredFaviconData(existing)) {
-                            const existingDimensions = await FaviconCache.getDataUrlDimensions(existing);
-                            const existingMinDimension = existingDimensions
-                                ? Math.min(
-                                    Number(existingDimensions.width) || 0,
-                                    Number(existingDimensions.height) || 0
-                                )
-                                : 0;
-                            if (existingMinDimension > 0 && incomingMinDimension > 0 && incomingMinDimension < existingMinDimension) {
+                        const canBackfillHole = !existing || existing === 'failed' || existing === fallbackIcon;
+                        const getDataUrlArea = (dataUrl) =>
+                            new Promise((resolve) => {
+                                if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+                                    resolve(0);
+                                    return;
+                                }
+                                const img = new Image();
+                                img.onload = () => {
+                                    const w = img.naturalWidth || img.width || 0;
+                                    const h = img.naturalHeight || img.height || 0;
+                                    resolve(w * h);
+                                };
+                                img.onerror = () => resolve(0);
+                                img.src = dataUrl;
+                            });
+
+                        if (!canBackfillHole) {
+                            const [existingArea, incomingArea] = await Promise.all([
+                                getDataUrlArea(existing),
+                                getDataUrlArea(incomingDataUrl)
+                            ]);
+                            const shouldSkipOverwrite = incomingArea > 0 && existingArea > 0 && incomingArea < existingArea;
+                            if (shouldSkipOverwrite) {
                                 return;
                             }
                         }

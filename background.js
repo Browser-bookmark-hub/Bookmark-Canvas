@@ -400,7 +400,15 @@ async function readBlobDimensions(blob) {
 async function fetchImageAsDataUrl(url, options = {}) {
   if (!url) {
     return options.includeMeta === true
-      ? { dataUrl: '', meta: { attempted: false, hardFailure: false, errorCode: 'invalid_url' } }
+      ? {
+        dataUrl: '',
+        meta: {
+          attempted: false,
+          hardFailure: false,
+          resultClass: 'invalid_content',
+          errorCode: 'invalid_url'
+        }
+      }
       : null;
   }
   const timeoutMs = Math.max(500, Number(options.timeoutMs) || 4000);
@@ -414,6 +422,28 @@ async function fetchImageAsDataUrl(url, options = {}) {
     if (code === 0 || code === 408) return true;
     return code >= 500 && code <= 599;
   };
+  const classifyResultByStatus = (statusCode) => (
+    isHardFailureStatus(statusCode) ? 'hard_failure' : 'invalid_content'
+  );
+  const isNonFetchableError = (error) => {
+    const name = String(error?.name || '').toLowerCase();
+    if (name === 'securityerror' || name === 'notsupportederror') return true;
+
+    const message = String(error?.message || '').toLowerCase();
+    const text = `${name} ${message}`;
+    if (text.includes('err_unknown_url_scheme')) return true;
+    if (text.includes('unknown url scheme')) return true;
+    if (text.includes('url scheme') && (text.includes('unsupported') || text.includes('not supported'))) {
+      return true;
+    }
+
+    const hasUrlHint = text.includes('url') || text.includes('scheme') || text.includes('protocol');
+    const hasUnsupportedHint = text.includes('unsupported')
+      || text.includes('not supported')
+      || text.includes('invalid')
+      || text.includes('failed to parse');
+    return hasUrlHint && hasUnsupportedHint;
+  };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => {
@@ -424,10 +454,12 @@ async function fetchImageAsDataUrl(url, options = {}) {
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) {
       const statusCode = Number(res.status) || 0;
+      const resultClass = classifyResultByStatus(statusCode);
       return wrap('', {
         attempted: true,
         statusCode,
-        hardFailure: isHardFailureStatus(statusCode),
+        hardFailure: resultClass === 'hard_failure',
+        resultClass,
         errorCode: `http_${statusCode || 0}`
       });
     }
@@ -438,6 +470,7 @@ async function fetchImageAsDataUrl(url, options = {}) {
         attempted: true,
         statusCode: Number(res.status) || 200,
         hardFailure: false,
+        resultClass: 'invalid_content',
         errorCode: 'non_image_content'
       });
     }
@@ -448,6 +481,7 @@ async function fetchImageAsDataUrl(url, options = {}) {
         attempted: true,
         statusCode: Number(res.status) || 200,
         hardFailure: false,
+        resultClass: 'invalid_content',
         errorCode: 'payload_too_large'
       });
     }
@@ -458,6 +492,7 @@ async function fetchImageAsDataUrl(url, options = {}) {
         attempted: true,
         statusCode: Number(res.status) || 200,
         hardFailure: false,
+        resultClass: 'invalid_content',
         errorCode: 'invalid_blob'
       });
     }
@@ -468,6 +503,7 @@ async function fetchImageAsDataUrl(url, options = {}) {
         attempted: true,
         statusCode: Number(res.status) || 200,
         hardFailure: false,
+        resultClass: 'invalid_content',
         errorCode: 'dimension_too_small'
       });
     }
@@ -478,6 +514,7 @@ async function fetchImageAsDataUrl(url, options = {}) {
         attempted: true,
         statusCode: Number(res.status) || 200,
         hardFailure: false,
+        resultClass: 'invalid_content',
         errorCode: 'invalid_data_url'
       });
     }
@@ -485,13 +522,21 @@ async function fetchImageAsDataUrl(url, options = {}) {
       attempted: true,
       statusCode: Number(res.status) || 200,
       hardFailure: false,
+      resultClass: 'success',
       errorCode: ''
     });
   } catch (error) {
-    const errorCode = error && error.name === 'AbortError' ? 'timeout' : 'fetch_failed';
+    const isTimeout = error && error.name === 'AbortError';
+    const resultClass = isTimeout
+      ? 'hard_failure'
+      : (isNonFetchableError(error) ? 'non_fetchable' : 'hard_failure');
+    const errorCode = isTimeout
+      ? 'timeout'
+      : (resultClass === 'non_fetchable' ? 'non_fetchable' : 'fetch_failed');
     return wrap('', {
       attempted: true,
-      hardFailure: true,
+      hardFailure: resultClass === 'hard_failure',
+      resultClass,
       errorCode
     });
   } finally {
@@ -516,17 +561,35 @@ if (browserAPI.tabs && browserAPI.tabs.onUpdated) {
         entries.slice(0, 500).forEach(([url]) => processedFavicons.delete(url));
       }
 
-      const dataUrl = await fetchImageAsDataUrl(changeInfo.favIconUrl || tab.favIconUrl, {
+      const fetchOptions = {
         minDimensionPx: 16,
         maxBytes: 512 * 1024,
-        timeoutMs: 4000
-      });
-      if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
+        timeoutMs: 4000,
+        includeMeta: true
+      };
+      const isFetchSuccess = (result) => {
+        if (!result || typeof result !== 'object') return false;
+        const dataUrl = typeof result.dataUrl === 'string' ? result.dataUrl : '';
+        const resultClass = String(result?.meta?.resultClass || '').toLowerCase();
+        return resultClass === 'success' && dataUrl.startsWith('data:image/');
+      };
+
+      let faviconFetchResult = await fetchImageAsDataUrl(tab.favIconUrl, fetchOptions);
+      if (!isFetchSuccess(faviconFetchResult)) {
+        const fallbackPath = `/_favicon?pageUrl=${encodeURIComponent(tab.url)}&size=32`;
+        const fallbackUrl = browserAPI?.runtime?.getURL
+          ? browserAPI.runtime.getURL(fallbackPath)
+          : fallbackPath;
+        faviconFetchResult = await fetchImageAsDataUrl(fallbackUrl, fetchOptions);
+      }
+
+      const shouldSendUpdate = isFetchSuccess(faviconFetchResult);
+      if (shouldSendUpdate) {
         try {
           browserAPI.runtime.sendMessage({
             action: 'updateFaviconFromTab',
             url: tab.url,
-            favIconUrl: dataUrl
+            favIconUrl: faviconFetchResult.dataUrl
           }).catch(() => {});
         } catch (_) {}
       }
