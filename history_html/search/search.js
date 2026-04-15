@@ -5137,7 +5137,7 @@ function renderCanvasSearchResults(results, options = {}) {
                             const badgeClass = disableLocationJumpBadges
                                 ? 'search-result-badge-disabled'
                                 : 'search-result-badge-interactive';
-                            const styleBase = `cursor:${badgeCursor}; margin-left:4px; padding:0 6px; font-family:monospace; font-weight:bold; color:var(--text-secondary); background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:4px; font-size:11px;`;
+                            const styleBase = `cursor:${badgeCursor}; margin-left:4px; padding:0 6px; font-family:var(--font-mono, monospace); font-weight:bold; color:var(--text-secondary); background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:4px; font-size:11px;`;
 
                             // #A
                             const disabledAttrBase = `data-search-nav-disabled="true" aria-disabled="true"`;
@@ -5181,7 +5181,7 @@ function renderCanvasSearchResults(results, options = {}) {
                     const chipClass = disableLocationJumpBadges
                         ? 'search-loc-chip search-loc-chip-disabled'
                         : 'search-loc-chip';
-                    const styleBase = `cursor:${chipCursor}; margin-left:4px; padding:0 6px; font-family:monospace; font-weight:bold; color:var(--text-secondary); background:var(--bg-secondary); border:1px solid ${sectionColor}80; border-radius:4px; font-size:11px;`;
+                    const styleBase = `cursor:${chipCursor}; margin-left:4px; padding:0 6px; font-family:var(--font-mono, monospace); font-weight:bold; color:var(--text-secondary); background:var(--bg-secondary); border:1px solid ${sectionColor}80; border-radius:4px; font-size:11px;`;
 
                     // Use .search-loc-chip class as it triggers 'handleSearchResultsPanelClick' with data-loc-... attributes
                     const attr = disableLocationJumpBadges

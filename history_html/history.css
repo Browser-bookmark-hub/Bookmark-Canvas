@@ -1,5 +1,8 @@
 /* ==================== 主题变量 ==================== */
 :root {
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Segoe UI Variable", "SF Pro Text", "Roboto", "Helvetica", "Arial", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
     /* Light Theme */
     --bg-primary: #ffffff;
     --bg-secondary: #f8f9fa;
@@ -535,7 +538,7 @@ html.layout-preload-active.canvas-view-active.layout-preload-node-maximized-acti
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+    font-family: var(--font-sans);
     background: var(--bg-primary);
     color: var(--text-primary);
     line-height: 1.6;
@@ -543,6 +546,14 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+input,
+textarea,
+select,
+button,
+option {
+    font: inherit;
 }
 
 /* ==================== 头部导航 ==================== */
@@ -15090,7 +15101,7 @@ body.canvas-popover-active .md-list-popover {
 }
 
 .range-slider-labels span {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--font-sans);
     font-size: 11px;
     font-weight: 500;
     color: var(--text-tertiary);

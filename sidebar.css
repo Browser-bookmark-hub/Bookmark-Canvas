@@ -1,5 +1,7 @@
 :root {
   color-scheme: light;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Segoe UI Variable", "SF Pro Text", "Roboto", "Helvetica", "Arial", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --panel-bg: #f2f4f7;
   --panel-bg-strong: #e7ebf1;
   --panel-gradient: linear-gradient(180deg, #f8fafc 0%, #edf1f6 100%);
@@ -24,9 +26,17 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Segoe UI Variable", "Segoe UI", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-sans);
   background: var(--panel-gradient);
   color: var(--text-primary);
+}
+
+input,
+textarea,
+select,
+button,
+option {
+  font: inherit;
 }
 
 .shell {
