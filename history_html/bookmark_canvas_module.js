@@ -16,7 +16,18 @@ const NODE_LAYOUT_ZOOM_STORAGE_KEY = 'canvas-node-layout-zoom-v1';
 const NODE_LAYOUT_ZOOM_DEFAULT = 150;
 const NODE_LAYOUT_ZOOM_DEFAULT_SECTION = 125;
 const NODE_LAYOUT_ZOOM_MIN = 50;
-const NODE_LAYOUT_ZOOM_MAX = 200;
+const NODE_LAYOUT_ZOOM_MAX = 320;
+const NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM = {
+    mac: { md: NODE_LAYOUT_ZOOM_DEFAULT, section: NODE_LAYOUT_ZOOM_DEFAULT_SECTION, baseDpr: 2 },
+    windows: { md: 200, section: 200, baseDpr: 1 },
+    linux: { md: 185, section: 180, baseDpr: 1 },
+    other: { md: 165, section: 145, baseDpr: 1 }
+};
+const NODE_LAYOUT_ZOOM_AUTO_SCALE_MIN = 0.90;
+const NODE_LAYOUT_ZOOM_AUTO_SCALE_MAX = 1.25;
+const NODE_LAYOUT_ZOOM_DPR_SCALE_EXPONENT = 0.35;
+const NODE_LAYOUT_ZOOM_FONT_SCALE_EXPONENT = 0.45;
+const NODE_LAYOUT_ZOOM_FONT_BASE_PX = 16;
 const NODE_LAYOUT_ZOOM_STEP = 5;
 const NODE_LAYOUT_ZOOM_STABILIZE_DELAY_MS = 96;
 const nodeLayoutZoomStabilizeTimerMap = new WeakMap();
@@ -11288,11 +11299,53 @@ function __normalizeLayoutZoomPercent(value, fallback) {
     return Math.round(safe);
 }
 
+function __getLayoutZoomPlatformKey() {
+    if (CANVAS_RUNTIME_PLATFORM && CANVAS_RUNTIME_PLATFORM.isWindows) return 'windows';
+    if (CANVAS_RUNTIME_PLATFORM && CANVAS_RUNTIME_PLATFORM.isLinux) return 'linux';
+    if (CANVAS_RUNTIME_PLATFORM && CANVAS_RUNTIME_PLATFORM.isMac) return 'mac';
+    return 'other';
+}
+
+function __getNodeLayoutZoomPlatformBaseline(element) {
+    const key = __getLayoutZoomPlatformKey();
+    const preset = NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM[key] || NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other;
+    const isMdNode = !!(element && element.classList && element.classList.contains('md-canvas-node'));
+    return {
+        percent: isMdNode ? preset.md : preset.section,
+        baseDpr: Number.isFinite(preset.baseDpr) && preset.baseDpr > 0 ? preset.baseDpr : 1
+    };
+}
+
+function __getNodeLayoutZoomEnvironmentScale(baseDpr = 1) {
+    const safeBaseDpr = Number.isFinite(baseDpr) && baseDpr > 0 ? baseDpr : 1;
+    let dprScale = 1;
+    try {
+        const dpr = (typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0)
+            ? window.devicePixelRatio
+            : 1;
+        const ratio = __clampNumber(dpr / safeBaseDpr, 0.5, 3.5, 1);
+        dprScale = Math.pow(ratio, NODE_LAYOUT_ZOOM_DPR_SCALE_EXPONENT);
+    } catch (_) { }
+
+    let fontScale = 1;
+    try {
+        const root = (typeof document !== 'undefined') ? document.documentElement : null;
+        if (root && typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+            const rootFontPx = parseFloat(window.getComputedStyle(root).fontSize || '');
+            const fontRatio = __clampNumber(rootFontPx / NODE_LAYOUT_ZOOM_FONT_BASE_PX, 0.75, 2.0, 1);
+            fontScale = Math.pow(fontRatio, NODE_LAYOUT_ZOOM_FONT_SCALE_EXPONENT);
+        }
+    } catch (_) { }
+
+    const combinedScale = Math.max(dprScale, fontScale);
+    return __clampNumber(combinedScale, NODE_LAYOUT_ZOOM_AUTO_SCALE_MIN, NODE_LAYOUT_ZOOM_AUTO_SCALE_MAX, 1);
+}
+
 function __getDefaultLayoutZoomPercentByElement(element) {
-    if (element && element.classList && element.classList.contains('md-canvas-node')) {
-        return NODE_LAYOUT_ZOOM_DEFAULT;
-    }
-    return NODE_LAYOUT_ZOOM_DEFAULT_SECTION;
+    const baseline = __getNodeLayoutZoomPlatformBaseline(element);
+    const autoScale = __getNodeLayoutZoomEnvironmentScale(baseline.baseDpr);
+    const computed = Math.round(baseline.percent * autoScale);
+    return __normalizeLayoutZoomPercent(computed, baseline.percent);
 }
 
 function __parseLayoutZoomInput(value, fallback) {
@@ -11481,10 +11534,15 @@ function __bindNodeLayoutZoomInput(element) {
     });
 }
 
-function __createLayoutZoomControls(buttonClass, lang, defaultPercent = NODE_LAYOUT_ZOOM_DEFAULT_SECTION) {
+function __createLayoutZoomControls(buttonClass, lang, defaultPercent = null) {
     const controls = document.createElement('div');
     controls.className = 'canvas-layout-zoom-controls';
     controls.setAttribute('data-layout-zoom-controls', 'true');
+    const sectionDefaultPercent = __getDefaultLayoutZoomPercentByElement(null);
+    const resolvedDefaultPercent = __normalizeLayoutZoomPercent(
+        Number.isFinite(defaultPercent) ? defaultPercent : sectionDefaultPercent,
+        sectionDefaultPercent
+    );
 
     const zoomOutLabel = getLayoutZoomLabel('out', lang);
     const zoomInLabel = getLayoutZoomLabel('in', lang);
@@ -11507,7 +11565,7 @@ function __createLayoutZoomControls(buttonClass, lang, defaultPercent = NODE_LAY
     zoomValue.setAttribute('title', zoomValueLabel);
     zoomValue.setAttribute('data-tooltip', zoomValueLabel);
     zoomValue.setAttribute('aria-label', zoomValueLabel);
-    zoomValue.value = `${defaultPercent}%`;
+    zoomValue.value = `${resolvedDefaultPercent}%`;
 
     const zoomInBtn = document.createElement('button');
     zoomInBtn.type = 'button';
@@ -16455,6 +16513,7 @@ function renderMdNode(node) {
     const layoutZoomOutTitle = getLayoutZoomLabel('out', lang);
     const layoutZoomInTitle = getLayoutZoomLabel('in', lang);
     const layoutZoomValueTitle = getLayoutZoomLabel('value', lang);
+    const mdLayoutZoomDefaultPercent = __getDefaultLayoutZoomPercentByElement(el);
 
     // 多语言：import-container 的两个删除按钮
     const deleteFrameTitle = lang === 'en' ? 'Delete Frame Only' : '仅删除框体';
@@ -16464,7 +16523,7 @@ function renderMdNode(node) {
             <button class="md-node-toolbar-btn canvas-layout-zoom-btn" data-action="layout-zoom-out" data-tooltip="${layoutZoomOutTitle}" title="${layoutZoomOutTitle}">
                 <i class="fas fa-minus"></i>
             </button>
-            <input class="canvas-layout-zoom-value canvas-layout-zoom-input" data-layout-zoom-value title="${layoutZoomValueTitle}" data-tooltip="${layoutZoomValueTitle}" aria-label="${layoutZoomValueTitle}" value="${NODE_LAYOUT_ZOOM_DEFAULT}%" />
+            <input class="canvas-layout-zoom-value canvas-layout-zoom-input" data-layout-zoom-value title="${layoutZoomValueTitle}" data-tooltip="${layoutZoomValueTitle}" aria-label="${layoutZoomValueTitle}" value="${mdLayoutZoomDefaultPercent}%" />
             <button class="md-node-toolbar-btn canvas-layout-zoom-btn" data-action="layout-zoom-in" data-tooltip="${layoutZoomInTitle}" title="${layoutZoomInTitle}">
                 <i class="fas fa-plus"></i>
             </button>
