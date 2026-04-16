@@ -19,12 +19,12 @@ const NODE_LAYOUT_ZOOM_MIN = 50;
 const NODE_LAYOUT_ZOOM_MAX = 320;
 const NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM = {
     mac: { md: NODE_LAYOUT_ZOOM_DEFAULT, section: NODE_LAYOUT_ZOOM_DEFAULT_SECTION, baseDpr: 2 },
-    windows: { md: 200, section: 200, baseDpr: 1 },
-    linux: { md: 185, section: 180, baseDpr: 1 },
-    other: { md: 165, section: 145, baseDpr: 1 }
+    windows: { md: NODE_LAYOUT_ZOOM_DEFAULT, section: NODE_LAYOUT_ZOOM_DEFAULT_SECTION, baseDpr: 1 },
+    linux: { md: NODE_LAYOUT_ZOOM_DEFAULT, section: NODE_LAYOUT_ZOOM_DEFAULT_SECTION, baseDpr: 1 },
+    other: { md: NODE_LAYOUT_ZOOM_DEFAULT, section: NODE_LAYOUT_ZOOM_DEFAULT_SECTION, baseDpr: 1 }
 };
-const NODE_LAYOUT_ZOOM_AUTO_SCALE_MIN = 0.90;
-const NODE_LAYOUT_ZOOM_AUTO_SCALE_MAX = 1.25;
+const NODE_LAYOUT_ZOOM_AUTO_SCALE_MIN = 0.95;
+const NODE_LAYOUT_ZOOM_AUTO_SCALE_MAX = 1.10;
 const NODE_LAYOUT_ZOOM_DPR_SCALE_EXPONENT = 0.35;
 const NODE_LAYOUT_ZOOM_FONT_SCALE_EXPONENT = 0.45;
 const NODE_LAYOUT_ZOOM_FONT_BASE_PX = 16;
@@ -95,7 +95,8 @@ const CanvasState = {
         animationId: null,
         lastDeltaX: 0,
         lastDeltaY: 0,
-        lastTime: 0
+        lastTime: 0,
+        inputType: 'none'
     },
     // 低缩放细节降级（性能优化）
     lowDetailEnabled: true,
@@ -1130,6 +1131,12 @@ let smoothWheelZoomTarget = null;
 let smoothWheelZoomCenterX = null;
 let smoothWheelZoomCenterY = null;
 let smoothWheelZoomOptions = null;
+let trackpadZoomInertiaFrame = null;
+let trackpadZoomInertiaVelocity = 0;
+let trackpadZoomInertiaLastInputTime = 0;
+let trackpadZoomInertiaCenterX = null;
+let trackpadZoomInertiaCenterY = null;
+let trackpadZoomInertiaOptions = null;
 // 性能优化：滚动更新去抖（RAF）
 let scrollUpdateFrame = null;
 let pendingScrollRequest = null;
@@ -1145,6 +1152,14 @@ let boundsUpdatePending = false;
 let scrollStopTimer = null;
 let isScrolling = false;
 const SCROLL_STOP_DELAY = 150; // 滚动停止后延迟加载时间
+const PAN_INERTIA_INPUT_NONE = 'none';
+const PAN_INERTIA_INPUT_WHEEL = 'wheel';
+const WHEEL_PAN_INERTIA_MAX_START_AGE_MS = 260;
+const WHEEL_PAN_INERTIA_MIN_SPEED = 0.35;
+const WHEEL_PAN_INERTIA_MULTIPLIER = 0.72;
+const WHEEL_PAN_INERTIA_DAMPING = 0.84;
+const WHEEL_PAN_INERTIA_STOP_THRESHOLD = 0.12;
+const WHEEL_PAN_INERTIA_SAMPLE_BLEND = 0.72;
 
 // 性能优化：缓存 DOM 元素引用，避免重复查询
 let cachedCanvasContainer = null;
@@ -1804,19 +1819,27 @@ const TRACKPAD_ZOOM_RATE_MAX = 3.0;
 const TRACKPAD_ZOOM_RATE_DEFAULT = 1.0;
 const TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER = 3.0;
 const TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR = 100;
-const TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER = 0.40;
-const TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN = 0.42;
-const TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX = 0.90;
+const TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER = 0.44;
+const TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN = 0.36;
+const TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX = 0.84;
 const TRACKPAD_ZOOM_STEP_CAP_MIN = 1.02;
-const TRACKPAD_ZOOM_STEP_CAP_MAX = 1.12;
-const TRACKPAD_ZOOM_IDLE_RESET_MS = 64;
+const TRACKPAD_ZOOM_STEP_CAP_MAX = 1.14;
+const TRACKPAD_ZOOM_IDLE_RESET_MS = 96;
+const TRACKPAD_ZOOM_INERTIA_START_DELAY_MS = 22;
+const TRACKPAD_ZOOM_INERTIA_DAMPING = 0.86;
+const TRACKPAD_ZOOM_INERTIA_MIN_LOG_DELTA = 0.00075;
+const TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP = 0.028;
+const TRACKPAD_ZOOM_INERTIA_INPUT_BLEND = 0.64;
 const ZOOM_INPUT_TOUCHPAD_DELTA_MAX = 10;
 const ZOOM_INPUT_WHEEL_DELTA_MIN = 24;
 const ZOOM_INPUT_MODE_STICKY_MS = 180;
 const ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX = 6;
 const DISCRETE_WHEEL_EVENT_DELTA_MIN = 24;
-const CANVAS_WHEEL_LINE_PIXEL = 16;
+const CANVAS_WHEEL_LINE_PIXEL = 12;
 const CTRL_TOUCHPAD_SCROLL_DELTA_SCALE = 24;
+const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 0.88;
+const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 0.82;
+const WINDOWS_LINUX_CTRL_TOUCHPAD_DELTA_REF = 24;
 const WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_MAX = 140;
 const WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_X_MAX = 10;
 const CANVAS_RUNTIME_PLATFORM = (() => {
@@ -6065,9 +6088,9 @@ function setupCanvasZoomAndPan() {
             // 标记正在滚动
             markScrolling();
 
-            // 检测是否为触控板
-            const isTouchpad = (Math.abs(e.deltaY) < 50 || Math.abs(e.deltaX) < 50) && e.deltaMode === 0;
             const normalizedWheel = __normalizeCanvasWheelEventDeltas(e);
+            // 检测是否为触控板（避免把 Windows 离散滚轮误判成触控板）
+            const isTouchpad = __isCanvasTouchpadLikeScrollInput(e, normalizedWheel);
             const wheelDeltaX = normalizedWheel.deltaX;
             const wheelDeltaY = normalizedWheel.deltaY;
 
@@ -6202,13 +6225,15 @@ function setupCanvasZoomAndPan() {
             // 触控板/滚轮隔离区：避免滚轮被误识别为触控板导致绕过曲线和磁矩点
             const zoomInputMode = resolveCanvasZoomInputMode(e);
             const isTouchpad = zoomInputMode === 'touchpad';
+            const isDiscreteWheelZoom = __isCanvasDiscreteWheelEvent(e);
 
             // Shift+滚轮在某些浏览器会变成横向滚动，需要使用 deltaX 或 deltaY
             const normalizedWheel = __normalizeCanvasWheelEventDeltas(e);
             const rawDelta = normalizedWheel.deltaY !== 0 ? -normalizedWheel.deltaY : -normalizedWheel.deltaX;
-            const deltaScale = isTouchpad
-                ? (CTRL_TOUCHPAD_SCROLL_DELTA_SCALE * getCanvasTrackpadZoomRate())
-                : 1;
+            let deltaScale = 1;
+            if (!isTouchpad && CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheelZoom) {
+                deltaScale = WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR;
+            }
             const scaledDelta = rawDelta * deltaScale;
 
             // [FIX] 核心修复：消除“钝感”和“阶梯感”
@@ -6219,27 +6244,31 @@ function setupCanvasZoomAndPan() {
                 ? smoothWheelTargetZoom
                 : (pendingZoomRequest ? pendingZoomRequest.zoom : CanvasState.zoom);
 
-            // 缩放磁矩：接近关键阈值时减速，离开附近恢复正常曲线
             const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
             const displayZoomForCalc = baseZoomForCalc / base;
             let zoomFactor = 1;
-            // 统一策略：Ctrl + 滚轮 / Ctrl + 双指滑动 都走「滚轮曲线 + 磁矩点」路径。
-            // 触控板仅在输入幅度上做缩放（deltaScale），不再绕开磁矩算法。
-            const nextDisplayZoomNoMagnet = (baseZoomForCalc * Math.exp(scaledDelta * zoomSpeed)) / base;
-            const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
-            const wheelCurveSpeedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
-            const effectiveDelta = scaledDelta * magnet.factor * wheelCurveSpeedFactor * ZOOM_SPEED_GLOBAL_MULTIPLIER;
+            if (isTouchpad) {
+                // 触控板缩放独立：只使用触控板专属速率与平滑，不吃滚轮曲线/磁矩。
+                // 注意：这里必须使用原始 rawDelta，避免与上游 deltaScale 叠加导致速率过快。
+                zoomFactor = getCanvasTrackpadZoomFactor(rawDelta, displayZoomForCalc);
+            } else {
+                // 滚轮缩放：走曲线 + 磁矩
+                const nextDisplayZoomNoMagnet = (baseZoomForCalc * Math.exp(scaledDelta * zoomSpeed)) / base;
+                const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
+                const wheelCurveSpeedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
+                const effectiveDelta = scaledDelta * magnet.factor * wheelCurveSpeedFactor * ZOOM_SPEED_GLOBAL_MULTIPLIER;
 
-            // 计算缩放因子：delta > 0 放大，delta < 0 缩小
-            // 使用 Math.exp 实现指数缩放，确保放大和缩小是对称的
-            zoomFactor = Math.exp(effectiveDelta * zoomSpeed);
+                // 计算缩放因子：delta > 0 放大，delta < 0 缩小
+                // 使用 Math.exp 实现指数缩放，确保放大和缩小是对称的
+                zoomFactor = Math.exp(effectiveDelta * zoomSpeed);
 
-            // 快速缩放时避免“一步跨过磁矩区”：在磁矩附近对每次事件的最大步进做限制
-            // 这样高速/普通速度都能感受到“缓慢区”，同时避免普通速度出现明显“顿挫停顿”。
-            if (magnet && magnet.strength > 0) {
-                const cap = Math.max(1.02, Math.min(1.10, 1.10 - 0.08 * magnet.strength));
-                if (zoomFactor > cap) zoomFactor = cap;
-                if (zoomFactor < (1 / cap)) zoomFactor = 1 / cap;
+                // 快速缩放时避免“一步跨过磁矩区”：在磁矩附近对每次事件的最大步进做限制
+                // 这样高速/普通速度都能感受到“缓慢区”，同时避免普通速度出现明显“顿挫停顿”。
+                if (magnet && magnet.strength > 0) {
+                    const cap = Math.max(1.02, Math.min(1.10, 1.10 - 0.08 * magnet.strength));
+                    if (zoomFactor > cap) zoomFactor = cap;
+                    if (zoomFactor < (1 / cap)) zoomFactor = 1 / cap;
+                }
             }
             let newZoom = baseZoomForCalc * zoomFactor;
 
@@ -6247,13 +6276,20 @@ function setupCanvasZoomAndPan() {
 
             // 使用优化的缩放更新，滚动时跳过边界计算
             const zoomOptions = { recomputeBounds: false, skipSave: false, skipScrollbarUpdate: true };
-            if (__shouldSmoothCanvasWheelZoom(e, zoomInputMode)) {
+            if (isTouchpad) {
+                __cancelCanvasSmoothWheelZoom();
+                scheduleZoomUpdate(newZoom, mouseX, mouseY, zoomOptions);
+                __pushCanvasTrackpadZoomInertiaFromFactor(zoomFactor, mouseX, mouseY, zoomOptions);
+            } else if (__shouldSmoothCanvasWheelZoom(e, zoomInputMode)) {
+                __cancelCanvasTrackpadZoomInertia();
                 __queueCanvasSmoothWheelZoom(newZoom, mouseX, mouseY, zoomOptions);
             } else {
                 __cancelCanvasSmoothWheelZoom();
+                __cancelCanvasTrackpadZoomInertia();
                 scheduleZoomUpdate(newZoom, mouseX, mouseY, zoomOptions);
             }
         } else if (shouldHandleCustomScroll(e)) {
+            __cancelCanvasTrackpadZoomInertia();
             handleCanvasCustomScroll(e);
         }
     }, { passive: false });
@@ -8148,9 +8184,10 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
     const baseFactor = Math.max(0.005, getCanvasZoomSpeedFactor(dz));
     const maxFactor = ZOOM_CURVE_ABS_MAX_FACTOR;
     const travel = Math.abs(Math.log(nextDz / dz));
-    const speedBoost = Math.max(0, Math.min(1, travel / 0.08));
-    const widthBoost = 1 + speedBoost * 0.8;
-    const strengthBoost = 1 + speedBoost * 0.6;
+    const speedBoostRef = CANVAS_RUNTIME_WINDOWS_LIKE ? 0.14 : 0.08;
+    const speedBoost = Math.max(0, Math.min(1, travel / speedBoostRef));
+    const widthBoost = 1 + speedBoost * (CANVAS_RUNTIME_WINDOWS_LIKE ? 0.45 : 0.8);
+    const strengthBoost = 1 + speedBoost * (CANVAS_RUNTIME_WINDOWS_LIKE ? 0.35 : 0.6);
 
     const settings = getCanvasZoomMagnetSettings();
     const useDefaultCurve = shouldUseDefaultZoomCurve();
@@ -8337,6 +8374,30 @@ function __isCanvasDiscreteWheelEvent(event) {
     return Number.isInteger(absDeltaX) && Number.isInteger(absDeltaY) && primaryDelta >= 8;
 }
 
+function __isCanvasTouchpadLikeScrollInput(event, normalizedDeltas = null) {
+    if (!event) return false;
+    if (Number(event.deltaMode) !== 0) return false;
+    if (__isCanvasDiscreteWheelEvent(event)) return false;
+
+    const source = (normalizedDeltas && typeof normalizedDeltas === 'object') ? normalizedDeltas : event;
+    const absDeltaX = Math.abs(Number(source.deltaX) || 0);
+    const absDeltaY = Math.abs(Number(source.deltaY) || 0);
+    const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
+    if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return false;
+
+    if (primaryDelta <= ZOOM_INPUT_TOUCHPAD_DELTA_MAX) return true;
+
+    if (primaryDelta < ZOOM_INPUT_WHEEL_DELTA_MIN) {
+        const rawAbsDeltaX = Math.abs(Number(event.deltaX) || 0);
+        const rawAbsDeltaY = Math.abs(Number(event.deltaY) || 0);
+        const hasFractional = (rawAbsDeltaX > 0 && !Number.isInteger(rawAbsDeltaX))
+            || (rawAbsDeltaY > 0 && !Number.isInteger(rawAbsDeltaY));
+        if (hasFractional) return true;
+    }
+
+    return false;
+}
+
 function __shouldSmoothCanvasWheelZoom(event, zoomInputMode) {
     if (zoomInputMode !== 'wheel') return false;
     return __isCanvasDiscreteWheelEvent(event);
@@ -8427,10 +8488,10 @@ function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
 
     const alphaBase = Math.max(
         TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN,
-        Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, 0.42 + absDelta / 20)
+        Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, 0.36 + absDelta / 26)
     );
     const alpha = directionFlip
-        ? Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, alphaBase + 0.16)
+        ? Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, alphaBase + 0.12)
         : alphaBase;
 
     let smoothedLogDelta = hasPrev
@@ -8438,7 +8499,7 @@ function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
         : targetLogDelta;
 
     // 手势趋近停止时快速贴近目标，避免尾巴拖拽造成“粘手”
-    if (Math.abs(targetLogDelta) < 0.0025 && Math.abs(smoothedLogDelta) < 0.0045) {
+    if (Math.abs(targetLogDelta) < 0.0012 && Math.abs(smoothedLogDelta) < 0.0022) {
         smoothedLogDelta = targetLogDelta;
     }
 
@@ -10333,28 +10394,75 @@ function scheduleDormancyUpdate(delayMs = null) {
 }
 
 // 惯性滚动相关函数
-function startInertiaScroll() {
-    // 检查是否有足够的速度启动惯性滚动
-    const velocityThreshold = 0.5; // 最小速度阈值
-    const timeSinceLastScroll = Date.now() - CanvasState.inertiaState.lastTime;
+function __resolveCanvasPanInertiaInputType(isTouchpad, isDiscreteWheel) {
+    if (!isTouchpad && CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheel) return PAN_INERTIA_INPUT_WHEEL;
+    return PAN_INERTIA_INPUT_NONE;
+}
 
-    // 如果距离上次滚动太久（超过100ms），不启动惯性滚动
-    if (timeSinceLastScroll > 100) {
+function __resetCanvasPanInertiaSample() {
+    CanvasState.inertiaState.lastDeltaX = 0;
+    CanvasState.inertiaState.lastDeltaY = 0;
+    CanvasState.inertiaState.lastTime = 0;
+    CanvasState.inertiaState.inputType = PAN_INERTIA_INPUT_NONE;
+}
+
+function __updateCanvasPanInertiaSample(inputType, panDeltaX, panDeltaY) {
+    if (inputType !== PAN_INERTIA_INPUT_WHEEL) {
+        __resetCanvasPanInertiaSample();
         return;
     }
 
-    const absVelocityX = Math.abs(CanvasState.inertiaState.lastDeltaX);
-    const absVelocityY = Math.abs(CanvasState.inertiaState.lastDeltaY);
+    const sampleX = Number(panDeltaX) || 0;
+    const sampleY = Number(panDeltaY) || 0;
+    const blend = WHEEL_PAN_INERTIA_SAMPLE_BLEND;
+    if (blend >= 1) {
+        CanvasState.inertiaState.lastDeltaX = sampleX;
+        CanvasState.inertiaState.lastDeltaY = sampleY;
+    } else {
+        CanvasState.inertiaState.lastDeltaX = (CanvasState.inertiaState.lastDeltaX * (1 - blend)) + (sampleX * blend);
+        CanvasState.inertiaState.lastDeltaY = (CanvasState.inertiaState.lastDeltaY * (1 - blend)) + (sampleY * blend);
+    }
+    CanvasState.inertiaState.lastTime = Date.now();
+    CanvasState.inertiaState.inputType = inputType;
+}
+
+function __getCanvasPanInertiaParams(inputType) {
+    if (inputType === PAN_INERTIA_INPUT_WHEEL) {
+        return {
+            maxStartAgeMs: WHEEL_PAN_INERTIA_MAX_START_AGE_MS,
+            minSpeed: WHEEL_PAN_INERTIA_MIN_SPEED,
+            multiplier: WHEEL_PAN_INERTIA_MULTIPLIER,
+            damping: WHEEL_PAN_INERTIA_DAMPING,
+            stopThreshold: WHEEL_PAN_INERTIA_STOP_THRESHOLD
+        };
+    }
+    return null;
+}
+
+function startInertiaScroll() {
+    const inputType = CanvasState.inertiaState.inputType || PAN_INERTIA_INPUT_NONE;
+    const params = __getCanvasPanInertiaParams(inputType);
+    if (!params) {
+        return;
+    }
+    const timeSinceLastScroll = Date.now() - (Number(CanvasState.inertiaState.lastTime) || 0);
+    if (!Number.isFinite(timeSinceLastScroll) || timeSinceLastScroll > params.maxStartAgeMs) {
+        __resetCanvasPanInertiaSample();
+        return;
+    }
+
+    const absVelocityX = Math.abs(Number(CanvasState.inertiaState.lastDeltaX) || 0);
+    const absVelocityY = Math.abs(Number(CanvasState.inertiaState.lastDeltaY) || 0);
 
     // 如果速度太小，不启动惯性滚动
-    if (absVelocityX < velocityThreshold && absVelocityY < velocityThreshold) {
+    if (absVelocityX < params.minSpeed && absVelocityY < params.minSpeed) {
+        __resetCanvasPanInertiaSample();
         return;
     }
 
-    // 设置初始速度（放大系数，让惯性更明显）
-    const inertiaMultiplier = 1.2;
-    CanvasState.inertiaState.velocityX = CanvasState.inertiaState.lastDeltaX * inertiaMultiplier;
-    CanvasState.inertiaState.velocityY = CanvasState.inertiaState.lastDeltaY * inertiaMultiplier;
+    // 速度单位使用 panDelta（像素偏移），保证滚轮/触控板同一套惯性模型可控
+    CanvasState.inertiaState.velocityX = CanvasState.inertiaState.lastDeltaX * params.multiplier;
+    CanvasState.inertiaState.velocityY = CanvasState.inertiaState.lastDeltaY * params.multiplier;
     CanvasState.inertiaState.isActive = true;
 
     // 启动惯性滚动动画
@@ -10366,16 +10474,21 @@ function runInertiaScroll() {
         return;
     }
 
-    const scrollFactor = 1.0 / getCanvasZoomForScrollFactor();
-    const damping = 0.92; // 阻尼系数，越小减速越快
-    const stopThreshold = 0.1; // 速度低于此值时停止
+    const inputType = CanvasState.inertiaState.inputType || PAN_INERTIA_INPUT_NONE;
+    const params = __getCanvasPanInertiaParams(inputType);
+    if (!params) {
+        cancelInertiaScroll();
+        return;
+    }
+    const damping = params.damping;
+    const stopThreshold = params.stopThreshold;
 
     // 应用速度
     if (Math.abs(CanvasState.inertiaState.velocityX) > stopThreshold) {
-        CanvasState.panOffsetX -= CanvasState.inertiaState.velocityX * scrollFactor;
+        CanvasState.panOffsetX += CanvasState.inertiaState.velocityX;
     }
     if (Math.abs(CanvasState.inertiaState.velocityY) > stopThreshold) {
-        CanvasState.panOffsetY -= CanvasState.inertiaState.velocityY * scrollFactor;
+        CanvasState.panOffsetY += CanvasState.inertiaState.velocityY;
     }
 
     // 应用阻尼
@@ -10396,6 +10509,7 @@ function runInertiaScroll() {
         CanvasState.inertiaState.velocityX = 0;
         CanvasState.inertiaState.velocityY = 0;
         CanvasState.inertiaState.animationId = null;
+        __resetCanvasPanInertiaSample();
 
         // 惯性滚动结束后，进行最终更新
         const container = getCachedContainer();
@@ -10423,6 +10537,7 @@ function cancelInertiaScroll() {
     CanvasState.inertiaState.isActive = false;
     CanvasState.inertiaState.velocityX = 0;
     CanvasState.inertiaState.velocityY = 0;
+    __resetCanvasPanInertiaSample();
 }
 
 // 边缘自动滚动相关函数
@@ -10790,7 +10905,19 @@ function __runCanvasSmoothWheelZoomStep() {
         return;
     }
 
-    const stepFactor = Math.abs(diff) > 0.06 ? 0.34 : 0.26;
+    const baseZoom = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
+    const displayCurrent = currentZoom / baseZoom;
+    const displayTarget = targetZoom / baseZoom;
+    const curveFactor = Math.max(0.2, Math.min(2.4, getCanvasZoomSpeedFactor(displayCurrent)));
+    const magnet = getCanvasZoomMagnetEffect(displayCurrent, displayTarget);
+    const responseFromCurve = Math.pow(curveFactor, 0.32);
+    const clampedMagnetFactor = Math.max(0.35, Math.min(1.35, magnet.factor));
+    const responseFromMagnet = 0.84 + (0.16 * clampedMagnetFactor);
+
+    const fastStep = 0.34;
+    const slowStep = 0.26;
+    const baseStep = Math.abs(diff) > 0.06 ? fastStep : slowStep;
+    const stepFactor = Math.max(0.16, Math.min(0.42, baseStep * responseFromCurve * responseFromMagnet));
     const nextZoom = currentZoom + diff * stepFactor;
     scheduleZoomUpdate(nextZoom, smoothWheelZoomCenterX, smoothWheelZoomCenterY, smoothWheelZoomOptions || {});
     smoothWheelZoomFrame = requestAnimationFrame(__runCanvasSmoothWheelZoomStep);
@@ -10807,6 +10934,89 @@ function __queueCanvasSmoothWheelZoom(targetZoom, centerX, centerY, options = {}
 
     if (!smoothWheelZoomFrame) {
         smoothWheelZoomFrame = requestAnimationFrame(__runCanvasSmoothWheelZoomStep);
+    }
+}
+
+function __cancelCanvasTrackpadZoomInertia(options = {}) {
+    const keepVelocity = !!(options && options.keepVelocity === true);
+    if (trackpadZoomInertiaFrame) {
+        cancelAnimationFrame(trackpadZoomInertiaFrame);
+        trackpadZoomInertiaFrame = null;
+    }
+    if (!keepVelocity) {
+        trackpadZoomInertiaVelocity = 0;
+    }
+    trackpadZoomInertiaLastInputTime = 0;
+    trackpadZoomInertiaCenterX = null;
+    trackpadZoomInertiaCenterY = null;
+    trackpadZoomInertiaOptions = null;
+}
+
+function __runCanvasTrackpadZoomInertiaStep() {
+    trackpadZoomInertiaFrame = null;
+
+    if (!Number.isFinite(trackpadZoomInertiaVelocity)) {
+        __cancelCanvasTrackpadZoomInertia();
+        return;
+    }
+
+    const now = Date.now();
+    const sinceInput = now - (trackpadZoomInertiaLastInputTime || 0);
+    if (sinceInput < TRACKPAD_ZOOM_INERTIA_START_DELAY_MS) {
+        trackpadZoomInertiaFrame = requestAnimationFrame(__runCanvasTrackpadZoomInertiaStep);
+        return;
+    }
+
+    trackpadZoomInertiaVelocity *= TRACKPAD_ZOOM_INERTIA_DAMPING;
+    if (Math.abs(trackpadZoomInertiaVelocity) < TRACKPAD_ZOOM_INERTIA_MIN_LOG_DELTA) {
+        __cancelCanvasTrackpadZoomInertia();
+        return;
+    }
+
+    const currentZoom = Number.isFinite(pendingZoomRequest && pendingZoomRequest.zoom)
+        ? pendingZoomRequest.zoom
+        : (Number.isFinite(CanvasState.zoom) ? CanvasState.zoom : 1);
+    const logStep = Math.max(
+        -TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP,
+        Math.min(TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP, trackpadZoomInertiaVelocity)
+    );
+    const targetZoom = clampCanvasZoom(currentZoom * Math.exp(logStep));
+    if (!Number.isFinite(targetZoom) || Math.abs(targetZoom - currentZoom) < 0.000001) {
+        __cancelCanvasTrackpadZoomInertia();
+        return;
+    }
+
+    scheduleZoomUpdate(
+        targetZoom,
+        trackpadZoomInertiaCenterX,
+        trackpadZoomInertiaCenterY,
+        trackpadZoomInertiaOptions || { recomputeBounds: false, skipSave: false, skipScrollbarUpdate: true }
+    );
+    trackpadZoomInertiaFrame = requestAnimationFrame(__runCanvasTrackpadZoomInertiaStep);
+}
+
+function __pushCanvasTrackpadZoomInertiaFromFactor(zoomFactor, centerX, centerY, options = {}) {
+    const factor = Number(zoomFactor);
+    if (!Number.isFinite(factor) || factor <= 0) return;
+    const logDelta = Math.log(factor);
+    if (!Number.isFinite(logDelta) || Math.abs(logDelta) < 0.000001) return;
+
+    const clampedLogDelta = Math.max(
+        -TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP,
+        Math.min(TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP, logDelta)
+    );
+
+    trackpadZoomInertiaVelocity = Number.isFinite(trackpadZoomInertiaVelocity) && Math.abs(trackpadZoomInertiaVelocity) > 0.000001
+        ? (trackpadZoomInertiaVelocity * (1 - TRACKPAD_ZOOM_INERTIA_INPUT_BLEND))
+            + (clampedLogDelta * TRACKPAD_ZOOM_INERTIA_INPUT_BLEND)
+        : clampedLogDelta;
+    trackpadZoomInertiaLastInputTime = Date.now();
+    if (Number.isFinite(centerX)) trackpadZoomInertiaCenterX = centerX;
+    if (Number.isFinite(centerY)) trackpadZoomInertiaCenterY = centerY;
+    trackpadZoomInertiaOptions = options;
+
+    if (!trackpadZoomInertiaFrame) {
+        trackpadZoomInertiaFrame = requestAnimationFrame(__runCanvasTrackpadZoomInertiaStep);
     }
 }
 
@@ -12517,6 +12727,12 @@ function __clearOtherMaximizedNodes(except) {
 
 function maximizeCanvasNode(element, options = {}) {
     if (!element) return;
+    if (__isNodeMaximized(element)) {
+        refreshMaximizedNodes();
+        __scheduleNodeLayoutZoomStabilize(element);
+        updateNodeFullscreenButtons();
+        return;
+    }
     const suppressReadyNotify = !!(options && options.suppressReadyNotify);
     __restoreTemporaryRaisedCanvasNode();
     const rect = __getCanvasViewportRect();
@@ -12524,10 +12740,21 @@ function maximizeCanvasNode(element, options = {}) {
     __clearOtherMaximizedNodes(element);
 
     if (!element.dataset) return;
-    element.dataset.maxPrevLeft = element.style.left || '';
-    element.dataset.maxPrevTop = element.style.top || '';
-    element.dataset.maxPrevWidth = element.style.width || '';
-    element.dataset.maxPrevHeight = element.style.height || '';
+    const computedStyle = (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function')
+        ? window.getComputedStyle(element)
+        : null;
+    const resolveLength = (inlineValue, computedValue, fallbackNumber) => {
+        const inline = String(inlineValue || '').trim();
+        if (inline) return inline;
+        const computed = String(computedValue || '').trim();
+        if (computed && computed !== 'auto') return computed;
+        if (Number.isFinite(fallbackNumber)) return `${Math.round(fallbackNumber * 1000) / 1000}px`;
+        return '';
+    };
+    element.dataset.maxPrevLeft = resolveLength(element.style.left, computedStyle && computedStyle.left, element.offsetLeft);
+    element.dataset.maxPrevTop = resolveLength(element.style.top, computedStyle && computedStyle.top, element.offsetTop);
+    element.dataset.maxPrevWidth = resolveLength(element.style.width, computedStyle && computedStyle.width, element.offsetWidth || rect.width);
+    element.dataset.maxPrevHeight = resolveLength(element.style.height, computedStyle && computedStyle.height, element.offsetHeight || rect.height);
     element.dataset.maxPrevTransform = element.style.transform || '';
     element.dataset.maxPrevZ = element.style.zIndex || '';
 
@@ -12654,7 +12881,7 @@ function shouldHandleCustomScroll(event) {
     if (descTarget || tipTarget) {
         const now = Date.now();
         const recentCanvasScroll = CanvasState.lastCanvasScrollTime && (now - CanvasState.lastCanvasScrollTime < 180);
-        const isTouchpad = (Math.abs(event.deltaX) < 50 || Math.abs(event.deltaY) < 50) && event.deltaMode === 0;
+        const isTouchpad = __isCanvasTouchpadLikeScrollInput(event);
         if ((isTouchpad && CanvasState.touchpadState.isScrolling) || CanvasState.inertiaState.isActive || recentCanvasScroll) {
             return true;
         }
@@ -12681,7 +12908,7 @@ function shouldHandleCustomScroll(event) {
     const sectionBody = event.target.closest('.permanent-section-body') || event.target.closest('.temp-node-body');
     if (sectionBody) {
         // 检测是否为触控板双指滑动
-        const isTouchpad = (Math.abs(event.deltaX) < 50 || Math.abs(event.deltaY) < 50) && event.deltaMode === 0;
+        const isTouchpad = __isCanvasTouchpadLikeScrollInput(event);
 
         // 如果正在画布级滚动（双指滑动），拦截并让画布处理
         const now = Date.now();
@@ -12727,7 +12954,9 @@ function handleCanvasCustomScroll(event) {
     }
 
     // 检测是否为触控板（触控板的 delta 值较小且连续，deltaMode 通常为 0）
-    const isTouchpad = (Math.abs(horizontalDelta) < 50 || Math.abs(verticalDelta) < 50) && event.deltaMode === 0;
+    const isTouchpad = __isCanvasTouchpadLikeScrollInput(event, normalizedWheel);
+    const isDiscreteWheel = __isCanvasDiscreteWheelEvent(event);
+    const panInertiaInputType = __resolveCanvasPanInertiaInputType(isTouchpad, isDiscreteWheel);
 
     // 双指滑动状态追踪：当检测到画布级别的滚动时，标记状态并设置超时清除
     if (isTouchpad && (Math.abs(horizontalDelta) > 0.5 || Math.abs(verticalDelta) > 0.5)) {
@@ -12743,14 +12972,6 @@ function handleCanvasCustomScroll(event) {
         CanvasState.touchpadState.scrollTimeout = setTimeout(() => {
             CanvasState.touchpadState.isScrolling = false;
         }, 300);
-    }
-
-    // 记录滚动速度用于惯性滚动（仅触控板）
-    if (isTouchpad) {
-        const currentTime = Date.now();
-        CanvasState.inertiaState.lastDeltaX = horizontalDelta;
-        CanvasState.inertiaState.lastDeltaY = verticalDelta;
-        CanvasState.inertiaState.lastTime = currentTime;
     }
 
     // 触控板双指拖动优化：根据缩放比例调整灵敏度（缩得极小时对速度做上限，避免过快）
@@ -12775,6 +12996,9 @@ function handleCanvasCustomScroll(event) {
     } else {
         // 鼠标滚轮也应用缩放调整，但保持相对较快的响应
         scrollFactor *= 0.8; // 鼠标滚轮也稍微降低一点灵敏度
+        if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheel) {
+            scrollFactor *= WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR;
+        }
     }
 
     // 累积滚动增量
@@ -12793,6 +13017,12 @@ function handleCanvasCustomScroll(event) {
     }
 
     if (hasUpdate) {
+        if (panInertiaInputType !== PAN_INERTIA_INPUT_NONE) {
+            __updateCanvasPanInertiaSample(panInertiaInputType, panDeltaX, panDeltaY);
+        } else {
+            __resetCanvasPanInertiaSample();
+        }
+
         if (__shouldSmoothCanvasWheelPan(event, isTouchpad)) {
             const baseTargetX = (CanvasState.scrollAnimation.frameId && Number.isFinite(CanvasState.scrollAnimation.targetX))
                 ? CanvasState.scrollAnimation.targetX
@@ -12813,6 +13043,8 @@ function handleCanvasCustomScroll(event) {
             scheduleScrollUpdate();
         }
         event.preventDefault();
+    } else {
+        __resetCanvasPanInertiaSample();
     }
 }
 
@@ -13390,11 +13622,14 @@ function getScrollFactor(axis) {
 
 function getScrollEaseFactor(axis) {
     const zoom = clampCanvasZoom(CanvasState.zoom || 1);
-    const base = axis === 'horizontal' ? 0.35 : 0.33;
+    const windowsLike = CANVAS_RUNTIME_WINDOWS_LIKE;
+    const base = axis === 'horizontal'
+        ? (windowsLike ? 0.31 : 0.35)
+        : (windowsLike ? 0.30 : 0.33);
     const zoomBoost = zoom > 1
-        ? Math.min(0.18, (zoom - 1) * 0.12)
-        : (1 - zoom) * 0.08;
-    return Math.min(0.52, base + zoomBoost);
+        ? Math.min(windowsLike ? 0.16 : 0.18, (zoom - 1) * (windowsLike ? 0.11 : 0.12))
+        : (1 - zoom) * (windowsLike ? 0.07 : 0.08);
+    return Math.min(windowsLike ? 0.50 : 0.52, base + zoomBoost);
 }
 
 function schedulePanTo(targetX, targetY) {
