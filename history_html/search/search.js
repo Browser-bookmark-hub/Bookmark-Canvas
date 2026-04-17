@@ -875,6 +875,65 @@ function handleSearchResultsPanelClick(e) {
         return;
     }
 
+    const bookmarkGroupToggle = e.target.closest('.canvas-bookmark-group-toggle, .canvas-bookmark-group-count');
+    if (bookmarkGroupToggle) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+
+        const groupId = String(bookmarkGroupToggle.getAttribute('data-bookmark-group-id') || '').trim();
+        const groupRow = bookmarkGroupToggle.closest('.search-result-item');
+        const selectedIndex = parseInt(groupRow && groupRow.getAttribute('data-index') || '-1', 10);
+        if (!groupId) return;
+
+        if (!(searchUiState.bookmarkGroupCollapse instanceof Map)) {
+            searchUiState.bookmarkGroupCollapse = new Map();
+        }
+        const previous = searchUiState.bookmarkGroupCollapse.get(groupId);
+        const wasCollapsed = typeof previous === 'boolean' ? previous : true;
+        searchUiState.bookmarkGroupCollapse.set(groupId, !wasCollapsed);
+        rerenderCanvasBookmarkResults(Number.isNaN(selectedIndex) ? searchUiState.selectedIndex : selectedIndex);
+        return;
+    }
+
+    const bookmarkGroupChild = e.target.closest('.canvas-bookmark-group-child-item');
+    if (bookmarkGroupChild) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+
+        const groupId = String(bookmarkGroupChild.getAttribute('data-bookmark-group-id') || '').trim();
+        const childKey = String(bookmarkGroupChild.getAttribute('data-bookmark-child-key') || '').trim();
+        const childId = String(bookmarkGroupChild.getAttribute('data-bookmark-child-id') || '').trim();
+        const pools = [searchUiState.results, searchUiState.resultAll, searchUiState.resultSource];
+        let groupItem = null;
+        for (const pool of pools) {
+            if (!Array.isArray(pool)) continue;
+            groupItem = pool.find((result) => result && result.type === 'bookmark-group' && String(result.id || '') === groupId) || null;
+            if (groupItem) break;
+        }
+
+        const targetItems = Array.isArray(groupItem && groupItem.targetItems) ? groupItem.targetItems : [];
+        const targetItem = targetItems.find((child) => {
+            if (!child) return false;
+            const key = String(child.locationKey || getCanvasBookmarkLocationKeyForSearch(child));
+            if (childKey && key === childKey) return true;
+            return !childKey && childId && String(child.id || '') === childId;
+        }) || null;
+
+        if (targetItem) {
+            try {
+                hideSearchResultsPanel();
+                const inputEl = document.getElementById('searchInput');
+                if (inputEl) inputEl.value = '';
+            } catch (_) { }
+            locateCanvasBookmarkItem(targetItem);
+        }
+        return;
+    }
+
     const exportBtn = e.target.closest('.canvas-bookmark-to-temp-btn');
     if (exportBtn) {
         e.preventDefault();
@@ -3507,6 +3566,41 @@ function getBookmarkItemParentPathForSearch(item) {
     return parts.join(' > ');
 }
 
+function getBookmarkItemParentPathForSearchScope(item, scope = null) {
+    const parentPath = getBookmarkItemParentPathForSearch(item);
+    if (!parentPath) return '';
+
+    if (item && item.source === 'temporary') {
+        const parts = parentPath.split('>').map((part) => String(part || '').trim()).filter(Boolean);
+        if (!parts.length) return '';
+
+        const sectionLabel = String(item.sectionLabel || '').trim();
+        const sectionTitle = String(item.sectionTitle || '').trim();
+        const sectionPrefix = [sectionLabel, sectionTitle].filter(Boolean).join(' ').trim();
+        const firstPart = String(parts[0] || '').trim().toLowerCase();
+        const prefixCandidates = [sectionPrefix, sectionLabel, sectionTitle]
+            .map((value) => String(value || '').trim().toLowerCase())
+            .filter(Boolean);
+
+        if (prefixCandidates.includes(firstPart)) {
+            return parts.length <= 1 ? '' : parts.slice(1).join(' > ');
+        }
+    }
+
+    return parentPath;
+}
+
+function getCanvasBookmarkLocationKeyForSearch(item) {
+    if (!item || typeof item !== 'object') return '';
+    return [
+        String(item.source || ''),
+        String(item.copyId || ''),
+        String(item.sectionId || ''),
+        String(item.id || ''),
+        String(item.namedPath || '')
+    ].join('::');
+}
+
 function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
     const scope = options && typeof options === 'object' ? (options.scope || null) : null;
     const groupsMap = new Map();
@@ -3541,7 +3635,7 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
 
         // Generate Content Key
         // Bookmarks: Title + URL
-        // Folders: unique by source bucket + folder id (avoid same-name merge)
+        // Folders: Title, matching the history snapshot search grouping behavior.
         let key, title, url, nodeType;
         let extra = null;
 
@@ -3549,12 +3643,10 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
             title = item.title;
             url = '';
             nodeType = 'folder';
-            const parentPath = getBookmarkItemParentPathForSearch(item);
-            const sourcePart = item.source === 'temporary'
-                ? `temporary:${String(item.sectionId || '').trim()}`
-                : 'permanent';
-            const folderIdPart = String(item.id || '').trim();
-            key = `FOLDER::${sourcePart}::${folderIdPart}::${title}`;
+            const parentPath = getBookmarkItemParentPathForSearchScope(item, scope);
+            const normalizedTitle = String(title || '').trim().toLowerCase();
+            const fallbackId = String(item.id || '').trim().toLowerCase();
+            key = normalizedTitle ? `FOLDER::${normalizedTitle}` : `FOLDER::${fallbackId}`;
             extra = { parentPath };
         } else {
             title = item.title;
@@ -3579,7 +3671,7 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
         const parentPathSet = new Set();
         for (let i = 0; i < g.children.length; i += 1) {
             const child = g.children[i] && g.children[i].item ? g.children[i].item : null;
-            const rawPath = getBookmarkItemParentPathForSearch(child);
+            const rawPath = getBookmarkItemParentPathForSearchScope(child, scope);
             const key = rawPath ? rawPath.toLowerCase() : '__root__';
             if (parentPathSet.has(key)) continue;
             parentPathSet.add(key);
@@ -3620,9 +3712,24 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
         const sortedChildren = Array.isArray(g.children)
             ? g.children.slice().sort((left, right) => compareCanvasBookmarkScoredPairs(left, right, fullscreenScope))
             : [];
+        const activePermanentCopyId = fullscreenScope && String(fullscreenScope.kind || '') === 'permanent'
+            ? String(fullscreenScope.copyId || '').trim()
+            : '';
+        const targetItems = sortedChildren.map((c) => {
+            const sourceItem = c && c.item ? c.item : null;
+            const itemCopy = sourceItem ? Object.assign({}, sourceItem) : null;
+            if (itemCopy && itemCopy.source === 'permanent') {
+                itemCopy.copyId = activePermanentCopyId || null;
+            }
+            if (itemCopy) {
+                itemCopy.locationKey = getCanvasBookmarkLocationKeyForSearch(itemCopy);
+            }
+            return itemCopy;
+        }).filter(Boolean);
 
-        const locations = sortedChildren.map(c => {
-            const item = c.item;
+        const locations = sortedChildren.map((c, childIndex) => {
+            const item = targetItems[childIndex] || (c ? c.item : null);
+            if (!item) return null;
             // Pre-calculate display props for efficiency
             const isPerm = item.source === 'permanent';
             let locationName = '';
@@ -3648,17 +3755,21 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
                 id: item.id, // Target ID to jump to
                 source: item.source,
                 sectionId: item.sectionId,
+                copyId: item.copyId || null,
                 label: item.sectionLabel, // e.g. "A-1"
                 title: locationName,
                 color: color,
+                locationKey: getCanvasBookmarkLocationKeyForSearch(item),
                 originalItem: item
             };
-        });
+        }).filter(Boolean);
 
         const headerItem = Object.assign({}, g.header, {
             id: groupId,
             type: 'bookmark-group', // Keep type, but render differently
             locations: locations, // [New] Attached locations
+            targetItems,
+            childItems: targetItems,
             matchesCount: g.children.length
         });
         results.push(headerItem);
@@ -3687,10 +3798,15 @@ function searchCanvasAndRender(query) {
         hideSearchResultsPanel();
         return;
     }
+    const previousCanvasQuery = String(searchUiState.query || '').trim().toLowerCase();
+    const nextCanvasQuery = trimmedQuery.toLowerCase();
 
     // Determine Source Index based on Active Mode
     let sourceIndex = [];
     const mode = searchUiState.activeMode;
+    if (mode === 'bookmark' && previousCanvasQuery !== nextCanvasQuery) {
+        searchUiState.bookmarkGroupCollapse = new Map();
+    }
 
     if (mode === 'bookmark') {
         sourceIndex = db.bookmarkIndex || [];
@@ -4627,7 +4743,7 @@ function renderCanvasSearchResults(results, options = {}) {
 
     const queryText = String(searchUiState.query || '');
     const fullscreenScope = getCanvasFullscreenSearchScope();
-    const disableLocationJumpBadges = Boolean(fullscreenScope);
+    const disableLocationJumpBadges = false;
     const compactBookmarkToolbar = Boolean(fullscreenScope);
     const markQueryInText = (text) => {
         const safe = escapeHtml(String(text || ''));
@@ -4728,6 +4844,133 @@ function renderCanvasSearchResults(results, options = {}) {
         if (!safeUrl) return '';
         const className = ['search-result-external-link', extraClass].filter(Boolean).join(' ');
         return `<a class="${className}" href="${escapeHtml(safeUrl)}" data-search-url="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${markQueryInText(safeUrl)}</a>`;
+    };
+    const getPermanentCopyLabelForBookmarkSearch = (copyId) => {
+        const safeCopyId = String(copyId || '').trim();
+        if (!safeCopyId) return '#A';
+        try {
+            const copies = getPermanentCopyShellsForSearch();
+            const copyIndex = copies.findIndex((copy) => String(copy && copy.copyId || '').trim() === safeCopyId);
+            if (copyIndex >= 0) {
+                const displayIndex = getPermanentCopySearchDisplayIndex(copies[copyIndex], copyIndex);
+                const alpha = toAlpha(displayIndex);
+                if (alpha) return `#${alpha}`;
+            }
+        } catch (_) { }
+        return '#?';
+    };
+    const renderBookmarkLocationInlineChip = (contentHtml, color, titleText = '') => {
+        const rawColor = String(color || '#3b82f6').trim() || '#3b82f6';
+        const safeColor = escapeHtml(rawColor);
+        const safeTitle = String(titleText || contentHtml || '')
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        return `<span class="search-loc-chip search-loc-chip-disabled canvas-bookmark-location-chip canvas-bookmark-location-chip-compact canvas-bookmark-location-chip-static" data-search-nav-disabled="true" aria-disabled="true" style="cursor:default; --loc-color:${safeColor}; border-color:${safeColor}; color:${safeColor}; background:${safeColor}18;" title="${escapeHtml(safeTitle)}"><span class="canvas-bookmark-location-chip-text">${contentHtml}</span></span>`;
+    };
+    const renderBookmarkChildSourceHtml = (child) => {
+        if (!child) return '';
+        if (child.source === 'temporary') {
+            const color = String(child.color || '#2563eb').trim() || '#2563eb';
+            const sectionLabel = String(child.sectionLabel || '').trim();
+            const sectionTitle = String(child.sectionTitle || '').trim();
+            const shouldShowTitle = !!sectionTitle && (!sectionLabel || sectionTitle.toLowerCase() !== sectionLabel.toLowerCase());
+            let chipContent = '';
+            if (sectionLabel && shouldShowTitle) {
+                chipContent = `<b>${escapeHtml(sectionLabel)}</b> <span style="opacity:0.8; margin-left:3px;">${escapeHtml(sectionTitle)}</span>`;
+            } else if (sectionLabel) {
+                chipContent = `<b>${escapeHtml(sectionLabel)}</b>`;
+            } else if (sectionTitle) {
+                chipContent = escapeHtml(sectionTitle);
+            } else {
+                chipContent = escapeHtml(isZh ? '临时栏目' : 'Temporary');
+            }
+            const chipTitle = [sectionLabel, sectionTitle].filter(Boolean).join(' ');
+            return `<div class="canvas-bookmark-location-row canvas-bookmark-location-row-temp canvas-bookmark-location-row-compact canvas-bookmark-group-child-source">
+                <span class="canvas-bookmark-location-label">${isZh ? '临时栏目' : 'Temporary'}:</span>
+                <div class="canvas-bookmark-location-chip-row">${renderBookmarkLocationInlineChip(chipContent, color, chipTitle)}</div>
+            </div>`;
+        }
+
+        const copyLabel = getPermanentCopyLabelForBookmarkSearch(child.copyId || null);
+        return `<div class="canvas-bookmark-location-row canvas-bookmark-location-row-permanent canvas-bookmark-location-row-compact canvas-bookmark-group-child-source">
+            <span class="canvas-bookmark-location-label">${isZh ? '永久栏目' : 'Permanent'}:</span>
+            <div class="canvas-bookmark-location-chip-row">${renderBookmarkLocationInlineChip(escapeHtml(copyLabel), '#059669', copyLabel)}</div>
+        </div>`;
+    };
+    const renderBookmarkChildIconHtml = (child) => {
+        const iconWrapStyle = 'display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; flex-shrink:0;';
+        if (child && child.nodeType === 'folder') {
+            return `<span class="search-result-icon-box-inline" style="${iconWrapStyle}">
+                <i class="fas fa-folder" style="color:#2563eb; font-size:11px;"></i>
+            </span>`;
+        }
+        const fallbackHtml = `<span class="search-result-icon-box-inline" style="${iconWrapStyle}">
+            <i class="fas fa-bookmark" style="color:#f59e0b; font-size:11px;"></i>
+        </span>`;
+        const url = String(child && child.url || '').trim();
+        if (!url || typeof getFaviconUrl !== 'function') return fallbackHtml;
+        const faviconSrc = getFaviconUrl(url);
+        if (faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml')) {
+            return `<img class="search-result-favicon canvas-bookmark-group-child-favicon" src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(url)}" alt="" style="width:13px; height:13px; max-width:13px; max-height:13px; object-fit:contain; border-radius:3px;">`;
+        }
+        return `${fallbackHtml}<img class="search-result-favicon canvas-bookmark-group-child-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(url)}" alt="" style="display:none; width:13px; height:13px; max-width:13px; max-height:13px; object-fit:contain; border-radius:3px;">`;
+    };
+    const isBookmarkGroupExpanded = (groupId) => {
+        if (!groupId) return false;
+        if (!(searchUiState.bookmarkGroupCollapse instanceof Map)) {
+            searchUiState.bookmarkGroupCollapse = new Map();
+        }
+        const collapsed = searchUiState.bookmarkGroupCollapse.get(groupId);
+        return collapsed === false;
+    };
+    const renderBookmarkGroupChildRow = (child, groupItem, childIndex) => {
+        if (!child) return '';
+        const groupId = String(groupItem && groupItem.id || '').trim();
+        const childKey = String(child.locationKey || getCanvasBookmarkLocationKeyForSearch(child));
+        const titleHtml = markQueryInText(child.title || (isZh ? '（无标题）' : '(Untitled)'));
+        const rootLabel = isZh ? '根目录' : 'Root';
+        const parentPath = getBookmarkItemParentPathForSearchScope(child, fullscreenScope);
+        const pathList = parentPath ? [parentPath] : [];
+        const pathHintTypeClass = child.nodeType === 'folder' ? 'is-folder' : 'is-bookmark';
+        const pathHtml = `<div class="search-result-path-hint ${pathHintTypeClass}"><span class="search-result-path-text">${renderPathListWithFolderUnderline(pathList, rootLabel)}</span></div>`;
+        const urlHtml = child.url
+            ? `<div class="search-result-link-row">${renderExternalLinkHtml(child.url)}</div>`
+            : '';
+        const sourceHtml = renderBookmarkChildSourceHtml(child);
+
+        return `
+            <div class="canvas-bookmark-group-child-item ${child.nodeType === 'folder' ? 'is-folder' : 'is-bookmark'}" role="button" tabindex="0"
+                data-bookmark-group-id="${escapeHtml(groupId)}"
+                data-bookmark-child-id="${escapeHtml(child.id || '')}"
+                data-bookmark-child-key="${escapeHtml(childKey)}">
+                <div class="canvas-bookmark-group-child-topline">
+                    <span class="canvas-bookmark-group-child-index">${childIndex + 1}</span>
+                    ${renderBookmarkChildIconHtml(child)}
+                    <span class="canvas-bookmark-group-child-title">${titleHtml}</span>
+                </div>
+                <div class="canvas-bookmark-group-child-meta">
+                    ${sourceHtml}
+                    ${pathHtml}
+                    ${urlHtml}
+                </div>
+            </div>
+        `;
+    };
+    const renderBookmarkGroupChildren = (groupItem) => {
+        const targetItems = Array.isArray(groupItem && groupItem.targetItems) ? groupItem.targetItems : [];
+        if (targetItems.length <= 1) return '';
+        const groupId = String(groupItem && groupItem.id || '').trim();
+        if (!groupId) return '';
+        const isExpanded = isBookmarkGroupExpanded(groupId);
+        const childRowsHtml = isExpanded
+            ? targetItems.map((child, childIndex) => renderBookmarkGroupChildRow(child, groupItem, childIndex)).join('')
+            : '';
+        return `
+            <div class="canvas-bookmark-group-children" data-bookmark-group-id="${escapeHtml(groupId)}" ${isExpanded ? '' : 'hidden'}>
+                ${childRowsHtml}
+            </div>
+        `;
     };
 
     // Canvas Bookmark Mode: render a top toggle row (counts + click to switch)
@@ -4962,13 +5205,24 @@ function renderCanvasSearchResults(results, options = {}) {
 
                 // 2. Title & URL
                 const titleText = markQueryInText(item.title || (isZh ? '（无标题）' : '(Untitled)'));
-                title = `<div class="search-result-bookmark-title-text">${titleText}</div>`;
+                const groupId = String(item.id || '').trim();
+                const targetItems = Array.isArray(item.targetItems) ? item.targetItems : [];
+                const matchCount = Number(item.matchesCount || targetItems.length || 0);
+                const canExpandGroup = groupId && targetItems.length > 1;
+                const isGroupExpanded = canExpandGroup && isBookmarkGroupExpanded(groupId);
+                const countHtml = canExpandGroup
+                    ? `<button class="canvas-bookmark-match-count canvas-bookmark-group-count" type="button" data-bookmark-group-id="${escapeHtml(groupId)}" aria-expanded="${isGroupExpanded ? 'true' : 'false'}">${isZh ? `${matchCount}处` : `${matchCount} locations`}</button>`
+                    : '';
+                const toggleHtml = canExpandGroup
+                    ? `<button class="canvas-bookmark-group-toggle" type="button" data-bookmark-group-id="${escapeHtml(groupId)}" aria-label="${escapeHtml(isZh ? '展开或收起候选路径' : 'Expand or collapse candidate paths')}"><i class="fas ${isGroupExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>`
+                    : '';
+                title = `<div class="search-result-bookmark-title-text">${titleText}</div>${countHtml}${toggleHtml}`;
                 const rootLabel = isZh ? '根目录' : 'Root';
                 const parentPathListRaw = Array.isArray(item.parentPaths) ? item.parentPaths : [];
                 const parentPathList = parentPathListRaw.length
                     ? parentPathListRaw
                     : [String(item.parentPath || '').trim()].filter(Boolean);
-                const showPathHint = !!fullscreenScope;
+                const showPathHint = Boolean(fullscreenScope || parentPathList.length);
                 const pathHintTypeClass = isFolder ? 'is-folder' : 'is-bookmark';
                 const parentPathHtml = showPathHint
                     ? renderPathHintWithTailPreview(parentPathList, rootLabel, pathHintTypeClass)
@@ -4987,23 +5241,25 @@ function renderCanvasSearchResults(results, options = {}) {
                     const temps = item.locations.filter(l => l.source !== 'permanent');
 
                     // Helper to make chip
-                    const makeChip = (text, color, attr, extraStyle = '') => {
+                    const makeChip = (text, color, attr, extraStyle = '', titleText = '') => {
                         const chipClass = disableLocationJumpBadges
-                            ? 'search-loc-chip search-loc-chip-disabled'
-                            : 'search-loc-chip';
+                            ? 'search-loc-chip search-loc-chip-disabled canvas-bookmark-location-chip'
+                            : 'search-loc-chip canvas-bookmark-location-chip';
                         const chipAttr = disableLocationJumpBadges
                             ? 'data-search-nav-disabled="true" aria-disabled="true"'
                             : attr;
                         const chipCursor = disableLocationJumpBadges ? 'cursor:default;' : 'cursor:pointer;';
-                        return `<div class="${chipClass}" ${chipAttr} style="${chipCursor} display:inline-flex; align-items:center; border:1px solid ${color}; color:${color}; background:${color}08; border-radius:4px; padding:0 5px; font-size:11px; height:18px; line-height:16px; box-sizing:border-box; ${extraStyle}" title="${escapeHtml(text)}"><div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;">${text}</div></div>`;
+                        const safeTitle = String(titleText || text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+                        const compactClass = compactBookmarkToolbar ? ' canvas-bookmark-location-chip-compact' : '';
+                        const safeColor = escapeHtml(color);
+                        return `<button type="button" class="${chipClass}${compactClass}" ${chipAttr} style="${chipCursor} --loc-color:${safeColor}; border-color:${safeColor}; color:${safeColor}; background:${safeColor}18; ${extraStyle}" title="${escapeHtml(safeTitle)}"><span class="canvas-bookmark-location-chip-text">${text}</span></button>`;
                     };
 
                     // A. Permanent Row
                     if (perms.length > 0) {
                         // Reuse first perm item for ID reference (they are usually duplicates in terms of location logic if multiple perm matches exist, but usually just one "Permanent" location per bookmark logic)
                         const loc = perms[0];
-                        // [User Request] White text for labels
-                        const permLabel = `<span style="color:var(--text-normal); font-weight:bold; font-size:11px; margin-right:6px;">${isZh ? '永久栏目' : 'Permanent'}:</span>`;
+                        const permLabel = `<span class="canvas-bookmark-location-label">${isZh ? '永久栏目' : 'Permanent'}:</span>`;
 
                         let copyBadges = [];
 
@@ -5030,19 +5286,17 @@ function renderCanvasSearchResults(results, options = {}) {
                             copyBadges.push(makeChip('#A', '#059669', `data-loc-id="${loc.id}" data-loc-source="permanent" data-copy-id="null"`));
                         }
 
-                        // Join with commas
-                        const badgestStr = copyBadges.join('<span style="margin:0 4px; color:#999;">,</span>');
+                        const badgestStr = copyBadges.join('');
 
-                        locationsHtml += `<div style="display:flex; align-items:center; margin-top:4px;">
+                        locationsHtml += `<div class="canvas-bookmark-location-row canvas-bookmark-location-row-permanent${compactBookmarkToolbar ? ' canvas-bookmark-location-row-compact' : ''}">
                             ${permLabel}
-                            <div style="display:flex; align-items:center; flex-wrap:wrap;">${badgestStr}</div>
+                            <div class="canvas-bookmark-location-chip-row">${badgestStr}</div>
                         </div>`;
                     }
 
                     // B. Temporary Row
                     if (temps.length > 0) {
-                        // [User Request] White text for labels
-                        const tempLabel = `<span style="color:var(--text-normal); font-weight:bold; font-size:11px; margin-right:6px;">${isZh ? '临时栏目' : 'Temporary'}:</span>`;
+                        const tempLabel = `<span class="canvas-bookmark-location-label">${isZh ? '临时栏目' : 'Temporary'}:</span>`;
 
                         const tempBadges = temps.map(loc => {
                             const color = loc.color || '#3b82f6';
@@ -5057,24 +5311,25 @@ function renderCanvasSearchResults(results, options = {}) {
                                 content = `<b>${escapeHtml(seq)}</b>`;
                             }
                             const attr = `data-loc-id="${loc.id}" data-loc-source="${loc.source}" data-loc-section="${loc.sectionId || ''}"`;
-                            return makeChip(content, color, attr);
+                            return makeChip(content, color, attr, '', [seq, rawTitle].filter(Boolean).join(' '));
                         });
 
-                        // Join with commas
-                        const badgestStr = tempBadges.join('<span style="margin:0 4px; color:#999;">,</span>');
+                        const badgestStr = tempBadges.join('');
 
-                        locationsHtml += `<div style="display:flex; align-items:baseline; margin-top:4px;">
+                        locationsHtml += `<div class="canvas-bookmark-location-row canvas-bookmark-location-row-temp${compactBookmarkToolbar ? ' canvas-bookmark-location-row-compact' : ''}">
                             ${tempLabel}
-                            <div style="display:flex; flex-wrap:wrap; align-items:center;">${badgestStr}</div>
+                            <div class="canvas-bookmark-location-chip-row">${badgestStr}</div>
                         </div>`;
                     }
                 }
 
-                descHtml = `<div class="search-result-match" style="display:flex; flex-direction:column; width:100%; min-width:0;">
-                    ${parentPathHtml}
+                const childrenHtml = renderBookmarkGroupChildren(item);
+
+                descHtml = `<div class="search-result-match canvas-bookmark-group-summary" style="display:flex; flex-direction:column; width:100%; min-width:0;">
                     ${locationsHtml}
+                    ${parentPathHtml}
                     ${urlHtml}
-                </div>`;
+                </div>${childrenHtml}`;
 
                 badge = '';
                 break;
@@ -5287,9 +5542,12 @@ function renderCanvasSearchResults(results, options = {}) {
         if (item.isChild) extraClasses.push('bookmark-child');
         if (item.domainChild) extraClasses.push('domain-child');
         const rowClassName = ['search-result-item', isSelected].concat(extraClasses).filter(Boolean).join(' ');
+        const bookmarkGroupExpandedAttr = item.type === 'bookmark-group' && isBookmarkGroupExpanded(String(item.id || ''))
+            ? ' data-expanded="true"'
+            : '';
 
         html += `
-            <div class="${rowClassName}" data-index="${index}" data-id="${item.id}" data-type="${item.type}">
+            <div class="${rowClassName}" data-index="${index}" data-id="${item.id}" data-type="${item.type}"${bookmarkGroupExpandedAttr}>
                 <div class="search-result-content">
                     <div class="search-result-title">${indexLabel}${title}</div>
                     ${descHtml}
@@ -6745,9 +7003,13 @@ async function locateCanvasBookmarkItem(item) {
     if (item.source === 'temporary' && item.sectionId) {
         return locateBookmarkItemInTempTree(item.sectionId, item.id, { color: item.color || '#3b82f6' });
     }
+    const fullscreenScope = getCanvasFullscreenSearchScope();
+    const activePermanentCopyId = fullscreenScope && String(fullscreenScope.kind || '') === 'permanent'
+        ? String(fullscreenScope.copyId || '').trim()
+        : '';
     return locateBookmarkItemInPermanentTree(item.id, {
         color: item.color || '#3b82f6',
-        copyId: (item.source === 'permanent-copy') ? item.copyId : null
+        copyId: item.copyId || activePermanentCopyId || null
     });
 }
 
@@ -7199,6 +7461,7 @@ async function activateCanvasSearchResultAtIndex(index) {
 
             const loc = pickBestBookmarkLocationByScope(locations, getCanvasFullscreenSearchScope()) || locations[0];
             const opts = { color: loc.color || item.color || '#3b82f6' };
+            if (loc.copyId) opts.copyId = loc.copyId;
             if (loc.source === 'temporary') {
                 await locateBookmarkItemInTempTree(loc.sectionId, loc.id, opts);
             } else {
