@@ -1324,7 +1324,7 @@ const FaviconCache = {
     networkBranchReevaluationCooldownMs: 300000,
     networkBranchSwitchReason: '',
     networkBranchLastReevaluationReason: '',
-    cacheQualityVersion: 8,
+    cacheQualityVersion: 9,
     cacheQualityVersionKey: 'bb_favicon_quality_version',
     firstInstallFastPathKey: 'bb_favicon_first_install_fast_path_done',
     firstInstallSkipDbReadsRemaining: 0,
@@ -1542,7 +1542,7 @@ const FaviconCache = {
     },
 
     // 从缓存获取favicon
-    async get(url) {
+    async get(url, options = {}) {
         if (this.isInvalidUrl(url)) {
             return null;
         }
@@ -1550,9 +1550,10 @@ const FaviconCache = {
         try {
             const domain = this._getHostnameKey(url);
             if (!domain) return null;
+            const ignoreFailureCache = options && options.ignoreFailureCache === true;
 
             // 检查失败缓存
-            if (this._isFailureDomainActive(domain)) {
+            if (!ignoreFailureCache && this._isFailureDomainActive(domain)) {
                 return 'failed';
             }
 
@@ -1578,7 +1579,7 @@ const FaviconCache = {
                 const failureRequest = failureStore.get(domain);
 
                 failureRequest.onsuccess = () => {
-                    if (failureRequest.result) {
+                    if (!ignoreFailureCache && failureRequest.result) {
                         // 检查失败缓存是否过期（默认 24 小时）
                         const age = Date.now() - failureRequest.result.timestamp;
                         if (age < this.failureTtlMs) {
@@ -2177,9 +2178,10 @@ const FaviconCache = {
                 : 0;
             const branchMode = this._resolveNetworkBranchForFetch();
             const speedFirst = options?.speedFirst === true;
+            const ignoreFailureCache = options?.ignoreFailureCache === true;
 
             // 同步阶段优先返回当前可用值，避免前台阻塞。
-            if (this._isFailureDomainActive(domain)) {
+            if (!ignoreFailureCache && this._isFailureDomainActive(domain)) {
                 return fallbackIcon;
             }
             if (this.memoryCache.has(domain)) {
@@ -2197,7 +2199,7 @@ const FaviconCache = {
 
             if (speedFirst) {
                 const networkPromise = this._ensureInFlightHostnameRequest(domain, url, requestOptions);
-                const cached = await this.get(url);
+                const cached = await this.get(url, options);
                 if (cached === 'failed') {
                     return fallbackIcon;
                 }
@@ -2209,7 +2211,7 @@ const FaviconCache = {
                 return await networkPromise;
             }
 
-            const cached = await this.get(url);
+            const cached = await this.get(url, options);
             if (cached === 'failed') {
                 return fallbackIcon;
             }
@@ -2331,10 +2333,7 @@ const FaviconCache = {
                 });
 
                 activeBranchMode = this._normalizeNetworkBranchMode(this.networkBranchMode || activeBranchMode);
-                const useFastFirstCandidate = strictMinDimension <= Math.max(16, Number(this.minFaviconDimensionPx) || 16);
-                let chosenCandidate = useFastFirstCandidate
-                    ? (strictCandidates[0] || null)
-                    : await this._selectBestCandidateWithConflictRule(strictCandidates);
+                let chosenCandidate = await this._selectBestCandidateWithConflictRule(strictCandidates);
 
                 // 第二轮：放宽到兜底阈值（默认 >= 32，拒绝 16x16）
                 if (!chosenCandidate && fallbackMinDimension < strictMinDimension) {
@@ -3814,6 +3813,14 @@ function getFaviconUrl(url) {
 
         // 检查失败缓存
         if (FaviconCache._isFailureDomainActive(domain)) {
+            FaviconCache.fetch(url, {
+                speedFirst: true,
+                ignoreFailureCache: true
+            }).then(dataUrl => {
+                if (dataUrl && dataUrl !== fallbackIcon) {
+                    updateFaviconImages(url, dataUrl);
+                }
+            }).catch(() => { });
             return fallbackIcon;
         }
 
