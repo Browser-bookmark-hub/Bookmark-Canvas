@@ -1814,6 +1814,7 @@ const ZOOM_CURVE_ABS_MAX_FACTOR = 2.4;
 const ZOOM_CURVE_EXPONENT = 1.35;
 const ZOOM_CURVE_RAW_MAX = Math.pow(ZOOM_CURVE_ABS_MAX_FACTOR / ZOOM_CURVE_MAX_FACTOR, 1 / ZOOM_CURVE_EXPONENT);
 const ZOOM_SPEED_GLOBAL_MULTIPLIER = 0.5;
+const SCROLLING_ZOOM_SPEED_BOOST = 1.35;
 const TRACKPAD_ZOOM_RATE_MIN = 0.4;
 const TRACKPAD_ZOOM_RATE_MAX = 3.0;
 const TRACKPAD_ZOOM_RATE_DEFAULT = 1.0;
@@ -1836,10 +1837,8 @@ const ZOOM_INPUT_MODE_STICKY_MS = 180;
 const ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX = 6;
 const DISCRETE_WHEEL_EVENT_DELTA_MIN = 24;
 const CANVAS_WHEEL_LINE_PIXEL = 12;
-const CTRL_TOUCHPAD_SCROLL_DELTA_SCALE = 24;
 const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 0.88;
 const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 0.82;
-const WINDOWS_LINUX_CTRL_TOUCHPAD_DELTA_REF = 24;
 const WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_MAX = 140;
 const WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_X_MAX = 10;
 const CANVAS_RUNTIME_PLATFORM = (() => {
@@ -6256,7 +6255,8 @@ function setupCanvasZoomAndPan() {
                 const nextDisplayZoomNoMagnet = (baseZoomForCalc * Math.exp(scaledDelta * zoomSpeed)) / base;
                 const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
                 const wheelCurveSpeedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
-                const effectiveDelta = scaledDelta * magnet.factor * wheelCurveSpeedFactor * ZOOM_SPEED_GLOBAL_MULTIPLIER;
+                const effectiveDelta = scaledDelta * magnet.factor * wheelCurveSpeedFactor
+                    * ZOOM_SPEED_GLOBAL_MULTIPLIER * SCROLLING_ZOOM_SPEED_BOOST;
 
                 // 计算缩放因子：delta > 0 放大，delta < 0 缩小
                 // 使用 Math.exp 实现指数缩放，确保放大和缩小是对称的
@@ -8184,10 +8184,9 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
     const baseFactor = Math.max(0.005, getCanvasZoomSpeedFactor(dz));
     const maxFactor = ZOOM_CURVE_ABS_MAX_FACTOR;
     const travel = Math.abs(Math.log(nextDz / dz));
-    const speedBoostRef = CANVAS_RUNTIME_WINDOWS_LIKE ? 0.14 : 0.08;
-    const speedBoost = Math.max(0, Math.min(1, travel / speedBoostRef));
-    const widthBoost = 1 + speedBoost * (CANVAS_RUNTIME_WINDOWS_LIKE ? 0.45 : 0.8);
-    const strengthBoost = 1 + speedBoost * (CANVAS_RUNTIME_WINDOWS_LIKE ? 0.35 : 0.6);
+    const speedBoost = Math.max(0, Math.min(1, travel / 0.08));
+    const widthBoost = 1 + speedBoost * 0.8;
+    const strengthBoost = 1 + speedBoost * 0.6;
 
     const settings = getCanvasZoomMagnetSettings();
     const useDefaultCurve = shouldUseDefaultZoomCurve();
@@ -8412,11 +8411,25 @@ function resolveCanvasZoomInputMode(event) {
     if (!event || event.deltaMode !== 0) return 'wheel';
 
     const now = Date.now();
+    const commitMode = (mode) => {
+        CanvasState.touchpadState.lastZoomInputMode = mode;
+        CanvasState.touchpadState.lastZoomInputTime = now;
+        return mode;
+    };
 
     const absDeltaX = Math.abs(Number(event.deltaX) || 0);
     const absDeltaY = Math.abs(Number(event.deltaY) || 0);
     const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
-    if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return 'wheel';
+    if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return commitMode('wheel');
+
+    // 物理按下缩放修饰键时，一律视为 Scrolling（Wheel / Swipe zoom）路径。
+    // 这样可以保证磁矩/曲线仅作用于滚轮与双指滑动缩放，不干扰 Pinch 独立速率。
+    if (CanvasState.isCtrlPressed) {
+        return commitMode('wheel');
+    }
+    if (event.metaKey && !event.ctrlKey) {
+        return commitMode('wheel');
+    }
 
     if (canvasShortcuts && canvasShortcuts.ctrlKey === 'Control' && event.ctrlKey && !CanvasState.isCtrlPressed) {
         const rawDeltaX = Number(event.deltaX);
@@ -8440,9 +8453,7 @@ function resolveCanvasZoomInputMode(event) {
                     ? 'touchpad'
                     : 'wheel'));
 
-        CanvasState.touchpadState.lastZoomInputMode = mode;
-        CanvasState.touchpadState.lastZoomInputTime = now;
-        return mode;
+        return commitMode(mode);
     }
 
     const state = CanvasState.touchpadState || {};
@@ -8458,9 +8469,7 @@ function resolveCanvasZoomInputMode(event) {
         mode = hasRecentMode ? state.lastZoomInputMode : 'wheel';
     }
 
-    CanvasState.touchpadState.lastZoomInputMode = mode;
-    CanvasState.touchpadState.lastZoomInputTime = now;
-    return mode;
+    return commitMode(mode);
 }
 
 function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
