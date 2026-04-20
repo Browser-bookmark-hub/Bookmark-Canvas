@@ -27,6 +27,18 @@
 - [拆分对照全量报告](./report-split-audit-split-audit-20260201-214732.md)
 
 - [sourceID 统一替换 originalId 与同步导入导出改造计划书（2026-04-20）](./sourceID统一替换originalId与同步导入导出改造计划书-2026-04-20.md)
+- [第五刀导入/导出/同步合并实施计划（2026-04-21）](./第五刀导入导出同步合并实施计划-2026-04-21.md)
+- [执行记录（2026-04-20）：originalId 清理 + 同步守门](./执行记录-2026-04-20-sourceID-originalId-sync-guard.md)
+- [本轮一键验收脚本](../tools/run-sync-guard-acceptance.sh)
+
+## 本轮一键验收脚本
+
+- 在仓库根目录运行：`bash tools/run-sync-guard-acceptance.sh`
+- 或先赋予执行权限后运行：`./tools/run-sync-guard-acceptance.sh`
+- 脚本会一次性执行：
+  - 语法检查（`bookmark_canvas_module.js`、`search.js`、`obsidian-git-sync.js`）
+  - `originalId` / `sourceID` 回检
+  - 关键 hook 命中检查（一致性预检、push fail-closed、恢复锁阈值、P2 审计上下文、抑制窗口保险丝）
 
 ## 维护约定
 

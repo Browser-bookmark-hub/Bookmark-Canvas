@@ -3160,7 +3160,6 @@ function buildCanvasSearchDb() {
                         sectionLabel,
                         sectionTitle,
                         sectionSource: typeof section.source === 'string' ? section.source : '',
-                        originalId: item.originalId ? String(item.originalId) : '',
                         namedPath,
                         color: sectionColor,
                         __title: itemTitle.toLowerCase(),
@@ -5822,23 +5821,24 @@ function getInsertBatchSize(total) {
     return TEMP_SECTION_INSERT_BATCH_SIZE;
 }
 
-async function insertPayloadWithBatches(tempApi, sectionId, payloadItems, parentId = null) {
+async function insertPayloadWithBatches(tempApi, sectionId, payloadItems, parentId = null, options = {}) {
     if (!tempApi || !sectionId || !Array.isArray(payloadItems) || !payloadItems.length) return;
 
     if (typeof tempApi.insertFromPayload !== 'function') {
         return;
     }
 
+    const insertOptions = options && typeof options === 'object' ? options : {};
     const total = payloadItems.length;
     const batchSize = getInsertBatchSize(total);
     if (!batchSize || batchSize >= total) {
-        tempApi.insertFromPayload(sectionId, parentId, payloadItems);
+        tempApi.insertFromPayload(sectionId, parentId, payloadItems, null, insertOptions);
         return;
     }
 
     for (let i = 0; i < total; i += batchSize) {
         const chunk = payloadItems.slice(i, i + batchSize);
-        tempApi.insertFromPayload(sectionId, parentId, chunk);
+        tempApi.insertFromPayload(sectionId, parentId, chunk, null, insertOptions);
         if (i + batchSize < total) {
             await yieldToMainThread();
         }
@@ -5866,7 +5866,7 @@ function isLargeFolderPayload(payload) {
     return false;
 }
 
-async function insertLargeFolderPayload(tempApi, sectionId, folderPayload, fallbackTitle) {
+async function insertLargeFolderPayload(tempApi, sectionId, folderPayload, fallbackTitle, options = {}) {
     if (!tempApi || !sectionId || !folderPayload || folderPayload.type !== 'folder') return false;
     if (typeof tempApi.createFolder !== 'function' || typeof tempApi.insertFromPayload !== 'function') return false;
 
@@ -5877,7 +5877,7 @@ async function insertLargeFolderPayload(tempApi, sectionId, folderPayload, fallb
     const children = Array.isArray(folderPayload.children) ? folderPayload.children : [];
     if (!children.length) return true;
 
-    await insertPayloadWithBatches(tempApi, sectionId, children, folderId);
+    await insertPayloadWithBatches(tempApi, sectionId, children, folderId, options);
     return true;
 }
 
@@ -5936,6 +5936,7 @@ async function createTempSectionFromSearchResults() {
         }
 
         const payloadItems = [];
+        const copyInsertOptions = { regenerateSourceID: true };
         let insertedDirectCount = 0;
         let processed = 0;
 
@@ -5965,7 +5966,8 @@ async function createTempSectionFromSearchResults() {
                                 tempApi,
                                 sectionId,
                                 payloadItem,
-                                item.title || (isZh ? '文件夹' : 'Folder')
+                                item.title || (isZh ? '文件夹' : 'Folder'),
+                                copyInsertOptions
                             );
                             if (inserted) {
                                 insertedDirectCount += 1;
@@ -6009,7 +6011,7 @@ async function createTempSectionFromSearchResults() {
             1600
         );
 
-        await insertPayloadWithBatches(tempApi, sectionId, payloadItems);
+        await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null, copyInsertOptions);
 
         try {
             if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
@@ -6136,7 +6138,7 @@ async function createTempSectionFromDomainResult(domain) {
             1600
         );
 
-        await insertPayloadWithBatches(tempApi, sectionId, payloadItems);
+        await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null, { regenerateSourceID: true });
 
         try {
             if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {

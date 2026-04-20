@@ -1593,7 +1593,7 @@ function __updateImportContainerMembershipAfterMove(nodeId) {
         changed = __addNodeToImportContainer(target, nodeId, nodeType) || changed;
     }
     if (changed) {
-        try { saveTempNodes({ suppressSyncMarkDirty }); } catch (_) { }
+        try { saveTempNodes(); } catch (_) { }
     }
 }
 
@@ -2838,9 +2838,11 @@ _Shortcuts can be customized in the "Manage" button at top-left_
         width: 420,
         height: 480,
         text: bookmarkGuideMarkdown,
+        markdownSource: bookmarkGuideMarkdown,
         html: __renderMarkdownSourceToCanvasHtml(bookmarkGuideMarkdown),
-        subtype: 'canvas-native-text',
-        source: 'obsidian-canvas-text',
+        subtype: CANVAS_PLUGIN_MARKDOWN_SUBTYPE,
+        source: CANVAS_PLUGIN_MARKDOWN_SOURCE,
+        canvasTextKind: 'blank',
         color: '4', // 绿色
         fontSize: MD_NODE_LEGACY_DEFAULT_FONT_SIZE,
         createdAt: Date.now()
@@ -2854,9 +2856,11 @@ _Shortcuts can be customized in the "Manage" button at top-left_
         width: 420,
         height: 400,
         text: shortcutGuideMarkdown,
+        markdownSource: shortcutGuideMarkdown,
         html: __renderMarkdownSourceToCanvasHtml(shortcutGuideMarkdown),
-        subtype: 'canvas-native-text',
-        source: 'obsidian-canvas-text',
+        subtype: CANVAS_PLUGIN_MARKDOWN_SUBTYPE,
+        source: CANVAS_PLUGIN_MARKDOWN_SOURCE,
+        canvasTextKind: 'blank',
         color: '5', // 蓝色
         fontSize: MD_NODE_LEGACY_DEFAULT_FONT_SIZE,
         createdAt: Date.now()
@@ -2912,9 +2916,11 @@ _Tip: This card can be freely edited or deleted_
         width: 420,
         height: 420,  // 稍微增高以容纳更多内容
         text: batchFeatureMarkdown,
+        markdownSource: batchFeatureMarkdown,
         html: __renderMarkdownSourceToCanvasHtml(batchFeatureMarkdown),
-        subtype: 'canvas-native-text',
-        source: 'obsidian-canvas-text',
+        subtype: CANVAS_PLUGIN_MARKDOWN_SUBTYPE,
+        source: CANVAS_PLUGIN_MARKDOWN_SOURCE,
+        canvasTextKind: 'blank',
         color: '5', // 蓝色
         fontSize: MD_NODE_LEGACY_DEFAULT_FONT_SIZE,
         createdAt: Date.now()
@@ -3912,10 +3918,18 @@ function allocateTempItemId(sectionId) {
     return `temp-${sectionId}-${++CanvasState.tempItemCounter}`;
 }
 
-function convertBookmarkNodeToTempItem(node, sectionId) {
+function convertBookmarkNodeToTempItem(node, sectionId, options = {}) {
     if (!node) return null;
 
     const itemId = allocateTempItemId(sectionId);
+    const regenerateSourceID = !!(options && options.regenerateSourceID === true);
+    const allowLegacyOriginalId = !(options && options.allowLegacyOriginalId === false);
+    const sourceID = regenerateSourceID
+        ? __generateTempItemSourceID()
+        : __resolveTempItemSourceID(
+            node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId,
+            allowLegacyOriginalId ? node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] : ''
+        );
     const item = {
         id: itemId,
         sectionId,
@@ -3923,13 +3937,13 @@ function convertBookmarkNodeToTempItem(node, sectionId) {
         url: node.url || '',
         type: node.url ? 'bookmark' : 'folder',
         children: [],
-        originalId: node.id || null,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        [TEMP_ITEM_SOURCE_ID_KEY]: sourceID
     };
 
     if (node.children && node.children.length) {
         item.children = node.children
-            .map(child => convertBookmarkNodeToTempItem(child, sectionId))
+            .map(child => convertBookmarkNodeToTempItem(child, sectionId, options))
             .filter(Boolean);
     }
 
@@ -4034,17 +4048,27 @@ function findTempItemEntry(sectionId, itemId) {
 
 function serializeTempItemForClipboard(item) {
     if (!item) return null;
+    const sourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY] || item.sourceId);
     return {
         title: item.title,
         url: item.url || '',
         type: item.type,
+        ...(sourceID ? { [TEMP_ITEM_SOURCE_ID_KEY]: sourceID } : {}),
         children: (item.children || []).map(child => serializeTempItemForClipboard(child))
     };
 }
 
-function createTempItemFromPayload(sectionId, payload) {
+function createTempItemFromPayload(sectionId, payload, options = {}) {
     if (!payload) return null;
     const hasExplicitTitle = typeof payload.title === 'string';
+    const regenerateSourceID = !!(options && options.regenerateSourceID === true);
+    const allowLegacyOriginalId = !(options && options.allowLegacyOriginalId === false);
+    const sourceID = regenerateSourceID
+        ? __generateTempItemSourceID()
+        : __resolveTempItemSourceID(
+            payload[TEMP_ITEM_SOURCE_ID_KEY] || payload.sourceId,
+            allowLegacyOriginalId ? payload[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] : ''
+        );
     const item = {
         id: allocateTempItemId(sectionId),
         sectionId,
@@ -4052,13 +4076,13 @@ function createTempItemFromPayload(sectionId, payload) {
         url: payload.url || '',
         type: payload.type === 'folder' ? 'folder' : (payload.url ? 'bookmark' : 'folder'),
         children: [],
-        originalId: null,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        [TEMP_ITEM_SOURCE_ID_KEY]: sourceID
     };
 
     if (payload.children && payload.children.length) {
         item.children = payload.children
-            .map(child => createTempItemFromPayload(sectionId, child))
+            .map(child => createTempItemFromPayload(sectionId, child, options))
             .filter(Boolean);
     }
 
@@ -4245,7 +4269,11 @@ function extractTempItemsPayload(sectionId, itemIds) {
 }
 
 function insertTempItemsFromPayload(sectionId, parentId, payloadItems, index = null, options = {}) {
-    const items = (payloadItems || []).map(item => createTempItemFromPayload(sectionId, item)).filter(Boolean);
+    const createOptions = {
+        regenerateSourceID: !!(options && options.regenerateSourceID === true),
+        allowLegacyOriginalId: !(options && options.allowLegacyOriginalId === false)
+    };
+    const items = (payloadItems || []).map(item => createTempItemFromPayload(sectionId, item, createOptions)).filter(Boolean);
     if (!items.length) return [];
     insertTempItems(sectionId, parentId, items, index, options);
     return items;
@@ -4474,7 +4502,10 @@ function setupCanvasDropFeedback() {
             : String(html || '');
 
         if (typeof text === 'string') {
-            node.text = __repairLegacyCanvasMarkdownSource(String(text || ''));
+            const markdownText = __repairLegacyCanvasMarkdownSource(String(text || ''));
+            node.text = markdownText;
+            node.markdownSource = markdownText;
+            node.canvasTextKind = 'blank';
         }
         if (normalized) node.html = normalized;
         if (typeof __ensureMdNodeMarkdownProtocol === 'function') {
@@ -5378,6 +5409,10 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
 
         // 递归转换为临时栏目格式
         const convertToTempItem = (node) => {
+            const sourceID = __resolveTempItemSourceID(
+                node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId,
+                node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]
+            );
             const item = {
                 id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
                 sectionId: sectionId,
@@ -5385,7 +5420,8 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
                 url: node.url || '',
                 type: node.url ? 'bookmark' : 'folder',
                 children: [],
-                createdAt: Date.now()
+                createdAt: Date.now(),
+                [TEMP_ITEM_SOURCE_ID_KEY]: sourceID
             };
 
             if (node.children && Array.isArray(node.children)) {
@@ -16453,8 +16489,12 @@ async function createTempNode(data, x, y) {
         }
 
         if (payload && payload.length) {
+            const convertOptions = {
+                regenerateSourceID: !!(data && data.regenerateSourceID === true),
+                allowLegacyOriginalId: !(data && data.allowLegacyOriginalId === false)
+            };
             payload.forEach(node => {
-                const tempItem = convertBookmarkNodeToTempItem(node, sectionId);
+                const tempItem = convertBookmarkNodeToTempItem(node, sectionId, convertOptions);
                 if (tempItem) section.items.push(tempItem);
             });
         }
@@ -16584,9 +16624,11 @@ function duplicateMdNode(nodeId) {
         width: node.width || baseSize.width,
         height: node.height || baseSize.height,
         text: body,
+        markdownSource: __isCanvasNativeTextNode(node) ? undefined : body,
         html: node.html || '',
-        subtype: 'canvas-native-text',
-        source: 'obsidian-canvas-text',
+        subtype: __isCanvasNativeTextNode(node) ? CANVAS_NATIVE_TEXT_SUBTYPE : CANVAS_PLUGIN_MARKDOWN_SUBTYPE,
+        source: __isCanvasNativeTextNode(node) ? CANVAS_NATIVE_TEXT_SOURCE : CANVAS_PLUGIN_MARKDOWN_SOURCE,
+        canvasTextKind: __isCanvasNativeTextNode(node) ? 'native' : 'blank',
         color: node.color || null,
         colorHex: node.colorHex || null,
         createdAt: Date.now()
@@ -17251,12 +17293,7 @@ function renderMdNode(node) {
     // 初始化编辑器内容：
     // - 文本节点统一按 text body 渲染（官方 text node 对齐）。
     const isCanvasNativeText = __isCanvasNativeTextNode(node);
-    const nativeTextBody = isCanvasNativeText
-        ? __resolveCanvasNativeTextNodeBody(node)
-        : '';
-    const rawMarkdownSource = isCanvasNativeText
-        ? __repairLegacyCanvasMarkdownSource(nativeTextBody)
-        : __repairLegacyCanvasMarkdownSource(typeof node.text === 'string' ? node.text : '');
+    const rawMarkdownSource = __deriveMdNodeMarkdownSource(node);
     if (rawMarkdownSource) {
         try {
             editor.innerHTML = __renderMarkdownToCanvasRichHtml(rawMarkdownSource, {
@@ -19214,7 +19251,7 @@ function renderMdNode(node) {
             const canonicalSource = __repairLegacyCanvasMarkdownSource(
                 isCanvasNativeText
                     ? __resolveCanvasNativeTextNodeBody(node)
-                    : (typeof node.text === 'string' ? node.text : '')
+                    : __deriveMdNodeMarkdownSource(node)
             );
             if (String(canonicalSource || '').trim()) {
                 editor.innerHTML = __renderMarkdownToCanvasRichHtml(canonicalSource, {
@@ -20584,8 +20621,10 @@ async function createMdNode(x, y, text = '') {
         width: baseSize.width,
         height: baseSize.height,
         text: nativeText,
-        subtype: 'canvas-native-text',
-        source: 'obsidian-canvas-text',
+        markdownSource: nativeText,
+        subtype: CANVAS_PLUGIN_MARKDOWN_SUBTYPE,
+        source: CANVAS_PLUGIN_MARKDOWN_SOURCE,
+        canvasTextKind: 'blank',
         color: null,
         colorHex: defaultColor || null,
         createdAt: Date.now()
@@ -21722,6 +21761,15 @@ function __deriveMdNodeMarkdownSource(node) {
     if (!node || typeof node !== 'object') return '';
     if (node.subtype === 'import-container') return '';
 
+    if (__isCanvasNativeTextNode(node)) {
+        return __normalizeCanvasMarkdownSource(
+            __repairLegacyCanvasMarkdownSource(__resolveCanvasNativeTextNodeBody(node))
+        );
+    }
+
+    const directMarkdownSource = __repairLegacyCanvasMarkdownSource(node.markdownSource);
+    if (directMarkdownSource.trim()) return __normalizeCanvasMarkdownSource(directMarkdownSource);
+
     const directText = __repairLegacyCanvasMarkdownSource(node.text);
     if (directText.trim()) return directText;
 
@@ -21742,6 +21790,10 @@ function __deriveMdNodeMarkdownSource(node) {
 function __normalizeCanvasNativeTextNodeFields(node, options = {}) {
     if (!node || typeof node !== 'object') return node;
     if (!__isCanvasNativeTextNode(node)) return node;
+
+    node.subtype = CANVAS_NATIVE_TEXT_SUBTYPE;
+    node.source = CANVAS_NATIVE_TEXT_SOURCE;
+    node.canvasTextKind = 'native';
 
     const markdownText = __normalizeCanvasMarkdownSource(
         __repairLegacyCanvasMarkdownSource(__resolveCanvasNativeTextNodeBody(node))
@@ -21765,16 +21817,41 @@ function __normalizeCanvasNativeTextNodeFields(node, options = {}) {
     return node;
 }
 
+function __normalizeCanvasPluginMarkdownNodeFields(node, options = {}) {
+    if (!node || typeof node !== 'object') return node;
+    if (__isCanvasNativeTextNode(node)) return node;
+    if (node.subtype === 'import-container') return node;
+
+    const markdownSource = __normalizeCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
+    node.subtype = CANVAS_PLUGIN_MARKDOWN_SUBTYPE;
+    node.source = CANVAS_PLUGIN_MARKDOWN_SOURCE;
+    node.canvasTextKind = 'blank';
+    node.markdownSource = markdownSource;
+    node.text = markdownSource;
+
+    const shouldRefreshCaches = options.refreshCachesFromMarkdown === true
+        || __shouldRebuildMdNodeHtmlCacheFromMarkdown(node.html)
+        || !(typeof node.html === 'string' && node.html.trim());
+
+    if (shouldRefreshCaches) {
+        node.html = markdownSource
+            ? __renderMarkdownSourceToCanvasHtml(markdownSource)
+            : '';
+    } else if (typeof node.html === 'string') {
+        node.html = __normalizeCanvasRichHtml(node.html) || '';
+    }
+    return node;
+}
+
 function __ensureMdNodeMarkdownProtocol(node, options = {}) {
     if (!node || typeof node !== 'object') return node;
     if (node.subtype === 'import-container') return node;
-    if (!__isCanvasNativeTextNode(node)) {
-        node.text = __repairLegacyCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
-        node.subtype = 'canvas-native-text';
-        node.source = 'obsidian-canvas-text';
+    if (__isCanvasNativeTextNode(node)) {
+        __normalizeCanvasNativeTextNodeFields(node, options);
+        return node;
     }
 
-    __normalizeCanvasNativeTextNodeFields(node, options);
+    __normalizeCanvasPluginMarkdownNodeFields(node, options);
     return node;
 }
 
@@ -21817,7 +21894,7 @@ function __syncMdNodeFromEditor(node, editor) {
 
     const markdownSource = __resolveMarkdownSourceFromEditorHtml(
         cleanHtml,
-        node.text,
+        node.markdownSource || node.text,
         {
             sourceMode: 'markdown-node',
             renderOptions: isCanvasNativeText ? { forceLinePreserve: true } : null,
@@ -21832,13 +21909,15 @@ function __syncMdNodeFromEditor(node, editor) {
     const nextNodeText = markdownSource;
 
     const changed = (node.html || '') !== cleanHtml
-        || (node.text || '') !== nextNodeText
-        || !__isCanvasNativeTextNode(node);
+        || (node.markdownSource || '') !== nextNodeText
+        || !__isCanvasPluginMarkdownNode(node);
 
     node.html = cleanHtml;
+    node.markdownSource = nextNodeText;
     node.text = nextNodeText;
-    node.subtype = 'canvas-native-text';
-    node.source = 'obsidian-canvas-text';
+    node.subtype = CANVAS_PLUGIN_MARKDOWN_SUBTYPE;
+    node.source = CANVAS_PLUGIN_MARKDOWN_SOURCE;
+    node.canvasTextKind = 'blank';
     return changed;
 }
 
@@ -25263,7 +25342,6 @@ function buildTempTreeNode(section, item, level, options = {}) {
     treeItem.dataset.nodeType = item.type;
     treeItem.dataset.sectionId = section.id;
     treeItem.dataset.treeType = 'temporary';
-    treeItem.dataset.originalId = item.originalId || '';
     treeItem.dataset.level = String(level);
     if (item.url) {
         treeItem.dataset.nodeUrl = item.url;
@@ -25706,7 +25784,9 @@ function setupTempSectionDropTargets(section, sectionElement, treeContainer, hea
                 if (!ids.length) return;
                 const payload = await resolvePermanentPayload(ids);
                 if (payload && payload.length) {
-                    insertTempItemsFromPayload(section.id, null, payload);
+                    insertTempItemsFromPayload(section.id, null, payload, null, {
+                        regenerateSourceID: true
+                    });
                     if (typeof deselectAll === 'function') {
                         deselectAll();
                     }
@@ -25855,7 +25935,9 @@ function setupTempTreeNodeDropHandlers(treeItem, section, item) {
             if (!ids.length) return;
             const payload = await resolvePermanentPayload(ids);
             if (!payload || !payload.length) return;
-            insertTempItemsFromPayload(section.id, item.id, payload);
+            insertTempItemsFromPayload(section.id, item.id, payload, null, {
+                regenerateSourceID: true
+            });
             if (typeof deselectAll === 'function') {
                 deselectAll();
             }
@@ -29327,7 +29409,7 @@ function __parseCloudSnapshotStorageValue(rawValue) {
     return parsed !== null ? parsed : rawValue;
 }
 
-function __normalizeCanvasTempStatePayloadForImport(stateInput) {
+function __normalizeCanvasTempStatePayloadForImport(stateInput, options = {}) {
     const parsedState = typeof stateInput === 'string'
         ? __safeParseCanvasStorageJson(stateInput)
         : stateInput;
@@ -29349,6 +29431,26 @@ function __normalizeCanvasTempStatePayloadForImport(stateInput) {
         ? parsedState.mdNodes
         : (Array.isArray(parsedState.cards) ? parsedState.cards : []);
     const edges = Array.isArray(parsedState.edges) ? parsedState.edges : [];
+    const preserveSourceIDRaw = !!(options && options.preserveSourceIDRaw === true);
+
+    if (preserveSourceIDRaw) {
+        return __normalizeCanvasTempStateForRuntime({
+            ...parsedState,
+            sections,
+            tempSectionCounter: Number(parsedState.tempSectionCounter) || sections.length || 0,
+            tempItemCounter: Number(parsedState.tempItemCounter) || 0,
+            colorCursor: Number(parsedState.colorCursor) || 0,
+            tempSectionLastColor: parsedState.tempSectionLastColor || getTempSectionDefaultColor(),
+            tempSectionPrevColor: parsedState.tempSectionPrevColor || null,
+            mdNodes,
+            mdNodeCounter: Number(parsedState.mdNodeCounter) || mdNodes.length || 0,
+            edges,
+            edgeCounter: Number(parsedState.edgeCounter) || edges.length || 0,
+            timestamp: Number(parsedState.timestamp) || Date.now()
+        }, {
+            preserveSourceIDRaw: true
+        });
+    }
 
     return __buildCanvasTempStateProtocolView({
         ...parsedState,
@@ -29366,27 +29468,48 @@ function __normalizeCanvasTempStatePayloadForImport(stateInput) {
     });
 }
 
-function __collectCanvasTempStateForExport() {
-    return __buildCanvasTempStateProtocolView({
-        sections: Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections : [],
-        tempSectionCounter: CanvasState.tempSectionCounter,
-        tempItemCounter: CanvasState.tempItemCounter,
-        colorCursor: CanvasState.colorCursor,
-        tempSectionLastColor: CanvasState.tempSectionLastColor || getTempSectionDefaultColor(),
-        tempSectionPrevColor: CanvasState.tempSectionPrevColor || null,
-        mdNodes: Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : [],
-        mdNodeCounter: CanvasState.mdNodeCounter,
-        edges: Array.isArray(CanvasState.edges) ? CanvasState.edges : [],
-        edgeCounter: CanvasState.edgeCounter,
-        timestamp: Date.now()
+function __summarizeCanvasTempStateForCanonicalAudit(stateInput) {
+    const normalized = __normalizeCanvasTempStatePayloadForImport(stateInput);
+    if (!normalized) {
+        return {
+            sections: 0,
+            mdNodes: 0,
+            edges: 0,
+            tempItems: 0
+        };
+    }
+
+    const countItems = (itemsInput) => {
+        const stack = Array.isArray(itemsInput) ? itemsInput.slice() : [];
+        let count = 0;
+        while (stack.length) {
+            const item = stack.pop();
+            if (!item || typeof item !== 'object') continue;
+            count += 1;
+            if (Array.isArray(item.children) && item.children.length) {
+                stack.push(...item.children);
+            }
+        }
+        return count;
+    };
+
+    const sections = Array.isArray(normalized.sections) ? normalized.sections : [];
+    let tempItems = 0;
+    sections.forEach((section) => {
+        tempItems += countItems(section && section.items);
     });
+
+    return {
+        sections: sections.length,
+        mdNodes: Array.isArray(normalized.mdNodes) ? normalized.mdNodes.length : 0,
+        edges: Array.isArray(normalized.edges) ? normalized.edges.length : 0,
+        tempItems
+    };
 }
 
-function __buildCanvasStateBackupView(tempStateInput = null) {
-    const state = tempStateInput && typeof tempStateInput === 'object'
-        ? tempStateInput
-        : __collectCanvasTempStateForExport();
-    if (!state || typeof state !== 'object') {
+function __buildCanvasStateBackupViewFromProtocolState(stateInput) {
+    const state = stateInput && typeof stateInput === 'object' ? stateInput : null;
+    if (!state) {
         return {
             tempSections: [],
             mdNodes: [],
@@ -29417,50 +29540,373 @@ function __buildCanvasStateBackupView(tempStateInput = null) {
     };
 }
 
-function __extractCanvasTempStateFromBackupPayload(primaryState, storage) {
-    if (primaryState && primaryState.canvasState) {
-        const normalizedFromCanvasState = __normalizeCanvasTempStatePayloadForImport(primaryState.canvasState);
-        if (normalizedFromCanvasState) return normalizedFromCanvasState;
+function __buildCanonicalSyncContract(input = {}, options = {}) {
+    const payload = (input && typeof input === 'object') ? input : {};
+    const primaryInput = (payload.primaryState && typeof payload.primaryState === 'object') ? payload.primaryState : {};
+    const storageInput = (payload.storage && typeof payload.storage === 'object') ? payload.storage : {};
+    const source = String(
+        (options && typeof options.source === 'string' && options.source.trim())
+            ? options.source
+            : (payload.source || 'unknown')
+    ).trim() || 'unknown';
+
+    const preserveSourceIDRaw = !!(options && options.preserveSourceIDRaw === true);
+    const tempCandidates = [
+        { value: primaryInput.canvasState, source: 'primary.canvasState' },
+        { value: storageInput[TEMP_SECTION_STORAGE_KEY], source: `storage.${TEMP_SECTION_STORAGE_KEY}` },
+        { value: payload.tempState, source: 'input.tempState' }
+    ];
+
+    let resolvedTempState = null;
+    let resolvedTempSource = 'none';
+    for (let i = 0; i < tempCandidates.length; i++) {
+        const candidate = tempCandidates[i];
+        const normalized = __normalizeCanvasTempStatePayloadForImport(candidate.value, {
+            preserveSourceIDRaw
+        });
+        if (!normalized) continue;
+        resolvedTempState = normalized;
+        resolvedTempSource = candidate.source;
+        break;
+    }
+    if (!resolvedTempState) return null;
+
+    const canonicalPersistedState = __buildPersistedCanvasState(resolvedTempState, {
+        preserveSourceIDRaw
+    });
+    const canonicalTempState = __normalizeCanvasTempStatePayloadForImport(canonicalPersistedState, {
+        preserveSourceIDRaw
+    }) || resolvedTempState;
+
+    const canonicalStorage = __cloneCanvasProtocolJson(storageInput) || {};
+    canonicalStorage[TEMP_SECTION_STORAGE_KEY] = __cloneCanvasProtocolJson(canonicalTempState);
+
+    const canonicalPrimaryState = __cloneCanvasProtocolJson(primaryInput) || {};
+    canonicalPrimaryState.canvasState = __buildCanvasStateBackupViewFromProtocolState(canonicalTempState);
+
+    const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(canonicalPrimaryState.permanentTreeSnapshot);
+    if (normalizedPermanentTreeSnapshot && normalizedPermanentTreeSnapshot.length) {
+        canonicalPrimaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
+    } else {
+        delete canonicalPrimaryState.permanentTreeSnapshot;
     }
 
-    if (storage && Object.prototype.hasOwnProperty.call(storage, TEMP_SECTION_STORAGE_KEY)) {
-        const normalizedFromStorage = __normalizeCanvasTempStatePayloadForImport(storage[TEMP_SECTION_STORAGE_KEY]);
-        if (normalizedFromStorage) return normalizedFromStorage;
-    }
-
-    return null;
+    return {
+        version: 1,
+        schema: 'bookmark-canvas.sync-contract.v1',
+        source,
+        resolvedTempSource,
+        tempState: canonicalTempState,
+        storage: canonicalStorage,
+        primaryState: canonicalPrimaryState
+    };
 }
 
-function __buildImportPayloadFromCloudSnapshot(snapshot) {
+function __buildCanonicalSyncContractFromBackupPayload(primaryStateInput, storageInput = null) {
+    const primaryState = (primaryStateInput && typeof primaryStateInput === 'object') ? primaryStateInput : {};
+    const resolvedStorage = (storageInput && typeof storageInput === 'object')
+        ? storageInput
+        : ((primaryState.storage && typeof primaryState.storage === 'object') ? primaryState.storage : {});
+    const preserveSourceIDRaw = true;
+    return __buildCanonicalSyncContract({
+        storage: resolvedStorage,
+        primaryState,
+        source: 'backup'
+    }, {
+        source: 'backup',
+        preserveSourceIDRaw
+    });
+}
+
+function __buildCanonicalSyncContractFromCloudSnapshot(snapshot) {
     const payload = snapshot && typeof snapshot === 'object' ? snapshot : null;
     const data = payload && payload.data && typeof payload.data === 'object' ? payload.data : null;
     if (!data) {
         throw new Error('云端快照格式无效：缺少 data');
     }
 
-    const parsedTempState = __parseCloudSnapshotStorageValue(data[TEMP_SECTION_STORAGE_KEY]);
-    const normalizedTempState = __normalizeCanvasTempStatePayloadForImport(parsedTempState);
-    if (!normalizedTempState) {
-        throw new Error('云端快照缺少画布临时栏目数据');
-    }
-
     const storage = {};
     Object.keys(data).forEach((key) => {
         storage[key] = __parseCloudSnapshotStorageValue(data[key]);
     });
-    storage[TEMP_SECTION_STORAGE_KEY] = normalizedTempState;
 
-    const primaryState = {};
-    const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(payload.permanentTreeSnapshot);
-    if (normalizedPermanentTreeSnapshot && normalizedPermanentTreeSnapshot.length) {
-        primaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
+    const canonical = __buildCanonicalSyncContract({
+        storage,
+        primaryState: {
+            permanentTreeSnapshot: payload.permanentTreeSnapshot
+        },
+        source: 'cloud-snapshot'
+    }, {
+        source: 'cloud-snapshot',
+        preserveSourceIDRaw: true
+    });
+    if (!canonical || !canonical.tempState) {
+        throw new Error('云端快照缺少画布临时栏目数据');
+    }
+    return canonical;
+}
+
+function __buildImportPayloadFromCanonicalSyncContract(contractInput, options = {}) {
+    const contract = (contractInput && typeof contractInput === 'object') ? contractInput : null;
+    if (!contract || !contract.tempState) return null;
+    const includeSource = !!(options && options.includeSource);
+    const payload = {
+        tempState: __cloneCanvasProtocolJson(contract.tempState),
+        storage: __cloneCanvasProtocolJson(contract.storage) || {},
+        primaryState: __cloneCanvasProtocolJson(contract.primaryState) || {}
+    };
+    payload.storage[TEMP_SECTION_STORAGE_KEY] = __cloneCanvasProtocolJson(payload.tempState);
+    if (includeSource) {
+        payload.source = String(contract.resolvedTempSource || 'none');
+    }
+    return payload;
+}
+
+function __resolveCanonicalTempStateForShadowAudit(tempStateInput, storageInput, primaryStateInput) {
+    const canonical = __buildCanonicalSyncContract({
+        tempState: tempStateInput,
+        storage: storageInput,
+        primaryState: primaryStateInput,
+        source: 'shadow-audit'
+    }, {
+        source: 'shadow-audit'
+    });
+    if (canonical && canonical.tempState) {
+        return {
+            tempState: canonical.tempState,
+            source: String(canonical.resolvedTempSource || 'none')
+        };
     }
 
     return {
-        tempState: normalizedTempState,
-        storage,
-        primaryState
+        tempState: null,
+        source: 'none'
     };
+}
+
+function __buildCanonicalImportShadowPayload(tempStateInput, storageInput, primaryStateInput) {
+    const canonical = __buildCanonicalSyncContract({
+        tempState: tempStateInput,
+        storage: storageInput,
+        primaryState: primaryStateInput,
+        source: 'shadow-audit'
+    }, {
+        source: 'shadow-audit'
+    });
+    if (!canonical || !canonical.tempState) return null;
+    return __buildImportPayloadFromCanonicalSyncContract(canonical, { includeSource: true });
+}
+
+function __normalizeCanonicalImportAuditContext(channelInput, contextInput) {
+    const context = (contextInput && typeof contextInput === 'object') ? contextInput : {};
+    const normalizedChannel = String(channelInput || context.channel || 'unknown').trim() || 'unknown';
+    const normalizedSource = String(context.source || '').trim() || (normalizedChannel === 'sync-import' ? 'folder' : 'unknown');
+    const normalizedTrigger = String(context.trigger || '').trim() || (normalizedChannel === 'sync-import' ? 'sync-import' : 'manual-import');
+    return {
+        version: 1,
+        channel: normalizedChannel,
+        source: normalizedSource,
+        syncMode: context.syncMode === true || normalizedChannel === 'sync-import',
+        trigger: normalizedTrigger
+    };
+}
+
+function __normalizeCanonicalImportAuditSink(input) {
+    const raw = (input && typeof input === 'object') ? input : {};
+    const rawByChannel = (raw.byChannel && typeof raw.byChannel === 'object') ? raw.byChannel : {};
+    const rawMismatchByType = (raw.mismatchByType && typeof raw.mismatchByType === 'object') ? raw.mismatchByType : {};
+    return {
+        version: 1,
+        total: Math.max(0, Number(raw.total) || 0),
+        mismatch: Math.max(0, Number(raw.mismatch) || 0),
+        byChannel: {
+            manualImport: Math.max(0, Number(rawByChannel.manualImport) || 0),
+            syncImport: Math.max(0, Number(rawByChannel.syncImport) || 0),
+            unknown: Math.max(0, Number(rawByChannel.unknown) || 0)
+        },
+        mismatchByType: {
+            sigChanged: Math.max(0, Number(rawMismatchByType.sigChanged) || 0),
+            countChanged: Math.max(0, Number(rawMismatchByType.countChanged) || 0),
+            permanentTreeChanged: Math.max(0, Number(rawMismatchByType.permanentTreeChanged) || 0),
+            inputHomogeneous: Math.max(0, Number(rawMismatchByType.inputHomogeneous) || 0)
+        },
+        last: raw.last || null,
+        recent: Array.isArray(raw.recent) ? raw.recent.slice() : [],
+        updatedAt: Math.max(0, Number(raw.updatedAt) || 0)
+    };
+}
+
+const CANVAS_CANONICAL_IMPORT_AUDIT_DEBUG_STORAGE_KEY = 'canvasCanonicalImportShadowAuditDebug';
+function __isCanonicalImportShadowAuditEnabled() {
+    try {
+        if (typeof window === 'undefined') return false;
+        if (window.__CANVAS_CANONICAL_IMPORT_SHADOW_AUDIT_DEBUG__ === true) return true;
+        if (window.__canvasCanonicalImportShadowAuditDebug === true) return true;
+
+        const raw = localStorage.getItem(CANVAS_CANONICAL_IMPORT_AUDIT_DEBUG_STORAGE_KEY);
+        if (raw == null) return false;
+        const normalized = String(raw).trim().toLowerCase();
+        return normalized === '1' || normalized === 'true' || normalized === 'on';
+    } catch (_) {
+        return false;
+    }
+}
+
+function __runCanonicalImportShadowAudit(channel, tempStateInput, storageInput, primaryStateInput, contextInput = null) {
+    if (!__isCanonicalImportShadowAuditEnabled()) return null;
+    const startedAt = Date.now();
+    const auditContext = __normalizeCanonicalImportAuditContext(channel, contextInput);
+    const legacyTempState = __normalizeCanvasTempStatePayloadForImport(tempStateInput);
+    const canonicalPayload = __buildCanonicalImportShadowPayload(tempStateInput, storageInput, primaryStateInput);
+    if (!legacyTempState || !canonicalPayload || !canonicalPayload.tempState) return null;
+
+    const legacySignature = __buildCanvasTempStateSignature(legacyTempState);
+    const canonicalSignature = __buildCanvasTempStateSignature(canonicalPayload.tempState);
+    const legacySummary = __summarizeCanvasTempStateForCanonicalAudit(legacyTempState);
+    const canonicalSummary = __summarizeCanvasTempStateForCanonicalAudit(canonicalPayload.tempState);
+    const legacyHasPermanentTree = !!(
+        primaryStateInput
+        && typeof primaryStateInput === 'object'
+        && Array.isArray(primaryStateInput.permanentTreeSnapshot)
+        && primaryStateInput.permanentTreeSnapshot.length
+    );
+    const canonicalHasPermanentTree = !!(
+        canonicalPayload.primaryState
+        && Array.isArray(canonicalPayload.primaryState.permanentTreeSnapshot)
+        && canonicalPayload.primaryState.permanentTreeSnapshot.length
+    );
+    const canonicalSource = String(canonicalPayload.source || 'none');
+    const inputHomogeneous = canonicalSource === 'input.tempState'
+        || canonicalSource === 'tempStateInput'
+        || canonicalSource === 'none';
+    const same = legacySignature === canonicalSignature;
+    const sigChanged = legacySignature !== canonicalSignature;
+    const sectionDelta = Number(canonicalSummary.sections) - Number(legacySummary.sections);
+    const mdDelta = Number(canonicalSummary.mdNodes) - Number(legacySummary.mdNodes);
+    const edgeDelta = Number(canonicalSummary.edges) - Number(legacySummary.edges);
+    const tempItemDelta = Number(canonicalSummary.tempItems) - Number(legacySummary.tempItems);
+    const permanentTreeChanged = legacyHasPermanentTree !== canonicalHasPermanentTree;
+    const countChanged = !!(sectionDelta || mdDelta || edgeDelta || tempItemDelta || permanentTreeChanged);
+    const record = {
+        version: 1,
+        ts: Date.now(),
+        channel: auditContext.channel,
+        source: auditContext.source,
+        syncMode: auditContext.syncMode === true,
+        trigger: auditContext.trigger,
+        legacy: {
+            sig: legacySignature,
+            sections: Number(legacySummary.sections) || 0,
+            mdNodes: Number(legacySummary.mdNodes) || 0,
+            edges: Number(legacySummary.edges) || 0,
+            tempItems: Number(legacySummary.tempItems) || 0,
+            hasPermanentTree: legacyHasPermanentTree
+        },
+        canonical: {
+            sig: canonicalSignature,
+            sections: Number(canonicalSummary.sections) || 0,
+            mdNodes: Number(canonicalSummary.mdNodes) || 0,
+            edges: Number(canonicalSummary.edges) || 0,
+            tempItems: Number(canonicalSummary.tempItems) || 0,
+            hasPermanentTree: canonicalHasPermanentTree,
+            source: canonicalSource
+        },
+        diff: {
+            same,
+            sigChanged,
+            countChanged,
+            sectionDelta,
+            mdDelta,
+            edgeDelta,
+            tempItemDelta,
+            permanentTreeChanged,
+            inputHomogeneous
+        },
+        costMs: Math.max(0, Date.now() - startedAt)
+    };
+
+    if (typeof window !== 'undefined') {
+        const sink = __normalizeCanonicalImportAuditSink(window.__canvasCanonicalImportAudit);
+        sink.total += 1;
+        if (auditContext.channel === 'manual-import') {
+            sink.byChannel.manualImport += 1;
+        } else if (auditContext.channel === 'sync-import') {
+            sink.byChannel.syncImport += 1;
+        } else {
+            sink.byChannel.unknown += 1;
+        }
+        if (!same) {
+            sink.mismatch += 1;
+            if (sigChanged) sink.mismatchByType.sigChanged += 1;
+            if (countChanged) sink.mismatchByType.countChanged += 1;
+            if (permanentTreeChanged) sink.mismatchByType.permanentTreeChanged += 1;
+        }
+        if (inputHomogeneous) {
+            sink.mismatchByType.inputHomogeneous += 1;
+        }
+        sink.last = record;
+        sink.recent.push(record);
+        if (sink.recent.length > 50) sink.recent.splice(0, sink.recent.length - 50);
+        sink.updatedAt = Date.now();
+        window.__canvasCanonicalImportAudit = sink;
+    }
+
+    if (!same) {
+        console.warn('[Canvas Canonical] import shadow mismatch:', record);
+    } else {
+        console.log('[Canvas Canonical] import shadow OK:', record.channel, record.source, record.trigger);
+    }
+    return record;
+}
+
+function __collectCanvasTempStateForExport() {
+    return __buildCanvasTempStateProtocolView({
+        sections: Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections : [],
+        tempSectionCounter: CanvasState.tempSectionCounter,
+        tempItemCounter: CanvasState.tempItemCounter,
+        colorCursor: CanvasState.colorCursor,
+        tempSectionLastColor: CanvasState.tempSectionLastColor || getTempSectionDefaultColor(),
+        tempSectionPrevColor: CanvasState.tempSectionPrevColor || null,
+        mdNodes: Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : [],
+        mdNodeCounter: CanvasState.mdNodeCounter,
+        edges: Array.isArray(CanvasState.edges) ? CanvasState.edges : [],
+        edgeCounter: CanvasState.edgeCounter,
+        timestamp: Date.now()
+    }, {
+        preserveSourceIDRaw: true
+    });
+}
+
+function __buildCanvasStateBackupView(tempStateInput = null) {
+    const fallbackState = tempStateInput && typeof tempStateInput === 'object'
+        ? tempStateInput
+        : __collectCanvasTempStateForExport();
+    const canonical = __buildCanonicalSyncContract({
+        tempState: fallbackState,
+        source: 'backup-export'
+    }, {
+        source: 'backup-export'
+    });
+    if (!canonical || !canonical.tempState) {
+        return __buildCanvasStateBackupViewFromProtocolState(null);
+    }
+    return __buildCanvasStateBackupViewFromProtocolState(canonical.tempState);
+}
+
+function __extractCanvasTempStateFromBackupPayload(primaryState, storage) {
+    const canonical = __buildCanonicalSyncContractFromBackupPayload(primaryState, storage);
+    return canonical && canonical.tempState
+        ? __cloneCanvasProtocolJson(canonical.tempState)
+        : null;
+}
+
+function __buildImportPayloadFromCloudSnapshot(snapshot) {
+    const canonical = __buildCanonicalSyncContractFromCloudSnapshot(snapshot);
+    const payload = __buildImportPayloadFromCanonicalSyncContract(canonical);
+    if (!payload || !payload.tempState) {
+        throw new Error('云端快照缺少画布临时栏目数据');
+    }
+    return payload;
 }
 
 async function importCloudSnapshotAsTemporary() {
@@ -29484,7 +29930,12 @@ async function importCloudSnapshotAsTemporary() {
         importPayload.tempState,
         importPayload.storage,
         importPayload.primaryState,
-        sourceName
+        sourceName,
+        {
+            source: 'cloud',
+            trigger: 'manual-cloud-import',
+            syncMode: false
+        }
     );
 
     if (!importPayload.primaryState || !importPayload.primaryState.permanentTreeSnapshot) {
@@ -29545,7 +29996,11 @@ async function handleFileImport(e) {
             }
             __setCanvasImportRuntimeMode(mode);
 
-            __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name);
+            __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
+                source: type === 'package-archive' ? 'zip' : 'json',
+                trigger: 'manual-file-import',
+                syncMode: false
+            });
         } else {
             const text = await file.text();
             if (type === 'html') {
@@ -29606,7 +30061,11 @@ async function handleFolderImport(e) {
         }
         __setCanvasImportRuntimeMode(mode);
 
-        __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName);
+        __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
+            source: 'folder',
+            trigger: 'manual-folder-import',
+            syncMode: false
+        });
 
         document.getElementById('canvasImportDialog').remove();
     } catch (error) {
@@ -29650,12 +30109,12 @@ async function parseCanvasPackageFromJsonFile(file) {
     const isBackupMode = primaryState.exportVersion === 2 && primaryState.canvasState;
     console.log(`[Canvas] JSON Import using ${isBackupMode ? 'BACKUP' : 'FULL'} mode`);
 
-    const storage = primaryState.storage || {};
-
-    // 提取 tempState
-    const tempState = isBackupMode
-        ? __extractCanvasTempStateFromBackupPayload(primaryState, storage)
-        : __normalizeCanvasTempStatePayloadForImport(storage[TEMP_SECTION_STORAGE_KEY] || null);
+    const storage = (primaryState && typeof primaryState.storage === 'object') ? primaryState.storage : {};
+    const canonical = __buildCanonicalSyncContractFromBackupPayload(primaryState, storage);
+    const normalizedPayload = __buildImportPayloadFromCanonicalSyncContract(canonical);
+    const tempState = normalizedPayload && normalizedPayload.tempState
+        ? normalizedPayload.tempState
+        : null;
 
     if (!tempState) {
         throw new Error(isEn ? 'Invalid package state.' : '导入包状态无效');
@@ -29663,14 +30122,19 @@ async function parseCanvasPackageFromJsonFile(file) {
 
     return {
         tempState,
-        storage,
-        primaryState
+        storage: normalizedPayload.storage,
+        primaryState: normalizedPayload.primaryState,
+        mode: isBackupMode ? 'backup' : 'full'
     };
 }
 
 async function importCanvasPackageJson(file) {
     const parsed = await parseCanvasPackageFromJsonFile(file);
-    __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, file.name);
+    __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, file.name, {
+        source: 'json',
+        trigger: 'manual-json-import',
+        syncMode: false
+    });
 }
 
 /**
@@ -29757,6 +30221,10 @@ async function importHtmlBookmarks(html, importFileName = '') {
             children: [],
             createdAt: Date.now()
         };
+        const sourceID = __normalizeTempItemSourceID(node && (node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId));
+        if (sourceID) {
+            item[TEMP_ITEM_SOURCE_ID_KEY] = sourceID;
+        }
 
         if (node.children && Array.isArray(node.children)) {
             item.children = node.children.map(convertToTempItem).filter(Boolean);
@@ -29781,7 +30249,7 @@ async function importHtmlBookmarks(html, importFileName = '') {
         }
     }
 
-    saveTempNodes();
+    saveTempNodes({ skipSourceIDNormalization: true });
 
     // 添加呼吸式闪烁效果，吸引用户注意
     const nodeElement = document.getElementById(section.id);
@@ -29956,6 +30424,19 @@ async function importJsonBookmarks(json, importFileName = '') {
             type: (url && !isFolder) ? 'bookmark' : 'folder',
             children: []
         };
+        const normalizedSourceID = __normalizeTempItemSourceID(
+            node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId
+        );
+        if (normalizedSourceID) {
+            item[TEMP_ITEM_SOURCE_ID_KEY] = normalizedSourceID;
+        } else {
+            const normalizedLegacyOriginalId = __normalizeTempItemSourceID(
+                node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]
+            );
+            if (normalizedLegacyOriginalId) {
+                item[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] = normalizedLegacyOriginalId;
+            }
+        }
 
         if (url && !isFolder) {
             totalBookmarkCount++;
@@ -29980,6 +30461,10 @@ async function importJsonBookmarks(json, importFileName = '') {
             children: [],
             createdAt: Date.now()
         };
+        const sourceID = __normalizeTempItemSourceID(node && (node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId));
+        if (sourceID) {
+            item[TEMP_ITEM_SOURCE_ID_KEY] = sourceID;
+        }
 
         if (node.children && Array.isArray(node.children)) {
             item.children = node.children.map(c => convertToTempItem(c, sectionId)).filter(Boolean);
@@ -29996,22 +30481,39 @@ async function importJsonBookmarks(json, importFileName = '') {
         data
         && typeof data === 'object'
         && !Array.isArray(data)
-        && Array.isArray(data.items)
         && (
             sectionType === 'temporary'
             || formatType === String(__CANVAS_SECTION_JSON_FORMAT || '').toLowerCase()
             || (data.sectionMeta && typeof data.sectionMeta === 'object')
         )
     );
+    let importedViaCanvasTempProtocol = false;
 
     // 检测并处理不同格式
     if (looksLikeCanvasTempProtocol) {
         console.log('[Canvas] Detected Bookmark Canvas temporary section JSON format');
         const normalizedProtocol = __normalizeTempSectionProtocolObject(data);
-        if (normalizedProtocol && Array.isArray(normalizedProtocol.items)) {
+        if (normalizedProtocol) {
+            importedViaCanvasTempProtocol = true;
             tempProtocolMeta = normalizedProtocol.sectionMeta || {};
-            items = normalizedProtocol.items.map(convert).filter(Boolean);
+            items = (Array.isArray(normalizedProtocol.items) ? normalizedProtocol.items : [])
+                .map(convert)
+                .filter(Boolean);
         }
+    } else if (data && typeof data === 'object' && Array.isArray(data.bookmarks)) {
+        // 第三方常见包裹格式：{ bookmarks: [...] }
+        console.log('[Canvas] Detected wrapped bookmarks array format');
+        data.bookmarks.forEach((entry) => {
+            const item = convert(entry);
+            if (item) items.push(item);
+        });
+    } else if (data && typeof data === 'object' && Array.isArray(data.items)) {
+        // 第三方常见包裹格式：{ items: [...] }
+        console.log('[Canvas] Detected wrapped items array format');
+        data.items.forEach((entry) => {
+            const item = convert(entry);
+            if (item) items.push(item);
+        });
     } else if (data.roots) {
         // Chrome/Edge 内部格式：{roots: {bookmark_bar, other, synced}}
         console.log('[Canvas] Detected Chrome/Edge internal bookmark format');
@@ -30080,7 +30582,7 @@ async function importJsonBookmarks(json, importFileName = '') {
         if (item) items.push(item);
     }
 
-    if (items.length === 0) {
+    if (items.length === 0 && !importedViaCanvasTempProtocol) {
         showCanvasToast(isEn ? 'No valid bookmark data found.' : '未解析到有效的书签数据', 'error');
         return;
     }
@@ -30155,7 +30657,7 @@ async function importJsonBookmarks(json, importFileName = '') {
         }
     }
 
-    saveTempNodes();
+    saveTempNodes({ skipSourceIDNormalization: true });
 
     // 添加呼吸式闪烁效果，吸引用户注意
     const nodeElement = document.getElementById(section.id);
@@ -32170,7 +32672,9 @@ function __buildImportedTempSectionFromVisualMarkdown(node, parsedMarkdown, cont
 }
 
 function __buildMdNodeMarkdown(node) {
-    const markdownSource = __normalizeCanvasMarkdownSource(__resolveCanvasNativeTextNodeBody(node));
+    const markdownSource = __isCanvasNativeTextNode(node)
+        ? __normalizeCanvasMarkdownSource(__resolveCanvasNativeTextNodeBody(node))
+        : __normalizeCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
     if (!markdownSource.trim()) return '\n';
     return markdownSource;
 }
@@ -33021,11 +33525,32 @@ function __joinSyncExportPath(root, rel) {
     return normalizedRoot ? `${normalizedRoot}/${normalizedRel}` : normalizedRel;
 }
 
+const CANVAS_NATIVE_TEXT_SUBTYPE = 'canvas-native-text';
+const CANVAS_NATIVE_TEXT_SOURCE = 'obsidian-canvas-text';
+const CANVAS_PLUGIN_MARKDOWN_SUBTYPE = 'canvas-markdown-blank';
+const CANVAS_PLUGIN_MARKDOWN_SOURCE = 'bookmark-canvas-blank';
+
 function __isCanvasNativeTextNode(node) {
     if (!node || typeof node !== 'object') return false;
+    const kind = String(node.canvasTextKind || '').trim().toLowerCase();
+    if (kind === 'blank') return false;
+    if (kind === 'native') return true;
     const subtype = String(node.subtype || '').trim().toLowerCase();
     const source = String(node.source || '').trim().toLowerCase();
-    return subtype === 'canvas-native-text' || source === 'obsidian-canvas-text';
+    const hasNativeMarker = subtype === CANVAS_NATIVE_TEXT_SUBTYPE || source === CANVAS_NATIVE_TEXT_SOURCE;
+    if (!hasNativeMarker) return false;
+    const id = String(node.id || '').trim().toLowerCase();
+    if (id.startsWith('md-node-')) return false;
+    return true;
+}
+
+function __isCanvasPluginMarkdownNode(node) {
+    if (!node || typeof node !== 'object') return false;
+    const kind = String(node.canvasTextKind || '').trim().toLowerCase();
+    if (kind === 'blank') return true;
+    const subtype = String(node.subtype || '').trim().toLowerCase();
+    const source = String(node.source || '').trim().toLowerCase();
+    return subtype === CANVAS_PLUGIN_MARKDOWN_SUBTYPE || source === CANVAS_PLUGIN_MARKDOWN_SOURCE;
 }
 
 function __resolveCanvasNativeTextNodeBody(node) {
@@ -33565,10 +34090,51 @@ if (typeof window !== 'undefined') {
                 permanentTreeSnapshot: rebuiltPermanentTree
             });
         }
+        try {
+            __runCanonicalImportShadowAudit(
+                'sync-import',
+                parsed && parsed.tempState ? parsed.tempState : null,
+                parsed && parsed.storage ? parsed.storage : null,
+                parsed && parsed.primaryState ? parsed.primaryState : null,
+                {
+                    source: 'folder',
+                    syncMode: true,
+                    trigger: 'sync-parse-remote-snapshot'
+                }
+            );
+        } catch (_) { }
         return parsed;
     };
     window.CanvasObsidianExportBridge.detectSyncFolderExportFormat = __detectObsidianSyncExportFormatFromFolderFiles;
     window.CanvasObsidianExportBridge.applySyncFilesReplace = __applyObsidianSyncFilesReplace;
+    window.CanvasObsidianExportBridge.validateTempSourceIDIntegrity = function (options = {}) {
+        const repairMissing = !(options && options.repairMissing === false);
+        const repairDuplicates = !!(options && options.repairDuplicates === true);
+        let validation = __validateCanvasTempSourceIDIntegrity({
+            repairMissing,
+            repairDuplicates
+        });
+        let persisted = false;
+        if (validation && (validation.repairedMissing > 0 || validation.repairedDuplicates > 0)) {
+            try {
+                saveTempNodes({
+                    immediate: true,
+                    suppressSyncMarkDirty: true,
+                    suppressReason: 'source-id-integrity-repair',
+                    skipUnchangedPersist: true
+                });
+                persisted = true;
+            } catch (_) { }
+            validation = __validateCanvasTempSourceIDIntegrity({
+                repairMissing: false,
+                repairDuplicates: false
+            });
+        }
+        return {
+            ...(validation && typeof validation === 'object' ? validation : { ok: true }),
+            persisted
+        };
+    };
     window.CanvasObsidianExportBridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles = __rebuildPermanentTreeSnapshotFromSyncFolderFiles;
     window.CanvasObsidianExportBridge.rebuildPermanentViewShellSnapshotFromSyncFolderFiles = __rebuildPermanentViewShellSnapshotFromSyncFolderFiles;
     const __normalizeBridgeShardedPath = (value) => {
@@ -35828,8 +36394,9 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                 color: isHex ? null : node.color,
                 colorHex: isHex ? convertedColor : null,
                 text: String(node.text || ''),
-                subtype: 'canvas-native-text',
-                source: 'obsidian-canvas-text'
+                subtype: CANVAS_NATIVE_TEXT_SUBTYPE,
+                source: CANVAS_NATIVE_TEXT_SOURCE,
+                canvasTextKind: 'native'
             });
         }
     });
@@ -35901,15 +36468,13 @@ async function parseCanvasPackageFromZipFile(file) {
         console.log(`[Canvas] Import using BACKUP mode: ${backupJsonName}`);
         const primaryJsonText = new TextDecoder('utf-8').decode(zipFiles.get(backupJsonName));
         primaryState = JSON.parse(primaryJsonText);
-        if (primaryState && primaryState.permanentTreeSnapshot) {
-            const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(primaryState.permanentTreeSnapshot);
-            if (normalizedPermanentTreeSnapshot) {
-                primaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
-            }
+        const canonical = __buildCanonicalSyncContractFromBackupPayload(primaryState, primaryState && primaryState.storage);
+        const normalizedPayload = __buildImportPayloadFromCanonicalSyncContract(canonical);
+        if (normalizedPayload) {
+            storage = normalizedPayload.storage;
+            primaryState = normalizedPayload.primaryState;
+            tempState = normalizedPayload.tempState;
         }
-        storage = primaryState.storage || null;
-
-        tempState = __extractCanvasTempStateFromBackupPayload(primaryState, storage);
     }
     // Mode B: Obsidian Canvas (Reconstruct from .canvas + .md)
     else if (canvasFileName) {
@@ -35941,7 +36506,12 @@ async function importCanvasPackageZip(file) {
         parsed.tempState,
         parsed.storage,
         parsed.primaryState,
-        parsed.importFileName || (file && file.name ? file.name : '')
+        parsed.importFileName || (file && file.name ? file.name : ''),
+        {
+            source: 'zip',
+            trigger: 'manual-zip-import',
+            syncMode: false
+        }
     );
 }
 
@@ -36009,15 +36579,13 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
         console.log(`[Canvas] Folder Import using BACKUP mode: ${backupJsonName}`);
         const primaryJsonText = new TextDecoder('utf-8').decode(folderFiles.get(backupJsonName));
         primaryState = JSON.parse(primaryJsonText);
-        if (primaryState && primaryState.permanentTreeSnapshot) {
-            const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(primaryState.permanentTreeSnapshot);
-            if (normalizedPermanentTreeSnapshot) {
-                primaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
-            }
+        const canonical = __buildCanonicalSyncContractFromBackupPayload(primaryState, primaryState && primaryState.storage);
+        const normalizedPayload = __buildImportPayloadFromCanonicalSyncContract(canonical);
+        if (normalizedPayload) {
+            storage = normalizedPayload.storage;
+            primaryState = normalizedPayload.primaryState;
+            tempState = normalizedPayload.tempState;
         }
-        storage = primaryState.storage || null;
-
-        tempState = __extractCanvasTempStateFromBackupPayload(primaryState, storage);
     }
     // Mode B: Obsidian Canvas (Reconstruct from .canvas + .md)
     else if (canvasFileName) {
@@ -36052,7 +36620,12 @@ async function importCanvasPackageFolder(folderFiles, folderName) {
         parsed.tempState,
         parsed.storage,
         parsed.primaryState,
-        parsed.importFileName || folderName || ''
+        parsed.importFileName || folderName || '',
+        {
+            source: 'folder',
+            trigger: 'manual-folder-import',
+            syncMode: false
+        }
     );
 }
 
@@ -36225,7 +36798,7 @@ function __rebuildPermanentViewShellSnapshotFromSyncFolderFiles(filesByPath) {
     });
 }
 
-async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
+async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '', options = {}) {
     const normalizedFiles = __normalizeImportFolderFilesMap(filesByPath);
     if (!normalizedFiles.size) {
         throw new Error('同步文件为空，无法应用。');
@@ -36403,23 +36976,37 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
                     __persistPermanentRootMetaFromTreeSnapshot(permanentTreeSnapshot);
                 }
             } catch (_) { }
+    try {
+        const auditPrimaryState = permanentTreeSnapshot
+            ? { ...parsedPrimaryState, permanentTreeSnapshot }
+            : parsedPrimaryState;
+        __runCanonicalImportShadowAudit('sync-import', parsedTempState, parsed.storage, auditPrimaryState, {
+            source: 'folder',
+            syncMode: true,
+            trigger: (options && typeof options.trigger === 'string' && options.trigger.trim())
+                ? options.trigger.trim()
+                : 'sync-import'
+        });
+    } catch (_) { }
 
     const nextSections = Array.isArray(parsedTempState.sections) ? parsedTempState.sections : [];
     const nextEdges = Array.isArray(parsedTempState.edges) ? parsedTempState.edges : [];
 
-    const nextState = __buildPersistedCanvasState({
-        sections: nextSections,
-        tempSectionCounter: parsedTempState.tempSectionCounter,
-        tempItemCounter: parsedTempState.tempItemCounter,
-        colorCursor: parsedTempState.colorCursor,
+    const nextState = {
+        sections: nextSections.map((section) => __cloneCanvasProtocolJson(section)).filter(Boolean),
+        tempSectionCounter: Number(parsedTempState.tempSectionCounter) || nextSections.length || 0,
+        tempItemCounter: Number(parsedTempState.tempItemCounter) || 0,
+        colorCursor: Number(parsedTempState.colorCursor) || 0,
         tempSectionLastColor: parsedTempState.tempSectionLastColor,
         tempSectionPrevColor: parsedTempState.tempSectionPrevColor,
-        mdNodes: Array.isArray(parsedTempState.mdNodes) ? parsedTempState.mdNodes : [],
-        mdNodeCounter: parsedTempState.mdNodeCounter,
-        edges: nextEdges,
-        edgeCounter: parsedTempState.edgeCounter,
+        mdNodes: (Array.isArray(parsedTempState.mdNodes) ? parsedTempState.mdNodes : [])
+            .map((node) => __cloneCanvasProtocolJson(node))
+            .filter(Boolean),
+        mdNodeCounter: Number(parsedTempState.mdNodeCounter) || 0,
+        edges: nextEdges.map((edge) => __cloneCanvasProtocolJson(edge)).filter(Boolean),
+        edgeCounter: Number(parsedTempState.edgeCounter) || 0,
         timestamp: Date.now()
-    });
+    };
 
     if (Array.isArray(CanvasState.tempSections)) {
         CanvasState.tempSections.forEach((section) => {
@@ -36449,7 +37036,9 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
     try { if (typeof clearTempSelection === 'function') clearTempSelection(); } catch (_) { }
     try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
 
-    __applyCanvasTempStateObject(nextState);
+    __applyCanvasTempStateObject(nextState, {
+        preserveSourceIDRaw: true
+    });
     __finalizeTempNodesLoad({ loadedFromStorage: true });
 
     try {
@@ -36458,7 +37047,7 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
         }
     } catch (_) { }
 
-    try { saveTempNodes({ immediate: true, suppressSyncMarkDirty: true }); } catch (_) { }
+    try { saveTempNodes({ immediate: true, suppressSyncMarkDirty: true, skipSourceIDNormalization: true }); } catch (_) { }
 
     // Apply permanent layout and tips to DOM (localStorage updates do not fire storage events in same page).
     try { loadPermanentSectionPosition(); } catch (_) { }
@@ -36528,10 +37117,25 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '') {
  * @param {Object} storage - 存储数据（滚动位置等）
  * @param {Object} primaryState - 原始状态对象（用于获取书签树快照等）
  * @param {string} [importFileName] - 导入的文件名
+ * @param {Object} [importMeta] - 审计上下文（source/trigger/syncMode）
  */
-function __processImportedPackage(tempState, storage, primaryState, importFileName = '') {
+function __processImportedPackage(tempState, storage, primaryState, importFileName = '', importMeta = null) {
     const { isEn } = __getLang();
     const importMode = __getCanvasImportRuntimeMode();
+    const normalizedImportMeta = (importMeta && typeof importMeta === 'object') ? importMeta : {};
+    try {
+        if (__isCanonicalImportShadowAuditEnabled()) {
+            __runCanonicalImportShadowAudit('manual-import', tempState, storage, primaryState, {
+                source: (typeof normalizedImportMeta.source === 'string' && normalizedImportMeta.source.trim())
+                    ? normalizedImportMeta.source.trim()
+                    : 'unknown',
+                syncMode: normalizedImportMeta.syncMode === true,
+                trigger: (typeof normalizedImportMeta.trigger === 'string' && normalizedImportMeta.trigger.trim())
+                    ? normalizedImportMeta.trigger.trim()
+                    : 'manual-import'
+            });
+        }
+    } catch (_) { }
 
     // 不再覆盖localStorage，而是直接进行沙箱导入
     // localStorage.setItem(TEMP_SECTION_STORAGE_KEY, JSON.stringify(tempState));
@@ -36758,6 +37362,10 @@ function __adaptChromeTreeToCanvasItems(chromeTree) {
 
     const convertNode = (node) => {
         if (!node) return null;
+        const sourceID = __resolveTempItemSourceID(
+            node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId,
+            node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]
+        );
 
         // 书签
         if (node.url) {
@@ -36765,7 +37373,8 @@ function __adaptChromeTreeToCanvasItems(chromeTree) {
                 id: `snapshot - ${node.id || Date.now()} - ${Math.random().toString(36).substr(2, 5)}`,
                 type: 'bookmark',
                 title: node.title || node.name || node.url,
-                url: node.url
+                url: node.url,
+                [TEMP_ITEM_SOURCE_ID_KEY]: sourceID
             };
         }
 
@@ -36778,7 +37387,8 @@ function __adaptChromeTreeToCanvasItems(chromeTree) {
             id: `snapshot - ${node.id || Date.now()} - ${Math.random().toString(36).substr(2, 5)}`,
             type: 'folder',
             title: node.title || node.name || 'Folder',
-            children: children
+            children: children,
+            [TEMP_ITEM_SOURCE_ID_KEY]: sourceID
         };
     };
 
@@ -36805,6 +37415,17 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
     const newMdNodes = [];
     const newEdges = [];
     const newScrolls = {};
+    const cloneImportedTempItems = (itemsInput, options = {}) => {
+        const cloned = __cloneCanvasProtocolJson(Array.isArray(itemsInput) ? itemsInput : []);
+        const list = Array.isArray(cloned) ? cloned : [];
+        try {
+            __ensureTempItemsSourceID(list, {
+                regenerate: !!(options && options.regenerateSourceID === true),
+                allowLegacyOriginalId: !(options && options.allowLegacyOriginalId === false)
+            });
+        } catch (_) { }
+        return list;
+    };
 
     const readImportedStorageValue = (keys) => {
         if (!fullStorage || typeof fullStorage !== 'object') return null;
@@ -36900,7 +37521,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
             width: toNumber(permPos.width, 600),
             height: toNumber(permPos.height, 600),
             color: '#44cf6e',
-            items: snapshotItems,
+            items: cloneImportedTempItems(snapshotItems, { regenerateSourceID: true, allowLegacyOriginalId: false }),
             descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
             isSnapshot: true
         });
@@ -36944,7 +37565,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
                 width: toNumber(copyCardState.width, 600),
                 height: toNumber(copyCardState.height, 600),
                 color: '#44cf6e',
-                items: snapshotItems,
+                items: cloneImportedTempItems(snapshotItems, { regenerateSourceID: true, allowLegacyOriginalId: false }),
                 descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
                 isSnapshot: true
             });
@@ -36964,6 +37585,12 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
             const newId = getNewId(sec.id);
             const newSec = JSON.parse(JSON.stringify(sec));
             newSec.id = newId;
+            try {
+                __ensureTempItemsSourceID(newSec.items, {
+                    regenerate: true,
+                    allowLegacyOriginalId: false
+                });
+            } catch (_) { }
             // Iterate items to remap internal IDs if needed? 
             // Usually internal item IDs are unique per section. But let's keep them as is.
 
@@ -37248,6 +37875,80 @@ let __canvasTempStateLastAppliedTimestamp = 0;
 let __canvasTempStateLastPersistedSignature = '';
 let __canvasTempStateLastDirtySnapshot = null;
 let __canvasImportRuntimeMode = 'permanent';
+const CANVAS_SUPPRESS_SYNC_MARK_DIRTY_SOFT_WARN_MS = 3 * 1000;
+const CANVAS_SUPPRESS_SYNC_MARK_DIRTY_HARD_FUSE_MS = 10 * 1000;
+let __canvasTempStateSuppressSyncWindowStartTs = 0;
+let __canvasTempStateSuppressSyncSoftWarned = false;
+let __canvasTempStateSuppressSyncFuseTrips = 0;
+let __canvasTempStateSuppressSyncLastFuseRecord = null;
+
+function __publishCanvasSuppressSyncMarkDirtyGuardState(active, ageMs, context = '') {
+    if (typeof window === 'undefined') return;
+    const prev = (window.__canvasSuppressSyncMarkDirtyGuard && typeof window.__canvasSuppressSyncMarkDirtyGuard === 'object')
+        ? window.__canvasSuppressSyncMarkDirtyGuard
+        : {};
+    window.__canvasSuppressSyncMarkDirtyGuard = {
+        ...prev,
+        active: !!active,
+        ageMs: Math.max(0, Number(ageMs) || 0),
+        softWarnMs: CANVAS_SUPPRESS_SYNC_MARK_DIRTY_SOFT_WARN_MS,
+        hardFuseMs: CANVAS_SUPPRESS_SYNC_MARK_DIRTY_HARD_FUSE_MS,
+        fuseTrips: Math.max(0, Number(__canvasTempStateSuppressSyncFuseTrips) || 0),
+        lastFuse: __canvasTempStateSuppressSyncLastFuseRecord,
+        context: String(context || ''),
+        updatedAt: Date.now()
+    };
+}
+
+function __resetCanvasSuppressSyncMarkDirtyWindow() {
+    __canvasTempStateSuppressSyncWindowStartTs = 0;
+    __canvasTempStateSuppressSyncSoftWarned = false;
+    __publishCanvasSuppressSyncMarkDirtyGuardState(false, 0, 'reset');
+}
+
+function __resolveCanvasSuppressSyncMarkDirtyOption(requestedSuppress, context = '') {
+    if (!requestedSuppress) {
+        __resetCanvasSuppressSyncMarkDirtyWindow();
+        return false;
+    }
+
+    const now = Date.now();
+    if (__canvasTempStateSuppressSyncWindowStartTs <= 0) {
+        __canvasTempStateSuppressSyncWindowStartTs = now;
+        __canvasTempStateSuppressSyncSoftWarned = false;
+    }
+    const ageMs = Math.max(0, now - __canvasTempStateSuppressSyncWindowStartTs);
+    const normalizedContext = String(context || 'saveTempNodes');
+    __publishCanvasSuppressSyncMarkDirtyGuardState(true, ageMs, normalizedContext);
+
+    if (!__canvasTempStateSuppressSyncSoftWarned && ageMs >= CANVAS_SUPPRESS_SYNC_MARK_DIRTY_SOFT_WARN_MS) {
+        __canvasTempStateSuppressSyncSoftWarned = true;
+        console.warn('[Canvas Sync] suppressSyncMarkDirty window reached soft threshold:', {
+            ageMs,
+            thresholdMs: CANVAS_SUPPRESS_SYNC_MARK_DIRTY_SOFT_WARN_MS,
+            context: normalizedContext
+        });
+    }
+
+    if (ageMs >= CANVAS_SUPPRESS_SYNC_MARK_DIRTY_HARD_FUSE_MS) {
+        __canvasTempStateSuppressSyncFuseTrips += 1;
+        __canvasTempStateSuppressSyncLastFuseRecord = {
+            ts: now,
+            ageMs,
+            context: normalizedContext
+        };
+        __publishCanvasSuppressSyncMarkDirtyGuardState(false, ageMs, normalizedContext);
+        console.warn('[Canvas Sync] suppressSyncMarkDirty hard fuse tripped, forcing markDirty:', {
+            ageMs,
+            thresholdMs: CANVAS_SUPPRESS_SYNC_MARK_DIRTY_HARD_FUSE_MS,
+            context: normalizedContext,
+            fuseTrips: __canvasTempStateSuppressSyncFuseTrips
+        });
+        return false;
+    }
+
+    return true;
+}
 
 function __setCanvasImportRuntimeMode(mode) {
     __canvasImportRuntimeMode = (mode === 'sandbox') ? 'sandbox' : 'permanent';
@@ -37274,8 +37975,198 @@ function __isPermanentCanvasNodeId(nodeId) {
     return !!(id && (id === 'permanent-section' || id.startsWith('permanent-section-copy-')));
 }
 
-function __buildPersistedCanvasState(state) {
+const LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY = 'original' + 'Id';
+const TEMP_ITEM_SOURCE_ID_KEY = 'sourceID';
+let __canvasTempItemSourceCounter = 0;
+
+function __normalizeTempItemSourceID(value) {
+    const raw = String(value == null ? '' : value).trim();
+    if (!raw) return '';
+    return raw.replace(/\s+/g, '-');
+}
+
+function __generateTempItemSourceID() {
+    __canvasTempItemSourceCounter = Math.max(0, Number(__canvasTempItemSourceCounter) || 0) + 1;
+    return `src-${Date.now().toString(36)}-${__canvasTempItemSourceCounter.toString(36)}`;
+}
+
+function __resolveTempItemSourceID(primaryValue, fallbackValue = '') {
+    const primary = __normalizeTempItemSourceID(primaryValue);
+    if (primary) return primary;
+    const fallback = __normalizeTempItemSourceID(fallbackValue);
+    if (fallback) return fallback;
+    return __generateTempItemSourceID();
+}
+
+function __ensureTempItemSourceID(itemInput, options = {}) {
+    if (!itemInput || typeof itemInput !== 'object') return { touched: 0, repaired: 0 };
+    const allowLegacyOriginalId = options && options.allowLegacyOriginalId !== false;
+    const regenerate = !!(options && options.regenerate === true);
+    const stack = [itemInput];
+    let touched = 0;
+    let repaired = 0;
+
+    while (stack.length) {
+        const item = stack.pop();
+        if (!item || typeof item !== 'object') continue;
+        touched += 1;
+
+        const currentSourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY] || item.sourceId);
+        const legacySourceID = allowLegacyOriginalId
+            ? __normalizeTempItemSourceID(item[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY])
+            : '';
+        const resolvedSourceID = regenerate
+            ? __generateTempItemSourceID()
+            : __resolveTempItemSourceID(currentSourceID, legacySourceID);
+
+        if (!currentSourceID || regenerate || currentSourceID !== resolvedSourceID) {
+            item[TEMP_ITEM_SOURCE_ID_KEY] = resolvedSourceID;
+            repaired += 1;
+        } else if (item[TEMP_ITEM_SOURCE_ID_KEY] !== currentSourceID) {
+            item[TEMP_ITEM_SOURCE_ID_KEY] = currentSourceID;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(item, 'sourceId')) {
+            try { delete item.sourceId; } catch (_) { item.sourceId = undefined; }
+        }
+
+        if (Array.isArray(item.children) && item.children.length) {
+            stack.push(...item.children);
+        }
+    }
+
+    return { touched, repaired };
+}
+
+function __ensureTempItemsSourceID(itemsInput, options = {}) {
+    if (!Array.isArray(itemsInput) || !itemsInput.length) {
+        return { touched: 0, repaired: 0 };
+    }
+    let touched = 0;
+    let repaired = 0;
+    itemsInput.forEach((item) => {
+        const result = __ensureTempItemSourceID(item, options);
+        touched += Number(result && result.touched) || 0;
+        repaired += Number(result && result.repaired) || 0;
+    });
+    return { touched, repaired };
+}
+
+function __ensureTempSectionsSourceID(sectionsInput, options = {}) {
+    const sections = Array.isArray(sectionsInput) ? sectionsInput : [];
+    let touched = 0;
+    let repaired = 0;
+    sections.forEach((section) => {
+        if (!section || typeof section !== 'object') return;
+        const result = __ensureTempItemsSourceID(section.items, options);
+        touched += Number(result && result.touched) || 0;
+        repaired += Number(result && result.repaired) || 0;
+    });
+    return { touched, repaired };
+}
+
+function __validateTempSectionsSourceIDIntegrity(sectionsInput, options = {}) {
+    const sections = Array.isArray(sectionsInput) ? sectionsInput : [];
+    const repairMissing = !!(options && options.repairMissing === true);
+    const repairDuplicates = !!(options && options.repairDuplicates === true);
+    const seen = new Map();
+    let totalItems = 0;
+    let missingCount = 0;
+    let duplicateCount = 0;
+    let repairedMissing = 0;
+    let repairedDuplicates = 0;
+
+    sections.forEach((section) => {
+        if (!section || typeof section !== 'object' || !Array.isArray(section.items)) return;
+        const stack = section.items.slice();
+        while (stack.length) {
+            const item = stack.pop();
+            if (!item || typeof item !== 'object') continue;
+            totalItems += 1;
+
+            let sourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY] || item.sourceId);
+            if (!sourceID) {
+                missingCount += 1;
+                if (repairMissing) {
+                    sourceID = __generateTempItemSourceID();
+                    item[TEMP_ITEM_SOURCE_ID_KEY] = sourceID;
+                    repairedMissing += 1;
+                }
+            } else {
+                item[TEMP_ITEM_SOURCE_ID_KEY] = sourceID;
+            }
+
+            if (Object.prototype.hasOwnProperty.call(item, 'sourceId')) {
+                try { delete item.sourceId; } catch (_) { item.sourceId = undefined; }
+            }
+
+            if (sourceID) {
+                if (seen.has(sourceID)) {
+                    duplicateCount += 1;
+                    if (repairDuplicates) {
+                        const regenerated = __generateTempItemSourceID();
+                        item[TEMP_ITEM_SOURCE_ID_KEY] = regenerated;
+                        seen.set(regenerated, item);
+                        repairedDuplicates += 1;
+                    }
+                } else {
+                    seen.set(sourceID, item);
+                }
+            }
+
+            if (Array.isArray(item.children) && item.children.length) {
+                stack.push(...item.children);
+            }
+        }
+    });
+
+    const unresolvedMissing = Math.max(0, missingCount - repairedMissing);
+    const unresolvedDuplicates = Math.max(0, duplicateCount - repairedDuplicates);
+    return {
+        ok: unresolvedMissing === 0 && unresolvedDuplicates === 0,
+        totalItems,
+        missingCount,
+        duplicateCount,
+        repairedMissing,
+        repairedDuplicates,
+        unresolvedMissing,
+        unresolvedDuplicates
+    };
+}
+
+function __validateCanvasTempSourceIDIntegrity(options = {}) {
+    return __validateTempSectionsSourceIDIntegrity(
+        Array.isArray(CanvasState && CanvasState.tempSections) ? CanvasState.tempSections : [],
+        options
+    );
+}
+
+function __stripLegacyOriginalIdFromTempItems(itemsInput) {
+    if (!Array.isArray(itemsInput) || !itemsInput.length) return;
+    const stack = itemsInput.slice();
+    while (stack.length) {
+        const item = stack.pop();
+        if (!item || typeof item !== 'object') continue;
+        if (Object.prototype.hasOwnProperty.call(item, LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY)) {
+            try { delete item[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]; } catch (_) { item[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] = undefined; }
+        }
+        if (Array.isArray(item.children) && item.children.length) {
+            stack.push(...item.children);
+        }
+    }
+}
+
+function __stripLegacyOriginalIdFromTempSection(sectionInput) {
+    if (!sectionInput || typeof sectionInput !== 'object') return;
+    if (Object.prototype.hasOwnProperty.call(sectionInput, LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY)) {
+        try { delete sectionInput[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]; } catch (_) { sectionInput[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] = undefined; }
+    }
+    __stripLegacyOriginalIdFromTempItems(sectionInput.items);
+}
+
+function __buildPersistedCanvasState(state, options = {}) {
     const safe = (state && typeof state === 'object') ? state : {};
+    const preserveSourceIDRaw = !!(options && options.preserveSourceIDRaw === true);
 
     const sourceSections = Array.isArray(safe.sections) ? safe.sections : [];
     const sourceMdNodes = Array.isArray(safe.mdNodes) ? safe.mdNodes : [];
@@ -37286,45 +38177,71 @@ function __buildPersistedCanvasState(state) {
         .map((section) => {
             const cloned = __cloneCanvasProtocolJson(section);
             if (!cloned || typeof cloned !== 'object') return null;
-            cloned.descriptionMd = __normalizeTempSectionDescriptionMarkdown(cloned);
-            if (Object.prototype.hasOwnProperty.call(cloned, 'description')) {
-                delete cloned.description;
+            if (!preserveSourceIDRaw) {
+                cloned.descriptionMd = __normalizeTempSectionDescriptionMarkdown(cloned);
+                if (Object.prototype.hasOwnProperty.call(cloned, 'description')) {
+                    delete cloned.description;
+                }
+                __stripLegacyOriginalIdFromTempSection(cloned);
             }
             return cloned;
         })
         .filter(Boolean);
+    if (!preserveSourceIDRaw) {
+        try {
+            __ensureTempSectionsSourceID(persistedSections, {
+                allowLegacyOriginalId: true
+            });
+        } catch (_) { }
+    }
     const persistedMdNodes = sourceMdNodes
         .filter((node) => !__isSandboxImportedNode(node))
         .map((node) => {
             const cloned = __cloneCanvasProtocolJson(node);
             if (!cloned || typeof cloned !== 'object') return null;
-            const refreshCachesFromMarkdown = !__isCanvasNativeTextNode(cloned)
-                || !(typeof cloned.html === 'string' && cloned.html.trim());
-            __ensureMdNodeMarkdownProtocol(cloned, {
-                refreshCachesFromMarkdown
-            });
-            try { delete cloned.markdownSource; } catch (_) { }
+            if (!preserveSourceIDRaw) {
+                const refreshCachesFromMarkdown = !__isCanvasNativeTextNode(cloned)
+                    || !(typeof cloned.html === 'string' && cloned.html.trim());
+                __ensureMdNodeMarkdownProtocol(cloned, {
+                    refreshCachesFromMarkdown
+                });
+                if (Object.prototype.hasOwnProperty.call(cloned, LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY)) {
+                    try { delete cloned[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]; } catch (_) { cloned[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] = undefined; }
+                }
+                if (__isCanvasNativeTextNode(cloned)) {
+                    try { delete cloned.markdownSource; } catch (_) { }
+                } else {
+                    cloned.markdownSource = __normalizeCanvasMarkdownSource(__deriveMdNodeMarkdownSource(cloned));
+                }
+            }
             return cloned;
         })
         .filter(Boolean);
 
-    const validIds = new Set();
-    persistedSections.forEach((section) => {
-        if (section && section.id) validIds.add(section.id);
-    });
-    persistedMdNodes.forEach((node) => {
-        if (node && node.id) validIds.add(node.id);
-    });
+    let persistedEdges = [];
+    if (preserveSourceIDRaw) {
+        persistedEdges = sourceEdges
+            .map((edge) => __cloneCanvasProtocolJson(edge))
+            .filter((edge) => edge && typeof edge === 'object');
+    } else {
+        const validIds = new Set();
+        persistedSections.forEach((section) => {
+            if (section && section.id) validIds.add(section.id);
+        });
+        persistedMdNodes.forEach((node) => {
+            if (node && node.id) validIds.add(node.id);
+        });
 
-    const persistedEdges = sourceEdges.filter((edge) => {
-        if (!edge || typeof edge !== 'object') return false;
-        const fromNode = String(edge.fromNode || '');
-        const toNode = String(edge.toNode || '');
-        if (!fromNode || !toNode) return false;
-        const fromValid = validIds.has(fromNode) || __isPermanentCanvasNodeId(fromNode);
-        const toValid = validIds.has(toNode) || __isPermanentCanvasNodeId(toNode);
-        return fromValid && toValid;
-    });
+        persistedEdges = sourceEdges.filter((edge) => {
+            if (!edge || typeof edge !== 'object') return false;
+            const fromNode = String(edge.fromNode || '');
+            const toNode = String(edge.toNode || '');
+            if (!fromNode || !toNode) return false;
+            const fromValid = validIds.has(fromNode) || __isPermanentCanvasNodeId(fromNode);
+            const toValid = validIds.has(toNode) || __isPermanentCanvasNodeId(toNode);
+            return fromValid && toValid;
+        });
+    }
 
     const persistedState = {
         ...safe,
@@ -37913,6 +38830,7 @@ const TEMP_SECTION_PROTOCOL_ITEM_RESERVED_KEYS = new Set([
     'type',
     'kind',
     'children',
+    // Legacy field is intentionally blocked from protocol passthrough.
     'originalId',
     'createdAt',
     'updatedAt',
@@ -37956,9 +38874,6 @@ function __buildTempSectionProtocolItemPayload(itemInput, sectionIdFallback = ''
     payload.url = rawUrl;
     payload.type = kind;
     payload.children = children;
-
-    const originalId = String(source.originalId || '').trim();
-    if (originalId) payload.originalId = originalId;
 
     const createdAt = __parseCanvasProtocolDateValue(source.createdAt);
     if (createdAt > 0) payload.createdAt = createdAt;
@@ -38066,11 +38981,18 @@ function __normalizeTempSectionProtocolObject(protocolInput) {
         originPermanent: rawMeta.originPermanent
     };
     const sectionMeta = __buildTempSectionProtocolMeta(sectionLike);
-    if (!Array.isArray(source.items)) return null;
+    let sourceItems = [];
+    if (Array.isArray(source.items)) {
+        sourceItems = source.items;
+    } else if (Array.isArray(source.bookmarkTree)) {
+        sourceItems = source.bookmarkTree;
+    } else if (source.bookmarkTree && typeof source.bookmarkTree === 'object') {
+        sourceItems = [source.bookmarkTree];
+    }
     const sectionId = String(sectionLike.id || '').trim();
     return {
         sectionMeta,
-        items: __buildTempSectionProtocolItems(source.items, sectionId)
+        items: __buildTempSectionProtocolItems(sourceItems, sectionId)
     };
 }
 
@@ -38102,8 +39024,7 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
                 || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder'),
             url: rawUrl,
             type: kind,
-            children: [],
-            originalId: String(payloadSource.originalId || '').trim() || null
+            children: []
         };
 
         const createdAt = __parseCanvasProtocolDateValue(payloadSource.createdAt);
@@ -38173,7 +39094,7 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
     return restored;
 }
 
-function __buildCanvasTempStateProtocolView(stateInput) {
+function __buildCanvasTempStateProtocolView(stateInput, options = {}) {
     const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
     const sections = Array.isArray(state.sections)
         ? state.sections
@@ -38201,6 +39122,8 @@ function __buildCanvasTempStateProtocolView(stateInput) {
         sections: sections.map((section) => __cloneCanvasProtocolJson(section)).filter(Boolean),
         mdNodes: normalizedMdNodes,
         edges: edges.map((edge) => __cloneCanvasProtocolJson(edge)).filter(Boolean)
+    }, {
+        preserveSourceIDRaw: !!(options && options.preserveSourceIDRaw === true)
     });
 }
 
@@ -38214,8 +39137,8 @@ if (typeof window !== 'undefined') {
                 refreshCachesFromMarkdown: options.refreshCachesFromMarkdown === true
             });
         },
-        normalizeCanvasTempState(stateInput) {
-            return __buildCanvasTempStateProtocolView(stateInput);
+        normalizeCanvasTempState(stateInput, options = {}) {
+            return __buildCanvasTempStateProtocolView(stateInput, options);
         },
         async loadCanvasTempStateFromBcs() {
             return await __loadCanvasTempStateFromBcs();
@@ -38223,8 +39146,12 @@ if (typeof window !== 'undefined') {
         async buildCanvasTempStateRawForSyncFromBcs() {
             const state = await __loadCanvasTempStateFromBcs();
             if (!state || typeof state !== 'object') return '';
-            const persisted = __buildPersistedCanvasState(state);
-            const normalized = __buildCanvasTempStateProtocolView(persisted);
+            const persisted = __buildPersistedCanvasState(state, {
+                preserveSourceIDRaw: true
+            });
+            const normalized = __buildCanvasTempStateProtocolView(persisted, {
+                preserveSourceIDRaw: true
+            });
             if (!normalized || typeof normalized !== 'object') return '';
             try {
                 return JSON.stringify(normalized);
@@ -39077,8 +40004,9 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
                 color: isHex ? null : node.color,
                 colorHex: isHex ? convertedColor : null,
                 text: String(node.text || ''),
-                subtype: 'canvas-native-text',
-                source: 'obsidian-canvas-text'
+                subtype: CANVAS_NATIVE_TEXT_SUBTYPE,
+                source: CANVAS_NATIVE_TEXT_SOURCE,
+                canvasTextKind: 'native'
             });
         }
     });
@@ -39344,11 +40272,12 @@ function __hasCanvasTempStatePayloadShape(state) {
     );
 }
 
-function __normalizeCanvasTempStateForRuntime(stateInput) {
+function __normalizeCanvasTempStateForRuntime(stateInput, options = {}) {
     const parsedState = typeof stateInput === 'string'
         ? __safeParseCanvasStorageJson(stateInput)
         : stateInput;
     if (!__hasCanvasTempStatePayloadShape(parsedState)) return null;
+    const preserveSourceIDRaw = !!(options && options.preserveSourceIDRaw === true);
 
     const sections = Array.isArray(parsedState.sections)
         ? parsedState.sections
@@ -39357,6 +40286,23 @@ function __normalizeCanvasTempStateForRuntime(stateInput) {
         ? parsedState.mdNodes
         : (Array.isArray(parsedState.cards) ? parsedState.cards : []);
     const edges = Array.isArray(parsedState.edges) ? parsedState.edges : [];
+
+    if (preserveSourceIDRaw) {
+        return {
+            ...parsedState,
+            sections: sections.map((section) => __cloneCanvasProtocolJson(section)).filter(Boolean),
+            tempSectionCounter: Number(parsedState.tempSectionCounter) || sections.length || 0,
+            tempItemCounter: Number(parsedState.tempItemCounter) || 0,
+            colorCursor: Number(parsedState.colorCursor) || 0,
+            tempSectionLastColor: parsedState.tempSectionLastColor || getTempSectionDefaultColor(),
+            tempSectionPrevColor: parsedState.tempSectionPrevColor || null,
+            mdNodes: mdNodes.map((node) => __cloneCanvasProtocolJson(node)).filter(Boolean),
+            mdNodeCounter: Number(parsedState.mdNodeCounter) || mdNodes.length || 0,
+            edges: edges.map((edge) => __cloneCanvasProtocolJson(edge)).filter(Boolean),
+            edgeCounter: Number(parsedState.edgeCounter) || edges.length || 0,
+            timestamp: Number(parsedState.timestamp) || Date.now()
+        };
+    }
 
     return __buildCanvasTempStateProtocolView({
         ...parsedState,
@@ -39929,13 +40875,29 @@ function __bindCanvasTempStateRealtimeSync() {
     }
 }
 
-function __applyCanvasTempStateObject(state) {
-    const sourceState = __normalizeCanvasTempStateForRuntime(state)
-        || ((state && typeof state === 'object') ? state : {});
+function __applyCanvasTempStateObject(state, options = {}) {
+    const preserveSourceIDRaw = !!(options && options.preserveSourceIDRaw === true);
+    const sourceState = __normalizeCanvasTempStateForRuntime(state, {
+        preserveSourceIDRaw
+    }) || ((state && typeof state === 'object') ? state : {});
 
     CanvasState.tempSections = Array.isArray(sourceState.sections)
         ? sourceState.sections
         : (Array.isArray(sourceState.tempSections) ? sourceState.tempSections : []);
+    if (!preserveSourceIDRaw) {
+        try {
+            (CanvasState.tempSections || []).forEach((section) => {
+                __stripLegacyOriginalIdFromTempSection(section);
+            });
+        } catch (_) { }
+    }
+    if (!preserveSourceIDRaw) {
+        try {
+            __ensureTempSectionsSourceID(CanvasState.tempSections, {
+                allowLegacyOriginalId: true
+            });
+        } catch (_) { }
+    }
     CanvasState.tempSectionCounter = sourceState.tempSectionCounter || CanvasState.tempSections.length;
     CanvasState.tempItemCounter = sourceState.tempItemCounter || 0;
     CanvasState.colorCursor = sourceState.colorCursor || 0;
@@ -40096,7 +41058,11 @@ function saveTempNodes(options = {}) {
     // 4) 若功能是“仅当前会话临时态”（如 sandbox 导入），不要调用本函数
     if (__canvasTempStateRealtimeSyncApplying) return;
     const immediate = !!(options && options.immediate);
-    const suppressSyncMarkDirty = !!(options && options.suppressSyncMarkDirty);
+    const requestedSuppressSyncMarkDirty = !!(options && options.suppressSyncMarkDirty);
+    const suppressSyncReason = (options && typeof options.suppressReason === 'string')
+        ? options.suppressReason
+        : 'saveTempNodes';
+    const suppressSyncMarkDirty = __resolveCanvasSuppressSyncMarkDirtyOption(requestedSuppressSyncMarkDirty, suppressSyncReason);
     const skipUnchangedPersist = !!(options && options.skipUnchangedPersist);
     const syncDirty = (options && options.syncDirty && typeof options.syncDirty === 'object')
         ? options.syncDirty
@@ -40104,12 +41070,20 @@ function saveTempNodes(options = {}) {
     const syncDirtyPaths = Array.isArray(options && options.syncDirtyPaths)
         ? options.syncDirtyPaths
         : null;
+    const skipSourceIDNormalization = !!(options && options.skipSourceIDNormalization === true);
     const prevDirtySnapshot = __canvasTempStateLastDirtySnapshot;
     let nextDirtySnapshot = null;
     let derivedDirtyPatch = null;
     let skippedAsUnchanged = false;
     // 保存前执行自动 resize
     autoResizeImportContainers();
+    if (!skipSourceIDNormalization) {
+        try {
+            __ensureTempSectionsSourceID(CanvasState.tempSections, {
+                allowLegacyOriginalId: true
+            });
+        } catch (_) { }
+    }
 
     try {
         (CanvasState.mdNodes || []).forEach((node) => {
@@ -40138,7 +41112,9 @@ function saveTempNodes(options = {}) {
             edgeCounter: CanvasState.edgeCounter,
             timestamp: Date.now()
         };
-        const persistedState = __buildPersistedCanvasState(state);
+        const persistedState = __buildPersistedCanvasState(state, {
+            preserveSourceIDRaw: skipSourceIDNormalization
+        });
         nextDirtySnapshot = __buildCanvasTempStateDirtySnapshot(persistedState);
         if (!syncDirty && nextDirtySnapshot) {
             derivedDirtyPatch = __deriveSyncDirtyFromTempSnapshotDiff(prevDirtySnapshot, nextDirtySnapshot);
@@ -40172,6 +41148,10 @@ function saveTempNodes(options = {}) {
     } catch (error) {
         console.error('[Canvas] 保存临时栏目失败:', error);
     } finally {
+        // Always close the suppress window at the end of each save call.
+        // This prevents cross-call leakage where a later unrelated suppress save
+        // inherits an old window age and can falsely trip the hard fuse.
+        __resetCanvasSuppressSyncMarkDirtyWindow();
         if (suppressSyncMarkDirty) {
             return;
         }

@@ -656,7 +656,9 @@ async function moveBookmark(sourceId, targetId, targetIsFolder, context) {
             const nodes = await chrome.bookmarks.getSubTree(sourceId);
             const payload = nodes && nodes[0] ? [serializeBookmarkNode(nodes[0])] : [];
             const targetInfo = computeTempInsertion(targetSectionId, targetId, position);
-            manager.insertFromPayload(targetSectionId, targetInfo.parentId, payload, targetInfo.index);
+            manager.insertFromPayload(targetSectionId, targetInfo.parentId, payload, targetInfo.index, {
+                regenerateSourceID: true
+            });
             return;
         }
 

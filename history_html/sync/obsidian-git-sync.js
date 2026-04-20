@@ -73,8 +73,8 @@
     const RECOVERY_SNAPSHOT_KEEP_LATEST = 1;
     const DEFAULT_PERMANENT_INCREMENTAL_MAX_LOGICAL_CHANGES_ABS = 200;
     const PERMANENT_TREE_UPLOAD_INTERVALS = new Set([0, 5, 15, 30, 60]);
-    // Sync pipeline keeps only JSON compatibility mode.
-    const OBSIDIAN_EXPORT_FORMATS = new Set(['json']);
+    const OBSIDIAN_EXPORT_FORMAT_ORDER = ['visual', 'visual-no-icon', 'json'];
+    const OBSIDIAN_EXPORT_FORMATS = new Set(OBSIDIAN_EXPORT_FORMAT_ORDER);
     const RECOVERY_SNAPSHOT_IDLE_REASON = 'idle-periodic-backup';
     const RECOVERY_SNAPSHOT_MANUAL_REASON = 'manual-backup';
     const CUSTOM_UPLOAD_INTERVAL_SECONDS_RANGE = { min: 0, max: 24 * 60 * 60 };
@@ -86,10 +86,12 @@
     const RECOVERY_BUNDLE_DB_NAME = 'canvas-obsidian-git-sync-recovery-db-v1';
     const RECOVERY_BUNDLE_STORE_NAME = 'recovery-bundles';
     const RECOVERY_BUNDLE_ACTIVE_KEY = 'active';
-    const RECOVERY_LOCK_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+    const RECOVERY_LOCK_SOFT_WARN_MS = 30 * 60 * 1000;
+    const RECOVERY_LOCK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
     const USER_INTERACTION_IDLE_GRACE_MS = 1200;
     const FOREGROUND_ACTIVITY_THROTTLE_MS = 80;
     const TEMP_STATE_CACHE_MAX_ENTRIES = 12;
+    const SYNC_INTERACTION_SHIELD_ID = 'canvasSyncInteractionShield';
 
     const DEFAULT_SETTINGS = {
         enabled: false,
@@ -170,6 +172,7 @@
     let floatingProgressDelayTimer = null;
     let syncUiProgressEnabled = false;
     let syncUiProgressButtonEl = null;
+    let syncInteractionShieldEl = null;
     let lastUserDirtyAt = 0;
     let remoteCommittedAtRefreshPromise = null;
     let latestConflictComparisonSummary = null;
@@ -524,6 +527,21 @@
         return Math.max(0, Date.now() - baseTs);
     }
 
+    function formatDurationCompact(msInput) {
+        const ms = Math.max(0, Number(msInput) || 0);
+        if (!ms) return textByLang('0 分钟', '0m');
+        const totalMinutes = Math.max(1, Math.floor(ms / 60000));
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        if (hours <= 0) {
+            return textByLang(`${minutes} 分钟`, `${minutes}m`);
+        }
+        if (minutes <= 0) {
+            return textByLang(`${hours} 小时`, `${hours}h`);
+        }
+        return textByLang(`${hours} 小时 ${minutes} 分钟`, `${hours}h ${minutes}m`);
+    }
+
     function mapRecoveryLockSourcePanel(trigger, fallback = 'sync') {
         const text = String(trigger || '').trim().toLowerCase();
         if (text.includes('conflict')) return 'conflict';
@@ -536,9 +554,13 @@
         const text = String(trigger || '').trim().toLowerCase();
         if (!text) return false;
         if (text.includes('conflict')) return false;
-        return text === 'manual-push'
-            || text === 'manual-push-recovery'
-            || text === 'auto-push-recovery';
+        if (text.includes('pull')) return false;
+        if (text.includes('push') || text.includes('full') || text.includes('sync')) return true;
+        if (text.includes('recovery')) return true;
+        return text.startsWith('manual-')
+            || text.startsWith('auto-')
+            || text === 'manual'
+            || text === 'auto';
     }
 
     function shouldForceRecoveryLockForTrigger(trigger) {
@@ -1091,6 +1113,7 @@
     function buildRecoveryLockDetailsHtml(lock) {
         if (!lock) return '';
         const details = [];
+        const ageMs = getRecoveryLockAgeMs(lock);
         const sourceLabel = (lock.sourcePanel === 'conflict')
             ? textByLang('冲突面板', 'Conflict panel')
             : (lock.sourcePanel === 'first-sync'
@@ -1120,6 +1143,15 @@
         }
         if (Number(lock.lastFailureAt) > 0) {
             details.push(textByLang(`失败时间：${formatTime(lock.lastFailureAt)}`, `Failure time: ${formatTime(lock.lastFailureAt)}`));
+        }
+        if (Number.isFinite(ageMs) && ageMs >= 0) {
+            details.push(textByLang(`锁龄：${formatDurationCompact(ageMs)}`, `Lock age: ${formatDurationCompact(ageMs)}`));
+            if (ageMs >= RECOVERY_LOCK_SOFT_WARN_MS && ageMs < RECOVERY_LOCK_MAX_AGE_MS) {
+                details.push(textByLang(
+                    `提醒：恢复锁已超过软阈值（${formatDurationCompact(RECOVERY_LOCK_SOFT_WARN_MS)}），请尽快完成继续或回滚。`,
+                    `Reminder: recovery lock exceeded soft threshold (${formatDurationCompact(RECOVERY_LOCK_SOFT_WARN_MS)}). Finish continue/rollback soon.`
+                ));
+            }
         }
         return `<div class="canvas-sync-other-lines">${details.map((line) => `<span>${escapeHtml(line)}</span>`).join('')}</div>`;
     }
@@ -1428,6 +1460,26 @@
         };
     }
 
+    async function ensureTempSourceIDIntegrityAfterRemoteApply(trigger = 'remote-apply') {
+        const bridge = global.CanvasObsidianExportBridge;
+        if (!bridge || typeof bridge.validateTempSourceIDIntegrity !== 'function') {
+            return null;
+        }
+        const sourceIdIntegrity = await bridge.validateTempSourceIDIntegrity({
+            repairMissing: false,
+            repairDuplicates: false
+        });
+        const missingCount = Math.max(0, Number(sourceIdIntegrity && sourceIdIntegrity.missingCount) || 0);
+        const duplicateCount = Math.max(0, Number(sourceIdIntegrity && sourceIdIntegrity.duplicateCount) || 0);
+        if (missingCount > 0 || duplicateCount > 0) {
+            console.warn('[Canvas Sync] sourceID integrity mismatch detected after remote apply (observation-only):', {
+                trigger: String(trigger || 'remote-apply'),
+                summary: sourceIdIntegrity
+            });
+        }
+        return sourceIdIntegrity;
+    }
+
     async function applyPreparedRemoteBundleToLocal(stagedBundle, trigger = 'recovery-pull', options = {}) {
         const folderFiles = deserializeRemoteFolderFilesEntries(stagedBundle && stagedBundle.folderFiles);
         const hasRemoteFiles = folderFiles.size > 0;
@@ -1458,7 +1510,6 @@
 
         let applyResult = null;
         let remotePermanentTreeSnapshot = resolveRemotePermanentTreeSnapshotForApply(stagedBundle, folderFiles);
-        let permanentApplied = false;
         let stagedSnapshotForTiming = null;
         try {
             stagedSnapshotForTiming = stagedBundle && stagedBundle.snapshot ? normalizeSnapshot(stagedBundle.snapshot) : null;
@@ -1469,16 +1520,8 @@
         const remoteUpdatedAtForPermanent = Math.max(0, Number(stagedSnapshotForTiming && stagedSnapshotForTiming.updatedAt) || Number(runtime && runtime.lastRemoteCommittedAt) || 0);
 
         try {
-            const overwriteResult = await maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(remotePermanentTreeSnapshot, trigger, {
-                force: !!(options && options.forcePermanentOverwrite === true),
-                permanentPullMode: options && options.permanentPullMode,
-                localUpdatedAt: localUpdatedAtForPermanent,
-                remoteUpdatedAt: remoteUpdatedAtForPermanent,
-                onProgress: (message) => updateSyncUiProgress(message, 82)
-            });
-            permanentApplied = !!(overwriteResult && overwriteResult.applied);
-
             if (hasRemoteFiles && settings.obsidianFilePushEnabled !== false) {
+                updateSyncUiProgress(textByLang('正在应用云端协议文件...', 'Applying cloud protocol files...'), 74);
                 const bridge = global.CanvasObsidianExportBridge;
                 if (bridge && typeof bridge.applySyncFilesReplace === 'function') {
                     const rootPath = normalizeSyncPath(stagedBundle && stagedBundle.rootPath);
@@ -1505,19 +1548,19 @@
                 if (!stagedSnapshot) {
                     throw new Error(textByLang('恢复缓存缺少可用云端快照，无法继续覆盖本地', 'The staged recovery bundle is missing a usable remote snapshot; cannot continue overwriting local'));
                 }
+                updateSyncUiProgress(textByLang('正在应用云端快照...', 'Applying cloud snapshot...'), 78);
                 await applySnapshotToLocal(buildSnapshotForRemoteLocalApply(stagedSnapshot));
             }
 
-            if (!permanentApplied && remotePermanentTreeSnapshot) {
-                const retryOverwrite = await maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(remotePermanentTreeSnapshot, trigger, {
-                    force: !!(options && options.forcePermanentOverwrite === true),
-                    permanentPullMode: options && options.permanentPullMode,
-                    localUpdatedAt: localUpdatedAtForPermanent,
-                    remoteUpdatedAt: remoteUpdatedAtForPermanent,
-                    onProgress: (message) => updateSyncUiProgress(message, 82)
-                });
-                permanentApplied = !!(retryOverwrite && retryOverwrite.applied);
-            }
+            await maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(remotePermanentTreeSnapshot, trigger, {
+                force: !!(options && options.forcePermanentOverwrite === true),
+                permanentPullMode: options && options.permanentPullMode,
+                localUpdatedAt: localUpdatedAtForPermanent,
+                remoteUpdatedAt: remoteUpdatedAtForPermanent,
+                onProgress: (message) => updateSyncUiProgress(message, 82)
+            });
+
+            await ensureTempSourceIDIntegrityAfterRemoteApply(trigger);
         } catch (error) {
             const rollbackResult = await rollbackRemoteLocalApplyFromSnapshot(
                 localRollbackSnapshot,
@@ -2123,6 +2166,7 @@
         }
 
         recoveryLockResumeInFlight = true;
+        refreshSyncInteractionShieldVisibility();
         syncUiProgressEnabled = true;
         updateSyncUiProgress(textByLang('准备回滚未完成任务...', 'Preparing to rollback unfinished task...'), 0);
         renderRecoveryLockPanel();
@@ -2255,6 +2299,7 @@
             clearSyncUiProgress();
             syncUiProgressEnabled = false;
             recoveryLockResumeInFlight = false;
+            refreshSyncInteractionShieldVisibility();
             renderRecoveryLockPanel();
             updateSyncEnabledDependentFieldState();
         }
@@ -2272,6 +2317,7 @@
         }
 
         recoveryLockResumeInFlight = true;
+        refreshSyncInteractionShieldVisibility();
         syncUiProgressEnabled = true;
         updateSyncUiProgress(textByLang('准备恢复未完成任务...', 'Preparing to resume the unfinished task...'), 0);
         renderRecoveryLockPanel();
@@ -2538,6 +2584,7 @@
             clearSyncUiProgress();
             syncUiProgressEnabled = false;
             recoveryLockResumeInFlight = false;
+            refreshSyncInteractionShieldVisibility();
             renderRecoveryLockPanel();
             updateSyncEnabledDependentFieldState();
         }
@@ -2655,6 +2702,8 @@
                     sections: sourceSections,
                     mdNodes: sourceMdNodes,
                     edges: sourceEdges
+                }, {
+                    preserveSourceIDRaw: true
                 });
                 if (normalized && typeof normalized === 'object') {
                     const normalizedSections = Array.isArray(normalized.sections) ? normalized.sections : [];
@@ -3262,11 +3311,9 @@
 
     function normalizeObsidianExportFormat(value, fallback = DEFAULT_SETTINGS.obsidianExportFormat) {
         const format = String(value || '').trim().toLowerCase();
-        if (format === 'visual' || format === 'visual-no-icon') return 'json';
         if (OBSIDIAN_EXPORT_FORMATS.has(format)) return format;
 
         const fallbackFormat = String(fallback || '').trim().toLowerCase();
-        if (fallbackFormat === 'visual' || fallbackFormat === 'visual-no-icon') return 'json';
         if (OBSIDIAN_EXPORT_FORMATS.has(fallbackFormat)) return fallbackFormat;
         if (typeof fallback === 'string' && !fallback.trim()) return '';
         return DEFAULT_SETTINGS.obsidianExportFormat;
@@ -3292,6 +3339,8 @@
 
     function formatObsidianExportFormatLabel(format) {
         const normalized = normalizeObsidianExportFormat(format, '');
+        if (normalized === 'visual') return textByLang('视觉模式（含图标）', 'Visual mode (with icons)');
+        if (normalized === 'visual-no-icon') return textByLang('视觉模式（无图标）', 'Visual mode (no icon)');
         if (normalized === 'json') return textByLang('JSON模式（供AI）', 'JSON mode (for AI)');
         return '';
     }
@@ -3299,20 +3348,32 @@
     function sanitizeSyncExportFormatSelect(selectEl) {
         const select = selectEl || getElement('canvasSyncObsidianExportFormatSelect');
         if (!select) return;
-        try {
-            Array.from(select.options || []).forEach((option) => {
-                if (!option || String(option.value || '').trim().toLowerCase() === 'json') return;
-                option.remove();
-            });
-        } catch (_) { }
-        if (!select.querySelector('option[value="json"]')) {
-            const option = document.createElement('option');
-            option.id = 'canvasSyncObsidianExportFormatJsonOption';
-            option.value = 'json';
-            option.textContent = textByLang('JSON模式（供AI）', 'JSON mode (for AI)');
-            select.appendChild(option);
+        const labels = {
+            visual: textByLang('视觉模式（含图标）', 'Visual mode (with icons)'),
+            'visual-no-icon': textByLang('视觉模式（无图标）', 'Visual mode (no icon)'),
+            json: textByLang('JSON模式（供AI）', 'JSON mode (for AI)')
+        };
+        const optionIds = {
+            visual: 'canvasSyncObsidianExportFormatVisualOption',
+            'visual-no-icon': 'canvasSyncObsidianExportFormatVisualNoIconOption',
+            json: 'canvasSyncObsidianExportFormatJsonOption'
+        };
+
+        OBSIDIAN_EXPORT_FORMAT_ORDER.forEach((format) => {
+            let option = select.querySelector(`option[value="${format}"]`);
+            if (!option) {
+                option = document.createElement('option');
+                option.value = format;
+                select.appendChild(option);
+            }
+            option.id = optionIds[format];
+            option.textContent = labels[format];
+        });
+
+        const currentValue = String(select.value || '').trim().toLowerCase();
+        if (!OBSIDIAN_EXPORT_FORMATS.has(currentValue)) {
+            select.value = normalizeObsidianExportFormat(currentValue, DEFAULT_SETTINGS.obsidianExportFormat);
         }
-        select.value = 'json';
     }
 
     function adoptRemoteObsidianExportFormat(remoteFormat, options = {}) {
@@ -6664,6 +6725,79 @@ Cancel: go back and change the branch name first.`
         };
     }
 
+    function buildLocalManagedSyncFolderFilesMap(filesInput) {
+        const files = Array.isArray(filesInput) ? filesInput : [];
+        const folderFiles = new Map();
+        files.forEach((file) => {
+            const path = normalizeSyncPath(file && file.path);
+            if (!path || !(/\.(md|json)$/i.test(path) || /\.canvas$/i.test(path))) return;
+            const content = String(file && file.content != null ? file.content : '');
+            folderFiles.set(path, new TextEncoder().encode(content));
+        });
+        return folderFiles;
+    }
+
+    async function verifyPermanentTreeConsistencyBeforePush(bundleInput, bridgeInput, options = {}) {
+        const bundle = bundleInput && typeof bundleInput === 'object' ? bundleInput : {};
+        const bridge = bridgeInput && typeof bridgeInput === 'object' ? bridgeInput : null;
+        if (!bridge || typeof bridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles !== 'function') {
+            throw new Error(textByLang(
+                '导出桥缺少永久栏目一致性校验能力，已阻断本次上传。',
+                'Export bridge lacks permanent-section consistency checks; upload has been blocked.'
+            ));
+        }
+
+        const folderFiles = buildLocalManagedSyncFolderFilesMap(bundle.files);
+        if (!folderFiles.size) {
+            throw new Error(textByLang(
+                '本地同步包为空，无法校验永久栏目一致性，已阻断本次上传。',
+                'Local sync bundle is empty; cannot validate permanent-section consistency, upload blocked.'
+            ));
+        }
+
+        const exportedTree = normalizeBookmarkTreeSnapshot(
+            bridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles(folderFiles)
+        );
+        if (!exportedTree) {
+            throw new Error(textByLang(
+                '无法从本地同步文件重建永久栏目快照，已阻断本次上传。',
+                'Failed to rebuild permanent-section snapshot from local sync files; upload blocked.'
+            ));
+        }
+
+        const allowSnapshotHint = !!(options && options.allowSnapshotHint === true);
+        let apiTree = allowSnapshotHint
+            ? normalizeBookmarkTreeSnapshot(options && options.localPermanentTreeSnapshot)
+            : null;
+        if (!apiTree) {
+            apiTree = await getPermanentTreeSnapshotForSync();
+        }
+        if (!apiTree) {
+            throw new Error(textByLang(
+                '无法读取浏览器永久栏目树，已阻断本次上传。',
+                'Failed to read browser permanent-section tree; upload blocked.'
+            ));
+        }
+
+        const exportedHash = getBookmarkTreeHash(exportedTree);
+        const apiHash = getBookmarkTreeHash(apiTree);
+        if (!exportedHash || !apiHash) {
+            throw new Error(textByLang(
+                '永久栏目一致性校验失败（无法计算哈希），已阻断本次上传。',
+                'Permanent-section consistency check failed (hash unavailable); upload blocked.'
+            ));
+        }
+
+        if (exportedHash !== apiHash) {
+            const exportedStats = getBookmarkTreeStats(exportedTree);
+            const apiStats = getBookmarkTreeStats(apiTree);
+            throw new Error(textByLang(
+                `检测到永久栏目快照与浏览器书签树不一致（导出 书签${exportedStats.bookmarks} 文件夹${exportedStats.folders}；API 书签${apiStats.bookmarks} 文件夹${apiStats.folders}）。已阻断本次 push/sync，请先完成本地对齐后重试。`,
+                `Permanent snapshot mismatches browser bookmark tree (export bookmarks ${exportedStats.bookmarks}, folders ${exportedStats.folders}; API bookmarks ${apiStats.bookmarks}, folders ${apiStats.folders}). Push/sync blocked; align local state and retry.`
+            ));
+        }
+    }
+
     function buildManagedSyncComparableRemoteFiles(remoteManagedFiles, remoteFolderFiles, remoteRootPath = '') {
         const files = Array.isArray(remoteManagedFiles) ? remoteManagedFiles : [];
         const fileMap = new Map();
@@ -7554,6 +7688,43 @@ Cancel: go back and change the branch name first.`
         return document.getElementById(id);
     }
 
+    function ensureSyncInteractionShieldElement() {
+        if (syncInteractionShieldEl && syncInteractionShieldEl.isConnected) return syncInteractionShieldEl;
+        if (!document.body) return null;
+
+        const existing = document.getElementById(SYNC_INTERACTION_SHIELD_ID);
+        if (existing) {
+            syncInteractionShieldEl = existing;
+            return existing;
+        }
+
+        const shield = document.createElement('div');
+        shield.id = SYNC_INTERACTION_SHIELD_ID;
+        shield.className = 'canvas-sync-interaction-shield';
+        shield.hidden = true;
+        shield.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(shield);
+        syncInteractionShieldEl = shield;
+        return shield;
+    }
+
+    function setSyncInteractionShieldVisible(visible) {
+        const shield = ensureSyncInteractionShieldElement();
+        if (!shield) return;
+        shield.hidden = !visible;
+    }
+
+    function shouldShowSyncInteractionShield() {
+        return !!(
+            (runtime && runtime.isRunning)
+            || recoveryLockResumeInFlight
+        );
+    }
+
+    function refreshSyncInteractionShieldVisibility() {
+        setSyncInteractionShieldVisible(shouldShowSyncInteractionShield());
+    }
+
     function normalizeProgressPercent(value) {
         if (value == null) return null;
         const n = Number(value);
@@ -8195,6 +8366,9 @@ Cancel: go back and change the branch name first.`
     }
 
     function renderStatus() {
+        const runningNow = shouldShowSyncInteractionShield();
+        refreshSyncInteractionShieldVisibility();
+
         const runningEl = getElement('canvasSyncStatusRunning');
         const queueEl = getElement('canvasSyncStatusQueue');
         const lastEl = getElement('canvasSyncStatusLastSuccess');
@@ -8209,7 +8383,7 @@ Cancel: go back and change the branch name first.`
         const errorEl = getElement('canvasSyncStatusError');
 
         if (runningEl) {
-            if (runtime.isRunning) {
+            if (runningNow) {
                 runningEl.textContent = textByLang('执行中', 'Running');
             } else if (runtime.hasPendingConflict) {
                 runningEl.textContent = textByLang('等待冲突处理', 'Waiting for Conflict Resolution');
@@ -8604,6 +8778,7 @@ Cancel: go back and change the branch name first.`
     }
 
     function updateSyncEnabledDependentFieldState() {
+        refreshSyncInteractionShieldVisibility();
         const enabledOn = isSyncEnabledToggleChecked();
         const disabledByRecoveryLock = isRecoveryLockActive();
         const disabledHint = textByLang(
@@ -10437,11 +10612,18 @@ Cancel: go back and change the branch name first.`
         }
 
         reportProgress(0.05, textByLang('正在导出文件...', 'Exporting files...'));
-        const bundle = await bridge.buildSyncFiles({
+        const prebuiltBundle = options && options.prebuiltBundle && typeof options.prebuiltBundle === 'object'
+            ? options.prebuiltBundle
+            : null;
+        const bundle = prebuiltBundle || await bridge.buildSyncFiles({
             exportFormat: settings.obsidianExportFormat,
             exportRoot: settings.obsidianExportRoot
         });
         const sourceFiles = Array.isArray(bundle && bundle.files) ? bundle.files : [];
+        reportProgress(0.15, textByLang('校验永久栏目一致性...', 'Validating permanent section consistency...'));
+        await verifyPermanentTreeConsistencyBeforePush(bundle, bridge, {
+            localPermanentTreeSnapshot: options.localPermanentTreeSnapshot || null
+        });
         reportProgress(0.25, textByLang(`导出完成：${sourceFiles.length} 个文件`, `Exported: ${sourceFiles.length} files`));
 
         const normalizedFiles = [];
@@ -10677,7 +10859,7 @@ Cancel: go back and change the branch name first.`
 
         const needsPushRecoveryLock = changedFiles.length > 0 || removedPaths.length > 0;
         if (needsPushRecoveryLock && options.skipRecoveryLock !== true && (options.forceRecoveryLock === true || shouldStagePushRecoveryLockForTrigger(trigger))) {
-            await stagePushRecoveryLock({
+            const stagedPushLock = await stagePushRecoveryLock({
                 exportRoot: bundle && bundle.exportRoot ? String(bundle.exportRoot) : settings.obsidianExportRoot,
                 files: normalizedFiles
             }, {
@@ -10687,6 +10869,12 @@ Cancel: go back and change the branch name first.`
                 baseRemoteSha: String(options.baseRemoteSha || getCurrentCloudHashForDisplay() || ''),
                 stage: 'prepared'
             });
+            if (!stagedPushLock) {
+                throw new Error(textByLang(
+                    '恢复保护创建失败：已取消本次上传，以保护本地和云端状态。请检查浏览器存储空间后重试。',
+                    'Recovery staging failed, so this upload was cancelled to protect local and cloud states. Check browser storage and retry.'
+                ));
+            }
         }
 
         // Prefer one single Git commit per push (Git Data API), instead of one commit per file (Contents API).
@@ -12668,11 +12856,13 @@ Cancel: go back and change the branch name first.`
                 });
             } else if (resolvedChoice === 'remote') {
                 // Conflict panel -> use remote:
-                // overwrite permanent section first, then apply snapshot data,
-                // so a permanent-overwrite failure won't leave temp/blank already switched.
+                // 1) apply protocol snapshot first
+                // 2) then overwrite permanent bookmark tree
+                // This matches the pull pipeline contract and keeps rollback snapshot safety.
                 const currentLocal = await buildLocalSnapshot('conflict-local-backup', { includePermanentTree: true });
                 let remotePermanentTreeSnapshot = remoteSnapshot && remoteSnapshot.permanentTreeSnapshot;
                 try {
+                    await applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot));
                     if (!normalizeBookmarkTreeSnapshot(remotePermanentTreeSnapshot)) {
                         try {
                             const latestRemoteState = await readRemoteSnapshotWithPathRecovery({
@@ -12693,7 +12883,7 @@ Cancel: go back and change the branch name first.`
                     if (overwriteResult && overwriteResult.applied) {
                         runtime.lastPermanentTreeSnapshotAt = Date.now();
                     }
-                    await applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot));
+                    await ensureTempSourceIDIntegrityAfterRemoteApply('manual-conflict-use-remote');
                 } catch (error) {
                     console.warn('[Canvas Sync] apply conflict(remote) to local failed:', error);
                     const rollbackResult = await rollbackRemoteLocalApplyFromSnapshot(
@@ -12969,7 +13159,32 @@ Cancel: go back and change the branch name first.`
             let localHash = getSnapshotHash(localSnapshot);
             let abortedByPendingConflict = false;
             let skipSuccessToast = false;
+            let preflightPushBundle = null;
             updateSyncUiProgress(textByLang('已读取本地状态', 'Loaded local state'), 10);
+
+            if (
+                settings.obsidianFilePushEnabled !== false
+                && (effectiveMode === 'push' || effectiveMode === 'full')
+            ) {
+                const bridge = global.CanvasObsidianExportBridge;
+                if (!bridge || typeof bridge.buildSyncFiles !== 'function') {
+                    throw new Error(textByLang(
+                        '导出桥不可用，无法执行 push/sync 前一致性校验。',
+                        'Export bridge is unavailable; cannot run pre-push/pre-sync consistency check.'
+                    ));
+                }
+                updateSyncUiProgress(textByLang('执行同步前一致性预检...', 'Running pre-sync consistency preflight...'), 12);
+                preflightPushBundle = await bridge.buildSyncFiles({
+                    exportFormat: settings.obsidianExportFormat,
+                    exportRoot: settings.obsidianExportRoot
+                });
+                await verifyPermanentTreeConsistencyBeforePush(preflightPushBundle, bridge, {
+                    localPermanentTreeSnapshot: localSnapshot && localSnapshot.permanentTreeSnapshot
+                        ? localSnapshot.permanentTreeSnapshot
+                        : null
+                });
+                updateSyncUiProgress(textByLang('同步前一致性预检通过', 'Pre-sync consistency preflight passed'), 14);
+            }
 
             const doPush = async (reason, pushOptions = {}) => {
                 let obsidianPushResult = null;
@@ -12982,6 +13197,9 @@ Cancel: go back and change the branch name first.`
                 const preflightRemoteSignalSha = String(
                     pushOptions && pushOptions.remoteSignalSha ? pushOptions.remoteSignalSha : ''
                 ).trim();
+                const prebuiltBundle = pushOptions && pushOptions.prebuiltBundle && typeof pushOptions.prebuiltBundle === 'object'
+                    ? pushOptions.prebuiltBundle
+                    : preflightPushBundle;
                 if (settings.obsidianFilePushEnabled !== false) {
                     const pushProgress = makeProgressRange(15, 85);
                     obsidianPushResult = await pushObsidianFilesIncremental(syncTrigger, pushProgress, {
@@ -12989,6 +13207,10 @@ Cancel: go back and change the branch name first.`
                         recoveryMode: effectiveMode,
                         sourcePanel: mapRecoveryLockSourcePanel(syncTrigger),
                         baseRemoteSha: getCurrentCloudHashForDisplay(),
+                        prebuiltBundle,
+                        localPermanentTreeSnapshot: localSnapshot && localSnapshot.permanentTreeSnapshot
+                            ? localSnapshot.permanentTreeSnapshot
+                            : null,
                         remoteFilesByPathForMissingCheck: preflightRemoteFilesByPath,
                         skipRemoteMissingPreflight: !!preflightRemoteSignalSha
                     });
@@ -14384,14 +14606,40 @@ Cancel: go back and change the branch name first.`
                 ));
             }
 
-            updateSyncUiProgress(textByLang('正在应用永久栏目...', 'Applying permanent section...'), 45);
+            let firstSyncAppliedByFiles = false;
+            let remotePermanentTreeForApply = remotePermanentTree;
+            if (settings.obsidianFilePushEnabled !== false && remoteState && remoteState.remoteList && Array.isArray(remoteState.remoteList.files) && remoteState.remoteList.files.length > 0) {
+                try {
+                    updateSyncUiProgress(textByLang('正在应用云端协议文件...', 'Applying cloud protocol files...'), 45);
+                    const fileApplyResult = await applyRemoteObsidianFilesReplace(
+                        remoteState.remoteList,
+                        'first-sync-cloud-overwrite'
+                    );
+                    firstSyncAppliedByFiles = !!(fileApplyResult && fileApplyResult.applied);
+                    const filePermanentTreeSnapshot = normalizeBookmarkTreeSnapshot(
+                        fileApplyResult && fileApplyResult.permanentTreeSnapshot
+                    );
+                    if (filePermanentTreeSnapshot) {
+                        remotePermanentTreeForApply = filePermanentTreeSnapshot;
+                    }
+                } catch (error) {
+                    console.warn('[Canvas Sync] apply remote files replace in first-sync cloud overwrite failed:', error);
+                }
+            }
+
+            if (!firstSyncAppliedByFiles) {
+                updateSyncUiProgress(textByLang('正在应用云端快照...', 'Applying cloud snapshot...'), 52);
+                await applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot));
+            }
+
+            updateSyncUiProgress(textByLang('正在应用永久栏目...', 'Applying permanent section...'), 60);
             const permanentApplyResult = await maybeOverwriteLocalPermanentTreeFromRemoteSnapshot(
-                remotePermanentTree,
+                remotePermanentTreeForApply,
                 'first-sync-cloud-overwrite',
                 {
                     force: true,
                     permanentPullMode: 'overwrite',
-                    onProgress: (message) => updateSyncUiProgress(message, 45)
+                    onProgress: (message) => updateSyncUiProgress(message, 60)
                 }
             );
             let permanentApplySummary = textByLang('永久栏目：未执行恢复', 'Permanent section: no restore executed');
@@ -14403,23 +14651,8 @@ Cancel: go back and change the branch name first.`
             } else if (permanentApplyResult && permanentApplyResult.skipped === 'same') {
                 permanentApplySummary = textByLang('永久栏目：本地与云端一致，已跳过恢复', 'Permanent section: local already matches cloud, skipped restore');
             }
+            await ensureTempSourceIDIntegrityAfterRemoteApply('first-sync-cloud-overwrite');
 
-            let firstSyncAppliedByFiles = false;
-            if (settings.obsidianFilePushEnabled !== false && remoteState && remoteState.remoteList && Array.isArray(remoteState.remoteList.files) && remoteState.remoteList.files.length > 0) {
-                try {
-                    const fileApplyResult = await applyRemoteObsidianFilesReplace(
-                        remoteState.remoteList,
-                        'first-sync-cloud-overwrite'
-                    );
-                    firstSyncAppliedByFiles = !!(fileApplyResult && fileApplyResult.applied);
-                } catch (error) {
-                    console.warn('[Canvas Sync] apply remote files replace in first-sync cloud overwrite failed:', error);
-                }
-            }
-
-            if (!firstSyncAppliedByFiles) {
-                await applySnapshotToLocal(buildSnapshotForRemoteLocalApply(remoteSnapshot));
-            }
             if (settings.obsidianFilePushEnabled !== false) {
                 try {
                     updateSyncUiProgress(textByLang('重建本地索引...', 'Rebuilding local index...'), 75);

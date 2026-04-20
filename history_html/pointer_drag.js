@@ -510,7 +510,8 @@ async function handleDropToCanvas(event, workspaceRect) {
         url: nodeUrl,
         type: isFolder ? 'folder' : 'bookmark',
         source: sourceTreeType === 'temporary' ? 'temporary' : 'permanent',
-        sectionId: sourceTreeType === 'temporary' ? sourceSectionId : null
+        sectionId: sourceTreeType === 'temporary' ? sourceSectionId : null,
+        regenerateSourceID: sourceTreeType === 'temporary'
     };
     // Scheme A: persist "which permanent section (#0/#n) it came from" for new temp sections.
     if (dragData.source === 'permanent') {

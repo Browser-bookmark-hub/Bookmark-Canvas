@@ -3459,7 +3459,9 @@ async function pasteIntoTemp(context) {
     try {
         if (bookmarkClipboard.source === 'temporary') {
             if (bookmarkClipboard.action === 'copy') {
-                manager.insertFromPayload(target.sectionId, target.parentId, bookmarkClipboard.payload, target.index);
+                manager.insertFromPayload(target.sectionId, target.parentId, bookmarkClipboard.payload, target.index, {
+                    regenerateSourceID: true
+                });
             } else if (bookmarkClipboard.action === 'cut') {
                 if (bookmarkClipboard.sectionId === target.sectionId) {
                     manager.moveWithin(target.sectionId, bookmarkClipboard.nodeIds, target.parentId, target.index);
@@ -3488,7 +3490,9 @@ async function pasteIntoTemp(context) {
             }
 
             if (payload && payload.length) {
-                manager.insertFromPayload(target.sectionId, target.parentId, payload, target.index);
+                manager.insertFromPayload(target.sectionId, target.parentId, payload, target.index, {
+                    regenerateSourceID: bookmarkClipboard.action === 'copy'
+                });
             }
 
             if (bookmarkClipboard.source === 'mixed') {
@@ -7705,7 +7709,9 @@ async function batchToTempSection(triggerEvent) {
             try {
                 const payload = canvas.temp.extractPayload(sectionId, ids);
                 if (payload && payload.length) {
-                    canvas.temp.insertFromPayload(newSectionId, null, payload);
+                    canvas.temp.insertFromPayload(newSectionId, null, payload, null, {
+                        regenerateSourceID: true
+                    });
                 }
             } catch (error) {
                 console.warn('[批量->临时栏目] 复制临时节点失败:', error);
