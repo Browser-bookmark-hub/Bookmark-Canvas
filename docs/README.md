@@ -26,6 +26,8 @@
 - [bookmark-canvas-skills 任务书](./bookmark-canvas-skills-任务书.md)
 - [拆分对照全量报告](./report-split-audit-split-audit-20260201-214732.md)
 
+- [sourceID 统一替换 originalId 与同步导入导出改造计划书（2026-04-20）](./sourceID统一替换originalId与同步导入导出改造计划书-2026-04-20.md)
+
 ## 维护约定
 
 - 新增文档请放在 `docs/` 目录。
