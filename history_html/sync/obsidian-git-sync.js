@@ -9783,13 +9783,12 @@ Cancel: go back and change the branch name first.`
         const snapshot = rawSnapshot && typeof rawSnapshot === 'object' ? rawSnapshot : null;
         if (!snapshot) throw new Error(textByLang('同步文件格式无效', 'Invalid sync file format'));
 
-        const isBackupPayload = snapshot.exporter === 'bookmark-backup-canvas'
-            && snapshot.storage
-            && typeof snapshot.storage === 'object';
-
-        const rawData = isBackupPayload
-            ? snapshot.storage
-            : (snapshot.data && typeof snapshot.data === 'object' ? snapshot.data : {});
+        const rawData = snapshot.data && typeof snapshot.data === 'object'
+            ? snapshot.data
+            : null;
+        if (!rawData) {
+            throw new Error(textByLang('同步文件格式无效：缺少 data', 'Invalid sync file format: missing data'));
+        }
 
         const data = {};
         Object.keys(rawData || {}).forEach((key) => {
@@ -9812,14 +9811,6 @@ Cancel: go back and change the branch name first.`
             const normalizedSnapshotTempState = normalizeCanvasTempStatePayloadForSync(rawSnapshotTempState);
             if (normalizedSnapshotTempState) {
                 data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(normalizedSnapshotTempState);
-            } else if (isBackupPayload && (!data[TEMP_SECTION_STORAGE_KEY] || !String(data[TEMP_SECTION_STORAGE_KEY]).trim())) {
-                const canvasState = snapshot.canvasState && typeof snapshot.canvasState === 'object' ? snapshot.canvasState : null;
-                if (canvasState) {
-                    const normalizedCanvasTempState = normalizeCanvasTempStatePayloadForSync(canvasState);
-                    if (normalizedCanvasTempState) {
-                        data[TEMP_SECTION_STORAGE_KEY] = JSON.stringify(normalizedCanvasTempState);
-                    }
-                }
             }
         }
 

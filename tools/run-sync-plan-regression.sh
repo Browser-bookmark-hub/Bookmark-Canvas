@@ -56,6 +56,18 @@ assert_pattern() {
   fi
 }
 
+assert_not_pattern() {
+  local file="$1"
+  local pattern="$2"
+  local label="$3"
+  if rg -n --no-heading --pcre2 "$pattern" "$file" >/dev/null 2>&1; then
+    fail "$label"
+    printf '  unexpected pattern: %s\n' "$pattern"
+  else
+    pass "$label"
+  fi
+}
+
 assert_order() {
   local file="$1"
   local first_pattern="$2"
@@ -143,15 +155,15 @@ main() {
   assert_pattern "$TEMP_FILE" \
     "function __buildCanonicalSyncContractFromCloudSnapshot\\(snapshot\\)" \
     "cloud -> canonical mapper exists"
-  assert_pattern "$TEMP_FILE" \
+  assert_not_pattern "$TEMP_FILE" \
     "function __buildCanonicalSyncContractFromBackupPayload\\(primaryStateInput, storageInput = null\\)" \
-    "backup -> canonical mapper exists"
+    "legacy backup mapper removed"
   assert_pattern "$TEMP_FILE" \
     "function __buildImportPayloadFromCanonicalSyncContract\\(contractInput, options = \\{\\}\\)" \
     "canonical -> import payload mapper exists"
-  assert_pattern "$TEMP_FILE" \
+  assert_not_pattern "$TEMP_FILE" \
     "const canonical = __buildCanonicalSyncContractFromBackupPayload\\(primaryState, storage\\);" \
-    "manual JSON import path goes through canonical mapper"
+    "manual backup-json import path removed"
   assert_pattern "$TEMP_FILE" \
     "const canonical = __buildCanonicalSyncContractFromCloudSnapshot\\(snapshot\\);" \
     "cloud snapshot import path goes through canonical mapper"

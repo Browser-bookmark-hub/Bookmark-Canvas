@@ -29569,13 +29569,6 @@ function showImportDialog() {
                             <span>${isEn ? 'JSON' : 'JSON 书签/临时'}</span>
                         </button>
                     </div>
-                    <div class="import-section-label-large" style="margin-top: 12px;">${isEn ? 'Cloud Relay' : '云端中转'}</div>
-                    <div class="import-row import-row-2cols">
-                        <button class="import-option-btn-compact" id="importCloudTempBtn" title="${isEn ? 'Pull from cloud and apply import rules' : '从云端拉取并按导入规则处理'}">
-                            <i class="fas fa-cloud-download-alt"></i>
-                            <span>${isEn ? 'Cloud' : '云端'}</span>
-                        </button>
-                    </div>
                 </div>
                 <input type="file" id="canvasFileInput" accept=".zip,.7z,.html,.json" style="display: none;">
                 <input type="file" id="canvasFolderInput" webkitdirectory directory style="display: none;">
@@ -29620,33 +29613,6 @@ function showImportDialog() {
         input.accept = '.json';
         input.dataset.type = 'json';
         input.click();
-    });
-
-    document.getElementById('importCloudTempBtn').addEventListener('click', async () => {
-        const shouldImport = await showCloudImportConfirmDialog();
-        if (!shouldImport) return;
-
-        try {
-            await importCloudSnapshotAsTemporary();
-            dialog.remove();
-        } catch (error) {
-            const text = error && error.message ? error.message : String(error);
-            console.error('[Canvas] 云端导入失败:', error);
-
-            if (__isCloudImportRepoConfigError(text)) {
-                showCanvasToast(`导入失败：${text}`, 'error');
-                dialog.remove();
-                try {
-                    const syncModule = window.CanvasObsidianGitSync;
-                    if (syncModule && typeof syncModule.openPanel === 'function') {
-                        syncModule.openPanel({ activeTab: 'repo' });
-                    }
-                } catch (_) { }
-                return;
-            }
-
-            showCanvasToast((isEn ? 'Import failed: ' : '导入失败：') + text, 'error');
-        }
     });
 
     document.getElementById('canvasFileInput').addEventListener('change', handleFileImport);
@@ -29920,22 +29886,6 @@ function __buildCanonicalSyncContract(input = {}, options = {}) {
     };
 }
 
-function __buildCanonicalSyncContractFromBackupPayload(primaryStateInput, storageInput = null) {
-    const primaryState = (primaryStateInput && typeof primaryStateInput === 'object') ? primaryStateInput : {};
-    const resolvedStorage = (storageInput && typeof storageInput === 'object')
-        ? storageInput
-        : ((primaryState.storage && typeof primaryState.storage === 'object') ? primaryState.storage : {});
-    const preserveSourceIDRaw = true;
-    return __buildCanonicalSyncContract({
-        storage: resolvedStorage,
-        primaryState,
-        source: 'backup'
-    }, {
-        source: 'backup',
-        preserveSourceIDRaw
-    });
-}
-
 function __buildCanonicalSyncContractFromCloudSnapshot(snapshot) {
     const payload = snapshot && typeof snapshot === 'object' ? snapshot : null;
     const data = payload && payload.data && typeof payload.data === 'object' ? payload.data : null;
@@ -30195,29 +30145,6 @@ function __collectCanvasTempStateForExport() {
     });
 }
 
-function __buildCanvasStateBackupView(tempStateInput = null) {
-    const fallbackState = tempStateInput && typeof tempStateInput === 'object'
-        ? tempStateInput
-        : __collectCanvasTempStateForExport();
-    const canonical = __buildCanonicalSyncContract({
-        tempState: fallbackState,
-        source: 'backup-export'
-    }, {
-        source: 'backup-export'
-    });
-    if (!canonical || !canonical.tempState) {
-        return __buildCanvasStateBackupViewFromProtocolState(null);
-    }
-    return __buildCanvasStateBackupViewFromProtocolState(canonical.tempState);
-}
-
-function __extractCanvasTempStateFromBackupPayload(primaryState, storage) {
-    const canonical = __buildCanonicalSyncContractFromBackupPayload(primaryState, storage);
-    return canonical && canonical.tempState
-        ? __cloneCanvasProtocolJson(canonical.tempState)
-        : null;
-}
-
 function __buildImportPayloadFromCloudSnapshot(snapshot) {
     const canonical = __buildCanonicalSyncContractFromCloudSnapshot(snapshot);
     const payload = __buildImportPayloadFromCanonicalSyncContract(canonical);
@@ -30385,67 +30312,6 @@ async function handleFolderImport(e) {
     }
 
     e.target.value = '';
-}
-
-/**
- * 3.4 格式适配器：导入 JSON 单文件
- * 直接读取并校验是否为合法的 Canvas State JSON
- */
-async function parseCanvasPackageFromJsonFile(file) {
-    const { isEn } = __getLang();
-    const text = await file.text();
-    let primaryState;
-
-    try {
-        primaryState = JSON.parse(text);
-    } catch (parseErr) {
-        throw new Error(isEn
-            ? 'Invalid JSON format.'
-            : 'JSON 格式无效。');
-    }
-
-    // 校验是否为合法的 Canvas State JSON
-    const isValidCanvasState = (
-        primaryState &&
-        primaryState.exporter === 'bookmark-backup-canvas' &&
-        (primaryState.storage || primaryState.canvasState)
-    );
-
-    if (!isValidCanvasState) {
-        throw new Error(isEn
-            ? 'This JSON file is not a valid Bookmark Canvas backup file.'
-            : '此 JSON 文件不是有效的书签画布备份文件。');
-    }
-
-    const isBackupMode = primaryState.exportVersion === 2 && primaryState.canvasState;
-    console.log(`[Canvas] JSON Import using ${isBackupMode ? 'BACKUP' : 'FULL'} mode`);
-
-    const storage = (primaryState && typeof primaryState.storage === 'object') ? primaryState.storage : {};
-    const canonical = __buildCanonicalSyncContractFromBackupPayload(primaryState, storage);
-    const normalizedPayload = __buildImportPayloadFromCanonicalSyncContract(canonical);
-    const tempState = normalizedPayload && normalizedPayload.tempState
-        ? normalizedPayload.tempState
-        : null;
-
-    if (!tempState) {
-        throw new Error(isEn ? 'Invalid package state.' : '导入包状态无效');
-    }
-
-    return {
-        tempState,
-        storage: normalizedPayload.storage,
-        primaryState: normalizedPayload.primaryState,
-        mode: isBackupMode ? 'backup' : 'full'
-    };
-}
-
-async function importCanvasPackageJson(file) {
-    const parsed = await parseCanvasPackageFromJsonFile(file);
-    __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, file.name, {
-        source: 'json',
-        trigger: 'manual-json-import',
-        syncMode: false
-    });
 }
 
 /**
@@ -30803,13 +30669,37 @@ async function importJsonBookmarks(json, importFileName = '') {
     // 检测并处理不同格式
     if (looksLikeCanvasTempProtocol) {
         console.log('[Canvas] Detected Bookmark Canvas temporary section JSON format');
-        const normalizedProtocol = __normalizeTempSectionProtocolObject(data);
-        if (normalizedProtocol) {
-            importedViaCanvasTempProtocol = true;
-            tempProtocolMeta = normalizedProtocol.sectionMeta || {};
-            items = (Array.isArray(normalizedProtocol.items) ? normalizedProtocol.items : [])
-                .map(convert)
-                .filter(Boolean);
+        try {
+            const normalizedProtocol = __normalizeTempSectionProtocolObject(data);
+            if (normalizedProtocol) {
+                importedViaCanvasTempProtocol = true;
+                tempProtocolMeta = (normalizedProtocol.sectionMeta && typeof normalizedProtocol.sectionMeta === 'object')
+                    ? normalizedProtocol.sectionMeta
+                    : {};
+                items = (Array.isArray(normalizedProtocol.items) ? normalizedProtocol.items : [])
+                    .map(convert)
+                    .filter(Boolean);
+            } else {
+                // 兼容“字段不完整”的临时栏目 JSON：尽量回退到纯书签树导入，不中断流程。
+                const fallbackTree = Array.isArray(data.items)
+                    ? data.items
+                    : (Array.isArray(data.bookmarkTree)
+                        ? data.bookmarkTree
+                        : ((data.bookmarkTree && typeof data.bookmarkTree === 'object')
+                            ? [data.bookmarkTree]
+                            : []));
+                items = fallbackTree.map(convert).filter(Boolean);
+            }
+        } catch (protocolError) {
+            console.warn('[Canvas] Temporary protocol JSON parse fallback:', protocolError);
+            const fallbackTree = Array.isArray(data.items)
+                ? data.items
+                : (Array.isArray(data.bookmarkTree)
+                    ? data.bookmarkTree
+                    : ((data.bookmarkTree && typeof data.bookmarkTree === 'object')
+                        ? [data.bookmarkTree]
+                        : []));
+            items = fallbackTree.map(convert).filter(Boolean);
         }
     } else if (data && typeof data === 'object' && Array.isArray(data.bookmarks)) {
         // 第三方常见包裹格式：{ bookmarks: [...] }
@@ -30918,9 +30808,9 @@ async function importJsonBookmarks(json, importFileName = '') {
         ? protocolUpdatedAt
         : 0;
     const protocolDescriptionMd = String(
-        tempProtocolMeta && tempProtocolMeta.descriptionMd == null
-            ? ''
-            : tempProtocolMeta.descriptionMd
+        (tempProtocolMeta && tempProtocolMeta.descriptionMd != null)
+            ? tempProtocolMeta.descriptionMd
+            : ''
     );
     const protocolSequenceNumber = __normalizePositiveInt(tempProtocolMeta && tempProtocolMeta.sequenceNumber);
     const protocolOriginPermanent = __normalizeOriginPermanentPayload(tempProtocolMeta && tempProtocolMeta.originPermanent);
@@ -31180,80 +31070,6 @@ function showExportModeDialog(options = {}) {
     }
 }
 
-
-/**
- * 全量备份模式的二级确认对话框
- */
-function showFullBackupConfirmDialog() {
-    const { isEn } = __getLang();
-
-    const dialog = document.createElement('div');
-    dialog.className = 'import-dialog';
-    dialog.id = 'canvasFullBackupConfirmDialog';
-
-    const title = isEn ? 'Full Backup Export' : '全量备份导出';
-    const desc = isEn
-        ? 'This will create a complete backup package containing:'
-        : '将创建一个完整的备份包，包含：';
-    const item1 = isEn ? '✓ All bookmark data (permanent & temporary)' : '✓ 所有书签数据（永久栏目 & 临时栏目）';
-    const item2 = isEn ? '✓ Canvas layout & connections' : '✓ 画布布局与连接线';
-    const item3 = isEn ? '✓ Scroll positions & settings' : '✓ 滚动位置与设置';
-    const item4 = isEn ? '✓ Structured JSON for AI analysis' : '✓ 结构化 JSON（便于 AI 分析）';
-    const btnText = isEn ? 'Export Now' : '立即导出';
-    const backText = isEn ? 'Back' : '返回';
-
-    dialog.innerHTML = `
-        <div class="import-dialog-content" style="max-width: 400px; width: 90vw;">
-            <div class="import-dialog-header">
-                <h3>${title}</h3>
-                <button class="import-dialog-close" id="closeFullBackupDialog">&times;</button>
-            </div>
-            <div class="import-dialog-body" style="padding: 16px;">
-                <div style="margin-bottom: 16px; color: #555; font-size: 13px;">${desc}</div>
-                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
-                    <div style="font-size: 13px; color: #166534; line-height: 1.8;">
-                        ${item1}<br>
-                        ${item2}<br>
-                        ${item3}<br>
-                        ${item4}
-                    </div>
-                </div>
-                <div style="display: flex; gap: 10px;">
-                    <button id="backToModeSelect" class="import-option-btn" style="flex: 1; padding: 10px; justify-content: center; background: #f3f4f6; border: 1px solid #e5e7eb;">
-                        <i class="fas fa-arrow-left" style="margin-right: 6px;"></i>${backText}
-                    </button>
-                    <button id="confirmFullBackup" class="import-option-btn" style="flex: 2; padding: 10px; justify-content: center; background: #059669; color: white; border: none;">
-                        <i class="fas fa-download" style="margin-right: 6px;"></i>${btnText}
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(dialog);
-
-    document.getElementById('closeFullBackupDialog').addEventListener('click', () => {
-        dialog.remove();
-    });
-
-    dialog.addEventListener('click', (e) => {
-        if (e.target === dialog) dialog.remove();
-    });
-
-    document.getElementById('backToModeSelect').addEventListener('click', () => {
-        dialog.remove();
-        showExportModeDialog();
-    });
-
-    document.getElementById('confirmFullBackup').addEventListener('click', () => {
-        dialog.remove();
-        exportCanvasPackage({ mode: 'full-backup' }).catch((e) => {
-            console.error('[Canvas] 导出失败:', e);
-            const { isEn } = __getLang();
-            alert((isEn ? 'Export failed: ' : '导出失败: ') + (e && e.message ? e.message : e));
-        });
-    });
-}
 
 // =============================================================================
 // Canvas 导入/导出（zip 包：.canvas + .md + 本体json）
@@ -34389,7 +34205,6 @@ if (typeof window !== 'undefined') {
     window.CanvasObsidianExportBridge.parseSyncFolderFiles = parseCanvasPackageFromFolderFiles;
     window.CanvasObsidianExportBridge.parseSyncFolderFilesForSync = async function (folderFiles, folderName) {
         const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName, {
-            preferBackupJson: false,
             syncMode: true
         });
         const normalizedFiles = __normalizeImportFolderFilesMap(folderFiles);
@@ -34598,8 +34413,7 @@ if (typeof window !== 'undefined') {
 }
 
 async function exportCanvasPackage(options = {}) {
-    const exportMode = options.mode || 'obsidian'; // 'obsidian' or 'full-backup'
-    const isFullBackupMode = exportMode === 'full-backup';
+    const exportMode = options.mode || 'obsidian';
     const { isEn } = __getLang();
     const api = (typeof browserAPI !== 'undefined' && browserAPI.bookmarks) ? browserAPI.bookmarks : (chrome && chrome.bookmarks ? chrome.bookmarks : null);
     if (!api || typeof api.getTree !== 'function') {
@@ -34802,7 +34616,6 @@ async function exportCanvasPackage(options = {}) {
                 return exportMode;
             }
             if (exportMode === 'obsidian') return 'fullscreen-html';
-            if (exportMode === 'full-backup') return 'fullscreen-json';
             return '';
         })();
 
@@ -34925,97 +34738,6 @@ async function exportCanvasPackage(options = {}) {
             ? `Exported: ${fileName}`
             : `已导出：${fileName}`);
         return;
-    }
-
-    // -------------------------------------------------------------------------
-    // 模式 B: 全量备份 (Direct JSON Download)
-    // -------------------------------------------------------------------------
-    if (isFullBackupMode) {
-        // Ensure permanent copy displayIndex (#1/#2/...) are present before exporting.
-        try { __ensurePermanentSectionCopyDisplayIndexes(); } catch (_) { }
-        const tempStateObj = __collectCanvasTempStateForExport();
-        const tempCanvasState = __buildCanvasStateBackupView(tempStateObj);
-        const permanentCopiesRaw = localStorage.getItem(PERMANENT_SECTION_COPIES_STORAGE_KEY);
-        const perfMode = localStorage.getItem('canvas-performance-mode');
-        const parseJsonSafe = (raw) => {
-            if (!raw) return null;
-            try { return JSON.parse(raw); } catch (_) { return null; }
-        };
-        let bcsCanvas = null;
-        try {
-            const bcsStorage = await __bcsStorageGetAll();
-            const bcsFileRefs = __collectBcsFileRefsFromState(tempStateObj, {
-                exportRoot: __getBcsExportRootSync(),
-                exportFormat: __getBcsExportFormatSync()
-            });
-            bcsCanvas = __buildBcsCanvasDataFromState(tempStateObj, bcsFileRefs, { storageMap: bcsStorage });
-        } catch (_) {
-            bcsCanvas = null;
-        }
-
-        // Collect Permanent Section Tips (Descriptions)
-        const permanentTips = {};
-        try {
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && (key === PERMANENT_MAIN_TIP_STORAGE_KEY || key.startsWith(PERMANENT_COPY_TIP_STORAGE_PREFIX))) {
-                    permanentTips[key] = localStorage.getItem(key);
-                }
-            }
-        } catch (_) { }
-
-        const bookmarkTree = __buildPermanentTreeSnapshotForJsonProtocol(await api.getTree());
-
-        const normalizedPermanentTreeSnapshot = __buildPermanentTreeSnapshotForJsonProtocol(bookmarkTree);
-        const backupState = {
-            exporter: 'bookmark-backup-canvas',
-            exportVersion: 2,
-            exportedAt,
-            exportMode: 'full-backup',
-            description: isEn
-                ? 'Full backup file for Bookmark Canvas. Contains complete bookmark tree (Permanent Columns #A...) and all canvas data (Temporary Columns A-1...).'
-                : '书签画布完整备份文件。包含完整的书签树（永久栏目 #A...）和所有画布数据（临时栏目 A-1...）。',
-            storage: {
-                [TEMP_SECTION_STORAGE_KEY]: tempStateObj,
-                [PERMANENT_SECTION_COPIES_STORAGE_KEY]: parseJsonSafe(permanentCopiesRaw),
-                [PERMANENT_ROOT_META_STORAGE_KEY]: __readPermanentRootMetaStorageValue(),
-                [BCS_CANVAS_KEY]: bcsCanvas || null,
-                'canvas-performance-mode': perfMode || null,
-                ...permanentTips
-            },
-            permanentTreeSnapshot: normalizedPermanentTreeSnapshot,
-            canvasState: tempCanvasState
-        };
-
-        const jsonString = JSON.stringify(backupState, null, 2);
-        const blob = new Blob([jsonString], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const filename = `bookmark-canvas-backup-${ymd}.json`;
-
-        if (chrome && chrome.downloads && typeof chrome.downloads.download === 'function') {
-            chrome.downloads.download({
-                url: url,
-                filename: `${downloadFolder}/${filename}`,
-                saveAs: false,
-                conflictAction: 'uniquify'
-            }, () => {
-                setTimeout(() => URL.revokeObjectURL(url), 10000);
-            });
-        } else {
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(url), 10000);
-        }
-
-        alert(isEn
-            ? `Exported Full Backup: ${filename}`
-            : `已导出全量备份：${filename}`);
-
-        return; // <--- 结束执行，跳过后续的 ZIP 生成逻辑
     }
 
     // -------------------------------------------------------------------------
@@ -35218,25 +34940,16 @@ async function exportCanvasPackage(options = {}) {
     // - vault 的子文件夹下：SomeFolder/bookmark-canvas-export/...
     // - 或把 bookmark-canvas-export/ 直接作为一个独立 vault 根目录（portable canvas）
 
-    // 只有 Obsidian 模式才需要路径配置对话框
-    // 全量备份模式直接使用默认路径
-    // 全量备份模式直接使用默认路径
     let vaultPrefixInput;
     let exportFormat = 'json'; // 'json' | 'visual' | 'visual-no-icon'
 
-    if (isFullBackupMode) {
-        // 全量备份模式：直接使用默认值，不显示路径对话框
-        vaultPrefixInput = defaultExportRoot;
-    } else {
-        // Obsidian 模式：显示路径配置对话框
-        const result = await promptVaultPrefixViaDialog(defaultExportRoot);
-        if (result === null) {
-            return;
-        }
-        vaultPrefixInput = result.path;
-        exportFormat = result.format || 'json';
-
+    const result = await promptVaultPrefixViaDialog(defaultExportRoot);
+    if (result === null) {
+        return;
     }
+    vaultPrefixInput = result.path;
+    exportFormat = result.format || 'json';
+
     const vaultPrefix = normalizeVaultPrefix(vaultPrefixInput);
     exportFormat = __normalizeCanvasObsidianExportFormat(exportFormat, 'json');
 
@@ -35555,15 +35268,6 @@ async function exportCanvasPackage(options = {}) {
     files.push({ name: `${exportRoot}/${canvasFileName}`, data: __toUint8(__formatObsidianCanvasJson(canvasForVault)) });
 
     // 3) Full state json (for full import)
-    const tempStateObj = __collectCanvasTempStateForExport();
-    const tempCanvasState = __buildCanvasStateBackupView(tempStateObj);
-    const permanentCopiesRaw = localStorage.getItem(PERMANENT_SECTION_COPIES_STORAGE_KEY);
-    const perfMode = localStorage.getItem('canvas-performance-mode');
-    const parseJsonSafe = (raw) => {
-        if (!raw) return null;
-        try { return JSON.parse(raw); } catch (_) { return null; }
-    };
-
     // 3.1) Supplementary layer (bookmark-canvas.full.json) - 补充层
     // [CHANGED] We no longer export 'style-data.json' for Obsidian Mode.
     // Obsidian Mode relies purely on .canvas and .md files to ensure edits in Obsidian are preserved.
@@ -35573,45 +35277,6 @@ async function exportCanvasPackage(options = {}) {
     const fullState = { ... };
     files.push({ name: `${exportRoot}/bookmark-canvas.style-data.json`, data: __toUint8(JSON.stringify(fullState, null, 2)) });
     */
-
-    // 3.2) Core data layer (bookmark-canvas.backup.json) - 核心数据层
-    // 仅在"模式 B"（全量备份模式）下生成
-    if (isFullBackupMode) {
-        let bcsCanvas = null;
-        try {
-            const bcsStorage = await __bcsStorageGetAll();
-            const bcsFileRefs = __collectBcsFileRefsFromState(tempStateObj, {
-                exportRoot: __getBcsExportRootSync(),
-                exportFormat: __getBcsExportFormatSync()
-            });
-            bcsCanvas = __buildBcsCanvasDataFromState(tempStateObj, bcsFileRefs, { storageMap: bcsStorage });
-        } catch (_) {
-            bcsCanvas = null;
-        }
-        const normalizedPermanentTreeSnapshot = __buildPermanentTreeSnapshotForJsonProtocol(bookmarkTree);
-        const backupState = {
-            exporter: 'bookmark-backup-canvas',
-            exportVersion: 2, // 核心数据层使用版本2
-            exportedAt,
-            exportMode: 'full-backup',
-            description: isEn
-                ? 'Full backup file for Bookmark Canvas. Contains complete bookmark tree and all canvas data.'
-                : '书签画布完整备份文件。包含完整的书签树和所有画布数据。',
-            storage: {
-                [TEMP_SECTION_STORAGE_KEY]: tempStateObj,
-                [PERMANENT_SECTION_COPIES_STORAGE_KEY]: parseJsonSafe(permanentCopiesRaw),
-                [PERMANENT_ROOT_META_STORAGE_KEY]: __readPermanentRootMetaStorageValue(),
-                [BCS_CANVAS_KEY]: bcsCanvas || null,
-                'canvas-performance-mode': perfMode || null
-            },
-            // 核心数据层包含完整书签树快照
-            permanentTreeSnapshot: normalizedPermanentTreeSnapshot,
-            // 包含当前画布所有栏目的完整数据对象树
-            canvasState: tempCanvasState
-        };
-        files.push({ name: `${exportRoot}/bookmark-canvas.backup.json`, data: __toUint8(JSON.stringify(backupState, null, 2)) });
-    }
-
     // 4) Import guide for Obsidian
 
     const readmeName = isEn ? 'README_Import_Rules.md' : '说明_导入规则.md';
@@ -36745,10 +36410,7 @@ async function parseCanvasPackageFromZipFile(file) {
     const buf = await file.arrayBuffer();
     const zipFiles = await __unzipStore(buf);
 
-    // 4.2 数据信任链：
-    // 优先查找 bookmark-canvas.backup.json（全量备份模式）
-    // 若不存在，则尝试查找 .canvas 文件（Obsidian 兼容模式）
-    let backupJsonName = null;
+    // 4.2 数据信任链：只接受 .canvas 包结构
     let canvasFileName = null;
 
     // 记录所有文件用于调试
@@ -36757,12 +36419,6 @@ async function parseCanvasPackageFromZipFile(file) {
     for (const name of zipFiles.keys()) {
         // 获取文件名（不含路径）
         const baseName = name.split('/').pop();
-
-        // 查找 backup.json - 支持任意目录深度
-        if (baseName === 'bookmark-canvas.backup.json') {
-            backupJsonName = name;
-            console.log('[Canvas] 找到备份文件:', name);
-        }
 
         // 查找 .canvas 文件 - 支持任意目录深度
         if (baseName.endsWith('.canvas')) {
@@ -36777,29 +36433,15 @@ async function parseCanvasPackageFromZipFile(file) {
     let storage = null;
     let primaryState = {}; // Mock primary state for compatibility
 
-    // Mode A: Full Backup (JSON)
-    if (backupJsonName) {
-        console.log(`[Canvas] Import using BACKUP mode: ${backupJsonName}`);
-        const primaryJsonText = new TextDecoder('utf-8').decode(zipFiles.get(backupJsonName));
-        primaryState = JSON.parse(primaryJsonText);
-        const canonical = __buildCanonicalSyncContractFromBackupPayload(primaryState, primaryState && primaryState.storage);
-        const normalizedPayload = __buildImportPayloadFromCanonicalSyncContract(canonical);
-        if (normalizedPayload) {
-            storage = normalizedPayload.storage;
-            primaryState = normalizedPayload.primaryState;
-            tempState = normalizedPayload.tempState;
-        }
-    }
-    // Mode B: Obsidian Canvas (Reconstruct from .canvas + .md)
-    else if (canvasFileName) {
+    if (canvasFileName) {
         console.log(`[Canvas] Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(zipFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
         tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, zipFiles, primaryState, { isEn });
     } else {
         throw new Error(isEn
-            ? 'Invalid Package: Missing both backup.json and .canvas file.'
-            : '无效包：缺少 backup.json 或 .canvas 文件。');
+            ? 'Invalid Package: Missing .canvas file.'
+            : '无效包：缺少 .canvas 文件。');
     }
 
     if (!tempState) {
@@ -36864,19 +36506,12 @@ async function importCanvasPackage7z(file) {
  */
 async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, options = {}) {
     const { isEn } = __getLang();
-    const preferBackupJson = !(options && options.preferBackupJson === false);
     const syncMode = !!(options && options.syncMode);
 
-    // 4.2 数据信任链：
-    // 优先查找 bookmark-canvas.backup.json（全量备份模式）
-    // 若不存在，则尝试查找 .canvas 文件（Obsidian 兼容模式）
-    let backupJsonName = null;
+    // 4.2 数据信任链：只接受 .canvas 包结构
     let canvasFileName = null;
 
     for (const name of folderFiles.keys()) {
-        if (preferBackupJson && (name.endsWith('/bookmark-canvas.backup.json') || name.endsWith('bookmark-canvas.backup.json'))) {
-            backupJsonName = name;
-        }
         if (name.endsWith('.canvas') && !name.includes('/')) {
             canvasFileName = name;
         } else if (name.endsWith('.canvas')) {
@@ -36888,21 +36523,7 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
     let storage = null;
     let primaryState = {};
 
-    // Mode A: Full Backup (JSON)
-    if (preferBackupJson && backupJsonName) {
-        console.log(`[Canvas] Folder Import using BACKUP mode: ${backupJsonName}`);
-        const primaryJsonText = new TextDecoder('utf-8').decode(folderFiles.get(backupJsonName));
-        primaryState = JSON.parse(primaryJsonText);
-        const canonical = __buildCanonicalSyncContractFromBackupPayload(primaryState, primaryState && primaryState.storage);
-        const normalizedPayload = __buildImportPayloadFromCanonicalSyncContract(canonical);
-        if (normalizedPayload) {
-            storage = normalizedPayload.storage;
-            primaryState = normalizedPayload.primaryState;
-            tempState = normalizedPayload.tempState;
-        }
-    }
-    // Mode B: Obsidian Canvas (Reconstruct from .canvas + .md)
-    else if (canvasFileName) {
+    if (canvasFileName) {
         console.log(`[Canvas] Folder Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(folderFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
@@ -36912,8 +36533,8 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
         });
     } else {
         throw new Error(isEn
-            ? 'Invalid Folder: Missing both backup.json and .canvas file.'
-            : '无效文件夹：缺少 backup.json 或 .canvas 文件。');
+            ? 'Invalid Folder: Missing .canvas file.'
+            : '无效文件夹：缺少 .canvas 文件。');
     }
 
     if (!tempState) {
@@ -37271,7 +36892,6 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '', opt
     try { applyPermanentLayoutAndTipsFromCanvas(); } catch (e) { console.warn('[Canvas] apply permanent layout/tip from remote canvas failed:', e); }
 
 		    const parsed = await parseCanvasPackageFromFolderFiles(normalizedFiles, folderName || 'sync-pull', {
-                preferBackupJson: false,
                 syncMode: true
             });
 		    const parsedTempState = parsed && parsed.tempState && typeof parsed.tempState === 'object'
@@ -37426,7 +37046,7 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '', opt
 
 /**
  * 沙箱导入核心处理逻辑
- * 被 importCanvasPackageZip 和 importCanvasPackageJson 共同使用
+ * 被 importCanvasPackageZip 和 importCanvasPackageFolder 共同使用
  * @param {Object} tempState - 临时栏目状态数据
  * @param {Object} storage - 存储数据（滚动位置等）
  * @param {Object} primaryState - 原始状态对象（用于获取书签树快照等）
