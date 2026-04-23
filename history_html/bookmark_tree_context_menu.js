@@ -3490,8 +3490,11 @@ async function pasteIntoTemp(context) {
             }
 
             if (payload && payload.length) {
+                const regenerateSourceID = (bookmarkClipboard.source === 'mixed')
+                    ? bookmarkClipboard.action === 'copy'
+                    : false;
                 manager.insertFromPayload(target.sectionId, target.parentId, payload, target.index, {
-                    regenerateSourceID: bookmarkClipboard.action === 'copy'
+                    regenerateSourceID
                 });
             }
 

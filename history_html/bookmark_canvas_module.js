@@ -26115,7 +26115,8 @@ function setupTempSectionDropTargets(section, sectionElement, treeContainer, hea
                 const payload = await resolvePermanentPayload(ids);
                 if (payload && payload.length) {
                     insertTempItemsFromPayload(section.id, null, payload, null, {
-                        regenerateSourceID: true
+                        // Permanent -> temporary: inherit sourceID when present, otherwise generate.
+                        regenerateSourceID: false
                     });
                     if (typeof deselectAll === 'function') {
                         deselectAll();
@@ -26266,7 +26267,8 @@ function setupTempTreeNodeDropHandlers(treeItem, section, item) {
             const payload = await resolvePermanentPayload(ids);
             if (!payload || !payload.length) return;
             insertTempItemsFromPayload(section.id, item.id, payload, null, {
-                regenerateSourceID: true
+                // Permanent -> temporary: inherit sourceID when present, otherwise generate.
+                regenerateSourceID: false
             });
             if (typeof deselectAll === 'function') {
                 deselectAll();

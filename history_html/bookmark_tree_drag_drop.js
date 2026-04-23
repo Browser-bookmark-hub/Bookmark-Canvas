@@ -657,7 +657,8 @@ async function moveBookmark(sourceId, targetId, targetIsFolder, context) {
             const payload = nodes && nodes[0] ? [serializeBookmarkNode(nodes[0])] : [];
             const targetInfo = computeTempInsertion(targetSectionId, targetId, position);
             manager.insertFromPayload(targetSectionId, targetInfo.parentId, payload, targetInfo.index, {
-                regenerateSourceID: true
+                // Permanent -> temporary: inherit sourceID when present, otherwise generate.
+                regenerateSourceID: false
             });
             return;
         }
