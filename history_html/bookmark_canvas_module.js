@@ -1838,20 +1838,20 @@ const ZOOM_INPUT_MODE_STICKY_MS = 180;
 const ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX = 6;
 const DISCRETE_WHEEL_EVENT_DELTA_MIN = 24;
 const CANVAS_WHEEL_LINE_PIXEL = 12;
-const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 1.02;
-const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 1.10;
+const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 0.78;
+const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 0.92;
 const WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND = 0.52;
-const WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER = 1.24;
-const WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST = 1.16;
+const WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER = 1.0;
+const WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST = 1.06;
 const WINDOWS_LINUX_WHEEL_PAN_INERTIA_ENABLED = false;
-const WINDOWS_LINUX_WHEEL_PAN_MICRO_SMOOTH_ENABLED = true;
-const WINDOWS_LINUX_WHEEL_PAN_EASE_MULTIPLIER = 1.75;
+const WINDOWS_LINUX_WHEEL_PAN_MICRO_SMOOTH_ENABLED = false;
+const WINDOWS_LINUX_WHEEL_PAN_EASE_MULTIPLIER = 1.0;
 const WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_MAX = 140;
 const WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_X_MAX = 10;
 const CANVAS_WIN_INPUT_DEBUG_KEY = 'canvas-win-input-debug-v1';
 const CANVAS_WIN_INPUT_DEBUG_JSON_KEY = 'canvas-win-input-debug-json-v1';
-const CANVAS_WIN_INPUT_DEBUG_DEFAULT = true;
-const CANVAS_WIN_INPUT_DEBUG_JSON_DEFAULT = true;
+const CANVAS_WIN_INPUT_DEBUG_DEFAULT = false;
+const CANVAS_WIN_INPUT_DEBUG_JSON_DEFAULT = false;
 const CANVAS_WIN_INPUT_DEBUG_THROTTLE_MS = 120;
 const CANVAS_RUNTIME_PLATFORM = (() => {
     try {
@@ -6331,6 +6331,7 @@ function setupCanvasZoomAndPan() {
 
             // 设置新的结束检测（延长至 400ms，防止滚轮间隙导致频繁的状态切换重排）
             workspace._zoomEndTimer = setTimeout(() => {
+                workspace._zoomEndTimer = null;
                 workspace.classList.remove('is-zooming');
 
                 // [OPT] 缩放结束：更新网格和CSS变量 (FORCE UPDATE)
@@ -6515,7 +6516,7 @@ function setupCanvasZoomAndPan() {
                 }, { throttleKey: 'wheel-zoom-apply', throttleMs: 80 });
             }
         } else if (shouldHandleCustomScroll(e)) {
-            __cancelCanvasTrackpadZoomInertia();
+            __cancelCanvasActiveZoomGesture('wheel-scroll');
             handleCanvasCustomScroll(e);
         }
     }, { passive: false });
@@ -6555,6 +6556,7 @@ function setupCanvasZoomAndPan() {
 
         if (isCustomSpaceKeyCode(e.code)) {
             e.preventDefault();
+            __cancelCanvasActiveZoomGesture('space-key');
             CanvasState.isSpacePressed = true;
             workspace.classList.add('space-pressed');
         }
@@ -6605,6 +6607,14 @@ function setupCanvasZoomAndPan() {
         if (CanvasState.isSpacePressed || CanvasState.isCtrlPressed) {
             e.preventDefault();
             e.stopPropagation();
+            __cancelCanvasActiveZoomGesture('pan-start');
+            if (CanvasState.scrollAnimation.frameId) {
+                cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
+                CanvasState.scrollAnimation.frameId = null;
+            }
+            CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+            CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+            CanvasState.scrollAnimation.source = null;
             CanvasState.isPanning = true;
             CanvasState.panStartX = e.clientX - CanvasState.panOffsetX;
             CanvasState.panStartY = e.clientY - CanvasState.panOffsetY;
@@ -11262,6 +11272,53 @@ function __cancelCanvasTrackpadZoomInertia(options = {}) {
     trackpadZoomInertiaCenterX = null;
     trackpadZoomInertiaCenterY = null;
     trackpadZoomInertiaOptions = null;
+}
+
+function __cancelCanvasPendingZoomUpdate() {
+    if (zoomUpdateFrame) {
+        cancelAnimationFrame(zoomUpdateFrame);
+        zoomUpdateFrame = null;
+    }
+    pendingZoomRequest = null;
+}
+
+function __cancelCanvasActiveZoomGesture(reason = 'interrupt') {
+    const workspace = document.getElementById('canvasWorkspace');
+    const hasActiveZoom = !!(
+        smoothWheelZoomFrame ||
+        trackpadZoomInertiaFrame ||
+        zoomUpdateFrame ||
+        pendingZoomRequest ||
+        (workspace && (workspace.classList.contains('is-zooming') || workspace._zoomEndTimer))
+    );
+    if (!hasActiveZoom) return false;
+
+    __cancelCanvasSmoothWheelZoom();
+    __cancelCanvasTrackpadZoomInertia();
+    __cancelCanvasPendingZoomUpdate();
+
+    if (workspace && workspace._zoomEndTimer) {
+        clearTimeout(workspace._zoomEndTimer);
+        workspace._zoomEndTimer = null;
+    }
+    if (workspace) {
+        workspace.classList.remove('is-zooming');
+    }
+
+    try {
+        const container = getCachedContainer();
+        if (container) {
+            setCanvasScaleVars(container, CanvasState.zoom, true);
+        }
+        updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom, true);
+        updateCanvasLowDetailMode(true);
+    } catch (_) { }
+
+    __logCanvasWinInput('zoom-interrupt', { reason }, {
+        throttleKey: `zoom-interrupt-${reason}`,
+        throttleMs: 160
+    });
+    return true;
 }
 
 function __runCanvasTrackpadZoomInertiaStep() {
