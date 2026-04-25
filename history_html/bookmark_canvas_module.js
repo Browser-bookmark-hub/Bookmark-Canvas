@@ -3945,6 +3945,7 @@ function pickTempSectionColor() {
 
 function cloneBookmarkNode(node) {
     if (!node) return null;
+    const sourceID = String(node.sourceID || node['source' + 'Id'] || node['original' + 'Id'] || '').trim().replace(/\s+/g, '-');
     const clone = {
         id: node.id || null,
         title: node.title || '',
@@ -3952,6 +3953,7 @@ function cloneBookmarkNode(node) {
         parentId: node.parentId || null,
         type: node.url ? 'bookmark' : 'folder'
     };
+    if (sourceID) clone.sourceID = sourceID;
     if (node.children && Array.isArray(node.children)) {
         clone.children = node.children.map(child => cloneBookmarkNode(child)).filter(Boolean);
     } else {
@@ -26378,13 +26380,28 @@ function setupTempTreeNodeDropHandlers(treeItem, section, item) {
 async function resolvePermanentPayload(nodeIds) {
     const results = [];
     if (!Array.isArray(nodeIds) || !nodeIds.length) return results;
+
+    const clonePermanentNodeForTempPayload = (node) => {
+        if (!node || typeof node !== 'object') return null;
+        const clone = cloneBookmarkNode(node);
+        if (!clone) return null;
+        try {
+            const sourceID = __resolvePermanentNodeSourceID(node);
+            if (sourceID) clone.sourceID = sourceID;
+        } catch (_) { }
+        clone.children = Array.isArray(node.children)
+            ? node.children.map(clonePermanentNodeForTempPayload).filter(Boolean)
+            : [];
+        return clone;
+    };
+
     const api = (typeof browserAPI !== 'undefined' && browserAPI.bookmarks) ? browserAPI.bookmarks : (chrome && chrome.bookmarks ? chrome.bookmarks : null);
     if (api && typeof api.getSubTree === 'function') {
         for (const id of nodeIds) {
             try {
                 const nodes = await api.getSubTree(id);
                 if (nodes && nodes[0]) {
-                    results.push(cloneBookmarkNode(nodes[0]));
+                    results.push(clonePermanentNodeForTempPayload(nodes[0]));
                 }
             } catch (error) {
                 console.warn('[Canvas] 获取书签数据失败:', error);
@@ -26394,7 +26411,7 @@ async function resolvePermanentPayload(nodeIds) {
     if (!results.length && CanvasState.dragState && CanvasState.dragState.draggedData) {
         const data = CanvasState.dragState.draggedData;
         if (data && data.id && nodeIds.includes(data.id) && (data.url || data.children)) {
-            results.push(cloneBookmarkNode(data));
+            results.push(clonePermanentNodeForTempPayload(data));
         }
     }
     return results.filter(Boolean);

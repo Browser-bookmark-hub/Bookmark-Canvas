@@ -154,16 +154,6 @@ function resolvePermanentPayloadSourceID(node) {
     return '';
 }
 
-function recordCreatedPermanentPayloadSourceID(createdNode, payload) {
-    const chromeId = String(createdNode && createdNode.id || '').trim();
-    const sourceID = String(payload && (payload.sourceID || payload['source' + 'Id']) || '').trim();
-    if (!chromeId || !sourceID) return;
-    const bridge = window.CanvasProtocolBridge;
-    if (bridge && typeof bridge.recordPermanentNodeSourceIDMapping === 'function') {
-        try { bridge.recordPermanentNodeSourceIDMapping(chromeId, sourceID); } catch (_) { }
-    }
-}
-
 function serializeBookmarkNode(node) {
     if (!node) return null;
     const sourceID = resolvePermanentPayloadSourceID(node);
@@ -637,7 +627,6 @@ async function createBookmarkFromPayload(parentId, index, payload) {
         createInfo.index = index;
     }
     const created = await chrome.bookmarks.create(createInfo);
-    recordCreatedPermanentPayloadSourceID(created, payload);
     if (payload.children && payload.children.length) {
         for (const child of payload.children) {
             await createBookmarkFromPayload(created.id, null, child);

@@ -233,6 +233,12 @@ main() {
     "permanent sourceID: bridge map persistence exposes exportability control"
   assert_pattern "$TEMP_FILE" "persistPermanentSourceIDMapFromTree\\(localTreeInput, remoteTreeInput\\)" \
     "permanent sourceID: bridge map persistence exposed"
+  assert_pattern "$TEMP_FILE" "const clonePermanentNodeForTempPayload = \\(node\\) => \\{" \
+    "permanent sourceID: canvas permanent-to-temp payload resolver exists"
+  assert_pattern "$TEMP_FILE" "const sourceID = __resolvePermanentNodeSourceID\\(node\\);" \
+    "permanent sourceID: canvas permanent-to-temp payload generates/inherits IDs"
+  assert_pattern "$TEMP_FILE" "node\\.children\\.map\\(clonePermanentNodeForTempPayload\\)" \
+    "permanent sourceID: canvas permanent-to-temp payload handles folder descendants"
   assert_pattern "$SYNC_FILE" "function attachPermanentSourceIDsForComparison\\(treeInput\\)" \
     "permanent sourceID: local compare tree receives sourceID"
   assert_pattern "$SYNC_FILE" "allowGenerate: false," \
@@ -247,10 +253,10 @@ main() {
     "permanent sourceID: folder comparable includes sourceID"
   assert_no_match "await persistPermanentSourceIDMapAfterApply\\(localTree, remoteTree\\);" \
     "permanent sourceID: same/no-change pull does not persist mapping"
-  assert_pattern "$CONTEXT_MENU_FILE" "recordCreatedPermanentPayloadSourceID\\(created, node\\);" \
-    "permanent sourceID: context-menu permanent create records mapping"
-  assert_pattern "$DRAG_DROP_FILE" "recordCreatedPermanentPayloadSourceID\\(created, payload\\);" \
-    "permanent sourceID: drag/drop permanent create records mapping"
+  assert_no_match "recordCreatedPermanentPayloadSourceID" \
+    "permanent sourceID: temp/permanent copy-create does not inherit payload IDs"
+  assert_pattern "$SYNC_FILE" "await recordCreatedPermanentNodeSourceID\\(created, node\\);" \
+    "permanent sourceID: remote permanent apply records remote permanent IDs"
 
   section "Step6/Step7 closure hit-check"
   assert_pattern "$SYNC_FILE" "const OBSIDIAN_EXPORT_FORMAT_ORDER = \\['visual', 'visual-no-icon', 'json'\\];" \
