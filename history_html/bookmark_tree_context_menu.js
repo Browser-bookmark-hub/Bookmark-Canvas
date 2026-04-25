@@ -47,6 +47,29 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+function resolvePermanentPayloadSourceID(node) {
+    if (!node || typeof node !== 'object') return '';
+    const direct = String(node.sourceID || node['source' + 'Id'] || '').trim();
+    if (direct) return direct.replace(/\s+/g, '-');
+    const bridge = window.CanvasProtocolBridge;
+    if (bridge && typeof bridge.resolvePermanentNodeSourceID === 'function') {
+        try {
+            return String(bridge.resolvePermanentNodeSourceID(node) || '').trim();
+        } catch (_) { }
+    }
+    return '';
+}
+
+function recordCreatedPermanentPayloadSourceID(createdNode, payload) {
+    const chromeId = String(createdNode && createdNode.id || '').trim();
+    const sourceID = String(payload && (payload.sourceID || payload['source' + 'Id']) || '').trim();
+    if (!chromeId || !sourceID) return;
+    const bridge = window.CanvasProtocolBridge;
+    if (bridge && typeof bridge.recordPermanentNodeSourceIDMapping === 'function') {
+        try { bridge.recordPermanentNodeSourceIDMapping(chromeId, sourceID); } catch (_) { }
+    }
+}
+
 // 全局：默认打开方式与特定窗口/分组ID
 let defaultOpenMode = 'specific-window'; // 默认：'specific-window'（in Same Window）。可选：'new-tab' | 'new-window' | 'incognito' | 'specific-window' | 'specific-group' | 'scoped-window' | 'scoped-group' | 'same-window-specific-group'
 let specificWindowId = null; // chrome.windows Window ID
@@ -3527,10 +3550,12 @@ async function pasteIntoTemp(context) {
 
 function serializeBookmarkNode(node) {
     if (!node) return null;
+    const sourceID = resolvePermanentPayloadSourceID(node);
     return {
         title: node.title,
         url: node.url || '',
         type: node.url ? 'bookmark' : 'folder',
+        ...(sourceID ? { sourceID } : {}),
         children: (node.children || []).map(serializeBookmarkNode)
     };
 }
@@ -6494,6 +6519,7 @@ async function duplicateNode(node, parentId) {
 
     // 创建节点
     const created = await chrome.bookmarks.create(newNode);
+    recordCreatedPermanentPayloadSourceID(created, node);
 
     // 如果有子节点，递归复制
     if (node.children) {

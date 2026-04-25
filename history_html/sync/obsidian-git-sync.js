@@ -4323,6 +4323,107 @@
         return null;
     }
 
+    function normalizePermanentNodeSourceID(value) {
+        const raw = String(value == null ? '' : value).trim();
+        if (!raw) return '';
+        return raw.replace(/\s+/g, '-');
+    }
+
+    function getPermanentNodeSourceID(node) {
+        if (!node || typeof node !== 'object') return '';
+        return normalizePermanentNodeSourceID(
+            node.sourceID
+            || node['source' + 'Id']
+            || node['original' + 'Id']
+        );
+    }
+
+    async function recordCreatedPermanentNodeSourceID(createdNode, sourceNode) {
+        const chromeId = String(createdNode && createdNode.id || '').trim();
+        const sourceID = getPermanentNodeSourceID(sourceNode);
+        if (!chromeId || !sourceID) return;
+        const bridge = global && global.CanvasProtocolBridge
+            && typeof global.CanvasProtocolBridge.recordPermanentNodeSourceIDMapping === 'function'
+            ? global.CanvasProtocolBridge
+            : null;
+        if (!bridge) return;
+        try {
+            if (typeof bridge.recordPermanentNodeSourceIDMappingWithOptions === 'function') {
+                bridge.recordPermanentNodeSourceIDMappingWithOptions(chromeId, sourceID, { exportable: false });
+            } else {
+                bridge.recordPermanentNodeSourceIDMapping(chromeId, sourceID);
+            }
+        } catch (_) { }
+    }
+
+    async function persistPermanentSourceIDMapAfterApply(localTreeInput, remoteTreeInput) {
+        const bridge = global && global.CanvasProtocolBridge
+            && typeof global.CanvasProtocolBridge.persistPermanentSourceIDMapFromTree === 'function'
+            ? global.CanvasProtocolBridge
+            : null;
+        if (!bridge) return;
+        const remoteTree = normalizeBookmarkTreeSnapshot(remoteTreeInput);
+        if (!remoteTree) return;
+        const localTree = localTreeInput
+            ? normalizeBookmarkTreeSnapshot(localTreeInput)
+            : await bookmarksGetTree();
+        if (!localTree) return;
+        try {
+            bridge.persistPermanentSourceIDMapFromTree(localTree, remoteTree);
+        } catch (_) { }
+    }
+
+    function attachPermanentSourceIDsForComparison(treeInput) {
+        const tree = normalizeBookmarkTreeSnapshot(treeInput);
+        if (!tree) return null;
+        const bridge = global && global.CanvasProtocolBridge
+            && typeof global.CanvasProtocolBridge.resolvePermanentNodeSourceID === 'function'
+            ? global.CanvasProtocolBridge
+            : null;
+        if (!bridge) return tree;
+        let sourceIDMap = null;
+        if (typeof bridge.readPermanentNodeSourceIDMap === 'function') {
+            try {
+                const maybeMap = bridge.readPermanentNodeSourceIDMap();
+                sourceIDMap = maybeMap && typeof maybeMap === 'object' && !Array.isArray(maybeMap)
+                    ? maybeMap
+                    : null;
+            } catch (_) {
+                sourceIDMap = null;
+            }
+        }
+
+        const visit = (node, fallbackKey) => {
+            if (!node || typeof node !== 'object') return;
+            const currentSourceID = getPermanentNodeSourceID(node);
+            if (currentSourceID) {
+                node.sourceID = currentSourceID;
+            } else {
+                try {
+                    const resolveOptions = {
+                        fallbackKey,
+                        allowGenerate: false,
+                        markExportable: false
+                    };
+                    if (sourceIDMap) resolveOptions.sourceIDMap = sourceIDMap;
+                    const sourceID = normalizePermanentNodeSourceID(
+                        bridge.resolvePermanentNodeSourceID(node, resolveOptions)
+                    );
+                    if (sourceID) node.sourceID = sourceID;
+                } catch (_) { }
+            }
+            const children = Array.isArray(node.children) ? node.children : [];
+            for (let i = 0; i < children.length; i += 1) {
+                visit(children[i], `${fallbackKey || 'node'}/${i}`);
+            }
+        };
+
+        for (let i = 0; i < tree.length; i += 1) {
+            visit(tree[i], `root/${i}`);
+        }
+        return tree;
+    }
+
     function enrichPermanentTreeRootIdentity(treeInput, options = {}) {
         const normalizedTree = normalizeBookmarkTreeSnapshot(treeInput);
         if (!normalizedTree) return null;
@@ -4995,14 +5096,17 @@
 
     function buildCanonicalBookmarkComparableNode(node) {
         if (!node || typeof node !== 'object') return null;
+        const sourceID = getPermanentNodeSourceID(node);
         if (typeof node.url === 'string' && node.url.trim()) {
             const url = String(node.url || '').trim();
             const title = String(node.title || node.name || url).trim() || url;
-            return {
+            const bookmarkComparable = {
                 type: 'bookmark',
                 title,
                 url
             };
+            if (sourceID) bookmarkComparable.sourceID = sourceID;
+            return bookmarkComparable;
         }
 
         const title = String(node.title || node.name || 'Folder').trim() || 'Folder';
@@ -5010,11 +5114,13 @@
             .map((child) => buildCanonicalBookmarkComparableNode(child))
             .filter(Boolean);
 
-        return {
+        const folderComparable = {
             type: 'folder',
             title,
             children
         };
+        if (sourceID) folderComparable.sourceID = sourceID;
+        return folderComparable;
     }
 
     function buildCanonicalBookmarkTreeComparable(treeSnapshot) {
@@ -5027,12 +5133,15 @@
             .map((node) => {
                 const rootKey = getBookmarkRootComparableKey(node, folderTypeCounts);
                 const normalizedRootKey = rootKey || normalizeBookmarkRootTitle(node && (node.title || node.name) || '') || 'custom:root';
-                return {
+                const sourceID = getPermanentNodeSourceID(node);
+                const rootComparable = {
                     rootKey: normalizedRootKey,
                     children: (Array.isArray(node && node.children) ? node.children : [])
                         .map((child) => buildCanonicalBookmarkComparableNode(child))
                         .filter(Boolean)
                 };
+                if (sourceID) rootComparable.sourceID = sourceID;
+                return rootComparable;
             })
             .filter(Boolean)
             .sort((left, right) => compareBookmarkRootMatchKeys(left.rootKey, right.rootKey));
@@ -5110,11 +5219,11 @@
 	            return { applied: false, skipped: 'remote-empty' };
 	        }
 
-	        const localTreeRaw = await bookmarksGetTree();
-	        const localTree = normalizeBookmarkTreeSnapshot(localTreeRaw);
-	        if (!localTree) {
-	            throw new Error(textByLang('读取本地永久栏目失败：书签树为空', 'Failed to read local permanent section: bookmark tree is empty'));
-	        }
+        const localTreeRaw = await bookmarksGetTree();
+        const localTree = attachPermanentSourceIDsForComparison(localTreeRaw);
+        if (!localTree) {
+            throw new Error(textByLang('读取本地永久栏目失败：书签树为空', 'Failed to read local permanent section: bookmark tree is empty'));
+        }
 
 	        remoteTree = enrichPermanentTreeRootIdentity(remoteTree, {
 	            localTree
@@ -5122,12 +5231,12 @@
 	        remoteStats = getBookmarkTreeStats(remoteTree);
 
 	        const localStats = getBookmarkTreeStats(localTree);
-	        const localHash = getBookmarkTreeHash(localTree);
-	        const remoteHash = getBookmarkTreeHash(remoteTree);
-	        if (localHash && remoteHash && localHash === remoteHash) {
-	            persistRemoteRootMeta();
-	            return { applied: false, skipped: 'same' };
-	        }
+        const localHash = getBookmarkTreeHash(localTree);
+        const remoteHash = getBookmarkTreeHash(remoteTree);
+        if (localHash && remoteHash && localHash === remoteHash) {
+            persistRemoteRootMeta();
+            return { applied: false, skipped: 'same' };
+        }
 
         const permanentPullMode = ensurePermanentPullMode(
             options && options.permanentPullMode
@@ -5248,12 +5357,13 @@
         const url = String(node.url || '').trim();
 
         if (url) {
-            await bookmarksCreate({
+            const created = await bookmarksCreate({
                 parentId,
                 index,
                 title: title || url,
                 url
             });
+            await recordCreatedPermanentNodeSourceID(created, node);
             if (counters) counters.bookmarks += 1;
             return;
         }
@@ -5263,6 +5373,7 @@
             index,
             title: title || 'Folder'
         });
+        await recordCreatedPermanentNodeSourceID(folder, node);
         if (counters) counters.folders += 1;
 
         const children = Array.isArray(node.children) ? node.children : [];
@@ -5352,18 +5463,23 @@
     function buildPermanentComparableNodeSignature(node) {
         const buildComparable = (input) => {
             if (!input || typeof input !== 'object') return null;
+            const sourceID = getPermanentNodeSourceID(input);
             if (isPermanentBookmarkNode(input)) {
-                return {
+                const bookmarkComparable = {
                     type: 'bookmark',
                     title: normalizePermanentNodeTitle(input, String(input.url || '')),
                     url: String(input.url || '').trim()
                 };
+                if (sourceID) bookmarkComparable.sourceID = sourceID;
+                return bookmarkComparable;
             }
-            return {
+            const folderComparable = {
                 type: 'folder',
                 title: normalizePermanentNodeTitle(input),
                 children: (Array.isArray(input.children) ? input.children : []).map(buildComparable).filter(Boolean)
             };
+            if (sourceID) folderComparable.sourceID = sourceID;
+            return folderComparable;
         };
         try {
             return hashString(JSON.stringify(buildComparable(node)));
@@ -5579,7 +5695,9 @@
             return { applied: false, fallback: 'remote-missing' };
         }
 
-        const localTree = localTreeSnapshot ? normalizeBookmarkTreeSnapshot(localTreeSnapshot) : await bookmarksGetTree();
+        const localTree = localTreeSnapshot
+            ? attachPermanentSourceIDsForComparison(localTreeSnapshot)
+            : attachPermanentSourceIDsForComparison(await bookmarksGetTree());
         const localRoots = extractBookmarkRootFolders(localTree);
         if (!localRoots.length) {
             throw new Error(textByLang('本地书签根目录不可用，无法增量同步', 'Local bookmark root is unavailable; cannot run incremental sync'));
@@ -5623,6 +5741,7 @@
                 await applyPermanentIncrementalPlan(plans[i], counters);
             }
         });
+        await persistPermanentSourceIDMapAfterApply(null, remoteTree);
 
         return {
             applied: true,
@@ -5638,7 +5757,9 @@
 	            throw new Error(textByLang('云端未提供永久栏目快照，无法覆盖', 'Remote permanent section snapshot is missing; cannot overwrite'));
 	        }
 
-	        const localTree = localTreeSnapshot ? normalizeBookmarkTreeSnapshot(localTreeSnapshot) : await bookmarksGetTree();
+	        const localTree = localTreeSnapshot
+	            ? attachPermanentSourceIDsForComparison(localTreeSnapshot)
+	            : attachPermanentSourceIDsForComparison(await bookmarksGetTree());
 	        const localRoots = extractBookmarkRootFolders(localTree);
 	        if (!localRoots.length) {
 	            throw new Error(textByLang('本地书签根目录不可用，无法覆盖', 'Local bookmark root is unavailable; cannot overwrite'));
@@ -5654,7 +5775,7 @@
             throw createPermanentRootAssignmentPlanError(assignmentPlan);
         }
 
-        return await withPermanentTreeBulkMode(options && options.reason || 'sync-permanent-overwrite', async () => {
+        const counters = await withPermanentTreeBulkMode(options && options.reason || 'sync-permanent-overwrite', async () => {
             const counters = {
                 folders: 0,
                 bookmarks: 0,
@@ -5681,6 +5802,8 @@
             }
             return counters;
         });
+        await persistPermanentSourceIDMapAfterApply(null, remoteTree);
+        return counters;
     }
 
     function normalizeRepoBranch(branch) {
@@ -12103,7 +12226,7 @@ Cancel: go back and change the branch name first.`
                 ? options.permanentPullMode
                 : (settings && settings.permanentPullMode)
         );
-        const localTree = normalizeBookmarkTreeSnapshot(localTreeSnapshot);
+        const localTree = attachPermanentSourceIDsForComparison(localTreeSnapshot);
         const remoteTree = normalizeBookmarkTreeSnapshot(remoteTreeSnapshot);
         if (!localTree || !remoteTree) {
             return { policy: mode, result: 'overwrite', reason: 'tree-missing', threshold: 0, logicalChangeCount: 0 };

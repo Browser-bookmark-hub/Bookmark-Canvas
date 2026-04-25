@@ -8,6 +8,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SYNC_FILE="history_html/sync/obsidian-git-sync.js"
 TEMP_FILE="history_html/bookmark_canvas_module.js"
 SEARCH_FILE="history_html/search/search.js"
+CONTEXT_MENU_FILE="history_html/bookmark_tree_context_menu.js"
+DRAG_DROP_FILE="history_html/bookmark_tree_drag_drop.js"
 SELF_PATH="tools/run-sync-guard-acceptance.sh"
 
 PASS_COUNT=0
@@ -128,6 +130,8 @@ main() {
   run_node_check "$TEMP_FILE"
   run_node_check "$SEARCH_FILE"
   run_node_check "$SYNC_FILE"
+  run_node_check "$CONTEXT_MENU_FILE"
+  run_node_check "$DRAG_DROP_FILE"
 
   section "originalId/sourceID back-check"
   assert_original_id_only_reserved
@@ -180,6 +184,73 @@ main() {
     "consistency precheck: realtime api-tree default enforced"
   assert_pattern "$SYNC_FILE" "if \\(text\\.includes\\('push'\\) \\|\\| text\\.includes\\('full'\\) \\|\\| text\\.includes\\('sync'\\)\\) return true;" \
     "push recovery lock: stage trigger coverage widened"
+
+  assert_pattern "$TEMP_FILE" "const PERMANENT_NODE_SOURCE_ID_MAP_STORAGE_KEY = 'bcs:perm:source-id-map';" \
+    "permanent sourceID: mapping storage key exists"
+  assert_pattern "$TEMP_FILE" "const PERMANENT_NODE_SOURCE_ID_EXPORT_KEYS_STORAGE_KEY = 'bcs:perm:source-id-export-keys';" \
+    "permanent sourceID: export-key storage key exists"
+  assert_pattern "$TEMP_FILE" "function __generateCanvasHighEntropySourceID\\(\\)" \
+    "sourceID generation: shared high-entropy generator exists"
+  assert_pattern "$TEMP_FILE" "const __CANVAS_SOURCE_ID_RANDOM_LENGTH = 8;" \
+    "sourceID generation: compact 8-char random suffix configured"
+  assert_pattern "$TEMP_FILE" "cryptoSource\\.getRandomValues\\(bytes\\)" \
+    "sourceID generation: getRandomValues path wired"
+  assert_no_match "__collectKnownCanvasSourceIDSet" \
+    "sourceID generation: no whole-state local ID scan"
+  assert_no_match "usedSet\\.has\\(candidate\\)" \
+    "sourceID generation: random generation does not scan existing IDs"
+  assert_no_match "src-perm-\\$\\{" \
+    "sourceID generation: permanent IDs are not chrome-id/path deterministic"
+  assert_pattern "$TEMP_FILE" "function __resolveTempItemSourceID\\(primaryValue, fallbackValue = '', options = \\{\\}\\)" \
+    "temporary sourceID: resolver can preserve missing IDs without generating"
+  assert_pattern "$TEMP_FILE" "if \\(options && options\\.allowGenerate === false\\) return '';" \
+    "temporary sourceID: import/sync can opt out of generation"
+  assert_pattern "$TEMP_FILE" "const generateMissing = !!\\(options && options\\.generateMissing === true\\);" \
+    "temporary sourceID: save normalization does not repair missing by default"
+  assert_pattern "$TEMP_FILE" "const repairMissing = !!\\(options && options\\.repairMissing === true\\);" \
+    "temporary sourceID: integrity validation repair is explicit"
+  assert_pattern "$TEMP_FILE" "saveTempNodes\\(\\{ skipSourceIDNormalization: true \\}\\);" \
+    "temporary sourceID: manual JSON/HTML import does not repair missing IDs during save"
+  assert_pattern "$TEMP_FILE" "function __buildPermanentTreeProtocolNode\\(nodeInput, options = \\{\\}\\)" \
+    "permanent sourceID: protocol node builder exists"
+  assert_pattern "$TEMP_FILE" "function __collectActiveTempSourceIDSet\\(\\)" \
+    "permanent sourceID: active temporary references are collected"
+  assert_pattern "$TEMP_FILE" "const shouldIncludeSourceID = !!\\(sourceID && \\(" \
+    "permanent sourceID: export is conditional, not whole-tree eager"
+  assert_pattern "$TEMP_FILE" "activeTempSourceIDSet && activeTempSourceIDSet\\.has\\(sourceID\\)" \
+    "permanent sourceID: active temporary references keep permanent IDs exported"
+  assert_pattern "$TEMP_FILE" "allowGenerate: options && options\\.allowGenerateSourceID === true" \
+    "permanent sourceID: snapshot generation is opt-in"
+  assert_pattern "$TEMP_FILE" "markExportable: false" \
+    "permanent sourceID: pure snapshot does not mark nodes exportable"
+  assert_pattern "$TEMP_FILE" "bookmarkNode\\[PERMANENT_NODE_SOURCE_ID_KEY\\] = sourceID;" \
+    "permanent sourceID: bookmark export can write conditional sourceID"
+  assert_pattern "$TEMP_FILE" "node\\[PERMANENT_NODE_SOURCE_ID_KEY\\] = sourceID;" \
+    "permanent sourceID: folder export can write conditional sourceID"
+  assert_pattern "$TEMP_FILE" "resolvePermanentNodeSourceID\\(nodeInput, options = \\{\\}\\)" \
+    "permanent sourceID: bridge resolver exposed"
+  assert_pattern "$TEMP_FILE" "recordPermanentNodeSourceIDMappingWithOptions\\(chromeId, sourceID, options = \\{\\}\\)" \
+    "permanent sourceID: bridge map persistence exposes exportability control"
+  assert_pattern "$TEMP_FILE" "persistPermanentSourceIDMapFromTree\\(localTreeInput, remoteTreeInput\\)" \
+    "permanent sourceID: bridge map persistence exposed"
+  assert_pattern "$SYNC_FILE" "function attachPermanentSourceIDsForComparison\\(treeInput\\)" \
+    "permanent sourceID: local compare tree receives sourceID"
+  assert_pattern "$SYNC_FILE" "allowGenerate: false," \
+    "permanent sourceID: compare does not generate IDs"
+  assert_pattern "$SYNC_FILE" "markExportable: false" \
+    "permanent sourceID: compare does not mark exportable IDs"
+  assert_pattern "$SYNC_FILE" "recordPermanentNodeSourceIDMappingWithOptions\\(chromeId, sourceID, \\{ exportable: false \\}\\)" \
+    "permanent sourceID: remote apply mapping does not export every remote ID"
+  assert_pattern "$SYNC_FILE" "bookmarkComparable\\.sourceID = sourceID;" \
+    "permanent sourceID: bookmark comparable includes sourceID"
+  assert_pattern "$SYNC_FILE" "folderComparable\\.sourceID = sourceID;" \
+    "permanent sourceID: folder comparable includes sourceID"
+  assert_no_match "await persistPermanentSourceIDMapAfterApply\\(localTree, remoteTree\\);" \
+    "permanent sourceID: same/no-change pull does not persist mapping"
+  assert_pattern "$CONTEXT_MENU_FILE" "recordCreatedPermanentPayloadSourceID\\(created, node\\);" \
+    "permanent sourceID: context-menu permanent create records mapping"
+  assert_pattern "$DRAG_DROP_FILE" "recordCreatedPermanentPayloadSourceID\\(created, payload\\);" \
+    "permanent sourceID: drag/drop permanent create records mapping"
 
   section "Step6/Step7 closure hit-check"
   assert_pattern "$SYNC_FILE" "const OBSIDIAN_EXPORT_FORMAT_ORDER = \\['visual', 'visual-no-icon', 'json'\\];" \

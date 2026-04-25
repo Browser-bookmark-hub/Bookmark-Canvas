@@ -141,12 +141,37 @@ function getTempManager() {
     return (window.CanvasModule && window.CanvasModule.temp) ? window.CanvasModule.temp : null;
 }
 
+function resolvePermanentPayloadSourceID(node) {
+    if (!node || typeof node !== 'object') return '';
+    const direct = String(node.sourceID || node['source' + 'Id'] || '').trim();
+    if (direct) return direct.replace(/\s+/g, '-');
+    const bridge = window.CanvasProtocolBridge;
+    if (bridge && typeof bridge.resolvePermanentNodeSourceID === 'function') {
+        try {
+            return String(bridge.resolvePermanentNodeSourceID(node) || '').trim();
+        } catch (_) { }
+    }
+    return '';
+}
+
+function recordCreatedPermanentPayloadSourceID(createdNode, payload) {
+    const chromeId = String(createdNode && createdNode.id || '').trim();
+    const sourceID = String(payload && (payload.sourceID || payload['source' + 'Id']) || '').trim();
+    if (!chromeId || !sourceID) return;
+    const bridge = window.CanvasProtocolBridge;
+    if (bridge && typeof bridge.recordPermanentNodeSourceIDMapping === 'function') {
+        try { bridge.recordPermanentNodeSourceIDMapping(chromeId, sourceID); } catch (_) { }
+    }
+}
+
 function serializeBookmarkNode(node) {
     if (!node) return null;
+    const sourceID = resolvePermanentPayloadSourceID(node);
     return {
         title: node.title,
         url: node.url || '',
         type: node.url ? 'bookmark' : 'folder',
+        ...(sourceID ? { sourceID } : {}),
         children: (node.children || []).map(child => serializeBookmarkNode(child))
     };
 }
@@ -612,6 +637,7 @@ async function createBookmarkFromPayload(parentId, index, payload) {
         createInfo.index = index;
     }
     const created = await chrome.bookmarks.create(createInfo);
+    recordCreatedPermanentPayloadSourceID(created, payload);
     if (payload.children && payload.children.length) {
         for (const child of payload.children) {
             await createBookmarkFromPayload(created.id, null, child);

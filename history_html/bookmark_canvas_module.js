@@ -30448,6 +30448,11 @@ async function importHtmlBookmarks(html, importFileName = '') {
 
     // 递归转换为临时栏目格式
     const convertToTempItem = (node) => {
+        const sourceID = __resolveTempItemSourceID(
+            node && (node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId),
+            node && node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY],
+            { allowGenerate: false }
+        );
         const item = {
             id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
             sectionId: sectionId,
@@ -30455,12 +30460,9 @@ async function importHtmlBookmarks(html, importFileName = '') {
             url: node.url || '',
             type: node.url ? 'bookmark' : 'folder',
             children: [],
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            ...(sourceID ? { [TEMP_ITEM_SOURCE_ID_KEY]: sourceID } : {})
         };
-        const sourceID = __normalizeTempItemSourceID(node && (node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId));
-        if (sourceID) {
-            item[TEMP_ITEM_SOURCE_ID_KEY] = sourceID;
-        }
 
         if (node.children && Array.isArray(node.children)) {
             item.children = node.children.map(convertToTempItem).filter(Boolean);
@@ -30688,6 +30690,11 @@ async function importJsonBookmarks(json, importFileName = '') {
 
     // 转换为临时栏目格式
     const convertToTempItem = (node, sectionId) => {
+        const sourceID = __resolveTempItemSourceID(
+            node && (node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId),
+            node && node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY],
+            { allowGenerate: false }
+        );
         const item = {
             id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
             sectionId: sectionId,
@@ -30695,12 +30702,9 @@ async function importJsonBookmarks(json, importFileName = '') {
             url: node.url || '',
             type: node.type,
             children: [],
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            ...(sourceID ? { [TEMP_ITEM_SOURCE_ID_KEY]: sourceID } : {})
         };
-        const sourceID = __normalizeTempItemSourceID(node && (node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId));
-        if (sourceID) {
-            item[TEMP_ITEM_SOURCE_ID_KEY] = sourceID;
-        }
 
         if (node.children && Array.isArray(node.children)) {
             item.children = node.children.map(c => convertToTempItem(c, sectionId)).filter(Boolean);
@@ -31630,23 +31634,349 @@ function __cloneRawChromeBookmarkTreeSnapshot(rawTree) {
     return (Array.isArray(snapshot) && snapshot.length) ? snapshot : null;
 }
 
+let __canvasGeneratedSourceIDCounter = 0;
+const __CANVAS_SOURCE_ID_RANDOM_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const __CANVAS_SOURCE_ID_RANDOM_LENGTH = 8;
+
+function __buildCanvasRandomSourceIDSuffix(length = __CANVAS_SOURCE_ID_RANDOM_LENGTH) {
+    const size = Math.max(8, Number(length) || __CANVAS_SOURCE_ID_RANDOM_LENGTH);
+    const cryptoSource = (typeof globalThis !== 'undefined' && globalThis.crypto)
+        ? globalThis.crypto
+        : (typeof window !== 'undefined' && window.crypto ? window.crypto : null);
+
+    try {
+        if (cryptoSource && typeof cryptoSource.getRandomValues === 'function') {
+            const bytes = new Uint8Array(size);
+            cryptoSource.getRandomValues(bytes);
+            return Array.from(bytes)
+                .map((byte) => __CANVAS_SOURCE_ID_RANDOM_ALPHABET[byte & 63])
+                .join('');
+        }
+    } catch (_) { }
+
+    let suffix = '';
+    for (let i = 0; i < size; i += 1) {
+        suffix += __CANVAS_SOURCE_ID_RANDOM_ALPHABET[Math.floor(Math.random() * __CANVAS_SOURCE_ID_RANDOM_ALPHABET.length)];
+    }
+    return suffix;
+}
+
+function __generateCanvasHighEntropySourceID() {
+    __canvasGeneratedSourceIDCounter = Math.max(0, Number(__canvasGeneratedSourceIDCounter) || 0) + 1;
+    return `src-${__buildCanvasRandomSourceIDSuffix()}`;
+}
+
+const PERMANENT_NODE_SOURCE_ID_KEY = 'sourceID';
+const PERMANENT_NODE_LEGACY_SOURCE_ID_KEY = 'source' + 'Id';
+const PERMANENT_NODE_LEGACY_ORIGINAL_ID_KEY = 'original' + 'Id';
+const PERMANENT_NODE_SOURCE_ID_MAP_STORAGE_KEY = 'bcs:perm:source-id-map';
+const PERMANENT_NODE_SOURCE_ID_EXPORT_KEYS_STORAGE_KEY = 'bcs:perm:source-id-export-keys';
+
+function __normalizePermanentNodeSourceID(value) {
+    const raw = String(value == null ? '' : value).trim();
+    if (!raw) return '';
+    return raw.replace(/\s+/g, '-');
+}
+
+function __buildGeneratedPermanentNodeSourceID() {
+    return __generateCanvasHighEntropySourceID();
+}
+
+function __readPermanentNodeSourceIDMap() {
+    try {
+        const raw = localStorage.getItem(PERMANENT_NODE_SOURCE_ID_MAP_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        const normalized = {};
+        Object.keys(parsed).forEach((key) => {
+            const chromeId = String(key || '').trim();
+            const sourceID = __normalizePermanentNodeSourceID(parsed[key]);
+            if (chromeId && sourceID) normalized[chromeId] = sourceID;
+        });
+        return normalized;
+    } catch (_) {
+        return {};
+    }
+}
+
+function __writePermanentNodeSourceIDMap(mapInput) {
+    const source = (mapInput && typeof mapInput === 'object' && !Array.isArray(mapInput)) ? mapInput : {};
+    const normalized = {};
+    Object.keys(source).forEach((key) => {
+        const chromeId = String(key || '').trim();
+        const sourceID = __normalizePermanentNodeSourceID(source[key]);
+        if (chromeId && sourceID) normalized[chromeId] = sourceID;
+    });
+    try {
+        saveSharedState(PERMANENT_NODE_SOURCE_ID_MAP_STORAGE_KEY, normalized);
+    } catch (_) {
+        try { localStorage.setItem(PERMANENT_NODE_SOURCE_ID_MAP_STORAGE_KEY, JSON.stringify(normalized)); } catch (_) { }
+    }
+    return normalized;
+}
+
+function __readPermanentNodeSourceIDExportKeySet() {
+    try {
+        const raw = localStorage.getItem(PERMANENT_NODE_SOURCE_ID_EXPORT_KEYS_STORAGE_KEY);
+        if (!raw) return new Set();
+        const parsed = JSON.parse(raw);
+        const values = Array.isArray(parsed) ? parsed : [];
+        return new Set(values.map((value) => String(value || '').trim()).filter(Boolean));
+    } catch (_) {
+        return new Set();
+    }
+}
+
+function __writePermanentNodeSourceIDExportKeySet(keySetInput) {
+    const values = Array.from(keySetInput instanceof Set ? keySetInput : new Set())
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+    try {
+        saveSharedState(PERMANENT_NODE_SOURCE_ID_EXPORT_KEYS_STORAGE_KEY, values);
+    } catch (_) {
+        try { localStorage.setItem(PERMANENT_NODE_SOURCE_ID_EXPORT_KEYS_STORAGE_KEY, JSON.stringify(values)); } catch (_) { }
+    }
+    return new Set(values);
+}
+
+function __markPermanentNodeSourceIDExportable(chromeIdInput) {
+    const chromeId = String(chromeIdInput || '').trim();
+    if (!chromeId) return false;
+    const exportKeySet = __readPermanentNodeSourceIDExportKeySet();
+    if (exportKeySet.has(chromeId)) return false;
+    exportKeySet.add(chromeId);
+    __writePermanentNodeSourceIDExportKeySet(exportKeySet);
+    return true;
+}
+
+function __collectActiveTempSourceIDSet() {
+    const set = new Set();
+    try {
+        const sections = Array.isArray(CanvasState && CanvasState.tempSections) ? CanvasState.tempSections : [];
+        const stack = [];
+        sections.forEach((section) => {
+            if (section && Array.isArray(section.items)) stack.push(...section.items);
+        });
+        while (stack.length) {
+            const item = stack.pop();
+            if (!item || typeof item !== 'object') continue;
+            const sourceID = __normalizePermanentNodeSourceID(
+                item[PERMANENT_NODE_SOURCE_ID_KEY]
+                || item[PERMANENT_NODE_LEGACY_SOURCE_ID_KEY]
+                || item[PERMANENT_NODE_LEGACY_ORIGINAL_ID_KEY]
+            );
+            if (sourceID) set.add(sourceID);
+            if (Array.isArray(item.children) && item.children.length) {
+                stack.push(...item.children);
+            }
+        }
+    } catch (_) { }
+    return set;
+}
+
+function __extractPermanentNodeSourceID(nodeInput) {
+    if (!nodeInput || typeof nodeInput !== 'object') return '';
+    return __normalizePermanentNodeSourceID(
+        nodeInput[PERMANENT_NODE_SOURCE_ID_KEY]
+        || nodeInput[PERMANENT_NODE_LEGACY_SOURCE_ID_KEY]
+        || nodeInput[PERMANENT_NODE_LEGACY_ORIGINAL_ID_KEY]
+    );
+}
+
+function __resolvePermanentNodeSourceID(nodeInput, options = {}) {
+    if (!nodeInput || typeof nodeInput !== 'object') return '';
+    const chromeId = String(nodeInput.id || '').trim();
+    const markExportable = !(options && options.markExportable === false);
+    const direct = __extractPermanentNodeSourceID(nodeInput);
+    if (direct) {
+        if (chromeId && markExportable) __markPermanentNodeSourceIDExportable(chromeId);
+        return direct;
+    }
+
+    const generatedSourceIDMap = options && options.generatedSourceIDMap && typeof options.generatedSourceIDMap === 'object'
+        ? options.generatedSourceIDMap
+        : null;
+    let sourceIDMap = options && options.sourceIDMap && typeof options.sourceIDMap === 'object'
+        ? options.sourceIDMap
+        : null;
+    if (!sourceIDMap) {
+        sourceIDMap = __readPermanentNodeSourceIDMap();
+    }
+    const mapped = chromeId && sourceIDMap
+        ? __normalizePermanentNodeSourceID(sourceIDMap[chromeId])
+        : '';
+    if (mapped) {
+        if (markExportable) __markPermanentNodeSourceIDExportable(chromeId);
+        return mapped;
+    }
+
+    if (options && options.allowGenerate === false) return '';
+    const generated = __buildGeneratedPermanentNodeSourceID();
+    if (chromeId) {
+        if (sourceIDMap) {
+            sourceIDMap[chromeId] = generated;
+        }
+        if (generatedSourceIDMap) {
+            generatedSourceIDMap[chromeId] = generated;
+        }
+        if (!(options && options.deferWrite === true)) {
+            __writePermanentNodeSourceIDMap(sourceIDMap || { [chromeId]: generated });
+        }
+        if (markExportable) {
+            __markPermanentNodeSourceIDExportable(chromeId);
+        }
+    }
+
+    return generated;
+}
+
+function __recordPermanentNodeSourceIDMapping(chromeIdInput, sourceIDInput, options = {}) {
+    const chromeId = String(chromeIdInput || '').trim();
+    const sourceID = __normalizePermanentNodeSourceID(sourceIDInput);
+    if (!chromeId || !sourceID) return false;
+    const map = __readPermanentNodeSourceIDMap();
+    if (map[chromeId] === sourceID) {
+        if (!(options && options.exportable === false)) {
+            __markPermanentNodeSourceIDExportable(chromeId);
+        }
+        return false;
+    }
+    map[chromeId] = sourceID;
+    __writePermanentNodeSourceIDMap(map);
+    if (!(options && options.exportable === false)) {
+        __markPermanentNodeSourceIDExportable(chromeId);
+    }
+    return true;
+}
+
+function __coercePermanentTreeArrayForSourceID(treeInput) {
+    if (Array.isArray(treeInput)) return treeInput;
+    if (treeInput && typeof treeInput === 'object' && Array.isArray(treeInput.children)) return [treeInput];
+    return [];
+}
+
+function __getPermanentSourceIDRootMatchKey(node, index) {
+    if (!node || typeof node !== 'object') return `index:${index}`;
+    const folderType = __normalizeBookmarkFolderType(node.folderType || node.folder_type || '');
+    if (folderType) return `folderType:${folderType}`;
+    const title = __normalizePermanentRootTitleKey(__resolvePermanentRootSectionTitle(node) || node.title || node.name || '');
+    if (title) return `title:${title}`;
+    return `index:${index}`;
+}
+
+function __collectPermanentSourceIDMappingsFromPair(localNode, remoteNode, targetMap, options = {}) {
+    if (!localNode || typeof localNode !== 'object' || !remoteNode || typeof remoteNode !== 'object') return;
+    const chromeId = String(localNode.id || '').trim();
+    const sourceID = __extractPermanentNodeSourceID(remoteNode);
+    if (chromeId && sourceID) {
+        targetMap[chromeId] = sourceID;
+    }
+    if (options && options.recurse === false) return;
+
+    const localChildren = Array.isArray(localNode.children) ? localNode.children : [];
+    const remoteChildren = Array.isArray(remoteNode.children) ? remoteNode.children : [];
+    const count = Math.min(localChildren.length, remoteChildren.length);
+    for (let index = 0; index < count; index += 1) {
+        __collectPermanentSourceIDMappingsFromPair(localChildren[index], remoteChildren[index], targetMap);
+    }
+}
+
+function __persistPermanentSourceIDMapFromTree(localTreeInput, remoteTreeInput) {
+    const localTree = __coercePermanentTreeArrayForSourceID(localTreeInput);
+    const remoteTree = __coercePermanentTreeArrayForSourceID(remoteTreeInput);
+    const localRoot = localTree[0] && typeof localTree[0] === 'object' ? localTree[0] : null;
+    const remoteRoot = remoteTree[0] && typeof remoteTree[0] === 'object' ? remoteTree[0] : null;
+    if (!localRoot || !remoteRoot) return { mapped: 0 };
+
+    const nextMap = __readPermanentNodeSourceIDMap();
+    const nextExportKeys = __readPermanentNodeSourceIDExportKeySet();
+    __collectPermanentSourceIDMappingsFromPair(localRoot, remoteRoot, nextMap, { recurse: false });
+
+    const localRoots = Array.isArray(localRoot.children) ? localRoot.children : [];
+    const remoteRoots = Array.isArray(remoteRoot.children) ? remoteRoot.children : [];
+    const remoteBuckets = new Map();
+    remoteRoots.forEach((node, index) => {
+        const key = __getPermanentSourceIDRootMatchKey(node, index);
+        if (!remoteBuckets.has(key)) remoteBuckets.set(key, []);
+        remoteBuckets.get(key).push(node);
+    });
+
+    localRoots.forEach((localNode, index) => {
+        const key = __getPermanentSourceIDRootMatchKey(localNode, index);
+        const bucket = remoteBuckets.get(key);
+        const remoteNode = bucket && bucket.length ? bucket.shift() : remoteRoots[index];
+        __collectPermanentSourceIDMappingsFromPair(localNode, remoteNode, nextMap);
+    });
+
+    const normalized = __writePermanentNodeSourceIDMap(nextMap);
+    const activeTempSourceIDSet = __collectActiveTempSourceIDSet();
+    Object.keys(nextMap).forEach((chromeId) => {
+        const sourceID = __normalizePermanentNodeSourceID(nextMap[chromeId]);
+        if (sourceID && activeTempSourceIDSet.has(sourceID)) nextExportKeys.add(chromeId);
+    });
+    __writePermanentNodeSourceIDExportKeySet(nextExportKeys);
+    return { mapped: Object.keys(normalized).length };
+}
+
 function __buildPermanentTreeProtocolNode(nodeInput, options = {}) {
     if (!nodeInput || typeof nodeInput !== 'object') return null;
 
     const rawUrl = String(nodeInput.url || '').trim();
+    const pathKey = String(options && options.pathKey || '').trim();
+    const sourceIDMap = options && options.sourceIDMap && typeof options.sourceIDMap === 'object'
+        ? options.sourceIDMap
+        : null;
+    const sourceIDExportKeySet = options && options.sourceIDExportKeySet instanceof Set
+        ? options.sourceIDExportKeySet
+        : null;
+    const activeTempSourceIDSet = options && options.activeTempSourceIDSet instanceof Set
+        ? options.activeTempSourceIDSet
+        : null;
+    const generatedSourceIDMap = options && options.generatedSourceIDMap && typeof options.generatedSourceIDMap === 'object'
+        ? options.generatedSourceIDMap
+        : null;
+    const directSourceID = __extractPermanentNodeSourceID(nodeInput);
+    const chromeId = String(nodeInput.id || '').trim();
+    const sourceID = __resolvePermanentNodeSourceID(nodeInput, {
+        sourceIDMap,
+        generatedSourceIDMap,
+        allowGenerate: options && options.allowGenerateSourceID === true,
+        deferWrite: options && options.deferWrite === true,
+        markExportable: options && options.markExportable === true,
+        fallbackKey: pathKey || `${nodeInput.title || nodeInput.name || rawUrl || 'node'}`
+    });
+    const shouldIncludeSourceID = !!(sourceID && (
+        directSourceID
+        || (options && options.allowGenerateSourceID === true)
+        || (chromeId && sourceIDExportKeySet && sourceIDExportKeySet.has(chromeId))
+        || (activeTempSourceIDSet && activeTempSourceIDSet.has(sourceID))
+    ));
     if (rawUrl) {
-        return {
+        const bookmarkNode = {
             title: String(nodeInput.title || nodeInput.name || rawUrl).trim() || rawUrl,
             url: rawUrl
         };
+        if (shouldIncludeSourceID) bookmarkNode[PERMANENT_NODE_SOURCE_ID_KEY] = sourceID;
+        return bookmarkNode;
     }
 
     const node = {
         title: String(nodeInput.title || nodeInput.name || 'Folder').trim() || 'Folder',
         children: (Array.isArray(nodeInput.children) ? nodeInput.children : [])
-            .map((child) => __buildPermanentTreeProtocolNode(child))
+            .map((child, index) => __buildPermanentTreeProtocolNode(child, {
+                sourceIDMap,
+                sourceIDExportKeySet,
+                activeTempSourceIDSet,
+                generatedSourceIDMap,
+                allowGenerateSourceID: options && options.allowGenerateSourceID === true,
+                deferWrite: options && options.deferWrite === true,
+                markExportable: options && options.markExportable === true,
+                pathKey: `${pathKey || 'node'}/${index}`
+            }))
             .filter(Boolean)
     };
+    if (shouldIncludeSourceID) node[PERMANENT_NODE_SOURCE_ID_KEY] = sourceID;
 
     if (options && options.isRootChild) {
         const folderType = __normalizeBookmarkFolderType(nodeInput.folderType || nodeInput.folder_type || '');
@@ -31660,7 +31990,7 @@ function __buildPermanentTreeProtocolNode(nodeInput, options = {}) {
     return node;
 }
 
-function __normalizePermanentTreeSnapshotForProtocol(rawTree) {
+function __normalizePermanentTreeSnapshotForProtocol(rawTree, options = {}) {
     const source = Array.isArray(rawTree)
         ? rawTree
         : ((rawTree && typeof rawTree === 'object' && Array.isArray(rawTree.children)) ? [rawTree] : null);
@@ -31668,12 +31998,46 @@ function __normalizePermanentTreeSnapshotForProtocol(rawTree) {
 
     const sourceRoot = source[0] && typeof source[0] === 'object' ? source[0] : { title: '', children: [] };
     const rootChildren = Array.isArray(sourceRoot.children) ? sourceRoot.children : [];
+    const sourceIDMap = __readPermanentNodeSourceIDMap();
+    const sourceIDExportKeySet = __readPermanentNodeSourceIDExportKeySet();
+    const activeTempSourceIDSet = __collectActiveTempSourceIDSet();
+    const generatedSourceIDMap = {};
+    const rootSourceID = __resolvePermanentNodeSourceID(sourceRoot, {
+        sourceIDMap,
+        generatedSourceIDMap,
+        allowGenerate: options && options.allowGenerateSourceID === true,
+        deferWrite: true,
+        markExportable: false,
+        fallbackKey: 'root'
+    });
+    const rootDirectSourceID = __extractPermanentNodeSourceID(sourceRoot);
+    const rootChromeId = String(sourceRoot.id || '').trim();
+    const shouldIncludeRootSourceID = !!(rootSourceID && (
+        rootDirectSourceID
+        || (options && options.allowGenerateSourceID === true)
+        || (rootChromeId && sourceIDExportKeySet.has(rootChromeId))
+        || activeTempSourceIDSet.has(rootSourceID)
+    ));
     const normalizedRoot = {
         title: String(sourceRoot.title || sourceRoot.name || '').trim(),
         children: rootChildren
-            .map((child) => __buildPermanentTreeProtocolNode(child, { isRootChild: true }))
+            .map((child, index) => __buildPermanentTreeProtocolNode(child, {
+                isRootChild: true,
+                sourceIDMap,
+                sourceIDExportKeySet,
+                activeTempSourceIDSet,
+                generatedSourceIDMap,
+                allowGenerateSourceID: options && options.allowGenerateSourceID === true,
+                deferWrite: true,
+                markExportable: false,
+                pathKey: `root/${index}`
+            }))
             .filter(Boolean)
     };
+    if (shouldIncludeRootSourceID) normalizedRoot[PERMANENT_NODE_SOURCE_ID_KEY] = rootSourceID;
+    if (Object.keys(generatedSourceIDMap).length) {
+        __writePermanentNodeSourceIDMap(sourceIDMap);
+    }
 
     return [normalizedRoot];
 }
@@ -31788,7 +32152,7 @@ function __applyPermanentRootMetaToTreeSnapshot(treeInput, rootMetaInput) {
 }
 
 function __buildPermanentTreeSnapshotForJsonProtocol(rawTree, options = {}) {
-    const normalizedTree = __normalizePermanentTreeSnapshotForProtocol(rawTree);
+    const normalizedTree = __normalizePermanentTreeSnapshotForProtocol(rawTree, options);
     if (!normalizedTree) return null;
     if (!(options && options.persistRootMeta === false)) {
         try { __persistPermanentRootMetaFromTreeSnapshot(normalizedTree); } catch (_) { }
@@ -33391,7 +33755,7 @@ function __buildCanvasImportRulesDocument(options = {}) {
             '- 永久栏目（主栏目）与永久副本共用同一套浏览器书签树数据。',
             '- 副本是镜像视图，不应长期当成独立正文源维护。',
             '- 若出现多处不一致，应以主栏目（通常 #A）统一收敛，再回写副本。',
-            '- JSON模式下，永久树正文直接保存为 Chrome Bookmarks API 根节点对象，不注入额外根身份字段。'
+            '- JSON模式下，永久树正文直接保存为 Chrome Bookmarks API 兼容根节点对象，并按身份链需要保留 `sourceID`。'
         ]
         : [
             '- 永久栏目（主栏目）与永久副本共用同一套浏览器书签树数据。',
@@ -34296,7 +34660,7 @@ if (typeof window !== 'undefined') {
     window.CanvasObsidianExportBridge.detectSyncFolderExportFormat = __detectObsidianSyncExportFormatFromFolderFiles;
     window.CanvasObsidianExportBridge.applySyncFilesReplace = __applyObsidianSyncFilesReplace;
     window.CanvasObsidianExportBridge.validateTempSourceIDIntegrity = function (options = {}) {
-        const repairMissing = !(options && options.repairMissing === false);
+        const repairMissing = !!(options && options.repairMissing === true);
         const repairDuplicates = !!(options && options.repairDuplicates === true);
         let validation = __validateCanvasTempSourceIDIntegrity({
             repairMissing,
@@ -35417,7 +35781,7 @@ async function exportCanvasPackage(options = {}) {
             '- Visual modes use the first non-empty line as section header text (`sequence + title` recommended); JSON mode stores the tree as a single plain JSON object body (no fenced block).',
             '- Optional description uses compact hidden comment marker: `<!--bc:1:...-->` (base64 payload).',
             '- Visual-mode permanent main markdown can include compact hidden root metadata marker under the header area for compatibility: `<!--bc:3:...-->`.',
-            '- In JSON mode, permanent tree content is stored as raw Chrome Bookmarks API root object (no synthetic root identity fields are injected).',
+            '- In JSON mode, permanent tree content is stored as a Chrome Bookmarks API-compatible root object and preserves `sourceID` only when needed for identity flow.',
             '- Fold metadata uses compact hidden marker `<!--bc:2:...-->` when needed.',
             '- Visual modes parse permanent/temporary bookmark tree content from lines below the header/description/meta block; JSON mode parses the plain JSON body directly.',
             '- Permanent slot recognition priority: header `#A/#B` > filename `(#B)` > file order fallback.',
@@ -35468,7 +35832,7 @@ async function exportCanvasPackage(options = {}) {
             '- 视觉模式下，首个非空行作为栏目头文本（建议“序号 + 标题”）；JSON模式正文直接是单一 JSON 对象。',
             '- 说明区可选，采用紧凑隐藏注释：`<!--bc:1:...-->`（base64 载荷）。',
             '- 视觉模式下，永久主 Markdown 可能在标题区下方写入兼容用途的根目录元数据隐藏注释：`<!--bc:3:...-->`。',
-            '- JSON模式下，永久树正文直接保存为 Chrome Bookmarks API 的根节点对象，不注入额外的根身份字段。',
+            '- JSON模式下，永久树正文直接保存为 Chrome Bookmarks API 兼容根节点对象，并按身份链需要保留 `sourceID`。',
             '- 折叠元数据如需写出，使用紧凑隐藏注释 `<!--bc:2:...-->`。',
             '- 视觉模式下，永久/临时栏目的书签树内容从栏目头/说明区/根元数据块之外的正文开始解析；JSON模式直接解析 JSON 正文。',
             '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名 `(#B)` > 文件顺序兜底。',
@@ -35505,7 +35869,7 @@ async function exportCanvasPackage(options = {}) {
             '- Type recognition = `.canvas` file mapping + folder path names.',
             '- Special temporary sections are recognized by folder + JSON/header/label semantics.',
             '- Visual modes parse bookmark tree from lines below the header/description block; JSON mode parses the plain JSON body directly.',
-            '- JSON-mode permanent files keep raw Chrome Bookmarks API tree shape in body (no synthetic root identity fields).',
+            '- JSON-mode permanent files keep Chrome Bookmarks API-compatible tree shape in body and preserve `sourceID` only when needed for identity flow.',
             '- In normal import flow, permanent files are restored as snapshot sections, not direct browser tree overwrite.',
             '',
             '### S4. Number / Title / Bookmark-count Priority',
@@ -35555,7 +35919,7 @@ async function exportCanvasPackage(options = {}) {
             '- 类型识别 = `.canvas` 文件映射 + 目录路径命名（双条件）。',
             '- 特殊临时栏目按目录 + JSON/栏目头/标签语义识别。',
             '- 视觉模式按“栏目头 +（可选说明注释块）+ 树内容”解析；JSON模式直接解析 JSON 正文。',
-            '- JSON 模式下的永久文件正文保持 Chrome Bookmarks API 原始树结构，不注入额外根身份字段。',
+            '- JSON 模式下的永久文件正文保持 Chrome Bookmarks API 兼容树结构，并按身份链需要保留 `sourceID`。',
             '- 常规导入流下，永久栏目按快照栏目恢复，不直接覆盖浏览器真实书签树。',
             '',
             '### S4. 编号 / 标题 / 书签数优先级',
@@ -37357,7 +37721,8 @@ function __adaptChromeTreeToCanvasItems(chromeTree) {
         if (!node) return null;
         const sourceID = __resolveTempItemSourceID(
             node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId,
-            node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]
+            node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY],
+            { allowGenerate: false }
         );
 
         // 书签
@@ -37367,7 +37732,7 @@ function __adaptChromeTreeToCanvasItems(chromeTree) {
                 type: 'bookmark',
                 title: node.title || node.name || node.url,
                 url: node.url,
-                [TEMP_ITEM_SOURCE_ID_KEY]: sourceID
+                ...(sourceID ? { [TEMP_ITEM_SOURCE_ID_KEY]: sourceID } : {})
             };
         }
 
@@ -37381,7 +37746,7 @@ function __adaptChromeTreeToCanvasItems(chromeTree) {
             type: 'folder',
             title: node.title || node.name || 'Folder',
             children: children,
-            [TEMP_ITEM_SOURCE_ID_KEY]: sourceID
+            ...(sourceID ? { [TEMP_ITEM_SOURCE_ID_KEY]: sourceID } : {})
         };
     };
 
@@ -37514,7 +37879,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
             width: toNumber(permPos.width, 600),
             height: toNumber(permPos.height, 600),
             color: '#44cf6e',
-            items: cloneImportedTempItems(snapshotItems, { regenerateSourceID: true, allowLegacyOriginalId: false }),
+            items: cloneImportedTempItems(snapshotItems, { allowLegacyOriginalId: false }),
             descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
             isSnapshot: true
         });
@@ -37558,7 +37923,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
                 width: toNumber(copyCardState.width, 600),
                 height: toNumber(copyCardState.height, 600),
                 color: '#44cf6e',
-                items: cloneImportedTempItems(snapshotItems, { regenerateSourceID: true, allowLegacyOriginalId: false }),
+                items: cloneImportedTempItems(snapshotItems, { allowLegacyOriginalId: false }),
                 descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
                 isSnapshot: true
             });
@@ -37580,7 +37945,6 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
             newSec.id = newId;
             try {
                 __ensureTempItemsSourceID(newSec.items, {
-                    regenerate: true,
                     allowLegacyOriginalId: false
                 });
             } catch (_) { }
@@ -37970,7 +38334,6 @@ function __isPermanentCanvasNodeId(nodeId) {
 
 const LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY = 'original' + 'Id';
 const TEMP_ITEM_SOURCE_ID_KEY = 'sourceID';
-let __canvasTempItemSourceCounter = 0;
 
 function __normalizeTempItemSourceID(value) {
     const raw = String(value == null ? '' : value).trim();
@@ -37979,15 +38342,15 @@ function __normalizeTempItemSourceID(value) {
 }
 
 function __generateTempItemSourceID() {
-    __canvasTempItemSourceCounter = Math.max(0, Number(__canvasTempItemSourceCounter) || 0) + 1;
-    return `src-${Date.now().toString(36)}-${__canvasTempItemSourceCounter.toString(36)}`;
+    return __generateCanvasHighEntropySourceID();
 }
 
-function __resolveTempItemSourceID(primaryValue, fallbackValue = '') {
+function __resolveTempItemSourceID(primaryValue, fallbackValue = '', options = {}) {
     const primary = __normalizeTempItemSourceID(primaryValue);
     if (primary) return primary;
     const fallback = __normalizeTempItemSourceID(fallbackValue);
     if (fallback) return fallback;
+    if (options && options.allowGenerate === false) return '';
     return __generateTempItemSourceID();
 }
 
@@ -38008,15 +38371,22 @@ function __ensureTempItemSourceID(itemInput, options = {}) {
         const legacySourceID = allowLegacyOriginalId
             ? __normalizeTempItemSourceID(item[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY])
             : '';
+        const generateMissing = !!(options && options.generateMissing === true);
         const resolvedSourceID = regenerate
             ? __generateTempItemSourceID()
-            : __resolveTempItemSourceID(currentSourceID, legacySourceID);
+            : __resolveTempItemSourceID(currentSourceID, legacySourceID, {
+                allowGenerate: generateMissing
+            });
 
-        if (!currentSourceID || regenerate || currentSourceID !== resolvedSourceID) {
+        if (resolvedSourceID && (!currentSourceID || regenerate || currentSourceID !== resolvedSourceID)) {
             item[TEMP_ITEM_SOURCE_ID_KEY] = resolvedSourceID;
             repaired += 1;
         } else if (item[TEMP_ITEM_SOURCE_ID_KEY] !== currentSourceID) {
-            item[TEMP_ITEM_SOURCE_ID_KEY] = currentSourceID;
+            if (currentSourceID) {
+                item[TEMP_ITEM_SOURCE_ID_KEY] = currentSourceID;
+            } else if (Object.prototype.hasOwnProperty.call(item, TEMP_ITEM_SOURCE_ID_KEY)) {
+                try { delete item[TEMP_ITEM_SOURCE_ID_KEY]; } catch (_) { item[TEMP_ITEM_SOURCE_ID_KEY] = undefined; }
+            }
         }
 
         if (Object.prototype.hasOwnProperty.call(item, 'sourceId')) {
@@ -39186,6 +39556,21 @@ if (typeof window !== 'undefined') {
         },
         normalizePermanentTreeSnapshot(treeInput, options = {}) {
             return __buildPermanentTreeSnapshotForJsonProtocol(treeInput, options);
+        },
+        resolvePermanentNodeSourceID(nodeInput, options = {}) {
+            return __resolvePermanentNodeSourceID(nodeInput, options);
+        },
+        recordPermanentNodeSourceIDMapping(chromeId, sourceID) {
+            return __recordPermanentNodeSourceIDMapping(chromeId, sourceID);
+        },
+        recordPermanentNodeSourceIDMappingWithOptions(chromeId, sourceID, options = {}) {
+            return __recordPermanentNodeSourceIDMapping(chromeId, sourceID, options);
+        },
+        persistPermanentSourceIDMapFromTree(localTreeInput, remoteTreeInput) {
+            return __persistPermanentSourceIDMapFromTree(localTreeInput, remoteTreeInput);
+        },
+        readPermanentNodeSourceIDMap() {
+            return __readPermanentNodeSourceIDMap();
         },
         applyPermanentRootMetaToTreeSnapshot(treeInput, rootMetaInput) {
             return __applyPermanentRootMetaToTreeSnapshot(treeInput, rootMetaInput);
