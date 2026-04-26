@@ -72,29 +72,27 @@ assert_pattern() {
   fi
 }
 
-assert_original_id_only_reserved() {
+assert_original_id_absent() {
   local output
-  local count
+  local hidden_hits
   output="$(rg -n --no-heading --pcre2 '\boriginalId\b' -g '!docs/**' -g "!${SELF_PATH}" . || true)"
 
-  if [[ -z "$output" ]]; then
-    fail "originalId back-check (expected one reserved-key hit, found none)"
-    return
-  fi
-
-  count="$(printf '%s\n' "$output" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
-  if [[ "$count" != "1" ]]; then
-    fail "originalId back-check (expected 1 hit, got ${count})"
+  if [[ -n "$output" ]]; then
+    fail "originalId back-check (unexpected runtime hit)"
     printf '%s\n' "$output"
     return
   fi
 
-  if [[ "$output" =~ ^(\./)?history_html/bookmark_canvas_module\.js:[0-9]+: ]]; then
-    pass "originalId back-check (only reserved key remains)"
-  else
-    fail "originalId back-check (unexpected location)"
-    printf '%s\n' "$output"
+  pass "originalId back-check (no runtime hits)"
+
+  hidden_hits="$(rg -n --no-heading --pcre2 "original['\"]\\s*\\+\\s*['\"]Id|allowLegacyOriginalId|PERMANENT_NODE_LEGACY_ORIGINAL_ID_KEY" -g '!docs/**' -g "!${SELF_PATH}" . || true)"
+  if [[ -n "$hidden_hits" ]]; then
+    fail "originalId hidden-compat back-check (unexpected fallback/constructed key)"
+    printf '%s\n' "$hidden_hits"
+    return
   fi
+
+  pass "originalId hidden-compat back-check"
 }
 
 assert_source_id_single_field_back_check() {
@@ -106,13 +104,13 @@ assert_source_id_single_field_back_check() {
     return
   fi
 
-  source_id_leak_hits="$(rg -n --no-heading --pcre2 "\\.sourceId\\b|sourceId\\s*:|'sourceId'" -g '!docs/**' -g "!${SELF_PATH}" . || true)"
+  source_id_leak_hits="$(rg -n --no-heading --pcre2 "\\.sourceId\\b|sourceId\\s*:|'sourceId'|source['\"]\\s*\\+\\s*['\"]Id" -g '!docs/**' -g "!${SELF_PATH}" . || true)"
   if [[ -n "$source_id_leak_hits" ]]; then
-    source_id_leak_hits="$(printf '%s\n' "$source_id_leak_hits" | rg -v --no-heading --pcre2 "^(\\./)?history_html/bookmark_canvas_module\\.js:[0-9]+:.*(\\|\\|\\s*[A-Za-z0-9_]+\\.sourceId|hasOwnProperty\\.call\\(item, 'sourceId'\\)|delete item\\.sourceId;|item\\.sourceId = undefined;|sourceId:\\s*'bookmark-canvas-export')" || true)"
+    source_id_leak_hits="$(printf '%s\n' "$source_id_leak_hits" | rg -v --no-heading --pcre2 "^(\\./)?history_html/bookmark_canvas_module\\.js:[0-9]+:.*(hasOwnProperty\\.call\\(item, 'sourceId'\\)|delete item\\.sourceId;|item\\.sourceId = undefined;|sourceId:\\s*'bookmark-canvas-export')" || true)"
   fi
 
   if [[ -z "$source_id_leak_hits" ]]; then
-    pass "sourceID single-field back-check (sourceID allowed; sourceId runtime leak blocked except compat read)"
+    pass "sourceID single-field back-check (sourceID allowed; sourceId only cleanup/metadata)"
   else
     fail "sourceID single-field back-check (unexpected sourceId runtime leak)"
     printf '%s\n' "$source_id_leak_hits"
@@ -134,7 +132,7 @@ main() {
   run_node_check "$DRAG_DROP_FILE"
 
   section "originalId/sourceID back-check"
-  assert_original_id_only_reserved
+  assert_original_id_absent
   assert_source_id_single_field_back_check
 
   section "Key hook hit-check"
@@ -176,10 +174,6 @@ main() {
     "suppress guard: hard fuse threshold is 10s"
   assert_pattern "$TEMP_FILE" 'function __resolveCanvasSuppressSyncMarkDirtyOption\(' \
     "suppress guard: resolve function exists"
-  assert_pattern "$TEMP_FILE" 'function __stripLegacyOriginalIdFromTempSection\(' \
-    "legacy cleanup: originalId strip helper exists"
-  assert_pattern "$TEMP_FILE" '__stripLegacyOriginalIdFromTempSection\(cloned\);' \
-    "legacy cleanup: persisted sections strip originalId"
   assert_pattern "$SYNC_FILE" "const allowSnapshotHint = !!\\(options && options.allowSnapshotHint === true\\);" \
     "consistency precheck: realtime api-tree default enforced"
   assert_pattern "$SYNC_FILE" "if \\(text\\.includes\\('push'\\) \\|\\| text\\.includes\\('full'\\) \\|\\| text\\.includes\\('sync'\\)\\) return true;" \
@@ -201,8 +195,8 @@ main() {
     "sourceID generation: random generation does not scan existing IDs"
   assert_no_match "src-perm-\\$\\{" \
     "sourceID generation: permanent IDs are not chrome-id/path deterministic"
-  assert_pattern "$TEMP_FILE" "function __resolveTempItemSourceID\\(primaryValue, fallbackValue = '', options = \\{\\}\\)" \
-    "temporary sourceID: resolver can preserve missing IDs without generating"
+  assert_pattern "$TEMP_FILE" "function __resolveTempItemSourceID\\(primaryValue, options = \\{\\}\\)" \
+    "temporary sourceID: resolver has no originalId fallback"
   assert_pattern "$TEMP_FILE" "if \\(options && options\\.allowGenerate === false\\) return '';" \
     "temporary sourceID: import/sync can opt out of generation"
   assert_pattern "$TEMP_FILE" "const generateMissing = !!\\(options && options\\.generateMissing === true\\);" \

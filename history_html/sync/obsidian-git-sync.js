@@ -4333,8 +4333,6 @@
         if (!node || typeof node !== 'object') return '';
         return normalizePermanentNodeSourceID(
             node.sourceID
-            || node['source' + 'Id']
-            || node['original' + 'Id']
         );
     }
 

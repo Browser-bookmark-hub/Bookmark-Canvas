@@ -1838,7 +1838,7 @@ const ZOOM_INPUT_MODE_STICKY_MS = 180;
 const ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX = 6;
 const DISCRETE_WHEEL_EVENT_DELTA_MIN = 24;
 const CANVAS_WHEEL_LINE_PIXEL = 12;
-const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 0.64;
+const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 0.5;
 const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 0.92;
 const WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND = 0.52;
 const WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER = 1.0;
@@ -3945,7 +3945,7 @@ function pickTempSectionColor() {
 
 function cloneBookmarkNode(node) {
     if (!node) return null;
-    const sourceID = String(node.sourceID || node['source' + 'Id'] || node['original' + 'Id'] || '').trim().replace(/\s+/g, '-');
+    const sourceID = String(node.sourceID || '').trim().replace(/\s+/g, '-');
     const clone = {
         id: node.id || null,
         title: node.title || '',
@@ -3989,11 +3989,9 @@ function __resolveSourceIDForTempPayload(payloadInput, options = {}) {
         } catch (_) { }
     }
 
-    const inherited = __resolveTempItemSourceID(
-        payload[TEMP_ITEM_SOURCE_ID_KEY] || payload.sourceId,
-        (options && options.allowLegacyOriginalId === false) ? '' : payload[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY],
-        { allowGenerate: false }
-    );
+    const inherited = __resolveTempItemSourceID(payload[TEMP_ITEM_SOURCE_ID_KEY], {
+        allowGenerate: false
+    });
     if (inherited) return inherited;
 
     return __generateTempItemSourceID();
@@ -4202,7 +4200,7 @@ function findTempItemEntry(sectionId, itemId) {
 
 function serializeTempItemForClipboard(item) {
     if (!item) return null;
-    const sourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY] || item.sourceId);
+    const sourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY]);
     return {
         title: item.title,
         url: item.url || '',
@@ -4423,7 +4421,6 @@ function extractTempItemsPayload(sectionId, itemIds) {
 function insertTempItemsFromPayload(sectionId, parentId, payloadItems, index = null, options = {}) {
     const createOptions = {
         regenerateSourceID: !!(options && options.regenerateSourceID === true),
-        allowLegacyOriginalId: !(options && options.allowLegacyOriginalId === false),
         payloadSource: __normalizeCanvasPayloadSource(options && options.payloadSource),
         resolvePermanentSourceID: !!(options && options.resolvePermanentSourceID === true)
     };
@@ -5564,8 +5561,7 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
         // 递归转换为临时栏目格式
         const convertToTempItem = (node) => {
             const sourceID = __resolveTempItemSourceID(
-                node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId,
-                node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]
+                node[TEMP_ITEM_SOURCE_ID_KEY]
             );
             const item = {
                 id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
@@ -16943,8 +16939,7 @@ async function createTempNode(data, x, y) {
 
         if (payload && payload.length) {
             const convertOptions = {
-                regenerateSourceID: !!(data && data.regenerateSourceID === true),
-                allowLegacyOriginalId: !(data && data.allowLegacyOriginalId === false)
+                regenerateSourceID: !!(data && data.regenerateSourceID === true)
             };
             payload.forEach(node => {
                 const tempItem = convertBookmarkNodeToTempItem(node, sectionId, convertOptions);
@@ -30530,8 +30525,7 @@ async function importHtmlBookmarks(html, importFileName = '') {
     // 递归转换为临时栏目格式
     const convertToTempItem = (node) => {
         const sourceID = __resolveTempItemSourceID(
-            node && (node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId),
-            node && node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY],
+            node && node[TEMP_ITEM_SOURCE_ID_KEY],
             { allowGenerate: false }
         );
         const item = {
@@ -30744,17 +30738,10 @@ async function importJsonBookmarks(json, importFileName = '') {
             children: []
         };
         const normalizedSourceID = __normalizeTempItemSourceID(
-            node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId
+            node[TEMP_ITEM_SOURCE_ID_KEY]
         );
         if (normalizedSourceID) {
             item[TEMP_ITEM_SOURCE_ID_KEY] = normalizedSourceID;
-        } else {
-            const normalizedLegacyOriginalId = __normalizeTempItemSourceID(
-                node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]
-            );
-            if (normalizedLegacyOriginalId) {
-                item[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] = normalizedLegacyOriginalId;
-            }
         }
 
         if (url && !isFolder) {
@@ -30772,8 +30759,7 @@ async function importJsonBookmarks(json, importFileName = '') {
     // 转换为临时栏目格式
     const convertToTempItem = (node, sectionId) => {
         const sourceID = __resolveTempItemSourceID(
-            node && (node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId),
-            node && node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY],
+            node && node[TEMP_ITEM_SOURCE_ID_KEY],
             { allowGenerate: false }
         );
         const item = {
@@ -31748,8 +31734,6 @@ function __generateCanvasHighEntropySourceID() {
 }
 
 const PERMANENT_NODE_SOURCE_ID_KEY = 'sourceID';
-const PERMANENT_NODE_LEGACY_SOURCE_ID_KEY = 'source' + 'Id';
-const PERMANENT_NODE_LEGACY_ORIGINAL_ID_KEY = 'original' + 'Id';
 const PERMANENT_NODE_SOURCE_ID_MAP_STORAGE_KEY = 'bcs:perm:source-id-map';
 const PERMANENT_NODE_SOURCE_ID_EXPORT_KEYS_STORAGE_KEY = 'bcs:perm:source-id-export-keys';
 
@@ -31844,8 +31828,6 @@ function __collectActiveTempSourceIDSet() {
             if (!item || typeof item !== 'object') continue;
             const sourceID = __normalizePermanentNodeSourceID(
                 item[PERMANENT_NODE_SOURCE_ID_KEY]
-                || item[PERMANENT_NODE_LEGACY_SOURCE_ID_KEY]
-                || item[PERMANENT_NODE_LEGACY_ORIGINAL_ID_KEY]
             );
             if (sourceID) set.add(sourceID);
             if (Array.isArray(item.children) && item.children.length) {
@@ -31860,8 +31842,6 @@ function __extractPermanentNodeSourceID(nodeInput) {
     if (!nodeInput || typeof nodeInput !== 'object') return '';
     return __normalizePermanentNodeSourceID(
         nodeInput[PERMANENT_NODE_SOURCE_ID_KEY]
-        || nodeInput[PERMANENT_NODE_LEGACY_SOURCE_ID_KEY]
-        || nodeInput[PERMANENT_NODE_LEGACY_ORIGINAL_ID_KEY]
     );
 }
 
@@ -37801,8 +37781,7 @@ function __adaptChromeTreeToCanvasItems(chromeTree) {
     const convertNode = (node) => {
         if (!node) return null;
         const sourceID = __resolveTempItemSourceID(
-            node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId,
-            node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY],
+            node[TEMP_ITEM_SOURCE_ID_KEY],
             { allowGenerate: false }
         );
 
@@ -37859,8 +37838,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
         const list = Array.isArray(cloned) ? cloned : [];
         try {
             __ensureTempItemsSourceID(list, {
-                regenerate: !!(options && options.regenerateSourceID === true),
-                allowLegacyOriginalId: !(options && options.allowLegacyOriginalId === false)
+                regenerate: !!(options && options.regenerateSourceID === true)
             });
         } catch (_) { }
         return list;
@@ -37960,7 +37938,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
             width: toNumber(permPos.width, 600),
             height: toNumber(permPos.height, 600),
             color: '#44cf6e',
-            items: cloneImportedTempItems(snapshotItems, { allowLegacyOriginalId: false }),
+            items: cloneImportedTempItems(snapshotItems),
             descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
             isSnapshot: true
         });
@@ -38004,7 +37982,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
                 width: toNumber(copyCardState.width, 600),
                 height: toNumber(copyCardState.height, 600),
                 color: '#44cf6e',
-                items: cloneImportedTempItems(snapshotItems, { allowLegacyOriginalId: false }),
+                items: cloneImportedTempItems(snapshotItems),
                 descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
                 isSnapshot: true
             });
@@ -38025,9 +38003,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
             const newSec = JSON.parse(JSON.stringify(sec));
             newSec.id = newId;
             try {
-                __ensureTempItemsSourceID(newSec.items, {
-                    allowLegacyOriginalId: false
-                });
+                __ensureTempItemsSourceID(newSec.items);
             } catch (_) { }
             // Iterate items to remap internal IDs if needed? 
             // Usually internal item IDs are unique per section. But let's keep them as is.
@@ -38413,7 +38389,6 @@ function __isPermanentCanvasNodeId(nodeId) {
     return !!(id && (id === 'permanent-section' || id.startsWith('permanent-section-copy-')));
 }
 
-const LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY = 'original' + 'Id';
 const TEMP_ITEM_SOURCE_ID_KEY = 'sourceID';
 
 function __normalizeTempItemSourceID(value) {
@@ -38426,18 +38401,15 @@ function __generateTempItemSourceID() {
     return __generateCanvasHighEntropySourceID();
 }
 
-function __resolveTempItemSourceID(primaryValue, fallbackValue = '', options = {}) {
+function __resolveTempItemSourceID(primaryValue, options = {}) {
     const primary = __normalizeTempItemSourceID(primaryValue);
     if (primary) return primary;
-    const fallback = __normalizeTempItemSourceID(fallbackValue);
-    if (fallback) return fallback;
     if (options && options.allowGenerate === false) return '';
     return __generateTempItemSourceID();
 }
 
 function __ensureTempItemSourceID(itemInput, options = {}) {
     if (!itemInput || typeof itemInput !== 'object') return { touched: 0, repaired: 0 };
-    const allowLegacyOriginalId = options && options.allowLegacyOriginalId !== false;
     const regenerate = !!(options && options.regenerate === true);
     const stack = [itemInput];
     let touched = 0;
@@ -38448,14 +38420,11 @@ function __ensureTempItemSourceID(itemInput, options = {}) {
         if (!item || typeof item !== 'object') continue;
         touched += 1;
 
-        const currentSourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY] || item.sourceId);
-        const legacySourceID = allowLegacyOriginalId
-            ? __normalizeTempItemSourceID(item[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY])
-            : '';
+        const currentSourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY]);
         const generateMissing = !!(options && options.generateMissing === true);
         const resolvedSourceID = regenerate
             ? __generateTempItemSourceID()
-            : __resolveTempItemSourceID(currentSourceID, legacySourceID, {
+            : __resolveTempItemSourceID(currentSourceID, {
                 allowGenerate: generateMissing
             });
 
@@ -38528,7 +38497,7 @@ function __validateTempSectionsSourceIDIntegrity(sectionsInput, options = {}) {
             if (!item || typeof item !== 'object') continue;
             totalItems += 1;
 
-            let sourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY] || item.sourceId);
+            let sourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY]);
             if (!sourceID) {
                 missingCount += 1;
                 if (repairMissing) {
@@ -38585,29 +38554,6 @@ function __validateCanvasTempSourceIDIntegrity(options = {}) {
     );
 }
 
-function __stripLegacyOriginalIdFromTempItems(itemsInput) {
-    if (!Array.isArray(itemsInput) || !itemsInput.length) return;
-    const stack = itemsInput.slice();
-    while (stack.length) {
-        const item = stack.pop();
-        if (!item || typeof item !== 'object') continue;
-        if (Object.prototype.hasOwnProperty.call(item, LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY)) {
-            try { delete item[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]; } catch (_) { item[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] = undefined; }
-        }
-        if (Array.isArray(item.children) && item.children.length) {
-            stack.push(...item.children);
-        }
-    }
-}
-
-function __stripLegacyOriginalIdFromTempSection(sectionInput) {
-    if (!sectionInput || typeof sectionInput !== 'object') return;
-    if (Object.prototype.hasOwnProperty.call(sectionInput, LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY)) {
-        try { delete sectionInput[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]; } catch (_) { sectionInput[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] = undefined; }
-    }
-    __stripLegacyOriginalIdFromTempItems(sectionInput.items);
-}
-
 function __buildPersistedCanvasState(state, options = {}) {
     const safe = (state && typeof state === 'object') ? state : {};
     const preserveSourceIDRaw = !!(options && options.preserveSourceIDRaw === true);
@@ -38626,16 +38572,13 @@ function __buildPersistedCanvasState(state, options = {}) {
                 if (Object.prototype.hasOwnProperty.call(cloned, 'description')) {
                     delete cloned.description;
                 }
-                __stripLegacyOriginalIdFromTempSection(cloned);
             }
             return cloned;
         })
         .filter(Boolean);
     if (!preserveSourceIDRaw) {
         try {
-            __ensureTempSectionsSourceID(persistedSections, {
-                allowLegacyOriginalId: true
-            });
+            __ensureTempSectionsSourceID(persistedSections);
         } catch (_) { }
     }
     const persistedMdNodes = sourceMdNodes
@@ -38649,9 +38592,6 @@ function __buildPersistedCanvasState(state, options = {}) {
                 __ensureMdNodeMarkdownProtocol(cloned, {
                     refreshCachesFromMarkdown
                 });
-                if (Object.prototype.hasOwnProperty.call(cloned, LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY)) {
-                    try { delete cloned[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY]; } catch (_) { cloned[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] = undefined; }
-                }
                 if (__isCanvasNativeTextNode(cloned)) {
                     try { delete cloned.markdownSource; } catch (_) { }
                 } else {
@@ -39274,8 +39214,6 @@ const TEMP_SECTION_PROTOCOL_ITEM_RESERVED_KEYS = new Set([
     'type',
     'kind',
     'children',
-    // Legacy field is intentionally blocked from protocol passthrough.
-    'originalId',
     'createdAt',
     'updatedAt',
     'dateAdded',
@@ -41345,16 +41283,7 @@ function __applyCanvasTempStateObject(state, options = {}) {
         : (Array.isArray(sourceState.tempSections) ? sourceState.tempSections : []);
     if (!preserveSourceIDRaw) {
         try {
-            (CanvasState.tempSections || []).forEach((section) => {
-                __stripLegacyOriginalIdFromTempSection(section);
-            });
-        } catch (_) { }
-    }
-    if (!preserveSourceIDRaw) {
-        try {
-            __ensureTempSectionsSourceID(CanvasState.tempSections, {
-                allowLegacyOriginalId: true
-            });
+            __ensureTempSectionsSourceID(CanvasState.tempSections);
         } catch (_) { }
     }
     CanvasState.tempSectionCounter = sourceState.tempSectionCounter || CanvasState.tempSections.length;
@@ -41538,9 +41467,7 @@ function saveTempNodes(options = {}) {
     autoResizeImportContainers();
     if (!skipSourceIDNormalization) {
         try {
-            __ensureTempSectionsSourceID(CanvasState.tempSections, {
-                allowLegacyOriginalId: true
-            });
+            __ensureTempSectionsSourceID(CanvasState.tempSections);
         } catch (_) { }
     }
 

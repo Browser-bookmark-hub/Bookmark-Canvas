@@ -143,7 +143,7 @@ function getTempManager() {
 
 function resolvePermanentPayloadSourceID(node) {
     if (!node || typeof node !== 'object') return '';
-    const direct = String(node.sourceID || node['source' + 'Id'] || '').trim();
+    const direct = String(node.sourceID || '').trim();
     if (direct) return direct.replace(/\s+/g, '-');
     const bridge = window.CanvasProtocolBridge;
     if (bridge && typeof bridge.resolvePermanentNodeSourceID === 'function') {
