@@ -36015,7 +36015,7 @@ async function exportCanvasPackage(options = {}) {
         __frontmatter({
             exportedAt,
             source: 'exportGuide',
-            sourceId: 'bookmark-canvas-export',
+            sourceID: 'bookmark-canvas-export',
             title: isEn ? 'Obsidian Import Rules' : 'Obsidian 导入规则'
         }),
         compatText,
@@ -38439,10 +38439,6 @@ function __ensureTempItemSourceID(itemInput, options = {}) {
             }
         }
 
-        if (Object.prototype.hasOwnProperty.call(item, 'sourceId')) {
-            try { delete item.sourceId; } catch (_) { item.sourceId = undefined; }
-        }
-
         if (Array.isArray(item.children) && item.children.length) {
             stack.push(...item.children);
         }
@@ -38507,10 +38503,6 @@ function __validateTempSectionsSourceIDIntegrity(sectionsInput, options = {}) {
                 }
             } else {
                 item[TEMP_ITEM_SOURCE_ID_KEY] = sourceID;
-            }
-
-            if (Object.prototype.hasOwnProperty.call(item, 'sourceId')) {
-                try { delete item.sourceId; } catch (_) { item.sourceId = undefined; }
             }
 
             if (sourceID) {

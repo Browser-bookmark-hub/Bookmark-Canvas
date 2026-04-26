@@ -27,6 +27,7 @@
 - [拆分对照全量报告](./report-split-audit-split-audit-20260201-214732.md)
 
 - [sourceID 统一替换 originalId 与同步导入导出改造计划书（2026-04-20）](./sourceID统一替换originalId与同步导入导出改造计划书-2026-04-20.md)
+- [永久栏目 JSON 真相源与 sourceID 嵌入式存储改造计划书（2026-04-26）](./永久栏目JSON真相源与sourceID嵌入式存储改造计划书-2026-04-26.md)
 - [第五刀导入/导出/同步合并实施计划（2026-04-21）](./第五刀导入导出同步合并实施计划-2026-04-21.md)
 - [执行记录（2026-04-20）：originalId 清理 + 同步守门](./执行记录-2026-04-20-sourceID-originalId-sync-guard.md)
 - [本轮一键验收脚本](../tools/run-sync-guard-acceptance.sh)

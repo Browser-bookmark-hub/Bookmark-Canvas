@@ -105,12 +105,9 @@ assert_source_id_single_field_back_check() {
   fi
 
   source_id_leak_hits="$(rg -n --no-heading --pcre2 "\\.sourceId\\b|sourceId\\s*:|'sourceId'|source['\"]\\s*\\+\\s*['\"]Id" -g '!docs/**' -g "!${SELF_PATH}" . || true)"
-  if [[ -n "$source_id_leak_hits" ]]; then
-    source_id_leak_hits="$(printf '%s\n' "$source_id_leak_hits" | rg -v --no-heading --pcre2 "^(\\./)?history_html/bookmark_canvas_module\\.js:[0-9]+:.*(hasOwnProperty\\.call\\(item, 'sourceId'\\)|delete item\\.sourceId;|item\\.sourceId = undefined;|sourceId:\\s*'bookmark-canvas-export')" || true)"
-  fi
 
   if [[ -z "$source_id_leak_hits" ]]; then
-    pass "sourceID single-field back-check (sourceID allowed; sourceId only cleanup/metadata)"
+    pass "sourceID single-field back-check (sourceID allowed; sourceId field blocked)"
   else
     fail "sourceID single-field back-check (unexpected sourceId runtime leak)"
     printf '%s\n' "$source_id_leak_hits"
