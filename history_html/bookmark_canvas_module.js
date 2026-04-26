@@ -3962,6 +3962,58 @@ function cloneBookmarkNode(node) {
     return clone;
 }
 
+const CANVAS_PAYLOAD_SOURCE_KEY = '__canvasPayloadSource';
+
+function __normalizeCanvasPayloadSource(value) {
+    const raw = String(value == null ? '' : value).trim().toLowerCase();
+    if (raw === 'permanent' || raw === 'temporary') return raw;
+    return '';
+}
+
+function __resolveCanvasPayloadSource(payloadInput, options = {}) {
+    return __normalizeCanvasPayloadSource(payloadInput && payloadInput[CANVAS_PAYLOAD_SOURCE_KEY])
+        || __normalizeCanvasPayloadSource(options && options.payloadSource);
+}
+
+function __resolveSourceIDForTempPayload(payloadInput, options = {}) {
+    const payload = (payloadInput && typeof payloadInput === 'object') ? payloadInput : {};
+    const payloadSource = __resolveCanvasPayloadSource(payload, options);
+    const resolvePermanentSourceID = payloadSource === 'permanent' || !!(options && options.resolvePermanentSourceID === true);
+    const regenerateSourceID = !!(options && options.regenerateSourceID === true) && !resolvePermanentSourceID;
+    if (regenerateSourceID) return __generateTempItemSourceID();
+
+    if (resolvePermanentSourceID) {
+        try {
+            const sourceID = __resolvePermanentNodeSourceID(payload);
+            if (sourceID) return sourceID;
+        } catch (_) { }
+    }
+
+    const inherited = __resolveTempItemSourceID(
+        payload[TEMP_ITEM_SOURCE_ID_KEY] || payload.sourceId,
+        (options && options.allowLegacyOriginalId === false) ? '' : payload[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY],
+        { allowGenerate: false }
+    );
+    if (inherited) return inherited;
+
+    return __generateTempItemSourceID();
+}
+
+function clonePermanentBookmarkNodeForTempPayload(node) {
+    if (!node || typeof node !== 'object') return null;
+    const clone = cloneBookmarkNode(node);
+    if (!clone) return null;
+    clone[CANVAS_PAYLOAD_SOURCE_KEY] = 'permanent';
+    try {
+        const sourceID = __resolvePermanentNodeSourceID(node);
+        if (sourceID) clone.sourceID = sourceID;
+    } catch (_) { }
+    clone.children = Array.isArray(node.children)
+        ? node.children.map(clonePermanentBookmarkNodeForTempPayload).filter(Boolean)
+        : [];
+    return clone;
+}
+
 function markTreeItemDragging(treeItem) {
     if (!treeItem || !treeItem.classList) return;
     treeItem.classList.add('tree-drag-out');
@@ -3989,14 +4041,18 @@ function clearTreeItemDragging() {
     CanvasState.dragState.treeDragItem = null;
 }
 
-async function resolveBookmarkNode(data) {
+async function resolveBookmarkNode(data, options = {}) {
     if (!data) {
         throw new Error('缺少拖拽数据');
     }
+    const resolvePermanentSourceID = !!(options && options.resolvePermanentSourceID === true);
+    const cloneForTemp = resolvePermanentSourceID
+        ? clonePermanentBookmarkNodeForTempPayload
+        : cloneBookmarkNode;
 
     // 数据已经是完整节点
     if (data.children || data.url) {
-        return cloneBookmarkNode(data);
+        return cloneForTemp(data);
     }
 
     const targetId = data.id || data.nodeId;
@@ -4007,7 +4063,7 @@ async function resolveBookmarkNode(data) {
     if (browserAPI && browserAPI.bookmarks && browserAPI.bookmarks.getSubTree) {
         const nodes = await browserAPI.bookmarks.getSubTree(targetId);
         if (nodes && nodes.length > 0) {
-            return cloneBookmarkNode(nodes[0]);
+            return cloneForTemp(nodes[0]);
         }
     }
 
@@ -4022,14 +4078,8 @@ function convertBookmarkNodeToTempItem(node, sectionId, options = {}) {
     if (!node) return null;
 
     const itemId = allocateTempItemId(sectionId);
-    const regenerateSourceID = !!(options && options.regenerateSourceID === true);
-    const allowLegacyOriginalId = !(options && options.allowLegacyOriginalId === false);
-    const sourceID = regenerateSourceID
-        ? __generateTempItemSourceID()
-        : __resolveTempItemSourceID(
-            node[TEMP_ITEM_SOURCE_ID_KEY] || node.sourceId,
-            allowLegacyOriginalId ? node[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] : ''
-        );
+    const payloadSource = __resolveCanvasPayloadSource(node, options);
+    const sourceID = __resolveSourceIDForTempPayload(node, options);
     const item = {
         id: itemId,
         sectionId,
@@ -4042,8 +4092,12 @@ function convertBookmarkNodeToTempItem(node, sectionId, options = {}) {
     };
 
     if (node.children && node.children.length) {
+        const childOptions = {
+            ...options,
+            payloadSource
+        };
         item.children = node.children
-            .map(child => convertBookmarkNodeToTempItem(child, sectionId, options))
+            .map(child => convertBookmarkNodeToTempItem(child, sectionId, childOptions))
             .filter(Boolean);
     }
 
@@ -4161,14 +4215,8 @@ function serializeTempItemForClipboard(item) {
 function createTempItemFromPayload(sectionId, payload, options = {}) {
     if (!payload) return null;
     const hasExplicitTitle = typeof payload.title === 'string';
-    const regenerateSourceID = !!(options && options.regenerateSourceID === true);
-    const allowLegacyOriginalId = !(options && options.allowLegacyOriginalId === false);
-    const sourceID = regenerateSourceID
-        ? __generateTempItemSourceID()
-        : __resolveTempItemSourceID(
-            payload[TEMP_ITEM_SOURCE_ID_KEY] || payload.sourceId,
-            allowLegacyOriginalId ? payload[LEGACY_TEMP_ITEM_ORIGINAL_ID_KEY] : ''
-        );
+    const payloadSource = __resolveCanvasPayloadSource(payload, options);
+    const sourceID = __resolveSourceIDForTempPayload(payload, options);
     const item = {
         id: allocateTempItemId(sectionId),
         sectionId,
@@ -4181,8 +4229,12 @@ function createTempItemFromPayload(sectionId, payload, options = {}) {
     };
 
     if (payload.children && payload.children.length) {
+        const childOptions = {
+            ...options,
+            payloadSource
+        };
         item.children = payload.children
-            .map(child => createTempItemFromPayload(sectionId, child, options))
+            .map(child => createTempItemFromPayload(sectionId, child, childOptions))
             .filter(Boolean);
     }
 
@@ -4371,7 +4423,9 @@ function extractTempItemsPayload(sectionId, itemIds) {
 function insertTempItemsFromPayload(sectionId, parentId, payloadItems, index = null, options = {}) {
     const createOptions = {
         regenerateSourceID: !!(options && options.regenerateSourceID === true),
-        allowLegacyOriginalId: !(options && options.allowLegacyOriginalId === false)
+        allowLegacyOriginalId: !(options && options.allowLegacyOriginalId === false),
+        payloadSource: __normalizeCanvasPayloadSource(options && options.payloadSource),
+        resolvePermanentSourceID: !!(options && options.resolvePermanentSourceID === true)
     };
     const items = (payloadItems || []).map(item => createTempItemFromPayload(sectionId, item, createOptions)).filter(Boolean);
     if (!items.length) return [];
@@ -16867,10 +16921,13 @@ async function createTempNode(data, x, y) {
         } else if (!payload.length) {
             let resolvedNode = null;
             try {
-                resolvedNode = await resolveBookmarkNode(data);
+                const resolvePermanentSourceID = !!(data && data.source === 'permanent');
+                resolvedNode = await resolveBookmarkNode(data, { resolvePermanentSourceID });
             } catch (error) {
                 console.warn('[Canvas] 实时获取书签数据失败，使用一次性快照:', error);
-                resolvedNode = cloneBookmarkNode(data);
+                resolvedNode = data && data.source === 'permanent'
+                    ? clonePermanentBookmarkNodeForTempPayload(data)
+                    : cloneBookmarkNode(data);
             }
             if (resolvedNode) {
                 payload = [resolvedNode];

@@ -3503,12 +3503,26 @@ async function pasteIntoTemp(context) {
             }
 
             if (payload && payload.length) {
-                const regenerateSourceID = (bookmarkClipboard.source === 'mixed')
-                    ? bookmarkClipboard.action === 'copy'
-                    : false;
-                manager.insertFromPayload(target.sectionId, target.parentId, payload, target.index, {
-                    regenerateSourceID
-                });
+                if (bookmarkClipboard.source === 'mixed' && bookmarkClipboard.action === 'copy') {
+                    const tempPayload = payload.filter(item => String(item && item.__canvasPayloadSource || '') !== 'permanent');
+                    const permanentPayload = payload.filter(item => String(item && item.__canvasPayloadSource || '') === 'permanent');
+                    let insertIndex = target.index;
+                    if (tempPayload.length) {
+                        manager.insertFromPayload(target.sectionId, target.parentId, tempPayload, insertIndex, {
+                            regenerateSourceID: true
+                        });
+                        if (typeof insertIndex === 'number') insertIndex += tempPayload.length;
+                    }
+                    if (permanentPayload.length) {
+                        manager.insertFromPayload(target.sectionId, target.parentId, permanentPayload, insertIndex, {
+                            regenerateSourceID: false
+                        });
+                    }
+                } else {
+                    manager.insertFromPayload(target.sectionId, target.parentId, payload, target.index, {
+                        regenerateSourceID: false
+                    });
+                }
             }
 
             if (bookmarkClipboard.source === 'mixed') {
@@ -3542,12 +3556,30 @@ function serializeBookmarkNode(node) {
     if (!node) return null;
     const sourceID = resolvePermanentPayloadSourceID(node);
     return {
+        ...(node.id ? { id: String(node.id) } : {}),
         title: node.title,
         url: node.url || '',
         type: node.url ? 'bookmark' : 'folder',
+        __canvasPayloadSource: 'permanent',
         ...(sourceID ? { sourceID } : {}),
         children: (node.children || []).map(serializeBookmarkNode)
     };
+}
+
+function markClipboardPayloadSource(itemsInput, sourceKind) {
+    const items = Array.isArray(itemsInput) ? itemsInput : [];
+    const source = String(sourceKind || '').trim();
+    return items.map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const clone = {
+            ...item,
+            __canvasPayloadSource: source
+        };
+        clone.children = Array.isArray(item.children)
+            ? markClipboardPayloadSource(item.children, source)
+            : [];
+        return clone;
+    }).filter(Boolean);
 }
 
 async function handleTempMenuAction(action, context) {
@@ -6830,11 +6862,11 @@ async function copySelected() {
     // 混合选择：统一用 payload（title/url/type/children）形式，便于粘贴到永久/临时
     if (tempNodes.length && permanentIds.length) {
         try {
-            const payload = [...tempPayload];
+            const payload = markClipboardPayloadSource(tempPayload, 'temporary');
             for (const nodeId of permanentIds) {
                 const nodes = await chrome.bookmarks.getSubTree(nodeId);
                 if (nodes && nodes[0]) {
-                    payload.push(serializeBookmarkNode(nodes[0]));
+                    payload.push(...markClipboardPayloadSource([serializeBookmarkNode(nodes[0])], 'permanent'));
                 }
             }
             bookmarkClipboard = {

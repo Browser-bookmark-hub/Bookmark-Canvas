@@ -4557,12 +4557,11 @@ async function buildDomainPayloadBySubdomain(items, domainKey, isZh) {
             hostMap.set(hostKey, entry);
         }
 
-        entry.children.push({
+        entry.children.push(buildSearchBookmarkPayload({
+            ...item,
             title: safeTitle,
-            url: safeUrl,
-            type: 'bookmark',
-            children: []
-        });
+            url: safeUrl
+        }, isZh));
 
         processed += 1;
         if (processed % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {
@@ -5745,26 +5744,66 @@ async function buildPermanentNodeMap(root) {
     return map;
 }
 
+function resolvePermanentPayloadSourceIDForSearch(node) {
+    if (!node || typeof node !== 'object') return '';
+    const direct = String(node.sourceID || node['source' + 'Id'] || '').trim();
+    if (direct) return direct.replace(/\s+/g, '-');
+    const bridge = window.CanvasProtocolBridge;
+    if (bridge && typeof bridge.resolvePermanentNodeSourceID === 'function') {
+        try {
+            return String(bridge.resolvePermanentNodeSourceID(node) || '').trim();
+        } catch (_) { }
+    }
+    return '';
+}
+
+function buildSearchBookmarkPayload(item, isZh) {
+    const source = String(item && item.source || '').trim();
+    const safeTitle = item && (item.title || item.url) ? (item.title || item.url) : (isZh ? '书签' : 'Bookmark');
+    const safeUrl = item && item.url ? item.url : 'https://';
+    const payload = {
+        title: safeTitle,
+        url: safeUrl,
+        type: 'bookmark',
+        children: []
+    };
+    if (item && item.id) payload.id = String(item.id);
+    if (source === 'permanent') {
+        payload.__canvasPayloadSource = 'permanent';
+        const sourceID = resolvePermanentPayloadSourceIDForSearch(payload);
+        if (sourceID) payload.sourceID = sourceID;
+    }
+    return payload;
+}
+
 async function buildPayloadFromPermanentNode(node, isZh) {
     if (!node) return null;
 
     const nodeUrl = typeof node.url === 'string' ? node.url : '';
     const nodeTitle = typeof node.title === 'string' ? node.title : '';
+    const rootSourceID = resolvePermanentPayloadSourceIDForSearch(node);
     if (nodeUrl) {
-        return {
+        const bookmarkPayload = {
+            id: node.id ? String(node.id) : undefined,
             title: nodeTitle || nodeUrl || (isZh ? '书签' : 'Bookmark'),
             url: nodeUrl,
             type: 'bookmark',
+            __canvasPayloadSource: 'permanent',
             children: []
         };
+        if (rootSourceID) bookmarkPayload.sourceID = rootSourceID;
+        return bookmarkPayload;
     }
 
     const rootPayload = {
+        id: node.id ? String(node.id) : undefined,
         title: nodeTitle || (isZh ? '文件夹' : 'Folder'),
         url: '',
         type: 'folder',
+        __canvasPayloadSource: 'permanent',
         children: []
     };
+    if (rootSourceID) rootPayload.sourceID = rootSourceID;
 
     const stack = [{ source: node, target: rootPayload, index: 0 }];
     let scanned = 0;
@@ -5786,19 +5825,28 @@ async function buildPayloadFromPermanentNode(node, isZh) {
         const childTitle = typeof child.title === 'string' ? child.title : '';
 
         if (childUrl) {
-            frame.target.children.push({
+            const bookmarkPayload = {
+                id: child.id ? String(child.id) : undefined,
                 title: childTitle || childUrl || (isZh ? '书签' : 'Bookmark'),
                 url: childUrl,
                 type: 'bookmark',
+                __canvasPayloadSource: 'permanent',
                 children: []
-            });
+            };
+            const sourceID = resolvePermanentPayloadSourceIDForSearch(child);
+            if (sourceID) bookmarkPayload.sourceID = sourceID;
+            frame.target.children.push(bookmarkPayload);
         } else {
             const folderPayload = {
+                id: child.id ? String(child.id) : undefined,
                 title: childTitle || (isZh ? '文件夹' : 'Folder'),
                 url: '',
                 type: 'folder',
+                __canvasPayloadSource: 'permanent',
                 children: []
             };
+            const sourceID = resolvePermanentPayloadSourceIDForSearch(child);
+            if (sourceID) folderPayload.sourceID = sourceID;
             frame.target.children.push(folderPayload);
 
             if (Array.isArray(child.children) && child.children.length) {
@@ -5928,7 +5976,7 @@ async function createTempSectionFromSearchResults() {
             return null;
         };
 
-        const needsPermanentLookup = items.some(item => item && item.nodeType === 'folder' && item.source === 'permanent');
+        const needsPermanentLookup = items.some(item => item && item.source === 'permanent');
         let permanentNodeMap = null;
         if (needsPermanentLookup) {
             showCanvasToastSafe(isZh ? '正在整理文件夹结构…' : 'Preparing folder structure…', 'info', 1600);
@@ -5939,10 +5987,47 @@ async function createTempSectionFromSearchResults() {
         const copyInsertOptions = { regenerateSourceID: true };
         let insertedDirectCount = 0;
         let processed = 0;
+        const appendPayloadList = async (payload, fallbackTitle) => {
+            if (!payload || !payload.length) return;
+            for (let j = 0; j < payload.length; j += 1) {
+                const payloadItem = payload[j];
+                if (!payloadItem) continue;
+
+                if (isLargeFolderPayload(payloadItem)) {
+                    const inserted = await insertLargeFolderPayload(
+                        tempApi,
+                        sectionId,
+                        payloadItem,
+                        fallbackTitle || (isZh ? '文件夹' : 'Folder'),
+                        copyInsertOptions
+                    );
+                    if (inserted) {
+                        insertedDirectCount += 1;
+                        await yieldToMainThread();
+                        continue;
+                    }
+                }
+
+                payloadItems.push(payloadItem);
+            }
+        };
 
         for (let i = 0; i < items.length; i += 1) {
             const item = items[i];
             if (!item) continue;
+
+            if (item.source === 'permanent' && permanentNodeMap) {
+                const node = permanentNodeMap.get(String(item.id));
+                const built = await buildPayloadFromPermanentNode(node, isZh);
+                if (built) {
+                    await appendPayloadList([built], item.title || (isZh ? '文件夹' : 'Folder'));
+                    processed += 1;
+                    if (processed % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {
+                        await yieldToMainThread();
+                    }
+                    continue;
+                }
+            }
 
             if (item.nodeType === 'folder') {
                 let payload = null;
@@ -5950,36 +6035,13 @@ async function createTempSectionFromSearchResults() {
                     try {
                         payload = tempApi.extractPayload(item.sectionId, [item.id]);
                     } catch (_) { }
-                } else if (item.source === 'permanent' && permanentNodeMap) {
-                    const node = permanentNodeMap.get(String(item.id));
-                    const built = await buildPayloadFromPermanentNode(node, isZh);
-                    if (built) payload = [built];
                 }
 
                 if (payload && payload.length) {
-                    for (let j = 0; j < payload.length; j += 1) {
-                        const payloadItem = payload[j];
-                        if (!payloadItem) continue;
-
-                        if (isLargeFolderPayload(payloadItem)) {
-                            const inserted = await insertLargeFolderPayload(
-                                tempApi,
-                                sectionId,
-                                payloadItem,
-                                item.title || (isZh ? '文件夹' : 'Folder'),
-                                copyInsertOptions
-                            );
-                            if (inserted) {
-                                insertedDirectCount += 1;
-                                await yieldToMainThread();
-                                continue;
-                            }
-                        }
-
-                        payloadItems.push(payloadItem);
-                    }
+                    await appendPayloadList(payload, item.title || (isZh ? '文件夹' : 'Folder'));
                 } else {
                     payloadItems.push({
+                        ...(item.source === 'permanent' && item.id ? { id: String(item.id), __canvasPayloadSource: 'permanent' } : {}),
                         title: item.title || (isZh ? '文件夹' : 'Folder'),
                         url: '',
                         type: 'folder',
@@ -5987,14 +6049,7 @@ async function createTempSectionFromSearchResults() {
                     });
                 }
             } else {
-                const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
-                const safeUrl = item.url || 'https://';
-                payloadItems.push({
-                    title: safeTitle,
-                    url: safeUrl,
-                    type: 'bookmark',
-                    children: []
-                });
+                payloadItems.push(buildSearchBookmarkPayload(item, isZh));
             }
 
             processed += 1;
@@ -6109,12 +6164,11 @@ async function createTempSectionFromDomainResult(domain) {
                 if (!item) continue;
                 const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
                 const safeUrl = item.url || 'https://';
-                payloadItems.push({
+                payloadItems.push(buildSearchBookmarkPayload({
+                    ...item,
                     title: safeTitle,
-                    url: safeUrl,
-                    type: 'bookmark',
-                    children: []
-                });
+                    url: safeUrl
+                }, isZh));
 
                 processed += 1;
                 if (processed % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {

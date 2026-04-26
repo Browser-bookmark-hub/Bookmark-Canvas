@@ -158,9 +158,11 @@ function serializeBookmarkNode(node) {
     if (!node) return null;
     const sourceID = resolvePermanentPayloadSourceID(node);
     return {
+        ...(node.id ? { id: String(node.id) } : {}),
         title: node.title,
         url: node.url || '',
         type: node.url ? 'bookmark' : 'folder',
+        __canvasPayloadSource: 'permanent',
         ...(sourceID ? { sourceID } : {}),
         children: (node.children || []).map(child => serializeBookmarkNode(child))
     };
