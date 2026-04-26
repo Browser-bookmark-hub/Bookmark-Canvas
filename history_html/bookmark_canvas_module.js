@@ -1838,7 +1838,7 @@ const ZOOM_INPUT_MODE_STICKY_MS = 180;
 const ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX = 6;
 const DISCRETE_WHEEL_EVENT_DELTA_MIN = 24;
 const CANVAS_WHEEL_LINE_PIXEL = 12;
-const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 0.78;
+const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 0.64;
 const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 0.92;
 const WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND = 0.52;
 const WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER = 1.0;
@@ -8705,7 +8705,7 @@ function __shouldSmoothCanvasWheelPan(event, isTouchpad) {
     if (isTouchpad) return false;
     const isDiscreteWheel = __isCanvasDiscreteWheelEvent(event);
     if (!isDiscreteWheel) return false;
-    // Windows/Linux 离散滚轮启用“微平滑”以去掉档位感，同时关闭惯性拖尾。
+    // Windows/Linux 离散滚轮默认直达；如需实验性微平滑，仅由平台常量打开。
     if (CANVAS_RUNTIME_WINDOWS_LIKE) return WINDOWS_LINUX_WHEEL_PAN_MICRO_SMOOTH_ENABLED;
     return true;
 }
@@ -8741,6 +8741,9 @@ function resolveCanvasZoomInputMode(event) {
             && Number.isFinite(rawDeltaY)
             && Number.isInteger(rawDeltaX)
             && Number.isInteger(rawDeltaY);
+        if (CANVAS_RUNTIME_WINDOWS_LIKE && __isCanvasDiscreteWheelEvent(event)) {
+            return commitMode('wheel');
+        }
         const likelyWindowsLinuxCtrlSynthPinch = CANVAS_RUNTIME_WINDOWS_LIKE
             && primaryDelta <= WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_MAX
             && absDeltaX <= WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_X_MAX
@@ -13411,16 +13414,14 @@ function handleCanvasCustomScroll(event) {
         }, 300);
     }
 
-    // 触控板双指拖动优化：根据缩放比例调整灵敏度（缩得极小时对速度做上限，避免过快）
+    // 触控板连续输入保留原有缩放补偿；鼠标滚轮平移使用屏幕像素步长，避免低缩放跳太远、高缩放太慢。
     const zoomForScroll = getCanvasZoomForScrollFactor();
-    let scrollFactor = 1.0 / zoomForScroll;
-
-    // 根据缩放比例动态调整基础系数，让不同缩放级别下的滚动感觉更一致
-    // 缩放越大（放大状态），滚动速率应该越慢；缩放越小（缩小状态），滚动速率应该越快
-    const zoomAdjustment = Math.pow(zoomForScroll, 0.3); // 使用较小的指数，减少缩放对速率的影响
-    scrollFactor *= zoomAdjustment;
+    let scrollFactor = 1.0;
 
     if (isTouchpad) {
+        scrollFactor = 1.0 / zoomForScroll;
+        scrollFactor *= Math.pow(zoomForScroll, 0.3);
+
         // 触控板使用适中的滚动系数（降低灵敏度）
         scrollFactor *= 0.7; // 降低灵敏度（从1.4降到0.7）
 
@@ -13479,8 +13480,14 @@ function handleCanvasCustomScroll(event) {
             CanvasState.scrollAnimation.source = 'direct';
             CanvasState.panOffsetX += panDeltaX;
             CanvasState.panOffsetY += panDeltaY;
-            // 使用 RAF 去抖，合并多个滚动事件为一次渲染
-            scheduleScrollUpdate();
+            if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheel) {
+                pendingScrollRequest = null;
+                applyPanOffsetFast();
+                updateScrollbarThumbsLightweight();
+            } else {
+                // 使用 RAF 去抖，合并多个滚动事件为一次渲染
+                scheduleScrollUpdate();
+            }
         }
         __logCanvasWinInput('wheel-pan-apply', {
             event: __snapshotCanvasWheelEvent(event),
