@@ -5751,7 +5751,7 @@ function resolvePermanentPayloadSourceIDForSearch(node) {
     const bridge = window.CanvasProtocolBridge;
     if (bridge && typeof bridge.resolvePermanentNodeSourceID === 'function') {
         try {
-            return String(bridge.resolvePermanentNodeSourceID(node) || '').trim();
+            return String(bridge.resolvePermanentNodeSourceID(node, { allowGenerate: false }) || '').trim();
         } catch (_) { }
     }
     return '';
@@ -5919,7 +5919,10 @@ async function insertLargeFolderPayload(tempApi, sectionId, folderPayload, fallb
     if (typeof tempApi.createFolder !== 'function' || typeof tempApi.insertFromPayload !== 'function') return false;
 
     const folderTitle = folderPayload.title || fallbackTitle || 'Folder';
-    const folderId = tempApi.createFolder(sectionId, '', folderTitle);
+    const createOptions = {};
+    if (folderPayload.sourceID) createOptions.sourceID = folderPayload.sourceID;
+    if (folderPayload.__canvasPayloadSource) createOptions.__canvasPayloadSource = folderPayload.__canvasPayloadSource;
+    const folderId = tempApi.createFolder(sectionId, '', folderTitle, createOptions);
     if (!folderId) return false;
 
     const children = Array.isArray(folderPayload.children) ? folderPayload.children : [];
@@ -5966,7 +5969,17 @@ async function createTempSectionFromSearchResults() {
             section.source = 'search-result';
         }
 
-        const getPermanentTreeRoot = () => {
+        const getPermanentTreeRoot = async () => {
+            try {
+                const bridge = window.CanvasProtocolBridge;
+                if (bridge && typeof bridge.readPermanentTreeSnapshotFromBcs === 'function') {
+                    const tree = await bridge.readPermanentTreeSnapshotFromBcs({
+                        validateSourceID: false,
+                        assumeCleanWhenMissingState: true
+                    });
+                    if (Array.isArray(tree) && tree[0]) return tree[0];
+                }
+            } catch (_) { }
             try {
                 if (typeof cachedCurrentTree !== 'undefined' && Array.isArray(cachedCurrentTree)) return cachedCurrentTree[0] || null;
             } catch (_) { }
@@ -5980,7 +5993,7 @@ async function createTempSectionFromSearchResults() {
         let permanentNodeMap = null;
         if (needsPermanentLookup) {
             showCanvasToastSafe(isZh ? '正在整理文件夹结构…' : 'Preparing folder structure…', 'info', 1600);
-            permanentNodeMap = await buildPermanentNodeMap(getPermanentTreeRoot());
+            permanentNodeMap = await buildPermanentNodeMap(await getPermanentTreeRoot());
         }
 
         const payloadItems = [];
@@ -6027,6 +6040,7 @@ async function createTempSectionFromSearchResults() {
                     }
                     continue;
                 }
+                throw new Error(isZh ? '永久搜索结果缺少 sourceID，无法创建临时栏目。' : 'Permanent search result is missing sourceID; cannot create a temporary section.');
             }
 
             if (item.nodeType === 'folder') {

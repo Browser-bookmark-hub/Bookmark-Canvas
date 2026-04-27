@@ -54,10 +54,162 @@ function resolvePermanentPayloadSourceID(node) {
     const bridge = window.CanvasProtocolBridge;
     if (bridge && typeof bridge.resolvePermanentNodeSourceID === 'function') {
         try {
-            return String(bridge.resolvePermanentNodeSourceID(node) || '').trim();
+            return String(bridge.resolvePermanentNodeSourceID(node, { allowGenerate: false }) || '').trim();
         } catch (_) { }
     }
     return '';
+}
+
+async function readPermanentNodeFromBcs(nodeId) {
+    const id = String(nodeId || '').trim();
+    if (!id) return null;
+    try {
+        const bridge = window.CanvasProtocolBridge;
+        const tree = bridge && typeof bridge.readPermanentTreeSnapshotFromBcs === 'function'
+            ? await bridge.readPermanentTreeSnapshotFromBcs({
+                validateSourceID: false,
+                assumeCleanWhenMissingState: true
+            })
+            : null;
+        const stack = Array.isArray(tree) ? tree.slice() : [];
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node || typeof node !== 'object') continue;
+            if (String(node.id || '').trim() === id) return node;
+            if (Array.isArray(node.children)) {
+                for (let i = node.children.length - 1; i >= 0; i -= 1) {
+                    stack.push(node.children[i]);
+                }
+            }
+        }
+    } catch (_) { }
+    return null;
+}
+
+async function readPermanentNodeForPayload(nodeId) {
+    const bcsNode = await readPermanentNodeFromBcs(nodeId);
+    if (bcsNode) return bcsNode;
+    if (chrome && chrome.bookmarks && typeof chrome.bookmarks.getSubTree === 'function') {
+        const nodes = await chrome.bookmarks.getSubTree(nodeId);
+        return nodes && nodes[0] ? nodes[0] : null;
+    }
+    return null;
+}
+
+function getPermanentMutationBridge() {
+    const bridge = window && window.CanvasProtocolBridge ? window.CanvasProtocolBridge : null;
+    return bridge && typeof bridge.restorePermanentMainContentSnapshot === 'function' ? bridge : null;
+}
+
+async function rollbackPermanentBcsMutation(prepared, reason = '') {
+    const bridge = getPermanentMutationBridge();
+    if (!bridge || !prepared || !prepared.previousContent) return;
+    try {
+        await bridge.restorePermanentMainContentSnapshot(prepared.previousContent, {
+            assumeClean: false,
+            reason
+        });
+    } catch (rollbackError) {
+        console.warn('[Permanent JSON] rollback failed:', rollbackError);
+        try {
+            if (typeof bridge.syncPermanentMainTreeFromChromeBookmarks === 'function') {
+                await bridge.syncPermanentMainTreeFromChromeBookmarks({
+                    assumeClean: false,
+                    reason: reason || 'rollback-fallback'
+                });
+            }
+        } catch (_) { }
+    }
+}
+
+async function createPermanentBookmarkNode(createPayload, options = {}) {
+    if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.create !== 'function') {
+        throw new Error('Chrome bookmarks API unavailable');
+    }
+    const bridge = getPermanentMutationBridge();
+    let prepared = null;
+    if (bridge && typeof bridge.preparePermanentCreateNodeInBcs === 'function') {
+        prepared = await bridge.preparePermanentCreateNodeInBcs(createPayload, {
+            sourceID: options && options.sourceID
+        });
+    }
+    try {
+        const created = await chrome.bookmarks.create(createPayload);
+        try {
+            const sourceID = (prepared && prepared.sourceID) || (options && options.sourceID) || '';
+            if (created && created.id && sourceID && bridge && typeof bridge.rememberPendingPermanentNodeSourceID === 'function') {
+                bridge.rememberPendingPermanentNodeSourceID(created.id, sourceID);
+            }
+            if (prepared && bridge && typeof bridge.commitPermanentCreatedNodeInBcs === 'function') {
+                await bridge.commitPermanentCreatedNodeInBcs(prepared.pendingId, created, {
+                    sourceID
+                });
+            }
+        } catch (commitError) {
+            console.warn('[Permanent JSON] create commit failed, resyncing from Chrome:', commitError);
+            try {
+                if (bridge && typeof bridge.syncPermanentMainTreeFromChromeBookmarks === 'function') {
+                    await bridge.syncPermanentMainTreeFromChromeBookmarks({
+                        assumeClean: false,
+                        reason: 'create-commit-fallback'
+                    });
+                }
+            } catch (_) { }
+        }
+        return created;
+    } catch (error) {
+        await rollbackPermanentBcsMutation(prepared, 'create-failed');
+        throw error;
+    }
+}
+
+async function updatePermanentBookmarkNode(nodeId, updates) {
+    if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.update !== 'function') {
+        throw new Error('Chrome bookmarks API unavailable');
+    }
+    const bridge = getPermanentMutationBridge();
+    const prepared = bridge && typeof bridge.updatePermanentNodeInBcs === 'function'
+        ? await bridge.updatePermanentNodeInBcs(nodeId, updates, { assumeClean: false })
+        : null;
+    try {
+        return await chrome.bookmarks.update(nodeId, updates);
+    } catch (error) {
+        await rollbackPermanentBcsMutation(prepared, 'update-failed');
+        throw error;
+    }
+}
+
+async function removePermanentBookmarkNode(nodeId, isFolder = false) {
+    if (!chrome || !chrome.bookmarks) {
+        throw new Error('Chrome bookmarks API unavailable');
+    }
+    const bridge = getPermanentMutationBridge();
+    const prepared = bridge && typeof bridge.removePermanentNodeFromBcs === 'function'
+        ? await bridge.removePermanentNodeFromBcs(nodeId, { assumeClean: false })
+        : null;
+    try {
+        if (isFolder) return await chrome.bookmarks.removeTree(nodeId);
+        return await chrome.bookmarks.remove(nodeId);
+    } catch (error) {
+        await rollbackPermanentBcsMutation(prepared, 'remove-failed');
+        throw error;
+    }
+}
+
+async function movePermanentBookmarkNode(nodeId, target) {
+    if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.move !== 'function') {
+        throw new Error('Chrome bookmarks API unavailable');
+    }
+    const bridge = getPermanentMutationBridge();
+    const prepared = bridge && typeof bridge.movePermanentNodeInBcs === 'function'
+        ? await bridge.movePermanentNodeInBcs(nodeId, target, { assumeClean: false })
+        : null;
+    try {
+        return await chrome.bookmarks.move(nodeId, target);
+    } catch (error) {
+        await rollbackPermanentBcsMutation(prepared, 'move-failed');
+        throw error;
+    }
 }
 
 // 全局：默认打开方式与特定窗口/分组ID
@@ -3494,9 +3646,9 @@ async function pasteIntoTemp(context) {
                 payload = [];
                 if (chrome && chrome.bookmarks && bookmarkClipboard.nodeIds) {
                     for (const id of bookmarkClipboard.nodeIds) {
-                        const nodes = await chrome.bookmarks.getSubTree(id);
-                        if (nodes && nodes[0]) {
-                            payload.push(serializeBookmarkNode(nodes[0]));
+                        const node = await readPermanentNodeForPayload(id);
+                        if (node) {
+                            payload.push(serializeBookmarkNode(node));
                         }
                     }
                 }
@@ -3533,7 +3685,7 @@ async function pasteIntoTemp(context) {
                 for (const id of bookmarkClipboard.nodeIds) {
                     try {
                         if (chrome && chrome.bookmarks) {
-                            await chrome.bookmarks.removeTree(id);
+                            await removePermanentBookmarkNode(id, true);
                         }
                     } catch (error) {
                         console.warn('[临时栏目] 移除原始书签失败:', error);
@@ -4562,7 +4714,7 @@ async function __addTabsToBookmarkTree(target, tabs) {
             createPayload.index = insertIndex;
             insertIndex += 1;
         }
-        const created = await chrome.bookmarks.create(createPayload);
+        const created = await createPermanentBookmarkNode(createPayload);
         createdCount += 1;
         if (!firstCreated && created && created.id) {
             firstCreated = { id: String(created.id), type: 'bookmark' };
@@ -4729,7 +4881,7 @@ async function __addBookmarkAddItemsToTree(target, items) {
 
             let folderNode = null;
             try {
-                folderNode = await chrome.bookmarks.create(folderPayload);
+                folderNode = await createPermanentBookmarkNode(folderPayload);
             } catch (folderError) {
                 console.warn('[右键菜单] 创建分组文件夹失败，回退直插:', folderError);
             }
@@ -4786,7 +4938,7 @@ async function __addBookmarkAddItemsToTree(target, items) {
             insertIndex += 1;
         }
 
-        const created = await chrome.bookmarks.create(createPayload);
+        const created = await createPermanentBookmarkNode(createPayload);
         createdCount += 1;
         if (!firstCreated && created && created.id) {
             firstCreated = { id: String(created.id), type: 'bookmark' };
@@ -5193,7 +5345,7 @@ async function executeBookmarkAddAction(context, config, options = {}) {
 
             let folderNode = null;
             try {
-                folderNode = await chrome.bookmarks.create(folderPayload);
+                folderNode = await createPermanentBookmarkNode(folderPayload);
             } catch (folderError) {
                 console.warn('[右键菜单] 创建窗口文件夹失败，回退直插:', folderError);
             }
@@ -6271,7 +6423,7 @@ async function editBookmark(nodeId, currentTitle, currentUrl, isFolder) {
         if (chrome && chrome.bookmarks) {
             if (isFolder) {
                 if (newTitle !== currentTitleValue) {
-                    await chrome.bookmarks.update(nodeId, { title: newTitle });
+                    await updatePermanentBookmarkNode(nodeId, { title: newTitle });
                 }
             } else {
                 const updates = {};
@@ -6279,7 +6431,7 @@ async function editBookmark(nodeId, currentTitle, currentUrl, isFolder) {
                 if (newUrl !== currentUrlValue) updates.url = newUrl;
 
                 if (Object.keys(updates).length > 0) {
-                    await chrome.bookmarks.update(nodeId, updates);
+                    await updatePermanentBookmarkNode(nodeId, updates);
                 }
             }
         }
@@ -6321,7 +6473,7 @@ async function addBookmark(parentId, options = {}) {
             if (Number.isFinite(index)) {
                 payload.index = Math.max(0, Math.floor(index));
             }
-            return await chrome.bookmarks.create(payload);
+            return await createPermanentBookmarkNode(payload);
         }
     } catch (error) {
         console.error('[添加书签] 失败:', error);
@@ -6359,7 +6511,7 @@ async function addFolder(parentId, options = {}) {
             if (Number.isFinite(index)) {
                 payload.index = Math.max(0, Math.floor(index));
             }
-            return await chrome.bookmarks.create(payload);
+            return await createPermanentBookmarkNode(payload);
         }
     } catch (error) {
         console.error('[添加文件夹] 失败:', error);
@@ -6388,9 +6540,9 @@ async function copyUrl(url) {
 async function deleteBookmark(nodeId, nodeTitle, isFolder) {
     if (chrome && chrome.bookmarks) {
         if (isFolder) {
-            await chrome.bookmarks.removeTree(nodeId);
+            await removePermanentBookmarkNode(nodeId, true);
         } else {
-            await chrome.bookmarks.remove(nodeId);
+            await removePermanentBookmarkNode(nodeId, false);
         }
     }
 }
@@ -6403,8 +6555,7 @@ async function cutBookmark(nodeId, nodeTitle, isFolder) {
     }
 
     try {
-        const nodes = await chrome.bookmarks.getSubTree(nodeId);
-        const node = nodes && nodes[0];
+        const node = await readPermanentNodeForPayload(nodeId);
 
         bookmarkClipboard = {
             action: 'cut',
@@ -6433,7 +6584,7 @@ async function copyBookmark(nodeId, nodeTitle, isFolder) {
     }
 
     try {
-        const [node] = await chrome.bookmarks.getSubTree(nodeId);
+        const node = await readPermanentNodeForPayload(nodeId);
 
         bookmarkClipboard = {
             action: 'copy',
@@ -6484,8 +6635,9 @@ async function pasteBookmark(targetNodeId, isFolder) {
         if (bookmarkClipboard.source === 'temporary' || bookmarkClipboard.source === 'mixed') {
             const payload = bookmarkClipboard.payload || [];
             if (payload.length) {
+                const preserveSourceID = bookmarkClipboard.source === 'temporary' && bookmarkClipboard.action === 'cut';
                 for (const item of payload) {
-                    await duplicateNode(item, targetFolderId);
+                    await duplicateNode(item, targetFolderId, { preserveSourceID });
                 }
             }
             if (bookmarkClipboard.source === 'mixed') {
@@ -6504,7 +6656,7 @@ async function pasteBookmark(targetNodeId, isFolder) {
         } else if (bookmarkClipboard.source === 'permanent') {
             if (bookmarkClipboard.action === 'cut' && bookmarkClipboard.nodeIds) {
                 for (const id of bookmarkClipboard.nodeIds) {
-                    await chrome.bookmarks.move(id, {
+                    await movePermanentBookmarkNode(id, {
                         parentId: targetFolderId
                     });
                 }
@@ -6514,7 +6666,7 @@ async function pasteBookmark(targetNodeId, isFolder) {
             } else if (bookmarkClipboard.action === 'copy') {
                 const payload = bookmarkClipboard.payload || (bookmarkClipboard.nodeData ? [bookmarkClipboard.nodeData] : []);
                 for (const node of payload) {
-                    await duplicateNode(node, targetFolderId);
+                    await duplicateNode(node, targetFolderId, { preserveSourceID: false });
                 }
             }
         }
@@ -6529,7 +6681,7 @@ async function pasteBookmark(targetNodeId, isFolder) {
 }
 
 // 递归复制节点
-async function duplicateNode(node, parentId) {
+async function duplicateNode(node, parentId, options = {}) {
     const newNode = {
         parentId: parentId,
         title: node.title
@@ -6540,12 +6692,22 @@ async function duplicateNode(node, parentId) {
     }
 
     // 创建节点
-    const created = await chrome.bookmarks.create(newNode);
+    const created = await createPermanentBookmarkNode(newNode, {
+        sourceID: options && options.preserveSourceID ? String(node && node.sourceID || '').trim() : ''
+    });
+    try {
+        const preserveSourceID = !!(options && options.preserveSourceID);
+        const sourceID = preserveSourceID ? String(node && node.sourceID || '').trim() : '';
+        const bridge = window && window.CanvasProtocolBridge;
+        if (created && created.id && sourceID && bridge && typeof bridge.rememberPendingPermanentNodeSourceID === 'function') {
+            bridge.rememberPendingPermanentNodeSourceID(created.id, sourceID);
+        }
+    } catch (_) { }
 
     // 如果有子节点，递归复制
     if (node.children) {
         for (const child of node.children) {
-            await duplicateNode(child, created.id);
+            await duplicateNode(child, created.id, options);
         }
     }
 
@@ -6864,9 +7026,9 @@ async function copySelected() {
         try {
             const payload = markClipboardPayloadSource(tempPayload, 'temporary');
             for (const nodeId of permanentIds) {
-                const nodes = await chrome.bookmarks.getSubTree(nodeId);
-                if (nodes && nodes[0]) {
-                    payload.push(...markClipboardPayloadSource([serializeBookmarkNode(nodes[0])], 'permanent'));
+                const node = await readPermanentNodeForPayload(nodeId);
+                if (node) {
+                    payload.push(...markClipboardPayloadSource([serializeBookmarkNode(node)], 'permanent'));
                 }
             }
             bookmarkClipboard = {
@@ -6902,9 +7064,9 @@ async function copySelected() {
     try {
         const payload = [];
         for (const nodeId of permanentIds) {
-            const nodes = await chrome.bookmarks.getSubTree(nodeId);
-            if (nodes && nodes[0]) {
-                payload.push(serializeBookmarkNode(nodes[0]));
+            const node = await readPermanentNodeForPayload(nodeId);
+            if (node) {
+                payload.push(serializeBookmarkNode(node));
             }
         }
         bookmarkClipboard = {
@@ -8677,9 +8839,9 @@ async function batchCut() {
     try {
         const payload = [];
         for (const nodeId of permanentIds) {
-            const nodes = await chrome.bookmarks.getSubTree(nodeId);
-            if (nodes && nodes[0]) {
-                payload.push(serializeBookmarkNode(nodes[0]));
+            const node = await readPermanentNodeForPayload(nodeId);
+            if (node) {
+                payload.push(serializeBookmarkNode(node));
             }
         }
         bookmarkClipboard = {
@@ -8756,9 +8918,9 @@ async function batchDelete() {
             for (const rootNode of permanentRoots) {
                 try {
                     if (rootNode.url) {
-                        await chrome.bookmarks.remove(rootNode.id);
+                        await removePermanentBookmarkNode(rootNode.id, false);
                     } else {
-                        await chrome.bookmarks.removeTree(rootNode.id);
+                        await removePermanentBookmarkNode(rootNode.id, true);
                     }
                     successCount++;
                 } catch (error) {
@@ -8856,7 +9018,7 @@ async function batchRename() {
             for (const nodeId of permanentIds) {
                 const [node] = await chrome.bookmarks.get(nodeId);
                 const newTitle = `${prefix || ''}${node.title}${suffix || ''}`;
-                await chrome.bookmarks.update(nodeId, { title: newTitle });
+                await updatePermanentBookmarkNode(nodeId, { title: newTitle });
                 count++;
             }
         }
@@ -8937,9 +9099,9 @@ async function batchExportHTML() {
 
         // 永久书签（递归导出）
         for (const nodeId of permanentIds) {
-            const nodes = await chrome.bookmarks.getSubTree(nodeId);
-            if (nodes && nodes[0]) {
-                html += renderPermanentNodeHtml(nodes[0], 1);
+            const node = await readPermanentNodeForPayload(nodeId);
+            if (node) {
+                html += renderPermanentNodeHtml(node, 1);
             }
         }
 
@@ -9013,11 +9175,11 @@ async function batchExportJSON() {
 
         // 永久书签（递归导出）
         for (const nodeId of permanentIds) {
-            const nodes = await chrome.bookmarks.getSubTree(nodeId);
-            if (nodes && nodes[0]) {
+            const node = await readPermanentNodeForPayload(nodeId);
+            if (node) {
                 bookmarks.push({
                     source: 'permanent',
-                    item: serializeBookmarkNode(nodes[0])
+                    item: serializeBookmarkNode(node)
                 });
             }
         }
@@ -9146,7 +9308,7 @@ async function batchMergeFolder() {
     try {
         // 创建新文件夹（默认在根目录的"其他书签"中）
         const bookmarkBar = (await chrome.bookmarks.getTree())[0].children.find(n => n.id === '1');
-        const newFolder = await chrome.bookmarks.create({
+        const newFolder = await createPermanentBookmarkNode({
             parentId: bookmarkBar.id,
             title: folderName
         });
@@ -9155,7 +9317,7 @@ async function batchMergeFolder() {
         let count = 0;
         for (const nodeId of permanentIds) {
             try {
-                await chrome.bookmarks.move(nodeId, { parentId: newFolder.id });
+                await movePermanentBookmarkNode(nodeId, { parentId: newFolder.id });
                 count++;
             } catch (error) {
                 console.error('[批量] 移动失败:', nodeId, error);

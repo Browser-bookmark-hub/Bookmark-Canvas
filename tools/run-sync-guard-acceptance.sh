@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 SYNC_FILE="history_html/sync/obsidian-git-sync.js"
 TEMP_FILE="history_html/bookmark_canvas_module.js"
+HISTORY_FILE="history_html/history.js"
 SEARCH_FILE="history_html/search/search.js"
 CONTEXT_MENU_FILE="history_html/bookmark_tree_context_menu.js"
 DRAG_DROP_FILE="history_html/bookmark_tree_drag_drop.js"
@@ -72,6 +73,21 @@ assert_pattern() {
   fi
 }
 
+assert_pattern_count() {
+  local file="$1"
+  local pattern="$2"
+  local expected="$3"
+  local label="$4"
+  local count
+  count="$(rg -n --no-heading --pcre2 "$pattern" "$file" 2>/dev/null | wc -l | tr -d '[:space:]')"
+  if [[ "$count" == "$expected" ]]; then
+    pass "$label"
+  else
+    fail "$label"
+    printf '  expected count: %s actual: %s pattern: %s\n' "$expected" "${count:-0}" "$pattern"
+  fi
+}
+
 assert_original_id_absent() {
   local output
   local hidden_hits
@@ -123,6 +139,7 @@ main() {
 
   section "Syntax check"
   run_node_check "$TEMP_FILE"
+  run_node_check "$HISTORY_FILE"
   run_node_check "$SEARCH_FILE"
   run_node_check "$SYNC_FILE"
   run_node_check "$CONTEXT_MENU_FILE"
@@ -177,9 +194,13 @@ main() {
     "push recovery lock: stage trigger coverage widened"
 
   assert_pattern "$TEMP_FILE" "const PERMANENT_NODE_SOURCE_ID_MAP_STORAGE_KEY = 'bcs:perm:source-id-map';" \
-    "permanent sourceID: mapping storage key exists"
-  assert_pattern "$TEMP_FILE" "const PERMANENT_NODE_SOURCE_ID_EXPORT_KEYS_STORAGE_KEY = 'bcs:perm:source-id-export-keys';" \
-    "permanent sourceID: export-key storage key exists"
+    "permanent sourceID: legacy map key exists only for migration"
+  assert_pattern "$TEMP_FILE" "const oldSourceIDMap = __readPermanentNodeSourceIDMap\\(\\);" \
+    "permanent sourceID: legacy map read is confined to migration"
+  assert_pattern_count "$TEMP_FILE" "__readPermanentNodeSourceIDMap\\(" "2" \
+    "permanent sourceID: legacy map has exactly function+迁移 references"
+  assert_no_match "source-id-export" \
+    "permanent sourceID: old export-key table is disabled"
   assert_pattern "$TEMP_FILE" "function __generateCanvasHighEntropySourceID\\(\\)" \
     "sourceID generation: shared high-entropy generator exists"
   assert_pattern "$TEMP_FILE" "const __CANVAS_SOURCE_ID_RANDOM_LENGTH = 8;" \
@@ -204,30 +225,92 @@ main() {
     "temporary sourceID: manual JSON/HTML import does not repair missing IDs during save"
   assert_pattern "$TEMP_FILE" "function __buildPermanentTreeProtocolNode\\(nodeInput, options = \\{\\}\\)" \
     "permanent sourceID: protocol node builder exists"
-  assert_pattern "$TEMP_FILE" "function __collectActiveTempSourceIDSet\\(\\)" \
-    "permanent sourceID: active temporary references are collected"
-  assert_pattern "$TEMP_FILE" "const shouldIncludeSourceID = !!\\(sourceID && \\(" \
-    "permanent sourceID: export is conditional, not whole-tree eager"
-  assert_pattern "$TEMP_FILE" "activeTempSourceIDSet && activeTempSourceIDSet\\.has\\(sourceID\\)" \
-    "permanent sourceID: active temporary references keep permanent IDs exported"
+  assert_pattern "$TEMP_FILE" "const BCS_PERM_MAIN_STATE_KEY = 'bcs:perm:main:state';" \
+    "permanent JSON: main content state key exists"
+  assert_pattern "$TEMP_FILE" "const BCS_PERM_COPY_STATE_PREFIX = 'bcs:perm:copy-state:';" \
+    "permanent JSON: copy-anchor state key exists"
+  assert_pattern "$HISTORY_FILE" "function __isCanvasPermanentTreeContainer\\(treeContainer\\)" \
+    "permanent copy view state: canvas permanent tree can be identified"
+  assert_pattern "$HISTORY_FILE" "const sourceID = String\\(item\\.getAttribute \\? item\\.getAttribute\\('data-source-id'\\) \\|\\| '' : ''\\)\\.trim\\(\\);" \
+    "permanent copy view state: expand state prefers sourceID"
+  assert_pattern "$HISTORY_FILE" 'data-source-id="\$\{CSS\.escape\(id\)\}"' \
+    "permanent copy view state: rerender restores by sourceID"
+  assert_pattern "$HISTORY_FILE" "if \\(preferSourceID\\) \\{" \
+    "permanent copy view state: restore path checks sourceID before local id"
+  assert_pattern "$TEMP_FILE" "function __buildPermanentMainSyncPayload\\(contentInput\\)" \
+    "permanent JSON: shared sync payload builder exists"
+  assert_pattern "$TEMP_FILE" "function __stripPermanentLocalIdsFromTree\\(treeInput\\)" \
+    "permanent JSON: local Chrome id stripping is structural"
+  assert_pattern "$TEMP_FILE" "function __assertPermanentTreeSourceIDs\\(treeInput, context = ''\\)" \
+    "permanent JSON: sourceID integrity assertion exists"
+  assert_pattern "$TEMP_FILE" "async function __preparePermanentCreateNodeInBcs\\(createInfoInput, options = \\{\\}\\)" \
+    "permanent JSON-first ops: create prewrites BCS tree"
+  assert_pattern "$TEMP_FILE" "async function __commitPermanentCreatedNodeInBcs\\(pendingIdInput, createdNodeInput, options = \\{\\}\\)" \
+    "permanent JSON-first ops: create commits Chrome id"
+  assert_pattern "$TEMP_FILE" "async function __updatePermanentNodeInBcs\\(nodeIdInput, updatesInput, options = \\{\\}\\)" \
+    "permanent JSON-first ops: update prewrites BCS tree"
+  assert_pattern "$TEMP_FILE" "async function __removePermanentNodeFromBcs\\(nodeIdInput, options = \\{\\}\\)" \
+    "permanent JSON-first ops: remove prewrites BCS tree"
+  assert_pattern "$TEMP_FILE" "async function __movePermanentNodeInBcs\\(nodeIdInput, targetInput, options = \\{\\}\\)" \
+    "permanent JSON-first ops: move prewrites BCS tree"
+  assert_pattern "$TEMP_FILE" "async function __restorePermanentMainContentSnapshot\\(contentInput, options = \\{\\}\\)" \
+    "permanent JSON-first ops: failed Chrome operation can rollback"
+  assert_pattern "$CONTEXT_MENU_FILE" "async function createPermanentBookmarkNode\\(createPayload, options = \\{\\}\\)" \
+    "permanent JSON-first ops: context menu uses create wrapper"
+  assert_pattern "$CONTEXT_MENU_FILE" "await bridge\\.preparePermanentCreateNodeInBcs\\(createPayload" \
+    "permanent JSON-first ops: context create wrapper prewrites BCS"
+  assert_pattern "$CONTEXT_MENU_FILE" "await bridge\\.updatePermanentNodeInBcs\\(nodeId, updates" \
+    "permanent JSON-first ops: context update wrapper prewrites BCS"
+  assert_pattern "$CONTEXT_MENU_FILE" "await bridge\\.removePermanentNodeFromBcs\\(nodeId" \
+    "permanent JSON-first ops: context remove wrapper prewrites BCS"
+  assert_pattern "$CONTEXT_MENU_FILE" "await bridge\\.movePermanentNodeInBcs\\(nodeId, target" \
+    "permanent JSON-first ops: context move wrapper prewrites BCS"
+  assert_pattern "$DRAG_DROP_FILE" "async function createPermanentBookmarkNode\\(createPayload, options = \\{\\}\\)" \
+    "permanent JSON-first ops: drag/drop uses create wrapper"
+  assert_pattern "$DRAG_DROP_FILE" "await bridge\\.movePermanentNodeInBcs\\(nodeId, target" \
+    "permanent JSON-first ops: drag/drop move prewrites BCS"
+  assert_pattern "$HISTORY_FILE" "await bridge\\.preparePermanentCreateNodeInBcs\\(info, \\{\\}\\)" \
+    "permanent JSON-first ops: quick-add prewrites BCS before Chrome create"
+  assert_pattern "$TEMP_FILE" "const nodeSourceID = String\\(item\\.getAttribute \\? item\\.getAttribute\\('data-source-id'\\) \\|\\| '' : ''\\)\\.trim\\(\\);" \
+    "permanent sourceID: drag-out payload reads DOM sourceID"
+  assert_pattern "$SEARCH_FILE" "if \\(folderPayload\\.sourceID\\) createOptions\\.sourceID = folderPayload\\.sourceID;" \
+    "permanent sourceID: search large-folder root preserves sourceID"
+  assert_pattern "$SEARCH_FILE" "tempApi\\.createFolder\\(sectionId, '', folderTitle, createOptions\\)" \
+    "permanent sourceID: search large-folder create passes sourceID options"
+  assert_pattern "$TEMP_FILE" "async function __readPermanentTreeSnapshotFromBcs\\(options = \\{\\}\\)" \
+    "permanent JSON: render/sync reads BCS tree source"
+  assert_pattern "$TEMP_FILE" "async function __replacePermanentMainContentFromSyncPayload\\(payloadInput, options = \\{\\}\\)" \
+    "permanent JSON: pull can replace local canonical content"
+  assert_pattern "$TEMP_FILE" "async function __writePermanentTreeSnapshotAfterChromeApply\\(localTreeInput, remoteTreeInput, options = \\{\\}\\)" \
+    "permanent JSON: Chrome-assigned ids are written back into BCS"
+  assert_pattern "$TEMP_FILE" "async function __syncPermanentMainTreeFromChromeBookmarks\\(options = \\{\\}\\)" \
+    "permanent JSON: native Chrome changes sync back to BCS"
+  assert_no_match "updates\\[BCS_PERM_MAIN_KEY\\] = __buildBcsGuardedPayload" \
+    "permanent JSON: main content is not stored as guarded state payload"
+  assert_no_match "(^|[^_[:alnum:]])readPermanentNodeSourceIDMap\\(" \
+    "permanent sourceID: legacy map is not exposed as a runtime bridge"
+  assert_no_match "__writePermanentNodeSourceIDMap" \
+    "permanent sourceID: legacy map is not written in target mode"
+  assert_no_match "__permanentNodeSourceIDByChromeId" \
+    "permanent sourceID: no runtime Chrome-id identity index"
   assert_pattern "$TEMP_FILE" "allowGenerate: options && options\\.allowGenerateSourceID === true" \
     "permanent sourceID: snapshot generation is opt-in"
-  assert_pattern "$TEMP_FILE" "markExportable: false" \
-    "permanent sourceID: pure snapshot does not mark nodes exportable"
-  assert_pattern "$TEMP_FILE" "bookmarkNode\\[PERMANENT_NODE_SOURCE_ID_KEY\\] = sourceID;" \
-    "permanent sourceID: bookmark export can write conditional sourceID"
-  assert_pattern "$TEMP_FILE" "node\\[PERMANENT_NODE_SOURCE_ID_KEY\\] = sourceID;" \
-    "permanent sourceID: folder export can write conditional sourceID"
+  assert_pattern "$TEMP_FILE" "if \\(sourceID\\) bookmarkNode\\[PERMANENT_NODE_SOURCE_ID_KEY\\] = sourceID;" \
+    "permanent sourceID: bookmark export preserves embedded sourceID"
+  assert_pattern "$TEMP_FILE" "if \\(sourceID\\) node\\[PERMANENT_NODE_SOURCE_ID_KEY\\] = sourceID;" \
+    "permanent sourceID: folder export preserves embedded sourceID"
+  assert_pattern "$TEMP_FILE" "throw new Error\\('Permanent payload is missing sourceID'\\);" \
+    "permanent sourceID: permanent-to-temp fails closed when sourceID is missing"
   assert_pattern "$TEMP_FILE" "resolvePermanentNodeSourceID\\(nodeInput, options = \\{\\}\\)" \
     "permanent sourceID: bridge resolver exposed"
   assert_pattern "$TEMP_FILE" "recordPermanentNodeSourceIDMappingWithOptions\\(chromeId, sourceID, options = \\{\\}\\)" \
-    "permanent sourceID: bridge map persistence exposes exportability control"
+    "permanent sourceID: existing bridge entry records pending ids only"
   assert_pattern "$TEMP_FILE" "persistPermanentSourceIDMapFromTree\\(localTreeInput, remoteTreeInput\\)" \
-    "permanent sourceID: bridge map persistence exposed"
+    "permanent sourceID: existing bridge entry writes canonical BCS tree"
   assert_pattern "$TEMP_FILE" "const clonePermanentNodeForTempPayload = \\(node\\) => \\{" \
     "permanent sourceID: canvas permanent-to-temp payload resolver exists"
-  assert_pattern "$TEMP_FILE" "const sourceID = __resolvePermanentNodeSourceID\\(node\\);" \
-    "permanent sourceID: canvas permanent-to-temp payload generates/inherits IDs"
+  assert_pattern "$TEMP_FILE" "const sourceID = __resolvePermanentNodeSourceID\\(node, \\{ allowGenerate: false \\}\\);" \
+    "permanent sourceID: canvas permanent-to-temp payload inherits embedded IDs without generation"
   assert_pattern "$TEMP_FILE" "node\\.children\\.map\\(clonePermanentNodeForTempPayload\\)" \
     "permanent sourceID: canvas permanent-to-temp payload handles folder descendants"
   assert_pattern "$TEMP_FILE" "function clonePermanentBookmarkNodeForTempPayload\\(node\\)" \
@@ -248,12 +331,18 @@ main() {
     "permanent sourceID: context-menu permanent payloads carry source marker"
   assert_pattern "$DRAG_DROP_FILE" "__canvasPayloadSource: 'permanent'," \
     "permanent sourceID: tree drag permanent payloads carry source marker"
+  assert_pattern "$CONTEXT_MENU_FILE" "async function readPermanentNodeFromBcs\\(nodeId\\)" \
+    "permanent sourceID: context-menu payloads can read embedded BCS sourceID"
+  assert_pattern "$DRAG_DROP_FILE" "async function readPermanentNodeFromBcs\\(nodeId\\)" \
+    "permanent sourceID: tree drag payloads can read embedded BCS sourceID"
   assert_pattern "$CONTEXT_MENU_FILE" "function markClipboardPayloadSource\\(itemsInput, sourceKind\\)" \
     "permanent sourceID: mixed clipboard payload tracks source kind"
   assert_pattern "$CONTEXT_MENU_FILE" "const permanentPayload = payload\\.filter\\(item => String\\(item && item\\.__canvasPayloadSource \\|\\| ''\\) === 'permanent'\\);" \
     "permanent sourceID: mixed paste separates permanent payload"
   assert_pattern "$CONTEXT_MENU_FILE" "manager\\.insertFromPayload\\(target\\.sectionId, target\\.parentId, permanentPayload, insertIndex, \\{" \
     "permanent sourceID: mixed permanent paste has independent insert options"
+  assert_pattern "$CONTEXT_MENU_FILE" "const preserveSourceID = bookmarkClipboard\\.source === 'temporary' && bookmarkClipboard\\.action === 'cut';" \
+    "permanent sourceID: temp cut-to-permanent preserves sourceID"
   assert_pattern "$SEARCH_FILE" "function buildSearchBookmarkPayload\\(item, isZh\\)" \
     "permanent sourceID: search temp payload builder is centralized"
   assert_pattern "$SEARCH_FILE" "const needsPermanentLookup = items\\.some\\(item => item && item\\.source === 'permanent'\\);" \
@@ -262,20 +351,26 @@ main() {
     "permanent sourceID: search permanent payloads carry source marker"
   assert_pattern "$SEARCH_FILE" "payloadItems\\.push\\(buildSearchBookmarkPayload\\(item, isZh\\)\\);" \
     "permanent sourceID: search bookmark fallback preserves permanent source"
-  assert_pattern "$SYNC_FILE" "function attachPermanentSourceIDsForComparison\\(treeInput\\)" \
+  assert_pattern "$SYNC_FILE" "function attachPermanentSourceIDsForComparison\\(treeInput, options = \\{\\}\\)" \
     "permanent sourceID: local compare tree receives sourceID"
-  assert_pattern "$SYNC_FILE" "allowGenerate: false," \
+  assert_pattern "$SYNC_FILE" "async function readPermanentSourceIDMapFromBcsForComparison\\(\\)" \
+    "permanent sourceID: local compare maps BCS embedded sourceIDs by Chrome id"
+  assert_pattern "$SYNC_FILE" "sourceIDMap: localSourceIDMap" \
+    "permanent sourceID: compare receives BCS sourceID map"
+  assert_pattern "$SYNC_FILE" "allowGenerate: false" \
     "permanent sourceID: compare does not generate IDs"
-  assert_pattern "$SYNC_FILE" "markExportable: false" \
-    "permanent sourceID: compare does not mark exportable IDs"
-  assert_pattern "$SYNC_FILE" "recordPermanentNodeSourceIDMappingWithOptions\\(chromeId, sourceID, \\{ exportable: false \\}\\)" \
-    "permanent sourceID: remote apply mapping does not export every remote ID"
+  assert_pattern "$SYNC_FILE" "throw error;" \
+    "permanent JSON: BCS replace failure aborts pull apply"
+  assert_pattern "$SYNC_FILE" "bridge\\.rememberPendingPermanentNodeSourceID\\(chromeId, sourceID\\);" \
+    "permanent sourceID: remote apply records pending ids without legacy map"
+  assert_pattern "$SYNC_FILE" "bridge\\.writePermanentTreeSnapshotAfterChromeApply\\(localTree, remoteTree, \\{" \
+    "permanent JSON: remote apply writes Chrome ids back into BCS tree"
   assert_pattern "$SYNC_FILE" "bookmarkComparable\\.sourceID = sourceID;" \
     "permanent sourceID: bookmark comparable includes sourceID"
   assert_pattern "$SYNC_FILE" "folderComparable\\.sourceID = sourceID;" \
     "permanent sourceID: folder comparable includes sourceID"
-  assert_no_match "await persistPermanentSourceIDMapAfterApply\\(localTree, remoteTree\\);" \
-    "permanent sourceID: same/no-change pull does not persist mapping"
+  assert_pattern "$SYNC_FILE" "await persistPermanentSourceIDMapAfterApply\\(localTree, remoteTree\\);" \
+    "permanent JSON: same/no-change pull still cleans Chrome id writeback"
   assert_no_match "recordCreatedPermanentPayloadSourceID" \
     "permanent sourceID: temp/permanent copy-create does not inherit payload IDs"
   assert_pattern "$SYNC_FILE" "await recordCreatedPermanentNodeSourceID\\(created, node\\);" \

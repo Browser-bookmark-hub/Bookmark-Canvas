@@ -2936,11 +2936,12 @@ function __captureTreeExpandedNodeIds(tree) {
     const expanded = new Set();
     if (!tree) return expanded;
     try {
+        const preferSourceID = __isCanvasPermanentTreeContainer(tree);
         tree.querySelectorAll('.tree-children.expanded').forEach(children => {
             const node = children.closest('.tree-node');
             const item = node ? node.querySelector(':scope > .tree-item[data-node-id]') : null;
-            const nodeId = item && item.dataset ? item.dataset.nodeId : null;
-            if (nodeId) expanded.add(String(nodeId));
+            const stableId = __getTreeExpandStateIdentity(item, preferSourceID);
+            if (stableId) expanded.add(stableId);
         });
     } catch (_) { }
     return expanded;
@@ -2966,10 +2967,10 @@ function __applyTreeExpandedNodeIds(tree, expandedNodeIds) {
     if (!tree || !expandedNodeIds) return;
     const expanded = expandedNodeIds instanceof Set ? expandedNodeIds : new Set(expandedNodeIds);
     if (!expanded.size) return;
-    expanded.forEach(nodeId => {
+    const preferSourceID = __isCanvasPermanentTreeContainer(tree);
+    expanded.forEach(stableId => {
         try {
-            const selector = `.tree-item[data-node-id="${CSS.escape(String(nodeId))}"]`;
-            const item = tree.querySelector(selector);
+            const item = __findTreeItemByExpandStateIdentity(tree, stableId, preferSourceID);
             if (!item) return;
             const node = item.closest('.tree-node');
             if (!node) return;
@@ -3184,9 +3185,10 @@ function __lazyLoadExpandedFolders(tree, expandedNodeIds) {
     try {
         const ids = expandedNodeIds instanceof Set ? expandedNodeIds : new Set(expandedNodeIds);
         if (!ids.size) return;
-        ids.forEach((nodeId) => {
+        const preferSourceID = __isCanvasPermanentTreeContainer(tree);
+        ids.forEach((stableId) => {
             try {
-                const item = tree.querySelector(`.tree-item[data-node-id="${CSS.escape(String(nodeId))}"]`);
+                const item = __findTreeItemByExpandStateIdentity(tree, stableId, preferSourceID);
                 if (!item) return;
                 const node = item.closest('.tree-node');
                 if (!node) return;
@@ -8446,21 +8448,79 @@ async function addTabsToBlankNode(tabs, scope, options = {}) {
     try { showToast(msg); } catch (_) { }
 }
 
-function bookmarksCreate(info) {
-    return new Promise((resolve, reject) => {
-        if (!browserAPI || !browserAPI.bookmarks || typeof browserAPI.bookmarks.create !== 'function') {
-            reject(new Error('bookmarks API not available'));
-            return;
-        }
-        browserAPI.bookmarks.create(info, (node) => {
-            const err = browserAPI.runtime && browserAPI.runtime.lastError;
-            if (err) {
-                reject(new Error(err.message || 'bookmarks.create failed'));
+function getPermanentMutationBridgeForHistory() {
+    const bridge = window && window.CanvasProtocolBridge ? window.CanvasProtocolBridge : null;
+    return bridge && typeof bridge.restorePermanentMainContentSnapshot === 'function' ? bridge : null;
+}
+
+async function rollbackPermanentBcsMutationForHistory(prepared, reason = '') {
+    const bridge = getPermanentMutationBridgeForHistory();
+    if (!bridge || !prepared || !prepared.previousContent) return;
+    try {
+        await bridge.restorePermanentMainContentSnapshot(prepared.previousContent, {
+            assumeClean: false,
+            reason
+        });
+    } catch (rollbackError) {
+        console.warn('[Permanent JSON] rollback failed:', rollbackError);
+        try {
+            if (typeof bridge.syncPermanentMainTreeFromChromeBookmarks === 'function') {
+                await bridge.syncPermanentMainTreeFromChromeBookmarks({
+                    assumeClean: false,
+                    reason: reason || 'rollback-fallback'
+                });
+            }
+        } catch (_) { }
+    }
+}
+
+async function bookmarksCreate(info) {
+    const bridge = getPermanentMutationBridgeForHistory();
+    let prepared = null;
+    if (bridge && typeof bridge.preparePermanentCreateNodeInBcs === 'function') {
+        prepared = await bridge.preparePermanentCreateNodeInBcs(info, {});
+    }
+    try {
+        const created = await new Promise((resolve, reject) => {
+            if (!browserAPI || !browserAPI.bookmarks || typeof browserAPI.bookmarks.create !== 'function') {
+                reject(new Error('bookmarks API not available'));
                 return;
             }
-            resolve(node);
+            browserAPI.bookmarks.create(info, (node) => {
+                const err = browserAPI.runtime && browserAPI.runtime.lastError;
+                if (err) {
+                    reject(new Error(err.message || 'bookmarks.create failed'));
+                    return;
+                }
+                resolve(node);
+            });
         });
-    });
+        try {
+            const sourceID = prepared && prepared.sourceID ? prepared.sourceID : '';
+            if (created && created.id && sourceID && bridge && typeof bridge.rememberPendingPermanentNodeSourceID === 'function') {
+                bridge.rememberPendingPermanentNodeSourceID(created.id, sourceID);
+            }
+            if (prepared && bridge && typeof bridge.commitPermanentCreatedNodeInBcs === 'function') {
+                await bridge.commitPermanentCreatedNodeInBcs(prepared.pendingId, created, {
+                    sourceID
+                });
+            }
+        } catch (commitError) {
+            console.warn('[Permanent JSON] create commit failed, resyncing from Chrome:', commitError);
+            try {
+                if (bridge && typeof bridge.syncPermanentMainTreeFromChromeBookmarks === 'function') {
+                    await bridge.syncPermanentMainTreeFromChromeBookmarks({
+                        assumeClean: false,
+                        reason: 'create-commit-fallback'
+                    });
+                }
+            } catch (_) { }
+        }
+        return created;
+    } catch (error) {
+        await rollbackPermanentBcsMutationForHistory(prepared, 'create-failed');
+        throw error;
+    }
 }
 
 async function getBookmarksBarId() {
@@ -11316,6 +11376,20 @@ function getTreeFingerprint(tree) {
 // 从 background.js 获取书签树快照（优先走缓存，失败再直连 getTree）
 async function getBookmarkTreeSnapshot() {
     try {
+        const bridge = window.CanvasProtocolBridge;
+        if (bridge && typeof bridge.readPermanentTreeSnapshotFromBcs === 'function') {
+            const tree = await bridge.readPermanentTreeSnapshotFromBcs({
+                validateSourceID: false,
+                assumeCleanWhenMissingState: true
+            });
+            if (Array.isArray(tree) && tree.length) {
+                return { tree, version: null };
+            }
+        }
+    } catch (e) {
+        console.warn('[TreeSnapshot] 读取永久 JSON 真相源失败，回退后台快照:', e);
+    }
+    try {
         if (browserAPI && browserAPI.runtime && typeof browserAPI.runtime.sendMessage === 'function') {
             const resp = await browserAPI.runtime.sendMessage({ action: 'getBookmarkSnapshot' });
             if (resp && resp.success && Array.isArray(resp.tree)) {
@@ -11327,6 +11401,30 @@ async function getBookmarkTreeSnapshot() {
     }
     const tree = await new Promise(resolve => browserAPI.bookmarks.getTree(resolve));
     return { tree, version: null };
+}
+
+let permanentMainStorageSyncTimer = null;
+function schedulePermanentMainStorageSyncFromChrome(reason = '', delayMs = 180) {
+    try {
+        if (permanentMainStorageSyncTimer) clearTimeout(permanentMainStorageSyncTimer);
+        permanentMainStorageSyncTimer = setTimeout(() => {
+            permanentMainStorageSyncTimer = null;
+            const bridge = window.CanvasProtocolBridge;
+            if (!bridge || typeof bridge.syncPermanentMainTreeFromChromeBookmarks !== 'function') return;
+            bridge.syncPermanentMainTreeFromChromeBookmarks({
+                reason,
+                assumeClean: false
+            }).then(() => {
+                try {
+                    if (typeof bridge.clearPermanentTreeRenderCaches === 'function') {
+                        bridge.clearPermanentTreeRenderCaches();
+                    }
+                } catch (_) { }
+            }).catch((error) => {
+                console.warn('[Permanent JSON] sync from Chrome bookmarks failed:', error);
+            });
+        }, Math.max(0, Number(delayMs) || 0));
+    } catch (_) { }
 }
 
 // Canvas 永久栏目懒加载：需要依赖 cachedCurrentTree 来按需加载 folder children。
@@ -12621,17 +12719,65 @@ function restoreJSONScrollPosition(jsonContainer) {
     }
 }
 
-// 保存树的展开状态（使用节点 ID，更可靠）
+function __isCanvasPermanentTreeContainer(treeContainer) {
+    try {
+        return !!(
+            currentView === 'canvas'
+            && treeContainer
+            && treeContainer.closest
+            && treeContainer.closest('.permanent-bookmark-section')
+        );
+    } catch (_) {
+        return false;
+    }
+}
+
+function __getTreeExpandStateIdentity(item, preferSourceID) {
+    if (!item || !item.dataset) return '';
+    if (preferSourceID) {
+        const sourceID = String(item.getAttribute ? item.getAttribute('data-source-id') || '' : '').trim();
+        if (sourceID) return sourceID;
+    }
+    return String(item.dataset.nodeId || '').trim();
+}
+
+function __findTreeItemByExpandStateIdentity(tree, stableId, preferSourceID) {
+    const id = String(stableId || '').trim();
+    if (!tree || !id) return null;
+    try {
+        if (preferSourceID) {
+            const sourceItem = tree.querySelector(`.tree-item[data-source-id="${CSS.escape(id)}"]`);
+            if (sourceItem) return sourceItem;
+        }
+        return tree.querySelector(`.tree-item[data-node-id="${CSS.escape(id)}"]`);
+    } catch (_) {
+        return null;
+    }
+}
+
+function __doesTreeExpandStateMatch(item, expandedSet, preferSourceID) {
+    if (!item || !item.dataset || !expandedSet || !expandedSet.size) return false;
+    if (preferSourceID) {
+        const sourceID = String(item.getAttribute ? item.getAttribute('data-source-id') || '' : '').trim();
+        if (sourceID && expandedSet.has(sourceID)) return true;
+    }
+    const nodeId = String(item.dataset.nodeId || '').trim();
+    return !!(nodeId && expandedSet.has(nodeId));
+}
+
+// 保存树的展开状态；Canvas 永久栏目使用 sourceID，普通树保留本地节点 ID。
 const _saveTreeExpandStateTimers = new WeakMap();
 function __saveTreeExpandStateToStorage(treeContainer) {
     if (!treeContainer) return;
     try {
+        const preferSourceID = __isCanvasPermanentTreeContainer(treeContainer);
         const expandedIds = [];
         treeContainer.querySelectorAll('.tree-children.expanded').forEach(children => {
             const node = children.closest('.tree-node');
             const item = node ? node.querySelector(':scope > .tree-item[data-node-id]') : null;
-            if (item && item.dataset && item.dataset.nodeId) {
-                expandedIds.push(item.dataset.nodeId);
+            const stableId = __getTreeExpandStateIdentity(item, preferSourceID);
+            if (stableId) {
+                expandedIds.push(stableId);
             }
         });
         const key = __getTreeExpandStateStorageKey(treeContainer);
@@ -12699,7 +12845,7 @@ function saveTreeExpandState(treeContainer) {
     }
 }
 
-// 恢复树的展开状态（使用节点 ID，更可靠）
+// 恢复树的展开状态；Canvas 永久栏目优先按 sourceID 恢复，兼容旧的本地节点 ID 状态。
 function restoreTreeExpandState(treeContainer) {
     try {
         const savedState = __readTreeExpandStateFromStorage(treeContainer);
@@ -12709,6 +12855,7 @@ function restoreTreeExpandState(treeContainer) {
         if (!Array.isArray(expandedIds) || expandedIds.length === 0) return;
 
         const expandedSet = new Set(expandedIds);
+        const preferSourceID = __isCanvasPermanentTreeContainer(treeContainer);
         const nodesToLazyLoad = []; // Canvas 懒加载模式下需要加载子节点的文件夹
 
         const isReadOnlyChangesPreview = (() => {
@@ -12720,7 +12867,7 @@ function restoreTreeExpandState(treeContainer) {
         })();
 
         treeContainer.querySelectorAll('.tree-item[data-node-id]').forEach(item => {
-            if (expandedSet.has(item.dataset.nodeId)) {
+            if (__doesTreeExpandStateMatch(item, expandedSet, preferSourceID)) {
                 const node = item.closest('.tree-node');
                 if (!node) return;
                 const children = node.querySelector(':scope > .tree-children');
@@ -13409,9 +13556,10 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
 
     if (node.url) {
         const favicon = getFaviconUrl(node.url);
+        const sourceIDAttr = node.sourceID ? ` data-source-id="${escapeHtml(node.sourceID)}"` : '';
         return `
             <div class="tree-node">
-                <div class="tree-item" data-node-id="${node.id}" data-node-title="${escapeHtml(node.title)}" data-node-url="${escapeHtml(node.url || '')}" data-node-type="bookmark" data-node-level="${level}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
+                <div class="tree-item" data-node-id="${node.id}"${sourceIDAttr} data-node-title="${escapeHtml(node.title)}" data-node-url="${escapeHtml(node.url || '')}" data-node-type="bookmark" data-node-level="${level}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
                     <span class="tree-toggle" style="opacity: 0"></span>
                     ${favicon ? `<img class="tree-icon" src="${favicon}" alt="">` : `<i class="tree-icon fas fa-bookmark"></i>`}
                     <a href="${escapeHtml(node.url)}" target="_blank" class="tree-label tree-bookmark-link" rel="noopener noreferrer">${escapeHtml(node.title)}</a>
@@ -13424,9 +13572,10 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
     if (isLazyStop) {
         const childCount = Array.isArray(node.children) ? node.children.length : 0;
         const hasChildren = childCount > 0;
+        const sourceIDAttr = node.sourceID ? ` data-source-id="${escapeHtml(node.sourceID)}"` : '';
         return `
             <div class="tree-node">
-                <div class="tree-item" data-node-id="${node.id}" data-node-title="${escapeHtml(node.title)}" data-node-type="folder" data-node-level="${level}" data-has-children="${hasChildren ? 'true' : 'false'}" data-children-loaded="${hasChildren ? 'false' : 'true'}" data-child-count="${childCount}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
+                <div class="tree-item" data-node-id="${node.id}"${sourceIDAttr} data-node-title="${escapeHtml(node.title)}" data-node-type="folder" data-node-level="${level}" data-has-children="${hasChildren ? 'true' : 'false'}" data-children-loaded="${hasChildren ? 'false' : 'true'}" data-child-count="${childCount}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
                     <span class="tree-toggle"><i class="fas fa-chevron-right"></i></span>
                     <i class="tree-icon fas fa-folder"></i>
                     <span class="tree-label">${escapeHtml(node.title)}</span>
@@ -13445,9 +13594,10 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
         return pa - pb;
     });
 
+    const sourceIDAttr = node.sourceID ? ` data-source-id="${escapeHtml(node.sourceID)}"` : '';
     return `
             <div class="tree-node">
-                <div class="tree-item" data-node-id="${node.id}" data-node-title="${escapeHtml(node.title)}" data-node-type="folder" data-node-level="${level}" data-has-children="${Array.isArray(node.children) && node.children.length ? 'true' : 'false'}" data-children-loaded="true" data-child-count="${Array.isArray(node.children) ? node.children.length : 0}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
+                <div class="tree-item" data-node-id="${node.id}"${sourceIDAttr} data-node-title="${escapeHtml(node.title)}" data-node-type="folder" data-node-level="${level}" data-has-children="${Array.isArray(node.children) && node.children.length ? 'true' : 'false'}" data-children-loaded="true" data-child-count="${Array.isArray(node.children) ? node.children.length : 0}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
                     <span class="tree-toggle ${level === 0 ? 'expanded' : ''}"><i class="fas fa-chevron-right"></i></span>
                     <i class="tree-icon fas fa-folder${level === 0 ? '-open' : ''}"></i>
                     <span class="tree-label">${escapeHtml(node.title)}</span>
@@ -13857,6 +14007,7 @@ let addRemoveFlushQueued = false;
 
 async function handleBookmarkCreateRealtime(id, bookmark) {
     addBookmarkToCache(bookmark);
+    schedulePermanentMainStorageSyncFromChrome('onCreated');
 
     if (currentView === 'canvas') {
         const appliedToCachedTree = applyIncrementalCreateToCachedCurrentTree(id, bookmark);
@@ -13870,6 +14021,7 @@ async function handleBookmarkCreateRealtime(id, bookmark) {
 
 async function handleBookmarkRemoveRealtime(id, removeInfo) {
     removeBookmarkFromCache(id);
+    schedulePermanentMainStorageSyncFromChrome('onRemoved');
 
     const enrichedRemoveInfo = enrichRemoveInfoWithSnapshot(id, removeInfo);
     cacheDeletedSnapshotForLazyRender(id, enrichedRemoveInfo);
@@ -13942,6 +14094,7 @@ async function flushPendingAddRemoveEvents(reason = '') {
                     FaviconCache.clear(event.removeInfo.node.url);
                 }
             });
+            schedulePermanentMainStorageSyncFromChrome('bulk-add-remove');
 
             if (currentView === 'canvas') {
                 await renderTreeView(true);
@@ -14022,6 +14175,7 @@ function setupBookmarkListener() {
             }
             await flushPendingAddRemoveEvents('before-onChanged');
             updateBookmarkInCache(id, changeInfo);
+            schedulePermanentMainStorageSyncFromChrome('onChanged');
 
             // 支持 canvas 视图（包含永久栏目的书签树）
             if (currentView === 'canvas') {
@@ -14049,6 +14203,7 @@ function setupBookmarkListener() {
             }
             await flushPendingAddRemoveEvents('before-onMoved');
             moveBookmarkInCache(id, moveInfo);
+            schedulePermanentMainStorageSyncFromChrome('onMoved');
 
             // 支持 canvas 视图（包含永久栏目的书签树）
             if (currentView === 'canvas') {
@@ -14080,6 +14235,8 @@ function setupBookmarkListener() {
         browserAPI.bookmarks.onImportEnded.addListener(() => {
             endBookmarkBulkMute('browser-import', { resetBaseline: true, refreshTree: true }).catch((e) => {
                 console.warn('[书签监听] onImportEnded 处理异常:', e);
+            }).finally(() => {
+                schedulePermanentMainStorageSyncFromChrome('browser-import-ended', 0);
             });
         });
     }

@@ -148,7 +148,7 @@ function resolvePermanentPayloadSourceID(node) {
     const bridge = window.CanvasProtocolBridge;
     if (bridge && typeof bridge.resolvePermanentNodeSourceID === 'function') {
         try {
-            return String(bridge.resolvePermanentNodeSourceID(node) || '').trim();
+            return String(bridge.resolvePermanentNodeSourceID(node, { allowGenerate: false }) || '').trim();
         } catch (_) { }
     }
     return '';
@@ -166,6 +166,115 @@ function serializeBookmarkNode(node) {
         ...(sourceID ? { sourceID } : {}),
         children: (node.children || []).map(child => serializeBookmarkNode(child))
     };
+}
+
+async function readPermanentNodeFromBcs(nodeId) {
+    const id = String(nodeId || '').trim();
+    if (!id) return null;
+    try {
+        const bridge = window.CanvasProtocolBridge;
+        const tree = bridge && typeof bridge.readPermanentTreeSnapshotFromBcs === 'function'
+            ? await bridge.readPermanentTreeSnapshotFromBcs({
+                validateSourceID: false,
+                assumeCleanWhenMissingState: true
+            })
+            : null;
+        const stack = Array.isArray(tree) ? tree.slice() : [];
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node || typeof node !== 'object') continue;
+            if (String(node.id || '').trim() === id) return node;
+            if (Array.isArray(node.children)) {
+                for (let i = node.children.length - 1; i >= 0; i -= 1) {
+                    stack.push(node.children[i]);
+                }
+            }
+        }
+    } catch (_) { }
+    return null;
+}
+
+function getPermanentMutationBridge() {
+    const bridge = window && window.CanvasProtocolBridge ? window.CanvasProtocolBridge : null;
+    return bridge && typeof bridge.restorePermanentMainContentSnapshot === 'function' ? bridge : null;
+}
+
+async function rollbackPermanentBcsMutation(prepared, reason = '') {
+    const bridge = getPermanentMutationBridge();
+    if (!bridge || !prepared || !prepared.previousContent) return;
+    try {
+        await bridge.restorePermanentMainContentSnapshot(prepared.previousContent, {
+            assumeClean: false,
+            reason
+        });
+    } catch (rollbackError) {
+        console.warn('[Permanent JSON] rollback failed:', rollbackError);
+        try {
+            if (typeof bridge.syncPermanentMainTreeFromChromeBookmarks === 'function') {
+                await bridge.syncPermanentMainTreeFromChromeBookmarks({
+                    assumeClean: false,
+                    reason: reason || 'rollback-fallback'
+                });
+            }
+        } catch (_) { }
+    }
+}
+
+async function createPermanentBookmarkNode(createPayload, options = {}) {
+    if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.create !== 'function') {
+        throw new Error('Chrome bookmarks API unavailable');
+    }
+    const bridge = getPermanentMutationBridge();
+    let prepared = null;
+    if (bridge && typeof bridge.preparePermanentCreateNodeInBcs === 'function') {
+        prepared = await bridge.preparePermanentCreateNodeInBcs(createPayload, {
+            sourceID: options && options.sourceID
+        });
+    }
+    try {
+        const created = await chrome.bookmarks.create(createPayload);
+        try {
+            const sourceID = (prepared && prepared.sourceID) || (options && options.sourceID) || '';
+            if (created && created.id && sourceID && bridge && typeof bridge.rememberPendingPermanentNodeSourceID === 'function') {
+                bridge.rememberPendingPermanentNodeSourceID(created.id, sourceID);
+            }
+            if (prepared && bridge && typeof bridge.commitPermanentCreatedNodeInBcs === 'function') {
+                await bridge.commitPermanentCreatedNodeInBcs(prepared.pendingId, created, {
+                    sourceID
+                });
+            }
+        } catch (commitError) {
+            console.warn('[Permanent JSON] create commit failed, resyncing from Chrome:', commitError);
+            try {
+                if (bridge && typeof bridge.syncPermanentMainTreeFromChromeBookmarks === 'function') {
+                    await bridge.syncPermanentMainTreeFromChromeBookmarks({
+                        assumeClean: false,
+                        reason: 'create-commit-fallback'
+                    });
+                }
+            } catch (_) { }
+        }
+        return created;
+    } catch (error) {
+        await rollbackPermanentBcsMutation(prepared, 'create-failed');
+        throw error;
+    }
+}
+
+async function movePermanentBookmarkNode(nodeId, target) {
+    if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.move !== 'function') {
+        throw new Error('Chrome bookmarks API unavailable');
+    }
+    const bridge = getPermanentMutationBridge();
+    const prepared = bridge && typeof bridge.movePermanentNodeInBcs === 'function'
+        ? await bridge.movePermanentNodeInBcs(nodeId, target, { assumeClean: false })
+        : null;
+    try {
+        return await chrome.bookmarks.move(nodeId, target);
+    } catch (error) {
+        await rollbackPermanentBcsMutation(prepared, 'move-failed');
+        throw error;
+    }
 }
 
 function resolvePermanentBlankDropParentId(targetElement = null) {
@@ -628,7 +737,16 @@ async function createBookmarkFromPayload(parentId, index, payload) {
     if (typeof index === 'number') {
         createInfo.index = index;
     }
-    const created = await chrome.bookmarks.create(createInfo);
+    const sourceID = String(payload.sourceID || '').trim();
+    const created = await createPermanentBookmarkNode(createInfo, {
+        sourceID
+    });
+    try {
+        const bridge = window && window.CanvasProtocolBridge;
+        if (created && created.id && sourceID && bridge && typeof bridge.rememberPendingPermanentNodeSourceID === 'function') {
+            bridge.rememberPendingPermanentNodeSourceID(created.id, sourceID);
+        }
+    } catch (_) { }
     if (payload.children && payload.children.length) {
         for (const child of payload.children) {
             await createBookmarkFromPayload(created.id, null, child);
@@ -670,11 +788,14 @@ async function moveBookmark(sourceId, targetId, targetIsFolder, context) {
         }
 
         if (sourceTreeType === 'permanent' && targetTreeType === 'temporary' && manager && chrome && chrome.bookmarks) {
-            const nodes = await chrome.bookmarks.getSubTree(sourceId);
-            const payload = nodes && nodes[0] ? [serializeBookmarkNode(nodes[0])] : [];
+            let sourceNode = await readPermanentNodeFromBcs(sourceId);
+            if (!sourceNode) {
+                const nodes = await chrome.bookmarks.getSubTree(sourceId);
+                sourceNode = nodes && nodes[0] ? nodes[0] : null;
+            }
+            const payload = sourceNode ? [serializeBookmarkNode(sourceNode)] : [];
             const targetInfo = computeTempInsertion(targetSectionId, targetId, position);
             manager.insertFromPayload(targetSectionId, targetInfo.parentId, payload, targetInfo.index, {
-                // Permanent -> temporary: inherit sourceID when present, otherwise generate.
                 regenerateSourceID: false
             });
             return;
@@ -697,7 +818,7 @@ async function moveBookmark(sourceId, targetId, targetIsFolder, context) {
         });
 
         // 执行Chrome API移动
-        await chrome.bookmarks.move(sourceId, {
+        await movePermanentBookmarkNode(sourceId, {
             parentId: insertInfo.parentId,
             index: insertInfo.index
         });
