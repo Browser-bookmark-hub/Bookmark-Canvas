@@ -1244,6 +1244,7 @@ function updateCanvasGridLayerTransform(panX, panY, scale, force = false) {
 // =============================================================================
 
 function isSectionCtrlModeEvent(e) {
+    if (CanvasState.isSpacePressed) return false;
     return !!(CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.active) || (!!e && (isCustomCtrlKeyPressed(e) || e.metaKey));
 }
 
@@ -1842,7 +1843,7 @@ const DISCRETE_WHEEL_EVENT_DELTA_MIN = 24;
 const CANVAS_WHEEL_LINE_PIXEL = 12;
 const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 0.5;
 const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 0.92;
-const WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND = 0.52;
+const WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND = 0.44;
 const WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER = 1.0;
 const WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST = 1.06;
 const WINDOWS_LINUX_WHEEL_PAN_INERTIA_ENABLED = false;
@@ -6449,6 +6450,11 @@ function setupCanvasZoomAndPan() {
             let deltaScale = 1;
             const isWindowsLikeDiscreteWheelZoom = !isTouchpad && CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheelZoom;
             if (isWindowsLikeDiscreteWheelZoom) {
+                __cancelCanvasSmoothWheelZoom();
+                __cancelCanvasTrackpadZoomInertia();
+                __cancelCanvasPendingZoomUpdate();
+            }
+            if (isWindowsLikeDiscreteWheelZoom) {
                 deltaScale = WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR;
             }
             const scaledDelta = rawDelta * deltaScale;
@@ -6468,7 +6474,7 @@ function setupCanvasZoomAndPan() {
             // [FIX] 核心修复：消除“钝感”和“阶梯感”
             // 如果有 pendingZoomRequest，说明上一帧的缩放还没渲染出来。
             // 此时必须基于 pending 的目标值继续累积，否则中间的高频滚动事件会被丢弃（因为 CanvasState.zoom 没变）。
-            const smoothWheelTargetZoom = __getCanvasSmoothWheelZoomTarget();
+            const smoothWheelTargetZoom = isWindowsLikeDiscreteWheelZoom ? null : __getCanvasSmoothWheelZoomTarget();
             const baseZoomForCalc = Number.isFinite(smoothWheelTargetZoom)
                 ? smoothWheelTargetZoom
                 : (pendingZoomRequest ? pendingZoomRequest.zoom : CanvasState.zoom);
@@ -6560,6 +6566,8 @@ function setupCanvasZoomAndPan() {
                     centerY: __roundCanvasDebugNumber(mouseY, 2),
                     zoomOptions
                 }, { throttleKey: 'wheel-zoom-apply', throttleMs: 80 });
+            } else if (isWindowsLikeDiscreteWheelZoom) {
+                setCanvasZoom(newZoom, mouseX, mouseY, zoomOptions);
             } else if (__shouldSmoothCanvasWheelZoom(e, zoomInputMode)) {
                 __cancelCanvasTrackpadZoomInertia();
                 __queueCanvasSmoothWheelZoom(newZoom, mouseX, mouseY, zoomOptions);
@@ -6617,26 +6625,33 @@ function setupCanvasZoomAndPan() {
 
     document.addEventListener('keydown', (e) => {
         if (isRecordingShortcut) return;
+        const isSpaceShortcut = isCustomSpaceKeyCode(e.code);
+        const isCtrlShortcut = isCustomCtrlKeyCode(e.code);
+
+        if (isCtrlShortcut) {
+            CanvasState.isCtrlPressed = true;
+            workspace.classList.add('ctrl-pressed');
+        }
+
         if (e.repeat || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
         // 在 contenteditable 元素内编辑时不拦截键盘事件（允许输入空格等）
         if (e.target.isContentEditable || e.target.closest('[contenteditable="true"]')) return;
 
-        if (isCustomSpaceKeyCode(e.code)) {
+        if (isSpaceShortcut) {
             e.preventDefault();
             __cancelCanvasActiveZoomGesture('space-key');
             CanvasState.isSpacePressed = true;
             workspace.classList.add('space-pressed');
+            setSectionCtrlModeActive(false);
         }
-        if (isCustomCtrlKeyCode(e.code)) {
-            CanvasState.isCtrlPressed = true;
-            workspace.classList.add('ctrl-pressed');
+        if (isCtrlShortcut) {
             // 延迟激活栏目操作蒙版，避免影响拖动性能
             requestAnimationFrame(() => {
-                if (CanvasState.isPanning) return;
+                if (CanvasState.isPanning || CanvasState.isSpacePressed) return;
                 setSectionCtrlModeActive(true);
             });
         }
-    });
+    }, true);
 
     document.addEventListener('keyup', (e) => {
         if (isCustomSpaceKeyCode(e.code)) {
@@ -6653,6 +6668,11 @@ function setupCanvasZoomAndPan() {
                         setSectionCtrlModeActive(true);
                     });
                 }
+            } else if (CanvasState.isCtrlPressed) {
+                requestAnimationFrame(() => {
+                    if (CanvasState.isPanning || CanvasState.isSpacePressed) return;
+                    setSectionCtrlModeActive(true);
+                });
             }
         }
         if (isCustomCtrlKeyCode(e.code)) {
@@ -6666,6 +6686,19 @@ function setupCanvasZoomAndPan() {
                 onScrollStop();
                 savePanOffsetThrottled();
             }
+        }
+    }, true);
+
+    window.addEventListener('blur', () => {
+        const wasPanning = CanvasState.isPanning;
+        CanvasState.isSpacePressed = false;
+        CanvasState.isCtrlPressed = false;
+        CanvasState.isPanning = false;
+        workspace.classList.remove('space-pressed', 'ctrl-pressed', 'panning');
+        setSectionCtrlModeActive(false);
+        if (wasPanning) {
+            onScrollStop();
+            savePanOffsetThrottled();
         }
     });
 
@@ -6725,7 +6758,7 @@ function setupCanvasZoomAndPan() {
             savePanOffsetThrottled();
             if (CanvasState.isCtrlPressed) {
                 requestAnimationFrame(() => {
-                    if (CanvasState.isPanning) return;
+                    if (CanvasState.isPanning || CanvasState.isSpacePressed) return;
                     setSectionCtrlModeActive(true);
                 });
             }
@@ -8661,8 +8694,8 @@ function __normalizeCanvasWheelEventDeltas(event) {
     };
 }
 
-function __isCanvasDiscreteWheelEvent(event) {
-    if (!event || !CANVAS_RUNTIME_WINDOWS_LIKE) return false;
+function __isLikelyCanvasDiscreteWheelEvent(event) {
+    if (!event) return false;
     const mode = Number(event.deltaMode);
     if (mode === 1 || mode === 2) return true;
     if (mode !== 0) return false;
@@ -8671,16 +8704,18 @@ function __isCanvasDiscreteWheelEvent(event) {
     const absDeltaY = Math.abs(Number(event.deltaY) || 0);
     const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
     if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return false;
+
     const hasFractional = (absDeltaX > 0 && !Number.isInteger(absDeltaX))
         || (absDeltaY > 0 && !Number.isInteger(absDeltaY));
+    if (hasFractional) return false;
 
-    // Windows 高速触控板手势在 deltaMode=0 下可能出现较大但带小数的 delta；
-    // 这里优先判定为 touchpad，避免被误分到“离散滚轮”分支后出现档位感/拖尾感。
-    if (primaryDelta >= DISCRETE_WHEEL_EVENT_DELTA_MIN) {
-        if (hasFractional) return false;
-        return true;
-    }
-    return Number.isInteger(absDeltaX) && Number.isInteger(absDeltaY) && primaryDelta >= 8;
+    return primaryDelta >= DISCRETE_WHEEL_EVENT_DELTA_MIN
+        || (Number.isInteger(absDeltaX) && Number.isInteger(absDeltaY) && primaryDelta >= 8);
+}
+
+function __isCanvasDiscreteWheelEvent(event) {
+    if (!event || !CANVAS_RUNTIME_WINDOWS_LIKE) return false;
+    return __isLikelyCanvasDiscreteWheelEvent(event);
 }
 
 function __isCanvasTouchpadLikeScrollInput(event, normalizedDeltas = null) {
@@ -8752,7 +8787,7 @@ function resolveCanvasZoomInputMode(event) {
             && Number.isFinite(rawDeltaY)
             && Number.isInteger(rawDeltaX)
             && Number.isInteger(rawDeltaY);
-        if (CANVAS_RUNTIME_WINDOWS_LIKE && __isCanvasDiscreteWheelEvent(event)) {
+        if (__isLikelyCanvasDiscreteWheelEvent(event)) {
             return commitMode('wheel');
         }
         const likelyWindowsLinuxCtrlSynthPinch = CANVAS_RUNTIME_WINDOWS_LIKE
@@ -13486,10 +13521,20 @@ function handleCanvasCustomScroll(event) {
                 CanvasState.scrollAnimation.frameId = requestAnimationFrame(runScrollAnimation);
             }
         } else {
+            if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheel && CanvasState.scrollAnimation.frameId) {
+                cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
+                CanvasState.scrollAnimation.frameId = null;
+                CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+                CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+                CanvasState.scrollAnimation.source = null;
+            }
             CanvasState.scrollAnimation.source = 'direct';
             CanvasState.panOffsetX += panDeltaX;
             CanvasState.panOffsetY += panDeltaY;
             if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheel) {
+                CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+                CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+                CanvasState.scrollAnimation.source = null;
                 pendingScrollRequest = null;
                 applyPanOffsetFast();
                 updateScrollbarThumbsLightweight();
@@ -20176,6 +20221,7 @@ function renderMdNode(node) {
 
     // 降低滚动链和事件冒泡带来的卡顿
     editor.addEventListener('wheel', (e) => {
+        if (isCustomCtrlKeyPressed(e) || e.metaKey) return;
         e.stopPropagation();
     }, { passive: true });
 
@@ -28601,6 +28647,14 @@ function setupCanvasEventListeners() {
 
     // Ctrl 按下/松开切换专属模式
     document.addEventListener('keydown', (e) => {
+        const target = e.target;
+        const isTypingTarget = target && (
+            target.tagName === 'INPUT'
+            || target.tagName === 'TEXTAREA'
+            || target.isContentEditable
+            || (target.closest && target.closest('[contenteditable="true"]'))
+        );
+        if (isTypingTarget || CanvasState.isSpacePressed) return;
         if (e.key === 'Control') {
             setSectionCtrlModeActive(true);
         }
