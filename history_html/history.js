@@ -3927,6 +3927,7 @@ function updateFaviconImages(url, dataUrl) {
             try {
                 const itemDomain = FaviconCache._getHostnameKey(itemUrl);
                 if (itemDomain !== domain) return;
+                if (img.src === dataUrl) return;
 
                 img.src = dataUrl;
                 if (img.style.display === 'none') {
