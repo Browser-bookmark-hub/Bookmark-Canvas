@@ -1117,8 +1117,13 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
 }
 
+.bookmark-tree,
+.temp-bookmark-tree {
+    position: relative;
+}
+
 .tree-locate-group-outline {
-    position: fixed;
+    position: absolute;
     pointer-events: none;
     z-index: 100001;
     border: 2px solid var(--search-highlight-color, rgba(59, 130, 246, 0.9));

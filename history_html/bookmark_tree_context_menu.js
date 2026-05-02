@@ -4256,12 +4256,41 @@ function __clearBookmarkAddLocateVisuals() {
 
 function __getBookmarkAddLocateGroupContainer(treeItem) {
     if (!treeItem || typeof treeItem.closest !== 'function') return null;
-    return treeItem.closest('.permanent-section-body, .temp-node-body, .bookmark-tree, .temp-bookmark-tree') || null;
+    return treeItem.closest('.bookmark-tree, .temp-bookmark-tree')
+        || treeItem.closest('.permanent-section-body, .temp-node-body')
+        || null;
 }
 
-function __appendBookmarkAddLocateGroupOutline(treeItems, color = '#3b82f6') {
+function __getBookmarkAddLocateContainerScale(container) {
+    if (!container || typeof container.getBoundingClientRect !== 'function') {
+        return { rect: null, scaleX: 1, scaleY: 1 };
+    }
+
+    try {
+        const rect = container.getBoundingClientRect();
+        const layoutWidth = Math.max(1, Number(container.offsetWidth || container.clientWidth) || 0);
+        const layoutHeight = Math.max(1, Number(container.offsetHeight || container.clientHeight) || 0);
+        let scaleX = rect && Number.isFinite(rect.width) && rect.width > 0
+            ? rect.width / layoutWidth
+            : 1;
+        let scaleY = rect && Number.isFinite(rect.height) && rect.height > 0
+            ? rect.height / layoutHeight
+            : 1;
+
+        if (!Number.isFinite(scaleX) || scaleX <= 0) scaleX = 1;
+        if (!Number.isFinite(scaleY) || scaleY <= 0) scaleY = 1;
+
+        return { rect, scaleX, scaleY };
+    } catch (_) {
+        return { rect: null, scaleX: 1, scaleY: 1 };
+    }
+}
+
+function __appendBookmarkAddLocateGroupOutline(treeItems, color = '#3b82f6', container = null) {
     const list = (Array.isArray(treeItems) ? treeItems : []).filter(Boolean);
     if (!list.length || !document || !document.body) return 0;
+    const outlineContainer = container || __getBookmarkAddLocateGroupContainer(list[0]) || document.body;
+    if (!outlineContainer || typeof outlineContainer.appendChild !== 'function') return 0;
 
     const rects = list
         .map((item) => {
@@ -4272,19 +4301,31 @@ function __appendBookmarkAddLocateGroupOutline(treeItems, color = '#3b82f6') {
     if (!rects.length) return 0;
 
     const padding = 6;
-    const minLeft = Math.max(0, Math.min(...rects.map((rect) => rect.left)) - padding);
-    const minTop = Math.max(0, Math.min(...rects.map((rect) => rect.top)) - padding);
+    const minLeft = Math.min(...rects.map((rect) => rect.left)) - padding;
+    const minTop = Math.min(...rects.map((rect) => rect.top)) - padding;
     const maxRight = Math.max(...rects.map((rect) => rect.right)) + padding;
     const maxBottom = Math.max(...rects.map((rect) => rect.bottom)) + padding;
+    const scaleInfo = __getBookmarkAddLocateContainerScale(outlineContainer);
+    const containerRect = scaleInfo.rect;
+    const scaleX = scaleInfo.scaleX;
+    const scaleY = scaleInfo.scaleY;
+    const innerLeft = containerRect ? containerRect.left + ((Number(outlineContainer.clientLeft) || 0) * scaleX) : 0;
+    const innerTop = containerRect ? containerRect.top + ((Number(outlineContainer.clientTop) || 0) * scaleY) : 0;
+    const scrollLeft = Math.max(0, Number(outlineContainer.scrollLeft) || 0);
+    const scrollTop = Math.max(0, Number(outlineContainer.scrollTop) || 0);
+    const outlineLeft = scrollLeft + ((minLeft - innerLeft) / scaleX);
+    const outlineTop = scrollTop + ((minTop - innerTop) / scaleY);
+    const outlineWidth = (maxRight - minLeft) / scaleX;
+    const outlineHeight = (maxBottom - minTop) / scaleY;
 
     const outline = document.createElement('div');
     outline.className = 'tree-locate-group-outline';
     outline.style.setProperty('--search-highlight-color', color);
-    outline.style.left = `${minLeft}px`;
-    outline.style.top = `${minTop}px`;
-    outline.style.width = `${Math.max(0, maxRight - minLeft)}px`;
-    outline.style.height = `${Math.max(0, maxBottom - minTop)}px`;
-    document.body.appendChild(outline);
+    outline.style.left = `${outlineLeft}px`;
+    outline.style.top = `${outlineTop}px`;
+    outline.style.width = `${Math.max(0, outlineWidth)}px`;
+    outline.style.height = `${Math.max(0, outlineHeight)}px`;
+    outlineContainer.appendChild(outline);
 
     setTimeout(() => {
         try { outline.remove(); } catch (_) { }
@@ -4303,7 +4344,7 @@ function __highlightBookmarkAddLocateTargets(targets) {
         const color = target && target.color ? target.color : '#3b82f6';
         let entry = groups.get(container);
         if (!entry) {
-            entry = { items: [], color };
+            entry = { items: [], color, container };
             groups.set(container, entry);
         }
         entry.items.push(treeItem);
@@ -4323,7 +4364,7 @@ function __highlightBookmarkAddLocateTargets(targets) {
             }
             return;
         }
-        count += __appendBookmarkAddLocateGroupOutline(items, color);
+        count += __appendBookmarkAddLocateGroupOutline(items, color, entry && entry.container ? entry.container : null);
     });
 
     return count;
