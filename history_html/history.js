@@ -2852,6 +2852,31 @@ function refreshSharedPermanentTreeCopySourceData(reason = '') {
     return true;
 }
 
+function __getPermanentTreeSharedSourceFingerprint() {
+    try {
+        const renderTree = cachedTreeData && Array.isArray(cachedTreeData.renderTree)
+            ? cachedTreeData.renderTree
+            : null;
+        if (renderTree && renderTree[0]) return getTreeFingerprint(renderTree);
+    } catch (_) { }
+
+    try {
+        const currentTree = cachedTreeData && Array.isArray(cachedTreeData.currentTree)
+            ? cachedTreeData.currentTree
+            : null;
+        if (currentTree && currentTree[0]) return getTreeFingerprint(currentTree);
+    } catch (_) { }
+
+    try {
+        const version = cachedTreeData && typeof cachedTreeData.version !== 'undefined'
+            ? cachedTreeData.version
+            : lastTreeSnapshotVersion;
+        if (version !== null && typeof version !== 'undefined') return `version:${String(version)}`;
+    } catch (_) { }
+
+    return '';
+}
+
 function __flushPermanentTreeSharedMutationRefresh() {
     cancelScheduledPermanentTreeCopySync();
     if (pendingPermanentTreeSharedMutationRefreshHandle !== null) {
@@ -3306,8 +3331,25 @@ function __renderCachedPermanentTreeIntoPrimary(tree) {
     }
 }
 
-function __renderPermanentTreeIntoTree(tree) {
+function __renderPermanentTreeIntoTree(tree, options = {}) {
     if (!tree) return false;
+
+    const reason = String(options.reason || '').trim();
+    const force = options.force === true
+        || reason === 'render-finished'
+        || reason.includes('mutation')
+        || reason.includes('onCreated')
+        || reason.includes('onRemoved')
+        || reason.includes('onChanged')
+        || reason.includes('onMoved')
+        || reason.includes('bulk-add-remove')
+        || reason.includes('browser-import');
+    const sourceFingerprint = __getPermanentTreeSharedSourceFingerprint();
+    try {
+        if (!force && sourceFingerprint && tree.dataset.permanentTreeFingerprint === sourceFingerprint && tree.children.length) {
+            return true;
+        }
+    } catch (_) { }
 
     const sourceFragment = __buildPermanentTreeSourceFragment();
     if (!sourceFragment) return false;
@@ -3384,6 +3426,14 @@ function __renderPermanentTreeIntoTree(tree) {
         });
     }
 
+    try {
+        if (sourceFingerprint) {
+            tree.dataset.permanentTreeFingerprint = sourceFingerprint;
+        }
+        tree.dataset.permanentTreeRenderReason = reason || 'shared-render';
+        tree.dataset.permanentTreeRenderRole = tree.id === 'bookmarkTree' ? 'primary' : 'copy';
+    } catch (_) { }
+
     return true;
 }
 window.__renderPermanentTreeIntoTree = __renderPermanentTreeIntoTree;
@@ -3433,7 +3483,7 @@ function __renderPermanentTreeSharedViews(options = {}) {
     let rendered = false;
     targets.forEach((tree) => {
         try {
-            if (__renderPermanentTreeIntoTree(tree)) {
+            if (__renderPermanentTreeIntoTree(tree, options)) {
                 rendered = true;
             }
         } catch (_) { }
@@ -11406,6 +11456,7 @@ async function getBookmarkTreeSnapshot() {
 }
 
 let permanentMainStorageSyncTimer = null;
+let permanentMainStorageSyncAfterFlushRefresh = false;
 function schedulePermanentMainStorageSyncFromChrome(reason = '', delayMs = 180) {
     try {
         if (permanentMainStorageSyncTimer) clearTimeout(permanentMainStorageSyncTimer);
@@ -11422,6 +11473,10 @@ function schedulePermanentMainStorageSyncFromChrome(reason = '', delayMs = 180) 
                         bridge.clearPermanentTreeRenderCaches();
                     }
                 } catch (_) { }
+                if (permanentMainStorageSyncAfterFlushRefresh) {
+                    permanentMainStorageSyncAfterFlushRefresh = false;
+                    try { scheduleBulkAddRemoveTreeRefresh('post-main-storage-sync', 120); } catch (_) { }
+                }
             }).catch((error) => {
                 console.warn('[Permanent JSON] sync from Chrome bookmarks failed:', error);
             });
@@ -12072,7 +12127,7 @@ async function renderTreeView(forceRefresh = false) {
             try {
                 if (hasPermanentTreeCopyTargets()) {
                     renderedSharedViewsInFastPath = !!__renderPermanentTreeSharedViews({
-                        includePrimary: true,
+                        includePrimary: false,
                         includeCopies: true,
                         reason: 'render-cached-fast-shared'
                     });
@@ -12233,7 +12288,7 @@ async function renderTreeView(forceRefresh = false) {
                 try {
                     if (hasPermanentTreeCopyTargets()) {
                         renderedSharedViewsInNoChangePath = !!__renderPermanentTreeSharedViews({
-                            includePrimary: true,
+                            includePrimary: false,
                             includeCopies: true,
                             reason: 'render-cached-nochange-shared'
                         });
@@ -13992,6 +14047,26 @@ let pendingAddRemoveEvents = [];
 let pendingAddRemoveTimer = null;
 let addRemoveFlushInProgress = false;
 let addRemoveFlushQueued = false;
+let bulkAddRemoveTreeRefreshTimer = null;
+
+function scheduleBulkAddRemoveTreeRefresh(reason = '', delayMs = 700) {
+    try {
+        if (bulkAddRemoveTreeRefreshTimer) clearTimeout(bulkAddRemoveTreeRefreshTimer);
+        bulkAddRemoveTreeRefreshTimer = setTimeout(async () => {
+            bulkAddRemoveTreeRefreshTimer = null;
+            if (currentView !== 'canvas') return;
+            cachedTreeData = null;
+            lastTreeFingerprint = null;
+            lastTreeSnapshotVersion = null;
+            cachedCurrentTreeIndex = null;
+            cachedRenderTreeIndex = null;
+            try { window.__canvasRenderTreeIndex = null; } catch (_) { }
+            await renderTreeView(false);
+        }, Math.max(0, Number(delayMs) || 0));
+    } catch (e) {
+        console.warn('[书签监听] 批量刷新调度失败:', e);
+    }
+}
 
 async function handleBookmarkCreateRealtime(id, bookmark) {
     addBookmarkToCache(bookmark);
@@ -14082,11 +14157,12 @@ async function flushPendingAddRemoveEvents(reason = '') {
                     FaviconCache.clear(event.removeInfo.node.url);
                 }
             });
-            schedulePermanentMainStorageSyncFromChrome('bulk-add-remove');
+            permanentMainStorageSyncAfterFlushRefresh = true;
+            schedulePermanentMainStorageSyncFromChrome('bulk-add-remove', 0);
 
             if (currentView === 'canvas') {
-                await renderTreeView(true);
-                scheduleCachedCurrentTreeSnapshotRefresh('bulk-add-remove');
+                scheduleCachedCurrentTreeSnapshotRefresh('bulk-add-remove', 320);
+                scheduleBulkAddRemoveTreeRefresh('bulk-add-remove-fallback', 900);
             }
             return;
         }

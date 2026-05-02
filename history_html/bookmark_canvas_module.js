@@ -13197,12 +13197,26 @@ function __clearOtherMaximizedNodes(except) {
     });
 }
 
+function __isMaximizedNodeRectCurrent(element, rect) {
+    if (!element || !rect) return false;
+    const tolerance = 0.5;
+    const nearlyEqual = (raw, expected) => {
+        const value = parseFloat(String(raw || ''));
+        return Number.isFinite(value) && Math.abs(value - expected) <= tolerance;
+    };
+    return nearlyEqual(element.style.left, rect.x)
+        && nearlyEqual(element.style.top, rect.y)
+        && nearlyEqual(element.style.width, rect.width)
+        && nearlyEqual(element.style.height, rect.height);
+}
+
 function maximizeCanvasNode(element, options = {}) {
     if (!element) return;
     if (__isNodeMaximized(element)) {
-        refreshMaximizedNodes();
-        __scheduleNodeLayoutZoomStabilize(element);
-        updateNodeFullscreenButtons();
+        if (refreshMaximizedNodes()) {
+            __scheduleNodeLayoutZoomStabilize(element);
+            updateNodeFullscreenButtons();
+        }
         return;
     }
     const suppressReadyNotify = !!(options && options.suppressReadyNotify);
@@ -13287,17 +13301,21 @@ function toggleElementFullscreen(element) {
 }
 
 function refreshMaximizedNodes() {
-    if (!CanvasState.nodeMaximizedActive) return;
+    if (!CanvasState.nodeMaximizedActive) return false;
     const rect = __getCanvasViewportRect();
-    if (!rect) return;
+    if (!rect) return false;
+    let changed = false;
     document.querySelectorAll('.canvas-node-maximized').forEach((element) => {
         if (!element) return;
+        if (__isMaximizedNodeRectCurrent(element, rect)) return;
         element.style.left = `${rect.x}px`;
         element.style.top = `${rect.y}px`;
         element.style.width = `${rect.width}px`;
         element.style.height = `${rect.height}px`;
         __scheduleNodeLayoutZoomStabilize(element);
+        changed = true;
     });
+    return changed;
 }
 
 function updateNodeFullscreenButtons() {
