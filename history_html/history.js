@@ -2936,11 +2936,10 @@ function __captureTreeExpandedNodeIds(tree) {
     const expanded = new Set();
     if (!tree) return expanded;
     try {
-        const preferSourceID = __isCanvasPermanentTreeContainer(tree);
         tree.querySelectorAll('.tree-children.expanded').forEach(children => {
             const node = children.closest('.tree-node');
             const item = node ? node.querySelector(':scope > .tree-item[data-node-id]') : null;
-            const stableId = __getTreeExpandStateIdentity(item, preferSourceID);
+            const stableId = __getTreeExpandStateIdentity(item);
             if (stableId) expanded.add(stableId);
         });
     } catch (_) { }
@@ -2967,10 +2966,9 @@ function __applyTreeExpandedNodeIds(tree, expandedNodeIds) {
     if (!tree || !expandedNodeIds) return;
     const expanded = expandedNodeIds instanceof Set ? expandedNodeIds : new Set(expandedNodeIds);
     if (!expanded.size) return;
-    const preferSourceID = __isCanvasPermanentTreeContainer(tree);
-    expanded.forEach(stableId => {
+    expanded.forEach(nodeId => {
         try {
-            const item = __findTreeItemByExpandStateIdentity(tree, stableId, preferSourceID);
+            const item = __findTreeItemByExpandStateIdentity(tree, nodeId);
             if (!item) return;
             const node = item.closest('.tree-node');
             if (!node) return;
@@ -3185,10 +3183,9 @@ function __lazyLoadExpandedFolders(tree, expandedNodeIds) {
     try {
         const ids = expandedNodeIds instanceof Set ? expandedNodeIds : new Set(expandedNodeIds);
         if (!ids.size) return;
-        const preferSourceID = __isCanvasPermanentTreeContainer(tree);
-        ids.forEach((stableId) => {
+        ids.forEach((nodeId) => {
             try {
-                const item = __findTreeItemByExpandStateIdentity(tree, stableId, preferSourceID);
+                const item = __findTreeItemByExpandStateIdentity(tree, nodeId);
                 if (!item) return;
                 const node = item.closest('.tree-node');
                 if (!node) return;
@@ -11756,7 +11753,7 @@ async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, star
                     const expandedSet = new Set(expandedIds);
                     // 只检查刚加载的子节点
                     childrenContainer.querySelectorAll(':scope > .tree-node > .tree-item[data-node-id]').forEach(item => {
-                        if (expandedSet.has(item.dataset.nodeId)) {
+                        if (__doesTreeExpandStateMatch(item, expandedSet)) {
                             const node = item.closest('.tree-node');
                             if (!node) return;
                             const children = node.querySelector(':scope > .tree-children');
@@ -12732,50 +12729,37 @@ function __isCanvasPermanentTreeContainer(treeContainer) {
     }
 }
 
-function __getTreeExpandStateIdentity(item, preferSourceID) {
+function __getTreeExpandStateIdentity(item) {
     if (!item || !item.dataset) return '';
-    if (preferSourceID) {
-        const sourceID = String(item.getAttribute ? item.getAttribute('data-source-id') || '' : '').trim();
-        if (sourceID) return sourceID;
-    }
     return String(item.dataset.nodeId || '').trim();
 }
 
-function __findTreeItemByExpandStateIdentity(tree, stableId, preferSourceID) {
+function __findTreeItemByExpandStateIdentity(tree, stableId) {
     const id = String(stableId || '').trim();
     if (!tree || !id) return null;
     try {
-        if (preferSourceID) {
-            const sourceItem = tree.querySelector(`.tree-item[data-source-id="${CSS.escape(id)}"]`);
-            if (sourceItem) return sourceItem;
-        }
         return tree.querySelector(`.tree-item[data-node-id="${CSS.escape(id)}"]`);
     } catch (_) {
         return null;
     }
 }
 
-function __doesTreeExpandStateMatch(item, expandedSet, preferSourceID) {
+function __doesTreeExpandStateMatch(item, expandedSet) {
     if (!item || !item.dataset || !expandedSet || !expandedSet.size) return false;
-    if (preferSourceID) {
-        const sourceID = String(item.getAttribute ? item.getAttribute('data-source-id') || '' : '').trim();
-        if (sourceID && expandedSet.has(sourceID)) return true;
-    }
     const nodeId = String(item.dataset.nodeId || '').trim();
     return !!(nodeId && expandedSet.has(nodeId));
 }
 
-// 保存树的展开状态；Canvas 永久栏目使用 sourceID，普通树保留本地节点 ID。
+// 保存树的展开状态；完全依赖本地节点 ID（nodeId）。
 const _saveTreeExpandStateTimers = new WeakMap();
 function __saveTreeExpandStateToStorage(treeContainer) {
     if (!treeContainer) return;
     try {
-        const preferSourceID = __isCanvasPermanentTreeContainer(treeContainer);
         const expandedIds = [];
         treeContainer.querySelectorAll('.tree-children.expanded').forEach(children => {
             const node = children.closest('.tree-node');
             const item = node ? node.querySelector(':scope > .tree-item[data-node-id]') : null;
-            const stableId = __getTreeExpandStateIdentity(item, preferSourceID);
+            const stableId = __getTreeExpandStateIdentity(item);
             if (stableId) {
                 expandedIds.push(stableId);
             }
@@ -12845,7 +12829,7 @@ function saveTreeExpandState(treeContainer) {
     }
 }
 
-// 恢复树的展开状态；Canvas 永久栏目优先按 sourceID 恢复，兼容旧的本地节点 ID 状态。
+// 恢复树的展开状态；完全依赖本地节点 ID（nodeId）。
 function restoreTreeExpandState(treeContainer) {
     try {
         const savedState = __readTreeExpandStateFromStorage(treeContainer);
@@ -12855,7 +12839,6 @@ function restoreTreeExpandState(treeContainer) {
         if (!Array.isArray(expandedIds) || expandedIds.length === 0) return;
 
         const expandedSet = new Set(expandedIds);
-        const preferSourceID = __isCanvasPermanentTreeContainer(treeContainer);
         const nodesToLazyLoad = []; // Canvas 懒加载模式下需要加载子节点的文件夹
 
         const isReadOnlyChangesPreview = (() => {
@@ -12867,7 +12850,7 @@ function restoreTreeExpandState(treeContainer) {
         })();
 
         treeContainer.querySelectorAll('.tree-item[data-node-id]').forEach(item => {
-            if (__doesTreeExpandStateMatch(item, expandedSet, preferSourceID)) {
+            if (__doesTreeExpandStateMatch(item, expandedSet)) {
                 const node = item.closest('.tree-node');
                 if (!node) return;
                 const children = node.querySelector(':scope > .tree-children');
