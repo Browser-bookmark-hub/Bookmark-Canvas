@@ -11129,44 +11129,6 @@ function cacheDeletedSnapshotForLazyRender(id, removeInfo) {
 
 function mergeLazyChildrenWithDeletedSnapshots(parentId, baseChildren) {
     const merged = Array.isArray(baseChildren) ? baseChildren.slice() : [];
-    if (!(currentView === 'canvas' && CANVAS_PERMANENT_TREE_LAZY_ENABLED)) return merged;
-    const key = String(parentId || '');
-    if (!key) return merged;
-
-    const bucket = incrementalDeletedChildrenByParent.get(key);
-    if (!(bucket instanceof Map) || bucket.size === 0) return merged;
-
-    const existingIds = new Set(merged.map((child) => String(child && child.id)).filter(Boolean));
-    const deletedNodes = Array.from(bucket.values())
-        .map(node => cloneBookmarkNodeSnapshot(node))
-        .filter(node => node && !existingIds.has(String(node.id)));
-
-    if (!deletedNodes.length) return merged;
-
-    deletedNodes.sort((a, b) => {
-        const ia = typeof a.index === 'number' ? a.index : Number.POSITIVE_INFINITY;
-        const ib = typeof b.index === 'number' ? b.index : Number.POSITIVE_INFINITY;
-        if (ia !== ib) return ia - ib;
-        return String(a.id).localeCompare(String(b.id));
-    });
-
-    deletedNodes.forEach((node) => {
-        const targetIndex = typeof node.index === 'number' ? node.index : Number.POSITIVE_INFINITY;
-        if (!Number.isFinite(targetIndex) || targetIndex < 0 || targetIndex >= merged.length) {
-            merged.push(node);
-            return;
-        }
-        let insertAt = merged.length;
-        for (let i = 0; i < merged.length; i++) {
-            const currentIndex = (typeof merged[i]?.index === 'number') ? merged[i].index : Number.POSITIVE_INFINITY;
-            if (currentIndex >= targetIndex) {
-                insertAt = i;
-                break;
-            }
-        }
-        merged.splice(insertAt, 0, node);
-    });
-
     return merged;
 }
 
@@ -14087,7 +14049,7 @@ async function handleBookmarkRemoveRealtime(id, removeInfo) {
     schedulePermanentMainStorageSyncFromChrome('onRemoved');
 
     const enrichedRemoveInfo = enrichRemoveInfoWithSnapshot(id, removeInfo);
-    cacheDeletedSnapshotForLazyRender(id, enrichedRemoveInfo);
+    clearIncrementalDeletedSnapshots('onRemoved');
 
     if (enrichedRemoveInfo && enrichedRemoveInfo.node && enrichedRemoveInfo.node.url) {
         FaviconCache.clear(enrichedRemoveInfo.node.url);
@@ -14223,6 +14185,9 @@ function setupBookmarkListener() {
                 type: 'removed',
                 id: String(id),
                 removeInfo
+            });
+            flushPendingAddRemoveEvents('onRemoved').catch((e) => {
+                console.warn('[书签监听] onRemoved flush 失败:', e);
             });
         } catch (e) {
             console.warn('[书签监听] onRemoved 处理异常:', e);
