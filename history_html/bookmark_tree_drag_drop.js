@@ -777,10 +777,26 @@ async function moveBookmark(sourceId, targetId, targetIsFolder, context) {
             const payload = manager.extractPayload(sourceSectionId, [sourceId]);
             // 临时栏目到永久栏目不需要调整索引（源不在永久栏目中）
             const { parentId, index } = await computePermanentInsertion(targetId, targetIsFolder, position);
-            for (const item of payload) {
-                await createBookmarkFromPayload(parentId, index, item);
+            let muteSession = null;
+            let loadingToast = null;
+            if (typeof window !== 'undefined' && typeof window.beginBookmarkBulkMute === 'function') {
+                muteSession = await window.beginBookmarkBulkMute('drag-temp-to-permanent');
             }
-            manager.removeItems(sourceSectionId, [sourceId]);
+            if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function' && payload.length > 1) {
+                const msg = typeof currentLang !== 'undefined' && currentLang === 'en' ? `Moving ${payload.length} items...` : `正在移动 ${payload.length} 项...`;
+                loadingToast = window.showLoadingToast(msg);
+            }
+            try {
+                for (const item of payload) {
+                    await createBookmarkFromPayload(parentId, index, item);
+                }
+                manager.removeItems(sourceSectionId, [sourceId]);
+            } finally {
+                if (loadingToast) loadingToast.close();
+                if (typeof window !== 'undefined' && typeof window.endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                    await window.endBookmarkBulkMute('drag-temp-to-permanent', { refreshTree: true });
+                }
+            }
             // 不调用 refreshBookmarkTree()，让 chrome.bookmarks.onCreated 事件触发增量更新
             // 这样可以避免页面闪烁和滚动位置丢失
             console.log('[拖拽] 临时->永久完成，等待 onCreated 事件增量更新');

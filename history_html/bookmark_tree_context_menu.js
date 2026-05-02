@@ -5334,7 +5334,22 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                     sectionId: target.sectionId
                 }
             );
-        } else if (actionType === 'add-current-window' && windowAsFolder) {
+        } else {
+            let muteSession = null;
+            let loadingToast = null;
+            try {
+                if (typeof beginBookmarkBulkMute === 'function') {
+                    muteSession = await beginBookmarkBulkMute('add-bookmark-action');
+                }
+                if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function') {
+                    const totalToAdd = Array.isArray(addItems) ? addItems.length : 0;
+                    if (totalToAdd > 1) {
+                        const loadingMsg = lang === 'zh_CN' ? `正在添加 ${totalToAdd} 个页面...` : `Adding ${totalToAdd} pages...`;
+                        loadingToast = window.showLoadingToast(loadingMsg);
+                    }
+                }
+                
+                if (actionType === 'add-current-window' && windowAsFolder) {
             const folderPayload = {
                 parentId: target.parentId,
                 title: __formatBookmarkAddWindowFolderTitle()
@@ -5385,21 +5400,30 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                     }
                 );
             }
-        } else {
-            const treeResult = await __addBookmarkAddItemsToTree(target, addItems);
-            createdCount = treeResult && Number.isFinite(treeResult.createdCount)
-                ? treeResult.createdCount
-                : 0;
-            firstCreated = treeResult && treeResult.firstCreated
-                ? treeResult.firstCreated
-                : null;
-            rememberLocateTargets(
-                treeResult ? treeResult.createdTargets || [] : [],
-                {
-                    source: 'permanent',
-                    copyId: permanentCopyId || null
+                } else {
+                    const treeResult = await __addBookmarkAddItemsToTree(target, addItems);
+                    createdCount = treeResult && Number.isFinite(treeResult.createdCount)
+                        ? treeResult.createdCount
+                        : 0;
+                    firstCreated = treeResult && treeResult.firstCreated
+                        ? treeResult.firstCreated
+                        : null;
+                    rememberLocateTargets(
+                        treeResult ? treeResult.createdTargets || [] : [],
+                        {
+                            source: 'permanent',
+                            copyId: permanentCopyId || null
+                        }
+                    );
                 }
-            );
+            } finally {
+                if (loadingToast) {
+                    loadingToast.close();
+                }
+                if (typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                    await endBookmarkBulkMute('add-bookmark-action', { refreshTree: true });
+                }
+            }
         }
 
         success = createdCount > 0;
@@ -6636,8 +6660,24 @@ async function pasteBookmark(targetNodeId, isFolder) {
             const payload = bookmarkClipboard.payload || [];
             if (payload.length) {
                 const preserveSourceID = bookmarkClipboard.source === 'temporary' && bookmarkClipboard.action === 'cut';
-                for (const item of payload) {
-                    await duplicateNode(item, targetFolderId, { preserveSourceID });
+                let muteSession = null;
+                let loadingToast = null;
+                if (typeof beginBookmarkBulkMute === 'function') {
+                    muteSession = await beginBookmarkBulkMute('paste-temp-to-permanent');
+                }
+                if (typeof window.showLoadingToast === 'function' && payload.length > 1) {
+                    const lang = currentLang || 'zh_CN';
+                    loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在粘贴 ${payload.length} 项...` : `Pasting ${payload.length} items...`);
+                }
+                try {
+                    for (const item of payload) {
+                        await duplicateNode(item, targetFolderId, { preserveSourceID });
+                    }
+                } finally {
+                    if (loadingToast) loadingToast.close();
+                    if (typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                        await endBookmarkBulkMute('paste-temp-to-permanent', { refreshTree: true });
+                    }
                 }
             }
             if (bookmarkClipboard.source === 'mixed') {
@@ -6655,18 +6695,50 @@ async function pasteBookmark(targetNodeId, isFolder) {
             }
         } else if (bookmarkClipboard.source === 'permanent') {
             if (bookmarkClipboard.action === 'cut' && bookmarkClipboard.nodeIds) {
-                for (const id of bookmarkClipboard.nodeIds) {
-                    await movePermanentBookmarkNode(id, {
-                        parentId: targetFolderId
-                    });
+                let muteSession = null;
+                let loadingToast = null;
+                if (typeof beginBookmarkBulkMute === 'function') {
+                    muteSession = await beginBookmarkBulkMute('paste-permanent-cut');
+                }
+                if (typeof window.showLoadingToast === 'function' && bookmarkClipboard.nodeIds.length > 1) {
+                    const lang = currentLang || 'zh_CN';
+                    loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在移动 ${bookmarkClipboard.nodeIds.length} 项...` : `Moving ${bookmarkClipboard.nodeIds.length} items...`);
+                }
+                try {
+                    for (const id of bookmarkClipboard.nodeIds) {
+                        await movePermanentBookmarkNode(id, {
+                            parentId: targetFolderId
+                        });
+                    }
+                } finally {
+                    if (loadingToast) loadingToast.close();
+                    if (typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                        await endBookmarkBulkMute('paste-permanent-cut', { refreshTree: true });
+                    }
                 }
                 bookmarkClipboard = null;
                 clipboardOperation = null;
                 unmarkCutNode();
             } else if (bookmarkClipboard.action === 'copy') {
                 const payload = bookmarkClipboard.payload || (bookmarkClipboard.nodeData ? [bookmarkClipboard.nodeData] : []);
-                for (const node of payload) {
-                    await duplicateNode(node, targetFolderId, { preserveSourceID: false });
+                let muteSession = null;
+                let loadingToast = null;
+                if (typeof beginBookmarkBulkMute === 'function') {
+                    muteSession = await beginBookmarkBulkMute('paste-permanent-copy');
+                }
+                if (typeof window.showLoadingToast === 'function' && payload.length > 1) {
+                    const lang = currentLang || 'zh_CN';
+                    loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在复制 ${payload.length} 项...` : `Copying ${payload.length} items...`);
+                }
+                try {
+                    for (const node of payload) {
+                        await duplicateNode(node, targetFolderId, { preserveSourceID: false });
+                    }
+                } finally {
+                    if (loadingToast) loadingToast.close();
+                    if (typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                        await endBookmarkBulkMute('paste-permanent-copy', { refreshTree: true });
+                    }
                 }
             }
         }
@@ -9303,11 +9375,31 @@ async function batchMergeFolder() {
     // 永久书签：新建文件夹并把选中项 move 进去
     const permanentIds = caps.permanentIds;
     if (!permanentIds.length) return;
-    const folderName = `${formatTimestampForTitle()}`;
+    const bookmarkBar = (await chrome.bookmarks.getTree())[0].children.find(n => n.id === '1');
+    if (!bookmarkBar) {
+        throw new Error('未找到书签栏');
+    }
 
+    const folderName = prompt(
+        lang === 'zh_CN' ? '请输入新文件夹名称:' : 'Enter new folder name:',
+        lang === 'zh_CN' ? '合并的文件夹' : 'Merged Folder'
+    );
+
+    if (!folderName) {
+        return;
+    }
+
+    let muteSession = null;
+    let loadingToast = null;
     try {
-        // 创建新文件夹（默认在根目录的"其他书签"中）
-        const bookmarkBar = (await chrome.bookmarks.getTree())[0].children.find(n => n.id === '1');
+        if (typeof beginBookmarkBulkMute === 'function') {
+            muteSession = await beginBookmarkBulkMute('batch-merge-folder');
+        }
+        if (typeof window.showLoadingToast === 'function' && permanentIds.length > 1) {
+            loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在合并 ${permanentIds.length} 项...` : `Merging ${permanentIds.length} items...`);
+        }
+
+        // 在书签栏下创建新文件夹
         const newFolder = await createPermanentBookmarkNode({
             parentId: bookmarkBar.id,
             title: folderName
@@ -9328,12 +9420,20 @@ async function batchMergeFolder() {
         updateBatchToolbar();
         // 不调用 refreshBookmarkTree()，让 onCreated/onMoved 事件触发增量更新
 
-        alert(lang === 'zh_CN' ? `已将 ${count} 项合并到新文件夹` : `Merged ${count} items to new folder`);
+        if (typeof showToast === 'function') {
+            showToast(lang === 'zh_CN' ? `已将 ${count} 项合并到新文件夹` : `Merged ${count} items to new folder`);
+        } else {
+            alert(lang === 'zh_CN' ? `已将 ${count} 项合并到新文件夹` : `Merged ${count} items to new folder`);
+        }
         console.log('[批量] 合并完成:', count);
-
     } catch (error) {
         console.error('[批量] 合并失败:', error);
         alert(lang === 'zh_CN' ? `合并失败: ${error.message}` : `Merge failed: ${error.message}`);
+    } finally {
+        if (loadingToast) loadingToast.close();
+        if (typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+            await endBookmarkBulkMute('batch-merge-folder', { refreshTree: true });
+        }
     }
 }
 

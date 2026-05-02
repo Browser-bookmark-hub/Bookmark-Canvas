@@ -2855,11 +2855,7 @@ function refreshSharedPermanentTreeCopySourceData(reason = '') {
 function __flushPermanentTreeSharedMutationRefresh() {
     cancelScheduledPermanentTreeCopySync();
     if (pendingPermanentTreeSharedMutationRefreshHandle !== null) {
-        if (typeof cancelAnimationFrame === 'function') {
-            try { cancelAnimationFrame(pendingPermanentTreeSharedMutationRefreshHandle); } catch (_) { }
-        } else {
-            try { clearTimeout(pendingPermanentTreeSharedMutationRefreshHandle); } catch (_) { }
-        }
+        try { clearTimeout(pendingPermanentTreeSharedMutationRefreshHandle); } catch (_) { }
     }
     pendingPermanentTreeSharedMutationRefreshHandle = null;
 
@@ -2887,18 +2883,14 @@ function schedulePermanentTreeSharedMutationRefresh(reason = '') {
     if (normalizedReason) {
         pendingPermanentTreeSharedMutationRefreshReasons.add(normalizedReason);
     }
-    if (pendingPermanentTreeSharedMutationRefreshHandle !== null) return;
-
-    if (typeof requestAnimationFrame === 'function') {
-        pendingPermanentTreeSharedMutationRefreshHandle = requestAnimationFrame(() => {
-            __flushPermanentTreeSharedMutationRefresh();
-        });
-        return;
+    
+    if (pendingPermanentTreeSharedMutationRefreshHandle !== null) {
+        try { clearTimeout(pendingPermanentTreeSharedMutationRefreshHandle); } catch (_) { }
     }
 
     pendingPermanentTreeSharedMutationRefreshHandle = setTimeout(() => {
         __flushPermanentTreeSharedMutationRefresh();
-    }, 16);
+    }, 150);
 }
 
 function refreshPermanentTreeSharedViewsAfterMutation(reason = '') {
@@ -8575,26 +8567,39 @@ async function addTabsToPermanent(tabs, scope, options = {}) {
 
     const skipAutoSectionFolder = !!(options && options.skipAutoSectionFolder);
 
-    if (skipAutoSectionFolder) {
-        await insertQuickAddItemsToPermanent(barId, items);
-    } else if (bookmarkCount === 1 && isQuickAddSingleBookmarkItem(items)) {
-        const item = items[0];
-        await bookmarksCreate({
-            parentId: barId,
-            title: (typeof item.title === 'string') ? item.title : String(item.url),
-            url: item.url
-        });
-    } else if (bookmarkCount === 1) {
-        await insertQuickAddItemsToPermanent(barId, items);
-    } else {
-        const title = buildSectionTitle(items, scope);
-        const folder = await bookmarksCreate({ parentId: barId, title });
-        await insertQuickAddItemsToPermanent(folder.id, items);
+    let muteSession = null;
+    let loadingToast = null;
+    if (typeof beginBookmarkBulkMute === 'function') {
+        muteSession = await beginBookmarkBulkMute('add-tabs-to-permanent');
+    }
+    if (typeof window.showLoadingToast === 'function') {
+        const msg = currentLang === 'en' ? `Adding ${bookmarkCount} pages...` : `正在添加 ${bookmarkCount} 个页面...`;
+        loadingToast = window.showLoadingToast(msg);
+    }
+    
+    try {
+        if (skipAutoSectionFolder) {
+            await insertQuickAddItemsToPermanent(barId, items);
+        } else if (bookmarkCount === 1 && isQuickAddSingleBookmarkItem(items)) {
+            const singleItem = items[0];
+            await bookmarksCreate({ parentId: barId, title: singleItem.title || singleItem.url, url: singleItem.url });
+        } else {
+            const folderTitle = scope === 'window' ? formatQuickAddWindowFolderTitle() : formatQuickAddCurrentFolderTitle();
+            const folder = await bookmarksCreate({ parentId: barId, title: folderTitle });
+            await insertQuickAddItemsToPermanent(folder.id, items);
+        }
+    } finally {
+        if (loadingToast) {
+            loadingToast.close();
+        }
+        if (typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+            await endBookmarkBulkMute('add-tabs-to-permanent', { refreshTree: true });
+        }
     }
 
-    const msg = currentLang === 'en'
-        ? `Added ${bookmarkCount} item${bookmarkCount > 1 ? 's' : ''} to bookmarks`
-        : `已加入永久栏目：${bookmarkCount} 项`;
+    const msg = (scope === 'window')
+        ? (currentLang === 'en' ? `Added current window tabs (${bookmarkCount})` : `已添加当前窗口所有标签页 (${bookmarkCount} 项)`)
+        : (currentLang === 'en' ? `Added ${bookmarkCount} tab(s)` : `已添加 ${bookmarkCount} 个标签页`);
     try { showToast(msg); } catch (_) { }
 }
 
@@ -14497,6 +14502,7 @@ function showToast(message, options = {}) {
     // 简单的提示功能
     const position = options && options.position === 'top-right' ? 'top-right' : 'bottom-right';
     const verticalPos = position === 'top-right' ? 'top: 20px;' : 'bottom: 20px;';
+    const duration = options && typeof options.duration === 'number' ? options.duration : 2000;
     const toast = document.createElement('div');
     toast.style.cssText = `
         position: fixed;
@@ -14509,17 +14515,49 @@ function showToast(message, options = {}) {
         box-shadow: var(--shadow-lg);
         z-index: 10000;
         animation: slideIn 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 8px;
     `;
-    toast.textContent = message;
+    
+    if (options && options.icon) {
+        const icon = document.createElement('i');
+        icon.className = options.icon;
+        if (options.spin) icon.style.animation = 'spin 1s linear infinite';
+        toast.appendChild(icon);
+    }
+    
+    const textSpan = document.createElement('span');
+    textSpan.textContent = message;
+    toast.appendChild(textSpan);
+    
     document.body.appendChild(toast);
 
-    setTimeout(() => {
-        toast.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => toast.remove(), 300);
-    }, 2000);
+    if (duration > 0) {
+        setTimeout(() => {
+            toast.style.animation = 'slideOut 0.3s ease';
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
+    }
+    
+    return {
+        update: (msg) => {
+            textSpan.textContent = msg;
+        },
+        close: () => {
+            toast.style.animation = 'slideOut 0.3s ease';
+            setTimeout(() => toast.remove(), 300);
+        }
+    };
 }
 
-
+window.showLoadingToast = function(initialMessage) {
+    return showToast(initialMessage, {
+        duration: 0,
+        icon: 'fas fa-spinner',
+        spin: true
+    });
+};
 
 // 添加动画样式
 const style = document.createElement('style');
@@ -14531,6 +14569,9 @@ style.textContent = `
     @keyframes slideOut {
         from { transform: translateX(0); opacity: 1; }
         to { transform: translateX(100%); opacity: 0; }
+    }
+    @keyframes spin {
+        100% { transform: rotate(360deg); }
     }
 `;
 document.head.appendChild(style);
