@@ -6288,6 +6288,56 @@ function expandAncestorsForTreeItem(treeItem, previewContainer) {
     } catch (_) { }
 }
 
+function persistSearchLocateTreeExpandState(treeContainer) {
+    if (!treeContainer) return;
+    try {
+        if (typeof __saveTreeExpandStateToStorage === 'function') {
+            __saveTreeExpandStateToStorage(treeContainer);
+            return;
+        }
+    } catch (_) { }
+    try {
+        if (typeof saveTreeExpandState === 'function') {
+            saveTreeExpandState(treeContainer);
+        }
+    } catch (_) { }
+}
+
+function persistTempSearchLocateExpandState(sectionId, folderIds) {
+    const sid = String(sectionId || '').trim();
+    if (!sid || !Array.isArray(folderIds) || !folderIds.length) return;
+    let changed = false;
+
+    try {
+        if (typeof LAZY_LOAD_THRESHOLD === 'undefined' || !LAZY_LOAD_THRESHOLD) return;
+        if (!(LAZY_LOAD_THRESHOLD.expandedFolders instanceof Set)) {
+            LAZY_LOAD_THRESHOLD.expandedFolders = new Set();
+        }
+        if (!(LAZY_LOAD_THRESHOLD.collapsedFolders instanceof Set)) {
+            LAZY_LOAD_THRESHOLD.collapsedFolders = new Set();
+        }
+
+        folderIds.forEach((folderId) => {
+            const fid = String(folderId || '').trim();
+            if (!fid) return;
+            const key = `${sid}-${fid}`;
+            if (!LAZY_LOAD_THRESHOLD.expandedFolders.has(key)) changed = true;
+            if (LAZY_LOAD_THRESHOLD.collapsedFolders.has(key)) changed = true;
+            LAZY_LOAD_THRESHOLD.expandedFolders.add(key);
+            LAZY_LOAD_THRESHOLD.collapsedFolders.delete(key);
+        });
+    } catch (_) {
+        return;
+    }
+
+    if (!changed) return;
+    try {
+        if (typeof saveTempExpandState === 'function') {
+            saveTempExpandState();
+        }
+    } catch (_) { }
+}
+
 function clearSearchTreeItemOutline() {
     try {
         // Clear outline info
@@ -6879,6 +6929,7 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
     if (options.expandTargetFolder !== false) {
         try { await ensurePermanentSearchFolderExpanded(target); } catch (_) { }
     }
+    persistSearchLocateTreeExpandState(treeContainer);
     const resolvePermanentTarget = () => {
         const latestSection = resolvePermanentSectionElementForSearch(options.copyId || null);
         const latestTree = (latestSection && latestSection.querySelector('.bookmark-tree'))
@@ -7032,6 +7083,13 @@ async function locateBookmarkItemInTempTree(sectionId, itemId, options = {}) {
     if (options.expandTargetFolder !== false) {
         try { await ensureTempSearchFolderExpanded(sectionObj, target); } catch (_) { }
     }
+    try {
+        const expandedTempFolderIds = parents.slice();
+        if (options.expandTargetFolder !== false && target && target.dataset && target.dataset.nodeType === 'folder') {
+            expandedTempFolderIds.push(id);
+        }
+        persistTempSearchLocateExpandState(sid, expandedTempFolderIds);
+    } catch (_) { }
     const resolveTempTarget = () => {
         const freshSection = document.getElementById(sid);
         if (!freshSection) return null;
