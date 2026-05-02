@@ -32780,6 +32780,17 @@ async function __syncPermanentMainTreeFromChromeBookmarks(options = {}) {
         ...(previous && typeof previous === 'object' ? previous : __buildPermanentPrimaryContentPayloadFromTree(normalizedTree)),
         tree: normalizedTree[0]
     };
+    const nextSyncPayload = __buildPermanentMainSyncPayload(content);
+    if (nextSyncPayload) {
+        const nextSignature = __buildBcsSignature(nextSyncPayload);
+        try {
+            const storage = await __bcsStorageGet([BCS_PERM_MAIN_STATE_KEY]);
+            const prevState = __normalizeBcsStatePayload(storage ? storage[BCS_PERM_MAIN_STATE_KEY] : null);
+            if (nextSignature && prevState.signature && nextSignature === prevState.signature) {
+                return { skipped: true, content, state: prevState, syncPayload: nextSyncPayload };
+            }
+        } catch (_) { }
+    }
     const result = await __writePermanentMainContentToBcs(content, {
         immediate: true,
         assumeClean: !!(options && options.assumeClean)

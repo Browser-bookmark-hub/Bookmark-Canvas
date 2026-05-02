@@ -1187,11 +1187,13 @@ function noteBookmarkBulkMutation(reason = '') {
     }
 }
 
-async function beginBookmarkBulkMute(reason = 'bulk-bookmark-operation') {
+async function beginBookmarkBulkMute(reason = 'bulk-bookmark-operation', options = {}) {
     const normalizedReason = String(reason || 'bulk-bookmark-operation');
     bookmarkBulkMuteDepth += 1;
     bookmarkBulkMuteReason = normalizedReason;
-    bookmarkBulkNeedsRefresh = true;
+    if (options.needsRefresh !== false) {
+        bookmarkBulkNeedsRefresh = true;
+    }
     bookmarkBulkMuteIgnoreUntil = 0;
     if (bookmarkBulkMuteDepth === 1) {
         clearBookmarkBulkQueuedEvents();
@@ -1210,7 +1212,8 @@ async function endBookmarkBulkMute(reason = '', options = {}) {
         return { active: true, depth: bookmarkBulkMuteDepth, reason: normalizedReason };
     }
 
-    const shouldRefreshTree = options.refreshTree !== false && bookmarkBulkNeedsRefresh;
+    const hadBulkMutations = bookmarkBulkNeedsRefresh;
+    const shouldRefreshTree = options.refreshTree !== false && hadBulkMutations;
 
     bookmarkBulkMuteReason = '';
     bookmarkBulkNeedsRefresh = false;
@@ -1220,12 +1223,15 @@ async function endBookmarkBulkMute(reason = '', options = {}) {
         await renderTreeView(true);
     }
 
-    bookmarkBulkMuteIgnoreUntil = Date.now() + BULK_BOOKMARK_POST_EVENT_GRACE_MS;
+    if (hadBulkMutations) {
+        bookmarkBulkMuteIgnoreUntil = Date.now() + BULK_BOOKMARK_POST_EVENT_GRACE_MS;
+    }
     return {
         active: false,
         depth: 0,
         reason: normalizedReason,
-        refreshed: shouldRefreshTree
+        refreshed: shouldRefreshTree,
+        mutated: hadBulkMutations
     };
 }
 
@@ -11388,6 +11394,14 @@ function getTreeFingerprint(tree) {
     return JSON.stringify(extractKey(tree[0]));
 }
 
+// 判断是否应该跳过 forceRefresh（缓存和指纹都完好，说明没有任何变化事件清除过它们）
+// 所有真正的书签变化路径（增删改移/导入/批量操作）都会清除 lastTreeFingerprint 和 cachedTreeData。
+// 如果两者都还在，说明上次渲染后没有发生任何变化，无需重新渲染。
+// 这个判断是纯内存检查，零开销，不调用 Chrome API。
+function shouldSkipForceTreeRefreshForNoNetChange() {
+    return !!(lastTreeFingerprint && cachedTreeData);
+}
+
 // 从 background.js 获取书签树快照（优先走缓存，失败再直连 getTree）
 async function getBookmarkTreeSnapshot() {
     try {
@@ -11423,14 +11437,18 @@ let permanentMainStorageSyncAfterFlushRefresh = false;
 function schedulePermanentMainStorageSyncFromChrome(reason = '', delayMs = 180) {
     try {
         if (permanentMainStorageSyncTimer) clearTimeout(permanentMainStorageSyncTimer);
-        permanentMainStorageSyncTimer = setTimeout(() => {
+        permanentMainStorageSyncTimer = setTimeout(async () => {
             permanentMainStorageSyncTimer = null;
             const bridge = window.CanvasProtocolBridge;
             if (!bridge || typeof bridge.syncPermanentMainTreeFromChromeBookmarks !== 'function') return;
             bridge.syncPermanentMainTreeFromChromeBookmarks({
                 reason,
                 assumeClean: false
-            }).then(() => {
+            }).then((syncResult) => {
+                if (syncResult && syncResult.skipped) {
+                    console.log('[Permanent JSON] sync skipped (no change):', reason);
+                    return;
+                }
                 try {
                     if (typeof bridge.clearPermanentTreeRenderCaches === 'function') {
                         bridge.clearPermanentTreeRenderCaches();
@@ -12073,7 +12091,18 @@ async function renderTreeView(forceRefresh = false) {
     }
 
     // 强制刷新时清除缓存，确保重新渲染
+    // 但先检查 Chrome 实际树是否与已显示树相同，相同则跳过（避免无变化的全量重建）
     if (forceRefresh) {
+        if (shouldSkipForceTreeRefreshForNoNetChange()) {
+            console.log('[renderTreeView] force-refresh-skipped-no-net-change: 缓存和指纹完好，无变化，跳过强制刷新');
+            isRenderingTree = false;
+            if (pendingRenderRequest !== null) {
+                const pending = pendingRenderRequest;
+                pendingRenderRequest = null;
+                renderTreeView(pending);
+            }
+            return;
+        }
         cachedTreeData = null;
         lastTreeFingerprint = null;
         lastTreeSnapshotVersion = null;
@@ -14255,7 +14284,7 @@ function setupBookmarkListener() {
 
     if (browserAPI.bookmarks.onImportBegan && typeof browserAPI.bookmarks.onImportBegan.addListener === 'function') {
         browserAPI.bookmarks.onImportBegan.addListener(() => {
-            beginBookmarkBulkMute('browser-import').catch((e) => {
+            beginBookmarkBulkMute('browser-import', { needsRefresh: false }).catch((e) => {
                 console.warn('[书签监听] onImportBegan 处理异常:', e);
             });
         });
@@ -14263,10 +14292,12 @@ function setupBookmarkListener() {
 
     if (browserAPI.bookmarks.onImportEnded && typeof browserAPI.bookmarks.onImportEnded.addListener === 'function') {
         browserAPI.bookmarks.onImportEnded.addListener(() => {
-            endBookmarkBulkMute('browser-import', { resetBaseline: true, refreshTree: true }).catch((e) => {
+            endBookmarkBulkMute('browser-import', { resetBaseline: true, refreshTree: true }).then((result) => {
+                if (result.mutated) {
+                    schedulePermanentMainStorageSyncFromChrome('browser-import-ended', 0);
+                }
+            }).catch((e) => {
                 console.warn('[书签监听] onImportEnded 处理异常:', e);
-            }).finally(() => {
-                schedulePermanentMainStorageSyncFromChrome('browser-import-ended', 0);
             });
         });
     }
