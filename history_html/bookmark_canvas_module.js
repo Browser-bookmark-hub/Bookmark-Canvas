@@ -1842,10 +1842,10 @@ const ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX = 6;
 const DISCRETE_WHEEL_EVENT_DELTA_MIN = 24;
 const CANVAS_WHEEL_LINE_PIXEL = 12;
 const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 0.5;
-const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 0.92;
-const WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND = 0.44;
+const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 1.0;
+const WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND = 0.36;
 const WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER = 1.0;
-const WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST = 1.06;
+const WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST = 1.10;
 const WINDOWS_LINUX_WHEEL_PAN_INERTIA_ENABLED = false;
 const WINDOWS_LINUX_WHEEL_PAN_MICRO_SMOOTH_ENABLED = false;
 const WINDOWS_LINUX_WHEEL_PAN_EASE_MULTIPLIER = 1.0;
@@ -4487,6 +4487,7 @@ function initCanvasView() {
     loadCanvasAppearanceSettings();
     // 加载其他设置（分裂自动连接/颜色跟随）
     loadCanvasOtherSettings();
+    loadCanvasDataIntensiveSettings();
 
     // 初始化连接线层
     setupCanvasEdgesLayer();
@@ -4551,6 +4552,8 @@ function initCanvasView() {
 
     // [数据密集模式] 初始化时计算一次视口数据量
     try { setTimeout(() => updateDataIntensiveMode(true), 200); } catch (_) { }
+    __bindCanvasViewportVisualSyncLifecycle();
+    __scheduleCanvasViewportVisualSync();
 }
 
 function setupCanvasDropFeedback() {
@@ -6373,6 +6376,7 @@ function setupCanvasZoomAndPan() {
 
         if (isCustomCtrlKeyPressed(e) || e.metaKey) {
             e.preventDefault();
+            __cancelCanvasWheelPanMotion();
 
             // [OPT] 缩放开始：进入高性能模式
             workspace.classList.add('is-zooming');
@@ -6708,13 +6712,7 @@ function setupCanvasZoomAndPan() {
             e.preventDefault();
             e.stopPropagation();
             __cancelCanvasActiveZoomGesture('pan-start');
-            if (CanvasState.scrollAnimation.frameId) {
-                cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
-                CanvasState.scrollAnimation.frameId = null;
-            }
-            CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
-            CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
-            CanvasState.scrollAnimation.source = null;
+            __cancelCanvasWheelPanMotion();
             CanvasState.isPanning = true;
             CanvasState.panStartX = e.clientX - CanvasState.panOffsetX;
             CanvasState.panStartY = e.clientY - CanvasState.panOffsetY;
@@ -6779,6 +6777,7 @@ function setupCanvasZoomAndPan() {
             content.classList.add('animate-zoom');
             setTimeout(() => content.classList.remove('animate-zoom'), 300);
         }
+        __cancelCanvasWheelPanMotion();
         setCanvasZoom(CanvasState.zoom * factor);
     };
 
@@ -8431,6 +8430,58 @@ function applyCanvasContentTransform(content, panX, panY, scale) {
     content.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${s})`;
     try { updateCanvasGridLayerTransform(x, y, s); } catch (_) { }
     try { refreshMaximizedNodes(); } catch (_) { }
+}
+
+function __forceCanvasViewportVisualSync() {
+    const container = getCachedContainer();
+    const content = getCachedContent();
+    const z = clampCanvasZoom(CanvasState.zoom || CanvasState.baseZoom || 1);
+    CanvasState.zoom = z;
+    if (container) {
+        setCanvasScaleVars(container, z, true);
+        container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
+        container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
+    }
+    if (content) {
+        applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, z);
+    }
+    try { updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, z, true); } catch (_) { }
+    try { updateCanvasLowDetailMode(true); } catch (_) { }
+    try { updateScrollbarThumbsLightweight(); } catch (_) { }
+}
+
+let __canvasViewportVisualSyncLifecycleBound = false;
+
+function __scheduleCanvasViewportVisualSync() {
+    requestAnimationFrame(() => {
+        try { __forceCanvasViewportVisualSync(); } catch (_) { }
+        requestAnimationFrame(() => {
+            try { __forceCanvasViewportVisualSync(); } catch (_) { }
+        });
+    });
+}
+
+function __isCanvasViewportVisualSyncEligible() {
+    const root = document && document.documentElement ? document.documentElement : null;
+    if (root && !root.classList.contains('canvas-view-active')) return false;
+    return !!(document.getElementById('canvasWorkspace') && getCachedContainer() && getCachedContent());
+}
+
+function __bindCanvasViewportVisualSyncLifecycle() {
+    if (__canvasViewportVisualSyncLifecycleBound) return;
+    __canvasViewportVisualSyncLifecycleBound = true;
+
+    const syncIfReady = () => {
+        if (!__isCanvasViewportVisualSyncEligible()) return;
+        __scheduleCanvasViewportVisualSync();
+    };
+    try { window.addEventListener('focus', syncIfReady); } catch (_) { }
+    try { window.addEventListener('pageshow', syncIfReady); } catch (_) { }
+    try {
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') syncIfReady();
+        });
+    } catch (_) { }
 }
 
 function getCanvasDisplayZoom() {
@@ -10501,9 +10552,11 @@ function updateCanvasLowDetailMode(force = false) {
 }
 
 function setCanvasZoom(zoom, centerX = null, centerY = null, options = {}) {
-    const container = document.querySelector('.canvas-main-container');
+    const container = getCachedContainer();
     const workspace = document.getElementById('canvasWorkspace');
     if (!container || !workspace) return;
+
+    const oldZoom = CanvasState.zoom;
 
     if (typeof options !== 'object' || options === null) {
         options = {};
@@ -10512,10 +10565,9 @@ function setCanvasZoom(zoom, centerX = null, centerY = null, options = {}) {
         recomputeBounds = false,
         skipSave = false,
         silent = false,
-        skipScrollbarUpdate = false // 新增：跳过滚动条更新（滚动时使用）
+        skipScrollbarUpdate = false, // 新增：跳过滚动条更新（滚动时使用）
+        forceScaleVars = false
     } = options;
-
-    const oldZoom = CanvasState.zoom;
 
     // 限制缩放范围（最小显示 1%）
     zoom = clampCanvasZoom(zoom);
@@ -10543,7 +10595,7 @@ function setCanvasZoom(zoom, centerX = null, centerY = null, options = {}) {
 
     // 优化：滚动时延迟更新边界
     if (!skipScrollbarUpdate) {
-        setCanvasScaleVars(container, zoom);
+        setCanvasScaleVars(container, zoom, forceScaleVars);
         updateCanvasScrollBounds({ initial: false, recomputeBounds });
         savePanOffsetThrottled();
         // [Fix] 缩放后检查唤醒状态：交互中/低细节/大数据时用节流，避免每次缩放都全量扫描导致掉帧
@@ -10555,7 +10607,7 @@ function setCanvasZoom(zoom, centerX = null, centerY = null, options = {}) {
         }
     } else {
         // 滚动/滚轮缩放时：仍需同步缩放变量（供低缩放文字/连线标签使用），但跳过边界计算
-        setCanvasScaleVars(container, zoom);
+        setCanvasScaleVars(container, zoom, forceScaleVars);
         // 滚动时使用极速平移（直接 transform）
         applyPanOffsetFast();
     }
@@ -10939,6 +10991,30 @@ function cancelInertiaScroll() {
             reason: 'cancelInertiaScroll'
         }, { force: true, throttleMs: 0 });
     }
+}
+
+function __cancelCanvasPendingScrollUpdate() {
+    if (scrollUpdateFrame) {
+        cancelAnimationFrame(scrollUpdateFrame);
+        scrollUpdateFrame = null;
+    }
+    pendingScrollRequest = null;
+}
+
+function __cancelCanvasScrollAnimationFrame() {
+    if (CanvasState.scrollAnimation.frameId) {
+        cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
+        CanvasState.scrollAnimation.frameId = null;
+    }
+    CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+    CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+    CanvasState.scrollAnimation.source = null;
+}
+
+function __cancelCanvasWheelPanMotion() {
+    cancelInertiaScroll();
+    __cancelCanvasPendingScrollUpdate();
+    __cancelCanvasScrollAnimationFrame();
 }
 
 // 边缘自动滚动相关函数
@@ -11681,12 +11757,7 @@ function startScrollbarThumbDrag(event, axis) {
     const thumbRect = thumb.getBoundingClientRect();
     const offset = axis === 'vertical' ? event.clientY - thumbRect.top : event.clientX - thumbRect.left;
 
-    if (CanvasState.scrollAnimation.frameId) {
-        cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
-        CanvasState.scrollAnimation.frameId = null;
-    }
-    CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
-    CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+    __cancelCanvasWheelPanMotion();
 
     CanvasState.scrollState.activeDragAxis = axis;
     CanvasState.scrollState.dragInfo = {
@@ -44115,6 +44186,9 @@ window.CanvasModule = {
     loadFolderChildren: loadFolderChildren,
     getTempSection: getTempSection,
     setZoom: setCanvasZoom,
+    syncViewportVisualState: () => {
+        if (__isCanvasViewportVisualSyncEligible()) __scheduleCanvasViewportVisualSync();
+    },
     getCanvasAppearanceSettings: getCanvasAppearanceSettings,
     getCanvasOtherSettings: getCanvasOtherSettings,
     getCanvasDirectoryCollapsePrefs: getCanvasDirectoryCollapsePrefs,

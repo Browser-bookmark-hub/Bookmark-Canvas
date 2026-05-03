@@ -10891,6 +10891,9 @@ function renderCurrentView() {
                             setTimeout(() => {
                                 try {
                                     window.CanvasModule.scheduleDormancyUpdate();
+                                    if (typeof window.CanvasModule.syncViewportVisualState === 'function') {
+                                        window.CanvasModule.syncViewportVisualState();
+                                    }
                                 } catch (err) {
                                     console.warn('[Canvas] 休眠管理调度失败:', err);
                                 }
