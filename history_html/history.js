@@ -9467,6 +9467,27 @@ function initSidebarToggle() {
         } catch (_) { }
     }
 
+    function stabilizeCanvasLayoutSafe(options = {}) {
+        try {
+            if (window.CanvasModule && typeof window.CanvasModule.stabilizePermanentSectionAnchors === 'function') {
+                window.CanvasModule.stabilizePermanentSectionAnchors(options);
+            }
+            if (window.CanvasModule && typeof window.CanvasModule.syncViewportVisualState === 'function') {
+                window.CanvasModule.syncViewportVisualState();
+            }
+        } catch (_) { }
+    }
+
+    function scheduleCanvasLayoutStabilization(options = {}) {
+        stabilizeCanvasLayoutSafe(options);
+        requestAnimationFrame(() => {
+            stabilizeCanvasLayoutSafe(options);
+        });
+        window.setTimeout(() => {
+            stabilizeCanvasLayoutSafe(options);
+        }, SIDEBAR_TRANSITION_MS + 40);
+    }
+
     function scheduleMaximizedRefresh() {
         refreshMaximizedNodesSafe();
         if (refreshRaf) {
@@ -9637,6 +9658,7 @@ function initSidebarToggle() {
     function applySidebarPosition(position, options = {}) {
         const nextPosition = normalizeSidebarPosition(position) || 'left';
         const sideChanged = nextPosition !== sidebarPosition;
+        stabilizeCanvasLayoutSafe({ syncBounds: false });
 
         const applyPositionState = () => {
             sidebarPosition = nextPosition;
@@ -9667,11 +9689,13 @@ function initSidebarToggle() {
 
         if (!options || options.refresh !== false) {
             scheduleMaximizedRefresh();
+            scheduleCanvasLayoutStabilization({ syncBounds: false });
         }
     }
 
     function applySidebarState(state) {
         clearSideSwitchAnimation();
+        stabilizeCanvasLayoutSafe({ syncBounds: false });
         const nextState = normalizeSidebarState(state) || 'expanded';
         sidebar.classList.toggle('compact', nextState === 'compact');
         sidebar.classList.remove('collapsed');
@@ -9748,6 +9772,7 @@ function initSidebarToggle() {
         persistSidebarState(nextState);
         syncSidebarWidth();
         scheduleMaximizedRefresh();
+        scheduleCanvasLayoutStabilization({ syncBounds: false });
         return nextState;
     }
 
@@ -9774,16 +9799,20 @@ function initSidebarToggle() {
     }
 
     function scheduleAutoStateOnResize() {
-        if (sidebarCollapseMode === SIDEBAR_COLLAPSE_MODE_MANUAL) return;
         if (autoResizeDebounceTimer != null) {
             window.clearTimeout(autoResizeDebounceTimer);
         }
 
         autoResizeDebounceTimer = window.setTimeout(() => {
             autoResizeDebounceTimer = null;
+            if (sidebarCollapseMode === SIDEBAR_COLLAPSE_MODE_MANUAL) {
+                scheduleCanvasLayoutStabilization({ syncBounds: false });
+                return;
+            }
             applyAutoState({ ignoreManualOverride: true });
             syncSidebarWidth();
             scheduleMaximizedRefresh();
+            scheduleCanvasLayoutStabilization({ syncBounds: false });
         }, AUTO_RESIZE_DEBOUNCE_MS);
     }
 
@@ -9812,6 +9841,7 @@ function initSidebarToggle() {
                 updateToggleLabel(currentState);
                 syncSidebarWidth();
                 scheduleMaximizedRefresh();
+                scheduleCanvasLayoutStabilization({ syncBounds: false });
             }
         }
     }
@@ -9837,6 +9867,7 @@ function initSidebarToggle() {
         currentState = applySidebarState('compact');
         syncSidebarWidth();
         scheduleMaximizedRefresh();
+        scheduleCanvasLayoutStabilization({ syncBounds: false });
         console.log('[侧边栏] 侧边栏模式默认完全收起');
     }
 
@@ -10024,6 +10055,7 @@ function initSidebarToggle() {
             resizeDragSession.previewState = 'compact';
             syncSidebarWidth();
             refreshMaximizedNodesSafe();
+            stabilizeCanvasLayoutSafe({ syncBounds: false });
             return;
         }
 
@@ -10034,6 +10066,7 @@ function initSidebarToggle() {
         resizeDragSession.previewWidth = safeWidth;
         syncSidebarWidth();
         refreshMaximizedNodesSafe();
+        stabilizeCanvasLayoutSafe({ syncBounds: false });
     });
 
     function finishResizeDrag(event, canceled) {
@@ -10087,6 +10120,7 @@ function initSidebarToggle() {
         if (!e || !e.propertyName) return;
         if (e.propertyName === 'width' || e.propertyName.startsWith('padding')) {
             scheduleMaximizedRefresh();
+            scheduleCanvasLayoutStabilization({ syncBounds: false });
         }
     });
 
@@ -10098,6 +10132,7 @@ function initSidebarToggle() {
         }
         syncSidebarWidth();
         scheduleMaximizedRefresh();
+        scheduleCanvasLayoutStabilization({ syncBounds: false });
     });
 
     window.addEventListener('header-compact-state-will-change', () => {

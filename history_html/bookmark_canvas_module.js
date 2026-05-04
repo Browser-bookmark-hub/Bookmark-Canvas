@@ -6890,11 +6890,13 @@ function setupCanvasZoomAndPan() {
 
     window.addEventListener('resize', () => {
         lastResizeTime = Date.now(); // 记录最后一次 Resize 时间
+        try { stabilizePermanentSectionAnchors({ syncBounds: false }); } catch (_) { }
         refreshMaximizedNodesRealtime();
 
         if (resizeTimer) clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
             scheduleDormancyUpdate(120);
+            try { stabilizePermanentSectionAnchors({ syncBounds: false }); } catch (_) { }
             updateCanvasScrollBounds({ recomputeBounds: true, initial: false });
             refreshMaximizedNodes();
         }, 300);
@@ -14795,6 +14797,13 @@ function __parsePermanentViewNumericValue(value) {
     return Number.isFinite(n) ? Math.round(n) : null;
 }
 
+function __parsePermanentViewCssPixelValue(value) {
+    const raw = String(value == null ? '' : value).trim();
+    if (!/^-?\d+(?:\.\d+)?px$/i.test(raw)) return null;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? Math.round(n) : null;
+}
+
 function __normalizePermanentViewCardState(rawState) {
     const source = rawState && typeof rawState === 'object' ? rawState : {};
     const out = {};
@@ -14831,11 +14840,14 @@ function __normalizePermanentSectionCopyStoragePayload(copy) {
 function __readPermanentViewCardStateFromDom(copyId = null) {
     const sectionEl = __resolvePermanentSectionElement(copyId);
     if (!sectionEl) return {};
+    const left = __parsePermanentViewCssPixelValue(sectionEl.style.left);
+    const top = __parsePermanentViewCssPixelValue(sectionEl.style.top);
+    if (left === null || top === null) return {};
     const fallbackWidth = Math.max(300, Math.round(sectionEl.offsetWidth || 0));
     const fallbackHeight = Math.max(200, Math.round(sectionEl.offsetHeight || 0));
     return __normalizePermanentViewCardState({
-        left: sectionEl.style.left,
-        top: sectionEl.style.top,
+        left,
+        top,
         width: sectionEl.style.width || fallbackWidth,
         height: sectionEl.style.height || fallbackHeight
     });
@@ -14973,18 +14985,26 @@ function __applyPermanentLayoutFromCanvasNodes(nodesInput, options = {}) {
     return !!(mainState || copyIds.length);
 }
 
+function __applyPermanentLayoutFromBcsStorageSnapshot(storageMap, options = {}) {
+    const storage = storageMap && typeof storageMap === 'object' ? storageMap : null;
+    if (!storage) return false;
+    const canvasRaw = storage[BCS_CANVAS_KEY];
+    const canvas = __readBcsCanvasPayload(canvasRaw);
+    const nodes = Array.isArray(canvas && canvas.nodes) ? canvas.nodes : [];
+    if (!nodes.length) return false;
+    return __applyPermanentLayoutFromCanvasNodes(nodes, options);
+}
+
 let __permanentLayoutFromBcsSyncToken = 0;
 function __syncPermanentLayoutFromBcsCanvasAsync(options = {}) {
     const token = ++__permanentLayoutFromBcsSyncToken;
     Promise.resolve()
         .then(async () => {
-            const storage = await __bcsStorageGet([BCS_CANVAS_KEY]);
+            const storage = (options && options.bcsStorage && typeof options.bcsStorage === 'object')
+                ? options.bcsStorage
+                : await __bcsStorageGet([BCS_CANVAS_KEY]);
             if (token !== __permanentLayoutFromBcsSyncToken) return;
-            const canvasRaw = storage ? storage[BCS_CANVAS_KEY] : null;
-            const canvas = __readBcsCanvasPayload(canvasRaw);
-            const nodes = Array.isArray(canvas && canvas.nodes) ? canvas.nodes : [];
-            if (!nodes.length) return;
-            __applyPermanentLayoutFromCanvasNodes(nodes, options);
+            __applyPermanentLayoutFromBcsStorageSnapshot(storage, options);
         })
         .catch(() => { });
 }
@@ -15992,7 +16012,6 @@ function createPermanentSectionCopy(sourceSection) {
     } catch (_) { }
 
     // Init canvas position near source
-    try { initializePermanentSectionPosition(origin); } catch (_) { }
     const baseLeft = parseFloat(origin.style.left) || 0;
     const baseTop = parseFloat(origin.style.top) || 0;
     const baseW = origin.style.width || `${Math.max(300, Math.round(origin.offsetWidth || 600))}px`;
@@ -16234,9 +16253,6 @@ function makePermanentSectionDraggable(permanentSection) {
 
     console.log('[Canvas] 为永久栏目添加拖拽功能');
 
-    // 初始化位置：如果使用transform居中，转换为left/top形式，避免第一次拖动跳动
-    initializePermanentSectionPosition(permanentSection);
-
     // 添加resize功能
     makePermanentSectionResizable(permanentSection);
 
@@ -16388,42 +16404,6 @@ function loadPermanentSectionPosition() {
         const permanentSection = document.getElementById('permanentSection');
         if (!permanentSection) return;
 
-        // 需求：永久栏目尺寸应始终“固定”，不要因为窗口 resize 而改变。
-        // 旧默认值中 height 使用 vh（会随窗口高度变化），只有当用户手动 resize 后才变成 px。
-        // 这里在“没有保存尺寸”的情况下，把当前计算后的尺寸固化为 px 并持久化，保证行为一致。
-        const hasInlineWidth = !!(permanentSection.style.width && permanentSection.style.width.trim());
-        const hasInlineHeight = !!(permanentSection.style.height && permanentSection.style.height.trim());
-        if (!hasInlineWidth || !hasInlineHeight) {
-            const baseSize = getPermanentSectionBaseSize();
-            // 确保 left/top 已经初始化（否则保存会写入空值）
-            if (!permanentSection.style.left || !permanentSection.style.top) {
-                try { initializePermanentSectionPosition(permanentSection); } catch (_) { }
-            }
-
-            if (baseSize.mode === 'manual') {
-                if (!hasInlineWidth) permanentSection.style.width = `${baseSize.width}px`;
-                if (!hasInlineHeight) permanentSection.style.height = `${baseSize.height}px`;
-            } else {
-                const autoSize = __computePermanentSectionAutoSize(permanentSection, baseSize);
-                if (autoSize) {
-                    if (!hasInlineWidth) permanentSection.style.width = `${autoSize.width}px`;
-                    if (!hasInlineHeight) permanentSection.style.height = `${autoSize.height}px`;
-                } else {
-                    // 回退：用当前渲染尺寸固化为 px（避免 70vh 这种相对单位随窗口变化）
-                    const widthPx = Math.max(300, Math.round(permanentSection.offsetWidth || 0));
-                    const heightPx = Math.max(200, Math.round(permanentSection.offsetHeight || 0));
-                    if (!hasInlineWidth) permanentSection.style.width = `${widthPx}px`;
-                    if (!hasInlineHeight) permanentSection.style.height = `${heightPx}px`;
-                }
-            }
-
-            try { savePermanentSectionPosition(); } catch (_) { }
-            console.log('[Canvas] 固化永久栏目默认尺寸为固定像素:', {
-                width: permanentSection.style.width,
-                height: permanentSection.style.height
-            });
-        }
-
         // 副本 UI 状态（展开/滚动）必须独立持久化：首次进入时仅补一次共享树同步。
         // 这里不要再优先排旧的 copy-sync 定时器，否则首屏完成后很容易再出现一轮可见补刷。
         try {
@@ -16470,31 +16450,8 @@ function __computePermanentSectionAutoSize(permanentSection, baseSize) {
 function applyPermanentSectionSizeFromAppearance(settings, options = {}) {
     const permanentSection = document.getElementById('permanentSection');
     if (!permanentSection) return;
-    const baseSize = (settings && settings.sizes && settings.sizes.permanent) ? settings.sizes.permanent : getPermanentSectionBaseSize();
-    const mode = baseSize.mode === 'auto' ? 'auto' : 'manual';
-
     const applySize = () => {
-        if (!permanentSection.style.left || !permanentSection.style.top) {
-            try { initializePermanentSectionPosition(permanentSection); } catch (_) { }
-        }
-        permanentSection.style.transition = 'none';
-        permanentSection.style.transform = 'none';
-
-        if (mode === 'manual') {
-            permanentSection.style.width = `${baseSize.width}px`;
-            permanentSection.style.height = `${baseSize.height}px`;
-        } else {
-            const autoSize = __computePermanentSectionAutoSize(permanentSection, baseSize);
-            if (autoSize) {
-                permanentSection.style.width = `${autoSize.width}px`;
-                permanentSection.style.height = `${autoSize.height}px`;
-            }
-        }
-
-        permanentSection.offsetHeight;
-        permanentSection.style.transition = '';
-
-        try { savePermanentSectionPosition(); } catch (_) { }
+        try { __syncPermanentLayoutFromBcsCanvasAsync({ removeMissingCopies: false }); } catch (_) { }
         try { updateCanvasScrollBounds(); } catch (_) { }
         try { updateScrollbarThumbs(); } catch (_) { }
         try { scheduleEdgesRender(); } catch (_) { }
@@ -16507,53 +16464,70 @@ function applyPermanentSectionSizeFromAppearance(settings, options = {}) {
     }
 }
 
-// 初始化永久栏目位置：转换transform为left/top，避免第一次拖动跳动
-function initializePermanentSectionPosition(permanentSection) {
-    if (!permanentSection) return;
+function stabilizePermanentSectionAnchors(options = {}) {
+    const canvasContent = document.getElementById('canvasContent');
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!canvasContent || !workspace) return false;
 
-    // 如果已经有left/top设置，说明已经初始化过了
-    if (permanentSection.style.left && permanentSection.style.top) {
-        return;
+    const workspaceRect = workspace.getBoundingClientRect();
+    if (!workspaceRect || !Number.isFinite(workspaceRect.left) || !Number.isFinite(workspaceRect.top)) return false;
+
+    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const panX = Number.isFinite(CanvasState.panOffsetX) ? CanvasState.panOffsetX : 0;
+    const panY = Number.isFinite(CanvasState.panOffsetY) ? CanvasState.panOffsetY : 0;
+    let changed = false;
+
+    canvasContent.querySelectorAll('.permanent-bookmark-section').forEach((sectionEl) => {
+        if (!sectionEl || !sectionEl.isConnected) return;
+        if (sectionEl.classList.contains('dragging') || sectionEl.classList.contains('resizing')) return;
+        if (__isNodeMaximized(sectionEl)) return;
+        if (sectionEl.dataset && sectionEl.dataset.locked === 'true') return;
+
+        const rect = sectionEl.getBoundingClientRect();
+        if (!rect || !Number.isFinite(rect.left) || !Number.isFinite(rect.top)) return;
+
+        const currentLeft = parseFloat(sectionEl.style.left);
+        const currentTop = parseFloat(sectionEl.style.top);
+        const inlineTransform = String(sectionEl.style.transform || '').trim();
+        let computedTransform = '';
+        try {
+            computedTransform = String((window.getComputedStyle(sectionEl) || {}).transform || '').trim();
+        } catch (_) { }
+        const missingPixelAnchor = !Number.isFinite(currentLeft) || !Number.isFinite(currentTop);
+        const hasInlineTransform = !!(inlineTransform && inlineTransform !== 'none');
+        const hasComputedTransform = !!(computedTransform && computedTransform !== 'none');
+        const needsTransformReset = hasInlineTransform || hasComputedTransform;
+        if (!missingPixelAnchor && !needsTransformReset) return;
+
+        const shouldMeasureVisualAnchor = missingPixelAnchor || (!hasInlineTransform && hasComputedTransform);
+        const nextLeft = shouldMeasureVisualAnchor
+            ? Math.round((rect.left - workspaceRect.left - panX) / zoom)
+            : Math.round(currentLeft);
+        const nextTop = shouldMeasureVisualAnchor
+            ? Math.round((rect.top - workspaceRect.top - panY) / zoom)
+            : Math.round(currentTop);
+        if (!Number.isFinite(nextLeft) || !Number.isFinite(nextTop)) return;
+
+
+        const previousTransition = sectionEl.style.transition;
+        sectionEl.style.transition = 'none';
+        sectionEl.style.transform = 'none';
+        sectionEl.style.left = `${nextLeft}px`;
+        sectionEl.style.top = `${nextTop}px`;
+        sectionEl.offsetHeight;
+        sectionEl.style.transition = previousTransition;
+        changed = true;
+    });
+
+    if (changed) {
+        if (!options || options.syncBounds !== false) {
+            try { updateCanvasScrollBounds({ recomputeBounds: true, initial: false }); } catch (_) { }
+            try { updateScrollbarThumbs(); } catch (_) { }
+        }
+        try { scheduleEdgesRender(); } catch (_) { }
     }
 
-    // 检测是否是首次打开 Canvas（演示模板）
-    // 首次打开时使用固定的 canvas 坐标，与使用说明卡片水平对齐
-    const openedKey = 'bookmark-canvas-has-opened';
-    const hasOpenedCanvas = localStorage.getItem(openedKey) === 'true';
-
-    let left, top;
-
-    if (!hasOpenedCanvas) {
-        // 首次打开：使用固定的 canvas 坐标，与使用说明卡片(y=-190)水平对齐
-        // 使用说明卡片位置：x=-500, y=-190, width=420, height=480
-        // 永久栏目放在使用说明卡片右侧，水平对齐：left=0, top=-190
-        left = 0;
-        top = -190;
-        console.log('[Canvas] 首次打开，使用固定位置与使用说明卡片对齐:', { left, top });
-    } else {
-        // 非首次打开：使用当前视口位置转换为 canvas 坐标
-        const rect = permanentSection.getBoundingClientRect();
-        const workspace = document.getElementById('canvasWorkspace');
-        if (!workspace) return;
-
-        const workspaceRect = workspace.getBoundingClientRect();
-
-        // 计算在canvas-content坐标系中的位置
-        left = (rect.left - workspaceRect.left) / CanvasState.zoom;
-        top = (rect.top - workspaceRect.top) / CanvasState.zoom;
-    }
-
-    // 禁用过渡，设置新位置
-    permanentSection.style.transition = 'none';
-    permanentSection.style.transform = 'none';
-    permanentSection.style.left = left + 'px';
-    permanentSection.style.top = top + 'px';
-
-    // 强制重排后恢复transition
-    permanentSection.offsetHeight;
-    permanentSection.style.transition = '';
-
-    console.log('[Canvas] 初始化永久栏目位置:', { left, top });
+    return changed;
 }
 
 // =============================================================================
@@ -39423,6 +39397,7 @@ function autoResizeImportContainers() {
 let __canvasTempStateBcsLoadInProgress = false;
 let __canvasTempStateBcsWriteTimer = null;
 let __canvasTempStateBcsWritePending = null;
+let __canvasTempStateBcsWriteWaiters = [];
 let __bcsExportRootCache = '';
 let __bcsExportFormatCache = '';
 let __bcsExportRootRefreshing = false;
@@ -39909,8 +39884,20 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
         const n = parseFloat(String(value == null ? '' : value));
         return Number.isFinite(n) ? n : fallback;
     };
+    const mainDomLeft = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.left) : null;
+    const mainDomTop = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.top) : null;
+    const mainDomWidth = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.width) : null;
+    const mainDomHeight = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.height) : null;
+    const hasMainDomPixelAnchor = mainDomLeft !== null && mainDomTop !== null;
     const permanentLeft = permanentSectionEl
-        ? (parseFloat(permanentSectionEl.style.left) || 0)
+        ? (hasMainDomPixelAnchor
+            ? mainDomLeft
+            : toNumber(
+                existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'left')
+                    ? existingMainCardState.left
+                    : null,
+                0
+            ))
         : toNumber(
             existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'left')
                 ? existingMainCardState.left
@@ -39918,7 +39905,14 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
             0
         );
     const permanentTop = permanentSectionEl
-        ? (parseFloat(permanentSectionEl.style.top) || 0)
+        ? (hasMainDomPixelAnchor
+            ? mainDomTop
+            : toNumber(
+                existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'top')
+                    ? existingMainCardState.top
+                    : null,
+                0
+            ))
         : toNumber(
             existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'top')
                 ? existingMainCardState.top
@@ -39926,7 +39920,14 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
             0
         );
     const permanentW = permanentSectionEl
-        ? (permanentSectionEl.offsetWidth || 600)
+        ? (mainDomWidth !== null
+            ? mainDomWidth
+            : toNumber(
+                existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'width')
+                    ? existingMainCardState.width
+                    : null,
+                600
+            ))
         : toNumber(
             existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'width')
                 ? existingMainCardState.width
@@ -39934,7 +39935,14 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
             600
         );
     const permanentH = permanentSectionEl
-        ? (permanentSectionEl.offsetHeight || 600)
+        ? (mainDomHeight !== null
+            ? mainDomHeight
+            : toNumber(
+                existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'height')
+                    ? existingMainCardState.height
+                    : null,
+                600
+            ))
         : toNumber(
             existingMainCardState && Object.prototype.hasOwnProperty.call(existingMainCardState, 'height')
                 ? existingMainCardState.height
@@ -40888,51 +40896,91 @@ function __bcsStorageGetAll() {
 function __bcsStorageRemove(keys) {
     const list = Array.isArray(keys) ? keys : [keys];
     const storage = __getCanvasStorageLocalArea();
+    if (!list.length) return Promise.resolve(false);
     if (!storage || typeof storage.remove !== 'function') {
         list.forEach((key) => {
             if (!key) return;
             try { localStorage.removeItem(key); } catch (_) { }
         });
-        return;
+        return Promise.resolve(true);
     }
-    try {
-        const maybePromise = storage.remove(list, () => { });
-        if (maybePromise && typeof maybePromise.catch === 'function') {
-            maybePromise.catch(() => { });
+    return new Promise((resolve) => {
+        let settled = false;
+        const done = (ok) => {
+            if (settled) return;
+            settled = true;
+            resolve(ok !== false);
+        };
+        try {
+            const maybePromise = storage.remove(list, () => {
+                done(true);
+            });
+            if (maybePromise && typeof maybePromise.then === 'function') {
+                maybePromise.then(() => done(true)).catch(() => done(false));
+            }
+        } catch (_) {
+            done(false);
         }
-    } catch (_) { }
+    });
 }
 
 function __bcsStorageSet(payload, { immediate = false } = {}) {
-    if (!payload || typeof payload !== 'object') return;
+    if (!payload || typeof payload !== 'object') return Promise.resolve(false);
     const storage = __getCanvasStorageLocalArea();
     if (!storage || typeof storage.set !== 'function') {
         Object.keys(payload).forEach((key) => {
             if (!key) return;
             try { saveSharedState(key, payload[key]); } catch (_) { }
         });
-        return;
+        return Promise.resolve(true);
     }
 
     if (!immediate) {
         __canvasTempStateBcsWritePending = Object.assign({}, __canvasTempStateBcsWritePending || {}, payload);
-        if (__canvasTempStateBcsWriteTimer) return;
-        __canvasTempStateBcsWriteTimer = setTimeout(() => {
-            __canvasTempStateBcsWriteTimer = null;
-            const pending = __canvasTempStateBcsWritePending;
-            __canvasTempStateBcsWritePending = null;
-            if (!pending) return;
-            __bcsStorageSet(pending, { immediate: true });
-        }, 320);
-        return;
+        const waiter = new Promise((resolve) => {
+            __canvasTempStateBcsWriteWaiters.push(resolve);
+        });
+        if (!__canvasTempStateBcsWriteTimer) {
+            __canvasTempStateBcsWriteTimer = setTimeout(() => {
+                __canvasTempStateBcsWriteTimer = null;
+                const pending = __canvasTempStateBcsWritePending;
+                const waiters = __canvasTempStateBcsWriteWaiters.slice();
+                __canvasTempStateBcsWritePending = null;
+                __canvasTempStateBcsWriteWaiters = [];
+                if (!pending) {
+                    waiters.forEach((resolve) => {
+                        try { resolve(false); } catch (_) { }
+                    });
+                    return;
+                }
+                __bcsStorageSet(pending, { immediate: true }).then((ok) => {
+                    waiters.forEach((resolve) => {
+                        try { resolve(ok); } catch (_) { }
+                    });
+                });
+            }, 320);
+        }
+        return waiter;
     }
 
-    try {
-        const maybePromise = storage.set(payload, () => { });
-        if (maybePromise && typeof maybePromise.catch === 'function') {
-            maybePromise.catch(() => { });
+    return new Promise((resolve) => {
+        let settled = false;
+        const done = (ok) => {
+            if (settled) return;
+            settled = true;
+            resolve(ok !== false);
+        };
+        try {
+            const maybePromise = storage.set(payload, () => {
+                done(true);
+            });
+            if (maybePromise && typeof maybePromise.then === 'function') {
+                maybePromise.then(() => done(true)).catch(() => done(false));
+            }
+        } catch (_) {
+            done(false);
         }
-    } catch (_) { }
+    });
 }
 
 function __buildBcsStableJsonValue(value) {
@@ -41456,9 +41504,17 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
         }
 
         if (removals.length) {
-            __bcsStorageRemove(removals);
+            await __bcsStorageRemove(removals);
         }
-        __bcsStorageSet(updates, { immediate });
+        await __bcsStorageSet(updates, { immediate });
+        try {
+            await __bcsStorageSet({
+                [BCS_SIGNAL_KEY]: {
+                    __storage: 'bcs',
+                    timestamp: Number(state.timestamp) || Date.now()
+                }
+            }, { immediate: true });
+        } catch (_) { }
         try {
             saveSharedState(BCS_SIGNAL_KEY, {
                 __storage: 'bcs',
@@ -41471,6 +41527,11 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
 }
 
 async function __loadCanvasTempStateFromBcs() {
+    const bundle = await __loadCanvasTempStateBundleFromBcs();
+    return bundle ? bundle.state : null;
+}
+
+async function __loadCanvasTempStateBundleFromBcs() {
     const storage = await __bcsStorageGetAll();
     const meta = storage ? storage[BCS_META_KEY] : null;
     if (!__isBcsMetaPayload(meta)) return null;
@@ -41480,7 +41541,10 @@ async function __loadCanvasTempStateFromBcs() {
             assumeCleanWhenMissingMeta: true
         });
     } catch (_) { }
-    return __buildCanvasTempStateFromBcsStorage(storage, meta);
+    return {
+        state: __buildCanvasTempStateFromBcsStorage(storage, meta),
+        storage
+    };
 }
 
 function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
@@ -41970,7 +42034,7 @@ function __isCanvasTempStatePayload(state) {
     return !!__normalizeCanvasTempStateForRuntime(state);
 }
 
-function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external') {
+function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external', options = {}) {
     const normalizedState = __normalizeCanvasTempStateForRuntime(state);
     if (!normalizedState) return;
 
@@ -41994,6 +42058,11 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external') {
         __resetCanvasDomAndStateForImport();
         __applyCanvasTempStateObject(normalizedState);
         __finalizeTempNodesLoad({ loadedFromStorage: true });
+        if (options && options.bcsStorage) {
+            try {
+                __applyPermanentLayoutFromBcsStorageSnapshot(options.bcsStorage, { removeMissingCopies: true });
+            } catch (_) { }
+        }
 
         if (ts > 0) {
             __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, ts);
@@ -42017,11 +42086,12 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external') {
     }
 }
 
-function __queueCanvasTempStateRealtimeSync(state, source = 'external') {
+function __queueCanvasTempStateRealtimeSync(state, source = 'external', options = {}) {
     const normalizedState = __normalizeCanvasTempStateForRuntime(state);
     if (!normalizedState) return;
 
-    __canvasTempStateRealtimeSyncPending = { state: normalizedState, source };
+    const normalizedOptions = (options && typeof options === 'object') ? options : {};
+    __canvasTempStateRealtimeSyncPending = { state: normalizedState, source, options: normalizedOptions };
     if (__canvasTempStateRealtimeSyncTimer) return;
 
     __canvasTempStateRealtimeSyncTimer = setTimeout(() => {
@@ -42029,7 +42099,7 @@ function __queueCanvasTempStateRealtimeSync(state, source = 'external') {
         const pending = __canvasTempStateRealtimeSyncPending;
         __canvasTempStateRealtimeSyncPending = null;
         if (!pending || !pending.state) return;
-        __applyCanvasTempStateRealtimeSyncNow(pending.state, pending.source);
+        __applyCanvasTempStateRealtimeSyncNow(pending.state, pending.source, pending.options || {});
     }, 140);
 }
 
@@ -42037,10 +42107,12 @@ function __consumeCanvasTempStateRealtimeSignal(rawState, source = 'external') {
     if (!rawState || typeof rawState !== 'object') return;
 
     if (__isCanvasTempStateBcsMarker(rawState)) {
-        __loadCanvasTempStateFromBcs()
-            .then((state) => {
-                if (!state) return;
-                __queueCanvasTempStateRealtimeSync(state, `${source}:bcs-marker`);
+        __loadCanvasTempStateBundleFromBcs()
+            .then((bundle) => {
+                if (!bundle || !bundle.state) return;
+                __queueCanvasTempStateRealtimeSync(bundle.state, `${source}:bcs-marker`, {
+                    bcsStorage: bundle.storage
+                });
             })
             .catch(() => { });
         return;

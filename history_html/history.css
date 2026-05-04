@@ -6759,12 +6759,6 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 /* 永久栏目样式 - 绿色框体 */
 .permanent-bookmark-section {
     position: absolute;
-    top: 55%;
-    /* 稍微向下偏移，与左侧说明卡片更好对齐 */
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 600px;
-    height: 70vh;
     /* 移除背景色，让内层元素填充 */
     background: transparent;
     border: 3px solid var(--permanent-section-color, #10b981);
@@ -6815,7 +6809,6 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     border-color: var(--accent-primary);
     border-width: 3px;
     box-shadow: var(--shadow-lg);
-    transform: translate(-50%, -50%);
 }
 
 .permanent-bookmark-section.drag-origin-active {
