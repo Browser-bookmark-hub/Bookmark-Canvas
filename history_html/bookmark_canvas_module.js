@@ -1138,6 +1138,11 @@ let trackpadZoomInertiaLastInputTime = 0;
 let trackpadZoomInertiaCenterX = null;
 let trackpadZoomInertiaCenterY = null;
 let trackpadZoomInertiaOptions = null;
+// [Fix-v7] Windows 滚轮缩放方向锁 + 排队事件过滤运行时状态
+let winWheelZoomDirLockSign = 0;           // 当前锁定方向 (+1 放大 / -1 缩小 / 0 无锁)
+let winWheelZoomDirLockTime = 0;           // 锁定开始时间戳 (performance.now)
+let winWheelZoomDirConsecutive = 0;        // 同方向连续事件计数
+let winWheelZoomLastEventNow = 0;          // 上一个事件处理时的 performance.now
 // 性能优化：滚动更新去抖（RAF）
 let scrollUpdateFrame = null;
 let pendingScrollRequest = null;
@@ -1851,6 +1856,10 @@ const WINDOWS_LINUX_WHEEL_PAN_MICRO_SMOOTH_ENABLED = false;
 const WINDOWS_LINUX_WHEEL_PAN_EASE_MULTIPLIER = 1.0;
 const WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_MAX = 140;
 const WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_X_MAX = 10;
+// [Fix-v7] Windows 滚轮缩放：排队过期事件过滤 + 方向反转防抖
+const WINDOWS_WHEEL_ZOOM_STALE_EVENT_MS = 200;            // 事件 timeStamp 与当前时间差超过此值视为排队过期
+const WINDOWS_WHEEL_ZOOM_DIR_LOCK_MS = 80;                // 方向反转后锁定（屏蔽反方向事件）的毫秒数
+const WINDOWS_WHEEL_ZOOM_DIR_LOCK_MIN_EVENTS = 2;         // 同方向至少连续 N 个事件后才视为方向已确定
 const CANVAS_WIN_INPUT_DEBUG_KEY = 'canvas-win-input-debug-v1';
 const CANVAS_WIN_INPUT_DEBUG_JSON_KEY = 'canvas-win-input-debug-json-v1';
 const CANVAS_WIN_INPUT_DEBUG_DEFAULT = false;
@@ -4553,7 +4562,32 @@ function initCanvasView() {
     // [数据密集模式] 初始化时计算一次视口数据量
     try { setTimeout(() => updateDataIntensiveMode(true), 200); } catch (_) { }
     __bindCanvasViewportVisualSyncLifecycle();
+
+    // [Fix-v7] Windows 冷启动网格不显示修复：
+    // Chrome 扩展侧面板在 Windows 下默认无焦点，requestAnimationFrame 不会立刻触发。
+    // 必须同步执行一次完整的视口视觉同步（设置 --canvas-scale/pan-x/pan-y、content transform、grid transform），
+    // 确保首帧就能绘制网格和内容。
+    try { __forceCanvasViewportVisualSync(); } catch (_) { }
+
+    // 同时保留 rAF 路径作为冗余保障
     __scheduleCanvasViewportVisualSync();
+
+    // [Fix-v7] Windows 焦点激活：确保 canvasWorkspace 可以接收焦点并激活 rAF 调度。
+    // macOS 下浏览器会自动给予悬停面板焦点，Windows 需要显式 focus。
+    if (CANVAS_RUNTIME_WINDOWS_LIKE) {
+        try {
+            const ws = document.getElementById('canvasWorkspace');
+            if (ws) {
+                if (!ws.hasAttribute('tabindex')) ws.setAttribute('tabindex', '-1');
+                // 延迟 focus 确保 DOM 已挂载完成，且不干扰正在进行的其他初始化
+                setTimeout(() => {
+                    try {
+                        if (ws && typeof ws.focus === 'function') ws.focus({ preventScroll: true });
+                    } catch (_) { }
+                }, 50);
+            }
+        } catch (_) { }
+    }
 }
 
 function setupCanvasDropFeedback() {
@@ -6450,9 +6484,21 @@ function setupCanvasZoomAndPan() {
 
             // Shift+滚轮在某些浏览器会变成横向滚动，需要使用 deltaX 或 deltaY
             const normalizedWheel = __normalizeCanvasWheelEventDeltas(e);
-            const rawDelta = normalizedWheel.deltaY !== 0 ? -normalizedWheel.deltaY : -normalizedWheel.deltaX;
+            const rawDeltaOriginal = normalizedWheel.deltaY !== 0 ? -normalizedWheel.deltaY : -normalizedWheel.deltaX;
             let deltaScale = 1;
             const isWindowsLikeDiscreteWheelZoom = !isTouchpad && CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheelZoom;
+
+            // [Fix-v7] Windows 滚轮缩放预处理：delta 归一化 + 排队过期过滤 + 方向反转防抖
+            let rawDelta = rawDeltaOriginal;
+            if (isWindowsLikeDiscreteWheelZoom) {
+                const pp = __preprocessWindowsWheelZoomEvent(e, rawDeltaOriginal);
+                if (pp.suppressed) {
+                    // 被过滤的事件：仍然阻止默认行为（防止页面滚动），但不执行缩放
+                    return;
+                }
+                rawDelta = pp.delta;
+            }
+
             if (isWindowsLikeDiscreteWheelZoom) {
                 __cancelCanvasSmoothWheelZoom();
                 __cancelCanvasTrackpadZoomInertia();
@@ -6470,6 +6516,7 @@ function setupCanvasZoomAndPan() {
                 isWindowsLikeDiscreteWheelZoom,
                 normalizedDeltaX: __roundCanvasDebugNumber(normalizedWheel.deltaX, 3),
                 normalizedDeltaY: __roundCanvasDebugNumber(normalizedWheel.deltaY, 3),
+                rawDeltaOriginal: __roundCanvasDebugNumber(rawDeltaOriginal, 4),
                 rawDelta: __roundCanvasDebugNumber(rawDelta, 4),
                 deltaScale: __roundCanvasDebugNumber(deltaScale, 4),
                 scaledDelta: __roundCanvasDebugNumber(scaledDelta, 4)
@@ -8796,6 +8843,81 @@ function __isCanvasTouchpadLikeScrollInput(event, normalizedDeltas = null) {
 function __shouldSmoothCanvasWheelZoom(event, zoomInputMode) {
     if (zoomInputMode !== 'wheel') return false;
     return __isCanvasDiscreteWheelEvent(event);
+}
+
+// [Fix-v7] Windows 滚轮缩放事件预处理：排队过期事件过滤 + 方向反转防抖
+// 返回 { delta: number, suppressed: boolean }
+// - delta: 缩放增量（保持原始量级，正=放大，负=缩小，与 rawDelta 同向）
+// - suppressed: true 表示此事件应被丢弃（过期排队/方向锁定中）
+// 注意：不对 delta 数值做归一化——Windows 每档 ±120 经下游公式约产生 ~9% 缩放，
+// 与主流应用的 Ctrl+滚轮步长一致。真正的问题是事件堆积和方向抖动，而非单步幅度。
+function __preprocessWindowsWheelZoomEvent(event, rawDelta) {
+    if (!CANVAS_RUNTIME_WINDOWS_LIKE) return { delta: rawDelta, suppressed: false };
+
+    const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now() : Date.now();
+
+    // ① 时间归一化：丢弃排队过期事件
+    // Windows 下高频滚轮 + 主线程卡顿 → 事件堆积；event.timeStamp 代表事件产生时间。
+    // 如果产生时间距当前已过太久，说明是排队滞后事件，丢弃以避免累积误差。
+    if (event && Number.isFinite(event.timeStamp) && event.timeStamp > 0) {
+        const eventAge = now - event.timeStamp;
+        if (eventAge > WINDOWS_WHEEL_ZOOM_STALE_EVENT_MS) {
+            __logCanvasWinInput('wheel-zoom-stale-drop', {
+                eventAge: __roundCanvasDebugNumber(eventAge, 1),
+                threshold: WINDOWS_WHEEL_ZOOM_STALE_EVENT_MS,
+                rawDelta: __roundCanvasDebugNumber(rawDelta, 3)
+            }, { throttleKey: 'wheel-zoom-stale-drop', throttleMs: 60 });
+            return { delta: 0, suppressed: true };
+        }
+    }
+
+    // ② 方向反转防抖锁（不修改 delta 数值，仅做过滤）
+    const sign = rawDelta > 0 ? 1 : (rawDelta < 0 ? -1 : 0);
+
+    if (sign !== 0) {
+        if (sign === winWheelZoomDirLockSign) {
+            // 同方向：累加计数
+            winWheelZoomDirConsecutive++;
+        } else {
+            // 方向改变
+            if (winWheelZoomDirLockSign !== 0 && winWheelZoomDirConsecutive >= WINDOWS_WHEEL_ZOOM_DIR_LOCK_MIN_EVENTS) {
+                // 之前已确立方向 → 启动反转锁
+                winWheelZoomDirLockTime = now;
+            }
+            winWheelZoomDirLockSign = sign;
+            winWheelZoomDirConsecutive = 1;
+        }
+
+        // 检查反转锁：在锁定窗口内且方向刚刚翻转（计数不足），抑制此事件
+        if (winWheelZoomDirLockTime > 0 && (now - winWheelZoomDirLockTime) < WINDOWS_WHEEL_ZOOM_DIR_LOCK_MS) {
+            if (winWheelZoomDirConsecutive < WINDOWS_WHEEL_ZOOM_DIR_LOCK_MIN_EVENTS) {
+                __logCanvasWinInput('wheel-zoom-dir-lock-drop', {
+                    sign,
+                    consecutive: winWheelZoomDirConsecutive,
+                    lockAge: __roundCanvasDebugNumber(now - winWheelZoomDirLockTime, 1),
+                    rawDelta: __roundCanvasDebugNumber(rawDelta, 4)
+                }, { throttleKey: 'wheel-zoom-dir-lock-drop', throttleMs: 60 });
+                return { delta: 0, suppressed: true };
+            }
+        }
+
+        // 锁定窗口已过期 → 清除
+        if (winWheelZoomDirLockTime > 0 && (now - winWheelZoomDirLockTime) >= WINDOWS_WHEEL_ZOOM_DIR_LOCK_MS) {
+            winWheelZoomDirLockTime = 0;
+        }
+    }
+
+    winWheelZoomLastEventNow = now;
+    return { delta: rawDelta, suppressed: false };
+}
+
+// [Fix-v7] 重置 Windows 滚轮缩放方向锁状态（缩放结束 / 切换输入模式时调用）
+function __resetWindowsWheelZoomDirLock() {
+    winWheelZoomDirLockSign = 0;
+    winWheelZoomDirLockTime = 0;
+    winWheelZoomDirConsecutive = 0;
+    winWheelZoomLastEventNow = 0;
 }
 
 function __shouldSmoothCanvasWheelPan(event, isTouchpad) {
@@ -11354,6 +11476,7 @@ function __cancelCanvasSmoothWheelZoom() {
     smoothWheelZoomCenterX = null;
     smoothWheelZoomCenterY = null;
     smoothWheelZoomOptions = null;
+    __resetWindowsWheelZoomDirLock();
 }
 
 function __runCanvasSmoothWheelZoomStep() {
@@ -11475,6 +11598,7 @@ function __cancelCanvasActiveZoomGesture(reason = 'interrupt') {
     __cancelCanvasSmoothWheelZoom();
     __cancelCanvasTrackpadZoomInertia();
     __cancelCanvasPendingZoomUpdate();
+    __resetWindowsWheelZoomDirLock();
 
     if (workspace && workspace._zoomEndTimer) {
         clearTimeout(workspace._zoomEndTimer);
