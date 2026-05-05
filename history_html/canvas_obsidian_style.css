@@ -84,6 +84,20 @@
     user-select: none;
 }
 
+.canvas-pan-capture-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    background: transparent;
+    pointer-events: none;
+}
+
+.canvas-workspace.space-pressed .canvas-pan-capture-layer,
+.canvas-workspace.panning .canvas-pan-capture-layer {
+    pointer-events: auto;
+    cursor: inherit;
+}
+
 :root {
     --canvas-scrollbar-horizontal-bottom: 30px;
     --canvas-scrollbar-vertical-right: 20px;
@@ -538,6 +552,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     background: transparent !important;
 }
 
+.canvas-workspace.space-pressed .canvas-content,
 .canvas-workspace.panning .canvas-content {
     /* Panning 时禁用命中测试，避免大量 hover/重算样式导致掉帧与内容闪烁 */
     pointer-events: none;

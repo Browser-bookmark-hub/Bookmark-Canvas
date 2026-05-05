@@ -6674,6 +6674,51 @@ function setupCanvasZoomAndPan() {
         return code === key;
     }
 
+    function beginCanvasPanFromMouseEvent(e) {
+        if (!e || !(CanvasState.isSpacePressed || CanvasState.isCtrlPressed)) return false;
+        e.preventDefault();
+        e.stopPropagation();
+        __cancelCanvasActiveZoomGesture('pan-start');
+        __cancelCanvasWheelPanMotion();
+        CanvasState.isPanning = true;
+        CanvasState.panStartX = e.clientX - CanvasState.panOffsetX;
+        CanvasState.panStartY = e.clientY - CanvasState.panOffsetY;
+        workspace.classList.add('panning');
+        // 标记正在拖动/滚动
+        markScrolling();
+        return true;
+    }
+
+    function ensureCanvasPanCaptureLayer() {
+        let layer = null;
+        try {
+            layer = workspace.querySelector(':scope > .canvas-pan-capture-layer');
+        } catch (_) {
+            layer = workspace.querySelector('.canvas-pan-capture-layer');
+        }
+        if (!layer) {
+            layer = document.createElement('div');
+            layer.className = 'canvas-pan-capture-layer';
+            layer.setAttribute('aria-hidden', 'true');
+            workspace.appendChild(layer);
+        }
+        if (!layer.dataset.canvasPanCaptureBound) {
+            layer.dataset.canvasPanCaptureBound = 'true';
+            layer.addEventListener('mousedown', (e) => {
+                if (!CanvasState.isSpacePressed) return;
+                beginCanvasPanFromMouseEvent(e);
+            }, true);
+            layer.addEventListener('contextmenu', (e) => {
+                if (!CanvasState.isSpacePressed && !CanvasState.isPanning) return;
+                e.preventDefault();
+                e.stopPropagation();
+            }, true);
+        }
+        return layer;
+    }
+
+    ensureCanvasPanCaptureLayer();
+
     document.addEventListener('keydown', (e) => {
         if (isRecordingShortcut) return;
         const isSpaceShortcut = isCustomSpaceKeyCode(e.code);
@@ -6756,16 +6801,7 @@ function setupCanvasZoomAndPan() {
     // 空格/Control + 鼠标拖动画布（Obsidian方式）
     workspace.addEventListener('mousedown', (e) => {
         if (CanvasState.isSpacePressed || CanvasState.isCtrlPressed) {
-            e.preventDefault();
-            e.stopPropagation();
-            __cancelCanvasActiveZoomGesture('pan-start');
-            __cancelCanvasWheelPanMotion();
-            CanvasState.isPanning = true;
-            CanvasState.panStartX = e.clientX - CanvasState.panOffsetX;
-            CanvasState.panStartY = e.clientY - CanvasState.panOffsetY;
-            workspace.classList.add('panning');
-            // 标记正在拖动/滚动
-            markScrolling();
+            beginCanvasPanFromMouseEvent(e);
         }
     });
 
