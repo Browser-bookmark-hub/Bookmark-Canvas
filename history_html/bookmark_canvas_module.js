@@ -2904,7 +2904,7 @@ _Tip: This card can be freely edited or deleted_
 - **Ctrl + 右键（单击）**：更改栏目卡片大小
 
 ### 空格键操作
-- **空格 + 左键（按住）**：拖动画布
+- **空格 + 左键（按住）**：拖动全局画布
 
 ### 触控板操作
 - **双指捏合**：缩放画布
@@ -2923,7 +2923,7 @@ _快捷键可在左上角「管理」中自定义_
 - **Ctrl + Right Click**: Resize section card
 
 ### Space Key Operations
-- **Space + Left Click (hold)**: Drag canvas
+- **Space + Left Click (hold)**: Drag global canvas
 
 ### Touchpad Operations
 - **Pinch gesture**: Zoom canvas
