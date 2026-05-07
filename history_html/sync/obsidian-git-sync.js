@@ -7949,7 +7949,7 @@ Cancel: go back and change the branch name first.`
 
         const langParam = getSyncLang() === 'en' ? 'en' : 'zh';
         const themeParam = getGuideThemeParam();
-        const guideUrl = `${runtimeApi.runtime.getURL('github-token-guide.html')}?lang=${encodeURIComponent(langParam)}&theme=${encodeURIComponent(themeParam)}`;
+        const guideUrl = `${runtimeApi.runtime.getURL('github/github-token-guide.html')}?lang=${encodeURIComponent(langParam)}&theme=${encodeURIComponent(themeParam)}`;
 
         if (runtimeApi.tabs && typeof runtimeApi.tabs.create === 'function') {
             runtimeApi.tabs.create({ url: guideUrl });
