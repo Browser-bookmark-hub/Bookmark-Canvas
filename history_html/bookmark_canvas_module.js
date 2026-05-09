@@ -1888,6 +1888,7 @@ const CANVAS_RUNTIME_PLATFORM = (() => {
     }
 })();
 const CANVAS_RUNTIME_WINDOWS_LIKE = !!(CANVAS_RUNTIME_PLATFORM.isWindows || CANVAS_RUNTIME_PLATFORM.isLinux);
+const DEFAULT_ZOOM_MAGNET_POINT_SPEED = CANVAS_RUNTIME_WINDOWS_LIKE ? 0.35 : 0.10;
 let canvasWinInputDebugSeq = 0;
 const canvasWinInputDebugLastTs = new Map();
 
@@ -1996,8 +1997,8 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     },
     trackpadZoomRate: TRACKPAD_ZOOM_RATE_DEFAULT,
     magnetPoints: {
-        m1: { x: 0.67, y: 0.10 },
-        m2: { x: 0.25, y: 0.10 }
+        m1: { x: 0.67, y: DEFAULT_ZOOM_MAGNET_POINT_SPEED },
+        m2: { x: 0.25, y: DEFAULT_ZOOM_MAGNET_POINT_SPEED }
     }
 };
 
@@ -6608,8 +6609,15 @@ function setupCanvasZoomAndPan() {
             };
             if (isTouchpad) {
                 __cancelCanvasSmoothWheelZoom();
-                scheduleZoomUpdate(newZoom, mouseX, mouseY, zoomOptions);
-                __pushCanvasTrackpadZoomInertiaFromFactor(zoomFactor, mouseX, mouseY, zoomOptions);
+                // Windows/Linux 下触控板也用直达路径避免 rAF 被节流导致磁矩失效
+                if (CANVAS_RUNTIME_WINDOWS_LIKE) {
+                    __cancelCanvasTrackpadZoomInertia();
+                    __cancelCanvasPendingZoomUpdate();
+                    setCanvasZoom(newZoom, mouseX, mouseY, zoomOptions);
+                } else {
+                    scheduleZoomUpdate(newZoom, mouseX, mouseY, zoomOptions);
+                    __pushCanvasTrackpadZoomInertiaFromFactor(zoomFactor, mouseX, mouseY, zoomOptions);
+                }
                 __logCanvasWinInput('wheel-zoom-apply', {
                     route: 'touchpad-direct-inertia',
                     targetZoom: __roundCanvasDebugNumber(newZoom, 5),
@@ -6618,6 +6626,12 @@ function setupCanvasZoomAndPan() {
                     zoomOptions
                 }, { throttleKey: 'wheel-zoom-apply', throttleMs: 80 });
             } else if (isWindowsLikeDiscreteWheelZoom) {
+                setCanvasZoom(newZoom, mouseX, mouseY, zoomOptions);
+            } else if (CANVAS_RUNTIME_WINDOWS_LIKE) {
+                // Windows/Linux 非离散滚轮也走直达路径，避免 rAF 节流导致磁矩不生效
+                __cancelCanvasSmoothWheelZoom();
+                __cancelCanvasTrackpadZoomInertia();
+                __cancelCanvasPendingZoomUpdate();
                 setCanvasZoom(newZoom, mouseX, mouseY, zoomOptions);
             } else if (__shouldSmoothCanvasWheelZoom(e, zoomInputMode)) {
                 __cancelCanvasTrackpadZoomInertia();
