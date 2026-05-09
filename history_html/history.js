@@ -1171,13 +1171,13 @@ function isBookmarkBulkMuteActive() {
 
 function clearBookmarkBulkQueuedEvents() {
     try {
-        if (pendingAddRemoveTimer) {
-            clearTimeout(pendingAddRemoveTimer);
-            pendingAddRemoveTimer = null;
+        if (pendingBookmarkMutationTimer) {
+            clearTimeout(pendingBookmarkMutationTimer);
+            pendingBookmarkMutationTimer = null;
         }
     } catch (_) { }
-    try { pendingAddRemoveEvents = []; } catch (_) { }
-    try { addRemoveFlushQueued = false; } catch (_) { }
+    try { pendingBookmarkMutationEvents = []; } catch (_) { }
+    try { bookmarkMutationFlushQueued = false; } catch (_) { }
 }
 
 function noteBookmarkBulkMutation(reason = '') {
@@ -11551,7 +11551,7 @@ function schedulePermanentMainStorageSyncFromChrome(reason = '', delayMs = 180) 
                 } catch (_) { }
                 if (permanentMainStorageSyncAfterFlushRefresh) {
                     permanentMainStorageSyncAfterFlushRefresh = false;
-                    try { scheduleBulkAddRemoveTreeRefresh('post-main-storage-sync', 120); } catch (_) { }
+                    try { scheduleBulkBookmarkMutationTreeRefresh('post-main-storage-sync', 120); } catch (_) { }
                 }
             }).catch((error) => {
                 console.warn('[Permanent JSON] sync from Chrome bookmarks failed:', error);
@@ -11738,6 +11738,323 @@ function applyIncrementalChangeToCachedCurrentTree(id, changeInfo) {
         return true;
     } catch (_) {
         // 静默失败：最终会由 refreshCachedCurrentTreeSnapshot() 兜底
+        return false;
+    }
+}
+
+function escapePermanentDomPatchId(id) {
+    const value = String(id || '');
+    try {
+        if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
+    } catch (_) { }
+    return value.replace(/["\\]/g, '\\$&');
+}
+
+function collectPermanentTreeDomPatchTargets() {
+    const trees = [];
+    const seen = new Set();
+    const pushTree = (tree) => {
+        if (!tree || seen.has(tree)) return;
+        seen.add(tree);
+        trees.push(tree);
+    };
+    try {
+        if (currentView !== 'canvas') return trees;
+    } catch (_) {
+        return trees;
+    }
+    try {
+        pushTree(document.getElementById('bookmarkTree'));
+        const canvasContent = document.getElementById('canvasContent');
+        const scope = canvasContent || document;
+        scope.querySelectorAll('.permanent-bookmark-section .bookmark-tree').forEach(pushTree);
+    } catch (_) { }
+    return trees;
+}
+
+function findPermanentTreeItemByChromeId(tree, id) {
+    if (!tree || !id) return null;
+    try {
+        return tree.querySelector(`.tree-item[data-node-id="${escapePermanentDomPatchId(id)}"]`);
+    } catch (_) {
+        return null;
+    }
+}
+
+function findPermanentTreeNodeByChromeId(tree, id) {
+    const item = findPermanentTreeItemByChromeId(tree, id);
+    return item && typeof item.closest === 'function' ? item.closest('.tree-node') : null;
+}
+
+function getPermanentCachedNodeById(id) {
+    try {
+        const index = getCachedCurrentTreeIndex();
+        return index ? index.get(String(id)) : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function renderPermanentDomPatchNode(node, level) {
+    if (!node || typeof renderTreeNodeWithChanges !== 'function') return null;
+    try {
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = renderTreeNodeWithChanges(node, Math.max(0, Number(level) || 0), 50, new Set());
+        return tempDiv.querySelector(':scope > .tree-node') || tempDiv.firstElementChild;
+    } catch (_) {
+        return null;
+    }
+}
+
+function bindPermanentDomPatchNode(treeNode) {
+    if (!treeNode) return;
+    try {
+        if (typeof attachDragEvents === 'function') attachDragEvents(treeNode);
+    } catch (_) { }
+}
+
+function getPermanentDirectTreeNodes(container) {
+    if (!container) return [];
+    try {
+        return Array.from(container.querySelectorAll(':scope > .tree-node'));
+    } catch (_) {
+        return Array.from(container.children || []).filter(el => el && el.classList && el.classList.contains('tree-node'));
+    }
+}
+
+function findPermanentChildrenContainerByParentId(tree, parentId) {
+    const parentItem = findPermanentTreeItemByChromeId(tree, parentId);
+    const parentNode = parentItem && typeof parentItem.closest === 'function' ? parentItem.closest('.tree-node') : null;
+    const childrenContainer = parentNode ? parentNode.querySelector(':scope > .tree-children') : null;
+    return { parentItem, parentNode, childrenContainer };
+}
+
+function updatePermanentTreeNodeLevels(treeNode, level) {
+    if (!treeNode) return;
+    const safeLevel = Math.max(0, Number(level) || 0);
+    try {
+        const item = treeNode.querySelector(':scope > .tree-item[data-node-id]');
+        if (item && item.dataset) item.dataset.nodeLevel = String(safeLevel);
+        const children = treeNode.querySelector(':scope > .tree-children');
+        if (!children) return;
+        getPermanentDirectTreeNodes(children).forEach(childNode => {
+            updatePermanentTreeNodeLevels(childNode, safeLevel + 1);
+        });
+    } catch (_) { }
+}
+
+function refreshPermanentLoadMoreState(tree, parentId) {
+    const { parentItem, childrenContainer } = findPermanentChildrenContainerByParentId(tree, parentId);
+    if (!parentItem || !childrenContainer) return;
+    const parentNode = getPermanentCachedNodeById(parentId);
+    const childCount = parentNode && Array.isArray(parentNode.children) ? parentNode.children.length : 0;
+    try {
+        parentItem.dataset.hasChildren = childCount > 0 ? 'true' : 'false';
+        parentItem.dataset.childCount = String(childCount);
+        if (childCount === 0) parentItem.dataset.childrenLoaded = 'true';
+        const directNodes = getPermanentDirectTreeNodes(childrenContainer);
+        const loadMoreBtn = childrenContainer.querySelector(':scope > .tree-load-more');
+        if (parentItem.dataset.childrenLoaded !== 'true') return;
+        const remaining = Math.max(0, childCount - directNodes.length);
+        if (remaining > 0) {
+            const button = loadMoreBtn || document.createElement('button');
+            button.type = 'button';
+            button.className = 'tree-load-more';
+            button.dataset.parentId = String(parentId);
+            button.dataset.startIndex = String(directNodes.length);
+            button.textContent = currentLang === 'zh_CN'
+                ? `加载更多（剩余 ${remaining} 项）`
+                : `Load more (${remaining} remaining)`;
+            if (!loadMoreBtn) childrenContainer.appendChild(button);
+        } else if (loadMoreBtn) {
+            loadMoreBtn.remove();
+        }
+    } catch (_) { }
+}
+
+function insertPermanentDomPatchNodeAtIndex(childrenContainer, treeNode, index) {
+    if (!childrenContainer || !treeNode) return false;
+    try {
+        const directNodes = getPermanentDirectTreeNodes(childrenContainer).filter(node => node !== treeNode);
+        const safeIndex = Number.isFinite(Number(index)) ? Math.max(0, Math.floor(Number(index))) : directNodes.length;
+        const referenceNode = safeIndex < directNodes.length
+            ? directNodes[safeIndex]
+            : childrenContainer.querySelector(':scope > .tree-load-more');
+        childrenContainer.insertBefore(treeNode, referenceNode || null);
+        bindPermanentDomPatchNode(treeNode);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function isPermanentChildrenContainerReadyForDomPatch(parentItem, childrenContainer) {
+    if (!parentItem || !childrenContainer) return false;
+    try {
+        return parentItem.dataset.childrenLoaded === 'true';
+    } catch (_) {
+        return false;
+    }
+}
+
+function refreshPermanentSharedSourceAfterDomPatch(reason = '') {
+    try {
+        refreshSharedPermanentTreeCopySourceData(reason || 'dom-patch');
+    } catch (_) { }
+}
+
+function applyPermanentChangeDomPatch(id, changeInfo) {
+    try {
+        const targets = collectPermanentTreeDomPatchTargets();
+        if (!targets.length) return true;
+        const cachedNode = getPermanentCachedNodeById(id);
+        let failed = false;
+        targets.forEach(tree => {
+            if (failed) return;
+            const item = findPermanentTreeItemByChromeId(tree, id);
+            if (!item) return;
+            const treeNode = item.closest('.tree-node');
+            if (!treeNode) {
+                failed = true;
+                return;
+            }
+            const isBookmark = item.dataset && item.dataset.nodeType === 'bookmark';
+            if (isBookmark && cachedNode) {
+                const level = parseInt(item.dataset.nodeLevel || '0', 10) || 0;
+                const replacement = renderPermanentDomPatchNode(cachedNode, level);
+                if (!replacement) {
+                    failed = true;
+                    return;
+                }
+                treeNode.replaceWith(replacement);
+                bindPermanentDomPatchNode(replacement);
+                return;
+            }
+            if (typeof changeInfo.title !== 'undefined') {
+                item.dataset.nodeTitle = String(changeInfo.title || '');
+                const label = item.querySelector(':scope > .tree-label');
+                if (label) label.textContent = String(changeInfo.title || '');
+            }
+            if (typeof changeInfo.url !== 'undefined') {
+                item.dataset.nodeUrl = String(changeInfo.url || '');
+                const link = item.querySelector(':scope > a.tree-bookmark-link');
+                if (link) link.setAttribute('href', String(changeInfo.url || ''));
+            }
+        });
+        return !failed;
+    } catch (_) {
+        return false;
+    }
+}
+
+function applyPermanentRemoveDomPatch(id, removeInfo) {
+    try {
+        const targets = collectPermanentTreeDomPatchTargets();
+        if (!targets.length) return true;
+        const parentId = removeInfo && typeof removeInfo.parentId !== 'undefined'
+            ? String(removeInfo.parentId)
+            : (removeInfo && removeInfo.node && typeof removeInfo.node.parentId !== 'undefined' ? String(removeInfo.node.parentId) : '');
+        let failed = false;
+        targets.forEach(tree => {
+            if (failed) return;
+            const treeNode = findPermanentTreeNodeByChromeId(tree, id);
+            if (treeNode) {
+                try { treeNode.remove(); } catch (_) { failed = true; return; }
+            }
+            if (parentId) refreshPermanentLoadMoreState(tree, parentId);
+        });
+        return !failed;
+    } catch (_) {
+        return false;
+    }
+}
+
+function applyPermanentCreateDomPatch(id, bookmark) {
+    try {
+        const targets = collectPermanentTreeDomPatchTargets();
+        if (!targets.length) return true;
+        const parentId = bookmark && typeof bookmark.parentId !== 'undefined' ? String(bookmark.parentId) : '';
+        if (!parentId) return false;
+        const cachedNode = getPermanentCachedNodeById(id);
+        if (!cachedNode) return false;
+        const insertIndex = typeof bookmark.index === 'number' ? bookmark.index : cachedNode.index;
+        let failed = false;
+        targets.forEach(tree => {
+            if (failed) return;
+            const { parentItem, childrenContainer } = findPermanentChildrenContainerByParentId(tree, parentId);
+            if (!parentItem) return;
+            if (parentItem.dataset && parentItem.dataset.nodeType === 'folder' && !childrenContainer) {
+                failed = true;
+                return;
+            }
+            refreshPermanentLoadMoreState(tree, parentId);
+            if (!isPermanentChildrenContainerReadyForDomPatch(parentItem, childrenContainer)) return;
+            const directNodes = getPermanentDirectTreeNodes(childrenContainer);
+            const loadMoreBtn = childrenContainer.querySelector(':scope > .tree-load-more');
+            if (loadMoreBtn && Number(insertIndex) > directNodes.length) return;
+            const parentLevel = parseInt(parentItem.dataset.nodeLevel || '0', 10) || 0;
+            const treeNode = renderPermanentDomPatchNode(cachedNode, parentLevel + 1);
+            if (!treeNode || !insertPermanentDomPatchNodeAtIndex(childrenContainer, treeNode, insertIndex)) {
+                failed = true;
+                return;
+            }
+            refreshPermanentLoadMoreState(tree, parentId);
+        });
+        return !failed;
+    } catch (_) {
+        return false;
+    }
+}
+
+function applyPermanentMoveDomPatch(id, moveInfo) {
+    try {
+        const targets = collectPermanentTreeDomPatchTargets();
+        if (!targets.length) return true;
+        if (!moveInfo || typeof moveInfo.parentId === 'undefined') return false;
+        const newParentId = String(moveInfo.parentId);
+        const oldParentId = typeof moveInfo.oldParentId !== 'undefined' ? String(moveInfo.oldParentId) : '';
+        const cachedNode = getPermanentCachedNodeById(id);
+        if (!cachedNode) return false;
+        let failed = false;
+        targets.forEach(tree => {
+            if (failed) return;
+            let sourceNode = findPermanentTreeNodeByChromeId(tree, id);
+            const { parentItem, childrenContainer } = findPermanentChildrenContainerByParentId(tree, newParentId);
+            if (parentItem && parentItem.dataset && parentItem.dataset.nodeType === 'folder' && !childrenContainer) {
+                failed = true;
+                return;
+            }
+            const canInsert = parentItem && isPermanentChildrenContainerReadyForDomPatch(parentItem, childrenContainer);
+            if (sourceNode && sourceNode.parentElement) {
+                try { sourceNode.parentElement.removeChild(sourceNode); } catch (_) { failed = true; return; }
+            }
+            if (oldParentId) refreshPermanentLoadMoreState(tree, oldParentId);
+            if (!canInsert) {
+                if (parentItem) refreshPermanentLoadMoreState(tree, newParentId);
+                return;
+            }
+            const directNodes = getPermanentDirectTreeNodes(childrenContainer);
+            const loadMoreBtn = childrenContainer.querySelector(':scope > .tree-load-more');
+            const insertIndex = typeof moveInfo.index === 'number' ? moveInfo.index : cachedNode.index;
+            if (loadMoreBtn && Number(insertIndex) > directNodes.length) {
+                refreshPermanentLoadMoreState(tree, newParentId);
+                return;
+            }
+            if (!sourceNode) {
+                const parentLevel = parseInt(parentItem.dataset.nodeLevel || '0', 10) || 0;
+                sourceNode = renderPermanentDomPatchNode(cachedNode, parentLevel + 1);
+            } else {
+                const parentLevel = parseInt(parentItem.dataset.nodeLevel || '0', 10) || 0;
+                updatePermanentTreeNodeLevels(sourceNode, parentLevel + 1);
+            }
+            if (!sourceNode || !insertPermanentDomPatchNodeAtIndex(childrenContainer, sourceNode, insertIndex)) {
+                failed = true;
+                return;
+            }
+            refreshPermanentLoadMoreState(tree, newParentId);
+        });
+        return !failed;
+    } catch (_) {
         return false;
     }
 }
@@ -14127,20 +14444,20 @@ function handleStorageChange(changes, namespace) {
 // 书签API监听（实时更新书签树）
 // =============================================================================
 
-const BULK_ADD_REMOVE_THRESHOLD = 300;
-const BULK_ADD_REMOVE_QUIET_MS = 220;
+const BULK_BOOKMARK_MUTATION_THRESHOLD = 100;
+const BULK_BOOKMARK_MUTATION_QUIET_MS = 220;
 
-let pendingAddRemoveEvents = [];
-let pendingAddRemoveTimer = null;
-let addRemoveFlushInProgress = false;
-let addRemoveFlushQueued = false;
-let bulkAddRemoveTreeRefreshTimer = null;
+let pendingBookmarkMutationEvents = [];
+let pendingBookmarkMutationTimer = null;
+let bookmarkMutationFlushInProgress = false;
+let bookmarkMutationFlushQueued = false;
+let bulkBookmarkMutationTreeRefreshTimer = null;
 
-function scheduleBulkAddRemoveTreeRefresh(reason = '', delayMs = 700) {
+function scheduleBulkBookmarkMutationTreeRefresh(reason = '', delayMs = 700) {
     try {
-        if (bulkAddRemoveTreeRefreshTimer) clearTimeout(bulkAddRemoveTreeRefreshTimer);
-        bulkAddRemoveTreeRefreshTimer = setTimeout(async () => {
-            bulkAddRemoveTreeRefreshTimer = null;
+        if (bulkBookmarkMutationTreeRefreshTimer) clearTimeout(bulkBookmarkMutationTreeRefreshTimer);
+        bulkBookmarkMutationTreeRefreshTimer = setTimeout(async () => {
+            bulkBookmarkMutationTreeRefreshTimer = null;
             if (currentView !== 'canvas') return;
             cachedTreeData = null;
             lastTreeFingerprint = null;
@@ -14164,7 +14481,11 @@ async function handleBookmarkCreateRealtime(id, bookmark) {
         if (!appliedToCachedTree) {
             scheduleCachedCurrentTreeSnapshotRefresh('onCreated-fast-fallback', 40);
         }
-        schedulePermanentTreeSharedMutationRefresh('onCreated');
+        if (appliedToCachedTree) refreshPermanentSharedSourceAfterDomPatch('onCreated');
+        const domPatched = appliedToCachedTree && applyPermanentCreateDomPatch(id, bookmark);
+        if (!domPatched) {
+            schedulePermanentTreeSharedMutationRefresh('onCreated');
+        }
         scheduleCachedCurrentTreeSnapshotRefresh('onCreated');
     }
 }
@@ -14185,71 +14506,104 @@ async function handleBookmarkRemoveRealtime(id, removeInfo) {
         if (!appliedToCachedTree) {
             scheduleCachedCurrentTreeSnapshotRefresh('onRemoved-fast-fallback', 40);
         }
-        schedulePermanentTreeSharedMutationRefresh('onRemoved');
+        if (appliedToCachedTree) refreshPermanentSharedSourceAfterDomPatch('onRemoved');
+        const domPatched = appliedToCachedTree && applyPermanentRemoveDomPatch(id, enrichedRemoveInfo);
+        if (!domPatched) {
+            schedulePermanentTreeSharedMutationRefresh('onRemoved');
+        }
         scheduleCachedCurrentTreeSnapshotRefresh('onRemoved');
     }
 }
 
-function scheduleAddRemoveEventFlush() {
-    if (pendingAddRemoveTimer) {
-        clearTimeout(pendingAddRemoveTimer);
+async function handleBookmarkMoveRealtime(id, moveInfo) {
+    moveBookmarkInCache(id, moveInfo);
+    schedulePermanentMainStorageSyncFromChrome('onMoved');
+
+    if (currentView === 'canvas') {
+        const appliedToCachedTree = applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
+        if (!appliedToCachedTree) {
+            scheduleCachedCurrentTreeSnapshotRefresh('onMoved-fast-fallback', 40);
+        }
+        if (appliedToCachedTree) refreshPermanentSharedSourceAfterDomPatch('onMoved');
+        const domPatched = appliedToCachedTree && applyPermanentMoveDomPatch(id, moveInfo);
+        scheduleCachedCurrentTreeSnapshotRefresh('onMoved');
+
+        if (!domPatched) {
+            schedulePermanentTreeSharedMutationRefresh('onMoved');
+        }
     }
-    pendingAddRemoveTimer = setTimeout(() => {
-        pendingAddRemoveTimer = null;
-        flushPendingAddRemoveEvents('quiet-window').catch((e) => {
-            console.warn('[书签监听] 批处理 flush 失败:', e);
+}
+
+function scheduleBookmarkMutationEventFlush() {
+    if (pendingBookmarkMutationTimer) {
+        clearTimeout(pendingBookmarkMutationTimer);
+    }
+    pendingBookmarkMutationTimer = setTimeout(() => {
+        pendingBookmarkMutationTimer = null;
+        flushPendingBookmarkMutationEvents('quiet-window').catch((e) => {
+            console.warn('[书签监听] 书签变更批处理 flush 失败:', e);
         });
-    }, BULK_ADD_REMOVE_QUIET_MS);
+    }, BULK_BOOKMARK_MUTATION_QUIET_MS);
 }
 
-function enqueueAddRemoveEvent(event) {
+function enqueueBookmarkMutationEvent(event) {
     if (!event || !event.type || !event.id) return;
-    pendingAddRemoveEvents.push(event);
-    scheduleAddRemoveEventFlush();
+    pendingBookmarkMutationEvents.push(event);
+    scheduleBookmarkMutationEventFlush();
 }
 
-async function flushPendingAddRemoveEvents(reason = '') {
+async function flushPendingBookmarkMutationEvents(reason = '') {
+    if (pendingBookmarkMutationTimer) {
+        clearTimeout(pendingBookmarkMutationTimer);
+        pendingBookmarkMutationTimer = null;
+    }
+
     if (isBookmarkBulkMuteActive()) {
         clearBookmarkBulkQueuedEvents();
-        noteBookmarkBulkMutation(reason || 'bulk-add-remove');
-        clearCanvasLazyChangeHints('bulk-add-remove-muted');
+        noteBookmarkBulkMutation(reason || 'bulk-bookmark-mutation');
+        clearCanvasLazyChangeHints('bulk-bookmark-mutation-muted');
         return;
     }
 
-    if (addRemoveFlushInProgress) {
-        addRemoveFlushQueued = true;
+    if (bookmarkMutationFlushInProgress) {
+        bookmarkMutationFlushQueued = true;
         return;
     }
 
-    if (!pendingAddRemoveEvents.length) return;
+    if (!pendingBookmarkMutationEvents.length) return;
 
-    addRemoveFlushInProgress = true;
-    const batch = pendingAddRemoveEvents;
-    pendingAddRemoveEvents = [];
+    bookmarkMutationFlushInProgress = true;
+    const batch = pendingBookmarkMutationEvents;
+    pendingBookmarkMutationEvents = [];
 
     try {
-        const isBulk = batch.length >= BULK_ADD_REMOVE_THRESHOLD;
+        const isBulk = batch.length >= BULK_BOOKMARK_MUTATION_THRESHOLD;
 
         if (isBulk) {
-            console.log(`[书签监听][批处理] 新增/删除事件数=${batch.length}，触发批处理 (${reason || 'unknown'})`);
+            console.log(`[书签监听][批处理] 书签变更事件数=${batch.length}，触发批处理 (${reason || 'unknown'})`);
 
             batch.forEach((event) => {
                 if (event.type === 'created') {
                     addBookmarkToCache(event.bookmark);
                     return;
                 }
-
-                removeBookmarkFromCache(event.id);
-                if (event.removeInfo && event.removeInfo.node && event.removeInfo.node.url) {
-                    FaviconCache.clear(event.removeInfo.node.url);
+                if (event.type === 'removed') {
+                    removeBookmarkFromCache(event.id);
+                    if (event.removeInfo && event.removeInfo.node && event.removeInfo.node.url) {
+                        FaviconCache.clear(event.removeInfo.node.url);
+                    }
+                    return;
+                }
+                if (event.type === 'moved') {
+                    moveBookmarkInCache(event.id, event.moveInfo);
                 }
             });
             permanentMainStorageSyncAfterFlushRefresh = true;
-            schedulePermanentMainStorageSyncFromChrome('bulk-add-remove', 0);
+            schedulePermanentMainStorageSyncFromChrome('bulk-bookmark-mutation', 0);
 
             if (currentView === 'canvas') {
-                scheduleCachedCurrentTreeSnapshotRefresh('bulk-add-remove', 320);
-                scheduleBulkAddRemoveTreeRefresh('bulk-add-remove-fallback', 900);
+                scheduleCachedCurrentTreeSnapshotRefresh('bulk-bookmark-mutation', 320);
+                scheduleBulkBookmarkMutationTreeRefresh('bulk-bookmark-mutation-fallback', 900);
             }
             return;
         }
@@ -14259,14 +14613,16 @@ async function flushPendingAddRemoveEvents(reason = '') {
                 await handleBookmarkCreateRealtime(event.id, event.bookmark);
             } else if (event.type === 'removed') {
                 await handleBookmarkRemoveRealtime(event.id, event.removeInfo);
+            } else if (event.type === 'moved') {
+                await handleBookmarkMoveRealtime(event.id, event.moveInfo);
             }
         }
     } finally {
-        addRemoveFlushInProgress = false;
-        if (addRemoveFlushQueued) {
-            addRemoveFlushQueued = false;
-            flushPendingAddRemoveEvents('queued').catch((e) => {
-                console.warn('[书签监听] queued flush 失败:', e);
+        bookmarkMutationFlushInProgress = false;
+        if (bookmarkMutationFlushQueued) {
+            bookmarkMutationFlushQueued = false;
+            flushPendingBookmarkMutationEvents('queued').catch((e) => {
+                console.warn('[书签监听] queued bookmark mutation flush 失败:', e);
             });
         }
     }
@@ -14288,7 +14644,7 @@ function setupBookmarkListener() {
                 noteBookmarkBulkMutation('bookmark-created');
                 return;
             }
-            enqueueAddRemoveEvent({
+            enqueueBookmarkMutationEvent({
                 type: 'created',
                 id: String(id),
                 bookmark
@@ -14306,13 +14662,10 @@ function setupBookmarkListener() {
                 noteBookmarkBulkMutation('bookmark-removed');
                 return;
             }
-            enqueueAddRemoveEvent({
+            enqueueBookmarkMutationEvent({
                 type: 'removed',
                 id: String(id),
                 removeInfo
-            });
-            flushPendingAddRemoveEvents('onRemoved').catch((e) => {
-                console.warn('[书签监听] onRemoved flush 失败:', e);
             });
         } catch (e) {
             console.warn('[书签监听] onRemoved 处理异常:', e);
@@ -14327,7 +14680,7 @@ function setupBookmarkListener() {
                 noteBookmarkBulkMutation('bookmark-changed');
                 return;
             }
-            await flushPendingAddRemoveEvents('before-onChanged');
+            await flushPendingBookmarkMutationEvents('before-onChanged');
             updateBookmarkInCache(id, changeInfo);
             schedulePermanentMainStorageSyncFromChrome('onChanged');
 
@@ -14337,7 +14690,11 @@ function setupBookmarkListener() {
                 if (!appliedToCachedTree) {
                     scheduleCachedCurrentTreeSnapshotRefresh('onChanged-fast-fallback', 40);
                 }
-                schedulePermanentTreeSharedMutationRefresh('onChanged');
+                if (appliedToCachedTree) refreshPermanentSharedSourceAfterDomPatch('onChanged');
+                const domPatched = appliedToCachedTree && applyPermanentChangeDomPatch(id, changeInfo);
+                if (!domPatched) {
+                    schedulePermanentTreeSharedMutationRefresh('onChanged');
+                }
                 scheduleCachedCurrentTreeSnapshotRefresh('onChanged');
             }
         } catch (e) {
@@ -14355,22 +14712,11 @@ function setupBookmarkListener() {
                 noteBookmarkBulkMutation('bookmark-moved');
                 return;
             }
-            await flushPendingAddRemoveEvents('before-onMoved');
-            moveBookmarkInCache(id, moveInfo);
-            schedulePermanentMainStorageSyncFromChrome('onMoved');
-
-            // 支持 canvas 视图（包含永久栏目的书签树）
-            if (currentView === 'canvas') {
-                const appliedToCachedTree = applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
-                if (!appliedToCachedTree) {
-                    scheduleCachedCurrentTreeSnapshotRefresh('onMoved-fast-fallback', 40);
-                }
-                scheduleCachedCurrentTreeSnapshotRefresh('onMoved');
-
-                // 主体/副本共享树不能只依赖局部 DOM mutation。
-                // 无论移动发生在主体还是副本，都统一回到共享源再同步副本。
-                schedulePermanentTreeSharedMutationRefresh('onMoved');
-            }
+            enqueueBookmarkMutationEvent({
+                type: 'moved',
+                id: String(id),
+                moveInfo
+            });
         } catch (e) {
             // 仅记录错误，不触发完全刷新以避免页面闪烁和滚动位置丢失
             console.warn('[书签监听] onMoved 处理异常:', e);
