@@ -1220,6 +1220,12 @@ async function endBookmarkBulkMute(reason = '', options = {}) {
     clearBookmarkBulkQueuedEvents();
 
     if (shouldRefreshTree) {
+        cachedTreeData = null;
+        lastTreeFingerprint = null;
+        lastTreeSnapshotVersion = null;
+        cachedCurrentTreeIndex = null;
+        cachedRenderTreeIndex = null;
+        try { window.__canvasRenderTreeIndex = null; } catch (_) { }
         await renderTreeView(true);
     }
 
