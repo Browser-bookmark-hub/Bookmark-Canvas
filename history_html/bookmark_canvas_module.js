@@ -32783,6 +32783,23 @@ function __findPermanentNodeEntryById(rootInput, nodeIdInput) {
     return null;
 }
 
+function __findPermanentNodeEntryBySourceID(rootInput, sourceIDInput) {
+    const targetSourceID = __normalizePermanentNodeSourceID(sourceIDInput);
+    if (!rootInput || typeof rootInput !== 'object' || !targetSourceID) return null;
+    const stack = [{ node: rootInput, parent: null, index: -1 }];
+    while (stack.length) {
+        const entry = stack.pop();
+        const node = entry && entry.node;
+        if (!node || typeof node !== 'object') continue;
+        if (__extractPermanentNodeSourceID(node) === targetSourceID) return entry;
+        const children = Array.isArray(node.children) ? node.children : [];
+        for (let i = children.length - 1; i >= 0; i -= 1) {
+            stack.push({ node: children[i], parent: node, index: i });
+        }
+    }
+    return null;
+}
+
 function __refreshPermanentLocalChildMeta(parentNode) {
     if (!parentNode || typeof parentNode !== 'object' || !Array.isArray(parentNode.children)) return;
     const parentId = String(parentNode.id || '').trim();
@@ -32899,19 +32916,25 @@ async function __commitPermanentCreatedNodeInBcs(pendingIdInput, createdNodeInpu
     if (!pendingId || !chromeId) return null;
     const sourceID = __normalizePermanentNodeSourceID(options && options.sourceID);
     if (sourceID) __rememberPendingPermanentNodeSourceID(chromeId, sourceID);
-    return __mutatePermanentMainContentInBcs((root) => {
+    const result = await __mutatePermanentMainContentInBcs((root) => {
         const entry = __findPermanentNodeEntryById(root, pendingId);
-        const node = entry && entry.node;
+        const existingEntry = entry ? null : __findPermanentNodeEntryById(root, chromeId);
+        const node = entry && entry.node ? entry.node : (existingEntry && existingEntry.node);
         if (!node) throw new Error('[Permanent JSON] pending created node is missing.');
-        node.id = chromeId;
+        if (String(node.id || '') !== chromeId) node.id = chromeId;
         if (created.parentId) node.parentId = String(created.parentId);
         if (typeof created.index === 'number' && Number.isFinite(created.index)) node.index = created.index;
         if (typeof created.title === 'string') node.title = created.title;
         if (typeof created.url === 'string') node.url = created.url;
         if (sourceID) node[PERMANENT_NODE_SOURCE_ID_KEY] = sourceID;
-        if (entry.parent) __refreshPermanentLocalChildMeta(entry.parent);
+        const parent = entry && entry.parent ? entry.parent : (existingEntry && existingEntry.parent);
+        if (parent) __refreshPermanentLocalChildMeta(parent);
         return { chromeId, sourceID };
     });
+    if (sourceID) {
+        try { __pendingPermanentNodeSourceIDByChromeId.delete(chromeId); } catch (_) { }
+    }
+    return result;
 }
 
 async function __updatePermanentNodeInBcs(nodeIdInput, updatesInput, options = {}) {
@@ -32976,6 +32999,290 @@ async function __movePermanentNodeInBcs(nodeIdInput, targetInput, options = {}) 
         __refreshPermanentLocalChildMeta(parent);
         return { nodeId, parentId, index: insertIndex };
     }, options);
+}
+
+function __coercePermanentBookmarkEventIndex(value, fallback = null) {
+    const raw = Number(value);
+    if (!Number.isFinite(raw)) return fallback;
+    return Math.max(0, Math.floor(raw));
+}
+
+function __buildPermanentBookmarkEventTitle(nodeInput) {
+    const node = nodeInput && typeof nodeInput === 'object' ? nodeInput : {};
+    const rawUrl = String(node.url || '').trim();
+    return String(node.title || node.name || rawUrl || (rawUrl ? 'Untitled Bookmark' : 'Folder')).trim()
+        || (rawUrl ? rawUrl : 'Folder');
+}
+
+function __findPermanentPendingCreatedNodeEntry(root, parentIdInput, indexInput, titleInput, urlInput) {
+    const parentId = String(parentIdInput || '').trim();
+    const parentEntry = __findPermanentNodeEntryById(root, parentId);
+    const parent = parentEntry && parentEntry.node;
+    if (!parent || !Array.isArray(parent.children)) return null;
+    const title = String(titleInput || '').trim();
+    const url = String(urlInput || '').trim();
+    const matches = [];
+    parent.children.forEach((child, index) => {
+        if (!child || typeof child !== 'object') return;
+        const childId = String(child.id || '').trim();
+        if (!childId.startsWith('pending:')) return;
+        if (String(child.title || '').trim() !== title) return;
+        if (String(child.url || '').trim() !== url) return;
+        matches.push({ node: child, parent, index });
+    });
+    if (!matches.length) return null;
+    const targetIndex = __coercePermanentBookmarkEventIndex(indexInput, null);
+    if (targetIndex !== null) {
+        const indexedMatch = matches.find((entry) => entry.index === targetIndex);
+        if (indexedMatch) return indexedMatch;
+    }
+    return matches.length === 1 ? matches[0] : null;
+}
+
+function __movePermanentBcsNodeEntry(root, sourceEntry, parentIdInput, indexInput) {
+    const parentId = String(parentIdInput || '').trim();
+    const node = sourceEntry && sourceEntry.node;
+    const sourceParent = sourceEntry && sourceEntry.parent;
+    if (!root || !node || !sourceParent || !Array.isArray(sourceParent.children) || sourceEntry.index < 0) {
+        throw new Error('[Permanent JSON] event move source is missing or is root.');
+    }
+    if (!parentId) throw new Error('[Permanent JSON] event move parentId is required.');
+    const parentEntry = __findPermanentNodeEntryById(root, parentId);
+    const targetParent = parentEntry && parentEntry.node;
+    if (!targetParent) throw new Error('[Permanent JSON] event move parent is missing.');
+
+    sourceParent.children.splice(sourceEntry.index, 1);
+    __refreshPermanentLocalChildMeta(sourceParent);
+    if (!Array.isArray(targetParent.children)) targetParent.children = [];
+
+    const insertIndexFallback = targetParent.children.length;
+    const insertIndex = Math.max(0, Math.min(
+        __coercePermanentBookmarkEventIndex(indexInput, insertIndexFallback),
+        targetParent.children.length
+    ));
+    node.parentId = parentId;
+    node.index = insertIndex;
+    targetParent.children.splice(insertIndex, 0, node);
+    __refreshPermanentLocalChildMeta(targetParent);
+    return true;
+}
+
+function __applyPermanentCreatedBookmarkEventToBcsRoot(root, event, resolvedChromeIds) {
+    const bookmark = event && event.bookmark && typeof event.bookmark === 'object' ? event.bookmark : {};
+    const chromeId = String((event && event.id) || bookmark.id || '').trim();
+    const parentId = String(bookmark.parentId || '').trim();
+    if (!chromeId || !parentId) throw new Error('[Permanent JSON] created event id and parentId are required.');
+
+    const title = __buildPermanentBookmarkEventTitle(bookmark);
+    const rawUrl = String(bookmark.url || '').trim();
+    let existingEntry = __findPermanentNodeEntryById(root, chromeId);
+    let existingSourceID = existingEntry && existingEntry.node
+        ? __extractPermanentNodeSourceID(existingEntry.node)
+        : '';
+    let pendingEntry = null;
+    let pendingSourceID = '';
+    if (!existingEntry) {
+        pendingEntry = __findPermanentPendingCreatedNodeEntry(root, parentId, bookmark.index, title, rawUrl);
+        pendingSourceID = pendingEntry && pendingEntry.node
+            ? __extractPermanentNodeSourceID(pendingEntry.node)
+            : '';
+    }
+    const sourceProbe = { ...bookmark, id: chromeId };
+    const sourceID = existingSourceID
+        || __normalizePermanentNodeSourceID(bookmark[PERMANENT_NODE_SOURCE_ID_KEY])
+        || pendingSourceID
+        || __resolvePermanentNodeSourceID(sourceProbe, { allowGenerate: true });
+    const targetIndex = __coercePermanentBookmarkEventIndex(bookmark.index, null);
+    let changed = false;
+
+    if (!existingEntry && sourceID) {
+        const sourceEntry = pendingEntry || __findPermanentNodeEntryBySourceID(root, sourceID);
+        if (sourceEntry && sourceEntry.node) {
+            const sourceEntryId = String(sourceEntry.node.id || '').trim();
+            if (sourceEntryId && sourceEntryId !== chromeId && sourceEntryId.startsWith('pending:')) {
+                sourceEntry.node.id = chromeId;
+                changed = true;
+                existingEntry = sourceEntry;
+                existingSourceID = sourceID;
+            }
+        }
+    }
+
+    if (existingEntry && existingEntry.node) {
+        const node = existingEntry.node;
+        if (node.title !== title) {
+            node.title = title;
+            changed = true;
+        }
+        if (rawUrl) {
+            if (node.url !== rawUrl) {
+                node.url = rawUrl;
+                changed = true;
+            }
+            if (Array.isArray(node.children)) {
+                delete node.children;
+                changed = true;
+            }
+        } else {
+            if (node.url) {
+                delete node.url;
+                changed = true;
+            }
+            if (!Array.isArray(node.children)) {
+                node.children = [];
+                changed = true;
+            }
+        }
+        if (sourceID && !__extractPermanentNodeSourceID(node)) {
+            node[PERMANENT_NODE_SOURCE_ID_KEY] = sourceID;
+            changed = true;
+        }
+        const currentParentId = existingEntry.parent && existingEntry.parent.id ? String(existingEntry.parent.id) : '';
+        if (!existingEntry.parent || currentParentId !== parentId || (targetIndex !== null && existingEntry.index !== targetIndex)) {
+            changed = __movePermanentBcsNodeEntry(root, existingEntry, parentId, targetIndex) || changed;
+        } else if (existingEntry.parent) {
+            __refreshPermanentLocalChildMeta(existingEntry.parent);
+        }
+        if (sourceID && resolvedChromeIds && typeof resolvedChromeIds.add === 'function') resolvedChromeIds.add(chromeId);
+        return changed;
+    }
+
+    const parentEntry = __findPermanentNodeEntryById(root, parentId);
+    const parent = parentEntry && parentEntry.node;
+    if (!parent) throw new Error('[Permanent JSON] created event parent is missing.');
+    if (!Array.isArray(parent.children)) parent.children = [];
+    const node = __normalizePermanentLocalMutationNode({
+        id: chromeId,
+        title,
+        url: rawUrl,
+        [PERMANENT_NODE_SOURCE_ID_KEY]: sourceID,
+        children: Array.isArray(bookmark.children) ? bookmark.children : []
+    }, {
+        allowGenerateSourceID: true
+    });
+    node.parentId = parentId;
+    const children = parent.children.filter((child) => String(child && child.id || '') !== chromeId);
+    const insertIndex = Math.max(0, Math.min(
+        targetIndex === null ? children.length : targetIndex,
+        children.length
+    ));
+    node.index = insertIndex;
+    children.splice(insertIndex, 0, node);
+    parent.children = children;
+    __refreshPermanentLocalChildMeta(parent);
+    if (sourceID && resolvedChromeIds && typeof resolvedChromeIds.add === 'function') resolvedChromeIds.add(chromeId);
+    return true;
+}
+
+function __applyPermanentRemovedBookmarkEventToBcsRoot(root, event) {
+    const nodeId = String(event && event.id || '').trim();
+    if (!nodeId) throw new Error('[Permanent JSON] removed event id is required.');
+    const entry = __findPermanentNodeEntryById(root, nodeId);
+    if (!entry) return false;
+    if (!entry.parent || !Array.isArray(entry.parent.children) || entry.index < 0) {
+        throw new Error('[Permanent JSON] removed event node is missing or is root.');
+    }
+    entry.parent.children.splice(entry.index, 1);
+    __refreshPermanentLocalChildMeta(entry.parent);
+    return true;
+}
+
+function __applyPermanentMovedBookmarkEventToBcsRoot(root, event) {
+    const nodeId = String(event && event.id || '').trim();
+    const moveInfo = event && event.moveInfo && typeof event.moveInfo === 'object' ? event.moveInfo : {};
+    const parentId = String(moveInfo.parentId || '').trim();
+    if (!nodeId || !parentId) throw new Error('[Permanent JSON] moved event id and parentId are required.');
+    const entry = __findPermanentNodeEntryById(root, nodeId);
+    if (!entry || !entry.node) throw new Error('[Permanent JSON] moved event source is missing.');
+    if (!entry.parent || entry.index < 0) throw new Error('[Permanent JSON] moved event source is root.');
+    const targetIndex = __coercePermanentBookmarkEventIndex(moveInfo.index, null);
+    if (targetIndex === null) throw new Error('[Permanent JSON] moved event index is required.');
+    const currentParentId = String(entry.parent.id || '');
+    if (currentParentId === parentId && entry.index === targetIndex) {
+        __refreshPermanentLocalChildMeta(entry.parent);
+        return false;
+    }
+    return __movePermanentBcsNodeEntry(root, entry, parentId, targetIndex);
+}
+
+function __applyPermanentChangedBookmarkEventToBcsRoot(root, event) {
+    const nodeId = String(event && event.id || '').trim();
+    const changeInfo = event && event.changeInfo && typeof event.changeInfo === 'object' ? event.changeInfo : {};
+    if (!nodeId) throw new Error('[Permanent JSON] changed event id is required.');
+    const entry = __findPermanentNodeEntryById(root, nodeId);
+    const node = entry && entry.node;
+    if (!node) throw new Error('[Permanent JSON] changed event node is missing.');
+    let changed = false;
+    if (typeof changeInfo.title === 'string' && node.title !== changeInfo.title) {
+        node.title = changeInfo.title;
+        changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(changeInfo, 'url')) {
+        const url = String(changeInfo.url || '').trim();
+        if (url) {
+            if (node.url !== url) {
+                node.url = url;
+                changed = true;
+            }
+        } else if (node.url) {
+            delete node.url;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+async function __applyPermanentBookmarkEventsToBcs(eventsInput, options = {}) {
+    const events = (Array.isArray(eventsInput) ? eventsInput : [eventsInput])
+        .filter((event) => event && typeof event === 'object' && event.type);
+    if (!events.length) return { changed: false, applied: 0, noops: 0 };
+
+    const resolvedChromeIds = new Set();
+    let appliedCount = 0;
+    let noopCount = 0;
+    const result = await __mutatePermanentMainContentInBcs((root) => {
+        let changed = false;
+        appliedCount = 0;
+        noopCount = 0;
+        for (const event of events) {
+            let eventChanged = false;
+            if (event.type === 'created') {
+                eventChanged = __applyPermanentCreatedBookmarkEventToBcsRoot(root, event, resolvedChromeIds);
+            } else if (event.type === 'removed') {
+                eventChanged = __applyPermanentRemovedBookmarkEventToBcsRoot(root, event);
+            } else if (event.type === 'moved') {
+                eventChanged = __applyPermanentMovedBookmarkEventToBcsRoot(root, event);
+            } else if (event.type === 'changed') {
+                eventChanged = __applyPermanentChangedBookmarkEventToBcsRoot(root, event);
+            } else {
+                throw new Error(`[Permanent JSON] unsupported bookmark event type: ${String(event.type)}`);
+            }
+            appliedCount += 1;
+            if (eventChanged) changed = true;
+            else noopCount += 1;
+        }
+        if (!changed) return false;
+        return {
+            applied: appliedCount,
+            noops: noopCount,
+            reason: String(options && options.reason || '')
+        };
+    }, {
+        assumeClean: !!(options && options.assumeClean),
+        filePath: typeof options.filePath === 'string' ? options.filePath : ''
+    });
+
+    try {
+        resolvedChromeIds.forEach((chromeId) => {
+            if (chromeId) __pendingPermanentNodeSourceIDByChromeId.delete(chromeId);
+        });
+    } catch (_) { }
+
+    return {
+        ...(result && typeof result === 'object' ? result : {}),
+        applied: appliedCount,
+        noops: noopCount
+    };
 }
 
 async function __syncPermanentMainTreeFromChromeBookmarks(options = {}) {
@@ -40809,6 +41116,9 @@ if (typeof window !== 'undefined') {
         },
         async movePermanentNodeInBcs(nodeId, target, options = {}) {
             return await __movePermanentNodeInBcs(nodeId, target, options);
+        },
+        async applyPermanentBookmarkEventsToBcs(events, options = {}) {
+            return await __applyPermanentBookmarkEventsToBcs(events, options);
         },
         async restorePermanentMainContentSnapshot(contentInput, options = {}) {
             return await __restorePermanentMainContentSnapshot(contentInput, options);

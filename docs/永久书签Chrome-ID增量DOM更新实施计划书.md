@@ -137,9 +137,9 @@ DOM patch 成功：不再调度 schedulePermanentTreeSharedMutationRefresh。
 DOM patch 失败或批量超过阈值：保留整树刷新兜底。
 ```
 
-### 2.4 当前 BCS 同步层仍有全树拉取
+### 2.4 BCS 同步层已接入事件增量
 
-`history_html/history.js` 中普通事件会调用：
+实施前，`history_html/history.js` 中普通事件会调用：
 
 ```js
 schedulePermanentMainStorageSyncFromChrome('onCreated')
@@ -162,11 +162,13 @@ __getPermanentChromeTreeForStorage()
 
 该路径会读取 Chrome 完整书签树。
 
-因此当前数据层事实是：
+实施后，普通事件路径已调整为：
 
 ```text
-普通单个 Chrome 事件后，代码会安排 Chrome -> BCS 的整树同步。
-即使后续签名一致跳过写入，整树读取已经发生。
+created/removed/moved：统一事件队列 flush 时先批量调用 applyPermanentBookmarkEventsToBcsIncremental。
+changed：先 flush 结构事件队列，再单独调用 applyPermanentBookmarkEventsToBcsIncremental。
+BCS 增量成功后，不再安排普通事件的 Chrome -> BCS 整树同步。
+BCS 增量失败、桥接 API 缺失、批量阈值、浏览器导入、打开/恢复/手动刷新等场景继续走整树同步兜底。
 ```
 
 ## 3. 为什么 DOM 增量是合理的
@@ -441,13 +443,13 @@ onChanged 不进入批量阈值，但会先 flush 前面的 pending mutation，�
 
 ## 8. BCS 同步策略调整
 
-当前普通事件后会调用：
+实施前普通事件后会调用：
 
 ```js
 schedulePermanentMainStorageSyncFromChrome(reason)
 ```
 
-当前第一版实现的是 **视觉 DOM 增量** 和 **运行时缓存增量**：
+当时第一版实现的是 **视觉 DOM 增量** 和 **运行时缓存增量**：
 
 ```text
 Chrome 事件 payload
@@ -462,23 +464,58 @@ DOM 增量：改当前页面看得见的 .tree-node，目标是减少闪烁。
 BCS 增量：改持久化的永久书签树数据，目标是减少后台 getTree / 全量写入。
 ```
 
-当前代码仍保留：
+实施后，普通事件改为优先走：
 
 ```text
-普通事件后 schedulePermanentMainStorageSyncFromChrome(reason)
+普通事件 payload -> applyPermanentBookmarkEventsToBcsIncremental -> bridge.applyPermanentBookmarkEventsToBcs
 ```
 
-也就是说，视觉上可以不整树替换，但存储层仍可能从 Chrome 重新同步整棵永久书签树。
+底层由 `history_html/bookmark_canvas_module.js` 的 `__applyPermanentBookmarkEventsToBcs()` 在一次 BCS mutation 内按事件顺序处理。
 
-目标调整为：
+当前边界为：
 
 ```text
 普通单个/少量事件：优先按 Chrome ID 增量写 BCS。
 增量写 BCS 成功：不调用 syncPermanentMainTreeFromChromeBookmarks。
 增量写 BCS 失败：调用 syncPermanentMainTreeFromChromeBookmarks 兜底。
+批量事件、浏览器导入、前端缺席后的重新打开：继续用整树同步校准。
 ```
 
-### 8.1 插件自己发起的操作
+增量写入覆盖四类 Chrome 事件：
+
+```text
+created：按 parentId/index 插入；已有节点视为幂等更新；pending 节点可被真实 Chrome ID 接管。
+removed：按 Chrome ID 删除整块子树；节点已经不存在时视为 no-op。
+moved：按 Chrome ID 移动整块子树；缺少源节点、目标父节点或 index 时兜底整树同步。
+changed：只更新 title/url；结构缺失时兜底整树同步。
+```
+
+### 8.1 sourceID 处理
+
+BCS 增量不引入长期 `chromeId -> sourceID` 映射表。
+
+`sourceID` 仍然嵌在 BCS JSON 节点内部，随节点移动、删除、整块迁移。
+
+新增节点的 `sourceID` 解析顺序：
+
+```text
+已有 Chrome ID 节点上的 sourceID
+-> 事件 payload 自带 sourceID（通常没有）
+-> prepare create 产生的 pending 节点 sourceID
+-> 内存中的 pending chromeId -> sourceID
+-> 生成新的 sourceID 并写入该 BCS 节点
+```
+
+这样保证：
+
+```text
+外部创建：生成一个新的 sourceID，直接嵌入新节点。
+插件自己创建：复用 prepare 阶段生成的 sourceID。
+重复事件：不生成第二个 sourceID。
+全量同步兜底：仍通过 Chrome ID 搜集旧树 sourceID 并贴回新树。
+```
+
+### 8.2 插件自己发起的操作
 
 插件自己操作时，BCS 已经在调用 Chrome API 前被更新：
 
@@ -507,7 +544,16 @@ BCS 已经是目标状态：视为成功。
 BCS 不存在目标结构或更新失败：整树同步兜底。
 ```
 
-### 8.2 外部发起的操作
+对 create 还有一个竞态：
+
+```text
+preparePermanentCreateNodeInBcs 先写入 pending 节点。
+Chrome onCreated 可能先于 commitPermanentCreatedNodeInBcs 到达。
+BCS 事件增量会把匹配的 pending 节点改成真实 Chrome ID。
+后续 commit 再到达时，如果 pending 已不存在但真实 Chrome ID 节点已存在，视为幂等成功。
+```
+
+### 8.3 外部发起的操作
 
 外部来源包括：
 
@@ -530,6 +576,34 @@ BCS 不存在目标结构或更新失败：整树同步兜底。
 事件信息是否完整。
 事件数量是否过多。
 本地结构是否能匹配 Chrome ID。
+```
+
+### 8.4 队列与兜底边界
+
+结构事件使用统一队列：
+
+```text
+onCreated/onRemoved/onMoved
+-> 220ms quiet window
+-> < 100：先按事件顺序合批写一次 BCS，再逐个更新运行时 cache/DOM
+-> >= 100：跳过 BCS 增量，直接整树同步和整树刷新兜底
+```
+
+修改事件不进入批量阈值：
+
+```text
+onChanged
+-> 先 flush 已排队结构事件
+-> 单独写 BCS 增量
+-> 再更新运行时 cache/DOM
+```
+
+任何 BCS 增量异常都会转为：
+
+```text
+syncPermanentMainTreeFromChromeBookmarks
+-> 清理永久树渲染缓存
+-> 必要时刷新 cachedCurrentTree / 当前 Canvas 树
 ```
 
 ## 9. 不做的事情
@@ -674,12 +748,14 @@ onChanged：不进批量阈值，先 flush 已排队 mutation，再立即增量�
 
 减少普通事件后的整树 getTree。
 
-目标：
+实现状态：
 
 ```text
 普通事件：事件 payload -> BCS 增量更新。
 失败：syncPermanentMainTreeFromChromeBookmarks 兜底。
 批量/导入/打开/恢复：继续整树同步。
+created/removed/moved：在统一队列内合批写一次 BCS，再进入缓存和 DOM 增量。
+changed：不进入批量阈值，但会先 flush 结构队列，再写 BCS 增量。
 ```
 
 这一步能减少后台性能压力；DOM patch 是视觉收益最大的一步。
