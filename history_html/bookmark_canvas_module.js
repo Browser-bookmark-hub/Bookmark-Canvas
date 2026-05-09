@@ -45458,14 +45458,6 @@ function __renderOtherZoomMagnetCurve(modal) {
                 xTickLabels[i].textContent = `${label}%`;
             }
         }
-        const yTickLabels = modal.querySelectorAll('#otherCurveYAxisTicks .other-curve-tick-label');
-        if (yTickLabels && yTickLabels.length) {
-            for (let i = 0; i <= tickCount && i < yTickLabels.length; i++) {
-                const t = (tickCount - i) / tickCount;
-                const label = Math.round(t * 100);
-                yTickLabels[i].textContent = `${label}%`;
-            }
-        }
     }
     const percentToX = (p) => paddingLeft + ((p - minPercent) / range) * plotW;
     let maxFactor = ZOOM_CURVE_MAX_FACTOR;
@@ -45547,6 +45539,17 @@ function __renderOtherZoomMagnetCurve(modal) {
     );
     maxFactor = Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, Math.max(ZOOM_CURVE_MAX_FACTOR, curveMax, magnetMax));
     if (modal) modal._curveMaxFactor = maxFactor;
+    if (modal) {
+        const yTickLabels = modal.querySelectorAll('#otherCurveYAxisTicks .other-curve-tick-label');
+        if (yTickLabels && yTickLabels.length) {
+            for (let i = 0; i <= tickCount && i < yTickLabels.length; i++) {
+                const t = (tickCount - i) / tickCount;
+                const v = Math.round(maxFactor * t * 1000) / 10;
+                const label = (v % 1 === 0) ? v.toFixed(0) : v.toFixed(1);
+                yTickLabels[i].textContent = `${label}%`;
+            }
+        }
+    }
 
     const startX = normToX(0);
     const startY = factorToY(__scaleZoomCurveFactor(p0.y));
@@ -45867,7 +45870,7 @@ function __bindOtherCurveInteractions(modal, onChange) {
         const combinedFactorAt = (nx) => {
             const base = baseFactorAt(nx);
             const percent = minPercent + (__clamp01(nx) * range);
-            const magnetFactor = (modal && modal._useDefaultZoomCurve) ? 1 : getMagnetFactorAt(percent);
+            const magnetFactor = getMagnetFactorAt(percent);
             return Math.max(0.005, Math.min(maxFactor, base * magnetFactor));
         };
         const m1x = layout.paddingLeft + magnets.m1.x * layout.plotW;

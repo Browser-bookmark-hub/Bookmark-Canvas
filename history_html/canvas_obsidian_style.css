@@ -2301,18 +2301,40 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .other-curve-axis-y .other-curve-axis-ticks {
     grid-column: 2;
     grid-row: 1;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    align-items: flex-end;
-    padding-right: 6px;
+    position: relative;
+    display: block;
+    height: 100%;
+    overflow: visible;
 }
 
 .other-curve-axis-y .other-curve-tick {
+    position: absolute;
+    right: 0;
+    transform: translateY(-50%);
     display: flex;
     align-items: center;
     gap: 6px;
     white-space: nowrap;
+}
+
+.other-curve-axis-y .other-curve-tick:nth-child(1) {
+    top: 0;
+}
+
+.other-curve-axis-y .other-curve-tick:nth-child(2) {
+    top: 25%;
+}
+
+.other-curve-axis-y .other-curve-tick:nth-child(3) {
+    top: 50%;
+}
+
+.other-curve-axis-y .other-curve-tick:nth-child(4) {
+    top: 75%;
+}
+
+.other-curve-axis-y .other-curve-tick:nth-child(5) {
+    top: 100%;
 }
 
 .other-curve-axis-y .other-curve-tick::after {
