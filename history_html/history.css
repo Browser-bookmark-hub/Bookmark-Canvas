@@ -7850,6 +7850,11 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     -webkit-backface-visibility: hidden;
 }
 
+.permanent-bookmark-section.canvas-node-maximized.permanent-tree-rerendering,
+.permanent-bookmark-section.canvas-node-maximized .permanent-section-body.permanent-tree-rerendering {
+    background: var(--bg-elevated);
+}
+
 .permanent-section-body.canvas-scroll-perf-active .bookmark-tree,
 .temp-node-body.canvas-scroll-perf-active .bookmark-tree,
 .temp-node-body.canvas-scroll-perf-active .temp-bookmark-tree,

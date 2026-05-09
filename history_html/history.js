@@ -3343,6 +3343,54 @@ function __renderCachedPermanentTreeIntoPrimary(tree) {
     }
 }
 
+function __beginPermanentTreeRenderVisualLock(tree) {
+    try {
+        const section = tree && typeof tree.closest === 'function'
+            ? tree.closest('.permanent-bookmark-section')
+            : null;
+        if (!section || !section.classList || !section.classList.contains('canvas-node-maximized')) return null;
+        const body = typeof tree.closest === 'function' ? tree.closest('.permanent-section-body') : null;
+        const treeRect = typeof tree.getBoundingClientRect === 'function' ? tree.getBoundingClientRect() : null;
+        const bodyRect = body && typeof body.getBoundingClientRect === 'function' ? body.getBoundingClientRect() : null;
+        const treeHeight = treeRect && Number.isFinite(treeRect.height) ? Math.ceil(treeRect.height) : 0;
+        const bodyHeight = bodyRect && Number.isFinite(bodyRect.height) ? Math.ceil(bodyRect.height) : 0;
+        const previousTreeMinHeight = tree.style.minHeight || '';
+        const previousBodyMinHeight = body ? (body.style.minHeight || '') : '';
+        if (treeHeight > 0) tree.style.minHeight = `${treeHeight}px`;
+        if (body && bodyHeight > 0) body.style.minHeight = `${bodyHeight}px`;
+        section.classList.add('permanent-tree-rerendering');
+        if (body && body.classList) body.classList.add('permanent-tree-rerendering');
+        let released = false;
+        const release = () => {
+            if (released) return;
+            released = true;
+            const restore = () => {
+                try {
+                    if (tree && tree.style) tree.style.minHeight = previousTreeMinHeight;
+                    if (body && body.style) body.style.minHeight = previousBodyMinHeight;
+                    if (section && section.classList) section.classList.remove('permanent-tree-rerendering');
+                    if (body && body.classList) body.classList.remove('permanent-tree-rerendering');
+                } catch (_) { }
+            };
+            try {
+                requestAnimationFrame(() => {
+                    try {
+                        requestAnimationFrame(restore);
+                    } catch (_) {
+                        restore();
+                    }
+                });
+            } catch (_) {
+                setTimeout(restore, 32);
+            }
+        };
+        setTimeout(release, 800);
+        return release;
+    } catch (_) {
+        return null;
+    }
+}
+
 function __renderPermanentTreeIntoTree(tree, options = {}) {
     if (!tree) return false;
 
@@ -3391,6 +3439,7 @@ function __renderPermanentTreeIntoTree(tree, options = {}) {
         }
     } catch (_) { }
 
+    const releaseVisualLock = __beginPermanentTreeRenderVisualLock(tree);
     try {
         tree.replaceChildren(sourceFragment);
     } catch (_) {
@@ -3445,6 +3494,8 @@ function __renderPermanentTreeIntoTree(tree, options = {}) {
         tree.dataset.permanentTreeRenderReason = reason || 'shared-render';
         tree.dataset.permanentTreeRenderRole = tree.id === 'bookmarkTree' ? 'primary' : 'copy';
     } catch (_) { }
+
+    if (typeof releaseVisualLock === 'function') releaseVisualLock();
 
     return true;
 }
