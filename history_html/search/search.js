@@ -5744,19 +5744,6 @@ async function buildPermanentNodeMap(root) {
     return map;
 }
 
-function resolvePermanentPayloadSourceIDForSearch(node) {
-    if (!node || typeof node !== 'object') return '';
-    const direct = String(node.sourceID || '').trim();
-    if (direct) return direct.replace(/\s+/g, '-');
-    const bridge = window.CanvasProtocolBridge;
-    if (bridge && typeof bridge.resolvePermanentNodeSourceID === 'function') {
-        try {
-            return String(bridge.resolvePermanentNodeSourceID(node, { allowGenerate: false }) || '').trim();
-        } catch (_) { }
-    }
-    return '';
-}
-
 function buildSearchBookmarkPayload(item, isZh) {
     const source = String(item && item.source || '').trim();
     const safeTitle = item && (item.title || item.url) ? (item.title || item.url) : (isZh ? '书签' : 'Bookmark');
@@ -5770,8 +5757,6 @@ function buildSearchBookmarkPayload(item, isZh) {
     if (item && item.id) payload.id = String(item.id);
     if (source === 'permanent') {
         payload.__canvasPayloadSource = 'permanent';
-        const sourceID = resolvePermanentPayloadSourceIDForSearch(payload);
-        if (sourceID) payload.sourceID = sourceID;
     }
     return payload;
 }
@@ -5781,9 +5766,8 @@ async function buildPayloadFromPermanentNode(node, isZh) {
 
     const nodeUrl = typeof node.url === 'string' ? node.url : '';
     const nodeTitle = typeof node.title === 'string' ? node.title : '';
-    const rootSourceID = resolvePermanentPayloadSourceIDForSearch(node);
     if (nodeUrl) {
-        const bookmarkPayload = {
+        return {
             id: node.id ? String(node.id) : undefined,
             title: nodeTitle || nodeUrl || (isZh ? '书签' : 'Bookmark'),
             url: nodeUrl,
@@ -5791,8 +5775,6 @@ async function buildPayloadFromPermanentNode(node, isZh) {
             __canvasPayloadSource: 'permanent',
             children: []
         };
-        if (rootSourceID) bookmarkPayload.sourceID = rootSourceID;
-        return bookmarkPayload;
     }
 
     const rootPayload = {
@@ -5803,7 +5785,6 @@ async function buildPayloadFromPermanentNode(node, isZh) {
         __canvasPayloadSource: 'permanent',
         children: []
     };
-    if (rootSourceID) rootPayload.sourceID = rootSourceID;
 
     const stack = [{ source: node, target: rootPayload, index: 0 }];
     let scanned = 0;
@@ -5825,17 +5806,14 @@ async function buildPayloadFromPermanentNode(node, isZh) {
         const childTitle = typeof child.title === 'string' ? child.title : '';
 
         if (childUrl) {
-            const bookmarkPayload = {
+            frame.target.children.push({
                 id: child.id ? String(child.id) : undefined,
                 title: childTitle || childUrl || (isZh ? '书签' : 'Bookmark'),
                 url: childUrl,
                 type: 'bookmark',
                 __canvasPayloadSource: 'permanent',
                 children: []
-            };
-            const sourceID = resolvePermanentPayloadSourceIDForSearch(child);
-            if (sourceID) bookmarkPayload.sourceID = sourceID;
-            frame.target.children.push(bookmarkPayload);
+            });
         } else {
             const folderPayload = {
                 id: child.id ? String(child.id) : undefined,
@@ -5845,8 +5823,6 @@ async function buildPayloadFromPermanentNode(node, isZh) {
                 __canvasPayloadSource: 'permanent',
                 children: []
             };
-            const sourceID = resolvePermanentPayloadSourceIDForSearch(child);
-            if (sourceID) folderPayload.sourceID = sourceID;
             frame.target.children.push(folderPayload);
 
             if (Array.isArray(child.children) && child.children.length) {
@@ -5920,7 +5896,6 @@ async function insertLargeFolderPayload(tempApi, sectionId, folderPayload, fallb
 
     const folderTitle = folderPayload.title || fallbackTitle || 'Folder';
     const createOptions = {};
-    if (folderPayload.sourceID) createOptions.sourceID = folderPayload.sourceID;
     if (folderPayload.__canvasPayloadSource) createOptions.__canvasPayloadSource = folderPayload.__canvasPayloadSource;
     const folderId = tempApi.createFolder(sectionId, '', folderTitle, createOptions);
     if (!folderId) return false;
@@ -5974,7 +5949,6 @@ async function createTempSectionFromSearchResults() {
                 const bridge = window.CanvasProtocolBridge;
                 if (bridge && typeof bridge.readPermanentTreeSnapshotFromBcs === 'function') {
                     const tree = await bridge.readPermanentTreeSnapshotFromBcs({
-                        validateSourceID: false,
                         assumeCleanWhenMissingState: true
                     });
                     if (Array.isArray(tree) && tree[0]) return tree[0];
@@ -5997,7 +5971,6 @@ async function createTempSectionFromSearchResults() {
         }
 
         const payloadItems = [];
-        const copyInsertOptions = { regenerateSourceID: true };
         let insertedDirectCount = 0;
         let processed = 0;
         const appendPayloadList = async (payload, fallbackTitle) => {
@@ -6011,8 +5984,7 @@ async function createTempSectionFromSearchResults() {
                         tempApi,
                         sectionId,
                         payloadItem,
-                        fallbackTitle || (isZh ? '文件夹' : 'Folder'),
-                        copyInsertOptions
+                        fallbackTitle || (isZh ? '文件夹' : 'Folder')
                     );
                     if (inserted) {
                         insertedDirectCount += 1;
@@ -6040,7 +6012,7 @@ async function createTempSectionFromSearchResults() {
                     }
                     continue;
                 }
-                throw new Error(isZh ? '永久搜索结果缺少 sourceID，无法创建临时栏目。' : 'Permanent search result is missing sourceID; cannot create a temporary section.');
+                throw new Error(isZh ? '永久搜索结果无法构建负载，无法创建临时栏目。' : 'Failed to build payload from permanent search result; cannot create a temporary section.');
             }
 
             if (item.nodeType === 'folder') {
@@ -6080,7 +6052,7 @@ async function createTempSectionFromSearchResults() {
             1600
         );
 
-        await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null, copyInsertOptions);
+        await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null);
 
         try {
             if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
@@ -6206,7 +6178,7 @@ async function createTempSectionFromDomainResult(domain) {
             1600
         );
 
-        await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null, { regenerateSourceID: true });
+        await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null);
 
         try {
             if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {

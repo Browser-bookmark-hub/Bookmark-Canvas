@@ -47,19 +47,6 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
-function resolvePermanentPayloadSourceID(node) {
-    if (!node || typeof node !== 'object') return '';
-    const direct = String(node.sourceID || '').trim();
-    if (direct) return direct.replace(/\s+/g, '-');
-    const bridge = window.CanvasProtocolBridge;
-    if (bridge && typeof bridge.resolvePermanentNodeSourceID === 'function') {
-        try {
-            return String(bridge.resolvePermanentNodeSourceID(node, { allowGenerate: false }) || '').trim();
-        } catch (_) { }
-    }
-    return '';
-}
-
 async function readPermanentNodeFromBcs(nodeId) {
     const id = String(nodeId || '').trim();
     if (!id) return null;
@@ -67,7 +54,6 @@ async function readPermanentNodeFromBcs(nodeId) {
         const bridge = window.CanvasProtocolBridge;
         const tree = bridge && typeof bridge.readPermanentTreeSnapshotFromBcs === 'function'
             ? await bridge.readPermanentTreeSnapshotFromBcs({
-                validateSourceID: false,
                 assumeCleanWhenMissingState: true
             })
             : null;
@@ -129,21 +115,13 @@ async function createPermanentBookmarkNode(createPayload, options = {}) {
     const bridge = getPermanentMutationBridge();
     let prepared = null;
     if (bridge && typeof bridge.preparePermanentCreateNodeInBcs === 'function') {
-        prepared = await bridge.preparePermanentCreateNodeInBcs(createPayload, {
-            sourceID: options && options.sourceID
-        });
+        prepared = await bridge.preparePermanentCreateNodeInBcs(createPayload);
     }
     try {
         const created = await chrome.bookmarks.create(createPayload);
         try {
-            const sourceID = (prepared && prepared.sourceID) || (options && options.sourceID) || '';
-            if (created && created.id && sourceID && bridge && typeof bridge.rememberPendingPermanentNodeSourceID === 'function') {
-                bridge.rememberPendingPermanentNodeSourceID(created.id, sourceID);
-            }
             if (prepared && bridge && typeof bridge.commitPermanentCreatedNodeInBcs === 'function') {
-                await bridge.commitPermanentCreatedNodeInBcs(prepared.pendingId, created, {
-                    sourceID
-                });
+                await bridge.commitPermanentCreatedNodeInBcs(prepared.pendingId, created);
             }
         } catch (commitError) {
             console.warn('[Permanent JSON] create commit failed, resyncing from Chrome:', commitError);
@@ -3624,9 +3602,7 @@ async function pasteIntoTemp(context) {
     try {
         if (bookmarkClipboard.source === 'temporary') {
             if (bookmarkClipboard.action === 'copy') {
-                manager.insertFromPayload(target.sectionId, target.parentId, bookmarkClipboard.payload, target.index, {
-                    regenerateSourceID: true
-                });
+                manager.insertFromPayload(target.sectionId, target.parentId, bookmarkClipboard.payload, target.index);
             } else if (bookmarkClipboard.action === 'cut') {
                 if (bookmarkClipboard.sectionId === target.sectionId) {
                     manager.moveWithin(target.sectionId, bookmarkClipboard.nodeIds, target.parentId, target.index);
@@ -3660,20 +3636,14 @@ async function pasteIntoTemp(context) {
                     const permanentPayload = payload.filter(item => String(item && item.__canvasPayloadSource || '') === 'permanent');
                     let insertIndex = target.index;
                     if (tempPayload.length) {
-                        manager.insertFromPayload(target.sectionId, target.parentId, tempPayload, insertIndex, {
-                            regenerateSourceID: true
-                        });
+                        manager.insertFromPayload(target.sectionId, target.parentId, tempPayload, insertIndex);
                         if (typeof insertIndex === 'number') insertIndex += tempPayload.length;
                     }
                     if (permanentPayload.length) {
-                        manager.insertFromPayload(target.sectionId, target.parentId, permanentPayload, insertIndex, {
-                            regenerateSourceID: false
-                        });
+                        manager.insertFromPayload(target.sectionId, target.parentId, permanentPayload, insertIndex);
                     }
                 } else {
-                    manager.insertFromPayload(target.sectionId, target.parentId, payload, target.index, {
-                        regenerateSourceID: false
-                    });
+                    manager.insertFromPayload(target.sectionId, target.parentId, payload, target.index);
                 }
             }
 
@@ -3706,14 +3676,12 @@ async function pasteIntoTemp(context) {
 
 function serializeBookmarkNode(node) {
     if (!node) return null;
-    const sourceID = resolvePermanentPayloadSourceID(node);
     return {
         ...(node.id ? { id: String(node.id) } : {}),
         title: node.title,
         url: node.url || '',
         type: node.url ? 'bookmark' : 'folder',
         __canvasPayloadSource: 'permanent',
-        ...(sourceID ? { sourceID } : {}),
         children: (node.children || []).map(serializeBookmarkNode)
     };
 }
@@ -6700,7 +6668,6 @@ async function pasteBookmark(targetNodeId, isFolder) {
         if (bookmarkClipboard.source === 'temporary' || bookmarkClipboard.source === 'mixed') {
             const payload = bookmarkClipboard.payload || [];
             if (payload.length) {
-                const preserveSourceID = bookmarkClipboard.source === 'temporary' && bookmarkClipboard.action === 'cut';
                 let muteSession = null;
                 let loadingToast = null;
                 if (typeof beginBookmarkBulkMute === 'function') {
@@ -6712,7 +6679,7 @@ async function pasteBookmark(targetNodeId, isFolder) {
                 }
                 try {
                     for (const item of payload) {
-                        await duplicateNode(item, targetFolderId, { preserveSourceID });
+                        await duplicateNode(item, targetFolderId);
                     }
                 } finally {
                     if (loadingToast) loadingToast.close();
@@ -6773,7 +6740,7 @@ async function pasteBookmark(targetNodeId, isFolder) {
                 }
                 try {
                     for (const node of payload) {
-                        await duplicateNode(node, targetFolderId, { preserveSourceID: false });
+                        await duplicateNode(node, targetFolderId);
                     }
                 } finally {
                     if (loadingToast) loadingToast.close();
@@ -6805,17 +6772,7 @@ async function duplicateNode(node, parentId, options = {}) {
     }
 
     // 创建节点
-    const created = await createPermanentBookmarkNode(newNode, {
-        sourceID: options && options.preserveSourceID ? String(node && node.sourceID || '').trim() : ''
-    });
-    try {
-        const preserveSourceID = !!(options && options.preserveSourceID);
-        const sourceID = preserveSourceID ? String(node && node.sourceID || '').trim() : '';
-        const bridge = window && window.CanvasProtocolBridge;
-        if (created && created.id && sourceID && bridge && typeof bridge.rememberPendingPermanentNodeSourceID === 'function') {
-            bridge.rememberPendingPermanentNodeSourceID(created.id, sourceID);
-        }
-    } catch (_) { }
+    const created = await createPermanentBookmarkNode(newNode);
 
     // 如果有子节点，递归复制
     if (node.children) {
@@ -8034,9 +7991,7 @@ async function batchToTempSection(triggerEvent) {
             try {
                 const payload = canvas.temp.extractPayload(sectionId, ids);
                 if (payload && payload.length) {
-                    canvas.temp.insertFromPayload(newSectionId, null, payload, null, {
-                        regenerateSourceID: true
-                    });
+                    canvas.temp.insertFromPayload(newSectionId, null, payload, null);
                 }
             } catch (error) {
                 console.warn('[批量->临时栏目] 复制临时节点失败:', error);

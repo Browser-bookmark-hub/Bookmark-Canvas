@@ -141,29 +141,14 @@ function getTempManager() {
     return (window.CanvasModule && window.CanvasModule.temp) ? window.CanvasModule.temp : null;
 }
 
-function resolvePermanentPayloadSourceID(node) {
-    if (!node || typeof node !== 'object') return '';
-    const direct = String(node.sourceID || '').trim();
-    if (direct) return direct.replace(/\s+/g, '-');
-    const bridge = window.CanvasProtocolBridge;
-    if (bridge && typeof bridge.resolvePermanentNodeSourceID === 'function') {
-        try {
-            return String(bridge.resolvePermanentNodeSourceID(node, { allowGenerate: false }) || '').trim();
-        } catch (_) { }
-    }
-    return '';
-}
-
 function serializeBookmarkNode(node) {
     if (!node) return null;
-    const sourceID = resolvePermanentPayloadSourceID(node);
     return {
         ...(node.id ? { id: String(node.id) } : {}),
         title: node.title,
         url: node.url || '',
         type: node.url ? 'bookmark' : 'folder',
         __canvasPayloadSource: 'permanent',
-        ...(sourceID ? { sourceID } : {}),
         children: (node.children || []).map(child => serializeBookmarkNode(child))
     };
 }
@@ -175,7 +160,6 @@ async function readPermanentNodeFromBcs(nodeId) {
         const bridge = window.CanvasProtocolBridge;
         const tree = bridge && typeof bridge.readPermanentTreeSnapshotFromBcs === 'function'
             ? await bridge.readPermanentTreeSnapshotFromBcs({
-                validateSourceID: false,
                 assumeCleanWhenMissingState: true
             })
             : null;
@@ -227,21 +211,13 @@ async function createPermanentBookmarkNode(createPayload, options = {}) {
     const bridge = getPermanentMutationBridge();
     let prepared = null;
     if (bridge && typeof bridge.preparePermanentCreateNodeInBcs === 'function') {
-        prepared = await bridge.preparePermanentCreateNodeInBcs(createPayload, {
-            sourceID: options && options.sourceID
-        });
+        prepared = await bridge.preparePermanentCreateNodeInBcs(createPayload);
     }
     try {
         const created = await chrome.bookmarks.create(createPayload);
         try {
-            const sourceID = (prepared && prepared.sourceID) || (options && options.sourceID) || '';
-            if (created && created.id && sourceID && bridge && typeof bridge.rememberPendingPermanentNodeSourceID === 'function') {
-                bridge.rememberPendingPermanentNodeSourceID(created.id, sourceID);
-            }
             if (prepared && bridge && typeof bridge.commitPermanentCreatedNodeInBcs === 'function') {
-                await bridge.commitPermanentCreatedNodeInBcs(prepared.pendingId, created, {
-                    sourceID
-                });
+                await bridge.commitPermanentCreatedNodeInBcs(prepared.pendingId, created);
             }
         } catch (commitError) {
             console.warn('[Permanent JSON] create commit failed, resyncing from Chrome:', commitError);
@@ -737,16 +713,7 @@ async function createBookmarkFromPayload(parentId, index, payload) {
     if (typeof index === 'number') {
         createInfo.index = index;
     }
-    const sourceID = String(payload.sourceID || '').trim();
-    const created = await createPermanentBookmarkNode(createInfo, {
-        sourceID
-    });
-    try {
-        const bridge = window && window.CanvasProtocolBridge;
-        if (created && created.id && sourceID && bridge && typeof bridge.rememberPendingPermanentNodeSourceID === 'function') {
-            bridge.rememberPendingPermanentNodeSourceID(created.id, sourceID);
-        }
-    } catch (_) { }
+    const created = await createPermanentBookmarkNode(createInfo);
     if (payload.children && payload.children.length) {
         for (const child of payload.children) {
             await createBookmarkFromPayload(created.id, null, child);
@@ -759,22 +726,22 @@ if (typeof window !== 'undefined') {
     window.__dragMoveHandled = window.__dragMoveHandled || new Set();
 }
 
-async function moveBookmark(sourceId, targetId, targetIsFolder, context) {
+async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
     const { sourceTreeType = 'permanent', sourceSectionId = null, targetTreeType = 'permanent', targetSectionId = null, position = 'inside' } = context || {};
     const manager = getTempManager();
     try {
         if (sourceTreeType === 'temporary' && targetTreeType === 'temporary' && manager) {
             const targetInfo = computeTempInsertion(targetSectionId || sourceSectionId, targetId, position);
             if (sourceSectionId === targetSectionId) {
-                manager.moveWithin(sourceSectionId, [sourceId], targetInfo.parentId, targetInfo.index);
+                manager.moveWithin(sourceSectionId, [dragNodeId], targetInfo.parentId, targetInfo.index);
             } else {
-                manager.moveAcross(sourceSectionId, targetSectionId, [sourceId], targetInfo.parentId, targetInfo.index);
+                manager.moveAcross(sourceSectionId, targetSectionId, [dragNodeId], targetInfo.parentId, targetInfo.index);
             }
             return;
         }
 
         if (sourceTreeType === 'temporary' && targetTreeType === 'permanent' && manager && chrome && chrome.bookmarks) {
-            const payload = manager.extractPayload(sourceSectionId, [sourceId]);
+            const payload = manager.extractPayload(sourceSectionId, [dragNodeId]);
             // 临时栏目到永久栏目不需要调整索引（源不在永久栏目中）
             const { parentId, index } = await computePermanentInsertion(targetId, targetIsFolder, position);
             let muteSession = null;
@@ -790,7 +757,7 @@ async function moveBookmark(sourceId, targetId, targetIsFolder, context) {
                 for (const item of payload) {
                     await createBookmarkFromPayload(parentId, index, item);
                 }
-                manager.removeItems(sourceSectionId, [sourceId]);
+                manager.removeItems(sourceSectionId, [dragNodeId]);
             } finally {
                 if (loadingToast) loadingToast.close();
                 if (typeof window !== 'undefined' && typeof window.endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
@@ -804,16 +771,14 @@ async function moveBookmark(sourceId, targetId, targetIsFolder, context) {
         }
 
         if (sourceTreeType === 'permanent' && targetTreeType === 'temporary' && manager && chrome && chrome.bookmarks) {
-            let sourceNode = await readPermanentNodeFromBcs(sourceId);
+            let sourceNode = await readPermanentNodeFromBcs(dragNodeId);
             if (!sourceNode) {
-                const nodes = await chrome.bookmarks.getSubTree(sourceId);
+                const nodes = await chrome.bookmarks.getSubTree(dragNodeId);
                 sourceNode = nodes && nodes[0] ? nodes[0] : null;
             }
             const payload = sourceNode ? [serializeBookmarkNode(sourceNode)] : [];
             const targetInfo = computeTempInsertion(targetSectionId, targetId, position);
-            manager.insertFromPayload(targetSectionId, targetInfo.parentId, payload, targetInfo.index, {
-                regenerateSourceID: false
-            });
+            manager.insertFromPayload(targetSectionId, targetInfo.parentId, payload, targetInfo.index);
             return;
         }
 
@@ -822,7 +787,7 @@ async function moveBookmark(sourceId, targetId, targetIsFolder, context) {
             return;
         }
 
-        const [sourceNode] = await chrome.bookmarks.get(sourceId);
+        const [sourceNode] = await chrome.bookmarks.get(dragNodeId);
         const [targetNode] = await chrome.bookmarks.get(targetId);
         const insertInfo = await computePermanentInsertion(targetId, targetIsFolder, position);
 
@@ -834,7 +799,7 @@ async function moveBookmark(sourceId, targetId, targetIsFolder, context) {
         });
 
         // 执行Chrome API移动
-        await movePermanentBookmarkNode(sourceId, {
+        await movePermanentBookmarkNode(dragNodeId, {
             parentId: insertInfo.parentId,
             index: insertInfo.index
         });

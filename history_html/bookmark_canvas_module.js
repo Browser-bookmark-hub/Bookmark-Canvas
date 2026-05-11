@@ -3958,7 +3958,6 @@ function pickTempSectionColor() {
 
 function cloneBookmarkNode(node) {
     if (!node) return null;
-    const sourceID = String(node.sourceID || '').trim().replace(/\s+/g, '-');
     const clone = {
         id: node.id || null,
         title: node.title || '',
@@ -3966,7 +3965,6 @@ function cloneBookmarkNode(node) {
         parentId: node.parentId || null,
         type: node.url ? 'bookmark' : 'folder'
     };
-    if (sourceID) clone.sourceID = sourceID;
     if (node.children && Array.isArray(node.children)) {
         clone.children = node.children.map(child => cloneBookmarkNode(child)).filter(Boolean);
     } else {
@@ -3988,38 +3986,11 @@ function __resolveCanvasPayloadSource(payloadInput, options = {}) {
         || __normalizeCanvasPayloadSource(options && options.payloadSource);
 }
 
-function __resolveSourceIDForTempPayload(payloadInput, options = {}) {
-    const payload = (payloadInput && typeof payloadInput === 'object') ? payloadInput : {};
-    const payloadSource = __resolveCanvasPayloadSource(payload, options);
-    const resolvePermanentSourceID = payloadSource === 'permanent' || !!(options && options.resolvePermanentSourceID === true);
-    const regenerateSourceID = !!(options && options.regenerateSourceID === true) && !resolvePermanentSourceID;
-    if (regenerateSourceID) return __generateTempItemSourceID();
-
-    if (resolvePermanentSourceID) {
-        try {
-            const sourceID = __resolvePermanentNodeSourceID(payload, { allowGenerate: false });
-            if (sourceID) return sourceID;
-        } catch (_) { }
-        throw new Error('Permanent payload is missing sourceID');
-    }
-
-    const inherited = __resolveTempItemSourceID(payload[TEMP_ITEM_SOURCE_ID_KEY], {
-        allowGenerate: false
-    });
-    if (inherited) return inherited;
-
-    return __generateTempItemSourceID();
-}
-
 function clonePermanentBookmarkNodeForTempPayload(node) {
     if (!node || typeof node !== 'object') return null;
     const clone = cloneBookmarkNode(node);
     if (!clone) return null;
     clone[CANVAS_PAYLOAD_SOURCE_KEY] = 'permanent';
-    try {
-        const sourceID = __resolvePermanentNodeSourceID(node, { allowGenerate: false });
-        if (sourceID) clone.sourceID = sourceID;
-    } catch (_) { }
     clone.children = Array.isArray(node.children)
         ? node.children.map(clonePermanentBookmarkNodeForTempPayload).filter(Boolean)
         : [];
@@ -4057,22 +4028,11 @@ async function resolveBookmarkNode(data, options = {}) {
     if (!data) {
         throw new Error('缺少拖拽数据');
     }
-    const resolvePermanentSourceID = !!(options && options.resolvePermanentSourceID === true);
-    const cloneForTemp = resolvePermanentSourceID
-        ? clonePermanentBookmarkNodeForTempPayload
-        : cloneBookmarkNode;
     const targetId = data.id || data.nodeId;
-
-    if (resolvePermanentSourceID && targetId) {
-        try {
-            const payload = await resolvePermanentPayload([targetId]);
-            if (payload && payload[0]) return payload[0];
-        } catch (_) { }
-    }
 
     // 数据已经是完整节点
     if (data.children || data.url) {
-        return cloneForTemp(data);
+        return cloneBookmarkNode(data);
     }
 
     if (!targetId) {
@@ -4082,7 +4042,7 @@ async function resolveBookmarkNode(data, options = {}) {
     if (browserAPI && browserAPI.bookmarks && browserAPI.bookmarks.getSubTree) {
         const nodes = await browserAPI.bookmarks.getSubTree(targetId);
         if (nodes && nodes.length > 0) {
-            return cloneForTemp(nodes[0]);
+            return cloneBookmarkNode(nodes[0]);
         }
     }
 
@@ -4098,7 +4058,6 @@ function convertBookmarkNodeToTempItem(node, sectionId, options = {}) {
 
     const itemId = allocateTempItemId(sectionId);
     const payloadSource = __resolveCanvasPayloadSource(node, options);
-    const sourceID = __resolveSourceIDForTempPayload(node, options);
     const item = {
         id: itemId,
         sectionId,
@@ -4106,8 +4065,7 @@ function convertBookmarkNodeToTempItem(node, sectionId, options = {}) {
         url: node.url || '',
         type: node.url ? 'bookmark' : 'folder',
         children: [],
-        createdAt: Date.now(),
-        [TEMP_ITEM_SOURCE_ID_KEY]: sourceID
+        createdAt: Date.now()
     };
 
     if (node.children && node.children.length) {
@@ -4221,12 +4179,10 @@ function findTempItemEntry(sectionId, itemId) {
 
 function serializeTempItemForClipboard(item) {
     if (!item) return null;
-    const sourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY]);
     return {
         title: item.title,
         url: item.url || '',
         type: item.type,
-        ...(sourceID ? { [TEMP_ITEM_SOURCE_ID_KEY]: sourceID } : {}),
         children: (item.children || []).map(child => serializeTempItemForClipboard(child))
     };
 }
@@ -4235,7 +4191,6 @@ function createTempItemFromPayload(sectionId, payload, options = {}) {
     if (!payload) return null;
     const hasExplicitTitle = typeof payload.title === 'string';
     const payloadSource = __resolveCanvasPayloadSource(payload, options);
-    const sourceID = __resolveSourceIDForTempPayload(payload, options);
     const item = {
         id: allocateTempItemId(sectionId),
         sectionId,
@@ -4243,8 +4198,7 @@ function createTempItemFromPayload(sectionId, payload, options = {}) {
         url: payload.url || '',
         type: payload.type === 'folder' ? 'folder' : (payload.url ? 'bookmark' : 'folder'),
         children: [],
-        createdAt: Date.now(),
-        [TEMP_ITEM_SOURCE_ID_KEY]: sourceID
+        createdAt: Date.now()
     };
 
     if (payload.children && payload.children.length) {
@@ -4441,9 +4395,7 @@ function extractTempItemsPayload(sectionId, itemIds) {
 
 function insertTempItemsFromPayload(sectionId, parentId, payloadItems, index = null, options = {}) {
     const createOptions = {
-        regenerateSourceID: !!(options && options.regenerateSourceID === true),
-        payloadSource: __normalizeCanvasPayloadSource(options && options.payloadSource),
-        resolvePermanentSourceID: !!(options && options.resolvePermanentSourceID === true)
+        payloadSource: __normalizeCanvasPayloadSource(options && options.payloadSource)
     };
     const items = (payloadItems || []).map(item => createTempItemFromPayload(sectionId, item, createOptions)).filter(Boolean);
     if (!items.length) return [];
@@ -4466,7 +4418,6 @@ function createTempFolder(sectionId, parentId, title, options = {}) {
     const item = createTempItemFromPayload(sectionId, {
         title: typeof title === 'string' ? title : '新建文件夹',
         type: 'folder',
-        ...(options && options.sourceID ? { [TEMP_ITEM_SOURCE_ID_KEY]: options.sourceID } : {}),
         ...(options && options[CANVAS_PAYLOAD_SOURCE_KEY] ? { [CANVAS_PAYLOAD_SOURCE_KEY]: options[CANVAS_PAYLOAD_SOURCE_KEY] } : {}),
         children: []
     }, options);
@@ -5611,9 +5562,6 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
 
         // 递归转换为临时栏目格式
         const convertToTempItem = (node) => {
-            const sourceID = __resolveTempItemSourceID(
-                node[TEMP_ITEM_SOURCE_ID_KEY]
-            );
             const item = {
                 id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
                 sectionId: sectionId,
@@ -5621,8 +5569,7 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
                 url: node.url || '',
                 type: node.url ? 'bookmark' : 'folder',
                 children: [],
-                createdAt: Date.now(),
-                [TEMP_ITEM_SOURCE_ID_KEY]: sourceID
+                createdAt: Date.now()
             };
 
             if (node.children && Array.isArray(node.children)) {
@@ -5903,7 +5850,6 @@ function enhanceBookmarkTreeForCanvas(treeContainer) {
             const nodeId = item.dataset.nodeId;
             const nodeTitle = item.dataset.nodeTitle;
             const nodeUrl = item.dataset.nodeUrl;
-            const nodeSourceID = String(item.getAttribute ? item.getAttribute('data-source-id') || '' : '').trim();
             const isFolder = item.dataset.nodeType === 'folder';
 
             // 保存到Canvas状态，仅存储必要的标识信息，完整数据稍后获取
@@ -5913,7 +5859,6 @@ function enhanceBookmarkTreeForCanvas(treeContainer) {
                 url: nodeUrl,
                 type: isFolder ? 'folder' : 'bookmark',
                 source: 'permanent',
-                ...(nodeSourceID ? { sourceID: nodeSourceID } : {}),
                 hasSnapshot: false
             };
             CanvasState.dragState.dragSource = 'permanent';
@@ -5929,7 +5874,6 @@ function enhanceBookmarkTreeForCanvas(treeContainer) {
                         id: nodeId,
                         title: nodeTitle,
                         url: nodeUrl,
-                        ...(nodeSourceID ? { sourceID: nodeSourceID } : {}),
                         type: isFolder ? 'folder' : 'bookmark'
                     }));
                 }
@@ -9322,7 +9266,6 @@ async function __refreshCanvasPermanentBaseStatsForPerfTotals() {
 
     try {
         const tree = await __readPermanentTreeSnapshotFromBcs({
-            validateSourceID: false,
             assumeCleanWhenMissingState: true
         });
         const root = Array.isArray(tree) ? tree[0] : null;
@@ -17219,8 +17162,7 @@ async function createTempNode(data, x, y) {
         } else if (!payload.length) {
             let resolvedNode = null;
             try {
-                const resolvePermanentSourceID = !!(data && data.source === 'permanent');
-                resolvedNode = await resolveBookmarkNode(data, { resolvePermanentSourceID });
+                resolvedNode = await resolveBookmarkNode(data);
             } catch (error) {
                 console.warn('[Canvas] 实时获取书签数据失败，使用一次性快照:', error);
                 resolvedNode = data && data.source === 'permanent'
@@ -17233,11 +17175,8 @@ async function createTempNode(data, x, y) {
         }
 
         if (payload && payload.length) {
-            const convertOptions = {
-                regenerateSourceID: !!(data && data.regenerateSourceID === true)
-            };
             payload.forEach(node => {
-                const tempItem = convertBookmarkNodeToTempItem(node, sectionId, convertOptions);
+                const tempItem = convertBookmarkNodeToTempItem(node, sectionId, {});
                 if (tempItem) section.items.push(tempItem);
             });
         }
@@ -26528,10 +26467,7 @@ function setupTempSectionDropTargets(section, sectionElement, treeContainer, hea
                 if (!ids.length) return;
                 const payload = await resolvePermanentPayload(ids);
                 if (payload && payload.length) {
-                    insertTempItemsFromPayload(section.id, null, payload, null, {
-                        // Permanent -> temporary: inherit sourceID when present, otherwise generate.
-                        regenerateSourceID: false
-                    });
+                    insertTempItemsFromPayload(section.id, null, payload, null);
                     if (typeof deselectAll === 'function') {
                         deselectAll();
                     }
@@ -26680,10 +26616,7 @@ function setupTempTreeNodeDropHandlers(treeItem, section, item) {
             if (!ids.length) return;
             const payload = await resolvePermanentPayload(ids);
             if (!payload || !payload.length) return;
-            insertTempItemsFromPayload(section.id, item.id, payload, null, {
-                // Permanent -> temporary: inherit sourceID when present, otherwise generate.
-                regenerateSourceID: false
-            });
+            insertTempItemsFromPayload(section.id, item.id, payload, null);
             if (typeof deselectAll === 'function') {
                 deselectAll();
             }
@@ -26740,10 +26673,6 @@ async function resolvePermanentPayload(nodeIds) {
         if (!node || typeof node !== 'object') return null;
         const clone = cloneBookmarkNode(node);
         if (!clone) return null;
-        try {
-            const sourceID = __resolvePermanentNodeSourceID(node, { allowGenerate: false });
-            if (sourceID) clone.sourceID = sourceID;
-        } catch (_) { }
         clone.children = Array.isArray(node.children)
             ? node.children.map(clonePermanentNodeForTempPayload).filter(Boolean)
             : [];
@@ -26755,7 +26684,6 @@ async function resolvePermanentPayload(nodeIds) {
         const bridge = window.CanvasProtocolBridge;
         const tree = bridge && typeof bridge.readPermanentTreeSnapshotFromBcs === 'function'
             ? await bridge.readPermanentTreeSnapshotFromBcs({
-                validateSourceID: false,
                 assumeCleanWhenMissingState: true
             })
             : null;
@@ -30187,9 +30115,9 @@ function __normalizeCanvasTempStatePayloadForImport(stateInput, options = {}) {
         ? parsedState.mdNodes
         : (Array.isArray(parsedState.cards) ? parsedState.cards : []);
     const edges = Array.isArray(parsedState.edges) ? parsedState.edges : [];
-    const preserveSourceIDRaw = !!(options && options.preserveSourceIDRaw === true);
+    const preserveRaw = !!(options && options.preserveRaw === true);
 
-    if (preserveSourceIDRaw) {
+    if (preserveRaw) {
         return __normalizeCanvasTempStateForRuntime({
             ...parsedState,
             sections,
@@ -30204,7 +30132,7 @@ function __normalizeCanvasTempStatePayloadForImport(stateInput, options = {}) {
             edgeCounter: Number(parsedState.edgeCounter) || edges.length || 0,
             timestamp: Number(parsedState.timestamp) || Date.now()
         }, {
-            preserveSourceIDRaw: true
+            preserveRaw: true
         });
     }
 
@@ -30306,7 +30234,7 @@ function __buildCanonicalSyncContract(input = {}, options = {}) {
             : (payload.source || 'unknown')
     ).trim() || 'unknown';
 
-    const preserveSourceIDRaw = !!(options && options.preserveSourceIDRaw === true);
+    const preserveRaw = !!(options && options.preserveRaw === true);
     const tempCandidates = [
         { value: primaryInput.canvasState, source: 'primary.canvasState' },
         { value: storageInput[TEMP_SECTION_STORAGE_KEY], source: `storage.${TEMP_SECTION_STORAGE_KEY}` },
@@ -30318,7 +30246,7 @@ function __buildCanonicalSyncContract(input = {}, options = {}) {
     for (let i = 0; i < tempCandidates.length; i++) {
         const candidate = tempCandidates[i];
         const normalized = __normalizeCanvasTempStatePayloadForImport(candidate.value, {
-            preserveSourceIDRaw
+            preserveRaw
         });
         if (!normalized) continue;
         resolvedTempState = normalized;
@@ -30328,10 +30256,10 @@ function __buildCanonicalSyncContract(input = {}, options = {}) {
     if (!resolvedTempState) return null;
 
     const canonicalPersistedState = __buildPersistedCanvasState(resolvedTempState, {
-        preserveSourceIDRaw
+        preserveRaw
     });
     const canonicalTempState = __normalizeCanvasTempStatePayloadForImport(canonicalPersistedState, {
-        preserveSourceIDRaw
+        preserveRaw
     }) || resolvedTempState;
 
     const canonicalStorage = __cloneCanvasProtocolJson(storageInput) || {};
@@ -30378,7 +30306,7 @@ function __buildCanonicalSyncContractFromCloudSnapshot(snapshot) {
         source: 'cloud-snapshot'
     }, {
         source: 'cloud-snapshot',
-        preserveSourceIDRaw: true
+        preserveRaw: true
     });
     if (!canonical || !canonical.tempState) {
         throw new Error('云端快照缺少画布临时栏目数据');
@@ -30613,7 +30541,7 @@ function __collectCanvasTempStateForExport() {
         edgeCounter: CanvasState.edgeCounter,
         timestamp: Date.now()
     }, {
-        preserveSourceIDRaw: true
+        preserveRaw: true
     });
 }
 
@@ -30861,10 +30789,6 @@ async function importHtmlBookmarks(html, importFileName = '') {
 
     // 递归转换为临时栏目格式
     const convertToTempItem = (node) => {
-        const sourceID = __resolveTempItemSourceID(
-            node && node[TEMP_ITEM_SOURCE_ID_KEY],
-            { allowGenerate: false }
-        );
         const item = {
             id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
             sectionId: sectionId,
@@ -30872,8 +30796,7 @@ async function importHtmlBookmarks(html, importFileName = '') {
             url: node.url || '',
             type: node.url ? 'bookmark' : 'folder',
             children: [],
-            createdAt: Date.now(),
-            ...(sourceID ? { [TEMP_ITEM_SOURCE_ID_KEY]: sourceID } : {})
+            createdAt: Date.now()
         };
 
         if (node.children && Array.isArray(node.children)) {
@@ -30899,7 +30822,7 @@ async function importHtmlBookmarks(html, importFileName = '') {
         }
     }
 
-    saveTempNodes({ skipSourceIDNormalization: true });
+    saveTempNodes();
 
     // 添加呼吸式闪烁效果，吸引用户注意
     const nodeElement = document.getElementById(section.id);
@@ -31074,12 +30997,6 @@ async function importJsonBookmarks(json, importFileName = '') {
             type: (url && !isFolder) ? 'bookmark' : 'folder',
             children: []
         };
-        const normalizedSourceID = __normalizeTempItemSourceID(
-            node[TEMP_ITEM_SOURCE_ID_KEY]
-        );
-        if (normalizedSourceID) {
-            item[TEMP_ITEM_SOURCE_ID_KEY] = normalizedSourceID;
-        }
 
         if (url && !isFolder) {
             totalBookmarkCount++;
@@ -31095,10 +31012,6 @@ async function importJsonBookmarks(json, importFileName = '') {
 
     // 转换为临时栏目格式
     const convertToTempItem = (node, sectionId) => {
-        const sourceID = __resolveTempItemSourceID(
-            node && node[TEMP_ITEM_SOURCE_ID_KEY],
-            { allowGenerate: false }
-        );
         const item = {
             id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
             sectionId: sectionId,
@@ -31106,8 +31019,7 @@ async function importJsonBookmarks(json, importFileName = '') {
             url: node.url || '',
             type: node.type,
             children: [],
-            createdAt: Date.now(),
-            ...(sourceID ? { [TEMP_ITEM_SOURCE_ID_KEY]: sourceID } : {})
+            createdAt: Date.now()
         };
 
         if (node.children && Array.isArray(node.children)) {
@@ -31325,7 +31237,7 @@ async function importJsonBookmarks(json, importFileName = '') {
         }
     }
 
-    saveTempNodes({ skipSourceIDNormalization: true });
+    saveTempNodes();
 
     // 添加呼吸式闪烁效果，吸引用户注意
     const nodeElement = document.getElementById(section.id);
@@ -32038,60 +31950,6 @@ function __cloneRawChromeBookmarkTreeSnapshot(rawTree) {
     return (Array.isArray(snapshot) && snapshot.length) ? snapshot : null;
 }
 
-let __canvasGeneratedSourceIDCounter = 0;
-const __CANVAS_SOURCE_ID_RANDOM_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-const __CANVAS_SOURCE_ID_RANDOM_LENGTH = 8;
-
-function __buildCanvasRandomSourceIDSuffix(length = __CANVAS_SOURCE_ID_RANDOM_LENGTH) {
-    const size = Math.max(8, Number(length) || __CANVAS_SOURCE_ID_RANDOM_LENGTH);
-    const cryptoSource = (typeof globalThis !== 'undefined' && globalThis.crypto)
-        ? globalThis.crypto
-        : (typeof window !== 'undefined' && window.crypto ? window.crypto : null);
-
-    try {
-        if (cryptoSource && typeof cryptoSource.getRandomValues === 'function') {
-            const bytes = new Uint8Array(size);
-            cryptoSource.getRandomValues(bytes);
-            return Array.from(bytes)
-                .map((byte) => __CANVAS_SOURCE_ID_RANDOM_ALPHABET[byte & 63])
-                .join('');
-        }
-    } catch (_) { }
-
-    let suffix = '';
-    for (let i = 0; i < size; i += 1) {
-        suffix += __CANVAS_SOURCE_ID_RANDOM_ALPHABET[Math.floor(Math.random() * __CANVAS_SOURCE_ID_RANDOM_ALPHABET.length)];
-    }
-    return suffix;
-}
-
-function __generateCanvasHighEntropySourceID() {
-    __canvasGeneratedSourceIDCounter = Math.max(0, Number(__canvasGeneratedSourceIDCounter) || 0) + 1;
-    return `src-${__buildCanvasRandomSourceIDSuffix()}`;
-}
-
-const PERMANENT_NODE_SOURCE_ID_KEY = 'sourceID';
-const PERMANENT_NODE_SOURCE_ID_MAP_STORAGE_KEY = 'bcs:perm:source-id-map';
-const __pendingPermanentNodeSourceIDByChromeId = new Map();
-
-function __normalizePermanentNodeSourceID(value) {
-    const raw = String(value == null ? '' : value).trim();
-    if (!raw) return '';
-    return raw.replace(/\s+/g, '-');
-}
-
-function __buildGeneratedPermanentNodeSourceID() {
-    return __generateCanvasHighEntropySourceID();
-}
-
-function __rememberPendingPermanentNodeSourceID(chromeIdInput, sourceIDInput) {
-    const chromeId = String(chromeIdInput || '').trim();
-    const sourceID = __normalizePermanentNodeSourceID(sourceIDInput);
-    if (!chromeId || !sourceID) return false;
-    __pendingPermanentNodeSourceIDByChromeId.set(chromeId, sourceID);
-    return true;
-}
-
 function __getCanvasBookmarksApiForPermanentStorage() {
     try {
         if (typeof browserAPI !== 'undefined' && browserAPI && browserAPI.bookmarks) return browserAPI.bookmarks;
@@ -32198,22 +32056,6 @@ function __readPermanentContentPayload(rawInput) {
     return __cloneCanvasProtocolJson(stripped) || null;
 }
 
-function __collectPermanentSourceIDMapByChromeId(treeInput) {
-    const map = {};
-    const source = Array.isArray(treeInput)
-        ? treeInput
-        : (treeInput && typeof treeInput === 'object' ? [treeInput] : []);
-    const visit = (node) => {
-        if (!node || typeof node !== 'object') return;
-        const chromeId = String(node.id || '').trim();
-        const sourceID = __normalizePermanentNodeSourceID(node[PERMANENT_NODE_SOURCE_ID_KEY]);
-        if (chromeId && sourceID) map[chromeId] = sourceID;
-        if (Array.isArray(node.children)) node.children.forEach(visit);
-    };
-    source.forEach(visit);
-    return map;
-}
-
 function __coercePermanentTreeRootInput(treeInput) {
     if (Array.isArray(treeInput) && treeInput.length) {
         return treeInput[0] && typeof treeInput[0] === 'object' ? treeInput[0] : null;
@@ -32225,25 +32067,6 @@ function __coercePermanentTreeRootInput(treeInput) {
 function __normalizePermanentTreeSnapshotForLocalStorage(rawTree, options = {}) {
     const rootInput = __coercePermanentTreeRootInput(rawTree);
     if (!rootInput) return null;
-
-    const sourceIDMap = options && options.sourceIDMap && typeof options.sourceIDMap === 'object'
-        ? options.sourceIDMap
-        : {};
-    const allowGenerateMissingSourceID = !!(options && options.allowGenerateMissingSourceID);
-    const generatedSourceIDMap = {};
-
-    const resolveSourceID = (node, pathKey) => {
-        const direct = __extractPermanentNodeSourceID(node);
-        if (direct) return direct;
-        const chromeId = String(node && node.id || '').trim();
-        const mapped = chromeId ? __normalizePermanentNodeSourceID(sourceIDMap[chromeId]) : '';
-        if (mapped) return mapped;
-        if (!allowGenerateMissingSourceID) return '';
-        const generated = __buildGeneratedPermanentNodeSourceID();
-        if (chromeId) generatedSourceIDMap[chromeId] = generated;
-        void pathKey;
-        return generated;
-    };
 
     const normalizeNode = (nodeInput, context = {}) => {
         if (!nodeInput || typeof nodeInput !== 'object') return null;
@@ -32257,9 +32080,6 @@ function __normalizePermanentTreeSnapshotForLocalStorage(rawTree, options = {}) 
         if (parentId) output.parentId = parentId;
         if (typeof nodeInput.index === 'number' && Number.isFinite(nodeInput.index)) output.index = nodeInput.index;
         output.title = rawTitle || (isBookmark ? rawUrl : 'Folder');
-
-        const sourceID = resolveSourceID(nodeInput, context.pathKey);
-        if (sourceID) output[PERMANENT_NODE_SOURCE_ID_KEY] = sourceID;
 
         if (isBookmark) {
             output.url = rawUrl;
@@ -32305,58 +32125,6 @@ function __normalizePermanentTreeSnapshotForLocalStorage(rawTree, options = {}) 
     return [normalizedRoot];
 }
 
-function __copyPermanentRemoteIdentityToLocalTree(localTreeInput, remoteTreeInput) {
-    const localTree = __normalizePermanentTreeSnapshotForLocalStorage(localTreeInput, {
-        sourceIDMap: {},
-        allowGenerateMissingSourceID: false
-    });
-    const remoteTree = __normalizePermanentTreeSnapshotForProtocol(remoteTreeInput, {
-        allowGenerateSourceID: false
-    });
-    const localRoot = localTree && localTree[0] ? localTree[0] : null;
-    const remoteRoot = remoteTree && remoteTree[0] ? remoteTree[0] : null;
-    if (!localRoot || !remoteRoot) return localTree;
-
-    const copyIdentity = (localNode, remoteNode, isRootChild = false) => {
-        if (!localNode || typeof localNode !== 'object' || !remoteNode || typeof remoteNode !== 'object') return;
-        const sourceID = __extractPermanentNodeSourceID(remoteNode);
-        if (sourceID) localNode[PERMANENT_NODE_SOURCE_ID_KEY] = sourceID;
-        if (isRootChild) {
-            const folderType = __normalizeBookmarkFolderType(remoteNode.folderType || remoteNode.folder_type || localNode.folderType || '');
-            const syncing = __canPersistBookmarkRootSyncing(folderType)
-                ? __normalizeBookmarkRootSyncing(
-                    Object.prototype.hasOwnProperty.call(remoteNode, 'syncing') ? remoteNode.syncing : localNode.syncing
-                )
-                : null;
-            if (folderType) localNode.folderType = folderType;
-            if (syncing !== null) localNode.syncing = syncing;
-        }
-        const localChildren = Array.isArray(localNode.children) ? localNode.children : [];
-        const remoteChildren = Array.isArray(remoteNode.children) ? remoteNode.children : [];
-        const count = Math.min(localChildren.length, remoteChildren.length);
-        for (let i = 0; i < count; i += 1) {
-            copyIdentity(localChildren[i], remoteChildren[i], false);
-        }
-    };
-
-    const localRoots = Array.isArray(localRoot.children) ? localRoot.children : [];
-    const remoteRoots = Array.isArray(remoteRoot.children) ? remoteRoot.children : [];
-    const remoteBuckets = new Map();
-    remoteRoots.forEach((node, index) => {
-        const key = __getPermanentSourceIDRootMatchKey(node, index);
-        if (!remoteBuckets.has(key)) remoteBuckets.set(key, []);
-        remoteBuckets.get(key).push(node);
-    });
-    localRoots.forEach((localNode, index) => {
-        const key = __getPermanentSourceIDRootMatchKey(localNode, index);
-        const bucket = remoteBuckets.get(key);
-        const remoteNode = bucket && bucket.length ? bucket.shift() : remoteRoots[index];
-        copyIdentity(localNode, remoteNode, true);
-    });
-
-    return localTree;
-}
-
 function __stripPermanentLocalIdsFromTreeNode(nodeInput, context = {}) {
     if (!nodeInput || typeof nodeInput !== 'object') return null;
     const rawUrl = String(nodeInput.url || '').trim();
@@ -32364,8 +32132,6 @@ function __stripPermanentLocalIdsFromTreeNode(nodeInput, context = {}) {
     const title = String(nodeInput.title || nodeInput.name || rawUrl || (isBookmark ? 'Untitled Bookmark' : 'Folder')).trim()
         || (isBookmark ? rawUrl : 'Folder');
     const output = { title };
-    const sourceID = __extractPermanentNodeSourceID(nodeInput);
-    if (sourceID) output[PERMANENT_NODE_SOURCE_ID_KEY] = sourceID;
     if (isBookmark) {
         output.url = rawUrl;
         return output;
@@ -32395,89 +32161,9 @@ function __stripPermanentLocalIdsFromTree(treeInput) {
     };
 }
 
-function __mergePermanentLocalIdsBySourceID(remoteTreeInput, localTreeInput) {
-    const remoteRoot = __coercePermanentTreeRootInput(remoteTreeInput);
-    const localRoot = __coercePermanentTreeRootInput(localTreeInput);
-    if (!remoteRoot) return remoteTreeInput;
-    const idBySourceID = new Map();
-    const visitLocal = (node) => {
-        if (!node || typeof node !== 'object') return;
-        const sourceID = __extractPermanentNodeSourceID(node);
-        const chromeId = String(node.id || '').trim();
-        if (sourceID && chromeId) idBySourceID.set(sourceID, chromeId);
-        (Array.isArray(node.children) ? node.children : []).forEach(visitLocal);
-    };
-    visitLocal(localRoot);
-    if (!idBySourceID.size) return remoteTreeInput;
-
-    const cloned = __cloneCanvasProtocolJson(remoteRoot) || remoteRoot;
-    const visitRemote = (node) => {
-        if (!node || typeof node !== 'object') return;
-        const sourceID = __extractPermanentNodeSourceID(node);
-        const chromeId = sourceID ? idBySourceID.get(sourceID) : '';
-        if (chromeId) node.id = chromeId;
-        (Array.isArray(node.children) ? node.children : []).forEach(visitRemote);
-    };
-    visitRemote(cloned);
-    return cloned;
-}
-
-function __auditPermanentTreeSourceIDs(treeInput) {
-    const root = __coercePermanentTreeRootInput(treeInput);
-    const missing = [];
-    const duplicates = [];
-    const seen = new Map();
-    let visibleCount = 0;
-    let sourceIDCount = 0;
-
-    const visit = (node, path) => {
-        if (!node || typeof node !== 'object') return;
-        visibleCount += 1;
-        const title = String(node.title || node.name || node.url || 'node').trim() || 'node';
-        const sourceID = __extractPermanentNodeSourceID(node);
-        if (!sourceID) {
-            missing.push(`${path}/${title}`);
-        } else {
-            sourceIDCount += 1;
-            if (seen.has(sourceID)) duplicates.push({ sourceID, firstPath: seen.get(sourceID), path: `${path}/${title}` });
-            else seen.set(sourceID, `${path}/${title}`);
-        }
-        (Array.isArray(node.children) ? node.children : []).forEach((child, index) => {
-            visit(child, `${path}/${title}[${index}]`);
-        });
-    };
-
-    if (root && Array.isArray(root.children)) {
-        root.children.forEach((child, index) => visit(child, `root[${index}]`));
-    }
-
-    return {
-        ok: missing.length === 0 && duplicates.length === 0,
-        visibleCount,
-        sourceIDCount,
-        missing,
-        duplicates
-    };
-}
-
-function __assertPermanentTreeSourceIDs(treeInput, context = '') {
-    const audit = __auditPermanentTreeSourceIDs(treeInput);
-    if (audit.ok) return audit;
-    const missingPreview = audit.missing.slice(0, 6).join('; ');
-    const duplicatePreview = audit.duplicates.slice(0, 6).map((item) => `${item.sourceID}: ${item.firstPath} <-> ${item.path}`).join('; ');
-    const detail = [
-        missingPreview ? `missing=${missingPreview}` : '',
-        duplicatePreview ? `duplicates=${duplicatePreview}` : ''
-    ].filter(Boolean).join(' | ');
-    throw new Error(`[Permanent JSON] sourceID integrity failed${context ? ` (${context})` : ''}: ${detail || 'unknown'}`);
-}
-
 function __buildPermanentPrimaryContentPayloadFromTree(treeInput, descriptionOverride = null, options = {}) {
     const { isEn } = __getLang();
-    const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(treeInput, {
-        sourceIDMap: options && options.sourceIDMap && typeof options.sourceIDMap === 'object' ? options.sourceIDMap : {},
-        allowGenerateMissingSourceID: !!(options && options.allowGenerateMissingSourceID)
-    });
+    const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(treeInput);
     const root = normalizedTree && normalizedTree[0] ? normalizedTree[0] : { id: '0', title: '', children: [] };
     const payload = {
         format: __CANVAS_SECTION_JSON_FORMAT,
@@ -32538,7 +32224,6 @@ function __buildPermanentMainSyncPayload(contentInput) {
     if (!content || content.fileRole === 'copy-anchor' || content.anchorOnly === true) return null;
     const tree = content.tree && typeof content.tree === 'object' ? content.tree : null;
     if (!tree) return null;
-    __assertPermanentTreeSourceIDs(tree, 'main-sync-payload');
     const payload = {
         format: content.format || __CANVAS_SECTION_JSON_FORMAT,
         schemaVersion: Number(content.schemaVersion) || 2,
@@ -32574,9 +32259,7 @@ async function __readPermanentMainContentFromBcs(options = {}) {
         return null;
     }
 
-    const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(content.tree, {
-        allowGenerateMissingSourceID: false
-    });
+    const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(content.tree);
     if (!normalizedTree) return null;
     content.tree = normalizedTree[0];
     if (!content.format) content.format = __CANVAS_SECTION_JSON_FORMAT;
@@ -32596,18 +32279,13 @@ async function __readPermanentMainContentFromBcs(options = {}) {
         });
     }
 
-    if (options && options.validateSourceID === true) {
-        __assertPermanentTreeSourceIDs(content.tree, 'read-bcs-main');
-    }
     return content;
 }
 
 async function __writePermanentMainContentToBcs(contentInput, options = {}) {
     const content = __readPermanentContentPayload(contentInput);
     if (!content || !content.tree || typeof content.tree !== 'object') return null;
-    const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(content.tree, {
-        allowGenerateMissingSourceID: false
-    });
+    const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(content.tree);
     if (!normalizedTree) return null;
     const nextContent = {
         ...content,
@@ -32655,13 +32333,8 @@ async function __migratePermanentMainContentFromChromeTree(options = {}) {
         : await __getPermanentChromeTreeForStorage();
     if (!chromeTree) return null;
 
-    const oldSourceIDMap = __readPermanentNodeSourceIDMap();
-    const content = __buildPermanentPrimaryContentPayloadFromTree(chromeTree, null, {
-        sourceIDMap: oldSourceIDMap,
-        allowGenerateMissingSourceID: true
-    });
+    const content = __buildPermanentPrimaryContentPayloadFromTree(chromeTree);
     if (!content || !content.tree) return null;
-    __assertPermanentTreeSourceIDs(content.tree, 'migration');
     return __writePermanentMainContentToBcs(content, {
         immediate: true,
         assumeClean: !!(options && options.assumeClean),
@@ -32670,9 +32343,7 @@ async function __migratePermanentMainContentFromChromeTree(options = {}) {
 }
 
 async function __ensurePermanentMainContentInBcs(options = {}) {
-    const existing = await __readPermanentMainContentFromBcs({
-        validateSourceID: options && options.validateSourceID === true
-    });
+    const existing = await __readPermanentMainContentFromBcs();
     if (existing && !(options && options.forceMigrateFromChrome === true)) {
         const storage = await __bcsStorageGet([BCS_PERM_MAIN_KEY, BCS_PERM_MAIN_STATE_KEY]);
         const rawMain = storage ? storage[BCS_PERM_MAIN_KEY] : null;
@@ -32697,7 +32368,6 @@ async function __ensurePermanentMainContentInBcs(options = {}) {
 
 async function __buildPermanentMainSyncPayloadFromBcs(options = {}) {
     const content = await __ensurePermanentMainContentInBcs({
-        validateSourceID: true,
         assumeCleanWhenMissingState: !!(options && options.assumeCleanWhenMissingState)
     });
     return __buildPermanentMainSyncPayload(content);
@@ -32705,7 +32375,6 @@ async function __buildPermanentMainSyncPayloadFromBcs(options = {}) {
 
 async function __readPermanentTreeSnapshotFromBcs(options = {}) {
     const content = await __ensurePermanentMainContentInBcs({
-        validateSourceID: !!(options && options.validateSourceID),
         assumeCleanWhenMissingState: !!(options && options.assumeCleanWhenMissingState)
     });
     if (!content || !content.tree) return null;
@@ -32718,13 +32387,6 @@ async function __replacePermanentMainContentFromSyncPayload(payloadInput, option
     if (!payload || payload.sectionType !== 'permanent' || payload.fileRole === 'copy-anchor') return null;
     const sourceTree = payload.tree && typeof payload.tree === 'object' ? payload.tree : null;
     if (!sourceTree) return null;
-    __assertPermanentTreeSourceIDs(sourceTree, 'remote-main');
-    const previous = await __readPermanentMainContentFromBcs({
-        validateSourceID: false
-    });
-    const mergedTree = previous && previous.tree
-        ? __mergePermanentLocalIdsBySourceID(sourceTree, previous.tree)
-        : sourceTree;
     const content = {
         format: payload.format || __CANVAS_SECTION_JSON_FORMAT,
         schemaVersion: Number(payload.schemaVersion) || 2,
@@ -32736,9 +32398,7 @@ async function __replacePermanentMainContentFromSyncPayload(payloadInput, option
         fileNote: String(payload.fileNote || (__getLang().isEn
             ? 'Primary permanent file: canonical bookmark tree source.'
             : '永久栏目主文件：书签树的规范真相源。')),
-        tree: (__normalizePermanentTreeSnapshotForLocalStorage(mergedTree, {
-            allowGenerateMissingSourceID: false
-        }) || [{ title: '', children: [] }])[0]
+        tree: (__normalizePermanentTreeSnapshotForLocalStorage(sourceTree) || [{ title: '', children: [] }])[0]
     };
     return __writePermanentMainContentToBcs(content, {
         immediate: true,
@@ -32747,17 +32407,16 @@ async function __replacePermanentMainContentFromSyncPayload(payloadInput, option
     });
 }
 
-async function __writePermanentTreeSnapshotAfterChromeApply(localTreeInput, remoteTreeInput, options = {}) {
-    const localWithRemoteIdentity = __copyPermanentRemoteIdentityToLocalTree(localTreeInput, remoteTreeInput);
-    if (!localWithRemoteIdentity) return null;
+async function __writePermanentTreeSnapshotAfterChromeApply(localTreeInput, options = {}) {
+    const localNormalized = __normalizePermanentTreeSnapshotForLocalStorage(localTreeInput);
+    if (!localNormalized) return null;
     const baseContent = __readPermanentContentPayload(options && options.baseContent);
     const previous = baseContent || await __ensurePermanentMainContentInBcs({
-        validateSourceID: false,
         assumeCleanWhenMissingState: true
     });
     const content = {
         ...(previous && typeof previous === 'object' ? previous : {}),
-        tree: localWithRemoteIdentity[0]
+        tree: localNormalized[0]
     };
     return __writePermanentMainContentToBcs(content, {
         immediate: true,
@@ -32783,23 +32442,6 @@ function __findPermanentNodeEntryById(rootInput, nodeIdInput) {
     return null;
 }
 
-function __findPermanentNodeEntryBySourceID(rootInput, sourceIDInput) {
-    const targetSourceID = __normalizePermanentNodeSourceID(sourceIDInput);
-    if (!rootInput || typeof rootInput !== 'object' || !targetSourceID) return null;
-    const stack = [{ node: rootInput, parent: null, index: -1 }];
-    while (stack.length) {
-        const entry = stack.pop();
-        const node = entry && entry.node;
-        if (!node || typeof node !== 'object') continue;
-        if (__extractPermanentNodeSourceID(node) === targetSourceID) return entry;
-        const children = Array.isArray(node.children) ? node.children : [];
-        for (let i = children.length - 1; i >= 0; i -= 1) {
-            stack.push({ node: children[i], parent: node, index: i });
-        }
-    }
-    return null;
-}
-
 function __refreshPermanentLocalChildMeta(parentNode) {
     if (!parentNode || typeof parentNode !== 'object' || !Array.isArray(parentNode.children)) return;
     const parentId = String(parentNode.id || '').trim();
@@ -32810,32 +32452,28 @@ function __refreshPermanentLocalChildMeta(parentNode) {
     });
 }
 
-function __normalizePermanentLocalMutationNode(nodeInput, options = {}) {
+function __normalizePermanentLocalMutationNode(nodeInput) {
     const source = nodeInput && typeof nodeInput === 'object' ? nodeInput : {};
     const rawUrl = String(source.url || '').trim();
     const isBookmark = !!rawUrl;
     const title = String(source.title || source.name || rawUrl || (isBookmark ? 'Untitled Bookmark' : 'Folder')).trim()
         || (isBookmark ? rawUrl : 'Folder');
-    const sourceID = __normalizePermanentNodeSourceID(source[PERMANENT_NODE_SOURCE_ID_KEY])
-        || (options && options.allowGenerateSourceID === true ? __buildGeneratedPermanentNodeSourceID() : '');
     const node = {
         ...(source.id ? { id: String(source.id) } : {}),
-        title,
-        ...(sourceID ? { [PERMANENT_NODE_SOURCE_ID_KEY]: sourceID } : {})
+        title
     };
     if (isBookmark) {
         node.url = rawUrl;
         return node;
     }
     node.children = (Array.isArray(source.children) ? source.children : [])
-        .map((child) => __normalizePermanentLocalMutationNode(child, options))
+        .map((child) => __normalizePermanentLocalMutationNode(child))
         .filter(Boolean);
     return node;
 }
 
 async function __mutatePermanentMainContentInBcs(mutator, options = {}) {
     const previous = await __ensurePermanentMainContentInBcs({
-        validateSourceID: false,
         assumeCleanWhenMissingState: true
     });
     if (!previous || !previous.tree) {
@@ -32878,18 +32516,12 @@ async function __preparePermanentCreateNodeInBcs(createInfoInput, options = {}) 
     const createInfo = createInfoInput && typeof createInfoInput === 'object' ? createInfoInput : {};
     const parentId = String(createInfo.parentId || '').trim();
     if (!parentId) throw new Error('[Permanent JSON] create parentId is required.');
-    const sourceID = __normalizePermanentNodeSourceID(options && options.sourceID)
-        || __normalizePermanentNodeSourceID(createInfo[PERMANENT_NODE_SOURCE_ID_KEY])
-        || __buildGeneratedPermanentNodeSourceID();
-    const pendingId = String(options && options.pendingId || `pending:${sourceID}`).trim();
+    const pendingId = String(options && options.pendingId || `pending:${Date.now()}`).trim();
     const node = __normalizePermanentLocalMutationNode({
         id: pendingId,
         title: createInfo.title,
         url: createInfo.url,
-        [PERMANENT_NODE_SOURCE_ID_KEY]: sourceID,
         children: Array.isArray(createInfo.children) ? createInfo.children : []
-    }, {
-        allowGenerateSourceID: true
     });
 
     return __mutatePermanentMainContentInBcs((root) => {
@@ -32905,18 +32537,16 @@ async function __preparePermanentCreateNodeInBcs(createInfoInput, options = {}) 
         node.index = insertIndex;
         parent.children.splice(insertIndex, 0, node);
         __refreshPermanentLocalChildMeta(parent);
-        return { pendingId, sourceID };
+        return { pendingId };
     });
 }
 
-async function __commitPermanentCreatedNodeInBcs(pendingIdInput, createdNodeInput, options = {}) {
+async function __commitPermanentCreatedNodeInBcs(pendingIdInput, createdNodeInput) {
     const pendingId = String(pendingIdInput || '').trim();
     const created = createdNodeInput && typeof createdNodeInput === 'object' ? createdNodeInput : {};
     const chromeId = String(created.id || '').trim();
     if (!pendingId || !chromeId) return null;
-    const sourceID = __normalizePermanentNodeSourceID(options && options.sourceID);
-    if (sourceID) __rememberPendingPermanentNodeSourceID(chromeId, sourceID);
-    const result = await __mutatePermanentMainContentInBcs((root) => {
+    return __mutatePermanentMainContentInBcs((root) => {
         const entry = __findPermanentNodeEntryById(root, pendingId);
         const existingEntry = entry ? null : __findPermanentNodeEntryById(root, chromeId);
         const node = entry && entry.node ? entry.node : (existingEntry && existingEntry.node);
@@ -32926,15 +32556,10 @@ async function __commitPermanentCreatedNodeInBcs(pendingIdInput, createdNodeInpu
         if (typeof created.index === 'number' && Number.isFinite(created.index)) node.index = created.index;
         if (typeof created.title === 'string') node.title = created.title;
         if (typeof created.url === 'string') node.url = created.url;
-        if (sourceID) node[PERMANENT_NODE_SOURCE_ID_KEY] = sourceID;
         const parent = entry && entry.parent ? entry.parent : (existingEntry && existingEntry.parent);
         if (parent) __refreshPermanentLocalChildMeta(parent);
-        return { chromeId, sourceID };
+        return { chromeId };
     });
-    if (sourceID) {
-        try { __pendingPermanentNodeSourceIDByChromeId.delete(chromeId); } catch (_) { }
-    }
-    return result;
 }
 
 async function __updatePermanentNodeInBcs(nodeIdInput, updatesInput, options = {}) {
@@ -33076,35 +32701,19 @@ function __applyPermanentCreatedBookmarkEventToBcsRoot(root, event, resolvedChro
     const title = __buildPermanentBookmarkEventTitle(bookmark);
     const rawUrl = String(bookmark.url || '').trim();
     let existingEntry = __findPermanentNodeEntryById(root, chromeId);
-    let existingSourceID = existingEntry && existingEntry.node
-        ? __extractPermanentNodeSourceID(existingEntry.node)
-        : '';
     let pendingEntry = null;
-    let pendingSourceID = '';
     if (!existingEntry) {
         pendingEntry = __findPermanentPendingCreatedNodeEntry(root, parentId, bookmark.index, title, rawUrl);
-        pendingSourceID = pendingEntry && pendingEntry.node
-            ? __extractPermanentNodeSourceID(pendingEntry.node)
-            : '';
     }
-    const sourceProbe = { ...bookmark, id: chromeId };
-    const sourceID = existingSourceID
-        || __normalizePermanentNodeSourceID(bookmark[PERMANENT_NODE_SOURCE_ID_KEY])
-        || pendingSourceID
-        || __resolvePermanentNodeSourceID(sourceProbe, { allowGenerate: true });
     const targetIndex = __coercePermanentBookmarkEventIndex(bookmark.index, null);
     let changed = false;
 
-    if (!existingEntry && sourceID) {
-        const sourceEntry = pendingEntry || __findPermanentNodeEntryBySourceID(root, sourceID);
-        if (sourceEntry && sourceEntry.node) {
-            const sourceEntryId = String(sourceEntry.node.id || '').trim();
-            if (sourceEntryId && sourceEntryId !== chromeId && sourceEntryId.startsWith('pending:')) {
-                sourceEntry.node.id = chromeId;
-                changed = true;
-                existingEntry = sourceEntry;
-                existingSourceID = sourceID;
-            }
+    if (!existingEntry && pendingEntry && pendingEntry.node) {
+        const pendingId = String(pendingEntry.node.id || '').trim();
+        if (pendingId && pendingId !== chromeId && pendingId.startsWith('pending:')) {
+            pendingEntry.node.id = chromeId;
+            changed = true;
+            existingEntry = pendingEntry;
         }
     }
 
@@ -33133,17 +32742,13 @@ function __applyPermanentCreatedBookmarkEventToBcsRoot(root, event, resolvedChro
                 changed = true;
             }
         }
-        if (sourceID && !__extractPermanentNodeSourceID(node)) {
-            node[PERMANENT_NODE_SOURCE_ID_KEY] = sourceID;
-            changed = true;
-        }
         const currentParentId = existingEntry.parent && existingEntry.parent.id ? String(existingEntry.parent.id) : '';
         if (!existingEntry.parent || currentParentId !== parentId || (targetIndex !== null && existingEntry.index !== targetIndex)) {
             changed = __movePermanentBcsNodeEntry(root, existingEntry, parentId, targetIndex) || changed;
         } else if (existingEntry.parent) {
             __refreshPermanentLocalChildMeta(existingEntry.parent);
         }
-        if (sourceID && resolvedChromeIds && typeof resolvedChromeIds.add === 'function') resolvedChromeIds.add(chromeId);
+        if (resolvedChromeIds && typeof resolvedChromeIds.add === 'function') resolvedChromeIds.add(chromeId);
         return changed;
     }
 
@@ -33155,10 +32760,7 @@ function __applyPermanentCreatedBookmarkEventToBcsRoot(root, event, resolvedChro
         id: chromeId,
         title,
         url: rawUrl,
-        [PERMANENT_NODE_SOURCE_ID_KEY]: sourceID,
         children: Array.isArray(bookmark.children) ? bookmark.children : []
-    }, {
-        allowGenerateSourceID: true
     });
     node.parentId = parentId;
     const children = parent.children.filter((child) => String(child && child.id || '') !== chromeId);
@@ -33170,7 +32772,7 @@ function __applyPermanentCreatedBookmarkEventToBcsRoot(root, event, resolvedChro
     children.splice(insertIndex, 0, node);
     parent.children = children;
     __refreshPermanentLocalChildMeta(parent);
-    if (sourceID && resolvedChromeIds && typeof resolvedChromeIds.add === 'function') resolvedChromeIds.add(chromeId);
+    if (resolvedChromeIds && typeof resolvedChromeIds.add === 'function') resolvedChromeIds.add(chromeId);
     return true;
 }
 
@@ -33272,12 +32874,6 @@ async function __applyPermanentBookmarkEventsToBcs(eventsInput, options = {}) {
         filePath: typeof options.filePath === 'string' ? options.filePath : ''
     });
 
-    try {
-        resolvedChromeIds.forEach((chromeId) => {
-            if (chromeId) __pendingPermanentNodeSourceIDByChromeId.delete(chromeId);
-        });
-    } catch (_) { }
-
     return {
         ...(result && typeof result === 'object' ? result : {}),
         applied: appliedCount,
@@ -33289,18 +32885,9 @@ async function __syncPermanentMainTreeFromChromeBookmarks(options = {}) {
     const chromeTree = await __getPermanentChromeTreeForStorage();
     if (!chromeTree) return null;
     const previous = await __ensurePermanentMainContentInBcs({
-        validateSourceID: false,
         assumeCleanWhenMissingState: true
     });
-    const sourceIDMap = Object.assign(
-        {},
-        previous && previous.tree ? __collectPermanentSourceIDMapByChromeId(previous.tree) : {},
-        Object.fromEntries(__pendingPermanentNodeSourceIDByChromeId.entries())
-    );
-    const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(chromeTree, {
-        sourceIDMap,
-        allowGenerateMissingSourceID: true
-    });
+    const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(chromeTree);
     if (!normalizedTree) return null;
     const content = {
         ...(previous && typeof previous === 'object' ? previous : __buildPermanentPrimaryContentPayloadFromTree(normalizedTree)),
@@ -33317,17 +32904,10 @@ async function __syncPermanentMainTreeFromChromeBookmarks(options = {}) {
             }
         } catch (_) { }
     }
-    const result = await __writePermanentMainContentToBcs(content, {
+    return __writePermanentMainContentToBcs(content, {
         immediate: true,
         assumeClean: !!(options && options.assumeClean)
     });
-    try {
-        const resolvedMap = normalizedTree[0] ? __collectPermanentSourceIDMapByChromeId(normalizedTree[0]) : {};
-        Array.from(__pendingPermanentNodeSourceIDByChromeId.keys()).forEach((chromeId) => {
-            if (resolvedMap[chromeId]) __pendingPermanentNodeSourceIDByChromeId.delete(chromeId);
-        });
-    } catch (_) { }
-    return result;
 }
 
 function __clearPermanentTreeRenderCachesAfterStorageUpdate() {
@@ -33341,132 +32921,23 @@ function __clearPermanentTreeRenderCachesAfterStorageUpdate() {
     } catch (_) { }
 }
 
-function __readPermanentNodeSourceIDMap() {
-    try {
-        const raw = localStorage.getItem(PERMANENT_NODE_SOURCE_ID_MAP_STORAGE_KEY);
-        if (!raw) return {};
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-        const normalized = {};
-        Object.keys(parsed).forEach((key) => {
-            const chromeId = String(key || '').trim();
-            const sourceID = __normalizePermanentNodeSourceID(parsed[key]);
-            if (chromeId && sourceID) normalized[chromeId] = sourceID;
-        });
-        return normalized;
-    } catch (_) {
-        return {};
-    }
-}
-
-function __extractPermanentNodeSourceID(nodeInput) {
-    if (!nodeInput || typeof nodeInput !== 'object') return '';
-    return __normalizePermanentNodeSourceID(
-        nodeInput[PERMANENT_NODE_SOURCE_ID_KEY]
-    );
-}
-
-function __resolvePermanentNodeSourceID(nodeInput, options = {}) {
-    if (!nodeInput || typeof nodeInput !== 'object') return '';
-    const chromeId = String(nodeInput.id || '').trim();
-    const direct = __extractPermanentNodeSourceID(nodeInput);
-    if (direct) {
-        return direct;
-    }
-
-    const pending = chromeId ? __normalizePermanentNodeSourceID(__pendingPermanentNodeSourceIDByChromeId.get(chromeId)) : '';
-    if (pending) return pending;
-
-    const generatedSourceIDMap = options && options.generatedSourceIDMap && typeof options.generatedSourceIDMap === 'object'
-        ? options.generatedSourceIDMap
-        : null;
-    let sourceIDMap = options && options.sourceIDMap && typeof options.sourceIDMap === 'object'
-        ? options.sourceIDMap
-        : null;
-    const mapped = chromeId && sourceIDMap
-        ? __normalizePermanentNodeSourceID(sourceIDMap[chromeId])
-        : '';
-    if (mapped) {
-        return mapped;
-    }
-
-    if (!(options && options.allowGenerate === true)) return '';
-    const generated = __buildGeneratedPermanentNodeSourceID();
-    if (chromeId) {
-        __rememberPendingPermanentNodeSourceID(chromeId, generated);
-        if (generatedSourceIDMap) {
-            generatedSourceIDMap[chromeId] = generated;
-        }
-    }
-
-    return generated;
-}
-
-function __recordPermanentNodeSourceIDMapping(chromeIdInput, sourceIDInput, options = {}) {
-    const chromeId = String(chromeIdInput || '').trim();
-    const sourceID = __normalizePermanentNodeSourceID(sourceIDInput);
-    if (!chromeId || !sourceID) return false;
-    void options;
-    return __rememberPendingPermanentNodeSourceID(chromeId, sourceID);
-}
-
-function __getPermanentSourceIDRootMatchKey(node, index) {
-    if (!node || typeof node !== 'object') return `index:${index}`;
-    const folderType = __normalizeBookmarkFolderType(node.folderType || node.folder_type || '');
-    if (folderType) return `folderType:${folderType}`;
-    const title = __normalizePermanentRootTitleKey(__resolvePermanentRootSectionTitle(node) || node.title || node.name || '');
-    if (title) return `title:${title}`;
-    return `index:${index}`;
-}
-
-async function __persistPermanentSourceIDMapFromTree(localTreeInput, remoteTreeInput) {
-    const writeResult = await __writePermanentTreeSnapshotAfterChromeApply(localTreeInput, remoteTreeInput, {
-        assumeClean: true
-    });
-    const tree = writeResult && writeResult.content && writeResult.content.tree ? writeResult.content.tree : null;
-    const mapped = tree ? Object.keys(__collectPermanentSourceIDMapByChromeId(tree)).length : 0;
-    return { mapped, content: writeResult && writeResult.content ? writeResult.content : null };
-}
-
 function __buildPermanentTreeProtocolNode(nodeInput, options = {}) {
     if (!nodeInput || typeof nodeInput !== 'object') return null;
 
     const rawUrl = String(nodeInput.url || '').trim();
-    const pathKey = String(options && options.pathKey || '').trim();
-    const sourceIDMap = options && options.sourceIDMap && typeof options.sourceIDMap === 'object'
-        ? options.sourceIDMap
-        : null;
-    const generatedSourceIDMap = options && options.generatedSourceIDMap && typeof options.generatedSourceIDMap === 'object'
-        ? options.generatedSourceIDMap
-        : null;
-    const directSourceID = __extractPermanentNodeSourceID(nodeInput);
-    const sourceID = directSourceID || __resolvePermanentNodeSourceID(nodeInput, {
-        sourceIDMap,
-        generatedSourceIDMap,
-        allowGenerate: options && options.allowGenerateSourceID === true,
-        fallbackKey: pathKey || `${nodeInput.title || nodeInput.name || rawUrl || 'node'}`
-    });
     if (rawUrl) {
-        const bookmarkNode = {
+        return {
             title: String(nodeInput.title || nodeInput.name || rawUrl).trim() || rawUrl,
             url: rawUrl
         };
-        if (sourceID) bookmarkNode[PERMANENT_NODE_SOURCE_ID_KEY] = sourceID;
-        return bookmarkNode;
     }
 
     const node = {
         title: String(nodeInput.title || nodeInput.name || 'Folder').trim() || 'Folder',
         children: (Array.isArray(nodeInput.children) ? nodeInput.children : [])
-            .map((child, index) => __buildPermanentTreeProtocolNode(child, {
-                sourceIDMap,
-                generatedSourceIDMap,
-                allowGenerateSourceID: options && options.allowGenerateSourceID === true,
-                pathKey: `${pathKey || 'node'}/${index}`
-            }))
+            .map((child) => __buildPermanentTreeProtocolNode(child, {}))
             .filter(Boolean)
     };
-    if (sourceID) node[PERMANENT_NODE_SOURCE_ID_KEY] = sourceID;
 
     if (options && options.isRootChild) {
         const folderType = __normalizeBookmarkFolderType(nodeInput.folderType || nodeInput.folder_type || '');
@@ -33481,6 +32952,7 @@ function __buildPermanentTreeProtocolNode(nodeInput, options = {}) {
 }
 
 function __normalizePermanentTreeSnapshotForProtocol(rawTree, options = {}) {
+    void options;
     const source = Array.isArray(rawTree)
         ? rawTree
         : ((rawTree && typeof rawTree === 'object' && Array.isArray(rawTree.children)) ? [rawTree] : null);
@@ -33488,32 +32960,12 @@ function __normalizePermanentTreeSnapshotForProtocol(rawTree, options = {}) {
 
     const sourceRoot = source[0] && typeof source[0] === 'object' ? source[0] : { title: '', children: [] };
     const rootChildren = Array.isArray(sourceRoot.children) ? sourceRoot.children : [];
-    const sourceIDMap = options && options.sourceIDMap && typeof options.sourceIDMap === 'object'
-        ? options.sourceIDMap
-        : null;
-    const generatedSourceIDMap = {};
-    const rootSourceID = __resolvePermanentNodeSourceID(sourceRoot, {
-        sourceIDMap,
-        generatedSourceIDMap,
-        allowGenerate: options && options.allowGenerateSourceID === true,
-        fallbackKey: 'root'
-    });
-    const rootDirectSourceID = __extractPermanentNodeSourceID(sourceRoot);
     const normalizedRoot = {
         title: String(sourceRoot.title || sourceRoot.name || '').trim(),
         children: rootChildren
-            .map((child, index) => __buildPermanentTreeProtocolNode(child, {
-                isRootChild: true,
-                sourceIDMap,
-                generatedSourceIDMap,
-                allowGenerateSourceID: options && options.allowGenerateSourceID === true,
-                pathKey: `root/${index}`
-            }))
+            .map((child) => __buildPermanentTreeProtocolNode(child, { isRootChild: true }))
             .filter(Boolean)
     };
-    if (rootDirectSourceID || (options && options.allowGenerateSourceID === true)) {
-        if (rootSourceID) normalizedRoot[PERMANENT_NODE_SOURCE_ID_KEY] = rootSourceID;
-    }
 
     return [normalizedRoot];
 }
@@ -35230,8 +34682,7 @@ function __buildCanvasImportRulesDocument(options = {}) {
         ? [
             '- 永久栏目（主栏目）与永久副本共用同一套浏览器书签树数据。',
             '- 副本是镜像视图，不应长期当成独立正文源维护。',
-            '- 若出现多处不一致，应以主栏目（通常 #A）统一收敛，再回写副本。',
-            '- JSON模式下，永久树正文直接保存为 Chrome Bookmarks API 兼容根节点对象，并按身份链需要保留 `sourceID`。'
+            '- 若出现多处不一致，应以主栏目（通常 #A）统一收敛，再回写副本。'
         ]
         : [
             '- 永久栏目（主栏目）与永久副本共用同一套浏览器书签树数据。',
@@ -35848,7 +35299,6 @@ async function __buildObsidianSyncFiles(options = {}) {
     };
 
     const permanentContent = await __ensurePermanentMainContentInBcs({
-        validateSourceID: true,
         assumeCleanWhenMissingState: true
     });
     const bookmarkTree = permanentContent && permanentContent.tree
@@ -36145,34 +35595,6 @@ if (typeof window !== 'undefined') {
     };
     window.CanvasObsidianExportBridge.detectSyncFolderExportFormat = __detectObsidianSyncExportFormatFromFolderFiles;
     window.CanvasObsidianExportBridge.applySyncFilesReplace = __applyObsidianSyncFilesReplace;
-    window.CanvasObsidianExportBridge.validateTempSourceIDIntegrity = function (options = {}) {
-        const repairMissing = !!(options && options.repairMissing === true);
-        const repairDuplicates = !!(options && options.repairDuplicates === true);
-        let validation = __validateCanvasTempSourceIDIntegrity({
-            repairMissing,
-            repairDuplicates
-        });
-        let persisted = false;
-        if (validation && (validation.repairedMissing > 0 || validation.repairedDuplicates > 0)) {
-            try {
-                saveTempNodes({
-                    immediate: true,
-                    suppressSyncMarkDirty: true,
-                    suppressReason: 'source-id-integrity-repair',
-                    skipUnchangedPersist: true
-                });
-                persisted = true;
-            } catch (_) { }
-            validation = __validateCanvasTempSourceIDIntegrity({
-                repairMissing: false,
-                repairDuplicates: false
-            });
-        }
-        return {
-            ...(validation && typeof validation === 'object' ? validation : { ok: true }),
-            persisted
-        };
-    };
     window.CanvasObsidianExportBridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles = __rebuildPermanentTreeSnapshotFromSyncFolderFiles;
     window.CanvasObsidianExportBridge.rebuildPermanentViewShellSnapshotFromSyncFolderFiles = __rebuildPermanentViewShellSnapshotFromSyncFolderFiles;
     const __normalizeBridgeShardedPath = (value) => {
@@ -36534,7 +35956,6 @@ async function exportCanvasPackage(options = {}) {
 
         if (targetType === 'permanent' || targetType === 'permanent-copy') {
             const permanentContent = await __ensurePermanentMainContentInBcs({
-                validateSourceID: true,
                 assumeCleanWhenMissingState: true
             });
             const bookmarkTree = permanentContent && permanentContent.tree ? [permanentContent.tree] : null;
@@ -36887,7 +36308,6 @@ async function exportCanvasPackage(options = {}) {
 
     // 1) Markdown files
     const permanentContent = await __ensurePermanentMainContentInBcs({
-        validateSourceID: true,
         assumeCleanWhenMissingState: true
     });
     const bookmarkTree = permanentContent && permanentContent.tree ? [permanentContent.tree] : null;
@@ -37286,7 +36706,7 @@ async function exportCanvasPackage(options = {}) {
             '- Visual modes use the first non-empty line as section header text (`sequence + title` recommended); JSON mode stores the tree as a single plain JSON object body (no fenced block).',
             '- Optional description uses compact hidden comment marker: `<!--bc:1:...-->` (base64 payload).',
             '- Visual-mode permanent main markdown can include compact hidden root metadata marker under the header area for compatibility: `<!--bc:3:...-->`.',
-            '- In JSON mode, permanent tree content is stored as a Chrome Bookmarks API-compatible root object and preserves `sourceID` only when needed for identity flow.',
+            '- In JSON mode, permanent tree content is stored as a Chrome Bookmarks API-compatible root object.',
             '- Fold metadata uses compact hidden marker `<!--bc:2:...-->` when needed.',
             '- Visual modes parse permanent/temporary bookmark tree content from lines below the header/description/meta block; JSON mode parses the plain JSON body directly.',
             '- Permanent slot recognition priority: header `#A/#B` > filename `(#B)` > file order fallback.',
@@ -37337,7 +36757,7 @@ async function exportCanvasPackage(options = {}) {
             '- 视觉模式下，首个非空行作为栏目头文本（建议“序号 + 标题”）；JSON模式正文直接是单一 JSON 对象。',
             '- 说明区可选，采用紧凑隐藏注释：`<!--bc:1:...-->`（base64 载荷）。',
             '- 视觉模式下，永久主 Markdown 可能在标题区下方写入兼容用途的根目录元数据隐藏注释：`<!--bc:3:...-->`。',
-            '- JSON模式下，永久树正文直接保存为 Chrome Bookmarks API 兼容根节点对象，并按身份链需要保留 `sourceID`。',
+            '- JSON模式下，永久树正文直接保存为 Chrome Bookmarks API 兼容根节点对象。',
             '- 折叠元数据如需写出，使用紧凑隐藏注释 `<!--bc:2:...-->`。',
             '- 视觉模式下，永久/临时栏目的书签树内容从栏目头/说明区/根元数据块之外的正文开始解析；JSON模式直接解析 JSON 正文。',
             '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名 `(#B)` > 文件顺序兜底。',
@@ -37374,7 +36794,7 @@ async function exportCanvasPackage(options = {}) {
             '- Type recognition = `.canvas` file mapping + folder path names.',
             '- Special temporary sections are recognized by folder + JSON/header/label semantics.',
             '- Visual modes parse bookmark tree from lines below the header/description block; JSON mode parses the plain JSON body directly.',
-            '- JSON-mode permanent files keep Chrome Bookmarks API-compatible tree shape in body and preserve `sourceID` only when needed for identity flow.',
+            '- JSON-mode permanent files keep Chrome Bookmarks API-compatible tree shape in body.',
             '- In normal import flow, permanent files are restored as snapshot sections, not direct browser tree overwrite.',
             '',
             '### S4. Number / Title / Bookmark-count Priority',
@@ -37424,7 +36844,7 @@ async function exportCanvasPackage(options = {}) {
             '- 类型识别 = `.canvas` 文件映射 + 目录路径命名（双条件）。',
             '- 特殊临时栏目按目录 + JSON/栏目头/标签语义识别。',
             '- 视觉模式按“栏目头 +（可选说明注释块）+ 树内容”解析；JSON模式直接解析 JSON 正文。',
-            '- JSON 模式下的永久文件正文保持 Chrome Bookmarks API 兼容树结构，并按身份链需要保留 `sourceID`。',
+            '- JSON 模式下的永久文件正文保持 Chrome Bookmarks API 兼容树结构。',
             '- 常规导入流下，永久栏目按快照栏目恢复，不直接覆盖浏览器真实书签树。',
             '',
             '### S4. 编号 / 标题 / 书签数优先级',
@@ -37459,7 +36879,6 @@ async function exportCanvasPackage(options = {}) {
         __frontmatter({
             exportedAt,
             source: 'exportGuide',
-            sourceID: 'bookmark-canvas-export',
             title: isEn ? 'Obsidian Import Rules' : 'Obsidian 导入规则'
         }),
         compatText,
@@ -38934,7 +38353,7 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '', opt
     try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
 
     __applyCanvasTempStateObject(nextState, {
-        preserveSourceIDRaw: true
+        preserveRaw: true
     });
     __finalizeTempNodesLoad({ loadedFromStorage: true });
 
@@ -38944,7 +38363,7 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '', opt
         }
     } catch (_) { }
 
-    try { saveTempNodes({ immediate: true, suppressSyncMarkDirty: true, skipSourceIDNormalization: true }); } catch (_) { }
+    try { saveTempNodes({ immediate: true, suppressSyncMarkDirty: true }); } catch (_) { }
 
     // Apply permanent layout and tips to DOM (localStorage updates do not fire storage events in same page).
     try { loadPermanentSectionPosition(); } catch (_) { }
@@ -39259,10 +38678,6 @@ function __adaptChromeTreeToCanvasItems(chromeTree) {
 
     const convertNode = (node) => {
         if (!node) return null;
-        const sourceID = __resolveTempItemSourceID(
-            node[TEMP_ITEM_SOURCE_ID_KEY],
-            { allowGenerate: false }
-        );
 
         // 书签
         if (node.url) {
@@ -39270,8 +38685,7 @@ function __adaptChromeTreeToCanvasItems(chromeTree) {
                 id: `snapshot - ${node.id || Date.now()} - ${Math.random().toString(36).substr(2, 5)}`,
                 type: 'bookmark',
                 title: node.title || node.name || node.url,
-                url: node.url,
-                ...(sourceID ? { [TEMP_ITEM_SOURCE_ID_KEY]: sourceID } : {})
+                url: node.url
             };
         }
 
@@ -39284,8 +38698,7 @@ function __adaptChromeTreeToCanvasItems(chromeTree) {
             id: `snapshot - ${node.id || Date.now()} - ${Math.random().toString(36).substr(2, 5)}`,
             type: 'folder',
             title: node.title || node.name || 'Folder',
-            children: children,
-            ...(sourceID ? { [TEMP_ITEM_SOURCE_ID_KEY]: sourceID } : {})
+            children: children
         };
     };
 
@@ -39312,15 +38725,9 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
     const newMdNodes = [];
     const newEdges = [];
     const newScrolls = {};
-    const cloneImportedTempItems = (itemsInput, options = {}) => {
+    const cloneImportedTempItems = (itemsInput) => {
         const cloned = __cloneCanvasProtocolJson(Array.isArray(itemsInput) ? itemsInput : []);
-        const list = Array.isArray(cloned) ? cloned : [];
-        try {
-            __ensureTempItemsSourceID(list, {
-                regenerate: !!(options && options.regenerateSourceID === true)
-            });
-        } catch (_) { }
-        return list;
+        return Array.isArray(cloned) ? cloned : [];
     };
 
     const readImportedStorageValue = (keys) => {
@@ -39481,9 +38888,6 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
             const newId = getNewId(sec.id);
             const newSec = JSON.parse(JSON.stringify(sec));
             newSec.id = newId;
-            try {
-                __ensureTempItemsSourceID(newSec.items);
-            } catch (_) { }
             // Iterate items to remap internal IDs if needed? 
             // Usually internal item IDs are unique per section. But let's keep them as is.
 
@@ -39869,166 +39273,9 @@ function __isPermanentCanvasNodeId(nodeId) {
     return !!(id && (id === 'permanent-section' || id.startsWith('permanent-section-copy-')));
 }
 
-const TEMP_ITEM_SOURCE_ID_KEY = 'sourceID';
-
-function __normalizeTempItemSourceID(value) {
-    const raw = String(value == null ? '' : value).trim();
-    if (!raw) return '';
-    return raw.replace(/\s+/g, '-');
-}
-
-function __generateTempItemSourceID() {
-    return __generateCanvasHighEntropySourceID();
-}
-
-function __resolveTempItemSourceID(primaryValue, options = {}) {
-    const primary = __normalizeTempItemSourceID(primaryValue);
-    if (primary) return primary;
-    if (options && options.allowGenerate === false) return '';
-    return __generateTempItemSourceID();
-}
-
-function __ensureTempItemSourceID(itemInput, options = {}) {
-    if (!itemInput || typeof itemInput !== 'object') return { touched: 0, repaired: 0 };
-    const regenerate = !!(options && options.regenerate === true);
-    const stack = [itemInput];
-    let touched = 0;
-    let repaired = 0;
-
-    while (stack.length) {
-        const item = stack.pop();
-        if (!item || typeof item !== 'object') continue;
-        touched += 1;
-
-        const currentSourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY]);
-        const generateMissing = !!(options && options.generateMissing === true);
-        const resolvedSourceID = regenerate
-            ? __generateTempItemSourceID()
-            : __resolveTempItemSourceID(currentSourceID, {
-                allowGenerate: generateMissing
-            });
-
-        if (resolvedSourceID && (!currentSourceID || regenerate || currentSourceID !== resolvedSourceID)) {
-            item[TEMP_ITEM_SOURCE_ID_KEY] = resolvedSourceID;
-            repaired += 1;
-        } else if (item[TEMP_ITEM_SOURCE_ID_KEY] !== currentSourceID) {
-            if (currentSourceID) {
-                item[TEMP_ITEM_SOURCE_ID_KEY] = currentSourceID;
-            } else if (Object.prototype.hasOwnProperty.call(item, TEMP_ITEM_SOURCE_ID_KEY)) {
-                try { delete item[TEMP_ITEM_SOURCE_ID_KEY]; } catch (_) { item[TEMP_ITEM_SOURCE_ID_KEY] = undefined; }
-            }
-        }
-
-        if (Array.isArray(item.children) && item.children.length) {
-            stack.push(...item.children);
-        }
-    }
-
-    return { touched, repaired };
-}
-
-function __ensureTempItemsSourceID(itemsInput, options = {}) {
-    if (!Array.isArray(itemsInput) || !itemsInput.length) {
-        return { touched: 0, repaired: 0 };
-    }
-    let touched = 0;
-    let repaired = 0;
-    itemsInput.forEach((item) => {
-        const result = __ensureTempItemSourceID(item, options);
-        touched += Number(result && result.touched) || 0;
-        repaired += Number(result && result.repaired) || 0;
-    });
-    return { touched, repaired };
-}
-
-function __ensureTempSectionsSourceID(sectionsInput, options = {}) {
-    const sections = Array.isArray(sectionsInput) ? sectionsInput : [];
-    let touched = 0;
-    let repaired = 0;
-    sections.forEach((section) => {
-        if (!section || typeof section !== 'object') return;
-        const result = __ensureTempItemsSourceID(section.items, options);
-        touched += Number(result && result.touched) || 0;
-        repaired += Number(result && result.repaired) || 0;
-    });
-    return { touched, repaired };
-}
-
-function __validateTempSectionsSourceIDIntegrity(sectionsInput, options = {}) {
-    const sections = Array.isArray(sectionsInput) ? sectionsInput : [];
-    const repairMissing = !!(options && options.repairMissing === true);
-    const repairDuplicates = !!(options && options.repairDuplicates === true);
-    const seen = new Map();
-    let totalItems = 0;
-    let missingCount = 0;
-    let duplicateCount = 0;
-    let repairedMissing = 0;
-    let repairedDuplicates = 0;
-
-    sections.forEach((section) => {
-        if (!section || typeof section !== 'object' || !Array.isArray(section.items)) return;
-        const stack = section.items.slice();
-        while (stack.length) {
-            const item = stack.pop();
-            if (!item || typeof item !== 'object') continue;
-            totalItems += 1;
-
-            let sourceID = __normalizeTempItemSourceID(item[TEMP_ITEM_SOURCE_ID_KEY]);
-            if (!sourceID) {
-                missingCount += 1;
-                if (repairMissing) {
-                    sourceID = __generateTempItemSourceID();
-                    item[TEMP_ITEM_SOURCE_ID_KEY] = sourceID;
-                    repairedMissing += 1;
-                }
-            } else {
-                item[TEMP_ITEM_SOURCE_ID_KEY] = sourceID;
-            }
-
-            if (sourceID) {
-                if (seen.has(sourceID)) {
-                    duplicateCount += 1;
-                    if (repairDuplicates) {
-                        const regenerated = __generateTempItemSourceID();
-                        item[TEMP_ITEM_SOURCE_ID_KEY] = regenerated;
-                        seen.set(regenerated, item);
-                        repairedDuplicates += 1;
-                    }
-                } else {
-                    seen.set(sourceID, item);
-                }
-            }
-
-            if (Array.isArray(item.children) && item.children.length) {
-                stack.push(...item.children);
-            }
-        }
-    });
-
-    const unresolvedMissing = Math.max(0, missingCount - repairedMissing);
-    const unresolvedDuplicates = Math.max(0, duplicateCount - repairedDuplicates);
-    return {
-        ok: unresolvedMissing === 0 && unresolvedDuplicates === 0,
-        totalItems,
-        missingCount,
-        duplicateCount,
-        repairedMissing,
-        repairedDuplicates,
-        unresolvedMissing,
-        unresolvedDuplicates
-    };
-}
-
-function __validateCanvasTempSourceIDIntegrity(options = {}) {
-    return __validateTempSectionsSourceIDIntegrity(
-        Array.isArray(CanvasState && CanvasState.tempSections) ? CanvasState.tempSections : [],
-        options
-    );
-}
-
 function __buildPersistedCanvasState(state, options = {}) {
     const safe = (state && typeof state === 'object') ? state : {};
-    const preserveSourceIDRaw = !!(options && options.preserveSourceIDRaw === true);
+    const preserveRaw = !!(options && options.preserveRaw === true);
 
     const sourceSections = Array.isArray(safe.sections) ? safe.sections : [];
     const sourceMdNodes = Array.isArray(safe.mdNodes) ? safe.mdNodes : [];
@@ -40039,7 +39286,7 @@ function __buildPersistedCanvasState(state, options = {}) {
         .map((section) => {
             const cloned = __cloneCanvasProtocolJson(section);
             if (!cloned || typeof cloned !== 'object') return null;
-            if (!preserveSourceIDRaw) {
+            if (!preserveRaw) {
                 cloned.descriptionMd = __normalizeTempSectionDescriptionMarkdown(cloned);
                 if (Object.prototype.hasOwnProperty.call(cloned, 'description')) {
                     delete cloned.description;
@@ -40048,17 +39295,12 @@ function __buildPersistedCanvasState(state, options = {}) {
             return cloned;
         })
         .filter(Boolean);
-    if (!preserveSourceIDRaw) {
-        try {
-            __ensureTempSectionsSourceID(persistedSections);
-        } catch (_) { }
-    }
     const persistedMdNodes = sourceMdNodes
         .filter((node) => !__isSandboxImportedNode(node))
         .map((node) => {
             const cloned = __cloneCanvasProtocolJson(node);
             if (!cloned || typeof cloned !== 'object') return null;
-            if (!preserveSourceIDRaw) {
+            if (!preserveRaw) {
                 const refreshCachesFromMarkdown = !__isCanvasNativeTextNode(cloned)
                     || !(typeof cloned.html === 'string' && cloned.html.trim());
                 __ensureMdNodeMarkdownProtocol(cloned, {
@@ -40075,7 +39317,7 @@ function __buildPersistedCanvasState(state, options = {}) {
         .filter(Boolean);
 
     let persistedEdges = [];
-    if (preserveSourceIDRaw) {
+    if (preserveRaw) {
         persistedEdges = sourceEdges
             .map((edge) => __cloneCanvasProtocolJson(edge))
             .filter((edge) => edge && typeof edge === 'object');
@@ -41010,7 +40252,7 @@ function __buildCanvasTempStateProtocolView(stateInput, options = {}) {
         mdNodes: normalizedMdNodes,
         edges: edges.map((edge) => __cloneCanvasProtocolJson(edge)).filter(Boolean)
     }, {
-        preserveSourceIDRaw: !!(options && options.preserveSourceIDRaw === true)
+        preserveRaw: !!(options && options.preserveRaw === true)
     });
 }
 
@@ -41034,10 +40276,10 @@ if (typeof window !== 'undefined') {
             const state = await __loadCanvasTempStateFromBcs();
             if (!state || typeof state !== 'object') return '';
             const persisted = __buildPersistedCanvasState(state, {
-                preserveSourceIDRaw: true
+                preserveRaw: true
             });
             const normalized = __buildCanvasTempStateProtocolView(persisted, {
-                preserveSourceIDRaw: true
+                preserveRaw: true
             });
             if (!normalized || typeof normalized !== 'object') return '';
             try {
@@ -41099,8 +40341,8 @@ if (typeof window !== 'undefined') {
         async replacePermanentMainContentFromSyncPayload(payloadInput, options = {}) {
             return await __replacePermanentMainContentFromSyncPayload(payloadInput, options);
         },
-        async writePermanentTreeSnapshotAfterChromeApply(localTreeInput, remoteTreeInput, options = {}) {
-            return await __writePermanentTreeSnapshotAfterChromeApply(localTreeInput, remoteTreeInput, options);
+        async writePermanentTreeSnapshotAfterChromeApply(localTreeInput, options = {}) {
+            return await __writePermanentTreeSnapshotAfterChromeApply(localTreeInput, options);
         },
         async preparePermanentCreateNodeInBcs(createInfo, options = {}) {
             return await __preparePermanentCreateNodeInBcs(createInfo, options);
@@ -41129,29 +40371,8 @@ if (typeof window !== 'undefined') {
         stripPermanentLocalIdsFromTree(treeInput) {
             return __stripPermanentLocalIdsFromTree(treeInput);
         },
-        validatePermanentTreeSourceIDIntegrity(treeInput) {
-            return __auditPermanentTreeSourceIDs(treeInput);
-        },
-        assertPermanentTreeSourceIDs(treeInput, context = '') {
-            return __assertPermanentTreeSourceIDs(treeInput, context);
-        },
-        rememberPendingPermanentNodeSourceID(chromeId, sourceID) {
-            return __rememberPendingPermanentNodeSourceID(chromeId, sourceID);
-        },
         clearPermanentTreeRenderCaches() {
             return __clearPermanentTreeRenderCachesAfterStorageUpdate();
-        },
-        resolvePermanentNodeSourceID(nodeInput, options = {}) {
-            return __resolvePermanentNodeSourceID(nodeInput, options);
-        },
-        recordPermanentNodeSourceIDMapping(chromeId, sourceID) {
-            return __recordPermanentNodeSourceIDMapping(chromeId, sourceID);
-        },
-        recordPermanentNodeSourceIDMappingWithOptions(chromeId, sourceID, options = {}) {
-            return __recordPermanentNodeSourceIDMapping(chromeId, sourceID, options);
-        },
-        persistPermanentSourceIDMapFromTree(localTreeInput, remoteTreeInput) {
-            return __persistPermanentSourceIDMapFromTree(localTreeInput, remoteTreeInput);
         },
         applyPermanentRootMetaToTreeSnapshot(treeInput, rootMetaInput) {
             return __applyPermanentRootMetaToTreeSnapshot(treeInput, rootMetaInput);
@@ -41810,7 +41031,6 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
             ? storage[BCS_PERM_MAIN_STATE_KEY]
             : (__isBcsGuardedPayload(prevPerm) ? prevPerm : null);
         const permContentBase = await __ensurePermanentMainContentInBcs({
-            validateSourceID: false,
             assumeCleanWhenMissingState: assumeClean,
             assumeClean
         });
@@ -42347,7 +41567,7 @@ function __normalizeCanvasTempStateForRuntime(stateInput, options = {}) {
         ? __safeParseCanvasStorageJson(stateInput)
         : stateInput;
     if (!__hasCanvasTempStatePayloadShape(parsedState)) return null;
-    const preserveSourceIDRaw = !!(options && options.preserveSourceIDRaw === true);
+    const preserveRaw = !!(options && options.preserveRaw === true);
 
     const sections = Array.isArray(parsedState.sections)
         ? parsedState.sections
@@ -42357,7 +41577,7 @@ function __normalizeCanvasTempStateForRuntime(stateInput, options = {}) {
         : (Array.isArray(parsedState.cards) ? parsedState.cards : []);
     const edges = Array.isArray(parsedState.edges) ? parsedState.edges : [];
 
-    if (preserveSourceIDRaw) {
+    if (preserveRaw) {
         return {
             ...parsedState,
             sections: sections.map((section) => __cloneCanvasProtocolJson(section)).filter(Boolean),
@@ -42954,19 +42174,14 @@ function __bindCanvasTempStateRealtimeSync() {
 }
 
 function __applyCanvasTempStateObject(state, options = {}) {
-    const preserveSourceIDRaw = !!(options && options.preserveSourceIDRaw === true);
+    const preserveRaw = !!(options && options.preserveRaw === true);
     const sourceState = __normalizeCanvasTempStateForRuntime(state, {
-        preserveSourceIDRaw
+        preserveRaw
     }) || ((state && typeof state === 'object') ? state : {});
 
     CanvasState.tempSections = Array.isArray(sourceState.sections)
         ? sourceState.sections
         : (Array.isArray(sourceState.tempSections) ? sourceState.tempSections : []);
-    if (!preserveSourceIDRaw) {
-        try {
-            __ensureTempSectionsSourceID(CanvasState.tempSections);
-        } catch (_) { }
-    }
     CanvasState.tempSectionCounter = sourceState.tempSectionCounter || CanvasState.tempSections.length;
     CanvasState.tempItemCounter = sourceState.tempItemCounter || 0;
     CanvasState.colorCursor = sourceState.colorCursor || 0;
@@ -43139,18 +42354,12 @@ function saveTempNodes(options = {}) {
     const syncDirtyPaths = Array.isArray(options && options.syncDirtyPaths)
         ? options.syncDirtyPaths
         : null;
-    const skipSourceIDNormalization = !!(options && options.skipSourceIDNormalization === true);
     const prevDirtySnapshot = __canvasTempStateLastDirtySnapshot;
     let nextDirtySnapshot = null;
     let derivedDirtyPatch = null;
     let skippedAsUnchanged = false;
     // 保存前执行自动 resize
     autoResizeImportContainers();
-    if (!skipSourceIDNormalization) {
-        try {
-            __ensureTempSectionsSourceID(CanvasState.tempSections);
-        } catch (_) { }
-    }
 
     try {
         (CanvasState.mdNodes || []).forEach((node) => {
@@ -43179,9 +42388,7 @@ function saveTempNodes(options = {}) {
             edgeCounter: CanvasState.edgeCounter,
             timestamp: Date.now()
         };
-        const persistedState = __buildPersistedCanvasState(state, {
-            preserveSourceIDRaw: skipSourceIDNormalization
-        });
+        const persistedState = __buildPersistedCanvasState(state);
         nextDirtySnapshot = __buildCanvasTempStateDirtySnapshot(persistedState);
         if (!syncDirty && nextDirtySnapshot) {
             derivedDirtyPatch = __deriveSyncDirtyFromTempSnapshotDiff(prevDirtySnapshot, nextDirtySnapshot);

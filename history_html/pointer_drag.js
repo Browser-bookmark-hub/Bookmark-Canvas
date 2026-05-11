@@ -306,15 +306,15 @@ function handlePointerUp(e) {
         performDrop(pointerDragState.draggedElement, targetTreeItem, e);
     } else if (!targetTreeItem && permanentSection) {
         const draggedElement = pointerDragState.draggedElement;
-        const sourceId = draggedElement?.dataset?.nodeId || '';
+        const dragNodeId = draggedElement?.dataset?.nodeId || '';
         const sourceTreeType = draggedElement?.dataset?.treeType || 'permanent';
         const sourceSectionId = draggedElement?.dataset?.sectionId || null;
         const targetParentId = (typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.resolvePermanentBlankDropParentId === 'function')
             ? window.__treeDnd.resolvePermanentBlankDropParentId(permanentSection)
             : null;
 
-        if (sourceId && targetParentId && typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.performMove === 'function') {
-            window.__treeDnd.performMove(sourceId, targetParentId, true, {
+        if (dragNodeId && targetParentId && typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.performMove === 'function') {
+            window.__treeDnd.performMove(dragNodeId, targetParentId, true, {
                 sourceTreeType,
                 sourceSectionId,
                 targetTreeType: 'permanent',
@@ -404,12 +404,12 @@ function startPointerDrag(e) {
 function performDrop(draggedElement, targetElement, event) {
     if (!draggedElement || !targetElement) return;
 
-    const sourceId = draggedElement.dataset.nodeId;
+    const dragNodeId = draggedElement.dataset.nodeId;
     const targetId = targetElement.dataset.nodeId;
     const targetIsFolder = targetElement.dataset.nodeType === 'folder';
 
     console.log('[指针拖拽] 执行放置:', {
-        from: sourceId,
+        from: dragNodeId,
         to: targetId,
         targetIsFolder
     });
@@ -428,7 +428,7 @@ function performDrop(draggedElement, targetElement, event) {
 
     // 调用共享的移动逻辑
     if (typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.performMove === 'function') {
-        window.__treeDnd.performMove(sourceId, targetId, targetIsFolder, {
+        window.__treeDnd.performMove(dragNodeId, targetId, targetIsFolder, {
             sourceTreeType,
             sourceSectionId,
             targetTreeType,
@@ -510,8 +510,7 @@ async function handleDropToCanvas(event, workspaceRect) {
         url: nodeUrl,
         type: isFolder ? 'folder' : 'bookmark',
         source: sourceTreeType === 'temporary' ? 'temporary' : 'permanent',
-        sectionId: sourceTreeType === 'temporary' ? sourceSectionId : null,
-        regenerateSourceID: sourceTreeType === 'temporary'
+        sectionId: sourceTreeType === 'temporary' ? sourceSectionId : null
     };
     // Scheme A: persist "which permanent section (#0/#n) it came from" for new temp sections.
     if (dragData.source === 'permanent') {

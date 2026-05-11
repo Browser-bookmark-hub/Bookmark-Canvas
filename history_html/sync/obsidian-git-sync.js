@@ -1294,7 +1294,6 @@
             provided && provided.permanentMainContent
                 ? provided.permanentMainContent
                 : await bridge.readPermanentMainContentFromBcs({
-                    validateSourceID: true,
                     assumeCleanWhenMissingState: true
                 })
         );
@@ -1370,7 +1369,6 @@
         }
 
         const currentBcsTree = normalizeBookmarkTreeSnapshot(await bridge.readPermanentTreeSnapshotFromBcs({
-            validateSourceID: false,
             assumeCleanWhenMissingState: true
         }));
         const currentBcsHash = getBookmarkTreeHash(currentBcsTree);
@@ -1381,10 +1379,7 @@
             ));
         }
 
-        const sourceIDMap = await readPermanentSourceIDMapFromBcsForComparison();
-        const currentChromeTree = attachPermanentSourceIDsForComparison(await bookmarksGetTree(), {
-            sourceIDMap
-        });
+        const currentChromeTree = normalizeBookmarkTreeSnapshot(await bookmarksGetTree());
         const currentChromeHash = getBookmarkTreeHash(currentChromeTree);
         if (!currentChromeHash || currentChromeHash !== expectedHash) {
             throw new Error(textByLang(
@@ -1394,6 +1389,27 @@
         }
 
         return true;
+    }
+
+    async function writePermanentChromeIdsBackToBcs(localTreeInput = null, options = {}) {
+        const bridge = global && global.CanvasProtocolBridge
+            && typeof global.CanvasProtocolBridge.writePermanentTreeSnapshotAfterChromeApply === 'function'
+            ? global.CanvasProtocolBridge
+            : null;
+        if (!bridge) {
+            throw new Error(textByLang(
+                '缺少永久栏目 JSON 回写能力，无法完成 Chrome ID 回写。',
+                'Permanent JSON writeback bridge is unavailable; cannot write Chrome IDs back.'
+            ));
+        }
+        const localTree = localTreeInput
+            ? normalizeBookmarkTreeSnapshot(localTreeInput)
+            : await bookmarksGetTree();
+        if (!localTree) return;
+        await bridge.writePermanentTreeSnapshotAfterChromeApply(localTree, {
+            assumeClean: true,
+            baseContent: options && options.baseContent ? options.baseContent : undefined
+        });
     }
 
     async function restorePermanentSectionFromRecoveryPayload(permanentRecoveryInput, reason = 'recovery-rollback') {
@@ -1667,26 +1683,6 @@
         };
     }
 
-    async function ensureTempSourceIDIntegrityAfterRemoteApply(trigger = 'remote-apply') {
-        const bridge = global.CanvasObsidianExportBridge;
-        if (!bridge || typeof bridge.validateTempSourceIDIntegrity !== 'function') {
-            return null;
-        }
-        const sourceIdIntegrity = await bridge.validateTempSourceIDIntegrity({
-            repairMissing: false,
-            repairDuplicates: false
-        });
-        const missingCount = Math.max(0, Number(sourceIdIntegrity && sourceIdIntegrity.missingCount) || 0);
-        const duplicateCount = Math.max(0, Number(sourceIdIntegrity && sourceIdIntegrity.duplicateCount) || 0);
-        if (missingCount > 0 || duplicateCount > 0) {
-            console.warn('[Canvas Sync] sourceID integrity mismatch detected after remote apply (observation-only):', {
-                trigger: String(trigger || 'remote-apply'),
-                summary: sourceIdIntegrity
-            });
-        }
-        return sourceIdIntegrity;
-    }
-
     async function applyPreparedRemoteBundleToLocal(stagedBundle, trigger = 'recovery-pull', options = {}) {
         const folderFiles = deserializeRemoteFolderFilesEntries(stagedBundle && stagedBundle.folderFiles);
         const hasRemoteFiles = folderFiles.size > 0;
@@ -1785,7 +1781,6 @@
                 remoteUpdatedAt: remoteUpdatedAtForPermanent,
                 onProgress: (message) => updateSyncUiProgress(message, 82)
             });
-            await ensureTempSourceIDIntegrityAfterRemoteApply(trigger);
         } catch (error) {
             const rollbackResult = await rollbackRemoteLocalApplyFromSnapshot(
                 localRollbackSnapshot,
@@ -2958,7 +2953,7 @@
                     mdNodes: sourceMdNodes,
                     edges: sourceEdges
                 }, {
-                    preserveSourceIDRaw: true
+                    preserveRaw: true
                 });
                 if (normalized && typeof normalized === 'object') {
                     const normalizedSections = Array.isArray(normalized.sections) ? normalized.sections : [];
@@ -4578,133 +4573,6 @@
         return null;
     }
 
-    function normalizePermanentNodeSourceID(value) {
-        const raw = String(value == null ? '' : value).trim();
-        if (!raw) return '';
-        return raw.replace(/\s+/g, '-');
-    }
-
-    function getPermanentNodeSourceID(node) {
-        if (!node || typeof node !== 'object') return '';
-        return normalizePermanentNodeSourceID(
-            node.sourceID
-        );
-    }
-
-    async function recordCreatedPermanentNodeSourceID(createdNode, sourceNode) {
-        const chromeId = String(createdNode && createdNode.id || '').trim();
-        const sourceID = getPermanentNodeSourceID(sourceNode);
-        if (!chromeId || !sourceID) return;
-        const bridge = global && global.CanvasProtocolBridge
-            && typeof global.CanvasProtocolBridge.rememberPendingPermanentNodeSourceID === 'function'
-            ? global.CanvasProtocolBridge
-            : null;
-        if (!bridge) return;
-        try {
-            bridge.rememberPendingPermanentNodeSourceID(chromeId, sourceID);
-        } catch (_) { }
-    }
-
-    async function persistPermanentSourceIDMapAfterApply(localTreeInput, remoteTreeInput, options = {}) {
-        const bridge = global && global.CanvasProtocolBridge
-            && typeof global.CanvasProtocolBridge.writePermanentTreeSnapshotAfterChromeApply === 'function'
-            ? global.CanvasProtocolBridge
-            : null;
-        if (!bridge) {
-            throw new Error(textByLang(
-                '缺少永久栏目 JSON 回写能力，无法完成 Chrome ID 回写。',
-                'Permanent JSON writeback bridge is unavailable; cannot write Chrome IDs back.'
-            ));
-        }
-        const remoteTree = normalizeBookmarkTreeSnapshot(remoteTreeInput);
-        if (!remoteTree) return;
-        const localTree = localTreeInput
-            ? normalizeBookmarkTreeSnapshot(localTreeInput)
-            : await bookmarksGetTree();
-        if (!localTree) return;
-        await bridge.writePermanentTreeSnapshotAfterChromeApply(localTree, remoteTree, {
-            assumeClean: true,
-            baseContent: options && options.baseContent ? options.baseContent : undefined
-        });
-    }
-
-    function collectPermanentSourceIDMapByChromeId(treeInput) {
-        const map = {};
-        const tree = normalizeBookmarkTreeSnapshot(treeInput);
-        const stack = tree ? tree.slice() : [];
-        while (stack.length) {
-            const node = stack.pop();
-            if (!node || typeof node !== 'object') continue;
-            const chromeId = String(node.id || '').trim();
-            const sourceID = getPermanentNodeSourceID(node);
-            if (chromeId && sourceID) map[chromeId] = sourceID;
-            if (Array.isArray(node.children)) {
-                for (let i = node.children.length - 1; i >= 0; i -= 1) {
-                    stack.push(node.children[i]);
-                }
-            }
-        }
-        return map;
-    }
-
-    async function readPermanentSourceIDMapFromBcsForComparison() {
-        const bridge = global && global.CanvasProtocolBridge
-            && typeof global.CanvasProtocolBridge.readPermanentTreeSnapshotFromBcs === 'function'
-            ? global.CanvasProtocolBridge
-            : null;
-        if (!bridge) return {};
-        try {
-            return collectPermanentSourceIDMapByChromeId(await bridge.readPermanentTreeSnapshotFromBcs({
-                validateSourceID: false,
-                assumeCleanWhenMissingState: true
-            }));
-        } catch (_) {
-            return {};
-        }
-    }
-
-    function attachPermanentSourceIDsForComparison(treeInput, options = {}) {
-        const tree = normalizeBookmarkTreeSnapshot(treeInput);
-        if (!tree) return null;
-        const bridge = global && global.CanvasProtocolBridge
-            && typeof global.CanvasProtocolBridge.resolvePermanentNodeSourceID === 'function'
-            ? global.CanvasProtocolBridge
-            : null;
-        if (!bridge) return tree;
-        const sourceIDMap = options && options.sourceIDMap && typeof options.sourceIDMap === 'object'
-            ? options.sourceIDMap
-            : null;
-
-        const visit = (node, fallbackKey) => {
-            if (!node || typeof node !== 'object') return;
-            const currentSourceID = getPermanentNodeSourceID(node);
-            if (currentSourceID) {
-                node.sourceID = currentSourceID;
-            } else {
-                try {
-                    const resolveOptions = {
-                        fallbackKey,
-                        allowGenerate: false
-                    };
-                    if (sourceIDMap) resolveOptions.sourceIDMap = sourceIDMap;
-                    const sourceID = normalizePermanentNodeSourceID(
-                        bridge.resolvePermanentNodeSourceID(node, resolveOptions)
-                    );
-                    if (sourceID) node.sourceID = sourceID;
-                } catch (_) { }
-            }
-            const children = Array.isArray(node.children) ? node.children : [];
-            for (let i = 0; i < children.length; i += 1) {
-                visit(children[i], `${fallbackKey || 'node'}/${i}`);
-            }
-        };
-
-        for (let i = 0; i < tree.length; i += 1) {
-            visit(tree[i], `root/${i}`);
-        }
-        return tree;
-    }
-
     function enrichPermanentTreeRootIdentity(treeInput, options = {}) {
         const normalizedTree = normalizeBookmarkTreeSnapshot(treeInput);
         if (!normalizedTree) return null;
@@ -5377,17 +5245,14 @@
 
     function buildCanonicalBookmarkComparableNode(node) {
         if (!node || typeof node !== 'object') return null;
-        const sourceID = getPermanentNodeSourceID(node);
         if (typeof node.url === 'string' && node.url.trim()) {
             const url = String(node.url || '').trim();
             const title = String(node.title || node.name || url).trim() || url;
-            const bookmarkComparable = {
+            return {
                 type: 'bookmark',
                 title,
                 url
             };
-            if (sourceID) bookmarkComparable.sourceID = sourceID;
-            return bookmarkComparable;
         }
 
         const title = String(node.title || node.name || 'Folder').trim() || 'Folder';
@@ -5395,13 +5260,11 @@
             .map((child) => buildCanonicalBookmarkComparableNode(child))
             .filter(Boolean);
 
-        const folderComparable = {
+        return {
             type: 'folder',
             title,
             children
         };
-        if (sourceID) folderComparable.sourceID = sourceID;
-        return folderComparable;
     }
 
     function buildCanonicalBookmarkTreeComparable(treeSnapshot) {
@@ -5414,15 +5277,12 @@
             .map((node) => {
                 const rootKey = getBookmarkRootComparableKey(node, folderTypeCounts);
                 const normalizedRootKey = rootKey || normalizeBookmarkRootTitle(node && (node.title || node.name) || '') || 'custom:root';
-                const sourceID = getPermanentNodeSourceID(node);
-                const rootComparable = {
+                return {
                     rootKey: normalizedRootKey,
                     children: (Array.isArray(node && node.children) ? node.children : [])
                         .map((child) => buildCanonicalBookmarkComparableNode(child))
                         .filter(Boolean)
                 };
-                if (sourceID) rootComparable.sourceID = sourceID;
-                return rootComparable;
             })
             .filter(Boolean)
             .sort((left, right) => compareBookmarkRootMatchKeys(left.rootKey, right.rootKey));
@@ -5500,11 +5360,7 @@
 	            return { applied: false, skipped: 'remote-empty' };
 	        }
 
-        const localTreeRaw = await bookmarksGetTree();
-        const localSourceIDMap = await readPermanentSourceIDMapFromBcsForComparison();
-        const localTree = attachPermanentSourceIDsForComparison(localTreeRaw, {
-            sourceIDMap: localSourceIDMap
-        });
+        const localTree = normalizeBookmarkTreeSnapshot(await bookmarksGetTree());
         if (!localTree) {
             throw new Error(textByLang('读取本地永久栏目失败：书签树为空', 'Failed to read local permanent section: bookmark tree is empty'));
         }
@@ -5544,7 +5400,7 @@
         const remoteHash = getBookmarkTreeHash(remoteTree);
         if (localHash && remoteHash && localHash === remoteHash) {
             persistRemoteRootMeta();
-            await persistPermanentSourceIDMapAfterApply(localTree, remoteTree);
+            await writePermanentChromeIdsBackToBcs(localTree);
             await verifyPermanentTreeMatchesTarget(remoteTree, `same:${String(reason || 'pull')}`);
             return { applied: false, skipped: 'same' };
         }
@@ -5585,7 +5441,7 @@
             }
             if (incrementalResult && incrementalResult.skipped === 'same') {
                 persistRemoteRootMeta();
-                await persistPermanentSourceIDMapAfterApply(localTree, remoteTree);
+                await writePermanentChromeIdsBackToBcs(localTree);
                 await verifyPermanentTreeMatchesTarget(remoteTree, `incremental-same:${String(reason || 'pull')}`);
                 return {
                     applied: false,
@@ -5630,7 +5486,6 @@
             if (protocolBridge && typeof protocolBridge.readPermanentTreeSnapshotFromBcs === 'function') {
                 try {
                     normalized = normalizeBookmarkTreeSnapshot(await protocolBridge.readPermanentTreeSnapshotFromBcs({
-                        validateSourceID: true,
                         assumeCleanWhenMissingState: true
                     }));
                 } catch (error) {
@@ -5674,7 +5529,6 @@
                 title: title || url,
                 url
             });
-            await recordCreatedPermanentNodeSourceID(created, node);
             if (counters) counters.bookmarks += 1;
             return;
         }
@@ -5684,7 +5538,6 @@
             index,
             title: title || 'Folder'
         });
-        await recordCreatedPermanentNodeSourceID(folder, node);
         if (counters) counters.folders += 1;
 
         const children = Array.isArray(node.children) ? node.children : [];
@@ -5774,23 +5627,18 @@
     function buildPermanentComparableNodeSignature(node) {
         const buildComparable = (input) => {
             if (!input || typeof input !== 'object') return null;
-            const sourceID = getPermanentNodeSourceID(input);
             if (isPermanentBookmarkNode(input)) {
-                const bookmarkComparable = {
+                return {
                     type: 'bookmark',
                     title: normalizePermanentNodeTitle(input, String(input.url || '')),
                     url: String(input.url || '').trim()
                 };
-                if (sourceID) bookmarkComparable.sourceID = sourceID;
-                return bookmarkComparable;
             }
-            const folderComparable = {
+            return {
                 type: 'folder',
                 title: normalizePermanentNodeTitle(input),
                 children: (Array.isArray(input.children) ? input.children : []).map(buildComparable).filter(Boolean)
             };
-            if (sourceID) folderComparable.sourceID = sourceID;
-            return folderComparable;
         };
         try {
             return hashString(JSON.stringify(buildComparable(node)));
@@ -6006,10 +5854,7 @@
             return { applied: false, fallback: 'remote-missing' };
         }
 
-        const localSourceIDMap = await readPermanentSourceIDMapFromBcsForComparison();
-        const localTree = localTreeSnapshot
-            ? attachPermanentSourceIDsForComparison(localTreeSnapshot, { sourceIDMap: localSourceIDMap })
-            : attachPermanentSourceIDsForComparison(await bookmarksGetTree(), { sourceIDMap: localSourceIDMap });
+        const localTree = normalizeBookmarkTreeSnapshot(localTreeSnapshot || await bookmarksGetTree());
         const localRoots = extractBookmarkRootFolders(localTree);
         if (!localRoots.length) {
             throw new Error(textByLang('本地书签根目录不可用，无法增量同步', 'Local bookmark root is unavailable; cannot run incremental sync'));
@@ -6053,8 +5898,7 @@
                 await applyPermanentIncrementalPlan(plans[i], counters);
             }
         });
-        await persistPermanentSourceIDMapAfterApply(null, remoteTree);
-
+        await writePermanentChromeIdsBackToBcs();
         return {
             applied: true,
             counters,
@@ -6069,10 +5913,7 @@
 	            throw new Error(textByLang('云端未提供永久栏目快照，无法覆盖', 'Remote permanent section snapshot is missing; cannot overwrite'));
 	        }
 
-	        const localSourceIDMap = await readPermanentSourceIDMapFromBcsForComparison();
-	        const localTree = localTreeSnapshot
-	            ? attachPermanentSourceIDsForComparison(localTreeSnapshot, { sourceIDMap: localSourceIDMap })
-	            : attachPermanentSourceIDsForComparison(await bookmarksGetTree(), { sourceIDMap: localSourceIDMap });
+	        const localTree = normalizeBookmarkTreeSnapshot(localTreeSnapshot || await bookmarksGetTree());
 	        const localRoots = extractBookmarkRootFolders(localTree);
 	        if (!localRoots.length) {
 	            throw new Error(textByLang('本地书签根目录不可用，无法覆盖', 'Local bookmark root is unavailable; cannot overwrite'));
@@ -6115,7 +5956,7 @@
             }
             return counters;
         });
-        await persistPermanentSourceIDMapAfterApply(null, remoteTree, {
+        await writePermanentChromeIdsBackToBcs(null, {
             baseContent: options && options.basePermanentContent ? options.basePermanentContent : undefined
         });
         return counters;
@@ -12543,7 +12384,7 @@ Cancel: go back and change the branch name first.`
                 ? options.permanentPullMode
                 : (settings && settings.permanentPullMode)
         );
-        const localTree = attachPermanentSourceIDsForComparison(localTreeSnapshot);
+        const localTree = normalizeBookmarkTreeSnapshot(localTreeSnapshot);
         const remoteTree = normalizeBookmarkTreeSnapshot(remoteTreeSnapshot);
         if (!localTree || !remoteTree) {
             return { policy: mode, result: 'overwrite', reason: 'tree-missing', threshold: 0, logicalChangeCount: 0 };
@@ -13324,7 +13165,6 @@ Cancel: go back and change the branch name first.`
                     if (overwriteResult && overwriteResult.applied) {
                         runtime.lastPermanentTreeSnapshotAt = Date.now();
                     }
-                    await ensureTempSourceIDIntegrityAfterRemoteApply('manual-conflict-use-remote');
                 } catch (error) {
                     console.warn('[Canvas Sync] apply conflict(remote) to local failed:', error);
                     const rollbackResult = await rollbackRemoteLocalApplyFromSnapshot(
@@ -15101,8 +14941,6 @@ Cancel: go back and change the branch name first.`
             } else if (permanentApplyResult && permanentApplyResult.skipped === 'same') {
                 permanentApplySummary = textByLang('永久栏目：本地与云端一致，已跳过恢复', 'Permanent section: local already matches cloud, skipped restore');
             }
-            await ensureTempSourceIDIntegrityAfterRemoteApply('first-sync-cloud-overwrite');
-
             if (settings.obsidianFilePushEnabled !== false) {
                 try {
                     updateSyncUiProgress(textByLang('重建本地索引...', 'Rebuilding local index...'), 75);

@@ -8599,14 +8599,8 @@ async function bookmarksCreate(info) {
             });
         });
         try {
-            const sourceID = prepared && prepared.sourceID ? prepared.sourceID : '';
-            if (created && created.id && sourceID && bridge && typeof bridge.rememberPendingPermanentNodeSourceID === 'function') {
-                bridge.rememberPendingPermanentNodeSourceID(created.id, sourceID);
-            }
             if (prepared && bridge && typeof bridge.commitPermanentCreatedNodeInBcs === 'function') {
-                await bridge.commitPermanentCreatedNodeInBcs(prepared.pendingId, created, {
-                    sourceID
-                });
+                await bridge.commitPermanentCreatedNodeInBcs(prepared.pendingId, created);
             }
         } catch (commitError) {
             console.warn('[Permanent JSON] create commit failed, resyncing from Chrome:', commitError);
@@ -11503,7 +11497,6 @@ async function getBookmarkTreeSnapshot() {
         const bridge = window.CanvasProtocolBridge;
         if (bridge && typeof bridge.readPermanentTreeSnapshotFromBcs === 'function') {
             const tree = await bridge.readPermanentTreeSnapshotFromBcs({
-                validateSourceID: false,
                 assumeCleanWhenMissingState: true
             });
             if (Array.isArray(tree) && tree.length) {
@@ -14040,10 +14033,9 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
 
     if (node.url) {
         const favicon = getFaviconUrl(node.url);
-        const sourceIDAttr = node.sourceID ? ` data-source-id="${escapeHtml(node.sourceID)}"` : '';
         return `
             <div class="tree-node">
-                <div class="tree-item" data-node-id="${node.id}"${sourceIDAttr} data-node-title="${escapeHtml(node.title)}" data-node-url="${escapeHtml(node.url || '')}" data-node-type="bookmark" data-node-level="${level}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
+                <div class="tree-item" data-node-id="${node.id}" data-node-title="${escapeHtml(node.title)}" data-node-url="${escapeHtml(node.url || '')}" data-node-type="bookmark" data-node-level="${level}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
                     <span class="tree-toggle" style="opacity: 0"></span>
                     ${favicon ? `<img class="tree-icon" src="${favicon}" alt="">` : `<i class="tree-icon fas fa-bookmark"></i>`}
                     <a href="${escapeHtml(node.url)}" target="_blank" class="tree-label tree-bookmark-link" rel="noopener noreferrer">${escapeHtml(node.title)}</a>
@@ -14056,10 +14048,9 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
     if (isLazyStop) {
         const childCount = Array.isArray(node.children) ? node.children.length : 0;
         const hasChildren = childCount > 0;
-        const sourceIDAttr = node.sourceID ? ` data-source-id="${escapeHtml(node.sourceID)}"` : '';
         return `
             <div class="tree-node">
-                <div class="tree-item" data-node-id="${node.id}"${sourceIDAttr} data-node-title="${escapeHtml(node.title)}" data-node-type="folder" data-node-level="${level}" data-has-children="${hasChildren ? 'true' : 'false'}" data-children-loaded="${hasChildren ? 'false' : 'true'}" data-child-count="${childCount}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
+                <div class="tree-item" data-node-id="${node.id}" data-node-title="${escapeHtml(node.title)}" data-node-type="folder" data-node-level="${level}" data-has-children="${hasChildren ? 'true' : 'false'}" data-children-loaded="${hasChildren ? 'false' : 'true'}" data-child-count="${childCount}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
                     <span class="tree-toggle"><i class="fas fa-chevron-right"></i></span>
                     <i class="tree-icon fas fa-folder"></i>
                     <span class="tree-label">${escapeHtml(node.title)}</span>
@@ -14078,10 +14069,9 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
         return pa - pb;
     });
 
-    const sourceIDAttr = node.sourceID ? ` data-source-id="${escapeHtml(node.sourceID)}"` : '';
     return `
             <div class="tree-node">
-                <div class="tree-item" data-node-id="${node.id}"${sourceIDAttr} data-node-title="${escapeHtml(node.title)}" data-node-type="folder" data-node-level="${level}" data-has-children="${Array.isArray(node.children) && node.children.length ? 'true' : 'false'}" data-children-loaded="true" data-child-count="${Array.isArray(node.children) ? node.children.length : 0}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
+                <div class="tree-item" data-node-id="${node.id}" data-node-title="${escapeHtml(node.title)}" data-node-type="folder" data-node-level="${level}" data-has-children="${Array.isArray(node.children) && node.children.length ? 'true' : 'false'}" data-children-loaded="true" data-child-count="${Array.isArray(node.children) ? node.children.length : 0}" data-node-index="${typeof node.index === 'number' ? node.index : ''}">
                     <span class="tree-toggle ${level === 0 ? 'expanded' : ''}"><i class="fas fa-chevron-right"></i></span>
                     <i class="tree-icon fas fa-folder${level === 0 ? '-open' : ''}"></i>
                     <span class="tree-label">${escapeHtml(node.title)}</span>
