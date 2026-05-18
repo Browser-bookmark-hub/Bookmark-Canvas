@@ -1775,12 +1775,9 @@ function handleCtrlOverlayMouseDown(e) {
 const TEMP_SECTION_STORAGE_KEY = 'bcs:temp-state-snapshot';
 const BCS_META_KEY = 'bcs:meta';
 const BCS_CANVAS_KEY = 'bcs:canvas';
-const BCS_CANVAS_META_KEY = 'bcs:canvas:meta';
 const BCS_SECTION_PREFIX = 'bcs:section:';
 const BCS_PERM_MAIN_KEY = 'bcs:perm:main';
-const BCS_PERM_MAIN_STATE_KEY = 'bcs:perm:main:state';
 const BCS_PERM_COPY_PREFIX = 'bcs:perm:copy-';
-const BCS_PERM_COPY_STATE_PREFIX = 'bcs:perm:copy-state:';
 const BCS_SIGNAL_KEY = 'bcs:signal';
 const BCS_META_SCHEMA_VERSION = 5;
 const TEMP_SECTION_DEFAULT_WIDTH = 525;
@@ -6142,99 +6139,6 @@ function createCanvasFolderItem(folder, isDraggable) {
     return item;
 }
 
-let __canvasFloatingSyncUiLastEnabled = null;
-let __canvasFloatingSyncUiBindingsReady = false;
-const __CANVAS_FLOATING_SYNC_SETTINGS_KEY = 'canvas-obsidian-git-sync-settings-v1';
-
-function __resolveCanvasFloatingSyncEnabled() {
-    try {
-        const syncModule = window.CanvasObsidianGitSync;
-        if (!syncModule || typeof syncModule.getSettings !== 'function') {
-            return false;
-        }
-        const settings = syncModule.getSettings() || {};
-        return settings.enabled === true;
-    } catch (_) {
-        return false;
-    }
-}
-
-function __updateCanvasFloatingSyncUi(force = false) {
-    const zoomIndicator = document.getElementById('canvasZoomIndicator');
-    const zoomHeader = zoomIndicator ? zoomIndicator.querySelector('.canvas-zoom-header') : null;
-    const zoomMeter = zoomHeader ? zoomHeader.querySelector('.canvas-zoom-meter') : null;
-    const zoomControls = zoomIndicator ? zoomIndicator.querySelector('.canvas-zoom-controls') : null;
-    const floatingSyncBtn = document.getElementById('canvasFloatingSyncBtn');
-    const helpBtn = document.getElementById('canvasHelpBtn');
-    const toolsInline = document.getElementById('canvasFloatingToolsInline');
-    if (!zoomIndicator || !zoomHeader || !zoomControls || !floatingSyncBtn || !helpBtn) return;
-
-    const enabled = __resolveCanvasFloatingSyncEnabled();
-    if (!force && __canvasFloatingSyncUiLastEnabled === enabled) return;
-    __canvasFloatingSyncUiLastEnabled = enabled;
-
-    zoomIndicator.classList.toggle('canvas-sync-enabled-layout', enabled);
-    floatingSyncBtn.style.display = enabled ? '' : 'none';
-    floatingSyncBtn.setAttribute('aria-hidden', enabled ? 'false' : 'true');
-
-    if (enabled) {
-        if (zoomMeter && zoomMeter.parentElement === zoomHeader) {
-            if (helpBtn.parentElement !== zoomHeader || helpBtn.nextSibling !== zoomMeter) {
-                zoomHeader.insertBefore(helpBtn, zoomMeter);
-            }
-        } else if (helpBtn.parentElement !== zoomHeader) {
-            zoomHeader.appendChild(helpBtn);
-        }
-        return;
-    }
-
-    const targetBefore = (toolsInline && toolsInline.parentElement === zoomControls) ? toolsInline : null;
-    if (targetBefore) {
-        if (helpBtn.parentElement !== zoomControls || helpBtn.nextSibling !== targetBefore) {
-            zoomControls.insertBefore(helpBtn, targetBefore);
-        }
-        return;
-    }
-    if (helpBtn.parentElement !== zoomControls) {
-        zoomControls.appendChild(helpBtn);
-    }
-}
-
-function __bindCanvasFloatingSyncUiEvents() {
-    if (__canvasFloatingSyncUiBindingsReady) return;
-    __canvasFloatingSyncUiBindingsReady = true;
-
-    const refreshUi = () => {
-        __updateCanvasFloatingSyncUi(false);
-    };
-    const onVisibilityChange = () => {
-        if (document.visibilityState === 'visible') {
-            refreshUi();
-        }
-    };
-
-    try { window.addEventListener('focus', refreshUi); } catch (_) { }
-    try { document.addEventListener('visibilitychange', onVisibilityChange); } catch (_) { }
-    try { window.addEventListener('canvas-obsidian-git-sync-settings-updated', refreshUi); } catch (_) { }
-    try { window.addEventListener('canvas-obsidian-git-sync-applied', refreshUi); } catch (_) { }
-
-    try {
-        const onChangedArea = __getCanvasStorageOnChangedArea();
-        if (onChangedArea && typeof onChangedArea.addListener === 'function') {
-            onChangedArea.addListener((changes, areaName) => {
-                if (areaName && areaName !== 'local') return;
-                if (!changes || !Object.prototype.hasOwnProperty.call(changes, __CANVAS_FLOATING_SYNC_SETTINGS_KEY)) return;
-                refreshUi();
-            });
-        }
-    } catch (_) { }
-}
-
-function __ensureCanvasFloatingSyncUiBinding() {
-    __updateCanvasFloatingSyncUi(true);
-    __bindCanvasFloatingSyncUiEvents();
-}
-
 // =============================================================================
 // Canvas 缩放和平移功能
 // =============================================================================
@@ -6808,9 +6712,6 @@ function setupCanvasZoomAndPan() {
     const zoomInBtn = document.getElementById('zoomInBtn');
     const zoomOutBtn = document.getElementById('zoomOutBtn');
     const zoomLocateBtn = document.getElementById('zoomLocateBtn');
-    const floatingSyncBtn = document.getElementById('canvasFloatingSyncBtn');
-    __ensureCanvasFloatingSyncUiBinding();
-
     // [OPT] 优化缩放手感：添加平滑动画，使用 1.2 倍指数缩放
     const animateZoomStep = (factor) => {
         const content = document.getElementById('canvasContent');
@@ -6847,28 +6748,6 @@ function setupCanvasZoomAndPan() {
     bindZoomStepButton(zoomInBtn, 1.2);
     bindZoomStepButton(zoomOutBtn, 1 / 1.2);
     if (zoomLocateBtn) zoomLocateBtn.addEventListener('click', locateToPermanentSection);
-    if (floatingSyncBtn && floatingSyncBtn.dataset.syncBound !== 'true') {
-        floatingSyncBtn.dataset.syncBound = 'true';
-        floatingSyncBtn.addEventListener('click', async (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            if (floatingSyncBtn.disabled) return;
-            const syncModule = window.CanvasObsidianGitSync;
-            if (!syncModule || typeof syncModule.requestSyncNow !== 'function') {
-                try { showCanvasToast('同步模块尚未就绪', 'warning'); } catch (_) { }
-                return;
-            }
-            floatingSyncBtn.disabled = true;
-            try {
-                await syncModule.requestSyncNow('manual');
-            } catch (error) {
-                try { showCanvasToast(error && error.message ? error.message : String(error), 'error'); } catch (_) { }
-            } finally {
-                floatingSyncBtn.disabled = false;
-            }
-        });
-    }
-
     // [Fix] 窗口大小改变时：
     // - 栏目全屏卡片实时跟随（rAF 节流到每帧）
     // - 重计算边界/休眠逻辑继续 debounce（避免高频重计算）
@@ -9265,9 +9144,7 @@ async function __refreshCanvasPermanentBaseStatsForPerfTotals() {
     if (cache.permanentFetchedAt && (now - cache.permanentFetchedAt) < 30000) return;
 
     try {
-        const tree = await __readPermanentTreeSnapshotFromBcs({
-            assumeCleanWhenMissingState: true
-        });
+        const tree = await __readPermanentTreeSnapshotFromBcs();
         const root = Array.isArray(tree) ? tree[0] : null;
         const items = (root && Array.isArray(root.children)) ? root.children : tree;
         const stats = __getBookmarkAndFolderStats(items);
@@ -12093,9 +11970,9 @@ function handleCanvasFullscreenChange() {
     updateNodeFullscreenButtons();
 
     try {
-        const syncHandler = window.__canvasSyncFullscreenStateFromModule;
-        if (typeof syncHandler === 'function') {
-            syncHandler(CanvasState.isFullscreen);
+        const fullscreenStatePublisher = window.__canvasSidePanelPublishFullscreenStateFromModule;
+        if (typeof fullscreenStatePublisher === 'function') {
+            fullscreenStatePublisher(CanvasState.isFullscreen);
         }
     } catch (_) { }
 }
@@ -14320,16 +14197,6 @@ function finalizePermanentSectionDrag() {
         }
 
         savePermanentSectionPosition(element);
-        try {
-            const syncModule = window.CanvasObsidianGitSync;
-            if (syncModule && typeof syncModule.markDirty === 'function') {
-                syncModule.markDirty('permanent-layout', {
-                    dirty: {
-                        canvasLayout: true
-                    }
-                });
-            }
-        } catch (_) { }
         scheduleBoundsUpdate();
         scheduleScrollbarUpdate();
     } else {
@@ -15465,9 +15332,7 @@ function __applyPermanentViewShellSnapshotProtocol(snapshotInput, options = {}) 
 
     try {
         saveTempNodes({
-            immediate: true,
-            suppressSyncMarkDirty: true,
-            syncDirty: { canvasLayout: true }
+            immediate: true
         });
     } catch (_) { }
 
@@ -16082,19 +15947,6 @@ function createPermanentSectionCopy(sourceSection) {
     try { bindPermanentSectionTipBehavior(copySection); } catch (_) { }
     updateNodeFullscreenButtons();
 
-    try {
-        const syncModule = window.CanvasObsidianGitSync;
-        if (syncModule && typeof syncModule.markDirty === 'function') {
-            syncModule.markDirty('permanent-copy-create', {
-                dirty: {
-                    canvasLayout: true,
-                    canvasFileRef: true,
-                    permanentAll: true
-                }
-            });
-        }
-    } catch (_) { }
-
     return copySection;
 }
 
@@ -16202,18 +16054,6 @@ function removePermanentSectionCopy(sectionEl) {
     try { updateCanvasScrollBounds(); } catch (_) { }
     try { updateScrollbarThumbs(); } catch (_) { }
 
-    try {
-        const syncModule = window.CanvasObsidianGitSync;
-        if (syncModule && typeof syncModule.markDirty === 'function') {
-            syncModule.markDirty('permanent-copy-remove', {
-                dirty: {
-                    canvasLayout: true,
-                    canvasFileRef: true,
-                    permanentAll: true
-                }
-            });
-        }
-    } catch (_) { }
 }
 
 function makePermanentSectionDraggable(permanentSection) {
@@ -16385,9 +16225,7 @@ function savePermanentSectionPosition(sectionEl) {
     // Canonical layout persistence is bcs:canvas node geometry.
     try {
         saveTempNodes({
-            immediate: true,
-            suppressSyncMarkDirty: true,
-            syncDirty: { canvasLayout: true }
+            immediate: true
         });
     } catch (_) { }
 }
@@ -16614,16 +16452,6 @@ function makePermanentSectionResizable(element) {
                     isResizing = false;
                     element.classList.remove('resizing');
                     savePermanentSectionPosition(element);
-                    try {
-                        const syncModule = window.CanvasObsidianGitSync;
-                        if (syncModule && typeof syncModule.markDirty === 'function') {
-                            syncModule.markDirty('permanent-layout', {
-                                dirty: {
-                                    canvasLayout: true
-                                }
-                            });
-                        }
-                    } catch (_) { }
                     updateCanvasScrollBounds();
                     updateScrollbarThumbs();
                     document.removeEventListener('mousemove', onMouseMove);
@@ -19598,12 +19426,7 @@ function renderMdNode(node) {
     const saveEditorContent = () => {
         const changed = __syncMdNodeFromEditor(node, editor);
         if (changed) {
-            saveTempNodes({
-                syncDirty: {
-                    canvasLayout: true,
-                    blankIds: [node.id]
-                }
-            });
+            saveTempNodes();
         }
         try { if (undoManager) undoManager.scheduleRecord('save'); } catch (_) { }
     };
@@ -26397,17 +26220,6 @@ function setupTempSectionTreeInteractions(treeContainer, section) {
             saveTempExpandState();
         }
 
-        try {
-            const syncModule = window.CanvasObsidianGitSync;
-            if (syncModule && typeof syncModule.markDirty === 'function') {
-                syncModule.markDirty('temp-expand', {
-                    dirty: {
-                        temporaryIds: [section.id]
-                    }
-                });
-            }
-        } catch (_) { }
-
         e.preventDefault();
         e.stopImmediatePropagation(); // 阻止 attachTreeEvents 再次处理导致双重切换
     });
@@ -26683,9 +26495,7 @@ async function resolvePermanentPayload(nodeIds) {
     try {
         const bridge = window.CanvasProtocolBridge;
         const tree = bridge && typeof bridge.readPermanentTreeSnapshotFromBcs === 'function'
-            ? await bridge.readPermanentTreeSnapshotFromBcs({
-                assumeCleanWhenMissingState: true
-            })
+            ? await bridge.readPermanentTreeSnapshotFromBcs()
             : null;
         const nodeById = new Map();
         const stack = Array.isArray(tree) ? tree.slice() : [];
@@ -28302,16 +28112,6 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         const normalized = syncTipDraft({ normalizeEditorHtml });
         const key = getStorageKey();
         __persistPermanentTipStorageValue(key, normalized);
-        try {
-            const syncModule = window.CanvasObsidianGitSync;
-            if (syncModule && typeof syncModule.markDirty === 'function') {
-                syncModule.markDirty('permanent-description', {
-                    dirty: {
-                        permanentAll: true
-                    }
-                });
-            }
-        } catch (_) { }
     };
 
     const exitEditingTip = ({ commit }) => {
@@ -28899,38 +28699,11 @@ function setupCanvasEventListeners() {
     // 工具栏按钮
     const importBtn = document.getElementById('importCanvasBtn');
     const exportBtn = document.getElementById('exportCanvasBtn');
-    const syncBtn = document.getElementById('syncCanvasBtn');
     const importOtherBtn = document.getElementById('importCanvasOtherBtn');
     const exportOtherBtn = document.getElementById('exportCanvasOtherBtn');
-    const syncOtherBtn = document.getElementById('syncCanvasOtherBtn');
-
-    const openObsidianGitSyncPanel = (anchorEl = null) => {
-        try {
-            try {
-                const manageModal = document.getElementById('canvasManageModal');
-                if (manageModal) manageModal.style.display = 'none';
-            } catch (_) { }
-            try {
-                const otherManageModal = document.getElementById('canvasOtherManageModal');
-                if (otherManageModal) otherManageModal.style.display = 'none';
-            } catch (_) { }
-
-            const syncModule = window.CanvasObsidianGitSync;
-            if (syncModule && typeof syncModule.openPanel === 'function') {
-                syncModule.openPanel({ anchorEl });
-                return;
-            }
-        } catch (_) { }
-        try { showToast('同步模块尚未就绪，请稍后重试'); } catch (_) { }
-    };
 
     if (importBtn) importBtn.addEventListener('click', showImportDialog);
     if (exportBtn) exportBtn.addEventListener('click', exportCanvas);
-    if (syncBtn) {
-        syncBtn.addEventListener('click', (event) => {
-            openObsidianGitSyncPanel(event ? event.currentTarget : syncBtn);
-        });
-    }
     if (importOtherBtn) {
         importOtherBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -28945,13 +28718,6 @@ function setupCanvasEventListeners() {
             exportCanvas();
         });
     }
-    if (syncOtherBtn) {
-        syncOtherBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openObsidianGitSyncPanel(e ? e.currentTarget : syncOtherBtn);
-        });
-    }
-
     // 清除菜单按钮 - 显示/隐藏下拉菜单
     const clearMenuBtn = document.getElementById('clearMenuBtn');
     const clearDropdown = document.getElementById('canvasClearDropdown');
@@ -30019,80 +29785,6 @@ function showImportDialog() {
     document.getElementById('canvasFolderInput').addEventListener('change', handleFolderImport);
 }
 
-function showCloudImportConfirmDialog() {
-    const { isEn } = __getLang();
-    return new Promise((resolve) => {
-        const dialog = document.createElement('div');
-        dialog.className = 'import-dialog import-mode-dialog';
-        dialog.id = 'canvasCloudImportConfirmDialog';
-
-        const title = isEn ? 'Cloud Import' : '云端导入';
-        const desc = isEn
-            ? 'This mode follows import rules: cloud permanent sections are converted into temporary snapshot sections and will not overwrite browser bookmarks.'
-            : '该模式沿用导入规则：云端永久栏目会自动降级为临时快照栏目，不会覆盖浏览器书签树。';
-        const hint = isEn
-            ? 'If repository is not configured, sync settings will open automatically.'
-            : '如果仓库未配置，将自动跳转到“同步”配置页。';
-
-        dialog.innerHTML = `
-            <div class="import-dialog-content import-mode-dialog-content">
-                <div class="import-dialog-header">
-                    <h3>${title}</h3>
-                    <button class="import-dialog-close" id="closeCloudImportConfirmDialog">&times;</button>
-                </div>
-                <div class="import-dialog-body import-mode-dialog-body">
-                    <div class="import-cloud-note">${desc}</div>
-                    <div class="import-mode-subtitle">${hint}</div>
-                    <div class="import-mode-actions">
-                        <button type="button" class="import-mode-btn import-mode-btn-cancel" id="cloudImportCancelBtn">${isEn ? 'Cancel' : '取消'}</button>
-                        <button type="button" class="import-mode-btn import-mode-btn-confirm" id="cloudImportConfirmBtn">${isEn ? 'Continue' : '继续导入'}</button>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(dialog);
-
-        const cleanup = (result) => {
-            try { dialog.remove(); } catch (_) { }
-            resolve(result);
-        };
-
-        const closeBtn = document.getElementById('closeCloudImportConfirmDialog');
-        if (closeBtn) closeBtn.addEventListener('click', () => cleanup(false));
-
-        const cancelBtn = document.getElementById('cloudImportCancelBtn');
-        if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(false));
-
-        const confirmBtn = document.getElementById('cloudImportConfirmBtn');
-        if (confirmBtn) confirmBtn.addEventListener('click', () => cleanup(true));
-
-        dialog.addEventListener('click', (event) => {
-            if (event.target === dialog) {
-                cleanup(false);
-            }
-        });
-
-        dialog.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape') {
-                event.preventDefault();
-                cleanup(false);
-            }
-        });
-    });
-}
-
-function __isCloudImportRepoConfigError(message) {
-    const text = String(message || '');
-    return /仓库未就绪|Owner\s*\/\s*Repo 未配置|Token 未配置|仓库未配置|GitHub Token 未配置|GitHub 仓库已禁用/i.test(text);
-}
-
-function __parseCloudSnapshotStorageValue(rawValue) {
-    if (typeof rawValue !== 'string') return rawValue;
-    const parsed = __safeParseCanvasStorageJson(rawValue);
-    return parsed !== null ? parsed : rawValue;
-}
-
 function __normalizeCanvasTempStatePayloadForImport(stateInput, options = {}) {
     const parsedState = typeof stateInput === 'string'
         ? __safeParseCanvasStorageJson(stateInput)
@@ -30224,7 +29916,7 @@ function __buildCanvasStateBackupViewFromProtocolState(stateInput) {
     };
 }
 
-function __buildCanonicalSyncContract(input = {}, options = {}) {
+function __buildCanonicalImportContract(input = {}, options = {}) {
     const payload = (input && typeof input === 'object') ? input : {};
     const primaryInput = (payload.primaryState && typeof payload.primaryState === 'object') ? payload.primaryState : {};
     const storageInput = (payload.storage && typeof payload.storage === 'object') ? payload.storage : {};
@@ -30277,7 +29969,7 @@ function __buildCanonicalSyncContract(input = {}, options = {}) {
 
     return {
         version: 1,
-        schema: 'bookmark-canvas.sync-contract.v1',
+        schema: 'bookmark-canvas.import-contract.v1',
         source,
         resolvedTempSource,
         tempState: canonicalTempState,
@@ -30286,35 +29978,7 @@ function __buildCanonicalSyncContract(input = {}, options = {}) {
     };
 }
 
-function __buildCanonicalSyncContractFromCloudSnapshot(snapshot) {
-    const payload = snapshot && typeof snapshot === 'object' ? snapshot : null;
-    const data = payload && payload.data && typeof payload.data === 'object' ? payload.data : null;
-    if (!data) {
-        throw new Error('云端快照格式无效：缺少 data');
-    }
-
-    const storage = {};
-    Object.keys(data).forEach((key) => {
-        storage[key] = __parseCloudSnapshotStorageValue(data[key]);
-    });
-
-    const canonical = __buildCanonicalSyncContract({
-        storage,
-        primaryState: {
-            permanentTreeSnapshot: payload.permanentTreeSnapshot
-        },
-        source: 'cloud-snapshot'
-    }, {
-        source: 'cloud-snapshot',
-        preserveRaw: true
-    });
-    if (!canonical || !canonical.tempState) {
-        throw new Error('云端快照缺少画布临时栏目数据');
-    }
-    return canonical;
-}
-
-function __buildImportPayloadFromCanonicalSyncContract(contractInput, options = {}) {
+function __buildImportPayloadFromCanonicalImportContract(contractInput, options = {}) {
     const contract = (contractInput && typeof contractInput === 'object') ? contractInput : null;
     if (!contract || !contract.tempState) return null;
     const includeSource = !!(options && options.includeSource);
@@ -30331,7 +29995,7 @@ function __buildImportPayloadFromCanonicalSyncContract(contractInput, options = 
 }
 
 function __resolveCanonicalTempStateForShadowAudit(tempStateInput, storageInput, primaryStateInput) {
-    const canonical = __buildCanonicalSyncContract({
+    const canonical = __buildCanonicalImportContract({
         tempState: tempStateInput,
         storage: storageInput,
         primaryState: primaryStateInput,
@@ -30353,7 +30017,7 @@ function __resolveCanonicalTempStateForShadowAudit(tempStateInput, storageInput,
 }
 
 function __buildCanonicalImportShadowPayload(tempStateInput, storageInput, primaryStateInput) {
-    const canonical = __buildCanonicalSyncContract({
+    const canonical = __buildCanonicalImportContract({
         tempState: tempStateInput,
         storage: storageInput,
         primaryState: primaryStateInput,
@@ -30362,19 +30026,18 @@ function __buildCanonicalImportShadowPayload(tempStateInput, storageInput, prima
         source: 'shadow-audit'
     });
     if (!canonical || !canonical.tempState) return null;
-    return __buildImportPayloadFromCanonicalSyncContract(canonical, { includeSource: true });
+    return __buildImportPayloadFromCanonicalImportContract(canonical, { includeSource: true });
 }
 
 function __normalizeCanonicalImportAuditContext(channelInput, contextInput) {
     const context = (contextInput && typeof contextInput === 'object') ? contextInput : {};
     const normalizedChannel = String(channelInput || context.channel || 'unknown').trim() || 'unknown';
-    const normalizedSource = String(context.source || '').trim() || (normalizedChannel === 'sync-import' ? 'folder' : 'unknown');
-    const normalizedTrigger = String(context.trigger || '').trim() || (normalizedChannel === 'sync-import' ? 'sync-import' : 'manual-import');
+    const normalizedSource = String(context.source || '').trim() || 'unknown';
+    const normalizedTrigger = String(context.trigger || '').trim() || 'manual-import';
     return {
         version: 1,
         channel: normalizedChannel,
         source: normalizedSource,
-        syncMode: context.syncMode === true || normalizedChannel === 'sync-import',
         trigger: normalizedTrigger
     };
 }
@@ -30389,7 +30052,6 @@ function __normalizeCanonicalImportAuditSink(input) {
         mismatch: Math.max(0, Number(raw.mismatch) || 0),
         byChannel: {
             manualImport: Math.max(0, Number(rawByChannel.manualImport) || 0),
-            syncImport: Math.max(0, Number(rawByChannel.syncImport) || 0),
             unknown: Math.max(0, Number(rawByChannel.unknown) || 0)
         },
         mismatchByType: {
@@ -30460,7 +30122,6 @@ function __runCanonicalImportShadowAudit(channel, tempStateInput, storageInput, 
         ts: Date.now(),
         channel: auditContext.channel,
         source: auditContext.source,
-        syncMode: auditContext.syncMode === true,
         trigger: auditContext.trigger,
         legacy: {
             sig: legacySignature,
@@ -30498,8 +30159,6 @@ function __runCanonicalImportShadowAudit(channel, tempStateInput, storageInput, 
         sink.total += 1;
         if (auditContext.channel === 'manual-import') {
             sink.byChannel.manualImport += 1;
-        } else if (auditContext.channel === 'sync-import') {
-            sink.byChannel.syncImport += 1;
         } else {
             sink.byChannel.unknown += 1;
         }
@@ -30545,62 +30204,6 @@ function __collectCanvasTempStateForExport() {
     });
 }
 
-function __buildImportPayloadFromCloudSnapshot(snapshot) {
-    const canonical = __buildCanonicalSyncContractFromCloudSnapshot(snapshot);
-    const payload = __buildImportPayloadFromCanonicalSyncContract(canonical);
-    if (!payload || !payload.tempState) {
-        throw new Error('云端快照缺少画布临时栏目数据');
-    }
-    return payload;
-}
-
-async function importCloudSnapshotAsTemporary() {
-    const { isEn } = __getLang();
-    const syncModule = window.CanvasObsidianGitSync;
-    if (!syncModule || typeof syncModule.readRemoteSnapshotForImport !== 'function') {
-        throw new Error(isEn ? 'Sync module is not ready.' : '同步模块尚未就绪。');
-    }
-
-    showCanvasToast(isEn ? 'Loading cloud snapshot...' : '正在读取云端快照...', 'info');
-    const remote = await syncModule.readRemoteSnapshotForImport();
-    const importPayload = __buildImportPayloadFromCloudSnapshot(remote && remote.snapshot ? remote.snapshot : null);
-
-    __setCanvasImportRuntimeMode('permanent');
-
-    const sourceName = (remote && remote.path)
-        ? `Cloud Sync (${remote.path})`
-        : (isEn ? 'Cloud Sync Snapshot' : '云端同步快照');
-
-    __processImportedPackage(
-        importPayload.tempState,
-        importPayload.storage,
-        importPayload.primaryState,
-        sourceName,
-        {
-            source: 'cloud',
-            trigger: 'manual-cloud-import',
-            syncMode: false
-        }
-    );
-
-    if (!importPayload.primaryState || !importPayload.primaryState.permanentTreeSnapshot) {
-        showCanvasToast(
-            isEn
-                ? 'Imported cloud data without permanent tree snapshot. Only temporary/layout data was applied.'
-                : '云端快照未包含永久栏目树，已仅导入临时栏目与布局数据。',
-            'warning'
-        );
-        return;
-    }
-
-    showCanvasToast(
-        isEn
-            ? 'Cloud snapshot imported as temporary sections.'
-            : '云端快照已按临时栏目导入。',
-        'success'
-    );
-}
-
 async function handleFileImport(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -30636,8 +30239,7 @@ async function handleFileImport(e) {
 
             __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
                 source: type === 'package-archive' ? 'zip' : 'json',
-                trigger: 'manual-file-import',
-                syncMode: false
+                trigger: 'manual-file-import'
             });
         } else {
             const text = await file.text();
@@ -30701,8 +30303,7 @@ async function handleFolderImport(e) {
 
         __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
             source: 'folder',
-            trigger: 'manual-folder-import',
-            syncMode: false
+            trigger: 'manual-folder-import'
         });
 
         document.getElementById('canvasImportDialog').remove();
@@ -31982,78 +31583,10 @@ function __getPermanentChromeTreeForStorage() {
     });
 }
 
-function __buildBcsPermCopyStateKey(copyId) {
-    const id = String(copyId || '').trim();
-    return id ? `${BCS_PERM_COPY_STATE_PREFIX}${id}` : '';
-}
-
-function __isBcsStatePayload(payload) {
-    return !!(
-        payload
-        && typeof payload === 'object'
-        && !Array.isArray(payload)
-        && (
-            Object.prototype.hasOwnProperty.call(payload, 'signature')
-            || Object.prototype.hasOwnProperty.call(payload, 'lastSyncedSignature')
-            || Object.prototype.hasOwnProperty.call(payload, 'dirty')
-            || Object.prototype.hasOwnProperty.call(payload, 'filePath')
-            || __isBcsGuardedPayload(payload)
-        )
-    );
-}
-
-function __normalizeBcsStatePayload(rawInput) {
-    const raw = rawInput && typeof rawInput === 'object' ? rawInput : {};
-    const signature = String(
-        Object.prototype.hasOwnProperty.call(raw, 'signature') ? raw.signature : raw._signature || ''
-    );
-    const lastSyncedSignature = String(
-        Object.prototype.hasOwnProperty.call(raw, 'lastSyncedSignature')
-            ? raw.lastSyncedSignature
-            : raw._lastSyncedSignature || ''
-    );
-    const dirty = Object.prototype.hasOwnProperty.call(raw, 'dirty')
-        ? raw.dirty === true
-        : raw._dirty === true;
-    const filePath = String(
-        Object.prototype.hasOwnProperty.call(raw, 'filePath') ? raw.filePath : raw._filePath || ''
-    );
-    return {
-        schemaVersion: Number(raw.schemaVersion) || 1,
-        signature,
-        lastSyncedSignature,
-        dirty,
-        filePath,
-        updatedAt: Number(raw.updatedAt) || 0
-    };
-}
-
-function __buildBcsStatePayload(syncPayload, prevStateInput, options = {}) {
-    const prevState = __normalizeBcsStatePayload(prevStateInput);
-    const signature = options && options.signature
-        ? String(options.signature)
-        : __buildBcsSignature(syncPayload && typeof syncPayload === 'object' ? syncPayload : {});
-    let lastSyncedSignature = String(prevState.lastSyncedSignature || '');
-    if (options && options.assumeClean) {
-        lastSyncedSignature = signature;
-    }
-    const dirty = !!signature && signature !== lastSyncedSignature;
-    return {
-        schemaVersion: 1,
-        signature,
-        lastSyncedSignature,
-        dirty,
-        filePath: typeof options.filePath === 'string' ? options.filePath : String(prevState.filePath || ''),
-        updatedAt: Date.now()
-    };
-}
-
 function __readPermanentContentPayload(rawInput) {
     if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) return null;
-    const stripped = __isBcsGuardedPayload(rawInput) ? __stripBcsGuardFields(rawInput) : rawInput;
-    if (!stripped || typeof stripped !== 'object' || Array.isArray(stripped)) return null;
-    if (stripped.sectionType && String(stripped.sectionType) !== 'permanent') return null;
-    return __cloneCanvasProtocolJson(stripped) || null;
+    if (rawInput.sectionType && String(rawInput.sectionType) !== 'permanent') return null;
+    return __cloneCanvasProtocolJson(rawInput) || null;
 }
 
 function __coercePermanentTreeRootInput(treeInput) {
@@ -32192,7 +31725,7 @@ function __buildPermanentCopyAnchorContentPayload(copyIdInput, options = {}) {
         || 1;
     const slot = toAlphaLabel(displayIndex + 1) || 'B';
     const inheritFrom = __normalizeCanvasMarkdownPath(options && options.inheritFrom || '')
-        || __buildPermanentSectionMarkdownRelativePath(1, isEn, __getBcsExportFormatSync());
+        || __buildPermanentSectionMarkdownRelativePath(1, isEn, __getBcsExportFormatCached());
     return {
         format: __CANVAS_SECTION_JSON_FORMAT,
         schemaVersion: 2,
@@ -32243,16 +31776,9 @@ function __buildPermanentMainSyncPayload(contentInput) {
     return payload;
 }
 
-function __buildPermanentCopySyncPayload(contentInput) {
-    const content = __readPermanentContentPayload(contentInput);
-    if (!content || content.fileRole !== 'copy-anchor') return null;
-    const payload = __cloneCanvasProtocolJson(content) || {};
-    delete payload.tree;
-    return payload;
-}
 
 async function __readPermanentMainContentFromBcs(options = {}) {
-    const storage = await __bcsStorageGet([BCS_PERM_MAIN_KEY, BCS_PERM_MAIN_STATE_KEY]);
+    const storage = await __bcsStorageGet([BCS_PERM_MAIN_KEY]);
     const raw = storage ? storage[BCS_PERM_MAIN_KEY] : null;
     const content = __readPermanentContentPayload(raw);
     if (!content || !content.tree || typeof content.tree !== 'object') {
@@ -32301,29 +31827,11 @@ async function __writePermanentMainContentToBcs(contentInput, options = {}) {
             : '永久栏目主文件：书签树的规范真相源。')),
         tree: normalizedTree[0]
     };
-    const syncPayload = __buildPermanentMainSyncPayload(nextContent);
-    if (!syncPayload) return null;
-    const storage = await __bcsStorageGet([BCS_PERM_MAIN_KEY, BCS_PERM_MAIN_STATE_KEY]);
-    const prevMain = storage ? storage[BCS_PERM_MAIN_KEY] : null;
-    const prevState = storage && storage[BCS_PERM_MAIN_STATE_KEY]
-        ? storage[BCS_PERM_MAIN_STATE_KEY]
-        : (__isBcsGuardedPayload(prevMain) ? prevMain : null);
-    const filePath = typeof options.filePath === 'string'
-        ? options.filePath
-        : String(__normalizeBcsStatePayload(prevState).filePath || (__isBcsGuardedPayload(prevMain) ? prevMain._filePath || '' : ''));
-    const nextState = __buildBcsStatePayload(syncPayload, prevState, {
-        filePath,
-        assumeClean: !!(options && options.assumeClean)
-    });
-
     __bcsStorageSet({
-        [BCS_PERM_MAIN_KEY]: nextContent,
-        [BCS_PERM_MAIN_STATE_KEY]: nextState
+        [BCS_PERM_MAIN_KEY]: nextContent
     }, { immediate: options && options.immediate !== false });
     return {
-        content: nextContent,
-        state: nextState,
-        syncPayload
+        content: nextContent
     };
 }
 
@@ -32336,92 +31844,38 @@ async function __migratePermanentMainContentFromChromeTree(options = {}) {
     const content = __buildPermanentPrimaryContentPayloadFromTree(chromeTree);
     if (!content || !content.tree) return null;
     return __writePermanentMainContentToBcs(content, {
-        immediate: true,
-        assumeClean: !!(options && options.assumeClean),
-        filePath: typeof options.filePath === 'string' ? options.filePath : ''
+        immediate: true
     });
 }
 
 async function __ensurePermanentMainContentInBcs(options = {}) {
     const existing = await __readPermanentMainContentFromBcs();
-    if (existing && !(options && options.forceMigrateFromChrome === true)) {
-        const storage = await __bcsStorageGet([BCS_PERM_MAIN_KEY, BCS_PERM_MAIN_STATE_KEY]);
-        const rawMain = storage ? storage[BCS_PERM_MAIN_KEY] : null;
-        if (__isBcsGuardedPayload(rawMain) || !__isBcsStatePayload(storage && storage[BCS_PERM_MAIN_STATE_KEY])) {
-            await __writePermanentMainContentToBcs(existing, {
-                immediate: true,
-                assumeClean: !!(options && options.assumeCleanWhenMissingState)
-            });
-        }
-        return existing;
-    }
+    if (existing && !(options && options.forceMigrateFromChrome === true)) return existing;
 
-    const storage = await __bcsStorageGet([BCS_PERM_MAIN_KEY, BCS_PERM_MAIN_STATE_KEY]);
-    const prevMain = storage ? storage[BCS_PERM_MAIN_KEY] : null;
-    const filePath = __isBcsGuardedPayload(prevMain) ? String(prevMain._filePath || '') : '';
-    const migrated = await __migratePermanentMainContentFromChromeTree({
-        assumeClean: !!(options && options.assumeClean),
-        filePath
-    });
+    const migrated = await __migratePermanentMainContentFromChromeTree();
     return migrated && migrated.content ? migrated.content : null;
 }
 
-async function __buildPermanentMainSyncPayloadFromBcs(options = {}) {
-    const content = await __ensurePermanentMainContentInBcs({
-        assumeCleanWhenMissingState: !!(options && options.assumeCleanWhenMissingState)
-    });
-    return __buildPermanentMainSyncPayload(content);
-}
 
-async function __readPermanentTreeSnapshotFromBcs(options = {}) {
-    const content = await __ensurePermanentMainContentInBcs({
-        assumeCleanWhenMissingState: !!(options && options.assumeCleanWhenMissingState)
-    });
+async function __readPermanentTreeSnapshotFromBcs() {
+    const content = await __ensurePermanentMainContentInBcs();
     if (!content || !content.tree) return null;
     const tree = __cloneCanvasProtocolJson([content.tree]);
     return Array.isArray(tree) ? tree : null;
 }
 
-async function __replacePermanentMainContentFromSyncPayload(payloadInput, options = {}) {
-    const payload = __readPermanentContentPayload(payloadInput);
-    if (!payload || payload.sectionType !== 'permanent' || payload.fileRole === 'copy-anchor') return null;
-    const sourceTree = payload.tree && typeof payload.tree === 'object' ? payload.tree : null;
-    if (!sourceTree) return null;
-    const content = {
-        format: payload.format || __CANVAS_SECTION_JSON_FORMAT,
-        schemaVersion: Number(payload.schemaVersion) || 2,
-        sectionType: 'permanent',
-        slot: String(payload.slot || 'A'),
-        title: String(payload.title || __getPermanentSectionDisplayTitle(__getLang().isEn)),
-        descriptionMd: String(payload.descriptionMd == null ? '' : payload.descriptionMd),
-        fileRole: 'primary',
-        fileNote: String(payload.fileNote || (__getLang().isEn
-            ? 'Primary permanent file: canonical bookmark tree source.'
-            : '永久栏目主文件：书签树的规范真相源。')),
-        tree: (__normalizePermanentTreeSnapshotForLocalStorage(sourceTree) || [{ title: '', children: [] }])[0]
-    };
-    return __writePermanentMainContentToBcs(content, {
-        immediate: true,
-        assumeClean: !!(options && options.assumeClean),
-        filePath: typeof options.filePath === 'string' ? options.filePath : ''
-    });
-}
 
 async function __writePermanentTreeSnapshotAfterChromeApply(localTreeInput, options = {}) {
     const localNormalized = __normalizePermanentTreeSnapshotForLocalStorage(localTreeInput);
     if (!localNormalized) return null;
     const baseContent = __readPermanentContentPayload(options && options.baseContent);
-    const previous = baseContent || await __ensurePermanentMainContentInBcs({
-        assumeCleanWhenMissingState: true
-    });
+    const previous = baseContent || await __ensurePermanentMainContentInBcs();
     const content = {
         ...(previous && typeof previous === 'object' ? previous : {}),
         tree: localNormalized[0]
     };
     return __writePermanentMainContentToBcs(content, {
-        immediate: true,
-        assumeClean: !!(options && options.assumeClean),
-        filePath: typeof options.filePath === 'string' ? options.filePath : ''
+        immediate: true
     });
 }
 
@@ -32473,9 +31927,7 @@ function __normalizePermanentLocalMutationNode(nodeInput) {
 }
 
 async function __mutatePermanentMainContentInBcs(mutator, options = {}) {
-    const previous = await __ensurePermanentMainContentInBcs({
-        assumeCleanWhenMissingState: true
-    });
+    const previous = await __ensurePermanentMainContentInBcs();
     if (!previous || !previous.tree) {
         throw new Error('[Permanent JSON] main content is unavailable.');
     }
@@ -32489,14 +31941,11 @@ async function __mutatePermanentMainContentInBcs(mutator, options = {}) {
         return { content: nextContent, previousContent, changed: false };
     }
     const writeResult = await __writePermanentMainContentToBcs(nextContent, {
-        immediate: true,
-        assumeClean: !!(options && options.assumeClean),
-        filePath: typeof options.filePath === 'string' ? options.filePath : ''
+        immediate: true
     });
     return {
         ...(mutation && typeof mutation === 'object' ? mutation : {}),
         content: writeResult && writeResult.content ? writeResult.content : nextContent,
-        state: writeResult && writeResult.state ? writeResult.state : null,
         previousContent,
         changed: true
     };
@@ -32506,9 +31955,7 @@ async function __restorePermanentMainContentSnapshot(contentInput, options = {})
     const content = __readPermanentContentPayload(contentInput);
     if (!content || !content.tree) return null;
     return __writePermanentMainContentToBcs(content, {
-        immediate: true,
-        assumeClean: !!(options && options.assumeClean),
-        filePath: typeof options.filePath === 'string' ? options.filePath : ''
+        immediate: true
     });
 }
 
@@ -32869,9 +32316,6 @@ async function __applyPermanentBookmarkEventsToBcs(eventsInput, options = {}) {
             noops: noopCount,
             reason: String(options && options.reason || '')
         };
-    }, {
-        assumeClean: !!(options && options.assumeClean),
-        filePath: typeof options.filePath === 'string' ? options.filePath : ''
     });
 
     return {
@@ -32884,29 +32328,15 @@ async function __applyPermanentBookmarkEventsToBcs(eventsInput, options = {}) {
 async function __syncPermanentMainTreeFromChromeBookmarks(options = {}) {
     const chromeTree = await __getPermanentChromeTreeForStorage();
     if (!chromeTree) return null;
-    const previous = await __ensurePermanentMainContentInBcs({
-        assumeCleanWhenMissingState: true
-    });
+    const previous = await __ensurePermanentMainContentInBcs();
     const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(chromeTree);
     if (!normalizedTree) return null;
     const content = {
         ...(previous && typeof previous === 'object' ? previous : __buildPermanentPrimaryContentPayloadFromTree(normalizedTree)),
         tree: normalizedTree[0]
     };
-    const nextSyncPayload = __buildPermanentMainSyncPayload(content);
-    if (nextSyncPayload) {
-        const nextSignature = __buildBcsSignature(nextSyncPayload);
-        try {
-            const storage = await __bcsStorageGet([BCS_PERM_MAIN_STATE_KEY]);
-            const prevState = __normalizeBcsStatePayload(storage ? storage[BCS_PERM_MAIN_STATE_KEY] : null);
-            if (nextSignature && prevState.signature && nextSignature === prevState.signature) {
-                return { skipped: true, content, state: prevState, syncPayload: nextSyncPayload };
-            }
-        } catch (_) { }
-    }
     return __writePermanentMainContentToBcs(content, {
-        immediate: true,
-        assumeClean: !!(options && options.assumeClean)
+        immediate: true
     });
 }
 
@@ -33620,13 +33050,13 @@ function __htmlToMarkdown(html, options = {}) {
 function __flushMdEditorsForExport(options = {}) {
     const editors = document.querySelectorAll('.md-canvas-node .md-canvas-editor');
     if (!editors || !editors.length) return;
-    const suppressSyncMarkDirty = !!(options && options.suppressSyncMarkDirty);
+    const skipActiveEditor = !!(options && options.skipActiveEditor);
 
     let changed = false;
     editors.forEach((editor) => {
         if (!editor) return;
         const host = editor.closest('.md-canvas-node');
-        if (suppressSyncMarkDirty) {
+        if (skipActiveEditor) {
             const activeEl = document.activeElement;
             const isActiveEditor = !!(activeEl && (activeEl === editor || editor.contains(activeEl)));
             const isEditingNode = !!(host && host.classList && host.classList.contains('editing'));
@@ -33645,7 +33075,7 @@ function __flushMdEditorsForExport(options = {}) {
     });
 
     if (changed) {
-        try { saveTempNodes({ suppressSyncMarkDirty }); } catch (_) { }
+        try { saveTempNodes(); } catch (_) { }
     }
 }
 
@@ -34710,7 +34140,7 @@ function __buildCanvasImportRulesDocument(options = {}) {
         '',
         '> 返回文档索引：[docs/README.md](./README.md)',
         '',
-        '> 适用范围：Obsidian 导入/拉取到插件，以及插件推送到云端时的结构约束与编辑约束。',
+        '> 适用范围：Obsidian 导出与导入时的结构约束与编辑约束。',
         '',
         `> 当前导出根目录：\`${exportRoot}\``,
         `> 当前画布文件：\`${exportRoot}/${canvasFileName}\``,
@@ -34941,7 +34371,7 @@ function __appendObsidianFilenameSuffix(stem, uniqueSeed = 'dup') {
     return `${truncated}${suffix}`;
 }
 
-function __resolveObsidianSyncDataFileExtension(exportFormatInput = 'visual') {
+function __resolveObsidianExportDataFileExtension(exportFormatInput = 'visual') {
     return __normalizeCanvasObsidianExportFormat(exportFormatInput, 'visual') === 'json' ? 'json' : 'md';
 }
 
@@ -34959,7 +34389,7 @@ function __buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn, export
         ? `${slotLabel}-PermanentBookmarks`
         : `${slotLabel}书签树（永久栏目）`;
     const fileName = __sanitizeFilename(fixedBaseName);
-    const fileExt = __resolveObsidianSyncDataFileExtension(exportFormat);
+    const fileExt = __resolveObsidianExportDataFileExtension(exportFormat);
     return `${folder}/${fileName}.${fileExt}`;
 }
 
@@ -34981,7 +34411,7 @@ function __getImportContainerLabelFromNode(node) {
 }
 
 
-function __normalizeObsidianSyncExportRoot(path, isEn, options = {}) {
+function __normalizeObsidianExportRoot(path, isEn, options = {}) {
     const allowEmpty = !!(options && options.allowEmpty);
     const fallback = '书签画布';
     const normalized = String(path == null ? '' : path)
@@ -34999,7 +34429,7 @@ function __normalizeObsidianSyncExportRoot(path, isEn, options = {}) {
     return migrated || fallback;
 }
 
-function __joinSyncExportPath(root, rel) {
+function __joinObsidianExportPath(root, rel) {
     const normalizedRoot = String(root || '').replace(/^\/+/, '').replace(/\/+$/, '');
     const normalizedRel = String(rel || '').replace(/^\/+/, '');
     return normalizedRoot ? `${normalizedRoot}/${normalizedRel}` : normalizedRel;
@@ -35048,397 +34478,6 @@ function __resolveCanvasNativeTextNodeBody(node) {
     }
 }
 
-function __buildObsidianSyncCanvasData({
-    exportRoot,
-    permanentMdRel,
-    copyFileMap,
-    tempSectionMdPaths,
-    blankTextNodes
-}) {
-    const normalizedExportRoot = String(exportRoot || '')
-        .replace(/\\/g, '/')
-        .replace(/^\/+/, '')
-        .replace(/\/+$/, '')
-        .replace(/\/+/g, '/');
-    const withPrefix = (relPath) => {
-        const normalizedRel = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
-        return normalizedExportRoot ? `${normalizedExportRoot}/${normalizedRel}` : normalizedRel;
-    };
-    const canvasData = { nodes: [], edges: [] };
-
-    const permanentSectionEl = document.getElementById('permanentSection');
-    const permanentLeft = permanentSectionEl ? (parseFloat(permanentSectionEl.style.left) || 0) : 0;
-    const permanentTop = permanentSectionEl ? (parseFloat(permanentSectionEl.style.top) || 0) : 0;
-    const permanentW = permanentSectionEl ? (permanentSectionEl.offsetWidth || 600) : 600;
-    const permanentH = permanentSectionEl ? (permanentSectionEl.offsetHeight || 600) : 600;
-    canvasData.nodes.push({
-        id: 'permanent-section',
-        type: 'file',
-        x: Math.round(permanentLeft),
-        y: Math.round(permanentTop),
-        width: Math.round(permanentW),
-        height: Math.round(permanentH),
-        file: withPrefix(permanentMdRel),
-        color: '4'
-    });
-
-    try {
-        const copyIds = new Set();
-        const domPositions = new Map(); // copyId -> { left, top, width, height }
-        const storedPositions = new Map(); // copyId -> stored payload
-
-        try {
-            Object.keys((copyFileMap && typeof copyFileMap === 'object') ? copyFileMap : {}).forEach((id) => {
-                if (id) copyIds.add(String(id));
-            });
-        } catch (_) { }
-
-        try {
-            const stored = __readPermanentSectionCopies();
-            if (Array.isArray(stored)) {
-                stored.forEach((payload) => {
-                    if (!payload || !payload.id) return;
-                    const id = String(payload.id);
-                    if (!id) return;
-                    copyIds.add(id);
-                    storedPositions.set(id, payload);
-                });
-            }
-        } catch (_) { }
-
-        try {
-            const canvasContent = document.getElementById('canvasContent');
-            const scope = canvasContent || document;
-            scope.querySelectorAll('.permanent-bookmark-section.permanent-section-copy').forEach((el) => {
-                if (!el) return;
-                const copyId = el.dataset ? el.dataset.permanentSectionCopyId : null;
-                if (!copyId) return;
-                const id = String(copyId);
-                copyIds.add(id);
-                domPositions.set(id, {
-                    left: parseFloat(el.style.left) || 0,
-                    top: parseFloat(el.style.top) || 0,
-                    width: el.offsetWidth || permanentW,
-                    height: el.offsetHeight || permanentH
-                });
-            });
-        } catch (_) { }
-
-        const toNumber = (value, fallback) => {
-            const n = parseFloat(String(value == null ? '' : value));
-            return Number.isFinite(n) ? n : fallback;
-        };
-
-        Array.from(copyIds.values()).forEach((copyId) => {
-            if (!copyId) return;
-            const domPos = domPositions.get(copyId) || null;
-            const storedPos = storedPositions.get(copyId) || null;
-
-            const left = domPos
-                ? domPos.left
-                : (storedPos ? toNumber(storedPos.left, permanentLeft) : permanentLeft);
-            const top = domPos
-                ? domPos.top
-                : (storedPos ? toNumber(storedPos.top, permanentTop) : permanentTop);
-            const w = domPos
-                ? domPos.width
-                : (storedPos ? toNumber(storedPos.width, permanentW) : permanentW);
-            const h = domPos
-                ? domPos.height
-                : (storedPos ? toNumber(storedPos.height, permanentH) : permanentH);
-
-            canvasData.nodes.push({
-                id: `permanent-section-copy-${copyId}`,
-                type: 'file',
-                x: Math.round(left),
-                y: Math.round(top),
-                width: Math.round(w),
-                height: Math.round(h),
-                file: withPrefix((copyId && copyFileMap && copyFileMap[copyId]) ? copyFileMap[copyId] : permanentMdRel),
-                color: '4'
-            });
-        });
-    } catch (_) { }
-
-    try {
-        const exportMdBase = getBlankNodeDefaultSize();
-        (CanvasState.mdNodes || [])
-            .filter(n => n && n.subtype === 'import-container')
-            .forEach((n) => {
-                const label = __getImportContainerLabelFromNode(n);
-                const color = n && (n.colorHex || n.color) ? (n.colorHex || n.color) : null;
-                canvasData.nodes.push({
-                    id: n.id,
-                    type: 'group',
-                    x: Math.round(n.x || 0),
-                    y: Math.round(n.y || 0),
-                    width: Math.round(n.width || exportMdBase.width),
-                    height: Math.round(n.height || exportMdBase.height),
-                    ...(label ? { label } : {}),
-                    ...(color ? { color } : {})
-                });
-            });
-    } catch (_) { }
-
-    const exportTempBase = getTempSectionBaseSize();
-    const exportMdBase = getBlankNodeDefaultSize();
-
-    tempSectionMdPaths.forEach(({ id, rel }) => {
-        const section = CanvasState.tempSections.find(s => s && s.id === id);
-        if (!section) return;
-        canvasData.nodes.push({
-            id,
-            type: 'file',
-            x: Math.round(section.x || 0),
-            y: Math.round(section.y || 0),
-            width: Math.round(section.width || exportTempBase.width),
-            height: Math.round(section.height || exportTempBase.height),
-            file: withPrefix(rel),
-            color: section.color || null
-        });
-    });
-
-    (Array.isArray(blankTextNodes) ? blankTextNodes : []).forEach((node) => {
-        if (!node || !node.id) return;
-        const color = node.colorHex || node.color || null;
-        const body = __isCanvasNativeTextNode(node)
-            ? __resolveCanvasNativeTextNodeBody(node)
-            : __deriveMdNodeMarkdownSource(node);
-        canvasData.nodes.push({
-            id: node.id,
-            type: 'text',
-            x: Math.round(node.x || 0),
-            y: Math.round(node.y || 0),
-            width: Math.round(node.width || exportMdBase.width),
-            height: Math.round(node.height || exportMdBase.height),
-            text: __normalizeCanvasMarkdownSource(body || ''),
-            ...(color ? { color } : {})
-        });
-    });
-
-    if (Array.isArray(CanvasState.edges)) {
-        canvasData.edges = CanvasState.edges.map(edge => {
-            const dir = edge.direction || 'none';
-            const fromEnd = (dir === 'both') ? 'arrow' : 'none';
-            const toEnd = (dir === 'forward' || dir === 'both') ? 'arrow' : 'none';
-            const colorHex = edge.colorHex || presetToHex(edge.color) || null;
-            const base = {
-                id: edge.id,
-                fromNode: edge.fromNode,
-                fromSide: edge.fromSide || 'right',
-                toNode: edge.toNode,
-                toSide: edge.toSide || 'left',
-                fromEnd,
-                toEnd
-            };
-            if (edge.label && String(edge.label).trim()) base.label = edge.label;
-            if (colorHex) base.color = colorHex;
-            return base;
-        });
-    }
-
-    return canvasData;
-}
-
-function __formatObsidianCanvasJson(canvasDataInput) {
-    const canvasData = (canvasDataInput && typeof canvasDataInput === 'object') ? canvasDataInput : { nodes: [], edges: [] };
-    const nodes = Array.isArray(canvasData.nodes) ? canvasData.nodes : [];
-    const edges = Array.isArray(canvasData.edges) ? canvasData.edges : [];
-    const lines = ['{', '	"nodes":['];
-
-    nodes.forEach((node, index) => {
-        const suffix = index < (nodes.length - 1) ? ',' : '';
-        lines.push(`		${JSON.stringify(node)}${suffix}`);
-    });
-
-    lines.push('	],', '	"edges":[');
-
-    edges.forEach((edge, index) => {
-        const suffix = index < (edges.length - 1) ? ',' : '';
-        lines.push(`		${JSON.stringify(edge)}${suffix}`);
-    });
-
-    lines.push('	]', '}');
-    return lines.join('\n');
-}
-
-
-
-async function __buildObsidianSyncFiles(options = {}) {
-    const { isEn } = __getLang();
-    const exportFormat = __normalizeCanvasObsidianExportFormat(options && options.exportFormat, 'json');
-    const obsidianBookmarkIconMode = exportFormat === 'visual-no-icon' ? 'text' : 'favicon';
-    const exportRoot = __normalizeObsidianSyncExportRoot(options && options.exportRoot, isEn, { allowEmpty: true });
-
-    try { __flushMdEditorsForExport({ suppressSyncMarkDirty: true }); } catch (_) { }
-    try { saveTempNodes({ suppressSyncMarkDirty: true, skipUnchangedPersist: true }); } catch (_) { }
-    try { savePermanentSectionPosition(); } catch (_) { }
-    // Keep expand/collapse state in-sync with storage before we generate markdown (<details open>).
-    // This avoids missing the latest folder toggle due to debounce.
-    try { loadTempExpandState(); } catch (_) { }
-    try {
-        const canvasContent = document.getElementById('canvasContent');
-        const scope = canvasContent || document;
-        const hasPermanentTree = !!(scope && scope.querySelector && scope.querySelector('.permanent-bookmark-section .bookmark-tree'));
-        const hasTempNodes = !!(scope && scope.querySelector && scope.querySelector('.temp-canvas-node'));
-        if (hasPermanentTree || hasTempNodes) {
-            __flushCurrentPartitionExpandAndScrollState(__getCanvasViewPartitionKey());
-        }
-    } catch (_) { }
-
-    const files = [];
-    const pushTextFile = (relPath, content, meta = null) => {
-        const file = {
-            path: __joinSyncExportPath(exportRoot, relPath),
-            content: String(content == null ? '' : content)
-        };
-        if (meta && typeof meta === 'object') {
-            file.meta = Object.assign({}, meta);
-        }
-        files.push(file);
-    };
-
-    const permanentContent = await __ensurePermanentMainContentInBcs({
-        assumeCleanWhenMissingState: true
-    });
-    const bookmarkTree = permanentContent && permanentContent.tree
-        ? [permanentContent.tree]
-        : null;
-    if (!bookmarkTree) {
-        throw new Error(isEn ? 'Permanent JSON source is unavailable.' : '永久栏目 JSON 真相源不可用，无法生成同步文件。');
-    }
-    const permanentSyncPayload = __buildPermanentMainSyncPayload(permanentContent);
-    const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat);
-    const forceCollapsedForObsidian = true;
-    pushTextFile(
-        permanentMdRel,
-        exportFormat === 'json'
-            ? `${__buildCanvasSectionJsonCodeBlock(permanentSyncPayload)}\n`
-            : __buildPermanentBookmarksMarkdown(bookmarkTree, null, {
-                permanentSlot: 1,
-                bookmarkIconMode: obsidianBookmarkIconMode,
-                forceCollapsed: forceCollapsedForObsidian,
-                exportFormat
-            }),
-        { type: 'permanent', slot: 1 }
-    );
-
-    const copyFileMap = {};
-    try {
-        const copies = __ensurePermanentSectionCopyDisplayIndexes();
-        if (Array.isArray(copies)) {
-            copies.forEach(copy => {
-                const copyId = copy && copy.id;
-                const idx = __normalizePositiveInt(copy && copy.displayIndex);
-                if (!copyId) return;
-
-                const descKey = `${PERMANENT_COPY_TIP_STORAGE_PREFIX}${copyId}`;
-                let descObj = '';
-                try { descObj = localStorage.getItem(descKey) || ''; } catch (_) { }
-
-                const copyMdRel = __buildPermanentSectionMarkdownRelativePath(idx + 1, isEn, exportFormat);
-
-                copyFileMap[copyId] = copyMdRel;
-                const slot = idx ? (idx + 1) : null;
-                const copyAnchorPayload = __buildPermanentCopyAnchorContentPayload(copyId, {
-                    displayIndex: idx,
-                    inheritFrom: __joinSyncExportPath(exportRoot, permanentMdRel)
-                });
-                pushTextFile(
-                    copyMdRel,
-                    exportFormat === 'json'
-                        ? `${__buildCanvasSectionJsonCodeBlock(copyAnchorPayload)}\n`
-                        : __buildPermanentBookmarksMarkdownCopyEmbedMain(
-                            bookmarkTree,
-                            descObj,
-                            {
-                                permanentSlot: slot,
-                                copyId,
-                                bookmarkIconMode: obsidianBookmarkIconMode,
-                                forceCollapsed: forceCollapsedForObsidian,
-                                exportFormat
-                            },
-                            __joinSyncExportPath(exportRoot, permanentMdRel)
-                        ),
-                    { type: 'permanent', slot: slot || (idx + 1), copyId }
-                );
-            });
-        }
-    } catch (_) { }
-
-    const tempSectionMdPaths = [];
-    const usedTempRelPaths = new Set();
-    (CanvasState.tempSections || []).forEach((section) => {
-        if (!section || !section.id) return;
-
-        const seqLabel = getTempSectionLabel(section);
-        const rawTitle = section.title || (isEn ? 'Temp Section' : '临时栏目');
-        const fileTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
-        const safeTitle = __buildObsidianSafeFilenameStem(
-            fileTitle,
-            seqLabel || rawTitle || section.id || 'section',
-            section.id || fileTitle
-        );
-        let rel = __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn, exportFormat);
-        if (usedTempRelPaths.has(rel)) {
-            const slashIndex = rel.lastIndexOf('/');
-            const relFolder = slashIndex >= 0 ? rel.slice(0, slashIndex) : '';
-            const relFile = slashIndex >= 0 ? rel.slice(slashIndex + 1) : rel;
-            const relStem = relFile.replace(/\.(md|json)$/i, '');
-            const relExt = /\.json$/i.test(relFile) ? 'json' : 'md';
-            const uniqueStem = __appendObsidianFilenameSuffix(relStem, section.id || relStem || 'section');
-            const uniqueFile = `${uniqueStem}.${relExt}`;
-            rel = relFolder ? `${relFolder}/${uniqueFile}` : uniqueFile;
-        }
-        usedTempRelPaths.add(rel);
-
-        tempSectionMdPaths.push({ id: section.id, rel });
-
-        pushTextFile(rel, __buildTempSectionMarkdown(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat }), {
-            type: 'temporary',
-            sectionId: section.id,
-            sectionSerial: seqLabel || ''
-        });
-    });
-
-    const blankTextNodes = [];
-
-    (CanvasState.mdNodes || []).forEach((node) => {
-        if (!node || !node.id) return;
-        if (node.subtype === 'import-container') return;
-        blankTextNodes.push(node);
-    });
-
-    const canvasData = __buildObsidianSyncCanvasData({
-        exportRoot,
-        permanentMdRel,
-        copyFileMap,
-        tempSectionMdPaths,
-        blankTextNodes
-    });
-
-    const defaultCanvasName = isEn ? 'bookmark-canvas' : '书签画布';
-    const exportRootLeaf = String(exportRoot).split('/').filter(Boolean).slice(-1)[0] || defaultCanvasName;
-    const canvasFileName = `${exportRootLeaf}.canvas`;
-    pushTextFile(canvasFileName, __formatObsidianCanvasJson(canvasData), { type: 'canvas' });
-    pushTextFile(
-        '说明导入规则.md',
-        __buildCanvasImportRulesDocument({
-            exportRoot: exportRootLeaf,
-            canvasFileName,
-            exportFormat
-        }),
-        { type: 'guide' }
-    );
-
-    return {
-        exportRoot,
-        exportFormat,
-        canvasFileName,
-        files
-    };
-}
-
 function __detectCanvasMarkdownExportFormatFromContent(fileText) {
     const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
     if (parsedMarkdown && parsedMarkdown.jsonProtocol) {
@@ -35460,287 +34499,6 @@ function __detectCanvasMarkdownExportFormatFromContent(fileText) {
     if (/<img[\s>]/i.test(content)) return 'visual';
     if (/<details[\s>]/i.test(content) || /<a\s+href=/i.test(content)) return 'visual-no-icon';
     return '';
-}
-
-function __detectObsidianSyncExportFormatFromFolderFiles(folderFiles) {
-    const normalizedFiles = __normalizeImportFolderFilesMap(folderFiles);
-    if (!normalizedFiles.size) return '';
-
-    const normalizePath = (path) => String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
-    const isGuideMarkdownPath = (path) => /(^|\/)(说明导入规则\.md|README_Import_Rules\.md|说明_导入规则\.md)$/i.test(normalizePath(path));
-    const isPermanentMarkdownPath = (path) => {
-        const normalized = normalizePath(path);
-        if (!normalized || !/\.(md|json)$/i.test(normalized)) return false;
-        return /(^|\/)(永久栏目|Permanent)(\/|$)/i.test(normalized)
-            || /Permanent\s*Sections/i.test(normalized)
-            || /Permanent\s*Bookmarks/i.test(normalized)
-            || /(^|\/)永久书签(\/|$)/.test(normalized);
-    };
-    const isTemporaryMarkdownPath = (path) => {
-        const normalized = normalizePath(path);
-        if (!normalized || !/\.(md|json)$/i.test(normalized)) return false;
-        return /(^|\/)(临时栏目|Temporary)(\/|$)/i.test(normalized);
-    };
-
-    const candidates = [];
-    let fallbackIndex = 0;
-    let guideFormat = '';
-
-    const parseGuideFormat = (fileText) => {
-        const text = String(fileText || '').replace(/\r\n?/g, '\n');
-        if (!text.trim()) return '';
-        if (/当前内容格式[：:]\s*JSON模式|Current\s+content\s+format[：:]\s*JSON\s+mode/i.test(text)) return 'json';
-        if (/当前内容格式[：:]\s*视觉模式（无图标）|Current\s+content\s+format[：:]\s*Visual\s+mode\s*\(no\s*icon\)/i.test(text)) return 'visual-no-icon';
-        if (/当前内容格式[：:]\s*视觉模式|Current\s+content\s+format[：:]\s*Visual\s+mode/i.test(text)) return 'visual';
-        return '';
-    };
-
-    normalizedFiles.forEach((bytes, path) => {
-        const normalizedPath = normalizePath(path);
-        if (!normalizedPath || !/\.(md|json)$/i.test(normalizedPath)) {
-            return;
-        }
-
-        let fileText = '';
-        try {
-            fileText = new TextDecoder('utf-8').decode(bytes);
-        } catch (_) {
-            return;
-        }
-
-        if (isGuideMarkdownPath(normalizedPath)) {
-            if (!guideFormat) {
-                guideFormat = parseGuideFormat(fileText);
-            }
-            return;
-        }
-
-        const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
-        const format = __detectCanvasMarkdownExportFormatFromContent(fileText);
-        if (!format) return;
-
-        fallbackIndex += 1;
-        const isPermanent = isPermanentMarkdownPath(normalizedPath);
-        const isTemporary = isTemporaryMarkdownPath(normalizedPath);
-        const slot = isPermanent
-            ? __resolvePermanentSectionSlotForImport(parsedMarkdown, normalizedPath, fallbackIndex)
-            : Number.MAX_SAFE_INTEGER;
-        const priority = isPermanent
-            ? ((slot === 1) ? 0 : 1)
-            : (isTemporary ? 2 : 3);
-
-        candidates.push({
-            path: normalizedPath,
-            format,
-            priority,
-            slot: Number.isFinite(slot) ? slot : Number.MAX_SAFE_INTEGER
-        });
-    });
-
-    if (guideFormat) {
-        return guideFormat;
-    }
-
-    candidates.sort((left, right) => {
-        const leftPriority = Number.isFinite(left && left.priority) ? left.priority : Number.MAX_SAFE_INTEGER;
-        const rightPriority = Number.isFinite(right && right.priority) ? right.priority : Number.MAX_SAFE_INTEGER;
-        if (leftPriority !== rightPriority) return leftPriority - rightPriority;
-
-        const leftSlot = Number.isFinite(left && left.slot) ? left.slot : Number.MAX_SAFE_INTEGER;
-        const rightSlot = Number.isFinite(right && right.slot) ? right.slot : Number.MAX_SAFE_INTEGER;
-        if (leftSlot !== rightSlot) return leftSlot - rightSlot;
-
-        return String(left && left.path || '').localeCompare(String(right && right.path || ''));
-    });
-
-    return candidates.length ? String(candidates[0].format || '') : '';
-}
-
-if (typeof window !== 'undefined') {
-    if (!window.CanvasObsidianExportBridge || typeof window.CanvasObsidianExportBridge !== 'object') {
-        window.CanvasObsidianExportBridge = {};
-    }
-    window.CanvasObsidianExportBridge.buildSyncFiles = __buildObsidianSyncFiles;
-    window.CanvasObsidianExportBridge.parseSyncFolderFiles = parseCanvasPackageFromFolderFiles;
-    window.CanvasObsidianExportBridge.parseSyncFolderFilesForSync = async function (folderFiles, folderName) {
-        const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName, {
-            syncMode: true
-        });
-        const normalizedFiles = __normalizeImportFolderFilesMap(folderFiles);
-        const rebuiltPermanentTree = __normalizePermanentTreeSnapshotForProtocol(
-            __rebuildPermanentTreeSnapshotFromSyncFolderFiles(normalizedFiles)
-        );
-        if (rebuiltPermanentTree) {
-            const primaryState = parsed && parsed.primaryState && typeof parsed.primaryState === 'object'
-                ? parsed.primaryState
-                : {};
-            parsed.primaryState = Object.assign({}, primaryState, {
-                permanentTreeSnapshot: rebuiltPermanentTree
-            });
-        }
-        try {
-            __runCanonicalImportShadowAudit(
-                'sync-import',
-                parsed && parsed.tempState ? parsed.tempState : null,
-                parsed && parsed.storage ? parsed.storage : null,
-                parsed && parsed.primaryState ? parsed.primaryState : null,
-                {
-                    source: 'folder',
-                    syncMode: true,
-                    trigger: 'sync-parse-remote-snapshot'
-                }
-            );
-        } catch (_) { }
-        return parsed;
-    };
-    window.CanvasObsidianExportBridge.detectSyncFolderExportFormat = __detectObsidianSyncExportFormatFromFolderFiles;
-    window.CanvasObsidianExportBridge.applySyncFilesReplace = __applyObsidianSyncFilesReplace;
-    window.CanvasObsidianExportBridge.rebuildPermanentTreeSnapshotFromSyncFolderFiles = __rebuildPermanentTreeSnapshotFromSyncFolderFiles;
-    window.CanvasObsidianExportBridge.rebuildPermanentViewShellSnapshotFromSyncFolderFiles = __rebuildPermanentViewShellSnapshotFromSyncFolderFiles;
-    const __normalizeBridgeShardedPath = (value) => {
-        return String(value == null ? '' : value)
-            .replace(/\\/g, '/')
-            .replace(/^\/+/, '')
-            .replace(/\/+/g, '/')
-            .trim();
-    };
-    const __hasBridgeDirtyPatch = (patch) => {
-        if (!patch || typeof patch !== 'object') return false;
-        if (patch.canvasLayout === true || patch.canvasFileRef === true) return true;
-        if (patch.permanentAll === true || patch.temporaryAll === true || patch.blankAll === true) return true;
-        if (Array.isArray(patch.permanentPaths) && patch.permanentPaths.length) return true;
-        if (Array.isArray(patch.temporaryIds) && patch.temporaryIds.length) return true;
-        if (Array.isArray(patch.blankIds) && patch.blankIds.length) return true;
-        return false;
-    };
-    window.CanvasObsidianExportBridge.buildDirtySyncFilesFromShards = async function () {
-        try { __refreshBcsExportRootFromSyncSettings(); } catch (_) { }
-        const emptyResult = {
-            sharded: false,
-            prefer: false,
-            preferSharded: false,
-            dirtyPatch: null,
-            dirtyPaths: [],
-            paths: [],
-            entities: [],
-            files: []
-        };
-        try {
-            const storage = await __bcsStorageGetAll();
-            const meta = storage ? storage[BCS_META_KEY] : null;
-            if (!__isBcsMetaPayload(meta)) return emptyResult;
-
-            const collected = __collectBcsDirtyEntitiesFromStorage(storage);
-            const entities = Array.isArray(collected && collected.entities) ? collected.entities : [];
-            const dirtyPatch = collected && typeof collected.dirtyPatch === 'object' ? collected.dirtyPatch : null;
-
-            const dirtyPaths = [];
-            const seenPaths = new Set();
-            const files = [];
-
-            entities.forEach((entry) => {
-                if (!entry || typeof entry !== 'object') return;
-                const filePath = __normalizeBridgeShardedPath(entry.filePath || '');
-                if (filePath && !seenPaths.has(filePath)) {
-                    seenPaths.add(filePath);
-                    dirtyPaths.push(filePath);
-                }
-                if (!filePath) return;
-                files.push({
-                    path: filePath,
-                    meta: {
-                        type: entry.type || '',
-                        id: entry.id || '',
-                        key: entry.key || '',
-                        filePath,
-                        signature: entry.signature || '',
-                        dirty: entry.dirty === true
-                    }
-                });
-            });
-
-            return {
-                sharded: true,
-                prefer: true,
-                preferSharded: true,
-                dirtyPatch: __hasBridgeDirtyPatch(dirtyPatch) ? dirtyPatch : null,
-                dirtyPaths,
-                paths: dirtyPaths.slice(),
-                entities,
-                files
-            };
-        } catch (error) {
-            console.warn('[Canvas Sync] build dirty info from shards failed:', error);
-            return emptyResult;
-        }
-    };
-    window.CanvasObsidianExportBridge.getShardedDirtyPatch = window.CanvasObsidianExportBridge.buildDirtySyncFilesFromShards;
-    window.CanvasObsidianExportBridge.collectShardedDirtyInfo = window.CanvasObsidianExportBridge.buildDirtySyncFilesFromShards;
-    window.CanvasObsidianExportBridge.clearShardedDirtyBySyncedFiles = async function (input = {}) {
-        const payload = Array.isArray(input)
-            ? { files: input }
-            : ((input && typeof input === 'object') ? input : {});
-        const files = Array.isArray(payload.files) ? payload.files : [];
-        const paths = Array.isArray(payload.paths) ? payload.paths : [];
-        const removedPaths = Array.isArray(payload.removedPaths) ? payload.removedPaths : [];
-
-        const metaList = [];
-        const seenMeta = new Set();
-        const pushMeta = (metaInput, fallbackPath = '') => {
-            const base = (metaInput && typeof metaInput === 'object') ? metaInput : {};
-            const filePath = __normalizeBridgeShardedPath(base.filePath || fallbackPath || '');
-            const type = String(base.type || '').trim();
-            const id = String(base.id || '').trim();
-            const key = String(base.key || base.storageKey || '').trim();
-            const marker = `${key}|${filePath}|${type}|${id}`;
-            if (!key && !filePath && !(type && id)) return;
-            if (seenMeta.has(marker)) return;
-            seenMeta.add(marker);
-            metaList.push({
-                ...base,
-                ...(key ? { key } : {}),
-                ...(filePath ? { filePath } : {}),
-                ...(type ? { type } : {}),
-                ...(id ? { id } : {})
-            });
-        };
-
-        files.forEach((file) => {
-            if (!file || typeof file !== 'object') return;
-            const filePath = __normalizeBridgeShardedPath(file.path || file.filePath || '');
-            if (file.meta && typeof file.meta === 'object') {
-                pushMeta(file.meta, filePath);
-                return;
-            }
-            if (filePath) pushMeta({ filePath }, filePath);
-        });
-
-        paths.forEach((path) => {
-            const normalized = __normalizeBridgeShardedPath(path);
-            if (normalized) pushMeta({ filePath: normalized }, normalized);
-        });
-        removedPaths.forEach((path) => {
-            const normalized = __normalizeBridgeShardedPath(path);
-            if (normalized) pushMeta({ filePath: normalized }, normalized);
-        });
-
-        if (!metaList.length) {
-            return { updated: 0, keys: [], cleared: 0 };
-        }
-
-        try {
-            const result = await __clearBcsDirtyByFileMeta(metaList);
-            return {
-                ...(result && typeof result === 'object' ? result : {}),
-                cleared: Number(result && result.updated) || 0
-            };
-        } catch (error) {
-            console.warn('[Canvas Sync] clear sharded dirty by synced files failed:', error);
-            return { updated: 0, keys: [], cleared: 0 };
-        }
-    };
-    window.CanvasObsidianExportBridge.clearShardedDirtyBySyncedPaths = window.CanvasObsidianExportBridge.clearShardedDirtyBySyncedFiles;
-    window.CanvasObsidianExportBridge.markShardedFilesSynced = window.CanvasObsidianExportBridge.clearShardedDirtyBySyncedFiles;
 }
 
 async function exportCanvasPackage(options = {}) {
@@ -35955,9 +34713,7 @@ async function exportCanvasPackage(options = {}) {
         let contentNodes = [];
 
         if (targetType === 'permanent' || targetType === 'permanent-copy') {
-            const permanentContent = await __ensurePermanentMainContentInBcs({
-                assumeCleanWhenMissingState: true
-            });
+            const permanentContent = await __ensurePermanentMainContentInBcs();
             const bookmarkTree = permanentContent && permanentContent.tree ? [permanentContent.tree] : null;
             if (!bookmarkTree) {
                 alert(isEn ? 'Export failed: permanent JSON source unavailable.' : '导出失败：永久栏目 JSON 真相源不可用。');
@@ -36307,9 +35063,7 @@ async function exportCanvasPackage(options = {}) {
     const obsidianBookmarkIconMode = exportFormat === 'visual-no-icon' ? 'text' : 'favicon';
 
     // 1) Markdown files
-    const permanentContent = await __ensurePermanentMainContentInBcs({
-        assumeCleanWhenMissingState: true
-    });
+    const permanentContent = await __ensurePermanentMainContentInBcs();
     const bookmarkTree = permanentContent && permanentContent.tree ? [permanentContent.tree] : null;
     if (!bookmarkTree) {
         alert(isEn ? 'Export failed: permanent JSON source unavailable.' : '导出失败：永久栏目 JSON 真相源不可用。');
@@ -36358,7 +35112,7 @@ async function exportCanvasPackage(options = {}) {
                 const slot = idx ? (idx + 1) : null;
                 const copyAnchorPayload = __buildPermanentCopyAnchorContentPayload(copyId, {
                     displayIndex: idx,
-                    inheritFrom: __joinSyncExportPath(exportRoot, permanentMdRel)
+                    inheritFrom: __joinObsidianExportPath(exportRoot, permanentMdRel)
                 });
                 const fileContent = exportFormat === 'json'
                     ? `${__buildCanvasSectionJsonCodeBlock(copyAnchorPayload)}\n`
@@ -36372,7 +35126,7 @@ async function exportCanvasPackage(options = {}) {
                             forceCollapsed: forceCollapsedForObsidian,
                             exportFormat
                         },
-                        __joinSyncExportPath(exportRoot, permanentMdRel)
+                        __joinObsidianExportPath(exportRoot, permanentMdRel)
                     );
                 files.push({ name: `${exportRoot}/${copyMdRel}`, data: __toUint8(fileContent) });
             });
@@ -37204,7 +35958,7 @@ function __normalizeTempSectionSourceKey(sourceRaw) {
 
 function __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn, exportFormat = 'visual') {
     const tempRoot = isEn ? 'Temporary' : '临时栏目';
-    const fileExt = __resolveObsidianSyncDataFileExtension(exportFormat);
+    const fileExt = __resolveObsidianExportDataFileExtension(exportFormat);
     if (__isSpecialTempSection(section)) {
         const specialRoot = isEn ? 'Special temporary' : '特殊临时栏目';
         return `${tempRoot}/${specialRoot}/${safeTitle}.${fileExt}`;
@@ -37579,7 +36333,6 @@ function __buildCanvasPackageFileLookupHelpers(sourceFiles) {
 
 function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, primaryState, options = {}) {
     const isEn = !!(options && options.isEn);
-    const syncMode = !!(options && options.syncMode);
     const tempState = {
         sections: [],
         mdNodes: [],
@@ -37641,10 +36394,6 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                 : contentToParse;
 
             if (isLivePermanentNode) {
-                if (syncMode) {
-                    // Sync mode: permanent nodes are handled by dedicated permanent sync flow.
-                    return;
-                }
                 importedPermanentCount += 1;
                 const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
                 try {
@@ -37689,9 +36438,6 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
             }
 
             if (isPermanent) {
-                if (syncMode) {
-                    return;
-                }
                 tempState.sections.push(
                     __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, resolvedContentToParse, isEn)
                 );
@@ -37812,8 +36558,7 @@ async function importCanvasPackageZip(file) {
         parsed.importFileName || (file && file.name ? file.name : ''),
         {
             source: 'zip',
-            trigger: 'manual-zip-import',
-            syncMode: false
+            trigger: 'manual-zip-import'
         }
     );
 }
@@ -37853,7 +36598,7 @@ async function importCanvasPackage7z(file) {
  */
 async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, options = {}) {
     const { isEn } = __getLang();
-    const syncMode = !!(options && options.syncMode);
+    void options;
 
     // 4.2 数据信任链：只接受 .canvas 包结构
     let canvasFileName = null;
@@ -37874,10 +36619,7 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
         console.log(`[Canvas] Folder Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(folderFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
-        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, folderFiles, primaryState, {
-            isEn,
-            syncMode
-        });
+        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, folderFiles, primaryState, { isEn });
     } else {
         throw new Error(isEn
             ? 'Invalid Folder: Missing .canvas file.'
@@ -37905,8 +36647,7 @@ async function importCanvasPackageFolder(folderFiles, folderName) {
         parsed.importFileName || folderName || '',
         {
             source: 'folder',
-            trigger: 'manual-folder-import',
-            syncMode: false
+            trigger: 'manual-folder-import'
         }
     );
 }
@@ -38080,352 +36821,6 @@ function __rebuildPermanentViewShellSnapshotFromSyncFolderFiles(filesByPath) {
     });
 }
 
-async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '', options = {}) {
-    const normalizedFiles = __normalizeImportFolderFilesMap(filesByPath);
-    if (!normalizedFiles.size) {
-        throw new Error('同步文件为空，无法应用。');
-    }
-
-    // Obsidian sync folder contains "permanent-section" cards exported as Markdown file nodes.
-    // These should NOT be imported as temporary snapshot sections, otherwise they show up under
-    // "导入区块" as fake temp sections (#A/#B...). Instead, map them back to:
-    // - canonical permanent layout in `bcs:canvas` (node x/y/width/height)
-    // - permanent copy metadata (`bcs:perm:copies`, only id/displayIndex)
-    // - permanent tips (`bcs:perm:tip-*`)
-    let remoteHasAnyPermanentNode = false;
-    const remotePermanentCopyIds = new Set();
-    let remoteHasAnyPermanentCopyNode = false;
-    const remotePermanentLayoutNodes = [];
-    const permanentTipUpdates = [];
-
-    const normalizePath = (path) => String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
-    const findFileBytes = (relPath) => {
-        const normalizedRel = normalizePath(relPath);
-        if (!normalizedRel) return null;
-        if (normalizedFiles.has(normalizedRel)) return normalizedFiles.get(normalizedRel);
-
-        let bestMatch = null;
-        for (const [key, val] of normalizedFiles.entries()) {
-            const normalizedKey = normalizePath(key);
-            if (!normalizedKey) continue;
-            if (normalizedKey.endsWith(normalizedRel)) {
-                if (!bestMatch || normalizedKey.length < bestMatch.key.length) {
-                    bestMatch = { key: normalizedKey, bytes: val };
-                }
-            }
-        }
-        if (bestMatch) return bestMatch.bytes;
-
-        for (const [key, val] of normalizedFiles.entries()) {
-            const normalizedKey = normalizePath(key);
-            if (!normalizedKey) continue;
-            if (normalizedKey.includes(normalizedRel)) return val;
-        }
-        return null;
-    };
-
-    const isPermanentMarkdownPath = (path) => {
-        const normalized = normalizePath(path);
-        if (!normalized) return false;
-        if (/(^|\/)(永久栏目|Permanent)(\/|$)/i.test(normalized)) return true;
-        if (/Permanent\s*Sections/i.test(normalized)) return true;
-        if (/Permanent\s*Bookmarks/i.test(normalized)) return true;
-        if (/(^|\/)永久书签(\/|$)/.test(normalized)) return true;
-        return false;
-    };
-
-    const applyPermanentLayoutAndTipsFromCanvas = () => {
-        const canvasCandidates = Array.from(normalizedFiles.keys())
-            .map((key) => normalizePath(key))
-            .filter((key) => !!key && /\.canvas$/i.test(key));
-        if (!canvasCandidates.length) return;
-
-        let canvasData = null;
-        let canvasPath = '';
-        for (const candidate of canvasCandidates) {
-            const bytes = normalizedFiles.get(candidate);
-            if (!bytes) continue;
-            try {
-                const text = new TextDecoder('utf-8').decode(bytes);
-                const parsed = JSON.parse(text);
-                if (parsed && typeof parsed === 'object' && Array.isArray(parsed.nodes)) {
-                    canvasData = parsed;
-                    canvasPath = candidate;
-                    break;
-                }
-            } catch (_) { }
-        }
-        if (!canvasData) return;
-
-        const nodes = Array.isArray(canvasData.nodes) ? canvasData.nodes : [];
-
-        const nextPermanentCopies = [];
-        let permanentFallbackIndex = 0;
-
-	        nodes.forEach((node) => {
-	            if (!node || node.type !== 'file') return;
-	            const nodeId = String(node.id || '').trim();
-	            const filePath = String(node.file || '').trim();
-	            if (!nodeId || !filePath || !/\.(md|json)$/i.test(filePath)) return;
-
-		            const isPermanentNodeFile = isPermanentMarkdownPath(filePath);
-		            const isExportedPermanentNode = isPermanentNodeFile && __isExportedPermanentCanvasNode(node);
-		            if (isExportedPermanentNode) {
-                        remoteHasAnyPermanentNode = true;
-	                        remotePermanentLayoutNodes.push({
-	                            id: nodeId,
-	                            type: node.type,
-	                            x: node.x,
-                            y: node.y,
-                            width: node.width,
-                            height: node.height
-                        });
-		            }
-		            if (!isExportedPermanentNode) return;
-	            if (nodeId.startsWith('permanent-section-copy-')) remoteHasAnyPermanentCopyNode = true;
-
-            const fileBytes = findFileBytes(filePath);
-            const fileText = fileBytes ? new TextDecoder('utf-8').decode(fileBytes) : '';
-            const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
-            permanentFallbackIndex += 1;
-            const slot = __resolvePermanentSectionSlotForImport(parsedMarkdown, filePath, permanentFallbackIndex);
-            const slotNumber = Number.isFinite(slot) && slot > 0 ? slot : 1;
-
-            const rawDescSource = parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string'
-                ? parsedMarkdown.descriptionMarkdown
-                : ((parsedMarkdown && typeof parsedMarkdown.descriptionHtml === 'string')
-                    ? __htmlToMarkdown(parsedMarkdown.descriptionHtml)
-                    : '');
-            const descSource = String(rawDescSource == null ? '' : rawDescSource);
-	            if (nodeId === 'permanent-section' || slotNumber === 1) {
-	                // Main permanent section layout
-	                try { __persistPermanentTipStorageValue(PERMANENT_MAIN_TIP_STORAGE_KEY, descSource, { preserveRawContent: true }); } catch (_) { }
-	                permanentTipUpdates.push({ copyId: null, source: descSource });
-	                return;
-	            }
-
-            // Permanent copy layout (slot >= 2)
-            const copyId = nodeId.startsWith('permanent-section-copy-')
-                ? nodeId.slice('permanent-section-copy-'.length)
-                : '';
-            const displayIndex = Math.max(1, slotNumber - 1);
-            if (copyId) {
-                remotePermanentCopyIds.add(copyId);
-                nextPermanentCopies.push({
-                    id: copyId,
-                    displayIndex
-                });
-
-                try { __persistPermanentTipStorageValue(`${PERMANENT_COPY_TIP_STORAGE_PREFIX}${copyId}`, descSource, { preserveRawContent: true }); } catch (_) { }
-                permanentTipUpdates.push({ copyId, source: descSource });
-            }
-        });
-
-	        if (nextPermanentCopies.length) {
-	            try {
-	                __writePermanentSectionCopies(nextPermanentCopies);
-	                __ensurePermanentSectionCopyDisplayIndexes(nextPermanentCopies);
-	            } catch (_) { }
-	        } else if (remoteHasAnyPermanentNode && !remoteHasAnyPermanentCopyNode) {
-	            // If remote canvas explicitly has no copy nodes, clear local copies.
-	            // (Don't call removePermanentSectionCopy here, it would mark dirty.)
-	            try { __writePermanentSectionCopies([]); } catch (_) { }
-	        }
-
-        // Avoid unused var lint (kept for future debug).
-        void canvasPath;
-    };
-
-    try { applyPermanentLayoutAndTipsFromCanvas(); } catch (e) { console.warn('[Canvas] apply permanent layout/tip from remote canvas failed:', e); }
-
-		    const parsed = await parseCanvasPackageFromFolderFiles(normalizedFiles, folderName || 'sync-pull', {
-                syncMode: true
-            });
-		    const parsedTempState = parsed && parsed.tempState && typeof parsed.tempState === 'object'
-		        ? parsed.tempState
-		        : {};
-		    const parsedPrimaryState = parsed && parsed.primaryState && typeof parsed.primaryState === 'object'
-		        ? parsed.primaryState
-		        : {};
-		    const permanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(
-                __rebuildPermanentTreeSnapshotFromSyncFolderFiles(normalizedFiles)
-            ) || (parsedPrimaryState && parsedPrimaryState.permanentTreeSnapshot
-		        ? parsedPrimaryState.permanentTreeSnapshot
-		        : null);
-            const findPrimaryPermanentPayload = () => {
-                for (const [path, bytes] of normalizedFiles.entries()) {
-                    const normalizedPath = String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
-                    if (!normalizedPath || !/\.(md|json)$/i.test(normalizedPath) || !__isPermanentMarkdownPath(normalizedPath)) continue;
-                    try {
-                        const text = new TextDecoder('utf-8').decode(bytes);
-                        const parsedFile = __parseCanvasMarkdownPayload(text);
-                        const protocol = parsedFile && parsedFile.jsonProtocol && typeof parsedFile.jsonProtocol === 'object'
-                            ? parsedFile.jsonProtocol
-                            : null;
-                        if (
-                            protocol
-                            && protocol.sectionType === 'permanent'
-                            && protocol.fileRole !== 'copy-anchor'
-                            && protocol.tree
-                            && typeof protocol.tree === 'object'
-                        ) {
-                            return protocol;
-                        }
-                    } catch (_) { }
-                }
-                return null;
-            };
-            try {
-                const remotePermanentPayload = findPrimaryPermanentPayload()
-                    || (permanentTreeSnapshot ? __buildPermanentSectionJsonProtocol(permanentTreeSnapshot) : null);
-                if (remotePermanentPayload) {
-                    await __replacePermanentMainContentFromSyncPayload(remotePermanentPayload, {
-                        assumeClean: false
-                    });
-                }
-            } catch (error) {
-                console.warn('[Canvas] apply remote permanent JSON to BCS failed:', error);
-                throw error;
-            }
-            try {
-                if (permanentTreeSnapshot) {
-                    __persistPermanentRootMetaFromTreeSnapshot(permanentTreeSnapshot);
-                }
-            } catch (_) { }
-    try {
-        const auditPrimaryState = permanentTreeSnapshot
-            ? { ...parsedPrimaryState, permanentTreeSnapshot }
-            : parsedPrimaryState;
-        __runCanonicalImportShadowAudit('sync-import', parsedTempState, parsed.storage, auditPrimaryState, {
-            source: 'folder',
-            syncMode: true,
-            trigger: (options && typeof options.trigger === 'string' && options.trigger.trim())
-                ? options.trigger.trim()
-                : 'sync-import'
-        });
-    } catch (_) { }
-
-    const nextSections = Array.isArray(parsedTempState.sections) ? parsedTempState.sections : [];
-    const nextEdges = Array.isArray(parsedTempState.edges) ? parsedTempState.edges : [];
-
-    const nextState = {
-        sections: nextSections.map((section) => __cloneCanvasProtocolJson(section)).filter(Boolean),
-        tempSectionCounter: Number(parsedTempState.tempSectionCounter) || nextSections.length || 0,
-        tempItemCounter: Number(parsedTempState.tempItemCounter) || 0,
-        colorCursor: Number(parsedTempState.colorCursor) || 0,
-        tempSectionLastColor: parsedTempState.tempSectionLastColor,
-        tempSectionPrevColor: parsedTempState.tempSectionPrevColor,
-        mdNodes: (Array.isArray(parsedTempState.mdNodes) ? parsedTempState.mdNodes : [])
-            .map((node) => __cloneCanvasProtocolJson(node))
-            .filter(Boolean),
-        mdNodeCounter: Number(parsedTempState.mdNodeCounter) || 0,
-        edges: nextEdges.map((edge) => __cloneCanvasProtocolJson(edge)).filter(Boolean),
-        edgeCounter: Number(parsedTempState.edgeCounter) || 0,
-        timestamp: Date.now()
-    };
-
-    if (Array.isArray(CanvasState.tempSections)) {
-        CanvasState.tempSections.forEach((section) => {
-            if (!section || !section.id) return;
-            const element = document.getElementById(section.id);
-            if (element) element.remove();
-        });
-    }
-    if (Array.isArray(CanvasState.mdNodes)) {
-        CanvasState.mdNodes.forEach((node) => {
-            if (!node || !node.id) return;
-            const element = document.getElementById(node.id);
-            if (element) element.remove();
-        });
-    }
-
-    const svg = document.querySelector('.canvas-edges');
-    if (svg) {
-        Array.from(svg.querySelectorAll('.canvas-edge, .canvas-edge-label, .canvas-edge-label-bg, .canvas-edge-hit-area, foreignObject.edge-label-fo'))
-            .forEach((element) => element.remove());
-    }
-
-    CanvasState.selectedEdgeId = null;
-    CanvasState.selectedTempSectionId = null;
-    CanvasState.selectedMdNodeId = null;
-    try { if (typeof hideEdgeToolbar === 'function') hideEdgeToolbar(); } catch (_) { }
-    try { if (typeof clearTempSelection === 'function') clearTempSelection(); } catch (_) { }
-    try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
-
-    __applyCanvasTempStateObject(nextState, {
-        preserveRaw: true
-    });
-    __finalizeTempNodesLoad({ loadedFromStorage: true });
-
-    try {
-        if (remotePermanentLayoutNodes.length) {
-            __applyPermanentLayoutFromCanvasNodes(remotePermanentLayoutNodes, { removeMissingCopies: true });
-        }
-    } catch (_) { }
-
-    try { saveTempNodes({ immediate: true, suppressSyncMarkDirty: true }); } catch (_) { }
-
-    // Apply permanent layout and tips to DOM (localStorage updates do not fire storage events in same page).
-    try { loadPermanentSectionPosition(); } catch (_) { }
-    try {
-        // Remove extra copy DOM nodes that no longer exist on remote (silent, no markDirty).
-        const canvasContent = document.getElementById('canvasContent');
-        const scope = canvasContent || document;
-        const existingCopyEls = Array.from(scope.querySelectorAll('.permanent-bookmark-section.permanent-section-copy'));
-        existingCopyEls.forEach((el) => {
-            if (!el || !el.dataset) return;
-            const copyId = String(el.dataset.permanentSectionCopyId || '').trim();
-            if (!copyId) return;
-            if (remoteHasAnyPermanentCopyNode) {
-                if (!remotePermanentCopyIds.has(copyId)) {
-                    try { el.remove(); } catch (_) { }
-                }
-                return;
-            }
-            // Remote explicitly has no copy nodes -> clear all copies.
-	            if (remoteHasAnyPermanentNode) {
-	                try { el.remove(); } catch (_) { }
-	            }
-	        });
-        try { __updatePermanentSectionIndexBadges(); } catch (_) { }
-    } catch (_) { }
-
-    try {
-        const mainEl = document.getElementById('permanentSection');
-        permanentTipUpdates.forEach((update) => {
-            if (!update) return;
-            const copyId = update.copyId ? String(update.copyId) : '';
-            const source = typeof update.source === 'string' ? update.source : '';
-            if (!copyId) {
-                if (mainEl) __applyPermanentTipContentRealtimeSync(mainEl, source);
-                return;
-            }
-            const canvasContent = document.getElementById('canvasContent');
-            const scope = canvasContent || document;
-            const target = scope.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${CSS.escape(copyId)}"]`);
-            if (target) __applyPermanentTipContentRealtimeSync(target, source);
-        });
-    } catch (_) { }
-
-    try {
-        if (typeof restoreTreeExpandState === 'function') {
-            const canvasContent = document.getElementById('canvasContent');
-            const scope = canvasContent || document;
-            scope.querySelectorAll('.permanent-bookmark-section .bookmark-tree').forEach((tree) => {
-                try { restoreTreeExpandState(tree); } catch (_) { }
-            });
-        }
-    } catch (_) { }
-
-	    return {
-	        success: true,
-	        tempCount: Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0,
-	        mdCount: Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.length : 0,
-	        edgeCount: Array.isArray(CanvasState.edges) ? CanvasState.edges.length : 0,
-	        permanentTreeSnapshot
-	    };
-	}
-
 /**
  * 沙箱导入核心处理逻辑
  * 被 importCanvasPackageZip 和 importCanvasPackageFolder 共同使用
@@ -38433,7 +36828,7 @@ async function __applyObsidianSyncFilesReplace(filesByPath, folderName = '', opt
  * @param {Object} storage - 存储数据（滚动位置等）
  * @param {Object} primaryState - 原始状态对象（用于获取书签树快照等）
  * @param {string} [importFileName] - 导入的文件名
- * @param {Object} [importMeta] - 审计上下文（source/trigger/syncMode）
+ * @param {Object} [importMeta] - 审计上下文（source/trigger）
  */
 function __processImportedPackage(tempState, storage, primaryState, importFileName = '', importMeta = null) {
     const { isEn } = __getLang();
@@ -38445,7 +36840,6 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
                 source: (typeof normalizedImportMeta.source === 'string' && normalizedImportMeta.source.trim())
                     ? normalizedImportMeta.source.trim()
                     : 'unknown',
-                syncMode: normalizedImportMeta.syncMode === true,
                 trigger: (typeof normalizedImportMeta.trigger === 'string' && normalizedImportMeta.trigger.trim())
                     ? normalizedImportMeta.trigger.trim()
                     : 'manual-import'
@@ -39161,9 +37555,6 @@ let __canvasTempStateBcsWritePending = null;
 let __canvasTempStateBcsWriteWaiters = [];
 let __bcsExportRootCache = '';
 let __bcsExportFormatCache = '';
-let __bcsExportRootRefreshing = false;
-let __bcsExportSettingsRealtimeBound = false;
-let __bcsExportSettingsRealignTimer = null;
 let __canvasTempStateRealtimeSyncBound = false;
 let __canvasTempStateRealtimeSyncApplying = false;
 let __canvasTempStateRealtimeSyncTimer = null;
@@ -39171,82 +37562,7 @@ let __canvasTempStateRealtimeSyncPending = null;
 let __canvasTempStateLastSavedTimestamp = 0;
 let __canvasTempStateLastAppliedTimestamp = 0;
 let __canvasTempStateLastPersistedSignature = '';
-let __canvasTempStateLastDirtySnapshot = null;
 let __canvasImportRuntimeMode = 'permanent';
-const CANVAS_SUPPRESS_SYNC_MARK_DIRTY_SOFT_WARN_MS = 3 * 1000;
-const CANVAS_SUPPRESS_SYNC_MARK_DIRTY_HARD_FUSE_MS = 10 * 1000;
-let __canvasTempStateSuppressSyncWindowStartTs = 0;
-let __canvasTempStateSuppressSyncSoftWarned = false;
-let __canvasTempStateSuppressSyncFuseTrips = 0;
-let __canvasTempStateSuppressSyncLastFuseRecord = null;
-
-function __publishCanvasSuppressSyncMarkDirtyGuardState(active, ageMs, context = '') {
-    if (typeof window === 'undefined') return;
-    const prev = (window.__canvasSuppressSyncMarkDirtyGuard && typeof window.__canvasSuppressSyncMarkDirtyGuard === 'object')
-        ? window.__canvasSuppressSyncMarkDirtyGuard
-        : {};
-    window.__canvasSuppressSyncMarkDirtyGuard = {
-        ...prev,
-        active: !!active,
-        ageMs: Math.max(0, Number(ageMs) || 0),
-        softWarnMs: CANVAS_SUPPRESS_SYNC_MARK_DIRTY_SOFT_WARN_MS,
-        hardFuseMs: CANVAS_SUPPRESS_SYNC_MARK_DIRTY_HARD_FUSE_MS,
-        fuseTrips: Math.max(0, Number(__canvasTempStateSuppressSyncFuseTrips) || 0),
-        lastFuse: __canvasTempStateSuppressSyncLastFuseRecord,
-        context: String(context || ''),
-        updatedAt: Date.now()
-    };
-}
-
-function __resetCanvasSuppressSyncMarkDirtyWindow() {
-    __canvasTempStateSuppressSyncWindowStartTs = 0;
-    __canvasTempStateSuppressSyncSoftWarned = false;
-    __publishCanvasSuppressSyncMarkDirtyGuardState(false, 0, 'reset');
-}
-
-function __resolveCanvasSuppressSyncMarkDirtyOption(requestedSuppress, context = '') {
-    if (!requestedSuppress) {
-        __resetCanvasSuppressSyncMarkDirtyWindow();
-        return false;
-    }
-
-    const now = Date.now();
-    if (__canvasTempStateSuppressSyncWindowStartTs <= 0) {
-        __canvasTempStateSuppressSyncWindowStartTs = now;
-        __canvasTempStateSuppressSyncSoftWarned = false;
-    }
-    const ageMs = Math.max(0, now - __canvasTempStateSuppressSyncWindowStartTs);
-    const normalizedContext = String(context || 'saveTempNodes');
-    __publishCanvasSuppressSyncMarkDirtyGuardState(true, ageMs, normalizedContext);
-
-    if (!__canvasTempStateSuppressSyncSoftWarned && ageMs >= CANVAS_SUPPRESS_SYNC_MARK_DIRTY_SOFT_WARN_MS) {
-        __canvasTempStateSuppressSyncSoftWarned = true;
-        console.warn('[Canvas Sync] suppressSyncMarkDirty window reached soft threshold:', {
-            ageMs,
-            thresholdMs: CANVAS_SUPPRESS_SYNC_MARK_DIRTY_SOFT_WARN_MS,
-            context: normalizedContext
-        });
-    }
-
-    if (ageMs >= CANVAS_SUPPRESS_SYNC_MARK_DIRTY_HARD_FUSE_MS) {
-        __canvasTempStateSuppressSyncFuseTrips += 1;
-        __canvasTempStateSuppressSyncLastFuseRecord = {
-            ts: now,
-            ageMs,
-            context: normalizedContext
-        };
-        __publishCanvasSuppressSyncMarkDirtyGuardState(false, ageMs, normalizedContext);
-        console.warn('[Canvas Sync] suppressSyncMarkDirty hard fuse tripped, forcing markDirty:', {
-            ageMs,
-            thresholdMs: CANVAS_SUPPRESS_SYNC_MARK_DIRTY_HARD_FUSE_MS,
-            context: normalizedContext,
-            fuseTrips: __canvasTempStateSuppressSyncFuseTrips
-        });
-        return false;
-    }
-
-    return true;
-}
 
 function __setCanvasImportRuntimeMode(mode) {
     __canvasImportRuntimeMode = (mode === 'sandbox') ? 'sandbox' : 'permanent';
@@ -39375,11 +37691,11 @@ function __buildCanvasTempStateSignature(state) {
 function __collectBcsFileRefsFromState(stateInput, options = {}) {
     const { isEn } = __getLang();
     const exportFormat = __normalizeCanvasObsidianExportFormat(
-        (options && typeof options.exportFormat === 'string') ? options.exportFormat : __getBcsExportFormatSync(),
+        (options && typeof options.exportFormat === 'string') ? options.exportFormat : __getBcsExportFormatCached(),
         'json'
     );
-    const exportRoot = __normalizeObsidianSyncExportRoot(
-        (options && typeof options.exportRoot === 'string') ? options.exportRoot : __getBcsExportRootSync(),
+    const exportRoot = __normalizeObsidianExportRoot(
+        (options && typeof options.exportRoot === 'string') ? options.exportRoot : __getBcsExportRootCached(),
         isEn,
         { allowEmpty: true }
     );
@@ -39413,13 +37729,13 @@ function __collectBcsFileRefsFromState(stateInput, options = {}) {
             rel = relFolder ? `${relFolder}/${uniqueFile}` : uniqueFile;
         }
         usedTempRelPaths.add(rel);
-        const path = __joinSyncExportPath(exportRoot, rel);
+        const path = __joinObsidianExportPath(exportRoot, rel);
         tempSectionPaths.push({ id: section.id, rel, path });
         tempSectionPathById[section.id] = path;
     });
 
     const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat);
-    const permanentPath = __joinSyncExportPath(exportRoot, permanentMdRel);
+    const permanentPath = __joinObsidianExportPath(exportRoot, permanentMdRel);
     const copyFileMap = {};
     try {
         const copies = __ensurePermanentSectionCopyDisplayIndexes();
@@ -39436,7 +37752,7 @@ function __collectBcsFileRefsFromState(stateInput, options = {}) {
 
     const copyPathById = {};
     Object.keys(copyFileMap).forEach((copyId) => {
-        copyPathById[copyId] = __joinSyncExportPath(exportRoot, copyFileMap[copyId]);
+        copyPathById[copyId] = __joinObsidianExportPath(exportRoot, copyFileMap[copyId]);
     });
 
     return {
@@ -39723,191 +38039,6 @@ function __toStableCanvasJson(value) {
     } catch (_) {
         return '';
     }
-}
-
-function __buildTempSectionDirtyPayloadKey(section) {
-    const normalizedProtocol = __normalizeTempSectionProtocolObject(section) || __buildTempSectionProtocol(section);
-    if (normalizedProtocol && typeof normalizedProtocol === 'object') {
-        return __toStableCanvasJson({
-            sectionMeta: normalizedProtocol.sectionMeta || {},
-            items: Array.isArray(normalizedProtocol.items) ? normalizedProtocol.items : []
-        });
-    }
-    return __toStableCanvasJson({
-        title: String(section && section.title || ''),
-        label: String(section && section.label || ''),
-        sequenceNumber: Number(section && section.sequenceNumber) || 0,
-        source: String(section && section.source || ''),
-        descriptionMd: __normalizeTempSectionDescriptionMarkdown(section),
-        items: Array.isArray(section && section.items) ? section.items : []
-    });
-}
-
-function __buildTempSectionDirtyRefKey(section) {
-    const { isEn } = __getLang();
-    const sectionId = String(section && section.id || '').trim();
-    const seqLabel = String(getTempSectionLabel(section) || '').trim();
-    const rawTitle = String(section && section.title || (isEn ? 'Temp Section' : '临时栏目'));
-    const fileTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
-    let safeTitle = __buildObsidianSafeFilenameStem(
-        fileTitle,
-        seqLabel || rawTitle || sectionId || 'section',
-        sectionId || fileTitle
-    );
-    if (!safeTitle || safeTitle === 'Untitled') safeTitle = sectionId || 'section';
-    return __toStableCanvasJson({
-        id: sectionId,
-        fileStem: safeTitle
-    });
-}
-
-function __buildTempSectionDirtyLayoutKey(section) {
-    return __toStableCanvasJson({
-        id: String(section && section.id || ''),
-        x: Number(section && section.x) || 0,
-        y: Number(section && section.y) || 0,
-        width: Number(section && section.width) || 0,
-        height: Number(section && section.height) || 0,
-        color: String(section && section.color || ''),
-        pinned: !!(section && section.pinned)
-    });
-}
-
-function __buildBlankNodeDirtyPayloadKey(node) {
-    if (!node || typeof node !== 'object') return '';
-    if (node.subtype === 'import-container') return '';
-    if (__isCanvasNativeTextNode(node)) {
-        return __toStableCanvasJson({
-            type: 'blank-native-text',
-            body: String(__resolveCanvasNativeTextNodeBody(node) || '')
-        });
-    }
-    return __toStableCanvasJson({
-        type: 'blank',
-        markdown: __buildMdNodeMarkdown(node)
-    });
-}
-
-function __buildBlankNodeDirtyLayoutKey(node) {
-    return __toStableCanvasJson({
-        id: String(node && node.id || ''),
-        subtype: String(node && node.subtype || ''),
-        x: Number(node && node.x) || 0,
-        y: Number(node && node.y) || 0,
-        width: Number(node && node.width) || 0,
-        height: Number(node && node.height) || 0,
-        color: String((node && (node.colorHex || node.color)) || '')
-    });
-}
-
-function __buildCanvasTempStateDirtySnapshot(state) {
-    const persistedState = __buildPersistedCanvasState(state);
-    const sections = Array.isArray(persistedState && persistedState.sections) ? persistedState.sections : [];
-    const mdNodes = Array.isArray(persistedState && persistedState.mdNodes) ? persistedState.mdNodes : [];
-    const edges = Array.isArray(persistedState && persistedState.edges) ? persistedState.edges : [];
-
-    const tempById = {};
-    const blankById = {};
-    const tempOrder = [];
-    const blankOrder = [];
-
-    sections.forEach((section) => {
-        const id = String(section && section.id || '').trim();
-        if (!id) return;
-        tempOrder.push(id);
-        tempById[id] = {
-            payloadKey: __buildTempSectionDirtyPayloadKey(section),
-            refKey: __buildTempSectionDirtyRefKey(section),
-            layoutKey: __buildTempSectionDirtyLayoutKey(section)
-        };
-    });
-
-    mdNodes.forEach((node) => {
-        const id = String(node && node.id || '').trim();
-        if (!id) return;
-        blankOrder.push(id);
-        blankById[id] = {
-            payloadKey: __buildBlankNodeDirtyPayloadKey(node),
-            layoutKey: __buildBlankNodeDirtyLayoutKey(node)
-        };
-    });
-
-    return {
-        tempById,
-        blankById,
-        tempOrder,
-        blankOrder,
-        edgesKey: __toStableCanvasJson(edges)
-    };
-}
-
-function __collectDirtyIdsBySnapshotDiff(prevMap, nextMap, keyName) {
-    const changedIds = [];
-    const prev = (prevMap && typeof prevMap === 'object') ? prevMap : {};
-    const next = (nextMap && typeof nextMap === 'object') ? nextMap : {};
-    const ids = new Set([].concat(Object.keys(prev), Object.keys(next)));
-    ids.forEach((id) => {
-        const prevEntry = prev[id] && typeof prev[id] === 'object' ? prev[id] : null;
-        const nextEntry = next[id] && typeof next[id] === 'object' ? next[id] : null;
-        const left = prevEntry ? String(prevEntry[keyName] || '') : '';
-        const right = nextEntry ? String(nextEntry[keyName] || '') : '';
-        if (left !== right) changedIds.push(id);
-    });
-    return changedIds;
-}
-
-function __deriveSyncDirtyFromTempSnapshotDiff(prevSnapshot, nextSnapshot) {
-    const prev = prevSnapshot && typeof prevSnapshot === 'object' ? prevSnapshot : null;
-    const next = nextSnapshot && typeof nextSnapshot === 'object' ? nextSnapshot : null;
-    if (!next) return null;
-
-    if (!prev) {
-        const allTempIds = Object.keys(next.tempById || {});
-        const allBlankIds = Object.keys(next.blankById || {}).filter((id) => {
-            const entry = next.blankById && next.blankById[id];
-            return !!(entry && entry.payloadKey);
-        });
-        return {
-            canvasLayout: allTempIds.length > 0 || allBlankIds.length > 0 || !!String(next.edgesKey || ''),
-            canvasFileRef: allTempIds.length > 0,
-            temporaryIds: allTempIds,
-            blankIds: allBlankIds
-        };
-    }
-
-    const changedTemporaryIds = __collectDirtyIdsBySnapshotDiff(prev.tempById, next.tempById, 'payloadKey');
-    const changedBlankIds = __collectDirtyIdsBySnapshotDiff(prev.blankById, next.blankById, 'payloadKey').filter((id) => {
-        const prevEntry = prev.blankById && prev.blankById[id];
-        const nextEntry = next.blankById && next.blankById[id];
-        const hasPayload = !!(
-            (prevEntry && prevEntry.payloadKey)
-            || (nextEntry && nextEntry.payloadKey)
-        );
-        return hasPayload;
-    });
-
-    const tempLayoutChanged = __collectDirtyIdsBySnapshotDiff(prev.tempById, next.tempById, 'layoutKey').length > 0
-        || __toStableCanvasJson(prev.tempOrder || []) !== __toStableCanvasJson(next.tempOrder || []);
-    const blankLayoutChanged = __collectDirtyIdsBySnapshotDiff(prev.blankById, next.blankById, 'layoutKey').length > 0
-        || __toStableCanvasJson(prev.blankOrder || []) !== __toStableCanvasJson(next.blankOrder || []);
-    const edgesChanged = String(prev.edgesKey || '') !== String(next.edgesKey || '');
-
-    const tempRefChanged = __collectDirtyIdsBySnapshotDiff(prev.tempById, next.tempById, 'refKey').length > 0;
-
-    const canvasLayout = tempLayoutChanged || blankLayoutChanged || edgesChanged || changedBlankIds.length > 0;
-    const canvasFileRef = tempRefChanged;
-
-    const hasAnyDirty = canvasLayout || canvasFileRef || changedTemporaryIds.length > 0 || changedBlankIds.length > 0;
-    if (!hasAnyDirty) {
-        return null;
-    }
-
-    return {
-        canvasLayout,
-        canvasFileRef,
-        temporaryIds: changedTemporaryIds,
-        blankIds: changedBlankIds
-    };
 }
 
 function __normalizeTempSectionProtocolLabel(section) {
@@ -40272,42 +38403,6 @@ if (typeof window !== 'undefined') {
         async loadCanvasTempStateFromBcs() {
             return await __loadCanvasTempStateFromBcs();
         },
-        async buildCanvasTempStateRawForSyncFromBcs() {
-            const state = await __loadCanvasTempStateFromBcs();
-            if (!state || typeof state !== 'object') return '';
-            const persisted = __buildPersistedCanvasState(state, {
-                preserveRaw: true
-            });
-            const normalized = __buildCanvasTempStateProtocolView(persisted, {
-                preserveRaw: true
-            });
-            if (!normalized || typeof normalized !== 'object') return '';
-            try {
-                return JSON.stringify(normalized);
-            } catch (_) {
-                return '';
-            }
-        },
-        async applyCanvasTempStateSnapshotToBcs(stateInput, options = {}) {
-            const normalizedState = __normalizeCanvasTempStateForRuntime(stateInput);
-            if (!normalizedState) return false;
-
-            const persistedState = __buildPersistedCanvasState(normalizedState);
-            await __saveCanvasTempStateToBcsStorage(persistedState, {
-                immediate: options && options.immediate !== false,
-                forceAll: options && options.forceAll === true,
-                assumeClean: options && options.assumeClean === true
-            });
-
-            if (!options || options.reload !== false) {
-                try {
-                    if (typeof loadTempNodes === 'function') {
-                        loadTempNodes();
-                    }
-                } catch (_) { }
-            }
-            return true;
-        },
         normalizeTempSectionProtocol(sectionInput) {
             return __normalizeTempSectionProtocolObject(sectionInput) || __buildTempSectionProtocol(sectionInput);
         },
@@ -40329,17 +38424,8 @@ if (typeof window !== 'undefined') {
         async readPermanentMainContentFromBcs(options = {}) {
             return await __readPermanentMainContentFromBcs(options);
         },
-        async buildPermanentMainSyncPayloadFromBcs(options = {}) {
-            return await __buildPermanentMainSyncPayloadFromBcs(options);
-        },
-        buildPermanentMainSyncPayload(contentInput) {
-            return __buildPermanentMainSyncPayload(contentInput);
-        },
         async readPermanentTreeSnapshotFromBcs(options = {}) {
             return await __readPermanentTreeSnapshotFromBcs(options);
-        },
-        async replacePermanentMainContentFromSyncPayload(payloadInput, options = {}) {
-            return await __replacePermanentMainContentFromSyncPayload(payloadInput, options);
         },
         async writePermanentTreeSnapshotAfterChromeApply(localTreeInput, options = {}) {
             return await __writePermanentTreeSnapshotAfterChromeApply(localTreeInput, options);
@@ -40602,209 +38688,35 @@ function __buildBcsTextSignature(value) {
     return __hashBcsString(String(value == null ? '' : value));
 }
 
-function __applyBcsExportSettingsSnapshot(settingsInput) {
-    const source = (settingsInput && typeof settingsInput === 'object')
-        ? settingsInput
-        : null;
-    if (!source) return false;
-    let changed = false;
-    if (typeof source.obsidianExportRoot === 'string') {
-        if (__bcsExportRootCache !== source.obsidianExportRoot) {
-            __bcsExportRootCache = source.obsidianExportRoot;
-            changed = true;
-        }
-    }
-    if (typeof source.obsidianExportFormat === 'string') {
-        if (__bcsExportFormatCache !== source.obsidianExportFormat) {
-            __bcsExportFormatCache = source.obsidianExportFormat;
-            changed = true;
-        }
-    }
-    return changed;
-}
-
-function __readBcsExportSettingsFromSyncModule() {
-    try {
-        const syncModule = (typeof window !== 'undefined' && window) ? window.CanvasObsidianGitSync : null;
-        if (!syncModule || typeof syncModule.getSettings !== 'function') return null;
-        const settings = syncModule.getSettings();
-        if (!settings || typeof settings !== 'object') return null;
-        return settings;
-    } catch (_) {
-        return null;
-    }
-}
-
-function __shouldRealignBcsFileRefsNow() {
-    if (__canvasTempStateBcsLoadInProgress || __canvasTempStateRealtimeSyncApplying) return false;
-    if (!CanvasState || typeof CanvasState !== 'object') return false;
-    if (!Array.isArray(CanvasState.tempSections) || !Array.isArray(CanvasState.mdNodes) || !Array.isArray(CanvasState.edges)) {
-        return false;
-    }
-    if (
-        __canvasTempStateLastAppliedTimestamp <= 0
-        && __canvasTempStateLastSavedTimestamp <= 0
-        && !__canvasTempStateLastPersistedSignature
-    ) {
-        return false;
-    }
-    return true;
-}
-
-function __scheduleRealignBcsFileRefsBySyncSettingsChange(reason = '') {
-    if (__bcsExportSettingsRealignTimer) {
-        clearTimeout(__bcsExportSettingsRealignTimer);
-    }
-    __bcsExportSettingsRealignTimer = setTimeout(() => {
-        __bcsExportSettingsRealignTimer = null;
-        if (!__shouldRealignBcsFileRefsNow()) return;
-        try {
-            const state = {
-                sections: CanvasState.tempSections,
-                tempSectionCounter: CanvasState.tempSectionCounter,
-                tempItemCounter: CanvasState.tempItemCounter,
-                colorCursor: CanvasState.colorCursor,
-                tempSectionLastColor: CanvasState.tempSectionLastColor || getTempSectionDefaultColor(),
-                tempSectionPrevColor: CanvasState.tempSectionPrevColor || null,
-                mdNodes: CanvasState.mdNodes,
-                mdNodeCounter: CanvasState.mdNodeCounter,
-                edges: CanvasState.edges,
-                edgeCounter: CanvasState.edgeCounter,
-                timestamp: Date.now()
-            };
-            __saveCanvasTempStateToBcsStorage(__buildPersistedCanvasState(state), {
-                immediate: true,
-                forceAll: true
-            });
-        } catch (error) {
-            console.warn(`[Canvas] BCS path realign skipped (${reason}):`, error);
-        }
-    }, 160);
-}
-
-function __bindBcsExportSettingsRealtimeSync() {
-    if (__bcsExportSettingsRealtimeBound) return;
-    __bcsExportSettingsRealtimeBound = true;
-
-    try {
-        const settings = __readBcsExportSettingsFromSyncModule();
-        if (settings) {
-            __applyBcsExportSettingsSnapshot(settings);
-        }
-    } catch (_) { }
-
-    try {
-        if (typeof window !== 'undefined' && window && typeof window.addEventListener === 'function') {
-            window.addEventListener('canvas-obsidian-git-sync-settings-updated', (event) => {
-                const changed = __applyBcsExportSettingsSnapshot(event && event.detail);
-                if (changed) {
-                    __scheduleRealignBcsFileRefsBySyncSettingsChange('sync-settings-event');
-                }
-            });
-        }
-    } catch (_) { }
-
-    try {
-        const onChanged = __getCanvasStorageOnChangedArea();
-        if (onChanged && typeof onChanged.addListener === 'function') {
-            onChanged.addListener((changes, areaName) => {
-                if (areaName && areaName !== 'local') return;
-                if (!changes || !Object.prototype.hasOwnProperty.call(changes, __CANVAS_FLOATING_SYNC_SETTINGS_KEY)) return;
-                const entry = changes[__CANVAS_FLOATING_SYNC_SETTINGS_KEY];
-                const raw = entry && Object.prototype.hasOwnProperty.call(entry, 'newValue') ? entry.newValue : null;
-                let parsed = null;
-                if (typeof raw === 'string') {
-                    try { parsed = JSON.parse(raw); } catch (_) { parsed = null; }
-                } else if (raw && typeof raw === 'object') {
-                    parsed = raw;
-                }
-                const changed = __applyBcsExportSettingsSnapshot(parsed);
-                if (changed) {
-                    __scheduleRealignBcsFileRefsBySyncSettingsChange('storage-onchanged');
-                }
-            });
-        }
-    } catch (_) { }
-}
-
-function __getBcsExportRootSync() {
-    try {
-        const settings = __readBcsExportSettingsFromSyncModule();
-        if (settings) {
-            __applyBcsExportSettingsSnapshot(settings);
-        }
-    } catch (_) { }
+function __getBcsExportRootCached() {
     const { isEn } = __getLang();
-    return __normalizeObsidianSyncExportRoot(__bcsExportRootCache || '', isEn, { allowEmpty: true });
+    return __normalizeObsidianExportRoot(__bcsExportRootCache || '', isEn, { allowEmpty: true });
 }
 
-function __getBcsExportFormatSync() {
-    try {
-        const settings = __readBcsExportSettingsFromSyncModule();
-        if (settings) {
-            __applyBcsExportSettingsSnapshot(settings);
-        }
-    } catch (_) { }
+function __getBcsExportFormatCached() {
     return __normalizeCanvasObsidianExportFormat(__bcsExportFormatCache || '', 'json');
 }
 
-function __refreshBcsExportRootFromSyncSettings() {
-    if (__bcsExportRootRefreshing) return;
-    __bcsExportRootRefreshing = true;
-    const storage = __getCanvasStorageLocalArea();
-    if (!storage || typeof storage.get !== 'function') {
-        __bcsExportRootRefreshing = false;
-        return;
-    }
-    try {
-        const maybePromise = storage.get(['canvas-obsidian-git-sync-settings-v1'], (result) => {
-            __bcsExportRootRefreshing = false;
-            try {
-                const raw = result && result['canvas-obsidian-git-sync-settings-v1'];
-                const parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw && typeof raw === 'object' ? raw : null);
-                const changed = __applyBcsExportSettingsSnapshot(parsed);
-                if (changed) {
-                    __scheduleRealignBcsFileRefsBySyncSettingsChange('storage-get-callback');
-                }
-            } catch (_) { }
-        });
-        if (maybePromise && typeof maybePromise.then === 'function') {
-            maybePromise.then((result) => {
-                __bcsExportRootRefreshing = false;
-                try {
-                    const raw = result && result['canvas-obsidian-git-sync-settings-v1'];
-                    const parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw && typeof raw === 'object' ? raw : null);
-                    const changed = __applyBcsExportSettingsSnapshot(parsed);
-                    if (changed) {
-                        __scheduleRealignBcsFileRefsBySyncSettingsChange('storage-get-promise');
-                    }
-                } catch (_) { }
-            }).catch(() => { __bcsExportRootRefreshing = false; });
-        }
-    } catch (_) {
-        __bcsExportRootRefreshing = false;
-    }
-}
+function __formatObsidianCanvasJson(canvasDataInput) {
+    const canvasData = (canvasDataInput && typeof canvasDataInput === 'object') ? canvasDataInput : { nodes: [], edges: [] };
+    const nodes = Array.isArray(canvasData.nodes) ? canvasData.nodes : [];
+    const edges = Array.isArray(canvasData.edges) ? canvasData.edges : [];
+    const lines = ['{', '	"nodes":['];
 
-
-function __stripBcsGuardFields(payload) {
-    if (!payload || typeof payload !== 'object') return null;
-    const cleaned = {};
-    Object.keys(payload).forEach((key) => {
-        if (key === '_signature' || key === '_lastSyncedSignature' || key === '_dirty' || key === '_filePath') return;
-        cleaned[key] = payload[key];
+    nodes.forEach((node, index) => {
+        const suffix = index < (nodes.length - 1) ? ',' : '';
+        lines.push(`		${JSON.stringify(node)}${suffix}`);
     });
-    return cleaned;
-}
 
-function __isBcsGuardedPayload(payload) {
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
-    return (
-        Object.prototype.hasOwnProperty.call(payload, '_signature')
-        || Object.prototype.hasOwnProperty.call(payload, '_lastSyncedSignature')
-        || Object.prototype.hasOwnProperty.call(payload, '_dirty')
-        || Object.prototype.hasOwnProperty.call(payload, '_filePath')
-    );
+    lines.push('	],', '	"edges":[');
+
+    edges.forEach((edge, index) => {
+        const suffix = index < (edges.length - 1) ? ',' : '';
+        lines.push(`		${JSON.stringify(edge)}${suffix}`);
+    });
+
+    lines.push('	]', '}');
+    return lines.join('\n');
 }
 
 function __normalizeBcsCanvasPayload(payloadInput) {
@@ -40828,45 +38740,9 @@ function __readBcsCanvasPayload(rawValue, options = {}) {
         }
     }
     if (rawValue && typeof rawValue === 'object') {
-        if (__isBcsGuardedPayload(rawValue)) {
-            return __normalizeBcsCanvasPayload(__stripBcsGuardFields(rawValue));
-        }
         return __normalizeBcsCanvasPayload(rawValue);
     }
     return options && options.allowEmptyFallback === false ? null : __normalizeBcsCanvasPayload(null);
-}
-
-function __resolveBcsCanvasMetaPayload(storageMap) {
-    const storage = storageMap && typeof storageMap === 'object' ? storageMap : {};
-    const sidecar = storage[BCS_CANVAS_META_KEY];
-    if (__isBcsGuardedPayload(sidecar)) return sidecar;
-    const legacy = storage[BCS_CANVAS_KEY];
-    if (__isBcsGuardedPayload(legacy)) return legacy;
-    return {};
-}
-
-function __buildBcsCanvasMetaPayload(canvasPayloadInput, prevMetaPayload, options = {}) {
-    const canvasPayload = __normalizeBcsCanvasPayload(canvasPayloadInput);
-    const prevMeta = __isBcsGuardedPayload(prevMetaPayload) ? prevMetaPayload : {};
-    const filePath = typeof options.filePath === 'string'
-        ? options.filePath
-        : String(prevMeta._filePath || '');
-    return __buildBcsGuardedPayload({}, prevMeta, {
-        signature: __buildBcsSignature(canvasPayload),
-        filePath,
-        assumeClean: !!(options && options.assumeClean)
-    });
-}
-
-function __hasSameBcsGuardMeta(leftMeta, rightMeta) {
-    const left = __isBcsGuardedPayload(leftMeta) ? leftMeta : {};
-    const right = __isBcsGuardedPayload(rightMeta) ? rightMeta : {};
-    return (
-        String(left._signature || '') === String(right._signature || '')
-        && String(left._lastSyncedSignature || '') === String(right._lastSyncedSignature || '')
-        && Boolean(left._dirty) === Boolean(right._dirty)
-        && String(left._filePath || '') === String(right._filePath || '')
-    );
 }
 
 function __canonicalizeBcsCanvasStorageIfNeeded(storageMap, options = {}) {
@@ -40878,21 +38754,11 @@ function __canonicalizeBcsCanvasStorageIfNeeded(storageMap, options = {}) {
     if (!parsedPayload) return false;
 
     const canonicalText = __formatObsidianCanvasJson(parsedPayload);
-    const sidecarMeta = storage[BCS_CANVAS_META_KEY];
-    const prevMeta = __resolveBcsCanvasMetaPayload(storage);
-    const filePath = String(prevMeta && prevMeta._filePath || '') || __buildBcsCanvasFilePath(__getBcsExportRootSync());
-    const nextMeta = __buildBcsCanvasMetaPayload(parsedPayload, prevMeta, {
-        filePath,
-        assumeClean: !!(options && options.assumeCleanWhenMissingMeta && !__isBcsGuardedPayload(sidecarMeta))
-    });
-
     const needsCanvasRewrite = (typeof canvasRaw !== 'string') || (canvasRaw !== canonicalText);
-    const needsMetaRewrite = !__isBcsGuardedPayload(sidecarMeta) || !__hasSameBcsGuardMeta(sidecarMeta, nextMeta);
-    if (!needsCanvasRewrite && !needsMetaRewrite) return false;
+    if (!needsCanvasRewrite) return false;
 
     const updates = {};
     if (needsCanvasRewrite) updates[BCS_CANVAS_KEY] = canonicalText;
-    if (needsMetaRewrite) updates[BCS_CANVAS_META_KEY] = nextMeta;
     __bcsStorageSet(updates, { immediate: !!(options && options.immediate) });
     return true;
 }
@@ -40903,7 +38769,7 @@ function __buildBcsCanvasFilePath(exportRoot, canvasFileName = '') {
     const defaultName = isEn ? 'bookmark-canvas' : '书签画布';
     const leaf = normalizedRoot.split('/').filter(Boolean).slice(-1)[0] || defaultName;
     const fileName = String(canvasFileName || '').trim() || `${leaf}.canvas`;
-    return __joinSyncExportPath(normalizedRoot, fileName);
+    return __joinObsidianExportPath(normalizedRoot, fileName);
 }
 
 function __buildBcsMetaPayloadFromState(stateInput) {
@@ -40936,40 +38802,16 @@ function __buildBcsPermanentPayload(copyId = null) {
     return null;
 }
 
-function __buildBcsGuardedPayload(payload, prevPayload, options = {}) {
-    const safe = payload && typeof payload === 'object' ? payload : {};
-    const prev = prevPayload && typeof prevPayload === 'object' ? prevPayload : {};
-    const signature = options.signature || __buildBcsSignature(safe);
-    let lastSynced = typeof prev._lastSyncedSignature === 'string' ? prev._lastSyncedSignature : '';
-    if (options.assumeClean && !lastSynced) {
-        lastSynced = signature;
-    }
-    const dirty = !!signature && signature !== lastSynced;
-    const filePath = typeof options.filePath === 'string' ? options.filePath : (prev._filePath || '');
-    return {
-        ...safe,
-        _signature: signature,
-        _lastSyncedSignature: lastSynced,
-        _dirty: dirty,
-        _filePath: filePath
-    };
-}
-
 async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
     try {
         const state = __buildPersistedCanvasState(stateInput);
         if (!state || typeof state !== 'object') return;
-        __refreshBcsExportRootFromSyncSettings();
-
         const fileRefs = __collectBcsFileRefsFromState(state, {
-            exportRoot: __getBcsExportRootSync(),
-            exportFormat: __getBcsExportFormatSync()
+            exportRoot: __getBcsExportRootCached(),
+            exportFormat: __getBcsExportFormatCached()
         });
         const storage = await __bcsStorageGetAll();
         const canvasData = __buildBcsCanvasDataFromState(state, fileRefs, { storageMap: storage });
-        const dirtyPatch = (options && typeof options.dirtyPatch === 'object') ? options.dirtyPatch : null;
-        const forceAll = !!(options && options.forceAll);
-        const assumeClean = !!(options && options.assumeClean);
         const immediate = !!(options && options.immediate);
 
         const updates = {};
@@ -40986,32 +38828,14 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
             sectionIdSet.add(id);
         });
 
-        const updateAllSections = forceAll || !dirtyPatch || dirtyPatch.temporaryAll === true;
-        const dirtySectionIds = updateAllSections
-            ? Array.from(sectionIdSet.values())
-            : (Array.isArray(dirtyPatch && dirtyPatch.temporaryIds) ? dirtyPatch.temporaryIds : []);
-
-        const canvasDirty = forceAll
-            || !dirtyPatch
-            || dirtyPatch.canvasLayout === true
-            || dirtyPatch.canvasFileRef === true;
-
         updates[BCS_META_KEY] = __buildBcsMetaPayloadFromState(state);
 
-        if (canvasDirty) {
-            const canvasPayload = {
-                nodes: Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [],
-                edges: Array.isArray(canvasData && canvasData.edges) ? canvasData.edges : []
-            };
-            const prevCanvasMeta = __resolveBcsCanvasMetaPayload(storage);
-            updates[BCS_CANVAS_KEY] = __formatObsidianCanvasJson(canvasPayload);
-            updates[BCS_CANVAS_META_KEY] = __buildBcsCanvasMetaPayload(canvasPayload, prevCanvasMeta, {
-                filePath: __buildBcsCanvasFilePath(fileRefs && fileRefs.exportRoot),
-                assumeClean
-            });
-        }
+        updates[BCS_CANVAS_KEY] = __formatObsidianCanvasJson({
+            nodes: Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [],
+            edges: Array.isArray(canvasData && canvasData.edges) ? canvasData.edges : []
+        });
 
-        dirtySectionIds.forEach((idInput) => {
+        Array.from(sectionIdSet.values()).forEach((idInput) => {
             const id = String(idInput || '').trim();
             if (!id) return;
             const section = sectionById.get(id);
@@ -41019,21 +38843,10 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
             const payload = __buildBcsSectionPayloadFromSection(section);
             if (!payload) return;
             const key = __buildBcsSectionKey(id);
-            const prevPayload = storage ? storage[key] : null;
-            updates[key] = __buildBcsGuardedPayload(payload, prevPayload, {
-                filePath: fileRefs && fileRefs.tempSectionPathById ? fileRefs.tempSectionPathById[id] : '',
-                assumeClean
-            });
+            updates[key] = payload;
         });
 
-        const prevPerm = storage ? storage[BCS_PERM_MAIN_KEY] : null;
-        const prevPermState = storage && storage[BCS_PERM_MAIN_STATE_KEY]
-            ? storage[BCS_PERM_MAIN_STATE_KEY]
-            : (__isBcsGuardedPayload(prevPerm) ? prevPerm : null);
-        const permContentBase = await __ensurePermanentMainContentInBcs({
-            assumeCleanWhenMissingState: assumeClean,
-            assumeClean
-        });
+        const permContentBase = await __ensurePermanentMainContentInBcs();
         const permContent = permContentBase && typeof permContentBase === 'object'
             ? {
                 ...permContentBase,
@@ -41042,13 +38855,8 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
                 })
             }
             : null;
-        const permSyncPayload = __buildPermanentMainSyncPayload(permContent);
-        if (permContent && permSyncPayload) {
+        if (permContent) {
             updates[BCS_PERM_MAIN_KEY] = permContent;
-            updates[BCS_PERM_MAIN_STATE_KEY] = __buildBcsStatePayload(permSyncPayload, prevPermState, {
-                filePath: fileRefs && fileRefs.permanentPath ? fileRefs.permanentPath : '',
-                assumeClean
-            });
         }
 
         const copyIds = Object.keys((fileRefs && fileRefs.copyPathById) ? fileRefs.copyPathById : {});
@@ -41058,13 +38866,7 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
             if (!id) return;
             const payload = __buildBcsPermanentPayload(id);
             const key = __buildBcsPermCopyKey(id);
-            const stateKey = __buildBcsPermCopyStateKey(id);
-            const prevPayload = storage ? storage[stateKey] || storage[key] : null;
             updates[key] = payload;
-            updates[stateKey] = __buildBcsStatePayload(__buildPermanentCopySyncPayload(payload) || payload, prevPayload, {
-                filePath: fileRefs && fileRefs.copyPathById ? fileRefs.copyPathById[id] : '',
-                assumeClean
-            });
         });
 
         if (storage && typeof storage === 'object') {
@@ -41073,9 +38875,6 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
                 if (key.startsWith(BCS_SECTION_PREFIX)) {
                     const id = key.slice(BCS_SECTION_PREFIX.length);
                     if (!sectionIdSet.has(id)) removals.push(key);
-                } else if (key.startsWith(BCS_PERM_COPY_STATE_PREFIX)) {
-                    const id = key.slice(BCS_PERM_COPY_STATE_PREFIX.length);
-                    if (!copyIdSet.has(id)) removals.push(key);
                 } else if (key.startsWith(BCS_PERM_COPY_PREFIX)) {
                     const id = key.slice(BCS_PERM_COPY_PREFIX.length);
                     if (!copyIdSet.has(id)) removals.push(key);
@@ -41117,8 +38916,7 @@ async function __loadCanvasTempStateBundleFromBcs() {
     if (!__isBcsMetaPayload(meta)) return null;
     try {
         __canonicalizeBcsCanvasStorageIfNeeded(storage, {
-            immediate: true,
-            assumeCleanWhenMissingMeta: true
+            immediate: true
         });
     } catch (_) { }
     return {
@@ -41157,7 +38955,7 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
 
     try {
         const permMainRaw = storage[BCS_PERM_MAIN_KEY];
-        const permMain = permMainRaw && typeof permMainRaw === 'object' ? __stripBcsGuardFields(permMainRaw) : null;
+        const permMain = permMainRaw && typeof permMainRaw === 'object' ? permMainRaw : null;
         const rootMeta = __normalizePermanentRootMeta(permMain && permMain.rootMeta ? permMain.rootMeta : null);
         if (rootMeta) {
             __persistPermanentRootMetaStorageValue(rootMeta);
@@ -41169,7 +38967,7 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
         if (!key || !key.startsWith(BCS_SECTION_PREFIX)) return;
         const id = key.slice(BCS_SECTION_PREFIX.length);
         if (!id) return;
-        const payload = __stripBcsGuardFields(storage[key]);
+        const payload = storage[key];
         if (!payload || typeof payload !== 'object') return;
         if (!payload.id) payload.id = id;
         sectionPayloadById.set(String(id), payload);
@@ -41328,200 +39126,6 @@ function __tryRestoreTempNodesFromBcs() {
         });
 
     return true;
-}
-
-function __collectBcsDirtyEntitiesFromStorage(storageMap) {
-    const storage = storageMap && typeof storageMap === 'object' ? storageMap : {};
-    const dirtyPatch = {
-        canvasLayout: false,
-        canvasFileRef: false,
-        permanentAll: false,
-        permanentPaths: [],
-        temporaryAll: false,
-        temporaryIds: [],
-        blankAll: false,
-        blankIds: []
-    };
-    const entities = [];
-    const hasCanvasMetaSidecar = __isBcsGuardedPayload(storage[BCS_CANVAS_META_KEY]);
-    const canvasPayload = __readBcsCanvasPayload(storage[BCS_CANVAS_KEY]);
-
-    Object.keys(storage).forEach((key) => {
-        if (!key) return;
-        const payload = storage[key];
-        if (!payload || typeof payload !== 'object') return;
-        const isStatePayload = __isBcsStatePayload(payload) && !__isBcsGuardedPayload(payload);
-        const statePayload = isStatePayload ? __normalizeBcsStatePayload(payload) : null;
-        const isDirty = isStatePayload ? statePayload.dirty === true : payload._dirty === true;
-        if (!isDirty) return;
-        if (key === BCS_CANVAS_KEY && hasCanvasMetaSidecar) return;
-
-        const isPermanentMainStateKey = key === BCS_PERM_MAIN_STATE_KEY;
-        const isPermanentCopyStateKey = key.startsWith(BCS_PERM_COPY_STATE_PREFIX);
-        const copyStateId = isPermanentCopyStateKey ? key.slice(BCS_PERM_COPY_STATE_PREFIX.length) : '';
-        const contentKey = isPermanentMainStateKey
-            ? BCS_PERM_MAIN_KEY
-            : (isPermanentCopyStateKey ? __buildBcsPermCopyKey(copyStateId) : key);
-        const cleaned = isStatePayload
-            ? (__readPermanentContentPayload(storage[contentKey]) || {})
-            : (__stripBcsGuardFields(payload) || {});
-        const entry = {
-            key: isPermanentMainStateKey || isPermanentCopyStateKey ? contentKey : key,
-            storageKey: key,
-            filePath: isStatePayload ? statePayload.filePath : payload._filePath || '',
-            signature: isStatePayload ? statePayload.signature : payload._signature || '',
-            lastSyncedSignature: isStatePayload ? statePayload.lastSyncedSignature : payload._lastSyncedSignature || '',
-            dirty: true,
-            payload: cleaned
-        };
-
-        if (key === BCS_CANVAS_KEY || key === BCS_CANVAS_META_KEY) {
-            entry.type = 'canvas';
-            if (key === BCS_CANVAS_META_KEY) {
-                entry.storageKey = BCS_CANVAS_META_KEY;
-                entry.key = BCS_CANVAS_KEY;
-            }
-            entry.payload = canvasPayload;
-            dirtyPatch.canvasLayout = true;
-            entities.push(entry);
-            return;
-        }
-
-        if (key === BCS_PERM_MAIN_KEY || isPermanentMainStateKey) {
-            entry.type = 'permanent';
-            entry.id = 'main';
-            if (entry.filePath) dirtyPatch.permanentPaths.push(entry.filePath);
-            dirtyPatch.permanentAll = true;
-            entities.push(entry);
-            return;
-        }
-
-        if (isPermanentCopyStateKey || key.startsWith(BCS_PERM_COPY_PREFIX)) {
-            entry.type = 'permanent-copy';
-            entry.id = isPermanentCopyStateKey ? copyStateId : key.slice(BCS_PERM_COPY_PREFIX.length);
-            if (entry.filePath) dirtyPatch.permanentPaths.push(entry.filePath);
-            dirtyPatch.permanentAll = true;
-            entities.push(entry);
-            return;
-        }
-
-        if (key.startsWith(BCS_SECTION_PREFIX)) {
-            entry.type = 'section';
-            entry.id = key.slice(BCS_SECTION_PREFIX.length);
-            dirtyPatch.temporaryIds.push(entry.id);
-            dirtyPatch.canvasFileRef = true;
-            entities.push(entry);
-            return;
-        }
-
-    });
-
-    return { dirtyPatch, entities };
-}
-
-async function __clearBcsDirtyByFileMeta(fileMetaList) {
-    const list = Array.isArray(fileMetaList) ? fileMetaList : [];
-    if (!list.length) return { updated: 0, keys: [] };
-
-    const storage = await __bcsStorageGetAll();
-    const keyByFilePath = new Map();
-    Object.keys(storage).forEach((key) => {
-        const payload = storage[key];
-        if (!payload || typeof payload !== 'object') return;
-        const filePath = (__isBcsStatePayload(payload) && !__isBcsGuardedPayload(payload))
-            ? __normalizeBcsStatePayload(payload).filePath
-            : payload._filePath;
-        if (filePath) keyByFilePath.set(String(filePath), key);
-    });
-
-    const updates = {};
-    const touched = new Set();
-    const resolveCanvasMetaKey = () => {
-        if (__isBcsGuardedPayload(storage[BCS_CANVAS_META_KEY])) return BCS_CANVAS_META_KEY;
-        if (__isBcsGuardedPayload(storage[BCS_CANVAS_KEY])) return BCS_CANVAS_KEY;
-        return '';
-    };
-
-    const resolveKey = (meta) => {
-        if (!meta || typeof meta !== 'object') return '';
-        if (meta.key) {
-            const key = String(meta.key);
-            if (key === BCS_CANVAS_KEY) return resolveCanvasMetaKey() || BCS_CANVAS_META_KEY;
-            if (key === BCS_PERM_MAIN_KEY && storage[BCS_PERM_MAIN_STATE_KEY]) return BCS_PERM_MAIN_STATE_KEY;
-            if (key === BCS_PERM_MAIN_STATE_KEY) return key;
-            if (key.startsWith(BCS_PERM_COPY_STATE_PREFIX)) return key;
-            if (key.startsWith(BCS_PERM_COPY_PREFIX)) {
-                const copyId = key.slice(BCS_PERM_COPY_PREFIX.length);
-                const stateKey = __buildBcsPermCopyStateKey(copyId);
-                if (stateKey && storage[stateKey]) return stateKey;
-            }
-            return key;
-        }
-        if (meta.storageKey) {
-            const storageKey = String(meta.storageKey);
-            if (storageKey === BCS_CANVAS_KEY) return resolveCanvasMetaKey() || BCS_CANVAS_META_KEY;
-            return storageKey;
-        }
-        if (meta.type && meta.id) {
-            const type = String(meta.type);
-            const id = String(meta.id);
-            if (type === 'section') return __buildBcsSectionKey(id);
-            if (type === 'canvas') return resolveCanvasMetaKey() || BCS_CANVAS_META_KEY;
-            if (type === 'permanent') return storage[BCS_PERM_MAIN_STATE_KEY] ? BCS_PERM_MAIN_STATE_KEY : BCS_PERM_MAIN_KEY;
-            if (type === 'permanent-copy') {
-                const stateKey = __buildBcsPermCopyStateKey(id);
-                return stateKey && storage[stateKey] ? stateKey : __buildBcsPermCopyKey(id);
-            }
-        }
-        if (meta.type && String(meta.type) === 'canvas') {
-            return resolveCanvasMetaKey() || BCS_CANVAS_META_KEY;
-        }
-        if (meta.filePath) {
-            return keyByFilePath.get(String(meta.filePath)) || '';
-        }
-        return '';
-    };
-
-    list.forEach((meta) => {
-        const key = resolveKey(meta);
-        if (!key) return;
-        const payload = storage[key];
-        if (!payload || typeof payload !== 'object') return;
-        if (__isBcsStatePayload(payload) && !__isBcsGuardedPayload(payload)) {
-            const statePayload = __normalizeBcsStatePayload(payload);
-            const signature = statePayload.signature || __buildBcsSignature({});
-            updates[key] = {
-                ...payload,
-                signature,
-                lastSyncedSignature: signature,
-                dirty: false,
-                updatedAt: Date.now()
-            };
-            touched.add(key);
-            return;
-        }
-        let signature = payload._signature;
-        if (!signature) {
-            if (key === BCS_CANVAS_KEY || key === BCS_CANVAS_META_KEY) {
-                signature = __buildBcsSignature(__readBcsCanvasPayload(storage[BCS_CANVAS_KEY]));
-            } else {
-                signature = __buildBcsSignature(__stripBcsGuardFields(payload) || {});
-            }
-        }
-        updates[key] = {
-            ...payload,
-            _signature: signature,
-            _lastSyncedSignature: signature,
-            _dirty: false
-        };
-        touched.add(key);
-    });
-
-    if (Object.keys(updates).length) {
-        __bcsStorageSet(updates, { immediate: true });
-    }
-
-    return { updated: touched.size, keys: Array.from(touched) };
 }
 
 function __getCanvasStorageOnChangedArea() {
@@ -42147,7 +39751,6 @@ window.__debugCanvasSyncState = __debugCanvasSyncState;
 function __bindCanvasTempStateRealtimeSync() {
     if (__canvasTempStateRealtimeSyncBound) return;
     __canvasTempStateRealtimeSyncBound = true;
-    __bindBcsExportSettingsRealtimeSync();
 
     // localStorage 通道：覆盖当前页使用 localStorage 持久化的场景。
     try {
@@ -42202,11 +39805,6 @@ function __applyCanvasTempStateObject(state, options = {}) {
     if (loadedSignature) {
         __canvasTempStateLastPersistedSignature = loadedSignature;
     }
-    const loadedDirtySnapshot = __buildCanvasTempStateDirtySnapshot(sourceState);
-    if (loadedDirtySnapshot) {
-        __canvasTempStateLastDirtySnapshot = loadedDirtySnapshot;
-    }
-
     // 区块休眠替代旧休眠：加载时不保留运行态 dormant 标记，避免“空白/隐藏栏目”
     try {
         (CanvasState.tempSections || []).forEach((s) => {
@@ -42310,7 +39908,7 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
     }
 
     if (isPristineDemoPreset && !loadedFromStorage) {
-        try { saveTempNodes({ immediate: true, suppressSyncMarkDirty: true }); } catch (_) { }
+        try { saveTempNodes({ immediate: true }); } catch (_) { }
     }
 
     if (!hasOpenedCanvas) {
@@ -42342,22 +39940,7 @@ function saveTempNodes(options = {}) {
     // 4) 若功能是“仅当前会话临时态”（如 sandbox 导入），不要调用本函数
     if (__canvasTempStateRealtimeSyncApplying) return;
     const immediate = !!(options && options.immediate);
-    const requestedSuppressSyncMarkDirty = !!(options && options.suppressSyncMarkDirty);
-    const suppressSyncReason = (options && typeof options.suppressReason === 'string')
-        ? options.suppressReason
-        : 'saveTempNodes';
-    const suppressSyncMarkDirty = __resolveCanvasSuppressSyncMarkDirtyOption(requestedSuppressSyncMarkDirty, suppressSyncReason);
     const skipUnchangedPersist = !!(options && options.skipUnchangedPersist);
-    const syncDirty = (options && options.syncDirty && typeof options.syncDirty === 'object')
-        ? options.syncDirty
-        : null;
-    const syncDirtyPaths = Array.isArray(options && options.syncDirtyPaths)
-        ? options.syncDirtyPaths
-        : null;
-    const prevDirtySnapshot = __canvasTempStateLastDirtySnapshot;
-    let nextDirtySnapshot = null;
-    let derivedDirtyPatch = null;
-    let skippedAsUnchanged = false;
     // 保存前执行自动 resize
     autoResizeImportContainers();
 
@@ -42389,10 +39972,6 @@ function saveTempNodes(options = {}) {
             timestamp: Date.now()
         };
         const persistedState = __buildPersistedCanvasState(state);
-        nextDirtySnapshot = __buildCanvasTempStateDirtySnapshot(persistedState);
-        if (!syncDirty && nextDirtySnapshot) {
-            derivedDirtyPatch = __deriveSyncDirtyFromTempSnapshotDiff(prevDirtySnapshot, nextDirtySnapshot);
-        }
         const persistedSignature = __buildCanvasTempStateSignature(persistedState);
         if (
             skipUnchangedPersist
@@ -42400,14 +39979,10 @@ function saveTempNodes(options = {}) {
             && __canvasTempStateLastPersistedSignature
             && persistedSignature === __canvasTempStateLastPersistedSignature
         ) {
-            skippedAsUnchanged = true;
             return;
         }
         if (persistedSignature) {
             __canvasTempStateLastPersistedSignature = persistedSignature;
-        }
-        if (nextDirtySnapshot) {
-            __canvasTempStateLastDirtySnapshot = nextDirtySnapshot;
         }
         const persistedTs = __extractCanvasTempStateTimestamp(persistedState);
         if (persistedTs > 0) {
@@ -42415,76 +39990,11 @@ function saveTempNodes(options = {}) {
             __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, persistedTs);
         }
         __saveCanvasTempStateToBcsStorage(persistedState, {
-            immediate,
-            dirtyPatch: syncDirty || derivedDirtyPatch || null
+            immediate
         });
 
     } catch (error) {
         console.error('[Canvas] 保存临时栏目失败:', error);
-    } finally {
-        // Always close the suppress window at the end of each save call.
-        // This prevents cross-call leakage where a later unrelated suppress save
-        // inherits an old window age and can falsely trip the hard fuse.
-        __resetCanvasSuppressSyncMarkDirtyWindow();
-        if (suppressSyncMarkDirty) {
-            return;
-        }
-        if (skippedAsUnchanged) {
-            return;
-        }
-        try {
-            const syncModule = window.CanvasObsidianGitSync;
-            if (syncModule && typeof syncModule.markDirty === 'function') {
-                const normalizeSyncIds = (value) => {
-                    if (!Array.isArray(value)) return [];
-                    return value
-                        .map((item) => String(item == null ? '' : item).trim())
-                        .filter((item) => !!item);
-                };
-                let dirtyPatch = syncDirty
-                    ? {
-                        canvasLayout: syncDirty.canvasLayout === true,
-                        canvasFileRef: syncDirty.canvasFileRef === true,
-                        permanentAll: syncDirty.permanentAll === true,
-                        permanentPaths: Array.isArray(syncDirty.permanentPaths) ? syncDirty.permanentPaths : [],
-                        temporaryAll: syncDirty.temporaryAll === true,
-                        temporaryIds: normalizeSyncIds(syncDirty.temporaryIds),
-                        blankAll: syncDirty.blankAll === true,
-                        blankIds: normalizeSyncIds(syncDirty.blankIds)
-                    }
-                    : null;
-
-                if (!dirtyPatch) {
-                    const fallbackNextSnapshot = nextDirtySnapshot || __buildCanvasTempStateDirtySnapshot({
-                        sections: CanvasState.tempSections,
-                        tempSectionCounter: CanvasState.tempSectionCounter,
-                        tempItemCounter: CanvasState.tempItemCounter,
-                        colorCursor: CanvasState.colorCursor,
-                        tempSectionLastColor: CanvasState.tempSectionLastColor || getTempSectionDefaultColor(),
-                        tempSectionPrevColor: CanvasState.tempSectionPrevColor || null,
-                        mdNodes: CanvasState.mdNodes,
-                        mdNodeCounter: CanvasState.mdNodeCounter,
-                        edges: CanvasState.edges,
-                        edgeCounter: CanvasState.edgeCounter,
-                        timestamp: 0
-                    });
-                    dirtyPatch = __deriveSyncDirtyFromTempSnapshotDiff(prevDirtySnapshot, fallbackNextSnapshot);
-                    if (fallbackNextSnapshot) {
-                        __canvasTempStateLastDirtySnapshot = fallbackNextSnapshot;
-                    }
-                }
-
-                if (!dirtyPatch) {
-                    return;
-                }
-                syncModule.markDirty('save', {
-                    immediate,
-                    bulk: !!(options && options.bulk),
-                    dirty: dirtyPatch,
-                    dirtyPaths: syncDirtyPaths || undefined
-                });
-            }
-        } catch (_) { }
     }
 }
 

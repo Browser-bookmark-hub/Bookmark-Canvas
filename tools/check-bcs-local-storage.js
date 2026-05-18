@@ -5,19 +5,15 @@
         TEMP_SNAPSHOT: 'bcs:temp-state-snapshot',
         META: 'bcs:meta',
         CANVAS: 'bcs:canvas',
-        CANVAS_META: 'bcs:canvas:meta',
         SECTION_PREFIX: 'bcs:section:',
         PERM_MAIN: 'bcs:perm:main',
-        PERM_MAIN_STATE: 'bcs:perm:main:state',
         PERM_COPY_PREFIX: 'bcs:perm:copy-',
-        PERM_COPY_STATE_PREFIX: 'bcs:perm:copy-state:',
         SIGNAL: 'bcs:signal'
     });
 
     const CURRENT_SECTION_FORMAT = 'bookmark-canvas-section';
     const CURRENT_BCS_META_SCHEMA_VERSION = 5;
     const LEGACY_IDENTITY_PATTERN = /(?:\bsourceID\b|\bsourceId\b|\bsource_id\b|source-id|data-source-id|\boriginalId\b|bcs:perm:source)/i;
-    const GUARDED_FIELDS = new Set(['_signature', '_lastSyncedSignature', '_dirty', '_filePath']);
 
     function isRecord(value) {
         return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -135,11 +131,8 @@
                 canvasEdges: 0,
                 blankNodes: 0,
                 groupNodes: 0,
-                dirtyEntries: 0,
                 sourceIdentityHits: 0
             },
-            files: [],
-            dirtyEntries: [],
             sourceIdentityHits: [],
             errors: [],
             warnings: [],
@@ -173,56 +166,9 @@
         return pushIssue(report, 'error', category, message, detail);
     }
 
-    function isGuardedPayload(payload) {
-        return !!(
-            isRecord(payload)
-            && (
-                Object.prototype.hasOwnProperty.call(payload, '_signature')
-                || Object.prototype.hasOwnProperty.call(payload, '_lastSyncedSignature')
-                || Object.prototype.hasOwnProperty.call(payload, '_dirty')
-                || Object.prototype.hasOwnProperty.call(payload, '_filePath')
-            )
-        );
-    }
-
-    function stripGuardFields(payload) {
-        if (!isRecord(payload)) return null;
-        const cleaned = {};
-        Object.keys(payload).forEach((key) => {
-            if (GUARDED_FIELDS.has(key)) return;
-            cleaned[key] = payload[key];
-        });
-        return cleaned;
-    }
-
-    function isBcsStatePayload(payload) {
-        return !!(
-            isRecord(payload)
-            && (
-                Object.prototype.hasOwnProperty.call(payload, 'signature')
-                || Object.prototype.hasOwnProperty.call(payload, 'lastSyncedSignature')
-                || Object.prototype.hasOwnProperty.call(payload, 'dirty')
-                || Object.prototype.hasOwnProperty.call(payload, 'filePath')
-                || isGuardedPayload(payload)
-            )
-        );
-    }
-
-    function normalizeStatePayload(payload) {
-        const raw = isRecord(payload) ? payload : {};
-        return {
-            schemaVersion: Number(raw.schemaVersion) || 1,
-            signature: String(Object.prototype.hasOwnProperty.call(raw, 'signature') ? raw.signature : raw._signature || ''),
-            lastSyncedSignature: String(Object.prototype.hasOwnProperty.call(raw, 'lastSyncedSignature') ? raw.lastSyncedSignature : raw._lastSyncedSignature || ''),
-            dirty: Object.prototype.hasOwnProperty.call(raw, 'dirty') ? raw.dirty === true : raw._dirty === true,
-            filePath: String(Object.prototype.hasOwnProperty.call(raw, 'filePath') ? raw.filePath : raw._filePath || ''),
-            updatedAt: Number(raw.updatedAt) || 0
-        };
-    }
-
     function readContentPayload(rawValue) {
         if (!isRecord(rawValue)) return null;
-        return isGuardedPayload(rawValue) ? stripGuardFields(rawValue) : rawValue;
+        return rawValue;
     }
 
     function cloneJsonValue(value) {
@@ -258,9 +204,7 @@
     function isPermanentStorageKey(key) {
         const text = String(key || '');
         return text === STORAGE_KEYS.PERM_MAIN
-            || text === STORAGE_KEYS.PERM_MAIN_STATE
-            || text.startsWith(STORAGE_KEYS.PERM_COPY_PREFIX)
-            || text.startsWith(STORAGE_KEYS.PERM_COPY_STATE_PREFIX);
+            || text.startsWith(STORAGE_KEYS.PERM_COPY_PREFIX);
     }
 
     function buildPermanentStorageSnapshot(source, storage) {
@@ -288,8 +232,6 @@
                 return null;
             }
             payload = parsed;
-        } else if (isGuardedPayload(payload)) {
-            payload = stripGuardFields(payload);
         }
 
         if (!isRecord(payload)) {
@@ -306,57 +248,6 @@
             payload.edges = [];
         }
         return payload;
-    }
-
-    function addFileEntry(report, type, key, statePayload, extra) {
-        const state = normalizeStatePayload(statePayload || {});
-        const entry = {
-            type,
-            key,
-            filePath: state.filePath,
-            dirty: state.dirty,
-            signature: state.signature,
-            lastSyncedSignature: state.lastSyncedSignature
-        };
-        if (extra && typeof extra === 'object') Object.assign(entry, extra);
-        report.files.push(entry);
-        if (entry.dirty) report.dirtyEntries.push(entry);
-        return entry;
-    }
-
-    function checkStateSidecar(report, storage, key, label, options) {
-        const required = !(options && options.required === false);
-        const raw = storage[key];
-        if (!raw) {
-            const detail = { key, label };
-            if (required) fail(report, 'state', `${label} state sidecar is missing.`, detail);
-            else warn(report, 'state', `${label} state sidecar is missing.`, detail);
-            return null;
-        }
-        if (!isBcsStatePayload(raw)) {
-            fail(report, 'state', `${label} state sidecar is not a BCS state payload.`, { key, value: raw });
-            return null;
-        }
-        const state = normalizeStatePayload(raw);
-        addFileEntry(report, options && options.type ? options.type : 'unknown', options && options.contentKey ? options.contentKey : key, state, {
-            stateKey: key,
-            label
-        });
-        if (!state.signature) warn(report, 'state', `${label} state sidecar has no signature.`, { key });
-        if (!state.filePath) warn(report, 'state', `${label} state sidecar has no filePath.`, { key });
-        return state;
-    }
-
-    function checkGuardedFilePayload(report, payload, key, label, type) {
-        if (!isGuardedPayload(payload)) {
-            fail(report, 'state', `${label} payload is not BCS guarded.`, { key });
-            return null;
-        }
-        const state = normalizeStatePayload(payload);
-        addFileEntry(report, type, key, state, { label });
-        if (!state.signature) warn(report, 'state', `${label} guarded payload has no signature.`, { key });
-        if (!state.filePath) warn(report, 'state', `${label} guarded payload has no filePath.`, { key });
-        return state;
     }
 
     function pathForChild(parent, key) {
@@ -480,11 +371,8 @@
         const main = readContentPayload(rawMain);
         report.permanentMain = {
             contentKey: STORAGE_KEYS.PERM_MAIN,
-            stateKey: STORAGE_KEYS.PERM_MAIN_STATE,
             rawContent: cloneJsonValue(rawMain),
-            content: cloneJsonValue(main),
-            rawState: cloneJsonValue(storage[STORAGE_KEYS.PERM_MAIN_STATE]),
-            state: cloneJsonValue(normalizeStatePayload(storage[STORAGE_KEYS.PERM_MAIN_STATE]))
+            content: cloneJsonValue(main)
         };
         if (!main) {
             fail(report, 'permanent', '`bcs:perm:main` is missing or invalid.');
@@ -514,22 +402,13 @@
             });
         }
 
-        checkStateSidecar(report, storage, STORAGE_KEYS.PERM_MAIN_STATE, 'Permanent main', {
-            type: 'permanent',
-            contentKey: STORAGE_KEYS.PERM_MAIN
-        });
-
         return main;
     }
 
     function checkPermanentCopies(report, storage, canvasNodeById) {
         const copyKeys = Object.keys(storage)
-            .filter((key) => key.startsWith(STORAGE_KEYS.PERM_COPY_PREFIX) && !key.startsWith(STORAGE_KEYS.PERM_COPY_STATE_PREFIX))
+            .filter((key) => key.startsWith(STORAGE_KEYS.PERM_COPY_PREFIX))
             .sort();
-        const copyStateKeys = Object.keys(storage)
-            .filter((key) => key.startsWith(STORAGE_KEYS.PERM_COPY_STATE_PREFIX))
-            .sort();
-        const contentKeysById = new Map(copyKeys.map((key) => [key.slice(STORAGE_KEYS.PERM_COPY_PREFIX.length), key]));
 
         copyKeys.forEach((key) => {
             const copyId = key.slice(STORAGE_KEYS.PERM_COPY_PREFIX.length);
@@ -556,22 +435,9 @@
                 });
             }
 
-            const stateKey = `${STORAGE_KEYS.PERM_COPY_STATE_PREFIX}${copyId}`;
-            checkStateSidecar(report, storage, stateKey, `Permanent copy ${copyId}`, {
-                type: 'permanent-copy',
-                contentKey: key
-            });
-
             const canvasId = `permanent-section-copy-${copyId}`;
             if (canvasNodeById && !canvasNodeById.has(canvasId)) {
                 warn(report, 'permanent-copy', 'Permanent copy has no matching canvas node anchor.', { copyId, expectedCanvasNodeId: canvasId });
-            }
-        });
-
-        copyStateKeys.forEach((stateKey) => {
-            const copyId = stateKey.slice(STORAGE_KEYS.PERM_COPY_STATE_PREFIX.length);
-            if (!contentKeysById.has(copyId)) {
-                fail(report, 'permanent-copy', 'Permanent copy state sidecar has no matching content payload.', { copyId, stateKey });
             }
         });
     }
@@ -625,13 +491,6 @@
             }
         });
 
-        const canvasMeta = storage[STORAGE_KEYS.CANVAS_META];
-        if (!canvasMeta) {
-            fail(report, 'canvas', '`bcs:canvas:meta` sidecar is missing.');
-        } else {
-            checkGuardedFilePayload(report, canvasMeta, STORAGE_KEYS.CANVAS, 'Canvas file', 'canvas');
-        }
-
         passInfo(report, 'canvas', 'Canvas file is readable from BCS local storage.', {
             nodes: report.summary.canvasNodes,
             edges: report.summary.canvasEdges,
@@ -662,8 +521,6 @@
             const payload = readContentPayload(raw);
             sectionIds.add(id);
             report.summary.tempSections += 1;
-
-            checkGuardedFilePayload(report, raw, key, `Temporary section ${id}`, 'temporary');
 
             if (!payload) {
                 fail(report, 'temporary', 'Temporary section payload is invalid.', { key, id });
@@ -720,7 +577,6 @@
     }
 
     function finalizeReport(report) {
-        report.summary.dirtyEntries = report.dirtyEntries.length;
         report.ok = report.errors.length === 0;
         return report;
     }
@@ -839,7 +695,7 @@
         }
 
         Object.keys(storage)
-            .filter((key) => key.startsWith(STORAGE_KEYS.PERM_COPY_PREFIX) && !key.startsWith(STORAGE_KEYS.PERM_COPY_STATE_PREFIX))
+            .filter((key) => key.startsWith(STORAGE_KEYS.PERM_COPY_PREFIX))
             .sort()
             .forEach((key, index) => {
                 const payload = readContentPayload(storage[key]);
@@ -925,8 +781,6 @@
                 generatedAt: new Date().toISOString(),
                 source: '',
                 summary: {},
-                files: [],
-                dirtyEntries: [],
                 sourceIdentityHits: [],
                 errors: [{
                     severity: 'error',
