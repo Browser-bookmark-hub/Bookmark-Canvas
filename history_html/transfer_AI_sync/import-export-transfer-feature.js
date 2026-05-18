@@ -3,7 +3,7 @@
  *
  * This file contains manual import/export UI, file-entry handlers, and package
  * assembly/parsing endpoints. Shared BCS storage, protocol, JSON compatibility,
- * and markdown/html conversion helpers remain in transfer_AI_sync_core.js
+ * and markdown/html conversion helpers remain in storageBCS/storageBCS_core.js
  * so AI, sync, and import/export can use the same data core.
  */
 
@@ -2358,15 +2358,6 @@ async function exportCanvasPackage(options = {}) {
         files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(__buildTempSectionMarkdown(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat })) });
     });
 
-    const blankTextNodes = [];
-
-    (CanvasState.mdNodes || []).forEach((node) => {
-        if (!node || !node.id) return;
-        // import-container 作为 Obsidian 的 group 节点导出（不生成 .md 文件）
-        if (node.subtype === 'import-container') return;
-        blankTextNodes.push(node);
-    });
-
     const buildCanvasData = ({ vaultRelativePrefix }) => {
         // Obsidian Canvas 的 file 节点保存的是 vault-relative path（相对 vault 根目录的路径）。
         // 因此若用户把导出文件夹放在 vault 的子目录中，需要把该子目录前缀写进 file 字段。
@@ -2375,181 +2366,26 @@ async function exportCanvasPackage(options = {}) {
             const rel = String(relPath || '').replace(/^\/+/, '');
             return prefix ? `${prefix}/${rel}` : rel;
         };
-        const canvasData = { nodes: [], edges: [] };
-
-        const permanentSectionEl = document.getElementById('permanentSection');
-        const permanentLeft = permanentSectionEl ? (parseFloat(permanentSectionEl.style.left) || 0) : 0;
-        const permanentTop = permanentSectionEl ? (parseFloat(permanentSectionEl.style.top) || 0) : 0;
-        const permanentW = permanentSectionEl ? (permanentSectionEl.offsetWidth || 600) : 600;
-        const permanentH = permanentSectionEl ? (permanentSectionEl.offsetHeight || 600) : 600;
-        canvasData.nodes.push({
-            id: 'permanent-section',
-            type: 'file',
-            x: Math.round(permanentLeft),
-            y: Math.round(permanentTop),
-            width: Math.round(permanentW),
-            height: Math.round(permanentH),
-            file: withPrefix(permanentMdRel),
-            color: '4'
-        });
-
-        // 永久栏目副本：需要同步进 .canvas，即使该副本 DOM 未立即创建（性能模式/懒加载）。
-        try {
-            const copyIds = new Set();
-            const domPositions = new Map(); // copyId -> { left, top, width, height }
-            const storedPositions = new Map(); // copyId -> stored payload
-
-            try {
-                Object.keys((copyFileMap && typeof copyFileMap === 'object') ? copyFileMap : {}).forEach((id) => {
-                    if (id) copyIds.add(String(id));
-                });
-            } catch (_) { }
-
-            try {
-                const stored = __readPermanentSectionCopies();
-                if (Array.isArray(stored)) {
-                    stored.forEach((payload) => {
-                        if (!payload || !payload.id) return;
-                        const id = String(payload.id);
-                        if (!id) return;
-                        copyIds.add(id);
-                        storedPositions.set(id, payload);
-                    });
-                }
-            } catch (_) { }
-
-            try {
-                const canvasContent = document.getElementById('canvasContent');
-                const scope = canvasContent || document;
-                scope.querySelectorAll('.permanent-bookmark-section.permanent-section-copy').forEach((el) => {
-                    if (!el) return;
-                    const copyId = el.dataset ? el.dataset.permanentSectionCopyId : null;
-                    if (!copyId) return;
-                    const id = String(copyId);
-                    copyIds.add(id);
-                    domPositions.set(id, {
-                        left: parseFloat(el.style.left) || 0,
-                        top: parseFloat(el.style.top) || 0,
-                        width: el.offsetWidth || permanentW,
-                        height: el.offsetHeight || permanentH
-                    });
-                });
-            } catch (_) { }
-
-            const toNumber = (value, fallback) => {
-                const n = parseFloat(String(value == null ? '' : value));
-                return Number.isFinite(n) ? n : fallback;
-            };
-
-            Array.from(copyIds.values()).forEach((copyId) => {
-                if (!copyId) return;
-                const domPos = domPositions.get(copyId) || null;
-                const storedPos = storedPositions.get(copyId) || null;
-
-                const left = domPos
-                    ? domPos.left
-                    : (storedPos ? toNumber(storedPos.left, permanentLeft) : permanentLeft);
-                const top = domPos
-                    ? domPos.top
-                    : (storedPos ? toNumber(storedPos.top, permanentTop) : permanentTop);
-                const w = domPos
-                    ? domPos.width
-                    : (storedPos ? toNumber(storedPos.width, permanentW) : permanentW);
-                const h = domPos
-                    ? domPos.height
-                    : (storedPos ? toNumber(storedPos.height, permanentH) : permanentH);
-
-                canvasData.nodes.push({
-                    id: `permanent-section-copy-${copyId}`,
-                    type: 'file',
-                    x: Math.round(left),
-                    y: Math.round(top),
-                    width: Math.round(w),
-                    height: Math.round(h),
-                    file: withPrefix((copyId && copyFileMap && copyFileMap[copyId]) ? copyFileMap[copyId] : permanentMdRel),
-                    color: '4'
-                });
-            });
-        } catch (_) { }
-
-        // import-container: export as Obsidian group nodes (JSON Canvas spec)
-        try {
-            const exportMdBase = getBlankNodeDefaultSize();
-            (CanvasState.mdNodes || [])
-                .filter(n => n && n.subtype === 'import-container')
-                .forEach((n) => {
-                    const label = __getImportContainerLabelFromNode(n);
-                    const color = n && (n.colorHex || n.color) ? (n.colorHex || n.color) : null;
-                    canvasData.nodes.push({
-                        id: n.id,
-                        type: 'group',
-                        x: Math.round(n.x || 0),
-                        y: Math.round(n.y || 0),
-                        width: Math.round(n.width || exportMdBase.width),
-                        height: Math.round(n.height || exportMdBase.height),
-                        ...(label ? { label } : {}),
-                        ...(color ? { color } : {})
-                    });
-                });
-        } catch (_) { }
-
-        const exportTempBase = getTempSectionBaseSize();
-        const exportMdBase = getBlankNodeDefaultSize();
+        const tempSectionPathById = {};
         tempSectionMdPaths.forEach(({ id, rel }) => {
-            const section = CanvasState.tempSections.find(s => s && s.id === id);
-            if (!section) return;
-            canvasData.nodes.push({
-                id,
-                type: 'file',
-                x: Math.round(section.x || 0),
-                y: Math.round(section.y || 0),
-                width: Math.round(section.width || exportTempBase.width),
-                height: Math.round(section.height || exportTempBase.height),
-                file: withPrefix(rel),
-                color: section.color || null
-            });
+            if (!id) return;
+            tempSectionPathById[id] = withPrefix(rel);
         });
-
-        blankTextNodes.forEach((node) => {
-            if (!node || !node.id) return;
-            const color = node.colorHex || node.color || null;
-            const body = __isCanvasNativeTextNode(node)
-                ? __resolveCanvasNativeTextNodeBody(node)
-                : __deriveMdNodeMarkdownSource(node);
-            canvasData.nodes.push({
-                id: node.id,
-                type: 'text',
-                x: Math.round(node.x || 0),
-                y: Math.round(node.y || 0),
-                width: Math.round(node.width || exportMdBase.width),
-                height: Math.round(node.height || exportMdBase.height),
-                text: __normalizeCanvasMarkdownSource(body || ''),
-                ...(color ? { color } : {})
-            });
+        const copyPathById = {};
+        Object.keys(copyFileMap || {}).forEach((copyId) => {
+            if (!copyId) return;
+            copyPathById[copyId] = withPrefix(copyFileMap[copyId]);
         });
-
-        if (Array.isArray(CanvasState.edges)) {
-            canvasData.edges = CanvasState.edges.map(edge => {
-                const dir = edge.direction || 'none';
-                const fromEnd = (dir === 'both') ? 'arrow' : 'none';
-                const toEnd = (dir === 'forward' || dir === 'both') ? 'arrow' : 'none';
-                const colorHex = edge.colorHex || presetToHex(edge.color) || null;
-                const base = {
-                    id: edge.id,
-                    fromNode: edge.fromNode,
-                    fromSide: edge.fromSide || 'right',
-                    toNode: edge.toNode,
-                    toSide: edge.toSide || 'left',
-                    fromEnd,
-                    toEnd
-                };
-                if (edge.label && String(edge.label).trim()) base.label = edge.label;
-                if (colorHex) base.color = colorHex;
-                return base;
-            });
-        }
-
-        return canvasData;
+        return __buildBcsCanvasDataFromState({
+            sections: CanvasState.tempSections,
+            mdNodes: CanvasState.mdNodes,
+            edges: CanvasState.edges
+        }, {
+            permanentPath: withPrefix(permanentMdRel),
+            copyFileMap,
+            copyPathById,
+            tempSectionPathById
+        });
     };
 
     // 2) .canvas file

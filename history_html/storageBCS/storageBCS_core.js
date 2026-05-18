@@ -1,5 +1,5 @@
 /*
- * Bookmark-Canvas transfer_AI_sync extraction
+ * Bookmark-Canvas storageBCS core
  *
  * Source: history_html/bookmark_canvas_module.js
  * Extracted range: lines 28965-39089 at the time this folder was created.
@@ -34,7 +34,7 @@
  *
  * When adding new operations (create/update/delete/replace/apply), prefer adding
  * a small reusable primitive here and expose it through a stable facade such as
- * CanvasProtocolBridge / a future CanvasDataCore. Feature layers should call the
+ * CanvasProtocolBridge / a future storageBCS facade. Feature layers should call the
  * facade instead of reaching into private __* helpers directly.
  */
 
@@ -42,6 +42,19 @@
 // =============================================================================
 
 // Import/export dialogs and manual entry points moved to import-export-transfer-feature.js
+
+const TEMP_SECTION_STORAGE_KEY = 'bcs:temp-state-snapshot';
+const BCS_META_KEY = 'bcs:meta';
+const BCS_CANVAS_KEY = 'bcs:canvas';
+const BCS_SECTION_PREFIX = 'bcs:section:';
+const BCS_PERM_MAIN_KEY = 'bcs:perm:main';
+const BCS_PERM_COPY_PREFIX = 'bcs:perm:copy-';
+const BCS_SIGNAL_KEY = 'bcs:signal';
+const BCS_META_SCHEMA_VERSION = 5;
+const PERMANENT_SECTION_COPIES_STORAGE_KEY = 'bcs:perm:copies';
+const PERMANENT_MAIN_TIP_STORAGE_KEY = 'bcs:perm:tip-main';
+const PERMANENT_COPY_TIP_STORAGE_PREFIX = 'bcs:perm:tip-copy-';
+const PERMANENT_ROOT_META_STORAGE_KEY = 'bcs:perm:root-meta';
 
 function __normalizeCanvasTempStatePayloadForImport(stateInput, options = {}) {
     const parsedState = typeof stateInput === 'string'
@@ -5683,6 +5696,68 @@ function __collectBcsFileRefsFromState(stateInput, options = {}) {
     };
 }
 
+function __buildObsidianCanvasFileNode({ id, file, x, y, width, height, color = null }) {
+    const node = {
+        id,
+        type: 'file',
+        file: String(file == null ? '' : file),
+        x: Math.round(Number(x) || 0),
+        y: Math.round(Number(y) || 0),
+        width: Math.round(Number(width) || 0),
+        height: Math.round(Number(height) || 0)
+    };
+    if (color != null && String(color).trim()) node.color = color;
+    return node;
+}
+
+function __buildObsidianCanvasTextNode({ id, text, x, y, width, height, color = null }) {
+    const node = {
+        id,
+        type: 'text',
+        text: __normalizeCanvasMarkdownSource(text || ''),
+        x: Math.round(Number(x) || 0),
+        y: Math.round(Number(y) || 0),
+        width: Math.round(Number(width) || 0),
+        height: Math.round(Number(height) || 0)
+    };
+    if (color != null && String(color).trim()) node.color = color;
+    return node;
+}
+
+function __buildObsidianCanvasGroupNode({ id, label = null, x, y, width, height, color = null }) {
+    const node = {
+        id,
+        type: 'group',
+        x: Math.round(Number(x) || 0),
+        y: Math.round(Number(y) || 0),
+        width: Math.round(Number(width) || 0),
+        height: Math.round(Number(height) || 0)
+    };
+    if (label != null && String(label).trim()) node.label = label;
+    if (color != null && String(color).trim()) node.color = color;
+    return node;
+}
+
+function __buildObsidianCanvasEdge(edgeInput) {
+    const edge = edgeInput && typeof edgeInput === 'object' ? edgeInput : {};
+    const dir = edge.direction || 'none';
+    const fromEnd = edge.fromEnd || ((dir === 'both') ? 'arrow' : 'none');
+    const toEnd = edge.toEnd || ((dir === 'forward' || dir === 'both') ? 'arrow' : 'none');
+    const colorHex = edge.colorHex || presetToHex(edge.color) || null;
+    const base = {
+        id: edge.id,
+        fromNode: edge.fromNode,
+        fromSide: edge.fromSide || 'right',
+        toNode: edge.toNode,
+        toSide: edge.toSide || 'left'
+    };
+    if (fromEnd === 'arrow') base.fromEnd = 'arrow';
+    if (toEnd === 'none') base.toEnd = 'none';
+    if (colorHex) base.color = colorHex;
+    if (edge.label && String(edge.label).trim()) base.label = edge.label;
+    return base;
+}
+
 function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
     const normalizedRefs = fileRefs && typeof fileRefs === 'object' ? fileRefs : {};
     const storageMap = options && options.storageMap && typeof options.storageMap === 'object'
@@ -5717,8 +5792,12 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
     };
     const mainDomLeft = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.left) : null;
     const mainDomTop = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.top) : null;
-    const mainDomWidth = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.width) : null;
-    const mainDomHeight = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.height) : null;
+    const mainDomWidth = permanentSectionEl
+        ? (__parsePermanentViewCssPixelValue(permanentSectionEl.style.width) || permanentSectionEl.offsetWidth || null)
+        : null;
+    const mainDomHeight = permanentSectionEl
+        ? (__parsePermanentViewCssPixelValue(permanentSectionEl.style.height) || permanentSectionEl.offsetHeight || null)
+        : null;
     const hasMainDomPixelAnchor = mainDomLeft !== null && mainDomTop !== null;
     const permanentLeft = permanentSectionEl
         ? (hasMainDomPixelAnchor
@@ -5781,20 +5860,20 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
             600
         );
 
-    canvasData.nodes.push({
+    canvasData.nodes.push(__buildObsidianCanvasFileNode({
         id: 'permanent-section',
-        type: 'file',
+        file: String(normalizedRefs.permanentPath || ''),
         x: Math.round(permanentLeft),
         y: Math.round(permanentTop),
         width: Math.round(permanentW),
         height: Math.round(permanentH),
-        file: String(normalizedRefs.permanentPath || ''),
         color: '4'
-    });
+    }));
 
     try {
         const copyIds = new Set();
         const domPositions = new Map();
+        const storedPositions = new Map();
         try {
             Object.keys(normalizedRefs.copyFileMap || {}).forEach((id) => { if (id) copyIds.add(String(id)); });
         } catch (_) { }
@@ -5811,6 +5890,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
                     const id = String(payload.id);
                     if (!id) return;
                     copyIds.add(id);
+                    storedPositions.set(id, payload);
                 });
             }
         } catch (_) { }
@@ -5836,36 +5916,36 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
             if (!copyId) return;
             const domPos = domPositions.get(copyId) || null;
             const canvasPos = existingCopyCardStateById[copyId] || null;
+            const storedPos = storedPositions.get(copyId) || null;
             const left = domPos
                 ? domPos.left
                 : (canvasPos
                     ? toNumber(canvasPos.left, permanentLeft)
-                    : permanentLeft);
+                    : (storedPos ? toNumber(storedPos.left, permanentLeft) : permanentLeft));
             const top = domPos
                 ? domPos.top
                 : (canvasPos
                     ? toNumber(canvasPos.top, permanentTop)
-                    : permanentTop);
+                    : (storedPos ? toNumber(storedPos.top, permanentTop) : permanentTop));
             const w = domPos
                 ? domPos.width
                 : (canvasPos
                     ? toNumber(canvasPos.width, permanentW)
-                    : permanentW);
+                    : (storedPos ? toNumber(storedPos.width, permanentW) : permanentW));
             const h = domPos
                 ? domPos.height
                 : (canvasPos
                     ? toNumber(canvasPos.height, permanentH)
-                    : permanentH);
-            canvasData.nodes.push({
+                    : (storedPos ? toNumber(storedPos.height, permanentH) : permanentH));
+            canvasData.nodes.push(__buildObsidianCanvasFileNode({
                 id: `permanent-section-copy-${copyId}`,
-                type: 'file',
+                file: String(normalizedRefs.copyPathById && normalizedRefs.copyPathById[copyId] || normalizedRefs.permanentPath || ''),
                 x: Math.round(left),
                 y: Math.round(top),
                 width: Math.round(w),
                 height: Math.round(h),
-                file: String(normalizedRefs.copyPathById && normalizedRefs.copyPathById[copyId] || normalizedRefs.permanentPath || ''),
                 color: '4'
-            });
+            }));
         });
     } catch (_) { }
 
@@ -5874,16 +5954,15 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
         mdNodes.filter((n) => n && n.subtype === 'import-container').forEach((n) => {
             const label = __getImportContainerLabelFromNode(n);
             const color = n && (n.colorHex || n.color) ? (n.colorHex || n.color) : null;
-            canvasData.nodes.push({
+            canvasData.nodes.push(__buildObsidianCanvasGroupNode({
                 id: n.id,
-                type: 'group',
                 x: Math.round(n.x || 0),
                 y: Math.round(n.y || 0),
                 width: Math.round(n.width || exportMdBase.width),
                 height: Math.round(n.height || exportMdBase.height),
-                ...(label ? { label } : {}),
-                ...(color ? { color } : {})
-            });
+                label,
+                color
+            }));
         });
     } catch (_) { }
 
@@ -5894,16 +5973,15 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
         if (!section || !section.id) return;
         const filePath = normalizedRefs.tempSectionPathById && normalizedRefs.tempSectionPathById[section.id];
         if (!filePath) return;
-        canvasData.nodes.push({
+        canvasData.nodes.push(__buildObsidianCanvasFileNode({
             id: section.id,
-            type: 'file',
+            file: String(filePath),
             x: Math.round(section.x || 0),
             y: Math.round(section.y || 0),
             width: Math.round(section.width || exportTempBase.width),
             height: Math.round(section.height || exportTempBase.height),
-            file: String(filePath),
             color: section.color || null
-        });
+        }));
     });
 
     mdNodes.forEach((node) => {
@@ -5913,37 +5991,19 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
         const body = __isCanvasNativeTextNode(node)
             ? __resolveCanvasNativeTextNodeBody(node)
             : __deriveMdNodeMarkdownSource(node);
-        canvasData.nodes.push({
+        canvasData.nodes.push(__buildObsidianCanvasTextNode({
             id: node.id,
-            type: 'text',
+            text: __normalizeCanvasMarkdownSource(body || ''),
             x: Math.round(node.x || 0),
             y: Math.round(node.y || 0),
             width: Math.round(node.width || exportMdBase.width),
             height: Math.round(node.height || exportMdBase.height),
-            text: __normalizeCanvasMarkdownSource(body || ''),
-            ...(color ? { color } : {})
-        });
+            color
+        }));
     });
 
     if (Array.isArray(edges)) {
-        canvasData.edges = edges.map((edge) => {
-            const dir = edge.direction || 'none';
-            const fromEnd = (dir === 'both') ? 'arrow' : 'none';
-            const toEnd = (dir === 'forward' || dir === 'both') ? 'arrow' : 'none';
-            const colorHex = edge.colorHex || presetToHex(edge.color) || null;
-            const base = {
-                id: edge.id,
-                fromNode: edge.fromNode,
-                fromSide: edge.fromSide || 'right',
-                toNode: edge.toNode,
-                toSide: edge.toSide || 'left',
-                fromEnd,
-                toEnd
-            };
-            if (edge.label && String(edge.label).trim()) base.label = edge.label;
-            if (colorHex) base.color = colorHex;
-            return base;
-        });
+        canvasData.edges = edges.map((edge) => __buildObsidianCanvasEdge(edge));
     }
 
     return canvasData;
@@ -6613,10 +6673,101 @@ function __getBcsExportFormatCached() {
     return __normalizeCanvasObsidianExportFormat(__bcsExportFormatCache || '', 'json');
 }
 
+function __copyCanvasExtraKeys(source, target, reservedKeys) {
+    if (!source || typeof source !== 'object' || !target || typeof target !== 'object') return target;
+    Object.keys(source).forEach((key) => {
+        if (!key || reservedKeys.has(key)) return;
+        if (typeof source[key] === 'undefined') return;
+        target[key] = source[key];
+    });
+    return target;
+}
+
+function __canonicalizeObsidianCanvasNodeForJson(nodeInput) {
+    const node = (nodeInput && typeof nodeInput === 'object') ? nodeInput : {};
+    const type = String(node.type || '').trim();
+    const baseKeys = new Set(['id', 'type', 'x', 'y', 'width', 'height']);
+    if (type === 'file') {
+        const result = {
+            id: node.id,
+            type: 'file',
+            file: String(node.file == null ? '' : node.file),
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height
+        };
+        if (node.color != null && String(node.color).trim()) result.color = node.color;
+        return __copyCanvasExtraKeys(node, result, new Set([...baseKeys, 'file', 'color']));
+    }
+    if (type === 'text') {
+        const result = {
+            id: node.id,
+            type: 'text',
+            text: String(node.text == null ? '' : node.text),
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height
+        };
+        if (node.color != null && String(node.color).trim()) result.color = node.color;
+        return __copyCanvasExtraKeys(node, result, new Set([...baseKeys, 'text', 'color']));
+    }
+    if (type === 'group') {
+        const result = {
+            id: node.id,
+            type: 'group',
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height
+        };
+        if (node.label != null && String(node.label).trim()) result.label = node.label;
+        if (node.color != null && String(node.color).trim()) result.color = node.color;
+        return __copyCanvasExtraKeys(node, result, new Set([...baseKeys, 'label', 'color']));
+    }
+    return __copyCanvasExtraKeys(node, {
+        id: node.id,
+        type: node.type,
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height
+    }, baseKeys);
+}
+
+function __canonicalizeObsidianCanvasEdgeForJson(edgeInput) {
+    const edge = (edgeInput && typeof edgeInput === 'object') ? edgeInput : {};
+    const result = {
+        id: edge.id,
+        fromNode: edge.fromNode,
+        fromSide: edge.fromSide || 'right',
+        toNode: edge.toNode,
+        toSide: edge.toSide || 'left'
+    };
+    const fromEnd = edge.fromEnd === 'arrow' ? 'arrow' : 'none';
+    const toEnd = edge.toEnd === 'none' ? 'none' : 'arrow';
+    if (fromEnd !== 'none') result.fromEnd = fromEnd;
+    if (toEnd !== 'arrow') result.toEnd = toEnd;
+    if (edge.color != null && String(edge.color).trim()) result.color = edge.color;
+    if (edge.label != null && String(edge.label).trim()) result.label = edge.label;
+    return __copyCanvasExtraKeys(edge, result, new Set([
+        'id',
+        'fromNode',
+        'fromSide',
+        'toNode',
+        'toSide',
+        'fromEnd',
+        'toEnd',
+        'color',
+        'label'
+    ]));
+}
+
 function __formatObsidianCanvasJson(canvasDataInput) {
     const canvasData = (canvasDataInput && typeof canvasDataInput === 'object') ? canvasDataInput : { nodes: [], edges: [] };
-    const nodes = Array.isArray(canvasData.nodes) ? canvasData.nodes : [];
-    const edges = Array.isArray(canvasData.edges) ? canvasData.edges : [];
+    const nodes = Array.isArray(canvasData.nodes) ? canvasData.nodes.map(__canonicalizeObsidianCanvasNodeForJson) : [];
+    const edges = Array.isArray(canvasData.edges) ? canvasData.edges.map(__canonicalizeObsidianCanvasEdgeForJson) : [];
     const lines = ['{', '	"nodes":['];
 
     nodes.forEach((node, index) => {
@@ -6718,6 +6869,93 @@ function __buildBcsPermanentPayload(copyId = null) {
     return null;
 }
 
+async function __buildBcsDocumentsFromState(stateInput, options = {}) {
+    const state = __buildPersistedCanvasState(stateInput);
+    if (!state || typeof state !== 'object') return null;
+    const storage = options && options.storage && typeof options.storage === 'object'
+        ? options.storage
+        : null;
+    const fileRefs = options && options.fileRefs && typeof options.fileRefs === 'object'
+        ? options.fileRefs
+        : __collectBcsFileRefsFromState(state, {
+            exportRoot: (options && typeof options.exportRoot === 'string') ? options.exportRoot : __getBcsExportRootCached(),
+            exportFormat: (options && typeof options.exportFormat === 'string') ? options.exportFormat : __getBcsExportFormatCached()
+        });
+    const canvasData = __buildBcsCanvasDataFromState(state, fileRefs, { storageMap: storage });
+    const updates = {};
+    const removals = [];
+    const sections = Array.isArray(state.sections) ? state.sections : [];
+    const sectionById = new Map();
+    const sectionIdSet = new Set();
+
+    sections.forEach((section) => {
+        const id = String(section && section.id || '').trim();
+        if (!id) return;
+        sectionById.set(id, section);
+        sectionIdSet.add(id);
+    });
+
+    updates[BCS_META_KEY] = __buildBcsMetaPayloadFromState(state);
+    updates[BCS_CANVAS_KEY] = __formatObsidianCanvasJson({
+        nodes: Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [],
+        edges: Array.isArray(canvasData && canvasData.edges) ? canvasData.edges : []
+    });
+
+    Array.from(sectionIdSet.values()).forEach((idInput) => {
+        const id = String(idInput || '').trim();
+        if (!id) return;
+        const section = sectionById.get(id);
+        if (!section) return;
+        const payload = __buildBcsSectionPayloadFromSection(section);
+        if (!payload) return;
+        updates[__buildBcsSectionKey(id)] = payload;
+    });
+
+    const permContentBase = await __ensurePermanentMainContentInBcs();
+    const permContent = permContentBase && typeof permContentBase === 'object'
+        ? {
+            ...permContentBase,
+            descriptionMd: __resolvePermanentSectionDescriptionMarkdown(null, null, {
+                preserveRawSource: true
+            })
+        }
+        : null;
+    if (permContent) {
+        updates[BCS_PERM_MAIN_KEY] = permContent;
+    }
+
+    const copyIds = Object.keys((fileRefs && fileRefs.copyPathById) ? fileRefs.copyPathById : {});
+    const copyIdSet = new Set(copyIds.map((id) => String(id || '').trim()).filter(Boolean));
+    copyIds.forEach((copyId) => {
+        const id = String(copyId || '').trim();
+        if (!id) return;
+        updates[__buildBcsPermCopyKey(id)] = __buildBcsPermanentPayload(id);
+    });
+
+    if (storage && typeof storage === 'object') {
+        Object.keys(storage).forEach((key) => {
+            if (!key) return;
+            if (key.startsWith(BCS_SECTION_PREFIX)) {
+                const id = key.slice(BCS_SECTION_PREFIX.length);
+                if (!sectionIdSet.has(id)) removals.push(key);
+            } else if (key.startsWith(BCS_PERM_COPY_PREFIX)) {
+                const id = key.slice(BCS_PERM_COPY_PREFIX.length);
+                if (!copyIdSet.has(id)) removals.push(key);
+            }
+        });
+    }
+
+    return {
+        state,
+        fileRefs,
+        canvasData,
+        updates,
+        removals,
+        sectionIdSet,
+        copyIdSet
+    };
+}
+
 async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
     try {
         const state = __buildPersistedCanvasState(stateInput);
@@ -6727,76 +6965,11 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
             exportFormat: __getBcsExportFormatCached()
         });
         const storage = await __bcsStorageGetAll();
-        const canvasData = __buildBcsCanvasDataFromState(state, fileRefs, { storageMap: storage });
+        const documents = await __buildBcsDocumentsFromState(state, { fileRefs, storage });
+        if (!documents) return;
         const immediate = !!(options && options.immediate);
-
-        const updates = {};
-        const removals = [];
-
-        const sections = Array.isArray(state.sections) ? state.sections : [];
-
-        const sectionById = new Map();
-        const sectionIdSet = new Set();
-        sections.forEach((section) => {
-            const id = String(section && section.id || '').trim();
-            if (!id) return;
-            sectionById.set(id, section);
-            sectionIdSet.add(id);
-        });
-
-        updates[BCS_META_KEY] = __buildBcsMetaPayloadFromState(state);
-
-        updates[BCS_CANVAS_KEY] = __formatObsidianCanvasJson({
-            nodes: Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [],
-            edges: Array.isArray(canvasData && canvasData.edges) ? canvasData.edges : []
-        });
-
-        Array.from(sectionIdSet.values()).forEach((idInput) => {
-            const id = String(idInput || '').trim();
-            if (!id) return;
-            const section = sectionById.get(id);
-            if (!section) return;
-            const payload = __buildBcsSectionPayloadFromSection(section);
-            if (!payload) return;
-            const key = __buildBcsSectionKey(id);
-            updates[key] = payload;
-        });
-
-        const permContentBase = await __ensurePermanentMainContentInBcs();
-        const permContent = permContentBase && typeof permContentBase === 'object'
-            ? {
-                ...permContentBase,
-                descriptionMd: __resolvePermanentSectionDescriptionMarkdown(null, null, {
-                    preserveRawSource: true
-                })
-            }
-            : null;
-        if (permContent) {
-            updates[BCS_PERM_MAIN_KEY] = permContent;
-        }
-
-        const copyIds = Object.keys((fileRefs && fileRefs.copyPathById) ? fileRefs.copyPathById : {});
-        const copyIdSet = new Set(copyIds.map((id) => String(id || '').trim()).filter(Boolean));
-        copyIds.forEach((copyId) => {
-            const id = String(copyId || '').trim();
-            if (!id) return;
-            const payload = __buildBcsPermanentPayload(id);
-            const key = __buildBcsPermCopyKey(id);
-            updates[key] = payload;
-        });
-
-        if (storage && typeof storage === 'object') {
-            Object.keys(storage).forEach((key) => {
-                if (!key) return;
-                if (key.startsWith(BCS_SECTION_PREFIX)) {
-                    const id = key.slice(BCS_SECTION_PREFIX.length);
-                    if (!sectionIdSet.has(id)) removals.push(key);
-                } else if (key.startsWith(BCS_PERM_COPY_PREFIX)) {
-                    const id = key.slice(BCS_PERM_COPY_PREFIX.length);
-                    if (!copyIdSet.has(id)) removals.push(key);
-                }
-            });
-        }
+        const updates = documents.updates || {};
+        const removals = Array.isArray(documents.removals) ? documents.removals : [];
 
         if (removals.length) {
             await __bcsStorageRemove(removals);
@@ -6980,7 +7153,7 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
         const convertedColor = convertObsidianColor(edge.color);
         const isHex = convertedColor && convertedColor.startsWith('#');
         const fromEnd = edge && edge.fromEnd === 'arrow' ? 'arrow' : 'none';
-        const toEnd = edge && edge.toEnd === 'arrow' ? 'arrow' : 'none';
+        const toEnd = edge && edge.toEnd === 'none' ? 'none' : 'arrow';
         const direction = (fromEnd === 'arrow' && toEnd === 'arrow')
             ? 'both'
             : (toEnd === 'arrow' ? 'forward' : 'none');

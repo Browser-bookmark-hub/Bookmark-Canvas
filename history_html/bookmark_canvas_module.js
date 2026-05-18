@@ -1525,14 +1525,6 @@ function handleCtrlOverlayMouseDown(e) {
         startSectionResize(host, e);
     }
 }
-const TEMP_SECTION_STORAGE_KEY = 'bcs:temp-state-snapshot';
-const BCS_META_KEY = 'bcs:meta';
-const BCS_CANVAS_KEY = 'bcs:canvas';
-const BCS_SECTION_PREFIX = 'bcs:section:';
-const BCS_PERM_MAIN_KEY = 'bcs:perm:main';
-const BCS_PERM_COPY_PREFIX = 'bcs:perm:copy-';
-const BCS_SIGNAL_KEY = 'bcs:signal';
-const BCS_META_SCHEMA_VERSION = 5;
 const TEMP_SECTION_DEFAULT_WIDTH = 525;
 const TEMP_SECTION_DEFAULT_HEIGHT = 380;
 const TEMP_SECTION_DEFAULT_COLOR = '#2563eb';
@@ -13370,10 +13362,6 @@ function locateToTempSection(sectionId) {
 // 让永久栏目本身可以拖动
 // =============================================================================
 
-const PERMANENT_SECTION_COPIES_STORAGE_KEY = 'bcs:perm:copies';
-const PERMANENT_MAIN_TIP_STORAGE_KEY = 'bcs:perm:tip-main';
-const PERMANENT_COPY_TIP_STORAGE_PREFIX = 'bcs:perm:tip-copy-';
-const PERMANENT_ROOT_META_STORAGE_KEY = 'bcs:perm:root-meta';
 const PERMANENT_SECTION_SCROLL_KEY = 'permanent-section-scroll';
 const PERMANENT_SECTION_EXPANDED_KEY = 'permanent-section-expanded';
 
@@ -27671,7 +27659,7 @@ function setupCanvasEventListeners() {
 }
 
 // =============================================================================
-// Shared transfer data core moved to transfer_AI_sync/transfer_AI_sync_core.js
+// Shared BCS data core moved to storageBCS/storageBCS_core.js
 function __tryRestoreTempNodesFromBcs() {
     if (__canvasTempStateBcsLoadInProgress) return true;
     __canvasTempStateBcsLoadInProgress = true;
