@@ -258,6 +258,8 @@ bulk mute 只静默事件监听器的逐条副作用，不影响 Chrome API 调�
 
 3、「3、加 颜色 / 标识 /tag系统」延后，等前两块稳定后再进入。
 
+4、「4、单文件 JSON/HTML 导入自兼容补齐」放在 tag 系统之后执行，避免 tags/color/text 数据结构未稳定前重复改导入转换逻辑。
+
 ## 3、 加 颜色 / 标识 /tag系统；
 
 对象：
@@ -310,3 +312,31 @@ tag面板ui：
 在全局模式，全屏模式是全部的存储，（这个一般是搜索对应卡片的bcs存储），搜索规则是带上 #Red 等标记进行搜索颜色 或者 直接搜
 
 tag可以搜索，可以进行组成特殊临时栏目，具体参考域名他们怎么形成的。「前提：「特殊临时栏目」进行拓展，加入一种「任意」的左上角的这种东西，因为特殊临时栏目 本质上是作为与 普通链式链式栏目进行的区分」
+
+## 4、单文件 JSON/HTML 导入自兼容补齐；
+
+本节放在「3、加 颜色 / 标识 /tag系统」之后执行。
+
+目标：
+- 单文件 JSON/HTML 永远作为增量素材导入为临时栏目，不参与永久覆盖，不直接改浏览器真实永久书签树，不改永久栏目 identityMap。
+- JSON 导入必须兼容 Chrome Bookmark API 树状结构，例如 `chrome.bookmarks.getTree()` 的数组根、单 root 对象、普通 `{ title, url, children }` 书签树。
+- JSON 导入必须兼容本插件导出包中的永久栏目 `.json` 与临时栏目 `.json` 单文件；即使脱离 `.canvas` 包导入，也应能被识别为一个临时栏目。
+- 第三步 tag 系统完成后，单文件 JSON 导入需透传节点级 `tags` / `color` / `text` 等扩展字段；若导入为新临时栏目，不与本地已有节点做冲突合并，以导入文件自身字段为准。
+
+永久栏目 JSON 单文件导入：
+- 识别 `sectionType: "permanent"` 且存在 `tree` 的结构。
+- 读取 `tree.children` 作为书签树内容，导入为一个「快照临时栏目」。
+- 保留 `title`、`descriptionMd`、`slot`、`fileRole` 等可展示元信息；`identityMap` 只作为 tags 等扩展字段来源参考，不把其中的 Chrome ID 写入本地永久映射表。
+- 如果是永久副本 anchor 文件（例如只有 `inheritFrom`，没有 `tree`），单文件导入时不得静默失败；可提示需要主永久 JSON 文件，或只导入说明为空栏目（执行时再定）。
+
+临时栏目 JSON 单文件导入：
+- 识别 `sectionType: "temporary"` / `sectionMeta` / `items` 的结构。
+- 读取 `items` 作为临时书签树，导入为一个新临时栏目。
+- 保留 `sectionMeta`、`title`、`descriptionMd`、`label`、`sequenceNumber`、颜色与 tag 扩展字段。
+- 导入时重新分配本地临时栏目 ID 与 item ID，避免和现有临时栏目冲突。
+
+最低兼容：
+- 单文件 JSON 若只有最基础书签树结构，也必须能导入。
+- 标题为空时使用 URL 或默认标题兜底；文件夹标题为空时使用默认文件夹名。
+- 空 children 合法，不能因为空数组直接判定整个 JSON 无效。
+- 无法识别为书签树时才报错，并给出明确提示。

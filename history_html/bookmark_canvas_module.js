@@ -3687,14 +3687,174 @@ function convertBookmarkNodeToTempItem(node, sectionId, options = {}) {
     return item;
 }
 
-function allocateTempSectionId() {
-    if (typeof window !== 'undefined'
-        && window.CanvasProtocolBridge
-        && typeof window.CanvasProtocolBridge.generateTempSectionId === 'function') {
-        ++CanvasState.tempSectionCounter;
-        return window.CanvasProtocolBridge.generateTempSectionId();
+function allocateTempSectionId(meta) {
+    // Always bump the legacy counter so existing fingerprint signatures keep changing.
+    ++CanvasState.tempSectionCounter;
+    const baseId = buildTempSectionIdFromMeta(meta || {});
+    // doc 最终修复计划 §3.6: 新建栏目时必须保证 sectionId 在当前 CanvasState 中唯一。
+    return makeUniqueTempSectionId(baseId, null);
+}
+
+// Builds `temp-section-<label-chain>` from a section meta stub.
+//   - Regular chain section with explicit chain label ("A-1-1") → temp-section-A-1-1
+//   - Chain top-level (no explicit label, has sequenceNumber)  → temp-section-A-1
+//   - Special section (drop/import/etc.) with descriptive label → temp-section-<label>
+// Special-section collisions are resolved later by `makeUniqueTempSectionId` with `-2/-3` suffixes.
+// doc 最终修复计划 §3.7: 特殊来源集合必须与目录识别保持一致。
+// 复用顶部 `SPECIAL_TEMP_SOURCE_SET`（包含 browser-drop / search-result / batch /
+// quick-add / file-import / import-html-bookmarks / import-json-bookmarks）。
+function __isSpecialTempSource(source) {
+    if (!source) return false;
+    const v = String(source).toLowerCase();
+    if (typeof SPECIAL_TEMP_SOURCE_SET !== 'undefined' && SPECIAL_TEMP_SOURCE_SET.has(v)) return true;
+    return false;
+}
+function buildTempSectionIdFromMeta(meta) {
+    const explicitLabelRaw = (meta && typeof meta.label === 'string') ? meta.label.trim() : '';
+    const seq = Number(meta && meta.sequenceNumber) || 0;
+    const source = String(meta && meta.source || '').trim();
+    const sanitize = (s) => String(s || '')
+        .replace(/[^A-Za-z0-9一-鿿_-]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '');
+
+    // Chain-style label like "A-1-1" — already unique by construction.
+    if (explicitLabelRaw && /^[A-Za-z]+(?:-\d+)+$/.test(explicitLabelRaw)) {
+        return `temp-section-${explicitLabelRaw}`;
     }
-    return `temp-section-${++CanvasState.tempSectionCounter}`;
+    const isSpecialSource = __isSpecialTempSource(source);
+    if (explicitLabelRaw) {
+        const safe = sanitize(explicitLabelRaw);
+        if (safe) {
+            // Special source labels are user-visible text; collisions are handled by makeUniqueTempSectionId.
+            if (isSpecialSource) return `temp-section-${safe}`;
+            return `temp-section-${safe}`;
+        }
+    }
+    if (seq) {
+        const alpha = toAlphaLabel(seq);
+        if (alpha) return `temp-section-${alpha}-1`;
+    }
+    // Fallback that should never trigger for a properly built section.
+    return `temp-section-orphan-${seq || Date.now().toString(36)}`;
+}
+
+// doc 最终修复计划 §3.6: 把 baseId 转换为当前 CanvasState 中唯一的 sectionId。
+//   - 如果 baseId 未被占用，直接返回。
+//   - 如果被其它 section 占用（exclude oldId），加 -2 / -3 ... 后缀。
+function makeUniqueTempSectionId(baseId, excludeId) {
+    if (!baseId) return baseId;
+    const sections = (typeof CanvasState !== 'undefined' && Array.isArray(CanvasState.tempSections))
+        ? CanvasState.tempSections : [];
+    const inUse = (id) => sections.some((s) => s && s.id === id && s.id !== excludeId);
+    if (!inUse(baseId)) return baseId;
+    let suffix = 2;
+    while (suffix < 10000) {
+        const candidate = `${baseId}-${suffix}`;
+        if (!inUse(candidate)) return candidate;
+        suffix += 1;
+    }
+    // Defensive fallback (should never happen).
+    return `${baseId}-${Date.now().toString(36)}`;
+}
+
+function buildTempSectionIdFromSection(section) {
+    if (!section) return '';
+    return buildTempSectionIdFromMeta({
+        label: section.label,
+        sequenceNumber: section.sequenceNumber,
+        source: section.source
+    });
+}
+
+// Unified rewrite: when a section's label / sequenceNumber changes such that its computed
+// `temp-section-<label-chain>` id no longer matches its current `section.id`, this function
+// rewrites every dependent reference in one pass:
+//   - CanvasState.tempSections[*].id
+//   - section.items[*].sectionId (recursive)
+//   - DOM element id + data-section-id (header + body)
+//   - edges.fromNode / edges.toNode
+//   - import-container containedTempIds (in CanvasState.mdNodes)
+//   - fold/scroll persistent-storage keys (renamed by copying old → new + removing old)
+// Callers should invoke this from any chain-renumbering / label-change codepath.
+function rewriteTempSectionId(oldId, newId) {
+    if (!oldId || !newId || oldId === newId) return false;
+    // doc 最终修复计划 §3.6: 防御 newId 被其它 section 占用。
+    newId = makeUniqueTempSectionId(newId, oldId);
+    if (oldId === newId) return false;
+    let touched = false;
+    try {
+        const section = (CanvasState.tempSections || []).find((s) => s && s.id === oldId);
+        if (section) {
+            section.id = newId;
+            touched = true;
+            const walk = (items) => {
+                if (!Array.isArray(items)) return;
+                items.forEach((it) => {
+                    if (it && typeof it === 'object') {
+                        it.sectionId = newId;
+                        if (it.children) walk(it.children);
+                    }
+                });
+            };
+            walk(section.items);
+        }
+    } catch (_) {}
+    try {
+        const el = document.getElementById(oldId);
+        if (el) {
+            el.id = newId;
+            if (el.dataset) el.dataset.sectionId = newId;
+            el.querySelectorAll('[data-section-id="' + (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(oldId) : oldId) + '"]')
+                .forEach((node) => { try { node.dataset.sectionId = newId; } catch (_) {} });
+            touched = true;
+        }
+    } catch (_) {}
+    try {
+        if (Array.isArray(CanvasState.edges)) {
+            CanvasState.edges.forEach((edge) => {
+                if (!edge) return;
+                if (edge.fromNode === oldId) { edge.fromNode = newId; touched = true; }
+                if (edge.toNode === oldId) { edge.toNode = newId; touched = true; }
+            });
+        }
+    } catch (_) {}
+    try {
+        if (Array.isArray(CanvasState.mdNodes)) {
+            CanvasState.mdNodes.forEach((node) => {
+                if (!node || !Array.isArray(node.containedTempIds)) return;
+                for (let i = 0; i < node.containedTempIds.length; i++) {
+                    if (node.containedTempIds[i] === oldId) {
+                        node.containedTempIds[i] = newId;
+                        touched = true;
+                    }
+                }
+            });
+        }
+    } catch (_) {}
+    // Migrate fold/scroll storage keys (chrome.storage.local). Best-effort, fire-and-forget.
+    try {
+        const browserAPI = (typeof chrome !== 'undefined' && chrome.storage) ? chrome : null;
+        if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
+            const keysToMigrate = [
+                [`temp-section-scroll:${oldId}`, `temp-section-scroll:${newId}`],
+                [`temp-section-collapsed:${oldId}`, `temp-section-collapsed:${newId}`]
+            ];
+            browserAPI.storage.local.get(keysToMigrate.map(([k]) => k), (data) => {
+                const writes = {};
+                const removes = [];
+                keysToMigrate.forEach(([oldKey, newKey]) => {
+                    if (data && Object.prototype.hasOwnProperty.call(data, oldKey)) {
+                        writes[newKey] = data[oldKey];
+                        removes.push(oldKey);
+                    }
+                });
+                if (Object.keys(writes).length) browserAPI.storage.local.set(writes);
+                if (removes.length) browserAPI.storage.local.remove(removes);
+            });
+        }
+    } catch (_) {}
+    return touched;
 }
 
 function refreshTempSectionCounters() {
@@ -4668,12 +4828,18 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         : '';
 
     // 创建临时栏目
-    const sectionId = allocateTempSectionId();
+    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
+    const sectionId = allocateTempSectionId({
+        label: isEn ? 'Drop' : '拖入',
+        sequenceNumber,
+        source: 'browser-drop'
+    });
     const section = {
         id: sectionId,
         title: sourceInfo,
         descriptionMd: __normalizeCanvasMarkdownSource(description),  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
+        sequenceNumber,
         color: getSpecialTempSectionDefaultColor(),
         colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,
@@ -13619,6 +13785,7 @@ function __applyPermanentLayoutFromBcsStorageSnapshot(storageMap, options = {}) 
     if (!nodes.length) return false;
     return __applyPermanentLayoutFromCanvasNodes(nodes, options);
 }
+try { window.__applyPermanentLayoutFromBcsStorageSnapshot = __applyPermanentLayoutFromBcsStorageSnapshot; } catch (_) { }
 
 let __permanentLayoutFromBcsSyncToken = 0;
 function __syncPermanentLayoutFromBcsCanvasAsync(options = {}) {
@@ -15667,7 +15834,6 @@ async function createTempNode(data, x, y) {
         ? getCanvasAppearanceSettings().names.temp.mode
         : 'timestamp';
     const splitTitle = __resolveTempSplitTitle(data, splitPayload);
-    const sectionId = allocateTempSectionId();
     const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
     const isDragBased = !!(data && (data.source === 'permanent' || data.source === 'temporary' || data.multi));
     let resolvedTitle = (!isDragBased && explicitTitle) ? explicitTitle : '';
@@ -15684,6 +15850,56 @@ async function createTempNode(data, x, y) {
             resolvedTitle = getDefaultTempSectionTitle({ splitTitle });
         }
     }
+
+    // doc 第三轮修复 §2.5: 先把 label 决议出来，再统一调一次 allocateTempSectionId，
+    // 让 section.id 从一开始就是 `temp-section-<label-chain>`，不再使用 `temp-section-pending-*`
+    // 这种中间态字符串（之前的中间态在迁移正则里也识别不到，存在泄漏到 DOM/edge/storage 的风险）。
+    //
+    // doc 第三轮修复 §2.6: 链式临时栏目刻意不写 source（保持与历史行为一致：
+    //   source=undefined → buildTempSectionIdFromMeta 走 label-chain 分支，
+    //   __isSpecialTempSection 返回 false）。这是有意为之，不要在此填充 'permanent' /
+    //   'temporary' 等 data.source，否则会被误判为特殊源、走错颜色锁与目录识别分支。
+    let resolvedLabel = '';
+    if (explicitLabel) {
+        resolvedLabel = explicitLabel;
+    } else if (!forceSequenceLabel) {
+        if (inheritedLabel) {
+            resolvedLabel = inheritedLabel;
+        } else if (!isTempSplit && originPermanent) {
+            // Generate label from permanent copy origin: A -> A-1, B -> B-1
+            try {
+                let baseLabel = '';
+                if (originPermanent.copyId) {
+                    const idx = originPermanent.displayIndex || __resolvePermanentCopyDisplayIndex(originPermanent.copyId);
+                    if (idx) baseLabel = toAlphaLabel(idx + 1);
+                } else {
+                    baseLabel = toAlphaLabel(1); // Original -> A
+                }
+                if (baseLabel) {
+                    const separator = '-';
+                    const pattern = new RegExp(`^${escapeRegExp(baseLabel)}${separator}(\\d+)$`); // A-1, A-2
+                    let maxIndex = 0;
+                    CanvasState.tempSections.forEach(sec => {
+                        const label = getTempSectionLabel(sec);
+                        if (!label) return;
+                        const match = label.match(pattern);
+                        if (match) {
+                            const num = parseInt(match[1], 10);
+                            if (Number.isFinite(num)) maxIndex = Math.max(maxIndex, num);
+                        }
+                    });
+                    resolvedLabel = `${baseLabel}${separator}${maxIndex + 1}`;
+                }
+            } catch (_) { }
+        }
+    }
+
+    const sectionId = allocateTempSectionId({
+        label: resolvedLabel,
+        sequenceNumber,
+        source: undefined // 见上方 §2.6 注释
+    });
+
     const section = {
         id: sectionId,
         title: resolvedTitle,
@@ -15705,42 +15921,8 @@ async function createTempNode(data, x, y) {
     // - 默认不写入 label，让 UI 使用 sequenceNumber -> A-1/B-1/C-1...
     // - 分裂/继承场景仍可写入 label
     // - forceSequenceLabel=true 时，强制不写入 label（避免 A-2/B-2... 这类“分裂序号”）
-    if (explicitLabel) {
-        section.label = explicitLabel;
-    } else if (!forceSequenceLabel) {
-        if (inheritedLabel) {
-            section.label = inheritedLabel;
-        } else if (!isTempSplit && originPermanent) {
-            // Generate label from permanent copy origin: A -> A-1, B -> B-1
-            try {
-                let baseLabel = '';
-                // Determine base label (A, B...)
-                if (originPermanent.copyId) {
-                    const idx = originPermanent.displayIndex || __resolvePermanentCopyDisplayIndex(originPermanent.copyId);
-                    // Copy 1 (idx 1) -> B (2)
-                    if (idx) baseLabel = toAlphaLabel(idx + 1);
-                } else {
-                    baseLabel = toAlphaLabel(1); // Original -> A
-                }
-
-                if (baseLabel) {
-                    const separator = '-';
-                    const pattern = new RegExp(`^${escapeRegExp(baseLabel)}${separator}(\\d+)$`); // A-1, A-2
-                    let maxIndex = 0;
-                    // Find all existing temp sections: A-1, A-2... to find max index
-                    CanvasState.tempSections.forEach(sec => {
-                        const label = getTempSectionLabel(sec);
-                        if (!label) return;
-                        const match = label.match(pattern);
-                        if (match) {
-                            const num = parseInt(match[1], 10);
-                            if (Number.isFinite(num)) maxIndex = Math.max(maxIndex, num);
-                        }
-                    });
-                    section.label = `${baseLabel}${separator}${maxIndex + 1}`;
-                }
-            } catch (_) { }
-        }
+    if (resolvedLabel) {
+        section.label = resolvedLabel;
     }
 
     const finalBaseSize = getTempSectionBaseSize(section);
@@ -15798,7 +15980,6 @@ async function createTempNode(data, x, y) {
 function createEmptyTempSection(x, y, options = {}) {
     // Ensure new sequenceNumber continues from existing sections
     try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
-    const sectionId = allocateTempSectionId();
     const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
     const title = (options && typeof options.title === 'string' && options.title.trim())
         ? options.title.trim()
@@ -15809,6 +15990,7 @@ function createEmptyTempSection(x, y, options = {}) {
     const source = (options && typeof options.source === 'string' && options.source.trim())
         ? options.source.trim()
         : '';
+    const sectionId = allocateTempSectionId({ label, sequenceNumber, source });
     // 创建时按 source/label 先做一次特殊判定，确保默认颜色从一开始就正确。
     const isSpecialSource = __isSpecialTempSection({
         source: (options && typeof options.source === 'string') ? options.source : '',
@@ -19907,7 +20089,15 @@ async function createMdNode(x, y, text = '') {
     return id;
 }
 
-function removeMdNode(id, deleteChildren = false) {
+function removeMdNode(id, deleteChildren = false, options = {}) {
+    if (deleteChildren && typeof deleteChildren === 'object') {
+        options = deleteChildren;
+        deleteChildren = !!(options && options.deleteChildren);
+    }
+    const skipSave = !!(options && options.skipSave);
+    const immediate = options && Object.prototype.hasOwnProperty.call(options, 'immediate')
+        ? !!options.immediate
+        : true;
     // Check for container cascading delete
     const node = CanvasState.mdNodes.find(n => n.id === id);
     if (node && node.subtype === 'import-container' && deleteChildren && !node._deletingChildren) {
@@ -19917,16 +20107,21 @@ function removeMdNode(id, deleteChildren = false) {
         const mdIds = Array.isArray(node.containedMdIds) ? node.containedMdIds.slice() : [];
 
         // Delete internal by membership (no overlap-based deletion)
-        tempIds.forEach((tid) => removeTempNode(tid));
-        mdIds.forEach((mid) => removeMdNode(mid));
+        tempIds.forEach((tid) => removeTempNode(tid, { skipSave: true }));
+        mdIds.forEach((mid) => {
+            if (mid && mid !== id) removeMdNode(mid, false, { skipSave: true });
+        });
     }
 
     const el = document.getElementById(id);
     if (el) el.remove();
     CanvasState.mdNodes = CanvasState.mdNodes.filter(n => n.id !== id);
+    try { __removeNodeFromAllImportContainers(id); } catch (_) { }
     // Remove edges connected to this markdown node
-    removeEdgesForNode(id);
-    saveTempNodes();
+    removeEdgesForNode(id, { skipSave: true });
+    if (!skipSave) {
+        saveTempNodes({ immediate });
+    }
     scheduleBoundsUpdate();
 }
 
@@ -25826,21 +26021,28 @@ function wakeSectionById(sectionId) {
 
 // 已移除废弃的 setPerformanceMode / loadPerformanceMode
 
-function removeTempNode(sectionId) {
+function removeTempNode(sectionId, options = {}) {
+    const skipSave = !!(options && options.skipSave);
+    const immediate = options && Object.prototype.hasOwnProperty.call(options, 'immediate')
+        ? !!options.immediate
+        : true;
     const element = document.getElementById(sectionId);
     if (element) {
         element.remove();
     }
 
     CanvasState.tempSections = CanvasState.tempSections.filter(section => section.id !== sectionId);
+    try { __removeNodeFromAllImportContainers(sectionId); } catch (_) { }
     // Remove all edges connected to this section
-    removeEdgesForNode(sectionId);
+    removeEdgesForNode(sectionId, { skipSave: true });
 
     // ⚠️序号规则：删除某个临时栏目后，其他临时栏目的序号不应变化
     // 仅当所有临时栏目都被清空时，才重置全局序号计数器（下次从 A 重新开始）
     __resetTempSectionSequenceCounterIfEmpty();
 
-    saveTempNodes();
+    if (!skipSave) {
+        saveTempNodes({ immediate });
+    }
     scheduleBoundsUpdate();
     scheduleScrollbarUpdate();
 
@@ -28417,6 +28619,36 @@ function __applyCanvasTempStateObject(state, options = {}) {
     CanvasState.edges = Array.isArray(sourceState.edges) ? sourceState.edges : [];
     CanvasState.edgeCounter = sourceState.edgeCounter || CanvasState.edges.length || 0;
 
+    // One-shot id migration: any section whose id is from the abandoned tempSecId_* scheme
+    // (commit 2298735) or the legacy temp-section-<N> numeric scheme gets renamed to the
+    // canonical temp-section-<label-chain> form. Uses rewriteTempSectionId so item.sectionId,
+    // edges and containedTempIds stay consistent.
+    try {
+        const needsRewrite = [];
+        for (const section of CanvasState.tempSections) {
+            if (!section || typeof section.id !== 'string') continue;
+            const id = section.id;
+            // doc 第三轮修复 §2.5: 防御性兜底——加 `temp-section-pending-*` 前缀。
+            // 现行 createTempNode 已不再产出这种中间态字符串，但保留识别能力以清理
+            // 历史数据里残留的 pending id（例如旧版本写入的 state）。
+            const isLegacy = /^temp-section-\d+$/.test(id)
+                || /^tempSecId_/.test(id)
+                || /^temp-section-protocol-/.test(id)
+                || /^temp-section-pending-/.test(id);
+            if (!isLegacy) continue;
+            const correctedId = buildTempSectionIdFromSection(section);
+            if (correctedId && correctedId !== id) needsRewrite.push([id, correctedId]);
+        }
+        let migratedAny = false;
+        for (const [oldId, newId] of needsRewrite) {
+            if (rewriteTempSectionId(oldId, newId)) migratedAny = true;
+        }
+        // doc 最终修复计划 §3.6 step 4: 迁移后立即保存，避免刷新后重复迁移与潜在重复 id。
+        if (migratedAny) {
+            try { if (typeof saveTempNodes === 'function') saveTempNodes(); } catch (_) {}
+        }
+    } catch (e) { console.warn('[Canvas] section-id migration on load failed:', e); }
+
     const ts = __extractCanvasTempStateTimestamp(sourceState);
     if (ts > 0) {
         __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, ts);
@@ -28934,7 +29166,11 @@ function addEdge(fromNode, fromSide, toNode, toSide) {
 }
 
 // Remove all edges attached to a given node (section/md/permanent)
-function removeEdgesForNode(nodeId) {
+function removeEdgesForNode(nodeId, options = {}) {
+    const skipSave = !!(options && options.skipSave);
+    const immediate = options && Object.prototype.hasOwnProperty.call(options, 'immediate')
+        ? !!options.immediate
+        : true;
     const before = CanvasState.edges.length;
     const removed = [];
     CanvasState.edges = CanvasState.edges.filter(e => {
@@ -28948,7 +29184,9 @@ function removeEdgesForNode(nodeId) {
     }
     if (removed.length) {
         renderEdges();
-        saveTempNodes();
+        if (!skipSave) {
+            saveTempNodes({ immediate });
+        }
         console.log(`[Canvas] 已移除与节点 ${nodeId} 相连的连接线: ${removed.length}/${before}`);
     }
 }

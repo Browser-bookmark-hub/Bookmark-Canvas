@@ -749,7 +749,12 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
     }
 
     // 创建临时栏目
-    const sectionId = allocateTempSectionId();
+    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
+    const sectionId = allocateTempSectionId({
+        label: isEn ? 'Drop' : '拖入',
+        sequenceNumber,
+        source: 'browser-drop'
+    });
     const items = [];
 
     for (const bm of bookmarks) {
@@ -765,7 +770,6 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
     }
 
     // 使用默认标题格式
-    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
 
     const section = {
         id: sectionId,
@@ -885,8 +889,12 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
         const totalCount = countBookmarks(children);
 
         // 创建临时栏目（使用默认标题格式）
-        const sectionId = allocateTempSectionId();
         const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
+        const sectionId = allocateTempSectionId({
+            label: isEn ? 'Drop' : '拖入',
+            sequenceNumber,
+            source: 'browser-drop'
+        });
         const section = {
             id: sectionId,
             title: getDefaultTempSectionTitle(),
@@ -987,12 +995,18 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         ? (isEn ? `Source: ${sourcePath}` : `来源路径：${sourcePath}`)
         : '';
 
-    const sectionId = allocateTempSectionId();
+    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
+    const sectionId = allocateTempSectionId({
+        label: isEn ? 'Drop' : '拖入',
+        sequenceNumber,
+        source: 'browser-drop'
+    });
     const section = {
         id: sectionId,
         title: sourceInfo,
         descriptionMd: __normalizeCanvasMarkdownSource(description),  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
+        sequenceNumber,
         color: getSpecialTempSectionDefaultColor(),
         colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,
@@ -1120,6 +1134,152 @@ async function showFolderSelectionDialog(folders, dropX, dropY) {
 // Backup dialog (single-slot backup; auto-saved before export; manual + restore).
 // =============================================================================
 
+function __normalizeBackupTempStateForExport(tempStateInput, bridge) {
+    const source = (tempStateInput && typeof tempStateInput === 'object') ? tempStateInput : {};
+    const rawSections = Array.isArray(source.sections) ? source.sections : [];
+    const sections = rawSections
+        .map((section, index) => {
+            if (!section || typeof section !== 'object') return null;
+            const fallbackId = String(
+                section.id
+                || section.sectionId
+                || (section.sectionMeta && section.sectionMeta.id)
+                || `backup-temp-section-${index + 1}`
+            ).trim() || `backup-temp-section-${index + 1}`;
+
+            if (bridge && typeof bridge.restoreTempSectionFromProtocol === 'function') {
+                try {
+                    const restored = bridge.restoreTempSectionFromProtocol(section, { sectionId: fallbackId });
+                    if (restored && typeof restored === 'object') {
+                        if (!restored.id) restored.id = fallbackId;
+                        return restored;
+                    }
+                } catch (_) {}
+            }
+
+            let cloned = null;
+            if (bridge && typeof bridge.cloneForSandbox === 'function') {
+                cloned = bridge.cloneForSandbox(section);
+            } else {
+                try { cloned = JSON.parse(JSON.stringify(section)); } catch (_) { cloned = null; }
+            }
+            if (!cloned || typeof cloned !== 'object') return null;
+            if (!cloned.id) cloned.id = fallbackId;
+            return cloned;
+        })
+        .filter(Boolean);
+
+    return {
+        sections,
+        mdNodes: Array.isArray(source.mdNodes) ? source.mdNodes : [],
+        edges: Array.isArray(source.edges) ? source.edges : []
+    };
+}
+
+function __getBackupCopyEntriesFromSandbox(sandbox) {
+    const copies = (sandbox && sandbox.permCopies && typeof sandbox.permCopies === 'object')
+        ? sandbox.permCopies
+        : {};
+    return Object.keys(copies)
+        .map((key) => {
+            const normalizedKey = String(key || '').trim();
+            if (!normalizedKey.startsWith('bcs:perm:copy-')) return null;
+            const copyId = normalizedKey.slice('bcs:perm:copy-'.length).trim();
+            if (!copyId) return null;
+            return {
+                key: normalizedKey,
+                copyId,
+                payload: (copies[key] && typeof copies[key] === 'object') ? copies[key] : null
+            };
+        })
+        .filter(Boolean);
+}
+
+async function __downloadBackupSlotAsImportPackage(slot, options = {}) {
+    const isEn = !!(options && options.isEn);
+
+    if (
+        typeof __zipStore !== 'function'
+        || typeof __buildBcsObsidianPackageFilesFromSnapshot !== 'function'
+    ) {
+        throw new Error(isEn ? 'Backup export helpers unavailable.' : '备份导出组件不可用。');
+    }
+
+    const sandbox = slot && slot.sandbox && typeof slot.sandbox === 'object' ? slot.sandbox : null;
+    if (!sandbox) throw new Error(isEn ? 'No backup found.' : '未找到备份。');
+
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    const tempState = __normalizeBackupTempStateForExport(sandbox.tempState, bridge);
+
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const savedAtTs = Number(slot && slot.savedAt) || Date.now();
+    const savedAtDate = new Date(savedAtTs);
+    const ymd = `${savedAtDate.getFullYear()}${pad2(savedAtDate.getMonth() + 1)}${pad2(savedAtDate.getDate())}`;
+    const hms = `${pad2(savedAtDate.getHours())}${pad2(savedAtDate.getMinutes())}${pad2(savedAtDate.getSeconds())}`;
+    const exportRoot = isEn ? `bookmark-canvas-backup-${ymd}-${hms}` : `书签画布-备份-${ymd}-${hms}`;
+    const exportFormat = 'json';
+    const copyEntries = __getBackupCopyEntriesFromSandbox(sandbox);
+
+    const packageBundle = __buildBcsObsidianPackageFilesFromSnapshot({
+        permMain: sandbox.permMain,
+        permCopies: sandbox.permCopies,
+        tempState,
+        canvasState: sandbox.canvasState
+    }, {
+        isEn,
+        exportRoot,
+        exportFormat,
+        copyEntries,
+        idsAlreadySyncIds: true
+    });
+
+    const files = packageBundle && Array.isArray(packageBundle.files) ? packageBundle.files : [];
+    if (!files.length) {
+        throw new Error(isEn ? 'Backup package is empty.' : '备份包内容为空。');
+    }
+
+    const zipBlob = __zipStore(files);
+    const zipName = (packageBundle && packageBundle.zipName) ? packageBundle.zipName : `${exportRoot}.zip`;
+    const zipUrl = URL.createObjectURL(zipBlob);
+    const downloadFolder = `${getCanvasExportRootFolder()}/${getCanvasExportFolder()}`;
+
+    await new Promise((resolve) => {
+        const fallbackDownload = () => {
+            try {
+                const link = document.createElement('a');
+                link.href = zipUrl;
+                link.download = zipName;
+                document.body.appendChild(link);
+                link.click();
+                try { document.body.removeChild(link); } catch (_) {}
+            } catch (_) {}
+            resolve();
+        };
+
+        if (typeof chrome !== 'undefined' && chrome.downloads && typeof chrome.downloads.download === 'function') {
+            chrome.downloads.download({
+                url: zipUrl,
+                filename: `${downloadFolder}/${zipName}`,
+                saveAs: false,
+                conflictAction: 'uniquify'
+            }, () => {
+                if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
+                    console.warn('[Backup] chrome.downloads.download failed, fallback to <a> tag:', chrome.runtime.lastError);
+                    fallbackDownload();
+                    return;
+                }
+                resolve();
+            });
+            return;
+        }
+
+        fallbackDownload();
+    });
+
+    setTimeout(() => URL.revokeObjectURL(zipUrl), 10000);
+    return { zipName };
+}
+
 async function showBackupDialog() {
     const isEn = (typeof currentLang !== 'undefined' && currentLang === 'en');
     const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
@@ -1129,8 +1289,20 @@ async function showBackupDialog() {
     }
 
     const existing = await bridge.readBackupSlot();
+    const hasBackupPayload = !!(existing && existing.sandbox);
     const savedAt = existing && existing.savedAt ? new Date(existing.savedAt) : null;
     const savedLabel = savedAt ? savedAt.toLocaleString(isEn ? 'en-US' : 'zh-CN') : (isEn ? 'No backup yet' : '暂无备份');
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const savedStampDate = savedAt || new Date();
+    const savedStamp = `${savedStampDate.getFullYear()}${pad2(savedStampDate.getMonth() + 1)}${pad2(savedStampDate.getDate())}-${pad2(savedStampDate.getHours())}${pad2(savedStampDate.getMinutes())}${pad2(savedStampDate.getSeconds())}`;
+    const backupFileNamePreview = `${isEn ? 'bookmark-canvas-backup' : '书签画布-备份'}-${savedStamp}.zip`;
+    const backupFileNamePreviewLabel = isEn ? `Backup filename: ${backupFileNamePreview}` : `备份文件名：${backupFileNamePreview}`;
+    const backupHintLine1 = isEn
+        ? 'Each export auto-saves here, and the backup file automatically overwrites the previous file.'
+        : '每次导出自动保存，备份文件自动覆盖上一次文件。';
+    const restoreConfirmLine = isEn
+        ? 'This will fully overwrite current local data. Please confirm again.'
+        : '这会完整覆盖当前本地数据，请再次确认。';
 
     return new Promise((resolve) => {
         const dialog = document.createElement('div');
@@ -1142,17 +1314,26 @@ async function showBackupDialog() {
                     <h3>${isEn ? 'Backup' : '备份'}</h3>
                     <button class="import-dialog-close" id="closeBackupDialog">&times;</button>
                 </div>
-                <div class="import-dialog-body" style="padding: 16px;">
-                    <p style="margin: 0 0 8px;">${isEn ? 'Single-slot backup. Last save:' : '单槽备份。上次保存：'}</p>
-                    <p style="margin: 0 0 16px; font-weight: 600;">${savedLabel}</p>
-                    <p style="font-size: 12px; opacity: 0.7; margin: 0 0 12px;">
-                        ${isEn
-                            ? 'Each export auto-saves here. Manual save overwrites the slot. Restore replays the slot as an overwrite-import (current data lost).'
-                            : '每次导出自动保存。手动保存会覆盖此槽。恢复将把此槽以「覆盖导入」回放（当前数据丢失）。'}
-                    </p>
-                    <div style="display:flex; gap:8px;">
+                <div class="import-dialog-body" style="padding: 16px; display: flex; flex-direction: column; min-height: 220px;">
+                    <div style="margin-bottom: 10px;">
+                        <div style="margin: 0 0 8px;">${isEn ? 'Single-slot backup. Last save:' : '单槽备份。上次保存：'}</div>
+                        <div style="margin: 0; font-weight: 600; text-align: center; border: 1px solid var(--border-color, rgba(255,255,255,0.2)); border-radius: 8px; padding: 8px 10px; background: var(--surface-hover, rgba(0,0,0,0.05));">${savedLabel}</div>
+                        <div style="margin-top: 6px; font-size: 11px; opacity: 0.72; text-align: center; word-break: break-all;">${backupFileNamePreviewLabel}</div>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0;">
+                        <div style="font-size: 12px; color: #f59e0b; line-height: 1.55;">${backupHintLine1}</div>
+                        <button type="button" class="import-mode-btn" id="backupDownloadBtn" ${hasBackupPayload ? '' : 'disabled'}>${isEn ? 'Download Backup' : '下载备份'}</button>
+                    </div>
+                    <div id="backupRestoreConfirmPanel" style="display: none; margin: 0 0 10px; padding: 10px; border: 1px solid var(--border-color, rgba(255,255,255,0.2)); border-radius: 8px; background: var(--surface-hover, rgba(0,0,0,0.05));">
+                        <div style="font-size: 12px; line-height: 1.5; margin-bottom: 8px;">${restoreConfirmLine}</div>
+                        <div style="display:flex; gap:8px; justify-content:flex-end;">
+                            <button type="button" class="import-mode-btn import-mode-btn-cancel" id="backupRestoreSecondCancelBtn">${isEn ? 'Cancel' : '取消'}</button>
+                            <button type="button" class="import-mode-btn import-mode-btn-confirm" id="backupRestoreSecondConfirmBtn">${isEn ? 'Confirm Restore' : '确认恢复'}</button>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:auto;">
                         <button type="button" class="import-mode-btn import-mode-btn-confirm" id="backupManualBtn">${isEn ? 'Manual Backup' : '手动备份'}</button>
-                        <button type="button" class="import-mode-btn import-mode-btn-confirm" id="backupRestoreBtn" ${existing ? '' : 'disabled'}>${isEn ? 'Restore' : '恢复'}</button>
+                        <button type="button" class="import-mode-btn import-mode-btn-confirm" id="backupRestoreBtn" ${hasBackupPayload ? '' : 'disabled'}>${isEn ? 'Restore' : '恢复'}</button>
                         <button type="button" class="import-mode-btn import-mode-btn-cancel" id="backupCloseBtn">${isEn ? 'Close' : '关闭'}</button>
                     </div>
                 </div>
@@ -1162,6 +1343,34 @@ async function showBackupDialog() {
         const cleanup = () => { try { dialog.remove(); } catch (_) {} resolve(); };
         document.getElementById('closeBackupDialog').addEventListener('click', cleanup);
         document.getElementById('backupCloseBtn').addEventListener('click', cleanup);
+
+        const restoreBtn = document.getElementById('backupRestoreBtn');
+        const restoreConfirmPanel = document.getElementById('backupRestoreConfirmPanel');
+        const restoreSecondCancelBtn = document.getElementById('backupRestoreSecondCancelBtn');
+        const restoreSecondConfirmBtn = document.getElementById('backupRestoreSecondConfirmBtn');
+        let restoreInProgress = false;
+        const hideRestoreConfirmPanel = () => {
+            if (restoreConfirmPanel) restoreConfirmPanel.style.display = 'none';
+        };
+
+        document.getElementById('backupDownloadBtn').addEventListener('click', async () => {
+            try {
+                const slot = await bridge.readBackupSlot();
+                if (!slot || !slot.sandbox) {
+                    alert(isEn ? 'No backup found.' : '未找到备份。');
+                    return;
+                }
+
+                const result = await __downloadBackupSlotAsImportPackage(slot, { isEn });
+                const msg = isEn
+                    ? `Backup package downloaded: ${result && result.zipName ? result.zipName : ''}`
+                    : `备份包已下载：${result && result.zipName ? result.zipName : ''}`;
+                try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'success', 2500) : null; } catch (_) {}
+            } catch (e) {
+                console.error('[Backup] download failed:', e);
+                alert(isEn ? `Download failed: ${e.message}` : `下载失败：${e.message}`);
+            }
+        });
         document.getElementById('backupManualBtn').addEventListener('click', async () => {
             try {
                 const sandbox = await bridge.buildExportSandbox({ reason: 'manual-backup' });
@@ -1177,11 +1386,29 @@ async function showBackupDialog() {
             }
             cleanup();
         });
-        document.getElementById('backupRestoreBtn').addEventListener('click', async () => {
-            const confirmMsg = isEn
-                ? 'Restore backup will overwrite current local data with the backup snapshot. Continue?'
-                : '恢复备份将以备份快照覆盖当前本地数据。继续吗？';
-            if (!window.confirm(confirmMsg)) return;
+
+        if (restoreSecondCancelBtn) {
+            restoreSecondCancelBtn.addEventListener('click', () => {
+                if (restoreInProgress) return;
+                hideRestoreConfirmPanel();
+            });
+        }
+
+        if (restoreBtn) {
+            restoreBtn.addEventListener('click', () => {
+                if (restoreInProgress || !hasBackupPayload) return;
+                if (restoreConfirmPanel) restoreConfirmPanel.style.display = 'block';
+            });
+        }
+
+        if (restoreSecondConfirmBtn) {
+            restoreSecondConfirmBtn.addEventListener('click', async () => {
+                if (restoreInProgress) return;
+                restoreInProgress = true;
+                if (restoreSecondConfirmBtn) restoreSecondConfirmBtn.disabled = true;
+                if (restoreSecondCancelBtn) restoreSecondCancelBtn.disabled = true;
+                if (restoreBtn) restoreBtn.disabled = true;
+
             try {
                 const slot = await bridge.readBackupSlot();
                 if (!slot || !slot.sandbox) {
@@ -1201,13 +1428,24 @@ async function showBackupDialog() {
                     parsedStorage,
                     parsedPrimaryState: null,
                     importFileName: 'backup-slot',
-                    threshold: 0 // force overwrite branch
+                    threshold: 0, // force overwrite branch
+                    skipBackupWrite: true // doc §2.6 step 3: don't overwrite the slot we're restoring from
                 });
             } catch (e) {
                 console.error('[Backup] restore failed:', e);
                 alert(isEn ? `Restore failed: ${e.message}` : `恢复失败：${e.message}`);
             }
             cleanup();
+            });
+        }
+
+        dialog.addEventListener('click', (e) => {
+            if (!restoreConfirmPanel || restoreConfirmPanel.style.display === 'none') return;
+            const target = e.target;
+            if (!(target instanceof Element)) return;
+            if (target.id === 'backupRestoreBtn') return;
+            if (target.closest('#backupRestoreConfirmPanel')) return;
+            hideRestoreConfirmPanel();
         });
     });
 }

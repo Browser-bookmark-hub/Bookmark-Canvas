@@ -496,7 +496,7 @@ function __buildImportPreviewDataFromTempState(tempState, options = {}) {
 function showImportStructurePreviewDialog(options = {}) {
     const { isEn } = __getLang();
     const sourceLabel = String((options && options.sourceLabel) || '').trim();
-    const mode = (options && options.mode === 'sandbox') ? 'sandbox' : 'permanent';
+    const mode = (options && options.mode === 'overwrite') ? 'overwrite' : 'permanent';
     const previewData = (options && options.previewData && typeof options.previewData === 'object') ? options.previewData : null;
     const previewTempState = (options && options.previewTempState && typeof options.previewTempState === 'object') ? options.previewTempState : null;
     const previewStorage = (options && options.previewStorage && typeof options.previewStorage === 'object') ? options.previewStorage : null;
@@ -508,17 +508,21 @@ function showImportStructurePreviewDialog(options = {}) {
 
         const title = isEn ? 'Import Structure Preview' : '导入结构预览';
         const closeText = isEn ? 'Close' : '关闭';
-        const modeBadge = mode === 'sandbox'
-            ? (isEn ? 'Sandbox Mode' : '沙箱模式')
-            : (isEn ? 'Permanent Mode' : '永久模式');
+        const modeBadge = mode === 'overwrite'
+            ? (isEn ? 'Full Overwrite' : '全量覆盖')
+            : (isEn ? 'Snapshot Package Import' : '导入快照包');
         const sourceText = sourceLabel
             ? (isEn ? `Source: ${sourceLabel}` : `来源：${sourceLabel}`)
             : '';
 
         const note = previewData && previewData.hasContent
             ? (isEn
-                ? 'Imported permanent sections are converted to temporary snapshot sections to avoid conflicts.'
-                : '导入时，永久栏目会自动转换为临时快照栏目（避免冲突）。')
+                ? (mode === 'overwrite'
+                    ? 'Shows the final directory after full overwrite: local target is cleared and replaced by package content.'
+                    : 'Imported content is treated as an incremental snapshot package and wrapped in a group frame for safer compare/manage.')
+                : (mode === 'overwrite'
+                    ? '展示全量覆盖后的最终目录：本地目标会被清空并替换为导入包内容。'
+                    : '导入内容按增量快照包处理，并自动放入分组框，便于对比与管理。'))
             : (isEn ? 'No parse result yet. Confirm this mode first, then preview imported structure.' : '当前尚无解析结果，请先选定模式后再预览导入结构。');
 
         dialog.innerHTML = `
@@ -529,7 +533,7 @@ function showImportStructurePreviewDialog(options = {}) {
                 </div>
                 <div class="import-dialog-body import-preview-dialog-body">
                     <div class="import-preview-meta">
-                        <span class="import-preview-mode-badge ${mode === 'sandbox' ? 'is-sandbox' : 'is-permanent'}">${modeBadge}</span>
+                        <span class="import-preview-mode-badge ${mode === 'overwrite' ? 'is-overwrite' : 'is-permanent'}">${modeBadge}</span>
                         ${sourceText ? `<span class="import-preview-source">${sourceText}</span>` : ''}
                     </div>
                     <div class="import-preview-note">${note}</div>
@@ -549,7 +553,8 @@ function showImportStructurePreviewDialog(options = {}) {
                 const previewState = __convertPreviewTempStateToDirectoryState(previewTempState || {});
                 window.CanvasSidebarDirectory.renderPreviewDirectory(previewTree, previewState, {
                     storage: previewStorage,
-                    groupName: sourceLabel
+                    groupName: sourceLabel,
+                    mode
                 });
             }
         } catch (err) {
@@ -588,7 +593,7 @@ function showImportStructurePreviewDialog(options = {}) {
 
 function showImportModeConfirmDialog(options = {}) {
     const { isEn } = __getLang();
-    const defaultMode = (options && options.defaultMode === 'sandbox') ? 'sandbox' : 'permanent';
+    const defaultMode = (options && options.defaultMode === 'overwrite') ? 'overwrite' : 'permanent';
     const sourceLabel = String((options && options.sourceLabel) || '').trim();
     const onConfirm = (options && typeof options.onConfirm === 'function') ? options.onConfirm : null;
     const previewData = (options && options.previewData && typeof options.previewData === 'object') ? options.previewData : null;
@@ -599,22 +604,15 @@ function showImportModeConfirmDialog(options = {}) {
         dialog.id = 'canvasImportModeDialog';
 
         const title = isEn ? 'Import Mode' : '导入模式';
-        const subtitle = isEn
-            ? 'Choose how this import should be handled.'
-            : '选择这次导入的处理方式。';
         const sourceText = sourceLabel
             ? (isEn ? `Source: ${sourceLabel}` : `来源：${sourceLabel}`)
             : '';
 
-        const permanentTitle = isEn ? 'Permanent Import' : '永久导入';
+        const permanentTitle = isEn ? 'Snapshot Package Import' : '导入快照包';
         const permanentDesc = isEn
-            ? 'Saved as normal canvas data. (Default)'
-            : '按普通画布数据保存（默认）。';
-        const sandboxTitle = isEn ? 'Temporary Sandbox Import' : '临时导入（沙箱）';
-        const sandboxDesc = isEn
-            ? 'Visible now, excluded from persisted data, and cleared after refresh.'
-            : '当前可见，不写入持久数据，刷新后会清除。';
-        const overwriteTitle = isEn ? 'Overwrite Import' : '覆盖导入';
+            ? 'Equivalent to incremental-style import: load as a snapshot package and wrap it in a group frame. (Default)'
+            : '相当于增量式导入：按快照包导入，并用分组框包裹（默认）。';
+        const overwriteTitle = isEn ? 'Full Overwrite' : '全量覆盖';
         const overwriteDesc = isEn
             ? 'Clears current local target and writes the imported package in. Undo via Backup.'
             : '清空本地目标，写入导入包内容。可通过「备份」撤销。';
@@ -634,7 +632,6 @@ function showImportModeConfirmDialog(options = {}) {
                     <button class="import-dialog-close" id="closeImportModeDialog">&times;</button>
                 </div>
                 <div class="import-dialog-body import-mode-dialog-body">
-                    <div class="import-mode-subtitle">${subtitle}</div>
                     ${sourceText ? `<div class="import-mode-source">${sourceText}</div>` : ''}
                     <div class="import-mode-options" id="importModeOptions">
                         <button type="button" class="import-mode-option ${defaultMode === 'permanent' ? 'is-selected' : ''}" data-mode="permanent">
@@ -642,13 +639,6 @@ function showImportModeConfirmDialog(options = {}) {
                             <span class="import-mode-option-main">
                                 <span class="import-mode-option-title">${permanentTitle}</span>
                                 <span class="import-mode-option-desc">${permanentDesc}</span>
-                            </span>
-                        </button>
-                        <button type="button" class="import-mode-option ${defaultMode === 'sandbox' ? 'is-selected' : ''}" data-mode="sandbox">
-                            <span class="import-mode-radio" aria-hidden="true"></span>
-                            <span class="import-mode-option-main">
-                                <span class="import-mode-option-title">${sandboxTitle}</span>
-                                <span class="import-mode-option-desc">${sandboxDesc}</span>
                             </span>
                         </button>
                         <button type="button" class="import-mode-option ${defaultMode === 'overwrite' ? 'is-selected' : ''}" data-mode="overwrite">
@@ -701,8 +691,7 @@ function showImportModeConfirmDialog(options = {}) {
         };
 
         const pickMode = (mode) => {
-            if (mode === 'sandbox') selectedMode = 'sandbox';
-            else if (mode === 'overwrite') selectedMode = 'overwrite';
+            if (mode === 'overwrite') selectedMode = 'overwrite';
             else selectedMode = 'permanent';
             const optionsWrap = document.getElementById('importModeOptions');
             refreshOverwriteVisibility();
@@ -768,8 +757,8 @@ function showImportModeConfirmDialog(options = {}) {
                         }
                     }
                     const confirmMsg = isEn
-                        ? `Overwrite import will clear your current local data and write the imported package in. You can undo via Backup. Threshold: ${currentThreshold}. Continue?`
-                        : `覆盖导入将清空当前本地数据并写入导入包内容。可通过「备份」撤销。阈值：${currentThreshold}。继续吗？`;
+                        ? `Full overwrite will clear your current local data and write the imported package in. You can undo via Backup. Threshold: ${currentThreshold}. Continue?`
+                        : `全量覆盖将清空当前本地数据并写入导入包内容。可通过「备份」撤销。阈值：${currentThreshold}。继续吗？`;
                     if (!window.confirm(confirmMsg)) {
                         return;
                     }
@@ -821,6 +810,9 @@ function __collectSyncIdsFromImportTree(treeRoot) {
     }
     return set;
 }
+
+// doc 第三轮修复 §2.3: 校验函数已迁到 storageBCS_core.js，通过 bridge.validateImportedIdentityMapAgainstTree
+// 调用，不再在本文件内重复实现。本文件只负责调用并构造 ignoredChromeIds（由 fresh tree 推导）。
 
 function __collectChromeIdsFromLocalContent(content) {
     const set = new Set();
@@ -888,16 +880,36 @@ async function __recreateChromeBookmarkTreeFromImport(importTreeRoot, syncIdToCh
             });
         } catch (e) { reject(e); }
     });
-    // The import tree root has its own syncId; its children's parentIds reference that root.
-    // Map each root child to a Chrome top-level root by `folderType` if available, else by index.
-    // For simplicity, attach all immediate children under bookmarks-bar (id '1') unless folderType
-    // hints otherwise.
     const folderTypeToChromeId = { 'bookmarks-bar': '1', 'other': '2', 'mobile': '3' };
+    // doc 第三轮修复 §2.2: 不再静默 fallback 到书签栏。folderType 缺失或未识别时返回 null,
+    // 调用方负责跳过该 top-child 并 console.warn, 避免把整棵子树堆到 '1' 导致重复。
     const rootChromeIdOf = (importRootChild) => {
         const ft = String(importRootChild && importRootChild.folderType || '').trim();
         if (folderTypeToChromeId[ft]) return folderTypeToChromeId[ft];
-        return '1';
+        return null;
     };
+
+    // Record root + top-level root syncId → fixed Chrome root id BEFORE walking children.
+    // These nodes are not created via chrome.bookmarks.create (they're permanent Chrome
+    // roots), so we map them by convention. Without this, the rebuilt identityMap would
+    // miss `root`, `bookmarks-bar`, `other`, `mobile` entries and __verifyAndHealIdentityMap
+    // would later mint fresh syncIds for them, violating doc §2.2.1.4.
+    const importRootSyncId = String(importTreeRoot.id || '').trim();
+    if (importRootSyncId) {
+        syncIdToChromeId.set(importRootSyncId, '0');
+    }
+    for (const topChild of importTreeRoot.children) {
+        if (!topChild) continue;
+        const topSyncId = String(topChild.id || '').trim();
+        if (!topSyncId) continue;
+        const chromeRootId = rootChromeIdOf(topChild);
+        if (!chromeRootId) {
+            try { console.warn('[Overwrite Import] unknown top-root folderType, skipping:', topChild.folderType, 'syncId=', topSyncId); } catch (_) {}
+            continue;
+        }
+        syncIdToChromeId.set(topSyncId, chromeRootId);
+    }
+
     const walk = async (chromeParentId, importChildren) => {
         if (!Array.isArray(importChildren)) return;
         for (const node of importChildren) {
@@ -913,10 +925,132 @@ async function __recreateChromeBookmarkTreeFromImport(importTreeRoot, syncIdToCh
     for (const topChild of importTreeRoot.children) {
         if (!topChild) continue;
         const chromeRootId = rootChromeIdOf(topChild);
+        if (!chromeRootId) continue; // already warned above
         if (Array.isArray(topChild.children) && topChild.children.length) {
             await walk(chromeRootId, topChild.children);
         }
     }
+}
+
+async function __applyOverwriteImportedCanvasState(parsedTempState, bridge, parsedStorage = null) {
+    if (!parsedTempState || typeof parsedTempState !== 'object') return false;
+    let persisted = false;
+    const cloneJson = (value) => {
+        try {
+            if (typeof structuredClone === 'function') return structuredClone(value);
+        } catch (_) {}
+        try { return JSON.parse(JSON.stringify(value)); } catch (_) { return value; }
+    };
+    const isPermanentCanvasSectionId = (idInput) => {
+        const id = String(idInput || '').trim();
+        return id === 'permanent-section' || id.startsWith('permanent-section-copy-');
+    };
+    const originalSections = Array.isArray(parsedTempState.sections)
+        ? parsedTempState.sections
+        : (Array.isArray(parsedTempState.tempSections) ? parsedTempState.tempSections : []);
+    const permanentLayoutNodes = [];
+    const filteredSections = [];
+    originalSections.forEach((section) => {
+        if (!section || typeof section !== 'object') return;
+        const id = String(section.id || '').trim();
+        if (isPermanentCanvasSectionId(id)) {
+            permanentLayoutNodes.push({
+                id,
+                type: 'file',
+                file: '',
+                x: Number(section.x) || 0,
+                y: Number(section.y) || 0,
+                width: Number(section.width) || 600,
+                height: Number(section.height) || 600,
+                color: section.color || '4'
+            });
+            return;
+        }
+        filteredSections.push(section);
+    });
+    const stateForOverwrite = cloneJson(parsedTempState) || {};
+    stateForOverwrite.sections = filteredSections;
+    if (Object.prototype.hasOwnProperty.call(stateForOverwrite, 'tempSections')) {
+        stateForOverwrite.tempSections = filteredSections;
+    }
+    stateForOverwrite.timestamp = Date.now();
+    let storagePatch = null;
+    if (parsedStorage && typeof parsedStorage === 'object' && parsedStorage[BCS_CANVAS_KEY]) {
+        storagePatch = { [BCS_CANVAS_KEY]: parsedStorage[BCS_CANVAS_KEY] };
+    } else if (permanentLayoutNodes.length) {
+        storagePatch = { [BCS_CANVAS_KEY]: JSON.stringify({ nodes: permanentLayoutNodes, edges: [] }) };
+    }
+
+    // 覆盖导入的临时栏目 / .canvas 需要写入当前 BCS 分片真相源：
+    // bcs:meta + bcs:canvas + bcs:section:*。只写旧的 temp snapshot key 会被加载器忽略。
+    if (bridge && typeof bridge.saveCanvasTempStateToBcsStorage === 'function') {
+        await bridge.saveCanvasTempStateToBcsStorage(stateForOverwrite, {
+            immediate: true,
+            storagePatch,
+            preferStoragePermanentLayout: true
+        });
+        persisted = true;
+    } else {
+        await new Promise((resolve) => {
+            try { chrome.storage.local.set({ 'bcs:temp-state-snapshot': stateForOverwrite }, () => resolve()); }
+            catch (_) { resolve(); }
+        });
+    }
+
+    // 同步当前运行态，避免用户覆盖导入后不刷新页面就再次导出时，
+    // 旧 CanvasState 把刚写入的 BCS 状态覆盖回去。
+    try {
+        const runtimeCanvasState = (typeof CanvasState !== 'undefined' && CanvasState)
+            ? CanvasState
+            : (window.CanvasState || null);
+        const prevSections = (runtimeCanvasState && Array.isArray(runtimeCanvasState.tempSections))
+            ? runtimeCanvasState.tempSections.slice()
+            : [];
+        const prevMdNodes = (runtimeCanvasState && Array.isArray(runtimeCanvasState.mdNodes))
+            ? runtimeCanvasState.mdNodes.slice()
+            : [];
+        prevSections.forEach((section) => {
+            if (!section || !section.id) return;
+            const el = document.getElementById(section.id);
+            if (el) el.remove();
+        });
+        prevMdNodes.forEach((node) => {
+            if (!node || !node.id) return;
+            const el = document.getElementById(node.id);
+            if (el) el.remove();
+        });
+        const svg = document.querySelector('.canvas-edges');
+        if (svg) {
+            Array.from(svg.querySelectorAll('.canvas-edge, .canvas-edge-label, .canvas-edge-label-bg, .canvas-edge-hit-area, foreignObject.edge-label-fo')).forEach((el) => {
+                try { el.remove(); } catch (_) {}
+            });
+        }
+        if (typeof window.__applyCanvasTempStateObject === 'function') {
+            window.__applyCanvasTempStateObject(stateForOverwrite, { preserveRaw: true });
+        } else if (typeof __applyCanvasTempStateObject === 'function') {
+            __applyCanvasTempStateObject(stateForOverwrite, { preserveRaw: true });
+        }
+        if (typeof window.__finalizeTempNodesLoad === 'function') {
+            window.__finalizeTempNodesLoad({ loadedFromStorage: true });
+        } else if (typeof __finalizeTempNodesLoad === 'function') {
+            __finalizeTempNodesLoad({ loadedFromStorage: true });
+        }
+        if (storagePatch && storagePatch[BCS_CANVAS_KEY]) {
+            const layoutStorage = { [BCS_CANVAS_KEY]: storagePatch[BCS_CANVAS_KEY] };
+            if (typeof window.__applyPermanentLayoutFromBcsStorageSnapshot === 'function') {
+                window.__applyPermanentLayoutFromBcsStorageSnapshot(layoutStorage, { removeMissingCopies: true });
+            } else if (typeof __applyPermanentLayoutFromBcsStorageSnapshot === 'function') {
+                __applyPermanentLayoutFromBcsStorageSnapshot(layoutStorage, { removeMissingCopies: true });
+            }
+        }
+        if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.refresh === 'function') {
+            try { window.CanvasSidebarDirectory.refresh({ force: true }); } catch (_) {}
+        }
+    } catch (e) {
+        console.warn('[Overwrite Import] runtime canvas-state apply failed; storage was still updated:', e);
+    }
+
+    return persisted;
 }
 
 async function __performOverwriteImport(payload) {
@@ -925,15 +1059,26 @@ async function __performOverwriteImport(payload) {
     const parsedStorage = (payload && payload.parsedStorage && typeof payload.parsedStorage === 'object') ? payload.parsedStorage : {};
     const parsedPrimaryState = payload && payload.parsedPrimaryState;
     const importFileName = String(payload && payload.importFileName || '');
-    const threshold = Math.max(0, parseInt(payload && payload.threshold, 10) || 300);
+    // doc 最终修复计划 §3.1: threshold:0 必须强制覆盖。
+    // 旧实现 `parseInt(...) || 300` 会把 0 重新映射成 300，导致 backup restore / auto-rollback 走增量分支。
+    const __parsedThreshold = parseInt(payload && payload.threshold, 10);
+    const threshold = Number.isFinite(__parsedThreshold) ? Math.max(0, __parsedThreshold) : 300;
+    const skipBackupWrite = !!(payload && payload.skipBackupWrite === true);
     const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
     if (!bridge) throw new Error('Storage bridge unavailable.');
 
     // 1. Snapshot current local state to backup slot (undo entry).
-    const localSnapshot = await bridge.buildExportSandbox({ reason: 'overwrite-import-pre' });
-    if (localSnapshot) {
-        try { bridge.processExportSandboxForExport(localSnapshot); } catch (_) {}
-        try { await bridge.writeBackupSlotFromSandbox(localSnapshot); } catch (_) {}
+    //    Restore-from-backup callers pass skipBackupWrite=true to avoid overwriting the very
+    //    backup they're restoring from (fix plan §2.6 step 3).
+    let preImportBackup = null;
+    if (!skipBackupWrite) {
+        try {
+            preImportBackup = await bridge.buildExportSandbox({ reason: 'overwrite-import-pre' });
+            if (preImportBackup) {
+                bridge.processExportSandboxForExport(preImportBackup);
+                await bridge.writeBackupSlotFromSandbox(preImportBackup);
+            }
+        } catch (e) { console.warn('[Overwrite Import] pre-import backup failed:', e); }
     }
 
     // 2. Locate the import permanent main content within parsedStorage.
@@ -945,7 +1090,9 @@ async function __performOverwriteImport(payload) {
     const importIdentityMap = Array.isArray(importPermMain.identityMap) ? importPermMain.identityMap : [];
 
     // 3. Decide branch.
-    const localContent = await bridge.readPermanentMainContentFromBcs();
+    const localContent = await bridge.readPermanentMainContentFromBcs({
+        skipIdentityMapHeal: true
+    });
     const diff = __countOverwriteDiff(localContent, importTree);
     const goOverwrite = threshold <= 0 || diff >= threshold;
     console.log(`[Overwrite Import] diff=${diff}, threshold=${threshold}, branch=${goOverwrite ? 'overwrite' : 'incremental'}`);
@@ -956,8 +1103,26 @@ async function __performOverwriteImport(payload) {
         muteSession = await window.beginBookmarkBulkMute('overwrite-import');
     }
 
+    // Extract extras (tags, etc.) from import identityMap keyed by syncId — both branches reuse.
+    const importExtrasBySyncId = new Map();
+    for (const entry of importIdentityMap) {
+        if (!entry || !entry.syncId) continue;
+        const extras = Object.keys(entry).filter((k) => k !== 'id' && k !== 'syncId');
+        if (extras.length) {
+            const obj = {};
+            for (const k of extras) obj[k] = entry[k];
+            importExtrasBySyncId.set(String(entry.syncId), obj);
+        }
+    }
+
+    // doc 最终修复计划 §3.3 / §3.8: expectedSyncIds 包含导入包 root + top + 所有普通节点。
+    // 写入 BCS 前必须用此集合校验 identityMap，防止重新生成 syncId 或漏项。
+    const expectedSyncIds = __collectSyncIdsFromImportTree(importTree);
+
+    let success = false;
     try {
         if (goOverwrite) {
+            // -- Overwrite branch ---------------------------------------------------------
             // Clear Chrome bookmark roots (immediate children of the bookmarks tree root).
             const tree = await new Promise((resolve) => chrome.bookmarks.getTree((t) => resolve(t)));
             const rootNode = Array.isArray(tree) ? tree[0] : null;
@@ -968,33 +1133,37 @@ async function __performOverwriteImport(payload) {
                 }
             }
 
-            // Recreate from the import tree, building syncId → chromeId map.
             const syncIdToChromeId = new Map();
             await __recreateChromeBookmarkTreeFromImport(importTree, syncIdToChromeId);
 
-            // Build new identityMap. Extras (tags etc.) preserved from importIdentityMap.
-            const extrasBySyncId = new Map();
-            for (const entry of importIdentityMap) {
-                if (!entry || !entry.syncId) continue;
-                const extras = Object.keys(entry).filter((k) => k !== 'id' && k !== 'syncId');
-                if (extras.length) {
-                    const obj = {};
-                    for (const k of extras) obj[k] = entry[k];
-                    extrasBySyncId.set(String(entry.syncId), obj);
-                }
-            }
+            // doc 最终修复计划 §3.3: nextIdentityMap 必须只包含 expectedSyncIds 来源的项。
             const nextIdentityMap = [];
             syncIdToChromeId.forEach((chromeId, syncId) => {
+                if (!expectedSyncIds.has(syncId)) return;
                 const out = { id: chromeId, syncId };
-                const extras = extrasBySyncId.get(syncId);
+                const extras = importExtrasBySyncId.get(syncId);
                 if (extras) Object.assign(out, extras);
                 nextIdentityMap.push(out);
             });
 
-            // Fetch fresh Chrome tree, write back to BCS with new identityMap.
             const freshTree = await new Promise((resolve) => chrome.bookmarks.getTree((t) => resolve(t)));
             const freshRoot = Array.isArray(freshTree) ? freshTree[0] : null;
+
+            // doc 最终修复计划 §3.8 + 第三轮 §2.2/§2.3: 写入前校验通过 bridge 调用，
+            // 并把 fresh tree 中 managed 等不可写根的 chromeId 列入 ignoredChromeIds，
+            // 避免企业策略环境下因 managed 节点未在 nextIdentityMap 中而误报失败。
+            const ignoredChromeIds = (typeof bridge.collectIgnoredChromeIdsFromFreshTree === 'function')
+                ? bridge.collectIgnoredChromeIdsFromFreshTree(freshRoot)
+                : new Set();
+            const validation = bridge.validateImportedIdentityMapAgainstTree(
+                freshRoot, nextIdentityMap, expectedSyncIds, { ignoredChromeIds }
+            );
+            if (!validation.ok) {
+                throw new Error('[Overwrite Import] identityMap validation failed: ' + validation.errors.slice(0, 5).join('; '));
+            }
+
             await bridge.writePermanentTreeSnapshotAfterChromeApply([freshRoot], {
+                skipIdentityMapHeal: true,
                 baseContent: {
                     ...(localContent || {}),
                     descriptionMd: importPermMain.descriptionMd || (localContent && localContent.descriptionMd) || '',
@@ -1002,27 +1171,116 @@ async function __performOverwriteImport(payload) {
                 }
             });
         } else {
-            // Incremental: for each diff cell, decide what to do.
-            // Simplified delta: drop everything in chromeRoots that has no matching syncId, then create missing.
+            // -- Incremental branch -------------------------------------------------------
+            // doc 最终修复计划 §3.2 / §3.3 / §3.4: 删除后必须清理 mapping；root/top-root syncId
+            // 必须以导入包为准；move/sort 必须基于 fresh tree。
+
+            // Local tables.
             const localList = (localContent && Array.isArray(localContent.identityMap)) ? localContent.identityMap : [];
             const localBySyncId = new Map();
             const localByChromeId = new Map();
             for (const entry of localList) {
-                if (!entry || !entry.syncId) continue;
+                if (!entry || !entry.syncId || !entry.id) continue;
                 localBySyncId.set(String(entry.syncId), entry);
                 localByChromeId.set(String(entry.id), entry);
             }
-            const importSyncIds = __collectSyncIdsFromImportTree(importTree);
-            // Remove local nodes whose syncId is not in import.
+
+            // Import tree shape:
+            //   importTree (root, syncId = importRootSyncId)
+            //     ├ topChild (folderType, syncId = topSyncId)
+            //     │   └ ...children
+            //     └ ...
+            const folderTypeToChromeId = { 'bookmarks-bar': '1', 'other': '2', 'mobile': '3' };
+            const importRootSyncId = String(importTree.id || '').trim();
+            const importTopSyncIdToChromeId = new Map();
+            // doc 第三轮修复 §2.2: 未识别的 folderType 直接跳过并 console.warn，
+            // 不再 fallback 到 '1'，避免把整棵子树堆到书签栏导致重复 / 错位。
+            if (Array.isArray(importTree.children)) {
+                for (const topChild of importTree.children) {
+                    if (!topChild) continue;
+                    const topSyncId = String(topChild.id || '').trim();
+                    if (!topSyncId) continue;
+                    const ft = String(topChild.folderType || '').trim();
+                    const mapped = folderTypeToChromeId[ft];
+                    if (!mapped) {
+                        try { console.warn('[Incremental Import] unknown top-root folderType, skipping:', ft, 'syncId=', topSyncId); } catch (_) {}
+                        continue;
+                    }
+                    importTopSyncIdToChromeId.set(topSyncId, mapped);
+                }
+            }
+
+            // Flatten import normal nodes (skip root + top-roots, since those are not created).
+            const importNormalNodesBySyncId = new Map(); // syncId -> { title, url, isFolder, parentSyncId }
+            const flattenImport = (node, parentSyncId) => {
+                if (!node || typeof node !== 'object') return;
+                const syncId = String(node.id || '').trim();
+                const children = Array.isArray(node.children) ? node.children : [];
+                if (syncId && parentSyncId !== null) {
+                    importNormalNodesBySyncId.set(syncId, {
+                        syncId,
+                        parentSyncId,
+                        title: String(node.title || ''),
+                        url: String(node.url || ''),
+                        isFolder: !node.url
+                    });
+                }
+                for (let i = 0; i < children.length; i++) {
+                    flattenImport(children[i], syncId || parentSyncId);
+                }
+            };
+            if (Array.isArray(importTree.children)) {
+                for (const topChild of importTree.children) {
+                    if (!topChild) continue;
+                    const topSyncId = String(topChild.id || '').trim();
+                    if (Array.isArray(topChild.children)) {
+                        for (const grandChild of topChild.children) {
+                            flattenImport(grandChild, topSyncId);
+                        }
+                    }
+                }
+            }
+
+            const importNormalSyncIds = new Set(importNormalNodesBySyncId.keys());
+
+            // 1) Delete: local syncId not in expectedSyncIds. (Skip root/top-roots — they always exist.)
+            const toDeleteEntries = [];
             for (const [syncId, entry] of localBySyncId) {
-                if (importSyncIds.has(syncId)) continue;
+                if (expectedSyncIds.has(syncId)) continue; // import has it, keep
+                if (importTopSyncIdToChromeId.has(syncId)) continue; // top root; keep chromeId, syncId rewritten later
+                if (syncId === importRootSyncId) continue; // root; same
+                // Skip if the chromeId is one of the fixed Chrome roots (defensive; shouldn't happen).
+                if (entry.id === '0' || entry.id === '1' || entry.id === '2' || entry.id === '3') continue;
+                toDeleteEntries.push(entry);
+            }
+            for (const entry of toDeleteEntries) {
                 try {
-                    await new Promise((resolve) => { try { chrome.bookmarks.removeTree(entry.id, () => resolve()); } catch (_) { resolve(); } });
+                    await new Promise((resolve) => {
+                        try { chrome.bookmarks.removeTree(entry.id, () => { if (chrome.runtime.lastError) { try { chrome.bookmarks.remove(entry.id, () => resolve()); } catch (_) { resolve(); } } else resolve(); }); }
+                        catch (_) { resolve(); }
+                    });
                 } catch (_) {}
             }
-            // Create import nodes whose syncId is not in local. (Skipping parent/order reordering for brevity.)
-            const syncIdToChromeId = new Map(localBySyncId.size ? Array.from(localBySyncId.entries()).map(([s, e]) => [s, e.id]) : []);
-            const incrementalWalk = async (chromeParentId, importChildren) => {
+            // §3.2: drop deleted entries from local maps so they cannot leak into nextIdentityMap.
+            for (const entry of toDeleteEntries) {
+                localBySyncId.delete(String(entry.syncId));
+                localByChromeId.delete(String(entry.id));
+            }
+            // Also drop descendants whose chromeId no longer exists. We'll re-validate against fresh tree below.
+
+            // 2) Pull fresh tree after deletes, then create missing nodes (parents first via DFS over import tree).
+            //    syncIdToChromeId is rebuilt from scratch, seeded only by import-package authoritative ids.
+            const syncIdToChromeId = new Map();
+            // Root + top-roots come from import (§3.3).
+            if (importRootSyncId) syncIdToChromeId.set(importRootSyncId, '0');
+            importTopSyncIdToChromeId.forEach((chromeId, syncId) => syncIdToChromeId.set(syncId, chromeId));
+            // Seed normal nodes with surviving local mappings.
+            importNormalSyncIds.forEach((syncId) => {
+                const local = localBySyncId.get(syncId);
+                if (local) syncIdToChromeId.set(syncId, String(local.id));
+            });
+
+            const createMissingWalk = async (chromeParentId, importChildren) => {
                 if (!Array.isArray(importChildren)) return;
                 for (const node of importChildren) {
                     if (!node || !node.id) continue;
@@ -1038,38 +1296,137 @@ async function __performOverwriteImport(payload) {
                         if (chromeId) syncIdToChromeId.set(syncId, chromeId);
                     }
                     if (chromeId && Array.isArray(node.children) && node.children.length) {
-                        await incrementalWalk(chromeId, node.children);
+                        await createMissingWalk(chromeId, node.children);
                     }
                 }
             };
             if (Array.isArray(importTree.children)) {
                 for (const topChild of importTree.children) {
-                    const folderTypeToChromeId = { 'bookmarks-bar': '1', 'other': '2', 'mobile': '3' };
-                    const chromeRootId = folderTypeToChromeId[String(topChild && topChild.folderType || '').trim()] || '1';
-                    await incrementalWalk(chromeRootId, topChild && topChild.children);
+                    if (!topChild) continue;
+                    const topSyncId = String(topChild.id || '').trim();
+                    // doc 第三轮修复 §2.2: 未在 importTopSyncIdToChromeId 中的 top-child 已在
+                    // 上方被显式跳过（含 warn），这里也跳过其子树，不再 fallback 到 '1'。
+                    const chromeRootId = importTopSyncIdToChromeId.get(topSyncId);
+                    if (!chromeRootId) continue;
+                    await createMissingWalk(chromeRootId, topChild.children);
                 }
             }
-            // Rebuild identityMap from collected mapping.
-            const extrasBySyncId = new Map();
-            for (const entry of importIdentityMap) {
-                if (!entry || !entry.syncId) continue;
-                const extras = Object.keys(entry).filter((k) => k !== 'id' && k !== 'syncId');
-                if (extras.length) {
-                    const obj = {};
-                    for (const k of extras) obj[k] = entry[k];
-                    extrasBySyncId.set(String(entry.syncId), obj);
+
+            // 3) Update title/url. We need fresh local tree to compare correctly after creates/deletes.
+            const buildFreshLookups = async () => {
+                const t = await new Promise((resolve) => chrome.bookmarks.getTree((tree) => resolve(tree)));
+                const root = Array.isArray(t) ? t[0] : null;
+                const nodeByChromeId = new Map();
+                const parentByChildId = new Map();
+                if (root) {
+                    const stack = [{ node: root, parent: null, index: -1 }];
+                    while (stack.length) {
+                        const { node, parent, index } = stack.pop();
+                        if (!node || typeof node !== 'object') continue;
+                        const id = String(node.id || '').trim();
+                        if (id) {
+                            nodeByChromeId.set(id, node);
+                            if (parent) parentByChildId.set(id, { parentId: String(parent.id || '').trim(), index });
+                        }
+                        const children = Array.isArray(node.children) ? node.children : [];
+                        for (let i = 0; i < children.length; i++) stack.push({ node: children[i], parent: node, index: i });
+                    }
+                }
+                return { root, nodeByChromeId, parentByChildId };
+            };
+
+            let lookups = await buildFreshLookups();
+            for (const imp of importNormalNodesBySyncId.values()) {
+                const chromeId = syncIdToChromeId.get(imp.syncId);
+                if (!chromeId) continue;
+                const liveNode = lookups.nodeByChromeId.get(chromeId);
+                if (!liveNode) continue;
+                const needTitle = String(liveNode.title || '') !== imp.title;
+                const needUrl = !imp.isFolder && String(liveNode.url || '') !== imp.url;
+                if (needTitle || needUrl) {
+                    const updateInfo = {};
+                    if (needTitle) updateInfo.title = imp.title;
+                    if (needUrl) updateInfo.url = imp.url;
+                    try {
+                        await new Promise((resolve) => { try { chrome.bookmarks.update(chromeId, updateInfo, () => resolve()); } catch (_) { resolve(); } });
+                    } catch (_) {}
                 }
             }
+
+            // 4) Move/reorder. §3.4: refresh lookups so parent/index decisions reflect post-create/delete state.
+            //    Walk top-down per parent so parents move before children.
+            lookups = await buildFreshLookups();
+            const moveWalk = async (importChildren) => {
+                if (!Array.isArray(importChildren)) return;
+                for (let i = 0; i < importChildren.length; i++) {
+                    const node = importChildren[i];
+                    if (!node || !node.id) continue;
+                    const syncId = String(node.id);
+                    const chromeId = syncIdToChromeId.get(syncId);
+                    if (!chromeId) continue;
+                    const parentSyncId = String(node.parentId || '').trim();
+                    const desiredParentChromeId = syncIdToChromeId.get(parentSyncId);
+                    const currentInfo = lookups.parentByChildId.get(chromeId);
+                    const parentDiffers = !!(desiredParentChromeId && currentInfo && String(currentInfo.parentId) !== String(desiredParentChromeId));
+                    const desiredIndex = i;
+                    const indexDiffers = !!(currentInfo && Number(currentInfo.index) !== Number(desiredIndex));
+                    if ((parentDiffers || indexDiffers) && desiredParentChromeId) {
+                        try {
+                            await new Promise((resolve) => {
+                                try { chrome.bookmarks.move(chromeId, { parentId: desiredParentChromeId, index: desiredIndex }, () => resolve()); }
+                                catch (_) { resolve(); }
+                            });
+                        } catch (_) {}
+                        // Refresh after each move so subsequent siblings see the new ordering.
+                        lookups = await buildFreshLookups();
+                    }
+                    if (Array.isArray(node.children) && node.children.length) {
+                        await moveWalk(node.children);
+                    }
+                }
+            };
+            if (Array.isArray(importTree.children)) {
+                for (const topChild of importTree.children) {
+                    if (!topChild) continue;
+                    await moveWalk(topChild.children);
+                }
+            }
+
+            // 5) Rebuild identityMap. §3.3: only include syncIds that come from the import package.
             const nextIdentityMap = [];
-            syncIdToChromeId.forEach((chromeId, syncId) => {
-                const out = { id: chromeId, syncId };
-                const extras = extrasBySyncId.get(syncId);
+            const seenSyncIds = new Set();
+            const pushEntry = (syncId, chromeId) => {
+                if (!syncId || !chromeId) return;
+                if (seenSyncIds.has(syncId)) return;
+                seenSyncIds.add(syncId);
+                const out = { id: String(chromeId), syncId };
+                const extras = importExtrasBySyncId.get(syncId);
                 if (extras) Object.assign(out, extras);
                 nextIdentityMap.push(out);
+            };
+            // root/top-roots first so their syncId is the canonical one.
+            if (importRootSyncId) pushEntry(importRootSyncId, '0');
+            importTopSyncIdToChromeId.forEach((chromeId, syncId) => pushEntry(syncId, chromeId));
+            importNormalSyncIds.forEach((syncId) => {
+                const chromeId = syncIdToChromeId.get(syncId);
+                if (chromeId) pushEntry(syncId, chromeId);
             });
-            const freshTree = await new Promise((resolve) => chrome.bookmarks.getTree((t) => resolve(t)));
-            const freshRoot = Array.isArray(freshTree) ? freshTree[0] : null;
-            await bridge.writePermanentTreeSnapshotAfterChromeApply([freshRoot], {
+
+            const freshFinal = await buildFreshLookups();
+            // doc 最终修复计划 §3.8 + 第三轮 §2.2/§2.3: validate before write via bridge,
+            // 并把 fresh tree 中 managed 等不可写根的 chromeId 列入 ignoredChromeIds。
+            const ignoredChromeIdsFinal = (typeof bridge.collectIgnoredChromeIdsFromFreshTree === 'function')
+                ? bridge.collectIgnoredChromeIdsFromFreshTree(freshFinal.root)
+                : new Set();
+            const validation = bridge.validateImportedIdentityMapAgainstTree(
+                freshFinal.root, nextIdentityMap, expectedSyncIds, { ignoredChromeIds: ignoredChromeIdsFinal }
+            );
+            if (!validation.ok) {
+                throw new Error('[Incremental Import] identityMap validation failed: ' + validation.errors.slice(0, 5).join('; '));
+            }
+
+            await bridge.writePermanentTreeSnapshotAfterChromeApply([freshFinal.root], {
+                skipIdentityMapHeal: true,
                 baseContent: {
                     ...(localContent || {}),
                     identityMap: nextIdentityMap
@@ -1079,28 +1436,62 @@ async function __performOverwriteImport(payload) {
 
         // 5. Overwrite non-Chrome state directly (temp sections, mdNodes, edges, canvas state, copies).
         try {
-            if (parsedTempState && typeof parsedTempState === 'object') {
-                await new Promise((resolve) => { try { chrome.storage.local.set({ 'bcs:temp-state-snapshot': parsedTempState }, () => resolve()); } catch (_) { resolve(); } });
-            }
-            // Overwrite copies if present in parsedStorage.
+            await __applyOverwriteImportedCanvasState(parsedTempState, bridge, parsedStorage);
             for (const key of Object.keys(parsedStorage || {})) {
                 if (typeof key !== 'string') continue;
                 if (key.startsWith('bcs:perm:copy-')) {
                     await new Promise((resolve) => { try { chrome.storage.local.set({ [key]: parsedStorage[key] }, () => resolve()); } catch (_) { resolve(); } });
                 }
-                if (key === 'bcs:canvas') {
-                    await new Promise((resolve) => { try { chrome.storage.local.set({ [key]: parsedStorage[key] }, () => resolve()); } catch (_) { resolve(); } });
-                }
             }
         } catch (_) {}
+
+        success = true;
+    } catch (mainErr) {
+        console.error('[Overwrite Import] main flow failed:', mainErr);
+        // Attempt auto-rollback from the just-written backup slot (fix plan §2.6).
+        if (!skipBackupWrite) {
+            try {
+                if (muteSession && muteSession.active && typeof window.endBookmarkBulkMute === 'function') {
+                    await window.endBookmarkBulkMute('overwrite-import-failed', { refreshTree: false });
+                    muteSession = null;
+                }
+                const slot = await bridge.readBackupSlot();
+                if (slot && slot.sandbox) {
+                    const rollbackStorage = {};
+                    if (slot.sandbox.permMain) rollbackStorage['bcs:perm:main'] = slot.sandbox.permMain;
+                    if (slot.sandbox.canvasState) rollbackStorage['bcs:canvas'] = slot.sandbox.canvasState;
+                    if (slot.sandbox.permCopies && typeof slot.sandbox.permCopies === 'object') {
+                        for (const k of Object.keys(slot.sandbox.permCopies)) rollbackStorage[k] = slot.sandbox.permCopies[k];
+                    }
+                    await __performOverwriteImport({
+                        parsedTempState: slot.sandbox.tempState,
+                        parsedStorage: rollbackStorage,
+                        parsedPrimaryState: null,
+                        importFileName: 'rollback-from-backup',
+                        threshold: 0,
+                        skipBackupWrite: true
+                    });
+                    const msg = isEn
+                        ? `Full overwrite failed; rolled back to backup. Error: ${mainErr.message}`
+                        : `全量覆盖失败，已回滚到备份。错误：${mainErr.message}`;
+                    try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'warning', 6000) : alert(msg); } catch (_) { alert(msg); }
+                    return;
+                }
+            } catch (rollbackErr) {
+                console.error('[Overwrite Import] auto-rollback failed:', rollbackErr);
+            }
+        }
+        throw mainErr;
     } finally {
         if (muteSession && muteSession.active && typeof window.endBookmarkBulkMute === 'function') {
             await window.endBookmarkBulkMute('overwrite-import', { refreshTree: true });
         }
     }
 
-    const msg = isEn ? 'Overwrite import complete. Undo via Backup.' : '覆盖导入完成。可通过「备份」撤销。';
-    try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'success', 4000) : alert(msg); } catch (_) { alert(msg); }
+    if (success) {
+        const msg = isEn ? 'Full overwrite complete. Undo via Backup.' : '全量覆盖完成。可通过「备份」撤销。';
+        try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'success', 4000) : alert(msg); } catch (_) { alert(msg); }
+    }
 }
 
 function showImportDialog() {
@@ -1244,14 +1635,19 @@ async function handleFileImport(e) {
             }
             if (mode === 'overwrite') {
                 try {
+                    const overwriteParsed = await parseCanvasPackageFromZipFile(file, { importMode: 'overwrite' });
                     await __performOverwriteImport({
-                        parsedTempState, parsedStorage, parsedPrimaryState,
+                        parsedTempState: overwriteParsed.tempState,
+                        parsedStorage: overwriteParsed.storage,
+                        parsedPrimaryState: overwriteParsed.primaryState || parsedPrimaryState,
                         importFileName: file && file.name ? file.name : '',
-                        threshold: overwriteThreshold || 300
+                        // doc 第三轮修复 §2.4: 与 __performOverwriteImport 入口的 Number.isFinite 语义对齐，
+                        // 避免 0 被静默吞成 300（未来 dialog 若放开 0=强制覆盖时也不会被劫持）。
+                        threshold: Number.isFinite(overwriteThreshold) ? overwriteThreshold : 300
                     });
                 } catch (err) {
                     console.error('[Overwrite Import] failed:', err);
-                    alert(isEn ? `Overwrite import failed: ${err.message}` : `覆盖导入失败：${err.message}`);
+                    alert(isEn ? `Full overwrite failed: ${err.message}` : `全量覆盖失败：${err.message}`);
                 }
                 return;
             }
@@ -1323,16 +1719,18 @@ async function handleFolderImport(e) {
         }
         if (mode === 'overwrite') {
             try {
+                const overwriteParsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName, { importMode: 'overwrite' });
                 await __performOverwriteImport({
-                    parsedTempState: parsed.tempState,
-                    parsedStorage: parsed.storage,
-                    parsedPrimaryState: parsed.primaryState,
+                    parsedTempState: overwriteParsed.tempState,
+                    parsedStorage: overwriteParsed.storage,
+                    parsedPrimaryState: overwriteParsed.primaryState || parsed.primaryState,
                     importFileName: folderName,
-                    threshold: overwriteThreshold || 300
+                    // doc 第三轮修复 §2.4: 同上，使用 Number.isFinite 而非 ||。
+                    threshold: Number.isFinite(overwriteThreshold) ? overwriteThreshold : 300
                 });
             } catch (err) {
                 console.error('[Overwrite Import] failed:', err);
-                alert(isEn ? `Overwrite import failed: ${err.message}` : `覆盖导入失败：${err.message}`);
+                alert(isEn ? `Full overwrite failed: ${err.message}` : `全量覆盖失败：${err.message}`);
             }
             return;
         }
@@ -1406,7 +1804,12 @@ async function importHtmlBookmarks(html, importFileName = '') {
     const sectionMeta = { source: 'file-import', label: isEn ? 'Import' : '导入' };
     const baseSize = getTempSectionBaseSize(sectionMeta);
     const position = findAvailablePositionInViewport(baseSize.width, baseSize.height);
-    const sectionId = allocateTempSectionId();
+    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
+    const sectionId = allocateTempSectionId({
+        label: sectionMeta.label,
+        sequenceNumber,
+        source: sectionMeta.source
+    });
     const fileNameTitle = String(importFileName || '').replace(/[\r\n]/g, ' ').trim();
     const section = {
         id: sectionId,
@@ -1421,6 +1824,7 @@ async function importHtmlBookmarks(html, importFileName = '') {
         height: baseSize.height,
         createdAt: Date.now(),
         source: sectionMeta.source,
+        sequenceNumber,
         label: sectionMeta.label,
         items: []
     };
@@ -1813,7 +2217,13 @@ async function importJsonBookmarks(json, importFileName = '') {
     };
     const baseSize = getTempSectionBaseSize(sectionMeta);
     const position = findAvailablePositionInViewport(baseSize.width, baseSize.height);
-    const sectionId = allocateTempSectionId();
+    const protocolSequenceNumberHint = __normalizePositiveInt(tempProtocolMeta && tempProtocolMeta.sequenceNumber);
+    const sequenceNumberForId = protocolSequenceNumberHint || (++CanvasState.tempSectionSequenceNumber);
+    const sectionId = allocateTempSectionId({
+        label: sectionMeta.label,
+        sequenceNumber: sequenceNumberForId,
+        source: sectionMeta.source
+    });
     const fileNameTitle = String(importFileName || '').replace(/[\r\n]/g, ' ').trim();
     const protocolTitle = String(tempProtocolMeta && tempProtocolMeta.title || '').trim();
     const protocolCreatedAt = Number(tempProtocolMeta && tempProtocolMeta.createdAt);
@@ -2005,6 +2415,9 @@ function showExportModeDialog(options = {}) {
         : '导出为单个 JSON 书签文件';
     const fullscreenTargetLabel = isFullscreenTarget ? __getFullscreenExportTargetLabel(fullscreenTarget) : '';
     const fullscreenHintPrefix = isEn ? 'Current card:' : '当前栏目：';
+    const backupHintPrefix = isEn ? 'Export automatically creates a backup. See ' : '导出时会进行自动备份，具体参考';
+    const backupHintLink = isEn ? 'Backup' : '「备份」';
+    const backupHintSuffix = isEn ? ' for details.' : '位置。';
 
     dialog.innerHTML = `
         <div class="import-dialog-content canvas-export-dialog-content" style="max-width: 430px; width: 90vw;">
@@ -2039,6 +2452,9 @@ function showExportModeDialog(options = {}) {
                     </button>
                     ` : ''}
                 </div>
+                <div class="canvas-export-backup-hint" style="margin-top: 12px; font-size: 12px; line-height: 1.5; opacity: 0.78;">
+                    ${backupHintPrefix}<button type="button" id="exportBackupJumpBtn" style="border: 0; background: transparent; padding: 0; color: #2563eb; text-decoration: underline; cursor: pointer; font: inherit;">${backupHintLink}</button>${backupHintSuffix}
+                </div>
             </div>
         </div>
     `;
@@ -2052,6 +2468,15 @@ function showExportModeDialog(options = {}) {
     dialog.addEventListener('click', (e) => {
         if (e.target === dialog) dialog.remove();
     });
+    const backupJumpBtn = document.getElementById('exportBackupJumpBtn');
+    if (backupJumpBtn) {
+        backupJumpBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dialog.remove();
+            try { showBackupDialog(); } catch (err) { console.warn(err); }
+        });
+    }
 
     document.getElementById('exportModeA').addEventListener('click', () => {
         dialog.remove();
@@ -2317,6 +2742,14 @@ async function exportCanvasPackage(options = {}) {
         let contentNodes = [];
 
         if (targetType === 'permanent' || targetType === 'permanent-copy') {
+            // doc 第三轮修复 §2.7: 全屏单卡导出（fullscreen-html / fullscreen-json）的输出
+            // 走 `toBookmarkNode`，该函数只保留 { title, url, type, children }，会主动
+            // 丢弃 node.id / node.parentId。因此 sandbox 命中（syncId 形态）与 live fallback
+            // （chromeId 形态）在这里产生的最终文件**不会**夹带任一种 id，两条路径的输出
+            // 字节级一致，无需再像主 payload 那样做 chromeId→syncId 转换。
+            // 若将来 `toBookmarkNode` 需要保留 id，请改为统一使用
+            //   `bridge.collectIgnoredChromeIdsFromFreshTree` 配合
+            //   `__buildPermanentMainSyncPayload` 的 idsAlreadySyncIds 选项，以保证一致。
             const permanentContent = (__exportSandbox && __exportSandbox.permMain)
                 ? __exportSandbox.permMain
                 : await __ensurePermanentMainContentInBcs();
@@ -2635,14 +3068,24 @@ async function exportCanvasPackage(options = {}) {
     const exportRoot = vaultPrefix ? vaultPrefix.split('/').slice(-1)[0] : defaultExportRoot;
 
     // 1) JSON section files
-    const permanentContent = (__exportSandbox && __exportSandbox.permMain)
+    // doc 最终修复计划 §3.5: sandbox 路径与 live fallback 路径必须显式区分。
+    const __usingSandboxPerm = !!(__exportSandbox && __exportSandbox.permMain);
+    const permanentContent = __usingSandboxPerm
         ? __exportSandbox.permMain
         : await __ensurePermanentMainContentInBcs();
     if (!(permanentContent && permanentContent.tree)) {
         alert(isEn ? 'Export failed: permanent JSON source unavailable.' : '导出失败：永久栏目 JSON 真相源不可用。');
         return;
     }
-    const permanentSyncPayload = __buildPermanentMainSyncPayload(permanentContent);
+    const permanentSyncPayload = __buildPermanentMainSyncPayload(permanentContent, {
+        idsAlreadySyncIds: __usingSandboxPerm
+    });
+    if (!permanentSyncPayload) {
+        alert(isEn
+            ? 'Export aborted: cannot map all bookmark ids to syncIds (sandbox unavailable). Please retry.'
+            : '导出已中止：无法将所有 chromeId 映射到 syncId（沙盒不可用）。请重试。');
+        return;
+    }
     const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat);
 
     files.push({
@@ -3166,9 +3609,127 @@ async function __inflateDeflate(compressed) {
     return result;
 }
 
+function __buildImportedStorageFromCanvasPackage(canvasData, sourceFiles, options = {}) {
+    const storage = {};
+    if (!(sourceFiles instanceof Map)) return storage;
+    const overwriteMode = !!(options && options.importMode === 'overwrite');
+    if (overwriteMode && canvasData && typeof canvasData === 'object') {
+        try {
+            storage[BCS_CANVAS_KEY] = (typeof __formatObsidianCanvasJson === 'function')
+                ? __formatObsidianCanvasJson(canvasData)
+                : JSON.stringify(canvasData);
+        } catch (_) { }
+    }
 
-async function parseCanvasPackageFromZipFile(file) {
+    const normalizePath = (path) => String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
+    const isPermanentPath = (path) => {
+        const normalized = normalizePath(path);
+        if (!normalized) return false;
+        if (/(^|\/)(永久栏目|Permanent)(\/|$)/i.test(normalized)) return true;
+        if (/Permanent\s*Sections/i.test(normalized)) return true;
+        if (/Permanent\s*Bookmarks/i.test(normalized)) return true;
+        if (/(^|\/)永久书签(\/|$)/.test(normalized)) return true;
+        return false;
+    };
+
+    const findBytes = (relPath) => {
+        const normalizedRel = normalizePath(relPath);
+        if (!normalizedRel) return null;
+        if (sourceFiles.has(normalizedRel)) {
+            return sourceFiles.get(normalizedRel);
+        }
+
+        let best = null;
+        for (const [rawKey, rawValue] of sourceFiles.entries()) {
+            const normalizedKey = normalizePath(rawKey);
+            if (!normalizedKey) continue;
+            if (normalizedKey === normalizedRel) return rawValue;
+            if (normalizedKey.endsWith(`/${normalizedRel}`)) {
+                if (!best || normalizedKey.length < best.key.length) {
+                    best = { key: normalizedKey, value: rawValue };
+                }
+            }
+        }
+        return best ? best.value : null;
+    };
+
+    const parsePermanentProtocol = (fileText, requireTree) => {
+        const text = String(fileText || '').trim();
+        if (!text) return null;
+
+        let parsed = null;
+        try {
+            parsed = JSON.parse(text);
+        } catch (_) {
+            try {
+                if (typeof __extractCanvasSectionJsonCodeBlock === 'function') {
+                    const extracted = __extractCanvasSectionJsonCodeBlock(text);
+                    parsed = extracted && extracted.jsonProtocol ? extracted.jsonProtocol : null;
+                }
+            } catch (_) { }
+        }
+
+        if (!parsed || typeof parsed !== 'object') return null;
+        if (String(parsed.sectionType || '').trim().toLowerCase() !== 'permanent') return null;
+        if (requireTree && !(parsed.tree && typeof parsed.tree === 'object')) return null;
+        return parsed;
+    };
+
+    const nodes = Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [];
+    const permanentNodes = nodes.filter((node) => {
+        if (!node || node.type !== 'file') return false;
+        const filePath = String(node.file || '').trim();
+        if (!filePath || !/\.(json|md)$/i.test(filePath)) return false;
+        return isPermanentPath(filePath);
+    });
+    if (!permanentNodes.length) return storage;
+
+    const toBytes = (value) => {
+        if (value instanceof Uint8Array) return value;
+        if (value instanceof ArrayBuffer) return new Uint8Array(value);
+        return null;
+    };
+
+    const mainNode = permanentNodes.find((node) => String(node.id || '').trim() === 'permanent-section') || permanentNodes[0];
+    if (mainNode) {
+        const mainBytesRaw = findBytes(mainNode.file);
+        const mainBytes = toBytes(mainBytesRaw);
+        if (mainBytes) {
+            try {
+                const mainText = new TextDecoder('utf-8').decode(mainBytes);
+                const mainPayload = parsePermanentProtocol(mainText, true);
+                if (mainPayload) {
+                    storage['bcs:perm:main'] = mainPayload;
+                }
+            } catch (_) { }
+        }
+    }
+
+    permanentNodes.forEach((node) => {
+        if (!node || node === mainNode) return;
+        const nodeId = String(node.id || '').trim();
+        if (!nodeId.startsWith('permanent-section-copy-')) return;
+        const copyId = nodeId.slice('permanent-section-copy-'.length).trim();
+        if (!copyId) return;
+        const raw = findBytes(node.file);
+        const bytes = toBytes(raw);
+        if (!bytes) return;
+        try {
+            const fileText = new TextDecoder('utf-8').decode(bytes);
+            const payload = parsePermanentProtocol(fileText, false);
+            if (payload) {
+                storage[`bcs:perm:copy-${copyId}`] = payload;
+            }
+        } catch (_) { }
+    });
+
+    return storage;
+}
+
+
+async function parseCanvasPackageFromZipFile(file, options = {}) {
     const { isEn } = __getLang();
+    const importMode = options && options.importMode === 'overwrite' ? 'overwrite' : 'snapshot';
     const lowerFileName = String((file && file.name) || '').toLowerCase();
     if (lowerFileName.endsWith('.7z')) {
         await importCanvasPackage7z(file);
@@ -3197,14 +3758,18 @@ async function parseCanvasPackageFromZipFile(file) {
     }
 
     let tempState = null;
-    let storage = null;
+    let storage = {};
     let primaryState = {}; // Mock primary state for compatibility
 
     if (canvasFileName) {
         console.log(`[Canvas] Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(zipFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
-        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, zipFiles, primaryState, { isEn });
+        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, zipFiles, primaryState, { isEn, importMode });
+        storage = __buildImportedStorageFromCanvasPackage(canvasData, zipFiles, { importMode });
+        if (storage && storage['bcs:perm:main'] && !primaryState['bcs:perm:main']) {
+            primaryState['bcs:perm:main'] = storage['bcs:perm:main'];
+        }
     } else {
         throw new Error(isEn
             ? 'Invalid Package: Missing .canvas file.'
@@ -3272,7 +3837,7 @@ async function importCanvasPackage7z(file) {
  */
 async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, options = {}) {
     const { isEn } = __getLang();
-    void options;
+    const importMode = options && options.importMode === 'overwrite' ? 'overwrite' : 'snapshot';
 
     // 4.2 数据信任链：只接受 .canvas 包结构
     let canvasFileName = null;
@@ -3286,14 +3851,18 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
     }
 
     let tempState = null;
-    let storage = null;
+    let storage = {};
     let primaryState = {};
 
     if (canvasFileName) {
         console.log(`[Canvas] Folder Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(folderFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
-        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, folderFiles, primaryState, { isEn });
+        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, folderFiles, primaryState, { isEn, importMode });
+        storage = __buildImportedStorageFromCanvasPackage(canvasData, folderFiles, { importMode });
+        if (storage && storage['bcs:perm:main'] && !primaryState['bcs:perm:main']) {
+            primaryState['bcs:perm:main'] = storage['bcs:perm:main'];
+        }
     } else {
         throw new Error(isEn
             ? 'Invalid Folder: Missing .canvas file.'

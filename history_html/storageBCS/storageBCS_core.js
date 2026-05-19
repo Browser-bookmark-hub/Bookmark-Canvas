@@ -1200,6 +1200,55 @@ function __stripPermanentLocalIdsFromTree(treeInput) {
     };
 }
 
+// Build an exportable permanent tree from a sandbox tree whose id/parentId already
+// hold syncIds (after __applySyncIdReplacementInSandbox). This is the syncId-preserving
+// counterpart to __stripPermanentLocalIdsFromTree: we keep id/parentId and only drop
+// Chrome-local fields (`index`, transient sort metadata). folderType/syncing are kept.
+function __buildPermanentSyncTreeNode(nodeInput, context = {}) {
+    if (!nodeInput || typeof nodeInput !== 'object') return null;
+    const rawUrl = String(nodeInput.url || '').trim();
+    const isBookmark = !!rawUrl;
+    const title = String(nodeInput.title || nodeInput.name || rawUrl || (isBookmark ? 'Untitled Bookmark' : 'Folder')).trim()
+        || (isBookmark ? rawUrl : 'Folder');
+    const id = String(nodeInput.id || '').trim();
+    const parentId = String(nodeInput.parentId || '').trim();
+    const output = { title };
+    if (id) output.id = id;
+    if (parentId) output.parentId = parentId;
+    if (isBookmark) {
+        output.url = rawUrl;
+        return output;
+    }
+    output.children = (Array.isArray(nodeInput.children) ? nodeInput.children : [])
+        .map((child) => __buildPermanentSyncTreeNode(child))
+        .filter(Boolean);
+    if (context && context.isRootChild) {
+        const folderType = __normalizeBookmarkFolderType(nodeInput.folderType || nodeInput.folder_type || '');
+        const syncing = __canPersistBookmarkRootSyncing(folderType)
+            ? __normalizeBookmarkRootSyncing(nodeInput.syncing)
+            : null;
+        if (folderType) output.folderType = folderType;
+        if (syncing !== null) output.syncing = syncing;
+    }
+    return output;
+}
+
+function __buildPermanentSyncTreeFromSandboxTree(treeInput) {
+    const root = __coercePermanentTreeRootInput(treeInput);
+    if (!root) return null;
+    const rootId = String(root.id || '').trim();
+    const rootParentId = String(root.parentId || '').trim();
+    const output = {
+        title: String(root.title || root.name || '').trim(),
+        children: (Array.isArray(root.children) ? root.children : [])
+            .map((child) => __buildPermanentSyncTreeNode(child, { isRootChild: true }))
+            .filter(Boolean)
+    };
+    if (rootId) output.id = rootId;
+    if (rootParentId) output.parentId = rootParentId;
+    return output;
+}
+
 function __buildPermanentPrimaryContentPayloadFromTree(treeInput, descriptionOverride = null, options = {}) {
     const { isEn } = __getLang();
     const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(treeInput);
@@ -1258,12 +1307,85 @@ function __buildPermanentCopyAnchorContentPayload(copyIdInput, options = {}) {
     };
 }
 
-function __buildPermanentMainSyncPayload(contentInput) {
+// doc 最终修复计划 §3.5: sandbox 路径与 live fallback 路径必须显式区分。
+// sandbox 已经把 tree.id/parentId 替换为 syncId；live 路径还是 chromeId，需要现场转换。
+// 若无法转换（缺失 identityMap 项），返回 null，让上层中止导出而不是导出 Chrome 本地 id。
+function __buildPermanentMainSyncPayload(contentInput, options = {}) {
     const content = __readPermanentContentPayload(contentInput);
     if (!content || content.fileRole === 'copy-anchor' || content.anchorOnly === true) return null;
     const tree = content.tree && typeof content.tree === 'object' ? content.tree : null;
     if (!tree) return null;
     const identityMap = Array.isArray(content.identityMap) ? content.identityMap : [];
+    const idsAlreadySyncIds = !!(options && options.idsAlreadySyncIds === true);
+
+    let exportTree = null;
+    if (idsAlreadySyncIds) {
+        exportTree = __buildPermanentSyncTreeFromSandboxTree(tree);
+    } else {
+        // Live fallback: identityMap is still { id: chromeId, syncId }. Build a byChromeId
+        // index, then deep-clone the tree replacing id/parentId with syncId. If any chromeId
+        // lacks a mapping, abort by returning null.
+        const byChromeId = new Map();
+        for (const entry of identityMap) {
+            if (!entry || typeof entry !== 'object') continue;
+            const id = String(entry.id || '').trim();
+            const syncId = String(entry.syncId || '').trim();
+            if (id && syncId) byChromeId.set(id, syncId);
+        }
+        const clonedTree = __cloneCanvasProtocolJson(tree);
+        let conversionOk = true;
+        const convert = (node) => {
+            if (!node || typeof node !== 'object') return;
+            if (Object.prototype.hasOwnProperty.call(node, 'index')) delete node.index;
+            const chromeId = String(node.id || '').trim();
+            if (chromeId) {
+                const mapped = byChromeId.get(chromeId);
+                if (mapped) {
+                    node.id = mapped;
+                } else {
+                    conversionOk = false;
+                }
+            }
+            const parentChromeId = String(node.parentId || '').trim();
+            if (parentChromeId) {
+                const parentMapped = byChromeId.get(parentChromeId);
+                if (parentMapped) {
+                    node.parentId = parentMapped;
+                }
+                // Missing parentId mapping is tolerated only at the synthetic root level.
+            }
+            if (Array.isArray(node.children)) node.children.forEach(convert);
+        };
+        convert(clonedTree);
+        if (!conversionOk) {
+            try { console.warn('[BCS export] live fallback found chromeId without syncId mapping; aborting payload build.'); } catch (_) {}
+            return null;
+        }
+        exportTree = __buildPermanentSyncTreeFromSandboxTree(clonedTree);
+    }
+
+    // identityMap on the exported payload should keep only entries that actually carry extras:
+    // { syncId, ...extras }. For sandbox path, callers will have already pruned. For live
+    // fallback, prune here with the same rule.
+    let exportIdentityMap = identityMap;
+    if (!idsAlreadySyncIds) {
+        const pruned = [];
+        for (const entry of identityMap) {
+            if (!entry || typeof entry !== 'object') continue;
+            const syncId = String(entry.syncId || '').trim();
+            if (!syncId) continue;
+            const out = {};
+            for (const key of Object.keys(entry)) {
+                if (key === 'id' || key === 'syncId') continue;
+                out[key] = entry[key];
+            }
+            if (!Object.keys(out).length) continue;
+            out.syncId = syncId;
+            pruned.push(out);
+        }
+        exportIdentityMap = pruned;
+    }
+
     const payload = {
         format: content.format || __CANVAS_SECTION_JSON_FORMAT,
         schemaVersion: Math.max(3, Number(content.schemaVersion) || 3),
@@ -1271,11 +1393,13 @@ function __buildPermanentMainSyncPayload(contentInput) {
         slot: String(content.slot || 'A'),
         title: String(content.title || __getPermanentSectionDisplayTitle(__getLang().isEn)),
         descriptionMd: String(content.descriptionMd == null ? '' : content.descriptionMd),
-        identityMap,
         fileRole: 'primary',
         fileNote: String(content.fileNote || ''),
-        tree: __stripPermanentLocalIdsFromTree(tree)
+        tree: exportTree
     };
+    if (Array.isArray(exportIdentityMap) && exportIdentityMap.length) {
+        payload.identityMap = exportIdentityMap;
+    }
     if (!payload.fileNote) {
         payload.fileNote = __getLang().isEn
             ? 'Primary permanent file: canonical bookmark tree source.'
@@ -1418,6 +1542,97 @@ function __verifyAndHealIdentityMap(content) {
     return { added, removed, regenerated };
 }
 
+// doc 第三轮修复 §2.3: 把校验函数从 import-export-transfer-feature.js 迁到协议核心层。
+// doc 第三轮修复 §2.2: 通过 options.ignoredChromeIds 跳过非可写 / 非标准的 Chrome 固定根
+//                       (典型如 managed root, chromeId='4')，企业策略环境下校验不再误杀。
+//
+// 入参:
+//   treeRoot         — 写入前最新的 chrome 书签树根（chrome.bookmarks.getTree()[0]）
+//   identityMap      — 即将写回 BCS 的 [{ id: chromeId, syncId, ...extras }]
+//   expectedSyncIds  — 来源于导入包的合法 syncId 集合 (Set / Array / Iterable)
+//   options.ignoredChromeIds — 不要求出现在 identityMap 中的 chromeId 集合 (Set / Array)
+//
+// 返回:
+//   { ok: boolean, errors: string[], mapByChromeId: Map<string,string> }
+function __validateImportedIdentityMapAgainstTree(treeRoot, identityMap, expectedSyncIds, options = {}) {
+    const errors = [];
+    if (!treeRoot || typeof treeRoot !== 'object') {
+        return { ok: false, errors: ['tree root missing'], mapByChromeId: new Map() };
+    }
+    if (!Array.isArray(identityMap)) {
+        return { ok: false, errors: ['identityMap is not an array'], mapByChromeId: new Map() };
+    }
+    const expected = expectedSyncIds instanceof Set
+        ? expectedSyncIds
+        : new Set(expectedSyncIds && typeof expectedSyncIds[Symbol.iterator] === 'function'
+            ? Array.from(expectedSyncIds)
+            : []);
+    const ignoredChromeIds = options && options.ignoredChromeIds instanceof Set
+        ? options.ignoredChromeIds
+        : new Set(options && Array.isArray(options.ignoredChromeIds) ? options.ignoredChromeIds : []);
+
+    const treeChromeIds = new Set();
+    const stack = [treeRoot];
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node || typeof node !== 'object') continue;
+        const id = String(node.id || '').trim();
+        if (id) treeChromeIds.add(id);
+        if (Array.isArray(node.children)) {
+            for (const child of node.children) stack.push(child);
+        }
+    }
+
+    const seenChromeIds = new Set();
+    const seenSyncIds = new Set();
+    const mapByChromeId = new Map();
+    for (const entry of identityMap) {
+        if (!entry || typeof entry !== 'object') continue;
+        const id = String(entry.id || '').trim();
+        const syncId = String(entry.syncId || '').trim();
+        if (!id) { errors.push('identityMap entry missing chromeId'); continue; }
+        if (!syncId) { errors.push(`identityMap entry for chromeId=${id} missing syncId`); continue; }
+        if (seenChromeIds.has(id)) errors.push(`duplicate chromeId in identityMap: ${id}`);
+        if (seenSyncIds.has(syncId)) errors.push(`duplicate syncId in identityMap: ${syncId}`);
+        seenChromeIds.add(id);
+        seenSyncIds.add(syncId);
+        mapByChromeId.set(id, syncId);
+        if (expected.size && !expected.has(syncId)) {
+            errors.push(`syncId not in expected set (re-generated?): ${syncId}`);
+        }
+    }
+    treeChromeIds.forEach((id) => {
+        if (ignoredChromeIds.has(id)) return;
+        if (!mapByChromeId.has(id)) errors.push(`tree chromeId not in identityMap: ${id}`);
+    });
+    return { ok: errors.length === 0, errors, mapByChromeId };
+}
+
+// doc 第三轮修复 §2.2: 默认从 fresh tree 中收集"应当跳过"的 chromeId。
+// 当前规则: 顶层 children 中 folderType === 'managed' 的节点（含其后代）整体跳过。
+// 日后若需要扩展（例如其它 read-only 根），在这里追加判定即可。
+function __collectIgnoredChromeIdsFromFreshTree(treeRoot) {
+    const ignored = new Set();
+    if (!treeRoot || typeof treeRoot !== 'object') return ignored;
+    const topChildren = Array.isArray(treeRoot.children) ? treeRoot.children : [];
+    for (const top of topChildren) {
+        if (!top || typeof top !== 'object') continue;
+        const ft = __normalizeBookmarkFolderType(top.folderType || top.folder_type || '');
+        if (ft !== 'managed') continue;
+        const stack = [top];
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node || typeof node !== 'object') continue;
+            const id = String(node.id || '').trim();
+            if (id) ignored.add(id);
+            if (Array.isArray(node.children)) {
+                for (const child of node.children) stack.push(child);
+            }
+        }
+    }
+    return ignored;
+}
+
 function __rebuildIdentityMapPreservingExisting(prevContent, nextTreeRoot) {
     const prevList = (prevContent && Array.isArray(prevContent.identityMap)) ? prevContent.identityMap : [];
     const prevByChromeId = new Map();
@@ -1521,7 +1736,9 @@ async function __readPermanentMainContentFromBcs(options = {}) {
     } else {
         content.identityMap = __normalizeIdentityMapArray(content.identityMap);
     }
-    __verifyAndHealIdentityMap(content);
+    if (!(options && options.skipIdentityMapHeal === true)) {
+        __verifyAndHealIdentityMap(content);
+    }
 
     return content;
 }
@@ -1553,7 +1770,12 @@ async function __writePermanentMainContentToBcs(contentInput, options = {}) {
             : '永久栏目主文件：书签树的规范真相源。')),
         tree: treeRoot
     };
-    __verifyAndHealIdentityMap(nextContent);
+    // The import flow already finalized the identityMap with syncIds sourced exclusively
+    // from the import package; we MUST NOT let __verifyAndHealIdentityMap mint fresh syncIds
+    // for unmatched chromeIds in that case (doc commit2298735 fix plan §2.3 step 4).
+    if (!(options && options.skipIdentityMapHeal === true)) {
+        __verifyAndHealIdentityMap(nextContent);
+    }
     __bcsStorageSet({
         [BCS_PERM_MAIN_KEY]: nextContent
     }, { immediate: options && options.immediate !== false });
@@ -1602,7 +1824,8 @@ async function __writePermanentTreeSnapshotAfterChromeApply(localTreeInput, opti
         tree: localNormalized[0]
     };
     return __writePermanentMainContentToBcs(content, {
-        immediate: true
+        immediate: true,
+        skipIdentityMapHeal: !!(options && options.skipIdentityMapHeal === true)
     });
 }
 
@@ -4270,6 +4493,7 @@ function __buildCanvasPackageFileLookupHelpers(sourceFiles) {
 
 function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, primaryState, options = {}) {
     const isEn = !!(options && options.isEn);
+    const overwriteMode = !!(options && options.importMode === 'overwrite');
     const tempState = {
         sections: [],
         mdNodes: [],
@@ -4346,6 +4570,10 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                     }
                 } catch (_) { }
 
+                if (overwriteMode) {
+                    return;
+                }
+
                 const items = __parseMarkdownAuto(resolvedContentToParse);
                 const sectionId = node.id;
                 const slotLabel = toAlphaLabel(resolvedSlot) || '';
@@ -4375,6 +4603,9 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
             }
 
             if (isPermanent) {
+                if (overwriteMode) {
+                    return;
+                }
                 tempState.sections.push(
                     __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, resolvedContentToParse, isEn)
                 );
@@ -4768,11 +4999,7 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     remappedNodes.tempSections.forEach(s => { s.x += offsetX; s.y += offsetY; });
     remappedNodes.mdNodes.forEach(n => { n.x += offsetX; n.y += offsetY; });
 
-    if (importMode === 'sandbox') {
-        remappedNodes.tempSections.forEach((section) => __markNodeAsSandboxImported(section));
-        remappedNodes.mdNodes.forEach((node) => __markNodeAsSandboxImported(node));
-        __markNodeAsSandboxImported(containerNode);
-    }
+    // 临时导入沙箱模式已下线：导入内容一律作为正式内容处理并持久化。
 
     console.log(`[Canvas] Import Stats:
         - Sections: ${remappedNodes.tempSections.length}
@@ -4808,15 +5035,8 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
         try { renderMdNode(n); } catch (_) { }
     });
 
-    if (importMode === 'sandbox') {
-        const tip = isEn
-            ? 'Temporary sandbox import: visible now, not persisted.'
-            : '临时导入（沙箱）：当前可见，不写入持久化。';
-        try { showCanvasToast(tip, 'info'); } catch (_) { }
-    } else {
-        // 导入属于正式内容，必须立即持久化，避免用户导入后立刻刷新导致丢失。
-        saveTempNodes({ immediate: true });
-    }
+    // 导入属于正式内容，必须立即持久化，避免用户导入后立刻刷新导致丢失。
+    saveTempNodes({ immediate: true });
 
     // 边：大数据/极限模式下延后或跳过，优先保证交互流畅
     try { scheduleEdgesRender(); } catch (_) { }
@@ -5345,23 +5565,12 @@ let __canvasTempStateLastPersistedSignature = '';
 let __canvasImportRuntimeMode = 'permanent';
 
 function __setCanvasImportRuntimeMode(mode) {
-    __canvasImportRuntimeMode = (mode === 'sandbox') ? 'sandbox' : 'permanent';
+    void mode;
+    __canvasImportRuntimeMode = 'permanent';
 }
 
 function __getCanvasImportRuntimeMode() {
-    return __canvasImportRuntimeMode === 'sandbox' ? 'sandbox' : 'permanent';
-}
-
-function __markNodeAsSandboxImported(node) {
-    if (!node || typeof node !== 'object') return;
-    node.__importMode = 'sandbox';
-}
-
-function __isSandboxImportedNode(node) {
-    if (!node || typeof node !== 'object') return false;
-    if (String(node.__importMode || '') === 'sandbox') return true;
-    if (node.subtype === 'import-container' && String(node.importMode || '') === 'sandbox') return true;
-    return false;
+    return 'permanent';
 }
 
 function __isPermanentCanvasNodeId(nodeId) {
@@ -5378,7 +5587,6 @@ function __buildPersistedCanvasState(state, options = {}) {
     const sourceEdges = Array.isArray(safe.edges) ? safe.edges : [];
 
     const persistedSections = sourceSections
-        .filter((section) => !__isSandboxImportedNode(section))
         .map((section) => {
             const cloned = __cloneCanvasProtocolJson(section);
             if (!cloned || typeof cloned !== 'object') return null;
@@ -5392,7 +5600,6 @@ function __buildPersistedCanvasState(state, options = {}) {
         })
         .filter(Boolean);
     const persistedMdNodes = sourceMdNodes
-        .filter((node) => !__isSandboxImportedNode(node))
         .map((node) => {
             const cloned = __cloneCanvasProtocolJson(node);
             if (!cloned || typeof cloned !== 'object') return null;
@@ -5547,6 +5754,175 @@ function __collectBcsFileRefsFromState(stateInput, options = {}) {
     };
 }
 
+function __buildBcsObsidianPackageFilesFromSnapshot(snapshotInput, options = {}) {
+    const snapshot = snapshotInput && typeof snapshotInput === 'object' ? snapshotInput : {};
+    const isEn = !!(options && options.isEn);
+    const exportFormat = __normalizeCanvasObsidianExportFormat(
+        (options && typeof options.exportFormat === 'string') ? options.exportFormat : 'json',
+        'json'
+    );
+    const exportRoot = __normalizeObsidianExportRoot(
+        (options && typeof options.exportRoot === 'string') ? options.exportRoot : '',
+        isEn,
+        { allowEmpty: false }
+    );
+
+    const tempState = __buildPersistedCanvasState(
+        (snapshot.tempState && typeof snapshot.tempState === 'object') ? snapshot.tempState : {}
+    );
+    const fileRefs = __collectBcsFileRefsFromState(tempState, { exportRoot, exportFormat });
+
+    const permanentPayload = __buildPermanentMainSyncPayload(snapshot.permMain, {
+        idsAlreadySyncIds: !(options && options.idsAlreadySyncIds === false)
+    }) || (snapshot.permMain && typeof snapshot.permMain === 'object' ? snapshot.permMain : null);
+
+    if (!permanentPayload || !permanentPayload.tree) {
+        throw new Error(isEn ? 'Backup slot missing permanent main content.' : '备份槽缺少永久主体内容。');
+    }
+
+    const sectionById = new Map();
+    const sections = Array.isArray(tempState.sections) ? tempState.sections : [];
+    sections.forEach((section, index) => {
+        if (!section || typeof section !== 'object') return;
+        const fallbackId = String(section.id || `temp-section-${index + 1}`).trim() || `temp-section-${index + 1}`;
+        if (!section.id) section.id = fallbackId;
+        sectionById.set(String(section.id), section);
+    });
+
+    const slotToIndex = (slotValue) => {
+        const slot = String(slotValue || '').trim().toUpperCase().replace(/^#/, '');
+        if (!/^[A-Z]$/.test(slot)) return null;
+        return slot.charCodeAt(0) - 64;
+    };
+
+    const resolveCopyEntries = () => {
+        const preferred = (options && Array.isArray(options.copyEntries)) ? options.copyEntries : [];
+        if (preferred.length) return preferred;
+
+        const copies = (snapshot.permCopies && typeof snapshot.permCopies === 'object') ? snapshot.permCopies : {};
+        return Object.keys(copies)
+            .map((key) => {
+                const normalizedKey = String(key || '').trim();
+                if (!normalizedKey.startsWith('bcs:perm:copy-')) return null;
+                const copyId = normalizedKey.slice('bcs:perm:copy-'.length).trim();
+                if (!copyId) return null;
+                const payload = copies[key];
+                return {
+                    key: normalizedKey,
+                    copyId,
+                    payload: (payload && typeof payload === 'object') ? payload : null
+                };
+            })
+            .filter(Boolean);
+    };
+
+    const rawCopyEntries = resolveCopyEntries()
+        .slice()
+        .sort((a, b) => String((a && a.copyId) || '').localeCompare(String((b && b.copyId) || '')));
+
+    const usedSlotIndexes = new Set([1]);
+    const copyFileMap = {};
+    const copyPathById = {};
+    const normalizedCopyEntries = [];
+
+    rawCopyEntries.forEach((entry, index) => {
+        const payload = (entry && entry.payload && typeof entry.payload === 'object') ? entry.payload : null;
+        if (!payload) return;
+        const copyId = String((entry && (entry.copyId || entry.id || entry.copyID)) || '').trim() || `copy-${index + 1}`;
+
+        let slotIndex = __normalizePositiveInt(entry && entry.slotIndex);
+        if (!(slotIndex > 1)) slotIndex = slotToIndex(entry && entry.slot);
+        if (!(slotIndex > 1)) slotIndex = slotToIndex(payload.slot);
+        if (!(slotIndex > 1) || usedSlotIndexes.has(slotIndex)) {
+            slotIndex = 2;
+            while (usedSlotIndexes.has(slotIndex)) slotIndex += 1;
+        }
+        usedSlotIndexes.add(slotIndex);
+
+        const rel = __buildPermanentSectionMarkdownRelativePath(slotIndex, isEn, exportFormat);
+        copyFileMap[copyId] = rel;
+        copyPathById[copyId] = __joinObsidianExportPath(exportRoot, rel);
+        normalizedCopyEntries.push({ copyId, payload });
+    });
+
+    const files = [];
+    const pushedNames = new Set();
+    const pushFile = (name, content) => {
+        const fileName = String(name || '')
+            .replace(/\\/g, '/')
+            .replace(/^\/+/, '')
+            .replace(/\/+/g, '/');
+        if (!fileName || pushedNames.has(fileName)) return;
+        pushedNames.add(fileName);
+        files.push({
+            name: fileName,
+            data: __toUint8(String(content == null ? '' : content))
+        });
+    };
+
+    const permanentMdRel = fileRefs.permanentMdRel;
+    const permanentPath = fileRefs.permanentPath;
+    pushFile(
+        __joinObsidianExportPath(exportRoot, permanentMdRel),
+        `${__buildCanvasSectionJsonCodeBlock(permanentPayload)}\n`
+    );
+
+    normalizedCopyEntries.forEach((entry) => {
+        const rel = copyFileMap[entry.copyId];
+        if (!rel) return;
+        let payload = entry.payload;
+        try { payload = JSON.parse(JSON.stringify(entry.payload)); } catch (_) { payload = entry.payload; }
+        if (payload && typeof payload === 'object' && String(payload.fileRole || '').trim() === 'copy-anchor') {
+            payload.inheritFrom = permanentPath;
+        }
+        pushFile(
+            __joinObsidianExportPath(exportRoot, rel),
+            `${__buildCanvasSectionJsonCodeBlock(payload)}\n`
+        );
+    });
+
+    const tempSectionPaths = Array.isArray(fileRefs.tempSectionPaths) ? fileRefs.tempSectionPaths : [];
+    const tempSectionPathById = (fileRefs.tempSectionPathById && typeof fileRefs.tempSectionPathById === 'object')
+        ? { ...fileRefs.tempSectionPathById }
+        : {};
+
+    tempSectionPaths.forEach((item) => {
+        if (!item || !item.id || !item.rel) return;
+        const section = sectionById.get(String(item.id));
+        if (!section) return;
+        pushFile(
+            __joinObsidianExportPath(exportRoot, item.rel),
+            __buildTempSectionJsonMarkdown(section)
+        );
+    });
+
+    const canvasData = __buildBcsCanvasDataFromState(tempState, {
+        permanentPath,
+        tempSectionPathById,
+        copyFileMap,
+        copyPathById
+    }, {
+        storageMap: { 'bcs:canvas': snapshot.canvasState }
+    });
+    const canvasFileName = `${exportRoot}.canvas`;
+    pushFile(
+        __joinObsidianExportPath(exportRoot, canvasFileName),
+        __formatObsidianCanvasJson(canvasData)
+    );
+
+    return {
+        exportRoot,
+        exportFormat,
+        zipName: `${exportRoot}.zip`,
+        canvasFileName,
+        files,
+        permanentPath,
+        copyFileMap,
+        copyPathById,
+        tempSectionPathById
+    };
+}
+
 function __buildObsidianCanvasFileNode({ id, file, x, y, width, height, color = null }) {
     const node = {
         id,
@@ -5614,6 +5990,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
     const storageMap = options && options.storageMap && typeof options.storageMap === 'object'
         ? options.storageMap
         : null;
+    const preferStoragePermanentLayout = !!(options && options.preferStoragePermanentLayout === true);
     const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
     const persisted = __buildPersistedCanvasState(state);
     const sections = Array.isArray(persisted.sections) ? persisted.sections : [];
@@ -5650,7 +6027,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
         ? (__parsePermanentViewCssPixelValue(permanentSectionEl.style.height) || permanentSectionEl.offsetHeight || null)
         : null;
     const hasMainDomPixelAnchor = mainDomLeft !== null && mainDomTop !== null;
-    const permanentLeft = permanentSectionEl
+    const permanentLeft = (permanentSectionEl && !preferStoragePermanentLayout)
         ? (hasMainDomPixelAnchor
             ? mainDomLeft
             : toNumber(
@@ -5665,7 +6042,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
                 : null,
             0
         );
-    const permanentTop = permanentSectionEl
+    const permanentTop = (permanentSectionEl && !preferStoragePermanentLayout)
         ? (hasMainDomPixelAnchor
             ? mainDomTop
             : toNumber(
@@ -5680,7 +6057,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
                 : null,
             0
         );
-    const permanentW = permanentSectionEl
+    const permanentW = (permanentSectionEl && !preferStoragePermanentLayout)
         ? (mainDomWidth !== null
             ? mainDomWidth
             : toNumber(
@@ -5695,7 +6072,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
                 : null,
             600
         );
-    const permanentH = permanentSectionEl
+    const permanentH = (permanentSectionEl && !preferStoragePermanentLayout)
         ? (mainDomHeight !== null
             ? mainDomHeight
             : toNumber(
@@ -5768,22 +6145,22 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
             const domPos = domPositions.get(copyId) || null;
             const canvasPos = existingCopyCardStateById[copyId] || null;
             const storedPos = storedPositions.get(copyId) || null;
-            const left = domPos
+            const left = (domPos && !preferStoragePermanentLayout)
                 ? domPos.left
                 : (canvasPos
                     ? toNumber(canvasPos.left, permanentLeft)
                     : (storedPos ? toNumber(storedPos.left, permanentLeft) : permanentLeft));
-            const top = domPos
+            const top = (domPos && !preferStoragePermanentLayout)
                 ? domPos.top
                 : (canvasPos
                     ? toNumber(canvasPos.top, permanentTop)
                     : (storedPos ? toNumber(storedPos.top, permanentTop) : permanentTop));
-            const w = domPos
+            const w = (domPos && !preferStoragePermanentLayout)
                 ? domPos.width
                 : (canvasPos
                     ? toNumber(canvasPos.width, permanentW)
                     : (storedPos ? toNumber(storedPos.width, permanentW) : permanentW));
-            const h = domPos
+            const h = (domPos && !preferStoragePermanentLayout)
                 ? domPos.height
                 : (canvasPos
                     ? toNumber(canvasPos.height, permanentH)
@@ -6040,7 +6417,7 @@ function __buildTempSectionProtocolSnapshot(stateInput) {
     return {
         version: 2,
         sections: sections
-            .filter((section) => section && typeof section === 'object' && !__isSandboxImportedNode(section))
+            .filter((section) => section && typeof section === 'object')
             .map((section) => __normalizeTempSectionProtocolObject(section) || __buildTempSectionProtocol(section))
             .filter(Boolean)
     };
@@ -6354,6 +6731,11 @@ function __pruneIdentityMapEntriesInSandbox(sandbox) {
             if (copy) targets.push(copy);
         }
     }
+    // Doc requirement (current execution baseline):
+    // - 本地 identityMap: { id: chromeId, syncId, ...extras }
+    // - 导出沙盒 identityMap: 去掉 id，仅保留含扩展字段的 { syncId, ...extras }
+    // - 若某项除 id/syncId 外无任何扩展字段，则整项不导出。
+    // - 若全部项都被裁剪，则不输出 identityMap 字段。
     for (const content of targets) {
         if (!content || !Array.isArray(content.identityMap)) continue;
         const next = [];
@@ -6361,13 +6743,20 @@ function __pruneIdentityMapEntriesInSandbox(sandbox) {
             if (!entry || typeof entry !== 'object') continue;
             const syncId = String(entry.syncId || '').trim();
             if (!syncId) continue;
-            const extras = Object.keys(entry).filter((k) => k !== 'id' && k !== 'syncId');
-            if (!extras.length) continue; // doc: minimum cell with only id+syncId → drop
-            const pruned = { syncId };
-            for (const key of extras) pruned[key] = entry[key];
+            const pruned = {};
+            for (const key of Object.keys(entry)) {
+                if (key === 'id' || key === 'syncId') continue;
+                pruned[key] = entry[key];
+            }
+            if (!Object.keys(pruned).length) continue;
+            pruned.syncId = syncId;
             next.push(pruned);
         }
-        content.identityMap = next;
+        if (next.length) {
+            content.identityMap = next;
+        } else {
+            delete content.identityMap;
+        }
     }
     return sandbox;
 }
@@ -6445,6 +6834,12 @@ if (typeof window !== 'undefined') {
         getIdentityMapIndex(content) { return __getIdentityMapIndex(content); },
         normalizeIdentityMapArray(rawList) { return __normalizeIdentityMapArray(rawList); },
         verifyAndHealIdentityMap(content) { return __verifyAndHealIdentityMap(content); },
+        validateImportedIdentityMapAgainstTree(treeRoot, identityMap, expectedSyncIds, options = {}) {
+            return __validateImportedIdentityMapAgainstTree(treeRoot, identityMap, expectedSyncIds, options);
+        },
+        collectIgnoredChromeIdsFromFreshTree(treeRoot) {
+            return __collectIgnoredChromeIdsFromFreshTree(treeRoot);
+        },
         rebuildIdentityMapPreservingExisting(prev, treeRoot) { return __rebuildIdentityMapPreservingExisting(prev, treeRoot); },
         applyIdentityMapDeltaFromBookmarkEvents(content, events) { return __applyIdentityMapDeltaFromBookmarkEvents(content, events); },
         bootstrapIdentityMapFromTree(treeRoot) { return __bootstrapIdentityMapFromTree(treeRoot); },
@@ -6470,6 +6865,9 @@ if (typeof window !== 'undefined') {
         },
         async loadCanvasTempStateFromBcs() {
             return await __loadCanvasTempStateFromBcs();
+        },
+        async saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
+            return await __saveCanvasTempStateToBcsStorage(stateInput, options);
         },
         normalizeTempSectionProtocol(sectionInput) {
             return __normalizeTempSectionProtocolObject(sectionInput) || __buildTempSectionProtocol(sectionInput);
@@ -6973,7 +7371,10 @@ async function __buildBcsDocumentsFromState(stateInput, options = {}) {
             exportRoot: (options && typeof options.exportRoot === 'string') ? options.exportRoot : __getBcsExportRootCached(),
             exportFormat: (options && typeof options.exportFormat === 'string') ? options.exportFormat : __getBcsExportFormatCached()
         });
-    const canvasData = __buildBcsCanvasDataFromState(state, fileRefs, { storageMap: storage });
+    const canvasData = __buildBcsCanvasDataFromState(state, fileRefs, {
+        storageMap: storage,
+        preferStoragePermanentLayout: options && options.preferStoragePermanentLayout === true
+    });
     const updates = {};
     const removals = [];
     const sections = Array.isArray(state.sections) ? state.sections : [];
@@ -7057,11 +7458,32 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
             exportFormat: __getBcsExportFormatCached()
         });
         const storage = await __bcsStorageGetAll();
-        const documents = await __buildBcsDocumentsFromState(state, { fileRefs, storage });
+        const storagePatch = (options && options.storagePatch && typeof options.storagePatch === 'object')
+            ? options.storagePatch
+            : null;
+        if (storagePatch) {
+            Object.assign(storage, storagePatch);
+        }
+        const documents = await __buildBcsDocumentsFromState(state, {
+            fileRefs,
+            storage,
+            preferStoragePermanentLayout: options && options.preferStoragePermanentLayout === true
+        });
         if (!documents) return;
         const immediate = !!(options && options.immediate);
         const updates = documents.updates || {};
         const removals = Array.isArray(documents.removals) ? documents.removals : [];
+
+        if (immediate && __canvasTempStateBcsWriteTimer) {
+            try { clearTimeout(__canvasTempStateBcsWriteTimer); } catch (_) { }
+            __canvasTempStateBcsWriteTimer = null;
+            __canvasTempStateBcsWritePending = null;
+            const waiters = __canvasTempStateBcsWriteWaiters.slice();
+            __canvasTempStateBcsWriteWaiters = [];
+            waiters.forEach((resolve) => {
+                try { resolve(false); } catch (_) { }
+            });
+        }
 
         if (removals.length) {
             await __bcsStorageRemove(removals);

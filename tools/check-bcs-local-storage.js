@@ -124,6 +124,7 @@
                 permanentFolders: 0,
                 permanentBookmarks: 0,
                 permanentNodes: 0,
+                permanentIdentityMapEntries: 0,
                 permanentCopies: 0,
                 tempSections: 0,
                 tempItems: 0,
@@ -196,8 +197,47 @@
         return {
             generatedAt: new Date().toISOString(),
             source,
+            mode: 'raw-local-storage',
             keys,
             storage: snapshotStorage
+        };
+    }
+
+    function getCanvasProtocolBridge() {
+        const bridge = global && global.CanvasProtocolBridge ? global.CanvasProtocolBridge : null;
+        return bridge && typeof bridge.buildExportSandbox === 'function' && typeof bridge.processExportSandboxForExport === 'function'
+            ? bridge
+            : null;
+    }
+
+    async function buildPermanentExportStyleSnapshot(options) {
+        const bridge = getCanvasProtocolBridge();
+        if (!bridge) return null;
+        const sandbox = await bridge.buildExportSandbox({
+            reason: 'bcs-local-storage-check'
+        });
+        if (!isRecord(sandbox)) return null;
+
+        bridge.processExportSandboxForExport(sandbox);
+
+        const storage = {};
+        const keys = [];
+        if (isRecord(sandbox.permMain)) {
+            storage[STORAGE_KEYS.PERM_MAIN] = cloneJsonValue(sandbox.permMain);
+            keys.push(STORAGE_KEYS.PERM_MAIN);
+        }
+        const copies = isRecord(sandbox.permCopies) ? sandbox.permCopies : {};
+        Object.keys(copies).sort().forEach((key) => {
+            storage[key] = cloneJsonValue(copies[key]);
+            keys.push(key);
+        });
+
+        return {
+            generatedAt: new Date().toISOString(),
+            source: 'canvas-export-sandbox',
+            mode: 'export-sandbox-processed',
+            keys,
+            storage
         };
     }
 
@@ -218,6 +258,7 @@
         return {
             generatedAt: new Date().toISOString(),
             source,
+            mode: 'raw-local-storage',
             keys,
             storage: snapshotStorage
         };
@@ -329,6 +370,113 @@
         children.forEach((child, index) => countPermanentTree(report, child, `${path}.children[${index}]`, depth + 1));
     }
 
+    function collectPermanentTreeNodeIds(node, outSet) {
+        if (!isRecord(node) || !(outSet instanceof Set)) return;
+        const id = String(node.id || '').trim();
+        if (id) outSet.add(id);
+        const children = Array.isArray(node.children) ? node.children : [];
+        children.forEach((child) => collectPermanentTreeNodeIds(child, outSet));
+    }
+
+    function checkPermanentIdentityMap(report, main) {
+        const keys = Object.keys(main || {});
+        const idxDescription = keys.indexOf('descriptionMd');
+        const idxIdentityMap = keys.indexOf('identityMap');
+        const idxTree = keys.indexOf('tree');
+
+        if (idxIdentityMap < 0) {
+            fail(report, 'permanent', '`bcs:perm:main.identityMap` is missing.');
+            return;
+        }
+        if (idxDescription >= 0 && idxIdentityMap < idxDescription) {
+            fail(report, 'permanent', '`identityMap` must appear after `descriptionMd` in `bcs:perm:main`.', {
+                keyOrder: keys
+            });
+        }
+        if (idxTree >= 0 && idxIdentityMap > idxTree) {
+            fail(report, 'permanent', '`identityMap` must appear before `tree` in `bcs:perm:main`.', {
+                keyOrder: keys
+            });
+        }
+
+        if (!Array.isArray(main.identityMap)) {
+            fail(report, 'permanent', '`bcs:perm:main.identityMap` must be an array.');
+            return;
+        }
+
+        report.summary.permanentIdentityMapEntries = main.identityMap.length;
+        const mapByChromeId = new Map();
+        const mapBySyncId = new Map();
+
+        main.identityMap.forEach((entry, index) => {
+            if (!isRecord(entry)) {
+                fail(report, 'permanent', 'identityMap entry must be an object.', { index });
+                return;
+            }
+            const id = String(entry.id || '').trim();
+            const syncId = String(entry.syncId || '').trim();
+            if (!id || !syncId) {
+                fail(report, 'permanent', 'identityMap entry must contain both `id` and `syncId`.', {
+                    index,
+                    entry
+                });
+                return;
+            }
+            if (mapByChromeId.has(id)) {
+                fail(report, 'permanent', 'Duplicate chrome id in identityMap.', {
+                    id,
+                    firstIndex: mapByChromeId.get(id),
+                    index
+                });
+            } else {
+                mapByChromeId.set(id, index);
+            }
+            if (mapBySyncId.has(syncId)) {
+                fail(report, 'permanent', 'Duplicate syncId in identityMap.', {
+                    syncId,
+                    firstIndex: mapBySyncId.get(syncId),
+                    index
+                });
+            } else {
+                mapBySyncId.set(syncId, index);
+            }
+        });
+
+        const treeNodeIds = new Set();
+        if (isRecord(main.tree)) {
+            collectPermanentTreeNodeIds(main.tree, treeNodeIds);
+        }
+
+        const missingInMap = [];
+        treeNodeIds.forEach((id) => {
+            if (!mapByChromeId.has(id)) missingInMap.push(id);
+        });
+        const staleInMap = [];
+        mapByChromeId.forEach((_idx, id) => {
+            if (!treeNodeIds.has(id)) staleInMap.push(id);
+        });
+
+        if (missingInMap.length) {
+            fail(report, 'permanent', 'Permanent tree contains nodes missing in identityMap.', {
+                count: missingInMap.length,
+                sample: missingInMap.slice(0, 20)
+            });
+        }
+        if (staleInMap.length) {
+            fail(report, 'permanent', 'identityMap contains chrome ids missing from permanent tree.', {
+                count: staleInMap.length,
+                sample: staleInMap.slice(0, 20)
+            });
+        }
+
+        passInfo(report, 'permanent', 'Permanent identityMap contract scan completed.', {
+            entries: main.identityMap.length,
+            treeNodeIds: treeNodeIds.size,
+            missingInMap: missingInMap.length,
+            staleInMap: staleInMap.length
+        });
+    }
+
     function countTempItems(items) {
         if (!Array.isArray(items)) return 0;
         let total = 0;
@@ -401,6 +549,8 @@
                 bookmarks: report.summary.permanentBookmarks
             });
         }
+
+        checkPermanentIdentityMap(report, main);
 
         return main;
     }
@@ -589,7 +739,18 @@
         if (report.warnings.length) console.warn('[BCS Local Storage Check] Warnings', report.warnings);
         console.info('[BCS Local Storage Check] Full report saved to window.__bcsLocalStorageReport', report);
         console.info('[BCS Local Storage Check] BCS storage snapshot saved to window.__bcsLocalStorageExport', report.bcsLocalStorageExport);
-        console.info('[BCS Local Storage Check] Permanent storage snapshot saved to window.__bcsPermanentStorageExport', report.permanentStorageExport);
+        console.info('[BCS Local Storage Check] Permanent storage snapshot saved to window.__bcsPermanentStorageExport', {
+            mode: report && report.permanentStorageExport ? report.permanentStorageExport.mode : '',
+            keys: report && report.permanentStorageExport && Array.isArray(report.permanentStorageExport.keys)
+                ? report.permanentStorageExport.keys.length
+                : 0
+        });
+        console.info('[BCS Local Storage Check] Raw permanent storage snapshot saved to window.__bcsPermanentStorageExportRaw', {
+            mode: report && report.permanentStorageExportRaw ? report.permanentStorageExportRaw.mode : '',
+            keys: report && report.permanentStorageExportRaw && Array.isArray(report.permanentStorageExportRaw.keys)
+                ? report.permanentStorageExportRaw.keys.length
+                : 0
+        });
     }
 
     function shouldAutoDownloadSnapshot() {
@@ -622,7 +783,14 @@
         return buildStorageSnapshot(loaded.source, loaded.storage || {}, options || {});
     }
 
-    async function exportBcsPermanentStorageSnapshot() {
+    async function exportBcsPermanentStorageSnapshot(options = {}) {
+        const useExportSandboxShape = !!(options && options.useExportSandboxShape === true);
+        if (useExportSandboxShape) {
+            try {
+                const exportStyle = await buildPermanentExportStyleSnapshot();
+                if (exportStyle) return exportStyle;
+            } catch (_) { }
+        }
         const loaded = await readAllLocalStorage();
         return buildPermanentStorageSnapshot(loaded.source, loaded.storage || {});
     }
@@ -678,6 +846,11 @@
         const storage = report && report.bcsLocalStorageExport && report.bcsLocalStorageExport.storage
             ? report.bcsLocalStorageExport.storage
             : {};
+        const permanentStorage = report && report.permanentStorageExportRaw && report.permanentStorageExportRaw.storage
+            ? report.permanentStorageExportRaw.storage
+            : report && report.permanentStorageExport && report.permanentStorageExport.storage
+                ? report.permanentStorageExport.storage
+            : storage;
         let count = 0;
 
         const canvas = readDownloadPayload(storage[STORAGE_KEYS.CANVAS]);
@@ -686,19 +859,20 @@
             count += 1;
         }
 
-        const permanentMain = report.permanentMain && report.permanentMain.content
-            ? report.permanentMain.content
-            : readContentPayload(storage[STORAGE_KEYS.PERM_MAIN]);
+        const permanentMain = readContentPayload(permanentStorage[STORAGE_KEYS.PERM_MAIN])
+            || (report.permanentMain && report.permanentMain.content
+                ? report.permanentMain.content
+                : readContentPayload(storage[STORAGE_KEYS.PERM_MAIN]));
         if (permanentMain) {
             downloadJsonPayload('A书签树（永久栏目）.json', permanentMain);
             count += 1;
         }
 
-        Object.keys(storage)
+        Object.keys(permanentStorage)
             .filter((key) => key.startsWith(STORAGE_KEYS.PERM_COPY_PREFIX))
             .sort()
             .forEach((key, index) => {
-                const payload = readContentPayload(storage[key]);
+                const payload = readContentPayload(permanentStorage[key]);
                 if (!payload) return;
                 const slot = sanitizeDownloadName(payload.slot || String.fromCharCode(66 + index), String.fromCharCode(66 + index));
                 downloadJsonPayload(`${slot}书签树（永久栏目副本）.json`, payload);
@@ -736,7 +910,7 @@
     }
 
     async function downloadBcsPermanentStorageSnapshot(options) {
-        const snapshot = await exportBcsPermanentStorageSnapshot();
+        const snapshot = await exportBcsPermanentStorageSnapshot(options || {});
         const filename = options && typeof options.filename === 'string' && options.filename.trim()
             ? options.filename.trim()
             : defaultSnapshotFilename('bcs-permanent-storage');
@@ -749,7 +923,28 @@
         const storage = loaded.storage || {};
         const report = createReport(loaded.source, storage);
         report.bcsLocalStorageExport = buildStorageSnapshot(loaded.source, storage, {});
-        report.permanentStorageExport = buildPermanentStorageSnapshot(loaded.source, storage);
+        report.permanentStorageExportRaw = buildPermanentStorageSnapshot(loaded.source, storage);
+        report.permanentStorageExport = report.permanentStorageExportRaw;
+        try {
+            const exportStyle = await buildPermanentExportStyleSnapshot();
+            if (exportStyle) {
+                report.permanentStorageExport = exportStyle;
+                passInfo(report, 'export', 'Permanent storage export uses export sandbox pipeline.', {
+                    mode: exportStyle.mode,
+                    source: exportStyle.source,
+                    keys: exportStyle.keys
+                });
+            } else {
+                warn(report, 'export', 'Permanent storage export falls back to raw local storage snapshot (export bridge unavailable).', {
+                    mode: report.permanentStorageExportRaw.mode
+                });
+            }
+        } catch (error) {
+            warn(report, 'export', 'Permanent storage export sandbox processing failed; fallback to raw snapshot.', {
+                message: error && error.message ? error.message : String(error),
+                mode: report.permanentStorageExportRaw.mode
+            });
+        }
 
         checkBcsMeta(report, storage);
         const canvasInfo = checkCanvas(report, storage);
@@ -763,6 +958,7 @@
         global.__bcsLocalStorageReport = report;
         global.__bcsLocalStorageExport = report.bcsLocalStorageExport;
         global.__bcsPermanentStorageExport = report.permanentStorageExport;
+        global.__bcsPermanentStorageExportRaw = report.permanentStorageExportRaw;
         printReport(report);
         autoDownloadReportSnapshot(report);
         return report;

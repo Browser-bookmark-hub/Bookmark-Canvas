@@ -949,6 +949,7 @@
     const copies = (options && Array.isArray(options.copies)) ? options.copies : readPermanentCopies();
     const importedOnly = !!(options && options.importedOnly);
     const enableGroupDelete = !(options && options.enableGroupDelete === false);
+    const suppressImportedGrouping = !!(options && options.suppressImportedGrouping);
     const colorTokens = getAppearanceBaseColorTokens();
     const locatableThemeTokens = getAppearanceThemeColorTokens();
     const syncFlags = getDirectoryColorSyncFlags();
@@ -1348,28 +1349,34 @@
       });
     };
 
-    const importMembership = collectImportMembership(mdNodes);
+    const importMembership = suppressImportedGrouping
+      ? { importContainers: [], tempIds: new Set(), mdIds: new Set() }
+      : collectImportMembership(mdNodes);
 
-    const importedTempSections = tempSections.filter((section) => isImportedTempSection(section, importMembership));
+    const importedTempSections = suppressImportedGrouping
+      ? []
+      : tempSections.filter((section) => isImportedTempSection(section, importMembership));
     const importedTempIdSet = new Set();
     importedTempSections.forEach((section) => {
       const sectionId = normalizeText(section && section.id);
       if (sectionId) importedTempIdSet.add(sectionId);
     });
 
-    const importedMdNodes = mdNodes.filter((node) => isImportedMdNode(node, importMembership));
+    const importedMdNodes = suppressImportedGrouping
+      ? []
+      : mdNodes.filter((node) => isImportedMdNode(node, importMembership));
     const importedMdIdSet = new Set();
     importedMdNodes.forEach((node) => {
       const nodeId = normalizeText(node && node.id);
       if (nodeId) importedMdIdSet.add(nodeId);
     });
 
-    const regularTempSections = tempSections.filter((section) => {
+    const regularTempSections = suppressImportedGrouping ? tempSections.slice() : tempSections.filter((section) => {
       const sectionId = normalizeText(section && section.id);
       return sectionId ? !importedTempIdSet.has(sectionId) : true;
     });
 
-    const regularMdNodes = mdNodes.filter((node) => {
+    const regularMdNodes = suppressImportedGrouping ? mdNodes.slice() : mdNodes.filter((node) => {
       const nodeId = normalizeText(node && node.id);
       return nodeId ? !importedMdIdSet.has(nodeId) : true;
     });
@@ -1380,13 +1387,17 @@
 
     const importedEdges = [];
     const regularEdges = [];
-    edges.forEach((edge) => {
-      if (isImportedEdge(edge, importedNodeIds)) {
-        importedEdges.push(edge);
-      } else {
-        regularEdges.push(edge);
-      }
-    });
+    if (suppressImportedGrouping) {
+      regularEdges.push(...edges);
+    } else {
+      edges.forEach((edge) => {
+        if (isImportedEdge(edge, importedNodeIds)) {
+          importedEdges.push(edge);
+        } else {
+          regularEdges.push(edge);
+        }
+      });
+    }
 
     const permanentChildren = [
       makeItemNode({
@@ -1461,12 +1472,14 @@
 
     const importedTitleLookup = buildNodeTitleLookup(tempSections, mdNodes, []);
 
-    const importedGroups = collectImportedGroups(
-      importMembership,
-      importedTempSections,
-      importedMdNodes,
-      importedEdges
-    );
+    const importedGroups = suppressImportedGrouping
+      ? []
+      : collectImportedGroups(
+        importMembership,
+        importedTempSections,
+        importedMdNodes,
+        importedEdges
+      );
 
     const importedGroupFolders = importedGroups.map((group, index) => {
       const groupSnapshotSections = group.tempSections.filter((section) => !!(section && section.isSnapshot));
@@ -1613,6 +1626,7 @@
     const inputState = previewState && typeof previewState === 'object' ? previewState : {};
     const storage = (options && options.storage && typeof options.storage === 'object') ? options.storage : null;
     const groupName = normalizeText(options && options.groupName);
+    const mode = normalizeText(options && options.mode) === 'overwrite' ? 'overwrite' : 'permanent';
 
     const tempSections = Array.isArray(inputState.tempSections)
       ? inputState.tempSections.map((section) => section ? { ...section } : section).filter(Boolean)
@@ -1623,6 +1637,36 @@
     const edges = Array.isArray(inputState.edges)
       ? inputState.edges.map((edge) => edge ? { ...edge } : edge).filter(Boolean)
       : [];
+
+    if (mode === 'overwrite') {
+      const hiddenImportContainerIds = new Set();
+      const overwriteMdNodes = mdNodes.filter((node) => {
+        if (!node || node.subtype !== 'import-container') return true;
+        const containerId = normalizeText(node.id);
+        if (containerId) hiddenImportContainerIds.add(containerId);
+        return false;
+      });
+      const overwriteEdges = edges.filter((edge) => {
+        const fromNode = normalizeText(edge && edge.fromNode);
+        const toNode = normalizeText(edge && edge.toNode);
+        if (fromNode && hiddenImportContainerIds.has(fromNode)) return false;
+        if (toNode && hiddenImportContainerIds.has(toNode)) return false;
+        return true;
+      });
+      const previewStatePrepared = {
+        tempSections,
+        mdNodes: overwriteMdNodes,
+        edges: overwriteEdges
+      };
+      const previewCopies = readPermanentCopiesFromStorage(storage);
+      return buildDirectoryData({
+        state: previewStatePrepared,
+        importedOnly: false,
+        enableGroupDelete: false,
+        copies: previewCopies,
+        suppressImportedGrouping: true
+      });
+    }
 
     let hasImportContainer = mdNodes.some((node) => node && node.subtype === 'import-container');
     if (!hasImportContainer) {

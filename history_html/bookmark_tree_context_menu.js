@@ -190,6 +190,17 @@ async function movePermanentBookmarkNode(nodeId, target) {
     }
 }
 
+if (typeof window !== 'undefined') {
+    window.__canvasPermanentBookmarkMutations = {
+        getPermanentMutationBridge,
+        rollbackPermanentBcsMutation,
+        createPermanentBookmarkNode,
+        updatePermanentBookmarkNode,
+        removePermanentBookmarkNode,
+        movePermanentBookmarkNode
+    };
+}
+
 // 全局：默认打开方式与特定窗口/分组ID
 let defaultOpenMode = 'specific-window'; // 默认：'specific-window'（in Same Window）。可选：'new-tab' | 'new-window' | 'incognito' | 'specific-window' | 'specific-group' | 'scoped-window' | 'scoped-group' | 'same-window-specific-group'
 let specificWindowId = null; // chrome.windows Window ID

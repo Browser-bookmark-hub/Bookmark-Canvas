@@ -178,79 +178,31 @@ async function readPermanentNodeFromBcs(nodeId) {
     return null;
 }
 
-function getPermanentMutationBridge() {
-    const bridge = window && window.CanvasProtocolBridge ? window.CanvasProtocolBridge : null;
-    return bridge && typeof bridge.restorePermanentMainContentSnapshot === 'function' ? bridge : null;
-}
-
-async function rollbackPermanentBcsMutation(prepared, reason = '') {
-    const bridge = getPermanentMutationBridge();
-    if (!bridge || !prepared || !prepared.previousContent) return;
-    try {
-        await bridge.restorePermanentMainContentSnapshot(prepared.previousContent, {
-            assumeClean: false,
-            reason
-        });
-    } catch (rollbackError) {
-        console.warn('[Permanent JSON] rollback failed:', rollbackError);
-        try {
-            if (typeof bridge.syncPermanentMainTreeFromChromeBookmarks === 'function') {
-                await bridge.syncPermanentMainTreeFromChromeBookmarks({
-                    assumeClean: false,
-                    reason: reason || 'rollback-fallback'
-                });
-            }
-        } catch (_) { }
-    }
-}
-
-async function createPermanentBookmarkNode(createPayload, options = {}) {
-    if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.create !== 'function') {
-        throw new Error('Chrome bookmarks API unavailable');
-    }
-    const bridge = getPermanentMutationBridge();
-    let prepared = null;
-    if (bridge && typeof bridge.preparePermanentCreateNodeInBcs === 'function') {
-        prepared = await bridge.preparePermanentCreateNodeInBcs(createPayload);
-    }
-    try {
-        const created = await chrome.bookmarks.create(createPayload);
-        try {
-            if (prepared && bridge && typeof bridge.commitPermanentCreatedNodeInBcs === 'function') {
-                await bridge.commitPermanentCreatedNodeInBcs(prepared.pendingId, created);
-            }
-        } catch (commitError) {
-            console.warn('[Permanent JSON] create commit failed, resyncing from Chrome:', commitError);
-            try {
-                if (bridge && typeof bridge.syncPermanentMainTreeFromChromeBookmarks === 'function') {
-                    await bridge.syncPermanentMainTreeFromChromeBookmarks({
-                        assumeClean: false,
-                        reason: 'create-commit-fallback'
-                    });
-                }
-            } catch (_) { }
-        }
-        return created;
-    } catch (error) {
-        await rollbackPermanentBcsMutation(prepared, 'create-failed');
-        throw error;
-    }
-}
-
-async function movePermanentBookmarkNode(nodeId, target) {
-    if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.move !== 'function') {
-        throw new Error('Chrome bookmarks API unavailable');
-    }
-    const bridge = getPermanentMutationBridge();
-    const prepared = bridge && typeof bridge.movePermanentNodeInBcs === 'function'
-        ? await bridge.movePermanentNodeInBcs(nodeId, target, { assumeClean: false })
+function getSharedPermanentMutationOps() {
+    const ops = (typeof window !== 'undefined' && window.__canvasPermanentBookmarkMutations)
+        ? window.__canvasPermanentBookmarkMutations
         : null;
-    try {
-        return await chrome.bookmarks.move(nodeId, target);
-    } catch (error) {
-        await rollbackPermanentBcsMutation(prepared, 'move-failed');
-        throw error;
+    return ops
+        && typeof ops.createPermanentBookmarkNode === 'function'
+        && typeof ops.movePermanentBookmarkNode === 'function'
+        ? ops
+        : null;
+}
+
+async function createPermanentBookmarkNodeViaSharedOps(createPayload, options = {}) {
+    const ops = getSharedPermanentMutationOps();
+    if (!ops) {
+        throw new Error('Permanent bookmark mutation ops unavailable');
     }
+    return await ops.createPermanentBookmarkNode(createPayload, options);
+}
+
+async function movePermanentBookmarkNodeViaSharedOps(nodeId, target) {
+    const ops = getSharedPermanentMutationOps();
+    if (!ops) {
+        throw new Error('Permanent bookmark mutation ops unavailable');
+    }
+    return await ops.movePermanentBookmarkNode(nodeId, target);
 }
 
 function resolvePermanentBlankDropParentId(targetElement = null) {
@@ -713,7 +665,7 @@ async function createBookmarkFromPayload(parentId, index, payload) {
     if (typeof index === 'number') {
         createInfo.index = index;
     }
-    const created = await createPermanentBookmarkNode(createInfo);
+    const created = await createPermanentBookmarkNodeViaSharedOps(createInfo);
     if (payload.children && payload.children.length) {
         for (const child of payload.children) {
             await createBookmarkFromPayload(created.id, null, child);
@@ -799,7 +751,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
         });
 
         // 执行Chrome API移动
-        await movePermanentBookmarkNode(dragNodeId, {
+        await movePermanentBookmarkNodeViaSharedOps(dragNodeId, {
             parentId: insertInfo.parentId,
             index: insertInfo.index
         });
