@@ -28,8 +28,7 @@
  * Code should stay in feature files when it is specific to one flow:
  * - Import/export dialogs, previews, file inputs, download actions, and mode
  *   selection UI.
- * - Visual / visual-no-icon export presentation decisions unless the helper is
- *   a general protocol conversion used by AI or sync as well.
+ * - Presentation-only export modes.
  * - Import placement, import-container drag behavior, and toolbar button wiring.
  *
  * When adding new operations (create/update/delete/replace/apply), prefer adding
@@ -508,7 +507,6 @@ function __renderDescriptionMarkdownToHtml(rawDesc) {
 
 const __CANVAS_SECTION_JSON_FORMAT = 'bookmark-canvas-section';
 const __CANVAS_SECTION_JSON_SCHEMA_VERSION = 1;
-const __CANVAS_OBSIDIAN_EXPORT_FORMATS = new Set(['visual', 'visual-no-icon', 'json']);
 const __CANVAS_COMPACT_TAG_DESCRIPTION = '1';
 const __CANVAS_COMPACT_TAG_FOLD_STATE = '2';
 const __CANVAS_COMPACT_TAG_ROOT_META = '3';
@@ -517,9 +515,10 @@ const __CANVAS_COMPACT_TAG_EXPORT_FORMAT = '9';
 
 function __normalizeCanvasObsidianExportFormat(value, fallback = 'json') {
     const format = String(value || '').trim().toLowerCase();
-    if (__CANVAS_OBSIDIAN_EXPORT_FORMATS.has(format)) return format;
+    if (format === 'json') return 'json';
     const normalizedFallback = String(fallback || '').trim().toLowerCase();
-    return __CANVAS_OBSIDIAN_EXPORT_FORMATS.has(normalizedFallback) ? normalizedFallback : 'json';
+    if (normalizedFallback === 'json') return 'json';
+    return normalizedFallback ? 'json' : '';
 }
 
 function __escapeCanvasRegexLiteral(text) {
@@ -2636,266 +2635,7 @@ function __applyImportedSectionFoldStates(sections) {
     }
 }
 
-/**
- * @param {Array} items
- * @param {number} depth
- * @param {Object} options
- * @param {string} options.checkType - 'permanent' or 'temp' or 'none'
- * @param {Set} options.permanentExpandedSet - for permanent section
- * @param {string} options.tempSectionId - for temp section
- */
-function __toTreeMarkdownLines(items, depth = 0, options = {}) {
-    const lines = [];
-    // Styles for tree visualization (mimicking the HTML canvas look)
-    const BORDER_COLOR = 'rgba(130, 130, 130, 0.3)';
-    // Children container: renders the vertical line
-    const containerStyle = `border-left: 1px solid ${BORDER_COLOR}; margin-left: 7px; padding-left: 16px; position: relative; display: flex; flex-direction: column;`;
-    // Item wrapper: holds connector and content
-    const itemWrapperStyle = `position: relative; margin-bottom: 2px;`;
-    // Connector: horizontal line from parent's vertical border to item
-    // We position it relative to the padding-left of the container.
-    const connectorStyle = `position: absolute; top: 12px; left: -16px; width: 12px; height: 1px; background-color: ${BORDER_COLOR}; pointer-events: none;`;
-
-    const labelStyle = `display: inline-flex; align-items: center; gap: 6px; vertical-align: middle; text-decoration: none; color: inherit; font-size: 14px; line-height: 24px; max-width: 100%; overflow: hidden;`;
-    const summaryStyle = `cursor: pointer; list-style: none; display: flex; align-items: center; outline: none;`;
-    const textStyle = `white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`;
-
-    const { checkType, permanentExpandedSet, tempSectionId, forceCollapsed, bookmarkIconMode, bookmarkSymbol } = options;
-
-    (items || []).forEach((item) => {
-        if (!item) return;
-        let titleRaw = String(item.title || item.name || item.url || 'Untitled').trim();
-        // Remove excesive spaces and newlines
-        titleRaw = titleRaw.replace(/\s+/g, ' ');
-
-        // HTML escape title
-        const titleSafe = titleRaw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-        const connector = depth > 0
-            ? `<span style="${connectorStyle}"></span>`
-            : '';
-
-        if (item.type === 'bookmark' || item.url) {
-            const url = String(item.url || '').trim();
-            const normalizedUrl = __sanitizeImportUrl(url);
-            const ok = __isValidUrl(url);
-            const safeUrl = ok ? normalizedUrl : '#';
-            const suffix = ok ? '' : ' <small style="color:red; opacity:0.7;">(invalid)</small>';
-
-            const iconMode = String(bookmarkIconMode || '').trim().toLowerCase();
-            const useFavicon = !(iconMode === 'text' || iconMode === 'none' || iconMode === 'no-icon');
-            const symbolRaw = (typeof bookmarkSymbol === 'string' && bookmarkSymbol) ? bookmarkSymbol : '-';
-            const symbolSafe = String(symbolRaw).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            const symbolStyle = 'width:16px; text-align:center; flex-shrink:0; opacity:.75;';
-
-            let leadingIconHtml = '';
-            if (useFavicon) {
-                let iconSrc = getFaviconUrl && getFaviconUrl(safeUrl);
-                if (!iconSrc) iconSrc = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZ3dCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOTE5MTkxIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiPjwvY2lyY2xlPjwvc3ZnPg==';
-                leadingIconHtml = `<img src="${iconSrc}" style="width:16px; height:16px; object-fit:contain; border-radius:3px; flex-shrink: 0;" />`;
-            } else {
-                leadingIconHtml = `<span style="${symbolStyle}">${symbolSafe}</span>`;
-            }
-
-            lines.push(`<div style="${itemWrapperStyle}">`);
-            lines.push(`  ${connector}`);
-            lines.push(`  <a href="${safeUrl}" target="_blank" style="${labelStyle}" title="${titleSafe}">`);
-            lines.push(`    ${leadingIconHtml}`);
-            lines.push(`    <span style="${textStyle}">${titleSafe}</span>`);
-            lines.push(`  </a>${suffix}`);
-            lines.push(`</div>`);
-            return;
-        }
-
-        // Folder
-        const folderName = titleSafe || 'Folder';
-        let isExpanded = true;
-
-        if (checkType === 'permanent') {
-            if (item.id && permanentExpandedSet) {
-                isExpanded = permanentExpandedSet.has(String(item.id));
-            } else {
-                isExpanded = false;
-            }
-        } else if (checkType === 'temp' && tempSectionId && item.id && typeof LAZY_LOAD_THRESHOLD !== 'undefined') {
-            const folderId = `${tempSectionId}-${item.id}`;
-            let maxDepth = LAZY_LOAD_THRESHOLD.maxInitialDepth || 1;
-            try {
-                if (typeof getTempTreeMaxInitialDepth === 'function') {
-                    const v = getTempTreeMaxInitialDepth();
-                    if (typeof v === 'number' && isFinite(v)) {
-                        maxDepth = Math.max(0, v);
-                    }
-                }
-            } catch (_) { }
-            const userCollapsed = LAZY_LOAD_THRESHOLD.collapsedFolders.has(folderId);
-            const userExpanded = LAZY_LOAD_THRESHOLD.expandedFolders.has(folderId);
-            const defaultExpanded = depth < maxDepth;
-            isExpanded = userExpanded || (defaultExpanded && !userCollapsed);
-        }
-
-        if (forceCollapsed) {
-            isExpanded = false;
-        }
-
-        const folderEmoji = isExpanded ? '📂' : '📁';
-        const openAttr = isExpanded ? ' open' : '';
-        const hasChildren = Array.isArray(item.children) && item.children.length > 0;
-
-        // Empty folder indicator
-        const emptyIndicator = hasChildren ? '' : ` <span style="opacity:0.5; font-size: 0.9em; margin-left: 6px;">(empty)</span>`;
-
-        lines.push(`<div style="${itemWrapperStyle}">`);
-        lines.push(`  ${connector}`);
-        lines.push(`  <details${openAttr}>`);
-        lines.push(`    <summary style="${summaryStyle}">`);
-        lines.push(`      <span style="${labelStyle}" title="${folderName}">`);
-        lines.push(`        <span style="font-size:16px; line-height:1; flex-shrink: 0;">${folderEmoji}</span>`);
-        lines.push(`        <span style="${textStyle}">${folderName}</span>`);
-        lines.push(`        ${emptyIndicator}`);
-        lines.push(`      </span>`);
-        lines.push(`    </summary>`);
-
-        if (hasChildren) {
-            lines.push(`    <div style="${containerStyle}">`);
-            const childLines = __toTreeMarkdownLines(item.children, depth + 1, options);
-            for (let i = 0; i < childLines.length; i++) {
-                lines.push(childLines[i]);
-            }
-            lines.push(`    </div>`);
-        }
-
-        lines.push(`  </details>`);
-        lines.push(`</div>`);
-    });
-    return lines;
-}
-
-function __buildPermanentBookmarksMarkdown(bookmarkTree, descriptionOverride = null, metaOptions = null) {
-    const exportFormat = __normalizeCanvasObsidianExportFormat(metaOptions && metaOptions.exportFormat, 'visual');
-    if (exportFormat === 'json') {
-        return __buildPermanentSectionJsonMarkdown(bookmarkTree, descriptionOverride, metaOptions);
-    }
-
-    const { isEn } = __getLang();
-
-    const domTitleEl = document.getElementById('permanentSectionTitle');
-    const domTitle = domTitleEl ? domTitleEl.textContent.trim() : '';
-    const title = domTitle || (isEn ? 'Permanent Bookmarks' : '书签树 (永久栏目)');
-    const permanentSlot = __normalizePositiveInt(metaOptions && metaOptions.permanentSlot) || 1;
-    const slotLabel = toAlphaLabel(permanentSlot) || 'A';
-    const sectionHeaderLine = `#${slotLabel} ${title}`.trim();
-    const copyId = String(metaOptions && metaOptions.copyId || '').trim() || null;
-    const descMd = __resolvePermanentSectionDescriptionMarkdown(copyId, descriptionOverride, {
-        preserveRawSource: true
-    });
-
-    const body = [sectionHeaderLine];
-    const formatComment = __buildCanvasExportFormatCompactComment(exportFormat);
-    if (formatComment) {
-        body.push(formatComment);
-    }
-    if (descMd) {
-        body.push(__buildCanvasDescriptionCommentBlock(descMd));
-    }
-    const shouldWriteRootMeta = permanentSlot === 1 && !String(metaOptions && metaOptions.copyId || '').trim();
-    if (shouldWriteRootMeta) {
-        const rootMetaBlock = __buildCanvasRootMetaCommentBlock(__buildPermanentRootMeta(bookmarkTree));
-        if (rootMetaBlock) {
-            body.push(rootMetaBlock);
-        }
-    }
-    body.push('');
-
-    const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
-    const roots = root && Array.isArray(root.children) ? root.children : [];
-    const permanentExpandedSet = (metaOptions && metaOptions.permanentExpandedSet && typeof metaOptions.permanentExpandedSet.has === 'function')
-        ? metaOptions.permanentExpandedSet
-        : __getPermanentExpandedSet(metaOptions && metaOptions.copyId);
-
-    const toPayload = (node) => {
-        if (!node) return null;
-        if (node.url) {
-            return { id: node.id, type: 'bookmark', title: node.title || node.name || node.url, url: node.url };
-        }
-        const children = Array.isArray(node.children) ? node.children.map(toPayload).filter(Boolean) : [];
-        return { id: node.id, type: 'folder', title: node.title || node.name || (isEn ? 'Folder' : '文件夹'), children };
-    };
-
-    const parts = [];
-    parts.push(...body);
-
-    roots.forEach((r) => {
-        const sectionName = __resolvePermanentRootSectionTitle(r);
-        parts.push(`## ${sectionName}`);
-        const children = Array.isArray(r.children) ? r.children.map(toPayload).filter(Boolean) : [];
-        const lines = __toTreeMarkdownLines(children, 0, {
-            checkType: 'permanent',
-            permanentExpandedSet,
-            forceCollapsed: !!(metaOptions && metaOptions.forceCollapsed),
-            bookmarkIconMode: metaOptions && metaOptions.bookmarkIconMode
-        });
-
-        if (lines.length) parts.push(lines.join('\n'));
-        parts.push('');
-    });
-
-    return parts.join('\n').trimEnd() + '\n';
-}
-
-function __buildTempSectionMarkdown(section, metaOptions = null) {
-    const exportFormat = __normalizeCanvasObsidianExportFormat(metaOptions && metaOptions.exportFormat, 'visual');
-    if (exportFormat === 'json') {
-        return __buildTempSectionJsonMarkdown(section);
-    }
-
-    const normalizedProtocol = __normalizeTempSectionProtocolObject(section) || __buildTempSectionProtocol(section);
-    const { isEn } = __getLang();
-
-    // 1. Title & Sequence
-    const sectionMeta = normalizedProtocol && normalizedProtocol.sectionMeta ? normalizedProtocol.sectionMeta : {};
-    const rawTitle = String(sectionMeta.title || (section && section.title) || (isEn ? 'Temp Section' : '临时栏目'));
-    const seqLabel = String(sectionMeta.label || getTempSectionLabel(section) || '').trim();
-    const fullTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
-
-    const body = [fullTitle.trim()];
-    const formatComment = __buildCanvasExportFormatCompactComment(exportFormat);
-    if (formatComment) {
-        body.push(formatComment);
-    }
-
-    // 2. Description (Markdown)
-    const descMd = String(sectionMeta.descriptionMd == null ? '' : sectionMeta.descriptionMd);
-    if (descMd.trim()) {
-        body.push(__buildCanvasDescriptionCommentBlock(descMd));
-    }
-
-    body.push('');
-
-    // 3. Items
-    const items = (section && Array.isArray(section.items))
-        ? section.items
-        : (normalizedProtocol && Array.isArray(normalizedProtocol.items))
-            ? normalizedProtocol.items
-            : [];
-
-    // Pass temp section ID for collapsed state checking
-    const lines = __toTreeMarkdownLines(items, 0, {
-        checkType: 'temp',
-        tempSectionId: section ? section.id : null,
-        forceCollapsed: !!(metaOptions && metaOptions.forceCollapsed),
-        bookmarkIconMode: metaOptions && metaOptions.bookmarkIconMode
-    });
-
-    if (lines.length) {
-        body.push(lines.join('\n'));
-        body.push('');
-    }
-
-    return (body.join('\n')).trimEnd() + '\n';
-}
-
-function __buildImportedTempSectionFromVisualMarkdown(node, parsedMarkdown, contentToParse, isEn) {
+function __buildImportedTempSectionFromJsonMarkdown(node, parsedMarkdown, contentToParse, isEn) {
     const parsedJsonProtocol = parsedMarkdown && parsedMarkdown.jsonProtocol && parsedMarkdown.jsonProtocol.sectionType === 'temporary'
         ? __normalizeTempSectionProtocolObject(parsedMarkdown.jsonProtocol)
         : null;
@@ -3029,63 +2769,6 @@ function __extractMdNodeFilenameTitle(markdownText, fallback = 'Untitled') {
  * - Embed each root section (Bookmark Bar / Other Bookmarks / Mobile Bookmarks / etc.)
  *   so we don't need to change #A's structure.
  */
-function __buildPermanentBookmarksMarkdownCopyEmbedMain(bookmarkTree, descriptionOverride = null, metaOptions = null, embedTargetPath = '') {
-    const exportFormat = __normalizeCanvasObsidianExportFormat(metaOptions && metaOptions.exportFormat, 'visual');
-    if (exportFormat === 'json') {
-        const inheritFrom = __normalizeCanvasMarkdownPath(embedTargetPath);
-        return __buildPermanentSectionJsonMarkdown(
-            bookmarkTree,
-            descriptionOverride,
-            inheritFrom
-                ? Object.assign({}, metaOptions || {}, { inheritFrom })
-                : metaOptions
-        );
-    }
-    const { isEn } = __getLang();
-    const domTitleEl = document.getElementById('permanentSectionTitle');
-    const domTitle = domTitleEl ? domTitleEl.textContent.trim() : '';
-    const title = domTitle || (isEn ? 'Permanent Bookmarks' : '书签树 (永久栏目)');
-    const permanentSlot = __normalizePositiveInt(metaOptions && metaOptions.permanentSlot) || 1;
-    const slotLabel = toAlphaLabel(permanentSlot) || 'A';
-    const sectionHeaderLine = `#${slotLabel} ${title}`.trim();
-
-    const body = [sectionHeaderLine];
-    const formatComment = __buildCanvasExportFormatCompactComment(exportFormat);
-    if (formatComment) {
-        body.push(formatComment);
-    }
-
-    const copyId = String(metaOptions && metaOptions.copyId || '').trim() || null;
-    const descMd = __resolvePermanentSectionDescriptionMarkdown(copyId, descriptionOverride, {
-        preserveRawSource: true
-    });
-    if (descMd) {
-        body.push(__buildCanvasDescriptionCommentBlock(descMd));
-    }
-
-    body.push('');
-
-    const target = String(embedTargetPath || '').trim().replace(/\.(md|json)$/i, '');
-    if (!target) {
-        body.push(isEn ? '*Missing embed target.*' : '*缺少共享正文目标*');
-        body.push('');
-        return body.join('\n').trimEnd() + '\n';
-    }
-
-    const root = Array.isArray(bookmarkTree) ? bookmarkTree[0] : null;
-    const roots = root && Array.isArray(root.children) ? root.children : [];
-
-    roots.forEach((r) => {
-        const sectionName = __resolvePermanentRootSectionTitle(r);
-        if (!sectionName) return;
-        body.push(`![[${target}#${sectionName}]]`);
-    });
-
-    body.push('');
-
-    return body.join('\n').trimEnd() + '\n';
-}
-
 /**
  * [SECURITY] Sanitize Imported URL
  * Prevent XSS (javascript:) and other dangerous schemes.
@@ -3127,68 +2810,7 @@ function __sanitizeImportUrl(url) {
 }
 
 /**
- * [PARSER] Parse "Visual Mode" HTML (with <details>, <a href>) back to Tree Structure
- */
-function __parseVisualHtmlToTree(htmlContent) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-
-    const parseNode = (element) => {
-        const results = [];
-
-        // Find all direct children that are wrappers
-        const wrappers = element.querySelectorAll(':scope > div');
-
-        wrappers.forEach(wrapper => {
-            // Check for bookmark (anchor link)
-            const anchor = wrapper.querySelector(':scope > a[href]');
-            if (anchor) {
-                const rawUrl = anchor.getAttribute('href') || '';
-                const url = __sanitizeImportUrl(rawUrl);
-                const titleSpan = anchor.querySelector('span:last-child');
-                const title = titleSpan ? titleSpan.textContent.trim() : anchor.textContent.trim();
-
-                if (url && url !== '#' && !url.startsWith('unsafe:')) {
-                    results.push({
-                        id: `imported-bm-v-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-                        type: 'bookmark',
-                        title: title || url,
-                        url: url
-                    });
-                }
-                return;
-            }
-
-            // Check for folder (details element)
-            const details = wrapper.querySelector(':scope > details');
-            if (details) {
-                const summary = details.querySelector(':scope > summary');
-                const titleSpan = summary ? summary.querySelector('span span:last-child') : null;
-                const title = titleSpan ? titleSpan.textContent.trim() :
-                    (summary ? summary.textContent.trim().replace(/^[📁📂]\s*/, '') : 'Folder');
-
-                // Find children container (the div after summary with border-left style)
-                const childrenContainer = details.querySelector(':scope > div');
-                const children = childrenContainer ? parseNode(childrenContainer) : [];
-
-                results.push({
-                    id: `imported-folder-v-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-                    type: 'folder',
-                    title: title,
-                    children: children
-                });
-            }
-        });
-
-        return results;
-    };
-
-    // Start parsing from body
-    return parseNode(doc.body);
-}
-
-/**
- * Parse the current visual Obsidian bookmark tree payload.
+ * Parse the current JSON Obsidian bookmark tree payload.
  */
 function __parseMarkdownAuto(content) {
     if (!content || typeof content !== 'string') return [];
@@ -3203,16 +2825,7 @@ function __parseMarkdownAuto(content) {
         return __buildBookmarkItemsFromProtocolTree(extractedJson.jsonProtocol.tree);
     }
 
-    const hasDetails = /<details[\s>]/i.test(trimmed);
-    const hasStyledAnchor = /<a\s+href=.*style=/i.test(trimmed);
-    const hasHtmlDiv = /<div\s+style=/i.test(trimmed);
-
-    if (hasDetails || (hasStyledAnchor && hasHtmlDiv)) {
-        console.log('[Canvas Import] Detected Visual Mode (HTML format)');
-        return __parseVisualHtmlToTree(trimmed);
-    }
-
-    console.warn('[Canvas Import] Unsupported bookmark tree payload; current versions only accept visual Obsidian structure.');
+    console.warn('[Canvas Import] Unsupported bookmark tree payload; current versions only accept JSON compatibility structure.');
     return [];
 }
 
@@ -3509,83 +3122,6 @@ function __toUint8(text) {
     return new TextEncoder().encode(String(text || ''));
 }
 
-function __buildCanvasImportRulesDocument(options = {}) {
-    const exportRoot = String(options && options.exportRoot || '').trim() || '书签画布';
-    const canvasFileName = String(options && options.canvasFileName || '').trim() || '书签画布.canvas';
-    const exportFormat = __normalizeCanvasObsidianExportFormat(options && options.exportFormat, 'json');
-    const modeLabel = exportFormat === 'json'
-        ? 'JSON模式（供AI）'
-        : (exportFormat === 'visual-no-icon' ? '视觉模式（无图标）' : '视觉模式');
-    const permanentRules = exportFormat === 'json'
-        ? [
-            '- 永久栏目（主栏目）与永久副本共用同一套浏览器书签树数据。',
-            '- 副本是镜像视图，不应长期当成独立正文源维护。',
-            '- 若出现多处不一致，应以主栏目（通常 #A）统一收敛，再回写副本。'
-        ]
-        : [
-            '- 永久栏目（主栏目）与永久副本共用同一套浏览器书签树数据。',
-            '- 副本是镜像视图，不应长期当成独立正文源维护。',
-            '- 若出现多处不一致，应以主栏目（通常 #A）统一收敛，再回写副本。',
-            '- 永久主 Markdown 会在标题区下方写入根元数据隐藏注释（`<!--bc:3:...-->`），用于识别浏览器内建根信息。'
-        ];
-    const modeRules = exportFormat === 'json'
-        ? [
-            '- JSON模式（供AI）使用单一 JSON 对象正文承载书签树（不使用代码围栏）。',
-            '- 永久栏目与临时栏目优先从该 JSON 正文恢复，不再依赖视觉 HTML 结构。'
-        ]
-        : (exportFormat === 'visual-no-icon'
-        ? [
-            '- 视觉模式（无图标）保留卡片结构，但书签行不显示 favicon，只保留纯文本链接。',
-            '- 请保留 `<details> / <summary> / <a>` 等外层结构，否则导入时可能丢节点。'
-        ]
-        : [
-            '- 视觉模式保留卡片结构与 favicon 展示，适合查看与存档。',
-            '- 请保留 `<details> / <summary> / <a>` 等外层结构，否则导入时可能丢节点。'
-        ]);
-
-    return [
-        '# 导入规则说明',
-        '',
-        '> 返回文档索引：[docs/README.md](./README.md)',
-        '',
-        '> 适用范围：Obsidian 导出与导入时的结构约束与编辑约束。',
-        '',
-        `> 当前导出根目录：\`${exportRoot}\``,
-        `> 当前画布文件：\`${exportRoot}/${canvasFileName}\``,
-        `> 当前内容格式：${modeLabel}`,
-        '',
-        '## 1) 永久栏目与副本',
-        '',
-        ...permanentRules,
-        '',
-        '## 2) 临时栏目与空白栏目',
-        '',
-        '- 临时栏目用于草稿、整理、分流和中间态操作，不是永久真相源。',
-        '- 特殊临时栏目统一放在 `临时栏目/特殊临时栏目/`。',
-        '- 常规链式临时栏目统一放在 `临时栏目/常规链式/`。',
-        '- 空白栏目统一保存在 `.canvas` 的 `type: "text"` 节点中，不再导出或同步独立 `.md` 文件。',
-        '',
-        '## 3) 内容格式',
-        '',
-        ...modeRules,
-        '',
-        '## 4) 导入识别基线',
-        '',
-        '- 类型识别同时依赖 `.canvas` 文件映射与目录路径命名。',
-        '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名槽位 > 文件顺序兜底。',
-        '- 空白栏目以 `.canvas` 中的 `type: "text"` 节点为唯一来源。',
-        '',
-        '## 5) 编辑时注意',
-        '',
-        '- 重命名或移动 `.md` 文件后，必须同步修改 `.canvas` 里的 `file` 路径。',
-        exportFormat === 'json'
-            ? '- JSON模式下，永久/临时栏目的树正文应保持为单一 JSON 对象正文（不使用代码围栏）；视觉模式旧结构不要混写进去。'
-            : '- 永久/临时栏目的树正文，请保持在栏目头、说明注释块、根元数据块之后。',
-        '- 空白栏目正文请直接编辑 `.canvas` 节点里的 `text` 内容，不再维护空白栏目镜像 `.md` 文件。',
-        '- 若需要避免冲突，应先确定永久主数据源，再处理临时与空白内容。'
-    ].join('\n');
-}
-
 const __crc32Table = (() => {
     const table = new Uint32Array(256);
     for (let i = 0; i < 256; i++) {
@@ -3779,8 +3315,8 @@ function __appendObsidianFilenameSuffix(stem, uniqueSeed = 'dup') {
     return `${truncated}${suffix}`;
 }
 
-function __resolveObsidianExportDataFileExtension(exportFormatInput = 'visual') {
-    return __normalizeCanvasObsidianExportFormat(exportFormatInput, 'visual') === 'json' ? 'json' : 'md';
+function __resolveObsidianExportDataFileExtension(exportFormatInput = 'json') {
+    return 'json';
 }
 
 function __getPermanentSectionDisplayTitle(isEn) {
@@ -3789,7 +3325,7 @@ function __getPermanentSectionDisplayTitle(isEn) {
     return titleFromDom || (isEn ? 'Permanent Bookmarks' : '书签树 (永久栏目)');
 }
 
-function __buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn, exportFormat = 'visual') {
+function __buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn, exportFormat = 'json') {
     const slot = __normalizePositiveInt(permanentSlot) || 1;
     const slotLabel = toAlphaLabel(slot) || 'A';
     const folder = isEn ? 'Permanent' : '永久栏目';
@@ -3895,17 +3431,6 @@ function __detectCanvasMarkdownExportFormatFromContent(fileText) {
     if (formatHint) {
         return formatHint;
     }
-
-    const content = String(
-        (parsedMarkdown && parsedMarkdown.contentToParse)
-        || (parsedMarkdown && parsedMarkdown.rawBody)
-        || fileText
-        || ''
-    ).replace(/\r\n?/g, '\n');
-
-    if (!content.trim()) return '';
-    if (/<img[\s>]/i.test(content)) return 'visual';
-    if (/<details[\s>]/i.test(content) || /<a\s+href=/i.test(content)) return 'visual-no-icon';
     return '';
 }
 
@@ -4042,7 +3567,7 @@ function __normalizeTempSectionSourceKey(sourceRaw) {
     return normalized;
 }
 
-function __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn, exportFormat = 'visual') {
+function __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn, exportFormat = 'json') {
     const tempRoot = isEn ? 'Temporary' : '临时栏目';
     const fileExt = __resolveObsidianExportDataFileExtension(exportFormat);
     if (__isSpecialTempSection(section)) {
@@ -4532,7 +4057,7 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
 
             if (isTempSection) {
                 tempState.sections.push(
-                    __buildImportedTempSectionFromVisualMarkdown(node, parsedMarkdown, contentToParse, isEn)
+                    __buildImportedTempSectionFromJsonMarkdown(node, parsedMarkdown, contentToParse, isEn)
                 );
                 return;
             }

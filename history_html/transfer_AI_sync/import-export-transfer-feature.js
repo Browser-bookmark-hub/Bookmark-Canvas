@@ -2056,8 +2056,8 @@ async function exportCanvasPackage(options = {}) {
             : `书签画布-${ymd}（示例）/`;
 
         const intro = isEn
-            ? 'Please follow the steps below to ensure Obsidian can locate the exported .md files.'
-            : '请按以下流程选择位置，确保 Obsidian 能正确找到导出的 .md 文件。';
+            ? 'Please follow the steps below to ensure Obsidian can locate the exported .json files.'
+            : '请按以下流程选择位置，确保 Obsidian 能正确找到导出的 .json 文件。';
 
         const stepTitle = isEn
             ? `Where will you place <code>${exampleFolderName}</code> inside your Obsidian vault?`
@@ -2089,15 +2089,10 @@ async function exportCanvasPackage(options = {}) {
             ? `If you use it as a ${hl('standalone vault')}, ${hl('clear the input')} and click Confirm.`
             : `-若把它直接作为一个独立的仓库，请${hl('清空输入框')}，点击确认即可。`;
 
-        const formatLabel = isEn ? 'Content Format:' : '内容格式：';
-        const formatOptionVisual = isEn ? 'Visual Cards (HTML)' : '视觉卡片 (HTML)';
-        const formatOptionVisualDesc = isEn ? 'Best for viewing, looks like cards.' : '类似卡片网格，适合查看与存档。';
-        const formatOptionVisualNoIcon = isEn ? 'Visual Cards (No Icon)' : '视觉卡片（无图标）';
-        const formatOptionVisualNoIconDesc = isEn ? 'Same visual layout, but bookmarks use text-only rows without favicons.' : '保持视觉卡片布局，但书签行不显示 favicon 图标。';
         const formatOptionJson = isEn ? 'JSON Mode (for AI)' : 'JSON模式（供AI）';
         const formatOptionJsonDesc = isEn
-            ? 'Stores the bookmark tree as structured JSON inside the MD file, best for AI analysis and stable sync.'
-            : '在 MD 文件中用结构化 JSON 表示书签树，更适合 AI 分析、增删改移和稳定同步。';
+            ? 'Stores the bookmark tree as structured JSON, best for AI analysis and stable sync.'
+            : '用结构化 JSON 表示书签树，更适合 AI 分析、增删改移和稳定同步。';
 
         const inputLabel = isEn
             ? 'Enter path'
@@ -2121,31 +2116,9 @@ async function exportCanvasPackage(options = {}) {
 	                        </button>
 	                    </div>
 
-                        <div style="margin-top: 16px;">
-                            <div style="margin: 0 0 8px; font-weight: 600;">${formatLabel}</div>
-                            <div style="display: flex; gap: 12px; flex-direction: column;">
-                                <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
-                                    <input type="radio" name="canvasExportFormat" value="json" checked style="margin-top: 4px;">
-                                    <div>
-                                        <div style="font-weight: 600; font-size: 13px;">${formatOptionJson}</div>
-                                        <div style="font-size: 12px; color: #666;">${formatOptionJsonDesc}</div>
-                                    </div>
-                                </label>
-                                <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
-                                    <input type="radio" name="canvasExportFormat" value="visual" style="margin-top: 4px;">
-                                    <div>
-                                        <div style="font-weight: 600; font-size: 13px;">${formatOptionVisual}</div>
-                                        <div style="font-size: 12px; color: #666;">${formatOptionVisualDesc}</div>
-                                    </div>
-                                </label>
-                                <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
-                                    <input type="radio" name="canvasExportFormat" value="visual-no-icon" style="margin-top: 4px;">
-                                    <div>
-                                        <div style="font-weight: 600; font-size: 13px;">${formatOptionVisualNoIcon}</div>
-                                        <div style="font-size: 12px; color: #666;">${formatOptionVisualNoIconDesc}</div>
-                                    </div>
-                                </label>
-                            </div>
+                        <div style="margin-top: 16px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 10px;">
+                            <div style="font-weight: 600; font-size: 13px;">${formatOptionJson}</div>
+                            <div style="font-size: 12px; color: #666; margin-top: 4px;">${formatOptionJsonDesc}</div>
                         </div>
 
                     <hr style="border:0;border-top:1px solid #e5e7eb;margin: 16px 0 12px;">
@@ -2184,11 +2157,6 @@ async function exportCanvasPackage(options = {}) {
         const closeBtn = document.getElementById('closeCanvasExportVaultPrefixDialog');
         if (closeBtn) closeBtn.addEventListener('click', () => cleanup(null));
 
-        const getFormat = () => {
-            const el = document.querySelector('input[name="canvasExportFormat"]:checked');
-            return el ? el.value : 'json';
-        };
-
         const input = document.getElementById('canvasExportVaultPrefixInput');
         if (input) {
             input.value = String(defaultValue || '');
@@ -2198,7 +2166,7 @@ async function exportCanvasPackage(options = {}) {
                     e.preventDefault();
                     cleanup({
                         path: String(input.value || ''),
-                        format: getFormat()
+                        format: 'json'
                     });
                 } else if (e.key === 'Escape') {
                     e.preventDefault();
@@ -2212,7 +2180,7 @@ async function exportCanvasPackage(options = {}) {
         const okBtn = document.getElementById('canvasExportVaultPrefixOk');
         if (okBtn) okBtn.addEventListener('click', () => cleanup({
             path: input ? String(input.value || '') : String(defaultValue || ''),
-            format: getFormat()
+            format: 'json'
         }));
     });
 
@@ -2222,7 +2190,7 @@ async function exportCanvasPackage(options = {}) {
     // - 或把 bookmark-canvas-export/ 直接作为一个独立 vault 根目录（portable canvas）
 
     let vaultPrefixInput;
-    let exportFormat = 'json'; // 'json' | 'visual' | 'visual-no-icon'
+    let exportFormat = 'json';
 
     const result = await promptVaultPrefixViaDialog(defaultExportRoot);
     if (result === null) {
@@ -2251,30 +2219,19 @@ async function exportCanvasPackage(options = {}) {
     }
 
     const exportRoot = vaultPrefix ? vaultPrefix.split('/').slice(-1)[0] : defaultExportRoot;
-    const forceCollapsedForObsidian = true;
-    const obsidianBookmarkIconMode = exportFormat === 'visual-no-icon' ? 'text' : 'favicon';
 
-    // 1) Markdown files
+    // 1) JSON section files
     const permanentContent = await __ensurePermanentMainContentInBcs();
-    const bookmarkTree = permanentContent && permanentContent.tree ? [permanentContent.tree] : null;
-    if (!bookmarkTree) {
+    if (!(permanentContent && permanentContent.tree)) {
         alert(isEn ? 'Export failed: permanent JSON source unavailable.' : '导出失败：永久栏目 JSON 真相源不可用。');
         return;
     }
     const permanentSyncPayload = __buildPermanentMainSyncPayload(permanentContent);
     const permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat);
 
-    // Choose builder based on format
     files.push({
         name: `${exportRoot}/${permanentMdRel}`,
-        data: __toUint8(exportFormat === 'json'
-            ? `${__buildCanvasSectionJsonCodeBlock(permanentSyncPayload)}\n`
-            : __buildPermanentBookmarksMarkdown(bookmarkTree, null, {
-                permanentSlot: 1,
-                bookmarkIconMode: obsidianBookmarkIconMode,
-                forceCollapsed: forceCollapsedForObsidian,
-                exportFormat
-            }))
+        data: __toUint8(`${__buildCanvasSectionJsonCodeBlock(permanentSyncPayload)}\n`)
     });
 
     // Generate separate MD files for Permanent Section Copies (with their own descriptions)
@@ -2290,36 +2247,14 @@ async function exportCanvasPackage(options = {}) {
                 const idx = __normalizePositiveInt(copy.displayIndex);
                 if (!copyId) return;
 
-                // Get Description for this specific copy
-                const descKey = `${PERMANENT_COPY_TIP_STORAGE_PREFIX}${copyId}`;
-                let descObj = '';
-                try { descObj = localStorage.getItem(descKey) || ''; } catch (_) { }
-
-                // Determine filename based on sidebar naming.
-                const alpha = toAlphaLabel(idx + 1);
-
                 const copyMdRel = __buildPermanentSectionMarkdownRelativePath(idx + 1, isEn, exportFormat);
                 copyFileMap[copyId] = copyMdRel;
 
-                const slot = idx ? (idx + 1) : null;
                 const copyAnchorPayload = __buildPermanentCopyAnchorContentPayload(copyId, {
                     displayIndex: idx,
                     inheritFrom: __joinObsidianExportPath(exportRoot, permanentMdRel)
                 });
-                const fileContent = exportFormat === 'json'
-                    ? `${__buildCanvasSectionJsonCodeBlock(copyAnchorPayload)}\n`
-                    : __buildPermanentBookmarksMarkdownCopyEmbedMain(
-                        bookmarkTree,
-                        descObj,
-                        {
-                            permanentSlot: slot,
-                            copyId,
-                            bookmarkIconMode: obsidianBookmarkIconMode,
-                            forceCollapsed: forceCollapsedForObsidian,
-                            exportFormat
-                        },
-                        __joinObsidianExportPath(exportRoot, permanentMdRel)
-                    );
+                const fileContent = `${__buildCanvasSectionJsonCodeBlock(copyAnchorPayload)}\n`;
                 files.push({ name: `${exportRoot}/${copyMdRel}`, data: __toUint8(fileContent) });
             });
         }
@@ -2354,8 +2289,7 @@ async function exportCanvasPackage(options = {}) {
 
         tempSectionMdPaths.push({ id: section.id, rel });
 
-        // Choose builder based on format
-        files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(__buildTempSectionMarkdown(section, { bookmarkIconMode: obsidianBookmarkIconMode, forceCollapsed: forceCollapsedForObsidian, exportFormat })) });
+        files.push({ name: `${exportRoot}/${rel}`, data: __toUint8(__buildTempSectionJsonMarkdown(section)) });
     });
 
     const buildCanvasData = ({ vaultRelativePrefix }) => {
@@ -2392,7 +2326,7 @@ async function exportCanvasPackage(options = {}) {
     // 由用户输入的 vaultPrefix 决定 .canvas 内的 file 路径：
     // - vault 根目录：保持默认（bookmark-canvas-export）
     // - vault 子目录：填写 Exports/bookmark-canvas-export
-    // - 独立 vault：留空（file 路径将是 permanent-bookmarks.md / temp-sections/...）
+    // - 独立 vault：留空（file 路径将是永久/临时栏目的 .json 文件）
     const canvasForVault = buildCanvasData({ vaultRelativePrefix: vaultPrefix });
     const canvasFileName = `${exportRoot}.canvas`;
     files.push({ name: `${exportRoot}/${canvasFileName}`, data: __toUint8(__formatObsidianCanvasJson(canvasForVault)) });
@@ -2400,7 +2334,7 @@ async function exportCanvasPackage(options = {}) {
     // 3) Full state json (for full import)
     // 3.1) Supplementary layer (bookmark-canvas.full.json) - 补充层
     // [CHANGED] We no longer export 'style-data.json' for Obsidian Mode.
-    // Obsidian Mode relies purely on .canvas and .md files to ensure edits in Obsidian are preserved.
+    // Obsidian Mode relies on .canvas and JSON section files to ensure edits in Obsidian are preserved.
     // We only keep this object construction if we want to include it in Full Backup (merged) or for legacy reasons.
     // For now, only generate it if specifically needed, but per request, we stop exporting it for standard Obsidian export.
     /* 
@@ -2409,47 +2343,22 @@ async function exportCanvasPackage(options = {}) {
     */
     // 4) Import guide for Obsidian
 
-    const readmeName = isEn ? 'README_Import_Rules.md' : '说明_导入规则.md';
+    const guideName = 'AGENTS.md';
 
-    const normalizedExportFormat = __normalizeCanvasObsidianExportFormat(exportFormat, 'json');
-    const exportModeLabelEn = normalizedExportFormat === 'json'
-        ? 'JSON Mode (for AI)'
-        : (normalizedExportFormat === 'visual-no-icon' ? 'Visual Export (No Icon)' : 'Visual Export');
-    const exportModeLabelZh = normalizedExportFormat === 'json'
-        ? 'JSON模式（供AI）'
-        : (normalizedExportFormat === 'visual-no-icon' ? '视觉模式导出（无图标）' : '视觉模式导出');
+    const exportModeLabelEn = 'JSON Mode (for AI)';
+    const exportModeLabelZh = 'JSON模式（供AI）';
     let compatText = '';
     let aiGuideText = '';
 
-    const modeTreeRulesEn = normalizedExportFormat === 'json'
-        ? [
-            '- JSON Mode (for AI) stores the bookmark tree as a single plain JSON object body (no fenced code block).',
-            '- Permanent/temporary section imports prefer this JSON block and no longer depend on visual HTML wrappers.'
-        ]
-        : (normalizedExportFormat === 'visual-no-icon'
-        ? [
-            '- Visual mode (No Icon) keeps HTML-like tree blocks: `<details> / <summary> / <a href>`.',
-            '- Bookmark rows stay text-only and do not render favicon spans.'
-        ]
-        : [
-            '- Visual mode keeps HTML-like tree blocks: `<details> / <summary> / <a href>`.',
-            '- Keep outer wrappers of visual cards; missing wrappers may drop nodes during import.'
-        ]);
+    const modeTreeRulesEn = [
+        '- JSON Mode (for AI) stores the bookmark tree as a single plain JSON object body (no fenced code block).',
+        '- Permanent/temporary section imports read this JSON body directly.'
+    ];
 
-    const modeTreeRulesZh = normalizedExportFormat === 'json'
-        ? [
-            '- JSON模式（供AI）使用单一 JSON 对象正文承载书签树（不使用代码围栏）。',
-            '- 永久栏目与临时栏目导入时优先读取这个 JSON 正文，不再依赖视觉 HTML 包裹结构。'
-        ]
-        : (normalizedExportFormat === 'visual-no-icon'
-        ? [
-            '- 视觉模式（无图标）保留 HTML 树结构：`<details> / <summary> / <a href>`。',
-            '- 书签行只保留纯文本链接，不渲染 favicon 图标。'
-        ]
-        : [
-            '- 视觉模式保留 HTML 树结构：`<details> / <summary> / <a href>`。',
-            '- 可视化卡片请保留外层容器；删掉外层结构可能导致导入时节点丢失。'
-        ]);
+    const modeTreeRulesZh = [
+        '- JSON模式（供AI）使用单一 JSON 对象正文承载书签树（不使用代码围栏）。',
+        '- 永久栏目与临时栏目导入时读取这个 JSON 正文，不再依赖视觉 HTML 包裹结构。'
+    ];
 
     compatText = isEn
         ? [
@@ -2471,29 +2380,28 @@ async function exportCanvasPackage(options = {}) {
             '',
             '### A1. Package File Structure',
             `- ${exportRoot}/${canvasFileName}: canvas entry (nodes/edges + file mapping).`,
-            `- ${exportRoot}/Permanent/#A <Permanent Title>.md/.json: main permanent section file.`,
-            '- Optional copy files: Permanent/#B <Permanent Title>.md/.json / #C <Permanent Title>.md/.json ...',
-            '- Temporary/General Chain/*.(md|json): general-chain temporary section files.',
-            '- Temporary/Special temporary/*.(md|json): special temporary section files.',
+            `- ${exportRoot}/Permanent/#A <Permanent Title>.json: main permanent section file.`,
+            '- Optional copy files: Permanent/#B <Permanent Title>.json / #C <Permanent Title>.json ...',
+            '- Temporary/General Chain/*.json: general-chain temporary section files.',
+            '- Temporary/Special temporary/*.json: special temporary section files.',
             '- Blank sections are stored directly in `.canvas` as `type: "text"` nodes.',
             '',
             '### A2. View File Structure (.canvas)',
             '- Root keys must remain nodes[] and edges[].',
-            '- File nodes point to markdown files through the file field (vault-relative path).',
+            '- File nodes point to JSON section files through the file field (vault-relative path).',
             '- Group nodes are import containers; membership is inferred by geometry on import.',
             '- Edge fromNode/toNode must reference existing node IDs.',
             '- Native blank cards remain `type: "text"` nodes inside `.canvas`.',
             '',
-            '### A3. Markdown Structure (all section files)',
-            '- Visual modes use the first non-empty line as section header text (`sequence + title` recommended); JSON mode stores the tree as a single plain JSON object body (no fenced block).',
+            '### A3. JSON Structure (all section files)',
+            '- JSON mode stores the tree as a single plain JSON object body (no fenced block).',
             '- Optional description uses compact hidden comment marker: `<!--bc:1:...-->` (base64 payload).',
-            '- Visual-mode permanent main markdown can include compact hidden root metadata marker under the header area for compatibility: `<!--bc:3:...-->`.',
             '- In JSON mode, permanent tree content is stored as a Chrome Bookmarks API-compatible root object.',
             '- Fold metadata uses compact hidden marker `<!--bc:2:...-->` when needed.',
-            '- Visual modes parse permanent/temporary bookmark tree content from lines below the header/description/meta block; JSON mode parses the plain JSON body directly.',
+            '- JSON mode parses permanent/temporary bookmark tree content from the plain JSON body directly.',
             '- Permanent slot recognition priority: header `#A/#B` > filename `(#B)` > file order fallback.',
             '- Special temporary files are placed under `Special temporary/`.',
-            '- Blank sections are now stored directly as `.canvas` text nodes (no standalone blank `.md` files).',
+            '- Blank sections are now stored directly as `.canvas` text nodes (no standalone blank section files).',
             '',
             '### A4. Mode-specific Content Grammar',
             ...modeTreeRulesEn,
@@ -2516,37 +2424,36 @@ async function exportCanvasPackage(options = {}) {
             '1. 在书签画布执行导出，并使用当前选择的内容格式。',
             '2. 将 ZIP 解压到 Obsidian 仓库。',
             `3. 打开 ${exportRoot}/${canvasFileName}。`,
-            '4. 按需编辑 永久栏目/、临时栏目/ 下的 .md 文件；空白栏目请直接编辑 `.canvas` 的 text 节点。',
+            '4. 按需编辑 永久栏目/、临时栏目/ 下的 .json 文件；空白栏目请直接编辑 `.canvas` 的 text 节点。',
             '5. 若重命名或移动 永久/临时 栏目文件，必须同步修改 .canvas 的 file 路径。',
             '6. 回到扩展中，以 ZIP 或文件夹方式导入。',
             '',
             '### A1. 文件基本结构（目录层）',
             `- ${exportRoot}/${canvasFileName}：画布入口文件（nodes/edges + 文件映射）。`,
-            `- ${exportRoot}/永久栏目/#A <永久栏目标题>.md：主永久栏目文件。`,
-            '- 可能存在永久副本文件：永久栏目/#B <永久栏目标题>.md / #C <永久栏目标题>.md ...',
-            '- 临时栏目/常规链式/*.md：常规链式临时栏目文件。',
-            '- 临时栏目/特殊临时栏目/*.md：特殊临时栏目文件。',
-            '- 空白栏目统一存放在 `.canvas` 的 `type: "text"` 节点中（不再导出空白栏目 `.md` 镜像）。',
+            `- ${exportRoot}/永久栏目/#A <永久栏目标题>.json：主永久栏目文件。`,
+            '- 可能存在永久副本文件：永久栏目/#B <永久栏目标题>.json / #C <永久栏目标题>.json ...',
+            '- 临时栏目/常规链式/*.json：常规链式临时栏目文件。',
+            '- 临时栏目/特殊临时栏目/*.json：特殊临时栏目文件。',
+            '- 空白栏目统一存放在 `.canvas` 的 `type: "text"` 节点中（不再导出空白栏目镜像文件）。',
             '',
             '### A2. 视图文件结构（.canvas）',
             '- 顶层结构必须保持 nodes[] 与 edges[]。',
-            '- file 节点通过 file 字段指向 markdown 文件（vault 相对路径）。',
+            '- file 节点通过 file 字段指向 JSON 栏目文件（vault 相对路径）。',
             '- group 节点作为导入分组容器，导入时按几何包含关系识别归属。',
             '- 边的 fromNode/toNode 必须引用存在的节点 ID。',
             '- 空白栏目以 `.canvas` 中的 `type: "text"` 节点为唯一真相源。',
             '',
-            '### A3. Markdown 文件结构（所有栏目）',
-            '- 视觉模式下，首个非空行作为栏目头文本（建议“序号 + 标题”）；JSON模式正文直接是单一 JSON 对象。',
+            '### A3. JSON 文件结构（所有栏目）',
+            '- JSON模式正文直接是单一 JSON 对象。',
             '- 说明区可选，采用紧凑隐藏注释：`<!--bc:1:...-->`（base64 载荷）。',
-            '- 视觉模式下，永久主 Markdown 可能在标题区下方写入兼容用途的根目录元数据隐藏注释：`<!--bc:3:...-->`。',
             '- JSON模式下，永久树正文直接保存为 Chrome Bookmarks API 兼容根节点对象。',
             '- 折叠元数据如需写出，使用紧凑隐藏注释 `<!--bc:2:...-->`。',
-            '- 视觉模式下，永久/临时栏目的书签树内容从栏目头/说明区/根元数据块之外的正文开始解析；JSON模式直接解析 JSON 正文。',
+            '- JSON模式直接解析永久/临时栏目的 JSON 正文。',
             '- 永久栏目槽位识别优先级：栏目头 `#A/#B` > 文件名 `(#B)` > 文件顺序兜底。',
             '- 特殊临时栏目文件统一放在 `临时栏目/特殊临时栏目/`。',
             '- 空白栏目正文直接存放在 `.canvas` 的 text 节点中，不再依赖空白栏目镜像文件。',
             '',
-            '### A4. 模式内容语法（视觉 / 视觉无图标）',
+            '### A4. 模式内容语法（JSON）',
             ...modeTreeRulesZh,
             '',
             '### A5. 导入识别优先级',
@@ -2562,20 +2469,19 @@ async function exportCanvasPackage(options = {}) {
             'Route principle: edit the minimum file set only ("change where used").',
             '',
             '### S1. File Routing (what to touch)',
-            '- Permanent content: `Permanent/#A <Permanent Title>.md/.json` and optional copy files `Permanent/#B <Permanent Title>.md/.json` ...',
-            '- Temporary content: `Temporary/General Chain/*.(md|json)` and `Temporary/Special temporary/*.(md|json)` + matching file nodes in `.canvas`.',
-            '- Blank content: edit `.canvas` `type: "text"` nodes directly (blank `.md` mirrors are removed).',
+            '- Permanent content: `Permanent/#A <Permanent Title>.json` and optional copy files `Permanent/#B <Permanent Title>.json` ...',
+            '- Temporary content: `Temporary/General Chain/*.json` and `Temporary/Special temporary/*.json` + matching file nodes in `.canvas`.',
+            '- Blank content: edit `.canvas` `type: "text"` nodes directly (blank mirror files are removed).',
             '- Layout/links only: edit `.canvas` node geometry and edge fields.',
             '',
             '### S2. Header Line Contract (no required front matter)',
-            '- Visual modes: the first non-empty line is the section header text.',
             '- JSON mode: the bookmark tree lives in a plain JSON object body, so no extra header line is required.',
             '- Temporary section label can still be derived from explicit JSON fields, header prefix, or filename prefix when restoring sequence mapping.',
             '',
             '### S3. Import Recognition & Merge Baseline',
             '- Type recognition = `.canvas` file mapping + folder path names.',
             '- Special temporary sections are recognized by folder + JSON/header/label semantics.',
-            '- Visual modes parse bookmark tree from lines below the header/description block; JSON mode parses the plain JSON body directly.',
+            '- JSON mode parses the bookmark tree from the plain JSON body directly.',
             '- JSON-mode permanent files keep Chrome Bookmarks API-compatible tree shape in body.',
             '- In normal import flow, permanent files are restored as snapshot sections, not direct browser tree overwrite.',
             '',
@@ -2600,7 +2506,7 @@ async function exportCanvasPackage(options = {}) {
             '- Node order controls z-order (earlier lower, later higher).',
             '',
             '### S7. Minimal Pre-import Checklist',
-            '- Every renamed/moved Permanent/Temporary `.md` path is synchronized into `.canvas`.',
+            '- Every renamed/moved Permanent/Temporary `.json` path is synchronized into `.canvas`.',
             '- Header line and optional description comment block are not corrupted.',
             '- Links and node IDs remain referentially valid.',
             '',
@@ -2612,20 +2518,19 @@ async function exportCanvasPackage(options = {}) {
             '路由原则：只改最小必要文件集合（用到哪里改哪里），避免全量重写。',
             '',
             '### S1. 文件路由（按需求定位）',
-            '- 永久栏目内容：修改 `永久栏目/#A <永久栏目标题>.md/.json` 与可选副本 `永久栏目/#B <永久栏目标题>.md/.json` ...。',
-            '- 临时栏目内容：修改 `临时栏目/常规链式/*.(md|json)` 与 `临时栏目/特殊临时栏目/*.(md|json)`，并同步 `.canvas` 对应 file 节点。',
-            '- 空白栏目：直接修改 `.canvas` 的 `type: "text"` 节点（不再维护空白栏目独立 `.md` 文件）。',
+            '- 永久栏目内容：修改 `永久栏目/#A <永久栏目标题>.json` 与可选副本 `永久栏目/#B <永久栏目标题>.json` ...。',
+            '- 临时栏目内容：修改 `临时栏目/常规链式/*.json` 与 `临时栏目/特殊临时栏目/*.json`，并同步 `.canvas` 对应 file 节点。',
+            '- 空白栏目：直接修改 `.canvas` 的 `type: "text"` 节点（不再维护空白栏目独立文件）。',
             '- 仅布局/连线：只改 `.canvas` 的节点几何与边字段。',
             '',
             '### S2. 栏目头文本合同（不要求 Front Matter）',
-            '- 视觉模式：首个非空行就是栏目头文本。',
             '- JSON模式（供AI）：书签树正文直接放在单一 JSON 对象正文里（不使用代码围栏），不要求额外栏目头。',
             '- 临时栏目序号仍可由显式 JSON 字段、栏目头前缀或文件名前缀恢复。',
             '',
             '### S3. 导入识别与合并基线',
             '- 类型识别 = `.canvas` 文件映射 + 目录路径命名（双条件）。',
             '- 特殊临时栏目按目录 + JSON/栏目头/标签语义识别。',
-            '- 视觉模式按“栏目头 +（可选说明注释块）+ 树内容”解析；JSON模式直接解析 JSON 正文。',
+            '- JSON模式直接解析 JSON 正文。',
             '- JSON 模式下的永久文件正文保持 Chrome Bookmarks API 兼容树结构。',
             '- 常规导入流下，永久栏目按快照栏目恢复，不直接覆盖浏览器真实书签树。',
             '',
@@ -2650,7 +2555,7 @@ async function exportCanvasPackage(options = {}) {
             '- 节点数组顺序决定叠层顺序（前下后上）。',
             '',
             '### S7. 导入前最小自检清单',
-            '- 所有重命名/移动过的 永久/临时 `.md` 已同步到 `.canvas` 的 file 路径。',
+            '- 所有重命名/移动过的 永久/临时 `.json` 已同步到 `.canvas` 的 file 路径。',
             '- 栏目头与说明注释块结构未损坏。',
             '- 链接、节点 ID、连线引用关系全部有效。',
             '',
@@ -2676,19 +2581,11 @@ async function exportCanvasPackage(options = {}) {
             : `3）打开：\`${exportRoot}/${canvasFileName}\`。`,
         '',
         isEn
-            ? 'If you only copy the .canvas file without the .md files, Canvas will show “.md could not be found”.'
-            : '注意：如果只拷贝 .canvas 文件而没有同时拷贝对应的 .md 文件，Canvas 会显示“.md could not be found”。',
+            ? 'If you only copy the .canvas file without the .json files, Canvas will show that linked files could not be found.'
+            : '注意：如果只拷贝 .canvas 文件而没有同时拷贝对应的 .json 文件，Canvas 会显示关联文件找不到。',
         ''
     ].join('\n');
-    files.push({ name: `${exportRoot}/${readmeName}`, data: __toUint8(guide) });
-    files.push({
-        name: `${exportRoot}/说明导入规则.md`,
-        data: __toUint8(__buildCanvasImportRulesDocument({
-            exportRoot,
-            canvasFileName,
-            exportFormat
-        }))
-    });
+    files.push({ name: `${exportRoot}/${guideName}`, data: __toUint8(guide) });
 
     const zipBlob = __zipStore(files);
     const zipUrl = URL.createObjectURL(zipBlob);
