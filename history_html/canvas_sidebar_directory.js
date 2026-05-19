@@ -2082,7 +2082,7 @@
       return locatePermanentCopy(module, copyId);
     }
 
-    if (id.startsWith('temp-section-')) {
+    if (id.startsWith('temp-section-') || id.startsWith('tempSecId_')) {
       if (module && typeof module.locateSection === 'function') {
         try {
           module.locateSection(id);

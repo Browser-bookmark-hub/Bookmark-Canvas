@@ -3650,6 +3650,12 @@ async function resolveBookmarkNode(data, options = {}) {
 }
 
 function allocateTempItemId(sectionId) {
+    if (typeof window !== 'undefined'
+        && window.CanvasProtocolBridge
+        && typeof window.CanvasProtocolBridge.generateTempId === 'function') {
+        ++CanvasState.tempItemCounter;
+        return window.CanvasProtocolBridge.generateTempId();
+    }
     return `temp-${sectionId}-${++CanvasState.tempItemCounter}`;
 }
 
@@ -3681,7 +3687,36 @@ function convertBookmarkNodeToTempItem(node, sectionId, options = {}) {
     return item;
 }
 
+function allocateTempSectionId() {
+    if (typeof window !== 'undefined'
+        && window.CanvasProtocolBridge
+        && typeof window.CanvasProtocolBridge.generateTempSectionId === 'function') {
+        ++CanvasState.tempSectionCounter;
+        return window.CanvasProtocolBridge.generateTempSectionId();
+    }
+    return `temp-section-${++CanvasState.tempSectionCounter}`;
+}
+
 function refreshTempSectionCounters() {
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    if (bridge && typeof bridge.rememberExistingBcsId === 'function') {
+        try {
+            CanvasState.tempSections.forEach((section) => {
+                if (section && typeof section.id === 'string') bridge.rememberExistingBcsId(section.id);
+                const walk = (items) => {
+                    if (!Array.isArray(items)) return;
+                    items.forEach((it) => {
+                        if (it && typeof it.id === 'string') bridge.rememberExistingBcsId(it.id);
+                        if (it && it.children) walk(it.children);
+                    });
+                };
+                if (section && section.items) walk(section.items);
+            });
+        } catch (_) { }
+    }
+
+    // Legacy counter-recovery: only meaningful for legacy `temp-section-<N>` / `temp-temp-section-<N>-<M>`
+    // residue from old storage. Under hash IDs these regexes simply produce no matches.
     let maxSection = CanvasState.tempSectionCounter || 0;
     let maxItem = CanvasState.tempItemCounter || 0;
 
@@ -3779,12 +3814,16 @@ function findTempItemEntry(sectionId, itemId) {
 
 function serializeTempItemForClipboard(item) {
     if (!item) return null;
-    return {
+    const out = {
         title: item.title,
         url: item.url || '',
         type: item.type,
         children: (item.children || []).map(child => serializeTempItemForClipboard(child))
     };
+    if (Array.isArray(item.tags) && item.tags.length) {
+        out.tags = item.tags.map((t) => (t && typeof t === 'object') ? { color: t.color, text: t.text } : null).filter(Boolean);
+    }
+    return out;
 }
 
 function createTempItemFromPayload(sectionId, payload, options = {}) {
@@ -3800,6 +3839,14 @@ function createTempItemFromPayload(sectionId, payload, options = {}) {
         children: [],
         createdAt: Date.now()
     };
+    // Phase 3 scaffold: pass-through `tags` array on temp-section items. The UI / palette
+    // is not implemented yet, but the field must round-trip through clone / save / export.
+    if (Array.isArray(payload.tags) && payload.tags.length) {
+        item.tags = payload.tags
+            .map((t) => (t && typeof t === 'object') ? { color: String(t.color || '').trim(), text: String(t.text || '').trim() } : null)
+            .filter((t) => t && t.color);
+        if (!item.tags.length) delete item.tags;
+    }
 
     if (payload.children && payload.children.length) {
         const childOptions = {
@@ -4621,7 +4668,7 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         : '';
 
     // 创建临时栏目
-    const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
+    const sectionId = allocateTempSectionId();
     const section = {
         id: sectionId,
         title: sourceInfo,
@@ -4636,7 +4683,7 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         createdAt: Date.now(),
         source: 'browser-drop',  // 标记来源
         items: bookmarks.map((bm, index) => ({
-            id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
+            id: allocateTempItemId(sectionId),
             sectionId: sectionId,
             title: bm.title,
             url: bm.url,
@@ -15620,7 +15667,7 @@ async function createTempNode(data, x, y) {
         ? getCanvasAppearanceSettings().names.temp.mode
         : 'timestamp';
     const splitTitle = __resolveTempSplitTitle(data, splitPayload);
-    const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
+    const sectionId = allocateTempSectionId();
     const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
     const isDragBased = !!(data && (data.source === 'permanent' || data.source === 'temporary' || data.multi));
     let resolvedTitle = (!isDragBased && explicitTitle) ? explicitTitle : '';
@@ -15751,7 +15798,7 @@ async function createTempNode(data, x, y) {
 function createEmptyTempSection(x, y, options = {}) {
     // Ensure new sequenceNumber continues from existing sections
     try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
-    const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
+    const sectionId = allocateTempSectionId();
     const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
     const title = (options && typeof options.title === 'string' && options.title.trim())
         ? options.title.trim()

@@ -54,6 +54,105 @@ const PERMANENT_SECTION_COPIES_STORAGE_KEY = 'bcs:perm:copies';
 const PERMANENT_MAIN_TIP_STORAGE_KEY = 'bcs:perm:tip-main';
 const PERMANENT_COPY_TIP_STORAGE_PREFIX = 'bcs:perm:tip-copy-';
 const PERMANENT_ROOT_META_STORAGE_KEY = 'bcs:perm:root-meta';
+const BCS_BACKUP_SLOT_KEY = 'bcs:backup:slot';
+const BCS_IMPORT_THRESHOLD_KEY = 'canvas-import-threshold-v1';
+const BCS_IMPORT_THRESHOLD_DEFAULT = 300;
+const BCS_LEGACY_TEMP_MIGRATION_DONE_KEY = 'bcs:legacy-temp-migrated-v1';
+
+// =============================================================================
+// ID Generators (sync-stable identifiers)
+// =============================================================================
+// Three identifier families share one algorithm: `<prefix>_<YYYYMMDD>_hash_<token7>`.
+// - syncId_*   binds a Chrome bookmark to a cross-device stable identifier in identityMap.
+// - tempId_*   identifies a temp-section item (book / folder) regardless of section.
+// - tempSecId_* identifies a temp section itself; the "A-1-1" label is computed separately.
+// Tokens use a 5-byte CSPRNG draw rendered to base36, truncated to 7 characters. Per-process
+// dedup sets guard against the (astronomically rare) collision during a single page session.
+
+const __BCS_ID_TOKEN_LENGTH = 7;
+const __bcsIssuedSyncIds = new Set();
+const __bcsIssuedTempIds = new Set();
+const __bcsIssuedTempSectionIds = new Set();
+
+function __formatTodayYYYYMMDD() {
+    const d = new Date();
+    const yyyy = String(d.getFullYear()).padStart(4, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}${mm}${dd}`;
+}
+
+function __makeBcsIdToken(length = __BCS_ID_TOKEN_LENGTH) {
+    const cryptoApi = (typeof crypto !== 'undefined' && crypto.getRandomValues) ? crypto : null;
+    let token = '';
+    while (token.length < length) {
+        let chunk = '';
+        if (cryptoApi) {
+            const bytes = new Uint8Array(8);
+            cryptoApi.getRandomValues(bytes);
+            for (let i = 0; i < bytes.length; i++) {
+                chunk += bytes[i].toString(36);
+            }
+        } else {
+            chunk += Math.random().toString(36).slice(2);
+            chunk += Date.now().toString(36);
+        }
+        token += chunk.replace(/[^a-z0-9]/g, '');
+    }
+    return token.slice(0, length);
+}
+
+function __mintBcsId(prefix, issuedSet) {
+    for (let attempt = 0; attempt < 8; attempt++) {
+        const id = `${prefix}_${__formatTodayYYYYMMDD()}_hash_${__makeBcsIdToken()}`;
+        if (!issuedSet.has(id)) {
+            issuedSet.add(id);
+            return id;
+        }
+    }
+    const fallback = `${prefix}_${__formatTodayYYYYMMDD()}_hash_${__makeBcsIdToken(10)}`;
+    issuedSet.add(fallback);
+    return fallback;
+}
+
+function __generateSyncId() {
+    return __mintBcsId('syncId', __bcsIssuedSyncIds);
+}
+
+function __generateTempId() {
+    return __mintBcsId('tempId', __bcsIssuedTempIds);
+}
+
+function __generateTempSectionId() {
+    return __mintBcsId('tempSecId', __bcsIssuedTempSectionIds);
+}
+
+function __isHashedSyncId(value) {
+    return typeof value === 'string' && /^syncId_\d{8}_hash_[a-z0-9]{5,}$/.test(value);
+}
+
+function __isHashedTempItemId(value) {
+    return typeof value === 'string' && /^tempId_\d{8}_hash_[a-z0-9]{5,}$/.test(value);
+}
+
+function __isHashedTempSectionId(value) {
+    return typeof value === 'string' && /^tempSecId_\d{8}_hash_[a-z0-9]{5,}$/.test(value);
+}
+
+function __isLegacyTempSectionId(value) {
+    return typeof value === 'string' && /^temp-section-\d+$/.test(value);
+}
+
+function __isLegacyTempItemId(value) {
+    return typeof value === 'string' && /^temp-temp-section-\d+-\d+$/.test(value);
+}
+
+function __rememberExistingBcsId(value) {
+    if (typeof value !== 'string') return;
+    if (__isHashedSyncId(value)) __bcsIssuedSyncIds.add(value);
+    else if (__isHashedTempItemId(value)) __bcsIssuedTempIds.add(value);
+    else if (__isHashedTempSectionId(value)) __bcsIssuedTempSectionIds.add(value);
+}
 
 function __normalizeCanvasTempStatePayloadForImport(stateInput, options = {}) {
     const parsedState = typeof stateInput === 'string'
@@ -1164,13 +1263,15 @@ function __buildPermanentMainSyncPayload(contentInput) {
     if (!content || content.fileRole === 'copy-anchor' || content.anchorOnly === true) return null;
     const tree = content.tree && typeof content.tree === 'object' ? content.tree : null;
     if (!tree) return null;
+    const identityMap = Array.isArray(content.identityMap) ? content.identityMap : [];
     const payload = {
         format: content.format || __CANVAS_SECTION_JSON_FORMAT,
-        schemaVersion: Number(content.schemaVersion) || 2,
+        schemaVersion: Math.max(3, Number(content.schemaVersion) || 3),
         sectionType: 'permanent',
         slot: String(content.slot || 'A'),
         title: String(content.title || __getPermanentSectionDisplayTitle(__getLang().isEn)),
         descriptionMd: String(content.descriptionMd == null ? '' : content.descriptionMd),
+        identityMap,
         fileRole: 'primary',
         fileNote: String(content.fileNote || ''),
         tree: __stripPermanentLocalIdsFromTree(tree)
@@ -1181,6 +1282,209 @@ function __buildPermanentMainSyncPayload(contentInput) {
             : '永久栏目主文件：书签树的规范真相源。';
     }
     return payload;
+}
+
+// =============================================================================
+// identityMap: chromeId <-> syncId binding for permanent BCS.
+// =============================================================================
+// Entry shape: { id: <chromeBookmarkId>, syncId: <stable-cross-device-id>, ...extras }
+// `id` and `syncId` form the "minimum cell" — both must be present, and deleting one
+// implicitly deletes the cell. Extras (`tags`, etc.) are introduced by section 3 of the
+// design. The identityMap field lives in `bcs:perm:main` between `descriptionMd` and
+// `tree` (the doc requires that exact ordering). Internally we expose a non-enumerable
+// lookup index `content.__identityMapIndex__` for O(1) chromeId/syncId lookups.
+
+function __normalizeIdentityMapEntry(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const id = String(entry.id || '').trim();
+    const syncId = String(entry.syncId || '').trim();
+    if (!id || !syncId) return null;
+    const out = { id, syncId };
+    if (Array.isArray(entry.tags) && entry.tags.length) {
+        out.tags = entry.tags
+            .map((t) => (t && typeof t === 'object') ? { color: String(t.color || '').trim(), text: String(t.text || '').trim() } : null)
+            .filter((t) => t && t.color);
+        if (!out.tags.length) delete out.tags;
+    }
+    return out;
+}
+
+function __normalizeIdentityMapArray(rawList) {
+    if (!Array.isArray(rawList)) return [];
+    const seenChromeIds = new Set();
+    const seenSyncIds = new Set();
+    const result = [];
+    for (const entry of rawList) {
+        const normalized = __normalizeIdentityMapEntry(entry);
+        if (!normalized) continue;
+        if (seenChromeIds.has(normalized.id) || seenSyncIds.has(normalized.syncId)) continue;
+        seenChromeIds.add(normalized.id);
+        seenSyncIds.add(normalized.syncId);
+        __rememberExistingBcsId(normalized.syncId);
+        result.push(normalized);
+    }
+    return result;
+}
+
+function __collectChromeIdsFromTree(treeRoot) {
+    const ids = new Set();
+    if (!treeRoot || typeof treeRoot !== 'object') return ids;
+    const stack = [treeRoot];
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node || typeof node !== 'object') continue;
+        const id = String(node.id || '').trim();
+        if (id) ids.add(id);
+        const children = Array.isArray(node.children) ? node.children : [];
+        for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
+    }
+    return ids;
+}
+
+function __bootstrapIdentityMapFromTree(treeRoot) {
+    const chromeIds = __collectChromeIdsFromTree(treeRoot);
+    const out = [];
+    chromeIds.forEach((chromeId) => {
+        out.push({ id: chromeId, syncId: __generateSyncId() });
+    });
+    return out;
+}
+
+function __getIdentityMapIndex(content) {
+    if (!content || typeof content !== 'object') return { byChromeId: new Map(), bySyncId: new Map() };
+    if (content.__identityMapIndex__) return content.__identityMapIndex__;
+    const byChromeId = new Map();
+    const bySyncId = new Map();
+    const list = Array.isArray(content.identityMap) ? content.identityMap : [];
+    for (const entry of list) {
+        if (!entry || typeof entry !== 'object') continue;
+        const id = String(entry.id || '').trim();
+        const syncId = String(entry.syncId || '').trim();
+        if (!id || !syncId) continue;
+        byChromeId.set(id, entry);
+        bySyncId.set(syncId, entry);
+    }
+    try {
+        Object.defineProperty(content, '__identityMapIndex__', {
+            value: { byChromeId, bySyncId },
+            enumerable: false,
+            configurable: true,
+            writable: true
+        });
+    } catch (_) { content.__identityMapIndex__ = { byChromeId, bySyncId }; }
+    return content.__identityMapIndex__;
+}
+
+function __invalidateIdentityMapIndex(content) {
+    if (content && typeof content === 'object' && content.__identityMapIndex__) {
+        try { delete content.__identityMapIndex__; } catch (_) { content.__identityMapIndex__ = null; }
+    }
+}
+
+function __verifyAndHealIdentityMap(content) {
+    if (!content || typeof content !== 'object' || !content.tree) return { added: 0, removed: 0, regenerated: 0 };
+    const list = Array.isArray(content.identityMap) ? __normalizeIdentityMapArray(content.identityMap) : [];
+    const chromeIds = __collectChromeIdsFromTree(content.tree);
+    const byChromeId = new Map();
+    const bySyncId = new Map();
+    let regenerated = 0;
+    for (const entry of list) {
+        if (!chromeIds.has(entry.id)) continue;
+        if (bySyncId.has(entry.syncId)) {
+            const fresh = __generateSyncId();
+            const replacement = { ...entry, syncId: fresh };
+            byChromeId.set(replacement.id, replacement);
+            bySyncId.set(replacement.syncId, replacement);
+            regenerated += 1;
+            continue;
+        }
+        byChromeId.set(entry.id, entry);
+        bySyncId.set(entry.syncId, entry);
+    }
+    let added = 0;
+    chromeIds.forEach((chromeId) => {
+        if (byChromeId.has(chromeId)) return;
+        const entry = { id: chromeId, syncId: __generateSyncId() };
+        byChromeId.set(chromeId, entry);
+        bySyncId.set(entry.syncId, entry);
+        added += 1;
+    });
+    const removed = Math.max(0, list.length - (byChromeId.size - added));
+    content.identityMap = Array.from(byChromeId.values());
+    __invalidateIdentityMapIndex(content);
+    if (added || removed || regenerated) {
+        try { console.warn(`[BCS] identityMap self-heal: +${added} -${removed} ~${regenerated}`); } catch (_) {}
+    }
+    return { added, removed, regenerated };
+}
+
+function __rebuildIdentityMapPreservingExisting(prevContent, nextTreeRoot) {
+    const prevList = (prevContent && Array.isArray(prevContent.identityMap)) ? prevContent.identityMap : [];
+    const prevByChromeId = new Map();
+    for (const entry of prevList) {
+        if (!entry || typeof entry !== 'object') continue;
+        const id = String(entry.id || '').trim();
+        const syncId = String(entry.syncId || '').trim();
+        if (id && syncId) prevByChromeId.set(id, entry);
+    }
+    const chromeIds = __collectChromeIdsFromTree(nextTreeRoot);
+    const out = [];
+    chromeIds.forEach((chromeId) => {
+        const prior = prevByChromeId.get(chromeId);
+        if (prior) {
+            out.push({ ...prior });
+        } else {
+            out.push({ id: chromeId, syncId: __generateSyncId() });
+        }
+    });
+    return out;
+}
+
+function __applyIdentityMapDeltaFromBookmarkEvents(content, events) {
+    if (!content || typeof content !== 'object' || !Array.isArray(events) || !events.length) return content;
+    if (!Array.isArray(content.identityMap)) content.identityMap = [];
+    const list = content.identityMap;
+    const idx = __getIdentityMapIndex(content);
+
+    for (const ev of events) {
+        if (!ev || typeof ev !== 'object') continue;
+        const type = ev.type || ev.event || '';
+        if (type === 'created') {
+            const newId = String(ev.id || (ev.bookmark && ev.bookmark.id) || '').trim();
+            if (!newId || idx.byChromeId.has(newId)) continue;
+            const entry = { id: newId, syncId: __generateSyncId() };
+            list.push(entry);
+            idx.byChromeId.set(entry.id, entry);
+            idx.bySyncId.set(entry.syncId, entry);
+        } else if (type === 'removed') {
+            const targetId = String(ev.id || '').trim();
+            if (!targetId) continue;
+            const descendants = new Set([targetId]);
+            const removeInfo = ev.removeInfo || ev.info;
+            const removedNode = removeInfo && removeInfo.node;
+            if (removedNode && Array.isArray(removedNode.children)) {
+                const stack = [...removedNode.children];
+                while (stack.length) {
+                    const child = stack.pop();
+                    if (!child || typeof child !== 'object') continue;
+                    if (child.id) descendants.add(String(child.id));
+                    if (Array.isArray(child.children)) stack.push(...child.children);
+                }
+            }
+            for (let i = list.length - 1; i >= 0; i--) {
+                if (descendants.has(list[i].id)) {
+                    const removed = list.splice(i, 1)[0];
+                    if (removed) {
+                        idx.byChromeId.delete(removed.id);
+                        idx.bySyncId.delete(removed.syncId);
+                    }
+                }
+            }
+        }
+        // 'moved' and 'changed' do not affect identityMap: syncId is bound to chromeId, not to position/title.
+    }
+    __invalidateIdentityMapIndex(content);
+    return content;
 }
 
 
@@ -1197,6 +1501,7 @@ async function __readPermanentMainContentFromBcs(options = {}) {
     content.tree = normalizedTree[0];
     if (!content.format) content.format = __CANVAS_SECTION_JSON_FORMAT;
     if (!content.schemaVersion) content.schemaVersion = 2;
+    if (Number(content.schemaVersion) < 3) content.schemaVersion = 3;
     if (!content.sectionType) content.sectionType = 'permanent';
     if (!content.slot) content.slot = 'A';
     if (!content.title) content.title = __getPermanentSectionDisplayTitle(__getLang().isEn);
@@ -1211,6 +1516,12 @@ async function __readPermanentMainContentFromBcs(options = {}) {
             preserveRawSource: true
         });
     }
+    if (!Array.isArray(content.identityMap)) {
+        content.identityMap = __bootstrapIdentityMapFromTree(content.tree);
+    } else {
+        content.identityMap = __normalizeIdentityMapArray(content.identityMap);
+    }
+    __verifyAndHealIdentityMap(content);
 
     return content;
 }
@@ -1220,20 +1531,29 @@ async function __writePermanentMainContentToBcs(contentInput, options = {}) {
     if (!content || !content.tree || typeof content.tree !== 'object') return null;
     const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(content.tree);
     if (!normalizedTree) return null;
+    const treeRoot = normalizedTree[0];
+    let identityMap = Array.isArray(content.identityMap)
+        ? __normalizeIdentityMapArray(content.identityMap)
+        : null;
+    if (!identityMap || !identityMap.length) {
+        identityMap = __bootstrapIdentityMapFromTree(treeRoot);
+    }
+    // Field order is contractual per the spec: descriptionMd → identityMap → fileRole/Note → tree.
     const nextContent = {
-        ...content,
         format: content.format || __CANVAS_SECTION_JSON_FORMAT,
-        schemaVersion: Number(content.schemaVersion) || 2,
+        schemaVersion: 3,
         sectionType: 'permanent',
         slot: String(content.slot || 'A'),
         title: String(content.title || __getPermanentSectionDisplayTitle(__getLang().isEn)),
         descriptionMd: String(content.descriptionMd == null ? '' : content.descriptionMd),
+        identityMap,
         fileRole: 'primary',
         fileNote: String(content.fileNote || (__getLang().isEn
             ? 'Primary permanent file: canonical bookmark tree source.'
             : '永久栏目主文件：书签树的规范真相源。')),
-        tree: normalizedTree[0]
+        tree: treeRoot
     };
+    __verifyAndHealIdentityMap(nextContent);
     __bcsStorageSet({
         [BCS_PERM_MAIN_KEY]: nextContent
     }, { immediate: options && options.immediate !== false });
@@ -1696,7 +2016,8 @@ async function __applyPermanentBookmarkEventsToBcs(eventsInput, options = {}) {
     const resolvedChromeIds = new Set();
     let appliedCount = 0;
     let noopCount = 0;
-    const result = await __mutatePermanentMainContentInBcs((root) => {
+    const suppressIdentityMapDelta = !!(options && options.suppressIdentityMapDelta === true);
+    const result = await __mutatePermanentMainContentInBcs((root, content) => {
         let changed = false;
         appliedCount = 0;
         noopCount = 0;
@@ -1716,6 +2037,9 @@ async function __applyPermanentBookmarkEventsToBcs(eventsInput, options = {}) {
             appliedCount += 1;
             if (eventChanged) changed = true;
             else noopCount += 1;
+        }
+        if (!suppressIdentityMapDelta && content && typeof content === 'object') {
+            __applyIdentityMapDeltaFromBookmarkEvents(content, events);
         }
         if (!changed) return false;
         return {
@@ -1738,9 +2062,11 @@ async function __syncPermanentMainTreeFromChromeBookmarks(options = {}) {
     const previous = await __ensurePermanentMainContentInBcs();
     const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(chromeTree);
     if (!normalizedTree) return null;
+    const rebuiltIdentityMap = __rebuildIdentityMapPreservingExisting(previous, normalizedTree[0]);
     const content = {
         ...(previous && typeof previous === 'object' ? previous : __buildPermanentPrimaryContentPayloadFromTree(normalizedTree)),
-        tree: normalizedTree[0]
+        tree: normalizedTree[0],
+        identityMap: rebuiltIdentityMap
     };
     return __writePermanentMainContentToBcs(content, {
         immediate: true
@@ -5764,7 +6090,7 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
     const sectionMeta = normalized.sectionMeta || {};
     __buildRuntimeTempSectionFromProtocol.__counter = (__buildRuntimeTempSectionFromProtocol.__counter || 0) + 1;
     const sectionId = String(options.sectionId || '').trim()
-        || `temp-section-protocol-${Date.now()}-${__buildRuntimeTempSectionFromProtocol.__counter.toString(36)}`;
+        || __generateTempSectionId();
     const hasItemPayloads = Array.isArray(normalized.items);
     const payloads = hasItemPayloads ? normalized.items : [];
     let restoredItemCounter = 0;
@@ -5888,9 +6214,250 @@ function __buildCanvasTempStateProtocolView(stateInput, options = {}) {
     });
 }
 
+// =============================================================================
+// One-shot migration: drop legacy temp-section-<N> storage residue.
+// =============================================================================
+// The temp-section ID scheme changed to stable hash IDs (tempSecId_*). Old chrome.storage.local
+// keys like `temp-section-scroll:temp-section-3` are not parseable under the new rules. The
+// doc explicitly authorizes wiping legacy temp-section state on first boot under the new
+// codebase, so we do exactly that, then mark the migration as done.
+
+async function __migrateLegacyTempSectionKeysOnce() {
+    try {
+        const flag = await __bcsStorageGet([BCS_LEGACY_TEMP_MIGRATION_DONE_KEY]);
+        if (flag && flag[BCS_LEGACY_TEMP_MIGRATION_DONE_KEY]) return { skipped: true };
+    } catch (_) { return { skipped: true }; }
+
+    const all = await __bcsStorageGetAll();
+    const toRemove = [];
+    Object.keys(all || {}).forEach((key) => {
+        if (typeof key !== 'string') return;
+        if (
+            /^temp-section-scroll:temp-section-\d+$/.test(key)
+            || /^temp-section-collapsed:temp-section-\d+$/.test(key)
+            || /^temp-section-scroll:temp-section-protocol-/.test(key)
+            || /^temp-section-collapsed:temp-section-protocol-/.test(key)
+        ) {
+            toRemove.push(key);
+        }
+    });
+
+    if (toRemove.length) {
+        try { await __bcsStorageRemove(toRemove); } catch (_) {}
+        try { console.info(`[BCS] legacy temp-section keys cleaned: ${toRemove.length}`); } catch (_) {}
+    }
+
+    try { await __bcsStorageSet({ [BCS_LEGACY_TEMP_MIGRATION_DONE_KEY]: { migratedAt: Date.now(), removed: toRemove.length } }, { immediate: true }); } catch (_) {}
+    return { removed: toRemove.length };
+}
+
+// =============================================================================
+// Export Sandbox: build an in-memory clone of the local state for export/sync/backup.
+// =============================================================================
+// All "sensitive" mutation work — replacing chromeIds with syncIds, dropping `index`,
+// pruning identityMap, embedding tags — happens against this sandbox copy, never against
+// live storage. Pipeline:
+//   1. __buildExportSandbox()              snapshot local BCS into a plain object
+//   2. __applySyncIdReplacementInSandbox() rewrite tree.id/parentId → syncId, drop index
+//   3. __pruneIdentityMapEntriesInSandbox() strip entries with only {id, syncId}
+//   4. __embedTempSectionTagsInSandbox()   (placeholder for phase 3 tag system)
+// The same pipeline feeds both export downloads and the single-slot backup.
+
+function __cloneForSandbox(state) {
+    if (state == null) return state;
+    try {
+        if (typeof structuredClone === 'function') return structuredClone(state);
+    } catch (_) {}
+    try { return JSON.parse(JSON.stringify(state)); } catch (_) { return null; }
+}
+
+async function __buildExportSandbox(options = {}) {
+    const all = await __bcsStorageGetAll();
+    const permMainRaw = all && all[BCS_PERM_MAIN_KEY] ? all[BCS_PERM_MAIN_KEY] : null;
+    const tempStateRaw = all && all[TEMP_SECTION_STORAGE_KEY] ? all[TEMP_SECTION_STORAGE_KEY] : null;
+    const copyKeys = Object.keys(all || {}).filter((key) => typeof key === 'string' && key.startsWith(BCS_PERM_COPY_PREFIX));
+    const copies = {};
+    for (const key of copyKeys) {
+        copies[key] = __cloneForSandbox(all[key]);
+    }
+    const canvasRaw = all && all[BCS_CANVAS_KEY] ? all[BCS_CANVAS_KEY] : null;
+    const metaRaw = all && all[BCS_META_KEY] ? all[BCS_META_KEY] : null;
+    const rootMetaRaw = all && all[PERMANENT_ROOT_META_STORAGE_KEY] ? all[PERMANENT_ROOT_META_STORAGE_KEY] : null;
+    return {
+        sandboxBuiltAt: Date.now(),
+        sandboxOptions: { reason: String(options && options.reason || 'export') },
+        permMain: __cloneForSandbox(permMainRaw),
+        permCopies: copies,
+        tempState: __cloneForSandbox(tempStateRaw),
+        canvasState: __cloneForSandbox(canvasRaw),
+        bcsMeta: __cloneForSandbox(metaRaw),
+        permRootMeta: __cloneForSandbox(rootMetaRaw)
+    };
+}
+
+function __replaceIdsWithSyncIdsInTree(treeRoot, byChromeId) {
+    if (!treeRoot || typeof treeRoot !== 'object') return treeRoot;
+    const stack = [treeRoot];
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node || typeof node !== 'object') continue;
+        if (Object.prototype.hasOwnProperty.call(node, 'index')) delete node.index;
+        const chromeId = String(node.id || '').trim();
+        if (chromeId) {
+            const mapped = byChromeId.get(chromeId);
+            if (mapped) node.id = mapped.syncId;
+        }
+        const parentChromeId = String(node.parentId || '').trim();
+        if (parentChromeId) {
+            const parentMapped = byChromeId.get(parentChromeId);
+            if (parentMapped) node.parentId = parentMapped.syncId;
+        }
+        if (Array.isArray(node.children)) {
+            for (const child of node.children) stack.push(child);
+        }
+    }
+    return treeRoot;
+}
+
+function __applySyncIdReplacementInSandbox(sandbox) {
+    if (!sandbox || typeof sandbox !== 'object') return sandbox;
+    const targets = [];
+    if (sandbox.permMain) targets.push(sandbox.permMain);
+    if (sandbox.permCopies && typeof sandbox.permCopies === 'object') {
+        for (const key of Object.keys(sandbox.permCopies)) {
+            const copy = sandbox.permCopies[key];
+            if (copy) targets.push(copy);
+        }
+    }
+    for (const content of targets) {
+        if (!content || typeof content !== 'object' || !content.tree) continue;
+        const list = Array.isArray(content.identityMap) ? content.identityMap : [];
+        const byChromeId = new Map();
+        for (const entry of list) {
+            if (!entry || typeof entry !== 'object') continue;
+            const id = String(entry.id || '').trim();
+            const syncId = String(entry.syncId || '').trim();
+            if (id && syncId) byChromeId.set(id, entry);
+        }
+        __replaceIdsWithSyncIdsInTree(content.tree, byChromeId);
+    }
+    return sandbox;
+}
+
+function __pruneIdentityMapEntriesInSandbox(sandbox) {
+    if (!sandbox || typeof sandbox !== 'object') return sandbox;
+    const targets = [];
+    if (sandbox.permMain) targets.push(sandbox.permMain);
+    if (sandbox.permCopies && typeof sandbox.permCopies === 'object') {
+        for (const key of Object.keys(sandbox.permCopies)) {
+            const copy = sandbox.permCopies[key];
+            if (copy) targets.push(copy);
+        }
+    }
+    for (const content of targets) {
+        if (!content || !Array.isArray(content.identityMap)) continue;
+        const next = [];
+        for (const entry of content.identityMap) {
+            if (!entry || typeof entry !== 'object') continue;
+            const syncId = String(entry.syncId || '').trim();
+            if (!syncId) continue;
+            const extras = Object.keys(entry).filter((k) => k !== 'id' && k !== 'syncId');
+            if (!extras.length) continue; // doc: minimum cell with only id+syncId → drop
+            const pruned = { syncId };
+            for (const key of extras) pruned[key] = entry[key];
+            next.push(pruned);
+        }
+        content.identityMap = next;
+    }
+    return sandbox;
+}
+
+function __embedTempSectionTagsInSandbox(sandbox) {
+    // Placeholder. Tag fields on temp-section tree-node JSON live alongside `createdAt`
+    // and move with the node by virtue of being nested in the node itself. The sandbox
+    // already deep-clones temp state, so any pre-existing `tags` arrays survive untouched.
+    // When phase 3 lands the tag UI, this function becomes the post-processing hook.
+    return sandbox;
+}
+
+function __processExportSandboxForExport(sandbox) {
+    __applySyncIdReplacementInSandbox(sandbox);
+    __pruneIdentityMapEntriesInSandbox(sandbox);
+    __embedTempSectionTagsInSandbox(sandbox);
+    return sandbox;
+}
+
+async function __writeBackupSlotFromSandbox(sandbox) {
+    if (!sandbox || typeof sandbox !== 'object') return null;
+    const payload = {
+        savedAt: Date.now(),
+        sandbox: __cloneForSandbox(sandbox)
+    };
+    try {
+        await __bcsStorageSet({ [BCS_BACKUP_SLOT_KEY]: payload }, { immediate: true });
+        return payload;
+    } catch (_) {
+        return null;
+    }
+}
+
+async function __readBackupSlot() {
+    const all = await __bcsStorageGet([BCS_BACKUP_SLOT_KEY]);
+    return (all && all[BCS_BACKUP_SLOT_KEY]) || null;
+}
+
+async function __getImportOverwriteThreshold() {
+    try {
+        const result = await __bcsStorageGet([BCS_IMPORT_THRESHOLD_KEY]);
+        const stored = result && result[BCS_IMPORT_THRESHOLD_KEY];
+        if (stored && typeof stored === 'object' && Number.isFinite(Number(stored.value))) {
+            const v = Number(stored.value);
+            if (v > 0) return v;
+        }
+        if (Number.isFinite(Number(stored))) {
+            const v = Number(stored);
+            if (v > 0) return v;
+        }
+    } catch (_) {}
+    return BCS_IMPORT_THRESHOLD_DEFAULT;
+}
+
+async function __setImportOverwriteThreshold(value) {
+    const v = Math.max(1, Math.min(100000, Math.round(Number(value) || BCS_IMPORT_THRESHOLD_DEFAULT)));
+    try { await __bcsStorageSet({ [BCS_IMPORT_THRESHOLD_KEY]: { value: v, savedAt: Date.now() } }, { immediate: true }); } catch (_) {}
+    return v;
+}
+
 if (typeof window !== 'undefined') {
     window.CanvasProtocolBridge = Object.assign(window.CanvasProtocolBridge || {}, {
         version: 1,
+        generateSyncId() { return __generateSyncId(); },
+        generateTempId() { return __generateTempId(); },
+        generateTempSectionId() { return __generateTempSectionId(); },
+        rememberExistingBcsId(value) { __rememberExistingBcsId(value); },
+        isHashedTempSectionId(value) { return __isHashedTempSectionId(value); },
+        isHashedTempItemId(value) { return __isHashedTempItemId(value); },
+        isHashedSyncId(value) { return __isHashedSyncId(value); },
+        isLegacyTempSectionId(value) { return __isLegacyTempSectionId(value); },
+        async migrateLegacyTempSectionKeysOnce() {
+            return await __migrateLegacyTempSectionKeysOnce();
+        },
+        getIdentityMapIndex(content) { return __getIdentityMapIndex(content); },
+        normalizeIdentityMapArray(rawList) { return __normalizeIdentityMapArray(rawList); },
+        verifyAndHealIdentityMap(content) { return __verifyAndHealIdentityMap(content); },
+        rebuildIdentityMapPreservingExisting(prev, treeRoot) { return __rebuildIdentityMapPreservingExisting(prev, treeRoot); },
+        applyIdentityMapDeltaFromBookmarkEvents(content, events) { return __applyIdentityMapDeltaFromBookmarkEvents(content, events); },
+        bootstrapIdentityMapFromTree(treeRoot) { return __bootstrapIdentityMapFromTree(treeRoot); },
+        async buildExportSandbox(options = {}) { return await __buildExportSandbox(options); },
+        cloneForSandbox(state) { return __cloneForSandbox(state); },
+        applySyncIdReplacementInSandbox(sandbox) { return __applySyncIdReplacementInSandbox(sandbox); },
+        pruneIdentityMapEntriesInSandbox(sandbox) { return __pruneIdentityMapEntriesInSandbox(sandbox); },
+        embedTempSectionTagsInSandbox(sandbox) { return __embedTempSectionTagsInSandbox(sandbox); },
+        processExportSandboxForExport(sandbox) { return __processExportSandboxForExport(sandbox); },
+        async writeBackupSlotFromSandbox(sandbox) { return await __writeBackupSlotFromSandbox(sandbox); },
+        async readBackupSlot() { return await __readBackupSlot(); },
+        async getImportOverwriteThreshold() { return await __getImportOverwriteThreshold(); },
+        async setImportOverwriteThreshold(value) { return await __setImportOverwriteThreshold(value); },
         normalizeBlankMarkdownNode(node, options = {}) {
             const cloned = __cloneCanvasProtocolJson(node);
             if (!cloned) return null;
@@ -6520,6 +7087,7 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
 }
 
 async function __loadCanvasTempStateFromBcs() {
+    try { await __migrateLegacyTempSectionKeysOnce(); } catch (_) {}
     const bundle = await __loadCanvasTempStateBundleFromBcs();
     return bundle ? bundle.state : null;
 }

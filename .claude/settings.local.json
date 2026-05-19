@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check /Users/kk/Downloads/kk/canvas/Bookmark-Canvas/history_html/bookmark_canvas_module.js)",
+      "Bash(awk NR==5024 || NR==5406 || NR==5542 || NR==5644 || NR==17077 || NR==17208 || NR==30771 || NR==31178 *)",
+      "Bash(grep *)",
+      "Bash(node --check /Users/kk/Downloads/kk/canvas/Bookmark-Canvas/history_html/canvas_sidebar_directory.js)",
+      "Bash(node --check /Users/kk/Downloads/kk/canvas/Bookmark-Canvas/history_html/sync/obsidian-git-sync.js)",
+      "Bash(awk NR>=5430 && NR<=5454 {printf \"%4d|%s|\\\\n\", NR, $0} *)",
+      "Bash(awk NR>=31050 && NR<=31064 {printf \"%4d|%s|\\\\n\", NR, $0} *)",
+      "Bash(node --check /Users/kk/Downloads/kk/canvas/Bookmark-Canvas/background.js)",
+      "Bash(awk 'NR>=6177 && NR<=6182' /Users/kk/Downloads/kk/canvas/Bookmark-Canvas/history_html/sync/obsidian-git-sync.js)",
+      "Bash(awk 'NR==6179' /Users/kk/Downloads/kk/canvas/Bookmark-Canvas/history_html/sync/obsidian-git-sync.js)",
+      "Bash(xxd)",
+      "Bash(awk NR>=6177 && NR<=6184 *)",
+      "Bash(python3 *)",
+      "Bash(node --check /Users/kk/Downloads/kk/canvas/Bookmark-Canvas/history_html/history.js)",
+      "Bash(node --check /Users/kk/Downloads/kk/canvas/Bookmark-Canvas/tools/syncid-e2e-dump.js)",
+      "Bash(node --check history_html/bookmark_canvas_module.js)",
+      "Bash(node --check background.js)",
+      "Bash(node --check history_html/history.js)",
+      "Bash(xargs basename -a)",
+      "Bash(node --check history_html/storageBCS/storageBCS_core.js)",
+      "Bash(node --check history_html/transfer_AI_sync/import-export-transfer-feature.js)",
+      "Bash(node --check history_html/transfer_AI_sync/import-export-transfer-ui-support.js)",
+      "Bash(node --check history_html/canvas_sidebar_directory.js)"
+    ]
+  }
+}

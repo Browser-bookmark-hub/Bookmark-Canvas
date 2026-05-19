@@ -749,12 +749,12 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
     }
 
     // 创建临时栏目
-    const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
+    const sectionId = allocateTempSectionId();
     const items = [];
 
     for (const bm of bookmarks) {
         items.push({
-            id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
+            id: allocateTempItemId(sectionId),
             sectionId: sectionId,
             title: bm.title,
             url: bm.url,
@@ -885,7 +885,7 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
         const totalCount = countBookmarks(children);
 
         // 创建临时栏目（使用默认标题格式）
-        const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
+        const sectionId = allocateTempSectionId();
         const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
         const section = {
             id: sectionId,
@@ -909,7 +909,7 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
         // 递归转换为临时栏目格式
         const convertToTempItem = (node) => {
             const item = {
-                id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
+                id: allocateTempItemId(sectionId),
                 sectionId: sectionId,
                 title: node.title || (node.url ? (isEn ? 'Untitled' : '未命名') : (isEn ? 'Folder' : '文件夹')),
                 url: node.url || '',
@@ -987,7 +987,7 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         ? (isEn ? `Source: ${sourcePath}` : `来源路径：${sourcePath}`)
         : '';
 
-    const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
+    const sectionId = allocateTempSectionId();
     const section = {
         id: sectionId,
         title: sourceInfo,
@@ -1002,7 +1002,7 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         createdAt: Date.now(),
         source: 'browser-drop',  // 标记来源
         items: [{
-            id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
+            id: allocateTempItemId(sectionId),
             sectionId: sectionId,
             title: bookmark.title || bookmark.url,
             url: bookmark.url || '',
@@ -1116,6 +1116,102 @@ async function showFolderSelectionDialog(folders, dropX, dropY) {
     });
 }
 
+// =============================================================================
+// Backup dialog (single-slot backup; auto-saved before export; manual + restore).
+// =============================================================================
+
+async function showBackupDialog() {
+    const isEn = (typeof currentLang !== 'undefined' && currentLang === 'en');
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    if (!bridge) {
+        alert(isEn ? 'Storage bridge unavailable.' : '存储桥不可用。');
+        return;
+    }
+
+    const existing = await bridge.readBackupSlot();
+    const savedAt = existing && existing.savedAt ? new Date(existing.savedAt) : null;
+    const savedLabel = savedAt ? savedAt.toLocaleString(isEn ? 'en-US' : 'zh-CN') : (isEn ? 'No backup yet' : '暂无备份');
+
+    return new Promise((resolve) => {
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog';
+        dialog.id = 'canvasBackupDialog';
+        dialog.innerHTML = `
+            <div class="import-dialog-content">
+                <div class="import-dialog-header">
+                    <h3>${isEn ? 'Backup' : '备份'}</h3>
+                    <button class="import-dialog-close" id="closeBackupDialog">&times;</button>
+                </div>
+                <div class="import-dialog-body" style="padding: 16px;">
+                    <p style="margin: 0 0 8px;">${isEn ? 'Single-slot backup. Last save:' : '单槽备份。上次保存：'}</p>
+                    <p style="margin: 0 0 16px; font-weight: 600;">${savedLabel}</p>
+                    <p style="font-size: 12px; opacity: 0.7; margin: 0 0 12px;">
+                        ${isEn
+                            ? 'Each export auto-saves here. Manual save overwrites the slot. Restore replays the slot as an overwrite-import (current data lost).'
+                            : '每次导出自动保存。手动保存会覆盖此槽。恢复将把此槽以「覆盖导入」回放（当前数据丢失）。'}
+                    </p>
+                    <div style="display:flex; gap:8px;">
+                        <button type="button" class="import-mode-btn import-mode-btn-confirm" id="backupManualBtn">${isEn ? 'Manual Backup' : '手动备份'}</button>
+                        <button type="button" class="import-mode-btn import-mode-btn-confirm" id="backupRestoreBtn" ${existing ? '' : 'disabled'}>${isEn ? 'Restore' : '恢复'}</button>
+                        <button type="button" class="import-mode-btn import-mode-btn-cancel" id="backupCloseBtn">${isEn ? 'Close' : '关闭'}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(dialog);
+        const cleanup = () => { try { dialog.remove(); } catch (_) {} resolve(); };
+        document.getElementById('closeBackupDialog').addEventListener('click', cleanup);
+        document.getElementById('backupCloseBtn').addEventListener('click', cleanup);
+        document.getElementById('backupManualBtn').addEventListener('click', async () => {
+            try {
+                const sandbox = await bridge.buildExportSandbox({ reason: 'manual-backup' });
+                if (sandbox) {
+                    bridge.processExportSandboxForExport(sandbox);
+                    await bridge.writeBackupSlotFromSandbox(sandbox);
+                }
+                const msg = isEn ? 'Manual backup saved.' : '手动备份已保存。';
+                try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'success', 3000) : alert(msg); } catch (_) { alert(msg); }
+            } catch (e) {
+                console.error('[Backup] manual save failed:', e);
+                alert(isEn ? `Backup failed: ${e.message}` : `备份失败：${e.message}`);
+            }
+            cleanup();
+        });
+        document.getElementById('backupRestoreBtn').addEventListener('click', async () => {
+            const confirmMsg = isEn
+                ? 'Restore backup will overwrite current local data with the backup snapshot. Continue?'
+                : '恢复备份将以备份快照覆盖当前本地数据。继续吗？';
+            if (!window.confirm(confirmMsg)) return;
+            try {
+                const slot = await bridge.readBackupSlot();
+                if (!slot || !slot.sandbox) {
+                    alert(isEn ? 'No backup found.' : '未找到备份。');
+                    cleanup();
+                    return;
+                }
+                const sandbox = slot.sandbox;
+                const parsedStorage = {};
+                if (sandbox.permMain) parsedStorage['bcs:perm:main'] = sandbox.permMain;
+                if (sandbox.canvasState) parsedStorage['bcs:canvas'] = sandbox.canvasState;
+                if (sandbox.permCopies && typeof sandbox.permCopies === 'object') {
+                    for (const k of Object.keys(sandbox.permCopies)) parsedStorage[k] = sandbox.permCopies[k];
+                }
+                await __performOverwriteImport({
+                    parsedTempState: sandbox.tempState,
+                    parsedStorage,
+                    parsedPrimaryState: null,
+                    importFileName: 'backup-slot',
+                    threshold: 0 // force overwrite branch
+                });
+            } catch (e) {
+                console.error('[Backup] restore failed:', e);
+                alert(isEn ? `Restore failed: ${e.message}` : `恢复失败：${e.message}`);
+            }
+            cleanup();
+        });
+    });
+}
+
 
 
 // ---- toolbar-import-export-bindings: source lines 28699-28720 ----
@@ -1125,9 +1221,12 @@ async function showFolderSelectionDialog(folders, dropX, dropY) {
     const exportBtn = document.getElementById('exportCanvasBtn');
     const importOtherBtn = document.getElementById('importCanvasOtherBtn');
     const exportOtherBtn = document.getElementById('exportCanvasOtherBtn');
+    const backupBtn = document.getElementById('backupCanvasBtn');
+    const backupOtherBtn = document.getElementById('backupCanvasOtherBtn');
 
     if (importBtn) importBtn.addEventListener('click', showImportDialog);
     if (exportBtn) exportBtn.addEventListener('click', exportCanvas);
+    if (backupBtn) backupBtn.addEventListener('click', () => { try { showBackupDialog(); } catch (e) { console.warn(e); } });
     if (importOtherBtn) {
         importOtherBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1140,6 +1239,13 @@ async function showFolderSelectionDialog(folders, dropX, dropY) {
             e.stopPropagation();
             try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
             exportCanvas();
+        });
+    }
+    if (backupOtherBtn) {
+        backupOtherBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            try { showBackupDialog(); } catch (err) { console.warn(err); }
         });
     }
 

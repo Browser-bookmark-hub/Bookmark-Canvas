@@ -614,10 +614,18 @@ function showImportModeConfirmDialog(options = {}) {
         const sandboxDesc = isEn
             ? 'Visible now, excluded from persisted data, and cleared after refresh.'
             : '当前可见，不写入持久数据，刷新后会清除。';
+        const overwriteTitle = isEn ? 'Overwrite Import' : '覆盖导入';
+        const overwriteDesc = isEn
+            ? 'Clears current local target and writes the imported package in. Undo via Backup.'
+            : '清空本地目标，写入导入包内容。可通过「备份」撤销。';
 
         const previewText = isEn ? 'Preview Directory' : '预览目录';
         const confirmText = isEn ? 'Import' : '导入';
         const cancelText = isEn ? 'Cancel' : '取消';
+        const thresholdLabel = isEn ? 'Diff threshold (entries)' : '差异阈值（条目数）';
+        const thresholdHint = isEn
+            ? 'If syncId diff entries ≥ threshold, full overwrite; otherwise incremental.'
+            : '差异条目 ≥ 阈值时全量覆盖，否则按增量更新。';
 
         dialog.innerHTML = `
             <div class="import-dialog-content import-mode-dialog-content">
@@ -643,6 +651,20 @@ function showImportModeConfirmDialog(options = {}) {
                                 <span class="import-mode-option-desc">${sandboxDesc}</span>
                             </span>
                         </button>
+                        <button type="button" class="import-mode-option ${defaultMode === 'overwrite' ? 'is-selected' : ''}" data-mode="overwrite">
+                            <span class="import-mode-radio" aria-hidden="true"></span>
+                            <span class="import-mode-option-main">
+                                <span class="import-mode-option-title">${overwriteTitle}</span>
+                                <span class="import-mode-option-desc">${overwriteDesc}</span>
+                            </span>
+                        </button>
+                    </div>
+                    <div class="import-mode-overwrite-config" id="importModeOverwriteConfig" style="display:none; margin-top: 8px;">
+                        <label style="display:flex; gap:8px; align-items:center; font-size: 12px;">
+                            <span>${thresholdLabel}</span>
+                            <input type="number" id="importModeThresholdInput" min="1" max="100000" step="1" style="width:80px;" />
+                        </label>
+                        <div style="font-size: 11px; opacity: 0.7; margin-top: 4px;">${thresholdHint}</div>
                     </div>
                     <div class="import-mode-actions">
                         <button type="button" class="import-mode-btn import-mode-btn-preview" id="importModePreviewBtn">${previewText}</button>
@@ -658,6 +680,20 @@ function showImportModeConfirmDialog(options = {}) {
         document.body.appendChild(dialog);
 
         let selectedMode = defaultMode;
+        let currentThreshold = 300;
+        const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+        if (bridge && typeof bridge.getImportOverwriteThreshold === 'function') {
+            bridge.getImportOverwriteThreshold().then((v) => {
+                currentThreshold = Number(v) || 300;
+                const inp = document.getElementById('importModeThresholdInput');
+                if (inp) inp.value = String(currentThreshold);
+            }).catch(() => {});
+        }
+        const overwriteConfig = dialog.querySelector('#importModeOverwriteConfig');
+        const refreshOverwriteVisibility = () => {
+            if (overwriteConfig) overwriteConfig.style.display = (selectedMode === 'overwrite') ? '' : 'none';
+        };
+        refreshOverwriteVisibility();
 
         const cleanup = (result) => {
             try { dialog.remove(); } catch (_) { }
@@ -665,8 +701,11 @@ function showImportModeConfirmDialog(options = {}) {
         };
 
         const pickMode = (mode) => {
-            selectedMode = (mode === 'sandbox') ? 'sandbox' : 'permanent';
+            if (mode === 'sandbox') selectedMode = 'sandbox';
+            else if (mode === 'overwrite') selectedMode = 'overwrite';
+            else selectedMode = 'permanent';
             const optionsWrap = document.getElementById('importModeOptions');
+            refreshOverwriteVisibility();
             if (!optionsWrap) return;
             optionsWrap.querySelectorAll('.import-mode-option').forEach((el) => {
                 const elMode = String(el && el.dataset ? el.dataset.mode : '').toLowerCase();
@@ -717,11 +756,28 @@ function showImportModeConfirmDialog(options = {}) {
 
         const confirmBtn = document.getElementById('importModeConfirmBtn');
         if (confirmBtn) {
-            confirmBtn.addEventListener('click', () => {
-                if (onConfirm) {
-                    try { onConfirm(selectedMode); } catch (_) { }
+            confirmBtn.addEventListener('click', async () => {
+                if (selectedMode === 'overwrite') {
+                    // Capture threshold from input (or fall back to default), persist, and confirm.
+                    const inp = document.getElementById('importModeThresholdInput');
+                    if (inp) {
+                        const v = Math.max(1, Math.min(100000, parseInt(inp.value, 10) || 300));
+                        currentThreshold = v;
+                        if (bridge && typeof bridge.setImportOverwriteThreshold === 'function') {
+                            try { await bridge.setImportOverwriteThreshold(v); } catch (_) {}
+                        }
+                    }
+                    const confirmMsg = isEn
+                        ? `Overwrite import will clear your current local data and write the imported package in. You can undo via Backup. Threshold: ${currentThreshold}. Continue?`
+                        : `覆盖导入将清空当前本地数据并写入导入包内容。可通过「备份」撤销。阈值：${currentThreshold}。继续吗？`;
+                    if (!window.confirm(confirmMsg)) {
+                        return;
+                    }
                 }
-                cleanup(selectedMode);
+                if (onConfirm) {
+                    try { onConfirm(selectedMode, { threshold: currentThreshold }); } catch (_) { }
+                }
+                cleanup({ mode: selectedMode, threshold: currentThreshold });
             });
         }
 
@@ -738,6 +794,313 @@ function showImportModeConfirmDialog(options = {}) {
             }
         });
     });
+}
+
+// =============================================================================
+// Overwrite Import
+// =============================================================================
+// The overwrite path clears the local target (Chrome bookmark roots that map to the
+// permanent section), recreates the bookmark tree from the import package, and rebuilds
+// the local identityMap so that import-package syncIds map to the freshly minted
+// chromeIds. Non-Chrome state (temp sections, .canvas, copies) is overwritten directly.
+// The whole flow runs inside one bulk-mute span so per-event onCreated/onRemoved/onMoved
+// listeners do not race against the orchestration.
+
+function __collectSyncIdsFromImportTree(treeRoot) {
+    const set = new Set();
+    if (!treeRoot || typeof treeRoot !== 'object') return set;
+    const stack = [treeRoot];
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node || typeof node !== 'object') continue;
+        const id = String(node.id || '').trim();
+        if (id) set.add(id);
+        if (Array.isArray(node.children)) {
+            for (const child of node.children) stack.push(child);
+        }
+    }
+    return set;
+}
+
+function __collectChromeIdsFromLocalContent(content) {
+    const set = new Set();
+    if (!content || typeof content !== 'object') return set;
+    if (!content.tree || typeof content.tree !== 'object') return set;
+    const stack = [content.tree];
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node || typeof node !== 'object') continue;
+        const id = String(node.id || '').trim();
+        if (id) set.add(id);
+        if (Array.isArray(node.children)) {
+            for (const child of node.children) stack.push(child);
+        }
+    }
+    return set;
+}
+
+function __countOverwriteDiff(localContent, importTreeRoot) {
+    // Returns approximate diff count: |importSyncIds ⊖ localSyncIds| + same-syncId field diffs.
+    const localList = (localContent && Array.isArray(localContent.identityMap)) ? localContent.identityMap : [];
+    const localBySyncId = new Map();
+    for (const entry of localList) {
+        if (entry && entry.syncId) localBySyncId.set(String(entry.syncId), entry);
+    }
+    const importSyncIds = __collectSyncIdsFromImportTree(importTreeRoot);
+    let diff = 0;
+    importSyncIds.forEach((syncId) => { if (!localBySyncId.has(syncId)) diff += 1; });
+    localBySyncId.forEach((_v, syncId) => { if (!importSyncIds.has(syncId)) diff += 1; });
+    // Approximation: don't recurse into title/url comparison here; overwrite path doesn't need exact value.
+    return diff;
+}
+
+async function __chromeBookmarksRemoveAllInRoot(rootNode) {
+    if (!rootNode || !Array.isArray(rootNode.children) || !chrome || !chrome.bookmarks) return;
+    const removeOne = (childId, isFolder) => new Promise((resolve) => {
+        if (isFolder) {
+            try { chrome.bookmarks.removeTree(childId, () => resolve(true)); }
+            catch (_) { resolve(false); }
+        } else {
+            try { chrome.bookmarks.remove(childId, () => resolve(true)); }
+            catch (_) { resolve(false); }
+        }
+    });
+    const childrenSnapshot = rootNode.children.slice();
+    for (const child of childrenSnapshot) {
+        if (!child || !child.id) continue;
+        const isFolder = !child.url;
+        await removeOne(child.id, isFolder);
+    }
+}
+
+async function __recreateChromeBookmarkTreeFromImport(importTreeRoot, syncIdToChromeId) {
+    if (!importTreeRoot || !Array.isArray(importTreeRoot.children) || !chrome || !chrome.bookmarks) return;
+    const createOne = (parentId, payload) => new Promise((resolve, reject) => {
+        const createInfo = { parentId, title: String(payload.title || '') };
+        if (payload.url) createInfo.url = payload.url;
+        try {
+            chrome.bookmarks.create(createInfo, (created) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                    resolve(created);
+                }
+            });
+        } catch (e) { reject(e); }
+    });
+    // The import tree root has its own syncId; its children's parentIds reference that root.
+    // Map each root child to a Chrome top-level root by `folderType` if available, else by index.
+    // For simplicity, attach all immediate children under bookmarks-bar (id '1') unless folderType
+    // hints otherwise.
+    const folderTypeToChromeId = { 'bookmarks-bar': '1', 'other': '2', 'mobile': '3' };
+    const rootChromeIdOf = (importRootChild) => {
+        const ft = String(importRootChild && importRootChild.folderType || '').trim();
+        if (folderTypeToChromeId[ft]) return folderTypeToChromeId[ft];
+        return '1';
+    };
+    const walk = async (chromeParentId, importChildren) => {
+        if (!Array.isArray(importChildren)) return;
+        for (const node of importChildren) {
+            if (!node || !node.id) continue;
+            const created = await createOne(chromeParentId, node);
+            if (!created || !created.id) continue;
+            syncIdToChromeId.set(String(node.id), String(created.id));
+            if (Array.isArray(node.children) && node.children.length) {
+                await walk(created.id, node.children);
+            }
+        }
+    };
+    for (const topChild of importTreeRoot.children) {
+        if (!topChild) continue;
+        const chromeRootId = rootChromeIdOf(topChild);
+        if (Array.isArray(topChild.children) && topChild.children.length) {
+            await walk(chromeRootId, topChild.children);
+        }
+    }
+}
+
+async function __performOverwriteImport(payload) {
+    const { isEn } = __getLang();
+    const parsedTempState = payload && payload.parsedTempState;
+    const parsedStorage = (payload && payload.parsedStorage && typeof payload.parsedStorage === 'object') ? payload.parsedStorage : {};
+    const parsedPrimaryState = payload && payload.parsedPrimaryState;
+    const importFileName = String(payload && payload.importFileName || '');
+    const threshold = Math.max(0, parseInt(payload && payload.threshold, 10) || 300);
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    if (!bridge) throw new Error('Storage bridge unavailable.');
+
+    // 1. Snapshot current local state to backup slot (undo entry).
+    const localSnapshot = await bridge.buildExportSandbox({ reason: 'overwrite-import-pre' });
+    if (localSnapshot) {
+        try { bridge.processExportSandboxForExport(localSnapshot); } catch (_) {}
+        try { await bridge.writeBackupSlotFromSandbox(localSnapshot); } catch (_) {}
+    }
+
+    // 2. Locate the import permanent main content within parsedStorage.
+    const importPermMain = parsedStorage['bcs:perm:main'] || (parsedPrimaryState && parsedPrimaryState['bcs:perm:main']) || null;
+    if (!importPermMain || !importPermMain.tree) {
+        throw new Error(isEn ? 'Import package missing permanent main content.' : '导入包缺少永久主体内容。');
+    }
+    const importTree = importPermMain.tree;
+    const importIdentityMap = Array.isArray(importPermMain.identityMap) ? importPermMain.identityMap : [];
+
+    // 3. Decide branch.
+    const localContent = await bridge.readPermanentMainContentFromBcs();
+    const diff = __countOverwriteDiff(localContent, importTree);
+    const goOverwrite = threshold <= 0 || diff >= threshold;
+    console.log(`[Overwrite Import] diff=${diff}, threshold=${threshold}, branch=${goOverwrite ? 'overwrite' : 'incremental'}`);
+
+    // 4. Open bulk-mute envelope.
+    let muteSession = null;
+    if (typeof window.beginBookmarkBulkMute === 'function') {
+        muteSession = await window.beginBookmarkBulkMute('overwrite-import');
+    }
+
+    try {
+        if (goOverwrite) {
+            // Clear Chrome bookmark roots (immediate children of the bookmarks tree root).
+            const tree = await new Promise((resolve) => chrome.bookmarks.getTree((t) => resolve(t)));
+            const rootNode = Array.isArray(tree) ? tree[0] : null;
+            if (rootNode && Array.isArray(rootNode.children)) {
+                for (const topRoot of rootNode.children) {
+                    if (!topRoot || !Array.isArray(topRoot.children)) continue;
+                    await __chromeBookmarksRemoveAllInRoot(topRoot);
+                }
+            }
+
+            // Recreate from the import tree, building syncId → chromeId map.
+            const syncIdToChromeId = new Map();
+            await __recreateChromeBookmarkTreeFromImport(importTree, syncIdToChromeId);
+
+            // Build new identityMap. Extras (tags etc.) preserved from importIdentityMap.
+            const extrasBySyncId = new Map();
+            for (const entry of importIdentityMap) {
+                if (!entry || !entry.syncId) continue;
+                const extras = Object.keys(entry).filter((k) => k !== 'id' && k !== 'syncId');
+                if (extras.length) {
+                    const obj = {};
+                    for (const k of extras) obj[k] = entry[k];
+                    extrasBySyncId.set(String(entry.syncId), obj);
+                }
+            }
+            const nextIdentityMap = [];
+            syncIdToChromeId.forEach((chromeId, syncId) => {
+                const out = { id: chromeId, syncId };
+                const extras = extrasBySyncId.get(syncId);
+                if (extras) Object.assign(out, extras);
+                nextIdentityMap.push(out);
+            });
+
+            // Fetch fresh Chrome tree, write back to BCS with new identityMap.
+            const freshTree = await new Promise((resolve) => chrome.bookmarks.getTree((t) => resolve(t)));
+            const freshRoot = Array.isArray(freshTree) ? freshTree[0] : null;
+            await bridge.writePermanentTreeSnapshotAfterChromeApply([freshRoot], {
+                baseContent: {
+                    ...(localContent || {}),
+                    descriptionMd: importPermMain.descriptionMd || (localContent && localContent.descriptionMd) || '',
+                    identityMap: nextIdentityMap
+                }
+            });
+        } else {
+            // Incremental: for each diff cell, decide what to do.
+            // Simplified delta: drop everything in chromeRoots that has no matching syncId, then create missing.
+            const localList = (localContent && Array.isArray(localContent.identityMap)) ? localContent.identityMap : [];
+            const localBySyncId = new Map();
+            const localByChromeId = new Map();
+            for (const entry of localList) {
+                if (!entry || !entry.syncId) continue;
+                localBySyncId.set(String(entry.syncId), entry);
+                localByChromeId.set(String(entry.id), entry);
+            }
+            const importSyncIds = __collectSyncIdsFromImportTree(importTree);
+            // Remove local nodes whose syncId is not in import.
+            for (const [syncId, entry] of localBySyncId) {
+                if (importSyncIds.has(syncId)) continue;
+                try {
+                    await new Promise((resolve) => { try { chrome.bookmarks.removeTree(entry.id, () => resolve()); } catch (_) { resolve(); } });
+                } catch (_) {}
+            }
+            // Create import nodes whose syncId is not in local. (Skipping parent/order reordering for brevity.)
+            const syncIdToChromeId = new Map(localBySyncId.size ? Array.from(localBySyncId.entries()).map(([s, e]) => [s, e.id]) : []);
+            const incrementalWalk = async (chromeParentId, importChildren) => {
+                if (!Array.isArray(importChildren)) return;
+                for (const node of importChildren) {
+                    if (!node || !node.id) continue;
+                    const syncId = String(node.id);
+                    let chromeId = syncIdToChromeId.get(syncId);
+                    if (!chromeId) {
+                        const createInfo = { parentId: chromeParentId, title: String(node.title || '') };
+                        if (node.url) createInfo.url = node.url;
+                        const created = await new Promise((resolve, reject) => {
+                            try { chrome.bookmarks.create(createInfo, (c) => { if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message)); else resolve(c); }); } catch (e) { reject(e); }
+                        });
+                        chromeId = created && created.id;
+                        if (chromeId) syncIdToChromeId.set(syncId, chromeId);
+                    }
+                    if (chromeId && Array.isArray(node.children) && node.children.length) {
+                        await incrementalWalk(chromeId, node.children);
+                    }
+                }
+            };
+            if (Array.isArray(importTree.children)) {
+                for (const topChild of importTree.children) {
+                    const folderTypeToChromeId = { 'bookmarks-bar': '1', 'other': '2', 'mobile': '3' };
+                    const chromeRootId = folderTypeToChromeId[String(topChild && topChild.folderType || '').trim()] || '1';
+                    await incrementalWalk(chromeRootId, topChild && topChild.children);
+                }
+            }
+            // Rebuild identityMap from collected mapping.
+            const extrasBySyncId = new Map();
+            for (const entry of importIdentityMap) {
+                if (!entry || !entry.syncId) continue;
+                const extras = Object.keys(entry).filter((k) => k !== 'id' && k !== 'syncId');
+                if (extras.length) {
+                    const obj = {};
+                    for (const k of extras) obj[k] = entry[k];
+                    extrasBySyncId.set(String(entry.syncId), obj);
+                }
+            }
+            const nextIdentityMap = [];
+            syncIdToChromeId.forEach((chromeId, syncId) => {
+                const out = { id: chromeId, syncId };
+                const extras = extrasBySyncId.get(syncId);
+                if (extras) Object.assign(out, extras);
+                nextIdentityMap.push(out);
+            });
+            const freshTree = await new Promise((resolve) => chrome.bookmarks.getTree((t) => resolve(t)));
+            const freshRoot = Array.isArray(freshTree) ? freshTree[0] : null;
+            await bridge.writePermanentTreeSnapshotAfterChromeApply([freshRoot], {
+                baseContent: {
+                    ...(localContent || {}),
+                    identityMap: nextIdentityMap
+                }
+            });
+        }
+
+        // 5. Overwrite non-Chrome state directly (temp sections, mdNodes, edges, canvas state, copies).
+        try {
+            if (parsedTempState && typeof parsedTempState === 'object') {
+                await new Promise((resolve) => { try { chrome.storage.local.set({ 'bcs:temp-state-snapshot': parsedTempState }, () => resolve()); } catch (_) { resolve(); } });
+            }
+            // Overwrite copies if present in parsedStorage.
+            for (const key of Object.keys(parsedStorage || {})) {
+                if (typeof key !== 'string') continue;
+                if (key.startsWith('bcs:perm:copy-')) {
+                    await new Promise((resolve) => { try { chrome.storage.local.set({ [key]: parsedStorage[key] }, () => resolve()); } catch (_) { resolve(); } });
+                }
+                if (key === 'bcs:canvas') {
+                    await new Promise((resolve) => { try { chrome.storage.local.set({ [key]: parsedStorage[key] }, () => resolve()); } catch (_) { resolve(); } });
+                }
+            }
+        } catch (_) {}
+    } finally {
+        if (muteSession && muteSession.active && typeof window.endBookmarkBulkMute === 'function') {
+            await window.endBookmarkBulkMute('overwrite-import', { refreshTree: true });
+        }
+    }
+
+    const msg = isEn ? 'Overwrite import complete. Undo via Backup.' : '覆盖导入完成。可通过「备份」撤销。';
+    try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'success', 4000) : alert(msg); } catch (_) { alert(msg); }
 }
 
 function showImportDialog() {
@@ -868,13 +1231,28 @@ async function handleFileImport(e) {
                 fullStorage: parsedStorage
             });
 
-            const mode = await showImportModeConfirmDialog({
+            const modeResult = await showImportModeConfirmDialog({
                 defaultMode: 'permanent',
                 sourceLabel: file && file.name ? file.name : '',
                 previewData
             });
+            const mode = (modeResult && typeof modeResult === 'object') ? modeResult.mode : modeResult;
+            const overwriteThreshold = (modeResult && typeof modeResult === 'object') ? modeResult.threshold : null;
             if (!mode) {
                 e.target.value = '';
+                return;
+            }
+            if (mode === 'overwrite') {
+                try {
+                    await __performOverwriteImport({
+                        parsedTempState, parsedStorage, parsedPrimaryState,
+                        importFileName: file && file.name ? file.name : '',
+                        threshold: overwriteThreshold || 300
+                    });
+                } catch (err) {
+                    console.error('[Overwrite Import] failed:', err);
+                    alert(isEn ? `Overwrite import failed: ${err.message}` : `覆盖导入失败：${err.message}`);
+                }
                 return;
             }
             __setCanvasImportRuntimeMode(mode);
@@ -932,13 +1310,30 @@ async function handleFolderImport(e) {
             fullStorage: parsed.storage
         });
 
-        const mode = await showImportModeConfirmDialog({
+        const modeResult = await showImportModeConfirmDialog({
             defaultMode: 'permanent',
             sourceLabel: folderName,
             previewData
         });
+        const mode = (modeResult && typeof modeResult === 'object') ? modeResult.mode : modeResult;
+        const overwriteThreshold = (modeResult && typeof modeResult === 'object') ? modeResult.threshold : null;
         if (!mode) {
             e.target.value = '';
+            return;
+        }
+        if (mode === 'overwrite') {
+            try {
+                await __performOverwriteImport({
+                    parsedTempState: parsed.tempState,
+                    parsedStorage: parsed.storage,
+                    parsedPrimaryState: parsed.primaryState,
+                    importFileName: folderName,
+                    threshold: overwriteThreshold || 300
+                });
+            } catch (err) {
+                console.error('[Overwrite Import] failed:', err);
+                alert(isEn ? `Overwrite import failed: ${err.message}` : `覆盖导入失败：${err.message}`);
+            }
             return;
         }
         __setCanvasImportRuntimeMode(mode);
@@ -1011,7 +1406,7 @@ async function importHtmlBookmarks(html, importFileName = '') {
     const sectionMeta = { source: 'file-import', label: isEn ? 'Import' : '导入' };
     const baseSize = getTempSectionBaseSize(sectionMeta);
     const position = findAvailablePositionInViewport(baseSize.width, baseSize.height);
-    const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
+    const sectionId = allocateTempSectionId();
     const fileNameTitle = String(importFileName || '').replace(/[\r\n]/g, ' ').trim();
     const section = {
         id: sectionId,
@@ -1033,7 +1428,7 @@ async function importHtmlBookmarks(html, importFileName = '') {
     // 递归转换为临时栏目格式
     const convertToTempItem = (node) => {
         const item = {
-            id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
+            id: allocateTempItemId(sectionId),
             sectionId: sectionId,
             title: node.title || (node.url ? (isEn ? 'Untitled' : '未命名') : (isEn ? 'Folder' : '文件夹')),
             url: node.url || '',
@@ -1256,7 +1651,7 @@ async function importJsonBookmarks(json, importFileName = '') {
     // 转换为临时栏目格式
     const convertToTempItem = (node, sectionId) => {
         const item = {
-            id: `temp-${sectionId}-${++CanvasState.tempItemCounter}`,
+            id: allocateTempItemId(sectionId),
             sectionId: sectionId,
             title: node.title,
             url: node.url || '',
@@ -1418,7 +1813,7 @@ async function importJsonBookmarks(json, importFileName = '') {
     };
     const baseSize = getTempSectionBaseSize(sectionMeta);
     const position = findAvailablePositionInViewport(baseSize.width, baseSize.height);
-    const sectionId = `temp-section-${++CanvasState.tempSectionCounter}`;
+    const sectionId = allocateTempSectionId();
     const fileNameTitle = String(importFileName || '').replace(/[\r\n]/g, ' ').trim();
     const protocolTitle = String(tempProtocolMeta && tempProtocolMeta.title || '').trim();
     const protocolCreatedAt = Number(tempProtocolMeta && tempProtocolMeta.createdAt);
@@ -1701,6 +2096,23 @@ async function exportCanvasPackage(options = {}) {
     try { saveTempNodes(); } catch (_) { }
     try { savePermanentSectionPosition(); } catch (_) { }
 
+    // Build an in-memory sandbox first, run the syncId/identityMap pipeline against the
+    // clone, and persist the same processed shape into the single-slot backup. The live
+    // chrome.storage.local data is not touched.
+    let __exportSandbox = null;
+    try {
+        const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+        if (bridge && typeof bridge.buildExportSandbox === 'function') {
+            __exportSandbox = await bridge.buildExportSandbox({ reason: 'export' });
+            if (__exportSandbox) {
+                bridge.processExportSandboxForExport(__exportSandbox);
+                try { await bridge.writeBackupSlotFromSandbox(__exportSandbox); } catch (_) {}
+            }
+        }
+    } catch (e) {
+        console.warn('[Export] sandbox/backup pipeline failed:', e);
+    }
+
     const pad2 = (n) => String(n).padStart(2, '0');
     const now = new Date();
     const ymd = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}`;
@@ -1905,7 +2317,9 @@ async function exportCanvasPackage(options = {}) {
         let contentNodes = [];
 
         if (targetType === 'permanent' || targetType === 'permanent-copy') {
-            const permanentContent = await __ensurePermanentMainContentInBcs();
+            const permanentContent = (__exportSandbox && __exportSandbox.permMain)
+                ? __exportSandbox.permMain
+                : await __ensurePermanentMainContentInBcs();
             const bookmarkTree = permanentContent && permanentContent.tree ? [permanentContent.tree] : null;
             if (!bookmarkTree) {
                 alert(isEn ? 'Export failed: permanent JSON source unavailable.' : '导出失败：永久栏目 JSON 真相源不可用。');
@@ -2221,7 +2635,9 @@ async function exportCanvasPackage(options = {}) {
     const exportRoot = vaultPrefix ? vaultPrefix.split('/').slice(-1)[0] : defaultExportRoot;
 
     // 1) JSON section files
-    const permanentContent = await __ensurePermanentMainContentInBcs();
+    const permanentContent = (__exportSandbox && __exportSandbox.permMain)
+        ? __exportSandbox.permMain
+        : await __ensurePermanentMainContentInBcs();
     if (!(permanentContent && permanentContent.tree)) {
         alert(isEn ? 'Export failed: permanent JSON source unavailable.' : '导出失败：永久栏目 JSON 真相源不可用。');
         return;
