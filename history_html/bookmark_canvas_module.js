@@ -4164,6 +4164,52 @@ function renameTempItem(sectionId, itemId, newTitle) {
     saveTempNodes();
 }
 
+function getTempItemTags(sectionId, itemId) {
+    const entry = findTempItemEntry(sectionId, itemId);
+    if (!entry || !Array.isArray(entry.item.tags)) return [];
+    return entry.item.tags.map((t) => ({ color: t.color, text: t.text || '' }));
+}
+
+function __tagBridge() {
+    return (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+}
+
+function setTempItemTags(sectionId, itemId, tagsInput, options = {}) {
+    const entry = findTempItemEntry(sectionId, itemId);
+    if (!entry) return false;
+    const bridge = __tagBridge();
+    const tags = (bridge && bridge.normalizeTagArray)
+        ? bridge.normalizeTagArray(tagsInput)
+        : (Array.isArray(tagsInput) ? tagsInput.slice() : []);
+    if (tags.length) entry.item.tags = tags;
+    else if (Object.prototype.hasOwnProperty.call(entry.item, 'tags')) delete entry.item.tags;
+    entry.item.updatedAt = Date.now();
+    if (options.skipRender !== true) renderTempNode(entry.section);
+    if (options.skipSave !== true) saveTempNodes();
+    return true;
+}
+
+function toggleTempItemTag(sectionId, itemId, tagInput, options = {}) {
+    const entry = findTempItemEntry(sectionId, itemId);
+    if (!entry) return null;
+    const bridge = __tagBridge();
+    if (!bridge || !bridge.makeTagKey || !bridge.normalizeTagInput) return null;
+    const norm = bridge.normalizeTagInput(tagInput);
+    if (!norm) return null;
+    const existing = Array.isArray(entry.item.tags) ? entry.item.tags.slice() : [];
+    const key = bridge.makeTagKey(norm.color, norm.text);
+    const idx = existing.findIndex((t) => bridge.makeTagKey(t.color, t.text) === key);
+    let action;
+    if (idx >= 0) { existing.splice(idx, 1); action = 'removed'; }
+    else { existing.push(norm); action = 'added'; }
+    if (existing.length) entry.item.tags = existing;
+    else if (Object.prototype.hasOwnProperty.call(entry.item, 'tags')) delete entry.item.tags;
+    entry.item.updatedAt = Date.now();
+    if (options.skipRender !== true) renderTempNode(entry.section);
+    if (options.skipSave !== true) saveTempNodes();
+    return { action, tags: existing };
+}
+
 function updateTempBookmark(sectionId, itemId, updates) {
     const entry = findTempItemEntry(sectionId, itemId);
     if (!entry) throw new Error('未找到临时节点');
@@ -24884,18 +24930,18 @@ function buildTempTreeNode(section, item, level, options = {}) {
     const badges = document.createElement('span');
     badges.className = 'tree-meta-badges';
 
-    // 如果有未加载的子节点，显示数量提示
-    if (hasChildren && !isExpanded) {
-        const countBadge = document.createElement('span');
-        countBadge.className = 'folder-count-badge';
-        countBadge.textContent = `(${item.children.length})`;
-        badges.appendChild(countBadge);
-    }
+    // tag 系统：行尾「提示图标」（三横），点击打开 tag 弹窗
+    const tipIcon = document.createElement('span');
+    tipIcon.className = 'tree-tip-icon';
+    tipIcon.dataset.action = 'open-tag-popover';
+    tipIcon.setAttribute('draggable', 'false');
+    tipIcon.setAttribute('aria-label', __getLang().isEn ? 'Tags' : '标签');
 
     treeItem.appendChild(toggle);
     treeItem.appendChild(icon);
     treeItem.appendChild(label);
     treeItem.appendChild(badges);
+    treeItem.appendChild(tipIcon);
     wrapper.appendChild(treeItem);
 
     setupTempTreeNodeDropHandlers(treeItem, section, item);
@@ -25007,9 +25053,6 @@ function loadFolderChildren(section, parentItemId, childrenContainer) {
         // 更新父节点状态
         if (parentTreeItem) {
             parentTreeItem.dataset.childrenLoaded = 'true';
-            // 移除数量提示
-            const countBadge = parentTreeItem.querySelector('.folder-count-badge');
-            if (countBadge) countBadge.remove();
         }
 
         if (typeof attachDragEvents === 'function') {

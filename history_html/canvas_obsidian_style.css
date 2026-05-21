@@ -534,7 +534,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .canvas-workspace.is-zooming .tree-node,
 .canvas-workspace.is-zooming .bookmark-tree,
 .canvas-workspace.is-zooming .bookmark-tree *,
-.canvas-workspace.is-zooming .tree-item::after,
+.canvas-workspace.is-zooming .tree-tip-icon,
 .canvas-workspace.is-zooming .tree-item::before,
 .canvas-workspace.is-zooming .tree-label,
 .canvas-workspace.is-zooming .temp-bookmark-tree,
@@ -543,7 +543,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 /* 缩放时隐藏 hover 状态的拖拽提示点，避免闪烁 */
-.canvas-workspace.is-zooming .tree-item::after {
+.canvas-workspace.is-zooming .tree-tip-icon {
     opacity: 0 !important;
 }
 

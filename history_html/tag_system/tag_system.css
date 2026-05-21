@@ -1,0 +1,458 @@
+/* =============================================================================
+   Tag system styles (doc §3)
+   ============================================================================= */
+
+/* Tag color palette CSS variables */
+:root {
+    --tag-red: #ff453a;
+    --tag-orange: #ff9f0a;
+    --tag-yellow: #ffd60a;
+    --tag-green: #30d158;
+    --tag-blue: #0a84ff;
+    --tag-purple: #bf5af2;
+    --tag-gray: #8e8e93;
+}
+
+/* -----------------------------------------------------------------------------
+   Tag dot (used in tree rows, popover palette, popover list, search chips)
+   ----------------------------------------------------------------------------- */
+.tag-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    border: 1px solid transparent;
+    vertical-align: middle;
+}
+.tag-dot-red    { background: var(--tag-red); }
+.tag-dot-orange { background: var(--tag-orange); }
+.tag-dot-yellow { background: var(--tag-yellow); }
+.tag-dot-green  { background: var(--tag-green); }
+.tag-dot-blue   { background: var(--tag-blue); }
+.tag-dot-purple { background: var(--tag-purple); }
+.tag-dot-gray   { background: var(--tag-gray); }
+
+/* -----------------------------------------------------------------------------
+   Tag dots on a tree-item row
+   - Default: shown to the left of indent guide (i.e. before .tree-toggle).
+   - Wide-row mode: shown to the right (just before tip icon) via .has-wide-row.
+   - Overlapping stack: subsequent dots overlap by ~6px (macOS Finder style).
+   ----------------------------------------------------------------------------- */
+.tree-item-tag-dots {
+    --tag-dot-shift-x: 0px;
+    --tag-dot-shift-y: 0px;
+    display: inline-flex;
+    align-items: center;
+    pointer-events: auto;
+    z-index: 1;
+    margin-right: 4px;
+    flex-shrink: 0;
+    will-change: transform, opacity;
+    transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.16s ease;
+}
+.tree-item-tag-dots .tag-dot {
+    width: 12px;
+    height: 12px;
+    margin-left: -7px;
+    border: 1.5px solid var(--bg-primary, #fff);
+    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+    cursor: pointer;
+    transition: transform 0.12s ease;
+}
+.tree-item-tag-dots .tag-dot:first-child {
+    margin-left: 0;
+}
+.tree-item-tag-dots .tag-dot:hover {
+    transform: scale(1.15);
+    z-index: 2;
+}
+.tree-item-tag-dots .tag-dot-more {
+    background: transparent !important;
+    border: none;
+    box-shadow: none;
+    font-size: 10px;
+    color: var(--text-tertiary);
+    width: auto;
+    padding-left: 2px;
+}
+
+/* Positioning variant: dots-leading (default, before toggle) */
+.tree-item-tag-dots.dots-leading {
+    position: absolute;
+    left: calc(var(--tree-toggle-center, -2px) - 6px);
+    top: 50%;
+    margin: 0;
+    transform: translate(var(--tag-dot-shift-x), calc(-50% + var(--tag-dot-shift-y)));
+}
+
+/* Positioning variant: dots-trailing (for wide rows, near tip icon) */
+.tree-item-tag-dots.dots-trailing {
+    position: absolute;
+    right: 24px;
+    top: 50%;
+    transform: translate(var(--tag-dot-shift-x), calc(-50% + var(--tag-dot-shift-y)));
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    max-width: 60%;
+    padding: 2px 4px 2px 10px;
+    border-radius: 12px;
+    background: linear-gradient(90deg,
+            rgba(255, 255, 255, 0),
+            color-mix(in srgb, var(--bg-primary, #fff) 82%, transparent) 28%,
+            color-mix(in srgb, var(--bg-primary, #fff) 94%, transparent));
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+.permanent-bookmark-section .tree-item-tag-dots.dots-trailing {
+    right: 12px;
+    top: 18px;
+    transform: translate(var(--tag-dot-shift-x), calc(-50% + var(--tag-dot-shift-y)));
+}
+.temp-bookmark-tree .tree-item-tag-dots.dots-trailing,
+.temp-canvas-node .tree-item-tag-dots.dots-trailing {
+    right: 12px;
+}
+
+/* Wide-row chip: color dot + text, right-aligned. Looks like the preview pill. */
+.tree-item-tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px 1px 4px;
+    background: color-mix(in srgb, var(--bg-hover, rgba(255, 255, 255, 0.06)) 70%, var(--bg-primary, #fff) 30%);
+    border-radius: 10px;
+    font-size: 11px;
+    line-height: 1.4;
+    max-width: 140px;
+    color: var(--text-primary, #fff);
+    cursor: pointer;
+}
+.tree-item-tag-chip .tag-dot {
+    width: 9px;
+    height: 9px;
+    border: 1px solid rgba(0, 0, 0, 0.18);
+    margin-left: 0;
+    box-shadow: none;
+}
+.tree-item-tag-chip-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.tree-item-tag-chip-more {
+    font-size: 10px;
+    color: var(--text-tertiary, #888);
+    padding-left: 2px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+/* Hover bubble showing tag text */
+.tag-hover-bubble {
+    position: fixed;
+    background: var(--bg-secondary, #2a2a2a);
+    color: var(--text-primary, #fff);
+    border-left: 3px solid currentColor;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    pointer-events: none;
+    z-index: 99999;
+    white-space: nowrap;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tag-hover-bubble[data-color="red"]    { color: var(--tag-red); }
+.tag-hover-bubble[data-color="orange"] { color: var(--tag-orange); }
+.tag-hover-bubble[data-color="yellow"] { color: var(--tag-yellow); }
+.tag-hover-bubble[data-color="green"]  { color: var(--tag-green); }
+.tag-hover-bubble[data-color="blue"]   { color: var(--tag-blue); }
+.tag-hover-bubble[data-color="purple"] { color: var(--tag-purple); }
+.tag-hover-bubble[data-color="gray"]   { color: var(--tag-gray); }
+.tag-hover-bubble .tag-hover-bubble-text { color: var(--text-primary, #fff); }
+
+/* -----------------------------------------------------------------------------
+   Tag popover (single panel):
+     ┌─────────────────────────────┐
+     │ [input            ] [✓]    │  ← top: input + confirm
+     │ ● ● ● ● ● ● ●               │  ← palette (transient selection)
+     │ ─────                       │
+     │ ● Red                       │  ← live preview based on selected color + input
+     │                             │
+     │ Applied:                    │
+     │ ● work          [x]         │  ← already-applied tags (removable)
+     │ ● important     [x]         │
+     └─────────────────────────────┘
+   ----------------------------------------------------------------------------- */
+.tag-popover {
+    position: absolute;
+    z-index: 100000;
+    min-width: 220px;
+    max-width: 280px;
+    background: var(--bg-elevated, var(--bg-primary, #1f1f1f));
+    color: var(--text-primary, #fff);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    padding: 8px;
+    font-size: 12px;
+}
+
+.tag-popover-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.tag-popover-input {
+    flex: 1;
+    box-sizing: border-box;
+    padding: 5px 8px;
+    background: var(--bg-input, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary, #fff);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    border-radius: 5px;
+    font-size: 12px;
+    outline: none;
+    min-width: 0;
+}
+.tag-popover-input:focus {
+    border-color: var(--accent-blue, #0a84ff);
+}
+.tag-popover-input::placeholder {
+    color: var(--text-tertiary, #888);
+    font-size: 11px;
+}
+
+.tag-popover-confirm {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.16));
+    background: var(--bg-input, rgba(255, 255, 255, 0.06));
+    color: var(--text-tertiary, #888);
+    border-radius: 5px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.tag-popover-confirm:hover:not(:disabled) {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.1));
+}
+.tag-popover-confirm:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+.tag-popover-confirm.is-ready {
+    border-color: currentColor;
+    background: rgba(255, 255, 255, 0.04);
+}
+.tag-popover-confirm.is-ready:active {
+    transform: scale(0.95);
+}
+
+.tag-popover-palette {
+    display: flex;
+    gap: 4px;
+    padding: 2px 0;
+    margin-bottom: 8px;
+    justify-content: space-between;
+}
+.tag-palette-btn {
+    background: transparent;
+    border: none;
+    padding: 3px;
+    cursor: pointer;
+    border-radius: 50%;
+    line-height: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.12s ease, transform 0.12s ease;
+}
+.tag-palette-btn .tag-dot {
+    width: 16px;
+    height: 16px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+}
+.tag-palette-btn:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+}
+.tag-palette-btn.is-selected .tag-dot {
+    box-shadow: 0 0 0 2px var(--text-primary, #fff);
+    transform: scale(1.1);
+}
+.tag-palette-btn.is-applied .tag-dot::after {
+    content: '✓';
+    position: absolute;
+    color: var(--text-primary, #fff);
+    font-size: 10px;
+    line-height: 16px;
+    width: 16px;
+    height: 16px;
+    text-align: center;
+    font-weight: 700;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+}
+.tag-palette-btn.is-applied .tag-dot {
+    position: relative;
+}
+.tag-palette-btn.is-mixed .tag-dot::after {
+    content: '–';
+    position: absolute;
+    color: var(--text-primary, #fff);
+    font-size: 13px;
+    line-height: 14px;
+    width: 16px;
+    height: 16px;
+    text-align: center;
+    font-weight: 700;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+}
+.tag-palette-btn.is-mixed .tag-dot {
+    position: relative;
+}
+
+.tag-popover-divider {
+    height: 1px;
+    background: var(--border-color, rgba(255, 255, 255, 0.08));
+    margin: 4px 0 8px;
+}
+
+/* Preview row */
+.tag-popover-preview {
+    display: flex;
+    align-items: center;
+    min-height: 18px;
+    padding: 1px 4px;
+    margin-bottom: 4px;
+}
+.tag-preview-placeholder {
+    color: var(--text-tertiary, #888);
+    font-size: 11px;
+    font-style: italic;
+}
+.tag-preview-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px 3px 6px;
+    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    border-radius: 12px;
+    font-size: 12px;
+    max-width: 100%;
+}
+.tag-preview-card .tag-dot {
+    width: 10px;
+    height: 10px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+}
+.tag-preview-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 180px;
+}
+
+/* Applied / Recent tags list (below preview) */
+.tag-popover-applied-section {
+    border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+    padding-top: 6px;
+}
+.tag-popover-applied-header {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-tertiary, #888);
+    margin-bottom: 4px;
+    padding: 0 2px;
+}
+.tag-popover-applied {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.tag-popover-applied.is-scrollable {
+    max-height: 220px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+.tag-popover-more {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    text-align: center;
+    color: var(--text-tertiary, #888);
+    font-size: 11px;
+    padding: 4px 0 2px;
+    user-select: none;
+    cursor: pointer;
+    border-radius: 4px;
+}
+.tag-popover-more[hidden] {
+    display: none !important;
+}
+.tag-popover-more:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    color: var(--text-secondary, #bbb);
+}
+.tag-recent-empty {
+    padding: 8px 4px;
+    color: var(--text-tertiary, #888);
+    font-size: 11px;
+    text-align: center;
+    font-style: italic;
+}
+.tag-applied-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.tag-applied-row:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+}
+.tag-applied-row.is-active {
+    background: var(--bg-hover-strong, rgba(10, 132, 255, 0.12));
+}
+.tag-applied-row.is-mixed {
+    opacity: 0.7;
+    font-style: italic;
+}
+.tag-applied-row .tag-dot {
+    width: 10px;
+    height: 10px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+}
+.tag-applied-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.tag-applied-status {
+    font-size: 11px;
+    min-width: 12px;
+    text-align: center;
+    color: var(--text-tertiary, #888);
+    font-weight: 600;
+}
+.tag-applied-row.is-active .tag-applied-status {
+    color: var(--accent-blue, #0a84ff);
+}

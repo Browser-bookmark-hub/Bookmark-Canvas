@@ -13162,6 +13162,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                     <span class="tree-toggle" style="opacity: 0"></span>
                     ${favicon ? `<img class="tree-icon" src="${favicon}" alt="">` : `<i class="tree-icon fas fa-bookmark"></i>`}
                     <a href="${escapeHtml(node.url)}" target="_blank" class="tree-label tree-bookmark-link" rel="noopener noreferrer">${escapeHtml(node.title)}</a>
+                    <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
                 </div>
             </div>
         `;
@@ -13177,6 +13178,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                     <span class="tree-toggle"><i class="fas fa-chevron-right"></i></span>
                     <i class="tree-icon fas fa-folder"></i>
                     <span class="tree-label">${escapeHtml(node.title)}</span>
+                    <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
                 </div>
                 <div class="tree-children"></div>
             </div>
@@ -13198,6 +13200,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                     <span class="tree-toggle ${level === 0 ? 'expanded' : ''}"><i class="fas fa-chevron-right"></i></span>
                     <i class="tree-icon fas fa-folder${level === 0 ? '-open' : ''}"></i>
                     <span class="tree-label">${escapeHtml(node.title)}</span>
+                    <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
                 </div>
                 <div class="tree-children ${level === 0 ? 'expanded' : ''}">
                     ${sortedChildren.map(child => renderTreeNodeWithChanges(child, level + 1, maxDepth, visitedIds, null, options, false, '')).join('')}

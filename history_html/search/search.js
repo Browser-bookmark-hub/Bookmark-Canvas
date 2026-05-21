@@ -875,6 +875,20 @@ function handleSearchResultsPanelClick(e) {
         return;
     }
 
+    const locationMoreBtn = e.target.closest('.canvas-bookmark-location-more');
+    if (locationMoreBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const row = locationMoreBtn.closest('.canvas-bookmark-location-chip-row');
+        if (!row) return;
+        row.classList.add('is-expanded');
+        row.querySelectorAll('[data-location-chip-extra="true"]').forEach((chip) => {
+            chip.hidden = false;
+        });
+        locationMoreBtn.hidden = true;
+        return;
+    }
+
     const bookmarkGroupToggle = e.target.closest('.canvas-bookmark-group-toggle, .canvas-bookmark-group-count');
     if (bookmarkGroupToggle) {
         try {
@@ -1786,8 +1800,8 @@ const SEARCH_MODES = [
         labelEn: 'Bookmark',
         icon: 'fa-bookmark',
         color: 'mode-color-blue',
-        desc: '书签标题、URL、文件夹名称',
-        descEn: 'Title, URL, Folders'
+        desc: '书签标题、URL、文件夹名称、#标签（如 #红/#红色/#工作）',
+        descEn: 'Title, URL, Folders, #Tags (e.g. #Blue/#blue/#BLUE/#work)'
     },
     {
         key: 'structure',
@@ -1811,7 +1825,7 @@ const SEARCH_MODES = [
 ];
 
 // Canvas mode order must match the visual order in UI:
-// Bookmark -> Card -> Description
+// Bookmark (including tags) -> Card -> Description
 const CANVAS_MODE_KEYS = ['bookmark', 'structure', 'description'];
 
 function getCurrentViewSafe() {
@@ -2023,6 +2037,7 @@ function getActiveSearchMode() {
 }
 
 function setSearchMode(modeKey, options = {}) {
+    if (modeKey === 'tag') modeKey = 'bookmark';
     const mode = SEARCH_MODES.find(m => m.key === modeKey);
     if (!mode) return;
 
@@ -2041,6 +2056,21 @@ function setSearchMode(modeKey, options = {}) {
     searchUiState.activeMode = modeKey;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
     renderSearchModeUI();
+
+    // Bookmark mode includes tag matching, so warm up the permanent identityMap cache.
+    if (modeKey === 'bookmark' && typeof window !== 'undefined' && window.TagSystem && window.TagSystem.ensurePermTagsLoaded) {
+        try {
+            window.TagSystem.ensurePermTagsLoaded().then(() => {
+                if (searchUiState && searchUiState.domainIndexCache) {
+                    searchUiState.domainIndexCache = null;
+                }
+                const input2 = document.getElementById('searchInput');
+                if (input2 && input2.value && input2.value.trim()) {
+                    try { searchCanvasAndRender(input2.value.trim()); } catch (_) {}
+                }
+            });
+        } catch (_) {}
+    }
 
     // [Modified] Update input placeholder with mode description
     const input = document.getElementById('searchInput');
@@ -2313,7 +2343,7 @@ function renderSearchModeUI() {
 
     // Interactive Mode UI (Canvas)
     if (trigger) {
-        const colorClasses = ['mode-color-blue', 'mode-color-orange', 'mode-color-green'];
+        const colorClasses = ['mode-color-blue', 'mode-color-orange', 'mode-color-green', 'mode-color-purple'];
         trigger.classList.remove(...colorClasses);
         if (mode && mode.color) trigger.classList.add(mode.color);
     }
@@ -2373,8 +2403,9 @@ function initSearchModeUI() {
     // [Phase 3.5] Restore persistent mode
     try {
         const savedMode = localStorage.getItem('canvasSearchMode');
-        if (savedMode && SEARCH_MODES.some(m => m.key === savedMode)) {
-            searchUiState.activeMode = savedMode;
+        const normalizedSavedMode = savedMode === 'tag' ? 'bookmark' : savedMode;
+        if (normalizedSavedMode && SEARCH_MODES.some(m => m.key === normalizedSavedMode)) {
+            searchUiState.activeMode = normalizedSavedMode;
         }
     } catch (_) { }
 
@@ -2602,10 +2633,61 @@ function getCanvasSearchSignature() {
 function resetCanvasSearchDb(reason = '') {
     canvasSearchDb = {
         signature: null,
-        items: [],
+        structureIndex: [],
+        descriptionIndex: [],
+        bookmarkIndex: [],
         itemById: new Map()
     };
+    if (searchUiState && searchUiState.domainIndexCache) {
+        searchUiState.domainIndexCache = null;
+    }
     console.log('[Search] Phase 3 cache cleared:', reason);
+}
+
+function updateCanvasSearchBookmarkTags(targets) {
+    const list = Array.isArray(targets) ? targets : [];
+    if (!list.length || !canvasSearchDb || !Array.isArray(canvasSearchDb.bookmarkIndex)) return false;
+
+    let changed = false;
+    list.forEach((target) => {
+        if (!target) return;
+        let matched = [];
+        if (target.kind === 'temporary') {
+            const sectionId = String(target.sectionId || '');
+            const itemId = String(target.itemId || '');
+            matched = canvasSearchDb.bookmarkIndex.filter((item) =>
+                item && item.type === 'bookmark-item' &&
+                item.source === 'temporary' &&
+                String(item.sectionId || '') === sectionId &&
+                String(item.id || '') === itemId
+            );
+        } else if (target.kind === 'permanent') {
+            const chromeId = String(target.chromeId || '');
+            matched = canvasSearchDb.bookmarkIndex.filter((item) =>
+                item && item.type === 'bookmark-item' &&
+                item.source === 'permanent' &&
+                String(item.id || '') === chromeId
+            );
+        }
+
+        matched.forEach((item) => {
+            const sourceTags = Array.isArray(target.tags) ? target.tags : __getItemTagsForSearch(item);
+            const tags = sourceTags.map((tag) => ({
+                color: String(tag.color || ''),
+                text: String(tag.text || '')
+            })).filter((tag) => tag.color);
+            if (tags.length) item.tags = tags;
+            else if (Object.prototype.hasOwnProperty.call(item, 'tags')) delete item.tags;
+            item.__tags = tags.map((tag) => `${tag.color} ${tag.text}`).join(' ').toLowerCase();
+            changed = true;
+        });
+    });
+
+    if (changed && searchUiState && searchUiState.domainIndexCache) {
+        searchUiState.domainIndexCache = null;
+    }
+
+    return changed;
 }
 
 // ==================== Phase 3: 索引构建 ====================
@@ -3148,6 +3230,9 @@ function buildCanvasSearchDb() {
 
                 if (itemUrl || itemTitle) {
                     const namedPath = pathStack.length ? pathStack.join(' > ') : '';
+                    const inlineTags = Array.isArray(item.tags)
+                        ? item.tags.filter((t) => t && t.color).map((t) => ({ color: String(t.color), text: String(t.text || '') }))
+                        : [];
                     const bItem = {
                         id: String(item.id),
                         type: 'bookmark-item',
@@ -3162,9 +3247,11 @@ function buildCanvasSearchDb() {
                         sectionSource: typeof section.source === 'string' ? section.source : '',
                         namedPath,
                         color: sectionColor,
+                        tags: inlineTags,
                         __title: itemTitle.toLowerCase(),
                         __url: itemUrl.toLowerCase(),
-                        __path: namedPath.toLowerCase()
+                        __path: namedPath.toLowerCase(),
+                        __tags: inlineTags.map((t) => `${t.color} ${t.text}`).join(' ').toLowerCase()
                     };
                     pushBookmarkIndexItem(bItem);
                 }
@@ -3465,23 +3552,29 @@ function scoreCanvasSearchItem(item, query, options = {}) {
             break;
 
         case 'bookmark-item': {
-            // 书签/文件夹匹配（支持多关键词，以空格分隔）
+            // 书签/文件夹匹配（支持多关键词，以空格分隔）；
+            // 标签归入书签模式：#tag 优先查标签，普通关键词也可命中 tag text/color。
             const tokens = q.split(/\s+/).map(s => s.trim()).filter(Boolean);
             if (!tokens.length) return -Infinity;
+            const itemTags = __getItemTagsForSearch(item);
 
             let tokenScoreSum = 0;
             for (const t of tokens) {
                 const isSingleToken = t.length === 1;
+                const isTagToken = t.startsWith('#');
                 let tokenScore = 0;
 
-                if (item.__title) {
+                if (!isTagToken && item.__title) {
                     if (item.__title.startsWith(t)) tokenScore = Math.max(tokenScore, 140);
                     else if (item.__title.includes(t)) tokenScore = Math.max(tokenScore, 110);
                 }
-                if (item.__url && !isSingleToken && item.__url.includes(t)) tokenScore = Math.max(tokenScore, 90);
-                if (item.__path) {
+                if (!isTagToken && item.__url && !isSingleToken && item.__url.includes(t)) tokenScore = Math.max(tokenScore, 90);
+                if (!isTagToken && item.__path) {
                     if (item.__path.startsWith(t)) tokenScore = Math.max(tokenScore, 105);
                     else if (!isSingleToken && item.__path.includes(t)) tokenScore = Math.max(tokenScore, 95);
+                }
+                if (__tagMatchesQuery(itemTags, t)) {
+                    tokenScore = Math.max(tokenScore, isTagToken ? 135 : 100);
                 }
 
                 if (tokenScore === 0) return -Infinity;
@@ -3779,6 +3872,59 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
 
 // ==================== Phase 3: 搜索主入口 ====================
 
+// Tag mode helpers (doc §3): resolve an item's tags for search-time matching.
+// Permanent items: lookup via cached identityMap exposed by tag_system.js.
+// Temporary items: read inline `tags` already embedded in bookmarkIndex entry.
+function __getItemTagsForSearch(item) {
+    if (!item) return [];
+    if (Array.isArray(item.tags) && item.tags.length) return item.tags;
+    if (item.source === 'permanent' && typeof window !== 'undefined' && window.TagSystem
+        && typeof window.TagSystem.getPermNodeTagsCached === 'function') {
+        return window.TagSystem.getPermNodeTagsCached(item.id) || [];
+    }
+    return [];
+}
+
+const TAG_SEARCH_COLOR_ALIASES = {
+    red: ['red', '红', '红色'],
+    orange: ['orange', '橙', '橙色'],
+    yellow: ['yellow', '黄', '黄色'],
+    green: ['green', '绿', '绿色'],
+    blue: ['blue', '蓝', '蓝色'],
+    purple: ['purple', '紫', '紫色'],
+    gray: ['gray', 'grey', '灰', '灰色']
+};
+
+function __getTagSearchTerms(tag) {
+    if (!tag) return [];
+    const color = String(tag.color || '').trim().toLowerCase();
+    const text = String(tag.text || '').trim().toLowerCase();
+    const terms = [];
+    if (color) {
+        terms.push(color);
+        (TAG_SEARCH_COLOR_ALIASES[color] || []).forEach((alias) => terms.push(alias.toLowerCase()));
+    }
+    if (text) terms.push(text);
+    return Array.from(new Set(terms.filter(Boolean)));
+}
+
+// Match against a query. Empty query → all items with at least one tag match.
+// '#Red'/'#BLUE'/'#红色' → exact color/text/alias match (case-insensitive).
+// Plain text → substring match against tag.text and tag.color.
+function __tagMatchesQuery(tags, query) {
+    if (!tags || !tags.length) return false;
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return tags.length > 0;
+    if (q.startsWith('#')) {
+        const tagQuery = q.slice(1);
+        if (!tagQuery) return tags.length > 0;
+        return tags.some((t) => __getTagSearchTerms(t).some((term) => term === tagQuery));
+    }
+    return tags.some((t) => {
+        return __getTagSearchTerms(t).some((term) => term.includes(q));
+    });
+}
+
 /**
  * 执行画布搜索并渲染结果
  * @param {string} query - 搜索关键词
@@ -3811,6 +3957,9 @@ function searchCanvasAndRender(query) {
         sourceIndex = db.bookmarkIndex || [];
     } else if (mode === 'description') {
         sourceIndex = db.descriptionIndex || [];
+    } else if (mode === 'tag') {
+        // Tag mode shares the bookmark index, filtered by tag presence/match below.
+        sourceIndex = db.bookmarkIndex || [];
     } else {
         // Default to Structure (Card)
         sourceIndex = db.structureIndex || [];
@@ -3882,6 +4031,11 @@ function searchCanvasAndRender(query) {
             if (item.type !== 'permanent-section' && item.type !== 'temp-section') {
                 continue;
             }
+        } else if (searchUiState.activeMode === 'tag') {
+            // Tag Mode: only bookmark-items whose tags match the query.
+            if (item.type !== 'bookmark-item') continue;
+            const itemTags = __getItemTagsForSearch(item);
+            if (!__tagMatchesQuery(itemTags, trimmedQuery)) continue;
         }
         // Note: 'bookmark' mode logic is "not done yet" but currently implicit.
         // Once bookmark data is in indices, we will filter for it here.
@@ -3919,8 +4073,34 @@ function searchCanvasAndRender(query) {
             }
         }
 
+        if (mode === 'tag' && fullscreenScope && item.type === 'bookmark-item') {
+            const scopeKind = String(fullscreenScope.kind || '').trim();
+            if (scopeKind === 'temp') {
+                const targetSectionId = String(fullscreenScope.id || '').trim();
+                if (!(item.source === 'temporary' && String(item.sectionId || '') === targetSectionId)) {
+                    continue;
+                }
+            } else if (scopeKind === 'permanent') {
+                if (item.source !== 'permanent') {
+                    continue;
+                }
+            } else if (scopeKind === 'blank') {
+                continue;
+            }
+        }
+
         // 特殊语法过滤
         if (isPermanentQuery && item.type !== 'permanent-section') continue;
+
+        // Tag mode: skip score machinery (already filtered above). Give a flat score
+        // proportional to tag count so items with more tags rank higher.
+        if (mode === 'tag') {
+            const tags = __getItemTagsForSearch(item);
+            const rawScore = 100 + Math.min(10, tags.length);
+            const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
+            scored.push({ item, s: rawScore + scopeBonus, rawScore });
+            continue;
+        }
 
         const rawScore = scoreCanvasSearchItem(item, trimmedQuery, { isGroupSearch });
         if (rawScore > -Infinity) {
@@ -4322,6 +4502,10 @@ function isDomainSearchItemMatched(domain, item, query) {
     const pathText = String(item && item.__path || '').trim().toLowerCase();
     if (pathText && pathText.includes(q)) return true;
 
+    if (typeof __tagMatchesQuery === 'function' && __tagMatchesQuery(__getItemTagsForSearch(item), q)) {
+        return true;
+    }
+
     return false;
 }
 
@@ -4370,7 +4554,7 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
         } else if (scope && scope.kind === 'blank') {
             continue;
         } else {
-            if (item.source !== 'permanent') continue;
+            if (item.source !== 'permanent' && item.source !== 'temporary') continue;
         }
 
         const domain = getDomainGroupKey(item.url);
@@ -4404,6 +4588,7 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             sectionId: item.sectionId || null,
             color: item.color || '#0ea5e9',
             host: host || '',
+            tags: __getItemTagsForSearch(item),
             __title: item.__title || '',
             __url: item.__url || '',
             __path: item.__path || '',
@@ -4474,14 +4659,19 @@ function buildCanvasDomainDisplayResultsForQuery(query, scopeInput = null) {
 
         const domainKey = String(parent.domain || parent.title || '').trim().toLowerCase();
         const collapsed = isDomainGroupCollapsed(domainKey);
+        const entry = cache.map instanceof Map ? cache.map.get(domainKey) : null;
+        const parentTargetItems = entry && Array.isArray(entry.items)
+            ? entry.items.filter((child) => !hasQuery || child.matched === true)
+            : [];
         displayResults.push(Object.assign({}, parent, {
             isCollapsed: collapsed,
-            isExpanded: !collapsed
+            isExpanded: !collapsed,
+            targetItems: parentTargetItems,
+            childItems: parentTargetItems
         }));
 
         if (collapsed) continue;
 
-        const entry = cache.map instanceof Map ? cache.map.get(domainKey) : null;
         const childItems = entry && Array.isArray(entry.items)
             ? entry.items.filter((child) => !hasQuery || child.matched === true).slice()
             : [];
@@ -4510,6 +4700,7 @@ function buildCanvasDomainDisplayResultsForQuery(query, scopeInput = null) {
                 domainChild: true,
                 domain: domainKey,
                 domainHost: child.host || '',
+                tags: Array.isArray(child.tags) ? child.tags : [],
                 groupLevel
             });
         });
@@ -4843,6 +5034,49 @@ function renderCanvasSearchResults(results, options = {}) {
         const className = ['search-result-external-link', extraClass].filter(Boolean).join(' ');
         return `<a class="${className}" href="${escapeHtml(safeUrl)}" data-search-url="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${markQueryInText(safeUrl)}</a>`;
     };
+    const getBookmarkResultTags = (item) => {
+        const result = [];
+        const seen = new Set();
+        const addTags = (tags) => {
+            (Array.isArray(tags) ? tags : []).forEach((tag) => {
+                if (!tag || !tag.color) return;
+                const color = String(tag.color || '').trim().toLowerCase();
+                const text = String(tag.text || '').trim();
+                const key = `${color}::${text.toLowerCase()}`;
+                if (seen.has(key)) return;
+                seen.add(key);
+                result.push({ color, text });
+            });
+        };
+        if (item && (item.type === 'bookmark-group' || item.type === 'domain-group')) {
+            const children = Array.isArray(item.targetItems) ? item.targetItems : [];
+            children.forEach((child) => addTags(__getItemTagsForSearch(child)));
+        } else {
+            addTags(__getItemTagsForSearch(item));
+        }
+        return result;
+    };
+    const renderBookmarkResultTagMarkers = (item) => {
+        if (!item || (item.type !== 'bookmark-group' && item.type !== 'bookmark-item' && item.type !== 'domain-group')) return '';
+        const tags = getBookmarkResultTags(item);
+        if (!tags.length) return '';
+        const safeColorClass = (color) => {
+            const c = String(color || '').trim().toLowerCase();
+            return Object.prototype.hasOwnProperty.call(TAG_SEARCH_COLOR_ALIASES, c) ? c : 'gray';
+        };
+        const tagTitle = tags.map((tag) => tag.text || tag.color).filter(Boolean).join(', ');
+        if (tags.length > 5) {
+            const visible = tags.slice(0, 5).map((tag) =>
+                `<span class="tag-dot tag-dot-${safeColorClass(tag.color)}" title="${escapeHtml(tag.text || tag.color)}"></span>`
+            ).join('');
+            return `<div class="search-result-tag-strip search-result-tag-strip-compact" title="${escapeHtml(tagTitle)}">${visible}<span class="search-result-tag-more">…+${tags.length - 5}</span></div>`;
+        }
+        const chips = tags.map((tag) => {
+            const label = tag.text || tag.color;
+            return `<span class="search-result-tag-chip" title="${escapeHtml(label)}"><span class="tag-dot tag-dot-${safeColorClass(tag.color)}"></span><span class="search-result-tag-chip-text">${escapeHtml(label)}</span></span>`;
+        }).join('');
+        return `<div class="search-result-tag-strip" title="${escapeHtml(tagTitle)}">${chips}</div>`;
+    };
     const getPermanentCopyLabelForBookmarkSearch = (copyId) => {
         const safeCopyId = String(copyId || '').trim();
         if (!safeCopyId) return '#A';
@@ -4936,6 +5170,7 @@ function renderCanvasSearchResults(results, options = {}) {
             ? `<div class="search-result-link-row">${renderExternalLinkHtml(child.url)}</div>`
             : '';
         const sourceHtml = renderBookmarkChildSourceHtml(child);
+        const childTagMarkersHtml = renderBookmarkResultTagMarkers(child);
 
         return `
             <div class="canvas-bookmark-group-child-item ${child.nodeType === 'folder' ? 'is-folder' : 'is-bookmark'}" role="button" tabindex="0"
@@ -4946,6 +5181,7 @@ function renderCanvasSearchResults(results, options = {}) {
                     <span class="canvas-bookmark-group-child-index">${childIndex + 1}</span>
                     ${renderBookmarkChildIconHtml(child)}
                     <span class="canvas-bookmark-group-child-title">${titleHtml}</span>
+                    ${childTagMarkersHtml ? `<span class="canvas-bookmark-group-child-tags">${childTagMarkersHtml}</span>` : ''}
                 </div>
                 <div class="canvas-bookmark-group-child-meta">
                     ${sourceHtml}
@@ -5214,7 +5450,10 @@ function renderCanvasSearchResults(results, options = {}) {
                 const toggleHtml = canExpandGroup
                     ? `<button class="canvas-bookmark-group-toggle" type="button" data-bookmark-group-id="${escapeHtml(groupId)}" aria-label="${escapeHtml(isZh ? '展开或收起候选路径' : 'Expand or collapse candidate paths')}"><i class="fas ${isGroupExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>`
                     : '';
-                title = `<div class="search-result-bookmark-title-text">${titleText}</div>${countHtml}${toggleHtml}`;
+                const groupActionsHtml = countHtml || toggleHtml
+                    ? `<div class="canvas-bookmark-group-actions">${countHtml}${toggleHtml}</div>`
+                    : '';
+                title = `<div class="search-result-bookmark-title-text">${titleText}</div>${groupActionsHtml}`;
                 const rootLabel = isZh ? '根目录' : 'Root';
                 const parentPathListRaw = Array.isArray(item.parentPaths) ? item.parentPaths : [];
                 const parentPathList = parentPathListRaw.length
@@ -5239,7 +5478,7 @@ function renderCanvasSearchResults(results, options = {}) {
                     const temps = item.locations.filter(l => l.source !== 'permanent');
 
                     // Helper to make chip
-                    const makeChip = (text, color, attr, extraStyle = '', titleText = '') => {
+                    const makeChip = (text, color, attr, extraStyle = '', titleText = '', extraAttrs = '') => {
                         const chipClass = disableLocationJumpBadges
                             ? 'search-loc-chip search-loc-chip-disabled canvas-bookmark-location-chip'
                             : 'search-loc-chip canvas-bookmark-location-chip';
@@ -5250,7 +5489,35 @@ function renderCanvasSearchResults(results, options = {}) {
                         const safeTitle = String(titleText || text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
                         const compactClass = compactBookmarkToolbar ? ' canvas-bookmark-location-chip-compact' : '';
                         const safeColor = escapeHtml(color);
-                        return `<button type="button" class="${chipClass}${compactClass}" ${chipAttr} style="${chipCursor} --loc-color:${safeColor}; border-color:${safeColor}; color:${safeColor}; background:${safeColor}18; ${extraStyle}" title="${escapeHtml(safeTitle)}"><span class="canvas-bookmark-location-chip-text">${text}</span></button>`;
+                        return `<button type="button" class="${chipClass}${compactClass}" ${chipAttr} ${extraAttrs} style="${chipCursor} --loc-color:${safeColor}; border-color:${safeColor}; color:${safeColor}; background:${safeColor}18; ${extraStyle}" title="${escapeHtml(safeTitle)}"><span class="canvas-bookmark-location-chip-text">${text}</span></button>`;
+                    };
+                    const renderLocationChipRow = (chips) => {
+                        const list = Array.isArray(chips) ? chips.filter(Boolean) : [];
+                        const compactClass = compactBookmarkToolbar ? ' canvas-bookmark-location-chip-row-compact' : '';
+                        const renderChipWithBreaks = (sourceList, options = {}) => sourceList.map((chipHtml, localIndex) => {
+                            const index = Number(options.startIndex || 0) + localIndex;
+                            const hiddenAttr = options.hidden ? 'hidden data-location-chip-extra="true" ' : '';
+                            const chip = hiddenAttr
+                                ? chipHtml.replace('<button ', `<button ${hiddenAttr}`)
+                                : chipHtml;
+                            const shouldBreak = (index + 1) % 3 === 0 && (index + 1) < list.length;
+                            const breakHtml = shouldBreak
+                                ? `<span class="canvas-bookmark-location-chip-row-break" ${hiddenAttr}></span>`
+                                : '';
+                            return `${chip}${breakHtml}`;
+                        }).join('');
+                        if (list.length <= 6) {
+                            return `<div class="canvas-bookmark-location-chip-row canvas-bookmark-location-chip-row-limited${compactClass}">${renderChipWithBreaks(list)}</div>`;
+                        }
+                        const visibleList = list.slice(0, 5);
+                        const hiddenList = list.slice(5);
+                        const visible = renderChipWithBreaks(visibleList);
+                        const hidden = renderChipWithBreaks(hiddenList, { hidden: true, startIndex: visibleList.length });
+                        return `<div class="canvas-bookmark-location-chip-row canvas-bookmark-location-chip-row-limited${compactClass}">
+                            ${visible}
+                            <button type="button" class="canvas-bookmark-location-more" title="${escapeHtml(isZh ? '展开全部标识' : 'Show all markers')}">...</button>
+                            ${hidden}
+                        </div>`;
                     };
 
                     // A. Permanent Row
@@ -5284,11 +5551,9 @@ function renderCanvasSearchResults(results, options = {}) {
                             copyBadges.push(makeChip('#A', '#059669', `data-loc-id="${loc.id}" data-loc-source="permanent" data-copy-id="null"`));
                         }
 
-                        const badgestStr = copyBadges.join('');
-
                         locationsHtml += `<div class="canvas-bookmark-location-row canvas-bookmark-location-row-permanent${compactBookmarkToolbar ? ' canvas-bookmark-location-row-compact' : ''}">
                             ${permLabel}
-                            <div class="canvas-bookmark-location-chip-row">${badgestStr}</div>
+                            ${renderLocationChipRow(copyBadges)}
                         </div>`;
                     }
 
@@ -5312,11 +5577,9 @@ function renderCanvasSearchResults(results, options = {}) {
                             return makeChip(content, color, attr, '', [seq, rawTitle].filter(Boolean).join(' '));
                         });
 
-                        const badgestStr = tempBadges.join('');
-
                         locationsHtml += `<div class="canvas-bookmark-location-row canvas-bookmark-location-row-temp${compactBookmarkToolbar ? ' canvas-bookmark-location-row-compact' : ''}">
                             ${tempLabel}
-                            <div class="canvas-bookmark-location-chip-row">${badgestStr}</div>
+                            ${renderLocationChipRow(tempBadges)}
                         </div>`;
                     }
                 }
@@ -5531,6 +5794,12 @@ function renderCanvasSearchResults(results, options = {}) {
             descHtml = item.domainChild
                 ? descHtml
                 : `<div class="search-result-match search-result-link-row">${renderExternalLinkHtml(item.url)}</div>`;
+        }
+        const hideAggregateTags = (item.type === 'bookmark-group' && isBookmarkGroupExpanded(String(item.id || '')))
+            || (item.type === 'domain-group' && item.isExpanded === true);
+        const tagMarkersHtml = isBookmarkMode && !hideAggregateTags ? renderBookmarkResultTagMarkers(item) : '';
+        if (tagMarkersHtml) {
+            badge = `<div class="search-result-right-stack">${tagMarkersHtml}${badge}</div>`;
         }
 
         const extraClasses = [];
@@ -5755,6 +6024,12 @@ function buildSearchBookmarkPayload(item, isZh) {
         children: []
     };
     if (item && item.id) payload.id = String(item.id);
+    if (item && Array.isArray(item.tags) && item.tags.length) {
+        payload.tags = item.tags.map((tag) => ({
+            color: String(tag && tag.color || ''),
+            text: String(tag && tag.text || '')
+        })).filter((tag) => tag.color);
+    }
     if (source === 'permanent') {
         payload.__canvasPayloadSource = 'permanent';
     }
@@ -7781,6 +8056,7 @@ if (typeof window !== 'undefined') {
     // ==================== Phase 3: 画布搜索 ====================
     window.searchCanvasAndRender = searchCanvasAndRender;
     window.resetCanvasSearchDb = resetCanvasSearchDb;
+    window.updateCanvasSearchBookmarkTags = updateCanvasSearchBookmarkTags;
     window.locateCanvasElement = locateCanvasElement;
     window.locateCanvasBookmarkTreeItem = locateCanvasBookmarkTreeItem;
     window.clearCanvasSearchHighlight = clearCanvasSearchHighlight;

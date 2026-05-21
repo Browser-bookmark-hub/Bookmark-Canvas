@@ -1542,6 +1542,206 @@ function __verifyAndHealIdentityMap(content) {
     return { added, removed, regenerated };
 }
 
+// =============================================================================
+// Tag CRUD (doc §3):
+//   - Permanent nodes: tags live on identityMap entries, keyed by chromeId.
+//   - Temporary items: tags live inline on item.tags (mutations handled in
+//     bookmark_canvas_module via the toggleTempItemTag helper which calls
+//     normalizeTagArray below for normalization).
+// Permanent mutations go through the regular BCS read/write so the bulk-mute
+// and identityMap-heal contracts are preserved.
+// =============================================================================
+
+function __makeTagKey(color, text) {
+    return `${String(color || '').trim().toLowerCase()}::${String(text || '').trim()}`;
+}
+
+function __normalizeTagInput(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const color = String(raw.color || '').trim();
+    if (!color) return null;
+    const text = String(raw.text || '').trim();
+    return { color, text };
+}
+
+function __normalizeTagArrayInput(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const t of raw) {
+        const norm = __normalizeTagInput(t);
+        if (!norm) continue;
+        const key = __makeTagKey(norm.color, norm.text);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(norm);
+    }
+    return out;
+}
+
+function __getPermanentNodeTagsFromContent(content, chromeId) {
+    if (!content || !chromeId) return [];
+    const { byChromeId } = __getIdentityMapIndex(content);
+    const entry = byChromeId.get(String(chromeId));
+    if (!entry || !Array.isArray(entry.tags)) return [];
+    return entry.tags.map((t) => ({ color: t.color, text: t.text || '' }));
+}
+
+function __setPermanentNodeTagsInContent(content, chromeId, tagsInput) {
+    if (!content || !chromeId) return false;
+    const tags = __normalizeTagArrayInput(tagsInput);
+    const { byChromeId } = __getIdentityMapIndex(content);
+    const entry = byChromeId.get(String(chromeId));
+    if (!entry) return false;
+    if (tags.length) {
+        entry.tags = tags;
+    } else if (Object.prototype.hasOwnProperty.call(entry, 'tags')) {
+        delete entry.tags;
+    }
+    return true;
+}
+
+function __togglePermanentNodeTagInContent(content, chromeId, tagInput) {
+    const norm = __normalizeTagInput(tagInput);
+    if (!norm) return null;
+    const existing = __getPermanentNodeTagsFromContent(content, chromeId);
+    const key = __makeTagKey(norm.color, norm.text);
+    const idx = existing.findIndex((t) => __makeTagKey(t.color, t.text) === key);
+    let nextTags;
+    let action;
+    if (idx >= 0) {
+        nextTags = existing.slice();
+        nextTags.splice(idx, 1);
+        action = 'removed';
+    } else {
+        nextTags = existing.concat([norm]);
+        action = 'added';
+    }
+    const ok = __setPermanentNodeTagsInContent(content, chromeId, nextTags);
+    return ok ? { action, tags: nextTags } : null;
+}
+
+async function __readPermanentNodeTags(chromeId) {
+    const content = await __readPermanentMainContentFromBcs({ skipIdentityMapHeal: true });
+    if (!content) return [];
+    return __getPermanentNodeTagsFromContent(content, chromeId);
+}
+
+async function __writePermanentNodeTags(chromeId, tagsInput, options = {}) {
+    const content = await __readPermanentMainContentFromBcs();
+    if (!content) return null;
+    if (!__setPermanentNodeTagsInContent(content, chromeId, tagsInput)) return null;
+    return await __writePermanentMainContentToBcs(content, {
+        immediate: !(options && options.immediate === false),
+        skipIdentityMapHeal: true
+    });
+}
+
+async function __togglePermanentNodeTag(chromeId, tagInput, options = {}) {
+    const content = await __readPermanentMainContentFromBcs();
+    if (!content) return null;
+    const result = __togglePermanentNodeTagInContent(content, chromeId, tagInput);
+    if (!result) return null;
+    await __writePermanentMainContentToBcs(content, {
+        immediate: !(options && options.immediate === false),
+        skipIdentityMapHeal: true
+    });
+    return result;
+}
+
+async function __writePermanentNodeTagsBulk(updates, options = {}) {
+    if (!Array.isArray(updates) || !updates.length) return null;
+    const content = await __readPermanentMainContentFromBcs();
+    if (!content) return null;
+    let changed = 0;
+    for (const u of updates) {
+        if (!u || !u.chromeId) continue;
+        if (__setPermanentNodeTagsInContent(content, u.chromeId, u.tags)) changed += 1;
+    }
+    if (!changed) return null;
+    await __writePermanentMainContentToBcs(content, {
+        immediate: !(options && options.immediate === false),
+        skipIdentityMapHeal: true
+    });
+    return { changed };
+}
+
+function __collectTagsFromIdentityMap(content) {
+    const map = new Map();
+    if (!content || !Array.isArray(content.identityMap)) return map;
+    for (const entry of content.identityMap) {
+        if (!entry || !Array.isArray(entry.tags)) continue;
+        for (const t of entry.tags) {
+            const norm = __normalizeTagInput(t);
+            if (!norm) continue;
+            const key = __makeTagKey(norm.color, norm.text);
+            const prev = map.get(key);
+            if (prev) {
+                prev.count += 1;
+                prev.lastSeen = Date.now();
+            } else {
+                map.set(key, { color: norm.color, text: norm.text, count: 1, lastSeen: Date.now() });
+            }
+        }
+    }
+    return map;
+}
+
+function __collectTagsFromTempState(stateInput) {
+    const map = new Map();
+    if (!stateInput || !Array.isArray(stateInput.sections)) return map;
+    const walk = (items) => {
+        if (!Array.isArray(items)) return;
+        for (const it of items) {
+            if (!it) continue;
+            if (Array.isArray(it.tags)) {
+                for (const t of it.tags) {
+                    const norm = __normalizeTagInput(t);
+                    if (!norm) continue;
+                    const key = __makeTagKey(norm.color, norm.text);
+                    const prev = map.get(key);
+                    const ts = Number(it.updatedAt) || Number(it.createdAt) || Date.now();
+                    if (prev) {
+                        prev.count += 1;
+                        if (ts > prev.lastSeen) prev.lastSeen = ts;
+                    } else {
+                        map.set(key, { color: norm.color, text: norm.text, count: 1, lastSeen: ts });
+                    }
+                }
+            }
+            if (Array.isArray(it.children) && it.children.length) walk(it.children);
+        }
+    };
+    for (const section of stateInput.sections) {
+        if (section && Array.isArray(section.items)) walk(section.items);
+    }
+    return map;
+}
+
+async function __collectAllUsedTags() {
+    const content = await __readPermanentMainContentFromBcs({ skipIdentityMapHeal: true });
+    let tempState = null;
+    try { tempState = await __loadCanvasTempStateFromBcs(); } catch (_) {}
+    const merged = new Map();
+    const mergeFrom = (src) => {
+        src.forEach((val, key) => {
+            const prev = merged.get(key);
+            if (prev) {
+                prev.count += val.count;
+                if (val.lastSeen > prev.lastSeen) prev.lastSeen = val.lastSeen;
+            } else {
+                merged.set(key, { color: val.color, text: val.text, count: val.count, lastSeen: val.lastSeen });
+            }
+        });
+    };
+    if (content) mergeFrom(__collectTagsFromIdentityMap(content));
+    if (tempState) mergeFrom(__collectTagsFromTempState(tempState));
+    return Array.from(merged.values()).sort((a, b) => {
+        if (b.lastSeen !== a.lastSeen) return b.lastSeen - a.lastSeen;
+        return b.count - a.count;
+    });
+}
+
 // doc 第三轮修复 §2.3: 把校验函数从 import-export-transfer-feature.js 迁到协议核心层。
 // doc 第三轮修复 §2.2: 通过 options.ignoredChromeIds 跳过非可写 / 非标准的 Chrome 固定根
 //                       (典型如 managed root, chromeId='4')，企业策略环境下校验不再误杀。
@@ -6843,6 +7043,20 @@ if (typeof window !== 'undefined') {
         rebuildIdentityMapPreservingExisting(prev, treeRoot) { return __rebuildIdentityMapPreservingExisting(prev, treeRoot); },
         applyIdentityMapDeltaFromBookmarkEvents(content, events) { return __applyIdentityMapDeltaFromBookmarkEvents(content, events); },
         bootstrapIdentityMapFromTree(treeRoot) { return __bootstrapIdentityMapFromTree(treeRoot); },
+        // ----- Tag CRUD (doc §3) -----
+        makeTagKey(color, text) { return __makeTagKey(color, text); },
+        normalizeTagInput(raw) { return __normalizeTagInput(raw); },
+        normalizeTagArray(rawList) { return __normalizeTagArrayInput(rawList); },
+        getPermanentNodeTagsFromContent(content, chromeId) { return __getPermanentNodeTagsFromContent(content, chromeId); },
+        setPermanentNodeTagsInContent(content, chromeId, tagsInput) { return __setPermanentNodeTagsInContent(content, chromeId, tagsInput); },
+        togglePermanentNodeTagInContent(content, chromeId, tagInput) { return __togglePermanentNodeTagInContent(content, chromeId, tagInput); },
+        async readPermanentNodeTags(chromeId) { return await __readPermanentNodeTags(chromeId); },
+        async writePermanentNodeTags(chromeId, tagsInput, options = {}) { return await __writePermanentNodeTags(chromeId, tagsInput, options); },
+        async togglePermanentNodeTag(chromeId, tagInput, options = {}) { return await __togglePermanentNodeTag(chromeId, tagInput, options); },
+        async writePermanentNodeTagsBulk(updates, options = {}) { return await __writePermanentNodeTagsBulk(updates, options); },
+        collectTagsFromIdentityMap(content) { return __collectTagsFromIdentityMap(content); },
+        collectTagsFromTempState(stateInput) { return __collectTagsFromTempState(stateInput); },
+        async collectAllUsedTags() { return await __collectAllUsedTags(); },
         async buildExportSandbox(options = {}) { return await __buildExportSandbox(options); },
         cloneForSandbox(state) { return __cloneForSandbox(state); },
         applySyncIdReplacementInSandbox(sandbox) { return __applySyncIdReplacementInSandbox(sandbox); },

@@ -3600,14 +3600,20 @@ body.sidebar-resizing * {
 }
 
 /* 永久栏目（含副本）：hover 小标识略向右、略向下 */
-.permanent-bookmark-section .tree-item::after {
+.permanent-bookmark-section .tree-tip-icon {
     right: -6px;
     top: 18px;
     transform: translateY(-50%);
 }
 
+/* 临时栏目/特殊临时栏目：tag 触发 # 向右对齐到永久栏目一侧 */
+.temp-bookmark-tree .tree-tip-icon,
+.temp-canvas-node .tree-tip-icon {
+    right: -6px;
+}
+
 /* 预览：保持原来的小标识位置（不要跟随永久栏目） */
-.changes-tree-preview-inline .tree-item::after {
+.changes-tree-preview-inline .tree-tip-icon {
     /* 突破右侧圆圈（悬浮背景），置于更右侧的空白区域 */
     right: -10px;
     /* 垂直对齐第一行文字中心 */
@@ -5399,37 +5405,46 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     position: relative;
 }
 
-/* 拖拽提示 */
+/* 拖拽提示（旧伪元素已弃用，由真 DOM .tree-tip-icon 承担视觉与交互） */
 .tree-item::after {
-    content: '';
+    content: none !important;
+}
+
+/* tag 系统：行尾提示图标 = #，hover 出现，点击打开 tag 弹窗 */
+.tree-tip-icon {
     position: absolute;
     right: 8px;
     top: 50%;
     transform: translateY(-50%);
-    width: 4px;
-    height: 12px;
-    background: linear-gradient(to bottom,
-            var(--text-tertiary) 0px,
-            var(--text-tertiary) 2px,
-            transparent 2px,
-            transparent 4px,
-            var(--text-tertiary) 4px,
-            var(--text-tertiary) 6px,
-            transparent 6px,
-            transparent 8px,
-            var(--text-tertiary) 8px,
-            var(--text-tertiary) 10px,
-            transparent 10px,
-            transparent 12px);
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    margin-left: auto;
+    background: none;
     opacity: 0;
-    transition: opacity 0.2s;
+    transition: opacity 0.2s ease;
+    cursor: pointer;
+    border-radius: 2px;
+    color: var(--text-tertiary);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 14px;
+    text-align: center;
 }
 
-.tree-item:hover::after {
-    opacity: 0.3;
+.tree-tip-icon::before {
+    content: '#';
 }
 
-.tree-item.dragging::after {
+.tree-item:hover .tree-tip-icon {
+    opacity: 0.45;
+}
+
+.tree-tip-icon:hover {
+    opacity: 1 !important;
+}
+
+.tree-item.dragging .tree-tip-icon {
     opacity: 0;
 }
 

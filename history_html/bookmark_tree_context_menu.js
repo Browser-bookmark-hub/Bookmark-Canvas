@@ -2890,6 +2890,7 @@ function buildMenuItems(context) {
             { action: 'batch-cut', label: lang === 'zh_CN' ? '剪切选中项' : 'Cut Selected', icon: 'cut' },
             { action: 'batch-delete', label: lang === 'zh_CN' ? '删除选中项' : 'DELETE', icon: 'trash-alt' },
             { action: 'batch-rename', label: lang === 'zh_CN' ? '批量重命名' : 'Batch Rename', icon: 'edit' },
+            { action: 'batch-add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag' },
             { separator: true },
             { action: 'batch-export-html', label: lang === 'zh_CN' ? '导出为HTML' : 'Export to HTML', icon: 'file-code' },
             { action: 'batch-export-json', label: lang === 'zh_CN' ? '导出为JSON' : 'Export to JSON', icon: 'file-alt' },
@@ -2921,6 +2922,7 @@ function buildMenuItems(context) {
             { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'select' },
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'select' },
             { action: 'paste', label: lang === 'zh_CN' ? '粘贴到文件夹内' : 'Paste into Folder', icon: 'paste', disabled: !hasClipboard(), group: 'select' },
+            { action: 'add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'select' },
             { separator: true },
 
             // 打开组
@@ -2958,6 +2960,7 @@ function buildMenuItems(context) {
             // 将 Copy Link 放到 Copy 后面
             { action: 'copy-url', label: lang === 'zh_CN' ? '复制链接' : 'Copy Link', icon: 'link', group: 'select' },
             { action: 'paste', label: lang === 'zh_CN' ? '粘贴到下方' : 'Paste Below', icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'select' },
+            { action: 'add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'select' },
             { separator: true },
 
             // 打开组（移除可点击的 Open，改为标题；英文改为 in ...）
@@ -3836,9 +3839,87 @@ async function handleTempMenuAction(action, context) {
         case 'batch-merge-folder':
             alert('该功能暂未在临时栏目中实现');
             break;
+        case 'add-tags':
+        case 'batch-add-tags':
+            await openTagPopoverForContext(action, context);
+            break;
         default:
             console.warn('[临时栏目] 未处理的菜单操作:', action);
     }
+}
+
+// ----- Tag popover entry (Phase E) -----------------------------------------
+// Open the tag popover from a right-click action ('add-tags') or a batch
+// action ('batch-add-tags'). Resolves anchor + target(s) and delegates to the
+// TagSystem module (history_html/tag_system/tag_system.js).
+async function openTagPopoverForContext(action, context) {
+    if (typeof window.openTagPopover !== 'function' || !window.TagSystem) return;
+    const isBatch = action === 'batch-add-tags';
+    let targets = [];
+    let anchorEl = null;
+
+    if (isBatch && selectedNodes && selectedNodes.size) {
+        selectedNodes.forEach((id) => {
+            const meta = (selectedNodeMeta && selectedNodeMeta.get) ? selectedNodeMeta.get(id) : null;
+            const treeType = (meta && meta.treeType) || (context && context.treeType) || 'permanent';
+            if (treeType === 'temporary') {
+                const sectionId = meta && meta.sectionId;
+                let el = document.querySelector(`.tree-item[data-tree-type="temporary"][data-section-id="${CSS.escape(String(sectionId || ''))}"][data-node-id="${CSS.escape(String(id))}"]`);
+                if (!el && context && context.nodeId === id) el = context.node || null;
+                const title = el ? (el.dataset.nodeTitle || '') : '';
+                const url = el ? (el.dataset.nodeUrl || '') : '';
+                targets.push({
+                    kind: 'temporary',
+                    sectionId: String(sectionId || ''),
+                    itemId: String(id),
+                    nodeType: el ? (el.dataset.nodeType || 'bookmark') : 'bookmark',
+                    title,
+                    url
+                });
+                if (!anchorEl && el) anchorEl = el.querySelector(':scope > .tree-tip-icon') || el;
+            } else {
+                let el = document.querySelector(`.tree-item[data-node-id="${CSS.escape(String(id))}"]:not([data-tree-type="temporary"])`);
+                const title = el ? (el.dataset.nodeTitle || '') : '';
+                const url = el ? (el.dataset.nodeUrl || '') : '';
+                targets.push({
+                    kind: 'permanent',
+                    chromeId: String(id),
+                    nodeType: el ? (el.dataset.nodeType || 'bookmark') : 'bookmark',
+                    title,
+                    url
+                });
+                if (!anchorEl && el) anchorEl = el.querySelector(':scope > .tree-tip-icon') || el;
+            }
+        });
+    } else if (context && context.nodeId) {
+        const treeType = context.treeType || 'permanent';
+        if (treeType === 'temporary') {
+            targets.push({
+                kind: 'temporary',
+                sectionId: String(context.sectionId || ''),
+                itemId: String(context.nodeId),
+                nodeType: context.isFolder ? 'folder' : 'bookmark',
+                title: context.nodeTitle || '',
+                url: context.nodeUrl || ''
+            });
+        } else {
+            targets.push({
+                kind: 'permanent',
+                chromeId: String(context.nodeId),
+                nodeType: context.isFolder ? 'folder' : 'bookmark',
+                title: context.nodeTitle || '',
+                url: context.nodeUrl || ''
+            });
+        }
+        const sel = treeType === 'temporary'
+            ? `.tree-item[data-tree-type="temporary"][data-section-id="${CSS.escape(String(context.sectionId || ''))}"][data-node-id="${CSS.escape(String(context.nodeId))}"]`
+            : `.tree-item[data-node-id="${CSS.escape(String(context.nodeId))}"]:not([data-tree-type="temporary"])`;
+        const el = document.querySelector(sel) || (context.node || null);
+        if (el) anchorEl = (el.querySelector ? el.querySelector(':scope > .tree-tip-icon') : null) || el;
+    }
+
+    if (!targets.length) return;
+    window.openTagPopover({ targets, anchor: anchorEl });
 }
 
 async function batchOpenTemp(options = {}) {
@@ -5695,6 +5776,11 @@ async function handleMenuAction(action, context) {
 
             case 'batch-merge-folder':
                 await batchMergeFolder();
+                break;
+
+            case 'add-tags':
+            case 'batch-add-tags':
+                await openTagPopoverForContext(action, context);
                 break;
 
             case 'select-item':
