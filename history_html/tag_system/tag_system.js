@@ -163,9 +163,14 @@
                 </button>
             </div>
             <div class="tag-popover-palette" data-role="palette">
-                ${TAG_PALETTE.map((c) =>
-                    `<button class="tag-palette-btn" data-color="${c}" type="button" aria-label="${c}"><span class="tag-dot tag-dot-${c}"></span></button>`
-                ).join('')}
+                <div class="tag-popover-palette-colors" data-role="palette-colors">
+                    ${TAG_PALETTE.map((c) =>
+                        `<button class="tag-palette-btn" data-color="${c}" type="button" aria-label="${c}"><span class="tag-dot tag-dot-${c}"></span></button>`
+                    ).join('')}
+                </div>
+                <button class="tag-popover-delete" data-role="delete-existing" type="button" aria-label="${__t(TAG_PANEL_I18N.removeAriaLabel)}" hidden>
+                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4.2 3 8 6.8 11.8 3 13 4.2 9.2 8l3.8 3.8-1.2 1.2L8 9.2 4.2 13 3 11.8 6.8 8 3 4.2z"/></svg>
+                </button>
             </div>
             <div class="tag-popover-divider"></div>
             <div class="tag-popover-preview" data-role="preview">
@@ -298,13 +303,18 @@
         const txt = __popoverEl.querySelector('[data-role="preview-text"]');
         const input = __popoverEl.querySelector('[data-role="input"]');
         const confirmBtn = __popoverEl.querySelector('[data-role="confirm"]');
+        const deleteBtn = __popoverEl.querySelector('[data-role="delete-existing"]');
         const color = __popoverCtx.selectedColor;
+        if (deleteBtn) {
+            deleteBtn.hidden = !__popoverCtx.editingTag;
+        }
         if (!color) {
             card.hidden = true;
             placeholder.hidden = false;
             placeholder.textContent = __t(TAG_PANEL_I18N.previewEmpty);
             confirmBtn.disabled = true;
             confirmBtn.classList.remove('is-ready');
+            confirmBtn.style.removeProperty('color');
             return;
         }
         placeholder.hidden = true;
@@ -469,6 +479,13 @@
         __notifyTagSearchChanged(targets, { updatedTags: latestSingleTargetTags });
     }
 
+    async function __deleteEditingTag() {
+        if (!__popoverCtx || !__popoverCtx.editingTag) return;
+        const tag = __popoverCtx.editingTag;
+        await __toggleTagOnAllTargets(tag, { mode: 'remove' });
+        __closePopover();
+    }
+
     function __loadMoreRecentTags() {
         if (!__popoverCtx) return;
         const prev = Number(__popoverCtx.recentLimit) || RECENT_INITIAL_VISIBLE;
@@ -549,6 +566,12 @@
             ev.stopPropagation();
             return;
         }
+        const deleteBtn = target.closest('[data-role="delete-existing"]');
+        if (deleteBtn) {
+            __deleteEditingTag();
+            ev.stopPropagation();
+            return;
+        }
         const recentMore = target.closest('[data-role="recent-more"]');
         if (recentMore && recentMore.dataset.action === 'load-more-tags') {
             __showAllRecentTags();
@@ -557,8 +580,17 @@
         }
         const recentRow = target.closest('.tag-applied-row');
         if (recentRow) {
-            // Click anywhere on the row toggles the tag (auto: add if missing, remove if all have it).
-            __toggleTagOnAllTargets({ color: recentRow.dataset.color, text: recentRow.dataset.text });
+            const tag = { color: recentRow.dataset.color, text: recentRow.dataset.text };
+            if (recentRow.classList.contains('is-active') || recentRow.classList.contains('is-mixed')) {
+                __popoverCtx.editingTag = tag;
+                __popoverCtx.selectedColor = tag.color;
+                const input = __popoverEl.querySelector('[data-role="input"]');
+                if (input) input.value = tag.text || __colorName(tag.color);
+                __updatePreview();
+                __renderPopover();
+            } else {
+                __toggleTagOnAllTargets(tag);
+            }
             ev.stopPropagation();
             return;
         }

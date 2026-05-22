@@ -5780,25 +5780,25 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     bottom: 80px;
     left: 50%;
     transform: translateX(-50%);
-    width: 1000px;
+    width: 520px;
     height: fit-content;
     /* 改为fit-content，完全贴合内容 */
-    min-width: 124px;
+    min-width: 160px;
     max-width: 95vw;
     max-height: 200px;
     background: rgba(248, 250, 252, 0.96) !important;
     backdrop-filter: blur(22px) saturate(125%) !important;
     -webkit-backdrop-filter: blur(22px) saturate(125%) !important;
     border: 1px solid rgba(148, 163, 184, 0.4);
-    border-radius: 14px;
-    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.22);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(15, 23, 42, 0.22);
     z-index: 99999;
     animation: panelFadeIn 0.25s ease-out;
     display: flex;
     flex-direction: column;
     resize: none;
-    overflow: hidden;
-    /* 改为hidden，避免内容溢出产生滚动条和空白 */
+    overflow: visible;
+    /* 允许四边 resize handle 伸出面板，内容滚动交给 .batch-panel-content */
 }
 
 @keyframes panelFadeIn {
@@ -5816,15 +5816,15 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 8px;
-    padding: 3px 8px;
+    gap: 6px;
+    padding: 4px 7px;
     /* 更小的padding，极致紧凑 */
     background: rgba(37, 99, 235, 0.12) !important;
     backdrop-filter: blur(10px) !important;
     -webkit-backdrop-filter: blur(10px) !important;
     color: white;
     text-shadow: 0 1px 4px rgba(0, 0, 0, 1), 0 0 8px rgba(0, 0, 0, 0.8);
-    border-radius: 10px 10px 0 0;
+    border-radius: 9px 9px 0 0;
     flex-shrink: 0;
     min-height: 0;
     /* 移除最小高度 */
@@ -5840,7 +5840,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .batch-panel-title {
     font-weight: 600;
-    font-size: 12px;
+    font-size: 11px;
     /* 更小的字体 */
     margin-right: auto;
     line-height: 1.2;
@@ -5848,9 +5848,9 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .batch-panel-count {
-    font-size: 11px;
+    font-size: 10px;
     /* 更小的字体 */
-    padding: 2px 8px;
+    padding: 2px 6px;
     /* 更小的padding */
     background: rgba(255, 255, 255, 0.2);
     border-radius: 10px;
@@ -5862,9 +5862,9 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     color: white;
     border: 1px solid rgba(255, 255, 255, 0.7);
     border-radius: 4px;
-    padding: 2px 8px;
+    padding: 2px 6px;
     /* 更小的padding */
-    font-size: 11px;
+    font-size: 10px;
     /* 更小的字体 */
     cursor: pointer;
     display: flex;
@@ -5891,14 +5891,14 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .batch-panel-help-btn {
-    width: 16px;
-    height: 16px;
+    width: 15px;
+    height: 15px;
     border-radius: 999px;
     border: 1px solid rgba(148, 163, 184, 0.7);
     background: rgba(255, 255, 255, 0.22);
     color: rgba(255, 255, 255, 0.95);
     font-weight: 700;
-    font-size: 10px;
+    font-size: 9px;
     line-height: 1;
     cursor: pointer;
     display: inline-flex;
@@ -6272,7 +6272,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .batch-panel-content {
-    padding: 8px;
+    padding: 6px;
     flex: 0 1 auto;
     /* 改为不自动增长，只根据内容大小 */
     overflow-y: auto;
@@ -6283,17 +6283,25 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .batch-panel-content .context-menu-item {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 14px;
-    border-radius: 8px;
+    gap: 7px;
+    padding: 7px 9px;
+    border-radius: 6px;
     cursor: pointer;
     transition: all 0.2s ease;
-    font-size: 13px;
+    font-size: 11px;
     color: var(--text-primary);
     background: rgba(255, 255, 255, 0.75) !important;
     border: 1px solid rgba(148, 163, 184, 0.24);
     backdrop-filter: blur(8px) !important;
     -webkit-backdrop-filter: blur(8px) !important;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.batch-panel-content .context-menu-item span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .batch-panel-content .context-menu-item:hover {
@@ -6301,8 +6309,8 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .batch-panel-content .context-menu-item i {
-    width: 16px;
-    font-size: 14px;
+    width: 13px;
+    font-size: 12px;
     color: var(--accent-primary);
 }
 
@@ -6419,10 +6427,10 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     display: grid;
     grid-auto-flow: column;
     grid-template-rows: repeat(2, auto);
-    gap: 6px;
-    padding: 6px 8px;
+    gap: 4px;
+    padding: 5px 6px 0;
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: auto;
     align-items: start;
 }
 
@@ -6440,7 +6448,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     /* 区域可以换行 */
     align-items: flex-start;
     /* 顶部对齐 */
-    gap: 12px;
+    gap: 8px;
     /* 纵向布局时稍大的区域间距 */
 }
 
@@ -6474,14 +6482,14 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .batch-action-panel.horizontal-batch-layout.tall-layout .context-menu-item {
     width: 100%;
     /* 按钮占满分组宽度 */
-    padding: 8px 12px;
+    padding: 6px 9px;
     /* 纵向时稍大padding，更容易点击 */
-    font-size: 13px;
+    font-size: 11px;
     /* 纵向时稍大字体 */
 }
 
 .batch-action-panel.horizontal-batch-layout.tall-layout .context-menu-item i {
-    font-size: 14px;
+    font-size: 12px;
     /* 纵向时稍大图标 */
 }
 
@@ -6544,17 +6552,17 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     /* 移除最小高度 */
     height: auto;
     /* 高度自适应 */
-    padding: 4px 8px;
+    padding: 4px 7px;
     /* 更紧凑的padding */
     margin: 0;
     white-space: nowrap;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.2;
     /* 紧凑的行高 */
 }
 
 .batch-action-panel.horizontal-batch-layout .context-menu-item i {
-    font-size: 13px;
+    font-size: 12px;
     line-height: 1.35;
 }
 
@@ -6572,8 +6580,8 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .batch-action-panel.vertical-batch-layout .batch-panel-content {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 8px;
+    gap: 7px;
+    padding: 6px 6px 0;
     overflow-y: auto;
     overflow-x: hidden;
 }
@@ -6583,8 +6591,8 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     border-right: none;
     border-bottom: 1px solid var(--border-color);
     padding-right: 0;
-    padding-bottom: 8px;
-    margin-bottom: 4px;
+    padding-bottom: 6px;
+    margin-bottom: 2px;
 }
 
 .batch-action-panel.vertical-batch-layout .batch-menu-group:last-child {
@@ -6595,14 +6603,14 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .batch-action-panel.vertical-batch-layout .batch-group-items {
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     flex-wrap: nowrap;
 }
 
 .batch-action-panel.vertical-batch-layout .context-menu-item {
     display: flex;
     width: 100%;
-    padding: 10px 12px;
+    padding: 7px 9px;
 }
 
 /* 纵向布局：避免为了文字撑宽面板 */

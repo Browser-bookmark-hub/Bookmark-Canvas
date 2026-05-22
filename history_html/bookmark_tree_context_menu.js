@@ -1489,8 +1489,8 @@ let currentBatchPanelAnchorInfo = null; // 当前批量面板定位信息
 let lastBatchSelectionInfo = null; // 最近一次选择所属栏目
 
 // 批量面板默认尺寸：固定，不跟随画布缩放
-const BATCH_PANEL_VERTICAL_DEFAULT_WIDTH = 220;
-const BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT = 720;
+const BATCH_PANEL_VERTICAL_DEFAULT_WIDTH = 200;
+const BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT = 520;
 
 function clampValue(value, min, max) {
     if (!Number.isFinite(value)) return min;
@@ -1816,7 +1816,10 @@ function fitBatchPanelToContent(panel, options = {}) {
 
         // 贴合内容：避免最后一排按钮下方空白
         if (isHorizontal || shrink) {
-            desiredWidth = Math.min(content.scrollWidth + widthPadding, viewportWidth - margin * 2);
+            const horizontalWidthCap = isHorizontal
+                ? Math.min(620, viewportWidth - margin * 2)
+                : (viewportWidth - margin * 2);
+            desiredWidth = Math.min(content.scrollWidth + widthPadding, horizontalWidthCap);
             desiredHeight = Math.min(content.scrollHeight + heightPadding, viewportHeight - margin * 2);
         } else {
             if (content.scrollWidth > content.clientWidth + 1) {
@@ -1903,6 +1906,20 @@ function getBatchPanelAnchorKey(info) {
     const type = info.treeType || 'permanent';
     const sectionId = info.sectionId || (type === 'permanent' ? PERMANENT_SECTION_ANCHOR_ID : 'global');
     return `${type}:${sectionId}`;
+}
+
+function isBatchPanelGlobalOrFullscreenMode(info) {
+    if (!info) return true;
+    try {
+        const fullscreenElement = document.fullscreenElement
+            || document.webkitFullscreenElement
+            || document.mozFullScreenElement
+            || document.msFullscreenElement;
+        if (fullscreenElement) return true;
+        if (document.body && document.body.classList && document.body.classList.contains('canvas-node-maximized-active')) return true;
+        if (document.querySelector && document.querySelector('.canvas-node-maximized')) return true;
+    } catch (_) { }
+    return getBatchPanelAnchorKey(info) === 'global';
 }
 
 function findBatchPanelColumnElement(treeType, sectionId) {
@@ -2891,6 +2908,7 @@ function buildMenuItems(context) {
             { action: 'batch-delete', label: lang === 'zh_CN' ? '删除选中项' : 'DELETE', icon: 'trash-alt' },
             { action: 'batch-rename', label: lang === 'zh_CN' ? '批量重命名' : 'Batch Rename', icon: 'edit' },
             { action: 'batch-add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag' },
+            { action: 'batch-clear-tags', label: lang === 'zh_CN' ? '清除标签' : 'Clear Tags', icon: 'times-circle' },
             { separator: true },
             { action: 'batch-export-html', label: lang === 'zh_CN' ? '导出为HTML' : 'Export to HTML', icon: 'file-code' },
             { action: 'batch-export-json', label: lang === 'zh_CN' ? '导出为JSON' : 'Export to JSON', icon: 'file-alt' },
@@ -3843,6 +3861,9 @@ async function handleTempMenuAction(action, context) {
         case 'batch-add-tags':
             await openTagPopoverForContext(action, context);
             break;
+        case 'batch-clear-tags':
+            await clearTagsForContext(action, context);
+            break;
         default:
             console.warn('[临时栏目] 未处理的菜单操作:', action);
     }
@@ -3852,9 +3873,8 @@ async function handleTempMenuAction(action, context) {
 // Open the tag popover from a right-click action ('add-tags') or a batch
 // action ('batch-add-tags'). Resolves anchor + target(s) and delegates to the
 // TagSystem module (history_html/tag_system/tag_system.js).
-async function openTagPopoverForContext(action, context) {
-    if (typeof window.openTagPopover !== 'function' || !window.TagSystem) return;
-    const isBatch = action === 'batch-add-tags';
+function resolveTagTargetsForContext(action, context) {
+    const isBatch = action === 'batch-add-tags' || action === 'batch-clear-tags';
     let targets = [];
     let anchorEl = null;
 
@@ -3918,8 +3938,72 @@ async function openTagPopoverForContext(action, context) {
         if (el) anchorEl = (el.querySelector ? el.querySelector(':scope > .tree-tip-icon') : null) || el;
     }
 
+    return { targets, anchorEl };
+}
+
+async function openTagPopoverForContext(action, context) {
+    if (typeof window.openTagPopover !== 'function' || !window.TagSystem) return;
+    const { targets, anchorEl } = resolveTagTargetsForContext(action, context);
     if (!targets.length) return;
     window.openTagPopover({ targets, anchor: anchorEl });
+}
+
+async function clearTagsForContext(action, context) {
+    const { targets } = resolveTagTargetsForContext(action, context);
+    if (!targets.length) return;
+
+    const lang = currentLang || 'zh_CN';
+    const message = lang === 'zh_CN'
+        ? `确定清除选中 ${targets.length} 项的所有标签吗？`
+        : `Clear all tags from ${targets.length} selected item(s)?`;
+    if (!confirm(message)) return;
+
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    const permanentUpdates = [];
+    const permanentTargets = [];
+    const changedTargets = [];
+
+    for (const target of targets) {
+        if (!target) continue;
+        if (target.kind === 'permanent') {
+            permanentUpdates.push({ chromeId: target.chromeId, tags: [] });
+            permanentTargets.push(target);
+        } else if (target.kind === 'temporary' && typeof setTempItemTags === 'function') {
+            const ok = setTempItemTags(target.sectionId, target.itemId, []);
+            if (ok) changedTargets.push(Object.assign({}, target, { tags: [] }));
+        }
+    }
+
+    if (permanentUpdates.length && bridge) {
+        if (typeof bridge.writePermanentNodeTagsBulk === 'function') {
+            await bridge.writePermanentNodeTagsBulk(permanentUpdates);
+            permanentTargets.forEach((target) => changedTargets.push(Object.assign({}, target, { tags: [] })));
+        } else if (typeof bridge.writePermanentNodeTags === 'function') {
+            for (let i = 0; i < permanentUpdates.length; i++) {
+                const update = permanentUpdates[i];
+                await bridge.writePermanentNodeTags(update.chromeId, update.tags);
+                changedTargets.push(Object.assign({}, permanentTargets[i], { tags: [] }));
+            }
+        }
+    }
+
+    if (!changedTargets.length) return;
+    if (typeof window.closeTagPopover === 'function') {
+        try { window.closeTagPopover(); } catch (_) {}
+    }
+    if (typeof window.__refreshTagDotsForTargets === 'function') {
+        try { window.__refreshTagDotsForTargets(changedTargets); } catch (_) {}
+    }
+    try {
+        if (typeof window.updateCanvasSearchBookmarkTags === 'function') {
+            window.updateCanvasSearchBookmarkTags(changedTargets);
+        }
+        const input = document.getElementById('searchInput');
+        const q = input && typeof input.value === 'string' ? input.value.trim() : '';
+        if (q && typeof window.searchCanvasAndRender === 'function') {
+            window.searchCanvasAndRender(q);
+        }
+    } catch (_) {}
 }
 
 async function batchOpenTemp(options = {}) {
@@ -5783,6 +5867,10 @@ async function handleMenuAction(action, context) {
                 await openTagPopoverForContext(action, context);
                 break;
 
+            case 'batch-clear-tags':
+                await clearTagsForContext(action, context);
+                break;
+
             case 'select-item':
                 enterSelectMode();
                 // 切换当前右键点击的节点的选中状态
@@ -7511,7 +7599,9 @@ function showBatchContextMenu(e) {
                 { action: 'batch-open-tab-group', label: lang === 'zh_CN' ? '标签组' : 'Group', icon: 'object-group' },
                 { action: 'batch-open-new-window', label: lang === 'zh_CN' ? '新窗口' : 'Window', icon: 'window-maximize' },
                 { action: 'batch-to-temp-section', label: lang === 'zh_CN' ? '临时栏目' : 'To Temp', icon: 'layer-group' },
-                { action: 'batch-merge-folder', label: lang === 'zh_CN' ? '合并' : 'Merge', icon: 'folder-plus', disabled: mergeDisabled }
+                { action: 'batch-merge-folder', label: lang === 'zh_CN' ? '合并' : 'Merge', icon: 'folder-plus', disabled: mergeDisabled },
+                { action: 'batch-add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag' },
+                { action: 'batch-clear-tags', label: lang === 'zh_CN' ? '清除标签' : 'Clear Tags', icon: 'times-circle' }
             ]
         },
         // 编辑组
@@ -7626,6 +7716,10 @@ function showBatchContextMenu(e) {
                 await batchExportJSON();
             } else if (action === 'batch-merge-folder') {
                 await batchMergeFolder();
+            } else if (action === 'batch-add-tags') {
+                await openTagPopoverForContext('batch-add-tags', null);
+            } else if (action === 'batch-clear-tags') {
+                await clearTagsForContext('batch-clear-tags', null);
             } else {
                 // 其他操作通过handleMenuAction处理（需要context）
                 await handleMenuAction(action, null, null, null, false);
@@ -9870,9 +9964,9 @@ function initBatchPanelResize(panel) {
         const deltaX = e.clientX - startX;
         const deltaY = e.clientY - startY;
         const isVertical = panel.classList.contains('vertical-batch-layout');
-        const minWidth = isVertical ? 200 : 800;
-        const maxWidth = isVertical ? 500 : Math.min((window.innerWidth || 1920) * 0.95, 2000);
-        const minHeight = isVertical ? 200 : 10;
+        const minWidth = isVertical ? 160 : 360;
+        const maxWidth = isVertical ? 260 : Math.min((window.innerWidth || 1920) * 0.95, 1400);
+        const minHeight = isVertical ? 160 : 76;
         const maxHeight = (window.innerHeight || 1080) * 0.8;
 
         let newWidth = startWidth;
@@ -9987,7 +10081,7 @@ function toggleBatchPanelLayout() {
         const margin = 16;
         const maxW = Math.max(320, viewportWidth - margin * 2);
         // 横向默认宽度：更窄一些（两行按钮为主，不要占太宽）
-        const w = Math.min(560, maxW);
+        const w = Math.min(520, maxW);
         const maxH = Math.max(180, Math.floor(viewportHeight * 0.6));
 
         batchPanel.style.width = `${w}px`;
@@ -10032,8 +10126,8 @@ function toggleBatchPanelLayout() {
         const margin = 16;
 
         const maxH = Math.max(260, viewportHeight - margin * 2);
-        const maxW = Math.max(200, Math.min(280, viewportWidth - margin * 2));
-        const minW = 200;
+        const maxW = Math.max(160, Math.min(260, viewportWidth - margin * 2));
+        const minW = 160;
         const minH = 160;
 
         const defaultH = clampValue(BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT, minH, maxH);
@@ -10279,8 +10373,8 @@ function restoreBatchPanelState(panel, anchorInfo) {
                 panel.classList.remove('horizontal-batch-layout', 'tall-layout');
                 panel.classList.add('vertical-batch-layout');
                 const maxH = Math.max(260, viewportHeight - margin * 2);
-                const maxW = Math.max(200, Math.min(280, viewportWidth - margin * 2));
-                const minW = 200;
+                const maxW = Math.max(160, Math.min(260, viewportWidth - margin * 2));
+                const minW = 160;
                 const minH = 160;
 
                 const defaultH = clampValue(BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT, minH, maxH);
@@ -10337,7 +10431,7 @@ function restoreBatchPanelState(panel, anchorInfo) {
                 panel.dataset.manualPosition = storedManual ? 'true' : 'false';
                 const margin = 16;
                 const horizontalMaxWidth = viewportWidth - margin * 2;
-                const widthCandidate = Number.isFinite(storedWidth) ? storedWidth * zoomRatio : 560;
+                const widthCandidate = storedManual && Number.isFinite(storedWidth) ? storedWidth * zoomRatio : 520;
                 const widthValue = clampValue(widthCandidate, 320, Math.max(321, horizontalMaxWidth));
                 panel.style.width = `${widthValue}px`;
                 panel.style.minWidth = '320px';
@@ -10386,7 +10480,7 @@ function restoreBatchPanelState(panel, anchorInfo) {
 
         console.log('[批量面板] 没有保存的状态，使用默认定位');
         const storedLayout = getStoredBatchPanelLayout();
-        batchPanelHorizontal = storedLayout === 'horizontal';
+        batchPanelHorizontal = isBatchPanelGlobalOrFullscreenMode(currentBatchPanelAnchorInfo) || storedLayout === 'horizontal';
         panel.classList.remove('horizontal-batch-layout', 'vertical-batch-layout', 'tall-layout');
         panel.classList.add(batchPanelHorizontal ? 'horizontal-batch-layout' : 'vertical-batch-layout');
         panel.dataset.manualPosition = 'false';
@@ -10394,7 +10488,7 @@ function restoreBatchPanelState(panel, anchorInfo) {
         if (batchPanelHorizontal) {
             const margin = 16;
             const maxW = Math.max(320, viewportWidth - margin * 2);
-            const w = Math.min(560, maxW);
+            const w = Math.min(520, maxW);
             panel.style.width = `${w}px`;
             panel.style.minWidth = '320px';
             panel.style.maxWidth = `${maxW}px`;
@@ -10409,8 +10503,8 @@ function restoreBatchPanelState(panel, anchorInfo) {
             applyBatchPanelTransform(panel, { baseTransform: 'none' });
         } else {
             const maxH = Math.max(260, viewportHeight - margin * 2);
-            const maxW = Math.max(200, Math.min(280, viewportWidth - margin * 2));
-            const minW = 200;
+            const maxW = Math.max(160, Math.min(260, viewportWidth - margin * 2));
+            const minW = 160;
             const minH = 160;
             const heightValue = clampValue(BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT, minH, maxH);
             const widthValue = clampValue(BATCH_PANEL_VERTICAL_DEFAULT_WIDTH, minW, maxW);
