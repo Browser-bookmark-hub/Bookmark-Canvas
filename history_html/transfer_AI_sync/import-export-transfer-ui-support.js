@@ -1134,6 +1134,196 @@ async function showFolderSelectionDialog(folders, dropX, dropY) {
 // Backup dialog (single-slot backup; auto-saved before export; manual + restore).
 // =============================================================================
 
+const CANVAS_AUTO_BACKUP_SETTINGS_KEY = 'bcs:auto-backup:settings:v1';
+const CANVAS_AUTO_BACKUP_DEFAULT_SETTINGS = Object.freeze({
+    enabled: true,
+    intervalDays: 3,
+    lastAutoBackupAt: 0,
+    lastAutoBackupOpenDayKey: '',
+    lastObservedOpenDayKey: '',
+    openedDaysSinceLastBackup: 0
+});
+
+function __normalizeAutoBackupIntervalDays(input) {
+    const parsed = parseInt(input, 10);
+    if (!Number.isFinite(parsed)) return CANVAS_AUTO_BACKUP_DEFAULT_SETTINGS.intervalDays;
+    return Math.max(1, Math.min(30, parsed));
+}
+
+function __normalizeAutoBackupSettings(raw) {
+    const source = (raw && typeof raw === 'object') ? raw : {};
+    return {
+        enabled: source.enabled !== false,
+        intervalDays: __normalizeAutoBackupIntervalDays(source.intervalDays),
+        lastAutoBackupAt: Number.isFinite(Number(source.lastAutoBackupAt)) ? Number(source.lastAutoBackupAt) : 0,
+        lastAutoBackupOpenDayKey: String(source.lastAutoBackupOpenDayKey || '').trim(),
+        lastObservedOpenDayKey: String(source.lastObservedOpenDayKey || '').trim(),
+        openedDaysSinceLastBackup: Math.max(0, parseInt(source.openedDaysSinceLastBackup, 10) || 0)
+    };
+}
+
+function __parsePositiveIntFromTextInput(value, fallback = CANVAS_AUTO_BACKUP_DEFAULT_SETTINGS.intervalDays) {
+    const digits = String(value == null ? '' : value).replace(/[^\d]/g, '');
+    if (!digits) return __normalizeAutoBackupIntervalDays(fallback);
+    return __normalizeAutoBackupIntervalDays(parseInt(digits, 10));
+}
+
+async function __storageReadJsonValue(key, fallback = null) {
+    const storage = (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) ? chrome.storage.local : null;
+    if (storage && typeof storage.get === 'function') {
+        const result = await new Promise((resolve) => {
+            try {
+                storage.get([key], (data) => {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        resolve(null);
+                        return;
+                    }
+                    resolve(data && Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null);
+                });
+            } catch (_) { resolve(null); }
+        });
+        if (result !== null && typeof result !== 'undefined') return result;
+    }
+
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return fallback;
+        return JSON.parse(raw);
+    } catch (_) {
+        return fallback;
+    }
+}
+
+async function __storageWriteJsonValue(key, value) {
+    const storage = (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) ? chrome.storage.local : null;
+    if (storage && typeof storage.set === 'function') {
+        const ok = await new Promise((resolve) => {
+            try {
+                storage.set({ [key]: value }, () => {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        resolve(false);
+                        return;
+                    }
+                    resolve(true);
+                });
+            } catch (_) { resolve(false); }
+        });
+        if (ok) return true;
+    }
+
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+async function __readAutoBackupSettings() {
+    const raw = await __storageReadJsonValue(CANVAS_AUTO_BACKUP_SETTINGS_KEY, null);
+    return __normalizeAutoBackupSettings(raw);
+}
+
+async function __writeAutoBackupSettings(settingsInput) {
+    const normalized = __normalizeAutoBackupSettings(settingsInput);
+    await __storageWriteJsonValue(CANVAS_AUTO_BACKUP_SETTINGS_KEY, normalized);
+    return normalized;
+}
+
+function __getOpenDayKey(ts = Date.now()) {
+    const date = new Date(Number(ts) || Date.now());
+    const pad2 = (n) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+async function __maybeRunScheduledAutoBackupOnLaunch(options = {}) {
+    const silent = !!(options && options.silent);
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    if (
+        !bridge
+        || typeof bridge.readBackupSlot !== 'function'
+        || typeof bridge.buildExportSandbox !== 'function'
+        || typeof bridge.processExportSandboxForExport !== 'function'
+        || typeof bridge.writeBackupSlotFromSandbox !== 'function'
+    ) {
+        return { skipped: true, reason: 'bridge_unavailable' };
+    }
+
+    const settings = await __readAutoBackupSettings();
+    if (!settings.enabled) return { skipped: true, reason: 'disabled' };
+
+    const now = Date.now();
+    const todayOpenDayKey = __getOpenDayKey(now);
+    if (settings.lastAutoBackupOpenDayKey && settings.lastAutoBackupOpenDayKey === todayOpenDayKey) {
+        return { skipped: true, reason: 'already_backed_up_today' };
+    }
+
+    let nextSettings = { ...settings };
+    let touchedOpenDayCounter = false;
+    if (nextSettings.lastObservedOpenDayKey !== todayOpenDayKey) {
+        touchedOpenDayCounter = true;
+        nextSettings.lastObservedOpenDayKey = todayOpenDayKey;
+        if (nextSettings.openedDaysSinceLastBackup > 0) {
+            nextSettings.openedDaysSinceLastBackup += 1;
+        } else {
+            nextSettings.openedDaysSinceLastBackup = 1;
+        }
+    }
+
+    if (nextSettings.openedDaysSinceLastBackup < nextSettings.intervalDays) {
+        if (touchedOpenDayCounter) {
+            await __writeAutoBackupSettings(nextSettings);
+        }
+        return { skipped: true, reason: 'not_due' };
+    }
+
+    const sandbox = await bridge.buildExportSandbox({ reason: 'scheduled-auto-backup' });
+    if (!sandbox) return { skipped: true, reason: 'sandbox_unavailable' };
+    bridge.processExportSandboxForExport(sandbox);
+    await bridge.writeBackupSlotFromSandbox(sandbox);
+    await __writeAutoBackupSettings({
+        ...nextSettings,
+        lastAutoBackupAt: now,
+        lastAutoBackupOpenDayKey: todayOpenDayKey,
+        lastObservedOpenDayKey: todayOpenDayKey,
+        openedDaysSinceLastBackup: 0
+    });
+
+    if (!silent) {
+        const isEn = (typeof currentLang !== 'undefined' && currentLang === 'en');
+        const msg = isEn ? 'Auto backup completed.' : '自动备份已完成。';
+        try {
+            if (typeof showCanvasToast === 'function') showCanvasToast(msg, 'success', 2400);
+        } catch (_) { }
+    }
+
+    return { skipped: false, savedAt: now };
+}
+
+let __autoBackupLaunchCheckStarted = false;
+function __scheduleAutoBackupLaunchCheck() {
+    if (__autoBackupLaunchCheckStarted) return;
+    __autoBackupLaunchCheckStarted = true;
+    const maxAttempts = 8;
+    const runWithRetry = async (attempt = 0) => {
+        try {
+            const result = await __maybeRunScheduledAutoBackupOnLaunch({ silent: true });
+            if (!result || result.reason === 'bridge_unavailable') {
+                if (attempt < maxAttempts) {
+                    const delay = 400 + (attempt * 250);
+                    setTimeout(() => runWithRetry(attempt + 1), delay);
+                }
+            }
+        } catch (_) {
+            if (attempt < maxAttempts) {
+                const delay = 500 + (attempt * 300);
+                setTimeout(() => runWithRetry(attempt + 1), delay);
+            }
+        }
+    };
+    setTimeout(() => runWithRetry(0), 1200);
+}
+
 function __normalizeBackupTempStateForExport(tempStateInput, bridge) {
     const source = (tempStateInput && typeof tempStateInput === 'object') ? tempStateInput : {};
     const rawSections = Array.isArray(source.sections) ? source.sections : [];
@@ -1291,6 +1481,9 @@ async function showBackupDialog() {
     const existing = await bridge.readBackupSlot();
     const hasBackupPayload = !!(existing && existing.sandbox);
     const savedAt = existing && existing.savedAt ? new Date(existing.savedAt) : null;
+    const autoBackupSettings = await __readAutoBackupSettings();
+    const autoBackupEnabled = autoBackupSettings.enabled !== false;
+    const autoBackupIntervalDays = __normalizeAutoBackupIntervalDays(autoBackupSettings.intervalDays);
     const savedLabel = savedAt ? savedAt.toLocaleString(isEn ? 'en-US' : 'zh-CN') : (isEn ? 'No backup yet' : '暂无备份');
     const pad2 = (n) => String(n).padStart(2, '0');
     const savedStampDate = savedAt || new Date();
@@ -1300,6 +1493,9 @@ async function showBackupDialog() {
     const backupHintLine1 = isEn
         ? 'Each export auto-saves here, and the backup file automatically overwrites the previous file.'
         : '每次导出自动保存，备份文件自动覆盖上一次文件。';
+    const autoBackupHintLine = isEn
+        ? 'Runs on page/panel open when due by open-day interval.'
+        : '按“打开天数”间隔触发：到期后首次打开页面/侧边栏时自动备份。';
     const restoreConfirmLine = isEn
         ? 'This will fully overwrite current local data. Please confirm again.'
         : '这会完整覆盖当前本地数据，请再次确认。';
@@ -1323,6 +1519,20 @@ async function showBackupDialog() {
                     <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0;">
                         <div style="font-size: 12px; color: #f59e0b; line-height: 1.55;">${backupHintLine1}</div>
                         <button type="button" class="import-mode-btn" id="backupDownloadBtn" ${hasBackupPayload ? '' : 'disabled'}>${isEn ? 'Download Backup' : '下载备份'}</button>
+                    </div>
+                    <div id="autoBackupPanel" style="margin: 0 0 10px; padding: 10px; border: 1px solid var(--border-color, rgba(255,255,255,0.2)); border-radius: 8px; background: var(--surface-hover, rgba(0,0,0,0.05)); transition: opacity .18s ease, filter .18s ease;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap: 10px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;">
+                                <input type="checkbox" id="autoBackupEnabledToggle" ${autoBackupEnabled ? 'checked' : ''} />
+                                <span style="font-weight:600;">${isEn ? 'Auto Backup' : '自动备份'}</span>
+                            </label>
+                            <label id="autoBackupIntervalWrap" style="display:flex; align-items:center; gap:4px;">
+                                <span style="font-size:12px; opacity:0.9;">${isEn ? 'Interval' : '间隔'}</span>
+                                <input type="text" inputmode="numeric" pattern="[0-9]*" id="autoBackupIntervalInput" value="${autoBackupIntervalDays}" style="width:52px; text-align:center; padding:4px 4px; border:1px solid color-mix(in srgb, var(--text-normal, #9ca3af) 22%, transparent); border-radius:6px; background:color-mix(in srgb, var(--surface, #111827) 28%, transparent); color: var(--text-normal, #e5e7eb);" />
+                                <span style="font-size:12px; opacity:0.9;">${isEn ? 'days' : '天'}</span>
+                            </label>
+                        </div>
+                        <div style="font-size:12px; margin-top:8px; line-height:1.55; opacity:0.85;">${autoBackupHintLine}</div>
                     </div>
                     <div id="backupRestoreConfirmPanel" style="display: none; margin: 0 0 10px; padding: 10px; border: 1px solid var(--border-color, rgba(255,255,255,0.2)); border-radius: 8px; background: var(--surface-hover, rgba(0,0,0,0.05));">
                         <div style="font-size: 12px; line-height: 1.5; margin-bottom: 8px;">${restoreConfirmLine}</div>
@@ -1348,10 +1558,58 @@ async function showBackupDialog() {
         const restoreConfirmPanel = document.getElementById('backupRestoreConfirmPanel');
         const restoreSecondCancelBtn = document.getElementById('backupRestoreSecondCancelBtn');
         const restoreSecondConfirmBtn = document.getElementById('backupRestoreSecondConfirmBtn');
+        const autoBackupEnabledToggle = document.getElementById('autoBackupEnabledToggle');
+        const autoBackupIntervalInput = document.getElementById('autoBackupIntervalInput');
+        const autoBackupPanel = document.getElementById('autoBackupPanel');
+        const autoBackupIntervalWrap = document.getElementById('autoBackupIntervalWrap');
         let restoreInProgress = false;
         const hideRestoreConfirmPanel = () => {
             if (restoreConfirmPanel) restoreConfirmPanel.style.display = 'none';
         };
+
+        const applyAutoBackupPanelEnabledState = (enabled) => {
+            if (autoBackupIntervalInput) autoBackupIntervalInput.disabled = !enabled;
+            if (autoBackupIntervalWrap) {
+                autoBackupIntervalWrap.style.opacity = enabled ? '1' : '0.55';
+                autoBackupIntervalWrap.style.pointerEvents = enabled ? 'auto' : 'none';
+            }
+            if (autoBackupPanel) {
+                autoBackupPanel.style.opacity = enabled ? '1' : '0.62';
+                autoBackupPanel.style.filter = enabled ? 'none' : 'grayscale(0.35)';
+            }
+        };
+
+        const persistAutoBackupSettingsFromUi = async () => {
+            const enabled = !!(autoBackupEnabledToggle && autoBackupEnabledToggle.checked);
+            const intervalDays = __parsePositiveIntFromTextInput(
+                autoBackupIntervalInput && autoBackupIntervalInput.value,
+                autoBackupIntervalDays
+            );
+            if (autoBackupIntervalInput) autoBackupIntervalInput.value = String(intervalDays);
+            await __writeAutoBackupSettings({
+                enabled,
+                intervalDays,
+                lastAutoBackupAt: autoBackupSettings.lastAutoBackupAt
+            });
+            applyAutoBackupPanelEnabledState(enabled);
+        };
+        if (autoBackupEnabledToggle) {
+            autoBackupEnabledToggle.addEventListener('change', () => {
+                persistAutoBackupSettingsFromUi().catch(() => {});
+            });
+        }
+        if (autoBackupIntervalInput) {
+            applyAutoBackupPanelEnabledState(!!(autoBackupEnabledToggle && autoBackupEnabledToggle.checked));
+            autoBackupIntervalInput.addEventListener('input', () => {
+                autoBackupIntervalInput.value = String(autoBackupIntervalInput.value || '').replace(/[^\d]/g, '');
+            });
+            autoBackupIntervalInput.addEventListener('change', () => {
+                persistAutoBackupSettingsFromUi().catch(() => {});
+            });
+            autoBackupIntervalInput.addEventListener('blur', () => {
+                persistAutoBackupSettingsFromUi().catch(() => {});
+            });
+        }
 
         document.getElementById('backupDownloadBtn').addEventListener('click', async () => {
             try {
@@ -1486,6 +1744,9 @@ async function showBackupDialog() {
             try { showBackupDialog(); } catch (err) { console.warn(err); }
         });
     }
+
+    // Auto backup check on first launch in this page context.
+    try { __scheduleAutoBackupLaunchCheck(); } catch (_) { }
 
 
 
