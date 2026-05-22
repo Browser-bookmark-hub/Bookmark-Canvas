@@ -1536,9 +1536,6 @@ function __verifyAndHealIdentityMap(content) {
     const removed = Math.max(0, list.length - (byChromeId.size - added));
     content.identityMap = Array.from(byChromeId.values());
     __invalidateIdentityMapIndex(content);
-    if (added || removed || regenerated) {
-        try { console.warn(`[BCS] identityMap self-heal: +${added} -${removed} ~${regenerated}`); } catch (_) {}
-    }
     return { added, removed, regenerated };
 }
 
