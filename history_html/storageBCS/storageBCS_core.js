@@ -1395,11 +1395,11 @@ function __buildPermanentMainSyncPayload(contentInput, options = {}) {
         descriptionMd: String(content.descriptionMd == null ? '' : content.descriptionMd),
         fileRole: 'primary',
         fileNote: String(content.fileNote || ''),
+        ...(Array.isArray(exportIdentityMap) && exportIdentityMap.length
+            ? { identityMap: exportIdentityMap }
+            : {}),
         tree: exportTree
     };
-    if (Array.isArray(exportIdentityMap) && exportIdentityMap.length) {
-        payload.identityMap = exportIdentityMap;
-    }
     if (!payload.fileNote) {
         payload.fileNote = __getLang().isEn
             ? 'Primary permanent file: canonical bookmark tree source.'
