@@ -637,7 +637,10 @@
                 }
                 const input = document.getElementById('searchInput');
                 const q = input && typeof input.value === 'string' ? input.value.trim() : '';
-                if (q && typeof window.searchCanvasAndRender === 'function') {
+                const panel = document.getElementById('searchResultsPanel');
+                const panelVisible = !!(panel && panel.classList && panel.classList.contains('visible'));
+                // 只在结果面板当前可见时才重跑搜索，避免“输入框残留文字”导致每次打 tag 都弹出搜索面板。
+                if (q && panelVisible && typeof window.searchCanvasAndRender === 'function') {
                     window.searchCanvasAndRender(q);
                 }
             } catch (_) {}
