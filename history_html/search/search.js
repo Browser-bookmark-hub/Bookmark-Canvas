@@ -5988,6 +5988,28 @@ function openSearchResultExternalUrl(url) {
     }
 }
 
+function normalizeTagsForPayload(tagsInput) {
+    return (Array.isArray(tagsInput) ? tagsInput : [])
+        .map((tag) => ({
+            color: String(tag && tag.color || '').trim().toLowerCase(),
+            text: String(tag && tag.text || '').trim()
+        }))
+        .filter((tag) => tag.color);
+}
+
+function readPermanentNodeTagsCachedForPayload(chromeId) {
+    const safeId = String(chromeId || '').trim();
+    if (!safeId) return [];
+    try {
+        if (typeof window !== 'undefined'
+            && window.TagSystem
+            && typeof window.TagSystem.getPermNodeTagsCached === 'function') {
+            return normalizeTagsForPayload(window.TagSystem.getPermNodeTagsCached(safeId));
+        }
+    } catch (_) { }
+    return [];
+}
+
 async function buildPermanentNodeMap(root) {
     const map = new Map();
     if (!root) return map;
@@ -6024,25 +6046,36 @@ function buildSearchBookmarkPayload(item, isZh) {
         children: []
     };
     if (item && item.id) payload.id = String(item.id);
-    if (item && Array.isArray(item.tags) && item.tags.length) {
-        payload.tags = item.tags.map((tag) => ({
-            color: String(tag && tag.color || ''),
-            text: String(tag && tag.text || '')
-        })).filter((tag) => tag.color);
-    }
+    const inlineTags = normalizeTagsForPayload(item && Array.isArray(item.tags) ? item.tags : []);
+    const fallbackPermanentTags = (!inlineTags.length && source === 'permanent' && item && item.id)
+        ? readPermanentNodeTagsCachedForPayload(item.id)
+        : [];
+    const payloadTags = inlineTags.length ? inlineTags : fallbackPermanentTags;
+    if (payloadTags.length) payload.tags = payloadTags;
     if (source === 'permanent') {
         payload.__canvasPayloadSource = 'permanent';
     }
     return payload;
 }
 
-async function buildPayloadFromPermanentNode(node, isZh) {
+async function buildPayloadFromPermanentNode(node, isZh, options = {}) {
     if (!node) return null;
+    const resolvePermanentNodeTags = (options && typeof options.resolvePermanentNodeTags === 'function')
+        ? options.resolvePermanentNodeTags
+        : null;
+    const resolveTags = (nodeId, fallback = []) => {
+        const fromResolver = resolvePermanentNodeTags ? resolvePermanentNodeTags(nodeId) : [];
+        const primary = normalizeTagsForPayload(fromResolver);
+        if (primary.length) return primary;
+        return normalizeTagsForPayload(fallback);
+    };
 
     const nodeUrl = typeof node.url === 'string' ? node.url : '';
     const nodeTitle = typeof node.title === 'string' ? node.title : '';
+    const rootId = node && node.id ? String(node.id) : '';
+    const rootTags = resolveTags(rootId, options && options.rootTags);
     if (nodeUrl) {
-        return {
+        const bookmarkPayload = {
             id: node.id ? String(node.id) : undefined,
             title: nodeTitle || nodeUrl || (isZh ? '书签' : 'Bookmark'),
             url: nodeUrl,
@@ -6050,6 +6083,8 @@ async function buildPayloadFromPermanentNode(node, isZh) {
             __canvasPayloadSource: 'permanent',
             children: []
         };
+        if (rootTags.length) bookmarkPayload.tags = rootTags;
+        return bookmarkPayload;
     }
 
     const rootPayload = {
@@ -6060,6 +6095,7 @@ async function buildPayloadFromPermanentNode(node, isZh) {
         __canvasPayloadSource: 'permanent',
         children: []
     };
+    if (rootTags.length) rootPayload.tags = rootTags;
 
     const stack = [{ source: node, target: rootPayload, index: 0 }];
     let scanned = 0;
@@ -6079,16 +6115,20 @@ async function buildPayloadFromPermanentNode(node, isZh) {
 
         const childUrl = typeof child.url === 'string' ? child.url : '';
         const childTitle = typeof child.title === 'string' ? child.title : '';
+        const childId = child && child.id ? String(child.id) : '';
+        const childTags = resolveTags(childId);
 
         if (childUrl) {
-            frame.target.children.push({
+            const childPayload = {
                 id: child.id ? String(child.id) : undefined,
                 title: childTitle || childUrl || (isZh ? '书签' : 'Bookmark'),
                 url: childUrl,
                 type: 'bookmark',
                 __canvasPayloadSource: 'permanent',
                 children: []
-            });
+            };
+            if (childTags.length) childPayload.tags = childTags;
+            frame.target.children.push(childPayload);
         } else {
             const folderPayload = {
                 id: child.id ? String(child.id) : undefined,
@@ -6098,6 +6138,7 @@ async function buildPayloadFromPermanentNode(node, isZh) {
                 __canvasPayloadSource: 'permanent',
                 children: []
             };
+            if (childTags.length) folderPayload.tags = childTags;
             frame.target.children.push(folderPayload);
 
             if (Array.isArray(child.children) && child.children.length) {
@@ -6240,9 +6281,18 @@ async function createTempSectionFromSearchResults() {
 
         const needsPermanentLookup = items.some(item => item && item.source === 'permanent');
         let permanentNodeMap = null;
+        let resolvePermanentNodeTags = null;
         if (needsPermanentLookup) {
             showCanvasToastSafe(isZh ? '正在整理文件夹结构…' : 'Preparing folder structure…', 'info', 1600);
             permanentNodeMap = await buildPermanentNodeMap(await getPermanentTreeRoot());
+            try {
+                if (typeof window !== 'undefined'
+                    && window.TagSystem
+                    && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                    await window.TagSystem.ensurePermTagsLoaded();
+                }
+            } catch (_) { }
+            resolvePermanentNodeTags = (chromeId) => readPermanentNodeTagsCachedForPayload(chromeId);
         }
 
         const payloadItems = [];
@@ -6278,7 +6328,10 @@ async function createTempSectionFromSearchResults() {
 
             if (item.source === 'permanent' && permanentNodeMap) {
                 const node = permanentNodeMap.get(String(item.id));
-                const built = await buildPayloadFromPermanentNode(node, isZh);
+                const built = await buildPayloadFromPermanentNode(node, isZh, {
+                    resolvePermanentNodeTags,
+                    rootTags: item.tags
+                });
                 if (built) {
                     await appendPayloadList([built], item.title || (isZh ? '文件夹' : 'Folder'));
                     processed += 1;
@@ -6301,13 +6354,22 @@ async function createTempSectionFromSearchResults() {
                 if (payload && payload.length) {
                     await appendPayloadList(payload, item.title || (isZh ? '文件夹' : 'Folder'));
                 } else {
-                    payloadItems.push({
+                    const fallbackPayload = {
                         ...(item.source === 'permanent' && item.id ? { id: String(item.id), __canvasPayloadSource: 'permanent' } : {}),
                         title: item.title || (isZh ? '文件夹' : 'Folder'),
                         url: '',
                         type: 'folder',
                         children: []
-                    });
+                    };
+                    const fallbackTags = normalizeTagsForPayload(
+                        (item && Array.isArray(item.tags) && item.tags.length)
+                            ? item.tags
+                            : (item && item.source === 'permanent' && item.id
+                                ? readPermanentNodeTagsCachedForPayload(item.id)
+                                : [])
+                    );
+                    if (fallbackTags.length) fallbackPayload.tags = fallbackTags;
+                    payloadItems.push(fallbackPayload);
                 }
             } else {
                 payloadItems.push(buildSearchBookmarkPayload(item, isZh));
@@ -6385,6 +6447,17 @@ async function createTempSectionFromDomainResult(domain) {
         const domainKey = String(domain || '').trim().toLowerCase();
         if (!domainKey) return;
         const groupBySubdomainFolders = (searchUiState && searchUiState.domainGrouping === 'root');
+
+        try {
+            if (typeof window !== 'undefined'
+                && window.TagSystem
+                && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                await window.TagSystem.ensurePermTagsLoaded();
+                if (searchUiState && searchUiState.domainIndexCache) {
+                    searchUiState.domainIndexCache = null;
+                }
+            }
+        } catch (_) { }
 
         const items = getDomainItemsForTemp(domainKey, searchUiState.query || '');
         if (!items.length) return;
