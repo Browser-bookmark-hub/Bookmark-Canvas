@@ -54,7 +54,11 @@ const searchUiState = {
     isHelpOpen: false,
 
     // In fullscreen mode, user manual mode switch should win over auto-default.
-    fullscreenAutoModeLocked: false
+    fullscreenAutoModeLocked: false,
+
+    // Tag browser: when query is "#" / "{#}", first-level shows color+tag navigator.
+    // Click one entry to enter second-level bookmark result view.
+    tagBrowseDetail: null
 };
 
 const TEMP_SECTION_BUILD_YIELD_EVERY = 180;
@@ -218,6 +222,43 @@ function isSidePanelSearchExpanded() {
 }
 
 const DOMAIN_GROUP_PREF_KEY = 'canvas-search-domain-grouping';
+const TAG_BROWSER_COLOR_ORDER = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
+const TAG_BROWSER_ROOT_QUERIES = new Set(['#', '{#}']);
+const TAG_BROWSER_ALPHA_KEYS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+const TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES = [
+    { letter: 'A', marker: '阿' },
+    { letter: 'B', marker: '芭' },
+    { letter: 'C', marker: '擦' },
+    { letter: 'D', marker: '搭' },
+    { letter: 'E', marker: '蛾' },
+    { letter: 'F', marker: '发' },
+    { letter: 'G', marker: '噶' },
+    { letter: 'H', marker: '哈' },
+    { letter: 'J', marker: '击' },
+    { letter: 'K', marker: '喀' },
+    { letter: 'L', marker: '垃' },
+    { letter: 'M', marker: '妈' },
+    { letter: 'N', marker: '拿' },
+    { letter: 'O', marker: '哦' },
+    { letter: 'P', marker: '啪' },
+    { letter: 'Q', marker: '期' },
+    { letter: 'R', marker: '然' },
+    { letter: 'S', marker: '撒' },
+    { letter: 'T', marker: '塌' },
+    { letter: 'W', marker: '挖' },
+    { letter: 'X', marker: '昔' },
+    { letter: 'Y', marker: '压' },
+    { letter: 'Z', marker: '匝' }
+];
+const TAG_BROWSER_COLOR_LABELS = {
+    red: { zh_CN: '红色', en: 'Red' },
+    orange: { zh_CN: '橙色', en: 'Orange' },
+    yellow: { zh_CN: '黄色', en: 'Yellow' },
+    green: { zh_CN: '绿色', en: 'Green' },
+    blue: { zh_CN: '蓝色', en: 'Blue' },
+    purple: { zh_CN: '紫色', en: 'Purple' },
+    gray: { zh_CN: '灰色', en: 'Gray' }
+};
 try {
     const stored = localStorage.getItem(DOMAIN_GROUP_PREF_KEY);
     if (stored === 'root' || stored === 'host') {
@@ -801,6 +842,17 @@ function handleSearchKeydown(e) {
         if (e.key === 'Escape') {
             if (panelVisible) {
                 e.preventDefault();
+                const queryText = e && e.target ? String(e.target.value || '').trim() : '';
+                const isTagBrowseBackEscape = panelType === 'results'
+                    && isTagBrowseRootQuery(queryText)
+                    && searchUiState
+                    && searchUiState.tagBrowseDetail
+                    && searchUiState.tagBrowseDetail.active === true;
+                if (isTagBrowseBackEscape) {
+                    searchUiState.tagBrowseDetail = null;
+                    searchCanvasAndRender(queryText || '#');
+                    return;
+                }
                 hideSearchResultsPanel();
             }
             toggleSearchModeMenu(false);
@@ -853,6 +905,28 @@ function handleSearchResultsPanelClick(e) {
     const panel = getSearchResultsPanel();
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results') return;
+
+    const tagBrowseBackBtn = e.target.closest('.canvas-tag-browse-back-btn');
+    if (tagBrowseBackBtn) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+        searchUiState.tagBrowseDetail = null;
+        const query = String(searchUiState.query || '').trim();
+        if (isTagBrowseRootQuery(query)) {
+            searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
+        } else {
+            const input = document.getElementById('searchInput');
+            const q = input ? String(input.value || '').trim() : '';
+            if (isTagBrowseRootQuery(q)) {
+                searchCanvasAndRender(q);
+            } else {
+                searchCanvasAndRender(query || '#');
+            }
+        }
+        return;
+    }
 
     const pathEllipsisToggle = e.target.closest('.search-result-path-ellipsis-toggle');
     if (pathEllipsisToggle) {
@@ -1093,6 +1167,28 @@ function handleSearchResultsPanelClick(e) {
 
     const itemEl = e.target.closest('.search-result-item');
     if (!itemEl) return;
+
+    const itemType = String(itemEl.getAttribute('data-type') || '').trim();
+    if (itemType === 'tag-browser-color' || itemType === 'tag-browser-tag') {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+        const idx = parseInt(itemEl.getAttribute('data-index') || '-1', 10);
+        if (Number.isNaN(idx) || idx < 0) return;
+        const tagItem = Array.isArray(searchUiState.results) ? searchUiState.results[idx] : null;
+        if (!tagItem) return;
+        searchUiState.tagBrowseDetail = {
+            active: true,
+            kind: itemType === 'tag-browser-color' ? 'color' : 'tag',
+            color: normalizeTagBrowseColor(tagItem.color),
+            text: String(tagItem.text || '').trim(),
+            textLower: String(tagItem.textLower || '').trim().toLowerCase()
+        };
+        const query = String(searchUiState.query || '').trim() || '#';
+        searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
+        return;
+    }
 
     try {
         const selection = window.getSelection();
@@ -1800,8 +1896,8 @@ const SEARCH_MODES = [
         labelEn: 'Bookmark',
         icon: 'fa-bookmark',
         color: 'mode-color-blue',
-        desc: '书签标题、URL、文件夹名称、#标签（如 #红/#红色/#工作）',
-        descEn: 'Title, URL, Folders, #Tags (e.g. #Blue/#blue/#BLUE/#work)'
+        desc: '书签标题、URL、文件夹名称、#标签（如 #/红/#/红色/#/工作）',
+        descEn: 'Title, URL, Folders, #Tags (e.g. #/Blue/#/blue/#/BLUE/#/work)'
     },
     {
         key: 'structure',
@@ -3909,14 +4005,15 @@ function __getTagSearchTerms(tag) {
 }
 
 // Match against a query. Empty query → all items with at least one tag match.
-// '#Red'/'#BLUE'/'#红色' → exact color/text/alias match (case-insensitive).
+// '#Red'/'#/RED'/'#红色'/'#/红色' → exact color/text/alias match (case-insensitive).
 // Plain text → substring match against tag.text and tag.color.
 function __tagMatchesQuery(tags, query) {
     if (!tags || !tags.length) return false;
     const q = String(query || '').trim().toLowerCase();
     if (!q) return tags.length > 0;
     if (q.startsWith('#')) {
-        const tagQuery = q.slice(1);
+        const rawTagQuery = q.slice(1);
+        const tagQuery = rawTagQuery.startsWith('/') ? rawTagQuery.slice(1) : rawTagQuery;
         if (!tagQuery) return tags.length > 0;
         return tags.some((t) => __getTagSearchTerms(t).some((term) => term === tagQuery));
     }
@@ -3925,12 +4022,386 @@ function __tagMatchesQuery(tags, query) {
     });
 }
 
+function normalizeTagBrowseRootQuery(query) {
+    return String(query || '').trim().toLowerCase();
+}
+
+function isTagBrowseRootQuery(query) {
+    return TAG_BROWSER_ROOT_QUERIES.has(normalizeTagBrowseRootQuery(query));
+}
+
+function normalizeTagBrowseColor(rawColor) {
+    const raw = String(rawColor || '').trim().toLowerCase();
+    if (!raw) return '';
+    if (raw === 'grey') return 'gray';
+    if (TAG_BROWSER_COLOR_ORDER.includes(raw)) return raw;
+    return '';
+}
+
+function getTagBrowseColorLabel(color, isZh) {
+    const key = normalizeTagBrowseColor(color);
+    const map = TAG_BROWSER_COLOR_LABELS[key];
+    if (!map) return key || '';
+    return isZh ? (map.zh_CN || map.en || key) : (map.en || map.zh_CN || key);
+}
+
+function normalizeTagBrowseTextForColor(color, rawText) {
+    const safeColor = normalizeTagBrowseColor(color);
+    const safeText = String(rawText || '').trim();
+    if (!safeColor || !safeText) return safeText;
+
+    const compactLower = safeText.replace(/\s+/g, '').toLowerCase();
+    const aliases = Array.isArray(TAG_SEARCH_COLOR_ALIASES[safeColor]) ? TAG_SEARCH_COLOR_ALIASES[safeColor] : [];
+    const matchedAlias = aliases.some((alias) => {
+        const aliasLower = String(alias || '').replace(/\s+/g, '').toLowerCase();
+        return aliasLower && aliasLower === compactLower;
+    });
+    return matchedAlias ? '' : safeText;
+}
+
+function getTagBrowseSortCollator(isZh) {
+    try {
+        if (isZh) {
+            return new Intl.Collator(['zh-Hans-CN-u-co-pinyin', 'zh-CN-u-co-pinyin', 'zh-CN', 'en'], {
+                sensitivity: 'base',
+                numeric: true
+            });
+        }
+        return new Intl.Collator(['en', 'zh-CN'], { sensitivity: 'base', numeric: true });
+    } catch (_) {
+        return null;
+    }
+}
+
+function getTagBrowseBucketKey(label, collator = null) {
+    const text = String(label || '').trim();
+    if (!text) return '#';
+    const first = text.charAt(0);
+    if (/^[0-9]$/.test(first)) return '0-9';
+    if (/^[A-Za-z]$/.test(first)) return first.toUpperCase();
+
+    if (/^[\u4e00-\u9fff]$/.test(first)) {
+        const cmp = collator && typeof collator.compare === 'function'
+            ? collator
+            : getTagBrowseSortCollator(true);
+        if (cmp && TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES.length) {
+            let bucket = 'A';
+            for (let i = 0; i < TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES.length; i += 1) {
+                const marker = TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES[i];
+                try {
+                    if (cmp.compare(first, marker.marker) >= 0) {
+                        bucket = marker.letter;
+                    } else {
+                        break;
+                    }
+                } catch (_) { }
+            }
+            if (cmp && cmp.compare(first, TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES[TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES.length - 1].marker) >= 0) {
+                return 'Z';
+            }
+            return bucket;
+        }
+        return 'A';
+    }
+    return '#';
+}
+
+function buildCanvasTagBrowseRootModel(sourceIndex) {
+    const isZh = currentLang === 'zh_CN';
+    const colorMap = new Map();
+    TAG_BROWSER_COLOR_ORDER.forEach((color) => {
+        colorMap.set(color, {
+            type: 'tag-browser-color',
+            color,
+            text: '',
+            textLower: '',
+            label: getTagBrowseColorLabel(color, isZh),
+            itemKeys: new Set()
+        });
+    });
+
+    const tagMap = new Map();
+    const ensureTagEntry = (color, text = '', itemKey = '') => {
+        const safeColor = normalizeTagBrowseColor(color);
+        if (!safeColor) return null;
+        const safeText = normalizeTagBrowseTextForColor(safeColor, text);
+        const textLower = safeText.toLowerCase();
+        const key = `${safeColor}::${textLower}`;
+        let entry = tagMap.get(key);
+        if (!entry) {
+            entry = {
+                type: 'tag-browser-tag',
+                color: safeColor,
+                text: safeText,
+                textLower,
+                label: safeText || getTagBrowseColorLabel(safeColor, isZh),
+                itemKeys: new Set()
+            };
+            tagMap.set(key, entry);
+        }
+        if (itemKey) entry.itemKeys.add(itemKey);
+        return entry;
+    };
+
+    const list = Array.isArray(sourceIndex) ? sourceIndex : [];
+    list.forEach((item) => {
+        if (!item || item.type !== 'bookmark-item') return;
+        const itemKey = String(item.locationKey || getCanvasBookmarkLocationKeyForSearch(item) || item.id || '').trim();
+        if (!itemKey) return;
+
+        const tags = normalizeTagsForPayload(__getItemTagsForSearch(item));
+        if (!tags.length) return;
+
+        const localSeen = new Set();
+        tags.forEach((tag) => {
+            const color = normalizeTagBrowseColor(tag && tag.color);
+            if (!color) return;
+            const colorEntry = colorMap.get(color);
+            if (colorEntry) colorEntry.itemKeys.add(itemKey);
+
+            const safeText = String(tag && tag.text || '').trim();
+            const textLower = safeText.toLowerCase();
+            const localKey = `${color}::${textLower}`;
+            if (localSeen.has(localKey)) return;
+            localSeen.add(localKey);
+            ensureTagEntry(color, safeText, itemKey);
+        });
+    });
+
+    // 二区块包含“全部 tag 标识”，因此将 7 种颜色标签也放入该列表（即便当前没有命中项）。
+    TAG_BROWSER_COLOR_ORDER.forEach((color) => {
+        const colorEntry = colorMap.get(color);
+        const defaultTagEntry = ensureTagEntry(color, '');
+        if (defaultTagEntry && colorEntry && colorEntry.itemKeys.size) {
+            colorEntry.itemKeys.forEach((itemKey) => defaultTagEntry.itemKeys.add(itemKey));
+        }
+    });
+
+    const colorEntries = TAG_BROWSER_COLOR_ORDER.map((color) => {
+        const entry = colorMap.get(color);
+        return {
+            type: 'tag-browser-color',
+            color,
+            text: '',
+            textLower: '',
+            label: entry ? entry.label : getTagBrowseColorLabel(color, isZh),
+            count: entry ? entry.itemKeys.size : 0
+        };
+    });
+
+    const collator = getTagBrowseSortCollator(isZh);
+    const compareText = (left, right) => {
+        const la = String(left || '');
+        const lb = String(right || '');
+        if (collator) return collator.compare(la, lb);
+        return la.localeCompare(lb, isZh ? 'zh-CN' : 'en', { numeric: true, sensitivity: 'base' });
+    };
+
+    const tagEntries = Array.from(tagMap.values()).map((entry) => ({
+        type: 'tag-browser-tag',
+        color: entry.color,
+        text: entry.text,
+        textLower: entry.textLower,
+        label: entry.label,
+        count: entry.itemKeys.size
+    })).sort((a, b) => {
+        const textDelta = compareText(a.label, b.label);
+        if (textDelta !== 0) return textDelta;
+        return TAG_BROWSER_COLOR_ORDER.indexOf(a.color) - TAG_BROWSER_COLOR_ORDER.indexOf(b.color);
+    });
+
+    return { colorEntries, tagEntries };
+}
+
+function tagMatchesBrowseDetail(tag, detail) {
+    if (!tag || !detail) return false;
+    const color = normalizeTagBrowseColor(tag.color);
+    if (!color) return false;
+    if (detail.kind === 'color') {
+        return color === normalizeTagBrowseColor(detail.color);
+    }
+    const targetColor = normalizeTagBrowseColor(detail.color);
+    const targetText = String(detail.textLower || '').trim().toLowerCase();
+    if (!targetText) {
+        return color === targetColor;
+    }
+    const currentText = String(tag.text || '').trim().toLowerCase();
+    return color === targetColor && currentText === targetText;
+}
+
+function renderCanvasTagBrowseRootPanel(model, options = {}) {
+    const panel = getSearchResultsPanel();
+    if (!panel) return;
+
+    try {
+        if (typeof window.currentView === 'string' && window.currentView !== 'canvas') return;
+        const input = document.getElementById('searchInput');
+        const currentQ = (input && typeof input.value === 'string') ? input.value.trim().toLowerCase() : '';
+        const expectedQ = normalizeTagBrowseRootQuery(options && options.query || '');
+        if (currentQ !== expectedQ) return;
+    } catch (_) { }
+
+    const isZh = currentLang === 'zh_CN';
+    const colorEntries = Array.isArray(model && model.colorEntries) ? model.colorEntries : [];
+    const tagEntries = Array.isArray(model && model.tagEntries) ? model.tagEntries : [];
+    const colorTitle = isZh ? '颜色' : 'Colors';
+    const tagTitle = isZh ? '全部标签（0-9 / A-Z）' : 'All Tags (0-9 / A-Z)';
+
+    const resultItems = [];
+    const registerResultItem = (entry) => {
+        const color = normalizeTagBrowseColor(entry && entry.color) || 'gray';
+        const text = String(entry && entry.text || '').trim();
+        const textLower = String(entry && entry.textLower || '').trim().toLowerCase();
+        const label = String(entry && entry.label || '').trim() || getTagBrowseColorLabel(color, isZh);
+        const count = Number(entry && entry.count || 0);
+        const type = String(entry && entry.type || 'tag-browser-tag');
+        const item = {
+            id: `tag-browser::${type}::${color}::${textLower || '__color__'}`,
+            type,
+            color,
+            text,
+            textLower,
+            label,
+            count
+        };
+        const index = resultItems.length;
+        resultItems.push(item);
+        return { item, index };
+    };
+
+    const renderColorCards = (entries) => {
+        const list = Array.isArray(entries) ? entries : [];
+        return list.map((entry) => {
+            const { item, index } = registerResultItem(entry);
+            return `
+                <div class="search-result-item canvas-tag-browse-item is-color-card" data-index="${index}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}">
+                    <div class="search-result-content">
+                        <div class="search-result-title">
+                            <span class="canvas-tag-browse-dot-wrap"><span class="tag-dot tag-dot-${escapeHtml(item.color)}"></span></span>
+                            <span class="canvas-tag-browse-label">${escapeHtml(item.label)}</span>
+                        </div>
+                    </div>
+                    <span class="canvas-tag-browse-count">${escapeHtml(String(item.count))}</span>
+                </div>
+            `;
+        }).join('');
+    };
+
+    const renderTagRows = (entries) => {
+        const list = Array.isArray(entries) ? entries : [];
+        return list.map((entry) => {
+            const { item, index } = registerResultItem(entry);
+            return `
+                <div class="search-result-item canvas-tag-browse-item is-tag-row" data-index="${index}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}">
+                    <div class="search-result-content">
+                        <div class="search-result-title">
+                            <span class="canvas-tag-browse-dot-wrap"><span class="tag-dot tag-dot-${escapeHtml(item.color)}"></span></span>
+                            <span class="canvas-tag-browse-label">${escapeHtml(item.label)}</span>
+                        </div>
+                    </div>
+                    <span class="canvas-tag-browse-count">${escapeHtml(String(item.count))}</span>
+                </div>
+            `;
+        }).join('');
+    };
+
+    const collator = getTagBrowseSortCollator(isZh);
+    const compareTagEntries = (left, right) => {
+        const la = String(left && left.label || '');
+        const lb = String(right && right.label || '');
+        if (collator) {
+            try {
+                const delta = collator.compare(la, lb);
+                if (delta !== 0) return delta;
+            } catch (_) { }
+        } else {
+            const delta = la.localeCompare(lb, isZh ? 'zh-CN' : 'en', { sensitivity: 'base', numeric: true });
+            if (delta !== 0) return delta;
+        }
+        return TAG_BROWSER_COLOR_ORDER.indexOf(normalizeTagBrowseColor(left && left.color))
+            - TAG_BROWSER_COLOR_ORDER.indexOf(normalizeTagBrowseColor(right && right.color));
+    };
+    const bucketOrder = ['0-9'].concat(TAG_BROWSER_ALPHA_KEYS);
+    const bucketMap = new Map(bucketOrder.map((key) => [key, []]));
+    const others = [];
+    tagEntries.forEach((entry) => {
+        const bucket = getTagBrowseBucketKey(entry && entry.label, collator);
+        if (bucketMap.has(bucket)) {
+            bucketMap.get(bucket).push(entry);
+        } else {
+            others.push(entry);
+        }
+    });
+    bucketMap.forEach((entries) => entries.sort(compareTagEntries));
+    others.sort(compareTagEntries);
+
+    const renderBucketSection = (key, entries) => {
+        const list = Array.isArray(entries) ? entries : [];
+        if (!list.length) return '';
+        return `<div class="canvas-tag-browse-bucket">
+            <div class="canvas-tag-browse-bucket-title">${escapeHtml(key)}</div>
+            <div class="canvas-tag-browse-bucket-list">${renderTagRows(list)}</div>
+        </div>`;
+    };
+
+    const numericBlock = renderBucketSection('0-9', bucketMap.get('0-9'));
+    const alphaBlocks = TAG_BROWSER_ALPHA_KEYS.map((letter) => renderBucketSection(letter, bucketMap.get(letter))).join('');
+    const otherBlocks = others.length ? renderBucketSection('#', others) : '';
+    const dividerHtml = numericBlock && (alphaBlocks || otherBlocks)
+        ? `<div class="canvas-tag-browse-major-divider"></div>`
+        : '';
+
+    panel.innerHTML = `
+        <div class="canvas-tag-browse-section">
+            <div class="canvas-tag-browse-section-title">${escapeHtml(colorTitle)}</div>
+            <div class="canvas-tag-browse-color-grid">
+                ${renderColorCards(colorEntries)}
+            </div>
+        </div>
+        <div class="canvas-tag-browse-section">
+            <div class="canvas-tag-browse-section-title">${escapeHtml(tagTitle)}</div>
+            <div class="canvas-tag-browse-buckets">
+                ${numericBlock}
+                ${dividerHtml}
+                ${alphaBlocks}
+                ${otherBlocks}
+            </div>
+        </div>
+    `;
+
+    searchUiState.view = 'canvas';
+    searchUiState.query = String(options && options.query || '#');
+    searchUiState.resultSource = resultItems;
+    searchUiState.resultAll = resultItems;
+    searchUiState.resultVisibleCount = resultItems.length;
+    searchUiState.resultHasMore = false;
+    searchUiState.resultPagingKey = `tag-browse-root|${searchUiState.query}`;
+    searchUiState.results = resultItems;
+    searchUiState.bookmarkModeCounts = null;
+    searchUiState.bookmarkGroupModel = null;
+    searchUiState.selectedIndex = resultItems.length > 0 ? 0 : -1;
+    try {
+        searchUiState.canvasSuggestionsVisible = false;
+        panel.dataset.panelType = 'results';
+    } catch (_) { }
+
+    showSearchResultsPanel();
+    if (resultItems.length > 0) {
+        updateSearchResultSelection(0);
+    }
+}
+
 /**
  * 执行画布搜索并渲染结果
  * @param {string} query - 搜索关键词
+ * @param {Object} options - 触发选项（source/keepTagBrowseDetail）
  */
-function searchCanvasAndRender(query) {
+function searchCanvasAndRender(query, options = {}) {
     const db = buildCanvasSearchDb();
+    const triggerSource = options && typeof options === 'object'
+        ? String(options.source || 'system')
+        : 'system';
+    const keepTagBrowseDetail = !!(options && typeof options === 'object' && options.keepTagBrowseDetail === true);
 
     // Check if entire DB is broken
     if (!db.itemById) {
@@ -3940,8 +4411,17 @@ function searchCanvasAndRender(query) {
 
     const trimmedQuery = String(query).trim();
     if (!trimmedQuery) {
+        searchUiState.tagBrowseDetail = null;
         hideSearchResultsPanel();
         return;
+    }
+    // 用户直接输入 # / {#} 时，始终回到一级 UI，不记忆上次二级状态和二级筛选选择。
+    if (isTagBrowseRootQuery(trimmedQuery) && triggerSource === 'input' && !keepTagBrowseDetail) {
+        searchUiState.tagBrowseDetail = null;
+        searchUiState.bookmarkTypeFilter = null;
+    }
+    if (!isTagBrowseRootQuery(trimmedQuery)) {
+        searchUiState.tagBrowseDetail = null;
     }
     const previousCanvasQuery = String(searchUiState.query || '').trim().toLowerCase();
     const nextCanvasQuery = trimmedQuery.toLowerCase();
@@ -3970,6 +4450,22 @@ function searchCanvasAndRender(query) {
         renderSearchResultsPanel([], { view: 'canvas', query: trimmedQuery, emptyText: i18n.searchNoResults[currentLang] });
         return;
     }
+
+    if (mode === 'bookmark' && isTagBrowseRootQuery(trimmedQuery)) {
+        const detail = searchUiState && searchUiState.tagBrowseDetail ? searchUiState.tagBrowseDetail : null;
+        if (!detail || detail.active !== true) {
+            const rootModel = buildCanvasTagBrowseRootModel(sourceIndex);
+            renderCanvasTagBrowseRootPanel(rootModel, { query: trimmedQuery });
+            return;
+        }
+    }
+    const activeTagBrowseDetail = mode === 'bookmark' && isTagBrowseRootQuery(trimmedQuery)
+        && searchUiState
+        && searchUiState.tagBrowseDetail
+        && searchUiState.tagBrowseDetail.active === true
+        ? searchUiState.tagBrowseDetail
+        : null;
+    const bookmarkScoringQuery = activeTagBrowseDetail ? '#' : trimmedQuery;
 
     // 检测特殊语法
     // Bookmark 模式下应当被视为“纯文本搜索”，不触发 # / A- / 时间等特殊语法。
@@ -4073,6 +4569,13 @@ function searchCanvasAndRender(query) {
             }
         }
 
+        if (activeTagBrowseDetail && item.type === 'bookmark-item') {
+            const itemTags = normalizeTagsForPayload(__getItemTagsForSearch(item));
+            if (!itemTags.some((tag) => tagMatchesBrowseDetail(tag, activeTagBrowseDetail))) {
+                continue;
+            }
+        }
+
         if (mode === 'tag' && fullscreenScope && item.type === 'bookmark-item') {
             const scopeKind = String(fullscreenScope.kind || '').trim();
             if (scopeKind === 'temp') {
@@ -4102,7 +4605,7 @@ function searchCanvasAndRender(query) {
             continue;
         }
 
-        const rawScore = scoreCanvasSearchItem(item, trimmedQuery, { isGroupSearch });
+        const rawScore = scoreCanvasSearchItem(item, bookmarkScoringQuery, { isGroupSearch });
         if (rawScore > -Infinity) {
             const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
             scored.push({ item, s: rawScore + scopeBonus, rawScore });
@@ -4486,9 +4989,22 @@ function setDomainGroupCollapsed(domain, collapsed) {
     searchUiState.domainGroupCollapse.set(key, !!collapsed);
 }
 
-function isDomainSearchItemMatched(domain, item, query) {
+function getActiveTagBrowseDetailForQuery(query) {
+    const q = String(query || '').trim();
+    if (!isTagBrowseRootQuery(q)) return null;
+    const detail = searchUiState && searchUiState.tagBrowseDetail ? searchUiState.tagBrowseDetail : null;
+    return (detail && detail.active === true) ? detail : null;
+}
+
+function isDomainSearchItemMatched(domain, item, query, detailInput = null) {
     const q = String(query || '').trim().toLowerCase();
+    const detail = detailInput && detailInput.active === true ? detailInput : null;
     if (!q) return true;
+
+    if (detail) {
+        const tags = normalizeTagsForPayload(__getItemTagsForSearch(item));
+        return tags.some((tag) => tagMatchesBrowseDetail(tag, detail));
+    }
 
     const domainText = String(domain || '').trim().toLowerCase();
     if (domainText.includes(q)) return true;
@@ -4535,10 +5051,19 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
     const q = String(query || '').trim().toLowerCase();
     const treeKey = getDomainCacheKey();
     const groupLevel = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
+    const tagBrowseDetail = getActiveTagBrowseDetailForQuery(query);
+    const tagBrowseDetailKey = tagBrowseDetail
+        ? `${String(tagBrowseDetail.kind || '')}:${normalizeTagBrowseColor(tagBrowseDetail.color)}:${String(tagBrowseDetail.textLower || '').trim().toLowerCase()}`
+        : '';
     const scope = resolveDomainSearchScope(scopeInput);
     const scopeKey = scope ? scope.key : 'global';
     const cache = searchUiState.domainIndexCache;
-    if (cache && cache.query === q && cache.treeKey === treeKey && cache.groupLevel === groupLevel && cache.scopeKey === scopeKey) return cache;
+    if (cache
+        && cache.query === q
+        && cache.treeKey === treeKey
+        && cache.groupLevel === groupLevel
+        && cache.scopeKey === scopeKey
+        && cache.tagBrowseDetailKey === tagBrowseDetailKey) return cache;
 
     const db = buildCanvasSearchDb();
     const items = Array.isArray(db.bookmarkIndex) ? db.bookmarkIndex : [];
@@ -4575,7 +5100,7 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             };
             map.set(domain, entry);
         }
-        const itemMatched = isDomainSearchItemMatched(domain, item, q);
+        const itemMatched = isDomainSearchItemMatched(domain, item, q, tagBrowseDetail);
 
         entry.count += 1;
         entry.items.push({
@@ -4637,7 +5162,7 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
         return String(a.domain || '').localeCompare(String(b.domain || ''));
     });
 
-    const nextCache = { query: q, treeKey, groupLevel, scopeKey, map, results };
+    const nextCache = { query: q, treeKey, groupLevel, scopeKey, tagBrowseDetailKey, map, results };
     searchUiState.domainIndexCache = nextCache;
     return nextCache;
 }
@@ -4864,6 +5389,15 @@ function renderCanvasSearchResults(results, options = {}) {
     }
 
     const renderQuery = String(options.query || '');
+    const normalizedRenderQuery = normalizeTagBrowseRootQuery(renderQuery);
+    const isTagBrowseQuery = isTagBrowseRootQuery(normalizedRenderQuery);
+    const activeTagBrowseDetail = isTagBrowseQuery
+        && searchUiState
+        && searchUiState.tagBrowseDetail
+        && searchUiState.tagBrowseDetail.active === true
+        ? searchUiState.tagBrowseDetail
+        : null;
+    const isTagBrowseSecondary = !!activeTagBrowseDetail;
     const pageSize = Math.max(
         SEARCH_RESULT_MIN_PAGE_SIZE,
         Number(searchUiState.resultPageSize) || SEARCH_RESULT_MIN_PAGE_SIZE
@@ -4911,7 +5445,28 @@ function renderCanvasSearchResults(results, options = {}) {
             // Or just standard no results.
             // msg = "No bookmark matches found"; 
         }
-        panel.innerHTML = `<div class="search-result-empty">${msg}</div>`;
+        if (isTagBrowseSecondary) {
+            const isZh = currentLang === 'zh_CN';
+            const detailColor = normalizeTagBrowseColor(activeTagBrowseDetail.color) || 'gray';
+            const detailLabel = activeTagBrowseDetail.kind === 'color'
+                ? getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh)
+                : (String(activeTagBrowseDetail.text || '').trim() || getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh));
+            const backLabel = isZh ? '返回' : 'Back';
+            const detailDesc = isZh ? '标签二级筛选' : 'Tag detail';
+            panel.innerHTML = `
+                <div class="canvas-tag-browse-detail-header canvas-tag-browse-detail-header-empty">
+                    <button type="button" class="canvas-tag-browse-back-btn">${escapeHtml(backLabel)}</button>
+                    <span class="canvas-tag-browse-detail-pill">
+                        <span class="tag-dot tag-dot-${escapeHtml(detailColor)}"></span>
+                        <span class="canvas-tag-browse-detail-pill-text">${escapeHtml(detailLabel)}</span>
+                    </span>
+                    <span class="canvas-tag-browse-detail-hint">${escapeHtml(detailDesc)}</span>
+                </div>
+                <div class="search-result-empty">${msg}</div>
+            `;
+        } else {
+            panel.innerHTML = `<div class="search-result-empty">${msg}</div>`;
+        }
         showSearchResultsPanel();
         return;
     }
@@ -5217,6 +5772,25 @@ function renderCanvasSearchResults(results, options = {}) {
         const showDomainBtn = domainCount > 0;
 
         if (showBookmarkBtn || showFolderBtn || showDomainBtn) {
+            const isZh = currentLang === 'zh_CN';
+            if (isTagBrowseSecondary) {
+                const detailColor = normalizeTagBrowseColor(activeTagBrowseDetail.color) || 'gray';
+                const detailLabel = activeTagBrowseDetail.kind === 'color'
+                    ? getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh)
+                    : (String(activeTagBrowseDetail.text || '').trim() || getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh));
+                const backLabel = isZh ? '返回' : 'Back';
+                const detailDesc = activeTagBrowseDetail.kind === 'color'
+                    ? (isZh ? '颜色筛选' : 'Color filter')
+                    : (isZh ? '标签筛选' : 'Tag filter');
+                html += `<div class="canvas-tag-browse-detail-header">
+                    <button type="button" class="canvas-tag-browse-back-btn">${escapeHtml(backLabel)}</button>
+                    <span class="canvas-tag-browse-detail-pill">
+                        <span class="tag-dot tag-dot-${escapeHtml(detailColor)}"></span>
+                        <span class="canvas-tag-browse-detail-pill-text">${escapeHtml(detailLabel)}</span>
+                    </span>
+                    <span class="canvas-tag-browse-detail-hint">${escapeHtml(detailDesc)}</span>
+                </div>`;
+            }
             const makeBtn = ({ type, icon, color, count, isActiveOverride = null }) => {
                 const isActive = (typeof isActiveOverride === 'boolean') ? isActiveOverride : active === type;
                 const bg = isActive ? `${color}22` : 'transparent';
@@ -5261,7 +5835,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 ? `生成临时栏目${visibleCount ? ` (${visibleCount})` : ''}`
                 : `To Temp${visibleCount ? ` (${visibleCount})` : ''}`;
 
-            const showExportBtn = !compactBookmarkToolbar && active !== 'domain';
+            const showExportBtn = (active !== 'domain') && (!compactBookmarkToolbar || isTagBrowseSecondary);
             const exportBtnHtml = showExportBtn
                 ? `<button class="canvas-bookmark-to-temp-btn${compactBookmarkToolbar ? ' canvas-bookmark-to-temp-btn-compact' : ''}" type="button"${compactBookmarkToolbar ? ' style="padding:5px 8px; font-size:11px; border-radius:7px;"' : ''}>${escapeHtml(exportLabel)}</button>`
                 : '';
@@ -5951,14 +6525,14 @@ function rerenderCanvasBookmarkResults(selectedIndex = 0) {
         });
         return;
     }
-    searchCanvasAndRender(query);
+    searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
 }
 
 function appendCanvasSearchResultsPage() {
     const sourceResults = Array.isArray(searchUiState.resultSource) ? searchUiState.resultSource : [];
     const query = String(searchUiState && searchUiState.query || '').trim();
     if (!sourceResults.length) {
-        searchCanvasAndRender(query);
+        searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
         return;
     }
     renderCanvasSearchResults(sourceResults, {
@@ -7895,6 +8469,19 @@ async function activateCanvasSearchResultAtIndex(index) {
 
     const item = searchUiState.results[idx];
     if (!item) return;
+
+    if (item.type === 'tag-browser-color' || item.type === 'tag-browser-tag') {
+        searchUiState.tagBrowseDetail = {
+            active: true,
+            kind: item.type === 'tag-browser-color' ? 'color' : 'tag',
+            color: normalizeTagBrowseColor(item.color),
+            text: String(item.text || '').trim(),
+            textLower: String(item.textLower || '').trim().toLowerCase()
+        };
+        const query = String(searchUiState.query || '').trim() || '#';
+        searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
+        return;
+    }
 
     // Canvas Bookmark Mode: flat group card
     if (item.type === 'bookmark-group') {

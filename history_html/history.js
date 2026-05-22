@@ -13349,7 +13349,7 @@ function performSearch(query) {
     // 根据当前视图执行搜索（仅 Canvas）
     if (currentView === 'canvas') {
         if (typeof searchCanvasAndRender === 'function') {
-            searchCanvasAndRender(query);
+            searchCanvasAndRender(query, { source: 'input' });
         } else {
             console.warn('[Search] searchCanvasAndRender not available');
             hideSearchResultsPanel();
