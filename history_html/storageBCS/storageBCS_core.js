@@ -1973,7 +1973,9 @@ async function __writePermanentMainContentToBcs(contentInput, options = {}) {
     if (!(options && options.skipIdentityMapHeal === true)) {
         __verifyAndHealIdentityMap(nextContent);
     }
-    __bcsStorageSet({
+    // Keep write paths deterministic for callers that immediately read-and-render
+    // (e.g. overwrite import). Fire-and-forget can race the next render with stale BCS.
+    await __bcsStorageSet({
         [BCS_PERM_MAIN_KEY]: nextContent
     }, { immediate: options && options.immediate !== false });
     return {
@@ -2790,6 +2792,9 @@ function __extractCanvasFoldStateCommentBlock(bodyText, options = {}) {
 
 function __buildBookmarkItemsFromProtocolTree(treeInput, options = {}) {
     const includeRootNode = options && options.includeRootNode === true;
+    const tagMapByNodeId = options && options.tagMapByNodeId instanceof Map
+        ? options.tagMapByNodeId
+        : null;
     const sourceNodes = Array.isArray(treeInput)
         ? treeInput
         : ((treeInput && typeof treeInput === 'object') ? [treeInput] : []);
@@ -2807,22 +2812,33 @@ function __buildBookmarkItemsFromProtocolTree(treeInput, options = {}) {
         const title = String(nodeInput.title || nodeInput.name || rawUrl || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder')).trim()
             || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder');
         const normalizedId = String(nodeInput.id || '').trim();
+        const normalizedSyncId = String(nodeInput.syncId || '').trim();
+        const nodeIdForTagLookup = normalizedId || normalizedSyncId;
+        const inlineTags = __normalizeTagArrayInput(Array.isArray(nodeInput.tags) ? nodeInput.tags : []);
+        const mappedTags = (!inlineTags.length && tagMapByNodeId && nodeIdForTagLookup)
+            ? __normalizeTagArrayInput(tagMapByNodeId.get(nodeIdForTagLookup))
+            : [];
+        const resolvedTags = inlineTags.length ? inlineTags : mappedTags;
 
         if (kind === 'bookmark') {
-            return {
+            const out = {
                 ...(normalizedId ? { id: normalizedId } : {}),
                 type: 'bookmark',
                 title,
                 url: rawUrl
             };
+            if (resolvedTags.length) out.tags = resolvedTags;
+            return out;
         }
 
-        return {
+        const out = {
             ...(normalizedId ? { id: normalizedId } : {}),
             type: 'folder',
             title,
             children: (Array.isArray(nodeInput.children) ? nodeInput.children : []).map(convertNode).filter(Boolean)
         };
+        if (resolvedTags.length) out.tags = resolvedTags;
+        return out;
     };
 
     return entryNodes.map(convertNode).filter(Boolean);
@@ -3567,6 +3583,24 @@ function __parseMarkdownAuto(content) {
         console.log('[Canvas Import] Detected JSON Mode (code block)');
         if (extractedJson.jsonProtocol.sectionType === 'temporary' && Array.isArray(extractedJson.jsonProtocol.items)) {
             return extractedJson.jsonProtocol.items;
+        }
+        if (extractedJson.jsonProtocol.sectionType === 'permanent') {
+            // Snapshot-import path: convert permanent identityMap tags into inline item.tags
+            // so permanent->temporary downgrade keeps tag semantics.
+            const tagMapByNodeId = new Map();
+            const identityMap = Array.isArray(extractedJson.jsonProtocol.identityMap)
+                ? extractedJson.jsonProtocol.identityMap
+                : [];
+            identityMap.forEach((entry) => {
+                if (!entry || typeof entry !== 'object') return;
+                const nodeId = String(entry.syncId || entry.id || '').trim();
+                const tags = __normalizeTagArrayInput(Array.isArray(entry.tags) ? entry.tags : []);
+                if (!nodeId || !tags.length) return;
+                tagMapByNodeId.set(nodeId, tags);
+            });
+            return __buildBookmarkItemsFromProtocolTree(extractedJson.jsonProtocol.tree, {
+                tagMapByNodeId
+            });
         }
         return __buildBookmarkItemsFromProtocolTree(extractedJson.jsonProtocol.tree);
     }
@@ -5254,6 +5288,23 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     // 导入后按需加载一次（只加载视口附近少量栏目）
     try { scheduleCanvasVirtualizationUpdate(60); } catch (_) { }
 
+    // Snapshot-package import appends new sections/nodes in-place (no full overwrite teardown).
+    // Tag UI uses cached indexes + dot injection, so trigger a lightweight refresh pass here.
+    try {
+        const refreshAllTagDots = () => {
+            try {
+                if (typeof window !== 'undefined' && typeof window.__refreshAllTagDots === 'function') {
+                    window.__refreshAllTagDots();
+                }
+            } catch (_) { }
+        };
+        if (typeof window !== 'undefined' && window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+            window.TagSystem.ensurePermTagsLoaded(true).then(refreshAllTagDots).catch(refreshAllTagDots);
+        } else {
+            refreshAllTagDots();
+        }
+    } catch (_) { }
+
     console.log(`[Canvas] Import successful. mode=${importMode}. ID Remapped, Offset applied, Group created.`);
     __setCanvasImportRuntimeMode('permanent');
 }
@@ -5264,20 +5315,31 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
  * @param {Array} chromeTree - Chrome 书签树 (chrome.bookmarks.getTree 返回值)
  * @returns {Array} Canvas items 格式
  */
-function __adaptChromeTreeToCanvasItems(chromeTree) {
+function __adaptChromeTreeToCanvasItems(chromeTree, options = {}) {
     if (!chromeTree || !Array.isArray(chromeTree)) return [];
+    const tagsBySyncId = options && options.tagsBySyncId instanceof Map
+        ? options.tagsBySyncId
+        : null;
 
     const convertNode = (node) => {
         if (!node) return null;
+        const nodeId = String(node.id || '').trim();
+        const inlineTags = __normalizeTagArrayInput(Array.isArray(node.tags) ? node.tags : []);
+        const mappedTags = (!inlineTags.length && tagsBySyncId && nodeId)
+            ? __normalizeTagArrayInput(tagsBySyncId.get(nodeId))
+            : [];
+        const resolvedTags = inlineTags.length ? inlineTags : mappedTags;
 
         // 书签
         if (node.url) {
-            return {
+            const out = {
                 id: `snapshot - ${node.id || Date.now()} - ${Math.random().toString(36).substr(2, 5)}`,
                 type: 'bookmark',
                 title: node.title || node.name || node.url,
                 url: node.url
             };
+            if (resolvedTags.length) out.tags = resolvedTags;
+            return out;
         }
 
         // 文件夹
@@ -5285,12 +5347,14 @@ function __adaptChromeTreeToCanvasItems(chromeTree) {
             ? node.children.map(convertNode).filter(Boolean)
             : [];
 
-        return {
+        const out = {
             id: `snapshot - ${node.id || Date.now()} - ${Math.random().toString(36).substr(2, 5)}`,
             type: 'folder',
             title: node.title || node.name || 'Folder',
             children: children
         };
+        if (resolvedTags.length) out.tags = resolvedTags;
+        return out;
     };
 
     // Chrome 书签树的根节点结构：[{ id: "0", children: [书签栏, 其他书签, ...] }]
@@ -5382,6 +5446,23 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
     };
 
     const importedPermanentLayout = __collectImportedPermanentLayoutFromStorage(fullStorage);
+    const importedPermMainPayload = fullStorage && fullStorage[BCS_PERM_MAIN_KEY] && typeof fullStorage[BCS_PERM_MAIN_KEY] === 'object'
+        ? fullStorage[BCS_PERM_MAIN_KEY]
+        : (primaryState && primaryState[BCS_PERM_MAIN_KEY] && typeof primaryState[BCS_PERM_MAIN_KEY] === 'object'
+            ? primaryState[BCS_PERM_MAIN_KEY]
+            : null);
+    const importedPermTagsBySyncId = (() => {
+        const map = new Map();
+        if (!importedPermMainPayload || !Array.isArray(importedPermMainPayload.identityMap)) return map;
+        importedPermMainPayload.identityMap.forEach((entry) => {
+            if (!entry || typeof entry !== 'object') return;
+            const syncId = String(entry.syncId || '').trim();
+            const tags = __normalizeTagArrayInput(Array.isArray(entry.tags) ? entry.tags : []);
+            if (!syncId || !tags.length) return;
+            map.set(syncId, tags);
+        });
+        return map;
+    })();
     const toNumber = (value, fallback) => {
         const parsed = parseFloat(String(value == null ? '' : value));
         return Number.isFinite(parsed) ? parsed : fallback;
@@ -5397,7 +5478,9 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
         let snapshotItems = [];
         if (primaryState && primaryState.permanentTreeSnapshot) {
             const bookmarkTree = primaryState.permanentTreeSnapshot;
-            snapshotItems = __adaptChromeTreeToCanvasItems(bookmarkTree);
+            snapshotItems = __adaptChromeTreeToCanvasItems(bookmarkTree, {
+                tagsBySyncId: importedPermTagsBySyncId
+            });
         }
 
         const dateStr = new Date().toISOString().slice(0, 10);
@@ -5433,7 +5516,9 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
         let snapshotItems = [];
         if (primaryState && primaryState.permanentTreeSnapshot) {
             try {
-                snapshotItems = __adaptChromeTreeToCanvasItems(primaryState.permanentTreeSnapshot);
+                snapshotItems = __adaptChromeTreeToCanvasItems(primaryState.permanentTreeSnapshot, {
+                    tagsBySyncId: importedPermTagsBySyncId
+                });
             } catch (_) { }
         }
 

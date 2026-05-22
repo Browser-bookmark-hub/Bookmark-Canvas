@@ -1120,6 +1120,18 @@ async function __performOverwriteImport(payload) {
     const expectedSyncIds = __collectSyncIdsFromImportTree(importTree);
 
     let success = false;
+    const refreshTagUiAfterImport = async () => {
+        try {
+            if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                await window.TagSystem.ensurePermTagsLoaded(true);
+            }
+        } catch (_) {}
+        try {
+            if (typeof window.__refreshAllTagDots === 'function') {
+                window.__refreshAllTagDots();
+            }
+        } catch (_) {}
+    };
     try {
         if (goOverwrite) {
             // -- Overwrite branch ---------------------------------------------------------
@@ -1369,11 +1381,39 @@ async function __performOverwriteImport(payload) {
                     const currentInfo = lookups.parentByChildId.get(chromeId);
                     const parentDiffers = !!(desiredParentChromeId && currentInfo && String(currentInfo.parentId) !== String(desiredParentChromeId));
                     const desiredIndex = i;
-                    const indexDiffers = !!(currentInfo && Number(currentInfo.index) !== Number(desiredIndex));
+                    // When import contains unmapped siblings, raw `i` can exceed the current live
+                    // sibling range and trigger "Index out of bounds". Clamp before move.
+                    const desiredParentNode = desiredParentChromeId
+                        ? lookups.nodeByChromeId.get(String(desiredParentChromeId))
+                        : null;
+                    const desiredParentChildCount = Array.isArray(desiredParentNode && desiredParentNode.children)
+                        ? desiredParentNode.children.length
+                        : 0;
+                    const maxAllowedIndex = Math.max(
+                        0,
+                        desiredParentChildCount - (parentDiffers ? 0 : 1)
+                    );
+                    const safeDesiredIndex = Math.max(0, Math.min(desiredIndex, maxAllowedIndex));
+                    const indexDiffers = !!(currentInfo && Number(currentInfo.index) !== Number(safeDesiredIndex));
                     if ((parentDiffers || indexDiffers) && desiredParentChromeId) {
                         try {
                             await new Promise((resolve) => {
-                                try { chrome.bookmarks.move(chromeId, { parentId: desiredParentChromeId, index: desiredIndex }, () => resolve()); }
+                                try {
+                                    chrome.bookmarks.move(
+                                        chromeId,
+                                        { parentId: desiredParentChromeId, index: safeDesiredIndex },
+                                        () => {
+                                            // Read lastError to avoid "Unchecked runtime.lastError" noise.
+                                            const err = chrome.runtime && chrome.runtime.lastError
+                                                ? String(chrome.runtime.lastError.message || '')
+                                                : '';
+                                            if (err) {
+                                                try { console.warn('[Incremental Import] bookmarks.move skipped:', { chromeId, desiredParentChromeId, safeDesiredIndex, err }); } catch (_) {}
+                                            }
+                                            resolve();
+                                        }
+                                    );
+                                }
                                 catch (_) { resolve(); }
                             });
                         } catch (_) {}
@@ -1489,6 +1529,7 @@ async function __performOverwriteImport(payload) {
     }
 
     if (success) {
+        await refreshTagUiAfterImport();
         const msg = isEn ? 'Full overwrite complete. Undo via Backup.' : '全量覆盖完成。可通过「备份」撤销。';
         try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'success', 4000) : alert(msg); } catch (_) { alert(msg); }
     }
