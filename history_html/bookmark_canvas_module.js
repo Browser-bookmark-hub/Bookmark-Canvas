@@ -11,21 +11,14 @@ const NODE_MAXIMIZED_VIEW_STATE_KIND = 'fullscreen';
 const NODE_LAST_MAXIMIZED_STORAGE_KEY = 'canvas-node-last-maximized-v1';
 const LAST_MAXIMIZED_NODE_UPDATED_EVENT = 'canvas-last-maximized-node-updated';
 const NODE_LAYOUT_ZOOM_STORAGE_KEY = 'canvas-node-layout-zoom-v1';
-const NODE_LAYOUT_ZOOM_DEFAULT = 150;
-const NODE_LAYOUT_ZOOM_DEFAULT_SECTION = 125;
 const NODE_LAYOUT_ZOOM_MIN = 50;
 const NODE_LAYOUT_ZOOM_MAX = 320;
 const NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM = {
-    mac: { md: NODE_LAYOUT_ZOOM_DEFAULT, section: NODE_LAYOUT_ZOOM_DEFAULT_SECTION, baseDpr: 2 },
-    windows: { md: NODE_LAYOUT_ZOOM_DEFAULT, section: NODE_LAYOUT_ZOOM_DEFAULT_SECTION, baseDpr: 1 },
-    linux: { md: NODE_LAYOUT_ZOOM_DEFAULT, section: NODE_LAYOUT_ZOOM_DEFAULT_SECTION, baseDpr: 1 },
-    other: { md: NODE_LAYOUT_ZOOM_DEFAULT, section: NODE_LAYOUT_ZOOM_DEFAULT_SECTION, baseDpr: 1 }
+    mac: { md: 70, section: 70 },
+    windows: { md: 90, section: 90 },
+    linux: { md: 90, section: 90 },
+    other: { md: 90, section: 90 }
 };
-const NODE_LAYOUT_ZOOM_AUTO_SCALE_MIN = 0.95;
-const NODE_LAYOUT_ZOOM_AUTO_SCALE_MAX = 1.10;
-const NODE_LAYOUT_ZOOM_DPR_SCALE_EXPONENT = 0.35;
-const NODE_LAYOUT_ZOOM_FONT_SCALE_EXPONENT = 0.45;
-const NODE_LAYOUT_ZOOM_FONT_BASE_PX = 16;
 const NODE_LAYOUT_ZOOM_STEP = 5;
 const NODE_LAYOUT_ZOOM_STABILIZE_DELAY_MS = 96;
 const MAXIMIZED_NODE_RESIZE_REFRESH_DEBOUNCE_MS = 120;
@@ -1545,7 +1538,7 @@ const MD_NODE_MIN_HEIGHT = 140;
 
 // Canvas 外观设置（默认值）
 const CANVAS_APPEARANCE_SETTINGS_KEY = 'canvas-appearance-settings-v1';
-const CANVAS_APPEARANCE_SETTINGS_VERSION = 4;
+const CANVAS_APPEARANCE_SETTINGS_VERSION = 5;
 const LEGACY_TEMP_SECTION_DEFAULT_WIDTH = 420;
 const LEGACY_TEMP_SECTION_DEFAULT_WIDTH_V2 = 500;
 const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
@@ -1565,6 +1558,10 @@ const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
     names: {
         temp: { mode: 'timestamp', manualValue: '' },
         edge: { mode: 'blank', manualValue: '' }
+    },
+    fullScreenZoom: {
+        section: NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.section,
+        mdNode: NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.md
     }
 };
 
@@ -1762,7 +1759,9 @@ const DEFAULT_PERF_BASELINE = {
 };
 
 function __cloneDefaultAppearanceSettings() {
-    return JSON.parse(JSON.stringify(DEFAULT_CANVAS_APPEARANCE_SETTINGS));
+    const cloned = JSON.parse(JSON.stringify(DEFAULT_CANVAS_APPEARANCE_SETTINGS));
+    cloned.fullScreenZoom = __getDefaultAppearanceFullscreenZoomSettings();
+    return cloned;
 }
 
 function __cloneDefaultOtherSettings() {
@@ -1795,6 +1794,27 @@ function __normalizeAppearanceSize(source, fallback, limits) {
         height: __clampNumber(raw.height, minHeight, limits.maxHeight, fallbackHeight),
         minWidth,
         minHeight
+    };
+}
+
+function __getDefaultAppearanceFullscreenZoomSettings() {
+    const key = __getLayoutZoomPlatformKey();
+    const preset = NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM[key] || NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other;
+    const sectionFallback = NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.section;
+    const mdFallback = NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.md;
+    return {
+        section: __normalizeLayoutZoomPercent(preset.section, sectionFallback),
+        mdNode: __normalizeLayoutZoomPercent(preset.md, mdFallback)
+    };
+}
+
+function __normalizeAppearanceFullscreenZoom(source, fallback = null) {
+    const raw = source && typeof source === 'object' ? source : {};
+    const defaults = __getDefaultAppearanceFullscreenZoomSettings();
+    const base = fallback && typeof fallback === 'object' ? fallback : defaults;
+    return {
+        section: __normalizeLayoutZoomPercent(raw.section, __normalizeLayoutZoomPercent(base.section, defaults.section)),
+        mdNode: __normalizeLayoutZoomPercent(raw.mdNode, __normalizeLayoutZoomPercent(base.mdNode, defaults.mdNode))
     };
 }
 
@@ -1955,6 +1975,7 @@ function normalizeCanvasAppearanceSettings(input) {
 
     out.names.edge.mode = ['manual', 'timestamp', 'parent', 'child', 'blank'].includes(edgeMode) ? edgeMode : out.names.edge.mode;
     out.names.edge.manualValue = typeof edgeNames.manualValue === 'string' ? edgeNames.manualValue : out.names.edge.manualValue;
+    out.fullScreenZoom = __normalizeAppearanceFullscreenZoom(input.fullScreenZoom, out.fullScreenZoom);
 
     out.version = CANVAS_APPEARANCE_SETTINGS_VERSION;
     return out;
@@ -11352,46 +11373,14 @@ function __getLayoutZoomPlatformKey() {
     return 'other';
 }
 
-function __getNodeLayoutZoomPlatformBaseline(element) {
-    const key = __getLayoutZoomPlatformKey();
-    const preset = NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM[key] || NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other;
-    const isMdNode = !!(element && element.classList && element.classList.contains('md-canvas-node'));
-    return {
-        percent: isMdNode ? preset.md : preset.section,
-        baseDpr: Number.isFinite(preset.baseDpr) && preset.baseDpr > 0 ? preset.baseDpr : 1
-    };
-}
-
-function __getNodeLayoutZoomEnvironmentScale(baseDpr = 1) {
-    const safeBaseDpr = Number.isFinite(baseDpr) && baseDpr > 0 ? baseDpr : 1;
-    let dprScale = 1;
-    try {
-        const dpr = (typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0)
-            ? window.devicePixelRatio
-            : 1;
-        const ratio = __clampNumber(dpr / safeBaseDpr, 0.5, 3.5, 1);
-        dprScale = Math.pow(ratio, NODE_LAYOUT_ZOOM_DPR_SCALE_EXPONENT);
-    } catch (_) { }
-
-    let fontScale = 1;
-    try {
-        const root = (typeof document !== 'undefined') ? document.documentElement : null;
-        if (root && typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
-            const rootFontPx = parseFloat(window.getComputedStyle(root).fontSize || '');
-            const fontRatio = __clampNumber(rootFontPx / NODE_LAYOUT_ZOOM_FONT_BASE_PX, 0.75, 2.0, 1);
-            fontScale = Math.pow(fontRatio, NODE_LAYOUT_ZOOM_FONT_SCALE_EXPONENT);
-        }
-    } catch (_) { }
-
-    const combinedScale = Math.max(dprScale, fontScale);
-    return __clampNumber(combinedScale, NODE_LAYOUT_ZOOM_AUTO_SCALE_MIN, NODE_LAYOUT_ZOOM_AUTO_SCALE_MAX, 1);
-}
-
 function __getDefaultLayoutZoomPercentByElement(element) {
-    const baseline = __getNodeLayoutZoomPlatformBaseline(element);
-    const autoScale = __getNodeLayoutZoomEnvironmentScale(baseline.baseDpr);
-    const computed = Math.round(baseline.percent * autoScale);
-    return __normalizeLayoutZoomPercent(computed, baseline.percent);
+    const isMdNode = !!(element && element.classList && element.classList.contains('md-canvas-node'));
+    const settings = getCanvasAppearanceSettings();
+    const fullScreenZoom = __normalizeAppearanceFullscreenZoom(
+        settings && settings.fullScreenZoom,
+        __getDefaultAppearanceFullscreenZoomSettings()
+    );
+    return isMdNode ? fullScreenZoom.mdNode : fullScreenZoom.section;
 }
 
 function __parseLayoutZoomInput(value, fallback) {
@@ -11403,18 +11392,21 @@ function __parseLayoutZoomInput(value, fallback) {
 
 function __getNodeLayoutZoomPercent(element) {
     const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
-    const fallback = (() => {
+    const key = __getNodeLayoutZoomKey(element);
+    if (!key) {
         if (element && element.dataset && element.dataset.layoutZoomPercent) {
             const parsed = Number(element.dataset.layoutZoomPercent);
-            if (Number.isFinite(parsed)) return parsed;
+            if (Number.isFinite(parsed)) {
+                return __normalizeLayoutZoomPercent(parsed, defaultPercent);
+            }
         }
         return defaultPercent;
-    })();
-    const key = __getNodeLayoutZoomKey(element);
-    if (!key) return __normalizeLayoutZoomPercent(fallback, defaultPercent);
+    }
     const map = __readJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, {});
-    const raw = map && typeof map === 'object' ? map[key] : null;
-    return __normalizeLayoutZoomPercent(raw, fallback);
+    const hasValue = !!(map && typeof map === 'object' && Object.prototype.hasOwnProperty.call(map, key));
+    if (!hasValue) return defaultPercent;
+    const raw = map[key];
+    return __normalizeLayoutZoomPercent(raw, defaultPercent);
 }
 
 function __applyNodeLayoutZoom(element, percent) {
@@ -30809,6 +30801,10 @@ function openCanvasAppearanceSettingsModal() {
     const sizes = settings.sizes || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes;
     const colors = settings.colors || DEFAULT_CANVAS_APPEARANCE_SETTINGS.colors;
     const names = settings.names || DEFAULT_CANVAS_APPEARANCE_SETTINGS.names;
+    const fullScreenZoom = __normalizeAppearanceFullscreenZoom(
+        settings.fullScreenZoom,
+        __getDefaultAppearanceFullscreenZoomSettings()
+    );
 
     __setAppearanceRadioGroup(modal, 'appearance-temp-size-mode', sizes.temp.mode || 'manual');
     __setAppearanceRadioGroup(modal, 'appearance-special-temp-size-mode', (sizes.specialTemp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.specialTemp).mode || 'manual');
@@ -30819,6 +30815,8 @@ function openCanvasAppearanceSettingsModal() {
     const specialTempH = modal.querySelector('#appearanceSpecialTempHeight');
     const blankW = modal.querySelector('#appearanceBlankWidth');
     const blankH = modal.querySelector('#appearanceBlankHeight');
+    const fullScreenSectionZoom = modal.querySelector('#appearanceFullScreenSectionZoom');
+    const fullScreenMdZoom = modal.querySelector('#appearanceFullScreenMdZoom');
 
     if (tempW) tempW.value = sizes.temp.width;
     if (tempH) tempH.value = sizes.temp.height;
@@ -30826,6 +30824,8 @@ function openCanvasAppearanceSettingsModal() {
     if (specialTempH) specialTempH.value = (sizes.specialTemp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.specialTemp).height;
     if (blankW) blankW.value = sizes.mdNode.width;
     if (blankH) blankH.value = sizes.mdNode.height;
+    if (fullScreenSectionZoom) fullScreenSectionZoom.value = fullScreenZoom.section;
+    if (fullScreenMdZoom) fullScreenMdZoom.value = fullScreenZoom.mdNode;
 
     modal.querySelectorAll('.appearance-color-row').forEach(row => {
         const target = row.dataset.colorTarget;
@@ -30918,6 +30918,22 @@ function saveCanvasAppearanceSettings(options = {}) {
                 width: readNumber('appearanceBlankWidth', (currentSizes.mdNode || {}).width),
                 height: readNumber('appearanceBlankHeight', (currentSizes.mdNode || {}).height)
             }
+        },
+        fullScreenZoom: {
+            section: readNumber(
+                'appearanceFullScreenSectionZoom',
+                __normalizeAppearanceFullscreenZoom(
+                    current.fullScreenZoom,
+                    __getDefaultAppearanceFullscreenZoomSettings()
+                ).section
+            ),
+            mdNode: readNumber(
+                'appearanceFullScreenMdZoom',
+                __normalizeAppearanceFullscreenZoom(
+                    current.fullScreenZoom,
+                    __getDefaultAppearanceFullscreenZoomSettings()
+                ).mdNode
+            )
         },
         colors: {
             permanent: (modal.querySelector('#appearanceColorPermanent') || {}).value,
@@ -31147,6 +31163,23 @@ function createCanvasAppearanceSettingsModal() {
                                 <span>×</span>
                                 <input type="number" id="appearanceBlankHeight" min="140" max="2000" step="10">
                                 <span>px</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Fullscreen default zoom' : '全屏模式默认缩放比率'}</div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-size-inputs appearance-size-inputs-stacked" id="appearanceFullScreenZoomInputs">
+                                <label class="appearance-inline-input" for="appearanceFullScreenSectionZoom">
+                                    <span>${isEn ? 'Section (Permanent/Temp)' : '栏目卡片（永久/临时）'}</span>
+                                    <input type="number" id="appearanceFullScreenSectionZoom" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5">
+                                    <span class="appearance-inline-suffix">%</span>
+                                </label>
+                                <label class="appearance-inline-input" for="appearanceFullScreenMdZoom">
+                                    <span>${isEn ? 'Blank card' : '空白栏目卡片'}</span>
+                                    <input type="number" id="appearanceFullScreenMdZoom" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5">
+                                    <span class="appearance-inline-suffix">%</span>
+                                </label>
                             </div>
                         </div>
                     </div>
@@ -31478,6 +31511,8 @@ function createCanvasAppearanceSettingsModal() {
         '#appearanceSpecialTempHeight',
         '#appearanceBlankWidth',
         '#appearanceBlankHeight',
+        '#appearanceFullScreenSectionZoom',
+        '#appearanceFullScreenMdZoom',
         '#appearanceTempNameManual',
         '#appearanceEdgeNameManual'
     ];

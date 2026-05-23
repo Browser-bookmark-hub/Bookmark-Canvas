@@ -2058,6 +2058,31 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     justify-content: flex-end;
 }
 
+.appearance-size-inputs-stacked {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+.appearance-inline-input {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.appearance-inline-input > span:first-child {
+    white-space: nowrap;
+}
+
+.appearance-inline-suffix {
+    min-width: 10px;
+    text-align: right;
+    color: var(--text-tertiary);
+}
+
 .appearance-size-inputs input {
     width: 64px;
     padding: 4px 8px;
