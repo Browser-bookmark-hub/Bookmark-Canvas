@@ -19530,6 +19530,7 @@ function renderMdNode(node) {
             ? e.target
             : (e.target && e.target.parentElement ? e.target.parentElement : null);
         if (!target) return;
+        if (e.button !== 0 && !isSectionCtrlModeEvent(e)) return;
         // 忽略在resize、小工具栏按钮、链接上的按下
         if (target.closest('.resize-handle') || target.closest('.md-node-toolbar-btn') || target.closest('.canvas-layout-zoom-controls') || target.closest('a')) return;
 
