@@ -14596,6 +14596,34 @@ function __isPermanentSectionCopy(sectionEl) {
     return !!(sectionEl && sectionEl.classList && sectionEl.classList.contains('permanent-section-copy'));
 }
 
+function __getPermanentSectionCanvasNodeId(sectionEl) {
+    if (!sectionEl) return 'permanent-section';
+    if (__isPermanentSectionCopy(sectionEl)) {
+        const copyId = __getPermanentSectionCopyId(sectionEl);
+        if (copyId) return `permanent-section-copy-${copyId}`;
+    }
+    return 'permanent-section';
+}
+
+function __resolveCanvasNodeElementById(nodeId) {
+    const id = String(nodeId || '').trim();
+    if (!id) return null;
+    if (id === 'permanent-section' || id === 'permanentSection') {
+        return document.getElementById('permanentSection');
+    }
+    if (id.startsWith('permanent-section-copy-')) {
+        const copyId = id.slice('permanent-section-copy-'.length).trim();
+        if (!copyId) return null;
+        try {
+            return document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${CSS.escape(copyId)}"]`)
+                || document.getElementById(id);
+        } catch (_) {
+            return document.getElementById(id);
+        }
+    }
+    return document.getElementById(id);
+}
+
 function __getPermanentSectionScrollBaseKey(sectionEl) {
     if (!sectionEl) return PERMANENT_SECTION_SCROLL_KEY;
     if (!__isPermanentSectionCopy(sectionEl)) return PERMANENT_SECTION_SCROLL_KEY;
@@ -15011,6 +15039,7 @@ function __createPermanentSectionCopyFromStorage(copyData) {
 function removePermanentSectionCopy(sectionEl) {
     if (!sectionEl || !__isPermanentSectionCopy(sectionEl)) return;
     const copyId = __getPermanentSectionCopyId(sectionEl);
+    const canvasNodeId = __getPermanentSectionCanvasNodeId(sectionEl);
 
     // Remove DOM first (avoid any future queries hitting it)
     try { sectionEl.remove(); } catch (_) { }
@@ -15031,6 +15060,8 @@ function removePermanentSectionCopy(sectionEl) {
         try { __clearTempSectionOriginForDeletedPermanentCopy(copyId); } catch (_) { }
     }
 
+    try { removeEdgesForNode(canvasNodeId, { skipSave: true }); } catch (_) { }
+    try { saveTempNodes({ immediate: true }); } catch (_) { }
     try { __updatePermanentSectionIndexBadges(); } catch (_) { }
     try { updateCanvasScrollBounds(); } catch (_) { }
     try { updateScrollbarThumbs(); } catch (_) { }
@@ -15058,6 +15089,8 @@ function makePermanentSectionDraggable(permanentSection) {
         console.warn('[Canvas] 找不到永久栏目标题区域');
         return;
     }
+
+    try { addAnchorsToNode(permanentSection, __getPermanentSectionCanvasNodeId(permanentSection)); } catch (_) { }
 
     // Avoid duplicate bindings
     if (permanentSection.dataset && permanentSection.dataset.permanentDraggableBound === 'true') {
@@ -29201,9 +29234,9 @@ function endConnection(e) {
             toSide = anchor.dataset.side;
         } else if (nodeEl) {
             // Dropped on a node but not an anchor -> auto-connect to nearest side
-            toNodeId = nodeEl.id;
-            // Special case for permanent section ID normalization
-            if (toNodeId === 'permanentSection') toNodeId = 'permanent-section';
+            toNodeId = nodeEl.classList && nodeEl.classList.contains('permanent-bookmark-section')
+                ? __getPermanentSectionCanvasNodeId(nodeEl)
+                : nodeEl.id;
 
             const rect = nodeEl.getBoundingClientRect();
             toSide = getNearestSide(rect, e.clientX, e.clientY);
@@ -29666,9 +29699,7 @@ function updateEdgePath(edge, pathElement, geometry = null) {
 }
 
 function getAnchorPosition(nodeId, side) {
-    let el = document.getElementById(nodeId);
-    // Special case mapping for permanent section
-    if (nodeId === 'permanent-section') el = document.getElementById('permanentSection');
+    let el = __resolveCanvasNodeElementById(nodeId);
 
     if (!el) return null;
 
