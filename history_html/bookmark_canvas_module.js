@@ -28,7 +28,11 @@ const NODE_LAYOUT_ZOOM_FONT_SCALE_EXPONENT = 0.45;
 const NODE_LAYOUT_ZOOM_FONT_BASE_PX = 16;
 const NODE_LAYOUT_ZOOM_STEP = 5;
 const NODE_LAYOUT_ZOOM_STABILIZE_DELAY_MS = 96;
+const MAXIMIZED_NODE_RESIZE_REFRESH_DEBOUNCE_MS = 120;
+const MAXIMIZED_NODE_RESIZE_STABILIZE_DELAY_MS = 180;
 const nodeLayoutZoomStabilizeTimerMap = new WeakMap();
+let maximizedNodeResizeRefreshTimer = null;
+let maximizedNodeResizeStabilizeTimer = null;
 const MD_NODE_DEFAULT_FONT_SIZE = 20;
 const MD_NODE_LEGACY_DEFAULT_FONT_SIZE = 14;
 const TEMP_DESC_HEIGHT_SETTINGS_KEY = 'canvas-temp-desc-height-settings-v1';
@@ -1440,8 +1444,9 @@ function startSectionResize(element, event) {
     state.startHeight = element.offsetHeight;
     state.startLeft = meta.x;
     state.startTop = meta.y;
-    state.minWidth = meta.type === 'permanent-section' ? 300 : (meta.type === 'md-node' ? 180 : 200);
-    state.minHeight = meta.type === 'permanent-section' ? 200 : (meta.type === 'md-node' ? 140 : 150);
+    const minSize = getSectionMinimumSize(element, meta.data);
+    state.minWidth = minSize.width;
+    state.minHeight = minSize.height;
     state.waitForSecondRightClick = true; // 第二次右键才结束
 
     element.classList.add('resizing');
@@ -1531,18 +1536,24 @@ const TEMP_SECTION_DEFAULT_COLOR = '#2563eb';
 // 空白栏目默认尺寸（产品自定义）
 const MD_NODE_DEFAULT_WIDTH = 300;
 const MD_NODE_DEFAULT_HEIGHT = 300;
+const PERMANENT_SECTION_MIN_WIDTH = 300;
+const PERMANENT_SECTION_MIN_HEIGHT = 200;
+const TEMP_SECTION_MIN_WIDTH = 200;
+const TEMP_SECTION_MIN_HEIGHT = 150;
+const MD_NODE_MIN_WIDTH = 180;
+const MD_NODE_MIN_HEIGHT = 140;
 
 // Canvas 外观设置（默认值）
 const CANVAS_APPEARANCE_SETTINGS_KEY = 'canvas-appearance-settings-v1';
-const CANVAS_APPEARANCE_SETTINGS_VERSION = 3;
+const CANVAS_APPEARANCE_SETTINGS_VERSION = 4;
 const LEGACY_TEMP_SECTION_DEFAULT_WIDTH = 420;
 const LEGACY_TEMP_SECTION_DEFAULT_WIDTH_V2 = 500;
 const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
     sizes: {
-        permanent: { mode: 'manual', width: 600, height: 600 },
-        temp: { mode: 'auto', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT },
-        specialTemp: { mode: 'manual', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT },
-        mdNode: { width: MD_NODE_DEFAULT_WIDTH, height: MD_NODE_DEFAULT_HEIGHT }
+        permanent: { mode: 'manual', width: 600, height: 600, minWidth: PERMANENT_SECTION_MIN_WIDTH, minHeight: PERMANENT_SECTION_MIN_HEIGHT },
+        temp: { mode: 'auto', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT, minWidth: TEMP_SECTION_MIN_WIDTH, minHeight: TEMP_SECTION_MIN_HEIGHT },
+        specialTemp: { mode: 'manual', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT, minWidth: TEMP_SECTION_MIN_WIDTH, minHeight: TEMP_SECTION_MIN_HEIGHT },
+        mdNode: { width: MD_NODE_DEFAULT_WIDTH, height: MD_NODE_DEFAULT_HEIGHT, minWidth: MD_NODE_MIN_WIDTH, minHeight: MD_NODE_MIN_HEIGHT }
     },
     colors: {
         permanent: '#10b981',
@@ -1771,6 +1782,22 @@ function __normalizeAppearanceColor(value, fallback) {
     return normalized ? `#${normalized}` : fallback;
 }
 
+function __normalizeAppearanceSize(source, fallback, limits) {
+    const raw = source && typeof source === 'object' ? source : {};
+    const base = fallback && typeof fallback === 'object' ? fallback : {};
+    const minWidth = __clampNumber(raw.minWidth, limits.minWidth, limits.maxWidth, base.minWidth || limits.minWidth);
+    const minHeight = __clampNumber(raw.minHeight, limits.minHeight, limits.maxHeight, base.minHeight || limits.minHeight);
+    const fallbackWidth = Math.max(minWidth, base.width || minWidth);
+    const fallbackHeight = Math.max(minHeight, base.height || minHeight);
+    return {
+        ...base,
+        width: __clampNumber(raw.width, minWidth, limits.maxWidth, fallbackWidth),
+        height: __clampNumber(raw.height, minHeight, limits.maxHeight, fallbackHeight),
+        minWidth,
+        minHeight
+    };
+}
+
 function __normalizeZoomCurve(input) {
     const fallback = __cloneDefaultOtherSettings().zoomCurve;
     if (!input || typeof input !== 'object') return fallback;
@@ -1873,17 +1900,42 @@ function normalizeCanvasAppearanceSettings(input) {
     out.sizes.temp.mode = (tempSize.mode === 'auto') ? 'auto' : 'manual';
     out.sizes.specialTemp.mode = (specialTempSize.mode === 'auto') ? 'auto' : 'manual';
 
-    out.sizes.permanent.width = __clampNumber(permSize.width, 300, 3000, out.sizes.permanent.width);
-    out.sizes.permanent.height = __clampNumber(permSize.height, 200, 4000, out.sizes.permanent.height);
+    out.sizes.permanent = {
+        ...__normalizeAppearanceSize(permSize, out.sizes.permanent, {
+            minWidth: PERMANENT_SECTION_MIN_WIDTH,
+            minHeight: PERMANENT_SECTION_MIN_HEIGHT,
+            maxWidth: 3000,
+            maxHeight: 4000
+        }),
+        mode: out.sizes.permanent.mode
+    };
 
-    out.sizes.temp.width = __clampNumber(tempSize.width, 200, 2400, out.sizes.temp.width);
-    out.sizes.temp.height = __clampNumber(tempSize.height, 150, 3000, out.sizes.temp.height);
+    out.sizes.temp = {
+        ...__normalizeAppearanceSize(tempSize, out.sizes.temp, {
+            minWidth: TEMP_SECTION_MIN_WIDTH,
+            minHeight: TEMP_SECTION_MIN_HEIGHT,
+            maxWidth: 2400,
+            maxHeight: 3000
+        }),
+        mode: out.sizes.temp.mode
+    };
 
-    out.sizes.specialTemp.width = __clampNumber(specialTempSize.width, 200, 2400, out.sizes.specialTemp.width);
-    out.sizes.specialTemp.height = __clampNumber(specialTempSize.height, 150, 3000, out.sizes.specialTemp.height);
+    out.sizes.specialTemp = {
+        ...__normalizeAppearanceSize(specialTempSize, out.sizes.specialTemp, {
+            minWidth: TEMP_SECTION_MIN_WIDTH,
+            minHeight: TEMP_SECTION_MIN_HEIGHT,
+            maxWidth: 2400,
+            maxHeight: 3000
+        }),
+        mode: out.sizes.specialTemp.mode
+    };
 
-    out.sizes.mdNode.width = __clampNumber(mdSize.width, 180, 2000, out.sizes.mdNode.width);
-    out.sizes.mdNode.height = __clampNumber(mdSize.height, 140, 2000, out.sizes.mdNode.height);
+    out.sizes.mdNode = __normalizeAppearanceSize(mdSize, out.sizes.mdNode, {
+        minWidth: MD_NODE_MIN_WIDTH,
+        minHeight: MD_NODE_MIN_HEIGHT,
+        maxWidth: 2000,
+        maxHeight: 2000
+    });
 
     const colors = input.colors || {};
     out.colors.permanent = __normalizeAppearanceColor(colors.permanent, out.colors.permanent);
@@ -2521,19 +2573,79 @@ function getSpecialTempSectionDefaultColor() {
 
 function getTempSectionBaseSize(section = null) {
     const size = __getTempSectionSizeSettings(section);
-    return { width: size.width, height: size.height, mode: size.mode || 'manual' };
+    const minWidth = Number.isFinite(Number(size.minWidth)) ? Number(size.minWidth) : TEMP_SECTION_MIN_WIDTH;
+    const minHeight = Number.isFinite(Number(size.minHeight)) ? Number(size.minHeight) : TEMP_SECTION_MIN_HEIGHT;
+    return {
+        width: Math.max(minWidth, Number(size.width) || TEMP_SECTION_DEFAULT_WIDTH),
+        height: Math.max(minHeight, Number(size.height) || TEMP_SECTION_DEFAULT_HEIGHT),
+        minWidth,
+        minHeight,
+        mode: size.mode || 'manual'
+    };
 }
 
 function getPermanentSectionBaseSize() {
     const settings = getCanvasAppearanceSettings();
     const size = settings.sizes && settings.sizes.permanent ? settings.sizes.permanent : DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.permanent;
-    return { width: size.width, height: size.height, mode: 'manual' };
+    const minWidth = Number.isFinite(Number(size.minWidth)) ? Number(size.minWidth) : PERMANENT_SECTION_MIN_WIDTH;
+    const minHeight = Number.isFinite(Number(size.minHeight)) ? Number(size.minHeight) : PERMANENT_SECTION_MIN_HEIGHT;
+    return {
+        width: Math.max(minWidth, Number(size.width) || 600),
+        height: Math.max(minHeight, Number(size.height) || 600),
+        minWidth,
+        minHeight,
+        mode: 'manual'
+    };
 }
 
 function getBlankNodeDefaultSize() {
     const settings = getCanvasAppearanceSettings();
     const size = settings.sizes && settings.sizes.mdNode ? settings.sizes.mdNode : DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.mdNode;
-    return { width: size.width, height: size.height };
+    const minWidth = Number.isFinite(Number(size.minWidth)) ? Number(size.minWidth) : MD_NODE_MIN_WIDTH;
+    const minHeight = Number.isFinite(Number(size.minHeight)) ? Number(size.minHeight) : MD_NODE_MIN_HEIGHT;
+    return {
+        width: Math.max(minWidth, Number(size.width) || MD_NODE_DEFAULT_WIDTH),
+        height: Math.max(minHeight, Number(size.height) || MD_NODE_DEFAULT_HEIGHT),
+        minWidth,
+        minHeight
+    };
+}
+
+function getSectionMinimumSize(element, data = null) {
+    if (element && element.classList && element.classList.contains('permanent-bookmark-section')) {
+        const size = getPermanentSectionBaseSize();
+        return { width: size.minWidth, height: size.minHeight };
+    }
+    if (element && element.classList && element.classList.contains('md-canvas-node')) {
+        const size = getBlankNodeDefaultSize();
+        return { width: size.minWidth, height: size.minHeight };
+    }
+    const size = getTempSectionBaseSize(data);
+    return { width: size.minWidth, height: size.minHeight };
+}
+
+function applyElementMinimumSize(element, minSize) {
+    if (!element || !minSize) return false;
+    const minWidth = Number(minSize.width);
+    const minHeight = Number(minSize.height);
+    let changed = false;
+    if (Number.isFinite(minWidth) && minWidth > 0) {
+        element.style.minWidth = `${minWidth}px`;
+        const currentWidth = parseFloat(element.style.width) || element.offsetWidth || 0;
+        if (!__isNodeMaximized(element) && currentWidth > 0 && currentWidth < minWidth) {
+            element.style.width = `${minWidth}px`;
+            changed = true;
+        }
+    }
+    if (Number.isFinite(minHeight) && minHeight > 0) {
+        element.style.minHeight = `${minHeight}px`;
+        const currentHeight = parseFloat(element.style.height) || element.offsetHeight || 0;
+        if (!__isNodeMaximized(element) && currentHeight > 0 && currentHeight < minHeight) {
+            element.style.height = `${minHeight}px`;
+            changed = true;
+        }
+    }
+    return changed;
 }
 
 function getTempSectionDefaultColor(section = null) {
@@ -5918,23 +6030,21 @@ function setupCanvasZoomAndPan() {
     bindZoomStepButton(zoomInBtn, 1.2);
     bindZoomStepButton(zoomOutBtn, 1 / 1.2);
     if (zoomLocateBtn) zoomLocateBtn.addEventListener('click', locateToPermanentSection);
-    // [Fix] 窗口大小改变时：
-    // - 栏目全屏卡片实时跟随（rAF 节流到每帧）
-    // - 重计算边界/休眠逻辑继续 debounce（避免高频重计算）
     let resizeTimer = null;
-    let resizeSyncRaf = 0;
-    const refreshMaximizedNodesRealtime = () => {
-        if (resizeSyncRaf) return;
-        resizeSyncRaf = requestAnimationFrame(() => {
-            resizeSyncRaf = 0;
-            refreshMaximizedNodes();
-        });
-    };
 
     window.addEventListener('resize', () => {
         lastResizeTime = Date.now(); // 记录最后一次 Resize 时间
+
+        if (__isCanvasNodeMaximizedActive()) {
+            if (resizeTimer) clearTimeout(resizeTimer);
+            scheduleMaximizedNodesRefresh({
+                delayMs: MAXIMIZED_NODE_RESIZE_REFRESH_DEBOUNCE_MS,
+                stabilizeDelayMs: MAXIMIZED_NODE_RESIZE_STABILIZE_DELAY_MS
+            });
+            return;
+        }
+
         try { stabilizePermanentSectionAnchors({ syncBounds: false }); } catch (_) { }
-        refreshMaximizedNodesRealtime();
 
         if (resizeTimer) clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
@@ -7521,7 +7631,16 @@ function applyCanvasContentTransform(content, panX, panY, scale) {
     // 与 CSS 保持一致：translate(...) scale(...)（右侧先应用 scale，再应用 translate；平移不随缩放变化）
     content.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${s})`;
     try { updateCanvasGridLayerTransform(x, y, s); } catch (_) { }
-    try { refreshMaximizedNodes(); } catch (_) { }
+    try {
+        if (__isCanvasNodeMaximizedActive()) {
+            scheduleMaximizedNodesRefresh({
+                delayMs: MAXIMIZED_NODE_RESIZE_REFRESH_DEBOUNCE_MS,
+                stabilizeDelayMs: MAXIMIZED_NODE_RESIZE_STABILIZE_DELAY_MS
+            });
+        } else {
+            refreshMaximizedNodes();
+        }
+    } catch (_) { }
 }
 
 function __forceCanvasViewportVisualSync() {
@@ -9939,6 +10058,7 @@ function scheduleCanvasBlockDormancyUnloadUpdate(delayMs = null) {
 
 // 性能优化：调度休眠管理更新（节流）
 function scheduleDormancyUpdate(delayMs = null) {
+    if (__isCanvasNodeMaximizedActive()) return;
     if (dormancyUpdatePending) return;
 
     // 极限/大数据：用虚拟化按需加载替代 dormancy 全量扫描
@@ -9961,6 +10081,7 @@ function scheduleDormancyUpdate(delayMs = null) {
     dormancyUpdateTimer = setTimeout(() => {
         dormancyUpdateTimer = null;
         dormancyUpdatePending = false;
+        if (__isCanvasNodeMaximizedActive()) return;
         if (isCanvasBlockDormancyEnabled()) {
             // 快速：先恢复/按需加载“区块内+视口附近”的内容
             runCanvasBlockDormancyUpdate({ doLoad: true, doUnload: false });
@@ -10320,6 +10441,7 @@ function stopEdgeAutoScroll() {
 
 // 性能优化：调度滚动条更新（使用 RAF 去抖）
 function scheduleScrollbarUpdate() {
+    if (__isCanvasNodeMaximizedActive()) return;
     if (scrollbarUpdatePending) return;
 
     scrollbarUpdatePending = true;
@@ -10331,12 +10453,14 @@ function scheduleScrollbarUpdate() {
     scrollbarUpdateFrame = requestAnimationFrame(() => {
         scrollbarUpdateFrame = null;
         scrollbarUpdatePending = false;
+        if (__isCanvasNodeMaximizedActive()) return;
         updateScrollbarThumbs();
     });
 }
 
 // 性能优化：调度边界更新（使用 RAF 去抖）
 function scheduleBoundsUpdate() {
+    if (__isCanvasNodeMaximizedActive()) return;
     if (boundsUpdatePending) return;
 
     boundsUpdatePending = true;
@@ -10348,6 +10472,7 @@ function scheduleBoundsUpdate() {
     boundsUpdateFrame = requestAnimationFrame(() => {
         boundsUpdateFrame = null;
         boundsUpdatePending = false;
+        if (__isCanvasNodeMaximizedActive()) return;
         updateCanvasScrollBounds({ initial: false, recomputeBounds: true });
     });
 }
@@ -11510,10 +11635,18 @@ function getCurrentFullscreenElement() {
         document.msFullscreenElement || null;
 }
 
-function __getCanvasViewportRect() {
+function __getCanvasViewportRect(options = {}) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return null;
     const rect = workspace.getBoundingClientRect();
+    if ((options && options.viewportCoordinates === true) || __isCanvasNodeMaximizedActive()) {
+        return {
+            x: 0,
+            y: 0,
+            width: rect.width,
+            height: rect.height
+        };
+    }
     const zoom = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.zoom === 'number' && CanvasState.zoom > 0)
         ? CanvasState.zoom : 1;
     const panX = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.panOffsetX === 'number')
@@ -11530,6 +11663,20 @@ function __getCanvasViewportRect() {
 
 function __isNodeMaximized(element) {
     return !!(element && element.classList && element.classList.contains('canvas-node-maximized'));
+}
+
+function __isCanvasNodeMaximizedActive() {
+    try {
+        if (CanvasState && CanvasState.nodeMaximizedActive) return true;
+    } catch (_) { }
+    try {
+        if (document && document.body && document.body.classList && document.body.classList.contains('canvas-node-maximized-active')) return true;
+    } catch (_) { }
+    try {
+        return !!document.querySelector('.canvas-node-maximized');
+    } catch (_) {
+        return false;
+    }
 }
 
 function __serializeMaximizedNode(element) {
@@ -12449,10 +12596,51 @@ function __isMaximizedNodeRectCurrent(element, rect) {
         && nearlyEqual(element.style.height, rect.height);
 }
 
+function __stabilizeMaximizedNodeLayouts() {
+    if (!CanvasState.nodeMaximizedActive) return;
+    document.querySelectorAll('.canvas-node-maximized').forEach((element) => {
+        __scheduleNodeLayoutZoomStabilize(element);
+    });
+}
+
+function scheduleMaximizedNodesRefresh(options = {}) {
+    if (!__isCanvasNodeMaximizedActive()) return false;
+
+    const parsedDelay = Number(options && options.delayMs);
+    const delayMs = Number.isFinite(parsedDelay)
+        ? Math.max(0, parsedDelay)
+        : MAXIMIZED_NODE_RESIZE_REFRESH_DEBOUNCE_MS;
+    const parsedStabilizeDelay = Number(options && options.stabilizeDelayMs);
+    const stabilizeDelayMs = Number.isFinite(parsedStabilizeDelay)
+        ? Math.max(delayMs, parsedStabilizeDelay)
+        : Math.max(delayMs, MAXIMIZED_NODE_RESIZE_STABILIZE_DELAY_MS);
+
+    if (maximizedNodeResizeRefreshTimer) {
+        clearTimeout(maximizedNodeResizeRefreshTimer);
+    }
+    maximizedNodeResizeRefreshTimer = setTimeout(() => {
+        maximizedNodeResizeRefreshTimer = null;
+        if (!__isCanvasNodeMaximizedActive()) return;
+        refreshMaximizedNodes({ stabilize: false });
+    }, delayMs);
+
+    if (maximizedNodeResizeStabilizeTimer) {
+        clearTimeout(maximizedNodeResizeStabilizeTimer);
+    }
+    maximizedNodeResizeStabilizeTimer = setTimeout(() => {
+        maximizedNodeResizeStabilizeTimer = null;
+        if (!__isCanvasNodeMaximizedActive()) return;
+        refreshMaximizedNodes({ stabilize: false });
+        __stabilizeMaximizedNodeLayouts();
+    }, stabilizeDelayMs);
+
+    return true;
+}
+
 function maximizeCanvasNode(element, options = {}) {
     if (!element) return;
     if (__isNodeMaximized(element)) {
-        if (refreshMaximizedNodes()) {
+        if (refreshMaximizedNodes({ stabilize: false })) {
             __scheduleNodeLayoutZoomStabilize(element);
             updateNodeFullscreenButtons();
         }
@@ -12460,7 +12648,7 @@ function maximizeCanvasNode(element, options = {}) {
     }
     const suppressReadyNotify = !!(options && options.suppressReadyNotify);
     __restoreTemporaryRaisedCanvasNode();
-    const rect = __getCanvasViewportRect();
+    const rect = __getCanvasViewportRect({ viewportCoordinates: true });
     if (!rect) return;
     __clearOtherMaximizedNodes(element);
 
@@ -12524,6 +12712,12 @@ function restoreCanvasNodeLayout(element) {
     __updateNodeMaximizedState();
     if (!CanvasState.nodeMaximizedActive) {
         __clearMaximizedNodeStorage();
+        requestAnimationFrame(() => {
+            if (__isCanvasNodeMaximizedActive()) return;
+            try { updateCanvasScrollBounds({ recomputeBounds: true, initial: false }); } catch (_) { }
+            try { scheduleScrollbarUpdate(); } catch (_) { }
+            try { scheduleEdgesRender(0); } catch (_) { }
+        });
     }
     updateNodeFullscreenButtons();
     __notifyNodeFullscreenContextChange(document.querySelector('.canvas-node-maximized'));
@@ -12539,10 +12733,11 @@ function toggleElementFullscreen(element) {
     updateNodeFullscreenButtons();
 }
 
-function refreshMaximizedNodes() {
+function refreshMaximizedNodes(options = {}) {
     if (!CanvasState.nodeMaximizedActive) return false;
     const rect = __getCanvasViewportRect();
     if (!rect) return false;
+    const shouldStabilize = !(options && options.stabilize === false);
     let changed = false;
     document.querySelectorAll('.canvas-node-maximized').forEach((element) => {
         if (!element) return;
@@ -12551,7 +12746,9 @@ function refreshMaximizedNodes() {
         element.style.top = `${rect.y}px`;
         element.style.width = `${rect.width}px`;
         element.style.height = `${rect.height}px`;
-        __scheduleNodeLayoutZoomStabilize(element);
+        if (shouldStabilize) {
+            __scheduleNodeLayoutZoomStabilize(element);
+        }
         changed = true;
     });
     return changed;
@@ -14340,6 +14537,7 @@ function __applyPermanentViewShellToSectionElement(sectionEl, shell) {
     if (cardState.top) sectionEl.style.top = cardState.top;
     if (cardState.width) sectionEl.style.width = cardState.width;
     if (cardState.height) sectionEl.style.height = cardState.height;
+    applyElementMinimumSize(sectionEl, getSectionMinimumSize(sectionEl));
     sectionEl.offsetHeight;
     sectionEl.style.transition = '';
 
@@ -15419,6 +15617,9 @@ function makePermanentSectionResizable(element) {
             startHeight = element.offsetHeight;
             startLeft = parseFloat(element.style.left) || 0;
             startTop = parseFloat(element.style.top) || 0;
+            const minSize = getSectionMinimumSize(element);
+            const minWidth = minSize.width;
+            const minHeight = minSize.height;
 
             element.classList.add('resizing');
 
@@ -15437,17 +15638,17 @@ function makePermanentSectionResizable(element) {
 
                 // 处理水平方向
                 if (handleInfo.name.includes('e')) {
-                    newWidth = Math.max(300, startWidth + deltaX);
+                    newWidth = Math.max(minWidth, startWidth + deltaX);
                 } else if (handleInfo.name.includes('w')) {
-                    newWidth = Math.max(300, startWidth - deltaX);
+                    newWidth = Math.max(minWidth, startWidth - deltaX);
                     newLeft = startLeft + (startWidth - newWidth);
                 }
 
                 // 处理垂直方向
                 if (handleInfo.name.includes('s')) {
-                    newHeight = Math.max(200, startHeight + deltaY);
+                    newHeight = Math.max(minHeight, startHeight + deltaY);
                 } else if (handleInfo.name.includes('n')) {
-                    newHeight = Math.max(200, startHeight - deltaY);
+                    newHeight = Math.max(minHeight, startHeight - deltaY);
                     newTop = startTop + (startHeight - newHeight);
                 }
 
@@ -15565,6 +15766,9 @@ function makeTempNodeResizable(element, node) {
             startHeight = element.offsetHeight;
             startLeft = node.x;
             startTop = node.y;
+            const minSize = getSectionMinimumSize(element, node);
+            const minWidth = minSize.width;
+            const minHeight = minSize.height;
 
             element.classList.add('resizing');
 
@@ -15583,17 +15787,17 @@ function makeTempNodeResizable(element, node) {
 
                 // 处理水平方向
                 if (handleInfo.name.includes('e')) {
-                    newWidth = Math.max(200, startWidth + deltaX);
+                    newWidth = Math.max(minWidth, startWidth + deltaX);
                 } else if (handleInfo.name.includes('w')) {
-                    newWidth = Math.max(200, startWidth - deltaX);
+                    newWidth = Math.max(minWidth, startWidth - deltaX);
                     newLeft = startLeft + (startWidth - newWidth);
                 }
 
                 // 处理垂直方向
                 if (handleInfo.name.includes('s')) {
-                    newHeight = Math.max(150, startHeight + deltaY);
+                    newHeight = Math.max(minHeight, startHeight + deltaY);
                 } else if (handleInfo.name.includes('n')) {
-                    newHeight = Math.max(150, startHeight - deltaY);
+                    newHeight = Math.max(minHeight, startHeight - deltaY);
                     newTop = startTop + (startHeight - newHeight);
                 }
 
@@ -16315,10 +16519,15 @@ function renderMdNode(node) {
 
     // Always update position/size/style
     const mdBaseSize = getBlankNodeDefaultSize();
+    const mdWidth = Math.max(mdBaseSize.minWidth, Number(node.width) || mdBaseSize.width);
+    const mdHeight = Math.max(mdBaseSize.minHeight, Number(node.height) || mdBaseSize.height);
+    node.width = mdWidth;
+    node.height = mdHeight;
     el.style.left = node.x + 'px';
     el.style.top = node.y + 'px';
-    el.style.width = (node.width || mdBaseSize.width) + 'px';
-    el.style.height = (node.height || mdBaseSize.height) + 'px';
+    el.style.width = mdWidth + 'px';
+    el.style.height = mdHeight + 'px';
+    applyElementMinimumSize(el, getSectionMinimumSize(el, node));
 
     // 应用自定义样式 (用于 import-container 等)
     if (node.style) {
@@ -23527,6 +23736,10 @@ function renderTempNode(section, options = {}) {
         // 更新时清空内容，但保持位置和大小不变
         nodeElement.innerHTML = '';
     }
+    if (applyElementMinimumSize(nodeElement, getSectionMinimumSize(nodeElement, section))) {
+        section.width = parseFloat(nodeElement.style.width) || section.width || baseSize.width;
+        section.height = parseFloat(nodeElement.style.height) || section.height || baseSize.height;
+    }
 
     // 防御：避免状态类残留导致“内容被隐藏但 section 已非休眠”的空白显示
     // 注意：区块休眠会在 section.dormant=false 时也使用 dormant-content，因此仅在非区块休眠模式下清理。
@@ -28846,15 +29059,15 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
         const mdBaseSize = getBlankNodeDefaultSize();
         CanvasState.tempSections.forEach(section => {
             const baseSize = getTempSectionBaseSize(section);
-            section.width = section.width || baseSize.width;
-            section.height = section.height || baseSize.height;
+            section.width = Math.max(baseSize.minWidth, Number(section.width) || baseSize.width);
+            section.height = Math.max(baseSize.minHeight, Number(section.height) || baseSize.height);
             // 大数据/极限模式 / 区块休眠：先渲染“壳体”，树内容按需加载（避免启动即卡死/一上来全量加载）
             renderTempNode(section, shouldRenderShellOnly ? { skipTree: true } : {});
         });
         // 渲染 Markdown 文本卡片
         CanvasState.mdNodes.forEach(node => {
-            node.width = node.width || mdBaseSize.width;
-            node.height = node.height || mdBaseSize.height;
+            node.width = Math.max(mdBaseSize.minWidth, Number(node.width) || mdBaseSize.width);
+            node.height = Math.max(mdBaseSize.minHeight, Number(node.height) || mdBaseSize.height);
             renderMdNode(node);
         });
     } finally {
@@ -29357,6 +29570,7 @@ function shouldSkipEdgesRender() {
 }
 
 function scheduleEdgesRender(delayMs = 90) {
+    if (__isCanvasNodeMaximizedActive()) return;
     if (edgesRenderPending) return;
     edgesRenderPending = true;
     if (edgesRenderTimer) clearTimeout(edgesRenderTimer);
@@ -29452,6 +29666,11 @@ function setupCanvasPerfHud() {
 function renderEdges() {
     const svg = document.querySelector('.canvas-edges');
     if (!svg) return;
+
+    if (__isCanvasNodeMaximizedActive()) {
+        try { hideEdgeToolbar(); } catch (_) { }
+        return;
+    }
 
     if (shouldSkipEdgesRender()) {
         svg.style.display = 'none';
@@ -30471,6 +30690,7 @@ window.CanvasModule = {
     updateNodeFullscreenButtons: updateNodeFullscreenButtons,
     updateViewSyncExpandScrollButtonText: __updateViewSyncExpandScrollButtonText,
     openLastFullscreenNode: openLastMaximizedNode,
+    scheduleMaximizedNodesRefresh: scheduleMaximizedNodesRefresh,
     updateShortcutDisplays: updateShortcutDisplays, // 更新快捷键显示
     CanvasState: CanvasState, // 导出状态供外部访问（如指针拖拽）
     createTempNode: createTempNode, // 导出创建临时节点函数

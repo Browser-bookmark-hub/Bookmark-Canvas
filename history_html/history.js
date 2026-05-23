@@ -8645,11 +8645,21 @@ function initSidebarToggle() {
         }
     }
 
-    function refreshMaximizedNodesSafe() {
+    function refreshMaximizedNodesSafe(options = {}) {
         try {
-            if (document.body && document.body.classList.contains('canvas-node-maximized-active') &&
-                typeof refreshMaximizedNodes === 'function') {
-                refreshMaximizedNodes();
+            if (!document.body || !document.body.classList.contains('canvas-node-maximized-active')) {
+                return;
+            }
+            const parsedDelay = Number(options && options.delayMs);
+            const delayMs = Number.isFinite(parsedDelay) ? Math.max(0, parsedDelay) : 120;
+            const parsedStabilizeDelay = Number(options && options.stabilizeDelayMs);
+            const stabilizeDelayMs = Number.isFinite(parsedStabilizeDelay) ? Math.max(delayMs, parsedStabilizeDelay) : 220;
+            if (!(options && options.immediate === true) && typeof scheduleMaximizedNodesRefresh === 'function') {
+                scheduleMaximizedNodesRefresh({ delayMs, stabilizeDelayMs });
+                return;
+            }
+            if (typeof refreshMaximizedNodes === 'function') {
+                refreshMaximizedNodes({ stabilize: !(options && options.stabilize === false) });
             }
         } catch (_) { }
     }
@@ -8676,21 +8686,14 @@ function initSidebarToggle() {
     }
 
     function scheduleMaximizedRefresh() {
-        refreshMaximizedNodesSafe();
         if (refreshRaf) {
             cancelAnimationFrame(refreshRaf);
             refreshRaf = null;
         }
-        const start = performance.now();
-        const tick = (now) => {
-            refreshMaximizedNodesSafe();
-            if (now - start < SIDEBAR_TRANSITION_MS) {
-                refreshRaf = requestAnimationFrame(tick);
-            } else {
-                refreshRaf = null;
-            }
-        };
-        refreshRaf = requestAnimationFrame(tick);
+        refreshMaximizedNodesSafe({
+            delayMs: SIDEBAR_TRANSITION_MS + 40,
+            stabilizeDelayMs: SIDEBAR_TRANSITION_MS + 120
+        });
     }
 
     function prefersReducedMotion() {

@@ -9065,6 +9065,22 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
 .canvas-node-maximized {
     border-radius: 0;
     box-shadow: var(--shadow-lg);
+    transition: none !important;
+    contain: layout style paint;
+    isolation: isolate;
+    will-change: auto;
+}
+
+body.canvas-node-maximized-active #canvasContent {
+    transform: none !important;
+    will-change: auto !important;
+}
+
+body.canvas-node-maximized-active #canvasContent > .canvas-node-maximized {
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
 }
 
 /* Layout zoom controls (fullscreen only) */
@@ -9235,11 +9251,15 @@ body.canvas-node-maximized-active #canvasContent > .md-canvas-node:not(.canvas-n
     visibility: hidden !important;
     opacity: 0 !important;
     pointer-events: none !important;
+    content-visibility: hidden !important;
+    contain: layout style paint;
 }
 
 body.canvas-node-maximized-active #edgeSvg,
+body.canvas-node-maximized-active .canvas-edges,
 body.canvas-node-maximized-active .edge-label,
 body.canvas-node-maximized-active .canvas-edge-label {
+    visibility: hidden !important;
     opacity: 0 !important;
     pointer-events: none !important;
 }
