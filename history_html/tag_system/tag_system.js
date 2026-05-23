@@ -756,8 +756,14 @@
                 wrap.appendChild(more);
             }
         } else {
-            const overflowCount = Math.max(0, visible.length - LEADING_DOTS_ANCHOR_VISIBLE);
-            wrap.style.setProperty('--tag-leading-overflow-shift', `${-overflowCount * LEADING_DOT_OVERLAP_STEP}px`);
+            const nodeType = treeItem
+                ? (treeItem.dataset.nodeType || treeItem.getAttribute('data-node-type') || '')
+                : '';
+            const shouldShiftFolderMore = nodeType === 'folder' && tags.length > LEADING_DOTS_VISIBLE;
+            if (shouldShiftFolderMore) {
+                const overflowCount = Math.max(0, visible.length - LEADING_DOTS_ANCHOR_VISIBLE);
+                wrap.style.setProperty('--tag-leading-overflow-shift', `${-overflowCount * LEADING_DOT_OVERLAP_STEP}px`);
+            }
             // Narrow rows: compact dots (no text), on the left.
             visible.forEach((t) => {
                 const dot = document.createElement('span');
