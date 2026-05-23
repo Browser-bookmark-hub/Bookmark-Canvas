@@ -6388,11 +6388,6 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
             Object.keys(normalizedRefs.copyFileMap || {}).forEach((id) => { if (id) copyIds.add(String(id)); });
         } catch (_) { }
         try {
-            Object.keys(existingCopyCardStateById).forEach((id) => {
-                if (id) copyIds.add(String(id));
-            });
-        } catch (_) { }
-        try {
             const stored = __readPermanentSectionCopies();
             if (Array.isArray(stored)) {
                 stored.forEach((payload) => {
@@ -6931,6 +6926,9 @@ function __cloneForSandbox(state) {
 }
 
 async function __buildExportSandbox(options = {}) {
+    if (!(options && options.skipRuntimeFlush === true)) {
+        await __flushRuntimeCanvasStateToBcs(options);
+    }
     const all = await __bcsStorageGetAll();
     const permMainRaw = all && all[BCS_PERM_MAIN_KEY] ? all[BCS_PERM_MAIN_KEY] : null;
     const tempStateRaw = all && all[TEMP_SECTION_STORAGE_KEY] ? all[TEMP_SECTION_STORAGE_KEY] : null;
@@ -6952,6 +6950,30 @@ async function __buildExportSandbox(options = {}) {
         bcsMeta: __cloneForSandbox(metaRaw),
         permRootMeta: __cloneForSandbox(rootMetaRaw)
     };
+}
+
+async function __flushRuntimeCanvasStateToBcs(options = {}) {
+    try {
+        if (typeof __flushPermanentSectionScrollStates === 'function') {
+            __flushPermanentSectionScrollStates();
+        }
+    } catch (_) { }
+    try {
+        __flushMdEditorsForExport(options);
+    } catch (_) { }
+    try {
+        const saveFn = (typeof saveTempNodes === 'function')
+            ? saveTempNodes
+            : ((typeof window !== 'undefined' && typeof window.saveTempNodes === 'function') ? window.saveTempNodes : null);
+        if (saveFn) {
+            const result = saveFn({
+                immediate: true
+            });
+            if (result && typeof result.then === 'function') {
+                await result;
+            }
+        }
+    } catch (_) { }
 }
 
 function __replaceIdsWithSyncIdsInTree(treeRoot, byChromeId) {
@@ -7140,6 +7162,7 @@ if (typeof window !== 'undefined') {
         collectTagsFromTempState(stateInput) { return __collectTagsFromTempState(stateInput); },
         async collectAllUsedTags() { return await __collectAllUsedTags(); },
         async buildExportSandbox(options = {}) { return await __buildExportSandbox(options); },
+        async flushRuntimeCanvasStateToBcs(options = {}) { return await __flushRuntimeCanvasStateToBcs(options); },
         cloneForSandbox(state) { return __cloneForSandbox(state); },
         applySyncIdReplacementInSandbox(sandbox) { return __applySyncIdReplacementInSandbox(sandbox); },
         pruneIdentityMapEntriesInSandbox(sandbox) { return __pruneIdentityMapEntriesInSandbox(sandbox); },

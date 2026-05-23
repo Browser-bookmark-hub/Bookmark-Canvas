@@ -28884,7 +28884,7 @@ function saveTempNodes(options = {}) {
             __canvasTempStateLastSavedTimestamp = Math.max(__canvasTempStateLastSavedTimestamp, persistedTs);
             __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, persistedTs);
         }
-        __saveCanvasTempStateToBcsStorage(persistedState, {
+        return __saveCanvasTempStateToBcsStorage(persistedState, {
             immediate
         });
 
