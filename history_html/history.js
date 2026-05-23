@@ -10030,6 +10030,11 @@ function renderCurrentView() {
                     const template = document.getElementById('permanentSectionTemplate');
                     if (template) {
                         const permanentSection = template.content.cloneNode(true);
+                        const permanentSectionEl = permanentSection.querySelector('.permanent-bookmark-section');
+                        if (permanentSectionEl) {
+                            permanentSectionEl.style.width = '600px';
+                            permanentSectionEl.style.height = '600px';
+                        }
                         canvasContent.appendChild(permanentSection);
                         console.log('[Canvas] 永久栏目已从template创建到canvas-content');
 

@@ -6303,10 +6303,10 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
     const mainDomLeft = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.left) : null;
     const mainDomTop = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.top) : null;
     const mainDomWidth = permanentSectionEl
-        ? (__parsePermanentViewCssPixelValue(permanentSectionEl.style.width) || permanentSectionEl.offsetWidth || null)
+        ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.width)
         : null;
     const mainDomHeight = permanentSectionEl
-        ? (__parsePermanentViewCssPixelValue(permanentSectionEl.style.height) || permanentSectionEl.offsetHeight || null)
+        ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.height)
         : null;
     const hasMainDomPixelAnchor = mainDomLeft !== null && mainDomTop !== null;
     const permanentLeft = (permanentSectionEl && !preferStoragePermanentLayout)
@@ -6411,8 +6411,8 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
                 domPositions.set(id, {
                     left: parseFloat(el.style.left) || 0,
                     top: parseFloat(el.style.top) || 0,
-                    width: el.offsetWidth || permanentW,
-                    height: el.offsetHeight || permanentH
+                    width: __parsePermanentViewCssPixelValue(el.style.width) || permanentW,
+                    height: __parsePermanentViewCssPixelValue(el.style.height) || permanentH
                 });
             });
         } catch (_) { }
