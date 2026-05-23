@@ -81,10 +81,10 @@
 /* Positioning variant: dots-leading (default, before toggle) */
 .tree-item-tag-dots.dots-leading {
     position: absolute;
-    left: calc(var(--tree-toggle-center, -2px) - 6px);
+    left: calc(-1 * var(--tree-children-indent, 0px) - 6px);
     top: 50%;
     margin: 0;
-    transform: translate(var(--tag-dot-shift-x), calc(-50% + var(--tag-dot-shift-y)));
+    transform: translate(calc(var(--tag-dot-shift-x) + var(--tag-leading-overflow-shift, 0px)), calc(-50% + var(--tag-dot-shift-y)));
 }
 
 /* Positioning variant: dots-trailing (for wide rows, near tip icon) */

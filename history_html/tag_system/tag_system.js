@@ -660,7 +660,10 @@
     // Phase C: tag dot rendering on tree-item rows + hover bubble.
     // -------------------------------------------------------------------------
 
-    const MAX_DOTS_VISIBLE = 3;
+    const LEADING_DOTS_VISIBLE = 5;
+    const TRAILING_DOTS_VISIBLE = 5;
+    const LEADING_DOTS_ANCHOR_VISIBLE = 3;
+    const LEADING_DOT_OVERLAP_STEP = 5;
     // Width threshold: rows wider than this render tags as chips (dot + text) on the
     // RIGHT side, right-aligned. Rows narrower than this fall back to compact dots on
     // the LEFT. Sidebar tree rows typically sit around 220–360 px wide, so the cutoff
@@ -733,7 +736,8 @@
         const wrap = document.createElement('span');
         wrap.className = 'tree-item-tag-dots ' + (wide ? 'dots-trailing' : 'dots-leading');
         wrap.dataset.role = 'tag-dots';
-        const visible = tags.slice(0, MAX_DOTS_VISIBLE);
+        const visibleLimit = wide ? TRAILING_DOTS_VISIBLE : LEADING_DOTS_VISIBLE;
+        const visible = tags.slice(0, visibleLimit);
         if (wide) {
             // Wide rows: render tags as small chips (color dot + text). Right-aligned.
             visible.forEach((t) => {
@@ -745,13 +749,15 @@
                 chip.querySelector('.tree-item-tag-chip-text').textContent = t.text || __colorName(t.color);
                 wrap.appendChild(chip);
             });
-            if (tags.length > MAX_DOTS_VISIBLE) {
+            if (tags.length > TRAILING_DOTS_VISIBLE) {
                 const more = document.createElement('span');
                 more.className = 'tree-item-tag-chip-more';
-                more.textContent = `…+${tags.length - MAX_DOTS_VISIBLE}`;
+                more.textContent = `…+${tags.length - TRAILING_DOTS_VISIBLE}`;
                 wrap.appendChild(more);
             }
         } else {
+            const overflowCount = Math.max(0, visible.length - LEADING_DOTS_ANCHOR_VISIBLE);
+            wrap.style.setProperty('--tag-leading-overflow-shift', `${-overflowCount * LEADING_DOT_OVERLAP_STEP}px`);
             // Narrow rows: compact dots (no text), on the left.
             visible.forEach((t) => {
                 const dot = document.createElement('span');
@@ -760,10 +766,10 @@
                 dot.dataset.text = t.text || '';
                 wrap.appendChild(dot);
             });
-            if (tags.length > MAX_DOTS_VISIBLE) {
+            if (tags.length > LEADING_DOTS_VISIBLE) {
                 const more = document.createElement('span');
                 more.className = 'tag-dot tag-dot-more';
-                more.textContent = `…+${tags.length - MAX_DOTS_VISIBLE}`;
+                more.textContent = `…+${tags.length - LEADING_DOTS_VISIBLE}`;
                 wrap.appendChild(more);
             }
         }
