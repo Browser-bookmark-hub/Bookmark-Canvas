@@ -5484,6 +5484,7 @@ function setupCanvasZoomAndPan() {
                 try { updateCanvasScrollBounds({ recomputeBounds: false, initial: false }); } catch (_) { }
                 try { updateScrollbarThumbs(); } catch (_) { }
                 try { savePanOffsetThrottled(); } catch (_) { }
+                try { scheduleEdgesRender(0); } catch (_) { }
                 try { __updateCanvasPerfHud(); } catch (_) { }
             }, 400);
 
@@ -9711,6 +9712,7 @@ function updateCanvasLowDetailMode(force = false) {
                 if (!CanvasState.lowDetailActive) runCanvasVirtualizationUpdate();
             });
         }
+        try { scheduleEdgesRender(0); } catch (_) { }
     }
 }
 
@@ -9907,6 +9909,7 @@ function onScrollStop() {
     } else if (!CanvasState.lowDetailActive || !isCanvasHugeData()) {
         scheduleDormancyUpdate();
     }
+    try { scheduleEdgesRender(isCanvasHugeData() ? 120 : 40); } catch (_) { }
 }
 
 function cancelCanvasBlockDormancyUnloadUpdate() {
@@ -29245,10 +29248,9 @@ function removeEdge(edgeId) {
 
 let edgesRenderTimer = null;
 let edgesRenderPending = false;
+let edgesRenderRetryTimer = null;
 
 function shouldSkipEdgesRender() {
-    // 低细节/极限模式下，连接线重建非常昂贵，优先保证缩放/拖动流畅
-    if (CanvasState.lowDetailActive) return true;
     // [Fix] 虚拟化开启时不应该隐藏连接线，否则永远看不见线了（因为虚拟化现已强制开启）
     // if (isCanvasVirtualizationEnabled()) return true;
     // 边太多时也直接跳过（避免频繁 rebuild DOM/SVG）
@@ -29272,6 +29274,14 @@ function scheduleEdgesRender(delayMs = 90) {
         }
         try { renderEdges(); } catch (_) { }
     }, delayMs);
+}
+
+function scheduleEdgesRenderRetry(delayMs = 80) {
+    if (edgesRenderRetryTimer) return;
+    edgesRenderRetryTimer = setTimeout(() => {
+        edgesRenderRetryTimer = null;
+        try { scheduleEdgesRender(0); } catch (_) { }
+    }, Math.max(0, delayMs));
 }
 
 let canvasPerfHudTimer = null;
@@ -29363,7 +29373,14 @@ function renderEdges() {
         ? CanvasState.edges.filter(e => e.id !== selectedId).concat(CanvasState.edges.filter(e => e.id === selectedId))
         : CanvasState.edges.slice();
 
+    let needsRetry = false;
     edgesToRender.forEach(edge => {
+        const geometry = getEdgeRenderGeometry(edge);
+        if (!geometry) {
+            needsRetry = true;
+            return;
+        }
+
         // 创建不可见的宽点击区域（用于扩大点击识别范围）
         const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         hitArea.setAttribute('class', 'canvas-edge-hit-area');
@@ -29374,7 +29391,7 @@ function renderEdges() {
         hitArea.style.cursor = 'pointer';
         hitArea.style.pointerEvents = 'stroke';
 
-        updateEdgePath(edge, hitArea);
+        updateEdgePath(edge, hitArea, geometry);
         svg.appendChild(hitArea);
 
         // 创建可见的连接线路径
@@ -29413,7 +29430,7 @@ function renderEdges() {
             path.style.filter = '';
         }
 
-        updateEdgePath(edge, path);
+        updateEdgePath(edge, path, geometry);
         svg.appendChild(path);
 
         // 点击事件绑定到不可见的宽区域
@@ -29441,23 +29458,25 @@ function renderEdges() {
 
         // 渲染标签（如果有）
         if (edge.label && edge.label.trim()) {
-            renderEdgeLabel(svg, edge);
+            renderEdgeLabel(svg, edge, geometry);
         }
     });
+
+    if (needsRetry) {
+        scheduleEdgesRenderRetry(isCanvasHugeData() ? 160 : 80);
+    }
 
     // 更新工具栏位置（如果工具栏正在显示）
     updateEdgeToolbarPosition();
 }
 
-function renderEdgeLabel(svg, edge) {
-    const start = getAnchorPosition(edge.fromNode, edge.fromSide);
-    const end = getAnchorPosition(edge.toNode, edge.toSide);
-    if (!start || !end) return;
+function renderEdgeLabel(svg, edge, geometry = null) {
+    const resolved = geometry || getEdgeRenderGeometry(edge);
+    if (!resolved) return;
 
     // 使用贝塞尔曲线中点放置标签，和曲线保持一致
-    const curveMid = getEdgeCurveMidpoint(edge);
-    const midX = curveMid ? curveMid.x : (start.x + end.x) / 2;
-    const midY = curveMid ? curveMid.y : (start.y + end.y) / 2;
+    const midX = resolved.labelX;
+    const midY = resolved.labelY;
 
     // 先创建背景挖空矩形（让连线在文字区域下方留出空白）
     // 注意：低细节模式下文字会“反向缩放”保持固定像素大小，若同时保留 rect 则尺寸会不匹配。
@@ -29550,13 +29569,34 @@ function renderEdgeLabel(svg, edge) {
     });
 }
 
-function updateEdgePath(edge, pathElement) {
+function getEdgeRenderGeometry(edge) {
     const start = getAnchorPosition(edge.fromNode, edge.fromSide);
     const end = getAnchorPosition(edge.toNode, edge.toSide);
+    if (!start || !end) return null;
 
-    if (start && end) {
-        const d = getEdgePathD(start.x, start.y, end.x, end.y, edge.fromSide, edge.toSide);
-        pathElement.setAttribute('d', d);
+    const x1 = start.x, y1 = start.y;
+    const x2 = end.x, y2 = end.y;
+    const { cp1x, cp1y, cp2x, cp2y } = computeEdgeControlPoints(x1, y1, x2, y2, edge.fromSide, edge.toSide);
+    const path = `M ${x1} ${y1} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${x2} ${y2}`;
+    const labelX = (x1 + 3 * cp1x + 3 * cp2x + x2) / 8;
+    const labelY = (y1 + 3 * cp1y + 3 * cp2y + y2) / 8;
+
+    return {
+        path,
+        labelX,
+        labelY,
+        sourceX: x1,
+        sourceY: y1,
+        targetX: x2,
+        targetY: y2
+    };
+}
+
+function updateEdgePath(edge, pathElement, geometry = null) {
+    const resolved = geometry || getEdgeRenderGeometry(edge);
+
+    if (resolved) {
+        pathElement.setAttribute('d', resolved.path);
     } else {
         pathElement.setAttribute('d', '');
     }
@@ -29616,7 +29656,6 @@ function computeEdgeControlPoints(x1, y1, x2, y2, side1, side2) {
     const adx = Math.abs(ddx);
     const ady = Math.abs(ddy);
     const dist = Math.hypot(ddx, ddy);
-    const z = (CanvasState && CanvasState.zoom) ? CanvasState.zoom : 1;
 
     const isHoriz = s => (s === 'left' || s === 'right');
     const isVert = s => (s === 'top' || s === 'bottom');
@@ -29631,9 +29670,9 @@ function computeEdgeControlPoints(x1, y1, x2, y2, side1, side2) {
     };
 
     // Near: compact "bracket" curve; Far: gentle curve with capped offset (avoid ugly large bows)
-    const nearThreshold = 220 / z;
-    const nearAmt = Math.min(Math.max(dist * 0.45, 24 / z), 80 / z);
-    const alongAmt = Math.min(Math.max(dist * 0.22, 40 / z), 160 / z);
+    const nearThreshold = 220;
+    const nearAmt = Math.min(Math.max(dist * 0.45, 24), 80);
+    const alongAmt = Math.min(Math.max(dist * 0.22, 40), 160);
 
     let cp1x = x1, cp1y = y1, cp2x = x2, cp2y = y2;
 
@@ -29653,7 +29692,7 @@ function computeEdgeControlPoints(x1, y1, x2, y2, side1, side2) {
         ({ x: cp1x, y: cp1y } = offsetAlongSide(side1, x1, y1, alongAmt));
         if (side2) ({ x: cp2x, y: cp2y } = offsetAlongSide(side2, x2, y2, alongAmt));
         // Very subtle perpendicular bend to avoid perfectly flat arcs and reduce crossings
-        const bend = Math.min(12 / z, alongAmt * 0.15);
+        const bend = Math.min(12, alongAmt * 0.15);
         if (isHoriz(side1)) { cp1y += (ddy === 0 ? 1 : Math.sign(ddy)) * bend; }
         else { cp1x += (ddx === 0 ? 1 : Math.sign(ddx)) * bend; }
         if (isHoriz(side2)) { cp2y -= (ddy === 0 ? 1 : Math.sign(ddy)) * bend; }
@@ -29683,15 +29722,9 @@ function getEdgePathD(x1, y1, x2, y2, side1, side2) {
 
 // 计算边曲线在 t=0.5 处的中点（与 getEdgePathD 使用相同的控制点逻辑）
 function getEdgeCurveMidpoint(edge) {
-    const start = getAnchorPosition(edge.fromNode, edge.fromSide);
-    const end = getAnchorPosition(edge.toNode, edge.toSide);
-    if (!start || !end) return null;
-    const x1 = start.x, y1 = start.y;
-    const x2 = end.x, y2 = end.y;
-    const { cp1x, cp1y, cp2x, cp2y } = computeEdgeControlPoints(x1, y1, x2, y2, edge.fromSide, edge.toSide);
-    const midX = (x1 + 3 * cp1x + 3 * cp2x + x2) / 8;
-    const midY = (y1 + 3 * cp1y + 3 * cp2y + y2) / 8;
-    return { x: midX, y: midY };
+    const geometry = getEdgeRenderGeometry(edge);
+    if (!geometry) return null;
+    return { x: geometry.labelX, y: geometry.labelY };
 }
 
 function setupCanvasConnectionInteractions() {
