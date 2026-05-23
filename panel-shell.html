@@ -20,6 +20,11 @@
       height: 100%;
       border: 0;
       background: #0f1117;
+      opacity: 0;
+      transition: opacity 80ms ease-out;
+    }
+    html.frame-ready #canvasSidePanelFrame {
+      opacity: 1;
     }
     html[data-theme="light"],
     html[data-theme="light"] body {
@@ -40,5 +45,6 @@
     title="Bookmark Canvas Side Panel"
     loading="eager"
   ></iframe>
+  <script src="panel-shell.js"></script>
 </body>
 </html>

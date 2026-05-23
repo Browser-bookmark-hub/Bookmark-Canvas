@@ -4,7 +4,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title></title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+            background: #ffffff;
+        }
+
+        @media (prefers-color-scheme: dark) {
+
+            html,
+            body {
+                background: #242526;
+            }
+        }
+
+        html[data-theme="dark"],
+        html[data-theme="dark"] body {
+            background: #242526;
+        }
+
+        html.side-panel-mode.canvas-view-active,
+        html.side-panel-mode.canvas-view-active body,
+        html.side-panel-mode.canvas-view-active #canvasView,
+        html.side-panel-mode.canvas-view-active .canvas-main-container,
+        html.side-panel-mode.canvas-view-active .canvas-workspace {
+            background: #ffffff;
+        }
+
+        html[data-theme="dark"].side-panel-mode.canvas-view-active,
+        html[data-theme="dark"].side-panel-mode.canvas-view-active body,
+        html[data-theme="dark"].side-panel-mode.canvas-view-active #canvasView,
+        html[data-theme="dark"].side-panel-mode.canvas-view-active .canvas-main-container,
+        html[data-theme="dark"].side-panel-mode.canvas-view-active .canvas-workspace {
+            background: #242526;
+        }
+    </style>
     <script src="history_theme_bootstrap.js"></script>
     <link rel="stylesheet" href="history.css?v=2.1">
     <link rel="stylesheet" href="search/search.css">
