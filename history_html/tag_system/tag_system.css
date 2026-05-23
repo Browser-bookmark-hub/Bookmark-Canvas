@@ -77,6 +77,14 @@
     width: auto;
     padding-left: 2px;
 }
+.tree-item-tag-dots.dots-leading .tag-dot-more + .tag-dot {
+    margin-left: 0;
+}
+.tree-item-tag-dots.dots-leading .tag-dot-more {
+    position: absolute;
+    right: 100%;
+    margin-right: 2px;
+}
 
 /* Positioning variant: dots-leading (default, before toggle) */
 .tree-item-tag-dots.dots-leading {

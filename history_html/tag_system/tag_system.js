@@ -756,15 +756,15 @@
                 wrap.appendChild(more);
             }
         } else {
-            const nodeType = treeItem
-                ? (treeItem.dataset.nodeType || treeItem.getAttribute('data-node-type') || '')
-                : '';
-            const shouldShiftFolderMore = nodeType === 'folder' && tags.length > LEADING_DOTS_VISIBLE;
-            if (shouldShiftFolderMore) {
-                const overflowCount = Math.max(0, visible.length - LEADING_DOTS_ANCHOR_VISIBLE);
-                wrap.style.setProperty('--tag-leading-overflow-shift', `${-overflowCount * LEADING_DOT_OVERLAP_STEP}px`);
-            }
+            const overflowCount = Math.max(0, visible.length - LEADING_DOTS_ANCHOR_VISIBLE);
+            wrap.style.setProperty('--tag-leading-overflow-shift', `${-overflowCount * LEADING_DOT_OVERLAP_STEP}px`);
             // Narrow rows: compact dots (no text), on the left.
+            if (tags.length > LEADING_DOTS_VISIBLE) {
+                const more = document.createElement('span');
+                more.className = 'tag-dot tag-dot-more';
+                more.textContent = `+${tags.length - LEADING_DOTS_VISIBLE}…`;
+                wrap.appendChild(more);
+            }
             visible.forEach((t) => {
                 const dot = document.createElement('span');
                 dot.className = `tag-dot tag-dot-${t.color}`;
@@ -772,12 +772,6 @@
                 dot.dataset.text = t.text || '';
                 wrap.appendChild(dot);
             });
-            if (tags.length > LEADING_DOTS_VISIBLE) {
-                const more = document.createElement('span');
-                more.className = 'tag-dot tag-dot-more';
-                more.textContent = `…+${tags.length - LEADING_DOTS_VISIBLE}`;
-                wrap.appendChild(more);
-            }
         }
         return wrap;
     }
