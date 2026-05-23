@@ -16152,7 +16152,34 @@ function makeMdNodeDraggable(element, node) {
     let startX = 0;
     let startY = 0;
 
+    const beginDrag = (dragStartClientX, dragStartClientY, clientX, clientY) => {
+        CanvasState.dragState.isDragging = true;
+        CanvasState.dragState.draggedElement = element;
+        CanvasState.dragState.dragStartX = dragStartClientX;
+        CanvasState.dragState.dragStartY = dragStartClientY;
+        CanvasState.dragState.nodeStartX = node.x;
+        CanvasState.dragState.nodeStartY = node.y;
+        CanvasState.dragState.dragSource = 'temp-node';
+        CanvasState.dragState.lastClientX = clientX;
+        CanvasState.dragState.lastClientY = clientY;
+        CanvasState.dragState.hasMoved = false;
+        CanvasState.dragState.meta = null;
+
+        CanvasState.dragState.childElements = [];
+        if (node && node.subtype === 'import-container') {
+            // 组拖动：只带走已绑定成员，不做重叠吸附
+            try { __ensureImportContainerMembership(node); } catch (_) { }
+            try { CanvasState.dragState.childElements = __collectImportContainerChildElements(node); } catch (_) { CanvasState.dragState.childElements = []; }
+        }
+
+        CanvasState.dragState.wheelScrollEnabled = true;
+
+        element.classList.add('dragging');
+        element.style.transition = 'none';
+    };
+
     const onMouseDown = (e) => {
+        if (e.__mdNodeSelectionDragHandled) return;
         if (node && node.locked) return; // 锁定不允许拖动
         if (node && node.isEditing) return; // 编辑模式下不允许拖动
         const target = e.target;
@@ -16208,25 +16235,8 @@ function makeMdNodeDraggable(element, node) {
             document.removeEventListener('mouseup', onUp);
 
             // 真正开始拖动（非Ctrl模式）
-            CanvasState.dragState.isDragging = true;
-            CanvasState.dragState.draggedElement = element;
-            CanvasState.dragState.dragStartX = startX;
-            CanvasState.dragState.dragStartY = startY;
-            CanvasState.dragState.nodeStartX = node.x;
-            CanvasState.dragState.nodeStartY = node.y;
-            CanvasState.dragState.dragSource = 'temp-node';
-
-            CanvasState.dragState.childElements = [];
-            if (node && node.subtype === 'import-container') {
-                // 组拖动：只带走已绑定成员，不做重叠吸附
-                try { __ensureImportContainerMembership(node); } catch (_) { }
-                try { CanvasState.dragState.childElements = __collectImportContainerChildElements(node); } catch (_) { CanvasState.dragState.childElements = []; }
-            }
-
-            CanvasState.dragState.wheelScrollEnabled = true;
-
-            element.classList.add('dragging');
-            element.style.transition = 'none';
+            beginDrag(startX, startY, ev.clientX, ev.clientY);
+            updateActiveDragPosition(ev.clientX, ev.clientY);
             ev.preventDefault();
         };
 
@@ -16243,6 +16253,7 @@ function makeMdNodeDraggable(element, node) {
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
     };
+    element.__beginMdNodeDrag = beginDrag;
     // 不使用捕获阶段，让滚动事件正常工作
     element.addEventListener('mousedown', onMouseDown, false);
 }
@@ -19413,6 +19424,7 @@ function renderMdNode(node) {
     let isInEditMode = false;
     let ctrlPausedEdit = false; // Ctrl暂停编辑标记
     let justSelectedOnClick = false;
+    let suppressNextClickForDrag = false;
     let fullscreenEditLock = false;
     let wasEditingBeforeFullscreen = false;
 
@@ -19511,29 +19523,76 @@ function renderMdNode(node) {
         if (CanvasState.selectedMdNodeId !== node.id) {
             // 单击：选中节点（不立刻进入编辑）
             e.preventDefault(); // 阻止编辑器自动聚焦
+            e.__mdNodeSelectionDragHandled = true;
             selectMdNode(node.id);
             justSelectedOnClick = true;
             const startX = e.clientX;
             const startY = e.clientY;
+            let movedToDrag = false;
             const onMove = (ev) => {
                 const dx = Math.abs(ev.clientX - startX);
                 const dy = Math.abs(ev.clientY - startY);
                 if (dx + dy > 3) {
                     justSelectedOnClick = false;
+                    suppressNextClickForDrag = true;
+                    movedToDrag = true;
+                    e.__mdNodeSelectionDragHandled = true;
+                    if (typeof el.__beginMdNodeDrag === 'function') {
+                        el.__beginMdNodeDrag(startX, startY, ev.clientX, ev.clientY);
+                        updateActiveDragPosition(ev.clientX, ev.clientY);
+                    }
                     cleanup();
+                    ev.preventDefault();
                 }
             };
             const cleanup = () => {
                 document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup', cleanup);
+                document.removeEventListener('mouseup', onUp);
+            };
+            const onUp = () => {
+                if (movedToDrag) {
+                    e.__mdNodeSelectionDragHandled = true;
+                }
+                cleanup();
             };
             document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', cleanup);
+            document.addEventListener('mouseup', onUp);
             return;
         }
 
         // 已选中：允许拖动/后续点击进入编辑
+        e.preventDefault();
+        e.__mdNodeSelectionDragHandled = true;
         justSelectedOnClick = false;
+        const startX = e.clientX;
+        const startY = e.clientY;
+        let movedToDrag = false;
+        const onMove = (ev) => {
+            const dx = Math.abs(ev.clientX - startX);
+            const dy = Math.abs(ev.clientY - startY);
+            if (dx + dy > 3) {
+                suppressNextClickForDrag = true;
+                movedToDrag = true;
+                if (typeof el.__beginMdNodeDrag === 'function') {
+                    el.__beginMdNodeDrag(startX, startY, ev.clientX, ev.clientY);
+                    updateActiveDragPosition(ev.clientX, ev.clientY);
+                }
+                cleanup();
+                ev.preventDefault();
+            }
+        };
+        const cleanup = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+        };
+        const onUp = () => {
+            if (movedToDrag) {
+                e.__mdNodeSelectionDragHandled = true;
+            }
+            cleanup();
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
     }, true);
 
     el.addEventListener('click', (e) => {
@@ -19556,6 +19615,10 @@ function renderMdNode(node) {
 
         if (el.classList.contains('canvas-node-maximized')) return;
         if (ctrlPausedEdit || isInEditMode) return;
+        if (suppressNextClickForDrag) {
+            suppressNextClickForDrag = false;
+            return;
+        }
         if (justSelectedOnClick) {
             justSelectedOnClick = false;
             return;
