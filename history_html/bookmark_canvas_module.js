@@ -3602,10 +3602,10 @@ function hasLockedAncestor(parentLabel, candidateLabel, labelMap) {
     return false;
 }
 
-function updateTempSectionColor(section, color) {
+function updateTempSectionColor(section, color, options = {}) {
     if (!section) return;
     section.color = color || getTempSectionDefaultColor(section);
-    requestSidebarMenuColorSyncRefresh();
+    if (!options || options.syncSidebar !== false) requestSidebarMenuColorSyncRefresh();
     const element = document.getElementById(section.id);
     if (!element) return;
     const header = element.querySelector('.temp-node-header');
@@ -3614,7 +3614,7 @@ function updateTempSectionColor(section, color) {
     applyTempSectionColor(section, element, header, colorBtn, colorInput);
 }
 
-function propagateTempSectionColor(parentSection, color) {
+function propagateTempSectionColor(parentSection, color, options = {}) {
     if (!parentSection) return;
     const parentLabel = getTempSectionLabel(parentSection);
     if (!parentLabel) return;
@@ -3625,7 +3625,7 @@ function propagateTempSectionColor(parentSection, color) {
         if (label && isDescendantLabel(parentLabel, label)) {
             if (__isTempSectionColorLocked(section)) return;
             if (hasLockedAncestor(parentLabel, label, labelMap)) return;
-            updateTempSectionColor(section, color);
+            updateTempSectionColor(section, color, options);
         }
     });
 }
@@ -5979,7 +5979,7 @@ function setupCanvasZoomAndPan() {
         }
         const target = e.target;
         if (!target || !target.closest) return;
-        if (target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .import-container, .canvas-edge, .canvas-pan-capture-layer')) return;
+        if (target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .import-container, .canvas-edge, .canvas-edge-hit-area, .canvas-edge-label, .canvas-edge-label-bg, .edge-label-fo, .canvas-pan-capture-layer')) return;
         const canvasContent = document.getElementById('canvasContent');
         if (canvasContent && !canvasContent.contains(target) && target !== workspace) return;
         e.preventDefault();
@@ -16679,11 +16679,18 @@ function renderMdNode(node) {
 
     // 强制层级管理：Container(5) < TempSection(10) < MdNode(15)
     if (node.subtype === 'import-container') {
-        el.style.zIndex = '5';
+        el.style.zIndex = node.pinned ? '200' : '5';
     } else {
         // 普通 Markdown 卡片默认在书签栏目之上
         // 如果自定义样式里没有指定 z-index，才应用默认值 (这里简单起见强制应用，保证层级正确)
-        el.style.zIndex = '15';
+        el.style.zIndex = node.pinned ? '200' : '15';
+    }
+    if (node.title) {
+        el.dataset.title = node.title;
+        el.setAttribute('aria-label', node.title);
+    } else {
+        try { delete el.dataset.title; } catch (_) { }
+        el.removeAttribute('aria-label');
     }
 
     // 顶部工具栏（选中/悬停可见）
@@ -19813,6 +19820,33 @@ function renderMdNode(node) {
     let fullscreenEditLock = false;
     let wasEditingBeforeFullscreen = false;
 
+    const openMdNodeObjectContextMenu = (event) => {
+        if (!event) return false;
+        const target = (event.target && event.target.nodeType === Node.ELEMENT_NODE)
+            ? event.target
+            : (event.target && event.target.parentElement ? event.target.parentElement : null);
+        if (!target) return false;
+        if (target.closest('.md-node-toolbar') ||
+            target.closest('.md-color-popover') ||
+            target.closest('.md-format-popover') ||
+            target.closest('.md-delete-options-popover')) {
+            return false;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        justSelectedOnClick = false;
+        suppressNextClickForDrag = true;
+        if (typeof showBookmarkTreeObjectContextMenu === 'function') {
+            showBookmarkTreeObjectContextMenu(event, {
+                type: 'md-node',
+                nodeId: node.id,
+                nodeData: node,
+                sectionElement: el
+            });
+        }
+        return true;
+    };
+
     const enterEditMode = () => {
         isInEditMode = true;
         ctrlPausedEdit = false;
@@ -19882,6 +19916,12 @@ function renderMdNode(node) {
             ? e.target
             : (e.target && e.target.parentElement ? e.target.parentElement : null);
         if (!target) return;
+        if (e.button === 2) {
+            justSelectedOnClick = false;
+            suppressNextClickForDrag = true;
+            e.stopPropagation();
+            return;
+        }
         if (e.button !== 0 && !isSectionCtrlModeEvent(e)) return;
         // 忽略在resize、小工具栏按钮、链接上的按下
         if (target.closest('.resize-handle') || target.closest('.md-node-toolbar-btn') || target.closest('.canvas-layout-zoom-controls') || target.closest('a')) return;
@@ -20107,7 +20147,10 @@ function renderMdNode(node) {
             removeMdNode(node.id, true);
             clearMdSelection();
         } else if (action === 'md-color-toggle') {
-            toggleMdColorPopover(toolbar, node, btn);
+            const anchorPoint = e && e.__contextAnchorPoint
+                ? e.__contextAnchorPoint
+                : (e && e.detail && e.detail.__contextAnchorPoint ? e.detail.__contextAnchorPoint : null);
+            toggleMdColorPopover(toolbar, node, btn, { anchorPoint });
         } else if (action === 'md-color-preset') {
             const preset = String(btn.getAttribute('data-color') || '').trim();
             // 更新颜色历史
@@ -20221,6 +20264,10 @@ function renderMdNode(node) {
         }
     });
 
+    el.addEventListener('contextmenu', (e) => {
+        openMdNodeObjectContextMenu(e);
+    }, true);
+
     // 同步字体大小到编辑器
     editor.style.fontSize = node.fontSize + 'px';
 
@@ -20239,7 +20286,7 @@ function renderMdNode(node) {
 
     // 初始颜色与层级
     applyMdNodeColor(el, node);
-    if (node && typeof node.z === 'number') {
+    if (node && typeof node.z === 'number' && !node.pinned) {
         el.style.zIndex = String(node.z);
     }
 
@@ -20292,7 +20339,7 @@ function applyMdNodeColor(el, node) {
     }
 }
 
-function setMdNodeColor(node, presetOrHex) {
+function setMdNodeColor(node, presetOrHex, options = {}) {
     if (!node) return;
     const raw = String(presetOrHex || '').trim();
     // 支持预设编号或十六进制颜色
@@ -20309,16 +20356,20 @@ function setMdNodeColor(node, presetOrHex) {
     }
     const el = document.getElementById(node.id);
     if (el) applyMdNodeColor(el, node);
-    saveTempNodes();
-    requestSidebarMenuColorSyncRefresh();
+    if (!options || options.persist !== false) saveTempNodes();
+    if (!options || options.syncSidebar !== false) requestSidebarMenuColorSyncRefresh();
 }
 
 // 色盘弹层逻辑
 function ensureMdColorPopover(toolbar, node) {
     let pop = toolbar.querySelector('.md-color-popover');
+    if (!pop && node && node.id && typeof CSS !== 'undefined' && CSS.escape) {
+        pop = document.querySelector(`.md-color-popover[data-md-node-id="${CSS.escape(String(node.id))}"]`);
+    }
     if (pop) return pop;
     pop = document.createElement('div');
     pop.className = 'md-color-popover';
+    if (node && node.id) pop.dataset.mdNodeId = node.id;
     preventCanvasEventsPropagation(pop);
 
     // 多语言支持
@@ -20397,27 +20448,138 @@ function ensureMdColorPopover(toolbar, node) {
     });
 
     // 自定义颜色变化
+    let mdColorInputRaf = null;
+    let pendingMdColor = null;
     colorInput.addEventListener('input', (ev) => {
-        setMdNodeColor(node, ev.target.value);
+        pendingMdColor = ev.target.value;
+        if (mdColorInputRaf) return;
+        mdColorInputRaf = requestAnimationFrame(() => {
+            mdColorInputRaf = null;
+            setMdNodeColor(node, pendingMdColor, { persist: false, syncSidebar: false });
+        });
     });
 
-    colorInput.addEventListener('change', () => {
+    colorInput.addEventListener('change', (ev) => {
+        if (mdColorInputRaf) {
+            cancelAnimationFrame(mdColorInputRaf);
+            mdColorInputRaf = null;
+        }
+        setMdNodeColor(node, ev.target.value);
         rgbPicker.classList.remove('open');
+    });
+
+    pop.addEventListener('click', (e) => {
+        const btn = e.target && e.target.closest
+            ? e.target.closest('.md-color-chip, .md-color-custom, .md-color-picker-btn')
+            : null;
+        if (!btn || !pop.contains(btn)) return;
+        const action = btn.getAttribute('data-action');
+        if (action === 'md-color-picker-toggle') return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (action === 'md-color-preset') {
+            const preset = String(btn.getAttribute('data-color') || '').trim();
+            const newColor = presetToHex(preset);
+            if (newColor && node.colorHex) {
+                CanvasState.mdNodePrevColor = node.colorHex;
+            }
+            setMdNodeColor(node, preset);
+            closeMdColorPopover(toolbar);
+        } else if (action === 'md-color-custom') {
+            const customColor = btn.getAttribute('data-color');
+            if (customColor) {
+                if (node.colorHex) {
+                    CanvasState.mdNodePrevColor = node.colorHex;
+                }
+                node.color = null;
+                node.colorHex = customColor;
+                const el2 = document.getElementById(node.id);
+                if (el2) applyMdNodeColor(el2, node);
+                saveTempNodes();
+                requestSidebarMenuColorSyncRefresh();
+                closeMdColorPopover(toolbar);
+            }
+        } else if (action === 'md-color-recent') {
+            const recentColor = btn.getAttribute('data-color') || CanvasState.mdNodePrevColor;
+            if (recentColor) {
+                const oldColor = node.colorHex;
+                node.color = null;
+                node.colorHex = recentColor;
+                const el2 = document.getElementById(node.id);
+                if (el2) applyMdNodeColor(el2, node);
+                if (oldColor) {
+                    CanvasState.mdNodePrevColor = oldColor;
+                }
+                saveTempNodes();
+                requestSidebarMenuColorSyncRefresh();
+                closeMdColorPopover(toolbar);
+            }
+        }
     });
 
     toolbar.appendChild(pop);
     return pop;
 }
 
-function toggleMdColorPopover(toolbar, node, anchorBtn) {
+function __clearMdColorPopoverContextAnchor(toolbar, pop) {
+    if (!pop || !pop.dataset || !pop.dataset.contextAnchored) return;
+    pop.classList.remove('context-anchored');
+    pop.style.position = '';
+    pop.style.left = '';
+    pop.style.top = '';
+    pop.style.right = '';
+    pop.style.bottom = '';
+    pop.style.transform = '';
+    pop.dataset.contextAnchored = '';
+    if (toolbar && pop.parentElement !== toolbar) {
+        try { toolbar.appendChild(pop); } catch (_) { }
+    }
+}
+
+function __positionMdColorPopoverAtViewportPoint(toolbar, pop, anchorPoint) {
+    if (!toolbar || !pop || !anchorPoint || !pop.classList.contains('open')) return;
+    if (pop.parentElement !== document.body) {
+        document.body.appendChild(pop);
+    }
+    pop.classList.add('context-anchored');
+    pop.dataset.contextAnchored = '1';
+    pop.style.position = 'fixed';
+    pop.style.right = 'auto';
+    pop.style.bottom = 'auto';
+    pop.style.transform = 'none';
+    pop.style.left = '0px';
+    pop.style.top = '0px';
+
+    const popRect = pop.getBoundingClientRect();
+    const margin = 8;
+    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+    const width = popRect.width || pop.offsetWidth || 0;
+    const height = popRect.height || pop.offsetHeight || 0;
+    let left = Number(anchorPoint.x);
+    let top = Number(anchorPoint.y);
+    if (!Number.isFinite(left)) left = margin;
+    if (!Number.isFinite(top)) top = margin;
+    if (viewportW && left + width > viewportW - margin) left = Math.max(margin, viewportW - width - margin);
+    if (viewportH && top + height > viewportH - margin) top = Math.max(margin, viewportH - height - margin);
+    if (viewportW) left = Math.min(Math.max(margin, left), Math.max(margin, viewportW - width - margin));
+    if (viewportH) top = Math.min(Math.max(margin, top), Math.max(margin, viewportH - height - margin));
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
+}
+
+function toggleMdColorPopover(toolbar, node, anchorBtn, options = {}) {
     const pop = ensureMdColorPopover(toolbar, node);
     const isOpen = pop.classList.contains('open');
     if (isOpen) { closeMdColorPopover(toolbar); return; }
     pop.classList.add('open');
+    const anchorPoint = options && options.anchorPoint ? options.anchorPoint : null;
+    if (anchorPoint) __positionMdColorPopoverAtViewportPoint(toolbar, pop, anchorPoint);
+    else __clearMdColorPopoverContextAnchor(toolbar, pop);
     updateCanvasPopoverState(true);
     // 监听外部点击关闭
     const onDoc = (e) => {
-        if (!toolbar.contains(e.target)) {
+        if (!toolbar.contains(e.target) && !pop.contains(e.target)) {
             closeMdColorPopover(toolbar);
             document.removeEventListener('mousedown', onDoc, true);
         }
@@ -20426,9 +20588,15 @@ function toggleMdColorPopover(toolbar, node, anchorBtn) {
 }
 
 function closeMdColorPopover(toolbar) {
-    const pop = toolbar.querySelector('.md-color-popover');
+    const nodeEl = toolbar && toolbar.closest ? toolbar.closest('.md-canvas-node') : null;
+    const nodeId = nodeEl ? String(nodeEl.id || '').trim() : '';
+    let pop = toolbar ? toolbar.querySelector('.md-color-popover') : null;
+    if (!pop && nodeId && typeof CSS !== 'undefined' && CSS.escape) {
+        pop = document.querySelector(`.md-color-popover[data-md-node-id="${CSS.escape(nodeId)}"]`);
+    }
     if (pop) {
         pop.classList.remove('open');
+        __clearMdColorPopoverContextAnchor(toolbar, pop);
         updateCanvasPopoverState(false);
     }
 }
@@ -24108,11 +24276,28 @@ function renderTempNode(section, options = {}) {
     closeBtn.setAttribute('aria-label', closeLabel);
     closeBtn.addEventListener('click', () => removeTempNode(section.id));
 
+    let tempColorInputRaf = null;
+    let pendingTempColor = null;
+    const applyTempColorValue = (nextColor, options = {}) => {
+        updateTempSectionColor(section, nextColor, options);
+        propagateTempSectionColor(section, nextColor, options);
+        if (!options || options.updateHistory !== false) updateColorHistory(nextColor);
+    };
     colorInput.addEventListener('input', (event) => {
+        pendingTempColor = event.target.value || getTempSectionDefaultColor(section);
+        if (tempColorInputRaf) return;
+        tempColorInputRaf = requestAnimationFrame(() => {
+            tempColorInputRaf = null;
+            applyTempColorValue(pendingTempColor, { syncSidebar: false, updateHistory: false });
+        });
+    });
+    colorInput.addEventListener('change', (event) => {
+        if (tempColorInputRaf) {
+            cancelAnimationFrame(tempColorInputRaf);
+            tempColorInputRaf = null;
+        }
         const nextColor = event.target.value || getTempSectionDefaultColor(section);
-        updateTempSectionColor(section, nextColor);
-        propagateTempSectionColor(section, nextColor);
-        updateColorHistory(nextColor);
+        applyTempColorValue(nextColor);
         saveTempNodes();
     });
 
@@ -29719,7 +29904,7 @@ function addEdge(fromNode, fromSide, toNode, toSide) {
 
     const defaultLabel = getDefaultEdgeLabel({ fromNode, toNode });
     const defaultColor = getEdgeDefaultColor();
-    const id = `edge - ${++CanvasState.edgeCounter} -${Date.now()} `;
+    const id = `edge - ${++CanvasState.edgeCounter} -${Date.now()}`;
     CanvasState.edges.push({
         id,
         fromNode,
@@ -29748,7 +29933,7 @@ function removeEdgesForNode(nodeId, options = {}) {
         if (match) removed.push(e.id);
         return !match;
     });
-    if (removed.includes(CanvasState.selectedEdgeId)) {
+    if (removed.some(edgeId => isSameEdgeId(edgeId, CanvasState.selectedEdgeId))) {
         CanvasState.selectedEdgeId = null;
         hideEdgeToolbar();
     }
@@ -29761,9 +29946,27 @@ function removeEdgesForNode(nodeId, options = {}) {
     }
 }
 
+function normalizeEdgeId(edgeId) {
+    return String(edgeId ?? '').trim();
+}
+
+function isSameEdgeId(a, b) {
+    const left = normalizeEdgeId(a);
+    const right = normalizeEdgeId(b);
+    return !!left && left === right;
+}
+
+function getEdgeById(edgeId) {
+    const id = normalizeEdgeId(edgeId);
+    if (!id || !Array.isArray(CanvasState.edges)) return null;
+    return CanvasState.edges.find(edge => edge && isSameEdgeId(edge.id, id)) || null;
+}
+
 function removeEdge(edgeId) {
-    CanvasState.edges = CanvasState.edges.filter(e => e.id !== edgeId);
-    if (CanvasState.selectedEdgeId === edgeId) {
+    const id = normalizeEdgeId(edgeId);
+    if (!id) return;
+    CanvasState.edges = CanvasState.edges.filter(e => !isSameEdgeId(e && e.id, id));
+    if (isSameEdgeId(CanvasState.selectedEdgeId, id)) {
         clearEdgeSelection();
     }
     renderEdges();
@@ -29898,9 +30101,9 @@ function renderEdges() {
     });
 
     // Stable z-order: render selected edge last to keep it on top
-    const selectedId = CanvasState.selectedEdgeId || null;
+    const selectedId = normalizeEdgeId(CanvasState.selectedEdgeId) || null;
     const edgesToRender = selectedId
-        ? CanvasState.edges.filter(e => e.id !== selectedId).concat(CanvasState.edges.filter(e => e.id === selectedId))
+        ? CanvasState.edges.filter(e => !isSameEdgeId(e && e.id, selectedId)).concat(CanvasState.edges.filter(e => isSameEdgeId(e && e.id, selectedId)))
         : CanvasState.edges.slice();
 
     let needsRetry = false;
@@ -29929,7 +30132,7 @@ function renderEdges() {
         path.setAttribute('class', 'canvas-edge');
         path.dataset.edgeId = edge.id;
         path.style.pointerEvents = 'none'; // 可见路径不响应点击，由 hitArea 处理
-        if (edge.id === CanvasState.selectedEdgeId) {
+        if (isSameEdgeId(edge.id, CanvasState.selectedEdgeId)) {
             path.classList.add('selected');
         }
 
@@ -29953,7 +30156,7 @@ function renderEdges() {
             path.removeAttribute('marker-start');
         }
         // 选中时发光（使用与线条相同的颜色）
-        if (edge.id === CanvasState.selectedEdgeId) {
+        if (isSameEdgeId(edge.id, CanvasState.selectedEdgeId)) {
             const glow = edgeColor || '#66bbff';
             path.style.filter = `drop-shadow(0 0 2px ${glow}66) drop-shadow(0 0 6px ${glow}99)`;
         } else {
@@ -29976,6 +30179,14 @@ function renderEdges() {
             e.stopPropagation();
             e.preventDefault();
             editEdgeLabel(edge.id);
+        });
+
+        hitArea.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof showCanvasEdgeObjectContextMenu === 'function') {
+                showCanvasEdgeObjectContextMenu(e, edge.id);
+            }
         });
 
         // 悬停效果也应用到 hitArea
@@ -30096,6 +30307,41 @@ function renderEdgeLabel(svg, edge, geometry = null) {
         e.stopPropagation();
         try { selectEdge(edge.id, e.clientX, e.clientY); } catch (_) { }
         startEdgeLabelInlineEdit(edge.id);
+    });
+    text.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof showCanvasEdgeObjectContextMenu === 'function') {
+            showCanvasEdgeObjectContextMenu(e, edge.id);
+        }
+    });
+}
+
+function getEdgeColorValue(edge) {
+    return edge && (edge.colorHex || presetToHex(edge.color) || null);
+}
+
+function applyEdgeColorToDom(edge) {
+    if (!edge) return;
+    const edgeColor = getEdgeColorValue(edge);
+    document.querySelectorAll('.canvas-edge').forEach(path => {
+        if (!isSameEdgeId(path.dataset && path.dataset.edgeId, edge.id)) return;
+        path.style.stroke = edgeColor || '';
+        if (isSameEdgeId(edge.id, CanvasState.selectedEdgeId)) {
+            const glow = edgeColor || '#66bbff';
+            path.style.filter = `drop-shadow(0 0 2px ${glow}66) drop-shadow(0 0 6px ${glow}99)`;
+        } else {
+            path.style.filter = '';
+        }
+    });
+    document.querySelectorAll('.canvas-edge-label').forEach(label => {
+        if (!isSameEdgeId(label.dataset && label.dataset.edgeId, edge.id)) return;
+        label.style.fill = edgeColor || '';
+    });
+    document.querySelectorAll('foreignObject.edge-label-fo').forEach(fo => {
+        if (!isSameEdgeId(fo.dataset && fo.dataset.edgeId, edge.id)) return;
+        const editable = fo.querySelector('.edge-label-inline');
+        if (editable) editable.style.color = edgeColor || '';
     });
 }
 
@@ -30276,9 +30522,9 @@ function selectEdge(edgeId, clientX, clientY) {
     // 清除空白栏目的选择
     clearMdSelection();
 
-    CanvasState.selectedEdgeId = edgeId;
+    CanvasState.selectedEdgeId = normalizeEdgeId(edgeId);
     renderEdges(); // Re-render to show selection state
-    showEdgeToolbar(edgeId, clientX, clientY);
+    showEdgeToolbar(CanvasState.selectedEdgeId, clientX, clientY);
 }
 
 function clearEdgeSelection() {
@@ -30291,7 +30537,7 @@ function clearEdgeSelection() {
 
 function showEdgeToolbar(edgeId, x, y) {
     console.log('[Edge Toolbar] showEdgeToolbar called:', edgeId);
-    const edge = CanvasState.edges.find(e => e.id === edgeId);
+    const edge = getEdgeById(edgeId);
     if (!edge) {
         console.warn('[Edge Toolbar] Edge not found:', edgeId);
         return;
@@ -30324,7 +30570,7 @@ function showEdgeToolbar(edgeId, x, y) {
     }
 
     // 保存当前选中的连接线 ID
-    toolbar.dataset.edgeId = edgeId;
+    toolbar.dataset.edgeId = normalizeEdgeId(edge.id);
 
     // Multi-language support - 每次显示都更新内容以确保语言正确
     const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
@@ -30362,82 +30608,82 @@ function showEdgeToolbar(edgeId, x, y) {
             if (!btn) return;
             e.preventDefault();
             e.stopPropagation();
-
-            const currentEdgeId = toolbar.dataset.edgeId;
-            const currentEdge = CanvasState.edges.find(ed => ed.id === currentEdgeId);
-            if (!currentEdge) return;
-
-            const action = btn.getAttribute('data-action');
-
-            if (action === 'edge-delete') {
-                removeEdge(currentEdgeId);
-                hideEdgeToolbar();
-            } else if (action === 'edge-color-toggle') {
-                // 复用空白栏目的色盘弹层逻辑
-                toggleEdgeColorPopover(toolbar, currentEdge, btn);
-            } else if (action === 'md-color-picker-toggle') {
-                // 通过委托打开原生颜色选择器
-                const pop = ensureEdgeColorPopover(toolbar, currentEdge);
-                const picker = pop.querySelector('.md-rgb-picker');
-                const input = pop.querySelector('.md-color-input');
-                if (picker && input) {
-                    picker.classList.add('open');
-                    setTimeout(() => input.click(), 30);
-                }
-            } else if (action === 'edge-focus') {
-                // 复用空白栏目的定位逻辑
-                locateAndZoomToEdge(currentEdgeId);
-            } else if (action === 'edge-direction') {
-                // 打开方向选择器
-                toggleEdgeDirectionPopover(toolbar, currentEdge, btn);
-            } else if (action === 'edge-label') {
-                editEdgeLabel(currentEdgeId);
-            } else if (action === 'md-color-preset') {
-                const preset = String(btn.getAttribute('data-color') || '').trim();
-                // 更新颜色历史
-                const newColor = presetToHex(preset);
-                if (newColor && currentEdge.colorHex) {
-                    CanvasState.edgePrevColor = currentEdge.colorHex;
-                }
-                setEdgeColor(currentEdge, preset);
-                closeEdgeColorPopover(toolbar);
-            } else if (action === 'edge-direction-set') {
-                const dir = String(btn.getAttribute('data-dir') || 'none');
-                setEdgeDirection(currentEdge, dir);
-                closeEdgeDirectionPopover(toolbar);
-            } else if (action === 'edge-color-custom') {
-                const customColor = btn.getAttribute('data-color');
-                if (customColor) {
-                    // 更新颜色历史
-                    if (currentEdge.colorHex) {
-                        CanvasState.edgePrevColor = currentEdge.colorHex;
-                    }
-                    currentEdge.color = null;
-                    currentEdge.colorHex = customColor;
-                    renderEdges();
-                    saveTempNodes();
-                    requestSidebarMenuColorSyncRefresh();
-                    closeEdgeColorPopover(toolbar);
-                }
-            } else if (action === 'edge-color-recent') {
-                // 上一次颜色
-                const recentColor = btn.getAttribute('data-color') || CanvasState.edgePrevColor;
-                if (recentColor) {
-                    const oldColor = currentEdge.colorHex;
-                    currentEdge.color = null;
-                    currentEdge.colorHex = recentColor;
-                    renderEdges();
-                    // 交换颜色历史
-                    if (oldColor) {
-                        CanvasState.edgePrevColor = oldColor;
-                    }
-                    saveTempNodes();
-                    requestSidebarMenuColorSyncRefresh();
-                    closeEdgeColorPopover(toolbar);
-                }
-            }
+            __handleEdgeToolbarAction(toolbar, btn);
         });
         toolbar.dataset.eventsBound = 'true';
+    }
+}
+
+function __handleEdgeToolbarAction(toolbar, btn) {
+    if (!toolbar || !btn) return;
+    const currentEdgeId = normalizeEdgeId(toolbar.dataset.edgeId);
+    const currentEdge = getEdgeById(currentEdgeId);
+    if (!currentEdge) return;
+
+    const action = btn.getAttribute('data-action');
+
+    if (action === 'edge-delete') {
+        removeEdge(currentEdgeId);
+        hideEdgeToolbar();
+    } else if (action === 'edge-color-toggle') {
+        // 复用空白栏目的色盘弹层逻辑
+        toggleEdgeColorPopover(toolbar, currentEdge, btn);
+    } else if (action === 'md-color-picker-toggle') {
+        // 通过委托打开原生颜色选择器
+        const pop = ensureEdgeColorPopover(toolbar, currentEdge);
+        const picker = pop.querySelector('.md-rgb-picker');
+        const input = pop.querySelector('.md-color-input');
+        if (picker && input) {
+            picker.classList.add('open');
+            setTimeout(() => input.click(), 30);
+        }
+    } else if (action === 'edge-focus') {
+        // 复用空白栏目的定位逻辑
+        locateAndZoomToEdge(currentEdgeId);
+    } else if (action === 'edge-direction') {
+        // 打开方向选择器
+        toggleEdgeDirectionPopover(toolbar, currentEdge, btn);
+    } else if (action === 'edge-label') {
+        editEdgeLabel(currentEdgeId);
+    } else if (action === 'md-color-preset') {
+        const preset = String(btn.getAttribute('data-color') || '').trim();
+        // 更新颜色历史
+        const newColor = presetToHex(preset);
+        if (newColor && currentEdge.colorHex) {
+            CanvasState.edgePrevColor = currentEdge.colorHex;
+        }
+        setEdgeColor(currentEdge, preset);
+        closeEdgeColorPopover(toolbar);
+        __removeEdgeContextPopoverHost(toolbar);
+    } else if (action === 'edge-direction-set') {
+        const dir = String(btn.getAttribute('data-dir') || 'none');
+        setEdgeDirection(currentEdge, dir);
+        closeEdgeDirectionPopover(toolbar);
+        __removeEdgeContextPopoverHost(toolbar);
+    } else if (action === 'edge-color-custom') {
+        const customColor = btn.getAttribute('data-color');
+        if (customColor) {
+            // 更新颜色历史
+            if (currentEdge.colorHex) {
+                CanvasState.edgePrevColor = currentEdge.colorHex;
+            }
+            setEdgeColor(currentEdge, customColor);
+            closeEdgeColorPopover(toolbar);
+            __removeEdgeContextPopoverHost(toolbar);
+        }
+    } else if (action === 'edge-color-recent') {
+        // 上一次颜色
+        const recentColor = btn.getAttribute('data-color') || CanvasState.edgePrevColor;
+        if (recentColor) {
+            const oldColor = currentEdge.colorHex;
+            setEdgeColor(currentEdge, recentColor);
+            // 交换颜色历史
+            if (oldColor) {
+                CanvasState.edgePrevColor = oldColor;
+            }
+            closeEdgeColorPopover(toolbar);
+            __removeEdgeContextPopoverHost(toolbar);
+        }
     }
 }
 
@@ -30448,7 +30694,7 @@ function updateEdgeToolbarPosition() {
         // 即使工具栏不存在，也尝试更新编辑器位置（在缩放/移动时）
         const editorOnly = document.getElementById('edge-label-editor');
         if (editorOnly && editorOnly.dataset.edgeId) {
-            const edge = CanvasState.edges.find(e => e.id === editorOnly.dataset.edgeId);
+            const edge = getEdgeById(editorOnly.dataset.edgeId);
             if (!edge) return;
             const start = getAnchorPosition(edge.fromNode, edge.fromSide);
             const end = getAnchorPosition(edge.toNode, edge.toSide);
@@ -30465,10 +30711,10 @@ function updateEdgeToolbarPosition() {
         return;
     }
 
-    const edgeId = toolbar.dataset.edgeId;
+    const edgeId = normalizeEdgeId(toolbar.dataset.edgeId);
     if (!edgeId) return;
 
-    const edge = CanvasState.edges.find(e => e.id === edgeId);
+    const edge = getEdgeById(edgeId);
     if (!edge) return;
 
     const start = getAnchorPosition(edge.fromNode, edge.fromSide);
@@ -30489,7 +30735,7 @@ function updateEdgeToolbarPosition() {
 
     // 同步更新正在编辑的输入框位置
     const editor = document.getElementById('edge-label-editor');
-    if (editor && editor.dataset.edgeId === edgeId) {
+    if (editor && isSameEdgeId(editor.dataset.edgeId, edgeId)) {
         const offsetPx = 18;
         editor.style.left = `${midX}px`;
         editor.style.top = `${midY - (offsetPx / z)}px`;
@@ -30594,11 +30840,23 @@ function ensureEdgeColorPopover(toolbar, edge) {
     });
 
     // 自定义颜色变化
+    let edgeColorInputRaf = null;
+    let pendingEdgeColor = null;
     colorInput.addEventListener('input', (ev) => {
-        setEdgeColor(edge, ev.target.value);
+        pendingEdgeColor = ev.target.value;
+        if (edgeColorInputRaf) return;
+        edgeColorInputRaf = requestAnimationFrame(() => {
+            edgeColorInputRaf = null;
+            setEdgeColor(edge, pendingEdgeColor, { render: false, persist: false, syncSidebar: false });
+        });
     });
 
-    colorInput.addEventListener('change', () => {
+    colorInput.addEventListener('change', (ev) => {
+        if (edgeColorInputRaf) {
+            cancelAnimationFrame(edgeColorInputRaf);
+            edgeColorInputRaf = null;
+        }
+        setEdgeColor(edge, ev.target.value);
         rgbPicker.classList.remove('open');
     });
 
@@ -30629,7 +30887,7 @@ function closeEdgeColorPopover(toolbar) {
     if (pop) pop.classList.remove('open');
 }
 
-function setEdgeColor(edge, presetOrHex) {
+function setEdgeColor(edge, presetOrHex, options = {}) {
     if (!edge) return;
 
     // 支持预设编号或十六进制颜色
@@ -30642,9 +30900,13 @@ function setEdgeColor(edge, presetOrHex) {
         edge.colorHex = presetOrHex;
     }
 
-    renderEdges();
-    saveTempNodes();
-    requestSidebarMenuColorSyncRefresh();
+    if (!options || options.render !== false) {
+        renderEdges();
+    } else {
+        applyEdgeColorToDom(edge);
+    }
+    if (!options || options.persist !== false) saveTempNodes();
+    if (!options || options.syncSidebar !== false) requestSidebarMenuColorSyncRefresh();
 }
 
 // 方向弹层（与色盘风格一致）
@@ -30690,6 +30952,95 @@ function closeEdgeDirectionPopover(toolbar) {
     if (pop) pop.classList.remove('open');
 }
 
+function __removeEdgeContextPopoverHost(host) {
+    if (!host || !host.classList || !host.classList.contains('edge-context-popover-host')) return;
+    try { host.remove(); } catch (_) { }
+}
+
+function __positionEdgeFloatingPopover(popover, anchorPoint) {
+    if (!popover) return;
+    const anchor = anchorPoint || {};
+    popover.classList.add('context-anchored');
+    popover.style.bottom = 'auto';
+    popover.style.right = 'auto';
+    popover.style.transform = 'none';
+    popover.style.left = '0px';
+    popover.style.top = '0px';
+    const rect = popover.getBoundingClientRect();
+    const margin = 8;
+    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+    const width = rect.width || popover.offsetWidth || 0;
+    const height = rect.height || popover.offsetHeight || 0;
+    let left = Number(anchor.x);
+    let top = Number(anchor.y);
+    if (!Number.isFinite(left)) left = margin;
+    if (!Number.isFinite(top)) top = margin;
+    if (viewportW && left + width > viewportW - margin) left = Math.max(margin, viewportW - width - margin);
+    if (viewportH && top + height > viewportH - margin) top = Math.max(margin, viewportH - height - margin);
+    if (viewportW) left = Math.min(Math.max(margin, left), Math.max(margin, viewportW - width - margin));
+    if (viewportH) top = Math.min(Math.max(margin, top), Math.max(margin, viewportH - height - margin));
+    popover.style.left = `${Math.round(left)}px`;
+    popover.style.top = `${Math.round(top)}px`;
+}
+
+function __createEdgeContextPopoverHost(edgeId, className) {
+    const id = normalizeEdgeId(edgeId);
+    const edge = getEdgeById(id);
+    if (!edge) return null;
+    document.querySelectorAll('.edge-context-popover-host').forEach(host => {
+        try { host.remove(); } catch (_) { }
+    });
+    const host = document.createElement('div');
+    host.className = `edge-context-popover-host ${className || ''}`.trim();
+    host.dataset.edgeId = id;
+    host.style.position = 'fixed';
+    host.style.left = '0px';
+    host.style.top = '0px';
+    host.style.zIndex = '10001';
+    host.style.pointerEvents = 'auto';
+    document.body.appendChild(host);
+    preventCanvasEventsPropagation(host);
+    host.addEventListener('click', (event) => {
+        const btn = event.target.closest('.md-color-chip, .md-color-picker-btn, .md-node-toolbar-btn');
+        if (!btn) return;
+        event.preventDefault();
+        event.stopPropagation();
+        __handleEdgeToolbarAction(host, btn);
+    });
+    return { host, edge };
+}
+
+function openEdgeColorPicker(edgeId, options = {}) {
+    const created = __createEdgeContextPopoverHost(edgeId, 'edge-color-context-host');
+    if (!created) return false;
+    const pop = ensureEdgeColorPopover(created.host, created.edge);
+    pop.classList.add('open');
+    setTimeout(() => __positionEdgeFloatingPopover(pop, options && options.anchorPoint ? options.anchorPoint : null), 0);
+    const onDoc = (event) => {
+        if (created.host.contains(event.target)) return;
+        document.removeEventListener('mousedown', onDoc, true);
+        __removeEdgeContextPopoverHost(created.host);
+    };
+    setTimeout(() => document.addEventListener('mousedown', onDoc, true), 0);
+    return true;
+}
+
+function openEdgeDirectionPicker(edgeId, options = {}) {
+    const created = __createEdgeContextPopoverHost(edgeId, 'edge-direction-context-host');
+    if (!created) return false;
+    const pop = ensureEdgeDirectionPopover(created.host, created.edge);
+    pop.classList.add('open');
+    setTimeout(() => __positionEdgeFloatingPopover(pop, options && options.anchorPoint ? options.anchorPoint : null), 0);
+    const onDoc = (event) => {
+        if (created.host.contains(event.target)) return;
+        document.removeEventListener('mousedown', onDoc, true);
+        __removeEdgeContextPopoverHost(created.host);
+    };
+    setTimeout(() => document.addEventListener('mousedown', onDoc, true), 0);
+    return true;
+}
+
 function setEdgeDirection(edge, dir) {
     if (!edge) return;
     const v = (dir === 'forward' || dir === 'both') ? dir : 'none';
@@ -30700,7 +31051,7 @@ function setEdgeDirection(edge, dir) {
 
 // 定位并放大到连接线（复用空白栏目的定位逻辑）
 function locateAndZoomToEdge(edgeId, targetZoom = null) {
-    const edge = CanvasState.edges.find(e => e.id === edgeId);
+    const edge = getEdgeById(edgeId);
     const workspace = document.getElementById('canvasWorkspace');
     if (!edge || !workspace) return;
 
@@ -30714,9 +31065,10 @@ function locateAndZoomToEdge(edgeId, targetZoom = null) {
         setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
     }
 
-    // 计算连接线中心点
-    const centerX = (start.x + end.x) / 2;
-    const centerY = (start.y + end.y) / 2;
+    // 计算连接线曲线中心点，右键定位与连接线标签/工具栏保持一致。
+    const curveMid = getEdgeCurveMidpoint(edge);
+    const centerX = curveMid ? curveMid.x : (start.x + end.x) / 2;
+    const centerY = curveMid ? curveMid.y : (start.y + end.y) / 2;
 
     // 平移到中心点（与空白栏目逻辑一致）
     const workspaceWidth = workspace.clientWidth;
@@ -30725,6 +31077,10 @@ function locateAndZoomToEdge(edgeId, targetZoom = null) {
     CanvasState.panOffsetY = workspaceHeight / 2 - centerY * CanvasState.zoom;
 
     updateCanvasScrollBounds();
+    updateScrollbarThumbs();
+    CanvasState.selectedEdgeId = normalizeEdgeId(edge.id);
+    renderEdges();
+    updateEdgeToolbarPosition();
     savePanOffsetThrottled();
 }
 
@@ -30806,6 +31162,83 @@ function __positionTempFloatingPopoverAtPoint(popover, anchorPoint) {
     if (viewportH) top = Math.min(Math.max(margin, top), Math.max(margin, viewportH - height - margin));
     popover.style.left = `${Math.round(left)}px`;
     popover.style.top = `${Math.round(top)}px`;
+}
+
+function openEdgeLabelPopover(edgeId, options = {}) {
+    const id = normalizeEdgeId(edgeId);
+    const edge = getEdgeById(id);
+    if (!edge) return false;
+
+    document.querySelectorAll('.edge-label-rename-popover').forEach(pop => {
+        try { pop.remove(); } catch (_) { }
+    });
+    document.querySelectorAll('.edge-context-popover-host').forEach(host => {
+        try { host.remove(); } catch (_) { }
+    });
+
+    const popover = document.createElement('div');
+    popover.className = 'temp-section-rename-popover edge-label-rename-popover';
+    popover.dataset.edgeId = id;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'temp-section-rename-popover-input edge-label-rename-popover-input';
+    input.value = edge.label || '';
+    input.placeholder = (getCanvasLanguage() === 'en') ? 'Edit label' : '编辑标签';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'temp-section-rename-popover-confirm edge-label-rename-popover-confirm';
+    confirmBtn.title = (getCanvasLanguage() === 'en') ? 'Confirm' : '确认';
+    confirmBtn.setAttribute('aria-label', confirmBtn.title);
+    confirmBtn.innerHTML = '<i class="fas fa-check"></i>';
+
+    popover.appendChild(input);
+    popover.appendChild(confirmBtn);
+    document.body.appendChild(popover);
+    preventCanvasEventsPropagation(popover);
+    __positionTempFloatingPopoverAtPoint(popover, options && options.anchorPoint ? options.anchorPoint : null);
+
+    let closed = false;
+    const close = (commit) => {
+        if (closed) return;
+        closed = true;
+        document.removeEventListener('mousedown', onDoc, true);
+        input.removeEventListener('keydown', onKeydown);
+        confirmBtn.removeEventListener('click', onConfirm);
+        if (commit) {
+            edge.label = String(input.value || '').trim();
+            renderEdges();
+            saveTempNodes();
+        }
+        try { popover.remove(); } catch (_) { }
+    };
+    const onDoc = (event) => {
+        if (popover.contains(event.target)) return;
+        close(true);
+    };
+    const onKeydown = (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            close(true);
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            close(false);
+        }
+    };
+    const onConfirm = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        close(true);
+    };
+    input.addEventListener('keydown', onKeydown);
+    confirmBtn.addEventListener('click', onConfirm);
+    setTimeout(() => document.addEventListener('mousedown', onDoc, true), 0);
+    setTimeout(() => {
+        input.focus();
+        input.select();
+    }, 0);
+    return true;
 }
 
 function openTempSectionRename(sectionId, options = {}) {
@@ -30907,6 +31340,55 @@ function openTempSectionColorPicker(sectionId, options = {}) {
     return false;
 }
 
+function getMdNodeById(nodeId) {
+    const id = String(nodeId || '').trim();
+    if (!id) return null;
+    return Array.isArray(CanvasState.mdNodes)
+        ? (CanvasState.mdNodes.find(node => node && node.id === id) || null)
+        : null;
+}
+
+function toggleMdNodePin(nodeId) {
+    const node = getMdNodeById(nodeId);
+    if (!node) return false;
+    node.pinned = !node.pinned;
+    const el = document.getElementById(node.id);
+    if (el) {
+        if (node.pinned) {
+            el.style.zIndex = '200';
+        } else if (node.subtype === 'import-container') {
+            el.style.zIndex = '5';
+        } else if (typeof node.z === 'number') {
+            el.style.zIndex = String(node.z);
+        } else {
+            el.style.zIndex = '15';
+        }
+    }
+    saveTempNodes();
+    return node.pinned;
+}
+
+function openMdNodeColorPicker(nodeId, options = {}) {
+    const node = getMdNodeById(nodeId);
+    const el = node ? document.getElementById(node.id) : null;
+    const toolbar = el ? el.querySelector('.md-node-toolbar') : null;
+    if (!node || !toolbar) return false;
+    const anchorPoint = options && options.anchorPoint ? options.anchorPoint : null;
+    const colorBtn = toolbar.querySelector('.md-node-toolbar-btn[data-action="md-color-toggle"]');
+    if (colorBtn && typeof colorBtn.dispatchEvent === 'function') {
+        const event = new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+        });
+        event.__contextAnchorPoint = anchorPoint;
+        colorBtn.dispatchEvent(event);
+        return true;
+    }
+    toggleMdColorPopover(toolbar, node, null, { anchorPoint });
+    return true;
+}
+
 function removeTempSectionById(sectionId) {
     if (!sectionId) return false;
     removeTempNode(sectionId);
@@ -30915,7 +31397,7 @@ function removeTempSectionById(sectionId) {
 
 // 切换连接线方向（交换起点和终点）
 function toggleEdgeDirection(edgeId) {
-    const edge = CanvasState.edges.find(e => e.id === edgeId);
+    const edge = getEdgeById(edgeId);
     if (!edge) return;
 
     // 交换起点和终点
@@ -30940,16 +31422,18 @@ function editEdgeLabel(edgeId) {
 
 // 就地编辑连接线标签（不再使用 prompt）
 function startEdgeLabelInlineEdit(edgeId) {
-    const edge = CanvasState.edges.find(e => e.id === edgeId);
+    const edge = getEdgeById(edgeId);
     const svg = document.querySelector('.canvas-edges');
     if (!edge || !svg) return;
+    const edgeDomId = String(edge.id ?? '');
+    const edgeDomIdSelector = edgeDomId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
     // 清除已有的编辑器
-    const existingFo = svg.querySelector(`foreignObject[data-edge-id="${edgeId}"]`);
+    const existingFo = svg.querySelector(`foreignObject[data-edge-id="${edgeDomIdSelector}"]`);
     if (existingFo) { try { existingFo.remove(); } catch (_) { } }
 
     // 移除原文字（若存在）
-    const textEl = svg.querySelector(`text.canvas-edge-label[data-edge-id="${edgeId}"]`);
+    const textEl = svg.querySelector(`text.canvas-edge-label[data-edge-id="${edgeDomIdSelector}"]`);
     if (textEl) { try { textEl.remove(); } catch (_) { } }
 
     // 计算放置位置
@@ -30976,7 +31460,7 @@ function startEdgeLabelInlineEdit(edgeId) {
     try { probe.remove(); } catch (_) { }
 
     const fo = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
-    fo.setAttribute('data-edge-id', edgeId);
+    fo.setAttribute('data-edge-id', edgeDomId);
     fo.setAttribute('class', 'edge-label-fo');
     fo.setAttribute('x', (mid.x - textW / 2).toString());
     fo.setAttribute('y', (mid.y - textH / 2).toString());
@@ -31007,11 +31491,11 @@ function startEdgeLabelInlineEdit(edgeId) {
     if (edgeColor) div.style.color = edgeColor;
 
     // 挖空矩形（如未存在则创建）
-    let rect = svg.querySelector(`rect.canvas-edge-label-bg[data-edge-id="${edgeId}"]`);
+    let rect = svg.querySelector(`rect.canvas-edge-label-bg[data-edge-id="${edgeDomIdSelector}"]`);
     if (!rect) {
         rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('class', 'canvas-edge-label-bg');
-        rect.setAttribute('data-edge-id', edgeId);
+        rect.setAttribute('data-edge-id', edgeDomId);
         rect.setAttribute('rx', '4');
         rect.setAttribute('ry', '4');
         rect.style.pointerEvents = 'none';
@@ -31104,8 +31588,19 @@ window.CanvasModule = {
     openTempSectionRename,
     openTempSectionColorPicker,
     removeTempSection: removeTempSectionById,
+    getMdNode: getMdNodeById,
+    locateMdNode: locateAndZoomToMdNode,
+    toggleMdNodePin,
+    openMdNodeColorPicker,
+    removeMdNode,
     removePermanentSectionCopy,
     createPermanentSectionCopy,
+    getEdge: getEdgeById,
+    locateEdge: locateAndZoomToEdge,
+    openEdgeColorPicker,
+    openEdgeDirectionPicker,
+    openEdgeLabelEditor: openEdgeLabelPopover,
+    removeEdge,
     ensurePermanentSectionCopyDisplayIndexes: __ensurePermanentSectionCopyDisplayIndexes,
     // 性能优化：休眠管理
     scheduleDormancyUpdate: scheduleDormancyUpdate,

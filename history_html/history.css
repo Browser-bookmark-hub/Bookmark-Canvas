@@ -9618,15 +9618,15 @@ body.canvas-node-maximized-active .canvas-edge-label {
 /* 顶部工具栏（空白栏目/Markdown 卡片） */
 .md-node-toolbar {
     position: absolute;
-    top: -42px;
-    /* Moved up from -28px to avoid conflict with top anchor */
+    top: -46px;
+    /* Keep a wider safety gap from the top resize handle. */
     left: 50%;
     transform: translateX(-50%);
-    height: 24px;
+    min-height: 32px;
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 0;
+    padding: 4px 2px;
     border: none;
     background: transparent;
     box-shadow: none;
@@ -9634,7 +9634,7 @@ body.canvas-node-maximized-active .canvas-edge-label {
     pointer-events: none;
     /* 隐藏时添加延迟，让用户有时间将鼠标移到工具栏 */
     transition: opacity 0.15s ease 0.35s, pointer-events 0s linear 0.35s;
-    z-index: 12000;
+    z-index: 13050;
     /* Above anchors (11000) so toolbar remains clickable on top edge */
 }
 
@@ -9668,8 +9668,8 @@ body.canvas-node-maximized-active .canvas-edge-label {
 }
 
 .md-node-toolbar-btn {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -10156,6 +10156,11 @@ body.canvas-node-maximized-active .canvas-edge-label {
     display: flex;
     align-items: center;
     flex-wrap: nowrap;
+}
+
+.md-color-popover.context-anchored {
+    position: fixed;
+    z-index: 10001;
 }
 
 .md-color-chip {
