@@ -8253,22 +8253,14 @@ async function locateCanvasElement(elementId, type, options = {}) {
             if (container) {
                 const skipPanForMaximizedTarget = shouldSkipCanvasPanForMaximizedTarget(elementId, type);
                 if (!skipPanForMaximizedTarget) {
-                    let currentZoom = CanvasState.zoom || 1;
-
-                    // [Fix] Low Detail Mode / Card Sleep Safety check
-                    // If zoom < 0.7, elements might be unloaded/hidden (Virtualization/LOD).
-                    // Auto-zoom to 0.8 as requested to ensure visibility.
-                    if (currentZoom < 0.7) {
-                        // Auto-zoom to 100% (baseZoom) as requested by user.
-                        currentZoom = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1.0;
-                        if (window.CanvasModule && typeof window.CanvasModule.setZoom === 'function') {
-                            window.CanvasModule.setZoom(currentZoom, null, null, { silent: true });
-                        } else {
-                            CanvasState.zoom = currentZoom;
-                        }
-                        // Sync CSS Variable immediately
-                        container.style.setProperty('--canvas-scale', currentZoom.toString());
+                    let currentZoom = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1.0;
+                    if (window.CanvasModule && typeof window.CanvasModule.setZoom === 'function') {
+                        window.CanvasModule.setZoom(currentZoom, null, null, { silent: true });
+                    } else {
+                        CanvasState.zoom = currentZoom;
                     }
+                    // Sync CSS variable immediately so every locate entry uses the same 100% view.
+                    container.style.setProperty('--canvas-scale', currentZoom.toString());
 
                     const containerRect = container.getBoundingClientRect();
                     const viewportCX = containerRect.width / 2;

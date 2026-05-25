@@ -7191,6 +7191,15 @@ if (typeof window !== 'undefined') {
         normalizeTempSectionProtocol(sectionInput) {
             return __normalizeTempSectionProtocolObject(sectionInput) || __buildTempSectionProtocol(sectionInput);
         },
+        buildTempSectionJsonProtocol(sectionInput) {
+            return __buildTempSectionJsonProtocol(sectionInput);
+        },
+        buildObsidianSafeFilenameStem(name, fallback = 'Untitled', uniqueSeed = '') {
+            return __buildObsidianSafeFilenameStem(name, fallback, uniqueSeed);
+        },
+        buildTempSectionMarkdownRelativePath(sectionInput, safeTitle, isEn, exportFormat = 'json') {
+            return __buildTempSectionMarkdownRelativePath(sectionInput, safeTitle, isEn, exportFormat);
+        },
         collectTempSectionProtocolSnapshot(stateInput) {
             return __buildTempSectionProtocolSnapshot(stateInput);
         },
@@ -7205,6 +7214,12 @@ if (typeof window !== 'undefined') {
         },
         async ensurePermanentMainContentInBcs(options = {}) {
             return await __ensurePermanentMainContentInBcs(options);
+        },
+        buildPermanentMainSyncPayload(contentInput, options = {}) {
+            return __buildPermanentMainSyncPayload(contentInput, options);
+        },
+        buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn, exportFormat = 'json') {
+            return __buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn, exportFormat);
         },
         async readPermanentMainContentFromBcs(options = {}) {
             return await __readPermanentMainContentFromBcs(options);

@@ -13702,13 +13702,31 @@ function updateScrollbarThumbs() {
 // 定位到永久栏目
 // =============================================================================
 
-function locateToPermanentSection() {
+const CANVAS_LOCATE_DEFAULT_ZOOM = 1;
+
+function __getCanvasLocateDefaultZoom() {
+    const baseZoom = Number(CanvasState && CanvasState.baseZoom);
+    return Number.isFinite(baseZoom) && baseZoom > 0 ? baseZoom : CANVAS_LOCATE_DEFAULT_ZOOM;
+}
+
+function __resolveCanvasLocateZoom(targetZoom) {
+    const requested = Number(targetZoom);
+    return clampCanvasZoom(Number.isFinite(requested) && requested > 0 ? requested : __getCanvasLocateDefaultZoom());
+}
+
+function locateToPermanentSection(targetZoom = null) {
     const permanentSection = document.getElementById('permanentSection');
     const workspace = document.getElementById('canvasWorkspace');
 
     if (!permanentSection || !workspace) {
         console.warn('[Canvas] 找不到永久栏目或工作区');
         return;
+    }
+
+    const zoom = __resolveCanvasLocateZoom(targetZoom);
+    if (zoom !== CanvasState.zoom) {
+        const rect = workspace.getBoundingClientRect();
+        setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
     }
 
     // 获取永久栏目的位置和尺寸（在canvas-content坐标系中）
@@ -13791,10 +13809,15 @@ function locateToIntroCardsCenter() {
 }
 
 // 通用：定位到任意 Canvas 节点（按绝对定位的 left/top + 尺寸）
-function locateToElement(el) {
+function locateToElement(el, targetZoom = null) {
     if (!el) return;
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
+    const zoom = __resolveCanvasLocateZoom(targetZoom);
+    if (zoom !== CanvasState.zoom) {
+        const rect = workspace.getBoundingClientRect();
+        setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
+    }
     const left = parseFloat(el.style.left) || 0;
     const top = parseFloat(el.style.top) || 0;
     const width = el.offsetWidth || 0;
@@ -13813,11 +13836,11 @@ function locateToElement(el) {
 }
 
 // 定位到临时栏目（通过 sectionId）
-function locateToTempSection(sectionId) {
+function locateToTempSection(sectionId, targetZoom = null) {
     if (!sectionId) return;
     try { ensureTempSectionRendered(sectionId); } catch (_) { }
     const el = document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(sectionId)}"]`);
-    if (el) locateToElement(el);
+    if (el) locateToElement(el, targetZoom);
 }
 
 // =============================================================================
@@ -14748,6 +14771,11 @@ function __ensurePermanentSectionLowDetailOverlay(sectionEl) {
     } catch (_) { }
 }
 
+function __isCanvasLowDetailModeActive() {
+    const workspace = document.querySelector('.canvas-workspace');
+    return !!(workspace && workspace.classList && workspace.classList.contains('canvas-low-detail'));
+}
+
 function __updatePermanentSectionIndexBadges() {
     try {
         const copies = __readPermanentSectionCopies();
@@ -14835,6 +14863,63 @@ function __getPermanentSectionScrollBaseKey(sectionEl) {
 function __getPermanentSectionScrollKey(sectionEl) {
     const baseKey = __getPermanentSectionScrollBaseKey(sectionEl);
     return __buildCanvasPartitionedViewStateKey('scroll', baseKey);
+}
+
+function __flushPermanentSectionViewState(sectionEl) {
+    if (!sectionEl) return;
+    try {
+        const tree = sectionEl.querySelector('.bookmark-tree');
+        if (tree) {
+            if (typeof __saveTreeExpandStateToStorage === 'function') {
+                __saveTreeExpandStateToStorage(tree);
+            } else if (typeof saveTreeExpandState === 'function') {
+                saveTreeExpandState(tree);
+            }
+        }
+    } catch (_) { }
+
+    try {
+        const body = sectionEl.querySelector('.permanent-section-body');
+        const baseKey = __getPermanentSectionScrollBaseKey(sectionEl);
+        if (body && baseKey) {
+            saveViewState('scroll', baseKey, {
+                top: body.scrollTop || 0,
+                left: body.scrollLeft || 0
+            });
+        }
+    } catch (_) { }
+}
+
+function __applyPermanentSectionViewRuntimeState(sectionEl, shell) {
+    if (!sectionEl || !shell) return;
+    try {
+        const tree = sectionEl.querySelector('.bookmark-tree');
+        if (tree && typeof restoreTreeExpandState === 'function') {
+            restoreTreeExpandState(tree);
+        }
+    } catch (_) { }
+
+    try {
+        const body = sectionEl.querySelector('.permanent-section-body');
+        const partitionKey = __getCanvasViewPartitionKey();
+        const scrollState = (shell.scrollState && shell.scrollState[partitionKey])
+            || (shell.scrollState && shell.scrollState.page)
+            || (shell.scrollState && shell.scrollState.sidepanel)
+            || null;
+        if (body && scrollState) {
+            const top = Number(scrollState.top) || 0;
+            const left = Number(scrollState.left) || 0;
+            __scheduleCanvasBodyScrollRestore(body, {
+                top,
+                left
+            }, {
+                target: sectionEl,
+                fallbackDelays: [10, 50, 100, 180],
+                useFullscreenLock: false,
+                isBlocked: () => false
+            });
+        }
+    } catch (_) { }
 }
 
 function __getTempSectionScrollBaseKey(sectionId) {
@@ -15128,11 +15213,16 @@ function createPermanentSectionCopy(sourceSection, options = {}) {
         if (Number.isFinite(requestedTop)) targetTop = requestedTop;
     }
 
+    try { __flushPermanentSectionViewState(origin); } catch (_) { }
     const originCopyId = __isPermanentSectionCopy(origin) ? __getPermanentSectionCopyId(origin) : null;
+    const inheritedScrollState = __collectPermanentViewScrollState(originCopyId);
+    const inheritedFoldState = __collectPermanentViewFoldState(originCopyId);
     const shell = __normalizePermanentViewShellProtocol({
         copyId,
         displayIndex,
         descriptionMd: __collectPermanentViewDescriptionMarkdown(originCopyId),
+        scrollState: inheritedScrollState,
+        foldState: inheritedFoldState,
         cardState: {
             left: targetLeft,
             top: targetTop,
@@ -15144,6 +15234,8 @@ function createPermanentSectionCopy(sourceSection, options = {}) {
     try {
         __persistPermanentTipStorageValue(__getPermanentViewTipStorageKey(copyId), shell.descriptionMd || '');
     } catch (_) { }
+    try { __applyPermanentViewShellScrollState(copyId, shell.scrollState); } catch (_) { }
+    try { __applyPermanentViewShellFoldState(copyId, shell.foldState); } catch (_) { }
     __applyPermanentViewShellToSectionElement(copySection, shell);
 
     canvasContent.appendChild(copySection);
@@ -15155,6 +15247,7 @@ function createPermanentSectionCopy(sourceSection, options = {}) {
         if (tree) __renderPermanentSectionCopyTree(tree);
         if (tree && typeof attachTreeEvents === 'function') attachTreeEvents(tree);
     } catch (_) { }
+    try { __applyPermanentSectionViewRuntimeState(copySection, shell); } catch (_) { }
 
     // Persist copy list
     try { savePermanentSectionPosition(copySection); } catch (_) { }
@@ -15371,12 +15464,50 @@ function makePermanentSectionDraggable(permanentSection) {
 
     // 使用捕获阶段确保事件优先处理，mousemove用冒泡阶段提高性能
     header.addEventListener('mousedown', onMouseDown, true);
+    header.addEventListener('contextmenu', (e) => {
+        if (e.target.closest('input, textarea, [contenteditable="true"]')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof showBookmarkTreeObjectContextMenu === 'function') {
+            showBookmarkTreeObjectContextMenu(e, {
+                type: __isPermanentSectionCopy(permanentSection) ? 'permanent-copy' : 'permanent',
+                sectionElement: permanentSection,
+                copyId: __getPermanentSectionCopyId(permanentSection)
+            });
+        }
+    }, true);
+
+    permanentSection.addEventListener('contextmenu', (e) => {
+        if (!__isCanvasLowDetailModeActive()) return;
+        if (e.target.closest('input, textarea, [contenteditable="true"]')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof showBookmarkTreeObjectContextMenu === 'function') {
+            showBookmarkTreeObjectContextMenu(e, {
+                type: __isPermanentSectionCopy(permanentSection) ? 'permanent-copy' : 'permanent',
+                sectionElement: permanentSection,
+                copyId: __getPermanentSectionCopyId(permanentSection)
+            });
+        }
+    });
 
     // 添加永久栏目空白区域右键菜单（整个栏目body区域）
     const permanentBody = permanentSection.querySelector('.permanent-section-body');
     if (permanentBody) {
         // 右键空白菜单
         permanentBody.addEventListener('contextmenu', (e) => {
+            if (__isCanvasLowDetailModeActive()) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof showBookmarkTreeObjectContextMenu === 'function') {
+                    showBookmarkTreeObjectContextMenu(e, {
+                        type: __isPermanentSectionCopy(permanentSection) ? 'permanent-copy' : 'permanent',
+                        sectionElement: permanentSection,
+                        copyId: __getPermanentSectionCopyId(permanentSection)
+                    });
+                }
+                return;
+            }
             // 检查是否点击在树节点上
             const treeItem = e.target.closest('.tree-item[data-node-id]');
             if (!treeItem) {
@@ -20396,22 +20527,7 @@ function locateAndZoomToMdNode(nodeId, targetZoom = null) {
     const nodeWidth = el.offsetWidth || 200;
     const nodeHeight = el.offsetHeight || 100;
 
-    // 自动计算合适的缩放比例，使节点完整显示在视野中
-    // 留出一些边距（80px）
-    const padding = 80;
-    let fitZoom;
-    if (targetZoom === null) {
-        const zoomX = (workspaceWidth - padding * 2) / nodeWidth;
-        const zoomY = (workspaceHeight - padding * 2) / nodeHeight;
-        // 取两者中较小的值，确保节点在两个方向上都能完整显示
-        fitZoom = Math.min(zoomX, zoomY);
-        // 限制缩放范围：最小0.2，最大1.5（不要放得太大）
-        fitZoom = Math.max(0.2, Math.min(1.5, fitZoom));
-    } else {
-        fitZoom = targetZoom;
-    }
-
-    const zoom = clampCanvasZoom(fitZoom);
+    const zoom = __resolveCanvasLocateZoom(targetZoom);
     if (zoom !== CanvasState.zoom) {
         const rect = workspace.getBoundingClientRect();
         setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
@@ -23908,8 +24024,51 @@ function renderTempNode(section, options = {}) {
     colorWrap.appendChild(colorPopover);
     preventCanvasEventsPropagation(colorPopover);
 
+    const clearColorPopoverContextAnchor = () => {
+        if (!colorPopover.dataset.contextAnchored) return;
+        colorPopover.classList.remove('context-anchored');
+        colorPopover.style.left = '';
+        colorPopover.style.top = '';
+        colorPopover.style.right = '';
+        colorPopover.style.bottom = '';
+        colorPopover.style.transform = '';
+        colorPopover.dataset.contextAnchored = '';
+    };
+
+    const positionColorPopoverAtViewportPoint = (anchorPoint) => {
+        if (!anchorPoint || !colorPopover.classList.contains('open')) return;
+        if (colorPopover.parentElement !== document.body) {
+            document.body.appendChild(colorPopover);
+        }
+        colorPopover.classList.add('context-anchored');
+        colorPopover.dataset.contextAnchored = '1';
+        colorPopover.style.right = 'auto';
+        colorPopover.style.bottom = 'auto';
+        colorPopover.style.transform = 'none';
+        colorPopover.style.left = '0px';
+        colorPopover.style.top = '0px';
+
+        const popRect = colorPopover.getBoundingClientRect();
+        const margin = 8;
+        const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+        const width = popRect.width || colorPopover.offsetWidth || 0;
+        const height = popRect.height || colorPopover.offsetHeight || 0;
+        let left = Number(anchorPoint.x);
+        let top = Number(anchorPoint.y);
+        if (!Number.isFinite(left)) left = 0;
+        if (!Number.isFinite(top)) top = 0;
+        if (viewportW && left + width > viewportW - margin) left = Math.max(margin, viewportW - width - margin);
+        if (viewportH && top + height > viewportH - margin) top = Math.max(margin, viewportH - height - margin);
+        if (viewportH) top = Math.min(Math.max(margin, top), Math.max(margin, viewportH - height - margin));
+        if (viewportW) left = Math.min(Math.max(margin, left), Math.max(margin, viewportW - width - margin));
+        colorPopover.style.left = `${Math.round(left)}px`;
+        colorPopover.style.top = `${Math.round(top)}px`;
+    };
+
     const closeColorPopover = () => {
         colorPopover.classList.remove('open');
+        clearColorPopoverContextAnchor();
         updateCanvasPopoverState(false);
     };
 
@@ -23926,6 +24085,9 @@ function renderTempNode(section, options = {}) {
         }
         syncHistoryChip(CanvasState.tempSectionPrevColor || getTempSectionDefaultColor(section));
         colorPopover.classList.add('open');
+        const anchorPoint = event && event.detail && event.detail.__contextAnchorPoint ? event.detail.__contextAnchorPoint : null;
+        if (anchorPoint) positionColorPopoverAtViewportPoint(anchorPoint);
+        else clearColorPopoverContextAnchor();
         updateCanvasPopoverState(true);
 
         const onDoc = (e) => {
@@ -24017,6 +24179,12 @@ function renderTempNode(section, options = {}) {
                 closeColorPopover();
             }
         }
+    });
+
+    renameBtn.addEventListener('mousedown', (event) => {
+        if (!titleInput.classList.contains('editing')) return;
+        event.preventDefault();
+        event.stopPropagation();
     });
 
     renameBtn.addEventListener('click', (event) => {
@@ -24914,6 +25082,10 @@ function beginTempSectionTitleEdit(section, input, renameButton) {
     input.select();
     if (renameButton) {
         renameButton.classList.add('active');
+        renameButton.innerHTML = '<i class="fas fa-check"></i>';
+        const confirmLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Confirm rename' : '确认重命名';
+        renameButton.title = confirmLabel;
+        renameButton.setAttribute('aria-label', confirmLabel);
     }
 }
 
@@ -24936,6 +25108,10 @@ function finishTempSectionTitleEdit(section, input, renameButton, commit) {
     }
     if (renameButton) {
         renameButton.classList.remove('active');
+        renameButton.innerHTML = '<i class="fas fa-edit"></i>';
+        const renameLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Rename section' : '重命名栏目';
+        renameButton.title = renameLabel;
+        renameButton.setAttribute('aria-label', renameLabel);
     }
 }
 
@@ -25575,6 +25751,32 @@ function setupTempSectionBlankAreaMenu(sectionElement, section) {
         // 检查是否点击在操作按钮上
         const actionBtn = e.target.closest('.temp-node-action-btn');
         const headerArea = e.target.closest('.temp-node-header');
+
+        if (__isCanvasLowDetailModeActive()) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof showBookmarkTreeObjectContextMenu === 'function') {
+                showBookmarkTreeObjectContextMenu(e, {
+                    type: 'temporary',
+                    sectionId: section.id,
+                    sectionElement
+                });
+            }
+            return;
+        }
+
+        if (headerArea && !actionBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof showBookmarkTreeObjectContextMenu === 'function') {
+                showBookmarkTreeObjectContextMenu(e, {
+                    type: 'temporary',
+                    sectionId: section.id,
+                    sectionElement
+                });
+            }
+            return;
+        }
 
         // 如果不是树节点、不是操作按钮，则显示空白区域菜单
         if (!treeItem && !actionBtn) {
@@ -30497,7 +30699,7 @@ function setEdgeDirection(edge, dir) {
 }
 
 // 定位并放大到连接线（复用空白栏目的定位逻辑）
-function locateAndZoomToEdge(edgeId, targetZoom = 1.2) {
+function locateAndZoomToEdge(edgeId, targetZoom = null) {
     const edge = CanvasState.edges.find(e => e.id === edgeId);
     const workspace = document.getElementById('canvasWorkspace');
     if (!edge || !workspace) return;
@@ -30506,8 +30708,7 @@ function locateAndZoomToEdge(edgeId, targetZoom = 1.2) {
     const end = getAnchorPosition(edge.toNode, edge.toSide);
     if (!start || !end) return;
 
-    // 先调整缩放（与空白栏目逻辑一致）
-    const zoom = clampCanvasZoom(Math.max(CanvasState.zoom || 1, targetZoom));
+    const zoom = __resolveCanvasLocateZoom(targetZoom);
     if (zoom !== CanvasState.zoom) {
         const rect = workspace.getBoundingClientRect();
         setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
@@ -30525,6 +30726,191 @@ function locateAndZoomToEdge(edgeId, targetZoom = 1.2) {
 
     updateCanvasScrollBounds();
     savePanOffsetThrottled();
+}
+
+function togglePermanentSectionPin(sectionEl) {
+    const section = sectionEl || document.getElementById('permanentSection');
+    if (!section) return false;
+    const btn = section.querySelector('.permanent-section-pin-btn');
+    const currentlyPinned = !!(btn && btn.classList && btn.classList.contains('pinned'))
+        || section.style.zIndex === '200';
+
+    if (!__isPermanentSectionCopy(section)) {
+        const isPinned = !currentlyPinned;
+        updatePermanentSectionPinState(isPinned, btn || document.getElementById('permanentSectionPinBtn'), section);
+        try { saveSharedState('permanent-section-pinned', isPinned.toString(), { asJSON: false }); } catch (_) { }
+        return isPinned;
+    }
+
+    const isPinned = !currentlyPinned;
+    section.classList.toggle('pinned', isPinned);
+    section.style.zIndex = isPinned ? '200' : '100';
+    if (btn) {
+        const lang = getCanvasLanguage();
+        const title = isPinned
+            ? (lang === 'en' ? 'Unpin section' : '取消置顶')
+            : (lang === 'en' ? 'Pin section' : '置顶栏目');
+        btn.classList.toggle('pinned', isPinned);
+        btn.title = title;
+        btn.setAttribute('aria-label', title);
+        btn.innerHTML = isPinned
+            ? '<i class="fas fa-thumbtack"></i>'
+            : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+    }
+    return isPinned;
+}
+
+function toggleTempSectionPin(sectionId) {
+    const section = getTempSection(sectionId);
+    if (!section) return false;
+    section.pinned = !section.pinned;
+    updateSectionZIndex(section.id, section.pinned);
+    try {
+        const el = document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(section.id)}"]`);
+        const btn = el ? el.querySelector('.temp-node-pin-btn') : null;
+        if (btn) {
+            const lang = getCanvasLanguage();
+            const title = section.pinned
+                ? (lang === 'en' ? 'Unpin section' : '取消置顶')
+                : (lang === 'en' ? 'Pin section' : '置顶栏目');
+            btn.classList.toggle('pinned', section.pinned);
+            btn.title = title;
+            btn.setAttribute('aria-label', title);
+            btn.innerHTML = section.pinned
+                ? '<i class="fas fa-thumbtack"></i>'
+                : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+        }
+    } catch (_) { }
+    saveTempNodes();
+    return section.pinned;
+}
+
+function __positionTempFloatingPopoverAtPoint(popover, anchorPoint) {
+    if (!popover || !anchorPoint) return;
+    popover.style.left = '0px';
+    popover.style.top = '0px';
+
+    const popRect = popover.getBoundingClientRect();
+    const margin = 8;
+    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+    const width = popRect.width || popover.offsetWidth || 0;
+    const height = popRect.height || popover.offsetHeight || 0;
+    let left = Number(anchorPoint.x);
+    let top = Number(anchorPoint.y);
+    if (!Number.isFinite(left)) left = margin;
+    if (!Number.isFinite(top)) top = margin;
+    if (viewportW && left + width > viewportW - margin) left = Math.max(margin, viewportW - width - margin);
+    if (viewportH && top + height > viewportH - margin) top = Math.max(margin, viewportH - height - margin);
+    if (viewportW) left = Math.min(Math.max(margin, left), Math.max(margin, viewportW - width - margin));
+    if (viewportH) top = Math.min(Math.max(margin, top), Math.max(margin, viewportH - height - margin));
+    popover.style.left = `${Math.round(left)}px`;
+    popover.style.top = `${Math.round(top)}px`;
+}
+
+function openTempSectionRename(sectionId, options = {}) {
+    try { ensureTempSectionRendered(sectionId); } catch (_) { }
+    const anchorPoint = options && options.anchorPoint ? options.anchorPoint : null;
+    const section = getTempSection(sectionId);
+    const el = document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(String(sectionId || ''))}"]`);
+    const btn = el ? el.querySelector('.temp-node-rename-btn') : null;
+    if (anchorPoint && section) {
+        document.querySelectorAll('.temp-section-rename-popover').forEach(pop => {
+            try { pop.remove(); } catch (_) { }
+        });
+
+        const popover = document.createElement('div');
+        popover.className = 'temp-section-rename-popover';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'temp-section-rename-popover-input';
+        input.value = getTempSectionDisplayTitle(section);
+        input.placeholder = (getCanvasLanguage() === 'en') ? 'Rename section' : '重命名栏目';
+        const confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.className = 'temp-section-rename-popover-confirm';
+        confirmBtn.title = (getCanvasLanguage() === 'en') ? 'Confirm' : '确认';
+        confirmBtn.setAttribute('aria-label', confirmBtn.title);
+        confirmBtn.innerHTML = '<i class="fas fa-check"></i>';
+        popover.appendChild(input);
+        popover.appendChild(confirmBtn);
+        document.body.appendChild(popover);
+        preventCanvasEventsPropagation(popover);
+        __positionTempFloatingPopoverAtPoint(popover, anchorPoint);
+
+        let closed = false;
+        const close = (commit) => {
+            if (closed) return;
+            closed = true;
+            document.removeEventListener('mousedown', onDoc, true);
+            input.removeEventListener('keydown', onKeydown);
+            confirmBtn.removeEventListener('click', onConfirm);
+            if (commit) {
+                const nextTitle = String(input.value || '').trim();
+                section.title = nextTitle;
+                const titleInput = el ? el.querySelector('.temp-node-title-input') : null;
+                if (titleInput) titleInput.value = nextTitle;
+                const lowDetailTitle = el ? el.querySelector('.temp-node-low-detail-title') : null;
+                if (lowDetailTitle) lowDetailTitle.textContent = nextTitle || getTempSectionDisplayTitle(section);
+                saveTempNodes();
+            }
+            try { popover.remove(); } catch (_) { }
+        };
+        const onDoc = (event) => {
+            if (popover.contains(event.target)) return;
+            close(true);
+        };
+        const onKeydown = (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                close(true);
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                close(false);
+            }
+        };
+        const onConfirm = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            close(true);
+        };
+        input.addEventListener('keydown', onKeydown);
+        confirmBtn.addEventListener('click', onConfirm);
+        setTimeout(() => document.addEventListener('mousedown', onDoc, true), 0);
+        setTimeout(() => {
+            input.focus();
+            input.select();
+        }, 0);
+        return true;
+    }
+    if (btn && typeof btn.click === 'function') {
+        btn.click();
+        return true;
+    }
+    return false;
+}
+
+function openTempSectionColorPicker(sectionId, options = {}) {
+    try { ensureTempSectionRendered(sectionId); } catch (_) { }
+    const el = document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(String(sectionId || ''))}"]`);
+    const btn = el ? el.querySelector('.temp-node-color-btn') : null;
+    if (btn && typeof btn.dispatchEvent === 'function') {
+        btn.dispatchEvent(new CustomEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            detail: {
+                __contextAnchorPoint: options && options.anchorPoint ? options.anchorPoint : null
+            }
+        }));
+        return true;
+    }
+    return false;
+}
+
+function removeTempSectionById(sectionId) {
+    if (!sectionId) return false;
+    removeTempNode(sectionId);
+    return true;
 }
 
 // 切换连接线方向（交换起点和终点）
@@ -30712,6 +31098,15 @@ window.CanvasModule = {
     locatePermanent: locateToPermanentSection,
     locateSection: locateToTempSection,
     locateElement: locateToElement,
+    toggleElementFullscreen,
+    togglePermanentSectionPin,
+    toggleTempSectionPin,
+    openTempSectionRename,
+    openTempSectionColorPicker,
+    removeTempSection: removeTempSectionById,
+    removePermanentSectionCopy,
+    createPermanentSectionCopy,
+    ensurePermanentSectionCopyDisplayIndexes: __ensurePermanentSectionCopyDisplayIndexes,
     // 性能优化：休眠管理
     scheduleDormancyUpdate: scheduleDormancyUpdate,
     forceWakeAndRender: forceWakeAndRender,

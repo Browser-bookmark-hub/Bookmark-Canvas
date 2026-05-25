@@ -16,7 +16,8 @@
 
 // Unified Export Folder Paths - 统一的导出文件夹路径（根据语言动态选择）
 const getCanvasExportRootFolder = () => (typeof currentLang !== 'undefined' && currentLang === 'zh_CN') ? '书签画布' : 'Bookmark Canvas';
-const getCanvasExportFolder = () => (typeof currentLang !== 'undefined' && currentLang === 'zh_CN') ? '书签画布' : 'Canvas';
+const getCanvasExportFolder = () => '';
+const getCanvasExportDownloadFolder = () => [getCanvasExportRootFolder(), getCanvasExportFolder()].filter(Boolean).join('/');
 
 
 
@@ -1431,7 +1432,7 @@ async function __downloadBackupSlotAsImportPackage(slot, options = {}) {
     const zipBlob = __zipStore(files);
     const zipName = (packageBundle && packageBundle.zipName) ? packageBundle.zipName : `${exportRoot}.zip`;
     const zipUrl = URL.createObjectURL(zipBlob);
-    const downloadFolder = `${getCanvasExportRootFolder()}/${getCanvasExportFolder()}`;
+    const downloadFolder = getCanvasExportDownloadFolder();
 
     await new Promise((resolve) => {
         const fallbackDownload = () => {

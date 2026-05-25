@@ -7710,6 +7710,72 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     gap: 6px;
 }
 
+.temp-node-color-wrap .temp-color-popover.context-anchored {
+    position: fixed;
+    z-index: 10001;
+}
+
+.temp-section-rename-popover {
+    position: fixed;
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+    background: #ffffff;
+    border: 1px solid rgba(27, 31, 36, 0.25);
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+}
+
+.temp-section-rename-popover-input {
+    width: 220px;
+    min-width: 0;
+    padding: 7px 9px;
+    border: 1px solid rgba(27, 31, 36, 0.18);
+    border-radius: 6px;
+    outline: none;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    font-size: 13px;
+}
+
+.temp-section-rename-popover-input:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(102, 187, 255, 0.18);
+}
+
+.temp-section-rename-popover-confirm {
+    width: 31px;
+    height: 31px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(27, 31, 36, 0.16);
+    border-radius: 7px;
+    color: #0f766e;
+    background: rgba(20, 184, 166, 0.12);
+    cursor: pointer;
+    transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.temp-section-rename-popover-confirm:hover {
+    background: rgba(20, 184, 166, 0.2);
+    transform: translateY(-1px);
+}
+
+[data-theme="dark"] .temp-section-rename-popover {
+    background: #1f2937;
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36);
+}
+
+[data-theme="dark"] .temp-section-rename-popover-confirm {
+    color: #5eead4;
+    border-color: rgba(94, 234, 212, 0.24);
+    background: rgba(20, 184, 166, 0.14);
+}
+
 .temp-color-chip-row {
     display: flex;
     align-items: center;

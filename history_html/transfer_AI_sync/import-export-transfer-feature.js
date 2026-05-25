@@ -2586,7 +2586,9 @@ async function exportCanvasPackage(options = {}) {
     const exportedAt = new Date().toISOString();
     // zip 保存到浏览器默认下载目录下的统一父目录（根据语言动态选择）
     // 需求：不同日期的 zip 都归档在同一个文件夹下
-    const downloadFolder = `${getCanvasExportRootFolder()}/${getCanvasExportFolder()}`;
+    const downloadFolder = typeof getCanvasExportDownloadFolder === 'function'
+        ? getCanvasExportDownloadFolder()
+        : [getCanvasExportRootFolder(), getCanvasExportFolder()].filter(Boolean).join('/');
     // 默认导出文件夹名（也作为默认 zip 名与默认 .canvas 名）
     // - zh_CN: 书签画布-YYYYMMDD
     // - en: bookmark-canvas-YYYYMMDD

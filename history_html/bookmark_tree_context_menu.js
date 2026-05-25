@@ -5,9 +5,10 @@
 const getTreeExportRootFolder = () => (typeof currentLang !== 'undefined' && currentLang === 'zh_CN')
     ? '书签画布'
     : 'Bookmark Canvas';
-const getTreeExportFolder = () => (typeof currentLang !== 'undefined' && currentLang === 'zh_CN')
-    ? '书签画布'
-    : 'Bookmark Canvas';
+const getTreeExportFolder = () => '';
+const getTreeExportDownloadFolder = () => [getTreeExportRootFolder(), getTreeExportFolder()]
+    .filter(Boolean)
+    .join('/');
 
 // 全局变量
 let contextMenu = null;
@@ -9378,7 +9379,7 @@ async function batchExportHTML() {
         // 下载文件
         const blob = new Blob([html], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
-        const exportPath = `${getTreeExportRootFolder()}/${getTreeExportFolder()}`;
+        const exportPath = getTreeExportDownloadFolder();
         const filename = 'bookmarks.html';
 
         if (chrome && chrome.downloads && typeof chrome.downloads.download === 'function') {
@@ -9471,7 +9472,7 @@ async function batchExportJSON() {
         // 下载文件
         const blob = new Blob([json], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
-        const exportPath = `${getTreeExportRootFolder()}/${getTreeExportFolder()}`;
+        const exportPath = getTreeExportDownloadFolder();
         const filename = 'bookmarks.json';
 
         if (chrome && chrome.downloads && typeof chrome.downloads.download === 'function') {
@@ -11059,11 +11060,362 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
     }
 }
 
+function __getCanvasObjectMenuLabels() {
+    const lang = currentLang || 'zh_CN';
+    return {
+        fullscreen: lang === 'zh_CN' ? '全屏' : 'Fullscreen',
+        locate: lang === 'zh_CN' ? '定位' : 'Locate',
+        rename: lang === 'zh_CN' ? '重命名' : 'Rename',
+        pin: lang === 'zh_CN' ? '置顶' : 'Pin',
+        duplicate: lang === 'zh_CN' ? '创建副本' : 'Create copy',
+        color: lang === 'zh_CN' ? '颜色' : 'Color',
+        delete: lang === 'zh_CN' ? '删除' : 'Delete',
+        exportJson: lang === 'zh_CN' ? '导出当前 JSON' : 'Export current JSON',
+        exportHtml: lang === 'zh_CN' ? '导出当前 HTML' : 'Export current HTML'
+    };
+}
+
+function __downloadBookmarkTreeObjectFile(content, filename, mimeType) {
+    const blob = new Blob([content], { type: mimeType || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const exportPath = getTreeExportDownloadFolder();
+    if (typeof chrome !== 'undefined' && chrome.downloads && typeof chrome.downloads.download === 'function') {
+        chrome.downloads.download({
+            url,
+            filename: `${exportPath}/${filename}`,
+            saveAs: false,
+            conflictAction: 'uniquify'
+        }, () => setTimeout(() => URL.revokeObjectURL(url), 10000));
+    } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
+}
+
+function __sanitizeBookmarkTreeObjectFileSegment(value, fallback = 'bookmarks') {
+    const raw = String(value || '').trim() || String(fallback || 'bookmarks');
+    const safe = raw
+        .replace(/[\\/:*?"<>|]/g, '-')
+        .replace(/[\x00-\x1f\x7f]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/[. ]+$/g, '')
+        .trim();
+    return safe || String(fallback || 'bookmarks');
+}
+
+function __bookmarkTreeObjectBasenameFromRelativePath(rel) {
+    const leaf = String(rel || '').split('/').filter(Boolean).pop() || '';
+    return leaf.replace(/\.(md|json|html)$/i, '');
+}
+
+function __getBookmarkTreeObjectPermanentCopySlot(target) {
+    const copyId = String(target && target.copyId || '').trim();
+    if (!copyId) return 2;
+    try {
+        const canvas = window.CanvasModule;
+        const copies = canvas && typeof canvas.ensurePermanentSectionCopyDisplayIndexes === 'function'
+            ? canvas.ensurePermanentSectionCopyDisplayIndexes()
+            : [];
+        const matched = Array.isArray(copies)
+            ? copies.find((copy) => copy && String(copy.id || '') === copyId)
+            : null;
+        const idx = matched && Number.parseInt(matched.displayIndex, 10);
+        if (Number.isFinite(idx) && idx > 0) return idx + 1;
+    } catch (_) { }
+    return 2;
+}
+
+function __buildBookmarkTreeObjectExportFilename(target, format) {
+    const lang = currentLang || 'zh_CN';
+    const isEn = lang === 'en' || lang === 'en_US' || String(lang).toLowerCase().startsWith('en');
+    const ext = format === 'html' ? 'html' : 'json';
+    const type = target && target.type;
+
+    if (type === 'permanent' || type === 'permanent-copy') {
+        const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+        const fallbackBasename = type === 'permanent-copy'
+            ? (isEn ? 'B-PermanentBookmarks' : 'B书签树（永久栏目）')
+            : (isEn ? 'A-PermanentBookmarks' : 'A书签树（永久栏目）');
+        if (bridge && typeof bridge.buildPermanentSectionMarkdownRelativePath === 'function') {
+            const slot = type === 'permanent-copy' ? __getBookmarkTreeObjectPermanentCopySlot(target) : 1;
+            const rel = bridge.buildPermanentSectionMarkdownRelativePath(slot, isEn, 'json').replace(/\.json$/i, `.${ext}`);
+            const basename = __bookmarkTreeObjectBasenameFromRelativePath(rel);
+            return `${__sanitizeBookmarkTreeObjectFileSegment(basename, fallbackBasename)}.${ext}`;
+        }
+        return `${__sanitizeBookmarkTreeObjectFileSegment(fallbackBasename)}.${ext}`;
+    }
+
+    if (type === 'temporary') {
+        const canvas = window.CanvasModule;
+        const section = canvas && canvas.temp && typeof canvas.temp.getSection === 'function'
+            ? canvas.temp.getSection(target.sectionId)
+            : null;
+        const label = section && typeof getTempSectionLabel === 'function' ? getTempSectionLabel(section) : '';
+        const title = section && section.title ? section.title : (isEn ? 'Temp Section' : '临时栏目');
+        const fileTitle = label ? `${label} ${title}` : title;
+        const fallbackTitle = label || title || (section && section.id) || (isEn ? 'Temp Section' : '临时栏目');
+        const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+        if (section && bridge
+            && typeof bridge.buildObsidianSafeFilenameStem === 'function'
+            && typeof bridge.buildTempSectionMarkdownRelativePath === 'function') {
+            const safeTitle = bridge.buildObsidianSafeFilenameStem(
+                fileTitle,
+                fallbackTitle,
+                (section && section.id) || fileTitle
+            );
+            const rel = bridge.buildTempSectionMarkdownRelativePath(section, safeTitle, isEn, 'json');
+            const basename = __bookmarkTreeObjectBasenameFromRelativePath(rel);
+            return `${__sanitizeBookmarkTreeObjectFileSegment(basename, safeTitle || fallbackTitle)}.${ext}`;
+        }
+        const safeTitle = __sanitizeBookmarkTreeObjectFileSegment(fileTitle, fallbackTitle);
+        return `${safeTitle}.${ext}`;
+    }
+
+    return `${isEn ? 'bookmarks' : '书签'}.${ext}`;
+}
+
+function __bookmarkTreeObjectHtmlFromItems(items) {
+    const render = (item, depth = 1) => {
+        if (!item) return '';
+        const indent = '    '.repeat(depth);
+        const title = escapeHtml(item.title || ((currentLang || 'zh_CN') === 'zh_CN' ? '文件夹' : 'Folder'));
+        if ((item.type === 'bookmark' || item.url) && item.url) {
+            return `${indent}<DT><A HREF="${escapeHtml(item.url)}">${title}</A>\n`;
+        }
+        let out = `${indent}<DT><H3>${title}</H3>\n${indent}<DL><p>\n`;
+        (item.children || []).forEach(child => { out += render(child, depth + 1); });
+        out += `${indent}</DL><p>\n`;
+        return out;
+    };
+    let html = '<!DOCTYPE NETSCAPE-Bookmark-file-1>\n';
+    html += '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n';
+    html += '<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n';
+    (Array.isArray(items) ? items : []).forEach(item => { html += render(item, 1); });
+    html += '</DL><p>\n';
+    return html;
+}
+
+function __serializeTempTreeItem(item) {
+    if (!item) return null;
+    return {
+        title: item.title || '',
+        url: item.url || '',
+        type: item.type || (item.url ? 'bookmark' : 'folder'),
+        children: (item.children || []).map(__serializeTempTreeItem).filter(Boolean)
+    };
+}
+
+function __buildTemporaryObjectJsonPayload(target) {
+    const canvas = window.CanvasModule;
+    const section = canvas && canvas.temp && typeof canvas.temp.getSection === 'function'
+        ? canvas.temp.getSection(target && target.sectionId)
+        : null;
+    if (!section) {
+        throw new Error((currentLang || 'zh_CN') === 'zh_CN' ? '临时栏目不存在' : 'Temporary section not found');
+    }
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    if (bridge && typeof bridge.buildTempSectionJsonProtocol === 'function') {
+        return bridge.buildTempSectionJsonProtocol(section);
+    }
+    if (bridge && typeof bridge.normalizeTempSectionProtocol === 'function') {
+        return bridge.normalizeTempSectionProtocol(section);
+    }
+    return {
+        format: 'bookmark-canvas-section',
+        schemaVersion: 2,
+        sectionType: 'temporary',
+        id: section.id,
+        title: section.title || '',
+        descriptionMd: section.descriptionMd || '',
+        items: Array.isArray(section.items) ? section.items.map(__serializeTempTreeItem).filter(Boolean) : []
+    };
+}
+
+async function __buildPermanentObjectJsonPayload(target) {
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    if (!bridge || typeof bridge.ensurePermanentMainContentInBcs !== 'function') {
+        throw new Error((currentLang || 'zh_CN') === 'zh_CN' ? '永久栏目 JSON 真相源不可用' : 'Permanent JSON source unavailable');
+    }
+
+    const permanentContent = await bridge.ensurePermanentMainContentInBcs();
+    const payload = bridge && typeof bridge.buildPermanentMainSyncPayload === 'function'
+        ? bridge.buildPermanentMainSyncPayload(permanentContent, { idsAlreadySyncIds: false })
+        : null;
+    if (!payload || !payload.tree) {
+        throw new Error((currentLang || 'zh_CN') === 'zh_CN' ? '永久栏目 JSON 导出转换失败' : 'Permanent JSON export conversion failed');
+    }
+
+    const type = target && target.type;
+    const copyId = type === 'permanent-copy' ? String(target.copyId || '').trim() : '';
+    try {
+        const descKey = copyId ? `bcs:perm:tip-copy-${copyId}` : 'bcs:perm:tip-main';
+        payload.descriptionMd = localStorage.getItem(descKey) || '';
+    } catch (_) {
+        if (typeof payload.descriptionMd !== 'string') payload.descriptionMd = '';
+    }
+
+    return payload;
+}
+
+async function __exportBookmarkTreeObject(target, format) {
+    const lang = currentLang || 'zh_CN';
+    const type = target && target.type;
+    let items = [];
+    const filename = __buildBookmarkTreeObjectExportFilename(target, format);
+    if (type === 'temporary') {
+        const canvas = window.CanvasModule;
+        const section = canvas && canvas.temp && typeof canvas.temp.getSection === 'function'
+            ? canvas.temp.getSection(target.sectionId)
+            : null;
+        items = section && Array.isArray(section.items)
+            ? section.items.map(__serializeTempTreeItem).filter(Boolean)
+            : [];
+    } else if (format === 'html') {
+        const roots = typeof chrome !== 'undefined' && chrome.bookmarks && typeof chrome.bookmarks.getTree === 'function'
+            ? await chrome.bookmarks.getTree()
+            : [];
+        const root = roots && roots[0] ? roots[0] : null;
+        const bookmarkBar = root && Array.isArray(root.children)
+            ? (root.children.find(child => child && (child.id === '1' || child.title === '书签栏' || child.title === 'Bookmarks bar')) || root.children[0])
+            : null;
+        if (bookmarkBar) items = [serializeBookmarkNode(bookmarkBar)];
+    }
+    if (format === 'html') {
+        __downloadBookmarkTreeObjectFile(__bookmarkTreeObjectHtmlFromItems(items), filename, 'text/html');
+    } else {
+        const payload = (type === 'permanent' || type === 'permanent-copy')
+            ? await __buildPermanentObjectJsonPayload(target)
+            : __buildTemporaryObjectJsonPayload(target);
+        __downloadBookmarkTreeObjectFile(JSON.stringify(payload, null, 2), filename, 'application/json');
+    }
+    if (format === 'html') {
+        alert(lang === 'zh_CN' ? '导出成功！HTML 为标准书签树格式，不包含说明与 tag。' : 'Export successful. HTML uses the standard bookmarks tree format without descriptions or tags.');
+    } else {
+        alert(lang === 'zh_CN' ? '导出成功！' : 'Export successful.');
+    }
+}
+
+function __handleBookmarkTreeObjectMenuAction(action, target, options = {}) {
+    const canvas = window.CanvasModule || {};
+    const type = target && target.type;
+    const sectionEl = target && target.sectionElement;
+    if (action === 'fullscreen' && canvas.toggleElementFullscreen) return canvas.toggleElementFullscreen(sectionEl);
+    if (action === 'locate') {
+        if (type === 'temporary' && canvas.locateSection) return canvas.locateSection(target.sectionId);
+        if (sectionEl && canvas.locateElement) return canvas.locateElement(sectionEl);
+        if (canvas.locatePermanent) return canvas.locatePermanent();
+    }
+    if (action === 'rename' && type === 'temporary' && canvas.openTempSectionRename) return canvas.openTempSectionRename(target.sectionId, {
+        anchorPoint: options.anchorPoint || null
+    });
+    if (action === 'pin') {
+        if (type === 'temporary' && canvas.toggleTempSectionPin) return canvas.toggleTempSectionPin(target.sectionId);
+        if (canvas.togglePermanentSectionPin) return canvas.togglePermanentSectionPin(sectionEl);
+    }
+    if (action === 'duplicate' && canvas.createPermanentSectionCopy) return canvas.createPermanentSectionCopy(sectionEl);
+    if (action === 'color' && canvas.openTempSectionColorPicker) return canvas.openTempSectionColorPicker(target.sectionId, {
+        anchorPoint: options.anchorPoint || null
+    });
+    if (action === 'delete') {
+        if (type === 'temporary' && canvas.removeTempSection) return canvas.removeTempSection(target.sectionId);
+        if (type === 'permanent-copy' && canvas.removePermanentSectionCopy) return canvas.removePermanentSectionCopy(sectionEl);
+    }
+    if (action === 'export-json') return __exportBookmarkTreeObject(target, 'json');
+    if (action === 'export-html') return __exportBookmarkTreeObject(target, 'html');
+}
+
+function showBookmarkTreeObjectContextMenu(e, target) {
+    e.preventDefault();
+    e.stopPropagation();
+    const labels = __getCanvasObjectMenuLabels();
+    const type = target && target.type;
+    const items = [
+        { action: 'fullscreen', label: labels.fullscreen, icon: 'expand' },
+        { action: 'locate', label: labels.locate, icon: 'crosshairs' }
+    ];
+    if (type === 'temporary') {
+        items.push({ action: 'rename', label: labels.rename, icon: 'edit' });
+    }
+    items.push({ action: 'pin', label: labels.pin, icon: 'thumbtack' });
+    if (type === 'permanent' || type === 'permanent-copy') {
+        items.push({ action: 'duplicate', label: labels.duplicate, icon: 'copy' });
+    }
+    if (type === 'temporary') {
+        items.push({ action: 'color', label: labels.color, icon: 'palette' });
+    }
+    if (type === 'permanent-copy' || type === 'temporary') {
+        items.push({ action: 'delete', label: labels.delete, icon: 'trash-alt', className: 'color-red' });
+    }
+    items.push(
+        { action: 'export-json', label: labels.exportJson, icon: 'file-alt' },
+        { action: 'export-html', label: labels.exportHtml, icon: 'file-code' }
+    );
+
+    const menu = document.getElementById('bookmark-context-menu');
+    if (!menu) return;
+    target = target && typeof target === 'object' ? target : {};
+    target.contextMenuPoint = { x: e.clientX, y: e.clientY };
+    target.contextMenuRenamePoint = { x: e.clientX, y: e.clientY };
+    target.contextMenuColorPoint = { x: e.clientX, y: e.clientY };
+    menu.classList.remove('horizontal-layout', 'density-xs', 'density-md', 'density-lg');
+    menu.classList.add('density-sm');
+    menu.dataset.menuScope = 'bookmark-tree-object';
+    menu.innerHTML = items.map(item => `
+        <div class="context-menu-item ${item.className || ''}" data-action="${item.action}">
+            <i class="fas fa-${item.icon}"></i>
+            <span class="context-menu-item-label"><span>${item.label}</span></span>
+        </div>
+    `).join('');
+    menu.querySelectorAll('.context-menu-item').forEach(item => {
+        item.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const action = item.dataset.action;
+            const actionPoint = action === 'rename'
+                ? target.contextMenuRenamePoint
+                : (action === 'color' ? target.contextMenuColorPoint : null);
+            const anchorPoint = actionPoint || (target && target.contextMenuPoint ? target.contextMenuPoint : null);
+            hideContextMenu();
+            try { await __handleBookmarkTreeObjectMenuAction(action, target, { anchorPoint }); } catch (error) {
+                console.error('[右键菜单] 书签树对象操作失败:', error);
+                alert((currentLang || 'zh_CN') === 'zh_CN' ? `操作失败: ${error.message}` : `Action failed: ${error.message}`);
+            }
+        });
+    });
+    menu.style.position = 'fixed';
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+    menu.style.transformOrigin = '';
+    menu.style.transform = '';
+    menu.style.display = 'block';
+    if (menu.parentElement && menu.parentElement !== document.body) document.body.appendChild(menu);
+    const colorItem = menu.querySelector('.context-menu-item[data-action="color"]');
+    if (colorItem) {
+        target.contextMenuColorPoint = {
+            x: e.clientX,
+            y: e.clientY + (colorItem.offsetTop || 0)
+        };
+    }
+    const renameItem = menu.querySelector('.context-menu-item[data-action="rename"]');
+    if (renameItem) {
+        target.contextMenuRenamePoint = {
+            x: e.clientX,
+            y: e.clientY + (renameItem.offsetTop || 0)
+        };
+    }
+}
+
 // 导出函数
 if (typeof window !== 'undefined') {
     window.initContextMenu = initContextMenu;
     window.showContextMenu = showContextMenu;
     window.showBlankAreaContextMenu = showBlankAreaContextMenu;
+    window.showBookmarkTreeObjectContextMenu = showBookmarkTreeObjectContextMenu;
     window.hideContextMenu = hideContextMenu;
     window.toggleNodeSelection = toggleNodeSelection;
     window.selectRange = selectRange;
