@@ -10649,6 +10649,105 @@ function __resolvePermanentBlankAddParentIdFromEvent(event) {
     return null;
 }
 
+function __resolveCanvasContextMenuPositionFromEvent(event) {
+    try {
+        const workspace = document.getElementById('canvasWorkspace');
+        if (!workspace || !event) return null;
+        const rect = workspace.getBoundingClientRect();
+        const zoom = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.zoom === 'number' && CanvasState.zoom > 0)
+            ? CanvasState.zoom : 1;
+        const panX = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.panOffsetX === 'number')
+            ? CanvasState.panOffsetX : 0;
+        const panY = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.panOffsetY === 'number')
+            ? CanvasState.panOffsetY : 0;
+        const left = (event.clientX - rect.left - panX) / zoom;
+        const top = (event.clientY - rect.top - panY) / zoom;
+        if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+        return { left, top };
+    } catch (_) {
+        return null;
+    }
+}
+
+function __createCanvasQuickAddTempSectionAtPosition(left, top) {
+    const lang = currentLang || 'zh_CN';
+    const x = Number(left);
+    const y = Number(top);
+    const canvas = (typeof window !== 'undefined') ? window.CanvasModule : null;
+    const options = {
+        label: lang === 'zh_CN' ? '添加' : 'Add',
+        source: 'quick-add'
+    };
+    if (canvas && typeof canvas.createEmptyTempSection === 'function') {
+        return canvas.createEmptyTempSection(Number.isFinite(x) ? x : 0, Number.isFinite(y) ? y : 0, options);
+    }
+    if (typeof createEmptyTempSection === 'function') {
+        return createEmptyTempSection(Number.isFinite(x) ? x : 0, Number.isFinite(y) ? y : 0, options);
+    }
+    return null;
+}
+
+async function __openCanvasBlankAddSecondaryAtPosition(left, top) {
+    const lang = currentLang || 'zh_CN';
+    const baseContext = {
+        treeType: 'temporary',
+        sectionId: '__canvas-blank-add-target__',
+        nodeId: null,
+        isFolder: true,
+        blankRoot: true
+    };
+    const remembered = __readBookmarkAddTemplate();
+    let initialActionType = remembered && remembered.actionType
+        ? __normalizeBookmarkAddActionType(remembered.actionType)
+        : 'add-page';
+    if (initialActionType === 'add-current-tab' && !__isSidePanelModeForAdd()) {
+        initialActionType = 'add-page';
+    }
+    const selected = await showBookmarkAddSecondaryModal(baseContext, {
+        actionType: initialActionType,
+        position: 'inside',
+        windowAsFolder: remembered ? remembered.windowAsFolder : undefined,
+        locateAfterAction: false
+    });
+    if (!selected) return false;
+    const sectionId = __createCanvasQuickAddTempSectionAtPosition(left, top);
+    if (!sectionId) return false;
+    const context = Object.assign({}, baseContext, { sectionId });
+    const normalizedSelection = {
+        actionType: __normalizeBookmarkAddActionType(selected.actionType),
+        position: __normalizeBookmarkAddPosition(context, selected.position),
+        windowAsFolder: __normalizeBookmarkAddActionType(selected.actionType) === 'add-current-window'
+            && __normalizeBookmarkAddWindowAsFolder(selected.windowAsFolder),
+        locateAfterAction: false
+    };
+    __writeBookmarkAddTemplate(normalizedSelection);
+    try {
+        return await executeBookmarkAddAction(context, normalizedSelection, { saveTemplate: false });
+    } catch (error) {
+        console.error('[右键菜单] 画布空白添加操作失败:', error);
+        alert(lang === 'zh_CN' ? `添加失败: ${error.message}` : `Add failed: ${error.message}`);
+        return false;
+    }
+}
+
+async function __createCanvasBlankMdCardAtPosition(left, top) {
+    const x = Number(left);
+    const y = Number(top);
+    const canvas = (typeof window !== 'undefined') ? window.CanvasModule : null;
+    const create = canvas && typeof canvas.createMdNode === 'function'
+        ? canvas.createMdNode.bind(canvas)
+        : (typeof createMdNode === 'function' ? createMdNode : null);
+    if (!create) return null;
+    const nodeId = await create(Number.isFinite(x) ? x : 0, Number.isFinite(y) ? y : 0, '');
+    requestAnimationFrame(() => {
+        const el = document.getElementById(nodeId);
+        if (!el) return;
+        const editor = el.querySelector('.md-canvas-editor');
+        if (editor) editor.focus();
+    });
+    return nodeId;
+}
+
 function showBlankAreaContextMenu(e, sectionId, treeType) {
     e.preventDefault();
     e.stopPropagation();
@@ -10656,18 +10755,60 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
     const lang = currentLang || 'zh_CN';
     const menuItems = [];
     const preferredPermanentParentId = treeType === 'permanent' ? __resolvePermanentBlankAddParentIdFromEvent(e) : null;
+    const canvasPosition = treeType === 'canvas' ? __resolveCanvasContextMenuPositionFromEvent(e) : null;
 
-    menuItems.push({
-        action: 'add-entry-blank',
-        label: lang === 'zh_CN' ? '添加' : 'Add',
-        icon: 'plus-circle',
-        sectionId,
-        treeType,
-        preferredParentId: preferredPermanentParentId
-    });
+    if (treeType === 'canvas') {
+        menuItems.push({
+            action: 'add-via-secondary-at-position',
+            label: lang === 'zh_CN' ? '添加' : 'Add',
+            icon: 'plus-circle',
+            sectionId,
+            treeType,
+            canvasLeft: canvasPosition ? canvasPosition.left : '',
+            canvasTop: canvasPosition ? canvasPosition.top : ''
+        });
+        menuItems.push({
+            action: 'add-permanent-copy-at-position',
+            label: lang === 'zh_CN' ? '添加永久栏目副本' : 'Add permanent section copy',
+            icon: 'copy',
+            sectionId,
+            treeType,
+            canvasLeft: canvasPosition ? canvasPosition.left : '',
+            canvasTop: canvasPosition ? canvasPosition.top : ''
+        });
+        menuItems.push({
+            action: 'add-empty-temp-card-at-position',
+            label: lang === 'zh_CN' ? '添加临时栏目' : 'Add temporary section',
+            icon: 'plus-square',
+            sectionId,
+            treeType,
+            canvasLeft: canvasPosition ? canvasPosition.left : '',
+            canvasTop: canvasPosition ? canvasPosition.top : ''
+        });
+        menuItems.push({
+            action: 'add-blank-md-card-at-position',
+            label: lang === 'zh_CN' ? '添加空白栏目' : 'Add blank section',
+            icon: 'sticky-note',
+            sectionId,
+            treeType,
+            canvasLeft: canvasPosition ? canvasPosition.left : '',
+            canvasTop: canvasPosition ? canvasPosition.top : ''
+        });
+    }
+
+    if (treeType !== 'canvas') {
+        menuItems.push({
+            action: 'add-entry-blank',
+            label: lang === 'zh_CN' ? '添加' : 'Add',
+            icon: 'plus-circle',
+            sectionId,
+            treeType,
+            preferredParentId: preferredPermanentParentId
+        });
+    }
 
     // 粘贴选项（如果剪贴板有内容）
-    if (hasClipboard()) {
+    if (treeType !== 'canvas' && hasClipboard()) {
         menuItems.push({
             action: 'paste-blank',
             label: lang === 'zh_CN' ? '粘贴' : 'Paste',
@@ -10685,10 +10826,19 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
     const contextMenu = document.getElementById('bookmark-context-menu');
     if (!contextMenu) return;
 
+    contextMenu.classList.remove('horizontal-layout', 'density-xs', 'density-sm', 'density-md', 'density-lg');
+    contextMenu.classList.add('density-sm');
+    contextMenu.classList.remove('lang-zh', 'lang-en');
+    contextMenu.classList.add(lang === 'zh_CN' ? 'lang-zh' : 'lang-en');
+    contextMenu.dataset.menuScope = treeType === 'canvas' ? 'canvas-blank' : '';
+
     const menuHTML = menuItems.map(item => {
+        if (item.separator) {
+            return '<div class="context-menu-separator"></div>';
+        }
         const icon = item.icon ? `<i class="fas fa-${item.icon}"></i>` : '';
         return `
-            <div class="context-menu-item" data-action="${item.action}" data-section-id="${item.sectionId || ''}" data-tree-type="${item.treeType || ''}" data-parent-id="${item.preferredParentId || ''}">
+            <div class="context-menu-item" data-action="${item.action}" data-section-id="${item.sectionId || ''}" data-tree-type="${item.treeType || ''}" data-parent-id="${item.preferredParentId || ''}" data-canvas-left="${item.canvasLeft || ''}" data-canvas-top="${item.canvasTop || ''}">
                 ${icon}
                 <span>${item.label}</span>
             </div>
@@ -10705,10 +10855,36 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
             const sid = item.dataset.sectionId;
             const ttype = item.dataset.treeType;
             const preferredParentId = item.dataset.parentId;
+            const canvasLeft = item.dataset.canvasLeft;
+            const canvasTop = item.dataset.canvasTop;
 
             hideContextMenu();
 
-            if (action === 'add-entry-blank') {
+            if (action === 'add-permanent-copy-at-position') {
+                const left = Number(canvasLeft);
+                const top = Number(canvasTop);
+                const sourceSection = document.getElementById('permanentSection') || document.querySelector('.permanent-bookmark-section');
+                if (typeof createPermanentSectionCopy === 'function') {
+                    createPermanentSectionCopy(sourceSection, {
+                        canvasPosition: {
+                            left,
+                            top
+                        }
+                    });
+                }
+            } else if (action === 'add-empty-temp-card-at-position') {
+                const left = Number(canvasLeft);
+                const top = Number(canvasTop);
+                __createCanvasQuickAddTempSectionAtPosition(left, top);
+            } else if (action === 'add-via-secondary-at-position') {
+                const left = Number(canvasLeft);
+                const top = Number(canvasTop);
+                await __openCanvasBlankAddSecondaryAtPosition(left, top);
+            } else if (action === 'add-blank-md-card-at-position') {
+                const left = Number(canvasLeft);
+                const top = Number(canvasTop);
+                await __createCanvasBlankMdCardAtPosition(left, top);
+            } else if (action === 'add-entry-blank') {
                 const addContext = {
                     treeType: ttype === 'temporary' ? 'temporary' : 'permanent',
                     sectionId: ttype === 'temporary' ? sid : null,

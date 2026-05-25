@@ -5975,6 +5975,17 @@ function setupCanvasZoomAndPan() {
         if (CanvasState.isCtrlPressed || CanvasState.isPanning) {
             e.preventDefault();
             e.stopPropagation();
+            return;
+        }
+        const target = e.target;
+        if (!target || !target.closest) return;
+        if (target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .import-container, .canvas-edge, .canvas-pan-capture-layer')) return;
+        const canvasContent = document.getElementById('canvasContent');
+        if (canvasContent && !canvasContent.contains(target) && target !== workspace) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof showBlankAreaContextMenu === 'function') {
+            showBlankAreaContextMenu(e, null, 'canvas');
         }
     }, true);
 
@@ -15029,7 +15040,7 @@ function __syncPermanentSectionSharedTreeViews(options = {}) {
     return false;
 }
 
-function createPermanentSectionCopy(sourceSection) {
+function createPermanentSectionCopy(sourceSection, options = {}) {
     const canvasContent = document.getElementById('canvasContent');
     const template = document.getElementById('permanentSectionTemplate');
     const origin = sourceSection || document.getElementById('permanentSection');
@@ -15107,6 +15118,15 @@ function createPermanentSectionCopy(sourceSection) {
     } catch (_) { }
     if (!Number.isFinite(targetLeft)) targetLeft = baseLeft + GAP;
     if (!Number.isFinite(targetTop)) targetTop = baseTop;
+    const requestedPosition = options && options.canvasPosition && typeof options.canvasPosition === 'object'
+        ? options.canvasPosition
+        : null;
+    if (requestedPosition) {
+        const requestedLeft = Number(requestedPosition.left);
+        const requestedTop = Number(requestedPosition.top);
+        if (Number.isFinite(requestedLeft)) targetLeft = requestedLeft;
+        if (Number.isFinite(requestedTop)) targetTop = requestedTop;
+    }
 
     const originCopyId = __isPermanentSectionCopy(origin) ? __getPermanentSectionCopyId(origin) : null;
     const shell = __normalizePermanentViewShellProtocol({
