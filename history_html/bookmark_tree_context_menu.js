@@ -10748,6 +10748,131 @@ async function __createCanvasBlankMdCardAtPosition(left, top) {
     return nodeId;
 }
 
+function __getCanvasCardGroupCreateTitles(lang) {
+    return {
+        modalTitle: lang === 'zh_CN' ? '创建卡片组' : 'Create Card Group',
+        modalIntro: lang === 'zh_CN' ? '创建固定卡片组。当前仅创建入口，功能暂未完成。' : 'Create a fixed card group. This only creates the entry for now.',
+        fixedTitle: lang === 'zh_CN' ? '固定组' : 'Fixed Group',
+        fixedDesc: lang === 'zh_CN' ? '对应「固定组」规则与后续存储实现。' : 'Maps to fixed group rules and future storage implementation.',
+        closeText: lang === 'zh_CN' ? '关闭' : 'Close',
+        pendingText: lang === 'zh_CN' ? '创建卡片组暂未完成。' : 'Create card group is not completed yet.'
+    };
+}
+
+function __invokeCanvasCardGroupCreateHandler(kind, left, top, title) {
+    const x = Number(left);
+    const y = Number(top);
+    const payload = {
+        kind,
+        title,
+        canvasPosition: {
+            left: Number.isFinite(x) ? x : 0,
+            top: Number.isFinite(y) ? y : 0
+        },
+        completed: false
+    };
+    const canvas = (typeof window !== 'undefined') ? window.CanvasModule : null;
+    const groupApi = (typeof window !== 'undefined') ? window.CanvasGroups : null;
+    const create = groupApi && typeof groupApi.createCardGroup === 'function'
+        ? groupApi.createCardGroup.bind(groupApi)
+        : (canvas && typeof canvas.createCardGroup === 'function' ? canvas.createCardGroup.bind(canvas) : null);
+    if (create) return create(payload);
+    const lang = currentLang || 'zh_CN';
+    const titles = __getCanvasCardGroupCreateTitles(lang);
+    try { alert(titles.pendingText); } catch (_) { }
+    return payload;
+}
+
+function __getCanvasCardGroupCreateActions(left, top) {
+    const lang = currentLang || 'zh_CN';
+    const titles = __getCanvasCardGroupCreateTitles(lang);
+    return [
+        {
+            key: 'fixed-group',
+            title: titles.fixedTitle,
+            description: titles.fixedDesc,
+            handler: () => __invokeCanvasCardGroupCreateHandler('fixed', left, top, titles.fixedTitle)
+        }
+    ];
+}
+
+async function __openCanvasCardGroupCreateUiAtPosition(left, top) {
+    const lang = currentLang || 'zh_CN';
+    const titles = __getCanvasCardGroupCreateTitles(lang);
+    const actions = __getCanvasCardGroupCreateActions(left, top);
+    let modal = document.getElementById('canvasCardGroupCreateModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'canvasCardGroupCreateModal';
+        modal.className = 'modal content-center canvas-card-group-create-modal';
+        document.body.appendChild(modal);
+    }
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header compact">
+                <h3>${escapeHtml(titles.modalTitle)}</h3>
+                <button class="modal-close" type="button"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="bookmark-add-secondary-form">
+                    <div class="bookmark-add-secondary-field">
+                        <label>${escapeHtml(titles.modalIntro)}</label>
+                        <div class="bookmark-add-secondary-grid">
+                            ${actions.map(action => `
+                                <button class="bookmark-add-secondary-choice" type="button" data-card-group-action="${escapeHtml(action.key)}">
+                                    <span class="bookmark-add-secondary-choice-main"><i class="fas fa-object-group"></i><span>${escapeHtml(action.title)}</span></span>
+                                    <span class="bookmark-add-secondary-choice-desc">${escapeHtml(action.description)}</span>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+                <div class="bookmark-add-secondary-actions">
+                    <button class="modal-btn" type="button" data-card-group-close="true">${escapeHtml(titles.closeText)}</button>
+                </div>
+            </div>
+        </div>
+    `;
+    modal.classList.add('show');
+    await new Promise((resolve) => {
+        let settled = false;
+        const close = () => {
+            if (settled) return;
+            settled = true;
+            modal.classList.remove('show');
+            modal.removeEventListener('click', onClick);
+            document.removeEventListener('keydown', onKeydown, true);
+            resolve(false);
+        };
+        const choose = async (key) => {
+            const action = actions.find(item => item.key === key);
+            if (!action) return;
+            try { await action.handler(); } catch (error) { console.warn('[右键菜单] 创建卡片组入口执行失败:', error); }
+            close();
+        };
+        const onClick = (event) => {
+            const closeBtn = event.target && event.target.closest ? event.target.closest('.modal-close, [data-card-group-close="true"]') : null;
+            if (closeBtn || event.target === modal) {
+                close();
+                return;
+            }
+            const actionBtn = event.target && event.target.closest ? event.target.closest('[data-card-group-action]') : null;
+            if (actionBtn) {
+                event.preventDefault();
+                choose(actionBtn.dataset.cardGroupAction);
+            }
+        };
+        const onKeydown = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                close();
+            }
+        };
+        modal.addEventListener('click', onClick);
+        document.addEventListener('keydown', onKeydown, true);
+    });
+}
+
 function showBlankAreaContextMenu(e, sectionId, treeType) {
     e.preventDefault();
     e.stopPropagation();
@@ -10789,6 +10914,15 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
             action: 'add-blank-md-card-at-position',
             label: lang === 'zh_CN' ? '添加空白栏目' : 'Add blank section',
             icon: 'sticky-note',
+            sectionId,
+            treeType,
+            canvasLeft: canvasPosition ? canvasPosition.left : '',
+            canvasTop: canvasPosition ? canvasPosition.top : ''
+        });
+        menuItems.push({
+            action: 'create-card-group-at-position',
+            label: lang === 'zh_CN' ? '创建卡片组' : 'Create card group',
+            icon: 'object-group',
             sectionId,
             treeType,
             canvasLeft: canvasPosition ? canvasPosition.left : '',
@@ -10884,6 +11018,10 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
                 const left = Number(canvasLeft);
                 const top = Number(canvasTop);
                 await __createCanvasBlankMdCardAtPosition(left, top);
+            } else if (action === 'create-card-group-at-position') {
+                const left = Number(canvasLeft);
+                const top = Number(canvasTop);
+                await __openCanvasCardGroupCreateUiAtPosition(left, top);
             } else if (action === 'add-entry-blank') {
                 const addContext = {
                     treeType: ttype === 'temporary' ? 'temporary' : 'permanent',
