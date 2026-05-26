@@ -280,53 +280,54 @@ function __buildImportPreviewDataFromTempState(tempState, options = {}) {
     const mdNodes = (tempState && Array.isArray(tempState.mdNodes)) ? tempState.mdNodes : [];
     const edges = (tempState && Array.isArray(tempState.edges)) ? tempState.edges : [];
 
-    const sectionById = new Map();
-    sections.forEach((section) => {
-        const id = section && section.id ? String(section.id) : '';
-        if (id) sectionById.set(id, section);
-    });
-
-    const mdById = new Map();
-    mdNodes.forEach((node) => {
-        const id = node && node.id ? String(node.id) : '';
-        if (id) mdById.set(id, node);
-    });
-
-    const containers = mdNodes.filter((node) => !!(node && node.subtype === 'import-container'));
+    const groupNodes = mdNodes.filter((node) => !!(node && node.subtype === 'card-group'));
     const hasSnapshotInTempState = sections.some((section) => !!(section && section.isSnapshot));
     const syntheticPermanentSections = hasSnapshotInTempState
         ? []
         : __buildImportPreviewSyntheticPermanentSections(fullStorage, isEn);
 
-    const buildGroup = (container, index) => {
+    const getRect = (node) => {
+        if (!node) return null;
+        const x = Number(node.x);
+        const y = Number(node.y);
+        const w = Number(node.width);
+        const h = Number(node.height);
+        if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) return null;
+        return { x, y, w, h };
+    };
+    const isInsideGroup = (candidate, groupNode) => {
+        const groupRect = getRect(groupNode);
+        const candidateRect = getRect(candidate);
+        if (!groupRect || !candidateRect || typeof __rectFullyInside !== 'function') return false;
+        try {
+            return __rectFullyInside(candidateRect, groupRect, 0);
+        } catch (_) {
+            return false;
+        }
+    };
+
+    const buildGroup = (groupNode, index) => {
         let groupTitle = '';
-        if (container) {
-            try {
-                groupTitle = __trimImportPreviewText(__getImportContainerLabelFromNode(container));
-            } catch (_) {
-                groupTitle = '';
-            }
+        if (groupNode) {
+            groupTitle = __trimImportPreviewText(String(groupNode.label || '').trim());
         }
         if (!groupTitle) {
-            groupTitle = isEn ? `Imported Group ${index}` : `导入区块 ${index}`;
+            groupTitle = groupNode ? (isEn ? 'Card Group' : '卡片组') : (isEn ? 'Imported Content' : '导入内容');
         }
 
         let groupTempSections = [];
         let groupMdNodes = [];
         let nodeIdSet = new Set();
 
-        if (container) {
-            const tempIds = Array.isArray(container.containedTempIds) ? container.containedTempIds : [];
-            const mdIds = Array.isArray(container.containedMdIds) ? container.containedMdIds : [];
-
-            groupTempSections = tempIds
-                .map((id) => sectionById.get(String(id || '')))
-                .filter(Boolean);
-
-            groupMdNodes = mdIds
-                .map((id) => mdById.get(String(id || '')))
-                .filter((node) => !!(node && node.subtype !== 'import-container'));
-
+        if (groupNode) {
+            groupTempSections = sections.filter((section) => isInsideGroup(section, groupNode));
+            groupMdNodes = mdNodes.filter((node) => !!(
+                node
+                && node.id
+                && node.id !== groupNode.id
+                && node.subtype !== 'card-group'
+                && isInsideGroup(node, groupNode)
+            ));
             groupTempSections.forEach((section) => {
                 if (section && section.id) nodeIdSet.add(String(section.id));
             });
@@ -334,9 +335,9 @@ function __buildImportPreviewDataFromTempState(tempState, options = {}) {
                 if (node && node.id) nodeIdSet.add(String(node.id));
             });
 
-            if (!groupTempSections.length && !groupMdNodes.length && containers.length === 1) {
+            if (!groupTempSections.length && !groupMdNodes.length && groupNodes.length === 1) {
                 groupTempSections = sections.slice();
-                groupMdNodes = mdNodes.filter((node) => !!(node && node.subtype !== 'import-container'));
+                groupMdNodes = mdNodes.filter((node) => !!(node && node.subtype !== 'card-group'));
                 nodeIdSet = new Set();
                 groupTempSections.forEach((section) => {
                     if (section && section.id) nodeIdSet.add(String(section.id));
@@ -347,7 +348,7 @@ function __buildImportPreviewDataFromTempState(tempState, options = {}) {
             }
         } else {
             groupTempSections = sections.slice();
-            groupMdNodes = mdNodes.filter((node) => !!(node && node.subtype !== 'import-container'));
+            groupMdNodes = mdNodes.filter((node) => !!(node && node.subtype !== 'card-group'));
             groupTempSections.forEach((section) => {
                 if (section && section.id) nodeIdSet.add(String(section.id));
             });
@@ -467,9 +468,9 @@ function __buildImportPreviewDataFromTempState(tempState, options = {}) {
     };
 
     const groups = [];
-    if (containers.length) {
-        containers.forEach((container, index) => {
-            groups.push(buildGroup(container, index + 1));
+    if (groupNodes.length) {
+        groupNodes.forEach((groupNode, index) => {
+            groups.push(buildGroup(groupNode, index + 1));
         });
     } else {
         groups.push(buildGroup(null, 1));

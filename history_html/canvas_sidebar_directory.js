@@ -9,6 +9,33 @@
   const PERMANENT_COPIES_STORAGE_KEY = 'bcs:perm:copies';
   const PERMANENT_MAIN_TIP_STORAGE_KEY = 'bcs:perm:tip-main';
   const PERMANENT_COPY_TIP_STORAGE_PREFIX = 'bcs:perm:tip-copy-';
+  const FOLDER_OPEN_STATES_KEY = 'bcs:sidebar:folder_open_states';
+
+  function getFolderOpenStates() {
+    try {
+      const raw = localStorage.getItem(FOLDER_OPEN_STATES_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function saveFolderOpenState(key, open) {
+    try {
+      const states = getFolderOpenStates();
+      states[key] = !!open;
+      localStorage.setItem(FOLDER_OPEN_STATES_KEY, JSON.stringify(states));
+    } catch (_) {}
+  }
+
+  function getDefaultFolderOpenState(node) {
+    const key = node.key || '';
+    if (key === 'folder-card-groups' || key === 'folder-permanent' || key === 'folder-temporary') {
+      return true;
+    }
+    return false;
+  }
+
   const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add', 'file-import', 'import-html-bookmarks', 'import-json-bookmarks']);
   const DIRECTORY_COLOR_DEFAULTS = Object.freeze({
     permanent: '#10b981',
@@ -511,193 +538,28 @@
     return label === 'drop' || label === 'search' || label === 'batch' || label === 'add' || label === 'import file' || label === 'import';
   }
 
-  function isImportedNodeId(value) {
-    const id = normalizeText(value).toLowerCase();
-    if (!id) return false;
-    return id.startsWith('imported -') || id.startsWith('imported-');
+  function __sidebarRectOf(node) {
+    if (!node) return null;
+    const x = Number(node.x);
+    const y = Number(node.y);
+    const w = Number(node.width);
+    const h = Number(node.height);
+    if (![x, y, w, h].every(v => Number.isFinite(v))) return null;
+    return { x, y, w, h };
   }
 
-  function collectImportMembership(mdNodes) {
-    const importContainers = [];
-    const tempIds = new Set();
-    const mdIds = new Set();
-
-    (Array.isArray(mdNodes) ? mdNodes : []).forEach((node) => {
-      if (!node || node.subtype !== 'import-container') return;
-      importContainers.push(node);
-
-      const containerId = normalizeText(node.id);
-      if (containerId) mdIds.add(containerId);
-
-      const memberTempIds = Array.isArray(node.containedTempIds) ? node.containedTempIds : [];
-      memberTempIds.forEach((id) => {
-        const normalized = normalizeText(id);
-        if (normalized) tempIds.add(normalized);
-      });
-
-      const memberMdIds = Array.isArray(node.containedMdIds) ? node.containedMdIds : [];
-      memberMdIds.forEach((id) => {
-        const normalized = normalizeText(id);
-        if (!normalized || normalized === containerId) return;
-        mdIds.add(normalized);
-      });
-    });
-
-    return { importContainers, tempIds, mdIds };
-  }
-
-  function isImportedTempSection(section, membership) {
-    const sectionId = normalizeText(section && section.id);
-    if (!sectionId) return false;
-    if (membership && membership.tempIds && membership.tempIds.has(sectionId)) return true;
-    if (section && section.isSnapshot) return true;
-
-    const source = normalizeText(section && section.source).toLowerCase();
-    if (source === 'file-import' || source === 'import-html-bookmarks' || source === 'import-json-bookmarks') return false;
-    if (source.startsWith('import')) return true;
-
-    return isImportedNodeId(sectionId);
-  }
-
-  function isImportedMdNode(node, membership) {
-    if (!node) return false;
-    if (node.subtype === 'import-container') return true;
-
-    const nodeId = normalizeText(node.id);
-    if (!nodeId) return false;
-    if (membership && membership.mdIds && membership.mdIds.has(nodeId)) return true;
-
-    return isImportedNodeId(nodeId);
-  }
-
-  function isImportedEdge(edge, importedNodeIds) {
-    const edgeId = normalizeText(edge && edge.id);
-    if (isImportedNodeId(edgeId)) return true;
-
-    const fromNode = normalizeText(edge && edge.fromNode);
-    const toNode = normalizeText(edge && edge.toNode);
-    if (!fromNode || !toNode) return false;
-
-    return importedNodeIds.has(fromNode) && importedNodeIds.has(toNode);
-  }
-
-  function getImportContainerName(node) {
-    const byGroupLabel = normalizeText(node && node.groupLabel);
-    if (byGroupLabel) return byGroupLabel;
-    return getMdNodeTitle(node);
-  }
-
-  function collectImportedGroups(importMembership, importedTempSections, importedMdNodes, importedEdges) {
-    const groups = [];
-    const sectionToGroup = new Map();
-    const mdToGroup = new Map();
-
-    const importedTempList = Array.isArray(importedTempSections) ? importedTempSections : [];
-    const importedMdList = Array.isArray(importedMdNodes) ? importedMdNodes : [];
-    const importedEdgeList = Array.isArray(importedEdges) ? importedEdges : [];
-    const containers = (importMembership && Array.isArray(importMembership.importContainers))
-      ? importMembership.importContainers
-      : [];
-
-    const importedTempById = new Map();
-    importedTempList.forEach((section) => {
-      const id = normalizeText(section && section.id);
-      if (id) importedTempById.set(id, section);
-    });
-
-    const importedMdById = new Map();
-    importedMdList.forEach((node) => {
-      const id = normalizeText(node && node.id);
-      if (id) importedMdById.set(id, node);
-    });
-
-    const createGroup = (name, keySeed) => {
-      const key = normalizeText(keySeed) || `import-group-${groups.length + 1}`;
-      const group = {
-        key,
-        name: normalizeText(name) || `${t('导入区块', 'Imported')} ${groups.length + 1}`,
-        containerId: '',
-        tempSections: [],
-        mdNodes: [],
-        edges: []
-      };
-      groups.push(group);
-      return group;
-    };
-
-    containers.forEach((container, index) => {
-      const containerId = normalizeText(container && container.id);
-      const name = getImportContainerName(container);
-      const group = createGroup(name, containerId || `container-${index + 1}`);
-      group.containerId = containerId;
-
-      if (containerId && importedMdById.has(containerId)) {
-        const node = importedMdById.get(containerId);
-        if (node) {
-          group.mdNodes.push(node);
-          mdToGroup.set(containerId, group.key);
-        }
-      }
-
-      const tempIds = Array.isArray(container && container.containedTempIds) ? container.containedTempIds : [];
-      tempIds.forEach((id) => {
-        const normalized = normalizeText(id);
-        if (!normalized) return;
-        const section = importedTempById.get(normalized);
-        if (!section) return;
-        if (!group.tempSections.some((item) => normalizeText(item && item.id) === normalized)) {
-          group.tempSections.push(section);
-        }
-        sectionToGroup.set(normalized, group.key);
-      });
-
-      const mdIds = Array.isArray(container && container.containedMdIds) ? container.containedMdIds : [];
-      mdIds.forEach((id) => {
-        const normalized = normalizeText(id);
-        if (!normalized || normalized === containerId) return;
-        const node = importedMdById.get(normalized);
-        if (!node) return;
-        if (!group.mdNodes.some((item) => normalizeText(item && item.id) === normalized)) {
-          group.mdNodes.push(node);
-        }
-        mdToGroup.set(normalized, group.key);
-      });
-    });
-
-    importedTempList.forEach((section) => {
-      const sectionId = normalizeText(section && section.id);
-      if (!sectionId || sectionToGroup.has(sectionId)) return;
-      const group = createGroup(getTempSectionTitle(section), sectionId);
-      group.tempSections.push(section);
-      sectionToGroup.set(sectionId, group.key);
-    });
-
-    importedMdList.forEach((node) => {
-      const nodeId = normalizeText(node && node.id);
-      if (!nodeId || mdToGroup.has(nodeId)) return;
-      const group = createGroup(getMdNodeTitle(node), nodeId);
-      group.mdNodes.push(node);
-      mdToGroup.set(nodeId, group.key);
-    });
-
-    const groupByKey = new Map(groups.map((group) => [group.key, group]));
-    importedEdgeList.forEach((edge) => {
-      const fromNode = normalizeText(edge && edge.fromNode);
-      const toNode = normalizeText(edge && edge.toNode);
-      const fromGroupKey = sectionToGroup.get(fromNode) || mdToGroup.get(fromNode) || '';
-      const toGroupKey = sectionToGroup.get(toNode) || mdToGroup.get(toNode) || '';
-      if (!fromGroupKey || fromGroupKey !== toGroupKey) return;
-      const group = groupByKey.get(fromGroupKey);
-      if (group) group.edges.push(edge);
-    });
-
-    groups.forEach((group) => {
-      group.tempSections.sort(sortTempSections);
-      group.mdNodes.sort((a, b) => compareText(a && a.id, b && b.id));
-      group.edges.sort((a, b) => compareText(a && a.id, b && b.id));
-    });
-
-    return groups;
+  function __sidebarRectFullyInside(inner, outer, margin) {
+    if (!inner || !outer) return false;
+    const m = (typeof margin === 'number' && isFinite(margin)) ? margin : 0;
+    if (typeof __rectFullyInside === 'function') {
+      try { return __rectFullyInside(inner, outer, m); } catch (_) { }
+    }
+    return (
+      inner.x >= outer.x + m &&
+      inner.y >= outer.y + m &&
+      inner.x + inner.w <= outer.x + outer.w - m &&
+      inner.y + inner.h <= outer.y + outer.h - m
+    );
   }
 
   function getTempSectionTitle(section) {
@@ -947,9 +809,7 @@
     const mdNodes = Array.isArray(state && state.mdNodes) ? state.mdNodes.filter(Boolean) : [];
     const edges = Array.isArray(state && state.edges) ? state.edges.filter(Boolean) : [];
     const copies = (options && Array.isArray(options.copies)) ? options.copies : readPermanentCopies();
-    const importedOnly = !!(options && options.importedOnly);
     const enableGroupDelete = !(options && options.enableGroupDelete === false);
-    const suppressImportedGrouping = !!(options && options.suppressImportedGrouping);
     const colorTokens = getAppearanceBaseColorTokens();
     const locatableThemeTokens = getAppearanceThemeColorTokens();
     const syncFlags = getDirectoryColorSyncFlags();
@@ -1056,27 +916,6 @@
     };
 
     const resolveEdgeColor = (edge) => {
-      if (!locatableColorSync) return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
-      const live = resolveNodeCustomColor(edge);
-      if (live) return live;
-      return locatableThemeTokens.edge;
-    };
-
-    const importNeutralColor = IMPORT_DIRECTORY_NEUTRAL_COLOR;
-    const resolveImportedTempSectionColor = (section) => {
-      if (!locatableColorSync) return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
-      const live = normalizeHexColor(section && section.color, null);
-      if (live) return live;
-      if (section && section.isSnapshot) return locatableThemeTokens.permanent;
-      return isSpecialTempSection(section) ? locatableThemeTokens.specialTemp : locatableThemeTokens.temp;
-    };
-    const resolveImportedMdNodeColor = (node) => {
-      if (!locatableColorSync) return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
-      const live = resolveNodeCustomColor(node);
-      if (live) return live;
-      return locatableThemeTokens.blank;
-    };
-    const resolveImportedEdgeColor = (edge) => {
       if (!locatableColorSync) return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
       const live = resolveNodeCustomColor(edge);
       if (live) return live;
@@ -1191,6 +1030,7 @@
             color: splitColor,
             defaultColor: splitColor,
             icon: splitFolderIcon,
+            open: false,
             count: splitTempSections.length,
             children: splitItems
           }),
@@ -1203,6 +1043,7 @@
             icon: specialFolderIcon,
             iconText: specialIconText,
             iconTone: specialIconTone,
+            open: false,
             count: specialTempSections.length,
             children: specialItems
           })
@@ -1246,9 +1087,9 @@
           deleteAction: {
             kind: 'md-node',
             nodeId: node.id,
-            scopeOptions: !!(node && node.subtype === 'import-container'),
+            scopeOptions: false,
             currentTitle: t('仅删除框体', 'Delete frame only'),
-            allTitle: t('删除全部内容', 'Delete all content')
+            allTitle: t('删除框体及成员', 'Delete frame and members')
           },
           target: { kind: 'md-node', nodeId: node.id },
           preview: ''
@@ -1295,7 +1136,7 @@
         : resolveEdgeColor;
       const folderColor = config.folderColor || colorTokens.edge;
       const defaultColor = config.defaultColor || folderColor;
-      const folderIcon = config.folderIcon || 'fas fa-ellipsis-h';
+      const folderIcon = config.folderIcon || 'fas fa-link';
       const edgesWithLabel = edgeList.filter((edge) => normalizeText(edge && edge.label));
       const edgeItems = edgesWithLabel.map((edge, index) => {
         const edgeId = normalizeText(edge && edge.id);
@@ -1339,7 +1180,7 @@
       return makeFolderNode({
         key: config.folderKey || 'folder-other',
         code: '',
-        title: config.title || t('其他', 'Others'),
+        title: config.title || t('连接线', 'Edges'),
         color: folderColor,
         defaultColor,
         icon: folderIcon,
@@ -1349,55 +1190,11 @@
       });
     };
 
-    const importMembership = suppressImportedGrouping
-      ? { importContainers: [], tempIds: new Set(), mdIds: new Set() }
-      : collectImportMembership(mdNodes);
+    const regularTempSections = tempSections.slice();
 
-    const importedTempSections = suppressImportedGrouping
-      ? []
-      : tempSections.filter((section) => isImportedTempSection(section, importMembership));
-    const importedTempIdSet = new Set();
-    importedTempSections.forEach((section) => {
-      const sectionId = normalizeText(section && section.id);
-      if (sectionId) importedTempIdSet.add(sectionId);
-    });
+    const regularMdNodes = mdNodes.slice();
 
-    const importedMdNodes = suppressImportedGrouping
-      ? []
-      : mdNodes.filter((node) => isImportedMdNode(node, importMembership));
-    const importedMdIdSet = new Set();
-    importedMdNodes.forEach((node) => {
-      const nodeId = normalizeText(node && node.id);
-      if (nodeId) importedMdIdSet.add(nodeId);
-    });
-
-    const regularTempSections = suppressImportedGrouping ? tempSections.slice() : tempSections.filter((section) => {
-      const sectionId = normalizeText(section && section.id);
-      return sectionId ? !importedTempIdSet.has(sectionId) : true;
-    });
-
-    const regularMdNodes = suppressImportedGrouping ? mdNodes.slice() : mdNodes.filter((node) => {
-      const nodeId = normalizeText(node && node.id);
-      return nodeId ? !importedMdIdSet.has(nodeId) : true;
-    });
-
-    const importedNodeIds = new Set();
-    importedTempIdSet.forEach((id) => importedNodeIds.add(id));
-    importedMdIdSet.forEach((id) => importedNodeIds.add(id));
-
-    const importedEdges = [];
-    const regularEdges = [];
-    if (suppressImportedGrouping) {
-      regularEdges.push(...edges);
-    } else {
-      edges.forEach((edge) => {
-        if (isImportedEdge(edge, importedNodeIds)) {
-          importedEdges.push(edge);
-        } else {
-          regularEdges.push(edge);
-        }
-      });
-    }
+    const regularEdges = edges.slice();
 
     const permanentChildren = [
       makeItemNode({
@@ -1461,41 +1258,282 @@
     const blankFolder = buildBlankFolder(regularMdNodes, {
       folderKey: 'folder-blank',
       count: regularMdNodes.length,
-      emptyKey: 'blank-empty'
+      emptyKey: 'blank-empty',
+      open: false
     });
 
     const titleLookup = buildNodeTitleLookup(tempSections, mdNodes, copies);
     const otherFolder = buildOtherFolder(regularEdges, titleLookup, {
       folderKey: 'folder-other',
-      emptyKey: 'edge-empty'
+      emptyKey: 'edge-empty',
+      open: false
     });
 
-    const importedTitleLookup = buildNodeTitleLookup(tempSections, mdNodes, []);
+    function getGeometricRect(item, type) {
+      if (type === 'temp-section' || type === 'md-node') {
+        return __sidebarRectOf(item);
+      }
+      if (type === 'permanent-main') {
+        const mainShell = getPermanentMainShell();
+        if (mainShell && mainShell.cardState) {
+          const x = Number(mainShell.cardState.left);
+          const y = Number(mainShell.cardState.top);
+          const w = Number(mainShell.cardState.width);
+          const h = Number(mainShell.cardState.height);
+          if ([x, y, w, h].every(v => Number.isFinite(v))) return { x, y, w, h };
+        }
+        const el = document.getElementById('permanentSection');
+        if (el) {
+          return {
+            x: parseFloat(el.style.left) || 0,
+            y: parseFloat(el.style.top) || 0,
+            w: el.offsetWidth || parseFloat(el.style.width) || 0,
+            h: el.offsetHeight || parseFloat(el.style.height) || 0
+          };
+        }
+      }
+      if (type === 'permanent-copy') {
+        const copyId = normalizeText(item.id);
+        const el = document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${copyId}"]`);
+        if (el) {
+          return {
+            x: parseFloat(el.style.left) || 0,
+            y: parseFloat(el.style.top) || 0,
+            w: el.offsetWidth || parseFloat(el.style.width) || 0,
+            h: el.offsetHeight || parseFloat(el.style.height) || 0
+          };
+        }
+        const x = Number(item.left);
+        const y = Number(item.top);
+        const w = Number(item.width);
+        const h = Number(item.height);
+        if ([x, y, w, h].every(v => Number.isFinite(v))) return { x, y, w, h };
+      }
+      return null;
+    }
 
-    const importedGroups = suppressImportedGrouping
-      ? []
-      : collectImportedGroups(
-        importMembership,
-        importedTempSections,
-        importedMdNodes,
-        importedEdges
-      );
+    function getGroupGeometricChildren(group, tempSections, mdNodes, copies, edges) {
+      const groupRect = getGeometricRect(group, 'md-node');
+      if (!groupRect) return { tempSections: [], mdNodes: [], permanentMain: false, permanentCopies: [], edges: [] };
 
-    const importedGroupFolders = importedGroups.map((group, index) => {
-      const groupSnapshotSections = group.tempSections.filter((section) => !!(section && section.isSnapshot));
-      const groupTemporarySections = group.tempSections.filter((section) => !(section && section.isSnapshot));
+      const margin = (group.subtype === 'card-group') ? 0 : 12;
+      const containedTempSections = [];
+      const containedMdNodes = [];
+      let containedPermanentMain = false;
+      const containedPermanentCopies = [];
+      const containedEdges = [];
 
-      const groupPermanentItems = [...groupSnapshotSections]
-        .sort((a, b) => compareText(getTempSectionTitle(a), getTempSectionTitle(b)))
-        .map((section) => makeItemNode({
-          key: `imported-group-${index + 1}-permanent-${section.id}`,
+      // 1. Temp sections
+      tempSections.forEach((s) => {
+        const r = getGeometricRect(s, 'temp-section');
+        if (r && __sidebarRectFullyInside(r, groupRect, margin)) {
+          containedTempSections.push(s);
+        }
+      });
+
+      // 2. mdNodes (excluding group itself)
+      mdNodes.forEach((n) => {
+        if (!n || n.id === group.id) return;
+        const r = getGeometricRect(n, 'md-node');
+        if (r && __sidebarRectFullyInside(r, groupRect, margin)) {
+          containedMdNodes.push(n);
+        }
+      });
+
+      // 3. Permanent main
+      const mainRect = getGeometricRect(null, 'permanent-main');
+      if (mainRect && __sidebarRectFullyInside(mainRect, groupRect, margin)) {
+        containedPermanentMain = true;
+      }
+
+      // 4. Permanent copies
+      copies.forEach((copy) => {
+        const r = getGeometricRect(copy, 'permanent-copy');
+        if (r && __sidebarRectFullyInside(r, groupRect, margin)) {
+          containedPermanentCopies.push(copy);
+        }
+      });
+
+      // 5. Edges
+      const containedIds = new Set();
+      containedTempSections.forEach((s) => containedIds.add(normalizeText(s.id)));
+      containedMdNodes.forEach((n) => containedIds.add(normalizeText(n.id)));
+      if (containedPermanentMain) {
+        containedIds.add('permanent-section');
+        containedIds.add('permanent-main');
+      }
+      containedPermanentCopies.forEach((copy) => {
+        containedIds.add(`permanent-section-copy-${normalizeText(copy.id)}`);
+        containedIds.add(normalizeText(copy.id));
+      });
+
+      edges.forEach((edge) => {
+        const fromNode = normalizeText(edge.fromNode);
+        const toNode = normalizeText(edge.toNode);
+        if (containedIds.has(fromNode) && containedIds.has(toNode)) {
+          containedEdges.push(edge);
+        }
+      });
+
+      return {
+        tempSections: containedTempSections,
+        mdNodes: containedMdNodes,
+        permanentMain: containedPermanentMain,
+        permanentCopies: containedPermanentCopies,
+        edges: containedEdges
+      };
+    }
+
+    function getDirectGroupChildren(group, tempSections, mdNodes, copies, edges) {
+      const geo = getGroupGeometricChildren(group, tempSections, mdNodes, copies, edges);
+      const groupId = normalizeText(group && group.id);
+      const isDirectChild = (item, type) => getDirectParentGroupId(item, type) === groupId;
+      const directTempSections = geo.tempSections.filter((section) => isDirectChild(section, 'temp-section'));
+      const directMdNodes = geo.mdNodes.filter((node) => isDirectChild(node, 'md-node'));
+      const directPermanentMain = geo.permanentMain && isDirectChild(null, 'permanent-main');
+      const directPermanentCopies = geo.permanentCopies.filter((copy) => isDirectChild(copy, 'permanent-copy'));
+      const directIds = new Set();
+      directTempSections.forEach((section) => directIds.add(normalizeText(section && section.id)));
+      directMdNodes.forEach((node) => directIds.add(normalizeText(node && node.id)));
+      if (directPermanentMain) {
+        directIds.add('permanent-section');
+        directIds.add('permanent-main');
+      }
+      directPermanentCopies.forEach((copy) => {
+        const copyId = normalizeText(copy && copy.id);
+        if (!copyId) return;
+        directIds.add(copyId);
+        directIds.add(`permanent-section-copy-${copyId}`);
+      });
+
+      return {
+        tempSections: directTempSections,
+        mdNodes: directMdNodes,
+        permanentMain: directPermanentMain,
+        permanentCopies: directPermanentCopies,
+        edges: geo.edges.filter((edge) => {
+          const fromNode = normalizeText(edge && edge.fromNode);
+          const toNode = normalizeText(edge && edge.toNode);
+          return directIds.has(fromNode) && directIds.has(toNode);
+        })
+      };
+    }
+
+    function getDirectParentGroupId(item, type) {
+      const itemRect = getGeometricRect(item, type);
+      if (!itemRect) return '';
+      const itemId = normalizeText(item && item.id);
+      let parentId = '';
+      let parentArea = Infinity;
+      mdNodes.forEach((groupNode) => {
+        if (!groupNode || groupNode.subtype !== 'card-group') return;
+        const groupId = normalizeText(groupNode.id);
+        if (!groupId || groupId === itemId) return;
+        const groupRect = getGeometricRect(groupNode, 'md-node');
+        if (!groupRect || !__sidebarRectFullyInside(itemRect, groupRect, 0)) return;
+        const area = Math.max(0, Number(groupRect.w) || 0) * Math.max(0, Number(groupRect.h) || 0);
+        if (area < parentArea) {
+          parentArea = area;
+          parentId = groupId;
+        }
+      });
+      return parentId;
+    }
+
+    function isNodeInsideAnyGroup(node, allNodes) {
+      const nodeRect = getGeometricRect(node, 'md-node');
+      if (!nodeRect) return false;
+      return allNodes.some((other) => {
+        if (!other || other.id === node.id) return false;
+        if (other.subtype !== 'card-group') return false;
+        const otherRect = getGeometricRect(other, 'md-node');
+        const margin = 0;
+        return otherRect && __sidebarRectFullyInside(nodeRect, otherRect, margin);
+      });
+    }
+
+    function buildGroupChildrenDirectoryNodes(geo, parentSafeId, visited, depth) {
+      const childrenNodes = [];
+
+      // 1. Nested card groups first: "然后内部嵌套组的优先显示在最上方"
+      const nestedGroups = geo.mdNodes.filter((n) => n && n.subtype === 'card-group');
+      nestedGroups.sort((a, b) => compareText(
+        normalizeText((a && a.label) || ''),
+        normalizeText((b && b.label) || '')
+      ));
+
+      nestedGroups.forEach((n) => {
+        const childNode = buildCardGroupDirectoryNode(n, tempSections, mdNodes, copies, edges, visited, depth + 1, `group-${parentSafeId}-nested-`);
+        if (childNode) {
+          childrenNodes.push(childNode);
+        }
+      });
+
+      // Then other elements
+      const otherChildren = [];
+
+      // 2 & 3. Permanent main + copies (folded under "Permanent Sections")
+      const permSubChildren = [];
+      if (geo.permanentMain) {
+        permSubChildren.push(makeItemNode({
+          key: `group-${parentSafeId}-perm-main`,
+          code: '',
+          title: t('#A 主体', '#A Main'),
+          color: colorTokens.permanent,
+          defaultColor: colorTokens.permanent,
+          showIcon: false, // "永久栏目前面不需要图标"
+          target: { kind: 'permanent-main' },
+          preview: getPermanentDescription(null)
+        }));
+      }
+
+      geo.permanentCopies.forEach((copy, idx) => {
+        const copyId = normalizeText(copy && copy.id);
+        if (!copyId) return;
+        permSubChildren.push(makeItemNode({
+          key: `group-${parentSafeId}-perm-copy-${copyId}`,
+          code: '',
+          title: getPermanentCopyTitle(copy, idx),
+          color: colorTokens.permanent,
+          defaultColor: colorTokens.permanent,
+          showIcon: false, // "永久栏目前面不需要图标"
+          showDeleteControl: true,
+          deleteAction: {
+            kind: 'permanent-copy',
+            copyId
+          },
+          target: { kind: 'permanent-copy', copyId },
+          preview: getPermanentDescription(copyId)
+        }));
+      });
+
+      if (permSubChildren.length > 0) {
+        otherChildren.push(makeFolderNode({
+          key: `group-${parentSafeId}-subfolder-permanent`,
+          code: '',
+          title: t('永久栏目', 'Permanent'),
+          icon: 'fas fa-layer-group',
+          count: permSubChildren.length,
+          showFoldControl: true,
+          open: false,
+          children: permSubChildren
+        }));
+      }
+
+      // 4. Temporary sections (folded under "Temporary Sections")
+      const tempSubChildren = [];
+      const sortedTemps = [...geo.tempSections].sort(sortTempSections);
+      sortedTemps.forEach((section) => {
+        const isSpecial = isSpecialTempSection(section);
+        const sectionColor = resolveTempSectionColor(section);
+        tempSubChildren.push(makeItemNode({
+          key: `group-${parentSafeId}-temp-${section.id}`,
           code: '',
           title: getTempSectionDisplayText(section),
-          color: resolveImportedTempSectionColor(section),
-          defaultColor: importNeutralColor,
-          icon: 'fas fa-copy',
-          iconText: '#',
-          iconTone: 'hash',
+          color: sectionColor,
+          defaultColor: sectionColor,
+          icon: isSpecial ? 'fas fa-star' : 'fas fa-code-branch',
+          showIcon: true,
           showDeleteControl: true,
           deleteAction: {
             kind: 'temp-section',
@@ -1505,120 +1543,199 @@
           target: { kind: 'temp-section', sectionId: section.id },
           preview: getTempSectionDescription(section)
         }));
+      });
 
-      if (!groupPermanentItems.length) {
-        groupPermanentItems.push(makePlaceholderItem(`imported-group-${index + 1}-permanent-empty`, '', t('暂无导入永久栏目', 'No imported permanent sections'), {
-          iconText: '#',
-          iconTone: 'hash',
-          color: importNeutralColor,
-          defaultColor: importNeutralColor
+      if (tempSubChildren.length > 0) {
+        otherChildren.push(makeFolderNode({
+          key: `group-${parentSafeId}-subfolder-temporary`,
+          code: '',
+          title: t('临时栏目', 'Temporary'),
+          icon: 'fas fa-code-branch',
+          count: tempSubChildren.length,
+          showFoldControl: true,
+          open: false,
+          children: tempSubChildren
         }));
       }
 
-      const groupPermanentFolder = makeFolderNode({
-        key: `folder-imported-group-${index + 1}-permanent`,
-        code: '',
-        title: t('永久栏目', 'Permanent'),
-        color: importNeutralColor,
-        defaultColor: importNeutralColor,
-        icon: 'fas fa-layer-group',
-        iconText: '#',
-        iconTone: 'hash',
-        open: false,
-        count: groupSnapshotSections.length,
-        children: groupPermanentItems
+      // 5. Blank cards (folded under "Blank Cards")
+      const blankSubChildren = [];
+      const nonGroupMdNodes = geo.mdNodes.filter((n) => n && n.subtype !== 'card-group');
+      const sortedBlankNodes = [...nonGroupMdNodes].sort((a, b) => {
+        const at = toPositiveInt(a && a.createdAt);
+        const bt = toPositiveInt(b && b.createdAt);
+        if (at && bt && at !== bt) return at - bt;
+        return compareText(a && a.id, b && b.id);
       });
 
-      const groupTemporaryFolder = buildTemporaryFolder(groupTemporarySections, {
-        folderKey: `folder-imported-group-${index + 1}-temporary`,
-        splitFolderKey: `folder-imported-group-${index + 1}-temp-split`,
-        specialFolderKey: `folder-imported-group-${index + 1}-temp-special`,
-        open: false,
-        count: groupTemporarySections.length,
-        itemKeyPrefix: `imported-group-${index + 1}-`,
-        splitEmptyKey: `imported-group-${index + 1}-temp-split-empty`,
-        specialEmptyKey: `imported-group-${index + 1}-temp-special-empty`,
-        sectionColorResolver: resolveImportedTempSectionColor,
-        folderColor: importNeutralColor,
-        splitColor: importNeutralColor,
-        specialColor: importNeutralColor,
-        specialIconText: '✦',
-        specialIconTone: 'special',
-        folderIcon: 'fas fa-project-diagram',
-        splitFolderIcon: 'fas fa-sitemap',
-        specialFolderIcon: 'fas fa-star'
+      sortedBlankNodes.forEach((n, idx) => {
+        const nodeColor = resolveMdNodeColor(n);
+        blankSubChildren.push(makeItemNode({
+          key: `group-${parentSafeId}-blank-${n.id}`,
+          code: '',
+          title: `${idx + 1}. ${getMdNodeTitle(n)}`,
+          color: nodeColor,
+          defaultColor: nodeColor,
+          icon: 'fas fa-file-alt',
+          iconText: 'md',
+          iconTone: 'md',
+          showIcon: true,
+          showDeleteControl: true,
+          deleteAction: {
+            kind: 'md-node',
+            nodeId: n.id,
+            scopeOptions: false
+          },
+          target: { kind: 'md-node', nodeId: n.id },
+          preview: ''
+        }));
       });
 
-      const groupBlankFolder = buildBlankFolder(group.mdNodes, {
-        folderKey: `folder-imported-group-${index + 1}-blank`,
-        open: false,
-        count: group.mdNodes.length,
-        itemKeyPrefix: `imported-group-${index + 1}-`,
-        emptyKey: `imported-group-${index + 1}-blank-empty`,
-        nodeColorResolver: resolveImportedMdNodeColor,
-        folderColor: importNeutralColor,
-        defaultColor: importNeutralColor,
-        iconText: 'md',
-        iconTone: 'md',
-        variant: 'blank',
-        folderIcon: 'fas fa-sticky-note',
-        itemIcon: 'fas fa-file-alt'
+      if (blankSubChildren.length > 0) {
+        otherChildren.push(makeFolderNode({
+          key: `group-${parentSafeId}-subfolder-blank`,
+          code: '',
+          title: t('空白栏目', 'Blank Cards'),
+          icon: 'fas fa-file-alt',
+          iconText: 'md',
+          iconTone: 'md',
+          count: blankSubChildren.length,
+          showFoldControl: true,
+          open: false,
+          children: blankSubChildren
+        }));
+      }
+
+      // 6. Edges (folded under "Connections")
+      const edgeSubChildren = [];
+      const sortedEdges = [...geo.edges].sort((a, b) => compareText(a && a.id, b && b.id));
+      sortedEdges.forEach((edge, idx) => {
+        const edgeId = normalizeText(edge && edge.id);
+        const fromNode = normalizeText(edge && edge.fromNode);
+        const toNode = normalizeText(edge && edge.toNode);
+        const fromTitle = getLookupNodeTitle(fromNode, titleLookup);
+        const toTitle = getLookupNodeTitle(toNode, titleLookup);
+        const label = normalizeText(edge.label);
+        const preview = (fromTitle || toTitle)
+          ? `${fromTitle || t('未知起点', 'Unknown source')} → ${toTitle || t('未知终点', 'Unknown target')}`
+          : '';
+        edgeSubChildren.push(makeItemNode({
+          key: `group-${parentSafeId}-edge-${edgeId || idx}`,
+          code: '',
+          title: `${idx + 1}. ${label || t('无标题连接线', 'Untitled edge')}`,
+          color: resolveEdgeColor(edge),
+          defaultColor: colorTokens.edge,
+          icon: 'fas fa-link',
+          showIcon: true,
+          showDeleteControl: true,
+          deleteAction: {
+            kind: 'edge',
+            edgeId
+          },
+          target: { kind: 'edge', edgeId, fromNode, toNode },
+          preview
+        }));
       });
 
-      const groupOtherFolder = buildOtherFolder(group.edges, importedTitleLookup, {
-        folderKey: `folder-imported-group-${index + 1}-other`,
-        open: false,
-        itemKeyPrefix: `imported-group-${index + 1}-`,
-        emptyKey: `imported-group-${index + 1}-edge-empty`,
-        edgeColorResolver: resolveImportedEdgeColor,
-        folderColor: importNeutralColor,
-        defaultColor: importNeutralColor,
-        folderIcon: 'fas fa-ellipsis-h'
-      });
+      if (edgeSubChildren.length > 0) {
+        otherChildren.push(makeFolderNode({
+          key: `group-${parentSafeId}-subfolder-edges`,
+          code: '',
+          title: t('连接线', 'Edges'),
+          icon: 'fas fa-link',
+          count: edgeSubChildren.length,
+          showFoldControl: true,
+          open: false,
+          children: edgeSubChildren
+        }));
+      }
 
-      const groupLabelBase = t('导入区块', 'Imported');
-      const groupLabel = `${groupLabelBase} ${index + 1}`;
-      const groupName = normalizeText(group.name);
-      const groupPreview = groupName
-        ? clampText(`${groupName}`)
-        : '';
-      const groupEdgeCount = group.edges.filter((edge) => normalizeText(edge && edge.label)).length;
+      const allChildren = childrenNodes.concat(otherChildren);
+      if (allChildren.length === 0) {
+        allChildren.push(makePlaceholderItem(`group-${parentSafeId}-empty`, '', t('暂无成员', 'No members'), {
+          icon: 'fas fa-minus'
+        }));
+      }
+      return allChildren;
+    }
+
+    function buildCardGroupDirectoryNode(node, tempSections, mdNodes, copies, edges, visited = new Set(), depth = 1, instancePrefix = '') {
+      const safeId = normalizeText(node && node.id);
+      if (!safeId || visited.has(safeId)) return null;
+      visited.add(safeId);
+      const instanceSafeId = `${normalizeText(instancePrefix)}${safeId}`;
+
+      const labelRaw = normalizeText((node && node.label) || '') || (
+        isEnglish() ? 'Card Group' : '卡片组'
+      );
+
+      const geo = getDirectGroupChildren(node, tempSections, mdNodes, copies, edges);
+      const children = buildGroupChildrenDirectoryNodes(geo, instanceSafeId, visited, depth);
 
       return makeFolderNode({
-        key: `folder-imported-group-${index + 1}`,
+        key: `card-group-item-${instanceSafeId}`,
         code: '',
-        title: groupLabel,
-        variant: 'import-group-root',
-        color: importNeutralColor,
-        defaultColor: importNeutralColor,
-        icon: 'fas fa-box',
-        open: true,
-        showDeleteControl: enableGroupDelete,
-        deleteAction: enableGroupDelete ? {
-          kind: 'import-group',
-          containerId: normalizeText(group.containerId),
-          tempIds: group.tempSections.map((section) => section && section.id).filter(Boolean),
-          mdIds: group.mdNodes.map((node) => node && node.id).filter(Boolean)
-        } : null,
-        count: groupSnapshotSections.length + groupTemporarySections.length + group.mdNodes.length + groupEdgeCount,
-        preview: groupPreview,
-        children: [
-          groupPermanentFolder,
-          groupTemporaryFolder,
-          groupBlankFolder,
-          groupOtherFolder
-        ]
+        title: labelRaw,
+        icon: 'fas fa-object-group',
+        variant: 'card-group-item',
+        color: '',
+        defaultColor: '',
+        showIcon: true,
+        showFoldControl: true,
+        showDeleteControl: true,
+        deleteAction: {
+          kind: 'md-node',
+          nodeId: safeId,
+          directoryVariant: 'card-group',
+          scopeOptions: true,
+          deleteTitle: t('删除组', 'Delete group'),
+          confirmTitle: t('确认删除组', 'Confirm delete group'),
+          currentTitle: t('仅删除框体', 'Delete frame only'),
+          allTitle: t('删除框体及成员', 'Delete frame and members')
+        },
+        target: { kind: 'md-node', nodeId: safeId },
+        open: false,
+        count: children.length,
+        children: children
       });
-    });
-
-    if (importedOnly) {
-      return applyDirectoryColorControl(importedGroupFolders);
     }
 
-    const nodes = [permanentFolder, temporaryFolder, blankFolder, otherFolder];
-    if (importedGroupFolders.length) {
-      nodes.push(...importedGroupFolders);
+    const cardGroupNodes = mdNodes.filter((node) => node && node.subtype === 'card-group' && !getDirectParentGroupId(node, 'md-node'));
+    const cardGroupItems = cardGroupNodes
+      .slice()
+      .sort((a, b) => compareText(
+        normalizeText((a && a.label) || ''),
+        normalizeText((b && b.label) || '')
+      ))
+      .map((node) => buildCardGroupDirectoryNode(node, tempSections, mdNodes, copies, edges, new Set(), 1))
+      .filter(Boolean);
+
+    if (options && options.groupsOnly) {
+      return applyDirectoryColorControl(cardGroupItems);
     }
+
+    const groupsHaveAny = cardGroupItems.length > 0;
+    const groupItems = cardGroupItems
+      .sort((a, b) => compareText(a && a.title, b && b.title));
+
+    const groupsFolder = groupsHaveAny ? makeFolderNode({
+      key: 'folder-card-groups',
+      code: '',
+      title: t('组', 'Group'),
+      icon: 'fas fa-object-group',
+      variant: 'card-groups-root',
+      color: '',
+      defaultColor: '',
+      open: true,
+      count: cardGroupItems.length,
+      children: groupItems
+    }) : null;
+
+    const nodes = [];
+    if (groupsFolder) {
+      nodes.push(groupsFolder);
+    }
+    nodes.push(permanentFolder, temporaryFolder, blankFolder, otherFolder);
     return applyDirectoryColorControl(nodes);
   }
 
@@ -1639,47 +1756,29 @@
       : [];
 
     if (mode === 'overwrite') {
-      const hiddenImportContainerIds = new Set();
-      const overwriteMdNodes = mdNodes.filter((node) => {
-        if (!node || node.subtype !== 'import-container') return true;
-        const containerId = normalizeText(node.id);
-        if (containerId) hiddenImportContainerIds.add(containerId);
-        return false;
-      });
-      const overwriteEdges = edges.filter((edge) => {
-        const fromNode = normalizeText(edge && edge.fromNode);
-        const toNode = normalizeText(edge && edge.toNode);
-        if (fromNode && hiddenImportContainerIds.has(fromNode)) return false;
-        if (toNode && hiddenImportContainerIds.has(toNode)) return false;
-        return true;
-      });
       const previewStatePrepared = {
         tempSections,
-        mdNodes: overwriteMdNodes,
-        edges: overwriteEdges
+        mdNodes,
+        edges
       };
       const previewCopies = readPermanentCopiesFromStorage(storage);
       return buildDirectoryData({
         state: previewStatePrepared,
-        importedOnly: false,
         enableGroupDelete: false,
-        copies: previewCopies,
-        suppressImportedGrouping: true
+        copies: previewCopies
       });
     }
 
-    let hasImportContainer = mdNodes.some((node) => node && node.subtype === 'import-container');
-    if (!hasImportContainer) {
-      const containerId = `preview-import-container-${Date.now()}`;
+    let hasCardGroup = mdNodes.some((node) => node && node.subtype === 'card-group');
+    if (!hasCardGroup) {
+      const containerId = `preview-card-group-${Date.now()}`;
       mdNodes.unshift({
         id: containerId,
         type: 'md',
-        subtype: 'import-container',
-        groupLabel: groupName || t('导入区块 1', 'Imported 1'),
-        containedTempIds: tempSections.map((section) => section && section.id).filter(Boolean),
-        containedMdIds: mdNodes.map((node) => node && node.id).filter(Boolean)
+        subtype: 'card-group',
+        label: groupName || t('未命名组', 'Untitled group')
       });
-      hasImportContainer = true;
+      hasCardGroup = true;
     }
 
     const hasSnapshot = tempSections.some((section) => !!(section && section.isSnapshot));
@@ -1687,12 +1786,6 @@
       const syntheticSnapshots = buildPreviewSnapshotSectionsFromStorage(storage);
       if (syntheticSnapshots.length) {
         tempSections.unshift(...syntheticSnapshots);
-        const firstContainer = mdNodes.find((node) => node && node.subtype === 'import-container');
-        if (firstContainer) {
-          const existingTempIds = Array.isArray(firstContainer.containedTempIds) ? firstContainer.containedTempIds : [];
-          const extraIds = syntheticSnapshots.map((section) => section && section.id).filter(Boolean);
-          firstContainer.containedTempIds = Array.from(new Set(existingTempIds.concat(extraIds)));
-        }
       }
     }
 
@@ -1704,9 +1797,9 @@
 
     return buildDirectoryData({
       state: previewStatePrepared,
-      importedOnly: true,
       enableGroupDelete: false,
-      copies: []
+      copies: [],
+      groupsOnly: true
     });
   }
 
@@ -1780,16 +1873,6 @@
     const fallbackAll = t('删除当前及子级', 'Delete current and children');
     const kind = normalizeText(action && action.kind);
 
-    if (kind === 'import-group') {
-      return {
-        delete: t('删除导入区块', 'Delete imported group'),
-        confirm: t('确认删除导入区块', 'Confirm delete imported group'),
-        cancel: fallbackCancel,
-        current: fallbackCurrent,
-        all: fallbackAll
-      };
-    }
-
     if (kind === 'permanent-copy') {
       return {
         delete: t('删除永久栏目副本', 'Delete permanent copy'),
@@ -1812,8 +1895,8 @@
 
     if (kind === 'md-node') {
       return {
-        delete: t('删除空白栏目', 'Delete blank card'),
-        confirm: t('确认删除空白栏目', 'Confirm delete blank card'),
+        delete: (action && action.deleteTitle) || t('删除空白栏目', 'Delete blank card'),
+        confirm: (action && action.confirmTitle) || t('确认删除空白栏目', 'Confirm delete blank card'),
         cancel: fallbackCancel,
         current: (action && action.currentTitle) || fallbackCurrent,
         all: (action && action.allTitle) || fallbackAll
@@ -1840,74 +1923,97 @@
   }
 
   function appendNodeDeleteControl(containerEl, node) {
-    if (!containerEl || !node || !node.showDeleteControl || !node.deleteAction) return;
+    if (!containerEl || !node) return;
 
-    const action = node.deleteAction;
-    const labels = getDeleteActionLabels(action);
-    const deleteUiOpen = !!pendingDeleteUiKey && pendingDeleteUiKey === node.key;
+    const isGroup = node.variant === 'card-group-item' || (node.deleteAction && node.deleteAction.directoryVariant === 'card-group');
+    const hasDelete = !!(node.showDeleteControl && node.deleteAction);
+
+    if (!hasDelete && !isGroup) return;
+
     const deleteWrap = document.createElement('span');
     deleteWrap.className = 'canvas-dir-folder-delete-wrap';
+    const deleteUiOpen = hasDelete && !!pendingDeleteUiKey && pendingDeleteUiKey === node.key;
     if (deleteUiOpen) {
       deleteWrap.classList.add('is-open');
     }
 
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'canvas-dir-folder-delete';
-    if (deleteUiOpen) {
-      deleteBtn.classList.add('is-armed');
+    if (isGroup) {
+      const locateBtn = document.createElement('button');
+      locateBtn.type = 'button';
+      locateBtn.className = 'canvas-dir-folder-locate';
+      locateBtn.dataset.nodeLocateKey = node.key;
+      locateBtn.setAttribute('aria-label', t('定位并放大', 'Locate and zoom'));
+      locateBtn.title = t('定位并放大', 'Locate and zoom');
+      locateBtn.innerHTML = '<i class="fas fa-search-plus" aria-hidden="true"></i>';
+      deleteWrap.appendChild(locateBtn);
     }
-    deleteBtn.dataset.nodeDeleteKey = node.key;
-    deleteBtn.setAttribute('aria-label', labels.delete);
-    deleteBtn.title = labels.delete;
-    deleteBtn.innerHTML = '<i class="fas fa-trash" aria-hidden="true"></i>';
-    deleteWrap.appendChild(deleteBtn);
 
-    nodeDeleteActionMap.set(node.key, action);
+    if (hasDelete) {
+      const action = node.deleteAction;
+      const labels = getDeleteActionLabels(action);
+      nodeDeleteActionMap.set(node.key, action);
 
-    if (deleteUiOpen) {
-      const secondaryWrap = document.createElement('span');
-      secondaryWrap.className = 'canvas-dir-folder-delete-secondary';
-
-      if (action.scopeOptions) {
-        const currentBtn = document.createElement('button');
-        currentBtn.type = 'button';
-        currentBtn.className = 'canvas-dir-folder-delete-current';
-        currentBtn.dataset.nodeDeleteKey = node.key;
-        currentBtn.setAttribute('aria-label', labels.current);
-        currentBtn.dataset.tooltip = labels.current;
-        currentBtn.innerHTML = '<i class="fas fa-circle" aria-hidden="true"></i>';
-        secondaryWrap.appendChild(currentBtn);
-
-        const allBtn = document.createElement('button');
-        allBtn.type = 'button';
-        allBtn.className = 'canvas-dir-folder-delete-all';
-        allBtn.dataset.nodeDeleteKey = node.key;
-        allBtn.setAttribute('aria-label', labels.all);
-        allBtn.dataset.tooltip = labels.all;
-        allBtn.innerHTML = '<i class="fas fa-layer-group" aria-hidden="true"></i>';
-        secondaryWrap.appendChild(allBtn);
+      if (!deleteUiOpen) {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'canvas-dir-folder-delete';
+        deleteBtn.dataset.nodeDeleteKey = node.key;
+        deleteBtn.setAttribute('aria-label', labels.delete);
+        deleteBtn.title = labels.delete;
+        deleteBtn.innerHTML = '<i class="fas fa-trash" aria-hidden="true"></i>';
+        deleteWrap.appendChild(deleteBtn);
       } else {
-        const confirmBtn = document.createElement('button');
-        confirmBtn.type = 'button';
-        confirmBtn.className = 'canvas-dir-folder-delete-confirm';
-        confirmBtn.dataset.nodeDeleteKey = node.key;
-        confirmBtn.title = labels.confirm;
-        confirmBtn.setAttribute('aria-label', labels.confirm);
-        confirmBtn.innerHTML = '<i class="fas fa-check" aria-hidden="true"></i>';
-        secondaryWrap.appendChild(confirmBtn);
+        const secondaryWrap = document.createElement('span');
+        secondaryWrap.className = 'canvas-dir-folder-delete-secondary';
+
+        if (action.scopeOptions) {
+          const currentBtn = document.createElement('button');
+          currentBtn.type = 'button';
+          currentBtn.className = 'canvas-dir-folder-delete-current';
+          currentBtn.dataset.nodeDeleteKey = node.key;
+          currentBtn.setAttribute('aria-label', labels.current);
+          currentBtn.dataset.tooltip = labels.current;
+          if (normalizeText(action && action.directoryVariant) === 'card-group') {
+            currentBtn.innerHTML = '<span class="icon-frame-delete"><i class="far fa-square"></i><i class="fas fa-trash-alt"></i></span>';
+          } else {
+            currentBtn.innerHTML = '<i class="fas fa-circle" aria-hidden="true"></i>';
+          }
+          secondaryWrap.appendChild(currentBtn);
+
+          const allBtn = document.createElement('button');
+          allBtn.type = 'button';
+          allBtn.className = 'canvas-dir-folder-delete-all';
+          allBtn.dataset.nodeDeleteKey = node.key;
+          allBtn.setAttribute('aria-label', labels.all);
+          allBtn.dataset.tooltip = labels.all;
+          if (normalizeText(action && action.directoryVariant) === 'card-group') {
+            allBtn.innerHTML = '<i class="far fa-trash-alt" aria-hidden="true"></i>';
+          } else {
+            allBtn.innerHTML = '<i class="fas fa-layer-group" aria-hidden="true"></i>';
+          }
+          secondaryWrap.appendChild(allBtn);
+        } else {
+          const confirmBtn = document.createElement('button');
+          confirmBtn.type = 'button';
+          confirmBtn.className = 'canvas-dir-folder-delete-confirm';
+          confirmBtn.dataset.nodeDeleteKey = node.key;
+          confirmBtn.title = labels.confirm;
+          confirmBtn.setAttribute('aria-label', labels.confirm);
+          confirmBtn.innerHTML = '<i class="fas fa-check" aria-hidden="true"></i>';
+          secondaryWrap.appendChild(confirmBtn);
+        }
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'canvas-dir-folder-delete-cancel';
+        cancelBtn.dataset.nodeDeleteKey = node.key;
+        cancelBtn.title = labels.cancel;
+        cancelBtn.setAttribute('aria-label', labels.cancel);
+        cancelBtn.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
+        secondaryWrap.appendChild(cancelBtn);
+
+        deleteWrap.appendChild(secondaryWrap);
       }
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.type = 'button';
-      cancelBtn.className = 'canvas-dir-folder-delete-cancel';
-      cancelBtn.dataset.nodeDeleteKey = node.key;
-      cancelBtn.title = labels.cancel;
-      cancelBtn.setAttribute('aria-label', labels.cancel);
-      cancelBtn.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
-      secondaryWrap.appendChild(cancelBtn);
-
-      deleteWrap.appendChild(secondaryWrap);
     }
 
     containerEl.appendChild(deleteWrap);
@@ -1919,7 +2025,16 @@
       details.className = 'canvas-dir-folder';
       details.dataset.nodeKey = node.key;
       if (node.variant) details.dataset.nodeVariant = node.variant;
-      details.open = openFolderKeys.has(node.key) || node.open !== false;
+      let isOpen = false;
+      const storedStates = getFolderOpenStates();
+      if (openFolderKeys.has(node.key)) {
+        isOpen = true;
+      } else if (storedStates[node.key] !== undefined) {
+        isOpen = storedStates[node.key];
+      } else {
+        isOpen = getDefaultFolderOpenState(node);
+      }
+      details.open = isOpen;
 
       const summary = document.createElement('summary');
       if (node.showIcon) {
@@ -2061,10 +2176,10 @@
     });
   }
 
-  function locateElement(module, element) {
+  function locateElement(module, element, zoom = null) {
     if (!module || typeof module.locateElement !== 'function' || !element) return false;
     try {
-      module.locateElement(element);
+      module.locateElement(element, zoom);
       return true;
     } catch (_) {
       return false;
@@ -2094,53 +2209,53 @@
     return document.getElementById(`permanent-section-copy-${safeCopyId}`);
   }
 
-  function locatePermanentMain(module) {
+  function locatePermanentMain(module, zoom = null) {
     if (module && typeof module.locatePermanent === 'function') {
       try {
-        module.locatePermanent();
+        module.locatePermanent(zoom);
         return true;
       } catch (_) { }
     }
-    return locateElement(module, resolvePermanentSectionElement(null));
+    return locateElement(module, resolvePermanentSectionElement(null), zoom);
   }
 
-  function locatePermanentCopy(module, copyId) {
+  function locatePermanentCopy(module, copyId, zoom = null) {
     if (!copyId) return false;
     const sectionEl = resolvePermanentSectionElement(copyId);
     if (sectionEl) {
-      return locateElement(module, sectionEl);
+      return locateElement(module, sectionEl, zoom);
     }
     return false;
   }
 
-  function locateByNodeId(module, nodeId) {
+  function locateByNodeId(module, nodeId, zoom = null) {
     const id = normalizeText(nodeId);
     if (!id) return false;
 
     if (id === 'permanentSection' || id === 'permanent-section') {
-      return locatePermanentMain(module);
+      return locatePermanentMain(module, zoom);
     }
 
     if (id.startsWith('permanent-section-copy-')) {
       const copyId = id.slice('permanent-section-copy-'.length);
-      return locatePermanentCopy(module, copyId);
+      return locatePermanentCopy(module, copyId, zoom);
     }
 
     if (id.startsWith('temp-section-') || id.startsWith('tempSecId_')) {
       if (module && typeof module.locateSection === 'function') {
         try {
-          module.locateSection(id);
+          module.locateSection(id, zoom);
           return true;
         } catch (_) { }
       }
       const tempEl = document.getElementById(id);
-      if (tempEl) return locateElement(module, tempEl);
+      if (tempEl) return locateElement(module, tempEl, zoom);
       return false;
     }
 
     const target = document.getElementById(id);
     if (target) {
-      return locateElement(module, target);
+      return locateElement(module, target, zoom);
     }
 
     return false;
@@ -2166,33 +2281,33 @@
     }, 1200);
   }
 
-  function locateTarget(target) {
+  function locateTarget(target, zoom = null) {
     if (!target || typeof target !== 'object') return;
 
     const module = getCanvasModule();
     switch (target.kind) {
       case 'permanent-main':
-        locatePermanentMain(module);
+        locatePermanentMain(module, zoom);
         break;
       case 'permanent-copy':
-        locatePermanentCopy(module, target.copyId);
+        locatePermanentCopy(module, target.copyId, zoom);
         break;
       case 'temp-section':
         if (module && typeof module.locateSection === 'function') {
           try {
-            module.locateSection(target.sectionId);
+            module.locateSection(target.sectionId, zoom);
             return;
           } catch (_) { }
         }
-        locateByNodeId(module, target.sectionId);
+        locateByNodeId(module, target.sectionId, zoom);
         break;
       case 'md-node':
-        locateByNodeId(module, target.nodeId);
+        locateByNodeId(module, target.nodeId, zoom);
         break;
       case 'edge':
         highlightEdge(target.edgeId);
-        if (locateByNodeId(module, target.fromNode)) return;
-        locateByNodeId(module, target.toNode);
+        if (locateByNodeId(module, target.fromNode, zoom)) return;
+        locateByNodeId(module, target.toNode, zoom);
         break;
       default:
         break;
@@ -2269,51 +2384,6 @@
 
     pendingDeleteUiKey = key;
     queueRefresh({ force: true });
-  }
-
-  function runDeleteImportedGroupAction(action) {
-    if (!action || action.kind !== 'import-group') return false;
-
-    const containerId = normalizeText(action.containerId);
-    if (containerId) {
-      try {
-        if (typeof global.deleteImportGroup === 'function') {
-          global.deleteImportGroup(containerId);
-          return true;
-        }
-      } catch (_) { }
-
-      try {
-        if (typeof global.removeMdNode === 'function') {
-          global.removeMdNode(containerId, true);
-          return true;
-        }
-      } catch (_) { }
-    }
-
-    const tempIds = Array.isArray(action.tempIds) ? action.tempIds.map(id => normalizeText(id)).filter(Boolean) : [];
-    const mdIds = Array.isArray(action.mdIds) ? action.mdIds.map(id => normalizeText(id)).filter(Boolean) : [];
-
-    let removed = false;
-    if (typeof global.removeTempNode === 'function') {
-      tempIds.forEach((id) => {
-        try {
-          global.removeTempNode(id);
-          removed = true;
-        } catch (_) { }
-      });
-    }
-
-    if (typeof global.removeMdNode === 'function') {
-      mdIds.forEach((id) => {
-        try {
-          global.removeMdNode(id, false);
-          removed = true;
-        } catch (_) { }
-      });
-    }
-
-    return removed;
   }
 
   function collectTempSectionDeleteIds(sectionId, includeDescendants = false) {
@@ -2430,8 +2500,6 @@
     if (!action || typeof action !== 'object') return false;
 
     switch (normalizeText(action.kind)) {
-      case 'import-group':
-        return runDeleteImportedGroupAction(action);
       case 'temp-section':
         return runDeleteTempSectionAction(action, mode);
       case 'md-node':
@@ -2446,6 +2514,28 @@
   }
 
   function handleRootClick(event) {
+    const locateBtn = event && event.target && event.target.closest ? event.target.closest('.canvas-dir-folder-locate') : null;
+    if (locateBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const nodeKey = locateBtn.dataset.nodeLocateKey;
+      if (nodeKey) {
+        const target = nodeActionMap.get(nodeKey);
+        if (target) {
+          const module = getCanvasModule();
+          if (target.kind === 'md-node') {
+            if (module && typeof module.selectMdNode === 'function') {
+              try { module.selectMdNode(target.nodeId); } catch (_) {}
+            }
+            locateByNodeId(module, target.nodeId, 'fit');
+          } else {
+            locateTarget(target, 'fit');
+          }
+        }
+      }
+      return;
+    }
+
     const deleteCurrentBtn = event && event.target && event.target.closest
       ? event.target.closest('.canvas-dir-folder-delete-current')
       : null;
@@ -2565,6 +2655,13 @@
     const target = nodeActionMap.get(nodeKey);
     if (!target) return;
 
+    if (targetEl.classList.contains('canvas-dir-folder-summary-btn')) {
+      activeNodeKey = nodeKey;
+      const root = document.getElementById(ROOT_ID);
+      updateActiveState(root);
+      return;
+    }
+
     if (targetEl.classList.contains('canvas-dir-item-btn')) {
       event.preventDefault();
       event.stopPropagation();
@@ -2577,11 +2674,31 @@
     locateTarget(target);
   }
 
+  function handleGlobalPointerDown(event) {
+    if (!pendingDeleteUiKey) return;
+    const target = event && event.target ? event.target : null;
+    if (!target) return;
+
+    const root = document.getElementById(ROOT_ID);
+    if (root && typeof root.contains === 'function' && root.contains(target)) return;
+
+    clearPendingDeleteUi({ refresh: true });
+  }
+
   function bindRootEvents(root) {
     if (!root) return;
     if (root.dataset.canvasDirectoryBound === 'true') return;
     root.dataset.canvasDirectoryBound = 'true';
     root.addEventListener('click', handleRootClick);
+    root.addEventListener('toggle', (event) => {
+      const details = event.target;
+      if (details && details.classList.contains('canvas-dir-folder')) {
+        const key = details.dataset.nodeKey;
+        if (key) {
+          saveFolderOpenState(key, details.open);
+        }
+      }
+    }, true);
   }
 
   function renderPreviewDirectory(root, previewState, options = {}) {
@@ -2676,6 +2793,7 @@
     initialized = true;
     ensureCanvasObserver();
     queueRefresh({ force: true });
+    global.addEventListener('pointerdown', handleGlobalPointerDown, true);
 
     refreshTimer = global.setInterval(() => {
       ensureCanvasObserver();

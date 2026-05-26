@@ -29,7 +29,7 @@
  * - Import/export dialogs, previews, file inputs, download actions, and mode
  *   selection UI.
  * - Presentation-only export modes.
- * - Import placement, import-container drag behavior, and toolbar button wiring.
+ * - Import placement and toolbar button wiring.
  *
  * When adding new operations (create/update/delete/replace/apply), prefer adding
  * a small reusable primitive here and expose it through a stable facade such as
@@ -4117,24 +4117,6 @@ function __buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn, export
     return `${folder}/${fileName}.${fileExt}`;
 }
 
-function __getImportContainerLabelFromNode(node) {
-    if (!node || node.subtype !== 'import-container') return '';
-    const direct = (typeof node.groupLabel === 'string') ? node.groupLabel.replace(/\u200B/g, '').trim() : '';
-    if (direct) return direct;
-    const html = (typeof node.html === 'string') ? node.html : '';
-    if (!html) return '';
-    try {
-        const div = document.createElement('div');
-        div.innerHTML = html;
-        const labelEl = div.querySelector('.import-group-label');
-        const txt = (labelEl ? labelEl.textContent : div.textContent) || '';
-        return String(txt).replace(/\u200B/g, '').trim().split('\n')[0].trim();
-    } catch (_) {
-        return '';
-    }
-}
-
-
 function __normalizeObsidianExportRoot(path, isEn, options = {}) {
     const allowEmpty = !!(options && options.allowEmpty);
     const fallback = '书签画布';
@@ -4742,30 +4724,21 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
     nodes.forEach((node) => {
         if (node.type === 'group') {
             const labelRaw = (typeof node.label === 'string') ? node.label : '';
-            const hintRaw = isEn ? 'Obsidian Group' : 'Obsidian 分组';
-            const safeLabel = __escapeHtml(labelRaw || (isEn ? 'Group' : '分组'));
-            const safeHint = __escapeHtml(hintRaw);
             const convertedColor = convertObsidianColor(node.color);
             const isHex = convertedColor && convertedColor.startsWith('#');
 
             tempState.mdNodes.push({
                 id: node.id,
                 type: 'md',
-                subtype: 'import-container',
+                subtype: 'card-group',
                 x: node.x,
                 y: node.y,
                 width: node.width,
                 height: node.height,
-                groupLabel: labelRaw || null,
-                groupHint: hintRaw,
-                containedTempIds: [],
-                containedMdIds: [],
-                _membershipInitialized: false,
-                text: '',
-                html: `<div class="import-group-label">${safeLabel}</div><div class="import-group-hint">${safeHint}</div>`,
-                color: 'transparent',
+                label: labelRaw || (isEn ? 'Card Group' : '卡片组'),
+                color: null,
                 colorHex: isHex ? convertedColor : null,
-                style: 'border: 2px dashed #bbb; background: rgba(0,0,0,0.02);'
+                pinned: false
             });
             return;
         }
@@ -4871,8 +4844,6 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
             });
         }
     });
-
-    try { __recomputeImportContainerMembershipForTempState(tempState); } catch (_) { }
 
     tempState.edges = edges.map((edge) => {
         const convertedColor = convertObsidianColor(edge.color);
@@ -5100,8 +5071,6 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     const bounds = __calculateNodesBoundingBox(remappedNodes);
 
     // 3. Find "Empty Space" near current viewport (guarantee non-overlap)
-    // Place imported batch near the current view, but avoid overlapping existing import-containers
-    // (otherwise consecutive imports can get nested, causing confusing drag/delete behavior).
     const workspace = document.getElementById('canvasWorkspace');
     const workspaceRect = workspace ? workspace.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
     const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
@@ -5114,13 +5083,6 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     const containerLabel = importFileName || (isEn
         ? `📦 Imported Package(${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()})`
         : `📦 导入的包(${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()})`);
-
-    const containerHint = isEn
-        ? 'Items inside this frame will be removed if you delete this group. Move items OUT to keep them.'
-        : '删除此分组时，框内的项目会一并删除。将项目移出框外可保留它们。';
-
-    const safeLabel = __escapeHtml(containerLabel);
-    const safeHint = __escapeHtml(containerHint);
 
     const containerWidth = bounds.width + (PADDING * 2);
     const containerHeight = bounds.height + (PADDING * 2);
@@ -5157,10 +5119,10 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
         );
     };
 
-    const collidesWithExistingImportContainers = (x, y, w, h) => {
+    const collidesWithExistingGroups = (x, y, w, h) => {
         const nodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : [];
         for (const n of nodes) {
-            if (!n || n.subtype !== 'import-container') continue;
+            if (!n || n.subtype !== 'card-group') continue;
             const r = getNodeRect(n);
             if (!r) continue;
             if (overlaps(x, y, w, h, r.x, r.y, r.w, r.h)) return true;
@@ -5188,7 +5150,7 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
                 const targetBoundsMinY = baseY + yMultipliers[yi] * stepY;
                 const containerX = targetBoundsMinX - PADDING;
                 const containerY = targetBoundsMinY - PADDING;
-                if (!collidesWithExistingImportContainers(containerX, containerY, containerWidth, containerHeight)) {
+                if (!collidesWithExistingGroups(containerX, containerY, containerWidth, containerHeight)) {
                     return { targetBoundsMinX, targetBoundsMinY };
                 }
             }
@@ -5205,31 +5167,21 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     const offsetY = targetBoundsMinY - bounds.minY;
 
     const containerNode = {
-        id: `import-group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `card-group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         type: 'md',
-        subtype: 'import-container', // Special flag
-        importMode,
+        subtype: 'card-group',
         x: (targetBoundsMinX - PADDING),
         y: (targetBoundsMinY - PADDING),
         width: containerWidth,
         height: containerHeight,
-        groupLabel: containerLabel,
-        groupHint: containerHint,
-        // Membership: only these nodes move with the group; membership updates only when user drags nodes in/out
-        containedTempIds: remappedNodes && Array.isArray(remappedNodes.tempSections) ? remappedNodes.tempSections.map(s => s && s.id).filter(Boolean) : [],
-        containedMdIds: remappedNodes && Array.isArray(remappedNodes.mdNodes) ? remappedNodes.mdNodes.map(n => n && n.id).filter(Boolean) : [],
-        _membershipInitialized: true,
-        text: '', // No text, just UI
-        // 移除背景样式，只保留纯文字，样式移入 CSS 以支持主题适配
-        html: `<div class="import-group-label">${safeLabel}</div><div class="import-group-hint">${safeHint}</div>`,
-        color: 'transparent',
-        style: 'border: 2px dashed #bbb; background: rgba(0,0,0,0.02);' // No z-index, rely on DOM order
+        label: containerLabel,
+        color: null,
+        pinned: false
     };
 
     // 5. Apply Offset to all imported nodes
     remappedNodes.tempSections.forEach(s => { s.x += offsetX; s.y += offsetY; });
     remappedNodes.mdNodes.forEach(n => { n.x += offsetX; n.y += offsetY; });
-
     // 临时导入沙箱模式已下线：导入内容一律作为正式内容处理并持久化。
 
     console.log(`[Canvas] Import Stats:
@@ -5583,21 +5535,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
     if (Array.isArray(tempState.mdNodes)) {
         tempState.mdNodes.forEach(node => {
             const newId = getNewId(node.id);
-            // Ensure style/color are preserved
             const newNode = { ...node, id: newId };
-            // Remap import-container membership IDs (否则导入后组框成员会指向旧ID)
-            if (newNode && newNode.subtype === 'import-container') {
-                const tempIds = Array.isArray(newNode.containedTempIds) ? newNode.containedTempIds : [];
-                const mdIds = Array.isArray(newNode.containedMdIds) ? newNode.containedMdIds : [];
-                const remapList = (ids) => Array.from(new Set(
-                    ids
-                        .map((oldId) => oldId ? getNewId(oldId) : null)
-                        .filter(Boolean)
-                        .filter((id) => id !== newId)
-                ));
-                newNode.containedTempIds = remapList(tempIds);
-                newNode.containedMdIds = remapList(mdIds);
-            }
             newMdNodes.push(newNode);
         });
     } else {
@@ -5674,27 +5612,6 @@ function __findCurrentContentRightBound() {
     return maxX === -Infinity ? 100 : maxX;
 }
 
-// Special Render Logic for "Import Container" (Group)
-// We need to inject this into 'renderMdNode' or handle it there. 
-// For now, let's modify the behavior by checking the subtype inside renderMdNode logic?
-// No, 'renderMdNode' in previous context treats html/text.
-// We can use the existing 'renderMdNode' and just ensuring the DELETE logic works as requested.
-
-function __setupImportContainerEvents(nodeElement, node) {
-    // This function is called after renderMdNode creates the element
-    if (node.subtype !== 'import-container') return;
-
-    // Note: The delete functionality is now handled by the toolbar's delete button
-    // which shows a popover with "Delete Frame Only" and "Delete All Content" options.
-    // No additional UI is needed here.
-}
-
-
-function deleteImportGroup(groupId) {
-    // 统一用 membership 级联删除，避免重叠/掠过导致误删
-    removeMdNode(groupId, true);
-}
-
 function formatSectionText(section) {
     const lines = [`# ${section.title || '临时栏目'} `, ''];
 
@@ -5721,115 +5638,6 @@ function formatSectionText(section) {
 // 数据持久化
 // =============================================================================
 
-
-/**
- * 自动调整 import-container 大小以包裹内容
- * 策略：检查所有大部分区域（>50%）位于容器内的节点，如果它们超出容器边界，则扩展容器。
- */
-function autoResizeImportContainers() {
-    const containers = (CanvasState.mdNodes || []).filter(n => n && n.subtype === 'import-container');
-    if (containers.length === 0) return;
-
-    // 仅当“成员节点超出组框边界”时才扩容；禁止基于重叠/接触的误扩容。
-    // 这样拖动组框掠过其它卡片时，不会触发宽高变化。
-    if (CanvasState.dragState && CanvasState.dragState.isDragging) return;
-    try {
-        const workspace = document.getElementById('workspace');
-        if (workspace && workspace.classList && workspace.classList.contains('is-zooming')) return;
-    } catch (_) { }
-
-    let changed = false;
-    const PADDING = 60;
-
-    for (const container of containers) {
-        try { __ensureImportContainerMembership(container); } catch (_) { }
-
-        const memberTemps = Array.isArray(container.containedTempIds) ? container.containedTempIds : [];
-        const memberMds = Array.isArray(container.containedMdIds) ? container.containedMdIds : [];
-
-        const children = [];
-        for (const id of memberTemps) {
-            const s = (CanvasState.tempSections || []).find(ss => ss && ss.id === id);
-            if (s) children.push(s);
-        }
-        for (const id of memberMds) {
-            const n = (CanvasState.mdNodes || []).find(nn => nn && nn.id === id);
-            if (n) children.push(n);
-        }
-
-        if (children.length === 0) continue;
-
-        let minX = Infinity;
-        let minY = Infinity;
-        let maxX = -Infinity;
-        let maxY = -Infinity;
-        for (const c of children) {
-            const x = Number(c.x);
-            const y = Number(c.y);
-            const w = Number(c.width);
-            const h = Number(c.height);
-            if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
-            if (x < minX) minX = x;
-            if (y < minY) minY = y;
-            if (x + w > maxX) maxX = x + w;
-            if (y + h > maxY) maxY = y + h;
-        }
-        if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) continue;
-
-        const contentLeft = minX - PADDING;
-        const contentTop = minY - PADDING;
-        const contentRight = maxX + PADDING;
-        const contentBottom = maxY + PADDING;
-
-        let newX = container.x;
-        let newY = container.y;
-        let newWidth = container.width;
-        let newHeight = container.height;
-        let hasResize = false;
-
-        // 仅扩容（不自动缩小）
-        if (contentLeft < container.x) {
-            newX = contentLeft;
-            newWidth += (container.x - contentLeft);
-            hasResize = true;
-        }
-        if (contentTop < container.y) {
-            newY = contentTop;
-            newHeight += (container.y - contentTop);
-            hasResize = true;
-        }
-        if (contentRight > newX + newWidth) {
-            newWidth = contentRight - newX;
-            hasResize = true;
-        }
-        if (contentBottom > newY + newHeight) {
-            newHeight = contentBottom - newY;
-            hasResize = true;
-        }
-
-        if (!hasResize) continue;
-
-        container.x = newX;
-        container.y = newY;
-        container.width = newWidth;
-        container.height = newHeight;
-
-        const el = document.getElementById(container.id);
-        if (el) {
-            try {
-                el.style.left = newX + 'px';
-                el.style.top = newY + 'px';
-                el.style.width = newWidth + 'px';
-                el.style.height = newHeight + 'px';
-            } catch (_) { }
-        }
-        changed = true;
-    }
-
-    if (changed) {
-        try { scheduleBoundsUpdate(); } catch (_) { }
-    }
-}
 
 let __canvasTempStateBcsLoadInProgress = false;
 let __canvasTempStateBcsWriteTimer = null;
@@ -5886,14 +5694,19 @@ function __buildPersistedCanvasState(state, options = {}) {
             const cloned = __cloneCanvasProtocolJson(node);
             if (!cloned || typeof cloned !== 'object') return null;
             if (!preserveRaw) {
-                const refreshCachesFromMarkdown = !__isCanvasNativeTextNode(cloned)
-                    || !(typeof cloned.html === 'string' && cloned.html.trim());
-                __ensureMdNodeMarkdownProtocol(cloned, {
-                    refreshCachesFromMarkdown
-                });
-                if (__isCanvasNativeTextNode(cloned)) {
+                const isGroupNode = cloned.subtype === 'card-group';
+                const refreshCachesFromMarkdown = !isGroupNode && (
+                    !__isCanvasNativeTextNode(cloned)
+                    || !(typeof cloned.html === 'string' && cloned.html.trim())
+                );
+                if (!isGroupNode) {
+                    __ensureMdNodeMarkdownProtocol(cloned, {
+                        refreshCachesFromMarkdown
+                    });
+                }
+                if (!isGroupNode && __isCanvasNativeTextNode(cloned)) {
                     try { delete cloned.markdownSource; } catch (_) { }
-                } else {
+                } else if (!isGroupNode) {
                     cloned.markdownSource = __normalizeCanvasMarkdownSource(__deriveMdNodeMarkdownSource(cloned));
                 }
             }
@@ -6456,8 +6269,8 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
 
     try {
         const exportMdBase = getBlankNodeDefaultSize();
-        mdNodes.filter((n) => n && n.subtype === 'import-container').forEach((n) => {
-            const label = __getImportContainerLabelFromNode(n);
+        mdNodes.filter((n) => n && n.subtype === 'card-group').forEach((n) => {
+            const label = (typeof n.label === 'string' && n.label.trim()) ? n.label : null;
             const color = n && (n.colorHex || n.color) ? (n.colorHex || n.color) : null;
             canvasData.nodes.push(__buildObsidianCanvasGroupNode({
                 id: n.id,
@@ -6491,7 +6304,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
 
     mdNodes.forEach((node) => {
         if (!node || !node.id) return;
-        if (node.subtype === 'import-container') return;
+        if (node.subtype === 'card-group') return;
         const color = node.colorHex || node.color || null;
         const body = __isCanvasNativeTextNode(node)
             ? __resolveCanvasNativeTextNodeBody(node)
@@ -6849,6 +6662,9 @@ function __buildCanvasTempStateProtocolView(stateInput, options = {}) {
         .map((node) => {
             const cloned = __cloneCanvasProtocolJson(node);
             if (!cloned) return null;
+            if (cloned.subtype === 'card-group') {
+                return cloned;
+            }
             const refreshCachesFromMarkdown = !__isCanvasNativeTextNode(cloned)
                 || !cloned.html;
             __ensureMdNodeMarkdownProtocol(cloned, {
@@ -7538,6 +7354,7 @@ function __canonicalizeObsidianCanvasNodeForJson(nodeInput) {
         return __copyCanvasExtraKeys(node, result, new Set([...baseKeys, 'text', 'color']));
     }
     if (type === 'group') {
+        // 严格 JsonCanvas group：仅保留标准 8 字段，不透传任何私有 extra key。
         const result = {
             id: node.id,
             type: 'group',
@@ -7548,7 +7365,7 @@ function __canonicalizeObsidianCanvasNodeForJson(nodeInput) {
         };
         if (node.label != null && String(node.label).trim()) result.label = node.label;
         if (node.color != null && String(node.color).trim()) result.color = node.color;
-        return __copyCanvasExtraKeys(node, result, new Set([...baseKeys, 'label', 'color']));
+        return result;
     }
     return __copyCanvasExtraKeys(node, {
         id: node.id,
@@ -7945,35 +7762,27 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
     });
 
     const { isEn } = __getLang();
+
     nodes.forEach((node) => {
         if (!node || !node.id) return;
 
         if (node.type === 'group') {
             const labelRaw = (typeof node.label === 'string') ? node.label : '';
-            const hintRaw = isEn ? 'Obsidian Group' : 'Obsidian 分组';
-            const safeLabel = __escapeHtml(labelRaw || (isEn ? 'Group' : '分组'));
-            const safeHint = __escapeHtml(hintRaw);
             const convertedColor = convertObsidianColor(node.color);
             const isHex = convertedColor && convertedColor.startsWith('#');
 
             tempState.mdNodes.push({
                 id: node.id,
                 type: 'md',
-                subtype: 'import-container',
+                subtype: 'card-group',
                 x: node.x,
                 y: node.y,
                 width: node.width,
                 height: node.height,
-                groupLabel: labelRaw || null,
-                groupHint: hintRaw,
-                containedTempIds: [],
-                containedMdIds: [],
-                _membershipInitialized: false,
-                text: '',
-                html: `<div class="import-group-label">${safeLabel}</div><div class="import-group-hint">${safeHint}</div>`,
-                color: 'transparent',
+                label: labelRaw || (isEn ? 'Card Group' : '卡片组'),
+                color: null,
                 colorHex: isHex ? convertedColor : null,
-                style: 'border: 2px dashed #bbb; background: rgba(0,0,0,0.02);'
+                pinned: false
             });
             return;
         }
@@ -8019,8 +7828,6 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
             colorHex: isHex ? convertedColor : null
         };
     });
-
-    try { __recomputeImportContainerMembershipForTempState(tempState); } catch (_) { }
 
     return __buildCanvasTempStateProtocolView(tempState);
 }

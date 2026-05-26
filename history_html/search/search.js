@@ -7,7 +7,7 @@
  * Canvas 搜索：
  * - 搜索范围：`history.html` 的 `view=canvas`（书签画布视图）
  * - 说明搜索：MD卡片文本、连接线标签、临时栏目说明、永久栏目说明
- * - 卡片搜索：#N序号定位、A-群组搜索、标题匹配
+ * - 卡片（组）搜索：#N序号定位、A-群组搜索、卡片组名字、标题匹配
  * - 行为：点击/回车选择结果后，画布平移到目标位置 + 高亮脉冲动画
  *
  * 依赖：
@@ -43,6 +43,10 @@ const searchUiState = {
     // Canvas bookmark search: whether to show bookmark / folder / domain results
     // Values: 'bookmark' | 'folder' | 'domain' | null (auto)
     bookmarkTypeFilter: null,
+
+    // Canvas card(group) search: whether to show cards/sections or groups
+    // Values: 'card' | 'group' | null (auto)
+    structureTypeFilter: null,
 
     // Cache for bookmark-domain grouping (per query)
     domainIndexCache: null,
@@ -1069,6 +1073,24 @@ function handleSearchResultsPanelClick(e) {
         return;
     }
 
+    const structureTypeBtn = e.target.closest('.canvas-structure-type-btn');
+    if (structureTypeBtn) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+
+        const type = String(structureTypeBtn.dataset.type || '');
+        if (type !== 'card' && type !== 'group') return;
+        searchUiState.structureTypeFilter = type;
+        renderCanvasSearchResults(searchUiState.resultSource || [], {
+            view: 'canvas',
+            query: searchUiState.query,
+            selectedIndex: 0
+        });
+        return;
+    }
+
     // 0b. Domain granularity toggle (Root / Subdomain)
     const domainGranularityBtn = e.target.closest('.canvas-bookmark-domain-granularity-btn');
     if (domainGranularityBtn) {
@@ -1901,13 +1923,13 @@ const SEARCH_MODES = [
     },
     {
         key: 'structure',
-        label: '卡片',
-        labelEn: 'Card',
+        label: '卡片（组）',
+        labelEn: 'Card (Group)',
         icon: 'fa-layer-group',
         color: 'mode-color-orange',
         // Include date-range example for card mode (e.g. 0107-0120)
-        desc: '序号(#A/A-1), 群组(A-), 时间(今天/2024/0107-0120)',
-        descEn: 'Index(#A/A-1), Group(A-), Time(Today/2024/0107-0120)'
+        desc: '序号(#A/A-1), 群组(A-), 卡片组名字, 时间(今天/2024/0107-0120)',
+        descEn: 'Index(#A/A-1), Group(A-), Card group name, Time(Today/2024/0107-0120)'
     },
     {
         key: 'description',
@@ -1921,7 +1943,7 @@ const SEARCH_MODES = [
 ];
 
 // Canvas mode order must match the visual order in UI:
-// Bookmark (including tags) -> Card -> Description
+// Bookmark (including tags) -> Card (Group) -> Description
 const CANVAS_MODE_KEYS = ['bookmark', 'structure', 'description'];
 
 function getCurrentViewSafe() {
@@ -3040,7 +3062,7 @@ function buildCanvasSearchDb() {
     // 2. MD 卡片（说明搜索 + 卡片标题）- 排除组框容器
     for (const node of (CanvasState.mdNodes || [])) {
         if (!node || !node.id) continue;
-        if (node.subtype === 'import-container') continue;
+        if (node.subtype === 'card-group') continue;
 
         const title = node.title || '';
         const text = node.text || '';
@@ -3099,6 +3121,33 @@ function buildCanvasSearchDb() {
         descriptionIndex.push(item);
 
         itemById.set(edge.id, item);
+    }
+
+    for (const node of (CanvasState.mdNodes || [])) {
+        if (!node || !node.id) continue;
+        if (node.subtype !== 'card-group') continue;
+        const labelRaw = node.label || '';
+        const labelText = String(labelRaw).trim();
+        if (!labelText) continue;
+
+        let color = '#475569';
+        if (node.colorHex) color = node.colorHex;
+        else if (node.color) color = presetToHex(node.color) || color;
+
+        const groupItem = {
+            id: node.id,
+            type: 'group',
+            subtype: node.subtype,
+            title: labelText,
+            label: labelText,
+            x: node.x || 0,
+            y: node.y || 0,
+            color,
+            __title: labelText.toLowerCase(),
+            __label: labelText.toLowerCase()
+        };
+        structureIndex.push(groupItem);
+        itemById.set(node.id, groupItem);
     }
 
     // 4. 永久栏目 (Permanent Section)
@@ -3645,6 +3694,18 @@ function scoreCanvasSearchItem(item, query, options = {}) {
             }
             // 说明匹配 (Only if in Description Mode or index contains it)
             if (item.__description && !isSingleChar && item.__description.includes(q)) score = Math.max(score, 70);
+            break;
+
+        case 'group':
+            // 卡片组：按 label/title 命中（#7）
+            if (item.__title) {
+                if (item.__title.startsWith(q)) score = Math.max(score, 140);
+                else if (!isSingleChar && item.__title.includes(q)) score = Math.max(score, 115);
+            }
+            if (item.__label) {
+                if (item.__label.startsWith(q)) score = Math.max(score, 140);
+                else if (!isSingleChar && item.__label.includes(q)) score = Math.max(score, 115);
+            }
             break;
 
         case 'bookmark-item': {
@@ -4524,7 +4585,7 @@ function searchCanvasAndRender(query, options = {}) {
             }
         } else if (searchUiState.activeMode === 'structure') {
             // Card/Structure Mode: Permanent Sections, Temp Sections (Structure), Groups
-            if (item.type !== 'permanent-section' && item.type !== 'temp-section') {
+            if (item.type !== 'permanent-section' && item.type !== 'temp-section' && item.type !== 'group') {
                 continue;
             }
         } else if (searchUiState.activeMode === 'tag') {
@@ -5325,7 +5386,9 @@ function renderCanvasSearchResults(results, options = {}) {
 
     // Canvas Bookmark Mode: count + filter (bookmark vs folder vs domain)
     const isBookmarkMode = searchUiState.activeMode === 'bookmark';
+    const isStructureMode = searchUiState.activeMode === 'structure';
     let bookmarkModeCounts = null;
+    let structureModeCounts = null;
     const sourceResults = Array.isArray(results) ? results : [];
     let displayResults = sourceResults;
     let domainResults = [];
@@ -5376,6 +5439,32 @@ function renderCanvasSearchResults(results, options = {}) {
         }
     }
 
+    if (isStructureMode) {
+        const cardCount = sourceResults.filter(r => r && r.type !== 'group').length;
+        const groupCount = sourceResults.filter(r => r && r.type === 'group').length;
+        structureModeCounts = { cardCount, groupCount };
+
+        let effectiveFilter = searchUiState.structureTypeFilter;
+        if (effectiveFilter === 'card' && cardCount === 0) effectiveFilter = null;
+        if (effectiveFilter === 'group' && groupCount === 0) effectiveFilter = null;
+        if (!effectiveFilter) {
+            if (cardCount > 0) {
+                effectiveFilter = 'card';
+            } else if (groupCount > 0) {
+                effectiveFilter = 'group';
+            } else {
+                effectiveFilter = null;
+            }
+        }
+        searchUiState.structureTypeFilter = effectiveFilter;
+
+        if (effectiveFilter === 'card') {
+            displayResults = sourceResults.filter(r => r && r.type !== 'group');
+        } else if (effectiveFilter === 'group') {
+            displayResults = sourceResults.filter(r => r && r.type === 'group');
+        }
+    }
+
     // [Tweak] Add style block for result item border
     // Ensure .search-result-item has stronger border
     if (!document.getElementById('search-result-tweaks')) {
@@ -5406,6 +5495,7 @@ function renderCanvasSearchResults(results, options = {}) {
         String(searchUiState.activeMode || ''),
         renderQuery.trim().toLowerCase(),
         String(searchUiState.bookmarkTypeFilter || ''),
+        String(searchUiState.structureTypeFilter || ''),
         String(searchUiState.domainGrouping || '')
     ].join('|');
     const appendPage = options && options.append === true;
@@ -5851,6 +5941,44 @@ function renderCanvasSearchResults(results, options = {}) {
         }
     }
 
+    if (isStructureMode && structureModeCounts) {
+        const { cardCount, groupCount } = structureModeCounts;
+        const active = searchUiState.structureTypeFilter;
+        const showCardBtn = cardCount > 0;
+        const showGroupBtn = groupCount > 0;
+
+        if (showCardBtn || showGroupBtn) {
+            const makeStructureBtn = ({ type, icon, color, label, count }) => {
+                const isActive = active === type;
+                const bg = isActive ? `${color}22` : 'transparent';
+                const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
+                const text = isActive ? color : 'var(--text-secondary)';
+                const gapPx = compactBookmarkToolbar ? 5 : 6;
+                const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
+                const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
+                const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
+                return `<button class="canvas-structure-type-btn${compactBookmarkToolbar ? ' canvas-structure-type-btn-compact' : ''}" data-type="${type}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
+                        <i class="fas ${icon}" style="color:${color};"></i>
+                        <span>${escapeHtml(label)}</span>
+                        <span>${count}</span>
+                    </button>`;
+            };
+            const cardBtn = showCardBtn
+                ? makeStructureBtn({ type: 'card', icon: 'fa-layer-group', color: '#f97316', label: isZh ? '卡片' : 'Card', count: cardCount })
+                : '';
+            const groupBtn = showGroupBtn
+                ? makeStructureBtn({ type: 'group', icon: 'fa-object-group', color: '#7c3aed', label: isZh ? '组' : 'Group', count: groupCount })
+                : '';
+            const toolbarGap = compactBookmarkToolbar ? 6 : 8;
+            const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
+            const controlGap = compactBookmarkToolbar ? 6 : 8;
+
+            html += `<div class="canvas-bookmark-type-toggle canvas-structure-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact canvas-structure-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:flex-start; gap:${toolbarGap}px; padding:${toolbarPadding};">
+                <div style="display:flex; align-items:center; gap:${controlGap}px;">${cardBtn}${groupBtn}</div>
+            </div>`;
+        }
+    }
+
     visibleResults.forEach((item, index) => {
         const isSelected = index === searchUiState.selectedIndex ? 'selected' : '';
         let title = '';
@@ -5905,6 +6033,15 @@ function renderCanvasSearchResults(results, options = {}) {
                 title = escapeHtml(item.label);
                 badge = makeColoredBadge(isZh ? '连线' : 'Edge', 'edge');
                 break;
+
+            case 'group': {
+                title = escapeHtml(item.title || item.label || (isZh ? '组' : 'Group'));
+                badge = makeColoredBadge(
+                    isZh ? '组' : 'Group',
+                    'md'
+                );
+                break;
+            }
 
             case 'permanent-section':
                 // 显示序号 #A, #B, ...
@@ -7583,6 +7720,47 @@ function shouldSkipCanvasPanForMaximizedTarget(elementId, type) {
     return false;
 }
 
+async function exitCanvasNodeFullscreenForSearchLocate() {
+    const active = document.querySelector('.canvas-node-maximized');
+    if (!active || !active.classList) return false;
+    const fullscreenBtn = active.querySelector('.canvas-node-fullscreen-btn, .permanent-section-fullscreen-btn, .temp-node-fullscreen-btn, .md-node-toolbar-btn[data-action="md-fullscreen"]');
+    if (!fullscreenBtn || typeof fullscreenBtn.click !== 'function') return false;
+
+    try {
+        window.__canvasSearchSuppressFullscreenAutoModeCounter = Math.max(
+            Number(window.__canvasSearchSuppressFullscreenAutoModeCounter || 0),
+            1
+        );
+    } catch (_) { }
+
+    try {
+        fullscreenBtn.click();
+    } catch (_) {
+        return false;
+    }
+
+    await waitForSearchLocateAnimationFrames(2);
+    return !document.querySelector('.canvas-node-maximized');
+}
+
+async function locateCanvasGroupSearchResult(item) {
+    if (!item || !item.id) return false;
+    try {
+        if (typeof selectMdNode === 'function') {
+            selectMdNode(item.id);
+        }
+    } catch (_) { }
+    try {
+        if (typeof locateAndZoomToMdNode === 'function') {
+            locateAndZoomToMdNode(item.id, 'fit');
+            return true;
+        }
+    } catch (_) { }
+    return locateCanvasElement(item.id, 'group', {
+        color: item.color || '#7c3aed'
+    });
+}
+
 function getCanvasSearchFullscreenTargetElement(item) {
     if (!item || !item.type) return null;
     const type = String(item.type || '').trim();
@@ -8081,8 +8259,8 @@ async function locateCanvasElement(elementId, type, options = {}) {
             const temp = (CanvasState.tempSections || []).find(s => s.id === id);
             if (temp) return { x: Number(temp.x) || 0, y: Number(temp.y) || 0, w: Number(temp.width) || 0, h: Number(temp.height) || 0 };
         }
-        // 2. MD Node
-        if (!typeHint || typeHint === 'md-node') {
+        // 2. MD Node / Card-Group / Import-Container
+        if (!typeHint || typeHint === 'md-node' || typeHint === 'group') {
             const md = (CanvasState.mdNodes || []).find(n => n.id === id);
             if (md) return { x: Number(md.x) || 0, y: Number(md.y) || 0, w: Number(md.width) || 0, h: Number(md.height) || 0 };
         }
@@ -8118,6 +8296,7 @@ async function locateCanvasElement(elementId, type, options = {}) {
     switch (type) {
         case 'temp-section':
         case 'md-node':
+        case 'group':
             const rect = getRectFromStorage(elementId, type);
             if (rect) {
                 targetX = rect.x + rect.w / 2;
@@ -8540,7 +8719,16 @@ async function activateCanvasSearchResultAtIndex(index) {
         return;
     }
 
-    const fullscreenScope = getCanvasFullscreenSearchScope();
+    let fullscreenScope = getCanvasFullscreenSearchScope();
+    const shouldExitFullscreenForSearchLocate = !!fullscreenScope
+        && searchUiState.activeMode === 'structure'
+        && (item.type === 'group' || item.type === 'md-node');
+    if (shouldExitFullscreenForSearchLocate) {
+        try {
+            await exitCanvasNodeFullscreenForSearchLocate();
+        } catch (_) { }
+        fullscreenScope = getCanvasFullscreenSearchScope();
+    }
     const shouldSwitchFullscreenTarget = !!fullscreenScope
         && searchUiState.activeMode !== 'bookmark'
         && (item.type === 'temp-section' || item.type === 'md-node' || item.type === 'permanent-section');
@@ -8690,6 +8878,8 @@ async function activateCanvasSearchResultAtIndex(index) {
     // Case 3: Single Element
     if (item.type === 'bookmark-item') {
         await locateCanvasBookmarkItem(item);
+    } else if (item.type === 'group') {
+        await locateCanvasGroupSearchResult(item);
     } else {
         const disableAnimationForFullscreenCardSearch = !!fullscreenScope
             && (searchUiState.activeMode === 'structure' || searchUiState.activeMode === 'description');

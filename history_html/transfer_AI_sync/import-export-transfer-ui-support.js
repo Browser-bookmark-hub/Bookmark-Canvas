@@ -5,10 +5,9 @@
  *
  * These are import/export-adjacent runtime helpers that live outside the main
  * `// 导入导出功能` block. They are included so the extracted folder covers
- * the button wiring, drag/drop import helpers, import-container membership,
- * positioning, and imported-group drag behavior. It is loaded by history.html
- * before bookmark_canvas_module.js and still expects the original
- * Bookmark-Canvas runtime globals when executed.
+ * the button wiring, drag/drop import helpers, positioning, and group drag
+ * behavior. It is loaded by history.html before bookmark_canvas_module.js and
+ * still expects the original Bookmark-Canvas runtime globals when executed.
  */
 
 
@@ -21,7 +20,7 @@ const getCanvasExportDownloadFolder = () => [getCanvasExportRootFolder(), getCan
 
 
 
-// ---- import-container-membership-helpers: source lines 1424-1669 ----
+// ---- geometry helpers ----
 
 function __rectFullyInside(inner, outer, margin = 0) {
     if (!inner || !outer) return false;
@@ -33,244 +32,6 @@ function __rectFullyInside(inner, outer, margin = 0) {
         inner.y + inner.h <= outer.y + outer.h - m
     );
 }
-
-function __ensureImportContainerMembership(containerNode) {
-    if (!containerNode || containerNode.subtype !== 'import-container') return;
-    if (!containerNode.containedTempIds) containerNode.containedTempIds = [];
-    if (!containerNode.containedMdIds) containerNode.containedMdIds = [];
-    if (containerNode._membershipInitialized) return;
-
-    // 若当前与其它组框重叠，避免“误吸附”迁移：保持空成员，后续由用户手动拖入建立关系
-    const selfRect = __getRectOfSectionOrNode(containerNode, 'md-node');
-    if (!selfRect) {
-        containerNode._membershipInitialized = true;
-        return;
-    }
-    const otherContainers = Array.isArray(CanvasState.mdNodes)
-        ? CanvasState.mdNodes.filter(n => n && n.id && n.id !== containerNode.id && n.subtype === 'import-container')
-        : [];
-    const overlapsOther = otherContainers.some((n) => {
-        const r = __getRectOfSectionOrNode(n, 'md-node');
-        return r ? __rectsOverlap(selfRect, r, 0) : false;
-    });
-    if (overlapsOther) {
-        containerNode._membershipInitialized = true;
-        return;
-    }
-
-    // 尝试一次性迁移：把“完全在框内”的节点作为初始成员（仅在不重叠的情况下）
-    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
-    const margin = 12 / zoom;
-
-    const tempIds = [];
-    for (const s of (CanvasState.tempSections || [])) {
-        if (!s || !s.id) continue;
-        const r = __getRectOfSectionOrNode(s, 'temp-section');
-        if (r && __rectFullyInside(r, selfRect, margin)) tempIds.push(s.id);
-    }
-    const mdIds = [];
-    for (const n of (CanvasState.mdNodes || [])) {
-        if (!n || !n.id) continue;
-        if (n.id === containerNode.id) continue;
-        if (n.subtype === 'import-container') continue; // 不自动把组框放进组框
-        const r = __getRectOfSectionOrNode(n, 'md-node');
-        if (r && __rectFullyInside(r, selfRect, margin)) mdIds.push(n.id);
-    }
-
-    containerNode.containedTempIds = Array.from(new Set([...(containerNode.containedTempIds || []), ...tempIds]));
-    containerNode.containedMdIds = Array.from(new Set([...(containerNode.containedMdIds || []), ...mdIds]));
-    containerNode._membershipInitialized = true;
-    try { saveTempNodes(); } catch (_) { }
-}
-
-function __collectImportContainerChildElements(containerNode) {
-    if (!containerNode || containerNode.subtype !== 'import-container') return [];
-    __ensureImportContainerMembership(containerNode);
-    const childElements = [];
-
-    const tempIds = Array.isArray(containerNode.containedTempIds) ? containerNode.containedTempIds : [];
-    tempIds.forEach((id) => {
-        const sec = (CanvasState.tempSections || []).find(s => s && s.id === id);
-        if (!sec) return;
-        childElements.push({
-            type: 'temp-section',
-            data: sec,
-            startX: Number(sec.x),
-            startY: Number(sec.y),
-            element: document.getElementById(sec.id)
-        });
-    });
-
-    const mdIds = Array.isArray(containerNode.containedMdIds) ? containerNode.containedMdIds : [];
-    mdIds.forEach((id) => {
-        const n = (CanvasState.mdNodes || []).find(nn => nn && nn.id === id);
-        if (!n) return;
-        childElements.push({
-            type: 'md-node',
-            data: n,
-            startX: Number(n.x),
-            startY: Number(n.y),
-            element: document.getElementById(n.id)
-        });
-    });
-
-    childElements.forEach((child) => {
-        if (child && child.element) {
-            try { child.element.style.transition = 'none'; } catch (_) { }
-        }
-    });
-
-    return childElements;
-}
-
-function __removeNodeFromAllImportContainers(nodeId) {
-    if (!nodeId) return false;
-    let changed = false;
-    for (const c of (CanvasState.mdNodes || [])) {
-        if (!c || c.subtype !== 'import-container') continue;
-        if (Array.isArray(c.containedTempIds) && c.containedTempIds.includes(nodeId)) {
-            c.containedTempIds = c.containedTempIds.filter(id => id !== nodeId);
-            changed = true;
-        }
-        if (Array.isArray(c.containedMdIds) && c.containedMdIds.includes(nodeId)) {
-            c.containedMdIds = c.containedMdIds.filter(id => id !== nodeId);
-            changed = true;
-        }
-    }
-    return changed;
-}
-
-function __addNodeToImportContainer(containerNode, nodeId, nodeType) {
-    if (!containerNode || containerNode.subtype !== 'import-container') return false;
-    if (!nodeId) return false;
-    __ensureImportContainerMembership(containerNode);
-    if (nodeType === 'temp-section') {
-        containerNode.containedTempIds = Array.isArray(containerNode.containedTempIds) ? containerNode.containedTempIds : [];
-        if (!containerNode.containedTempIds.includes(nodeId)) {
-            containerNode.containedTempIds.push(nodeId);
-            return true;
-        }
-        return false;
-    }
-    if (nodeType === 'md-node') {
-        // 不允许组框进组框（降低误触/误吸附）
-        const n = (CanvasState.mdNodes || []).find(nn => nn && nn.id === nodeId);
-        if (n && n.subtype === 'import-container') return false;
-        containerNode.containedMdIds = Array.isArray(containerNode.containedMdIds) ? containerNode.containedMdIds : [];
-        if (!containerNode.containedMdIds.includes(nodeId)) {
-            containerNode.containedMdIds.push(nodeId);
-            return true;
-        }
-        return false;
-    }
-    return false;
-}
-
-function __updateImportContainerMembershipAfterMove(nodeId) {
-    if (!nodeId) return;
-    const temp = (CanvasState.tempSections || []).find(s => s && s.id === nodeId) || null;
-    const md = (CanvasState.mdNodes || []).find(n => n && n.id === nodeId) || null;
-    const nodeType = temp ? 'temp-section' : (md ? 'md-node' : null);
-    if (!nodeType) return;
-    if (md && md.subtype === 'import-container') return; // 组框本身不参与
-
-    const nodeRect = __getRectOfSectionOrNode(temp || md, nodeType);
-    if (!nodeRect) return;
-
-    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
-    const margin = 12 / zoom;
-
-    const containers = (CanvasState.mdNodes || []).filter(n => n && n.subtype === 'import-container');
-    // 选择“最小能完全包含”的容器（更符合小放大、可嵌套的直觉）
-    let target = null;
-    let bestArea = Infinity;
-    for (const c of containers) {
-        if (!c || !c.id) continue;
-        const r = __getRectOfSectionOrNode(c, 'md-node');
-        if (!r) continue;
-        if (!__rectFullyInside(nodeRect, r, margin)) continue;
-        const area = r.w * r.h;
-        if (area < bestArea) {
-            bestArea = area;
-            target = c;
-        }
-    }
-
-    let changed = false;
-    changed = __removeNodeFromAllImportContainers(nodeId) || changed;
-    if (target) {
-        changed = __addNodeToImportContainer(target, nodeId, nodeType) || changed;
-    }
-    if (changed) {
-        try { saveTempNodes(); } catch (_) { }
-    }
-}
-
-function __recomputeImportContainerMembershipForTempState(tempState) {
-    if (!tempState || typeof tempState !== 'object') return;
-    const tempSections = Array.isArray(tempState.sections) ? tempState.sections : [];
-    const mdNodes = Array.isArray(tempState.mdNodes) ? tempState.mdNodes : [];
-    const containers = mdNodes.filter(n => n && n.subtype === 'import-container');
-    if (containers.length === 0) return;
-
-    const margin = 12;
-
-    const getRect = (obj) => {
-        if (!obj) return null;
-        const x = Number(obj.x);
-        const y = Number(obj.y);
-        const w = Number(obj.width);
-        const h = Number(obj.height);
-        if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) return null;
-        return { x, y, w, h };
-    };
-
-    // Reset and mark initialized: membership is derived from geometry here (Obsidian .canvas has no explicit membership).
-    containers.forEach((c) => {
-        c.containedTempIds = [];
-        c.containedMdIds = [];
-        c._membershipInitialized = true;
-    });
-
-    const findSmallestContainer = (rect) => {
-        let target = null;
-        let bestArea = Infinity;
-        for (const c of containers) {
-            const cr = getRect(c);
-            if (!cr) continue;
-            if (!__rectFullyInside(rect, cr, margin)) continue;
-            const area = cr.w * cr.h;
-            if (area < bestArea) {
-                bestArea = area;
-                target = c;
-            }
-        }
-        return target;
-    };
-
-    for (const s of tempSections) {
-        if (!s || !s.id) continue;
-        const r = getRect(s);
-        if (!r) continue;
-        const c = findSmallestContainer(r);
-        if (c) {
-            c.containedTempIds.push(s.id);
-        }
-    }
-
-    for (const n of mdNodes) {
-        if (!n || !n.id) continue;
-        if (n.subtype === 'import-container') continue; // 不做组框进组框
-        const r = getRect(n);
-        if (!r) continue;
-        const c = findSmallestContainer(r);
-        if (c) {
-            c.containedMdIds.push(n.id);
-        }
-    }
-}
-
-
 
 // ---- import-auto-position-helper: source lines 3092-3234 ----
 
@@ -305,7 +66,7 @@ function findAvailablePositionInViewport(width = null, height = null) {
     // 位置策略：
     // - 默认落点在“当前视口中心偏右一点”的空白区域（右偏移以屏幕像素为基准，跨缩放一致）
     // - 多次导入时，轻微右下错位（同样以屏幕像素为基准）
-    // - 额外：尽量避免与现有栏目重叠（否则拖动 import-container 时会误捕获其它栏目）
+    // - 额外：尽量避免与现有栏目重叠
     // - 最终 clamp 到当前视口内，避免跑到很远的右侧
     const marginPx = 24;
     const marginX = marginPx / zoom;
@@ -1751,11 +1512,11 @@ async function showBackupDialog() {
 
 
 
-// ---- import-group-drag-edge-helpers: source lines 13765-13953 ----
+// ---- card-group-drag-edge-helpers: source lines 13765-13953 ----
 
-function __initImportGroupDragEdgeFollow(meta, containerSection) {
-    if (!meta || meta.importGroupEdgeFollowInit) return;
-    meta.importGroupEdgeFollowInit = true;
+function __initCardGroupDragEdgeFollow(meta, containerSection) {
+    if (!meta || meta.cardGroupEdgeFollowInit) return;
+    meta.cardGroupEdgeFollowInit = true;
 
     const movedIds = new Set();
     const movedRects = new Map();
@@ -1796,17 +1557,17 @@ function __initImportGroupDragEdgeFollow(meta, containerSection) {
         });
     });
 
-    meta.importGroupMovedIds = movedIds;
-    meta.importGroupMovedRects = movedRects;
+    meta.cardGroupMovedIds = movedIds;
+    meta.cardGroupMovedRects = movedRects;
 
     const allEdges = Array.isArray(CanvasState.edges) ? CanvasState.edges : [];
-    meta.importGroupAffectedEdges = allEdges.length
+    meta.cardGroupAffectedEdges = allEdges.length
         ? allEdges.filter(e => e && e.id && (movedIds.has(e.fromNode) || movedIds.has(e.toNode)))
         : [];
 
     const svg = document.querySelector('.canvas-edges');
     if (!svg) {
-        meta.importGroupEdgeDomMap = null;
+        meta.cardGroupEdgeDomMap = null;
         return;
     }
 
@@ -1834,7 +1595,7 @@ function __initImportGroupDragEdgeFollow(meta, containerSection) {
             entry.label = el;
         }
     });
-    meta.importGroupEdgeDomMap = domMap;
+    meta.cardGroupEdgeDomMap = domMap;
 }
 
 function __getEdgeCurveMidpointFromAnchors(edge, start, end) {
@@ -1847,13 +1608,13 @@ function __getEdgeCurveMidpointFromAnchors(edge, start, end) {
     return { x: midX, y: midY };
 }
 
-function __getAnchorPositionForImportGroupDrag(meta, nodeId, side) {
+function __getAnchorPositionForCardGroupDrag(meta, nodeId, side) {
     if (!meta || !nodeId) return getAnchorPosition(nodeId, side);
-    if (meta.importGroupMovedIds && meta.importGroupMovedIds.has && meta.importGroupMovedIds.has(nodeId)) {
-        const rect = meta.importGroupMovedRects && meta.importGroupMovedRects.get ? meta.importGroupMovedRects.get(nodeId) : null;
+    if (meta.cardGroupMovedIds && meta.cardGroupMovedIds.has && meta.cardGroupMovedIds.has(nodeId)) {
+        const rect = meta.cardGroupMovedRects && meta.cardGroupMovedRects.get ? meta.cardGroupMovedRects.get(nodeId) : null;
         if (rect) {
-            const dx = (typeof meta.importGroupDx === 'number' && isFinite(meta.importGroupDx)) ? meta.importGroupDx : 0;
-            const dy = (typeof meta.importGroupDy === 'number' && isFinite(meta.importGroupDy)) ? meta.importGroupDy : 0;
+            const dx = (typeof meta.cardGroupDx === 'number' && isFinite(meta.cardGroupDx)) ? meta.cardGroupDx : 0;
+            const dy = (typeof meta.cardGroupDy === 'number' && isFinite(meta.cardGroupDy)) ? meta.cardGroupDy : 0;
             const left = (Number(rect.x) || 0) + dx;
             const top = (Number(rect.y) || 0) + dy;
             const width = Number(rect.width) || 0;
@@ -1870,16 +1631,16 @@ function __getAnchorPositionForImportGroupDrag(meta, nodeId, side) {
     return getAnchorPosition(nodeId, side);
 }
 
-function __updateImportGroupDragEdges(meta) {
-    if (!meta || !meta.importGroupDrag) return;
+function __updateCardGroupDragEdges(meta) {
+    if (!meta || !meta.cardGroupDrag) return;
 
-    const edges = Array.isArray(meta.importGroupAffectedEdges) ? meta.importGroupAffectedEdges : [];
+    const edges = Array.isArray(meta.cardGroupAffectedEdges) ? meta.cardGroupAffectedEdges : [];
     if (!edges.length) {
         try { updateEdgeToolbarPosition(); } catch (_) { }
         return;
     }
 
-    const domMap = meta.importGroupEdgeDomMap;
+    const domMap = meta.cardGroupEdgeDomMap;
     if (!domMap || !domMap.get) {
         try { updateEdgeToolbarPosition(); } catch (_) { }
         return;
@@ -1890,8 +1651,8 @@ function __updateImportGroupDragEdges(meta) {
         const dom = domMap.get(edge.id);
         if (!dom) return;
 
-        const start = __getAnchorPositionForImportGroupDrag(meta, edge.fromNode, edge.fromSide);
-        const end = __getAnchorPositionForImportGroupDrag(meta, edge.toNode, edge.toSide);
+        const start = __getAnchorPositionForCardGroupDrag(meta, edge.fromNode, edge.fromSide);
+        const end = __getAnchorPositionForCardGroupDrag(meta, edge.toNode, edge.toSide);
         const d = (start && end) ? getEdgePathD(start.x, start.y, end.x, end.y, edge.fromSide, edge.toSide) : '';
 
         if (dom.hitArea) {
@@ -1934,11 +1695,11 @@ function __updateImportGroupDragEdges(meta) {
     try { updateEdgeToolbarPosition(); } catch (_) { }
 }
 
-function __scheduleImportGroupDragEdgeUpdate(meta) {
-    if (!meta || !meta.importGroupDrag) return;
-    if (meta.importGroupEdgeRaf) return;
-    meta.importGroupEdgeRaf = requestAnimationFrame(() => {
-        meta.importGroupEdgeRaf = 0;
-        try { __updateImportGroupDragEdges(meta); } catch (_) { }
+function __scheduleCardGroupDragEdgeUpdate(meta) {
+    if (!meta || !meta.cardGroupDrag) return;
+    if (meta.cardGroupEdgeRaf) return;
+    meta.cardGroupEdgeRaf = requestAnimationFrame(() => {
+        meta.cardGroupEdgeRaf = 0;
+        try { __updateCardGroupDragEdges(meta); } catch (_) { }
     });
 }

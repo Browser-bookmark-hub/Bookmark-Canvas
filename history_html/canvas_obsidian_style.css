@@ -1,6 +1,7 @@
 /* Obsidian风格的Canvas缩放和平移 */
 
 .canvas-main-container {
+    --canvas-edge-label-scale-max: 1.5;
     position: relative;
     width: 100%;
     /* Canvas 视图由外层布局负责高度，避免留下底部“黑边/空白” */
@@ -224,10 +225,6 @@ html:not(.side-panel-mode) .canvas-scrollbar.horizontal .scrollbar-controls {
     right: var(--canvas-scrollbar-horizontal-controls-right);
     top: calc(50% + var(--canvas-scrollbar-horizontal-controls-top-offset));
     transform: translateY(-50%);
-}
-
-html:not(.side-panel-mode) .canvas-scrollbar.horizontal {
-    height: 26px;
 }
 
 .canvas-scrollbar.show-controls .scrollbar-controls {
@@ -658,7 +655,9 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 /* 连接线标签样式 */
 .canvas-edge-label {
-    font-size: 16px;
+    --canvas-edge-label-scale-source: var(--canvas-scale-inv, 1);
+    --canvas-edge-label-scale-effective: min(var(--canvas-edge-label-scale-source), var(--canvas-edge-label-scale-max, 2));
+    font-size: calc(16px * var(--canvas-edge-label-scale-effective));
     /* 放大标签字体，提升可读性 */
     font-weight: 500;
     fill: #666;
@@ -675,7 +674,9 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 /* 低细节模式：连线说明文字固定屏幕像素大小（不随缩放“漂移/乱跳”） */
 .canvas-workspace.canvas-low-detail .canvas-edge-label {
-    font-size: calc(8px * var(--canvas-low-detail-freeze-inv, var(--canvas-scale-inv, 1)));
+    --canvas-edge-label-scale-source: var(--canvas-low-detail-freeze-inv, var(--canvas-scale-inv, 1));
+    --canvas-edge-label-scale-effective: min(var(--canvas-edge-label-scale-source), var(--canvas-edge-label-scale-max, 2));
+    font-size: calc(8px * var(--canvas-edge-label-scale-effective));
     text-shadow:
         0 0 2px #fff,
         0 0 4px #fff;
@@ -739,7 +740,9 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 /* 连接线标签内联编辑（foreignObject中的div） */
 .edge-label-inline {
-    font-size: 16px;
+    --canvas-edge-label-scale-source: var(--canvas-scale-inv, 1);
+    --canvas-edge-label-scale-effective: min(var(--canvas-edge-label-scale-source), var(--canvas-edge-label-scale-max, 2));
+    font-size: calc(16px * var(--canvas-edge-label-scale-effective));
     font-weight: 500;
     white-space: nowrap;
     color: inherit;
@@ -756,48 +759,48 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 /* Anchors & Zones - Strictly OUTSIDE node to prevent conflicts */
 .canvas-anchor-zone {
     position: absolute;
-    z-index: 240;
-    /* Layer for hover reveal only */
+    z-index: 10002;
+    /* Hover reveal sits below resize handles; only the 10% anchor wins clicks. */
     pointer-events: auto;
     /* Enable hover detection in external zones */
     /* Debug: uncomment to visualize hover zones */
     /* background: rgba(255, 0, 0, 0.1); */
 }
 
-/* Hover zones - Large semi-circle shapes for better detection (2.5x radius) */
+/* Hover zones reveal anchors across the middle 70% of each side. */
 .zone-top {
     top: -37.5px;
     height: 37.5px;
-    left: 50%;
-    width: 75px;
-    transform: translateX(-50%);
+    left: 15%;
+    width: 70%;
+    transform: none;
     border-radius: 37.5px 37.5px 0 0;
 }
 
 .zone-bottom {
     bottom: -37.5px;
     height: 37.5px;
-    left: 50%;
-    width: 75px;
-    transform: translateX(-50%);
+    left: 15%;
+    width: 70%;
+    transform: none;
     border-radius: 0 0 37.5px 37.5px;
 }
 
 .zone-left {
     left: -37.5px;
     width: 37.5px;
-    top: 50%;
-    height: 75px;
-    transform: translateY(-50%);
+    top: 15%;
+    height: 70%;
+    transform: none;
     border-radius: 37.5px 0 0 37.5px;
 }
 
 .zone-right {
     right: -37.5px;
     width: 37.5px;
-    top: 50%;
-    height: 75px;
-    transform: translateY(-50%);
+    top: 15%;
+    height: 70%;
+    transform: none;
     border-radius: 0 37.5px 37.5px 0;
 }
 
@@ -820,8 +823,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 .canvas-node-anchor {
     position: absolute;
-    /* Large transparent clickable area (2.5x radius) */
-    z-index: 11000;
+    /* Direct clickable area stays narrow; hover zones handle wider reveal. */
+    z-index: 12000;
     /* Above resize handles (10003) */
     opacity: 0;
     /* Hidden by default, show on hover */
@@ -833,7 +836,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     border: none;
 }
 
-/* Small visible UI inside large clickable area - 视觉更小但点击区域不变 */
+/* Small visible UI inside the direct clickable area. */
 .canvas-node-anchor::before {
     content: '';
     position: absolute;
@@ -841,14 +844,14 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     border: 1px solid rgba(100, 100, 100, 0.55);
 }
 
-/* Top anchor: large clickable area, small visual */
+/* Direct clickable anchor stays narrow; the larger zone only reveals it. */
 .canvas-node-anchor[data-side="top"] {
-    width: 75px;
+    width: 10%;
     height: 37.5px;
     top: -37.5px;
-    left: 50%;
-    transform: translateX(-50%);
-    --anchor-translate-x: -50%;
+    left: 45%;
+    transform: none;
+    --anchor-translate-x: 0;
     --anchor-translate-y: 0;
 }
 
@@ -863,12 +866,12 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 /* Bottom anchor */
 .canvas-node-anchor[data-side="bottom"] {
-    width: 75px;
+    width: 10%;
     height: 37.5px;
     bottom: -37.5px;
-    left: 50%;
-    transform: translateX(-50%);
-    --anchor-translate-x: -50%;
+    left: 45%;
+    transform: none;
+    --anchor-translate-x: 0;
     --anchor-translate-y: 0;
 }
 
@@ -884,12 +887,12 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 /* Left anchor */
 .canvas-node-anchor[data-side="left"] {
     width: 37.5px;
-    height: 75px;
+    height: 10%;
     left: -37.5px;
-    top: 50%;
-    transform: translateY(-50%);
+    top: 45%;
+    transform: none;
     --anchor-translate-x: 0;
-    --anchor-translate-y: -50%;
+    --anchor-translate-y: 0;
 }
 
 .canvas-node-anchor[data-side="left"]::before {
@@ -904,12 +907,12 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 /* Right anchor */
 .canvas-node-anchor[data-side="right"] {
     width: 37.5px;
-    height: 75px;
+    height: 10%;
     right: -37.5px;
-    top: 50%;
-    transform: translateY(-50%);
+    top: 45%;
+    transform: none;
     --anchor-translate-x: 0;
-    --anchor-translate-y: -50%;
+    --anchor-translate-y: 0;
 }
 
 .canvas-node-anchor[data-side="right"]::before {
@@ -1062,7 +1065,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .zone-bottom:hover~.canvas-node-anchor[data-side="bottom"],
 .zone-left:hover~.canvas-node-anchor[data-side="left"],
 .zone-right:hover~.canvas-node-anchor[data-side="right"],
-.canvas-workspace.connecting .canvas-node-anchor,
+.canvas-workspace.connecting .connection-target .canvas-node-anchor,
 .canvas-node-anchor:hover {
     opacity: 1;
     pointer-events: auto;
@@ -1070,19 +1073,19 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 /* Hover scale effect */
 .canvas-node-anchor[data-side="top"]:hover {
-    transform: translateX(-50%) scale(1.2);
+    transform: scale(1.08);
 }
 
 .canvas-node-anchor[data-side="bottom"]:hover {
-    transform: translateX(-50%) scale(1.2);
+    transform: scale(1.08);
 }
 
 .canvas-node-anchor[data-side="left"]:hover {
-    transform: translateY(-50%) scale(1.2);
+    transform: scale(1.08);
 }
 
 .canvas-node-anchor[data-side="right"]:hover {
-    transform: translateY(-50%) scale(1.2);
+    transform: scale(1.08);
 }
 
 /* Removed edge-tight positions to keep anchors clear of toolbars */
@@ -2667,7 +2670,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 /* 但被拖动的那个元素本身必须能响应（否则拖不动） */
 .canvas-workspace.is-dragging .permanent-bookmark-section.dragging,
-.canvas-workspace.is-dragging .temp-canvas-node.dragging {
+.canvas-workspace.is-dragging .temp-canvas-node.dragging,
+.canvas-workspace.is-dragging .card-group-canvas-node.dragging {
     pointer-events: auto !important;
     /* 提升被拖动元素层级，并隔离 */
     will-change: transform;
@@ -2691,4 +2695,388 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     /* 这里的 transform-style: preserve-3d 有时会引起 blurry text，但在拖动优化中通常利大于弊 */
     /* 如果发现文字模糊，请移除下面这行 */
     /* transform: translateZ(0); */
+}
+
+/* =============================================================================
+   Card Group (卡片组) — JsonCanvas/Obsidian 风格的几何嵌套组
+   ============================================================================= */
+
+.card-group-canvas-node {
+    --card-group-border: #94a3b8;
+    --card-group-fill: rgba(148, 163, 184, 0.06);
+    --card-group-pill-bg: #475569;
+    --card-group-pill-fg: #f8fafc;
+    --card-group-pill-scale-hard-max: 2;
+    --card-group-corner-radius: 14px;
+    --card-group-highlight-color: rgba(9, 105, 218, 0.9);
+    --card-group-anchor-color: var(--card-group-border);
+
+    position: absolute;
+    box-sizing: border-box;
+    border: 2px solid var(--card-group-border);
+    background: var(--card-group-fill);
+    border-radius: var(--card-group-corner-radius);
+    will-change: transform;
+    /* 根节点不接收点击；只有左上角标题进入选中态。 */
+    pointer-events: none;
+}
+
+[data-theme="dark"] .card-group-canvas-node {
+    --card-group-highlight-color: rgba(88, 166, 255, 0.95);
+}
+
+.card-group-canvas-node.selected {
+    z-index: 240 !important;
+    border-color: var(--card-group-highlight-color);
+    box-shadow:
+        0 0 0 1.5px color-mix(in srgb, var(--card-group-highlight-color) 45%, transparent),
+        0 0 6px 1px color-mix(in srgb, var(--card-group-highlight-color) 35%, transparent);
+}
+
+.card-group-canvas-node.pinned.selected {
+    z-index: 240 !important;
+}
+
+.card-group-canvas-node .canvas-node-anchor::before {
+    background-color: color-mix(in srgb, var(--card-group-anchor-color) 45%, transparent);
+    border-color: color-mix(in srgb, var(--card-group-anchor-color) 65%, transparent);
+}
+
+.card-group-canvas-node .canvas-node-anchor:hover::before,
+.card-group-canvas-node .zone-top:hover~.canvas-node-anchor[data-side="top"]::before,
+.card-group-canvas-node .zone-bottom:hover~.canvas-node-anchor[data-side="bottom"]::before,
+.card-group-canvas-node .zone-left:hover~.canvas-node-anchor[data-side="left"]::before,
+.card-group-canvas-node .zone-right:hover~.canvas-node-anchor[data-side="right"]::before {
+    background-color: color-mix(in srgb, var(--card-group-anchor-color) 65%, transparent);
+    border-color: color-mix(in srgb, var(--card-group-anchor-color) 90%, transparent);
+    box-shadow:
+        0 0 0 2px color-mix(in srgb, var(--card-group-anchor-color) 22%, transparent),
+        0 4px 10px color-mix(in srgb, var(--card-group-anchor-color) 32%, transparent);
+}
+
+.card-group-canvas-node.selected,
+.card-group-canvas-node.dragging {
+    --card-group-anchor-color: var(--card-group-highlight-color);
+}
+
+.card-group-canvas-node .zone-top {
+    top: -56px;
+    height: 56px;
+    left: 15%;
+    width: 70%;
+    transform: none;
+    border-radius: 56px 56px 0 0;
+}
+
+.card-group-canvas-node .zone-bottom {
+    bottom: -56px;
+    height: 56px;
+    left: 15%;
+    width: 70%;
+    transform: none;
+    border-radius: 0 0 56px 56px;
+}
+
+.card-group-canvas-node .zone-left {
+    left: -56px;
+    width: 56px;
+    top: 15%;
+    height: 70%;
+    transform: none;
+    border-radius: 56px 0 0 56px;
+}
+
+.card-group-canvas-node .zone-right {
+    right: -56px;
+    width: 56px;
+    top: 15%;
+    height: 70%;
+    transform: none;
+    border-radius: 0 56px 56px 0;
+}
+
+.card-group-canvas-node .canvas-node-anchor[data-side="top"] {
+    left: 45%;
+    width: 10%;
+    height: 56px;
+    top: -56px;
+    transform: none;
+    --anchor-translate-x: 0;
+}
+
+.card-group-canvas-node .canvas-node-anchor[data-side="bottom"] {
+    left: 45%;
+    width: 10%;
+    height: 56px;
+    bottom: -56px;
+    transform: none;
+    --anchor-translate-x: 0;
+}
+
+.card-group-canvas-node .canvas-node-anchor[data-side="left"] {
+    width: 56px;
+    top: 45%;
+    height: 10%;
+    left: -56px;
+    transform: none;
+    --anchor-translate-y: 0;
+}
+
+.card-group-canvas-node .canvas-node-anchor[data-side="right"] {
+    width: 56px;
+    top: 45%;
+    height: 10%;
+    right: -56px;
+    transform: none;
+    --anchor-translate-y: 0;
+}
+
+.card-group-canvas-node .canvas-node-anchor[data-side="top"]:hover,
+.card-group-canvas-node .canvas-node-anchor[data-side="bottom"]:hover,
+.card-group-canvas-node .canvas-node-anchor[data-side="left"]:hover,
+.card-group-canvas-node .canvas-node-anchor[data-side="right"]:hover {
+    transform: scale(1.06);
+}
+
+.card-group-canvas-node.dragging {
+    z-index: 9999 !important;
+    cursor: grabbing;
+    border-color: var(--card-group-highlight-color);
+    box-shadow:
+        0 0 0 1.5px color-mix(in srgb, var(--card-group-highlight-color) 55%, transparent),
+        0 0 8px 1px color-mix(in srgb, var(--card-group-highlight-color) 42%, transparent);
+}
+
+/* body 不接收事件；选中后的蒙版负责整组拖动 */
+.card-group-body {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.card-group-drag-mask {
+    position: absolute;
+    inset: 0;
+    display: none;
+    background: color-mix(in srgb, var(--card-group-highlight-color) 8%, transparent);
+    border-radius: 12px;
+    cursor: grab;
+    pointer-events: none;
+    z-index: 1;
+    box-sizing: border-box;
+}
+
+.card-group-canvas-node.selected .card-group-drag-mask {
+    display: block;
+    pointer-events: auto;
+}
+
+.card-group-canvas-node.dragging .card-group-drag-mask {
+    display: block;
+    cursor: grabbing;
+    background: color-mix(in srgb, var(--card-group-highlight-color) 14%, transparent);
+}
+
+/* 子元素显式开启 pointer-events，保证工具/连接点/选中蒙版可交互 */
+.card-group-canvas-node > .canvas-node-anchor,
+.card-group-canvas-node > .canvas-anchor-zone,
+.card-group-canvas-node > .resize-handle,
+.card-group-canvas-node > .card-group-drag-mask {
+    pointer-events: auto;
+}
+
+.card-group-canvas-node.card-group-renaming > .canvas-node-anchor,
+.card-group-canvas-node.card-group-renaming > .canvas-anchor-zone,
+.card-group-canvas-node.card-group-renaming > .resize-handle,
+.card-group-canvas-node.card-group-renaming > .card-group-drag-mask {
+    pointer-events: none !important;
+}
+
+/* 左上角 pill（label 在 bbox 上沿之上） */
+.card-group-header-pill {
+    --card-group-pill-scale-effective: min(var(--canvas-scale-inv, 1), var(--card-group-pill-scale-max, 999));
+    position: absolute;
+    top: calc(-28px * var(--card-group-pill-scale-effective));
+    left: 0;
+    max-width: calc(50% / var(--card-group-pill-scale-effective));
+    height: 26px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    background: var(--card-group-pill-bg);
+    color: var(--card-group-pill-fg);
+    border-radius: 8px;
+    font-size: 13px !important;
+    font-weight: 600;
+    line-height: 1;
+    cursor: grab;
+    user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: auto;
+    z-index: 3;
+    transform: scale(var(--card-group-pill-scale-effective));
+    transform-origin: top left;
+    transition: filter 0.12s ease;
+}
+
+.card-group-header-pill:hover {
+    filter: brightness(1.1);
+}
+
+.card-group-canvas-node.dragging .card-group-header-pill {
+    cursor: grabbing;
+}
+
+.card-group-header-pill-input {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: inherit;
+    font: inherit;
+    font-size: 13px !important;
+    width: 100%;
+    min-width: 80px;
+    padding: 0;
+}
+
+/* 工具栏：复用空白栏目/连接线的 md-node-toolbar 视觉，位于上边界上方 */
+.card-group-toolbar {
+    top: calc(-46px * var(--canvas-scale-inv, 1));
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%) scale(var(--canvas-scale-inv, 1));
+    transform-origin: center top;
+    min-height: 32px;
+    padding: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.card-group-canvas-node.selected .card-group-toolbar {
+    opacity: 1;
+    pointer-events: auto;
+    transition: none;
+}
+
+.canvas-workspace.connecting .card-group-toolbar {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* 颜色弹层 */
+.card-group-color-popover {
+    top: auto;
+    bottom: calc(100% + 4px);
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    gap: 8px;
+    padding: 8px;
+    background: #ffffff;
+    border: 1px solid rgba(27, 31, 36, 0.25);
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+    z-index: 10;
+}
+
+[data-theme="dark"] .card-group-color-popover {
+    background: #2c2d2e;
+    border-color: rgba(99, 110, 123, 0.45);
+}
+
+.card-group-color-popover.open {
+    display: flex;
+}
+
+.card-group-color-divider {
+    width: 1px;
+    align-self: stretch;
+    background: rgba(27, 31, 36, 0.12);
+    margin: 0 2px;
+}
+
+[data-theme="dark"] .card-group-color-divider {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* card-group 也复用现有 card-group-dragging 的 translate3d 规则进行整组移动；
+   选中态优先级提示 */
+.card-group-canvas-node.card-group-dragging {
+    pointer-events: none;
+}
+
+.card-group-canvas-node.card-group-dragging .card-group-header-pill {
+    pointer-events: none;
+}
+
+/* =============================================================================
+   左键框选（lasso） + 临时组（temp-group）
+   ============================================================================= */
+
+.lasso-rect {
+    position: absolute;
+    display: none;
+    border: 1.5px dashed rgba(37, 99, 235, 0.85);
+    background: rgba(37, 99, 235, 0.10);
+    pointer-events: none;
+    z-index: 12000;
+    border-radius: 2px;
+}
+
+.temp-group-mask {
+    position: absolute;
+    background: rgba(37, 99, 235, 0.08);
+    border: 1.5px dashed rgba(37, 99, 235, 0.55);
+    border-radius: 8px;
+    cursor: grab;
+    pointer-events: auto;
+    z-index: 12500;
+    box-sizing: border-box;
+}
+
+.temp-group-mask.dragging {
+    cursor: grabbing;
+    background: rgba(37, 99, 235, 0.14);
+}
+
+.temp-group-toolbar {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 32px;
+    padding: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    transform: translateX(-50%) scale(var(--canvas-scale-inv, 1));
+    transform-origin: center top;
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 13050;
+    transition: none;
+}
+
+.canvas-workspace.connecting .temp-group-toolbar {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+.temp-group-toolbar-btn.temp-group-toolbar-btn-danger:hover {
+    border-color: rgba(220, 38, 38, 0.65);
+    color: #b91c1c;
+    background: rgba(220, 38, 38, 0.08);
+}
+
+.temp-group-color-popover {
+    position: absolute;
+    top: auto;
+    bottom: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
 }

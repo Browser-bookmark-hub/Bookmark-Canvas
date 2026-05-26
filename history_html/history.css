@@ -2992,10 +2992,6 @@ body.sidebar-resizing * {
     color: var(--canvas-dir-color-edge, var(--text-secondary));
 }
 
-.canvas-dir-folder[data-node-key^="folder-imported-group-"]>summary {
-    color: #9aa0a6;
-}
-
 .canvas-dir-folder>summary.canvas-dir-folder-summary-btn {
     list-style: none;
 }
@@ -3044,11 +3040,6 @@ body.sidebar-resizing * {
 .canvas-dir-folder[data-node-key="folder-other"]>summary .canvas-dir-icon,
 .canvas-dir-folder[data-node-key="folder-other"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-edge, var(--text-tertiary));
-}
-
-.canvas-dir-folder[data-node-key^="folder-imported-group-"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key^="folder-imported-group-"]>summary .canvas-dir-count {
-    color: #9aa0a6;
 }
 
 .canvas-dir-icon-spacer {
@@ -3172,7 +3163,7 @@ body.sidebar-resizing * {
 }
 
 .canvas-dir-item-btn.canvas-dir-item-btn-has-delete {
-    padding-right: 56px;
+    padding-right: 22px;
 }
 
 .canvas-dir-item-delete-wrap {
@@ -3258,11 +3249,6 @@ body.sidebar-resizing * {
     width: var(--canvas-tree-indent);
 }
 
-.canvas-dir-folder[data-node-variant="import-group-root"]>.canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn::before,
-.canvas-dir-folder[data-node-variant="import-group-root"]>.canvas-dir-children>.canvas-dir-folder>summary::before {
-    width: var(--canvas-tree-indent);
-}
-
 .canvas-dir-children>.canvas-dir-item:last-child::after,
 .canvas-dir-children>.canvas-dir-folder:last-child::after {
     content: "";
@@ -3310,11 +3296,13 @@ body.sidebar-resizing * {
 }
 
 .canvas-dir-folder-delete-wrap {
-    margin-left: 4px;
+    margin-left: 0;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    flex: 0 0 auto;
+    gap: 0;
+    flex: 0 0 0;
+    width: 0;
+    overflow: hidden;
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.14s ease;
@@ -3325,8 +3313,41 @@ body.sidebar-resizing * {
 .canvas-dir-item:hover>.canvas-dir-item-delete-wrap,
 .canvas-dir-item:focus-within>.canvas-dir-item-delete-wrap,
 .canvas-dir-folder-delete-wrap.is-open {
+    margin-left: 4px;
+    gap: 4px;
+    flex: 0 0 auto;
+    width: auto;
+    overflow: visible;
     opacity: 1;
     pointer-events: auto;
+    background: var(--bg-primary);
+    border-radius: 6px;
+    box-shadow: 0 0 0 2px var(--bg-primary);
+}
+
+.canvas-dir-folder-locate {
+    margin-left: 0;
+    width: 14px;
+    height: 14px;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    flex: 0 0 14px;
+}
+
+.canvas-dir-folder-locate i {
+    font-size: 9px;
+}
+
+.canvas-dir-folder-locate:hover {
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+    color: var(--accent-primary);
 }
 
 .canvas-dir-folder-delete {
@@ -3350,18 +3371,18 @@ body.sidebar-resizing * {
 }
 
 .canvas-dir-folder-delete:hover {
-    background: color-mix(in srgb, var(--danger) 18%, transparent);
-    color: var(--danger);
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+    color: var(--accent-primary);
 }
 
 .canvas-dir-folder-delete.is-armed {
     color: var(--warning);
-    background: color-mix(in srgb, var(--warning) 14%, transparent);
+    background: transparent;
 }
 
 .canvas-dir-folder-delete.is-armed:hover {
     color: var(--warning);
-    background: color-mix(in srgb, var(--warning) 14%, transparent);
+    background: transparent;
 }
 
 .canvas-dir-folder-delete-secondary {
@@ -3401,13 +3422,13 @@ body.sidebar-resizing * {
 }
 
 .canvas-dir-folder-delete-current:hover {
-    color: var(--text-primary);
-    background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+    color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
 }
 
 .canvas-dir-folder-delete-all:hover {
-    color: var(--text-primary);
-    background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+    color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
 }
 
 .canvas-dir-folder-delete-current,
@@ -5317,6 +5338,41 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 [data-theme="dark"] .context-menu-item.color-red:hover {
     background: #ef5350;
     border-color: #f44336;
+}
+
+.bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-box {
+    border: 1px solid #d32f2f;
+    border-radius: 8px;
+    padding: 3px;
+    margin-top: 4px;
+}
+
+.bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-item {
+    background: transparent;
+    border-color: transparent;
+    color: #d32f2f;
+}
+
+.bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-item i {
+    color: #d32f2f;
+}
+
+.bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-item:hover {
+    background: rgba(244, 67, 54, 0.08);
+    border-color: transparent;
+}
+
+[data-theme="dark"] .bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-box {
+    border-color: #ef5350;
+}
+
+[data-theme="dark"] .bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-item,
+[data-theme="dark"] .bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-item i {
+    color: #ef5350;
+}
+
+[data-theme="dark"] .bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-item:hover {
+    background: rgba(239, 83, 80, 0.12);
 }
 
 /* ==================== 拖拽样式 ==================== */
@@ -9618,22 +9674,23 @@ body.canvas-node-maximized-active .canvas-edge-label {
 /* 顶部工具栏（空白栏目/Markdown 卡片） */
 .md-node-toolbar {
     position: absolute;
-    top: -46px;
+    top: calc(-46px * var(--canvas-scale-inv, 1));
     /* Keep a wider safety gap from the top resize handle. */
     left: 50%;
-    transform: translateX(-50%);
+    transform: translateX(-50%) scale(var(--canvas-scale-inv, 1));
+    transform-origin: center top;
     min-height: 32px;
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 2px;
-    border: none;
-    background: transparent;
-    box-shadow: none;
+    padding: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
     opacity: 0;
     pointer-events: none;
-    /* 隐藏时添加延迟，让用户有时间将鼠标移到工具栏 */
-    transition: opacity 0.15s ease 0.35s, pointer-events 0s linear 0.35s;
+    transition: none;
     z-index: 13050;
     /* Above anchors (11000) so toolbar remains clickable on top edge */
 }
@@ -9650,16 +9707,10 @@ body.canvas-node-maximized-active .canvas-edge-label {
     pointer-events: none;
 }
 
-.md-canvas-node.selected .md-node-toolbar,
-.md-canvas-node:hover .md-node-toolbar,
-.md-node-toolbar:hover,
-.md-node-toolbar:has(.md-color-popover.open),
-.md-node-toolbar:has(.md-format-popover.open),
-.md-node-toolbar:has(.md-delete-options-popover.open) {
+.md-canvas-node.selected .md-node-toolbar {
     opacity: 1;
     pointer-events: auto;
-    /* 显示时无延迟，立即显示 */
-    transition: opacity 0.12s ease, pointer-events 0s linear;
+    transition: none;
 }
 
 /* Strong override: while connecting, toolbars never capture events */
@@ -9674,9 +9725,9 @@ body.canvas-node-maximized-active .canvas-edge-label {
     align-items: center;
     justify-content: center;
     border-radius: 6px;
-    border: 1px solid rgba(27, 31, 36, 0.25);
-    background: transparent;
-    color: #57606a;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
     cursor: pointer;
     transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
     font-size: 12px;
@@ -10045,7 +10096,7 @@ body.canvas-node-maximized-active .canvas-edge-label {
 
 [data-theme="dark"] .md-node-toolbar-btn {
     border-color: rgba(99, 110, 123, 0.45);
-    background: transparent;
+    background: var(--bg-secondary);
     color: #b0b3b8;
 }
 
@@ -10246,7 +10297,7 @@ body.canvas-node-maximized-active .canvas-edge-label {
     border-color: rgba(255, 255, 255, 0.25);
 }
 
-/* 删除选项弹窗样式 (用于 import-container) */
+/* 删除选项弹窗样式（用于卡片组） */
 .md-delete-options-popover {
     position: absolute;
     bottom: calc(100% + 4px);
@@ -13504,47 +13555,14 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
     background: rgba(24, 119, 242, 0.2);
 }
 
-/* Import Container Label & Hint Theming */
-.import-group-label {
-    /* Base styles (moved from inline) */
-    font-weight: bold;
-    padding: 4px 0;
-    display: inline-block;
-    pointer-events: auto;
-    cursor: grab;
-    font-size: 16px;
-    /* Light theme color */
-    color: #555;
-    transition: color 0.2s ease;
+/* Card Group Drag Performance: move group via 1 CSS var update per frame */
+.canvas-content.card-group-drag-active {
+    --card-group-dx: 0px;
+    --card-group-dy: 0px;
 }
 
-.import-group-hint {
-    /* Base styles (moved from inline) */
-    font-size: 12px;
-    margin-top: 0;
-    /* Light theme color */
-    color: #999;
-    transition: color 0.2s ease;
-}
-
-[data-theme="dark"] .import-group-label {
-    color: #e6edf3;
-    /* High contrast for dark mode */
-}
-
-[data-theme="dark"] .import-group-hint {
-    color: #8b949e;
-    /* Muted text for dark mode */
-}
-
-/* Import Group Drag Performance: move group via 1 CSS var update per frame */
-.canvas-content.import-group-drag-active {
-    --import-group-dx: 0px;
-    --import-group-dy: 0px;
-}
-
-.canvas-content.import-group-drag-active .import-group-dragging {
-    transform: translate3d(var(--import-group-dx), var(--import-group-dy), 0) !important;
+.canvas-content.card-group-drag-active .card-group-dragging {
+    transform: translate3d(var(--card-group-dx), var(--card-group-dy), 0) !important;
     transition: none !important;
     will-change: transform;
 }

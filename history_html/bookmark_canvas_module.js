@@ -162,6 +162,7 @@ const CanvasState = {
     // Ctrl 专属栏目操作状态（移动/缩放和蒙版）
     sectionCtrlMode: {
         active: false,
+        clearSelectionOnInteractionEnd: false,
         resize: {
             active: false,
             element: null,
@@ -1261,7 +1262,7 @@ function resolveSectionMeta(element) {
         };
     }
 
-    if (element.classList.contains('md-canvas-node')) {
+    if (element.classList.contains('md-canvas-node') || element.classList.contains('card-group-canvas-node')) {
         const data = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.find(n => n.id === element.id) : null;
         if (!data) return null;
         return {
@@ -1292,6 +1293,13 @@ function resolveSectionMeta(element) {
 
 function registerSectionCtrlOverlay(element) {
     if (!element) return null;
+    if (element.classList && element.classList.contains('card-group-canvas-node')) {
+        const existing = element.querySelector('.canvas-section-ctrl-overlay');
+        if (existing) {
+            try { existing.remove(); } catch (_) { }
+        }
+        return null;
+    }
     let overlay = element.querySelector('.canvas-section-ctrl-overlay');
     if (!overlay) {
         overlay = document.createElement('div');
@@ -1342,6 +1350,131 @@ function refreshSectionCtrlOverlays() {
     nodes.forEach(el => registerSectionCtrlOverlay(el));
 }
 
+function __markSectionCtrlSelectionForInteractionEnd() {
+    if (CanvasState.sectionCtrlMode) {
+        CanvasState.sectionCtrlMode.clearSelectionOnInteractionEnd = true;
+    }
+}
+
+function __clearSectionCtrlSelectionOnInteractionEnd() {
+    const mode = CanvasState.sectionCtrlMode;
+    if (!mode || !mode.clearSelectionOnInteractionEnd) return;
+    mode.clearSelectionOnInteractionEnd = false;
+
+    try {
+        if (typeof clearMdSelection === 'function') clearMdSelection();
+    } catch (_) { }
+    try {
+        if (typeof clearEdgeSelection === 'function') clearEdgeSelection();
+    } catch (_) { }
+    try {
+        if (typeof clearTempSelection === 'function') clearTempSelection();
+    } catch (_) { }
+
+    CanvasState.selectedTempSectionId = null;
+    CanvasState.selectedMdNodeId = null;
+    const canvasContent = document.getElementById('canvasContent');
+    const scope = canvasContent || document;
+    try {
+        scope.querySelectorAll('.permanent-bookmark-section.selected, .temp-canvas-node.selected, .md-canvas-node.selected, .card-group-canvas-node.selected')
+            .forEach(el => el.classList.remove('selected'));
+    } catch (_) { }
+}
+
+function __isCardGroupBlankAreaBlockedElement(element) {
+    if (!element || !element.closest) return false;
+    if (element.closest('input, textarea, select, button, [contenteditable="true"]')) return true;
+    if (element.closest('.md-node-toolbar, .card-group-toolbar, .context-menu, .modal, .popover')) return true;
+    if (element.closest('.card-group-header-pill, .resize-handle, .canvas-node-anchor, .canvas-anchor-zone')) return true;
+    if (element.closest('.permanent-bookmark-section, .temp-canvas-node')) return true;
+    const mdNode = element.closest('.md-canvas-node');
+    if (mdNode && !(mdNode.classList && mdNode.classList.contains('card-group-canvas-node'))) return true;
+    if (element.closest('.canvas-edge, .canvas-edge-hit-area, .canvas-edge-label, .canvas-edge-label-bg, .edge-label-fo')) return true;
+    return false;
+}
+
+function __isCardGroupBlankAreaPointCovered(clientX, clientY) {
+    if (!document || typeof document.elementsFromPoint !== 'function') return false;
+    const elements = document.elementsFromPoint(clientX, clientY) || [];
+    return elements.some(element => __isCardGroupBlankAreaBlockedElement(element));
+}
+
+function __isPointInsideElementBox(element, clientX, clientY) {
+    if (!element || !element.getBoundingClientRect) return false;
+    const rect = element.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+}
+
+function __isCardGroupBlankAreaPointInsideCanvasElement(clientX, clientY) {
+    const canvasContent = document.getElementById('canvasContent');
+    const scope = canvasContent || document;
+    const elements = scope.querySelectorAll('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node:not(.card-group-canvas-node)');
+    return Array.from(elements).some(element => __isPointInsideElementBox(element, clientX, clientY));
+}
+
+function __findCardGroupElementAtBlankClientPoint(clientX, clientY) {
+    const groups = (CanvasState.mdNodes || [])
+        .filter(node => node && node.id && node.subtype === 'card-group' && !node.locked)
+        .map((node) => {
+            const element = document.getElementById(node.id);
+            if (!element || !element.getBoundingClientRect) return null;
+            const rect = element.getBoundingClientRect();
+            if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+            const area = Math.max(1, rect.width * rect.height);
+            const z = parseFloat(window.getComputedStyle(element).zIndex) || 0;
+            return { node, element, area, z };
+        })
+        .filter(Boolean);
+    if (!groups.length) return null;
+    groups.sort((a, b) => (a.area - b.area) || (b.z - a.z));
+    return groups[0].element;
+}
+
+function __resolveCardGroupBlankAreaCtrlTarget(event) {
+    if (!event || !isSectionCtrlModeEvent(event)) return null;
+    if (event.button !== 0 && event.button !== 2) return null;
+    const target = event.target;
+    if (target && __isCardGroupBlankAreaBlockedElement(target)) return null;
+    if (__isCardGroupBlankAreaPointCovered(event.clientX, event.clientY)) return null;
+    if (__isCardGroupBlankAreaPointInsideCanvasElement(event.clientX, event.clientY)) return null;
+    return __findCardGroupElementAtBlankClientPoint(event.clientX, event.clientY);
+}
+
+function __handleCardGroupBlankAreaCtrlMouseDown(event) {
+    const element = __resolveCardGroupBlankAreaCtrlTarget(event);
+    if (!element) return;
+    const node = (CanvasState.mdNodes || []).find(item => item && item.id === element.id && item.subtype === 'card-group');
+    if (!node || node.locked) return;
+
+    try {
+        if (typeof selectMdNode === 'function') selectMdNode(node.id);
+    } catch (_) { }
+    __markSectionCtrlSelectionForInteractionEnd();
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.button === 0) {
+        startSectionDrag(element, event);
+        return;
+    }
+
+    const resizeState = CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize;
+    if (resizeState && resizeState.active && resizeState.waitForSecondRightClick && event.button === 2) {
+        endCtrlResize(false);
+        __clearSectionCtrlSelectionOnInteractionEnd();
+        return;
+    }
+    startSectionResize(element, event);
+}
+
+function __handleCardGroupBlankAreaCtrlContextMenu(event) {
+    const element = __resolveCardGroupBlankAreaCtrlTarget(event);
+    if (!element) return;
+    event.preventDefault();
+    event.stopPropagation();
+}
+
 function setSectionCtrlModeActive(active) {
     const wasActive = !!(CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.active);
     if (wasActive === active) return;
@@ -1381,11 +1514,13 @@ function startSectionDrag(element, event) {
     }
 
     CanvasState.dragState.childElements = [];
-    // import-container：拖动时只带走“已绑定为组内成员”的节点（不做重叠吸附）
-    if (meta.data && meta.data.subtype === 'import-container') {
+    if (meta.data && meta.data.subtype === 'card-group') {
         try {
-            __ensureImportContainerMembership(meta.data);
-            CanvasState.dragState.childElements = __collectImportContainerChildElements(meta.data);
+            if (window.__BCSCardGroup && typeof window.__BCSCardGroup.collectCardGroupChildElementsRecursive === 'function') {
+                CanvasState.dragState.childElements = window.__BCSCardGroup.collectCardGroupChildElementsRecursive(meta.data) || [];
+            } else {
+                CanvasState.dragState.childElements = [];
+            }
         } catch (_) {
             CanvasState.dragState.childElements = [];
         }
@@ -1397,6 +1532,22 @@ function startSectionDrag(element, event) {
 
 function __getRectOfSectionOrNode(obj, type) {
     if (!obj) return null;
+    try {
+        const id = obj && obj.id ? String(obj.id) : '';
+        const dragMeta = CanvasState && CanvasState.dragState ? CanvasState.dragState.meta : null;
+        if (id && dragMeta && dragMeta.cardGroupDrag && dragMeta.cardGroupMovedRects && dragMeta.cardGroupMovedRects.get) {
+            const rect = dragMeta.cardGroupMovedRects.get(id);
+            if (rect) {
+                const dx = (typeof dragMeta.cardGroupDx === 'number' && isFinite(dragMeta.cardGroupDx)) ? dragMeta.cardGroupDx : 0;
+                const dy = (typeof dragMeta.cardGroupDy === 'number' && isFinite(dragMeta.cardGroupDy)) ? dragMeta.cardGroupDy : 0;
+                const rx = Number(rect.x) + dx;
+                const ry = Number(rect.y) + dy;
+                const rw = Number(rect.width);
+                const rh = Number(rect.height);
+                if ([rx, ry, rw, rh].every(v => typeof v === 'number' && isFinite(v))) return { x: rx, y: ry, w: rw, h: rh };
+            }
+        }
+    } catch (_) { }
     const x = Number(type === 'temp-section' ? obj.x : obj.x);
     const y = Number(type === 'temp-section' ? obj.y : obj.y);
     const w = Number(obj.width);
@@ -1471,6 +1622,9 @@ function applyCtrlResize(clientX, clientY) {
     } else if (state.data) {
         state.data.width = newWidth;
         state.data.height = newHeight;
+        if (state.data.subtype === 'card-group') {
+            try { __scheduleCardGroupMembershipRefreshForNodeIds(state.data.id, { renderFrames: false, renderEdges: false }); } catch (_) { }
+        }
     }
 }
 
@@ -1483,6 +1637,9 @@ function endCtrlResize(force) {
             savePermanentSectionPosition(state.element);
         } else if (state.data) {
             saveTempNodes();
+            if (state.data.subtype === 'card-group') {
+                try { __scheduleCardGroupMembershipRefreshForNodeIds(state.data.id); } catch (_) { }
+            }
         }
         updateCanvasScrollBounds();
         updateScrollbarThumbs();
@@ -1508,12 +1665,14 @@ function handleCtrlOverlayMouseDown(e) {
     if (!host) return;
     e.preventDefault();
     e.stopPropagation();
+    __markSectionCtrlSelectionForInteractionEnd();
 
     const resizeState = CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize;
 
     if (resizeState && resizeState.active && resizeState.waitForSecondRightClick && e.button === 2) {
         // 第二次右键点击，结束缩放
         endCtrlResize(false);
+        __clearSectionCtrlSelectionOnInteractionEnd();
         return;
     }
 
@@ -2669,6 +2828,44 @@ function applyElementMinimumSize(element, minSize) {
     return changed;
 }
 
+function __getConnectionPrioritySideForResize(element, clientX, clientY) {
+    if (!element) return null;
+    const rect = element.getBoundingClientRect ? element.getBoundingClientRect() : null;
+    if (!rect || !Number.isFinite(rect.left) || !Number.isFinite(rect.top)) return null;
+    const zoom = (CanvasState && CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const isCardGroup = !!(element.classList && element.classList.contains('card-group-canvas-node'));
+    const outward = (isCardGroup ? 56 : 37.5) * zoom;
+    const inward = 14 * zoom;
+    const horizontalCenterStart = rect.left + rect.width * 0.45;
+    const horizontalCenterEnd = rect.left + rect.width * 0.55;
+    const verticalCenterStart = rect.top + rect.height * 0.45;
+    const verticalCenterEnd = rect.top + rect.height * 0.55;
+    const inHorizontalAnchorBand = clientX >= horizontalCenterStart && clientX <= horizontalCenterEnd;
+    const inVerticalAnchorBand = clientY >= verticalCenterStart && clientY <= verticalCenterEnd;
+
+    if (inHorizontalAnchorBand) {
+        if (clientY >= rect.top - outward && clientY <= rect.top + inward) return 'top';
+        if (clientY >= rect.bottom - inward && clientY <= rect.bottom + outward) return 'bottom';
+    }
+    if (inVerticalAnchorBand) {
+        if (clientX >= rect.left - outward && clientX <= rect.left + inward) return 'left';
+        if (clientX >= rect.right - inward && clientX <= rect.right + outward) return 'right';
+    }
+    return null;
+}
+
+function __tryStartConnectionBeforeResize(element, event, nodeId) {
+    if (!element || !event || event.button !== 0) return false;
+    const side = __getConnectionPrioritySideForResize(element, event.clientX, event.clientY);
+    if (!side) return false;
+    try {
+        startConnection(event, nodeId, side);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
 function getTempSectionDefaultColor(section = null) {
     // 只要被识别为“特殊临时栏目”，默认颜色就自动切到 specialTemp。
     if (section && __isSpecialTempSection(section)) {
@@ -2932,7 +3129,7 @@ _Tip: This card can be freely edited or deleted_
         fromSide: 'bottom',
         toNode: 'md-node-demo-bookmark-guide',
         toSide: 'top',
-        direction: 'none',
+        direction: 'forward',
         color: '5', // 蓝色
         colorHex: null,
         label: ''
@@ -2945,7 +3142,7 @@ _Tip: This card can be freely edited or deleted_
         fromSide: 'bottom',
         toNode: 'md-node-demo-batch-feature',
         toSide: 'top',
-        direction: 'none',
+        direction: 'forward',
         color: '5', // 蓝色
         colorHex: null,
         label: ''
@@ -3019,6 +3216,7 @@ function applyTempSectionAutoSizeIfNeeded(section) {
     if (baseSize.mode !== 'auto') return;
     requestAnimationFrame(() => {
         applyTempSectionAutoSize(section, { save: true });
+        try { __scheduleCardGroupMembershipRefreshForNodeIds(section.id); } catch (_) { }
     });
 }
 
@@ -3907,7 +4105,6 @@ function buildTempSectionIdFromSection(section) {
 //   - section.items[*].sectionId (recursive)
 //   - DOM element id + data-section-id (header + body)
 //   - edges.fromNode / edges.toNode
-//   - import-container containedTempIds (in CanvasState.mdNodes)
 //   - fold/scroll persistent-storage keys (renamed by copying old → new + removing old)
 // Callers should invoke this from any chain-renumbering / label-change codepath.
 function rewriteTempSectionId(oldId, newId) {
@@ -3949,19 +4146,6 @@ function rewriteTempSectionId(oldId, newId) {
                 if (!edge) return;
                 if (edge.fromNode === oldId) { edge.fromNode = newId; touched = true; }
                 if (edge.toNode === oldId) { edge.toNode = newId; touched = true; }
-            });
-        }
-    } catch (_) {}
-    try {
-        if (Array.isArray(CanvasState.mdNodes)) {
-            CanvasState.mdNodes.forEach((node) => {
-                if (!node || !Array.isArray(node.containedTempIds)) return;
-                for (let i = 0; i < node.containedTempIds.length; i++) {
-                    if (node.containedTempIds[i] === oldId) {
-                        node.containedTempIds[i] = newId;
-                        touched = true;
-                    }
-                }
             });
         }
     } catch (_) {}
@@ -4055,7 +4239,10 @@ function __refreshCanvasNodeCounters() {
     (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : []).forEach((node) => {
         const nodeId = String(node && node.id || '').trim();
         if (!nodeId) return;
-        const match = nodeId.match(/^md-node-(\d+)$/i);
+        // mdNodes 现在包含 md-node-N（普通卡片）与 card-group-N（卡片组）两种 ID 前缀，
+        // 两者共享 mdNodeCounter，所以两种都要解析进 max。
+        let match = nodeId.match(/^md-node-(\d+)$/i);
+        if (!match) match = nodeId.match(/^card-group-(\d+)$/i);
         if (!match) return;
         const numericId = parseInt(match[1], 10);
         if (!Number.isNaN(numericId)) {
@@ -4656,6 +4843,7 @@ function setupCanvasDropFeedback() {
         }
         renderMdNode(node);
         saveTempNodes();
+        try { __scheduleCardGroupMembershipRefreshForNodeIds(id); } catch (_) { }
         return id;
     };
 
@@ -5979,7 +6167,7 @@ function setupCanvasZoomAndPan() {
         }
         const target = e.target;
         if (!target || !target.closest) return;
-        if (target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .import-container, .canvas-edge, .canvas-edge-hit-area, .canvas-edge-label, .canvas-edge-label-bg, .edge-label-fo, .canvas-pan-capture-layer')) return;
+        if (target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .card-group-canvas-node, .temp-group-mask, .temp-group-toolbar, .canvas-edge, .canvas-edge-hit-area, .canvas-edge-label, .canvas-edge-label-bg, .edge-label-fo, .canvas-pan-capture-layer')) return;
         const canvasContent = document.getElementById('canvasContent');
         if (canvasContent && !canvasContent.contains(target) && target !== workspace) return;
         e.preventDefault();
@@ -8418,16 +8606,15 @@ function __getCanvasTotalDataStatsSync() {
     const permanentColumnCount = __getPermanentColumnCountForPerfTotals();
     const tempCount = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
     const mdNodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : [];
-    const blankCount = mdNodes.filter(n => n && n.subtype !== 'import-container').length;
-    const hasImportContainer = mdNodes.some(n => n && n.subtype === 'import-container');
+    const mdNodeCount = mdNodes.filter(Boolean).length;
 
     const signature = `${permanentColumnCount}|${tempCount}|${mdNodes.length}|${CanvasState.tempSectionCounter || 0}|${CanvasState.mdNodeCounter || 0}`;
     const needsRecompute = (signature !== cache._signature) || ((now - (cache._computedAt || 0)) > 800);
 
     if (!needsRecompute) return cache;
 
-    // Total columns = permanent (incl copies) + temp + blank + imported frames (counted as 1)
-    const totalColumnCount = permanentColumnCount + tempCount + blankCount + (hasImportContainer ? 1 : 0);
+    // Total columns = permanent (incl copies) + temp + markdown cards/groups.
+    const totalColumnCount = permanentColumnCount + tempCount + mdNodeCount;
 
     // Total bookmarks/folders:
     // - Permanent section copies render the same underlying tree multiple times, so totals should
@@ -8620,10 +8807,9 @@ function getCanvasViewportDataStats() {
         });
     } catch (_) { }
 
-    // 空白栏目也计入“可视栏目数”；导入的组框（import-container）出现则额外 +1
+    // 空白栏目和卡片组也计入“可视栏目数”。
     try {
         const mdBaseSize = getBlankNodeDefaultSize();
-        let hasVisibleImportContainer = false;
         for (const node of (CanvasState.mdNodes || [])) {
             if (!node || !node.id) continue;
             const x = Number(node.x);
@@ -8640,13 +8826,8 @@ function getCanvasViewportDataStats() {
             );
             if (!inViewport) continue;
 
-            if (node.subtype === 'import-container') {
-                hasVisibleImportContainer = true;
-            } else {
-                visibleSectionCount++;
-            }
+            visibleSectionCount++;
         }
-        if (hasVisibleImportContainer) visibleSectionCount++;
     } catch (_) { }
 
     // 避免除以0
@@ -8706,7 +8887,7 @@ function updateDataIntensiveMode(force = false) {
     dim.totalAlwaysActive = isTotalAlways;
 
     // 数据密集模式判定（只看“可视栏目数”）
-    // - 口径：永久栏目（含副本）+ 临时栏目 + 空白栏目 + 导入组框（出现则算 1 个）
+    // - 口径：永久栏目（含副本）+ 临时栏目 + 空白栏目 + 卡片组
     // - 仅当“可视栏目数”超过阈值时才激活 P2。
     // - 书签/文件夹阈值仅用于橙色预警展示（不参与 P2 激活判定）。
     // [P2] 数据密集模式判定（只看“可视栏目数”）
@@ -13159,39 +13340,40 @@ function applyTempNodeDragPosition(clientX, clientY) {
     const section = CanvasState.tempSections.find(n => n.id === nodeId) ||
         (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.find(n => n.id === nodeId) : null);
 
-    // import-container 组拖动：只移动“已绑定成员”，不做重叠吸附/自动捕获
-    if (section && section.subtype === 'import-container' && Array.isArray(CanvasState.dragState.childElements) && CanvasState.dragState.childElements.length > 0) {
+    const isCardGroupSection = !!(section && section.subtype === 'card-group');
+    if (isCardGroupSection && Array.isArray(CanvasState.dragState.childElements) && CanvasState.dragState.childElements.length > 0) {
         const meta = (CanvasState.dragState.meta && typeof CanvasState.dragState.meta === 'object')
             ? CanvasState.dragState.meta
             : (CanvasState.dragState.meta = {});
 
-        if (!meta.importGroupDrag) {
-            meta.importGroupDrag = true;
-            meta.importGroupDx = 0;
-            meta.importGroupDy = 0;
-            meta.importGroupEdgeRaf = 0;
-            try { __initImportGroupDragEdgeFollow(meta, section); } catch (_) { }
+        if (!meta.cardGroupDrag) {
+            meta.cardGroupDrag = true;
+            meta.cardGroupDx = 0;
+            meta.cardGroupDy = 0;
+            meta.cardGroupEdgeRaf = 0;
+            try { __initCardGroupDragEdgeFollow(meta, section); } catch (_) { }
             const content = getCachedContent();
             if (content) {
-                content.classList.add('import-group-drag-active');
+                content.classList.add('card-group-drag-active');
             }
-            try { element.classList.add('import-group-dragging'); } catch (_) { }
+            try { element.classList.add('card-group-dragging'); } catch (_) { }
             CanvasState.dragState.childElements.forEach((child) => {
                 if (child && child.element) {
-                    try { child.element.classList.add('import-group-dragging'); } catch (_) { }
+                    try { child.element.classList.add('card-group-dragging'); } catch (_) { }
                 }
             });
         }
 
-        meta.importGroupDx = scaledDeltaX;
-        meta.importGroupDy = scaledDeltaY;
+        meta.cardGroupDx = scaledDeltaX;
+        meta.cardGroupDy = scaledDeltaY;
 
         const content = getCachedContent();
         if (content) {
-            try { content.style.setProperty('--import-group-dx', `${scaledDeltaX}px`); } catch (_) { }
-            try { content.style.setProperty('--import-group-dy', `${scaledDeltaY}px`); } catch (_) { }
+            try { content.style.setProperty('--card-group-dx', `${scaledDeltaX}px`); } catch (_) { }
+            try { content.style.setProperty('--card-group-dy', `${scaledDeltaY}px`); } catch (_) { }
         }
-        try { __scheduleImportGroupDragEdgeUpdate(meta); } catch (_) { }
+        try { __scheduleCardGroupMembershipRefreshForNodeIds(section.id, { renderFrames: false, renderEdges: false }); } catch (_) { }
+        try { __scheduleCardGroupDragEdgeUpdate(meta); } catch (_) { }
         return true;
     }
 
@@ -13202,6 +13384,7 @@ function applyTempNodeDragPosition(clientX, clientY) {
     if (section) {
         section.x = newX;
         section.y = newY;
+        try { __scheduleCardGroupMembershipRefreshForNodeIds(section.id, { renderFrames: false, renderEdges: false }); } catch (_) { }
     }
 
     // 优化：拖动时降低连接线渲染频率
@@ -13254,24 +13437,25 @@ function finalizeTempNodeDrag() {
         (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.find(n => n.id === nodeId) : null);
 
     const meta = (CanvasState.dragState.meta && typeof CanvasState.dragState.meta === 'object') ? CanvasState.dragState.meta : null;
-    const isImportGroupDrag = !!(meta && meta.importGroupDrag && section && section.subtype === 'import-container');
+    const isGroupLikeSection = !!(section && section.subtype === 'card-group');
+    const isCardGroupDrag = !!(meta && meta.cardGroupDrag && isGroupLikeSection);
 
-    if (isImportGroupDrag) {
+    if (isCardGroupDrag) {
         const deltaX = (CanvasState.dragState.lastClientX || 0) - (CanvasState.dragState.dragStartX || 0);
         const deltaY = (CanvasState.dragState.lastClientY || 0) - (CanvasState.dragState.dragStartY || 0);
         const zoom = (CanvasState.zoom || 1);
         const scaledDeltaX = deltaX / zoom;
         const scaledDeltaY = deltaY / zoom;
 
-        if (meta && meta.importGroupEdgeRaf) {
-            try { cancelAnimationFrame(meta.importGroupEdgeRaf); } catch (_) { }
-            meta.importGroupEdgeRaf = 0;
+        if (meta && meta.cardGroupEdgeRaf) {
+            try { cancelAnimationFrame(meta.cardGroupEdgeRaf); } catch (_) { }
+            meta.cardGroupEdgeRaf = 0;
         }
 
         const content = getCachedContent();
         if (content) {
-            try { content.style.setProperty('--import-group-dx', '0px'); } catch (_) { }
-            try { content.style.setProperty('--import-group-dy', '0px'); } catch (_) { }
+            try { content.style.setProperty('--card-group-dx', '0px'); } catch (_) { }
+            try { content.style.setProperty('--card-group-dy', '0px'); } catch (_) { }
         }
 
         const restoreTransitionEls = [];
@@ -13304,23 +13488,23 @@ function finalizeTempNodeDrag() {
         }
 
         if (content) {
-            try { content.classList.remove('import-group-drag-active'); } catch (_) { }
-            try { content.style.removeProperty('--import-group-dx'); } catch (_) { }
-            try { content.style.removeProperty('--import-group-dy'); } catch (_) { }
+            try { content.classList.remove('card-group-drag-active'); } catch (_) { }
+            try { content.style.removeProperty('--card-group-dx'); } catch (_) { }
+            try { content.style.removeProperty('--card-group-dy'); } catch (_) { }
         }
-        try { element.classList.remove('import-group-dragging'); } catch (_) { }
+        try { element.classList.remove('card-group-dragging'); } catch (_) { }
         if (Array.isArray(CanvasState.dragState.childElements) && CanvasState.dragState.childElements.length > 0) {
             CanvasState.dragState.childElements.forEach((child) => {
                 if (child && child.element) {
-                    try { child.element.classList.remove('import-group-dragging'); } catch (_) { }
+                    try { child.element.classList.remove('card-group-dragging'); } catch (_) { }
                 }
             });
         }
 
         if (meta) {
-            meta.importGroupDx = 0;
-            meta.importGroupDy = 0;
-            meta.importGroupDrag = false;
+            meta.cardGroupDx = 0;
+            meta.cardGroupDy = 0;
+            meta.cardGroupDrag = false;
         }
 
         requestAnimationFrame(() => {
@@ -13344,13 +13528,18 @@ function finalizeTempNodeDrag() {
     saveTempNodes();
     scheduleBoundsUpdate();
     scheduleScrollbarUpdate();
+    try {
+        const changedIds = [nodeId];
+        if (Array.isArray(CanvasState.dragState.childElements)) {
+            CanvasState.dragState.childElements.forEach((child) => {
+                if (child && child.data && child.data.id) changedIds.push(child.data.id);
+            });
+        }
+        __scheduleCardGroupMembershipRefreshForNodeIds(changedIds);
+    } catch (_) { }
     CanvasState.dragState.meta = null;
     CanvasState.dragState.hasMoved = false;
 
-    // 用户手动拖拽某个节点并松手：更新其“所属组框”（只在此时更新，组框移动不会吸附）
-    if (section && section.subtype !== 'import-container') {
-        try { __updateImportContainerMembershipAfterMove(nodeId); } catch (_) { }
-    }
 }
 
 function finalizePermanentSectionDrag() {
@@ -13813,7 +14002,20 @@ function locateToElement(el, targetZoom = null) {
     if (!el) return;
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
-    const zoom = __resolveCanvasLocateZoom(targetZoom);
+    let zoom;
+    if (targetZoom === 'fit') {
+        const wsW = workspace.clientWidth || window.innerWidth;
+        const wsH = workspace.clientHeight || window.innerHeight;
+        const elW = el.offsetWidth || 200;
+        const elH = el.offsetHeight || 100;
+        const padding = 60;
+        const fitW = Math.max(0.1, (wsW - padding) / elW);
+        const fitH = Math.max(0.1, (wsH - padding) / elH);
+        const fitZoom = Math.min(fitW, fitH);
+        zoom = clampCanvasZoom(Math.min(1.0, fitZoom));
+    } else {
+        zoom = __resolveCanvasLocateZoom(targetZoom);
+    }
     if (zoom !== CanvasState.zoom) {
         const rect = workspace.getBoundingClientRect();
         setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
@@ -15750,6 +15952,7 @@ function makePermanentSectionResizable(element) {
             if (isSectionCtrlModeEvent(e)) return;
 
             if (e.button !== 0) return;
+            if (__tryStartConnectionBeforeResize(element, e, __getPermanentSectionCanvasNodeId(element))) return;
             e.stopPropagation();
             e.preventDefault();
 
@@ -15899,6 +16102,18 @@ function makeTempNodeResizable(element, node) {
             if (isSectionCtrlModeEvent(e)) return;
 
             if (e.button !== 0) return;
+            if (__tryStartConnectionBeforeResize(element, e, node && node.id ? node.id : element.id)) return;
+
+            const isMdLikeCanvasNode = !!(element && element.classList && (
+                element.classList.contains('md-canvas-node') ||
+                element.classList.contains('card-group-canvas-node')
+            ));
+            if (isMdLikeCanvasNode && node && node.id) {
+                try {
+                    if (typeof selectMdNode === 'function') selectMdNode(node.id);
+                } catch (_) { }
+            }
+
             e.stopPropagation();
             e.preventDefault();
 
@@ -15955,6 +16170,9 @@ function makeTempNodeResizable(element, node) {
                 node.height = newHeight;
                 node.x = newLeft;
                 node.y = newTop;
+                if (node.subtype === 'card-group') {
+                    try { __scheduleCardGroupMembershipRefreshForNodeIds(node.id, { renderFrames: false, renderEdges: false }); } catch (_) { }
+                }
 
                 // Update connected edges in real-time during resize
                 renderEdges();
@@ -15965,6 +16183,9 @@ function makeTempNodeResizable(element, node) {
                     isResizing = false;
                     element.classList.remove('resizing');
                     saveTempNodes();
+                    if (node.subtype === 'card-group') {
+                        try { __scheduleCardGroupMembershipRefreshForNodeIds(node.id); } catch (_) { }
+                    }
                     updateCanvasScrollBounds();
                     updateScrollbarThumbs();
                     document.removeEventListener('mousemove', onMouseMove);
@@ -16402,7 +16623,7 @@ async function createTempNode(data, x, y) {
     scheduleDormancyUpdate();
 
     saveTempNodes();
-
+    try { __scheduleCardGroupMembershipRefreshForNodeIds(sectionId); } catch (_) { }
     return sectionId;
 }
 
@@ -16463,6 +16684,7 @@ function createEmptyTempSection(x, y, options = {}) {
     applyTempSectionAutoSizeIfNeeded(section);
     scheduleDormancyUpdate();
     saveTempNodes();
+    try { __scheduleCardGroupMembershipRefreshForNodeIds(sectionId); } catch (_) { }
     return sectionId;
 }
 
@@ -16546,11 +16768,6 @@ function makeMdNodeDraggable(element, node) {
         CanvasState.dragState.meta = null;
 
         CanvasState.dragState.childElements = [];
-        if (node && node.subtype === 'import-container') {
-            // 组拖动：只带走已绑定成员，不做重叠吸附
-            try { __ensureImportContainerMembership(node); } catch (_) { }
-            try { CanvasState.dragState.childElements = __collectImportContainerChildElements(node); } catch (_) { CanvasState.dragState.childElements = []; }
-        }
 
         CanvasState.dragState.wheelScrollEnabled = true;
 
@@ -16571,16 +16788,6 @@ function makeMdNodeDraggable(element, node) {
             target.closest('.canvas-anchor-zone') ||
             target.closest('a')) {
             return;
-        }
-
-        // *** 重要：如果是 import-container，检查点击的是否是内部的子节点 ***
-        // 如果点击的是子节点，则不拖动容器，让子节点自己处理拖动
-        if (node && node.subtype === 'import-container') {
-            const clickedChildNode = target.closest('.temp-canvas-node, .md-canvas-node');
-            // 如果点击的子节点不是当前容器本身，则跳过
-            if (clickedChildNode && clickedChildNode.id !== node.id) {
-                return;
-            }
         }
 
         // 编辑器区域：如果编辑器已聚焦（正在编辑），不拖动；否则允许拖动
@@ -16642,12 +16849,17 @@ function renderMdNode(node) {
     const container = document.getElementById('canvasContent');
     if (!container) return;
 
-    if (!(node && node.subtype === 'import-container')) {
-        const shouldRefreshFromMarkdown = !__isCanvasNativeTextNode(node);
-        __ensureMdNodeMarkdownProtocol(node, {
-            refreshCachesFromMarkdown: shouldRefreshFromMarkdown
-        });
+    if (node && node.subtype === 'card-group') {
+        if (typeof window !== 'undefined' && window.__BCSCardGroup && typeof window.__BCSCardGroup.renderCardGroup === 'function') {
+            return window.__BCSCardGroup.renderCardGroup(node);
+        }
+        return; // 模块未加载（理论上不会发生），跳过
     }
+
+    const shouldRefreshFromMarkdown = !__isCanvasNativeTextNode(node);
+    __ensureMdNodeMarkdownProtocol(node, {
+        refreshCachesFromMarkdown: shouldRefreshFromMarkdown
+    });
 
     let el = document.getElementById(node.id);
     const isNew = !el;
@@ -16672,13 +16884,12 @@ function renderMdNode(node) {
     el.style.height = mdHeight + 'px';
     applyElementMinimumSize(el, getSectionMinimumSize(el, node));
 
-    // 应用自定义样式 (用于 import-container 等)
     if (node.style) {
         el.style.cssText += node.style;
     }
 
     // 强制层级管理：Container(5) < TempSection(10) < MdNode(15)
-    if (node.subtype === 'import-container') {
+    if (node.subtype === 'card-group') {
         el.style.zIndex = node.pinned ? '200' : '5';
     } else {
         // 普通 Markdown 卡片默认在书签栏目之上
@@ -16702,17 +16913,19 @@ function renderMdNode(node) {
     const deleteTitle = lang === 'en' ? 'Delete' : '删除';
     const colorTitle = lang === 'en' ? 'Color' : '颜色';
     const focusTitle = lang === 'en' ? 'Locate and zoom' : '定位并放大';
-    const editTitle = lang === 'en' ? 'Edit' : '编辑';
     const formatTitle = lang === 'en' ? 'Format toolbar' : '格式工具栏';
+    const pinTitle = lang === 'en' ? 'Pin' : '置顶';
+    const unpinTitle = lang === 'en' ? 'Unpin' : '取消置顶';
+    const mdPinBtnTitle = node.pinned ? unpinTitle : pinTitle;
+    const mdPinBtnIcon = node.pinned
+        ? '<i class="fas fa-thumbtack"></i>'
+        : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
     const fullscreenTitle = getFullscreenLabel('canvasFullscreenEnter', lang);
     const layoutZoomOutTitle = getLayoutZoomLabel('out', lang);
     const layoutZoomInTitle = getLayoutZoomLabel('in', lang);
     const layoutZoomValueTitle = getLayoutZoomLabel('value', lang);
     const mdLayoutZoomDefaultPercent = __getDefaultLayoutZoomPercentByElement(el);
 
-    // 多语言：import-container 的两个删除按钮
-    const deleteFrameTitle = lang === 'en' ? 'Delete Frame Only' : '仅删除框体';
-    const deleteAllTitle = lang === 'en' ? 'Delete All Content' : '删除全部内容';
     const layoutZoomControlsHtml = `
         <div class="canvas-layout-zoom-controls md-node-layout-zoom-controls" data-layout-zoom-controls="true">
             <button class="md-node-toolbar-btn canvas-layout-zoom-btn" data-action="layout-zoom-out" data-tooltip="${layoutZoomOutTitle}" title="${layoutZoomOutTitle}">
@@ -16725,45 +16938,13 @@ function renderMdNode(node) {
         </div>
     `;
 
-    // 根据节点类型生成不同的工具栏
-    if (node.subtype === 'import-container') {
-        // import-container 使用两个独立的删除按钮
-        // data-tooltip 用于自定义快速气泡，移除 title 属性以禁用原生提示
-        toolbar.innerHTML = `
-            ${layoutZoomControlsHtml}
-            <button class="md-node-toolbar-btn" data-action="md-delete-frame-only" data-tooltip="${deleteFrameTitle}">
-                <div class="icon-frame-delete">
-                    <i class="far fa-square"></i>
-                    <i class="fas fa-trash-alt"></i>
-                </div>
-            </button>
-            <button class="md-node-toolbar-btn" data-action="md-delete-all-content" data-tooltip="${deleteAllTitle}">
-                <i class="fas fa-trash-alt"></i>
-            </button>
-            <button class="md-node-toolbar-btn" data-action="md-focus" data-tooltip="${focusTitle}">
-                <i class="fas fa-search-plus"></i>
-            </button>
-            <button class="md-node-toolbar-btn canvas-node-fullscreen-btn" data-action="md-fullscreen" data-tooltip="${fullscreenTitle}">
-                <i class="fas fa-expand"></i>
-            </button>
-        `;
-    } else {
-        // 普通节点使用标准工具栏
-        toolbar.innerHTML = `
-            ${layoutZoomControlsHtml}
-            <button class="md-node-toolbar-btn" data-action="md-delete" data-tooltip="${deleteTitle}"><i class="far fa-trash-alt"></i></button>
-            <button class="md-node-toolbar-btn" data-action="md-color-toggle" data-tooltip="${colorTitle}"><i class="fas fa-palette"></i></button>
-            <button class="md-node-toolbar-btn" data-action="md-format-toggle" data-tooltip="${formatTitle}"><i class="fas fa-font"></i></button>
-            <button class="md-node-toolbar-btn" data-action="md-focus" data-tooltip="${focusTitle}"><i class="fas fa-search-plus"></i></button>
-            <button class="md-node-toolbar-btn canvas-node-fullscreen-btn" data-action="md-fullscreen" data-tooltip="${fullscreenTitle}"><i class="fas fa-expand"></i></button>
-            <button class="md-node-toolbar-btn" data-action="md-edit" data-tooltip="${editTitle}"><i class="far fa-edit"></i></button>
-        `;
-    }
-
-    // Hook for Import Container Events
-    if (node.subtype === 'import-container') {
-        __setupImportContainerEvents(el, node);
-    }
+    toolbar.innerHTML = `
+        <button class="md-node-toolbar-btn" data-action="md-format-toggle" data-tooltip="${formatTitle}"><i class="fas fa-font"></i></button>
+        <button class="md-node-toolbar-btn" data-action="md-focus" data-tooltip="${focusTitle}"><i class="fas fa-search-plus"></i></button>
+        <button class="md-node-toolbar-btn" data-action="md-color-toggle" data-tooltip="${colorTitle}"><i class="fas fa-palette"></i></button>
+        <button class="md-node-toolbar-btn${node.pinned ? ' pinned' : ''}" data-action="md-pin" data-tooltip="${mdPinBtnTitle}">${mdPinBtnIcon}</button>
+        <button class="md-node-toolbar-btn md-delete-danger-btn" data-action="md-delete" data-tooltip="${deleteTitle}"><i class="far fa-trash-alt"></i></button>
+    `;
 
     // 初始化字体大小（从节点数据或默认值）
     const defaultFontSize = MD_NODE_DEFAULT_FONT_SIZE;
@@ -19923,8 +20104,13 @@ function renderMdNode(node) {
             return;
         }
         if (e.button !== 0 && !isSectionCtrlModeEvent(e)) return;
-        // 忽略在resize、小工具栏按钮、链接上的按下
-        if (target.closest('.resize-handle') || target.closest('.md-node-toolbar-btn') || target.closest('.canvas-layout-zoom-controls') || target.closest('a')) return;
+        // 忽略在resize、连接点/连接点显示区、小工具栏按钮、链接上的按下
+        if (target.closest('.resize-handle') ||
+            target.closest('.canvas-node-anchor') ||
+            target.closest('.canvas-anchor-zone') ||
+            target.closest('.md-node-toolbar-btn') ||
+            target.closest('.canvas-layout-zoom-controls') ||
+            target.closest('a')) return;
 
         // 按住Ctrl键时，暂停编辑模式，允许拖动和调整大小
         if (isSectionCtrlModeEvent(e)) {
@@ -20027,6 +20213,8 @@ function renderMdNode(node) {
             : (e.target && e.target.parentElement ? e.target.parentElement : null);
         if (!target) return;
         if (target.closest('.resize-handle') ||
+            target.closest('.canvas-node-anchor') ||
+            target.closest('.canvas-anchor-zone') ||
             target.closest('.md-node-toolbar-btn') ||
             target.closest('.canvas-layout-zoom-controls') ||
             target.closest('.md-format-btn') ||
@@ -20139,11 +20327,9 @@ function renderMdNode(node) {
             removeMdNode(node.id);
             clearMdSelection();
         } else if (action === 'md-delete-frame-only') {
-            // import-container: 仅删除框体，保留内容
             removeMdNode(node.id, false);
             clearMdSelection();
         } else if (action === 'md-delete-all-content') {
-            // import-container: 删除框体及全部内容
             removeMdNode(node.id, true);
             clearMdSelection();
         } else if (action === 'md-color-toggle') {
@@ -20206,6 +20392,15 @@ function renderMdNode(node) {
         } else if (action === 'md-focus') {
             selectMdNode(node.id);
             locateAndZoomToMdNode(node.id);
+        } else if (action === 'md-pin') {
+            const pinned = toggleMdNodePin(node.id);
+            const title = pinned ? unpinTitle : pinTitle;
+            btn.classList.toggle('pinned', !!pinned);
+            btn.setAttribute('data-tooltip', title);
+            btn.title = title;
+            btn.innerHTML = pinned
+                ? '<i class="fas fa-thumbtack"></i>'
+                : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
         } else if (action === 'md-fullscreen') {
             toggleElementFullscreen(el);
         } else if (action === 'md-format-toggle') {
@@ -20601,7 +20796,7 @@ function closeMdColorPopover(toolbar) {
     }
 }
 
-// 删除选项弹窗 (用于 import-container)
+// 删除选项弹窗（用于卡片组）
 function ensureDeleteOptionsPopover(toolbar, node) {
     let pop = toolbar.querySelector('.md-delete-options-popover');
     if (pop) return pop;
@@ -20695,7 +20890,16 @@ function locateAndZoomToMdNode(nodeId, targetZoom = null) {
     const nodeWidth = el.offsetWidth || 200;
     const nodeHeight = el.offsetHeight || 100;
 
-    const zoom = __resolveCanvasLocateZoom(targetZoom);
+    let zoom;
+    if (targetZoom === 'fit') {
+        const padding = 60;
+        const fitW = Math.max(0.1, (workspaceWidth - padding) / nodeWidth);
+        const fitH = Math.max(0.1, (workspaceHeight - padding) / nodeHeight);
+        const fitZoom = Math.min(fitW, fitH);
+        zoom = clampCanvasZoom(Math.min(1.0, fitZoom));
+    } else {
+        zoom = __resolveCanvasLocateZoom(targetZoom);
+    }
     if (zoom !== CanvasState.zoom) {
         const rect = workspace.getBoundingClientRect();
         setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
@@ -20737,6 +20941,7 @@ async function createMdNode(x, y, text = '') {
     renderMdNode(node);
     scheduleBoundsUpdate();
     saveTempNodes();
+    try { __scheduleCardGroupMembershipRefreshForNodeIds(id); } catch (_) { }
     return id;
 }
 
@@ -20751,23 +20956,39 @@ function removeMdNode(id, deleteChildren = false, options = {}) {
         : true;
     // Check for container cascading delete
     const node = CanvasState.mdNodes.find(n => n.id === id);
-    if (node && node.subtype === 'import-container' && deleteChildren && !node._deletingChildren) {
+    if (node && node.subtype === 'card-group' && deleteChildren && !node._deletingChildren) {
         node._deletingChildren = true;
-        try { __ensureImportContainerMembership(node); } catch (_) { }
-        const tempIds = Array.isArray(node.containedTempIds) ? node.containedTempIds.slice() : [];
-        const mdIds = Array.isArray(node.containedMdIds) ? node.containedMdIds.slice() : [];
-
-        // Delete internal by membership (no overlap-based deletion)
-        tempIds.forEach((tid) => removeTempNode(tid, { skipSave: true }));
-        mdIds.forEach((mid) => {
-            if (mid && mid !== id) removeMdNode(mid, false, { skipSave: true });
+        let members = [];
+        try {
+            if (window.__BCSCardGroup && typeof window.__BCSCardGroup.getRecursiveGeometricMembers === 'function') {
+                members = window.__BCSCardGroup.getRecursiveGeometricMembers(node) || [];
+            }
+        } catch (_) { members = []; }
+        const seenIds = new Set();
+        members.forEach((m) => {
+            if (!m || !m.data || !m.data.id || m.data.id === id) return;
+            if (seenIds.has(m.data.id)) return;
+            seenIds.add(m.data.id);
+            if (m.type === 'temp-section') {
+                try { removeTempNode(m.data.id, { skipSave: true }); } catch (_) { }
+            } else if (m.type === 'md-node') {
+                try { removeMdNode(m.data.id, false, { skipSave: true }); } catch (_) { }
+            } else if (m.type === 'permanent-section') {
+                try {
+                    const permanentEl = (typeof __resolveCanvasNodeElementById === 'function')
+                        ? __resolveCanvasNodeElementById(m.data.id)
+                        : document.getElementById(m.data.id);
+                    if (permanentEl && typeof removePermanentSectionCopy === 'function') {
+                        removePermanentSectionCopy(permanentEl);
+                    }
+                } catch (_) { }
+            }
         });
     }
 
     const el = document.getElementById(id);
     if (el) el.remove();
     CanvasState.mdNodes = CanvasState.mdNodes.filter(n => n.id !== id);
-    try { __removeNodeFromAllImportContainers(id); } catch (_) { }
     // Remove edges connected to this markdown node
     removeEdgesForNode(id, { skipSave: true });
     if (!skipSave) {
@@ -21876,8 +22097,6 @@ function __renderMarkdownSourceToCanvasHtml(markdownSource, renderOptions = null
 
 function __deriveMdNodeMarkdownSource(node) {
     if (!node || typeof node !== 'object') return '';
-    if (node.subtype === 'import-container') return '';
-
     if (__isCanvasNativeTextNode(node)) {
         return __normalizeCanvasMarkdownSource(
             __repairLegacyCanvasMarkdownSource(__resolveCanvasNativeTextNodeBody(node))
@@ -21937,7 +22156,7 @@ function __normalizeCanvasNativeTextNodeFields(node, options = {}) {
 function __normalizeCanvasPluginMarkdownNodeFields(node, options = {}) {
     if (!node || typeof node !== 'object') return node;
     if (__isCanvasNativeTextNode(node)) return node;
-    if (node.subtype === 'import-container') return node;
+    if (node.subtype === 'card-group') return node;
 
     const markdownSource = __normalizeCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
     node.subtype = CANVAS_PLUGIN_MARKDOWN_SUBTYPE;
@@ -21962,7 +22181,7 @@ function __normalizeCanvasPluginMarkdownNodeFields(node, options = {}) {
 
 function __ensureMdNodeMarkdownProtocol(node, options = {}) {
     if (!node || typeof node !== 'object') return node;
-    if (node.subtype === 'import-container') return node;
+    if (node.subtype === 'card-group') return node;
     if (__isCanvasNativeTextNode(node)) {
         __normalizeCanvasNativeTextNodeFields(node, options);
         return node;
@@ -26363,7 +26582,7 @@ function __restoreTemporaryRaisedCanvasNode() {
 
 function __getTemporaryRaiseZIndex() {
     let maxZ = 220;
-    const nodes = document.querySelectorAll('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
+    const nodes = document.querySelectorAll('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .card-group-canvas-node');
     nodes.forEach((node) => {
         if (!node || (node.classList && node.classList.contains('canvas-node-maximized'))) return;
         let value = Number(node.style && node.style.zIndex);
@@ -26413,7 +26632,7 @@ function __handleCanvasNodeTemporaryRaiseOnMouseDown(event) {
         return;
     }
 
-    const node = target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
+    const node = target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .card-group-canvas-node');
     if (!node) {
         __restoreTemporaryRaisedCanvasNode();
         return;
@@ -26787,7 +27006,6 @@ function removeTempNode(sectionId, options = {}) {
     }
 
     CanvasState.tempSections = CanvasState.tempSections.filter(section => section.id !== sectionId);
-    try { __removeNodeFromAllImportContainers(sectionId); } catch (_) { }
     // Remove all edges connected to this section
     removeEdgesForNode(sectionId, { skipSave: true });
 
@@ -26838,7 +27056,7 @@ function clearAllTempNodes() {
 
     const isEmptyMdNode = (node) => {
         if (!node) return true;
-        if (node.subtype === 'import-container') return false;
+        if (node.subtype === 'card-group') return false;
         if (__isCanvasNativeTextNode(node)) {
             const textBody = __resolveCanvasNativeTextNodeBody(node);
             return String(textBody || '').replace(/\u200B/g, '').trim().length === 0;
@@ -28353,6 +28571,9 @@ function setupCanvasEventListeners() {
     });
     window.addEventListener('blur', () => setSectionCtrlModeActive(false));
 
+    document.addEventListener('mousedown', __handleCardGroupBlankAreaCtrlMouseDown, true);
+    document.addEventListener('contextmenu', __handleCardGroupBlankAreaCtrlContextMenu, true);
+
     // Ctrl 尺寸调整
     document.addEventListener('mousemove', (e) => {
         if (CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize && CanvasState.sectionCtrlMode.resize.active) {
@@ -28410,6 +28631,7 @@ function setupCanvasEventListeners() {
         CanvasState.dragState.dragSource = null;
         CanvasState.dragState.wheelScrollEnabled = false;
         CanvasState.dragState.childElements = []; // 清空子元素数组，避免后续拖动时仍带着子节点
+        __clearSectionCtrlSelectionOnInteractionEnd();
 
         // 停止自动滚动
         stopEdgeAutoScroll();
@@ -28608,11 +28830,12 @@ function setupCanvasEventListeners() {
             const target = e.target;
             // 在已有节点/永久栏目/滚动条/缩放控件内不清除
             const inMd = !!target.closest('.md-canvas-node');
+            const inCardGroup = !!target.closest('.card-group-canvas-node');
             const inTemp = !!target.closest('.temp-canvas-node');
             const inPermanent = !!target.closest('.permanent-bookmark-section');
             const isUI = !!target.closest('.canvas-scrollbar, .canvas-zoom-indicator, .view-actions');
-            const isForm = ['INPUT', 'TEXTAREA', 'BUTTON', 'SELECT', 'LABEL'].includes(target.tagName);
-            if (inMd || inTemp || inPermanent || isUI || isForm) return;
+            const isForm = !!target.closest('input, textarea, button, select, label');
+            if (inMd || inCardGroup || inTemp || inPermanent || isUI || isForm) return;
             clearMdSelection();
         }, true);
 
@@ -29376,8 +29599,8 @@ function __applyCanvasTempStateObject(state, options = {}) {
 
     // One-shot id migration: any section whose id is from the abandoned tempSecId_* scheme
     // (commit 2298735) or the legacy temp-section-<N> numeric scheme gets renamed to the
-    // canonical temp-section-<label-chain> form. Uses rewriteTempSectionId so item.sectionId,
-    // edges and containedTempIds stay consistent.
+    // canonical temp-section-<label-chain> form. Uses rewriteTempSectionId so item.sectionId
+    // and edges stay consistent.
     try {
         const needsRewrite = [];
         for (const section of CanvasState.tempSections) {
@@ -29548,9 +29771,6 @@ function saveTempNodes(options = {}) {
     if (__canvasTempStateRealtimeSyncApplying) return;
     const immediate = !!(options && options.immediate);
     const skipUnchangedPersist = !!(options && options.skipUnchangedPersist);
-    // 保存前执行自动 resize
-    autoResizeImportContainers();
-
     try {
         (CanvasState.mdNodes || []).forEach((node) => {
             const refreshCachesFromMarkdown = __isCanvasNativeTextNode(node)
@@ -29699,6 +29919,12 @@ function addAnchorsToNode(nodeElement, nodeId) {
         zone.className = `canvas-anchor-zone zone-${side}`;
         zone.dataset.side = side;
         nodeElement.appendChild(zone);
+        zone.addEventListener('mousedown', (e) => {
+            // The 70% zone is only for revealing the connection point; never let it
+            // fall through into card selection/drag when it overlaps the node edge.
+            if (e.button !== 0) return;
+            e.stopPropagation();
+        }, true);
 
         const anchor = document.createElement('div');
         anchor.className = 'canvas-node-anchor';
@@ -29781,6 +30007,7 @@ function startConnection(e, nodeId, side) {
     e.preventDefault();
     CanvasState.isConnecting = true;
     CanvasState.connectionStart = { nodeId, side, x: e.clientX, y: e.clientY };
+    __setConnectionTargetNode(null);
     const workspace = document.getElementById('canvasWorkspace');
     if (workspace) workspace.classList.add('connecting');
 
@@ -29799,6 +30026,26 @@ function startConnection(e, nodeId, side) {
             svg.appendChild(tempPath);
         }
     }
+}
+
+let __connectionTargetNodeEl = null;
+
+function __setConnectionTargetNode(nodeEl) {
+    if (__connectionTargetNodeEl === nodeEl) return;
+    if (__connectionTargetNodeEl && __connectionTargetNodeEl.classList) {
+        __connectionTargetNodeEl.classList.remove('connection-target');
+    }
+    __connectionTargetNodeEl = nodeEl || null;
+    if (__connectionTargetNodeEl && __connectionTargetNodeEl.classList) {
+        __connectionTargetNodeEl.classList.add('connection-target');
+    }
+}
+
+function __resolveConnectionTargetNodeByPointer(clientX, clientY) {
+    const target = document.elementFromPoint(clientX, clientY);
+    if (!target || !target.closest) return null;
+    const nodeEl = target.closest('.temp-canvas-node, .md-canvas-node, .permanent-bookmark-section');
+    return nodeEl || null;
 }
 
 function updateConnection(e) {
@@ -29820,6 +30067,9 @@ function updateConnection(e) {
 
     const d = getEdgePathD(startPos.x, startPos.y, endX, endY, CanvasState.connectionStart.side, null);
     tempPath.setAttribute('d', d);
+
+    const targetNodeEl = __resolveConnectionTargetNodeByPointer(e.clientX, e.clientY);
+    __setConnectionTargetNode(targetNodeEl);
 }
 
 function endConnection(e) {
@@ -29830,6 +30080,7 @@ function endConnection(e) {
 
     const tempPath = document.getElementById('temp-connection-path');
     if (tempPath) tempPath.remove();
+    __setConnectionTargetNode(null);
 
     // Use composedPath if available to get all elements under cursor, 
     // or just elementFromPoint. elementFromPoint might hit the dragging line if not careful,
@@ -29889,18 +30140,211 @@ function getNearestSide(rect, x, y) {
     return 'right';
 }
 
+function __canvasGetNodeRectById(nodeId) {
+    const id = String(nodeId || '').trim();
+    if (!id) return null;
+    const temp = (CanvasState.tempSections || []).find(s => s && s.id === id);
+    if (temp) return __getRectOfSectionOrNode(temp, 'temp-section');
+    const md = (CanvasState.mdNodes || []).find(n => n && n.id === id);
+    if (md) return __getRectOfSectionOrNode(md, 'md-node');
+    const el = (typeof __resolveCanvasNodeElementById === 'function') ? __resolveCanvasNodeElementById(id) : document.getElementById(id);
+    if (!el) return null;
+    const x = parseFloat(el.style.left) || 0;
+    const y = parseFloat(el.style.top) || 0;
+    const w = parseFloat(el.style.width) || el.offsetWidth || 0;
+    const h = parseFloat(el.style.height) || el.offsetHeight || 0;
+    if (![x, y, w, h].every(v => Number.isFinite(v))) return null;
+    return { x, y, w, h };
+}
+
+function __canvasRectFullyInside(inner, outer, margin = 0) {
+    if (!inner || !outer) return false;
+    const m = (typeof margin === 'number' && isFinite(margin)) ? margin : 0;
+    return (
+        inner.x >= outer.x + m &&
+        inner.y >= outer.y + m &&
+        inner.x + inner.w <= outer.x + outer.w - m &&
+        inner.y + inner.h <= outer.y + outer.h - m
+    );
+}
+
+function __canvasGetOwningCardGroupIds(nodeId) {
+    const id = String(nodeId || '').trim();
+    if (!id) return [];
+    const nodeRect = __canvasGetNodeRectById(id);
+    if (!nodeRect) return [];
+    const containmentMargin = 0;
+    return (CanvasState.mdNodes || [])
+        .filter(group => group && group.id && group.id !== id && group.subtype === 'card-group')
+        .filter(group => {
+            const groupRect = __canvasGetNodeRectById(group.id);
+            return groupRect && __canvasRectFullyInside(nodeRect, groupRect, containmentMargin);
+        })
+        .map(group => group.id);
+}
+
+function __refreshAllCardGroupFrames() {
+    (CanvasState.mdNodes || [])
+        .filter(node => node && node.id && node.subtype === 'card-group')
+        .forEach((node) => {
+            try { renderMdNode(node); } catch (_) { }
+        });
+}
+
+let __cardGroupMembershipRefreshRaf = 0;
+let __cardGroupMembershipRefreshPendingIds = new Set();
+let __cardGroupMembershipRefreshShouldRenderFrames = false;
+let __cardGroupMembershipRefreshShouldRenderEdges = false;
+let __cardGroupMembershipRefreshForceAll = false;
+
+function __normalizeCardGroupMembershipRefreshOptions(options) {
+    const opts = options && typeof options === 'object' ? options : {};
+    return {
+        forceAll: !!opts.forceAll,
+        renderFrames: !Object.prototype.hasOwnProperty.call(opts, 'renderFrames') || opts.renderFrames !== false,
+        renderEdges: !Object.prototype.hasOwnProperty.call(opts, 'renderEdges') || opts.renderEdges !== false
+    };
+}
+
+function __collectDirectCardGroupMemberHints(group) {
+    if (!group || !group.id) return [];
+    try {
+        if (window.__BCSCardGroup && typeof window.__BCSCardGroup.getDirectGeometricMembers === 'function') {
+            return (window.__BCSCardGroup.getDirectGeometricMembers(group) || [])
+                .map(member => ({
+                    type: member && member.type,
+                    id: String((member && member.data && member.data.id) || '').trim()
+                }))
+                .filter(member => member.id && (member.type === 'temp-section' || member.type === 'md-node' || member.type === 'permanent-section'));
+        }
+    } catch (_) { }
+
+    const groupRect = __canvasGetNodeRectById(group.id);
+    if (!groupRect) return [];
+    const hints = [];
+    (CanvasState.tempSections || []).forEach((section) => {
+        if (!section || !section.id) return;
+        const rect = __canvasGetNodeRectById(section.id);
+        if (rect && __canvasRectFullyInside(rect, groupRect, 0)) hints.push({ type: 'temp-section', id: section.id });
+    });
+    (CanvasState.mdNodes || []).forEach((node) => {
+        if (!node || !node.id || node.id === group.id) return;
+        const rect = __canvasGetNodeRectById(node.id);
+        if (rect && __canvasRectFullyInside(rect, groupRect, 0)) hints.push({ type: 'md-node', id: node.id });
+    });
+    try {
+        const permanentEls = document.querySelectorAll('.permanent-bookmark-section');
+        permanentEls.forEach((el) => {
+            if (!el) return;
+            const nodeId = (typeof __getPermanentSectionCanvasNodeId === 'function')
+                ? String(__getPermanentSectionCanvasNodeId(el) || '').trim()
+                : (String(el.id || '').trim() || (String(el.dataset && el.dataset.permanentSectionCopyId || '').trim() ? `permanent-section-copy-${String(el.dataset.permanentSectionCopyId || '').trim()}` : ''));
+            if (!nodeId) return;
+            const rect = __canvasGetNodeRectById(nodeId);
+            if (rect && __canvasRectFullyInside(rect, groupRect, 0)) hints.push({ type: 'permanent-section', id: nodeId });
+        });
+    } catch (_) { }
+    return hints;
+}
+
+function __syncAllCardGroupMembershipHints() {
+    if (!window.__BCSCardGroup || typeof window.__BCSCardGroup.setTransientMemberHint !== 'function') return;
+    (CanvasState.mdNodes || [])
+        .filter(node => node && node.id && node.subtype === 'card-group')
+        .forEach((group) => {
+            try {
+                window.__BCSCardGroup.setTransientMemberHint(group.id, __collectDirectCardGroupMemberHints(group));
+            } catch (_) { }
+        });
+}
+
+function __refreshCardGroupMembershipForNodeIds(nodeIds, options = {}) {
+    const opts = __normalizeCardGroupMembershipRefreshOptions(options);
+    const ids = (Array.isArray(nodeIds) ? nodeIds : [nodeIds])
+        .map(id => String(id || '').trim())
+        .filter(Boolean);
+    if (!ids.length && !opts.forceAll) return;
+    try { __syncAllCardGroupMembershipHints(); } catch (_) { }
+    if (opts.renderFrames) {
+        try { __refreshAllCardGroupFrames(); } catch (_) { }
+    }
+    if (opts.renderEdges) {
+        try { renderEdges(); } catch (_) { }
+    }
+}
+
+function __scheduleCardGroupMembershipRefreshForNodeIds(nodeIds, options = {}) {
+    const opts = __normalizeCardGroupMembershipRefreshOptions(options);
+    const ids = (Array.isArray(nodeIds) ? nodeIds : [nodeIds])
+        .map(id => String(id || '').trim())
+        .filter(Boolean);
+    if (!ids.length && !opts.forceAll) return;
+    ids.forEach(id => __cardGroupMembershipRefreshPendingIds.add(id));
+    __cardGroupMembershipRefreshForceAll = __cardGroupMembershipRefreshForceAll || opts.forceAll;
+    __cardGroupMembershipRefreshShouldRenderFrames = __cardGroupMembershipRefreshShouldRenderFrames || opts.renderFrames;
+    __cardGroupMembershipRefreshShouldRenderEdges = __cardGroupMembershipRefreshShouldRenderEdges || opts.renderEdges;
+    const run = () => {
+        const pendingIds = Array.from(__cardGroupMembershipRefreshPendingIds);
+        const refreshOptions = {
+            forceAll: __cardGroupMembershipRefreshForceAll,
+            renderFrames: __cardGroupMembershipRefreshShouldRenderFrames,
+            renderEdges: __cardGroupMembershipRefreshShouldRenderEdges
+        };
+        __cardGroupMembershipRefreshRaf = 0;
+        __cardGroupMembershipRefreshPendingIds.clear();
+        __cardGroupMembershipRefreshForceAll = false;
+        __cardGroupMembershipRefreshShouldRenderFrames = false;
+        __cardGroupMembershipRefreshShouldRenderEdges = false;
+        try { __refreshCardGroupMembershipForNodeIds(pendingIds, refreshOptions); } catch (_) { }
+    };
+    if (__cardGroupMembershipRefreshRaf) return;
+    if (typeof requestAnimationFrame === 'function') {
+        __cardGroupMembershipRefreshRaf = requestAnimationFrame(run);
+    } else {
+        __cardGroupMembershipRefreshRaf = setTimeout(run, 0);
+    }
+}
+
+function __isCardGroupMembershipConnectionBlocked(fromNode, toNode) {
+    const fromId = String(fromNode || '').trim();
+    const toId = String(toNode || '').trim();
+    if (!fromId || !toId || fromId === toId) return false;
+    const fromIsGroup = (CanvasState.mdNodes || []).some(n => n && n.id === fromId && n.subtype === 'card-group');
+    const toIsGroup = (CanvasState.mdNodes || []).some(n => n && n.id === toId && n.subtype === 'card-group');
+    if (fromIsGroup && __canvasGetOwningCardGroupIds(toId).includes(fromId)) return true;
+    if (toIsGroup && __canvasGetOwningCardGroupIds(fromId).includes(toId)) return true;
+    return false;
+}
+
 function addEdge(fromNode, fromSide, toNode, toSide) {
+    // Block self-connections between anchors of the same node
+    if (fromNode === toNode) {
+        console.log('[Canvas] 忽略同栏目的锚点连接');
+        return;
+    }
+    if (__isCardGroupMembershipConnectionBlocked(fromNode, toNode)) {
+        console.log('[Canvas] 忽略卡片组与其内部成员之间的连接线');
+        return;
+    }
+
+    // Same pair in reverse means the edge is bidirectional, not duplicated.
+    const reverseEdge = CanvasState.edges.find(e =>
+        e.fromNode === toNode &&
+        e.toNode === fromNode
+    );
+    if (reverseEdge) {
+        reverseEdge.direction = 'both';
+        renderEdges();
+        saveTempNodes();
+        return;
+    }
+
     // Check for existing identical edge
     const exists = CanvasState.edges.some(e =>
         e.fromNode === fromNode && e.fromSide === fromSide &&
         e.toNode === toNode && e.toSide === toSide
     );
     if (exists) return;
-    // Block self-connections between anchors of the same node
-    if (fromNode === toNode) {
-        console.log('[Canvas] 忽略同栏目的锚点连接');
-        return;
-    }
 
     const defaultLabel = getDefaultEdgeLabel({ fromNode, toNode });
     const defaultColor = getEdgeDefaultColor();
@@ -29911,7 +30355,7 @@ function addEdge(fromNode, fromSide, toNode, toSide) {
         fromSide,
         toNode,
         toSide,
-        direction: 'none', // 'none' | 'forward' | 'both'
+        direction: 'forward', // 'none' | 'forward' | 'both'
         color: null, // 预设颜色编号 (1-6) 或 null
         colorHex: defaultColor || null, // 自定义十六进制颜色
         label: defaultLabel || '' // 连接线文字标签
@@ -30399,14 +30843,14 @@ function getAnchorPosition(nodeId, side) {
         }
     }
 
-    // [Drag] import-container 组拖动期间：节点位置由 CSS translate3d 驱动（不改 left/top）。
+    // [Drag] card-group 组拖动期间：节点位置由 CSS translate3d 驱动（不改 left/top）。
     // 连接线/工具栏计算位置时需手动补偿当前拖动位移，避免“松手瞬间漂移/跳变”。
     const dragMeta = CanvasState && CanvasState.dragState ? CanvasState.dragState.meta : null;
-    if (dragMeta && dragMeta.importGroupDrag &&
-        dragMeta.importGroupMovedIds && dragMeta.importGroupMovedIds.has &&
-        dragMeta.importGroupMovedIds.has(nodeId)) {
-        const dx = (typeof dragMeta.importGroupDx === 'number' && isFinite(dragMeta.importGroupDx)) ? dragMeta.importGroupDx : 0;
-        const dy = (typeof dragMeta.importGroupDy === 'number' && isFinite(dragMeta.importGroupDy)) ? dragMeta.importGroupDy : 0;
+    if (dragMeta && dragMeta.cardGroupDrag &&
+        dragMeta.cardGroupMovedIds && dragMeta.cardGroupMovedIds.has &&
+        dragMeta.cardGroupMovedIds.has(nodeId)) {
+        const dx = (typeof dragMeta.cardGroupDx === 'number' && isFinite(dragMeta.cardGroupDx)) ? dragMeta.cardGroupDx : 0;
+        const dy = (typeof dragMeta.cardGroupDy === 'number' && isFinite(dragMeta.cardGroupDy)) ? dragMeta.cardGroupDy : 0;
         left += dx;
         top += dy;
     }
@@ -30581,9 +31025,6 @@ function showEdgeToolbar(edgeId, x, y) {
     const labelTitle = lang === 'en' ? 'Edit label' : '编辑标签';
 
     toolbar.innerHTML = `
-        <button class="md-node-toolbar-btn" data-action="edge-delete" data-tooltip="${deleteTitle}">
-            <i class="far fa-trash-alt"></i>
-        </button>
         <button class="md-node-toolbar-btn" data-action="edge-color-toggle" data-tooltip="${colorTitle}">
             <i class="fas fa-palette"></i>
         </button>
@@ -30595,6 +31036,9 @@ function showEdgeToolbar(edgeId, x, y) {
         </button>
         <button class="md-node-toolbar-btn" data-action="edge-label" data-tooltip="${labelTitle}">
             <i class="far fa-edit"></i>
+        </button>
+        <button class="md-node-toolbar-btn" data-action="edge-delete" data-tooltip="${deleteTitle}">
+            <i class="far fa-trash-alt"></i>
         </button>
     `;
 
@@ -30727,14 +31171,18 @@ function updateEdgeToolbarPosition() {
     const midX = curveMid ? curveMid.x : (start.x + end.x) / 2;
     const midY = curveMid ? curveMid.y : (start.y + end.y) / 2;
 
-    // 工具栏显示在中点上方（使用 canvas-content 坐标系），根据缩放比例调整偏移
+    // 工具栏显示在中点上方（使用 canvas-content 坐标系），统一固定偏移
     const z = (CanvasState && CanvasState.zoom) ? CanvasState.zoom : 1;
+    const inv = 1 / z;
+    const activeLabelEditor = document.getElementById('edge-label-editor');
+    const toolbarTopOffsetPx = 55;
     toolbar.style.left = `${midX}px`;
-    toolbar.style.top = `${midY - (40 / z)}px`;
-    toolbar.style.transform = 'translateX(-50%)'; // 居中对齐
+    toolbar.style.top = `${midY - (toolbarTopOffsetPx * inv)}px`;
+    toolbar.style.transform = `translateX(-50%) scale(${inv.toFixed(5)})`;
+    toolbar.style.transformOrigin = 'center top';
 
     // 同步更新正在编辑的输入框位置
-    const editor = document.getElementById('edge-label-editor');
+    const editor = activeLabelEditor || document.getElementById('edge-label-editor');
     if (editor && isSameEdgeId(editor.dataset.edgeId, edgeId)) {
         const offsetPx = 18;
         editor.style.left = `${midX}px`;
@@ -31348,22 +31796,133 @@ function getMdNodeById(nodeId) {
         : null;
 }
 
-function toggleMdNodePin(nodeId) {
-    const node = getMdNodeById(nodeId);
-    if (!node) return false;
-    node.pinned = !node.pinned;
+function __applyMdNodePinnedStateToElement(node) {
+    if (!node || !node.id) return;
     const el = document.getElementById(node.id);
     if (el) {
         if (node.pinned) {
             el.style.zIndex = '200';
-        } else if (node.subtype === 'import-container') {
+        } else if (node.subtype === 'card-group') {
             el.style.zIndex = '5';
         } else if (typeof node.z === 'number') {
             el.style.zIndex = String(node.z);
         } else {
             el.style.zIndex = '15';
         }
+        if (el.classList && el.classList.contains('card-group-canvas-node')) {
+            el.classList.toggle('pinned', !!node.pinned);
+        }
     }
+}
+
+function __setTempSectionPinnedState(sectionId, isPinned) {
+    const section = getTempSection(sectionId);
+    if (!section) return false;
+    section.pinned = !!isPinned;
+    updateSectionZIndex(section.id, section.pinned);
+    try {
+        const el = document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(section.id)}"]`);
+        const btn = el ? el.querySelector('.temp-node-pin-btn') : null;
+        if (btn) {
+            const lang = getCanvasLanguage();
+            const title = section.pinned
+                ? (lang === 'en' ? 'Unpin section' : '取消置顶')
+                : (lang === 'en' ? 'Pin section' : '置顶栏目');
+            btn.classList.toggle('pinned', section.pinned);
+            btn.title = title;
+            btn.setAttribute('aria-label', title);
+            btn.innerHTML = section.pinned
+                ? '<i class="fas fa-thumbtack"></i>'
+                : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+        }
+    } catch (_) { }
+    return true;
+}
+
+function __setMdNodePinnedState(nodeId, isPinned, visited) {
+    const node = getMdNodeById(nodeId);
+    if (!node) return false;
+    node.pinned = !!isPinned;
+    __applyMdNodePinnedStateToElement(node);
+    return true;
+}
+
+function __getPinStateOfCanvasMember(member) {
+    if (!member || !member.data) return null;
+    if (member.type === 'temp-section' || member.type === 'md-node') {
+        return !!member.data.pinned;
+    }
+    if (member.type === 'permanent-section') {
+        const el = member.data._permanentElement
+            || ((typeof __resolveCanvasNodeElementById === 'function') ? __resolveCanvasNodeElementById(member.data.id) : document.getElementById(member.data.id));
+        if (!el) return null;
+        const btn = el.querySelector('.permanent-section-pin-btn');
+        return !!(btn && btn.classList && btn.classList.contains('pinned')) || el.style.zIndex === '200';
+    }
+    return null;
+}
+
+function __setPinStateOfCanvasMember(member, isPinned) {
+    if (!member || !member.data || !member.data.id) return false;
+    if (member.type === 'temp-section') {
+        return __setTempSectionPinnedState(member.data.id, isPinned);
+    }
+    if (member.type === 'md-node') {
+        return __setMdNodePinnedState(member.data.id, isPinned);
+    }
+    if (member.type === 'permanent-section') {
+        const current = __getPinStateOfCanvasMember(member);
+        if (current === null || current === !!isPinned) return false;
+        const el = member.data._permanentElement
+            || ((typeof __resolveCanvasNodeElementById === 'function') ? __resolveCanvasNodeElementById(member.data.id) : document.getElementById(member.data.id));
+        if (!el || typeof togglePermanentSectionPin !== 'function') return false;
+        togglePermanentSectionPin(el);
+        return true;
+    }
+    return false;
+}
+
+function __getCardGroupMemberPinTargets(groupNode) {
+    if (!groupNode || !groupNode.id) return [];
+    if (typeof getRecursiveGeometricMembers !== 'function') return [];
+    try {
+        return (getRecursiveGeometricMembers(groupNode) || [])
+            .filter((member) => member && member.data && member.data.id && member.data.id !== groupNode.id)
+            .filter((member) => member.type === 'temp-section' || member.type === 'md-node' || member.type === 'permanent-section')
+            .filter((member) => !(member.type === 'md-node' && member.data && member.data.subtype === 'card-group'));
+    } catch (_) {
+        return [];
+    }
+}
+
+function getCardGroupMembersPinState(groupId) {
+    const group = getMdNodeById(groupId);
+    const members = __getCardGroupMemberPinTargets(group);
+    const pinnable = members.filter((member) => __getPinStateOfCanvasMember(member) !== null);
+    return {
+        hasTargets: pinnable.length > 0,
+        allPinned: pinnable.length > 0 && pinnable.every((member) => __getPinStateOfCanvasMember(member) === true)
+    };
+}
+
+function toggleCardGroupMembersPin(groupId) {
+    const group = getMdNodeById(groupId);
+    const members = __getCardGroupMemberPinTargets(group);
+    const pinnable = members.filter((member) => __getPinStateOfCanvasMember(member) !== null);
+    if (pinnable.length === 0) return false;
+    const shouldPin = pinnable.some((member) => __getPinStateOfCanvasMember(member) !== true);
+    pinnable.forEach((member) => {
+        try { __setPinStateOfCanvasMember(member, shouldPin); } catch (_) { }
+    });
+    saveTempNodes();
+    return shouldPin;
+}
+
+function toggleMdNodePin(nodeId) {
+    const node = getMdNodeById(nodeId);
+    if (!node) return false;
+    const nextPinned = !node.pinned;
+    __setMdNodePinnedState(node.id, nextPinned);
     saveTempNodes();
     return node.pinned;
 }
@@ -31474,20 +32033,25 @@ function startEdgeLabelInlineEdit(edgeId) {
     div.contentEditable = 'true';
     div.textContent = edge.label || '';
     div.style.whiteSpace = 'nowrap';
-    div.style.padding = '0';
+    div.style.padding = '2px 10px';
     div.style.margin = '0';
-    div.style.background = 'transparent';
+    const edgeColor = edge.colorHex || presetToHex(edge.color) || '#66bbff';
+    const edgeRgb = hexToRgb(edgeColor) || { r: 102, g: 187, b: 255 };
+    div.style.background = `rgba(${edgeRgb.r}, ${edgeRgb.g}, ${edgeRgb.b}, 0.12)`;
     div.style.outline = 'none';
-    div.style.border = 'none';
+    div.style.border = `1.5px solid rgba(${edgeRgb.r}, ${edgeRgb.g}, ${edgeRgb.b}, 0.9)`;
+    div.style.borderRadius = '8px';
+    div.style.boxShadow = `0 2px 10px rgba(${edgeRgb.r}, ${edgeRgb.g}, ${edgeRgb.b}, 0.24)`;
     div.style.cursor = 'text';
     div.style.userSelect = 'text';
     div.style.WebkitUserSelect = 'text';
+    div.style.textAlign = 'center';
+    div.style.display = 'inline-block';
+    div.style.caretColor = edgeColor;
     div.style.minWidth = 'max-content'; // 确保内容完全显示
     div.style.width = 'max-content'; // 自动适应内容宽度
     // 字体样式与SVG文本一致
-    div.style.fontSize = '16px';
     div.style.fontWeight = '500';
-    const edgeColor = edge.colorHex || presetToHex(edge.color) || '';
     if (edgeColor) div.style.color = edgeColor;
 
     // 挖空矩形（如未存在则创建）
@@ -31508,12 +32072,11 @@ function startEdgeLabelInlineEdit(edgeId) {
     }
 
     const layout = () => {
-        const z = (CanvasState && CanvasState.zoom) ? CanvasState.zoom : 1;
-        // 使用 scrollWidth 获取实际内容宽度，而不是被截断的宽度
-        const r = div.getBoundingClientRect();
-        const actualWidth = Math.max(r.width, div.scrollWidth);
-        const w = Math.max(12, actualWidth / z);
-        const h = Math.max(14, r.height / z);
+        // 统一使用同一坐标系（foreignObject 本地尺寸）避免 zoom/屏幕像素混算导致编辑态左右偏移
+        const measuredWidth = Math.max(div.offsetWidth || 0, div.scrollWidth || 0);
+        const measuredHeight = Math.max(div.offsetHeight || 0, div.scrollHeight || 0);
+        const w = Math.max(12, measuredWidth);
+        const h = Math.max(14, measuredHeight);
         fo.setAttribute('x', (mid.x - w / 2).toString());
         fo.setAttribute('y', (mid.y - h / 2).toString());
         fo.setAttribute('width', w.toString());
@@ -34205,8 +34768,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfTriggerHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Primary Trigger + Fuse</b>: P2 becomes <b>Active</b> when the <b>Visible Columns</b> count (permanent, temp, blank; imported frames count as one) exceeds its threshold. When P2 is active, Bookmark/Folder thresholds show orange warnings. Hold <b>Ctrl</b> while zooming to force block mode, trading some detail for smoother navigation.'
-            : '<b>主触发 + 保险丝</b>：P2 是否<b>激活</b>主要看<b>可见栏目数阈值</b>（永久/临时/空白；导入组框算 1 个）。当 P2 激活时，书签/文件夹阈值会显示橙色预警；此时按住 <b>Ctrl</b> 缩放可强制进入色块模式，适当降低细节以提升流畅度。'}
+            ? '<b>Primary Trigger + Fuse</b>: P2 becomes <b>Active</b> when the <b>Visible Columns</b> count (permanent, temp, blank, groups) exceeds its threshold. When P2 is active, Bookmark/Folder thresholds show orange warnings. Hold <b>Ctrl</b> while zooming to force block mode, trading some detail for smoother navigation.'
+            : '<b>主触发 + 保险丝</b>：P2 是否<b>激活</b>主要看<b>可见栏目数阈值</b>（永久/临时/空白/组）。当 P2 激活时，书签/文件夹阈值会显示橙色预警；此时按住 <b>Ctrl</b> 缩放可强制进入色块模式，适当降低细节以提升流畅度。'}
             </div>
         </div>
         

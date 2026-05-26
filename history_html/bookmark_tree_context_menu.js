@@ -10760,7 +10760,7 @@ function __getCanvasCardGroupCreateTitles(lang) {
     };
 }
 
-function __invokeCanvasCardGroupCreateHandler(kind, left, top, title) {
+function __invokeCanvasCardGroupCreateHandler(kind, left, top, title, options = {}) {
     const x = Number(left);
     const y = Number(top);
     const payload = {
@@ -10772,6 +10772,11 @@ function __invokeCanvasCardGroupCreateHandler(kind, left, top, title) {
         },
         completed: false
     };
+    if (options && typeof options === 'object') {
+        if (options.empty === true) payload.empty = true;
+        if (Number.isFinite(Number(options.width))) payload.width = Number(options.width);
+        if (Number.isFinite(Number(options.height))) payload.height = Number(options.height);
+    }
     const canvas = (typeof window !== 'undefined') ? window.CanvasModule : null;
     const groupApi = (typeof window !== 'undefined') ? window.CanvasGroups : null;
     const create = groupApi && typeof groupApi.createCardGroup === 'function'
@@ -11022,7 +11027,7 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
             } else if (action === 'create-card-group-at-position') {
                 const left = Number(canvasLeft);
                 const top = Number(canvasTop);
-                await __openCanvasCardGroupCreateUiAtPosition(left, top);
+                await __invokeCanvasCardGroupCreateHandler('fixed', left, top, '', { empty: true });
             } else if (action === 'add-entry-blank') {
                 const addContext = {
                     treeType: ttype === 'temporary' ? 'temporary' : 'permanent',
