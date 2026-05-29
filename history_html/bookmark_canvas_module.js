@@ -16698,6 +16698,9 @@ function clearMdSelection() {
             const prev = document.getElementById(CanvasState.selectedMdNodeId);
             if (prev) prev.classList.remove('selected');
         }
+        document.querySelectorAll('.selected-member').forEach(el => {
+            el.classList.remove('selected-member');
+        });
     } catch (_) { }
     CanvasState.selectedMdNodeId = null;
 }
@@ -16712,6 +16715,26 @@ function selectMdNode(nodeId) {
     if (el) {
         el.classList.add('selected');
         CanvasState.selectedMdNodeId = nodeId;
+        
+        try {
+            if (typeof window.__BCSCardGroup !== 'undefined' && typeof window.__BCSCardGroup.getRecursiveGeometricMembers === 'function') {
+                const group = (CanvasState.mdNodes || []).find(n => n.id === nodeId);
+                if (group && group.subtype === 'card-group') {
+                    const members = window.__BCSCardGroup.getRecursiveGeometricMembers(group);
+                    members.forEach(m => {
+                        const id = m.data && m.data.id;
+                        if (!id) return;
+                        let childEl = document.getElementById(id);
+                        if (!childEl && m.data._permanentElement) {
+                            childEl = m.data._permanentElement;
+                        }
+                        if (childEl) {
+                            childEl.classList.add('selected-member');
+                        }
+                    });
+                }
+            }
+        } catch (_) {}
     }
 }
 

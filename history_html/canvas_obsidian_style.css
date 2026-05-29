@@ -2737,6 +2737,13 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     z-index: 240 !important;
 }
 
+.card-group-canvas-node.selected-member,
+.md-canvas-node.selected-member,
+.temp-canvas-node.selected-member,
+.permanent-bookmark-section.selected-member {
+    z-index: 241 !important;
+}
+
 .card-group-canvas-node .canvas-node-anchor::before {
     background-color: color-mix(in srgb, var(--card-group-anchor-color) 45%, transparent);
     border-color: color-mix(in srgb, var(--card-group-anchor-color) 65%, transparent);
