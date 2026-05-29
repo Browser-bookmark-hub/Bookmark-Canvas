@@ -5069,6 +5069,16 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     const { remappedNodes, remappedEdges, remappedScrolls } = __remapImportedData(tempState, storage, primaryState);
     // 2. Calculate Bounding Box of the imported batch
     const bounds = __calculateNodesBoundingBox(remappedNodes);
+    const requestedCanvasPosition = (() => {
+        const source = normalizedImportMeta && normalizedImportMeta.canvasPosition && typeof normalizedImportMeta.canvasPosition === 'object'
+            ? normalizedImportMeta.canvasPosition
+            : null;
+        if (!source) return null;
+        const left = Number(Object.prototype.hasOwnProperty.call(source, 'left') ? source.left : source.x);
+        const top = Number(Object.prototype.hasOwnProperty.call(source, 'top') ? source.top : source.y);
+        if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+        return { left, top };
+    })();
 
     // 3. Find "Empty Space" near current viewport (guarantee non-overlap)
     const workspace = document.getElementById('canvasWorkspace');
@@ -5084,8 +5094,57 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
         ? `📦 Imported Package(${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()})`
         : `📦 导入的包(${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()})`);
 
-    const containerWidth = bounds.width + (PADDING * 2);
-    const containerHeight = bounds.height + (PADDING * 2);
+    const getRuntimeRect = (node) => {
+        if (!node) return null;
+        const x = Number(node.x);
+        const y = Number(node.y);
+        const w = Number(node.width) || 300;
+        const h = Number(node.height) || 300;
+        if (![x, y, w, h].every(v => Number.isFinite(v))) return null;
+        return { x, y, w, h };
+    };
+    const rectFullyInside = (inner, outer, margin = 0) => {
+        if (!inner || !outer) return false;
+        const m = Number.isFinite(Number(margin)) ? Number(margin) : 0;
+        return (
+            inner.x >= outer.x + m &&
+            inner.y >= outer.y + m &&
+            inner.x + inner.w <= outer.x + outer.w - m &&
+            inner.y + inner.h <= outer.y + outer.h - m
+        );
+    };
+    const explicitContainerGroup = (() => {
+        const mdNodes = Array.isArray(remappedNodes.mdNodes) ? remappedNodes.mdNodes : [];
+        const groups = mdNodes.filter((node) => node && node.subtype === 'card-group');
+        if (!groups.length) return null;
+        const tempSections = Array.isArray(remappedNodes.tempSections) ? remappedNodes.tempSections : [];
+        const candidates = groups.filter((group) => {
+            const groupRect = getRuntimeRect(group);
+            if (!groupRect) return false;
+            const children = [
+                ...tempSections,
+                ...mdNodes.filter((node) => node && node.id !== group.id)
+            ];
+            return children.every((node) => rectFullyInside(getRuntimeRect(node), groupRect, 0));
+        });
+        if (!candidates.length) return null;
+        candidates.sort((a, b) => {
+            const ar = getRuntimeRect(a);
+            const br = getRuntimeRect(b);
+            const aa = ar ? ar.w * ar.h : 0;
+            const ba = br ? br.w * br.h : 0;
+            return ba - aa;
+        });
+        return candidates[0] || null;
+    })();
+    const useExplicitContainerGroup = !!explicitContainerGroup;
+    const explicitContainerRect = useExplicitContainerGroup ? getRuntimeRect(explicitContainerGroup) : null;
+    const containerWidth = useExplicitContainerGroup && explicitContainerRect
+        ? explicitContainerRect.w
+        : bounds.width + (PADDING * 2);
+    const containerHeight = useExplicitContainerGroup && explicitContainerRect
+        ? explicitContainerRect.h
+        : bounds.height + (PADDING * 2);
 
     const viewportRightCanvasX = (workspaceRect.width - panX) / zoom;
     const viewportCenterCanvasY = (workspaceRect.height / 2 - panY) / zoom;
@@ -5158,7 +5217,12 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
         return null;
     };
 
-    const found = tryFindBoundsMinXMinY();
+    const found = requestedCanvasPosition
+        ? {
+            targetBoundsMinX: requestedCanvasPosition.left + (useExplicitContainerGroup ? 0 : PADDING),
+            targetBoundsMinY: requestedCanvasPosition.top + (useExplicitContainerGroup ? 0 : PADDING)
+        }
+        : tryFindBoundsMinXMinY();
     const targetBoundsMinX = found ? found.targetBoundsMinX : baseX;
     const targetBoundsMinY = found ? found.targetBoundsMinY : baseY;
 
@@ -5166,18 +5230,20 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     const offsetX = targetBoundsMinX - bounds.minX;
     const offsetY = targetBoundsMinY - bounds.minY;
 
-    const containerNode = {
-        id: `card-group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        type: 'md',
-        subtype: 'card-group',
-        x: (targetBoundsMinX - PADDING),
-        y: (targetBoundsMinY - PADDING),
-        width: containerWidth,
-        height: containerHeight,
-        label: containerLabel,
-        color: null,
-        pinned: false
-    };
+    const containerNode = useExplicitContainerGroup
+        ? explicitContainerGroup
+        : {
+            id: `card-group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'md',
+            subtype: 'card-group',
+            x: (targetBoundsMinX - PADDING),
+            y: (targetBoundsMinY - PADDING),
+            width: containerWidth,
+            height: containerHeight,
+            label: containerLabel,
+            color: null,
+            pinned: false
+        };
 
     // 5. Apply Offset to all imported nodes
     remappedNodes.tempSections.forEach(s => { s.x += offsetX; s.y += offsetY; });
@@ -5192,8 +5258,12 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
 
     // 6. Merge into CanvasState
     CanvasState.tempSections.push(...remappedNodes.tempSections);
-    // Put container FIRST so it renders at the bottom (DOM order)
-    CanvasState.mdNodes.unshift(containerNode);
+    // Put generated container FIRST so it renders at the bottom (DOM order).
+    // If the imported package already contains one real JsonCanvas group wrapping all members,
+    // reuse that group instead of creating a second wrapper.
+    if (!useExplicitContainerGroup) {
+        CanvasState.mdNodes.unshift(containerNode);
+    }
     CanvasState.mdNodes.push(...remappedNodes.mdNodes);
     CanvasState.edges.push(...remappedEdges);
 
@@ -5213,7 +5283,9 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     remappedNodes.tempSections.forEach(s => {
         try { renderTempNode(s, useVirtual ? { skipTree: true } : {}); } catch (_) { }
     });
-    try { renderMdNode(containerNode); } catch (_) { }
+    if (!useExplicitContainerGroup) {
+        try { renderMdNode(containerNode); } catch (_) { }
+    }
     remappedNodes.mdNodes.forEach(n => {
         try { renderMdNode(n); } catch (_) { }
     });

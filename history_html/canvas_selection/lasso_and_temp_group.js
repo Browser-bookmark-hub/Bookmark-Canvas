@@ -954,7 +954,8 @@ function __tempGroupContextMenuLabels() {
         color: isEn ? 'Color' : '颜色',
         locate: isEn ? 'Locate' : '定位',
         pin: isEn ? 'Pin' : '置顶',
-        del: isEn ? 'Delete' : '删除'
+        del: isEn ? 'Delete' : '删除',
+        export: isEn ? 'Export' : '导出'
     };
 }
 
@@ -1021,6 +1022,20 @@ function __handleTempGroupContextMenuAction(action, options = {}) {
         __pinAllTempGroup();
     } else if (action === 'temp-group-context-delete') {
         __deleteAllTempGroup();
+    } else if (action === 'temp-group-context-export') {
+        const members = (__tempGroup.members || []).slice();
+        try {
+            if (typeof window !== 'undefined' && typeof window.exportCanvasTempGroupPackage === 'function') {
+                window.exportCanvasTempGroupPackage(members, {
+                    label: (typeof currentLang !== 'undefined' && currentLang === 'zh_CN') ? '框选组' : 'selection'
+                }).catch((error) => {
+                    console.error('[TempGroup] export failed:', error);
+                    alert(((typeof currentLang !== 'undefined' && currentLang === 'zh_CN') ? '导出失败: ' : 'Export failed: ') + (error && error.message ? error.message : error));
+                });
+            }
+        } catch (error) {
+            console.error('[TempGroup] export failed:', error);
+        }
     }
 }
 
@@ -1038,7 +1053,8 @@ function showTempGroupContextMenu(event) {
         { action: 'temp-group-context-color', label: labels.color, icon: 'palette' },
         { action: 'temp-group-context-locate', label: labels.locate, icon: 'crosshairs' },
         { action: 'temp-group-context-pin', label: labels.pin, icon: 'thumbtack' },
-        { action: 'temp-group-context-delete', label: labels.del, icon: 'trash-alt', className: 'color-red' }
+        { action: 'temp-group-context-delete', label: labels.del, icon: 'trash-alt', className: 'color-red' },
+        { action: 'temp-group-context-export', label: labels.export, icon: 'file-export' }
     ];
     menu.classList.remove('horizontal-layout', 'density-xs', 'density-md', 'density-lg', 'lang-zh', 'lang-en');
     menu.classList.add('density-sm');

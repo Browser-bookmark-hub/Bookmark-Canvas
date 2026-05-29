@@ -1536,8 +1536,43 @@ async function __performOverwriteImport(payload) {
     }
 }
 
-function showImportDialog() {
+function __normalizeCanvasImportPosition(positionInput) {
+    const source = positionInput && typeof positionInput === 'object' ? positionInput : null;
+    if (!source) return null;
+    const left = Number(
+        Object.prototype.hasOwnProperty.call(source, 'left') ? source.left : source.x
+    );
+    const top = Number(
+        Object.prototype.hasOwnProperty.call(source, 'top') ? source.top : source.y
+    );
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+    return { left, top };
+}
+
+function __resolveCanvasImportPlacement(width, height, options = {}) {
+    const explicitPosition = __normalizeCanvasImportPosition(options && options.canvasPosition);
+    if (explicitPosition) {
+        return {
+            x: explicitPosition.left,
+            y: explicitPosition.top,
+            needsHigherZIndex: true
+        };
+    }
+    return findAvailablePositionInViewport(width, height);
+}
+
+function showImportDialog(options = {}) {
     const { isEn } = __getLang();
+    const dialogOptions = (options && typeof options === 'object') ? options : {};
+    const canvasPosition = __normalizeCanvasImportPosition(dialogOptions.canvasPosition);
+    const titleText = String(dialogOptions.title || '').trim() || (isEn ? 'Import' : '导入');
+    const importOptions = {
+        canvasPosition,
+        forceSnapshot: !!dialogOptions.forceSnapshot,
+        trigger: dialogOptions.trigger || (canvasPosition ? 'canvas-position-import' : 'manual-import')
+    };
+    const existingDialog = document.getElementById('canvasImportDialog');
+    if (existingDialog) existingDialog.remove();
     // 创建导入对话框
     const dialog = document.createElement('div');
     dialog.className = 'import-dialog';
@@ -1546,7 +1581,7 @@ function showImportDialog() {
     dialog.innerHTML = `
         <div class="import-dialog-content">
             <div class="import-dialog-header">
-                <h3>${isEn ? 'Import' : '导入'}</h3>
+                <h3>${titleText}</h3>
                 <button class="import-dialog-close" id="closeImportDialog">&times;</button>
             </div>
             <div class="import-dialog-body">
@@ -1596,12 +1631,14 @@ function showImportDialog() {
         // 支持 ZIP 和 7z 压缩包
         input.accept = '.zip,.7z';
         input.dataset.type = 'package-archive';
+        input.__canvasImportOptions = importOptions;
         input.click();
     });
 
     // 文件夹导入按钮
     document.getElementById('importCanvasFolderBtn').addEventListener('click', () => {
         const input = document.getElementById('canvasFolderInput');
+        input.__canvasImportOptions = importOptions;
         input.click();
     });
 
@@ -1609,6 +1646,7 @@ function showImportDialog() {
         const input = document.getElementById('canvasFileInput');
         input.accept = '.html';
         input.dataset.type = 'html';
+        input.__canvasImportOptions = importOptions;
         input.click();
     });
 
@@ -1616,6 +1654,7 @@ function showImportDialog() {
         const input = document.getElementById('canvasFileInput');
         input.accept = '.json';
         input.dataset.type = 'json';
+        input.__canvasImportOptions = importOptions;
         input.click();
     });
 
@@ -1647,6 +1686,11 @@ async function handleFileImport(e) {
     if (!file) return;
 
     const type = e.target.dataset.type;
+    const importOptions = (e.target && e.target.__canvasImportOptions && typeof e.target.__canvasImportOptions === 'object')
+        ? e.target.__canvasImportOptions
+        : {};
+    const canvasPosition = __normalizeCanvasImportPosition(importOptions.canvasPosition);
+    const forceSnapshotImport = !!importOptions.forceSnapshot;
 
     try {
         if (type === 'package-archive') {
@@ -1658,6 +1702,20 @@ async function handleFileImport(e) {
             parsedTempState = parsed.tempState;
             parsedStorage = parsed.storage;
             parsedPrimaryState = parsed.primaryState;
+
+            if (forceSnapshotImport) {
+                __setCanvasImportRuntimeMode('permanent');
+                __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
+                    source: 'zip',
+                    trigger: importOptions.trigger || 'canvas-position-import',
+                    canvasPosition
+                });
+                const activeDialog = document.getElementById('canvasImportDialog');
+                if (activeDialog) activeDialog.remove();
+                e.target.value = '';
+                e.target.__canvasImportOptions = null;
+                return;
+            }
 
             const previewData = __buildImportPreviewDataFromTempState(parsedTempState, {
                 sourceLabel: file && file.name ? file.name : '',
@@ -1697,18 +1755,24 @@ async function handleFileImport(e) {
 
             __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
                 source: type === 'package-archive' ? 'zip' : 'json',
-                trigger: 'manual-file-import'
+                trigger: canvasPosition ? 'canvas-position-import' : 'manual-file-import',
+                canvasPosition
             });
         } else {
             const text = await file.text();
             if (type === 'html') {
-                await importHtmlBookmarks(text, file && file.name ? file.name : '');
+                await importHtmlBookmarks(text, file && file.name ? file.name : '', {
+                    canvasPosition
+                });
             } else {
-                await importJsonBookmarks(text, file && file.name ? file.name : '');
+                await importJsonBookmarks(text, file && file.name ? file.name : '', {
+                    canvasPosition
+                });
             }
         }
 
-        document.getElementById('canvasImportDialog').remove();
+        const activeDialog = document.getElementById('canvasImportDialog');
+        if (activeDialog) activeDialog.remove();
         // 成功提示已在各导入函数中显示，这里不再重复
     } catch (error) {
         console.error('[Canvas] 导入失败:', error);
@@ -1717,6 +1781,7 @@ async function handleFileImport(e) {
     }
 
     e.target.value = '';
+    e.target.__canvasImportOptions = null;
 }
 
 /**
@@ -1728,6 +1793,11 @@ async function handleFolderImport(e) {
     if (!files || files.length === 0) return;
 
     const { isEn } = __getLang();
+    const importOptions = (e.target && e.target.__canvasImportOptions && typeof e.target.__canvasImportOptions === 'object')
+        ? e.target.__canvasImportOptions
+        : {};
+    const canvasPosition = __normalizeCanvasImportPosition(importOptions.canvasPosition);
+    const forceSnapshotImport = !!importOptions.forceSnapshot;
 
     try {
 
@@ -1743,6 +1813,20 @@ async function handleFolderImport(e) {
         }
 
         const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName);
+        if (forceSnapshotImport) {
+            __setCanvasImportRuntimeMode('permanent');
+            __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
+                source: 'folder',
+                trigger: importOptions.trigger || 'canvas-position-import',
+                canvasPosition
+            });
+            const activeDialog = document.getElementById('canvasImportDialog');
+            if (activeDialog) activeDialog.remove();
+            e.target.value = '';
+            e.target.__canvasImportOptions = null;
+            return;
+        }
+
         const previewData = __buildImportPreviewDataFromTempState(parsed.tempState, {
             sourceLabel: folderName,
             fullStorage: parsed.storage
@@ -1780,16 +1864,19 @@ async function handleFolderImport(e) {
 
         __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
             source: 'folder',
-            trigger: 'manual-folder-import'
+            trigger: canvasPosition ? 'canvas-position-import' : 'manual-folder-import',
+            canvasPosition
         });
 
-        document.getElementById('canvasImportDialog').remove();
+        const activeDialog = document.getElementById('canvasImportDialog');
+        if (activeDialog) activeDialog.remove();
     } catch (error) {
         console.error('[Canvas] 文件夹导入失败:', error);
         showCanvasToast((isEn ? 'Import failed: ' : '导入失败: ') + (error && error.message ? error.message : error), 'error');
     }
 
     e.target.value = '';
+    e.target.__canvasImportOptions = null;
 }
 
 /**
@@ -1804,7 +1891,7 @@ async function handleFolderImport(e) {
  *    - 任何包含 <a href> 链接的 HTML 文件
  *    - 扁平化提取所有链接
  */
-async function importHtmlBookmarks(html, importFileName = '') {
+async function importHtmlBookmarks(html, importFileName = '', options = {}) {
     const { isEn } = __getLang();
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
@@ -1843,9 +1930,9 @@ async function importHtmlBookmarks(html, importFileName = '') {
 
     // 创建一个新的临时栏目容器
     // 在当前视口中找一个空白位置
-    const sectionMeta = { source: 'file-import', label: isEn ? 'Import' : '导入' };
+    const sectionMeta = { source: 'import-html-bookmarks', label: isEn ? 'Import' : '导入' };
     const baseSize = getTempSectionBaseSize(sectionMeta);
-    const position = findAvailablePositionInViewport(baseSize.width, baseSize.height);
+    const position = __resolveCanvasImportPlacement(baseSize.width, baseSize.height, options);
     const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
     const sectionId = allocateTempSectionId({
         label: sectionMeta.label,
@@ -2025,7 +2112,7 @@ function parseNetscapeBookmarkHtml(doc) {
  * 5. 单对象格式：{name/title, url/href/uri, children}
  * 6. 第三方插件常用格式（兼容各种字段名）
  */
-async function importJsonBookmarks(json, importFileName = '') {
+async function importJsonBookmarks(json, importFileName = '', options = {}) {
     const { isEn } = __getLang();
     let data;
     try {
@@ -2117,10 +2204,19 @@ async function importJsonBookmarks(json, importFileName = '') {
     let tempProtocolMeta = null;
     const sectionType = String(data && data.sectionType || '').trim().toLowerCase();
     const formatType = String(data && data.format || '').trim().toLowerCase();
+    const looksLikeCanvasPermanentProtocol = !!(
+        data
+        && typeof data === 'object'
+        && !Array.isArray(data)
+        && sectionType === 'permanent'
+        && data.tree
+        && typeof data.tree === 'object'
+    );
     const looksLikeCanvasTempProtocol = !!(
         data
         && typeof data === 'object'
         && !Array.isArray(data)
+        && sectionType !== 'permanent'
         && (
             sectionType === 'temporary'
             || formatType === String(__CANVAS_SECTION_JSON_FORMAT || '').toLowerCase()
@@ -2130,7 +2226,17 @@ async function importJsonBookmarks(json, importFileName = '') {
     let importedViaCanvasTempProtocol = false;
 
     // 检测并处理不同格式
-    if (looksLikeCanvasTempProtocol) {
+    if (looksLikeCanvasPermanentProtocol) {
+        console.log('[Canvas] Detected Bookmark Canvas permanent section JSON format');
+        const permanentTree = data.tree;
+        const roots = permanentTree && Array.isArray(permanentTree.children)
+            ? permanentTree.children
+            : [permanentTree];
+        roots.forEach((entry) => {
+            const item = convert(entry);
+            if (item) items.push(item);
+        });
+    } else if (looksLikeCanvasTempProtocol) {
         console.log('[Canvas] Detected Bookmark Canvas temporary section JSON format');
         try {
             const normalizedProtocol = __normalizeTempSectionProtocolObject(data);
@@ -2254,13 +2360,12 @@ async function importJsonBookmarks(json, importFileName = '') {
     // 创建一个新的临时栏目容器
     // 在当前视口中找一个空白位置
     const sectionMeta = {
-        source: String(tempProtocolMeta && tempProtocolMeta.source || 'file-import').trim() || 'file-import',
-        label: String(tempProtocolMeta && tempProtocolMeta.label || '').trim() || (isEn ? 'Import' : '导入')
+        source: 'import-json-bookmarks',
+        label: isEn ? 'Import' : '导入'
     };
     const baseSize = getTempSectionBaseSize(sectionMeta);
-    const position = findAvailablePositionInViewport(baseSize.width, baseSize.height);
-    const protocolSequenceNumberHint = __normalizePositiveInt(tempProtocolMeta && tempProtocolMeta.sequenceNumber);
-    const sequenceNumberForId = protocolSequenceNumberHint || (++CanvasState.tempSectionSequenceNumber);
+    const position = __resolveCanvasImportPlacement(baseSize.width, baseSize.height, options);
+    const sequenceNumberForId = ++CanvasState.tempSectionSequenceNumber;
     const sectionId = allocateTempSectionId({
         label: sectionMeta.label,
         sequenceNumber: sequenceNumberForId,
@@ -2281,7 +2386,6 @@ async function importJsonBookmarks(json, importFileName = '') {
             ? tempProtocolMeta.descriptionMd
             : ''
     );
-    const protocolSequenceNumber = __normalizePositiveInt(tempProtocolMeta && tempProtocolMeta.sequenceNumber);
     const protocolOriginPermanent = __normalizeOriginPermanentPayload(tempProtocolMeta && tempProtocolMeta.originPermanent);
     const section = {
         id: sectionId,
@@ -2302,9 +2406,6 @@ async function importJsonBookmarks(json, importFileName = '') {
     if (protocolDescriptionMd) {
         section.descriptionMd = protocolDescriptionMd;
         section.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(protocolDescriptionMd));
-    }
-    if (protocolSequenceNumber) {
-        section.sequenceNumber = protocolSequenceNumber;
     }
     if (protocolOriginPermanent) {
         section.originPermanent = protocolOriginPermanent;
@@ -2424,6 +2525,303 @@ function __getFullscreenExportTargetLabel(descriptor) {
 function exportCanvas() {
     const fullscreenTarget = __getCurrentFullscreenExportTarget();
     showExportModeDialog({ fullscreenTarget });
+}
+
+function __canvasExportTimeParts() {
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const now = new Date();
+    return {
+        ymd: `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}`,
+        hms: `${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
+    };
+}
+
+function __downloadCanvasZipPackage(files, zipName, downloadFolder) {
+    const zipBlob = __zipStore(files);
+    const zipUrl = URL.createObjectURL(zipBlob);
+    if (chrome && chrome.downloads && typeof chrome.downloads.download === 'function') {
+        chrome.downloads.download({
+            url: zipUrl,
+            filename: `${downloadFolder}/${zipName}`,
+            saveAs: false,
+            conflictAction: 'uniquify'
+        }, () => {
+            if (chrome.runtime && chrome.runtime.lastError) {
+                console.warn('[Canvas] chrome.downloads.download failed, fallback to <a> tag:', chrome.runtime.lastError);
+                const a = document.createElement('a');
+                a.href = zipUrl;
+                a.download = zipName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+            setTimeout(() => URL.revokeObjectURL(zipUrl), 10000);
+        });
+        return;
+    }
+
+    const a = document.createElement('a');
+    a.href = zipUrl;
+    a.download = zipName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(zipUrl), 10000);
+}
+
+function __normalizeCanvasSubsetMembers(rawMembers, options = {}) {
+    const out = {
+        tempIds: new Set(),
+        mdIds: new Set(),
+        edgeIds: new Set(),
+        permanentMain: false,
+        permanentCopyIds: new Set()
+    };
+    const addPermanentId = (rawId) => {
+        const id = String(rawId || '').trim();
+        if (!id) return;
+        if (id === 'permanent-section' || id === 'permanentSection') {
+            out.permanentMain = true;
+            return;
+        }
+        if (id.startsWith('permanent-section-copy-')) {
+            const copyId = id.slice('permanent-section-copy-'.length).trim();
+            if (copyId) out.permanentCopyIds.add(copyId);
+        }
+    };
+    const addMember = (member) => {
+        if (!member || typeof member !== 'object') return;
+        const type = String(member.type || '').trim();
+        const data = member.data && typeof member.data === 'object' ? member.data : member;
+        const id = String(member.id || (data && data.id) || '').trim();
+        if (!id) return;
+        if (type === 'temp-section') {
+            out.tempIds.add(id);
+        } else if (type === 'md-node') {
+            out.mdIds.add(id);
+        } else if (type === 'edge') {
+            out.edgeIds.add(id);
+        } else if (type === 'permanent-section') {
+            addPermanentId(id);
+        } else {
+            const state = (typeof CanvasState !== 'undefined') ? CanvasState : null;
+            if (state && (state.tempSections || []).some((section) => section && section.id === id)) out.tempIds.add(id);
+            else if (state && (state.mdNodes || []).some((node) => node && node.id === id)) out.mdIds.add(id);
+            else if (state && (state.edges || []).some((edge) => edge && edge.id === id)) out.edgeIds.add(id);
+            else addPermanentId(id);
+        }
+    };
+
+    if (options && options.includeMdId) {
+        const mdId = String(options.includeMdId || '').trim();
+        if (mdId) out.mdIds.add(mdId);
+    }
+    (Array.isArray(rawMembers) ? rawMembers : []).forEach(addMember);
+    return out;
+}
+
+function __buildCanvasSubsetNodeIdSet(subset) {
+    const ids = new Set();
+    subset.tempIds.forEach((id) => ids.add(id));
+    subset.mdIds.forEach((id) => ids.add(id));
+    if (subset.permanentMain) ids.add('permanent-section');
+    subset.permanentCopyIds.forEach((copyId) => {
+        if (copyId) ids.add(`permanent-section-copy-${copyId}`);
+    });
+    return ids;
+}
+
+function __collectCanvasSubsetEdges(subset) {
+    const nodeIds = __buildCanvasSubsetNodeIdSet(subset);
+    return (CanvasState.edges || []).filter((edge) => {
+        if (!edge || !edge.id) return false;
+        const fromId = String(edge.fromNode || '').trim();
+        const toId = String(edge.toNode || '').trim();
+        return !!(fromId && toId && nodeIds.has(fromId) && nodeIds.has(toId));
+    });
+}
+
+function __getCardGroupExportMembers(groupNode) {
+    if (!groupNode || !groupNode.id) return [];
+    const members = [{ type: 'md-node', id: groupNode.id, data: groupNode }];
+    try {
+        const api = window.__BCSCardGroup;
+        if (api && typeof api.getRecursiveGeometricMembers === 'function') {
+            const recursive = api.getRecursiveGeometricMembers(groupNode);
+            if (Array.isArray(recursive)) members.push(...recursive);
+        }
+    } catch (_) { }
+    return members;
+}
+
+async function __exportCanvasSubsetPackage(rawMembers, options = {}) {
+    const { isEn } = __getLang();
+    const state = (typeof CanvasState !== 'undefined') ? CanvasState : null;
+    if (!state) {
+        throw new Error(isEn ? 'Canvas state unavailable.' : '画布状态不可用。');
+    }
+
+    try { __flushMdEditorsForExport(); } catch (_) { }
+    try { saveTempNodes(); } catch (_) { }
+    try { savePermanentSectionPosition(); } catch (_) { }
+
+    const subset = __normalizeCanvasSubsetMembers(rawMembers, {
+        includeMdId: options && options.includeMdId
+    });
+    const selectedTempSections = (state.tempSections || []).filter((section) => section && subset.tempIds.has(section.id));
+    const selectedMdNodes = (state.mdNodes || []).filter((node) => node && subset.mdIds.has(node.id));
+    const selectedEdges = __collectCanvasSubsetEdges(subset);
+    const includedNodeIds = __buildCanvasSubsetNodeIdSet(subset);
+
+    if (!selectedTempSections.length && !selectedMdNodes.length && !subset.permanentMain && !subset.permanentCopyIds.size) {
+        throw new Error(isEn ? 'Nothing to export.' : '没有可导出的对象。');
+    }
+
+    const { ymd, hms } = __canvasExportTimeParts();
+    const rawLabel = String(options && options.label || '').trim();
+    const labelStem = __sanitizeFilename(rawLabel || (isEn ? 'group' : '组')).replace(/[. ]+$/g, '').trim() || (isEn ? 'group' : '组');
+    const exportRootBase = isEn ? `bookmark-canvas-${labelStem}` : `书签画布-${labelStem}`;
+    const exportRoot = `${exportRootBase}-${ymd}-${hms}`;
+    const downloadFolder = typeof getCanvasExportDownloadFolder === 'function'
+        ? getCanvasExportDownloadFolder()
+        : [getCanvasExportRootFolder(), getCanvasExportFolder()].filter(Boolean).join('/');
+    const exportFormat = 'json';
+    const files = [];
+    const pushFile = (name, text) => files.push({ name, data: __toUint8(text) });
+
+    const includePermanentFile = subset.permanentMain || subset.permanentCopyIds.size > 0;
+    let permanentMdRel = '';
+    let permanentCanvasPath = '';
+    if (includePermanentFile) {
+        let exportSandbox = null;
+        try {
+            const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+            if (bridge && typeof bridge.buildExportSandbox === 'function') {
+                exportSandbox = await bridge.buildExportSandbox({ reason: 'subset-export' });
+                if (exportSandbox && typeof bridge.processExportSandboxForExport === 'function') {
+                    bridge.processExportSandboxForExport(exportSandbox);
+                }
+            }
+        } catch (e) {
+            console.warn('[Subset Export] sandbox pipeline failed:', e);
+        }
+        const usingSandboxPerm = !!(exportSandbox && exportSandbox.permMain);
+        const permanentContent = usingSandboxPerm
+            ? exportSandbox.permMain
+            : await __ensurePermanentMainContentInBcs();
+        if (!(permanentContent && permanentContent.tree)) {
+            throw new Error(isEn ? 'Permanent JSON source unavailable.' : '永久栏目 JSON 真相源不可用。');
+        }
+        const permanentSyncPayload = __buildPermanentMainSyncPayload(permanentContent, {
+            idsAlreadySyncIds: usingSandboxPerm
+        });
+        if (!permanentSyncPayload) {
+            throw new Error(isEn ? 'Cannot export permanent section ids.' : '无法导出永久栏目 ID。');
+        }
+        permanentMdRel = __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat);
+        permanentCanvasPath = __joinObsidianExportPath(exportRoot, permanentMdRel);
+        pushFile(`${exportRoot}/${permanentMdRel}`, `${__buildCanvasSectionJsonCodeBlock(permanentSyncPayload)}\n`);
+    }
+
+    const copyFileMap = {};
+    const copyPathById = {};
+    if (subset.permanentCopyIds.size > 0) {
+        let copies = [];
+        try { copies = __ensurePermanentSectionCopyDisplayIndexes(); } catch (_) { copies = []; }
+        subset.permanentCopyIds.forEach((copyId) => {
+            if (!copyId) return;
+            const matchedCopy = Array.isArray(copies)
+                ? copies.find((copy) => copy && String(copy.id || '') === copyId)
+                : null;
+            const idx = __normalizePositiveInt(matchedCopy && matchedCopy.displayIndex) || 1;
+            const copyMdRel = __buildPermanentSectionMarkdownRelativePath(idx + 1, isEn, exportFormat);
+            copyFileMap[copyId] = copyMdRel;
+            copyPathById[copyId] = __joinObsidianExportPath(exportRoot, copyMdRel);
+            const copyAnchorPayload = __buildPermanentCopyAnchorContentPayload(copyId, {
+                displayIndex: idx,
+                inheritFrom: permanentCanvasPath
+                    || __joinObsidianExportPath(exportRoot, __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat))
+            });
+            pushFile(`${exportRoot}/${copyMdRel}`, `${__buildCanvasSectionJsonCodeBlock(copyAnchorPayload)}\n`);
+        });
+    }
+
+    const tempSectionPathById = {};
+    const usedTempRelPaths = new Set();
+    selectedTempSections.forEach((section) => {
+        const seqLabel = getTempSectionLabel(section);
+        const rawTitle = section.title || (isEn ? 'Temp Section' : '临时栏目');
+        const fileTitle = seqLabel ? `${seqLabel} ${rawTitle}` : rawTitle;
+        const safeTitle = __buildObsidianSafeFilenameStem(
+            fileTitle,
+            seqLabel || rawTitle || section.id || 'section',
+            section.id || fileTitle
+        );
+        let rel = __buildTempSectionMarkdownRelativePath(section, safeTitle, isEn, exportFormat);
+        if (usedTempRelPaths.has(rel)) {
+            const slashIndex = rel.lastIndexOf('/');
+            const relFolder = slashIndex >= 0 ? rel.slice(0, slashIndex) : '';
+            const relFile = slashIndex >= 0 ? rel.slice(slashIndex + 1) : rel;
+            const relStem = relFile.replace(/\.(md|json)$/i, '');
+            const uniqueStem = __appendObsidianFilenameSuffix(relStem, section.id || relStem || 'section');
+            rel = relFolder ? `${relFolder}/${uniqueStem}.json` : `${uniqueStem}.json`;
+        }
+        usedTempRelPaths.add(rel);
+        tempSectionPathById[section.id] = __joinObsidianExportPath(exportRoot, rel);
+        pushFile(`${exportRoot}/${rel}`, __buildTempSectionJsonMarkdown(section));
+    });
+
+    const canvasData = __buildBcsCanvasDataFromState({
+        sections: selectedTempSections,
+        mdNodes: selectedMdNodes,
+        edges: selectedEdges
+    }, {
+        permanentPath: permanentCanvasPath,
+        copyFileMap,
+        copyPathById,
+        tempSectionPathById
+    });
+    canvasData.nodes = (Array.isArray(canvasData.nodes) ? canvasData.nodes : [])
+        .filter((node) => node && includedNodeIds.has(String(node.id || '').trim()));
+    canvasData.edges = (Array.isArray(canvasData.edges) ? canvasData.edges : [])
+        .filter((edge) => {
+            if (!edge || !edge.id) return false;
+            const fromId = String(edge.fromNode || '').trim();
+            const toId = String(edge.toNode || '').trim();
+            return !!(fromId && toId && includedNodeIds.has(fromId) && includedNodeIds.has(toId));
+        });
+
+    const canvasFileName = `${exportRoot}.canvas`;
+    pushFile(`${exportRoot}/${canvasFileName}`, __formatObsidianCanvasJson(canvasData));
+
+    const zipName = `${exportRoot}.zip`;
+    __downloadCanvasZipPackage(files, zipName, downloadFolder);
+    const msg = isEn
+        ? `Exported: ${zipName}`
+        : `已导出：${zipName}`;
+    if (typeof showCanvasToast === 'function') showCanvasToast(msg, 'success');
+    else alert(msg);
+}
+
+async function exportCanvasCardGroupPackage(groupNode) {
+    const { isEn } = __getLang();
+    const node = groupNode && typeof groupNode === 'object' ? groupNode : null;
+    if (!node || !node.id) {
+        throw new Error(isEn ? 'Card group not found.' : '未找到卡片组。');
+    }
+    const members = __getCardGroupExportMembers(node);
+    const label = String(node.label || '').trim() || (isEn ? 'card-group' : '卡片组');
+    return __exportCanvasSubsetPackage(members, {
+        includeMdId: node.id,
+        label
+    });
+}
+
+async function exportCanvasTempGroupPackage(members, options = {}) {
+    const { isEn } = __getLang();
+    return __exportCanvasSubsetPackage(Array.isArray(members) ? members : [], {
+        label: (options && options.label) || (isEn ? 'selection' : '框选组')
+    });
 }
 
 function showExportModeDialog(options = {}) {
@@ -3937,4 +4335,10 @@ async function importCanvasPackageFolder(folderFiles, folderName) {
             trigger: 'manual-folder-import'
         }
     );
+}
+
+if (typeof window !== 'undefined') {
+    window.showImportDialog = showImportDialog;
+    window.exportCanvasCardGroupPackage = exportCanvasCardGroupPackage;
+    window.exportCanvasTempGroupPackage = exportCanvasTempGroupPackage;
 }

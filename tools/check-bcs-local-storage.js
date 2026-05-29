@@ -853,9 +853,10 @@
             : storage;
         let count = 0;
 
-        const canvas = readDownloadPayload(storage[STORAGE_KEYS.CANVAS]);
-        if (canvas) {
-            downloadTextPayload('书签画布.canvas', JSON.stringify(canvas, null, 2), 'application/json;charset=utf-8');
+        const rawCanvas = storage[STORAGE_KEYS.CANVAS];
+        if (rawCanvas) {
+            const canvasStr = typeof rawCanvas === 'string' ? rawCanvas : JSON.stringify(rawCanvas);
+            downloadTextPayload('书签画布.canvas', canvasStr, 'application/json;charset=utf-8');
             count += 1;
         }
 

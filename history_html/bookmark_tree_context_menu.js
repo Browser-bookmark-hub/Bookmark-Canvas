@@ -10934,6 +10934,16 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
             canvasLeft: canvasPosition ? canvasPosition.left : '',
             canvasTop: canvasPosition ? canvasPosition.top : ''
         });
+        menuItems.push({ separator: true });
+        menuItems.push({
+            action: 'import-at-position',
+            label: lang === 'zh_CN' ? '此位置导入' : 'Import here',
+            icon: 'file-import',
+            sectionId,
+            treeType,
+            canvasLeft: canvasPosition ? canvasPosition.left : '',
+            canvasTop: canvasPosition ? canvasPosition.top : ''
+        });
     }
 
     if (treeType !== 'canvas') {
@@ -11028,6 +11038,20 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
                 const left = Number(canvasLeft);
                 const top = Number(canvasTop);
                 await __invokeCanvasCardGroupCreateHandler('fixed', left, top, '', { empty: true });
+            } else if (action === 'import-at-position') {
+                const left = Number(canvasLeft);
+                const top = Number(canvasTop);
+                if (typeof showImportDialog === 'function') {
+                    showImportDialog({
+                        title: (currentLang || 'zh_CN') === 'zh_CN' ? '此位置导入' : 'Import here',
+                        canvasPosition: {
+                            left: Number.isFinite(left) ? left : 0,
+                            top: Number.isFinite(top) ? top : 0
+                        },
+                        forceSnapshot: true,
+                        trigger: 'canvas-blank-context-import'
+                    });
+                }
             } else if (action === 'add-entry-blank') {
                 const addContext = {
                     treeType: ttype === 'temporary' ? 'temporary' : 'permanent',
