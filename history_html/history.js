@@ -4122,6 +4122,10 @@ const i18n = {
         'zh_CN': '侧边栏管理',
         'en': 'Side Panel'
     },
+    settingsCanvasManageText: {
+        'zh_CN': '画布管理',
+        'en': 'Canvas Management'
+    },
     settingsOtherManageText: {
         'zh_CN': '其他管理',
         'en': 'Other Manage'
@@ -4206,6 +4210,10 @@ const i18n = {
         'zh_CN': '导出',
         'en': 'Export'
     },
+    backupCanvasText: {
+        'zh_CN': '备份',
+        'en': 'Backup'
+    },
     clearMenuText: {
         'zh_CN': '清除',
         'en': 'Clear'
@@ -4214,45 +4222,9 @@ const i18n = {
         'zh_CN': '点击清除',
         'en': 'Click to Clear'
     },
-    clearTempNodesText: {
-        'zh_CN': '清空未标注节点',
-        'en': 'Clear Unmarked Nodes'
-    },
     clearAllText: {
         'zh_CN': '清除全部（永久栏目除外）',
         'en': 'Clear All (Except Permanent)'
-    },
-    clearRulesTooltipTitle: {
-        'zh_CN': '清除规则',
-        'en': 'Clear Rules'
-    },
-    clearRulesWillClear: {
-        'zh_CN': '会被清除：',
-        'en': 'Will be cleared:'
-    },
-    clearRulesWillKeep: {
-        'zh_CN': '会被保留：',
-        'en': 'Will be kept:'
-    },
-    clearRuleTemp: {
-        'zh_CN': '<strong>书签型临时栏目</strong>：无说明 + 默认标题 + 无连接线',
-        'en': '<strong>Temp Section</strong>: No description + Default title + No edges'
-    },
-    clearRuleMd: {
-        'zh_CN': '<strong>空白栏目</strong>：内容为空 + 无连接线',
-        'en': '<strong>Blank Node</strong>: Empty content + No edges'
-    },
-    clearRuleKeepDesc: {
-        'zh_CN': '<i class="fas fa-check"></i> 有说明文字',
-        'en': '<i class="fas fa-check"></i> Has description'
-    },
-    clearRuleKeepTitle: {
-        'zh_CN': '<i class="fas fa-check"></i> 标题被修改过',
-        'en': '<i class="fas fa-check"></i> Custom title'
-    },
-    clearRuleKeepEdge: {
-        'zh_CN': '<i class="fas fa-check"></i> 有连接线',
-        'en': '<i class="fas fa-check"></i> Has edges'
     },
     canvasFullscreenEnter: {
         'zh_CN': '全屏',
@@ -5113,48 +5085,18 @@ function applyLanguage() {
     if (importCanvasText) importCanvasText.textContent = i18n.importCanvasText[currentLang];
     const exportCanvasText = document.getElementById('exportCanvasText');
     if (exportCanvasText) exportCanvasText.textContent = i18n.exportCanvasText[currentLang];
+    const backupCanvasText = document.getElementById('backupCanvasText');
+    if (backupCanvasText) backupCanvasText.textContent = i18n.backupCanvasText[currentLang];
     const clearMenuText = document.getElementById('clearMenuText');
     if (clearMenuText) clearMenuText.textContent = i18n.clearMenuText[currentLang];
+    const canvasClearSettingsText = document.getElementById('canvasClearSettingsText');
+    if (canvasClearSettingsText) canvasClearSettingsText.textContent = i18n.clearMenuText[currentLang];
     const clearByClickText = document.getElementById('clearByClickText');
     if (clearByClickText) clearByClickText.textContent = i18n.clearByClickText[currentLang];
     const clearTempNodesText = document.getElementById('clearTempNodesText');
     if (clearTempNodesText) clearTempNodesText.textContent = i18n.clearTempNodesText[currentLang];
     const clearAllText = document.getElementById('clearAllText');
     if (clearAllText) clearAllText.textContent = i18n.clearAllText[currentLang];
-
-    // 清除规则提示框翻译
-    const clearRulesTooltipTitle = document.getElementById('clearRulesTooltipTitle');
-    if (clearRulesTooltipTitle) clearRulesTooltipTitle.textContent = i18n.clearRulesTooltipTitle[currentLang];
-    const clearRulesWillClear = document.getElementById('clearRulesWillClear');
-    if (clearRulesWillClear) clearRulesWillClear.textContent = i18n.clearRulesWillClear[currentLang];
-    const clearRulesWillKeep = document.getElementById('clearRulesWillKeep');
-    if (clearRulesWillKeep) clearRulesWillKeep.textContent = i18n.clearRulesWillKeep[currentLang];
-    const clearRuleTemp = document.getElementById('clearRuleTemp');
-    if (clearRuleTemp) clearRuleTemp.innerHTML = i18n.clearRuleTemp[currentLang];
-    const clearRuleMd = document.getElementById('clearRuleMd');
-    if (clearRuleMd) clearRuleMd.innerHTML = i18n.clearRuleMd[currentLang];
-    const clearRuleKeepDesc = document.getElementById('clearRuleKeepDesc');
-    if (clearRuleKeepDesc) clearRuleKeepDesc.innerHTML = i18n.clearRuleKeepDesc[currentLang];
-    const clearRuleKeepTitle = document.getElementById('clearRuleKeepTitle');
-    if (clearRuleKeepTitle) clearRuleKeepTitle.innerHTML = i18n.clearRuleKeepTitle[currentLang];
-    const clearRuleKeepEdge = document.getElementById('clearRuleKeepEdge');
-    if (clearRuleKeepEdge) clearRuleKeepEdge.innerHTML = i18n.clearRuleKeepEdge[currentLang];
-    const clearRulesOtherTooltipTitle = document.getElementById('clearRulesOtherTooltipTitle');
-    if (clearRulesOtherTooltipTitle) clearRulesOtherTooltipTitle.textContent = i18n.clearRulesTooltipTitle[currentLang];
-    const clearRulesOtherWillClear = document.getElementById('clearRulesOtherWillClear');
-    if (clearRulesOtherWillClear) clearRulesOtherWillClear.textContent = i18n.clearRulesWillClear[currentLang];
-    const clearRulesOtherWillKeep = document.getElementById('clearRulesOtherWillKeep');
-    if (clearRulesOtherWillKeep) clearRulesOtherWillKeep.textContent = i18n.clearRulesWillKeep[currentLang];
-    const clearRuleOtherTemp = document.getElementById('clearRuleOtherTemp');
-    if (clearRuleOtherTemp) clearRuleOtherTemp.innerHTML = i18n.clearRuleTemp[currentLang];
-    const clearRuleOtherMd = document.getElementById('clearRuleOtherMd');
-    if (clearRuleOtherMd) clearRuleOtherMd.innerHTML = i18n.clearRuleMd[currentLang];
-    const clearRuleOtherKeepDesc = document.getElementById('clearRuleOtherKeepDesc');
-    if (clearRuleOtherKeepDesc) clearRuleOtherKeepDesc.innerHTML = i18n.clearRuleKeepDesc[currentLang];
-    const clearRuleOtherKeepTitle = document.getElementById('clearRuleOtherKeepTitle');
-    if (clearRuleOtherKeepTitle) clearRuleOtherKeepTitle.innerHTML = i18n.clearRuleKeepTitle[currentLang];
-    const clearRuleOtherKeepEdge = document.getElementById('clearRuleOtherKeepEdge');
-    if (clearRuleOtherKeepEdge) clearRuleOtherKeepEdge.innerHTML = i18n.clearRuleKeepEdge[currentLang];
 
     const canvasZoomLabel = document.getElementById('canvasZoomLabel');
     if (canvasZoomLabel) canvasZoomLabel.textContent = i18n.canvasZoomLabel[currentLang];
@@ -5252,8 +5194,12 @@ function applyLanguage() {
     if (importCanvasOtherText) importCanvasOtherText.textContent = i18n.importCanvasText[currentLang];
     const exportCanvasOtherText = document.getElementById('exportCanvasOtherText');
     if (exportCanvasOtherText) exportCanvasOtherText.textContent = i18n.exportCanvasText[currentLang];
+    const backupCanvasOtherText = document.getElementById('backupCanvasOtherText');
+    if (backupCanvasOtherText) backupCanvasOtherText.textContent = i18n.backupCanvasText[currentLang];
     const clearMenuOtherText = document.getElementById('clearMenuOtherText');
     if (clearMenuOtherText) clearMenuOtherText.textContent = i18n.clearMenuText[currentLang];
+    const clearMenuOtherSettingsText = document.getElementById('clearMenuOtherSettingsText');
+    if (clearMenuOtherSettingsText) clearMenuOtherSettingsText.textContent = i18n.clearMenuText[currentLang];
     const clearByClickOtherText = document.getElementById('clearByClickOtherText');
     if (clearByClickOtherText) clearByClickOtherText.textContent = i18n.clearByClickText[currentLang];
     const clearTempNodesOtherText = document.getElementById('clearTempNodesOtherText');
@@ -5479,6 +5425,8 @@ function applyLanguage() {
     });
     const settingsSidePanelText = document.getElementById('settingsSidePanelText');
     if (settingsSidePanelText) settingsSidePanelText.textContent = i18n.settingsSidePanelText[currentLang];
+    const settingsCanvasManageText = document.getElementById('settingsCanvasManageText');
+    if (settingsCanvasManageText) settingsCanvasManageText.textContent = i18n.settingsCanvasManageText[currentLang];
     const settingsOtherManageText = document.getElementById('settingsOtherManageText');
     if (settingsOtherManageText) settingsOtherManageText.textContent = i18n.settingsOtherManageText[currentLang];
     const settingsThemeText = document.getElementById('settingsThemeText');
@@ -5718,6 +5666,15 @@ function setupSidePanelSettingsMenu() {
             if (otherBtn && typeof otherBtn.click === 'function') {
                 window.setTimeout(() => {
                     try { otherBtn.click(); } catch (_) { }
+                }, 0);
+            }
+            return;
+        }
+        if (action === 'open-canvas-manage') {
+            const canvasBtn = document.getElementById('canvasOpenManageBridgeBtn');
+            if (canvasBtn && typeof canvasBtn.click === 'function') {
+                window.setTimeout(() => {
+                    try { canvasBtn.click(); } catch (_) { }
                 }, 0);
             }
             return;

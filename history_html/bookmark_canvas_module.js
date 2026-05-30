@@ -6288,6 +6288,7 @@ function setupCanvasManageModal() {
     const otherManageModal = document.getElementById('canvasOtherManageModal');
     const otherManageModalClose = document.getElementById('canvasOtherManageModalClose');
     const openOtherManageBridgeBtn = document.getElementById('canvasOpenOtherManageBridgeBtn');
+    const openManageBridgeBtn = document.getElementById('canvasOpenManageBridgeBtn');
     const helpModal = document.getElementById('canvasHelpModal');
     const shortcutsModal = document.getElementById('canvasShortcutsModal');
 
@@ -6297,24 +6298,41 @@ function setupCanvasManageModal() {
     loadCanvasShortcuts();
     setupCanvasSidePanelSettingsBtn();
 
-    manageBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // 先关闭帮助弹窗
+    const openManageModal = (options = {}) => {
+        if (!manageModal) return;
+        const { anchorToSettings = false } = options;
+
+        stopShortcutRecording(null);
+        if (otherManageModal) otherManageModal.style.display = 'none';
         if (helpModal) helpModal.style.display = 'none';
         if (shortcutsModal) shortcutsModal.classList.remove('show');
-        // 切换管理弹窗
+        const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
+        if (pop) pop.remove();
+
         const isVisible = manageModal.style.display === 'block';
-        manageModal.style.display = isVisible ? 'none' : 'block';
         if (isVisible) {
-            stopShortcutRecording(null);
-            const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
-            if (pop) pop.remove();
-        } else {
-            updateShortcutDisplays();
-            if (typeof updateShortcutsDisplay === 'function') {
-                updateShortcutsDisplay();
-            }
+            manageModal.style.display = 'none';
+            return;
         }
+
+        manageModal.style.display = 'block';
+        if (anchorToSettings) {
+            window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(manageModal));
+        } else {
+            manageModal.style.position = '';
+            manageModal.style.left = '';
+            manageModal.style.top = '';
+        }
+
+        updateShortcutDisplays();
+        if (typeof updateShortcutsDisplay === 'function') {
+            updateShortcutsDisplay();
+        }
+    };
+
+    manageBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openManageModal({ anchorToSettings: false });
     });
 
     if (manageModalClose) {
@@ -6419,6 +6437,15 @@ function setupCanvasManageModal() {
             e.preventDefault();
             e.stopPropagation();
             openOtherManageModal({ anchorToSettings: true });
+        });
+    }
+
+    if (openManageBridgeBtn && openManageBridgeBtn.dataset.bound !== 'true') {
+        openManageBridgeBtn.dataset.bound = 'true';
+        openManageBridgeBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openManageModal({ anchorToSettings: true });
         });
     }
 
@@ -27046,210 +27073,6 @@ function removeTempNode(sectionId, options = {}) {
     scheduleDormancyUpdate();
 }
 
-function clearAllTempNodes() {
-    const container = document.getElementById('canvasContent');
-    if (!container) return;
-
-    // 先关闭管理模态框，防止 confirm 对话框与模态框交互冲突
-    const manageModal = document.getElementById('canvasManageModal');
-    if (manageModal) manageModal.style.display = 'none';
-
-    const lang = (typeof currentLang === 'string' && currentLang) ? currentLang : 'zh_CN';
-    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
-    const text = {
-        noneToClear: isEn
-            ? 'Nothing to clear (nodes with descriptions, custom titles, or edges are kept).'
-            : '没有可清理的未标注节点（有说明、自定义标题或连接线的节点已自动跳过）。',
-        confirmTitle: isEn ? 'Confirm' : '确认',
-        confirmBody: (tempCount, mdCount) => isEn
-            ? `Will clear:\n- ${tempCount} unlabeled temp bookmark section(s) (no description, default title)\n- ${mdCount} empty blank node(s)\n\nNote: nodes with descriptions, custom titles, or edges will be kept.\n\nContinue?`
-            : `将清理：\n- ${tempCount} 个未标注的书签型临时栏目（无说明、默认标题）\n- ${mdCount} 个空的「空白栏目」\n\n注：有说明、自定义标题或连接线的节点会被保留。\n\n确定继续吗？`
-    };
-
-    const hasEdgeForNode = (nodeId) => {
-        if (!nodeId) return false;
-        if (!Array.isArray(CanvasState.edges) || !CanvasState.edges.length) return false;
-        return CanvasState.edges.some(e => e && (e.fromNode === nodeId || e.toNode === nodeId));
-    };
-
-    const isEmptyDesc = (desc) => {
-        if (typeof desc !== 'string') return true;
-        return desc.trim().length === 0;
-    };
-
-    const isEmptyMdNode = (node) => {
-        if (!node) return true;
-        if (node.subtype === 'card-group') return false;
-        if (__isCanvasNativeTextNode(node)) {
-            const textBody = __resolveCanvasNativeTextNodeBody(node);
-            return String(textBody || '').replace(/\u200B/g, '').trim().length === 0;
-        }
-        const markdownSource = __deriveMdNodeMarkdownSource(node);
-        return String(markdownSource || '').replace(/\u200B/g, '').trim().length === 0;
-    };
-
-    // 判断标题是否为自动生成的默认格式（用户未修改）
-    // 自动生成的标题格式包括：
-    // 1. 时间戳格式：YYYY-MM-DD HH:MM:SS
-    // 2. 导入书签格式：导入的书签 (X) - 时间 / Imported Bookmarks (X) - 时间
-    // 3. 浏览器拖入格式：日期 时间 | X个书签 | 浏览器拖入 / Browser drop
-    // 4. 空标题
-    const isAutoGeneratedTitle = (title) => {
-        if (!title || typeof title !== 'string') return true;
-        const t = title.trim();
-        if (!t) return true;
-
-        // 时间戳格式：YYYY-MM-DD HH:MM:SS
-        if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/.test(t)) return true;
-
-        // 导入书签格式（中文）：导入的书签 (X) - 时间
-        if (/^导入的书签\s*\(\d+\)\s*-/.test(t)) return true;
-
-        // 导入书签格式（英文）：Imported Bookmarks (X) - 时间
-        if (/^Imported Bookmarks\s*\(\d+\)\s*-/i.test(t)) return true;
-
-        // 浏览器拖入格式：日期 时间 | X个书签 | 浏览器拖入 / Browser drop
-        if (/\|\s*\d+\s*(个书签|bookmarks)\s*\|\s*(浏览器拖入|Browser drop)/i.test(t)) return true;
-
-        // 其他情况认为是用户自定义的标题
-        return false;
-    };
-
-    // 清除「未标注」的临时栏目：
-    // - 说明为空
-    // - 标题是自动生成的（未被用户修改）
-    // - 没有连接线
-    // 注：即使有书签内容，只要没有标注也会被清除
-    const removableTempIds = CanvasState.tempSections
-        .filter(section => section && section.id && isEmptyDesc(__normalizeTempSectionDescriptionMarkdown(section)) && isAutoGeneratedTitle(section.title) && !hasEdgeForNode(section.id))
-        .map(section => section.id);
-
-    const removableMdIds = CanvasState.mdNodes
-        .filter(node => node && node.id && isEmptyMdNode(node) && !hasEdgeForNode(node.id))
-        .map(node => node.id);
-
-    const removableTempIdSet = new Set(removableTempIds);
-    const removableMdIdSet = new Set(removableMdIds);
-
-    const total = removableTempIds.length + removableMdIds.length;
-    if (!total) {
-        showCanvasToast(text.noneToClear, 'info');
-        return;
-    }
-
-    const modal = document.getElementById('clearUnlabeledModal');
-    if (!modal) {
-        const fallbackMsg = text.confirmBody(removableTempIds.length, removableMdIds.length);
-        if (!window.confirm(fallbackMsg)) return;
-    } else {
-        const closeBtn = document.getElementById('clearUnlabeledModalClose');
-        const cancelBtn = document.getElementById('clearUnlabeledCancelBtn');
-        const confirmBtn = document.getElementById('clearUnlabeledConfirmBtn');
-        const statsDiv = document.getElementById('clearUnlabeledStats');
-        const titleEl = document.getElementById('clearUnlabeledModalTitle');
-        const descEl = document.getElementById('clearUnlabeledModalDesc');
-        const noteEl = document.getElementById('clearUnlabeledNote');
-
-        if (titleEl) titleEl.textContent = isEn ? 'Clear Unlabeled Content' : '清除未标注内容';
-        if (descEl) descEl.textContent = isEn ? 'Only the following unlabeled content will be removed:' : '仅会清除以下未标注内容：';
-        if (confirmBtn) confirmBtn.textContent = isEn ? 'Confirm Clear' : '确认清除';
-        if (cancelBtn) cancelBtn.textContent = isEn ? 'Cancel' : '取消';
-
-        if (statsDiv) {
-            const hl = (num) => `<span style="color: #2563eb; font-weight: bold; margin: 0 2px;">${num}</span>`;
-            statsDiv.innerHTML = isEn
-                ? `Will clear: ${hl(removableTempIds.length)} unlabeled temp section(s), ${hl(removableMdIds.length)} empty blank node(s).`
-                : `即将清除：${hl(removableTempIds.length)} 个未标注临时栏目、${hl(removableMdIds.length)} 个空白节点。`;
-        }
-        if (noteEl) {
-            noteEl.textContent = isEn
-                ? 'Items with descriptions, custom titles, or edges are kept. Permanent copies are never affected here.'
-                : '有说明、自定义标题或连接线的内容会被保留；此操作不会影响永久栏目副本。';
-        }
-
-        modal.style.display = 'flex';
-        requestAnimationFrame(() => modal.classList.add('open'));
-
-        const closeModal = () => {
-            modal.classList.remove('open');
-            modal.style.display = 'none';
-            if (closeBtn) closeBtn.onclick = null;
-            if (cancelBtn) cancelBtn.onclick = null;
-            if (confirmBtn) confirmBtn.onclick = null;
-        };
-
-        if (closeBtn) closeBtn.onclick = closeModal;
-        if (cancelBtn) cancelBtn.onclick = closeModal;
-
-        if (confirmBtn) {
-            confirmBtn.onclick = () => {
-                closeModal();
-
-                removableTempIds.forEach((id) => {
-                    const el = document.getElementById(id);
-                    if (el) el.remove();
-                });
-                removableMdIds.forEach((id) => {
-                    const el = document.getElementById(id);
-                    if (el) el.remove();
-                });
-
-                CanvasState.tempSections = CanvasState.tempSections.filter(section => section && !removableTempIdSet.has(section.id));
-                CanvasState.mdNodes = CanvasState.mdNodes.filter(node => node && !removableMdIdSet.has(node.id));
-
-                if (CanvasState.selectedTempSectionId && removableTempIdSet.has(CanvasState.selectedTempSectionId)) {
-                    CanvasState.selectedTempSectionId = null;
-                    try { if (typeof clearTempSelection === 'function') clearTempSelection(); } catch (_) { }
-                }
-                if (CanvasState.selectedMdNodeId && removableMdIdSet.has(CanvasState.selectedMdNodeId)) {
-                    CanvasState.selectedMdNodeId = null;
-                    try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
-                }
-
-                __resetTempSectionSequenceCounterIfEmpty();
-                saveTempNodes();
-                scheduleBoundsUpdate();
-                scheduleScrollbarUpdate();
-                scheduleDormancyUpdate();
-                showCanvasToast(isEn ? 'Unlabeled content cleared.' : '未标注内容已清除。', 'success');
-            };
-        }
-        return;
-    }
-
-    // 删除 DOM
-    removableTempIds.forEach((id) => {
-        const el = document.getElementById(id);
-        if (el) el.remove();
-    });
-    removableMdIds.forEach((id) => {
-        const el = document.getElementById(id);
-        if (el) el.remove();
-    });
-
-    // 删除数据
-    CanvasState.tempSections = CanvasState.tempSections.filter(section => section && !removableTempIdSet.has(section.id));
-    CanvasState.mdNodes = CanvasState.mdNodes.filter(node => node && !removableMdIdSet.has(node.id));
-
-    // 清理可能的选中态
-    if (CanvasState.selectedTempSectionId && removableTempIdSet.has(CanvasState.selectedTempSectionId)) {
-        CanvasState.selectedTempSectionId = null;
-        try { if (typeof clearTempSelection === 'function') clearTempSelection(); } catch (_) { }
-    }
-    if (CanvasState.selectedMdNodeId && removableMdIdSet.has(CanvasState.selectedMdNodeId)) {
-        CanvasState.selectedMdNodeId = null;
-        try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
-    }
-
-    // 删除部分临时栏目后不重排序号；仅在全部清空时重置计数器
-    __resetTempSectionSequenceCounterIfEmpty();
-
-    saveTempNodes();
-    scheduleBoundsUpdate();
-    scheduleScrollbarUpdate();
-    scheduleDormancyUpdate();
-    showCanvasToast(isEn ? 'Unlabeled content cleared.' : '未标注内容已清除。', 'success');
-}
 
 // =============================================================================
 // 清除全部（永久栏目除外）
@@ -27292,69 +27115,41 @@ function clearAllExceptPermanent() {
     const closeBtn = document.getElementById('clearCanvasModalClose');
     const cancelBtn = document.getElementById('clearCanvasCancelBtn');
     const confirmBtn = document.getElementById('clearCanvasConfirmBtn');
-    const includeCopiesCheckbox = document.getElementById('clearCanvasIncludeCopies');
     const statsDiv = document.getElementById('clearCanvasStats');
     const titleEl = document.getElementById('clearCanvasModalTitle');
     const descEl = document.getElementById('clearCanvasModalDesc');
 
-    const labelDefault = document.getElementById('clearCanvasLabelDefault');
-    const labelCopies = document.getElementById('clearCanvasLabelCopies');
-    const copiesOption = document.getElementById('clearCanvasCopiesOption');
-
     // 国际化文本
     if (titleEl) titleEl.textContent = isEn ? 'Clear Canvas' : '清除画布';
-    if (descEl) descEl.textContent = isEn ? 'Select content to clear:' : '选择要清除的内容：';
+    if (descEl) descEl.textContent = isEn ? 'Will clear all contents EXCEPT permanent sections. This includes: temporary sections, markdown nodes, edges, permanent section copies, and card groups.' : '将清除除永久栏目本体外的所有内容，包括：临时栏目、空白栏目、连接线、永久栏目副本及卡片组。';
     if (confirmBtn) confirmBtn.textContent = isEn ? 'Confirm Clear' : '确认清除';
     if (cancelBtn) cancelBtn.textContent = isEn ? 'Cancel' : '取消';
-    if (labelDefault) labelDefault.textContent = isEn ? 'Temp Sections, Blank Nodes & Edges' : '临时栏目、空白节点与连接线';
-    if (labelCopies) labelCopies.textContent = isEn ? 'Also Clear Permanent Copies' : '同时清除永久栏目副本';
 
     // 统计更新函数
     const updateStats = () => {
-        const includeCopies = includeCopiesCheckbox ? includeCopiesCheckbox.checked : false;
         const hl = (num) => `<span style="color: #2563eb; font-weight: bold; margin: 0 2px;">${num}</span>`;
 
         let msg = isEn
             ? `Items to be cleared: ${hl(tempCount)} Temp Sections, ${hl(mdCount)} Blank Nodes, ${hl(edgeCount)} Edges`
-            : `即将清除：${hl(tempCount)} 个临时栏目、${hl(mdCount)} 个空白节点、${hl(edgeCount)} 条连接线`;
+            : `即将清除：${hl(tempCount)} 个临时栏目、${hl(mdCount)} 个空白栏目、${hl(edgeCount)} 条连接线`;
 
-        if (includeCopies) {
+        if (copyCount > 0) {
             msg += isEn
                 ? `, AND ${hl(copyCount)} Permanent Copies.`
                 : `、以及 ${hl(copyCount)} 个永久栏目副本。`;
-        } else {
-            if (copyCount > 0) {
-                msg += isEn
-                    ? `.<br><span style="color:var(--text-tertiary); font-size:12px;">(${hl(copyCount)} Permanent Copies will be KEPT)</span>`
-                    : `。<br><span style="color:var(--text-tertiary); font-size:12px;">（保留 ${hl(copyCount)} 个永久栏目副本）</span>`;
-            }
         }
+        
+        // Count card groups
+        const groupCount = document.querySelectorAll('.card-group-canvas-node').length;
+        if (groupCount > 0) {
+            msg += isEn 
+                ? ` AND ${hl(groupCount)} Card Groups.`
+                : `、以及 ${hl(groupCount)} 个卡片组。`;
+        }
+        
         if (statsDiv) statsDiv.innerHTML = msg;
     };
 
-    // 重置复选框状态并绑定变更事件
-    if (includeCopiesCheckbox) {
-        // 恢复上次的选择
-        const savedState = localStorage.getItem('canvas_clear_include_copies') === 'true';
-        includeCopiesCheckbox.checked = savedState;
-
-        includeCopiesCheckbox.onchange = function () {
-            updateStats();
-            // 持久化保存选择
-            saveSharedState('canvas_clear_include_copies', this.checked);
-        };
-
-        // 如果没有副本，禁用该选项
-        if (copyCount === 0) {
-            includeCopiesCheckbox.disabled = true;
-            if (includeCopiesCheckbox.parentElement) includeCopiesCheckbox.parentElement.style.opacity = '0.5';
-            if (copiesOption) copiesOption.style.opacity = '0.58';
-        } else {
-            includeCopiesCheckbox.disabled = false;
-            if (includeCopiesCheckbox.parentElement) includeCopiesCheckbox.parentElement.style.opacity = '1';
-            if (copiesOption) copiesOption.style.opacity = '1';
-        }
-    }
     updateStats();
 
     // 显示模态框
@@ -27375,8 +27170,7 @@ function clearAllExceptPermanent() {
     if (cancelBtn) cancelBtn.onclick = closeModal;
 
     if (confirmBtn) confirmBtn.onclick = () => {
-        const includeCopies = includeCopiesCheckbox ? includeCopiesCheckbox.checked : false;
-        _doClearCanvas(includeCopies);
+        _doClearCanvas(true); // 始终包括副本
         closeModal();
     };
 }
@@ -27465,8 +27259,10 @@ function startClickToClearMode() {
 
     const tempCount = CanvasState.tempSections.length;
     const mdCount = CanvasState.mdNodes.length;
+    const edgeCount = CanvasState.edges.length;
+    const permanentCount = document.querySelectorAll('.permanent-bookmark-section').length;
 
-    if (!tempCount && !mdCount) {
+    if (!tempCount && !mdCount && !edgeCount && !permanentCount) {
         alert(isEn ? 'No items to clear.' : '没有可清理的项目。');
         return;
     }
@@ -27505,6 +27301,25 @@ function addClickToClearListeners() {
         el.classList.add('click-to-clear-selectable');
         el.addEventListener('click', handleClickToClearSelect, true);
     });
+
+    // 为永久栏目及其副本添加点击监听
+    document.querySelectorAll('.permanent-bookmark-section').forEach(el => {
+        el.classList.add('click-to-clear-selectable');
+        el.addEventListener('click', handleClickToClearSelect, true);
+    });
+
+    // 为连接线添加点击监听
+    CanvasState.edges.forEach(edge => {
+        if (!edge || !edge.id) return;
+        const el = document.querySelector(`.canvas-edge-hit-area[data-edge-id="${edge.id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
+        if (!el) return;
+        el.classList.add('click-to-clear-selectable');
+        // 为连接线文本添加点击监听
+        const label = document.querySelector(`.canvas-edge-label[data-edge-id="${edge.id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
+        if (label) {
+            label.classList.add('click-to-clear-selectable');
+        }
+    });
 }
 
 function handleClickToClearSelect(e) {
@@ -27514,14 +27329,59 @@ function handleClickToClearSelect(e) {
     e.stopPropagation();
 
     const el = e.currentTarget;
-    const id = el.id;
+    // 连接线的 hitArea 拿到的 id 可能为空，所以通过 dataset.edgeId 作为补救
+    const id = el.id || (el.dataset && (el.dataset.permanentId || el.dataset.edgeId));
+    if (!id) return;
+
+    // 获取可能存在的卡片组子元素
+    let childIds = [];
+    const node = (CanvasState.mdNodes || []).find(n => n && n.id === id);
+    if (node && node.subtype === 'card-group') {
+        try {
+            if (window.__BCSCardGroup && typeof window.__BCSCardGroup.collectCardGroupChildElementsRecursive === 'function') {
+                const childElements = window.__BCSCardGroup.collectCardGroupChildElementsRecursive(node) || [];
+                childIds = childElements.map(c => c.data && c.data.id).filter(Boolean);
+            }
+        } catch (_) {}
+    }
+
+    // 更新 Edge 自身的类名。由于 Edge 由不可见的 hitArea 触发事件，
+    // 其外观展示依靠 .canvas-edge，所以需额外更新真实 path 的类
+    const updateEdgeDomClass = (edgeId, add) => {
+        const safeEdgeId = edgeId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const path = document.querySelector(`.canvas-edge[data-edge-id="${safeEdgeId}"]`);
+        if (path) {
+            if (add) path.classList.add('click-to-clear-selected');
+            else path.classList.remove('click-to-clear-selected');
+        }
+        
+        const label = document.querySelector(`.canvas-edge-label[data-edge-id="${safeEdgeId}"]`);
+        if (label) {
+            if (add) label.classList.add('click-to-clear-selected');
+            else label.classList.remove('click-to-clear-selected');
+        }
+    };
 
     if (clickToClearSelectedIds.has(id)) {
         clickToClearSelectedIds.delete(id);
         el.classList.remove('click-to-clear-selected');
+        if (el.dataset && el.dataset.edgeId) updateEdgeDomClass(id, false);
+        
+        childIds.forEach(childId => {
+            clickToClearSelectedIds.delete(childId);
+            const childEl = document.getElementById(childId);
+            if (childEl) childEl.classList.remove('click-to-clear-selected');
+        });
     } else {
         clickToClearSelectedIds.add(id);
         el.classList.add('click-to-clear-selected');
+        if (el.dataset && el.dataset.edgeId) updateEdgeDomClass(id, true);
+        
+        childIds.forEach(childId => {
+            clickToClearSelectedIds.add(childId);
+            const childEl = document.getElementById(childId);
+            if (childEl) childEl.classList.add('click-to-clear-selected');
+        });
     }
 
     // 更新工具栏计数
@@ -27541,19 +27401,11 @@ function showClickToClearToolbar() {
     toolbar.className = 'click-to-clear-toolbar';
     toolbar.innerHTML = `
         <div class="click-to-clear-toolbar-content">
-            <span class="click-to-clear-hint">
-                <i class="fas fa-mouse-pointer"></i>
-                <span id="clickToClearHintText">${isEn ? 'Click items to select, then confirm to delete' : '点击选择要清除的项目，然后确认删除'}</span>
-            </span>
             <span class="click-to-clear-count">
                 <span id="clickToClearCountText">${isEn ? 'Selected' : '已选择'}:</span>
                 <span id="clickToClearCountNum">0</span>
             </span>
             <div class="click-to-clear-actions">
-                <button class="click-to-clear-btn select-all" id="clickToClearSelectAllBtn">
-                    <i class="fas fa-check-double"></i>
-                    <span>${isEn ? 'Select All' : '全选'}</span>
-                </button>
                 <button class="click-to-clear-btn confirm" id="clickToClearConfirmBtn" disabled>
                     <i class="fas fa-trash-alt"></i>
                     <span>${isEn ? 'Delete' : '删除'}</span>
@@ -27569,7 +27421,6 @@ function showClickToClearToolbar() {
     document.body.appendChild(toolbar);
 
     // 绑定事件
-    document.getElementById('clickToClearSelectAllBtn').addEventListener('click', selectAllForClickToClear);
     document.getElementById('clickToClearConfirmBtn').addEventListener('click', confirmClickToClear);
     document.getElementById('clickToClearCancelBtn').addEventListener('click', cancelClickToClearMode);
 }
@@ -27585,28 +27436,6 @@ function updateClickToClearToolbar() {
     if (confirmBtn) {
         confirmBtn.disabled = clickToClearSelectedIds.size === 0;
     }
-}
-
-function selectAllForClickToClear() {
-    // 选择所有临时栏目
-    CanvasState.tempSections.forEach(section => {
-        if (!section || !section.id) return;
-        const el = document.getElementById(section.id);
-        if (!el) return;
-        clickToClearSelectedIds.add(section.id);
-        el.classList.add('click-to-clear-selected');
-    });
-
-    // 选择所有空白栏目
-    CanvasState.mdNodes.forEach(node => {
-        if (!node || !node.id) return;
-        const el = document.getElementById(node.id);
-        if (!el) return;
-        clickToClearSelectedIds.add(node.id);
-        el.classList.add('click-to-clear-selected');
-    });
-
-    updateClickToClearToolbar();
 }
 
 function confirmClickToClear() {
@@ -27700,7 +27529,7 @@ function executeClickToClearDeletion() {
     });
     CanvasState.tempSections = CanvasState.tempSections.filter(s => s && !selectedIdSet.has(s.id));
 
-    // 删除选中的空白栏目
+    // 删除选中的空白栏目及卡片组
     const removedMdIds = [];
     CanvasState.mdNodes.forEach(node => {
         if (node && node.id && selectedIdSet.has(node.id)) {
@@ -27711,10 +27540,37 @@ function executeClickToClearDeletion() {
     });
     CanvasState.mdNodes = CanvasState.mdNodes.filter(n => n && !selectedIdSet.has(n.id));
 
-    // 删除相关的连接线
+    // 删除选中的永久栏目及副本
+    document.querySelectorAll('.permanent-bookmark-section').forEach(el => {
+        if (el && el.id && selectedIdSet.has(el.id)) {
+            if (el.classList.contains('permanent-section-copy')) {
+                el.remove();
+            } else {
+                el.remove(); // 理论上可以调用 __removePermanentSection
+                try {
+                    if (typeof __removePermanentSection === 'function') {
+                        __removePermanentSection(el.dataset.permanentId);
+                    }
+                } catch(e) {}
+            }
+        }
+    });
+
+    // 删除相关及选中的连接线
     CanvasState.edges = CanvasState.edges.filter(edge => {
         if (!edge) return false;
-        return !selectedIdSet.has(edge.fromNode) && !selectedIdSet.has(edge.toNode);
+        if (selectedIdSet.has(edge.id) || selectedIdSet.has(edge.fromNode) || selectedIdSet.has(edge.toNode)) {
+            const hitArea = document.querySelector(`.canvas-edge-hit-area[data-edge-id="${edge.id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
+            if (hitArea) hitArea.remove();
+            const path = document.querySelector(`.canvas-edge[data-edge-id="${edge.id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
+            if (path) path.remove();
+            const label = document.querySelector(`.canvas-edge-label[data-edge-id="${edge.id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
+            if (label) label.remove();
+            const labelBg = document.querySelector(`.canvas-edge-label-bg[data-edge-id="${edge.id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
+            if (labelBg) labelBg.remove();
+            return false;
+        }
+        return true;
     });
 
     // 清理选中态
@@ -27775,6 +27631,20 @@ function cancelClickToClearMode() {
         if (!el) return;
         el.classList.remove('click-to-clear-selectable', 'click-to-clear-selected');
         el.removeEventListener('click', handleClickToClearSelect, true);
+    });
+
+    document.querySelectorAll('.permanent-bookmark-section').forEach(el => {
+        el.classList.remove('click-to-clear-selectable', 'click-to-clear-selected');
+        el.removeEventListener('click', handleClickToClearSelect, true);
+    });
+
+    CanvasState.edges.forEach(edge => {
+        if (!edge || !edge.id) return;
+        const el = document.querySelector(`.canvas-edge-hit-area[data-edge-id="${edge.id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
+        if (el) el.classList.remove('click-to-clear-selectable', 'click-to-clear-selected');
+
+        const label = document.querySelector(`.canvas-edge-label[data-edge-id="${edge.id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
+        if (label) label.classList.remove('click-to-clear-selectable', 'click-to-clear-selected');
     });
 
     // 移除工具栏
@@ -28665,12 +28535,12 @@ function setupCanvasEventListeners() {
 
 // Import/export transfer logic moved to transfer_AI_sync/import-export-transfer-ui-support.js
     // 清除菜单按钮 - 显示/隐藏下拉菜单
-    const clearMenuBtn = document.getElementById('clearMenuBtn');
-    const clearDropdown = document.getElementById('canvasClearDropdown');
-    const clearDropdownMenu = document.getElementById('clearDropdownMenu');
-    const clearMenuOtherBtn = document.getElementById('clearMenuOtherBtn');
-    const clearOtherDropdown = document.getElementById('canvasOtherClearDropdown');
-    const clearOtherDropdownMenu = document.getElementById('clearDropdownOtherMenu');
+    const clearMenuBtn = document.getElementById('canvasClearSettingsBtn');
+    const clearDropdown = document.getElementById('canvasClearDropdownWrapper');
+    const clearDropdownMenu = document.getElementById('canvasClearDropdownMenu');
+    const clearMenuOtherBtn = document.getElementById('clearMenuOtherSettingsBtn');
+    const clearOtherDropdown = document.getElementById('canvasOtherClearDropdownSettings');
+    const clearOtherDropdownMenu = document.getElementById('clearDropdownOtherSettingsMenu');
 
     if (clearMenuBtn && clearDropdownMenu && clearDropdown) {
         clearMenuBtn.addEventListener('click', (e) => {
@@ -28714,78 +28584,6 @@ function setupCanvasEventListeners() {
         });
     }
 
-    // 清空未标注节点按钮 (原有功能)
-    const clearBtn = document.getElementById('clearTempNodesBtn');
-    if (clearBtn) {
-        clearBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            // 关闭下拉菜单
-            if (clearDropdownMenu) {
-                clearDropdownMenu.style.display = 'none';
-                clearDropdown.classList.remove('open');
-            }
-            // 执行清除
-            clearAllTempNodes();
-        });
-    }
-
-    const clearOtherBtn = document.getElementById('clearTempNodesOtherBtn');
-    if (clearOtherBtn) {
-        clearOtherBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (clearOtherDropdownMenu) {
-                clearOtherDropdownMenu.style.display = 'none';
-                clearOtherDropdown.classList.remove('open');
-            }
-            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
-            clearAllTempNodes();
-        });
-    }
-
-    // 清除规则帮助按钮 - 点击显示提示框
-    const clearHelpBtn = document.getElementById('clearTempNodesHelpBtn');
-    const clearRulesTooltip = document.getElementById('clearRulesTooltip');
-    if (clearHelpBtn && clearRulesTooltip) {
-        // 点击帮助按钮切换显示/隐藏
-        clearHelpBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const isVisible = clearRulesTooltip.style.display === 'block';
-            clearRulesTooltip.style.display = isVisible ? 'none' : 'block';
-        });
-
-        // 点击提示框内部不关闭
-        clearRulesTooltip.addEventListener('click', (e) => {
-            e.stopPropagation();
-        });
-
-        // 点击其他地方关闭提示框
-        document.addEventListener('click', (e) => {
-            if (!clearHelpBtn.contains(e.target) && !clearRulesTooltip.contains(e.target)) {
-                clearRulesTooltip.style.display = 'none';
-            }
-        });
-    }
-
-    const clearOtherHelpBtn = document.getElementById('clearTempNodesOtherHelpBtn');
-    const clearOtherRulesTooltip = document.getElementById('clearRulesOtherTooltip');
-    if (clearOtherHelpBtn && clearOtherRulesTooltip) {
-        clearOtherHelpBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const isVisible = clearOtherRulesTooltip.style.display === 'block';
-            clearOtherRulesTooltip.style.display = isVisible ? 'none' : 'block';
-        });
-
-        clearOtherRulesTooltip.addEventListener('click', (e) => {
-            e.stopPropagation();
-        });
-
-        document.addEventListener('click', (e) => {
-            if (!clearOtherHelpBtn.contains(e.target) && !clearOtherRulesTooltip.contains(e.target)) {
-                clearOtherRulesTooltip.style.display = 'none';
-            }
-        });
-    }
-
     // 点击清除按钮
     const clearByClickBtn = document.getElementById('clearByClickBtn');
     if (clearByClickBtn) {
@@ -28796,12 +28594,62 @@ function setupCanvasEventListeners() {
                 clearDropdownMenu.style.display = 'none';
                 clearDropdown.classList.remove('open');
             }
+            try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
             // 启动点击清除模式
             startClickToClearMode();
         });
     }
 
-    const clearByClickOtherBtn = document.getElementById('clearByClickOtherBtn');
+    // Bind original sidebar clear other buttons
+    const sidebarClearMenuOtherBtn = document.getElementById('clearMenuOtherBtn');
+    const sidebarClearOtherDropdown = document.getElementById('canvasOtherClearDropdown');
+    const sidebarClearOtherDropdownMenu = document.getElementById('clearDropdownOtherMenu');
+    
+    if (sidebarClearMenuOtherBtn && sidebarClearOtherDropdownMenu && sidebarClearOtherDropdown) {
+        sidebarClearMenuOtherBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = sidebarClearOtherDropdownMenu.style.display === 'block';
+            sidebarClearOtherDropdownMenu.style.display = isVisible ? 'none' : 'block';
+            sidebarClearOtherDropdown.classList.toggle('open', !isVisible);
+        });
+
+        sidebarClearOtherDropdownMenu.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!sidebarClearOtherDropdown.contains(e.target)) {
+                sidebarClearOtherDropdownMenu.style.display = 'none';
+                sidebarClearOtherDropdown.classList.remove('open');
+            }
+        });
+    }
+
+    const sidebarClearByClickOtherBtn = document.getElementById('clearByClickOtherBtn');
+    if (sidebarClearByClickOtherBtn) {
+        sidebarClearByClickOtherBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (sidebarClearOtherDropdownMenu) {
+                sidebarClearOtherDropdownMenu.style.display = 'none';
+                sidebarClearOtherDropdown.classList.remove('open');
+            }
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            startClickToClearMode();
+        });
+    }
+
+    const sidebarClearAllOtherBtn = document.getElementById('clearAllOtherBtn');
+    if (sidebarClearAllOtherBtn) {
+        sidebarClearAllOtherBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (sidebarClearOtherDropdownMenu) {
+                sidebarClearOtherDropdownMenu.style.display = 'none';
+                sidebarClearOtherDropdown.classList.remove('open');
+            }
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            clearAllExceptPermanent();
+        });
+    }
     if (clearByClickOtherBtn) {
         clearByClickOtherBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -28829,7 +28677,7 @@ function setupCanvasEventListeners() {
         });
     }
 
-    const clearAllOtherBtn = document.getElementById('clearAllOtherBtn');
+    const clearAllOtherBtn = document.getElementById('clearAllOtherSettingsBtn');
     if (clearAllOtherBtn) {
         clearAllOtherBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -30591,6 +30439,13 @@ function renderEdges() {
         hitArea.style.cursor = 'pointer';
         hitArea.style.pointerEvents = 'stroke';
 
+        if (clickToClearModeActive) {
+            hitArea.classList.add('click-to-clear-selectable');
+            if (clickToClearSelectedIds.has(edge.id)) {
+                hitArea.classList.add('click-to-clear-selected');
+            }
+        }
+
         updateEdgePath(edge, hitArea, geometry);
         svg.appendChild(hitArea);
 
@@ -30603,9 +30458,9 @@ function renderEdges() {
             path.classList.add('selected');
         }
 
-        // 应用颜色（使用 inline style 优先级高于样式表）
+        // 应用颜色（除非在点击清除模式）
         const edgeColor = edge.colorHex || presetToHex(edge.color) || null;
-        if (edgeColor) {
+        if (edgeColor && !clickToClearModeActive) {
             path.style.stroke = edgeColor;
         } else {
             path.style.stroke = '';
@@ -30637,7 +30492,17 @@ function renderEdges() {
         hitArea.addEventListener('click', (e) => {
             console.log('[Edge] Edge clicked:', edge.id);
             e.stopPropagation();
-            selectEdge(edge.id, e.clientX, e.clientY);
+            if (clickToClearModeActive) {
+                // 在点击清除模式下，直接调用处理函数
+                const fakeEvent = {
+                    preventDefault: () => {},
+                    stopPropagation: () => {},
+                    currentTarget: hitArea
+                };
+                handleClickToClearSelect(fakeEvent);
+            } else {
+                selectEdge(edge.id, e.clientX, e.clientY);
+            }
         });
 
         // 双击连接线直接进入编辑标签
@@ -30761,10 +30626,17 @@ function renderEdgeLabel(svg, edge, geometry = null) {
 
     // 应用颜色（inline style 覆盖样式表）
     const edgeColor = edge.colorHex || presetToHex(edge.color) || null;
-    if (edgeColor) {
+    if (edgeColor && !clickToClearModeActive) {
         text.style.fill = edgeColor;
     } else {
         text.style.fill = '';
+    }
+    
+    if (clickToClearModeActive) {
+        text.classList.add('click-to-clear-selectable');
+        if (clickToClearSelectedIds.has(edge.id)) {
+            text.classList.add('click-to-clear-selected');
+        }
     }
 
     svg.appendChild(text);
@@ -30772,8 +30644,20 @@ function renderEdgeLabel(svg, edge, geometry = null) {
     // 标签点击事件：直接进入就地编辑
     text.addEventListener('click', (e) => {
         e.stopPropagation();
-        try { selectEdge(edge.id, e.clientX, e.clientY); } catch (_) { }
-        startEdgeLabelInlineEdit(edge.id);
+        if (clickToClearModeActive) {
+            const hitArea = svg.querySelector(`.canvas-edge-hit-area[data-edge-id="${edge.id}"]`);
+            if (hitArea) {
+                const fakeEvent = {
+                    preventDefault: () => {},
+                    stopPropagation: () => {},
+                    currentTarget: hitArea
+                };
+                handleClickToClearSelect(fakeEvent);
+            }
+        } else {
+            try { selectEdge(edge.id, e.clientX, e.clientY); } catch (_) { }
+            startEdgeLabelInlineEdit(edge.id);
+        }
     });
     text.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -30790,7 +30674,7 @@ function getEdgeColorValue(edge) {
 
 function applyEdgeColorToDom(edge) {
     if (!edge) return;
-    const edgeColor = getEdgeColorValue(edge);
+    const edgeColor = clickToClearModeActive ? null : getEdgeColorValue(edge);
     document.querySelectorAll('.canvas-edge').forEach(path => {
         if (!isSameEdgeId(path.dataset && path.dataset.edgeId, edge.id)) return;
         path.style.stroke = edgeColor || '';
@@ -32153,7 +32037,7 @@ function startEdgeLabelInlineEdit(edgeId) {
 window.CanvasModule = {
     init: initCanvasView,
     enhance: enhanceBookmarkTreeForCanvas, // 增强书签树的Canvas功能
-    clear: clearAllTempNodes,
+    clear: clearAllExceptPermanent,
     updateFullscreenButton: updateFullscreenButtonState,
     updateNodeFullscreenButtons: updateNodeFullscreenButtons,
     updateViewSyncExpandScrollButtonText: __updateViewSyncExpandScrollButtonText,

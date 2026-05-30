@@ -1561,6 +1561,97 @@ function __resolveCanvasImportPlacement(width, height, options = {}) {
     return findAvailablePositionInViewport(width, height);
 }
 
+function __getCanvasBookmarkImportBatchMeta(type) {
+    const { isEn } = __getLang();
+    const normalizedType = String(type || '').trim().toLowerCase();
+    return {
+        source: normalizedType === 'html' ? 'import-html-bookmarks' : 'import-json-bookmarks',
+        label: isEn ? 'Import' : '导入'
+    };
+}
+
+function __buildCanvasBookmarkImportBatchPlacement(type, count, options = {}) {
+    const totalCount = Math.max(1, Number.parseInt(count, 10) || 1);
+    const columns = Math.min(5, totalCount);
+    const rows = Math.max(1, Math.ceil(totalCount / columns));
+    const sectionMeta = __getCanvasBookmarkImportBatchMeta(type);
+    const baseSize = getTempSectionBaseSize(sectionMeta);
+    const zoom = (CanvasState && CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const gap = 32 / zoom;
+    const totalWidth = (columns * baseSize.width) + ((columns - 1) * gap);
+    const totalHeight = (rows * baseSize.height) + ((rows - 1) * gap);
+    const origin = __resolveCanvasImportPlacement(totalWidth, totalHeight, options);
+
+    return (index) => {
+        const i = Math.max(0, Number.parseInt(index, 10) || 0);
+        const col = i % columns;
+        const row = Math.floor(i / columns);
+        return {
+            left: origin.x + col * (baseSize.width + gap),
+            top: origin.y + row * (baseSize.height + gap)
+        };
+    };
+}
+
+async function __importBookmarkFilesBatch(type, filesInput, options = {}) {
+    const { isEn } = __getLang();
+    const files = Array.from(filesInput || []).filter(Boolean);
+    if (!files.length) return { importedFiles: 0, failedFiles: 0, totalBookmarks: 0 };
+
+    const resolvePosition = __buildCanvasBookmarkImportBatchPlacement(type, files.length, options);
+    let importedFiles = 0;
+    let failedFiles = 0;
+    let totalBookmarks = 0;
+
+    for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        try {
+            const text = await file.text();
+            const canvasPosition = resolvePosition(index);
+            const result = String(type || '').toLowerCase() === 'html'
+                ? await importHtmlBookmarks(text, file && file.name ? file.name : '', {
+                    canvasPosition,
+                    suppressToast: true,
+                    suppressSave: true
+                })
+                : await importJsonBookmarks(text, file && file.name ? file.name : '', {
+                    canvasPosition,
+                    suppressToast: true,
+                    suppressSave: true
+                });
+            if (result && result.ok) {
+                importedFiles += 1;
+                totalBookmarks += Number(result.count) || 0;
+            } else {
+                failedFiles += 1;
+            }
+        } catch (error) {
+            failedFiles += 1;
+            console.error('[Canvas] 批量书签文件导入失败:', file && file.name, error);
+        }
+    }
+
+    if (importedFiles > 0) {
+        try { saveTempNodes(); } catch (_) { }
+        showCanvasToast(
+            isEn
+                ? `Successfully imported ${importedFiles} files (${totalBookmarks} bookmarks)`
+                : `成功导入 ${importedFiles} 个文件（${totalBookmarks} 个书签）`,
+            'success'
+        );
+    }
+    if (failedFiles > 0) {
+        showCanvasToast(
+            isEn
+                ? `${failedFiles} files were not imported`
+                : `${failedFiles} 个文件未导入`,
+            importedFiles > 0 ? 'warning' : 'error'
+        );
+    }
+
+    return { importedFiles, failedFiles, totalBookmarks };
+}
+
 function showImportDialog(options = {}) {
     const { isEn } = __getLang();
     const dialogOptions = (options && typeof options === 'object') ? options : {};
@@ -1579,7 +1670,7 @@ function showImportDialog(options = {}) {
     dialog.id = 'canvasImportDialog';
 
     dialog.innerHTML = `
-        <div class="import-dialog-content">
+        <div class="import-dialog-content" style="max-width: 400px;">
             <div class="import-dialog-header">
                 <h3>${titleText}</h3>
                 <button class="import-dialog-close" id="closeImportDialog">&times;</button>
@@ -1587,7 +1678,7 @@ function showImportDialog(options = {}) {
             <div class="import-dialog-body">
                 <div class="import-options">
                     <div class="import-section-label-large">${isEn ? 'Canvas Snapshot' : '画布快照'}</div>
-                    <div class="import-row">
+                    <div class="import-row import-row-2cols">
                         <button class="import-option-btn-compact" id="importCanvasFolderBtn" title="${isEn ? 'Import Folder' : '导入文件夹快照'}">
                             <i class="fas fa-folder-open"></i>
                             <span>${isEn ? 'Folder' : '文件夹'}</span>
@@ -1630,6 +1721,7 @@ function showImportDialog(options = {}) {
         const input = document.getElementById('canvasFileInput');
         // 支持 ZIP 和 7z 压缩包
         input.accept = '.zip,.7z';
+        input.multiple = false;
         input.dataset.type = 'package-archive';
         input.__canvasImportOptions = importOptions;
         input.click();
@@ -1645,6 +1737,7 @@ function showImportDialog(options = {}) {
     document.getElementById('importHtmlBtn').addEventListener('click', () => {
         const input = document.getElementById('canvasFileInput');
         input.accept = '.html';
+        input.multiple = true;
         input.dataset.type = 'html';
         input.__canvasImportOptions = importOptions;
         input.click();
@@ -1653,6 +1746,7 @@ function showImportDialog(options = {}) {
     document.getElementById('importJsonBtn').addEventListener('click', () => {
         const input = document.getElementById('canvasFileInput');
         input.accept = '.json';
+        input.multiple = true;
         input.dataset.type = 'json';
         input.__canvasImportOptions = importOptions;
         input.click();
@@ -1682,7 +1776,8 @@ function __collectCanvasTempStateForExport() {
 }
 
 async function handleFileImport(e) {
-    const file = e.target.files[0];
+    const files = Array.from((e.target && e.target.files) || []);
+    const file = files[0];
     if (!file) return;
 
     const type = e.target.dataset.type;
@@ -1758,16 +1853,22 @@ async function handleFileImport(e) {
                 trigger: canvasPosition ? 'canvas-position-import' : 'manual-file-import',
                 canvasPosition
             });
-        } else {
-            const text = await file.text();
-            if (type === 'html') {
-                await importHtmlBookmarks(text, file && file.name ? file.name : '', {
+        } else if (type === 'html' || type === 'json') {
+            if (files.length > 1) {
+                await __importBookmarkFilesBatch(type, files, {
                     canvasPosition
                 });
             } else {
-                await importJsonBookmarks(text, file && file.name ? file.name : '', {
-                    canvasPosition
-                });
+                const text = await file.text();
+                if (type === 'html') {
+                    await importHtmlBookmarks(text, file && file.name ? file.name : '', {
+                        canvasPosition
+                    });
+                } else {
+                    await importJsonBookmarks(text, file && file.name ? file.name : '', {
+                        canvasPosition
+                    });
+                }
             }
         }
 
@@ -1924,8 +2025,10 @@ async function importHtmlBookmarks(html, importFileName = '', options = {}) {
     }
 
     if (!items || items.length === 0) {
-        showCanvasToast(isEn ? 'No valid bookmark links found.' : '未找到有效的书签链接', 'error');
-        return;
+        if (!(options && options.suppressToast)) {
+            showCanvasToast(isEn ? 'No valid bookmark links found.' : '未找到有效的书签链接', 'error');
+        }
+        return { ok: false, count: 0, section: null };
     }
 
     // 创建一个新的临时栏目容器
@@ -1993,7 +2096,9 @@ async function importHtmlBookmarks(html, importFileName = '', options = {}) {
         }
     }
 
-    saveTempNodes();
+    if (!(options && options.suppressSave)) {
+        saveTempNodes();
+    }
 
     // 添加呼吸式闪烁效果，吸引用户注意
     const nodeElement = document.getElementById(section.id);
@@ -2002,10 +2107,13 @@ async function importHtmlBookmarks(html, importFileName = '', options = {}) {
     }
 
     // 显示成功提示
-    showCanvasToast(
-        isEn ? `Successfully imported ${totalCount} bookmarks` : `成功导入 ${totalCount} 个书签`,
-        'success'
-    );
+    if (!(options && options.suppressToast)) {
+        showCanvasToast(
+            isEn ? `Successfully imported ${totalCount} bookmarks` : `成功导入 ${totalCount} 个书签`,
+            'success'
+        );
+    }
+    return { ok: true, count: totalCount, section };
 }
 
 /**
@@ -2110,7 +2218,8 @@ function parseNetscapeBookmarkHtml(doc) {
  * 3. Firefox 格式：{root, guid, title, uri, children, dateAdded}
  * 4. 通用数组格式：[{name/title, url/href/uri, children}, ...]
  * 5. 单对象格式：{name/title, url/href/uri, children}
- * 6. 第三方插件常用格式（兼容各种字段名）
+ * 6. 包裹格式：{bookmarks/items/bookmarkTree: [...]}
+ * 7. 第三方插件常用格式（兼容各种字段名）
  */
 async function importJsonBookmarks(json, importFileName = '', options = {}) {
     const { isEn } = __getLang();
@@ -2118,8 +2227,10 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     try {
         data = JSON.parse(json);
     } catch (e) {
-        showCanvasToast(isEn ? 'Invalid JSON format.' : '无效的 JSON 格式', 'error');
-        return;
+        if (!(options && options.suppressToast)) {
+            showCanvasToast(isEn ? 'Invalid JSON format.' : '无效的 JSON 格式', 'error');
+        }
+        return { ok: false, count: 0, section: null };
     }
 
     // 统计书签总数
@@ -2270,6 +2381,21 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
                         : []));
             items = fallbackTree.map(convert).filter(Boolean);
         }
+    } else if (data && typeof data === 'object' && (Array.isArray(data.bookmarkTree) || (data.bookmarkTree && typeof data.bookmarkTree === 'object'))) {
+        // Bookmark-Backup 快照格式：{ _exportInfo, bookmarkTree: chrome.bookmarks.getTree() }
+        console.log('[Canvas] Detected wrapped bookmarkTree snapshot format');
+        const treeEntries = Array.isArray(data.bookmarkTree) ? data.bookmarkTree : [data.bookmarkTree];
+        if (treeEntries.length === 1 && treeEntries[0] && Array.isArray(treeEntries[0].children) && !treeEntries[0].url) {
+            treeEntries[0].children.forEach((entry) => {
+                const item = convert(entry);
+                if (item) items.push(item);
+            });
+        } else {
+            treeEntries.forEach((entry) => {
+                const item = convert(entry);
+                if (item) items.push(item);
+            });
+        }
     } else if (data && typeof data === 'object' && Array.isArray(data.bookmarks)) {
         // 第三方常见包裹格式：{ bookmarks: [...] }
         console.log('[Canvas] Detected wrapped bookmarks array format');
@@ -2353,8 +2479,10 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     }
 
     if (items.length === 0 && !importedViaCanvasTempProtocol) {
-        showCanvasToast(isEn ? 'No valid bookmark data found.' : '未解析到有效的书签数据', 'error');
-        return;
+        if (!(options && options.suppressToast)) {
+            showCanvasToast(isEn ? 'No valid bookmark data found.' : '未解析到有效的书签数据', 'error');
+        }
+        return { ok: false, count: 0, section: null };
     }
 
     // 创建一个新的临时栏目容器
@@ -2428,7 +2556,9 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         }
     }
 
-    saveTempNodes();
+    if (!(options && options.suppressSave)) {
+        saveTempNodes();
+    }
 
     // 添加呼吸式闪烁效果，吸引用户注意
     const nodeElement = document.getElementById(section.id);
@@ -2437,10 +2567,13 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     }
 
     // 显示成功提示
-    showCanvasToast(
-        isEn ? `Successfully imported ${totalBookmarkCount} bookmarks` : `成功导入 ${totalBookmarkCount} 个书签`,
-        'success'
-    );
+    if (!(options && options.suppressToast)) {
+        showCanvasToast(
+            isEn ? `Successfully imported ${totalBookmarkCount} bookmarks` : `成功导入 ${totalBookmarkCount} 个书签`,
+            'success'
+        );
+    }
+    return { ok: true, count: totalBookmarkCount, section };
 }
 
 function __getCurrentFullscreenExportTarget() {

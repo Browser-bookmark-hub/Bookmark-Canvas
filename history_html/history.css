@@ -1977,19 +1977,21 @@ body.header-dock-bottom:not(.header-compact) .floating-tools-mode-panel {
 
 .settings-storage-block .settings-storage-split {
     display: flex;
+    flex-direction: column;
     align-items: stretch;
     border: none;
     border-radius: 0;
     overflow: visible;
     background: transparent;
+    gap: 4px;
 }
 
 .settings-storage-block .settings-storage-split-btn {
-    flex: 1;
+    flex: none;
     min-height: 32px;
     padding: 8px 10px;
     border: none;
-    border-radius: 8px;
+    border-radius: 8px !important;
     background: transparent;
     font-size: 13px;
     color: var(--text-primary);
@@ -2015,12 +2017,7 @@ body.header-dock-bottom:not(.header-compact) .floating-tools-mode-panel {
 }
 
 .settings-storage-block .settings-storage-split-btn+.settings-storage-split-btn {
-    border-left: 1px solid var(--border-color);
-    border-radius: 0 8px 8px 0;
-}
-
-.settings-storage-block .settings-storage-split-btn:first-child {
-    border-radius: 8px 0 0 8px;
+    border-left: none;
 }
 
 .settings-storage-block #clearMenuOtherBtn {
@@ -8718,19 +8715,11 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
     background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
 }
 
-/* 两列布局（书签文件行） - 让两个按钮和三个按钮保持相同尺寸 */
+/* 两列布局（书签文件行） */
 .import-row-2cols {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 10px;
-}
-
-.import-row-2cols .import-option-btn-compact:nth-child(1) {
-    grid-column: 1;
-}
-
-.import-row-2cols .import-option-btn-compact:nth-child(2) {
-    grid-column: 2;
 }
 
 /* 导入模式二级 UI */
@@ -12480,12 +12469,17 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
     backdrop-filter: blur(10px);
     z-index: 1001;
-    min-width: 240px;
-    width: min(420px, calc(100vw - 16px));
+    min-width: 280px;
+    width: min(300px, calc(100vw - 16px));
     max-width: calc(100vw - 16px);
     max-height: calc(100vh - 16px);
     overflow: hidden;
     box-sizing: border-box;
+}
+
+html[lang="en"] .canvas-manage-modal {
+    min-width: 400px;
+    width: min(420px, calc(100vw - 16px));
 }
 
 .canvas-manage-modal-header {
@@ -12531,8 +12525,8 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
 
 
 #canvasOtherManageModal {
-    min-width: 200px;
-    width: min(220px, calc(100vw - 16px));
+    min-width: 280px;
+    width: min(300px, calc(100vw - 16px));
     max-width: calc(100vw - 16px);
 }
 
@@ -12605,7 +12599,9 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
 
 .canvas-manage-btn:hover {
     background: var(--bg-tertiary);
-    border-color: var(--accent-primary);
+    border-color: var(--accent-primary) !important;
+    position: relative;
+    z-index: 2;
 }
 
 .canvas-manage-btn i {
@@ -12623,29 +12619,58 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
 
 .canvas-manage-split-group {
     display: flex;
+    flex-direction: column;
     align-items: stretch;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    overflow: hidden;
-    background: var(--bg-secondary);
-}
-
-.canvas-manage-btn.canvas-manage-btn-split {
-    flex: 1;
     border: none;
     border-radius: 0;
+    overflow: visible;
     background: transparent;
-    justify-content: center;
     gap: 6px;
 }
 
-.canvas-manage-btn.canvas-manage-btn-split+.canvas-manage-btn.canvas-manage-btn-split {
-    border-left: 1px solid var(--border-color);
+.canvas-manage-split-group.canvas-manage-horizontal-row {
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 8px !important;
+}
+
+.canvas-manage-split-group.canvas-manage-horizontal-row .canvas-manage-btn,
+.canvas-manage-split-group.canvas-manage-horizontal-row .canvas-clear-dropdown {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 4px;
+    justify-content: center;
+}
+
+.canvas-manage-split-group.canvas-manage-horizontal-row .canvas-clear-dropdown {
+    padding: 0;
+    display: flex;
+}
+
+.canvas-manage-split-group.canvas-manage-horizontal-row .canvas-clear-dropdown .canvas-manage-btn {
+    width: 100%;
+}
+
+.canvas-manage-split-group.canvas-manage-horizontal-row .canvas-clear-dropdown .clear-dropdown-menu {
+    left: auto;
+    right: 0;
+    min-width: max-content;
+}
+
+.canvas-manage-btn.canvas-manage-btn-split {
+    flex: none;
+    border: 1px solid var(--border-color);
+    border-radius: 8px !important;
+    background: var(--bg-secondary);
+    justify-content: flex-start;
+    gap: 8px;
 }
 
 .canvas-manage-btn.canvas-manage-btn-split:hover {
     background: var(--bg-tertiary);
-    border-color: transparent;
+    border-color: var(--accent-primary) !important;
+    position: relative;
+    z-index: 2;
 }
 
 .canvas-manage-btn.danger {
@@ -12658,7 +12683,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
 
 .canvas-manage-btn.danger:hover {
     background: var(--error-light);
-    border-color: var(--error);
+    border-color: var(--error) !important;
 }
 
 /* 侧边栏管理弹出层 */
@@ -12759,7 +12784,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-    z-index: 1020;
+    z-index: 1030;
     padding: 4px;
     animation: dropdownFadeIn 0.15s ease-out;
 }
@@ -13916,11 +13941,65 @@ body.canvas-popover-active .md-list-popover {
     outline-offset: 2px;
 }
 
+/* 连线点击清除特殊处理 */
+.canvas-edge-hit-area.click-to-clear-selectable {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+.canvas-edge-hit-area.click-to-clear-selectable:hover {
+    outline: none !important;
+}
+
+/* Add !important to override inline colors when in click-to-clear mode */
+.canvas-workspace.click-to-clear-mode .canvas-edge-hit-area.click-to-clear-selectable:hover + .canvas-edge {
+    stroke: var(--error) !important;
+    stroke-width: 4px !important;
+    filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.4)) !important;
+}
+
+.canvas-workspace.click-to-clear-mode .canvas-edge-hit-area.click-to-clear-selected + .canvas-edge {
+    stroke: var(--error) !important;
+    stroke-width: 5px !important;
+    filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.6)) !important;
+    stroke-dasharray: 6 4 !important;
+}
+
 /* 选中的项目 */
 .click-to-clear-selected {
     outline: 3px solid var(--error) !important;
     outline-offset: 2px;
     box-shadow: 0 0 20px rgba(239, 68, 68, 0.4) !important;
+}
+
+/* 连接线的 hit-area 不显示默认的选中框和勾号 */
+.canvas-edge-hit-area.click-to-clear-selected {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+.canvas-edge-hit-area.click-to-clear-selected::after {
+    display: none !important;
+}
+
+/* 连线文字点击清除样式 */
+.canvas-workspace.click-to-clear-mode .canvas-edge-label {
+    cursor: pointer !important;
+    transition: fill 0.15s ease, filter 0.15s ease;
+}
+
+.canvas-workspace.click-to-clear-mode .canvas-edge-label:hover {
+    fill: var(--error) !important;
+    filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.4)) !important;
+}
+
+.canvas-workspace.click-to-clear-mode .canvas-edge-label.click-to-clear-selected {
+    fill: var(--error) !important;
+    filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.6)) !important;
+}
+
+.canvas-workspace.click-to-clear-mode .canvas-edge-label.click-to-clear-selected::after {
+    display: none !important;
 }
 
 .click-to-clear-selected::after {
@@ -13951,7 +14030,7 @@ body.canvas-popover-active .md-list-popover {
     background: rgba(255, 255, 255, 0.98);
     border: 1px solid var(--border-color);
     border-radius: 12px;
-    padding: 12px 20px;
+    padding: 10px 16px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
     z-index: 100000;
     backdrop-filter: blur(10px);
