@@ -899,7 +899,7 @@ async function showFolderSelectionDialog(folders, dropX, dropY) {
 const CANVAS_AUTO_BACKUP_SETTINGS_KEY = 'bcs:auto-backup:settings:v1';
 const CANVAS_AUTO_BACKUP_DEFAULT_SETTINGS = Object.freeze({
     enabled: true,
-    intervalDays: 3,
+    intervalDays: 2,
     lastAutoBackupAt: 0,
     lastAutoBackupOpenDayKey: '',
     lastObservedOpenDayKey: '',

@@ -6819,14 +6819,14 @@ async function __buildExportSandbox(options = {}) {
     }
     const all = await __bcsStorageGetAll();
     const permMainRaw = all && all[BCS_PERM_MAIN_KEY] ? all[BCS_PERM_MAIN_KEY] : null;
-    const tempStateRaw = all && all[TEMP_SECTION_STORAGE_KEY] ? all[TEMP_SECTION_STORAGE_KEY] : null;
+    const metaRaw = all && all[BCS_META_KEY] ? all[BCS_META_KEY] : null;
+    const tempStateRaw = __buildCanvasTempStateFromBcsStorage(all, metaRaw);
     const copyKeys = Object.keys(all || {}).filter((key) => typeof key === 'string' && key.startsWith(BCS_PERM_COPY_PREFIX));
     const copies = {};
     for (const key of copyKeys) {
         copies[key] = __cloneForSandbox(all[key]);
     }
     const canvasRaw = all && all[BCS_CANVAS_KEY] ? all[BCS_CANVAS_KEY] : null;
-    const metaRaw = all && all[BCS_META_KEY] ? all[BCS_META_KEY] : null;
     const rootMetaRaw = all && all[PERMANENT_ROOT_META_STORAGE_KEY] ? all[PERMANENT_ROOT_META_STORAGE_KEY] : null;
     return {
         sandboxBuiltAt: Date.now(),
