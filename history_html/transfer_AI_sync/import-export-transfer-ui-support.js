@@ -526,8 +526,7 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
             title: bm.title,
             url: bm.url,
             type: 'bookmark',
-            children: [],
-            createdAt: Date.now()
+            children: []
         });
     }
 
@@ -544,7 +543,6 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
         y: dropY,
         width: 0,
         height: 0,
-        createdAt: Date.now(),
         source: 'browser-drop',  // 标记来源
         items: items
     };
@@ -668,7 +666,6 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
             y: dropY,
             width: 0,
             height: 0,
-            createdAt: Date.now(),
             source: 'browser-drop',  // 标记来源
             items: []
         };
@@ -684,8 +681,7 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
                 title: node.title || (node.url ? (isEn ? 'Untitled' : '未命名') : (isEn ? 'Folder' : '文件夹')),
                 url: node.url || '',
                 type: node.url ? 'bookmark' : 'folder',
-                children: [],
-                createdAt: Date.now()
+                children: []
             };
 
             if (node.children && Array.isArray(node.children)) {
@@ -775,7 +771,6 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         y: dropY,
         width: 0,
         height: 0,
-        createdAt: Date.now(),
         source: 'browser-drop',  // 标记来源
         items: [{
             id: allocateTempItemId(sectionId),
@@ -783,8 +778,7 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
             title: bookmark.title || bookmark.url,
             url: bookmark.url || '',
             type: 'bookmark',
-            children: [],
-            createdAt: Date.now()
+            children: []
         }]
     };
     const baseSize = getTempSectionBaseSize(section);

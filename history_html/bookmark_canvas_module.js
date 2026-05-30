@@ -4004,8 +4004,7 @@ function convertBookmarkNodeToTempItem(node, sectionId, options = {}) {
         title: node.title || (node.url || '未命名'),
         url: node.url || '',
         type: node.url ? 'bookmark' : 'folder',
-        children: [],
-        createdAt: Date.now()
+        children: []
     };
 
     if (node.children && node.children.length) {
@@ -4319,8 +4318,7 @@ function createTempItemFromPayload(sectionId, payload, options = {}) {
         title: hasExplicitTitle ? payload.title : (payload.url || '未命名'),
         url: payload.url || '',
         type: payload.type === 'folder' ? 'folder' : (payload.url ? 'bookmark' : 'folder'),
-        children: [],
-        createdAt: Date.now()
+        children: []
     };
     // Phase 3 scaffold: pass-through `tags` array on temp-section items. The UI / palette
     // is not implemented yet, but the field must round-trip through clone / save / export.
@@ -4506,7 +4504,6 @@ function setTempItemTags(sectionId, itemId, tagsInput, options = {}) {
         : (Array.isArray(tagsInput) ? tagsInput.slice() : []);
     if (tags.length) entry.item.tags = tags;
     else if (Object.prototype.hasOwnProperty.call(entry.item, 'tags')) delete entry.item.tags;
-    entry.item.updatedAt = Date.now();
     if (options.skipRender !== true) renderTempNode(entry.section);
     if (options.skipSave !== true) saveTempNodes();
     return true;
@@ -4527,7 +4524,6 @@ function toggleTempItemTag(sectionId, itemId, tagInput, options = {}) {
     else { existing.push(norm); action = 'added'; }
     if (existing.length) entry.item.tags = existing;
     else if (Object.prototype.hasOwnProperty.call(entry.item, 'tags')) delete entry.item.tags;
-    entry.item.updatedAt = Date.now();
     if (options.skipRender !== true) renderTempNode(entry.section);
     if (options.skipSave !== true) saveTempNodes();
     return { action, tags: existing };
@@ -5216,7 +5212,6 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         y: dropY,
         width: 0,
         height: 0,
-        createdAt: Date.now(),
         source: 'browser-drop',  // 标记来源
         items: bookmarks.map((bm, index) => ({
             id: allocateTempItemId(sectionId),
@@ -5224,8 +5219,7 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
             title: bm.title,
             url: bm.url,
             type: 'bookmark',
-            children: [],
-            createdAt: Date.now()
+            children: []
         }))
     };
     const baseSize = getTempSectionBaseSize(section);
@@ -16590,7 +16584,6 @@ async function createTempNode(data, x, y) {
         y,
         width: 0,
         height: 0,
-        createdAt: Date.now(),
         pinned: !!(data && data.pinned),
         items: []
     };
@@ -16693,7 +16686,6 @@ function createEmptyTempSection(x, y, options = {}) {
         y: (typeof y === 'number' && isFinite(y)) ? y : 0,
         width: 0,
         height: 0,
-        createdAt: Date.now(),
         pinned: !!(options && options.pinned),
         items: []
     };

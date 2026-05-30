@@ -2054,7 +2054,6 @@ async function importHtmlBookmarks(html, importFileName = '', options = {}) {
         y: position.y,
         width: baseSize.width,
         height: baseSize.height,
-        createdAt: Date.now(),
         source: sectionMeta.source,
         sequenceNumber,
         label: sectionMeta.label,
@@ -2069,8 +2068,7 @@ async function importHtmlBookmarks(html, importFileName = '', options = {}) {
             title: node.title || (node.url ? (isEn ? 'Untitled' : '未命名') : (isEn ? 'Folder' : '文件夹')),
             url: node.url || '',
             type: node.url ? 'bookmark' : 'folder',
-            children: [],
-            createdAt: Date.now()
+            children: []
         };
 
         if (node.children && Array.isArray(node.children)) {
@@ -2300,8 +2298,7 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
             title: node.title,
             url: node.url || '',
             type: node.type,
-            children: [],
-            createdAt: Date.now()
+            children: []
         };
 
         if (node.children && Array.isArray(node.children)) {
@@ -2518,14 +2515,6 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     });
     const fileNameTitle = String(importFileName || '').replace(/[\r\n]/g, ' ').trim();
     const protocolTitle = String(tempProtocolMeta && tempProtocolMeta.title || '').trim();
-    const protocolCreatedAt = Number(tempProtocolMeta && tempProtocolMeta.createdAt);
-    const sectionCreatedAt = (Number.isFinite(protocolCreatedAt) && protocolCreatedAt > 0)
-        ? protocolCreatedAt
-        : Date.now();
-    const protocolUpdatedAt = Number(tempProtocolMeta && tempProtocolMeta.updatedAt);
-    const sectionUpdatedAt = (Number.isFinite(protocolUpdatedAt) && protocolUpdatedAt > 0)
-        ? protocolUpdatedAt
-        : 0;
     const fallbackImportedTitle = isEn
         ? `Imported Bookmarks (JSON, ${totalBookmarkCount}) - ${formatTimestampForTitle()}`
         : `导入的书签 (JSON, ${totalBookmarkCount}) - ${formatTimestampForTitle()}`;
@@ -2547,7 +2536,6 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         y: position.y,
         width: baseSize.width,
         height: baseSize.height,
-        createdAt: sectionCreatedAt,
         source: sectionMeta.source,
         label: sectionMeta.label,
         tempKind: sectionMeta.tempKind,
@@ -2562,9 +2550,6 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     }
     if (protocolOriginPermanent) {
         section.originPermanent = protocolOriginPermanent;
-    }
-    if (sectionUpdatedAt) {
-        section.updatedAt = sectionUpdatedAt;
     }
 
     CanvasState.tempSections.push(section);
@@ -3875,7 +3860,7 @@ async function exportCanvasPackage(options = {}) {
             '- Special temporary sections live under `Temporary/Special temporary/` and use `tempKind: "special"` with a human label such as Drop, Search, Add, Import, or AI. See [R5](#ref-r5).',
             '- For repeated special labels, scan existing same-label IDs and use the next suffix, for example `temp-section-AI`, then `temp-section-AI-2`. See [R1](#ref-r1).',
             '- Temporary item IDs use `tempId_YYYYMMDD_hash_<token7>`, where `token7` is lowercase letters/digits only. Folders use `type: "folder"` and bookmarks use `type: "bookmark"` with `url`. See [R1](#ref-r1) and [R4](#ref-r4).',
-            '- Temporary items may carry timestamp metadata: `createdAt` records creation time; `updatedAt` is optional and should be preserved when present. Current runtime stamps `updatedAt` with JavaScript `Date.now()` for tag edits and import/export preserves it; pure reorder/move operations do not currently add it by themselves. If an AI edit changes item content or tags directly, refresh `updatedAt` with a tool-generated millisecond Unix timestamp, for example `node -e "console.log(Date.now())"`. Do not invent this value. See [R4](#ref-r4).',
+
             '',
             '### A5. .canvas Element Contract',
             '- Root keys must remain `nodes[]` and `edges[]`; the file is JSON Canvas compatible. See [R6](#ref-r6).',
@@ -3893,7 +3878,7 @@ async function exportCanvasPackage(options = {}) {
             '- `text` is the visible tag label. If the UI user only clicks a color, the app uses the localized color name as text; AI edits should write an explicit short `text`.',
             '- Multiple tags are allowed. Keep their order stable, remove exact duplicates by `color + text`, and preserve existing tags unless the task asks to change them.',
             '- Permanent tags belong on `identityMap` entries keyed by `syncId`, not inside bookmark tree nodes. See [R2](#ref-r2).',
-            '- Temporary tags belong inline on the affected item object next to fields like `createdAt` and `updatedAt`, so they move/delete with that item. See [R4](#ref-r4).',
+            '- Temporary tags belong inline on the affected item object, so they move/delete with that item. See [R4](#ref-r4).',
             '- Tag colors are separate from `.canvas` node/edge/section `color` and `colorHex` values. Do not convert between them.',
             '- Preserve unknown metadata fields unless the task explicitly targets them.',
             '',
@@ -3958,7 +3943,7 @@ async function exportCanvasPackage(options = {}) {
             '- 特殊临时栏目在 `临时栏目/特殊临时栏目/`，使用 `tempKind: "special"`，label 可以是拖入、搜索、添加、导入、AI 等中文或英文标签。见 [R5](#ref-r5)。',
             '- 同类特殊标签重复时，扫描已有同类 ID 后取 max+1，例如 `temp-section-AI`、`temp-section-AI-2`；用户可见的 `label` 仍可保持 `AI`。见 [R1](#ref-r1)。',
             '- 临时 item ID 使用 `tempId_YYYYMMDD_hash_<token7>`，其中 `token7` 只能是小写字母/数字。文件夹用 `type: "folder"`，书签用 `type: "bookmark"` 并带 `url`。见 [R1](#ref-r1) 与 [R4](#ref-r4)。',
-            '- 临时 item 可以带时间元数据：`createdAt` 表示创建时间；`updatedAt` 是可选修改时间，已有时必须保留。当前运行时代码会在 tag 修改时用 JavaScript `Date.now()` 写入 `updatedAt`，导入/导出会透传；纯排序/移动/跨栏目拖动目前不会单独新增它。AI 直接修改 item 内容或 tags 时，应使用工具刷新毫秒级 Unix 时间戳，例如 `node -e "console.log(Date.now())"`；不要凭空编这个值。见 [R4](#ref-r4)。',
+
             '',
             '### A5. .canvas 元素协议',
             '- 顶层必须保持 `nodes[]` 与 `edges[]`，整体兼容 Obsidian JSON Canvas。见 [R6](#ref-r6)。',
@@ -3976,7 +3961,7 @@ async function exportCanvasPackage(options = {}) {
             '- `text` 是 tag 的显示文字。用户在 UI 里只点颜色时，插件会用对应本地化颜色名；AI 手动编辑 JSON 时应写明确、简短的 `text`。',
             '- 允许多个 tag。保持已有顺序，按 `color + text` 去重；除非任务要求改 tag，不要删除已有 tag。',
             '- 永久栏目 tags 属于 `identityMap` 里的 `syncId` 条目，不直接塞进书签树节点。见 [R2](#ref-r2)。',
-            '- 临时栏目 tags 直接内嵌在对应 item 对象里，和 `createdAt` / `updatedAt` 同级，随该 item 移动或删除。见 [R4](#ref-r4)。',
+            '- 临时栏目 tags 直接内嵌在对应 item 对象里，随该 item 移动或删除。见 [R4](#ref-r4)。',
             '- tag 颜色和 `.canvas` 节点/边/栏目里的 `color`、`colorHex` 是两套东西，不要互相转换。',
             '- 未知元数据字段默认保留，除非任务明确要求修改。',
             '',
@@ -4178,7 +4163,7 @@ async function exportCanvasPackage(options = {}) {
             '',
             '<a id="ref-r4"></a>',
             '### R4. Regular Temporary Section Examples',
-            'Temporary item timestamps are item-level metadata. Preserve existing `createdAt` and `updatedAt`; refresh `updatedAt` with a tool-generated JavaScript `Date.now()` value when directly editing item content or tags, but do not add it only because an item was reordered or moved.',
+
             'Top-level regular chain section:',
             '```json',
             '{',
@@ -4206,8 +4191,6 @@ async function exportCanvasPackage(options = {}) {
             '          "url": "https://github.com/trending/javascript?since=daily",',
             '          "type": "bookmark",',
             '          "children": [],',
-            '          "createdAt": 1780113033692,',
-            '          "updatedAt": 1780128459049,',
             '          "tags": [',
             '            {',
             '              "color": "orange",',
@@ -4219,11 +4202,9 @@ async function exportCanvasPackage(options = {}) {
             '            }',
             '          ]',
             '        }',
-            '      ],',
-            '      "createdAt": 1780113033691',
+            '      ]',
             '    }',
             '  ],',
-            '  "createdAt": 1780113033000,',
             '  "sequenceNumber": 1',
             '}',
             '```',
@@ -4267,8 +4248,7 @@ async function exportCanvasPackage(options = {}) {
             '      "type": "folder",',
             '      "children": []',
             '    }',
-            '  ],',
-            '  "createdAt": 1780114220058',
+            '  ]',
             '}',
             '```',
             '',
@@ -4410,7 +4390,6 @@ async function exportCanvasPackage(options = {}) {
             '',
             '<a id="ref-r4"></a>',
             '### R4. 普通链式临时栏目示例',
-            '临时 item 的时间戳是 item 级元数据。保留已有 `createdAt` 与 `updatedAt`；直接修改 item 内容或 tags 时，用工具生成的 JavaScript `Date.now()` 值刷新 `updatedAt`，但不要仅因为排序或移动就新增它。',
             '顶层普通链式栏目：',
             '```json',
             '{',
@@ -4438,8 +4417,6 @@ async function exportCanvasPackage(options = {}) {
             '          "url": "https://github.com/trending/javascript?since=daily",',
             '          "type": "bookmark",',
             '          "children": [],',
-            '          "createdAt": 1780113033692,',
-            '          "updatedAt": 1780128459049,',
             '          "tags": [',
             '            {',
             '              "color": "orange",',
@@ -4451,11 +4428,9 @@ async function exportCanvasPackage(options = {}) {
             '            }',
             '          ]',
             '        }',
-            '      ],',
-            '      "createdAt": 1780113033691',
+            '      ]',
             '    }',
             '  ],',
-            '  "createdAt": 1780113033000,',
             '  "sequenceNumber": 1',
             '}',
             '```',
@@ -4499,8 +4474,7 @@ async function exportCanvasPackage(options = {}) {
             '      "type": "folder",',
             '      "children": []',
             '    }',
-            '  ],',
-            '  "createdAt": 1780114220058',
+            '  ]',
             '}',
             '```',
             '',

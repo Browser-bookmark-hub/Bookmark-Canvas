@@ -2914,14 +2914,7 @@ function buildCanvasSearchDb() {
         const fromTitle = parseDefaultTempSectionTitleTime(title);
         if (fromTitle) return fromTitle;
 
-        // 3) createdAt fallback
-        const createdAt = section.createdAt;
-        if (createdAt) {
-            const ms = (typeof createdAt === 'number')
-                ? createdAt
-                : parseInt(String(createdAt), 10);
-            if (Number.isFinite(ms) && ms > 0) return ms;
-        }
+
 
         return 0;
     };

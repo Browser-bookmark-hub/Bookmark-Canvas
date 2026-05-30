@@ -1675,9 +1675,8 @@ function __collectTagsFromIdentityMap(content) {
             const prev = map.get(key);
             if (prev) {
                 prev.count += 1;
-                prev.lastSeen = Date.now();
             } else {
-                map.set(key, { color: norm.color, text: norm.text, count: 1, lastSeen: Date.now() });
+                map.set(key, { color: norm.color, text: norm.text, count: 1 });
             }
         }
     }
@@ -1697,12 +1696,10 @@ function __collectTagsFromTempState(stateInput) {
                     if (!norm) continue;
                     const key = __makeTagKey(norm.color, norm.text);
                     const prev = map.get(key);
-                    const ts = Number(it.updatedAt) || Number(it.createdAt) || Date.now();
                     if (prev) {
                         prev.count += 1;
-                        if (ts > prev.lastSeen) prev.lastSeen = ts;
                     } else {
-                        map.set(key, { color: norm.color, text: norm.text, count: 1, lastSeen: ts });
+                        map.set(key, { color: norm.color, text: norm.text, count: 1 });
                     }
                 }
             }
@@ -1725,17 +1722,28 @@ async function __collectAllUsedTags() {
             const prev = merged.get(key);
             if (prev) {
                 prev.count += val.count;
-                if (val.lastSeen > prev.lastSeen) prev.lastSeen = val.lastSeen;
             } else {
-                merged.set(key, { color: val.color, text: val.text, count: val.count, lastSeen: val.lastSeen });
+                merged.set(key, { color: val.color, text: val.text, count: val.count });
             }
         });
     };
     if (content) mergeFrom(__collectTagsFromIdentityMap(content));
     if (tempState) mergeFrom(__collectTagsFromTempState(tempState));
     return Array.from(merged.values()).sort((a, b) => {
-        if (b.lastSeen !== a.lastSeen) return b.lastSeen - a.lastSeen;
-        return b.count - a.count;
+        if (b.count !== a.count) return b.count - a.count;
+
+        // 3) Fallback: A-Z / 1-9 text alphabetical comparison
+        const textA = String(a.text || '').trim();
+        const textB = String(b.text || '').trim();
+        if (textA || textB) {
+            if (textA && !textB) return -1;
+            if (!textA && textB) return 1;
+            const textDelta = textA.localeCompare(textB, undefined, { numeric: true, sensitivity: 'base' });
+            if (textDelta !== 0) return textDelta;
+        }
+
+        // 4) Fallback: Color name comparison alphabetically
+        return String(a.color || '').localeCompare(String(b.color || ''));
     });
 }
 
@@ -2937,8 +2945,6 @@ function __buildPermanentSectionJsonMarkdown(bookmarkTree, descriptionOverride =
 function __buildTempSectionJsonProtocol(section) {
     const normalizedProtocol = __normalizeTempSectionProtocolObject(section) || __buildTempSectionProtocol(section);
     const sectionMeta = normalizedProtocol && normalizedProtocol.sectionMeta ? normalizedProtocol.sectionMeta : {};
-    const createdAtTs = __parseCanvasProtocolDateValue(sectionMeta.createdAt || (section && section.createdAt));
-    const updatedAtTs = __parseCanvasProtocolDateValue(sectionMeta.updatedAt || (section && section.updatedAt));
     const sectionId = String((section && section.id) || sectionMeta.id || '').trim();
     const items = __buildTempSectionProtocolItems(
         Array.isArray(section && section.items)
@@ -2966,8 +2972,6 @@ function __buildTempSectionJsonProtocol(section) {
         descriptionMd: String(sectionMeta.descriptionMd == null ? '' : sectionMeta.descriptionMd),
         items
     };
-    if (createdAtTs) payload.createdAt = createdAtTs;
-    if (updatedAtTs) payload.updatedAt = updatedAtTs;
     if (sectionMeta.originPermanent) payload.originPermanent = sectionMeta.originPermanent;
     if (sectionMeta.sequenceNumber) payload.sequenceNumber = sectionMeta.sequenceNumber;
     if (!payload.id) delete payload.id;
@@ -6535,12 +6539,6 @@ function __buildTempSectionProtocolItemPayload(itemInput, sectionIdFallback = ''
     payload.type = kind;
     payload.children = children;
 
-    const createdAt = __parseCanvasProtocolDateValue(source.createdAt);
-    if (createdAt > 0) payload.createdAt = createdAt;
-
-    const updatedAt = __parseCanvasProtocolDateValue(source.updatedAt);
-    if (updatedAt > 0) payload.updatedAt = updatedAt;
-
     const dateAdded = __parseCanvasProtocolDateValue(source.dateAdded);
     if (dateAdded > 0) payload.dateAdded = dateAdded;
 
@@ -6583,12 +6581,6 @@ function __buildTempSectionProtocolMeta(section) {
 
     const sequenceNumber = __normalizePositiveInt(section && section.sequenceNumber);
     if (sequenceNumber) meta.sequenceNumber = sequenceNumber;
-
-    const createdAt = __parseCanvasProtocolDateValue(section && section.createdAt);
-    if (createdAt > 0) meta.createdAt = createdAt;
-
-    const updatedAt = __parseCanvasProtocolDateValue(section && section.updatedAt);
-    if (updatedAt > 0) meta.updatedAt = updatedAt;
 
     const originPermanent = __normalizeOriginPermanentPayload(section && section.originPermanent);
     if (originPermanent) meta.originPermanent = originPermanent;
@@ -6635,8 +6627,6 @@ function __normalizeTempSectionProtocolObject(protocolInput) {
         title: rawMeta.title,
         source: rawMeta.source,
         sequenceNumber: rawMeta.sequenceNumber,
-        createdAt: rawMeta.createdAt,
-        updatedAt: rawMeta.updatedAt,
         descriptionMd: rawMeta.descriptionMd,
         originPermanent: rawMeta.originPermanent
     };
@@ -6687,12 +6677,6 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
             children: []
         };
 
-        const createdAt = __parseCanvasProtocolDateValue(payloadSource.createdAt);
-        if (createdAt > 0) runtimeItem.createdAt = createdAt;
-
-        const updatedAt = __parseCanvasProtocolDateValue(payloadSource.updatedAt);
-        if (updatedAt > 0) runtimeItem.updatedAt = updatedAt;
-
         const dateAdded = __parseCanvasProtocolDateValue(payloadSource.dateAdded);
         if (dateAdded > 0) runtimeItem.dateAdded = dateAdded;
 
@@ -6733,20 +6717,12 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
         colorLocked: typeof options.colorLocked === 'boolean' ? options.colorLocked : __getDefaultTempColorLockedState(),
         pinned: !!options.pinned
     };
-    const restoredCreatedAt = Number(sectionMeta.createdAt || options.createdAt);
-    if (Number.isFinite(restoredCreatedAt) && restoredCreatedAt > 0) {
-        restored.createdAt = restoredCreatedAt;
-    }
 
     if (sectionMeta.label) restored.label = sectionMeta.label;
     if (sectionMeta.source) restored.source = sectionMeta.source;
     if (sectionMeta.tempKind) restored.tempKind = sectionMeta.tempKind;
     if (sectionMeta.sequenceNumber) restored.sequenceNumber = sectionMeta.sequenceNumber;
     if (sectionMeta.originPermanent) restored.originPermanent = __normalizeOriginPermanentPayload(sectionMeta.originPermanent);
-    const restoredUpdatedAt = Number(sectionMeta.updatedAt || options.updatedAt);
-    if (Number.isFinite(restoredUpdatedAt) && restoredUpdatedAt > 0) {
-        restored.updatedAt = restoredUpdatedAt;
-    }
     const restoredDescriptionMd = String(sectionMeta.descriptionMd == null ? '' : sectionMeta.descriptionMd);
     restored.descriptionMd = restoredDescriptionMd;
     restored.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(restoredDescriptionMd));
