@@ -2351,16 +2351,19 @@ function requestSidebarMenuColorSyncRefresh() {
 }
 
 // [Special Temp 接入约定]
-// 新增“特殊临时栏目”时，建议只做这一步：为 section.source 分配稳定值，并加入下面集合。
+// 新数据优先用 section.tempKind = 'special' 标记；旧数据仍回退 source / label 判定。
+// 新增固定来源的“特殊临时栏目”时，可为 section.source 分配稳定值，并加入下面集合。
 // 命中后会自动接入：
 // - 外观尺寸：sizes.specialTemp
 // - 外观颜色：colors.specialTemp
 // - 颜色锁行为：与常规临时栏目共用同一套设置
-// 兼容旧数据时，__isSpecialTempSection 仍会回退用 label 判定。
 const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add', 'file-import', 'import-html-bookmarks', 'import-json-bookmarks']);
 
 function __isSpecialTempSection(section) {
     if (!section) return false;
+    const tempKindRaw = (typeof section.tempKind === 'string') ? section.tempKind.trim().toLowerCase() : '';
+    if (tempKindRaw === 'special') return true;
+    if (tempKindRaw === 'regular') return false;
     const sourceRaw = (typeof section.source === 'string') ? section.source.trim() : '';
     const source = sourceRaw.toLowerCase();
     if (source && SPECIAL_TEMP_SOURCE_SET.has(source)) return true;
@@ -32654,15 +32657,15 @@ function createCanvasAppearanceSettingsModal() {
         <div class="perf-help-popover" id="appearanceSpecialTempHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Special temp sections</b>: Drop / Search / Batch / Add / Import.<br><b>Tip</b>: Auto-fit is not recommended when you have many of these sections.'
-            : '<b>特殊临时栏目</b>：拖入 / 搜索 / 批量 / 添加 / 导入。<br><b>提示</b>：数量很多时不建议使用自适应。'}
+            ? '<b>Special temp sections</b>: Drop / Search / Batch / Add / Import / Custom.<br><b>Tip</b>: Auto-fit is not recommended when you have many of these sections.'
+            : '<b>特殊临时栏目</b>：拖入 / 搜索 / 批量 / 添加 / 导入 / 任意。<br><b>提示</b>：数量很多时不建议使用自适应。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherTempColorHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Global switch</b>: one-tap unify all temp section locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special temp sections</b> (Drop / Search / Batch / Add / Import) now use their own default color in Appearance.'
-            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加 / 导入）现在使用外观中的独立默认颜色。'}
+            ? '<b>Global switch</b>: one-tap unify all temp section locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special temp sections</b> (Drop / Search / Batch / Add / Import / Custom) now use their own default color in Appearance.'
+            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加 / 导入 / 任意）现在使用外观中的独立默认颜色。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherMenuDefaultColorSyncHelpPopover">

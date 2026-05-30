@@ -1787,6 +1787,11 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     font-weight: 600;
 }
 
+#appearanceSpecialTempHelpPopover {
+    width: 440px;
+    max-width: calc(100vw - 48px);
+}
+
 [data-theme="dark"] .perf-help-popover {
     background: var(--bg-secondary);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);

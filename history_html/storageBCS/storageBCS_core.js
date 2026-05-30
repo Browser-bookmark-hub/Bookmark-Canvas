@@ -3437,6 +3437,17 @@ function __buildImportedTempSectionFromJsonMarkdown(node, parsedMarkdown, conten
         if (seq) sequenceNumber = seq;
     }
 
+    const parsedTempKindRaw = String(
+        parsedJsonProtocol && parsedJsonProtocol.sectionMeta && parsedJsonProtocol.sectionMeta.tempKind || ''
+    ).trim().toLowerCase();
+    const parsedTempKind = (parsedTempKindRaw === 'special' || parsedTempKindRaw === 'regular')
+        ? parsedTempKindRaw
+        : '';
+    const inferredTempKind = parsedTempKind || __inferTempSectionKindFromFilePath(node.file);
+    if (parsedJsonProtocol && inferredTempKind && !parsedTempKind) {
+        parsedJsonProtocol.sectionMeta.tempKind = inferredTempKind;
+    }
+
     const inferredSource = String(
         (parsedJsonProtocol && parsedJsonProtocol.sectionMeta && parsedJsonProtocol.sectionMeta.source)
         || __inferTempSectionSourceFromFilePath(node.file)
@@ -3451,6 +3462,7 @@ function __buildImportedTempSectionFromJsonMarkdown(node, parsedMarkdown, conten
         sectionMeta: {
             label,
             title,
+            tempKind: inferredTempKind,
             source: inferredSource,
             sequenceNumber,
             descriptionMd: String(
@@ -4368,6 +4380,28 @@ function __inferTempSectionSourceFromFilePath(filePath) {
         const source = __normalizeTempSectionSourceKey(lv1);
         if (SPECIAL_TEMP_SOURCE_SET.has(source)) return source;
     }
+
+    return '';
+}
+
+function __inferTempSectionKindFromFilePath(filePath) {
+    const normalizedPath = String(filePath || '')
+        .replace(/\\/g, '/')
+        .replace(/^\/+/g, '')
+        .replace(/\/+$/g, '');
+    if (!normalizedPath) return '';
+
+    const segments = normalizedPath.split('/').filter(Boolean);
+    if (!segments.length) return '';
+
+    const tempRootIndex = segments.findIndex(seg => seg === 'Temporary' || seg === 'Temporary Sections' || seg === '临时栏目');
+    if (tempRootIndex < 0) return '';
+
+    const lv1 = segments[tempRootIndex + 1] || '';
+    const lv1Lower = lv1.toLowerCase();
+
+    if (lv1Lower === 'general chain' || lv1Lower === 'regular' || lv1 === '常规链式' || lv1 === '普通临时栏目') return 'regular';
+    if (lv1Lower === 'special temporary' || lv1Lower === 'special' || lv1 === '特殊临时栏目') return 'special';
 
     return '';
 }
@@ -6533,10 +6567,10 @@ function __buildTempSectionProtocolMeta(section) {
     const normalizedSource = __normalizeTempSectionSourceKey(section && section.source);
     const normalizedLabel = __normalizeTempSectionProtocolLabel(section);
     const explicitTempKind = String(section && section.tempKind || '').trim().toLowerCase();
-    const resolvedTempKind = normalizedSource && SPECIAL_TEMP_SOURCE_SET.has(normalizedSource)
-        ? 'special'
-        : ((explicitTempKind === 'special' || explicitTempKind === 'regular')
-            ? explicitTempKind
+    const resolvedTempKind = (explicitTempKind === 'special' || explicitTempKind === 'regular')
+        ? explicitTempKind
+        : (normalizedSource && SPECIAL_TEMP_SOURCE_SET.has(normalizedSource)
+            ? 'special'
             : (__isSpecialTempSection(section) ? 'special' : 'regular'));
     const meta = {
         tempKind: resolvedTempKind,

@@ -527,6 +527,10 @@
 
   function isSpecialTempSection(section) {
     if (!section) return false;
+    const tempKindRaw = normalizeText(section.tempKind).toLowerCase();
+    if (tempKindRaw === 'special') return true;
+    if (tempKindRaw === 'regular') return false;
+
     const sourceRaw = normalizeText(section.source).toLowerCase();
     if (sourceRaw && SPECIAL_TEMP_SOURCE_SET.has(sourceRaw)) return true;
 

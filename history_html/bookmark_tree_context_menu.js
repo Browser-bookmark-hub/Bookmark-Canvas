@@ -11334,15 +11334,25 @@ function __buildTemporaryObjectJsonPayload(target) {
     if (bridge && typeof bridge.normalizeTempSectionProtocol === 'function') {
         return bridge.normalizeTempSectionProtocol(section);
     }
-    return {
+    const label = typeof getTempSectionLabel === 'function' ? getTempSectionLabel(section) : '';
+    const tempKind = (typeof __isSpecialTempSection === 'function' && __isSpecialTempSection(section))
+        ? 'special'
+        : 'regular';
+    const payload = {
         format: 'bookmark-canvas-section',
         schemaVersion: 2,
         sectionType: 'temporary',
         id: section.id,
+        label,
         title: section.title || '',
+        tempKind,
         descriptionMd: section.descriptionMd || '',
         items: Array.isArray(section.items) ? section.items.map(__serializeTempTreeItem).filter(Boolean) : []
     };
+    const source = String(section.source || '').trim();
+    if (source) payload.source = source;
+    if (!label) delete payload.label;
+    return payload;
 }
 
 async function __buildPermanentObjectJsonPayload(target) {
