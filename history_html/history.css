@@ -10026,6 +10026,69 @@ body.canvas-node-maximized-active .canvas-edge-label {
     display: flex;
 }
 
+.md-fontcolor-popover,
+.md-align-popover {
+    position: absolute;
+    top: -4px;
+    left: 0;
+    bottom: auto;
+    transform: translateX(-50%) translateY(-100%);
+    background: #ffffff;
+    border: 1px solid rgba(27, 31, 36, 0.25);
+    border-radius: 6px;
+    padding: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 12200;
+    display: none;
+    flex-direction: row;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.md-fontcolor-popover.open,
+.md-align-popover.open {
+    display: flex;
+    align-items: center;
+}
+
+[data-theme="dark"] .md-fontcolor-popover,
+[data-theme="dark"] .md-align-popover {
+    background: #2d2d2d;
+    border-color: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.md-align-option {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: #444;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    font-size: 13px;
+}
+
+.md-align-option:hover {
+    background: rgba(9, 105, 218, 0.1);
+    border-color: rgba(9, 105, 218, 0.3);
+    color: #0969da;
+}
+
+[data-theme="dark"] .md-align-option {
+    color: #e4e6eb;
+}
+
+[data-theme="dark"] .md-align-option:hover {
+    background: rgba(88, 166, 255, 0.15);
+    border-color: rgba(88, 166, 255, 0.3);
+    color: #58a6ff;
+}
+
 [data-theme="dark"] .md-list-popover {
     background: #2d2d2d;
     border-color: rgba(255, 255, 255, 0.15);
@@ -10270,6 +10333,22 @@ body.canvas-node-maximized-active .canvas-edge-label {
 .md-color-popover.context-anchored {
     position: fixed;
     z-index: 10001;
+}
+
+.md-fontcolor-popover.md-color-popover {
+    top: -4px;
+    bottom: auto;
+    transform: translateX(-50%) translateY(-100%);
+    flex-wrap: nowrap;
+    width: max-content;
+    max-width: none;
+    white-space: nowrap;
+}
+
+.md-fontcolor-popover.md-color-popover.open {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: nowrap;
 }
 
 .md-color-chip {
@@ -13673,7 +13752,9 @@ body.canvas-popover-active .temp-node-header .temp-node-actions,
 body.canvas-popover-active .md-node-toolbar,
 body.canvas-popover-active .md-format-popover,
 body.canvas-popover-active .md-color-popover,
-body.canvas-popover-active .temp-color-popover {
+body.canvas-popover-active .temp-color-popover,
+body.canvas-popover-active .md-fontcolor-popover,
+body.canvas-popover-active .md-align-popover {
     pointer-events: auto !important;
 }
 
@@ -13692,7 +13773,9 @@ body.canvas-popover-active .md-color-popover,
 body.canvas-popover-active .temp-color-popover,
 body.canvas-popover-active .md-delete-options-popover,
 body.canvas-popover-active .md-heading-popover,
-body.canvas-popover-active .md-list-popover {
+body.canvas-popover-active .md-list-popover,
+body.canvas-popover-active .md-fontcolor-popover,
+body.canvas-popover-active .md-align-popover {
     pointer-events: auto !important;
 }
 
@@ -13702,7 +13785,9 @@ body.canvas-popover-active .md-list-popover {
 .temp-color-popover,
 .md-delete-options-popover,
 .md-heading-popover,
-.md-list-popover {
+.md-list-popover,
+.md-fontcolor-popover,
+.md-align-popover {
     cursor: default !important;
 }
 

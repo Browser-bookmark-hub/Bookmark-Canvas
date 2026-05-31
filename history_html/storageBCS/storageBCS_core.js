@@ -3083,6 +3083,12 @@ function __htmlToMarkdown(html, options = {}) {
             case 'p':
             case 'div': {
                 const content = childContent();
+                if (tag === 'p') {
+                    const align = String(node.getAttribute('align') || '').trim().toLowerCase();
+                    if (/^(left|center|right|justify)$/.test(align)) {
+                        return `<p align="${align}">${content}</p>${paragraphBreaks ? paragraphSeparator : '\n'}`;
+                    }
+                }
                 const isVisuallyEmpty = !String(content || '').replace(/[\s\u00A0]+/g, '');
                 if (isVisuallyEmpty) {
                     return paragraphBreaks ? paragraphSeparator : '\n';
@@ -3110,9 +3116,9 @@ function __htmlToMarkdown(html, options = {}) {
                 return `**${childContent()}**`;
             case 'em':
             case 'i':
-                return `*${childContent()}*`;
+                return `_${childContent()}_`;
             case 'u':
-                return childContent();
+                return `<u>${childContent()}</u>`;
             case 'del':
             case 's':
             case 'strike':
@@ -3166,7 +3172,19 @@ function __htmlToMarkdown(html, options = {}) {
                 return `![${alt}](${src})`;
             }
             case 'span': {
+                const style = String(node.getAttribute('style') || '').trim();
+                if (style && /^(?:\s*(?:color|background-color|text-align|font-weight|font-style|text-decoration)\s*:[^;]+;?)+$/i.test(style)) {
+                    return `<span style="${style.replace(/"/g, '&quot;')}">${childContent()}</span>`;
+                }
                 return childContent();
+            }
+            case 'font': {
+                const color = String(node.getAttribute('color') || '').trim();
+                if (color) return `<font color="${color.replace(/"/g, '&quot;')}">${childContent()}</font>`;
+                return childContent();
+            }
+            case 'center': {
+                return `<center>${childContent()}</center>`;
             }
             default:
                 return childContent();

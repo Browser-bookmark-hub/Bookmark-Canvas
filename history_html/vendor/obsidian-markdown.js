@@ -58,10 +58,81 @@
     return baseImage(safeHref, title, text);
   };
 
-  // Disable raw HTML rendering in markdown body.
-  // HTML snippets are displayed as plain text so sync/output stays markdown-only.
+  const allowedTags = new Set([
+    'font',
+    'span',
+    'u',
+    'mark',
+    'strong',
+    'em',
+    'b',
+    'i',
+    'del',
+    's',
+    'sub',
+    'sup',
+    'br',
+    'center',
+    'p'
+  ]);
+  const allowedAttrs = new Set(['color', 'style', 'class', 'align']);
+
+  const sanitizeStyle = (style = '') => {
+    const out = [];
+    String(style || '').split(';').forEach((decl) => {
+      const parts = decl.split(':');
+      if (parts.length < 2) return;
+      const prop = String(parts.shift() || '').trim().toLowerCase();
+      const value = parts.join(':').trim();
+      if (!prop || !value) return;
+      if (!/^(color|background-color|text-align|font-weight|font-style|text-decoration)$/.test(prop)) return;
+      if (/javascript:|expression\s*\(|url\s*\(/i.test(value)) return;
+      out.push(`${prop}: ${value}`);
+    });
+    return out.join('; ');
+  };
+
+  const sanitizeColorValue = (value = '') => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/javascript:|expression\s*\(|url\s*\(/i.test(raw)) return '';
+    if (/^#[0-9a-f]{3,8}$/i.test(raw)) return raw;
+    if (/^(?:rgb|rgba|hsl|hsla)\(\s*[-+.\d%]+(?:\s*,\s*[-+.\d%]+){2,3}\s*\)$/i.test(raw)) return raw;
+    if (/^[a-z]+$/i.test(raw)) return raw;
+    return '';
+  };
+
+  // Render a small Obsidian-style HTML subset used by blank cards and section descriptions.
   renderer.html = function safeHtml(html) {
-    return escapeHtml(String(html || ''));
+    const tagPattern = /<(\/?)([\w]+)([^>]*)>/g;
+    return String(html || '').replace(tagPattern, (match, slash, tag, attrs) => {
+      const tagLower = tag.toLowerCase();
+      if (!allowedTags.has(tagLower)) return escapeHtml(match);
+
+      if (attrs && !slash) {
+        const safeAttrs = [];
+        attrs.replace(/(\w+)\s*=\s*["']([^"']*)["']/g, (attrMatch, name, value) => {
+          const attrName = String(name || '').toLowerCase();
+          if (!allowedAttrs.has(attrName)) return '';
+          let safeValue = String(value || '');
+          if (attrName === 'style') {
+            safeValue = sanitizeStyle(safeValue);
+            if (!safeValue) return '';
+          } else if (attrName === 'color') {
+            safeValue = sanitizeColorValue(safeValue);
+            if (!safeValue) return '';
+          } else if (attrName === 'align') {
+            safeValue = safeValue.trim().toLowerCase();
+            if (!/^(left|center|right|justify)$/.test(safeValue)) return '';
+          }
+          safeAttrs.push(` ${attrName}="${safeValue.replace(/"/g, '&quot;')}"`);
+          return '';
+        });
+        return `<${tagLower}${safeAttrs.join('')}>`;
+      }
+
+      return `<${slash}${tagLower}>`;
+    });
   };
 
   const CALL_OUT_ICONS = {

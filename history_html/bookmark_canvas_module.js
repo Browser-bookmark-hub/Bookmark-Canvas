@@ -14354,6 +14354,129 @@ function __looksLikeHtmlTagContent(value) {
     return /<\s*[a-z][\w:-]*(?:\s[^>]*)?>/i.test(String(value == null ? '' : value));
 }
 
+function __isCanvasHtmlToolSource(value) {
+    return /^\s*<\s*(?:font|span|u|center|p)\b[\s\S]*<\/\s*(?:font|span|u|center|p)\s*>\s*$/i
+        .test(String(value == null ? '' : value));
+}
+
+function __expandCanvasHtmlToolElementToSource(el) {
+    if (!el || !el.tagName) return null;
+    const tagName = String(el.tagName || '').toUpperCase();
+    if (tagName === 'P') {
+        const align = String(el.getAttribute('align') || '').trim().toLowerCase();
+        if (!/^(left|center|right|justify)$/.test(align)) return null;
+    } else if (tagName === 'SPAN') {
+        const style = String(el.getAttribute('style') || '').trim();
+        if (!style) return null;
+    } else if (!/^(FONT|U|CENTER)$/.test(tagName)) {
+        return null;
+    }
+    const source = __normalizeCanvasMarkdownSource(
+        __repairLegacyCanvasMarkdownSource(
+            __htmlToMarkdown(String(el.outerHTML || ''), {
+                trimResult: false,
+                compactNewlines: false,
+                paragraphBreaks: false,
+                hardLineBreaks: true
+            })
+        )
+    ).trim();
+    if (!__isCanvasHtmlToolSource(source)) return null;
+    return { source, prefix: '', suffix: '', type: 'html-tool' };
+}
+
+function __replaceTextNodeWithCanvasHtmlToolSource(textNode, sourceText) {
+    if (!textNode || !textNode.parentNode || !__isCanvasHtmlToolSource(sourceText)) return false;
+    const html = __renderCanvasMixedInlineMarkdownHtml(sourceText)
+        || __normalizeCanvasRichHtml(
+            __renderMarkdownSourceToCanvasHtml(String(sourceText || ''), { forceLinePreserve: true })
+        );
+    if (!html) return false;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    const frag = tpl.content;
+    if (!frag || !frag.childNodes || !frag.childNodes.length) return false;
+    textNode.parentNode.replaceChild(frag, textNode);
+    return true;
+}
+
+function __renderCanvasMixedInlineMarkdownHtml(source) {
+    const raw = String(source == null ? '' : source);
+    if (!raw) return '';
+    let rendered = '';
+    try {
+        const api = (typeof marked !== 'undefined' && marked && typeof marked.parseInline === 'function')
+            ? marked
+            : (typeof window !== 'undefined' && window.marked && typeof window.marked.parseInline === 'function' ? window.marked : null);
+        if (api) rendered = String(api.parseInline(raw) || '');
+    } catch (_) {
+        rendered = '';
+    }
+    let safeHtml = __normalizeCanvasRichHtml(rendered || raw);
+    if (!safeHtml && rendered) safeHtml = __normalizeCanvasRichHtml(raw);
+    if (!safeHtml) return '';
+
+    const tmp = document.createElement('div');
+    tmp.innerHTML = safeHtml;
+    let changed = true;
+    let loop = 0;
+    while (changed && loop++ < 10) {
+        changed = false;
+        const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_TEXT, null, false);
+        const textNodes = [];
+        let n;
+        while (n = walker.nextNode()) textNodes.push(n);
+        for (const tn of textNodes) {
+            if (!tn || !tn.parentNode) continue;
+            if (tn.parentNode.closest && tn.parentNode.closest('code, pre')) continue;
+            if (__tryConvertInlinePatternsInTextNode(tmp, tn)) changed = true;
+        }
+    }
+    return __normalizeCanvasRichHtml(tmp.innerHTML) || safeHtml;
+}
+
+function __setCanvasDescriptionToolbarTopLayer({ cardEl, containerEl, controlsEl, active }) {
+    const targets = [
+        { el: cardEl, z: '2147483000' },
+        { el: containerEl, z: '2147483001' },
+        { el: controlsEl, z: '2147483002' }
+    ];
+    targets.forEach(({ el, z }) => {
+        if (!el || !el.style) return;
+        if (active) {
+            if (!el.__canvasDescTopLayerPrev) {
+                el.__canvasDescTopLayerPrev = {
+                    position: el.style.position || '',
+                    zIndex: el.style.zIndex || ''
+                };
+            }
+            const computed = window.getComputedStyle ? window.getComputedStyle(el) : null;
+            if (computed && computed.position === 'static') el.style.position = 'relative';
+            el.style.zIndex = z;
+            return;
+        }
+        const prev = el.__canvasDescTopLayerPrev;
+        if (prev) {
+            el.style.position = prev.position;
+            el.style.zIndex = prev.zIndex;
+            try { delete el.__canvasDescTopLayerPrev; } catch (_) { el.__canvasDescTopLayerPrev = null; }
+        }
+    });
+}
+
+function __positionCanvasFloatingPopoverAboveButton(pop, btn) {
+    if (!pop || !btn || !btn.getBoundingClientRect) return;
+    const rect = btn.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.left = `${Math.round(rect.left + rect.width / 2)}px`;
+    pop.style.top = `${Math.round(rect.top)}px`;
+    pop.style.right = 'auto';
+    pop.style.bottom = 'auto';
+    pop.style.transform = 'translate(-50%, calc(-100% - 4px))';
+    pop.style.zIndex = '2147483647';
+    pop.style.pointerEvents = 'auto';
+}
+
 function __looksLikeEscapedHtmlTagContent(value) {
     return /&lt;\s*[a-z][\w:-]*(?:\s[^&]*?)?&gt;/i.test(String(value == null ? '' : value));
 }
@@ -17043,6 +17166,8 @@ function renderMdNode(node) {
     if (typeof node.fontSize !== 'number') {
         node.fontSize = defaultFontSize;
     }
+    let currentFontColor = '#2DC26B';
+    let previousFontColor = '#2DC26B';
 
     // 创建格式工具栏弹层（单行布局）
     const createFormatPopover = () => {
@@ -17060,11 +17185,14 @@ function renderMdNode(node) {
         const italicTitle = lang === 'en' ? 'Italic' : '斜体';
         const underlineTitle = lang === 'en' ? 'Underline' : '下划线';
         const highlightTitle = lang === 'en' ? 'Highlight' : '高亮';
+        const fontColorTitle = lang === 'en' ? 'Font Color' : '字体颜色';
         const strikeTitle = lang === 'en' ? 'Strikethrough' : '删除线';
         const codeTitle = lang === 'en' ? 'Code' : '代码';
         const headingTitle = lang === 'en' ? 'Heading' : '标题';
+        const alignTitle = lang === 'en' ? 'Alignment' : '对齐';
         const listTitle = lang === 'en' ? 'List' : '列表';
         const quoteTitle = lang === 'en' ? 'Quote' : '引用';
+        const toolbarFontColor = currentFontColor || '#2DC26B';
 
         pop.innerHTML = `
             <div class="md-format-row">
@@ -17073,10 +17201,13 @@ function renderMdNode(node) {
                 <button class="md-format-btn md-format-btn-sm" data-action="md-font-increase" title="${sizeIncreaseTitle}"><i class="fas fa-plus"></i></button>
                 <span class="md-format-sep"></span>
                 <button class="md-format-btn md-format-heading-btn" data-action="md-heading-toggle" title="${headingTitle}"><i class="fas fa-heading"></i></button>
+                <button class="md-format-btn md-format-align-btn" data-action="md-align-toggle" title="${alignTitle}"><i class="fas fa-align-left"></i></button>
                 <span class="md-format-sep"></span>
                 <button class="md-format-btn" data-action="md-insert-bold" title="${boldTitle}"><b>B</b></button>
                 <button class="md-format-btn" data-action="md-insert-italic" title="${italicTitle}"><i>I</i></button>
+                <button class="md-format-btn" data-action="md-insert-underline" title="${underlineTitle}"><u>U</u></button>
                 <button class="md-format-btn" data-action="md-insert-highlight" title="${highlightTitle}"><span style="background:#fcd34d;color:#000;padding:0 3px;border-radius:2px;">H</span></button>
+                <button class="md-format-btn md-format-fontcolor-btn" data-action="md-fontcolor-toggle" title="${fontColorTitle}"><span style="border-bottom:2px solid ${toolbarFontColor};padding:0 2px;">A</span></button>
                 <button class="md-format-btn" data-action="md-insert-strike" title="${strikeTitle}"><s>S</s></button>
                 <button class="md-format-btn" data-action="md-insert-code" title="${codeTitle}"><code>&lt;/&gt;</code></button>
                 <span class="md-format-sep"></span>
@@ -17088,6 +17219,12 @@ function renderMdNode(node) {
 
         toolbar.appendChild(pop);
         preventCanvasEventsPropagation(pop);
+        try {
+            pop.__fontColorLifecycleObserver = new MutationObserver(() => {
+                if (!pop.classList.contains('open')) closeFontColorPopover();
+            });
+            pop.__fontColorLifecycleObserver.observe(pop, { attributes: true, attributeFilter: ['class'] });
+        } catch (_) { }
         return pop;
     };
 
@@ -17100,9 +17237,7 @@ function renderMdNode(node) {
         closeMdColorPopover(toolbar);
 
         if (isOpen) {
-            pop.classList.remove('open');
-            btn.classList.remove('active');
-            updateCanvasPopoverState(false);
+            closeFormatPopover();
         } else {
             pop.classList.add('open');
             btn.classList.add('active');
@@ -17115,6 +17250,7 @@ function renderMdNode(node) {
 
     // 关闭格式工具栏
     const closeFormatPopover = () => {
+        closeFontColorPopover();
         const pop = toolbar.querySelector('.md-format-popover');
         if (pop) {
             pop.classList.remove('open');
@@ -17133,14 +17269,295 @@ function renderMdNode(node) {
         const formatRect = formatPop.getBoundingClientRect();
         // 计算按钮中心相对于格式弹层的位置
         const btnCenterX = btnRect.left + btnRect.width / 2 - formatRect.left;
+        pop.style.top = '-4px';
+        pop.style.bottom = 'auto';
         pop.style.left = btnCenterX + 'px';
         pop.style.transform = 'translateX(-50%) translateY(-100%)';
     };
 
-    // Obsidian official text node does not expose font-color/alignment popovers.
-    // Keep compatibility call sites as no-ops.
-    const closeFontColorPopover = () => { };
-    const closeAlignPopover = () => { };
+    const HTML_TOOL_COLORS = ['#888888', '#66bbff', '#fb464c', '#e9973f', '#e0de71', '#44cf6e', '#53dfdd', '#a882ff'];
+
+    const getToolbarRange = () => {
+        const sel = window.getSelection();
+        let range = null;
+        if (savedSelection && savedSelection.range) {
+            range = savedSelection.range;
+            if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+        } else if (sel && sel.rangeCount) {
+            range = sel.getRangeAt(0);
+        }
+        if (!range || !editor.contains(range.commonAncestorContainer)) {
+            editor.focus();
+            return null;
+        }
+        return { sel, range };
+    };
+
+    const insertHtmlToolElement = (wrapper) => {
+        const resolved = getToolbarRange();
+        if (!resolved || !wrapper) return false;
+        const { sel, range } = resolved;
+        const selected = range.toString();
+        wrapper.textContent = selected || (lang === 'en' ? 'text' : '文本');
+        if (
+            expandedElement &&
+            expandedElement.parentNode &&
+            range.startContainer === expandedElement &&
+            range.endContainer === expandedElement
+        ) {
+            const sourceText = String(wrapper.outerHTML || '');
+            if (!sourceText) return false;
+            const original = String(expandedElement.textContent || '');
+            const start = Math.max(0, Math.min(range.startOffset, original.length));
+            const end = Math.max(start, Math.min(range.endOffset, original.length));
+            expandedElement.textContent = original.slice(0, start) + sourceText + original.slice(end);
+            const nextOffset = start + sourceText.length;
+            range.setStart(expandedElement, nextOffset);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            savedSelection = {
+                range: range.cloneRange(),
+                text: ''
+            };
+            __syncMdNodeFromEditor(node, editor);
+            saveTempNodes();
+            try { if (undoManager) undoManager.scheduleRecord('html-tool-source-insert'); } catch (_) { }
+            editor.focus();
+            return true;
+        }
+        savedSelection = null;
+        range.deleteContents();
+        range.insertNode(wrapper);
+        const spacer = document.createTextNode('\u200B');
+        wrapper.parentNode.insertBefore(spacer, wrapper.nextSibling);
+        range.setStart(spacer, 1);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        __syncMdNodeFromEditor(node, editor);
+        saveTempNodes();
+        try { if (undoManager) undoManager.scheduleRecord('html-tool-insert'); } catch (_) { }
+        editor.focus();
+        return true;
+    };
+
+    const closeFontColorPopover = () => {
+        let pop = toolbar.querySelector('.md-fontcolor-popover');
+        if (!pop && typeof CSS !== 'undefined' && CSS.escape) {
+            pop = document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(String(node.id || 'blank-md-node'))}"]`);
+        }
+        if (pop) {
+            pop.classList.remove('open');
+            if (pop.__fontColorDocHandler) {
+                document.removeEventListener('mousedown', pop.__fontColorDocHandler, true);
+                pop.__fontColorDocHandler = null;
+            }
+            updateCanvasPopoverState(false);
+        }
+        const btn = toolbar.querySelector('[data-action="md-fontcolor-toggle"]');
+        if (btn) btn.classList.remove('active');
+    };
+
+    const createFontColorPopover = () => {
+        const ownerId = String(node.id || 'blank-md-node');
+        let pop = toolbar.querySelector('.md-fontcolor-popover');
+        if (!pop && typeof CSS !== 'undefined' && CSS.escape) {
+            pop = document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(ownerId)}"]`);
+        }
+        if (pop) return pop;
+        pop = document.createElement('div');
+        pop.className = 'md-fontcolor-popover md-color-popover';
+        pop.dataset.ownerToolbar = ownerId;
+        preventCanvasEventsPropagation(pop);
+        const rgbPickerTitle = lang === 'en' ? 'RGB Color Picker' : 'RGB颜色选择器';
+        const recentTitle = lang === 'en' ? 'Previous color' : '上一次颜色';
+        const gradientId = `rainbow-gradient-font-${ownerId.replace(/[^a-z0-9_-]/gi, '-')}`;
+        pop.innerHTML = HTML_TOOL_COLORS.map(color =>
+            `<span class="md-color-chip" data-action="md-fontcolor-apply" data-color="${color}" style="background:${color}" title="${color}"></span>`
+        ).join('') + `
+            <span class="md-color-divider" aria-hidden="true"></span>
+            <span class="md-color-chip md-fontcolor-recent-chip" data-action="md-fontcolor-recent" title="${recentTitle}"></span>
+            <button class="md-color-chip md-color-picker-btn" data-action="md-fontcolor-picker-toggle" title="${rgbPickerTitle}">
+                <svg viewBox="0 0 24 24" width="14" height="14">
+                    <circle cx="12" cy="12" r="10" fill="url(#${gradientId})" />
+                    <defs>
+                        <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#ff0000" />
+                            <stop offset="16.67%" style="stop-color:#ff9900" />
+                            <stop offset="33.33%" style="stop-color:#ffff00" />
+                            <stop offset="50%" style="stop-color:#00ff00" />
+                            <stop offset="66.67%" style="stop-color:#0099ff" />
+                            <stop offset="83.33%" style="stop-color:#9900ff" />
+                            <stop offset="100%" style="stop-color:#ff0099" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+            </button>
+        `;
+        const rgbPicker = document.createElement('div');
+        rgbPicker.className = 'md-rgb-picker';
+        rgbPicker.innerHTML = `<input class="md-color-input" type="color" value="${currentFontColor || '#2DC26B'}" title="${rgbPickerTitle}" />`;
+        pop.appendChild(rgbPicker);
+        const colorInput = rgbPicker.querySelector('.md-color-input');
+        const recentChip = pop.querySelector('.md-fontcolor-recent-chip');
+        const syncRecentChip = () => {
+            if (!recentChip) return;
+            const safe = previousFontColor || '#2DC26B';
+            recentChip.dataset.color = safe;
+            recentChip.style.backgroundColor = safe;
+        };
+        syncRecentChip();
+        pop.addEventListener('mousedown', (e) => {
+            markExpandedSourceToolbarInteraction();
+            if (e.target.closest('.md-color-chip, [data-action], .md-color-input')) e.preventDefault();
+        }, true);
+        pop.addEventListener('click', (e) => {
+            const pickerBtn = e.target.closest('[data-action="md-fontcolor-picker-toggle"]');
+            if (pickerBtn && pop.contains(pickerBtn)) {
+                e.preventDefault();
+                e.stopPropagation();
+                saveSelection();
+                rgbPicker.classList.toggle('open');
+                if (rgbPicker.classList.contains('open') && colorInput) {
+                    colorInput.value = currentFontColor || '#2DC26B';
+                    setTimeout(() => colorInput.click(), 30);
+                }
+                return;
+            }
+            const recentBtn = e.target.closest('[data-action="md-fontcolor-recent"]');
+            if (recentBtn && pop.contains(recentBtn)) {
+                e.preventDefault();
+                e.stopPropagation();
+                insertFontColor(recentBtn.getAttribute('data-color') || previousFontColor);
+                closeFontColorPopover();
+                return;
+            }
+            const chip = e.target.closest('[data-action="md-fontcolor-apply"]');
+            if (!chip || !pop.contains(chip)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            insertFontColor(chip.getAttribute('data-color'));
+            closeFontColorPopover();
+        });
+        if (colorInput) {
+            colorInput.addEventListener('change', (e) => {
+                saveSelection();
+                insertFontColor(e.target.value);
+                rgbPicker.classList.remove('open');
+                closeFontColorPopover();
+            });
+        }
+        document.body.appendChild(pop);
+        return pop;
+    };
+
+    const toggleFontColorPopover = (btn) => {
+        saveSelection();
+        const pop = createFontColorPopover();
+        const isOpen = pop.classList.contains('open');
+        closeAlignPopover();
+        closeHeadingPopover();
+        closeListPopover();
+        if (isOpen) {
+            pop.classList.remove('open');
+            btn.classList.remove('active');
+            updateCanvasPopoverState(false);
+        } else {
+            __positionCanvasFloatingPopoverAboveButton(pop, btn);
+            pop.classList.add('open');
+            btn.classList.add('active');
+            updateCanvasPopoverState(true);
+            if (pop.__fontColorDocHandler) {
+                document.removeEventListener('mousedown', pop.__fontColorDocHandler, true);
+            }
+            pop.__fontColorDocHandler = (event) => {
+                const target = event && event.target;
+                if (!target) return;
+                if (pop.contains(target) || btn.contains(target) || toolbar.contains(target)) return;
+                closeFontColorPopover();
+            };
+            document.addEventListener('mousedown', pop.__fontColorDocHandler, true);
+        }
+    };
+
+    const insertFontColor = (color) => {
+        const safeColor = String(color || '').trim();
+        if (!safeColor) return;
+        const wrapper = document.createElement('font');
+        wrapper.setAttribute('color', safeColor);
+        if (insertHtmlToolElement(wrapper)) {
+            if (currentFontColor && currentFontColor !== safeColor) previousFontColor = currentFontColor;
+            currentFontColor = safeColor;
+            editor.__htmlToolFontColor = safeColor;
+            const pop = (typeof CSS !== 'undefined' && CSS.escape)
+                ? document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(String(node.id || 'blank-md-node'))}"]`)
+                : null;
+            const recentChip = pop ? pop.querySelector('.md-fontcolor-recent-chip') : null;
+            if (recentChip) {
+                recentChip.dataset.color = previousFontColor || '#2DC26B';
+                recentChip.style.backgroundColor = previousFontColor || '#2DC26B';
+            }
+            const fontColorBtn = toolbar.querySelector('[data-action="md-fontcolor-toggle"] span');
+            if (fontColorBtn) fontColorBtn.style.borderBottomColor = safeColor;
+        }
+    };
+
+    const closeAlignPopover = () => {
+        const pop = toolbar.querySelector('.md-align-popover');
+        if (pop) {
+            pop.classList.remove('open');
+            updateCanvasPopoverState(false);
+        }
+        const btn = toolbar.querySelector('[data-action="md-align-toggle"]');
+        if (btn) btn.classList.remove('active');
+    };
+
+    const createAlignPopover = () => {
+        let pop = toolbar.querySelector('.md-align-popover');
+        if (pop) return pop;
+        pop = document.createElement('div');
+        pop.className = 'md-align-popover';
+        preventCanvasEventsPropagation(pop);
+        pop.innerHTML = `
+            <button class="md-align-option" data-action="md-align-apply" data-align="left" title="${lang === 'en' ? 'Align Left' : '左对齐'}"><i class="fas fa-align-left"></i></button>
+            <button class="md-align-option" data-action="md-align-apply" data-align="center" title="${lang === 'en' ? 'Center' : '居中'}"><i class="fas fa-align-center"></i></button>
+            <button class="md-align-option" data-action="md-align-apply" data-align="right" title="${lang === 'en' ? 'Align Right' : '右对齐'}"><i class="fas fa-align-right"></i></button>
+            <button class="md-align-option" data-action="md-align-apply" data-align="justify" title="${lang === 'en' ? 'Justify' : '两端对齐'}"><i class="fas fa-align-justify"></i></button>
+        `;
+        const formatPop = toolbar.querySelector('.md-format-popover');
+        if (formatPop) formatPop.appendChild(pop);
+        return pop;
+    };
+
+    const toggleAlignPopover = (btn) => {
+        saveSelection();
+        const pop = createAlignPopover();
+        const isOpen = pop.classList.contains('open');
+        closeFontColorPopover();
+        closeHeadingPopover();
+        closeListPopover();
+        if (isOpen) {
+            pop.classList.remove('open');
+            btn.classList.remove('active');
+            updateCanvasPopoverState(false);
+        } else {
+            positionPopoverAboveBtn(pop, btn);
+            pop.classList.add('open');
+            btn.classList.add('active');
+            updateCanvasPopoverState(true);
+        }
+    };
+
+    const insertAlign = (alignType) => {
+        const safeAlign = /^(left|center|right|justify)$/.test(String(alignType || '')) ? String(alignType) : 'left';
+        const wrapper = safeAlign === 'center' ? document.createElement('center') : document.createElement('p');
+        if (safeAlign !== 'center') wrapper.setAttribute('align', safeAlign);
+        insertHtmlToolElement(wrapper);
+    };
 
     // 创建标题选择弹层
     const createHeadingPopover = () => {
@@ -17485,8 +17902,8 @@ function renderMdNode(node) {
     editor.style.fontSize = node.fontSize + 'px';
 
     const mdPlaceholder = (lang === 'en')
-        ? 'Type Markdown: **bold**, *italic*, ==highlight==, [text](URL), https://example.com, www.example.com'
-        : '输入 Markdown：**粗体**、*斜体*、==高亮==、[文字](URL)、https://example.com、www.example.com';
+        ? 'Type Markdown: **bold**, _italic_, ==highlight==, [text](URL), https://example.com, www.example.com'
+        : '输入 Markdown：**粗体**、_斜体_、==高亮==、[文字](URL)、https://example.com、www.example.com';
     editor.setAttribute('data-placeholder', mdPlaceholder);
     editor.setAttribute('aria-label', mdPlaceholder);
 
@@ -17544,8 +17961,8 @@ function renderMdNode(node) {
     const formatMap = {
         'STRONG': { prefix: '**', suffix: '**' },
         'B': { prefix: '**', suffix: '**' },
-        'EM': { prefix: '*', suffix: '*' },
-        'I': { prefix: '*', suffix: '*' },
+        'EM': { prefix: '_', suffix: '_' },
+        'I': { prefix: '_', suffix: '_' },
         // underline 使用 HTML 语法（便于“展开为源码/离开后重渲染”的体验）
         'U': { prefix: '', suffix: '' },
         'DEL': { prefix: '~~', suffix: '~~' },
@@ -17558,6 +17975,25 @@ function renderMdNode(node) {
     let expandedElement = null;
     let expandedMarkdown = null;
     let expandedType = null; // 'simple'
+    let preserveExpandedSourceUntil = 0;
+    const markExpandedSourceToolbarInteraction = (durationMs = 1200) => {
+        preserveExpandedSourceUntil = Math.max(preserveExpandedSourceUntil, Date.now() + durationMs);
+    };
+    const isFontColorPopoverActive = () => {
+        if (Date.now() < preserveExpandedSourceUntil) return true;
+        const ownerId = String(node.id || 'blank-md-node');
+        let pop = null;
+        try {
+            pop = (typeof CSS !== 'undefined' && CSS.escape)
+                ? document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(ownerId)}"]`)
+                : toolbar.querySelector('.md-fontcolor-popover');
+        } catch (_) {
+            pop = toolbar.querySelector('.md-fontcolor-popover');
+        }
+        if (!pop) return false;
+        const activeEl = document.activeElement;
+        return pop.classList.contains('open') || (activeEl && pop.contains(activeEl));
+    };
 
     // 统一判定：当前光标是否仍在“展开的源码文本节点”内
     const isCaretInsideExpandedSource = () => {
@@ -17573,9 +18009,11 @@ function renderMdNode(node) {
         let rafId = 0;
         return () => {
             if (!expandedElement || !expandedElement.parentNode) return;
+            if (isFontColorPopoverActive()) return;
             if (rafId) cancelAnimationFrame(rafId);
             rafId = requestAnimationFrame(() => {
                 rafId = 0;
+                if (isFontColorPopoverActive()) return;
                 if (expandedElement && expandedElement.parentNode && !isCaretInsideExpandedSource()) {
                     reRenderExpanded();
                 }
@@ -17602,6 +18040,9 @@ function renderMdNode(node) {
             );
         };
         const inlineContent = getInlineSource(htmlContent, content);
+
+        const htmlToolSource = __expandCanvasHtmlToolElementToSource(el);
+        if (htmlToolSource) return htmlToolSource;
 
         // hr: --- 水平分割线
         if (tagName === 'HR') {
@@ -18339,6 +18780,7 @@ function renderMdNode(node) {
                     return safe
                         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                         .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                        .replace(/_(.+?)_/g, '<em>$1</em>')
                         .replace(/~~(.+?)~~/g, '<del>$1</del>')
                         .replace(/==(.+?)==/g, '<mark>$1</mark>')
                         .replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -18691,6 +19133,7 @@ function renderMdNode(node) {
             return safe
                 .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/_(.+?)_/g, '<em>$1</em>')
                 .replace(/~~(.+?)~~/g, '<del>$1</del>')
                 .replace(/==(.+?)==/g, '<mark>$1</mark>')
                 .replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -18705,6 +19148,13 @@ function renderMdNode(node) {
         expandedElement = null;
         expandedMarkdown = null;
         expandedType = null;
+
+        if (savedType === 'html-tool' || __isCanvasHtmlToolSource(normalizedText)) {
+            if (__replaceTextNodeWithCanvasHtmlToolSource(textNode, normalizedText)) {
+                saveEditorContent();
+                return;
+            }
+        }
 
         // Link: [text](URL) 还原回 <a>
         if (savedType === 'link') {
@@ -18931,6 +19381,7 @@ function renderMdNode(node) {
                     return safe
                         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                         .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                        .replace(/_(.+?)_/g, '<em>$1</em>')
                         .replace(/~~(.+?)~~/g, '<del>$1</del>')
                         .replace(/==(.+?)==/g, '<mark>$1</mark>')
                         .replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -18938,6 +19389,13 @@ function renderMdNode(node) {
 
                 // 辅助函数：安全地设置元素内容（解析 Markdown 后用 innerHTML）
                 const setElementContent = (element, content) => {
+                    if (__looksLikeHtmlTagContent(content)) {
+                        const rendered = __renderCanvasMixedInlineMarkdownHtml(content);
+                        if (rendered) {
+                            element.innerHTML = rendered;
+                            return;
+                        }
+                    }
                     const parsed = parseInlineMarkdown(content);
                     if (/<[^>]+>/.test(parsed)) {
                         element.innerHTML = parsed;
@@ -19241,6 +19699,7 @@ function renderMdNode(node) {
                     const looksLikeExpandedToken = (() => {
                         if (/^\*\*[\s\S]+?\*\*$/.test(text)) return true; // **bold**
                         if (/^\*[\s\S]+?\*$/.test(text)) return true; // *italic*
+                        if (/^_[\s\S]+?_$/.test(text)) return true; // _italic_
                         if (/^~~[\s\S]+?~~$/.test(text)) return true; // ~~del~~
                         if (/^==[\s\S]+?==$/.test(text)) return true; // ==mark==
                         if (/^`[^`]+`$/.test(text)) return true; // `code`
@@ -19467,6 +19926,7 @@ function renderMdNode(node) {
     let suppressBlurExit = false;
     let suppressBlurExitTimer = null;
     const markToolbarInteraction = () => {
+        markExpandedSourceToolbarInteraction();
         suppressBlurExit = true;
         if (suppressBlurExitTimer) {
             clearTimeout(suppressBlurExitTimer);
@@ -19527,7 +19987,7 @@ function renderMdNode(node) {
 
     // 编辑器失去焦点时退出编辑状态并重新渲染展开的内容
     editor.addEventListener('blur', () => {
-        reRenderExpanded();
+        if (!isFontColorPopoverActive()) reRenderExpanded();
         if (el.classList.contains('canvas-node-maximized') || fullscreenEditLock) {
             return;
         }
@@ -19868,7 +20328,7 @@ function renderMdNode(node) {
         const isClickInsideExpanded = isCaretInsideExpandedSource() || rawTarget === expandedElement;
 
         // 点击格式化元素时展开为 Markdown 源码（包括 HTML 格式）- 排除checkbox
-        let formattedEl = target.closest('strong, b, em, i, u, del, s, mark, code, a, blockquote, hr, li, .md-task-item, h1, h2, h3, h4, h5, h6');
+        let formattedEl = target.closest('strong, b, em, i, u, del, s, mark, code, a, font, span[style], center, p[align], blockquote, hr, li, .md-task-item, h1, h2, h3, h4, h5, h6');
         // 标题是高频操作：无论点击标题内部的哪个子元素，都优先按整个标题处理（保留 # / ## / ### 语义）
         const headingEl = target.closest('h1, h2, h3, h4, h5, h6');
         if (headingEl && editor.contains(headingEl)) {
@@ -20413,15 +20873,15 @@ function renderMdNode(node) {
         if (toolbar.contains(e.target)) {
             markToolbarInteraction();
         }
-        const btn = e.target.closest('button');
-        if (btn && toolbar.contains(btn)) {
+        const actionEl = e.target.closest('button, [data-action], .md-color-chip');
+        if (actionEl && toolbar.contains(actionEl)) {
             e.preventDefault(); // 防止 editor 失焦 / 编辑态被动退出
         }
-    });
+    }, true);
 
     // 工具栏事件
     toolbar.addEventListener('click', (e) => {
-        const btn = e.target.closest('.md-node-toolbar-btn, .md-color-chip, .md-color-custom, .md-color-picker-btn, .md-format-btn, .md-heading-option, .md-list-option');
+        const btn = e.target.closest('.md-node-toolbar-btn, .md-color-chip, .md-color-custom, .md-color-picker-btn, .md-format-btn, .md-heading-option, .md-list-option, .md-align-option');
         if (!btn) return;
         e.preventDefault();
         e.stopPropagation();
@@ -20436,6 +20896,8 @@ function renderMdNode(node) {
             if (action === 'md-format-close') return true;
             if (action === 'md-heading-toggle' || action === 'md-heading-apply') return true;
             if (action === 'md-list-toggle' || action === 'md-list-apply') return true;
+            if (action === 'md-fontcolor-toggle' || action === 'md-fontcolor-apply') return true;
+            if (action === 'md-align-toggle' || action === 'md-align-apply') return true;
             return false;
         })();
 
@@ -20557,6 +21019,8 @@ function renderMdNode(node) {
             insertFormat('bold');
         } else if (action === 'md-insert-italic') {
             insertFormat('italic');
+        } else if (action === 'md-insert-underline') {
+            insertFormat('underline');
         } else if (action === 'md-insert-highlight') {
             insertFormat('highlight');
         } else if (action === 'md-insert-strike') {
@@ -20579,6 +21043,16 @@ function renderMdNode(node) {
                 insertFormat(listType);
                 closeListPopover();
             }
+        } else if (action === 'md-fontcolor-toggle') {
+            toggleFontColorPopover(btn);
+        } else if (action === 'md-fontcolor-apply') {
+            insertFontColor(btn.getAttribute('data-color'));
+            closeFontColorPopover();
+        } else if (action === 'md-align-toggle') {
+            toggleAlignPopover(btn);
+        } else if (action === 'md-align-apply') {
+            insertAlign(btn.getAttribute('data-align'));
+            closeAlignPopover();
         } else if (action === 'md-insert-quote') {
             insertFormat('quote');
         } else if (action === 'md-format-close') {
@@ -21132,6 +21606,7 @@ function __sanitizeCanvasRichTextHtml(html) {
         'a',
         'p',
         'span',
+        'font',
         'u',
         'mark',
         'strong',
@@ -21143,6 +21618,7 @@ function __sanitizeCanvasRichTextHtml(html) {
         'sub',
         'sup',
         'br',
+        'center',
         'code',
         'blockquote',
         'ul',
@@ -21180,7 +21656,10 @@ function __sanitizeCanvasRichTextHtml(html) {
         'aria-label',
         'aria-expanded',
         'aria-hidden',
-        'open'
+        'open',
+        'color',
+        'align',
+        'style'
     ]);
 
     const normalizeExternalHref = (href) => {
@@ -21224,6 +21703,31 @@ function __sanitizeCanvasRichTextHtml(html) {
         }
     };
 
+    const sanitizeColorValue = (value) => {
+        const rawColor = String(value || '').trim();
+        if (!rawColor) return '';
+        if (/javascript:|expression\s*\(|url\s*\(/i.test(rawColor)) return '';
+        if (/^#[0-9a-f]{3,8}$/i.test(rawColor)) return rawColor;
+        if (/^(?:rgb|rgba|hsl|hsla)\(\s*[-+.\d%]+(?:\s*,\s*[-+.\d%]+){2,3}\s*\)$/i.test(rawColor)) return rawColor;
+        if (/^[a-z]+$/i.test(rawColor)) return rawColor;
+        return '';
+    };
+
+    const sanitizeStyle = (styleText) => {
+        const safe = [];
+        String(styleText || '').split(';').forEach((decl) => {
+            const parts = decl.split(':');
+            if (parts.length < 2) return;
+            const prop = String(parts.shift() || '').trim().toLowerCase();
+            const value = parts.join(':').trim();
+            if (!prop || !value) return;
+            if (!/^(color|background-color|text-align|font-weight|font-style|text-decoration)$/.test(prop)) return;
+            if (/javascript:|expression\s*\(|url\s*\(/i.test(value)) return;
+            safe.push(`${prop}: ${value}`);
+        });
+        return safe.join('; ');
+    };
+
     const tpl = document.createElement('template');
     tpl.innerHTML = raw;
 
@@ -21264,6 +21768,24 @@ function __sanitizeCanvasRichTextHtml(html) {
             }
             el.setAttribute('src', safeSrc);
             return;
+        }
+
+        if (el.hasAttribute('color')) {
+            const safeColor = sanitizeColorValue(el.getAttribute('color'));
+            if (safeColor) el.setAttribute('color', safeColor);
+            else el.removeAttribute('color');
+        }
+
+        if (el.hasAttribute('align')) {
+            const safeAlign = String(el.getAttribute('align') || '').trim().toLowerCase();
+            if (/^(left|center|right|justify)$/.test(safeAlign)) el.setAttribute('align', safeAlign);
+            else el.removeAttribute('align');
+        }
+
+        if (el.hasAttribute('style')) {
+            const safeStyle = sanitizeStyle(el.getAttribute('style'));
+            if (safeStyle) el.setAttribute('style', safeStyle);
+            else el.removeAttribute('style');
         }
 
         if (tag === 'button') {
@@ -21419,6 +21941,7 @@ function __tryConvertInlinePatternsInTextNode(editorEl, explicitNode = null) {
         // Markdown-like implicit syntax
         { type: 'bold', regex: /\*\*(.+?)\*\*/, tag: 'strong', contentIndex: 1 },
         { type: 'italic', regex: /\*(.+?)\*/, tag: 'em', contentIndex: 1 },
+        { type: 'italic', regex: /_(.+?)_/, tag: 'em', contentIndex: 1 },
         { type: 'strike', regex: /~~(.+?)~~/, tag: 'del', contentIndex: 1 },
         { type: 'highlight', regex: /==(.+?)==/, tag: 'mark', contentIndex: 1 },
         { type: 'code', regex: /`([^`]+)`/, tag: 'code', contentIndex: 1 },
@@ -21628,6 +22151,73 @@ function __renderMarkdownToCanvasRichHtml(markdownText, options = {}) {
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
+        const sanitizeHtmlToolStyle = (styleText) => {
+            const safe = [];
+            String(styleText || '').split(';').forEach((decl) => {
+                const parts = decl.split(':');
+                if (parts.length < 2) return;
+                const prop = String(parts.shift() || '').trim().toLowerCase();
+                const value = parts.join(':').trim();
+                if (!prop || !value) return;
+                if (!/^(color|background-color|text-align|font-weight|font-style|text-decoration)$/.test(prop)) return;
+                if (/javascript:|expression\s*\(|url\s*\(/i.test(value)) return;
+                safe.push(`${prop}: ${value}`);
+            });
+            return safe.join('; ');
+        };
+        const sanitizeHtmlToolColor = (value) => {
+            const raw = String(value || '').trim();
+            if (!raw) return '';
+            if (/javascript:|expression\s*\(|url\s*\(/i.test(raw)) return '';
+            if (/^#[0-9a-f]{3,8}$/i.test(raw)) return raw;
+            if (/^(?:rgb|rgba|hsl|hsla)\(\s*[-+.\d%]+(?:\s*,\s*[-+.\d%]+){2,3}\s*\)$/i.test(raw)) return raw;
+            if (/^[a-z]+$/i.test(raw)) return raw;
+            return '';
+        };
+        const renderSafeHtmlToolSource = (text) => {
+            const mixedInline = __renderCanvasMixedInlineMarkdownHtml(text);
+            if (mixedInline) return mixedInline;
+            const allowedTags = new Set(['font', 'span', 'u', 'mark', 'strong', 'em', 'b', 'i', 'del', 's', 'sub', 'sup', 'br', 'center', 'p']);
+            const allowedAttrs = new Set(['color', 'style', 'class', 'align']);
+            let out = '';
+            let lastIndex = 0;
+            const tagPattern = /<(\/?)([\w]+)([^>]*)>/g;
+            String(text || '').replace(tagPattern, (match, slash, tag, attrs, offset) => {
+                out += escapeHtml(String(text || '').slice(lastIndex, offset));
+                lastIndex = offset + match.length;
+                const tagLower = String(tag || '').toLowerCase();
+                if (!allowedTags.has(tagLower)) {
+                    out += escapeHtml(match);
+                    return match;
+                }
+                if (slash) {
+                    out += `<\/${tagLower}>`;
+                    return match;
+                }
+                const safeAttrs = [];
+                String(attrs || '').replace(/(\w+)\s*=\s*["']([^"']*)["']/g, (attrMatch, name, value) => {
+                    const attrName = String(name || '').toLowerCase();
+                    if (!allowedAttrs.has(attrName)) return '';
+                    let safeValue = String(value || '');
+                    if (attrName === 'style') {
+                        safeValue = sanitizeHtmlToolStyle(safeValue);
+                        if (!safeValue) return '';
+                    } else if (attrName === 'color') {
+                        safeValue = sanitizeHtmlToolColor(safeValue);
+                        if (!safeValue) return '';
+                    } else if (attrName === 'align') {
+                        safeValue = safeValue.trim().toLowerCase();
+                        if (!/^(left|center|right|justify)$/.test(safeValue)) return '';
+                    }
+                    safeAttrs.push(` ${attrName}="${safeValue.replace(/"/g, '&quot;')}"`);
+                    return '';
+                });
+                out += `<${tagLower}${safeAttrs.join('')}>`;
+                return match;
+            });
+            out += escapeHtml(String(text || '').slice(lastIndex));
+            return out;
+        };
         const source = String(val || '').replace(/\r\n?/g, '\n');
         const lines = source.split('\n');
         const tmp = document.createElement('div');
@@ -21675,7 +22265,7 @@ function __renderMarkdownToCanvasRichHtml(markdownText, options = {}) {
             if (headingMatch) {
                 closeList();
                 const level = Math.min(6, headingMatch[1].length);
-                html += `<h${level}>${escapeHtml(headingMatch[2])}</h${level}>`;
+                html += `<h${level}>${renderSafeHtmlToolSource(headingMatch[2])}</h${level}>`;
                 return;
             }
 
@@ -21688,7 +22278,7 @@ function __renderMarkdownToCanvasRichHtml(markdownText, options = {}) {
             const quoteMatch = line.match(/^\s*>\s?(.*)$/);
             if (quoteMatch) {
                 closeList();
-                html += `<blockquote>${escapeHtml(quoteMatch[1])}</blockquote>`;
+                html += `<blockquote>${renderSafeHtmlToolSource(quoteMatch[1])}</blockquote>`;
                 return;
             }
 
@@ -21699,7 +22289,7 @@ function __renderMarkdownToCanvasRichHtml(markdownText, options = {}) {
                     html += '<ul>';
                     listMode = 'ul';
                 }
-                html += `<li>${escapeHtml(ulMatch[1])}</li>`;
+                html += `<li>${renderSafeHtmlToolSource(ulMatch[1])}</li>`;
                 return;
             }
 
@@ -21710,12 +22300,15 @@ function __renderMarkdownToCanvasRichHtml(markdownText, options = {}) {
                     html += '<ol>';
                     listMode = 'ol';
                 }
-                html += `<li>${escapeHtml(olMatch[1])}</li>`;
+                html += `<li>${renderSafeHtmlToolSource(olMatch[1])}</li>`;
                 return;
             }
 
             closeList();
-            html += `<div>${escapeHtml(line)}</div>`;
+            const renderedLine = renderSafeHtmlToolSource(line);
+            html += /^<(?:center|p)\b/i.test(renderedLine.trim())
+                ? renderedLine
+                : `<div>${renderedLine}</div>`;
         });
 
         if (inCodeBlock) {
@@ -21790,6 +22383,9 @@ function __coerceDescriptionSourceToHtml(raw) {
     const val = String(raw || '');
     if (!val.trim()) return '';
     const normalized = __repairLegacyCanvasMarkdownSource(val);
+    const looksLikeHtml = /<\s*(?:a|p|div|span|br|strong|em|b|i|u|del|s|mark|code|blockquote|ul|ol|li|hr|h[1-6]|font|center|input)\b/i.test(normalized);
+    const looksLikeMarkdown = /(^|\n)\s*(#{1,6}\s+|>\s+|[-*]\s+(?:\[[ xX]\]\s+)?|\d+\.\s+|```)/m.test(normalized);
+    if (looksLikeHtml && !looksLikeMarkdown) return normalized;
     // Description editors should keep manual line breaks visible after blur/commit.
     // This avoids hidden newline payloads where source contains "\n" but rendered view collapses it.
     return __renderMarkdownSourceToCanvasHtml(normalized, { forceLinePreserve: true });
@@ -21988,23 +22584,7 @@ function __normalizeCanvasMarkdownSource(value) {
 }
 
 function __stripUnsupportedCanvasHtmlMarkdown(value) {
-    let output = String(value == null ? '' : value);
-    const unwrap = (pattern) => {
-        let changed = true;
-        while (changed) {
-            const next = output.replace(pattern, '$1');
-            changed = next !== output;
-            output = next;
-        }
-    };
-    // 兼容旧数据清洗：这些 HTML 包装会被还原为纯 markdown 文本，
-    // 不代表当前编辑器允许或依赖这些 HTML 标签作为正式语法。
-    unwrap(/<\s*font\b[^>]*>([\s\S]*?)<\s*\/\s*font\s*>/gi);
-    unwrap(/<\s*center\b[^>]*>([\s\S]*?)<\s*\/\s*center\s*>/gi);
-    unwrap(/<\s*p\b[^>]*\balign\s*=\s*['"]?[^"' >]+['"]?[^>]*>([\s\S]*?)<\s*\/\s*p\s*>/gi);
-    unwrap(/<\s*u\b[^>]*>([\s\S]*?)<\s*\/\s*u\s*>/gi);
-    unwrap(/<\s*span\b[^>]*\bstyle\s*=\s*['"][^'"]*['"][^>]*>([\s\S]*?)<\s*\/\s*span\s*>/gi);
-    return output;
+    return String(value == null ? '' : value);
 }
 
 function __resolveMarkdownSourceFromEditorHtml(cleanHtml, currentSource, options = {}) {
@@ -22067,25 +22647,6 @@ function __repairLegacyCanvasMarkdownSource(value) {
     // Recover legacy single-line markdown where line breaks were serialized as <br>.
     if (/<br\s*\/?>/i.test(normalized)) {
         normalized = normalized.replace(/<br\s*\/?>/gi, '\n');
-    }
-
-    // Recover payloads polluted by inline HTML tags (<em>/<strong>/...) and
-    // convert them back to canonical markdown source.
-    const hasResidualInlineHtml =
-        /<\s*(?:strong|em|b|i|del|s|mark|code|u|span|font|center)\b/i.test(normalized)
-        || /<\s*(?:p|div|blockquote|ul|ol|li|hr|h[1-6]|details|summary)\b/i.test(normalized);
-    if (hasResidualInlineHtml) {
-        try {
-            const converted = __htmlToMarkdown(normalized, {
-                trimResult: false,
-                compactNewlines: false,
-                paragraphBreaks: false,
-                hardLineBreaks: true
-            });
-            if (String(converted || '').trim()) {
-                normalized = __normalizeCanvasMarkdownSource(converted);
-            }
-        } catch (_) { }
     }
 
     // Recover payloads that were accidentally wrapped as HTML headings/paragraphs
@@ -22640,6 +23201,7 @@ function __tryConvertBlockPatternsAtCaret(editorEl, explicitNode = null) {
         return safe
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/_(.+?)_/g, '<em>$1</em>')
             .replace(/~~(.+?)~~/g, '<del>$1</del>')
             .replace(/==(.+?)==/g, '<mark>$1</mark>')
             .replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -22788,7 +23350,7 @@ function __fullScanRenderDescriptionEditor(editorEl) {
     try { __applyHeadingCollapse(editorEl); } catch (_) { }
 }
 
-function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isEditing, enterEdit, save, nodeId, fontSizeConfig }) {
+function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isEditing, enterEdit, save, nodeId, fontSizeConfig, popoverAnchor }) {
     if (!editor || !toolbar || !formatToggleBtn) return null;
 
     const getLang = () => (typeof currentLang !== 'undefined' ? currentLang : 'zh');
@@ -23180,11 +23742,30 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     let expandedElement = null;
     let expandedMarkdown = null;
     let expandedType = null;
+    let preserveExpandedSourceUntil = 0;
+    const markExpandedSourceToolbarInteraction = (durationMs = 1200) => {
+        preserveExpandedSourceUntil = Math.max(preserveExpandedSourceUntil, Date.now() + durationMs);
+    };
+    const isFontColorPopoverActive = () => {
+        if (Date.now() < preserveExpandedSourceUntil) return true;
+        const ownerId = String(nodeId || editor.id || 'description-editor');
+        let pop = null;
+        try {
+            pop = (typeof CSS !== 'undefined' && CSS.escape)
+                ? document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(ownerId)}"]`)
+                : toolbar.querySelector('.md-fontcolor-popover');
+        } catch (_) {
+            pop = toolbar.querySelector('.md-fontcolor-popover');
+        }
+        if (!pop) return false;
+        const activeEl = document.activeElement;
+        return pop.classList.contains('open') || (activeEl && pop.contains(activeEl));
+    };
     const formatMap = {
         'STRONG': { prefix: '**', suffix: '**' },
         'B': { prefix: '**', suffix: '**' },
-        'EM': { prefix: '*', suffix: '*' },
-        'I': { prefix: '*', suffix: '*' },
+        'EM': { prefix: '_', suffix: '_' },
+        'I': { prefix: '_', suffix: '_' },
         'U': { prefix: '', suffix: '' },
         'DEL': { prefix: '~~', suffix: '~~' },
         'S': { prefix: '~~', suffix: '~~' },
@@ -23221,7 +23802,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
 
         // Only auto-expand inline-like formats here; block elements are handled by click rules.
-        const formatted = node.closest('strong, b, em, i, u, del, s, mark, code, a, h1, h2, h3, h4, h5, h6, hr');
+        const formatted = node.closest('strong, b, em, i, u, del, s, mark, code, a, font, span[style], center, p[align], h1, h2, h3, h4, h5, h6, hr');
         if (formatted && editor.contains(formatted)) {
             // Expand it!
             expandToMarkdown(formatted);
@@ -23232,9 +23813,11 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         let rafId = 0;
         return () => {
             if (!expandedElement || !expandedElement.parentNode) return;
+            if (isFontColorPopoverActive()) return;
             if (rafId) cancelAnimationFrame(rafId);
             rafId = requestAnimationFrame(() => {
                 rafId = 0;
+                if (isFontColorPopoverActive()) return;
                 if (expandedElement && expandedElement.parentNode && !isCaretInsideExpandedSource()) {
                     reRenderExpanded();
                 }
@@ -23288,6 +23871,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             return safe
                 .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/_(.+?)_/g, '<em>$1</em>')
                 .replace(/~~(.+?)~~/g, '<del>$1</del>')
                 .replace(/==(.+?)==/g, '<mark>$1</mark>')
                 .replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -23306,6 +23890,13 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         if (!rawText.replace(/\u200B/g, '').trim()) {
             try { el.remove(); } catch (_) { }
             return;
+        }
+
+        if (savedType === 'html-tool' || __isCanvasHtmlToolSource(text)) {
+            if (__replaceTextNodeWithCanvasHtmlToolSource(el, text)) {
+                saveEditorContent();
+                return;
+            }
         }
 
         // Link: [text](URL) 还原回 <a>
@@ -23363,6 +23954,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         // 内联格式模式
         const inlinePatterns = [
             { regex: /^\*\*(.+?)\*\*$/, tag: 'strong', contentIndex: 1 },
+            { regex: /^_(.+?)_$/, tag: 'em', contentIndex: 1 },
             { regex: /^\*(.+?)\*$/, tag: 'em', contentIndex: 1 },
             { regex: /^~~(.+?)~~$/, tag: 'del', contentIndex: 1 },
             { regex: /^==(.+?)==$/, tag: 'mark', contentIndex: 1 },
@@ -23387,6 +23979,13 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         // 辅助函数：安全地设置元素内容（解析 Markdown 后用 innerHTML）
         const setElementContent = (element, content) => {
+            if (__looksLikeHtmlTagContent(content)) {
+                const rendered = __renderCanvasMixedInlineMarkdownHtml(content);
+                if (rendered) {
+                    element.innerHTML = rendered;
+                    return;
+                }
+            }
             const parsed = parseInlineMarkdown(content);
             if (/<[^>]+>/.test(parsed)) {
                 element.innerHTML = parsed;
@@ -23486,6 +24085,9 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             );
         };
         const inlineContent = getInlineSource(htmlContent, content);
+
+        const htmlToolSource = __expandCanvasHtmlToolElementToSource(el);
+        if (htmlToolSource) return htmlToolSource;
 
         // hr: --- 水平分割线
         if (tagName === 'HR') {
@@ -23707,7 +24309,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         // If clicked inside editor but not on text directly
         if (target !== editor && editor.contains(target)) {
             // Find closest formatted element (including block-level elements)
-            const formatted = target.closest('strong, b, em, i, u, del, s, mark, code, a, blockquote, h1, h2, h3, h4, h5, h6, hr, li, .md-task-item');
+            const formatted = target.closest('strong, b, em, i, u, del, s, mark, code, a, font, span[style], center, p[align], blockquote, h1, h2, h3, h4, h5, h6, hr, li, .md-task-item');
 
             if (formatted && editor.contains(formatted)) {
                 const isBlockRestricted = formatted.tagName === 'LI' || formatted.tagName === 'BLOCKQUOTE';
@@ -23750,7 +24352,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     });
 
     editor.addEventListener('blur', () => {
-        if (expandedElement) reRenderExpanded();
+        if (expandedElement && !isFontColorPopoverActive()) reRenderExpanded();
     });
 
     // 鼠标抬起时也检查是否需要重渲染
@@ -23774,11 +24376,14 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         const italicTitle = lang === 'en' ? 'Italic' : '斜体';
         const underlineTitle = lang === 'en' ? 'Underline' : '下划线';
         const highlightTitle = lang === 'en' ? 'Highlight' : '高亮';
+        const fontColorTitle = lang === 'en' ? 'Font Color' : '字体颜色';
         const strikeTitle = lang === 'en' ? 'Strikethrough' : '删除线';
         const codeTitle = lang === 'en' ? 'Code' : '代码';
         const headingTitle = lang === 'en' ? 'Heading' : '标题';
+        const alignTitle = lang === 'en' ? 'Alignment' : '对齐';
         const listTitle = lang === 'en' ? 'List' : '列表';
         const quoteTitle = lang === 'en' ? 'Quote' : '引用';
+        const currentFontColor = editor.__htmlToolFontColor || '#2DC26B';
 
         pop.innerHTML = `
             <div class="md-format-row">
@@ -23787,10 +24392,13 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                 <button class="md-format-btn md-format-btn-sm" data-action="md-font-increase" title="${sizeIncreaseTitle}"><i class="fas fa-plus"></i></button>
                 <span class="md-format-sep"></span>
                 <button class="md-format-btn md-format-heading-btn" data-action="md-heading-toggle" title="${headingTitle}"><i class="fas fa-heading"></i></button>
+                <button class="md-format-btn md-format-align-btn" data-action="md-align-toggle" title="${alignTitle}"><i class="fas fa-align-left"></i></button>
                 <span class="md-format-sep"></span>
                 <button class="md-format-btn" data-action="md-insert-bold" title="${boldTitle}"><b>B</b></button>
                 <button class="md-format-btn" data-action="md-insert-italic" title="${italicTitle}"><i>I</i></button>
+                <button class="md-format-btn" data-action="md-insert-underline" title="${underlineTitle}"><u>U</u></button>
                 <button class="md-format-btn" data-action="md-insert-highlight" title="${highlightTitle}"><span style="background:#fcd34d;color:#000;padding:0 3px;border-radius:2px;">H</span></button>
+                <button class="md-format-btn md-format-fontcolor-btn" data-action="md-fontcolor-toggle" title="${fontColorTitle}"><span style="border-bottom:2px solid ${currentFontColor};padding:0 2px;">A</span></button>
                 <button class="md-format-btn" data-action="md-insert-strike" title="${strikeTitle}"><s>S</s></button>
                 <button class="md-format-btn" data-action="md-insert-code" title="${codeTitle}"><code>&lt;/&gt;</code></button>
                 <span class="md-format-sep"></span>
@@ -23802,10 +24410,17 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         toolbar.appendChild(pop);
         preventCanvasEventsPropagation(pop);
+        try {
+            pop.__fontColorLifecycleObserver = new MutationObserver(() => {
+                if (!pop.classList.contains('open')) closeFontColorPopover();
+            });
+            pop.__fontColorLifecycleObserver.observe(pop, { attributes: true, attributeFilter: ['class'] });
+        } catch (_) { }
         return pop;
     };
 
     const closeFormatPopover = () => {
+        closeFontColorPopover();
         const pop = toolbar.querySelector('.md-format-popover');
         if (pop) {
             pop.classList.remove('open');
@@ -23820,14 +24435,296 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         const btnRect = btn.getBoundingClientRect();
         const formatRect = formatPop.getBoundingClientRect();
         const btnCenterX = btnRect.left + btnRect.width / 2 - formatRect.left;
+        pop.style.top = '-4px';
+        pop.style.bottom = 'auto';
         pop.style.left = btnCenterX + 'px';
         pop.style.transform = 'translateX(-50%) translateY(-100%)';
     };
 
-    // Obsidian official text node does not expose font-color/alignment popovers.
-    // Keep compatibility call sites as no-ops.
-    const closeFontColorPopover = () => { };
-    const closeAlignPopover = () => { };
+    const HTML_TOOL_COLORS = ['#888888', '#66bbff', '#fb464c', '#e9973f', '#e0de71', '#44cf6e', '#53dfdd', '#a882ff'];
+
+    const getToolbarRange = () => {
+        const sel = window.getSelection();
+        let range = null;
+        if (savedSelection && savedSelection.range) {
+            range = savedSelection.range;
+            if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+        } else if (sel && sel.rangeCount) {
+            range = sel.getRangeAt(0);
+        }
+        if (!range || !editor.contains(range.commonAncestorContainer)) {
+            editor.focus();
+            return null;
+        }
+        return { sel, range };
+    };
+
+    const insertHtmlToolElement = (wrapper) => {
+        const resolved = getToolbarRange();
+        if (!resolved || !wrapper) return false;
+        const { sel, range } = resolved;
+        const lang = getLang();
+        const selected = range.toString();
+        wrapper.textContent = selected || (lang === 'en' ? 'text' : '文本');
+        if (
+            expandedElement &&
+            expandedElement.parentNode &&
+            range.startContainer === expandedElement &&
+            range.endContainer === expandedElement
+        ) {
+            const sourceText = String(wrapper.outerHTML || '');
+            if (!sourceText) return false;
+            const original = String(expandedElement.textContent || '');
+            const start = Math.max(0, Math.min(range.startOffset, original.length));
+            const end = Math.max(start, Math.min(range.endOffset, original.length));
+            expandedElement.textContent = original.slice(0, start) + sourceText + original.slice(end);
+            const nextOffset = start + sourceText.length;
+            range.setStart(expandedElement, nextOffset);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            savedSelection = {
+                range: range.cloneRange(),
+                text: ''
+            };
+            saveEditorContent();
+            editor.focus();
+            return true;
+        }
+        savedSelection = null;
+        range.deleteContents();
+        range.insertNode(wrapper);
+        const spacer = document.createTextNode('\u200B');
+        wrapper.parentNode.insertBefore(spacer, wrapper.nextSibling);
+        range.setStart(spacer, 1);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        saveEditorContent();
+        editor.focus();
+        return true;
+    };
+
+    const closeFontColorPopover = () => {
+        const ownerId = String(nodeId || editor.id || 'description-editor');
+        let pop = toolbar.querySelector('.md-fontcolor-popover');
+        if (!pop && typeof CSS !== 'undefined' && CSS.escape) {
+            pop = document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(ownerId)}"]`);
+        }
+        if (pop) {
+            pop.classList.remove('open');
+            if (pop.__fontColorDocHandler) {
+                document.removeEventListener('mousedown', pop.__fontColorDocHandler, true);
+                pop.__fontColorDocHandler = null;
+            }
+            updateCanvasPopoverState(false);
+        }
+        const btn = toolbar.querySelector('[data-action="md-fontcolor-toggle"]');
+        if (btn) btn.classList.remove('active');
+    };
+
+    const createFontColorPopover = () => {
+        const ownerId = String(nodeId || editor.id || 'description-editor');
+        let pop = toolbar.querySelector('.md-fontcolor-popover');
+        if (!pop && typeof CSS !== 'undefined' && CSS.escape) {
+            pop = document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(ownerId)}"]`);
+        }
+        if (pop) return pop;
+        pop = document.createElement('div');
+        pop.className = 'md-fontcolor-popover md-color-popover';
+        pop.dataset.ownerToolbar = ownerId;
+        preventCanvasEventsPropagation(pop);
+        const rgbPickerTitle = getLang() === 'en' ? 'RGB Color Picker' : 'RGB颜色选择器';
+        const recentTitle = getLang() === 'en' ? 'Previous color' : '上一次颜色';
+        const gradientId = `rainbow-gradient-font-${ownerId.replace(/[^a-z0-9_-]/gi, '-')}`;
+        pop.innerHTML = HTML_TOOL_COLORS.map(color =>
+            `<span class="md-color-chip" data-action="md-fontcolor-apply" data-color="${color}" style="background:${color}" title="${color}"></span>`
+        ).join('') + `
+            <span class="md-color-divider" aria-hidden="true"></span>
+            <span class="md-color-chip md-fontcolor-recent-chip" data-action="md-fontcolor-recent" title="${recentTitle}"></span>
+            <button class="md-color-chip md-color-picker-btn" data-action="md-fontcolor-picker-toggle" title="${rgbPickerTitle}">
+                <svg viewBox="0 0 24 24" width="14" height="14">
+                    <circle cx="12" cy="12" r="10" fill="url(#${gradientId})" />
+                    <defs>
+                        <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#ff0000" />
+                            <stop offset="16.67%" style="stop-color:#ff9900" />
+                            <stop offset="33.33%" style="stop-color:#ffff00" />
+                            <stop offset="50%" style="stop-color:#00ff00" />
+                            <stop offset="66.67%" style="stop-color:#0099ff" />
+                            <stop offset="83.33%" style="stop-color:#9900ff" />
+                            <stop offset="100%" style="stop-color:#ff0099" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+            </button>
+        `;
+        const rgbPicker = document.createElement('div');
+        rgbPicker.className = 'md-rgb-picker';
+        rgbPicker.innerHTML = `<input class="md-color-input" type="color" value="${editor.__htmlToolFontColor || '#2DC26B'}" title="${rgbPickerTitle}" />`;
+        pop.appendChild(rgbPicker);
+        const colorInput = rgbPicker.querySelector('.md-color-input');
+        const recentChip = pop.querySelector('.md-fontcolor-recent-chip');
+        const syncRecentChip = () => {
+            if (!recentChip) return;
+            const safe = editor.__htmlToolPrevFontColor || '#2DC26B';
+            recentChip.dataset.color = safe;
+            recentChip.style.backgroundColor = safe;
+        };
+        syncRecentChip();
+        pop.addEventListener('mousedown', (e) => {
+            markExpandedSourceToolbarInteraction();
+            if (e.target.closest('.md-color-chip, [data-action], .md-color-input')) e.preventDefault();
+        }, true);
+        pop.addEventListener('click', (e) => {
+            const pickerBtn = e.target.closest('[data-action="md-fontcolor-picker-toggle"]');
+            if (pickerBtn && pop.contains(pickerBtn)) {
+                e.preventDefault();
+                e.stopPropagation();
+                saveSelection();
+                rgbPicker.classList.toggle('open');
+                if (rgbPicker.classList.contains('open') && colorInput) {
+                    colorInput.value = editor.__htmlToolFontColor || '#2DC26B';
+                    setTimeout(() => colorInput.click(), 30);
+                }
+                return;
+            }
+            const recentBtn = e.target.closest('[data-action="md-fontcolor-recent"]');
+            if (recentBtn && pop.contains(recentBtn)) {
+                e.preventDefault();
+                e.stopPropagation();
+                insertFontColor(recentBtn.getAttribute('data-color') || editor.__htmlToolPrevFontColor || '#2DC26B');
+                closeFontColorPopover();
+                return;
+            }
+            const chip = e.target.closest('[data-action="md-fontcolor-apply"]');
+            if (!chip || !pop.contains(chip)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            insertFontColor(chip.getAttribute('data-color'));
+            closeFontColorPopover();
+        });
+        if (colorInput) {
+            colorInput.addEventListener('change', (e) => {
+                saveSelection();
+                insertFontColor(e.target.value);
+                rgbPicker.classList.remove('open');
+                closeFontColorPopover();
+            });
+        }
+        document.body.appendChild(pop);
+        return pop;
+    };
+
+    const toggleFontColorPopover = (btn) => {
+        saveSelection();
+        const pop = createFontColorPopover();
+        const isOpen = pop.classList.contains('open');
+        closeAlignPopover();
+        closeHeadingPopover();
+        closeListPopover();
+        if (isOpen) {
+            pop.classList.remove('open');
+            btn.classList.remove('active');
+            updateCanvasPopoverState(false);
+        } else {
+            __positionCanvasFloatingPopoverAboveButton(pop, btn);
+            pop.classList.add('open');
+            btn.classList.add('active');
+            updateCanvasPopoverState(true);
+            if (pop.__fontColorDocHandler) {
+                document.removeEventListener('mousedown', pop.__fontColorDocHandler, true);
+            }
+            pop.__fontColorDocHandler = (event) => {
+                const target = event && event.target;
+                if (!target) return;
+                if (pop.contains(target) || btn.contains(target) || toolbar.contains(target)) return;
+                closeFontColorPopover();
+            };
+            document.addEventListener('mousedown', pop.__fontColorDocHandler, true);
+        }
+    };
+
+    const insertFontColor = (color) => {
+        const safeColor = String(color || '').trim();
+        if (!safeColor) return;
+        const wrapper = document.createElement('font');
+        wrapper.setAttribute('color', safeColor);
+        if (insertHtmlToolElement(wrapper)) {
+            const previous = editor.__htmlToolFontColor || '#2DC26B';
+            editor.__htmlToolFontColor = safeColor;
+            if (previous && previous !== safeColor) editor.__htmlToolPrevFontColor = previous;
+            const fontColorBtn = toolbar.querySelector('[data-action="md-fontcolor-toggle"] span');
+            if (fontColorBtn) fontColorBtn.style.borderBottomColor = safeColor;
+            const ownerId = String(nodeId || editor.id || 'description-editor');
+            const pop = (typeof CSS !== 'undefined' && CSS.escape)
+                ? document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(ownerId)}"]`)
+                : null;
+            const recentChip = pop ? pop.querySelector('.md-fontcolor-recent-chip') : null;
+            if (recentChip) {
+                const recent = editor.__htmlToolPrevFontColor || '#2DC26B';
+                recentChip.dataset.color = recent;
+                recentChip.style.backgroundColor = recent;
+            }
+        }
+    };
+
+    const closeAlignPopover = () => {
+        const pop = toolbar.querySelector('.md-align-popover');
+        if (pop) {
+            pop.classList.remove('open');
+            updateCanvasPopoverState(false);
+        }
+        const btn = toolbar.querySelector('[data-action="md-align-toggle"]');
+        if (btn) btn.classList.remove('active');
+    };
+
+    const createAlignPopover = () => {
+        let pop = toolbar.querySelector('.md-align-popover');
+        if (pop) return pop;
+        const lang = getLang();
+        pop = document.createElement('div');
+        pop.className = 'md-align-popover';
+        preventCanvasEventsPropagation(pop);
+        pop.innerHTML = `
+            <button class="md-align-option" data-action="md-align-apply" data-align="left" title="${lang === 'en' ? 'Align Left' : '左对齐'}"><i class="fas fa-align-left"></i></button>
+            <button class="md-align-option" data-action="md-align-apply" data-align="center" title="${lang === 'en' ? 'Center' : '居中'}"><i class="fas fa-align-center"></i></button>
+            <button class="md-align-option" data-action="md-align-apply" data-align="right" title="${lang === 'en' ? 'Align Right' : '右对齐'}"><i class="fas fa-align-right"></i></button>
+            <button class="md-align-option" data-action="md-align-apply" data-align="justify" title="${lang === 'en' ? 'Justify' : '两端对齐'}"><i class="fas fa-align-justify"></i></button>
+        `;
+        const formatPop = toolbar.querySelector('.md-format-popover');
+        if (formatPop) formatPop.appendChild(pop);
+        return pop;
+    };
+
+    const toggleAlignPopover = (btn) => {
+        saveSelection();
+        const pop = createAlignPopover();
+        const isOpen = pop.classList.contains('open');
+        closeFontColorPopover();
+        closeHeadingPopover();
+        closeListPopover();
+        if (isOpen) {
+            pop.classList.remove('open');
+            btn.classList.remove('active');
+            updateCanvasPopoverState(false);
+        } else {
+            positionPopoverAboveBtn(pop, btn);
+            pop.classList.add('open');
+            btn.classList.add('active');
+            updateCanvasPopoverState(true);
+        }
+    };
+
+    const insertAlign = (alignType) => {
+        const safeAlign = /^(left|center|right|justify)$/.test(String(alignType || '')) ? String(alignType) : 'left';
+        const wrapper = safeAlign === 'center' ? document.createElement('center') : document.createElement('p');
+        if (safeAlign !== 'center') wrapper.setAttribute('align', safeAlign);
+        insertHtmlToolElement(wrapper);
+    };
 
     const createHeadingPopover = () => {
         let pop = toolbar.querySelector('.md-heading-popover');
@@ -23967,6 +24864,8 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                     toolbar.style.position = 'relative';
                 }
 
+                const anchorEl = popoverAnchor || editor;
+                const anchorRect = anchorEl.getBoundingClientRect();
                 const editorRect = editor.getBoundingClientRect();
                 const toolbarRect = toolbar.getBoundingClientRect();
 
@@ -23977,24 +24876,41 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                     ? __isNodeMaximized(ownerNode)
                     : !!(ownerNode && ownerNode.classList && ownerNode.classList.contains('canvas-node-maximized'));
 
-                // 目标位置：Editor 右上角 (实现右对齐)
-                // 绝对坐标 (Viewport based)
-                const targetX = editorRect.right;
-                const targetY = isMaximized ? editorRect.bottom : editorRect.top;
-
-                // 计算相对于 toolbar 的坐标 (pop 是 toolbar 的子元素，绝对定位)
-                const relX = targetX - toolbarRect.left;
-                const relY = targetY - toolbarRect.top;
-
-                pop.style.left = relX + 'px';
-                pop.style.top = relY + 'px';
-
-                if (isMaximized) {
-                    // 全屏：向下弹出，避免被上方区域挤压/遮挡
-                    pop.style.transform = 'translate(-100%, 6px)';
+                if (popoverAnchor) {
+                    const targetX = anchorRect.left + anchorRect.width / 2;
+                    const targetY = anchorRect.top;
+                    const scaleX = toolbar.offsetWidth ? (toolbarRect.width / toolbar.offsetWidth) : 1;
+                    const scaleY = toolbar.offsetHeight ? (toolbarRect.height / toolbar.offsetHeight) : 1;
+                    const relX = (targetX - toolbarRect.left) / (scaleX || 1);
+                    const relY = (targetY - toolbarRect.top) / (scaleY || 1);
+                    pop.style.position = 'absolute';
+                    pop.style.left = relX + 'px';
+                    pop.style.top = relY + 'px';
+                    pop.style.bottom = 'auto';
+                    pop.style.zIndex = '2147483647';
+                    pop.style.pointerEvents = 'auto';
+                    pop.style.transform = 'translate(-50%, calc(-100% - 2px))';
                 } else {
-                    // 普通：向上弹出
-                    pop.style.transform = 'translate(-100%, calc(-100% - 6px))';
+                    // 目标位置：Editor 右上角 (实现右对齐)
+                    // 绝对坐标 (Viewport based)
+                    const targetX = editorRect.right;
+                    const targetY = isMaximized ? editorRect.bottom : editorRect.top;
+
+                    // 计算相对于 toolbar 的坐标 (pop 是 toolbar 的子元素，绝对定位)
+                    const relX = targetX - toolbarRect.left;
+                    const relY = targetY - toolbarRect.top;
+
+                    pop.style.left = relX + 'px';
+                    pop.style.top = relY + 'px';
+                    pop.style.bottom = 'auto';
+
+                    if (isMaximized) {
+                        // 全屏：向下弹出，避免被上方区域挤压/遮挡
+                        pop.style.transform = 'translate(-100%, 6px)';
+                    } else {
+                        // 普通：向上弹出
+                        pop.style.transform = 'translate(-100%, calc(-100% - 6px))';
+                    }
                 }
             } catch (e) {
                 console.warn('Format popover positioning failed:', e);
@@ -24157,11 +25073,12 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
     toolbar.addEventListener('mousedown', (e) => {
         // Prevent editor blur when clicking toolbar buttons (keep editing state)
-        const btn = e.target.closest('button');
-        if (btn && toolbar.contains(btn)) {
+        const actionEl = e.target.closest('button, [data-action], .md-color-chip');
+        if (actionEl && toolbar.contains(actionEl)) {
+            markExpandedSourceToolbarInteraction();
             e.preventDefault();
         }
-    });
+    }, true);
 
     toolbar.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-action]');
@@ -24217,10 +25134,23 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         if (action === 'md-insert-bold') return insertFormat('bold');
         if (action === 'md-insert-italic') return insertFormat('italic');
+        if (action === 'md-insert-underline') return insertFormat('underline');
         if (action === 'md-insert-highlight') return insertFormat('highlight');
         if (action === 'md-insert-strike') return insertFormat('strike');
         if (action === 'md-insert-code') return insertFormat('code');
         if (action === 'md-insert-quote') return insertFormat('quote');
+        if (action === 'md-fontcolor-toggle') return toggleFontColorPopover(btn);
+        if (action === 'md-fontcolor-apply') {
+            insertFontColor(btn.getAttribute('data-color'));
+            closeFontColorPopover();
+            return;
+        }
+        if (action === 'md-align-toggle') return toggleAlignPopover(btn);
+        if (action === 'md-align-apply') {
+            insertAlign(btn.getAttribute('data-align'));
+            closeAlignPopover();
+            return;
+        }
 
         if (action === 'md-format-close') {
             closeFormatPopover();
@@ -25030,6 +25960,14 @@ function renderTempNode(section, options = {}) {
             descriptionControls.style.opacity = '0';
             descriptionControls.style.pointerEvents = 'none';
         }
+        try {
+            __setCanvasDescriptionToolbarTopLayer({
+                cardEl: nodeElement,
+                containerEl: descriptionContainer,
+                controlsEl: descriptionControls,
+                active: false
+            });
+        } catch (_) { }
 
         try {
             if (descEditorApi) {
@@ -25058,6 +25996,14 @@ function renderTempNode(section, options = {}) {
             descriptionControls.style.opacity = '1';
             descriptionControls.style.pointerEvents = 'auto';
         }
+        try {
+            __setCanvasDescriptionToolbarTopLayer({
+                cardEl: nodeElement,
+                containerEl: descriptionContainer,
+                controlsEl: descriptionControls,
+                active: true
+            });
+        } catch (_) { }
 
     };
 
@@ -25208,8 +26154,8 @@ function renderTempNode(section, options = {}) {
 
     descriptionControls.addEventListener('mousedown', (e) => {
         if (!isEditingDesc) return;
-        const btn = e.target.closest('button');
-        if (btn) e.preventDefault();
+        const actionEl = e.target.closest('button, [data-action], .md-color-chip');
+        if (actionEl && descriptionControls.contains(actionEl)) e.preventDefault();
     });
 
     applyPlaceholder();
@@ -25226,6 +26172,7 @@ function renderTempNode(section, options = {}) {
             syncDescDraft({ normalizeEditorHtml: false });
         },
         nodeId: section.id,
+        popoverAnchor: descriptionContainer,
         fontSizeConfig: {
             min: 10,
             max: 28,
@@ -28049,6 +28996,14 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             tipControls.style.opacity = '0';
             tipControls.style.pointerEvents = 'none';
         }
+        try {
+            __setCanvasDescriptionToolbarTopLayer({
+                cardEl: sectionEl,
+                containerEl: tipContainer,
+                controlsEl: tipControls,
+                active: false
+            });
+        } catch (_) { }
 
         try {
             if (typeof tipEditorApi !== 'undefined' && tipEditorApi) {
@@ -28078,6 +29033,14 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             tipControls.style.opacity = '1';
             tipControls.style.pointerEvents = 'auto';
         }
+        try {
+            __setCanvasDescriptionToolbarTopLayer({
+                cardEl: sectionEl,
+                containerEl: tipContainer,
+                controlsEl: tipControls,
+                active: true
+            });
+        } catch (_) { }
     };
 
     tipText.addEventListener('dblclick', (e) => {
@@ -28292,7 +29255,8 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     if (tipControls) {
         tipControls.addEventListener('mousedown', (e) => {
             if (!isEditingTip) return;
-            if (e.target.closest('button')) e.preventDefault();
+            const actionEl = e.target.closest('button, [data-action], .md-color-chip');
+            if (actionEl && tipControls.contains(actionEl)) e.preventDefault();
         });
     }
 
@@ -28307,6 +29271,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             syncTipDraft({ normalizeEditorHtml: false });
         },
         nodeId: sectionEl.id || sectionEl.dataset.permanentSectionCopyId || 'permanentSection',
+        popoverAnchor: tipContainer,
         fontSizeConfig: {
             min: 10,
             max: 28,
