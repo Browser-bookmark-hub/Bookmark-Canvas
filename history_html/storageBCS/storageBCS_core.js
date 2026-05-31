@@ -4046,9 +4046,9 @@ function __sanitizeFilename(name) {
 function __getStableBuiltinBlankSectionFilename(nodeId) {
     const id = String(nodeId || '').trim();
     if (!id) return '';
-    if (id === 'md-node-demo-bookmark-guide') return 'Bookmark Canvas (dev) - User Guide';
-    if (id === 'md-node-demo-shortcut-guide') return 'Keyboard Shortcuts';
-    if (id === 'md-node-demo-batch-feature') return 'Open Mode Features';
+    if (id === 'md-node-demo-bookmark-guide') return 'Canvas Basics';
+    if (id === 'md-node-demo-shortcut-guide') return 'Quick Actions';
+    if (id === 'md-node-demo-batch-feature') return 'Features';
     return '';
 }
 
@@ -4885,6 +4885,7 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
         if (node.type === 'text') {
             const convertedColor = convertObsidianColor(node.color);
             const isHex = convertedColor && convertedColor.startsWith('#');
+            const isBlankCard = node.id && String(node.id).startsWith('md-node-');
             tempState.mdNodes.push({
                 id: node.id,
                 x: node.x,
@@ -4894,9 +4895,9 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                 color: isHex ? null : node.color,
                 colorHex: isHex ? convertedColor : null,
                 text: String(node.text || ''),
-                subtype: CANVAS_NATIVE_TEXT_SUBTYPE,
-                source: CANVAS_NATIVE_TEXT_SOURCE,
-                canvasTextKind: 'native'
+                subtype: isBlankCard ? CANVAS_PLUGIN_MARKDOWN_SUBTYPE : CANVAS_NATIVE_TEXT_SUBTYPE,
+                source: isBlankCard ? CANVAS_PLUGIN_MARKDOWN_SOURCE : CANVAS_NATIVE_TEXT_SOURCE,
+                canvasTextKind: isBlankCard ? 'blank' : 'native'
             });
         }
     });
@@ -5823,10 +5824,11 @@ function __buildPersistedCanvasState(state, options = {}) {
             if (!cloned || typeof cloned !== 'object') return null;
             if (!preserveRaw) {
                 const isGroupNode = cloned.subtype === 'card-group';
-                const refreshCachesFromMarkdown = !isGroupNode && (
-                    !__isCanvasNativeTextNode(cloned)
-                    || !(typeof cloned.html === 'string' && cloned.html.trim())
-                );
+                const markedApi = (typeof marked !== 'undefined' && marked && typeof marked.parse === 'function')
+                    ? marked
+                    : (typeof window !== 'undefined' && window && window.marked && typeof window.marked.parse === 'function' ? window.marked : null);
+                const isMarkedLoaded = !!markedApi;
+                const refreshCachesFromMarkdown = !isGroupNode && !(typeof cloned.html === 'string' && cloned.html.trim());
                 if (!isGroupNode) {
                     __ensureMdNodeMarkdownProtocol(cloned, {
                         refreshCachesFromMarkdown
@@ -6765,8 +6767,11 @@ function __buildCanvasTempStateProtocolView(stateInput, options = {}) {
             if (cloned.subtype === 'card-group') {
                 return cloned;
             }
-            const refreshCachesFromMarkdown = !__isCanvasNativeTextNode(cloned)
-                || !cloned.html;
+            const markedApi = (typeof marked !== 'undefined' && marked && typeof marked.parse === 'function')
+                ? marked
+                : (typeof window !== 'undefined' && window && window.marked && typeof window.marked.parse === 'function' ? window.marked : null);
+            const isMarkedLoaded = !!markedApi;
+            const refreshCachesFromMarkdown = !(typeof cloned.html === 'string' && cloned.html.trim());
             __ensureMdNodeMarkdownProtocol(cloned, {
                 refreshCachesFromMarkdown
             });
@@ -7746,7 +7751,7 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
                     __storage: 'bcs',
                     timestamp: Number(state.timestamp) || Date.now()
                 }
-            }, { immediate: true });
+            }, { immediate });
         } catch (_) { }
         try {
             saveSharedState(BCS_SIGNAL_KEY, {
@@ -7890,6 +7895,7 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
         if (node.type === 'text') {
             const convertedColor = convertObsidianColor(node.color);
             const isHex = convertedColor && convertedColor.startsWith('#');
+            const isBlankCard = node.id && String(node.id).startsWith('md-node-');
 
             tempState.mdNodes.push({
                 id: node.id,
@@ -7900,9 +7906,9 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
                 color: isHex ? null : node.color,
                 colorHex: isHex ? convertedColor : null,
                 text: String(node.text || ''),
-                subtype: CANVAS_NATIVE_TEXT_SUBTYPE,
-                source: CANVAS_NATIVE_TEXT_SOURCE,
-                canvasTextKind: 'native'
+                subtype: isBlankCard ? CANVAS_PLUGIN_MARKDOWN_SUBTYPE : CANVAS_NATIVE_TEXT_SUBTYPE,
+                source: isBlankCard ? CANVAS_PLUGIN_MARKDOWN_SOURCE : CANVAS_NATIVE_TEXT_SOURCE,
+                canvasTextKind: isBlankCard ? 'blank' : 'native'
             });
         }
     });
