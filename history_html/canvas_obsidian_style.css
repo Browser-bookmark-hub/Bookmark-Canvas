@@ -27,6 +27,12 @@
     box-shadow: none;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
+    outline: none;
+}
+
+.canvas-workspace:focus,
+.canvas-workspace:focus-visible {
+    outline: none;
 }
 
 /* Grid Layer：用 transform 来移动（合成层），避免滚动时每帧更新 background-position 触发 repaint */
