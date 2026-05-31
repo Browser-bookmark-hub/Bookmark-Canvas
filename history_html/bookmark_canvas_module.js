@@ -1755,6 +1755,21 @@ const ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX = 6;
 const DISCRETE_WHEEL_EVENT_DELTA_MIN = 24;
 const CANVAS_WHEEL_LINE_PIXEL = 12;
 const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 0.5;
+const WINDOWS_LINUX_WHEEL_PAN_MAX_PER_FRAME = 160;
+const WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL = 0.3;
+const WINDOWS_LINUX_WHEEL_ZOOM_MAX_FACTOR_PER_FRAME = 1.10;
+const WINDOWS_LINUX_WHEEL_ZOOM_PUMP_SPEED = 0.001;
+
+let winWheelPanAccumX = 0;
+let winWheelPanAccumY = 0;
+let winWheelPanPumpFrame = null;
+
+let winWheelZoomAccumDelta = 0;
+let winWheelZoomPumpFrame = null;
+let winWheelZoomPumpCenterX = null;
+let winWheelZoomPumpCenterY = null;
+let winWheelZoomPumpOptions = null;
+
 const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 1.0;
 const WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND = 0.36;
 const WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER = 1.0;
@@ -6120,36 +6135,9 @@ function setupCanvasZoomAndPan() {
             // 设置新的结束检测（延长至 400ms，防止滚轮间隙导致频繁的状态切换重排）
             workspace._zoomEndTimer = setTimeout(() => {
                 workspace._zoomEndTimer = null;
-                workspace.classList.remove('is-zooming');
-
-                // [OPT] 缩放结束：更新网格和CSS变量 (FORCE UPDATE)
-                try {
-                    const container = getCachedContainer();
-                    if (container) setCanvasScaleVars(container, CanvasState.zoom, true);
-                    updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom, true);
-                } catch (_) { }
-
-                // [数据密集模式] 缩放结束：更新数据密集模式状态（为下一次缩放准备）
-                try { updateDataIntensiveMode(true); } catch (_) { }
-
-                // 强制刷新低细节模式（可能退出），确保逻辑发生在 is-zooming 解除之后
-                try { updateCanvasLowDetailMode(true); } catch (_) { }
-                // 低细节区间（30%~35%）：只预热“视口中心附近少量栏目”，避免一屏全加载
-                if (!isCanvasVirtualizationEnabled()) {
-                    try { prewarmCanvasLowDetailVisibleTrees(); } catch (_) { }
+                if (!winWheelZoomPumpFrame) {
+                    __onCanvasZoomEndCleanup();
                 }
-                // 缩放真正停止后再统一恢复/按需加载（避免 is-zooming 阶段被判定为交互中而跳过补渲染）
-                if (isCanvasVirtualizationEnabled()) {
-                    try { scheduleCanvasVirtualizationUpdate(); } catch (_) { }
-                } else {
-                    try { scheduleDormancyUpdate(); } catch (_) { }
-                }
-                // Wheel 缩放过程中会跳过滚动条/边界更新；缩放停止后统一补一次，避免中途反复触发布局计算导致闪烁
-                try { updateCanvasScrollBounds({ recomputeBounds: false, initial: false }); } catch (_) { }
-                try { updateScrollbarThumbs(); } catch (_) { }
-                try { savePanOffsetThrottled(); } catch (_) { }
-                try { scheduleEdgesRender(0); } catch (_) { }
-                try { __updateCanvasPerfHud(); } catch (_) { }
             }, 400);
 
             // 获取鼠标在viewport中的位置
@@ -6186,10 +6174,25 @@ function setupCanvasZoomAndPan() {
                 __cancelCanvasSmoothWheelZoom();
                 __cancelCanvasTrackpadZoomInertia();
                 __cancelCanvasPendingZoomUpdate();
+                
+                winWheelZoomAccumDelta += rawDelta;
+                winWheelZoomPumpCenterX = mouseX;
+                winWheelZoomPumpCenterY = mouseY;
+                winWheelZoomPumpOptions = {
+                    recomputeBounds: false,
+                    skipSave: false,
+                    skipScrollbarUpdate: true,
+                    wheelSmoothStepMultiplier: WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER
+                };
+                __startWinWheelZoomPump();
+                __logCanvasWinInput('wheel-zoom-apply', {
+                    route: 'windows-pump',
+                    rawDelta: rawDelta,
+                    winWheelZoomAccumDelta
+                }, { throttleKey: 'wheel-zoom-apply', throttleMs: 80 });
+                return;
             }
-            if (isWindowsLikeDiscreteWheelZoom) {
-                deltaScale = WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR;
-            }
+
             const scaledDelta = rawDelta * deltaScale;
             __logCanvasWinInput('wheel-zoom-input', {
                 event: __snapshotCanvasWheelEvent(e),
@@ -6307,8 +6310,6 @@ function setupCanvasZoomAndPan() {
                     centerY: __roundCanvasDebugNumber(mouseY, 2),
                     zoomOptions
                 }, { throttleKey: 'wheel-zoom-apply', throttleMs: 80 });
-            } else if (isWindowsLikeDiscreteWheelZoom) {
-                setCanvasZoom(newZoom, mouseX, mouseY, zoomOptions);
             } else if (CANVAS_RUNTIME_WINDOWS_LIKE) {
                 // Windows/Linux 非离散滚轮也走直达路径，避免 rAF 节流导致磁矩不生效
                 __cancelCanvasSmoothWheelZoom();
@@ -10922,7 +10923,59 @@ function __cancelCanvasScrollAnimationFrame() {
     CanvasState.scrollAnimation.source = null;
 }
 
+function __startWinWheelPanPump() {
+    if (winWheelPanPumpFrame) return;
+
+    const pump = () => {
+        winWheelPanPumpFrame = null;
+        if (Math.abs(winWheelPanAccumX) < WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL && 
+            Math.abs(winWheelPanAccumY) < WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL) {
+            winWheelPanAccumX = 0;
+            winWheelPanAccumY = 0;
+            return;
+        }
+
+        let stepX = winWheelPanAccumX;
+        let stepY = winWheelPanAccumY;
+
+        const dist = Math.sqrt(stepX * stepX + stepY * stepY);
+        if (dist > WINDOWS_LINUX_WHEEL_PAN_MAX_PER_FRAME) {
+            const ratio = WINDOWS_LINUX_WHEEL_PAN_MAX_PER_FRAME / dist;
+            stepX *= ratio;
+            stepY *= ratio;
+        }
+
+        winWheelPanAccumX -= stepX;
+        winWheelPanAccumY -= stepY;
+
+        CanvasState.scrollAnimation.source = 'direct';
+        CanvasState.panOffsetX += stepX;
+        CanvasState.panOffsetY += stepY;
+        CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+        CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+
+        applyPanOffsetFast();
+        updateScrollbarThumbsLightweight();
+
+        if (Math.abs(winWheelPanAccumX) >= WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL || 
+            Math.abs(winWheelPanAccumY) >= WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL) {
+            winWheelPanPumpFrame = requestAnimationFrame(pump);
+        } else {
+            winWheelPanAccumX = 0;
+            winWheelPanAccumY = 0;
+            scheduleScrollUpdate();
+        }
+    };
+    winWheelPanPumpFrame = requestAnimationFrame(pump);
+}
+
 function __cancelCanvasWheelPanMotion() {
+    if (winWheelPanPumpFrame) {
+        cancelAnimationFrame(winWheelPanPumpFrame);
+        winWheelPanPumpFrame = null;
+    }
+    winWheelPanAccumX = 0;
+    winWheelPanAccumY = 0;
     cancelInertiaScroll();
     __cancelCanvasPendingScrollUpdate();
     __cancelCanvasScrollAnimationFrame();
@@ -11377,6 +11430,118 @@ function __cancelCanvasPendingZoomUpdate() {
     pendingZoomRequest = null;
 }
 
+function __onCanvasZoomEndCleanup() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+    workspace.classList.remove('is-zooming');
+
+    // [OPT] 缩放结束：更新网格和CSS变量 (FORCE UPDATE)
+    try {
+        const container = getCachedContainer();
+        if (container) setCanvasScaleVars(container, CanvasState.zoom, true);
+        updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom, true);
+    } catch (_) { }
+
+    // [数据密集模式] 缩放结束：更新数据密集模式状态（为下一次缩放准备）
+    try { updateDataIntensiveMode(true); } catch (_) { }
+
+    // 强制刷新低细节模式（可能退出），确保逻辑发生在 is-zooming 解除之后
+    try { updateCanvasLowDetailMode(true); } catch (_) { }
+    // 低细节区间（30%~35%）：只预热“视口中心附近少量栏目”，避免一屏全加载
+    if (!isCanvasVirtualizationEnabled()) {
+        try { prewarmCanvasLowDetailVisibleTrees(); } catch (_) { }
+    }
+    // 缩放真正停止后再统一恢复/按需加载（避免 is-zooming 阶段被判定为交互中而跳过补渲染）
+    if (isCanvasVirtualizationEnabled()) {
+        try { scheduleCanvasVirtualizationUpdate(); } catch (_) { }
+    } else {
+        try { scheduleDormancyUpdate(); } catch (_) { }
+    }
+    // Wheel 缩放过程中会跳过滚动条/边界更新；缩放停止后统一补一次，避免中途反复触发布局计算导致闪烁
+    try { updateCanvasScrollBounds({ recomputeBounds: false, initial: false }); } catch (_) { }
+    try { updateScrollbarThumbs(); } catch (_) { }
+    try { savePanOffsetThrottled(); } catch (_) { }
+    try { scheduleEdgesRender(0); } catch (_) { }
+    try { __updateCanvasPerfHud(); } catch (_) { }
+}
+
+function __startWinWheelZoomPump() {
+    if (winWheelZoomPumpFrame) return;
+
+    const pump = () => {
+        winWheelZoomPumpFrame = null;
+        if (Math.abs(winWheelZoomAccumDelta) < 0.01) {
+            winWheelZoomAccumDelta = 0;
+            const workspace = document.getElementById('canvasWorkspace');
+            if (workspace && !workspace._zoomEndTimer) {
+                __onCanvasZoomEndCleanup();
+            }
+            return;
+        }
+
+        const rawDelta = winWheelZoomAccumDelta;
+        const zoomSpeed = WINDOWS_LINUX_WHEEL_ZOOM_PUMP_SPEED; // 0.001
+
+        const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
+        const currentZoom = CanvasState.zoom;
+        const displayZoomForCalc = currentZoom / base;
+
+        const scaledDelta = rawDelta * WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR;
+
+        const nextDisplayZoomNoMagnet = (currentZoom * Math.exp(scaledDelta * zoomSpeed)) / base;
+        const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
+        const magnetFactor = (1 + (magnet.factor - 1) * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND);
+        const magnetStrength = (magnet.strength * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND);
+        const wheelCurveSpeedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
+        const effectiveDelta = scaledDelta * magnetFactor * wheelCurveSpeedFactor
+            * ZOOM_SPEED_GLOBAL_MULTIPLIER * SCROLLING_ZOOM_SPEED_BOOST
+            * WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST;
+
+        let zoomFactor = Math.exp(effectiveDelta * zoomSpeed);
+        const limitCap = WINDOWS_LINUX_WHEEL_ZOOM_MAX_FACTOR_PER_FRAME;
+        
+        let cappedFactor = zoomFactor;
+        if (cappedFactor > limitCap) cappedFactor = limitCap;
+        if (cappedFactor < (1 / limitCap)) cappedFactor = 1 / limitCap;
+
+        if (magnet && magnetStrength > 0) {
+            const maxCap = 1.16;
+            const minCap = 1.05;
+            const capDrop = 0.05;
+            const cap = Math.max(minCap, Math.min(maxCap, maxCap - capDrop * magnetStrength));
+            if (cappedFactor > cap) cappedFactor = cap;
+            if (cappedFactor < (1 / cap)) cappedFactor = 1 / cap;
+        }
+
+        const effectiveDeltaCapped = Math.log(cappedFactor) / zoomSpeed;
+        const multiplier = WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR * magnetFactor * wheelCurveSpeedFactor
+            * ZOOM_SPEED_GLOBAL_MULTIPLIER * SCROLLING_ZOOM_SPEED_BOOST
+            * WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST;
+        
+        const rawDeltaConsumed = effectiveDeltaCapped / multiplier;
+
+        winWheelZoomAccumDelta -= rawDeltaConsumed;
+        if (rawDelta > 0 && winWheelZoomAccumDelta < 0) winWheelZoomAccumDelta = 0;
+        if (rawDelta < 0 && winWheelZoomAccumDelta > 0) winWheelZoomAccumDelta = 0;
+
+        let newZoom = currentZoom * cappedFactor;
+        newZoom = clampCanvasZoom(newZoom);
+
+        setCanvasZoom(newZoom, winWheelZoomPumpCenterX, winWheelZoomPumpCenterY, winWheelZoomPumpOptions);
+
+        if (Math.abs(winWheelZoomAccumDelta) > 0.01) {
+            winWheelZoomPumpFrame = requestAnimationFrame(pump);
+        } else {
+            winWheelZoomAccumDelta = 0;
+            const workspace = document.getElementById('canvasWorkspace');
+            if (workspace && !workspace._zoomEndTimer) {
+                __onCanvasZoomEndCleanup();
+            }
+        }
+    };
+    winWheelZoomPumpFrame = requestAnimationFrame(pump);
+}
+
 function __cancelCanvasActiveZoomGesture(reason = 'interrupt') {
     const workspace = document.getElementById('canvasWorkspace');
     const hasActiveZoom = !!(
@@ -11384,10 +11549,16 @@ function __cancelCanvasActiveZoomGesture(reason = 'interrupt') {
         trackpadZoomInertiaFrame ||
         zoomUpdateFrame ||
         pendingZoomRequest ||
+        winWheelZoomPumpFrame ||
         (workspace && (workspace.classList.contains('is-zooming') || workspace._zoomEndTimer))
     );
     if (!hasActiveZoom) return false;
 
+    if (winWheelZoomPumpFrame) {
+        cancelAnimationFrame(winWheelZoomPumpFrame);
+        winWheelZoomPumpFrame = null;
+        winWheelZoomAccumDelta = 0;
+    }
     __cancelCanvasSmoothWheelZoom();
     __cancelCanvasTrackpadZoomInertia();
     __cancelCanvasPendingZoomUpdate();
@@ -13577,18 +13748,14 @@ function handleCanvasCustomScroll(event) {
                 CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
                 CanvasState.scrollAnimation.source = null;
             }
-            CanvasState.scrollAnimation.source = 'direct';
-            CanvasState.panOffsetX += panDeltaX;
-            CanvasState.panOffsetY += panDeltaY;
             if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheel) {
-                CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
-                CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
-                CanvasState.scrollAnimation.source = null;
-                pendingScrollRequest = null;
-                applyPanOffsetFast();
-                updateScrollbarThumbsLightweight();
+                winWheelPanAccumX += panDeltaX;
+                winWheelPanAccumY += panDeltaY;
+                __startWinWheelPanPump();
             } else {
-                // 使用 RAF 去抖，合并多个滚动事件为一次渲染
+                CanvasState.scrollAnimation.source = 'direct';
+                CanvasState.panOffsetX += panDeltaX;
+                CanvasState.panOffsetY += panDeltaY;
                 scheduleScrollUpdate();
             }
         }
