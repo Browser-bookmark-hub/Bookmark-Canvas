@@ -6775,6 +6775,30 @@ function __syncExpandAndScrollForFullscreenCard(descriptor, sourcePartition) {
         };
     }
 
+    if (type === 'md-node') {
+        const nodeId = String(descriptor.id || '').trim();
+        if (!nodeId) return { expandKeyCount: 0, scrollKeyCount: 0 };
+
+        const scrollBaseKey = `md-node-scroll:${nodeId}`;
+        if (target && scrollBaseKey) {
+            try {
+                const body = target.querySelector('.md-canvas-editor');
+                if (body) {
+                    saveViewState('scroll', scrollBaseKey, {
+                        top: body.scrollTop || 0,
+                        left: body.scrollLeft || 0
+                    }, { partitionKey: sourcePartition });
+                }
+            } catch (_) { }
+        }
+
+        const scrollResult = __copyPartitionedViewStateBaseKeyToAllPartitions('scroll', scrollBaseKey, sourcePartition);
+        return {
+            expandKeyCount: 0,
+            scrollKeyCount: scrollResult.keyCount || 0
+        };
+    }
+
     return { expandKeyCount: 0, scrollKeyCount: 0 };
 }
 
@@ -6866,6 +6890,23 @@ function __applyCurrentPartitionExpandAndScrollSnapshot() {
                 const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
                 if (!body || !persisted || typeof persisted.top !== 'number') return;
                 if (typeof window.__isCanvasBodyScrollRestoreBlocked === 'function' && window.__isCanvasBodyScrollRestoreBlocked(body)) return;
+                body.scrollTop = persisted.top || 0;
+                body.scrollLeft = typeof persisted.left === 'number' ? persisted.left : 0;
+            } catch (_) { }
+        });
+    } catch (_) { }
+
+    try {
+        const canvasContent = document.getElementById('canvasContent');
+        const scope = canvasContent || document;
+        scope.querySelectorAll('.md-canvas-node').forEach((nodeEl) => {
+            try {
+                const body = nodeEl.querySelector('.md-canvas-editor');
+                if (!body) return;
+                const baseKey = `md-node-scroll:${nodeEl.id}`;
+                const key = __buildCanvasPartitionedViewStateKey('scroll', baseKey);
+                const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
+                if (!persisted || typeof persisted.top !== 'number') return;
                 body.scrollTop = persisted.top || 0;
                 body.scrollLeft = typeof persisted.left === 'number' ? persisted.left : 0;
             } catch (_) { }
@@ -15169,6 +15210,10 @@ function __getCanvasSectionScrollBaseKeyFromBody(body) {
         const sectionId = nodeEl && nodeEl.dataset ? nodeEl.dataset.sectionId : null;
         return __getTempSectionScrollBaseKey(sectionId);
     }
+    if (body.classList.contains('md-canvas-editor')) {
+        const nodeEl = body.closest('.md-canvas-node');
+        return nodeEl ? `md-node-scroll:${nodeEl.id}` : null;
+    }
     return null;
 }
 
@@ -15177,7 +15222,7 @@ function __flushCanvasSectionScrollStates() {
     try {
         const canvasContent = document.getElementById('canvasContent');
         const scope = canvasContent || document;
-        scope.querySelectorAll('.permanent-section-body, .temp-node-body').forEach((body) => {
+        scope.querySelectorAll('.permanent-section-body, .temp-node-body, .md-canvas-editor').forEach((body) => {
             try {
                 const baseKey = __getCanvasSectionScrollBaseKeyFromBody(body);
                 if (!baseKey) return;
@@ -17416,6 +17461,26 @@ function renderMdNode(node) {
     editor.contentEditable = 'true';
     editor.spellcheck = false;
 
+    // 覆盖 focus 方法，防止 contenteditable 聚焦时滚动条自动跳回顶端
+    const originalFocus = editor.focus;
+    editor.focus = function(options) {
+        const savedScrollTop = editor.scrollTop;
+        const savedScrollLeft = editor.scrollLeft;
+        editor.__isFocusing = true;
+        originalFocus.call(editor, options);
+        editor.scrollTop = savedScrollTop;
+        editor.scrollLeft = savedScrollLeft;
+        setTimeout(() => {
+            if (editor.scrollTop !== savedScrollTop) {
+                editor.scrollTop = savedScrollTop;
+            }
+            if (editor.scrollLeft !== savedScrollLeft) {
+                editor.scrollLeft = savedScrollLeft;
+            }
+            editor.__isFocusing = false;
+        }, 50);
+    };
+
     // 应用字体大小
     editor.style.fontSize = node.fontSize + 'px';
 
@@ -17458,19 +17523,20 @@ function renderMdNode(node) {
     editor.addEventListener('keyup', saveSelection);
 
     // 持久化：空白栏目滚动位置
-    const scrollKey = `md-node-scroll:${node.id}`;
-    // 恢复滚动位置
-    const scrollPersist = __readJSON(scrollKey, null);
-    if (scrollPersist && typeof scrollPersist.top === 'number') {
-        editor.scrollTop = scrollPersist.top || 0;
-        editor.scrollLeft = scrollPersist.left || 0;
-    }
+    const scrollBaseKey = `md-node-scroll:${node.id}`;
+    const scrollKey = __buildCanvasPartitionedViewStateKey('scroll', scrollBaseKey);
+    // 恢复滚动位置 (延迟到 editor 插入 DOM 后执行，否则 unattached 元素设置 scrollTop 无效)
+    const scrollPersist = __readPartitionedViewJSON(scrollKey, null);
     // 保存滚动位置
     {
         let rafS = 0;
         editor.addEventListener('scroll', () => {
+            if (editor.__isFocusing) return;
             if (rafS) cancelAnimationFrame(rafS);
-            rafS = requestAnimationFrame(() => __writeJSON(scrollKey, { top: editor.scrollTop || 0, left: editor.scrollLeft || 0 }));
+            rafS = requestAnimationFrame(() => {
+                if (editor.__isFocusing) return;
+                saveViewState('scroll', scrollBaseKey, { top: editor.scrollTop || 0, left: editor.scrollLeft || 0 });
+            });
         }, { passive: true });
     }
 
@@ -19740,6 +19806,22 @@ function renderMdNode(node) {
 
     el.appendChild(toolbar);
     el.appendChild(editor);
+
+    // 恢复滚动位置（在 editor 成功挂载到 DOM 并获得 layout 后进行）
+    if (scrollPersist && typeof scrollPersist.top === 'number') {
+        editor.scrollTop = scrollPersist.top || 0;
+        editor.scrollLeft = scrollPersist.left || 0;
+        // 延迟兜底：避免 DOM 渲染抖动或渲染延迟导致的滚动位置失效
+        setTimeout(() => {
+            if (editor.scrollTop !== scrollPersist.top) {
+                editor.scrollTop = scrollPersist.top || 0;
+            }
+            if (editor.scrollLeft !== scrollPersist.left) {
+                editor.scrollLeft = scrollPersist.left || 0;
+            }
+        }, 50);
+    }
+
     updateNodeFullscreenButtons();
 
     // 点击处理：格式化元素展开为源码，链接打开

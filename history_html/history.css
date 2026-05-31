@@ -203,6 +203,13 @@ html.layout-preload-active.canvas-view-active #canvasHorizontalScrollbar .scroll
     opacity: 0;
 }
 
+/* 预置阶段不显示滚动容器内容，避免首帧出现垂直滚动条“先回到顶端再拉回上次位置”的可见跳弹 */
+html.layout-preload-active .permanent-section-body,
+html.layout-preload-active .temp-node-body,
+html.layout-preload-active .md-canvas-editor {
+    opacity: 0 !important;
+}
+
 html.layout-preload-active.layout-preload-sidebar-right .sidebar {
     order: 2;
     border-right: none;
