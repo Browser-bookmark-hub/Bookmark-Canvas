@@ -3180,10 +3180,16 @@ function showExportModeDialog(options = {}) {
     });
 
     const collectGuideNames = () => {
+        if (typeof getGuideChoice !== 'function') {
+            return __getExportGuideNamesFromStorage();
+        }
         const choice = getGuideChoice();
         let name = 'AGENTS.md';
         if (choice === 'claude') name = 'CLAUDE.md';
-        else if (choice === 'custom') name = sanitizeGuideFileName(guideCustomInput && guideCustomInput.value) || 'AGENTS.md';
+        else if (choice === 'custom') {
+            const guideCustomInput = document.getElementById('guideNameCustomInput');
+            name = sanitizeGuideFileName(guideCustomInput && guideCustomInput.value) || 'AGENTS.md';
+        }
         return [name];
     };
 
@@ -3205,7 +3211,12 @@ function showExportModeDialog(options = {}) {
     }
 
     document.getElementById('exportModeA').addEventListener('click', () => {
-        const guideNames = collectGuideNames();
+        let guideNames = ['AGENTS.md'];
+        try {
+            if (typeof collectGuideNames === 'function') {
+                guideNames = collectGuideNames();
+            }
+        } catch (_) { }
         dialog.remove();
         const mode = isFullscreenTarget
             ? 'fullscreen-html'
@@ -3395,7 +3406,13 @@ function __buildExportGuide(guideNames, source, isEn, exportedAt, exportRoot, va
             '- Permanent/temporary `descriptionMd` and `.canvas` text nodes are notes or prompts about the nearby bookmark tree. Use them as context, but do not treat them as bookmark items.',
             '- For first-pass analysis of a regular chain section, inspect its likely source family and parent chain first, such as `#A`, `#B`, `A-1`, `A-1-1`, or `B-1`. If lineage is ambiguous, match by `title` or `url` with local search/tools.',
             '- Edge direction can encode relationship semantics. Canonical export form: single arrow from `fromNode` to `toNode` omits both ends; no arrow sets `toEnd: "none"`; two-ended arrow sets `fromEnd: "arrow"` and relies on the default `toEnd` arrow. Preserve existing direction unless the task asks to change the relationship.',
-            '- Tags should mark user-requested or especially important items. Avoid adding many tags just because many URLs are present.'
+            '- Tags should mark user-requested or especially important items. Avoid adding many tags just because many URLs are present.',
+            '',
+            '### A9. Text Formatting Support',
+            '- Blank cards (`.canvas` `text` nodes) and permanent/temporary `descriptionMd` support Obsidian-style Markdown and partial HTML rendering.',
+            '- Formatting should primarily follow the habits of the user\'s current tool. If some tools lack support, adjust based on the user\'s actual habits, supplementing other tools as needed. There is no need to list all supported tools and formats.',
+            '- Recommended Markdown examples (3 types): Highlights `==text==`, blockquotes `> text`, and lists `- item` or `1. item`.',
+            '- Recommended HTML examples (2 types): Text color `<span style="color:red;">text</span>` and alignment `<div align="center">text</div>` (supports left/center/right).'
         ].join('\n')
         : [
             '# 书签画布导入/导出规则',
@@ -3488,7 +3505,13 @@ function __buildExportGuide(guideNames, source, isEn, exportedAt, exportRoot, va
             '- 永久/临时栏目的 `descriptionMd` 与 `.canvas` 的 text 节点通常是栏目说明或提示词，可作为上下文使用，但不要当作书签 item。',
             '- 第一次分析普通链式栏目时，先看可能的来源族和父级链路，例如 `#A`、`#B`、`A-1`、`A-1-1`、`B-1`；链路不明确时，再用 `title` 或 `url` 通过本地搜索/工具匹配。',
             '- 连接线指向性可表达关系语义。规范导出形态：从 `fromNode` 指向 `toNode` 的单箭头默认省略两端字段；无箭头写 `toEnd: "none"`；双端箭头写 `fromEnd: "arrow"`，`toEnd` 使用默认箭头。除非任务要求改变关系语义，否则保留已有方向。',
-            '- tag 用于用户要求或特别重要的书签/文件夹；不要因为 URL 多就批量添加过多 tag。'
+            '- tag 用于用户要求或特别重要的书签/文件夹；不要因为 URL 多就批量添加过多 tag。',
+            '',
+            '### A9. 文本格式支持与建议',
+            '- 空白栏目（`.canvas` 的 `text` 节点）及永久/临时栏目的 `descriptionMd` 支持类似 Obsidian（黑曜石）的 Markdown 及部分 HTML 渲染。',
+            '- 格式应主要根据用户当前所用工具的习惯来决定；若某些工具不支持，则按用户的实际习惯调整，其他工具视情况补充。无需列举所有支持的工具与格式。',
+            '- 推荐的 Markdown 示例（3种）：高亮 `==文本==`、引用 `> 文本`、序列 `- 列表` 或 `1. 列表`。',
+            '- 推荐的 HTML 示例（2种）：文字颜色 `<span style="color:red;">文本</span>`、对齐 `<div align="center">文本</div>`（支持 left/center/right）。'
         ].join('\n');
 
     aiGuideText = isEn
@@ -4201,6 +4224,11 @@ function __buildExportGuide(guideNames, source, isEn, exportedAt, exportRoot, va
 async function exportCanvasPackage(options = {}) {
     const exportMode = options.mode || 'obsidian';
     const { isEn } = __getLang();
+    
+    // Check if options contains guideNames passed from dialog, otherwise fetch from storage
+    const guideNames = (options && Array.isArray(options.guideNames) && options.guideNames.length > 0) 
+        ? options.guideNames 
+        : __getExportGuideNamesFromStorage();
 
     try { __flushMdEditorsForExport(); } catch (_) { }
     try { saveTempNodes(); } catch (_) { }
