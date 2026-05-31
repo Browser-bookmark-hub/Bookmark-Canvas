@@ -6024,6 +6024,24 @@ function setupCanvasZoomAndPan() {
     setupCanvasFullscreenControls();
     setupCanvasPerfHud();
 
+    // [Feature] 全屏模式（卡片最大化或整体全屏）下全局禁用浏览器原生及画布的 Ctrl 缩放（包括按键和滚轮）
+    // 避免导致内部虚拟列表书签树加载异常
+    window.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '_' || e.key === '0')) {
+            if (__isCanvasNodeMaximizedActive() || CanvasState.isFullscreen) {
+                e.preventDefault();
+            }
+        }
+    }, { passive: false });
+
+    window.addEventListener('wheel', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+            if (__isCanvasNodeMaximizedActive() || CanvasState.isFullscreen) {
+                e.preventDefault();
+            }
+        }
+    }, { passive: false });
+
     // Ctrl + 滚轮缩放（以鼠标位置为中心）- 性能优化版本
     workspace.addEventListener('wheel', (e) => {
         // 拖动时的滚轮滚动功能：
@@ -6106,6 +6124,13 @@ function setupCanvasZoomAndPan() {
         }
 
         if (isCustomCtrlKeyPressed(e) || e.metaKey) {
+            // [Feature] 全屏模式（卡片最大化或整体全屏）下禁用 Ctrl 缩放
+            // 避免在全屏模式下缩放画布导致内部的书签树（虚拟列表）加载异常
+            if (__isCanvasNodeMaximizedActive() || CanvasState.isFullscreen) {
+                e.preventDefault();
+                return;
+            }
+
             e.preventDefault();
             __cancelCanvasWheelPanMotion();
 
@@ -6560,6 +6585,10 @@ function setupCanvasZoomAndPan() {
     const zoomLocateBtn = document.getElementById('zoomLocateBtn');
     // [OPT] 优化缩放手感：添加平滑动画，使用 1.2 倍指数缩放
     const animateZoomStep = (factor) => {
+        // [Feature] 全屏模式（卡片最大化或整体全屏）下禁用 UI 缩放按钮
+        if (__isCanvasNodeMaximizedActive() || CanvasState.isFullscreen) {
+            return;
+        }
         const content = document.getElementById('canvasContent');
         if (content) {
             content.classList.add('animate-zoom');
