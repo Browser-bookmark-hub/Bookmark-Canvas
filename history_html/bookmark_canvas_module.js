@@ -11282,6 +11282,11 @@ function loadCanvasZoom() {
             CanvasState.panOffsetX = pan.x;
             CanvasState.panOffsetY = pan.y;
             applyPanOffset();
+        } else {
+            // 首次安装，或者无历史平移
+            try {
+                locateToIntroCardsCenter();
+            } catch (_) { }
         }
     } catch (error) {
         console.error('[Canvas] 加载画布状态失败:', error);
@@ -14557,24 +14562,50 @@ function locateToPermanentSection(targetZoom = null) {
     });
 }
 
-// 首次打开 Canvas（演示模板）时：定位到「永久栏目」的中心
+// 首次打开 Canvas（演示模板）时：定位并放大到「快捷操作」卡片
 function locateToIntroCardsCenter() {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return false;
 
-    const permanentSection = document.getElementById('permanentSection');
-    if (!permanentSection) return false;
+    // 计算 offsetY (与 createInitialDemoTemplate 逻辑一致)
+    let permCenterY = 110;
+    try {
+        const permSec = document.getElementById('permanentSection');
+        if (permSec) {
+            let permH = 200;
+            if (typeof __computePermanentSectionAutoSize === 'function') {
+                const size = __computePermanentSectionAutoSize(permSec);
+                if (size && size.height) permH = size.height;
+            } else {
+                permH = permSec.offsetHeight || 200;
+            }
+            permCenterY = permH / 2;
+        }
+    } catch (_) {}
+    const offsetY = permCenterY - 110;
 
-    const left = parseFloat(permanentSection.style.left) || 0;
-    const top = parseFloat(permanentSection.style.top) || 0;
-    const width = permanentSection.offsetWidth || 0;
-    const height = permanentSection.offsetHeight || 0;
+    // 「快捷操作」卡片的预设位置和尺寸
+    const left = -1020;
+    const top = 260 + offsetY;
+    const width = 420;
+    const height = 560;
+
+    const wsW = workspace.clientWidth || window.innerWidth || 800;
+    const wsH = workspace.clientHeight || window.innerHeight || 600;
+
+    const padding = 60;
+    const fitW = Math.max(0.1, (wsW - padding) / width);
+    const fitH = Math.max(0.1, (wsH - padding) / height);
+    const fitZoom = Math.min(fitW, fitH);
+    const zoom = clampCanvasZoom(Math.min(1.0, fitZoom));
+
+    if (zoom !== CanvasState.zoom) {
+        const rect = workspace.getBoundingClientRect();
+        setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
+    }
 
     const centerX = left + width / 2;
     const centerY = top + height / 2;
-
-    const wsW = workspace.clientWidth || 1;
-    const wsH = workspace.clientHeight || 1;
 
     CanvasState.panOffsetX = wsW / 2 - centerX * CanvasState.zoom;
     CanvasState.panOffsetY = wsH / 2 - centerY * CanvasState.zoom;
