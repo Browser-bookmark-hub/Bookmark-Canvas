@@ -759,6 +759,9 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
         console.log('[拖拽] Chrome API 移动成功，等待 onMoved 事件更新视觉');
 
     } catch (error) {
+        if (error && error.message && error.message.includes('move parent is missing')) {
+            return;
+        }
         console.error('[拖拽] 移动操作失败:', error);
     }
 }

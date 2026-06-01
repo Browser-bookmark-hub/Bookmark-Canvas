@@ -12105,6 +12105,13 @@ function toggleCanvasFullscreen() {
         container.mozRequestFullScreen ||
         container.msRequestFullscreen;
     if (request) {
+        const hasTransientActivation = (typeof navigator !== 'undefined' && navigator.userActivation)
+            ? navigator.userActivation.isActive === true
+            : true;
+        if (!hasTransientActivation) {
+            console.warn('[Canvas] 无法进入全屏: 当前没有用户手势激活 (API只能由用户手势触发)');
+            return;
+        }
         Promise.resolve(request.call(container)).catch(error => {
             console.warn('[Canvas] 进入全屏失败:', error);
         });
@@ -12116,6 +12123,12 @@ function handleCanvasFullscreenChange() {
     CanvasState.isFullscreen = getCurrentFullscreenElement() === container;
     updateFullscreenButtonState();
     updateNodeFullscreenButtons();
+
+    // Force recalculation of canvas layout, scroll limits, and offsets immediately when fullscreen state toggles
+    try {
+        updateCanvasScrollBounds({ recomputeBounds: true, initial: false });
+        stabilizePermanentSectionAnchors({ syncBounds: true });
+    } catch (_) { }
 
     try {
         const fullscreenStatePublisher = window.__canvasSidePanelPublishFullscreenStateFromModule;

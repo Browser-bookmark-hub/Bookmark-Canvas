@@ -6793,6 +6793,21 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     overflow: hidden;
 }
 
+/* Force fullscreen element to strictly occupy 100% of viewport size, preventing Chrome/macOS toolbar-slide rendering gaps */
+.canvas-main-container:fullscreen,
+.canvas-main-container:-webkit-full-screen,
+.canvas-main-container:-moz-full-screen,
+.canvas-main-container:-ms-fullscreen {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+
+
 /* Canvas画布工作区 */
 .canvas-workspace {
     position: absolute;
