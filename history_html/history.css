@@ -12630,6 +12630,16 @@ html[lang="en"] .canvas-manage-modal {
     width: min(420px, calc(100vw - 16px));
 }
 
+#canvasShortcutsModal.canvas-manage-modal {
+    min-width: 440px;
+    width: min(480px, calc(100vw - 16px));
+}
+
+html[lang="en"] #canvasShortcutsModal.canvas-manage-modal {
+    min-width: 480px;
+    width: min(520px, calc(100vw - 16px));
+}
+
 .canvas-manage-modal-header {
     display: flex;
     align-items: center;

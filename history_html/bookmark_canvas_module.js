@@ -6678,7 +6678,7 @@ function setupCanvasManageModal() {
         stopShortcutRecording(null);
         if (otherManageModal) otherManageModal.style.display = 'none';
         if (helpModal) helpModal.style.display = 'none';
-        if (shortcutsModal) shortcutsModal.classList.remove('show');
+        if (shortcutsModal) shortcutsModal.style.display = 'none';
         const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
         if (pop) pop.remove();
 
@@ -6722,61 +6722,6 @@ function setupCanvasManageModal() {
         otherManageModal.style.display = 'none';
     };
 
-    const positionManageModalUnderSettingsBtn = (modalEl) => {
-        if (!modalEl) return;
-
-        const pickVisibleAnchor = () => {
-            const candidates = [
-                document.getElementById('settingsToggle'),
-                document.getElementById('titleSettingsToggleBtn')
-            ].filter(Boolean);
-
-            const visible = candidates.find((el) => {
-                const rect = el.getBoundingClientRect();
-                if (rect.width <= 0 || rect.height <= 0) return false;
-                const style = window.getComputedStyle(el);
-                return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-            });
-
-            return visible || candidates[0] || null;
-        };
-
-        const anchorBtn = pickVisibleAnchor();
-        if (!anchorBtn) {
-            modalEl.style.position = '';
-            modalEl.style.left = '';
-            modalEl.style.top = '';
-            return;
-        }
-
-        modalEl.style.maxWidth = `calc(100vw - 16px)`;
-        modalEl.style.maxHeight = `calc(100vh - 16px)`;
-
-        const anchorRect = anchorBtn.getBoundingClientRect();
-        const modalRect = modalEl.getBoundingClientRect();
-        const gap = 8;
-        const viewportPadding = 8;
-        const minLeft = viewportPadding;
-        const maxLeft = Math.max(minLeft, window.innerWidth - modalRect.width - viewportPadding);
-        const targetCenterX = anchorRect.left + (anchorRect.width / 2);
-        let left = targetCenterX - (modalRect.width / 2);
-        left = Math.min(Math.max(left, minLeft), maxLeft);
-
-        const spaceBelow = window.innerHeight - anchorRect.bottom - viewportPadding;
-        const spaceAbove = anchorRect.top - viewportPadding;
-        let top = anchorRect.bottom + gap;
-        if (spaceBelow < modalRect.height && spaceAbove > spaceBelow) {
-            top = anchorRect.top - modalRect.height - gap;
-        }
-        const minTop = viewportPadding;
-        const maxTop = Math.max(minTop, window.innerHeight - modalRect.height - viewportPadding);
-        top = Math.min(Math.max(top, minTop), maxTop);
-
-        modalEl.style.position = 'fixed';
-        modalEl.style.left = `${Math.round(left)}px`;
-        modalEl.style.top = `${Math.round(top)}px`;
-    };
-
     const openOtherManageModal = (options = {}) => {
         if (!otherManageModal) return;
         const { anchorToSettings = false } = options;
@@ -6784,7 +6729,7 @@ function setupCanvasManageModal() {
         stopShortcutRecording(null);
         manageModal.style.display = 'none';
         if (helpModal) helpModal.style.display = 'none';
-        if (shortcutsModal) shortcutsModal.classList.remove('show');
+        if (shortcutsModal) shortcutsModal.style.display = 'none';
         const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
         if (pop) pop.remove();
 
@@ -6846,8 +6791,75 @@ function setupCanvasManageModal() {
             !(openOtherManageBridgeBtn && openOtherManageBridgeBtn.contains(e.target))) {
             closeOtherManageModal();
         }
+
+        if (shortcutsModal && shortcutsModal.style.display === 'block') {
+            const isClickInside = shortcutsModal.contains(e.target);
+            const isClickTrigger = e.target.closest('#canvasShortcutSettingsBtn') || 
+                                   e.target.closest('#canvasOtherShortcutSettingsBtn') ||
+                                   e.target.closest('#settingsToggle') ||
+                                   e.target.closest('#titleSettingsToggleBtn') ||
+                                   e.target.closest('.settings-menu-item[data-action="open-help"]');
+            if (!isClickInside && !isClickTrigger) {
+                closeCanvasShortcutsModal();
+            }
+        }
     });
 }
+
+const positionManageModalUnderSettingsBtn = (modalEl) => {
+    if (!modalEl) return;
+
+    const pickVisibleAnchor = () => {
+        const candidates = [
+            document.getElementById('settingsToggle'),
+            document.getElementById('titleSettingsToggleBtn')
+        ].filter(Boolean);
+
+        const visible = candidates.find((el) => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return false;
+            const style = window.getComputedStyle(el);
+            return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+        });
+
+        return visible || candidates[0] || null;
+    };
+
+    const anchorBtn = pickVisibleAnchor();
+    if (!anchorBtn) {
+        modalEl.style.position = '';
+        modalEl.style.left = '';
+        modalEl.style.top = '';
+        return;
+    }
+
+    modalEl.style.maxWidth = `calc(100vw - 16px)`;
+    modalEl.style.maxHeight = `calc(100vh - 16px)`;
+
+    const anchorRect = anchorBtn.getBoundingClientRect();
+    const modalRect = modalEl.getBoundingClientRect();
+    const gap = 8;
+    const viewportPadding = 8;
+    const minLeft = viewportPadding;
+    const maxLeft = Math.max(minLeft, window.innerWidth - modalRect.width - viewportPadding);
+    const targetCenterX = anchorRect.left + (anchorRect.width / 2);
+    let left = targetCenterX - (modalRect.width / 2);
+    left = Math.min(Math.max(left, minLeft), maxLeft);
+
+    const spaceBelow = window.innerHeight - anchorRect.bottom - viewportPadding;
+    const spaceAbove = anchorRect.top - viewportPadding;
+    let top = anchorRect.bottom + gap;
+    if (spaceBelow < modalRect.height && spaceAbove > spaceBelow) {
+        top = anchorRect.top - modalRect.height - gap;
+    }
+    const minTop = viewportPadding;
+    const maxTop = Math.max(minTop, window.innerHeight - modalRect.height - viewportPadding);
+    top = Math.min(Math.max(top, minTop), maxTop);
+
+    modalEl.style.position = 'fixed';
+    modalEl.style.left = `${Math.round(left)}px`;
+    modalEl.style.top = `${Math.round(top)}px`;
+};
 
 let __canvasViewSyncLastSignalTimestamp = 0;
 let __canvasViewSyncConsumedSignalIds = [];
@@ -7609,9 +7621,6 @@ function setupCanvasShortcutsModal() {
     const closeBtn = document.getElementById('canvasShortcutsModalClose');
     const close = () => closeCanvasShortcutsModal();
     if (closeBtn) closeBtn.addEventListener('click', close);
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) close();
-    });
 }
 
 // =============================================================================
@@ -7928,15 +7937,28 @@ function createCanvasSidePanelSettingsModal() {
     });
 }
 
-function openCanvasShortcutsModal() {
+function openCanvasShortcutsModal(options = {}) {
     const modal = document.getElementById('canvasShortcutsModal');
     if (!modal) return;
     setupCanvasShortcutsModal();
 
-    // 先关闭帮助弹窗
-    try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
+    const { anchorToSettings = true } = options;
 
-    modal.classList.add('show');
+    // 先关闭帮助弹窗和管理弹窗
+    try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+
+    modal.style.display = 'block';
+
+    if (anchorToSettings) {
+        window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(modal));
+    } else {
+        modal.style.position = '';
+        modal.style.left = '';
+        modal.style.top = '';
+    }
+
     updateShortcutDisplays();
     if (typeof updateShortcutsDisplay === 'function') {
         updateShortcutsDisplay();
@@ -7945,7 +7967,7 @@ function openCanvasShortcutsModal() {
 
 function closeCanvasShortcutsModal() {
     const modal = document.getElementById('canvasShortcutsModal');
-    if (modal) modal.classList.remove('show');
+    if (modal) modal.style.display = 'none';
     stopShortcutRecording(null);
 }
 
@@ -33689,6 +33711,7 @@ function startEdgeLabelInlineEdit(edgeId) {
 
 window.CanvasModule = {
     init: initCanvasView,
+    openShortcuts: openCanvasShortcutsModal,
     enhance: enhanceBookmarkTreeForCanvas, // 增强书签树的Canvas功能
     clear: clearAllExceptPermanent,
     updateFullscreenButton: updateFullscreenButtonState,

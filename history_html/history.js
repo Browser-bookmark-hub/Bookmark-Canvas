@@ -5645,9 +5645,15 @@ function setupSidePanelSettingsMenu() {
         }
 
         if (action === 'open-help') {
-            const helpToggle = document.getElementById('helpToggle');
-            if (helpToggle && typeof helpToggle.click === 'function') {
-                helpToggle.click();
+            if (currentView === 'canvas') {
+                if (window.CanvasModule && typeof window.CanvasModule.openShortcuts === 'function') {
+                    window.CanvasModule.openShortcuts({ anchorToSettings: true });
+                }
+            } else {
+                const helpToggle = document.getElementById('helpToggle');
+                if (helpToggle && typeof helpToggle.click === 'function') {
+                    helpToggle.click();
+                }
             }
             return;
         }

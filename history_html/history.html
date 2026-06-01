@@ -382,109 +382,107 @@
             </div>
 
             <!-- Canvas 快捷键设置二级 UI -->
-            <div id="canvasShortcutsModal" class="modal">
-                <div class="modal-content canvas-shortcuts-modal">
-                    <div class="modal-header">
-                        <h3 id="canvasShortcutsModalTitle">快捷键</h3>
-                        <button id="canvasShortcutsModalClose" class="perf-modal-close" aria-label="Close"><i
-                                class="fas fa-times"></i></button>
-                    </div>
-                    <div class="modal-body canvas-shortcuts-modal-body">
-                        <div class="canvas-shortcuts-panel">
-                            <div class="canvas-help-modal-body">
-                                <div class="canvas-shortcuts-available" id="canvasShortcutsList"></div>
-                                <div class="canvas-help-section">
-                                    <div class="canvas-help-section-header">
-                                        <div class="canvas-help-section-header-left">
-                                            <span class="canvas-help-section-title" id="canvasHelpCtrlTitle"
-                                                data-shortcut-title="ctrl">Ctrl 键操作</span>
-                                        </div>
-                                        <button class="canvas-shortcut-edit-btn" id="editCtrlKeyBtn" title="点击修改快捷键"><i
-                                                class="fas fa-edit"></i></button>
+            <div id="canvasShortcutsModal" class="canvas-manage-modal" style="display: none;">
+                <div class="canvas-manage-modal-header">
+                    <h4 id="canvasShortcutsModalTitle">快捷键</h4>
+                    <button id="canvasShortcutsModalClose" class="canvas-manage-modal-close" aria-label="Close"><i
+                            class="fas fa-times"></i></button>
+                </div>
+                <div class="canvas-manage-modal-body canvas-shortcuts-modal-body">
+                    <div class="canvas-shortcuts-panel">
+                        <div class="canvas-help-modal-body">
+                            <div class="canvas-shortcuts-available" id="canvasShortcutsList"></div>
+                            <div class="canvas-help-section">
+                                <div class="canvas-help-section-header">
+                                    <div class="canvas-help-section-header-left">
+                                        <span class="canvas-help-section-title" id="canvasHelpCtrlTitle"
+                                            data-shortcut-title="ctrl">Ctrl 键操作</span>
                                     </div>
-                                    <div class="canvas-help-row">
-                                        <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
-                                                data-shortcut-display="ctrl">Ctrl</kbd> + <span
-                                                id="canvasHelpCtrlLeftClick">左键（按住）</span></span>
-                                        <span class="canvas-help-desc" id="canvasHelpCtrlLeftDesc">拖动画布 或 栏目卡片</span>
-                                    </div>
-                                    <div class="canvas-help-row">
-                                        <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
-                                                data-shortcut-display="ctrl">Ctrl</kbd> + <span
-                                                id="canvasHelpCtrlWheel">滚轮 或 双指滑动</span></span>
-                                        <span class="canvas-help-desc" id="canvasHelpCtrlWheelDesc">缩放</span>
-                                    </div>
-                                    <div class="canvas-help-row">
-                                        <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
-                                                data-shortcut-display="ctrl">Ctrl</kbd> + <span
-                                                id="canvasHelpCtrlRightClick">右键（单击）</span></span>
-                                        <span class="canvas-help-desc" id="canvasHelpCtrlRightDesc">更改栏目卡片的大小</span>
-                                    </div>
+                                    <button class="canvas-shortcut-edit-btn" id="editCtrlKeyBtn" title="点击修改快捷键"><i
+                                            class="fas fa-edit"></i></button>
                                 </div>
-                                <div class="canvas-help-section">
-                                    <div class="canvas-help-section-header">
-                                        <div class="canvas-help-section-header-left">
-                                            <span class="canvas-help-section-title" id="canvasHelpSpaceTitle"
-                                                data-shortcut-title="space">空格键操作</span>
-                                        </div>
-                                        <button class="canvas-shortcut-edit-btn" id="editSpaceKeyBtn" title="点击修改快捷键"><i
-                                                class="fas fa-edit"></i></button>
-                                    </div>
-                                    <div class="canvas-help-row">
-                                        <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
-                                                id="canvasHelpSpaceKey" data-shortcut-display="space">空格</kbd> + <span
-                                                id="canvasHelpSpaceLeftClick">左键（按住）</span></span>
-                                        <span class="canvas-help-desc" id="canvasHelpSpaceDesc">拖动画布</span>
-                                    </div>
+                                <div class="canvas-help-row">
+                                    <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                            data-shortcut-display="ctrl">Ctrl</kbd> + <span
+                                            id="canvasHelpCtrlLeftClick">左键（按住）</span></span>
+                                    <span class="canvas-help-desc" id="canvasHelpCtrlLeftDesc">拖动画布 或 栏目卡片</span>
                                 </div>
-                                <div class="canvas-help-section">
-                                    <div class="canvas-help-section-title" id="canvasHelpTouchpadTitle">触控板操作</div>
-                                    <div class="canvas-help-row">
-                                        <span class="canvas-help-key"
-                                            style="display:inline-flex;align-items:center;gap:4px;">
-                                            <span id="canvasHelpTouchpadPinch">双指捏合</span>
-                                            <button type="button" class="perf-help-btn" id="pinchHelpBtn1">
-                                                <i class="fas fa-question-circle"></i>
-                                            </button>
-                                        </span>
-                                        <span class="canvas-help-desc" id="canvasHelpTouchpadPinchDesc">缩放画布</span>
-                                    </div>
-                                    <div class="canvas-help-row">
-                                        <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
-                                                data-shortcut-display="ctrl">Ctrl</kbd> + <span
-                                                id="canvasHelpTouchpadModifierSwipe">双指滑动（兼容侧边栏）</span></span>
-                                        <span class="canvas-help-desc"
-                                            id="canvasHelpTouchpadModifierSwipeDesc">缩放</span>
-                                    </div>
-                                    <div class="canvas-help-row">
-                                        <span class="canvas-help-key" id="canvasHelpTouchpadScroll">双指滑动</span>
-                                        <span class="canvas-help-desc" id="canvasHelpTouchpadScrollDesc">拖动画布</span>
-                                    </div>
+                                <div class="canvas-help-row">
+                                    <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                            data-shortcut-display="ctrl">Ctrl</kbd> + <span
+                                            id="canvasHelpCtrlWheel">滚轮 或 双指滑动</span></span>
+                                    <span class="canvas-help-desc" id="canvasHelpCtrlWheelDesc">缩放</span>
+                                </div>
+                                <div class="canvas-help-row">
+                                    <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                            data-shortcut-display="ctrl">Ctrl</kbd> + <span
+                                            id="canvasHelpCtrlRightClick">右键（单击）</span></span>
+                                    <span class="canvas-help-desc" id="canvasHelpCtrlRightDesc">更改栏目卡片的大小</span>
                                 </div>
                             </div>
-                            <!-- 快捷键录制提示 -->
-                            <div class="canvas-shortcut-recorder" id="canvasShortcutRecorder" style="display: none;">
-                                <div class="recorder-content">
-                                    <span class="recorder-text" id="recorderText">请按下新的快捷键...</span>
-                                    <div class="recorder-buttons">
-                                        <button class="recorder-help-btn" id="recorderHelpBtn" title="可用按键"><i
-                                                class="fas fa-question-circle"></i></button>
-                                        <button class="recorder-cancel-btn" id="recorderCancelBtn">取消</button>
+                            <div class="canvas-help-section">
+                                <div class="canvas-help-section-header">
+                                    <div class="canvas-help-section-header-left">
+                                        <span class="canvas-help-section-title" id="canvasHelpSpaceTitle"
+                                            data-shortcut-title="space">空格键操作</span>
                                     </div>
+                                    <button class="canvas-shortcut-edit-btn" id="editSpaceKeyBtn" title="点击修改快捷键"><i
+                                            class="fas fa-edit"></i></button>
                                 </div>
-                                <!-- 可用按键说明 -->
-                                <div class="recorder-help-tooltip" id="recorderHelpTooltip" style="display: none;">
-                                    <div class="tooltip-title" id="recorderHelpTitle">可用按键</div>
-                                    <div class="tooltip-content">
-                                        <div class="tooltip-row"><span class="tooltip-label"
-                                                id="tooltipModifierLabel">修饰键:</span> Ctrl, Alt, Shift, Cmd/Win</div>
-                                        <div class="tooltip-row"><span class="tooltip-label"
-                                                id="tooltipSpecialLabel">特殊键:</span> Space, Tab</div>
-                                        <div class="tooltip-row"><span class="tooltip-label"
-                                                id="tooltipLetterLabel">字母键:</span> A-Z</div>
-                                        <div class="tooltip-row"><span class="tooltip-label"
-                                                id="tooltipNumberLabel">数字键:</span> 0-9</div>
-                                    </div>
+                                <div class="canvas-help-row">
+                                    <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                            id="canvasHelpSpaceKey" data-shortcut-display="space">空格</kbd> + <span
+                                            id="canvasHelpSpaceLeftClick">左键（按住）</span></span>
+                                    <span class="canvas-help-desc" id="canvasHelpSpaceDesc">拖动画布</span>
+                                </div>
+                            </div>
+                            <div class="canvas-help-section">
+                                <div class="canvas-help-section-title" id="canvasHelpTouchpadTitle">触控板操作</div>
+                                <div class="canvas-help-row">
+                                    <span class="canvas-help-key"
+                                        style="display:inline-flex;align-items:center;gap:4px;">
+                                        <span id="canvasHelpTouchpadPinch">双指捏合</span>
+                                        <button type="button" class="perf-help-btn" id="pinchHelpBtn1">
+                                            <i class="fas fa-question-circle"></i>
+                                        </button>
+                                    </span>
+                                    <span class="canvas-help-desc" id="canvasHelpTouchpadPinchDesc">缩放画布</span>
+                                </div>
+                                <div class="canvas-help-row">
+                                    <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
+                                            data-shortcut-display="ctrl">Ctrl</kbd> + <span
+                                            id="canvasHelpTouchpadModifierSwipe">双指滑动（兼容侧边栏）</span></span>
+                                    <span class="canvas-help-desc"
+                                        id="canvasHelpTouchpadModifierSwipeDesc">缩放</span>
+                                </div>
+                                <div class="canvas-help-row">
+                                    <span class="canvas-help-key" id="canvasHelpTouchpadScroll">双指滑动</span>
+                                    <span class="canvas-help-desc" id="canvasHelpTouchpadScrollDesc">拖动画布</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- 快捷键录制提示 -->
+                        <div class="canvas-shortcut-recorder" id="canvasShortcutRecorder" style="display: none;">
+                            <div class="recorder-content">
+                                <span class="recorder-text" id="recorderText">请按下新的快捷键...</span>
+                                <div class="recorder-buttons">
+                                    <button class="recorder-help-btn" id="recorderHelpBtn" title="可用按键"><i
+                                            class="fas fa-question-circle"></i></button>
+                                    <button class="recorder-cancel-btn" id="recorderCancelBtn">取消</button>
+                                </div>
+                            </div>
+                            <!-- 可用按键说明 -->
+                            <div class="recorder-help-tooltip" id="recorderHelpTooltip" style="display: none;">
+                                <div class="tooltip-title" id="recorderHelpTitle">可用按键</div>
+                                <div class="tooltip-content">
+                                    <div class="tooltip-row"><span class="tooltip-label"
+                                            id="tooltipModifierLabel">修饰键:</span> Ctrl, Alt, Shift, Cmd/Win</div>
+                                    <div class="tooltip-row"><span class="tooltip-label"
+                                            id="tooltipSpecialLabel">特殊键:</span> Space, Tab</div>
+                                    <div class="tooltip-row"><span class="tooltip-label"
+                                            id="tooltipLetterLabel">字母键:</span> A-Z</div>
+                                    <div class="tooltip-row"><span class="tooltip-label"
+                                            id="tooltipNumberLabel">数字键:</span> 0-9</div>
                                 </div>
                             </div>
                         </div>
