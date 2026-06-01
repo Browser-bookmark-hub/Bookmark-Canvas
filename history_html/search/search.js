@@ -910,6 +910,19 @@ function handleSearchResultsPanelClick(e) {
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results') return;
 
+    const descriptionOthersBtn = e.target.closest('.canvas-description-others-btn');
+    if (descriptionOthersBtn) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+        searchUiState.showFullscreenDescriptionOthers = true;
+        if (typeof searchCanvasAndRender === 'function') {
+            searchCanvasAndRender(searchUiState.query || '');
+        }
+        return;
+    }
+
     const tagBrowseBackBtn = e.target.closest('.canvas-tag-browse-back-btn');
     if (tagBrowseBackBtn) {
         try {
@@ -2026,6 +2039,7 @@ function applyFullscreenDefaultSearchMode(options = {}) {
         : getCanvasFullscreenSearchScope();
     if (!scope) {
         searchUiState.fullscreenAutoModeLocked = false;
+        searchUiState.showFullscreenDescriptionOthers = false;
         return false;
     }
     if (searchUiState.fullscreenAutoModeLocked) return false;
@@ -2172,6 +2186,7 @@ function setSearchMode(modeKey, options = {}) {
     }
 
     searchUiState.activeMode = modeKey;
+    searchUiState.showFullscreenDescriptionOthers = false;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
     renderSearchModeUI();
 
@@ -2643,11 +2658,13 @@ function initSearchModeUI() {
 
     const menu = document.getElementById('searchModeMenu');
     if (menu) {
-        menu.addEventListener('click', (e) => {
+        menu.addEventListener('mousedown', (e) => {
             // Only handle mode selection in Canvas/mode menu
             if (menu.dataset.menuType && menu.dataset.menuType !== 'mode') return;
             const item = e.target.closest('.search-mode-menu-item');
             if (item) {
+                e.preventDefault();
+                e.stopPropagation();
                 const modeKey = item.getAttribute('data-mode-key');
                 if (modeKey) {
                     setSearchMode(modeKey, { source: 'user' });
@@ -4534,6 +4551,28 @@ function searchCanvasAndRender(query, options = {}) {
     const scored = [];
     const fullscreenScope = getCanvasFullscreenSearchScope();
 
+    const currentScopeId = fullscreenScope ? `${fullscreenScope.kind}:${fullscreenScope.id}` : '';
+    const lastScopeId = searchUiState.lastFullscreenScopeId || '';
+    if (previousCanvasQuery !== nextCanvasQuery || currentScopeId !== lastScopeId) {
+        searchUiState.showFullscreenDescriptionOthers = false;
+        searchUiState.lastFullscreenScopeId = currentScopeId;
+    }
+
+    const fullscreenOthers = [];
+    const belongsToFullscreen = (item, scope) => {
+        if (!scope) return false;
+        if (scope.kind === 'temp' && item.type === 'temp-section' && String(item.id) === String(scope.id)) {
+            return true;
+        }
+        if (scope.kind === 'permanent' && item.type === 'permanent-section' && String(item.id) === String(scope.id)) {
+            return true;
+        }
+        if (scope.kind === 'blank' && item.type === 'md-node' && String(item.id) === String(scope.id)) {
+            return true;
+        }
+        return false;
+    };
+
     // Aggregation buckets
     const groupAggregation = {
         ids: [],
@@ -4662,7 +4701,16 @@ function searchCanvasAndRender(query, options = {}) {
         const rawScore = scoreCanvasSearchItem(item, bookmarkScoringQuery, { isGroupSearch });
         if (rawScore > -Infinity) {
             const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
-            scored.push({ item, s: rawScore + scopeBonus, rawScore });
+            const scoredItem = { item, s: rawScore + scopeBonus, rawScore };
+            if (mode === 'description' && fullscreenScope) {
+                if (belongsToFullscreen(item, fullscreenScope)) {
+                    scored.push(scoredItem);
+                } else {
+                    fullscreenOthers.push(scoredItem);
+                }
+            } else {
+                scored.push(scoredItem);
+            }
 
             // Collect for Aggregation
             if (groupAggregation.type === 'permanent-group') {
@@ -4716,6 +4764,23 @@ function searchCanvasAndRender(query, options = {}) {
             selectedIndex: preferredIndex >= 0 ? preferredIndex : 0
         });
         return;
+    }
+
+    if (mode === 'description' && fullscreenScope) {
+        fullscreenOthers.sort((a, b) => {
+            if (b.s !== a.s) return b.s - a.s;
+            const ta = a.item.title || a.item.label || '';
+            const tb = b.item.title || b.item.label || '';
+            return ta.localeCompare(tb);
+        });
+
+        searchUiState.fullscreenDescriptionOthers = fullscreenOthers.map(x => x.item);
+
+        if (searchUiState.showFullscreenDescriptionOthers) {
+            scored.push(...fullscreenOthers);
+        }
+    } else {
+        searchUiState.fullscreenDescriptionOthers = [];
     }
 
     // 按分数排序
@@ -4865,17 +4930,13 @@ function renderCanvasSearchSuggestions() {
             });
         }
         panel.querySelectorAll('.canvas-suggestion-mode-item').forEach((el) => {
-            el.addEventListener('click', (ev) => {
+            el.addEventListener('mousedown', (ev) => {
                 ev.preventDefault();
                 ev.stopPropagation();
                 const key = el.getAttribute('data-mode-key');
                 if (key) {
                     try { setSearchMode(key, { source: 'user' }); } catch (_) { }
                     try { hideSearchResultsPanel(); } catch (_) { }
-                    try {
-                        const input = document.getElementById('searchInput');
-                        if (input) requestAnimationFrame(() => input.focus());
-                    } catch (_) { }
                 }
             });
         });
@@ -5968,6 +6029,23 @@ function renderCanvasSearchResults(results, options = {}) {
 
             html += `<div class="canvas-bookmark-type-toggle canvas-structure-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact canvas-structure-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:flex-start; gap:${toolbarGap}px; padding:${toolbarPadding};">
                 <div style="display:flex; align-items:center; gap:${controlGap}px;">${cardBtn}${groupBtn}</div>
+            </div>`;
+        }
+    }
+
+    if (searchUiState.activeMode === 'description' && fullscreenScope) {
+        const othersCount = Array.isArray(searchUiState.fullscreenDescriptionOthers)
+            ? searchUiState.fullscreenDescriptionOthers.length
+            : 0;
+        const showingOthers = !!searchUiState.showFullscreenDescriptionOthers;
+
+        if (othersCount > 0 && !showingOthers) {
+            const otherBtnLabel = isZh ? '其他' : 'Other';
+
+            html += `<div class="canvas-description-fullscreen-header" style="display:flex; align-items:center; justify-content:flex-start; padding:6px 8px 6px 8px; border-bottom:1px solid rgba(128, 128, 128, 0.15);">
+                <button class="canvas-description-others-btn" type="button" style="border:1px solid var(--border-color); background:var(--bg-secondary); padding:4px 10px; border-radius:999px; font-size:11px; color:var(--text-secondary); cursor:pointer; font-weight:600; white-space:nowrap;">
+                    ${escapeHtml(otherBtnLabel)} (${othersCount})
+                </button>
             </div>`;
         }
     }
