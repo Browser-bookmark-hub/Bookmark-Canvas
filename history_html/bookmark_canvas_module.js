@@ -15,7 +15,7 @@ const NODE_LAYOUT_ZOOM_MIN = 50;
 const NODE_LAYOUT_ZOOM_MAX = 320;
 const NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM = {
     mac: { md: 70, section: 70 },
-    windows: { md: 90, section: 90 },
+    windows: { md: 70, section: 70 },
     linux: { md: 90, section: 90 },
     other: { md: 90, section: 90 }
 };
