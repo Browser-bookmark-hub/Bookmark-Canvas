@@ -11573,10 +11573,10 @@ function showCanvasEdgeObjectContextMenu(e, edgeId) {
     };
     if (!target.edgeId) return;
     const items = [
+        { action: 'edge-label', label: labels.editLabel, icon: 'edit' },
         { action: 'edge-color', label: labels.color, icon: 'palette' },
         { action: 'edge-locate', label: labels.locate, icon: 'crosshairs' },
         { action: 'edge-direction', label: labels.edgeDirection, icon: 'arrows-alt-h' },
-        { action: 'edge-label', label: labels.editLabel, icon: 'edit' },
         { action: 'edge-delete', label: labels.delete, icon: 'trash-alt', className: 'color-red' }
     ];
     const menu = document.getElementById('bookmark-context-menu');

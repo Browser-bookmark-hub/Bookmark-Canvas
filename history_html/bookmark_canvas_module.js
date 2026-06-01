@@ -32607,6 +32607,9 @@ function showEdgeToolbar(edgeId, x, y) {
     const labelTitle = lang === 'en' ? 'Edit label' : '编辑标签';
 
     toolbar.innerHTML = `
+        <button class="md-node-toolbar-btn" data-action="edge-label" data-tooltip="${labelTitle}">
+            <i class="far fa-edit"></i>
+        </button>
         <button class="md-node-toolbar-btn" data-action="edge-color-toggle" data-tooltip="${colorTitle}">
             <i class="fas fa-palette"></i>
         </button>
@@ -32615,9 +32618,6 @@ function showEdgeToolbar(edgeId, x, y) {
         </button>
         <button class="md-node-toolbar-btn" data-action="edge-direction" data-tooltip="${directionTitle}">
             <i class="fas fa-arrows-alt-h"></i>
-        </button>
-        <button class="md-node-toolbar-btn" data-action="edge-label" data-tooltip="${labelTitle}">
-            <i class="far fa-edit"></i>
         </button>
         <button class="md-node-toolbar-btn" data-action="edge-delete" data-tooltip="${deleteTitle}">
             <i class="far fa-trash-alt"></i>
