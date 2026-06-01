@@ -1669,11 +1669,50 @@ function showImportDialog(options = {}) {
     dialog.className = 'import-dialog';
     dialog.id = 'canvasImportDialog';
 
+    const importInfoHtml = isEn
+        ? `
+        <div style="font-weight: 600; margin-bottom: 6px; color: var(--accent-primary, #7c3aed); font-size: 13px;">Import Instructions</div>
+        <div style="margin-bottom: 8px; line-height: 1.4;">
+            <strong>Canvas Snapshot (ZIP / Folder)</strong><br>
+            Supports <span style="color: #f97316; font-weight: 600;">Full Overwrite Restore</span> (clearing current canvas and replacing all layout and bookmarks) or <span style="color: #f97316; font-weight: 600;">Import as Package</span> (incrementally loading as a grouped canvas section card).
+        </div>
+        <div style="margin-bottom: 8px; line-height: 1.4;">
+            <strong>Bookmarks (HTML / JSON)</strong><br>
+            Import standard HTML browser bookmarks or exported section JSON files. Imported bookmarks will create a <span style="color: #f97316; font-weight: 600;">new temporary section</span>.
+        </div>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
+            💡 <strong>Import Here Tip</strong>: You can right-click any blank canvas area and select <span style="color: #f97316; font-weight: 600;">"Import Here"</span> to import files at the clicked coordinates without affecting your current canvas layout.
+        </div>
+        `
+        : `
+        <div style="font-weight: 600; margin-bottom: 6px; color: var(--accent-primary, #7c3aed); font-size: 13px;">导入功能说明</div>
+        <div style="margin-bottom: 8px; line-height: 1.4;">
+            <strong>画布快照 (ZIP / 文件夹)</strong><br>
+            支持<span style="color: #f97316; font-weight: 600;">全量覆盖还原</span>（清空当前状态，重现快照的排版布局及所有书签数据）或<span style="color: #f97316; font-weight: 600;">快照包导入</span>（增量导入为当前画布下的一个分组卡片）。
+        </div>
+        <div style="margin-bottom: 8px; line-height: 1.4;">
+            <strong>书签文件 (HTML / JSON)</strong><br>
+            导入普通的 HTML 浏览器书签或导出的临时/永久栏目 JSON，导入后将创建为一块<span style="color: #f97316; font-weight: 600;">新的临时栏目</span>。
+        </div>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
+            💡 <strong>此位置导入提示</strong>：您也可以在画布空白处右键并选择<span style="color: #f97316; font-weight: 600;">「此位置导入」</span>，即可在鼠标指定的坐标处导入书签文件，以防意外破坏您当前的画布布局。
+        </div>
+        `;
+
     dialog.innerHTML = `
-        <div class="import-dialog-content" style="max-width: 400px;">
+        <div class="import-dialog-content" style="max-width: 400px; position: relative;">
             <div class="import-dialog-header">
-                <h3>${titleText}</h3>
+                <h3 style="display: flex; align-items: center; justify-content: flex-start; margin: 0; width: 100%;">
+                    <span>${titleText}</span>
+                    <button type="button" class="canvas-import-info-btn" id="importInfoBtn" style="background: none; border: none; padding: 0 4px; color: var(--text-secondary); opacity: 0.8; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; line-height: 1; vertical-align: middle; margin-top: 1.5px;" title="${isEn ? 'View explanation' : '查看说明'}">
+                        <i class="fas fa-info-circle" style="font-size: 14px;"></i>
+                    </button>
+                </h3>
                 <button class="import-dialog-close" id="closeImportDialog">&times;</button>
+            </div>
+            <!-- Popover -->
+            <div id="importInfoPopover" style="display: none; position: absolute; left: 16px; top: 52px; right: 16px; background: var(--bg-elevated, #ffffff); border: 1px solid var(--accent-primary, #7c3aed); border-radius: 8px; padding: 12px; box-shadow: var(--shadow-lg, 0 6px 16px rgba(0,0,0,0.15)); z-index: 1000; font-size: 12px; line-height: 1.5; color: var(--text-primary); text-align: left;">
+                ${importInfoHtml}
             </div>
             <div class="import-dialog-body">
                 <div class="import-options">
@@ -1709,12 +1748,29 @@ function showImportDialog(options = {}) {
     document.body.appendChild(dialog);
 
     // 事件监听
+    const importInfoBtn = dialog.querySelector('#importInfoBtn');
+    const importInfoPopover = dialog.querySelector('#importInfoPopover');
+    if (importInfoBtn && importInfoPopover) {
+        importInfoBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const visible = importInfoPopover.style.display === 'block';
+            importInfoPopover.style.display = visible ? 'none' : 'block';
+        });
+    }
+
     document.getElementById('closeImportDialog').addEventListener('click', () => {
         dialog.remove();
     });
 
     dialog.addEventListener('click', (e) => {
-        if (e.target === dialog) dialog.remove();
+        if (e.target === dialog) {
+            dialog.remove();
+            return;
+        }
+        if (importInfoPopover && importInfoPopover.style.display === 'block' && !e.target.closest('#importInfoPopover') && !e.target.closest('#importInfoBtn')) {
+            importInfoPopover.style.display = 'none';
+        }
     });
 
     document.getElementById('importCanvasZipBtn').addEventListener('click', () => {
@@ -3014,9 +3070,43 @@ function showExportModeDialog(options = {}) {
         : '导出为单个 JSON 书签文件';
     const fullscreenTargetLabel = isFullscreenTarget ? __getFullscreenExportTargetLabel(fullscreenTarget) : '';
     const fullscreenHintPrefix = isEn ? 'Current card:' : '当前栏目：';
-    const backupHintPrefix = isEn ? 'Export automatically creates a backup. See ' : '导出时会进行自动备份，具体参考';
-    const backupHintLink = isEn ? 'Backup' : '「备份」';
-    const backupHintSuffix = isEn ? ' for details.' : '位置。';
+    const exportSelectionInfoHtml = isEn
+        ? `
+        <div style="font-weight: 600; margin-bottom: 6px; color: var(--accent-primary, #7c3aed); font-size: 13px;">Export Instructions</div>
+        <div style="margin-bottom: 8px; line-height: 1.4;">
+            This panel performs a global export of the <span style="color: #f97316; font-weight: 600;">Canvas Snapshot</span> (packaging all card columns, lines, groups, and layouts, suitable for full restores).
+        </div>
+        <div style="margin-bottom: 8px; line-height: 1.4;">
+            <strong>Local / Individual Export:</strong><br>
+            You can also <span style="color: #f97316; font-weight: 600;">right-click directly on the canvas</span> elements to export them individually:
+            <ul style="margin: 4px 0 0 14px; padding: 0; list-style-type: disc;">
+                <li>Permanent columns & copies</li>
+                <li>Temporary columns</li>
+                <li>Card groups (nested groups / temporary box selection groups)</li>
+            </ul>
+        </div>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
+            💡 <span style="color: #f97316; font-weight: 600;">Exporting automatically creates a backup</span>. See <button type="button" id="exportBackupJumpBtn" style="border: 0; background: transparent; padding: 0; color: #2563eb; text-decoration: underline; cursor: pointer; font: inherit;">Backup</button> for details.
+        </div>
+        `
+        : `
+        <div style="font-weight: 600; margin-bottom: 6px; color: var(--accent-primary, #7c3aed); font-size: 13px;">导出功能说明</div>
+        <div style="margin-bottom: 8px; line-height: 1.4;">
+            这里是全局导出<span style="color: #f97316; font-weight: 600;">「画布快照」</span>（打包全部卡片栏目、连接线、嵌套组及排版布局，适用于后续完整恢复）。
+        </div>
+        <div style="margin-bottom: 8px; line-height: 1.4;">
+            <strong>局部元素导出：</strong><br>
+            您也可以直接在<span style="color: #f97316; font-weight: 600;">画布上通过右键</span>以下元素来单独进行导出：
+            <ul style="margin: 4px 0 0 14px; padding: 0; list-style-type: disc;">
+                <li>永久栏目及其副本</li>
+                <li>临时栏目</li>
+                <li>卡片组（嵌套组 / 临时左键框选组）</li>
+            </ul>
+        </div>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
+            💡 <span style="color: #f97316; font-weight: 600;">导出时会进行自动备份</span>，具体参考<button type="button" id="exportBackupJumpBtn" style="border: 0; background: transparent; padding: 0; color: #2563eb; text-decoration: underline; cursor: pointer; font: inherit;">「备份」</button>位置。
+        </div>
+        `;
 
     // AI 指南文件名选择（仅 Obsidian 包导出含 AI 指南；全屏单文件导出无此文件）
     // AGENTS.md 默认勾选（供 codex），CLAUDE.md 供 Claude Code，另可自定义名字。
@@ -3082,14 +3172,27 @@ function showExportModeDialog(options = {}) {
     `;
 
     dialog.innerHTML = `
-        <div class="import-dialog-content canvas-export-dialog-content" style="max-width: 430px; width: 90vw;">
+        <div class="import-dialog-content canvas-export-dialog-content" style="max-width: 430px; width: 90vw; position: relative;">
             <div class="import-dialog-header" style="padding: 10px 16px;">
                 <h3 style="margin-left: 4px;">${dialogTitle}</h3>
                 <button class="import-dialog-close" id="closeExportModeDialog" style="margin-top: 1px;">&times;</button>
             </div>
             <div class="import-dialog-body" style="padding: 16px;">
                 ${fullscreenTargetLabel ? `<div class="canvas-export-current-target">${fullscreenHintPrefix} ${fullscreenTargetLabel}</div>` : ''}
-                <div class="canvas-export-section-title">${exportSelectionTitle}</div>
+                
+                <div style="position: relative;">
+                    <div class="canvas-export-section-title" style="display: flex; align-items: center; margin-bottom: 6px;">
+                        <span>${exportSelectionTitle}</span>
+                        <button type="button" class="canvas-export-info-btn" id="exportSelectionInfoBtn" style="background: none; border: none; padding: 0 4px; color: var(--text-secondary); opacity: 0.8; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; line-height: 1; vertical-align: middle;" title="${isEn ? 'View explanation' : '查看说明'}">
+                            <i class="fas fa-info-circle" style="font-size: 14px;"></i>
+                        </button>
+                    </div>
+                    <!-- Popover -->
+                    <div id="exportSelectionInfoPopover" style="display: none; position: absolute; left: 0; top: 100%; right: 0; margin-top: 4px; background: var(--bg-elevated, #ffffff); border: 1px solid var(--accent-primary, #7c3aed); border-radius: 8px; padding: 12px; box-shadow: var(--shadow-lg, 0 6px 16px rgba(0,0,0,0.15)); z-index: 1000; font-size: 12px; line-height: 1.5; color: var(--text-primary); text-align: left;">
+                        ${exportSelectionInfoHtml}
+                    </div>
+                </div>
+
                 <div class="import-options" style="gap: 12px;">
                     <button class="import-option-btn canvas-export-primary-option" id="exportModeA" style="padding: 14px 16px; display: flex; align-items: center;">
                         <div style="width: 32px; display: flex; justify-content: center; margin-right: 12px;">
@@ -3114,9 +3217,6 @@ function showExportModeDialog(options = {}) {
                         </div>
                     </button>
                     ` : ''}
-                </div>
-                <div class="canvas-export-backup-hint" style="margin-top: 12px; font-size: 12px; line-height: 1.5; opacity: 0.78;">
-                    ${backupHintPrefix}<button type="button" id="exportBackupJumpBtn" style="border: 0; background: transparent; padding: 0; color: #2563eb; text-decoration: underline; cursor: pointer; font: inherit;">${backupHintLink}</button>${backupHintSuffix}
                 </div>
                 ${guideNameBlockHtml}
             </div>
@@ -3160,7 +3260,6 @@ function showExportModeDialog(options = {}) {
         r.addEventListener('change', () => { syncCustomEnabled(); persistGuideNamePref(); });
     });
     if (guideCustomInput) guideCustomInput.addEventListener('input', persistGuideNamePref);
-
     // Popover Event Listeners
     const infoBtn = dialog.querySelector('#guideNameInfoBtn');
     const infoPopover = dialog.querySelector('#guideNameInfoPopover');
@@ -3173,9 +3272,28 @@ function showExportModeDialog(options = {}) {
             infoPopover.style.display = visible ? 'none' : 'block';
         });
     }
+
+    const exportSelectionInfoBtn = dialog.querySelector('#exportSelectionInfoBtn');
+    const exportSelectionInfoPopover = dialog.querySelector('#exportSelectionInfoPopover');
+    if (exportSelectionInfoBtn && exportSelectionInfoPopover) {
+        exportSelectionInfoBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const visible = exportSelectionInfoPopover.style.display === 'block';
+            exportSelectionInfoPopover.style.display = visible ? 'none' : 'block';
+        });
+    }
+
     dialog.addEventListener('click', (e) => {
+        if (e.target === dialog) {
+            dialog.remove();
+            return;
+        }
         if (infoPopover && infoPopover.style.display === 'block' && !e.target.closest('#guideNameInfoPopover') && !e.target.closest('#guideNameInfoBtn')) {
             infoPopover.style.display = 'none';
+        }
+        if (exportSelectionInfoPopover && exportSelectionInfoPopover.style.display === 'block' && !e.target.closest('#exportSelectionInfoPopover') && !e.target.closest('#exportSelectionInfoBtn')) {
+            exportSelectionInfoPopover.style.display = 'none';
         }
     });
 
@@ -3197,9 +3315,6 @@ function showExportModeDialog(options = {}) {
         dialog.remove();
     });
 
-    dialog.addEventListener('click', (e) => {
-        if (e.target === dialog) dialog.remove();
-    });
     const backupJumpBtn = document.getElementById('exportBackupJumpBtn');
     if (backupJumpBtn) {
         backupJumpBtn.addEventListener('click', (e) => {
