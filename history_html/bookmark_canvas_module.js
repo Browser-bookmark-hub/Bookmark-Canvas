@@ -387,8 +387,8 @@ function __showDescHeightSettingsPopover(anchorEl, options = {}) {
     const rowsLabel = options.rowsLabel || (isEn ? 'Rows' : '行');
 
     const defaults = options.defaults || {};
-    const defaultDisplayRows = Number.isFinite(defaults.displayRows) ? defaults.displayRows : 4;
-    const defaultEditRows = Number.isFinite(defaults.editRows) ? defaults.editRows : 5;
+    const defaultDisplayRows = Number.isFinite(defaults.displayRows) ? defaults.displayRows : 3;
+    const defaultEditRows = Number.isFinite(defaults.editRows) ? defaults.editRows : 9;
 
     const getSettings = typeof options.getSettings === 'function'
         ? options.getSettings
@@ -26392,9 +26392,9 @@ function renderTempNode(section, options = {}) {
     }
     const descHeightDefaults = {
         displayMode: 'rows',
-        displayRows: 4,
+        displayRows: 3,
         editMode: 'full',
-        editRows: 5
+        editRows: 9
     };
     let isEditingDesc = false;
     const descHeightSettings = __readDescHeightSettings(
@@ -29461,9 +29461,9 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     }
     const descHeightDefaults = {
         displayMode: 'rows',
-        displayRows: 4,
+        displayRows: 3,
         editMode: 'full',
-        editRows: 5
+        editRows: 9
     };
     let isEditingTip = false;
     const descHeightSettings = __readDescHeightSettings(
@@ -30920,9 +30920,9 @@ function __applyDescHeightSettingsRealtimeSync(storageKey, rawValue) {
     const parsed = __safeParseCanvasStorageJson(rawValue);
     const defaults = {
         displayMode: 'rows',
-        displayRows: 4,
+        displayRows: 3,
         editMode: 'full',
-        editRows: 5
+        editRows: 9
     };
     const normalized = __readDescHeightSettings(
         storageKey,

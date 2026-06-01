@@ -7077,7 +7077,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .permanent-section-tip-container.desc-display-fixed:not(.editing) .permanent-section-tip {
-    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-display-rows, 4) * 1em);
+    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-display-rows, 3) * 1em);
     overflow-y: auto;
     overflow-x: hidden;
 }
@@ -7329,7 +7329,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .permanent-section-tip-container.editing.desc-edit-fixed .permanent-section-tip {
-    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-edit-rows, 5) * 1em);
+    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-edit-rows, 9) * 1em);
     overflow-y: auto;
     overflow-x: hidden;
 }
@@ -8077,7 +8077,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .temp-node-description-container.desc-display-fixed:not(.editing) .temp-node-description {
-    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-display-rows, 4) * 1em);
+    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-display-rows, 3) * 1em);
     overflow-y: auto;
     overflow-x: hidden;
 }
@@ -8237,7 +8237,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .temp-node-description-container.editing.desc-edit-fixed .temp-node-description {
-    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-edit-rows, 5) * 1em);
+    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-edit-rows, 9) * 1em);
     overflow-y: auto;
     overflow-x: hidden;
 }
