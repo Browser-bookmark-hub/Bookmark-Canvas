@@ -602,6 +602,7 @@
 
     function __onPopoverInputKeydown(ev) {
         if (ev.key === 'Enter') {
+            if (ev.isComposing) return;
             ev.preventDefault();
             if (__popoverCtx && __popoverCtx.selectedColor) __confirmCurrentSelection();
         } else if (ev.key === 'Escape') {

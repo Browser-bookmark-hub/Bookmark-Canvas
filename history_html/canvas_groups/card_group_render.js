@@ -310,6 +310,7 @@ function __cardGroupStartRenamePill(pill, node) {
 
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
+            if (e.isComposing) return;
             e.preventDefault();
             commit(true);
         } else if (e.key === 'Escape') {

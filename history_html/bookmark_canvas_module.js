@@ -12381,6 +12381,7 @@ function __bindNodeLayoutZoomInput(element) {
 
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
+            if (e.isComposing) return;
             e.preventDefault();
             input.blur();
         } else if (e.key === 'Escape') {
@@ -26267,6 +26268,7 @@ function renderTempNode(section, options = {}) {
     titleInput.addEventListener('keydown', (ev) => {
         if (!titleInput.classList.contains('editing')) return;
         if (ev.key === 'Enter') {
+            if (ev.isComposing) return;
             ev.preventDefault();
             finishTempSectionTitleEdit(section, titleInput, renameBtn, true);
         } else if (ev.key === 'Escape') {
@@ -33249,6 +33251,7 @@ function openEdgeLabelPopover(edgeId, options = {}) {
     };
     const onKeydown = (event) => {
         if (event.key === 'Enter') {
+            if (event.isComposing) return;
             event.preventDefault();
             close(true);
         } else if (event.key === 'Escape') {
@@ -33325,6 +33328,7 @@ function openTempSectionRename(sectionId, options = {}) {
         };
         const onKeydown = (event) => {
             if (event.key === 'Enter') {
+                if (event.isComposing) return;
                 event.preventDefault();
                 close(true);
             } else if (event.key === 'Escape') {
@@ -33682,7 +33686,11 @@ function startEdgeLabelInlineEdit(edgeId) {
     };
 
     div.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); apply(); }
+        if (e.key === 'Enter') {
+            if (e.isComposing) return;
+            e.preventDefault();
+            apply();
+        }
         else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
     });
     div.addEventListener('input', () => layout());
@@ -35587,6 +35595,7 @@ function createCanvasOtherSettingsModal() {
         });
         trackpadZoomRateInput.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
+                if (event.isComposing) return;
                 event.preventDefault();
                 normalizeTrackpadRateInput();
                 scheduleOtherSave();

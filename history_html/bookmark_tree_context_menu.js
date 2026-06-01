@@ -3471,6 +3471,7 @@ function showBookmarkEditorModal(options = {}) {
 
         function handleKeydown(e) {
             if (e.key === 'Enter') {
+                if (e.isComposing) return;
                 e.preventDefault();
                 handleSave();
             } else if (e.key === 'Escape') {
@@ -5378,6 +5379,7 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
                 return;
             }
             if (event.key === 'Enter') {
+                if (event.isComposing) return;
                 const target = event.target;
                 if (target && target.closest && target.closest('.bookmark-add-secondary-choice')) {
                     event.preventDefault();
@@ -12716,6 +12718,7 @@ async function showWindowNameEditor(item, windowId, currentName, lang) {
     input.addEventListener('keydown', (e) => {
         e.stopPropagation();
         if (e.key === 'Enter') {
+            if (e.isComposing) return;
             save();
         } else if (e.key === 'Escape') {
             cancel();

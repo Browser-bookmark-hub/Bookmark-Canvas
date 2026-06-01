@@ -4725,6 +4725,7 @@ async function exportCanvasPackage(options = {}) {
             try { input.focus(); input.select(); } catch (_) { }
             input.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
+                    if (e.isComposing) return;
                     e.preventDefault();
                     cleanup({
                         path: String(input.value || ''),
