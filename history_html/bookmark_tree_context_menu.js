@@ -12,6 +12,7 @@ const getTreeExportDownloadFolder = () => [getTreeExportRootFolder(), getTreeExp
 
 // 全局变量
 let contextMenu = null;
+let contextSubmenu = null;
 let currentContextNode = null;
 let bookmarkClipboard = null; // 剪贴板 { action: 'cut'|'copy', nodeId, nodeData }
 
@@ -203,13 +204,13 @@ if (typeof window !== 'undefined') {
 }
 
 // 全局：默认打开方式与特定窗口/分组ID
-let defaultOpenMode = 'specific-window'; // 默认：'specific-window'（in Same Window）。可选：'new-tab' | 'new-window' | 'incognito' | 'specific-window' | 'specific-group' | 'scoped-window' | 'scoped-group' | 'same-window-specific-group'
+let defaultOpenMode = 'new-tab'; // 默认：'new-tab'（新标签页）。可选：'new-tab' | 'new-window' | 'incognito' | 'specific-window' | 'specific-group' | 'scoped-window' | 'scoped-group' | 'same-window-specific-group'
 let specificWindowId = null; // chrome.windows Window ID
 let specificTabGroupId = null; // chrome.tabGroups Group ID（在“特定标签组”模式下复用）
 let specificGroupWindowId = null; // 保存分组所在窗口，确保新开的标签在同一窗口
 
 // 超链接系统：独立的打开方式与窗口/分组ID（与书签系统完全隔离）
-let hyperlinkDefaultOpenMode = 'specific-window'; // 超链接的默认打开方式：'specific-window'（in Same Window）
+let hyperlinkDefaultOpenMode = 'new-tab'; // 超链接的默认打开方式：'new-tab'（新标签页）
 let hyperlinkSpecificWindowId = null; // 超链接专用的窗口ID
 let hyperlinkSpecificTabGroupId = null; // 超链接专用的分组ID
 let hyperlinkSpecificGroupWindowId = null; // 超链接分组所在窗口
@@ -1367,6 +1368,7 @@ function __isSelectModeUiTarget(target) {
         target.closest('#batch-action-panel') ||
         target.closest('#batch-toolbar') ||
         target.closest('#bookmark-context-menu') ||
+        target.closest('#bookmark-context-submenu') ||
         target.closest('.manual-selector-overlay') ||
         target.closest('.manual-selector-dialog') ||
         target.closest('#canvasManageModal') ||
@@ -1521,6 +1523,7 @@ function __ensureBatchHelpAnchors() {
             badge.className = 'batch-help-anchor';
             badge.textContent = String(n);
             el.appendChild(badge);
+            el.classList.add('has-help-badge');
         });
     };
 
@@ -1552,7 +1555,7 @@ function getBatchHelpHtml(lang) {
 <div class="batch-help-card" id="batch-help-card-temp-merge">
   <div class="batch-help-card-title"><span class="batch-help-badge">2</span>临时栏目 / 合并</div>
   <div class="batch-help-line">临时栏目：把当前选择汇总成一个新的临时栏目，方便临时整理。</div>
-  <div class="batch-help-line">合并：会生成一个新文件夹，名称为时间戳（例如：${formatTimestampForTitle()}）。</div>
+  <div class="batch-help-line">合并：会在根目录下生成一个新文件夹并合并（临时栏目则在当前栏目内），名称默认为当前时间戳（例如：${formatTimestampForTitle()}）。</div>
 </div>
 
 <div class="batch-help-card" id="batch-help-card-copy-cut">
@@ -1579,7 +1582,7 @@ function getBatchHelpHtml(lang) {
 <div class="batch-help-card" id="batch-help-card-temp-merge">
   <div class="batch-help-card-title"><span class="batch-help-badge">2</span>Temp Section / Merge</div>
   <div class="batch-help-line">Temp Section: collects current selection into a new temporary section for quick organization.</div>
-  <div class="batch-help-line">Merge: creates a new folder named by timestamp (e.g. ${formatTimestampForTitle()}).</div>
+  <div class="batch-help-line">Merge: creates a new folder in the root directory (or within the current section for temp items), named by current timestamp by default (e.g. ${formatTimestampForTitle()}).</div>
 </div>
 
 <div class="batch-help-card" id="batch-help-card-copy-cut">
@@ -1600,9 +1603,10 @@ function hideBatchHelpPopover() {
     batchHelpPopoverEl.remove();
     batchHelpPopoverEl = null;
 
-    // Remove button-side numeric anchors
+    // Remove button-side numeric anchors and classes
     try {
         document.querySelectorAll('#batch-action-panel .context-menu-item .batch-help-anchor').forEach((el) => el.remove());
+        document.querySelectorAll('#batch-action-panel .context-menu-item.has-help-badge').forEach((el) => el.classList.remove('has-help-badge'));
     } catch (_) { }
 }
 
@@ -2154,6 +2158,13 @@ function initContextMenu() {
     // 初始挂载到body，使用时会动态插入到目标节点附近
     document.body.appendChild(contextMenu);
 
+    // 创建子菜单容器
+    contextSubmenu = document.createElement('div');
+    contextSubmenu.id = 'bookmark-context-submenu';
+    contextSubmenu.className = 'bookmark-context-menu bookmark-context-submenu';
+    contextSubmenu.style.display = 'none';
+    document.body.appendChild(contextSubmenu);
+
     // 绑定超链接的右键菜单
     attachHyperlinkContextMenu();
 
@@ -2171,17 +2182,55 @@ function initContextMenu() {
             scrollContainer.scrollTop += e.deltaY;
             scrollContainer.scrollLeft += e.deltaX;
 
+            // 滚动时隐藏子菜单
+            hideSubmenu();
+
             // 注意：不调用 e.stopPropagation()，保持事件冒泡
         }
     }, { passive: false }); // 使用 passive: false 以允许 preventDefault()
 
+    // 监听子菜单的滚轮，如果子菜单滚动，也隐藏或者直接滚动（由于子菜单是 fixed，这里可以同样处理滚动）
+    contextSubmenu.addEventListener('wheel', (e) => {
+        const scrollContainer = contextMenu.closest('.permanent-section-body, .temp-node-body');
+        if (scrollContainer) {
+            e.preventDefault();
+            scrollContainer.scrollTop += e.deltaY;
+            scrollContainer.scrollLeft += e.deltaX;
+            hideSubmenu(); // 滚动时关闭子菜单
+        }
+    }, { passive: false });
+
     // 点击其他地方关闭菜单（使用捕获阶段，优先处理）
     document.addEventListener('click', (e) => {
-        // 如果点击的不是菜单内部，关闭菜单
-        if (contextMenu && !contextMenu.contains(e.target)) {
+        // 如果点击的不是菜单和子菜单内部，关闭菜单
+        const clickInMenu = contextMenu && contextMenu.contains(e.target);
+        const clickInSubmenu = contextSubmenu && contextSubmenu.contains(e.target);
+        if (!clickInMenu && !clickInSubmenu) {
             hideContextMenu();
         }
     }, true);  // 使用捕获阶段
+
+    // 监听全局滚动，关闭菜单
+    window.addEventListener('scroll', (e) => {
+        if (contextMenu && contextMenu.style.display !== 'none') {
+            // 如果滚动的容器是包含右键菜单的内部滚动容器（例如永久栏目/临时栏目的滚动体），我们只关闭二级子菜单，让主菜单跟着列表滚动
+            if (e.target && e.target.nodeType === Node.ELEMENT_NODE && 
+                e.target !== document.body && e.target !== document.documentElement && 
+                e.target.contains(contextMenu)) {
+                hideSubmenu();
+            } else {
+                // 如果是其他不相干的容器或者全局窗口滚动，则关闭整个菜单
+                if (e.target !== contextMenu && !contextMenu.contains(e.target) && e.target !== contextSubmenu && (!contextSubmenu || !contextSubmenu.contains(e.target))) {
+                    hideContextMenu();
+                }
+            }
+        }
+    }, true);
+
+    // 窗口调整大小时，关闭菜单
+    window.addEventListener('resize', () => {
+        hideContextMenu();
+    });
 
     // 也监听右键事件，关闭已打开的菜单
     document.addEventListener('contextmenu', (e) => {
@@ -2192,7 +2241,7 @@ function initContextMenu() {
             const inTempDescription = linkElement.closest('.temp-node-description, .temp-node-description-editor');
             const inMdNodeContent = linkElement.closest('.md-canvas-text, .md-canvas-editor'); // 修复：使用 md-canvas-text
 
-            // 如果是描述区域的超链接，不要关闭菜单（由超链接处理器处理）
+            // 如果是描述区域 of 超链接，不要关闭菜单（由超链接处理器处理）
             if (inPermanentTip || inTempDescription || inMdNodeContent) {
                 return;
             }
@@ -2210,9 +2259,6 @@ function initContextMenu() {
             hideContextMenu();
         }
     });
-
-    // Resize时不调整菜单位置（保持嵌入式相对定位）
-    // 嵌入式菜单会随DOM自然调整，无需手动处理
 
     console.log('[右键菜单] 初始化完成');
 }
@@ -2749,12 +2795,12 @@ async function showContextMenu(e, node) {
         });
 
         // 指定横向布局行次：
-        // 行1：select；行2：open；行3：其余（delete/settings/structure等）
+        // 行1：actions（包含选择及编辑的所有操作，由 flex 容器自动换行，填充空白）；行2：open；行3：其余（settings/structure等）
         const explicitOrder = [];
-        if (groups.select) explicitOrder.push('select');
+        if (groups.actions) explicitOrder.push('actions');
         if (groups.open) explicitOrder.push('open');
         // 其余分组保持出现顺序
-        groupOrder.forEach(g => { if (!['select', 'open'].includes(g)) explicitOrder.push(g); });
+        groupOrder.forEach(g => { if (!['actions', 'open'].includes(g)) explicitOrder.push(g); });
 
         const groupElements = explicitOrder.map((groupName, idx) => {
             const groupItems = groups[groupName];
@@ -2766,7 +2812,10 @@ async function showContextMenu(e, node) {
                 const colorClass = item.action === 'select-item' ? 'color-blue' : item.action === 'delete' ? 'color-red' : '';
                 const hiddenStyle = item.hidden ? 'style="display:none;"' : '';
                 const extraClass = item.className ? item.className : '';
-                const labelContent = item.labelHTML ? item.labelHTML : `<span>${item.label || ''}</span>`;
+                let labelContent = item.labelHTML ? item.labelHTML : `<span>${item.label || ''}</span>`;
+                if (item.hasSubmenu) {
+                    labelContent = `<span>${item.label || ''} <i class="fas fa-chevron-right" style="margin-left: auto; font-size: 0.8em; opacity: 0.7;"></i></span>`;
+                }
                 return `
                     <div class="context-menu-item ${disabled} ${colorClass} ${selected} ${labelClass} ${extraClass}" data-action="${item.action}" ${hiddenStyle}>
                         ${icon}
@@ -2774,8 +2823,8 @@ async function showContextMenu(e, node) {
                     </div>`;
             }).join('');
             const html = `<div class="context-menu-group" data-group="${groupName}">${inner}</div>`;
-            // 在第1组和第2组之后插入换行占位，使 delete/settings 固定到第3行
-            if (idx === 0 || idx === 1) {
+            // 仅在第1组 (actions) 之后插入换行占位，使后面的“默认打开模式”与“纵/横向布局切换”并排显示
+            if (idx === 0) {
                 return html + '<div class="context-menu-break"></div>';
             }
             return html;
@@ -2799,7 +2848,10 @@ async function showContextMenu(e, node) {
             const colorClass = item.action === 'select-item' ? 'color-blue' : item.action === 'delete' ? 'color-red' : '';
             const hiddenStyle = item.hidden ? 'style="display:none;"' : '';
             const extraClass = item.className ? item.className : '';
-            const labelContent = item.labelHTML ? item.labelHTML : `<span>${item.label || ''}</span>`;
+            let labelContent = item.labelHTML ? item.labelHTML : `<span>${item.label || ''}</span>`;
+            if (item.hasSubmenu) {
+                labelContent = `<span>${item.label || ''} <i class="fas fa-chevron-right" style="margin-left: auto; font-size: 0.8em; opacity: 0.7;"></i></span>`;
+            }
 
             return `
                 <div class="context-menu-item ${disabled} ${colorClass} ${selected} ${labelClass} ${extraClass}" data-action="${item.action}" ${hiddenStyle}>
@@ -2871,6 +2923,14 @@ async function showContextMenu(e, node) {
             if (action === 'open-label') {
                 return;
             }
+            // 如果是打开子菜单的触发器
+            if (action === 'open-submenu-trigger') {
+                toggleSubmenu(item, context);
+                return;
+            }
+
+            // Click on other main menu item hides submenu
+            hideSubmenu();
 
             handleMenuAction(action, context);
             hideContextMenu();
@@ -2881,6 +2941,412 @@ async function showContextMenu(e, node) {
     embedContextMenu(node);
 
     contextMenu.style.display = 'block';
+
+    // Apply custom positioning if horizontal layout and node level is 5 or below
+    const nodeLevel = parseInt(node.dataset.nodeLevel || '0', 10);
+    if (contextMenuHorizontal && nodeLevel >= 4) {
+        const iconEl = node.querySelector('.tree-icon');
+        if (iconEl) {
+            const iconRect = iconEl.getBoundingClientRect();
+            const iconCenter = iconRect.left + iconRect.width / 2;
+
+            // Reset positioning temporarily to measure default
+            contextMenu.style.left = '0px';
+            const menuRect = contextMenu.getBoundingClientRect();
+            const menuWidth = menuRect.width || contextMenu.offsetWidth || 250;
+            const defaultLeft = menuRect.left;
+
+            const treeContainer = node.closest('.bookmark-tree') || node.closest('.canvas-main-container') || document.body;
+            const treeRect = treeContainer.getBoundingClientRect();
+
+            let targetLeft = iconCenter - menuWidth / 2;
+            const padding = 8;
+            const minLeft = treeRect.left + padding;
+            const maxLeft = treeRect.right - padding - menuWidth;
+            targetLeft = Math.max(minLeft, Math.min(maxLeft, targetLeft));
+
+            const shift = targetLeft - defaultLeft;
+            contextMenu.style.left = `${shift}px`;
+        }
+    } else {
+        contextMenu.style.left = '';
+    }
+}
+
+// 渲染二级菜单
+function renderSubmenu(context) {
+    if (!contextSubmenu) return;
+
+    const lang = currentLang || 'zh_CN';
+    contextSubmenu.classList.remove('lang-zh', 'lang-en');
+    contextSubmenu.classList.add(lang === 'zh_CN' ? 'lang-zh' : 'lang-en');
+
+    // Sync density classes from the main contextMenu to match size
+    contextSubmenu.classList.remove('density-xs', 'density-sm', 'density-md', 'density-lg');
+    const activeDensity = ['density-xs', 'density-sm', 'density-md', 'density-lg'].find(cls => contextMenu.classList.contains(cls));
+    if (activeDensity) {
+        contextSubmenu.classList.add(activeDensity);
+    }
+
+    // 构建子菜单项
+    const submenuItems = buildSubmenuItems(context);
+
+    // 渲染 HTML
+    const submenuHTML = submenuItems.map(item => {
+        if (item.separator) {
+            return '<div class="context-menu-separator"></div>';
+        }
+        if (item.separatorShort) {
+            return '<div class="context-menu-separator short"></div>';
+        }
+
+        const icon = item.icon ? `<i class="fas fa-${item.icon}"></i>` : '';
+        const disabled = item.disabled ? 'disabled' : '';
+        const selected = item.selected ? 'selected-open' : '';
+        const labelClass = item.action === 'open-label' ? 'section-label' : '';
+        const colorClass = item.action === 'select-item' ? 'color-blue' : item.action === 'delete' ? 'color-red' : '';
+        const hiddenStyle = item.hidden ? 'style="display:none;"' : '';
+        const extraClass = item.className ? item.className : '';
+        const labelContent = item.labelHTML ? item.labelHTML : `<span>${item.label || ''}</span>`;
+
+        return `
+            <div class="context-menu-item ${disabled} ${colorClass} ${selected} ${labelClass} ${extraClass}" data-action="${item.action}" ${hiddenStyle}>
+                ${icon}
+                <span class="context-menu-item-label">${labelContent}</span>
+            </div>
+        `;
+    }).filter(html => html !== '').join('');
+
+    contextSubmenu.innerHTML = submenuHTML;
+
+    // 绑定子菜单的 badge 点击事件
+    contextSubmenu.querySelectorAll('.sub-badge[data-sub-action]').forEach(badge => {
+        badge.addEventListener('click', async (event) => {
+            const subAction = badge.dataset.subAction;
+            if (!subAction || !context) return;
+            event.preventDefault();
+            event.stopPropagation();
+            try {
+                switch (subAction) {
+                    case 'add-template-run':
+                        hideContextMenu();
+                        await openBookmarkAddByTemplateAction(context);
+                        return;
+                    case 'swsg-new-group':
+                    case 'swsg-new-window':
+                        if (!context.nodeUrl) return;
+                        await openInSameWindowSpecificGroup(context.nodeUrl, {
+                            context,
+                            forceNewGroup: subAction === 'swsg-new-group' || subAction === 'swsg-new-window',
+                            forceNewWindow: subAction === 'swsg-new-window'
+                        });
+                        await setDefaultOpenMode('same-window-specific-group');
+                        break;
+                    case 'scoped-group-new':
+                        if (!context.nodeUrl) return;
+                        await openInScopedTabGroup(context.nodeUrl, { context, forceNew: true });
+                        await setDefaultOpenMode('scoped-group');
+                        break;
+                    case 'scoped-window-new':
+                        if (!context.nodeUrl) return;
+                        await openInScopedWindow(context.nodeUrl, { context, forceNew: true });
+                        await setDefaultOpenMode('scoped-window');
+                        break;
+                    default:
+                        console.warn('[右键菜单] unknown sub-action:', subAction);
+                }
+            } catch (badgeError) {
+                console.warn('[右键菜单] sub-badge 操作失败:', badgeError);
+            }
+            hideContextMenu();
+        });
+    });
+
+    // 绑定子菜单项点击事件
+    contextSubmenu.querySelectorAll('.context-menu-item:not(.disabled)').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const action = item.dataset.action;
+            if (action === 'open-label') return;
+
+            handleMenuAction(action, context);
+            hideContextMenu();
+        });
+    });
+}
+
+// 隐藏二级菜单，并在纵向布局下重置一级菜单的位置
+function hideSubmenu() {
+    if (contextSubmenu) {
+        contextSubmenu.style.display = 'none';
+    }
+    if (contextMenu && !contextMenuHorizontal) {
+        contextMenu.style.left = '';
+    }
+}
+
+// 展开/收起二级菜单
+function toggleSubmenu(triggerItem, context) {
+    if (!contextSubmenu) return;
+
+    if (contextSubmenu.style.display === 'block') {
+        hideSubmenu();
+        return;
+    }
+
+    // 先渲染子菜单内容
+    renderSubmenu(context);
+
+    // 挂载到 body 以便进行屏幕绝对定位
+    if (contextSubmenu.parentElement !== document.body) {
+        document.body.appendChild(contextSubmenu);
+    }
+
+    // 关键：在测量前临时设置为 fixed 并重置 transform，确保浏览器计算出正确的 offsetWidth / offsetHeight
+    contextSubmenu.style.transform = 'none';
+    contextSubmenu.style.position = 'fixed';
+    contextSubmenu.style.display = 'block';
+
+    // 计算一级菜单的缩放比例 (scale)
+    let scale = 1;
+    if (contextMenu) {
+        const scaleInfo = __getBookmarkAddLocateContainerScale(contextMenu);
+        if (scaleInfo && scaleInfo.scaleX) {
+            scale = scaleInfo.scaleX;
+        }
+    }
+
+    const triggerRect = triggerItem.getBoundingClientRect();
+    const submenuWidth = contextSubmenu.offsetWidth || 230;
+    const submenuHeight = contextSubmenu.offsetHeight || 300;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    // 计算实际的缩放后宽度和高度
+    const visualWidth = submenuWidth * scale;
+    const visualHeight = submenuHeight * scale;
+
+    // 定位和变换原点
+    let left, top, transformOriginX, transformOriginY;
+
+    if (contextMenuHorizontal) {
+        // 横向布局下：二级子菜单显示在“默认打开模式”按钮的下方或上方
+        transformOriginY = 'top';
+        top = triggerRect.bottom + 4;
+        
+        // 检查底部是否溢出，如果溢出则显示在上方
+        if (top + visualHeight > viewportHeight - 8) {
+            top = triggerRect.top - submenuHeight - 4;
+            transformOriginY = 'bottom';
+        }
+        
+        // 水平对齐：默认左对齐，如果右侧溢出则右对齐
+        if (triggerRect.left + visualWidth <= viewportWidth - 8) {
+            left = triggerRect.left;
+            transformOriginX = 'left';
+        } else {
+            left = triggerRect.right - submenuWidth;
+            transformOriginX = 'right';
+        }
+        
+        // 边界防护
+        left = Math.max(8, left);
+    } else {
+        // 纵向布局下：二级子菜单显示在“打开/默认打开模式”按钮的右侧或左侧
+        transformOriginY = 'center';
+
+        // 检查左右是否有足够的位置显示二级子菜单
+        const rightFits = (triggerRect.right + 4 + visualWidth <= viewportWidth - 8);
+        const leftFits = (triggerRect.left - 4 - visualWidth >= 8);
+
+        let shift = 0;
+        let showOnRight = true;
+
+        if (rightFits) {
+            // 右侧空间足够，正常在右侧显示，不移动一级菜单
+            showOnRight = true;
+            shift = 0;
+        } else if (leftFits) {
+            // 左侧空间足够，正常在左侧显示，不移动一级菜单
+            showOnRight = false;
+            shift = 0;
+        } else {
+            // 左右两侧空间都不够，需要移动一级菜单 (contextMenu)
+            const neededShiftLeft = (viewportWidth - 8) - (triggerRect.right + 4 + visualWidth); // 负值 (向左移)
+            const neededShiftRight = 8 - (triggerRect.left - 4 - visualWidth); // 正值 (向右移)
+
+            const contextMenuRect = contextMenu.getBoundingClientRect();
+            
+            // 判断向左移动后，一级菜单是否会超出屏幕左边界
+            const canShiftLeft = (contextMenuRect.left + neededShiftLeft >= 8);
+            // 判断向右移动后，一级菜单是否会超出屏幕右边界
+            const canShiftRight = (contextMenuRect.right + neededShiftRight <= viewportWidth - 8);
+
+            if (canShiftLeft && canShiftRight) {
+                // 如果两边都可以，选择移动幅度较小的一边
+                if (Math.abs(neededShiftLeft) <= Math.abs(neededShiftRight)) {
+                    shift = neededShiftLeft;
+                    showOnRight = true;
+                } else {
+                    shift = neededShiftRight;
+                    showOnRight = false;
+                }
+            } else if (canShiftLeft) {
+                shift = neededShiftLeft;
+                showOnRight = true;
+            } else if (canShiftRight) {
+                shift = neededShiftRight;
+                showOnRight = false;
+            } else {
+                // 如果两边移动都会导致一级菜单部分移出屏幕，则做折中处理，优先移动到空间较多的一侧，并做边界限制
+                if (contextMenuRect.left - 8 > (viewportWidth - 8) - contextMenuRect.right) {
+                    // 左边空间多，向左移，最大移到左边界 8px
+                    shift = Math.max(neededShiftLeft, 8 - contextMenuRect.left);
+                    showOnRight = true;
+                } else {
+                    // 右边空间多，向右移，最大移到右边界 viewportWidth - 8
+                    shift = Math.min(neededShiftRight, (viewportWidth - 8) - contextMenuRect.right);
+                    showOnRight = false;
+                }
+            }
+        }
+
+        // 应用一级菜单的水平位移
+        if (shift !== 0 && contextMenu) {
+            contextMenu.style.left = `${shift}px`;
+        } else if (contextMenu) {
+            contextMenu.style.left = '';
+        }
+
+        // 重新计算移动后 trigger 按钮的实际水平坐标
+        const newTriggerLeft = triggerRect.left + shift;
+        const newTriggerRight = triggerRect.right + shift;
+
+        if (showOnRight) {
+            left = newTriggerRight + 4;
+            transformOriginX = 'left';
+        } else {
+            left = newTriggerLeft - submenuWidth - 4;
+            transformOriginX = 'right';
+        }
+
+        // 垂直定位：中心位置与 trigger 按钮 Y 轴中心对齐
+        let visualCenterY = triggerRect.top + triggerRect.height / 2;
+        const visualHalfHeight = visualHeight / 2;
+        if (visualCenterY - visualHalfHeight < 8) {
+            visualCenterY = 8 + visualHalfHeight;
+        }
+        if (visualCenterY + visualHalfHeight > viewportHeight - 8) {
+            visualCenterY = viewportHeight - 8 - visualHalfHeight;
+        }
+        top = visualCenterY - submenuHeight / 2;
+    }
+
+    // 应用 fixed 绝对定位和缩放 transform
+    contextSubmenu.style.cssText = `
+        position: fixed !important;
+        display: block !important;
+        left: ${left}px !important;
+        top: ${top}px !important;
+        z-index: 10001 !important;
+        margin: 0 !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25) !important;
+        transform: scale(${scale}) !important;
+        transform-origin: ${transformOriginX} ${transformOriginY} !important;
+    `;
+}
+
+// 构建子菜单项
+function buildSubmenuItems(context) {
+    const lang = currentLang || 'zh_CN';
+    const items = [];
+
+    items.push(
+        // 同窗专属组
+        (() => {
+            const scope = getScopeFromContext(context);
+            const badges = [
+                `<span class="sub-badge" data-sub-action="swsg-new-group">${lang === 'zh_CN' ? '新分组' : 'New Group'}</span>`,
+                `<span class="sub-badge" data-sub-action="swsg-new-window">${lang === 'zh_CN' ? '新窗口' : 'New Window'}</span>`
+            ];
+            const scopeSuffix = scope && scope.prefix ? ` (${escapeHtml(scope.prefix)})` : '';
+            const baseLabelZh = `同窗专属组${scopeSuffix}`;
+            const baseLabelEn = `In Same Window & Exclusive Group${scopeSuffix}`;
+            const badgeHtml = `<div class="swsg-badge-row">${badges.join('')}</div>`;
+            const titleClass = lang === 'zh_CN' ? 'swsg-title' : 'swsg-title swsg-title-compact';
+            const titleHtml = `<span class="${titleClass}">${lang === 'zh_CN' ? baseLabelZh : baseLabelEn}</span>`;
+            return {
+                action: 'open-same-window-specific-group',
+                labelHTML: `${titleHtml}${badgeHtml}`,
+                label: lang === 'zh_CN' ? baseLabelZh : baseLabelEn,
+                icon: 'layer-group',
+                className: 'swsg-option',
+                selected: defaultOpenMode === 'same-window-specific-group'
+            };
+        })(),
+        // 新增：手动选择窗口+组（可勾选）
+        {
+            action: 'open-manual-select',
+            label: lang === 'zh_CN' ? '手动选择...' : 'Manual Select...',
+            icon: 'crosshairs',
+            selected: defaultOpenMode === 'manual-select'
+        },
+        { separatorShort: true },
+        { action: 'open-new-tab', label: lang === 'zh_CN' ? '新标签页' : 'in New Tab', icon: 'window-maximize', selected: defaultOpenMode === 'new-tab' },
+        // 改名：原“特定标签组”改为“同一标签组”/“In Same Group”（带提示徽标）
+        (() => {
+            const showBadge = !!specificTabGroupId;
+            const baseLabelZh = '同一标签组';
+            const baseLabelEn = 'in Same Group';
+            const badge = showBadge ? (lang === 'zh_CN' ? ' <span class="sub-badge">新分组</span>' : ' <span class="sub-badge">New Group</span>') : '';
+            return { action: 'open-specific-group', label: (lang === 'zh_CN' ? baseLabelZh : baseLabelEn) + badge, icon: 'object-group', selected: defaultOpenMode === 'specific-group' };
+        })(),
+        // 新增：分栏“特定标签组”（放在“同一标签组”之下）
+        (() => {
+            const scope = getScopeFromContext(context);
+            const scopedEntry = (scope && scopedCurrentGroups) ? scopedCurrentGroups[scope.key] : null;
+            const showBadge = !!(scopedEntry && Number.isInteger(scopedEntry.groupId));
+            const scopeSuffix = scope && scope.prefix ? ` (${escapeHtml(scope.prefix)})` : '';
+            const baseLabelZh = `专属标签组${scopeSuffix}`;
+            const baseLabelEn = `in Exclusive Group${scopeSuffix}`;
+            // badge 点击：强制新建分组（不复用已有组）
+            const badge = showBadge
+                ? (lang === 'zh_CN'
+                    ? ' <span class="sub-badge" data-sub-action="scoped-group-new">新分组</span>'
+                    : ' <span class="sub-badge" data-sub-action="scoped-group-new">New Group</span>')
+                : '';
+            return { action: 'open-scoped-group', label: (lang === 'zh_CN' ? baseLabelZh : baseLabelEn) + badge, icon: 'object-group', selected: defaultOpenMode === 'scoped-group' };
+        })(),
+        { separatorShort: true },
+        // 第三行：窗口相关
+        { action: 'open-new-window', label: lang === 'zh_CN' ? '新窗口' : 'in New Window', icon: 'window-restore', selected: defaultOpenMode === 'new-window' },
+        // 改名：原“特定窗口打开”改为“同一窗口”/“In Same Window”（带提示徽标）
+        (() => {
+            const showBadge = !!specificWindowId;
+            const baseLabelZh = '同一窗口';
+            const baseLabelEn = 'in Same Window';
+            const badge = showBadge ? (lang === 'zh_CN' ? ' <span class="sub-badge">新窗口</span>' : ' <span class="sub-badge">New Window</span>') : '';
+            return { action: 'open-specific-window', label: (lang === 'zh_CN' ? baseLabelZh : baseLabelEn) + badge, icon: 'window-restore', selected: defaultOpenMode === 'specific-window' };
+        })(),
+        (() => {
+            const scope = getScopeFromContext(context);
+            const scopedWinId = (scope && scopedWindows) ? scopedWindows[scope.key] : null;
+            const showBadge = Number.isInteger(scopedWinId);
+            const scopeSuffix = scope && scope.prefix ? ` (${escapeHtml(scope.prefix)})` : '';
+            const baseLabelZh = `专属窗口${scopeSuffix}`;
+            const baseLabelEn = `in Exclusive Window${scopeSuffix}`;
+            // badge 点击：强制新建窗口（不复用已有窗口）
+            const badge = showBadge
+                ? (lang === 'zh_CN'
+                    ? ' <span class="sub-badge" data-sub-action="scoped-window-new">新窗口</span>'
+                    : ' <span class="sub-badge" data-sub-action="scoped-window-new">New Window</span>')
+                : '';
+            return { action: 'open-scoped-window', label: (lang === 'zh_CN' ? baseLabelZh : baseLabelEn) + badge, icon: 'window-restore', selected: defaultOpenMode === 'scoped-window' };
+        })(),
+        { action: 'open-incognito', label: lang === 'zh_CN' ? '无痕窗口' : 'in Incognito', icon: 'user-secret', selected: defaultOpenMode === 'incognito' }
+    );
+
+    return items;
 }
 
 // 构建菜单项
@@ -2907,9 +3373,9 @@ function buildMenuItems(context) {
             { separator: true },
             { action: 'batch-cut', label: lang === 'zh_CN' ? '剪切选中项' : 'Cut Selected', icon: 'cut' },
             { action: 'batch-delete', label: lang === 'zh_CN' ? '删除选中项' : 'DELETE', icon: 'trash-alt' },
-            { action: 'batch-rename', label: lang === 'zh_CN' ? '批量重命名' : 'Batch Rename', icon: 'edit' },
             { action: 'batch-add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag' },
             { action: 'batch-clear-tags', label: lang === 'zh_CN' ? '清除标签' : 'Clear Tags', icon: 'times-circle' },
+            { action: 'batch-rename', label: lang === 'zh_CN' ? '批量重命名' : 'Batch Rename', icon: 'edit' },
             { separator: true },
             { action: 'batch-export-html', label: lang === 'zh_CN' ? '导出为HTML' : 'Export to HTML', icon: 'file-code' },
             { action: 'batch-export-json', label: lang === 'zh_CN' ? '导出为JSON' : 'Export to JSON', icon: 'file-alt' },
@@ -2925,23 +3391,24 @@ function buildMenuItems(context) {
         // 文件夹菜单 - 按分组组织
         items.push(
             // 选择组
-            { action: 'select-item', label: lang === 'zh_CN' ? '选择（批量操作）' : 'Select (Batch)', icon: 'check-square', group: 'select' },
+            { action: 'select-item', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '选择' : '选择（批量操作）') : (contextMenuHorizontal ? 'Select' : 'Select (Batch)'), icon: 'check-square', group: 'actions' },
+            { action: 'add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'actions' },
 
             // 编辑组 - 紧跟在select后面
-            { action: 'rename', label: lang === 'zh_CN' ? '重命名' : 'Rename', icon: 'edit', group: 'select' },
+            { action: 'rename', label: lang === 'zh_CN' ? '重命名' : 'Rename', icon: 'edit', group: 'actions' },
             {
                 action: 'add-entry',
                 labelHTML: `<span class="swsg-title">${lang === 'zh_CN' ? '添加' : 'Add'}</span><div class="swsg-badge-row"><span class="sub-badge" data-sub-action="add-template-run">${lang === 'zh_CN' ? '模版' : 'Template'}</span></div>`,
                 label: lang === 'zh_CN' ? '添加' : 'Add',
                 icon: 'plus-circle',
-                group: 'select',
+                group: 'actions',
                 className: 'add-entry-option',
                 hidden: false
             },
-            { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'select' },
-            { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'select' },
-            { action: 'paste', label: lang === 'zh_CN' ? '粘贴到文件夹内' : 'Paste into Folder', icon: 'paste', disabled: !hasClipboard(), group: 'select' },
-            { action: 'add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'select' },
+            { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'actions' },
+            { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'actions' },
+            { action: 'paste', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴' : '粘贴到文件夹内') : (contextMenuHorizontal ? 'Paste' : 'Paste into Folder'), icon: 'paste', disabled: !hasClipboard(), group: 'actions' },
+            { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'actions' },
             { separator: true },
 
             // 打开组
@@ -2954,124 +3421,42 @@ function buildMenuItems(context) {
             // 结构/设置组（合并第三组）
             { action: 'add-page', label: lang === 'zh_CN' ? '添加网页' : 'Add Page', icon: 'plus-circle', group: 'structure', hidden: true },
             { action: 'add-folder', label: lang === 'zh_CN' ? '添加文件夹' : 'Add Folder', icon: 'folder-plus', group: 'structure', hidden: true },
-            { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'structure' },
             { action: 'toggle-context-menu-layout', label: contextMenuHorizontal ? (lang === 'zh_CN' ? '纵向布局' : 'Vertical') : (lang === 'zh_CN' ? '横向布局' : 'Horizontal'), icon: 'exchange-alt', group: 'structure' }
         );
     } else {
         // 书签菜单 - 按分组组织
         items.push(
             // 选择组
-            { action: 'select-item', label: lang === 'zh_CN' ? '选择（批量操作）' : 'Select (Batch)', icon: 'check-square', group: 'select' },
+            { action: 'select-item', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '选择' : '选择（批量操作）') : (contextMenuHorizontal ? 'Select' : 'Select (Batch)'), icon: 'check-square', group: 'actions' },
+            { action: 'add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'actions' },
 
             // 编辑组 - 紧跟在select后面
-            { action: 'edit', label: lang === 'zh_CN' ? '编辑' : 'Edit', icon: 'edit', group: 'select' },
+            { action: 'edit', label: lang === 'zh_CN' ? '编辑' : 'Edit', icon: 'edit', group: 'actions' },
             {
                 action: 'add-entry',
                 labelHTML: `<span class="swsg-title">${lang === 'zh_CN' ? '添加' : 'Add'}</span><div class="swsg-badge-row"><span class="sub-badge" data-sub-action="add-template-run">${lang === 'zh_CN' ? '模版' : 'Template'}</span></div>`,
                 label: lang === 'zh_CN' ? '添加' : 'Add',
                 icon: 'plus-circle',
-                group: 'select',
+                group: 'actions',
                 className: 'add-entry-option',
                 hidden: false
             },
-            { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'select' },
-            { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'select' },
+            { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'actions' },
+            { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'actions' },
             // 将 Copy Link 放到 Copy 后面
-            { action: 'copy-url', label: lang === 'zh_CN' ? '复制链接' : 'Copy Link', icon: 'link', group: 'select' },
-            { action: 'paste', label: lang === 'zh_CN' ? '粘贴到下方' : 'Paste Below', icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'select' },
-            { action: 'add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'select' },
+            { action: 'copy-url', label: lang === 'zh_CN' ? '复制链接' : 'Copy Link', icon: 'link', group: 'actions' },
+            { action: 'paste', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴' : '粘贴到下方') : (contextMenuHorizontal ? 'Paste' : 'Paste Below'), icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'actions' },
+            { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'actions' },
             { separator: true },
 
-            // 打开组（移除可点击的 Open，改为标题；英文改为 in ...）
-            { action: 'open-label', label: lang === 'zh_CN' ? '打开：' : 'Open:', icon: '', group: 'open', disabled: true },
-            (() => {
-                const scope = getScopeFromContext(context);
-                const badges = [
-                    `<span class="sub-badge" data-sub-action="swsg-new-group">${lang === 'zh_CN' ? '新分组' : 'New Group'}</span>`,
-                    `<span class="sub-badge" data-sub-action="swsg-new-window">${lang === 'zh_CN' ? '新窗口' : 'New Window'}</span>`
-                ];
-                const scopeSuffix = scope && scope.prefix ? ` (${escapeHtml(scope.prefix)})` : '';
-                const baseLabelZh = `同窗专属组${scopeSuffix}`;
-                const baseLabelEn = `In Same Window & Exclusive Group${scopeSuffix}`;
-                const badgeHtml = `<div class="swsg-badge-row">${badges.join('')}</div>`;
-                const titleClass = lang === 'zh_CN' ? 'swsg-title' : 'swsg-title swsg-title-compact';
-                const titleHtml = `<span class="${titleClass}">${lang === 'zh_CN' ? baseLabelZh : baseLabelEn}</span>`;
-                return {
-                    action: 'open-same-window-specific-group',
-                    labelHTML: `${titleHtml}${badgeHtml}`,
-                    label: lang === 'zh_CN' ? baseLabelZh : baseLabelEn,
-                    icon: 'layer-group',
-                    group: 'open',
-                    className: 'swsg-option',
-                    selected: defaultOpenMode === 'same-window-specific-group'
-                };
-            })(),
-            // 新增：手动选择窗口+组（可勾选）
+            // 打开组（二级菜单）
             {
-                action: 'open-manual-select',
-                label: lang === 'zh_CN' ? '手动选择...' : 'Manual Select...',
-                icon: 'crosshairs',
+                action: 'open-submenu-trigger',
+                label: lang === 'zh_CN' ? '默认打开模式' : 'Default Open Mode',
+                icon: 'external-link-alt',
                 group: 'open',
-                selected: defaultOpenMode === 'manual-select'
+                hasSubmenu: true
             },
-            { separatorShort: true },
-            { action: 'open-new-tab', label: lang === 'zh_CN' ? '新标签页' : 'in New Tab', icon: 'window-maximize', group: 'open', selected: defaultOpenMode === 'new-tab' },
-            // 改名：原“特定标签组”改为“同一标签组”/“In Same Group”（带提示徽标）
-            (() => {
-                const showBadge = !!specificTabGroupId;
-                const baseLabelZh = '同一标签组';
-                const baseLabelEn = 'in Same Group';
-                const badge = showBadge ? (lang === 'zh_CN' ? ' <span class="sub-badge">新分组</span>' : ' <span class="sub-badge">New Group</span>') : '';
-                return { action: 'open-specific-group', label: (lang === 'zh_CN' ? baseLabelZh : baseLabelEn) + badge, icon: 'object-group', group: 'open', selected: defaultOpenMode === 'specific-group' };
-            })(),
-            // 新增：分栏“特定标签组”（放在“同一标签组”之下）
-            (() => {
-                const scope = getScopeFromContext(context);
-                const scopedEntry = (scope && scopedCurrentGroups) ? scopedCurrentGroups[scope.key] : null;
-                const showBadge = !!(scopedEntry && Number.isInteger(scopedEntry.groupId));
-                const scopeSuffix = scope && scope.prefix ? ` (${escapeHtml(scope.prefix)})` : '';
-                const baseLabelZh = `专属标签组${scopeSuffix}`;
-                const baseLabelEn = `in Exclusive Group${scopeSuffix}`;
-                // badge 点击：强制新建分组（不复用已有组）
-                const badge = showBadge
-                    ? (lang === 'zh_CN'
-                        ? ' <span class="sub-badge" data-sub-action="scoped-group-new">新分组</span>'
-                        : ' <span class="sub-badge" data-sub-action="scoped-group-new">New Group</span>')
-                    : '';
-                return { action: 'open-scoped-group', label: (lang === 'zh_CN' ? baseLabelZh : baseLabelEn) + badge, icon: 'object-group', group: 'open', selected: defaultOpenMode === 'scoped-group' };
-            })(),
-            // 纵向菜单在“标签组区域”后插入短分隔线（横向布局会被忽略）
-            { separatorShort: true },
-            // 第三行：窗口相关
-            { action: 'open-new-window', label: lang === 'zh_CN' ? '新窗口' : 'in New Window', icon: 'window-restore', group: 'open2', selected: defaultOpenMode === 'new-window' },
-            // 改名：原“特定窗口打开”改为“同一窗口”/“In Same Window”（带提示徽标）
-            (() => {
-                const showBadge = !!specificWindowId;
-                const baseLabelZh = '同一窗口';
-                const baseLabelEn = 'in Same Window';
-                const badge = showBadge ? (lang === 'zh_CN' ? ' <span class="sub-badge">新窗口</span>' : ' <span class="sub-badge">New Window</span>') : '';
-                return { action: 'open-specific-window', label: (lang === 'zh_CN' ? baseLabelZh : baseLabelEn) + badge, icon: 'window-restore', group: 'open2', selected: defaultOpenMode === 'specific-window' };
-            })(),
-            (() => {
-                const scope = getScopeFromContext(context);
-                const scopedWinId = (scope && scopedWindows) ? scopedWindows[scope.key] : null;
-                const showBadge = Number.isInteger(scopedWinId);
-                const scopeSuffix = scope && scope.prefix ? ` (${escapeHtml(scope.prefix)})` : '';
-                const baseLabelZh = `专属窗口${scopeSuffix}`;
-                const baseLabelEn = `in Exclusive Window${scopeSuffix}`;
-                // badge 点击：强制新建窗口（不复用已有窗口）
-                const badge = showBadge
-                    ? (lang === 'zh_CN'
-                        ? ' <span class="sub-badge" data-sub-action="scoped-window-new">新窗口</span>'
-                        : ' <span class="sub-badge" data-sub-action="scoped-window-new">New Window</span>')
-                    : '';
-                return { action: 'open-scoped-window', label: (lang === 'zh_CN' ? baseLabelZh : baseLabelEn) + badge, icon: 'window-restore', group: 'open2', selected: defaultOpenMode === 'scoped-window' };
-            })(),
-            { action: 'open-incognito', label: lang === 'zh_CN' ? '无痕窗口' : 'in Incognito', icon: 'user-secret', group: 'open2', selected: defaultOpenMode === 'incognito' },
-            { separator: true },
-
-            // 删除组
-            { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'delete' },
             { separator: true },
 
             // 设置组
@@ -3120,10 +3505,20 @@ function embedContextMenu(node) {
 function hideContextMenu() {
     if (contextMenu) {
         contextMenu.style.display = 'none';
+        contextMenu.style.left = ''; // Reset custom position!
 
         // 将菜单移回body，避免影响DOM结构
         if (contextMenu.parentElement !== document.body) {
             document.body.appendChild(contextMenu);
+        }
+    }
+
+    if (contextSubmenu) {
+        hideSubmenu();
+
+        // 将子菜单移回body，避免影响DOM结构
+        if (contextSubmenu.parentElement !== document.body) {
+            document.body.appendChild(contextSubmenu);
         }
     }
 
@@ -7446,6 +7841,9 @@ function exitSelectMode() {
     // 隐藏批量操作面板
     hideBatchActionPanel();
 
+    // 关闭说明弹窗
+    try { hideBatchHelpPopover(); } catch (_) { }
+
     // 清空选中
     deselectAll();
     updateBatchToolbar();
@@ -7460,6 +7858,8 @@ function hideBatchActionPanel() {
         batchPanel.style.display = 'none';
         console.log('[批量面板] 已隐藏');
     }
+    // 关闭说明弹窗
+    try { hideBatchHelpPopover(); } catch (_) { }
 }
 
 // 显示Select模式蓝框（不再显示顶部提示）
@@ -9571,8 +9971,8 @@ async function batchMergeFolder() {
     }
 
     const folderName = prompt(
-        lang === 'zh_CN' ? '请输入新文件夹名称:' : 'Enter new folder name:',
-        lang === 'zh_CN' ? '合并的文件夹' : 'Merged Folder'
+        lang === 'zh_CN' ? '请输入新文件夹名称（将合并在根目录）:' : 'Enter new folder name (will be merged in the root directory):',
+        formatTimestampForTitle()
     );
 
     if (!folderName) {

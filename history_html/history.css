@@ -4941,8 +4941,8 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     flex-direction: row;
     flex-wrap: wrap;
     width: auto;
-    max-width: min(95vw, 640px);
-    /* 中文最大宽度：视口95%或640px，取较小值 */
+    max-width: min(95vw, 450px);
+    /* 中文最大宽度：视口95%或450px，取较小值 */
     min-width: auto;
     overflow-x: visible;
     overflow-y: visible;
@@ -4957,8 +4957,8 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 /* 英文模式下横向布局更宽 */
 .bookmark-context-menu.horizontal-layout.lang-en {
-    max-width: min(95vw, 831px);
-    /* 英文最大宽度：视口95%或800px，取较小值 */
+    max-width: min(95vw, 550px);
+    /* 英文最大宽度：视口95%或550px，取较小值 */
 }
 
 /* ========== 纵向菜单（第一种形态）更紧凑：缩小按钮的上下内边距与分隔的上下间距 ==========
@@ -5184,6 +5184,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .bookmark-context-menu.horizontal-layout .context-menu-group {
     display: inline-flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 6px;
     /* 纵向额外留白，确保行与行更明显 */
@@ -5286,6 +5287,36 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .bookmark-context-menu.density-lg.horizontal-layout .context-menu-group+.context-menu-group {
     margin-left: 16px;
+}
+
+/* ==================== 二级子菜单专属样式优化 ==================== */
+.bookmark-context-submenu {
+    position: fixed !important;
+    min-width: 170px !important;
+    max-width: 220px !important;
+    padding: 4px 0 !important;
+}
+
+.bookmark-context-submenu .context-menu-item {
+    padding: 6px 12px !important;
+    gap: 8px !important;
+}
+
+.bookmark-context-submenu .context-menu-item i {
+    width: 16px !important;
+}
+
+.bookmark-context-submenu .context-menu-item.swsg-option {
+    min-width: 0 !important;
+    width: 100% !important;
+}
+
+.bookmark-context-submenu .context-menu-item .swsg-title {
+    font-weight: normal !important;
+}
+
+.bookmark-context-submenu .context-menu-separator {
+    margin: 4px 0 !important;
 }
 
 /* ==================== 右键菜单按钮颜色样式 ==================== */
@@ -5856,6 +5887,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     animation: panelFadeIn 0.25s ease-out;
     display: flex;
     flex-direction: column;
+    padding-bottom: 6px; /* Safe padding buffer to elevate content scrollbars away from edge resize handles */
     resize: none;
     overflow: visible;
     /* 允许四边 resize handle 伸出面板，内容滚动交给 .batch-panel-content */
@@ -6048,7 +6080,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 /* Numbers on batch buttons while help is open */
 .batch-help-anchor {
     position: absolute;
-    right: 28px;
+    right: 8px; /* Unified to the right end of each button */
     top: 50%;
     transform: translateY(-50%);
     width: 16px;
@@ -6063,6 +6095,17 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     align-items: center;
     justify-content: center;
     pointer-events: none;
+}
+
+/* Expand the button's right padding when a help badge is present to prevent layout/text overlap */
+.batch-panel-content .context-menu-item.has-help-badge {
+    position: relative;
+    padding-right: 30px !important;
+}
+
+/* Align success checkmark left of help badge when both are present */
+.batch-panel-content .context-menu-item.has-help-badge.action-success::after {
+    right: 28px;
 }
 
 
@@ -6151,37 +6194,37 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     transition: all 0.2s ease;
 }
 
-/* 四边 - 增加可拖动区域的宽度 */
+/* 四边 - 增加可拖动区域的宽度 (Shifted outside panel bounds to prevent scrollbar overlapping) */
 .resize-n {
-    top: -8px;
+    top: -10px;
     left: 0;
     right: 0;
-    height: 18px;
+    height: 12px;
     cursor: ns-resize;
 }
 
 .resize-s {
-    bottom: -8px;
+    bottom: -10px;
     left: 0;
     right: 0;
-    height: 18px;
+    height: 12px;
     cursor: ns-resize;
 }
 
 .resize-w {
-    left: -8px;
+    left: -10px;
     top: 0;
     bottom: 0;
-    width: 18px;
+    width: 12px;
     cursor: ew-resize;
 }
 
 /* 【修复】右侧resize handle完全在栏目外部，避免与垂直滚动条冲突 */
 .resize-e {
-    right: -8px;
+    right: -10px;
     top: 0;
     bottom: 0;
-    width: 18px;
+    width: 12px;
     cursor: ew-resize;
 }
 
