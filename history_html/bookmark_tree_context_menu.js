@@ -114,15 +114,24 @@ async function createPermanentBookmarkNode(createPayload, options = {}) {
     if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.create !== 'function') {
         throw new Error('Chrome bookmarks API unavailable');
     }
+    const skipBcs = options.skipBcs === true || (window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.isRenderingBlocked === 'function' && window.__canvasBookmarkBulkMode.isRenderingBlocked());
     const bridge = getPermanentMutationBridge();
     let prepared = null;
-    if (bridge && typeof bridge.preparePermanentCreateNodeInBcs === 'function') {
+    if (!skipBcs && bridge && typeof bridge.preparePermanentCreateNodeInBcs === 'function') {
         prepared = await bridge.preparePermanentCreateNodeInBcs(createPayload);
     }
     try {
         const created = await chrome.bookmarks.create(createPayload);
+        if (options.createdEvents && Array.isArray(options.createdEvents)) {
+            options.createdEvents.push({
+                type: 'created',
+                id: created.id,
+                parentId: created.parentId,
+                bookmark: created
+            });
+        }
         try {
-            if (prepared && bridge && typeof bridge.commitPermanentCreatedNodeInBcs === 'function') {
+            if (!skipBcs && prepared && bridge && typeof bridge.commitPermanentCreatedNodeInBcs === 'function') {
                 await bridge.commitPermanentCreatedNodeInBcs(prepared.pendingId, created);
             }
         } catch (commitError) {
@@ -138,56 +147,93 @@ async function createPermanentBookmarkNode(createPayload, options = {}) {
         }
         return created;
     } catch (error) {
-        await rollbackPermanentBcsMutation(prepared, 'create-failed');
+        if (!skipBcs) {
+            await rollbackPermanentBcsMutation(prepared, 'create-failed');
+        }
         throw error;
     }
 }
 
-async function updatePermanentBookmarkNode(nodeId, updates) {
+async function updatePermanentBookmarkNode(nodeId, updates, options = {}) {
     if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.update !== 'function') {
         throw new Error('Chrome bookmarks API unavailable');
     }
+    const skipBcs = options.skipBcs === true || (window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.isRenderingBlocked === 'function' && window.__canvasBookmarkBulkMode.isRenderingBlocked());
     const bridge = getPermanentMutationBridge();
-    const prepared = bridge && typeof bridge.updatePermanentNodeInBcs === 'function'
+    const prepared = !skipBcs && bridge && typeof bridge.updatePermanentNodeInBcs === 'function'
         ? await bridge.updatePermanentNodeInBcs(nodeId, updates, { assumeClean: false })
         : null;
     try {
-        return await chrome.bookmarks.update(nodeId, updates);
+        const updated = await chrome.bookmarks.update(nodeId, updates);
+        if (options.createdEvents && Array.isArray(options.createdEvents)) {
+            options.createdEvents.push({
+                type: 'changed',
+                id: nodeId,
+                changeInfo: updates
+            });
+        }
+        return updated;
     } catch (error) {
-        await rollbackPermanentBcsMutation(prepared, 'update-failed');
+        if (!skipBcs) {
+            await rollbackPermanentBcsMutation(prepared, 'update-failed');
+        }
         throw error;
     }
 }
 
-async function removePermanentBookmarkNode(nodeId, isFolder = false) {
+async function removePermanentBookmarkNode(nodeId, isFolder = false, options = {}) {
     if (!chrome || !chrome.bookmarks) {
         throw new Error('Chrome bookmarks API unavailable');
     }
+    const skipBcs = options.skipBcs === true || (window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.isRenderingBlocked === 'function' && window.__canvasBookmarkBulkMode.isRenderingBlocked());
     const bridge = getPermanentMutationBridge();
-    const prepared = bridge && typeof bridge.removePermanentNodeFromBcs === 'function'
+    const prepared = !skipBcs && bridge && typeof bridge.removePermanentNodeFromBcs === 'function'
         ? await bridge.removePermanentNodeFromBcs(nodeId, { assumeClean: false })
         : null;
     try {
-        if (isFolder) return await chrome.bookmarks.removeTree(nodeId);
-        return await chrome.bookmarks.remove(nodeId);
+        let result;
+        if (isFolder) result = await chrome.bookmarks.removeTree(nodeId);
+        else result = await chrome.bookmarks.remove(nodeId);
+        if (options.createdEvents && Array.isArray(options.createdEvents)) {
+            options.createdEvents.push({
+                type: 'removed',
+                id: nodeId,
+                isFolder: isFolder
+            });
+        }
+        return result;
     } catch (error) {
-        await rollbackPermanentBcsMutation(prepared, 'remove-failed');
+        if (!skipBcs) {
+            await rollbackPermanentBcsMutation(prepared, 'remove-failed');
+        }
         throw error;
     }
 }
 
-async function movePermanentBookmarkNode(nodeId, target) {
+async function movePermanentBookmarkNode(nodeId, target, options = {}) {
     if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.move !== 'function') {
         throw new Error('Chrome bookmarks API unavailable');
     }
+    const skipBcs = options.skipBcs === true || (window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.isRenderingBlocked === 'function' && window.__canvasBookmarkBulkMode.isRenderingBlocked());
     const bridge = getPermanentMutationBridge();
-    const prepared = bridge && typeof bridge.movePermanentNodeInBcs === 'function'
+    const prepared = !skipBcs && bridge && typeof bridge.movePermanentNodeInBcs === 'function'
         ? await bridge.movePermanentNodeInBcs(nodeId, target, { assumeClean: false })
         : null;
     try {
-        return await chrome.bookmarks.move(nodeId, target);
+        const moved = await chrome.bookmarks.move(nodeId, target);
+        if (options.createdEvents && Array.isArray(options.createdEvents)) {
+            options.createdEvents.push({
+                type: 'moved',
+                id: nodeId,
+                parentId: target.parentId,
+                index: target.index
+            });
+        }
+        return moved;
     } catch (error) {
-        await rollbackPermanentBcsMutation(prepared, 'move-failed');
+        if (!skipBcs) {
+            await rollbackPermanentBcsMutation(prepared, 'move-failed');
+        }
         throw error;
     }
 }
@@ -4050,6 +4096,13 @@ async function pasteIntoTemp(context) {
             if (!payload || !payload.length) {
                 payload = [];
                 if (chrome && chrome.bookmarks && bookmarkClipboard.nodeIds) {
+                    if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                        try {
+                            await window.TagSystem.ensurePermTagsLoaded();
+                        } catch (e) {
+                            console.warn('[粘贴] 加载永久标签失败:', e);
+                        }
+                    }
                     for (const id of bookmarkClipboard.nodeIds) {
                         const node = await readPermanentNodeForPayload(id);
                         if (node) {
@@ -4103,9 +4156,25 @@ async function pasteIntoTemp(context) {
     }
 }
 
+function countPayloadNodes(payload) {
+    if (!payload) return 0;
+    const items = Array.isArray(payload) ? payload : [payload];
+    let count = 0;
+    const stack = [...items];
+    while (stack.length) {
+        const item = stack.pop();
+        if (!item) continue;
+        count += 1;
+        if (item.children && item.children.length) {
+            stack.push(...item.children);
+        }
+    }
+    return count;
+}
+
 function serializeBookmarkNode(node) {
     if (!node) return null;
-    return {
+    const out = {
         ...(node.id ? { id: String(node.id) } : {}),
         title: node.title,
         url: node.url || '',
@@ -4113,6 +4182,13 @@ function serializeBookmarkNode(node) {
         __canvasPayloadSource: 'permanent',
         children: (node.children || []).map(serializeBookmarkNode)
     };
+    if (node.id && window.TagSystem && typeof window.TagSystem.getPermNodeTagsCached === 'function') {
+        const cachedTags = window.TagSystem.getPermNodeTagsCached(node.id);
+        if (Array.isArray(cachedTags) && cachedTags.length) {
+            out.tags = cachedTags.map(t => ({ color: t.color, text: t.text }));
+        }
+    }
+    return out;
 }
 
 function markClipboardPayloadSource(itemsInput, sourceKind) {
@@ -5271,7 +5347,7 @@ async function __resolveBookmarkAddTarget(context, preferredPosition = null) {
     };
 }
 
-async function __addTabsToBookmarkTree(target, tabs) {
+async function __addTabsToBookmarkTree(target, tabs, options = {}) {
     if (!target || !target.parentId) {
         return { createdCount: 0, firstCreated: null, createdTargets: [] };
     }
@@ -5296,7 +5372,7 @@ async function __addTabsToBookmarkTree(target, tabs) {
             createPayload.index = insertIndex;
             insertIndex += 1;
         }
-        const created = await createPermanentBookmarkNode(createPayload);
+        const created = await createPermanentBookmarkNode(createPayload, options);
         createdCount += 1;
         if (!firstCreated && created && created.id) {
             firstCreated = { id: String(created.id), type: 'bookmark' };
@@ -5425,7 +5501,7 @@ async function __buildBookmarkAddItemsFromTabs(tabs, options = {}) {
     return items;
 }
 
-async function __addBookmarkAddItemsToTree(target, items) {
+async function __addBookmarkAddItemsToTree(target, items, options = {}) {
     if (!target || !target.parentId) {
         return { createdCount: 0, firstCreated: null, createdTargets: [] };
     }
@@ -5463,7 +5539,7 @@ async function __addBookmarkAddItemsToTree(target, items) {
 
             let folderNode = null;
             try {
-                folderNode = await createPermanentBookmarkNode(folderPayload);
+                folderNode = await createPermanentBookmarkNode(folderPayload, options);
             } catch (folderError) {
                 console.warn('[右键菜单] 创建分组文件夹失败，回退直插:', folderError);
             }
@@ -5479,7 +5555,7 @@ async function __addBookmarkAddItemsToTree(target, items) {
                     parentId: folderNode.id,
                     index: null,
                     position: target.position
-                }, item.children || []);
+                }, item.children || [], options);
                 createdCount += nestedResult.createdCount;
                 if (!firstCreated && nestedResult.firstCreated) {
                     firstCreated = nestedResult.firstCreated;
@@ -5491,7 +5567,7 @@ async function __addBookmarkAddItemsToTree(target, items) {
                     index: insertIndex,
                     position: target.position
                 };
-                const fallbackResult = await __addTabsToBookmarkTree(fallbackTarget, fallbackTabs);
+                const fallbackResult = await __addTabsToBookmarkTree(fallbackTarget, fallbackTabs, options);
                 createdCount += fallbackResult.createdCount;
                 if (!firstCreated && fallbackResult.firstCreated) {
                     firstCreated = fallbackResult.firstCreated;
@@ -5520,7 +5596,7 @@ async function __addBookmarkAddItemsToTree(target, items) {
             insertIndex += 1;
         }
 
-        const created = await createPermanentBookmarkNode(createPayload);
+        const created = await createPermanentBookmarkNode(createPayload, options);
         createdCount += 1;
         if (!firstCreated && created && created.id) {
             firstCreated = { id: String(created.id), type: 'bookmark' };
@@ -5918,18 +5994,20 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                 }
             );
         } else {
+            const totalToAdd = Array.isArray(addItems) ? addItems.length : 0;
+            const totalNodes = (actionType === 'add-current-window' && windowAsFolder) ? (totalToAdd + 1) : totalToAdd;
+            const useBulkMute = totalNodes > 15;
             let muteSession = null;
             let loadingToast = null;
+            const createdEvents = [];
+            const createOptions = { createdEvents };
             try {
-                if (typeof beginBookmarkBulkMute === 'function') {
+                if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                     muteSession = await beginBookmarkBulkMute('add-bookmark-action');
                 }
-                if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function') {
-                    const totalToAdd = Array.isArray(addItems) ? addItems.length : 0;
-                    if (totalToAdd > 1) {
-                        const loadingMsg = lang === 'zh_CN' ? `正在添加 ${totalToAdd} 个页面...` : `Adding ${totalToAdd} pages...`;
-                        loadingToast = window.showLoadingToast(loadingMsg);
-                    }
+                if (useBulkMute && typeof window !== 'undefined' && typeof window.showLoadingToast === 'function') {
+                    const loadingMsg = lang === 'zh_CN' ? `正在添加 ${totalNodes} 个页面...` : `Adding ${totalNodes} pages...`;
+                    loadingToast = window.showLoadingToast(loadingMsg);
                 }
                 
                 if (actionType === 'add-current-window' && windowAsFolder) {
@@ -5943,7 +6021,7 @@ async function executeBookmarkAddAction(context, config, options = {}) {
 
             let folderNode = null;
             try {
-                folderNode = await createPermanentBookmarkNode(folderPayload);
+                folderNode = await createPermanentBookmarkNode(folderPayload, createOptions);
             } catch (folderError) {
                 console.warn('[右键菜单] 创建窗口文件夹失败，回退直插:', folderError);
             }
@@ -5953,7 +6031,7 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                     parentId: folderNode.id,
                     index: null,
                     position: target.position
-                }, addItems);
+                }, addItems, createOptions);
                 createdCount = nestedResult && Number.isFinite(nestedResult.createdCount)
                     ? nestedResult.createdCount
                     : 0;
@@ -5968,7 +6046,7 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                 });
                 usedFolderMode = true;
             } else {
-                const fallbackResult = await __addBookmarkAddItemsToTree(target, addItems);
+                const fallbackResult = await __addBookmarkAddItemsToTree(target, addItems, createOptions);
                 createdCount = fallbackResult && Number.isFinite(fallbackResult.createdCount)
                     ? fallbackResult.createdCount
                     : 0;
@@ -5984,7 +6062,7 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                 );
             }
                 } else {
-                    const treeResult = await __addBookmarkAddItemsToTree(target, addItems);
+                    const treeResult = await __addBookmarkAddItemsToTree(target, addItems, createOptions);
                     createdCount = treeResult && Number.isFinite(treeResult.createdCount)
                         ? treeResult.createdCount
                         : 0;
@@ -5999,11 +6077,15 @@ async function executeBookmarkAddAction(context, config, options = {}) {
                         }
                     );
                 }
+
+                if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
+                    await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'add-bookmark-action');
+                }
             } finally {
                 if (loadingToast) {
                     loadingToast.close();
                 }
-                if (typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                if (useBulkMute && typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
                     await endBookmarkBulkMute('add-bookmark-action', { refreshTree: true });
                 }
             }
@@ -7173,6 +7255,14 @@ async function cutBookmark(nodeId, nodeTitle, isFolder) {
     try {
         const node = await readPermanentNodeForPayload(nodeId);
 
+        if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+            try {
+                await window.TagSystem.ensurePermTagsLoaded();
+            } catch (e) {
+                console.warn('[剪切] 加载永久标签失败:', e);
+            }
+        }
+
         bookmarkClipboard = {
             action: 'cut',
             source: 'permanent',
@@ -7201,6 +7291,14 @@ async function copyBookmark(nodeId, nodeTitle, isFolder) {
 
     try {
         const node = await readPermanentNodeForPayload(nodeId);
+
+        if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+            try {
+                await window.TagSystem.ensurePermTagsLoaded();
+            } catch (e) {
+                console.warn('[复制] 加载永久标签失败:', e);
+            }
+        }
 
         bookmarkClipboard = {
             action: 'copy',
@@ -7251,22 +7349,45 @@ async function pasteBookmark(targetNodeId, isFolder) {
         if (bookmarkClipboard.source === 'temporary' || bookmarkClipboard.source === 'mixed') {
             const payload = bookmarkClipboard.payload || [];
             if (payload.length) {
+                const totalNodes = countPayloadNodes(payload);
+                const useBulkMute = totalNodes > 15;
                 let muteSession = null;
                 let loadingToast = null;
-                if (typeof beginBookmarkBulkMute === 'function') {
+                if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                     muteSession = await beginBookmarkBulkMute('paste-temp-to-permanent');
                 }
-                if (typeof window.showLoadingToast === 'function' && payload.length > 1) {
+                if (typeof window.showLoadingToast === 'function' && totalNodes > 15) {
                     const lang = currentLang || 'zh_CN';
-                    loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在粘贴 ${payload.length} 项...` : `Pasting ${payload.length} items...`);
+                    loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在粘贴 ${totalNodes} 项...` : `Pasting ${totalNodes} items...`);
                 }
+                const createdEvents = [];
                 try {
+                    const tagUpdates = [];
                     for (const item of payload) {
-                        await duplicateNode(item, targetFolderId);
+                        await duplicateNode(item, targetFolderId, { tagUpdates, createdEvents });
+                    }
+                    if (tagUpdates.length > 0) {
+                        const bridge = window.CanvasProtocolBridge;
+                        if (bridge && typeof bridge.writePermanentNodeTagsBulk === 'function') {
+                            try {
+                                await bridge.writePermanentNodeTagsBulk(tagUpdates);
+                                if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                                    await window.TagSystem.ensurePermTagsLoaded(true);
+                                }
+                                if (typeof window.__refreshAllTagDots === 'function') {
+                                    window.__refreshAllTagDots();
+                                }
+                            } catch (e) {
+                                console.warn('[粘贴] 批量写入标签失败:', e);
+                            }
+                        }
+                    }
+                    if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
+                        await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'paste-temp-to-permanent');
                     }
                 } finally {
                     if (loadingToast) loadingToast.close();
-                    if (typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                    if (useBulkMute && typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
                         await endBookmarkBulkMute('paste-temp-to-permanent', { refreshTree: true });
                     }
                 }
@@ -7286,24 +7407,30 @@ async function pasteBookmark(targetNodeId, isFolder) {
             }
         } else if (bookmarkClipboard.source === 'permanent') {
             if (bookmarkClipboard.action === 'cut' && bookmarkClipboard.nodeIds) {
+                const totalNodes = bookmarkClipboard.nodeIds.length;
+                const useBulkMute = totalNodes > 15;
                 let muteSession = null;
                 let loadingToast = null;
-                if (typeof beginBookmarkBulkMute === 'function') {
+                if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                     muteSession = await beginBookmarkBulkMute('paste-permanent-cut');
                 }
-                if (typeof window.showLoadingToast === 'function' && bookmarkClipboard.nodeIds.length > 1) {
+                if (typeof window.showLoadingToast === 'function' && totalNodes > 15) {
                     const lang = currentLang || 'zh_CN';
-                    loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在移动 ${bookmarkClipboard.nodeIds.length} 项...` : `Moving ${bookmarkClipboard.nodeIds.length} items...`);
+                    loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在移动 ${totalNodes} 项...` : `Moving ${totalNodes} items...`);
                 }
+                const createdEvents = [];
                 try {
                     for (const id of bookmarkClipboard.nodeIds) {
                         await movePermanentBookmarkNode(id, {
                             parentId: targetFolderId
-                        });
+                        }, { createdEvents });
+                    }
+                    if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
+                        await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'paste-permanent-cut');
                     }
                 } finally {
                     if (loadingToast) loadingToast.close();
-                    if (typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                    if (useBulkMute && typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
                         await endBookmarkBulkMute('paste-permanent-cut', { refreshTree: true });
                     }
                 }
@@ -7312,22 +7439,28 @@ async function pasteBookmark(targetNodeId, isFolder) {
                 unmarkCutNode();
             } else if (bookmarkClipboard.action === 'copy') {
                 const payload = bookmarkClipboard.payload || (bookmarkClipboard.nodeData ? [bookmarkClipboard.nodeData] : []);
+                const totalNodes = countPayloadNodes(payload);
+                const useBulkMute = totalNodes > 15;
                 let muteSession = null;
                 let loadingToast = null;
-                if (typeof beginBookmarkBulkMute === 'function') {
+                if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                     muteSession = await beginBookmarkBulkMute('paste-permanent-copy');
                 }
-                if (typeof window.showLoadingToast === 'function' && payload.length > 1) {
+                if (typeof window.showLoadingToast === 'function' && totalNodes > 15) {
                     const lang = currentLang || 'zh_CN';
-                    loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在复制 ${payload.length} 项...` : `Copying ${payload.length} items...`);
+                    loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在复制 ${totalNodes} 项...` : `Copying ${totalNodes} items...`);
                 }
+                const createdEvents = [];
                 try {
                     for (const node of payload) {
-                        await duplicateNode(node, targetFolderId);
+                        await duplicateNode(node, targetFolderId, { createdEvents });
+                    }
+                    if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
+                        await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'paste-permanent-copy');
                     }
                 } finally {
                     if (loadingToast) loadingToast.close();
-                    if (typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                    if (useBulkMute && typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
                         await endBookmarkBulkMute('paste-permanent-copy', { refreshTree: true });
                     }
                 }
@@ -7355,7 +7488,15 @@ async function duplicateNode(node, parentId, options = {}) {
     }
 
     // 创建节点
-    const created = await createPermanentBookmarkNode(newNode);
+    const created = await createPermanentBookmarkNode(newNode, options);
+
+    // Inherit tags if tagUpdates array is provided
+    if (node.tags && node.tags.length && options.tagUpdates) {
+        options.tagUpdates.push({
+            chromeId: created.id,
+            tags: node.tags
+        });
+    }
 
     // 如果有子节点，递归复制
     if (node.children) {
@@ -7677,6 +7818,13 @@ async function copySelected() {
     // 混合选择：统一用 payload（title/url/type/children）形式，便于粘贴到永久/临时
     if (tempNodes.length && permanentIds.length) {
         try {
+            if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                try {
+                    await window.TagSystem.ensurePermTagsLoaded();
+                } catch (e) {
+                    console.warn('[多选] 加载永久标签失败:', e);
+                }
+            }
             const payload = markClipboardPayloadSource(tempPayload, 'temporary');
             for (const nodeId of permanentIds) {
                 const node = await readPermanentNodeForPayload(nodeId);
@@ -7715,6 +7863,13 @@ async function copySelected() {
     }
 
     try {
+        if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+            try {
+                await window.TagSystem.ensurePermTagsLoaded();
+            } catch (e) {
+                console.warn('[多选] 加载永久标签失败:', e);
+            }
+        }
         const payload = [];
         for (const nodeId of permanentIds) {
             const node = await readPermanentNodeForPayload(nodeId);
@@ -9499,6 +9654,13 @@ async function batchCut() {
     const permanentIds = caps.permanentIds;
     if (!permanentIds.length) return;
     try {
+        if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+            try {
+                await window.TagSystem.ensurePermTagsLoaded();
+            } catch (e) {
+                console.warn('[批量] 加载永久标签失败:', e);
+            }
+        }
         const payload = [];
         for (const nodeId of permanentIds) {
             const node = await readPermanentNodeForPayload(nodeId);
@@ -9830,6 +9992,13 @@ async function batchExportJSON() {
     const lang = currentLang || 'zh_CN';
 
     try {
+        if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+            try {
+                await window.TagSystem.ensurePermTagsLoaded();
+            } catch (e) {
+                console.warn('[导出] 加载永久标签失败:', e);
+            }
+        }
         const bookmarks = [];
         const permanentIds = getSelectedPermanentNodeIds();
         const tempNodes = getSelectedTempNodes();
@@ -9979,13 +10148,17 @@ async function batchMergeFolder() {
         return;
     }
 
+    const totalNodes = permanentIds.length + 1;
+    const useBulkMute = totalNodes > 15;
     let muteSession = null;
     let loadingToast = null;
+    const createdEvents = [];
+    const createOptions = { createdEvents };
     try {
-        if (typeof beginBookmarkBulkMute === 'function') {
+        if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
             muteSession = await beginBookmarkBulkMute('batch-merge-folder');
         }
-        if (typeof window.showLoadingToast === 'function' && permanentIds.length > 1) {
+        if (typeof window.showLoadingToast === 'function' && totalNodes > 15) {
             loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在合并 ${permanentIds.length} 项...` : `Merging ${permanentIds.length} items...`);
         }
 
@@ -9993,17 +10166,21 @@ async function batchMergeFolder() {
         const newFolder = await createPermanentBookmarkNode({
             parentId: bookmarkBar.id,
             title: folderName
-        });
+        }, createOptions);
 
         // 移动所有选中项到新文件夹
         let count = 0;
         for (const nodeId of permanentIds) {
             try {
-                await movePermanentBookmarkNode(nodeId, { parentId: newFolder.id });
+                await movePermanentBookmarkNode(nodeId, { parentId: newFolder.id }, createOptions);
                 count++;
             } catch (error) {
                 console.error('[批量] 移动失败:', nodeId, error);
             }
+        }
+
+        if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
+            await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'batch-merge-folder');
         }
 
         deselectAll();
@@ -10021,7 +10198,7 @@ async function batchMergeFolder() {
         alert(lang === 'zh_CN' ? `合并失败: ${error.message}` : `Merge failed: ${error.message}`);
     } finally {
         if (loadingToast) loadingToast.close();
-        if (typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+        if (useBulkMute && typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
             await endBookmarkBulkMute('batch-merge-folder', { refreshTree: true });
         }
     }

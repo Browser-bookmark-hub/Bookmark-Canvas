@@ -27799,8 +27799,28 @@ function setupTempSectionTreeInteractions(treeContainer, section) {
             LAZY_LOAD_THRESHOLD.expandedFolders.delete(folderId);
             LAZY_LOAD_THRESHOLD.collapsedFolders.add(folderId);
             saveTempExpandState();
+
+            // 5秒防抖延迟卸载子 DOM，防止误触或高频折叠展开带来的重绘开销
+            if (childrenContainer.__unloadTimer__) {
+                clearTimeout(childrenContainer.__unloadTimer__);
+            }
+            childrenContainer.__unloadTimer__ = setTimeout(() => {
+                childrenContainer.__unloadTimer__ = null;
+                // 确保确实处于折叠状态且该容器仍在 DOM 中（未被整卡刷新销毁）
+                if (!childrenContainer.classList.contains('expanded') && document.body.contains(childrenContainer)) {
+                    childrenContainer.innerHTML = '';
+                    treeItem.dataset.childrenLoaded = 'false';
+                    console.log(`[Canvas] 临时栏目文件夹折叠超过5秒，已回收 DOM 节点: ${folderId}`);
+                }
+            }, 5000);
         } else {
             // 展开
+            // 如果存在等待中的卸载定时器，立刻取消，直接复用已有 DOM
+            if (childrenContainer.__unloadTimer__) {
+                clearTimeout(childrenContainer.__unloadTimer__);
+                childrenContainer.__unloadTimer__ = null;
+            }
+
             childrenContainer.classList.add('expanded');
             if (nodeToggle) nodeToggle.classList.add('expanded');
             if (nodeIcon) {

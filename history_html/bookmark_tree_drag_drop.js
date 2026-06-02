@@ -20,6 +20,22 @@ if (typeof window !== 'undefined') window.__hoverExpandState = __hoverExpandStat
 // 长时间不拖动后重置的阈值（毫秒）
 var HOVER_EXPAND_RESET_THRESHOLD = 5000; // 5秒不拖动则重置
 
+function countPayloadNodes(payload) {
+    if (!payload) return 0;
+    const items = Array.isArray(payload) ? payload : [payload];
+    let count = 0;
+    const stack = [...items];
+    while (stack.length) {
+        const item = stack.pop();
+        if (!item) continue;
+        count += 1;
+        if (item.children && item.children.length) {
+            stack.push(...item.children);
+        }
+    }
+    return count;
+}
+
 function getHoverDelayForFolder(folderId) {
     // 检查是否距离上次拖动结束已经过了很长时间，如果是则重置计数
     const now = Date.now();
@@ -143,7 +159,7 @@ function getTempManager() {
 
 function serializeBookmarkNode(node) {
     if (!node) return null;
-    return {
+    const out = {
         ...(node.id ? { id: String(node.id) } : {}),
         title: node.title,
         url: node.url || '',
@@ -151,6 +167,13 @@ function serializeBookmarkNode(node) {
         __canvasPayloadSource: 'permanent',
         children: (node.children || []).map(child => serializeBookmarkNode(child))
     };
+    if (node.id && window.TagSystem && typeof window.TagSystem.getPermNodeTagsCached === 'function') {
+        const cachedTags = window.TagSystem.getPermNodeTagsCached(node.id);
+        if (Array.isArray(cachedTags) && cachedTags.length) {
+            out.tags = cachedTags.map(t => ({ color: t.color, text: t.text }));
+        }
+    }
+    return out;
 }
 
 async function readPermanentNodeFromBcs(nodeId) {
@@ -197,12 +220,12 @@ async function createPermanentBookmarkNodeViaSharedOps(createPayload, options = 
     return await ops.createPermanentBookmarkNode(createPayload, options);
 }
 
-async function movePermanentBookmarkNodeViaSharedOps(nodeId, target) {
+async function movePermanentBookmarkNodeViaSharedOps(nodeId, target, options = {}) {
     const ops = getSharedPermanentMutationOps();
     if (!ops) {
         throw new Error('Permanent bookmark mutation ops unavailable');
     }
-    return await ops.movePermanentBookmarkNode(nodeId, target);
+    return await ops.movePermanentBookmarkNode(nodeId, target, options);
 }
 
 function resolvePermanentBlankDropParentId(targetElement = null) {
@@ -653,7 +676,7 @@ function computeTempInsertion(sectionId, targetId, position) {
     return { parentId, index };
 }
 
-async function createBookmarkFromPayload(parentId, index, payload) {
+async function createBookmarkFromPayload(parentId, index, payload, tagUpdates = null, options = {}) {
     if (!chrome || !chrome.bookmarks || !payload) return;
     const createInfo = {
         parentId: parentId,
@@ -665,10 +688,18 @@ async function createBookmarkFromPayload(parentId, index, payload) {
     if (typeof index === 'number') {
         createInfo.index = index;
     }
-    const created = await createPermanentBookmarkNodeViaSharedOps(createInfo);
+    const created = await createPermanentBookmarkNodeViaSharedOps(createInfo, options);
+
+    if (payload.tags && payload.tags.length && Array.isArray(tagUpdates)) {
+        tagUpdates.push({
+            chromeId: created.id,
+            tags: payload.tags
+        });
+    }
+
     if (payload.children && payload.children.length) {
         for (const child of payload.children) {
-            await createBookmarkFromPayload(created.id, null, child);
+            await createBookmarkFromPayload(created.id, null, child, tagUpdates, options);
         }
     }
 }
@@ -696,28 +727,59 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
             const payload = manager.extractPayload(sourceSectionId, [dragNodeId]);
             // 临时栏目到永久栏目不需要调整索引（源不在永久栏目中）
             const { parentId, index } = await computePermanentInsertion(targetId, targetIsFolder, position);
+            
+            const totalNodes = countPayloadNodes(payload);
+            const useBulkMute = totalNodes > 15;
             let muteSession = null;
             let loadingToast = null;
-            if (typeof window !== 'undefined' && typeof window.beginBookmarkBulkMute === 'function') {
+            
+            if (useBulkMute && typeof window !== 'undefined' && typeof window.beginBookmarkBulkMute === 'function') {
                 muteSession = await window.beginBookmarkBulkMute('drag-temp-to-permanent');
             }
-            if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function' && payload.length > 1) {
-                const msg = typeof currentLang !== 'undefined' && currentLang === 'en' ? `Moving ${payload.length} items...` : `正在移动 ${payload.length} 项...`;
+            if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function' && totalNodes > 15) {
+                const msg = typeof currentLang !== 'undefined' && currentLang === 'en' ? `Moving ${totalNodes} items...` : `正在移动 ${totalNodes} 项...`;
                 loadingToast = window.showLoadingToast(msg);
             }
+            const createdEvents = [];
+            const createOptions = { createdEvents };
             try {
+                const tagUpdates = [];
                 for (const item of payload) {
-                    await createBookmarkFromPayload(parentId, index, item);
+                    await createBookmarkFromPayload(parentId, index, item, tagUpdates, createOptions);
                 }
+
+                // Inherit tags in bulk
+                if (tagUpdates.length > 0) {
+                    const bridge = window.CanvasProtocolBridge;
+                    if (bridge && typeof bridge.writePermanentNodeTagsBulk === 'function') {
+                        try {
+                            await bridge.writePermanentNodeTagsBulk(tagUpdates);
+                            if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                                await window.TagSystem.ensurePermTagsLoaded(true);
+                            }
+                            if (typeof window.__refreshAllTagDots === 'function') {
+                                window.__refreshAllTagDots();
+                            }
+                        } catch (e) {
+                            console.warn('[拖拽] 批量写入永久书签标签失败:', e);
+                        }
+                    }
+                }
+
+                if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
+                    await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'drag-temp-to-permanent');
+                }
+
+                // Delete the source temporary item synchronously
                 manager.removeItems(sourceSectionId, [dragNodeId]);
             } finally {
                 if (loadingToast) loadingToast.close();
-                if (typeof window !== 'undefined' && typeof window.endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                if (useBulkMute && typeof window !== 'undefined' && typeof window.endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
                     await window.endBookmarkBulkMute('drag-temp-to-permanent', { refreshTree: true });
                 }
             }
             // 不调用 refreshBookmarkTree()，让 chrome.bookmarks.onCreated 事件触发增量更新
-            // 这样可以避免页面闪烁和滚动位置丢失
+            // 这样可以避免页面闪烁 and 滚动位置丢失
             console.log('[拖拽] 临时->永久完成，等待 onCreated 事件增量更新');
             return;
         }
@@ -727,6 +789,13 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
             if (!sourceNode) {
                 const nodes = await chrome.bookmarks.getSubTree(dragNodeId);
                 sourceNode = nodes && nodes[0] ? nodes[0] : null;
+            }
+            if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                try {
+                    await window.TagSystem.ensurePermTagsLoaded();
+                } catch (e) {
+                    console.warn('[拖拽] 加载永久标签失败:', e);
+                }
             }
             const payload = sourceNode ? [serializeBookmarkNode(sourceNode)] : [];
             const targetInfo = computeTempInsertion(targetSectionId, targetId, position);
@@ -787,8 +856,7 @@ function updateAutoScroll(e) {
 
     // 优先滚动鼠标所在的树容器（永久/临时）
     const containers = [];
-    const permanentBody = document.querySelector('.permanent-section-body');
-    if (permanentBody) containers.push(permanentBody);
+    document.querySelectorAll('.permanent-section-body').forEach(el => containers.push(el));
     document.querySelectorAll('.temp-node-body').forEach(el => containers.push(el));
 
     for (const c of containers) {

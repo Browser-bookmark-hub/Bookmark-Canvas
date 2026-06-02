@@ -448,8 +448,7 @@ function handleAutoScroll(e) {
 
     // 根据指针位置选择容器进行滚动（永久 body + 临时 body）
     const containers = [];
-    const permanentBody = document.querySelector('.permanent-section-body');
-    if (permanentBody) containers.push(permanentBody);
+    document.querySelectorAll('.permanent-section-body').forEach(el => containers.push(el));
     document.querySelectorAll('.temp-node-body').forEach(el => containers.push(el));
     for (const c of containers) {
         const rect = c.getBoundingClientRect();
