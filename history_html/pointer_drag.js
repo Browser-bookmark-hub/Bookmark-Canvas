@@ -578,14 +578,23 @@ function handleAutoScroll(e) {
         }
     }
 
-    // 备选：滚动窗口
+    // 如果没有滚动书签树容器，则检查并触发画布边缘自动滚动
     if (!didScroll) {
+        if (typeof window.checkEdgeAutoScroll === 'function') {
+            window.checkEdgeAutoScroll(e.clientX, e.clientY);
+        }
+        // 备选：滚动窗口
         const viewportHeight = window.innerHeight;
         const dynamicZone = Math.max(baseZone, Math.min(Math.round(viewportHeight * 0.12), 160));
         let winDelta = 0;
         if (e.clientY < dynamicZone) winDelta = -scrollSpeed * ((dynamicZone - e.clientY) / dynamicZone);
         else if (e.clientY > viewportHeight - dynamicZone) winDelta = scrollSpeed * ((e.clientY - (viewportHeight - dynamicZone)) / dynamicZone);
         if (winDelta !== 0) window.scrollBy(0, winDelta);
+    } else {
+        // 如果滚动了书签树容器，停止画布边缘自动滚动
+        if (typeof window.stopEdgeAutoScroll === 'function') {
+            window.stopEdgeAutoScroll();
+        }
     }
 }
 
@@ -663,6 +672,11 @@ async function handleDropToCanvas(event, workspaceRect) {
 }
 
 function cleanupPointerDrag() {
+    // 停止画布边缘自动滚动
+    if (typeof window.stopEdgeAutoScroll === 'function') {
+        window.stopEdgeAutoScroll();
+    }
+
     // 移除拖拽样式
     if (pointerDragState.draggedElement) {
         pointerDragState.draggedElement.classList.remove('dragging');

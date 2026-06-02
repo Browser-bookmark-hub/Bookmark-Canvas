@@ -6237,6 +6237,7 @@ function setupCanvasZoomAndPan() {
 
     // Ctrl + 滚轮缩放（以鼠标位置为中心）- 性能优化版本
     workspace.addEventListener('wheel', (e) => {
+        syncCanvasCtrlStateWithEvent(e);
         // 拖动时的滚轮滚动功能：
         // - 触控板双指滑动：四向自由滚动（横向 + 纵向同时支持）
         // - 鼠标滚轮：纵向滚动
@@ -6634,6 +6635,23 @@ function setupCanvasZoomAndPan() {
 
     ensureCanvasPanCaptureLayer();
 
+    function syncCanvasCtrlStateWithEvent(e) {
+        if (!e) return;
+        const physicalCtrl = isCustomCtrlKeyPressed(e);
+        if (CanvasState.isCtrlPressed !== physicalCtrl) {
+            CanvasState.isCtrlPressed = physicalCtrl;
+            if (physicalCtrl) {
+                workspace.classList.add('ctrl-pressed');
+                if (!CanvasState.isPanning && !CanvasState.isSpacePressed) {
+                    setSectionCtrlModeActive(true);
+                }
+            } else {
+                workspace.classList.remove('ctrl-pressed');
+                setSectionCtrlModeActive(false);
+            }
+        }
+    }
+
     document.addEventListener('keydown', (e) => {
         if (isRecordingShortcut) return;
         const isSpaceShortcut = isCustomSpaceKeyCode(e.code);
@@ -6715,7 +6733,17 @@ function setupCanvasZoomAndPan() {
 
     // 空格/Control + 鼠标拖动画布（Obsidian方式）
     workspace.addEventListener('mousedown', (e) => {
+        syncCanvasCtrlStateWithEvent(e);
         if (CanvasState.isSpacePressed || CanvasState.isCtrlPressed) {
+            // 如果按住的是 Ctrl，且点击的是卡片/栏目内部，不触发画布平移（因为这是移动卡片的操作）
+            if (CanvasState.isCtrlPressed && !CanvasState.isSpacePressed) {
+                const target = e.target;
+                if (target && typeof target.closest === 'function') {
+                    if (target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .card-group-canvas-node')) {
+                        return;
+                    }
+                }
+            }
             beginCanvasPanFromMouseEvent(e);
         }
     });
@@ -6740,6 +6768,7 @@ function setupCanvasZoomAndPan() {
     }, true);
 
     document.addEventListener('mousemove', (e) => {
+        syncCanvasCtrlStateWithEvent(e);
         if (CanvasState.isPanning) {
             // 标记正在拖动/滚动
             markScrolling();
@@ -8170,7 +8199,7 @@ function closeCanvasShortcutsModal() {
 
 const CANVAS_SHORTCUTS_KEY = 'canvas-custom-shortcuts';
 const DEFAULT_SHORTCUTS = {
-    ctrlKey: 'Control',  // Control, Alt, Shift, Meta
+    ctrlKey: 'Alt',      // Control, Alt, Shift, Meta
     spaceKey: 'Space'    // Space, or any other key
 };
 
@@ -8183,6 +8212,13 @@ function loadCanvasShortcuts() {
         const saved = localStorage.getItem(CANVAS_SHORTCUTS_KEY);
         if (saved) {
             const parsed = JSON.parse(saved);
+            // 如果之前保存的是旧默认值 Control，自动升级到新的默认值 Alt，避免旧缓存导致冲突
+            if (parsed.ctrlKey === 'Control') {
+                parsed.ctrlKey = 'Alt';
+                try {
+                    localStorage.setItem(CANVAS_SHORTCUTS_KEY, JSON.stringify(parsed));
+                } catch (_) {}
+            }
             canvasShortcuts = { ...DEFAULT_SHORTCUTS, ...parsed };
         }
     } catch (e) {
@@ -8201,11 +8237,12 @@ function saveCanvasShortcuts() {
 
 function getKeyDisplayName(keyCode, lang) {
     const isZh = lang === 'zh_CN';
+    const isMac = /Mac|iPod|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
     const keyMap = {
         'Control': 'Ctrl',
-        'Alt': 'Alt',
+        'Alt': isMac ? 'Option' : 'Alt',
         'Shift': 'Shift',
-        'Meta': 'Cmd',
+        'Meta': isMac ? 'Cmd' : 'Win',
         'Space': isZh ? '空格' : 'Space',
         'Tab': 'Tab'
     };
@@ -11231,11 +11268,11 @@ function checkEdgeAutoScroll(clientX, clientY) {
     if (!workspace) return;
 
     const rect = workspace.getBoundingClientRect();
-    const edgeThreshold = 100; // 触发自动滚动的边缘距离（像素）- 增加到100px
-    const maxSpeed = 20; // 最大滚动速度 - 增加基础速度
-    const minSpeed = 2; // 最小滚动速度 - 确保在边缘有基础速度
+    const edgeThreshold = 100; // 触发自动滚动的边缘距离（像素）
+    const maxSpeed = 8;        // 最大滚动速度 - 降低到8，使操作更温和
+    const minSpeed = 1.5;      // 最小滚动速度
 
-    // 计算距离边缘的距离
+    // 计算距离边缘 of the viewport/workspace
     const distLeft = clientX - rect.left;
     const distRight = rect.right - clientX;
     const distTop = clientY - rect.top;
@@ -11244,33 +11281,23 @@ function checkEdgeAutoScroll(clientX, clientY) {
     let targetVelocityX = 0;
     let targetVelocityY = 0;
 
-    // 缓动函数：使用三次方缓动（easeInCubic）让加速更平滑
-    const easeInCubic = (t) => t * t * t;
-
+    // 匀速化：使用线性比率，使速度随着越靠近边缘而均匀地、缓慢地增加，避免突然的加速抖动
     // 横向滚动
     if (distLeft < edgeThreshold && distLeft > 0) {
-        // 靠近左边缘，向左滚动（正向）
         const ratio = 1 - (distLeft / edgeThreshold);
-        const easedRatio = easeInCubic(ratio);
-        targetVelocityX = minSpeed + (maxSpeed - minSpeed) * easedRatio;
+        targetVelocityX = minSpeed + (maxSpeed - minSpeed) * ratio;
     } else if (distRight < edgeThreshold && distRight > 0) {
-        // 靠近右边缘，向右滚动（负向）
         const ratio = 1 - (distRight / edgeThreshold);
-        const easedRatio = easeInCubic(ratio);
-        targetVelocityX = -(minSpeed + (maxSpeed - minSpeed) * easedRatio);
+        targetVelocityX = -(minSpeed + (maxSpeed - minSpeed) * ratio);
     }
 
     // 纵向滚动
     if (distTop < edgeThreshold && distTop > 0) {
-        // 靠近上边缘，向上滚动（正向）
         const ratio = 1 - (distTop / edgeThreshold);
-        const easedRatio = easeInCubic(ratio);
-        targetVelocityY = minSpeed + (maxSpeed - minSpeed) * easedRatio;
+        targetVelocityY = minSpeed + (maxSpeed - minSpeed) * ratio;
     } else if (distBottom < edgeThreshold && distBottom > 0) {
-        // 靠近下边缘，向下滚动（负向）
         const ratio = 1 - (distBottom / edgeThreshold);
-        const easedRatio = easeInCubic(ratio);
-        targetVelocityY = -(minSpeed + (maxSpeed - minSpeed) * easedRatio);
+        targetVelocityY = -(minSpeed + (maxSpeed - minSpeed) * ratio);
     }
 
     // 启动或更新自动滚动
@@ -11358,6 +11385,10 @@ function stopEdgeAutoScroll() {
         }
         scheduleScrollbarUpdate();
     }
+}
+if (typeof window !== 'undefined') {
+    window.checkEdgeAutoScroll = checkEdgeAutoScroll;
+    window.stopEdgeAutoScroll = stopEdgeAutoScroll;
 }
 
 // 性能优化：调度滚动条更新（使用 RAF 去抖）
@@ -31828,8 +31859,10 @@ function addAnchorsToNode(nodeElement, nodeId) {
         const link = e.target && e.target.closest('.temp-canvas-node a.tree-bookmark-link');
         if (!link) return;
         // 如果处于批量选择模式，或者按下了修饰键（Ctrl/Cmd/Shift）用于选择，屏蔽默认的打开逻辑
-        if ((typeof window.selectMode !== 'undefined' && window.selectMode) || 
-            e.metaKey || e.ctrlKey || e.shiftKey) {
+        const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+        const hasSelectModifier = isMac ? (e.metaKey || e.shiftKey) : (e.ctrlKey || e.metaKey || e.shiftKey);
+        if ((typeof window.selectMode !== 'undefined' && window.selectMode && !(isMac && e.ctrlKey)) || 
+            hasSelectModifier) {
             e.preventDefault();
             return;
         }
@@ -34034,11 +34067,27 @@ function startEdgeLabelInlineEdit(edgeId) {
 }
 
 // =============================================================================
+// 重置 Ctrl/Space 等按键及平移状态函数，用于解决选择模式焦点切换时的按键卡死
+// =============================================================================
+function resetCanvasCtrlState() {
+    CanvasState.isCtrlPressed = false;
+    CanvasState.isSpacePressed = false;
+    CanvasState.isPanning = false;
+    const workspace = document.getElementById('canvasWorkspace');
+    if (workspace) {
+        workspace.classList.remove('space-pressed', 'ctrl-pressed', 'panning');
+    }
+    setSectionCtrlModeActive(false);
+    console.log('[CanvasModule] Canvas Ctrl/Space key states reset.');
+}
+
+// =============================================================================
 // 导出模块
 // =============================================================================
 
 window.CanvasModule = {
     init: initCanvasView,
+    resetCanvasCtrlState: resetCanvasCtrlState,
     openShortcuts: openCanvasShortcutsModal,
     enhance: enhanceBookmarkTreeForCanvas, // 增强书签树的Canvas功能
     clear: clearAllExceptPermanent,

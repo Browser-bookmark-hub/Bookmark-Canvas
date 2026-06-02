@@ -12238,8 +12238,10 @@ function attachTreeEvents(treeContainer) {
             const link = e.target && e.target.closest ? e.target.closest('a.tree-bookmark-link') : null;
             if (link && treeContainer.contains(link)) {
                 // 如果处于批量选择模式，或者按下了修饰键（Ctrl/Cmd/Shift）用于选择，屏蔽默认的打开逻辑
-                if ((typeof window.selectMode !== 'undefined' && window.selectMode) || 
-                    e.metaKey || e.ctrlKey || e.shiftKey) {
+                const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+                const hasSelectModifier = isMac ? (e.metaKey || e.shiftKey) : (e.ctrlKey || e.metaKey || e.shiftKey);
+                if ((typeof window.selectMode !== 'undefined' && window.selectMode && !(isMac && e.ctrlKey)) || 
+                    hasSelectModifier) {
                     e.preventDefault();
                     e.stopPropagation();
                     return;

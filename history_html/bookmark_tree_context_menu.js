@@ -1464,8 +1464,12 @@ function bindSelectModeGlobalHandlers() {
         e.stopPropagation();
         if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
 
-        // Ctrl/Cmd + Click: 多选
-        if (e.ctrlKey || e.metaKey) {
+        const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+        if (isMac && e.ctrlKey) return; // macOS 下 Ctrl+Click 视为右键，不作选择拦截
+
+        // Cmd + Click (Mac) 或 Ctrl/Cmd + Click (其它): 多选
+        const isMultiKey = isMac ? e.metaKey : (e.ctrlKey || e.metaKey);
+        if (isMultiKey) {
             toggleSelectItem(nodeId, treeItem);
             lastClickedNode = nodeId;
             return;
@@ -1542,7 +1546,11 @@ function unbindSelectModeGlobalHandlers() {
 document.addEventListener('click', (e) => {
     if (typeof selectMode !== 'undefined' && selectMode) return; // 已进入选择模式，由 selectModeGlobalClickHandler 处理
 
-    if (!e.ctrlKey && !e.metaKey && !e.shiftKey) return; // 没有按下修饰键
+    const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+    if (isMac && e.ctrlKey) return; // macOS 下 Ctrl+Click 视为右键，不触发多选
+
+    const hasModifier = isMac ? (e.metaKey || e.shiftKey) : (e.ctrlKey || e.metaKey || e.shiftKey);
+    if (!hasModifier) return; // 没有按下修饰键（在 Mac 上，排除 Ctrl 键以防止与右键/缩放冲突）
 
     const target = e.target;
     if (!target) return;
@@ -8130,6 +8138,15 @@ async function refreshBookmarkTree() {
 function enterSelectMode() {
     selectMode = true;
 
+    // 重置画布上的 Ctrl/Space/平移 状态，避免处于卡死状态
+    try {
+        if (window.CanvasModule && typeof window.CanvasModule.resetCanvasCtrlState === 'function') {
+            window.CanvasModule.resetCanvasCtrlState();
+        }
+    } catch (e) {
+        console.error('[Select模式] 进入时重置画布状态失败:', e);
+    }
+
     // 显示全局蓝框和提示
     showSelectModeOverlay();
     bindSelectModeGlobalHandlers();
@@ -8193,6 +8210,15 @@ function exitSelectMode() {
     // 清空选中
     deselectAll();
     updateBatchToolbar();
+
+    // 重置画布上的 Ctrl 状态，恢复正常缩放/平移操作，防止按键由于失焦导致未触发 keyup
+    try {
+        if (window.CanvasModule && typeof window.CanvasModule.resetCanvasCtrlState === 'function') {
+            window.CanvasModule.resetCanvasCtrlState();
+        }
+    } catch (e) {
+        console.error('[Select模式] 退出时重置画布状态失败:', e);
+    }
 
     console.log('[Select模式] 已退出');
 }
@@ -8485,13 +8511,18 @@ function showBatchContextMenu(e) {
             try {
                 exitSelectMode();
             } catch (_) {
-                // 兜底：显式关闭面板与蓝框并清空选择
+                // 兜底：显式关闭面板与蓝框并清空选择并重置画布 Ctrl 状态
                 try { selectMode = false; } catch (_) { }
                 try { unbindSelectModeGlobalHandlers(); } catch (_) { }
                 try { hideBatchActionPanel(); } catch (_) { }
                 try { hideSelectModeOverlay(); } catch (_) { }
                 try { if (typeof deselectAll === 'function') deselectAll(); } catch (_) { }
                 try { updateBatchToolbar(); } catch (_) { }
+                try {
+                    if (window.CanvasModule && typeof window.CanvasModule.resetCanvasCtrlState === 'function') {
+                        window.CanvasModule.resetCanvasCtrlState();
+                    }
+                } catch (_) { }
             }
             console.log('[批量菜单] 点击标题栏退出按钮');
         });
