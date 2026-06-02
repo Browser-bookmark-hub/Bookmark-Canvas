@@ -2294,37 +2294,31 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     const convert = (node) => {
         if (!node || typeof node !== 'object') return null;
 
-        // 如果节点包含 item 字段（例如来自批量面板导出的封装格式：{ source: '...', item: {...} }），则对其解包
-        let actualNode = node;
-        if (node.item && typeof node.item === 'object') {
-            actualNode = node.item;
-        }
-
         // 获取标题：支持 title, name, label, text
-        const title = actualNode.title || actualNode.name || actualNode.label || actualNode.text || '';
+        const title = node.title || node.name || node.label || node.text || '';
 
         // 获取 URL：支持 url, uri, href, link
-        const url = actualNode.url || actualNode.uri || actualNode.href || actualNode.link || '';
+        const url = node.url || node.uri || node.href || node.link || '';
 
         // 判断类型
         // Firefox 使用 type: "text/x-moz-place" 或 "text/x-moz-place-container"
         // Chrome 使用 type 字段或检查是否有 url
         let isFolder = false;
-        if (actualNode.type) {
+        if (node.type) {
             // Firefox: "text/x-moz-place-container" 是文件夹
             // Chrome: "folder" 是文件夹
-            if (actualNode.type === 'text/x-moz-place-container' ||
-                actualNode.type === 'folder' ||
-                actualNode.type === 'directory') {
+            if (node.type === 'text/x-moz-place-container' ||
+                node.type === 'folder' ||
+                node.type === 'directory') {
                 isFolder = true;
             }
         } else {
             // 没有 type 字段时：有 children 且没有 url 视为文件夹
-            isFolder = !url && (actualNode.children && Array.isArray(actualNode.children));
+            isFolder = !url && (node.children && Array.isArray(node.children));
         }
 
         // 跳过无效节点（既没有标题也没有 URL，且没有 children）
-        if (!title && !url && (!actualNode.children || actualNode.children.length === 0)) {
+        if (!title && !url && (!node.children || node.children.length === 0)) {
             return null;
         }
 
@@ -2344,9 +2338,17 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
             totalBookmarkCount++;
         }
 
+        // 提取 tags
+        if (Array.isArray(node.tags) && node.tags.length) {
+            item.tags = node.tags
+                .map(t => (t && typeof t === 'object') ? { color: String(t.color || '').trim(), text: String(t.text || '').trim() } : null)
+                .filter(t => t && t.color);
+            if (!item.tags.length) delete item.tags;
+        }
+
         // 递归处理子节点
-        if (actualNode.children && Array.isArray(actualNode.children)) {
-            item.children = actualNode.children.map(convert).filter(Boolean);
+        if (node.children && Array.isArray(node.children)) {
+            item.children = node.children.map(convert).filter(Boolean);
         }
 
         return item;
@@ -2362,6 +2364,10 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
             type: node.type,
             children: []
         };
+
+        if (Array.isArray(node.tags) && node.tags.length) {
+            item.tags = node.tags;
+        }
 
         if (node.children && Array.isArray(node.children)) {
             item.children = node.children.map(c => convertToTempItem(c, sectionId)).filter(Boolean);

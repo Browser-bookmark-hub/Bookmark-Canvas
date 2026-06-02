@@ -10252,7 +10252,18 @@ async function batchExportJSON() {
                 console.warn('[导出] 加载永久标签失败:', e);
             }
         }
-        const bookmarks = [];
+
+        const payload = {
+            format: 'bookmark-canvas-section',
+            schemaVersion: 2,
+            sectionType: 'temporary',
+            title: lang === 'zh_CN' ? `批量导出的书签 (${formatTimestampForTitle()})` : `Batch Exported Bookmarks (${formatTimestampForTitle()})`,
+            tempKind: 'special',
+            source: 'batch',
+            label: lang === 'zh_CN' ? '批量' : 'Batch',
+            items: []
+        };
+
         const permanentIds = getSelectedPermanentNodeIds();
         const tempNodes = getSelectedTempNodes();
         const manager = (tempNodes.length ? getTempManager() : null);
@@ -10261,37 +10272,33 @@ async function batchExportJSON() {
         for (const nodeId of permanentIds) {
             const node = await readPermanentNodeForPayload(nodeId);
             if (node) {
-                bookmarks.push({
-                    source: 'permanent',
-                    item: serializeBookmarkNode(node)
-                });
+                payload.items.push(serializeBookmarkNode(node));
             }
         }
 
         // 临时栏目
         const serializeTempItem = (item) => {
             if (!item) return null;
-            return {
+            const out = {
                 title: item.title,
                 url: item.url || null,
                 type: item.type,
                 children: (item.children || []).map(serializeTempItem).filter(Boolean)
             };
+            if (Array.isArray(item.tags) && item.tags.length) {
+                out.tags = item.tags.map(t => ({ color: t.color, text: t.text }));
+            }
+            return out;
         };
         if (manager && tempNodes.length) {
             for (const node of tempNodes) {
                 const entry = manager.findItem(node.sectionId, node.id);
                 if (!entry || !entry.item) continue;
-                bookmarks.push({
-                    source: 'temporary',
-                    sectionId: node.sectionId,
-                    id: node.id,
-                    item: serializeTempItem(entry.item)
-                });
+                payload.items.push(serializeTempItem(entry.item));
             }
         }
 
-        const json = JSON.stringify(bookmarks, null, 2);
+        const json = JSON.stringify(payload, null, 2);
 
         // 下载文件
         const blob = new Blob([json], { type: 'application/json' });
