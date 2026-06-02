@@ -4887,13 +4887,17 @@ function moveTempItemsAcrossSections(sourceSectionId, targetSectionId, itemIds, 
     saveTempNodes();
 }
 
-function renameTempItem(sectionId, itemId, newTitle) {
+function renameTempItem(sectionId, itemId, newTitle, options = {}) {
     const entry = findTempItemEntry(sectionId, itemId);
     if (!entry) throw new Error('未找到临时节点');
     entry.item.title = newTitle;
     const section = entry.section;
-    renderTempNode(section);
-    saveTempNodes();
+    if (options.skipRender !== true) {
+        renderTempNode(section);
+    }
+    if (options.skipSave !== true) {
+        saveTempNodes();
+    }
 }
 
 function getTempItemTags(sectionId, itemId) {
@@ -4940,7 +4944,7 @@ function toggleTempItemTag(sectionId, itemId, tagInput, options = {}) {
     return { action, tags: existing };
 }
 
-function updateTempBookmark(sectionId, itemId, updates) {
+function updateTempBookmark(sectionId, itemId, updates, options = {}) {
     const entry = findTempItemEntry(sectionId, itemId);
     if (!entry) throw new Error('未找到临时节点');
 
@@ -4952,8 +4956,12 @@ function updateTempBookmark(sectionId, itemId, updates) {
         entry.item.type = updates.url ? 'bookmark' : entry.item.type;
     }
 
-    renderTempNode(entry.section);
-    saveTempNodes();
+    if (options.skipRender !== true) {
+        renderTempNode(entry.section);
+    }
+    if (options.skipSave !== true) {
+        saveTempNodes();
+    }
 }
 
 function ensureTempSectionRendered(sectionId) {

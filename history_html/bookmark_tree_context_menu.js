@@ -1352,6 +1352,7 @@ let selectedNodes = new Set(); // 多选节点集合
 let selectedNodeMeta = new Map(); // 节点元信息：nodeId -> { treeType, sectionId }
 let lastClickedNode = null; // 上次点击的节点（用于Shift选择）
 let lastClickedElement = null; // 上次点击的元素（用于永久栏目副本定位）
+let selectionSnapshot = new Set(); // 范围选择快照
 let selectMode = false; // 是否处于Select模式
 try {
     Object.defineProperty(window, 'selectMode', {
@@ -7839,21 +7840,43 @@ function selectRange(startNodeId, endNodeId, endNodeElement = null) {
     const start = Math.min(startIndex, endIndex);
     const end = Math.max(startIndex, endIndex);
 
-    // 选中范围内的所有节点
+    // 计算当前范围内的节点集合
+    const rangeNodeIds = new Set();
     for (let i = start; i <= end; i++) {
-        const node = allNodes[i];
-        const nodeId = node.dataset.nodeId;
-        selectedNodes.add(nodeId);
-        selectedNodeMeta.set(nodeId, {
-            treeType: node.dataset.treeType || 'permanent',
-            sectionId: node.dataset.sectionId || null,
-            nodeType: node.dataset.nodeType || 'bookmark'
-        });
-        // 同步高亮所有副本中的该节点
-        document.querySelectorAll(`.tree-item[data-node-id="${nodeId}"]`).forEach(el => {
-            el.classList.add('selected');
-        });
+        const nodeId = allNodes[i].dataset.nodeId;
+        if (nodeId) rangeNodeIds.add(nodeId);
     }
+
+    // 更新该容器下的选择状态（支持扩大与收缩收回）
+    allNodes.forEach(node => {
+        const nodeId = node.dataset.nodeId;
+        if (!nodeId) return;
+
+        if (rangeNodeIds.has(nodeId)) {
+            selectedNodes.add(nodeId);
+            selectedNodeMeta.set(nodeId, {
+                treeType: node.dataset.treeType || 'permanent',
+                sectionId: node.dataset.sectionId || null,
+                nodeType: node.dataset.nodeType || 'bookmark'
+            });
+            document.querySelectorAll(`.tree-item[data-node-id="${nodeId}"]`).forEach(el => {
+                el.classList.add('selected');
+            });
+        } else {
+            if (selectionSnapshot && selectionSnapshot.has(nodeId)) {
+                selectedNodes.add(nodeId);
+                document.querySelectorAll(`.tree-item[data-node-id="${nodeId}"]`).forEach(el => {
+                    el.classList.add('selected');
+                });
+            } else {
+                selectedNodes.delete(nodeId);
+                selectedNodeMeta.delete(nodeId);
+                document.querySelectorAll(`.tree-item[data-node-id="${nodeId}"]`).forEach(el => {
+                    el.classList.remove('selected');
+                });
+            }
+        }
+    });
 
     rememberBatchSelection(allNodes[end]);
 
@@ -7878,6 +7901,8 @@ function selectAll() {
     const firstNode = document.querySelector('.tree-item[data-node-id]');
     rememberBatchSelection(firstNode);
 
+    selectionSnapshot = new Set(selectedNodes); // 更新范围选择快照
+
     updateBatchToolbar();
     updateBatchPanelCount();
 
@@ -7892,6 +7917,9 @@ function deselectAll() {
     selectedNodes.clear();
     selectedNodeMeta.clear();
     lastBatchSelectionInfo = null;
+    lastClickedNode = null;
+    lastClickedElement = null;
+    selectionSnapshot.clear();
 
     updateBatchToolbar();
     updateBatchPanelCount();
@@ -8138,6 +8166,10 @@ async function refreshBookmarkTree() {
 function enterSelectMode() {
     selectMode = true;
 
+    lastClickedNode = null;
+    lastClickedElement = null;
+    selectionSnapshot.clear();
+
     // 重置画布上的 Ctrl/Space/平移 状态，避免处于卡死状态
     try {
         if (window.CanvasModule && typeof window.CanvasModule.resetCanvasCtrlState === 'function') {
@@ -8210,6 +8242,10 @@ function exitSelectMode() {
     // 清空选中
     deselectAll();
     updateBatchToolbar();
+
+    lastClickedNode = null;
+    lastClickedElement = null;
+    selectionSnapshot.clear();
 
     // 重置画布上的 Ctrl 状态，恢复正常缩放/平移操作，防止按键由于失焦导致未触发 keyup
     try {
@@ -8611,6 +8647,8 @@ function toggleSelectItem(nodeId, nodeElement) {
         rememberBatchSelection(referenceEl);
         console.log('[批量] 选中:', nodeId);
     }
+
+    selectionSnapshot = new Set(selectedNodes); // 更新范围选择快照
 
     updateBatchToolbar();
     updateBatchPanelCount(); // 实时更新批量面板计数
@@ -10050,16 +10088,23 @@ async function batchRename() {
 
         if (tempNodes.length) {
             const manager = ensureTempManager();
+            const updatedSections = new Set();
             for (const node of tempNodes) {
                 if (node.isFolder) {
-                    manager.renameItem(node.sectionId, node.id, normalizedTitle);
+                    manager.renameItem(node.sectionId, node.id, normalizedTitle, { skipRender: true, skipSave: true });
                 } else {
                     manager.updateBookmark(node.sectionId, node.id, {
                         title: normalizedTitle
-                    });
+                    }, { skipRender: true, skipSave: true });
                 }
+                updatedSections.add(node.sectionId);
                 count++;
             }
+            // 批量修改完成后，对所有受影响的栏目各触发一次统一重绘和存储保存
+            updatedSections.forEach(sectionId => {
+                manager.ensureRendered(sectionId);
+            });
+            saveTempNodes();
         }
 
         alert(lang === 'zh_CN' ? `已重命名 ${count} 项` : `Renamed ${count} items`);
