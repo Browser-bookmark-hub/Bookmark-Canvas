@@ -12,8 +12,18 @@ let pointerDragState = {
     startY: 0,
     treeContainer: null,
     dragThreshold: 5, // 移动5px后才开始拖拽
-    hasMoved: false
+    hasMoved: false,
+    preventNextClick: false
 };
+
+// 全局捕获阶段 click 监听器，用于阻止拖拽释放后误触发的点击事件
+document.addEventListener('click', (e) => {
+    if (pointerDragState.preventNextClick) {
+        e.stopPropagation();
+        e.preventDefault();
+        pointerDragState.preventNextClick = false;
+    }
+}, true);
 
 // 暴露给外部的接口：为书签树容器附加指针拖拽事件
 // 悬停展开状态（跨模块共享，二次/后续加速）
@@ -149,6 +159,14 @@ function attachPointerDragEvents(treeContainer) {
     // 使用事件委托，只在容器上监听
     treeContainer.addEventListener('pointerdown', handlePointerDown);
 
+    // 阻止原生拖拽，以便由我们的指针拖拽系统完全接管并允许滚轮滚动
+    treeContainer.addEventListener('dragstart', (e) => {
+        const targetItem = e.target.closest('.tree-item[data-node-id]');
+        if (targetItem) {
+            e.preventDefault();
+        }
+    });
+
     // 全局监听 pointermove 和 pointerup（只绑定一次）
     if (!pointerDragState.globalHandlersAttached) {
         document.addEventListener('pointermove', handlePointerMove);
@@ -183,8 +201,8 @@ function handlePointerDown(e) {
     pointerDragState.hasMoved = false;
     pointerDragState.isDragging = false; // 还未开始拖拽
 
-    // 阻止默认选择行为
-    e.preventDefault();
+    // 注意：在此处，我们不再调用 e.preventDefault()，从而允许浏览器正常触发 native click 事件。
+    // 原生拖拽启动（dragstart）将由 attachPointerDragEvents 中绑定的 dragstart 监听器阻止。
 }
 
 function handlePointerMove(e) {
@@ -202,6 +220,13 @@ function handlePointerMove(e) {
     // 开始拖拽
     if (!pointerDragState.isDragging) {
         startPointerDrag(e);
+    }
+
+    pointerDragState.hasMoved = true;
+
+    // 如果处于拖动状态，阻止默认事件以避免在拖动过程中触发浏览器的其他默认行为（如文本选择或页面滚动）
+    if (pointerDragState.isDragging) {
+        e.preventDefault();
     }
 
     pointerDragState.hasMoved = true;
@@ -276,9 +301,9 @@ function handlePointerMove(e) {
     handleAutoScroll(e);
 }
 
-function handlePointerUp(e) {
+async function handlePointerUp(e) {
     if (!pointerDragState.isDragging) {
-        // 未开始拖拽，清理状态
+        // 未开始拖拽，清理状态。浏览器会自动触发原生 click 事件。
         cleanupPointerDrag();
         return;
     }
@@ -292,6 +317,7 @@ function handlePointerUp(e) {
     const target = document.elementFromPoint(e.clientX, e.clientY);
     const targetTreeItem = target?.closest('.tree-item[data-node-id]');
     const permanentSection = target?.closest('.permanent-bookmark-section');
+    const tempSection = target?.closest('.temp-canvas-node');
 
     // 恢复覆盖层显示（准备清理）
     if (pointerDragState.dragOverlay) {
@@ -323,7 +349,24 @@ function handlePointerUp(e) {
                 event: e
             });
         }
-    } else if (!treeContainer) {
+    } else if (!targetTreeItem && tempSection) {
+        const draggedElement = pointerDragState.draggedElement;
+        const dragNodeId = draggedElement?.dataset?.nodeId || '';
+        const sourceTreeType = draggedElement?.dataset?.treeType || 'permanent';
+        const sourceSectionId = draggedElement?.dataset?.sectionId || null;
+        const targetSectionId = tempSection.dataset.sectionId;
+
+        if (dragNodeId && targetSectionId && typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.performMove === 'function') {
+            window.__treeDnd.performMove(dragNodeId, null, true, {
+                sourceTreeType,
+                sourceSectionId,
+                targetTreeType: 'temporary',
+                targetSectionId,
+                position: 'inside',
+                event: e
+            });
+        }
+    } else {
         // 可能拖到Canvas外，检查是否需要创建临时栏目
         const canvasWorkspace = document.getElementById('canvasWorkspace');
         const primaryPermanentSection = document.getElementById('permanentSection');
@@ -342,12 +385,27 @@ function handlePointerUp(e) {
                 e.clientY >= permanentRect.top &&
                 e.clientY <= permanentRect.bottom;
 
-            // 如果在Canvas工作区但不在永久栏目内，创建临时栏目
+            // 如果在Canvas工作区但不在任何已有栏目（永久/临时）内，创建临时栏目
             if (inWorkspace && !inPermanent) {
-                handleDropToCanvas(e, workspaceRect);
+                const draggedElement = pointerDragState.draggedElement;
+                const dragNodeId = draggedElement?.dataset?.nodeId;
+                const isDraggedNodeSelected = dragNodeId && typeof selectedNodes !== 'undefined' && selectedNodes && selectedNodes.has(dragNodeId);
+
+                const batchToTemp = window.batchToTempSection || (typeof batchToTempSection !== 'undefined' ? batchToTempSection : null);
+                if (isDraggedNodeSelected && batchToTemp) {
+                    await batchToTemp(e);
+                } else {
+                    handleDropToCanvas(e, workspaceRect);
+                }
             }
         }
     }
+
+    // 拖拽成功结束，标记接下来短时间内阻止触发点击事件（防误触）
+    pointerDragState.preventNextClick = true;
+    setTimeout(() => {
+        pointerDragState.preventNextClick = false;
+    }, 50);
 
     cleanupPointerDrag();
 }
@@ -358,6 +416,9 @@ function handlePointerCancel(e) {
 
 function startPointerDrag(e) {
     pointerDragState.isDragging = true;
+    try {
+        window.getSelection()?.removeAllRanges();
+    } catch (_) {}
 
     const draggedElement = pointerDragState.draggedElement;
     if (!draggedElement) return;
@@ -368,18 +429,67 @@ function startPointerDrag(e) {
     // 创建拖拽覆盖层
     const overlay = document.createElement('div');
     overlay.className = 'pointer-drag-overlay';
-    overlay.textContent = draggedElement.dataset.nodeTitle || '拖拽中...';
+
+    // Calculate detailed count for selection
+    let previewText = draggedElement.dataset.nodeTitle || draggedElement.dataset.nodeUrl || '拖拽中...';
+    const dragNodeId = draggedElement.dataset.nodeId;
+    const isDraggedNodeSelected = dragNodeId && typeof selectedNodes !== 'undefined' && selectedNodes && selectedNodes.has(dragNodeId);
+
+    if (isDraggedNodeSelected && selectedNodes.size > 1) {
+        let bookmarkCount = 0;
+        let folderCount = 0;
+        selectedNodes.forEach(id => {
+            const el = document.querySelector(`.tree-item[data-node-id="${id}"]`);
+            if (el) {
+                if (el.dataset.nodeType === 'folder') {
+                    folderCount++;
+                } else {
+                    bookmarkCount++;
+                }
+            } else {
+                const meta = typeof selectedNodeMeta !== 'undefined' ? selectedNodeMeta.get(id) : null;
+                if (meta && meta.nodeType === 'folder') {
+                    folderCount++;
+                } else {
+                    bookmarkCount++;
+                }
+            }
+        });
+        const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
+        const isEn = lang === 'en' || lang === 'en_US';
+        if (isEn) {
+            const bText = bookmarkCount > 0 ? `${bookmarkCount} bookmark${bookmarkCount > 1 ? 's' : ''}` : '';
+            const fText = folderCount > 0 ? `${folderCount} folder${folderCount > 1 ? 's' : ''}` : '';
+            previewText = (bText && fText) ? `${bText}, ${fText}` : (bText || fText || '0 items');
+        } else {
+            const bText = bookmarkCount > 0 ? `${bookmarkCount}个书签` : '';
+            const fText = folderCount > 0 ? `${folderCount}个文件夹` : '';
+            previewText = (bText && fText) ? `${bText}，${fText}` : (bText || fText || '0个项目');
+        }
+
+        // 简洁的框体样式：使用暗色背景和橙色边框
+        overlay.style.background = '#282828';
+        overlay.style.border = '1px solid #ff7b00';
+        overlay.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.25)';
+        overlay.style.fontWeight = 'normal';
+    } else {
+        overlay.style.background = '#282828';
+        overlay.style.border = '1px solid #555';
+        overlay.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.25)';
+        overlay.style.fontWeight = 'normal';
+    }
+
+    overlay.textContent = previewText;
     overlay.style.position = 'fixed';
     overlay.style.left = e.clientX + 10 + 'px';
     overlay.style.top = e.clientY + 10 + 'px';
     overlay.style.padding = '4px 8px';
-    overlay.style.background = 'rgba(0, 0, 0, 0.75)';
     overlay.style.color = 'white';
     overlay.style.borderRadius = '4px';
     overlay.style.pointerEvents = 'none';
     overlay.style.zIndex = '10000';
     overlay.style.fontSize = '12px';
-    overlay.style.maxWidth = '200px';
+    overlay.style.maxWidth = '260px'; // Slightly wider to hold details
     overlay.style.overflow = 'hidden';
     overlay.style.textOverflow = 'ellipsis';
     overlay.style.whiteSpace = 'nowrap';

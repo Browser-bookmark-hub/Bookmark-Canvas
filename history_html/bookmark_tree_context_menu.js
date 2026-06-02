@@ -1353,6 +1353,13 @@ let selectedNodeMeta = new Map(); // 节点元信息：nodeId -> { treeType, sec
 let lastClickedNode = null; // 上次点击的节点（用于Shift选择）
 let lastClickedElement = null; // 上次点击的元素（用于永久栏目副本定位）
 let selectMode = false; // 是否处于Select模式
+try {
+    Object.defineProperty(window, 'selectMode', {
+        get: () => selectMode,
+        set: (v) => { selectMode = v; },
+        configurable: true
+    });
+} catch (_) {}
 
 function getPermanentColumnKeyFromElement(el) {
     if (!el || !el.closest) return null;
@@ -1466,7 +1473,7 @@ function bindSelectModeGlobalHandlers() {
 
         // Shift + Click: 范围选择
         if (e.shiftKey && lastClickedNode) {
-            selectRange(lastClickedNode, nodeId);
+            selectRange(lastClickedNode, nodeId, treeItem);
             return;
         }
 
@@ -1485,15 +1492,15 @@ function bindSelectModeGlobalHandlers() {
         const treeItem = target.closest ? target.closest('.tree-item[data-node-id]') : null;
         if (treeItem) return;
 
-        // 仅在树/画布区域拦截右键，避免影响其它弹窗/输入框
-        const isInScope = !!(
+        // 允许卡片内部空白区域、栏目body区域、以及画布空白区域触发原有的右键空白菜单（用于粘贴、添加、此位置导入等操作）
+        const isBlankArea = !!(
             target.closest('.bookmark-tree') ||
             target.closest('.permanent-section-body') ||
             target.closest('.temp-node-body') ||
             target.closest('.canvas-workspace') ||
             target.closest('.tree-view-container')
         );
-        if (!isInScope) return;
+        if (isBlankArea) return;
 
         e.preventDefault();
         e.stopPropagation();
@@ -1531,6 +1538,61 @@ function unbindSelectModeGlobalHandlers() {
     selectModeJustDraggedUntil = 0;
 }
 
+// 全局快捷键/修饰键点击监听器：用于在未进入选择模式时，通过 Cmd/Ctrl/Shift + 点击触发选择模式
+document.addEventListener('click', (e) => {
+    if (typeof selectMode !== 'undefined' && selectMode) return; // 已进入选择模式，由 selectModeGlobalClickHandler 处理
+
+    if (!e.ctrlKey && !e.metaKey && !e.shiftKey) return; // 没有按下修饰键
+
+    const target = e.target;
+    if (!target) return;
+
+    // 排除批量操作面板等 UI
+    if (typeof __isSelectModeUiTarget === 'function' && __isSelectModeUiTarget(target)) return;
+
+    const treeItem = target.closest ? target.closest('.tree-item[data-node-id]') : null;
+    if (!treeItem) return;
+
+    // 允许折叠按钮（及其右侧一定范围）触发展开/收起，不视为选择
+    const toggle = treeItem.querySelector ? treeItem.querySelector('.tree-toggle') : null;
+    if (toggle) {
+        const toggleRect = toggle.getBoundingClientRect();
+        const nearToggle = (
+            e.clientX >= toggleRect.left &&
+            e.clientX <= (toggleRect.right + 30) &&
+            e.clientY >= toggleRect.top &&
+            e.clientY <= toggleRect.bottom
+        );
+        if ((target.closest && target.closest('.tree-toggle')) || nearToggle) {
+            return;
+        }
+    }
+
+    const nodeId = treeItem.dataset ? treeItem.dataset.nodeId : null;
+    if (!nodeId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+
+    console.log('[快捷键选择] 触发批量选择模式, 节点:', nodeId);
+    if (typeof enterSelectMode === 'function') {
+        enterSelectMode();
+    }
+
+    if (e.shiftKey && typeof lastClickedNode !== 'undefined' && lastClickedNode) {
+        if (typeof selectRange === 'function') {
+            selectRange(lastClickedNode, nodeId, treeItem);
+        }
+    } else {
+        if (typeof toggleSelectItem === 'function') {
+            toggleSelectItem(nodeId, treeItem);
+        }
+        lastClickedNode = nodeId;
+    }
+}, true); // 使用捕获阶段
+
+
 const BATCH_PANEL_STATE_MAP_KEY = 'batchPanelStateMap';
 const BATCH_PANEL_LEGACY_KEY = 'batchPanelState';
 const PERMANENT_SECTION_ANCHOR_ID = 'permanent-root';
@@ -1538,7 +1600,7 @@ let currentBatchPanelAnchorInfo = null; // 当前批量面板定位信息
 let lastBatchSelectionInfo = null; // 最近一次选择所属栏目
 
 // 批量面板默认尺寸：固定，不跟随画布缩放
-const BATCH_PANEL_VERTICAL_DEFAULT_WIDTH = 200;
+const BATCH_PANEL_VERTICAL_DEFAULT_WIDTH = 220;
 const BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT = 520;
 
 function clampValue(value, min, max) {
@@ -3615,19 +3677,48 @@ function ensureTempManager() {
 
 function getSelectedTempNodes() {
     const nodes = [];
+    const manager = getTempManager();
     selectedNodes.forEach(nodeId => {
         const meta = selectedNodeMeta.get(nodeId);
         if (!meta || meta.treeType !== 'temporary') return;
         const element = document.querySelector(`.tree-item[data-node-id="${nodeId}"]`);
-        const isFolder = element ? element.dataset.nodeType === 'folder' : false;
-        const title = element ? element.dataset.nodeTitle : '';
+        
+        let isFolder = meta.nodeType === 'folder';
+        let title = '';
+        let url = '';
+
+        // Try to retrieve data from temporary section memory manager first
+        if (manager && typeof manager.findItem === 'function') {
+            try {
+                const entry = manager.findItem(meta.sectionId, nodeId);
+                if (entry && entry.item) {
+                    isFolder = entry.item.type === 'folder';
+                    title = entry.item.title || '';
+                    url = entry.item.url || '';
+                }
+            } catch (err) {
+                console.warn('[getSelectedTempNodes] Memory query failed, fallback to DOM:', err);
+            }
+        }
+
+        // Fallback to DOM queries if memory query failed or properties are missing
+        if (!title && element) {
+            title = element.dataset.nodeTitle || '';
+        }
+        if (!url && element) {
+            url = element.dataset.nodeUrl || '';
+        }
+        if (element && !isFolder) {
+            isFolder = element.dataset.nodeType === 'folder';
+        }
+
         nodes.push({
             id: nodeId,
             sectionId: meta.sectionId,
             element,
             isFolder,
             title,
-            url: element ? element.dataset.nodeUrl : ''
+            url
         });
     });
     return nodes;
@@ -3658,13 +3749,35 @@ function getBatchSelectionCapabilities() {
         tempAllSameSection = tempNodes.every(n => n.sectionId === sectionId);
     }
 
+    let hasBookmarks = false;
+    let hasFolders = false;
+
+    // 直接从选中的元数据缓存中获取节点类型，避免 DOM 查询及折叠状态导致的错误 fallback
+    selectedNodes.forEach(nodeId => {
+        const meta = selectedNodeMeta.get(nodeId);
+        if (meta) {
+            if (meta.nodeType === 'folder') {
+                hasFolders = true;
+            } else {
+                hasBookmarks = true;
+            }
+        } else {
+            hasBookmarks = true; // 默认回退
+        }
+    });
+
+    const mixedTypes = hasBookmarks && hasFolders;
+
     return {
         permanentIds,
         tempNodes,
         hasPermanent,
         hasTemp,
         mixed,
-        tempAllSameSection
+        tempAllSameSection,
+        hasBookmarks,
+        hasFolders,
+        mixedTypes
     };
 }
 
@@ -4534,47 +4647,38 @@ async function batchDeleteTemp() {
 }
 
 async function batchRenameTemp() {
-    const tempNodes = getSelectedTempNodes();
+    const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
+    const caps = getBatchSelectionCapabilities();
+
+    if (caps.mixedTypes) {
+        alert(lang === 'zh_CN' ? '无法对混合了书签与文件夹的选中项进行重命名' : 'Cannot rename a mixed selection of bookmarks and folders');
+        return;
+    }
+
+    const tempNodes = caps.tempNodes;
     if (!tempNodes.length) return;
+
+    const newTitle = prompt(
+        lang === 'zh_CN' ? '请输入统一的新名称（覆盖所有选中项）:' : 'Enter a new name (overwrites all selected items):',
+        ''
+    );
+    if (newTitle === null) return;
+    const normalizedTitle = newTitle.trim();
+    if (!normalizedTitle) return;
+
     const manager = ensureTempManager();
-    const lang = currentLang || 'zh_CN';
+    let count = 0;
     for (const node of tempNodes) {
         if (node.isFolder) {
-            const newTitle = prompt(
-                lang === 'zh_CN' ? `重命名文件夹 (${node.title}):` : `Rename folder (${node.title}):`,
-                node.title || ''
-            );
-            if (newTitle !== null) {
-                const normalizedTitle = newTitle.trim();
-                const normalizedCurrentTitle = typeof node.title === 'string' ? node.title.trim() : '';
-                if (normalizedTitle !== normalizedCurrentTitle) {
-                    manager.renameItem(node.sectionId, node.id, normalizedTitle);
-                }
-            }
+            manager.renameItem(node.sectionId, node.id, normalizedTitle);
         } else {
-            const newTitle = prompt(
-                lang === 'zh_CN' ? `重命名书签 (${node.title}):` : `Rename bookmark (${node.title}):`,
-                node.title || ''
-            );
-            if (newTitle === null) continue;
-            const newUrl = prompt(
-                lang === 'zh_CN' ? '更新书签地址:' : 'Update bookmark URL:',
-                node.url || 'https://'
-            );
-            if (newUrl === null) continue;
-            const normalizedTitle = newTitle.trim();
-            const normalizedUrl = newUrl.trim();
-            const normalizedCurrentTitle = typeof node.title === 'string' ? node.title.trim() : '';
-            const normalizedCurrentUrl = typeof node.url === 'string' ? node.url.trim() : '';
-            if (normalizedTitle === normalizedCurrentTitle && normalizedUrl === normalizedCurrentUrl) {
-                continue;
-            }
             manager.updateBookmark(node.sectionId, node.id, {
-                title: normalizedTitle,
-                url: normalizedUrl
+                title: normalizedTitle
             });
         }
+        count++;
     }
+    console.log('[批量临时] 重命名完成:', count);
 }
 
 function __normalizeBookmarkAddActionType(actionType) {
@@ -7452,8 +7556,25 @@ async function pasteBookmark(targetNodeId, isFolder) {
                 }
                 const createdEvents = [];
                 try {
+                    const tagUpdates = [];
                     for (const node of payload) {
-                        await duplicateNode(node, targetFolderId, { createdEvents });
+                        await duplicateNode(node, targetFolderId, { tagUpdates, createdEvents });
+                    }
+                    if (tagUpdates.length > 0) {
+                        const bridge = window.CanvasProtocolBridge;
+                        if (bridge && typeof bridge.writePermanentNodeTagsBulk === 'function') {
+                            try {
+                                await bridge.writePermanentNodeTagsBulk(tagUpdates);
+                                if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                                    await window.TagSystem.ensurePermTagsLoaded(true);
+                                }
+                                if (typeof window.__refreshAllTagDots === 'function') {
+                                    window.__refreshAllTagDots();
+                                }
+                            } catch (e) {
+                                console.warn('[粘贴] 批量写入标签失败:', e);
+                            }
+                        }
                     }
                     if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
                         await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'paste-permanent-copy');
@@ -7602,45 +7723,110 @@ async function getAllUrlsFromFolder(folderId) {
 
 // 切换节点选中状态
 function toggleNodeSelection(nodeId, nodeElement) {
-    if (!nodeElement) {
-        nodeElement = document.querySelector(`.tree-item[data-node-id="${nodeId}"]`);
-    }
-
-    // 多永久栏目副本：同一个 nodeId 可能在多个树中出现，需要同步选中态
-    const nodeElements = Array.from(document.querySelectorAll(`.tree-item[data-node-id="${nodeId}"]`));
-
-    if (selectedNodes.has(nodeId)) {
-        selectedNodes.delete(nodeId);
-        selectedNodeMeta.delete(nodeId);
-        nodeElements.forEach(el => el.classList.remove('selected'));
-        if (selectedNodes.size === 0) {
-            lastBatchSelectionInfo = null;
-        }
-    } else {
-        selectedNodes.add(nodeId);
-        const referenceEl = nodeElement || nodeElements[0] || null;
-        nodeElements.forEach(el => el.classList.add('selected'));
-        if (referenceEl) {
-            selectedNodeMeta.set(nodeId, {
-                treeType: referenceEl.dataset.treeType || 'permanent',
-                sectionId: referenceEl.dataset.sectionId || null
-            });
-            rememberBatchSelection(referenceEl);
-        } else {
-            selectedNodeMeta.delete(nodeId);
-        }
-    }
-
-    console.log('[多选] 当前选中:', selectedNodes.size, '个');
+    toggleSelectItem(nodeId, nodeElement);
 }
 
+window.getDragSelectionBreakdown = function(nodeIds) {
+    let foldersCount = 0;
+    let bookmarksCount = 0;
+    const ids = nodeIds || (typeof selectedNodes !== 'undefined' ? Array.from(selectedNodes) : []);
+    const manager = getTempManager();
+
+    ids.forEach(id => {
+        const el = document.querySelector(`.tree-item[data-node-id="${id}"]`);
+        if (el) {
+            if (el.dataset.nodeType === 'folder') {
+                foldersCount++;
+            } else {
+                bookmarksCount++;
+            }
+        } else {
+            const meta = typeof selectedNodeMeta !== 'undefined' && selectedNodeMeta.get(id);
+            if (meta) {
+                if (meta.nodeType === 'folder') {
+                    foldersCount++;
+                } else if (meta.treeType === 'temporary' && manager && typeof manager.findItem === 'function') {
+                    try {
+                        const entry = manager.findItem(meta.sectionId, id);
+                        if (entry && entry.item && entry.item.type === 'folder') {
+                            foldersCount++;
+                            return;
+                        }
+                    } catch (_) {}
+                    bookmarksCount++;
+                } else {
+                    bookmarksCount++;
+                }
+            } else {
+                bookmarksCount++;
+            }
+        }
+    });
+
+    return { folders: foldersCount, bookmarks: bookmarksCount, total: ids.length };
+};
+
+window.formatDragPreviewText = function(nodeIds, lang = 'zh_CN') {
+    const breakdown = window.getDragSelectionBreakdown(nodeIds);
+    const f = breakdown.folders;
+    const b = breakdown.bookmarks;
+
+    if (lang === 'zh_CN') {
+        if (f > 0 && b > 0) {
+            return `${b} 个书签，${f} 个文件夹`;
+        } else if (f > 0) {
+            return `${f} 个文件夹`;
+        } else if (b > 0) {
+            return `${b} 个书签`;
+        }
+        return '0 个项目';
+    } else {
+        if (f > 0 && b > 0) {
+            return `${b} bookmark${b > 1 ? 's' : ''}, ${f} folder${f > 1 ? 's' : ''}`;
+        } else if (f > 0) {
+            return `${f} folder${f > 1 ? 's' : ''}`;
+        } else if (b > 0) {
+            return `${b} bookmark${b > 1 ? 's' : ''}`;
+        }
+        return '0 items';
+    }
+};
+
 // 范围选择（Shift+Click）
-function selectRange(startNodeId, endNodeId) {
-    const allNodes = Array.from(document.querySelectorAll('.tree-item[data-node-id]'));
+function selectRange(startNodeId, endNodeId, endNodeElement = null) {
+    // 找出结束节点元素及其所在的卡片容器（确保选择是在同一个卡片内进行）
+    const endEl = endNodeElement ||
+                  document.querySelector(`.tree-item[data-node-id="${endNodeId}"].selected`) || 
+                  document.querySelector(`.tree-item[data-node-id="${endNodeId}"]`);
+    const container = endEl ? endEl.closest('.permanent-bookmark-section, .temp-canvas-node') : null;
+    if (!container) return;
+
+    // 尝试在同一个卡片容器中解析起始节点元素（支持因更新/重渲染导致的元素离线或指针丢失）
+    let startEl = null;
+    if (lastClickedElement && container.contains(lastClickedElement)) {
+        startEl = lastClickedElement;
+    } else {
+        startEl = container.querySelector(`.tree-item[data-node-id="${startNodeId}"]`);
+    }
+
+    // 如果起始节点不在此卡片容器内，则不支持跨卡片范围选择，回退为单选当前节点
+    if (!startEl) {
+        toggleSelectItem(endNodeId, endEl);
+        lastClickedNode = endNodeId;
+        return;
+    }
+
+    const scope = container;
+    const allNodes = Array.from(scope.querySelectorAll('.tree-item[data-node-id]'));
+
     const startIndex = allNodes.findIndex(n => n.dataset.nodeId === startNodeId);
     const endIndex = allNodes.findIndex(n => n.dataset.nodeId === endNodeId);
 
-    if (startIndex === -1 || endIndex === -1) return;
+    if (startIndex === -1 || endIndex === -1) {
+        toggleSelectItem(endNodeId, endEl);
+        lastClickedNode = endNodeId;
+        return;
+    }
 
     const start = Math.min(startIndex, endIndex);
     const end = Math.max(startIndex, endIndex);
@@ -7652,9 +7838,13 @@ function selectRange(startNodeId, endNodeId) {
         selectedNodes.add(nodeId);
         selectedNodeMeta.set(nodeId, {
             treeType: node.dataset.treeType || 'permanent',
-            sectionId: node.dataset.sectionId || null
+            sectionId: node.dataset.sectionId || null,
+            nodeType: node.dataset.nodeType || 'bookmark'
         });
-        node.classList.add('selected');
+        // 同步高亮所有副本中的该节点
+        document.querySelectorAll(`.tree-item[data-node-id="${nodeId}"]`).forEach(el => {
+            el.classList.add('selected');
+        });
     }
 
     rememberBatchSelection(allNodes[end]);
@@ -7671,7 +7861,8 @@ function selectAll() {
         selectedNodes.add(node.dataset.nodeId);
         selectedNodeMeta.set(node.dataset.nodeId, {
             treeType: node.dataset.treeType || 'permanent',
-            sectionId: node.dataset.sectionId || null
+            sectionId: node.dataset.sectionId || null,
+            nodeType: node.dataset.nodeType || 'bookmark'
         });
         node.classList.add('selected');
     });
@@ -8145,7 +8336,8 @@ function showBatchContextMenu(e) {
 
     const caps = getBatchSelectionCapabilities();
     const cutDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
-    const mergeDisabled = caps.mixed;
+    const mergeDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
+    const renameDisabled = caps.mixedTypes;
 
     // 构建批量菜单 - 分组显示（简化版本）
         const itemGroups = [
@@ -8169,7 +8361,7 @@ function showBatchContextMenu(e) {
                 { action: 'batch-copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy' },
                 { action: 'batch-cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', disabled: cutDisabled },
                 { action: 'batch-delete', label: lang === 'zh_CN' ? '删除' : 'DELETE', icon: 'trash-alt' },
-                { action: 'batch-rename', label: lang === 'zh_CN' ? '改名' : 'Rename', icon: 'edit' }
+                { action: 'batch-rename', label: lang === 'zh_CN' ? '改名' : 'Rename', icon: 'edit', disabled: renameDisabled }
             ]
         },
         // 导出组
@@ -8199,7 +8391,7 @@ function showBatchContextMenu(e) {
         <div class="batch-panel-header" id="batch-panel-header">
             <span class="batch-panel-title" title="${lang === 'zh_CN' ? '拖动移动窗口' : 'Drag to move'}">${lang === 'zh_CN' ? '批量操作' : 'Batch Actions'}</span>
             <button class="batch-panel-help-btn" type="button" data-action="batch-help" title="${lang === 'zh_CN' ? '说明' : 'Help'}">?</button>
-            <span class="batch-panel-count" id="batch-panel-count">${selectedNodes.size} ${lang === 'zh_CN' ? '项已选' : 'selected'}</span>
+            <span class="batch-panel-count" id="batch-panel-count" title="${lang === 'zh_CN' ? '点击取消全部选择' : 'Click to cancel all selection'}">${selectedNodes.size}${lang === 'zh_CN' ? '项｜取消' : ' items｜Cancel'}</span>
             <button class="batch-panel-exit-btn" data-action="exit-select-mode" title="${lang === 'zh_CN' ? '退出Select模式' : 'Exit Select Mode'}">
                 <i class="fas fa-times"></i> ${lang === 'zh_CN' ? '退出' : 'Exit'}
             </button>
@@ -8305,6 +8497,18 @@ function showBatchContextMenu(e) {
         });
     }
 
+    // 绑定计数/取消选择按钮事件
+    const countCancelBtn = batchPanel.querySelector('#batch-panel-count');
+    if (countCancelBtn) {
+        countCancelBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            console.log('[批量菜单] 点击取消选择按钮');
+            if (typeof deselectAll === 'function') {
+                deselectAll();
+            }
+        });
+    }
+
     // 标题栏帮助按钮
     const headerHelpBtn = batchPanel.querySelector('.batch-panel-help-btn');
     if (headerHelpBtn) {
@@ -8337,6 +8541,10 @@ function showBatchContextMenu(e) {
 
 // 切换选择单个项目
 function toggleSelectItem(nodeId, nodeElement) {
+    if (!nodeElement) {
+        nodeElement = document.querySelector(`.tree-item[data-node-id="${nodeId}"]`);
+    }
+
     const nodeElements = Array.from(document.querySelectorAll(`.tree-item[data-node-id="${nodeId}"]`));
     const referenceEl = nodeElement || nodeElements[0] || null;
     if (!referenceEl) {
@@ -8348,45 +8556,11 @@ function toggleSelectItem(nodeId, nodeElement) {
 
     const treeType = referenceEl.dataset.treeType || 'permanent';
 
-    const applySelectedClass = (selected, meta) => {
-        if (treeType === 'permanent') {
-            const columnKey = (meta && meta.permanentColumnKey) || getPermanentColumnKeyFromElement(referenceEl) || 'origin';
-            const columnEl = findPermanentColumnElementByKey(columnKey);
-            const scoped = columnEl
-                ? Array.from(columnEl.querySelectorAll(`.tree-item[data-node-id="${nodeId}"]`))
-                : nodeElements;
-            scoped.forEach(el => el.classList.toggle('selected', !!selected));
-            return;
-        }
-        nodeElements.forEach(el => el.classList.toggle('selected', !!selected));
-    };
-
     if (selectedNodes.has(nodeId)) {
         const existingMeta = selectedNodeMeta.get(nodeId);
-        if (treeType === 'permanent') {
-            const currentKey = getPermanentColumnKeyFromElement(referenceEl) || 'origin';
-            const prevKey = existingMeta && existingMeta.permanentColumnKey ? existingMeta.permanentColumnKey : currentKey;
-
-            // 已选中但来自另一个副本：切换高亮到当前副本，不做取消
-            if (prevKey !== currentKey) {
-                // 清理旧副本的高亮
-                applySelectedClass(false, { permanentColumnKey: prevKey });
-                selectedNodeMeta.set(nodeId, {
-                    treeType: 'permanent',
-                    sectionId: PERMANENT_SECTION_ANCHOR_ID,
-                    permanentColumnKey: currentKey
-                });
-                applySelectedClass(true, { permanentColumnKey: currentKey });
-                rememberBatchSelection(referenceEl);
-                updateBatchToolbar();
-                updateBatchPanelCount();
-                return;
-            }
-        }
-
         selectedNodes.delete(nodeId);
         selectedNodeMeta.delete(nodeId);
-        applySelectedClass(false, existingMeta);
+        nodeElements.forEach(el => el.classList.remove('selected'));
         console.log('[批量] 取消选中:', nodeId);
         if (selectedNodes.size === 0) {
             lastBatchSelectionInfo = null;
@@ -8395,14 +8569,14 @@ function toggleSelectItem(nodeId, nodeElement) {
         selectedNodes.add(nodeId);
         const meta = {
             treeType,
-            sectionId: referenceEl.dataset.sectionId || null
+            sectionId: referenceEl.dataset.sectionId || null,
+            nodeType: referenceEl.dataset.nodeType || 'bookmark'
         };
         if (treeType === 'permanent') {
             meta.sectionId = PERMANENT_SECTION_ANCHOR_ID;
-            meta.permanentColumnKey = getPermanentColumnKeyFromElement(referenceEl) || 'origin';
         }
         selectedNodeMeta.set(nodeId, meta);
-        applySelectedClass(true, meta);
+        nodeElements.forEach(el => el.classList.add('selected'));
         rememberBatchSelection(referenceEl);
         console.log('[批量] 选中:', nodeId);
     }
@@ -8741,6 +8915,9 @@ async function batchToTempSection(triggerEvent) {
                 const payload = canvas.temp.extractPayload(sectionId, ids);
                 if (payload && payload.length) {
                     canvas.temp.insertFromPayload(newSectionId, null, payload, null, { defaultCollapseFolders: true });
+                    if (canvas.temp && typeof canvas.temp.removeItems === 'function') {
+                        canvas.temp.removeItems(sectionId, ids);
+                    }
                 }
             } catch (error) {
                 console.warn('[批量->临时栏目] 复制临时节点失败:', error);
@@ -8748,11 +8925,6 @@ async function batchToTempSection(triggerEvent) {
         });
     }
 
-    try {
-        if (typeof canvas.locateSection === 'function') {
-            canvas.locateSection(newSectionId);
-        }
-    } catch (_) { }
 
     // 生成成功后自动退出批量选择模式
     try { exitSelectMode(); } catch (_) { }
@@ -9810,52 +9982,57 @@ async function batchDelete() {
 
 // 批量重命名
 async function batchRename() {
-    const lang = currentLang || 'zh_CN';
-    const permanentIds = getSelectedPermanentNodeIds();
-    const tempNodes = getSelectedTempNodes();
-    if (!permanentIds.length && tempNodes.length) {
-        await batchRenameTemp();
+    const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
+    const caps = getBatchSelectionCapabilities();
+
+    if (caps.mixedTypes) {
+        alert(lang === 'zh_CN' ? '无法对混合了书签与文件夹的选中项进行重命名' : 'Cannot rename a mixed selection of bookmarks and folders');
         return;
     }
 
-    const prefix = prompt(
-        lang === 'zh_CN' ? '请输入统一前缀（可选）:' : 'Enter prefix (optional):',
+    const permanentIds = caps.permanentIds;
+    const tempNodes = caps.tempNodes;
+
+    if (!permanentIds.length && !tempNodes.length) return;
+
+    const newTitle = prompt(
+        lang === 'zh_CN' ? '请输入统一的新名称（覆盖所有选中项）:' : 'Enter a new name (overwrites all selected items):',
         ''
     );
-
-    const suffix = prompt(
-        lang === 'zh_CN' ? '请输入统一后缀（可选）:' : 'Enter suffix (optional):',
-        ''
-    );
-
-    // 如果仅想重命名临时节点，允许跳过永久重命名（仍可继续执行 batchRenameTemp）
-    const shouldRenamePermanent = !(prefix === null && suffix === null);
-
-    if (!chrome || !chrome.bookmarks) {
-        alert('此功能需要Chrome扩展环境');
-        return;
-    }
+    if (newTitle === null) return;
+    const normalizedTitle = newTitle.trim();
+    if (!normalizedTitle) return;
 
     try {
         let count = 0;
-        if (shouldRenamePermanent && permanentIds.length) {
+
+        if (permanentIds.length) {
+            if (!chrome || !chrome.bookmarks) {
+                alert('此功能需要Chrome扩展环境');
+                return;
+            }
             for (const nodeId of permanentIds) {
-                const [node] = await chrome.bookmarks.get(nodeId);
-                const newTitle = `${prefix || ''}${node.title}${suffix || ''}`;
-                await updatePermanentBookmarkNode(nodeId, { title: newTitle });
+                await updatePermanentBookmarkNode(nodeId, { title: normalizedTitle });
                 count++;
             }
         }
 
         if (tempNodes.length) {
-            await batchRenameTemp();
+            const manager = ensureTempManager();
+            for (const node of tempNodes) {
+                if (node.isFolder) {
+                    manager.renameItem(node.sectionId, node.id, normalizedTitle);
+                } else {
+                    manager.updateBookmark(node.sectionId, node.id, {
+                        title: normalizedTitle
+                    });
+                }
+                count++;
+            }
         }
 
-        // 不调用 refreshBookmarkTree()，让 onChanged 事件触发增量更新
-        if (shouldRenamePermanent && permanentIds.length) {
-            alert(lang === 'zh_CN' ? `已重命名 ${count} 项` : `Renamed ${count} items`);
-            console.log('[批量] 重命名完成:', count);
-        }
+        alert(lang === 'zh_CN' ? `已重命名 ${count} 项` : `Renamed ${count} items`);
+        console.log('[批量] 重命名完成:', count);
 
     } catch (error) {
         console.error('[批量] 重命名失败:', error);
@@ -10092,8 +10269,10 @@ async function batchMergeFolder() {
     const lang = currentLang || 'zh_CN';
 
     const caps = getBatchSelectionCapabilities();
-    if (caps.mixed) {
-        alert(lang === 'zh_CN' ? '合并不支持永久与临时混选' : 'Merge does not support mixed permanent + temporary selection');
+    if (caps.mixed || (caps.hasTemp && !caps.tempAllSameSection)) {
+        alert(lang === 'zh_CN' 
+            ? '合并不支持永久与临时混选，或同时选择多个不同的临时卡片' 
+            : 'Merge does not support mixed permanent + temporary selection or items from multiple different cards');
         return;
     }
 
@@ -10283,7 +10462,7 @@ function updateBatchToolbar() {
     try {
         const caps = getBatchSelectionCapabilities();
         const cutDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
-        const mergeDisabled = caps.mixed;
+        const mergeDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
 
         const cutBtn = toolbar.querySelector('[data-action="batch-cut"]');
         if (cutBtn) {
@@ -10357,19 +10536,23 @@ function updateBatchPanelCount() {
 
     const lang = currentLang || 'zh_CN';
     const count = selectedNodes.size;
-    countElement.textContent = `${count} ${lang === 'zh_CN' ? '项已选' : 'selected'}`;
+    countElement.textContent = `${count}${lang === 'zh_CN' ? '项｜取消' : ' items｜Cancel'}`;
 
     console.log('[批量面板] 更新计数:', count);
 
     try {
         const caps = getBatchSelectionCapabilities();
         const cutDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
-        const mergeDisabled = caps.mixed;
+        const mergeDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
+        const renameDisabled = caps.mixedTypes;
         batchPanel.querySelectorAll('.context-menu-item[data-action="batch-cut"]').forEach((el) => {
             el.classList.toggle('disabled', !!cutDisabled);
         });
         batchPanel.querySelectorAll('.context-menu-item[data-action="batch-merge-folder"]').forEach((el) => {
             el.classList.toggle('disabled', !!mergeDisabled);
+        });
+        batchPanel.querySelectorAll('.context-menu-item[data-action="batch-rename"]').forEach((el) => {
+            el.classList.toggle('disabled', !!renameDisabled);
         });
     } catch (_) { }
 }
@@ -10386,6 +10569,7 @@ function initBatchPanelDrag(panel) {
         if (!target) return false;
         return target.closest('.batch-panel-exit-btn') ||
             target.closest('.batch-panel-help-btn') ||
+            target.closest('#batch-panel-count') ||
             target.closest('.batch-help-popover') ||
             target.closest('.context-menu-item') ||
             target.closest('button') ||
@@ -13411,3 +13595,5 @@ try {
     window.reportExtensionBookmarkOpen = reportExtensionBookmarkOpen;
     window.openBookmarkWithManualSelection = openBookmarkWithManualSelection;
 } catch (_) { }
+
+// Redundant click listener removed. Global modifier key click listener is managed near selectModeGlobalClickHandler.

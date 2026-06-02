@@ -5947,6 +5947,17 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     background: rgba(255, 255, 255, 0.2);
     border-radius: 10px;
     line-height: 1.2;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s, transform 0.1s;
+}
+
+.batch-panel-count:hover {
+    background: rgba(255, 255, 255, 0.35);
+}
+
+.batch-panel-count:active {
+    transform: scale(0.95);
 }
 
 .batch-panel-exit-btn {

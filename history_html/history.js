@@ -12237,8 +12237,13 @@ function attachTreeEvents(treeContainer) {
         try {
             const link = e.target && e.target.closest ? e.target.closest('a.tree-bookmark-link') : null;
             if (link && treeContainer.contains(link)) {
-                // 尊重系统快捷键：Ctrl/Cmd/Shift 走浏览器默认行为
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                // 如果处于批量选择模式，或者按下了修饰键（Ctrl/Cmd/Shift）用于选择，屏蔽默认的打开逻辑
+                if ((typeof window.selectMode !== 'undefined' && window.selectMode) || 
+                    e.metaKey || e.ctrlKey || e.shiftKey) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
 
                 e.preventDefault();
                 const url = link.getAttribute('href');

@@ -2294,31 +2294,37 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     const convert = (node) => {
         if (!node || typeof node !== 'object') return null;
 
+        // 如果节点包含 item 字段（例如来自批量面板导出的封装格式：{ source: '...', item: {...} }），则对其解包
+        let actualNode = node;
+        if (node.item && typeof node.item === 'object') {
+            actualNode = node.item;
+        }
+
         // 获取标题：支持 title, name, label, text
-        const title = node.title || node.name || node.label || node.text || '';
+        const title = actualNode.title || actualNode.name || actualNode.label || actualNode.text || '';
 
         // 获取 URL：支持 url, uri, href, link
-        const url = node.url || node.uri || node.href || node.link || '';
+        const url = actualNode.url || actualNode.uri || actualNode.href || actualNode.link || '';
 
         // 判断类型
         // Firefox 使用 type: "text/x-moz-place" 或 "text/x-moz-place-container"
         // Chrome 使用 type 字段或检查是否有 url
         let isFolder = false;
-        if (node.type) {
+        if (actualNode.type) {
             // Firefox: "text/x-moz-place-container" 是文件夹
             // Chrome: "folder" 是文件夹
-            if (node.type === 'text/x-moz-place-container' ||
-                node.type === 'folder' ||
-                node.type === 'directory') {
+            if (actualNode.type === 'text/x-moz-place-container' ||
+                actualNode.type === 'folder' ||
+                actualNode.type === 'directory') {
                 isFolder = true;
             }
         } else {
             // 没有 type 字段时：有 children 且没有 url 视为文件夹
-            isFolder = !url && (node.children && Array.isArray(node.children));
+            isFolder = !url && (actualNode.children && Array.isArray(actualNode.children));
         }
 
         // 跳过无效节点（既没有标题也没有 URL，且没有 children）
-        if (!title && !url && (!node.children || node.children.length === 0)) {
+        if (!title && !url && (!actualNode.children || actualNode.children.length === 0)) {
             return null;
         }
 
@@ -2339,8 +2345,8 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         }
 
         // 递归处理子节点
-        if (node.children && Array.isArray(node.children)) {
-            item.children = node.children.map(convert).filter(Boolean);
+        if (actualNode.children && Array.isArray(actualNode.children)) {
+            item.children = actualNode.children.map(convert).filter(Boolean);
         }
 
         return item;

@@ -4368,6 +4368,22 @@ function convertBookmarkNodeToTempItem(node, sectionId, options = {}) {
         children: []
     };
 
+    // Transfer tags
+    if (Array.isArray(node.tags) && node.tags.length) {
+        item.tags = node.tags
+            .map((t) => (t && typeof t === 'object') ? { color: String(t.color || '').trim(), text: String(t.text || '').trim() } : null)
+            .filter((t) => t && t.color);
+        if (!item.tags.length) delete item.tags;
+    } else if (node.id && window.TagSystem && typeof window.TagSystem.getPermNodeTagsCached === 'function') {
+        const idStr = String(node.id);
+        if (!idStr.startsWith('temp') && !idStr.startsWith('sync')) {
+            const cachedTags = window.TagSystem.getPermNodeTagsCached(node.id);
+            if (Array.isArray(cachedTags) && cachedTags.length) {
+                item.tags = cachedTags.map(t => ({ color: String(t.color || '').trim(), text: String(t.text || '').trim() }));
+            }
+        }
+    }
+
     if (node.children && node.children.length) {
         const childOptions = {
             ...options,
@@ -4688,6 +4704,14 @@ function createTempItemFromPayload(sectionId, payload, options = {}) {
             .map((t) => (t && typeof t === 'object') ? { color: String(t.color || '').trim(), text: String(t.text || '').trim() } : null)
             .filter((t) => t && t.color);
         if (!item.tags.length) delete item.tags;
+    } else if (payload.id && window.TagSystem && typeof window.TagSystem.getPermNodeTagsCached === 'function') {
+        const idStr = String(payload.id);
+        if (!idStr.startsWith('temp') && !idStr.startsWith('sync')) {
+            const cachedTags = window.TagSystem.getPermNodeTagsCached(payload.id);
+            if (Array.isArray(cachedTags) && cachedTags.length) {
+                item.tags = cachedTags.map(t => ({ color: String(t.color || '').trim(), text: String(t.text || '').trim() }));
+            }
+        }
     }
 
     if (payload.children && payload.children.length) {
@@ -5895,9 +5919,24 @@ function enhanceBookmarkTreeForCanvas(treeContainer) {
                 if (e.dataTransfer && typeof e.dataTransfer.setDragImage === 'function') {
                     let previewText = nodeTitle || nodeUrl || '';
                     try {
-                        const ids = collectPermanentSelectionIds(nodeId);
-                        if (Array.isArray(ids) && ids.length > 1) {
-                            previewText = 'Multiple items';
+                        const selection = (typeof selectedNodes !== 'undefined') ? selectedNodes : null;
+                        const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
+                        if (selection && selection.has(nodeId) && selection.size > 1) {
+                            if (typeof window.formatDragPreviewText === 'function') {
+                                previewText = window.formatDragPreviewText(Array.from(selection), lang);
+                            } else {
+                                const count = selection.size;
+                                previewText = lang === 'zh_CN' ? `${count} 个书签/文件夹` : `${count} items`;
+                            }
+                        } else {
+                            const ids = collectPermanentSelectionIds(nodeId);
+                            if (Array.isArray(ids) && ids.length > 1) {
+                                if (typeof window.formatDragPreviewText === 'function') {
+                                    previewText = window.formatDragPreviewText(ids, lang);
+                                } else {
+                                    previewText = lang === 'zh_CN' ? `${ids.length} 个书签/文件夹` : `${ids.length} items`;
+                                }
+                            }
                         }
                     } catch (_) { }
                     const preview = document.createElement('div');
@@ -5974,14 +6013,20 @@ function enhanceBookmarkTreeForCanvas(treeContainer) {
                             CanvasState.isCreatingTempNode = true;
                             CanvasState.lastDragEndTime = now;
 
-                            let ids = [];
-                            try {
-                                ids = collectPermanentSelectionIds(CanvasState.dragState.draggedData.id || null) || [];
-                            } catch (_) { }
-                            if (Array.isArray(ids) && ids.length > 1) {
-                                await createTempNode({ multi: true, permanentIds: ids }, canvasX, canvasY);
+                            const dragId = CanvasState.dragState.draggedData.id;
+                            const isDraggedNodeSelected = typeof selectedNodes !== 'undefined' && selectedNodes && selectedNodes.has(dragId);
+                            if (isDraggedNodeSelected && typeof batchToTempSection === 'function') {
+                                await batchToTempSection(e);
                             } else {
-                                await createTempNode(CanvasState.dragState.draggedData, canvasX, canvasY);
+                                let ids = [];
+                                try {
+                                    ids = collectPermanentSelectionIds(CanvasState.dragState.draggedData.id || null) || [];
+                                } catch (_) { }
+                                if (Array.isArray(ids) && ids.length > 1) {
+                                    await createTempNode({ multi: true, permanentIds: ids }, canvasX, canvasY);
+                                } else {
+                                    await createTempNode(CanvasState.dragState.draggedData, canvasX, canvasY);
+                                }
                             }
                             accepted = true;
                         } catch (err) {
@@ -17171,9 +17216,25 @@ function handlePermanentDragStart(e, data, type) {
     // 创建拖拽预览（替代UI规则同上）
     let previewText = data && (data.title || data.url) ? (data.title || data.url) : '';
     try {
-        const ids = collectPermanentSelectionIds(data && data.id ? data.id : null);
-        if (Array.isArray(ids) && ids.length > 1) {
-            previewText = 'Multiple items';
+        const dataId = data && data.id ? data.id : null;
+        const selection = (typeof selectedNodes !== 'undefined') ? selectedNodes : null;
+        const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
+        if (selection && selection.has(dataId) && selection.size > 1) {
+            if (typeof window.formatDragPreviewText === 'function') {
+                previewText = window.formatDragPreviewText(Array.from(selection), lang);
+            } else {
+                const count = selection.size;
+                previewText = lang === 'zh_CN' ? `${count} 个书签/文件夹` : `${count} items`;
+            }
+        } else {
+            const ids = collectPermanentSelectionIds(dataId);
+            if (Array.isArray(ids) && ids.length > 1) {
+                if (typeof window.formatDragPreviewText === 'function') {
+                    previewText = window.formatDragPreviewText(ids, lang);
+                } else {
+                    previewText = lang === 'zh_CN' ? `${ids.length} 个书签/文件夹` : `${ids.length} items`;
+                }
+            }
         }
     } catch (_) { }
     const preview = document.createElement('div');
@@ -17218,12 +17279,18 @@ async function handlePermanentDragEnd(e) {
             const x = dropX - rect.left + workspace.scrollLeft;
             const y = dropY - rect.top + workspace.scrollTop;
             try {
-                let ids = [];
-                try { ids = collectPermanentSelectionIds((CanvasState.dragState.draggedData && CanvasState.dragState.draggedData.id) || null) || []; } catch (_) { }
-                if (Array.isArray(ids) && ids.length > 1) {
-                    await createTempNode({ multi: true, permanentIds: ids }, x, y);
+                const dragId = CanvasState.dragState.draggedData && CanvasState.dragState.draggedData.id;
+                const isDraggedNodeSelected = typeof selectedNodes !== 'undefined' && selectedNodes && selectedNodes.has(dragId);
+                if (isDraggedNodeSelected && typeof batchToTempSection === 'function') {
+                    await batchToTempSection(e);
                 } else {
-                    await createTempNode(CanvasState.dragState.draggedData, x, y);
+                    let ids = [];
+                    try { ids = collectPermanentSelectionIds(dragId || null) || []; } catch (_) { }
+                    if (Array.isArray(ids) && ids.length > 1) {
+                        await createTempNode({ multi: true, permanentIds: ids }, x, y);
+                    } else {
+                        await createTempNode(CanvasState.dragState.draggedData, x, y);
+                    }
                 }
             } catch (error) {
                 console.error('[Canvas] 创建临时栏目失败:', error);
@@ -17351,6 +17418,11 @@ function __resolveTempSplitTitle(data, splitPayload) {
 }
 
 async function createTempNode(data, x, y) {
+    if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+        try {
+            await window.TagSystem.ensurePermTagsLoaded();
+        } catch (_) {}
+    }
     // Ensure new sequenceNumber continues from existing sections
     try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
     const forceSequenceLabel = !!(data && data.forceSequenceLabel);
@@ -28065,31 +28137,87 @@ function setupTempSectionDropTargets(section, sectionElement, treeContainer, hea
         event.preventDefault();
         clearHighlight();
         try {
-            const source = getCurrentDragSourceType();
-            if (source === 'permanent') {
-                const fallbackId = (typeof draggedNodeId !== 'undefined') ? draggedNodeId : null;
-                const ids = collectPermanentSelectionIds(fallbackId);
-                if (!ids.length) return;
-                const payload = await resolvePermanentPayload(ids);
-                if (payload && payload.length) {
-                    insertTempItemsFromPayload(section.id, null, payload, null);
-                    if (typeof deselectAll === 'function') {
-                        deselectAll();
+            const fallbackId = (typeof draggedNodeId !== 'undefined') ? draggedNodeId : null;
+            const isDraggedNodeSelected = typeof selectedNodes !== 'undefined' && selectedNodes && fallbackId && selectedNodes.has(fallbackId);
+
+            if (isDraggedNodeSelected) {
+                // Collect all selected permanent node IDs
+                const permanentIds = [];
+                // Collect selected temporary nodes grouped by sectionId
+                const tempBySection = new Map();
+
+                selectedNodes.forEach(id => {
+                    const meta = getSelectionMeta(id);
+                    const treeType = meta ? meta.treeType : 'permanent';
+                    if (treeType === 'temporary') {
+                        const secId = meta.sectionId;
+                        if (secId) {
+                            if (!tempBySection.has(secId)) {
+                                tempBySection.set(secId, []);
+                            }
+                            tempBySection.get(secId).push(id);
+                        }
+                    } else {
+                        permanentIds.push(id);
                     }
-                }
-            } else if (source === 'temporary') {
-                const sourceSectionId = getTempDragSourceSectionId();
-                if (!sourceSectionId) return;
-                const fallbackId = (typeof draggedNodeId !== 'undefined') ? draggedNodeId : null;
-                const ids = collectTemporarySelectionIds(sourceSectionId, fallbackId);
-                if (!ids.length) return;
-                if (sourceSectionId === section.id) {
+                });
+
+                const otherSectionsCount = Array.from(tempBySection.keys()).filter(secId => secId !== section.id).length;
+                const hasSameSection = tempBySection.has(section.id);
+                const hasPermanent = permanentIds.length > 0;
+
+                if (!hasPermanent && otherSectionsCount === 0 && hasSameSection) {
+                    // Only same-section temporary items: just move within section
+                    const ids = tempBySection.get(section.id);
                     moveTempItemsWithinSection(section.id, ids, null, null);
                 } else {
-                    moveTempItemsAcrossSections(sourceSectionId, section.id, ids, null, null);
+                    const payload = [];
+
+                    // 1. Process permanent nodes
+                    if (permanentIds.length > 0) {
+                        const permPayload = await resolvePermanentPayload(permanentIds);
+                        if (permPayload && permPayload.length) {
+                            payload.push(...permPayload);
+                        }
+                    }
+
+                    // 2. Process temporary nodes (extract payloads)
+                    tempBySection.forEach((ids, secId) => {
+                        const p = extractTempItemsPayload(secId, ids);
+                        if (p && p.length) {
+                            payload.push(...p);
+                        }
+                    });
+
+                    // 3. Insert into target section (collapse folders by default)
+                    insertTempItemsFromPayload(section.id, null, payload, null, { defaultCollapseFolders: true });
+
+                    // 4. Remove temporary items from their sources
+                    tempBySection.forEach((ids, secId) => {
+                        removeTempItemsById(secId, ids);
+                    });
                 }
-                if (typeof deselectAll === 'function') {
-                    deselectAll();
+
+                if (typeof exitSelectMode === 'function') {
+                    exitSelectMode();
+                }
+            } else {
+                // Fallback to single drag-and-drop
+                const source = getCurrentDragSourceType();
+                if (source === 'permanent') {
+                    if (!fallbackId) return;
+                    const payload = await resolvePermanentPayload([fallbackId]);
+                    if (payload && payload.length) {
+                        insertTempItemsFromPayload(section.id, null, payload, null, { defaultCollapseFolders: true });
+                    }
+                } else if (source === 'temporary') {
+                    const sourceSectionId = getTempDragSourceSectionId();
+                    if (!sourceSectionId || !fallbackId) return;
+                    if (sourceSectionId === section.id) {
+                        moveTempItemsWithinSection(section.id, [fallbackId], null, null);
+                    } else {
+                        moveTempItemsAcrossSections(sourceSectionId, section.id, [fallbackId], null, null);
+                    }
                 }
             }
         } catch (error) {
@@ -30144,7 +30272,10 @@ function setupPermanentDropTarget() {
     const permanentSections = Array.from(scope.querySelectorAll('.permanent-bookmark-section'));
     if (!permanentSections.length) return;
 
-    const allowDrop = () => getCurrentDragSourceType() === 'temporary';
+    const allowDrop = () => {
+        const source = getCurrentDragSourceType();
+        return source === 'temporary' || source === 'permanent';
+    };
 
     permanentSections.forEach((permanentSection) => {
         if (!permanentSection) return;
@@ -30170,38 +30301,46 @@ function setupPermanentDropTarget() {
             e.preventDefault();
             clearHighlight();
             try {
-                const sourceSectionId = getTempDragSourceSectionId();
-                if (!sourceSectionId) return;
                 const fallbackId = (typeof draggedNodeId !== 'undefined') ? draggedNodeId : null;
-                const ids = collectTemporarySelectionIds(sourceSectionId, fallbackId);
-                let payload = [];
-                let sectionRemoved = false;
-                if (ids.length) {
-                    payload = extractTempItemsPayload(sourceSectionId, ids);
-                    if (!payload || !payload.length) return;
-                    removeTempItemsById(sourceSectionId, ids);
-                    ensureTempSectionRendered(sourceSectionId);
-                } else if (CanvasState.dragState && CanvasState.dragState.draggedData && CanvasState.dragState.draggedData.id === sourceSectionId) {
-                    const sectionData = CanvasState.dragState.draggedData;
-                    const children = (sectionData.items || []).map(item => serializeTempItemForClipboard(item));
-                    payload = [{
-                        title: sectionData.title || getDefaultTempSectionTitle(),
-                        type: 'folder',
-                        children
-                    }];
-                    removeTempNode(sectionData.id);
-                    sectionRemoved = true;
-                }
+                const isDraggedNodeSelected = typeof selectedNodes !== 'undefined' && selectedNodes && fallbackId && selectedNodes.has(fallbackId);
+                const targetParentId = resolvePermanentBlankDropParentId(permanentSection);
+                if (!targetParentId) return;
 
-                if (!payload || !payload.length) return;
-                await addToPermanentBookmarks(payload);
-                if (!sectionRemoved) {
-                    ensureTempSectionRendered(sourceSectionId);
+                if (isDraggedNodeSelected) {
+                    await moveBookmark(fallbackId, targetParentId, true, {
+                        sourceTreeType: getCurrentDragSourceType(),
+                        sourceSectionId: getTempDragSourceSectionId(),
+                        targetTreeType: 'permanent',
+                        targetSectionId: PERMANENT_SECTION_ANCHOR_ID,
+                        position: 'inside',
+                        event: e
+                    });
+                } else {
+                    // Fallback to single-node logic
+                    const sourceSectionId = getTempDragSourceSectionId();
+                    if (!sourceSectionId) return;
+
+                    if (CanvasState.dragState && CanvasState.dragState.draggedData && CanvasState.dragState.draggedData.id === sourceSectionId) {
+                        const sectionData = CanvasState.dragState.draggedData;
+                        const children = (sectionData.items || []).map(item => serializeTempItemForClipboard(item));
+                        const payload = [{
+                            title: sectionData.title || getDefaultTempSectionTitle(),
+                            type: 'folder',
+                            children
+                        }];
+                        await addToPermanentBookmarks(payload, targetParentId);
+                        removeTempNode(sectionData.id);
+                    } else if (fallbackId) {
+                        await moveBookmark(fallbackId, targetParentId, true, {
+                            sourceTreeType: getCurrentDragSourceType(),
+                            sourceSectionId: sourceSectionId,
+                            targetTreeType: 'permanent',
+                            targetSectionId: PERMANENT_SECTION_ANCHOR_ID,
+                            position: 'inside',
+                            event: e
+                        });
+                    }
                 }
-                if (typeof deselectAll === 'function') {
-                    deselectAll();
-                }
-                // 不调用 refreshBookmarkTree()，让 onCreated 事件触发增量更新
             } catch (error) {
                 console.error('[Canvas] 添加到书签失败:', error);
                 alert('添加到书签失败: ' + (error && error.message ? error.message : error));
@@ -31688,13 +31827,12 @@ function addAnchorsToNode(nodeElement, nodeId) {
     tempLinkClickHandler = (e) => {
         const link = e.target && e.target.closest('.temp-canvas-node a.tree-bookmark-link');
         if (!link) return;
-        // Select（批量）模式下：点击应当用于“选择”，不应触发默认打开逻辑
-        // 注意：selectMode 变量定义在 bookmark_tree_context_menu.js（全局作用域共享）
-        try {
-            if (typeof selectMode !== 'undefined' && selectMode) return;
-        } catch (_) { }
-        // 修饰键交给浏览器默认行为
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        // 如果处于批量选择模式，或者按下了修饰键（Ctrl/Cmd/Shift）用于选择，屏蔽默认的打开逻辑
+        if ((typeof window.selectMode !== 'undefined' && window.selectMode) || 
+            e.metaKey || e.ctrlKey || e.shiftKey) {
+            e.preventDefault();
+            return;
+        }
         e.preventDefault();
         // 阻止其它监听器重复处理
         if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
