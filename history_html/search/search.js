@@ -7171,7 +7171,7 @@ async function createTempSectionFromSearchResults() {
             1600
         );
 
-        await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null);
+        await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null, { defaultCollapseFolders: true });
 
         try {
             if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
@@ -7308,7 +7308,7 @@ async function createTempSectionFromDomainResult(domain) {
             1600
         );
 
-        await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null);
+        await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null, { defaultCollapseFolders: true });
 
         try {
             if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {

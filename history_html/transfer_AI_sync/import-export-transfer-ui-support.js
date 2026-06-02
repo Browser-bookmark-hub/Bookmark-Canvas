@@ -695,6 +695,11 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
         const folderItem = convertToTempItem(folderNode);
         section.items = [folderItem];
 
+        // Ensure all folders in this section are collapsed recursively
+        if (typeof window.collapseTempFoldersRecursively === 'function') {
+            window.collapseTempFoldersRecursively(sectionId, section.items);
+        }
+
         // 调试：打印创建的数据结构
         console.log('[Canvas] 创建的临时栏目数据结构:', JSON.stringify(section, null, 2).substring(0, 2000));
         console.log('[Canvas] 顶层项类型:', folderItem.type, '子项数量:', folderItem.children?.length);

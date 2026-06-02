@@ -4712,6 +4712,26 @@ function reassignTempItemIds(sectionId, item) {
     }
 }
 
+function __collapseTempFolderRecursively(sectionId, item) {
+    if (!item || typeof LAZY_LOAD_THRESHOLD === 'undefined') return;
+    const stack = [item];
+    while (stack.length) {
+        const current = stack.pop();
+        if (!current) continue;
+        if (current.type === 'folder' && current.id) {
+            const folderKey = `${sectionId}-${current.id}`;
+            LAZY_LOAD_THRESHOLD.expandedFolders.delete(folderKey);
+            LAZY_LOAD_THRESHOLD.collapsedFolders.add(folderKey);
+        }
+        if (Array.isArray(current.children)) {
+            stack.push(...current.children);
+        }
+    }
+}
+if (typeof window !== 'undefined') {
+    window.collapseTempFoldersRecursively = __collapseTempFolderRecursively;
+}
+
 function insertTempItems(sectionId, parentId, items, index = null, options = {}) {
     const section = getTempSection(sectionId);
     if (!section) throw new Error('未找到临时栏目');
@@ -4729,10 +4749,7 @@ function insertTempItems(sectionId, parentId, items, index = null, options = {})
 
     if (options && options.defaultCollapseFolders && typeof LAZY_LOAD_THRESHOLD !== 'undefined') {
         items.forEach((item) => {
-            if (!item || item.type !== 'folder' || !item.id) return;
-            const folderKey = `${sectionId}-${item.id}`;
-            LAZY_LOAD_THRESHOLD.expandedFolders.delete(folderKey);
-            LAZY_LOAD_THRESHOLD.collapsedFolders.add(folderKey);
+            __collapseTempFolderRecursively(sectionId, item);
         });
     }
 
@@ -4793,6 +4810,7 @@ function moveTempItemsWithinSection(sectionId, itemIds, targetParentId, index = 
     movingItems.forEach((entry, offset) => {
         entry.item.sectionId = sectionId;
         targetArray.splice(index + offset, 0, entry.item);
+        __collapseTempFolderRecursively(sectionId, entry.item);
     });
 
     renderTempNode(section);
@@ -4830,6 +4848,7 @@ function moveTempItemsAcrossSections(sourceSectionId, targetSectionId, itemIds, 
     removedItems.forEach(item => reassignTempItemIds(targetSectionId, item));
     removedItems.forEach((item, offset) => {
         targetArray.splice(index + offset, 0, item);
+        __collapseTempFolderRecursively(targetSectionId, item);
     });
 
     renderTempNode(sourceSection);
@@ -5437,42 +5456,53 @@ async function handleBrowserBookmarkDrop(e) {
     const dropX = (e.clientX - rect.left - CanvasState.panOffsetX) / zoom;
     const dropY = (e.clientY - rect.top - CanvasState.panOffsetY) / zoom;
 
-    if (urls.length > 1) {
-        // 多个 URL：文件夹拖拽，扁平展示所有书签
-        console.log('[Canvas] 检测到多个 URL，扁平展示所有书签');
-        await createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY);
-    } else if (urls.length === 1) {
-        // 单个 URL：直接创建包含单个书签的临时栏目
-        console.log('[Canvas] 检测到单个 URL，创建单个书签临时栏目');
-        let title = '';
-        if (htmlData) {
-            const match = htmlData.match(/<a[^>]*>([^<]*)<\/a>/i);
-            if (match && match[1]) {
-                title = match[1].trim();
-            }
-        }
-        // 尝试从书签库获取真实标题
-        if (browserAPI && browserAPI.bookmarks) {
-            try {
-                const results = await browserAPI.bookmarks.search({ url: urls[0] });
-                if (results && results.length > 0) {
-                    title = results[0].title || title;
-                }
-            } catch (e) { }
-        }
-        await createTempNodeFromBrowserBookmark({
-            title: title || urls[0],
-            url: urls[0],
-            type: 'bookmark'
-        }, dropX, dropY);
-    } else {
-        // 没有有效 URL，尝试作为文件夹名称匹配
-        const folderName = plainText.trim().split(/[\r\n]+/)[0].trim();
-        if (folderName && !folderName.match(/^(https?|ftp|file):\/\//i)) {
-            console.log('[Canvas] 尝试匹配文件夹:', folderName);
-            await handleBrowserBookmarkFolderDrop(folderName, dropX, dropY);
+    // 优先使用拖拽反向查找
+    let matchedNode = null;
+    if (typeof window.findMatchingChromeNode === 'function') {
+        matchedNode = await window.findMatchingChromeNode(urls, dataTransfer);
+    }
+
+    if (matchedNode) {
+        if (!matchedNode.url) {
+            // 匹配到 Chrome 书签中的文件夹
+            console.log('[Canvas] 成功反向查找到匹配的 Chrome 文件夹:', matchedNode.title);
+            await createTempNodeFromBookmarkFolder(matchedNode, dropX, dropY);
         } else {
-            showCanvasToast(isEn ? 'Unable to recognize dropped content' : '无法识别拖入的内容', 'warning');
+            // 匹配到 Chrome 书签中的单个书签
+            console.log('[Canvas] 成功反向查找到匹配的 Chrome 书签:', matchedNode.title);
+            await createTempNodeFromBrowserBookmark(matchedNode, dropX, dropY);
+        }
+    } else {
+        // 未在 Chrome 书签中匹配成功，说明是第三方或无法匹配的内容
+        if (urls.length > 1) {
+            // 提取文件夹名称
+            const folderTitle = plainText.trim().split(/[\r\n]+/)[0].trim();
+            const resolvedFolderTitle = (folderTitle && !folderTitle.match(/^(https?|ftp|file):\/\//i)) ? folderTitle : '';
+            console.log('[Canvas] 未匹配到 Chrome 文件夹，作为第三方多 URL 文件夹导入:', resolvedFolderTitle || '拖入的文件夹');
+            await createTempNodeFromMultipleUrlsAsFolder(urls, dropX, dropY, resolvedFolderTitle);
+        } else if (urls.length === 1) {
+            console.log('[Canvas] 未匹配到 Chrome 书签，直接创建单个书签临时栏目');
+            let title = '';
+            if (htmlData) {
+                const match = htmlData.match(/<a[^>]*>([^<]*)<\/a>/i);
+                if (match && match[1]) {
+                    title = match[1].trim();
+                }
+            }
+            await createTempNodeFromBrowserBookmark({
+                title: title || urls[0],
+                url: urls[0],
+                type: 'bookmark'
+            }, dropX, dropY);
+        } else {
+            // 没有有效 URL，尝试作为文件夹名称匹配
+            const folderName = plainText.trim().split(/[\r\n]+/)[0].trim();
+            if (folderName && !folderName.match(/^(https?|ftp|file):\/\//i)) {
+                console.log('[Canvas] 尝试通过文件夹名称匹配:', folderName);
+                await handleBrowserBookmarkFolderDrop(folderName, dropX, dropY);
+            } else {
+                showCanvasToast(isEn ? 'Unable to recognize dropped content' : '无法识别拖入的内容', 'warning');
+            }
         }
     }
 }
@@ -5504,6 +5534,124 @@ async function getBookmarkPathString(folderId) {
         console.warn('[Canvas] 获取书签路径失败:', e);
         return '';
     }
+}
+
+/**
+ * 从多个 URL 创建临时栏目（作为一个文件夹，不展开）
+ */
+async function createTempNodeFromMultipleUrlsAsFolder(urls, dropX, dropY, folderTitle) {
+    const { isEn } = __getLang();
+
+    if (!urls || urls.length === 0) return;
+
+    // 收集所有书签信息，并记录第一个书签的路径
+    const bookmarks = [];
+    let sourcePath = '';
+
+    for (const url of urls) {
+        let title = url;
+        // 尝试从书签库获取真实标题和路径
+        if (browserAPI && browserAPI.bookmarks) {
+            try {
+                const results = await browserAPI.bookmarks.search({ url: url });
+                if (results && results.length > 0) {
+                    title = results[0].title || url;
+                    if (!sourcePath && results[0].parentId) {
+                        sourcePath = await getBookmarkPathString(results[0].parentId);
+                    }
+                }
+            } catch (e) { }
+        }
+        bookmarks.push({
+            title: title,
+            url: url,
+            type: 'bookmark',
+            children: []
+        });
+    }
+
+    // 生成标题：时间 + 书签数量 + 来源说明
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    const dateStr = now.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+    const sourceInfo = isEn
+        ? `${dateStr} ${timeStr} | ${bookmarks.length} bookmarks | Browser drop`
+        : `${dateStr} ${timeStr} | ${bookmarks.length}个书签 | 浏览器拖入`;
+
+    // 生成说明：书签路径
+    const description = sourcePath
+        ? (isEn ? `Source: ${sourcePath}` : `来源路径：${sourcePath}`)
+        : '';
+
+    // 创建临时栏目
+    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
+    const sectionId = allocateTempSectionId({
+        label: isEn ? 'Drop' : '拖入',
+        sequenceNumber,
+        source: 'browser-drop'
+    });
+    
+    // 生成文件夹名称
+    const resolvedFolderTitle = folderTitle || (isEn ? 'Imported Folder' : '拖入的文件夹');
+
+    const folderItem = {
+        id: allocateTempItemId(sectionId),
+        sectionId: sectionId,
+        title: resolvedFolderTitle,
+        url: '',
+        type: 'folder',
+        children: bookmarks.map(bm => ({
+            id: allocateTempItemId(sectionId),
+            sectionId: sectionId,
+            title: bm.title,
+            url: bm.url,
+            type: 'bookmark',
+            children: []
+        }))
+    };
+
+    const section = {
+        id: sectionId,
+        title: sourceInfo,
+        descriptionMd: __normalizeCanvasMarkdownSource(description),
+        label: isEn ? 'Drop' : '拖入',
+        sequenceNumber,
+        color: getSpecialTempSectionDefaultColor(),
+        colorLocked: __getDefaultTempColorLockedState(),
+        x: dropX,
+        y: dropY,
+        width: 0,
+        height: 0,
+        source: 'browser-drop',
+        items: [folderItem]
+    };
+    
+    // Ensure the folder is collapsed
+    __collapseTempFolderRecursively(sectionId, folderItem);
+
+    const baseSize = getTempSectionBaseSize(section);
+    section.width = baseSize.width;
+    section.height = baseSize.height;
+
+    CanvasState.tempSections.push(section);
+    renderTempNode(section);
+    applyTempSectionAutoSizeIfNeeded(section);
+
+    // 设置更高的 z-index 和呼吸效果
+    const nodeElement = document.getElementById(section.id);
+    if (nodeElement) {
+        nodeElement.style.zIndex = '500';
+        pulseBreathingEffect(nodeElement, 1500);
+    }
+
+    saveTempNodes();
+
+    showCanvasToast(
+        isEn
+            ? `Created section with folder "${resolvedFolderTitle}" (${bookmarks.length} bookmarks).`
+            : `已创建临时栏目，包含文件夹「${resolvedFolderTitle}」（共 ${bookmarks.length} 个书签）。`,
+        'success'
+    );
 }
 
 /**
@@ -17384,7 +17532,10 @@ async function createTempNode(data, x, y) {
         if (payload && payload.length) {
             payload.forEach(node => {
                 const tempItem = convertBookmarkNodeToTempItem(node, sectionId, {});
-                if (tempItem) section.items.push(tempItem);
+                if (tempItem) {
+                    section.items.push(tempItem);
+                    __collapseTempFolderRecursively(sectionId, tempItem);
+                }
             });
         }
     } catch (error) {
@@ -27218,9 +27369,7 @@ const LAZY_LOAD_THRESHOLD = {
 };
 
 function getTempTreeMaxInitialDepth() {
-    // 大数据：默认不展开任何层级，避免首次渲染就把大量子节点挂到 DOM 上
-    if (isCanvasHugeData()) return 0;
-    return 1;
+    return 0;
 }
 
 function getTempTreeMaxInitialChildren() {

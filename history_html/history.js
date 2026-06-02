@@ -6805,7 +6805,7 @@ function setupQuickAddMenu() {
             if (textEl) {
                 textEl.textContent = optionMode === 'heading'
                     ? (lang === 'zh_CN' ? '一级标题' : 'Heading')
-                    : (lang === 'zh_CN' ? '文件夹' : 'Folder');
+                    : (lang === 'zh_CN' ? '外裹文件夹' : 'Wrapper Folder');
             }
         });
     };

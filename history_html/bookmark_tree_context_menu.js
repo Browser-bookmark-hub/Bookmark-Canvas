@@ -5710,7 +5710,7 @@ function __renderBookmarkAddActionOptions(container, lang, actionType, windowAsF
     `;
         }
 
-        const folderLabel = lang === 'zh_CN' ? '文件夹' : 'Folder';
+        const folderLabel = lang === 'zh_CN' ? '外裹文件夹' : 'Wrapper Folder';
         return `
         <label class="bookmark-add-secondary-choice bookmark-add-secondary-choice-window">
             <input type="radio" name="bookmarkAddActionType" value="${option.value}" ${option.value === selected ? 'checked' : ''}>
@@ -8740,7 +8740,7 @@ async function batchToTempSection(triggerEvent) {
             try {
                 const payload = canvas.temp.extractPayload(sectionId, ids);
                 if (payload && payload.length) {
-                    canvas.temp.insertFromPayload(newSectionId, null, payload, null);
+                    canvas.temp.insertFromPayload(newSectionId, null, payload, null, { defaultCollapseFolders: true });
                 }
             } catch (error) {
                 console.warn('[批量->临时栏目] 复制临时节点失败:', error);
@@ -10119,7 +10119,7 @@ async function batchMergeFolder() {
                     title: folderTitle,
                     type: 'folder',
                     children: payload
-                }]);
+                }], null, { defaultCollapseFolders: true });
             });
 
             deselectAll();

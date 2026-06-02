@@ -328,7 +328,17 @@ function attachDragEvents(treeContainer) {
                 hideDropIndicator();
 
                 const parentId = resolvePermanentBlankDropParentId(permanentBody);
-                if (!parentId || !draggedNodeId) return;
+                if (!parentId) return;
+
+                const isExternal = !draggedNodeId;
+                if (isExternal) {
+                    await handleExternalDropOnTreeNode(e, parentId, true, {
+                        targetTreeType: 'permanent',
+                        targetSectionId: null,
+                        position: 'inside'
+                    });
+                    return;
+                }
 
                 await moveBookmark(draggedNodeId, parentId, true, {
                     sourceTreeType: draggedNodeTreeType,
@@ -341,6 +351,50 @@ function attachDragEvents(treeContainer) {
             });
             permanentBody.__blankDropHooked = true;
             console.log('[拖拽] 已在永久栏目空白区域绑定 drop 监听');
+        }
+
+        const tempBody = treeContainer.closest('.temp-node-body');
+        if (tempBody && !tempBody.__blankDropHooked) {
+            tempBody.addEventListener('dragover', (e) => {
+                const targetNode = e && e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
+                if (targetNode) return;
+                e.preventDefault();
+                e.stopPropagation();
+                hideDropIndicator();
+                updateAutoScroll(e);
+            });
+            tempBody.addEventListener('drop', async (e) => {
+                const targetNode = e && e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
+                if (targetNode) return;
+                e.preventDefault();
+                e.stopPropagation();
+                hideDropIndicator();
+
+                const section = tempBody.closest('.temp-canvas-node');
+                const sectionId = section ? section.id : null;
+                if (!sectionId) return;
+
+                const isExternal = !draggedNodeId;
+                if (isExternal) {
+                    await handleExternalDropOnTreeNode(e, null, true, {
+                        targetTreeType: 'temporary',
+                        targetSectionId: sectionId,
+                        position: 'inside'
+                    });
+                    return;
+                }
+
+                await moveBookmark(draggedNodeId, null, true, {
+                    sourceTreeType: draggedNodeTreeType,
+                    sourceSectionId: draggedNodeSectionId,
+                    targetTreeType: 'temporary',
+                    targetSectionId: sectionId,
+                    position: 'inside',
+                    event: e
+                });
+            });
+            tempBody.__blankDropHooked = true;
+            console.log('[拖拽] 已在临时栏目空白区域绑定 drop 监听');
         }
     } catch (_) { }
 }
@@ -492,6 +546,17 @@ async function handleDrop(e) {
 
     const targetTreeType = targetNode.dataset.treeType || 'permanent';
     const targetSectionId = targetNode.dataset.sectionId || null;
+
+    const isExternal = !draggedNodeId;
+    if (isExternal) {
+        await handleExternalDropOnTreeNode(e, targetNodeId, targetIsFolder, {
+            targetTreeType,
+            targetSectionId,
+            position
+        });
+        return;
+    }
+
     await moveBookmark(draggedNodeId, targetNodeId, targetIsFolder, {
         sourceTreeType: draggedNodeTreeType,
         sourceSectionId: draggedNodeSectionId,
@@ -799,7 +864,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
             }
             const payload = sourceNode ? [serializeBookmarkNode(sourceNode)] : [];
             const targetInfo = computeTempInsertion(targetSectionId, targetId, position);
-            manager.insertFromPayload(targetSectionId, targetInfo.parentId, payload, targetInfo.index);
+            manager.insertFromPayload(targetSectionId, targetInfo.parentId, payload, targetInfo.index, { defaultCollapseFolders: true });
             return;
         }
 
@@ -911,6 +976,229 @@ async function refreshBookmarkTree() {
 }
 
 // =============================================================================
+// 外部拖拽反向查找与处理
+// =============================================================================
+
+async function findMatchingChromeNode(urls, dataTransfer) {
+    if (!chrome || !chrome.bookmarks) return null;
+    
+    // 1. 如果 urls 长度为 1，直接根据 URL 搜索
+    if (urls.length === 1) {
+        try {
+            const results = await chrome.bookmarks.search({ url: urls[0] });
+            if (results && results.length > 0) {
+                return results[0];
+            }
+        } catch (e) {
+            console.warn('[拖拽反向查找] 搜索单个 URL 失败:', e);
+        }
+        return null;
+    }
+    
+    // 2. 如果 urls 长度大于 1，通过后序遍历匹配包含这些 URL 的最深文件夹
+    if (urls.length > 1) {
+        try {
+            const tree = await chrome.bookmarks.getTree();
+            const draggedUrlSet = new Set(urls.map(u => u.trim()));
+            
+            function traverse(node) {
+                if (node.url) return null;
+                
+                // 先遍历子节点（优先匹配最深层级的文件夹）
+                if (node.children) {
+                    for (const c of node.children) {
+                        const match = traverse(c);
+                        if (match) return match;
+                    }
+                }
+                
+                // 再检查自己
+                if (node.children) {
+                    const folderUrls = [];
+                    function collectUrls(childNode) {
+                        if (childNode.url) {
+                            folderUrls.push(childNode.url.trim());
+                        }
+                        if (childNode.children) {
+                            for (const c of childNode.children) {
+                                collectUrls(c);
+                            }
+                        }
+                    }
+                    for (const c of node.children) {
+                        collectUrls(c);
+                    }
+                    
+                    if (folderUrls.length === draggedUrlSet.size) {
+                        const isMatch = folderUrls.every(url => draggedUrlSet.has(url));
+                        if (isMatch) {
+                            return node;
+                        }
+                    }
+                }
+                return null;
+            }
+            
+            let matchedFolder = null;
+            if (tree && tree.length) {
+                for (const rootNode of tree) {
+                    matchedFolder = traverse(rootNode);
+                    if (matchedFolder) break;
+                }
+            }
+            
+            if (matchedFolder) {
+                console.log('[拖拽反向查找] 成功通过 URL 集合匹配到最深文件夹:', matchedFolder.title, 'ID:', matchedFolder.id);
+                const subTree = await chrome.bookmarks.getSubTree(matchedFolder.id);
+                return subTree && subTree[0] ? subTree[0] : matchedFolder;
+            }
+        } catch (e) {
+            console.warn('[拖拽反向查找] 遍历树匹配文件夹失败:', e);
+        }
+    }
+    
+    // 3. 如果 urls 为空，或者 URL 集合匹配失败，尝试通过文本内容（文件夹名称）在 Chrome 书签中搜索
+    let plainText = '';
+    try {
+        plainText = dataTransfer.getData('text/plain') || '';
+    } catch (_) {}
+    
+    const folderName = plainText.trim().split(/[\r\n]+/)[0].trim();
+    if (folderName && !folderName.match(/^(https?|ftp|file):\/\//i)) {
+        try {
+            const results = await chrome.bookmarks.search({ title: folderName });
+            const folders = results.filter(node => !node.url);
+            if (folders.length > 0) {
+                const matchedFolder = folders[0];
+                console.log('[拖拽反向查找] 成功通过名称匹配到文件夹:', matchedFolder.title, 'ID:', matchedFolder.id);
+                const subTree = await chrome.bookmarks.getSubTree(matchedFolder.id);
+                return subTree && subTree[0] ? subTree[0] : matchedFolder;
+            }
+        } catch (e) {
+            console.warn('[拖拽反向查找] 按名称搜索文件夹失败:', e);
+        }
+    }
+    
+    return null;
+}
+
+if (typeof window !== 'undefined') {
+    window.findMatchingChromeNode = findMatchingChromeNode;
+}
+
+async function handleExternalDropOnTreeNode(e, targetNodeId, targetIsFolder, context) {
+    const { targetTreeType = 'permanent', targetSectionId = null, position = 'inside' } = context || {};
+    const { isEn } = (typeof __getLang === 'function' ? __getLang() : { isEn: false });
+    const currentLang = isEn ? 'en' : 'zh';
+    
+    const dataTransfer = e.dataTransfer;
+    if (!dataTransfer) return;
+    
+    let uriList = '';
+    let plainText = '';
+    let htmlData = '';
+    try {
+        uriList = dataTransfer.getData('text/uri-list') || '';
+        plainText = dataTransfer.getData('text/plain') || '';
+        htmlData = dataTransfer.getData('text/html') || '';
+    } catch (_) {}
+    
+    let urls = [];
+    const rawUrls = (uriList || plainText || '').split(/[\r\n]+/).map(s => s.trim()).filter(s => s);
+    for (const u of rawUrls) {
+        if (u.match(/^(https?|ftp|file):\/\//i)) {
+            urls.push(u);
+        }
+    }
+    
+    const matchedNode = await findMatchingChromeNode(urls, dataTransfer);
+    const manager = getTempManager();
+    
+    if (matchedNode) {
+        if (targetTreeType === 'temporary' && manager) {
+            const payload = [serializeBookmarkNode(matchedNode)];
+            const targetInfo = computeTempInsertion(targetSectionId, targetNodeId, position);
+            manager.insertFromPayload(targetSectionId, targetInfo.parentId, payload, targetInfo.index, { defaultCollapseFolders: true });
+        } else if (targetTreeType === 'permanent' && chrome && chrome.bookmarks) {
+            const insertInfo = await computePermanentInsertion(targetNodeId, targetIsFolder, position);
+            const payload = serializeBookmarkNode(matchedNode);
+            await createBookmarkFromPayload(insertInfo.parentId, insertInfo.index, payload);
+        }
+    } else {
+        let title = '';
+        if (htmlData) {
+            const match = htmlData.match(/<a[^>]*>([^<]*)<\/a>/i);
+            if (match && match[1]) title = match[1].trim();
+        }
+        
+        if (urls.length === 1) {
+            if (targetTreeType === 'temporary' && manager) {
+                const payload = [{
+                    title: title || urls[0],
+                    url: urls[0],
+                    type: 'bookmark'
+                }];
+                const targetInfo = computeTempInsertion(targetSectionId, targetNodeId, position);
+                manager.insertFromPayload(targetSectionId, targetInfo.parentId, payload, targetInfo.index, { defaultCollapseFolders: true });
+            } else if (targetTreeType === 'permanent' && chrome && chrome.bookmarks) {
+                const insertInfo = await computePermanentInsertion(targetNodeId, targetIsFolder, position);
+                await createPermanentBookmarkNodeViaSharedOps({
+                    parentId: insertInfo.parentId,
+                    index: insertInfo.index,
+                    title: title || urls[0],
+                    url: urls[0]
+                });
+            }
+        } else if (urls.length > 1) {
+            const folderTitle = plainText.trim().split(/[\r\n]+/)[0].trim();
+            const resolvedFolderTitle = (folderTitle && !folderTitle.match(/^(https?|ftp|file):\/\//i)) 
+                ? folderTitle 
+                : (currentLang === 'en' ? 'Imported Folder' : '拖入的文件夹');
+                
+            const bookmarks = [];
+            for (const url of urls) {
+                let bmTitle = url;
+                if (chrome && chrome.bookmarks) {
+                    try {
+                        const results = await chrome.bookmarks.search({ url });
+                        if (results && results.length > 0) {
+                            bmTitle = results[0].title || url;
+                        }
+                    } catch (_) {}
+                }
+                bookmarks.push({ title: bmTitle, url, type: 'bookmark' });
+            }
+            
+            const folderPayload = {
+                title: resolvedFolderTitle,
+                url: '',
+                type: 'folder',
+                children: bookmarks
+            };
+            
+            if (targetTreeType === 'temporary' && manager) {
+                const targetInfo = computeTempInsertion(targetSectionId, targetNodeId, position);
+                manager.insertFromPayload(targetSectionId, targetInfo.parentId, [folderPayload], targetInfo.index, { defaultCollapseFolders: true });
+            } else if (targetTreeType === 'permanent' && chrome && chrome.bookmarks) {
+                const insertInfo = await computePermanentInsertion(targetNodeId, targetIsFolder, position);
+                const createdFolder = await createPermanentBookmarkNodeViaSharedOps({
+                    parentId: insertInfo.parentId,
+                    index: insertInfo.index,
+                    title: folderPayload.title
+                });
+                for (const child of folderPayload.children) {
+                    await createPermanentBookmarkNodeViaSharedOps({
+                        parentId: createdFolder.id,
+                        title: child.title,
+                        url: child.url
+                    });
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
 // 导出共享接口（供指针拖拽复用）
 // =============================================================================
 
@@ -931,6 +1219,8 @@ if (typeof window !== 'undefined') {
         performMove: moveBookmark,
 
         resolvePermanentBlankDropParentId,
+
+        findMatchingChromeNode,
 
         // 获取拖拽的节点信息
         getDraggedNodeInfo: function () {
