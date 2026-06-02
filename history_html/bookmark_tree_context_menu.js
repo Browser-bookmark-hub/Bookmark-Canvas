@@ -10535,6 +10535,10 @@ function initKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
         // ESC - 退出Select模式
         if (e.key === 'Escape' && selectMode) {
+            // 如果当前正在进行拖拽，优先交给拖拽系统处理，不要退出选择模式
+            if (window.pointerDragState && window.pointerDragState.isDragging) {
+                return;
+            }
             exitSelectMode();
             return;
         }

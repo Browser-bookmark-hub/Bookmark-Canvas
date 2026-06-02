@@ -172,6 +172,14 @@ function attachPointerDragEvents(treeContainer) {
         document.addEventListener('pointermove', handlePointerMove);
         document.addEventListener('pointerup', handlePointerUp);
         document.addEventListener('pointercancel', handlePointerCancel);
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && pointerDragState.isDragging) {
+                cleanupPointerDrag();
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+            }
+        }, true);
         pointerDragState.globalHandlersAttached = true;
     }
 }
@@ -308,106 +316,110 @@ async function handlePointerUp(e) {
         return;
     }
 
-    // 隐藏覆盖层以准确检测落点
-    if (pointerDragState.dragOverlay) {
-        pointerDragState.dragOverlay.style.display = 'none';
-    }
-
-    // 重新检测落点位置（确保最准确）
-    const target = document.elementFromPoint(e.clientX, e.clientY);
-    const targetTreeItem = target?.closest('.tree-item[data-node-id]');
-    const permanentSection = target?.closest('.permanent-bookmark-section');
-    const tempSection = target?.closest('.temp-canvas-node');
-
-    // 恢复覆盖层显示（准备清理）
-    if (pointerDragState.dragOverlay) {
-        pointerDragState.dragOverlay.style.display = 'block';
-    }
-
-    // 检查是否在树容器内
-    const treeContainer = target?.closest('.bookmark-tree, .temp-bookmark-tree');
-
-    if (targetTreeItem && targetTreeItem !== pointerDragState.draggedElement && treeContainer) {
-        // 在树内放置
-        performDrop(pointerDragState.draggedElement, targetTreeItem, e);
-    } else if (!targetTreeItem && permanentSection) {
-        const draggedElement = pointerDragState.draggedElement;
-        const dragNodeId = draggedElement?.dataset?.nodeId || '';
-        const sourceTreeType = draggedElement?.dataset?.treeType || 'permanent';
-        const sourceSectionId = draggedElement?.dataset?.sectionId || null;
-        const targetParentId = (typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.resolvePermanentBlankDropParentId === 'function')
-            ? window.__treeDnd.resolvePermanentBlankDropParentId(permanentSection)
-            : null;
-
-        if (dragNodeId && targetParentId && typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.performMove === 'function') {
-            window.__treeDnd.performMove(dragNodeId, targetParentId, true, {
-                sourceTreeType,
-                sourceSectionId,
-                targetTreeType: 'permanent',
-                targetSectionId: null,
-                position: 'inside',
-                event: e
-            });
+    try {
+        // 隐藏覆盖层以准确检测落点
+        if (pointerDragState.dragOverlay) {
+            pointerDragState.dragOverlay.style.display = 'none';
         }
-    } else if (!targetTreeItem && tempSection) {
-        const draggedElement = pointerDragState.draggedElement;
-        const dragNodeId = draggedElement?.dataset?.nodeId || '';
-        const sourceTreeType = draggedElement?.dataset?.treeType || 'permanent';
-        const sourceSectionId = draggedElement?.dataset?.sectionId || null;
-        const targetSectionId = tempSection.dataset.sectionId;
 
-        if (dragNodeId && targetSectionId && typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.performMove === 'function') {
-            window.__treeDnd.performMove(dragNodeId, null, true, {
-                sourceTreeType,
-                sourceSectionId,
-                targetTreeType: 'temporary',
-                targetSectionId,
-                position: 'inside',
-                event: e
-            });
+        // 重新检测落点位置（确保最准确）
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        const targetTreeItem = target?.closest('.tree-item[data-node-id]');
+        const permanentSection = target?.closest('.permanent-bookmark-section');
+        const tempSection = target?.closest('.temp-canvas-node');
+
+        // 恢复覆盖层显示（准备清理）
+        if (pointerDragState.dragOverlay) {
+            pointerDragState.dragOverlay.style.display = 'block';
         }
-    } else {
-        // 可能拖到Canvas外，检查是否需要创建临时栏目
-        const canvasWorkspace = document.getElementById('canvasWorkspace');
-        const primaryPermanentSection = document.getElementById('permanentSection');
 
-        if (canvasWorkspace && primaryPermanentSection) {
-            const workspaceRect = canvasWorkspace.getBoundingClientRect();
-            const permanentRect = primaryPermanentSection.getBoundingClientRect();
+        // 检查是否在树容器内
+        const treeContainer = target?.closest('.bookmark-tree, .temp-bookmark-tree');
 
-            const inWorkspace = e.clientX >= workspaceRect.left &&
-                e.clientX <= workspaceRect.right &&
-                e.clientY >= workspaceRect.top &&
-                e.clientY <= workspaceRect.bottom;
+        if (targetTreeItem && targetTreeItem !== pointerDragState.draggedElement && treeContainer) {
+            // 在树内放置
+            performDrop(pointerDragState.draggedElement, targetTreeItem, e);
+        } else if (!targetTreeItem && permanentSection) {
+            const draggedElement = pointerDragState.draggedElement;
+            const dragNodeId = draggedElement?.dataset?.nodeId || '';
+            const sourceTreeType = draggedElement?.dataset?.treeType || 'permanent';
+            const sourceSectionId = draggedElement?.dataset?.sectionId || null;
+            const targetParentId = (typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.resolvePermanentBlankDropParentId === 'function')
+                ? window.__treeDnd.resolvePermanentBlankDropParentId(permanentSection)
+                : null;
 
-            const inPermanent = e.clientX >= permanentRect.left &&
-                e.clientX <= permanentRect.right &&
-                e.clientY >= permanentRect.top &&
-                e.clientY <= permanentRect.bottom;
+            if (dragNodeId && targetParentId && typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.performMove === 'function') {
+                window.__treeDnd.performMove(dragNodeId, targetParentId, true, {
+                    sourceTreeType,
+                    sourceSectionId,
+                    targetTreeType: 'permanent',
+                    targetSectionId: null,
+                    position: 'inside',
+                    event: e
+                });
+            }
+        } else if (!targetTreeItem && tempSection) {
+            const draggedElement = pointerDragState.draggedElement;
+            const dragNodeId = draggedElement?.dataset?.nodeId || '';
+            const sourceTreeType = draggedElement?.dataset?.treeType || 'permanent';
+            const sourceSectionId = draggedElement?.dataset?.sectionId || null;
+            const targetSectionId = tempSection.dataset.sectionId;
 
-            // 如果在Canvas工作区但不在任何已有栏目（永久/临时）内，创建临时栏目
-            if (inWorkspace && !inPermanent) {
-                const draggedElement = pointerDragState.draggedElement;
-                const dragNodeId = draggedElement?.dataset?.nodeId;
-                const isDraggedNodeSelected = dragNodeId && typeof selectedNodes !== 'undefined' && selectedNodes && selectedNodes.has(dragNodeId);
+            if (dragNodeId && targetSectionId && typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.performMove === 'function') {
+                window.__treeDnd.performMove(dragNodeId, null, true, {
+                    sourceTreeType,
+                    sourceSectionId,
+                    targetTreeType: 'temporary',
+                    targetSectionId,
+                    position: 'inside',
+                    event: e
+                });
+            }
+        } else {
+            // 可能拖到Canvas外，检查是否需要创建临时栏目
+            const canvasWorkspace = document.getElementById('canvasWorkspace');
+            const primaryPermanentSection = document.getElementById('permanentSection');
 
-                const batchToTemp = window.batchToTempSection || (typeof batchToTempSection !== 'undefined' ? batchToTempSection : null);
-                if (isDraggedNodeSelected && batchToTemp) {
-                    await batchToTemp(e);
-                } else {
-                    handleDropToCanvas(e, workspaceRect);
+            if (canvasWorkspace && primaryPermanentSection) {
+                const workspaceRect = canvasWorkspace.getBoundingClientRect();
+                const permanentRect = primaryPermanentSection.getBoundingClientRect();
+
+                const inWorkspace = e.clientX >= workspaceRect.left &&
+                    e.clientX <= workspaceRect.right &&
+                    e.clientY >= workspaceRect.top &&
+                    e.clientY <= workspaceRect.bottom;
+
+                const inPermanent = e.clientX >= permanentRect.left &&
+                    e.clientX <= permanentRect.right &&
+                    e.clientY >= permanentRect.top &&
+                    e.clientY <= permanentRect.bottom;
+
+                // 如果在Canvas工作区但不在任何已有栏目（永久/临时）内，创建临时栏目
+                if (inWorkspace && !inPermanent) {
+                    const draggedElement = pointerDragState.draggedElement;
+                    const dragNodeId = draggedElement?.dataset?.nodeId;
+                    const isDraggedNodeSelected = dragNodeId && typeof selectedNodes !== 'undefined' && selectedNodes && selectedNodes.has(dragNodeId);
+
+                    const batchToTemp = window.batchToTempSection || (typeof batchToTempSection !== 'undefined' ? batchToTempSection : null);
+                    if (isDraggedNodeSelected && batchToTemp) {
+                        await batchToTemp(e);
+                    } else {
+                        handleDropToCanvas(e, workspaceRect);
+                    }
                 }
             }
         }
+    } catch (err) {
+        console.error('[指针拖拽] 放置操作发生异常:', err);
+    } finally {
+        // 拖拽成功结束，标记接下来短时间内阻止触发点击事件（防误触）
+        pointerDragState.preventNextClick = true;
+        setTimeout(() => {
+            pointerDragState.preventNextClick = false;
+        }, 50);
+
+        cleanupPointerDrag();
     }
-
-    // 拖拽成功结束，标记接下来短时间内阻止触发点击事件（防误触）
-    pointerDragState.preventNextClick = true;
-    setTimeout(() => {
-        pointerDragState.preventNextClick = false;
-    }, 50);
-
-    cleanupPointerDrag();
 }
 
 function handlePointerCancel(e) {
@@ -702,6 +714,11 @@ function cleanupPointerDrag() {
         document.querySelectorAll('.temp-tree-drop-highlight').forEach(el => el.classList.remove('temp-tree-drop-highlight'));
         document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
         document.querySelectorAll('.temp-drop-highlight').forEach(el => el.classList.remove('temp-drop-highlight'));
+        document.querySelectorAll('.tree-item.dragging').forEach(el => el.classList.remove('dragging'));
+        document.querySelectorAll('.tree-item.tree-drag-out').forEach(el => el.classList.remove('tree-drag-out'));
+        document.querySelectorAll('.tree-item.tree-drag-leaving').forEach(el => el.classList.remove('tree-drag-leaving'));
+        document.querySelectorAll('.permanent-bookmark-section.drag-origin-active').forEach(el => el.classList.remove('drag-origin-active'));
+        document.querySelectorAll('.temp-canvas-node.drag-origin-active').forEach(el => el.classList.remove('drag-origin-active'));
         const ws = document.getElementById('canvasWorkspace');
         if (ws) ws.classList.remove('canvas-drop-active');
     } catch (_) { }
@@ -728,5 +745,6 @@ function cleanupPointerDrag() {
 // 导出到全局
 if (typeof window !== 'undefined') {
     window.attachPointerDragEvents = attachPointerDragEvents;
+    window.pointerDragState = pointerDragState;
     console.log('[指针拖拽] 模块已加载');
 }

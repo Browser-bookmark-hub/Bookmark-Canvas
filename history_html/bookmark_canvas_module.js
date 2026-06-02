@@ -4316,6 +4316,13 @@ function clearTreeItemDragging() {
         CanvasState.dragState.treeDragItem.classList.remove('tree-drag-out');
         CanvasState.dragState.treeDragItem.classList.remove('tree-drag-leaving');
     }
+    try {
+        document.querySelectorAll('.tree-item.tree-drag-out').forEach(el => el.classList.remove('tree-drag-out'));
+        document.querySelectorAll('.tree-item.tree-drag-leaving').forEach(el => el.classList.remove('tree-drag-leaving'));
+        document.querySelectorAll('.tree-item.dragging').forEach(el => el.classList.remove('dragging'));
+        document.querySelectorAll('.permanent-bookmark-section.drag-origin-active').forEach(el => el.classList.remove('drag-origin-active'));
+        document.querySelectorAll('.temp-canvas-node.drag-origin-active').forEach(el => el.classList.remove('drag-origin-active'));
+    } catch (_) { }
     CanvasState.dragState.treeDragItem = null;
 }
 
