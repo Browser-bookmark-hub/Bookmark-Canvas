@@ -12579,8 +12579,8 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
 .canvas-shortcuts-modal-body {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 14px 18px;
+    gap: 6px;
+    padding: 10px 18px;
 }
 
 .canvas-shortcuts-available {
@@ -12622,7 +12622,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
 }
 
 .canvas-help-section {
-    margin-bottom: 8px;
+    margin-bottom: 5px;
 }
 
 .canvas-help-section:last-child {
@@ -12633,7 +12633,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
     font-size: 14px;
     font-weight: 600;
     color: var(--text-secondary);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     padding-bottom: 3px;
     border-bottom: 1px solid var(--border-color);
 }
@@ -12642,7 +12642,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 4px 0;
+    padding: 2.5px 0;
     gap: 10px;
 }
 
@@ -12661,6 +12661,18 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn > span {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     font-family: monospace;
+    box-shadow: none !important;
+    text-shadow: none !important;
+}
+
+.canvas-help-key kbd.canvas-shortcut-key-disabled {
+    background: var(--bg-secondary) !important;
+    color: var(--text-tertiary) !important;
+    border-color: var(--border-color) !important;
+    opacity: 0.65;
+    cursor: not-allowed;
+    box-shadow: none !important;
+    text-shadow: none !important;
 }
 
 .canvas-help-desc {
@@ -12801,7 +12813,7 @@ html[lang="en"] #canvasShortcutsModal.canvas-manage-modal {
 }
 
 .canvas-shortcuts-panel .canvas-help-modal-body {
-    padding: 4px 10px 26px;
+    padding: 2px 10px 18px;
 }
 
 .canvas-manage-btn[hidden] {
@@ -13289,6 +13301,8 @@ html[lang="en"] #canvasShortcutsModal.canvas-manage-modal {
 .canvas-shortcut-key {
     cursor: default;
     transition: all 0.15s ease;
+    box-shadow: none !important;
+    text-shadow: none !important;
 }
 
 .canvas-shortcut-key.recording {

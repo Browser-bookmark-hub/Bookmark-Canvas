@@ -4488,7 +4488,7 @@ const i18n = {
 <h3>触控板操作</h3>
 <ul>
 <li><strong>双指捏合</strong>：缩放画布</li>
-<li><strong>Ctrl 等按键 + 双指滑动</strong>：缩放（备用方式）</li>
+<li><strong>Ctrl + 双指滑动</strong>：缩放（兼容侧边栏）</li>
 <li><strong>双指滑动</strong>：拖动画布</li>
 </ul>
 <hr>
@@ -4507,7 +4507,7 @@ const i18n = {
 <h3>Touchpad Operations</h3>
 <ul>
 <li><strong>Pinch gesture</strong>: Zoom canvas</li>
-<li><strong>Modifier (e.g., Ctrl) + swipe</strong>: Zoom (fallback)</li>
+<li><strong>Ctrl + swipe</strong>: Zoom (Sidebar compatible)</li>
 <li><strong>Two-finger swipe</strong>: Drag canvas</li>
 </ul>
 <hr>
@@ -4595,6 +4595,22 @@ const i18n = {
 <hr>
 <p><em>Tip: This card can be freely edited or deleted</em></p>`
     },
+    canvasHelpBatchSelectTitle: {
+        'zh_CN': '批量选择',
+        'en': 'Batch Selection'
+    },
+    canvasHelpBatchSelectClick: {
+        'zh_CN': '左键（单击）',
+        'en': 'Left Click'
+    },
+    canvasHelpBatchSelectDesc: {
+        'zh_CN': '批量/单个选中书签',
+        'en': 'Batch/single selection of bookmarks'
+    },
+    canvasHelpBatchSelectTooltip: {
+        'zh_CN': '进入批量模式的时候鼠标左键单击也可以选中',
+        'en': 'Clicking the left mouse button in batch mode can also select elements'
+    },
     canvasHelpCtrlTitle: {
         'zh_CN': 'Ctrl 键操作',
         'en': 'Ctrl Key Actions'
@@ -4656,12 +4672,12 @@ const i18n = {
         'en': 'If system gestures or device settings conflict,\nuse "Modifier + Swipe" as a fallback zoom method.'
     },
     canvasHelpTouchpadModifierSwipe: {
-        'zh_CN': '按键（如 Ctrl）+ 双指滑动',
-        'en': 'Modifier (e.g., Ctrl) + Swipe'
+        'zh_CN': '双指滑动',
+        'en': 'Swipe'
     },
     canvasHelpTouchpadModifierSwipeDesc: {
-        'zh_CN': '缩放（备用方式）',
-        'en': 'Zoom (fallback)'
+        'zh_CN': '缩放（兼容侧边栏）',
+        'en': 'Zoom (Sidebar compatible)'
     },
     canvasHelpTouchpadScroll: {
         'zh_CN': '双指滑动',
@@ -5324,6 +5340,34 @@ function applyLanguage() {
     if (canvasHelpPanelFeatures) canvasHelpPanelFeatures.innerHTML = i18n.canvasHelpPanelFeatures[currentLang];
     const canvasShortcutsModalTitle = document.getElementById('canvasShortcutsModalTitle');
     if (canvasShortcutsModalTitle) canvasShortcutsModalTitle.textContent = i18n.canvasShortcutsModalTitle[currentLang];
+    const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+    const batchModifier = isMac ? 'Option' : 'Alt';
+
+    const canvasHelpBatchSelectTitle = document.getElementById('canvasHelpBatchSelectTitle');
+    if (canvasHelpBatchSelectTitle) canvasHelpBatchSelectTitle.textContent = i18n.canvasHelpBatchSelectTitle[currentLang];
+    const canvasHelpBatchSelectTitleHelp = document.getElementById('canvasHelpBatchSelectTitleHelp');
+    if (canvasHelpBatchSelectTitleHelp) canvasHelpBatchSelectTitleHelp.textContent = i18n.canvasHelpBatchSelectTitle[currentLang];
+
+    const canvasHelpBatchSelectModifier1 = document.getElementById('canvasHelpBatchSelectModifier1');
+    if (canvasHelpBatchSelectModifier1) canvasHelpBatchSelectModifier1.textContent = batchModifier;
+    const canvasHelpBatchSelectModifier2 = document.getElementById('canvasHelpBatchSelectModifier2');
+    if (canvasHelpBatchSelectModifier2) canvasHelpBatchSelectModifier2.textContent = batchModifier;
+
+    const canvasHelpBatchSelectClick1 = document.getElementById('canvasHelpBatchSelectClick1');
+    if (canvasHelpBatchSelectClick1) canvasHelpBatchSelectClick1.textContent = i18n.canvasHelpBatchSelectClick[currentLang];
+    const canvasHelpBatchSelectClick2 = document.getElementById('canvasHelpBatchSelectClick2');
+    if (canvasHelpBatchSelectClick2) canvasHelpBatchSelectClick2.textContent = i18n.canvasHelpBatchSelectClick[currentLang];
+
+    const canvasHelpBatchSelectDesc1 = document.getElementById('canvasHelpBatchSelectDesc1');
+    if (canvasHelpBatchSelectDesc1) canvasHelpBatchSelectDesc1.textContent = i18n.canvasHelpBatchSelectDesc[currentLang];
+    const canvasHelpBatchSelectDesc2 = document.getElementById('canvasHelpBatchSelectDesc2');
+    if (canvasHelpBatchSelectDesc2) canvasHelpBatchSelectDesc2.textContent = i18n.canvasHelpBatchSelectDesc[currentLang];
+
+    const batchSelectHelpText1 = document.getElementById('batchSelectHelpText1');
+    if (batchSelectHelpText1) batchSelectHelpText1.innerHTML = i18n.canvasHelpBatchSelectTooltip[currentLang].replace(/\n/g, '<br>');
+    const batchSelectHelpText2 = document.getElementById('batchSelectHelpText2');
+    if (batchSelectHelpText2) batchSelectHelpText2.innerHTML = i18n.canvasHelpBatchSelectTooltip[currentLang].replace(/\n/g, '<br>');
+
     const canvasHelpCtrlTitle = document.getElementById('canvasHelpCtrlTitle');
     if (canvasHelpCtrlTitle) canvasHelpCtrlTitle.textContent = i18n.canvasHelpCtrlTitle[currentLang];
     const canvasHelpCtrlLeftClick = document.getElementById('canvasHelpCtrlLeftClick');
@@ -5388,6 +5432,8 @@ function applyLanguage() {
     };
     setupPinchPopover('pinchHelpBtn1', 'pinchHelpPopover1');
     setupPinchPopover('pinchHelpBtn2', 'pinchHelpPopover2');
+    setupPinchPopover('batchSelectHelpBtn1', 'batchSelectHelpPopover1');
+    setupPinchPopover('batchSelectHelpBtn2', 'batchSelectHelpPopover2');
     if (!document.body.dataset.pinchPopoverGlobalBound) {
         document.body.dataset.pinchPopoverGlobalBound = 'true';
         document.addEventListener('click', (e) => {
@@ -12237,9 +12283,9 @@ function attachTreeEvents(treeContainer) {
         try {
             const link = e.target && e.target.closest ? e.target.closest('a.tree-bookmark-link') : null;
             if (link && treeContainer.contains(link)) {
-                // 如果处于批量选择模式，或者按下了修饰键（Ctrl/Cmd/Shift）用于选择，屏蔽默认的打开逻辑
+                // 如果处于批量选择模式，或者按下了修饰键（Option/Alt/Shift）用于选择，屏蔽默认的打开逻辑
+                const hasSelectModifier = e.altKey || e.shiftKey;
                 const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-                const hasSelectModifier = isMac ? (e.metaKey || e.shiftKey) : (e.ctrlKey || e.metaKey || e.shiftKey);
                 if ((typeof window.selectMode !== 'undefined' && window.selectMode && !(isMac && e.ctrlKey)) || 
                     hasSelectModifier) {
                     e.preventDefault();

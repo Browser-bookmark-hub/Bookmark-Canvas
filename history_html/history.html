@@ -395,6 +395,24 @@
                             <div class="canvas-help-section">
                                 <div class="canvas-help-section-header">
                                     <div class="canvas-help-section-header-left">
+                                        <span class="canvas-help-section-title" id="canvasHelpBatchSelectTitle">批量选择</span>
+                                        <button type="button" class="perf-help-btn" id="batchSelectHelpBtn1">
+                                            <i class="fas fa-question-circle"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="canvas-help-row">
+                                    <span class="canvas-help-key">
+                                        <kbd class="canvas-shortcut-key">Shift</kbd> / 
+                                        <kbd class="canvas-shortcut-key" id="canvasHelpBatchSelectModifier1">Cmd</kbd> + 
+                                        <span id="canvasHelpBatchSelectClick1">左键（单击）</span>
+                                    </span>
+                                    <span class="canvas-help-desc" id="canvasHelpBatchSelectDesc1">批量/单个选中书签</span>
+                                </div>
+                            </div>
+                            <div class="canvas-help-section">
+                                <div class="canvas-help-section-header">
+                                    <div class="canvas-help-section-header-left">
                                         <span class="canvas-help-section-title" id="canvasHelpCtrlTitle"
                                             data-shortcut-title="ctrl">Ctrl 键操作</span>
                                     </div>
@@ -451,9 +469,9 @@
                                 <div class="canvas-help-row">
                                     <span class="canvas-help-key"><kbd class="canvas-shortcut-key"
                                             data-shortcut-display="ctrl">Ctrl</kbd> + <span
-                                            id="canvasHelpTouchpadModifierSwipe">双指滑动（兼容侧边栏）</span></span>
+                                            id="canvasHelpTouchpadModifierSwipe">双指滑动</span></span>
                                     <span class="canvas-help-desc"
-                                        id="canvasHelpTouchpadModifierSwipeDesc">缩放</span>
+                                        id="canvasHelpTouchpadModifierSwipeDesc">缩放（兼容侧边栏）</span>
                                 </div>
                                 <div class="canvas-help-row">
                                     <span class="canvas-help-key" id="canvasHelpTouchpadScroll">双指滑动</span>
@@ -601,6 +619,24 @@
                                                     <div class="canvas-help-section">
                                                         <div class="canvas-help-section-header">
                                                             <div class="canvas-help-section-header-left">
+                                                                <span class="canvas-help-section-title" id="canvasHelpBatchSelectTitleHelp">批量选择</span>
+                                                                <button type="button" class="perf-help-btn" id="batchSelectHelpBtn2">
+                                                                    <i class="fas fa-question-circle"></i>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <div class="canvas-help-row">
+                                                            <span class="canvas-help-key">
+                                                                <kbd class="canvas-shortcut-key">Shift</kbd> / 
+                                                                <kbd class="canvas-shortcut-key" id="canvasHelpBatchSelectModifier2">Cmd</kbd> + 
+                                                                <span id="canvasHelpBatchSelectClick2">左键（单击）</span>
+                                                            </span>
+                                                            <span class="canvas-help-desc" id="canvasHelpBatchSelectDesc2">批量/单个选中书签</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="canvas-help-section">
+                                                        <div class="canvas-help-section-header">
+                                                            <div class="canvas-help-section-header-left">
                                                                 <span class="canvas-help-section-title"
                                                                     data-shortcut-title="ctrl">Ctrl 键操作</span>
                                                             </div>
@@ -674,9 +710,9 @@
                                                             <span class="canvas-help-key"><kbd
                                                                     class="canvas-shortcut-key"
                                                                     data-shortcut-display="ctrl">Ctrl</kbd> + <span
-                                                                    data-i18n-key="canvasHelpTouchpadModifierSwipe">双指滑动（兼容侧边栏）</span></span>
+                                                                    data-i18n-key="canvasHelpTouchpadModifierSwipe">双指滑动</span></span>
                                                             <span class="canvas-help-desc"
-                                                                data-i18n-key="canvasHelpTouchpadModifierSwipeDesc">缩放</span>
+                                                                data-i18n-key="canvasHelpTouchpadModifierSwipeDesc">缩放（兼容侧边栏）</span>
                                                         </div>
                                                         <div class="canvas-help-row">
                                                             <span class="canvas-help-key"
@@ -976,6 +1012,12 @@
     </div>
     <div class="perf-help-popover" id="pinchHelpPopover2">
         <div class="perf-help-popover-content" id="pinchHelpText2"></div>
+    </div>
+    <div class="perf-help-popover" id="batchSelectHelpPopover1">
+        <div class="perf-help-popover-content" id="batchSelectHelpText1"></div>
+    </div>
+    <div class="perf-help-popover" id="batchSelectHelpPopover2">
+        <div class="perf-help-popover-content" id="batchSelectHelpText2"></div>
     </div>
 </body>
 

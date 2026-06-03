@@ -1461,16 +1461,19 @@ function bindSelectModeGlobalHandlers() {
         const nodeId = treeItem.dataset ? treeItem.dataset.nodeId : null;
         if (!nodeId) return;
 
+        const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+        if (isMac && e.ctrlKey) return; // macOS 下 Ctrl+Click 视为右键，不作选择拦截
+
+        // 如果是系统默认的打开新标签页修饰键（Cmd+Click在Mac上，或者Ctrl/Cmd+Click在其他系统上），且没有按下Alt/Shift，则不拦截，由浏览器默认处理
+        const isDefaultModifierClick = isMac ? (e.metaKey && !e.altKey && !e.shiftKey) : ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey);
+        if (isDefaultModifierClick) return;
+
         e.preventDefault();
         e.stopPropagation();
         if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
 
-        const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-        if (isMac && e.ctrlKey) return; // macOS 下 Ctrl+Click 视为右键，不作选择拦截
-
-        // Cmd + Click (Mac) 或 Ctrl/Cmd + Click (其它): 多选
-        const isMultiKey = isMac ? e.metaKey : (e.ctrlKey || e.metaKey);
-        if (isMultiKey) {
+        // Option/Alt + Click: 多选
+        if (e.altKey) {
             toggleSelectItem(nodeId, treeItem);
             lastClickedNode = nodeId;
             return;
@@ -1547,11 +1550,8 @@ function unbindSelectModeGlobalHandlers() {
 document.addEventListener('click', (e) => {
     if (typeof selectMode !== 'undefined' && selectMode) return; // 已进入选择模式，由 selectModeGlobalClickHandler 处理
 
-    const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-    if (isMac && e.ctrlKey) return; // macOS 下 Ctrl+Click 视为右键，不触发多选
-
-    const hasModifier = isMac ? (e.metaKey || e.shiftKey) : (e.ctrlKey || e.metaKey || e.shiftKey);
-    if (!hasModifier) return; // 没有按下修饰键（在 Mac 上，排除 Ctrl 键以防止与右键/缩放冲突）
+    const hasModifier = e.altKey || e.shiftKey;
+    if (!hasModifier) return; // 没有按下修饰键
 
     const target = e.target;
     if (!target) return;

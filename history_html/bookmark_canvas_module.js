@@ -3018,6 +3018,9 @@ _Tip: This card can be freely edited or deleted_
 
     // 中文版：快捷操作（Markdown-first）
     const shortcutGuideMarkdown_zh = `## 快捷操作
+### 批量选择
+- **Shift / Cmd/Ctrl + 左键**：批量/单个选中书签（进入批量模式后左键单击也可以选中）
+
 ### Ctrl 键操作
 - **Ctrl + 左键（按住）**：拖动画布或栏目卡片
 - **Ctrl + 滚轮（或触控板双指滑动）**：缩放画布
@@ -3028,7 +3031,7 @@ _Tip: This card can be freely edited or deleted_
 
 ### 触控板操作
 - **双指捏合**：缩放画布
-- **Ctrl 等按键 + 双指滑动**：缩放（备用方式）
+- **Ctrl/Option + 双指滑动**：缩放（兼容侧边栏）
 - **双指滑动**：拖动画布
 
 ### 元素右键
@@ -3041,6 +3044,9 @@ _快捷键可在左上角「管理」中自定义_
 
     // 英文版：快捷操作（Markdown-first）
     const shortcutGuideMarkdown_en = `## Quick Actions
+### Batch Selection
+- **Shift / Cmd/Ctrl + Left Click**: Batch/single selection of bookmarks (left click also selects under batch mode)
+
 ### Ctrl Key Operations
 - **Ctrl + Left Click (hold)**: Drag canvas or section card
 - **Ctrl + Scroll (or trackpad swipe)**: Zoom canvas
@@ -3051,7 +3057,7 @@ _快捷键可在左上角「管理」中自定义_
 
 ### Touchpad Operations
 - **Pinch gesture**: Zoom canvas
-- **Modifier (e.g., Ctrl) + swipe**: Zoom (fallback)
+- **Ctrl/Option + swipe**: Zoom (Sidebar compatible)
 - **Two-finger swipe**: Drag canvas
 
 ### Element Right-Click
@@ -3143,6 +3149,10 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 `;
 
     const shortcutGuideHtml_zh = `<h2>快捷操作</h2>
+<h3>批量选择</h3>
+<ul>
+<li><strong>Shift / Cmd/Ctrl + 左键</strong>：批量/单个选中书签（进入批量模式后左键单击也可以选中）</li>
+</ul>
 <h3>Ctrl 键操作</h3>
 <ul>
 <li><strong>Ctrl + 左键（按住）</strong>：拖动画布或栏目卡片</li>
@@ -3156,7 +3166,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <h3>触控板操作</h3>
 <ul>
 <li><strong>双指捏合</strong>：缩放画布</li>
-<li><strong>Ctrl 等按键 + 双指滑动</strong>：缩放（备用方式）</li>
+<li><strong>Ctrl/Option + 双指滑动</strong>：缩放（兼容侧边栏）</li>
 <li><strong>双指滑动</strong>：拖动画布</li>
 </ul>
 <h3>元素右键</h3>
@@ -3169,6 +3179,10 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 `;
 
     const shortcutGuideHtml_en = `<h2>Quick Actions</h2>
+<h3>Batch Selection</h3>
+<ul>
+<li><strong>Shift / Cmd/Ctrl + Left Click</strong>: Batch/single selection of bookmarks (left click also selects under batch mode)</li>
+</ul>
 <h3>Ctrl Key Operations</h3>
 <ul>
 <li><strong>Ctrl + Left Click (hold)</strong>: Drag canvas or section card</li>
@@ -3182,7 +3196,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <h3>Touchpad Operations</h3>
 <ul>
 <li><strong>Pinch gesture</strong>: Zoom canvas</li>
-<li><strong>Modifier (e.g., Ctrl) + swipe</strong>: Zoom (fallback)</li>
+<li><strong>Ctrl/Option + swipe</strong>: Zoom (Sidebar compatible)</li>
 <li><strong>Two-finger swipe</strong>: Drag canvas</li>
 </ul>
 <h3>Element Right-Click</h3>
@@ -8214,7 +8228,7 @@ function closeCanvasShortcutsModal() {
 
 const CANVAS_SHORTCUTS_KEY = 'canvas-custom-shortcuts';
 const DEFAULT_SHORTCUTS = {
-    ctrlKey: 'Alt',      // Control, Alt, Shift, Meta
+    ctrlKey: 'Control',  // Control, Alt, Shift, Meta
     spaceKey: 'Space'    // Space, or any other key
 };
 
@@ -8227,9 +8241,9 @@ function loadCanvasShortcuts() {
         const saved = localStorage.getItem(CANVAS_SHORTCUTS_KEY);
         if (saved) {
             const parsed = JSON.parse(saved);
-            // 如果之前保存的是旧默认值 Control，自动升级到新的默认值 Alt，避免旧缓存导致冲突
-            if (parsed.ctrlKey === 'Control') {
-                parsed.ctrlKey = 'Alt';
+            // 如果之前保存的是旧默认值 Alt，自动升级到新的默认值 Control，避免旧缓存导致冲突
+            if (parsed.ctrlKey === 'Alt') {
+                parsed.ctrlKey = 'Control';
                 try {
                     localStorage.setItem(CANVAS_SHORTCUTS_KEY, JSON.stringify(parsed));
                 } catch (_) {}
@@ -31873,9 +31887,9 @@ function addAnchorsToNode(nodeElement, nodeId) {
     tempLinkClickHandler = (e) => {
         const link = e.target && e.target.closest('.temp-canvas-node a.tree-bookmark-link');
         if (!link) return;
-        // 如果处于批量选择模式，或者按下了修饰键（Ctrl/Cmd/Shift）用于选择，屏蔽默认的打开逻辑
+        // 如果处于批量选择模式，或者按下了修饰键（Option/Alt/Shift）用于选择，屏蔽默认的打开逻辑
+        const hasSelectModifier = e.altKey || e.shiftKey;
         const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-        const hasSelectModifier = isMac ? (e.metaKey || e.shiftKey) : (e.ctrlKey || e.metaKey || e.shiftKey);
         if ((typeof window.selectMode !== 'undefined' && window.selectMode && !(isMac && e.ctrlKey)) || 
             hasSelectModifier) {
             e.preventDefault();
