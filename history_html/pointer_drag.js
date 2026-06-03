@@ -160,12 +160,17 @@ function attachPointerDragEvents(treeContainer) {
     treeContainer.addEventListener('pointerdown', handlePointerDown);
 
     // 阻止原生拖拽，以便由我们的指针拖拽系统完全接管并允许滚轮滚动
-    treeContainer.addEventListener('dragstart', (e) => {
-        const targetItem = e.target.closest('.tree-item[data-node-id]');
-        if (targetItem) {
-            e.preventDefault();
-        }
-    });
+    // 使用捕获阶段绑定在 document 上，以确保比 bookmark_canvas_module.js 的捕获监听器更早执行，
+    // 从而使 onDragStart 能够通过 e.defaultPrevented 识别并跳过，防止 CanvasState.dragState.wheelScrollEnabled 被错误置为 true。
+    if (!document.__pointerDragGlobalDragStartBound) {
+        document.__pointerDragGlobalDragStartBound = true;
+        document.addEventListener('dragstart', (e) => {
+            const targetItem = e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
+            if (targetItem) {
+                e.preventDefault();
+            }
+        }, true);
+    }
 
     // 全局监听 pointermove 和 pointerup（只绑定一次）
     if (!pointerDragState.globalHandlersAttached) {
@@ -730,6 +735,14 @@ function cleanupPointerDrag() {
     pointerDragState.currentTarget = null;
     pointerDragState.treeContainer = null;
     pointerDragState.hasMoved = false;
+
+    // 确保 CanvasState.dragState.wheelScrollEnabled 被还原，以防其处于 stuck 状态
+    try {
+        const CanvasState = window.CanvasModule?.CanvasState || window.CanvasState;
+        if (CanvasState && CanvasState.dragState) {
+            CanvasState.dragState.wheelScrollEnabled = false;
+        }
+    } catch (_) {}
 
     // 结束拖动：清理所有悬停展开计时器，记录结束时间
     // 不立即清除计数，让后续拖动可以继续使用1.2秒的快速延迟

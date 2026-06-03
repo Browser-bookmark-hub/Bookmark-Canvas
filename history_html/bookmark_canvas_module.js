@@ -5890,6 +5890,7 @@ function enhanceBookmarkTreeForCanvas(treeContainer) {
         bookmarkTree.dataset.canvasDragDelegated = 'true';
 
         const onDragStart = (e) => {
+            if (e && e.defaultPrevented) return;
             const item = e && e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
             if (!item) return;
 
@@ -17240,6 +17241,7 @@ function makeTempNodeResizable(element, node) {
 // =============================================================================
 
 function handlePermanentDragStart(e, data, type) {
+    if (e && e.defaultPrevented) return;
     CanvasState.dragState.isDragging = true;
     CanvasState.dragState.draggedData = {
         id: data.id,
@@ -34102,12 +34104,21 @@ function resetCanvasCtrlState() {
     CanvasState.isCtrlPressed = false;
     CanvasState.isSpacePressed = false;
     CanvasState.isPanning = false;
+    if (CanvasState.dragState) {
+        CanvasState.dragState.isDragging = false;
+        CanvasState.dragState.draggedElement = null;
+        CanvasState.dragState.dragSource = null;
+        CanvasState.dragState.wheelScrollEnabled = false;
+        if (Array.isArray(CanvasState.dragState.childElements)) {
+            CanvasState.dragState.childElements = [];
+        }
+    }
     const workspace = document.getElementById('canvasWorkspace');
     if (workspace) {
         workspace.classList.remove('space-pressed', 'ctrl-pressed', 'panning');
     }
     setSectionCtrlModeActive(false);
-    console.log('[CanvasModule] Canvas Ctrl/Space key states reset.');
+    console.log('[CanvasModule] Canvas Ctrl/Space key states and drag states reset.');
 }
 
 // =============================================================================

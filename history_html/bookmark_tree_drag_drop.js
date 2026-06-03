@@ -437,6 +437,7 @@ function attachDragEvents(treeContainer) {
 
 // 拖拽开始
 function handleDragStart(e) {
+    if (e && e.defaultPrevented) return;
     draggedNode = e.currentTarget;
     draggedNodeId = draggedNode?.dataset?.nodeId;
     draggedNodeTreeType = draggedNode?.dataset?.treeType || 'permanent';
@@ -762,6 +763,7 @@ async function handleDragEnd(e) {
         CanvasState.dragState.isDragging = false;
         CanvasState.dragState.draggedData = null;
         CanvasState.dragState.dragSource = null;
+        CanvasState.dragState.wheelScrollEnabled = false;
     }
 
     draggedNode = null;
