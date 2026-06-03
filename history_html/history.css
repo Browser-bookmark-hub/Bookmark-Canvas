@@ -5871,12 +5871,12 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     bottom: 80px;
     left: 50%;
     transform: translateX(-50%);
-    width: 520px;
+    width: 720px;
     height: fit-content;
     /* 改为fit-content，完全贴合内容 */
     min-width: 160px;
     max-width: 95vw;
-    max-height: 200px;
+    max-height: 85vh;
     background: rgba(248, 250, 252, 0.96) !important;
     backdrop-filter: blur(22px) saturate(125%) !important;
     -webkit-backdrop-filter: blur(22px) saturate(125%) !important;

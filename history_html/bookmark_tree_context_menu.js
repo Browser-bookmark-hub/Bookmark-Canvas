@@ -1661,13 +1661,52 @@ document.addEventListener('click', (e) => {
 
 const BATCH_PANEL_STATE_MAP_KEY = 'batchPanelStateMap';
 const BATCH_PANEL_LEGACY_KEY = 'batchPanelState';
+const BATCH_PANEL_GLOBAL_STATE_KEY = 'batchPanelGlobalState';
 const PERMANENT_SECTION_ANCHOR_ID = 'permanent-root';
 let currentBatchPanelAnchorInfo = null; // 当前批量面板定位信息
 let lastBatchSelectionInfo = null; // 最近一次选择所属栏目
 
 // 批量面板默认尺寸：固定，不跟随画布缩放
-const BATCH_PANEL_VERTICAL_DEFAULT_WIDTH = 220;
-const BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT = 520;
+const BATCH_PANEL_VERTICAL_DEFAULT_WIDTH = 280;
+const BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT = 700;
+
+function getBatchPanelGlobalState() {
+    try {
+        const raw = localStorage.getItem(BATCH_PANEL_GLOBAL_STATE_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                return parsed;
+            }
+        }
+    } catch (e) {
+        console.error('[批量面板] 读取全局状态失败:', e);
+    }
+    return {
+        vertical: {
+            width: BATCH_PANEL_VERTICAL_DEFAULT_WIDTH,
+            height: BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT,
+            manualPosition: false,
+            left: null,
+            top: null
+        },
+        horizontal: {
+            width: 720,
+            height: null,
+            manualPosition: false,
+            left: null,
+            top: null
+        }
+    };
+}
+
+function saveBatchPanelGlobalState(state) {
+    try {
+        localStorage.setItem(BATCH_PANEL_GLOBAL_STATE_KEY, JSON.stringify(state));
+    } catch (e) {
+        console.error('[批量面板] 保存全局状态失败:', e);
+    }
+}
 
 function clampValue(value, min, max) {
     if (!Number.isFinite(value)) return min;
@@ -1992,19 +2031,31 @@ function fitBatchPanelToContent(panel, options = {}) {
         let desiredHeight = panelRect.height;
 
         const isHorizontal = panel.classList && panel.classList.contains('horizontal-batch-layout');
+        const hasUserWidth = isHorizontal
+            ? (panel.dataset.userWidthHorizontal && Number.isFinite(parseFloat(panel.dataset.userWidthHorizontal)))
+            : (panel.dataset.userWidthVertical && Number.isFinite(parseFloat(panel.dataset.userWidthVertical)));
+        const hasUserHeight = isHorizontal
+            ? (panel.dataset.userHeightHorizontal && Number.isFinite(parseFloat(panel.dataset.userHeightHorizontal)))
+            : (panel.dataset.userHeightVertical && Number.isFinite(parseFloat(panel.dataset.userHeightVertical)));
+
+        const defaultHorizontalBottom = 80;
 
         // 贴合内容：避免最后一排按钮下方空白
         if (isHorizontal || shrink) {
             const horizontalWidthCap = isHorizontal
-                ? Math.min(620, viewportWidth - margin * 2)
+                ? Math.min(1200, viewportWidth - margin * 2)
                 : (viewportWidth - margin * 2);
-            desiredWidth = Math.min(content.scrollWidth + widthPadding, horizontalWidthCap);
-            desiredHeight = Math.min(content.scrollHeight + heightPadding, viewportHeight - margin * 2);
+            desiredWidth = hasUserWidth
+                ? panelRect.width
+                : Math.min(content.scrollWidth + widthPadding, horizontalWidthCap);
+            desiredHeight = hasUserHeight
+                ? panelRect.height
+                : Math.min(content.scrollHeight + heightPadding, viewportHeight - margin * 2);
         } else {
-            if (content.scrollWidth > content.clientWidth + 1) {
+            if (!hasUserWidth && content.scrollWidth > content.clientWidth + 1) {
                 desiredWidth = Math.min(content.scrollWidth + widthPadding, viewportWidth - margin * 2);
             }
-            if (content.scrollHeight > content.clientHeight + 1) {
+            if (!hasUserHeight && content.scrollHeight > content.clientHeight + 1) {
                 desiredHeight = Math.min(content.scrollHeight + heightPadding, viewportHeight - margin * 2);
             }
         }
@@ -2031,7 +2082,7 @@ function fitBatchPanelToContent(panel, options = {}) {
         }
 
         // 横向布局：保持 height=auto，避免底部残留空白
-        if (isHorizontal) {
+        if (isHorizontal && !hasUserHeight) {
             if (panel.style.height !== 'auto') {
                 panel.style.height = 'auto';
             }
@@ -2044,18 +2095,25 @@ function fitBatchPanelToContent(panel, options = {}) {
         const updatedRect = panel.getBoundingClientRect();
         let left = updatedRect.left;
         let top = updatedRect.top;
-        if (updatedRect.right > viewportWidth - margin) {
-            left = Math.max(margin, viewportWidth - margin - updatedRect.width);
+
+        if (isHorizontal && panel.dataset.manualPosition !== 'true') {
+            left = clampValue((viewportWidth - desiredWidth) / 2, margin, viewportWidth - desiredWidth - margin);
+            top = clampValue(viewportHeight - desiredHeight - defaultHorizontalBottom, margin, viewportHeight - desiredHeight - margin);
+        } else {
+            if (updatedRect.right > viewportWidth - margin) {
+                left = Math.max(margin, viewportWidth - margin - updatedRect.width);
+            }
+            if (updatedRect.left < margin) {
+                left = margin;
+            }
+            if (updatedRect.bottom > viewportHeight - margin) {
+                top = Math.max(margin, viewportHeight - margin - updatedRect.height);
+            }
+            if (updatedRect.top < margin) {
+                top = margin;
+            }
         }
-        if (updatedRect.left < margin) {
-            left = margin;
-        }
-        if (updatedRect.bottom > viewportHeight - margin) {
-            top = Math.max(margin, viewportHeight - margin - updatedRect.height);
-        }
-        if (updatedRect.top < margin) {
-            top = margin;
-        }
+
         if (left !== updatedRect.left) {
             panel.style.left = `${left}px`;
             panel.style.right = 'auto';
@@ -11009,6 +11067,237 @@ function updateBatchPanelCount() {
     } catch (_) { }
 }
 
+// 恢复批量面板的位置和大小
+function restoreBatchPanelState(panel, anchorInfo) {
+    try {
+        if (!panel) return;
+        const info = anchorInfo || currentBatchPanelAnchorInfo || getBatchPanelAnchorInfoFromSelection();
+        if (!info) {
+            console.warn('[批量面板] 缺少定位信息，维持默认位置');
+            return;
+        }
+
+        const resolvedElement = info.element || findBatchPanelColumnElement(info.treeType, info.sectionId);
+        const anchorKey = getBatchPanelAnchorKey({ treeType: info.treeType, sectionId: info.sectionId });
+
+        currentBatchPanelAnchorInfo = {
+            treeType: info.treeType || 'permanent',
+            sectionId: info.sectionId || (info.treeType === 'permanent' ? PERMANENT_SECTION_ANCHOR_ID : null),
+            element: resolvedElement
+        };
+
+        panel.dataset.anchorKey = anchorKey;
+        panel.dataset.treeType = currentBatchPanelAnchorInfo.treeType;
+        if (currentBatchPanelAnchorInfo.sectionId) {
+            panel.dataset.sectionId = currentBatchPanelAnchorInfo.sectionId;
+        } else {
+            delete panel.dataset.sectionId;
+        }
+
+        panel.style.position = 'fixed';
+        const margin = 16;
+        const defaultHorizontalBottom = 80;
+
+        const anchorRect = resolvedElement && typeof resolvedElement.getBoundingClientRect === 'function'
+            ? resolvedElement.getBoundingClientRect()
+            : null;
+        const viewportWidth = window.innerWidth || 1920;
+        const viewportHeight = window.innerHeight || 1080;
+
+        // 加载全局状态
+        const globalState = getBatchPanelGlobalState();
+        
+        // 兼容处理：如果全局状态里没有自定义数据，但是旧的 localStorage 里有，做一次性数据同步
+        const legacyRaw = localStorage.getItem(BATCH_PANEL_LEGACY_KEY);
+        if (legacyRaw) {
+            try {
+                const legacyState = JSON.parse(legacyRaw);
+                if (legacyState && legacyState.manualPosition === true) {
+                    if (legacyState.layout === 'vertical') {
+                        if (!globalState.vertical.manualPosition && parseFloat(legacyState.width)) {
+                            globalState.vertical.width = parseFloat(legacyState.width);
+                            globalState.vertical.height = parseFloat(legacyState.height) || null;
+                            globalState.vertical.manualPosition = true;
+                            globalState.vertical.left = legacyState.left;
+                            globalState.vertical.top = legacyState.top;
+                        }
+                    } else if (legacyState.layout === 'horizontal') {
+                        if (!globalState.horizontal.manualPosition && parseFloat(legacyState.width)) {
+                            globalState.horizontal.width = parseFloat(legacyState.width);
+                            globalState.horizontal.height = parseFloat(legacyState.height) || null;
+                            globalState.horizontal.manualPosition = true;
+                            globalState.horizontal.left = legacyState.left;
+                            globalState.horizontal.top = legacyState.top;
+                        }
+                    }
+                }
+            } catch (_) {}
+        }
+
+        // 同步数据集
+        if (globalState.vertical.width) panel.dataset.userWidthVertical = String(globalState.vertical.width);
+        if (globalState.vertical.height) panel.dataset.userHeightVertical = String(globalState.vertical.height);
+        if (globalState.horizontal.width) panel.dataset.userWidthHorizontal = String(globalState.horizontal.width);
+        if (globalState.horizontal.height) panel.dataset.userHeightHorizontal = String(globalState.horizontal.height);
+
+        const computeAnchorAlignedPosition = (rect, panelWidth, panelHeight) => {
+            const gap = 8;
+            let left = clampValue(viewportWidth - panelWidth - margin, margin, viewportWidth - panelWidth - margin);
+            let top = clampValue(margin, margin, viewportHeight - panelHeight - margin);
+            if (!rect) {
+                return { left, top };
+            }
+            const spaceOnRight = viewportWidth - rect.right - margin;
+            const spaceOnLeft = rect.left - margin;
+            if (spaceOnRight >= panelWidth + gap || spaceOnRight >= spaceOnLeft) {
+                left = clampValue(rect.right + gap, margin, viewportWidth - panelWidth - margin);
+            } else if (spaceOnLeft >= panelWidth + gap) {
+                left = clampValue(rect.left - gap - panelWidth, margin, viewportWidth - panelWidth - margin);
+            } else {
+                left = clampValue(rect.right + gap, margin, viewportWidth - panelWidth - margin);
+            }
+            const idealTop = rect.top;
+            top = clampValue(idealTop, margin, viewportHeight - panelHeight - margin);
+            return { left, top };
+        };
+
+        const deriveManualCoordinate = (primary, secondary, viewportSize, panelSize) => {
+            if (primary && primary !== 'auto') {
+                const numeric = parseFloat(primary);
+                if (Number.isFinite(numeric)) {
+                    return clampValue(numeric, margin, viewportSize - panelSize - margin);
+                }
+            }
+            if (secondary && secondary !== 'auto') {
+                const numeric = parseFloat(secondary);
+                if (Number.isFinite(numeric)) {
+                    const inferred = viewportSize - panelSize - numeric;
+                    return clampValue(inferred, margin, viewportSize - panelSize - margin);
+                }
+            }
+            return null;
+        };
+
+        const storedLayout = getStoredBatchPanelLayout();
+        const isVerticalLayout = storedLayout === 'vertical';
+
+        if (isVerticalLayout) {
+            batchPanelHorizontal = false;
+            panel.classList.remove('horizontal-batch-layout', 'tall-layout');
+            panel.classList.add('vertical-batch-layout');
+            
+            const maxH = Math.max(300, viewportHeight - margin * 2);
+            const maxW = Math.max(160, Math.min(480, viewportWidth - margin * 2));
+            const minW = 160;
+            const minH = 160;
+
+            const storedWidth = globalState.vertical.width;
+            const storedHeight = globalState.vertical.height;
+            const widthValue = Number.isFinite(storedWidth) ? clampValue(storedWidth, minW, maxW) : BATCH_PANEL_VERTICAL_DEFAULT_WIDTH;
+            const heightValue = Number.isFinite(storedHeight) ? clampValue(storedHeight, minH, maxH) : null;
+
+            panel.style.width = `${widthValue}px`;
+            panel.style.minWidth = `${minW}px`;
+            panel.style.maxWidth = `${maxW}px`;
+            if (Number.isFinite(heightValue)) {
+                panel.style.height = `${heightValue}px`;
+            } else {
+                panel.style.height = 'auto';
+            }
+            panel.style.minHeight = `${minH}px`;
+            panel.style.maxHeight = `${maxH}px`;
+
+            const storedManual = globalState.vertical.manualPosition === true;
+            let left, top;
+            const alignHeight = Number.isFinite(heightValue) ? heightValue : minH;
+
+            if (!storedManual) {
+                panel.dataset.manualPosition = 'false';
+                const aligned = computeAnchorAlignedPosition(anchorRect, widthValue, alignHeight);
+                left = aligned.left;
+                top = aligned.top;
+            } else {
+                left = deriveManualCoordinate(globalState.vertical.left, null, viewportWidth, widthValue);
+                top = deriveManualCoordinate(globalState.vertical.top, null, viewportHeight, alignHeight);
+                if (left === null || top === null) {
+                    const fallback = computeAnchorAlignedPosition(anchorRect, widthValue, alignHeight);
+                    if (left === null) left = fallback.left;
+                    if (top === null) top = fallback.top;
+                    panel.dataset.manualPosition = 'false';
+                } else {
+                    panel.dataset.manualPosition = 'true';
+                }
+            }
+            panel.style.left = `${left}px`;
+            panel.style.top = `${top}px`;
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+            applyBatchPanelTransform(panel, { baseTransform: 'none' });
+        } else {
+            batchPanelHorizontal = true;
+            panel.classList.add('horizontal-batch-layout');
+            panel.classList.remove('vertical-batch-layout');
+            
+            const horizontalMaxWidth = viewportWidth - margin * 2;
+            const storedWidth = globalState.horizontal.width;
+            const storedHeight = globalState.horizontal.height;
+            
+            const widthValue = Number.isFinite(storedWidth) ? clampValue(storedWidth, 320, horizontalMaxWidth) : 720;
+            panel.style.width = `${widthValue}px`;
+            panel.style.minWidth = '320px';
+            panel.style.maxWidth = `${horizontalMaxWidth}px`;
+
+            const heightValue = Number.isFinite(storedHeight) ? clampValue(storedHeight, 76, Math.max(180, Math.floor(viewportHeight * 0.6))) : null;
+            if (Number.isFinite(heightValue)) {
+                panel.style.height = `${heightValue}px`;
+            } else {
+                panel.style.height = 'auto';
+            }
+            panel.style.minHeight = '0';
+            panel.style.maxHeight = `${Math.max(180, Math.floor(viewportHeight * 0.6))}px`;
+
+            const storedManual = globalState.horizontal.manualPosition === true;
+            if (!storedManual) {
+                const left = clampValue((viewportWidth - widthValue) / 2, margin, viewportWidth - widthValue - margin);
+                panel.style.left = `${left}px`;
+                panel.style.right = 'auto';
+                panel.style.bottom = `${defaultHorizontalBottom}px`;
+                panel.style.top = 'auto';
+                panel.dataset.manualPosition = 'false';
+            } else {
+                const left = deriveManualCoordinate(globalState.horizontal.left, null, viewportWidth, widthValue);
+                const top = deriveManualCoordinate(globalState.horizontal.top, null, viewportHeight, Number.isFinite(heightValue) ? heightValue : 180);
+                if (left !== null && top !== null) {
+                    panel.style.left = `${left}px`;
+                    panel.style.top = `${top}px`;
+                    panel.style.right = 'auto';
+                    panel.style.bottom = 'auto';
+                    panel.dataset.manualPosition = 'true';
+                } else {
+                    const leftFallback = clampValue((viewportWidth - widthValue) / 2, margin, viewportWidth - widthValue - margin);
+                    panel.style.left = `${leftFallback}px`;
+                    panel.style.right = 'auto';
+                    panel.style.bottom = `${defaultHorizontalBottom}px`;
+                    panel.style.top = 'auto';
+                    panel.dataset.manualPosition = 'false';
+                }
+            }
+            applyBatchPanelTransform(panel, { baseTransform: 'none' });
+            if (panel.classList.contains('horizontal-batch-layout')) {
+                const currentHeight = parseFloat(panel.style.height) || panel.offsetHeight;
+                updateTallLayoutClass(panel, currentHeight);
+            }
+        }
+        
+        fitBatchPanelToContent(panel);
+        if (isVerticalLayout && !globalState.vertical.manualPosition) {
+            fitBatchPanelToContent(panel, { delay: 0, retries: 1, shrink: true });
+        }
+    } catch (e) {
+        console.error('[批量面板] 恢复状态失败:', e);
+    }
+}
+
 // 初始化批量面板的拖拽移动功能
 function initBatchPanelDrag(panel) {
     const header = panel.querySelector('#batch-panel-header');
@@ -11290,7 +11579,7 @@ function initBatchPanelResize(panel) {
         const deltaY = e.clientY - startY;
         const isVertical = panel.classList.contains('vertical-batch-layout');
         const minWidth = isVertical ? 160 : 360;
-        const maxWidth = isVertical ? 260 : Math.min((window.innerWidth || 1920) * 0.95, 1400);
+        const maxWidth = isVertical ? 480 : Math.min((window.innerWidth || 1920) * 0.95, 1400);
         const minHeight = isVertical ? 160 : 76;
         const maxHeight = (window.innerHeight || 1080) * 0.8;
 
@@ -11315,8 +11604,23 @@ function initBatchPanelResize(panel) {
             newTop = startTop + (startHeight - newHeight);
         }
 
-        panel.style.width = newWidth + 'px';
-        panel.style.height = newHeight + 'px';  // 始终设置高度为计算值，实现无极调整
+        // 根据方向调整并设置样式与数据集
+        if (direction.includes('e') || direction.includes('w')) {
+            panel.style.width = newWidth + 'px';
+            if (isVertical) {
+                panel.dataset.userWidthVertical = String(newWidth);
+            } else {
+                panel.dataset.userWidthHorizontal = String(newWidth);
+            }
+        }
+        if (direction.includes('s') || direction.includes('n')) {
+            panel.style.height = newHeight + 'px';  // 始终设置高度为计算值，实现无极调整
+            if (isVertical) {
+                panel.dataset.userHeightVertical = String(newHeight);
+            } else {
+                panel.dataset.userHeightHorizontal = String(newHeight);
+            }
+        }
 
         // 根据高度动态切换横向/纵向布局（只对横向布局生效）
         if (!isVertical) {
@@ -11326,10 +11630,12 @@ function initBatchPanelResize(panel) {
         if (direction.includes('w')) {
             panel.style.left = newLeft + 'px';
             panel.style.right = 'auto';
+            panel.dataset.manualPosition = 'true';
         }
         if (direction.includes('n')) {
             panel.style.top = newTop + 'px';
             panel.style.bottom = 'auto';
+            panel.dataset.manualPosition = 'true';
         }
     });
 
@@ -11392,113 +11698,21 @@ function toggleBatchPanelLayout() {
     const batchPanel = document.getElementById('batch-action-panel');
     if (!batchPanel) return;
 
-    const beforeRect = batchPanel.getBoundingClientRect();
-    const wasManual = batchPanel.dataset.manualPosition === 'true';
-
     batchPanelHorizontal = !batchPanelHorizontal;
-
-    if (batchPanelHorizontal) {
-        batchPanel.classList.add('horizontal-batch-layout');
-        batchPanel.classList.remove('vertical-batch-layout');
-
-        const viewportWidth = window.innerWidth || 1200;
-        const viewportHeight = window.innerHeight || 800;
-        const margin = 16;
-        const maxW = Math.max(320, viewportWidth - margin * 2);
-        // 横向默认宽度：更窄一些（两行按钮为主，不要占太宽）
-        const w = Math.min(520, maxW);
-        const maxH = Math.max(180, Math.floor(viewportHeight * 0.6));
-
-        batchPanel.style.width = `${w}px`;
-        batchPanel.style.minWidth = '320px';
-        batchPanel.style.maxWidth = `${maxW}px`;
-        batchPanel.style.height = 'auto';
-        batchPanel.style.minHeight = '0px';
-        batchPanel.style.maxHeight = `${maxH}px`;
-        // 默认横向：底部居中（不用 transform，避免跳动）
-        const left = clampValue((viewportWidth - w) / 2, margin, viewportWidth - w - margin);
-        batchPanel.style.left = `${left}px`;
-        batchPanel.style.right = 'auto';
-        batchPanel.style.bottom = `${margin}px`;
-        batchPanel.style.top = 'auto';
-        applyBatchPanelTransform(batchPanel, { baseTransform: 'none' });
-
-        setTimeout(() => {
-            const currentHeight = batchPanel.offsetHeight || 0;
-            updateTallLayoutClass(batchPanel, currentHeight);
-            fitBatchPanelToContent(batchPanel, { delay: 0, retries: 2 });
-            // 再强制一次：横向不写死高度
-            batchPanel.style.height = 'auto';
-        }, 30);
-
-        // 横向布局：贴底时不要保存/恢复 translateX，避免后续 restore 时跳
-        batchPanel.dataset.manualPosition = wasManual ? 'true' : 'false';
-
-        console.log('[批量面板] 切换到横向布局');
-        // 更新按钮文字
-        const btn = batchPanel.querySelector('[data-action="toggle-batch-layout"] span');
-        if (btn) {
-            const lang = currentLang || 'zh_CN';
-            btn.textContent = lang === 'zh_CN' ? '横向/纵向' : 'Horiz/Vert';
-        }
-    } else {
-        batchPanel.classList.remove('horizontal-batch-layout');
-        batchPanel.classList.add('vertical-batch-layout');
-        batchPanel.classList.remove('tall-layout'); // 纵向布局不需要tall-layout
-
-        const viewportHeight = window.innerHeight || 800;
-        const viewportWidth = window.innerWidth || 1200;
-        const margin = 16;
-
-        const maxH = Math.max(260, viewportHeight - margin * 2);
-        const maxW = Math.max(160, Math.min(260, viewportWidth - margin * 2));
-        const minW = 160;
-        const minH = 160;
-
-        const defaultH = clampValue(BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT, minH, maxH);
-        const defaultW = clampValue(BATCH_PANEL_VERTICAL_DEFAULT_WIDTH, minW, maxW);
-
-        batchPanel.style.width = `${defaultW}px`;
-        batchPanel.style.minWidth = `${minW}px`;
-        batchPanel.style.maxWidth = `${maxW}px`;
-        // 默认贴合内容高度（不留底部空白），但允许拖拽变大
-        batchPanel.style.height = 'auto';
-        batchPanel.style.minHeight = `${minH}px`;
-        batchPanel.style.maxHeight = `${maxH}px`;
-        batchPanel.style.left = 'auto';
-        batchPanel.style.right = `${margin}px`;
-        batchPanel.style.bottom = `${margin}px`;
-        batchPanel.style.top = 'auto';
-        applyBatchPanelTransform(batchPanel, { baseTransform: 'none' });
-
-        console.log('[批量面板] 切换到纵向布局');
-        // 更新按钮文字
-        const btn = batchPanel.querySelector('[data-action="toggle-batch-layout"] span');
-        if (btn) {
-            const lang = currentLang || 'zh_CN';
-            btn.textContent = lang === 'zh_CN' ? '横向/纵向' : 'Horiz/Vert';
-        }
-        fitBatchPanelToContent(batchPanel, { delay: 0, retries: 2 });
-        fitBatchPanelToContent(batchPanel, { delay: 0, retries: 1, shrink: true });
-    }
-
-    // 如果用户刚刚拖动过位置，切换布局时保持“固定在那里”（不强制回到底部/右下角）
-    if (wasManual) {
-        batchPanel.dataset.manualPosition = 'true';
-        batchPanel.style.left = `${beforeRect.left}px`;
-        batchPanel.style.top = `${beforeRect.top}px`;
-        batchPanel.style.right = 'auto';
-        batchPanel.style.bottom = 'auto';
-        applyBatchPanelTransform(batchPanel, { baseTransform: 'none' });
-    }
-
-    // 保存状态
     try {
         localStorage.setItem('batchPanelLayout', batchPanelHorizontal ? 'horizontal' : 'vertical');
-        // 保存当前位置和大小
-        saveBatchPanelState(batchPanel);
     } catch (e) {
         console.error('[批量面板] 保存布局状态失败:', e);
+    }
+
+    // 恢复新布局的状态
+    restoreBatchPanelState(batchPanel, currentBatchPanelAnchorInfo);
+
+    // 更新按钮文字
+    const btn = batchPanel.querySelector('[data-action="toggle-batch-layout"] span');
+    if (btn) {
+        const lang = currentLang || 'zh_CN';
+        btn.textContent = lang === 'zh_CN' ? '横向/纵向' : 'Horiz/Vert';
     }
 
     // Reposition help popover/connectors if visible
@@ -11513,345 +11727,87 @@ function toggleBatchPanelLayout() {
 function saveBatchPanelState(panel, anchorInfo) {
     try {
         if (!panel) return;
+        const isVertical = panel.classList.contains('vertical-batch-layout');
+        const globalState = getBatchPanelGlobalState();
+        const layoutKey = isVertical ? 'vertical' : 'horizontal';
+        
+        // 1. 保存大小
+        const currentWidth = parseFloat(panel.style.width);
+        const currentHeight = parseFloat(panel.style.height);
+        
+        if (isVertical) {
+            const userW = panel.dataset.userWidthVertical ? parseFloat(panel.dataset.userWidthVertical) : null;
+            const userH = panel.dataset.userHeightVertical ? parseFloat(panel.dataset.userHeightVertical) : null;
+            globalState.vertical.width = Number.isFinite(userW) ? userW : (Number.isFinite(currentWidth) ? currentWidth : BATCH_PANEL_VERTICAL_DEFAULT_WIDTH);
+            globalState.vertical.height = Number.isFinite(userH) ? userH : (Number.isFinite(currentHeight) ? currentHeight : null);
+        } else {
+            const userW = panel.dataset.userWidthHorizontal ? parseFloat(panel.dataset.userWidthHorizontal) : null;
+            const userH = panel.dataset.userHeightHorizontal ? parseFloat(panel.dataset.userHeightHorizontal) : null;
+            globalState.horizontal.width = Number.isFinite(userW) ? userW : (Number.isFinite(currentWidth) ? currentWidth : 720);
+            globalState.horizontal.height = Number.isFinite(userH) ? userH : (Number.isFinite(currentHeight) ? currentHeight : null);
+        }
+        
+        // 2. 保存位置
+        const isManual = panel.dataset.manualPosition === 'true';
+        globalState[layoutKey].manualPosition = isManual;
+        if (isManual) {
+            globalState[layoutKey].left = panel.style.left;
+            globalState[layoutKey].top = panel.style.top;
+        } else {
+            globalState[layoutKey].left = null;
+            globalState[layoutKey].top = null;
+        }
+        
+        saveBatchPanelGlobalState(globalState);
+        
+        // 同时兼容保存旧的状态映射以防其他模块依赖
         const info = anchorInfo || currentBatchPanelAnchorInfo || getBatchPanelAnchorInfoFromSelection();
         const inferredKey = getBatchPanelAnchorKey(info);
         const anchorKey = panel.dataset.anchorKey || inferredKey;
-        if (!anchorKey) return;
-        const anchorRect = info && info.element && typeof info.element.getBoundingClientRect === 'function'
-            ? info.element.getBoundingClientRect()
-            : null;
-        const currentZoom = getCurrentBatchPanelZoom();
-
-        const isVertical = panel.classList.contains('vertical-batch-layout');
-        const isVisible = panel && panel.style.display !== 'none';
-        const state = {
-            left: panel.style.left,
-            top: panel.style.top,
-            bottom: panel.style.bottom,
-            right: panel.style.right,
-            width: panel.style.width,
-            height: panel.style.height,
-            transform: panel.style.transform,
-            layout: isVertical ? 'vertical' : 'horizontal',
-            visible: isVisible,
-            treeType: (info && info.treeType) || panel.dataset.treeType || 'permanent',
-            sectionId: (info && info.sectionId) || panel.dataset.sectionId || null,
-            anchorKey,
-            baseTransform: panel.dataset.baseTransform || 'none',
-            manualPosition: panel.dataset.manualPosition === 'true',
-            zoom: currentZoom,
-            anchorRect: anchorRect ? {
-                left: anchorRect.left,
-                top: anchorRect.top,
-                width: anchorRect.width,
-                height: anchorRect.height,
-                right: anchorRect.right,
-                bottom: anchorRect.bottom
-            } : null
-        };
-
-        const stateMapRaw = localStorage.getItem(BATCH_PANEL_STATE_MAP_KEY);
-        const stateMap = stateMapRaw ? JSON.parse(stateMapRaw) : {};
-        stateMap[anchorKey] = state;
-        localStorage.setItem(BATCH_PANEL_STATE_MAP_KEY, JSON.stringify(stateMap));
-        localStorage.setItem(BATCH_PANEL_LEGACY_KEY, JSON.stringify(state));
-        console.log('[批量面板] 状态已保存:', anchorKey, state);
+        if (anchorKey) {
+            const anchorRect = info && info.element && typeof info.element.getBoundingClientRect === 'function'
+                ? info.element.getBoundingClientRect()
+                : null;
+            const currentZoom = getCurrentBatchPanelZoom();
+            const isVisible = panel && panel.style.display !== 'none';
+            const state = {
+                left: panel.style.left,
+                top: panel.style.top,
+                bottom: panel.style.bottom,
+                right: panel.style.right,
+                width: panel.style.width,
+                height: panel.style.height,
+                transform: panel.style.transform,
+                layout: isVertical ? 'vertical' : 'horizontal',
+                visible: isVisible,
+                treeType: (info && info.treeType) || panel.dataset.treeType || 'permanent',
+                sectionId: (info && info.sectionId) || panel.dataset.sectionId || null,
+                anchorKey,
+                baseTransform: panel.dataset.baseTransform || 'none',
+                manualPosition: isManual,
+                zoom: currentZoom,
+                userWidthVertical: globalState.vertical.width,
+                userHeightVertical: globalState.vertical.height,
+                userWidthHorizontal: globalState.horizontal.width,
+                userHeightHorizontal: globalState.horizontal.height,
+                anchorRect: anchorRect ? {
+                    left: anchorRect.left,
+                    top: anchorRect.top,
+                    width: anchorRect.width,
+                    height: anchorRect.height,
+                    right: anchorRect.right,
+                    bottom: anchorRect.bottom
+                } : null
+            };
+            const stateMapRaw = localStorage.getItem(BATCH_PANEL_STATE_MAP_KEY);
+            const stateMap = stateMapRaw ? JSON.parse(stateMapRaw) : {};
+            stateMap[anchorKey] = state;
+            localStorage.setItem(BATCH_PANEL_STATE_MAP_KEY, JSON.stringify(stateMap));
+            localStorage.setItem(BATCH_PANEL_LEGACY_KEY, JSON.stringify(state));
+        }
+        console.log('[批量面板] 全局状态已保存:', globalState);
     } catch (e) {
         console.error('[批量面板] 保存状态失败:', e);
-    }
-}
-
-// 恢复批量面板的位置和大小
-function restoreBatchPanelState(panel, anchorInfo) {
-    try {
-        if (!panel) return;
-        const info = anchorInfo || currentBatchPanelAnchorInfo || getBatchPanelAnchorInfoFromSelection();
-        if (!info) {
-            console.warn('[批量面板] 缺少定位信息，维持默认位置');
-            return;
-        }
-
-        const resolvedElement = info.element || findBatchPanelColumnElement(info.treeType, info.sectionId);
-        const anchorKey = getBatchPanelAnchorKey({ treeType: info.treeType, sectionId: info.sectionId });
-
-        currentBatchPanelAnchorInfo = {
-            treeType: info.treeType || 'permanent',
-            sectionId: info.sectionId || (info.treeType === 'permanent' ? PERMANENT_SECTION_ANCHOR_ID : null),
-            element: resolvedElement
-        };
-
-        panel.dataset.anchorKey = anchorKey;
-        panel.dataset.treeType = currentBatchPanelAnchorInfo.treeType;
-        if (currentBatchPanelAnchorInfo.sectionId) {
-            panel.dataset.sectionId = currentBatchPanelAnchorInfo.sectionId;
-        } else {
-            delete panel.dataset.sectionId;
-        }
-
-        panel.style.position = 'fixed';
-        const margin = 16;
-
-        const anchorRect = resolvedElement && typeof resolvedElement.getBoundingClientRect === 'function'
-            ? resolvedElement.getBoundingClientRect()
-            : null;
-        const viewportWidth = window.innerWidth || 1920;
-        const viewportHeight = window.innerHeight || 1080;
-        const currentZoom = 1;
-        const sizing = computeBatchPanelSizing(anchorRect, currentZoom, viewportWidth, viewportHeight, margin);
-        const {
-            minWidth,
-            maxWidth,
-            minHeight,
-            maxHeight,
-            defaultWidth,
-            defaultHeight,
-            gap,
-            normalizedZoom
-        } = sizing;
-        panel.dataset.anchorZoom = String(normalizedZoom);
-
-        const computeAnchorAlignedPosition = (rect, panelWidth, panelHeight) => {
-            let left = clampValue(viewportWidth - panelWidth - margin, margin, viewportWidth - panelWidth - margin);
-            let top = clampValue(margin, margin, viewportHeight - panelHeight - margin);
-            if (!rect) {
-                return { left, top };
-            }
-            const spaceOnRight = viewportWidth - rect.right - margin;
-            const spaceOnLeft = rect.left - margin;
-            if (spaceOnRight >= panelWidth + gap || spaceOnRight >= spaceOnLeft) {
-                left = clampValue(rect.right + gap, margin, viewportWidth - panelWidth - margin);
-            } else if (spaceOnLeft >= panelWidth + gap) {
-                left = clampValue(rect.left - gap - panelWidth, margin, viewportWidth - panelWidth - margin);
-            } else {
-                left = clampValue(rect.right + gap, margin, viewportWidth - panelWidth - margin);
-            }
-            const idealTop = rect.top;
-            top = clampValue(idealTop, margin, viewportHeight - panelHeight - margin);
-            return { left, top };
-        };
-
-        const deriveManualCoordinate = (primary, secondary, viewportSize, panelSize) => {
-            if (primary && primary !== 'auto') {
-                const numeric = parseFloat(primary);
-                if (Number.isFinite(numeric)) {
-                    return clampValue(numeric, margin, viewportSize - panelSize - margin);
-                }
-            }
-            if (secondary && secondary !== 'auto') {
-                const numeric = parseFloat(secondary);
-                if (Number.isFinite(numeric)) {
-                    const inferred = viewportSize - panelSize - numeric;
-                    return clampValue(inferred, margin, viewportSize - panelSize - margin);
-                }
-            }
-            return null;
-        };
-
-        let state = null;
-        const stateMapRaw = localStorage.getItem(BATCH_PANEL_STATE_MAP_KEY);
-        if (stateMapRaw) {
-            try {
-                const stateMap = JSON.parse(stateMapRaw);
-                state = stateMap ? stateMap[anchorKey] : null;
-            } catch (err) {
-                console.warn('[批量面板] 状态映射解析失败，忽略:', err);
-            }
-        }
-
-        if (!state) {
-            const legacyRaw = localStorage.getItem(BATCH_PANEL_LEGACY_KEY);
-            if (legacyRaw) {
-                try {
-                    const legacyState = JSON.parse(legacyRaw);
-                    if (!legacyState.anchorKey || legacyState.anchorKey === anchorKey) {
-                        state = legacyState;
-                    }
-                } catch (err) {
-                    console.warn('[批量面板] 兼容状态解析失败，忽略:', err);
-                }
-            }
-        }
-
-        if (state) {
-            console.log('[批量面板] 恢复状态:', anchorKey, state);
-            const storedWidth = parseFloat(state.width);
-            const storedHeight = parseFloat(state.height);
-            const storedBaseTransform = state.baseTransform || 'none';
-            const storedZoom = Number.isFinite(state.zoom) && state.zoom > 0 ? clampValue(state.zoom, 0.2, 3) : normalizedZoom;
-            const zoomDelta = Math.abs(normalizedZoom - storedZoom);
-            const zoomRatio = storedZoom > 0 ? normalizedZoom / storedZoom : 1;
-            const storedManual = state.manualPosition === true;
-            const previousAnchorRect = state.anchorRect || null;
-            const anchorShift = anchorRect && previousAnchorRect
-                ? Math.hypot(
-                    (anchorRect.left || 0) - (previousAnchorRect.left || 0),
-                    (anchorRect.top || 0) - (previousAnchorRect.top || 0)
-                )
-                : 0;
-            const sizeShift = anchorRect && previousAnchorRect
-                ? Math.abs((anchorRect.width || 0) - (previousAnchorRect.width || 0))
-                : 0;
-            const shouldSnapToAnchor = !storedManual || zoomDelta > 0.05 || sizeShift > 24 || anchorShift > 48 || !anchorRect;
-
-            if (state.layout === 'vertical') {
-                batchPanelHorizontal = false;
-                panel.classList.remove('horizontal-batch-layout', 'tall-layout');
-                panel.classList.add('vertical-batch-layout');
-                const maxH = Math.max(260, viewportHeight - margin * 2);
-                const maxW = Math.max(160, Math.min(260, viewportWidth - margin * 2));
-                const minW = 160;
-                const minH = 160;
-
-                const defaultH = clampValue(BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT, minH, maxH);
-                const defaultW = clampValue(BATCH_PANEL_VERTICAL_DEFAULT_WIDTH, minW, maxW);
-
-                // 默认固定尺寸，但允许用户拖拽改大小（storedManual=true 时恢复用户尺寸）
-                const widthValue = (storedManual && Number.isFinite(storedWidth))
-                    ? clampValue(storedWidth * zoomRatio, minW, maxW)
-                    : defaultW;
-                const heightValue = (storedManual && Number.isFinite(storedHeight))
-                    ? clampValue(storedHeight * zoomRatio, minH, maxH)
-                    : null;
-
-                panel.style.width = `${widthValue}px`;
-                panel.style.minWidth = `${minW}px`;
-                panel.style.maxWidth = `${maxW}px`;
-                if (Number.isFinite(heightValue)) {
-                    panel.style.height = `${heightValue}px`;
-                } else {
-                    panel.style.height = 'auto';
-                }
-                panel.style.minHeight = `${minH}px`;
-                panel.style.maxHeight = `${maxH}px`;
-
-                let left;
-                let top;
-                const alignHeight = Number.isFinite(heightValue) ? heightValue : minH;
-                if (shouldSnapToAnchor) {
-                    panel.dataset.manualPosition = 'false';
-                    const aligned = computeAnchorAlignedPosition(anchorRect, widthValue, alignHeight);
-                    left = aligned.left;
-                    top = aligned.top;
-                } else {
-                    let usedManualPosition = storedManual;
-                    left = deriveManualCoordinate(state.left, state.right, viewportWidth, widthValue);
-                    top = deriveManualCoordinate(state.top, state.bottom, viewportHeight, alignHeight);
-                    if (left === null || top === null) {
-                        const fallback = computeAnchorAlignedPosition(anchorRect, widthValue, alignHeight);
-                        if (left === null) left = fallback.left;
-                        if (top === null) top = fallback.top;
-                        usedManualPosition = false;
-                    }
-                    panel.dataset.manualPosition = usedManualPosition ? 'true' : 'false';
-                }
-                panel.style.left = `${left}px`;
-                panel.style.top = `${top}px`;
-                panel.style.right = 'auto';
-                panel.style.bottom = 'auto';
-                applyBatchPanelTransform(panel, { baseTransform: storedBaseTransform || 'none' });
-            } else {
-                batchPanelHorizontal = true;
-                panel.classList.add('horizontal-batch-layout');
-                panel.classList.remove('vertical-batch-layout');
-                panel.dataset.manualPosition = storedManual ? 'true' : 'false';
-                const margin = 16;
-                const horizontalMaxWidth = viewportWidth - margin * 2;
-                const widthCandidate = storedManual && Number.isFinite(storedWidth) ? storedWidth * zoomRatio : 520;
-                const widthValue = clampValue(widthCandidate, 320, Math.max(321, horizontalMaxWidth));
-                panel.style.width = `${widthValue}px`;
-                panel.style.minWidth = '320px';
-                panel.style.maxWidth = `${horizontalMaxWidth}px`;
-                panel.style.height = 'auto';
-                panel.style.minHeight = '0';
-                panel.style.maxHeight = `${Math.max(180, Math.floor(viewportHeight * 0.6))}px`;
-
-                if (shouldSnapToAnchor || !storedManual) {
-                    const left = clampValue((viewportWidth - widthValue) / 2, margin, viewportWidth - widthValue - margin);
-                    panel.style.left = `${left}px`;
-                    panel.style.right = 'auto';
-                    panel.style.bottom = `${margin}px`;
-                    panel.style.top = 'auto';
-                    panel.dataset.manualPosition = 'false';
-                } else {
-                    const left = deriveManualCoordinate(state.left, state.right, viewportWidth, widthValue);
-                    const top = deriveManualCoordinate(state.top, state.bottom, viewportHeight, 180);
-                    if (left !== null && top !== null) {
-                        panel.style.left = `${left}px`;
-                        panel.style.top = `${top}px`;
-                        panel.style.right = 'auto';
-                        panel.style.bottom = 'auto';
-                    } else {
-                        const leftFallback = clampValue((viewportWidth - widthValue) / 2, margin, viewportWidth - widthValue - margin);
-                        panel.style.left = `${leftFallback}px`;
-                        panel.style.right = 'auto';
-                        panel.style.bottom = `${margin}px`;
-                        panel.style.top = 'auto';
-                        panel.dataset.manualPosition = 'false';
-                    }
-                }
-
-                applyBatchPanelTransform(panel, { baseTransform: storedBaseTransform || 'none' });
-                if (panel.classList.contains('horizontal-batch-layout')) {
-                    const currentHeight = parseFloat(panel.style.height) || panel.offsetHeight;
-                    updateTallLayoutClass(panel, currentHeight);
-                }
-            }
-            fitBatchPanelToContent(panel);
-            if (state.layout === 'vertical' && !storedManual) {
-                fitBatchPanelToContent(panel, { delay: 0, retries: 1, shrink: true });
-            }
-            return;
-        }
-
-        console.log('[批量面板] 没有保存的状态，使用默认定位');
-        const storedLayout = getStoredBatchPanelLayout();
-        batchPanelHorizontal = isBatchPanelGlobalOrFullscreenMode(currentBatchPanelAnchorInfo) || storedLayout === 'horizontal';
-        panel.classList.remove('horizontal-batch-layout', 'vertical-batch-layout', 'tall-layout');
-        panel.classList.add(batchPanelHorizontal ? 'horizontal-batch-layout' : 'vertical-batch-layout');
-        panel.dataset.manualPosition = 'false';
-
-        if (batchPanelHorizontal) {
-            const margin = 16;
-            const maxW = Math.max(320, viewportWidth - margin * 2);
-            const w = Math.min(520, maxW);
-            panel.style.width = `${w}px`;
-            panel.style.minWidth = '320px';
-            panel.style.maxWidth = `${maxW}px`;
-            panel.style.height = 'auto';
-            panel.style.minHeight = '0px';
-            panel.style.maxHeight = `${Math.max(180, Math.floor(viewportHeight * 0.6))}px`;
-            const left = clampValue((viewportWidth - w) / 2, margin, viewportWidth - w - margin);
-            panel.style.left = `${left}px`;
-            panel.style.right = 'auto';
-            panel.style.bottom = `${margin}px`;
-            panel.style.top = 'auto';
-            applyBatchPanelTransform(panel, { baseTransform: 'none' });
-        } else {
-            const maxH = Math.max(260, viewportHeight - margin * 2);
-            const maxW = Math.max(160, Math.min(260, viewportWidth - margin * 2));
-            const minW = 160;
-            const minH = 160;
-            const heightValue = clampValue(BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT, minH, maxH);
-            const widthValue = clampValue(BATCH_PANEL_VERTICAL_DEFAULT_WIDTH, minW, maxW);
-            const alignHeight = minH;
-            panel.style.width = `${widthValue}px`;
-            panel.style.height = 'auto';
-            panel.style.minWidth = `${minW}px`;
-            panel.style.maxWidth = `${maxW}px`;
-            panel.style.minHeight = `${minH}px`;
-            panel.style.maxHeight = `${maxH}px`;
-            const aligned = computeAnchorAlignedPosition(anchorRect, widthValue, alignHeight);
-            panel.style.left = `${aligned.left}px`;
-            panel.style.top = `${aligned.top}px`;
-            panel.style.right = 'auto';
-            panel.style.bottom = 'auto';
-            applyBatchPanelTransform(panel, { baseTransform: 'none' });
-        }
-
-        console.log('[批量面板] 默认定位完成:', { anchorKey });
-        fitBatchPanelToContent(panel, { delay: 0, shrink: true });
-    } catch (e) {
-        console.error('[批量面板] 恢复状态失败:', e);
     }
 }
 
