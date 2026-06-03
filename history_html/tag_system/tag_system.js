@@ -161,6 +161,9 @@
                 <button class="tag-popover-confirm" data-role="confirm" type="button" aria-label="${__t(TAG_PANEL_I18N.confirmAriaLabel)}">
                     <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M6.2 11.4 2.6 7.8l1.4-1.4 2.2 2.2 5.8-5.8 1.4 1.4z"/></svg>
                 </button>
+                <button class="tag-popover-close" data-role="close-popover" type="button" aria-label="${currentLang === 'en' ? 'Close' : '关闭'}">
+                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4.2 3 8 6.8 11.8 3 13 4.2 9.2 8l3.8 3.8-1.2 1.2L8 9.2 4.2 13 3 11.8 6.8 8 3 4.2z"/></svg>
+                </button>
             </div>
             <div class="tag-popover-palette" data-role="palette">
                 <div class="tag-popover-palette-colors" data-role="palette-colors">
@@ -563,6 +566,12 @@
         const confirmBtn = target.closest('[data-role="confirm"]');
         if (confirmBtn) {
             if (!confirmBtn.disabled) __confirmCurrentSelection();
+            ev.stopPropagation();
+            return;
+        }
+        const closeBtn = target.closest('[data-role="close-popover"]');
+        if (closeBtn) {
+            __closePopover();
             ev.stopPropagation();
             return;
         }
@@ -1033,7 +1042,7 @@
     document.addEventListener('click', (ev) => {
         const tagMark = ev.target.closest('.tree-item-tag-dots .tag-dot, .tree-item-tag-chip, .tree-item-tag-chip-more');
         if (tagMark) {
-            ev.stopPropagation();
+            ev.stopImmediatePropagation();
             ev.preventDefault();
             const treeItem = tagMark.closest('.tree-item');
             const target = __resolveTargetFromTreeItem(treeItem);
@@ -1057,7 +1066,7 @@
 
         const tip = ev.target.closest('.tree-tip-icon');
         if (!tip) return;
-        ev.stopPropagation();
+        ev.stopImmediatePropagation();
         ev.preventDefault();
         const treeItem = tip.closest('.tree-item');
         const target = __resolveTargetFromTreeItem(treeItem);
@@ -1068,8 +1077,11 @@
     // Prevent dragstart from initiating on the tip icon (it's draggable=false but
     // some browsers still bubble the dragstart up; this is defensive).
     document.addEventListener('mousedown', (ev) => {
-        const tip = ev.target.closest('.tree-tip-icon');
-        if (tip) ev.stopPropagation();
+        const tip = ev.target.closest('.tree-tip-icon, .tree-item-tag-dots');
+        if (tip) {
+            ev.stopImmediatePropagation();
+            ev.preventDefault();
+        }
     }, true);
 
     // -------------------------------------------------------------------------

@@ -11539,6 +11539,10 @@ async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, star
                 }
             }
         } catch (_) { }
+
+        if (typeof window.__updateTraceHighlights === 'function') {
+            window.__updateTraceHighlights();
+        }
     } catch (e) {
         console.warn('[Canvas Tree Lazy] load children failed:', e);
     }
@@ -12356,6 +12360,16 @@ function attachTreeEvents(treeContainer) {
         // 点击整个文件夹行都可以展开
         const treeItem = e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
         if (treeItem) {
+            // 如果点击在右侧快捷图标区域或标签区域，不触发展开/收起，防止误触
+            if (e.target.closest('.tree-item-hover-actions') || e.target.closest('.tree-item-tag-dots') || e.target.closest('.tree-tip-icon')) {
+                return;
+            }
+            // 另外，如果点击位置靠近右边缘（例如在 tree-item 右侧 120px 范围内，即快捷键和标签可能渲染的区域），也屏蔽展开/收起，防止边缘误触
+            const rect = treeItem.getBoundingClientRect();
+            if (e.clientX > rect.right - 120) {
+                return;
+            }
+
             // 找到包含这个tree-item的tree-node
             const node = treeItem.closest('.tree-node');
             if (!node) {
@@ -12439,6 +12453,10 @@ function attachTreeEvents(treeContainer) {
     restoreTreeExpandState(treeContainer);
 
     ensureCanvasLazyLegend(treeContainer);
+
+    if (typeof window.__updateTraceHighlights === 'function') {
+        window.__updateTraceHighlights();
+    }
 }
 
 function setupLegendClickHandlers(container) {
@@ -13309,7 +13327,11 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                     <span class="tree-toggle" style="opacity: 0"></span>
                     ${favicon ? `<img class="tree-icon" src="${favicon}" alt="">` : `<i class="tree-icon fas fa-bookmark"></i>`}
                     <a href="${escapeHtml(node.url)}" target="_blank" class="tree-label tree-bookmark-link" rel="noopener noreferrer">${escapeHtml(node.title)}</a>
-                    <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
+                    <span class="tree-item-hover-actions">
+                        <span class="tree-delete-icon" data-action="delete-node" draggable="false" aria-label="${currentLang === 'en' ? 'Delete' : '删除'}"></span>
+                        <span class="tree-trace-icon" data-action="trace-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Trace' : '临时溯源'}"></span>
+                        <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
+                    </span>
                 </div>
             </div>
         `;
@@ -13325,7 +13347,11 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                     <span class="tree-toggle"><i class="fas fa-chevron-right"></i></span>
                     <i class="tree-icon fas fa-folder"></i>
                     <span class="tree-label">${escapeHtml(node.title)}</span>
-                    <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
+                    <span class="tree-item-hover-actions">
+                        <span class="tree-delete-icon" data-action="delete-node" draggable="false" aria-label="${currentLang === 'en' ? 'Delete' : '删除'}"></span>
+                        <span class="tree-trace-icon" data-action="trace-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Trace' : '临时溯源'}"></span>
+                        <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
+                    </span>
                 </div>
                 <div class="tree-children"></div>
             </div>
@@ -13347,7 +13373,11 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                     <span class="tree-toggle ${level === 0 ? 'expanded' : ''}"><i class="fas fa-chevron-right"></i></span>
                     <i class="tree-icon fas fa-folder${level === 0 ? '-open' : ''}"></i>
                     <span class="tree-label">${escapeHtml(node.title)}</span>
-                    <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
+                    <span class="tree-item-hover-actions">
+                        <span class="tree-delete-icon" data-action="delete-node" draggable="false" aria-label="${currentLang === 'en' ? 'Delete' : '删除'}"></span>
+                        <span class="tree-trace-icon" data-action="trace-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Trace' : '临时溯源'}"></span>
+                        <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
+                    </span>
                 </div>
                 <div class="tree-children ${level === 0 ? 'expanded' : ''}">
                     ${sortedChildren.map(child => renderTreeNodeWithChanges(child, level + 1, maxDepth, visitedIds, null, options, false, '')).join('')}

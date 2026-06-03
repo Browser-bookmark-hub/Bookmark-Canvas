@@ -27808,18 +27808,35 @@ function buildTempTreeNode(section, item, level, options = {}) {
     const badges = document.createElement('span');
     badges.className = 'tree-meta-badges';
 
-    // tag 系统：行尾「提示图标」（三横），点击打开 tag 弹窗
+    const deleteIcon = document.createElement('span');
+    deleteIcon.className = 'tree-delete-icon';
+    deleteIcon.dataset.action = 'delete-node';
+    deleteIcon.setAttribute('draggable', 'false');
+    deleteIcon.setAttribute('aria-label', __getLang().isEn ? 'Delete' : '删除');
+
+    const traceIcon = document.createElement('span');
+    traceIcon.className = 'tree-trace-icon';
+    traceIcon.dataset.action = 'trace-submenu-trigger';
+    traceIcon.setAttribute('draggable', 'false');
+    traceIcon.setAttribute('aria-label', __getLang().isEn ? 'Trace' : '临时溯源');
+
     const tipIcon = document.createElement('span');
     tipIcon.className = 'tree-tip-icon';
     tipIcon.dataset.action = 'open-tag-popover';
     tipIcon.setAttribute('draggable', 'false');
     tipIcon.setAttribute('aria-label', __getLang().isEn ? 'Tags' : '标签');
 
+    const hoverActions = document.createElement('span');
+    hoverActions.className = 'tree-item-hover-actions';
+    hoverActions.appendChild(deleteIcon);
+    hoverActions.appendChild(traceIcon);
+    hoverActions.appendChild(tipIcon);
+
     treeItem.appendChild(toggle);
     treeItem.appendChild(icon);
     treeItem.appendChild(label);
     treeItem.appendChild(badges);
-    treeItem.appendChild(tipIcon);
+    treeItem.appendChild(hoverActions);
     wrapper.appendChild(treeItem);
 
     setupTempTreeNodeDropHandlers(treeItem, section, item);
@@ -27940,6 +27957,10 @@ function loadFolderChildren(section, parentItemId, childrenContainer) {
             try { attachPointerDragEvents(childrenContainer); } catch (_) { }
         }
 
+        if (typeof window.__updateTraceHighlights === 'function') {
+            window.__updateTraceHighlights();
+        }
+
         return true;
     } catch (error) {
         return false;
@@ -28010,6 +28031,10 @@ function loadMoreChildren(section, parentItemId, startIndex, loadMoreBtn) {
         }
         if (typeof attachPointerDragEvents === 'function') {
             try { attachPointerDragEvents(childrenContainer); } catch (_) { }
+        }
+
+        if (typeof window.__updateTraceHighlights === 'function') {
+            window.__updateTraceHighlights();
         }
 
         return true;

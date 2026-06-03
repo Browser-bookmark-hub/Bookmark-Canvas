@@ -5539,6 +5539,114 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     opacity: 0;
 }
 
+/* 临时溯源与删除行尾快捷图标 */
+.tree-item-hover-actions {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%) !important;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 6px;
+    border-radius: 12px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    z-index: 100;
+    border: 1px solid transparent;
+}
+
+.tree-item:hover .tree-item-hover-actions {
+    opacity: 1;
+    pointer-events: auto;
+    background: color-mix(in srgb, var(--bg-primary, #1e1e1e) 75%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-color: var(--border-color);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.tree-item.dragging .tree-item-hover-actions {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+.tree-delete-icon,
+.tree-trace-icon,
+.tree-item-hover-actions .tree-tip-icon {
+    position: static !important;
+    top: auto !important;
+    transform: none !important;
+    right: auto !important;
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    background: none;
+    opacity: 0.55 !important;
+    transition: opacity 0.12s ease, color 0.12s ease;
+    cursor: pointer;
+    border-radius: 2px;
+    color: var(--text-tertiary) !important;
+    font-size: 11px;
+    line-height: 14px;
+    text-align: center;
+    pointer-events: auto;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.tree-item-hover-actions .tree-tip-icon {
+    font-size: 13px !important;
+    font-weight: 700 !important;
+}
+
+.tree-delete-icon::before {
+    content: '\f2ed';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+}
+
+.tree-trace-icon::before {
+    content: '\f4d7';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+}
+
+.tree-delete-icon:hover,
+.tree-trace-icon:hover,
+.tree-item-hover-actions .tree-tip-icon:hover {
+    opacity: 1 !important;
+}
+
+.tree-delete-icon:hover {
+    color: var(--danger, #ff4d4f) !important;
+}
+
+.tree-trace-icon:hover {
+    color: var(--accent-primary, #1890ff) !important;
+}
+
+.tree-item-hover-actions .tree-tip-icon:hover {
+    color: var(--accent-primary, #1890ff) !important;
+}
+
+/* 确保 tag 标识 (dots-trailing) 垂直居中对齐 */
+.tree-item-tag-dots.dots-trailing {
+    top: 50% !important;
+    transform: translate(var(--tag-dot-shift-x), calc(-50% + var(--tag-dot-shift-y))) !important;
+}
+.permanent-bookmark-section .tree-item-tag-dots.dots-trailing {
+    top: 50% !important;
+    transform: translate(var(--tag-dot-shift-x), calc(-50% + var(--tag-dot-shift-y))) !important;
+}
+.temp-bookmark-tree .tree-item-tag-dots.dots-trailing,
+.temp-canvas-node .tree-item-tag-dots.dots-trailing {
+    top: 50% !important;
+    transform: translate(var(--tag-dot-shift-x), calc(-50% + var(--tag-dot-shift-y))) !important;
+}
+
 /* ==================== 剪切标记样式 ==================== */
 
 .tree-item.cut-marked {
@@ -15784,3 +15892,181 @@ body.canvas-popover-active .md-align-popover {
 .manual-selector-drag-btn:active {
     cursor: grabbing;
 }
+
+/* ==================== 临时溯源功能 ==================== */
+.trace-submenu-header {
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.trace-clear-btn:hover {
+    color: var(--accent-orange, #ff9f0a) !important;
+}
+
+.trace-close-btn:hover {
+    color: var(--tag-red, #ff453a) !important;
+}
+
+.trace-help-trigger {
+    position: relative;
+    cursor: pointer;
+}
+
+.trace-help-bubble {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translate(-50%, -8px) scale(0.95);
+    transform-origin: bottom center;
+    background: var(--bg-elevated, #2c2c2c);
+    color: var(--text-primary, #ffffff);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    padding: 8px 12px;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    z-index: 10000;
+    width: 230px;
+    font-size: 11px;
+    line-height: 1.4;
+    white-space: normal;
+    text-align: left;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease, visibility 0.15s ease, transform 0.15s ease;
+}
+
+.trace-help-bubble::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: var(--bg-elevated, #2c2c2c);
+}
+
+.trace-help-trigger:hover .trace-help-bubble {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, -8px) scale(1);
+}
+
+.trace-popover-palette {
+    padding: 4px 12px 8px;
+}
+
+.trace-popover-palette-colors {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+}
+
+.trace-palette-btn {
+    background: transparent;
+    border: none;
+    padding: 3px;
+    cursor: pointer;
+    border-radius: 50%;
+    line-height: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.12s ease, transform 0.12s ease;
+}
+
+.trace-palette-btn .tag-dot {
+    width: 16px;
+    height: 16px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.trace-palette-btn:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+    transform: scale(1.1);
+}
+
+.trace-help-desc {
+    padding: 8px 12px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-tertiary);
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    margin: 4px 8px;
+    max-width: 220px;
+    word-break: break-all;
+}
+
+.tree-item.has-trace::before {
+    content: '' !important;
+    position: absolute !important;
+    left: calc(-1 * var(--tree-children-indent, var(--canvas-tree-indent, 1px))) !important;
+    top: 50% !important;
+    width: calc(var(--tree-children-indent, var(--canvas-tree-indent, 1px)) + var(--tree-toggle-center, var(--canvas-tree-toggle-center, 11px))) !important;
+    height: var(--trace-item-line-height, 1.5px) !important;
+    transform: translateY(-50%) !important;
+    background: var(--trace-item-line-background, var(--trace-color)) !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+.tree-item.has-trace.has-trace-no-line::before {
+    content: none !important;
+}
+
+.tree-item.has-trace .tree-icon,
+.tree-item.has-trace i.fas.fa-folder,
+.tree-item.has-trace i.fas.fa-folder-open {
+    background: var(--trace-text-gradient, var(--trace-color)) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    color: var(--trace-color) !important; /* Fallback */
+}
+
+.tree-item.has-trace .tree-label,
+.tree-item.has-trace a.tree-label {
+    display: inline-block !important;
+    width: fit-content !important;
+    flex: 0 1 auto !important;
+    background: var(--trace-text-gradient, var(--trace-color)) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    color: var(--trace-color) !important; /* Fallback */
+    font-weight: 600 !important;
+    text-shadow: var(--trace-text-shadow, 0 0 2px var(--trace-shadow-color)) !important;
+}
+
+.tree-children.has-trace {
+    position: relative !important;
+}
+
+.tree-children.has-trace::before {
+    content: '' !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: var(--trace-line-top, -14px) !important;
+    z-index: 2 !important;
+    width: var(--trace-line-width, 1.5px) !important;
+    height: var(--trace-line-height, calc(100% + 14px)) !important;
+    background: var(--trace-line-background, var(--trace-color)) !important;
+    opacity: 1 !important;
+    pointer-events: none !important;
+}
+
+/* Hovering highlighted guide lines */
+.tree-item.has-trace:hover::before {
+    height: calc(var(--trace-item-line-height, 1.5px) + 0.7px) !important;
+    filter: brightness(1.2);
+}
+
+.tree-children.has-trace:hover::before {
+    width: calc(var(--trace-line-width, 1.5px) + 0.7px) !important;
+    filter: brightness(1.2);
+}
+

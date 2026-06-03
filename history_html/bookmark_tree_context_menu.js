@@ -2715,10 +2715,11 @@ function initContextMenu() {
 
     // 点击其他地方关闭菜单（使用捕获阶段，优先处理）
     document.addEventListener('click', (e) => {
-        // 如果点击的不是菜单和子菜单内部，关闭菜单
+        // 如果点击的不是菜单和子菜单内部，并且不是快捷图标本身，关闭菜单
         const clickInMenu = contextMenu && contextMenu.contains(e.target);
         const clickInSubmenu = contextSubmenu && contextSubmenu.contains(e.target);
-        if (!clickInMenu && !clickInSubmenu) {
+        const clickInShortcut = e.target.closest('.tree-trace-icon, .tree-delete-icon');
+        if (!clickInMenu && !clickInSubmenu && !clickInShortcut) {
             hideContextMenu();
         }
     }, true);  // 使用捕获阶段
@@ -3455,7 +3456,7 @@ async function showContextMenu(e, node) {
                 return;
             }
             // 如果是打开子菜单的触发器
-            if (action === 'open-submenu-trigger') {
+            if (action === 'open-submenu-trigger' || action === 'trace-submenu-trigger') {
                 toggleSubmenu(item, context);
                 return;
             }
@@ -3475,6 +3476,11 @@ async function showContextMenu(e, node) {
 // 渲染二级菜单
 function renderSubmenu(context) {
     if (!contextSubmenu) return;
+
+    if (contextSubmenu.dataset.triggerAction === 'trace-submenu-trigger') {
+        renderTraceSubmenu(context);
+        return;
+    }
 
     const lang = currentLang || 'zh_CN';
     contextSubmenu.classList.remove('lang-zh', 'lang-en');
@@ -3602,10 +3608,15 @@ function hideSubmenu() {
 function toggleSubmenu(triggerItem, context) {
     if (!contextSubmenu) return;
 
-    if (contextSubmenu.style.display === 'block') {
+    const currentTriggerAction = contextSubmenu.dataset.triggerAction;
+    const newTriggerAction = triggerItem.dataset.action;
+
+    if (contextSubmenu.style.display === 'block' && currentTriggerAction === newTriggerAction) {
         hideSubmenu();
         return;
     }
+
+    contextSubmenu.dataset.triggerAction = newTriggerAction;
 
     // 先渲染子菜单内容
     renderSubmenu(context);
@@ -3669,6 +3680,33 @@ function toggleSubmenu(triggerItem, context) {
         
         // 边界防护
         left = Math.max(8, left);
+    } else if (!contextMenu || contextMenu.style.display === 'none') {
+        // 当主菜单未显示时（通过快捷按钮直接触发），直接在快捷按钮左侧或右侧定位二级子菜单，不涉及主菜单的偏移
+        transformOriginY = 'center';
+        const rightFits = (triggerRect.right + 4 + visualWidth <= viewportWidth - 8);
+        const leftFits = (triggerRect.left - 4 - visualWidth >= 8);
+
+        if (rightFits) {
+            left = triggerRect.right + 4;
+            transformOriginX = 'left';
+        } else if (leftFits) {
+            left = triggerRect.left - submenuWidth - 4;
+            transformOriginX = 'right';
+        } else {
+            left = Math.max(8, viewportWidth - submenuWidth - 8);
+            transformOriginX = 'center';
+        }
+
+        // 垂直定位：中心位置与 trigger 按钮 Y 轴中心对齐
+        let visualCenterY = triggerRect.top + triggerRect.height / 2;
+        const visualHalfHeight = visualHeight / 2;
+        if (visualCenterY - visualHalfHeight < 8) {
+            visualCenterY = 8 + visualHalfHeight;
+        }
+        if (visualCenterY + visualHalfHeight > viewportHeight - 8) {
+            visualCenterY = viewportHeight - 8 - visualHalfHeight;
+        }
+        top = visualCenterY - submenuHeight / 2;
     } else {
         // 纵向布局下：二级子菜单显示在“打开/默认打开模式”按钮的右侧或左侧
         transformOriginY = 'center';
@@ -3920,6 +3958,15 @@ function buildMenuItems(context) {
             { action: 'select-item', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '选择' : '选择（批量操作）') : (contextMenuHorizontal ? 'Select' : 'Select (Batch)'), icon: 'check-square', group: 'actions' },
             { action: 'add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'actions' },
 
+            // 临时溯源放在重命名上方
+            {
+                action: 'trace-submenu-trigger',
+                label: lang === 'zh_CN' ? '临时溯源' : 'Temporary Trace',
+                icon: 'route',
+                group: 'actions',
+                hasSubmenu: true
+            },
+
             // 编辑组 - 紧跟在select后面
             { action: 'rename', label: lang === 'zh_CN' ? '重命名' : 'Rename', icon: 'edit', group: 'actions' },
             {
@@ -3962,6 +4009,15 @@ function buildMenuItems(context) {
             // 选择组
             { action: 'select-item', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '选择' : '选择（批量操作）') : (contextMenuHorizontal ? 'Select' : 'Select (Batch)'), icon: 'check-square', group: 'actions' },
             { action: 'add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'actions' },
+
+            // 临时溯源放在编辑上方
+            {
+                action: 'trace-submenu-trigger',
+                label: lang === 'zh_CN' ? '临时溯源' : 'Temporary Trace',
+                icon: 'route',
+                group: 'actions',
+                hasSubmenu: true
+            },
 
             // 编辑组 - 紧跟在select后面
             { action: 'edit', label: lang === 'zh_CN' ? '编辑' : 'Edit', icon: 'edit', group: 'actions' },
@@ -4197,6 +4253,688 @@ function hasClipboard() {
 function getTempManager() {
     return (window.CanvasModule && window.CanvasModule.temp) ? window.CanvasModule.temp : null;
 }
+
+// ==================== 临时溯源核心逻辑 ====================
+window.__activeTraces = [];
+
+const TRACE_PALETTE = {
+    red: { hex: '#ff453a', rgb: [255, 69, 58], class: 'tag-dot-red', labelZh: '红色', labelEn: 'Red' },
+    orange: { hex: '#ff9f0a', rgb: [255, 159, 10], class: 'tag-dot-orange', labelZh: '橙色', labelEn: 'Orange' },
+    yellow: { hex: '#ffd60a', rgb: [255, 214, 10], class: 'tag-dot-yellow', labelZh: '黄色', labelEn: 'Yellow' },
+    green: { hex: '#30d158', rgb: [48, 209, 88], class: 'tag-dot-green', labelZh: '绿色', labelEn: 'Green' },
+    blue: { hex: '#0a84ff', rgb: [10, 132, 255], class: 'tag-dot-blue', labelZh: '蓝色', labelEn: 'Blue' },
+    purple: { hex: '#bf5af2', rgb: [191, 90, 242], class: 'tag-dot-purple', labelZh: '紫色', labelEn: 'Purple' },
+    gray: { hex: '#8e8e93', rgb: [142, 142, 147], class: 'tag-dot-gray', labelZh: '灰色', labelEn: 'Gray' }
+};
+
+let currentTraceLevel = '2'; // 默认溯源层级
+
+const traceSyncChannel = new BroadcastChannel('bookmark-canvas-trace-sync');
+traceSyncChannel.onmessage = (event) => {
+    const { action, traces } = event.data;
+    if (action === 'sync-traces') {
+        window.__activeTraces = traces || [];
+        if (typeof window.__updateTraceHighlights === 'function') {
+            window.__updateTraceHighlights();
+        }
+    } else if (action === 'request-traces-state') {
+        if (window.__activeTraces && window.__activeTraces.length > 0) {
+            broadcastTraces();
+        }
+    }
+};
+
+function broadcastTraces() {
+    try {
+        traceSyncChannel.postMessage({
+            action: 'sync-traces',
+            traces: window.__activeTraces
+        });
+    } catch (e) {
+        console.warn('[Trace Sync] Broadcast failed:', e);
+    }
+}
+
+// 启动时请求其他页面的溯源状态
+try {
+    traceSyncChannel.postMessage({ action: 'request-traces-state' });
+} catch (e) {}
+
+// 计算指定节点元素上方实际有多少级可追溯的父目录
+function getAvailableLevelsAbove(nodeElement) {
+    if (!nodeElement) return 0;
+    
+    let count = 0;
+    let currentItem = nodeElement;
+    while (true) {
+        const currentNode = currentItem.closest('.tree-node');
+        if (!currentNode) break;
+
+        const parentChildren = currentNode.parentElement.closest('.tree-children');
+        if (!parentChildren) break;
+
+        const parentNode = parentChildren.closest('.tree-node');
+        if (!parentNode) break;
+
+        const parentItem = parentNode.querySelector(':scope > .tree-item');
+        if (!parentItem) break;
+
+        currentItem = parentItem;
+        count++;
+    }
+    return count;
+}
+
+// DOM爬取路径元素：从指定的.tree-item向上查找指定层级的父节点和父连线
+function getDOMPathElements(startItem, level) {
+    const pathElements = [];
+    if (!startItem) return pathElements;
+
+    let currentItem = startItem;
+    pathElements.push(currentItem);
+
+    const maxParents = (level === 'root') ? Infinity : parseInt(level, 10);
+    
+    let parentCount = 0;
+    while (parentCount < maxParents) {
+        const currentNode = currentItem.closest('.tree-node');
+        if (!currentNode) break;
+
+        const parentChildren = currentNode.parentElement.closest('.tree-children');
+        if (!parentChildren) break;
+
+        // 垂直导引线是由 tree-children 容器的 border-left (或其 pseudo-element) 渲染的
+        pathElements.push(parentChildren);
+
+        const parentNode = parentChildren.closest('.tree-node');
+        if (!parentNode) break;
+
+        const parentItem = parentNode.querySelector(':scope > .tree-item');
+        if (!parentItem) break;
+
+        currentItem = parentItem;
+        pathElements.push(currentItem);
+        parentCount++;
+    }
+
+    return pathElements;
+}
+
+// 混合多个重合颜色，求 RGB 平均值
+function blendColors(colorNames) {
+    if (!colorNames || colorNames.size === 0) return null;
+    if (colorNames.size === 1) {
+        const name = Array.from(colorNames)[0];
+        return TRACE_PALETTE[name] || null;
+    }
+    
+    let sumR = 0;
+    let sumG = 0;
+    let sumB = 0;
+    let count = 0;
+    
+    for (const name of colorNames) {
+        const color = TRACE_PALETTE[name];
+        if (color && color.rgb) {
+            sumR += color.rgb[0];
+            sumG += color.rgb[1];
+            sumB += color.rgb[2];
+            count++;
+        }
+    }
+    
+    if (count === 0) return null;
+    
+    const avgR = Math.round(sumR / count);
+    const avgG = Math.round(sumG / count);
+    const avgB = Math.round(sumB / count);
+    
+    const hex = '#' + [avgR, avgG, avgB].map(x => {
+        const s = x.toString(16);
+        return s.length === 1 ? '0' + s : s;
+    }).join('');
+    
+    return {
+        hex,
+        rgb: [avgR, avgG, avgB]
+    };
+}
+
+// 取消经过指定点击元素的 trace
+function cancelTracesPassingThrough(clickedElement) {
+    if (!window.__activeTraces || window.__activeTraces.length === 0) return;
+    
+    const tracesToRemove = new Set();
+    
+    for (const trace of window.__activeTraces) {
+        const startItems = document.querySelectorAll(`.tree-item[data-node-id="${trace.targetId}"]`);
+        let passes = false;
+        for (const startItem of startItems) {
+            const path = getDOMPathElements(startItem, trace.level);
+            if (path.includes(clickedElement)) {
+                passes = true;
+                break;
+            }
+        }
+        if (passes) {
+            tracesToRemove.add(trace.targetId);
+        }
+    }
+    
+    if (tracesToRemove.size > 0) {
+        window.__activeTraces = window.__activeTraces.filter(t => !tracesToRemove.has(t.targetId));
+        broadcastTraces();
+        window.__updateTraceHighlights();
+    }
+}
+
+// 更新 DOM 的溯源高亮渲染
+window.__updateTraceHighlights = function() {
+    // 1. 清除旧高亮及所有自定义高度、偏移、并排颜色线等属性
+    const prevHighlighted = document.querySelectorAll('.has-trace');
+    prevHighlighted.forEach(el => {
+        el.classList.remove('has-trace');
+        el.classList.remove('has-trace-no-line');
+        el.style.removeProperty('--trace-color');
+        el.style.removeProperty('--trace-shadow-color');
+        el.style.removeProperty('--trace-line-top');
+        el.style.removeProperty('--trace-line-height');
+        el.style.removeProperty('--trace-line-width');
+        el.style.removeProperty('--trace-line-background');
+        el.style.removeProperty('--trace-item-line-height');
+        el.style.removeProperty('--trace-item-line-background');
+        el.style.removeProperty('--trace-text-gradient');
+        el.style.removeProperty('--trace-text-shadow');
+    });
+
+    if (!window.__activeTraces || window.__activeTraces.length === 0) return;
+
+    // Helper: 计算元素相对于其容器祖先元素的本地 offsetTop 偏移量，避免受 CSS 缩放/变换影响
+    function getRelativeOffsetTop(element, ancestor) {
+        let offsetTop = 0;
+        let curr = element;
+        while (curr && curr !== ancestor) {
+            offsetTop += curr.offsetTop || 0;
+            curr = curr.offsetParent;
+        }
+        if (curr !== ancestor) {
+            const rectEl = element.getBoundingClientRect();
+            const rectAnc = ancestor.getBoundingClientRect();
+            return rectEl.top - rectAnc.top;
+        }
+        return offsetTop;
+    }
+
+    // 2. 映射 DOM 节点到颜色名集合，并计算每个垂直引导线的最远点高度与顶部偏移量
+    const elementColorsMap = new Map();
+    const childrenHeightsMap = new Map();
+
+    for (const trace of window.__activeTraces) {
+        const startItems = document.querySelectorAll(`.tree-item[data-node-id="${trace.targetId}"]`);
+        for (const startItem of startItems) {
+            const path = getDOMPathElements(startItem, trace.level);
+            
+            // 逐级向上爬取并精确算得垂直引导线的可见截断高度和顶部偏移量
+            let currentItem = startItem;
+            const maxParents = (trace.level === 'root') ? Infinity : parseInt(trace.level, 10);
+            let parentCount = 0;
+            while (parentCount < maxParents) {
+                const currentNode = currentItem.closest('.tree-node');
+                if (!currentNode) break;
+
+                const parentChildren = currentNode.parentElement.closest('.tree-children');
+                if (!parentChildren) break;
+
+                const itemHeight = currentItem.offsetHeight || 0;
+                const rectChildren = parentChildren.getBoundingClientRect();
+                if (itemHeight > 0 && rectChildren.height > 0) {
+                    const localOffsetTop = getRelativeOffsetTop(currentItem, parentChildren);
+                    const height = localOffsetTop + itemHeight / 2;
+
+                    // 计算 parentItem 的 center Y，得到精确 of topOffset
+                    const parentNode = parentChildren.closest('.tree-node');
+                    const parentItem = parentNode ? parentNode.querySelector(':scope > .tree-item') : null;
+                    let topOffset = -14; // 默认 fallback
+                    if (parentItem) {
+                        const parentItemHeight = parentItem.offsetHeight || 0;
+                        if (parentItemHeight > 0) {
+                            const parentItemOffsetTop = parentItem.offsetTop || 0;
+                            const parentChildrenOffsetTop = parentChildren.offsetTop || 0;
+                            topOffset = (parentItemOffsetTop + parentItemHeight / 2) - parentChildrenOffsetTop;
+                        } else {
+                            const rectParentItem = parentItem.getBoundingClientRect();
+                            if (rectParentItem.height > 0) {
+                                const parentCenterY = rectParentItem.top + rectParentItem.height / 2;
+                                topOffset = parentCenterY - rectChildren.top;
+                            }
+                        }
+                    }
+
+                    if (!childrenHeightsMap.has(parentChildren) || height > childrenHeightsMap.get(parentChildren).height) {
+                        childrenHeightsMap.set(parentChildren, { height, topOffset });
+                    }
+                }
+
+                const parentNode = parentChildren.closest('.tree-node');
+                if (!parentNode) break;
+
+                const parentItem = parentNode.querySelector(':scope > .tree-item');
+                if (!parentItem) break;
+
+                currentItem = parentItem;
+                parentCount++;
+            }
+
+            for (const el of path) {
+                if (!elementColorsMap.has(el)) {
+                    elementColorsMap.set(el, new Set());
+                }
+                elementColorsMap.get(el).add(trace.colorName);
+            }
+        }
+    }
+
+    // 3. 决定哪些 tree-item 在溯源中作为最上级，不需要横线
+    const noLineItemsSet = new Set();
+    for (const el of elementColorsMap.keys()) {
+        if (el.classList.contains('tree-item')) {
+            const parentNode = el.closest('.tree-node');
+            const parentChildren = parentNode ? parentNode.parentElement.closest('.tree-children') : null;
+            if (!parentChildren || !elementColorsMap.has(parentChildren)) {
+                noLineItemsSet.add(el);
+            }
+        }
+    }
+
+    // 4. 应用混合颜色和高亮到 DOM 节点
+    for (const [el, colorsSet] of elementColorsMap.entries()) {
+        const hexColors = Array.from(colorsSet).map(name => TRACE_PALETTE[name]?.hex).filter(Boolean);
+        const rgbColors = Array.from(colorsSet).map(name => TRACE_PALETTE[name]?.rgb).filter(Boolean);
+
+        if (hexColors.length > 0) {
+            el.classList.add('has-trace');
+            if (noLineItemsSet.has(el)) {
+                el.classList.add('has-trace-no-line');
+            }
+
+            // 主要颜色变量设置为首选色作为 Fallback
+            const primaryColor = hexColors[0];
+            el.style.setProperty('--trace-color', primaryColor, 'important');
+
+            // 阴影颜色也基于首选色
+            const primaryRgb = rgbColors[0];
+            const shadowColor = `rgba(${primaryRgb[0]}, ${primaryRgb[1]}, ${primaryRgb[2]}, 0.4)`;
+            el.style.setProperty('--trace-shadow-color', shadowColor, 'important');
+
+            // 1. 如果有多个颜色，构建平分颜色的线性渐变并赋给文本与图标的背景
+            if (hexColors.length > 1) {
+                const step = 100 / hexColors.length;
+                const stops = [];
+                hexColors.forEach((color, idx) => {
+                    stops.push(`${color} ${idx * step}%`);
+                    stops.push(`${color} ${(idx + 1) * step}%`);
+                });
+                const textGradient = `linear-gradient(to right, ${stops.join(', ')})`;
+                el.style.setProperty('--trace-text-gradient', textGradient, 'important');
+                el.style.setProperty('--trace-text-shadow', 'none', 'important'); // 禁用文字阴影以防干扰渐变字
+            } else {
+                el.style.removeProperty('--trace-text-gradient');
+                el.style.removeProperty('--trace-text-shadow');
+            }
+
+            // 2. 引导线绘制：如果是多颜色且不互相影响，利用无混色的多条并排（不重叠紧贴）实线绘制
+            if (el.classList.contains('tree-children')) {
+                const traceInfo = childrenHeightsMap.get(el);
+                if (traceInfo) {
+                    const lineTop = traceInfo.topOffset;
+                    const lineHeight = traceInfo.height - traceInfo.topOffset;
+                    el.style.setProperty('--trace-line-top', `${lineTop}px`, 'important');
+                    el.style.setProperty('--trace-line-height', `${lineHeight}px`, 'important');
+                } else {
+                    el.style.setProperty('--trace-line-top', '-14px', 'important');
+                    el.style.setProperty('--trace-line-height', 'calc(100% + 14px)', 'important');
+                }
+
+                if (hexColors.length > 1) {
+                    const baseWidth = 1.5;
+                    const totalWidth = baseWidth * hexColors.length;
+                    const bgGradients = hexColors.map((color, idx) => {
+                        return `linear-gradient(${color}, ${color}) no-repeat ${idx * baseWidth}px 0px / ${baseWidth}px 100%`;
+                    });
+                    el.style.setProperty('--trace-line-width', `${totalWidth}px`, 'important');
+                    el.style.setProperty('--trace-line-background', bgGradients.join(', '), 'important');
+                } else {
+                    el.style.removeProperty('--trace-line-width');
+                    el.style.removeProperty('--trace-line-background');
+                }
+            } else if (el.classList.contains('tree-item')) {
+                if (hexColors.length > 1) {
+                    const baseHeight = 1.5;
+                    const totalHeight = baseHeight * hexColors.length;
+                    const bgGradients = hexColors.map((color, idx) => {
+                        return `linear-gradient(${color}, ${color}) no-repeat 0px ${idx * baseHeight}px / 100% ${baseHeight}px`;
+                    });
+                    el.style.setProperty('--trace-item-line-height', `${totalHeight}px`, 'important');
+                    el.style.setProperty('--trace-item-line-background', bgGradients.join(', '), 'important');
+                } else {
+                    el.style.removeProperty('--trace-item-line-height');
+                    el.style.removeProperty('--trace-item-line-background');
+                }
+            }
+        }
+    }
+};
+
+// 渲染二级溯源菜单
+function renderTraceSubmenu(context) {
+    if (!contextSubmenu) return;
+
+    const lang = currentLang || 'zh_CN';
+    
+    // 计算当前右键节点上方实际有多少个父层级可选
+    const availableLevels = getAvailableLevelsAbove(currentContextNode);
+    
+    // 如果当前选中的层级越界，则降级到最大可用层级，或直接降为 Root (根)
+    if (currentTraceLevel !== 'root') {
+        const currentLvlNum = parseInt(currentTraceLevel, 10);
+        if (isNaN(currentLvlNum) || currentLvlNum > availableLevels) {
+            currentTraceLevel = availableLevels > 0 ? String(availableLevels) : 'root';
+        }
+    } else if (availableLevels === 0) {
+        currentTraceLevel = 'root';
+    }
+    
+    // 生成颜色按钮 HTML
+    const colorsHtml = Object.keys(TRACE_PALETTE).map(name => {
+        const color = TRACE_PALETTE[name];
+        const label = lang === 'zh_CN' ? color.labelZh : color.labelEn;
+        return `
+            <button class="trace-palette-btn" data-color="${name}" title="${label}">
+                <span class="tag-dot ${color.class}"></span>
+            </button>
+        `;
+    }).join('');
+
+    const levels = [];
+    if (availableLevels <= 15) {
+        for (let i = 1; i <= availableLevels; i++) {
+            levels.push(String(i));
+        }
+        levels.push('root');
+    } else {
+        for (let i = 1; i <= 14; i++) {
+            levels.push(String(i));
+        }
+        levels.push('...');
+        levels.push('root');
+    }
+
+    const levelsHtml = levels.map(lvl => {
+        const isRoot = lvl === 'root';
+        const isEllipsis = lvl === '...';
+        const label = isRoot ? (lang === 'zh_CN' ? '根' : 'Root') : lvl;
+        const isActive = currentTraceLevel === lvl;
+        
+        let style = `
+            width: calc((100% - 20px) / 6);
+            box-sizing: border-box;
+            padding: 4px 0;
+            font-size: 11px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            text-align: center;
+            transition: all 0.1s ease;
+        `;
+        
+        if (isEllipsis) {
+            style += `
+                background: transparent;
+                border-color: transparent;
+                color: var(--text-tertiary);
+                cursor: default;
+            `;
+            return `
+                <span class="trace-level-ellipsis" style="${style}">${label}</span>
+            `;
+        } else {
+            style += `
+                background: ${isActive ? 'var(--accent-primary)' : 'var(--bg-secondary)'};
+                color: ${isActive ? '#ffffff' : 'var(--text-primary)'};
+                cursor: pointer;
+            `;
+            return `
+                <button class="trace-level-btn ${isActive ? 'active' : ''}" 
+                    data-level="${lvl}" 
+                    style="${style}">${label}</button>
+            `;
+        }
+    }).join('');
+
+    const descText = lang === 'zh_CN' 
+        ? '点击颜色可对当前节点向上追溯 guide lines、文本及图标高亮标记。<br/>- 向上溯源：可选不同层级或直到根目录。<br/>- 临时标记：不保存到存储，刷新或重开侧栏即消失。<br/>- 颜色并排：多条路径并排显示，互不干扰颜色。<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">取消方式</span>：直接点击高亮引导线，或者开关插件侧边栏/标签页即可取消该溯源。'
+        : 'Click color to trace upward guide lines, text and icons.<br/>- Levels: Select parent level or up to root directory.<br/>- Temporary: Saved in-memory only, lost on reload/reopen.<br/>- Overlaps: Multiple paths run side-by-side, preserving distinct colors.<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">Cancel</span>: Click on any highlighted guide line, or toggle the extension sidebar/tab to cancel.';
+
+    const helpLabel = lang === 'zh_CN' ? '功能说明' : 'How it works';
+
+    contextSubmenu.innerHTML = `
+        <div class="trace-submenu-header" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; position: relative;">
+            <span style="font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">
+                ${lang === 'zh_CN' ? '临时溯源' : 'Temporary Trace'}
+            </span>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <button class="trace-clear-btn" title="${lang === 'zh_CN' ? '清除高亮' : 'Clear Highlight'}" style="background: transparent; border: none; padding: 2px; cursor: pointer; color: var(--text-tertiary); display: inline-flex; align-items: center; font-size: 12px; transition: color 0.12s ease;">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+                <button class="trace-close-btn" title="${lang === 'zh_CN' ? '关闭' : 'Close'}" style="background: transparent; border: none; padding: 2px; cursor: pointer; color: var(--text-tertiary); display: inline-flex; align-items: center; font-size: 12px; transition: color 0.12s ease;">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        <div class="trace-popover-palette">
+            <div class="trace-submenu-label" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">
+                ${lang === 'zh_CN' ? '选择标记颜色' : 'Select Trace Color'}
+            </div>
+            <div class="trace-popover-palette-colors">
+                ${colorsHtml}
+            </div>
+        </div>
+        <div class="trace-menu-divider" style="height: 1px; background: var(--border-color); margin: 4px 0; opacity: 0.5;"></div>
+        <div class="trace-level-section" style="padding: 6px 12px 10px;">
+            <div class="trace-submenu-label" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">
+                ${lang === 'zh_CN' ? '向上溯源层级' : 'Trace Levels'}
+            </div>
+            <div class="trace-level-buttons" style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-start;">
+                ${levelsHtml}
+            </div>
+        </div>
+        <div class="trace-menu-divider" style="height: 1px; background: var(--border-color); margin: 4px 0; opacity: 0.5;"></div>
+        <div class="trace-help-toggle-row" style="padding: 6px 12px; display: flex; align-items: center; justify-content: flex-start; position: relative;">
+            <span class="trace-help-trigger" style="font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px; position: relative; cursor: pointer;">
+                <i class="fas fa-question-circle"></i> ${helpLabel}
+                <span class="trace-help-bubble">${descText}</span>
+            </span>
+        </div>
+    `;
+
+    // 绑定颜色按钮事件
+    contextSubmenu.querySelectorAll('.trace-palette-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const colorName = btn.dataset.color;
+            const targetId = context.nodeId;
+            const level = currentTraceLevel;
+
+            const existingIndex = window.__activeTraces.findIndex(t => t.targetId === targetId);
+            if (existingIndex !== -1) {
+                window.__activeTraces[existingIndex] = { targetId, colorName, level };
+            } else {
+                window.__activeTraces.push({ targetId, colorName, level });
+            }
+
+            broadcastTraces();
+            window.__updateTraceHighlights();
+            hideContextMenu();
+        });
+    });
+
+    // 绑定层级按钮事件 (忽略 disabled 状态)
+    contextSubmenu.querySelectorAll('.trace-level-btn:not(.disabled)').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const lvl = btn.dataset.level;
+            currentTraceLevel = lvl;
+            // 更新 UI 状态
+            contextSubmenu.querySelectorAll('.trace-level-btn:not(.disabled)').forEach(b => {
+                const isActive = b.dataset.level === lvl;
+                b.style.background = isActive ? 'var(--accent-primary)' : 'var(--bg-secondary)';
+                b.style.color = isActive ? '#ffffff' : 'var(--text-primary)';
+            });
+        });
+    });
+
+    // 绑定清除高亮事件
+    const clearBtn = contextSubmenu.querySelector('.trace-clear-btn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const targetId = context.nodeId;
+            const originalLength = window.__activeTraces.length;
+            window.__activeTraces = window.__activeTraces.filter(t => t.targetId !== targetId);
+            if (window.__activeTraces.length !== originalLength) {
+                broadcastTraces();
+                window.__updateTraceHighlights();
+            }
+            hideContextMenu();
+        });
+    }
+
+    // 绑定退出面板事件
+    const closeBtn = contextSubmenu.querySelector('.trace-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            hideContextMenu();
+        });
+    }
+}
+
+// 捕获阶段的全局点击监听，用于检测是否点击了高亮导引线并取消 Trace
+document.addEventListener('click', (event) => {
+    if (!window.__activeTraces || window.__activeTraces.length === 0) return;
+
+    const target = event.target;
+    if (!target) return;
+
+    // 情况 1: 点击垂直引导线 (.tree-children 且 has-trace)
+    if (target.classList.contains('tree-children') && target.classList.contains('has-trace')) {
+        const rect = target.getBoundingClientRect();
+        if (Math.abs(event.clientX - rect.left) <= 8) {
+            // 读取 trace-line-height 自定义属性，限制只在可见高亮线段高度内才响应点击
+            const style = window.getComputedStyle(target);
+            const lineHeightStr = style.getPropertyValue('--trace-line-height');
+            const lineHeight = parseFloat(lineHeightStr);
+            
+            if (!isNaN(lineHeight) && lineHeight > 0) {
+                if (event.clientY < rect.top || event.clientY > rect.top + lineHeight) {
+                    return; // 点击落在可见高亮线高度之外，不做任何操作
+                }
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            cancelTracesPassingThrough(target);
+            return;
+        }
+    }
+
+    // 情况 2: 点击水平引导线 (点击点在 .tree-item.has-trace 且不含 has-trace-no-line 的左侧 ::before 位置)
+    const item = target.closest('.tree-item');
+    if (item && item.classList.contains('has-trace') && !item.classList.contains('has-trace-no-line')) {
+        const rect = item.getBoundingClientRect();
+        // 横线位于 left: -1px，宽度 12px，故点击的水平坐标应在 [rect.left - 4, rect.left + 12] 范围内
+        if (event.clientX >= rect.left - 4 && event.clientX <= rect.left + 12) {
+            event.preventDefault();
+            event.stopPropagation();
+            cancelTracesPassingThrough(item);
+            return;
+        }
+    }
+}, true);
+
+// 捕获阶段的全局点击监听，用于响应临时溯源行尾快捷图标
+document.addEventListener('click', (e) => {
+    const traceIcon = e.target.closest('.tree-trace-icon');
+    if (!traceIcon) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+
+    const treeItem = traceIcon.closest('.tree-item');
+    if (!treeItem) return;
+
+    // 获取节点的上下文
+    const context = getNodeContext(treeItem);
+    if (!context) return;
+
+    // 设置当前节点
+    currentContextNode = treeItem;
+
+    // 如果该节点的临时溯源子菜单已经是打开状态，则关闭它
+    if (contextSubmenu && contextSubmenu.style.display === 'block' && 
+        contextSubmenu.dataset.triggerAction === 'trace-submenu-trigger' && 
+        contextSubmenu.dataset.contextNodeId === context.nodeId) {
+        hideContextMenu();
+        return;
+    }
+
+    // 否则，先隐藏旧的菜单和子菜单
+    hideContextMenu();
+
+    // 重新设置上下文
+    currentContextNode = treeItem;
+    contextSubmenu.dataset.triggerAction = 'trace-submenu-trigger';
+    contextSubmenu.dataset.contextNodeId = context.nodeId; // 用于第二次点击时切换关闭
+
+    // 展开临时溯源面板
+    toggleSubmenu(traceIcon, context);
+}, true);
+
+// 捕获阶段的全局点击监听，用于响应删除行尾快捷图标
+document.addEventListener('click', (e) => {
+    const deleteIcon = e.target.closest('.tree-delete-icon');
+    if (!deleteIcon) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+
+    const treeItem = deleteIcon.closest('.tree-item');
+    if (!treeItem) return;
+
+    // 获取节点的上下文并执行删除
+    const context = getNodeContext(treeItem);
+    if (!context) return;
+
+    handleMenuAction('delete', context);
+}, true);
+
+// 捕获阶段全局拦截除 click 外的各类鼠标/指针/拖拽/右键/双击事件，避免快捷按钮触发树节点的选中、高亮、折叠/展开、拖拽等行为
+['mousedown', 'mouseup', 'pointerdown', 'pointerup', 'dblclick', 'contextmenu', 'dragstart'].forEach(eventType => {
+    document.addEventListener(eventType, (e) => {
+        if (e.target.closest('.tree-item-hover-actions')) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+        }
+    }, true);
+});
+
+// 捕获阶段全局拦截对快捷按钮背景/间隔的点击，防止误触发文件夹的展开或折叠
+document.addEventListener('click', (e) => {
+    if (e.target.closest('.tree-item-hover-actions')) {
+        const button = e.target.closest('.tree-trace-icon, .tree-delete-icon, .tree-tip-icon');
+        if (!button) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+        }
+    }
+}, true);
 
 function ensureTempManager() {
     const manager = getTempManager();
@@ -4938,6 +5676,13 @@ async function handleTempMenuAction(action, context) {
             await addTempFolderAction(context);
             break;
         case 'delete':
+            // 乐观 UI 更新：立即从 DOM 中移除对应的节点，消除视觉延迟
+            if (context.node) {
+                const treeNode = context.node.closest('.tree-node');
+                if (treeNode) {
+                    treeNode.remove();
+                }
+            }
             await deleteTempNodes(context.nodeId, context.sectionId, context.nodeTitle, context.isFolder);
             break;
         case 'cut':
@@ -7059,6 +7804,13 @@ async function handleMenuAction(action, context) {
                 break;
 
             case 'delete':
+                // 乐观 UI 更新：立即从 DOM 中移除对应的节点，消除视觉延迟
+                if (context.node) {
+                    const treeNode = context.node.closest('.tree-node');
+                    if (treeNode) {
+                        treeNode.remove();
+                    }
+                }
                 await deleteBookmark(nodeId, nodeTitle, isFolder);
                 break;
 
