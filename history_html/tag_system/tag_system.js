@@ -959,7 +959,38 @@
         document.querySelectorAll('.tree-item').forEach(__observeTreeItem);
     }, { passive: true });
 
-    function refreshTagDotsForTargets(targets) {
+    const tagSyncChannel = new BroadcastChannel('bookmark-canvas-tag-sync');
+    tagSyncChannel.onmessage = (event) => {
+        const { action, targets } = event.data;
+        if (action === 'sync-tags') {
+            if (typeof window.__refreshTagDotsForTargets === 'function') {
+                window.__refreshTagDotsForTargets(targets, true);
+            }
+            if (__popoverEl && !__popoverEl.hidden && __popoverCtx && __popoverCtx.targets) {
+                const affected = __popoverCtx.targets.some(t => {
+                    const k = t.kind === 'temporary' ? t.itemId : t.chromeId;
+                    return targets.some(tt => (tt.kind === t.kind && (tt.kind === 'temporary' ? tt.itemId === k : tt.chromeId === k)));
+                });
+                if (affected) {
+                    __renderPopover();
+                }
+            }
+            try {
+                if (typeof window.updateCanvasSearchBookmarkTags === 'function') {
+                    window.updateCanvasSearchBookmarkTags(targets);
+                }
+                const input = document.getElementById('searchInput');
+                const q = input && typeof input.value === 'string' ? input.value.trim() : '';
+                const panel = document.getElementById('searchResultsPanel');
+                const panelVisible = !!(panel && panel.classList && panel.classList.contains('visible'));
+                if (q && panelVisible && typeof window.searchCanvasAndRender === 'function') {
+                    window.searchCanvasAndRender(q);
+                }
+            } catch (_) {}
+        }
+    };
+
+    function refreshTagDotsForTargets(targets, skipBroadcast = false) {
         if (!Array.isArray(targets)) return;
         // Invalidate perm index so the next read sees latest tags.
         const hasPerm = targets.some((t) => t && t.kind === 'permanent');
@@ -974,6 +1005,15 @@
             document.querySelectorAll(sel).forEach((el) => items.add(el));
         });
         items.forEach(__observeTreeItem);
+
+        if (!skipBroadcast) {
+            try {
+                tagSyncChannel.postMessage({
+                    action: 'sync-tags',
+                    targets: targets
+                });
+            } catch (_) {}
+        }
     }
 
     window.__refreshTagDotsForTargets = refreshTagDotsForTargets;

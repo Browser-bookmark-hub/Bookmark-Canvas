@@ -12364,9 +12364,22 @@ function attachTreeEvents(treeContainer) {
             if (e.target.closest('.tree-item-hover-actions') || e.target.closest('.tree-item-tag-dots') || e.target.closest('.tree-tip-icon')) {
                 return;
             }
-            // 另外，如果点击位置靠近右边缘（例如在 tree-item 右侧 120px 范围内，即快捷键和标签可能渲染的区域），也屏蔽展开/收起，防止边缘误触
-            const rect = treeItem.getBoundingClientRect();
-            if (e.clientX > rect.right - 120) {
+            // 另外，如果点击在快捷图标区域或标签区域实际可见的边界内，才屏蔽展开/收起，防止误触且保留最大可点击范围
+            const isClickInsideElement = (selector) => {
+                const el = treeItem.querySelector(selector);
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+                    return false;
+                }
+                const rect = el.getBoundingClientRect();
+                return e.clientX >= rect.left - 2 && e.clientX <= rect.right + 2 &&
+                       e.clientY >= rect.top - 2 && e.clientY <= rect.bottom + 2;
+            };
+
+            if (isClickInsideElement('.tree-item-hover-actions') || 
+                isClickInsideElement('.tree-item-tag-dots') || 
+                isClickInsideElement('.tree-tip-icon')) {
                 return;
             }
 

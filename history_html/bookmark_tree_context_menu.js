@@ -13,6 +13,7 @@ const getTreeExportDownloadFolder = () => [getTreeExportRootFolder(), getTreeExp
 // 全局变量
 let contextMenu = null;
 let contextSubmenu = null;
+let tagSubmenuCtx = null;
 let currentContextNode = null;
 let bookmarkClipboard = null; // 剪贴板 { action: 'cut'|'copy', nodeId, nodeData }
 
@@ -3456,7 +3457,7 @@ async function showContextMenu(e, node) {
                 return;
             }
             // 如果是打开子菜单的触发器
-            if (action === 'open-submenu-trigger' || action === 'trace-submenu-trigger') {
+            if (action === 'open-submenu-trigger' || action === 'trace-submenu-trigger' || action === 'tag-submenu-trigger') {
                 toggleSubmenu(item, context);
                 return;
             }
@@ -3479,6 +3480,11 @@ function renderSubmenu(context) {
 
     if (contextSubmenu.dataset.triggerAction === 'trace-submenu-trigger') {
         renderTraceSubmenu(context);
+        return;
+    }
+
+    if (contextSubmenu.dataset.triggerAction === 'tag-submenu-trigger') {
+        renderTagSubmenu(context);
         return;
     }
 
@@ -3595,7 +3601,9 @@ function renderSubmenu(context) {
 function hideSubmenu() {
     if (contextSubmenu) {
         contextSubmenu.style.display = 'none';
+        contextSubmenu.classList.remove('is-tag-submenu');
     }
+    tagSubmenuCtx = null;
     if (contextMenu && !contextMenuHorizontal) {
         if (contextMenu.dataset.originalLeft) {
             contextMenu.style.left = contextMenu.dataset.originalLeft;
@@ -3937,7 +3945,7 @@ function buildMenuItems(context) {
             { separator: true },
             { action: 'batch-cut', label: lang === 'zh_CN' ? '剪切选中项' : 'Cut Selected', icon: 'cut' },
             { action: 'batch-delete', label: lang === 'zh_CN' ? '删除选中项' : 'DELETE', icon: 'trash-alt' },
-            { action: 'batch-add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag' },
+            { action: 'tag-submenu-trigger', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', hasSubmenu: true },
             { action: 'batch-clear-tags', label: lang === 'zh_CN' ? '清除标签' : 'Clear Tags', icon: 'times-circle' },
             { action: 'batch-rename', label: lang === 'zh_CN' ? '批量重命名' : 'Batch Rename', icon: 'edit' },
             { separator: true },
@@ -3956,7 +3964,7 @@ function buildMenuItems(context) {
         items.push(
             // 选择组
             { action: 'select-item', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '选择' : '选择（批量操作）') : (contextMenuHorizontal ? 'Select' : 'Select (Batch)'), icon: 'check-square', group: 'actions' },
-            { action: 'add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'actions' },
+            { action: 'tag-submenu-trigger', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'actions', hasSubmenu: true },
 
             // 临时溯源放在重命名上方
             {
@@ -4008,7 +4016,7 @@ function buildMenuItems(context) {
         items.push(
             // 选择组
             { action: 'select-item', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '选择' : '选择（批量操作）') : (contextMenuHorizontal ? 'Select' : 'Select (Batch)'), icon: 'check-square', group: 'actions' },
-            { action: 'add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'actions' },
+            { action: 'tag-submenu-trigger', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'actions', hasSubmenu: true },
 
             // 临时溯源放在编辑上方
             {
@@ -4300,6 +4308,19 @@ try {
     traceSyncChannel.postMessage({ action: 'request-traces-state' });
 } catch (e) {}
 
+// 页面隐藏/卸载（如关闭侧边栏/标签页）时，清空当前溯源状态并广播给其他同步页面
+function clearAndBroadcastTracesOnUnload() {
+    if (window.__activeTraces && window.__activeTraces.length > 0) {
+        window.__activeTraces = [];
+        broadcastTraces();
+        if (typeof window.__updateTraceHighlights === 'function') {
+            window.__updateTraceHighlights();
+        }
+    }
+}
+window.addEventListener('pagehide', clearAndBroadcastTracesOnUnload);
+window.addEventListener('beforeunload', clearAndBroadcastTracesOnUnload);
+
 // 计算指定节点元素上方实际有多少级可追溯的父目录
 function getAvailableLevelsAbove(nodeElement) {
     if (!nodeElement) return 0;
@@ -4578,7 +4599,7 @@ window.__updateTraceHighlights = function() {
                 el.style.setProperty('--trace-text-gradient', textGradient, 'important');
                 el.style.setProperty('--trace-text-shadow', 'none', 'important'); // 禁用文字阴影以防干扰渐变字
             } else {
-                el.style.removeProperty('--trace-text-gradient');
+                el.style.setProperty('--trace-text-gradient', primaryColor, 'important');
                 el.style.removeProperty('--trace-text-shadow');
             }
 
@@ -4604,8 +4625,8 @@ window.__updateTraceHighlights = function() {
                     el.style.setProperty('--trace-line-width', `${totalWidth}px`, 'important');
                     el.style.setProperty('--trace-line-background', bgGradients.join(', '), 'important');
                 } else {
-                    el.style.removeProperty('--trace-line-width');
-                    el.style.removeProperty('--trace-line-background');
+                    el.style.setProperty('--trace-line-width', '1.5px', 'important');
+                    el.style.setProperty('--trace-line-background', primaryColor, 'important');
                 }
             } else if (el.classList.contains('tree-item')) {
                 if (hexColors.length > 1) {
@@ -4617,8 +4638,8 @@ window.__updateTraceHighlights = function() {
                     el.style.setProperty('--trace-item-line-height', `${totalHeight}px`, 'important');
                     el.style.setProperty('--trace-item-line-background', bgGradients.join(', '), 'important');
                 } else {
-                    el.style.removeProperty('--trace-item-line-height');
-                    el.style.removeProperty('--trace-item-line-background');
+                    el.style.setProperty('--trace-item-line-height', '1.5px', 'important');
+                    el.style.setProperty('--trace-item-line-background', primaryColor, 'important');
                 }
             }
         }
@@ -4644,12 +4665,18 @@ function renderTraceSubmenu(context) {
         currentTraceLevel = 'root';
     }
     
+    // 找出当前节点是否已经有临时溯源，如果有，获取其颜色
+    const targetId = context.nodeId;
+    const activeTrace = window.__activeTraces ? window.__activeTraces.find(t => t.targetId === targetId) : null;
+    const activeColorName = activeTrace ? activeTrace.colorName : null;
+
     // 生成颜色按钮 HTML
     const colorsHtml = Object.keys(TRACE_PALETTE).map(name => {
         const color = TRACE_PALETTE[name];
         const label = lang === 'zh_CN' ? color.labelZh : color.labelEn;
+        const isActiveColor = activeColorName === name;
         return `
-            <button class="trace-palette-btn" data-color="${name}" title="${label}">
+            <button class="trace-palette-btn ${isActiveColor ? 'is-active' : ''}" data-color="${name}" title="${label}">
                 <span class="tag-dot ${color.class}"></span>
             </button>
         `;
@@ -4725,7 +4752,7 @@ function renderTraceSubmenu(context) {
                 <button class="trace-clear-btn" title="${lang === 'zh_CN' ? '清除高亮' : 'Clear Highlight'}" style="background: transparent; border: none; padding: 2px; cursor: pointer; color: var(--text-tertiary); display: inline-flex; align-items: center; font-size: 12px; transition: color 0.12s ease;">
                     <i class="fas fa-trash-alt"></i>
                 </button>
-                <button class="trace-close-btn" title="${lang === 'zh_CN' ? '关闭' : 'Close'}" style="background: transparent; border: none; padding: 2px; cursor: pointer; color: var(--text-tertiary); display: inline-flex; align-items: center; font-size: 12px; transition: color 0.12s ease;">
+                <button class="trace-close-btn" title="${lang === 'zh_CN' ? '关闭' : 'Close'}" style="background: transparent; border: none; padding: 2px; cursor: pointer; color: var(--text-tertiary); display: inline-flex; align-items: center; font-size: 15px; transition: color 0.12s ease;">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
@@ -4816,6 +4843,380 @@ function renderTraceSubmenu(context) {
             hideContextMenu();
         });
     }
+}
+
+// 渲染二级标签菜单
+function renderTagSubmenu(context) {
+    if (!contextSubmenu) return;
+
+    contextSubmenu.classList.add('is-tag-submenu');
+
+    const lang = currentLang || 'zh_CN';
+    const { targets } = resolveTagTargetsForContext('tag-submenu-trigger', context);
+    if (!targets || !targets.length) {
+        contextSubmenu.innerHTML = `<div style="padding: 8px; color: var(--text-secondary);">${lang === 'zh_CN' ? '无有效节点' : 'No valid nodes'}</div>`;
+        return;
+    }
+
+    if (!tagSubmenuCtx || JSON.stringify(tagSubmenuCtx.targets) !== JSON.stringify(targets)) {
+        tagSubmenuCtx = {
+            targets,
+            selectedColor: null,
+            editingTag: null,
+            recentLimit: 3
+        };
+    }
+
+    const TAG_SUBMENU_I18N = {
+        inputPlaceholder: { 'zh_CN': '可选：自定义文字...', 'en': 'Optional: custom text...' },
+        confirmAriaLabel: { 'zh_CN': '确认', 'en': 'Confirm' },
+        removeAriaLabel:  { 'zh_CN': '删除标签', 'en': 'Delete tag' },
+        previewEmpty:     { 'zh_CN': '选一个颜色…', 'en': 'Pick a color…' },
+        recentHeader:     { 'zh_CN': '已用 tag（全局）', 'en': 'Recent tags (all)' },
+        noTagsYet:        { 'zh_CN': '暂无已用 tag', 'en': 'No tags yet' },
+        moreEllipsis:     { 'zh_CN': '…还有 {n} 个', 'en': '…{n} more' }
+    };
+    const t = (key, vars) => {
+        let s = TAG_SUBMENU_I18N[key][lang] || TAG_SUBMENU_I18N[key]['zh_CN'];
+        if (vars) {
+            Object.keys(vars).forEach(k => {
+                s = s.replace(new RegExp(`{${k}}`, 'g'), String(vars[k]));
+            });
+        }
+        return s;
+    };
+    const colorNames = {
+        red:    { 'zh_CN': '红色',  'en': 'Red' },
+        orange: { 'zh_CN': '橙色',  'en': 'Orange' },
+        yellow: { 'zh_CN': '黄色',  'en': 'Yellow' },
+        green:  { 'zh_CN': '绿色',  'en': 'Green' },
+        blue:   { 'zh_CN': '蓝色',  'en': 'Blue' },
+        purple: { 'zh_CN': '紫色',  'en': 'Purple' },
+        gray:   { 'zh_CN': '灰色',  'en': 'Gray' }
+    };
+    const colorName = (c) => (colorNames[c] ? colorNames[c][lang] : c);
+
+    const TAG_PALETTE = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
+
+    contextSubmenu.innerHTML = `
+        <div class="tag-popover-top" style="padding: 6px 12px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+            <input type="text" class="tag-popover-input" data-role="input" placeholder="${t('inputPlaceholder')}" style="flex: 1;" />
+            <button class="tag-popover-confirm" data-role="confirm" type="button" title="${t('confirmAriaLabel')}" style="width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M6.2 11.4 2.6 7.8l1.4-1.4 2.2 2.2 5.8-5.8 1.4 1.4z"/></svg>
+            </button>
+            <button class="tag-popover-close" data-role="close-popover" type="button" title="${lang === 'zh_CN' ? '关闭' : 'Close'}" style="width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4.2 3 8 6.8 11.8 3 13 4.2 9.2 8l3.8 3.8-1.2 1.2L8 9.2 4.2 13 3 11.8 6.8 8 3 4.2z"/></svg>
+            </button>
+        </div>
+        <div class="tag-popover-palette" data-role="palette" style="padding: 4px 12px 6px; display: flex; align-items: center; justify-content: space-between;">
+            <div class="tag-popover-palette-colors" data-role="palette-colors" style="display: flex; gap: 4px; align-items: center;">
+                ${TAG_PALETTE.map((c) =>
+                    `<button class="tag-palette-btn" data-color="${c}" type="button" aria-label="${c}"><span class="tag-dot tag-dot-${c}"></span></button>`
+                ).join('')}
+            </div>
+            <button class="tag-popover-delete" data-role="delete-existing" type="button" title="${t('removeAriaLabel')}" style="width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center;" hidden>
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4.2 3 8 6.8 11.8 3 13 4.2 9.2 8l3.8 3.8-1.2 1.2L8 9.2 4.2 13 3 11.8 6.8 8 3 4.2z"/></svg>
+            </button>
+        </div>
+        <div class="tag-popover-divider" style="height: 1px; background: var(--border-color); opacity: 0.5; margin: 4px 0;"></div>
+        <div class="tag-popover-preview" data-role="preview" style="padding: 4px 12px 6px; display: flex; align-items: center; min-height: 20px;">
+            <span class="tag-preview-placeholder" data-role="preview-placeholder" style="color: var(--text-tertiary); font-size: 11px;"></span>
+            <span class="tag-preview-card" data-role="preview-card" style="display: inline-flex; align-items: center; gap: 4px;" hidden>
+                <span class="tag-dot" data-role="preview-dot"></span>
+                <span class="tag-preview-text" data-role="preview-text"></span>
+            </span>
+        </div>
+        <div class="tag-popover-divider" style="height: 1px; background: var(--border-color); opacity: 0.5; margin: 4px 0;"></div>
+        <div class="tag-popover-applied-section" style="padding: 6px 12px 10px;">
+            <div class="tag-popover-applied-header" data-role="recent-header" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;"></div>
+            <div class="tag-popover-applied" data-role="recent" style="display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto;"></div>
+            <button class="tag-popover-more" data-role="recent-more" type="button" style="background: transparent; border: none; color: var(--accent-blue); cursor: pointer; padding: 2px 0; font-size: 11px; text-align: left;" hidden></button>
+        </div>
+    `;
+
+    const inputEl = contextSubmenu.querySelector('[data-role="input"]');
+    const confirmBtn = contextSubmenu.querySelector('[data-role="confirm"]');
+    const closeBtn = contextSubmenu.querySelector('[data-role="close-popover"]');
+    const deleteBtn = contextSubmenu.querySelector('[data-role="delete-existing"]');
+    const recentHeader = contextSubmenu.querySelector('[data-role="recent-header"]');
+    const recentEl = contextSubmenu.querySelector('[data-role="recent"]');
+    const recentMore = contextSubmenu.querySelector('[data-role="recent-more"]');
+    const previewPlaceholder = contextSubmenu.querySelector('[data-role="preview-placeholder"]');
+    const previewCard = contextSubmenu.querySelector('[data-role="preview-card"]');
+    const previewDot = contextSubmenu.querySelector('[data-role="preview-dot"]');
+    const previewText = contextSubmenu.querySelector('[data-role="preview-text"]');
+
+    function updatePreview() {
+        const color = tagSubmenuCtx.selectedColor;
+        if (deleteBtn) {
+            deleteBtn.hidden = !tagSubmenuCtx.editingTag;
+        }
+        if (!color) {
+            previewCard.hidden = true;
+            previewPlaceholder.hidden = false;
+            previewPlaceholder.textContent = t('previewEmpty');
+            confirmBtn.disabled = true;
+            confirmBtn.classList.remove('is-ready');
+            confirmBtn.style.removeProperty('color');
+            return;
+        }
+        previewPlaceholder.hidden = true;
+        previewCard.hidden = false;
+        previewDot.className = `tag-dot tag-dot-${color}`;
+        previewDot.dataset.color = color;
+        const typed = (inputEl.value || '').trim();
+        const text = typed || colorName(color);
+        previewText.textContent = text;
+        confirmBtn.disabled = false;
+        confirmBtn.classList.add('is-ready');
+    }
+
+    async function toggleTagOnAllTargets(tagInput, options = {}) {
+        if (!window.TagSystem || !window.TagSystem.toggleTagOnTarget) return;
+        const bridge = window.CanvasProtocolBridge;
+        if (!bridge || !bridge.normalizeTagInput || !bridge.makeTagKey) return;
+        
+        const norm = bridge.normalizeTagInput(tagInput);
+        if (!norm) return;
+        const key = bridge.makeTagKey(norm.color, norm.text);
+        
+        const perTargetTags = await Promise.all(targets.map((t) => window.TagSystem.getTagsForTarget(t)));
+        const allHave = perTargetTags.every((tags) => (tags || []).some((tt) => bridge.makeTagKey(tt.color, tt.text) === key));
+        const mode = options.mode || 'auto';
+        let latestSingleTargetTags = null;
+
+        for (let i = 0; i < targets.length; i++) {
+            const has = (perTargetTags[i] || []).some((tt) => bridge.makeTagKey(tt.color, tt.text) === key);
+            let result = null;
+            if (mode === 'remove') {
+                if (has) result = await window.TagSystem.toggleTagOnTarget(targets[i], norm);
+            } else {
+                if (allHave && has) {
+                    result = await window.TagSystem.toggleTagOnTarget(targets[i], norm);
+                } else if (!allHave && !has) {
+                    result = await window.TagSystem.toggleTagOnTarget(targets[i], norm);
+                }
+            }
+            if (targets.length === 1 && result && Array.isArray(result.tags)) {
+                latestSingleTargetTags = result.tags;
+            }
+        }
+        
+        await renderList();
+        
+        if (typeof window.__refreshTagDotsForTargets === 'function') {
+            window.__refreshTagDotsForTargets(targets);
+        }
+    }
+
+    async function confirmCurrentSelection() {
+        if (!tagSubmenuCtx.selectedColor) return;
+        const color = tagSubmenuCtx.selectedColor;
+        const typed = (inputEl.value || '').trim();
+        const text = typed || colorName(color);
+        const tagInput = { color, text };
+
+        const bridge = window.CanvasProtocolBridge;
+        if (!bridge || !bridge.normalizeTagInput || !bridge.makeTagKey) return;
+        const norm = bridge.normalizeTagInput(tagInput);
+        if (!norm) return;
+        const key = bridge.makeTagKey(norm.color, norm.text);
+
+        const editingNorm = tagSubmenuCtx.editingTag ? bridge.normalizeTagInput(tagSubmenuCtx.editingTag) : null;
+        const editingKey = editingNorm ? bridge.makeTagKey(editingNorm.color, editingNorm.text) : null;
+
+        const perTargetTags = await Promise.all(targets.map((t) => window.TagSystem.getTagsForTarget(t)));
+        let latestSingleTargetTags = null;
+        for (let i = 0; i < targets.length; i++) {
+            const has = (perTargetTags[i] || []).some((tt) => bridge.makeTagKey(tt.color, tt.text) === key);
+            if (editingNorm && editingKey && editingKey !== key) {
+                const hasEditingTag = (perTargetTags[i] || []).some((tt) => bridge.makeTagKey(tt.color, tt.text) === editingKey);
+                let result = null;
+                if (hasEditingTag) result = await window.TagSystem.toggleTagOnTarget(targets[i], editingNorm);
+                if (!has) result = await window.TagSystem.toggleTagOnTarget(targets[i], norm);
+                if (targets.length === 1 && result && Array.isArray(result.tags)) latestSingleTargetTags = result.tags;
+            } else if (!has) {
+                const result = await window.TagSystem.toggleTagOnTarget(targets[i], norm);
+                if (targets.length === 1 && result && Array.isArray(result.tags)) latestSingleTargetTags = result.tags;
+            }
+        }
+        
+        inputEl.value = '';
+        tagSubmenuCtx.selectedColor = null;
+        tagSubmenuCtx.editingTag = null;
+        
+        await renderList();
+        
+        if (typeof window.__refreshTagDotsForTargets === 'function') {
+            window.__refreshTagDotsForTargets(targets);
+        }
+    }
+
+    async function deleteEditingTag() {
+        if (!tagSubmenuCtx.editingTag) return;
+        await toggleTagOnAllTargets(tagSubmenuCtx.editingTag, { mode: 'remove' });
+        inputEl.value = '';
+        tagSubmenuCtx.selectedColor = null;
+        tagSubmenuCtx.editingTag = null;
+        updatePreview();
+        await renderList();
+    }
+
+    async function renderList() {
+        if (!window.TagSystem || !window.TagSystem.getTagsForTarget) return;
+        const perTargetTags = await Promise.all(targets.map((t) => window.TagSystem.getTagsForTarget(t)));
+        const bridge = window.CanvasProtocolBridge;
+        if (!bridge) return;
+        
+        const keyOf = (color, text) => (bridge && bridge.makeTagKey) ? bridge.makeTagKey(color, text) : `${color}::${text}`;
+        
+        const aggregate = new Map();
+        perTargetTags.forEach((list) => {
+            const seen = new Set();
+            (list || []).forEach((t) => {
+                const k = keyOf(t.color, t.text);
+                if (seen.has(k)) return;
+                seen.add(k);
+                const prev = aggregate.get(k);
+                if (prev) prev.present += 1;
+                else aggregate.set(k, { tag: { color: t.color, text: t.text }, present: 1 });
+            });
+        });
+
+        const allByColor = new Map();
+        aggregate.forEach((entry) => {
+            const c = entry.tag.color;
+            const prev = allByColor.get(c) || 0;
+            if (entry.present > prev) allByColor.set(c, entry.present);
+        });
+        contextSubmenu.querySelectorAll('.tag-palette-btn').forEach((btn) => {
+            const color = btn.dataset.color;
+            btn.classList.toggle('is-selected', color === tagSubmenuCtx.selectedColor);
+            const presentCount = allByColor.get(color) || 0;
+            btn.classList.toggle('is-applied', presentCount === targets.length && targets.length > 0);
+            btn.classList.toggle('is-mixed', presentCount > 0 && presentCount < targets.length);
+        });
+
+        let globalTags = [];
+        try {
+            if (bridge && bridge.collectAllUsedTags) globalTags = await bridge.collectAllUsedTags();
+        } catch (_) {}
+
+        recentHeader.textContent = t('recentHeader');
+        recentEl.innerHTML = '';
+
+        if (!globalTags.length) {
+            const empty = document.createElement('div');
+            empty.className = 'tag-recent-empty';
+            empty.textContent = t('noTagsYet');
+            recentEl.appendChild(empty);
+            recentMore.hidden = true;
+        } else {
+            const limit = Math.min(10, Math.max(3, tagSubmenuCtx.recentLimit || 3));
+            tagSubmenuCtx.recentLimit = limit;
+            const visible = globalTags.slice(0, limit);
+            
+            visible.forEach((tag) => {
+                const k = keyOf(tag.color, tag.text);
+                const entry = aggregate.get(k);
+                const row = document.createElement('div');
+                row.className = 'tag-applied-row';
+                row.dataset.color = tag.color;
+                row.dataset.text = tag.text;
+                let statusMark = '+';
+                if (entry) {
+                    if (entry.present === targets.length) {
+                        row.classList.add('is-active');
+                        statusMark = '✓';
+                    } else {
+                        row.classList.add('is-mixed');
+                        statusMark = '–';
+                    }
+                }
+                row.innerHTML = `
+                    <span class="tag-dot tag-dot-${tag.color}"></span>
+                    <span class="tag-applied-text"></span>
+                    <span class="tag-applied-status">${statusMark}</span>
+                `;
+                row.querySelector('.tag-applied-text').textContent = tag.text || colorName(tag.color);
+                
+                row.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (row.classList.contains('is-active') || row.classList.contains('is-mixed')) {
+                        tagSubmenuCtx.editingTag = tag;
+                        tagSubmenuCtx.selectedColor = tag.color;
+                        inputEl.value = tag.text || colorName(tag.color);
+                        updatePreview();
+                        await renderList();
+                    } else {
+                        await toggleTagOnAllTargets(tag, { mode: 'auto' });
+                    }
+                });
+
+                recentEl.appendChild(row);
+            });
+
+            const hiddenCount = Math.max(0, Math.min(globalTags.length, 10) - visible.length);
+            if (hiddenCount > 0) {
+                recentMore.hidden = false;
+                recentMore.textContent = t('moreEllipsis', { n: hiddenCount });
+            } else {
+                recentMore.hidden = true;
+            }
+        }
+        updatePreview();
+    }
+
+    contextSubmenu.querySelectorAll('.tag-palette-btn').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const color = btn.dataset.color;
+            tagSubmenuCtx.selectedColor = (tagSubmenuCtx.selectedColor === color) ? null : color;
+            updatePreview();
+            await renderList();
+        });
+    });
+
+    confirmBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirmBtn.disabled) {
+            await confirmCurrentSelection();
+        }
+    });
+
+    closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hideContextMenu();
+    });
+
+    deleteBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await deleteEditingTag();
+    });
+
+    recentMore.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        tagSubmenuCtx.recentLimit = 10;
+        await renderList();
+    });
+
+    inputEl.addEventListener('input', () => {
+        updatePreview();
+    });
+    inputEl.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (tagSubmenuCtx.selectedColor) {
+                await confirmCurrentSelection();
+            }
+        } else if (e.key === 'Escape') {
+            e.stopPropagation();
+            hideContextMenu();
+        }
+    });
+
+    renderList();
 }
 
 // 捕获阶段的全局点击监听，用于检测是否点击了高亮导引线并取消 Trace
@@ -5745,7 +6146,8 @@ async function handleTempMenuAction(action, context) {
 // action ('batch-add-tags'). Resolves anchor + target(s) and delegates to the
 // TagSystem module (history_html/tag_system/tag_system.js).
 function resolveTagTargetsForContext(action, context) {
-    const isBatch = action === 'batch-add-tags' || action === 'batch-clear-tags';
+    const isBatch = action === 'batch-add-tags' || action === 'batch-clear-tags' ||
+                    (action === 'tag-submenu-trigger' && selectedNodes && selectedNodes.size > 0 && context && selectedNodes.has(context.nodeId));
     let targets = [];
     let anchorEl = null;
 

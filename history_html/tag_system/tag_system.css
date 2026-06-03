@@ -369,12 +369,16 @@
     line-height: 16px;
     width: 16px;
     height: 16px;
+    left: -1px;
+    top: -1px;
     text-align: center;
     font-weight: 700;
     text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
 }
 .tag-palette-btn.is-applied .tag-dot {
     position: relative;
+    box-shadow: 0 0 0 2px var(--text-primary, #fff);
+    transform: scale(1.1);
 }
 .tag-palette-btn.is-mixed .tag-dot::after {
     content: '–';
@@ -384,12 +388,16 @@
     line-height: 14px;
     width: 16px;
     height: 16px;
+    left: -1px;
+    top: -1px;
     text-align: center;
     font-weight: 700;
     text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
 }
 .tag-palette-btn.is-mixed .tag-dot {
     position: relative;
+    box-shadow: 0 0 0 2px var(--text-primary, #fff);
+    transform: scale(1.1);
 }
 
 .tag-popover-divider {
@@ -523,3 +531,11 @@
 .tag-applied-row.is-active .tag-applied-status {
     color: var(--accent-blue, #0a84ff);
 }
+
+/* ==================== Tag Submenu Custom Layout Overrides ==================== */
+.bookmark-context-submenu.is-tag-submenu {
+    min-width: 240px !important;
+    max-width: 280px !important;
+    padding: 8px 0 !important;
+}
+

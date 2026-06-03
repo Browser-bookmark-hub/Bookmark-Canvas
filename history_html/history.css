@@ -15991,6 +15991,27 @@ body.canvas-popover-active .md-align-popover {
     transform: scale(1.1);
 }
 
+.trace-palette-btn.is-active .tag-dot {
+    position: relative;
+    box-shadow: 0 0 0 2px var(--text-primary, #fff);
+    transform: scale(1.1);
+}
+
+.trace-palette-btn.is-active .tag-dot::after {
+    content: '✓';
+    position: absolute;
+    color: var(--text-primary, #fff);
+    font-size: 10px;
+    line-height: 16px;
+    width: 16px;
+    height: 16px;
+    left: -1px;
+    top: -1px;
+    text-align: center;
+    font-weight: 700;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+}
+
 .trace-help-desc {
     padding: 8px 12px;
     font-size: 11px;
