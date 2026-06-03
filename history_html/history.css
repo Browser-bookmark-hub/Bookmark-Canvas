@@ -13771,11 +13771,51 @@ html[lang="en"] #canvasShortcutsModal.canvas-manage-modal {
     font-size: 12px;
 }
 
+.manual-selector-options-row {
+    padding: 12px 18px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.manual-selector-options-label {
+    font-weight: 600;
+}
+
+.manual-selector-radio-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.manual-selector-radio-label input[type="radio"] {
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--accent-primary);
+}
+
+.manual-selector-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.manual-selector-checkbox-label input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--accent-primary);
+}
+
 .manual-selector-footer {
     padding: 12px 18px;
     border-top: 1px solid var(--border-color);
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: 10px;
 }
 
@@ -13801,7 +13841,7 @@ html[lang="en"] #canvasShortcutsModal.canvas-manage-modal {
 .manual-selector-btn-confirm {
     background: var(--accent-primary);
     color: white;
-    flex: 1;
+    padding: 8px 24px;
 }
 
 .manual-selector-btn-confirm:hover {
@@ -15671,4 +15711,76 @@ body.canvas-popover-active .md-align-popover {
     cursor: grabbing;
     transform: scale(1.05);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 0 0 4px rgba(231, 76, 60, 0.15);
+}
+
+/* ==================== 批量操作面板次级提示徽标（模版） ==================== */
+.batch-action-panel .context-menu-item .sub-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 10px;
+    line-height: 1.4;
+    background: rgba(37, 99, 235, 0.15);
+    color: var(--accent-primary);
+    cursor: pointer;
+    user-select: none;
+    font-weight: 500;
+}
+
+[data-theme="dark"] .batch-action-panel .context-menu-item .sub-badge {
+    background: rgba(96, 165, 250, 0.2);
+    color: #60a5fa;
+}
+
+.batch-action-panel .context-menu-item .sub-badge:hover {
+    background: var(--accent-primary);
+    color: white !important;
+}
+
+[data-theme="dark"] .batch-action-panel .context-menu-item .sub-badge:hover {
+    background: #60a5fa;
+    color: #0f172a !important;
+}
+
+/* 布局调整：支持徽标在右侧对齐 */
+.batch-action-panel .context-menu-item > span {
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    justify-content: space-between;
+}
+
+.batch-action-panel .context-menu-item > span .sub-badge {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+/* ==================== 手动选择器拖拽按钮 ==================== */
+.manual-selector-drag-btn {
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: var(--text-secondary);
+    cursor: grab;
+    transition: all 0.2s;
+    margin: 0;
+}
+
+.manual-selector-drag-btn i {
+    font-size: 15px;
+    transform: translateY(1.5px);
+}
+
+.manual-selector-drag-btn:hover {
+    background: var(--hover-bg);
+    color: var(--text-primary);
+}
+
+.manual-selector-drag-btn:active {
+    cursor: grabbing;
 }

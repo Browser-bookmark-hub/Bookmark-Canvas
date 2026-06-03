@@ -2,17 +2,563 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Marker</title>
+    <title>Workspace Monitor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
-      html,body { height:100%; margin:0; }
-      .full { position:fixed; inset:0; border:0; width:100%; height:100%; }
-      .fallback { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; color:#888; font: 14px/1.6 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial; }
+      :root {
+        --bg-main: #f4f4f5;
+        --bg-card: #ffffff;
+        --bg-header: #f4f4f5;
+        --border-color: #e4e4e7;
+        --text-primary: #18181b;
+        --text-secondary: #71717a;
+        --text-muted: #a1a1aa;
+        --accent: #2563eb;
+        --accent-hover: #1d4ed8;
+        --success: #10b981;
+        --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+        /* Chrome tab group colors (adaptive) */
+        --color-group-grey: #5f6368;
+        --color-group-blue: #1a73e8;
+        --color-group-red: #d93025;
+        --color-group-yellow: #b07c00;
+        --color-group-green: #188038;
+        --color-group-pink: #d84b96;
+        --color-group-purple: #a142f4;
+        --color-group-cyan: #007b83;
+        --color-group-orange: #fa903e;
+      }
+
+      /* Dark theme mapping */
+      [data-theme="dark"] {
+        --bg-main: #09090b;
+        --bg-card: #18181b;
+        --bg-header: #202024;
+        --border-color: #27272a;
+        --text-primary: #f4f4f5;
+        --text-secondary: #a1a1aa;
+        --text-muted: #71717a;
+        --accent: #3b82f6;
+        --accent-hover: #2563eb;
+
+        /* Chrome tab group colors (dark optimized) */
+        --color-group-grey: #a1a1aa;
+        --color-group-blue: #8ab4f8;
+        --color-group-red: #f28b82;
+        --color-group-yellow: #fde293;
+        --color-group-green: #81c995;
+        --color-group-pink: #ff8bcb;
+        --color-group-purple: #c58af9;
+        --color-group-cyan: #78d9ec;
+        --color-group-orange: #fcad70;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html, body {
+        overflow-x: hidden;
+      }
+
+      body {
+        background-color: var(--bg-main);
+        color: var(--text-primary);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-size: 13px;
+        line-height: 1.5;
+        padding: 20px;
+      }
+
+      .dashboard {
+        max-width: 1000px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      /* Top Header Bar */
+      .top-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        padding: 10px 16px;
+        border-radius: 4px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .brand-title {
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .brand-badge {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        background: rgba(0, 0, 0, 0.05);
+        border: 1px solid var(--border-color);
+        padding: 1px 5px;
+        border-radius: 3px;
+        color: var(--accent);
+      }
+
+      [data-theme="dark"] .brand-badge {
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .top-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      /* Metadata Grid */
+      .meta-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+      }
+
+      @media (max-width: 768px) {
+        .meta-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      .meta-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        padding: 10px 12px;
+      }
+
+      .meta-label {
+        font-size: 10px;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        margin-bottom: 2px;
+      }
+
+      .meta-value {
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .meta-value.mono {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: normal;
+        color: var(--text-secondary);
+      }
+
+      /* Stacked Content - Always take full 100% width */
+      .main-content {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        width: 100%;
+      }
+
+      .panel {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+      }
+
+      .panel-header {
+        background: var(--bg-header);
+        border-bottom: 1px solid var(--border-color);
+        padding: 8px 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .panel-title {
+        font-size: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .panel-count {
+        font-family: var(--font-mono);
+        background: rgba(0, 0, 0, 0.05);
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-size: 10px;
+        color: var(--text-secondary);
+      }
+
+      [data-theme="dark"] .panel-count {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      /* Tables styling */
+      .table-wrapper {
+        width: 100%;
+        overflow-x: hidden;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        table-layout: fixed;
+      }
+
+      th {
+        background: rgba(0, 0, 0, 0.02);
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: 500;
+        padding: 6px 12px;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      td {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-color);
+        vertical-align: middle;
+        word-break: break-all;
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+
+      /* Collapsible Tab Group Headers */
+      .group-header-row {
+        cursor: pointer;
+        background: rgba(0, 0, 0, 0.03) !important;
+      }
+
+      [data-theme="dark"] .group-header-row {
+        background: rgba(255, 255, 255, 0.02) !important;
+      }
+
+      .group-header-content {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+      }
+
+      .group-arrow {
+        font-size: 8px;
+        color: var(--text-secondary);
+        transition: transform 0.15s ease;
+      }
+
+      .group-header-row.collapsed .group-arrow {
+        transform: rotate(-90deg);
+      }
+
+      .group-color-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+
+      /* Chrome tab group colors */
+      .color-grey { background-color: var(--color-group-grey); }
+      .color-blue { background-color: var(--color-group-blue); }
+      .color-red { background-color: var(--color-group-red); }
+      .color-yellow { background-color: var(--color-group-yellow); }
+      .color-green { background-color: var(--color-group-green); }
+      .color-pink { background-color: var(--color-group-pink); }
+      .color-purple { background-color: var(--color-group-purple); }
+      .color-cyan { background-color: var(--color-group-cyan); }
+      .color-orange { background-color: var(--color-group-orange); }
+
+      /* Clickable row focus */
+      .tab-row {
+        cursor: pointer;
+        transition: background-color 0.1s ease;
+      }
+
+      .tab-row:hover td {
+        background-color: rgba(0, 0, 0, 0.02);
+      }
+
+      [data-theme="dark"] .tab-row:hover td {
+        background-color: rgba(255, 255, 255, 0.02);
+      }
+
+      .cell-flex {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .cell-icon {
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        background: rgba(0, 0, 0, 0.05);
+        border-radius: 2px;
+      }
+
+      [data-theme="dark"] .cell-icon {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .cell-icon img {
+        width: 14px;
+        height: 14px;
+        object-fit: contain;
+      }
+
+      .cell-title {
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .cell-domain {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .cell-source {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-primary);
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .status-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--text-muted);
+        display: inline-block;
+      }
+
+      .status-dot.active {
+        background: var(--success);
+      }
+
+      .empty-message {
+        padding: 20px;
+        text-align: center;
+        color: var(--text-muted);
+        font-style: italic;
+      }
+
+      /* Row Action Buttons Container */
+      .action-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 6px;
+      }
+
+      .action-buttons .btn {
+        padding: 4px 6px;
+        background: transparent;
+        border-color: transparent;
+        color: var(--text-secondary);
+      }
+
+      .action-buttons .btn:hover {
+        background: rgba(0, 0, 0, 0.05);
+      }
+
+      [data-theme="dark"] .action-buttons .btn:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .action-buttons .action-focus:hover {
+        color: var(--accent) !important;
+      }
+
+      .action-buttons .action-close:hover {
+        color: #ef4444 !important;
+      }
+
+      /* Group Header Actions */
+      .group-header-actions {
+        display: flex;
+        align-items: center;
+      }
+
+      .group-header-actions .btn {
+        padding: 4px 6px;
+        background: transparent;
+        border-color: transparent;
+        color: var(--text-secondary);
+        border: none;
+      }
+
+      .group-header-actions .btn:hover {
+        background: rgba(0, 0, 0, 0.05);
+      }
+
+      [data-theme="dark"] .group-header-actions .btn:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .group-header-actions .action-group-close:hover {
+        color: #ef4444 !important;
+      }
+
+      /* Drag and Drop visual styles */
+      tr.dragging {
+        opacity: 0.4;
+      }
+
+      tr.drag-over td {
+        border-top: 2px solid var(--accent) !important;
+      }
+
+      .action-drag,
+      .action-group-drag {
+        cursor: grab;
+      }
+
+      .action-drag:active,
+      .action-group-drag:active {
+        cursor: grabbing;
+      }
+
+      /* Simple flat buttons */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 5px 10px;
+        border-radius: 3px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        border: 1px solid var(--border-color);
+        background: var(--bg-card);
+        color: var(--text-primary);
+        text-decoration: none;
+        user-select: none;
+      }
+
+      .btn:hover {
+        background: rgba(0, 0, 0, 0.03);
+      }
+
+      [data-theme="dark"] .btn:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
     </style>
-    <script src="window_marker.js" defer></script>
+    <link rel="stylesheet" href="../font-awesome.min.css">
+    <!-- Sync loader in head for immediate title application -->
+    <script src="window_marker.js"></script>
   </head>
   <body>
-    <iframe id="canvasFrame" class="full" src="about:blank" allow="clipboard-read; clipboard-write"></iframe>
-    <div class="fallback">Loading Bookmark Canvas…</div>
+    <div class="dashboard">
+      <!-- Top Action Header -->
+      <header class="top-bar">
+        <div class="brand">
+          <span id="brandTitle" class="brand-title">Workspace Monitor</span>
+          <span id="metaName" class="brand-badge">-</span>
+        </div>
+        <div class="top-actions">
+          <button id="btnLangToggle" class="btn" title="Toggle Language / 切换语言">
+            <i class="fas fa-language"></i>
+            <span id="txtLangToggle">EN</span>
+          </button>
+          <button id="btnThemeToggle" class="btn" title="Toggle Theme / 切换主题">
+            <i id="themeIcon" class="fas fa-moon"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Stacked Lists -->
+      <main class="main-content">
+        <!-- Active Tabs Panel -->
+        <section class="panel">
+          <header class="panel-header">
+            <h2 class="panel-title">
+              <span id="lblActiveTabs">Active Tabs in Window</span>
+              <span id="tabCount" class="panel-count">0</span>
+            </h2>
+          </header>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th id="thStatus" style="width: 36px; text-align: center; padding-left: 4px !important; padding-right: 4px !important;">No.</th>
+                  <th id="thIcon" style="width: 36px; text-align: center; padding-left: 4px !important; padding-right: 4px !important;">Icon</th>
+                  <th id="thTitle">Title</th>
+                  <th id="thDomain" style="width: 160px;">Domain</th>
+                  <th id="thSource" style="width: 75px; text-align: center; display: none;">Source</th>
+                  <th id="thAction" style="width: 110px; text-align: center;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="tabList">
+                <tr>
+                  <td colspan="5" class="empty-message">No other tabs open in this window</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Associated Bookmarks Panel -->
+        <section id="bookmarksPanel" class="panel" style="display: none;">
+          <header class="panel-header">
+            <h2 class="panel-title">
+              <span id="lblAssociatedBookmarks">Associated Bookmarks</span>
+              <span id="bookmarkCount" class="panel-count">0</span>
+            </h2>
+          </header>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th id="thBkIcon" style="width: 36px; text-align: center; padding-left: 4px !important; padding-right: 4px !important;">Icon</th>
+                  <th id="thBkTitle">Bookmark Title</th>
+                  <th id="thBkDomain" style="width: 160px;">Domain</th>
+                  <th id="thBkAction" style="width: 110px; text-align: center;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="bookmarkList">
+                <tr>
+                  <td colspan="4" class="empty-message">Loading associated bookmarks...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
   </body>
-  </html>
+</html>

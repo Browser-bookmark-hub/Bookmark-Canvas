@@ -31916,7 +31916,7 @@ function addAnchorsToNode(nodeElement, nodeId) {
         } else if (mode === 'incognito') {
             if (typeof window.openBookmarkNewWindow === 'function') window.openBookmarkNewWindow(url, true); else window.open(url, '_blank');
         } else if (mode === 'specific-window') {
-            if (typeof window.openInSpecificWindow === 'function') window.openInSpecificWindow(url); else window.open(url, '_blank');
+            if (typeof window.openInSpecificWindow === 'function') window.openInSpecificWindow(url, { context: scopedContext }); else window.open(url, '_blank');
         } else if (mode === 'scoped-window') {
             if (typeof window.openInScopedWindow === 'function') window.openInScopedWindow(url, { context: scopedContext }); else window.open(url, '_blank');
         } else if (mode === 'specific-group') {

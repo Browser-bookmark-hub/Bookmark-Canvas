@@ -12294,6 +12294,8 @@ function attachTreeEvents(treeContainer) {
                 }
 
                 e.preventDefault();
+                if (typeof e.stopPropagation === 'function') e.stopPropagation();
+                if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
                 const url = link.getAttribute('href');
                 const nodeElement = link.closest('.tree-item[data-node-id]');
                 const contextInfo = nodeElement ? {
@@ -12333,7 +12335,7 @@ function attachTreeEvents(treeContainer) {
                 } else if (mode === 'incognito') {
                     if (typeof openBookmarkNewWindow === 'function') openBookmarkNewWindow(url, true); else window.open(url, '_blank');
                 } else if (mode === 'specific-window') {
-                    if (typeof openInSpecificWindow === 'function') openInSpecificWindow(url); else window.open(url, '_blank');
+                    if (typeof openInSpecificWindow === 'function') openInSpecificWindow(url, { context: contextInfo }); else window.open(url, '_blank');
                 } else if (mode === 'specific-group') {
                     if (typeof openInSpecificTabGroup === 'function') openInSpecificTabGroup(url); else window.open(url, '_blank');
                 } else if (mode === 'scoped-window') {
