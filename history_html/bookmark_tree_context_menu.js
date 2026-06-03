@@ -249,6 +249,32 @@ if (typeof window !== 'undefined') {
     };
 }
 
+// 全局：当前窗口ID，在初始化时自动获取
+let currentWindowId = null;
+let specificTabGroups = {}; // { [windowId]: groupId }
+let hyperlinkSpecificTabGroups = {}; // { [windowId]: groupId }
+
+async function ensureCurrentWindowId() {
+    if (currentWindowId) return;
+    if (typeof chrome !== 'undefined' && chrome.windows && chrome.windows.getCurrent) {
+        try {
+            const win = await chrome.windows.getCurrent({ populate: false });
+            if (win && win.id) {
+                currentWindowId = win.id;
+                // 初始化当前窗口专属标签组
+                if (Number.isInteger(specificTabGroups[currentWindowId])) {
+                    specificTabGroupId = specificTabGroups[currentWindowId];
+                    specificGroupWindowId = currentWindowId;
+                }
+                if (Number.isInteger(hyperlinkSpecificTabGroups[currentWindowId])) {
+                    hyperlinkSpecificTabGroupId = hyperlinkSpecificTabGroups[currentWindowId];
+                    hyperlinkSpecificGroupWindowId = currentWindowId;
+                }
+            }
+        } catch (_) {}
+    }
+}
+
 // 全局：默认打开方式与特定窗口/分组ID
 let defaultOpenMode = 'new-tab'; // 默认：'new-tab'（新标签页）。可选：'new-tab' | 'new-window' | 'incognito' | 'specific-window' | 'specific-group' | 'scoped-window' | 'scoped-group' | 'same-window-specific-group'
 let specificWindowId = null; // chrome.windows Window ID
@@ -294,6 +320,14 @@ try {
 // 读取持久化默认打开方式（书签系统）
 (async function initDefaultOpenMode() {
     try {
+        if (typeof chrome !== 'undefined' && chrome.windows && chrome.windows.getCurrent) {
+            try {
+                const win = await chrome.windows.getCurrent({ populate: false });
+                if (win && win.id) {
+                    currentWindowId = win.id;
+                }
+            } catch (_) {}
+        }
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
             const data = await chrome.storage.local.get([
                 'bookmarkDefaultOpenMode',
@@ -302,6 +336,7 @@ try {
                 'bookmarkSpecificGroupWindowId',
                 'bookmarkScopedCurrentGroups',
                 'bookmarkScopedWindows',
+                'bookmarkSpecificTabGroups',
                 SAME_WINDOW_SPECIFIC_GROUP_WINDOW_KEY,
                 SAME_WINDOW_SPECIFIC_GROUP_SCOPES_KEY
             ]);
@@ -311,11 +346,15 @@ try {
             if (data && Number.isInteger(data.bookmarkSpecificWindowId)) {
                 specificWindowId = data.bookmarkSpecificWindowId;
             }
-            if (data && Number.isInteger(data.bookmarkSpecificGroupId)) {
-                specificTabGroupId = data.bookmarkSpecificGroupId;
+            if (data && data.bookmarkSpecificTabGroups && typeof data.bookmarkSpecificTabGroups === 'object') {
+                specificTabGroups = data.bookmarkSpecificTabGroups || {};
             }
-            if (data && Number.isInteger(data.bookmarkSpecificGroupWindowId)) {
-                specificGroupWindowId = data.bookmarkSpecificGroupWindowId;
+            if (currentWindowId && Number.isInteger(specificTabGroups[currentWindowId])) {
+                specificTabGroupId = specificTabGroups[currentWindowId];
+                specificGroupWindowId = currentWindowId;
+            } else if (data && Number.isInteger(data.bookmarkSpecificGroupId)) {
+                specificTabGroupId = data.bookmarkSpecificGroupId;
+                specificGroupWindowId = data.bookmarkSpecificGroupWindowId || null;
             }
             if (data && Number.isInteger(data[SAME_WINDOW_SPECIFIC_GROUP_WINDOW_KEY])) {
                 sameWindowSpecificGroupWindowId = data[SAME_WINDOW_SPECIFIC_GROUP_WINDOW_KEY];
@@ -335,10 +374,18 @@ try {
             const winId = parseInt(localStorage.getItem('bookmarkSpecificWindowId') || '', 10);
             if (mode) defaultOpenMode = mode;
             if (Number.isInteger(winId)) specificWindowId = winId;
-            const gid = parseInt(localStorage.getItem('bookmarkSpecificGroupId') || '', 10);
-            const gwid = parseInt(localStorage.getItem('bookmarkSpecificGroupWindowId') || '', 10);
-            if (Number.isInteger(gid)) specificTabGroupId = gid;
-            if (Number.isInteger(gwid)) specificGroupWindowId = gwid;
+            try {
+                specificTabGroups = JSON.parse(localStorage.getItem('bookmarkSpecificTabGroups') || '{}');
+            } catch (_) {}
+            if (currentWindowId && Number.isInteger(specificTabGroups[currentWindowId])) {
+                specificTabGroupId = specificTabGroups[currentWindowId];
+                specificGroupWindowId = currentWindowId;
+            } else {
+                const gid = parseInt(localStorage.getItem('bookmarkSpecificGroupId') || '', 10);
+                const gwid = parseInt(localStorage.getItem('bookmarkSpecificGroupWindowId') || '', 10);
+                if (Number.isInteger(gid)) specificTabGroupId = gid;
+                if (Number.isInteger(gwid)) specificGroupWindowId = gwid;
+            }
             const combinedWinId = parseInt(localStorage.getItem(SAME_WINDOW_SPECIFIC_GROUP_WINDOW_KEY) || '', 10);
             if (Number.isInteger(combinedWinId)) sameWindowSpecificGroupWindowId = combinedWinId;
             try { scopedCurrentGroups = JSON.parse(localStorage.getItem('bookmarkScopedCurrentGroups') || '{}'); } catch (_) { }
@@ -363,7 +410,8 @@ try {
                 'hyperlinkDefaultOpenMode',
                 'hyperlinkSpecificWindowId',
                 'hyperlinkSpecificGroupId',
-                'hyperlinkSpecificGroupWindowId'
+                'hyperlinkSpecificGroupWindowId',
+                'hyperlinkSpecificTabGroups'
             ]);
             console.log('[超链接初始化] 从 chrome.storage 读取:', data);
             if (data && typeof data.hyperlinkDefaultOpenMode === 'string') {
@@ -374,13 +422,17 @@ try {
                 hyperlinkSpecificWindowId = data.hyperlinkSpecificWindowId;
                 console.log('[超链接初始化] 设置 hyperlinkSpecificWindowId =', hyperlinkSpecificWindowId);
             }
-            if (data && Number.isInteger(data.hyperlinkSpecificGroupId)) {
-                hyperlinkSpecificTabGroupId = data.hyperlinkSpecificGroupId;
-                console.log('[超链接初始化] 设置 hyperlinkSpecificTabGroupId =', hyperlinkSpecificTabGroupId);
+            if (data && data.hyperlinkSpecificTabGroups && typeof data.hyperlinkSpecificTabGroups === 'object') {
+                hyperlinkSpecificTabGroups = data.hyperlinkSpecificTabGroups || {};
             }
-            if (data && Number.isInteger(data.hyperlinkSpecificGroupWindowId)) {
-                hyperlinkSpecificGroupWindowId = data.hyperlinkSpecificGroupWindowId;
-                console.log('[超链接初始化] 设置 hyperlinkSpecificGroupWindowId =', hyperlinkSpecificGroupWindowId);
+            if (currentWindowId && Number.isInteger(hyperlinkSpecificTabGroups[currentWindowId])) {
+                hyperlinkSpecificTabGroupId = hyperlinkSpecificTabGroups[currentWindowId];
+                hyperlinkSpecificGroupWindowId = currentWindowId;
+                console.log('[超链接初始化] 窗口专属设置 hyperlinkSpecificTabGroupId =', hyperlinkSpecificTabGroupId);
+            } else if (data && Number.isInteger(data.hyperlinkSpecificGroupId)) {
+                hyperlinkSpecificTabGroupId = data.hyperlinkSpecificGroupId;
+                hyperlinkSpecificGroupWindowId = data.hyperlinkSpecificGroupWindowId || null;
+                console.log('[超链接初始化] 默认设置 hyperlinkSpecificTabGroupId =', hyperlinkSpecificTabGroupId);
             }
         } else {
             console.log('[超链接初始化] 使用 localStorage');
@@ -394,15 +446,17 @@ try {
                 hyperlinkSpecificWindowId = winId;
                 console.log('[超链接初始化] 设置 hyperlinkSpecificWindowId =', hyperlinkSpecificWindowId);
             }
-            const gid = parseInt(localStorage.getItem('hyperlinkSpecificGroupId') || '', 10);
-            if (Number.isInteger(gid)) {
-                hyperlinkSpecificTabGroupId = gid;
-                console.log('[超链接初始化] 设置 hyperlinkSpecificTabGroupId =', hyperlinkSpecificTabGroupId);
-            }
-            const gwid = parseInt(localStorage.getItem('hyperlinkSpecificGroupWindowId') || '', 10);
-            if (Number.isInteger(gwid)) {
-                hyperlinkSpecificGroupWindowId = gwid;
-                console.log('[超链接初始化] 设置 hyperlinkSpecificGroupWindowId =', hyperlinkSpecificGroupWindowId);
+            try {
+                hyperlinkSpecificTabGroups = JSON.parse(localStorage.getItem('hyperlinkSpecificTabGroups') || '{}');
+            } catch (_) {}
+            if (currentWindowId && Number.isInteger(hyperlinkSpecificTabGroups[currentWindowId])) {
+                hyperlinkSpecificTabGroupId = hyperlinkSpecificTabGroups[currentWindowId];
+                hyperlinkSpecificGroupWindowId = currentWindowId;
+            } else {
+                const gid = parseInt(localStorage.getItem('hyperlinkSpecificGroupId') || '', 10);
+                const gwid = parseInt(localStorage.getItem('hyperlinkSpecificGroupWindowId') || '', 10);
+                if (Number.isInteger(gid)) hyperlinkSpecificTabGroupId = gid;
+                if (Number.isInteger(gwid)) hyperlinkSpecificGroupWindowId = gwid;
             }
         }
         console.log('[超链接初始化] 完成。当前状态:', {
@@ -454,28 +508,46 @@ async function resetSpecificWindowId() {
 async function setSpecificGroupInfo(groupId, windowId) {
     specificTabGroupId = groupId;
     specificGroupWindowId = windowId;
+    if (windowId) {
+        specificTabGroups[windowId] = groupId;
+    }
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
             await chrome.storage.local.set({
                 bookmarkSpecificGroupId: groupId,
-                bookmarkSpecificGroupWindowId: windowId
+                bookmarkSpecificGroupWindowId: windowId,
+                bookmarkSpecificTabGroups: specificTabGroups
             });
         } else {
             localStorage.setItem('bookmarkSpecificGroupId', String(groupId));
             localStorage.setItem('bookmarkSpecificGroupWindowId', String(windowId));
+            localStorage.setItem('bookmarkSpecificTabGroups', JSON.stringify(specificTabGroups));
         }
     } catch (_) { }
 }
 
-async function resetSpecificGroupInfo() {
-    specificTabGroupId = null;
-    specificGroupWindowId = null;
+async function resetSpecificGroupInfo(targetWindowId = null) {
+    const winId = targetWindowId || currentWindowId || specificGroupWindowId;
+    if (!targetWindowId || winId === currentWindowId) {
+        specificTabGroupId = null;
+        specificGroupWindowId = null;
+    }
+    if (winId) {
+        delete specificTabGroups[winId];
+    }
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-            await chrome.storage.local.remove(['bookmarkSpecificGroupId', 'bookmarkSpecificGroupWindowId']);
+            const updates = { bookmarkSpecificTabGroups: specificTabGroups };
+            if (!targetWindowId || winId === currentWindowId) {
+                await chrome.storage.local.remove(['bookmarkSpecificGroupId', 'bookmarkSpecificGroupWindowId']);
+            }
+            await chrome.storage.local.set(updates);
         } else {
-            localStorage.removeItem('bookmarkSpecificGroupId');
-            localStorage.removeItem('bookmarkSpecificGroupWindowId');
+            if (!targetWindowId || winId === currentWindowId) {
+                localStorage.removeItem('bookmarkSpecificGroupId');
+                localStorage.removeItem('bookmarkSpecificGroupWindowId');
+            }
+            localStorage.setItem('bookmarkSpecificTabGroups', JSON.stringify(specificTabGroups));
         }
     } catch (_) { }
 }
@@ -507,28 +579,46 @@ async function resetHyperlinkSpecificWindowId() {
 async function setHyperlinkSpecificGroupInfo(groupId, windowId) {
     hyperlinkSpecificTabGroupId = groupId;
     hyperlinkSpecificGroupWindowId = windowId;
+    if (windowId) {
+        hyperlinkSpecificTabGroups[windowId] = groupId;
+    }
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
             await chrome.storage.local.set({
                 hyperlinkSpecificGroupId: groupId,
-                hyperlinkSpecificGroupWindowId: windowId
+                hyperlinkSpecificGroupWindowId: windowId,
+                hyperlinkSpecificTabGroups: hyperlinkSpecificTabGroups
             });
         } else {
             localStorage.setItem('hyperlinkSpecificGroupId', String(groupId));
             localStorage.setItem('hyperlinkSpecificGroupWindowId', String(windowId));
+            localStorage.setItem('hyperlinkSpecificTabGroups', JSON.stringify(hyperlinkSpecificTabGroups));
         }
     } catch (_) { }
 }
 
-async function resetHyperlinkSpecificGroupInfo() {
-    hyperlinkSpecificTabGroupId = null;
-    hyperlinkSpecificGroupWindowId = null;
+async function resetHyperlinkSpecificGroupInfo(targetWindowId = null) {
+    const winId = targetWindowId || currentWindowId || hyperlinkSpecificGroupWindowId;
+    if (!targetWindowId || winId === currentWindowId) {
+        hyperlinkSpecificTabGroupId = null;
+        hyperlinkSpecificGroupWindowId = null;
+    }
+    if (winId) {
+        delete hyperlinkSpecificTabGroups[winId];
+    }
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-            await chrome.storage.local.remove(['hyperlinkSpecificGroupId', 'hyperlinkSpecificGroupWindowId']);
+            const updates = { hyperlinkSpecificTabGroups: hyperlinkSpecificTabGroups };
+            if (!targetWindowId || winId === currentWindowId) {
+                await chrome.storage.local.remove(['hyperlinkSpecificGroupId', 'hyperlinkSpecificGroupWindowId']);
+            }
+            await chrome.storage.local.set(updates);
         } else {
-            localStorage.removeItem('hyperlinkSpecificGroupId');
-            localStorage.removeItem('hyperlinkSpecificGroupWindowId');
+            if (!targetWindowId || winId === currentWindowId) {
+                localStorage.removeItem('hyperlinkSpecificGroupId');
+                localStorage.removeItem('hyperlinkSpecificGroupWindowId');
+            }
+            localStorage.setItem('hyperlinkSpecificTabGroups', JSON.stringify(hyperlinkSpecificTabGroups));
         }
     } catch (_) { }
 }
@@ -943,8 +1033,8 @@ async function handleTrackedWindowRemoved(windowId) {
         if (sameWindowSpecificGroupWindowId === windowId) {
             await resetSameWindowSpecificGroupState();
         }
-        if (specificGroupWindowId === windowId) {
-            await resetSpecificGroupInfo();
+        if (specificGroupWindowId === windowId || specificTabGroups[windowId]) {
+            await resetSpecificGroupInfo(windowId);
         }
 
         // 超链接系统：窗口关闭时重置
@@ -953,8 +1043,8 @@ async function handleTrackedWindowRemoved(windowId) {
             // 注意：不重置计数器，计数器由注册表系统管理
             console.log('[超链接 LifecycleGuards] 窗口已关闭，重置 ID');
         }
-        if (hyperlinkSpecificGroupWindowId === windowId) {
-            await resetHyperlinkSpecificGroupInfo();
+        if (hyperlinkSpecificGroupWindowId === windowId || hyperlinkSpecificTabGroups[windowId]) {
+            await resetHyperlinkSpecificGroupInfo(windowId);
             hyperlinkGroupCounter = 0; // 重置分组计数器
             console.log('[超链接 LifecycleGuards] 分组所在窗口已关闭，重置分组信息和计数器');
         }
@@ -999,14 +1089,27 @@ async function handleTrackedGroupRemoved(groupInfo) {
     if (!Number.isInteger(groupId)) return;
     try {
         // 书签系统
-        if (specificTabGroupId === groupId) {
+        let isSpecificGroupDeleted = false;
+        for (const [winId, gId] of Object.entries(specificTabGroups)) {
+            if (gId === groupId) {
+                await resetSpecificGroupInfo(winId);
+                isSpecificGroupDeleted = true;
+            }
+        }
+        if (specificTabGroupId === groupId && !isSpecificGroupDeleted) {
             await resetSpecificGroupInfo();
         }
 
         // 超链接系统：分组关闭时重置
-        if (hyperlinkSpecificTabGroupId === groupId) {
-            hyperlinkSpecificTabGroupId = null;
-            hyperlinkSpecificGroupWindowId = null;
+        let isHyperlinkSpecificGroupDeleted = false;
+        for (const [winId, gId] of Object.entries(hyperlinkSpecificTabGroups)) {
+            if (gId === groupId) {
+                await resetHyperlinkSpecificGroupInfo(winId);
+                isHyperlinkSpecificGroupDeleted = true;
+            }
+        }
+        if (hyperlinkSpecificTabGroupId === groupId && !isHyperlinkSpecificGroupDeleted) {
+            await resetHyperlinkSpecificGroupInfo();
             hyperlinkGroupCounter = 0; // 重置分组计数器
             console.log('[超链接 LifecycleGuards] 分组已关闭，重置 ID 和计数器');
         }
@@ -1141,9 +1244,9 @@ async function setScopedCurrentGroup(scopeKey, groupId, windowId) {
     } catch (_) { }
 }
 
-async function removeScopedCurrentGroup(scopeKey) {
-    if (!scopeKey || !scopedCurrentGroups || !scopedCurrentGroups[scopeKey]) return;
-    delete scopedCurrentGroups[scopeKey];
+async function removeScopedCurrentGroup(key) {
+    if (!key || !scopedCurrentGroups || !scopedCurrentGroups[key]) return;
+    delete scopedCurrentGroups[key];
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
             await chrome.storage.local.set({ bookmarkScopedCurrentGroups: scopedCurrentGroups });
@@ -2551,6 +2654,8 @@ async function showHyperlinkContextMenu(e, linkElement) {
     e.preventDefault();
     e.stopPropagation();
 
+    await ensureCurrentWindowId();
+
     const url = linkElement.href;
     console.log('[超链接菜单] URL:', url);
 
@@ -2942,6 +3047,8 @@ try {
 async function showContextMenu(e, node) {
     e.preventDefault();
     e.stopPropagation();
+
+    await ensureCurrentWindowId();
 
     currentContextNode = node;
 
@@ -3522,7 +3629,8 @@ function buildSubmenuItems(context) {
         // 新增：分栏“特定标签组”（放在“同一标签组”之下）
         (() => {
             const scope = getScopeFromContext(context);
-            const scopedEntry = (scope && scopedCurrentGroups) ? scopedCurrentGroups[scope.key] : null;
+            const key = currentWindowId && scope ? `${currentWindowId}:${scope.key}` : (scope ? scope.key : null);
+            const scopedEntry = (key && scopedCurrentGroups) ? scopedCurrentGroups[key] : null;
             const showBadge = !!(scopedEntry && Number.isInteger(scopedEntry.groupId));
             const scopeSuffix = scope && scope.prefix ? ` (${escapeHtml(scope.prefix)})` : '';
             const baseLabelZh = `专属标签组${scopeSuffix}`;
@@ -7051,16 +7159,23 @@ async function openInSpecificTabGroup(url, options = {}) {
         window.open(url, '_blank');
         return;
     }
+    
+    await ensureCurrentWindowId();
+    
     let tabCreated = false;
     try {
         if (forceNew) {
-            await resetSpecificGroupInfo();
+            await resetSpecificGroupInfo(currentWindowId);
         }
 
         // 如果已有分组，先校验分组与窗口是否有效
         if (specificTabGroupId && Number.isInteger(specificTabGroupId)) {
             let isValidGroup = false;
             try {
+                // 窗口必须匹配当前窗口，以实现窗口隔离
+                if (specificGroupWindowId !== currentWindowId) {
+                    throw new Error('Window mismatch');
+                }
                 // 校验组是否存在
                 if (chrome.tabGroups && chrome.tabGroups.get) {
                     await chrome.tabGroups.get(specificTabGroupId);
@@ -7071,8 +7186,8 @@ async function openInSpecificTabGroup(url, options = {}) {
                 }
                 isValidGroup = true;
             } catch (err) {
-                // 可能分组或窗口失效，重置后走创建逻辑
-                await resetSpecificGroupInfo();
+                // 可能分组或窗口失效，或者窗口不匹配，重置当前窗口的分组数据后走创建逻辑
+                await resetSpecificGroupInfo(currentWindowId);
             }
 
             if (isValidGroup) {
@@ -7196,12 +7311,16 @@ async function openInScopedTabGroup(url, opts = {}) {
         window.open(url, '_blank');
         return;
     }
+    
+    await ensureCurrentWindowId();
+    
     const scope = getScopeFromContext(context || {});
+    const key = currentWindowId ? `${currentWindowId}:${scope.key}` : scope.key;
     let tabCreated = false;
     try {
         // 尝试复用当前作用域的组
         if (!forceNew) {
-            const entry = scopedCurrentGroups[scope.key];
+            const entry = scopedCurrentGroups[key];
             if (entry && Number.isInteger(entry.groupId)) {
                 let isValidGroup = false;
                 try {
@@ -7211,7 +7330,7 @@ async function openInScopedTabGroup(url, opts = {}) {
                 } catch (_) {
                     // 失效：清除指针，落到新建逻辑
                     try {
-                        delete scopedCurrentGroups[scope.key];
+                        delete scopedCurrentGroups[key];
                         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
                             await chrome.storage.local.set({ bookmarkScopedCurrentGroups: scopedCurrentGroups });
                         } else {
@@ -7221,23 +7340,36 @@ async function openInScopedTabGroup(url, opts = {}) {
                 }
 
                 if (isValidGroup) {
-                    const tab = await chrome.tabs.create({ url, active: false, windowId: entry.windowId || undefined });
-                    tabCreated = true;
-                    if (tab && tab.id != null) {
-                        try {
-                            await chrome.tabs.group({ groupId: entry.groupId, tabIds: tab.id });
-                        } catch (groupErr) {
-                            console.warn('[分栏特定标签组] 复用分组加入失败 (仅保留标签):', groupErr);
+                    if (entry.windowId === currentWindowId) {
+                        const tab = await chrome.tabs.create({ url, active: false, windowId: entry.windowId || undefined });
+                        tabCreated = true;
+                        if (tab && tab.id != null) {
+                            try {
+                                await chrome.tabs.group({ groupId: entry.groupId, tabIds: tab.id });
+                            } catch (groupErr) {
+                                console.warn('[分栏特定标签组] 复用分组加入失败 (仅保留标签):', groupErr);
+                            }
                         }
+                        return;
+                    } else {
+                        // Window mismatch: remove the stale reference and proceed to create in current window
+                        try {
+                            delete scopedCurrentGroups[key];
+                            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                                await chrome.storage.local.set({ bookmarkScopedCurrentGroups: scopedCurrentGroups });
+                            } else {
+                                localStorage.setItem('bookmarkScopedCurrentGroups', JSON.stringify(scopedCurrentGroups));
+                            }
+                        } catch (_) {}
                     }
-                    return;
                 }
             }
         }
 
         // 新建：分配本作用域下一可用编号
         const nextNumber = await allocateNextScopedNumber(scope.key);
-        const tab = await chrome.tabs.create({ url, active: false });
+        const winId = currentWindowId || (await chrome.windows.getCurrent({ populate: false })).id;
+        const tab = await chrome.tabs.create({ url, active: false, windowId: winId });
         tabCreated = true;
         if (tab && tab.id != null) {
             try {
@@ -7249,7 +7381,7 @@ async function openInScopedTabGroup(url, opts = {}) {
                 if (chrome.tabGroups && chrome.tabGroups.update) {
                     try { await chrome.tabGroups.update(groupId, { title, color: 'blue' }); } catch (_) { }
                 }
-                await setScopedCurrentGroup(scope.key, groupId, windowId);
+                await setScopedCurrentGroup(key, groupId, windowId);
                 await registerScopedGroup(scope.key, groupId, windowId, nextNumber);
             } catch (groupErr) {
                 console.warn('[分栏特定标签组] 新建标签组失败 (仅保留标签):', groupErr);
@@ -13131,14 +13263,20 @@ async function openHyperlinkInSpecificTabGroup(url, options = {}) {
         return;
     }
 
+    await ensureCurrentWindowId();
+
     try {
         if (forceNew) {
-            await resetHyperlinkSpecificGroupInfo();
+            await resetHyperlinkSpecificGroupInfo(currentWindowId);
         }
 
         // 检查已有分组是否有效
         if (hyperlinkSpecificTabGroupId && Number.isInteger(hyperlinkSpecificTabGroupId)) {
             try {
+                // 窗口必须匹配当前窗口，以实现窗口隔离
+                if (hyperlinkSpecificGroupWindowId !== currentWindowId) {
+                    throw new Error('Window mismatch');
+                }
                 if (chrome.tabGroups && chrome.tabGroups.get) {
                     await chrome.tabGroups.get(hyperlinkSpecificTabGroupId);
                 }
@@ -13163,8 +13301,8 @@ async function openHyperlinkInSpecificTabGroup(url, options = {}) {
                 console.log(`[超链接] 在现有分组中打开: ${url}`);
                 return;
             } catch (error) {
-                console.warn('[超链接] 分组已失效，创建新分组');
-                await resetHyperlinkSpecificGroupInfo();
+                console.warn('[超链接] 分组已失效或窗口不匹配，创建新分组');
+                await resetHyperlinkSpecificGroupInfo(currentWindowId);
             }
         }
 
@@ -13172,10 +13310,10 @@ async function openHyperlinkInSpecificTabGroup(url, options = {}) {
         hyperlinkGroupCounter++;
         const groupTitle = `Hyperlink ${hyperlinkGroupCounter}`;
 
-        const currentWindow = await chrome.windows.getCurrent({ populate: false });
+        const winId = currentWindowId || (await chrome.windows.getCurrent({ populate: false })).id;
         const tab = await chrome.tabs.create({
             url,
-            windowId: currentWindow.id,
+            windowId: winId,
             active: true
         });
 
@@ -13186,7 +13324,7 @@ async function openHyperlinkInSpecificTabGroup(url, options = {}) {
                 collapsed: false
             });
 
-            await setHyperlinkSpecificGroupInfo(groupId, currentWindow.id);
+            await setHyperlinkSpecificGroupInfo(groupId, winId);
 
             console.log(`[超链接] 创建新分组"${groupTitle}": ${url}`);
         }
