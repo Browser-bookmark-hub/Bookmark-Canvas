@@ -275,6 +275,86 @@ async function ensureCurrentWindowId() {
     }
 }
 
+if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName !== 'local') return;
+        if (changes.bookmarkSpecificTabGroups) {
+            specificTabGroups = changes.bookmarkSpecificTabGroups.newValue || {};
+            if (currentWindowId && Number.isInteger(specificTabGroups[currentWindowId])) {
+                specificTabGroupId = specificTabGroups[currentWindowId];
+                specificGroupWindowId = currentWindowId;
+            } else {
+                specificTabGroupId = null;
+                specificGroupWindowId = null;
+            }
+        }
+        if (changes.hyperlinkSpecificTabGroups) {
+            hyperlinkSpecificTabGroups = changes.hyperlinkSpecificTabGroups.newValue || {};
+            if (currentWindowId && Number.isInteger(hyperlinkSpecificTabGroups[currentWindowId])) {
+                hyperlinkSpecificTabGroupId = hyperlinkSpecificTabGroups[currentWindowId];
+                hyperlinkSpecificGroupWindowId = currentWindowId;
+            } else {
+                hyperlinkSpecificTabGroupId = null;
+                hyperlinkSpecificGroupWindowId = null;
+            }
+        }
+        if (changes.bookmarkScopedCurrentGroups) {
+            scopedCurrentGroups = changes.bookmarkScopedCurrentGroups.newValue || {};
+        }
+        if (changes.bookmarkScopedWindows) {
+            scopedWindows = changes.bookmarkScopedWindows.newValue || {};
+        }
+        if (changes.bookmarkSameWindowSpecificGroupScopes) {
+            sameWindowSpecificGroupScopes = changes.bookmarkSameWindowSpecificGroupScopes.newValue || {};
+        }
+        
+        // 同步默认打开模式与特定窗口/分组配置
+        if (changes.bookmarkDefaultOpenMode) {
+            defaultOpenMode = changes.bookmarkDefaultOpenMode.newValue || 'new-tab';
+            try { window.defaultOpenMode = defaultOpenMode; } catch (_) {}
+        }
+        if (changes.hyperlinkDefaultOpenMode) {
+            hyperlinkDefaultOpenMode = changes.hyperlinkDefaultOpenMode.newValue || 'new-tab';
+            try { window.hyperlinkDefaultOpenMode = hyperlinkDefaultOpenMode; } catch (_) {}
+        }
+        if (changes.bookmarkSpecificWindowId) {
+            specificWindowId = changes.bookmarkSpecificWindowId.newValue || null;
+        }
+        if (changes.hyperlinkSpecificWindowId) {
+            hyperlinkSpecificWindowId = changes.hyperlinkSpecificWindowId.newValue || null;
+        }
+        if (changes.bookmarkSameWindowSpecificGroupWindowId) {
+            sameWindowSpecificGroupWindowId = changes.bookmarkSameWindowSpecificGroupWindowId.newValue || null;
+        }
+
+        // 同步手动选择记忆
+        if (changes.manualSelectedWindowId) {
+            manualSelectedWindowId = changes.manualSelectedWindowId.newValue || null;
+        }
+        if (changes.manualSelectedGroupId) {
+            manualSelectedGroupId = changes.manualSelectedGroupId.newValue || null;
+        }
+        if (changes.customWindowNames) {
+            customWindowNames = changes.customWindowNames.newValue || {};
+        }
+        if (changes.manualFocusWindow) {
+            manualFocusWindow = changes.manualFocusWindow.newValue === true;
+        }
+        if (changes.folderManualSelectedWindowId) {
+            folderManualSelectedWindowId = changes.folderManualSelectedWindowId.newValue || null;
+        }
+        if (changes.folderManualSelectedGroupId) {
+            folderManualSelectedGroupId = changes.folderManualSelectedGroupId.newValue || null;
+        }
+        if (changes.folderManualOpenMode) {
+            folderManualOpenMode = changes.folderManualOpenMode.newValue || 'open-all';
+        }
+        if (changes.folderManualFocusWindow) {
+            folderManualFocusWindow = changes.folderManualFocusWindow.newValue !== false;
+        }
+    });
+}
+
 // 全局：默认打开方式与特定窗口/分组ID
 let defaultOpenMode = 'new-tab'; // 默认：'new-tab'（新标签页）。可选：'new-tab' | 'new-window' | 'incognito' | 'specific-window' | 'specific-group' | 'scoped-window' | 'scoped-group' | 'same-window-specific-group'
 let specificWindowId = null; // chrome.windows Window ID
@@ -508,17 +588,25 @@ async function resetSpecificWindowId() {
 async function setSpecificGroupInfo(groupId, windowId) {
     specificTabGroupId = groupId;
     specificGroupWindowId = windowId;
-    if (windowId) {
-        specificTabGroups[windowId] = groupId;
-    }
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            const data = await chrome.storage.local.get('bookmarkSpecificTabGroups');
+            specificTabGroups = data.bookmarkSpecificTabGroups || {};
+            if (windowId) {
+                specificTabGroups[windowId] = groupId;
+            }
             await chrome.storage.local.set({
                 bookmarkSpecificGroupId: groupId,
                 bookmarkSpecificGroupWindowId: windowId,
                 bookmarkSpecificTabGroups: specificTabGroups
             });
         } else {
+            try {
+                specificTabGroups = JSON.parse(localStorage.getItem('bookmarkSpecificTabGroups') || '{}');
+            } catch (_) {}
+            if (windowId) {
+                specificTabGroups[windowId] = groupId;
+            }
             localStorage.setItem('bookmarkSpecificGroupId', String(groupId));
             localStorage.setItem('bookmarkSpecificGroupWindowId', String(windowId));
             localStorage.setItem('bookmarkSpecificTabGroups', JSON.stringify(specificTabGroups));
@@ -527,27 +615,36 @@ async function setSpecificGroupInfo(groupId, windowId) {
 }
 
 async function resetSpecificGroupInfo(targetWindowId = null) {
-    const winId = targetWindowId || currentWindowId || specificGroupWindowId;
-    if (!targetWindowId || winId === currentWindowId) {
+    const targetWinIdInt = targetWindowId ? parseInt(targetWindowId, 10) : null;
+    const winId = targetWinIdInt || currentWindowId || specificGroupWindowId;
+    if (!targetWindowId || winId === currentWindowId || winId === specificGroupWindowId) {
         specificTabGroupId = null;
         specificGroupWindowId = null;
     }
-    if (winId) {
-        delete specificTabGroups[winId];
-    }
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            const data = await chrome.storage.local.get('bookmarkSpecificTabGroups');
+            specificTabGroups = data.bookmarkSpecificTabGroups || {};
+            if (winId) {
+                delete specificTabGroups[winId];
+            }
             const updates = { bookmarkSpecificTabGroups: specificTabGroups };
-            if (!targetWindowId || winId === currentWindowId) {
+            await chrome.storage.local.set(updates);
+            if (!targetWindowId || winId === currentWindowId || winId === specificGroupWindowId) {
                 await chrome.storage.local.remove(['bookmarkSpecificGroupId', 'bookmarkSpecificGroupWindowId']);
             }
-            await chrome.storage.local.set(updates);
         } else {
-            if (!targetWindowId || winId === currentWindowId) {
+            try {
+                specificTabGroups = JSON.parse(localStorage.getItem('bookmarkSpecificTabGroups') || '{}');
+            } catch (_) {}
+            if (winId) {
+                delete specificTabGroups[winId];
+            }
+            localStorage.setItem('bookmarkSpecificTabGroups', JSON.stringify(specificTabGroups));
+            if (!targetWindowId || winId === currentWindowId || winId === specificGroupWindowId) {
                 localStorage.removeItem('bookmarkSpecificGroupId');
                 localStorage.removeItem('bookmarkSpecificGroupWindowId');
             }
-            localStorage.setItem('bookmarkSpecificTabGroups', JSON.stringify(specificTabGroups));
         }
     } catch (_) { }
 }
@@ -579,17 +676,25 @@ async function resetHyperlinkSpecificWindowId() {
 async function setHyperlinkSpecificGroupInfo(groupId, windowId) {
     hyperlinkSpecificTabGroupId = groupId;
     hyperlinkSpecificGroupWindowId = windowId;
-    if (windowId) {
-        hyperlinkSpecificTabGroups[windowId] = groupId;
-    }
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            const data = await chrome.storage.local.get('hyperlinkSpecificTabGroups');
+            hyperlinkSpecificTabGroups = data.hyperlinkSpecificTabGroups || {};
+            if (windowId) {
+                hyperlinkSpecificTabGroups[windowId] = groupId;
+            }
             await chrome.storage.local.set({
                 hyperlinkSpecificGroupId: groupId,
                 hyperlinkSpecificGroupWindowId: windowId,
                 hyperlinkSpecificTabGroups: hyperlinkSpecificTabGroups
             });
         } else {
+            try {
+                hyperlinkSpecificTabGroups = JSON.parse(localStorage.getItem('hyperlinkSpecificTabGroups') || '{}');
+            } catch (_) {}
+            if (windowId) {
+                hyperlinkSpecificTabGroups[windowId] = groupId;
+            }
             localStorage.setItem('hyperlinkSpecificGroupId', String(groupId));
             localStorage.setItem('hyperlinkSpecificGroupWindowId', String(windowId));
             localStorage.setItem('hyperlinkSpecificTabGroups', JSON.stringify(hyperlinkSpecificTabGroups));
@@ -598,27 +703,36 @@ async function setHyperlinkSpecificGroupInfo(groupId, windowId) {
 }
 
 async function resetHyperlinkSpecificGroupInfo(targetWindowId = null) {
-    const winId = targetWindowId || currentWindowId || hyperlinkSpecificGroupWindowId;
-    if (!targetWindowId || winId === currentWindowId) {
+    const targetWinIdInt = targetWindowId ? parseInt(targetWindowId, 10) : null;
+    const winId = targetWinIdInt || currentWindowId || hyperlinkSpecificGroupWindowId;
+    if (!targetWindowId || winId === currentWindowId || winId === hyperlinkSpecificGroupWindowId) {
         hyperlinkSpecificTabGroupId = null;
         hyperlinkSpecificGroupWindowId = null;
     }
-    if (winId) {
-        delete hyperlinkSpecificTabGroups[winId];
-    }
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            const data = await chrome.storage.local.get('hyperlinkSpecificTabGroups');
+            hyperlinkSpecificTabGroups = data.hyperlinkSpecificTabGroups || {};
+            if (winId) {
+                delete hyperlinkSpecificTabGroups[winId];
+            }
             const updates = { hyperlinkSpecificTabGroups: hyperlinkSpecificTabGroups };
-            if (!targetWindowId || winId === currentWindowId) {
+            await chrome.storage.local.set(updates);
+            if (!targetWindowId || winId === currentWindowId || winId === hyperlinkSpecificGroupWindowId) {
                 await chrome.storage.local.remove(['hyperlinkSpecificGroupId', 'hyperlinkSpecificGroupWindowId']);
             }
-            await chrome.storage.local.set(updates);
         } else {
-            if (!targetWindowId || winId === currentWindowId) {
+            try {
+                hyperlinkSpecificTabGroups = JSON.parse(localStorage.getItem('hyperlinkSpecificTabGroups') || '{}');
+            } catch (_) {}
+            if (winId) {
+                delete hyperlinkSpecificTabGroups[winId];
+            }
+            localStorage.setItem('hyperlinkSpecificTabGroups', JSON.stringify(hyperlinkSpecificTabGroups));
+            if (!targetWindowId || winId === currentWindowId || winId === hyperlinkSpecificGroupWindowId) {
                 localStorage.removeItem('hyperlinkSpecificGroupId');
                 localStorage.removeItem('hyperlinkSpecificGroupWindowId');
             }
-            localStorage.setItem('hyperlinkSpecificTabGroups', JSON.stringify(hyperlinkSpecificTabGroups));
         }
     } catch (_) { }
 }
@@ -810,6 +924,16 @@ async function persistSameWindowSpecificGroupScopes() {
 
 async function setSameWindowSpecificGroupScope(scopeKey, groupId, windowId, number) {
     if (!scopeKey) return;
+    try {
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            const data = await chrome.storage.local.get(SAME_WINDOW_SPECIFIC_GROUP_SCOPES_KEY);
+            sameWindowSpecificGroupScopes = data[SAME_WINDOW_SPECIFIC_GROUP_SCOPES_KEY] || {};
+        } else {
+            try {
+                sameWindowSpecificGroupScopes = JSON.parse(localStorage.getItem(SAME_WINDOW_SPECIFIC_GROUP_SCOPES_KEY) || '{}');
+            } catch (_) {}
+        }
+    } catch (_) {}
     sameWindowSpecificGroupScopes[scopeKey] = {
         groupId,
         windowId: windowId || null,
@@ -820,8 +944,18 @@ async function setSameWindowSpecificGroupScope(scopeKey, groupId, windowId, numb
 }
 
 async function clearSameWindowSpecificGroupScope(scopeKey) {
-    if (!scopeKey || !sameWindowSpecificGroupScopes) return;
-    if (sameWindowSpecificGroupScopes[scopeKey]) {
+    if (!scopeKey) return;
+    try {
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            const data = await chrome.storage.local.get(SAME_WINDOW_SPECIFIC_GROUP_SCOPES_KEY);
+            sameWindowSpecificGroupScopes = data[SAME_WINDOW_SPECIFIC_GROUP_SCOPES_KEY] || {};
+        } else {
+            try {
+                sameWindowSpecificGroupScopes = JSON.parse(localStorage.getItem(SAME_WINDOW_SPECIFIC_GROUP_SCOPES_KEY) || '{}');
+            } catch (_) {}
+        }
+    } catch (_) {}
+    if (sameWindowSpecificGroupScopes && sameWindowSpecificGroupScopes[scopeKey]) {
         delete sameWindowSpecificGroupScopes[scopeKey];
         await persistSameWindowSpecificGroupScopes();
     }
@@ -1234,49 +1368,93 @@ async function registerScopedGroup(scopeKey, groupId, windowId, number) {
 }
 
 async function setScopedCurrentGroup(scopeKey, groupId, windowId) {
-    scopedCurrentGroups[scopeKey] = { groupId, windowId: windowId || null };
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            const data = await chrome.storage.local.get('bookmarkScopedCurrentGroups');
+            scopedCurrentGroups = data.bookmarkScopedCurrentGroups || {};
+            scopedCurrentGroups[scopeKey] = { groupId, windowId: windowId || null };
             await chrome.storage.local.set({ bookmarkScopedCurrentGroups: scopedCurrentGroups });
         } else {
+            try {
+                scopedCurrentGroups = JSON.parse(localStorage.getItem('bookmarkScopedCurrentGroups') || '{}');
+            } catch (_) {}
+            scopedCurrentGroups[scopeKey] = { groupId, windowId: windowId || null };
             localStorage.setItem('bookmarkScopedCurrentGroups', JSON.stringify(scopedCurrentGroups));
         }
-    } catch (_) { }
+    } catch (_) {
+        scopedCurrentGroups[scopeKey] = { groupId, windowId: windowId || null };
+    }
 }
 
 async function removeScopedCurrentGroup(key) {
-    if (!key || !scopedCurrentGroups || !scopedCurrentGroups[key]) return;
-    delete scopedCurrentGroups[key];
+    if (!key) return;
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-            await chrome.storage.local.set({ bookmarkScopedCurrentGroups: scopedCurrentGroups });
+            const data = await chrome.storage.local.get('bookmarkScopedCurrentGroups');
+            scopedCurrentGroups = data.bookmarkScopedCurrentGroups || {};
+            if (scopedCurrentGroups[key]) {
+                delete scopedCurrentGroups[key];
+                await chrome.storage.local.set({ bookmarkScopedCurrentGroups: scopedCurrentGroups });
+            }
         } else {
-            localStorage.setItem('bookmarkScopedCurrentGroups', JSON.stringify(scopedCurrentGroups));
+            try {
+                scopedCurrentGroups = JSON.parse(localStorage.getItem('bookmarkScopedCurrentGroups') || '{}');
+            } catch (_) {}
+            if (scopedCurrentGroups[key]) {
+                delete scopedCurrentGroups[key];
+                localStorage.setItem('bookmarkScopedCurrentGroups', JSON.stringify(scopedCurrentGroups));
+            }
         }
-    } catch (_) { }
+    } catch (_) {
+        if (scopedCurrentGroups && scopedCurrentGroups[key]) {
+            delete scopedCurrentGroups[key];
+        }
+    }
 }
 
 async function setScopedWindow(scopeKey, windowId) {
-    scopedWindows[scopeKey] = windowId;
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            const data = await chrome.storage.local.get('bookmarkScopedWindows');
+            scopedWindows = data.bookmarkScopedWindows || {};
+            scopedWindows[scopeKey] = windowId;
             await chrome.storage.local.set({ bookmarkScopedWindows: scopedWindows });
         } else {
+            try {
+                scopedWindows = JSON.parse(localStorage.getItem('bookmarkScopedWindows') || '{}');
+            } catch (_) {}
+            scopedWindows[scopeKey] = windowId;
             localStorage.setItem('bookmarkScopedWindows', JSON.stringify(scopedWindows));
         }
-    } catch (_) { }
+    } catch (_) {
+        scopedWindows[scopeKey] = windowId;
+    }
 }
 
 async function removeScopedWindowEntry(scopeKey) {
-    if (!scopeKey || !scopedWindows || typeof scopedWindows[scopeKey] === 'undefined') return;
-    delete scopedWindows[scopeKey];
+    if (!scopeKey) return;
     try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-            await chrome.storage.local.set({ bookmarkScopedWindows: scopedWindows });
+            const data = await chrome.storage.local.get('bookmarkScopedWindows');
+            scopedWindows = data.bookmarkScopedWindows || {};
+            if (typeof scopedWindows[scopeKey] !== 'undefined') {
+                delete scopedWindows[scopeKey];
+                await chrome.storage.local.set({ bookmarkScopedWindows: scopedWindows });
+            }
         } else {
-            localStorage.setItem('bookmarkScopedWindows', JSON.stringify(scopedWindows));
+            try {
+                scopedWindows = JSON.parse(localStorage.getItem('bookmarkScopedWindows') || '{}');
+            } catch (_) {}
+            if (typeof scopedWindows[scopeKey] !== 'undefined') {
+                delete scopedWindows[scopeKey];
+                localStorage.setItem('bookmarkScopedWindows', JSON.stringify(scopedWindows));
+            }
         }
-    } catch (_) { }
+    } catch (_) {
+        if (scopedWindows && typeof scopedWindows[scopeKey] !== 'undefined') {
+            delete scopedWindows[scopeKey];
+        }
+    }
 }
 
 async function readPluginGroupRegistry() {
