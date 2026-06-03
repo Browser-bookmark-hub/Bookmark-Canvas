@@ -2289,7 +2289,7 @@ function initContextMenu() {
     // 当鼠标在菜单上滚动时，将事件传递给滚动容器
     contextMenu.addEventListener('wheel', (e) => {
         // 查找最近的滚动容器
-        const scrollContainer = contextMenu.closest('.permanent-section-body, .temp-node-body');
+        const scrollContainer = currentContextNode ? currentContextNode.closest('.permanent-section-body, .temp-node-body') : null;
         if (scrollContainer) {
             // 阻止菜单本身的默认滚动行为（因为菜单不是滚动容器）
             e.preventDefault();
@@ -2308,7 +2308,7 @@ function initContextMenu() {
 
     // 监听子菜单的滚轮，如果子菜单滚动，也隐藏或者直接滚动（由于子菜单是 fixed，这里可以同样处理滚动）
     contextSubmenu.addEventListener('wheel', (e) => {
-        const scrollContainer = contextMenu.closest('.permanent-section-body, .temp-node-body');
+        const scrollContainer = currentContextNode ? currentContextNode.closest('.permanent-section-body, .temp-node-body') : null;
         if (scrollContainer) {
             e.preventDefault();
             scrollContainer.scrollTop += e.deltaY;
@@ -3054,40 +3054,8 @@ async function showContextMenu(e, node) {
         });
     });
 
-    // 将菜单嵌入到DOM中（插入到被右键的节点后面）
-    embedContextMenu(node);
-
-    contextMenu.style.display = 'block';
-
-    // Apply custom positioning if horizontal layout and node level is 5 or below
-    const nodeLevel = parseInt(node.dataset.nodeLevel || '0', 10);
-    if (contextMenuHorizontal && nodeLevel >= 4) {
-        const iconEl = node.querySelector('.tree-icon');
-        if (iconEl) {
-            const iconRect = iconEl.getBoundingClientRect();
-            const iconCenter = iconRect.left + iconRect.width / 2;
-
-            // Reset positioning temporarily to measure default
-            contextMenu.style.left = '0px';
-            const menuRect = contextMenu.getBoundingClientRect();
-            const menuWidth = menuRect.width || contextMenu.offsetWidth || 250;
-            const defaultLeft = menuRect.left;
-
-            const treeContainer = node.closest('.bookmark-tree') || node.closest('.canvas-main-container') || document.body;
-            const treeRect = treeContainer.getBoundingClientRect();
-
-            let targetLeft = iconCenter - menuWidth / 2;
-            const padding = 8;
-            const minLeft = treeRect.left + padding;
-            const maxLeft = treeRect.right - padding - menuWidth;
-            targetLeft = Math.max(minLeft, Math.min(maxLeft, targetLeft));
-
-            const shift = targetLeft - defaultLeft;
-            contextMenu.style.left = `${shift}px`;
-        }
-    } else {
-        contextMenu.style.left = '';
-    }
+    // 使用固定定位显示菜单（不嵌入DOM，悬浮于卡片之上）
+    positionPrimaryContextMenu(e, node);
 }
 
 // 渲染二级菜单
@@ -3198,7 +3166,10 @@ function hideSubmenu() {
         contextSubmenu.style.display = 'none';
     }
     if (contextMenu && !contextMenuHorizontal) {
-        contextMenu.style.left = '';
+        if (contextMenu.dataset.originalLeft) {
+            contextMenu.style.left = contextMenu.dataset.originalLeft;
+            delete contextMenu.dataset.originalLeft;
+        }
     }
 }
 
@@ -3226,7 +3197,12 @@ function toggleSubmenu(triggerItem, context) {
 
     // 计算一级菜单的缩放比例 (scale)
     let scale = 1;
-    if (contextMenu) {
+    if (currentContextNode) {
+        const scaleInfo = __getBookmarkAddLocateContainerScale(currentContextNode);
+        if (scaleInfo && scaleInfo.scaleX) {
+            scale = scaleInfo.scaleX;
+        }
+    } else if (contextMenu) {
         const scaleInfo = __getBookmarkAddLocateContainerScale(contextMenu);
         if (scaleInfo && scaleInfo.scaleX) {
             scale = scaleInfo.scaleX;
@@ -3330,9 +3306,16 @@ function toggleSubmenu(triggerItem, context) {
 
         // 应用一级菜单的水平位移
         if (shift !== 0 && contextMenu) {
-            contextMenu.style.left = `${shift}px`;
+            const originalLeft = parseFloat(contextMenu.dataset.originalLeft) || parseFloat(contextMenu.style.left) || 0;
+            if (!contextMenu.dataset.originalLeft) {
+                contextMenu.dataset.originalLeft = contextMenu.style.left;
+            }
+            contextMenu.style.left = `${originalLeft + shift}px`;
         } else if (contextMenu) {
-            contextMenu.style.left = '';
+            if (contextMenu.dataset.originalLeft) {
+                contextMenu.style.left = contextMenu.dataset.originalLeft;
+                delete contextMenu.dataset.originalLeft;
+            }
         }
 
         // 重新计算移动后 trigger 按钮的实际水平坐标
@@ -3584,7 +3567,7 @@ function buildMenuItems(context) {
     return items;
 }
 
-// 将菜单嵌入到DOM中（插入到树节点后面）
+// 将菜单嵌入到DOM中（已弃用，保留以维持向后兼容性）
 function embedContextMenu(node) {
     // 从当前位置移除菜单
     if (contextMenu.parentElement) {
@@ -3618,11 +3601,117 @@ function embedContextMenu(node) {
     });
 }
 
+// 使用固定定位定位一级菜单（悬浮在卡片之上）
+function positionPrimaryContextMenu(event, node) {
+    // 确保菜单在body中
+    if (contextMenu.parentElement !== document.body) {
+        document.body.appendChild(contextMenu);
+    }
+
+    // 计算缩放比例
+    let scale = 1;
+    if (node) {
+        const scaleInfo = __getBookmarkAddLocateContainerScale(node);
+        if (scaleInfo && scaleInfo.scaleX) {
+            scale = scaleInfo.scaleX;
+        }
+    }
+
+    // 设置基本定位样式
+    contextMenu.style.cssText = `
+        position: fixed !important;
+        display: block !important;
+        margin: 0 !important;
+        z-index: 10001 !important;
+        transform: scale(${scale}) !important;
+        transform-origin: top left !important;
+    `;
+
+    // 获取点击位置
+    let clickX = 0;
+    let clickY = 0;
+
+    // 检查是不是在已开启菜单上点击了切换布局等操作重新渲染菜单
+    const isClickInsideMenu = event && event.target && contextMenu && contextMenu.contains(event.target);
+
+    if (isClickInsideMenu) {
+        const menuRect = contextMenu.getBoundingClientRect();
+        clickX = menuRect.left;
+        clickY = menuRect.top;
+    } else if (event && typeof event.clientX === 'number' && typeof event.clientY === 'number') {
+        clickX = event.clientX;
+        clickY = event.clientY;
+    } else if (node) {
+        const nodeRect = node.getBoundingClientRect();
+        clickX = nodeRect.left;
+        clickY = nodeRect.bottom;
+    }
+
+    // 获取菜单尺寸（先显示以获取真实尺寸）
+    contextMenu.style.visibility = 'hidden';
+    contextMenu.style.display = 'block';
+    const menuRect = contextMenu.getBoundingClientRect();
+    contextMenu.style.visibility = 'visible';
+
+    // 视口尺寸
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const margin = 8;
+
+    // 计算在缩放下的视觉大小
+    const visualWidth = menuRect.width;
+    const visualHeight = menuRect.height;
+
+    // 计算最佳位置（默认在鼠标右下方）
+    let left = clickX + 2;
+    let top = clickY + 2;
+
+    // 防止超出右边界
+    if (left + visualWidth > viewportWidth - margin) {
+        left = clickX - visualWidth - 2;
+    }
+
+    // 防止超出左边界
+    if (left < margin) {
+        left = margin;
+    }
+
+    // 防止超出底部边界
+    if (top + visualHeight > viewportHeight - margin) {
+        top = clickY - visualHeight - 2;
+    }
+
+    // 防止超出顶部边界
+    if (top < margin) {
+        top = margin;
+    }
+
+    contextMenu.style.left = `${left}px`;
+    contextMenu.style.top = `${top}px`;
+    contextMenu.style.right = 'auto';
+    contextMenu.style.bottom = 'auto';
+
+    console.log('[右键菜单] 使用固定定位:', {
+        clickX,
+        clickY,
+        menuWidth: visualWidth,
+        menuHeight: visualHeight,
+        scale,
+        finalLeft: left,
+        finalTop: top
+    });
+}
+
 // 隐藏菜单
 function hideContextMenu() {
     if (contextMenu) {
         contextMenu.style.display = 'none';
         contextMenu.style.left = ''; // Reset custom position!
+        contextMenu.style.top = '';  // Reset custom position!
+        contextMenu.style.position = ''; // Reset custom position!
+        contextMenu.style.margin = ''; // Reset custom position!
+        contextMenu.style.transform = ''; // Reset transform!
+        contextMenu.style.transformOrigin = ''; // Reset transform-origin!
 
         // 将菜单移回body，避免影响DOM结构
         if (contextMenu.parentElement !== document.body) {
