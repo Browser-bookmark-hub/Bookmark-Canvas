@@ -31935,7 +31935,7 @@ function addAnchorsToNode(nodeElement, nodeId) {
                 window.defaultOpenMode = window.getDefaultOpenMode();
             }
         } catch (_) { }
-        const mode = (typeof window !== 'undefined' && window.defaultOpenMode) || 'new-tab';
+        const mode = (typeof window !== 'undefined' && window.defaultOpenMode) || 'specific-window';
         if (mode === 'new-window') {
             if (typeof window.openBookmarkNewWindow === 'function') window.openBookmarkNewWindow(url, false); else window.open(url, '_blank');
         } else if (mode === 'incognito') {

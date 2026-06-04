@@ -12327,7 +12327,7 @@ function attachTreeEvents(treeContainer) {
                         window.defaultOpenMode = window.getDefaultOpenMode();
                     }
                 } catch (_) { }
-                const mode = (typeof window !== 'undefined' && window.defaultOpenMode) || (typeof defaultOpenMode !== 'undefined' ? defaultOpenMode : 'new-tab');
+                const mode = (typeof window !== 'undefined' && window.defaultOpenMode) || (typeof defaultOpenMode !== 'undefined' ? defaultOpenMode : 'specific-window');
 
                 const actionKey = `left-click-${mode}-${url}`;
                 if (typeof shouldAllowBookmarkOpen === 'function' && !shouldAllowBookmarkOpen(actionKey)) {

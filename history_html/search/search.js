@@ -977,6 +977,28 @@ function handleSearchResultsPanelClick(e) {
             chip.hidden = false;
         });
         locationMoreBtn.hidden = true;
+        const lessBtn = row.querySelector('.canvas-bookmark-location-less');
+        if (lessBtn) {
+            lessBtn.hidden = false;
+        }
+        return;
+    }
+
+    const locationLessBtn = e.target.closest('.canvas-bookmark-location-less');
+    if (locationLessBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const row = locationLessBtn.closest('.canvas-bookmark-location-chip-row');
+        if (!row) return;
+        row.classList.remove('is-expanded');
+        row.querySelectorAll('[data-location-chip-extra="true"]').forEach((chip) => {
+            chip.hidden = true;
+        });
+        locationLessBtn.hidden = true;
+        const moreBtn = row.querySelector('.canvas-bookmark-location-more');
+        if (moreBtn) {
+            moreBtn.hidden = false;
+        }
         return;
     }
 
@@ -2721,8 +2743,8 @@ function getCanvasSearchSignature() {
     const treeVersion = (typeof lastTreeSnapshotVersion !== 'undefined' && lastTreeSnapshotVersion !== null)
         ? String(lastTreeSnapshotVersion)
         : '';
-    const treeFingerprintLen = (typeof lastTreeFingerprint !== 'undefined' && lastTreeFingerprint)
-        ? String(lastTreeFingerprint.length)
+    const treeFingerprint = (typeof lastTreeFingerprint !== 'undefined' && lastTreeFingerprint)
+        ? String(lastTreeFingerprint)
         : '';
 
     // Temporary bookmarks/folders rely on CanvasState.tempSections.items.
@@ -2749,6 +2771,32 @@ function getCanvasSearchSignature() {
         contentChecksum = (contentChecksum + permDesc.length) % 10000;
     } catch (_) { }
 
+    let tempItemsChecksum = 0;
+    if (Array.isArray(CanvasState.tempSections)) {
+        const traverse = (item) => {
+            if (!item) return;
+            const id = String(item.id || '');
+            const title = String(item.title || '');
+            const url = String(item.url || '');
+            tempItemsChecksum = (tempItemsChecksum + id.length + title.length + url.length) % 1000000;
+            for (let i = 0; i < title.length; i++) {
+                tempItemsChecksum = (tempItemsChecksum + title.charCodeAt(i)) % 1000000;
+            }
+            for (let i = 0; i < url.length; i++) {
+                tempItemsChecksum = (tempItemsChecksum + url.charCodeAt(i)) % 1000000;
+            }
+            if (Array.isArray(item.children)) {
+                tempItemsChecksum = (tempItemsChecksum + item.children.length) % 1000000;
+                item.children.forEach(traverse);
+            }
+        };
+        for (const s of CanvasState.tempSections) {
+            if (s && Array.isArray(s.items)) {
+                s.items.forEach(traverse);
+            }
+        }
+    }
+
     const tempCounter = CanvasState.tempSectionCounter || 0;
     const mdCounter = CanvasState.mdNodeCounter || 0;
     const edgeCounter = CanvasState.edgeCounter || 0;
@@ -2759,7 +2807,7 @@ function getCanvasSearchSignature() {
         permanentCopiesLen = getPermanentCopyShellsForSearch().length;
     } catch (_) { }
 
-    return `${tempCount}:${mdCount}:${edgeCount}:${tempCounter}:${tempItemCounter}:${mdCounter}:${edgeCounter}:${contentChecksum}:${permanentCopiesLen}:${tempRootItemsCount}:${tempStateTimestamp}:${treeVersion}:${treeFingerprintLen}`;
+    return `${tempCount}:${mdCount}:${edgeCount}:${tempCounter}:${tempItemCounter}:${mdCounter}:${edgeCounter}:${contentChecksum}:${permanentCopiesLen}:${tempRootItemsCount}:${tempStateTimestamp}:${treeVersion}:${treeFingerprint}:${tempItemsChecksum}`;
 }
 
 /**
@@ -6288,7 +6336,7 @@ function renderCanvasSearchResults(results, options = {}) {
                                 : '';
                             return `${chip}${breakHtml}`;
                         }).join('');
-                        if (list.length <= 6) {
+                        if (list.length <= 5) {
                             return `<div class="canvas-bookmark-location-chip-row canvas-bookmark-location-chip-row-limited${compactClass}">${renderChipWithBreaks(list)}</div>`;
                         }
                         const visibleList = list.slice(0, 5);
@@ -6297,8 +6345,9 @@ function renderCanvasSearchResults(results, options = {}) {
                         const hidden = renderChipWithBreaks(hiddenList, { hidden: true, startIndex: visibleList.length });
                         return `<div class="canvas-bookmark-location-chip-row canvas-bookmark-location-chip-row-limited${compactClass}">
                             ${visible}
-                            <button type="button" class="canvas-bookmark-location-more" title="${escapeHtml(isZh ? '展开全部标识' : 'Show all markers')}">...</button>
                             ${hidden}
+                            <button type="button" class="canvas-bookmark-location-more" title="${escapeHtml(isZh ? '展开全部标识' : 'Show all markers')}">...</button>
+                            <button type="button" class="canvas-bookmark-location-less" title="${escapeHtml(isZh ? '收起部分标识' : 'Collapse markers')}" hidden><i class="fas fa-chevron-up"></i></button>
                         </div>`;
                     };
 

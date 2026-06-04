@@ -311,11 +311,11 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
         
         // 同步默认打开模式与特定窗口/分组配置
         if (changes.bookmarkDefaultOpenMode) {
-            defaultOpenMode = changes.bookmarkDefaultOpenMode.newValue || 'new-tab';
+            defaultOpenMode = changes.bookmarkDefaultOpenMode.newValue || 'specific-window';
             try { window.defaultOpenMode = defaultOpenMode; } catch (_) {}
         }
         if (changes.hyperlinkDefaultOpenMode) {
-            hyperlinkDefaultOpenMode = changes.hyperlinkDefaultOpenMode.newValue || 'new-tab';
+            hyperlinkDefaultOpenMode = changes.hyperlinkDefaultOpenMode.newValue || 'specific-window';
             try { window.hyperlinkDefaultOpenMode = hyperlinkDefaultOpenMode; } catch (_) {}
         }
         if (changes.bookmarkSpecificWindowId) {
@@ -357,13 +357,13 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
 }
 
 // 全局：默认打开方式与特定窗口/分组ID
-let defaultOpenMode = 'new-tab'; // 默认：'new-tab'（新标签页）。可选：'new-tab' | 'new-window' | 'incognito' | 'specific-window' | 'specific-group' | 'scoped-window' | 'scoped-group' | 'same-window-specific-group'
+let defaultOpenMode = 'specific-window'; // 默认：'specific-window'（同一窗口）。可选：'new-tab' | 'new-window' | 'incognito' | 'specific-window' | 'specific-group' | 'scoped-window' | 'scoped-group' | 'same-window-specific-group'
 let specificWindowId = null; // chrome.windows Window ID
 let specificTabGroupId = null; // chrome.tabGroups Group ID（在“特定标签组”模式下复用）
 let specificGroupWindowId = null; // 保存分组所在窗口，确保新开的标签在同一窗口
 
 // 超链接系统：独立的打开方式与窗口/分组ID（与书签系统完全隔离）
-let hyperlinkDefaultOpenMode = 'new-tab'; // 超链接的默认打开方式：'new-tab'（新标签页）
+let hyperlinkDefaultOpenMode = 'specific-window'; // 超链接的默认打开方式：'specific-window'（同一窗口）
 let hyperlinkSpecificWindowId = null; // 超链接专用的窗口ID
 let hyperlinkSpecificTabGroupId = null; // 超链接专用的分组ID
 let hyperlinkSpecificGroupWindowId = null; // 超链接分组所在窗口
@@ -2330,16 +2330,17 @@ function fitBatchPanelToContent(panel, options = {}) {
             desiredWidth = hasUserWidth
                 ? panelRect.width
                 : Math.min(content.scrollWidth + widthPadding, horizontalWidthCap);
-            desiredHeight = hasUserHeight
-                ? panelRect.height
-                : Math.min(content.scrollHeight + heightPadding, viewportHeight - margin * 2);
         } else {
             if (!hasUserWidth && content.scrollWidth > content.clientWidth + 1) {
                 desiredWidth = Math.min(content.scrollWidth + widthPadding, viewportWidth - margin * 2);
             }
-            if (!hasUserHeight && content.scrollHeight > content.clientHeight + 1) {
-                desiredHeight = Math.min(content.scrollHeight + heightPadding, viewportHeight - margin * 2);
-            }
+        }
+
+        // 高度贴合：如果用户没有手动调整过高度，则始终贴合内容，防止空白或异常滚动条
+        if (!hasUserHeight) {
+            desiredHeight = Math.min(content.scrollHeight + heightPadding, viewportHeight - margin * 2);
+        } else {
+            desiredHeight = panelRect.height;
         }
 
         let minWidth = parseFloat(panel.style.minWidth);
@@ -3654,7 +3655,7 @@ function toggleSubmenu(triggerItem, context) {
     }
 
     const triggerRect = triggerItem.getBoundingClientRect();
-    const submenuWidth = contextSubmenu.offsetWidth || 230;
+    const submenuWidth = contextSubmenu.offsetWidth || 280;
     const submenuHeight = contextSubmenu.offsetHeight || 300;
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
@@ -6390,7 +6391,7 @@ function __getBookmarkAddPositionOptions(context) {
         return [
             {
                 value: 'inside',
-                label: lang === 'zh_CN' ? '栏目内（默认）' : 'Inside Section (Default)'
+                label: lang === 'zh_CN' ? '生成特殊临时栏目' : 'Generate Special Temporary Section'
             }
         ];
     }
@@ -7588,6 +7589,11 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
         locateAfterActionInput.checked = initialLocateAfterAction;
     }
 
+    const locateField = modal.querySelector('.bookmark-add-secondary-field-inline');
+    if (locateField) {
+        locateField.style.display = (context && context.blankRoot) ? 'none' : '';
+    }
+
     const inlineWindowFolderInput = modal.querySelector('#bookmarkAddSecondaryWindowAsFolderInline');
     if (inlineWindowFolderInput) {
         inlineWindowFolderInput.addEventListener('click', (event) => {
@@ -7621,7 +7627,7 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
             const position = __readCheckedValue(modal, 'input[name="bookmarkAddPosition"]:checked', initialPosition);
             const inlineWindowFolderInput = modal.querySelector('#bookmarkAddSecondaryWindowAsFolderInline');
             const windowAsFolder = normalizedActionType === 'add-current-window' && !!(inlineWindowFolderInput && inlineWindowFolderInput.checked);
-            const locateAfterAction = !!(locateAfterActionInput && locateAfterActionInput.checked);
+            const locateAfterAction = (context && context.blankRoot) ? false : !!(locateAfterActionInput && locateAfterActionInput.checked);
             closeModal({
                 actionType: normalizedActionType,
                 position: __normalizeBookmarkAddPosition(context, position),
@@ -7663,7 +7669,7 @@ async function executeBookmarkAddAction(context, config, options = {}) {
     const actionType = __normalizeBookmarkAddActionType(config && config.actionType);
     const preferredPosition = __normalizeBookmarkAddPosition(context, config && config.position);
     const windowAsFolder = actionType === 'add-current-window' && __normalizeBookmarkAddWindowAsFolder(config && config.windowAsFolder);
-    const locateAfterAction = __normalizeBookmarkAddLocateAfterAction(config && config.locateAfterAction);
+    const locateAfterAction = (context && context.blankRoot) ? false : __normalizeBookmarkAddLocateAfterAction(config && config.locateAfterAction);
     const saveTemplate = options && options.saveTemplate !== false;
     const permanentCopyId = (context && context.permanentCopyId)
         ? String(context.permanentCopyId).trim()
@@ -8282,7 +8288,7 @@ async function openBookmarkNewTab(url, meta = {}) {
     if (!url) return;
     if (chrome && chrome.tabs) {
         try {
-            const tab = await chrome.tabs.create({ url: url });
+            const tab = await chrome.tabs.create({ url: url, active: false });
             if (tab && tab.id != null) {
                 await reportExtensionBookmarkOpen({
                     tabId: tab.id,
@@ -12599,10 +12605,26 @@ function restoreBatchPanelState(panel, anchorInfo) {
         }
 
         // 同步数据集
-        if (globalState.vertical.width) panel.dataset.userWidthVertical = String(globalState.vertical.width);
-        if (globalState.vertical.height) panel.dataset.userHeightVertical = String(globalState.vertical.height);
-        if (globalState.horizontal.width) panel.dataset.userWidthHorizontal = String(globalState.horizontal.width);
-        if (globalState.horizontal.height) panel.dataset.userHeightHorizontal = String(globalState.horizontal.height);
+        if (globalState.vertical.width) {
+            panel.dataset.userWidthVertical = String(globalState.vertical.width);
+        } else {
+            delete panel.dataset.userWidthVertical;
+        }
+        if (globalState.vertical.height) {
+            panel.dataset.userHeightVertical = String(globalState.vertical.height);
+        } else {
+            delete panel.dataset.userHeightVertical;
+        }
+        if (globalState.horizontal.width) {
+            panel.dataset.userWidthHorizontal = String(globalState.horizontal.width);
+        } else {
+            delete panel.dataset.userWidthHorizontal;
+        }
+        if (globalState.horizontal.height) {
+            panel.dataset.userHeightHorizontal = String(globalState.horizontal.height);
+        } else {
+            delete panel.dataset.userHeightHorizontal;
+        }
 
         const computeAnchorAlignedPosition = (rect, panelWidth, panelHeight) => {
             const gap = 8;
@@ -13203,12 +13225,12 @@ function saveBatchPanelState(panel, anchorInfo) {
             const userW = panel.dataset.userWidthVertical ? parseFloat(panel.dataset.userWidthVertical) : null;
             const userH = panel.dataset.userHeightVertical ? parseFloat(panel.dataset.userHeightVertical) : null;
             globalState.vertical.width = Number.isFinite(userW) ? userW : (Number.isFinite(currentWidth) ? currentWidth : BATCH_PANEL_VERTICAL_DEFAULT_WIDTH);
-            globalState.vertical.height = Number.isFinite(userH) ? userH : (Number.isFinite(currentHeight) ? currentHeight : null);
+            globalState.vertical.height = Number.isFinite(userH) ? userH : null; // 不将自适应的高度误存为用户手动调整的高度
         } else {
             const userW = panel.dataset.userWidthHorizontal ? parseFloat(panel.dataset.userWidthHorizontal) : null;
             const userH = panel.dataset.userHeightHorizontal ? parseFloat(panel.dataset.userHeightHorizontal) : null;
             globalState.horizontal.width = Number.isFinite(userW) ? userW : (Number.isFinite(currentWidth) ? currentWidth : 720);
-            globalState.horizontal.height = Number.isFinite(userH) ? userH : (Number.isFinite(currentHeight) ? currentHeight : null);
+            globalState.horizontal.height = Number.isFinite(userH) ? userH : null; // 不将自适应的高度误存为用户手动调整的高度
         }
         
         // 2. 保存位置
@@ -14404,7 +14426,7 @@ async function openHyperlinkNewTab(url) {
     if (!url) return;
     try {
         if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
-            await chrome.tabs.create({ url, active: true });
+            await chrome.tabs.create({ url, active: false });
         } else {
             window.open(url, '_blank');
         }

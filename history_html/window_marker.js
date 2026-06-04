@@ -19,37 +19,57 @@
     }
   }
 
+  // Helper to get translated prefix based on type/mode
+  function getModePrefix(currentLang) {
+    const isZh = currentLang === 'zh_CN';
+    if (isHyperlink) {
+      return isZh ? '超链接' : 'Hyperlink';
+    }
+    if (mode === 'same-window') {
+      return isZh ? '同一窗口' : 'Same Window';
+    }
+    if (mode === 'same-window-specific-group') {
+      return isZh ? '同窗专属组' : 'Same Window Exclusive Group';
+    }
+    if (mode === 'scoped-window') {
+      return isZh ? '专属窗口' : 'Exclusive Window';
+    }
+    return '';
+  }
+
   // 1. 立即执行：同步设置网页 Tab 标题，防止白屏或闪烁默认文件名
   function updateTabTitle(currentLang) {
     if (!t) return;
-    const isZh = currentLang === 'zh_CN';
-    let prefix = '';
+    const prefix = getModePrefix(currentLang);
+    const cleanT = t.trim();
     
-    if (isHyperlink) {
-      prefix = isZh ? '超链接' : 'Hyperlink';
-    } else {
-      if (mode === 'same-window') {
-        prefix = isZh ? '同一窗口' : 'Same Window';
-      } else if (mode === 'same-window-specific-group') {
-        prefix = isZh ? '同窗专属组' : 'Same Window Exclusive Group';
-      } else if (mode === 'scoped-window') {
-        prefix = isZh ? '专属窗口' : 'Exclusive Window';
+    // List of prefixes to strip from the title, ordered by length descending to avoid partial matches
+    const prefixesToStrip = [
+      'same window exclusive group',
+      'same-window-exclusive-group',
+      'same window',
+      'same-window',
+      'exclusive window',
+      'hyperlink',
+      '同窗专属组',
+      '同一窗口',
+      '专属窗口',
+      '超链接'
+    ];
+    
+    let strippedT = cleanT;
+    for (const p of prefixesToStrip) {
+      if (strippedT.toLowerCase().startsWith(p)) {
+        strippedT = strippedT.slice(p.length).replace(/^[-—\s]+/, '');
+        break;
       }
     }
     
-    const cleanT = t.trim();
     if (prefix) {
-      const lowerT = cleanT.toLowerCase();
-      const lowerPrefix = prefix.toLowerCase();
-      
-      const hasPrefix = lowerT.startsWith(lowerPrefix) || 
-                        (isZh && (lowerT.startsWith('same window') || lowerT.startsWith('same-window'))) ||
-                        (!isZh && (lowerT.startsWith('同一窗口') || lowerT.startsWith('同窗专属组') || lowerT.startsWith('专属窗口') || lowerT.startsWith('超链接')));
-      
-      if (hasPrefix) {
-        document.title = cleanT;
+      if (strippedT === '') {
+        document.title = prefix;
       } else {
-        document.title = `${prefix} ${cleanT}`;
+        document.title = `${prefix} ${strippedT}`;
       }
     } else {
       document.title = cleanT;
@@ -57,7 +77,17 @@
   }
 
   // 立即用默认语言初始化网页标题，防止白屏或闪烁默认文件名
-  const initialLang = navigator.language.startsWith('zh') ? 'zh_CN' : 'en';
+  const initialLang = (function () {
+    try {
+      const ui = (chrome?.i18n?.getUILanguage?.() || navigator.language || '').toLowerCase();
+      return ui.startsWith('zh') ? 'zh_CN' : 'en';
+    } catch (_) { }
+    try {
+      const ui = (navigator.language || '').toLowerCase();
+      return ui.startsWith('zh') ? 'zh_CN' : 'en';
+    } catch (_) { }
+    return 'en';
+  })();
   updateTabTitle(initialLang);
 
   // 翻译字典
@@ -147,8 +177,16 @@
     try {
       if (chrome && chrome.storage && chrome.storage.local) {
         const data = await chrome.storage.local.get(['preferredLang', 'currentTheme']);
-        if (data.preferredLang) {
+        if (data.preferredLang === 'zh_CN' || data.preferredLang === 'en') {
           lang = data.preferredLang;
+        } else {
+          lang = (function () {
+            try {
+              const ui = (chrome?.i18n?.getUILanguage?.() || '').toLowerCase();
+              return ui.startsWith('zh') ? 'zh_CN' : 'en';
+            } catch (_) { }
+            return 'en';
+          })();
         }
         if (localOverride) {
           currentActiveTheme = localOverride;
@@ -157,7 +195,17 @@
         }
       } else {
         const localLang = localStorage.getItem('preferredLang');
-        if (localLang) lang = localLang;
+        if (localLang === 'zh_CN' || localLang === 'en') {
+          lang = localLang;
+        } else {
+          lang = (function () {
+            try {
+              const ui = (navigator.language || '').toLowerCase();
+              return ui.startsWith('zh') ? 'zh_CN' : 'en';
+            } catch (_) { }
+            return 'en';
+          })();
+        }
 
         if (localOverride) {
           currentActiveTheme = localOverride;
@@ -167,7 +215,13 @@
         }
       }
     } catch (_) {
-      lang = navigator.language.startsWith('zh') ? 'zh_CN' : 'en';
+      lang = (function () {
+        try {
+          const ui = (navigator.language || '').toLowerCase();
+          return ui.startsWith('zh') ? 'zh_CN' : 'en';
+        } catch (_) { }
+        return 'en';
+      })();
       currentActiveTheme = localOverride || 'dark';
     }
 
@@ -248,7 +302,36 @@
 
     // 填充窗口 ID
     if (metaNameEl) {
-      const windowIdText = cleanTitle || t_str.workspaceTitle;
+      const prefix = getModePrefix(lang);
+      
+      const prefixesToStrip = [
+        'same window exclusive group',
+        'same-window-exclusive-group',
+        'same window',
+        'same-window',
+        'exclusive window',
+        'hyperlink',
+        '同窗专属组',
+        '同一窗口',
+        '专属窗口',
+        '超链接'
+      ];
+      
+      let strippedT = cleanTitle;
+      for (const p of prefixesToStrip) {
+        if (strippedT.toLowerCase().startsWith(p)) {
+          strippedT = strippedT.slice(p.length).replace(/^[-—\s]+/, '');
+          break;
+        }
+      }
+      
+      let windowIdText;
+      if (prefix) {
+        windowIdText = strippedT ? `${prefix} ${strippedT}` : prefix;
+      } else {
+        windowIdText = cleanTitle || t_str.workspaceTitle;
+      }
+      
       metaNameEl.textContent = `ID: ${windowIdText}`;
     }
 

@@ -104,6 +104,8 @@
       }
 
       .brand-badge {
+        display: inline-flex;
+        align-items: center;
         font-family: var(--font-mono);
         font-size: 10px;
         background: rgba(0, 0, 0, 0.05);
@@ -111,6 +113,11 @@
         padding: 1px 5px;
         border-radius: 3px;
         color: var(--accent);
+        white-space: nowrap;
+        line-height: 1;
+        height: 18px;
+        box-sizing: border-box;
+        transform: translateY(1px);
       }
 
       [data-theme="dark"] .brand-badge {
@@ -200,12 +207,19 @@
       }
 
       .panel-count {
+        display: inline-flex;
+        align-items: center;
         font-family: var(--font-mono);
         background: rgba(0, 0, 0, 0.05);
         padding: 1px 5px;
         border-radius: 3px;
         font-size: 10px;
         color: var(--text-secondary);
+        white-space: nowrap;
+        line-height: 1;
+        height: 18px;
+        box-sizing: border-box;
+        transform: translateY(1px);
       }
 
       [data-theme="dark"] .panel-count {

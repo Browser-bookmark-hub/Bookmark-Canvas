@@ -755,7 +755,8 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     pointer-events: none;
 }
 
-.canvas-bookmark-location-more {
+.canvas-bookmark-location-more,
+.canvas-bookmark-location-less {
     appearance: none;
     display: inline-flex;
     align-items: center;
@@ -773,10 +774,17 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     cursor: pointer;
 }
 
-.canvas-bookmark-location-more:hover {
+.canvas-bookmark-location-more:hover,
+.canvas-bookmark-location-less:hover {
     border-color: var(--border-hover, var(--border-color));
     background: var(--bg-tertiary);
     color: var(--text-primary);
+}
+.canvas-bookmark-location-chip-row-break[hidden],
+.canvas-bookmark-location-chip[hidden],
+.canvas-bookmark-location-more[hidden],
+.canvas-bookmark-location-less[hidden] {
+    display: none !important;
 }
 
 .canvas-bookmark-location-chip {

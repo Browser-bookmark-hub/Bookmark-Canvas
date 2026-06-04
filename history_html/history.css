@@ -4877,7 +4877,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
     min-width: 200px;
     max-width: 250px;
-    padding: 6px 0;
+    padding: 6px;
     font-size: 13px;
     margin-left: 20px;
     margin-top: 5px;
@@ -4905,12 +4905,17 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     padding: 10px 16px;
     cursor: pointer;
     color: var(--text-primary);
-    transition: background-color 0.2s;
+    transition: all 0.15s ease;
     user-select: none;
+    border-radius: 6px;
 }
 
 .context-menu-item:hover {
-    background: var(--bg-secondary);
+    background: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="dark"] .context-menu-item:hover {
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .context-menu-item.disabled {
@@ -4919,7 +4924,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .context-menu-item.disabled:hover {
-    background: transparent;
+    background: transparent !important;
 }
 
 .context-menu-item i {
@@ -4965,8 +4970,8 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
    仅作用于非横向形态，避免影响第二种形态（横向） */
 .bookmark-context-menu:not(.horizontal-layout) .context-menu-item {
     padding-top: 5px;
-    /* 原 10px → 5px，约减半 */
     padding-bottom: 5px;
+    margin: 2px 0;
 }
 
 .bookmark-context-menu:not(.horizontal-layout) .context-menu-separator {
@@ -4975,10 +4980,10 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     margin-bottom: 3px;
 }
 
-/* 纵向菜单：短分隔线（宽度为标准分隔线的一半） */
+/* 纵向菜单：短分隔线（宽度为标准分隔线的一半多） */
 .bookmark-context-menu:not(.horizontal-layout) .context-menu-separator.short {
-    width: 50%;
-    margin-left: 0;
+    width: 85%;
+    margin-left: auto;
     margin-right: auto;
 }
 
@@ -5160,7 +5165,12 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 
 .bookmark-context-menu.horizontal-layout .context-menu-item:hover {
-    background: var(--accent-light);
+    background: rgba(24, 119, 242, 0.08);
+    border-color: var(--accent-primary);
+}
+
+[data-theme="dark"] .bookmark-context-menu.horizontal-layout .context-menu-item:hover {
+    background: rgba(45, 136, 255, 0.15);
     border-color: var(--accent-primary);
 }
 
@@ -5293,13 +5303,14 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .bookmark-context-submenu {
     position: fixed !important;
     min-width: 170px !important;
-    max-width: 220px !important;
-    padding: 4px 0 !important;
+    max-width: 350px !important;
+    padding: 6px !important;
 }
 
 .bookmark-context-submenu .context-menu-item {
     padding: 6px 12px !important;
     gap: 8px !important;
+    border-radius: 6px !important;
 }
 
 .bookmark-context-submenu .context-menu-item i {
@@ -5317,6 +5328,10 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .bookmark-context-submenu .context-menu-separator {
     margin: 4px 0 !important;
+}
+
+.bookmark-context-submenu .context-menu-separator.short {
+    width: 92% !important;
 }
 
 /* ==================== 右键菜单按钮颜色样式 ==================== */
