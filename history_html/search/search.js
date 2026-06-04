@@ -31,13 +31,14 @@ const searchUiState = {
     resultPagingKey: '',
     resultVisibleCount: 0,
     resultHasMore: false,
-    resultPageSize: 80,
+    resultPageSize: 50,
     activeMode: 'bookmark',
     isMenuOpen: false,
     canvasSuggestionsVisible: false,
 
     // Canvas bookmark mode: group-by-section UI state
     bookmarkGroupCollapse: new Map(), // groupId -> boolean (true = collapsed)
+    bookmarkGroupVisibleCount: new Map(), // groupId -> number (visible count)
     bookmarkGroupModel: null // [{ header, children:[{item,s}] }]
     ,
     // Canvas bookmark search: whether to show bookmark / folder / domain results
@@ -1020,6 +1021,34 @@ function handleSearchResultsPanelClick(e) {
         const previous = searchUiState.bookmarkGroupCollapse.get(groupId);
         const wasCollapsed = typeof previous === 'boolean' ? previous : true;
         searchUiState.bookmarkGroupCollapse.set(groupId, !wasCollapsed);
+
+        if (!wasCollapsed) {
+            // It was expanded, now collapsing. Reset visible count to 10.
+            if (searchUiState.bookmarkGroupVisibleCount instanceof Map) {
+                searchUiState.bookmarkGroupVisibleCount.set(groupId, 10);
+            }
+        }
+
+        rerenderCanvasBookmarkResults(Number.isNaN(selectedIndex) ? searchUiState.selectedIndex : selectedIndex);
+        return;
+    }
+
+    const bookmarkGroupLoadMore = e.target.closest('.canvas-bookmark-group-load-more-btn');
+    if (bookmarkGroupLoadMore) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+
+        const groupId = String(bookmarkGroupLoadMore.getAttribute('data-bookmark-group-id') || '').trim();
+        const groupRow = bookmarkGroupLoadMore.closest('.search-result-item');
+        const selectedIndex = parseInt(groupRow && groupRow.getAttribute('data-index') || '-1', 10);
+        if (!groupId) return;
+
+        if (!(searchUiState.bookmarkGroupVisibleCount instanceof Map)) {
+            searchUiState.bookmarkGroupVisibleCount = new Map();
+        }
+        searchUiState.bookmarkGroupVisibleCount.set(groupId, Infinity);
         rerenderCanvasBookmarkResults(Number.isNaN(selectedIndex) ? searchUiState.selectedIndex : selectedIndex);
         return;
     }
@@ -3699,6 +3728,48 @@ function scoreCanvasSearchItem(item, query, options = {}) {
     // [Optim] Single letter query: strict prefix matching only to avoid noise (e.g. searching 'A' finding 'B-1' via 'a' in date/text)
     const isSingleChar = query.length === 1;
 
+    // Description Mode Multi-word AND Match
+    if (searchUiState.activeMode === 'description') {
+        const tokens = q.split(/\s+/).map(s => s.trim()).filter(Boolean);
+        if (!tokens.length) return -Infinity;
+        let totalScore = 0;
+
+        for (const t of tokens) {
+            let tokenScore = 0;
+            if (item.type === 'temp-section') {
+                if (item.__description && !isSingleChar && item.__description.includes(t)) {
+                    tokenScore = Math.max(tokenScore, 80);
+                }
+            } else if (item.type === 'permanent-section') {
+                if (item.__description && !isSingleChar && item.__description.includes(t)) {
+                    tokenScore = Math.max(tokenScore, 70);
+                }
+            } else if (item.type === 'md-node') {
+                if (item.__title) {
+                    if (isSingleChar && item.__title.startsWith(t)) {
+                        tokenScore = Math.max(tokenScore, 150);
+                    } else if (!isSingleChar && item.__title.includes(t)) {
+                        tokenScore = Math.max(tokenScore, 120);
+                    }
+                }
+                if (item.__text && !isSingleChar && item.__text.includes(t)) {
+                    tokenScore = Math.max(tokenScore, 90);
+                }
+            } else if (item.type === 'edge') {
+                if (item.__label) {
+                    if (isSingleChar && item.__label.startsWith(t)) {
+                        tokenScore = Math.max(tokenScore, 140);
+                    } else if (!isSingleChar && item.__label.includes(t)) {
+                        tokenScore = Math.max(tokenScore, 110);
+                    }
+                }
+            }
+            if (tokenScore === 0) return -Infinity;
+            totalScore += tokenScore;
+        }
+        return totalScore;
+    }
+
     const checkMatch = (text, scoreValPrefix, scoreValContains) => {
         if (!text) return -Infinity;
         const low = text.toLowerCase(); // Assuming text is already normalized if intended, but safe to re-lower or assume passed args are checked
@@ -5682,12 +5753,26 @@ function renderCanvasSearchResults(results, options = {}) {
     const disableLocationJumpBadges = false;
     const compactBookmarkToolbar = Boolean(fullscreenScope);
     const markQueryInText = (text) => {
-        const safe = escapeHtml(String(text || ''));
+        let safe = escapeHtml(String(text || ''));
         if (!queryText) return safe;
         try {
-            const escapedQuery = queryText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const re = new RegExp(`(${escapedQuery})`, 'gi');
-            return safe.replace(re, '<mark>$1</mark>');
+            const isBookmarkOrDesc = searchUiState.activeMode === 'bookmark' || searchUiState.activeMode === 'description';
+            if (isBookmarkOrDesc) {
+                const tokens = queryText.split(/\s+/).map(s => s.trim()).filter(Boolean);
+                if (!tokens.length) return safe;
+                // Sort descending by length to avoid sub-token matching inside other tokens before they are fully matched
+                tokens.sort((a, b) => b.length - a.length);
+                tokens.forEach((token) => {
+                    const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const re = new RegExp(`(${escapedToken})(?![^<>]*>)`, 'gi');
+                    safe = safe.replace(re, '<mark>$1</mark>');
+                });
+                return safe;
+            } else {
+                const escapedQuery = queryText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const re = new RegExp(`(${escapedQuery})`, 'gi');
+                return safe.replace(re, '<mark>$1</mark>');
+            }
         } catch (_) {
             return safe;
         }
@@ -5944,9 +6029,32 @@ function renderCanvasSearchResults(results, options = {}) {
         const groupId = String(groupItem && groupItem.id || '').trim();
         if (!groupId) return '';
         const isExpanded = isBookmarkGroupExpanded(groupId);
-        const childRowsHtml = isExpanded
-            ? targetItems.map((child, childIndex) => renderBookmarkGroupChildRow(child, groupItem, childIndex)).join('')
-            : '';
+        
+        let childRowsHtml = '';
+        if (isExpanded) {
+            if (!(searchUiState.bookmarkGroupVisibleCount instanceof Map)) {
+                searchUiState.bookmarkGroupVisibleCount = new Map();
+            }
+            const visibleLimit = searchUiState.bookmarkGroupVisibleCount.get(groupId) || 10;
+            const sliced = targetItems.slice(0, visibleLimit);
+            childRowsHtml = sliced.map((child, childIndex) => renderBookmarkGroupChildRow(child, groupItem, childIndex)).join('');
+            
+            if (targetItems.length > visibleLimit) {
+                const remain = targetItems.length - visibleLimit;
+                const loadMoreLabel = isZh
+                    ? `展开剩余 ${remain} 条`
+                    : `Show ${remain} more`;
+                childRowsHtml += `
+                    <div class="canvas-bookmark-group-load-more-row" style="padding: 6px 12px; display: flex; justify-content: center;">
+                        <button type="button" class="canvas-bookmark-group-load-more-btn" data-bookmark-group-id="${escapeHtml(groupId)}" style="border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-secondary); padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px;">
+                            <i class="fas fa-chevron-down" style="font-size:9px;"></i>
+                            <span>${escapeHtml(loadMoreLabel)}</span>
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
         return `
             <div class="canvas-bookmark-group-children" data-bookmark-group-id="${escapeHtml(groupId)}" ${isExpanded ? '' : 'hidden'}>
                 ${childRowsHtml}
@@ -6321,7 +6429,7 @@ function renderCanvasSearchResults(results, options = {}) {
                         const safeColor = escapeHtml(color);
                         return `<button type="button" class="${chipClass}${compactClass}" ${chipAttr} ${extraAttrs} style="${chipCursor} --loc-color:${safeColor}; border-color:${safeColor}; color:${safeColor}; background:${safeColor}18; ${extraStyle}" title="${escapeHtml(safeTitle)}"><span class="canvas-bookmark-location-chip-text">${text}</span></button>`;
                     };
-                    const renderLocationChipRow = (chips) => {
+                    const renderLocationChipRow = (chips, limit = 5) => {
                         const list = Array.isArray(chips) ? chips.filter(Boolean) : [];
                         const compactClass = compactBookmarkToolbar ? ' canvas-bookmark-location-chip-row-compact' : '';
                         const renderChipWithBreaks = (sourceList, options = {}) => sourceList.map((chipHtml, localIndex) => {
@@ -6331,16 +6439,17 @@ function renderCanvasSearchResults(results, options = {}) {
                                 ? chipHtml.replace('<button ', `<button ${hiddenAttr}`)
                                 : chipHtml;
                             const shouldBreak = (index + 1) % 3 === 0 && (index + 1) < list.length;
+                            const breakHiddenAttr = (options.hidden || (index + 1) === limit) ? 'hidden data-location-chip-extra="true" ' : '';
                             const breakHtml = shouldBreak
-                                ? `<span class="canvas-bookmark-location-chip-row-break" ${hiddenAttr}></span>`
+                                ? `<span class="canvas-bookmark-location-chip-row-break" ${breakHiddenAttr}></span>`
                                 : '';
                             return `${chip}${breakHtml}`;
                         }).join('');
-                        if (list.length <= 5) {
+                        if (list.length <= limit) {
                             return `<div class="canvas-bookmark-location-chip-row canvas-bookmark-location-chip-row-limited${compactClass}">${renderChipWithBreaks(list)}</div>`;
                         }
-                        const visibleList = list.slice(0, 5);
-                        const hiddenList = list.slice(5);
+                        const visibleList = list.slice(0, limit);
+                        const hiddenList = list.slice(limit);
                         const visible = renderChipWithBreaks(visibleList);
                         const hidden = renderChipWithBreaks(hiddenList, { hidden: true, startIndex: visibleList.length });
                         return `<div class="canvas-bookmark-location-chip-row canvas-bookmark-location-chip-row-limited${compactClass}">
@@ -6410,7 +6519,7 @@ function renderCanvasSearchResults(results, options = {}) {
 
                         locationsHtml += `<div class="canvas-bookmark-location-row canvas-bookmark-location-row-temp${compactBookmarkToolbar ? ' canvas-bookmark-location-row-compact' : ''}">
                             ${tempLabel}
-                            ${renderLocationChipRow(tempBadges)}
+                            ${renderLocationChipRow(tempBadges, 3)}
                         </div>`;
                     }
                 }
@@ -6704,7 +6813,7 @@ function renderCanvasSearchResults(results, options = {}) {
     syncBookmarkResultTitleLayout();
     showSearchResultsPanel();
     requestAnimationFrame(syncBookmarkResultTitleLayout);
-    updateSearchResultSelection(searchUiState.selectedIndex);
+    updateSearchResultSelection(searchUiState.selectedIndex, { ensureVisible: !options.skipEnsureVisible });
 
 }
 
@@ -6726,7 +6835,7 @@ function collectBookmarkItemsForTempSection() {
         return items;
     }
 
-    items = (searchUiState.results || []).filter(r => r && r.type === 'bookmark-item');
+    items = (searchUiState.resultAll || searchUiState.results || []).filter(r => r && r.type === 'bookmark-item');
     if (filter === 'bookmark') {
         items = items.filter(r => r.nodeType === 'bookmark');
     } else if (filter === 'folder') {
@@ -6778,7 +6887,8 @@ function rerenderCanvasBookmarkResults(selectedIndex = 0) {
         renderCanvasSearchResults(nextResults, {
             view: 'canvas',
             query,
-            selectedIndex: Number.isFinite(selectedIndex) ? selectedIndex : 0
+            selectedIndex: Number.isFinite(selectedIndex) ? selectedIndex : 0,
+            skipEnsureVisible: true
         });
         return;
     }
