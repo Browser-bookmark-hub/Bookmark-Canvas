@@ -14347,8 +14347,24 @@ body.canvas-popover-active .md-align-popover {
 }
 
 .click-to-clear-selectable:hover {
-    outline: 2px dashed var(--accent-primary);
+    outline: 2px dashed var(--error) !important;
     outline-offset: 2px;
+}
+
+/* 点击清除模式下的栏目蒙版 */
+.canvas-workspace.click-to-clear-mode .canvas-section-ctrl-overlay.active {
+    pointer-events: auto !important;
+    opacity: 1 !important;
+    background: rgba(239, 68, 68, 0.04) !important;
+    cursor: pointer !important;
+}
+
+.canvas-workspace.click-to-clear-mode .canvas-section-ctrl-overlay.active:hover {
+    background: rgba(239, 68, 68, 0.08) !important;
+}
+
+.canvas-workspace.click-to-clear-mode .click-to-clear-selected .canvas-section-ctrl-overlay.active {
+    background: rgba(239, 68, 68, 0.08) !important;
 }
 
 /* 连线点击清除特殊处理 */

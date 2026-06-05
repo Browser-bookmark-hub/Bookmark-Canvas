@@ -1245,6 +1245,7 @@ function updateCanvasGridLayerTransform(panX, panY, scale, force = false) {
 // =============================================================================
 
 function isSectionCtrlModeEvent(e) {
+    if (typeof clickToClearModeActive !== 'undefined' && clickToClearModeActive) return false;
     if (CanvasState.isSpacePressed) return false;
     return !!(CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.active) || (!!e && (isCustomCtrlKeyPressed(e) || e.metaKey));
 }
@@ -1306,7 +1307,7 @@ function registerSectionCtrlOverlay(element) {
         overlay.className = 'canvas-section-ctrl-overlay';
         overlay.addEventListener('mousedown', handleCtrlOverlayMouseDown, true);
         overlay.addEventListener('contextmenu', (e) => {
-            if (isSectionCtrlModeEvent(e)) {
+            if (isSectionCtrlModeEvent(e) || (typeof clickToClearModeActive !== 'undefined' && clickToClearModeActive)) {
                 e.preventDefault();
                 e.stopPropagation();
             }
@@ -1332,7 +1333,8 @@ function registerSectionCtrlOverlay(element) {
     overlay.dataset.sectionType = isPermanentSection
         ? 'permanent-section'
         : (element.classList.contains('md-canvas-node') ? 'md-node' : 'temp-node');
-    overlay.classList.toggle('active', !!(CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.active));
+    const isOverlayActive = !!(CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.active) || (typeof clickToClearModeActive !== 'undefined' && clickToClearModeActive);
+    overlay.classList.toggle('active', isOverlayActive);
 
     if (CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize && CanvasState.sectionCtrlMode.resize.element === element) {
         overlay.classList.add('ctrl-resize');
@@ -29301,6 +29303,13 @@ function startClickToClearMode() {
         workspace.classList.add('click-to-clear-mode');
     }
 
+    // 激活蒙版状态
+    try {
+        refreshSectionCtrlOverlays();
+    } catch (err) {
+        console.warn('[Canvas] refreshSectionCtrlOverlays failed on start:', err);
+    }
+
     // 为所有临时栏目和空白栏目添加点击选择监听
     addClickToClearListeners();
 
@@ -29639,6 +29648,13 @@ function cancelClickToClearMode() {
     const workspace = document.getElementById('canvasWorkspace');
     if (workspace) {
         workspace.classList.remove('click-to-clear-mode');
+    }
+
+    // 还原蒙版状态
+    try {
+        refreshSectionCtrlOverlays();
+    } catch (err) {
+        console.warn('[Canvas] refreshSectionCtrlOverlays failed on cancel:', err);
     }
 
     // 移除所有选中状态和监听器
