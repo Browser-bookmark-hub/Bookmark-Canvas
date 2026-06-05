@@ -410,10 +410,21 @@ function hideSearchResultsPanel() {
         panel.classList.remove('visible');
         try { panel.dataset.panelType = ''; } catch (_) { }
     }
+
+    // 如果之前触发了同步构建 fallback，在搜索框关闭时将其回写到 IndexedDB，并清空 fallback 标记
+    if (typeof SearchIndexManager !== 'undefined' && SearchIndexManager.hasPendingSyncWriteBack) {
+        SearchIndexManager.hasPendingSyncWriteBack = false;
+        console.log('[Search] Sync build fallback was triggered. Writing back to IndexedDB on exit...');
+        saveMemoryIndexToIndexedDb().catch(err => {
+            console.error('[Search] Failed to write back sync fallback index:', err);
+        });
+    }
+
     try {
         if (typeof searchUiState === 'object' && searchUiState) {
             searchUiState.canvasSuggestionsVisible = false;
-            // 释放大结果缓存，避免长时间驻留内存（下次输入会重新计算）
+            
+            // 立即清理 UI 搜索结果缓存，保证下次打开界面干净
             searchUiState.results = [];
             searchUiState.resultSource = [];
             searchUiState.resultAll = [];
@@ -421,6 +432,11 @@ function hideSearchResultsPanel() {
             searchUiState.resultVisibleCount = 0;
             searchUiState.resultHasMore = false;
             searchUiState.selectedIndex = -1;
+
+            // 5分钟防抖延迟卸载内存物理索引，防范频繁开关搜索导致的磁盘 I/O 轰炸
+            if (typeof scheduleReleaseSearchMemoryDebounced === 'function') {
+                scheduleReleaseSearchMemoryDebounced();
+            }
         }
     } catch (_) { }
 }
@@ -874,13 +890,24 @@ function handleSearchKeydown(e) {
 /**
  * 搜索输入框聚焦处理
  */
-function handleSearchInputFocus(e) {
+async function handleSearchInputFocus(e) {
     try {
+        // 取消由于搜索框关闭触发的 5 分钟延迟卸载内存缓存定时器，直接复用当前内存索引
+        if (typeof cancelReleaseSearchMemory === 'function') {
+            cancelReleaseSearchMemory();
+        }
         const input = e && e.target ? e.target : document.getElementById('searchInput');
         if (!input) return;
         if (isSidePanelModeInSearch()) {
             setSidePanelSearchExpanded(true);
         }
+        
+        // 确保主动加载当前激活模式的索引和坐标映射
+        const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
+        if (typeof ensureIndexForModeLoaded === 'function') {
+            await ensureIndexForModeLoaded(activeMode);
+        }
+
         const q = (input.value || '').trim().toLowerCase();
 
         if (!q) {
@@ -1838,6 +1865,12 @@ function buildTimeSearchableString(timestamp) {
  * 应在 DOM 加载完成后调用
  */
 function initSearchEvents() {
+    if (typeof SearchIndexManager !== 'undefined' && typeof SearchIndexManager.init === 'function') {
+        SearchIndexManager.init().catch(err => {
+            console.error('[Search] Failed to initialize SearchIndexManager in initSearchEvents:', err);
+        });
+    }
+
     const searchInput = document.getElementById('searchInput');
     const searchResultsPanel = getSearchResultsPanel();
 
@@ -2219,7 +2252,7 @@ function getActiveSearchMode() {
     return SEARCH_MODES.find(m => m.key === searchUiState.activeMode) || SEARCH_MODES[0];
 }
 
-function setSearchMode(modeKey, options = {}) {
+async function setSearchMode(modeKey, options = {}) {
     if (modeKey === 'tag') modeKey = 'bookmark';
     const mode = SEARCH_MODES.find(m => m.key === modeKey);
     if (!mode) return;
@@ -2240,6 +2273,18 @@ function setSearchMode(modeKey, options = {}) {
     searchUiState.showFullscreenDescriptionOthers = false;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
     renderSearchModeUI();
+
+    // 确保异步加载目标模式的分片索引，加载完成后再触发搜索渲染，避免回退到同步内存构建
+    if (typeof ensureIndexForModeLoaded === 'function') {
+        try {
+            await ensureIndexForModeLoaded(modeKey);
+        } catch (_) {}
+    }
+
+    // Active mode check: if the user quickly selected another mode during index loading, abort
+    if (searchUiState.activeMode !== modeKey) {
+        return;
+    }
 
     // Bookmark mode includes tag matching, so warm up the permanent identityMap cache.
     if (modeKey === 'bookmark' && typeof window !== 'undefined' && window.TagSystem && window.TagSystem.ensurePermTagsLoaded) {
@@ -2283,8 +2328,8 @@ function setSearchMode(modeKey, options = {}) {
             }
         } catch (_) { }
 
-        // Refresh search if there is query
-        if (input.value.trim()) {
+        // Refresh search if there is query (bookmark mode is skipped as it handles this async via ensurePermTagsLoaded)
+        if (input.value.trim() && modeKey !== 'bookmark') {
             const q = input.value.trim();
             const isCanvas = getCurrentViewSafe() === 'canvas';
 
@@ -2697,10 +2742,6 @@ function initSearchModeUI() {
                                 }
                             }
                         } catch (_) { }
-                        // Optional: Select text or move cursor to start? 
-                        // User said "move to text we input", implying cursor position.
-                        // Default focus behavior usually puts cursor at end or selects all depending on browser.
-                        // Let's ensure it's usable.
                     }
                 }
             }
@@ -2746,6 +2787,62 @@ let canvasSearchDb = {
     bookmarkIndex: [],     // 书签 (Raw Bookmarks)
     itemById: new Map()
 };
+let canvasSearchLoadedModes = new Set();
+
+function normalizeCanvasSearchModeKey(mode) {
+    if (mode === 'bookmark' || mode === 'tag') return 'bookmark';
+    if (mode === 'description') return 'description';
+    return 'structure';
+}
+
+function markCanvasSearchModeLoaded(mode) {
+    canvasSearchLoadedModes.add(normalizeCanvasSearchModeKey(mode));
+}
+
+function markAllCanvasSearchModesLoaded() {
+    canvasSearchLoadedModes = new Set(['bookmark', 'structure', 'description']);
+}
+
+let canvasSearchReadyWaitPromise = null;
+
+function getActiveCanvasState() {
+    if (typeof window !== 'undefined' && window.CanvasModule && window.CanvasModule.CanvasState) {
+        return window.CanvasModule.CanvasState;
+    }
+    if (typeof CanvasState !== 'undefined') {
+        return CanvasState;
+    }
+    return null;
+}
+
+function isCanvasSearchStateReady() {
+    if (!getActiveCanvasState()) return false;
+    if (typeof window !== 'undefined' && window.__bookmarkCanvasSearchStateReady === true) return true;
+    return false;
+}
+
+function waitForCanvasSearchStateReady() {
+    if (isCanvasSearchStateReady()) return Promise.resolve(true);
+    if (canvasSearchReadyWaitPromise) return canvasSearchReadyWaitPromise;
+
+    canvasSearchReadyWaitPromise = new Promise((resolve) => {
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+            resolve(false);
+            return;
+        }
+        const onReady = () => {
+            cleanup();
+            resolve(true);
+        };
+        const cleanup = () => {
+            try { window.removeEventListener('canvas-search-state-ready', onReady); } catch (_) { }
+            canvasSearchReadyWaitPromise = null;
+        };
+        window.addEventListener('canvas-search-state-ready', onReady, { once: true });
+    });
+
+    return canvasSearchReadyWaitPromise;
+}
 
 /**
  * 画布搜索高亮状态
@@ -2762,13 +2859,10 @@ const canvasSearchHighlightState = {
  * 获取画布搜索签名（用于缓存失效判断）
  */
 function getCanvasSearchSignature() {
-    if (typeof CanvasState === 'undefined') return '';
+    const activeCanvasState = getActiveCanvasState();
+    if (!activeCanvasState) return '';
 
-    const tempCount = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
-    const mdCount = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.length : 0;
-    const edgeCount = Array.isArray(CanvasState.edges) ? CanvasState.edges.length : 0;
-
-    // Permanent bookmarks/folders rely on the cached bookmark tree snapshot.
+    const tempStateTimestamp = activeCanvasState.tempStateTimestamp || 0;
     const treeVersion = (typeof lastTreeSnapshotVersion !== 'undefined' && lastTreeSnapshotVersion !== null)
         ? String(lastTreeSnapshotVersion)
         : '';
@@ -2776,67 +2870,12 @@ function getCanvasSearchSignature() {
         ? String(lastTreeFingerprint)
         : '';
 
-    // Temporary bookmarks/folders rely on CanvasState.tempSections.items.
-    // We prefer a timestamp written by the canvas module (cheap + reliable).
-    const tempStateTimestamp = CanvasState.tempStateTimestamp || 0;
-    const tempItemCounter = CanvasState.tempItemCounter || 0;
-
-    // 使用计数器 + 简单的标题和说明 Checksum 作为签名
-    // 解决：用户修改标题或说明后，计数器不变导致搜索索引不更新的问题
-    let contentChecksum = 0;
-    let tempRootItemsCount = 0;
-    if (Array.isArray(CanvasState.tempSections)) {
-        for (const s of CanvasState.tempSections) {
-            // 简单校验和：标题长度 + 说明长度
-            if (!s) continue;
-            if (s.title) contentChecksum = (contentChecksum + s.title.length) % 10000;
-            if (s.description) contentChecksum = (contentChecksum + s.description.length) % 10000;
-            if (Array.isArray(s.items)) tempRootItemsCount = (tempRootItemsCount + s.items.length) % 100000;
-        }
-    }
-    // 加入永久栏目说明的 checksum
-    try {
-        const permDesc = getPermanentDescriptionTextForSearch(null);
-        contentChecksum = (contentChecksum + permDesc.length) % 10000;
-    } catch (_) { }
-
-    let tempItemsChecksum = 0;
-    if (Array.isArray(CanvasState.tempSections)) {
-        const traverse = (item) => {
-            if (!item) return;
-            const id = String(item.id || '');
-            const title = String(item.title || '');
-            const url = String(item.url || '');
-            tempItemsChecksum = (tempItemsChecksum + id.length + title.length + url.length) % 1000000;
-            for (let i = 0; i < title.length; i++) {
-                tempItemsChecksum = (tempItemsChecksum + title.charCodeAt(i)) % 1000000;
-            }
-            for (let i = 0; i < url.length; i++) {
-                tempItemsChecksum = (tempItemsChecksum + url.charCodeAt(i)) % 1000000;
-            }
-            if (Array.isArray(item.children)) {
-                tempItemsChecksum = (tempItemsChecksum + item.children.length) % 1000000;
-                item.children.forEach(traverse);
-            }
-        };
-        for (const s of CanvasState.tempSections) {
-            if (s && Array.isArray(s.items)) {
-                s.items.forEach(traverse);
-            }
-        }
-    }
-
-    const tempCounter = CanvasState.tempSectionCounter || 0;
-    const mdCounter = CanvasState.mdNodeCounter || 0;
-    const edgeCounter = CanvasState.edgeCounter || 0;
-
-    // Check permanent section copies count for cache invalidation
     let permanentCopiesLen = 0;
     try {
         permanentCopiesLen = getPermanentCopyShellsForSearch().length;
     } catch (_) { }
 
-    return `${tempCount}:${mdCount}:${edgeCount}:${tempCounter}:${tempItemCounter}:${mdCounter}:${edgeCounter}:${contentChecksum}:${permanentCopiesLen}:${tempRootItemsCount}:${tempStateTimestamp}:${treeVersion}:${treeFingerprint}:${tempItemsChecksum}`;
+    return `v2:${tempStateTimestamp}:${treeVersion}:${treeFingerprint}:${permanentCopiesLen}`;
 }
 
 /**
@@ -2850,6 +2889,7 @@ function resetCanvasSearchDb(reason = '') {
         bookmarkIndex: [],
         itemById: new Map()
     };
+    canvasSearchLoadedModes = new Set();
     if (searchUiState && searchUiState.domainIndexCache) {
         searchUiState.domainIndexCache = null;
     }
@@ -2902,252 +2942,286 @@ function updateCanvasSearchBookmarkTags(targets) {
     return changed;
 }
 
-// ==================== Phase 3: 索引构建 ====================
+// ==================== Phase 3: 缓存与空闲优化管理器 ====================
 
-/**
- * 构建画布搜索数据库
- * 包含：说明搜索（MD卡片、连接线、栏目说明）+ 卡片搜索（标题）
- */
-function buildCanvasSearchDb() {
-    const signature = getCanvasSearchSignature();
-    if (canvasSearchDb.signature === signature &&
-        Array.isArray(canvasSearchDb.structureIndex) &&
-        Array.isArray(canvasSearchDb.descriptionIndex) &&
-        Array.isArray(canvasSearchDb.bookmarkIndex)) {
-        return canvasSearchDb;
+let isSearchStorageListening = false;
+
+function startListeningStorageChanges() {
+    if (typeof chrome !== 'undefined' && chrome && chrome.storage && chrome.storage.onChanged) {
+        if (!isSearchStorageListening) {
+            chrome.storage.onChanged.addListener(handleSearchStorageChange);
+            isSearchStorageListening = true;
+            console.log('[Search] Started listening to chrome.storage changes.');
+        }
     }
+}
 
-    const startTime = performance.now();
-    const structureIndex = [];
-    const descriptionIndex = [];
-    const bookmarkIndex = [];
-    const itemById = new Map();
-
-    if (typeof CanvasState === 'undefined') {
-        canvasSearchDb = {
-            signature,
-            structureIndex: [],
-            descriptionIndex: [],
-            bookmarkIndex: [],
-            itemById: new Map()
-        };
-        return canvasSearchDb;
+function stopListeningStorageChanges() {
+    if (typeof chrome !== 'undefined' && chrome && chrome.storage && chrome.storage.onChanged) {
+        if (isSearchStorageListening) {
+            chrome.storage.onChanged.removeListener(handleSearchStorageChange);
+            isSearchStorageListening = false;
+            console.log('[Search] Stopped listening to chrome.storage changes.');
+        }
     }
+}
 
-    // Helper: Convert preset color to hex
-    const presetToHex = (preset) => {
-        switch (String(preset)) {
-            case '1': return '#fb464c'; // Red
-            case '2': return '#e9973f'; // Orange
-            case '3': return '#e0de71'; // Yellow
-            case '4': return '#44cf6e'; // Green
-            case '5': return '#53dfdd'; // Cyan
-            case '6': return '#a882ff'; // Purple
-            case 'red': return '#fb464c';
-            case 'orange': return '#e9973f';
-            case 'yellow': return '#e0de71';
-            case 'green': return '#44cf6e';
-            case 'cyan': return '#53dfdd';
-            case 'blue': return '#2563eb'; // Temp section blue
-            case 'purple': return '#a882ff';
-            case 'gray': return '#9ca3af';
-            default: return null;
-        }
-    };
+// 提取的辅助工具函数（原定义在 buildCanvasSearchDbSync 内部）
+const toAlpha = (num) => {
+    if (!Number.isFinite(num) || num <= 0) return '';
+    let s = '';
+    while (num > 0) {
+        const rem = (num - 1) % 26;
+        s = String.fromCharCode(65 + rem) + s;
+        num = Math.floor((num - 1) / 26);
+    }
+    return s;
+};
 
-    // Helper: Alpha index conversion
-    const toAlpha = (num) => {
-        if (!Number.isFinite(num) || num <= 0) return '';
-        let s = '';
-        while (num > 0) {
-            const rem = (num - 1) % 26;
-            s = String.fromCharCode(65 + rem) + s;
-            num = Math.floor((num - 1) / 26);
-        }
-        return s;
-    };
+const canvasSearchPresetToHex = (preset) => {
+    switch (String(preset)) {
+        case '1': return '#fb464c'; // Red
+        case '2': return '#e9973f'; // Orange
+        case '3': return '#e0de71'; // Yellow
+        case '4': return '#44cf6e'; // Green
+        case '5': return '#53dfdd'; // Cyan
+        case '6': return '#a882ff'; // Purple
+        case 'red': return '#fb464c';
+        case 'orange': return '#e9973f';
+        case 'yellow': return '#e0de71';
+        case 'green': return '#44cf6e';
+        case 'cyan': return '#53dfdd';
+        case 'blue': return '#2563eb'; // Temp section blue
+        case 'purple': return '#a882ff';
+        case 'gray': return '#9ca3af';
+        default: return null;
+    }
+};
 
-    // Helper: derive temp section timestamp from default title
-    // Default title format: "YYYY-MM-DD HH:MM:SS" (see getDefaultTempSectionTitle in bookmark_canvas_module.js)
-    const parseDefaultTempSectionTitleTime = (title) => {
-        const t = String(title || '').trim();
-        if (!t) return 0;
+const parseDefaultTempSectionTitleTime = (title) => {
+    const t = String(title || '').trim();
+    if (!t) return 0;
+    const m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (!m) return 0;
+    const y = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10);
+    const d = parseInt(m[3], 10);
+    const hh = parseInt(m[4] || '0', 10);
+    const mi = parseInt(m[5] || '0', 10);
+    const ss = parseInt(m[6] || '0', 10);
+    if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return 0;
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return 0;
+    const dt = new Date(y, mo - 1, d, hh, mi, ss);
+    const ms = dt.getTime();
+    return Number.isFinite(ms) ? ms : 0;
+};
 
-        // Accept: "YYYY-MM-DD", "YYYY-MM-DD HH:MM", "YYYY-MM-DD HH:MM:SS", also allow "T" separator.
-        const m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
-        if (!m) return 0;
+const inferTempSectionTime = (section, title) => {
+    if (!section || typeof section !== 'object') return 0;
+    const explicit = section.time;
+    if (explicit) {
+        const ms = (typeof explicit === 'number')
+            ? explicit
+            : Date.parse(String(explicit));
+        if (Number.isFinite(ms) && ms > 0) return ms;
+    }
+    const fromTitle = parseDefaultTempSectionTitleTime(title);
+    if (fromTitle) return fromTitle;
+    return 0;
+};
 
-        const y = parseInt(m[1], 10);
-        const mo = parseInt(m[2], 10);
-        const d = parseInt(m[3], 10);
-        const hh = parseInt(m[4] || '0', 10);
-        const mi = parseInt(m[5] || '0', 10);
-        const ss = parseInt(m[6] || '0', 10);
-
-        if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return 0;
-        if (mo < 1 || mo > 12 || d < 1 || d > 31) return 0;
-
-        const dt = new Date(y, mo - 1, d, hh, mi, ss);
-        const ms = dt.getTime();
-        return Number.isFinite(ms) ? ms : 0;
-    };
-
-    const inferTempSectionTime = (section, title) => {
-        if (!section || typeof section !== 'object') return 0;
-
-        // 1) Explicit time
-        const explicit = section.time;
-        if (explicit) {
-            const ms = (typeof explicit === 'number')
-                ? explicit
-                : Date.parse(String(explicit));
-            if (Number.isFinite(ms) && ms > 0) return ms;
-        }
-
-        // 2) Default title timestamp (important for legacy data without createdAt)
-        const fromTitle = parseDefaultTempSectionTitleTime(title);
-        if (fromTitle) return fromTitle;
-
-
-
-        return 0;
-    };
-
-    // Phase 3 Multi-column Detection
-    // Determine if we should show column labels (#A, #B...).
-    // Logic: If there are ANY copies OR any temp sections implying a column > 1 (e.g. B-1),
-    // then we are in multi-column mode and should show labels for A as well.
+function checkCanvasSearchMultiColumnMode() {
     let maxIndexFound = 1;
-
-    // 1. Check Copies
     try {
         if (getPermanentCopyShellsForSearch().length > 0) {
-            maxIndexFound = 2; // At least B exists
+            maxIndexFound = 2;
         }
     } catch (_) { }
-
-    // 2. Check Temp Sections (Ghost Check)
-    // Even if copies are deleted, if B-1 temp sections exist, we keep multi-column mode.
-    if (CanvasState.tempSections) {
-        for (const section of CanvasState.tempSections) {
+    const activeCanvasState = getActiveCanvasState();
+    if (activeCanvasState && activeCanvasState.tempSections) {
+        for (const section of activeCanvasState.tempSections) {
             if (!section) continue;
             let idx = 1;
-
-            // Check originPermanent
             if (section.originPermanent && typeof section.originPermanent.displayIndex === 'number') {
                 idx = section.originPermanent.displayIndex;
             }
-
-            // Infer from Label "B-1"
             const label = (typeof section.label === 'string') ? section.label.trim() : '';
             if (label && /^[A-Z]-/i.test(label)) {
                 const letter = label.charAt(0).toUpperCase();
                 const inferred = letter.charCodeAt(0) - 64;
                 if (inferred > idx) idx = inferred;
             }
-
             if (idx > maxIndexFound) maxIndexFound = idx;
         }
     }
-    const isMultiColumnMode = maxIndexFound > 1;
+    return maxIndexFound > 1;
+}
 
-    // 1. 临时栏目（卡片搜索 + 说明搜索）
-    for (const section of (CanvasState.tempSections || [])) {
-        if (!section || !section.id) continue;
+// 模块化切片解析器 Helpers
+function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkOrderRef) {
+    if (!section || !section.id) return;
 
-        const title = section.title || section.name || '';
-        const description = (section.description || '').replace(/<[^>]+>/g, ' ').trim();
-        const time = inferTempSectionTime(section, title);
-        let label = (typeof section.label === 'string') ? section.label.trim() : '';
-        const sequenceNumber = section.sequenceNumber || null;
+    const title = section.title || section.name || '';
+    const description = (section.description || '').replace(/<[^>]+>/g, ' ').trim();
+    const time = inferTempSectionTime(section, title);
+    let label = (typeof section.label === 'string') ? section.label.trim() : '';
+    const sequenceNumber = section.sequenceNumber || null;
 
-        if (!label && sequenceNumber) {
-            // Replicate logical from bookmark_canvas_module.js
-            const alpha = toAlpha(sequenceNumber);
-            if (alpha) label = `${alpha}-1`;
-        }
-
-        let originDisplayIndex = null;
-        if (section.originPermanent && typeof section.originPermanent === 'object') {
-            if (typeof section.originPermanent.displayIndex === 'number') {
-                originDisplayIndex = section.originPermanent.displayIndex;
-            } else if (section.originPermanent.copyId === null) {
-                originDisplayIndex = 1;
-            }
-        }
-
-        // Infer index from Label if possible (e.g. "B-1" -> Index 2 (#B))
-        // This fixes the issue where B-1 items show as #A because they originated from main section
-        if (label && /^[A-Z]-/i.test(label)) {
-            const letter = label.charAt(0).toUpperCase();
-            const inferredIndex = letter.charCodeAt(0) - 64; // A=1, B=2...
-            if (inferredIndex >= 1) {
-                originDisplayIndex = inferredIndex;
-            }
-        }
-
-        // Color Logic: Temp Section default #2563eb
-        let color = '#2563eb';
-        if (section.color) {
-            // section.color might be hex without # or with #, or preset? Typically hex in this app.
-            // Simple normalization
-            const c = String(section.color).trim();
-            color = c.startsWith('#') ? c : `#${c}`;
-        }
-
-        const item = {
-            id: section.id,
-            type: 'temp-section',
-            title: title,
-            label: label,
-            sequenceNumber: sequenceNumber,
-            description: description,
-            time: time,
-            originDisplayIndex: originDisplayIndex,
-            x: section.x || 0,
-            y: section.y || 0,
-            color: color, // Store color
-            __title: title.toLowerCase(),
-            __label: label.toLowerCase(),
-            __description: description.toLowerCase(),
-            __timeSearchable: time ? buildTimeSearchableString(time) : '',
-            isMultiColumnMode: isMultiColumnMode
-        };
-
-        // Partition Strategy:
-        // Structure Index: If it has Title, Label, or Time (Structure data)
-        // [Strict Separation] Clone item and remove description tokens for Structure Index
-        const structureItem = Object.assign({}, item);
-        structureItem.__description = ''; // Remove description content from search
-        structureIndex.push(structureItem);
-
-        // Description Index: If it has Description text
-        if (description) {
-            // [Strict Separation] Clone item and remove structure tokens for Description Index
-            // Note: We keep __title for context if needed, but primary match is __description?
-            // User requested strict separation ("Description is Description").
-            // If we remove __title, searching Title in Description Mode won't work.
-            // Assumption: Description Mode is for finding content "inside" the card/section.
-            // We KEEP __title for display but maybe wipe it from search if we want ULTRA strict.
-            // But let's start with removing the CROSS-POLLINATION (Structure shouldn't match Description).
-            const descItem = Object.assign({}, item);
-
-            // Should Description Mode match Title?
-            // "Description Mode" desc says: "Section Notes, Card Text, Edge Labels".
-            // It does NOT say "Section Title".
-            // So we wipe __title and __label from Description Index item to be safe.
-            descItem.__title = '';
-            descItem.__label = '';
-            descItem.__timeSearchable = '';
-
-            descriptionIndex.push(descItem);
-        }
-
-        itemById.set(section.id, item); // itemById keeps the 'full' item for simple lookups if needed
+    if (!label && sequenceNumber) {
+        const alpha = toAlpha(sequenceNumber);
+        if (alpha) label = `${alpha}-1`;
     }
 
-    // 2. MD 卡片（说明搜索 + 卡片标题）- 排除组框容器
-    for (const node of (CanvasState.mdNodes || [])) {
+    let originDisplayIndex = null;
+    if (section.originPermanent && typeof section.originPermanent === 'object') {
+        if (typeof section.originPermanent.displayIndex === 'number') {
+            originDisplayIndex = section.originPermanent.displayIndex;
+        } else if (section.originPermanent.copyId === null) {
+            originDisplayIndex = 1;
+        }
+    }
+
+    if (label && /^[A-Z]-/i.test(label)) {
+        const letter = label.charAt(0).toUpperCase();
+        const inferredIndex = letter.charCodeAt(0) - 64;
+        if (inferredIndex >= 1) {
+            originDisplayIndex = inferredIndex;
+        }
+    }
+
+    let color = '#2563eb';
+    if (section.color) {
+        const c = String(section.color).trim();
+        color = c.startsWith('#') ? c : `#${c}`;
+    }
+
+    const item = {
+        id: section.id,
+        type: 'temp-section',
+        title: title,
+        label: label,
+        sequenceNumber: sequenceNumber,
+        description: description,
+        time: time,
+        originDisplayIndex: originDisplayIndex,
+        x: section.x || 0,
+        y: section.y || 0,
+        color: color,
+        __title: title.toLowerCase(),
+        __label: label.toLowerCase(),
+        __description: description.toLowerCase(),
+        __timeSearchable: time ? buildTimeSearchableString(time) : '',
+        isMultiColumnMode: isMultiColumnMode
+    };
+
+    const structureItem = Object.assign({}, item);
+    structureItem.__description = '';
+    db.structureIndex.push(structureItem);
+
+    if (description) {
+        const descItem = Object.assign({}, item);
+        descItem.__title = '';
+        descItem.__label = '';
+        descItem.__timeSearchable = '';
+        db.descriptionIndex.push(descItem);
+    }
+
+    db.itemById.set(section.id, item);
+
+    if (coords) {
+        coords[section.id] = {
+            x: section.x || 0,
+            y: section.y || 0,
+            w: section.width || section.w || 300,
+            h: section.height || section.h || 300,
+            color: color,
+            type: 'structure-item',
+            copyId: null,
+            sectionId: null
+        };
+    }
+
+    // 递归解析栏目内部的所有书签
+    if (Array.isArray(section.items)) {
+        const sectionTitle = typeof section.title === 'string' ? section.title : (typeof section.name === 'string' ? section.name : '');
+        let sectionLabel = (typeof section.label === 'string') ? section.label.trim() : '';
+        if (!sectionLabel && sequenceNumber) {
+            const alpha = toAlpha(sequenceNumber);
+            if (alpha) sectionLabel = `${alpha}-1`;
+        }
+
+        const sectionPrefix = [sectionLabel, sectionTitle].filter(Boolean).join(' ');
+        const pathStack = sectionPrefix ? [sectionPrefix] : [];
+
+        const stack = [];
+        for (let i = section.items.length - 1; i >= 0; i--) {
+            stack.push({ item: section.items[i], parentId: '', stage: 0 });
+        }
+
+        while (stack.length) {
+            const frame = stack.pop();
+            const it = frame ? frame.item : null;
+            if (!it || !it.id) continue;
+
+            const itemUrl = typeof it.url === 'string' ? it.url : '';
+            const itemNodeType = it.type === 'folder' ? 'folder' : 'bookmark';
+            const rawTitle = typeof it.title === 'string' ? it.title : '';
+            const itemTitle = (itemNodeType === 'bookmark') ? (rawTitle || itemUrl || '') : rawTitle;
+
+            if (frame.stage === 1) {
+                if (itemTitle) pathStack.pop();
+                continue;
+            }
+
+            if (itemTitle) pathStack.push(itemTitle);
+
+            if (itemUrl || itemTitle) {
+                const namedPath = pathStack.length ? pathStack.join(' > ') : '';
+                const inlineTags = Array.isArray(it.tags)
+                    ? it.tags.filter(t => t && t.color).map(t => ({ color: String(t.color), text: String(t.text || '') }))
+                    : [];
+                const bItem = {
+                    id: String(it.id),
+                    type: 'bookmark-item',
+                    source: 'temporary',
+                    nodeType: itemNodeType,
+                    title: itemTitle,
+                    url: itemUrl,
+                    parentId: frame.parentId ? String(frame.parentId) : '',
+                    sectionId: String(section.id),
+                    sectionLabel,
+                    sectionTitle,
+                    sectionSource: typeof section.source === 'string' ? section.source : '',
+                    namedPath,
+                    color: color,
+                    tags: inlineTags,
+                    __title: itemTitle.toLowerCase(),
+                    __url: itemUrl.toLowerCase(),
+                    __path: namedPath.toLowerCase(),
+                    __tags: inlineTags.map(t => `${t.color} ${t.text}`).join(' ').toLowerCase(),
+                    bookmarkSearchOrder: bookmarkOrderRef.value++
+                };
+                db.bookmarkIndex.push(bItem);
+                db.itemById.set(String(it.id), bItem);
+            }
+
+            stack.push({ item: it, parentId: frame.parentId, stage: 1 });
+
+            if (Array.isArray(it.children) && it.children.length) {
+                for (let j = it.children.length - 1; j >= 0; j--) {
+                    stack.push({ item: it.children[j], parentId: it.id, stage: 0 });
+                }
+            }
+        }
+    }
+}
+
+function parseCanvasLayoutSlice(db, coords) {
+    const activeCanvasState = getActiveCanvasState();
+    if (!activeCanvasState) return;
+
+    // 1. MD 卡片 (说明搜索 + 标题)
+    for (const node of (activeCanvasState.mdNodes || [])) {
         if (!node || !node.id) continue;
         if (node.subtype === 'card-group') continue;
 
@@ -3155,12 +3229,11 @@ function buildCanvasSearchDb() {
         const text = node.text || '';
         const subtype = node.subtype || '';
 
-        // usage of node.color or node.colorHex
-        let color = '#2563eb'; // Default Blue as per user request for "Blank Column"
+        let color = '#2563eb';
         if (node.colorHex) {
             color = node.colorHex;
         } else if (node.color) {
-            color = presetToHex(node.color) || color;
+            color = canvasSearchPresetToHex(node.color) || color;
         }
 
         const item = {
@@ -3176,19 +3249,25 @@ function buildCanvasSearchDb() {
             __text: text.substring(0, 3000).toLowerCase()
         };
 
-        // Partition Strategy:
-        // Description Index: MD Cards are content
-        descriptionIndex.push(item);
+        db.descriptionIndex.push(item);
+        db.itemById.set(node.id, item);
 
-        // Also add to Structure Index if it acts as a "Head" (has Title)?
-        // User definition: "Structure = Permanent, Temp, Groups". MD Cards are explicitly "Description".
-        // So we do NOT add to structureIndex.
-
-        itemById.set(node.id, item);
+        if (coords) {
+            coords[node.id] = {
+                x: node.x || 0,
+                y: node.y || 0,
+                w: node.width || node.w || 300,
+                h: node.height || node.h || 300,
+                color: color,
+                type: 'description-item',
+                copyId: null,
+                sectionId: null
+            };
+        }
     }
 
-    // 3. 连接线（说明搜索）
-    for (const edge of (CanvasState.edges || [])) {
+    // 2. 连接线 (说明搜索)
+    for (const edge of (activeCanvasState.edges || [])) {
         if (!edge || !edge.id) continue;
         if (!edge.label) continue;
 
@@ -3198,19 +3277,17 @@ function buildCanvasSearchDb() {
             label: edge.label,
             fromId: edge.from || edge.fromId,
             toId: edge.to || edge.toId,
-            color: edge.colorHex || presetToHex(edge.color) || '#999', // Default fallback
+            color: edge.colorHex || canvasSearchPresetToHex(edge.color) || '#999',
             direction: edge.direction || 'none',
             __label: edge.label.toLowerCase()
         };
 
-        // Partition Strategy:
-        // Description Index: Edge Labels
-        descriptionIndex.push(item);
-
-        itemById.set(edge.id, item);
+        db.descriptionIndex.push(item);
+        db.itemById.set(edge.id, item);
     }
 
-    for (const node of (CanvasState.mdNodes || [])) {
+    // 3. 卡片组 (容器名)
+    for (const node of (activeCanvasState.mdNodes || [])) {
         if (!node || !node.id) continue;
         if (node.subtype !== 'card-group') continue;
         const labelRaw = node.label || '';
@@ -3219,7 +3296,7 @@ function buildCanvasSearchDb() {
 
         let color = '#475569';
         if (node.colorHex) color = node.colorHex;
-        else if (node.color) color = presetToHex(node.color) || color;
+        else if (node.color) color = canvasSearchPresetToHex(node.color) || color;
 
         const groupItem = {
             id: node.id,
@@ -3229,32 +3306,38 @@ function buildCanvasSearchDb() {
             label: labelText,
             x: node.x || 0,
             y: node.y || 0,
-            color,
+            color: color,
             __title: labelText.toLowerCase(),
             __label: labelText.toLowerCase()
         };
-        structureIndex.push(groupItem);
-        itemById.set(node.id, groupItem);
-    }
+        db.structureIndex.push(groupItem);
+        db.itemById.set(node.id, groupItem);
 
-    // 4. 永久栏目 (Permanent Section)
+        if (coords) {
+            coords[node.id] = {
+                x: node.x || 0,
+                y: node.y || 0,
+                w: node.width || node.w || 300,
+                h: node.height || node.h || 300,
+                color: color,
+                type: 'structure-item',
+                copyId: null,
+                sectionId: null
+            };
+        }
+    }
+}
+
+function parsePermanentSectionSlice(db, coords, isMultiColumnMode) {
     const permanentShellSnapshot = collectPermanentViewShellSnapshotForSearch();
     const permanentDescription = getPermanentDescriptionTextForSearch(null, permanentShellSnapshot);
     const permanentCopies = getPermanentCopyShellsForSearch(permanentShellSnapshot);
     const hasCopies = permanentCopies.length > 0;
 
     const permanentSectionId = 'permanentSection';
-    // Permanent Default Green
     const permColor = '#10b981';
 
-    // Main Permanent Section
-    // Title logic: If has copies, append #A to match user expectation (though render overrides commonly)
-    // We add `hasCopies` property for the renderer to use.
     const mainTitle = (currentLang === 'en' ? 'Permanent Column' : '永久栏目') + ' #A';
-    const mainLabel = '#a'; // Always searchable by #a
-    // Keeping it searchable by #a might be useful even if hidden, but
-    // logically if hidden, maybe user just searches "Permanent".
-
     const mainItem = {
         id: permanentSectionId,
         type: 'permanent-section',
@@ -3262,94 +3345,104 @@ function buildCanvasSearchDb() {
         description: permanentDescription,
         copyIndex: null,
         displayIndex: 1,
-        hasCopies: hasCopies, // Critical flag for renderer
+        hasCopies: hasCopies,
         color: permColor,
         __title: (currentLang === 'en' ? 'permanent column' : '永久栏目'),
-        __label: '#a', // Always allow searching by #A internally?
+        __label: '#a',
         __description: permanentDescription.toLowerCase(),
         isMultiColumnMode: isMultiColumnMode
     };
 
-    // Partition Strategy:
-    // Structure Index: Remove description
     const mainStructureItem = Object.assign({}, mainItem);
     mainStructureItem.__description = '';
-    structureIndex.push(mainStructureItem);
+    db.structureIndex.push(mainStructureItem);
 
     if (permanentDescription) {
-        // Description Index: Remove structure labels
         const mainDescItem = Object.assign({}, mainItem);
-        mainDescItem.__title = ''; // Don't match "Permanent Column" title in desc mode
+        mainDescItem.__title = '';
         mainDescItem.__label = '';
-        descriptionIndex.push(mainDescItem);
+        db.descriptionIndex.push(mainDescItem);
     }
 
-    itemById.set(permanentSectionId, mainItem);
+    db.itemById.set(permanentSectionId, mainItem);
 
-    // Permanent Copies
-    if (hasCopies) {
-        permanentCopies.forEach((copy, idx) => {
-            const copyId = String(copy && copy.copyId || '').trim();
-            if (!copyId) return;
-
-            const dIndex = getPermanentCopySearchDisplayIndex(copy, idx);
-            const copyDescription = getPermanentDescriptionTextForSearch(copyId, permanentShellSnapshot);
-
-            const idxLabel = toAlpha(dIndex);
-            const copyItem = {
-                id: copyId,
-                type: 'permanent-section',
-                title: (currentLang === 'en' ? `Permanent Copy #${idxLabel}` : `永久栏目副本 #${idxLabel}`),
-                description: copyDescription,
-                copyId,
-                displayIndex: dIndex,
-                hasCopies: true,
-                isMultiColumnMode: isMultiColumnMode,
-                color: permColor,
-                __title: (currentLang === 'en' ? `permanent copy #${idxLabel}` : `永久栏目副本 #${idxLabel}`).toLowerCase(),
-                __label: `#${idxLabel.toLowerCase()}`,
-                __description: copyDescription.toLowerCase()
-            };
-
-            const itemStructureCopy = Object.assign({}, copyItem);
-            itemStructureCopy.__description = '';
-
-            structureIndex.push(itemStructureCopy);
-            if (copyDescription) {
-                const itemDescCopy = Object.assign({}, copyItem);
-                itemDescCopy.__title = '';
-                itemDescCopy.__label = '';
-                descriptionIndex.push(itemDescCopy);
-            }
-            itemById.set(copyId, copyItem);
-        });
+    if (coords) {
+        coords[permanentSectionId] = {
+            x: 0,
+            y: 0,
+            w: 300,
+            h: 300,
+            color: permColor,
+            type: 'structure-item',
+            copyId: null,
+            sectionId: null
+        };
     }
+}
 
-    // 5. 书签索引 (Bookmark Index)
-    // 支持：永久栏目（cachedCurrentTree）+ 临时栏目（CanvasState.tempSections.items）
-    let bookmarkSearchOrder = 0;
-    const pushBookmarkIndexItem = (bItem) => {
-        if (!bItem || !bItem.id) return;
-        if (!Number.isFinite(Number(bItem.bookmarkSearchOrder))) {
-            bItem.bookmarkSearchOrder = bookmarkSearchOrder++;
-        }
-        bookmarkIndex.push(bItem);
-        itemById.set(String(bItem.id), bItem);
+function parsePermanentCopySlice(copy, idx, db, coords, isMultiColumnMode) {
+    if (!copy) return;
+    const copyId = String(copy.copyId || '').trim();
+    if (!copyId) return;
+
+    const dIndex = getPermanentCopySearchDisplayIndex(copy, idx);
+    const permanentShellSnapshot = collectPermanentViewShellSnapshotForSearch();
+    const copyDescription = getPermanentDescriptionTextForSearch(copyId, permanentShellSnapshot);
+
+    const idxLabel = toAlpha(dIndex);
+    const permColor = '#10b981';
+    const copyItem = {
+        id: copyId,
+        type: 'permanent-section',
+        title: (currentLang === 'en' ? `Permanent Copy #${idxLabel}` : `永久栏目副本 #${idxLabel}`),
+        description: copyDescription,
+        copyId,
+        displayIndex: dIndex,
+        hasCopies: true,
+        isMultiColumnMode: isMultiColumnMode,
+        color: permColor,
+        __title: (currentLang === 'en' ? `permanent copy #${idxLabel}` : `永久栏目副本 #${idxLabel}`).toLowerCase(),
+        __label: `#${idxLabel.toLowerCase()}`,
+        __description: copyDescription.toLowerCase()
     };
 
-    // 5a. 永久栏目：从 cachedCurrentTree 遍历所有书签/文件夹
+    const itemStructureCopy = Object.assign({}, copyItem);
+    itemStructureCopy.__description = '';
+    db.structureIndex.push(itemStructureCopy);
+
+    if (copyDescription) {
+        const itemDescCopy = Object.assign({}, copyItem);
+        itemDescCopy.__title = '';
+        itemDescCopy.__label = '';
+        db.descriptionIndex.push(itemDescCopy);
+    }
+    db.itemById.set(copyId, copyItem);
+
+    if (coords) {
+        coords[copyId] = {
+            x: 0,
+            y: 0,
+            w: 300,
+            h: 300,
+            color: permColor,
+            type: 'structure-item',
+            copyId: copyId,
+            sectionId: null
+        };
+    }
+}
+
+function parsePermanentTreeSlice(db, bookmarkOrderRef) {
     let permanentTree = null;
     try {
         if (typeof cachedCurrentTree !== 'undefined' && Array.isArray(cachedCurrentTree)) {
             permanentTree = cachedCurrentTree;
         } else if (typeof window !== 'undefined' && Array.isArray(window.cachedCurrentTree)) {
-            // 兼容旧版本：若有挂到 window 上
             permanentTree = window.cachedCurrentTree;
         }
     } catch (_) { }
 
     if (permanentTree && permanentTree[0]) {
-        // Iterative DFS to avoid call-stack overflow on deep trees.
         const pathStack = [];
         const stack = [{ node: permanentTree[0], stage: 0 }];
 
@@ -3367,17 +3460,10 @@ function buildCanvasSearchDb() {
 
             const url = typeof node.url === 'string' ? node.url : '';
             const nodeType = url ? 'bookmark' : 'folder';
-
-            // 对于无标题书签，使用 URL 作为展示标题（避免搜索结果“空行”）
-            const title = (nodeType === 'bookmark')
-                ? (rawTitle || url || '')
-                : rawTitle;
+            const title = (nodeType === 'bookmark') ? (rawTitle || url || '') : rawTitle;
 
             if (rawTitle) pathStack.push(rawTitle);
 
-            // 索引策略：
-            // - 书签（有 URL）始终加入索引
-            // - 文件夹：仅在有标题时加入索引（避免空标题污染结果）
             if (url || title) {
                 const namedPath = pathStack.length ? pathStack.join(' > ') : '';
                 const bItem = {
@@ -3391,12 +3477,13 @@ function buildCanvasSearchDb() {
                     namedPath,
                     __title: title.toLowerCase(),
                     __url: url.toLowerCase(),
-                    __path: namedPath.toLowerCase()
+                    __path: namedPath.toLowerCase(),
+                    bookmarkSearchOrder: bookmarkOrderRef.value++
                 };
-                pushBookmarkIndexItem(bItem);
+                db.bookmarkIndex.push(bItem);
+                db.itemById.set(String(node.id), bItem);
             }
 
-            // Exit frame (pop pathStack)
             stack.push({ node, stage: 1 });
 
             if (Array.isArray(node.children) && node.children.length) {
@@ -3406,111 +3493,1253 @@ function buildCanvasSearchDb() {
             }
         }
     }
+}
 
-    // 5b. 临时栏目：从 CanvasState.tempSections.items 遍历所有书签/文件夹
-    if (Array.isArray(CanvasState.tempSections)) {
-        for (const section of CanvasState.tempSections) {
-            if (!section || !section.id || !Array.isArray(section.items)) continue;
+function mergeCoordinatesIntoItemById(db, coords) {
+    if (!coords || !db.itemById) return;
+    for (const [id, coord] of Object.entries(coords)) {
+        if (!db.itemById.has(id)) {
+            db.itemById.set(id, {
+                id,
+                type: coord.type,
+                x: coord.x,
+                y: coord.y,
+                color: coord.color,
+                copyId: coord.copyId,
+                sectionId: coord.sectionId
+            });
+        } else {
+            const item = db.itemById.get(id);
+            item.x = coord.x;
+            item.y = coord.y;
+            if (coord.color) item.color = coord.color;
+            if (coord.copyId) item.copyId = coord.copyId;
+            if (coord.sectionId) item.sectionId = coord.sectionId;
+        }
+    }
+}
 
-            const sectionTitle = typeof section.title === 'string'
-                ? section.title
-                : (typeof section.name === 'string' ? section.name : '');
+const SearchIndexManager = {
+    isDirty: false,
+    needsFullUpdate: false,
+    dirtyKeys: new Set(),
+    isIndexing: false,
+    hasPendingSyncWriteBack: false,
+    listenersBound: false,
+    idleListener: null,
+    checkTimer: null,
+    recordActivity: null,
 
-            // 复用 label 推导逻辑：优先 section.label，否则用 sequenceNumber 推导 "A-1"。
-            let sectionLabel = (typeof section.label === 'string') ? section.label.trim() : '';
-            const sequenceNumber = section.sequenceNumber || null;
-            if (!sectionLabel && sequenceNumber) {
-                const alpha = toAlpha(sequenceNumber);
-                if (alpha) sectionLabel = `${alpha}-1`;
-            }
+    // Snapshot keys being processed during async indexing to prevent write race conditions
+    processingKeys: null,
+    processingFullUpdate: false,
+    processingBaseSignature: null,
 
-            // 使用栏目颜色（若有），否则用默认蓝色
-            let sectionColor = '#2563eb';
-            if (section.color) {
-                const c = String(section.color).trim();
-                sectionColor = c.startsWith('#') ? c : `#${c}`;
-            }
-
-            const sectionPrefix = [sectionLabel, sectionTitle].filter(Boolean).join(' ');
-            const pathStack = sectionPrefix ? [sectionPrefix] : [];
-
-            // Iterative DFS to avoid call-stack overflow on deep trees.
-            const stack = [];
-            for (let i = section.items.length - 1; i >= 0; i--) {
-                stack.push({ item: section.items[i], parentId: '', stage: 0 });
-            }
-
-            while (stack.length) {
-                const frame = stack.pop();
-                const item = frame ? frame.item : null;
-                if (!item || !item.id) continue;
-
-                const itemUrl = typeof item.url === 'string' ? item.url : '';
-                const itemNodeType = item.type === 'folder' ? 'folder' : 'bookmark';
-
-                const rawTitle = typeof item.title === 'string' ? item.title : '';
-                const itemTitle = (itemNodeType === 'bookmark')
-                    ? (rawTitle || itemUrl || '')
-                    : rawTitle;
-
-                if (frame.stage === 1) {
-                    if (itemTitle) pathStack.pop();
-                    continue;
-                }
-
-                if (itemTitle) pathStack.push(itemTitle);
-
-                if (itemUrl || itemTitle) {
-                    const namedPath = pathStack.length ? pathStack.join(' > ') : '';
-                    const inlineTags = Array.isArray(item.tags)
-                        ? item.tags.filter((t) => t && t.color).map((t) => ({ color: String(t.color), text: String(t.text || '') }))
-                        : [];
-                    const bItem = {
-                        id: String(item.id),
-                        type: 'bookmark-item',
-                        source: 'temporary',
-                        nodeType: itemNodeType,
-                        title: itemTitle,
-                        url: itemUrl,
-                        parentId: frame.parentId ? String(frame.parentId) : '',
-                        sectionId: String(section.id),
-                        sectionLabel,
-                        sectionTitle,
-                        sectionSource: typeof section.source === 'string' ? section.source : '',
-                        namedPath,
-                        color: sectionColor,
-                        tags: inlineTags,
-                        __title: itemTitle.toLowerCase(),
-                        __url: itemUrl.toLowerCase(),
-                        __path: namedPath.toLowerCase(),
-                        __tags: inlineTags.map((t) => `${t.color} ${t.text}`).join(' ').toLowerCase()
-                    };
-                    pushBookmarkIndexItem(bItem);
-                }
-
-                // Exit frame (pop pathStack)
-                stack.push({ item, parentId: frame.parentId, stage: 1 });
-
-                if (Array.isArray(item.children) && item.children.length) {
-                    for (let j = item.children.length - 1; j >= 0; j--) {
-                        stack.push({ item: item.children[j], parentId: item.id, stage: 0 });
+    bindActivityListeners() {
+        if (this.listenersBound) return;
+        this.listenersBound = true;
+        
+        if (typeof chrome !== 'undefined' && chrome && chrome.idle) {
+            try {
+                chrome.idle.setDetectionInterval(15);
+                this.idleListener = (state) => {
+                    if (state === 'idle') {
+                        console.log('[SearchIndexManager] chrome.idle detected idle state.');
+                        this.triggerIdleIndexing();
                     }
+                };
+                chrome.idle.onStateChanged.addListener(this.idleListener);
+                console.log('[SearchIndexManager] Persistent activity listeners: bound chrome.idle listener.');
+            } catch (e) {
+                console.error('[SearchIndexManager] Failed to bind chrome.idle:', e);
+                this.setupFallbackIdleTimer();
+            }
+        } else {
+            this.setupFallbackIdleTimer();
+        }
+    },
+
+    setupFallbackIdleTimer() {
+        if (this.checkTimer) clearInterval(this.checkTimer);
+        this.lastActivityTime = Date.now();
+        
+        this.recordActivity = () => { this.lastActivityTime = Date.now(); };
+        window.addEventListener('focus', this.recordActivity, { passive: true });
+        document.addEventListener('visibilitychange', this.recordActivity, { passive: true });
+        
+        this.checkTimer = setInterval(() => {
+            const now = Date.now();
+            if (this.isDirty && now - this.lastActivityTime > 15000 && document.visibilityState === 'visible') {
+                console.log('[SearchIndexManager] Fallback idle detected with dirty state.');
+                this.triggerIdleIndexing();
+            }
+        }, 5000);
+        console.log('[SearchIndexManager] Dynamic activity listeners: fallback idle timer started.');
+    },
+
+    unbindActivityListeners() {
+        if (!this.listenersBound) return;
+        this.listenersBound = false;
+        
+        if (typeof chrome !== 'undefined' && chrome && chrome.idle && this.idleListener) {
+            try {
+                chrome.idle.onStateChanged.removeListener(this.idleListener);
+            } catch (_) {}
+            this.idleListener = null;
+        }
+        
+        if (this.checkTimer) {
+            clearInterval(this.checkTimer);
+            this.checkTimer = null;
+        }
+        
+        if (this.recordActivity) {
+            window.removeEventListener('focus', this.recordActivity);
+            document.removeEventListener('visibilitychange', this.recordActivity);
+            this.recordActivity = null;
+        }
+        console.log('[SearchIndexManager] Dynamic activity listeners: stopped.');
+    },
+
+    async markDirty(options = {}) {
+        this.isDirty = true;
+        if (options.full) {
+            this.needsFullUpdate = true;
+        }
+        if (options.keys) {
+            options.keys.forEach(k => this.dirtyKeys.add(k));
+        }
+
+        this.debounceStorageWrite();
+    },
+
+    debounceStorageWriteTimer: null,
+    debounceStorageWrite() {
+        if (this.debounceStorageWriteTimer) clearTimeout(this.debounceStorageWriteTimer);
+        this.debounceStorageWriteTimer = setTimeout(async () => {
+            this.debounceStorageWriteTimer = null;
+            if (chrome && chrome.storage && chrome.storage.local) {
+                try {
+                    await chrome.storage.local.set({
+                        canvas_search_index_dirty: this.isDirty,
+                        canvas_search_index_needs_full: this.needsFullUpdate,
+                        canvas_search_index_dirty_keys: Array.from(this.dirtyKeys)
+                    });
+                } catch (_) {}
+            }
+        }, 1000);
+    },
+
+    snapshotDirtyState() {
+        this.processingKeys = new Set(this.dirtyKeys);
+        this.processingFullUpdate = this.needsFullUpdate;
+        this.processingBaseSignature = null;
+    },
+
+    async clearProcessedDirtyState(extraPayload = null) {
+        // If there is an extraPayload, we perform the storage write FIRST.
+        // If it throws, execution stops and memory dirty state remains dirty.
+        if (chrome && chrome.storage && chrome.storage.local) {
+            const payload = {
+                canvas_search_index_dirty: this.dirtyKeys.size === 0 ? false : this.isDirty,
+                canvas_search_index_needs_full: this.dirtyKeys.size === 0 ? false : this.needsFullUpdate,
+                canvas_search_index_dirty_keys: Array.from(this.dirtyKeys)
+            };
+            
+            if (this.processingKeys) {
+                const remainingKeys = new Set(this.dirtyKeys);
+                this.processingKeys.forEach(k => remainingKeys.delete(k));
+                payload.canvas_search_index_dirty_keys = Array.from(remainingKeys);
+                if (remainingKeys.size === 0) {
+                    payload.canvas_search_index_dirty = false;
+                    payload.canvas_search_index_needs_full = false;
                 }
+            }
+            
+            if (extraPayload && typeof extraPayload === 'object') {
+                Object.assign(payload, extraPayload);
+            }
+            
+            try {
+                await chrome.storage.local.set(payload);
+            } catch (err) {
+                if (extraPayload) {
+                    throw err; // Re-throw payload write errors so callers can retain dirty memory state.
+                }
+                console.error('[Search] Failed to clear dirty state in storage:', err);
+            }
+        }
+
+        if (this.processingKeys) {
+            this.processingKeys.forEach(k => this.dirtyKeys.delete(k));
+            this.processingKeys = null;
+        }
+        
+        const hasRemainingDirty = this.dirtyKeys.size > 0;
+        if (!hasRemainingDirty) {
+            this.isDirty = false;
+            if (this.processingFullUpdate) {
+                this.needsFullUpdate = false;
+            }
+        } else {
+            this.isDirty = true;
+        }
+        this.processingFullUpdate = false;
+        this.processingBaseSignature = null;
+
+        if (hasRemainingDirty) {
+            this.debounceStorageWrite();
+        } else {
+            if (this.debounceStorageWriteTimer) {
+                clearTimeout(this.debounceStorageWriteTimer);
+                this.debounceStorageWriteTimer = null;
+            }
+        }
+        startListeningStorageChanges();
+    },
+
+    clearDirtyMemoryOnly() {
+        this.isDirty = false;
+        this.needsFullUpdate = false;
+        this.dirtyKeys.clear();
+        this.processingKeys = null;
+        this.processingFullUpdate = false;
+        this.processingBaseSignature = null;
+        if (this.debounceStorageWriteTimer) {
+            clearTimeout(this.debounceStorageWriteTimer);
+            this.debounceStorageWriteTimer = null;
+        }
+        startListeningStorageChanges();
+    },
+
+    async clearDirty() {
+        this.isDirty = false;
+        this.needsFullUpdate = false;
+        this.dirtyKeys.clear();
+        this.processingKeys = null;
+        this.processingFullUpdate = false;
+        this.processingBaseSignature = null;
+        
+        if (this.debounceStorageWriteTimer) {
+            clearTimeout(this.debounceStorageWriteTimer);
+            this.debounceStorageWriteTimer = null;
+        }
+        
+        if (chrome && chrome.storage && chrome.storage.local) {
+            try {
+                await chrome.storage.local.set({
+                    canvas_search_index_dirty: false,
+                    canvas_search_index_needs_full: false,
+                    canvas_search_index_dirty_keys: []
+                });
+            } catch (_) {}
+        }
+        startListeningStorageChanges();
+    },
+
+    async triggerIdleIndexing() {
+        if (!this.isDirty) return; // Fast O(1) return if nothing is dirty
+        if (this.isIndexing) return;
+        if (!isCanvasSearchStateReady()) {
+            console.log('[SearchIndexManager] Canvas state is not ready. Deferring idle indexing.');
+            await waitForCanvasSearchStateReady();
+            if (this.isIndexing) return;
+            if (!this.isDirty) return;
+        }
+        this.isIndexing = true;
+        
+        // Before rebuilding, check if another tab/end already wrote a fresh IndexedDB index.
+        try {
+            const liveSig = getCanvasSearchSignature();
+            if (window.SearchIndexDb && await window.SearchIndexDb.hasFreshIndex(liveSig)) {
+                console.log('[SearchIndexManager] IndexedDB search index already up-to-date. Skipping idle indexing.');
+                this.clearDirtyMemoryOnly();
+
+                if (typeof ensureIndexForModeLoaded === 'function') {
+                    const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
+                    ensureIndexForModeLoaded(activeMode).catch(err => {
+                        console.error('[SearchIndexManager] Failed to preload updated index on skip:', err);
+                    });
+                }
+
+                this.isIndexing = false;
+                return;
+            }
+        } catch (err) {
+            console.error('[SearchIndexManager] Failed to check IndexedDB before idle indexing:', err);
+        }
+
+        this.snapshotDirtyState();
+        
+        console.log('[SearchIndexManager] Idle time detected. Requesting idle callback for indexing...');
+        
+        const runTask = () => {
+            return new Promise((resolve, reject) => {
+                const checkFull = () => {
+                    const activeCanvasState = getActiveCanvasState();
+                    const totalCards = ((activeCanvasState && Array.isArray(activeCanvasState.tempSections)) ? activeCanvasState.tempSections.length : 0) + 
+                                       ((activeCanvasState && Array.isArray(activeCanvasState.mdNodes)) ? activeCanvasState.mdNodes.length : 0);
+                    const exceedsPercent = totalCards > 0 && (this.dirtyKeys.size / totalCards) > 0.6;
+                    const exceedsLimit = this.dirtyKeys.size > 50;
+                    return this.needsFullUpdate || exceedsPercent || exceedsLimit;
+                };
+
+                if (typeof window.requestIdleCallback === 'function') {
+                    window.requestIdleCallback(async (deadline) => {
+                        try {
+                            if (checkFull()) {
+                                buildCanvasSearchDbSync();
+                            } else {
+                                await buildCanvasSearchDbIncrementallyInMemory();
+                            }
+                            await saveMemoryIndexToIndexedDb();
+                            resolve();
+                        } catch (err) {
+                            reject(err);
+                        }
+                    }, { timeout: 2000 });
+                } else {
+                    (async () => {
+                        try {
+                            if (checkFull()) {
+                                buildCanvasSearchDbSync();
+                            } else {
+                                await buildCanvasSearchDbIncrementallyInMemory();
+                            }
+                            await saveMemoryIndexToIndexedDb();
+                            resolve();
+                        } catch (err) {
+                            reject(err);
+                        }
+                    })();
+                }
+            });
+        };
+
+        try {
+            await runTask();
+        } catch (err) {
+            console.error('[SearchIndexManager] Idle indexing failed:', err);
+        } finally {
+            this.isIndexing = false;
+        }
+    },
+
+    async init() {
+        if (!isCanvasSearchStateReady()) {
+            if (!this.initDeferred) {
+                this.initDeferred = true;
+                waitForCanvasSearchStateReady().then(() => {
+                    this.initDeferred = false;
+                    return this.init();
+                }).catch(() => {
+                    this.initDeferred = false;
+                });
+            }
+            return;
+        }
+        if (chrome && chrome.storage && chrome.storage.local) {
+            try {
+                const data = await chrome.storage.local.get([
+                    'canvas_search_index_dirty',
+                    'canvas_search_index_needs_full',
+                    'canvas_search_index_dirty_keys'
+                ]);
+
+                let hasIndex = false;
+                try {
+                    const liveSig = getCanvasSearchSignature();
+                    hasIndex = !!(window.SearchIndexDb && await window.SearchIndexDb.hasFreshIndex(liveSig));
+                    if (window.SearchIndexDb && typeof window.SearchIndexDb.clearLegacyChromeStorageIndex === 'function') {
+                        window.SearchIndexDb.clearLegacyChromeStorageIndex().catch(() => {});
+                    }
+                } catch (_) {}
+
+                this.isDirty = data['canvas_search_index_dirty'] === true || !hasIndex;
+                this.needsFullUpdate = data['canvas_search_index_needs_full'] === true || !hasIndex;
+                const keys = data['canvas_search_index_dirty_keys'] || [];
+                keys.forEach(k => this.dirtyKeys.add(k));
+                
+                this.bindActivityListeners();
+                
+                if (this.isDirty && this.needsFullUpdate) {
+                    stopListeningStorageChanges();
+                } else {
+                    startListeningStorageChanges();
+                }
+            } catch (_) {
+                startListeningStorageChanges();
+            }
+        }
+    }
+};
+
+function handleSearchStorageChange(changes, areaName) {
+    if (areaName !== 'local') return;
+    
+    // Sync dirty state metadata from other tabs/ends to avoid redundant indexing
+    if (changes['canvas_search_index_dirty'] !== undefined) {
+        const newDirty = changes['canvas_search_index_dirty'].newValue;
+        if (newDirty === false) {
+            // If we have a pending local write, it means we have local dirty state that hasn't been written to storage yet.
+            // We should not clear our local dirty memory, but rather write our pending changes to storage.
+            if (SearchIndexManager.debounceStorageWriteTimer) {
+                console.log('[Search] Other tab cleared dirty state, but we have pending local changes. Retaining local dirty state.');
+                return;
+            }
+            console.log('[Search] Index dirty state cleared in storage. Syncing local state.');
+            SearchIndexManager.clearDirtyMemoryOnly();
+            
+            // Proactively preload the updated index in the background to avoid synchronous rebuilds
+            if (typeof ensureIndexForModeLoaded === 'function') {
+                const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
+                ensureIndexForModeLoaded(activeMode).catch(err => {
+                    console.error('[Search] Failed to preload updated index in background:', err);
+                });
+            }
+            return;
+        } else if (newDirty === true) {
+            SearchIndexManager.isDirty = true;
+            if (changes['canvas_search_index_needs_full']) {
+                SearchIndexManager.needsFullUpdate = changes['canvas_search_index_needs_full'].newValue === true;
+            }
+            if (changes['canvas_search_index_dirty_keys']) {
+                const keys = changes['canvas_search_index_dirty_keys'].newValue || [];
+                keys.forEach(k => SearchIndexManager.dirtyKeys.add(k));
+            }
+            return;
+        }
+    }
+    
+    const activeCanvasState = getActiveCanvasState();
+    if (activeCanvasState && activeCanvasState.dragState && activeCanvasState.dragState.isDragging) {
+        return;
+    }
+    
+    if (SearchIndexManager.isDirty && SearchIndexManager.needsFullUpdate) {
+        stopListeningStorageChanges();
+        return;
+    }
+    
+    // Note: 'bcs:canvas' (containing MD nodes and edges) is intentionally excluded here to avoid
+    // unnecessary background re-indexing storms during frequent canvas edits.
+    // Instead, signature comparison (via getCanvasSearchSignature) is used to detect canvas changes
+    // dynamically when the user actually initiates search, keeping background tabs highly performant.
+    const changedKeys = Object.keys(changes).filter(key => 
+        key.startsWith('bcs:section:') || 
+        key.startsWith('bcs:perm:') || 
+        key === 'cachedCurrentTree'
+    );
+    if (changedKeys.length === 0) return;
+    
+    let cardChangeCount = changedKeys.length;
+    const totalCards = ((activeCanvasState && Array.isArray(activeCanvasState.tempSections)) ? activeCanvasState.tempSections.length : 0) + 
+                       ((activeCanvasState && Array.isArray(activeCanvasState.mdNodes)) ? activeCanvasState.mdNodes.length : 0);
+                       
+    const exceedsPercent = totalCards > 0 && (cardChangeCount / totalCards) > 0.6;
+    const exceedsLimit = cardChangeCount > 50;
+    
+    if (exceedsPercent || exceedsLimit) {
+        SearchIndexManager.markDirty({ full: true });
+    } else {
+        SearchIndexManager.markDirty({ full: false, keys: changedKeys });
+    }
+
+    if (SearchIndexManager.needsFullUpdate) {
+        stopListeningStorageChanges();
+    }
+}
+
+startListeningStorageChanges();
+
+function normalizeSearchIndexOwnerKey(key) {
+    const normalized = String(key || '').trim();
+    if (normalized === 'cachedCurrentTree') return 'bcs:perm:main';
+    return normalized || 'bcs:canvas';
+}
+
+function getSearchIndexOwnerKeyForItem(item) {
+    if (!item || typeof item !== 'object') return 'bcs:canvas';
+    if (item.ownerKey) return normalizeSearchIndexOwnerKey(item.ownerKey);
+
+    if (item.type === 'bookmark-item') {
+        if (item.source === 'temporary' && item.sectionId) {
+            return `bcs:section:${String(item.sectionId)}`;
+        }
+        if (item.source === 'permanent') {
+            return 'bcs:perm:main';
+        }
+    }
+
+    if (item.type === 'temp-section' && item.id) {
+        return `bcs:section:${String(item.id)}`;
+    }
+    if (item.type === 'permanent-section') {
+        if (item.copyId) return `bcs:perm:copy-${String(item.copyId)}`;
+        return 'bcs:perm:main';
+    }
+    if (item.copyId) return `bcs:perm:copy-${String(item.copyId)}`;
+    if (item.sectionId) return `bcs:section:${String(item.sectionId)}`;
+    return 'bcs:canvas';
+}
+
+function getSearchIndexOwnerKeysFromDirtyKeys(keys) {
+    const source = keys instanceof Set ? Array.from(keys) : (Array.isArray(keys) ? keys : []);
+    const ownerKeys = new Set();
+
+    source.forEach((key) => {
+        const normalized = normalizeSearchIndexOwnerKey(key);
+        if (normalized === 'bcs:canvas' ||
+            normalized === 'bcs:perm:main' ||
+            normalized.startsWith('bcs:section:') ||
+            normalized.startsWith('bcs:perm:copy-')) {
+            ownerKeys.add(normalized);
+        }
+    });
+
+    return ownerKeys;
+}
+
+function filterSearchIndexListByOwnerKeys(list, ownerKeys) {
+    if (!(ownerKeys instanceof Set) || ownerKeys.size === 0) {
+        return Array.isArray(list) ? list : [];
+    }
+    const filtered = [];
+    (Array.isArray(list) ? list : []).forEach((item, order) => {
+        if (!ownerKeys.has(getSearchIndexOwnerKeyForItem(item))) return;
+        filtered.push({
+            __searchIndexRecordItem: item,
+            __searchIndexRecordOrder: order
+        });
+    });
+    return filtered;
+}
+
+function collectSearchIndexCoordinatesForPersistence(ownerKeys = null) {
+    const coordinates = {};
+    if (!canvasSearchDb || !canvasSearchDb.itemById) return coordinates;
+    const shouldFilter = ownerKeys instanceof Set && ownerKeys.size > 0;
+
+    for (const item of canvasSearchDb.itemById.values()) {
+        if (!item || item.id === undefined || item.id === null) continue;
+        const ownerKey = getSearchIndexOwnerKeyForItem(item);
+        if (shouldFilter && !ownerKeys.has(ownerKey)) continue;
+        if (typeof item.x !== 'number' && typeof item.y !== 'number') continue;
+
+        coordinates[String(item.id)] = {
+            x: item.x || 0,
+            y: item.y || 0,
+            w: item.width || item.w || 300,
+            h: item.height || item.h || 300,
+            color: item.color || null,
+            type: item.type || null,
+            copyId: item.copyId || null,
+            sectionId: item.sectionId || null,
+            ownerKey
+        };
+    }
+
+    return coordinates;
+}
+
+function buildSearchIndexPersistencePayload(signature, ownerKeys = null) {
+    const shouldFilter = ownerKeys instanceof Set && ownerKeys.size > 0;
+    return {
+        signature,
+        bookmarkIndex: shouldFilter
+            ? filterSearchIndexListByOwnerKeys(canvasSearchDb.bookmarkIndex, ownerKeys)
+            : (Array.isArray(canvasSearchDb.bookmarkIndex) ? canvasSearchDb.bookmarkIndex : []),
+        cardIndex: shouldFilter
+            ? filterSearchIndexListByOwnerKeys(canvasSearchDb.structureIndex, ownerKeys)
+            : (Array.isArray(canvasSearchDb.structureIndex) ? canvasSearchDb.structureIndex : []),
+        descriptionIndex: shouldFilter
+            ? filterSearchIndexListByOwnerKeys(canvasSearchDb.descriptionIndex, ownerKeys)
+            : (Array.isArray(canvasSearchDb.descriptionIndex) ? canvasSearchDb.descriptionIndex : []),
+        coordinates: collectSearchIndexCoordinatesForPersistence(shouldFilter ? ownerKeys : null)
+    };
+}
+
+function getPendingIncrementalPersistenceOwnerKeys() {
+    if (!SearchIndexManager || SearchIndexManager.processingFullUpdate) return null;
+    if (!SearchIndexManager.processingKeys || SearchIndexManager.processingKeys.size === 0) return null;
+    if (!SearchIndexManager.processingBaseSignature) return null;
+
+    const ownerKeys = getSearchIndexOwnerKeysFromDirtyKeys(SearchIndexManager.processingKeys);
+    return ownerKeys.size > 0 ? ownerKeys : null;
+}
+
+async function saveMemoryIndexToIndexedDb() {
+    const startTime = performance.now();
+    const liveSig = getCanvasSearchSignature();
+
+    if (!window.SearchIndexDb || typeof window.SearchIndexDb.saveSnapshot !== 'function') {
+        throw new Error('SearchIndexDb is not available');
+    }
+
+    // Check if another tab/end already indexed and wrote it to IndexedDB.
+    try {
+        if (await window.SearchIndexDb.hasFreshIndex(liveSig)) {
+            console.log('[Search] IndexedDB signature is already up-to-date. Skipping write-back.');
+            await SearchIndexManager.clearProcessedDirtyState();
+
+            // Preload the updated index from IndexedDB to ensure local memory DB is not stale.
+            if (typeof ensureIndexForModeLoaded === 'function') {
+                const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
+                ensureIndexForModeLoaded(activeMode).catch(err => {
+                    console.error('[Search] Failed to preload updated index on skip write-back:', err);
+                });
+            }
+            return;
+        }
+    } catch (_) {}
+
+    if (!canvasSearchDb.signature) {
+        buildCanvasSearchDbSync();
+    }
+
+    try {
+        let meta = null;
+        let incrementalFallbackReason = '';
+        const incrementalOwnerKeys = getPendingIncrementalPersistenceOwnerKeys();
+        const canTryIncremental = incrementalOwnerKeys &&
+            canvasSearchDb.signature === liveSig &&
+            typeof window.SearchIndexDb.saveIncrementalSnapshot === 'function';
+
+        if (canTryIncremental) {
+            const patchPayload = buildSearchIndexPersistencePayload(liveSig, incrementalOwnerKeys);
+            patchPayload.ownerKeys = Array.from(incrementalOwnerKeys);
+            patchPayload.baseSignature = SearchIndexManager.processingBaseSignature;
+            meta = await window.SearchIndexDb.saveIncrementalSnapshot(patchPayload);
+            if (meta && meta.applied === false) {
+                incrementalFallbackReason = meta.reason || '';
+                console.log('[Search] IndexedDB incremental save skipped. Falling back to full record save:', meta.reason);
+                meta = null;
+            }
+        }
+
+        if (!meta) {
+            if (incrementalFallbackReason === 'base-signature-mismatch' || canvasSearchDb.signature !== liveSig) {
+                buildCanvasSearchDbSync();
+            }
+            const snapshotPayload = buildSearchIndexPersistencePayload(canvasSearchDb.signature || liveSig);
+            meta = await window.SearchIndexDb.saveSnapshot(snapshotPayload);
+        }
+
+        await SearchIndexManager.clearProcessedDirtyState();
+        if (window.SearchIndexDb && typeof window.SearchIndexDb.clearLegacyChromeStorageIndex === 'function') {
+            window.SearchIndexDb.clearLegacyChromeStorageIndex().catch(() => {});
+        }
+        const counts = meta && meta.counts ? meta.counts : {};
+        console.log(`[Search] IndexedDB search index save completed in ${(performance.now() - startTime).toFixed(1)}ms.`, counts);
+    } catch (err) {
+        console.error('[Search] Failed to save search index to IndexedDB. Dirty state retained:', err);
+        SearchIndexManager.hasPendingSyncWriteBack = true;
+        throw err;
+    }
+}
+
+async function loadIndexForMode(mode) {
+    if (!window.SearchIndexDb || typeof window.SearchIndexDb.loadModeSnapshot !== 'function') {
+        return null;
+    }
+
+    try {
+        const liveSig = getCanvasSearchSignature();
+        const normalizedMode = mode === 'tag' ? 'bookmark' : mode;
+        const snapshot = await window.SearchIndexDb.loadModeSnapshot(normalizedMode, liveSig);
+        if (!snapshot) {
+            return null;
+        }
+
+        if (canvasSearchDb.signature !== snapshot.signature) {
+            canvasSearchDb.signature = snapshot.signature;
+            canvasSearchDb.structureIndex = [];
+            canvasSearchDb.descriptionIndex = [];
+            canvasSearchDb.bookmarkIndex = [];
+            canvasSearchDb.itemById = new Map();
+            canvasSearchLoadedModes = new Set();
+        }
+
+        if (normalizedMode === 'bookmark') {
+            canvasSearchDb.bookmarkIndex = snapshot.list;
+        } else if (normalizedMode === 'description') {
+            canvasSearchDb.descriptionIndex = snapshot.list;
+        } else {
+            canvasSearchDb.structureIndex = snapshot.list;
+        }
+
+        for (const item of snapshot.list) {
+            if (item && item.id) {
+                canvasSearchDb.itemById.set(item.id, item);
+            }
+        }
+
+        mergeCoordinatesIntoItemById(canvasSearchDb, snapshot.coordinates);
+        markCanvasSearchModeLoaded(normalizedMode);
+
+        return canvasSearchDb;
+    } catch (err) {
+        console.warn('[Search] Failed to load index for mode from IndexedDB:', err);
+        return null;
+    }
+}
+
+async function loadAllIndexShardsFromIndexedDb(options = {}) {
+    if (!window.SearchIndexDb || typeof window.SearchIndexDb.loadAllSnapshot !== 'function') {
+        return false;
+    }
+
+    try {
+        const allowStale = !!(options && options.allowStale === true);
+        const liveSig = getCanvasSearchSignature();
+        const hasAllMemoryShards = Array.isArray(canvasSearchDb.bookmarkIndex) &&
+            Array.isArray(canvasSearchDb.structureIndex) &&
+            Array.isArray(canvasSearchDb.descriptionIndex) &&
+            canvasSearchLoadedModes.has('bookmark') &&
+            canvasSearchLoadedModes.has('structure') &&
+            canvasSearchLoadedModes.has('description');
+
+        if (hasAllMemoryShards && (canvasSearchDb.signature === liveSig || (allowStale && canvasSearchDb.signature))) {
+            return true;
+        }
+
+        const snapshot = allowStale && typeof window.SearchIndexDb.loadLatestSnapshot === 'function'
+            ? await window.SearchIndexDb.loadLatestSnapshot()
+            : await window.SearchIndexDb.loadAllSnapshot(liveSig);
+        if (!snapshot) {
+            return false;
+        }
+
+        canvasSearchDb.signature = snapshot.signature;
+        canvasSearchDb.bookmarkIndex = snapshot.bookmark;
+        canvasSearchDb.structureIndex = snapshot.card;
+        canvasSearchDb.descriptionIndex = snapshot.description;
+        canvasSearchDb.itemById = new Map();
+
+        const rebuildMap = (list) => {
+            for (const item of list) {
+                if (item && item.id) {
+                    canvasSearchDb.itemById.set(item.id, item);
+                }
+            }
+        };
+        rebuildMap(canvasSearchDb.bookmarkIndex);
+        rebuildMap(canvasSearchDb.structureIndex);
+        rebuildMap(canvasSearchDb.descriptionIndex);
+
+        mergeCoordinatesIntoItemById(canvasSearchDb, snapshot.coordinates);
+        markAllCanvasSearchModesLoaded();
+
+        return true;
+    } catch (err) {
+        console.warn('[Search] Failed to load all index shards from IndexedDB:', err);
+        return false;
+    }
+}
+
+function applyIncrementalUpdatesToMemory(dirtyKeys) {
+    if (!dirtyKeys || dirtyKeys.size === 0) return;
+    
+    console.log('[Search] Running true incremental index build in memory for keys:', Array.from(dirtyKeys));
+
+    // Save old bookmarkSearchOrder values and find max order to avoid duplicates or resetting to 0
+    const oldBookmarkOrders = new Map();
+    let maxOrder = -1;
+    if (Array.isArray(canvasSearchDb.bookmarkIndex)) {
+        canvasSearchDb.bookmarkIndex.forEach(item => {
+            if (item && item.id && typeof item.bookmarkSearchOrder === 'number') {
+                oldBookmarkOrders.set(item.id, item.bookmarkSearchOrder);
+                if (item.bookmarkSearchOrder > maxOrder) {
+                    maxOrder = item.bookmarkSearchOrder;
+                }
+            }
+        });
+    }
+
+    const sliceDb = {
+        structureIndex: [],
+        descriptionIndex: [],
+        bookmarkIndex: [],
+        itemById: new Map()
+    };
+    const sliceCoords = {};
+    const isMultiColumnMode = checkCanvasSearchMultiColumnMode();
+    const bookmarkOrderRef = { value: 0 };
+
+    let reparseSections = new Set();
+    let reparsePermMain = false;
+    let reparsePermCopies = new Set();
+    let reparseCanvasLayout = false;
+    
+    dirtyKeys.forEach(key => {
+        if (key === 'bcs:canvas') {
+            reparseCanvasLayout = true;
+        } else if (key === 'bcs:perm:main' || key === 'cachedCurrentTree') {
+            reparsePermMain = true;
+        } else if (key.startsWith('bcs:perm:copy-')) {
+            reparsePermCopies.add(key.substring('bcs:perm:copy-'.length));
+        } else if (key.startsWith('bcs:section:')) {
+            reparseSections.add(key.substring('bcs:section:'.length));
+        }
+    });
+
+    const filterOutItems = (predicate) => {
+        canvasSearchDb.bookmarkIndex = canvasSearchDb.bookmarkIndex.filter(item => !predicate(item));
+        canvasSearchDb.structureIndex = canvasSearchDb.structureIndex.filter(item => !predicate(item));
+        canvasSearchDb.descriptionIndex = canvasSearchDb.descriptionIndex.filter(item => !predicate(item));
+        for (const [id, item] of canvasSearchDb.itemById.entries()) {
+            if (predicate(item)) {
+                canvasSearchDb.itemById.delete(id);
+            }
+        }
+    };
+    
+    const filterPredicates = [];
+    
+    if (reparseCanvasLayout) {
+        filterPredicates.push(item => item.type === 'md-node' || item.type === 'edge' || item.type === 'group');
+        parseCanvasLayoutSlice(sliceDb, sliceCoords);
+    }
+    
+    if (reparsePermMain) {
+        filterPredicates.push(item => (item.type === 'permanent-section' && item.displayIndex === 1) || (item.source === 'permanent' && !item.copyId));
+        parsePermanentSectionSlice(sliceDb, sliceCoords, isMultiColumnMode);
+        parsePermanentTreeSlice(sliceDb, bookmarkOrderRef);
+    }
+    
+    reparsePermCopies.forEach(copyId => {
+        filterPredicates.push(item => item.copyId === copyId || item.id === copyId);
+        const permanentShellSnapshot = collectPermanentViewShellSnapshotForSearch();
+        const permanentCopies = getPermanentCopyShellsForSearch(permanentShellSnapshot);
+        const idx = permanentCopies.findIndex(c => String(c.copyId) === copyId);
+        if (idx >= 0) {
+            parsePermanentCopySlice(permanentCopies[idx], idx, sliceDb, sliceCoords, isMultiColumnMode);
+        }
+    });
+    
+    reparseSections.forEach(secId => {
+        filterPredicates.push(item => item.sectionId === secId || item.id === secId);
+        const activeCanvasState = getActiveCanvasState();
+        if (activeCanvasState && activeCanvasState.tempSections) {
+            const section = activeCanvasState.tempSections.find(s => s && s.id === secId);
+            if (section) {
+                parseTempSectionSlice(section, sliceDb, sliceCoords, isMultiColumnMode, bookmarkOrderRef);
+            }
+        }
+    });
+
+    if (filterPredicates.length > 0) {
+        const combinedPredicate = (item) => filterPredicates.some(p => p(item));
+        canvasSearchDb.bookmarkIndex = canvasSearchDb.bookmarkIndex.filter(item => !combinedPredicate(item));
+        canvasSearchDb.structureIndex = canvasSearchDb.structureIndex.filter(item => !combinedPredicate(item));
+        canvasSearchDb.descriptionIndex = canvasSearchDb.descriptionIndex.filter(item => !combinedPredicate(item));
+        for (const [id, item] of canvasSearchDb.itemById.entries()) {
+            if (combinedPredicate(item)) {
+                canvasSearchDb.itemById.delete(id);
             }
         }
     }
 
-    // Total Items count for log is sum? Or just structure+description?
-    canvasSearchDb = {
-        signature,
-        structureIndex,
-        descriptionIndex,
-        bookmarkIndex,
-        itemById
+    // Re-calibrate bookmarkSearchOrder values to prevent them from resetting to 0 and colliding
+    let nextNewOrder = maxOrder >= 0 ? maxOrder + 1 : 0;
+    sliceDb.bookmarkIndex.forEach(item => {
+        if (item && item.id) {
+            if (oldBookmarkOrders.has(item.id)) {
+                item.bookmarkSearchOrder = oldBookmarkOrders.get(item.id);
+            } else {
+                item.bookmarkSearchOrder = nextNewOrder++;
+            }
+        }
+    });
+
+    mergeCoordinatesIntoItemById(sliceDb, sliceCoords);
+
+    canvasSearchDb.bookmarkIndex.push(...sliceDb.bookmarkIndex);
+    canvasSearchDb.structureIndex.push(...sliceDb.structureIndex);
+    canvasSearchDb.descriptionIndex.push(...sliceDb.descriptionIndex);
+    for (const [id, item] of sliceDb.itemById.entries()) {
+        canvasSearchDb.itemById.set(id, item);
+    }
+}
+
+function detectDirtyKeysFromLiveState() {
+    const detected = new Set();
+    const activeCanvasState = getActiveCanvasState();
+    if (!activeCanvasState || !canvasSearchDb.itemById) return detected;
+    
+    // Calculate live standard MD cards and labeled card groups
+    let liveMdCount = 0;
+    if (Array.isArray(activeCanvasState.mdNodes)) {
+        for (const node of activeCanvasState.mdNodes) {
+            if (!node) continue;
+            if (node.subtype === 'card-group') {
+                if (String(node.label || '').trim()) {
+                    liveMdCount++; // Only count labeled card-groups as they are indexed
+                }
+            } else {
+                liveMdCount++;
+            }
+        }
+    }
+
+    // Calculate live labeled edges
+    let liveEdgeCount = 0;
+    if (Array.isArray(activeCanvasState.edges)) {
+        for (const edge of activeCanvasState.edges) {
+            if (edge && edge.label) {
+                liveEdgeCount++; // Only count labeled edges as unlabeled ones are skipped in index
+            }
+        }
+    }
+    
+    let cachedMdCount = 0;
+    let cachedEdgeCount = 0;
+    for (const item of canvasSearchDb.itemById.values()) {
+        if (item && (item.type === 'md-node' || item.type === 'group')) cachedMdCount++;
+        if (item && item.type === 'edge') cachedEdgeCount++;
+    }
+    
+    if (liveMdCount !== cachedMdCount || liveEdgeCount !== cachedEdgeCount) {
+        detected.add('bcs:canvas');
+    } else {
+        for (const node of (activeCanvasState.mdNodes || [])) {
+            if (!node || !node.id) continue;
+            if (node.subtype === 'card-group' && !String(node.label || '').trim()) continue;
+            
+            const cached = canvasSearchDb.itemById.get(node.id);
+            if (!cached) {
+                detected.add('bcs:canvas');
+                break;
+            }
+            if (node.subtype === 'card-group') {
+                const liveTitle = String(node.label || '').trim();
+                if (cached.title !== liveTitle) {
+                    detected.add('bcs:canvas');
+                    break;
+                }
+            } else {
+                if (cached.title !== (node.title || '') || cached.text !== (node.text || '')) {
+                    detected.add('bcs:canvas');
+                    break;
+                }
+            }
+        }
+
+        if (!detected.has('bcs:canvas')) {
+            for (const edge of (activeCanvasState.edges || [])) {
+                if (!edge || !edge.id) continue;
+                if (!edge.label) continue;
+                const cached = canvasSearchDb.itemById.get(edge.id);
+                if (!cached) {
+                    detected.add('bcs:canvas');
+                    break;
+                } else if (cached.label !== edge.label) {
+                    detected.add('bcs:canvas');
+                    break;
+                }
+            }
+        }
+    }
+    
+    const liveSections = activeCanvasState.tempSections || [];
+    liveSections.forEach(sec => {
+        if (!sec || !sec.id) return;
+        const cached = canvasSearchDb.itemById.get(sec.id);
+        if (!cached) {
+            detected.add(`bcs:section:${sec.id}`);
+            return;
+        }
+        
+        const liveTitle = sec.title || sec.name || '';
+        const liveDesc = (sec.description || '').replace(/<[^>]+>/g, ' ').trim();
+        if (cached.title !== liveTitle || cached.description !== liveDesc) {
+            detected.add(`bcs:section:${sec.id}`);
+        }
+        
+        let cachedItemsCount = 0;
+        if (Array.isArray(canvasSearchDb.bookmarkIndex)) {
+            cachedItemsCount = canvasSearchDb.bookmarkIndex.filter(item => item.sectionId === sec.id).length;
+        }
+        let liveItemsCount = 0;
+        const countLiveItems = (items) => {
+            if (!Array.isArray(items)) return;
+            items.forEach(it => {
+                if (it) {
+                    liveItemsCount++;
+                    if (it.children) countLiveItems(it.children);
+                }
+            });
+        };
+        countLiveItems(sec.items);
+        if (liveItemsCount !== cachedItemsCount) {
+            detected.add(`bcs:section:${sec.id}`);
+        }
+    });
+
+    // Detect deleted temp sections
+    for (const item of canvasSearchDb.itemById.values()) {
+        if (item && item.type === 'temp-section') {
+            const stillExists = liveSections.some(s => s && s.id === item.id);
+            if (!stillExists) {
+                detected.add(`bcs:section:${item.id}`);
+            }
+        }
+    }
+    
+    try {
+        const livePermDesc = getPermanentDescriptionTextForSearch(null);
+        const cachedPerm = canvasSearchDb.itemById.get('permanentSection');
+        if (!cachedPerm || (cachedPerm.description || '') !== livePermDesc) {
+            detected.add('bcs:perm:main');
+        }
+    } catch (_) {}
+    
+    try {
+        const liveCopies = getPermanentCopyShellsForSearch();
+        liveCopies.forEach(copy => {
+            if (!copy || !copy.copyId) return;
+            const cachedCopy = canvasSearchDb.itemById.get(copy.copyId);
+            if (!cachedCopy) {
+                detected.add(`bcs:perm:copy-${copy.copyId}`);
+                return;
+            }
+            const liveCopyDesc = getPermanentDescriptionTextForSearch(copy.copyId);
+            if ((cachedCopy.description || '') !== liveCopyDesc) {
+                detected.add(`bcs:perm:copy-${copy.copyId}`);
+            }
+        });
+
+        // Detect deleted permanent copies
+        for (const item of canvasSearchDb.itemById.values()) {
+            if (item && item.type === 'permanent-section' && item.copyId) {
+                const stillExists = liveCopies.some(c => c && String(c.copyId) === item.copyId);
+                if (!stillExists) {
+                    detected.add(`bcs:perm:copy-${item.copyId}`);
+                }
+            }
+        }
+    } catch (_) {}
+    
+    const treeVersion = (typeof lastTreeSnapshotVersion !== 'undefined' && lastTreeSnapshotVersion !== null)
+        ? String(lastTreeSnapshotVersion)
+        : '';
+    const treeFingerprint = (typeof lastTreeFingerprint !== 'undefined' && lastTreeFingerprint)
+        ? String(lastTreeFingerprint)
+        : '';
+    
+    if (canvasSearchDb.signature) {
+        const sigParts = canvasSearchDb.signature.split(':');
+        const cachedTreeVer = sigParts[11] || '';
+        const cachedTreeFp = sigParts[12] || '';
+        if (treeVersion !== cachedTreeVer || treeFingerprint !== cachedTreeFp) {
+            detected.add('cachedCurrentTree');
+        }
+    }
+    
+    return detected;
+}
+
+async function buildCanvasSearchDbIncrementallyInMemory() {
+    if (!isCanvasSearchStateReady()) {
+        await waitForCanvasSearchStateReady();
+    }
+
+    const liveSig = getCanvasSearchSignature();
+    
+    // Bypass incremental updates and do a full sync rebuild if a full rebuild is requested
+    if (SearchIndexManager.needsFullUpdate) {
+        SearchIndexManager.processingBaseSignature = null;
+        buildCanvasSearchDbSync();
+        return;
+    }
+    
+    const baseLoaded = await loadAllIndexShardsFromIndexedDb({ allowStale: true });
+    if (!baseLoaded) {
+        SearchIndexManager.processingBaseSignature = null;
+        buildCanvasSearchDbSync();
+        return;
+    }
+    SearchIndexManager.processingBaseSignature = canvasSearchDb.signature || null;
+    
+    const extraDirtyKeys = detectDirtyKeysFromLiveState();
+    extraDirtyKeys.forEach(k => SearchIndexManager.dirtyKeys.add(k));
+    
+    if (SearchIndexManager.dirtyKeys.size === 0 && canvasSearchDb.signature !== liveSig) {
+        console.warn('[Search] IndexedDB base snapshot differs from live state but no dirty keys were detected. Falling back to full rebuild.');
+        SearchIndexManager.processingBaseSignature = null;
+        buildCanvasSearchDbSync();
+        return;
+    }
+
+    const keysToApply = new Set(SearchIndexManager.dirtyKeys);
+    if (keysToApply.size > 0) {
+        SearchIndexManager.processingKeys = new Set(keysToApply);
+        applyIncrementalUpdatesToMemory(keysToApply);
+    }
+    
+    canvasSearchDb.signature = liveSig;
+}
+
+let ensureIndexPromiseChain = Promise.resolve();
+
+async function ensureIndexForModeLoaded(modeKey) {
+    const run = async () => {
+        if (!isCanvasSearchStateReady()) {
+            await waitForCanvasSearchStateReady();
+        }
+
+        const liveSig = getCanvasSearchSignature();
+        
+        // If we are dirty or signatures mismatch, first check if IndexedDB has already been updated.
+        if (SearchIndexManager.isDirty || canvasSearchDb.signature !== liveSig) {
+            const result = await loadIndexForMode(modeKey);
+            if (result) {
+                // IndexedDB is already up-to-date. Sync memory flags only and skip local rebuild.
+                SearchIndexManager.clearDirtyMemoryOnly();
+                return;
+            }
+        }
+        
+        if (SearchIndexManager.isDirty) {
+            console.log('[Search] Index is dirty. Rebuilding in memory incrementally.');
+            SearchIndexManager.snapshotDirtyState();
+            await buildCanvasSearchDbIncrementallyInMemory();
+            SearchIndexManager.hasPendingSyncWriteBack = true;
+            return;
+        }
+
+        if (canvasSearchDb.signature === liveSig) {
+            const indexList = modeKey === 'bookmark' ? canvasSearchDb.bookmarkIndex :
+                              modeKey === 'description' ? canvasSearchDb.descriptionIndex :
+                              canvasSearchDb.structureIndex;
+            if (Array.isArray(indexList) && indexList.length > 0) {
+                return;
+            }
+        }
+        
+        const result = await loadIndexForMode(modeKey);
+        if (!result) {
+            console.log('[Search] Index out of date or empty. Falling back to incremental build in memory.');
+            SearchIndexManager.snapshotDirtyState();
+            await buildCanvasSearchDbIncrementallyInMemory();
+            SearchIndexManager.hasPendingSyncWriteBack = true;
+        }
     };
 
-    const count = structureIndex.length + descriptionIndex.length + bookmarkIndex.length;
-    console.log(`[Search] Phase 3 index built (Partitioned): ${count} items (Structure:${structureIndex.length}, Desc:${descriptionIndex.length}, Bookmark:${bookmarkIndex.length}) in ${(performance.now() - startTime).toFixed(1)}ms`);
+    ensureIndexPromiseChain = ensureIndexPromiseChain.then(run).catch(err => {
+        console.error('[Search] Error in ensureIndexForModeLoaded:', err);
+    });
+    return ensureIndexPromiseChain;
+}
+
+function releaseSearchMemory() {
+    canvasSearchDb = {
+        signature: null,
+        structureIndex: [],
+        descriptionIndex: [],
+        bookmarkIndex: [],
+        itemById: new Map()
+    };
+    canvasSearchLoadedModes = new Set();
+    if (searchUiState) {
+        searchUiState.results = [];
+        searchUiState.resultSource = [];
+        searchUiState.resultAll = [];
+    }
+    console.log('[Search] In-memory search cache released.');
+}
+
+let releaseSearchMemoryTimer = null;
+
+function scheduleReleaseSearchMemoryDebounced() {
+    if (releaseSearchMemoryTimer) clearTimeout(releaseSearchMemoryTimer);
+    releaseSearchMemoryTimer = setTimeout(() => {
+        releaseSearchMemoryTimer = null;
+        releaseSearchMemory();
+    }, 300000); // 5 minutes
+}
+
+function cancelReleaseSearchMemory() {
+    if (releaseSearchMemoryTimer) {
+        clearTimeout(releaseSearchMemoryTimer);
+        releaseSearchMemoryTimer = null;
+        console.log('[Search] Cancelled pending in-memory cache release.');
+    }
+}
+
+// ==================== Phase 3: 索引构建 ====================
+
+/**
+ * 构建画布搜索数据库
+ */
+function buildCanvasSearchDb() {
+    let signature = canvasSearchDb.signature;
+    if (SearchIndexManager.isDirty || !signature) {
+        signature = getCanvasSearchSignature();
+    }
+    if (canvasSearchDb.signature === signature) {
+        const mode = searchUiState.activeMode;
+        const indexList = mode === 'bookmark' ? canvasSearchDb.bookmarkIndex :
+                          mode === 'description' ? canvasSearchDb.descriptionIndex :
+                          canvasSearchDb.structureIndex;
+        if (canvasSearchLoadedModes.has(normalizeCanvasSearchModeKey(mode)) ||
+            (Array.isArray(indexList) && indexList.length > 0)) {
+            return canvasSearchDb;
+        }
+    }
+    return buildCanvasSearchDbSync();
+}
+
+function buildCanvasSearchDbSync() {
+    const signature = getCanvasSearchSignature();
+    if (canvasSearchDb.signature === signature &&
+        Array.isArray(canvasSearchDb.structureIndex) &&
+        Array.isArray(canvasSearchDb.descriptionIndex) &&
+        Array.isArray(canvasSearchDb.bookmarkIndex) &&
+        canvasSearchLoadedModes.has('structure') &&
+        canvasSearchLoadedModes.has('description') &&
+        canvasSearchLoadedModes.has('bookmark')) {
+        return canvasSearchDb;
+    }
+
+    const startTime = performance.now();
+    const db = {
+        signature,
+        structureIndex: [],
+        descriptionIndex: [],
+        bookmarkIndex: [],
+        itemById: new Map()
+    };
+    const coords = {};
+    const isMultiColumnMode = checkCanvasSearchMultiColumnMode();
+    const bookmarkOrderRef = { value: 0 };
+    const activeCanvasState = getActiveCanvasState();
+
+    for (const section of ((activeCanvasState && activeCanvasState.tempSections) || [])) {
+        parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkOrderRef);
+    }
+
+    parseCanvasLayoutSlice(db, coords);
+
+    parsePermanentSectionSlice(db, coords, isMultiColumnMode);
+
+    const permanentShellSnapshot = collectPermanentViewShellSnapshotForSearch();
+    const permanentCopies = getPermanentCopyShellsForSearch(permanentShellSnapshot);
+    if (permanentCopies.length > 0) {
+        permanentCopies.forEach((copy, idx) => {
+            parsePermanentCopySlice(copy, idx, db, coords, isMultiColumnMode);
+        });
+    }
+
+    parsePermanentTreeSlice(db, bookmarkOrderRef);
+
+    mergeCoordinatesIntoItemById(db, coords);
+
+    canvasSearchDb = db;
+    markAllCanvasSearchModesLoaded();
+
+    const count = db.structureIndex.length + db.descriptionIndex.length + db.bookmarkIndex.length;
+    console.log(`[Search] Phase 3 index built (Partitioned): ${count} items (Structure:${db.structureIndex.length}, Desc:${db.descriptionIndex.length}, Bookmark:${db.bookmarkIndex.length}) in ${(performance.now() - startTime).toFixed(1)}ms`);
     return canvasSearchDb;
 }
 
@@ -4821,10 +6050,14 @@ function searchCanvasAndRender(query, options = {}) {
         if (rawScore > -Infinity) {
             const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
             const scoredItem = { item, s: rawScore + scopeBonus, rawScore };
-            if (mode === 'description' && fullscreenScope) {
-                if (belongsToFullscreen(item, fullscreenScope)) {
+            if (fullscreenScope) {
+                // 如果是全屏模式，书签和卡片模式过滤已单独处理（书签在循环开头过滤，卡片模式在全屏下用于切换，不限制在当前卡片）
+                if (mode === 'bookmark' || mode === 'structure') {
                     scored.push(scoredItem);
-                } else {
+                } else if (belongsToFullscreen(item, fullscreenScope)) {
+                    scored.push(scoredItem);
+                } else if (mode === 'description') {
+                    // 全屏说明模式下，非当前卡片的匹配项归入 others，用户点击“展示其他”按钮时才展示
                     fullscreenOthers.push(scoredItem);
                 }
             } else {
@@ -6846,7 +8079,7 @@ function collectBookmarkItemsForTempSection() {
 
 function getCanvasViewportCenterForTemp() {
     const workspace = document.getElementById('canvasWorkspace');
-    const state = (window.CanvasModule && window.CanvasModule.CanvasState) ? window.CanvasModule.CanvasState : (typeof CanvasState !== 'undefined' ? CanvasState : null);
+    const state = getActiveCanvasState();
     if (!workspace || !state) return { x: 100, y: 100 };
 
     const rect = workspace.getBoundingClientRect();
@@ -7345,8 +8578,9 @@ async function createTempSectionFromSearchResults() {
         } catch (_) { }
 
         try {
-            if (window.CanvasModule && window.CanvasModule.CanvasState) {
-                window.CanvasModule.CanvasState.tempStateTimestamp = Date.now();
+            const state = getActiveCanvasState();
+            if (state) {
+                state.tempStateTimestamp = Date.now();
             }
         } catch (_) { }
 
@@ -7482,8 +8716,9 @@ async function createTempSectionFromDomainResult(domain) {
         } catch (_) { }
 
         try {
-            if (window.CanvasModule && window.CanvasModule.CanvasState) {
-                window.CanvasModule.CanvasState.tempStateTimestamp = Date.now();
+            const state = getActiveCanvasState();
+            if (state) {
+                state.tempStateTimestamp = Date.now();
             }
         } catch (_) { }
 
@@ -8484,14 +9719,16 @@ async function locateCanvasElement(elementId, type, options = {}) {
 
     // Helper: 获取节点/栏目矩形 (从 Storage)
     const getRectFromStorage = (id, typeHint) => {
+        const state = getActiveCanvasState();
+        if (!state) return null;
         // 1. Temp Section
         if (!typeHint || typeHint === 'temp-section') {
-            const temp = (CanvasState.tempSections || []).find(s => s.id === id);
+            const temp = (state.tempSections || []).find(s => s.id === id);
             if (temp) return { x: Number(temp.x) || 0, y: Number(temp.y) || 0, w: Number(temp.width) || 0, h: Number(temp.height) || 0 };
         }
         // 2. MD Node / Card-Group / Import-Container
         if (!typeHint || typeHint === 'md-node' || typeHint === 'group') {
-            const md = (CanvasState.mdNodes || []).find(n => n.id === id);
+            const md = (state.mdNodes || []).find(n => n.id === id);
             if (md) return { x: Number(md.x) || 0, y: Number(md.y) || 0, w: Number(md.width) || 0, h: Number(md.height) || 0 };
         }
         // 3. Permanent Main
@@ -8582,9 +9819,10 @@ async function locateCanvasElement(elementId, type, options = {}) {
                         const relX = screenCX - bgRect.left;
                         const relY = screenCY - bgRect.top;
 
-                        const currentZoom = CanvasState.zoom || 1;
-                        const currentPanX = CanvasState.panOffsetX || 0;
-                        const currentPanY = CanvasState.panOffsetY || 0;
+                        const state = getActiveCanvasState();
+                        const currentZoom = (state && state.zoom) || 1;
+                        const currentPanX = (state && state.panOffsetX) || 0;
+                        const currentPanY = (state && state.panOffsetY) || 0;
 
                         // CanvasX = (RelX - PanX) / Zoom
                         targetX = (relX - currentPanX) / currentZoom;
@@ -8596,7 +9834,8 @@ async function locateCanvasElement(elementId, type, options = {}) {
 
             // 2. Fallback to Storage/Memory (if DOM missing)
             if (!foundLocation) {
-                const edge = (CanvasState.edges || []).find(e => e.id === elementId);
+                const state = getActiveCanvasState();
+                const edge = ((state && state.edges) || []).find(e => e.id === elementId);
                 if (edge) {
                     const fromRect = getRectFromStorage(edge.fromNode || edge.from);
                     const toRect = getRectFromStorage(edge.toNode || edge.to);
@@ -8657,16 +9896,17 @@ async function locateCanvasElement(elementId, type, options = {}) {
 
     // 1. 平移画布到计算出的坐标 (Storage-based Pan)
     try {
-        if (typeof CanvasState !== 'undefined') {
+        const state = getActiveCanvasState();
+        if (state) {
             const container = document.querySelector('.canvas-main-container');
             if (container) {
                 const skipPanForMaximizedTarget = shouldSkipCanvasPanForMaximizedTarget(elementId, type);
                 if (!skipPanForMaximizedTarget) {
-                    let currentZoom = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1.0;
+                    let currentZoom = (state.baseZoom && state.baseZoom > 0) ? state.baseZoom : 1.0;
                     if (window.CanvasModule && typeof window.CanvasModule.setZoom === 'function') {
                         window.CanvasModule.setZoom(currentZoom, null, null, { silent: true });
                     } else {
-                        CanvasState.zoom = currentZoom;
+                        state.zoom = currentZoom;
                     }
                     // Sync CSS variable immediately so every locate entry uses the same 100% view.
                     container.style.setProperty('--canvas-scale', currentZoom.toString());
@@ -8683,8 +9923,8 @@ async function locateCanvasElement(elementId, type, options = {}) {
                     if (!Number.isFinite(newPanY)) newPanY = 0;
 
                     // Update State
-                    CanvasState.panOffsetX = newPanX;
-                    CanvasState.panOffsetY = newPanY;
+                    state.panOffsetX = newPanX;
+                    state.panOffsetY = newPanY;
 
                     // Apply Transform (Immediate)
                     const content = document.getElementById('canvasContent');
@@ -9035,63 +10275,66 @@ async function activateCanvasSearchResultAtIndex(index) {
             canvasSearchHighlightState.groupQuery = searchUiState.query; // Track query to clear on mismatch
 
             // 2. Fit Bounds
-            if (bounds.count > 0 && typeof CanvasState !== 'undefined') {
-                // Calculate Target Rect
-                const targetW = bounds.maxX - bounds.minX;
-                const targetH = bounds.maxY - bounds.minY;
-                const centerX = bounds.minX + targetW / 2;
-                const centerY = bounds.minY + targetH / 2;
+            if (bounds.count > 0) {
+                const state = getActiveCanvasState();
+                if (state) {
+                    // Calculate Target Rect
+                    const targetW = bounds.maxX - bounds.minX;
+                    const targetH = bounds.maxY - bounds.minY;
+                    const centerX = bounds.minX + targetW / 2;
+                    const centerY = bounds.minY + targetH / 2;
 
-                // Padding
-                const padding = 100;
-                const container = document.querySelector('.canvas-main-container');
-                if (container) {
-                    const rect = container.getBoundingClientRect();
-                    const viewportW = rect.width;
-                    const viewportH = rect.height;
+                    // Padding
+                    const padding = 100;
+                    const container = document.querySelector('.canvas-main-container');
+                    if (container) {
+                        const rect = container.getBoundingClientRect();
+                        const viewportW = rect.width;
+                        const viewportH = rect.height;
 
-                    // Determined Zoom to fit
-                    const scaleX = viewportW / (targetW + padding * 2);
-                    const scaleY = viewportH / (targetH + padding * 2);
-                    let targetZoom = Math.min(scaleX, scaleY);
+                        // Determined Zoom to fit
+                        const scaleX = viewportW / (targetW + padding * 2);
+                        const scaleY = viewportH / (targetH + padding * 2);
+                        let targetZoom = Math.min(scaleX, scaleY);
 
-                    // Clamp zoom
-                    targetZoom = Math.min(Math.max(targetZoom, 0.1), 1.5); // Don't zoom in too much
+                        // Clamp zoom
+                        targetZoom = Math.min(Math.max(targetZoom, 0.1), 1.5); // Don't zoom in too much
 
-                    // Apply Transform (Center View on CenterX, CenterY)
-                    // PanX = ViewportCX - CenterX * Zoom
-                    let newPanX = (viewportW / 2) - centerX * targetZoom;
-                    let newPanY = (viewportH / 2) - centerY * targetZoom;
+                        // Apply Transform (Center View on CenterX, CenterY)
+                        // PanX = ViewportCX - CenterX * Zoom
+                        let newPanX = (viewportW / 2) - centerX * targetZoom;
+                        let newPanY = (viewportH / 2) - centerY * targetZoom;
 
-                    if (!Number.isFinite(newPanX)) newPanX = 0;
-                    if (!Number.isFinite(newPanY)) newPanY = 0;
+                        if (!Number.isFinite(newPanX)) newPanX = 0;
+                        if (!Number.isFinite(newPanY)) newPanY = 0;
 
-                    // Update State
-                    CanvasState.zoom = targetZoom;
-                    CanvasState.panOffsetX = newPanX;
-                    CanvasState.panOffsetY = newPanY;
+                        // Update State
+                        state.zoom = targetZoom;
+                        state.panOffsetX = newPanX;
+                        state.panOffsetY = newPanY;
 
-                    // Apply Transform (Immediate)
-                    const content = document.getElementById('canvasContent');
-                    if (content) {
-                        if (typeof applyCanvasContentTransform === 'function') {
-                            applyCanvasContentTransform(content, newPanX, newPanY, targetZoom);
-                        } else {
-                            content.style.transform = `translate3d(${newPanX}px, ${newPanY}px, 0) scale(${targetZoom})`;
-                            if (typeof updateCanvasGridLayerTransform === 'function') {
-                                updateCanvasGridLayerTransform(newPanX, newPanY, targetZoom, true);
+                        // Apply Transform (Immediate)
+                        const content = document.getElementById('canvasContent');
+                        if (content) {
+                            if (typeof applyCanvasContentTransform === 'function') {
+                                applyCanvasContentTransform(content, newPanX, newPanY, targetZoom);
+                            } else {
+                                content.style.transform = `translate3d(${newPanX}px, ${newPanY}px, 0) scale(${targetZoom})`;
+                                if (typeof updateCanvasGridLayerTransform === 'function') {
+                                    updateCanvasGridLayerTransform(newPanX, newPanY, targetZoom, true);
+                                }
                             }
                         }
-                    }
 
-                    // Update CSS Vars
-                    container.style.setProperty('--canvas-scale', targetZoom.toString());
-                    container.style.setProperty('--canvas-pan-x', `${newPanX}px`);
-                    container.style.setProperty('--canvas-pan-y', `${newPanY}px`);
+                        // Update CSS Vars
+                        container.style.setProperty('--canvas-scale', targetZoom.toString());
+                        container.style.setProperty('--canvas-pan-x', `${newPanX}px`);
+                        container.style.setProperty('--canvas-pan-y', `${newPanY}px`);
 
-                    // Notify system (if needed)
-                    if (typeof updateCanvasTransform === 'function') {
-                        requestAnimationFrame(() => updateCanvasTransform(false));
+                        // Notify system (if needed)
+                        if (typeof updateCanvasTransform === 'function') {
+                            requestAnimationFrame(() => updateCanvasTransform(false));
+                        }
                     }
                 }
             }
@@ -9133,6 +10376,11 @@ if (typeof window !== 'undefined') {
     window.locateCanvasBookmarkTreeItem = locateCanvasBookmarkTreeItem;
     window.clearCanvasSearchHighlight = clearCanvasSearchHighlight;
     window.activateCanvasSearchResultAtIndex = activateCanvasSearchResultAtIndex;
+    window.ensureCanvasSearchIndexForModeLoaded = ensureIndexForModeLoaded;
+    window.ensureCanvasSearchIndexForActiveMode = function () {
+        const activeMode = (window.searchUiState && window.searchUiState.activeMode) || 'bookmark';
+        return ensureIndexForModeLoaded(activeMode);
+    };
 
     // ==================== 通用事件处理函数 ====================
     window.handleSearchKeydown = handleSearchKeydown;

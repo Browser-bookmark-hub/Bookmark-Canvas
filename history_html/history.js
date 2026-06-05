@@ -13450,6 +13450,7 @@ function enrichRemoveInfoWithSnapshot(id, removeInfo) {
 
 let mainSearchDebounceTimer = null;
 let mainSearchDebounceSeq = 0;
+let mainSearchRenderSeq = 0;
 
 function getMainSearchContextKey() {
     const view = (typeof currentView === 'string' && currentView) ? currentView : 'unknown';
@@ -13474,6 +13475,7 @@ function cancelPendingMainSearchDebounce() {
     } catch (_) { }
     // bump seq so any already-scheduled closures become stale
     mainSearchDebounceSeq += 1;
+    mainSearchRenderSeq += 1;
 }
 
 try {
@@ -13528,7 +13530,9 @@ function handleSearch(e) {
 }
 
 function performSearch(query) {
-    if (!query) {
+    const normalizedQuery = String(query || '').trim().toLowerCase();
+    if (!normalizedQuery) {
+        mainSearchRenderSeq += 1;
         hideSearchResultsPanel();
         if (typeof clearCanvasSearchHighlight === 'function') {
             clearCanvasSearchHighlight();
@@ -13539,7 +13543,35 @@ function performSearch(query) {
     // 根据当前视图执行搜索（仅 Canvas）
     if (currentView === 'canvas') {
         if (typeof searchCanvasAndRender === 'function') {
-            searchCanvasAndRender(query, { source: 'input' });
+            const renderSeq = (mainSearchRenderSeq += 1);
+            const scheduledContextKey = getMainSearchContextKey();
+            const renderNow = () => {
+                if (renderSeq !== mainSearchRenderSeq) return;
+                if (scheduledContextKey !== getMainSearchContextKey()) return;
+
+                const currentInput = document.getElementById('searchInput');
+                const currentNormalized = (currentInput && typeof currentInput.value === 'string')
+                    ? currentInput.value.trim().toLowerCase()
+                    : '';
+                if (currentNormalized !== normalizedQuery) return;
+
+                searchCanvasAndRender(normalizedQuery, { source: 'input' });
+            };
+
+            const ensureIndex = typeof window.ensureCanvasSearchIndexForActiveMode === 'function'
+                ? window.ensureCanvasSearchIndexForActiveMode
+                : null;
+            if (ensureIndex) {
+                Promise.resolve()
+                    .then(() => ensureIndex())
+                    .then(renderNow)
+                    .catch((err) => {
+                        console.warn('[Search] Failed to load IndexedDB search index before rendering. Falling back to sync build:', err);
+                        renderNow();
+                    });
+            } else {
+                renderNow();
+            }
         } else {
             console.warn('[Search] searchCanvasAndRender not available');
             hideSearchResultsPanel();

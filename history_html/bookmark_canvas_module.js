@@ -48,6 +48,7 @@ try {
 } catch (_) { }
 
 const CanvasState = {
+    tempStateTimestamp: 0,
     tempSections: [],
     tempSectionCounter: 0,
     tempItemCounter: 0,
@@ -31586,6 +31587,7 @@ function __applyCanvasTempStateObject(state, options = {}) {
     const ts = __extractCanvasTempStateTimestamp(sourceState);
     if (ts > 0) {
         __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, ts);
+        CanvasState.tempStateTimestamp = __canvasTempStateLastAppliedTimestamp;
     }
     const loadedSignature = __buildCanvasTempStateSignature(sourceState);
     if (loadedSignature) {
@@ -31706,6 +31708,11 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
     // Restore maximized node state after all nodes are rendered
     __tryRestoreMaximizedNode({ clearIfMissing: false });
 
+    try {
+        window.__bookmarkCanvasSearchStateReady = true;
+        window.dispatchEvent(new CustomEvent('canvas-search-state-ready'));
+    } catch (_) { }
+
     // 通知首屏预置：Canvas 初始布局（含滚动条位置）已经就绪
     try {
         requestAnimationFrame(() => {
@@ -31754,6 +31761,7 @@ function saveTempNodes(options = {}) {
             edgeCounter: CanvasState.edgeCounter,
             timestamp: Date.now()
         };
+        CanvasState.tempStateTimestamp = state.timestamp;
         const persistedState = __buildPersistedCanvasState(state);
         const persistedSignature = __buildCanvasTempStateSignature(persistedState);
         if (
@@ -31783,6 +31791,7 @@ function saveTempNodes(options = {}) {
 
 function loadTempNodes() {
     try {
+        try { window.__bookmarkCanvasSearchStateReady = false; } catch (_) { }
         CanvasState.tempSections = [];
         CanvasState.tempSectionCounter = 0;
         CanvasState.tempItemCounter = 0;
