@@ -4301,6 +4301,14 @@ const i18n = {
         'zh_CN': '全部加入空白栏目',
         'en': 'Add All to Blank'
     },
+    quickAddAllWindowsTitle: {
+        'zh_CN': '所有窗口全部',
+        'en': 'All Windows'
+    },
+    quickAddAllWindowsCardGroupText: {
+        'zh_CN': '一键存档（卡片组）',
+        'en': 'Archive All (Card Group)'
+    },
     navCanvas: {
         'zh_CN': '书签画布',
         'en': 'Bookmark Canvas'
@@ -5645,6 +5653,10 @@ function applyLanguage() {
     if (quickAddWindowPermanentText) quickAddWindowPermanentText.textContent = i18n.quickAddWindowPermanentText[currentLang];
     const quickAddWindowBlankText = document.getElementById('quickAddWindowBlankText');
     if (quickAddWindowBlankText) quickAddWindowBlankText.textContent = i18n.quickAddWindowBlankText[currentLang];
+    const quickAddAllWindowsTitle = document.getElementById('quickAddAllWindowsTitle');
+    if (quickAddAllWindowsTitle) quickAddAllWindowsTitle.textContent = i18n.quickAddAllWindowsTitle[currentLang];
+    const quickAddAllWindowsCardGroupText = document.getElementById('quickAddAllWindowsCardGroupText');
+    if (quickAddAllWindowsCardGroupText) quickAddAllWindowsCardGroupText.textContent = i18n.quickAddAllWindowsCardGroupText[currentLang];
     if (typeof window.__refreshQuickAddWindowFolderOptionLabels === 'function') {
         try { window.__refreshQuickAddWindowFolderOptionLabels(); } catch (_) { }
     }
@@ -6742,6 +6754,7 @@ function setupQuickAddMenu() {
 
     const quickAddCurrentTitle = document.getElementById('quickAddCurrentTitle');
     const quickAddWindowTitle = document.getElementById('quickAddWindowTitle');
+    const quickAddAllWindowsTitle = document.getElementById('quickAddAllWindowsTitle');
     const quickAddCurrentViewItem = document.getElementById('quickAddCurrentViewItem');
     const quickAddWindowViewItem = document.getElementById('quickAddWindowViewItem');
     const quickAddCurrentItems = menu.querySelectorAll('.quick-add-menu-item[data-action^="add-current-"]');
@@ -6758,13 +6771,16 @@ function setupQuickAddMenu() {
             const tempColor = (colors && colors.specialTemp) || '#e9973f';
             const permanentColor = (colors && colors.permanent) || '#10b981';
             const blankColor = (colors && colors.mdNode) || '#888888';
+            const cardGroupColor = (colors && colors.cardGroup) || blankColor;
             menu.style.setProperty('--quick-add-special-temp-color', tempColor);
             menu.style.setProperty('--quick-add-permanent-color', permanentColor);
             menu.style.setProperty('--quick-add-blank-color', blankColor);
+            menu.style.setProperty('--quick-add-card-group-color', cardGroupColor);
         } catch (_) {
             menu.style.setProperty('--quick-add-special-temp-color', '#e9973f');
             menu.style.setProperty('--quick-add-permanent-color', '#10b981');
             menu.style.setProperty('--quick-add-blank-color', '#888888');
+            menu.style.setProperty('--quick-add-card-group-color', '#888888');
         }
     };
 
@@ -6781,11 +6797,15 @@ function setupQuickAddMenu() {
         }
         if (action.endsWith('-blank')) {
             item.dataset.kind = 'blank';
+            return;
+        }
+        if (action.endsWith('-card-group')) {
+            item.dataset.kind = 'card-group';
         }
     });
 
     const getQuickAddInlineOptionMode = (action) => {
-        if (!action || !action.includes('window')) return '';
+        if (!action || !action.includes('window') || action === 'add-all-windows-card-group') return '';
         if (action === 'add-window-blank') return 'heading';
         if (action === 'add-window-view' && !!getMaximizedMdNodeId()) return 'heading';
         return 'folder';
@@ -6865,6 +6885,7 @@ function setupQuickAddMenu() {
             menu.classList.add('quick-add-menu-fullscreen-only');
             if (quickAddCurrentTitle) quickAddCurrentTitle.style.display = 'none';
             if (quickAddWindowTitle) quickAddWindowTitle.style.display = 'none';
+            if (quickAddAllWindowsTitle) quickAddAllWindowsTitle.style.display = 'none';
             if (quickAddDivider) quickAddDivider.style.display = 'none';
             quickAddAllItems.forEach((item) => {
                 const action = item && item.dataset ? item.dataset.action || '' : '';
@@ -6882,6 +6903,7 @@ function setupQuickAddMenu() {
 
         if (quickAddCurrentTitle) quickAddCurrentTitle.style.display = hideCurrentGroup ? 'none' : '';
         if (quickAddWindowTitle) quickAddWindowTitle.style.display = '';
+        if (quickAddAllWindowsTitle) quickAddAllWindowsTitle.style.display = '';
         quickAddCurrentItems.forEach((item) => {
             const action = item && item.dataset ? item.dataset.action || '' : '';
             if (action === 'add-current-view') return;
@@ -7119,6 +7141,11 @@ function buildQuickAddWindowFolderItems(items, scope = 'window') {
 async function handleQuickAddAction(action) {
     if (!action) return;
 
+    if (action === 'add-all-windows-card-group') {
+        await archiveAllWindowsToCardGroup();
+        return;
+    }
+
     const isWindowScopeAction = action.includes('window');
     const isWindowViewAction = action === 'add-window-view';
     const isBlankViewTarget = isWindowViewAction && !!getMaximizedMdNodeId();
@@ -7194,6 +7221,243 @@ async function handleQuickAddAction(action) {
         return;
     }
     await addTabsToTempSection(itemsForTarget, scope);
+}
+
+function getAllWindowsWithTabs() {
+    return new Promise((resolve) => {
+        if (!browserAPI || !browserAPI.windows || typeof browserAPI.windows.getAll !== 'function') {
+            resolve([]);
+            return;
+        }
+        browserAPI.windows.getAll({ populate: true, windowTypes: ['normal'] }, (windows) => {
+            const err = browserAPI.runtime && browserAPI.runtime.lastError;
+            if (err) {
+                console.warn('[Archive] windows.getAll failed:', err.message);
+                resolve([]);
+                return;
+            }
+            resolve(Array.isArray(windows) ? windows : []);
+        });
+    });
+}
+
+function getAllTabGroups() {
+    return new Promise((resolve) => {
+        if (!browserAPI || !browserAPI.tabGroups || typeof browserAPI.tabGroups.query !== 'function') {
+            resolve([]);
+            return;
+        }
+        browserAPI.tabGroups.query({}, (groups) => {
+            const err = browserAPI.runtime && browserAPI.runtime.lastError;
+            if (err) {
+                console.warn('[Archive] tabGroups.query failed:', err.message);
+                resolve([]);
+                return;
+            }
+            resolve(Array.isArray(groups) ? groups : []);
+        });
+    });
+}
+
+async function archiveAllWindowsToCardGroup(options = {}) {
+    const isEn = currentLang === 'en';
+    const showToastMsg = (msg) => {
+        try { showToast(msg); } catch (_) { }
+    };
+
+    const windows = await getAllWindowsWithTabs();
+    if (!windows || !windows.length) {
+        showToastMsg(isEn ? 'No windows found to archive' : '未找到可存档的窗口');
+        return;
+    }
+
+    const addableTabsByWindow = [];
+    for (const win of windows) {
+        const tabs = (win.tabs || []).filter(tab => {
+            const url = tab.url || tab.pendingUrl;
+            return url && isAddableUrl(url);
+        });
+        if (tabs.length > 0) {
+            addableTabsByWindow.push({
+                window: win,
+                tabs: tabs
+            });
+        }
+    }
+
+    if (!addableTabsByWindow.length) {
+        showToastMsg(isEn ? 'No valid pages to archive' : '没有可存档的页面');
+        return;
+    }
+
+    if (!window.CanvasModule || !window.CanvasModule.createEmptyTempSection || !window.CanvasModule.temp) {
+        showToastMsg(isEn ? 'Canvas Module is not ready' : '画布模块未就绪');
+        return;
+    }
+
+    const settings = window.CanvasModule.getCanvasAppearanceSettings() || {};
+    const sizes = settings.sizes || {};
+    const tempWidth = (sizes.temp && sizes.temp.width) || 500;
+    const tempHeight = (sizes.temp && sizes.temp.height) || 450;
+
+    const gap = 80;
+    const totalWidth = addableTabsByWindow.length * tempWidth + (addableTabsByWindow.length - 1) * gap;
+
+    let pos = options.position;
+    if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) {
+        pos = getCanvasCenterPoint();
+    }
+
+    const startX = pos.x - totalWidth / 2;
+    const startY = pos.y - tempHeight / 2;
+
+    const activeGroups = await getAllTabGroups();
+    const groupInfoMap = new Map();
+    activeGroups.forEach(g => groupInfoMap.set(g.id, g));
+
+    const sectionIds = [];
+
+    for (let i = 0; i < addableTabsByWindow.length; i++) {
+        const winData = addableTabsByWindow[i];
+        const win = winData.window;
+        const tabs = winData.tabs;
+
+        const structuredItems = [];
+        const groupedFolderMap = new Map();
+
+        tabs.forEach((tab) => {
+            const groupId = (tab && typeof tab.groupId === 'number') ? tab.groupId : -1;
+            if (groupId >= 0) {
+                let folder = groupedFolderMap.get(groupId);
+                if (!folder) {
+                    folder = {
+                        type: 'folder',
+                        title: resolveTabGroupFolderTitle(groupId, groupInfoMap.get(groupId)),
+                        children: []
+                    };
+                    groupedFolderMap.set(groupId, folder);
+                    structuredItems.push(folder);
+                }
+                folder.children.push({
+                    type: 'bookmark',
+                    title: tab.title || tab.url,
+                    url: tab.url
+                });
+            } else {
+                structuredItems.push({
+                    type: 'bookmark',
+                    title: tab.title || tab.url,
+                    url: tab.url
+                });
+            }
+        });
+
+        const x = startX + i * (tempWidth + gap);
+        const y = startY;
+
+        let windowTitle = '';
+        if (win.focused) {
+            windowTitle = isEn ? 'Main Window' : '主窗口';
+        } else {
+            windowTitle = (isEn ? 'Window ' : '窗口 ') + (i + 1);
+        }
+        windowTitle += ` (${tabs.length})`;
+
+        const sectionId = window.CanvasModule.createEmptyTempSection(x, y, {
+            title: windowTitle,
+            label: isEn ? 'Archive' : '存档',
+            source: 'quick-add'
+        });
+
+        if (sectionId) {
+            sectionIds.push(sectionId);
+            insertQuickAddItemsToTempSection(sectionId, structuredItems, '');
+            if (window.CanvasModule.temp.ensureRendered) {
+                window.CanvasModule.temp.ensureRendered(sectionId);
+            }
+        }
+    }
+
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            const CanvasState = window.CanvasModule.CanvasState;
+            if (!CanvasState || !Array.isArray(CanvasState.tempSections)) return;
+
+            let minX = Infinity;
+            let maxX = -Infinity;
+            let minY = Infinity;
+            let maxY = -Infinity;
+
+            sectionIds.forEach(id => {
+                const section = CanvasState.tempSections.find(s => s && s.id === id);
+                if (!section) return;
+                const x = section.x;
+                const y = section.y;
+                const w = section.width;
+                const h = section.height;
+
+                if (x < minX) minX = x;
+                if (x + w > maxX) maxX = x + w;
+                if (y < minY) minY = y;
+                if (y + h > maxY) maxY = y + h;
+            });
+
+            if (minX === Infinity) return;
+
+            const paddingX = 40;
+            const paddingY = 60;
+            const groupX = minX - paddingX;
+            const groupY = minY - paddingY;
+            const groupWidth = (maxX - minX) + 2 * paddingX;
+            const groupHeight = (maxY - minY) + paddingY + paddingX;
+
+            const groupLabel = isEn ? 'Archived Windows' : '一键存档';
+            const defaultColor = (typeof getCardGroupDefaultColor === 'function')
+                ? getCardGroupDefaultColor()
+                : ((window.CanvasModule && typeof window.CanvasModule.getCardGroupDefaultColor === 'function')
+                    ? window.CanvasModule.getCardGroupDefaultColor()
+                    : null);
+
+            const groupNode = {
+                id: `card-group-${++CanvasState.mdNodeCounter}`,
+                type: 'md',
+                subtype: 'card-group',
+                x: groupX,
+                y: groupY,
+                width: groupWidth,
+                height: groupHeight,
+                label: groupLabel,
+                color: null,
+                colorHex: defaultColor || null,
+                pinned: false,
+                createdAt: Date.now()
+            };
+
+            CanvasState.mdNodes.push(groupNode);
+
+            if (typeof renderMdNode === 'function') {
+                renderMdNode(groupNode);
+            } else if (window.CanvasModule.renderMdNode) {
+                window.CanvasModule.renderMdNode(groupNode);
+            }
+
+            if (typeof saveTempNodes === 'function') {
+                saveTempNodes();
+            }
+            if (typeof scheduleBoundsUpdate === 'function') {
+                scheduleBoundsUpdate();
+            }
+
+            if (window.CanvasModule.locateMdNode) {
+                window.CanvasModule.locateMdNode(groupNode.id, 'fit');
+            }
+
+            const successMsg = isEn
+                ? `Archived all windows into a card group`
+                : `一键存档已完成，已包含所有窗口的所有页面并打包到卡片组`;
+            showToastMsg(successMsg);
+        });
+    });
 }
 
 function queryTabs(params) {

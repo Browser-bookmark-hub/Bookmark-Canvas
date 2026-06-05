@@ -1632,6 +1632,25 @@ body.header-dock-bottom:not(.header-compact) .quick-add-menu {
     color: var(--quick-add-blank-color, var(--text-primary));
 }
 
+.quick-add-menu-item[data-kind="card-group"] {
+    color: var(--quick-add-card-group-color, var(--text-primary));
+}
+
+.quick-add-menu-icon-group {
+    width: 18px;
+    min-width: 18px;
+    height: 14px;
+    padding: 0 1px;
+    font-size: 7px;
+    font-weight: 500;
+    letter-spacing: 0.05px;
+    color: var(--quick-add-card-group-color, var(--accent-primary));
+    border: 1px solid color-mix(in srgb, var(--quick-add-card-group-color, var(--accent-primary)) 45%, var(--border-color));
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--quick-add-card-group-color, var(--accent-primary)) 10%, transparent);
+    box-sizing: border-box;
+}
+
 .quick-add-menu-item:hover {
     background: var(--bg-tertiary);
 }
@@ -3039,6 +3058,15 @@ body.sidebar-resizing * {
 .canvas-dir-folder[data-node-key="folder-blank"]>summary .canvas-dir-icon,
 .canvas-dir-folder[data-node-key="folder-blank"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-blank, var(--quick-add-blank-color, var(--text-tertiary)));
+}
+
+.canvas-dir-folder[data-node-key="folder-card-groups"]>summary {
+    color: var(--canvas-dir-color-card-group, var(--quick-add-card-group-color, var(--text-secondary)));
+}
+
+.canvas-dir-folder[data-node-key="folder-card-groups"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-card-groups"]>summary .canvas-dir-count {
+    color: var(--canvas-dir-color-card-group, var(--quick-add-card-group-color, var(--text-tertiary)));
 }
 
 .canvas-dir-folder[data-node-key="folder-other"]>summary .canvas-dir-icon,
@@ -7104,7 +7132,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .permanent-section-header {
     background: linear-gradient(135deg, var(--permanent-section-color, #10b981) 0%, var(--permanent-section-color-dark, #059669) 100%);
-    color: white;
+    color: var(--permanent-header-text-color, white);
     padding: 10px 18px 0;
     cursor: move;
     user-select: none;
@@ -7146,10 +7174,11 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     line-height: 1;
     font-weight: 700;
     letter-spacing: 0.2px;
-    background: rgba(255, 255, 255, 0.18);
-    border: 1px solid rgba(255, 255, 255, 0.28);
-    color: rgba(255, 255, 255, 0.95);
+    background: var(--permanent-header-badge-bg, rgba(255, 255, 255, 0.18));
+    border: 1px solid var(--permanent-header-badge-border, rgba(255, 255, 255, 0.28));
+    color: var(--permanent-header-text-color, rgba(255, 255, 255, 0.95));
     flex: 0 0 auto;
+    text-shadow: var(--permanent-header-text-shadow, none);
 }
 
 .permanent-section-title h3 {
@@ -7167,9 +7196,9 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .permanent-section-action-btn {
-    background: rgba(255, 255, 255, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    color: white;
+    background: var(--permanent-action-bg, rgba(255, 255, 255, 0.2));
+    border: 1px solid var(--permanent-action-border, rgba(255, 255, 255, 0.3));
+    color: var(--permanent-action-icon, white);
     width: 26px;
     height: 26px;
     border-radius: 4px;
@@ -7180,21 +7209,29 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     padding: 0;
     font-size: 12px;
     transition: all 0.2s ease;
+    box-shadow: 0 4px 12px var(--permanent-action-shadow, rgba(15, 23, 42, 0.12));
 }
 
 .permanent-section-action-btn:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: var(--permanent-action-hover-bg, rgba(255, 255, 255, 0.3));
+    color: var(--permanent-action-hover-icon, var(--permanent-action-icon, white));
     transform: translateY(-1px);
 }
 
 .permanent-section-action-btn.pinned {
-    background: rgba(255, 255, 255, 0.35);
-    border-color: rgba(255, 255, 255, 0.5);
+    background: var(--permanent-action-hover-bg, rgba(255, 255, 255, 0.35));
+    border-color: var(--permanent-action-outline, rgba(255, 255, 255, 0.5));
 }
 
 /* 默认隐藏删除按钮：仅在“永久栏目副本”上显示 */
 .permanent-section-remove-btn {
     display: none;
+    --permanent-action-bg: var(--permanent-action-danger-bg, rgba(239, 68, 68, 0.85));
+    --permanent-action-hover-bg: var(--permanent-action-danger-hover-bg, rgba(239, 68, 68, 0.93));
+    --permanent-action-border: var(--permanent-action-danger-border, rgba(239, 68, 68, 0.55));
+    --permanent-action-icon: var(--permanent-action-danger-icon, #ffffff);
+    --permanent-action-hover-icon: var(--permanent-action-danger-hover-icon, #ffffff);
+    --permanent-action-shadow: var(--permanent-action-danger-shadow, rgba(239, 68, 68, 0.3));
 }
 
 .permanent-bookmark-section.permanent-section-copy .permanent-section-remove-btn {
@@ -7755,7 +7792,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .temp-node-header {
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.15), rgba(0, 0, 0, 0.2)), var(--section-color, #2563eb);
     background-blend-mode: overlay;
-    color: #ffffff;
+    color: var(--temp-header-text-color, #ffffff);
     padding: 10px 16px;
     display: flex;
     align-items: center;
@@ -7783,13 +7820,13 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.35);
+    background: var(--temp-header-badge-bg, rgba(255, 255, 255, 0.35));
     font-size: 11px;
     font-weight: 700;
-    color: white;
+    color: var(--temp-header-text-color, white);
     flex-shrink: 0;
-    border: 1.5px solid rgba(255, 255, 255, 0.5);
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    border: 1.5px solid var(--temp-header-badge-border, rgba(255, 255, 255, 0.5));
+    text-shadow: var(--temp-header-text-shadow, 0 1px 3px rgba(0, 0, 0, 0.4));
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
@@ -7808,13 +7845,13 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     height: 20px;
     padding: 0 8px;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.35);
+    background: var(--temp-header-origin-bg, rgba(255, 255, 255, 0.2));
+    border: 1px solid var(--temp-header-origin-border, rgba(255, 255, 255, 0.35));
     font-size: 11px;
     font-weight: 700;
-    color: rgba(255, 255, 255, 0.95);
+    color: var(--temp-header-text-color, rgba(255, 255, 255, 0.95));
     flex-shrink: 0;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    text-shadow: var(--temp-header-text-shadow, 0 1px 3px rgba(0, 0, 0, 0.35));
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
 }
 
@@ -7828,15 +7865,17 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     outline: none;
     letter-spacing: -0.1px;
     min-width: 0;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    text-shadow: var(--temp-header-text-shadow, 0 1px 3px rgba(0, 0, 0, 0.4));
 }
 
 .temp-node-title::placeholder {
-    color: rgba(255, 255, 255, 0.65);
+    color: currentColor;
+    opacity: 0.65;
 }
 
 [data-theme="dark"] .temp-node-title::placeholder {
-    color: rgba(248, 250, 252, 0.55);
+    color: currentColor;
+    opacity: 0.55;
 }
 
 .temp-node-title-input[readonly] {
@@ -7947,7 +7986,8 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .temp-node-color-wrap .temp-color-popover {
     position: absolute;
-    bottom: calc(100% + 6px);
+    top: calc(100% + 6px);
+    bottom: auto;
     left: 50%;
     right: auto;
     transform: translateX(-50%);
@@ -8145,9 +8185,6 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     color: #22c55e;
 }
 
-.temp-node-close {
-    color: inherit;
-}
 
 .temp-node-body {
     padding: 12px 16px 16px;

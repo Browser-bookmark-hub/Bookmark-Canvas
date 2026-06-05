@@ -1714,6 +1714,7 @@ const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
         temp: TEMP_SECTION_DEFAULT_COLOR,
         specialTemp: '#e9973f',
         mdNode: '#888888',
+        cardGroup: '#888888',
         edge: '#999999'
     },
     names: {
@@ -2138,6 +2139,7 @@ function normalizeCanvasAppearanceSettings(input) {
     out.colors.temp = __normalizeAppearanceColor(colors.temp, out.colors.temp);
     out.colors.specialTemp = __normalizeAppearanceColor(colors.specialTemp, out.colors.specialTemp);
     out.colors.mdNode = __normalizeAppearanceColor(colors.mdNode, out.colors.mdNode);
+    out.colors.cardGroup = __normalizeAppearanceColor(colors.cardGroup, colors.mdNode || out.colors.mdNode);
     out.colors.edge = __normalizeAppearanceColor(colors.edge, out.colors.edge);
 
     const names = input.names || {};
@@ -2900,6 +2902,11 @@ function getBlankNodeDefaultColor() {
     return (settings.colors && settings.colors.mdNode) ? settings.colors.mdNode : '#888888';
 }
 
+function getCardGroupDefaultColor() {
+    const settings = getCanvasAppearanceSettings();
+    return (settings.colors && settings.colors.cardGroup) ? settings.colors.cardGroup : getBlankNodeDefaultColor();
+}
+
 function getEdgeDefaultColor() {
     const settings = getCanvasAppearanceSettings();
     return (settings.colors && settings.colors.edge) ? settings.colors.edge : '#999999';
@@ -2925,6 +2932,40 @@ function applyPermanentSectionColorVars(color) {
     __setCssVar('--permanent-section-color', hex);
     __setCssVar('--permanent-section-color-dark', dark);
     __setCssVar('--permanent-section-color-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+
+    const luminance = rgb ? calculateRelativeLuminance(rgb) : 0.5;
+    const headerTextColor = pickReadableTextColor(hex);
+    const isDarkText = headerTextColor === '#0f172a';
+    const badgeBg = isDarkText ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.18)';
+    const badgeBorder = isDarkText ? 'rgba(0, 0, 0, 0.16)' : 'rgba(255, 255, 255, 0.28)';
+    const textShadow = isDarkText ? 'none' : '0 1px 3px rgba(0, 0, 0, 0.4)';
+
+    __setCssVar('--permanent-header-text-color', headerTextColor);
+    __setCssVar('--permanent-header-badge-bg', badgeBg);
+    __setCssVar('--permanent-header-badge-border', badgeBorder);
+    __setCssVar('--permanent-header-text-shadow', textShadow);
+
+    // Compute button palette for permanent section
+    const preferLightening = luminance < 0.45;
+    const palette = buildAdaptivePalette(hex, preferLightening);
+    const dangerPalette = buildAdaptivePalette('#ef4444', preferLightening);
+
+    __setCssVar('--permanent-action-bg', palette.base);
+    __setCssVar('--permanent-action-hover-bg', palette.hover);
+    __setCssVar('--permanent-action-border', palette.border);
+    const actionIconColor = isDarkText ? '#0f172a' : '#ffffff';
+    __setCssVar('--permanent-action-icon', actionIconColor);
+    __setCssVar('--permanent-action-hover-icon', actionIconColor);
+    __setCssVar('--permanent-action-shadow', palette.shadow);
+    __setCssVar('--permanent-action-outline', palette.outline);
+    __setCssVar('--permanent-action-muted-bg', palette.subtle);
+
+    __setCssVar('--permanent-action-danger-bg', dangerPalette.base);
+    __setCssVar('--permanent-action-danger-hover-bg', dangerPalette.hover);
+    __setCssVar('--permanent-action-danger-border', dangerPalette.border);
+    __setCssVar('--permanent-action-danger-icon', dangerPalette.icon);
+    __setCssVar('--permanent-action-danger-hover-icon', dangerPalette.hoverIcon);
+    __setCssVar('--permanent-action-danger-shadow', dangerPalette.shadow);
 }
 
 function applyCanvasAppearanceSettings(settings, options = {}) {
@@ -3340,7 +3381,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
         height: 1540,
         label: presetGroupLabel,
         color: null,
-        colorHex: null,
+        colorHex: '#94a3b8',
         pinned: false,
         createdAt: Date.now()
     };
@@ -27376,7 +27417,7 @@ function pickReadableTextColor(hex) {
     const rgb = hexToRgb(hex);
     if (!rgb) return '#0f172a';
     const luminance = calculateRelativeLuminance(rgb);
-    return luminance > 0.6 ? '#0f172a' : '#ffffff';
+    return luminance > 0.38 ? '#0f172a' : '#ffffff';
 }
 
 function buildAdaptivePalette(baseColor, preferLightening) {
@@ -27430,13 +27471,28 @@ function applyTempSectionColor(section, nodeElement, header, colorButton, colorI
         header.style.setProperty('--section-color', safeColor);
     }
 
+    const headerTextColor = pickReadableTextColor(safeColor);
+    const isDarkText = headerTextColor === '#0f172a';
+    const badgeBg = isDarkText ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.35)';
+    const badgeBorder = isDarkText ? 'rgba(0, 0, 0, 0.16)' : 'rgba(255, 255, 255, 0.5)';
+    const originBadgeBg = isDarkText ? 'rgba(0, 0, 0, 0.06)' : 'rgba(255, 255, 255, 0.2)';
+    const originBadgeBorder = isDarkText ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255, 255, 255, 0.35)';
+    const textShadow = isDarkText ? 'none' : '0 1px 3px rgba(0, 0, 0, 0.4)';
+
     const target = nodeElement || header;
     if (target) {
+        target.style.setProperty('--temp-header-text-color', headerTextColor);
+        target.style.setProperty('--temp-header-badge-bg', badgeBg);
+        target.style.setProperty('--temp-header-badge-border', badgeBorder);
+        target.style.setProperty('--temp-header-origin-bg', originBadgeBg);
+        target.style.setProperty('--temp-header-origin-border', originBadgeBorder);
+        target.style.setProperty('--temp-header-text-shadow', textShadow);
+
         target.style.setProperty('--temp-action-bg', palettes.primary.base);
         target.style.setProperty('--temp-action-hover-bg', palettes.primary.hover);
         target.style.setProperty('--temp-action-border', palettes.primary.border);
-        target.style.setProperty('--temp-action-icon', palettes.primary.icon);
-        target.style.setProperty('--temp-action-hover-icon', palettes.primary.hoverIcon);
+        target.style.setProperty('--temp-action-icon', isDarkText ? '#0f172a' : '#ffffff');
+        target.style.setProperty('--temp-action-hover-icon', isDarkText ? '#0f172a' : '#ffffff');
         target.style.setProperty('--temp-action-shadow', palettes.primary.shadow);
         target.style.setProperty('--temp-action-outline', palettes.primary.outline);
         target.style.setProperty('--temp-action-muted-bg', palettes.primary.subtle);
@@ -34227,6 +34283,7 @@ window.CanvasModule = {
         if (__isCanvasViewportVisualSyncEligible()) __scheduleCanvasViewportVisualSync();
     },
     getCanvasAppearanceSettings: getCanvasAppearanceSettings,
+    getCardGroupDefaultColor: getCardGroupDefaultColor,
     getCanvasOtherSettings: getCanvasOtherSettings,
     getCanvasDirectoryCollapsePrefs: getCanvasDirectoryCollapsePrefs,
     setCanvasDirectoryCollapsePrefs: setCanvasDirectoryCollapsePrefs,
@@ -34356,6 +34413,7 @@ function openCanvasAppearanceSettingsModal() {
         if (target === 'temp') __syncAppearanceColorRow(row, colors.temp);
         if (target === 'special-temp') __syncAppearanceColorRow(row, colors.specialTemp);
         if (target === 'blank') __syncAppearanceColorRow(row, colors.mdNode);
+        if (target === 'card-group') __syncAppearanceColorRow(row, colors.cardGroup);
         if (target === 'edge') __syncAppearanceColorRow(row, colors.edge);
     });
 
@@ -34463,6 +34521,7 @@ function saveCanvasAppearanceSettings(options = {}) {
             temp: (modal.querySelector('#appearanceColorTemp') || {}).value,
             specialTemp: (modal.querySelector('#appearanceColorSpecialTemp') || {}).value,
             mdNode: (modal.querySelector('#appearanceColorBlank') || {}).value,
+            cardGroup: (modal.querySelector('#appearanceColorCardGroup') || {}).value,
             edge: (modal.querySelector('#appearanceColorEdge') || {}).value
         },
         names: {
@@ -34679,7 +34738,7 @@ function createCanvasAppearanceSettingsModal() {
                         </div>
                     </div>
                     <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Blank (non-group)' : '空白栏目（非组框）'}</div>
+                        <div class="appearance-row-label">${isEn ? 'Blank' : '空白栏目'}</div>
                         <div class="appearance-row-content">
                             <div class="appearance-size-inputs" id="appearanceBlankSizeInputs">
                                 <input type="number" id="appearanceBlankWidth" min="180" max="2000" step="10">
@@ -34740,12 +34799,22 @@ function createCanvasAppearanceSettingsModal() {
                         </div>
                     </div>
                     <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Blank (non-group)' : '空白栏目（非组框）'}</div>
+                        <div class="appearance-row-label">${isEn ? 'Blank' : '空白栏目'}</div>
                         <div class="appearance-row-content">
                             <div class="appearance-color-row" data-color-target="blank">
                                 <div class="appearance-color-chips">${chipsHtml}</div>
                                 <span class="appearance-color-value" id="appearanceColorBlankValue">#888888</span>
                                 <input type="color" id="appearanceColorBlank" class="appearance-color-input" data-color-target="blank">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Card Group' : '卡片组'}</div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-color-row" data-color-target="card-group">
+                                <div class="appearance-color-chips">${chipsHtml}</div>
+                                <span class="appearance-color-value" id="appearanceColorCardGroupValue">#888888</span>
+                                <input type="color" id="appearanceColorCardGroup" class="appearance-color-input" data-color-target="card-group">
                             </div>
                         </div>
                     </div>

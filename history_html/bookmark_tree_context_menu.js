@@ -6377,7 +6377,7 @@ function __normalizeBookmarkAddActionType(actionType) {
         return 'add-page';
     }
 
-    if (value === 'add-page' || value === 'add-folder' || value === 'add-current-window' || (allowCurrentTab && value === 'add-current-tab')) {
+    if (value === 'add-page' || value === 'add-folder' || value === 'add-current-window' || value === 'add-all-windows-card-group' || (allowCurrentTab && value === 'add-current-tab')) {
         return value;
     }
 
@@ -7485,6 +7485,12 @@ function __renderBookmarkAddActionOptions(container, lang, actionType, windowAsF
         icon: 'window-maximize'
     });
 
+    options.push({
+        value: 'add-all-windows-card-group',
+        label: lang === 'zh_CN' ? '一键存档（所有窗口）' : 'Archive All (All Windows)',
+        icon: 'archive'
+    });
+
     const selected = __normalizeBookmarkAddActionType(actionType);
     const checkedWindowAsFolder = __normalizeBookmarkAddWindowAsFolder(windowAsFolder);
 
@@ -7589,10 +7595,24 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
         locateAfterActionInput.checked = initialLocateAfterAction;
     }
 
+    const positionField = positionWrap ? positionWrap.closest('.bookmark-add-secondary-field') : null;
     const locateField = modal.querySelector('.bookmark-add-secondary-field-inline');
-    if (locateField) {
-        locateField.style.display = (context && context.blankRoot) ? 'none' : '';
-    }
+
+    const updateFieldVisibility = () => {
+        const actionType = __readCheckedValue(modal, 'input[name="bookmarkAddActionType"]:checked', initialActionType);
+        const isArchiveAll = actionType === 'add-all-windows-card-group';
+        if (positionField) {
+            positionField.style.display = isArchiveAll ? 'none' : '';
+        }
+        if (locateField) {
+            locateField.style.display = (isArchiveAll || (context && context.blankRoot)) ? 'none' : '';
+        }
+    };
+
+    modal.querySelectorAll('input[name="bookmarkAddActionType"]').forEach(radio => {
+        radio.addEventListener('change', updateFieldVisibility);
+    });
+    updateFieldVisibility();
 
     const inlineWindowFolderInput = modal.querySelector('#bookmarkAddSecondaryWindowAsFolderInline');
     if (inlineWindowFolderInput) {
@@ -7696,6 +7716,18 @@ async function executeBookmarkAddAction(context, config, options = {}) {
             rememberLocateTarget(normalized);
         });
     };
+
+    if (actionType === 'add-all-windows-card-group') {
+        const x = context && Number.isFinite(context.x) ? context.x : (target && Number.isFinite(target.x) ? target.x : null);
+        const y = context && Number.isFinite(context.y) ? context.y : (target && Number.isFinite(target.y) ? target.y : null);
+        const positionOption = x !== null && y !== null ? { x, y } : null;
+        if (typeof archiveAllWindowsToCardGroup === 'function') {
+            await archiveAllWindowsToCardGroup({ position: positionOption });
+        } else if (window.archiveAllWindowsToCardGroup) {
+            await window.archiveAllWindowsToCardGroup({ position: positionOption });
+        }
+        return true;
+    }
 
     if (actionType === 'add-page') {
         if (isTemporaryTarget) {
@@ -13477,6 +13509,22 @@ async function __openCanvasBlankAddSecondaryAtPosition(left, top) {
         locateAfterAction: false
     });
     if (!selected) return false;
+    const actionType = __normalizeBookmarkAddActionType(selected.actionType);
+    if (actionType === 'add-all-windows-card-group') {
+        const normalizedSelection = {
+            actionType,
+            position: 'inside',
+            windowAsFolder: false,
+            locateAfterAction: false
+        };
+        __writeBookmarkAddTemplate(normalizedSelection);
+        if (typeof archiveAllWindowsToCardGroup === 'function') {
+            await archiveAllWindowsToCardGroup({ position: { x: left, y: top } });
+        } else if (window.archiveAllWindowsToCardGroup) {
+            await window.archiveAllWindowsToCardGroup({ position: { x: left, y: top } });
+        }
+        return true;
+    }
     const sectionId = __createCanvasQuickAddTempSectionAtPosition(left, top);
     if (!sectionId) return false;
     const context = Object.assign({}, baseContext, { sectionId });

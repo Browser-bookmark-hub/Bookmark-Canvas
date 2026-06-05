@@ -21,20 +21,19 @@ const CARD_GROUP_DEFAULT_PILL_BG = '#475569';
 const CARD_GROUP_DEFAULT_PILL_FG = '#f8fafc';
 
 function __cardGroupResolveColors(node) {
-    const hex = (node && typeof node.colorHex === 'string') ? node.colorHex.trim() : '';
-    if (hex && /^#[0-9a-fA-F]{3,8}$/.test(hex)) {
-        return {
-            border: hex,
-            fill: __cardGroupHexWithAlpha(hex, 0.10),
-            pillBg: hex,
-            pillFg: __cardGroupPickReadableForeground(hex)
-        };
+    let hex = (node && typeof node.colorHex === 'string') ? node.colorHex.trim() : '';
+    if (!hex || !/^#[0-9a-fA-F]{3,8}$/.test(hex)) {
+        hex = (typeof getCardGroupDefaultColor === 'function')
+            ? getCardGroupDefaultColor()
+            : ((window.CanvasModule && typeof window.CanvasModule.getCardGroupDefaultColor === 'function')
+                ? window.CanvasModule.getCardGroupDefaultColor()
+                : CARD_GROUP_DEFAULT_BORDER);
     }
     return {
-        border: CARD_GROUP_DEFAULT_BORDER,
-        fill: CARD_GROUP_DEFAULT_FILL,
-        pillBg: CARD_GROUP_DEFAULT_PILL_BG,
-        pillFg: CARD_GROUP_DEFAULT_PILL_FG
+        border: hex,
+        fill: __cardGroupHexWithAlpha(hex, 0.10),
+        pillBg: hex,
+        pillFg: __cardGroupPickReadableForeground(hex)
     };
 }
 

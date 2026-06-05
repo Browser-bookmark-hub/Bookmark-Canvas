@@ -42,6 +42,7 @@
     temp: '#2563eb',
     specialTemp: '#e9973f',
     blank: '#888888',
+    cardGroup: '#888888',
     edge: '#999999'
   });
   const DIRECTORY_LOCATABLE_NEUTRAL_COLOR = '#888888';
@@ -333,6 +334,7 @@
       temp: normalizeHexColor(colors && colors.temp, defaults.temp),
       specialTemp: normalizeHexColor(colors && colors.specialTemp, defaults.specialTemp),
       blank: normalizeHexColor(colors && colors.mdNode, defaults.blank),
+      cardGroup: normalizeHexColor(colors && colors.cardGroup, defaults.cardGroup),
       edge: normalizeHexColor(colors && colors.edge, defaults.edge)
     };
   }
@@ -345,6 +347,7 @@
         temp: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
         specialTemp: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
         blank: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
+        cardGroup: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
         edge: DIRECTORY_LOCATABLE_NEUTRAL_COLOR
       };
     }
@@ -362,11 +365,13 @@
     root.style.setProperty('--quick-add-special-temp-color', colors.specialTemp);
     root.style.setProperty('--quick-add-permanent-color', colors.permanent);
     root.style.setProperty('--quick-add-blank-color', colors.blank);
+    root.style.setProperty('--quick-add-card-group-color', colors.cardGroup);
 
     root.style.setProperty('--canvas-dir-color-permanent', colors.permanent);
     root.style.setProperty('--canvas-dir-color-temp', colors.temp);
     root.style.setProperty('--canvas-dir-color-special-temp', colors.specialTemp);
     root.style.setProperty('--canvas-dir-color-blank', colors.blank);
+    root.style.setProperty('--canvas-dir-color-card-group', colors.cardGroup);
     root.style.setProperty('--canvas-dir-color-edge', colors.edge);
   }
 
@@ -849,7 +854,14 @@
         const section = sectionId ? tempSectionById.get(sectionId) : null;
         return isSpecialTempSection(section) ? locatableThemeTokens.specialTemp : locatableThemeTokens.temp;
       }
-      if (kind === 'md-node') return locatableThemeTokens.blank;
+      if (kind === 'md-node') {
+        const nodeId = normalizeText(target.nodeId);
+        const node = nodeId ? mdNodeById.get(nodeId) : null;
+        if (node && node.subtype === 'card-group') {
+          return locatableThemeTokens.cardGroup || locatableThemeTokens.blank;
+        }
+        return locatableThemeTokens.blank;
+      }
       if (kind === 'edge') return locatableThemeTokens.edge;
       return DIRECTORY_LOCATABLE_NEUTRAL_COLOR;
     };
@@ -1684,7 +1696,7 @@
         variant: 'card-group-item',
         color: '',
         defaultColor: '',
-        showIcon: true,
+        showIcon: false,
         showFoldControl: true,
         showDeleteControl: true,
         deleteAction: {

@@ -95,17 +95,22 @@ function __cardGroupBuildColorPopover(node) {
             </svg>
         </button>
     `;
+    const defaultColor = (typeof getCardGroupDefaultColor === 'function')
+        ? getCardGroupDefaultColor()
+        : ((window.CanvasModule && typeof window.CanvasModule.getCardGroupDefaultColor === 'function')
+            ? window.CanvasModule.getCardGroupDefaultColor()
+            : '#66bbff');
     const rgbPicker = document.createElement('div');
     rgbPicker.className = 'md-rgb-picker card-group-rgb-picker';
     rgbPicker.innerHTML = `
-        <input class="md-color-input" type="color" value="${node.colorHex || '#66bbff'}" title="${customColorTitle}" />
+        <input class="md-color-input" type="color" value="${node.colorHex || defaultColor}" title="${customColorTitle}" />
     `;
     pop.appendChild(rgbPicker);
 
     const recentChipEl = pop.querySelector('.md-color-recent-chip');
     const syncRecent = () => {
         if (!recentChipEl) return;
-        const safe = (typeof CanvasState !== 'undefined' && CanvasState.cardGroupPrevColor) ? CanvasState.cardGroupPrevColor : '#66bbff';
+        const safe = (typeof CanvasState !== 'undefined' && CanvasState.cardGroupPrevColor) ? CanvasState.cardGroupPrevColor : defaultColor;
         recentChipEl.dataset.hex = safe;
         recentChipEl.style.backgroundColor = safe;
     };
@@ -143,7 +148,12 @@ function __cardGroupBuildColorPopover(node) {
 
 function __cardGroupSetColor(node, preset, hex) {
     if (!node) return;
-    const prev = node.colorHex || (typeof presetToHex === 'function' && node.color ? presetToHex(node.color) : '') || '#66bbff';
+    const defaultColor = (typeof getCardGroupDefaultColor === 'function')
+        ? getCardGroupDefaultColor()
+        : ((window.CanvasModule && typeof window.CanvasModule.getCardGroupDefaultColor === 'function')
+            ? window.CanvasModule.getCardGroupDefaultColor()
+            : '#66bbff');
+    const prev = node.colorHex || (typeof presetToHex === 'function' && node.color ? presetToHex(node.color) : '') || defaultColor;
     if (typeof CanvasState !== 'undefined') CanvasState.cardGroupPrevColor = prev;
     if (preset && /^[1-6]$/.test(String(preset))) {
         node.color = String(preset);

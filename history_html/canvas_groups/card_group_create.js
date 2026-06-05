@@ -55,6 +55,12 @@ function createCardGroupNode(payload) {
         label = getDefaultCardGroupLabel();
     }
 
+    const defaultColor = (typeof getCardGroupDefaultColor === 'function')
+        ? getCardGroupDefaultColor()
+        : ((window.CanvasModule && typeof window.CanvasModule.getCardGroupDefaultColor === 'function')
+            ? window.CanvasModule.getCardGroupDefaultColor()
+            : '#888888');
+
     const node = {
         id: __cardGroupNewId(),
         type: 'md',
@@ -65,7 +71,7 @@ function createCardGroupNode(payload) {
         height,
         label,
         color: null,
-        colorHex: null,
+        colorHex: defaultColor || null,
         pinned: false
     };
 
