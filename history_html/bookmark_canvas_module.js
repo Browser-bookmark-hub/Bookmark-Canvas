@@ -4842,7 +4842,7 @@ function insertTempItems(sectionId, parentId, items, index = null, options = {})
         });
     }
 
-    renderTempNode(section);
+    refreshTempSectionTreeInPlace(section);
     saveTempNodes();
     if (options && options.defaultCollapseFolders && typeof saveTempExpandState === 'function') {
         try { saveTempExpandState(); } catch (_) { }
@@ -4864,7 +4864,7 @@ function removeTempItemsById(sectionId, itemIds) {
 
     const section = getTempSection(sectionId);
     if (section) {
-        renderTempNode(section);
+        refreshTempSectionTreeInPlace(section);
         saveTempNodes();
     }
 
@@ -4902,7 +4902,7 @@ function moveTempItemsWithinSection(sectionId, itemIds, targetParentId, index = 
         __collapseTempFolderRecursively(sectionId, entry.item);
     });
 
-    renderTempNode(section);
+    refreshTempSectionTreeInPlace(section);
     saveTempNodes();
 }
 
@@ -4940,8 +4940,8 @@ function moveTempItemsAcrossSections(sourceSectionId, targetSectionId, itemIds, 
         __collapseTempFolderRecursively(targetSectionId, item);
     });
 
-    renderTempNode(sourceSection);
-    renderTempNode(targetSection);
+    refreshTempSectionTreeInPlace(sourceSection);
+    refreshTempSectionTreeInPlace(targetSection);
     saveTempNodes();
 }
 
@@ -4951,7 +4951,7 @@ function renameTempItem(sectionId, itemId, newTitle, options = {}) {
     entry.item.title = newTitle;
     const section = entry.section;
     if (options.skipRender !== true) {
-        renderTempNode(section);
+        refreshTempSectionTreeInPlace(section);
     }
     if (options.skipSave !== true) {
         saveTempNodes();
@@ -4977,7 +4977,7 @@ function setTempItemTags(sectionId, itemId, tagsInput, options = {}) {
         : (Array.isArray(tagsInput) ? tagsInput.slice() : []);
     if (tags.length) entry.item.tags = tags;
     else if (Object.prototype.hasOwnProperty.call(entry.item, 'tags')) delete entry.item.tags;
-    if (options.skipRender !== true) renderTempNode(entry.section);
+    if (options.skipRender !== true) refreshTempSectionTreeInPlace(entry.section);
     if (options.skipSave !== true) saveTempNodes();
     return true;
 }
@@ -4997,7 +4997,7 @@ function toggleTempItemTag(sectionId, itemId, tagInput, options = {}) {
     else { existing.push(norm); action = 'added'; }
     if (existing.length) entry.item.tags = existing;
     else if (Object.prototype.hasOwnProperty.call(entry.item, 'tags')) delete entry.item.tags;
-    if (options.skipRender !== true) renderTempNode(entry.section);
+    if (options.skipRender !== true) refreshTempSectionTreeInPlace(entry.section);
     if (options.skipSave !== true) saveTempNodes();
     return { action, tags: existing };
 }
@@ -5015,7 +5015,7 @@ function updateTempBookmark(sectionId, itemId, updates, options = {}) {
     }
 
     if (options.skipRender !== true) {
-        renderTempNode(entry.section);
+        refreshTempSectionTreeInPlace(entry.section);
     }
     if (options.skipSave !== true) {
         saveTempNodes();
@@ -5024,10 +5024,14 @@ function updateTempBookmark(sectionId, itemId, updates, options = {}) {
 
 function ensureTempSectionRendered(sectionId) {
     const section = getTempSection(sectionId);
-    if (section) {
-        renderTempNode(section);
+    if (!section) return;
+    const el = document.getElementById(section.id);
+    if (!el) {
+        renderTempNode(section, (isCanvasVirtualizationEnabled() || isCanvasBlockDormancyEnabled()) ? { skipTree: true } : {});
         saveTempNodes();
+        return;
     }
+    patchTempSectionShellInPlace(section, { updateDescription: false });
 }
 
 function extractTempItemsPayload(sectionId, itemIds) {
@@ -7626,17 +7630,9 @@ function __flushCurrentPartitionExpandAndScrollState(partitionKey) {
     try { __flushPermanentSectionScrollStates(); } catch (_) { }
 }
 
+
 function __applyCurrentPartitionExpandAndScrollSnapshot() {
     try { loadTempExpandState(); } catch (_) { }
-
-    try {
-        if (Array.isArray(CanvasState.tempSections)) {
-            CanvasState.tempSections.forEach((section) => {
-                if (!section || !section.id) return;
-                try { renderTempNode(section); } catch (_) { }
-            });
-        }
-    } catch (_) { }
 
     try {
         const canvasContent = document.getElementById('canvasContent');
@@ -7692,7 +7688,7 @@ function __applyCurrentPartitionExpandAndScrollSnapshot() {
         if (typeof restoreTreeExpandState === 'function') {
             const canvasContent = document.getElementById('canvasContent');
             const scope = canvasContent || document;
-            scope.querySelectorAll('.permanent-bookmark-section .bookmark-tree').forEach((tree) => {
+            scope.querySelectorAll('.permanent-bookmark-section .bookmark-tree, .temp-canvas-node .bookmark-tree').forEach((tree) => {
                 try { restoreTreeExpandState(tree); } catch (_) { }
             });
         }
@@ -10458,6 +10454,86 @@ function __ensureTempSectionTreeLoadedInPlace(section) {
 
     return true;
 }
+
+function __buildTempSectionTreeFragment(section, treeContainer) {
+    const fragment = document.createDocumentFragment();
+    if (!section || !Array.isArray(section.items)) return fragment;
+
+    const total = section.items.length;
+    const rootVisible = getTempSectionRootVisibleCount(section, total);
+    const initialItems = rootVisible >= total ? section.items : section.items.slice(0, rootVisible);
+
+    initialItems.forEach((item) => {
+        try {
+            const node = buildTempTreeNode(section, item, 0);
+            if (node) fragment.appendChild(node);
+        } catch (_) { }
+    });
+
+    if (rootVisible < total) {
+        try {
+            const loadMoreBtn = createTempRootLoadMoreButton(section, rootVisible, total, treeContainer);
+            if (loadMoreBtn) fragment.appendChild(loadMoreBtn);
+        } catch (_) { }
+    }
+
+    return fragment;
+}
+
+function refreshTempSectionTreeInPlace(section, options = {}) {
+    if (!section || !section.id) return false;
+
+    let element = document.getElementById(section.id);
+    if (!element) {
+        try {
+            renderTempNode(section, (isCanvasVirtualizationEnabled() || isCanvasBlockDormancyEnabled()) ? { skipTree: true } : {});
+            element = document.getElementById(section.id);
+        } catch (_) { }
+        return !!element;
+    }
+
+    const treeContainer = element.querySelector('.temp-bookmark-tree');
+    if (!treeContainer) {
+        try { renderTempNode(section, { skipTree: !!(options && options.skipTree) }); } catch (_) { }
+        return !!document.getElementById(section.id);
+    }
+
+    const isUnloaded = (treeContainer.dataset && treeContainer.dataset.contentUnloaded === 'true') ||
+        (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(section.id));
+    const shouldKeepUnloaded = !!(
+        section.dormant ||
+        CanvasState.lowDetailActive ||
+        (isUnloaded && !(options && options.forceBuildTree))
+    );
+
+    if (shouldKeepUnloaded) {
+        try { treeContainer.innerHTML = ''; } catch (_) { }
+        try { treeContainer.style.display = 'none'; } catch (_) { }
+        try { treeContainer.dataset.contentHidden = 'true'; } catch (_) { }
+        try { treeContainer.dataset.contentUnloaded = 'true'; } catch (_) { }
+        try { if (CanvasState.unloadedTempSectionTrees) CanvasState.unloadedTempSectionTrees.add(section.id); } catch (_) { }
+        try { element.classList.add('temp-tree-unloaded'); } catch (_) { }
+        return true;
+    }
+
+    try { treeContainer.innerHTML = ''; } catch (_) { }
+    try { treeContainer.appendChild(__buildTempSectionTreeFragment(section, treeContainer)); } catch (_) { }
+    try { treeContainer.style.display = ''; } catch (_) { }
+    try { treeContainer.style.height = ''; } catch (_) { }
+    try { treeContainer.dataset.contentHidden = 'false'; } catch (_) { }
+    try { treeContainer.dataset.contentUnloaded = 'false'; } catch (_) { }
+    try { if (CanvasState.unloadedTempSectionTrees) CanvasState.unloadedTempSectionTrees.delete(section.id); } catch (_) { }
+    try { element.classList.remove('temp-tree-unloaded'); } catch (_) { }
+
+    try { setupTempSectionTreeInteractions(treeContainer, section); } catch (_) { }
+    try { if (typeof attachTreeEvents === 'function') attachTreeEvents(treeContainer); } catch (_) { }
+    try { if (typeof attachDragEvents === 'function' && treeContainer.querySelector('.tree-item[data-node-id]')) attachDragEvents(treeContainer); } catch (_) { }
+    try { if (typeof attachPointerDragEvents === 'function') attachPointerDragEvents(treeContainer); } catch (_) { }
+    try { if (typeof window.__updateTraceHighlights === 'function') window.__updateTraceHighlights(); } catch (_) { }
+
+    return true;
+}
+window.refreshTempSectionTreeInPlace = refreshTempSectionTreeInPlace;
 
 let lastLowDetailPrewarmAt = 0;
 
@@ -27825,6 +27901,223 @@ function applyTempSectionColor(section, nodeElement, header, colorButton, colorI
     }
 }
 
+function __getTempLowDetailOriginText(section) {
+    if (!section || !section.source) return '';
+    const src = String(section.source).trim().toLowerCase();
+    const isEn = (typeof getCanvasLanguage === 'function' ? getCanvasLanguage() : '') === 'en';
+    switch (src) {
+        case 'browser-drop': return isEn ? 'Drop' : '拖入';
+        case 'search-result': return isEn ? 'Search' : '搜索';
+        case 'batch': return isEn ? 'Batch' : '批量';
+        case 'quick-add': return isEn ? 'Add' : '添加';
+        case 'file-import': return isEn ? 'Import' : '导入文件';
+        case 'import-html-bookmarks':
+        case 'import-json-bookmarks':
+            return isEn ? 'Import' : '导入';
+        default: return '';
+    }
+}
+
+function __patchTempSectionBadgeInPlace(section, nodeElement) {
+    if (!section || !nodeElement) return;
+    const titleContainer = nodeElement.querySelector('.temp-node-title-container');
+    if (!titleContainer) return;
+
+    const label = getTempSectionLabel(section);
+    let badge = titleContainer.querySelector('.temp-node-sequence-badge');
+    if (!label) {
+        if (badge) {
+            try { badge.remove(); } catch (_) { }
+        }
+        return;
+    }
+
+    if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'temp-node-sequence-badge';
+        const titleInput = titleContainer.querySelector('.temp-node-title-input');
+        try {
+            titleContainer.insertBefore(badge, titleInput || titleContainer.firstChild);
+        } catch (_) {
+            titleContainer.appendChild(badge);
+        }
+    }
+    applyTempSectionBadge(badge, label);
+}
+
+function __patchTempSectionLowDetailOverlayInPlace(section, nodeElement) {
+    if (!section || !nodeElement) return;
+    const overlay = nodeElement.querySelector('.temp-node-low-detail-overlay');
+    if (!overlay) return;
+
+    const badgeEl = overlay.querySelector('.temp-node-low-detail-badge');
+    if (badgeEl) {
+        const badgeText = [getTempSectionLabel(section), __getTempLowDetailOriginText(section)].filter(Boolean).join(' ');
+        if (badgeText) {
+            badgeEl.textContent = badgeText;
+            badgeEl.style.display = '';
+        } else {
+            badgeEl.textContent = '';
+            badgeEl.style.display = 'none';
+        }
+    }
+
+    const titleEl = overlay.querySelector('.temp-node-low-detail-title');
+    if (titleEl) titleEl.textContent = getTempSectionDisplayTitle(section);
+}
+
+function __getTempDescriptionPlaceholderText() {
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
+    return lang === 'en'
+        ? 'Click to add description... (supports [text](URL), https://..., www...)'
+        : '点击添加说明...（支持 [文字](URL)、https://...、www...）';
+}
+
+function __patchTempSectionDescriptionMeta(descriptionText, section) {
+    if (!descriptionText) return;
+    const html = __normalizeCanvasRichHtml(descriptionText.innerHTML);
+    const hasContent = !!html;
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
+    descriptionText.style.fontStyle = hasContent ? 'normal' : 'italic';
+    descriptionText.style.opacity = hasContent ? '1' : '0.5';
+    descriptionText.title = hasContent
+        ? (lang === 'en' ? 'Click to edit' : '点击编辑说明')
+        : (section && section.suppressPlaceholder ? '' : (lang === 'en' ? 'Click to add description' : '点击添加说明'));
+}
+
+function __patchTempSectionDescriptionHeightInPlace(section, descriptionContainer) {
+    if (!section || !descriptionContainer || typeof __readDescHeightSettings !== 'function') return;
+    try {
+        const settings = __readDescHeightSettings(
+            TEMP_DESC_HEIGHT_SETTINGS_KEY,
+            {
+                displayMode: 'rows',
+                displayRows: 3,
+                editMode: 'full',
+                editRows: 9
+            },
+            {
+                displayMode: section.descDisplayMode,
+                displayRows: section.descDisplayRows,
+                editMode: section.descEditMode,
+                editRows: section.descEditRows
+            }
+        );
+        descriptionContainer.__descHeightSettings = settings;
+        if (typeof descriptionContainer.__applyDescHeightSettings === 'function') {
+            descriptionContainer.__applyDescHeightSettings();
+        }
+    } catch (_) { }
+}
+
+function __patchTempSectionDescriptionInPlace(section, nodeElement, options = {}) {
+    if (!section || !nodeElement) return false;
+    const descriptionContainer = nodeElement.querySelector('.temp-node-description-container');
+    const descriptionText = descriptionContainer ? descriptionContainer.querySelector('.temp-node-description') : null;
+    if (!descriptionContainer || !descriptionText) return false;
+
+    const savedDescFontSize = Number(section && section.descFontSize);
+    if (Number.isFinite(savedDescFontSize) && savedDescFontSize > 0) {
+        descriptionText.style.fontSize = savedDescFontSize + 'px';
+    } else {
+        descriptionText.style.removeProperty('font-size');
+    }
+    __patchTempSectionDescriptionHeightInPlace(section, descriptionContainer);
+
+    if (section.suppressPlaceholder) {
+        descriptionText.setAttribute('data-placeholder', '');
+        descriptionText.setAttribute('aria-label', '');
+    } else {
+        const placeholder = __getTempDescriptionPlaceholderText();
+        descriptionText.setAttribute('data-placeholder', placeholder);
+        descriptionText.setAttribute('aria-label', placeholder);
+    }
+
+    const isEditing = descriptionContainer.classList.contains('editing') ||
+        descriptionText.isContentEditable ||
+        descriptionText.getAttribute('contenteditable') === 'true' ||
+        descriptionContainer.contains(document.activeElement);
+
+    if (isEditing && !(options && options.forceDescriptionDom)) {
+        return true;
+    }
+
+    const nextSource = __normalizeTempSectionDescriptionMarkdown(section);
+    const nextHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(nextSource));
+    section.descriptionMd = nextSource;
+    section.description = nextHtml;
+    if (descriptionText.innerHTML !== nextHtml) {
+        descriptionText.innerHTML = nextHtml;
+        try { __applyHeadingCollapse(descriptionText); } catch (_) { }
+    }
+    __patchTempSectionDescriptionMeta(descriptionText, section);
+    return true;
+}
+
+function patchTempSectionShellInPlace(section, options = {}) {
+    if (!section || !section.id) return false;
+    const nodeElement = document.getElementById(section.id);
+    if (!nodeElement) return false;
+
+    section.color = section.color || getTempSectionDefaultColor(section);
+    const baseSize = getTempSectionBaseSize(section);
+
+    if (Number.isFinite(Number(section.x))) nodeElement.style.left = Number(section.x) + 'px';
+    if (Number.isFinite(Number(section.y))) nodeElement.style.top = Number(section.y) + 'px';
+    nodeElement.style.width = (section.width || baseSize.width) + 'px';
+    nodeElement.style.height = (section.height || baseSize.height) + 'px';
+    if (applyElementMinimumSize(nodeElement, getSectionMinimumSize(nodeElement, section))) {
+        section.width = parseFloat(nodeElement.style.width) || section.width || baseSize.width;
+        section.height = parseFloat(nodeElement.style.height) || section.height || baseSize.height;
+    }
+
+    const pinned = !!section.pinned;
+    nodeElement.style.zIndex = pinned ? '200' : '100';
+    nodeElement.style.position = 'absolute';
+    nodeElement.dataset.sectionId = section.id;
+
+    const header = nodeElement.querySelector('.temp-node-header');
+    const colorInput = nodeElement.querySelector('.temp-node-color-input');
+    const colorBtn = nodeElement.querySelector('.temp-node-color-btn');
+    applyTempSectionColor(section, nodeElement, header, colorBtn, colorInput);
+
+    const lockBtn = nodeElement.querySelector('.temp-color-lock-btn');
+    if (lockBtn) __applyTempColorLockButtonState(lockBtn, section);
+
+    const titleInput = nodeElement.querySelector('.temp-node-title-input');
+    if (titleInput && !titleInput.classList.contains('editing') && document.activeElement !== titleInput) {
+        titleInput.value = getTempSectionDisplayTitle(section);
+    }
+
+    __patchTempSectionBadgeInPlace(section, nodeElement);
+    __patchTempSectionLowDetailOverlayInPlace(section, nodeElement);
+
+    const pinBtn = nodeElement.querySelector('.temp-node-pin-btn');
+    if (pinBtn) {
+        const isEn = (typeof currentLang !== 'undefined' && currentLang === 'en');
+        const pinLabel = isEn ? 'Pin section' : '置顶栏目';
+        const unpinLabel = isEn ? 'Unpin section' : '取消置顶';
+        pinBtn.classList.toggle('pinned', pinned);
+        pinBtn.title = pinned ? unpinLabel : pinLabel;
+        pinBtn.setAttribute('aria-label', pinBtn.title);
+        pinBtn.innerHTML = pinned ? '<i class="fas fa-thumbtack"></i>' : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+    }
+
+    if (!section.dormant && !isCanvasBlockDormancyEnabled()) {
+        try { nodeElement.classList.remove('dormant-content'); } catch (_) { }
+    } else if (section.dormant) {
+        try { nodeElement.classList.add('dormant-content'); } catch (_) { }
+    }
+
+    if (!options || options.updateDescription !== false) {
+        __patchTempSectionDescriptionInPlace(section, nodeElement, options);
+    }
+
+    try { __updateTempSectionOriginBadges(); } catch (_) { }
+    return true;
+}
+window.patchTempSectionShellInPlace = patchTempSectionShellInPlace;
+
 function beginTempSectionTitleEdit(section, input, renameButton) {
     if (!input) return;
     input.classList.add('editing');
@@ -27848,6 +28141,10 @@ function finishTempSectionTitleEdit(section, input, renameButton, commit) {
         const newTitle = typeof input.value === 'string' ? input.value.trim() : '';
         section.title = newTitle;
         input.value = newTitle;
+        const nodeElement = input.closest('.temp-canvas-node');
+        if (nodeElement) {
+            try { __patchTempSectionLowDetailOverlayInPlace(section, nodeElement); } catch (_) { }
+        }
         saveTempNodes();
     } else {
         input.value = getTempSectionDisplayTitle(section);
@@ -31383,9 +31680,184 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external', optio
 
     __canvasTempStateRealtimeSyncApplying = true;
     try {
-        __resetCanvasDomAndStateForImport();
-        __applyCanvasTempStateObject(normalizedState, { preserveRaw: true });
-        __finalizeTempNodesLoad({ loadedFromStorage: true });
+        const container = document.getElementById('canvasContent');
+        if (container) {
+            const incomingSections = Array.isArray(normalizedState.sections)
+                ? normalizedState.sections
+                : (Array.isArray(normalizedState.tempSections) ? normalizedState.tempSections : []);
+            const incomingMdNodes = Array.isArray(normalizedState.mdNodes)
+                ? normalizedState.mdNodes
+                : (Array.isArray(normalizedState.cards) ? normalizedState.cards : []);
+            const incomingEdges = Array.isArray(normalizedState.edges) ? normalizedState.edges : [];
+
+            // 1. 删除已被剔除的临时卡片
+            const incomingSectionIds = new Set(incomingSections.map(s => s.id).filter(Boolean));
+            const currentSectionsCopy = [...CanvasState.tempSections];
+            for (const oldSection of currentSectionsCopy) {
+                if (!incomingSectionIds.has(oldSection.id)) {
+                    const el = document.getElementById(oldSection.id);
+                    if (el) {
+                        try { el.remove(); } catch (_) {}
+                    }
+                    CanvasState.tempSections = CanvasState.tempSections.filter(s => s.id !== oldSection.id);
+                }
+            }
+
+            // 2. 删除已被剔除的 Markdown 卡片
+            const incomingMdNodeIds = new Set(incomingMdNodes.map(n => n.id).filter(Boolean));
+            const currentMdNodesCopy = [...CanvasState.mdNodes];
+            for (const oldNode of currentMdNodesCopy) {
+                if (!incomingMdNodeIds.has(oldNode.id)) {
+                    const el = document.getElementById(oldNode.id);
+                    if (el) {
+                        try { el.remove(); } catch (_) {}
+                    }
+                    CanvasState.mdNodes = CanvasState.mdNodes.filter(n => n.id !== oldNode.id);
+                }
+            }
+
+            // 3. 增量更新或新增临时卡片
+            incomingSections.forEach(newSection => {
+                if (!newSection || !newSection.id) return;
+                const oldSection = CanvasState.tempSections.find(s => s.id === newSection.id);
+                if (!oldSection) {
+                    CanvasState.tempSections.push(newSection);
+                    try {
+                        renderTempNode(newSection, (isCanvasVirtualizationEnabled() || isCanvasBlockDormancyEnabled()) ? { skipTree: true } : {});
+                    } catch (_) {}
+                } else {
+                    const posChanged = oldSection.x !== newSection.x || oldSection.y !== newSection.y;
+                    const sizeChanged = oldSection.width !== newSection.width || oldSection.height !== newSection.height;
+                    const colorChanged = oldSection.color !== newSection.color;
+                    const pinChanged = oldSection.pinned !== newSection.pinned;
+                    const folderChanged = oldSection.folderId !== newSection.folderId;
+                    const dormantChanged = oldSection.dormant !== newSection.dormant;
+                    const titleChanged = getTempSectionDisplayTitle(oldSection) !== getTempSectionDisplayTitle(newSection);
+                    const badgeChanged = getTempSectionLabel(oldSection) !== getTempSectionLabel(newSection);
+                    const sourceChanged = oldSection.source !== newSection.source || oldSection.tempKind !== newSection.tempKind || JSON.stringify(oldSection.originPermanent || null) !== JSON.stringify(newSection.originPermanent || null);
+                    const colorLockChanged = oldSection.colorLocked !== newSection.colorLocked;
+                    const descriptionChanged = oldSection.description !== newSection.description ||
+                        oldSection.descriptionMd !== newSection.descriptionMd ||
+                        oldSection.descFontSize !== newSection.descFontSize ||
+                        oldSection.descDisplayMode !== newSection.descDisplayMode ||
+                        oldSection.descDisplayRows !== newSection.descDisplayRows ||
+                        oldSection.descEditMode !== newSection.descEditMode ||
+                        oldSection.descEditRows !== newSection.descEditRows ||
+                        oldSection.suppressPlaceholder !== newSection.suppressPlaceholder;
+                    const itemsChanged = JSON.stringify(oldSection.items) !== JSON.stringify(newSection.items);
+
+                    Object.assign(oldSection, newSection);
+
+                    const el = document.getElementById(oldSection.id);
+                    if (el) {
+                        if (posChanged || sizeChanged || colorChanged || pinChanged || titleChanged || badgeChanged || sourceChanged || colorLockChanged || descriptionChanged || folderChanged || dormantChanged) {
+                            try { patchTempSectionShellInPlace(oldSection); } catch (_) {}
+                        }
+                        if (itemsChanged || dormantChanged) {
+                            try {
+                                refreshTempSectionTreeInPlace(oldSection, { forceBuildTree: !oldSection.dormant && !CanvasState.lowDetailActive });
+                            } catch (_) {}
+                        }
+                    } else {
+                        try {
+                            renderTempNode(oldSection, (isCanvasVirtualizationEnabled() || isCanvasBlockDormancyEnabled()) ? { skipTree: true } : {});
+                        } catch (_) {}
+                    }
+                }
+            });
+
+            // 4. 增量更新或新增 Markdown 卡片
+            incomingMdNodes.forEach(newNode => {
+                if (!newNode || !newNode.id) return;
+                const oldNode = CanvasState.mdNodes.find(n => n.id === newNode.id);
+                if (!oldNode) {
+                    CanvasState.mdNodes.push(newNode);
+                    try { renderMdNode(newNode); } catch (_) {}
+                } else {
+                    const posChanged = oldNode.x !== newNode.x || oldNode.y !== newNode.y;
+                    const sizeChanged = oldNode.width !== newNode.width || oldNode.height !== newNode.height;
+                    const pinChanged = oldNode.pinned !== newNode.pinned;
+                    const colorChanged = oldNode.color !== newNode.color || oldNode.colorHex !== newNode.colorHex;
+                    const fontSizeChanged = oldNode.fontSize !== newNode.fontSize;
+                    const labelChanged = oldNode.label !== newNode.label;
+                    const contentChanged = oldNode.text !== newNode.text || oldNode.html !== newNode.html || oldNode.subtype !== newNode.subtype || oldNode.style !== newNode.style;
+
+                    Object.assign(oldNode, newNode);
+
+                    const el = document.getElementById(oldNode.id);
+                    if (el) {
+                        if (contentChanged || labelChanged) {
+                            try { renderMdNode(oldNode); } catch (_) {}
+                        } else {
+                            if (posChanged) {
+                                el.style.left = newNode.x + 'px';
+                                el.style.top = newNode.y + 'px';
+                            }
+                            if (sizeChanged) {
+                                el.style.width = newNode.width + 'px';
+                                el.style.height = newNode.height + 'px';
+                                if (oldNode.subtype === 'card-group' && typeof __cardGroupUpdateHeaderPillScaleCap === 'function') {
+                                    try { __cardGroupUpdateHeaderPillScaleCap(el); } catch (_) {}
+                                }
+                            }
+                            if (pinChanged) {
+                                const defaultZ = (oldNode.subtype === 'card-group') ? '5' : '15';
+                                el.style.zIndex = newNode.pinned ? '200' : defaultZ;
+                            }
+                            if (colorChanged) {
+                                if (oldNode.subtype === 'card-group' && typeof applyCardGroupColor === 'function') {
+                                    try { applyCardGroupColor(oldNode); } catch (_) {}
+                                } else if (typeof applyMdNodeColor === 'function') {
+                                    try { applyMdNodeColor(el, oldNode); } catch (_) {}
+                                }
+                            }
+                            if (fontSizeChanged) {
+                                const editor = el.querySelector('.md-canvas-editor');
+                                if (editor) {
+                                    editor.style.fontSize = oldNode.fontSize + 'px';
+                                }
+                                const sizeValue = el.querySelector('.md-format-size-value');
+                                if (sizeValue) {
+                                    sizeValue.textContent = oldNode.fontSize + 'px';
+                                }
+                            }
+                        }
+                    } else {
+                        try { renderMdNode(oldNode); } catch (_) {}
+                    }
+                }
+            });
+
+            // 5. 更新 CanvasState 元数据计数器与属性
+            CanvasState.tempSectionCounter = normalizedState.tempSectionCounter || CanvasState.tempSections.length;
+            CanvasState.tempItemCounter = normalizedState.tempItemCounter || 0;
+            CanvasState.colorCursor = normalizedState.colorCursor || 0;
+            CanvasState.tempSectionLastColor = normalizedState.tempSectionLastColor || getTempSectionDefaultColor();
+            CanvasState.tempSectionPrevColor = normalizedState.tempSectionPrevColor || null;
+            CanvasState.mdNodeCounter = normalizedState.mdNodeCounter || CanvasState.mdNodes.length || 0;
+            CanvasState.edgeCounter = normalizedState.edgeCounter || incomingEdges.length || 0;
+
+            // 6. 重绘连接线
+            CanvasState.edges = incomingEdges;
+            if (typeof renderEdges === 'function') {
+                try { renderEdges(); } catch (_) {}
+            }
+
+            // 7. 更新卡片组外边框
+            try {
+                if (typeof __refreshAllCardGroupFrames === 'function') {
+                    __refreshAllCardGroupFrames();
+                }
+            } catch (_) {}
+
+            // 8. 局部刷新临时卡片计数等全局状态
+            try { refreshTempSectionCounters(); } catch (_) {}
+            try { __refreshCanvasNodeCounters(); } catch (_) {}
+            try { updateCanvasScrollBounds(); } catch (_) {}
+            try { updateScrollbarThumbs(); } catch (_) {}
+        }
+
+        // 9. 依然执行永久栏目的布局位置同步
         if (options && options.bcsStorage) {
             try {
                 __applyPermanentLayoutFromBcsStorageSnapshot(options.bcsStorage, { removeMissingCopies: true });
@@ -31396,9 +31868,9 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external', optio
             __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, ts);
         }
 
-        console.log('[Canvas] 已同步外部画布状态:', source, ts || 'no-ts');
+        console.log('[Canvas] 已增量同步外部画布状态:', source, ts || 'no-ts');
     } catch (error) {
-        console.warn('[Canvas] 外部画布状态同步失败:', error);
+        console.warn('[Canvas] 外部画布状态增量同步失败，尝试安全恢复:', error);
     } finally {
         __canvasTempStateRealtimeSyncApplying = false;
         if (shouldEnableFullscreenGuard) {

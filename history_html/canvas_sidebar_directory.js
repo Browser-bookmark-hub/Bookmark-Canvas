@@ -3214,6 +3214,87 @@
     });
   }
 
+  function getMutationElement(node) {
+    if (!node) return null;
+    if (node.nodeType === 1) return node;
+    return node.parentElement || null;
+  }
+
+  function isDirectoryIgnoredMutationScope(element) {
+    if (!element || !element.closest) return false;
+    return !!element.closest([
+      '.canvas-edges',
+      '.bookmark-tree',
+      '.temp-bookmark-tree',
+      '.tree-node',
+      '.tree-item',
+      '.tree-children',
+      '.tree-load-more',
+      '.tree-load-more-root',
+      '.temp-node-description',
+      '.temp-node-description-controls',
+      '.temp-node-actions',
+      '.temp-color-popover',
+      '.resize-handle',
+      '.temp-node-resize-handle',
+      '.canvas-node-anchor',
+      '.canvas-anchor-zone'
+    ].join(','));
+  }
+
+  function nodeTouchesDirectoryCardShell(node) {
+    const element = getMutationElement(node);
+    if (!element || !element.matches) return false;
+    if (isDirectoryIgnoredMutationScope(element)) return false;
+
+    const cardSelector = '.temp-canvas-node, .md-canvas-node, .permanent-bookmark-section';
+    if (element.matches(cardSelector)) return true;
+    if (element.querySelector && element.querySelector(cardSelector)) return true;
+
+    const titleSelector = [
+      '.temp-node-header',
+      '.temp-node-title-container',
+      '.temp-node-sequence-badge',
+      '.permanent-section-title',
+      '.md-canvas-header',
+      '.md-canvas-title'
+    ].join(',');
+    return element.matches(titleSelector) || !!(element.querySelector && element.querySelector(titleSelector));
+  }
+
+  function shouldRefreshForCanvasMutations(mutations) {
+    if (!Array.isArray(mutations) && !(mutations && typeof mutations.length === 'number')) return true;
+
+    for (const mutation of mutations) {
+      if (!mutation) continue;
+
+      if (mutation.type === 'attributes') {
+        const target = getMutationElement(mutation.target);
+        if (!target || isDirectoryIgnoredMutationScope(target)) continue;
+        const attr = normalizeText(mutation.attributeName);
+        if (attr === 'style' || attr === 'class') continue;
+        if (nodeTouchesDirectoryCardShell(target)) return true;
+        continue;
+      }
+
+      if (mutation.type !== 'childList') continue;
+
+      const target = getMutationElement(mutation.target);
+      if (target && isDirectoryIgnoredMutationScope(target)) continue;
+      if (target && target.matches && target.matches('.temp-canvas-node, .md-canvas-node, .permanent-bookmark-section')) {
+        return true;
+      }
+
+      const added = Array.from(mutation.addedNodes || []);
+      const removed = Array.from(mutation.removedNodes || []);
+      if (added.some(nodeTouchesDirectoryCardShell) || removed.some(nodeTouchesDirectoryCardShell)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   function ensureCanvasObserver() {
     const canvasContent = document.getElementById(CANVAS_CONTENT_ID);
     if (canvasContent === observedCanvasContent) return;
@@ -3226,12 +3307,16 @@
     observedCanvasContent = canvasContent;
     if (!canvasContent) return;
 
-    canvasObserver = new MutationObserver(() => {
-      queueRefresh();
+    canvasObserver = new MutationObserver((mutations) => {
+      if (shouldRefreshForCanvasMutations(mutations)) {
+        queueRefresh();
+      }
     });
     canvasObserver.observe(canvasContent, {
       childList: true,
-      subtree: true
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['id', 'data-section-id', 'data-permanent-section-copy-id', 'data-node-id', 'data-edge-id']
     });
   }
 

@@ -11552,7 +11552,10 @@ function applyPermanentCreateDomPatch(id, bookmark) {
             const { parentItem, childrenContainer } = findPermanentChildrenContainerByParentId(tree, parentId);
             if (!parentItem) return;
             if (parentItem.dataset && parentItem.dataset.nodeType === 'folder' && !childrenContainer) {
-                failed = true;
+                const parentNode = getPermanentCachedNodeById(parentId);
+                const childCount = parentNode && Array.isArray(parentNode.children) ? parentNode.children.length : 0;
+                parentItem.dataset.hasChildren = childCount > 0 ? 'true' : 'false';
+                parentItem.dataset.childCount = String(childCount);
                 return;
             }
             refreshPermanentLoadMoreState(tree, parentId);
@@ -11589,7 +11592,14 @@ function applyPermanentMoveDomPatch(id, moveInfo) {
             let sourceNode = findPermanentTreeNodeByChromeId(tree, id);
             const { parentItem, childrenContainer } = findPermanentChildrenContainerByParentId(tree, newParentId);
             if (parentItem && parentItem.dataset && parentItem.dataset.nodeType === 'folder' && !childrenContainer) {
-                failed = true;
+                if (sourceNode && sourceNode.parentElement) {
+                    try { sourceNode.parentElement.removeChild(sourceNode); } catch (_) { failed = true; return; }
+                }
+                if (oldParentId) refreshPermanentLoadMoreState(tree, oldParentId);
+                const parentNode = getPermanentCachedNodeById(newParentId);
+                const childCount = parentNode && Array.isArray(parentNode.children) ? parentNode.children.length : 0;
+                parentItem.dataset.hasChildren = childCount > 0 ? 'true' : 'false';
+                parentItem.dataset.childCount = String(childCount);
                 return;
             }
             const canInsert = parentItem && isPermanentChildrenContainerReadyForDomPatch(parentItem, childrenContainer);
