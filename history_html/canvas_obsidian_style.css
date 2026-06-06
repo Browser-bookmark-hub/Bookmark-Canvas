@@ -2745,6 +2745,76 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     content-visibility: visible !important;
 }
 
+/* 提升交互节点及其子元素的 z-index，防止相邻栏目的连接点和 hover 区域相互抢占/覆盖 */
+.permanent-bookmark-section.dragging > .resize-handle,
+.permanent-bookmark-section.resizing > .resize-handle,
+.permanent-bookmark-section.selected > .resize-handle,
+.permanent-bookmark-section.editing > .resize-handle,
+.permanent-bookmark-section:hover > .resize-handle,
+.temp-canvas-node.dragging > .resize-handle,
+.temp-canvas-node.resizing > .resize-handle,
+.temp-canvas-node.selected > .resize-handle,
+.temp-canvas-node.editing > .resize-handle,
+.temp-canvas-node:hover > .resize-handle,
+.md-canvas-node.dragging > .resize-handle,
+.md-canvas-node.resizing > .resize-handle,
+.md-canvas-node.selected > .resize-handle,
+.md-canvas-node.editing > .resize-handle,
+.md-canvas-node:hover > .resize-handle,
+.card-group-canvas-node.dragging > .resize-handle,
+.card-group-canvas-node.resizing > .resize-handle,
+.card-group-canvas-node.selected > .resize-handle,
+.card-group-canvas-node.editing > .resize-handle,
+.card-group-canvas-node:hover > .resize-handle {
+    z-index: 13000 !important;
+}
+
+.permanent-bookmark-section.dragging .canvas-node-anchor,
+.permanent-bookmark-section.resizing .canvas-node-anchor,
+.permanent-bookmark-section.selected .canvas-node-anchor,
+.permanent-bookmark-section.editing .canvas-node-anchor,
+.permanent-bookmark-section:hover .canvas-node-anchor,
+.temp-canvas-node.dragging .canvas-node-anchor,
+.temp-canvas-node.resizing .canvas-node-anchor,
+.temp-canvas-node.selected .canvas-node-anchor,
+.temp-canvas-node.editing .canvas-node-anchor,
+.temp-canvas-node:hover .canvas-node-anchor,
+.md-canvas-node.dragging .canvas-node-anchor,
+.md-canvas-node.resizing .canvas-node-anchor,
+.md-canvas-node.selected .canvas-node-anchor,
+.md-canvas-node.editing .canvas-node-anchor,
+.md-canvas-node:hover .canvas-node-anchor,
+.card-group-canvas-node.dragging .canvas-node-anchor,
+.card-group-canvas-node.resizing .canvas-node-anchor,
+.card-group-canvas-node.selected .canvas-node-anchor,
+.card-group-canvas-node.editing .canvas-node-anchor,
+.card-group-canvas-node:hover .canvas-node-anchor {
+    z-index: 14000 !important;
+}
+
+.permanent-bookmark-section.dragging .canvas-anchor-zone,
+.permanent-bookmark-section.resizing .canvas-anchor-zone,
+.permanent-bookmark-section.selected .canvas-anchor-zone,
+.permanent-bookmark-section.editing .canvas-anchor-zone,
+.permanent-bookmark-section:hover .canvas-anchor-zone,
+.temp-canvas-node.dragging .canvas-anchor-zone,
+.temp-canvas-node.resizing .canvas-anchor-zone,
+.temp-canvas-node.selected .canvas-anchor-zone,
+.temp-canvas-node.editing .canvas-anchor-zone,
+.temp-canvas-node:hover .canvas-anchor-zone,
+.md-canvas-node.dragging .canvas-anchor-zone,
+.md-canvas-node.resizing .canvas-anchor-zone,
+.md-canvas-node.selected .canvas-anchor-zone,
+.md-canvas-node.editing .canvas-anchor-zone,
+.md-canvas-node:hover .canvas-anchor-zone,
+.card-group-canvas-node.dragging .canvas-anchor-zone,
+.card-group-canvas-node.resizing .canvas-anchor-zone,
+.card-group-canvas-node.selected .canvas-anchor-zone,
+.card-group-canvas-node.editing .canvas-anchor-zone,
+.card-group-canvas-node:hover .canvas-anchor-zone {
+    z-index: 12500 !important;
+}
+
 
 /* =============================================================================
    Card Group (卡片组) — JsonCanvas/Obsidian 风格的几何嵌套组
