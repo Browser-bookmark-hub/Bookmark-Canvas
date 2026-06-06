@@ -2725,8 +2725,26 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .md-canvas-node.dragging,
 .md-canvas-node.resizing {
     will-change: transform;
+}
+
+.permanent-bookmark-section.dragging,
+.permanent-bookmark-section.resizing,
+.permanent-bookmark-section.selected,
+.permanent-bookmark-section.editing,
+.permanent-bookmark-section:hover,
+.temp-canvas-node.dragging,
+.temp-canvas-node.resizing,
+.temp-canvas-node.selected,
+.temp-canvas-node.editing,
+.temp-canvas-node:hover,
+.md-canvas-node.dragging,
+.md-canvas-node.resizing,
+.md-canvas-node.selected,
+.md-canvas-node.editing,
+.md-canvas-node:hover {
     content-visibility: visible !important;
 }
+
 
 /* =============================================================================
    Card Group (卡片组) — JsonCanvas/Obsidian 风格的几何嵌套组
