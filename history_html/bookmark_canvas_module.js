@@ -6574,40 +6574,7 @@ function setupCanvasZoomAndPan() {
             let deltaScale = 1;
             const isWindowsLikeDiscreteWheelZoom = !isTouchpad && CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheelZoom;
 
-            // [Fix-v7] Windows 滚轮缩放预处理：delta 归一化 + 排队过期过滤 + 方向反转防抖
-            let rawDelta = rawDeltaOriginal;
-            if (isWindowsLikeDiscreteWheelZoom) {
-                const pp = __preprocessWindowsWheelZoomEvent(e, rawDeltaOriginal);
-                if (pp.suppressed) {
-                    // 被过滤的事件：仍然阻止默认行为（防止页面滚动），但不执行缩放
-                    return;
-                }
-                rawDelta = pp.delta;
-            }
-
-            if (isWindowsLikeDiscreteWheelZoom) {
-                __cancelCanvasSmoothWheelZoom();
-                __cancelCanvasTrackpadZoomInertia();
-                __cancelCanvasPendingZoomUpdate();
-                
-                winWheelZoomAccumDelta += rawDelta;
-                winWheelZoomPumpCenterX = mouseX;
-                winWheelZoomPumpCenterY = mouseY;
-                winWheelZoomPumpOptions = {
-                    recomputeBounds: false,
-                    skipSave: false,
-                    skipScrollbarUpdate: true,
-                    wheelSmoothStepMultiplier: WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER
-                };
-                __startWinWheelZoomPump();
-                __logCanvasWinInput('wheel-zoom-apply', {
-                    route: 'windows-pump',
-                    rawDelta: rawDelta,
-                    winWheelZoomAccumDelta
-                }, { throttleKey: 'wheel-zoom-apply', throttleMs: 80 });
-                return;
-            }
-
+            const rawDelta = rawDeltaOriginal;
             const scaledDelta = rawDelta * deltaScale;
             __logCanvasWinInput('wheel-zoom-input', {
                 event: __snapshotCanvasWheelEvent(e),
