@@ -15935,23 +15935,36 @@ async function openBookmarkWithManualSelection(url) {
 
         // 情况1: 窗口 + 组
         if (windowId && groupId) {
-            // 验证组是否存在且在指定窗口中
             try {
+                // 验证组是否存在
                 const group = await chrome.tabGroups.get(groupId);
-                if (group.windowId !== windowId) {
-                    throw new Error('组不在指定窗口中');
-                }
-
-                // 在指定窗口的指定组中打开
-                const tab = await chrome.tabs.create({ url, windowId, active: focusWindow });
+                
+                // 如果组存在，则使用该组所在的实际窗口 ID
+                const targetWindowId = group.windowId;
+                const tab = await chrome.tabs.create({ url, windowId: targetWindowId, active: focusWindow });
                 await chrome.tabs.group({ groupId, tabIds: [tab.id] });
                 if (tab && tab.id != null) {
                     await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
                 }
-
             } catch (error) {
-                console.warn('[手动选择器] 组不存在，在窗口中创建新标签:', error);
-                const tab = await chrome.tabs.create({ url, windowId, active: focusWindow });
+                console.warn('[手动选择器] 组不存在，尝试在指定窗口中创建标签:', error);
+                
+                // 组不存在，退而求其次，在指定窗口打开
+                let targetWindowId = windowId;
+                if (targetWindowId) {
+                    try {
+                        await chrome.windows.get(targetWindowId);
+                    } catch (_) {
+                        console.warn('[手动选择器] 指定窗口不存在，回退到当前窗口');
+                        targetWindowId = null;
+                    }
+                }
+                
+                const createProps = { url, active: focusWindow };
+                if (targetWindowId) {
+                    createProps.windowId = targetWindowId;
+                }
+                const tab = await chrome.tabs.create(createProps);
                 if (tab && tab.id != null) {
                     await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
                 }
@@ -15959,7 +15972,18 @@ async function openBookmarkWithManualSelection(url) {
         }
         // 情况2: 仅窗口
         else if (windowId) {
-            const tab = await chrome.tabs.create({ url, windowId, active: focusWindow });
+            let targetWindowId = windowId;
+            try {
+                await chrome.windows.get(targetWindowId);
+            } catch (_) {
+                console.warn('[手动选择器] 指定窗口不存在，回退到当前窗口');
+                targetWindowId = null;
+            }
+            const createProps = { url, active: focusWindow };
+            if (targetWindowId) {
+                createProps.windowId = targetWindowId;
+            }
+            const tab = await chrome.tabs.create(createProps);
             if (tab && tab.id != null) {
                 await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
             }
@@ -15989,17 +16013,20 @@ async function openBookmarkWithManualSelection(url) {
             }
         }
 
-        // 如果要跳转且指定了窗口，则激活目标窗口
+        // 如果要跳转，激活目标窗口
         if (focusWindow) {
             let targetWindowId = windowId;
-            if (!targetWindowId && groupId) {
+            if (groupId) {
                 try {
                     const group = await chrome.tabGroups.get(groupId);
                     targetWindowId = group.windowId;
                 } catch (_) {}
             }
             if (targetWindowId) {
-                await chrome.windows.update(targetWindowId, { focused: true });
+                try {
+                    await chrome.windows.get(targetWindowId);
+                    await chrome.windows.update(targetWindowId, { focused: true });
+                } catch (_) {}
             }
         }
 
@@ -16072,6 +16099,15 @@ async function openFolderWithManualSelection(urls, title) {
                 targetWindowId = group.windowId;
             } catch (_) {}
         }
+        if (targetWindowId) {
+            try {
+                // 验证目标窗口是否存在
+                await chrome.windows.get(targetWindowId);
+            } catch (_) {
+                console.warn('[手动选择器] 指定目标窗口不存在，回退到当前窗口');
+                targetWindowId = null;
+            }
+        }
         if (!targetWindowId) {
             const currentWindow = await chrome.windows.getCurrent();
             targetWindowId = currentWindow.id;
@@ -16124,7 +16160,9 @@ async function openFolderWithManualSelection(urls, title) {
 
         // 4. 如果要跳转且目标窗口不是当前窗口，则激活该窗口
         if (focusWindow) {
-            await chrome.windows.update(targetWindowId, { focused: true });
+            try {
+                await chrome.windows.update(targetWindowId, { focused: true });
+            } catch (_) {}
         }
     } catch (error) {
         console.error('[手动选择器] 打开文件夹失败:', error);

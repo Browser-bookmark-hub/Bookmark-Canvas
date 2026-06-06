@@ -5241,7 +5241,9 @@ function setupCanvasDropFeedback() {
     const isImageFile = (file) => {
         if (!file) return false;
         const t = String(file.type || '');
-        return /^image\//i.test(t);
+        if (/^image\//i.test(t)) return true;
+        const name = String(file.name || '');
+        return /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
     };
 
     const isLikelyImageUrl = (u) => {
