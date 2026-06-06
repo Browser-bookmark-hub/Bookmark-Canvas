@@ -3241,9 +3241,9 @@ body.sidebar-resizing * {
     padding-left: 3px;
 }
 
-/* 非常规链式：特殊临时/空白/其他 的首条目再稍微加大缩进 */
-.canvas-dir-folder[data-node-key="folder-temp-special"]>.canvas-dir-children>.canvas-dir-item:first-child>.canvas-dir-item-btn,
-.canvas-dir-folder[data-node-key="folder-other"]>.canvas-dir-children>.canvas-dir-item:first-child>.canvas-dir-item-btn {
+/* 非常规链式：特殊临时/空白/其他 所有条目缩进一致 */
+.canvas-dir-folder[data-node-key="folder-temp-special"]>.canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn,
+.canvas-dir-folder[data-node-key="folder-other"]>.canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn {
     padding-left: 4px;
 }
 
@@ -3614,6 +3614,26 @@ body.sidebar-resizing * {
 .canvas-dir-edge-highlight {
     filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent-primary) 70%, transparent));
     stroke-width: 4px !important;
+}
+
+.canvas-locate-highlight {
+    outline: 3px solid var(--accent-primary, #2196F3) !important;
+    outline-offset: 3px !important;
+    box-shadow: 0 0 15px 6px color-mix(in srgb, var(--accent-primary, #2196F3) 60%, transparent) !important;
+    animation: locate-pulse-effect 1.25s ease-in-out infinite !important;
+    transition: outline 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease !important;
+}
+
+@keyframes locate-pulse-effect {
+    0% {
+        box-shadow: 0 0 10px 4px color-mix(in srgb, var(--accent-primary, #2196F3) 40%, transparent);
+    }
+    50% {
+        box-shadow: 0 0 25px 10px color-mix(in srgb, var(--accent-primary, #2196F3) 80%, transparent);
+    }
+    100% {
+        box-shadow: 0 0 10px 4px color-mix(in srgb, var(--accent-primary, #2196F3) 40%, transparent);
+    }
 }
 
 /* 树形视图 */

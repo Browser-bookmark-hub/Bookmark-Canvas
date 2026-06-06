@@ -29,6 +29,9 @@
   }
 
   function getDefaultFolderOpenState(node) {
+    if (node && typeof node.open === 'boolean') {
+      return node.open;
+    }
     const key = node.key || '';
     if (key === 'folder-card-groups' || key === 'folder-permanent' || key === 'folder-temporary') {
       return true;
@@ -539,6 +542,9 @@
     const sourceRaw = normalizeText(section.source).toLowerCase();
     if (sourceRaw && SPECIAL_TEMP_SOURCE_SET.has(sourceRaw)) return true;
 
+    const seq = toPositiveInt(section.sequenceNumber);
+    if (!seq) return true;
+
     const labelRaw = normalizeText(section.label);
     if (!labelRaw) return false;
     if (labelRaw === '拖入' || labelRaw === '搜索' || labelRaw === '批量' || labelRaw === '添加' || labelRaw === '导入文件' || labelRaw === '导入') return true;
@@ -600,7 +606,7 @@
     const byHtml = normalizeMdNodeTitleLine(getFirstLineText(node && node.html));
     if (byHtml) return byHtml;
 
-    return t('未命名空白栏目', 'Untitled blank node');
+    return '--';
   }
 
   function sortTempSections(a, b) {
@@ -609,9 +615,10 @@
     if (as && bs && as !== bs) return as - bs;
     if (as && !bs) return -1;
     if (!as && bs) return 1;
-    const al = getTempSectionLabel(a);
-    const bl = getTempSectionLabel(b);
-    if (al && bl && al !== bl) return compareText(al, bl);
+    const nameA = getTempSectionDisplayText(a);
+    const nameB = getTempSectionDisplayText(b);
+    const cmp = compareText(nameA, nameB);
+    if (cmp !== 0) return cmp;
     return compareText(a && a.id, b && b.id);
   }
 
@@ -766,7 +773,7 @@
           },
           target,
           preview,
-          children: entry.children.map(toNode)
+          children: foldExtraNodes(entry.children.map(toNode), `${key}-children`)
         });
       }
 
@@ -790,7 +797,8 @@
       });
     };
 
-    return roots.map(toNode);
+    const rootNodes = roots.map(toNode);
+    return foldExtraNodes(rootNodes, `${keyPrefix}root`);
   }
 
   function makePlaceholderItem(key, code, title, options = {}) {
@@ -808,6 +816,133 @@
       target: null,
       preview: ''
     });
+  }
+
+  function foldExtraNodes(nodes, parentKey) {
+    if (!Array.isArray(nodes) || nodes.length <= 5) return nodes;
+    const result = nodes.slice(0, 5);
+    const remaining = nodes.slice(5);
+    result.push(makeFolderNode({
+      key: `${parentKey}-more`,
+      code: '',
+      title: t('展开更多', 'Expand more'),
+      icon: 'fas fa-chevron-down',
+      showIcon: true,
+      showFoldControl: true,
+      open: false,
+      count: remaining.length,
+      children: remaining
+    }));
+    return result;
+  }
+
+  function getPinyinInitial(char) {
+    if (!char || char.charCodeAt(0) < 128) return null;
+    const c = char.charAt(0);
+    const BOUNDARIES = [
+      { initial: 'A', char: '啊' },
+      { initial: 'B', char: '芭' },
+      { initial: 'C', char: '擦' },
+      { initial: 'D', char: '搭' },
+      { initial: 'E', char: '蛾' },
+      { initial: 'F', char: '发' },
+      { initial: 'G', char: '噶' },
+      { initial: 'H', char: '哈' },
+      { initial: 'J', char: '击' },
+      { initial: 'K', char: '喀' },
+      { initial: 'L', char: '垃圾' },
+      { initial: 'M', char: '妈' },
+      { initial: 'N', char: '拿' },
+      { initial: 'O', char: '哦' },
+      { initial: 'P', char: '啪' },
+      { initial: 'Q', char: '期' },
+      { initial: 'R', char: '然' },
+      { initial: 'S', char: '撒' },
+      { initial: 'T', char: '塌' },
+      { initial: 'W', char: '挖' },
+      { initial: 'X', char: '昔' },
+      { initial: 'Y', char: '压' },
+      { initial: 'Z', char: '匝' }
+    ];
+    let resolved = null;
+    for (let i = 0; i < BOUNDARIES.length; i++) {
+      const nextBoundary = BOUNDARIES[i + 1];
+      const currentMatches = c.localeCompare(BOUNDARIES[i].char, 'zh') >= 0;
+      const beforeNext = !nextBoundary || c.localeCompare(nextBoundary.char, 'zh') < 0;
+      if (currentMatches && beforeNext) {
+        resolved = BOUNDARIES[i].initial;
+        break;
+      }
+    }
+    return resolved;
+  }
+
+  function getFirstCharCategory(text) {
+    const t = String(text || '').trim();
+    if (!t) return 'other';
+    const first = t.charAt(0);
+    if (/^[0-9]/.test(first)) {
+      return '0-9';
+    }
+    if (/^[A-Za-z]/.test(first)) {
+      return first.toUpperCase();
+    }
+    const pinyin = getPinyinInitial(first);
+    if (pinyin) {
+      return pinyin;
+    }
+    return 'other';
+  }
+
+  const CATEGORY_ORDER = ['0-9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'W', 'X', 'Y', 'Z', 'other'];
+
+  function processGroupAndFold(rawNodes, parentKey, getRawTitle, mapNodeToItem, folderColor, defaultColor) {
+    const groups = new Map();
+    rawNodes.forEach((node) => {
+      const title = getRawTitle(node);
+      const cat = getFirstCharCategory(title);
+      if (!groups.has(cat)) {
+        groups.set(cat, []);
+      }
+      groups.get(cat).push(node);
+    });
+
+    const folderNodes = [];
+    const flatNodes = [];
+    let globalIndex = 0;
+    const allCats = CATEGORY_ORDER.slice();
+    groups.forEach((_, cat) => {
+      if (!allCats.includes(cat)) {
+        allCats.push(cat);
+      }
+    });
+
+    allCats.forEach((cat) => {
+      if (!groups.has(cat)) return;
+      const groupNodes = groups.get(cat);
+      const threshold = (cat === '0-9') ? 10 : 5;
+
+      if (groupNodes.length >= threshold) {
+        const folderItems = groupNodes.map((node, idx) => mapNodeToItem(node, idx));
+        folderNodes.push(makeFolderNode({
+          key: `${parentKey}-cat-${cat}`,
+          code: '',
+          title: cat === 'other' ? t('其他', 'Other') : cat,
+          color: folderColor,
+          defaultColor,
+          icon: 'fas fa-folder',
+          open: false,
+          count: groupNodes.length,
+          children: folderItems
+        }));
+      } else {
+        groupNodes.forEach((node) => {
+          flatNodes.push(mapNodeToItem(node, globalIndex++));
+        });
+      }
+    });
+
+    return folderNodes.concat(flatNodes);
   }
 
   function buildDirectoryData(options = {}) {
@@ -1080,6 +1215,10 @@
       const folderIcon = config.folderIcon || 'fas fa-sticky-note';
       const itemIcon = config.itemIcon || 'fas fa-file-alt';
       const sortedMdNodes = [...nodes].sort((a, b) => {
+        const titleA = getMdNodeTitle(a);
+        const titleB = getMdNodeTitle(b);
+        const cmp = compareText(titleA, titleB);
+        if (cmp !== 0) return cmp;
         const at = toPositiveInt(a && a.createdAt);
         const bt = toPositiveInt(b && b.createdAt);
         if (at && bt && at !== bt) return at - bt;
@@ -1089,28 +1228,34 @@
       });
 
       const buildBlankItems = (list) => {
-        const items = (Array.isArray(list) ? list : []).map((node, index) => makeItemNode({
-          key: `${keyPrefix}blank-${node.id}`,
-          code: '',
-          title: `${index + 1}. ${getMdNodeTitle(node)}`,
-          color: nodeColorResolver(node),
-          defaultColor,
-          icon: itemIcon,
-          iconText,
-          iconTone,
-          variant,
-          showDeleteControl: true,
-          deleteAction: {
-            kind: 'md-node',
-            nodeId: node.id,
-            scopeOptions: false,
-            currentTitle: t('仅删除框体', 'Delete frame only'),
-            allTitle: t('删除框体及成员', 'Delete frame and members')
-          },
-          target: { kind: 'md-node', nodeId: node.id },
-          preview: ''
-        }));
-        return items;
+        return processGroupAndFold(
+          list,
+          config.folderKey || 'folder-blank',
+          (node) => getMdNodeTitle(node),
+          (node, index) => makeItemNode({
+            key: `${keyPrefix}blank-${node.id}`,
+            code: '',
+            title: `${index + 1}. ${getMdNodeTitle(node)}`,
+            color: nodeColorResolver(node),
+            defaultColor,
+            icon: itemIcon,
+            iconText,
+            iconTone,
+            variant,
+            showDeleteControl: true,
+            deleteAction: {
+              kind: 'md-node',
+              nodeId: node.id,
+              scopeOptions: false,
+              currentTitle: t('仅删除框体', 'Delete frame only'),
+              allTitle: t('删除框体及成员', 'Delete frame and members')
+            },
+            target: { kind: 'md-node', nodeId: node.id },
+            preview: ''
+          }),
+          folderColor,
+          defaultColor
+        );
       };
 
       const directItems = buildBlankItems(sortedMdNodes);
@@ -1153,44 +1298,144 @@
       const folderColor = config.folderColor || colorTokens.edge;
       const defaultColor = config.defaultColor || folderColor;
       const folderIcon = config.folderIcon || 'fas fa-link';
-      const edgesWithLabel = edgeList.filter((edge) => normalizeText(edge && edge.label));
-      const edgeItems = edgesWithLabel.map((edge, index) => {
-        const edgeId = normalizeText(edge && edge.id);
-        const fromNode = normalizeText(edge && edge.fromNode);
-        const toNode = normalizeText(edge && edge.toNode);
-        const fromTitle = getLookupNodeTitle(fromNode, titleLookup);
-        const toTitle = getLookupNodeTitle(toNode, titleLookup);
-        const label = normalizeText(edge.label);
-        const preview = (fromTitle || toTitle)
-          ? `${fromTitle || t('未知起点', 'Unknown source')} → ${toTitle || t('未知终点', 'Unknown target')}`
-          : '';
-        return makeItemNode({
-          key: `${keyPrefix}edge-${edgeId || index}`,
-          code: '',
-          title: `${index + 1}. ${label}`,
-          color: edgeColorResolver(edge),
-          defaultColor,
-          icon: 'fas fa-link',
-          showDeleteControl: true,
-          deleteAction: {
-            kind: 'edge',
-            edgeId
-          },
-          target: { kind: 'edge', edgeId, fromNode, toNode },
-          preview
-        });
-      });
 
-      if (!edgeItems.length) {
-        edgeItems.push(makePlaceholderItem(
+      const mainChildren = [];
+
+      if (!edgeList.length) {
+        mainChildren.push(makePlaceholderItem(
           config.emptyKey || `${keyPrefix}edge-empty`,
           '',
-          t('暂无带说明连接线', 'No labeled edges'),
+          t('暂无连接线', 'No edges'),
           {
             color: folderColor,
             defaultColor
           }
         ));
+      } else {
+        const labeledEdges = [];
+        const unlabeledEdges = [];
+        edgeList.forEach((edge) => {
+          if (normalizeText(edge && edge.label)) {
+            labeledEdges.push(edge);
+          } else {
+            unlabeledEdges.push(edge);
+          }
+        });
+
+        // 排序
+        labeledEdges.sort((a, b) => compareText(a.label, b.label));
+        unlabeledEdges.sort((a, b) => {
+          const titleA = getLookupNodeTitle(a.fromNode, titleLookup);
+          const titleB = getLookupNodeTitle(b.fromNode, titleLookup);
+          const cmp = compareText(titleA, titleB);
+          if (cmp !== 0) return cmp;
+          const toA = getLookupNodeTitle(a.toNode, titleLookup);
+          const toB = getLookupNodeTitle(b.toNode, titleLookup);
+          return compareText(toA, toB);
+        });
+
+        const buildEdgeItem = (edge, index, isLabeled) => {
+          const edgeId = normalizeText(edge && edge.id);
+          const fromNode = normalizeText(edge && edge.fromNode);
+          const toNode = normalizeText(edge && edge.toNode);
+          const fromTitle = getLookupNodeTitle(fromNode, titleLookup);
+          const toTitle = getLookupNodeTitle(toNode, titleLookup);
+          const label = isLabeled ? normalizeText(edge.label) : '--';
+          
+          const dir = edge.direction || 'none';
+          let arrowSymbol = '→';
+          if (dir === 'both') {
+            arrowSymbol = '↔';
+          } else if (dir === 'none') {
+            arrowSymbol = '—';
+          }
+
+          const preview = (fromTitle || toTitle)
+            ? `${fromTitle || t('未知起点', 'Unknown source')} ${arrowSymbol} ${toTitle || t('未知终点', 'Unknown target')}`
+            : '';
+
+          return makeItemNode({
+            key: `${keyPrefix}edge-${isLabeled ? 'labeled' : 'unlabeled'}-${edgeId || index}`,
+            code: '',
+            title: `${index + 1}. ${label}`,
+            color: edgeColorResolver(edge),
+            defaultColor,
+            icon: 'fas fa-link',
+            showDeleteControl: true,
+            deleteAction: {
+              kind: 'edge',
+              edgeId
+            },
+            target: { kind: 'edge', edgeId, fromNode, toNode },
+            preview
+          });
+        };
+
+        const labeledItems = processGroupAndFold(
+          labeledEdges,
+          config.folderKey ? `${config.folderKey}-subfolder-labeled` : 'folder-other-labeled',
+          (edge) => edge.label,
+          (edge, idx) => buildEdgeItem(edge, idx, true),
+          folderColor,
+          defaultColor
+        );
+        const unlabeledItems = processGroupAndFold(
+          unlabeledEdges,
+          config.folderKey ? `${config.folderKey}-subfolder-unlabeled` : 'folder-other-unlabeled',
+          (edge) => getLookupNodeTitle(edge.fromNode, titleLookup),
+          (edge, idx) => buildEdgeItem(edge, idx, false),
+          folderColor,
+          defaultColor
+        );
+
+        if (!labeledItems.length) {
+          labeledItems.push(makePlaceholderItem(
+            `${keyPrefix}edge-labeled-empty`,
+            '',
+            t('暂无有标题连接线', 'No labeled edges'),
+            {
+              color: folderColor,
+              defaultColor
+            }
+          ));
+        }
+        if (!unlabeledItems.length) {
+          unlabeledItems.push(makePlaceholderItem(
+            `${keyPrefix}edge-unlabeled-empty`,
+            '',
+            t('暂无无标题连接线', 'No untitled edges'),
+            {
+              color: folderColor,
+              defaultColor
+            }
+          ));
+        }
+
+        const labeledFolder = makeFolderNode({
+          key: config.folderKey ? `${config.folderKey}-subfolder-labeled` : 'folder-other-labeled',
+          code: '',
+          title: t('有标题', 'Labeled'),
+          color: folderColor,
+          defaultColor,
+          icon: 'fas fa-link',
+          open: true,
+          count: labeledEdges.length,
+          children: labeledItems
+        });
+
+        const unlabeledFolder = makeFolderNode({
+          key: config.folderKey ? `${config.folderKey}-subfolder-unlabeled` : 'folder-other-unlabeled',
+          code: '',
+          title: t('无标题', 'Untitled'),
+          color: folderColor,
+          defaultColor,
+          icon: 'fas fa-link',
+          open: false,
+          count: unlabeledEdges.length,
+          children: unlabeledItems
+        });
+
+        mainChildren.push(labeledFolder, unlabeledFolder);
       }
 
       return makeFolderNode({
@@ -1201,8 +1446,8 @@
         defaultColor,
         icon: folderIcon,
         open: config.open !== false,
-        count: edgesWithLabel.length,
-        children: edgeItems
+        count: edgeList.length,
+        children: mainChildren
       });
     };
 
@@ -1537,77 +1782,67 @@
       }
 
       // 4. Temporary sections (folded under "Temporary Sections")
-      const tempSubChildren = [];
-      const sortedTemps = [...geo.tempSections].sort(sortTempSections);
-      sortedTemps.forEach((section) => {
-        const isSpecial = isSpecialTempSection(section);
-        const sectionColor = resolveTempSectionColor(section);
-        tempSubChildren.push(makeItemNode({
-          key: `group-${parentSafeId}-temp-${section.id}`,
-          code: '',
-          title: getTempSectionDisplayText(section),
-          color: sectionColor,
-          defaultColor: sectionColor,
-          icon: isSpecial ? 'fas fa-star' : 'fas fa-code-branch',
-          showIcon: true,
-          showDeleteControl: true,
-          deleteAction: {
-            kind: 'temp-section',
-            sectionId: section.id,
-            scopeOptions: false
-          },
-          target: { kind: 'temp-section', sectionId: section.id },
-          preview: getTempSectionDescription(section)
-        }));
-      });
-
-      if (tempSubChildren.length > 0) {
-        otherChildren.push(makeFolderNode({
-          key: `group-${parentSafeId}-subfolder-temporary`,
-          code: '',
-          title: t('临时栏目', 'Temporary'),
-          icon: 'fas fa-code-branch',
-          count: tempSubChildren.length,
-          showFoldControl: true,
-          open: false,
-          children: tempSubChildren
-        }));
+      if (geo.tempSections.length > 0) {
+        const groupTemporaryFolder = buildTemporaryFolder(geo.tempSections, {
+          itemKeyPrefix: `group-${parentSafeId}-`,
+          folderKey: `group-${parentSafeId}-subfolder-temporary`,
+          splitFolderKey: `group-${parentSafeId}-subfolder-temporary-split`,
+          specialFolderKey: `group-${parentSafeId}-subfolder-temporary-special`,
+          count: geo.tempSections.length,
+          splitEmptyKey: `group-${parentSafeId}-temp-split-empty`,
+          specialEmptyKey: `group-${parentSafeId}-temp-special-empty`,
+          open: false
+        });
+        otherChildren.push(groupTemporaryFolder);
       }
 
       // 5. Blank cards (folded under "Blank Cards")
       const blankSubChildren = [];
       const nonGroupMdNodes = geo.mdNodes.filter((n) => n && n.subtype !== 'card-group');
       const sortedBlankNodes = [...nonGroupMdNodes].sort((a, b) => {
+        const titleA = getMdNodeTitle(a);
+        const titleB = getMdNodeTitle(b);
+        const cmp = compareText(titleA, titleB);
+        if (cmp !== 0) return cmp;
         const at = toPositiveInt(a && a.createdAt);
         const bt = toPositiveInt(b && b.createdAt);
         if (at && bt && at !== bt) return at - bt;
+        if (at && !bt) return -1;
+        if (!at && bt) return 1;
         return compareText(a && a.id, b && b.id);
       });
 
-      sortedBlankNodes.forEach((n, idx) => {
-        const nodeColor = resolveMdNodeColor(n);
-        blankSubChildren.push(makeItemNode({
-          key: `group-${parentSafeId}-blank-${n.id}`,
-          code: '',
-          title: `${idx + 1}. ${getMdNodeTitle(n)}`,
-          color: nodeColor,
-          defaultColor: nodeColor,
-          icon: 'fas fa-file-alt',
-          iconText: 'md',
-          iconTone: 'md',
-          showIcon: true,
-          showDeleteControl: true,
-          deleteAction: {
-            kind: 'md-node',
-            nodeId: n.id,
-            scopeOptions: false
-          },
-          target: { kind: 'md-node', nodeId: n.id },
-          preview: ''
-        }));
-      });
+      const groupBlankItems = processGroupAndFold(
+        sortedBlankNodes,
+        `group-${parentSafeId}-subfolder-blank`,
+        (n) => getMdNodeTitle(n),
+        (n, idx) => {
+          const nodeColor = resolveMdNodeColor(n);
+          return makeItemNode({
+            key: `group-${parentSafeId}-blank-${n.id}`,
+            code: '',
+            title: `${idx + 1}. ${getMdNodeTitle(n)}`,
+            color: nodeColor,
+            defaultColor: nodeColor,
+            icon: 'fas fa-file-alt',
+            iconText: 'md',
+            iconTone: 'md',
+            showIcon: false,
+            showDeleteControl: true,
+            deleteAction: {
+              kind: 'md-node',
+              nodeId: n.id,
+              scopeOptions: false
+            },
+            target: { kind: 'md-node', nodeId: n.id },
+            preview: ''
+          });
+        },
+        colorTokens.blank,
+        colorTokens.blank
+      );
 
-      if (blankSubChildren.length > 0) {
+      if (sortedBlankNodes.length > 0) {
         otherChildren.push(makeFolderNode({
           key: `group-${parentSafeId}-subfolder-blank`,
           code: '',
@@ -1615,54 +1850,152 @@
           icon: 'fas fa-file-alt',
           iconText: 'md',
           iconTone: 'md',
-          count: blankSubChildren.length,
+          count: sortedBlankNodes.length,
           showFoldControl: true,
           open: false,
-          children: blankSubChildren
+          children: groupBlankItems
         }));
       }
 
       // 6. Edges (folded under "Connections")
-      const edgeSubChildren = [];
-      const sortedEdges = [...geo.edges].sort((a, b) => compareText(a && a.id, b && b.id));
-      sortedEdges.forEach((edge, idx) => {
-        const edgeId = normalizeText(edge && edge.id);
-        const fromNode = normalizeText(edge && edge.fromNode);
-        const toNode = normalizeText(edge && edge.toNode);
-        const fromTitle = getLookupNodeTitle(fromNode, titleLookup);
-        const toTitle = getLookupNodeTitle(toNode, titleLookup);
-        const label = normalizeText(edge.label);
-        const preview = (fromTitle || toTitle)
-          ? `${fromTitle || t('未知起点', 'Unknown source')} → ${toTitle || t('未知终点', 'Unknown target')}`
-          : '';
-        edgeSubChildren.push(makeItemNode({
-          key: `group-${parentSafeId}-edge-${edgeId || idx}`,
-          code: '',
-          title: `${idx + 1}. ${label || t('无标题连接线', 'Untitled edge')}`,
-          color: resolveEdgeColor(edge),
-          defaultColor: colorTokens.edge,
-          icon: 'fas fa-link',
-          showIcon: true,
-          showDeleteControl: true,
-          deleteAction: {
-            kind: 'edge',
-            edgeId
-          },
-          target: { kind: 'edge', edgeId, fromNode, toNode },
-          preview
-        }));
-      });
+      if (geo.edges.length > 0) {
+        const groupKeyPrefix = `group-${parentSafeId}-`;
+        const edgeColorResolver = resolveEdgeColor;
+        const defaultColor = colorTokens.edge;
 
-      if (edgeSubChildren.length > 0) {
+        const groupLabeledEdges = [];
+        const groupUnlabeledEdges = [];
+        geo.edges.forEach((edge) => {
+          if (normalizeText(edge && edge.label)) {
+            groupLabeledEdges.push(edge);
+          } else {
+            groupUnlabeledEdges.push(edge);
+          }
+        });
+
+        // 排序
+        groupLabeledEdges.sort((a, b) => compareText(a.label, b.label));
+        groupUnlabeledEdges.sort((a, b) => {
+          const titleA = getLookupNodeTitle(a.fromNode, titleLookup);
+          const titleB = getLookupNodeTitle(b.fromNode, titleLookup);
+          const cmp = compareText(titleA, titleB);
+          if (cmp !== 0) return cmp;
+          const toA = getLookupNodeTitle(a.toNode, titleLookup);
+          const toB = getLookupNodeTitle(b.toNode, titleLookup);
+          return compareText(toA, toB);
+        });
+
+        const buildGroupEdgeItem = (edge, index, isLabeled) => {
+          const edgeId = normalizeText(edge && edge.id);
+          const fromNode = normalizeText(edge && edge.fromNode);
+          const toNode = normalizeText(edge && edge.toNode);
+          const fromTitle = getLookupNodeTitle(fromNode, titleLookup);
+          const toTitle = getLookupNodeTitle(toNode, titleLookup);
+          const label = isLabeled ? normalizeText(edge.label) : '--';
+          
+          const dir = edge.direction || 'none';
+          let arrowSymbol = '→';
+          if (dir === 'both') {
+            arrowSymbol = '↔';
+          } else if (dir === 'none') {
+            arrowSymbol = '—';
+          }
+
+          const preview = (fromTitle || toTitle)
+            ? `${fromTitle || t('未知起点', 'Unknown source')} ${arrowSymbol} ${toTitle || t('未知终点', 'Unknown target')}`
+            : '';
+
+          return makeItemNode({
+            key: `${groupKeyPrefix}edge-${isLabeled ? 'labeled' : 'unlabeled'}-${edgeId || index}`,
+            code: '',
+            title: `${index + 1}. ${label}`,
+            color: edgeColorResolver(edge),
+            defaultColor,
+            icon: 'fas fa-link',
+            showIcon: true,
+            showDeleteControl: true,
+            deleteAction: {
+              kind: 'edge',
+              edgeId
+            },
+            target: { kind: 'edge', edgeId, fromNode, toNode },
+            preview
+          });
+        };
+
+        const groupLabeledItems = processGroupAndFold(
+          groupLabeledEdges,
+          `group-${parentSafeId}-subfolder-edges-labeled`,
+          (edge) => edge.label,
+          (edge, idx) => buildGroupEdgeItem(edge, idx, true),
+          defaultColor,
+          defaultColor
+        );
+        const groupUnlabeledItems = processGroupAndFold(
+          groupUnlabeledEdges,
+          `group-${parentSafeId}-subfolder-edges-unlabeled`,
+          (edge) => getLookupNodeTitle(edge.fromNode, titleLookup),
+          (edge, idx) => buildGroupEdgeItem(edge, idx, false),
+          defaultColor,
+          defaultColor
+        );
+
+        if (!groupLabeledItems.length) {
+          groupLabeledItems.push(makePlaceholderItem(
+            `${groupKeyPrefix}edge-labeled-empty`,
+            '',
+            t('暂无有标题连接线', 'No labeled edges'),
+            {
+              color: defaultColor,
+              defaultColor
+            }
+          ));
+        }
+        if (!groupUnlabeledItems.length) {
+          groupUnlabeledItems.push(makePlaceholderItem(
+            `${groupKeyPrefix}edge-unlabeled-empty`,
+            '',
+            t('暂无无标题连接线', 'No untitled edges'),
+            {
+              color: defaultColor,
+              defaultColor
+            }
+          ));
+        }
+
+        const groupLabeledFolder = makeFolderNode({
+          key: `group-${parentSafeId}-subfolder-edges-labeled`,
+          code: '',
+          title: t('有标题', 'Labeled'),
+          color: defaultColor,
+          defaultColor,
+          icon: 'fas fa-link',
+          open: true,
+          count: groupLabeledEdges.length,
+          children: groupLabeledItems
+        });
+
+        const groupUnlabeledFolder = makeFolderNode({
+          key: `group-${parentSafeId}-subfolder-edges-unlabeled`,
+          code: '',
+          title: t('无标题', 'Untitled'),
+          color: defaultColor,
+          defaultColor,
+          icon: 'fas fa-link',
+          open: false,
+          count: groupUnlabeledEdges.length,
+          children: groupUnlabeledItems
+        });
+
         otherChildren.push(makeFolderNode({
           key: `group-${parentSafeId}-subfolder-edges`,
           code: '',
           title: t('连接线', 'Edges'),
           icon: 'fas fa-link',
-          count: edgeSubChildren.length,
+          count: geo.edges.length,
           showFoldControl: true,
           open: false,
-          children: edgeSubChildren
+          children: [groupLabeledFolder, groupUnlabeledFolder]
         }));
       }
 
@@ -2192,10 +2525,43 @@
     });
   }
 
+  function highlightLocatedElement(element) {
+    if (!element) return;
+    const highlightClass = 'canvas-locate-highlight';
+
+    // If the element is already highlighted, clear its previous timeout first
+    if (element.dataset.locateHighlightTimeoutId) {
+      global.clearTimeout(parseInt(element.dataset.locateHighlightTimeoutId, 10));
+    } else {
+      // Save original zIndex if not already saved
+      element.dataset.originalZIndex = element.style.zIndex || '';
+    }
+
+    element.style.zIndex = '99999';
+    element.classList.add(highlightClass);
+
+    const timeoutId = global.setTimeout(() => {
+      element.classList.remove(highlightClass);
+      const origZIndex = element.dataset.originalZIndex;
+      if (origZIndex !== undefined) {
+        if (origZIndex === '') {
+          element.style.removeProperty('z-index');
+        } else {
+          element.style.zIndex = origZIndex;
+        }
+      }
+      delete element.dataset.originalZIndex;
+      delete element.dataset.locateHighlightTimeoutId;
+    }, 1250);
+
+    element.dataset.locateHighlightTimeoutId = String(timeoutId);
+  }
+
   function locateElement(module, element, zoom = null) {
     if (!module || typeof module.locateElement !== 'function' || !element) return false;
     try {
       module.locateElement(element, zoom);
+      highlightLocatedElement(element);
       return true;
     } catch (_) {
       return false;
@@ -2218,21 +2584,23 @@
 
     const escaped = escapeSelector(safeCopyId);
     if (escaped) {
-      const byDataset = document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id=\"${escaped}\"]`)
-        || document.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id=\"${escaped}\"]`);
+      const byDataset = document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${escaped}"]`)
+        || document.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id="${escaped}"]`);
       if (byDataset) return byDataset;
     }
     return document.getElementById(`permanent-section-copy-${safeCopyId}`);
   }
 
   function locatePermanentMain(module, zoom = null) {
+    const sectionEl = resolvePermanentSectionElement(null);
     if (module && typeof module.locatePermanent === 'function') {
       try {
         module.locatePermanent(zoom);
+        highlightLocatedElement(sectionEl);
         return true;
       } catch (_) { }
     }
-    return locateElement(module, resolvePermanentSectionElement(null), zoom);
+    return locateElement(module, sectionEl, zoom);
   }
 
   function locatePermanentCopy(module, copyId, zoom = null) {
@@ -2258,13 +2626,14 @@
     }
 
     if (id.startsWith('temp-section-') || id.startsWith('tempSecId_')) {
+      const tempEl = document.getElementById(id);
       if (module && typeof module.locateSection === 'function') {
         try {
           module.locateSection(id, zoom);
+          highlightLocatedElement(tempEl);
           return true;
         } catch (_) { }
       }
-      const tempEl = document.getElementById(id);
       if (tempEl) return locateElement(module, tempEl, zoom);
       return false;
     }
@@ -2312,6 +2681,7 @@
         if (module && typeof module.locateSection === 'function') {
           try {
             module.locateSection(target.sectionId, zoom);
+            highlightLocatedElement(document.getElementById(target.sectionId));
             return;
           } catch (_) { }
         }
@@ -2538,6 +2908,19 @@
       if (nodeKey) {
         const target = nodeActionMap.get(nodeKey);
         if (target) {
+          activeNodeKey = nodeKey;
+          const root = document.getElementById(ROOT_ID);
+          updateActiveState(root);
+
+          const clearActiveHighlight = () => {
+            global.setTimeout(() => {
+              if (activeNodeKey === nodeKey) {
+                activeNodeKey = '';
+                updateActiveState(root);
+              }
+            }, 300);
+          };
+
           const module = getCanvasModule();
           if (target.kind === 'md-node') {
             if (module && typeof module.selectMdNode === 'function') {
@@ -2547,6 +2930,7 @@
           } else {
             locateTarget(target, 'fit');
           }
+          clearActiveHighlight();
         }
       }
       return;
@@ -2672,10 +3056,36 @@
     if (!target) return;
 
     if (targetEl.classList.contains('canvas-dir-folder-summary-btn')) {
-      activeNodeKey = nodeKey;
-      const root = document.getElementById(ROOT_ID);
-      updateActiveState(root);
-      return;
+      const isTitleClick = !!event.target.closest('.canvas-dir-title');
+      if (isTitleClick) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        activeNodeKey = nodeKey;
+        const root = document.getElementById(ROOT_ID);
+        updateActiveState(root);
+
+        const clearActiveHighlight = () => {
+          global.setTimeout(() => {
+            if (activeNodeKey === nodeKey) {
+              activeNodeKey = '';
+              updateActiveState(root);
+            }
+          }, 300);
+        };
+
+        if (switchFullscreenNodeByDirectoryTarget(target)) {
+          clearActiveHighlight();
+          return;
+        }
+        locateTarget(target);
+        clearActiveHighlight();
+        return;
+      } else {
+        // Clicked non-title, non-button area. Let details toggle natively.
+        // Do not locate, do not set activeNodeKey / highlight.
+        return;
+      }
     }
 
     if (targetEl.classList.contains('canvas-dir-item-btn')) {
@@ -2686,8 +3096,22 @@
     activeNodeKey = nodeKey;
     const root = document.getElementById(ROOT_ID);
     updateActiveState(root);
-    if (switchFullscreenNodeByDirectoryTarget(target)) return;
+
+    const clearActiveHighlight = () => {
+      global.setTimeout(() => {
+        if (activeNodeKey === nodeKey) {
+          activeNodeKey = '';
+          updateActiveState(root);
+        }
+      }, 300);
+    };
+
+    if (switchFullscreenNodeByDirectoryTarget(target)) {
+      clearActiveHighlight();
+      return;
+    }
     locateTarget(target);
+    clearActiveHighlight();
   }
 
   function handleGlobalPointerDown(event) {
