@@ -1320,20 +1320,27 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 /* 低缩放细节模式：缩得很小时隐藏“重内容”，但保留连接线与线标签 */
+.temp-canvas-node.low-detail-active .temp-node-description-container,
+.temp-canvas-node.low-detail-active .temp-node-body,
 .canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-description-container,
 .canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-body {
     display: none !important;
 }
 
+.permanent-bookmark-section.low-detail-active .permanent-section-body,
 .canvas-workspace.canvas-low-detail .permanent-section-body {
     display: none !important;
 }
 
+.temp-canvas-node.low-detail-active .canvas-node-anchor,
+.temp-canvas-node.low-detail-active .canvas-anchor-zone,
 .canvas-workspace.canvas-low-detail .canvas-node-anchor,
 .canvas-workspace.canvas-low-detail .canvas-anchor-zone {
     display: none !important;
 }
 
+.md-canvas-node.low-detail-active .md-canvas-editor,
+.md-canvas-node.low-detail-active .md-node-toolbar,
 .canvas-workspace.canvas-low-detail .md-canvas-node .md-canvas-editor,
 .canvas-workspace.canvas-low-detail .md-canvas-node .md-node-toolbar {
     display: none !important;
@@ -1353,6 +1360,9 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     /* 限制叠加文字/背景不要“溢出栏目卡片” */
 }
 
+.temp-canvas-node.low-detail-active .temp-node-low-detail-overlay,
+.permanent-bookmark-section.low-detail-active .permanent-node-low-detail-overlay,
+.md-canvas-node.low-detail-active .temp-node-low-detail-overlay,
 .canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-low-detail-overlay,
 .canvas-workspace.canvas-low-detail .permanent-bookmark-section .permanent-node-low-detail-overlay,
 .canvas-workspace.canvas-low-detail .md-canvas-node .temp-node-low-detail-overlay {
@@ -1419,10 +1429,13 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 /* ========== 丝滑缩放性能架构 (Core Performance) ========== */
 
-/* 1. 静态优化：布局隔离 + 文字渲染优化 */
+/* 1. 静态优化：布局隔离 + 视口渲染隔离 + 文字渲染优化 */
 .temp-canvas-node,
+.permanent-bookmark-section,
 .md-canvas-node {
     contain: layout style;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 300px;
     /* 强制 2D 平面渲染，避免缩放时文字模糊 */
     transform-style: flat;
     /* macOS 字体平滑优化 */
@@ -2704,14 +2717,15 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     background-color: var(--bg-secondary) !important;
 }
 
-/* 4. GPU 加速提示（仅针对由 JS 频繁控制 transform 的元素） */
-.permanent-bookmark-section,
-.temp-canvas-node {
-    /* 提示浏览器：这个东西经常变位置，请给它分配独立的显存纹理 */
+/* 4. GPU 加速提示（仅在拖动或缩放尺寸时分配独立的显存纹理，避免静止时图层过多造成闪烁） */
+.permanent-bookmark-section.dragging,
+.permanent-bookmark-section.resizing,
+.temp-canvas-node.dragging,
+.temp-canvas-node.resizing,
+.md-canvas-node.dragging,
+.md-canvas-node.resizing {
     will-change: transform;
-    /* 这里的 transform-style: preserve-3d 有时会引起 blurry text，但在拖动优化中通常利大于弊 */
-    /* 如果发现文字模糊，请移除下面这行 */
-    /* transform: translateZ(0); */
+    content-visibility: visible !important;
 }
 
 /* =============================================================================
@@ -2733,9 +2747,13 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     border: 2px solid var(--card-group-border);
     background: var(--card-group-fill);
     border-radius: var(--card-group-corner-radius);
-    will-change: transform;
     /* 根节点不接收点击；只有左上角标题进入选中态。 */
     pointer-events: none;
+}
+
+.card-group-canvas-node.dragging,
+.card-group-canvas-node.card-group-dragging {
+    will-change: transform;
 }
 
 [data-theme="dark"] .card-group-canvas-node {

@@ -10776,6 +10776,56 @@ function maybeStartCanvasLowDetailPrewarmJob() {
     }, 80);
 }
 
+let __lowDetailBatchTimer = null;
+function __applyLowDetailStateBatched(shouldActive) {
+    if (__lowDetailBatchTimer) {
+        cancelAnimationFrame(__lowDetailBatchTimer);
+        __lowDetailBatchTimer = null;
+    }
+
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    // 获取工作区内所有的卡片 DOM
+    const cards = Array.from(workspace.querySelectorAll('.temp-canvas-node, .permanent-bookmark-section, .md-canvas-node'));
+    if (cards.length === 0) {
+        workspace.classList.toggle('canvas-low-detail', shouldActive);
+        return;
+    }
+
+    let index = 0;
+    const batchSize = 10; // 每帧处理 10 个卡片，约 1.5ms 运行开销，兼顾流畅度与性能
+
+    const processBatch = () => {
+        const end = Math.min(index + batchSize, cards.length);
+        for (let i = index; i < end; i++) {
+            const card = cards[i];
+            card.classList.toggle('low-detail-active', shouldActive);
+
+            // 空白卡片进入低细节时，刷新文字叠层内容
+            if (shouldActive && card.classList.contains('md-canvas-node')) {
+                try {
+                    const nodeId = card.id;
+                    const node = (typeof getMdNodeById === 'function') ? getMdNodeById(nodeId) : null;
+                    if (node) {
+                        __ensureMdNodeLowDetailOverlay(card, node);
+                    }
+                } catch (_) {}
+            }
+        }
+        index = end;
+        if (index < cards.length) {
+            __lowDetailBatchTimer = requestAnimationFrame(processBatch);
+        } else {
+            // 分批完成，最终同步全局 workspace 类进行兜底
+            workspace.classList.toggle('canvas-low-detail', shouldActive);
+            __lowDetailBatchTimer = null;
+        }
+    };
+
+    __lowDetailBatchTimer = requestAnimationFrame(processBatch);
+}
+
 function updateCanvasLowDetailMode(force = false) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
@@ -10827,16 +10877,10 @@ function updateCanvasLowDetailMode(force = false) {
     const isInteracting = isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || isZoomingClass;
 
     // [Fix Priority] 数据密集模式判断
-    // 只要同时满足：1. 数据量超标(Active) 2. 按住Ctrl 3. 正在交互(缩放/滚动/拖拽)
-    // 就必须强制进入低细节，不管具体的缩放比例是多少。
-    // 这里放宽了条件，不仅仅是 'isZooming'，只要是交互就保护，防止被标准逻辑抢占
-    // [Real-time Check] 尝试更新数据密集状态 (内部有节流，此处调用安全，确保缩放时状态及时)
     updateDataIntensiveMode();
     const dim = CanvasState.dataIntensiveMode;
     const isTotalAlwaysActive = !!(dim && dim.totalAlwaysEnabled && dim.totalAlwaysActive);
     const isDataOrange = !!(dim && dim.active);
-
-
 
     // [Fix Priority] 优先级逻辑重构
     let shouldActive;
@@ -10847,30 +10891,16 @@ function updateCanvasLowDetailMode(force = false) {
     if (safeZoneEnabled && displayZoom >= safeZoneThreshold) {
         shouldActive = false;
     } else if (isTotalAlwaysActive) {
-        // [Priority Override] P4：总量触发后，始终低细节（忽略 P2/P3），仅受 P1 安全区控制
         shouldActive = true;
     } else if (isDataOrange) {
-        // [Scenario A: Orange Mode / 橙色预警]
-        // 数据密集模式下仍然保持 P3（缩放阈值）可用；并保留 Ctrl 手动强制进入低细节。
-
-        // 检查 Ctrl 是否按下
         const isCtrl = !!(CanvasState.isCtrlPressed || (CanvasState.dragState && CanvasState.dragState.meta && CanvasState.dragState.meta.ctrlOverlay));
-
-        // 1) P3：缩放阈值（始终生效）
         const zoomSaysLowDetail = wasActive
             ? ((enterThreshold > 0) ? (displayZoom <= exitThreshold) : false)
             : ((enterThreshold > 0) ? (displayZoom <= enterThreshold) : false);
-
-        // 2) Ctrl：交互中手动强制进入低细节
         const ctrlForcesLowDetail = !!(isInteracting && isCtrl);
-
-        // 3) Safety floor：极小缩放兜底
         const safetyFloor = 0.15;
-
         shouldActive = zoomSaysLowDetail || ctrlForcesLowDetail || (displayZoom < safetyFloor);
     } else {
-        // [Scenario B: Green Mode / 安全状态]
-        // 使用标准的缩放阈值逻辑 (The "Second One")
         if (wasActive) {
             shouldActive = (enterThreshold > 0) ? (displayZoom <= exitThreshold) : false;
         } else {
@@ -10880,20 +10910,13 @@ function updateCanvasLowDetailMode(force = false) {
 
     // [Fix] 交互门控逻辑
     if (!force && isInteracting) {
-        // [Highest Priority Override] 安全区强制放行退出
-        // 当缩放 >= 阈值时，必须立即退出低细节模式，不受交互防抖影响
         if (safeZoneEnabled && displayZoom >= safeZoneThreshold && !shouldActive && wasActive) {
-            // Allow Exit - 强制退出低细节模式
-        }
-        // 1. 如果是 DataIntensive (Orange) 触发的强制低细节 -> 放行 Entry
-        else if (isDataOrange && shouldActive && !wasActive) {
+            // Allow Exit
+        } else if (isDataOrange && shouldActive && !wasActive) {
             // Allow Entry
-        }
-        // 2. 否则进行标准防抖
-        else {
+        } else {
             if (shouldActive === wasActive) return;
             if (!shouldActive && wasActive) return;
-            // 如果是 Green Mode 标准逻辑想进入 -> 被挡住
             if (!isDataOrange) return;
         }
     }
@@ -10907,26 +10930,16 @@ function updateCanvasLowDetailMode(force = false) {
     }
 
     CanvasState.lowDetailActive = shouldActive;
-    workspace.classList.toggle('canvas-low-detail', shouldActive);
 
     // 进入低细节：隐藏连接线工具栏（避免“悬空工具条”）
     if (shouldActive) {
         ensureFreezeInv();
-        try {
-            __updateAllMdNodeLowDetailOverlays();
-        } catch (_) {}
         const edgeToolbar = document.getElementById('edge-toolbar');
         if (edgeToolbar) edgeToolbar.style.display = 'none';
-
-        // 标记所有临时节点树隐藏（CSS已处理，这里辅助）
-        if (document.body.classList.contains('canvas-view-active')) {
-            // efficient class toggle if needed
-        }
     } else {
         // 退出低细节
         clearFreezeInv();
         cancelCanvasLowDetailPrewarmJob();
-        // 尝试预热
         const edgeToolbar = document.getElementById('edge-toolbar');
         if (edgeToolbar) edgeToolbar.style.display = '';
 
@@ -10937,6 +10950,16 @@ function updateCanvasLowDetailMode(force = false) {
             });
         }
         try { scheduleEdgesRender(0); } catch (_) { }
+    }
+
+    // [Batch OPT] 使用时间切片分批为卡片应用低细节模式样式，分散重排计算开销，彻底告别单帧掉帧
+    try {
+        __applyLowDetailStateBatched(shouldActive);
+    } catch (_) {
+        workspace.classList.toggle('canvas-low-detail', shouldActive);
+        if (shouldActive) {
+            try { __updateAllMdNodeLowDetailOverlays(); } catch (_) {}
+        }
     }
 }
 
