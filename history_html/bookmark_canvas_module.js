@@ -34583,112 +34583,6 @@ function createCanvasAppearanceSettingsModal() {
             </div>
             <div class="modal-body">
                 <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? 'Special' : '特殊'}</div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Directory locatable item color sync' : '目录栏可定位条目颜色同步'}</span>
-                            <button class="perf-help-btn" id="otherMenuLocatableColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherMenuLocatableColorSync">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Directory default color sync' : '目录栏其他颜色同步'}</span>
-                            <button class="perf-help-btn" id="otherMenuDefaultColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherMenuDefaultColorSync">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Directory collapse mode' : '目录栏折叠方式'}</span>
-                            <button class="perf-help-btn" id="otherSidebarCollapseModeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content appearance-row-content-inline">
-                            <div class="appearance-mode-toggle">
-                                <label class="appearance-radio">
-                                    <input type="radio" name="other-sidebar-collapse-mode" value="manual">
-                                    <span>${isEn ? 'Manual' : '手动折叠'}</span>
-                                </label>
-                                <label class="appearance-radio">
-                                    <input type="radio" name="other-sidebar-collapse-mode" value="auto">
-                                    <span>${isEn ? 'Auto' : '自动折叠'}</span>
-                                </label>
-                            </div>
-                            <div class="appearance-size-inputs" id="otherSidebarAutoCollapseInputs">
-                                <input type="number" id="otherSidebarAutoCollapseWidth" min="320" max="2000" step="10">
-                                <span>px</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</span>
-                            <span class="temp-color-follow-lock" id="otherTempColorFollowLock" aria-hidden="true"></span>
-                            <button class="perf-help-btn" id="otherTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherTempColorFollow">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Unlock sync to parent' : '解锁后继承父色'}</span>
-                            <button class="perf-help-btn" id="otherTempColorUnlockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherTempColorUnlockSync">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Reset all temp colors' : '全部还原默认色'}</span>
-                            <button class="perf-help-btn" id="otherTempColorResetHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <button class="perf-btn secondary other-mini-btn" id="otherTempColorResetBtn">
-                                ${isEn ? 'Reset to default' : '还原'}
-                            </button>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Auto connect with edges after temp split' : '临时栏目分裂后使用「连接线」自动连接'}</div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherAutoLinkSplit">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-                <div class="detail-section">
                     <div class="detail-section-title">${isEn ? 'Default Sizes' : '默认尺寸'}</div>
                     <div class="appearance-row">
                         <div class="appearance-row-label">${isEn ? 'Temp' : '临时栏目'}</div>
@@ -34861,6 +34755,112 @@ function createCanvasAppearanceSettingsModal() {
                         </div>
                     </div>
                 </div>
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'Special' : '特殊'}</div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Directory locatable item color sync' : '目录栏可定位条目颜色同步'}</span>
+                            <button class="perf-help-btn" id="otherMenuLocatableColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherMenuLocatableColorSync">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Directory title color' : '目录栏标题颜色'}</span>
+                            <button class="perf-help-btn" id="otherMenuDefaultColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherMenuDefaultColorSync">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Directory collapse mode' : '目录栏折叠方式'}</span>
+                            <button class="perf-help-btn" id="otherSidebarCollapseModeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content appearance-row-content-inline">
+                            <div class="appearance-mode-toggle">
+                                <label class="appearance-radio">
+                                    <input type="radio" name="other-sidebar-collapse-mode" value="manual">
+                                    <span>${isEn ? 'Manual' : '手动折叠'}</span>
+                                </label>
+                                <label class="appearance-radio">
+                                    <input type="radio" name="other-sidebar-collapse-mode" value="auto">
+                                    <span>${isEn ? 'Auto' : '自动折叠'}</span>
+                                </label>
+                            </div>
+                            <div class="appearance-size-inputs" id="otherSidebarAutoCollapseInputs">
+                                <input type="number" id="otherSidebarAutoCollapseWidth" min="320" max="2000" step="10">
+                                <span>px</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</span>
+                            <span class="temp-color-follow-lock" id="otherTempColorFollowLock" aria-hidden="true"></span>
+                            <button class="perf-help-btn" id="otherTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherTempColorFollow">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Unlock sync to parent' : '解锁后继承父色'}</span>
+                            <button class="perf-help-btn" id="otherTempColorUnlockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherTempColorUnlockSync">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Reset all temp colors' : '全部还原默认色'}</span>
+                            <button class="perf-help-btn" id="otherTempColorResetHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <button class="perf-btn secondary other-mini-btn" id="otherTempColorResetBtn">
+                                ${isEn ? 'Reset to default' : '还原'}
+                            </button>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Auto connect with edges after temp split' : '临时栏目分裂后使用「连接线」自动连接'}</div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherAutoLinkSplit">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="perf-help-popover" id="appearanceSpecialTempHelpPopover">
@@ -34880,8 +34880,8 @@ function createCanvasAppearanceSettingsModal() {
         <div class="perf-help-popover" id="otherMenuDefaultColorSyncHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Non-locatable entries</b>: Manages directory entries that cannot be located/jumped. This switch controls all remaining non-locatable parts outside the locatable-item switch.'
-            : '<b>不可定位跳转条目</b>：管理目录中不能定位/跳转的条目。这个开关只负责第二个开关之外的其余内容。'}
+            ? '<b>Directory title entries</b>: Manages the color synchronization of category headers and folder titles in the directory (controls all remaining non-locatable parts outside the locatable-item switch).'
+            : '<b>目录栏标题条目</b>：管理目录中分类标题、文件夹等不可定位跳转的条目（即控制除「可定位跳转条目」之外的其余条目颜色同步）。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherMenuLocatableColorSyncHelpPopover">
