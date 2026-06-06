@@ -133,17 +133,44 @@
     }
   }
 
+  function cleanTextWithImageFallback(raw) {
+    const text = normalizeText(raw);
+    if (!text) return '';
+
+    // 1. Get the normal stripped text using original stripping logic
+    const normalStripped = stripInlineMarkdown(stripHtml(text)).trim();
+    if (normalStripped) {
+      return normalStripped;
+    }
+
+    // 2. If it is empty, extract the raw image source markup
+    // Search for markdown image: ![]()
+    const mdImgMatch = text.match(/(!\[[^\]]*\]\([^)]+\))/);
+    if (mdImgMatch) {
+      return mdImgMatch[1].trim();
+    }
+
+    // Search for HTML image: <img ...>
+    const htmlImgMatch = text.match(/(<img[^>]*>)/i);
+    if (htmlImgMatch) {
+      return htmlImgMatch[1].trim();
+    }
+
+    return '';
+  }
+
   function toPreviewText(raw, limit = PREVIEW_LIMIT) {
-    return clampText(stripHtml(raw), limit);
+    return clampText(cleanTextWithImageFallback(raw), limit);
   }
 
   function getFirstLineText(raw) {
-    const normalized = stripHtml(raw);
+    const normalized = cleanTextWithImageFallback(raw);
     if (!normalized) return '';
     const lines = normalized.split(/\n+/).map(line => squeezeSpaces(line)).filter(Boolean);
     if (!lines.length) return '';
     return lines[0];
   }
+
 
   function normalizeMdNodeTitleLine(raw) {
     let line = squeezeSpaces(raw);
@@ -189,7 +216,7 @@
     if (!raw) return '';
     const lines = raw
       .split(/\n+/)
-      .map((line) => squeezeSpaces(stripInlineMarkdown(line)))
+      .map((line) => squeezeSpaces(cleanTextWithImageFallback(line)))
       .filter(Boolean);
     if (!lines.length) return '';
     return lines[0];
@@ -1719,8 +1746,8 @@
       // 1. Nested card groups first: "然后内部嵌套组的优先显示在最上方"
       const nestedGroups = geo.mdNodes.filter((n) => n && n.subtype === 'card-group');
       nestedGroups.sort((a, b) => compareText(
-        normalizeText((a && a.label) || ''),
-        normalizeText((b && b.label) || '')
+        normalizeText(stripInlineMarkdown(stripHtml((a && a.label) || ''))),
+        normalizeText(stripInlineMarkdown(stripHtml((b && b.label) || '')))
       ));
 
       nestedGroups.forEach((n) => {
@@ -2014,7 +2041,7 @@
       visited.add(safeId);
       const instanceSafeId = `${normalizeText(instancePrefix)}${safeId}`;
 
-      const labelRaw = normalizeText((node && node.label) || '') || (
+      const labelRaw = normalizeText(stripInlineMarkdown(stripHtml((node && node.label) || ''))) || (
         isEnglish() ? 'Card Group' : '卡片组'
       );
 
@@ -2053,8 +2080,8 @@
     const cardGroupItems = cardGroupNodes
       .slice()
       .sort((a, b) => compareText(
-        normalizeText((a && a.label) || ''),
-        normalizeText((b && b.label) || '')
+        normalizeText(stripInlineMarkdown(stripHtml((a && a.label) || ''))),
+        normalizeText(stripInlineMarkdown(stripHtml((b && b.label) || '')))
       ))
       .map((node) => buildCardGroupDirectoryNode(node, tempSections, mdNodes, copies, edges, new Set(), 1))
       .filter(Boolean);

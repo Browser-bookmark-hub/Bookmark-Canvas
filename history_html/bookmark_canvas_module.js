@@ -5379,11 +5379,16 @@ function setupCanvasDropFeedback() {
             plainText = dt.getData('text/plain') || '';
             htmlData = dt.getData('text/html') || '';
         } catch (_) { }
-
         // 1) Image file drop -> MD node with <img> (no dependency on marked)
         {
             const file = __extractImageFileFromDataTransfer(dt);
             if (file) {
+                if (file.size > 20 * 1024) {
+                    alert(window.currentLang === 'en'
+                        ? 'Image too large (max 20KB). Only small icons/emojis are supported to avoid bloating AI context.'
+                        : '图片过大（最大支持 20KB）。为避免 Base64 字符过多影响 AI 解析，仅支持小图标。');
+                    return;
+                }
                 const dataUrl = await readFileAsDataUrl(file);
                 if (dataUrl) {
                     const alt = (file.name || 'image').replace(/[\r\n]/g, ' ').trim();
@@ -5447,7 +5452,15 @@ function setupCanvasDropFeedback() {
         } catch (_) { }
 
         const imgSrc = extractFirstImgSrcFromHtml(htmlData);
-        if (imgSrc && isLikelyImageUrl(imgSrc)) return true;
+        if (imgSrc) {
+            if (isLikelyImageUrl(imgSrc)) return true;
+            // Lenient check for dynamically generated or API-based images (e.g. without static file extensions)
+            // If the dragged HTML starts with <img> or is very short (under 500 chars), it is recognized as a direct image drag.
+            const cleanHtml = htmlData.replace(/<!--[\s\S]*?-->/g, '').replace(/<meta[\s\S]*?>/ig, '').trim();
+            if (/^<img\b/i.test(cleanHtml) || /^\s*<a[^>]*>\s*<img\b/i.test(cleanHtml) || cleanHtml.length < 500) {
+                return true;
+            }
+        }
 
         const u = extractFirstUrlFromText(uriList || plainText);
         if (u && isLikelyImageUrl(u)) return true;
@@ -5492,6 +5505,115 @@ function setupCanvasDropFeedback() {
     workspace.addEventListener('drop', async (e) => {
         try { e.preventDefault(); } catch (_) { }
         workspace.classList.remove('canvas-drop-active', 'browser-bookmark-drop');
+
+        // 检查是否是拖拽到已有的 Markdown 栏目上
+        const cardEl = e.target.closest('.md-canvas-node:not(.card-group-canvas-node)');
+        if (cardEl) {
+            const nodeId = cardEl.id;
+            const node = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.find(n => n && n.id === nodeId) : null;
+            if (node) {
+                const dt = e.dataTransfer;
+                if (dt) {
+                    let plainText = '';
+                    let htmlData = '';
+                    let uriList = '';
+                    try {
+                        uriList = dt.getData('text/uri-list') || '';
+                        plainText = dt.getData('text/plain') || '';
+                        htmlData = dt.getData('text/html') || '';
+                    } catch (_) { }
+
+                    let finalSrc = '';
+                    const file = __extractImageFileFromDataTransfer(dt);
+                    if (file) {
+                        if (file.size > 20 * 1024) {
+                            alert(window.currentLang === 'en'
+                                ? 'Image too large (max 20KB). Only small icons/emojis are supported to avoid bloating AI context.'
+                                : '图片过大（最大支持 20KB）。为避免 Base64 字符过多影响 AI 解析，仅支持小图标。');
+                            return;
+                        }
+                        const dataUrl = await readFileAsDataUrl(file);
+                        if (dataUrl) finalSrc = dataUrl;
+                    }
+                    if (!finalSrc) {
+                        const imgSrc = extractFirstImgSrcFromHtml(htmlData);
+                        if (imgSrc) {
+                            const dataUrl = (imgSrc.startsWith('blob:') ? await __tryFetchImageAsDataUrl(imgSrc) : '');
+                            finalSrc = dataUrl || imgSrc;
+                        }
+                    }
+                    if (!finalSrc) {
+                        const urlFromText = extractFirstUrlFromText(uriList || plainText);
+                        if (urlFromText && isLikelyImageUrl(urlFromText)) {
+                            finalSrc = urlFromText;
+                        }
+                    }
+
+                    if (finalSrc) {
+                        const editorEl = cardEl.querySelector('.md-canvas-editor');
+                        if (editorEl && document.activeElement === editorEl) {
+                            const selection = window.getSelection();
+                            if (selection.rangeCount > 0) {
+                                const range = selection.getRangeAt(0).cloneRange();
+                                range.deleteContents();
+                                const textNode = document.createTextNode(`![](${finalSrc})`);
+                                range.insertNode(textNode);
+                                range.setStartAfter(textNode);
+                                range.collapse(true);
+                                selection.removeAllRanges();
+                                selection.addRange(range);
+                                __tryConvertInlinePatternsInTextNode(editorEl, textNode);
+                                __syncMdNodeFromEditor(node, editorEl);
+                                saveTempNodes();
+                                return;
+                            }
+                        }
+
+                        const currentText = (node.text || '').replace(/\u200B/g, '').trim();
+                        node.text = (currentText ? currentText + '\n\n' : '') + `![](${finalSrc})`;
+                        node.html = '';
+                        if (typeof __ensureMdNodeMarkdownProtocol === 'function') {
+                            __ensureMdNodeMarkdownProtocol(node, { refreshCachesFromMarkdown: true });
+                        }
+                        renderMdNode(node);
+                        saveTempNodes();
+                        return;
+                    }
+
+                    const text = String(plainText || '').trim();
+                    if (text) {
+                        const editorEl = cardEl.querySelector('.md-canvas-editor');
+                        if (editorEl && document.activeElement === editorEl) {
+                            const selection = window.getSelection();
+                            if (selection.rangeCount > 0) {
+                                const range = selection.getRangeAt(0).cloneRange();
+                                range.deleteContents();
+                                const textNode = document.createTextNode(text);
+                                range.insertNode(textNode);
+                                range.setStartAfter(textNode);
+                                range.collapse(true);
+                                selection.removeAllRanges();
+                                selection.addRange(range);
+                                __tryConvertInlinePatternsInTextNode(editorEl, textNode);
+                                __syncMdNodeFromEditor(node, editorEl);
+                                saveTempNodes();
+                                return;
+                            }
+                        }
+
+                        const currentText = (node.text || '').replace(/\u200B/g, '').trim();
+                        node.text = (currentText ? currentText + '\n\n' : '') + text;
+                        node.html = '';
+                        if (typeof __ensureMdNodeMarkdownProtocol === 'function') {
+                            __ensureMdNodeMarkdownProtocol(node, { refreshCachesFromMarkdown: true });
+                        }
+                        renderMdNode(node);
+                        saveTempNodes();
+                        return;
+                    }
+                }
+            }
+        }
 
         // 图片拖入优先：避免被误判成书签/链接拖拽导致“无法识别”
         if (isExternalImageDrag(e)) {
@@ -15317,7 +15439,7 @@ function __renderCanvasMixedInlineMarkdownHtml(source) {
         while (n = walker.nextNode()) textNodes.push(n);
         for (const tn of textNodes) {
             if (!tn || !tn.parentNode) continue;
-            if (tn.parentNode.closest && tn.parentNode.closest('code, pre')) continue;
+            if (tn.parentNode.closest && tn.parentNode.closest('code, pre, a')) continue;
             if (__tryConvertInlinePatternsInTextNode(tmp, tn)) changed = true;
         }
     }
@@ -19516,7 +19638,7 @@ function renderMdNode(node) {
             { regex: /\[\[(.+?)\]\]/, tag: 'span', className: 'md-wikilink' }, // [[链接]]
             {
                 type: 'bare-url',
-                regex: /(^|[\s(\[{\<"'“‘*_~`])((?:https?:\/\/|mailto:|tel:)[^\s<>"“”'‘’]+?)(?=$|[\s)\]}>.,;:!?"'“”‘’])/i,
+                regex: /(^|[\s(\[{\<"'“‘*_~`])((?:https?:\/\/|mailto:|tel:)[^\s<>"“”'‘’]+)(?=$|[\s)\]}>.,;:!?"'“”‘’])/i,
                 tag: 'a',
                 boundaryGroupIndex: 1,
                 urlGroupIndex: 2
@@ -19844,6 +19966,24 @@ function renderMdNode(node) {
             if (match && match.index !== undefined) {
                 const matchStart = match.index;
                 let matchEnd = matchStart + match[0].length;
+
+                if (pattern.type === 'bare-url' || pattern.type === 'www-url' || pattern.type === 'link') {
+                    if (textNode.parentNode && textNode.parentNode.closest && textNode.parentNode.closest('a')) {
+                        continue;
+                    }
+                }
+                if (pattern.type === 'bare-url' || pattern.type === 'www-url') {
+                    const beforeText = text.substring(0, matchStart);
+                    const boundaryChar = match[pattern.boundaryGroupIndex] || '';
+                    if (boundaryChar.includes('(') && /\]\s*$/.test(beforeText)) continue;
+                    const countChar = (s, ch) => {
+                        let c = 0;
+                        for (let i = 0; i < s.length; i++) if (s[i] === ch) c++;
+                        return c;
+                    };
+                    if (countChar(beforeText, '<') > countChar(beforeText, '>')) continue;
+                    if (countChar(beforeText, '[') > countChar(beforeText, ']')) continue;
+                }
 
                 // 只在光标位于匹配文本之后时才渲染（即用户刚完成输入）
                 if (cursorPos >= matchEnd) {
@@ -21445,6 +21585,31 @@ function renderMdNode(node) {
     editor.addEventListener('paste', (e) => {
         try {
             const cd = e && e.clipboardData;
+            // 检查并处理剪贴板中直接粘贴的图片（例如屏幕截图）
+            if (cd && cd.items) {
+                const imgItem = Array.from(cd.items).find(item => item && item.type.startsWith('image/'));
+                if (imgItem) {
+                    const file = imgItem.getAsFile();
+                    if (file) {
+                        e.preventDefault();
+                        if (file.size > 20 * 1024) {
+                            alert(window.currentLang === 'en'
+                                ? 'Image too large (max 20KB). Only small icons/emojis are supported to avoid bloating AI context.'
+                                : '图片过大（最大支持 20KB）。为避免 Base64 字符过多影响 AI 解析，仅支持小图标。');
+                            return;
+                        }
+                        readFileAsDataUrl(file).then((dataUrl) => {
+                            if (dataUrl) {
+                                const alt = (file.name || 'image').replace(/[\r\n]/g, ' ').trim();
+                                const textToInsert = `![${alt}](${dataUrl})`;
+                                __insertTextAtSelection(textToInsert);
+                                saveEditorContent();
+                            }
+                        });
+                        return;
+                    }
+                }
+            }
             const clipboardHtml = cd ? String(cd.getData('application/x-bookmark-canvas-html') || cd.getData('text/html') || '') : '';
             const plain = cd ? String(cd.getData('text/plain') || '') : '';
             const normalized = plain.replace(/\r\n/g, '\n');
@@ -22583,7 +22748,9 @@ function __sanitizeCanvasRichTextHtml(html) {
         'open',
         'color',
         'align',
-        'style'
+        'style',
+        'width',
+        'height'
     ]);
 
     const normalizeExternalHref = (href) => {
@@ -22691,6 +22858,17 @@ function __sanitizeCanvasRichTextHtml(html) {
                 return;
             }
             el.setAttribute('src', safeSrc);
+
+            if (el.hasAttribute('width')) {
+                const w = String(el.getAttribute('width') || '').trim().toLowerCase();
+                if (/^\d+(?:px|%)?$/i.test(w) || w === 'auto') el.setAttribute('width', w);
+                else el.removeAttribute('width');
+            }
+            if (el.hasAttribute('height')) {
+                const h = String(el.getAttribute('height') || '').trim().toLowerCase();
+                if (/^\d+(?:px|%)?$/i.test(h) || h === 'auto') el.setAttribute('height', h);
+                else el.removeAttribute('height');
+            }
             return;
         }
 
@@ -22874,7 +23052,7 @@ function __tryConvertInlinePatternsInTextNode(editorEl, explicitNode = null) {
         // Obsidian-style auto external links (bare URL / www.*)
         {
             type: 'bare-url',
-            regex: /(^|[\s(\[{\<"'“‘*_~`])((?:https?:\/\/|mailto:|tel:)[^\s<>"“”'‘’]+?)(?=$|[\s)\]}>.,;:!?"'“”‘’])/i,
+            regex: /(^|[\s(\[{\<"'“‘*_~`])((?:https?:\/\/|mailto:|tel:)[^\s<>"“”'‘’]+)(?=$|[\s)\]}>.,;:!?"'“”‘’])/i,
             tag: 'a',
             boundaryGroupIndex: 1,
             urlGroupIndex: 2
@@ -22893,6 +23071,19 @@ function __tryConvertInlinePatternsInTextNode(editorEl, explicitNode = null) {
         if (!match || match.index == null) continue;
 
         const matchStart = match.index;
+
+        if (pattern.type === 'bare-url' || pattern.type === 'www-url' || pattern.type === 'link') {
+            if (textNode.parentNode && textNode.parentNode.closest && textNode.parentNode.closest('a')) {
+                continue;
+            }
+        }
+        if (pattern.type === 'bare-url' || pattern.type === 'www-url') {
+            const beforeText = text.substring(0, matchStart);
+            const boundaryChar = match[pattern.boundaryGroupIndex] || '';
+            if (boundaryChar.includes('(') && /\]\s*$/.test(beforeText)) continue;
+            if (countChar(beforeText, '<') > countChar(beforeText, '>')) continue;
+            if (countChar(beforeText, '[') > countChar(beforeText, ']')) continue;
+        }
 
         let replaceStart = matchStart;
         let typingEnd = matchStart + match[0].length;
@@ -23044,7 +23235,7 @@ function __finalizeInlinePatternsInEditor(editorEl) {
 
         for (const tn of textNodes) {
             if (!tn || !tn.parentNode) continue;
-            if (tn.parentNode.closest('code, pre')) continue;
+            if (tn.parentNode.closest('code, pre, a')) continue;
             if (__tryConvertInlinePatternsInTextNode(editorEl, tn)) {
                 changed = true;
                 changedOverall = true;
@@ -24282,8 +24473,8 @@ function __fullScanRenderDescriptionEditor(editorEl) {
 
         for (const tn of textNodes) {
             if (!tn.parentNode) continue;
-            // Skip if inside code block or pre
-            if (tn.parentNode.closest('code, pre')) continue;
+            // Skip if inside code block, pre or anchor
+            if (tn.parentNode.closest('code, pre, a')) continue;
 
             if (__tryConvertInlinePatternsInTextNode(editorEl, tn)) {
                 changed = true;
@@ -24400,12 +24591,37 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     };
     editor.addEventListener('mouseup', saveSelection);
     editor.addEventListener('keyup', saveSelection);
-
     // 修复粘贴后不自动渲染的问题
     editor.addEventListener('paste', (e) => {
         // 多行/块级 Markdown 粘贴：直接解析为 HTML 插入，避免整段文本落在同一个节点导致无法命中规则
         try {
             const cd = e && e.clipboardData;
+            // 检查并处理剪贴板中直接粘贴的图片（例如屏幕截图）
+            if (cd && cd.items) {
+                const imgItem = Array.from(cd.items).find(item => item && item.type.startsWith('image/'));
+                if (imgItem) {
+                    const file = imgItem.getAsFile();
+                    if (file) {
+                        e.preventDefault();
+                        if (file.size > 20 * 1024) {
+                            alert(window.currentLang === 'en'
+                                ? 'Image too large (max 20KB). Only small icons/emojis are supported to avoid bloating AI context.'
+                                : '图片过大（最大支持 20KB）。为避免 Base64 字符过多影响 AI 解析，仅支持小图标。');
+                            return;
+                        }
+                        readFileAsDataUrl(file).then((dataUrl) => {
+                            if (dataUrl) {
+                                const alt = (file.name || 'image').replace(/[\r\n]/g, ' ').trim();
+                                const textToInsert = `![${alt}](${dataUrl})`;
+                                __insertTextAtSelection(textToInsert);
+                                __fullScanRenderDescriptionEditor(editor);
+                                saveEditorContent();
+                            }
+                        });
+                        return;
+                    }
+                }
+            }
             const clipboardHtml = cd ? String(cd.getData('application/x-bookmark-canvas-html') || cd.getData('text/html') || '') : '';
             const plain = cd ? String(cd.getData('text/plain') || '') : '';
             const normalized = plain.replace(/\r\n/g, '\n');

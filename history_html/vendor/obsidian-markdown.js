@@ -73,9 +73,10 @@
     'sup',
     'br',
     'center',
-    'p'
+    'p',
+    'img'
   ]);
-  const allowedAttrs = new Set(['color', 'style', 'class', 'align']);
+  const allowedAttrs = new Set(['color', 'style', 'class', 'align', 'src', 'alt', 'width', 'height']);
 
   const sanitizeStyle = (style = '') => {
     const out = [];
@@ -124,6 +125,22 @@
           } else if (attrName === 'align') {
             safeValue = safeValue.trim().toLowerCase();
             if (!/^(left|center|right|justify)$/.test(safeValue)) return '';
+          } else if (attrName === 'src') {
+            safeValue = safeValue.trim();
+            if (safeValue.startsWith('data:image/')) {
+              // Allow data:image
+            } else {
+              try {
+                const u = new URL(safeValue, 'https://dummy.local');
+                const ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'blob:' || u.protocol === 'chrome-extension:';
+                if (!ok) return '';
+              } catch (_) {
+                return '';
+              }
+            }
+          } else if (attrName === 'width' || attrName === 'height') {
+            safeValue = safeValue.trim().toLowerCase();
+            if (!/^\d+(?:px|%)?$/i.test(safeValue) && safeValue !== 'auto') return '';
           }
           safeAttrs.push(` ${attrName}="${safeValue.replace(/"/g, '&quot;')}"`);
           return '';

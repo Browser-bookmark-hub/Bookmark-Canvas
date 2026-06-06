@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Canvas Rendering Test Cases</title>
+    <!-- Mock some chrome global variables if required by imports -->
+    <script>
+        window.chrome = {
+            runtime: {
+                getManifest: () => ({ version: '1.0' }),
+                onMessage: { addListener: () => {} },
+                sendMessage: () => {}
+            },
+            storage: {
+                local: { get: (k, cb) => cb({}), set: (v, cb) => cb && cb() }
+            },
+            i18n: {
+                getMessage: (key) => key
+            }
+        };
+        // Mock a minimal i18n object for history.js/canvas modules
+        window.i18n = {
+            canvasHelpBatchSelectTooltip: { zh_CN: '', en: '' },
+            canvasHelpTouchpadPinchTooltip: { zh_CN: '', en: '' }
+        };
+        window.currentLang = 'zh_CN';
+    </script>
+    <script src="vendor/marked.min.js"></script>
+    <script src="vendor/obsidian-markdown.js"></script>
+    <script src="storageBCS/storageBCS_core.js"></script>
+    <script src="bookmark_canvas_module.js"></script>
+</head>
+<body>
+    <h1>Bookmark-Canvas Rendering Verification</h1>
+    <div id="test-results" style="font-family: monospace; white-space: pre-wrap; background: #eee; padding: 10px; border: 1px solid #ccc; margin-bottom: 20px;"></div>
+    
+    <h2>Live Preview Areas</h2>
+    <div id="preview-container" style="border: 2px dashed #666; padding: 20px;">
+        <h3>Case 1: Plain URL Link (expect plain text link URL, fully clickable)</h3>
+        <div id="case1-preview" style="padding: 10px; border: 1px solid #999; margin-bottom: 10px; min-height: 50px;"></div>
+        
+        <h3>Case 2: Markdown Image Syntax (expect rendered image star icon)</h3>
+        <div id="case2-preview" style="padding: 10px; border: 1px solid #999; margin-bottom: 10px; min-height: 50px;"></div>
+        
+        <h3>Case 3: HTML Image Syntax (expect rendered image with width=48 height=48)</h3>
+        <div id="case3-preview" style="padding: 10px; border: 1px solid #999; margin-bottom: 10px; min-height: 50px;"></div>
+    </div>
+
+    <script>
+        const resultsEl = document.getElementById('test-results');
+        let logs = [];
+        const log = (msg) => {
+            logs.push(msg);
+            resultsEl.textContent = logs.join('\n');
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            try {
+                log('Verifying rendering functions...');
+                
+                // Case 1: Plain URL Link
+                const case1Source = 'https://img.icons8.com/color/48/star--v1.png';
+                const case1Html = __renderMarkdownSourceToCanvasHtml(case1Source);
+                log('Case 1 HTML output:\n' + case1Html);
+                document.getElementById('case1-preview').innerHTML = case1Html;
+                
+                // Case 2: Markdown Image
+                const case2Source = '![](https://img.icons8.com/color/48/star--v1.png)';
+                const case2Html = __renderMarkdownSourceToCanvasHtml(case2Source);
+                log('Case 2 HTML output:\n' + case2Html);
+                document.getElementById('case2-preview').innerHTML = case2Html;
+                
+                // Case 3: HTML Image Tag
+                const case3Source = '<img src="https://img.icons8.com/color/48/star--v1.png" width="48" height="48" />';
+                const case3Html = __renderMarkdownSourceToCanvasHtml(case3Source);
+                log('Case 3 HTML output:\n' + case3Html);
+                document.getElementById('case3-preview').innerHTML = case3Html;
+                
+                // Check assertions
+                const c1Ok = case1Html.includes('href="https://img.icons8.com/color/48/star--v1.png"') && !case1Html.includes('[https://img');
+                const c2Ok = case2Html.includes('<img src="https://img.icons8.com/color/48/star--v1.png"');
+                const c3Ok = case3Html.includes('<img src="https://img.icons8.com/color/48/star--v1.png"') && case3Html.includes('width="48"') && case3Html.includes('height="48"');
+                
+                log('\n--- ASSERTIONS ---');
+                log('Case 1 (Plain URL): ' + (c1Ok ? 'PASSED ✅' : 'FAILED ❌'));
+                log('Case 2 (Markdown Image): ' + (c2Ok ? 'PASSED ✅' : 'FAILED ❌'));
+                log('Case 3 (HTML Image Tag): ' + (c3Ok ? 'PASSED ✅' : 'FAILED ❌'));
+                
+                if (c1Ok && c2Ok && c3Ok) {
+                    log('\nALL TESTS PASSED SUCCESSFULLY! 🎉');
+                    window.testResultStatus = 'SUCCESS';
+                } else {
+                    log('\nSOME TESTS FAILED. ❌');
+                    window.testResultStatus = 'FAILED';
+                }
+            } catch (e) {
+                log('Error running tests: ' + e.message + '\n' + e.stack);
+                window.testResultStatus = 'ERROR';
+            }
+        });
+    </script>
+</body>
+</html>
