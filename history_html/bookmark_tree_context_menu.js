@@ -8617,7 +8617,7 @@ async function openInSpecificWindow(url, options = {}) {
                 try {
                     const win = await chrome.windows.get(specificWindowId, { populate: false });
                     if (win && win.id) {
-                        const tab = await chrome.tabs.create({ windowId: specificWindowId, url });
+                        const tab = await chrome.tabs.create({ windowId: specificWindowId, url, active: false });
                         if (tab && tab.id != null) {
                             await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
                             const scope = getScopeFromContext(context);
@@ -8777,7 +8777,7 @@ async function openInScopedWindow(url, opts = {}) {
                 try {
                     const win = await chrome.windows.get(winId, { populate: false });
                     if (win && win.id) {
-                        await chrome.tabs.create({ windowId: win.id, url });
+                        await chrome.tabs.create({ windowId: win.id, url, active: false });
                         return;
                     }
                 } catch (_) {
@@ -8923,7 +8923,7 @@ async function openInSameWindowSpecificGroup(url, opts = {}) {
             }
         }
 
-        const tab = await chrome.tabs.create({ url, active: true, windowId });
+        const tab = await chrome.tabs.create({ url, active: isNewWindow, windowId });
         tabCreated = true;
 
         // 激活窗口，确保显示最新打开的书签页面（如果是新窗口才激活，避免已存在的窗口后续打开tab页时跳转）
