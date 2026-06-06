@@ -2741,8 +2741,18 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .md-canvas-node.resizing,
 .md-canvas-node.selected,
 .md-canvas-node.editing,
-.md-canvas-node:hover {
+.md-canvas-node:hover,
+.permanent-bookmark-section:has(.open),
+.temp-canvas-node:has(.open),
+.md-canvas-node:has(.open) {
     content-visibility: visible !important;
+}
+
+/* 当卡片内部含有开启的色盘/弹窗时，提升父级卡片层级，确保弹出的色盘不被相邻卡片遮挡 */
+.permanent-bookmark-section:has(.open),
+.temp-canvas-node:has(.open),
+.md-canvas-node:has(.open) {
+    z-index: 9998 !important;
 }
 
 /* 提升交互节点及其子元素的 z-index，防止相邻栏目的连接点和 hover 区域相互抢占/覆盖 */
