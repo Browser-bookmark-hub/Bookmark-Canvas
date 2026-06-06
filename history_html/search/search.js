@@ -7469,14 +7469,7 @@ function renderCanvasSearchResults(results, options = {}) {
                     // Use item color for the label
                     indexLabel += makeColoredSpan(item.label, 'group');
                 }
-                // 2. 序号：#A
-                if (item.originDisplayIndex) {
-                    const alpha = toAlpha(item.originDisplayIndex);
-                    // Show label if index > 1 OR internal multi-column mode is active (so A is shown)
-                    if (item.originDisplayIndex > 1 || item.isMultiColumnMode) {
-                        indexLabel += makeColoredSpan(`#${alpha}`, 'hash');
-                    }
-                }
+                // [Modified] 按照用户需求，临时栏目的来源序号（如 #A 等）不再显示，直接屏蔽不渲染
 
                 title = escapeHtml(item.title || (isZh ? '临时栏目' : 'Temp Section'));
                 // [Modified] Restore badge with dynamic color

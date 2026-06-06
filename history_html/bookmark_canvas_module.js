@@ -26288,20 +26288,7 @@ function renderTempNode(section, options = {}) {
         titleContainer.appendChild(sequenceBadge);
     }
 
-    // 来源标识（Scheme A）：显示“来自哪个永久栏目副本” (#A/#B/...)
-    // 注意：不影响 A/B/C 主序号，仅作为额外提示。
-    const originBadge = document.createElement('span');
-    originBadge.className = 'temp-node-origin-badge';
-    originBadge.dataset.tempOriginBadge = 'true';
-    const originText = getTempSectionOriginBadgeText(section);
-    if (originText) {
-        originBadge.textContent = originText;
-        originBadge.style.display = 'inline-flex';
-    } else {
-        originBadge.textContent = '';
-        originBadge.style.display = 'none';
-    }
-    titleContainer.appendChild(originBadge);
+    // 来源标识（Scheme A）：不渲染临时栏目的来源序号（如 #A 等）
 
     const titleInput = document.createElement('input');
     titleInput.type = 'text';
