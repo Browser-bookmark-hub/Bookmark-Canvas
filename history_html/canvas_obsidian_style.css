@@ -1334,6 +1334,11 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     display: none !important;
 }
 
+.canvas-workspace.canvas-low-detail .md-canvas-node .md-canvas-editor,
+.canvas-workspace.canvas-low-detail .md-canvas-node .md-node-toolbar {
+    display: none !important;
+}
+
 /* 低缩放：栏目/永久栏目“序号(#) + 标题”居中大字（反向缩放，保证在很小缩放下仍可读） */
 .temp-node-low-detail-overlay,
 .permanent-node-low-detail-overlay {
@@ -1349,7 +1354,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 .canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-low-detail-overlay,
-.canvas-workspace.canvas-low-detail .permanent-bookmark-section .permanent-node-low-detail-overlay {
+.canvas-workspace.canvas-low-detail .permanent-bookmark-section .permanent-node-low-detail-overlay,
+.canvas-workspace.canvas-low-detail .md-canvas-node .temp-node-low-detail-overlay {
     display: flex;
 }
 

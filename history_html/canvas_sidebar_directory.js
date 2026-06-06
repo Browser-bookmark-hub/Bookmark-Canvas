@@ -4,7 +4,7 @@
   const ROOT_ID = 'canvasDirectoryTree';
   const CANVAS_CONTENT_ID = 'canvasContent';
   const REFRESH_INTERVAL_MS = 1200;
-  const PREVIEW_LIMIT = 260;
+  const PREVIEW_LIMIT = 30;
   const BCS_CANVAS_KEY = 'bcs:canvas';
   const PERMANENT_COPIES_STORAGE_KEY = 'bcs:perm:copies';
   const PERMANENT_MAIN_TIP_STORAGE_KEY = 'bcs:perm:tip-main';
@@ -222,21 +222,7 @@
     return lines[0];
   }
 
-  function getMdNodeFirstLineFromDom(nodeId) {
-    const normalizedId = normalizeText(nodeId);
-    if (!normalizedId) return '';
 
-    const nodeEl = document.getElementById(normalizedId);
-    if (!nodeEl) return '';
-
-    try {
-      const liveTextEl = nodeEl.querySelector('.md-canvas-editor, .md-canvas-text');
-      if (!liveTextEl) return '';
-      return getFirstLineText(liveTextEl.innerText || liveTextEl.textContent || '');
-    } catch (_) {
-      return '';
-    }
-  }
 
   function parseJSON(raw, fallback) {
     try {
@@ -620,19 +606,17 @@
     return toPreviewText(section && section.description);
   }
 
+  function clampCardTitle(title, limit = 30) {
+    if (!title) return '';
+    if (title.length <= limit) return title;
+    return title.slice(0, limit) + '...';
+  }
+
   function getMdNodeTitle(node) {
-    const byLiveText = normalizeMdNodeTitleLine(getMdNodeFirstLineFromDom(node && node.id));
-    if (byLiveText) return byLiveText;
-
-    const bySourceLine = normalizeMdNodeTitleLine(getMdNodeTitleLineFromSource(node));
+    if (!node) return '--';
+    const mainText = (typeof node.title === 'string' && node.title.trim()) ? node.title.trim() : (node.markdownSource || node.text || node.html || '');
+    const bySourceLine = normalizeMdNodeTitleLine(getFirstLineText(mainText));
     if (bySourceLine) return bySourceLine;
-
-    const byText = normalizeMdNodeTitleLine(getFirstLineText(node && node.text));
-    if (byText) return byText;
-
-    const byHtml = normalizeMdNodeTitleLine(getFirstLineText(node && node.html));
-    if (byHtml) return byHtml;
-
     return '--';
   }
 
@@ -1262,7 +1246,7 @@
           (node, index) => makeItemNode({
             key: `${keyPrefix}blank-${node.id}`,
             code: '',
-            title: `${index + 1}. ${getMdNodeTitle(node)}`,
+            title: `${index + 1}. ${clampCardTitle(getMdNodeTitle(node), 30)}`,
             color: nodeColorResolver(node),
             defaultColor,
             icon: itemIcon,
@@ -1848,7 +1832,7 @@
           return makeItemNode({
             key: `group-${parentSafeId}-blank-${n.id}`,
             code: '',
-            title: `${idx + 1}. ${getMdNodeTitle(n)}`,
+            title: `${idx + 1}. ${clampCardTitle(getMdNodeTitle(n), 30)}`,
             color: nodeColor,
             defaultColor: nodeColor,
             icon: 'fas fa-file-alt',
@@ -3279,6 +3263,23 @@
   global.CanvasSidebarDirectory = {
     init,
     refresh,
-    renderPreviewDirectory
+    renderPreviewDirectory,
+    getMdNodeTitle,
+    clampCardTitle,
+    getSortedMdNodes: (mdNodes) => {
+      if (!Array.isArray(mdNodes)) return [];
+      return [...mdNodes].sort((a, b) => {
+        const titleA = getMdNodeTitle(a);
+        const titleB = getMdNodeTitle(b);
+        const cmp = compareText(titleA, titleB);
+        if (cmp !== 0) return cmp;
+        const at = toPositiveInt(a && a.createdAt);
+        const bt = toPositiveInt(b && b.createdAt);
+        if (at && bt && at !== bt) return at - bt;
+        if (at && !bt) return -1;
+        if (!at && bt) return 1;
+        return compareText(a && a.id, b && b.id);
+      });
+    }
   };
 })(window);

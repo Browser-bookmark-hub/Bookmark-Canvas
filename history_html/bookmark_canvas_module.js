@@ -10912,6 +10912,9 @@ function updateCanvasLowDetailMode(force = false) {
     // 进入低细节：隐藏连接线工具栏（避免“悬空工具条”）
     if (shouldActive) {
         ensureFreezeInv();
+        try {
+            __updateAllMdNodeLowDetailOverlays();
+        } catch (_) {}
         const edgeToolbar = document.getElementById('edge-toolbar');
         if (edgeToolbar) edgeToolbar.style.display = 'none';
 
@@ -18100,6 +18103,95 @@ function makeMdNodeDraggable(element, node) {
     element.addEventListener('mousedown', onMouseDown, false);
 }
 
+function __getTitleFromDirectoryDom(nodeId) {
+    try {
+        const root = document.getElementById('canvasDirectoryTree');
+        if (!root) return '';
+        const itemEl = root.querySelector('[data-node-key$="blank-' + nodeId + '"]');
+        if (itemEl) {
+            const labelTextEl = itemEl.querySelector('.canvas-dir-title');
+            if (labelTextEl && labelTextEl.textContent) {
+                return labelTextEl.textContent.replace(/^\d+\.\s+/, '').trim();
+            }
+        }
+    } catch (_) {}
+    return '';
+}
+
+function __getMdNodeLowDetailTitleAndIndex(node) {
+    let title = __getTitleFromDirectoryDom(node.id);
+    let indexText = '';
+    
+    if (!title) {
+        if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.getMdNodeTitle === 'function' && typeof window.CanvasSidebarDirectory.getSortedMdNodes === 'function') {
+            title = window.CanvasSidebarDirectory.getMdNodeTitle(node);
+        } else {
+            // Fallback sorting and title extraction
+            title = (typeof node.title === 'string' && node.title.trim()) ? node.title.trim().split(/\r?\n/)[0].trim() : '';
+            if (!title && typeof node.text === 'string' && node.text.trim()) {
+                title = node.text.trim().split(/\r?\n/)[0].trim();
+            }
+            if (!title) title = '--';
+        }
+    }
+    
+    if (title && title.length > 15) {
+        title = title.slice(0, 15) + '...';
+    }
+    
+    return {
+        titleText: title,
+        indexText: indexText
+    };
+}
+
+function __ensureMdNodeLowDetailOverlay(el, node) {
+    if (!el || !node) return;
+
+    let overlay = el.querySelector('.temp-node-low-detail-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'temp-node-low-detail-overlay';
+
+        const content = document.createElement('div');
+        content.className = 'temp-node-low-detail-content';
+
+        const badge = document.createElement('div');
+        badge.className = 'temp-node-low-detail-badge';
+
+        const title = document.createElement('div');
+        title.className = 'temp-node-low-detail-title';
+
+        content.appendChild(badge);
+        content.appendChild(title);
+        overlay.appendChild(content);
+        el.appendChild(overlay);
+    }
+
+    try {
+        const info = __getMdNodeLowDetailTitleAndIndex(node);
+        const badgeNode = overlay.querySelector('.temp-node-low-detail-badge');
+        if (badgeNode) {
+            badgeNode.textContent = info.indexText;
+            badgeNode.style.display = info.indexText ? '' : 'none';
+        }
+        const titleNode = overlay.querySelector('.temp-node-low-detail-title');
+        if (titleNode) {
+            titleNode.textContent = info.titleText;
+        }
+    } catch (_) {}
+}
+
+function __updateAllMdNodeLowDetailOverlays() {
+    const nodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(Boolean) : [];
+    nodes.forEach(node => {
+        const el = document.getElementById(node.id);
+        if (el) {
+            __ensureMdNodeLowDetailOverlay(el, node);
+        }
+    });
+}
+
 function renderMdNode(node) {
     const container = document.getElementById('canvasContent');
     if (!container) return;
@@ -22184,6 +22276,11 @@ function renderMdNode(node) {
 
     // Ctrl 蒙版同步
     registerSectionCtrlOverlay(el);
+
+    // 空白栏目低细节叠层初始化
+    try {
+        __ensureMdNodeLowDetailOverlay(el, node);
+    } catch (_) {}
 }
 
 // —— 工具栏动作实现 ——
@@ -24077,6 +24174,12 @@ function __syncMdNodeFromEditor(node, editor) {
     node.subtype = CANVAS_PLUGIN_MARKDOWN_SUBTYPE;
     node.source = CANVAS_PLUGIN_MARKDOWN_SOURCE;
     node.canvasTextKind = 'blank';
+    const el = document.getElementById(node.id);
+    if (el) {
+        try {
+            __ensureMdNodeLowDetailOverlay(el, node);
+        } catch (_) {}
+    }
     return changed;
 }
 
@@ -27403,6 +27506,23 @@ function renderTempNode(section, options = {}) {
 
         const badgeEl = document.createElement('div');
         badgeEl.className = 'temp-node-low-detail-badge';
+        const getOriginText = (sec) => {
+            if (!sec || !sec.source) return '';
+            const src = String(sec.source).trim().toLowerCase();
+            const isEn = (typeof getCanvasLanguage === 'function' ? getCanvasLanguage() : '') === 'en';
+            switch (src) {
+                case 'browser-drop': return isEn ? 'Drop' : '拖入';
+                case 'search-result': return isEn ? 'Search' : '搜索';
+                case 'batch': return isEn ? 'Batch' : '批量';
+                case 'quick-add': return isEn ? 'Add' : '添加';
+                case 'file-import': return isEn ? 'Import' : '导入文件';
+                case 'import-html-bookmarks':
+                case 'import-json-bookmarks':
+                    return isEn ? 'Import' : '导入';
+                default: return '';
+            }
+        };
+        const originText = getOriginText(section);
         const badgeText = [sectionLabel, originText].filter(Boolean).join(' ');
         if (badgeText) {
             badgeEl.textContent = badgeText;
@@ -32009,6 +32129,9 @@ function saveTempNodes(options = {}) {
     // 3) 本函数负责：持久化 + 触发跨页面同步信号
     // 4) 若功能是“仅当前会话临时态”（如 sandbox 导入），不要调用本函数
     if (__canvasTempStateRealtimeSyncApplying) return;
+    try {
+        __updateAllMdNodeLowDetailOverlays();
+    } catch (_) {}
     const immediate = !!(options && options.immediate);
     const skipUnchangedPersist = !!(options && options.skipUnchangedPersist);
     try {
