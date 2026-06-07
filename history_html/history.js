@@ -3641,6 +3641,15 @@ function __renderPermanentTreeSharedViews(options = {}) {
         return false;
     }
 
+    try {
+        const state = window.CanvasModule && window.CanvasModule.CanvasState ? window.CanvasModule.CanvasState : null;
+        const reason = String(options && options.reason ? options.reason : '').trim();
+        const allowLowDetailRestore = reason === 'low-detail-exit';
+        if (state && state.lowDetailActive && !allowLowDetailRestore) {
+            return false;
+        }
+    } catch (_) { }
+
     if (!__hasPermanentTreeSharedContentSource()) return false;
 
     const targets = __collectPermanentTreeSharedRenderTargets(options);

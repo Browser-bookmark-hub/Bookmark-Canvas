@@ -4,7 +4,9 @@
   const ROOT_ID = 'canvasDirectoryTree';
   const CANVAS_CONTENT_ID = 'canvasContent';
   const REFRESH_INTERVAL_MS = 1200;
+  const REFRESH_DEFER_MS = 180;
   const PREVIEW_LIMIT = 30;
+  const STRIP_HTML_CACHE_LIMIT = 1200;
   const BCS_CANVAS_KEY = 'bcs:canvas';
   const PERMANENT_COPIES_STORAGE_KEY = 'bcs:perm:copies';
   const PERMANENT_MAIN_TIP_STORAGE_KEY = 'bcs:perm:tip-main';
@@ -54,6 +56,7 @@
   let initialized = false;
   let refreshTimer = null;
   let refreshRaf = null;
+  let refreshDeferredTimer = null;
   let pendingForceRefresh = false;
   let canvasObserver = null;
   let observedCanvasContent = null;
@@ -124,13 +127,22 @@
     const text = normalizeText(raw);
     if (!text) return '';
     if (!/[<>]/.test(text)) return text;
+    if (!stripHtml.cache) stripHtml.cache = new Map();
+    const cached = stripHtml.cache.get(text);
+    if (typeof cached === 'string') return cached;
+    let stripped = '';
     try {
       const tmp = document.createElement('div');
       tmp.innerHTML = text;
-      return normalizeText(tmp.textContent || '');
+      stripped = normalizeText(tmp.textContent || '');
     } catch (_) {
-      return normalizeText(text.replace(/<[^>]*>/g, ' '));
+      stripped = normalizeText(text.replace(/<[^>]*>/g, ' '));
     }
+    stripHtml.cache.set(text, stripped);
+    if (stripHtml.cache.size > STRIP_HTML_CACHE_LIMIT) {
+      try { stripHtml.cache.delete(stripHtml.cache.keys().next().value); } catch (_) {}
+    }
+    return stripped;
   }
 
   function cleanTextWithImageFallback(raw) {
@@ -3203,13 +3215,54 @@
     updateActiveState(root);
   }
 
+  function isCanvasInteractionActiveForDirectory() {
+    const workspace = document.getElementById('canvasWorkspace');
+    const module = global.CanvasModule || null;
+    const state = module && module.CanvasState ? module.CanvasState : null;
+    const resizeState = state && state.sectionCtrlMode && state.sectionCtrlMode.resize;
+    const dragging = !!(state && state.dragState && state.dragState.isDragging);
+    const touchpadScrolling = !!(state && state.touchpadState && state.touchpadState.isScrolling);
+    const inertiaScrolling = !!(state && state.inertiaState && state.inertiaState.isActive);
+    const stateBusy = !!(
+      dragging ||
+      touchpadScrolling ||
+      inertiaScrolling ||
+      (state && state.isPanning) ||
+      (resizeState && resizeState.active)
+    );
+    const workspaceBusy = !!(workspace && (
+      workspace.classList.contains('is-zooming') ||
+      workspace.classList.contains('is-scrolling') ||
+      workspace.classList.contains('panning') ||
+      (workspace.querySelector && workspace.querySelector('.resizing'))
+    ));
+    return stateBusy || workspaceBusy;
+  }
+
+  function scheduleDeferredRefresh() {
+    if (refreshDeferredTimer) return;
+    refreshDeferredTimer = global.setTimeout(() => {
+      refreshDeferredTimer = null;
+      queueRefresh({ force: pendingForceRefresh });
+    }, REFRESH_DEFER_MS);
+  }
+
   function queueRefresh(options = {}) {
     if (options.force) pendingForceRefresh = true;
+    if (lastFingerprint && isCanvasInteractionActiveForDirectory()) {
+      scheduleDeferredRefresh();
+      return;
+    }
     if (refreshRaf) return;
     refreshRaf = global.requestAnimationFrame(() => {
       refreshRaf = null;
       const force = pendingForceRefresh;
       pendingForceRefresh = false;
+      if (lastFingerprint && isCanvasInteractionActiveForDirectory()) {
+        if (force) pendingForceRefresh = true;
+        scheduleDeferredRefresh();
+        return;
+      }
       refreshDirectory({ force });
     });
   }

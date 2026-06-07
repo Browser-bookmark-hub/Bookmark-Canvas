@@ -526,8 +526,11 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .canvas-workspace.is-zooming .canvas-content,
 .canvas-workspace.is-zooming .temp-canvas-node,
 .canvas-workspace.is-zooming .permanent-bookmark-section,
-.canvas-workspace.is-zooming .md-canvas-node {
+.canvas-workspace.is-zooming .md-canvas-node,
+.canvas-workspace.is-zooming .card-group-canvas-node,
+.canvas-workspace.is-zooming .card-group-canvas-node * {
     transition: none !important;
+    animation: none !important;
 }
 
 /* [Fix] 缩放时禁用书签树节点的过渡效果，防止阴影/hover闪烁 */
@@ -697,6 +700,11 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 /* 低细节模式下不显示“挖空矩形”（否则尺寸会与反向缩放后的文字不匹配） */
 .canvas-workspace.canvas-low-detail .canvas-edge-label-bg {
     display: none;
+}
+
+.canvas-workspace.canvas-low-detail .canvas-content,
+.canvas-workspace.canvas-low-detail .canvas-grid-layer {
+    will-change: auto;
 }
 
 [data-theme="dark"] .canvas-edge-label {
@@ -1343,7 +1351,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     display: none !important;
 }
 
-/* Hide resize handles on low-detail cards */
+/* Hide resize handles on low-detail cards; card groups keep frame controls usable. */
 .temp-canvas-node.low-detail-active > .resize-handle,
 .permanent-bookmark-section.low-detail-active > .resize-handle,
 .md-canvas-node.low-detail-active > .resize-handle {
@@ -1360,7 +1368,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 /* 低缩放：栏目/永久栏目“序号(#) + 标题”居中大字（反向缩放，保证在很小缩放下仍可读） */
 .temp-node-low-detail-overlay,
-.permanent-node-low-detail-overlay {
+.permanent-node-low-detail-overlay,
+.card-group-low-detail-overlay {
     position: absolute;
     inset: 0;
     display: none;
@@ -1375,9 +1384,11 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .temp-canvas-node.low-detail-active .temp-node-low-detail-overlay,
 .permanent-bookmark-section.low-detail-active .permanent-node-low-detail-overlay,
 .md-canvas-node.low-detail-active .temp-node-low-detail-overlay,
+.card-group-canvas-node.low-detail-active .card-group-low-detail-overlay,
 .canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-low-detail-overlay,
 .canvas-workspace.canvas-low-detail .permanent-bookmark-section .permanent-node-low-detail-overlay,
-.canvas-workspace.canvas-low-detail .md-canvas-node .temp-node-low-detail-overlay {
+.canvas-workspace.canvas-low-detail .md-canvas-node .temp-node-low-detail-overlay,
+.canvas-workspace.canvas-low-detail .card-group-canvas-node .card-group-low-detail-overlay {
     display: flex;
 }
 
@@ -1388,7 +1399,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 .temp-node-low-detail-content,
-.permanent-node-low-detail-content {
+.permanent-node-low-detail-content,
+.card-group-low-detail-content {
     text-align: center;
     width: 90%;
     /* 关键：内容会做 scale(反向缩放)，因此这里要按比例缩小“布局宽度”，避免视觉上溢出被裁剪 */
@@ -1409,7 +1421,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 [data-theme="dark"] .temp-node-low-detail-content,
-[data-theme="dark"] .permanent-node-low-detail-content {
+[data-theme="dark"] .permanent-node-low-detail-content,
+[data-theme="dark"] .card-group-low-detail-content {
     color: #e5e7eb;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
@@ -1437,6 +1450,43 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     white-space: normal;
     overflow-wrap: anywhere;
     word-break: break-word;
+}
+
+.card-group-low-detail-title {
+    font-size: var(--card-group-low-detail-title-size, 20px);
+    font-weight: 750;
+    line-height: 1.15;
+    opacity: var(--card-group-low-detail-title-opacity, 1);
+    width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.card-group-canvas-node.card-group-low-detail-nested-visible {
+    z-index: 245 !important;
+}
+
+.card-group-low-detail-child-hidden {
+    visibility: hidden !important;
+    pointer-events: none !important;
+    content-visibility: hidden !important;
+}
+
+.card-group-low-detail-child-hidden .temp-node-low-detail-overlay,
+.card-group-low-detail-child-hidden .permanent-node-low-detail-overlay,
+.card-group-low-detail-child-hidden .card-group-low-detail-overlay {
+    display: none !important;
+}
+
+.canvas-workspace.canvas-low-detail .temp-canvas-node,
+.canvas-workspace.canvas-low-detail .permanent-bookmark-section,
+.canvas-workspace.canvas-low-detail .md-canvas-node,
+.temp-canvas-node.low-detail-active,
+.permanent-bookmark-section.low-detail-active,
+.md-canvas-node.low-detail-active {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 300px;
 }
 
 /* ========== 丝滑缩放性能架构 (Core Performance) ========== */
@@ -2697,7 +2747,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 /* [Fix] 移除 .canvas-content 的隔离，因为它需要显示那些绝对定位且可能超出其初始宽高的子元素 */
 .permanent-bookmark-section,
 .temp-canvas-node,
-.md-canvas-node {
+.md-canvas-node,
+.card-group-canvas-node {
     /* 严格限制布局计算范围：内部改动不触发布局重排，且自带层叠上下文 */
     /* [Fix] 移除 paint 以避免裁剪溢出的子元素（如连接点、悬浮工具栏） */
     contain: layout style;
@@ -2859,6 +2910,14 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     border-radius: var(--card-group-corner-radius);
     /* 根节点不接收点击；只有左上角标题进入选中态。 */
     pointer-events: none;
+    content-visibility: visible !important;
+    overflow: visible;
+}
+
+.canvas-workspace.canvas-low-detail .card-group-canvas-node,
+.card-group-canvas-node.low-detail-active {
+    content-visibility: visible !important;
+    overflow: visible;
 }
 
 .card-group-canvas-node.dragging,

@@ -298,6 +298,7 @@ function __cardGroupStartRenamePill(pill, node) {
             root.dataset.title = finalLabel;
             root.setAttribute('aria-label', finalLabel);
             root.classList.remove('card-group-renaming');
+            try { __ensureCardGroupLowDetailOverlay(root, node); } catch (_) { }
         }
         if (toolbar) {
             toolbar.style.display = '';
@@ -363,6 +364,48 @@ function __cardGroupUpdateHeaderPillScaleCap(element) {
     }
 }
 
+function __cardGroupUpdateLowDetailTitleMetrics(element, node) {
+    if (!element) return;
+    const width = Math.max(160,
+        Number(node && node.width) ||
+        parseFloat(element.style.width) ||
+        element.offsetWidth ||
+        0);
+    const height = Math.max(120,
+        Number(node && node.height) ||
+        parseFloat(element.style.height) ||
+        element.offsetHeight ||
+        0);
+    const minSide = Math.min(width, height);
+    const raw = Math.min(width * 0.035, height * 0.10, minSide * 0.09);
+    const fontSize = Math.max(14, Math.min(30, raw));
+    try { element.style.setProperty('--card-group-low-detail-title-size', `${fontSize.toFixed(1)}px`); } catch (_) { }
+}
+
+function __ensureCardGroupLowDetailOverlay(element, node) {
+    if (!element || !node) return null;
+    let overlay = element.querySelector('.card-group-low-detail-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'card-group-low-detail-overlay';
+
+        const content = document.createElement('div');
+        content.className = 'card-group-low-detail-content';
+
+        const title = document.createElement('div');
+        title.className = 'card-group-low-detail-title';
+
+        content.appendChild(title);
+        overlay.appendChild(content);
+        element.appendChild(overlay);
+    }
+
+    const title = overlay.querySelector('.card-group-low-detail-title');
+    if (title) title.textContent = __getCardGroupNodeDisplayLabel(node);
+    __cardGroupUpdateLowDetailTitleMetrics(element, node);
+    return overlay;
+}
+
 function renderCardGroup(node) {
     if (!node) return null;
     if (node.subtype !== 'card-group') return null;
@@ -413,6 +456,8 @@ function renderCardGroup(node) {
     body.className = 'card-group-body';
     el.appendChild(body);
 
+    try { __ensureCardGroupLowDetailOverlay(el, node); } catch (_) { }
+
     const mask = document.createElement('div');
     mask.className = 'card-group-drag-mask';
     el.appendChild(mask);
@@ -457,6 +502,7 @@ function updateCardGroupLabel(node, nextLabel) {
         if (pill && pill.dataset.renaming !== 'true') {
             pill.textContent = label;
         }
+        try { __ensureCardGroupLowDetailOverlay(el, node); } catch (_) { }
         try { __cardGroupUpdateHeaderPillScaleCap(el); } catch (_) { }
         el.dataset.title = label;
         el.setAttribute('aria-label', label);
@@ -483,4 +529,5 @@ if (typeof window !== 'undefined') {
     window.__BCSCardGroup.startRename = startCardGroupRename;
     window.__BCSCardGroup.applyZIndex = __cardGroupApplyZIndex;
     window.__BCSCardGroup.fallbackLabel = __cardGroupFallbackLabel;
+    window.__BCSCardGroup.ensureLowDetailOverlay = __ensureCardGroupLowDetailOverlay;
 }
