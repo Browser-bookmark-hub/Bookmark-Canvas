@@ -1334,10 +1334,22 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 .temp-canvas-node.low-detail-active .canvas-node-anchor,
 .temp-canvas-node.low-detail-active .canvas-anchor-zone,
+.md-canvas-node.low-detail-active .canvas-node-anchor,
+.md-canvas-node.low-detail-active .canvas-anchor-zone,
+.permanent-bookmark-section.low-detail-active .canvas-node-anchor,
+.permanent-bookmark-section.low-detail-active .canvas-anchor-zone,
 .canvas-workspace.canvas-low-detail .canvas-node-anchor,
 .canvas-workspace.canvas-low-detail .canvas-anchor-zone {
     display: none !important;
 }
+
+/* Hide resize handles on low-detail cards */
+.temp-canvas-node.low-detail-active > .resize-handle,
+.permanent-bookmark-section.low-detail-active > .resize-handle,
+.md-canvas-node.low-detail-active > .resize-handle {
+    display: none !important;
+}
+
 
 .md-canvas-node.low-detail-active .md-canvas-editor,
 .md-canvas-node.low-detail-active .md-node-toolbar,

@@ -10109,6 +10109,10 @@ function runCanvasVirtualizationUpdate(options = {}) {
             try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
         }
     }
+
+    try {
+        __updateNonTempNodesViewportVisibility();
+    } catch (_) {}
 }
 
 function isCanvasBlockDormancyEnabled() {
@@ -10821,6 +10825,85 @@ function maybeStartCanvasLowDetailPrewarmJob() {
     }, 80);
 }
 
+function __getCanvasViewportBounds(workspace) {
+    if (!workspace) return null;
+    const rect = workspace.getBoundingClientRect();
+    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const panX = CanvasState.panOffsetX || 0;
+    const panY = CanvasState.panOffsetY || 0;
+
+    const marginPx = 250; 
+    const margin = marginPx / zoom;
+    return {
+        left: (0 - panX) / zoom - margin,
+        right: (rect.width - panX) / zoom + margin,
+        top: (0 - panY) / zoom - margin,
+        bottom: (rect.height - panY) / zoom + margin
+    };
+}
+
+function __isCardOutsideViewportBounds(el, bounds) {
+    if (!el || !bounds) return false;
+    const x = parseFloat(el.style.left) || 0;
+    const y = parseFloat(el.style.top) || 0;
+    const w = parseFloat(el.style.width) || el.offsetWidth || 0;
+    const h = parseFloat(el.style.height) || el.offsetHeight || 0;
+
+    return (
+        x + w < bounds.left ||
+        x > bounds.right ||
+        y + h < bounds.top ||
+        y > bounds.bottom
+    );
+}
+
+function __updateNonTempNodesViewportVisibility() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    const bounds = __getCanvasViewportBounds(workspace);
+    const isGlobalLowDetail = !!CanvasState.lowDetailActive;
+
+    // 1) 空白栏目 (mdNodes)
+    const mdNodes = Array.from(workspace.querySelectorAll('.md-canvas-node'));
+    mdNodes.forEach(el => {
+        let shouldActive = isGlobalLowDetail;
+        if (!shouldActive) {
+            shouldActive = __isCardOutsideViewportBounds(el, bounds);
+        }
+
+        const wasActive = el.classList.contains('low-detail-active');
+        if (shouldActive !== wasActive) {
+            el.classList.toggle('low-detail-active', shouldActive);
+        }
+        
+        // 进入低细节时，刷新文字叠层内容
+        if (shouldActive) {
+            try {
+                const nodeId = el.id;
+                const node = (typeof getMdNodeById === 'function') ? getMdNodeById(nodeId) : null;
+                if (node) {
+                    __ensureMdNodeLowDetailOverlay(el, node);
+                }
+            } catch (_) {}
+        }
+    });
+
+    // 2) 永久栏目 (permanentSections)
+    const permSections = Array.from(workspace.querySelectorAll('.permanent-bookmark-section'));
+    permSections.forEach(el => {
+        let shouldActive = isGlobalLowDetail;
+        if (!shouldActive) {
+            shouldActive = __isCardOutsideViewportBounds(el, bounds);
+        }
+
+        const wasActive = el.classList.contains('low-detail-active');
+        if (shouldActive !== wasActive) {
+            el.classList.toggle('low-detail-active', shouldActive);
+        }
+    });
+}
+
 let __lowDetailBatchTimer = null;
 function __applyLowDetailStateBatched(shouldActive) {
     if (__lowDetailBatchTimer) {
@@ -10838,6 +10921,7 @@ function __applyLowDetailStateBatched(shouldActive) {
         return;
     }
 
+    const bounds = __getCanvasViewportBounds(workspace);
     let index = 0;
     const batchSize = 10; // 每帧处理 10 个卡片，约 1.5ms 运行开销，兼顾流畅度与性能
 
@@ -10845,10 +10929,18 @@ function __applyLowDetailStateBatched(shouldActive) {
         const end = Math.min(index + batchSize, cards.length);
         for (let i = index; i < end; i++) {
             const card = cards[i];
-            card.classList.toggle('low-detail-active', shouldActive);
+            
+            let activeForCard = shouldActive;
+            if (!activeForCard) {
+                if (card.classList.contains('md-canvas-node') || card.classList.contains('permanent-bookmark-section')) {
+                    activeForCard = __isCardOutsideViewportBounds(card, bounds);
+                }
+            }
+
+            card.classList.toggle('low-detail-active', activeForCard);
 
             // 空白卡片进入低细节时，刷新文字叠层内容
-            if (shouldActive && card.classList.contains('md-canvas-node')) {
+            if (activeForCard && card.classList.contains('md-canvas-node')) {
                 try {
                     const nodeId = card.id;
                     const node = (typeof getMdNodeById === 'function') ? getMdNodeById(nodeId) : null;
@@ -10870,6 +10962,7 @@ function __applyLowDetailStateBatched(shouldActive) {
 
     __lowDetailBatchTimer = requestAnimationFrame(processBatch);
 }
+
 
 function updateCanvasLowDetailMode(force = false) {
     const workspace = document.getElementById('canvasWorkspace');
