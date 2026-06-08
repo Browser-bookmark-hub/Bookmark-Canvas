@@ -1992,9 +1992,9 @@ let winWheelZoomPumpCenterY = null;
 let winWheelZoomPumpOptions = null;
 
 const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 1.0;
-const WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND = 0.36;
+const WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND = 0.7;
 const WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER = 1.0;
-const WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST = 1.10;
+const WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST = 1.80;
 const WINDOWS_LINUX_WHEEL_PAN_INERTIA_ENABLED = false;
 const WINDOWS_LINUX_WHEEL_PAN_MICRO_SMOOTH_ENABLED = false;
 const WINDOWS_LINUX_WHEEL_PAN_EASE_MULTIPLIER = 1.0;
@@ -6923,12 +6923,6 @@ function setupCanvasZoomAndPan() {
                     centerY: __roundCanvasDebugNumber(mouseY, 2),
                     zoomOptions
                 }, { throttleKey: 'wheel-zoom-apply', throttleMs: 80 });
-            } else if (CANVAS_RUNTIME_WINDOWS_LIKE) {
-                // Windows/Linux 非离散滚轮也走直达路径，避免 rAF 节流导致磁矩不生效
-                __cancelCanvasSmoothWheelZoom();
-                __cancelCanvasTrackpadZoomInertia();
-                __cancelCanvasPendingZoomUpdate();
-                setCanvasZoom(newZoom, mouseX, mouseY, zoomOptions);
             } else if (__shouldSmoothCanvasWheelZoom(e, zoomInputMode)) {
                 __cancelCanvasTrackpadZoomInertia();
                 __queueCanvasSmoothWheelZoom(newZoom, mouseX, mouseY, zoomOptions);
@@ -6939,6 +6933,12 @@ function setupCanvasZoomAndPan() {
                     centerY: __roundCanvasDebugNumber(mouseY, 2),
                     zoomOptions
                 }, { throttleKey: 'wheel-zoom-apply', throttleMs: 80 });
+            } else if (CANVAS_RUNTIME_WINDOWS_LIKE) {
+                // Windows/Linux 非离散滚轮走直达路径，避免 rAF 节流影响响应。
+                __cancelCanvasSmoothWheelZoom();
+                __cancelCanvasTrackpadZoomInertia();
+                __cancelCanvasPendingZoomUpdate();
+                setCanvasZoom(newZoom, mouseX, mouseY, zoomOptions);
             } else {
                 __cancelCanvasSmoothWheelZoom();
                 __cancelCanvasTrackpadZoomInertia();
@@ -9266,12 +9266,13 @@ function __isLikelyCanvasDiscreteWheelEvent(event) {
     const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
     if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return false;
 
+    if (primaryDelta >= DISCRETE_WHEEL_EVENT_DELTA_MIN) return true;
+
     const hasFractional = (absDeltaX > 0 && !Number.isInteger(absDeltaX))
         || (absDeltaY > 0 && !Number.isInteger(absDeltaY));
     if (hasFractional) return false;
 
-    return primaryDelta >= DISCRETE_WHEEL_EVENT_DELTA_MIN
-        || (Number.isInteger(absDeltaX) && Number.isInteger(absDeltaY) && primaryDelta >= 8);
+    return (Number.isInteger(absDeltaX) && Number.isInteger(absDeltaY) && primaryDelta >= 8);
 }
 
 function __isCanvasDiscreteWheelEvent(event) {
@@ -13292,7 +13293,7 @@ function __runCanvasSmoothWheelZoomStep() {
     const fastStep = 0.34;
     const slowStep = 0.26;
     const baseStep = (Math.abs(diff) > 0.06 ? fastStep : slowStep) * wheelStepMultiplier;
-    const stepFactor = Math.max(0.16, Math.min(0.56, baseStep * responseFromCurve * responseFromMagnet));
+    const stepFactor = Math.max(0.16, Math.min(0.38, baseStep * responseFromCurve * responseFromMagnet));
     const nextZoom = currentZoom + diff * stepFactor;
     __logCanvasWinInput('wheel-zoom-smooth-step', {
         currentZoom: __roundCanvasDebugNumber(currentZoom, 5),
