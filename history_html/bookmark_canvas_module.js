@@ -37,6 +37,15 @@ const CANVAS_VIEW_PARTITIONS = ['page', 'sidepanel'];
 const CANVAS_STORAGE_SCHEMA_VERSION_KEY = 'canvas:storage:schema-version';
 const CANVAS_STORAGE_SCHEMA_VERSION = 4;
 const CANVAS_BROOM_SVG = '<svg class="canvas-broom-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3.55 21H6v-2q0-.425.288-.712T7 18t.713.288T8 19v2h3v-2q0-.425.288-.712T12 18t.713.288T13 19v2h3v-2q0-.425.288-.712T17 18t.713.288T18 19v2h2.45l-1-4H4.55zm16.9 2H3.55q-.975 0-1.575-.775t-.35-1.725L3 15v-2q0-.825.588-1.412T5 11h4V4q0-1.25.875-2.125T12 1t2.125.875T15 4v7h4q.825 0 1.413.588T21 13v2l1.375 5.5q.325.95-.288 1.725T20.45 23"/></svg>';
+const CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT = 6000;
+const CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT = 1500;
+
+function __createDefaultCanvasTotalAlwaysThresholds() {
+    return {
+        bookmarks: CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT,
+        folders: CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT
+    };
+}
 
 // 统一的首屏初始缩放：让 HTML 不需要再手动同步数值
 try {
@@ -119,10 +128,7 @@ const CanvasState = {
         checkIntervalMs: 150,               // 检测间隔（ms）：提升检测频率以保证实时性
         totalAlwaysEnabled: true,           // 总量触发（忽略可视统计）
         totalAlwaysActive: false,
-        totalAlwaysThresholds: {
-            bookmarks: 8000,
-            folders: 4000
-        },
+        totalAlwaysThresholds: __createDefaultCanvasTotalAlwaysThresholds(),
         // 阈值配置（可根据实际体验调整）
         thresholds: {
             visibleSectionCount: 12,         // 视界窗口可见栏目数量阈值（优先级更高）
@@ -9955,7 +9961,7 @@ function updateDataIntensiveMode(force = false, options = {}) {
 
     // [P4] 总量触发（忽略可视统计）：当画布总书签/总文件夹过大时，进入“始终低细节”。
     // 注意：永久树统计需要异步 getTree()，这里触发一次后台刷新（有缓存）。
-    const totalTh = dim.totalAlwaysThresholds || { bookmarks: 8000, folders: 4000 };
+    const totalTh = dim.totalAlwaysThresholds || __createDefaultCanvasTotalAlwaysThresholds();
     let isTotalAlways = false;
     if (dim.totalAlwaysEnabled) {
         try { __refreshCanvasPermanentBaseStatsForPerfTotals(); } catch (_) { }
@@ -10084,6 +10090,7 @@ let lastCanvasVirtualizationRunAt = 0;
 let canvasVirtualizationUnloadTimer = null;
 let canvasLowDetailDomPruneTimer = null;
 let canvasLowDetailDomRestoreTimer = null;
+let canvasLowDetailSafeZoneAuditTimer = null;
 let canvasZoomPerformanceModeRestoreTimer = null;
 const CANVAS_LOW_DETAIL_DOM_PRUNE_DEBOUNCE_MS = 80;
 const CANVAS_LOW_DETAIL_DOM_PRUNE_THROTTLE_MS = 360;
@@ -11806,13 +11813,15 @@ function __updateNonTempNodesViewportVisibility() {
 
     const bounds = __getCanvasViewportBounds(workspace);
     const isGlobalLowDetail = !!CanvasState.lowDetailActive;
+    const isSafeZoneActive = __isCanvasSafeZoneActive();
+    const allowViewportLowDetail = !!CanvasState.lowDetailEnabled && !isSafeZoneActive;
 
     // 1) 空白栏目 (mdNodes)
     const mdNodes = Array.from(workspace.querySelectorAll('.md-canvas-node'));
     mdNodes.forEach(el => {
         if (el.classList.contains('card-group-low-detail-child-hidden')) return;
         let shouldActive = isGlobalLowDetail;
-        if (!shouldActive) {
+        if (!shouldActive && allowViewportLowDetail) {
             shouldActive = __isCardOutsideViewportBounds(el, bounds);
         }
 
@@ -11838,7 +11847,7 @@ function __updateNonTempNodesViewportVisibility() {
     permSections.forEach(el => {
         if (el.classList.contains('card-group-low-detail-child-hidden')) return;
         let shouldActive = isGlobalLowDetail;
-        if (!shouldActive) {
+        if (!shouldActive && allowViewportLowDetail) {
             shouldActive = __isCardOutsideViewportBounds(el, bounds);
         }
 
@@ -11856,7 +11865,7 @@ function __updateNonTempNodesViewportVisibility() {
     const cardGroups = Array.from(workspace.querySelectorAll('.card-group-canvas-node'));
     cardGroups.forEach(el => {
         let shouldActive = isGlobalLowDetail;
-        if (!shouldActive) {
+        if (!shouldActive && allowViewportLowDetail) {
             shouldActive = __isCardOutsideViewportBounds(el, bounds);
         }
 
@@ -11923,6 +11932,106 @@ function __cancelCanvasLowDetailRipple(workspace = null, options = {}) {
     if (ws && ws.classList) {
         try { ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS); } catch (_) { }
     }
+}
+
+function __clearCanvasLowDetailFreezeInv() {
+    CanvasState.lowDetailFreezeInv = null;
+    try {
+        const container = getCachedContainer();
+        if (container) container.style.removeProperty('--canvas-low-detail-freeze-inv');
+    } catch (_) { }
+}
+
+function __isCanvasSafeZoneActive(displayZoom = null) {
+    if (!isCanvasSafeZoneEnabled()) return false;
+    const zoom = (typeof displayZoom === 'number' && isFinite(displayZoom))
+        ? displayZoom
+        : getCanvasDisplayZoom();
+    const threshold = getCanvasSafeZoneThreshold();
+    return Number.isFinite(zoom) && Number.isFinite(threshold) && threshold > 0 && zoom >= threshold;
+}
+
+function __hasCanvasGlobalLowDetailResidue(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws || !ws.classList) return !!CanvasState.lowDetailActive;
+    return !!(
+        CanvasState.lowDetailActive ||
+        CanvasState.lowDetailFreezeInv !== null ||
+        ws.classList.contains('canvas-low-detail') ||
+        ws.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS)
+    );
+}
+
+function __hasCanvasSafeZoneLowDetailResidue(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws) return !!CanvasState.lowDetailActive;
+    if (__hasCanvasGlobalLowDetailResidue(ws)) return true;
+    try {
+        return !!ws.querySelector('.low-detail-active, .card-group-low-detail-child-hidden, .card-group-low-detail-nested-visible, [data-low-detail-host-group-id]');
+    } catch (_) {
+        return false;
+    }
+}
+
+function __forceCanvasLowDetailVisualExit(workspace = null, options = {}) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    const opts = (options && typeof options === 'object') ? options : {};
+    const clearAllCards = opts.clearAllCards === true;
+
+    CanvasState.lowDetailActive = false;
+    CanvasState.suppressTreeLoadAnimationUntil = Date.now() + CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS;
+    try { __cancelCanvasLowDetailRipple(ws); } catch (_) { }
+    if (ws && ws.classList) {
+        try {
+            ws.classList.remove('canvas-low-detail');
+            ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
+        } catch (_) { }
+        if (clearAllCards) {
+            try { ws.querySelectorAll('.low-detail-active').forEach(el => el.classList.remove('low-detail-active')); } catch (_) { }
+            try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
+        }
+    }
+    __clearCanvasLowDetailFreezeInv();
+    try { cancelCanvasLowDetailPrewarmJob(); } catch (_) { }
+    try {
+        const edgeToolbar = document.getElementById('edge-toolbar');
+        if (edgeToolbar) edgeToolbar.style.display = '';
+    } catch (_) { }
+    if (opts.restoreDom !== false) {
+        try { __scheduleCanvasLowDetailDomRestore(0); } catch (_) { }
+    }
+    if (clearAllCards) {
+        try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: false }); } catch (_) { }
+    }
+    if (opts.scheduleVirtualization !== false) {
+        try { scheduleCanvasVirtualizationUpdate(0); } catch (_) { }
+    }
+    try { scheduleEdgesRender(0); } catch (_) { }
+}
+
+function __auditCanvasLowDetailSafeZoneExit(reason = 'safe-zone-audit') {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace || !__isCanvasSafeZoneActive()) return false;
+    if (!__hasCanvasSafeZoneLowDetailResidue(workspace)) return false;
+    __forceCanvasLowDetailVisualExit(workspace, {
+        clearAllCards: true,
+        restoreDom: true,
+        scheduleVirtualization: true,
+        reason
+    });
+    return true;
+}
+
+function __scheduleCanvasLowDetailSafeZoneAudit(reason = 'safe-zone-audit', delayMs = 90) {
+    if (canvasLowDetailSafeZoneAuditTimer) {
+        clearTimeout(canvasLowDetailSafeZoneAuditTimer);
+        canvasLowDetailSafeZoneAuditTimer = null;
+    }
+    if (!__isCanvasSafeZoneActive()) return;
+    canvasLowDetailSafeZoneAuditTimer = setTimeout(() => {
+        canvasLowDetailSafeZoneAuditTimer = null;
+        try { __auditCanvasLowDetailSafeZoneExit(reason); } catch (_) { }
+    }, Math.max(0, Number(delayMs) || 0));
 }
 
 function __getCanvasLowDetailRippleViewportRect(workspace) {
@@ -11994,6 +12103,8 @@ function __ensureLowDetailOverlayForCard(card) {
 
 function __shouldKeepCardLowDetailAfterGlobalExit(card, bounds) {
     if (!card || !card.classList) return false;
+    if (!CanvasState.lowDetailEnabled) return false;
+    if (__isCanvasSafeZoneActive()) return false;
     if (card.classList.contains('card-group-low-detail-child-hidden')) return true;
     if (card.classList.contains('dormant-content') || card.classList.contains('temp-tree-unloaded')) return true;
     if (card.classList.contains('permanent-tree-unloaded')) return true;
@@ -12091,6 +12202,7 @@ function __startCanvasLowDetailVisualRipple(shouldActive, workspace = null) {
                 entry.card.classList.add('low-detail-active');
             } catch (_) { }
         });
+        ws.classList.remove('canvas-low-detail');
     }
 
     const finish = () => {
@@ -12179,6 +12291,17 @@ function __applyLowDetailStateVisualSync(shouldActive) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
 
+    if (!shouldActive && __isCanvasSafeZoneActive()) {
+        __forceCanvasLowDetailVisualExit(workspace, {
+            clearAllCards: true,
+            restoreDom: true,
+            scheduleVirtualization: true,
+            reason: 'safe-zone-visual-sync'
+        });
+        __scheduleCanvasLowDetailSafeZoneAudit('safe-zone-visual-sync-post', 90);
+        return;
+    }
+
     if (__startCanvasLowDetailVisualRipple(shouldActive, workspace)) {
         return;
     }
@@ -12193,8 +12316,7 @@ function updateCanvasLowDetailMode(force = false) {
 
     const container = getCachedContainer();
     const clearFreezeInv = () => {
-        CanvasState.lowDetailFreezeInv = null;
-        try { if (container) container.style.removeProperty('--canvas-low-detail-freeze-inv'); } catch (_) { }
+        __clearCanvasLowDetailFreezeInv();
     };
     const ensureFreezeInv = () => {
         if (typeof CanvasState.lowDetailFreezeInv === 'number' && isFinite(CanvasState.lowDetailFreezeInv) && CanvasState.lowDetailFreezeInv > 0) {
@@ -12218,13 +12340,13 @@ function updateCanvasLowDetailMode(force = false) {
     };
 
     if (!CanvasState.lowDetailEnabled) {
-        if (force || CanvasState.lowDetailActive) {
-            CanvasState.lowDetailActive = false;
-            __exitCanvasLowDetailVisualState(workspace);
-            try { workspace.querySelectorAll('.low-detail-active').forEach(el => el.classList.remove('low-detail-active')); } catch (_) { }
-            clearFreezeInv();
-            cancelCanvasLowDetailPrewarmJob();
-            try { __scheduleCanvasLowDetailDomRestore(0); } catch (_) { }
+        if (force || __hasCanvasSafeZoneLowDetailResidue(workspace)) {
+            __forceCanvasLowDetailVisualExit(workspace, {
+                clearAllCards: true,
+                restoreDom: true,
+                scheduleVirtualization: true,
+                reason: 'low-detail-disabled'
+            });
         }
         return;
     }
@@ -12244,10 +12366,23 @@ function updateCanvasLowDetailMode(force = false) {
     // 稳定低细节交互帧只需要保持 transform/CSS 变量，不要重算数据量或组成员。
     const safeZoneEnabled = isCanvasSafeZoneEnabled();
     const safeZoneThreshold = getCanvasSafeZoneThreshold();
+    const safeZoneActive = safeZoneEnabled && displayZoom >= safeZoneThreshold;
+    if (safeZoneActive) {
+        try { updateDataIntensiveMode(force, { useCached: !force && isInteracting }); } catch (_) { }
+        if (force || __hasCanvasSafeZoneLowDetailResidue(workspace)) {
+            __forceCanvasLowDetailVisualExit(workspace, {
+                clearAllCards: true,
+                restoreDom: true,
+                scheduleVirtualization: true,
+                reason: 'safe-zone'
+            });
+        }
+        __scheduleCanvasLowDetailSafeZoneAudit('safe-zone-post-update', force ? 0 : 90);
+        return;
+    }
     if (!force &&
         wasActive &&
         isInteracting &&
-        !(safeZoneEnabled && displayZoom >= safeZoneThreshold) &&
         enterThreshold > 0 &&
         displayZoom <= exitThreshold) {
         ensureFreezeInv();
@@ -12266,10 +12401,7 @@ function updateCanvasLowDetailMode(force = false) {
     // [Fix Priority] 优先级逻辑重构
     let shouldActive;
 
-    // [Highest Priority] 安全区 - 当缩放 >= 阈值时，绝对不进入低细节模式
-    if (safeZoneEnabled && displayZoom >= safeZoneThreshold) {
-        shouldActive = false;
-    } else if (isTotalAlwaysActive) {
+    if (isTotalAlwaysActive) {
         const zoomSaysLowDetail = wasActive
             ? ((enterThreshold > 0) ? (displayZoom <= exitThreshold) : false)
             : ((enterThreshold > 0) ? (displayZoom <= enterThreshold) : false);
@@ -12291,9 +12423,7 @@ function updateCanvasLowDetailMode(force = false) {
 
     // [Fix] 交互门控逻辑
     if (!force && isInteracting) {
-        if (safeZoneEnabled && displayZoom >= safeZoneThreshold && !shouldActive && wasActive) {
-            // Allow Exit
-        } else if (enterThreshold > 0 && displayZoom > exitThreshold && !shouldActive && wasActive) {
+        if (enterThreshold > 0 && displayZoom > exitThreshold && !shouldActive && wasActive) {
             // Allow Exit: the configured low-detail threshold is the visible boundary.
         } else if (shouldActive && !wasActive) {
             // Allow Entry
@@ -12314,8 +12444,13 @@ function updateCanvasLowDetailMode(force = false) {
             }
             try { __scheduleCanvasLowDetailDomPrune(0); } catch (_) { }
             try { maybeStartCanvasLowDetailPrewarmJob(); } catch (_) { }
-        } else if (force && workspace.classList.contains('canvas-low-detail')) {
-            __exitCanvasLowDetailVisualState(workspace);
+        } else if (!shouldActive && (force || __hasCanvasGlobalLowDetailResidue(workspace))) {
+            __forceCanvasLowDetailVisualExit(workspace, {
+                clearAllCards: false,
+                restoreDom: true,
+                scheduleVirtualization: force,
+                reason: force ? 'force-state-sync' : 'visual-residue-sync'
+            });
             try { __scheduleCanvasLowDetailDomRestore(); } catch (_) { }
         }
         return;
@@ -38446,8 +38581,12 @@ function loadCanvasDataIntensiveSettings() {
         if (savedTotalTh) {
             const parsed = JSON.parse(savedTotalTh);
             if (parsed && typeof parsed === 'object') {
-                if (Number.isFinite(parsed.bookmarks) && parsed.bookmarks > 0) CanvasState.dataIntensiveMode.totalAlwaysThresholds.bookmarks = parsed.bookmarks;
-                if (Number.isFinite(parsed.folders) && parsed.folders > 0) CanvasState.dataIntensiveMode.totalAlwaysThresholds.folders = parsed.folders;
+                if (Number.isFinite(parsed.bookmarks) && parsed.bookmarks > 0) {
+                    CanvasState.dataIntensiveMode.totalAlwaysThresholds.bookmarks = parsed.bookmarks;
+                }
+                if (Number.isFinite(parsed.folders) && parsed.folders > 0) {
+                    CanvasState.dataIntensiveMode.totalAlwaysThresholds.folders = parsed.folders;
+                }
             }
         }
 
@@ -38516,11 +38655,11 @@ function openCanvasPerfSettingsModal() {
     const toggleTotalAlways = document.getElementById('perfToggleTotalAlways');
     if (toggleTotalAlways) toggleTotalAlways.checked = !!CanvasState.dataIntensiveMode.totalAlwaysEnabled;
 
-    const totalTh = CanvasState.dataIntensiveMode.totalAlwaysThresholds || { bookmarks: 8000, folders: 4000 };
+    const totalTh = CanvasState.dataIntensiveMode.totalAlwaysThresholds || __createDefaultCanvasTotalAlwaysThresholds();
     const totalBm = document.getElementById('perfInputTotalAlwaysBm');
     const totalFo = document.getElementById('perfInputTotalAlwaysFolder');
-    if (totalBm) totalBm.value = Number.isFinite(totalTh.bookmarks) ? totalTh.bookmarks : 8000;
-    if (totalFo) totalFo.value = Number.isFinite(totalTh.folders) ? totalTh.folders : 4000;
+    if (totalBm) totalBm.value = Number.isFinite(totalTh.bookmarks) ? totalTh.bookmarks : CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT;
+    if (totalFo) totalFo.value = Number.isFinite(totalTh.folders) ? totalTh.folders : CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT;
 
     const toggleLow = document.getElementById('perfToggleLowDetail');
     if (toggleLow) toggleLow.checked = !!CanvasState.lowDetailEnabled;
@@ -38680,7 +38819,7 @@ function updateCanvasPerfSettingsUI() {
     setVisibleColor('perfStatAvg', (isActive && stats.visibleFolderCount >= th.sectionBookmarkAvg) ? 'var(--warning)' : null);
 
     // P4 totals feedback: when totals reach thresholds, highlight the "/ total" part in warning color
-    const totalTh = (dim && dim.totalAlwaysThresholds) ? dim.totalAlwaysThresholds : { bookmarks: 8000, folders: 4000 };
+    const totalTh = (dim && dim.totalAlwaysThresholds) ? dim.totalAlwaysThresholds : __createDefaultCanvasTotalAlwaysThresholds();
     const totalAlwaysEnabled = !!(dim && dim.totalAlwaysEnabled);
     const overTotalBm = totalAlwaysEnabled && Number.isFinite(totalTh.bookmarks) && totalTh.bookmarks > 0 && (totals.totalBookmarkCount || 0) >= totalTh.bookmarks;
     const overTotalFo = totalAlwaysEnabled && Number.isFinite(totalTh.folders) && totalTh.folders > 0 && (totals.totalFolderCount || 0) >= totalTh.folders;
@@ -38774,7 +38913,7 @@ function saveCanvasPerfSettings(options = {}) {
     const totalBm = parseInt((document.getElementById('perfInputTotalAlwaysBm') || {}).value, 10);
     const totalFo = parseInt((document.getElementById('perfInputTotalAlwaysFolder') || {}).value, 10);
     if (!CanvasState.dataIntensiveMode.totalAlwaysThresholds) {
-        CanvasState.dataIntensiveMode.totalAlwaysThresholds = { bookmarks: 8000, folders: 4000 };
+        CanvasState.dataIntensiveMode.totalAlwaysThresholds = __createDefaultCanvasTotalAlwaysThresholds();
     }
     if (Number.isFinite(totalBm) && totalBm > 0) CanvasState.dataIntensiveMode.totalAlwaysThresholds.bookmarks = totalBm;
     if (Number.isFinite(totalFo) && totalFo > 0) CanvasState.dataIntensiveMode.totalAlwaysThresholds.folders = totalFo;
@@ -39368,6 +39507,10 @@ function restoreDefaultTriggerSettings() {
     document.getElementById('perfInputVisBm').value = 150;
     // 默认可视文件夹阈值 100
     document.getElementById('perfInputAvg').value = 100;
+    const totalBm = document.getElementById('perfInputTotalAlwaysBm');
+    const totalFo = document.getElementById('perfInputTotalAlwaysFolder');
+    if (totalBm) totalBm.value = CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT;
+    if (totalFo) totalFo.value = CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT;
 }
 
 function restoreDefaultZoomSettings() {
