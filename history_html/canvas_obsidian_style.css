@@ -1455,6 +1455,39 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     display: flex;
 }
 
+.canvas-workspace.canvas-low-detail .temp-canvas-node,
+.canvas-workspace.canvas-low-detail .permanent-bookmark-section,
+.canvas-workspace.canvas-low-detail .md-canvas-node,
+.canvas-workspace.canvas-low-detail .card-group-canvas-node,
+.temp-canvas-node.low-detail-active,
+.temp-canvas-node.dormant-content,
+.temp-canvas-node.temp-tree-unloaded,
+.permanent-bookmark-section.low-detail-active,
+.permanent-bookmark-section.permanent-tree-unloaded,
+.md-canvas-node.low-detail-active,
+.card-group-canvas-node.low-detail-active {
+    cursor: grab;
+}
+
+.canvas-workspace.is-dragging .temp-canvas-node.dragging,
+.canvas-workspace.is-dragging .permanent-bookmark-section.dragging,
+.canvas-workspace.is-dragging .md-canvas-node.dragging,
+.canvas-workspace.is-dragging .card-group-canvas-node.dragging,
+.canvas-workspace.is-dragging .card-group-canvas-node.card-group-dragging {
+    cursor: grabbing;
+}
+
+.card-group-canvas-node.low-detail-active .card-group-low-detail-overlay,
+.canvas-workspace.canvas-low-detail .card-group-canvas-node .card-group-low-detail-overlay {
+    pointer-events: auto;
+    cursor: grab;
+}
+
+.canvas-workspace.is-dragging .card-group-canvas-node.dragging .card-group-low-detail-overlay,
+.canvas-workspace.is-dragging .card-group-canvas-node.card-group-dragging .card-group-low-detail-overlay {
+    cursor: grabbing;
+}
+
 .temp-node-low-detail-content,
 .permanent-node-low-detail-content,
 .card-group-low-detail-content {

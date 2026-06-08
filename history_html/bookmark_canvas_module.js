@@ -1558,6 +1558,125 @@ function __handleCardGroupBlankAreaCtrlContextMenu(event) {
     event.stopPropagation();
 }
 
+const CANVAS_LOW_DETAIL_SURFACE_SELECTOR = '.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .card-group-canvas-node';
+
+function __getEventTargetElement(event) {
+    const target = event && event.target ? event.target : null;
+    if (!target) return null;
+    if (target.nodeType === Node.ELEMENT_NODE) return target;
+    return target.parentElement || null;
+}
+
+function __isCanvasPointInsideWorkspace(event, workspace) {
+    if (!event || !workspace || !workspace.getBoundingClientRect) return false;
+    const x = Number(event.clientX);
+    const y = Number(event.clientY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const rect = workspace.getBoundingClientRect();
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+function __forceOffCanvasZoomPerformanceForPointer(event) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace || !workspace.classList || !workspace.classList.contains('canvas-zoom-performance')) return;
+    if (!__isCanvasPointInsideWorkspace(event, workspace)) return;
+    try { updateCanvasZoomPerformanceMode({ forceOff: true }); } catch (_) { }
+}
+
+function __isLowDetailSurfaceActive(element) {
+    if (!element || !element.classList) return false;
+    if (element.classList.contains('card-group-low-detail-child-hidden')) return false;
+    if (__isCanvasLowDetailModeActive()) return true;
+    return !!(
+        element.classList.contains('low-detail-active') ||
+        element.classList.contains('dormant-content') ||
+        element.classList.contains('temp-tree-unloaded') ||
+        element.classList.contains('permanent-tree-unloaded')
+    );
+}
+
+function __resolveLowDetailSurfaceHostFromEvent(event) {
+    __forceOffCanvasZoomPerformanceForPointer(event);
+
+    const target = __getEventTargetElement(event);
+    let host = target && target.closest ? target.closest(CANVAS_LOW_DETAIL_SURFACE_SELECTOR) : null;
+    if (host && __isLowDetailSurfaceActive(host)) return host;
+
+    if (!document || typeof document.elementsFromPoint !== 'function') return null;
+    const x = Number(event && event.clientX);
+    const y = Number(event && event.clientY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+    const elements = document.elementsFromPoint(x, y) || [];
+    for (const element of elements) {
+        if (!element || !element.closest) continue;
+        host = element.closest(CANVAS_LOW_DETAIL_SURFACE_SELECTOR);
+        if (host && __isLowDetailSurfaceActive(host)) return host;
+    }
+    return null;
+}
+
+function __isLowDetailSurfaceBlockedTarget(target, host) {
+    if (!target || !target.closest) return false;
+    if (target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return true;
+    if (target.closest('.context-menu, .modal, .popover')) return true;
+    if (target.closest('.temp-node-action-btn, .permanent-section-actions, .permanent-section-tip-close, .permanent-section-tip-container')) return true;
+    if (target.closest('.md-node-toolbar, .card-group-toolbar, .temp-color-popover, .card-group-color-popover, .canvas-layout-zoom-controls')) return true;
+    if (target.closest('.resize-handle, .canvas-node-anchor, .canvas-anchor-zone')) return true;
+
+    const nestedSurface = target.closest(CANVAS_LOW_DETAIL_SURFACE_SELECTOR);
+    return !!(nestedSurface && host && nestedSurface !== host);
+}
+
+function __handleLowDetailSurfaceMouseDown(event) {
+    if (!event || event.defaultPrevented) return;
+    if (event.button !== 0 && event.button !== 2) return;
+    if (CanvasState.isSpacePressed) return;
+
+    const host = __resolveLowDetailSurfaceHostFromEvent(event);
+    if (!host) return;
+
+    const target = __getEventTargetElement(event);
+    if (__isLowDetailSurfaceBlockedTarget(target, host)) return;
+
+    const isCtrlSurfaceAction = isSectionCtrlModeEvent(event);
+    if (!isCtrlSurfaceAction && event.button !== 0) return;
+
+    if (isCtrlSurfaceAction) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        __markSectionCtrlSelectionForInteractionEnd();
+
+        const resizeState = CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize;
+        if (resizeState && resizeState.active && resizeState.waitForSecondRightClick && event.button === 2) {
+            endCtrlResize(false);
+            __clearSectionCtrlSelectionOnInteractionEnd();
+            return;
+        }
+
+        if (event.button === 0) {
+            startSectionDrag(host, event);
+        } else if (event.button === 2) {
+            startSectionResize(host, event);
+        }
+        return;
+    }
+
+    if (startSectionDrag(host, event, { requireCtrl: false, ctrlOverlay: false })) {
+        event.stopImmediatePropagation();
+    }
+}
+
+function __handleLowDetailSurfaceContextMenu(event) {
+    if (!event || event.defaultPrevented || !isSectionCtrlModeEvent(event)) return;
+    const host = __resolveLowDetailSurfaceHostFromEvent(event);
+    if (!host) return;
+    const target = __getEventTargetElement(event);
+    if (__isLowDetailSurfaceBlockedTarget(target, host)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+}
+
 function setSectionCtrlModeActive(active) {
     const wasActive = !!(CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.active);
     if (wasActive === active) return;
@@ -1568,8 +1687,9 @@ function setSectionCtrlModeActive(active) {
     refreshSectionCtrlOverlays();
 }
 
-function startSectionDrag(element, event) {
-    if (!isSectionCtrlModeEvent(event)) return false;
+function startSectionDrag(element, event, options = {}) {
+    const opts = (options && typeof options === 'object') ? options : {};
+    if (opts.requireCtrl !== false && !isSectionCtrlModeEvent(event)) return false;
     if (!element || event.button !== 0) return false;
     if (CanvasState.sectionCtrlMode.resize && CanvasState.sectionCtrlMode.resize.active) return false;
 
@@ -1586,7 +1706,7 @@ function startSectionDrag(element, event) {
     CanvasState.dragState.lastClientX = event.clientX;
     CanvasState.dragState.lastClientY = event.clientY;
     CanvasState.dragState.hasMoved = false;
-    CanvasState.dragState.meta = { ctrlOverlay: !!CanvasState.sectionCtrlMode.active };
+    CanvasState.dragState.meta = { ctrlOverlay: opts.ctrlOverlay === undefined ? !!CanvasState.sectionCtrlMode.active : !!opts.ctrlOverlay };
     CanvasState.dragState.wheelScrollEnabled = true;
 
     element.classList.add('dragging');
@@ -10074,7 +10194,10 @@ function updateCanvasZoomPerformanceMode(options = {}) {
     canvasZoomPerformanceModeRestoreTimer = setTimeout(() => {
         canvasZoomPerformanceModeRestoreTimer = null;
         const ws = document.getElementById('canvasWorkspace');
-        if (__isCanvasHotInteractionActive(ws) && shouldUseCanvasZoomPerformanceMode()) return;
+        if (__isCanvasHotInteractionActive(ws) && shouldUseCanvasZoomPerformanceMode()) {
+            updateCanvasZoomPerformanceMode({ deferOff: true });
+            return;
+        }
         setCanvasZoomPerformanceModeActive(false);
     }, delay);
 }
@@ -12401,6 +12524,7 @@ function runInertiaScroll() {
         }
         scheduleScrollbarUpdate();
         savePanOffsetThrottled();
+        try { updateCanvasZoomPerformanceMode({ deferOff: false }); } catch (_) { }
         return;
     }
 
@@ -12422,6 +12546,7 @@ function cancelInertiaScroll() {
         __logCanvasWinInput('wheel-pan-inertia-cancel', {
             reason: 'cancelInertiaScroll'
         }, { force: true, throttleMs: 0 });
+        try { updateCanvasZoomPerformanceMode({ deferOff: false }); } catch (_) { }
     }
 }
 
@@ -32204,6 +32329,8 @@ function setupCanvasEventListeners() {
     });
     window.addEventListener('blur', () => setSectionCtrlModeActive(false));
 
+    document.addEventListener('mousedown', __handleLowDetailSurfaceMouseDown, true);
+    document.addEventListener('contextmenu', __handleLowDetailSurfaceContextMenu, true);
     document.addEventListener('mousedown', __handleCardGroupBlankAreaCtrlMouseDown, true);
     document.addEventListener('contextmenu', __handleCardGroupBlankAreaCtrlContextMenu, true);
 
