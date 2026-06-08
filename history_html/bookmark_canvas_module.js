@@ -2032,7 +2032,11 @@ const CANVAS_RUNTIME_PLATFORM = (() => {
     }
 })();
 const CANVAS_RUNTIME_WINDOWS_LIKE = !!(CANVAS_RUNTIME_PLATFORM.isWindows || CANVAS_RUNTIME_PLATFORM.isLinux);
-const DEFAULT_ZOOM_MAGNET_POINT_SPEED = CANVAS_RUNTIME_WINDOWS_LIKE ? 0.35 : 0.10;
+const DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR = DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR;
+const DEFAULT_ZOOM_RATE_1_DISPLAY_FACTOR = CANVAS_RUNTIME_PLATFORM.isWindows ? 0.80 : DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR;
+const DEFAULT_ZOOM_RATE_2_DISPLAY_FACTOR = CANVAS_RUNTIME_PLATFORM.isWindows ? 0.60 : DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR;
+const DEFAULT_ZOOM_MAGNET_POINT_1_SPEED = CANVAS_RUNTIME_PLATFORM.isWindows ? 0.80 : 0.10;
+const DEFAULT_ZOOM_MAGNET_POINT_2_SPEED = CANVAS_RUNTIME_PLATFORM.isWindows ? 0.60 : 0.50;
 let canvasWinInputDebugSeq = 0;
 const canvasWinInputDebugLastTs = new Map();
 
@@ -2134,22 +2138,22 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     tempColorUnlockSync: false, // 解锁后立即继承父色
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
     zoomCurve: {
-        p0: { x: 0, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) },
-        p1: { x: 0.25, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) },
-        p2: { x: 0.67, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) },
-        p3: { x: 1, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM_CURVE_MAX_FACTOR) }
+        p0: { x: 0, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR) },
+        p1: { x: 0.25, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_RATE_1_DISPLAY_FACTOR) },
+        p2: { x: 0.67, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_RATE_2_DISPLAY_FACTOR) },
+        p3: { x: 1, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR) }
     },
     trackpadZoomRate: TRACKPAD_ZOOM_RATE_DEFAULT,
     magnetPoints: {
-        m1: { x: 0.67, y: DEFAULT_ZOOM_MAGNET_POINT_SPEED },
-        m2: { x: 0.2777777778, y: DEFAULT_ZOOM_MAGNET_POINT_SPEED }
+        m1: { x: 0.67, y: DEFAULT_ZOOM_MAGNET_POINT_1_SPEED },
+        m2: { x: 0.4444444444, y: DEFAULT_ZOOM_MAGNET_POINT_2_SPEED }
     }
 };
 
 const DEFAULT_PERF_BASELINE = {
     safeZone: 70,
-    exitLowDetail: 30,
-    enterLowDetail: 35
+    exitLowDetail: 45,
+    enterLowDetail: 50
 };
 
 const CANVAS_LOW_DETAIL_PREWARM_GAP = 0.05;
@@ -2157,7 +2161,7 @@ const CANVAS_LOW_DETAIL_SWITCH_HYSTERESIS = 0.02;
 
 function __deriveCanvasLowDetailPrewarmThreshold(enterThreshold) {
     const enter = Number(enterThreshold);
-    const safeEnter = Number.isFinite(enter) && enter > 0 ? enter : 0.35;
+    const safeEnter = Number.isFinite(enter) && enter > 0 ? enter : 0.50;
     return Math.max(0.01, Math.min(1, safeEnter - CANVAS_LOW_DETAIL_PREWARM_GAP));
 }
 
@@ -9095,7 +9099,7 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
 
     // 两个“磁矩”位置：
     // - Safe Zone 阈值（默认 70%）
-    // - low-detail visual switch threshold（默认 35%）
+    // - low-detail visual switch threshold（默认 50%）
     const magnets = [];
 
     try {
@@ -9166,6 +9170,7 @@ function getCanvasZoomCurveSettings() {
 
 function getCanvasZoomMagnetPoints() {
     const settings = getCanvasOtherSettings();
+    if (settings && settings.useDefaultZoomCurve !== false) return __getDefaultMagnetPointsFromPerf();
     if (settings && settings.magnetPoints) return settings.magnetPoints;
     return __getDefaultMagnetPointsFromPerf();
 }
@@ -9516,7 +9521,7 @@ function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
 }
 
 function getCanvasLowDetailDisplayZoomThreshold() {
-    // 动态阈值：从 localStorage 读取，默认 35% 启用低细节模式
+    // 动态阈值：从 localStorage 读取，默认 50% 启用低细节模式
     try {
         const saved = localStorage.getItem('canvasZoomThresholds');
         if (saved) {
@@ -9526,7 +9531,7 @@ function getCanvasLowDetailDisplayZoomThreshold() {
             }
         }
     } catch (_) { }
-    return 0.35;
+    return 0.50;
 }
 
 function getCanvasLowDetailPrewarmDisplayZoomThreshold() {
@@ -11150,7 +11155,7 @@ function prewarmCanvasLowDetailVisibleTrees(options = {}) {
     const scale = CanvasState.zoom || 1;
     let warmed = 0;
 
-    // 以“当前视口中心”为基准，仅预热中心附近少量栏目，避免 35% 视界一屏全部一起加载
+    // 以“当前视口中心”为基准，仅预热中心附近少量栏目，避免 50% 视界一屏全部一起加载
     const centerScreenX = workspaceRect.left + (workspaceRect.width / 2);
     const centerScreenY = workspaceRect.top + (workspaceRect.height / 2);
     const candidates = [];
@@ -13359,7 +13364,7 @@ function __onCanvasZoomEndCleanup() {
     // 强制刷新低细节模式（可能退出），确保逻辑发生在 is-zooming 解除之后
     try { updateCanvasLowDetailMode(true); } catch (_) { }
     try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
-    // 低细节区间（30%~35%）：只预热“视口中心附近少量栏目”，避免一屏全加载
+    // 低细节区间（45%~50%）：只预热“视口中心附近少量栏目”，避免一屏全加载
     if (!isCanvasVirtualizationEnabled()) {
         try { prewarmCanvasLowDetailVisibleTrees(); } catch (_) { }
     }
@@ -38151,6 +38156,11 @@ function createCanvasOtherSettingsModal() {
 
     const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
     const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+    const defaultM1Speed = Math.round(DEFAULT_ZOOM_MAGNET_POINT_1_SPEED * 100);
+    const defaultM2Speed = Math.round(DEFAULT_ZOOM_MAGNET_POINT_2_SPEED * 100);
+    const defaultMagnetHint = isEn
+        ? `Default restore: M1 (X=${DEFAULT_PERF_BASELINE.safeZone}%, Y=${defaultM1Speed}%), M2 (X=${DEFAULT_PERF_BASELINE.enterLowDetail}%, Y=${defaultM2Speed}%).`
+        : `默认还原：磁1（X=${DEFAULT_PERF_BASELINE.safeZone}%，Y=${defaultM1Speed}%），磁2（X=${DEFAULT_PERF_BASELINE.enterLowDetail}%，Y=${defaultM2Speed}%）。`;
 
     modal.innerHTML = `
         <div class="modal-content other-settings-modal">
@@ -38189,7 +38199,7 @@ function createCanvasOtherSettingsModal() {
                         </div>
                     </div>
                     <div class="other-default-hint-row">
-                        <div class="other-default-hint">${isEn ? 'Default restore: M1 (X=70%, Y=10%), M2 (X=35%, Y=10%).' : '默认还原：磁1（X=70%，Y=10%），磁2（X=35%，Y=10%）。'}</div>
+                        <div class="other-default-hint">${defaultMagnetHint}</div>
                         <button class="perf-source-btn other-default-jump-btn" id="otherDefaultJumpPerfBtn" title="${isEn ? 'Go to Performance' : '跳转到性能'}" aria-label="${isEn ? 'Go to Performance' : '跳转到性能'}">
                             <svg class="jump-icon" viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M14 3h7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -39067,7 +39077,7 @@ function createCanvasPerfSettingsModal() {
                         <label>${isEn ? 'Magnet 2: Low Detail Switch Point' : '磁矩2：低细节切换点'}</label>
                         <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
                             <div style="display: inline-flex; align-items: baseline; gap: 6px;">
-                                <span id="perfMagnetMidValue" style="font-weight: 700;">35%</span>
+                                <span id="perfMagnetMidValue" style="font-weight: 700;">50%</span>
                                 <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? '(follows P3 switch)' : '（跟随 P3 切换阈值）'}</span>
                             </div>
                             <label class="toggle-switch" title="${isEn ? 'Enable this magnet' : '启用该磁矩'}">
@@ -39114,8 +39124,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfZoomHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Low Detail Boundary</b>: Low-detail visual mode only enters at or below this user threshold (default 35%). A short internal buffer below it is handled automatically, and heavy DOM is pruned only after staying in low detail for about 12s, so boundary zooming avoids repeatedly rebuilding content.'
-            : '<b>低细节边界</b>：只有缩放小于等于这个用户阈值时才进入低细节视觉（默认35%）。阈值下方的短缓冲区由系统内部处理；进入低细节后约 12 秒仍未退出，才真正卸载重 DOM，避免边界附近缩放时反复重建内容。'}
+            ? '<b>Low Detail Boundary</b>: Low-detail visual mode only enters at or below this user threshold (default 50%). A short internal buffer below it is handled automatically, and heavy DOM is pruned only after staying in low detail for about 12s, so boundary zooming avoids repeatedly rebuilding content.'
+            : '<b>低细节边界</b>：只有缩放小于等于这个用户阈值时才进入低细节视觉（默认50%）。阈值下方的短缓冲区由系统内部处理；进入低细节后约 12 秒仍未退出，才真正卸载重 DOM，避免边界附近缩放时反复重建内容。'}
             </div>
         </div>
 
@@ -39360,7 +39370,7 @@ function restoreDefaultTriggerSettings() {
 }
 
 function restoreDefaultZoomSettings() {
-    // 默认缩放阈值：内部缓冲由切换阈值自动派生；低细节切换 35%
+    // 默认缩放阈值：内部缓冲由切换阈值自动派生；低细节切换 50%
     const enterInput = document.getElementById('perfInputEnterLowDetail');
     const exitInput = document.getElementById('perfInputExitLowDetail');
     if (enterInput) enterInput.value = __formatPercentInputValue(DEFAULT_PERF_BASELINE.enterLowDetail);
@@ -39368,7 +39378,7 @@ function restoreDefaultZoomSettings() {
 }
 
 function restoreDefaultZoomMagnetSettings() {
-    // 默认：整体开启；70% 磁矩开启；低细节切换点磁矩 35% 默认开启
+    // 默认：整体开启；70% 磁矩开启；低细节切换点磁矩 50% 默认开启
     const t = document.getElementById('perfToggleZoomMagnet');
     if (t) t.checked = true;
     const s = document.getElementById('perfToggleZoomMagnetSafe');
