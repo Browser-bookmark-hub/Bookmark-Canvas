@@ -53,6 +53,9 @@
 
   const baseImage = renderer.image.bind(renderer);
   renderer.image = function safeImage(href, title, text) {
+    if (href && String(href).startsWith('data:image/')) {
+      return baseImage(href, title, text);
+    }
     const safeHref = sanitizeHref(href);
     if (!safeHref) return text || '';
     return baseImage(safeHref, title, text);
