@@ -2290,6 +2290,7 @@ async function setSearchMode(modeKey, options = {}) {
     if (modeKey === 'bookmark' && typeof window !== 'undefined' && window.TagSystem && window.TagSystem.ensurePermTagsLoaded) {
         try {
             window.TagSystem.ensurePermTagsLoaded().then(() => {
+                invalidateCanvasTagSearchCaches();
                 if (searchUiState && searchUiState.domainIndexCache) {
                     searchUiState.domainIndexCache = null;
                 }
@@ -2862,20 +2863,7 @@ function getCanvasSearchSignature() {
     const activeCanvasState = getActiveCanvasState();
     if (!activeCanvasState) return '';
 
-    const tempStateTimestamp = activeCanvasState.tempStateTimestamp || 0;
-    const treeVersion = (typeof lastTreeSnapshotVersion !== 'undefined' && lastTreeSnapshotVersion !== null)
-        ? String(lastTreeSnapshotVersion)
-        : '';
-    const treeFingerprint = (typeof lastTreeFingerprint !== 'undefined' && lastTreeFingerprint)
-        ? String(lastTreeFingerprint)
-        : '';
-
-    let permanentCopiesLen = 0;
-    try {
-        permanentCopiesLen = getPermanentCopyShellsForSearch().length;
-    } catch (_) { }
-
-    return `v2:${tempStateTimestamp}:${treeVersion}:${treeFingerprint}:${permanentCopiesLen}`;
+    return `v3:${stringifyCanvasSearchSignaturePayload(buildCanvasSearchSignaturePayload(activeCanvasState))}`;
 }
 
 /**
@@ -2890,6 +2878,7 @@ function resetCanvasSearchDb(reason = '') {
         itemById: new Map()
     };
     canvasSearchLoadedModes = new Set();
+    invalidateCanvasTagSearchCaches();
     if (searchUiState && searchUiState.domainIndexCache) {
         searchUiState.domainIndexCache = null;
     }
@@ -2931,12 +2920,18 @@ function updateCanvasSearchBookmarkTags(targets) {
             if (tags.length) item.tags = tags;
             else if (Object.prototype.hasOwnProperty.call(item, 'tags')) delete item.tags;
             item.__tags = tags.map((tag) => `${tag.color} ${tag.text}`).join(' ').toLowerCase();
+            if (canvasBookmarkTagSearchStateCache && typeof canvasBookmarkTagSearchStateCache.delete === 'function') {
+                canvasBookmarkTagSearchStateCache.delete(item);
+            }
             changed = true;
         });
     });
 
-    if (changed && searchUiState && searchUiState.domainIndexCache) {
-        searchUiState.domainIndexCache = null;
+    if (changed) {
+        invalidateCanvasTagSearchCaches();
+        if (searchUiState && searchUiState.domainIndexCache) {
+            searchUiState.domainIndexCache = null;
+        }
     }
 
     return changed;
@@ -3030,6 +3025,391 @@ const inferTempSectionTime = (section, title) => {
     return 0;
 };
 
+function normalizeCanvasSearchNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function normalizeCanvasSearchString(value) {
+    return value === undefined || value === null ? '' : String(value);
+}
+
+function stringifyCanvasSearchSignaturePayload(payload) {
+    try {
+        return JSON.stringify(payload || {});
+    } catch (_) {
+        return '{}';
+    }
+}
+
+function parseCanvasSearchSignaturePayload(signature) {
+    const raw = normalizeCanvasSearchString(signature);
+    if (!raw.startsWith('v3:')) return null;
+    try {
+        const parsed = JSON.parse(raw.slice(3));
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function collectCanvasSearchContentSignature(activeCanvasState) {
+    const canvasItems = [];
+    if (!activeCanvasState || typeof activeCanvasState !== 'object') return canvasItems;
+
+    for (const node of (Array.isArray(activeCanvasState.mdNodes) ? activeCanvasState.mdNodes : [])) {
+        if (!node || !node.id) continue;
+        if (node.subtype === 'card-group') {
+            const label = normalizeCanvasSearchString(node.label).trim();
+            if (!label) continue;
+            canvasItems.push({
+                id: normalizeCanvasSearchString(node.id),
+                kind: 'group',
+                label,
+                color: normalizeCanvasSearchString(getCanvasSearchNodeColor(node, '#475569'))
+            });
+            continue;
+        }
+        canvasItems.push({
+            id: normalizeCanvasSearchString(node.id),
+            kind: 'md-node',
+            subtype: normalizeCanvasSearchString(node.subtype),
+            title: normalizeCanvasSearchString(node.title),
+            text: normalizeCanvasSearchString(node.text),
+            color: normalizeCanvasSearchString(getCanvasSearchNodeColor(node, '#2563eb'))
+        });
+    }
+
+    for (const edge of (Array.isArray(activeCanvasState.edges) ? activeCanvasState.edges : [])) {
+        if (!edge || !edge.id || !edge.label) continue;
+        canvasItems.push({
+            id: normalizeCanvasSearchString(edge.id),
+            kind: 'edge',
+            label: normalizeCanvasSearchString(edge.label),
+            color: normalizeCanvasSearchString(edge.colorHex || canvasSearchPresetToHex(edge.color) || '#999'),
+            direction: normalizeCanvasSearchString(edge.direction || 'none')
+        });
+    }
+
+    return canvasItems;
+}
+
+function collectSectionSearchContentSignature(activeCanvasState) {
+    const sectionItems = [];
+    if (!activeCanvasState || typeof activeCanvasState !== 'object') return sectionItems;
+
+    for (const section of (Array.isArray(activeCanvasState.tempSections) ? activeCanvasState.tempSections : [])) {
+        if (!section || !section.id) continue;
+        const title = section.title || section.name || '';
+        const label = getTempSectionSearchLabel(section);
+        sectionItems.push({
+            id: normalizeCanvasSearchString(section.id),
+            title: normalizeCanvasSearchString(title),
+            label,
+            sequenceNumber: normalizeCanvasSearchString(section.sequenceNumber || null),
+            description: normalizeCanvasSearchString((section.description || '').replace(/<[^>]+>/g, ' ').trim()),
+            time: normalizeCanvasSearchString(inferTempSectionTime(section, title) || ''),
+            originDisplayIndex: normalizeCanvasSearchString(getTempSectionOriginDisplayIndex(section, label) || ''),
+            color: normalizeCanvasSearchString(getTempSectionSearchColor(section)),
+            items: collectTempSectionSearchItemSnapshots(section)
+        });
+    }
+
+    return sectionItems;
+}
+
+function collectPermanentSearchContentSignature() {
+    const treeVersion = (typeof lastTreeSnapshotVersion !== 'undefined' && lastTreeSnapshotVersion !== null)
+        ? String(lastTreeSnapshotVersion)
+        : '';
+    const treeFingerprint = (typeof lastTreeFingerprint !== 'undefined' && lastTreeFingerprint)
+        ? String(lastTreeFingerprint)
+        : '';
+
+    let mainDescription = '';
+    try {
+        mainDescription = getPermanentDescriptionTextForSearch(null);
+    } catch (_) { }
+
+    const copies = [];
+    try {
+        const liveCopies = getPermanentCopyShellsForSearch();
+        liveCopies.forEach((copy, idx) => {
+            if (!copy || !copy.copyId) return;
+            const copyId = normalizeCanvasSearchString(copy.copyId);
+            copies.push({
+                copyId,
+                displayIndex: normalizeCanvasSearchString(getPermanentCopySearchDisplayIndex(copy, idx)),
+                description: normalizeCanvasSearchString(getPermanentDescriptionTextForSearch(copyId))
+            });
+        });
+    } catch (_) { }
+
+    return {
+        treeVersion,
+        treeFingerprint,
+        mainDescription: normalizeCanvasSearchString(mainDescription),
+        copies
+    };
+}
+
+function buildCanvasSearchSignaturePayload(activeCanvasState) {
+    return {
+        canvas: collectCanvasSearchContentSignature(activeCanvasState),
+        sections: collectSectionSearchContentSignature(activeCanvasState),
+        permanent: collectPermanentSearchContentSignature()
+    };
+}
+
+function getCanvasSearchSignatureParts(signature) {
+    const raw = normalizeCanvasSearchString(signature);
+    const firstColon = raw.indexOf(':');
+    if (firstColon < 0) {
+        return {
+            raw,
+            version: raw,
+            tempStateTimestamp: '',
+            treeSnapshotToken: '',
+            permanentCopiesLen: ''
+        };
+    }
+
+    const version = raw.slice(0, firstColon);
+    const rest = raw.slice(firstColon + 1);
+    const secondColon = rest.indexOf(':');
+    if (secondColon < 0) {
+        return {
+            raw,
+            version,
+            tempStateTimestamp: rest,
+            treeSnapshotToken: '',
+            permanentCopiesLen: ''
+        };
+    }
+
+    const tempStateTimestamp = rest.slice(0, secondColon);
+    const afterTemp = rest.slice(secondColon + 1);
+    const lastColon = afterTemp.lastIndexOf(':');
+
+    return {
+        raw,
+        version,
+        tempStateTimestamp,
+        treeSnapshotToken: lastColon >= 0 ? afterTemp.slice(0, lastColon) : afterTemp,
+        permanentCopiesLen: lastColon >= 0 ? afterTemp.slice(lastColon + 1) : ''
+    };
+}
+
+function addDirtyKeysFromSearchSignatureDiff(detected, cachedSignature, liveSignature) {
+    if (!(detected instanceof Set)) return;
+    const cachedPayload = parseCanvasSearchSignaturePayload(cachedSignature);
+    const livePayload = parseCanvasSearchSignaturePayload(liveSignature);
+    if (cachedPayload && livePayload) {
+        if (stringifyCanvasSearchSignaturePayload(cachedPayload.canvas) !== stringifyCanvasSearchSignaturePayload(livePayload.canvas)) {
+            detected.add('bcs:canvas');
+        }
+
+        const cachedSections = new Map((Array.isArray(cachedPayload.sections) ? cachedPayload.sections : [])
+            .filter(sec => sec && sec.id)
+            .map(sec => [String(sec.id), sec]));
+        const liveSections = new Map((Array.isArray(livePayload.sections) ? livePayload.sections : [])
+            .filter(sec => sec && sec.id)
+            .map(sec => [String(sec.id), sec]));
+        for (const [sectionId, liveSection] of liveSections.entries()) {
+            if (stringifyCanvasSearchSignaturePayload(cachedSections.get(sectionId)) !== stringifyCanvasSearchSignaturePayload(liveSection)) {
+                detected.add(`bcs:section:${sectionId}`);
+            }
+        }
+        for (const sectionId of cachedSections.keys()) {
+            if (!liveSections.has(sectionId)) {
+                detected.add(`bcs:section:${sectionId}`);
+            }
+        }
+
+        const cachedPermanent = cachedPayload.permanent || {};
+        const livePermanent = livePayload.permanent || {};
+        if (normalizeCanvasSearchString(cachedPermanent.treeVersion) !== normalizeCanvasSearchString(livePermanent.treeVersion) ||
+            normalizeCanvasSearchString(cachedPermanent.treeFingerprint) !== normalizeCanvasSearchString(livePermanent.treeFingerprint)) {
+            detected.add('cachedCurrentTree');
+        }
+        if (normalizeCanvasSearchString(cachedPermanent.mainDescription) !== normalizeCanvasSearchString(livePermanent.mainDescription)) {
+            detected.add('bcs:perm:main');
+        }
+
+        const cachedCopies = new Map((Array.isArray(cachedPermanent.copies) ? cachedPermanent.copies : [])
+            .filter(copy => copy && copy.copyId)
+            .map(copy => [String(copy.copyId), copy]));
+        const liveCopies = new Map((Array.isArray(livePermanent.copies) ? livePermanent.copies : [])
+            .filter(copy => copy && copy.copyId)
+            .map(copy => [String(copy.copyId), copy]));
+        for (const [copyId, liveCopy] of liveCopies.entries()) {
+            if (stringifyCanvasSearchSignaturePayload(cachedCopies.get(copyId)) !== stringifyCanvasSearchSignaturePayload(liveCopy)) {
+                detected.add(`bcs:perm:copy-${copyId}`);
+            }
+        }
+        for (const copyId of cachedCopies.keys()) {
+            if (!liveCopies.has(copyId)) {
+                detected.add(`bcs:perm:copy-${copyId}`);
+            }
+        }
+        return;
+    }
+
+    const cached = getCanvasSearchSignatureParts(cachedSignature);
+    const live = getCanvasSearchSignatureParts(liveSignature);
+    if (!cached.raw || !live.raw || cached.raw === live.raw) return;
+
+    if (cached.version !== live.version) {
+        detected.add('bcs:canvas');
+        detected.add('bcs:perm:main');
+        return;
+    }
+
+    if (cached.treeSnapshotToken !== live.treeSnapshotToken) {
+        detected.add('cachedCurrentTree');
+    }
+    if (cached.permanentCopiesLen !== live.permanentCopiesLen) {
+        detected.add('bcs:perm:main');
+    }
+}
+
+function getCanvasSearchBoxMetrics(source, fallbackColor = '') {
+    const safe = source && typeof source === 'object' ? source : {};
+    return {
+        x: normalizeCanvasSearchNumber(safe.x, 0),
+        y: normalizeCanvasSearchNumber(safe.y, 0),
+        w: normalizeCanvasSearchNumber(safe.width !== undefined ? safe.width : safe.w, 300),
+        h: normalizeCanvasSearchNumber(safe.height !== undefined ? safe.height : safe.h, 300),
+        color: normalizeCanvasSearchString(safe.color || fallbackColor)
+    };
+}
+
+function getCanvasSearchNodeColor(node, fallbackColor) {
+    if (node && node.colorHex) return node.colorHex;
+    if (node && node.color) return canvasSearchPresetToHex(node.color) || fallbackColor;
+    return fallbackColor;
+}
+
+function getTempSectionSearchColor(section) {
+    if (section && section.color) {
+        const c = String(section.color).trim();
+        return c.startsWith('#') ? c : `#${c}`;
+    }
+    return '#2563eb';
+}
+
+function getTempSectionSearchLabel(section) {
+    if (!section || typeof section !== 'object') return '';
+    let label = (typeof section.label === 'string') ? section.label.trim() : '';
+    const sequenceNumber = section.sequenceNumber || null;
+    if (!label && sequenceNumber) {
+        const alpha = toAlpha(sequenceNumber);
+        if (alpha) label = `${alpha}-1`;
+    }
+    return label;
+}
+
+function getTempSectionOriginDisplayIndex(section, label = '') {
+    if (!section || typeof section !== 'object') return null;
+    let originDisplayIndex = null;
+    if (section.originPermanent && typeof section.originPermanent === 'object') {
+        if (typeof section.originPermanent.displayIndex === 'number') {
+            originDisplayIndex = section.originPermanent.displayIndex;
+        } else if (section.originPermanent.copyId === null) {
+            originDisplayIndex = 1;
+        }
+    }
+    const safeLabel = normalizeCanvasSearchString(label).trim();
+    if (safeLabel && /^[A-Z]-/i.test(safeLabel)) {
+        const inferredIndex = safeLabel.charAt(0).toUpperCase().charCodeAt(0) - 64;
+        if (inferredIndex >= 1) originDisplayIndex = inferredIndex;
+    }
+    return originDisplayIndex;
+}
+
+function buildCanvasSearchDateFields(timestamp) {
+    const ms = Number(timestamp);
+    if (!Number.isFinite(ms) || ms <= 0) return {};
+    const d = new Date(ms);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const mm = String(month).padStart(2, '0');
+    const dd = String(day).padStart(2, '0');
+    return {
+        __dateYear: year,
+        __dateMonth: month,
+        __dateDay: day,
+        __dateWeekday: d.getDay(),
+        __dateKey: `${year}-${mm}-${dd}`,
+        __dateMonthKey: `${year}-${mm}`,
+        __dateMmdd: `${mm}-${dd}`
+    };
+}
+
+function getInlineTagSearchSignature(tags) {
+    if (!Array.isArray(tags)) return '';
+    return tags
+        .filter(t => t && t.color)
+        .map(t => `${String(t.color)}:${String(t.text || '')}`)
+        .join('|');
+}
+
+function collectTempSectionSearchItemSnapshots(section) {
+    const snapshots = [];
+    if (!section || !Array.isArray(section.items)) return snapshots;
+
+    const sectionTitle = typeof section.title === 'string' ? section.title : (typeof section.name === 'string' ? section.name : '');
+    const sectionLabel = getTempSectionSearchLabel(section);
+    const sectionPrefix = [sectionLabel, sectionTitle].filter(Boolean).join(' ');
+    const pathStack = sectionPrefix ? [sectionPrefix] : [];
+    const stack = [];
+
+    for (let i = section.items.length - 1; i >= 0; i--) {
+        stack.push({ item: section.items[i], parentId: '', stage: 0 });
+    }
+
+    while (stack.length) {
+        const frame = stack.pop();
+        const it = frame ? frame.item : null;
+        if (!it || !it.id) continue;
+
+        const itemUrl = typeof it.url === 'string' ? it.url : '';
+        const itemNodeType = it.type === 'folder' ? 'folder' : 'bookmark';
+        const rawTitle = typeof it.title === 'string' ? it.title : '';
+        const itemTitle = (itemNodeType === 'bookmark') ? (rawTitle || itemUrl || '') : rawTitle;
+
+        if (frame.stage === 1) {
+            if (itemTitle) pathStack.pop();
+            continue;
+        }
+
+        if (itemTitle) pathStack.push(itemTitle);
+
+        if (itemUrl || itemTitle) {
+            snapshots.push({
+                id: String(it.id),
+                nodeType: itemNodeType,
+                title: itemTitle,
+                url: itemUrl,
+                parentId: frame.parentId ? String(frame.parentId) : '',
+                namedPath: pathStack.length ? pathStack.join(' > ') : '',
+                tags: getInlineTagSearchSignature(it.tags)
+            });
+        }
+
+        stack.push({ item: it, parentId: frame.parentId, stage: 1 });
+
+        if (Array.isArray(it.children) && it.children.length) {
+            for (let j = it.children.length - 1; j >= 0; j--) {
+                stack.push({ item: it.children[j], parentId: it.id, stage: 0 });
+            }
+        }
+    }
+
+    return snapshots;
+}
+
 function checkCanvasSearchMultiColumnMode() {
     let maxIndexFound = 1;
     try {
@@ -3064,36 +3444,12 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
     const title = section.title || section.name || '';
     const description = (section.description || '').replace(/<[^>]+>/g, ' ').trim();
     const time = inferTempSectionTime(section, title);
-    let label = (typeof section.label === 'string') ? section.label.trim() : '';
+    const label = getTempSectionSearchLabel(section);
     const sequenceNumber = section.sequenceNumber || null;
-
-    if (!label && sequenceNumber) {
-        const alpha = toAlpha(sequenceNumber);
-        if (alpha) label = `${alpha}-1`;
-    }
-
-    let originDisplayIndex = null;
-    if (section.originPermanent && typeof section.originPermanent === 'object') {
-        if (typeof section.originPermanent.displayIndex === 'number') {
-            originDisplayIndex = section.originPermanent.displayIndex;
-        } else if (section.originPermanent.copyId === null) {
-            originDisplayIndex = 1;
-        }
-    }
-
-    if (label && /^[A-Z]-/i.test(label)) {
-        const letter = label.charAt(0).toUpperCase();
-        const inferredIndex = letter.charCodeAt(0) - 64;
-        if (inferredIndex >= 1) {
-            originDisplayIndex = inferredIndex;
-        }
-    }
-
-    let color = '#2563eb';
-    if (section.color) {
-        const c = String(section.color).trim();
-        color = c.startsWith('#') ? c : `#${c}`;
-    }
+    const originDisplayIndex = getTempSectionOriginDisplayIndex(section, label);
+    const color = getTempSectionSearchColor(section);
+    const metrics = getCanvasSearchBoxMetrics(section, color);
+    const dateFields = buildCanvasSearchDateFields(time);
 
     const item = {
         id: section.id,
@@ -3104,13 +3460,16 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
         description: description,
         time: time,
         originDisplayIndex: originDisplayIndex,
-        x: section.x || 0,
-        y: section.y || 0,
+        x: metrics.x,
+        y: metrics.y,
+        w: metrics.w,
+        h: metrics.h,
         color: color,
         __title: title.toLowerCase(),
         __label: label.toLowerCase(),
         __description: description.toLowerCase(),
         __timeSearchable: time ? buildTimeSearchableString(time) : '',
+        ...dateFields,
         isMultiColumnMode: isMultiColumnMode
     };
 
@@ -3130,10 +3489,10 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
 
     if (coords) {
         coords[section.id] = {
-            x: section.x || 0,
-            y: section.y || 0,
-            w: section.width || section.w || 300,
-            h: section.height || section.h || 300,
+            x: metrics.x,
+            y: metrics.y,
+            w: metrics.w,
+            h: metrics.h,
             color: color,
             type: 'structure-item',
             copyId: null,
@@ -3144,11 +3503,7 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
     // 递归解析栏目内部的所有书签
     if (Array.isArray(section.items)) {
         const sectionTitle = typeof section.title === 'string' ? section.title : (typeof section.name === 'string' ? section.name : '');
-        let sectionLabel = (typeof section.label === 'string') ? section.label.trim() : '';
-        if (!sectionLabel && sequenceNumber) {
-            const alpha = toAlpha(sequenceNumber);
-            if (alpha) sectionLabel = `${alpha}-1`;
-        }
+        const sectionLabel = getTempSectionSearchLabel(section);
 
         const sectionPrefix = [sectionLabel, sectionTitle].filter(Boolean).join(' ');
         const pathStack = sectionPrefix ? [sectionPrefix] : [];
@@ -3229,12 +3584,8 @@ function parseCanvasLayoutSlice(db, coords) {
         const text = node.text || '';
         const subtype = node.subtype || '';
 
-        let color = '#2563eb';
-        if (node.colorHex) {
-            color = node.colorHex;
-        } else if (node.color) {
-            color = canvasSearchPresetToHex(node.color) || color;
-        }
+        const color = getCanvasSearchNodeColor(node, '#2563eb');
+        const metrics = getCanvasSearchBoxMetrics(node, color);
 
         const item = {
             id: node.id,
@@ -3242,8 +3593,10 @@ function parseCanvasLayoutSlice(db, coords) {
             subtype: subtype,
             title: title,
             text: text,
-            x: node.x || 0,
-            y: node.y || 0,
+            x: metrics.x,
+            y: metrics.y,
+            w: metrics.w,
+            h: metrics.h,
             color: color,
             __title: title.toLowerCase(),
             __text: text.substring(0, 3000).toLowerCase()
@@ -3254,10 +3607,10 @@ function parseCanvasLayoutSlice(db, coords) {
 
         if (coords) {
             coords[node.id] = {
-                x: node.x || 0,
-                y: node.y || 0,
-                w: node.width || node.w || 300,
-                h: node.height || node.h || 300,
+                x: metrics.x,
+                y: metrics.y,
+                w: metrics.w,
+                h: metrics.h,
                 color: color,
                 type: 'description-item',
                 copyId: null,
@@ -3294,9 +3647,8 @@ function parseCanvasLayoutSlice(db, coords) {
         const labelText = String(labelRaw).trim();
         if (!labelText) continue;
 
-        let color = '#475569';
-        if (node.colorHex) color = node.colorHex;
-        else if (node.color) color = canvasSearchPresetToHex(node.color) || color;
+        const color = getCanvasSearchNodeColor(node, '#475569');
+        const metrics = getCanvasSearchBoxMetrics(node, color);
 
         const groupItem = {
             id: node.id,
@@ -3304,8 +3656,10 @@ function parseCanvasLayoutSlice(db, coords) {
             subtype: node.subtype,
             title: labelText,
             label: labelText,
-            x: node.x || 0,
-            y: node.y || 0,
+            x: metrics.x,
+            y: metrics.y,
+            w: metrics.w,
+            h: metrics.h,
             color: color,
             __title: labelText.toLowerCase(),
             __label: labelText.toLowerCase()
@@ -3315,10 +3669,10 @@ function parseCanvasLayoutSlice(db, coords) {
 
         if (coords) {
             coords[node.id] = {
-                x: node.x || 0,
-                y: node.y || 0,
-                w: node.width || node.w || 300,
-                h: node.height || node.h || 300,
+                x: metrics.x,
+                y: metrics.y,
+                w: metrics.w,
+                h: metrics.h,
                 color: color,
                 type: 'structure-item',
                 copyId: null,
@@ -3504,6 +3858,8 @@ function mergeCoordinatesIntoItemById(db, coords) {
                 type: coord.type,
                 x: coord.x,
                 y: coord.y,
+                w: coord.w,
+                h: coord.h,
                 color: coord.color,
                 copyId: coord.copyId,
                 sectionId: coord.sectionId
@@ -3512,6 +3868,8 @@ function mergeCoordinatesIntoItemById(db, coords) {
             const item = db.itemById.get(id);
             item.x = coord.x;
             item.y = coord.y;
+            if (typeof coord.w === 'number') item.w = coord.w;
+            if (typeof coord.h === 'number') item.h = coord.h;
             if (coord.color) item.color = coord.color;
             if (coord.copyId) item.copyId = coord.copyId;
             if (coord.sectionId) item.sectionId = coord.sectionId;
@@ -3523,6 +3881,9 @@ const SearchIndexManager = {
     isDirty: false,
     needsFullUpdate: false,
     dirtyKeys: new Set(),
+    dirtyKeyVersions: {},
+    dirtyRevision: 0,
+    fullDirtyRevision: 0,
     isIndexing: false,
     hasPendingSyncWriteBack: false,
     listenersBound: false,
@@ -3530,10 +3891,14 @@ const SearchIndexManager = {
     checkTimer: null,
     recordActivity: null,
 
-    // Snapshot keys being processed during async indexing to prevent write race conditions
+    // Snapshot the exact dirty revisions being processed so newer dirty marks survive cleanup.
     processingKeys: null,
+    processingKeyVersions: null,
     processingFullUpdate: false,
+    processingFullRevision: 0,
     processingBaseSignature: null,
+    dirtyStateWriteChain: Promise.resolve(),
+    dirtyStateNotifyChain: Promise.resolve(),
 
     bindActivityListeners() {
         if (this.listenersBound) return;
@@ -3601,159 +3966,249 @@ const SearchIndexManager = {
         console.log('[SearchIndexManager] Dynamic activity listeners: stopped.');
     },
 
-    async markDirty(options = {}) {
-        this.isDirty = true;
-        if (options.full) {
-            this.needsFullUpdate = true;
-        }
-        if (options.keys) {
-            options.keys.forEach(k => this.dirtyKeys.add(k));
-        }
-
-        this.debounceStorageWrite();
+    normalizeDirtyKeys(keys) {
+        return Array.from(new Set((Array.isArray(keys) ? keys : [])
+            .map(key => String(key || '').trim())
+            .filter(Boolean)));
     },
 
-    debounceStorageWriteTimer: null,
-    debounceStorageWrite() {
-        if (this.debounceStorageWriteTimer) clearTimeout(this.debounceStorageWriteTimer);
-        this.debounceStorageWriteTimer = setTimeout(async () => {
-            this.debounceStorageWriteTimer = null;
-            if (chrome && chrome.storage && chrome.storage.local) {
-                try {
-                    await chrome.storage.local.set({
-                        canvas_search_index_dirty: this.isDirty,
-                        canvas_search_index_needs_full: this.needsFullUpdate,
-                        canvas_search_index_dirty_keys: Array.from(this.dirtyKeys)
-                    });
-                } catch (_) {}
+    getDirtyStateApi() {
+        return (typeof window !== 'undefined' &&
+            window.SearchIndexDb &&
+            typeof window.SearchIndexDb.getDirtyState === 'function')
+            ? window.SearchIndexDb
+            : null;
+    },
+
+    getLocalDirtyState() {
+        return {
+            dirty: this.isDirty || this.needsFullUpdate || this.dirtyKeys.size > 0,
+            needsFullUpdate: this.needsFullUpdate,
+            dirtyKeys: Array.from(this.dirtyKeys),
+            dirtyKeyVersions: Object.assign({}, this.dirtyKeyVersions),
+            revision: this.dirtyRevision,
+            fullRevision: this.fullDirtyRevision
+        };
+    },
+
+    applyDirtyState(state) {
+        const safeState = state && typeof state === 'object' ? state : {};
+        const sourceKeys = this.normalizeDirtyKeys([
+            ...(Array.isArray(safeState.dirtyKeys) ? safeState.dirtyKeys : []),
+            ...Object.keys(safeState.dirtyKeyVersions || {})
+        ]);
+        const versions = {};
+        const rawVersions = safeState.dirtyKeyVersions && typeof safeState.dirtyKeyVersions === 'object'
+            ? safeState.dirtyKeyVersions
+            : {};
+        const fallbackRevision = Number.isFinite(Number(safeState.revision)) ? Number(safeState.revision) : 0;
+
+        sourceKeys.forEach(key => {
+            const keyRevision = Number(rawVersions[key]);
+            versions[key] = Number.isFinite(keyRevision) && keyRevision > 0
+                ? Math.floor(keyRevision)
+                : fallbackRevision;
+        });
+
+        const maxKeyRevision = sourceKeys.reduce((max, key) => {
+            return Math.max(max, Number(versions[key]) || 0);
+        }, 0);
+        const fullRevision = Number(safeState.fullRevision);
+        const normalizedFullRevision = Number.isFinite(fullRevision) && fullRevision > 0 ? Math.floor(fullRevision) : 0;
+        const normalizedRevision = Math.max(fallbackRevision, maxKeyRevision, normalizedFullRevision);
+
+        this.dirtyKeys = new Set(sourceKeys);
+        this.dirtyKeyVersions = versions;
+        this.needsFullUpdate = safeState.needsFullUpdate === true;
+        this.isDirty = safeState.dirty === true || this.needsFullUpdate || this.dirtyKeys.size > 0;
+        this.dirtyRevision = normalizedRevision;
+        this.fullDirtyRevision = normalizedFullRevision;
+    },
+
+    notifyDirtyStateChanged(state = null) {
+        if (!(typeof chrome !== 'undefined' && chrome && chrome.storage && chrome.storage.local)) {
+            return Promise.resolve();
+        }
+        const dirtyState = state || this.getLocalDirtyState();
+        const payload = {
+            canvas_search_index_dirty: dirtyState.dirty === true,
+            canvas_search_index_needs_full: dirtyState.needsFullUpdate === true,
+            canvas_search_index_dirty_revision: Number(dirtyState.revision) || 0,
+            canvas_search_index_dirty_keys: []
+        };
+        this.dirtyStateNotifyChain = this.dirtyStateNotifyChain.then(
+            () => chrome.storage.local.set(payload),
+            () => chrome.storage.local.set(payload)
+        );
+        return this.dirtyStateNotifyChain.catch(err => {
+            console.error('[SearchIndexManager] Failed to publish dirty state notification:', err);
+        });
+    },
+
+    async markDirty(options = {}) {
+        const keys = this.normalizeDirtyKeys(options.keys);
+        const localRevision = this.dirtyRevision + 1;
+        this.isDirty = true;
+        this.dirtyRevision = localRevision;
+        if (options.full) {
+            this.needsFullUpdate = true;
+            this.fullDirtyRevision = localRevision;
+        }
+        keys.forEach(k => {
+            this.dirtyKeys.add(k);
+            this.dirtyKeyVersions[k] = localRevision;
+        });
+
+        const run = async () => {
+            const api = this.getDirtyStateApi();
+            if (api && typeof api.markDirtyState === 'function') {
+                const state = await api.markDirtyState({
+                    full: options.full === true,
+                    keys
+                });
+                this.applyDirtyState(state);
+                await this.notifyDirtyStateChanged(state);
+            } else {
+                await this.notifyDirtyStateChanged(this.getLocalDirtyState());
             }
-        }, 1000);
+        };
+
+        this.dirtyStateWriteChain = this.dirtyStateWriteChain.then(run, run).catch(async (err) => {
+            console.error('[SearchIndexManager] Failed to persist dirty state in IndexedDB:', err);
+            await this.notifyDirtyStateChanged(this.getLocalDirtyState());
+        });
+        await this.dirtyStateWriteChain;
+    },
+
+    async refreshDirtyStateFromStorage() {
+        await this.dirtyStateWriteChain.catch(() => {});
+        const api = this.getDirtyStateApi();
+        if (api && typeof api.getDirtyState === 'function') {
+            const state = await api.getDirtyState();
+            this.applyDirtyState(state);
+            return state;
+        }
+
+        if (!(typeof chrome !== 'undefined' && chrome && chrome.storage && chrome.storage.local)) {
+            return this.getLocalDirtyState();
+        }
+
+        const data = await chrome.storage.local.get([
+            'canvas_search_index_dirty',
+            'canvas_search_index_needs_full'
+        ]);
+        this.applyDirtyState({
+            dirty: data['canvas_search_index_dirty'] === true,
+            needsFullUpdate: data['canvas_search_index_needs_full'] === true,
+            dirtyKeys: [],
+            dirtyKeyVersions: {},
+            revision: this.dirtyRevision,
+            fullRevision: this.fullDirtyRevision
+        });
+        return this.getLocalDirtyState();
     },
 
     snapshotDirtyState() {
         this.processingKeys = new Set(this.dirtyKeys);
+        this.processingKeyVersions = {};
+        this.processingKeys.forEach(key => {
+            const revision = Number(this.dirtyKeyVersions[key]) || this.dirtyRevision;
+            if (revision > 0) {
+                this.processingKeyVersions[key] = revision;
+            }
+        });
         this.processingFullUpdate = this.needsFullUpdate;
+        this.processingFullRevision = this.needsFullUpdate
+            ? (Number(this.fullDirtyRevision) || Number(this.dirtyRevision) || 0)
+            : 0;
         this.processingBaseSignature = null;
     },
 
-    async clearProcessedDirtyState(extraPayload = null) {
-        // If there is an extraPayload, we perform the storage write FIRST.
-        // If it throws, execution stops and memory dirty state remains dirty.
-        if (chrome && chrome.storage && chrome.storage.local) {
-            const payload = {
-                canvas_search_index_dirty: this.dirtyKeys.size === 0 ? false : this.isDirty,
-                canvas_search_index_needs_full: this.dirtyKeys.size === 0 ? false : this.needsFullUpdate,
-                canvas_search_index_dirty_keys: Array.from(this.dirtyKeys)
-            };
-            
-            if (this.processingKeys) {
-                const remainingKeys = new Set(this.dirtyKeys);
-                this.processingKeys.forEach(k => remainingKeys.delete(k));
-                payload.canvas_search_index_dirty_keys = Array.from(remainingKeys);
-                if (remainingKeys.size === 0) {
-                    payload.canvas_search_index_dirty = false;
-                    payload.canvas_search_index_needs_full = false;
-                }
-            }
-            
-            if (extraPayload && typeof extraPayload === 'object') {
-                Object.assign(payload, extraPayload);
-            }
-            
+    async clearProcessedDirtyState() {
+        const processedKeys = this.processingKeys ? Array.from(this.processingKeys) : [];
+        const processedKeyVersions = Object.assign({}, this.processingKeyVersions || {});
+        const processedFull = this.processingFullUpdate === true;
+        const processedFullRevision = this.processingFullRevision || 0;
+        const api = this.getDirtyStateApi();
+
+        if (api && typeof api.clearProcessedDirtyState === 'function') {
             try {
-                await chrome.storage.local.set(payload);
+                const state = await api.clearProcessedDirtyState({
+                    keys: processedKeys,
+                    keyVersions: processedKeyVersions,
+                    full: processedFull,
+                    fullRevision: processedFullRevision
+                });
+                this.applyDirtyState(state);
+                this.processingKeys = null;
+                this.processingKeyVersions = null;
+                this.processingFullUpdate = false;
+                this.processingFullRevision = 0;
+                this.processingBaseSignature = null;
+                await this.notifyDirtyStateChanged(state);
+                startListeningStorageChanges();
+                return;
             } catch (err) {
-                if (extraPayload) {
-                    throw err; // Re-throw payload write errors so callers can retain dirty memory state.
-                }
-                console.error('[Search] Failed to clear dirty state in storage:', err);
+                console.error('[Search] Failed to clear processed dirty state in IndexedDB:', err);
+                throw err;
             }
         }
 
         if (this.processingKeys) {
-            this.processingKeys.forEach(k => this.dirtyKeys.delete(k));
+            this.processingKeys.forEach(k => {
+                this.dirtyKeys.delete(k);
+                delete this.dirtyKeyVersions[k];
+            });
             this.processingKeys = null;
         }
-        
+        this.processingKeyVersions = null;
+
         const hasRemainingDirty = this.dirtyKeys.size > 0;
         if (!hasRemainingDirty) {
             this.isDirty = false;
             if (this.processingFullUpdate) {
                 this.needsFullUpdate = false;
+                this.fullDirtyRevision = 0;
             }
         } else {
             this.isDirty = true;
         }
         this.processingFullUpdate = false;
+        this.processingFullRevision = 0;
         this.processingBaseSignature = null;
 
-        if (hasRemainingDirty) {
-            this.debounceStorageWrite();
-        } else {
-            if (this.debounceStorageWriteTimer) {
-                clearTimeout(this.debounceStorageWriteTimer);
-                this.debounceStorageWriteTimer = null;
-            }
-        }
-        startListeningStorageChanges();
-    },
-
-    clearDirtyMemoryOnly() {
-        this.isDirty = false;
-        this.needsFullUpdate = false;
-        this.dirtyKeys.clear();
-        this.processingKeys = null;
-        this.processingFullUpdate = false;
-        this.processingBaseSignature = null;
-        if (this.debounceStorageWriteTimer) {
-            clearTimeout(this.debounceStorageWriteTimer);
-            this.debounceStorageWriteTimer = null;
-        }
-        startListeningStorageChanges();
-    },
-
-    async clearDirty() {
-        this.isDirty = false;
-        this.needsFullUpdate = false;
-        this.dirtyKeys.clear();
-        this.processingKeys = null;
-        this.processingFullUpdate = false;
-        this.processingBaseSignature = null;
-        
-        if (this.debounceStorageWriteTimer) {
-            clearTimeout(this.debounceStorageWriteTimer);
-            this.debounceStorageWriteTimer = null;
-        }
-        
-        if (chrome && chrome.storage && chrome.storage.local) {
-            try {
-                await chrome.storage.local.set({
-                    canvas_search_index_dirty: false,
-                    canvas_search_index_needs_full: false,
-                    canvas_search_index_dirty_keys: []
-                });
-            } catch (_) {}
-        }
+        await this.notifyDirtyStateChanged(this.getLocalDirtyState());
         startListeningStorageChanges();
     },
 
     async triggerIdleIndexing() {
-        if (!this.isDirty) return; // Fast O(1) return if nothing is dirty
+        try {
+            await this.refreshDirtyStateFromStorage();
+        } catch (err) {
+            console.warn('[SearchIndexManager] Failed to refresh dirty state before idle indexing:', err);
+        }
+        if (!this.isDirty) return;
         if (this.isIndexing) return;
         if (!isCanvasSearchStateReady()) {
             console.log('[SearchIndexManager] Canvas state is not ready. Deferring idle indexing.');
             await waitForCanvasSearchStateReady();
             if (this.isIndexing) return;
+            try {
+                await this.refreshDirtyStateFromStorage();
+            } catch (err) {
+                console.warn('[SearchIndexManager] Failed to refresh dirty state after canvas ready:', err);
+            }
             if (!this.isDirty) return;
         }
         this.isIndexing = true;
+        this.snapshotDirtyState();
         
         // Before rebuilding, check if another tab/end already wrote a fresh IndexedDB index.
         try {
             const liveSig = getCanvasSearchSignature();
             if (window.SearchIndexDb && await window.SearchIndexDb.hasFreshIndex(liveSig)) {
                 console.log('[SearchIndexManager] IndexedDB search index already up-to-date. Skipping idle indexing.');
-                this.clearDirtyMemoryOnly();
+                await this.clearProcessedDirtyState();
 
                 if (typeof ensureIndexForModeLoaded === 'function') {
                     const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
@@ -3768,8 +4223,6 @@ const SearchIndexManager = {
         } catch (err) {
             console.error('[SearchIndexManager] Failed to check IndexedDB before idle indexing:', err);
         }
-
-        this.snapshotDirtyState();
         
         console.log('[SearchIndexManager] Idle time detected. Requesting idle callback for indexing...');
         
@@ -3779,9 +4232,10 @@ const SearchIndexManager = {
                     const activeCanvasState = getActiveCanvasState();
                     const totalCards = ((activeCanvasState && Array.isArray(activeCanvasState.tempSections)) ? activeCanvasState.tempSections.length : 0) + 
                                        ((activeCanvasState && Array.isArray(activeCanvasState.mdNodes)) ? activeCanvasState.mdNodes.length : 0);
-                    const exceedsPercent = totalCards > 0 && (this.dirtyKeys.size / totalCards) > 0.6;
-                    const exceedsLimit = this.dirtyKeys.size > 50;
-                    return this.needsFullUpdate || exceedsPercent || exceedsLimit;
+                    const dirtyCount = this.processingKeys ? this.processingKeys.size : this.dirtyKeys.size;
+                    const exceedsPercent = totalCards > 0 && (dirtyCount / totalCards) > 0.6;
+                    const exceedsLimit = dirtyCount > 50;
+                    return this.processingFullUpdate || this.needsFullUpdate || exceedsPercent || exceedsLimit;
                 };
 
                 if (typeof window.requestIdleCallback === 'function') {
@@ -3838,38 +4292,31 @@ const SearchIndexManager = {
             }
             return;
         }
-        if (chrome && chrome.storage && chrome.storage.local) {
+        try {
+            let hasIndex = false;
             try {
-                const data = await chrome.storage.local.get([
-                    'canvas_search_index_dirty',
-                    'canvas_search_index_needs_full',
-                    'canvas_search_index_dirty_keys'
-                ]);
-
-                let hasIndex = false;
-                try {
-                    const liveSig = getCanvasSearchSignature();
-                    hasIndex = !!(window.SearchIndexDb && await window.SearchIndexDb.hasFreshIndex(liveSig));
-                    if (window.SearchIndexDb && typeof window.SearchIndexDb.clearLegacyChromeStorageIndex === 'function') {
-                        window.SearchIndexDb.clearLegacyChromeStorageIndex().catch(() => {});
-                    }
-                } catch (_) {}
-
-                this.isDirty = data['canvas_search_index_dirty'] === true || !hasIndex;
-                this.needsFullUpdate = data['canvas_search_index_needs_full'] === true || !hasIndex;
-                const keys = data['canvas_search_index_dirty_keys'] || [];
-                keys.forEach(k => this.dirtyKeys.add(k));
-                
-                this.bindActivityListeners();
-                
-                if (this.isDirty && this.needsFullUpdate) {
-                    stopListeningStorageChanges();
-                } else {
-                    startListeningStorageChanges();
+                const liveSig = getCanvasSearchSignature();
+                hasIndex = !!(window.SearchIndexDb && await window.SearchIndexDb.hasFreshIndex(liveSig));
+                if (window.SearchIndexDb && typeof window.SearchIndexDb.clearLegacyChromeStorageIndex === 'function') {
+                    window.SearchIndexDb.clearLegacyChromeStorageIndex().catch(() => {});
                 }
-            } catch (_) {
+            } catch (_) {}
+
+            await this.refreshDirtyStateFromStorage();
+            if (!hasIndex && !this.isDirty) {
+                await this.markDirty({ full: true });
+            }
+
+            this.bindActivityListeners();
+
+            if (this.isDirty && this.needsFullUpdate) {
+                stopListeningStorageChanges();
+            } else {
                 startListeningStorageChanges();
             }
+        } catch (err) {
+            console.error('[SearchIndexManager] Failed to initialize dirty state:', err);
+            startListeningStorageChanges();
         }
     }
 };
@@ -3877,38 +4324,21 @@ const SearchIndexManager = {
 function handleSearchStorageChange(changes, areaName) {
     if (areaName !== 'local') return;
     
-    // Sync dirty state metadata from other tabs/ends to avoid redundant indexing
-    if (changes['canvas_search_index_dirty'] !== undefined) {
-        const newDirty = changes['canvas_search_index_dirty'].newValue;
-        if (newDirty === false) {
-            // If we have a pending local write, it means we have local dirty state that hasn't been written to storage yet.
-            // We should not clear our local dirty memory, but rather write our pending changes to storage.
-            if (SearchIndexManager.debounceStorageWriteTimer) {
-                console.log('[Search] Other tab cleared dirty state, but we have pending local changes. Retaining local dirty state.');
-                return;
-            }
-            console.log('[Search] Index dirty state cleared in storage. Syncing local state.');
-            SearchIndexManager.clearDirtyMemoryOnly();
-            
-            // Proactively preload the updated index in the background to avoid synchronous rebuilds
-            if (typeof ensureIndexForModeLoaded === 'function') {
+    // chrome.storage is only a cross-tab notification surface. The dirty set lives in IndexedDB.
+    if (changes['canvas_search_index_dirty'] !== undefined ||
+        changes['canvas_search_index_needs_full'] !== undefined ||
+        changes['canvas_search_index_dirty_revision'] !== undefined) {
+        SearchIndexManager.refreshDirtyStateFromStorage().then(() => {
+            if (!SearchIndexManager.isDirty && typeof ensureIndexForModeLoaded === 'function') {
                 const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
                 ensureIndexForModeLoaded(activeMode).catch(err => {
                     console.error('[Search] Failed to preload updated index in background:', err);
                 });
             }
-            return;
-        } else if (newDirty === true) {
-            SearchIndexManager.isDirty = true;
-            if (changes['canvas_search_index_needs_full']) {
-                SearchIndexManager.needsFullUpdate = changes['canvas_search_index_needs_full'].newValue === true;
-            }
-            if (changes['canvas_search_index_dirty_keys']) {
-                const keys = changes['canvas_search_index_dirty_keys'].newValue || [];
-                keys.forEach(k => SearchIndexManager.dirtyKeys.add(k));
-            }
-            return;
-        }
+        }).catch(err => {
+            console.error('[Search] Failed to sync dirty state from IndexedDB notification:', err);
+        });
+        return;
     }
     
     const activeCanvasState = getActiveCanvasState();
@@ -4413,12 +4843,18 @@ function detectDirtyKeysFromLiveState() {
             }
             if (node.subtype === 'card-group') {
                 const liveTitle = String(node.label || '').trim();
-                if (cached.title !== liveTitle) {
+                if (cached.title !== liveTitle ||
+                    cached.label !== liveTitle ||
+                    normalizeCanvasSearchString(cached.color) !== normalizeCanvasSearchString(getCanvasSearchNodeColor(node, '#475569'))) {
                     detected.add('bcs:canvas');
                     break;
                 }
             } else {
-                if (cached.title !== (node.title || '') || cached.text !== (node.text || '')) {
+                const liveSubtype = node.subtype || '';
+                if (cached.title !== (node.title || '') ||
+                    cached.text !== (node.text || '') ||
+                    normalizeCanvasSearchString(cached.subtype) !== normalizeCanvasSearchString(liveSubtype) ||
+                    normalizeCanvasSearchString(cached.color) !== normalizeCanvasSearchString(getCanvasSearchNodeColor(node, '#2563eb'))) {
                     detected.add('bcs:canvas');
                     break;
                 }
@@ -4433,7 +4869,12 @@ function detectDirtyKeysFromLiveState() {
                 if (!cached) {
                     detected.add('bcs:canvas');
                     break;
-                } else if (cached.label !== edge.label) {
+                }
+                const liveColor = edge.colorHex || canvasSearchPresetToHex(edge.color) || '#999';
+                const liveDirection = edge.direction || 'none';
+                if (cached.label !== edge.label ||
+                    normalizeCanvasSearchString(cached.color) !== normalizeCanvasSearchString(liveColor) ||
+                    normalizeCanvasSearchString(cached.direction || 'none') !== normalizeCanvasSearchString(liveDirection)) {
                     detected.add('bcs:canvas');
                     break;
                 }
@@ -4452,27 +4893,42 @@ function detectDirtyKeysFromLiveState() {
         
         const liveTitle = sec.title || sec.name || '';
         const liveDesc = (sec.description || '').replace(/<[^>]+>/g, ' ').trim();
-        if (cached.title !== liveTitle || cached.description !== liveDesc) {
+        const liveLabel = getTempSectionSearchLabel(sec);
+        const liveTime = inferTempSectionTime(sec, liveTitle);
+        const liveOriginDisplayIndex = getTempSectionOriginDisplayIndex(sec, liveLabel);
+        const liveColor = getTempSectionSearchColor(sec);
+        if (cached.title !== liveTitle ||
+            cached.description !== liveDesc ||
+            normalizeCanvasSearchString(cached.label) !== normalizeCanvasSearchString(liveLabel) ||
+            normalizeCanvasSearchString(cached.sequenceNumber) !== normalizeCanvasSearchString(sec.sequenceNumber || null) ||
+            normalizeCanvasSearchNumber(cached.time, 0) !== normalizeCanvasSearchNumber(liveTime, 0) ||
+            normalizeCanvasSearchNumber(cached.originDisplayIndex, 0) !== normalizeCanvasSearchNumber(liveOriginDisplayIndex, 0) ||
+            normalizeCanvasSearchString(cached.color) !== normalizeCanvasSearchString(liveColor)) {
             detected.add(`bcs:section:${sec.id}`);
         }
         
-        let cachedItemsCount = 0;
-        if (Array.isArray(canvasSearchDb.bookmarkIndex)) {
-            cachedItemsCount = canvasSearchDb.bookmarkIndex.filter(item => item.sectionId === sec.id).length;
-        }
-        let liveItemsCount = 0;
-        const countLiveItems = (items) => {
-            if (!Array.isArray(items)) return;
-            items.forEach(it => {
-                if (it) {
-                    liveItemsCount++;
-                    if (it.children) countLiveItems(it.children);
-                }
-            });
-        };
-        countLiveItems(sec.items);
-        if (liveItemsCount !== cachedItemsCount) {
+        const cachedItems = Array.isArray(canvasSearchDb.bookmarkIndex)
+            ? canvasSearchDb.bookmarkIndex.filter(item => item && String(item.sectionId || '') === String(sec.id))
+            : [];
+        const liveItems = collectTempSectionSearchItemSnapshots(sec);
+        if (liveItems.length !== cachedItems.length) {
             detected.add(`bcs:section:${sec.id}`);
+        } else {
+            for (let i = 0; i < liveItems.length; i += 1) {
+                const liveItem = liveItems[i];
+                const cachedItem = cachedItems[i];
+                if (!cachedItem ||
+                    normalizeCanvasSearchString(cachedItem.id) !== normalizeCanvasSearchString(liveItem.id) ||
+                    normalizeCanvasSearchString(cachedItem.nodeType) !== normalizeCanvasSearchString(liveItem.nodeType) ||
+                    normalizeCanvasSearchString(cachedItem.title) !== normalizeCanvasSearchString(liveItem.title) ||
+                    normalizeCanvasSearchString(cachedItem.url) !== normalizeCanvasSearchString(liveItem.url) ||
+                    normalizeCanvasSearchString(cachedItem.parentId) !== normalizeCanvasSearchString(liveItem.parentId) ||
+                    normalizeCanvasSearchString(cachedItem.namedPath) !== normalizeCanvasSearchString(liveItem.namedPath) ||
+                    getInlineTagSearchSignature(cachedItem.tags) !== normalizeCanvasSearchString(liveItem.tags)) {
+                    detected.add(`bcs:section:${sec.id}`);
+                    break;
+                }
+            }
         }
     });
 
@@ -4520,21 +4976,7 @@ function detectDirtyKeysFromLiveState() {
         }
     } catch (_) {}
     
-    const treeVersion = (typeof lastTreeSnapshotVersion !== 'undefined' && lastTreeSnapshotVersion !== null)
-        ? String(lastTreeSnapshotVersion)
-        : '';
-    const treeFingerprint = (typeof lastTreeFingerprint !== 'undefined' && lastTreeFingerprint)
-        ? String(lastTreeFingerprint)
-        : '';
-    
-    if (canvasSearchDb.signature) {
-        const sigParts = canvasSearchDb.signature.split(':');
-        const cachedTreeVer = sigParts[11] || '';
-        const cachedTreeFp = sigParts[12] || '';
-        if (treeVersion !== cachedTreeVer || treeFingerprint !== cachedTreeFp) {
-            detected.add('cachedCurrentTree');
-        }
-    }
+    addDirtyKeysFromSearchSignatureDiff(detected, canvasSearchDb.signature, getCanvasSearchSignature());
     
     return detected;
 }
@@ -4561,19 +5003,42 @@ async function buildCanvasSearchDbIncrementallyInMemory() {
     }
     SearchIndexManager.processingBaseSignature = canvasSearchDb.signature || null;
     
+    const keysToApply = new Set(SearchIndexManager.processingKeys
+        ? Array.from(SearchIndexManager.processingKeys)
+        : Array.from(SearchIndexManager.dirtyKeys));
     const extraDirtyKeys = detectDirtyKeysFromLiveState();
-    extraDirtyKeys.forEach(k => SearchIndexManager.dirtyKeys.add(k));
+    const extraDirtyKeyList = Array.from(extraDirtyKeys);
+    if (extraDirtyKeyList.length > 0) {
+        try {
+            await SearchIndexManager.markDirty({ full: false, keys: extraDirtyKeyList });
+        } catch (err) {
+            console.warn('[Search] Failed to persist live-detected dirty keys. Keeping them in memory for this pass:', err);
+        }
+        extraDirtyKeyList.forEach(k => {
+            SearchIndexManager.dirtyKeys.add(k);
+            keysToApply.add(k);
+        });
+    }
     
-    if (SearchIndexManager.dirtyKeys.size === 0 && canvasSearchDb.signature !== liveSig) {
-        console.warn('[Search] IndexedDB base snapshot differs from live state but no dirty keys were detected. Falling back to full rebuild.');
-        SearchIndexManager.processingBaseSignature = null;
-        buildCanvasSearchDbSync();
+    if (keysToApply.size === 0 && canvasSearchDb.signature !== liveSig) {
+        console.info('[Search] IndexedDB base snapshot signature changed without indexable diffs. Updating signature only.');
+        canvasSearchDb.signature = liveSig;
         return;
     }
 
-    const keysToApply = new Set(SearchIndexManager.dirtyKeys);
     if (keysToApply.size > 0) {
         SearchIndexManager.processingKeys = new Set(keysToApply);
+        if (!SearchIndexManager.processingKeyVersions) {
+            SearchIndexManager.processingKeyVersions = {};
+        }
+        keysToApply.forEach(key => {
+            if (!SearchIndexManager.processingKeyVersions[key]) {
+                const revision = Number(SearchIndexManager.dirtyKeyVersions[key]) || Number(SearchIndexManager.dirtyRevision) || 0;
+                if (revision > 0) {
+                    SearchIndexManager.processingKeyVersions[key] = revision;
+                }
+            }
+        });
         applyIncrementalUpdatesToMemory(keysToApply);
     }
     
@@ -4588,14 +5053,23 @@ async function ensureIndexForModeLoaded(modeKey) {
             await waitForCanvasSearchStateReady();
         }
 
+        try {
+            await SearchIndexManager.refreshDirtyStateFromStorage();
+        } catch (err) {
+            console.warn('[Search] Failed to refresh stored dirty state before loading index:', err);
+        }
+
         const liveSig = getCanvasSearchSignature();
         
         // If we are dirty or signatures mismatch, first check if IndexedDB has already been updated.
         if (SearchIndexManager.isDirty || canvasSearchDb.signature !== liveSig) {
+            if (SearchIndexManager.isDirty && !SearchIndexManager.processingKeys) {
+                SearchIndexManager.snapshotDirtyState();
+            }
             const result = await loadIndexForMode(modeKey);
             if (result) {
-                // IndexedDB is already up-to-date. Sync memory flags only and skip local rebuild.
-                SearchIndexManager.clearDirtyMemoryOnly();
+                // IndexedDB is already up-to-date. Clear only the dirty revisions observed before this check.
+                await SearchIndexManager.clearProcessedDirtyState();
                 return;
             }
         }
@@ -4641,6 +5115,7 @@ function releaseSearchMemory() {
         itemById: new Map()
     };
     canvasSearchLoadedModes = new Set();
+    invalidateCanvasTagSearchCaches();
     if (searchUiState) {
         searchUiState.results = [];
         searchUiState.resultSource = [];
@@ -4672,11 +5147,40 @@ function cancelReleaseSearchMemory() {
 /**
  * 构建画布搜索数据库
  */
+function isCanvasSearchMemoryCompleteForSignature(signature) {
+    return !!(
+        signature &&
+        canvasSearchDb.signature === signature &&
+        Array.isArray(canvasSearchDb.structureIndex) &&
+        Array.isArray(canvasSearchDb.descriptionIndex) &&
+        Array.isArray(canvasSearchDb.bookmarkIndex) &&
+        canvasSearchLoadedModes.has('structure') &&
+        canvasSearchLoadedModes.has('description') &&
+        canvasSearchLoadedModes.has('bookmark')
+    );
+}
+
 function buildCanvasSearchDb() {
-    let signature = canvasSearchDb.signature;
-    if (SearchIndexManager.isDirty || !signature) {
-        signature = getCanvasSearchSignature();
+    const liveSignature = getCanvasSearchSignature();
+    const previousSignature = canvasSearchDb.signature || '';
+    if (SearchIndexManager.isDirty) {
+        if (
+            SearchIndexManager.hasPendingSyncWriteBack &&
+            isCanvasSearchMemoryCompleteForSignature(liveSignature)
+        ) {
+            return canvasSearchDb;
+        }
+
+        if (!SearchIndexManager.processingKeys && !SearchIndexManager.processingFullUpdate) {
+            SearchIndexManager.snapshotDirtyState();
+        }
+
+        const rebuilt = buildCanvasSearchDbSync();
+        SearchIndexManager.hasPendingSyncWriteBack = true;
+        return rebuilt;
     }
+
+    const signature = canvasSearchDb.signature || liveSignature;
     if (canvasSearchDb.signature === signature) {
         const mode = searchUiState.activeMode;
         const indexList = mode === 'bookmark' ? canvasSearchDb.bookmarkIndex :
@@ -4687,18 +5191,16 @@ function buildCanvasSearchDb() {
             return canvasSearchDb;
         }
     }
-    return buildCanvasSearchDbSync();
+    const rebuilt = buildCanvasSearchDbSync();
+    if (previousSignature !== rebuilt.signature) {
+        SearchIndexManager.hasPendingSyncWriteBack = true;
+    }
+    return rebuilt;
 }
 
 function buildCanvasSearchDbSync() {
     const signature = getCanvasSearchSignature();
-    if (canvasSearchDb.signature === signature &&
-        Array.isArray(canvasSearchDb.structureIndex) &&
-        Array.isArray(canvasSearchDb.descriptionIndex) &&
-        Array.isArray(canvasSearchDb.bookmarkIndex) &&
-        canvasSearchLoadedModes.has('structure') &&
-        canvasSearchLoadedModes.has('description') &&
-        canvasSearchLoadedModes.has('bookmark')) {
+    if (isCanvasSearchMemoryCompleteForSignature(signature)) {
         return canvasSearchDb;
     }
 
@@ -4839,6 +5341,121 @@ function generateSearchSnippet(text, query) {
     return `${prefix}${highlightedSnippet}${suffix}`;
 }
 
+function createCanvasSearchQueryContext(query, mode = '') {
+    const rawQuery = String(query || '').trim();
+    const lowerQuery = rawQuery.toLowerCase();
+    const tokens = lowerQuery.split(/\s+/)
+        .map(token => String(token || '').trim())
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length);
+    const isBookmarkMode = mode === 'bookmark' || mode === 'tag';
+    const permanentQuery = !isBookmarkMode ? parsePermanentSectionQuery(rawQuery) : null;
+    const isGroupSearch = !isBookmarkMode && isGroupSearchQuery(rawQuery);
+    const dateMeta = !isBookmarkMode ? parseDateQuery(lowerQuery) : null;
+    const timeKeyword = !isBookmarkMode ? parseTimeKeyword(lowerQuery) : null;
+
+    return {
+        rawQuery,
+        lowerQuery,
+        tokens,
+        isSingleChar: lowerQuery.length === 1,
+        isBookmarkMode,
+        permanentQuery,
+        isPermanentQuery: permanentQuery !== null,
+        isGroupSearch,
+        groupPrefix: isGroupSearch ? lowerQuery.replace(/-$/, '') : '',
+        dateMeta,
+        timeKeyword
+    };
+}
+
+function getCanvasSearchQueryContext(query, options = {}) {
+    if (options && options.queryContext) return options.queryContext;
+    const mode = options && options.mode ? String(options.mode) :
+        ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || '');
+    return createCanvasSearchQueryContext(query, mode);
+}
+
+function matchCanvasSearchDateMetaForItem(item, dateMeta) {
+    if (!item || !dateMeta || item.type !== 'temp-section' || !item.time) return false;
+
+    const dateFields = Number.isFinite(Number(item.__dateYear))
+        ? item
+        : buildCanvasSearchDateFields(item.time);
+    const year = Number(dateFields.__dateYear);
+    const month = Number(dateFields.__dateMonth);
+    const day = Number(dateFields.__dateDay);
+    const dateKey = dateFields.__dateKey || '';
+    const mmdd = dateFields.__dateMmdd || '';
+
+    if (dateMeta.type === 'day') {
+        const vm = parseInt(dateMeta.m, 10);
+        const vd = parseInt(dateMeta.d, 10);
+        if (!Number.isFinite(vm) || !Number.isFinite(vd)) return false;
+        if (dateMeta.ignoreYear) return month === vm && day === vd;
+        const vy = parseInt(dateMeta.y, 10);
+        return year === vy && month === vm && day === vd;
+    }
+
+    if (dateMeta.type === 'month') {
+        const vm = parseInt(dateMeta.m, 10);
+        if (!Number.isFinite(vm)) return false;
+        if (dateMeta.ignoreYear) return month === vm;
+        const vy = parseInt(dateMeta.y, 10);
+        return year === vy && month === vm;
+    }
+
+    if (dateMeta.type === 'year') {
+        return year === parseInt(dateMeta.y, 10);
+    }
+
+    if (dateMeta.type === 'range') {
+        if (dateMeta.ignoreYear) {
+            return !!mmdd && mmdd >= dateMeta.startM + '-' + dateMeta.startD && mmdd <= dateMeta.endM + '-' + dateMeta.endD;
+        }
+        return !!dateKey && dateKey >= dateMeta.startKey && dateKey <= dateMeta.endKey;
+    }
+
+    return false;
+}
+
+function getCanvasSearchDateMetaScore(dateMeta) {
+    if (!dateMeta) return 0;
+    if (dateMeta.type === 'day') return 200;
+    if (dateMeta.type === 'month') return 180;
+    if (dateMeta.type === 'year') return 160;
+    if (dateMeta.type === 'range') return 170;
+    return 0;
+}
+
+function matchCanvasSearchTimeKeywordForItem(item, timeKeyword) {
+    if (!item || !timeKeyword || !item.time) return false;
+    const dateFields = Number.isFinite(Number(item.__dateYear))
+        ? item
+        : buildCanvasSearchDateFields(item.time);
+    if (timeKeyword.type === 'range') {
+        return item.time >= timeKeyword.start && item.time <= timeKeyword.end;
+    }
+    if (timeKeyword.type === 'month') return Number(dateFields.__dateMonth) === Number(timeKeyword.month);
+    if (timeKeyword.type === 'weekday') return Number(dateFields.__dateWeekday) === Number(timeKeyword.weekday);
+    if (timeKeyword.type === 'day') return Number(dateFields.__dateDay) === Number(timeKeyword.day);
+    if (timeKeyword.type === 'year') return Number(dateFields.__dateYear) === Number(timeKeyword.year);
+    return matchTimeRange(item.time, timeKeyword);
+}
+
+function shouldSkipCanvasSearchCandidateForQuery(item, mode, queryContext) {
+    if (!item || !queryContext) return true;
+    if (mode !== 'structure') return false;
+
+    if (queryContext.isPermanentQuery) {
+        return item.type !== 'permanent-section';
+    }
+    if (queryContext.isGroupSearch) {
+        return item.type !== 'temp-section' || !item.__label;
+    }
+    return false;
+}
+
 /**
  * 计算画布搜索项的匹配分数
  * @param {Object} item - 索引项
@@ -4848,14 +5465,15 @@ function generateSearchSnippet(text, query) {
  */
 function scoreCanvasSearchItem(item, query, options = {}) {
     let score = 0;
-    const q = query.toLowerCase();
+    const queryContext = getCanvasSearchQueryContext(query, options);
+    const q = queryContext.lowerQuery;
 
     // 0. Mode-specific scoring check (Optional, as we partition indices now)
     // But helpful for mixed logic if any.
 
     // 1. 特殊语法：#N 序号定位 (Only for Permanent)
     if (item.type === 'permanent-section') {
-        const sectionQuery = parsePermanentSectionQuery(query);
+        const sectionQuery = queryContext.permanentQuery;
         if (sectionQuery) {
             if (sectionQuery.displayIndex === item.displayIndex) {
                 return 300; // 精确匹配
@@ -4864,11 +5482,11 @@ function scoreCanvasSearchItem(item, query, options = {}) {
     }
 
     // 2. 群组搜索（如 A- 或 A-1）- 只搜索临时栏目
-    if (options.isGroupSearch) {
+    if (queryContext.isGroupSearch || options.isGroupSearch) {
         // 群组搜索只适用于有 label 的临时栏目
         if (item.type === 'temp-section' && item.__label) {
             // 匹配 label 字段（如搜索 "A-" 匹配 "A-1", "A-2" 等）
-            const prefix = query.toLowerCase().replace(/-$/, '');
+            const prefix = queryContext.groupPrefix || q.replace(/-$/, '');
             if (item.__label === prefix || item.__label.startsWith(prefix + '-')) {
                 return 250;
             }
@@ -4877,118 +5495,58 @@ function scoreCanvasSearchItem(item, query, options = {}) {
     }
 
     // 3. 时间搜索（临时栏目 - Unified Date）
-    const dateMeta = parseDateQuery(q);
-    if (dateMeta && item.type === 'temp-section' && item.time) {
-        const d = new Date(item.time);
-        let matched = false;
-        let scoreVal = 0;
-
-        if (dateMeta.type === 'day') {
-            const vy = parseInt(dateMeta.y);
-            const vm = parseInt(dateMeta.m);
-            const vd = parseInt(dateMeta.d);
-
-            if (dateMeta.ignoreYear) {
-                if ((d.getMonth() + 1) === vm && d.getDate() === vd) {
-                    matched = true; scoreVal = 200;
-                }
-            } else {
-                if (d.getFullYear() === vy && (d.getMonth() + 1) === vm && d.getDate() === vd) {
-                    matched = true; scoreVal = 200;
-                }
-            }
-        } else if (dateMeta.type === 'month') {
-            const vy = parseInt(dateMeta.y);
-            const vm = parseInt(dateMeta.m);
-
-            if (dateMeta.ignoreYear) {
-                if ((d.getMonth() + 1) === vm) {
-                    matched = true; scoreVal = 180;
-                }
-            } else {
-                if (d.getFullYear() === vy && (d.getMonth() + 1) === vm) {
-                    matched = true; scoreVal = 180;
-                }
-            }
-        } else if (dateMeta.type === 'year') {
-            if (d.getFullYear() === parseInt(dateMeta.y)) {
-                matched = true;
-                scoreVal = 160;
-            }
-        } else if (dateMeta.type === 'range') {
-            // [New] Date Range Support for Canvas Card Mode
-            const mm = String(d.getMonth() + 1).padStart(2, '0');
-            const dd = String(d.getDate()).padStart(2, '0');
-            const yyyy = String(d.getFullYear());
-
-            if (dateMeta.ignoreYear) {
-                // Compare only MM-DD
-                const mmdd = mm + '-' + dd;
-                const startMmdd = dateMeta.startM + '-' + dateMeta.startD;
-                const endMmdd = dateMeta.endM + '-' + dateMeta.endD;
-                if (mmdd >= startMmdd && mmdd <= endMmdd) {
-                    matched = true;
-                    scoreVal = 170;
-                }
-            } else {
-                // Compare full date
-                const fullDate = `${yyyy}-${mm}-${dd}`;
-                if (fullDate >= dateMeta.startKey && fullDate <= dateMeta.endKey) {
-                    matched = true;
-                    scoreVal = 170;
-                }
-            }
-        }
-
-        if (matched) return scoreVal;
+    const dateMeta = queryContext.dateMeta;
+    if (dateMeta && matchCanvasSearchDateMetaForItem(item, dateMeta)) {
+        return getCanvasSearchDateMetaScore(dateMeta);
     }
 
     // 3b. 相对时间范围搜索 (本周/上周等 - Legacy Support)
     //parseDateQuery currently focuses on specific points (day/month/year). 
     //Time ranges are still handled by parseTimeKeyword for now.
-    const timeKeyword = parseTimeKeyword(q);
+    const timeKeyword = queryContext.timeKeyword;
     if (timeKeyword && timeKeyword.type === 'range' && item.type === 'temp-section' && item.time) {
-        if (matchTimeRange(item.time, timeKeyword)) {
+        if (matchCanvasSearchTimeKeywordForItem(item, timeKeyword)) {
             return 150;
         }
     }
 
     // 4. 普通文本匹配
     // [Optim] Single letter query: strict prefix matching only to avoid noise (e.g. searching 'A' finding 'B-1' via 'a' in date/text)
-    const isSingleChar = query.length === 1;
+    const isSingleChar = queryContext.isSingleChar;
 
     // Description Mode Multi-word AND Match
     if (searchUiState.activeMode === 'description') {
-        const tokens = q.split(/\s+/).map(s => s.trim()).filter(Boolean);
+        const tokens = queryContext.tokens;
         if (!tokens.length) return -Infinity;
         let totalScore = 0;
 
         for (const t of tokens) {
+            const isSingleToken = t.length === 1;
             let tokenScore = 0;
             if (item.type === 'temp-section') {
-                if (item.__description && !isSingleChar && item.__description.includes(t)) {
+                if (item.__description && !isSingleToken && item.__description.includes(t)) {
                     tokenScore = Math.max(tokenScore, 80);
                 }
             } else if (item.type === 'permanent-section') {
-                if (item.__description && !isSingleChar && item.__description.includes(t)) {
+                if (item.__description && !isSingleToken && item.__description.includes(t)) {
                     tokenScore = Math.max(tokenScore, 70);
                 }
             } else if (item.type === 'md-node') {
                 if (item.__title) {
-                    if (isSingleChar && item.__title.startsWith(t)) {
+                    if (isSingleToken && item.__title.startsWith(t)) {
                         tokenScore = Math.max(tokenScore, 150);
-                    } else if (!isSingleChar && item.__title.includes(t)) {
+                    } else if (!isSingleToken && item.__title.includes(t)) {
                         tokenScore = Math.max(tokenScore, 120);
                     }
                 }
-                if (item.__text && !isSingleChar && item.__text.includes(t)) {
+                if (item.__text && !isSingleToken && item.__text.includes(t)) {
                     tokenScore = Math.max(tokenScore, 90);
                 }
             } else if (item.type === 'edge') {
                 if (item.__label) {
-                    if (isSingleChar && item.__label.startsWith(t)) {
+                    if (isSingleToken && item.__label.startsWith(t)) {
                         tokenScore = Math.max(tokenScore, 140);
-                    } else if (!isSingleChar && item.__label.includes(t)) {
+                    } else if (!isSingleToken && item.__label.includes(t)) {
                         tokenScore = Math.max(tokenScore, 110);
                     }
                 }
@@ -5069,9 +5627,8 @@ function scoreCanvasSearchItem(item, query, options = {}) {
         case 'bookmark-item': {
             // 书签/文件夹匹配（支持多关键词，以空格分隔）；
             // 标签归入书签模式：#tag 优先查标签，普通关键词也可命中 tag text/color。
-            const tokens = q.split(/\s+/).map(s => s.trim()).filter(Boolean);
+            const tokens = queryContext.tokens;
             if (!tokens.length) return -Infinity;
-            const itemTags = __getItemTagsForSearch(item);
 
             let tokenScoreSum = 0;
             for (const t of tokens) {
@@ -5088,7 +5645,7 @@ function scoreCanvasSearchItem(item, query, options = {}) {
                     if (item.__path.startsWith(t)) tokenScore = Math.max(tokenScore, 105);
                     else if (!isSingleToken && item.__path.includes(t)) tokenScore = Math.max(tokenScore, 95);
                 }
-                if (__tagMatchesQuery(itemTags, t)) {
+                if ((isTagToken || tokenScore < 100) && doesCanvasBookmarkItemTagsMatchQuery(item, t)) {
                     tokenScore = Math.max(tokenScore, isTagToken ? 135 : 100);
                 }
 
@@ -5441,6 +5998,62 @@ function __tagMatchesQuery(tags, query) {
     });
 }
 
+let canvasTagSearchCacheRevision = 0;
+let canvasTagBrowseRootCache = null;
+const canvasBookmarkTagSearchStateCache = new WeakMap();
+
+function invalidateCanvasTagSearchCaches() {
+    canvasTagSearchCacheRevision += 1;
+    canvasTagBrowseRootCache = null;
+}
+
+function getCanvasBookmarkTagSearchState(item) {
+    if (!item || typeof item !== 'object') {
+        return { tags: [], terms: [], exactTerms: new Set() };
+    }
+
+    const cached = canvasBookmarkTagSearchStateCache.get(item);
+    if (cached && cached.revision === canvasTagSearchCacheRevision) return cached;
+
+    const tags = normalizeTagsForPayload(__getItemTagsForSearch(item));
+    const exactTerms = new Set();
+    const terms = [];
+    tags.forEach((tag) => {
+        __getTagSearchTerms(tag).forEach((term) => {
+            const normalized = String(term || '').trim().toLowerCase();
+            if (!normalized || exactTerms.has(normalized)) return;
+            exactTerms.add(normalized);
+            terms.push(normalized);
+        });
+    });
+
+    const state = {
+        revision: canvasTagSearchCacheRevision,
+        tags,
+        terms,
+        exactTerms
+    };
+    canvasBookmarkTagSearchStateCache.set(item, state);
+    return state;
+}
+
+function getCanvasBookmarkTagsForSearchCached(item) {
+    return getCanvasBookmarkTagSearchState(item).tags;
+}
+
+function doesCanvasBookmarkItemTagsMatchQuery(item, query) {
+    const state = getCanvasBookmarkTagSearchState(item);
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return state.tags.length > 0;
+    if (q.startsWith('#')) {
+        const rawTagQuery = q.slice(1);
+        const tagQuery = rawTagQuery.startsWith('/') ? rawTagQuery.slice(1) : rawTagQuery;
+        if (!tagQuery) return state.tags.length > 0;
+        return state.exactTerms.has(tagQuery);
+    }
+    return state.terms.some((term) => term.includes(q));
+}
+
 function normalizeTagBrowseRootQuery(query) {
     return String(query || '').trim().toLowerCase();
 }
@@ -5527,6 +6140,17 @@ function getTagBrowseBucketKey(label, collator = null) {
 
 function buildCanvasTagBrowseRootModel(sourceIndex) {
     const isZh = currentLang === 'zh_CN';
+    const list = Array.isArray(sourceIndex) ? sourceIndex : [];
+    const cacheKey = [
+        canvasSearchDb && canvasSearchDb.signature ? canvasSearchDb.signature : '',
+        canvasTagSearchCacheRevision,
+        isZh ? 'zh_CN' : 'en',
+        list.length
+    ].join('::');
+    if (canvasTagBrowseRootCache && canvasTagBrowseRootCache.key === cacheKey) {
+        return canvasTagBrowseRootCache.model;
+    }
+
     const colorMap = new Map();
     TAG_BROWSER_COLOR_ORDER.forEach((color) => {
         colorMap.set(color, {
@@ -5562,13 +6186,12 @@ function buildCanvasTagBrowseRootModel(sourceIndex) {
         return entry;
     };
 
-    const list = Array.isArray(sourceIndex) ? sourceIndex : [];
     list.forEach((item) => {
         if (!item || item.type !== 'bookmark-item') return;
         const itemKey = String(item.locationKey || getCanvasBookmarkLocationKeyForSearch(item) || item.id || '').trim();
         if (!itemKey) return;
 
-        const tags = normalizeTagsForPayload(__getItemTagsForSearch(item));
+        const tags = getCanvasBookmarkTagsForSearchCached(item);
         if (!tags.length) return;
 
         const localSeen = new Set();
@@ -5629,7 +6252,9 @@ function buildCanvasTagBrowseRootModel(sourceIndex) {
         return TAG_BROWSER_COLOR_ORDER.indexOf(a.color) - TAG_BROWSER_COLOR_ORDER.indexOf(b.color);
     });
 
-    return { colorEntries, tagEntries };
+    const model = { colorEntries, tagEntries };
+    canvasTagBrowseRootCache = { key: cacheKey, model };
+    return model;
 }
 
 function tagMatchesBrowseDetail(tag, detail) {
@@ -5848,6 +6473,7 @@ function searchCanvasAndRender(query, options = {}) {
     // Determine Source Index based on Active Mode
     let sourceIndex = [];
     const mode = searchUiState.activeMode;
+    const queryContext = createCanvasSearchQueryContext(trimmedQuery, mode);
     if (mode === 'bookmark' && previousCanvasQuery !== nextCanvasQuery) {
         searchUiState.bookmarkGroupCollapse = new Map();
     }
@@ -5885,13 +6511,15 @@ function searchCanvasAndRender(query, options = {}) {
         ? searchUiState.tagBrowseDetail
         : null;
     const bookmarkScoringQuery = activeTagBrowseDetail ? '#' : trimmedQuery;
+    const scoringQueryContext = activeTagBrowseDetail
+        ? createCanvasSearchQueryContext(bookmarkScoringQuery, mode)
+        : queryContext;
 
     // 检测特殊语法
     // Bookmark 模式下应当被视为“纯文本搜索”，不触发 # / A- / 时间等特殊语法。
-    const isBookmarkMode = mode === 'bookmark';
-    const isGroupSearch = !isBookmarkMode && isGroupSearchQuery(trimmedQuery);
-    const isPermanentQuery = !isBookmarkMode && parsePermanentSectionQuery(trimmedQuery) !== null;
-    const timeKeyword = !isBookmarkMode ? parseTimeKeyword(trimmedQuery) : null;
+    const isGroupSearch = queryContext.isGroupSearch;
+    const isPermanentQuery = queryContext.isPermanentQuery;
+    const timeKeyword = queryContext.timeKeyword;
 
     // 清除之前的高亮状态 (用户输入改变时，如果不再匹配之前的群组，需要清除高亮)
     clearCanvasSearchHighlight();
@@ -5971,8 +6599,7 @@ function searchCanvasAndRender(query, options = {}) {
         } else if (searchUiState.activeMode === 'tag') {
             // Tag Mode: only bookmark-items whose tags match the query.
             if (item.type !== 'bookmark-item') continue;
-            const itemTags = __getItemTagsForSearch(item);
-            if (!__tagMatchesQuery(itemTags, trimmedQuery)) continue;
+            if (!doesCanvasBookmarkItemTagsMatchQuery(item, trimmedQuery)) continue;
         }
         // Note: 'bookmark' mode logic is "not done yet" but currently implicit.
         // Once bookmark data is in indices, we will filter for it here.
@@ -5994,6 +6621,10 @@ function searchCanvasAndRender(query, options = {}) {
             }
         }
 
+        if (shouldSkipCanvasSearchCandidateForQuery(item, mode, queryContext)) {
+            continue;
+        }
+
         if (mode === 'bookmark' && fullscreenScope && item.type === 'bookmark-item') {
             const scopeKind = String(fullscreenScope.kind || '').trim();
             if (scopeKind === 'temp') {
@@ -6011,7 +6642,7 @@ function searchCanvasAndRender(query, options = {}) {
         }
 
         if (activeTagBrowseDetail && item.type === 'bookmark-item') {
-            const itemTags = normalizeTagsForPayload(__getItemTagsForSearch(item));
+            const itemTags = getCanvasBookmarkTagsForSearchCached(item);
             if (!itemTags.some((tag) => tagMatchesBrowseDetail(tag, activeTagBrowseDetail))) {
                 continue;
             }
@@ -6039,14 +6670,14 @@ function searchCanvasAndRender(query, options = {}) {
         // Tag mode: skip score machinery (already filtered above). Give a flat score
         // proportional to tag count so items with more tags rank higher.
         if (mode === 'tag') {
-            const tags = __getItemTagsForSearch(item);
+            const tags = getCanvasBookmarkTagsForSearchCached(item);
             const rawScore = 100 + Math.min(10, tags.length);
             const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
             scored.push({ item, s: rawScore + scopeBonus, rawScore });
             continue;
         }
 
-        const rawScore = scoreCanvasSearchItem(item, bookmarkScoringQuery, { isGroupSearch });
+        const rawScore = scoreCanvasSearchItem(item, bookmarkScoringQuery, { isGroupSearch, queryContext: scoringQueryContext, mode });
         if (rawScore > -Infinity) {
             const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
             const scoredItem = { item, s: rawScore + scopeBonus, rawScore };
@@ -6469,7 +7100,7 @@ function isDomainSearchItemMatched(domain, item, query, detailInput = null) {
     if (!q) return true;
 
     if (detail) {
-        const tags = normalizeTagsForPayload(__getItemTagsForSearch(item));
+        const tags = getCanvasBookmarkTagsForSearchCached(item);
         return tags.some((tag) => tagMatchesBrowseDetail(tag, detail));
     }
 
@@ -6485,7 +7116,7 @@ function isDomainSearchItemMatched(domain, item, query, detailInput = null) {
     const pathText = String(item && item.__path || '').trim().toLowerCase();
     if (pathText && pathText.includes(q)) return true;
 
-    if (typeof __tagMatchesQuery === 'function' && __tagMatchesQuery(__getItemTagsForSearch(item), q)) {
+    if (doesCanvasBookmarkItemTagsMatchQuery(item, q)) {
         return true;
     }
 
@@ -6580,7 +7211,7 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             sectionId: item.sectionId || null,
             color: item.color || '#0ea5e9',
             host: host || '',
-            tags: __getItemTagsForSearch(item),
+            tags: getCanvasBookmarkTagsForSearchCached(item),
             __title: item.__title || '',
             __url: item.__url || '',
             __path: item.__path || '',
@@ -7115,9 +7746,9 @@ function renderCanvasSearchResults(results, options = {}) {
         };
         if (item && (item.type === 'bookmark-group' || item.type === 'domain-group')) {
             const children = Array.isArray(item.targetItems) ? item.targetItems : [];
-            children.forEach((child) => addTags(__getItemTagsForSearch(child)));
+            children.forEach((child) => addTags(getCanvasBookmarkTagsForSearchCached(child)));
         } else {
-            addTags(__getItemTagsForSearch(item));
+            addTags(getCanvasBookmarkTagsForSearchCached(item));
         }
         return result;
     };
@@ -10050,8 +10681,9 @@ function highlightCanvasGroup(prefix) {
     const db = buildCanvasSearchDb();
     const matchedIds = [];
     const p = prefix.toLowerCase().replace(/-$/, '');
+    const structureItems = Array.isArray(db.structureIndex) ? db.structureIndex : [];
 
-    for (const item of db.items) {
+    for (const item of structureItems) {
         // 只匹配有 label 的临时栏目
         if (item.type === 'temp-section' && item.__label) {
             if (item.__label === p || item.__label.startsWith(p + '-')) {

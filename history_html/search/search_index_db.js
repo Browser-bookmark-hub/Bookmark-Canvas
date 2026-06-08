@@ -8,6 +8,7 @@
     const STORE_RECORDS = 'records';
     const STORE_COORDINATES = 'coordinates';
     const SNAPSHOT_META_KEY = 'snapshot';
+    const DIRTY_META_KEY = 'dirty_state';
     const RECORD_STORAGE_FORMAT = 'records-v1';
     const INDEX_MODE = 'mode';
     const INDEX_OWNER = 'ownerKey';
@@ -105,6 +106,85 @@
         return String(signature || '');
     }
 
+    function normalizeRevision(value) {
+        const n = Number(value);
+        return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+    }
+
+    function normalizeDirtyKeys(keys) {
+        return Array.from(new Set((Array.isArray(keys) ? keys : [])
+            .map(key => String(key || '').trim())
+            .filter(Boolean)));
+    }
+
+    function normalizeDirtyKeyVersions(rawVersions, keys, revision) {
+        const versions = {};
+        if (rawVersions && typeof rawVersions === 'object') {
+            for (const [key, value] of Object.entries(rawVersions)) {
+                const normalizedKey = String(key || '').trim();
+                if (!normalizedKey) continue;
+                versions[normalizedKey] = normalizeRevision(value) || revision || 1;
+            }
+        }
+        normalizeDirtyKeys(keys).forEach(key => {
+            if (!versions[key]) {
+                versions[key] = revision || 1;
+            }
+        });
+        return versions;
+    }
+
+    function normalizeDirtyState(rawState) {
+        const safeState = rawState && typeof rawState === 'object' ? rawState : {};
+        const rawRevision = normalizeRevision(safeState.revision);
+        const dirtyKeys = normalizeDirtyKeys([
+            ...(Array.isArray(safeState.dirtyKeys) ? safeState.dirtyKeys : []),
+            ...Object.keys(safeState.dirtyKeyVersions || {})
+        ]);
+        const dirtyKeyVersions = normalizeDirtyKeyVersions(safeState.dirtyKeyVersions, dirtyKeys, rawRevision);
+        const normalizedKeys = normalizeDirtyKeys(Object.keys(dirtyKeyVersions));
+        const maxKeyRevision = normalizedKeys.reduce((max, key) => {
+            return Math.max(max, normalizeRevision(dirtyKeyVersions[key]));
+        }, 0);
+        const needsFullUpdate = safeState.needsFullUpdate === true;
+        const rawFullRevision = normalizeRevision(safeState.fullRevision);
+        const revision = Math.max(rawRevision, maxKeyRevision, rawFullRevision);
+        const dirty = safeState.dirty === true || needsFullUpdate || normalizedKeys.length > 0;
+        const fullRevision = needsFullUpdate
+            ? (rawFullRevision || revision || 1)
+            : 0;
+
+        return {
+            dirty,
+            needsFullUpdate,
+            dirtyKeys: normalizedKeys,
+            dirtyKeyVersions,
+            revision,
+            fullRevision,
+            updatedAt: normalizeRevision(safeState.updatedAt)
+        };
+    }
+
+    function serializeDirtyState(state) {
+        const normalized = normalizeDirtyState(state);
+        return {
+            dirty: normalized.dirty,
+            needsFullUpdate: normalized.needsFullUpdate,
+            dirtyKeys: normalized.dirtyKeys,
+            dirtyKeyVersions: normalized.dirtyKeyVersions,
+            revision: normalized.revision,
+            fullRevision: normalized.fullRevision,
+            updatedAt: normalized.updatedAt || Date.now()
+        };
+    }
+
+    function isDirtyStateClean(state) {
+        const normalized = normalizeDirtyState(state);
+        return normalized.dirty !== true &&
+            normalized.needsFullUpdate !== true &&
+            normalized.dirtyKeys.length === 0;
+    }
+
     function isFreshMeta(meta, signature) {
         return !!(
             meta &&
@@ -130,9 +210,105 @@
         return db.get(STORE_META, SNAPSHOT_META_KEY);
     }
 
+    async function getDirtyState() {
+        const db = await openSearchDb();
+        return normalizeDirtyState(await db.get(STORE_META, DIRTY_META_KEY));
+    }
+
+    async function getMetaWithDirtyState() {
+        const db = await openSearchDb();
+        const tx = db.transaction(STORE_META, 'readonly');
+        const metaStore = tx.objectStore(STORE_META);
+        const [meta, dirtyState] = await Promise.all([
+            metaStore.get(SNAPSHOT_META_KEY),
+            metaStore.get(DIRTY_META_KEY)
+        ]);
+        await tx.done;
+        return { db, meta, dirtyState };
+    }
+
+    async function markDirtyState(options = {}) {
+        const db = await openSearchDb();
+        const tx = db.transaction(STORE_META, 'readwrite');
+        const metaStore = tx.objectStore(STORE_META);
+        const current = normalizeDirtyState(await metaStore.get(DIRTY_META_KEY));
+        const revision = current.revision + 1;
+        const dirtyKeyVersions = Object.assign({}, current.dirtyKeyVersions);
+        const keys = normalizeDirtyKeys(options.keys);
+
+        keys.forEach(key => {
+            dirtyKeyVersions[key] = revision;
+        });
+
+        const needsFullUpdate = current.needsFullUpdate || options.full === true;
+        const fullRevision = options.full === true
+            ? revision
+            : (needsFullUpdate ? current.fullRevision : 0);
+        const next = serializeDirtyState({
+            dirty: needsFullUpdate || keys.length > 0 || Object.keys(dirtyKeyVersions).length > 0,
+            needsFullUpdate,
+            dirtyKeys: Object.keys(dirtyKeyVersions),
+            dirtyKeyVersions,
+            revision,
+            fullRevision,
+            updatedAt: Date.now()
+        });
+
+        await metaStore.put(next, DIRTY_META_KEY);
+        await tx.done;
+        return normalizeDirtyState(next);
+    }
+
+    async function clearProcessedDirtyState(processed = {}) {
+        const db = await openSearchDb();
+        const tx = db.transaction(STORE_META, 'readwrite');
+        const metaStore = tx.objectStore(STORE_META);
+        const current = normalizeDirtyState(await metaStore.get(DIRTY_META_KEY));
+        const dirtyKeyVersions = Object.assign({}, current.dirtyKeyVersions);
+        const processedKeys = normalizeDirtyKeys(processed.keys);
+        const processedKeyVersions = processed.keyVersions && typeof processed.keyVersions === 'object'
+            ? processed.keyVersions
+            : {};
+        if (processedKeys.length === 0 && processed.full !== true) {
+            await tx.done;
+            return current;
+        }
+
+        processedKeys.forEach(key => {
+            const processedRevision = normalizeRevision(processedKeyVersions[key]);
+            if (!processedRevision) return;
+            const currentRevision = normalizeRevision(dirtyKeyVersions[key]);
+            if (!currentRevision || currentRevision <= processedRevision) {
+                delete dirtyKeyVersions[key];
+            }
+        });
+
+        const processedFullRevision = normalizeRevision(processed.fullRevision);
+        const canClearFull = processed.full === true &&
+            current.needsFullUpdate &&
+            processedFullRevision &&
+            (!current.fullRevision || current.fullRevision <= processedFullRevision);
+        const needsFullUpdate = canClearFull ? false : current.needsFullUpdate;
+        const revision = current.revision + 1;
+        const remainingKeys = Object.keys(dirtyKeyVersions);
+        const next = serializeDirtyState({
+            dirty: needsFullUpdate || remainingKeys.length > 0,
+            needsFullUpdate,
+            dirtyKeys: remainingKeys,
+            dirtyKeyVersions,
+            revision,
+            fullRevision: needsFullUpdate ? current.fullRevision : 0,
+            updatedAt: Date.now()
+        });
+
+        await metaStore.put(next, DIRTY_META_KEY);
+        await tx.done;
+        return normalizeDirtyState(next);
+    }
+
     async function hasFreshIndex(signature) {
-        const meta = await getMeta();
-        return isFreshMeta(meta, signature);
+        const { meta, dirtyState } = await getMetaWithDirtyState();
+        return isFreshMeta(meta, signature) && isDirtyStateClean(dirtyState);
     }
 
     function normalizeMode(mode) {
@@ -445,9 +621,8 @@
     }
 
     async function loadModeSnapshot(mode, signature) {
-        const db = await openSearchDb();
-        const meta = await db.get(STORE_META, SNAPSHOT_META_KEY);
-        if (!isFreshMeta(meta, signature)) return null;
+        const { db, meta, dirtyState } = await getMetaWithDirtyState();
+        if (!isFreshMeta(meta, signature) || !isDirtyStateClean(dirtyState)) return null;
 
         if (isRecordMeta(meta)) {
             return loadRecordModeSnapshot(db, meta, mode);
@@ -497,13 +672,12 @@
     }
 
     async function loadAllSnapshot(signature, options = {}) {
-        const db = await openSearchDb();
-        const meta = await db.get(STORE_META, SNAPSHOT_META_KEY);
+        const { db, meta, dirtyState } = await getMetaWithDirtyState();
         const allowStale = !!(options && options.allowStale === true);
         if (allowStale) {
             if (!isCompleteMeta(meta)) return null;
-        } else if (!isFreshMeta(meta, signature)) {
-            return null;
+        } else {
+            if (!isFreshMeta(meta, signature) || !isDirtyStateClean(dirtyState)) return null;
         }
 
         if (isRecordMeta(meta)) {
@@ -527,11 +701,14 @@
 
     globalThis.SearchIndexDb = {
         clearLegacyChromeStorageIndex,
+        clearProcessedDirtyState,
+        getDirtyState,
         getMeta,
         hasFreshIndex,
         loadAllSnapshot,
         loadLatestSnapshot,
         loadModeSnapshot,
+        markDirtyState,
         saveIncrementalSnapshot,
         saveSnapshot
     };
