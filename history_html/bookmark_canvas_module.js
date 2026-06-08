@@ -108,6 +108,8 @@ const CanvasState = {
     lowDetailDomPruneGeneration: 0,
     lowDetailDomLastPruneAt: 0,
     lowDetailDomLastRestoreAt: 0,
+    lowDetailRippleGeneration: 0,
+    lowDetailRippleFrame: null,
     zoomPerformanceModeActive: false,
     // 数据密集即时低细节模式（视界窗口数据量过多时，缩放瞬间即进入低细节）
     dataIntensiveMode: {
@@ -1559,6 +1561,11 @@ function __handleCardGroupBlankAreaCtrlContextMenu(event) {
 }
 
 const CANVAS_LOW_DETAIL_SURFACE_SELECTOR = '.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .card-group-canvas-node';
+const CANVAS_LOW_DETAIL_RIPPLE_CLASS = 'canvas-low-detail-ripple';
+const CANVAS_LOW_DETAIL_RIPPLE_NEAR_MARGIN = 96;
+const CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME = 28;
+const CANVAS_LOW_DETAIL_RIPPLE_MIN_MS = 180;
+const CANVAS_LOW_DETAIL_RIPPLE_MAX_MS = 520;
 
 function __getEventTargetElement(event) {
     const target = event && event.target ? event.target : null;
@@ -2135,7 +2142,7 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     trackpadZoomRate: TRACKPAD_ZOOM_RATE_DEFAULT,
     magnetPoints: {
         m1: { x: 0.67, y: DEFAULT_ZOOM_MAGNET_POINT_SPEED },
-        m2: { x: 0.25, y: DEFAULT_ZOOM_MAGNET_POINT_SPEED }
+        m2: { x: 0.2777777778, y: DEFAULT_ZOOM_MAGNET_POINT_SPEED }
     }
 };
 
@@ -2144,6 +2151,15 @@ const DEFAULT_PERF_BASELINE = {
     exitLowDetail: 30,
     enterLowDetail: 35
 };
+
+const CANVAS_LOW_DETAIL_PREWARM_GAP = 0.05;
+const CANVAS_LOW_DETAIL_SWITCH_HYSTERESIS = 0.02;
+
+function __deriveCanvasLowDetailPrewarmThreshold(enterThreshold) {
+    const enter = Number(enterThreshold);
+    const safeEnter = Number.isFinite(enter) && enter > 0 ? enter : 0.35;
+    return Math.max(0.01, Math.min(1, safeEnter - CANVAS_LOW_DETAIL_PREWARM_GAP));
+}
 
 function __cloneDefaultAppearanceSettings() {
     const cloned = JSON.parse(JSON.stringify(DEFAULT_CANVAS_APPEARANCE_SETTINGS));
@@ -2240,20 +2256,28 @@ function __normalizeZoomCurve(input) {
 
 function __getDefaultMagnetPointsFromPerf(baseMagnets) {
     const fallback = baseMagnets ? __normalizeMagnetPoints(baseMagnets) : __cloneDefaultOtherSettings().magnetPoints;
-    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
-    const maxPercent = 100;
-    const range = Math.max(1, maxPercent - minPercent);
-    const toNorm = (percent) => __clamp01((percent - minPercent) / range);
-    const safePercent = DEFAULT_PERF_BASELINE.safeZone;
-    const enter = DEFAULT_PERF_BASELINE.enterLowDetail;
-    const exit = DEFAULT_PERF_BASELINE.exitLowDetail;
-    const midPercent = (enter + exit) / 2;
-    const m1x = toNorm(safePercent);
-    const m2x = toNorm(midPercent);
+    const safePercent = getCanvasSafeZoneThreshold() * 100;
+    const switchPercent = getCanvasLowDetailDisplayZoomThreshold() * 100;
+    const m1x = __getCanvasMagnetNormXForPercent(safePercent);
+    const m2x = __getCanvasMagnetNormXForPercent(switchPercent);
     return {
         m1: { x: m1x, y: fallback.m1.y },
         m2: { x: m2x, y: fallback.m2.y }
     };
+}
+
+function __getCanvasMagnetNormXForPercent(percent) {
+    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
+    const maxPercent = 100;
+    const range = Math.max(1, maxPercent - minPercent);
+    return __clamp01((percent - minPercent) / range);
+}
+
+function __syncMagnetPointPositionsFromPerf(points) {
+    const out = __normalizeMagnetPoints(points);
+    out.m1.x = __getCanvasMagnetNormXForPercent(getCanvasSafeZoneThreshold() * 100);
+    out.m2.x = __getCanvasMagnetNormXForPercent(getCanvasLowDetailDisplayZoomThreshold() * 100);
+    return out;
 }
 
 function __normalizeMagnetPoints(input) {
@@ -2418,7 +2442,7 @@ function normalizeCanvasOtherSettings(input) {
     if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
     out.zoomCurve = __normalizeZoomCurve(input.zoomCurve);
     out.trackpadZoomRate = __clampNumber(input.trackpadZoomRate, TRACKPAD_ZOOM_RATE_MIN, TRACKPAD_ZOOM_RATE_MAX, out.trackpadZoomRate);
-    out.magnetPoints = __normalizeMagnetPoints(input.magnetPoints);
+    out.magnetPoints = __syncMagnetPointPositionsFromPerf(input.magnetPoints);
     return out;
 }
 
@@ -2716,8 +2740,13 @@ function __writePerfManualBaseline(payload) {
 
 function __getPerfManualBaseline() {
     const saved = __readPerfManualBaseline();
-    if (saved && Number.isFinite(saved.safeZone) && Number.isFinite(saved.exitLowDetail) && Number.isFinite(saved.enterLowDetail)) {
-        return saved;
+    if (saved && Number.isFinite(saved.safeZone) && Number.isFinite(saved.enterLowDetail)) {
+        const enterLowDetail = saved.enterLowDetail;
+        return {
+            safeZone: saved.safeZone,
+            exitLowDetail: __deriveCanvasLowDetailPrewarmThreshold(enterLowDetail / 100) * 100,
+            enterLowDetail
+        };
     }
     return {
         safeZone: getCanvasSafeZoneThreshold() * 100,
@@ -2795,8 +2824,7 @@ function __applyPerfManualBaselineToPerf() {
     if (safeValueEl) safeValueEl.textContent = `${__formatPercentInputValue(baseline.safeZone)}%`;
     const midValueEl = document.getElementById('perfMagnetMidValue');
     if (midValueEl) {
-        const mid = (baseline.exitLowDetail + baseline.enterLowDetail) / 2;
-        midValueEl.textContent = `${__formatPercentInputValue(mid)}%`;
+        midValueEl.textContent = `${__formatPercentInputValue(baseline.enterLowDetail)}%`;
     }
 
     __clearPerfLinkedFromOther();
@@ -2834,8 +2862,7 @@ function __applyPerfDefaultBaselineToPerf() {
     if (safeValueEl) safeValueEl.textContent = `${__formatPercentInputValue(DEFAULT_PERF_BASELINE.safeZone)}%`;
     const midValueEl = document.getElementById('perfMagnetMidValue');
     if (midValueEl) {
-        const mid = (DEFAULT_PERF_BASELINE.exitLowDetail + DEFAULT_PERF_BASELINE.enterLowDetail) / 2;
-        midValueEl.textContent = `${__formatPercentInputValue(mid)}%`;
+        midValueEl.textContent = `${__formatPercentInputValue(DEFAULT_PERF_BASELINE.enterLowDetail)}%`;
     }
 
     __clearPerfLinkedFromOther();
@@ -2855,6 +2882,7 @@ function __applyPerfLinkedStyles() {
 
     const apply = (input) => {
         if (!input) return;
+        if (input.type === 'hidden') return;
         const unit = input.parentElement ? input.parentElement.querySelector('span') : null;
         if (flags) {
             input.classList.add('perf-linked-input');
@@ -2898,33 +2926,12 @@ function __syncPerfSettingsFromOtherMagnetPoints(magnetPoints) {
     const maxPercent = 100;
     const range = Math.max(1, maxPercent - minPercent);
     const safePercent = minPercent + (__clamp01(points.m1.x) * range);
-    const midPercent = minPercent + (__clamp01(points.m2.x) * range);
+    const switchPercent = minPercent + (__clamp01(points.m2.x) * range);
 
-    let gap = 5;
-    const baseline = __getPerfManualBaseline();
-    const curGap = baseline.enterLowDetail - baseline.exitLowDetail;
-    if (Number.isFinite(curGap) && curGap > 0) gap = curGap;
-    if (!Number.isFinite(gap) || gap <= 0) gap = 5;
-
-    let exitPercent = midPercent - gap / 2;
-    let enterPercent = midPercent + gap / 2;
     const minV = 1;
     const maxV = 100;
-    if (exitPercent < minV) {
-        exitPercent = minV;
-        enterPercent = exitPercent + gap;
-    }
-    if (enterPercent > maxV) {
-        enterPercent = maxV;
-        exitPercent = enterPercent - gap;
-    }
-    exitPercent = Math.max(minV, Math.min(maxV, exitPercent));
-    enterPercent = Math.max(minV, Math.min(maxV, enterPercent));
-    if (enterPercent < exitPercent) {
-        const tmp = enterPercent;
-        enterPercent = exitPercent;
-        exitPercent = tmp;
-    }
+    const enterPercent = Math.max(minV, Math.min(maxV, switchPercent));
+    const exitPercent = __deriveCanvasLowDetailPrewarmThreshold(enterPercent / 100) * 100;
 
     const safeZoneSettings = (() => {
         try {
@@ -2949,7 +2956,7 @@ function __syncPerfSettingsFromOtherMagnetPoints(magnetPoints) {
         safeZone: safePercent,
         exitLowDetail: exitPercent,
         enterLowDetail: enterPercent,
-        midPercent,
+        switchPercent,
         updatedAt: Date.now()
     });
 
@@ -2963,7 +2970,7 @@ function __syncPerfSettingsFromOtherMagnetPoints(magnetPoints) {
     const safeValueEl = document.getElementById('perfMagnetSafeValue');
     if (safeValueEl) safeValueEl.textContent = `${__formatPercentInputValue(safePercent)}%`;
     const midValueEl = document.getElementById('perfMagnetMidValue');
-    if (midValueEl) midValueEl.textContent = `${__formatPercentInputValue(midPercent)}%`;
+    if (midValueEl) midValueEl.textContent = `${__formatPercentInputValue(enterPercent)}%`;
 
     __applyPerfLinkedStyles();
 }
@@ -6760,7 +6767,7 @@ function setupCanvasZoomAndPan() {
                         CanvasState.lowDetailFreezeInv = inv;
                         container.style.setProperty('--canvas-low-detail-freeze-inv', inv.toString());
                     }
-                    __enterCanvasLowDetailVisualState(workspace);
+                    __applyLowDetailStateVisualSync(true);
                     try { __scheduleCanvasLowDetailDomPrune(0); } catch (_) { }
                 } catch (_) { }
             }
@@ -9017,8 +9024,8 @@ function getCanvasZoomMagnetSettings() {
     // Defaults:
     // - magnet enabled: true
     // - safe zone magnet (70%): enabled
-    // - low-detail mid magnet (~32%): disabled
-    const defaults = { enabled: true, enableSafeZone: true, enableLowDetailMid: false };
+    // - low-detail boundary magnet: enabled
+    const defaults = { enabled: true, enableSafeZone: true, enableLowDetailMid: true };
 
     // New format
     try {
@@ -9084,24 +9091,16 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
     const strengthBoost = 1 + speedBoost * 0.6;
 
     const settings = getCanvasZoomMagnetSettings();
-    const useDefaultCurve = shouldUseDefaultZoomCurve();
-    const magnetPoints = useDefaultCurve
-        ? __getDefaultMagnetPointsFromPerf(getCanvasZoomMagnetPoints())
-        : __normalizeMagnetPoints(getCanvasZoomMagnetPoints());
-    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
-    const maxPercent = 100;
-    const range = Math.max(1, maxPercent - minPercent);
-    const normToPercent = (nx) => minPercent + (__clamp01(nx) * range);
+    const magnetPoints = __normalizeMagnetPoints(getCanvasZoomMagnetPoints());
 
     // 两个“磁矩”位置：
     // - Safe Zone 阈值（默认 70%）
-    // - (exitLowDetail + enterLowDetail) / 2（默认 (30%+35%)/2 = 32.5%）
+    // - low-detail visual switch threshold（默认 35%）
     const magnets = [];
 
     try {
         if (settings.enableSafeZone && isCanvasSafeZoneEnabled()) {
-            const safePercent = normToPercent(magnetPoints.m1.x);
-            const safe = safePercent / 100;
+            const safe = getCanvasSafeZoneThreshold();
             if (Number.isFinite(safe) && safe > 0) {
                 // Safe Zone 附近更明显（范围更宽、减速更强）
                 const halfWidth = Math.min(0.16, 0.08 * widthBoost);
@@ -9115,13 +9114,11 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
             const enter = getCanvasLowDetailDisplayZoomThreshold();
             const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
             if (Number.isFinite(enter) && Number.isFinite(exit) && enter > 0 && exit > 0) {
-                const midPercent = normToPercent(magnetPoints.m2.x);
-                const mid = midPercent / 100;
                 const band = Math.max(0.01, Math.abs(enter - exit));
-                // (30%~35%) 的中点附近给一个更宽的“缓慢区”，避免感觉只是“一个点”
+                // 中心精准卡在低细节切换点；缓慢区覆盖边界前后，给 DOM/低细节状态切换留反应时间。
                 const baseHalf = Math.min(0.12, Math.max(0.06, band * 2.5));
                 const halfWidth = Math.min(0.18, baseHalf * widthBoost);
-                magnets.push({ center: mid, halfWidth, minFactor: magnetPoints.m2.y, boost: strengthBoost });
+                magnets.push({ center: enter, halfWidth, minFactor: magnetPoints.m2.y, boost: strengthBoost });
             }
         }
     } catch (_) { }
@@ -9533,17 +9530,8 @@ function getCanvasLowDetailDisplayZoomThreshold() {
 }
 
 function getCanvasLowDetailPrewarmDisplayZoomThreshold() {
-    // 动态阈值：从 localStorage 读取，默认 30% 为预加载阈值
-    try {
-        const saved = localStorage.getItem('canvasZoomThresholds');
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed && Number.isFinite(parsed.exitLowDetail)) {
-                return parsed.exitLowDetail;
-            }
-        }
-    } catch (_) { }
-    return 0.30;
+    // 预热阈值不再作为用户独立参数暴露，固定由“低细节切换阈值”向下派生。
+    return __deriveCanvasLowDetailPrewarmThreshold(getCanvasLowDetailDisplayZoomThreshold());
 }
 
 /**
@@ -10003,9 +9991,14 @@ function shouldInstantLowDetailOnZoom() {
         }
     }
 
-    // [New Refined Logic]
-    // 只有在数据量过大(active) 且 用户按住 Ctrl 键缩放时，才进入"进阶低细节模式"
-    // 这样既防止了普通缩放时的意外降级，又给了用户手动优化的手段
+    const enterThreshold = getCanvasLowDetailDisplayZoomThreshold();
+    const safetyFloor = 0.15;
+    if (!(displayZoom <= enterThreshold || displayZoom < safetyFloor)) {
+        return false;
+    }
+
+    // 只有在数据量过大(active) 且用户按住 Ctrl 键缩放时，才提前进入低细节；
+    // Ctrl 不能越过用户设置的低细节阈值，否则阈值~安全区之间会反复闪成色块。
     const isCtrl = !!(CanvasState.isCtrlPressed || (CanvasState.dragState && CanvasState.dragState.meta && CanvasState.dragState.meta.ctrlOverlay));
 
     // 使用缓存的active状态（避免在缩放热路径上做重计算）
@@ -10088,6 +10081,8 @@ let canvasLowDetailDomRestoreTimer = null;
 let canvasZoomPerformanceModeRestoreTimer = null;
 const CANVAS_LOW_DETAIL_DOM_PRUNE_DEBOUNCE_MS = 80;
 const CANVAS_LOW_DETAIL_DOM_PRUNE_THROTTLE_MS = 360;
+const CANVAS_LOW_DETAIL_DOM_PRUNE_GRACE_MS = 12000;
+const CANVAS_LOW_DETAIL_DOM_PRUNE_BUSY_RETRY_MS = 1000;
 const CANVAS_LOW_DETAIL_DOM_RESTORE_GRACE_MS = 520;
 const CANVAS_LOW_DETAIL_DOM_RESTORE_BUSY_RETRY_MS = 180;
 const CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS = 1200;
@@ -10162,6 +10157,9 @@ function setCanvasZoomPerformanceModeActive(active) {
         return;
     }
     CanvasState.zoomPerformanceModeActive = next;
+    if (next) {
+        try { __clearCanvasTreeFadeInClasses(workspace); } catch (_) { }
+    }
     workspace.classList.toggle('canvas-zoom-performance', next);
 }
 
@@ -10331,7 +10329,7 @@ function __restorePermanentSectionTreesAfterLowDetail() {
     return rendered;
 }
 
-function __scheduleCanvasLowDetailDomPrune(delayMs = 0) {
+function __scheduleCanvasLowDetailDomPrune(delayMs = CANVAS_LOW_DETAIL_DOM_PRUNE_GRACE_MS, options = {}) {
     if (canvasLowDetailDomRestoreTimer) {
         clearTimeout(canvasLowDetailDomRestoreTimer);
         canvasLowDetailDomRestoreTimer = null;
@@ -10346,7 +10344,9 @@ function __scheduleCanvasLowDetailDomPrune(delayMs = 0) {
     const throttleDelay = sinceLast >= CANVAS_LOW_DETAIL_DOM_PRUNE_THROTTLE_MS
         ? 0
         : (CANVAS_LOW_DETAIL_DOM_PRUNE_THROTTLE_MS - sinceLast);
-    const requestedDelay = Math.max(0, Number(delayMs) || 0);
+    const opts = (options && typeof options === 'object') ? options : {};
+    const minDelay = opts.allowShortDelay ? 0 : CANVAS_LOW_DETAIL_DOM_PRUNE_GRACE_MS;
+    const requestedDelay = Math.max(minDelay, Number(delayMs) || 0);
     const delay = Math.max(requestedDelay, CanvasState.lowDetailDomPruned ? throttleDelay : Math.min(throttleDelay, CANVAS_LOW_DETAIL_DOM_PRUNE_DEBOUNCE_MS));
     const generation = (Number(CanvasState.lowDetailDomPruneGeneration || 0) || 0) + 1;
     CanvasState.lowDetailDomPruneGeneration = generation;
@@ -10354,8 +10354,16 @@ function __scheduleCanvasLowDetailDomPrune(delayMs = 0) {
         canvasLowDetailDomPruneTimer = null;
         if (!CanvasState.lowDetailActive) return;
         if (CanvasState.lowDetailDomPruneGeneration !== generation) return;
+        if (__isCanvasInteractionBusyForDomRestore()) {
+            __scheduleCanvasLowDetailDomPrune(CANVAS_LOW_DETAIL_DOM_PRUNE_BUSY_RETRY_MS, { allowShortDelay: true });
+            return;
+        }
         try { __unloadPermanentSectionTreesForLowDetail(); } catch (_) { }
-        try { runCanvasVirtualizationUpdate({ force: true, doLoad: false, doUnload: true }); } catch (_) { }
+        if (isCanvasVirtualizationEnabled()) {
+            try { runCanvasVirtualizationUpdate({ force: true, doLoad: false, doUnload: true, lowDetailPrune: true }); } catch (_) { }
+        } else {
+            try { startCanvasLowDetailUnloadJob(); } catch (_) { }
+        }
         CanvasState.lowDetailDomPruned = true;
         CanvasState.lowDetailDomLastPruneAt = Date.now();
     }, delay);
@@ -10440,10 +10448,9 @@ function scheduleCanvasVirtualizationUpdate(delayMs = null) {
     canvasVirtualizationTimer = setTimeout(() => {
         canvasVirtualizationTimer = null;
         canvasVirtualizationPending = false;
-        // 低细节：仅卸载（不加载），确保重内容尽快退出 DOM
+        // 低细节：先切视觉，重 DOM 延迟卸载，避免边界附近来回缩放反复构建/销毁。
         if (CanvasState.lowDetailActive) {
-            try { __unloadPermanentSectionTreesForLowDetail(); } catch (_) { }
-            try { runCanvasVirtualizationUpdate({ doLoad: false, doUnload: true }); } catch (_) { }
+            try { __scheduleCanvasLowDetailDomPrune(); } catch (_) { }
             return;
         }
         // 正常：先补加载（稳定体验），再延迟卸载（避免抖动）
@@ -10466,12 +10473,16 @@ function runCanvasVirtualizationUpdate(options = {}) {
         doLoad = true    // 在预算内：加载树 DOM
     } = options;
 
+    const allowLowDetailPrune = !!options.lowDetailPrune;
     if (CanvasState.lowDetailActive) {
-        // 进入低细节后应尽快接近“刷新后直接处于低缩放”的轻量状态。
-        // 过去在预热区间保留已加载树 DOM，会让从高细节缩小的页面比刷新后的同缩放页面重很多，
-        // 大数据时容易触发持续重绘/合成抖动，并连带影响画布外 UI。
-        try { __unloadPermanentSectionTreesForLowDetail(); } catch (_) { }
         doLoad = false;
+        if (!allowLowDetailPrune) {
+            if (doUnload) {
+                try { __scheduleCanvasLowDetailDomPrune(); } catch (_) { }
+            }
+            return;
+        }
+        try { __unloadPermanentSectionTreesForLowDetail(); } catch (_) { }
         doUnload = true;
     }
 
@@ -10913,6 +10924,49 @@ function startCanvasLowDetailUnloadJob() {
     __scheduleCanvasLowDetailUnloadChunk();
 }
 
+function __cleanupCanvasTreeFadeInClass(treeContainer) {
+    if (!treeContainer || !treeContainer.classList) return;
+    const handler = treeContainer.__canvasFadeInCleanupHandler;
+    if (handler) {
+        try { treeContainer.removeEventListener('animationend', handler); } catch (_) { }
+    }
+    const timer = treeContainer.__canvasFadeInCleanupTimer;
+    if (timer) {
+        try { clearTimeout(timer); } catch (_) { }
+    }
+    treeContainer.__canvasFadeInCleanupHandler = null;
+    treeContainer.__canvasFadeInCleanupTimer = null;
+    try { treeContainer.classList.remove('animate-fade-in'); } catch (_) { }
+}
+
+function __scheduleCanvasTreeFadeInCleanup(treeContainer) {
+    if (!treeContainer || !treeContainer.classList) return;
+    const previousHandler = treeContainer.__canvasFadeInCleanupHandler;
+    if (previousHandler) {
+        try { treeContainer.removeEventListener('animationend', previousHandler); } catch (_) { }
+    }
+    const previousTimer = treeContainer.__canvasFadeInCleanupTimer;
+    if (previousTimer) {
+        try { clearTimeout(previousTimer); } catch (_) { }
+    }
+
+    const cleanup = (event) => {
+        if (event && event.target !== treeContainer) return;
+        __cleanupCanvasTreeFadeInClass(treeContainer);
+    };
+    treeContainer.__canvasFadeInCleanupHandler = cleanup;
+    try { treeContainer.addEventListener('animationend', cleanup); } catch (_) { }
+    treeContainer.__canvasFadeInCleanupTimer = setTimeout(cleanup, 420);
+}
+
+function __clearCanvasTreeFadeInClasses(scope = null) {
+    const root = scope && scope.querySelectorAll ? scope : document;
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('.bookmark-tree.animate-fade-in').forEach(tree => {
+        try { __cleanupCanvasTreeFadeInClass(tree); } catch (_) { }
+    });
+}
+
 function __ensureTempSectionTreeLoadedInPlace(section) {
     if (!section || !section.id) return false;
 
@@ -10971,7 +11025,10 @@ function __ensureTempSectionTreeLoadedInPlace(section) {
         treeContainer.classList.remove('animate-fade-in');
         const suppressUntil = Number(CanvasState.suppressTreeLoadAnimationUntil || 0) || 0;
         const shouldAnimate = !isCanvasHugeData() && Date.now() >= suppressUntil;
-        if (shouldAnimate) treeContainer.classList.add('animate-fade-in');
+        if (shouldAnimate) {
+            treeContainer.classList.add('animate-fade-in');
+            __scheduleCanvasTreeFadeInCleanup(treeContainer);
+        }
     } catch (_) { }
 
     return true;
@@ -11248,7 +11305,7 @@ function __runCanvasLowDetailPrewarmChunk(deadline) {
 
     if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.size) {
         cancelCanvasLowDetailPrewarmJob();
-        // 预热完成后尝试退出低细节（如果已超过 40%）
+        // 内部缓冲加载完成后尝试退出低细节（如果已超过显示切换阈值）
         try { updateCanvasLowDetailMode(true); } catch (_) { }
         return;
     }
@@ -11739,6 +11796,7 @@ function __maybeApplyCardGroupLowDetailMembershipState(options = {}) {
 function __updateNonTempNodesViewportVisibility() {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
+    if (workspace.classList && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS)) return;
 
     const bounds = __getCanvasViewportBounds(workspace);
     const isGlobalLowDetail = !!CanvasState.lowDetailActive;
@@ -11847,6 +11905,251 @@ function __ensureCanvasLowDetailOverlaysReady(workspace = null) {
     } catch (_) { }
 }
 
+function __cancelCanvasLowDetailRipple(workspace = null, options = {}) {
+    CanvasState.lowDetailRippleGeneration = (Number(CanvasState.lowDetailRippleGeneration || 0) || 0) + 1;
+    if (CanvasState.lowDetailRippleFrame) {
+        try { cancelAnimationFrame(CanvasState.lowDetailRippleFrame); } catch (_) { }
+        CanvasState.lowDetailRippleFrame = null;
+    }
+    const opts = (options && typeof options === 'object') ? options : {};
+    if (opts.keepClass) return;
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (ws && ws.classList) {
+        try { ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS); } catch (_) { }
+    }
+}
+
+function __getCanvasLowDetailRippleViewportRect(workspace) {
+    const container = getCachedContainer() || (workspace && workspace.parentElement) || workspace;
+    if (!container || typeof container.getBoundingClientRect !== 'function') return null;
+    try {
+        const rect = container.getBoundingClientRect();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+        return rect;
+    } catch (_) {
+        return null;
+    }
+}
+
+function __isRectNearLowDetailRippleViewport(rect, viewportRect) {
+    if (!rect || !viewportRect) return false;
+    const m = CANVAS_LOW_DETAIL_RIPPLE_NEAR_MARGIN;
+    return !(
+        rect.right < viewportRect.left - m ||
+        rect.left > viewportRect.right + m ||
+        rect.bottom < viewportRect.top - m ||
+        rect.top > viewportRect.bottom + m
+    );
+}
+
+function __isCardAlreadyLowDetailIntrinsic(card) {
+    if (!card || !card.classList) return false;
+    return !!(
+        card.classList.contains('low-detail-active') ||
+        card.classList.contains('dormant-content') ||
+        card.classList.contains('temp-tree-unloaded') ||
+        card.classList.contains('permanent-tree-unloaded') ||
+        card.classList.contains('card-group-low-detail-child-hidden')
+    );
+}
+
+function __ensureLowDetailOverlayForCard(card) {
+    if (!card || !card.classList) return;
+    try {
+        if (card.classList.contains('temp-canvas-node')) {
+            const sectionId = card.dataset ? (card.dataset.sectionId || card.id) : card.id;
+            const section = (typeof getTempSection === 'function') ? getTempSection(sectionId) : null;
+            if (section) __ensureTempSectionLowDetailOverlay(section, card);
+            return;
+        }
+    } catch (_) { }
+    try {
+        if (card.classList.contains('permanent-bookmark-section')) {
+            __ensurePermanentSectionLowDetailOverlay(card);
+            return;
+        }
+    } catch (_) { }
+    try {
+        if (card.classList.contains('card-group-canvas-node')) {
+            const node = __getCardGroupLowDetailNodeById(card.id);
+            if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
+                window.__BCSCardGroup.ensureLowDetailOverlay(card, node);
+            }
+            return;
+        }
+    } catch (_) { }
+    try {
+        if (card.classList.contains('md-canvas-node')) {
+            const node = (typeof getMdNodeById === 'function') ? getMdNodeById(card.id) : null;
+            if (node) __ensureMdNodeLowDetailOverlay(card, node);
+        }
+    } catch (_) { }
+}
+
+function __shouldKeepCardLowDetailAfterGlobalExit(card, bounds) {
+    if (!card || !card.classList) return false;
+    if (card.classList.contains('card-group-low-detail-child-hidden')) return true;
+    if (card.classList.contains('dormant-content') || card.classList.contains('temp-tree-unloaded')) return true;
+    if (card.classList.contains('permanent-tree-unloaded')) return true;
+    if (card.classList.contains('md-canvas-node') ||
+        card.classList.contains('permanent-bookmark-section') ||
+        card.classList.contains('card-group-canvas-node')) {
+        return __isCardOutsideViewportBounds(card, bounds);
+    }
+    return false;
+}
+
+function __collectCanvasLowDetailRippleCards(workspace, shouldActive) {
+    const viewportRect = __getCanvasLowDetailRippleViewportRect(workspace);
+    if (!workspace || !viewportRect) return [];
+    const centerX = viewportRect.left + viewportRect.width / 2;
+    const centerY = viewportRect.top + viewportRect.height / 2;
+    const bounds = __getCanvasViewportBounds(workspace);
+    const cards = Array.from(workspace.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
+    const entries = [];
+
+    cards.forEach(card => {
+        if (!card || !card.classList) return;
+        if (card.classList.contains('card-group-low-detail-child-hidden')) return;
+        const rect = (typeof card.getBoundingClientRect === 'function') ? card.getBoundingClientRect() : null;
+        if (!rect || rect.width <= 0 || rect.height <= 0) return;
+        if (!__isRectNearLowDetailRippleViewport(rect, viewportRect)) return;
+
+        if (shouldActive) {
+            if (__isCardAlreadyLowDetailIntrinsic(card)) return;
+        } else {
+            if (__shouldKeepCardLowDetailAfterGlobalExit(card, bounds)) return;
+        }
+
+        const cardX = rect.left + rect.width / 2;
+        const cardY = rect.top + rect.height / 2;
+        const distance = Math.hypot(cardX - centerX, cardY - centerY);
+        entries.push({ card, distance });
+    });
+
+    if (!entries.length) return [];
+    const maxDistance = Math.max(1, ...entries.map(entry => entry.distance));
+    entries.forEach(entry => {
+        // Enter: outside -> viewport center. Exit: viewport center -> outside.
+        entry.wave = shouldActive ? (maxDistance - entry.distance) : entry.distance;
+    });
+    entries.sort((a, b) => a.wave - b.wave);
+    return entries;
+}
+
+function __finalizeCanvasLowDetailExitVisualState(workspace) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws) return;
+
+    ws.classList.remove('canvas-low-detail');
+    ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
+    try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
+
+    const bounds = __getCanvasViewportBounds(ws);
+    const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
+    cards.forEach(card => {
+        const activeForCard = __shouldKeepCardLowDetailAfterGlobalExit(card, bounds);
+        if (card.classList && !card.classList.contains('card-group-low-detail-child-hidden')) {
+            card.classList.toggle('low-detail-active', activeForCard);
+        }
+        if (activeForCard) {
+            __ensureLowDetailOverlayForCard(card);
+        }
+    });
+
+    try { __maybeApplyCardGroupLowDetailMembershipState({ force: false }); } catch (_) { }
+}
+
+function __startCanvasLowDetailVisualRipple(shouldActive, workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws || !ws.classList) return false;
+
+    __cancelCanvasLowDetailRipple(ws);
+    const generation = (Number(CanvasState.lowDetailRippleGeneration || 0) || 0) + 1;
+    CanvasState.lowDetailRippleGeneration = generation;
+
+    if (shouldActive) {
+        __ensureCanvasLowDetailOverlaysReady(ws);
+        ws.classList.add(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
+        ws.classList.add('canvas-low-detail');
+    } else {
+        __ensureCanvasLowDetailOverlaysReady(ws);
+        ws.classList.add(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
+    }
+
+    const entries = __collectCanvasLowDetailRippleCards(ws, shouldActive);
+    if (!shouldActive) {
+        entries.forEach(entry => {
+            try {
+                __ensureLowDetailOverlayForCard(entry.card);
+                entry.card.classList.add('low-detail-active');
+            } catch (_) { }
+        });
+    }
+
+    const finish = () => {
+        if (CanvasState.lowDetailRippleGeneration !== generation) return;
+        CanvasState.lowDetailRippleFrame = null;
+        if (shouldActive) {
+            ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
+            ws.classList.add('canvas-low-detail');
+            try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
+            try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
+        } else {
+            __finalizeCanvasLowDetailExitVisualState(ws);
+        }
+        try { scheduleEdgesRender(0); } catch (_) { }
+    };
+
+    if (!entries.length) {
+        finish();
+        return true;
+    }
+
+    const maxWave = Math.max(1, ...entries.map(entry => entry.wave));
+    const duration = Math.min(
+        CANVAS_LOW_DETAIL_RIPPLE_MAX_MS,
+        Math.max(CANVAS_LOW_DETAIL_RIPPLE_MIN_MS, 140 + entries.length * 8)
+    );
+    const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    let index = 0;
+
+    const applyEntry = (entry) => {
+        if (!entry || !entry.card || !entry.card.classList) return;
+        try {
+            if (shouldActive) {
+                __ensureLowDetailOverlayForCard(entry.card);
+                entry.card.classList.add('low-detail-active');
+            } else {
+                entry.card.classList.remove('low-detail-active');
+            }
+        } catch (_) { }
+    };
+
+    const step = (now) => {
+        if (CanvasState.lowDetailRippleGeneration !== generation) return;
+        const current = (typeof now === 'number') ? now : Date.now();
+        const t = Math.max(0, Math.min(1, (current - start) / duration));
+        const threshold = maxWave * t;
+        let applied = 0;
+        while (index < entries.length &&
+            (entries[index].wave <= threshold || (t >= 1 && applied < CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME)) &&
+            applied < CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME) {
+            applyEntry(entries[index]);
+            index++;
+            applied++;
+        }
+        if (index >= entries.length) {
+            finish();
+            return;
+        }
+        CanvasState.lowDetailRippleFrame = requestAnimationFrame(step);
+    };
+
+    CanvasState.lowDetailRippleFrame = requestAnimationFrame(step);
+    return true;
+}
+
 function __enterCanvasLowDetailVisualState(workspace = null) {
     const ws = workspace || document.getElementById('canvasWorkspace');
     if (!ws) return;
@@ -11861,6 +12164,7 @@ function __exitCanvasLowDetailVisualState(workspace = null) {
     const ws = workspace || document.getElementById('canvasWorkspace');
     if (!ws) return;
 
+    __cancelCanvasLowDetailRipple(ws);
     ws.classList.remove('canvas-low-detail');
     try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
 }
@@ -11869,54 +12173,12 @@ function __applyLowDetailStateVisualSync(shouldActive) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
 
-    if (shouldActive) {
-        __enterCanvasLowDetailVisualState(workspace);
+    if (__startCanvasLowDetailVisualRipple(shouldActive, workspace)) {
         return;
     }
 
-    __exitCanvasLowDetailVisualState(workspace);
-
-    // 获取工作区内所有的卡片 DOM
-    const cards = Array.from(workspace.querySelectorAll('.temp-canvas-node, .permanent-bookmark-section, .md-canvas-node, .card-group-canvas-node'));
-    if (cards.length === 0) {
-        return;
-    }
-
-    const bounds = __getCanvasViewportBounds(workspace);
-    cards.forEach(card => {
-        let activeForCard = false;
-        if (card.classList.contains('md-canvas-node') ||
-            card.classList.contains('permanent-bookmark-section') ||
-            card.classList.contains('card-group-canvas-node')) {
-            activeForCard = __isCardOutsideViewportBounds(card, bounds);
-        }
-
-        card.classList.toggle('low-detail-active', activeForCard);
-
-        // 视口外卡片保留同一套低细节表示，避免退出全局低细节时出现旧样式。
-        if (activeForCard && card.classList.contains('permanent-bookmark-section')) {
-            try { __ensurePermanentSectionLowDetailOverlay(card); } catch (_) { }
-        }
-        if (activeForCard && card.classList.contains('md-canvas-node')) {
-            try {
-                const nodeId = card.id;
-                const node = (typeof getMdNodeById === 'function') ? getMdNodeById(nodeId) : null;
-                if (node) {
-                    __ensureMdNodeLowDetailOverlay(card, node);
-                }
-            } catch (_) {}
-        }
-        if (activeForCard && card.classList.contains('card-group-canvas-node')) {
-            try {
-                const node = __getCardGroupLowDetailNodeById(card.id);
-                if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
-                    window.__BCSCardGroup.ensureLowDetailOverlay(card, node);
-                }
-            } catch (_) { }
-        }
-    });
-
-    try { __maybeApplyCardGroupLowDetailMembershipState({ force: false }); } catch (_) { }
+    if (shouldActive) __enterCanvasLowDetailVisualState(workspace);
+    else __finalizeCanvasLowDetailExitVisualState(workspace);
 }
 
 function updateCanvasLowDetailMode(force = false) {
@@ -11961,8 +12223,8 @@ function updateCanvasLowDetailMode(force = false) {
         return;
     }
 
-    const enterThreshold = getCanvasLowDetailDisplayZoomThreshold(); // 0.35/0.40
-    const exitThreshold = enterThreshold + 0.05; // Hysteresis
+    const enterThreshold = getCanvasLowDetailDisplayZoomThreshold();
+    const exitThreshold = enterThreshold + CANVAS_LOW_DETAIL_SWITCH_HYSTERESIS;
     const displayZoom = getCanvasDisplayZoom();
     const wasActive = CanvasState.lowDetailActive;
 
@@ -12002,15 +12264,17 @@ function updateCanvasLowDetailMode(force = false) {
     if (safeZoneEnabled && displayZoom >= safeZoneThreshold) {
         shouldActive = false;
     } else if (isTotalAlwaysActive) {
-        shouldActive = true;
-    } else if (isDataOrange) {
-        const isCtrl = !!(CanvasState.isCtrlPressed || (CanvasState.dragState && CanvasState.dragState.meta && CanvasState.dragState.meta.ctrlOverlay));
         const zoomSaysLowDetail = wasActive
             ? ((enterThreshold > 0) ? (displayZoom <= exitThreshold) : false)
             : ((enterThreshold > 0) ? (displayZoom <= enterThreshold) : false);
-        const ctrlForcesLowDetail = !!(isInteracting && isCtrl);
         const safetyFloor = 0.15;
-        shouldActive = zoomSaysLowDetail || ctrlForcesLowDetail || (displayZoom < safetyFloor);
+        shouldActive = zoomSaysLowDetail || (displayZoom < safetyFloor);
+    } else if (isDataOrange) {
+        const zoomSaysLowDetail = wasActive
+            ? ((enterThreshold > 0) ? (displayZoom <= exitThreshold) : false)
+            : ((enterThreshold > 0) ? (displayZoom <= enterThreshold) : false);
+        const safetyFloor = 0.15;
+        shouldActive = zoomSaysLowDetail || (displayZoom < safetyFloor);
     } else {
         if (wasActive) {
             shouldActive = (enterThreshold > 0) ? (displayZoom <= exitThreshold) : false;
@@ -12023,6 +12287,8 @@ function updateCanvasLowDetailMode(force = false) {
     if (!force && isInteracting) {
         if (safeZoneEnabled && displayZoom >= safeZoneThreshold && !shouldActive && wasActive) {
             // Allow Exit
+        } else if (enterThreshold > 0 && displayZoom > exitThreshold && !shouldActive && wasActive) {
+            // Allow Exit: the configured low-detail threshold is the visible boundary.
         } else if (shouldActive && !wasActive) {
             // Allow Entry
         } else {
@@ -37334,16 +37600,16 @@ function __renderOtherZoomMagnetCurve(modal) {
 
     const magnetPoints = useDefaultCurve
         ? __getDefaultMagnetPointsFromPerf((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints())
-        : __normalizeMagnetPoints((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints());
+        : __syncMagnetPointPositionsFromPerf((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints());
     if (modal) modal._magnetPoints = magnetPoints;
     if (modal) __syncOtherMagnetTogglesFromSettings(modal, settings);
 
     const safePercent = minPercent + (__clamp01(magnetPoints.m1.x) * range);
-    const midPercent = minPercent + (__clamp01(magnetPoints.m2.x) * range);
+    const switchPercent = minPercent + (__clamp01(magnetPoints.m2.x) * range);
     const formatPercent = (v) => Number.isFinite(v) ? `${Math.round(v * 10) / 10}%` : '--';
     const formatSpeed = (v) => Number.isFinite(v) ? `${Math.round(v * 100)}%` : '--';
     const safePercentText = `${formatPercent(safePercent)} · ${formatSpeed(magnetPoints.m1.y)}`;
-    const midPercentText = `${formatPercent(midPercent)} · ${formatSpeed(magnetPoints.m2.y)}`;
+    const midPercentText = `${formatPercent(switchPercent)} · ${formatSpeed(magnetPoints.m2.y)}`;
     __updateOtherMagnetLegend(modal, {
         safeEnabled,
         midEnabled,
@@ -37427,7 +37693,7 @@ function __renderOtherZoomMagnetCurve(modal) {
     const endY = factorToY(__scaleZoomCurveFactor(p3.y));
 
     const safeCenter = safePercent / 100;
-    const midCenter = midPercent / 100;
+    const switchCenter = switchPercent / 100;
     const enter = getCanvasLowDetailDisplayZoomThreshold();
     const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
     const band = (Number.isFinite(enter) && Number.isFinite(exit)) ? Math.max(0.01, Math.abs(enter - exit)) : 0.05;
@@ -37455,8 +37721,8 @@ function __renderOtherZoomMagnetCurve(modal) {
                 }
             }
         }
-        if (midEnabled && Number.isFinite(midCenter) && midCenter > 0) {
-            const minD = Math.abs(dz - midCenter);
+        if (midEnabled && Number.isFinite(switchCenter) && switchCenter > 0) {
+            const minD = Math.abs(dz - switchCenter);
             if (minD < midHalfWidth) {
                 const t = Math.max(0, Math.min(1, minD / midHalfWidth));
                 const smooth = t * t * (3 - 2 * t);
@@ -37581,7 +37847,7 @@ function __renderOtherZoomMagnetCurve(modal) {
         ctx.restore();
     };
     drawMarker(safePercent, '#10b981', safeEnabled);
-    drawMarker(midPercent, '#a855f7', midEnabled);
+    drawMarker(switchPercent, '#a855f7', midEnabled);
 
     const drawMagnetPoint = (percent, y, color, label, enabled, id) => {
         if (!Number.isFinite(percent) || !Number.isFinite(y)) return;
@@ -37601,7 +37867,7 @@ function __renderOtherZoomMagnetCurve(modal) {
         ctx.restore();
     };
     drawMagnetPoint(safePercent, getCombinedFactor(safePercent), '#10b981', isEn ? 'M1' : '磁1', safeEnabled, 'm1');
-    drawMagnetPoint(midPercent, getCombinedFactor(midPercent), '#a855f7', isEn ? 'M2' : '磁2', midEnabled, 'm2');
+    drawMagnetPoint(switchPercent, getCombinedFactor(switchPercent), '#a855f7', isEn ? 'M2' : '磁2', midEnabled, 'm2');
 
     modal._curveLayout = {
         paddingLeft,
@@ -37646,7 +37912,7 @@ function __bindOtherCurveInteractions(modal, onChange) {
 
     const getCurve = () => __normalizeZoomCurve((modal && modal._zoomCurve) || getCanvasZoomCurveSettings());
     const setCurve = (curve) => { modal._zoomCurve = __normalizeZoomCurve(curve); };
-    const getMagnets = () => __normalizeMagnetPoints((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints());
+    const getMagnets = () => __syncMagnetPointPositionsFromPerf((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints());
     const setMagnets = (magnets) => { modal._magnetPoints = __normalizeMagnetPoints(magnets); };
 
     const ensureCustom = () => {
@@ -37708,13 +37974,13 @@ function __bindOtherCurveInteractions(modal, onChange) {
                 }
             }
             if (midEnabled && Number.isFinite(magnets.m2.y)) {
-                const midPercent = minPercent + (__clamp01(magnets.m2.x) * range);
-                const midCenter = midPercent / 100;
+                const switchPercent = minPercent + (__clamp01(magnets.m2.x) * range);
+                const switchCenter = switchPercent / 100;
                 const enter = getCanvasLowDetailDisplayZoomThreshold();
                 const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
                 const band = (Number.isFinite(enter) && Number.isFinite(exit)) ? Math.max(0.01, Math.abs(enter - exit)) : 0.05;
                 const midHalfWidth = Math.min(0.12, Math.max(0.06, band * 2.5));
-                const minD = Math.abs(dz - midCenter);
+                const minD = Math.abs(dz - switchCenter);
                 if (minD < midHalfWidth) {
                     const t = Math.max(0, Math.min(1, minD / midHalfWidth));
                     const smooth = t * t * (3 - 2 * t);
@@ -37923,7 +38189,7 @@ function createCanvasOtherSettingsModal() {
                         </div>
                     </div>
                     <div class="other-default-hint-row">
-                        <div class="other-default-hint">${isEn ? 'Default restore: M1 (X=70%, Y=10%), M2 (X=32.5%, Y=10%).' : '默认还原：磁1（X=70%，Y=10%），磁2（X=32.5%，Y=10%）。'}</div>
+                        <div class="other-default-hint">${isEn ? 'Default restore: M1 (X=70%, Y=10%), M2 (X=35%, Y=10%).' : '默认还原：磁1（X=70%，Y=10%），磁2（X=35%，Y=10%）。'}</div>
                         <button class="perf-source-btn other-default-jump-btn" id="otherDefaultJumpPerfBtn" title="${isEn ? 'Go to Performance' : '跳转到性能'}" aria-label="${isEn ? 'Go to Performance' : '跳转到性能'}">
                             <svg class="jump-icon" viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M14 3h7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -38420,14 +38686,10 @@ function updateCanvasPerfSettingsUI() {
         safeEl.textContent = `${pct.toFixed(0)}%`;
     }
     if (midEl) {
-        const exitInput = document.getElementById('perfInputExitLowDetail');
         const enterInput = document.getElementById('perfInputEnterLowDetail');
-        const exitV = exitInput ? parseFloat(exitInput.value) : NaN;
         const enterV = enterInput ? parseFloat(enterInput.value) : NaN;
-        const e1 = (Number.isFinite(exitV) && exitV > 0) ? exitV : (getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100);
-        const e2 = (Number.isFinite(enterV) && enterV > 0) ? enterV : (getCanvasLowDetailDisplayZoomThreshold() * 100);
-        const mid = (e1 + e2) / 2;
-        midEl.textContent = (mid % 1 === 0) ? `${mid.toFixed(0)}%` : `${mid.toFixed(1)}%`;
+        const switchValue = (Number.isFinite(enterV) && enterV > 0) ? enterV : (getCanvasLowDetailDisplayZoomThreshold() * 100);
+        midEl.textContent = (switchValue % 1 === 0) ? `${switchValue.toFixed(0)}%` : `${switchValue.toFixed(1)}%`;
     }
 }
 
@@ -38446,18 +38708,16 @@ function saveCanvasPerfSettings(options = {}) {
     saveSharedState('canvasDataIntensiveThresholds', CanvasState.dataIntensiveMode.thresholds);
 
     // 保存缩放阈值 (从百分比转换为小数)
-    const enterLowDetail = parseFloat(document.getElementById('perfInputEnterLowDetail').value);
-    const exitLowDetail = parseFloat(document.getElementById('perfInputExitLowDetail').value);
+    const enterLowDetailInput = document.getElementById('perfInputEnterLowDetail');
+    const enterLowDetail = parseFloat(enterLowDetailInput ? enterLowDetailInput.value : '');
+    const enterLowDetailThreshold = Number.isFinite(enterLowDetail) && enterLowDetail > 0
+        ? enterLowDetail / 100
+        : DEFAULT_PERF_BASELINE.enterLowDetail / 100;
 
     const zoomThresholds = {
-        enterLowDetail: Number.isFinite(enterLowDetail) && enterLowDetail > 0 ? enterLowDetail / 100 : 0.35,
-        exitLowDetail: Number.isFinite(exitLowDetail) && exitLowDetail > 0 ? exitLowDetail / 100 : 0.30
+        enterLowDetail: enterLowDetailThreshold,
+        exitLowDetail: __deriveCanvasLowDetailPrewarmThreshold(enterLowDetailThreshold)
     };
-
-    // 确保进入阈值 >= 恢复阈值，避免逻辑冲突
-    if (zoomThresholds.enterLowDetail < zoomThresholds.exitLowDetail) {
-        zoomThresholds.enterLowDetail = zoomThresholds.exitLowDetail;
-    }
 
     saveSharedState('canvasZoomThresholds', zoomThresholds);
 
@@ -38711,7 +38971,7 @@ function createCanvasPerfSettingsModal() {
                     <div class="perf-settings-section-title">
                         <div style="display: flex; align-items: center; gap: 6px;">
                             <span style="background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">P3</span>
-                            <span>${isEn ? 'Low Detail Mode Zoom Thresholds' : '低细节模式缩放阈值'}</span>
+                            <span>${isEn ? 'Low Detail Mode Zoom Threshold' : '低细节模式缩放阈值'}</span>
                             <button class="perf-help-btn" id="perfZoomHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
@@ -38729,13 +38989,7 @@ function createCanvasPerfSettingsModal() {
                             </label>
                         </div>
                     </div>
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Preload Threshold' : '预加载阈值'}</label>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <input type="number" id="perfInputExitLowDetail" min="10" max="100" step="0.5">
-                            <span style="color: var(--text-secondary); font-size: 12px;">%</span>
-                        </div>
-                    </div>
+                    <input type="hidden" id="perfInputExitLowDetail">
                     <div class="perf-input-group">
                         <label>${isEn ? 'Low Detail Switch Threshold' : '低细节显示切换阈值'}</label>
                         <div style="display: flex; align-items: center; gap: 8px;">
@@ -38810,11 +39064,11 @@ function createCanvasPerfSettingsModal() {
                     </div>
 
                     <div class="perf-input-group">
-                        <label>${isEn ? 'Magnet 2: Midpoint of Low Detail Thresholds' : '磁矩2：低细节阈值中点'}</label>
+                        <label>${isEn ? 'Magnet 2: Low Detail Switch Point' : '磁矩2：低细节切换点'}</label>
                         <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
                             <div style="display: inline-flex; align-items: baseline; gap: 6px;">
-                                <span id="perfMagnetMidValue" style="font-weight: 700;">32.5%</span>
-                                <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? '((P3 preload + switch)/2)' : '（(P3 预加载 + 切换)/2）'}</span>
+                                <span id="perfMagnetMidValue" style="font-weight: 700;">35%</span>
+                                <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? '(follows P3 switch)' : '（跟随 P3 切换阈值）'}</span>
                             </div>
                             <label class="toggle-switch" title="${isEn ? 'Enable this magnet' : '启用该磁矩'}">
                                 <input type="checkbox" id="perfToggleZoomMagnetMid">
@@ -38860,8 +39114,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfZoomHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Buffer Zone</b>: Create a <b>buffer</b> between thresholds to prevent screen flickering caused by frequent mode switching.'
-            : '<b>缓冲防闪烁</b>：利用双阈值差值形成<b>缓冲区</b>，避免在缩放临界点反复切换模式导致的画面闪动。'}
+            ? '<b>Low Detail Boundary</b>: Low-detail visual mode only enters at or below this user threshold (default 35%). A short internal buffer below it is handled automatically, and heavy DOM is pruned only after staying in low detail for about 12s, so boundary zooming avoids repeatedly rebuilding content.'
+            : '<b>低细节边界</b>：只有缩放小于等于这个用户阈值时才进入低细节视觉（默认35%）。阈值下方的短缓冲区由系统内部处理；进入低细节后约 12 秒仍未退出，才真正卸载重 DOM，避免边界附近缩放时反复重建内容。'}
             </div>
         </div>
 
@@ -38869,8 +39123,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfMagnetHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Zoom Magnet</b>: creates a slow zone around key zoom thresholds (Lenz-like: resist approach, relax on leave). Magnet 1 follows <b>P1 Safe Zone</b>. Magnet 2 follows the midpoint of <b>P3</b> thresholds: (preload + switch)/2. Changes in P1/P3 inputs update these values immediately.'
-            : '<b>缩放磁矩</b>：在关键缩放阈值附近创建“缓慢区”（来拒去留）。磁矩1跟随<b>P1 安全区</b>阈值；磁矩2跟随<b>P3</b>两条阈值的中点：(预加载 + 切换)/2。上面输入变化，下面磁矩数值会实时跟随变化。'}
+            ? '<b>Zoom Magnet</b>: creates a slow zone around key zoom thresholds (Lenz-like: resist approach, relax on leave). Magnet 1 follows <b>P1 Safe Zone</b>. Magnet 2 is centered exactly on the <b>P3 Low Detail Switch</b> point and is enabled by default, slowing zoom right as low-detail mode enters or exits.'
+            : '<b>缩放磁矩</b>：在关键缩放阈值附近创建“缓慢区”（来拒去留）。磁矩1跟随<b>P1 安全区</b>阈值；磁矩2精准居中在<b>P3 低细节切换点</b>，默认开启，让进入/退出低细节模式的边界缩放变慢，给系统更多反应时间。'}
             </div>
         </div>
 
@@ -38878,8 +39132,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfTotalAlwaysHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>P4: Always Low Detail</b>: When enabled and the <b>total</b> bookmark/folder counts exceed the thresholds, low-detail mode stays ON (ignores <b>P2/P3</b>). <b>P1 Safe Zone</b> still overrides and keeps high detail when zoom is above its threshold.'
-            : '<b>P4：始终低细节</b>：开启后，当<b>总书签/总文件夹</b>超过阈值时，将持续处于低细节模式（忽略<b>P2/P3</b>）。但<b>P1 安全区</b>仍然优先生效：缩放高于安全区阈值时保持高细节。'}
+            ? '<b>P4: Always Low Detail</b>: When enabled and the <b>total</b> bookmark/folder counts exceed the thresholds, low-detail mode stays ON once zoom is at or below the low-detail switch threshold (ignores <b>P2</b>). Above that threshold, zooming keeps full-detail cards.'
+            : '<b>P4：始终低细节</b>：开启后，当<b>总书签/总文件夹</b>超过阈值时，只要缩放小于等于低细节显示切换阈值，就持续处于低细节模式（忽略<b>P2</b>）。高于该阈值缩放时保持完整卡片。'}
             </div>
         </div>
     `;
@@ -39024,7 +39278,7 @@ function createCanvasPerfSettingsModal() {
         const merged = __writeCanvasZoomMagnetSettings({
             enabled: toggleMagnet ? !!toggleMagnet.checked : true,
             enableSafeZone: toggleSafe ? !!toggleSafe.checked : true,
-            enableLowDetailMid: toggleMid ? !!toggleMid.checked : false
+            enableLowDetailMid: toggleMid ? !!toggleMid.checked : true
         });
         __syncOtherMagnetTogglesFromSettings(null, merged);
         const otherModal = document.getElementById('canvasOtherSettingsModal');
@@ -39106,19 +39360,21 @@ function restoreDefaultTriggerSettings() {
 }
 
 function restoreDefaultZoomSettings() {
-    // 默认缩放阈值：预加载 30%，低细节切换 35%
-    document.getElementById('perfInputExitLowDetail').value = 30;
-    document.getElementById('perfInputEnterLowDetail').value = 35;
+    // 默认缩放阈值：内部缓冲由切换阈值自动派生；低细节切换 35%
+    const enterInput = document.getElementById('perfInputEnterLowDetail');
+    const exitInput = document.getElementById('perfInputExitLowDetail');
+    if (enterInput) enterInput.value = __formatPercentInputValue(DEFAULT_PERF_BASELINE.enterLowDetail);
+    if (exitInput) exitInput.value = __formatPercentInputValue(DEFAULT_PERF_BASELINE.exitLowDetail);
 }
 
 function restoreDefaultZoomMagnetSettings() {
-    // 默认：整体开启；70% 磁矩开启；(30%+35%)/2 磁矩默认关闭
+    // 默认：整体开启；70% 磁矩开启；低细节切换点磁矩 35% 默认开启
     const t = document.getElementById('perfToggleZoomMagnet');
     if (t) t.checked = true;
     const s = document.getElementById('perfToggleZoomMagnetSafe');
     if (s) s.checked = true;
     const m = document.getElementById('perfToggleZoomMagnetMid');
-    if (m) m.checked = false;
+    if (m) m.checked = true;
 }
 
 // [Fix] 确保全局可访问，解决"二级菜单无法关闭"的问题

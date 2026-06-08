@@ -712,7 +712,6 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .canvas-workspace.canvas-zoom-performance .canvas-content * {
     pointer-events: none !important;
     transition: none !important;
-    animation: none !important;
 }
 
 .canvas-workspace.canvas-zoom-performance .temp-canvas-node,
@@ -1357,9 +1356,9 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .temp-canvas-node.temp-tree-unloaded .temp-node-header,
 .temp-canvas-node.temp-tree-unloaded .temp-node-description-container,
 .temp-canvas-node.temp-tree-unloaded .temp-node-body,
-.canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-header,
-.canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-description-container,
-.canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-body {
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-header,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-description-container,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-body {
     display: none !important;
 }
 
@@ -1367,8 +1366,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .permanent-bookmark-section.low-detail-active .permanent-section-body,
 .permanent-bookmark-section.permanent-tree-unloaded .permanent-section-header,
 .permanent-bookmark-section.permanent-tree-unloaded .permanent-section-body,
-.canvas-workspace.canvas-low-detail .permanent-section-header,
-.canvas-workspace.canvas-low-detail .permanent-section-body {
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-section-header,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-section-body {
     display: none !important;
 }
 
@@ -1384,8 +1383,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .permanent-bookmark-section.low-detail-active .canvas-anchor-zone,
 .permanent-bookmark-section.permanent-tree-unloaded .canvas-node-anchor,
 .permanent-bookmark-section.permanent-tree-unloaded .canvas-anchor-zone,
-.canvas-workspace.canvas-low-detail .canvas-node-anchor,
-.canvas-workspace.canvas-low-detail .canvas-anchor-zone {
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .canvas-node-anchor,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .canvas-anchor-zone {
     display: none !important;
 }
 
@@ -1397,7 +1396,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .permanent-bookmark-section.permanent-tree-unloaded > .resize-handle,
 .md-canvas-node.low-detail-active > .resize-handle,
 .card-group-canvas-node.low-detail-active > .resize-handle,
-.canvas-workspace.canvas-low-detail .resize-handle {
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .resize-handle {
     display: none !important;
 }
 
@@ -1405,9 +1404,9 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .md-canvas-node.low-detail-active .md-canvas-editor,
 .md-canvas-node.low-detail-active .md-canvas-text,
 .md-canvas-node.low-detail-active .md-node-toolbar,
-.canvas-workspace.canvas-low-detail .md-canvas-node .md-canvas-editor,
-.canvas-workspace.canvas-low-detail .md-canvas-node .md-canvas-text,
-.canvas-workspace.canvas-low-detail .md-canvas-node .md-node-toolbar {
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .md-canvas-editor,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .md-canvas-text,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .md-node-toolbar {
     display: none !important;
 }
 
@@ -1420,9 +1419,9 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .temp-canvas-node.dormant-content .canvas-section-ctrl-overlay,
 .temp-canvas-node.temp-tree-unloaded .canvas-section-ctrl-overlay,
 .permanent-bookmark-section.permanent-tree-unloaded .canvas-section-ctrl-overlay,
-.canvas-workspace.canvas-low-detail .card-group-header-pill,
-.canvas-workspace.canvas-low-detail .card-group-toolbar,
-.canvas-workspace.canvas-low-detail .canvas-section-ctrl-overlay {
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-header-pill,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-toolbar,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .canvas-section-ctrl-overlay {
     display: none !important;
 }
 
@@ -1448,17 +1447,17 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .permanent-bookmark-section.permanent-tree-unloaded .permanent-node-low-detail-overlay,
 .md-canvas-node.low-detail-active .temp-node-low-detail-overlay,
 .card-group-canvas-node.low-detail-active .card-group-low-detail-overlay,
-.canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-low-detail-overlay,
-.canvas-workspace.canvas-low-detail .permanent-bookmark-section .permanent-node-low-detail-overlay,
-.canvas-workspace.canvas-low-detail .md-canvas-node .temp-node-low-detail-overlay,
-.canvas-workspace.canvas-low-detail .card-group-canvas-node .card-group-low-detail-overlay {
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-low-detail-overlay,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-bookmark-section .permanent-node-low-detail-overlay,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .temp-node-low-detail-overlay,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-canvas-node .card-group-low-detail-overlay {
     display: flex;
 }
 
-.canvas-workspace.canvas-low-detail .temp-canvas-node,
-.canvas-workspace.canvas-low-detail .permanent-bookmark-section,
-.canvas-workspace.canvas-low-detail .md-canvas-node,
-.canvas-workspace.canvas-low-detail .card-group-canvas-node,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-bookmark-section,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-canvas-node,
 .temp-canvas-node.low-detail-active,
 .temp-canvas-node.dormant-content,
 .temp-canvas-node.temp-tree-unloaded,
@@ -1478,7 +1477,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 .card-group-canvas-node.low-detail-active .card-group-low-detail-overlay,
-.canvas-workspace.canvas-low-detail .card-group-canvas-node .card-group-low-detail-overlay {
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-canvas-node .card-group-low-detail-overlay {
     pointer-events: auto;
     cursor: grab;
 }
@@ -1569,10 +1568,10 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     display: none !important;
 }
 
-.canvas-workspace.canvas-low-detail .temp-canvas-node,
-.canvas-workspace.canvas-low-detail .permanent-bookmark-section,
-.canvas-workspace.canvas-low-detail .md-canvas-node,
-.canvas-workspace.canvas-low-detail .card-group-canvas-node,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-bookmark-section,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-canvas-node,
 .temp-canvas-node.low-detail-active,
 .temp-canvas-node.dormant-content,
 .temp-canvas-node.temp-tree-unloaded,
@@ -2867,10 +2866,10 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 /* 3. 极速模式下的样式简化（色块模式） */
-.canvas-workspace.canvas-low-detail .permanent-bookmark-section,
-.canvas-workspace.canvas-low-detail .temp-canvas-node,
-.canvas-workspace.canvas-low-detail .md-canvas-node,
-.canvas-workspace.canvas-low-detail .card-group-canvas-node,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-bookmark-section,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-canvas-node,
 .permanent-bookmark-section.low-detail-active,
 .permanent-bookmark-section.permanent-tree-unloaded,
 .temp-canvas-node.low-detail-active,
@@ -3018,7 +3017,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     overflow: visible;
 }
 
-.canvas-workspace.canvas-low-detail .card-group-canvas-node,
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-canvas-node,
 .card-group-canvas-node.low-detail-active {
     content-visibility: visible !important;
     overflow: visible;
