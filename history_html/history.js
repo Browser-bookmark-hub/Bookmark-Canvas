@@ -1241,7 +1241,7 @@ async function endBookmarkBulkMute(reason = '', options = {}) {
     };
 }
 
-async function applyPermanentBookmarkEventsToDomIncremental(events) {
+async function applyPermanentBookmarkEventsToDomIncremental(events, options = {}) {
     if (!events || !events.length) return false;
     let allPatched = true;
     for (const event of events) {
@@ -1296,9 +1296,13 @@ async function applyPermanentBookmarkEventsToDomIncremental(events) {
         }
     }
     if (allPatched) {
+        const skipSnapshotRefresh = !!(options && options.skipSnapshotRefresh === true);
+        if (skipSnapshotRefresh) return true;
         scheduleCachedCurrentTreeSnapshotRefresh('bulk-dom-patch-success', 40);
         return true;
     } else {
+        const allowFallbackRender = !(options && options.allowFallbackRender === false);
+        if (!allowFallbackRender) return false;
         cachedTreeData = null;
         lastTreeFingerprint = null;
         lastTreeSnapshotVersion = null;
@@ -1308,6 +1312,10 @@ async function applyPermanentBookmarkEventsToDomIncremental(events) {
         await renderTreeView(true);
         return false;
     }
+}
+
+if (typeof window !== 'undefined') {
+    window.__applyPermanentBookmarkEventsToDomIncremental = applyPermanentBookmarkEventsToDomIncremental;
 }
 
 async function flushPermanentBookmarkEventsAfterBulk(events, reason) {

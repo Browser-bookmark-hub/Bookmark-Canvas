@@ -248,6 +248,54 @@ function getSharedPermanentMutationOps() {
         : null;
 }
 
+function isBookmarkTreeSelectModeActive() {
+    try {
+        if (typeof selectMode !== 'undefined' && selectMode) return true;
+    } catch (_) { }
+    try {
+        return !!(typeof window !== 'undefined' && window.selectMode === true);
+    } catch (_) {
+        return false;
+    }
+}
+
+function isBookmarkTreeBatchDragSelection(nodeId) {
+    if (!nodeId || !isBookmarkTreeSelectModeActive()) return false;
+    return typeof selectedNodes !== 'undefined'
+        && selectedNodes
+        && typeof selectedNodes.has === 'function'
+        && selectedNodes.has(nodeId);
+}
+
+function applyPermanentMoveDomFastPath(nodeId, moveInfo, reason = 'drag-single-permanent', options = {}) {
+    if (!nodeId || !moveInfo) return false;
+    const applyDom = (typeof window !== 'undefined' && typeof window.__applyPermanentBookmarkEventsToDomIncremental === 'function')
+        ? window.__applyPermanentBookmarkEventsToDomIncremental
+        : null;
+    if (!applyDom) return false;
+
+    try {
+        const result = applyDom([{
+            type: 'moved',
+            id: String(nodeId),
+            moveInfo
+        }], {
+            reason,
+            skipSnapshotRefresh: !!(options && options.skipSnapshotRefresh === true),
+            allowFallbackRender: options && options.allowFallbackRender === false ? false : true
+        });
+        if (result && typeof result.catch === 'function') {
+            result.catch((error) => {
+                console.warn('[拖拽] 永久栏目单个移动快速落位失败:', error);
+            });
+        }
+        return true;
+    } catch (error) {
+        console.warn('[拖拽] 永久栏目单个移动快速落位失败:', error);
+        return false;
+    }
+}
+
 async function createPermanentBookmarkNodeViaSharedOps(createPayload, options = {}) {
     const ops = getSharedPermanentMutationOps();
     if (!ops) {
@@ -709,7 +757,7 @@ async function handleDragEnd(e) {
             } catch (_) { }
 
             if (!(insidePermanentDom || insidePermanentRect) && !insideTempNodeDom) {
-                const isDraggedNodeSelected = typeof selectedNodes !== 'undefined' && selectedNodes && selectedNodes.has(draggedNodeId);
+                const isDraggedNodeSelected = isBookmarkTreeBatchDragSelection(draggedNodeId);
                 if (isDraggedNodeSelected && typeof batchToTempSection === 'function') {
                     await batchToTempSection(e);
                 } else {
@@ -953,7 +1001,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
     const { sourceTreeType = 'permanent', sourceSectionId = null, targetTreeType = 'permanent', targetSectionId = null, position = 'inside' } = context || {};
     const manager = getTempManager();
     try {
-        const isDraggedNodeSelected = typeof selectedNodes !== 'undefined' && selectedNodes && selectedNodes.has(dragNodeId);
+        const isDraggedNodeSelected = isBookmarkTreeBatchDragSelection(dragNodeId);
 
         if (isDraggedNodeSelected) {
             // Collect all selected permanent node IDs and selected temporary nodes
@@ -1337,15 +1385,12 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
         const insertInfo = await computePermanentInsertion(targetId, targetIsFolder, position);
 
         // Check for cyclic/self-containment move in single permanent item
-        const isFolder = await new Promise(resolve => {
-            try {
-                chrome.bookmarks.get(dragNodeId, ([node]) => {
-                    resolve(node && !node.url);
-                });
-            } catch (_) {
-                resolve(false);
-            }
-        });
+        let sourceChromeNode = null;
+        try {
+            const nodes = await chrome.bookmarks.get(dragNodeId);
+            sourceChromeNode = nodes && nodes[0] ? nodes[0] : null;
+        } catch (_) { }
+        const isFolder = !!(sourceChromeNode && !sourceChromeNode.url);
         if (isFolder && await isPermanentDescendantOf(insertInfo.parentId, dragNodeId)) {
             const msg = (typeof currentLang !== 'undefined' && currentLang === 'en')
                 ? "Cannot move a folder to itself or its descendants."
@@ -1360,6 +1405,21 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
             return; // Abort
         }
 
+        const optimisticMoveInfo = sourceChromeNode && sourceChromeNode.parentId
+            ? {
+                parentId: String(insertInfo.parentId),
+                index: typeof insertInfo.index === 'number' ? insertInfo.index : null,
+                oldParentId: String(sourceChromeNode.parentId),
+                oldIndex: typeof sourceChromeNode.index === 'number' ? sourceChromeNode.index : null
+            }
+            : null;
+        const appliedOptimisticMove = optimisticMoveInfo
+            ? applyPermanentMoveDomFastPath(dragNodeId, optimisticMoveInfo, 'drag-single-permanent-optimistic', {
+                skipSnapshotRefresh: true,
+                allowFallbackRender: false
+            })
+            : false;
+
         console.log('[拖拽] 永久栏目内移动:', {
             nodeId: dragNodeId,
             parentId: insertInfo.parentId,
@@ -1367,12 +1427,35 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
         });
 
         // 执行真实Chrome API移动，不进行克隆，保留原节点与原有标签
-        await movePermanentBookmarkNodeViaSharedOps(dragNodeId, {
-            parentId: insertInfo.parentId,
-            index: insertInfo.index
-        });
+        try {
+            const movedNode = await movePermanentBookmarkNodeViaSharedOps(dragNodeId, {
+                parentId: insertInfo.parentId,
+                index: insertInfo.index
+            });
+            const actualParentId = movedNode && movedNode.parentId ? String(movedNode.parentId) : String(insertInfo.parentId);
+            const actualIndex = movedNode && typeof movedNode.index === 'number' ? movedNode.index : insertInfo.index;
+            if (appliedOptimisticMove && optimisticMoveInfo
+                && (actualParentId !== optimisticMoveInfo.parentId || actualIndex !== optimisticMoveInfo.index)) {
+                applyPermanentMoveDomFastPath(dragNodeId, {
+                    parentId: actualParentId,
+                    index: typeof actualIndex === 'number' ? actualIndex : null,
+                    oldParentId: optimisticMoveInfo.parentId,
+                    oldIndex: optimisticMoveInfo.index
+                }, 'drag-single-permanent-actual');
+            }
+        } catch (moveError) {
+            if (appliedOptimisticMove && optimisticMoveInfo && sourceChromeNode && sourceChromeNode.parentId) {
+                applyPermanentMoveDomFastPath(dragNodeId, {
+                    parentId: String(sourceChromeNode.parentId),
+                    index: typeof sourceChromeNode.index === 'number' ? sourceChromeNode.index : null,
+                    oldParentId: optimisticMoveInfo.parentId,
+                    oldIndex: optimisticMoveInfo.index
+                }, 'drag-single-permanent-rollback');
+            }
+            throw moveError;
+        }
 
-        console.log('[拖拽] Chrome API 移动成功，等待 onMoved 事件更新视觉');
+        console.log('[拖拽] Chrome API 移动成功，onMoved 事件将作为兜底同步');
 
     } catch (error) {
         if (error && error.message && error.message.includes('move parent is missing')) {
