@@ -108,6 +108,7 @@ const CanvasState = {
     lowDetailDomPruneGeneration: 0,
     lowDetailDomLastPruneAt: 0,
     lowDetailDomLastRestoreAt: 0,
+    zoomPerformanceModeActive: false,
     // 数据密集即时低细节模式（视界窗口数据量过多时，缩放瞬间即进入低细节）
     dataIntensiveMode: {
         enabled: true,                      // 是否启用数据密集模式
@@ -6624,14 +6625,13 @@ function setupCanvasZoomAndPan() {
 
             // [OPT] 缩放开始：进入高性能模式
             workspace.classList.add('is-zooming');
+            try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
 
             // [数据密集模式] 缩放开始的一瞬间：如果视界窗口数据量过多，立即进入低细节模式
             // 这避免了在大数据量场景下缩放时的卡顿和闪烁
             if (shouldInstantLowDetailOnZoom() && !CanvasState.lowDetailActive) {
                 try {
                     CanvasState.lowDetailActive = true;
-                    try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
-                    workspace.classList.add('canvas-low-detail');
                     // 设置冻结的缩放补偿值
                     const container = getCachedContainer();
                     if (container) {
@@ -6640,6 +6640,7 @@ function setupCanvasZoomAndPan() {
                         CanvasState.lowDetailFreezeInv = inv;
                         container.style.setProperty('--canvas-low-detail-freeze-inv', inv.toString());
                     }
+                    __enterCanvasLowDetailVisualState(workspace);
                     try { __scheduleCanvasLowDetailDomPrune(0); } catch (_) { }
                 } catch (_) { }
             }
@@ -9964,11 +9965,119 @@ let lastCanvasVirtualizationRunAt = 0;
 let canvasVirtualizationUnloadTimer = null;
 let canvasLowDetailDomPruneTimer = null;
 let canvasLowDetailDomRestoreTimer = null;
+let canvasZoomPerformanceModeRestoreTimer = null;
 const CANVAS_LOW_DETAIL_DOM_PRUNE_DEBOUNCE_MS = 80;
 const CANVAS_LOW_DETAIL_DOM_PRUNE_THROTTLE_MS = 360;
 const CANVAS_LOW_DETAIL_DOM_RESTORE_GRACE_MS = 520;
 const CANVAS_LOW_DETAIL_DOM_RESTORE_BUSY_RETRY_MS = 180;
 const CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS = 1200;
+const CANVAS_ZOOM_PERFORMANCE_MODE_RESTORE_MS = 140;
+const CANVAS_ZOOM_PERFORMANCE_MODE_TOTAL_CARD_THRESHOLD = 80;
+const CANVAS_ZOOM_PERFORMANCE_MODE_VISIBLE_CARD_THRESHOLD = 14;
+const CANVAS_ZOOM_PERFORMANCE_MODE_MIN_DISPLAY_THRESHOLD = 0.45;
+
+function __getCanvasCardCountForInteractionPerf() {
+    const tempCount = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
+    const mdCount = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(Boolean).length : 0;
+    if (tempCount + mdCount >= CANVAS_ZOOM_PERFORMANCE_MODE_TOTAL_CARD_THRESHOLD) {
+        return tempCount + mdCount;
+    }
+    let permanentCount = 0;
+    try {
+        permanentCount = document.querySelectorAll('.permanent-bookmark-section').length;
+    } catch (_) {
+        permanentCount = document.getElementById('permanentSection') ? 1 : 0;
+    }
+    return tempCount + mdCount + permanentCount;
+}
+
+function __isCanvasHotInteractionActive(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    return !!(ws && (
+        ws.classList.contains('is-zooming') ||
+        ws.classList.contains('is-scrolling') ||
+        CanvasState.isPanning ||
+        (CanvasState.inertiaState && CanvasState.inertiaState.isActive) ||
+        (CanvasState.dragState && CanvasState.dragState.isDragging)
+    ));
+}
+
+function __getCanvasZoomPerformanceDisplayThreshold() {
+    const enter = getCanvasLowDetailDisplayZoomThreshold();
+    const safe = isCanvasSafeZoneEnabled() ? getCanvasSafeZoneThreshold() : 1;
+    const safeBound = Math.max(0.25, safe - 0.08);
+    const preferred = Math.max(CANVAS_ZOOM_PERFORMANCE_MODE_MIN_DISPLAY_THRESHOLD, enter + 0.12);
+    return Math.min(preferred, safeBound);
+}
+
+function shouldUseCanvasZoomPerformanceMode() {
+    if (__isCanvasNodeMaximizedActive()) return false;
+    const displayZoom = getCanvasDisplayZoom();
+    if (displayZoom > __getCanvasZoomPerformanceDisplayThreshold()) return false;
+
+    const dim = CanvasState.dataIntensiveMode || {};
+    const stats = dim.cachedStats || {};
+    const visibleCards = Number(stats.visibleSectionCount) || 0;
+    const totalCards = __getCanvasCardCountForInteractionPerf();
+
+    return !!(
+        CanvasState.lowDetailActive ||
+        dim.active ||
+        isCanvasHugeData() ||
+        visibleCards >= CANVAS_ZOOM_PERFORMANCE_MODE_VISIBLE_CARD_THRESHOLD ||
+        totalCards >= CANVAS_ZOOM_PERFORMANCE_MODE_TOTAL_CARD_THRESHOLD
+    );
+}
+
+function setCanvasZoomPerformanceModeActive(active) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+    const next = !!active;
+    if (canvasZoomPerformanceModeRestoreTimer) {
+        clearTimeout(canvasZoomPerformanceModeRestoreTimer);
+        canvasZoomPerformanceModeRestoreTimer = null;
+    }
+    if (CanvasState.zoomPerformanceModeActive === next &&
+        workspace.classList.contains('canvas-zoom-performance') === next) {
+        return;
+    }
+    CanvasState.zoomPerformanceModeActive = next;
+    workspace.classList.toggle('canvas-zoom-performance', next);
+}
+
+function updateCanvasZoomPerformanceMode(options = {}) {
+    const opts = (options && typeof options === 'object') ? options : {};
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    if (opts.forceOff) {
+        setCanvasZoomPerformanceModeActive(false);
+        return;
+    }
+
+    const shouldActive = __isCanvasHotInteractionActive(workspace) && shouldUseCanvasZoomPerformanceMode();
+    if (shouldActive) {
+        setCanvasZoomPerformanceModeActive(true);
+        return;
+    }
+
+    if (!CanvasState.zoomPerformanceModeActive) return;
+
+    const delay = opts.deferOff === false
+        ? 0
+        : CANVAS_ZOOM_PERFORMANCE_MODE_RESTORE_MS;
+    if (delay <= 0) {
+        setCanvasZoomPerformanceModeActive(false);
+        return;
+    }
+    if (canvasZoomPerformanceModeRestoreTimer) return;
+    canvasZoomPerformanceModeRestoreTimer = setTimeout(() => {
+        canvasZoomPerformanceModeRestoreTimer = null;
+        const ws = document.getElementById('canvasWorkspace');
+        if (__isCanvasHotInteractionActive(ws) && shouldUseCanvasZoomPerformanceMode()) return;
+        setCanvasZoomPerformanceModeActive(false);
+    }, delay);
+}
 
 function __isCanvasInteractionBusyForDomRestore() {
     const ws = document.getElementById('canvasWorkspace');
@@ -11550,6 +11659,10 @@ function __updateNonTempNodesViewportVisibility() {
         if (shouldActive !== wasActive) {
             el.classList.toggle('low-detail-active', shouldActive);
         }
+
+        if (shouldActive) {
+            try { __ensurePermanentSectionLowDetailOverlay(el); } catch (_) { }
+        }
     });
 
     // 3) 卡片组：组自己进入低细节，组内元素由组级占位托管。
@@ -11578,91 +11691,110 @@ function __updateNonTempNodesViewportVisibility() {
     try { __maybeApplyCardGroupLowDetailMembershipState(); } catch (_) { }
 }
 
-let __lowDetailBatchTimer = null;
-function __applyLowDetailStateBatched(shouldActive) {
-    if (__lowDetailBatchTimer) {
-        cancelAnimationFrame(__lowDetailBatchTimer);
-        __lowDetailBatchTimer = null;
-    }
+function __ensureCanvasLowDetailOverlaysReady(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws) return;
 
+    try {
+        const sections = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections : [];
+        sections.forEach(section => {
+            if (!section || !section.id) return;
+            const el = document.getElementById(section.id);
+            if (el) __ensureTempSectionLowDetailOverlay(section, el);
+        });
+    } catch (_) { }
+
+    try {
+        ws.querySelectorAll('.permanent-bookmark-section').forEach(el => {
+            try { __ensurePermanentSectionLowDetailOverlay(el); } catch (_) { }
+        });
+    } catch (_) { }
+
+    try { __updateAllMdNodeLowDetailOverlays(); } catch (_) { }
+
+    try {
+        ws.querySelectorAll('.card-group-canvas-node').forEach(el => {
+            try {
+                const node = __getCardGroupLowDetailNodeById(el.id);
+                if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
+                    window.__BCSCardGroup.ensureLowDetailOverlay(el, node);
+                }
+            } catch (_) { }
+        });
+    } catch (_) { }
+}
+
+function __enterCanvasLowDetailVisualState(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws) return;
+
+    __ensureCanvasLowDetailOverlaysReady(ws);
+    try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
+    try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
+    ws.classList.add('canvas-low-detail');
+}
+
+function __exitCanvasLowDetailVisualState(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws) return;
+
+    ws.classList.remove('canvas-low-detail');
+    try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
+}
+
+function __applyLowDetailStateVisualSync(shouldActive) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
 
     if (shouldActive) {
-        try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
-        try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
-        try { __updateAllMdNodeLowDetailOverlays(); } catch (_) { }
-        workspace.classList.add('canvas-low-detail');
-        __lowDetailBatchTimer = null;
+        __enterCanvasLowDetailVisualState(workspace);
         return;
-    } else {
-        try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
     }
+
+    __exitCanvasLowDetailVisualState(workspace);
 
     // 获取工作区内所有的卡片 DOM
     const cards = Array.from(workspace.querySelectorAll('.temp-canvas-node, .permanent-bookmark-section, .md-canvas-node, .card-group-canvas-node'));
     if (cards.length === 0) {
-        workspace.classList.toggle('canvas-low-detail', shouldActive);
-        if (shouldActive) {
-            try { __maybeApplyCardGroupLowDetailMembershipState(); } catch (_) { }
-        }
         return;
     }
 
     const bounds = __getCanvasViewportBounds(workspace);
-    let index = 0;
-    const batchSize = 5; // 降低退出低细节时的单帧样式/布局峰值，换取更平滑的恢复过程
+    cards.forEach(card => {
+        let activeForCard = false;
+        if (card.classList.contains('md-canvas-node') ||
+            card.classList.contains('permanent-bookmark-section') ||
+            card.classList.contains('card-group-canvas-node')) {
+            activeForCard = __isCardOutsideViewportBounds(card, bounds);
+        }
 
-    const processBatch = () => {
-        const end = Math.min(index + batchSize, cards.length);
-        for (let i = index; i < end; i++) {
-            const card = cards[i];
-            if (shouldActive && card.classList.contains('card-group-low-detail-child-hidden')) continue;
-            
-            let activeForCard = shouldActive;
-            if (!activeForCard) {
-                if (card.classList.contains('md-canvas-node') || card.classList.contains('permanent-bookmark-section') || card.classList.contains('card-group-canvas-node')) {
-                    activeForCard = __isCardOutsideViewportBounds(card, bounds);
+        card.classList.toggle('low-detail-active', activeForCard);
+
+        // 视口外卡片保留同一套低细节表示，避免退出全局低细节时出现旧样式。
+        if (activeForCard && card.classList.contains('permanent-bookmark-section')) {
+            try { __ensurePermanentSectionLowDetailOverlay(card); } catch (_) { }
+        }
+        if (activeForCard && card.classList.contains('md-canvas-node')) {
+            try {
+                const nodeId = card.id;
+                const node = (typeof getMdNodeById === 'function') ? getMdNodeById(nodeId) : null;
+                if (node) {
+                    __ensureMdNodeLowDetailOverlay(card, node);
                 }
-            }
-
-            card.classList.toggle('low-detail-active', activeForCard);
-
-            // 空白卡片进入低细节时，刷新文字叠层内容
-            if (activeForCard && card.classList.contains('md-canvas-node')) {
-                try {
-                    const nodeId = card.id;
-                    const node = (typeof getMdNodeById === 'function') ? getMdNodeById(nodeId) : null;
-                    if (node) {
-                        __ensureMdNodeLowDetailOverlay(card, node);
-                    }
-                } catch (_) {}
-            }
-            if (activeForCard && card.classList.contains('card-group-canvas-node')) {
-                try {
-                    const node = __getCardGroupLowDetailNodeById(card.id);
-                    if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
-                        window.__BCSCardGroup.ensureLowDetailOverlay(card, node);
-                    }
-                } catch (_) { }
-            }
+            } catch (_) {}
         }
-        index = end;
-        if (index < cards.length) {
-            __lowDetailBatchTimer = requestAnimationFrame(processBatch);
-        } else {
-            // 分批完成，最终同步全局 workspace 类进行兜底
-            workspace.classList.toggle('canvas-low-detail', shouldActive);
-            if (shouldActive) {
-                try { __maybeApplyCardGroupLowDetailMembershipState(); } catch (_) { }
-            }
-            __lowDetailBatchTimer = null;
+        if (activeForCard && card.classList.contains('card-group-canvas-node')) {
+            try {
+                const node = __getCardGroupLowDetailNodeById(card.id);
+                if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
+                    window.__BCSCardGroup.ensureLowDetailOverlay(card, node);
+                }
+            } catch (_) { }
         }
-    };
+    });
 
-    __lowDetailBatchTimer = requestAnimationFrame(processBatch);
+    try { __maybeApplyCardGroupLowDetailMembershipState({ force: false }); } catch (_) { }
 }
-
 
 function updateCanvasLowDetailMode(force = false) {
     const workspace = document.getElementById('canvasWorkspace');
@@ -11697,9 +11829,8 @@ function updateCanvasLowDetailMode(force = false) {
     if (!CanvasState.lowDetailEnabled) {
         if (force || CanvasState.lowDetailActive) {
             CanvasState.lowDetailActive = false;
-            workspace.classList.remove('canvas-low-detail');
-            try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
-            try { workspace.querySelectorAll('.card-group-canvas-node.low-detail-active').forEach(el => el.classList.remove('low-detail-active')); } catch (_) { }
+            __exitCanvasLowDetailVisualState(workspace);
+            try { workspace.querySelectorAll('.low-detail-active').forEach(el => el.classList.remove('low-detail-active')); } catch (_) { }
             clearFreezeInv();
             cancelCanvasLowDetailPrewarmJob();
             try { __scheduleCanvasLowDetailDomRestore(0); } catch (_) { }
@@ -11730,7 +11861,7 @@ function updateCanvasLowDetailMode(force = false) {
         displayZoom <= exitThreshold) {
         ensureFreezeInv();
         if (!workspace.classList.contains('canvas-low-detail')) {
-            workspace.classList.add('canvas-low-detail');
+            __enterCanvasLowDetailVisualState(workspace);
         }
         return;
     }
@@ -11781,15 +11912,15 @@ function updateCanvasLowDetailMode(force = false) {
     if (shouldActive === wasActive) {
         if (shouldActive) {
             ensureFreezeInv();
-            try { __maybeApplyCardGroupLowDetailMembershipState(); } catch (_) { }
             if (!workspace.classList.contains('canvas-low-detail')) {
-                workspace.classList.add('canvas-low-detail');
+                __enterCanvasLowDetailVisualState(workspace);
+            } else {
+                try { __maybeApplyCardGroupLowDetailMembershipState(); } catch (_) { }
             }
             try { __scheduleCanvasLowDetailDomPrune(0); } catch (_) { }
             try { maybeStartCanvasLowDetailPrewarmJob(); } catch (_) { }
         } else if (force && workspace.classList.contains('canvas-low-detail')) {
-            workspace.classList.remove('canvas-low-detail');
-            try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
+            __exitCanvasLowDetailVisualState(workspace);
             try { __scheduleCanvasLowDetailDomRestore(); } catch (_) { }
         }
         return;
@@ -11822,13 +11953,19 @@ function updateCanvasLowDetailMode(force = false) {
         try { scheduleEdgesRender(0); } catch (_) { }
     }
 
-    // [Batch OPT] 使用时间切片分批为卡片应用低细节模式样式，分散重排计算开销，彻底告别单帧掉帧
+    // 低细节视觉状态必须同步切换，避免出现“先隐藏内容、后补文字层”的中间态。
     try {
-        __applyLowDetailStateBatched(shouldActive);
+        __applyLowDetailStateVisualSync(shouldActive);
     } catch (_) {
-        workspace.classList.toggle('canvas-low-detail', shouldActive);
         if (shouldActive) {
-            try { __updateAllMdNodeLowDetailOverlays(); } catch (_) {}
+            try { __enterCanvasLowDetailVisualState(workspace); } catch (_) {
+                workspace.classList.add('canvas-low-detail');
+                try { __updateAllMdNodeLowDetailOverlays(); } catch (_) {}
+            }
+        } else {
+            try { __exitCanvasLowDetailVisualState(workspace); } catch (_) {
+                workspace.classList.remove('canvas-low-detail');
+            }
         }
         if (shouldActive) {
             try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
@@ -11890,6 +12027,7 @@ function setCanvasZoom(zoom, centerX = null, centerY = null, options = {}) {
 
     // 缩放阈值降级：用已经更新后的 pan/transform 判断，避免快速缩放时新 zoom + 旧 pan 造成模式抖动。
     updateCanvasLowDetailMode();
+    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
 
     if (!skipScrollbarUpdate) {
         // [Fix] 缩放后检查唤醒状态：交互中/低细节/大数据时用节流，避免每次缩放都全量扫描导致掉帧
@@ -11986,6 +12124,7 @@ function markScrolling() {
         const ws = document.getElementById('canvasWorkspace');
         if (ws) ws.classList.add('is-scrolling');
     } catch (_) { }
+    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
 
     // 清除之前的停止计时器
     if (scrollStopTimer) {
@@ -12034,6 +12173,7 @@ function onScrollStop() {
         scheduleDormancyUpdate();
     }
     try { scheduleEdgesRender(isCanvasHugeData() ? 120 : 40); } catch (_) { }
+    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
 }
 
 function cancelCanvasBlockDormancyUnloadUpdate() {
@@ -12827,6 +12967,7 @@ function __onCanvasZoomEndCleanup() {
 
     // 强制刷新低细节模式（可能退出），确保逻辑发生在 is-zooming 解除之后
     try { updateCanvasLowDetailMode(true); } catch (_) { }
+    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
     // 低细节区间（30%~35%）：只预热“视口中心附近少量栏目”，避免一屏全加载
     if (!isCanvasVirtualizationEnabled()) {
         try { prewarmCanvasLowDetailVisibleTrees(); } catch (_) { }
@@ -12959,6 +13100,7 @@ function __cancelCanvasActiveZoomGesture(reason = 'interrupt') {
         }
         updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom, true);
         updateCanvasLowDetailMode(true);
+        updateCanvasZoomPerformanceMode({ deferOff: true });
     } catch (_) { }
 
     __logCanvasWinInput('zoom-interrupt', { reason }, {
@@ -28770,6 +28912,41 @@ function __patchTempSectionBadgeInPlace(section, nodeElement) {
     applyTempSectionBadge(badge, label);
 }
 
+function __ensureTempSectionLowDetailOverlay(section, nodeElement) {
+    if (!section || !nodeElement) return null;
+
+    let overlay = nodeElement.querySelector('.temp-node-low-detail-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'temp-node-low-detail-overlay';
+        nodeElement.appendChild(overlay);
+    }
+
+    let contentWrap = overlay.querySelector('.temp-node-low-detail-content');
+    if (!contentWrap) {
+        contentWrap = document.createElement('div');
+        contentWrap.className = 'temp-node-low-detail-content';
+        overlay.appendChild(contentWrap);
+    }
+
+    let badgeEl = contentWrap.querySelector('.temp-node-low-detail-badge');
+    if (!badgeEl) {
+        badgeEl = document.createElement('div');
+        badgeEl.className = 'temp-node-low-detail-badge';
+        contentWrap.appendChild(badgeEl);
+    }
+
+    let titleEl = contentWrap.querySelector('.temp-node-low-detail-title');
+    if (!titleEl) {
+        titleEl = document.createElement('div');
+        titleEl.className = 'temp-node-low-detail-title';
+        contentWrap.appendChild(titleEl);
+    }
+
+    __patchTempSectionLowDetailOverlayInPlace(section, nodeElement);
+    return overlay;
+}
+
 function __patchTempSectionLowDetailOverlayInPlace(section, nodeElement) {
     if (!section || !nodeElement) return;
     const overlay = nodeElement.querySelector('.temp-node-low-detail-overlay');
@@ -34171,7 +34348,7 @@ function __updateCanvasPerfHud() {
 
     el.textContent =
         `Canvas Perf (debugPerf=1)\n` +
-        `virtual=${virtual} lowDetail=${!!CanvasState.lowDetailActive}\n` +
+        `virtual=${virtual} lowDetail=${!!CanvasState.lowDetailActive} zoomPerf=${!!CanvasState.zoomPerformanceModeActive}\n` +
         `displayZoom=${(displayZoom * 100).toFixed(1)}% rawZoom=${(CanvasState.zoom || 1).toFixed(3)}\n` +
         `temp=${tempCount} md=${mdCount} edges=${edgeCount}\n` +
         `treesLoaded≈${loadedApprox} unloaded=${unloaded}\n` +

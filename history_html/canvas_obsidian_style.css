@@ -707,6 +707,31 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     will-change: auto;
 }
 
+/* 低缩放 + 大量卡片的热交互性能模式：低细节外观不变，只降低命中测试/动画成本。 */
+.canvas-workspace.canvas-zoom-performance .canvas-content,
+.canvas-workspace.canvas-zoom-performance .canvas-content * {
+    pointer-events: none !important;
+    transition: none !important;
+    animation: none !important;
+}
+
+.canvas-workspace.canvas-zoom-performance .temp-canvas-node,
+.canvas-workspace.canvas-zoom-performance .permanent-bookmark-section,
+.canvas-workspace.canvas-zoom-performance .md-canvas-node,
+.canvas-workspace.canvas-zoom-performance .card-group-canvas-node {
+    box-shadow: none !important;
+    filter: none !important;
+}
+
+.canvas-workspace.canvas-zoom-performance .canvas-edge-hit-area {
+    pointer-events: none !important;
+}
+
+.canvas-workspace.canvas-zoom-performance .canvas-edge {
+    transition: none !important;
+    filter: none !important;
+}
+
 [data-theme="dark"] .canvas-edge-label {
     fill: #aaa;
     text-shadow:
@@ -1318,51 +1343,86 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     contain-intrinsic-size: auto 280px;
 }
 
-.temp-canvas-node.dormant-content .temp-node-body {
-    visibility: hidden;
-    pointer-events: none;
-}
-
 .temp-canvas-node.dormant-content .temp-bookmark-tree {
     display: none;
 }
 
-/* 低缩放细节模式：缩得很小时隐藏“重内容”，但保留连接线与线标签 */
+/* 低缩放细节模式：用轻量色块 + 中央文字替代完整卡片内容。 */
+.temp-canvas-node.low-detail-active .temp-node-header,
 .temp-canvas-node.low-detail-active .temp-node-description-container,
 .temp-canvas-node.low-detail-active .temp-node-body,
+.temp-canvas-node.dormant-content .temp-node-header,
+.temp-canvas-node.dormant-content .temp-node-description-container,
+.temp-canvas-node.dormant-content .temp-node-body,
+.temp-canvas-node.temp-tree-unloaded .temp-node-header,
+.temp-canvas-node.temp-tree-unloaded .temp-node-description-container,
+.temp-canvas-node.temp-tree-unloaded .temp-node-body,
+.canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-header,
 .canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-description-container,
 .canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-body {
     display: none !important;
 }
 
+.permanent-bookmark-section.low-detail-active .permanent-section-header,
 .permanent-bookmark-section.low-detail-active .permanent-section-body,
+.permanent-bookmark-section.permanent-tree-unloaded .permanent-section-header,
+.permanent-bookmark-section.permanent-tree-unloaded .permanent-section-body,
+.canvas-workspace.canvas-low-detail .permanent-section-header,
 .canvas-workspace.canvas-low-detail .permanent-section-body {
     display: none !important;
 }
 
 .temp-canvas-node.low-detail-active .canvas-node-anchor,
 .temp-canvas-node.low-detail-active .canvas-anchor-zone,
+.temp-canvas-node.dormant-content .canvas-node-anchor,
+.temp-canvas-node.dormant-content .canvas-anchor-zone,
+.temp-canvas-node.temp-tree-unloaded .canvas-node-anchor,
+.temp-canvas-node.temp-tree-unloaded .canvas-anchor-zone,
 .md-canvas-node.low-detail-active .canvas-node-anchor,
 .md-canvas-node.low-detail-active .canvas-anchor-zone,
 .permanent-bookmark-section.low-detail-active .canvas-node-anchor,
 .permanent-bookmark-section.low-detail-active .canvas-anchor-zone,
+.permanent-bookmark-section.permanent-tree-unloaded .canvas-node-anchor,
+.permanent-bookmark-section.permanent-tree-unloaded .canvas-anchor-zone,
 .canvas-workspace.canvas-low-detail .canvas-node-anchor,
 .canvas-workspace.canvas-low-detail .canvas-anchor-zone {
     display: none !important;
 }
 
-/* Hide resize handles on low-detail cards; card groups keep frame controls usable. */
+/* Hide resize handles on low-detail cards; the central low-detail overlay becomes the only visible affordance. */
 .temp-canvas-node.low-detail-active > .resize-handle,
+.temp-canvas-node.dormant-content > .resize-handle,
+.temp-canvas-node.temp-tree-unloaded > .resize-handle,
 .permanent-bookmark-section.low-detail-active > .resize-handle,
-.md-canvas-node.low-detail-active > .resize-handle {
+.permanent-bookmark-section.permanent-tree-unloaded > .resize-handle,
+.md-canvas-node.low-detail-active > .resize-handle,
+.card-group-canvas-node.low-detail-active > .resize-handle,
+.canvas-workspace.canvas-low-detail .resize-handle {
     display: none !important;
 }
 
 
 .md-canvas-node.low-detail-active .md-canvas-editor,
+.md-canvas-node.low-detail-active .md-canvas-text,
 .md-canvas-node.low-detail-active .md-node-toolbar,
 .canvas-workspace.canvas-low-detail .md-canvas-node .md-canvas-editor,
+.canvas-workspace.canvas-low-detail .md-canvas-node .md-canvas-text,
 .canvas-workspace.canvas-low-detail .md-canvas-node .md-node-toolbar {
+    display: none !important;
+}
+
+.card-group-canvas-node.low-detail-active .card-group-header-pill,
+.card-group-canvas-node.low-detail-active .card-group-toolbar,
+.temp-canvas-node.low-detail-active .canvas-section-ctrl-overlay,
+.permanent-bookmark-section.low-detail-active .canvas-section-ctrl-overlay,
+.md-canvas-node.low-detail-active .canvas-section-ctrl-overlay,
+.card-group-canvas-node.low-detail-active .canvas-section-ctrl-overlay,
+.temp-canvas-node.dormant-content .canvas-section-ctrl-overlay,
+.temp-canvas-node.temp-tree-unloaded .canvas-section-ctrl-overlay,
+.permanent-bookmark-section.permanent-tree-unloaded .canvas-section-ctrl-overlay,
+.canvas-workspace.canvas-low-detail .card-group-header-pill,
+.canvas-workspace.canvas-low-detail .card-group-toolbar,
+.canvas-workspace.canvas-low-detail .canvas-section-ctrl-overlay {
     display: none !important;
 }
 
@@ -1382,19 +1442,16 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 .temp-canvas-node.low-detail-active .temp-node-low-detail-overlay,
+.temp-canvas-node.dormant-content .temp-node-low-detail-overlay,
+.temp-canvas-node.temp-tree-unloaded .temp-node-low-detail-overlay,
 .permanent-bookmark-section.low-detail-active .permanent-node-low-detail-overlay,
+.permanent-bookmark-section.permanent-tree-unloaded .permanent-node-low-detail-overlay,
 .md-canvas-node.low-detail-active .temp-node-low-detail-overlay,
 .card-group-canvas-node.low-detail-active .card-group-low-detail-overlay,
 .canvas-workspace.canvas-low-detail .temp-canvas-node .temp-node-low-detail-overlay,
 .canvas-workspace.canvas-low-detail .permanent-bookmark-section .permanent-node-low-detail-overlay,
 .canvas-workspace.canvas-low-detail .md-canvas-node .temp-node-low-detail-overlay,
 .canvas-workspace.canvas-low-detail .card-group-canvas-node .card-group-low-detail-overlay {
-    display: flex;
-}
-
-/* 休眠/按需加载未渲染树内容时：也显示低细节叠层文字占位，避免出现“空白栏目” */
-.temp-canvas-node.dormant-content .temp-node-low-detail-overlay,
-.temp-canvas-node.temp-tree-unloaded .temp-node-low-detail-overlay {
     display: flex;
 }
 
@@ -1482,9 +1539,14 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .canvas-workspace.canvas-low-detail .temp-canvas-node,
 .canvas-workspace.canvas-low-detail .permanent-bookmark-section,
 .canvas-workspace.canvas-low-detail .md-canvas-node,
+.canvas-workspace.canvas-low-detail .card-group-canvas-node,
 .temp-canvas-node.low-detail-active,
+.temp-canvas-node.dormant-content,
+.temp-canvas-node.temp-tree-unloaded,
 .permanent-bookmark-section.low-detail-active,
-.md-canvas-node.low-detail-active {
+.permanent-bookmark-section.permanent-tree-unloaded,
+.md-canvas-node.low-detail-active,
+.card-group-canvas-node.low-detail-active {
     content-visibility: auto;
     contain-intrinsic-size: auto 300px;
 }
@@ -2773,11 +2835,20 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 /* 3. 极速模式下的样式简化（色块模式） */
 .canvas-workspace.canvas-low-detail .permanent-bookmark-section,
-.canvas-workspace.canvas-low-detail .temp-canvas-node {
+.canvas-workspace.canvas-low-detail .temp-canvas-node,
+.canvas-workspace.canvas-low-detail .md-canvas-node,
+.canvas-workspace.canvas-low-detail .card-group-canvas-node,
+.permanent-bookmark-section.low-detail-active,
+.permanent-bookmark-section.permanent-tree-unloaded,
+.temp-canvas-node.low-detail-active,
+.temp-canvas-node.dormant-content,
+.temp-canvas-node.temp-tree-unloaded,
+.md-canvas-node.low-detail-active,
+.card-group-canvas-node.low-detail-active {
     /* 色块模式下不需要绘制阴影和圆角细节，能省则省 */
     box-shadow: none !important;
-    /* 强制背景不透明，方便合成器做遮挡剔除 (Occlusion Culling) */
-    background-color: var(--bg-secondary) !important;
+    filter: none !important;
+    /* 保留卡片自身底色，只去掉高成本阴影/滤镜。 */
 }
 
 /* 4. GPU 加速提示（仅在拖动或缩放尺寸时分配独立的显存纹理，避免静止时图层过多造成闪烁） */
