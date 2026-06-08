@@ -71,8 +71,8 @@ function __buildPermanentSectionMemberData(el, nodeId) {
     if (!el || !nodeId) return null;
     const x = parseFloat(el.style.left) || 0;
     const y = parseFloat(el.style.top) || 0;
-    const width = el.offsetWidth || parseFloat(el.style.width) || 0;
-    const height = el.offsetHeight || parseFloat(el.style.height) || 0;
+    const width = parseFloat(el.style.width) || el.offsetWidth || 0;
+    const height = parseFloat(el.style.height) || el.offsetHeight || 0;
     if (width <= 0 || height <= 0) return null;
     return { id: nodeId, x, y, width, height, _permanentElement: el };
 }

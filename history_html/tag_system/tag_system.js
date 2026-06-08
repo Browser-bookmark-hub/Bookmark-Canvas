@@ -919,6 +919,49 @@
         __scheduleFlushDots();
     }
 
+    let __deferredTreeItemScanTimer = null;
+    function __isCanvasInteractionBusyForTagDots() {
+        const workspace = document.getElementById('canvasWorkspace');
+        const state = (window.CanvasModule && window.CanvasModule.CanvasState) ? window.CanvasModule.CanvasState : null;
+        const resizeState = state && state.sectionCtrlMode && state.sectionCtrlMode.resize;
+        return !!(
+            (workspace && (
+                workspace.classList.contains('is-zooming') ||
+                workspace.classList.contains('is-scrolling') ||
+                workspace.classList.contains('panning')
+            )) ||
+            (state && state.isPanning) ||
+            (state && state.dragState && state.dragState.isDragging) ||
+            (state && state.touchpadState && state.touchpadState.isScrolling) ||
+            (resizeState && resizeState.active)
+        );
+    }
+
+    function __scanTreeItemsForTagDots(scope) {
+        const root = (scope && scope.querySelectorAll) ? scope : document;
+        root.querySelectorAll('.tree-item').forEach(__observeTreeItem);
+    }
+
+    function __scheduleDeferredTreeItemScan() {
+        if (__deferredTreeItemScanTimer) return;
+        __deferredTreeItemScanTimer = setTimeout(() => {
+            __deferredTreeItemScanTimer = null;
+            if (__isCanvasInteractionBusyForTagDots()) {
+                __scheduleDeferredTreeItemScan();
+                return;
+            }
+            __scanTreeItemsForTagDots(document);
+        }, 180);
+    }
+
+    function __queueTreeItemScanForTagDots(scope) {
+        if (__isCanvasInteractionBusyForTagDots()) {
+            __scheduleDeferredTreeItemScan();
+            return;
+        }
+        __scanTreeItemsForTagDots(scope);
+    }
+
     const __treeObserver = new MutationObserver((mutations) => {
         for (const m of mutations) {
             if (m.type === 'attributes') {
@@ -930,7 +973,7 @@
                     target.matches &&
                     target.matches('.canvas-fullscreen-active, .canvas-fullscreen-node, .canvas-content, .canvas-workspace, .search-results-panel, body')
                 ) {
-                    target.querySelectorAll('.tree-item').forEach(__observeTreeItem);
+                    __queueTreeItemScanForTagDots(target);
                 }
                 continue;
             }
@@ -948,15 +991,15 @@
     document.addEventListener('DOMContentLoaded', () => {
         __treeObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
         // Initial pass for existing items
-        document.querySelectorAll('.tree-item').forEach(__observeTreeItem);
+        __scanTreeItemsForTagDots(document);
     });
     // In case DOMContentLoaded already fired before this file ran:
     if (document.readyState !== 'loading') {
         __treeObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
-        document.querySelectorAll('.tree-item').forEach(__observeTreeItem);
+        __scanTreeItemsForTagDots(document);
     }
     window.addEventListener('resize', () => {
-        document.querySelectorAll('.tree-item').forEach(__observeTreeItem);
+        __queueTreeItemScanForTagDots(document);
     }, { passive: true });
 
     const tagSyncChannel = new BroadcastChannel('bookmark-canvas-tag-sync');

@@ -1176,6 +1176,11 @@ let cachedCanvasGridLayer = null;
 let cachedCanvasScaleVarsContainer = null;
 let cachedCanvasScaleVarsValue = null;
 let cachedCanvasGridTransform = null;
+let cachedCanvasWorkspaceRect = null;
+const cachedCanvasScrollbarMetrics = {
+    vertical: null,
+    horizontal: null
+};
 
 // 性能优化：休眠管理节流
 let dormancyUpdateTimer = null;
@@ -1205,6 +1210,75 @@ function getCachedGridLayer() {
         cachedCanvasGridLayer = document.getElementById('canvasGridLayer');
     }
     return cachedCanvasGridLayer;
+}
+
+function invalidateCanvasWorkspaceRectCache() {
+    cachedCanvasWorkspaceRect = null;
+}
+
+function getCachedCanvasWorkspaceRect(workspace, force = false) {
+    if (!workspace) return null;
+    if (force || !cachedCanvasWorkspaceRect) {
+        const rect = workspace.getBoundingClientRect();
+        cachedCanvasWorkspaceRect = {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height
+        };
+    }
+    return cachedCanvasWorkspaceRect;
+}
+
+function invalidateCanvasScrollbarMetrics(axis = null) {
+    if (axis === 'vertical' || axis === 'horizontal') {
+        cachedCanvasScrollbarMetrics[axis] = null;
+        return;
+    }
+    cachedCanvasScrollbarMetrics.vertical = null;
+    cachedCanvasScrollbarMetrics.horizontal = null;
+}
+
+function __getScrollbarMetricElements(axis) {
+    const bar = axis === 'vertical'
+        ? document.getElementById('canvasVerticalScrollbar')
+        : document.getElementById('canvasHorizontalScrollbar');
+    if (!bar) return null;
+    const track = bar.querySelector('.scrollbar-track');
+    const thumb = bar.querySelector('.scrollbar-thumb');
+    if (!track || !thumb) return null;
+    return { bar, track, thumb };
+}
+
+function __setCanvasScrollbarMetricCache(axis, track, thumb, trackSize, thumbSize) {
+    if (axis !== 'vertical' && axis !== 'horizontal') return null;
+    if (!track || !thumb) return null;
+    const safeTrackSize = Number(trackSize);
+    const safeThumbSize = Number(thumbSize);
+    if (!Number.isFinite(safeTrackSize) || safeTrackSize <= 0) return null;
+    cachedCanvasScrollbarMetrics[axis] = {
+        track,
+        thumb,
+        trackSize: safeTrackSize,
+        thumbSize: Number.isFinite(safeThumbSize) && safeThumbSize > 0 ? safeThumbSize : 20
+    };
+    return cachedCanvasScrollbarMetrics[axis];
+}
+
+function getCachedCanvasScrollbarMetrics(axis) {
+    if (axis !== 'vertical' && axis !== 'horizontal') return null;
+    const cached = cachedCanvasScrollbarMetrics[axis];
+    if (cached && cached.track && cached.thumb && cached.track.isConnected && cached.thumb.isConnected) {
+        return cached;
+    }
+    const elements = __getScrollbarMetricElements(axis);
+    if (!elements) return null;
+    const trackSize = axis === 'vertical' ? elements.track.clientHeight : elements.track.clientWidth;
+    const thumbStyleSize = axis === 'vertical'
+        ? parseFloat(elements.thumb.style.height)
+        : parseFloat(elements.thumb.style.width);
+    const thumbDomSize = axis === 'vertical' ? elements.thumb.offsetHeight : elements.thumb.offsetWidth;
+    return __setCanvasScrollbarMetricCache(axis, elements.track, elements.thumb, trackSize, thumbStyleSize || thumbDomSize || 20);
 }
 
 function __modWrapPx(value, period) {
@@ -6545,6 +6619,9 @@ function setupCanvasZoomAndPan() {
             e.preventDefault();
             __cancelCanvasWheelPanMotion();
 
+            const wasZooming = workspace.classList.contains('is-zooming');
+            const workspaceRect = getCachedCanvasWorkspaceRect(workspace, !wasZooming);
+
             // [OPT] 缩放开始：进入高性能模式
             workspace.classList.add('is-zooming');
 
@@ -6554,7 +6631,6 @@ function setupCanvasZoomAndPan() {
                 try {
                     CanvasState.lowDetailActive = true;
                     try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
-                    try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
                     workspace.classList.add('canvas-low-detail');
                     // 设置冻结的缩放补偿值
                     const container = getCachedContainer();
@@ -6579,10 +6655,9 @@ function setupCanvasZoomAndPan() {
                 }
             }, 400);
 
-            // 获取鼠标在viewport中的位置
-            const rect = workspace.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
+            // 获取鼠标在 viewport 中的位置。缩放手势内复用缓存，避免每个 wheel 都强制布局。
+            const mouseX = e.clientX - workspaceRect.left;
+            const mouseY = e.clientY - workspaceRect.top;
 
             // 基础缩放速率（滚轮）
             let zoomSpeed = 0.001;
@@ -7036,6 +7111,8 @@ function setupCanvasZoomAndPan() {
 
     window.addEventListener('resize', () => {
         lastResizeTime = Date.now(); // 记录最后一次 Resize 时间
+        invalidateCanvasWorkspaceRectCache();
+        invalidateCanvasScrollbarMetrics();
 
         if (__isCanvasNodeMaximizedActive()) {
             if (resizeTimer) clearTimeout(resizeTimer);
@@ -9604,7 +9681,7 @@ function getCanvasViewportDataStats() {
         // 所以不需要在这里立刻 return，而是下面的循环里跳过 countVisibleDOMNodes
     }
 
-    const rect = workspace.getBoundingClientRect();
+    const rect = getCachedCanvasWorkspaceRect(workspace, true);
     const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
     const panX = CanvasState.panOffsetX || 0;
     const panY = CanvasState.panOffsetY || 0;
@@ -9662,16 +9739,19 @@ function getCanvasViewportDataStats() {
 
     // 永久书签栏目（含副本）也算，但必须在可视范围内
     try {
-        const workspaceRect = workspace.getBoundingClientRect();
         const permSections = Array.from(document.querySelectorAll('.permanent-bookmark-section'));
         permSections.forEach((permEl) => {
             if (!permEl) return;
-            const permRect = permEl.getBoundingClientRect();
+            const x = parseFloat(permEl.style.left) || 0;
+            const y = parseFloat(permEl.style.top) || 0;
+            const w = parseFloat(permEl.style.width) || permEl.offsetWidth || 0;
+            const h = parseFloat(permEl.style.height) || permEl.offsetHeight || 0;
+            if (w <= 0 || h <= 0) return;
             const isPermVisible = !(
-                permRect.right < workspaceRect.left ||
-                permRect.left > workspaceRect.right ||
-                permRect.bottom < workspaceRect.top ||
-                permRect.top > workspaceRect.bottom
+                x + w < viewportLeft ||
+                x > viewportRight ||
+                y + h < viewportTop ||
+                y > viewportBottom
             );
             if (!isPermVisible) return;
 
@@ -9728,16 +9808,23 @@ function getCanvasViewportDataStats() {
  * 更新数据密集模式状态
  * 使用节流机制避免高频计算
  * @param {boolean} force - 是否强制更新（跳过节流）
+ * @param {Object} options - 可选项
+ * @param {boolean} options.useCached - 是否只使用缓存状态
  * @returns {boolean} 是否处于数据密集模式
  */
-function updateDataIntensiveMode(force = false) {
+function updateDataIntensiveMode(force = false, options = {}) {
     const dim = CanvasState.dataIntensiveMode;
     if (!dim) return false;
+    const opts = (options && typeof options === 'object') ? options : {};
 
     // [New] 如果功能被禁用，直接返回 false
     if (!dim.enabled) {
         dim.active = false;
         return false;
+    }
+
+    if (!force && opts.useCached === true) {
+        return dim.active;
     }
 
     const now = performance.now();
@@ -11081,6 +11168,20 @@ function __markCardGroupLowDetailMembershipDirty() {
     __cardGroupLowDetailMembershipDirty = true;
 }
 
+function __isCardGroupLowDetailMembershipHotInteraction() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return false;
+    const resizeState = CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize;
+    return !!(
+        workspace.classList.contains('is-zooming') ||
+        workspace.classList.contains('is-scrolling') ||
+        (CanvasState.touchpadState && CanvasState.touchpadState.isScrolling) ||
+        CanvasState.isPanning ||
+        (CanvasState.dragState && CanvasState.dragState.isDragging) ||
+        (resizeState && resizeState.active)
+    );
+}
+
 function __getCardGroupLowDetailElementKey(el) {
     if (!el) return '';
     const id = String(el.id || '').trim();
@@ -11394,6 +11495,12 @@ function __maybeApplyCardGroupLowDetailMembershipState(options = {}) {
         __cardGroupLowDetailMembershipSignature) {
         return false;
     }
+    if (!opts.force &&
+        CanvasState.lowDetailActive &&
+        __cardGroupLowDetailMembershipDirty &&
+        __isCardGroupLowDetailMembershipHotInteraction()) {
+        return false;
+    }
     return __applyCardGroupLowDetailMembershipState(opts);
 }
 
@@ -11504,7 +11611,7 @@ function __applyLowDetailStateBatched(shouldActive) {
 
     const bounds = __getCanvasViewportBounds(workspace);
     let index = 0;
-    const batchSize = 10; // 每帧处理 10 个卡片，约 1.5ms 运行开销，兼顾流畅度与性能
+    const batchSize = 5; // 降低退出低细节时的单帧样式/布局峰值，换取更平滑的恢复过程
 
     const processBatch = () => {
         const end = Math.min(index + batchSize, cards.length);
@@ -11628,8 +11735,8 @@ function updateCanvasLowDetailMode(force = false) {
         return;
     }
 
-    // [Fix Priority] 数据密集模式判断
-    updateDataIntensiveMode();
+    // [Fix Priority] 数据密集模式判断；交互中只读缓存，避免缩放/拖拽帧扫描可视 DOM。
+    updateDataIntensiveMode(force, { useCached: !force && isInteracting });
     const dim = CanvasState.dataIntensiveMode;
     const isTotalAlwaysActive = !!(dim && dim.totalAlwaysEnabled && dim.totalAlwaysActive);
     const isDataOrange = !!(dim && dim.active);
@@ -12706,6 +12813,7 @@ function __onCanvasZoomEndCleanup() {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
     workspace.classList.remove('is-zooming');
+    invalidateCanvasWorkspaceRectCache();
 
     // [OPT] 缩放结束：更新网格和CSS变量 (FORCE UPDATE)
     try {
@@ -13116,15 +13224,18 @@ function startScrollbarThumbDrag(event, axis) {
     const trackRect = track.getBoundingClientRect();
     const thumbRect = thumb.getBoundingClientRect();
     const offset = axis === 'vertical' ? event.clientY - thumbRect.top : event.clientX - thumbRect.left;
+    const trackStart = axis === 'vertical' ? trackRect.top : trackRect.left;
 
     __cancelCanvasWheelPanMotion();
 
     CanvasState.scrollState.activeDragAxis = axis;
     CanvasState.scrollState.dragInfo = {
         offset,
+        trackStart,
         trackSize: axis === 'vertical' ? trackRect.height : trackRect.width,
         thumbSize: axis === 'vertical' ? thumbRect.height : thumbRect.width
     };
+    __setCanvasScrollbarMetricCache(axis, track, thumb, CanvasState.scrollState.dragInfo.trackSize, CanvasState.scrollState.dragInfo.thumbSize);
 
     CanvasState.scrollState[axis].dragging = true;
     thumb.classList.add('dragging');
@@ -13146,10 +13257,9 @@ function handleScrollbarThumbDrag(event) {
 
     event.preventDefault();
 
-    const trackRect = track.getBoundingClientRect();
     const coord = axis === 'vertical'
-        ? event.clientY - trackRect.top - info.offset
-        : event.clientX - trackRect.left - info.offset;
+        ? event.clientY - info.trackStart - info.offset
+        : event.clientX - info.trackStart - info.offset;
     const maxTravel = Math.max(0, info.trackSize - info.thumbSize);
     const clampedCoord = Math.min(Math.max(coord, 0), maxTravel);
     const ratio = maxTravel === 0 ? 0 : clampedCoord / maxTravel;
@@ -15106,40 +15216,38 @@ function updateScrollbarThumbsLightweight() {
 
     // 更新垂直滚动条
     if (verticalBar) {
-        const track = verticalBar.querySelector('.scrollbar-track');
-        const thumb = verticalBar.querySelector('.scrollbar-thumb');
-        if (track && thumb) {
-            const trackSize = track.clientHeight;
+        const metrics = getCachedCanvasScrollbarMetrics('vertical');
+        if (metrics && metrics.thumb) {
+            const trackSize = metrics.trackSize;
             const bounds = CanvasState.scrollBounds.vertical;
             if (trackSize > 0 && bounds && isFinite(bounds.min) && isFinite(bounds.max)) {
                 const range = bounds.max - bounds.min;
-                const thumbSize = parseFloat(thumb.style.height) || 20;
+                const thumbSize = metrics.thumbSize || 20;
                 const maxTravel = Math.max(0, trackSize - thumbSize);
                 const normalized = range === 0 ? 0 : (bounds.max - CanvasState.panOffsetY) / range;
                 const position = Math.min(maxTravel, Math.max(0, normalized * maxTravel));
 
                 // 只更新 transform，极轻量
-                thumb.style.transform = `translateY(${position}px)`;
+                metrics.thumb.style.transform = `translateY(${position}px)`;
             }
         }
     }
 
     // 更新水平滚动条
     if (horizontalBar) {
-        const track = horizontalBar.querySelector('.scrollbar-track');
-        const thumb = horizontalBar.querySelector('.scrollbar-thumb');
-        if (track && thumb) {
-            const trackSize = track.clientWidth;
+        const metrics = getCachedCanvasScrollbarMetrics('horizontal');
+        if (metrics && metrics.thumb) {
+            const trackSize = metrics.trackSize;
             const bounds = CanvasState.scrollBounds.horizontal;
             if (trackSize > 0 && bounds && isFinite(bounds.min) && isFinite(bounds.max)) {
                 const range = bounds.max - bounds.min;
-                const thumbSize = parseFloat(thumb.style.width) || 20;
+                const thumbSize = metrics.thumbSize || 20;
                 const maxTravel = Math.max(0, trackSize - thumbSize);
                 const normalized = range === 0 ? 0 : (bounds.max - CanvasState.panOffsetX) / range;
                 const position = Math.min(maxTravel, Math.max(0, normalized * maxTravel));
 
                 // 只更新 transform，极轻量
-                thumb.style.transform = `translateX(${position}px)`;
+                metrics.thumb.style.transform = `translateX(${position}px)`;
             }
         }
     }
@@ -15703,6 +15811,7 @@ function updateScrollbarThumbs() {
 
                 thumb.style.height = `${thumbSize}px`;
                 thumb.style.transform = `translateY(${position}px)`;
+                __setCanvasScrollbarMetricCache('vertical', track, thumb, trackSize, thumbSize);
             }
         }
     }
@@ -15727,6 +15836,7 @@ function updateScrollbarThumbs() {
 
                 thumb.style.width = `${thumbSize}px`;
                 thumb.style.transform = `translateX(${position}px)`;
+                __setCanvasScrollbarMetricCache('horizontal', track, thumb, trackSize, thumbSize);
             }
         }
     }
@@ -34765,12 +34875,10 @@ function updateEdgeToolbarPosition() {
         if (editorOnly && editorOnly.dataset.edgeId) {
             const edge = getEdgeById(editorOnly.dataset.edgeId);
             if (!edge) return;
-            const start = getAnchorPosition(edge.fromNode, edge.fromSide);
-            const end = getAnchorPosition(edge.toNode, edge.toSide);
-            if (!start || !end) return;
-            const curveMid = getEdgeCurveMidpoint(edge);
-            const midX = curveMid ? curveMid.x : (start.x + end.x) / 2;
-            const midY = curveMid ? curveMid.y : (start.y + end.y) / 2;
+            const geometry = getEdgeRenderGeometry(edge);
+            if (!geometry) return;
+            const midX = geometry.labelX;
+            const midY = geometry.labelY;
             const z = (CanvasState && CanvasState.zoom) ? CanvasState.zoom : 1;
             const offsetPx = 18;
             editorOnly.style.left = `${midX}px`;
@@ -34780,31 +34888,31 @@ function updateEdgeToolbarPosition() {
         return;
     }
 
+    const activeLabelEditor = document.getElementById('edge-label-editor');
+    const toolbarHidden = toolbar.hidden || toolbar.style.display === 'none' || toolbar.style.opacity === '0';
+    if (toolbarHidden && !activeLabelEditor) return;
+
     const edgeId = normalizeEdgeId(toolbar.dataset.edgeId);
     if (!edgeId) return;
 
     const edge = getEdgeById(edgeId);
     if (!edge) return;
 
-    const start = getAnchorPosition(edge.fromNode, edge.fromSide);
-    const end = getAnchorPosition(edge.toNode, edge.toSide);
-
-    if (!start || !end) return;
-
-    // 工具栏定位于贝塞尔曲线中点
-    const curveMid = getEdgeCurveMidpoint(edge);
-    const midX = curveMid ? curveMid.x : (start.x + end.x) / 2;
-    const midY = curveMid ? curveMid.y : (start.y + end.y) / 2;
+    const geometry = getEdgeRenderGeometry(edge);
+    if (!geometry) return;
+    const midX = geometry.labelX;
+    const midY = geometry.labelY;
 
     // 工具栏显示在中点上方（使用 canvas-content 坐标系），统一固定偏移
     const z = (CanvasState && CanvasState.zoom) ? CanvasState.zoom : 1;
     const inv = 1 / z;
-    const activeLabelEditor = document.getElementById('edge-label-editor');
     const toolbarTopOffsetPx = 55;
-    toolbar.style.left = `${midX}px`;
-    toolbar.style.top = `${midY - (toolbarTopOffsetPx * inv)}px`;
-    toolbar.style.transform = `translateX(-50%) scale(${inv.toFixed(5)})`;
-    toolbar.style.transformOrigin = 'center top';
+    if (!toolbarHidden) {
+        toolbar.style.left = `${midX}px`;
+        toolbar.style.top = `${midY - (toolbarTopOffsetPx * inv)}px`;
+        toolbar.style.transform = `translateX(-50%) scale(${inv.toFixed(5)})`;
+        toolbar.style.transformOrigin = 'center top';
+    }
 
     // 同步更新正在编辑的输入框位置
     const editor = activeLabelEditor || document.getElementById('edge-label-editor');
