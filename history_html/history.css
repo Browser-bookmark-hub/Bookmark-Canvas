@@ -16004,9 +16004,42 @@ body.canvas-popover-active .md-align-popover {
     color: var(--tag-red, #ff453a) !important;
 }
 
+.trace-help-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 8px 10px 12px;
+    position: relative;
+}
+
 .trace-help-trigger {
     position: relative;
     cursor: pointer;
+}
+
+.trace-clear-card-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 24px;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.trace-clear-card-btn:hover {
+    background: rgba(255, 159, 10, 0.1);
+    border-color: rgba(255, 159, 10, 0.45);
+    color: var(--accent-orange, #ff9f0a);
 }
 
 .trace-help-bubble {

@@ -4480,6 +4480,58 @@ function cancelTracesPassingThrough(clickedElement) {
     }
 }
 
+function getTraceCardScope(nodeElement) {
+    if (!nodeElement || !nodeElement.closest) return { key: '', card: null };
+    const tempCard = nodeElement.closest('.temp-canvas-node[data-section-id]');
+    if (tempCard) {
+        const sectionId = tempCard.dataset && tempCard.dataset.sectionId ? String(tempCard.dataset.sectionId) : '';
+        return { key: sectionId ? `temporary:${sectionId}` : '', card: tempCard };
+    }
+
+    const permanentCard = nodeElement.closest('.permanent-bookmark-section');
+    if (permanentCard) {
+        const copyId = permanentCard.dataset && permanentCard.dataset.permanentSectionCopyId
+            ? String(permanentCard.dataset.permanentSectionCopyId)
+            : '';
+        const cardId = copyId || permanentCard.id || 'permanent-main';
+        return { key: `permanent:${cardId}`, card: permanentCard };
+    }
+
+    const tree = nodeElement.closest('.bookmark-tree, .temp-bookmark-tree');
+    return { key: '', card: tree || null };
+}
+
+function collectTraceTargetIdsInCard(cardElement) {
+    const ids = new Set();
+    if (!cardElement || !cardElement.querySelectorAll) return ids;
+    cardElement.querySelectorAll('.tree-item[data-node-id]').forEach((item) => {
+        const id = item && item.dataset ? String(item.dataset.nodeId || '').trim() : '';
+        if (id) ids.add(id);
+    });
+    return ids;
+}
+
+function clearTracesForCurrentCard(context) {
+    if (!window.__activeTraces || window.__activeTraces.length === 0) return false;
+    const nodeElement = (context && context.node) || currentContextNode;
+    const scope = getTraceCardScope(nodeElement);
+    const cardTargetIds = collectTraceTargetIdsInCard(scope.card);
+    if (!scope.key && cardTargetIds.size === 0) return false;
+
+    const originalLength = window.__activeTraces.length;
+    window.__activeTraces = window.__activeTraces.filter((trace) => {
+        const targetId = String(trace && trace.targetId || '').trim();
+        const traceScopeKey = String(trace && trace.scopeKey || '').trim();
+        if (scope.key && traceScopeKey && traceScopeKey === scope.key) return false;
+        return !targetId || !cardTargetIds.has(targetId);
+    });
+
+    if (window.__activeTraces.length === originalLength) return false;
+    broadcastTraces();
+    window.__updateTraceHighlights();
+    return true;
+}
+
 // 更新 DOM 的溯源高亮渲染
 window.__updateTraceHighlights = function() {
     // 1. 清除旧高亮及所有自定义高度、偏移、并排颜色线等属性
@@ -4775,7 +4827,7 @@ function renderTraceSubmenu(context) {
         ? '点击颜色可对当前节点向上追溯 guide lines、文本及图标高亮标记。<br/>- 向上溯源：可选不同层级或直到根目录。<br/>- 临时标记：不保存到存储，刷新或重开侧栏即消失。<br/>- 颜色并排：多条路径并排显示，互不干扰颜色。<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">取消方式</span>：直接点击高亮引导线，或者开关插件侧边栏/标签页即可取消该溯源。'
         : 'Click color to trace upward guide lines, text and icons.<br/>- Levels: Select parent level or up to root directory.<br/>- Temporary: Saved in-memory only, lost on reload/reopen.<br/>- Overlaps: Multiple paths run side-by-side, preserving distinct colors.<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">Cancel</span>: Click on any highlighted guide line, or toggle the extension sidebar/tab to cancel.';
 
-    const helpLabel = lang === 'zh_CN' ? '功能说明' : 'How it works';
+    const helpLabel = lang === 'zh_CN' ? '说明' : 'Info';
 
     contextSubmenu.innerHTML = `
         <div class="trace-submenu-header" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; position: relative;">
@@ -4809,11 +4861,15 @@ function renderTraceSubmenu(context) {
             </div>
         </div>
         <div class="trace-menu-divider" style="height: 1px; background: var(--border-color); margin: 4px 0; opacity: 0.5;"></div>
-        <div class="trace-help-toggle-row" style="padding: 6px 12px; display: flex; align-items: center; justify-content: flex-start; position: relative;">
+        <div class="trace-help-toggle-row">
             <span class="trace-help-trigger" style="font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px; position: relative; cursor: pointer;">
                 <i class="fas fa-question-circle"></i> ${helpLabel}
                 <span class="trace-help-bubble">${descText}</span>
             </span>
+            <button class="trace-clear-card-btn" type="button" title="${lang === 'zh_CN' ? '清除当前卡片全部溯源' : 'Clear all traces in this card'}">
+                <i class="fas fa-broom"></i>
+                <span>${lang === 'zh_CN' ? '清除全部' : 'Clear all'}</span>
+            </button>
         </div>
     `;
 
@@ -4824,12 +4880,15 @@ function renderTraceSubmenu(context) {
             const colorName = btn.dataset.color;
             const targetId = context.nodeId;
             const level = currentTraceLevel;
+            const traceScope = getTraceCardScope((context && context.node) || currentContextNode);
+            const nextTrace = { targetId, colorName, level };
+            if (traceScope && traceScope.key) nextTrace.scopeKey = traceScope.key;
 
             const existingIndex = window.__activeTraces.findIndex(t => t.targetId === targetId);
             if (existingIndex !== -1) {
-                window.__activeTraces[existingIndex] = { targetId, colorName, level };
+                window.__activeTraces[existingIndex] = nextTrace;
             } else {
-                window.__activeTraces.push({ targetId, colorName, level });
+                window.__activeTraces.push(nextTrace);
             }
 
             broadcastTraces();
@@ -4865,6 +4924,15 @@ function renderTraceSubmenu(context) {
                 broadcastTraces();
                 window.__updateTraceHighlights();
             }
+            hideContextMenu();
+        });
+    }
+
+    const clearCardBtn = contextSubmenu.querySelector('.trace-clear-card-btn');
+    if (clearCardBtn) {
+        clearCardBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            clearTracesForCurrentCard(context);
             hideContextMenu();
         });
     }
