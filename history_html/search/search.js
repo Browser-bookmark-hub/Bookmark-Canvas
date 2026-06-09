@@ -1249,13 +1249,30 @@ function handleSearchResultsPanelClick(e) {
         hideSearchResultsPanel();
 
         // Default options
-        const opts = { color: item.color || '#3b82f6' };
+        const opts = {
+            color: item.color || '#3b82f6',
+            expandTargetFolder: shouldExpandSearchLocateTargetFolder(item)
+        };
 
         // Is it a "Location Chip" with explicit instructions?
         const locId = interactive.dataset.locId;
         const locSource = interactive.dataset.locSource;
         const locSection = interactive.dataset.locSection;
         const copyId = interactive.dataset.copyId;
+
+        const explicitLocation = locId && Array.isArray(item.locations)
+            ? item.locations.find((loc) => {
+                if (!loc) return false;
+                if (String(loc.id || '') !== String(locId || '')) return false;
+                if (locSource && String(loc.source || '') !== String(locSource || '')) return false;
+                if (locSection && String(loc.sectionId || '') !== String(locSection || '')) return false;
+                if (copyId && copyId !== 'null' && String(loc.copyId || '') !== String(copyId || '')) return false;
+                return true;
+            }) || null
+            : null;
+        if (explicitLocation) {
+            opts.expandTargetFolder = shouldExpandSearchLocateTargetFolder(explicitLocation);
+        }
 
         if (copyId && copyId !== 'null') opts.copyId = copyId;
 
@@ -5918,6 +5935,7 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
             return {
                 id: item.id, // Target ID to jump to
                 source: item.source,
+                nodeType: item.nodeType,
                 sectionId: item.sectionId,
                 copyId: item.copyId || null,
                 label: item.sectionLabel, // e.g. "A-1"
@@ -10287,10 +10305,19 @@ async function locateBookmarkItemInTempTree(sectionId, itemId, options = {}) {
     return true;
 }
 
+function shouldExpandSearchLocateTargetFolder(target) {
+    const rawNodeType = target && (target.nodeType || (target.originalItem && target.originalItem.nodeType));
+    return String(rawNodeType || '').trim() !== 'folder';
+}
+
 async function locateCanvasBookmarkItem(item) {
     if (!item || item.type !== 'bookmark-item') return false;
+    const expandTargetFolder = shouldExpandSearchLocateTargetFolder(item);
     if (item.source === 'temporary' && item.sectionId) {
-        return locateBookmarkItemInTempTree(item.sectionId, item.id, { color: item.color || '#3b82f6' });
+        return locateBookmarkItemInTempTree(item.sectionId, item.id, {
+            color: item.color || '#3b82f6',
+            expandTargetFolder
+        });
     }
     const fullscreenScope = getCanvasFullscreenSearchScope();
     const activePermanentCopyId = fullscreenScope && String(fullscreenScope.kind || '') === 'permanent'
@@ -10298,7 +10325,8 @@ async function locateCanvasBookmarkItem(item) {
         : '';
     return locateBookmarkItemInPermanentTree(item.id, {
         color: item.color || '#3b82f6',
-        copyId: item.copyId || activePermanentCopyId || null
+        copyId: item.copyId || activePermanentCopyId || null,
+        expandTargetFolder
     });
 }
 
@@ -10761,7 +10789,10 @@ async function activateCanvasSearchResultAtIndex(index) {
             } catch (_) { }
 
             const loc = pickBestBookmarkLocationByScope(locations, getCanvasFullscreenSearchScope()) || locations[0];
-            const opts = { color: loc.color || item.color || '#3b82f6' };
+            const opts = {
+                color: loc.color || item.color || '#3b82f6',
+                expandTargetFolder: shouldExpandSearchLocateTargetFolder(loc || item)
+            };
             if (loc.copyId) opts.copyId = loc.copyId;
             if (loc.source === 'temporary') {
                 await locateBookmarkItemInTempTree(loc.sectionId, loc.id, opts);
