@@ -3479,6 +3479,8 @@ async function showContextMenu(e, node) {
 function renderSubmenu(context) {
     if (!contextSubmenu) return;
 
+    contextSubmenu.classList.remove('is-tag-submenu', 'is-trace-submenu');
+
     if (contextSubmenu.dataset.triggerAction === 'trace-submenu-trigger') {
         renderTraceSubmenu(context);
         return;
@@ -3602,7 +3604,7 @@ function renderSubmenu(context) {
 function hideSubmenu() {
     if (contextSubmenu) {
         contextSubmenu.style.display = 'none';
-        contextSubmenu.classList.remove('is-tag-submenu');
+        contextSubmenu.classList.remove('is-tag-submenu', 'is-trace-submenu');
     }
     tagSubmenuCtx = null;
     if (contextMenu && !contextMenuHorizontal) {
@@ -3611,6 +3613,44 @@ function hideSubmenu() {
             delete contextMenu.dataset.originalLeft;
         }
     }
+}
+
+function getQuickActionPopoverScale(anchor) {
+    const BASE = 0.9;
+    try {
+        const inCanvas = anchor && anchor.closest && anchor.closest('.canvas-content, .canvas-workspace');
+        if (inCanvas && typeof CanvasState !== 'undefined' && CanvasState) {
+            const zoom = Number(CanvasState.zoom);
+            const baseZoom = Number(CanvasState.baseZoom) || 1;
+            if (Number.isFinite(zoom) && zoom > 0 && Number.isFinite(baseZoom) && baseZoom > 0) {
+                return BASE * (zoom / baseZoom);
+            }
+        }
+    } catch (_) { }
+    return null;
+}
+
+function getContextSubmenuScale(triggerItem, triggerAction) {
+    const action = String(triggerAction || '');
+    const fromQuickAction = !!(triggerItem && triggerItem.closest && triggerItem.closest('.tree-item-hover-actions'));
+    if (fromQuickAction && action === 'trace-submenu-trigger') {
+        const quickScale = getQuickActionPopoverScale(triggerItem);
+        if (Number.isFinite(quickScale) && quickScale > 0) return quickScale;
+    }
+
+    let scale = 1;
+    if (currentContextNode) {
+        const scaleInfo = __getBookmarkAddLocateContainerScale(currentContextNode);
+        if (scaleInfo && scaleInfo.scaleX) {
+            scale = scaleInfo.scaleX;
+        }
+    } else if (contextMenu) {
+        const scaleInfo = __getBookmarkAddLocateContainerScale(contextMenu);
+        if (scaleInfo && scaleInfo.scaleX) {
+            scale = scaleInfo.scaleX;
+        }
+    }
+    return scale;
 }
 
 // 展开/收起二级菜单
@@ -3640,19 +3680,9 @@ function toggleSubmenu(triggerItem, context) {
     contextSubmenu.style.position = 'fixed';
     contextSubmenu.style.display = 'block';
 
-    // 计算一级菜单的缩放比例 (scale)
-    let scale = 1;
-    if (currentContextNode) {
-        const scaleInfo = __getBookmarkAddLocateContainerScale(currentContextNode);
-        if (scaleInfo && scaleInfo.scaleX) {
-            scale = scaleInfo.scaleX;
-        }
-    } else if (contextMenu) {
-        const scaleInfo = __getBookmarkAddLocateContainerScale(contextMenu);
-        if (scaleInfo && scaleInfo.scaleX) {
-            scale = scaleInfo.scaleX;
-        }
-    }
+    // 计算二级菜单缩放比例。快捷按钮触发的临时溯源面板跟随 Tag 快捷面板：
+    // 使用显示缩放 zoom/baseZoom，而不是 raw canvas transform scale。
+    const scale = getContextSubmenuScale(triggerItem, newTriggerAction);
 
     const triggerRect = triggerItem.getBoundingClientRect();
     const submenuWidth = contextSubmenu.offsetWidth || 280;
@@ -4651,6 +4681,9 @@ window.__updateTraceHighlights = function() {
 function renderTraceSubmenu(context) {
     if (!contextSubmenu) return;
 
+    contextSubmenu.classList.remove('is-tag-submenu');
+    contextSubmenu.classList.add('is-trace-submenu');
+
     const lang = currentLang || 'zh_CN';
     
     // 计算当前右键节点上方实际有多少个父层级可选
@@ -4850,6 +4883,7 @@ function renderTraceSubmenu(context) {
 function renderTagSubmenu(context) {
     if (!contextSubmenu) return;
 
+    contextSubmenu.classList.remove('is-trace-submenu');
     contextSubmenu.classList.add('is-tag-submenu');
 
     const lang = currentLang || 'zh_CN';

@@ -5355,6 +5355,11 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     padding: 6px !important;
 }
 
+.bookmark-context-submenu.is-trace-submenu {
+    min-width: 220px !important;
+    max-width: 280px !important;
+}
+
 .bookmark-context-submenu .context-menu-item {
     padding: 6px 12px !important;
     gap: 8px !important;
@@ -16178,4 +16183,3 @@ body.canvas-popover-active .md-align-popover {
     width: calc(var(--trace-line-width, 1.5px) + 0.7px) !important;
     filter: brightness(1.2);
 }
-

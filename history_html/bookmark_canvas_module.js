@@ -2920,8 +2920,8 @@ function __applyPerfLinkedStyles() {
     const isEn = lang === 'en';
     if (magnetJumpLabel) {
         magnetJumpLabel.textContent = flags
-            ? (isEn ? 'Source: Other → Zoom Speed & Magnet' : '来源：其他 → 缩放速率与磁矩')
-            : (isEn ? 'Go to Other → Zoom Speed & Magnet' : '跳转到其他 → 缩放速率与磁矩');
+            ? (isEn ? 'Source: Zoom Settings → Zoom Speed & Magnet' : '来源：缩放设置 → 缩放速率与磁矩')
+            : (isEn ? 'Go to Zoom Settings → Zoom Speed & Magnet' : '跳转到缩放设置 → 缩放速率与磁矩');
         toggleLinkedText(magnetJumpLabel);
     }
     if (magnetJumpBtn) {
@@ -38302,7 +38302,7 @@ function createCanvasOtherSettingsModal() {
         <div class="modal-content other-settings-modal">
             <div class="modal-header">
                 <div class="modal-header-left">
-                    <h3>${isEn ? 'Other' : '其他设置'}</h3>
+                    <h3>${isEn ? 'Zoom Settings' : '缩放设置'}</h3>
                 </div>
                 <button class="perf-modal-close" id="otherModalCloseBtn"><i class="fas fa-times"></i></button>
             </div>
@@ -39227,8 +39227,8 @@ function createCanvasPerfSettingsModal() {
                         </div>
                     </div>
                     <div class="perf-jump-row" id="perfMagnetJumpRow">
-                        <span id="perfMagnetJumpLabel">${isEn ? 'Go to Other → Zoom Speed & Magnet' : '跳转到其他 → 缩放速率与磁矩'}</span>
-                        <button class="perf-source-btn perf-jump-btn" id="perfMagnetJumpOtherBtn" title="${isEn ? 'Go to Other settings' : '跳转到其他设置'}" aria-label="${isEn ? 'Go to Other settings' : '跳转到其他设置'}">
+                        <span id="perfMagnetJumpLabel">${isEn ? 'Go to Zoom Settings → Zoom Speed & Magnet' : '跳转到缩放设置 → 缩放速率与磁矩'}</span>
+                        <button class="perf-source-btn perf-jump-btn" id="perfMagnetJumpOtherBtn" title="${isEn ? 'Go to Zoom settings' : '跳转到缩放设置'}" aria-label="${isEn ? 'Go to Zoom settings' : '跳转到缩放设置'}">
                             <svg class="jump-icon" viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M14 3h7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
                                 <path d="M10 14L21 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>

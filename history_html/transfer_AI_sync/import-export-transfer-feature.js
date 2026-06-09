@@ -847,22 +847,75 @@ function __countOverwriteDiff(localContent, importTreeRoot) {
     return diff;
 }
 
-async function __chromeBookmarksRemoveAllInRoot(rootNode) {
-    if (!rootNode || !Array.isArray(rootNode.children) || !chrome || !chrome.bookmarks) return;
-    const removeOne = (childId, isFolder) => new Promise((resolve) => {
-        if (isFolder) {
-            try { chrome.bookmarks.removeTree(childId, () => resolve(true)); }
-            catch (_) { resolve(false); }
-        } else {
-            try { chrome.bookmarks.remove(childId, () => resolve(true)); }
-            catch (_) { resolve(false); }
+function __chromeBookmarksRemoveNodeByType(node) {
+    if (!node || !node.id || !chrome || !chrome.bookmarks) return Promise.resolve(false);
+    const childId = String(node.id);
+    const isFolder = !node.url;
+    const removeApi = isFolder ? chrome.bookmarks.removeTree : chrome.bookmarks.remove;
+    if (typeof removeApi !== 'function') return Promise.resolve(false);
+    return new Promise((resolve) => {
+        try {
+            removeApi.call(chrome.bookmarks, childId, () => {
+                const err = chrome.runtime && chrome.runtime.lastError
+                    ? String(chrome.runtime.lastError.message || '')
+                    : '';
+                if (err) {
+                    try {
+                        console.warn('[Overwrite Import] bookmarks remove skipped:', {
+                            chromeId: childId,
+                            isFolder,
+                            api: isFolder ? 'removeTree' : 'remove',
+                            err
+                        });
+                    } catch (_) {}
+                    resolve(false);
+                    return;
+                }
+                resolve(true);
+            });
+        } catch (error) {
+            try {
+                console.warn('[Overwrite Import] bookmarks remove failed:', {
+                    chromeId: childId,
+                    isFolder,
+                    api: isFolder ? 'removeTree' : 'remove',
+                    error
+                });
+            } catch (_) {}
+            resolve(false);
         }
     });
+}
+
+async function __chromeBookmarksGetNodeById(chromeId) {
+    const id = String(chromeId || '').trim();
+    if (!id || !chrome || !chrome.bookmarks || typeof chrome.bookmarks.getSubTree !== 'function') return null;
+    try {
+        const roots = await new Promise((resolve) => {
+            try {
+                chrome.bookmarks.getSubTree(id, (nodes) => {
+                    const err = chrome.runtime && chrome.runtime.lastError;
+                    resolve(err ? null : nodes);
+                });
+            } catch (_) { resolve(null); }
+        });
+        return roots && roots[0] ? roots[0] : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+async function __chromeBookmarksRemoveExistingNodeById(chromeId) {
+    const node = await __chromeBookmarksGetNodeById(chromeId);
+    return node ? __chromeBookmarksRemoveNodeByType(node) : false;
+}
+
+async function __chromeBookmarksRemoveAllInRoot(rootNode) {
+    if (!rootNode || !Array.isArray(rootNode.children) || !chrome || !chrome.bookmarks) return;
     const childrenSnapshot = rootNode.children.slice();
     for (const child of childrenSnapshot) {
         if (!child || !child.id) continue;
-        const isFolder = !child.url;
-        await removeOne(child.id, isFolder);
+        await __chromeBookmarksRemoveNodeByType(child);
     }
 }
 
@@ -1268,10 +1321,7 @@ async function __performOverwriteImport(payload) {
             }
             for (const entry of toDeleteEntries) {
                 try {
-                    await new Promise((resolve) => {
-                        try { chrome.bookmarks.removeTree(entry.id, () => { if (chrome.runtime.lastError) { try { chrome.bookmarks.remove(entry.id, () => resolve()); } catch (_) { resolve(); } } else resolve(); }); }
-                        catch (_) { resolve(); }
-                    });
+                    await __chromeBookmarksRemoveExistingNodeById(entry.id);
                 } catch (_) {}
             }
             // §3.2: drop deleted entries from local maps so they cannot leak into nextIdentityMap.
