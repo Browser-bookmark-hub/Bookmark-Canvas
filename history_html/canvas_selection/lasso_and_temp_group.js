@@ -155,10 +155,14 @@ function __getPermanentSectionMembersInRect(lassoRect) {
     return list;
 }
 
-function __getEdgeEndpointPos(edge, role) {
+function __getEdgeEndpointPos(edge, role, nodeCenterById = null) {
     if (!edge) return null;
     const id = role === 'from' ? edge.fromNode : edge.toNode;
     if (!id) return null;
+    if (nodeCenterById && typeof nodeCenterById.get === 'function') {
+        const cached = nodeCenterById.get(id);
+        if (cached) return cached;
+    }
     const sec = (CanvasState.tempSections || []).find(s => s && s.id === id);
     if (sec) {
         const x = Number(sec.x) || 0;
@@ -188,10 +192,12 @@ function __getEdgeEndpointPos(edge, role) {
 
 function __collectLassoMembers(lassoRect) {
     const members = [];
+    const nodeCenterById = new Map();
     (CanvasState.tempSections || []).forEach((s) => {
         if (!s || !s.id) return;
         const r = { x: Number(s.x) || 0, y: Number(s.y) || 0, w: Number(s.width) || 0, h: Number(s.height) || 0 };
         if (r.w <= 0 || r.h <= 0) return;
+        nodeCenterById.set(s.id, { x: r.x + r.w / 2, y: r.y + r.h / 2 });
         if (__rectsIntersect(r, lassoRect)) {
             members.push({ type: 'temp-section', id: s.id, data: s, rect: r });
         }
@@ -200,6 +206,7 @@ function __collectLassoMembers(lassoRect) {
         if (!n || !n.id) return;
         const r = { x: Number(n.x) || 0, y: Number(n.y) || 0, w: Number(n.width) || 0, h: Number(n.height) || 0 };
         if (r.w <= 0 || r.h <= 0) return;
+        nodeCenterById.set(n.id, { x: r.x + r.w / 2, y: r.y + r.h / 2 });
         const matched = __isLassoGroupNode(n)
             ? __rectFullyInsideLocal(r, lassoRect)
             : __rectsIntersect(r, lassoRect);
@@ -207,11 +214,16 @@ function __collectLassoMembers(lassoRect) {
             members.push({ type: 'md-node', id: n.id, data: n, rect: r });
         }
     });
-    __getPermanentSectionMembersInRect(lassoRect).forEach((m) => members.push(m));
+    __getPermanentSectionMembersInRect(lassoRect).forEach((m) => {
+        if (m && m.id && m.rect) {
+            nodeCenterById.set(m.id, { x: m.rect.x + m.rect.w / 2, y: m.rect.y + m.rect.h / 2 });
+        }
+        members.push(m);
+    });
     (CanvasState.edges || []).forEach((edge) => {
         if (!edge || !edge.id) return;
-        const a = __getEdgeEndpointPos(edge, 'from');
-        const b = __getEdgeEndpointPos(edge, 'to');
+        const a = __getEdgeEndpointPos(edge, 'from', nodeCenterById);
+        const b = __getEdgeEndpointPos(edge, 'to', nodeCenterById);
         if (!a || !b) return;
         if (__pointInRect(a.x, a.y, lassoRect) && __pointInRect(b.x, b.y, lassoRect)) {
             members.push({ type: 'edge', id: edge.id, data: edge, rect: null });
