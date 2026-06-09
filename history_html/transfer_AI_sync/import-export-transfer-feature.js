@@ -4775,7 +4775,7 @@ async function exportCanvasPackage(options = {}) {
     };
 
     const promptVaultPrefixViaDialog = (defaultValue) => new Promise((resolve) => {
-        const title = isEn ? 'Export: Obsidian Path' : '导出：Obsidian 路径';
+        const title = isEn ? 'Export: ".canvas" Internal Path' : '导出：「.canvas」内部路径';
         const isDark = (() => {
             try { return (document.documentElement.getAttribute('data-theme') || '') === 'dark'; } catch (_) { return false; }
         })();
@@ -4824,15 +4824,6 @@ async function exportCanvasPackage(options = {}) {
 <div style="transform: translateX(${exampleShiftPx}px);">${arrow}</div>
 <div style="text-align:center;">输入框填：<code>个人/书签/${defaultExportRoot}</code> 即可</div>`;
 
-        const stepC = isEn
-            ? `If you use it as a ${hl('standalone vault')}, ${hl('clear the input')} and click Confirm.`
-            : `-若把它直接作为一个独立的仓库，请${hl('清空输入框')}，点击确认即可。`;
-
-        const formatOptionJson = isEn ? 'JSON Mode (for AI)' : 'JSON模式（供AI）';
-        const formatOptionJsonDesc = isEn
-            ? 'Stores the bookmark tree as structured JSON, best for AI analysis and stable sync.'
-            : '用结构化 JSON 表示书签树，更适合 AI 分析、增删改移和稳定同步。';
-
         const inputLabel = isEn
             ? 'Enter path'
             : '请输入路径';
@@ -4855,11 +4846,6 @@ async function exportCanvasPackage(options = {}) {
 	                        </button>
 	                    </div>
 
-                        <div style="margin-top: 16px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 10px;">
-                            <div style="font-weight: 600; font-size: 13px;">${formatOptionJson}</div>
-                            <div style="font-size: 12px; color: #666; margin-top: 4px;">${formatOptionJsonDesc}</div>
-                        </div>
-
                     <hr style="border:0;border-top:1px solid #e5e7eb;margin: 16px 0 12px;">
 
                     <div style="margin-bottom: 10px; line-height: 1.6;">
@@ -4876,7 +4862,6 @@ async function exportCanvasPackage(options = {}) {
 	                                </div>
 	                            </div>
 	                        </div>
-	                        <div style="margin: 6px 0 0;">${stepC}</div>
                     </div>
                 </div>
             </div>
@@ -4897,6 +4882,22 @@ async function exportCanvasPackage(options = {}) {
         if (closeBtn) closeBtn.addEventListener('click', () => cleanup(null));
 
         const input = document.getElementById('canvasExportVaultPrefixInput');
+        const confirm = () => {
+            const val = input ? String(input.value || '').trim() : '';
+            if (!val) {
+                alert(isEn ? 'Path cannot be empty. Default value restored.' : '路径不能为空，已自动恢复默认值。');
+                if (input) {
+                    input.value = defaultValue || '';
+                    try { input.focus(); input.select(); } catch (_) {}
+                }
+                return;
+            }
+            cleanup({
+                path: val,
+                format: 'json'
+            });
+        };
+
         if (input) {
             input.value = String(defaultValue || '');
             try { input.focus(); input.select(); } catch (_) { }
@@ -4904,10 +4905,7 @@ async function exportCanvasPackage(options = {}) {
                 if (e.key === 'Enter') {
                     if (e.isComposing) return;
                     e.preventDefault();
-                    cleanup({
-                        path: String(input.value || ''),
-                        format: 'json'
-                    });
+                    confirm();
                 } else if (e.key === 'Escape') {
                     e.preventDefault();
                     cleanup(null);
@@ -4915,19 +4913,13 @@ async function exportCanvasPackage(options = {}) {
             });
         }
 
-
-
         const okBtn = document.getElementById('canvasExportVaultPrefixOk');
-        if (okBtn) okBtn.addEventListener('click', () => cleanup({
-            path: input ? String(input.value || '') : String(defaultValue || ''),
-            format: 'json'
-        }));
+        if (okBtn) okBtn.addEventListener('click', confirm);
     });
 
     // 让用户决定"导出文件夹在 vault 内的相对位置"，以适配：
     // - vault 根目录下（默认）：bookmark-canvas-export/...
     // - vault 的子文件夹下：SomeFolder/bookmark-canvas-export/...
-    // - 或把 bookmark-canvas-export/ 直接作为一个独立 vault 根目录（portable canvas）
 
     let vaultPrefixInput;
     let exportFormat = 'json';
@@ -5302,18 +5294,50 @@ function __buildImportedStorageFromCanvasPackage(canvasData, sourceFiles, option
             return sourceFiles.get(normalizedRel);
         }
 
+        const normalizedLeaf = options && options.packageLeaf ? String(options.packageLeaf).trim() : '';
+        const leafSegment = normalizedLeaf ? `${normalizedLeaf}/` : '';
+        if (leafSegment) {
+            const idxRel = normalizedRel.indexOf(leafSegment);
+            if (idxRel >= 0) {
+                const suffixRel = normalizedRel.slice(idxRel);
+                for (const [rawKey, rawValue] of sourceFiles.entries()) {
+                    const normalizedKey = normalizePath(rawKey);
+                    const idxKey = normalizedKey.indexOf(leafSegment);
+                    if (idxKey >= 0 && normalizedKey.slice(idxKey) === suffixRel) {
+                        return rawValue;
+                    }
+                }
+            }
+        }
+
         let best = null;
         for (const [rawKey, rawValue] of sourceFiles.entries()) {
             const normalizedKey = normalizePath(rawKey);
             if (!normalizedKey) continue;
             if (normalizedKey === normalizedRel) return rawValue;
+            if (normalizedRel.endsWith(`/${normalizedKey}`)) return rawValue;
             if (normalizedKey.endsWith(`/${normalizedRel}`)) {
                 if (!best || normalizedKey.length < best.key.length) {
                     best = { key: normalizedKey, value: rawValue };
                 }
+                continue;
             }
+            if (normalizedKey.includes(normalizedRel)) return rawValue;
         }
-        return best ? best.value : null;
+        if (best) return best.value;
+
+        // Suffix fallback: strip first segment (e.g. package root folder name) of both paths
+        const stripFirstSegment = (p) => {
+            const parts = p.split('/');
+            return parts.length > 1 ? parts.slice(1).join('/') : p;
+        };
+        const strippedRel = stripFirstSegment(normalizedRel);
+        for (const [rawKey, rawValue] of sourceFiles.entries()) {
+            const normalizedKey = normalizePath(rawKey);
+            if (stripFirstSegment(normalizedKey) === strippedRel) return rawValue;
+        }
+
+        return null;
     };
 
     const parsePermanentProtocol = (fileText, requireTree) => {
@@ -5428,8 +5452,9 @@ async function parseCanvasPackageFromZipFile(file, options = {}) {
         console.log(`[Canvas] Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(zipFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
-        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, zipFiles, primaryState, { isEn, importMode });
-        storage = __buildImportedStorageFromCanvasPackage(canvasData, zipFiles, { importMode });
+        const packageLeaf = canvasFileName.split('/').pop().replace(/\.canvas$/i, '');
+        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, zipFiles, primaryState, { isEn, importMode, packageLeaf });
+        storage = __buildImportedStorageFromCanvasPackage(canvasData, zipFiles, { importMode, packageLeaf });
         if (storage && storage['bcs:perm:main'] && !primaryState['bcs:perm:main']) {
             primaryState['bcs:perm:main'] = storage['bcs:perm:main'];
         }
@@ -5521,8 +5546,9 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
         console.log(`[Canvas] Folder Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
         const canvasText = new TextDecoder('utf-8').decode(folderFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
-        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, folderFiles, primaryState, { isEn, importMode });
-        storage = __buildImportedStorageFromCanvasPackage(canvasData, folderFiles, { importMode });
+        const packageLeaf = canvasFileName.split('/').pop().replace(/\.canvas$/i, '');
+        tempState = __rebuildTempStateFromObsidianCanvasPackage(canvasData, folderFiles, primaryState, { isEn, importMode, packageLeaf });
+        storage = __buildImportedStorageFromCanvasPackage(canvasData, folderFiles, { importMode, packageLeaf });
         if (storage && storage['bcs:perm:main'] && !primaryState['bcs:perm:main']) {
             primaryState['bcs:perm:main'] = storage['bcs:perm:main'];
         }
@@ -5558,8 +5584,217 @@ async function importCanvasPackageFolder(folderFiles, folderName) {
     );
 }
 
+function __normalizeTransferExportRoot(value) {
+    const { isEn } = __getLang();
+    const def = isEn ? 'bookmark-canvas' : '书签画布';
+    const normalized = String(value == null ? '' : value)
+        .trim()
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .replace(/\/+$/, '')
+        .replace(/\/+/g, '/');
+    if (normalized === 'bookmark-canvas-sync' || normalized === 'bookmark-canvas' || normalized === '书签画布同步' || normalized === '书签画布' || normalized === 'Bookmark Canvas') {
+        return def;
+    }
+    return normalized || def;
+}
+
+function __buildTransferCopyEntriesFromSandbox(sandbox) {
+    const copies = sandbox && sandbox.permCopies && typeof sandbox.permCopies === 'object'
+        ? sandbox.permCopies
+        : {};
+    const entries = [];
+    const pushed = new Set();
+
+    try {
+        const copyList = (typeof __ensurePermanentSectionCopyDisplayIndexes === 'function')
+            ? __ensurePermanentSectionCopyDisplayIndexes()
+            : [];
+        if (Array.isArray(copyList)) {
+            copyList.forEach((copy) => {
+                const copyId = String(copy && copy.id || '').trim();
+                if (!copyId || pushed.has(copyId)) return;
+                const key = `bcs:perm:copy-${copyId}`;
+                const payload = copies[key];
+                if (!payload || typeof payload !== 'object') return;
+                const displayIndex = (typeof __normalizePositiveInt === 'function')
+                    ? __normalizePositiveInt(copy && copy.displayIndex)
+                    : Math.max(1, parseInt(copy && copy.displayIndex, 10) || 1);
+                entries.push({
+                    key,
+                    copyId,
+                    payload,
+                    slotIndex: displayIndex + 1
+                });
+                pushed.add(copyId);
+            });
+        }
+    } catch (_) { }
+
+    Object.keys(copies).forEach((key) => {
+        const normalizedKey = String(key || '').trim();
+        if (!normalizedKey.startsWith('bcs:perm:copy-')) return;
+        const copyId = normalizedKey.slice('bcs:perm:copy-'.length).trim();
+        if (!copyId || pushed.has(copyId)) return;
+        const payload = copies[normalizedKey];
+        if (!payload || typeof payload !== 'object') return;
+        entries.push({
+            key: normalizedKey,
+            copyId,
+            payload
+        });
+        pushed.add(copyId);
+    });
+
+    return entries;
+}
+
+async function buildFullCanvasPackageFromCurrent(options = {}) {
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    if (!bridge || typeof bridge.buildExportSandbox !== 'function' || typeof bridge.buildObsidianPackageFilesFromSnapshot !== 'function') {
+        throw new Error('Canvas export bridge unavailable.');
+    }
+
+    const { isEn } = __getLang();
+    const exportRoot = __normalizeTransferExportRoot(options && options.exportRoot);
+    const exportFormat = 'json';
+    const reason = String(options && options.reason || 'github-transfer-push');
+
+    try { __flushMdEditorsForExport(); } catch (_) { }
+    try {
+        if (typeof saveTempNodes === 'function') {
+            const result = saveTempNodes({ immediate: true });
+            if (result && typeof result.then === 'function') await result;
+        }
+    } catch (_) { }
+    try {
+        if (typeof savePermanentSectionPosition === 'function') {
+            const result = savePermanentSectionPosition();
+            if (result && typeof result.then === 'function') await result;
+        }
+    } catch (_) { }
+
+    const sandbox = await bridge.buildExportSandbox({ reason });
+    if (!sandbox || !sandbox.permMain) {
+        throw new Error(isEn ? 'Export failed: permanent JSON source unavailable.' : '导出失败：永久栏目 JSON 真相源不可用。');
+    }
+
+    bridge.processExportSandboxForExport(sandbox);
+    if (options && options.writeBackupSlot === true && typeof bridge.writeBackupSlotFromSandbox === 'function') {
+        try { await bridge.writeBackupSlotFromSandbox(sandbox); } catch (_) { }
+    }
+
+    const bundle = bridge.buildObsidianPackageFilesFromSnapshot({
+        permMain: sandbox.permMain,
+        permCopies: sandbox.permCopies,
+        tempState: sandbox.tempState,
+        canvasState: sandbox.canvasState
+    }, {
+        isEn,
+        exportFormat,
+        exportRoot,
+        idsAlreadySyncIds: true,
+        copyEntries: __buildTransferCopyEntriesFromSandbox(sandbox)
+    });
+
+    const guideNames = (options && Array.isArray(options.guideNames) && options.guideNames.length > 0)
+        ? options.guideNames
+        : __getExportGuideNamesFromStorage();
+    const permanentPath = String(bundle && bundle.permanentPath || '');
+    const permanentMdRel = permanentPath.startsWith(`${exportRoot}/`)
+        ? permanentPath.slice(exportRoot.length + 1)
+        : permanentPath;
+    const guide = __buildExportGuide(
+        guideNames,
+        'githubPushGuide',
+        isEn,
+        new Date().toISOString(),
+        exportRoot,
+        __normalizeTransferExportRoot(options && options.vaultPrefix) || exportRoot,
+        permanentMdRel,
+        exportFormat
+    );
+    const encoder = new TextEncoder();
+    guideNames.forEach((name) => {
+        const fileName = String(name || '').trim();
+        if (!fileName) return;
+        bundle.files.push({
+            name: `${exportRoot}/${fileName}`,
+            data: encoder.encode(guide)
+        });
+    });
+
+    return bundle;
+}
+
+async function parseCanvasPackageForTransfer(input, options = {}) {
+    const source = input && typeof input === 'object' ? input : {};
+    if (source.folderFiles instanceof Map) {
+        return await parseCanvasPackageFromFolderFiles(
+            source.folderFiles,
+            source.folderName || '',
+            options
+        );
+    }
+    if (source.file) {
+        return await parseCanvasPackageFromZipFile(source.file, options);
+    }
+    throw new Error('Missing import package input.');
+}
+
+async function importParsedCanvasPackageForTransfer(parsed, options = {}) {
+    const safeParsed = parsed && typeof parsed === 'object' ? parsed : {};
+    const importMode = options && options.importMode === 'overwrite' ? 'overwrite' : 'snapshot';
+    const importFileName = String(safeParsed.importFileName || options.importFileName || '');
+
+    if (importMode === 'overwrite') {
+        await __performOverwriteImport({
+            parsedTempState: safeParsed.tempState,
+            parsedStorage: safeParsed.storage,
+            parsedPrimaryState: safeParsed.primaryState,
+            importFileName,
+            threshold: Number.isFinite(Number(options && options.threshold)) ? Number(options.threshold) : 300
+        });
+        return { success: true, mode: 'overwrite' };
+    }
+
+    __processImportedPackage(
+        safeParsed.tempState,
+        safeParsed.storage,
+        safeParsed.primaryState,
+        importFileName,
+        options && options.importMeta ? options.importMeta : {
+            source: 'github',
+            trigger: 'github-pull-snapshot'
+        }
+    );
+    return { success: true, mode: 'snapshot' };
+}
+
+async function importCanvasGithubFolderPackage(folderFiles, folderName, options = {}) {
+    const importMode = options && options.importMode === 'overwrite' ? 'overwrite' : 'snapshot';
+    const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName, { importMode });
+    return await importParsedCanvasPackageForTransfer(parsed, {
+        ...options,
+        importMode,
+        importFileName: parsed.importFileName || folderName || '',
+        importMeta: {
+            source: 'github',
+            trigger: importMode === 'overwrite' ? 'github-pull-overwrite' : 'github-pull-snapshot'
+        }
+    });
+}
+
 if (typeof window !== 'undefined') {
     window.showImportDialog = showImportDialog;
     window.exportCanvasCardGroupPackage = exportCanvasCardGroupPackage;
     window.exportCanvasTempGroupPackage = exportCanvasTempGroupPackage;
+    window.buildCanvasGithubPackageFiles = buildFullCanvasPackageFromCurrent;
+    window.importCanvasGithubFolderPackage = importCanvasGithubFolderPackage;
+    window.BookmarkCanvasPackageTransferBridge = Object.assign(window.BookmarkCanvasPackageTransferBridge || {}, {
+        buildFullCanvasPackageFromCurrent,
+        parseCanvasPackage: parseCanvasPackageForTransfer,
+        importParsedCanvasPackage: importParsedCanvasPackageForTransfer,
+        importCanvasGithubFolderPackage
+    });
 }

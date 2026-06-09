@@ -4342,6 +4342,18 @@ const i18n = {
         'zh_CN': '备份',
         'en': 'Backup'
     },
+    githubConfigText: {
+        'zh_CN': '配置',
+        'en': 'Config'
+    },
+    githubPushText: {
+        'zh_CN': '推送',
+        'en': 'Push'
+    },
+    githubPullText: {
+        'zh_CN': '拉取',
+        'en': 'Pull'
+    },
     clearMenuText: {
         'zh_CN': '清除',
         'en': 'Clear'
@@ -5231,6 +5243,12 @@ function applyLanguage() {
     if (exportCanvasText) exportCanvasText.textContent = i18n.exportCanvasText[currentLang];
     const backupCanvasText = document.getElementById('backupCanvasText');
     if (backupCanvasText) backupCanvasText.textContent = i18n.backupCanvasText[currentLang];
+    const githubConfigText = document.getElementById('githubConfigText');
+    if (githubConfigText) githubConfigText.textContent = i18n.githubConfigText[currentLang];
+    const githubPushText = document.getElementById('githubPushText');
+    if (githubPushText) githubPushText.textContent = i18n.githubPushText[currentLang];
+    const githubPullText = document.getElementById('githubPullText');
+    if (githubPullText) githubPullText.textContent = i18n.githubPullText[currentLang];
     const clearMenuText = document.getElementById('clearMenuText');
     if (clearMenuText) clearMenuText.textContent = i18n.clearMenuText[currentLang];
     const canvasClearSettingsText = document.getElementById('canvasClearSettingsText');
@@ -5277,8 +5295,6 @@ function applyLanguage() {
     const canvasShortcutSettingsText = document.getElementById('canvasShortcutSettingsText');
     if (canvasShortcutSettingsText) canvasShortcutSettingsText.textContent = i18n.canvasShortcutSettingsText[currentLang];
 
-    const canvasManageGeneralSectionText = document.getElementById('canvasManageGeneralSectionText');
-    if (canvasManageGeneralSectionText) canvasManageGeneralSectionText.textContent = i18n.canvasManageSectionGeneralText[currentLang];
     const canvasManageOtherSectionText = document.getElementById('canvasManageOtherSectionText');
     if (canvasManageOtherSectionText) canvasManageOtherSectionText.textContent = i18n.canvasManageSectionOtherText[currentLang];
     const canvasManageStorageSectionText = document.getElementById('canvasManageStorageSectionText');
@@ -5340,6 +5356,12 @@ function applyLanguage() {
     if (exportCanvasOtherText) exportCanvasOtherText.textContent = i18n.exportCanvasText[currentLang];
     const backupCanvasOtherText = document.getElementById('backupCanvasOtherText');
     if (backupCanvasOtherText) backupCanvasOtherText.textContent = i18n.backupCanvasText[currentLang];
+    const githubConfigOtherText = document.getElementById('githubConfigOtherText');
+    if (githubConfigOtherText) githubConfigOtherText.textContent = i18n.githubConfigText[currentLang];
+    const githubPushOtherText = document.getElementById('githubPushOtherText');
+    if (githubPushOtherText) githubPushOtherText.textContent = i18n.githubPushText[currentLang];
+    const githubPullOtherText = document.getElementById('githubPullOtherText');
+    if (githubPullOtherText) githubPullOtherText.textContent = i18n.githubPullText[currentLang];
     const clearMenuOtherText = document.getElementById('clearMenuOtherText');
     if (clearMenuOtherText) clearMenuOtherText.textContent = i18n.clearMenuText[currentLang];
     const clearMenuOtherSettingsText = document.getElementById('clearMenuOtherSettingsText');

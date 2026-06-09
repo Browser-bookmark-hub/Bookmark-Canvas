@@ -58,6 +58,8 @@
     <script src="pointer_drag.js" defer></script>
     <script src="storageBCS/storageBCS_core.js?v=1.0" defer></script>
     <script src="transfer_AI_sync/import-export-transfer-feature.js?v=1.0" defer></script>
+    <script src="transfer_AI_sync/github-repo-api.js?v=1.0" defer></script>
+    <script src="transfer_AI_sync/github-package-transfer.js?v=1.0" defer></script>
     <script src="transfer_AI_sync/import-export-transfer-ui-support.js?v=1.0" defer></script>
     <script src="bookmark_canvas_module.js?v=3.7" defer></script>
     <script src="canvas_groups/card_group_membership.js?v=1.0" defer></script>
@@ -315,6 +317,23 @@
                             type="button">
                             <i class="fas fa-file-export"></i>
                             <span id="exportCanvasOtherText">导出</span>
+                        </button>
+                    </div>
+                    <div class="settings-storage-split settings-github-split" role="group" aria-label="GitHub 推送拉取">
+                        <button id="githubPullOtherBtn" class="settings-menu-item settings-storage-split-btn"
+                            type="button">
+                            <i class="fas fa-arrow-down"></i>
+                            <span id="githubPullOtherText">拉取</span>
+                        </button>
+                        <button id="githubConfigOtherBtn" class="settings-menu-item settings-storage-split-btn"
+                            type="button">
+                            <i class="fab fa-github"></i>
+                            <span id="githubConfigOtherText">配置</span>
+                        </button>
+                        <button id="githubPushOtherBtn" class="settings-menu-item settings-storage-split-btn"
+                            type="button">
+                            <i class="fas fa-arrow-up"></i>
+                            <span id="githubPushOtherText">推送</span>
                         </button>
                     </div>
                     <div class="canvas-clear-dropdown" id="canvasOtherClearDropdown">
@@ -752,9 +771,6 @@
                             </div>
                             <div class="canvas-manage-modal-body">
                                 <div class="canvas-manage-actions">
-                                    <div class="canvas-manage-section-title">
-                                        <span id="canvasManageGeneralSectionText">常规</span>
-                                    </div>
                                     <div class="canvas-manage-split-group canvas-manage-horizontal-row" role="group">
                                         <button id="canvasAppearanceSettingsBtn" class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-left">
                                             <i class="fas fa-palette"></i>
@@ -817,6 +833,23 @@
                                             class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-right">
                                             <i class="fas fa-file-export"></i>
                                             <span id="exportCanvasText">导出</span>
+                                        </button>
+                                    </div>
+                                    <div class="canvas-manage-split-group canvas-manage-horizontal-row canvas-manage-github-row" role="group" aria-label="GitHub 推送拉取">
+                                        <button id="githubPullBtn"
+                                            class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-left">
+                                            <i class="fas fa-arrow-down"></i>
+                                            <span id="githubPullText">拉取</span>
+                                        </button>
+                                        <button id="githubConfigBtn"
+                                            class="canvas-manage-btn canvas-manage-btn-split">
+                                            <i class="fab fa-github"></i>
+                                            <span id="githubConfigText">配置</span>
+                                        </button>
+                                        <button id="githubPushBtn"
+                                            class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-right">
+                                            <i class="fas fa-arrow-up"></i>
+                                            <span id="githubPushText">推送</span>
                                         </button>
                                     </div>
                                 </div>

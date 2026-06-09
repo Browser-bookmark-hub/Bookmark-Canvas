@@ -1252,8 +1252,8 @@ async function showBackupDialog() {
     const backupFileNamePreview = `${isEn ? 'bookmark-canvas-backup' : '书签画布-备份'}-${savedStamp}.zip`;
     const backupFileNamePreviewLabel = isEn ? `Backup filename: ${backupFileNamePreview}` : `备份文件名：${backupFileNamePreview}`;
     const backupHintLine1 = isEn
-        ? 'Each export auto-saves here, and the backup file automatically overwrites the previous file.'
-        : '每次导出自动保存，备份文件自动覆盖上一次文件。';
+        ? 'Saves a backup during "Export", and the backup file automatically overwrites the previous one. ("Push" does not back up as GitHub is already a version control tool)'
+        : '「导出」时顺带保存一次备份，备份文件自动覆盖上一次文件。<br>（「推送」不做备份，因GitHub已是版本管理工具）';
     const autoBackupHintLine = isEn
         ? 'Runs on page/panel open when due by open-day interval.'
         : '按“打开天数”间隔触发：到期后首次打开页面/侧边栏时自动备份。';
@@ -1277,10 +1277,6 @@ async function showBackupDialog() {
                         <div style="margin: 0; font-weight: 600; text-align: center; border: 1px solid var(--border-color, rgba(255,255,255,0.2)); border-radius: 8px; padding: 8px 10px; background: var(--surface-hover, rgba(0,0,0,0.05));">${savedLabel}</div>
                         <div style="margin-top: 6px; font-size: 11px; opacity: 0.72; text-align: center; word-break: break-all;">${backupFileNamePreviewLabel}</div>
                     </div>
-                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0;">
-                        <div style="font-size: 12px; color: #f59e0b; line-height: 1.55;">${backupHintLine1}</div>
-                        <button type="button" class="import-mode-btn" id="backupDownloadBtn" ${hasBackupPayload ? '' : 'disabled'}>${isEn ? 'Download Backup' : '下载备份'}</button>
-                    </div>
                     <div id="autoBackupPanel" style="margin: 0 0 10px; padding: 10px; border: 1px solid var(--border-color, rgba(255,255,255,0.2)); border-radius: 8px; background: var(--surface-hover, rgba(0,0,0,0.05)); transition: opacity .18s ease, filter .18s ease;">
                         <div style="display:flex; align-items:center; justify-content:space-between; gap: 10px;">
                             <label style="display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;">
@@ -1294,6 +1290,10 @@ async function showBackupDialog() {
                             </label>
                         </div>
                         <div style="font-size:12px; margin-top:8px; line-height:1.55; opacity:0.85;">${autoBackupHintLine}</div>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0;">
+                        <div style="font-size: 12px; color: #f59e0b; line-height: 1.55;">${backupHintLine1}</div>
+                        <button type="button" class="import-mode-btn" id="backupDownloadBtn" ${hasBackupPayload ? '' : 'disabled'}>${isEn ? 'Download' : '下载备份'}</button>
                     </div>
                     <div id="backupRestoreConfirmPanel" style="display: none; margin: 0 0 10px; padding: 10px; border: 1px solid var(--border-color, rgba(255,255,255,0.2)); border-radius: 8px; background: var(--surface-hover, rgba(0,0,0,0.05));">
                         <div style="font-size: 12px; line-height: 1.5; margin-bottom: 8px;">${restoreConfirmLine}</div>
@@ -1480,10 +1480,44 @@ async function showBackupDialog() {
     const exportOtherBtn = document.getElementById('exportCanvasOtherBtn');
     const backupBtn = document.getElementById('backupCanvasBtn');
     const backupOtherBtn = document.getElementById('backupCanvasOtherBtn');
+    const githubConfigBtn = document.getElementById('githubConfigBtn');
+    const githubPushBtn = document.getElementById('githubPushBtn');
+    const githubPullBtn = document.getElementById('githubPullBtn');
+    const githubConfigOtherBtn = document.getElementById('githubConfigOtherBtn');
+    const githubPushOtherBtn = document.getElementById('githubPushOtherBtn');
+    const githubPullOtherBtn = document.getElementById('githubPullOtherBtn');
+
+    const getGithubTransfer = () => {
+        const transfer = (typeof window !== 'undefined') ? window.BookmarkCanvasGithubTransfer : null;
+        if (!transfer) {
+            const msg = (typeof __getLang === 'function' && __getLang().isEn)
+                ? 'GitHub transfer is unavailable.'
+                : 'GitHub 推送/拉取模块不可用。';
+            try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'error', 5000) : alert(msg); } catch (_) { alert(msg); }
+            return null;
+        }
+        return transfer;
+    };
+
+    const runGithubAction = (action) => {
+        const transfer = getGithubTransfer();
+        if (!transfer || typeof transfer[action] !== 'function') return;
+        try {
+            const result = transfer[action]();
+            if (result && typeof result.catch === 'function') {
+                result.catch((err) => console.warn('[GitHub Transfer] action failed:', err));
+            }
+        } catch (err) {
+            console.warn('[GitHub Transfer] action failed:', err);
+        }
+    };
 
     if (importBtn) importBtn.addEventListener('click', showImportDialog);
     if (exportBtn) exportBtn.addEventListener('click', exportCanvas);
     if (backupBtn) backupBtn.addEventListener('click', () => { try { showBackupDialog(); } catch (e) { console.warn(e); } });
+    if (githubConfigBtn) githubConfigBtn.addEventListener('click', () => runGithubAction('showConfigDialog'));
+    if (githubPushBtn) githubPushBtn.addEventListener('click', () => runGithubAction('push'));
+    if (githubPullBtn) githubPullBtn.addEventListener('click', () => runGithubAction('pull'));
     if (importOtherBtn) {
         importOtherBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1505,6 +1539,17 @@ async function showBackupDialog() {
             try { showBackupDialog(); } catch (err) { console.warn(err); }
         });
     }
+    const bindGithubOtherButton = (button, action) => {
+        if (!button) return;
+        button.addEventListener('click', (e) => {
+            e.stopPropagation();
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            runGithubAction(action);
+        });
+    };
+    bindGithubOtherButton(githubConfigOtherBtn, 'showConfigDialog');
+    bindGithubOtherButton(githubPushOtherBtn, 'push');
+    bindGithubOtherButton(githubPullOtherBtn, 'pull');
 
     // Auto backup check on first launch in this page context.
     try { __scheduleAutoBackupLaunchCheck(); } catch (_) { }

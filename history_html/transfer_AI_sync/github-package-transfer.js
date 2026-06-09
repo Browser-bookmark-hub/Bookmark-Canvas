@@ -1,0 +1,1624 @@
+(function (global) {
+    'use strict';
+
+    function getDefaultRemoteRoot() {
+        return t('书签画布', 'bookmark-canvas');
+    }
+    const DEFAULT_PULL_MODE = 'overwrite';
+    const DEFAULT_OVERWRITE_THRESHOLD = 300;
+    const STORAGE_KEYS = [
+        'githubRepoToken',
+        'githubRepoOwner',
+        'githubRepoName',
+        'githubRepoBranch',
+        'githubRepoBasePath',
+        'githubCanvasRemoteRoot',
+        'githubDefaultPullMode',
+        'githubOverwriteThreshold',
+        'githubLastOperation',
+        'githubLastPullRemotePath',
+        'githubCanvasPushGuideChoice',
+        'githubCanvasPushGuideCustomName'
+    ];
+
+    let activeConfigDialog = null;
+    let activeConfirmDialog = null;
+    let operationRunning = false;
+
+    function getApi() {
+        return global.BookmarkCanvasGithubRepoApi || null;
+    }
+
+    function isEn() {
+        try {
+            if (typeof __getLang === 'function') return !!__getLang().isEn;
+        } catch (_) { }
+        try {
+            return String(localStorage.getItem('language') || '').toLowerCase().startsWith('en');
+        } catch (_) { }
+        return false;
+    }
+
+    function t(zh, en) {
+        return isEn() ? en : zh;
+    }
+
+    function showToast(message, type = 'info', duration = 3200) {
+        try {
+            if (typeof showCanvasToast === 'function') {
+                showCanvasToast(String(message || ''), type, duration);
+                return;
+            }
+        } catch (_) { }
+        if (type === 'error' || type === 'warning') {
+            alert(String(message || ''));
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function normalizeRepoPath(path) {
+        const normalized = String(path == null ? '' : path)
+            .trim()
+            .replace(/\\/g, '/')
+            .replace(/^\/+/, '')
+            .replace(/\/+$/, '')
+            .replace(/\/+/g, '/');
+        if (normalized === 'bookmark-canvas-sync' || normalized === 'bookmark-canvas' || normalized === '书签画布同步' || normalized === '书签画布' || normalized === 'Bookmark Canvas') {
+            return getDefaultRemoteRoot();
+        }
+        return normalized;
+    }
+
+    function joinRepoPath() {
+        return Array.from(arguments)
+            .map(normalizeRepoPath)
+            .filter(Boolean)
+            .join('/');
+    }
+
+    function getPathLeaf(path, fallback = null) {
+        const normalized = normalizeRepoPath(path);
+        const fb = fallback === null ? getDefaultRemoteRoot() : fallback;
+        if (!normalized) return fb;
+        return normalized.split('/').filter(Boolean).slice(-1)[0] || fb;
+    }
+
+    function isValidRepoFolderPath(path, { allowEmpty = true } = {}) {
+        const normalized = normalizeRepoPath(path);
+        if (!normalized) return !!allowEmpty;
+        const segments = normalized.split('/');
+        for (const segment of segments) {
+            if (!segment || segment === '.' || segment === '..') return false;
+            if (/[<>:"\\|?*\x00-\x1F]/.test(segment)) return false;
+            if (/[. ]$/.test(segment)) return false;
+        }
+        return true;
+    }
+
+    function normalizePullMode(value) {
+        return value === 'overwrite' ? 'overwrite' : 'snapshot';
+    }
+
+    function normalizeThreshold(value) {
+        const n = Math.round(Number(value));
+        if (!Number.isFinite(n)) return DEFAULT_OVERWRITE_THRESHOLD;
+        return Math.max(1, Math.min(100000, n));
+    }
+
+    function normalizeLastPullRemotePath(value) {
+        if (typeof value === 'string') {
+            const path = normalizeRepoPath(value);
+            return path ? { path, branch: '', sha: '', at: 0 } : null;
+        }
+        if (!value || typeof value !== 'object') return null;
+        const path = normalizeRepoPath(value.path);
+        if (!path) return null;
+        const at = Number(value.at);
+        return {
+            path,
+            branch: String(value.branch || ''),
+            sha: String(value.sha || ''),
+            at: Number.isFinite(at) && at > 0 ? at : 0
+        };
+    }
+
+    function getStorageArea() {
+        try {
+            if (typeof chrome !== 'undefined' && chrome && chrome.storage && chrome.storage.local) return chrome.storage.local;
+        } catch (_) { }
+        try {
+            if (typeof browser !== 'undefined' && browser && browser.storage && browser.storage.local) return browser.storage.local;
+        } catch (_) { }
+        return null;
+    }
+
+    function storageGet(keys) {
+        const area = getStorageArea();
+        if (area && typeof area.get === 'function') {
+            return new Promise((resolve) => {
+                try {
+                    const result = area.get(keys, (items) => {
+                        try {
+                            if (chrome && chrome.runtime && chrome.runtime.lastError) {
+                                resolve({});
+                                return;
+                            }
+                        } catch (_) { }
+                        resolve(items || {});
+                    });
+                    if (result && typeof result.then === 'function') result.then(resolve).catch(() => resolve({}));
+                } catch (_) {
+                    resolve({});
+                }
+            });
+        }
+        const out = {};
+        const list = Array.isArray(keys) ? keys : Object.keys(keys || {});
+        list.forEach((key) => {
+            try {
+                const raw = localStorage.getItem(key);
+                if (raw == null) return;
+                try { out[key] = JSON.parse(raw); } catch (_) { out[key] = raw; }
+            } catch (_) { }
+        });
+        return Promise.resolve(out);
+    }
+
+    function storageSet(values) {
+        const safeValues = values && typeof values === 'object' ? values : {};
+        const area = getStorageArea();
+        if (area && typeof area.set === 'function') {
+            return new Promise((resolve, reject) => {
+                try {
+                    const result = area.set(safeValues, () => {
+                        try {
+                            if (chrome && chrome.runtime && chrome.runtime.lastError) {
+                                reject(new Error(chrome.runtime.lastError.message || 'storage.set failed'));
+                                return;
+                            }
+                        } catch (_) { }
+                        resolve();
+                    });
+                    if (result && typeof result.then === 'function') result.then(resolve).catch(reject);
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        }
+        Object.keys(safeValues).forEach((key) => {
+            try { localStorage.setItem(key, JSON.stringify(safeValues[key])); } catch (_) { }
+        });
+        return Promise.resolve();
+    }
+
+    async function readDefaultOverwriteThreshold() {
+        try {
+            const bridge = global.CanvasProtocolBridge;
+            if (bridge && typeof bridge.getImportOverwriteThreshold === 'function') {
+                return normalizeThreshold(await bridge.getImportOverwriteThreshold());
+            }
+        } catch (_) { }
+        return DEFAULT_OVERWRITE_THRESHOLD;
+    }
+
+    async function loadConfig() {
+        const raw = await storageGet(STORAGE_KEYS);
+        const fallbackThreshold = await readDefaultOverwriteThreshold();
+        return {
+            token: String(raw.githubRepoToken || '').trim(),
+            owner: String(raw.githubRepoOwner || '').trim(),
+            repo: String(raw.githubRepoName || '').trim(),
+            branch: String(raw.githubRepoBranch || '').trim(),
+            basePath: normalizeRepoPath(raw.githubRepoBasePath || ''),
+            remoteRoot: normalizeRepoPath(raw.githubCanvasRemoteRoot || getDefaultRemoteRoot()) || getDefaultRemoteRoot(),
+            defaultPullMode: normalizePullMode(raw.githubDefaultPullMode || DEFAULT_PULL_MODE),
+            overwriteThreshold: normalizeThreshold(raw.githubOverwriteThreshold || fallbackThreshold),
+            lastOperation: raw.githubLastOperation && typeof raw.githubLastOperation === 'object' ? raw.githubLastOperation : null,
+            lastPullRemotePath: normalizeLastPullRemotePath(raw.githubLastPullRemotePath),
+            pushGuideChoice: String(raw.githubCanvasPushGuideChoice || 'agents').trim(),
+            pushGuideCustomName: String(raw.githubCanvasPushGuideCustomName || '').trim()
+        };
+    }
+
+    async function saveConfig(config) {
+        const safe = {
+            githubRepoToken: String(config && config.token || '').trim(),
+            githubRepoOwner: String(config && config.owner || '').trim(),
+            githubRepoName: String(config && config.repo || '').trim(),
+            githubRepoBranch: String(config && config.branch || '').trim(),
+            githubRepoBasePath: normalizeRepoPath(config && config.basePath),
+            githubCanvasRemoteRoot: normalizeRepoPath(config && config.remoteRoot) || getDefaultRemoteRoot(),
+            githubDefaultPullMode: normalizePullMode(config && config.defaultPullMode),
+            githubOverwriteThreshold: normalizeThreshold(config && config.overwriteThreshold),
+            githubCanvasPushGuideChoice: String(config && config.pushGuideChoice || 'agents').trim(),
+            githubCanvasPushGuideCustomName: String(config && config.pushGuideCustomName || '').trim()
+        };
+        await storageSet(safe);
+        return await loadConfig();
+    }
+
+    async function saveLastOperation(operation) {
+        const payload = {
+            type: String(operation && operation.type || ''),
+            at: Date.now(),
+            result: String(operation && operation.result || ''),
+            path: normalizeRepoPath(operation && operation.path),
+            branch: String(operation && operation.branch || ''),
+            sha: String(operation && operation.sha || '').trim(),
+            message: String(operation && operation.message || ''),
+            error: String(operation && operation.error || '')
+        };
+        await storageSet({ githubLastOperation: payload });
+        return payload;
+    }
+
+    async function saveLastPullRemotePath(operation) {
+        const path = normalizeRepoPath(operation && operation.path);
+        if (!path) return null;
+        const payload = {
+            path,
+            branch: String(operation && operation.branch || ''),
+            sha: String(operation && operation.sha || '').trim(),
+            at: Date.now()
+        };
+        await storageSet({ githubLastPullRemotePath: payload });
+        return payload;
+    }
+
+    function getRepoParams(config, branchOverride = '') {
+        return {
+            token: config.token,
+            owner: config.owner,
+            repo: config.repo,
+            branch: branchOverride || config.branch,
+            basePath: config.basePath
+        };
+    }
+
+    function getRemoteRootPath(config) {
+        return joinRepoPath(config.basePath, config.remoteRoot || getDefaultRemoteRoot());
+    }
+
+    function validateConfig(config, { requireRepo = false } = {}) {
+        if (!isValidRepoFolderPath(config.basePath, { allowEmpty: true })) {
+            return t('Base Path 不合法，请使用仓库内相对路径。', 'Invalid Base Path. Use a relative path inside the repo.');
+        }
+        if (!isValidRepoFolderPath(config.remoteRoot, { allowEmpty: false })) {
+            return t('远端路径不合法，请使用合法的仓库文件夹路径。', 'Invalid remote path. Use a valid repo folder path.');
+        }
+        if (requireRepo) {
+            if (!config.owner || !config.repo || !config.token) {
+                return t('请先填写 Owner、Repo 和 Token。', 'Please fill Owner, Repo, and Token first.');
+            }
+        }
+        return '';
+    }
+
+    function formatDateTime(ms) {
+        const n = Number(ms);
+        if (!Number.isFinite(n) || n <= 0) return '-';
+        try {
+            return new Date(n).toLocaleString(isEn() ? 'en-US' : 'zh-CN', { hour12: false });
+        } catch (_) {
+            return new Date(n).toISOString();
+        }
+    }
+
+    function formatLastOperation(last) {
+        if (!last || typeof last !== 'object') return `<span class="github-config-muted">${escapeHtml(t('暂无操作记录', 'No operation yet'))}</span>`;
+        const typeLabel = last.type === 'push'
+            ? t('推送', 'Push')
+            : (last.type === 'pull' ? t('拉取', 'Pull') : escapeHtml(last.type || '-'));
+        const resultLabel = last.result === 'success'
+            ? t('成功', 'Success')
+            : (last.result === 'failed' ? t('失败', 'Failed') : (last.result || '-'));
+        const lines = [
+            `${t('类型', 'Type')}: ${typeLabel}`,
+            `${t('时间', 'Time')}: ${formatDateTime(last.at)}`,
+            `${t('结果', 'Result')}: ${resultLabel}`,
+            `${t('路径', 'Path')}: ${last.path || '-'}`
+        ];
+        if (last.branch) lines.push(`${t('分支', 'Branch')}: ${last.branch}`);
+        if (last.sha) lines.push(`${t('提交', 'Commit')}: ${last.sha.slice(0, 7)}`);
+        if (last.message) lines.push(`${t('说明', 'Note')}: ${last.message}`);
+        if (last.error) lines.push(`${t('错误', 'Error')}: ${last.error}`);
+        return lines.map((line) => `<div>${escapeHtml(line)}</div>`).join('');
+    }
+
+    function formatLastPullRemotePath(lastPullInput) {
+        const lastPull = normalizeLastPullRemotePath(lastPullInput);
+        if (!lastPull) {
+            return `<span class="github-config-muted">${escapeHtml(t('暂无成功拉取路径', 'No successful pull path yet'))}</span>`;
+        }
+        const branchWithSha = lastPull.branch
+            ? `${lastPull.branch}${lastPull.sha ? ` (${lastPull.sha.slice(0, 7)})` : ''}`
+            : '';
+        const meta = [
+            branchWithSha ? `${t('分支', 'Branch')}: ${branchWithSha}` : '',
+            lastPull.at ? `${t('时间', 'Time')}: ${formatDateTime(lastPull.at)}` : ''
+        ].filter(Boolean).join(' · ');
+        return `
+            <div class="github-config-last-pull-row">
+                <code>${escapeHtml(lastPull.path)}</code>
+                <button type="button" class="github-path-copy-btn import-option-btn" id="githubLastPullPathCopyBtn" data-copy-value="${escapeHtml(lastPull.path)}" style="min-width: 48px; display: inline-flex; justify-content: center; align-items: center; text-align: center; padding: 0 6px !important;">${escapeHtml(t('复制', 'Copy'))}</button>
+            </div>
+            ${meta ? `<div class="github-config-muted">${escapeHtml(meta)}</div>` : ''}
+        `;
+    }
+
+    function copyTextToClipboard(text) {
+        const value = String(text == null ? '' : text);
+        if (!value) return Promise.resolve(false);
+        try {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                return navigator.clipboard.writeText(value).then(() => true).catch(() => false);
+            }
+        } catch (_) { }
+        return new Promise((resolve) => {
+            try {
+                const textarea = document.createElement('textarea');
+                textarea.value = value;
+                textarea.setAttribute('readonly', 'readonly');
+                textarea.style.position = 'fixed';
+                textarea.style.left = '-9999px';
+                textarea.style.top = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                const ok = document.execCommand('copy');
+                textarea.remove();
+                resolve(!!ok);
+            } catch (_) {
+                resolve(false);
+            }
+        });
+    }
+
+    function openTokenGuide() {
+        const lang = isEn() ? 'en' : 'zh';
+        const theme = (() => {
+            try { return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'; } catch (_) { return 'light'; }
+        })();
+        const path = `github/github-token-guide.html?lang=${encodeURIComponent(lang)}&theme=${encodeURIComponent(theme)}`;
+        let url = path;
+        try {
+            if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.getURL === 'function') {
+                url = chrome.runtime.getURL(path);
+            }
+        } catch (_) { }
+        try {
+            if (typeof chrome !== 'undefined' && chrome.tabs && typeof chrome.tabs.create === 'function') {
+                chrome.tabs.create({ url });
+                return;
+            }
+        } catch (_) { }
+        window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    function collectDialogConfig(dialog) {
+        const get = (id) => {
+            const el = dialog.querySelector(`#${id}`);
+            return el ? String(el.value || '').trim() : '';
+        };
+        const getRadioValue = (name) => {
+            const el = dialog.querySelector(`input[name="${name}"]:checked`);
+            return el ? el.value : 'agents';
+        };
+        return {
+            token: get('githubConfigToken'),
+            owner: get('githubConfigOwner'),
+            repo: get('githubConfigRepo'),
+            branch: get('githubConfigBranch'),
+            basePath: normalizeRepoPath(get('githubConfigBasePath')),
+            remoteRoot: normalizeRepoPath(get('githubConfigRemoteRoot')),
+            defaultPullMode: normalizePullMode(get('githubConfigDefaultPullMode')),
+            overwriteThreshold: normalizeThreshold(get('githubConfigOverwriteThreshold')),
+            pushGuideChoice: getRadioValue('githubPushGuideChoice'),
+            pushGuideCustomName: get('githubPushGuideCustomInput')
+        };
+    }
+
+    function setDialogStatus(dialog, message, type = 'info') {
+        const el = dialog.querySelector('#githubConfigStatus');
+        if (!el) return;
+        el.textContent = String(message || '');
+        el.dataset.type = type;
+    }
+
+    function buildPathHelpTemplateHtml(config) {
+        const basePath = normalizeRepoPath(config && config.basePath);
+        const folderName = getPathLeaf(config && config.remoteRoot, getDefaultRemoteRoot());
+        const isDark = (() => {
+            try { return (document.documentElement.getAttribute('data-theme') || '') === 'dark'; } catch (_) { return false; }
+        })();
+        const hl = (value) => {
+            const style = isDark
+                ? 'color:#fde68a;background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.35);padding:0 4px;border-radius:6px;font-weight:700;'
+                : 'color:#92400e;background:rgba(245,158,11,0.22);border:1px solid rgba(245,158,11,0.38);padding:0 4px;border-radius:6px;font-weight:700;';
+            return `<span style="${style}">${escapeHtml(value)}</span>`;
+        };
+        const hlGray = (value) => {
+            const style = isDark
+                ? 'color:#8b949e;background:rgba(240,246,252,0.1);border:1px solid #3a3b3c;padding:0 4px;border-radius:6px;font-family:monospace;font-weight:700;'
+                : 'color:#57606a;background:rgba(175,184,193,0.2);border:1px solid #d0d7de;padding:0 4px;border-radius:6px;font-family:monospace;font-weight:700;';
+            return `<span style="${style}">${escapeHtml(value)}</span>`;
+        };
+        const arrow = '<div style="margin:8px 0; line-height:1; display:flex; justify-content:center;"><i class="fas fa-arrow-down"></i></div>';
+        
+        let pathRelationHtml = '';
+        if (basePath) {
+            pathRelationHtml = isEn()
+                ? `<div style="margin: 10px 0; padding: 10px; background: rgba(255, 255, 255, 0.03); border: 1px dashed rgba(229, 231, 235, 0.2); border-radius: 8px;">
+                     <div style="font-weight: 600; margin-bottom: 4px; color: var(--text-primary);">Fixed Prefix UI Explanation:</div>
+                     <div style="line-height: 1.5;">The gray prefix ${hlGray(basePath + '/')} in front of the input field is your configured ${hl('Base Path')}.</div>
+                   </div>`
+                : `<div style="margin: 10px 0; padding: 10px; background: rgba(255, 255, 255, 0.03); border: 1px dashed rgba(229, 231, 235, 0.2); border-radius: 8px;">
+                     <div style="font-weight: 600; margin-bottom: 4px; color: var(--text-primary);">固定前缀 UI 说明：</div>
+                     <div style="line-height: 1.5;">输入框前方的灰色前缀 ${hlGray(basePath + '/')} 是您配置的 ${hl('Base Path')}（仓库基础路径）。</div>
+                   </div>`;
+        }
+
+        const repoName = config && config.repo ? config.repo : t('您的仓库', 'your-repo');
+        
+        const mainDesc = isEn()
+            ? `<div style="margin-top: 12px; line-height: 1.6;">
+                 Please ensure that you use ${hl('「Open folder as vault」')} in Obsidian to open the folder cloned (pulled) from GitHub: ${hl(repoName)}.
+               </div>`
+            : `<div style="margin-top: 12px; line-height: 1.6;">
+                 请确保在 Obsidian 中使用 ${hl('「打开本地仓库」')} 打开您从 GitHub 克隆（拉取）到本地的 ${hl(repoName)} 文件夹。
+               </div>`;
+
+        return `
+            <div class="github-path-help-notes">
+                ${pathRelationHtml}
+                ${mainDesc}
+            </div>
+        `;
+    }
+
+    function showPathHelpDialog(configInput) {
+        if (activeConfirmDialog) {
+            try { activeConfirmDialog.remove(); } catch (_) { }
+            activeConfirmDialog = null;
+        }
+        const config = configInput && typeof configInput === 'object' ? configInput : {};
+        const initialPath = normalizeRepoPath(config.remoteRoot || getDefaultRemoteRoot()) || getDefaultRemoteRoot();
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog github-path-help-dialog';
+        dialog.innerHTML = `
+            <div class="import-dialog-content github-path-help-content">
+                <div class="import-dialog-header" style="padding-left: 14px; padding-right: 14px;">
+                    <h3>${escapeHtml(t('推送：「.canvas」内部路径', 'Push: ".canvas" Internal Path'))}</h3>
+                    <button class="import-dialog-close" id="githubPathHelpClose" type="button">&times;</button>
+                </div>
+                <div class="import-dialog-body github-confirm-body">
+                    <div class="github-path-detail-editor">
+                        <div class="github-path-detail-label">${escapeHtml(t('请输入路径', 'Enter path'))}</div>
+                        <div class="github-path-detail-input-row">
+                            <div class="github-path-input-wrapper">
+                                ${config.basePath ? `<span class="github-path-prefix" title="${escapeHtml(config.basePath)}/">${escapeHtml(config.basePath)}/</span>` : ''}
+                                <input id="githubPathHelpInput" type="text" autocomplete="off" value="${escapeHtml(initialPath)}" placeholder="${escapeHtml(getDefaultRemoteRoot())}">
+                            </div>
+                            <button id="githubPathHelpOk" type="button" class="import-option-btn">${escapeHtml(t('确定', 'OK'))}</button>
+                        </div>
+                    </div>
+                    <hr class="github-path-help-divider">
+                    <div class="github-confirm-message">${buildPathHelpTemplateHtml(config)}</div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(dialog);
+        activeConfirmDialog = dialog;
+
+        return new Promise((resolve) => {
+            const input = dialog.querySelector('#githubPathHelpInput');
+            const cleanup = (value) => {
+                try { dialog.remove(); } catch (_) { }
+                if (activeConfirmDialog === dialog) activeConfirmDialog = null;
+                resolve(value);
+            };
+            const confirm = () => {
+                const val = input ? String(input.value || '').trim() : '';
+                if (!val) {
+                    alert(isEn() ? 'Path cannot be empty.' : '路径不能为空，已自动恢复默认值。');
+                    if (input) {
+                        input.value = getDefaultRemoteRoot();
+                        try { input.focus(); input.select(); } catch (_) {}
+                    }
+                    return;
+                }
+                cleanup({
+                    path: val
+                });
+            };
+            const closeBtn = dialog.querySelector('#githubPathHelpClose');
+            const okBtn = dialog.querySelector('#githubPathHelpOk');
+            if (closeBtn) closeBtn.addEventListener('click', () => cleanup(null));
+            if (okBtn) okBtn.addEventListener('click', confirm);
+            if (input) {
+                try { input.focus(); input.select(); } catch (_) { }
+                input.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter') {
+                        if (event.isComposing) return;
+                        event.preventDefault();
+                        confirm();
+                    } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        cleanup(null);
+                    }
+                });
+            }
+            dialog.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cleanup(null);
+                }
+            });
+        });
+    }
+
+    async function showConfigDialog(options = {}) {
+        if (activeConfigDialog) {
+            try { activeConfigDialog.remove(); } catch (_) { }
+            activeConfigDialog = null;
+        }
+        const config = await loadConfig();
+        const title = t('GitHub 推送/拉取配置', 'GitHub Push/Pull Config');
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog github-config-dialog';
+        dialog.id = 'githubTransferConfigDialog';
+        dialog.innerHTML = `
+            <style>
+                .inferred-path-tooltip {
+                    left: 0 !important;
+                    transform: translateY(4px) !important;
+                    width: max-content !important;
+                    max-width: none !important;
+                    white-space: nowrap !important;
+                }
+                .github-config-info-trigger:hover .inferred-path-tooltip {
+                    opacity: 1 !important;
+                    transform: translateY(0) !important;
+                }
+            </style>
+            <div class="import-dialog-content github-config-content">
+                <div class="import-dialog-header">
+                    <h3>${escapeHtml(title)}</h3>
+                    <button class="import-dialog-close" id="githubConfigClose" type="button">&times;</button>
+                </div>
+                <div class="import-dialog-body github-config-body">
+                    <div class="github-config-section">
+                        <div class="github-config-section-title">${escapeHtml(t('1. 仓库配置', '1. Repository'))}</div>
+                        <div class="github-config-grid github-config-repo-grid">
+                            <label class="github-config-field">
+                                <span>Owner</span>
+                                <input id="githubConfigOwner" type="text" autocomplete="off" value="${escapeHtml(config.owner)}" placeholder="your-name">
+                            </label>
+                            <label class="github-config-field">
+                                <span>Repo</span>
+                                <input id="githubConfigRepo" type="text" autocomplete="off" value="${escapeHtml(config.repo)}" placeholder="bookmark-canvas">
+                            </label>
+                            <label class="github-config-field">
+                                <span>Branch</span>
+                                <input id="githubConfigBranch" type="text" autocomplete="off" value="${escapeHtml(config.branch)}" placeholder="${escapeHtml(t('留空=默认分支', 'empty = default branch'))}">
+                            </label>
+                            <label class="github-config-field">
+                                <span>Base Path</span>
+                                <input id="githubConfigBasePath" type="text" autocomplete="off" value="${escapeHtml(config.basePath)}" placeholder="${escapeHtml(t('可不填(路径前缀)', 'empty = path prefix'))}">
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="github-config-auth-row">
+                        <label class="github-config-field github-config-token-field">
+                            <span>Token (PAT)</span>
+                            <input id="githubConfigToken" type="password" autocomplete="off" value="${escapeHtml(config.token)}" placeholder="github_pat_...">
+                        </label>
+                        <div class="github-config-actions">
+                            <button id="githubConfigGuideBtn" type="button" class="import-option-btn github-config-secondary">${escapeHtml(t('Token 说明', 'Token Guide'))}</button>
+                            <button id="githubConfigTestBtn" type="button" class="import-option-btn github-config-secondary" style="border: 1px solid var(--accent-primary, #0969da) !important; color: var(--accent-primary, #0969da) !important;">${escapeHtml(t('测试连接', 'Test'))}</button>
+                        </div>
+                    </div>
+                    <div id="githubConfigStatus" class="github-config-status" data-type="info">${escapeHtml(t('修改后会自动保存。', 'Changes are saved automatically.'))}</div>
+
+                    <div class="github-config-subsection">
+                        <div class="github-config-subtitle">${escapeHtml(t('2. 推送/拉取默认项', '2. Push/Pull Defaults'))}</div>
+                        <div class="github-config-inline">
+                            <label class="github-config-field github-config-remote-field">
+                                <span>${escapeHtml(t('「.canvas」内部路径', '".canvas" Internal Path'))}</span>
+                                <div class="github-path-input-row">
+                                    <div class="github-path-input-wrapper">
+                                        ${config.basePath ? `<span class="github-path-prefix" title="${escapeHtml(config.basePath)}/">${escapeHtml(config.basePath)}/</span>` : ''}
+                                        <input id="githubConfigRemoteRoot" type="text" autocomplete="off" value="${escapeHtml(config.remoteRoot)}" placeholder="${escapeHtml(getDefaultRemoteRoot())}">
+                                    </div>
+                                    <button id="githubPathHelpBtn" type="button" class="import-option-btn github-path-detail-btn" style="border: 1px solid var(--accent-primary, #0969da) !important; color: var(--accent-primary, #0969da) !important;">${escapeHtml(t('详情', 'Details'))}</button>
+                                </div>
+                            </label>
+                            <div class="github-config-guide-container" style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+                                <span style="font-size: 12px; font-weight: 700; color: var(--text-primary);">${escapeHtml(t('AI 指南文件名', 'AI Guide Filename'))}</span>
+                                <div class="github-config-guide-rows" style="display: flex; flex-direction: column; gap: 8px;">
+                                    <div class="github-config-guide-row-1" style="display: flex; align-items: center; gap: 16px;">
+                                        <label class="github-config-guide-option" style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary);">
+                                            <input type="radio" name="githubPushGuideChoice" value="agents" id="githubPushGuideAgents" ${config.pushGuideChoice === 'agents' ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                            <span style="font-weight: 600;">AGENTS.md</span>
+                                            <span style="font-size: 11px; color: var(--text-secondary); opacity: 0.8;">codex</span>
+                                        </label>
+                                        <label class="github-config-guide-option" style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary);">
+                                            <input type="radio" name="githubPushGuideChoice" value="claude" id="githubPushGuideClaude" ${config.pushGuideChoice === 'claude' ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                            <span style="font-weight: 600;">CLAUDE.md</span>
+                                            <span style="font-size: 11px; color: var(--text-secondary); opacity: 0.8;">Claude Code</span>
+                                        </label>
+                                    </div>
+                                    <div class="github-config-guide-row-2" style="display: grid; grid-template-columns: minmax(0, var(--github-config-control-width)) auto; gap: 6px; align-items: center; width: fit-content; max-width: 100%;">
+                                        <div style="display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0;">
+                                            <label class="github-config-guide-option" style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary); flex-shrink: 0; margin: 0;">
+                                                <input type="radio" name="githubPushGuideChoice" value="custom" id="githubPushGuideCustom" ${config.pushGuideChoice === 'custom' ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                                <span style="font-weight: 600;">${escapeHtml(t('自定义', 'Custom'))}</span>
+                                            </label>
+                                            <input type="text" id="githubPushGuideCustomInput" class="github-config-guide-input" placeholder="${escapeHtml(t('例如 GUIDE.md', 'e.g. GUIDE.md'))}" value="${escapeHtml(config.pushGuideCustomName)}" ${config.pushGuideChoice === 'custom' ? '' : 'disabled'} style="flex: 1; min-width: 0;">
+                                        </div>
+                                        <button type="button" class="import-option-btn github-path-detail-btn" style="visibility: hidden; pointer-events: none; border: 1px solid var(--accent-primary, #0969da) !important; color: var(--accent-primary, #0969da) !important; margin: 0;">${escapeHtml(t('详情', 'Details'))}</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="github-config-divider-mini"></div>
+                            <div class="github-config-pull-row">
+                                <label class="github-config-field github-config-pull-mode-field">
+                                    <span>${escapeHtml(t('默认拉取方式', 'Default Pull Mode'))}</span>
+                                    <select id="githubConfigDefaultPullMode">
+                                        <option value="snapshot"${config.defaultPullMode === 'snapshot' ? ' selected' : ''}>${escapeHtml(t('快照包导入', 'Snapshot import'))}</option>
+                                        <option value="overwrite"${config.defaultPullMode === 'overwrite' ? ' selected' : ''}>${escapeHtml(t('全量覆盖', 'Full Overwrite'))}</option>
+                                    </select>
+                                </label>
+                                <label class="github-config-field github-config-threshold-field">
+                                    <span style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;">
+                                        ${escapeHtml(t('差异阈值', 'Diff Threshold'))}
+                                        <span class="github-config-info-trigger">?
+                                            <span class="github-config-info-tooltip ${isEn() ? 'is-en' : 'is-zh'}">${t('差异条目 ≥ 阈值时全量覆盖，<br>否则按增量更新。', 'If diff entries ≥ threshold, perform full overwrite; otherwise incremental.')}</span>
+                                        </span>
+                                    </span>
+                                    <input id="githubConfigOverwriteThreshold" type="number" min="1" max="100000" step="1" value="${escapeHtml(config.overwriteThreshold)}">
+                                </label>
+                            </div>
+                            <div class="github-config-inferred-row" style="grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; width: var(--github-config-control-width); max-width: 100%; margin-top: 8px;">
+                                <span style="font-size: 12px; font-weight: 600; white-space: nowrap; flex-shrink: 0; color: var(--text-primary); display: inline-flex; align-items: center; gap: 4px;">
+                                    ${escapeHtml(t('拉取路径', 'Pull Path'))}
+                                    <span class="github-config-info-trigger">?
+                                        <span class="github-config-info-tooltip inferred-path-tooltip ${isEn() ? 'is-en' : 'is-zh'}">${t('根据「.canvas」内部路径计算。', 'Calculated from the ".canvas" internal path.')}</span>
+                                    </span>
+                                </span>
+                                <div class="github-config-last-content" id="githubConfigInferredPathDisplay" style="font-family: monospace; word-break: break-all; min-height: 30px; display: inline-flex; align-items: center; padding: 5px 8px; flex: 1; min-width: 0; box-sizing: border-box; line-height: 1.4;">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="github-config-last">
+                        <div class="github-config-subtitle">${escapeHtml(t('3. 上一次操作', '3. Last Operation'))}</div>
+                        <div class="github-config-last-content">${formatLastOperation(config.lastOperation)}</div>
+                        <div class="github-config-subtitle github-config-last-pull-title">${escapeHtml(t('上次拉取路径', 'Last Pull Path'))}</div>
+                        <div class="github-config-last-content github-config-last-pull-content">${formatLastPullRemotePath(config.lastPullRemotePath)}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(dialog);
+        activeConfigDialog = dialog;
+
+        return new Promise((resolve) => {
+            let saveTimer = null;
+            let lastSavedConfig = config;
+            let saveSeq = 0;
+
+            const cleanup = (result) => {
+                if (saveTimer) {
+                    clearTimeout(saveTimer);
+                    saveTimer = null;
+                }
+                try { dialog.remove(); } catch (_) { }
+                if (activeConfigDialog === dialog) activeConfigDialog = null;
+                resolve(result);
+            };
+
+            const updatePullModeState = () => {
+                const select = dialog.querySelector('#githubConfigDefaultPullMode');
+                const input = dialog.querySelector('#githubConfigOverwriteThreshold');
+                const field = input ? input.closest('.github-config-field') : null;
+                const disabled = !select || select.value !== 'overwrite';
+                if (input) input.disabled = disabled;
+                if (field) field.classList.toggle('is-disabled', disabled);
+            };
+
+            const updateInferredPath = () => {
+                const nextConfig = collectDialogConfig(dialog);
+                const inferredPath = joinRepoPath(nextConfig.basePath, nextConfig.remoteRoot || getDefaultRemoteRoot());
+                const displayEl = dialog.querySelector('#githubConfigInferredPathDisplay');
+                if (displayEl) {
+                    displayEl.textContent = inferredPath || getDefaultRemoteRoot();
+                }
+            };
+
+            const runAutoSave = async (options = {}) => {
+                const nextConfig = collectDialogConfig(dialog);
+                if (!nextConfig.remoteRoot) {
+                    const remoteInput = dialog.querySelector('#githubConfigRemoteRoot');
+                    if (remoteInput && document.activeElement === remoteInput) {
+                        return null;
+                    }
+                    if (remoteInput) {
+                        remoteInput.value = getDefaultRemoteRoot();
+                    }
+                    nextConfig.remoteRoot = getDefaultRemoteRoot();
+                    updateInferredPath();
+                    setDialogStatus(dialog, t('无法保存：路径不能为空，已自动恢复默认值。', 'Cannot save: path cannot be empty. Default value restored.'), 'error');
+                    try {
+                        const saved = await saveConfig(nextConfig);
+                        lastSavedConfig = saved;
+                    } catch (_) {}
+                    return null;
+                }
+                const pathError = validateConfig(nextConfig, { requireRepo: false });
+                if (pathError) {
+                    setDialogStatus(dialog, pathError, 'error');
+                    return null;
+                }
+                const seq = ++saveSeq;
+                if (!options.quiet) setDialogStatus(dialog, t('正在自动保存...', 'Saving...'), 'info');
+                try {
+                    const saved = await saveConfig(nextConfig);
+                    if (seq === saveSeq) {
+                        lastSavedConfig = saved;
+                        if (!options.quiet) {
+                            setDialogStatus(dialog, t('已自动保存。', 'Saved automatically.'), 'success');
+                        }
+                    }
+                    return saved;
+                } catch (err) {
+                    if (seq === saveSeq) {
+                        setDialogStatus(dialog, (err && err.message) || String(err), 'error');
+                    }
+                    return null;
+                }
+            };
+
+            const scheduleAutoSave = () => {
+                updatePullModeState();
+                updateInferredPath();
+                if (saveTimer) clearTimeout(saveTimer);
+                saveTimer = setTimeout(() => {
+                    saveTimer = null;
+                    void runAutoSave();
+                }, 450);
+            };
+
+            const closeWithAutoSave = async () => {
+                if (saveTimer) {
+                    clearTimeout(saveTimer);
+                    saveTimer = null;
+                }
+                const saved = await runAutoSave({ quiet: true });
+                const finalConfig = saved || lastSavedConfig || collectDialogConfig(dialog);
+                if (options.requireRepo === true) {
+                    const error = validateConfig(finalConfig, { requireRepo: true });
+                    if (error) {
+                        cleanup(null);
+                        return;
+                    }
+                }
+                cleanup(finalConfig);
+            };
+
+            const closeBtn = dialog.querySelector('#githubConfigClose');
+            if (closeBtn) closeBtn.addEventListener('click', () => { void closeWithAutoSave(); });
+            dialog.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    void closeWithAutoSave();
+                }
+            });
+
+            const guideBtn = dialog.querySelector('#githubConfigGuideBtn');
+            if (guideBtn) guideBtn.addEventListener('click', openTokenGuide);
+
+            const pathHelpBtn = dialog.querySelector('#githubPathHelpBtn');
+            if (pathHelpBtn) {
+                pathHelpBtn.addEventListener('click', async (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const nextConfig = Object.assign({}, lastSavedConfig || config, collectDialogConfig(dialog));
+                    nextConfig.lastPullRemotePath = (lastSavedConfig && lastSavedConfig.lastPullRemotePath) || config.lastPullRemotePath || null;
+                    const result = await showPathHelpDialog(nextConfig);
+                    if (!result || typeof result.path !== 'string') return;
+                    const remoteInput = dialog.querySelector('#githubConfigRemoteRoot');
+                    if (!remoteInput) return;
+                    remoteInput.value = normalizeRepoPath(result.path) || getDefaultRemoteRoot();
+                    remoteInput.dispatchEvent(new Event('input', { bubbles: true }));
+                });
+            }
+
+            const lastPullPathCopyBtn = dialog.querySelector('#githubLastPullPathCopyBtn');
+            if (lastPullPathCopyBtn) {
+                lastPullPathCopyBtn.addEventListener('click', async () => {
+                    const value = lastPullPathCopyBtn.getAttribute('data-copy-value') || '';
+                    const ok = await copyTextToClipboard(value);
+                    showToast(ok ? t('已复制路径。', 'Path copied.') : t('复制失败，请手动复制。', 'Copy failed. Please copy manually.'), ok ? 'success' : 'error', 2200);
+                });
+            }
+
+            const testBtn = dialog.querySelector('#githubConfigTestBtn');
+            if (testBtn) {
+                testBtn.addEventListener('click', async () => {
+                    const api = getApi();
+                    if (!api || typeof api.testRepoConnection !== 'function') {
+                        setDialogStatus(dialog, 'GitHub API unavailable.', 'error');
+                        return;
+                    }
+                    if (saveTimer) {
+                        clearTimeout(saveTimer);
+                        saveTimer = null;
+                    }
+                    const nextConfig = await runAutoSave({ quiet: true }) || collectDialogConfig(dialog);
+                    const error = validateConfig(nextConfig, { requireRepo: true });
+                    if (error) {
+                        setDialogStatus(dialog, error, 'error');
+                        return;
+                    }
+                    try {
+                        testBtn.disabled = true;
+                        setDialogStatus(dialog, t('正在测试连接...', 'Testing connection...'), 'info');
+                        const result = await api.testRepoConnection(getRepoParams(nextConfig));
+                        if (!result || result.success !== true) {
+                            setDialogStatus(dialog, result && result.error ? result.error : t('连接失败', 'Connection failed'), 'error');
+                            return;
+                        }
+                        let msg = t('连接成功。', 'Connection succeeded.');
+                        if (result.branchWillBeCreated) {
+                            msg += t(' 目标分支当前不存在，首次推送会自动创建。', ' Target branch does not exist and will be created on first push.');
+                        }
+                        setDialogStatus(dialog, msg, 'success');
+                    } catch (err) {
+                        setDialogStatus(dialog, (err && err.message) || String(err), 'error');
+                    } finally {
+                        testBtn.disabled = false;
+                    }
+                });
+            }
+
+            const syncPushGuideCustomEnabled = () => {
+                const customRadio = dialog.querySelector('#githubPushGuideCustom');
+                const customInput = dialog.querySelector('#githubPushGuideCustomInput');
+                const isCustom = !!(customRadio && customRadio.checked);
+                if (customInput) {
+                    customInput.disabled = !isCustom;
+                    if (isCustom) {
+                        try { customInput.focus(); } catch (_) { }
+                    }
+                }
+            };
+
+            const pushGuideRadios = dialog.querySelectorAll('input[name="githubPushGuideChoice"]');
+            pushGuideRadios.forEach((r) => {
+                r.addEventListener('change', () => {
+                    syncPushGuideCustomEnabled();
+                });
+            });
+
+            dialog.querySelectorAll('input, select').forEach((el) => {
+                el.addEventListener('input', scheduleAutoSave);
+                el.addEventListener('change', scheduleAutoSave);
+            });
+
+            const remoteRootEl = dialog.querySelector('#githubConfigRemoteRoot');
+            if (remoteRootEl) {
+                remoteRootEl.addEventListener('blur', () => {
+                    const val = String(remoteRootEl.value || '').trim();
+                    if (!val) {
+                        void runAutoSave();
+                    }
+                });
+            }
+
+            const updateRemoteRootPrefix = () => {
+                const basePathInput = dialog.querySelector('#githubConfigBasePath');
+                const basePath = basePathInput ? normalizeRepoPath(basePathInput.value) : '';
+                const wrapper = dialog.querySelector('.github-path-input-row .github-path-input-wrapper');
+                if (!wrapper) return;
+                let prefixEl = wrapper.querySelector('.github-path-prefix');
+                if (basePath) {
+                    if (!prefixEl) {
+                        prefixEl = document.createElement('span');
+                        prefixEl.className = 'github-path-prefix';
+                        wrapper.insertBefore(prefixEl, wrapper.firstChild);
+                    }
+                    prefixEl.textContent = basePath + '/';
+                    prefixEl.title = basePath + '/';
+                    prefixEl.style.display = '';
+                } else {
+                    if (prefixEl) {
+                        prefixEl.style.display = 'none';
+                    }
+                }
+            };
+
+            const basePathInput = dialog.querySelector('#githubConfigBasePath');
+            if (basePathInput) {
+                basePathInput.addEventListener('input', updateRemoteRootPrefix);
+                basePathInput.addEventListener('change', updateRemoteRootPrefix);
+            }
+
+            updatePullModeState();
+            updateInferredPath();
+            updateRemoteRootPrefix();
+            syncPushGuideCustomEnabled();
+            const firstInput = dialog.querySelector('#githubConfigOwner');
+            try { if (firstInput) firstInput.focus(); } catch (_) { }
+        });
+    }
+
+    function showConfirmDialog(options = {}) {
+        if (activeConfirmDialog) {
+            try { activeConfirmDialog.remove(); } catch (_) { }
+            activeConfirmDialog = null;
+        }
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog github-confirm-dialog';
+        const title = String(options.title || t('确认操作', 'Confirm'));
+        const messageHtml = String(options.messageHtml || '');
+        const confirmText = String(options.confirmText || t('继续', 'Continue'));
+        const cancelText = String(options.cancelText || t('取消', 'Cancel'));
+        const danger = options.danger === true;
+        dialog.innerHTML = `
+            <div class="import-dialog-content github-confirm-content">
+                <div class="import-dialog-header">
+                    <h3>${escapeHtml(title)}</h3>
+                    <button class="import-dialog-close" id="githubConfirmClose" type="button">&times;</button>
+                </div>
+                <div class="import-dialog-body github-confirm-body">
+                    <div class="github-confirm-message">${messageHtml}</div>
+                    <div class="github-confirm-actions">
+                        <button id="githubConfirmCancel" type="button" class="import-mode-btn import-mode-btn-cancel">${escapeHtml(cancelText)}</button>
+                        <button id="githubConfirmOk" type="button" class="import-mode-btn${danger ? ' github-danger-btn' : ''}">${escapeHtml(confirmText)}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(dialog);
+        activeConfirmDialog = dialog;
+        return new Promise((resolve) => {
+            const cleanup = (value) => {
+                try { dialog.remove(); } catch (_) { }
+                if (activeConfirmDialog === dialog) activeConfirmDialog = null;
+                resolve(value);
+            };
+            const closeBtn = dialog.querySelector('#githubConfirmClose');
+            const cancelBtn = dialog.querySelector('#githubConfirmCancel');
+            const okBtn = dialog.querySelector('#githubConfirmOk');
+            if (closeBtn) closeBtn.addEventListener('click', () => cleanup(false));
+            if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(false));
+            if (okBtn) okBtn.addEventListener('click', () => cleanup(true));
+            dialog.addEventListener('click', (event) => {
+                if (event.target === dialog) cleanup(false);
+            });
+            dialog.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cleanup(false);
+                }
+            });
+        });
+    }
+
+    function buildOperationPathHtml(label, path) {
+        return `
+            <div class="github-operation-line">
+                <span>${escapeHtml(label)}</span>
+                <code>${escapeHtml(path || getDefaultRemoteRoot())}</code>
+            </div>
+        `;
+    }
+
+    function buildOperationNoticeHtml({ title, description, pathLabel, path, metaHtml = '' } = {}) {
+        const english = isEn();
+        const separator = english ? '. ' : '。';
+        const endPunctuation = english ? '.' : '。';
+        const text = [title, description].map((item) => String(item || '').trim()).filter(Boolean).join(separator);
+        return `
+            <div class="github-operation-text">${escapeHtml(text)}${text && !/[。.!?？]$/.test(text) ? endPunctuation : ''}</div>
+            ${buildOperationPathHtml(pathLabel || t('目标路径', 'Target path'), path)}
+            ${metaHtml ? `<div class="github-operation-line github-operation-meta">${metaHtml}</div>` : ''}
+        `;
+    }
+
+    async function ensureReadyConfig(actionLabel) {
+        let config = await loadConfig();
+        const missing = validateConfig(config, { requireRepo: true });
+        if (!missing) return config;
+        showToast(t('请先完成 GitHub 配置。', 'Please finish GitHub config first.'), 'warning');
+        const next = await showConfigDialog({ requireRepo: true, actionLabel });
+        if (!next) return null;
+        config = await loadConfig();
+        const error = validateConfig(config, { requireRepo: true });
+        if (error) {
+            showToast(error, 'error', 5000);
+            return null;
+        }
+        return config;
+    }
+
+    function getCanvasFileEntries(files, rootPath) {
+        const normalizedRoot = normalizeRepoPath(rootPath);
+        const prefix = normalizedRoot ? `${normalizedRoot}/` : '';
+        return (Array.isArray(files) ? files : []).filter((file) => {
+            const path = normalizeRepoPath(file && file.path);
+            if (!path) return false;
+            if (normalizedRoot && path !== normalizedRoot && !path.startsWith(prefix)) return false;
+            return /\.canvas$/i.test(path.split('/').pop() || '');
+        });
+    }
+
+    function classifyRemoteRoot(listResult, rootPath) {
+        const files = Array.isArray(listResult && listResult.files) ? listResult.files : [];
+        const canvasFiles = getCanvasFileEntries(files, rootPath);
+        if (!listResult || listResult.rootExists === false) {
+            return { kind: 'missing', files, canvasFiles };
+        }
+        if (!files.length) return { kind: 'empty', files, canvasFiles };
+        if (canvasFiles.length > 0) return { kind: 'valid-package', files, canvasFiles };
+        return { kind: 'foreign-files', files, canvasFiles };
+    }
+
+    async function confirmPushPreflight({ config, connection, classification, rootPath }) {
+        if (connection && connection.branchWillBeCreated) {
+            const ok = await showConfirmDialog({
+                title: t('首次推送：创建分支', 'First Push: Create Branch'),
+                messageHtml: buildOperationNoticeHtml({
+                    title: t('目标分支当前不存在', 'Target branch does not exist'),
+                    description: t('将先创建分支，再继续推送。', 'Create the branch first, then continue pushing.'),
+                    pathLabel: t('目标分支', 'Target branch'),
+                    path: connection.resolvedBranch || config.branch || ''
+                }),
+                confirmText: t('创建并继续', 'Create and Continue')
+            });
+            if (!ok) return false;
+        }
+
+        if (!classification || classification.kind === 'missing') {
+            return await showConfirmDialog({
+                title: t('首次推送：初始化远端路径', 'First Push: Initialize Remote Path'),
+                messageHtml: buildOperationNoticeHtml({
+                    title: t('远端路径尚未创建', 'Remote path has not been created'),
+                    description: t('将创建完整导出包。', 'Create a full export package.'),
+                    pathLabel: t('目标路径', 'Target path'),
+                    path: rootPath || getDefaultRemoteRoot()
+                }),
+                confirmText: t('初始化并推送', 'Initialize and Push')
+            });
+        }
+
+        if (classification.kind === 'empty') {
+            return await showConfirmDialog({
+                title: t('首次推送：空路径', 'First Push: Empty Path'),
+                messageHtml: buildOperationNoticeHtml({
+                    title: t('远端路径为空', 'Remote path is empty'),
+                    description: t('将写入完整导出包。', 'Write a full export package.'),
+                    pathLabel: t('目标路径', 'Target path'),
+                    path: rootPath || DEFAULT_REMOTE_ROOT
+                }),
+                confirmText: t('写入导出包', 'Write Package')
+            });
+        }
+
+        if (classification.kind === 'foreign-files') {
+            const count = classification.files.length;
+            return await showConfirmDialog({
+                title: t('路径风险提示', 'Path Risk'),
+                messageHtml: buildOperationNoticeHtml({
+                    title: t('该路径不像书签画布导出包', 'This path does not look like a Bookmark Canvas package'),
+                    description: t('已有文件，但没有识别到 .canvas 包。', 'Files exist, but no .canvas package was found.'),
+                    pathLabel: t('目标路径', 'Target path'),
+                    path: rootPath || getDefaultRemoteRoot(),
+                    metaHtml: `<span>${escapeHtml(t('远端文件数', 'Remote files'))}</span><strong>${count}</strong>`
+                }),
+                confirmText: t('仍然覆盖', 'Overwrite Anyway'),
+                cancelText: t('停止', 'Stop'),
+                danger: true
+            });
+        }
+
+        return true;
+    }
+
+    function uint8ToText(data) {
+        if (typeof data === 'string') return data;
+        try {
+            return new TextDecoder('utf-8').decode(data instanceof Uint8Array ? data : new Uint8Array(data || []));
+        } catch (_) {
+            return String(data == null ? '' : data);
+        }
+    }
+
+    function textToUtf8Bytes(text) {
+        try {
+            return new TextEncoder().encode(String(text == null ? '' : text));
+        } catch (_) {
+            return new Uint8Array();
+        }
+    }
+
+    function bytesToHex(bytes) {
+        return Array.from(bytes || [])
+            .map((byte) => Number(byte || 0).toString(16).padStart(2, '0'))
+            .join('');
+    }
+
+    async function sha1Hex(bytes) {
+        try {
+            const cryptoApi = global.crypto || global.msCrypto || null;
+            const subtle = cryptoApi && cryptoApi.subtle;
+            if (!subtle || typeof subtle.digest !== 'function') return '';
+            const digest = await subtle.digest('SHA-1', bytes);
+            return bytesToHex(new Uint8Array(digest));
+        } catch (_) {
+            return '';
+        }
+    }
+
+    async function calculateGitBlobSha(content) {
+        const bodyBytes = textToUtf8Bytes(content);
+        const headerBytes = textToUtf8Bytes(`blob ${bodyBytes.byteLength}\0`);
+        const payload = new Uint8Array(headerBytes.byteLength + bodyBytes.byteLength);
+        payload.set(headerBytes, 0);
+        payload.set(bodyBytes, headerBytes.byteLength);
+        return await sha1Hex(payload);
+    }
+
+    function replacePackageRootPrefixInText(text, packageRoot, remoteRootPath) {
+        const fromRoot = normalizeRepoPath(packageRoot);
+        const toRoot = normalizeRepoPath(remoteRootPath);
+        if (!fromRoot || !toRoot || fromRoot === toRoot) return text;
+        const escaped = fromRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return String(text || '').replace(new RegExp(`${escaped}/`, 'g'), `${toRoot}/`);
+    }
+
+    async function buildPushChanges(bundle, config, remoteFiles, options = {}) {
+        const remoteRootPath = normalizeRepoPath(options.remoteRootPath || getRemoteRootPath(config));
+        const packageRoot = normalizeRepoPath(options.packageRoot || getPathLeaf(config.remoteRoot));
+        const localByPath = new Map();
+        const remoteShaByPath = new Map();
+        const files = Array.isArray(bundle && bundle.files) ? bundle.files : [];
+        (Array.isArray(remoteFiles) ? remoteFiles : []).forEach((file) => {
+            const path = normalizeRepoPath(file && file.path);
+            const sha = String(file && file.sha || '').trim();
+            if (path && sha) remoteShaByPath.set(path, sha);
+        });
+
+        files.forEach((file) => {
+            const name = normalizeRepoPath(file && file.name);
+            if (!name) return;
+            const relPath = packageRoot && name.startsWith(`${packageRoot}/`)
+                ? name.slice(packageRoot.length + 1)
+                : name;
+            const path = joinRepoPath(remoteRootPath, relPath);
+            const rawContent = uint8ToText(file.data);
+            const shouldRewriteRefs = /\.(canvas|json)$/i.test(name);
+            localByPath.set(path, {
+                path,
+                content: shouldRewriteRefs
+                    ? replacePackageRootPrefixInText(rawContent, packageRoot, joinRepoPath(config.basePath, config.remoteRoot || getDefaultRemoteRoot()))
+                    : rawContent
+            });
+        });
+
+        const localEntries = Array.from(localByPath.values());
+        const updateChanges = [];
+        let skipped = 0;
+        let hashCompared = 0;
+        const hashConcurrency = Math.max(1, Math.min(12, localEntries.length || 1));
+        let cursor = 0;
+        const workers = Array.from({ length: hashConcurrency }, async () => {
+            while (cursor < localEntries.length) {
+                const entry = localEntries[cursor];
+                cursor += 1;
+                const remoteSha = remoteShaByPath.get(entry.path) || '';
+                const localSha = remoteSha ? await calculateGitBlobSha(entry.content) : '';
+                if (remoteSha && localSha) {
+                    hashCompared += 1;
+                    if (remoteSha === localSha) {
+                        skipped += 1;
+                        continue;
+                    }
+                }
+                updateChanges.push(entry);
+            }
+        });
+        await Promise.all(workers);
+
+        const deleteChanges = [];
+        (Array.isArray(remoteFiles) ? remoteFiles : []).forEach((file) => {
+            const path = normalizeRepoPath(file && file.path);
+            if (!path || localByPath.has(path)) return;
+            deleteChanges.push({ path, delete: true });
+        });
+        return {
+            changes: updateChanges.concat(deleteChanges),
+            updated: updateChanges.length,
+            deleted: deleteChanges.length,
+            skipped,
+            hashCompared,
+            localCount: localEntries.length,
+            remoteCount: Array.isArray(remoteFiles) ? remoteFiles.length : 0
+        };
+    }
+
+    function buildCommitMessage(type, rootPath) {
+        const now = new Date();
+        const stamp = now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, 'Z');
+        if (type === 'pull') return `Bookmark Canvas: pull package ${stamp}`;
+        return `Bookmark Canvas: push package ${rootPath || getDefaultRemoteRoot()} ${stamp}`;
+    }
+
+    function getPushGuideNames(config) {
+        const choice = config.pushGuideChoice || 'agents';
+        const customName = config.pushGuideCustomName || '';
+        let name = 'AGENTS.md';
+        if (choice === 'claude') {
+            name = 'CLAUDE.md';
+        } else if (choice === 'custom') {
+            const sanitizeGuideFileName = (raw) => {
+                let s = String(raw == null ? '' : raw).trim().replace(/[\\/:*?"<>|]+/g, '').trim();
+                if (!s) return '';
+                if (!/\.[A-Za-z0-9]+$/.test(s)) s += '.md';
+                return s;
+            };
+            name = sanitizeGuideFileName(customName) || 'AGENTS.md';
+        }
+        return [name];
+    }
+
+    async function push() {
+        if (operationRunning) {
+            showToast(t('已有 GitHub 操作正在执行。', 'A GitHub operation is already running.'), 'warning');
+            return;
+        }
+        operationRunning = true;
+        let rootPath = '';
+        try {
+            const api = getApi();
+            if (!api) throw new Error('GitHub API unavailable.');
+            const config = await ensureReadyConfig('push');
+            if (!config) return;
+            rootPath = getRemoteRootPath(config);
+            showToast(t('正在检查 GitHub 配置...', 'Checking GitHub config...'), 'info', 2200);
+
+            const connection = await api.testRepoConnection({
+                ...getRepoParams(config),
+                basePath: ''
+            });
+            if (!connection || connection.success !== true) {
+                throw new Error(connection && connection.error ? connection.error : t('GitHub 连接失败', 'GitHub connection failed'));
+            }
+            if (connection.repo && connection.repo.permissions && connection.repo.permissions.push === false) {
+                throw new Error(t('当前 Token 没有仓库写入权限。', 'The current token has no repo write permission.'));
+            }
+
+            let listResult = null;
+            let classification = null;
+            if (connection.branchExists === false) {
+                classification = { kind: 'missing', files: [], canvasFiles: [] };
+            } else {
+                listResult = await api.listRepoFiles({
+                    token: config.token,
+                    owner: config.owner,
+                    repo: config.repo,
+                    branch: connection.resolvedBranch || config.branch,
+                    rootPath
+                });
+                if (!listResult || listResult.success !== true) {
+                    throw new Error(listResult && listResult.error ? listResult.error : t('读取远端路径失败', 'Failed to read remote path'));
+                }
+                classification = classifyRemoteRoot(listResult, rootPath);
+            }
+
+            const ok = await confirmPushPreflight({ config, connection, classification, rootPath });
+            if (!ok) return;
+
+            showToast(t('正在构建完整导出包...', 'Building full export package...'), 'info', 2200);
+            const buildPackage = global.buildCanvasGithubPackageFiles ||
+                (global.BookmarkCanvasPackageTransferBridge && global.BookmarkCanvasPackageTransferBridge.buildFullCanvasPackageFromCurrent);
+            if (typeof buildPackage !== 'function') throw new Error('Canvas export package bridge unavailable.');
+            const packageRoot = getPathLeaf(config.remoteRoot || getDefaultRemoteRoot());
+            const guideNames = getPushGuideNames(config);
+            const bundle = await buildPackage({
+                exportRoot: packageRoot,
+                vaultPrefix: rootPath || packageRoot,
+                reason: 'github-push',
+                guideNames: guideNames
+            });
+            const pushPlan = await buildPushChanges(bundle, config, classification.files, { packageRoot, remoteRootPath: rootPath });
+            const changes = Array.isArray(pushPlan && pushPlan.changes) ? pushPlan.changes : [];
+            if (!changes.length) {
+                const note = t('远端已是最新。', 'Remote already up to date.');
+                await saveLastOperation({
+                    type: 'push',
+                    result: 'success',
+                    path: rootPath,
+                    branch: connection.resolvedBranch || config.branch,
+                    sha: connection.branchHeadSha || null,
+                    message: note
+                });
+                showToast(note, 'success', 4200);
+                return;
+            }
+
+            showToast(
+                t(
+                    `正在推送到 GitHub（${pushPlan.updated || 0} 个变更，${pushPlan.deleted || 0} 个删除）...`,
+                    `Pushing to GitHub (${pushPlan.updated || 0} changed, ${pushPlan.deleted || 0} deleted)...`
+                ),
+                'info',
+                2800
+            );
+            const result = await api.applyRepoFilesBatch({
+                token: config.token,
+                owner: config.owner,
+                repo: config.repo,
+                branch: connection.resolvedBranch || config.branch,
+                message: buildCommitMessage('push', rootPath),
+                changes
+            });
+            if (!result || result.success !== true) {
+                throw new Error(result && result.error ? result.error : t('推送失败', 'Push failed'));
+            }
+            const note = result.noChanges
+                ? t('远端已是最新。', 'Remote already up to date.')
+                : t(`已推送 ${result.updated || 0} 个文件，删除 ${result.deleted || 0} 个旧文件。`, `Pushed ${result.updated || 0} files, deleted ${result.deleted || 0} old files.`);
+            await saveLastOperation({
+                type: 'push',
+                result: 'success',
+                path: rootPath,
+                branch: result.branch || connection.resolvedBranch || config.branch,
+                sha: result.commitSha || null,
+                message: note
+            });
+            showToast(note, 'success', 5000);
+        } catch (error) {
+            const msg = (error && error.message) || String(error);
+            try { await saveLastOperation({ type: 'push', result: 'failed', path: rootPath, error: msg }); } catch (_) { }
+            showToast(`${t('推送失败：', 'Push failed: ')}${msg}`, 'error', 7000);
+        } finally {
+            operationRunning = false;
+        }
+    }
+
+    async function downloadRemoteFilesToFolderMap({ api, config, branch, files }) {
+        const folderFiles = new Map();
+        const list = Array.isArray(files) ? files : [];
+        const concurrency = Math.max(1, Math.min(6, list.length || 1));
+        let nextIndex = 0;
+
+        const worker = async () => {
+            while (nextIndex < list.length) {
+                const file = list[nextIndex];
+                nextIndex += 1;
+                const filePath = normalizeRepoPath(file && file.path);
+                if (!filePath) continue;
+                let fileResult = null;
+                if (typeof api.getRepoFileRaw === 'function') {
+                    fileResult = await api.getRepoFileRaw({
+                        token: config.token,
+                        owner: config.owner,
+                        repo: config.repo,
+                        branch,
+                        path: filePath
+                    });
+                }
+                if (!fileResult || fileResult.success !== true) {
+                    fileResult = await api.getRepoFile({
+                        token: config.token,
+                        owner: config.owner,
+                        repo: config.repo,
+                        branch,
+                        path: filePath
+                    });
+                }
+                if (!fileResult || fileResult.success !== true) {
+                    throw new Error(fileResult && fileResult.error ? `${filePath}: ${fileResult.error}` : `${filePath}: ${t('下载失败', 'download failed')}`);
+                }
+                const resultPath = normalizeRepoPath(fileResult.path || filePath) || filePath;
+                folderFiles.set(resultPath, fileResult.contentBytes || new Uint8Array());
+            }
+        };
+
+        const workers = [];
+        for (let i = 0; i < concurrency; i += 1) workers.push(worker());
+        await Promise.all(workers);
+        return folderFiles;
+    }
+
+    async function choosePullMode(config, rootPath, fileCount) {
+        const defaultMode = normalizePullMode(config.defaultPullMode);
+        const pullMessageHtml = buildOperationNoticeHtml({
+            title: t('读取远端完整 .canvas 包', 'Read the full remote .canvas package'),
+            description: t('请选择导入方式。', 'Choose an import mode.'),
+            pathLabel: t('远端路径', 'Remote path'),
+            path: rootPath || getDefaultRemoteRoot(),
+            metaHtml: `<span>${escapeHtml(t('远端文件数', 'Remote files'))}</span><strong>${fileCount}</strong>`
+        });
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog github-pull-mode-dialog';
+        dialog.innerHTML = `
+            <div class="import-dialog-content github-confirm-content">
+                <div class="import-dialog-header">
+                    <h3>${escapeHtml(t('选择拉取方式', 'Choose Pull Mode'))}</h3>
+                    <button class="import-dialog-close" id="githubPullModeClose" type="button">&times;</button>
+                </div>
+                <div class="import-dialog-body github-confirm-body">
+                    <div class="github-confirm-message github-pull-mode-message">
+                        ${pullMessageHtml}
+                    </div>
+                    <div class="github-pull-mode-actions">
+                        <button id="githubPullSnapshot" type="button" class="import-mode-option github-pull-mode-option${defaultMode === 'snapshot' ? ' is-selected' : ''}">
+                            <span class="import-mode-radio" aria-hidden="true"></span>
+                            <span class="import-mode-option-main">
+                                <span class="import-mode-option-title">${escapeHtml(t('导入快照包', 'Snapshot Package Import'))}</span>
+                                <span class="import-mode-option-desc">${escapeHtml(t('相当于增量式导入：按快照包导入，并用分组框包裹（默认）。', 'Equivalent to incremental-style import: load as a snapshot package and wrap it in a group frame. (Default)'))}</span>
+                            </span>
+                        </button>
+                        <button id="githubPullOverwrite" type="button" class="import-mode-option github-pull-mode-option${defaultMode === 'overwrite' ? ' is-selected' : ''}">
+                            <span class="import-mode-radio" aria-hidden="true"></span>
+                            <span class="import-mode-option-main">
+                                <span class="import-mode-option-title">${escapeHtml(t('全量覆盖', 'Full Overwrite'))}</span>
+                                <span class="import-mode-option-desc">${escapeHtml(t('清空本地目标，写入导入包内容。可通过「备份」撤销。', 'Clears current local target and writes the imported package in. Undo via Backup.'))}</span>
+                            </span>
+                        </button>
+                    </div>
+                    <div class="github-pull-mode-footer">
+                        <button id="githubPullCancel" type="button" class="import-mode-btn import-mode-btn-cancel">${escapeHtml(t('取消', 'Cancel'))}</button>
+                        <button id="githubPullConfirm" type="button" class="import-mode-btn import-mode-btn-confirm">${escapeHtml(t('确定', 'OK'))}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(dialog);
+        return new Promise((resolve) => {
+            let selectedMode = defaultMode;
+            const cleanup = (value) => {
+                try { dialog.remove(); } catch (_) { }
+                resolve(value);
+            };
+            const closeBtn = dialog.querySelector('#githubPullModeClose');
+            const snapshotBtn = dialog.querySelector('#githubPullSnapshot');
+            const overwriteBtn = dialog.querySelector('#githubPullOverwrite');
+            const cancelBtn = dialog.querySelector('#githubPullCancel');
+            const confirmBtn = dialog.querySelector('#githubPullConfirm');
+            const setSelectedMode = (mode) => {
+                selectedMode = mode === 'overwrite' ? 'overwrite' : 'snapshot';
+                if (snapshotBtn) snapshotBtn.classList.toggle('is-selected', selectedMode === 'snapshot');
+                if (overwriteBtn) overwriteBtn.classList.toggle('is-selected', selectedMode === 'overwrite');
+            };
+            if (closeBtn) closeBtn.addEventListener('click', () => cleanup(null));
+            if (snapshotBtn) snapshotBtn.addEventListener('click', () => setSelectedMode('snapshot'));
+            if (overwriteBtn) overwriteBtn.addEventListener('click', () => setSelectedMode('overwrite'));
+            if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(null));
+            if (confirmBtn) confirmBtn.addEventListener('click', () => cleanup(selectedMode));
+            dialog.addEventListener('click', (event) => {
+                if (event.target === dialog) cleanup(null);
+            });
+            dialog.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cleanup(null);
+                } else if (event.key === 'Enter') {
+                    event.preventDefault();
+                    cleanup(selectedMode);
+                }
+            });
+        });
+    }
+
+    async function pull() {
+        if (operationRunning) {
+            showToast(t('已有 GitHub 操作正在执行。', 'A GitHub operation is already running.'), 'warning');
+            return;
+        }
+        operationRunning = true;
+        let rootPath = '';
+        try {
+            const api = getApi();
+            if (!api) throw new Error('GitHub API unavailable.');
+            const config = await ensureReadyConfig('pull');
+            if (!config) return;
+            rootPath = getRemoteRootPath(config);
+            showToast(t('正在读取远端包...', 'Reading remote package...'), 'info', 2400);
+
+            const connection = await api.testRepoConnection({
+                ...getRepoParams(config),
+                basePath: ''
+            });
+            if (!connection || connection.success !== true) {
+                throw new Error(connection && connection.error ? connection.error : t('GitHub 连接失败', 'GitHub connection failed'));
+            }
+            if (connection.branchExists === false) {
+                throw new Error(t('目标分支不存在，无法拉取。请先推送一次或换一个分支。', 'Target branch does not exist. Push once first or choose another branch.'));
+            }
+
+            const listResult = await api.listRepoFiles({
+                token: config.token,
+                owner: config.owner,
+                repo: config.repo,
+                branch: connection.resolvedBranch || config.branch,
+                rootPath
+            });
+            if (!listResult || listResult.success !== true) {
+                throw new Error(listResult && listResult.error ? listResult.error : t('读取远端路径失败', 'Failed to read remote path'));
+            }
+            const classification = classifyRemoteRoot(listResult, rootPath);
+            if (classification.kind === 'missing' || classification.kind === 'empty') {
+                throw new Error(t('远端路径没有可拉取的 .canvas 包。', 'Remote path has no .canvas package to pull.'));
+            }
+            if (!classification.canvasFiles.length) {
+                throw new Error(t('远端路径已有文件，但没有识别到 .canvas 包。', 'Remote path has files but no recognizable .canvas package.'));
+            }
+
+            const mode = await choosePullMode(config, rootPath, classification.files.length);
+            if (!mode) return;
+
+            showToast(t('正在下载远端文件...', 'Downloading remote files...'), 'info', 2600);
+            const folderFiles = await downloadRemoteFilesToFolderMap({
+                api,
+                config,
+                branch: connection.resolvedBranch || config.branch,
+                files: classification.files
+            });
+
+            const importFn = global.importCanvasGithubFolderPackage ||
+                (global.BookmarkCanvasPackageTransferBridge && global.BookmarkCanvasPackageTransferBridge.importCanvasGithubFolderPackage);
+            if (typeof importFn !== 'function') throw new Error('Canvas import package bridge unavailable.');
+            showToast(mode === 'overwrite' ? t('正在覆盖导入...', 'Importing with overwrite...') : t('正在快照导入...', 'Importing snapshot...'), 'info', 2600);
+            await importFn(folderFiles, getPathLeaf(config.remoteRoot), {
+                importMode: mode,
+                threshold: config.overwriteThreshold
+            });
+            const note = mode === 'overwrite'
+                ? t('已完成 GitHub 拉取：覆盖导入。', 'GitHub pull complete: overwrite import.')
+                : t('已完成 GitHub 拉取：快照包导入。', 'GitHub pull complete: snapshot import.');
+            await saveLastOperation({
+                type: 'pull',
+                result: 'success',
+                path: rootPath,
+                branch: connection.resolvedBranch || config.branch,
+                sha: connection.branchHeadSha || null,
+                message: note
+            });
+            await saveLastPullRemotePath({
+                path: rootPath,
+                branch: connection.resolvedBranch || config.branch,
+                sha: connection.branchHeadSha || null
+            });
+            showToast(note, 'success', 5000);
+        } catch (error) {
+            const msg = (error && error.message) || String(error);
+            try { await saveLastOperation({ type: 'pull', result: 'failed', path: rootPath, error: msg }); } catch (_) { }
+            showToast(`${t('拉取失败：', 'Pull failed: ')}${msg}`, 'error', 7000);
+        } finally {
+            operationRunning = false;
+        }
+    }
+
+    global.BookmarkCanvasGithubTransfer = {
+        loadConfig,
+        saveConfig,
+        showConfigDialog,
+        push,
+        pull,
+        normalizeRepoPath,
+        getRemoteRootPath
+    };
+})(window);

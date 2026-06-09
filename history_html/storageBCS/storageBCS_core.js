@@ -4153,7 +4153,7 @@ function __buildPermanentSectionMarkdownRelativePath(permanentSlot, isEn, export
 
 function __normalizeObsidianExportRoot(path, isEn, options = {}) {
     const allowEmpty = !!(options && options.allowEmpty);
-    const fallback = '书签画布';
+    const fallback = isEn ? 'bookmark-canvas' : '书签画布';
     const normalized = String(path == null ? '' : path)
         .trim()
         .replace(/\\/g, '/')
@@ -4162,8 +4162,10 @@ function __normalizeObsidianExportRoot(path, isEn, options = {}) {
         .replace(/\/+/g, '/');
     const migrated = (normalized === 'bookmark-canvas-sync'
         || normalized === 'bookmark-canvas'
-        || normalized === '书签画布同步')
-        ? '书签画布'
+        || normalized === '书签画布同步'
+        || normalized === '书签画布'
+        || normalized === 'Bookmark Canvas')
+        ? fallback
         : normalized;
     if (allowEmpty) return migrated;
     return migrated || fallback;
@@ -4723,14 +4725,30 @@ function __resolveCanvasMarkdownEmbeddedContent(contentToParse, currentFilePath,
     return resolvedLines.join('\n').trim();
 }
 
-function __buildCanvasPackageFileLookupHelpers(sourceFiles) {
+function __buildCanvasPackageFileLookupHelpers(sourceFiles, packageLeaf = '') {
     const files = sourceFiles instanceof Map ? sourceFiles : new Map();
     const normalizePath = (value) => String(value || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
+    const normalizedLeaf = packageLeaf ? String(packageLeaf).trim() : '';
+    const leafSegment = normalizedLeaf ? `${normalizedLeaf}/` : '';
 
     const findFileBytes = (relPath) => {
         const normalizedRel = normalizePath(relPath);
         if (!normalizedRel) return null;
         if (files.has(normalizedRel)) return files.get(normalizedRel);
+
+        if (leafSegment) {
+            const idxRel = normalizedRel.indexOf(leafSegment);
+            if (idxRel >= 0) {
+                const suffixRel = normalizedRel.slice(idxRel);
+                for (const [key, val] of files.entries()) {
+                    const normalizedKey = normalizePath(key);
+                    const idxKey = normalizedKey.indexOf(leafSegment);
+                    if (idxKey >= 0 && normalizedKey.slice(idxKey) === suffixRel) {
+                        return val;
+                    }
+                }
+            }
+        }
 
         for (const [key, val] of files.entries()) {
             const normalizedKey = normalizePath(key);
@@ -4739,6 +4757,18 @@ function __buildCanvasPackageFileLookupHelpers(sourceFiles) {
             if (normalizedKey.endsWith(`/${normalizedRel}`) || normalizedRel.endsWith(`/${normalizedKey}`)) return val;
             if (normalizedKey.includes(normalizedRel)) return val;
         }
+
+        // Suffix fallback: strip first segment (e.g. package root folder name) of both paths
+        const stripFirstSegment = (p) => {
+            const parts = p.split('/');
+            return parts.length > 1 ? parts.slice(1).join('/') : p;
+        };
+        const strippedRel = stripFirstSegment(normalizedRel);
+        for (const [key, val] of files.entries()) {
+            const normalizedKey = normalizePath(key);
+            if (stripFirstSegment(normalizedKey) === strippedRel) return val;
+        }
+
         return null;
     };
 
@@ -4772,7 +4802,7 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
         edgeCounter: 0
     };
     const safePrimaryState = primaryState && typeof primaryState === 'object' ? primaryState : {};
-    const { findFileBytes, readFileTextByPath } = __buildCanvasPackageFileLookupHelpers(sourceFiles);
+    const { findFileBytes, readFileTextByPath } = __buildCanvasPackageFileLookupHelpers(sourceFiles, options.packageLeaf);
     const nodes = Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [];
     const edges = Array.isArray(canvasData && canvasData.edges) ? canvasData.edges : [];
     let importedPermanentCount = 0;
@@ -7093,6 +7123,9 @@ if (typeof window !== 'undefined') {
         async readBackupSlot() { return await __readBackupSlot(); },
         async getImportOverwriteThreshold() { return await __getImportOverwriteThreshold(); },
         async setImportOverwriteThreshold(value) { return await __setImportOverwriteThreshold(value); },
+        buildObsidianPackageFilesFromSnapshot(snapshotInput, options = {}) {
+            return __buildBcsObsidianPackageFilesFromSnapshot(snapshotInput, options);
+        },
         normalizeBlankMarkdownNode(node, options = {}) {
             const cloned = __cloneCanvasProtocolJson(node);
             if (!cloned) return null;
