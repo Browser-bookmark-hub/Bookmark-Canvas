@@ -23,6 +23,7 @@
 
     let activeConfigDialog = null;
     let activeConfirmDialog = null;
+    let activeProgressDialog = null;
     let operationRunning = false;
 
     function getApi() {
@@ -1015,6 +1016,67 @@
         });
     }
 
+    function showProgressDialog(title) {
+        if (activeProgressDialog) {
+            try { activeProgressDialog.remove(); } catch (_) { }
+            activeProgressDialog = null;
+        }
+        const dialog = document.createElement('div');
+        dialog.className = 'github-progress-dialog';
+        dialog.innerHTML = `
+            <div class="github-progress-content">
+                <div class="github-progress-body">
+                    <div class="github-progress-icon-container">
+                        <span class="github-progress-spinner"><i class="fas fa-sync"></i></span>
+                    </div>
+                    <div class="github-progress-title">${escapeHtml(title)}</div>
+                    <div class="github-progress-text">${escapeHtml(t('正在初始化...', 'Initializing...'))}</div>
+                    <div class="github-progress-bar-container">
+                        <div class="github-progress-bar" style="width: 0%"></div>
+                    </div>
+                    <div class="github-progress-percentage">0%</div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(dialog);
+        activeProgressDialog = dialog;
+    }
+
+    function updateProgress(percent, text) {
+        if (!activeProgressDialog) return;
+        const bar = activeProgressDialog.querySelector('.github-progress-bar');
+        const textEl = activeProgressDialog.querySelector('.github-progress-text');
+        const pctEl = activeProgressDialog.querySelector('.github-progress-percentage');
+        
+        const clamped = Math.max(0, Math.min(100, percent));
+        if (bar) bar.style.width = `${clamped}%`;
+        if (pctEl) pctEl.textContent = `${clamped}%`;
+        if (text) {
+            if (textEl) textEl.textContent = text;
+        }
+    }
+
+    function closeProgressDialog(delay = 0, isSuccess = true) {
+        if (!activeProgressDialog) return Promise.resolve();
+        const dialog = activeProgressDialog;
+        activeProgressDialog = null;
+
+        if (isSuccess) {
+            updateProgress(100, t('同步完成！', 'Sync complete!'));
+            const iconContainer = dialog.querySelector('.github-progress-icon-container');
+            if (iconContainer) {
+                iconContainer.innerHTML = `<span class="github-progress-success-icon"><i class="fas fa-check-circle"></i></span>`;
+            }
+        }
+
+        return new Promise((resolve) => {
+            setTimeout(() => {
+                try { dialog.remove(); } catch (_) { }
+                resolve();
+            }, delay);
+        });
+    }
+
     function buildOperationPathHtml(label, path) {
         return `
             <div class="github-operation-line">
@@ -1222,6 +1284,8 @@
         let hashCompared = 0;
         const hashConcurrency = Math.max(1, Math.min(12, localEntries.length || 1));
         let cursor = 0;
+        let comparedCount = 0;
+        const total = localEntries.length || 1;
         const workers = Array.from({ length: hashConcurrency }, async () => {
             while (cursor < localEntries.length) {
                 const entry = localEntries[cursor];
@@ -1232,10 +1296,14 @@
                     hashCompared += 1;
                     if (remoteSha === localSha) {
                         skipped += 1;
+                        comparedCount += 1;
+                        updateProgress(30 + Math.round((comparedCount / total) * 30), t(`正在比对本地与远端文件 (${comparedCount}/${total})...`, `Comparing local and remote files (${comparedCount}/${total})...`));
                         continue;
                     }
                 }
                 updateChanges.push(entry);
+                comparedCount += 1;
+                updateProgress(30 + Math.round((comparedCount / total) * 30), t(`正在比对本地与远端文件 (${comparedCount}/${total})...`, `Comparing local and remote files (${comparedCount}/${total})...`));
             }
         });
         await Promise.all(workers);
@@ -1293,8 +1361,12 @@
             const api = getApi();
             if (!api) throw new Error('GitHub API unavailable.');
             const config = await ensureReadyConfig('push');
-            if (!config) return;
+            if (!config) {
+                operationRunning = false;
+                return;
+            }
             rootPath = getRemoteRootPath(config);
+
             showToast(t('正在检查 GitHub 配置...', 'Checking GitHub config...'), 'info', 2200);
 
             const connection = await api.testRepoConnection({
@@ -1327,9 +1399,13 @@
             }
 
             const ok = await confirmPushPreflight({ config, connection, classification, rootPath });
-            if (!ok) return;
+            if (!ok) {
+                operationRunning = false;
+                return;
+            }
 
-            showToast(t('正在构建完整导出包...', 'Building full export package...'), 'info', 2200);
+            showProgressDialog(t('GitHub 推送中...', 'GitHub Push...'));
+            updateProgress(10, t('正在构建完整导出包...', 'Building full export package...'));
             const buildPackage = global.buildCanvasGithubPackageFiles ||
                 (global.BookmarkCanvasPackageTransferBridge && global.BookmarkCanvasPackageTransferBridge.buildFullCanvasPackageFromCurrent);
             if (typeof buildPackage !== 'function') throw new Error('Canvas export package bridge unavailable.');
@@ -1341,6 +1417,8 @@
                 reason: 'github-push',
                 guideNames: guideNames
             });
+
+            updateProgress(30, t('正在比对本地与远端文件...', 'Comparing local and remote files...'));
             const pushPlan = await buildPushChanges(bundle, config, classification.files, { packageRoot, remoteRootPath: rootPath });
             const changes = Array.isArray(pushPlan && pushPlan.changes) ? pushPlan.changes : [];
             if (!changes.length) {
@@ -1353,17 +1431,19 @@
                     sha: connection.branchHeadSha || null,
                     message: note
                 });
+                updateProgress(100, note);
+                await closeProgressDialog(800, true);
                 showToast(note, 'success', 4200);
                 return;
             }
 
-            showToast(
+            updateProgress(75, t('正在准备推送变更...', 'Preparing upload changes...'));
+            updateProgress(
+                85,
                 t(
                     `正在推送到 GitHub（${pushPlan.updated || 0} 个变更，${pushPlan.deleted || 0} 个删除）...`,
                     `Pushing to GitHub (${pushPlan.updated || 0} changed, ${pushPlan.deleted || 0} deleted)...`
-                ),
-                'info',
-                2800
+                )
             );
             const result = await api.applyRepoFilesBatch({
                 token: config.token,
@@ -1379,6 +1459,8 @@
             const note = result.noChanges
                 ? t('远端已是最新。', 'Remote already up to date.')
                 : t(`已推送 ${result.updated || 0} 个文件，删除 ${result.deleted || 0} 个旧文件。`, `Pushed ${result.updated || 0} files, deleted ${result.deleted || 0} old files.`);
+            
+            updateProgress(95, t('正在保存同步状态...', 'Saving sync status...'));
             await saveLastOperation({
                 type: 'push',
                 result: 'success',
@@ -1387,8 +1469,10 @@
                 sha: result.commitSha || null,
                 message: note
             });
+            await closeProgressDialog(800, true);
             showToast(note, 'success', 5000);
         } catch (error) {
+            await closeProgressDialog(0, false);
             const msg = (error && error.message) || String(error);
             try { await saveLastOperation({ type: 'push', result: 'failed', path: rootPath, error: msg }); } catch (_) { }
             showToast(`${t('推送失败：', 'Push failed: ')}${msg}`, 'error', 7000);
@@ -1402,13 +1486,19 @@
         const list = Array.isArray(files) ? files : [];
         const concurrency = Math.max(1, Math.min(6, list.length || 1));
         let nextIndex = 0;
+        let completedCount = 0;
+        const total = list.length || 1;
 
         const worker = async () => {
             while (nextIndex < list.length) {
                 const file = list[nextIndex];
                 nextIndex += 1;
                 const filePath = normalizeRepoPath(file && file.path);
-                if (!filePath) continue;
+                if (!filePath) {
+                    completedCount += 1;
+                    updateProgress(20 + Math.round((completedCount / total) * 50), t(`正在下载远端文件 (${completedCount}/${total})...`, `Downloading remote files (${completedCount}/${total})...`));
+                    continue;
+                }
                 let fileResult = null;
                 if (typeof api.getRepoFileRaw === 'function') {
                     fileResult = await api.getRepoFileRaw({
@@ -1433,6 +1523,8 @@
                 }
                 const resultPath = normalizeRepoPath(fileResult.path || filePath) || filePath;
                 folderFiles.set(resultPath, fileResult.contentBytes || new Uint8Array());
+                completedCount += 1;
+                updateProgress(20 + Math.round((completedCount / total) * 50), t(`正在下载远端文件 (${completedCount}/${total})...`, `Downloading remote files (${completedCount}/${total})...`));
             }
         };
 
@@ -1534,8 +1626,12 @@
             const api = getApi();
             if (!api) throw new Error('GitHub API unavailable.');
             const config = await ensureReadyConfig('pull');
-            if (!config) return;
+            if (!config) {
+                operationRunning = false;
+                return;
+            }
             rootPath = getRemoteRootPath(config);
+
             showToast(t('正在读取远端包...', 'Reading remote package...'), 'info', 2400);
 
             const connection = await api.testRepoConnection({
@@ -1568,9 +1664,13 @@
             }
 
             const mode = await choosePullMode(config, rootPath, classification.files.length);
-            if (!mode) return;
+            if (!mode) {
+                operationRunning = false;
+                return;
+            }
 
-            showToast(t('正在下载远端文件...', 'Downloading remote files...'), 'info', 2600);
+            showProgressDialog(t('GitHub 拉取中...', 'GitHub Pull...'));
+            updateProgress(10, t('正在下载远端文件...', 'Downloading remote files...'));
             const folderFiles = await downloadRemoteFilesToFolderMap({
                 api,
                 config,
@@ -1581,7 +1681,8 @@
             const importFn = global.importCanvasGithubFolderPackage ||
                 (global.BookmarkCanvasPackageTransferBridge && global.BookmarkCanvasPackageTransferBridge.importCanvasGithubFolderPackage);
             if (typeof importFn !== 'function') throw new Error('Canvas import package bridge unavailable.');
-            showToast(mode === 'overwrite' ? t('正在覆盖导入...', 'Importing with overwrite...') : t('正在快照导入...', 'Importing snapshot...'), 'info', 2600);
+            
+            updateProgress(80, mode === 'overwrite' ? t('正在覆盖导入...', 'Importing with overwrite...') : t('正在快照导入...', 'Importing snapshot...'));
             await importFn(folderFiles, getPathLeaf(config.remoteRoot), {
                 importMode: mode,
                 threshold: config.overwriteThreshold
@@ -1589,6 +1690,8 @@
             const note = mode === 'overwrite'
                 ? t('已完成 GitHub 拉取：覆盖导入。', 'GitHub pull complete: overwrite import.')
                 : t('已完成 GitHub 拉取：快照包导入。', 'GitHub pull complete: snapshot import.');
+            
+            updateProgress(95, t('正在保存同步状态...', 'Saving sync status...'));
             await saveLastOperation({
                 type: 'pull',
                 result: 'success',
@@ -1602,8 +1705,10 @@
                 branch: connection.resolvedBranch || config.branch,
                 sha: connection.branchHeadSha || null
             });
+            await closeProgressDialog(800, true);
             showToast(note, 'success', 5000);
         } catch (error) {
+            await closeProgressDialog(0, false);
             const msg = (error && error.message) || String(error);
             try { await saveLastOperation({ type: 'pull', result: 'failed', path: rootPath, error: msg }); } catch (_) { }
             showToast(`${t('拉取失败：', 'Pull failed: ')}${msg}`, 'error', 7000);
