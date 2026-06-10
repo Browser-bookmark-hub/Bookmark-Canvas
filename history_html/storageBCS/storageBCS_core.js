@@ -210,7 +210,7 @@ function __normalizeCanvasTempStatePayloadForImport(stateInput, options = {}) {
         edges,
         edgeCounter: Number(parsedState.edgeCounter) || edges.length || 0,
         timestamp: Number(parsedState.timestamp) || Date.now()
-    });
+    }, options);
 }
 
 function __summarizeCanvasTempStateForCanonicalAudit(stateInput) {
@@ -7140,8 +7140,8 @@ if (typeof window !== 'undefined') {
         normalizeCanvasTempState(stateInput, options = {}) {
             return __buildCanvasTempStateProtocolView(stateInput, options);
         },
-        async loadCanvasTempStateFromBcs() {
-            return await __loadCanvasTempStateFromBcs();
+        async loadCanvasTempStateFromBcs(options = {}) {
+            return await __loadCanvasTempStateFromBcs(options);
         },
         async saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
             return await __saveCanvasTempStateToBcsStorage(stateInput, options);
@@ -7801,13 +7801,13 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
     }
 }
 
-async function __loadCanvasTempStateFromBcs() {
+async function __loadCanvasTempStateFromBcs(options = {}) {
     try { await __migrateLegacyTempSectionKeysOnce(); } catch (_) {}
-    const bundle = await __loadCanvasTempStateBundleFromBcs();
+    const bundle = await __loadCanvasTempStateBundleFromBcs(options);
     return bundle ? bundle.state : null;
 }
 
-async function __loadCanvasTempStateBundleFromBcs() {
+async function __loadCanvasTempStateBundleFromBcs(options = {}) {
     const storage = await __bcsStorageGetAll();
     const meta = storage ? storage[BCS_META_KEY] : null;
     if (!__isBcsMetaPayload(meta)) return null;
@@ -7816,8 +7816,9 @@ async function __loadCanvasTempStateBundleFromBcs() {
             immediate: true
         });
     } catch (_) { }
+    const mergedOptions = { skipValidation: true, ...options };
     return {
-        state: __buildCanvasTempStateFromBcsStorage(storage, meta),
+        state: __buildCanvasTempStateFromBcsStorage(storage, meta, mergedOptions),
         storage
     };
 }

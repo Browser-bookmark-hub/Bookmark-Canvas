@@ -24475,13 +24475,26 @@ function __sanitizeCanvasRichTextHtml(html) {
         if (!h) return null;
         try {
             if (typeof ObsidianMarkdown !== 'undefined' && typeof ObsidianMarkdown.sanitizeHref === 'function') {
-                return ObsidianMarkdown.sanitizeHref(h);
+                const res = ObsidianMarkdown.sanitizeHref(h);
+                if (!res) return null;
+                const u = new URL(res, 'https://dummy.local');
+                if (u.origin === 'https://dummy.local') {
+                    const lower = res.toLowerCase();
+                    const hasValidPrefix = lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('mailto:') || lower.startsWith('tel:') || lower.startsWith('obsidian:') || lower.startsWith('#');
+                    if (!hasValidPrefix) return null;
+                }
+                return res;
             }
         } catch (_) { }
         if (h.startsWith('#')) return h;
         try {
             const u = new URL(h, 'https://dummy.local');
-            const ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' || u.protocol === 'tel:';
+            let ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' || u.protocol === 'tel:';
+            if (ok && u.origin === 'https://dummy.local') {
+                const lower = h.toLowerCase();
+                const hasValidPrefix = lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('mailto:') || lower.startsWith('tel:') || lower.startsWith('obsidian:');
+                if (!hasValidPrefix) ok = false;
+            }
             return ok ? h : null;
         } catch (_) {
             return null;
@@ -24494,7 +24507,12 @@ function __sanitizeCanvasRichTextHtml(html) {
         if (s.startsWith('data:image/')) return s;
         try {
             const u = new URL(s, 'https://dummy.local');
-            const ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'blob:' || u.protocol === 'chrome-extension:';
+            let ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'blob:' || u.protocol === 'chrome-extension:';
+            if (ok && u.origin === 'https://dummy.local') {
+                const lower = s.toLowerCase();
+                const hasValidPrefix = lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('blob:') || lower.startsWith('chrome-extension:');
+                if (!hasValidPrefix) ok = false;
+            }
             return ok ? s : null;
         } catch (_) {
             return null;

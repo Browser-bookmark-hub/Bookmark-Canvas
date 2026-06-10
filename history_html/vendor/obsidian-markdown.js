@@ -36,7 +36,13 @@
     if (normalized.startsWith('#')) return normalized;
     try {
       const url = new URL(normalized, 'https://dummy.local');
-      return allowedProtocols.has(url.protocol) ? normalized : null;
+      let ok = allowedProtocols.has(url.protocol);
+      if (ok && url.origin === 'https://dummy.local') {
+        const lower = normalized.toLowerCase();
+        const hasValidPrefix = lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('mailto:') || lower.startsWith('tel:') || lower.startsWith('obsidian:');
+        if (!hasValidPrefix) ok = false;
+      }
+      return ok ? normalized : null;
     } catch (_) {
       return null;
     }
@@ -135,7 +141,12 @@
             } else {
               try {
                 const u = new URL(safeValue, 'https://dummy.local');
-                const ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'blob:' || u.protocol === 'chrome-extension:';
+                let ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'blob:' || u.protocol === 'chrome-extension:';
+                if (ok && u.origin === 'https://dummy.local') {
+                  const lower = safeValue.toLowerCase();
+                  const hasValidPrefix = lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('blob:') || lower.startsWith('chrome-extension:');
+                  if (!hasValidPrefix) ok = false;
+                }
                 if (!ok) return '';
               } catch (_) {
                 return '';
