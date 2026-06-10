@@ -1041,7 +1041,8 @@ async function __applyOverwriteImportedCanvasState(parsedTempState, bridge, pars
         await bridge.saveCanvasTempStateToBcsStorage(stateForOverwrite, {
             immediate: true,
             storagePatch,
-            preferStoragePermanentLayout: true
+            preferStoragePermanentLayout: true,
+            skipValidation: true
         });
         persisted = true;
     } else {
@@ -1877,7 +1878,8 @@ function __collectCanvasTempStateForExport() {
         edgeCounter: CanvasState.edgeCounter,
         timestamp: Date.now()
     }, {
-        preserveRaw: true
+        preserveRaw: true,
+        skipValidation: true
     });
 }
 
@@ -5663,7 +5665,7 @@ async function buildFullCanvasPackageFromCurrent(options = {}) {
     try { __flushMdEditorsForExport(); } catch (_) { }
     try {
         if (typeof saveTempNodes === 'function') {
-            const result = saveTempNodes({ immediate: true });
+            const result = saveTempNodes({ immediate: true, skipValidation: true });
             if (result && typeof result.then === 'function') await result;
         }
     } catch (_) { }
@@ -5694,7 +5696,8 @@ async function buildFullCanvasPackageFromCurrent(options = {}) {
         exportFormat,
         exportRoot,
         idsAlreadySyncIds: true,
-        copyEntries: __buildTransferCopyEntriesFromSandbox(sandbox)
+        copyEntries: __buildTransferCopyEntriesFromSandbox(sandbox),
+        skipValidation: true
     });
 
     const guideNames = (options && Array.isArray(options.guideNames) && options.guideNames.length > 0)

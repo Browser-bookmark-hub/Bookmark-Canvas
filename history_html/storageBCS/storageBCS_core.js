@@ -5378,7 +5378,7 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     });
 
     // 导入属于正式内容，必须立即持久化，避免用户导入后立刻刷新导致丢失。
-    saveTempNodes({ immediate: true });
+    saveTempNodes({ immediate: true, skipValidation: true });
 
     // 边：大数据/极限模式下延后或跳过，优先保证交互流畅
     try { scheduleEdgesRender(); } catch (_) { }
@@ -5859,7 +5859,7 @@ function __buildPersistedCanvasState(state, options = {}) {
                     : (typeof window !== 'undefined' && window && window.marked && typeof window.marked.parse === 'function' ? window.marked : null);
                 const isMarkedLoaded = !!markedApi;
                 const refreshCachesFromMarkdown = !isGroupNode && !(typeof cloned.html === 'string' && cloned.html.trim());
-                if (!isGroupNode) {
+                if (!isGroupNode && !(options && options.skipValidation === true)) {
                     __ensureMdNodeMarkdownProtocol(cloned, {
                         refreshCachesFromMarkdown
                     });
@@ -5915,8 +5915,8 @@ function __buildPersistedCanvasState(state, options = {}) {
     return persistedState;
 }
 
-function __buildCanvasTempStateSignature(state) {
-    const persistedState = __buildPersistedCanvasState(state);
+function __buildCanvasTempStateSignature(state, options = {}) {
+    const persistedState = __buildPersistedCanvasState(state, options);
     if (!persistedState || typeof persistedState !== 'object') return '';
     const comparableState = {
         ...persistedState,
@@ -6023,7 +6023,8 @@ function __buildBcsObsidianPackageFilesFromSnapshot(snapshotInput, options = {})
     );
 
     const tempState = __buildPersistedCanvasState(
-        (snapshot.tempState && typeof snapshot.tempState === 'object') ? snapshot.tempState : {}
+        (snapshot.tempState && typeof snapshot.tempState === 'object') ? snapshot.tempState : {},
+        options
     );
     const fileRefs = __collectBcsFileRefsFromState(tempState, { exportRoot, exportFormat });
 
@@ -6247,7 +6248,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
         : null;
     const preferStoragePermanentLayout = !!(options && options.preferStoragePermanentLayout === true);
     const state = stateInput && typeof stateInput === 'object' ? stateInput : {};
-    const persisted = __buildPersistedCanvasState(state);
+    const persisted = __buildPersistedCanvasState(state, options);
     const sections = Array.isArray(persisted.sections) ? persisted.sections : [];
     const mdNodes = Array.isArray(persisted.mdNodes) ? persisted.mdNodes : [];
     const edges = Array.isArray(persisted.edges) ? persisted.edges : [];
@@ -6797,6 +6798,9 @@ function __buildCanvasTempStateProtocolView(stateInput, options = {}) {
             if (cloned.subtype === 'card-group') {
                 return cloned;
             }
+            if (options && options.skipValidation === true) {
+                return cloned;
+            }
             const markedApi = (typeof marked !== 'undefined' && marked && typeof marked.parse === 'function')
                 ? marked
                 : (typeof window !== 'undefined' && window && window.marked && typeof window.marked.parse === 'function' ? window.marked : null);
@@ -6883,7 +6887,7 @@ async function __buildExportSandbox(options = {}) {
     const all = await __bcsStorageGetAll();
     const permMainRaw = all && all[BCS_PERM_MAIN_KEY] ? all[BCS_PERM_MAIN_KEY] : null;
     const metaRaw = all && all[BCS_META_KEY] ? all[BCS_META_KEY] : null;
-    const tempStateRaw = __buildCanvasTempStateFromBcsStorage(all, metaRaw);
+    const tempStateRaw = __buildCanvasTempStateFromBcsStorage(all, metaRaw, { skipValidation: true });
     const copyKeys = Object.keys(all || {}).filter((key) => typeof key === 'string' && key.startsWith(BCS_PERM_COPY_PREFIX));
     const copies = {};
     for (const key of copyKeys) {
@@ -7649,7 +7653,7 @@ function __buildBcsPermanentPayload(copyId = null) {
 }
 
 async function __buildBcsDocumentsFromState(stateInput, options = {}) {
-    const state = __buildPersistedCanvasState(stateInput);
+    const state = __buildPersistedCanvasState(stateInput, options);
     if (!state || typeof state !== 'object') return null;
     const storage = options && options.storage && typeof options.storage === 'object'
         ? options.storage
@@ -7740,7 +7744,7 @@ async function __buildBcsDocumentsFromState(stateInput, options = {}) {
 
 async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
     try {
-        const state = __buildPersistedCanvasState(stateInput);
+        const state = __buildPersistedCanvasState(stateInput, options);
         if (!state || typeof state !== 'object') return;
         const fileRefs = __collectBcsFileRefsFromState(state, {
             exportRoot: __getBcsExportRootCached(),
@@ -7818,7 +7822,7 @@ async function __loadCanvasTempStateBundleFromBcs() {
     };
 }
 
-function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
+function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload, options = {}) {
     const storage = storageMap && typeof storageMap === 'object' ? storageMap : {};
     const meta = metaPayload && typeof metaPayload === 'object' ? metaPayload : {};
     const canvasRaw = storage[BCS_CANVAS_KEY];
@@ -7968,5 +7972,5 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload) {
         };
     });
 
-    return __buildCanvasTempStateProtocolView(tempState);
+    return __buildCanvasTempStateProtocolView(tempState, options);
 }

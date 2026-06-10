@@ -34203,12 +34203,15 @@ function saveTempNodes(options = {}) {
     } catch (_) {}
     const immediate = !!(options && options.immediate);
     const skipUnchangedPersist = !!(options && options.skipUnchangedPersist);
+    const skipValidation = !!(options && options.skipValidation === true);
     try {
         (CanvasState.mdNodes || []).forEach((node) => {
-            const refreshCachesFromMarkdown = !(typeof node.html === 'string' && node.html.trim());
-            __ensureMdNodeMarkdownProtocol(node, {
-                refreshCachesFromMarkdown
-            });
+            if (!skipValidation) {
+                const refreshCachesFromMarkdown = !(typeof node.html === 'string' && node.html.trim());
+                __ensureMdNodeMarkdownProtocol(node, {
+                    refreshCachesFromMarkdown
+                });
+            }
         });
     } catch (_) { }
 
@@ -34229,8 +34232,8 @@ function saveTempNodes(options = {}) {
             timestamp: Date.now()
         };
         CanvasState.tempStateTimestamp = state.timestamp;
-        const persistedState = __buildPersistedCanvasState(state);
-        const persistedSignature = __buildCanvasTempStateSignature(persistedState);
+        const persistedState = __buildPersistedCanvasState(state, options);
+        const persistedSignature = __buildCanvasTempStateSignature(persistedState, options);
         if (
             skipUnchangedPersist
             && persistedSignature
@@ -34248,7 +34251,8 @@ function saveTempNodes(options = {}) {
             __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, persistedTs);
         }
         return __saveCanvasTempStateToBcsStorage(persistedState, {
-            immediate
+            immediate,
+            ...options
         });
 
     } catch (error) {
