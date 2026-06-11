@@ -1369,33 +1369,59 @@
 
             showToast(t('正在检查 GitHub 配置...', 'Checking GitHub config...'), 'info', 2200);
 
-            const connection = await api.testRepoConnection({
-                ...getRepoParams(config),
-                basePath: ''
-            });
-            if (!connection || connection.success !== true) {
-                throw new Error(connection && connection.error ? connection.error : t('GitHub 连接失败', 'GitHub connection failed'));
-            }
-            if (connection.repo && connection.repo.permissions && connection.repo.permissions.push === false) {
-                throw new Error(t('当前 Token 没有仓库写入权限。', 'The current token has no repo write permission.'));
-            }
-
+            let connection = null;
             let listResult = null;
             let classification = null;
-            if (connection.branchExists === false) {
-                classification = { kind: 'missing', files: [], canvasFiles: [] };
-            } else {
-                listResult = await api.listRepoFiles({
-                    token: config.token,
-                    owner: config.owner,
-                    repo: config.repo,
-                    branch: connection.resolvedBranch || config.branch,
-                    rootPath
-                });
-                if (!listResult || listResult.success !== true) {
-                    throw new Error(listResult && listResult.error ? listResult.error : t('读取远端路径失败', 'Failed to read remote path'));
+
+            if (config.branch) {
+                try {
+                    listResult = await api.listRepoFiles({
+                        token: config.token,
+                        owner: config.owner,
+                        repo: config.repo,
+                        branch: config.branch,
+                        rootPath
+                    });
+                    if (listResult && listResult.success === true) {
+                        connection = {
+                            success: true,
+                            branchExists: true,
+                            resolvedBranch: config.branch
+                        };
+                        classification = classifyRemoteRoot(listResult, rootPath);
+                    }
+                } catch (err) {
+                    console.log('[Push Preflight] Optimized tree fetch failed, falling back to full connection test:', err);
                 }
-                classification = classifyRemoteRoot(listResult, rootPath);
+            }
+
+            if (!connection || !listResult || listResult.success !== true) {
+                connection = await api.testRepoConnection({
+                    ...getRepoParams(config),
+                    basePath: ''
+                });
+                if (!connection || connection.success !== true) {
+                    throw new Error(connection && connection.error ? connection.error : t('GitHub 连接失败', 'GitHub connection failed'));
+                }
+                if (connection.repo && connection.repo.permissions && connection.repo.permissions.push === false) {
+                    throw new Error(t('当前 Token 没有仓库写入权限。', 'The current token has no repo write permission.'));
+                }
+
+                if (connection.branchExists === false) {
+                    classification = { kind: 'missing', files: [], canvasFiles: [] };
+                } else {
+                    listResult = await api.listRepoFiles({
+                        token: config.token,
+                        owner: config.owner,
+                        repo: config.repo,
+                        branch: connection.resolvedBranch || config.branch,
+                        rootPath
+                    });
+                    if (!listResult || listResult.success !== true) {
+                        throw new Error(listResult && listResult.error ? listResult.error : t('读取远端路径失败', 'Failed to read remote path'));
+                    }
+                    classification = classifyRemoteRoot(listResult, rootPath);
+                }
             }
 
             const ok = await confirmPushPreflight({ config, connection, classification, rootPath });
@@ -1634,27 +1660,54 @@
 
             showToast(t('正在读取远端包...', 'Reading remote package...'), 'info', 2400);
 
-            const connection = await api.testRepoConnection({
-                ...getRepoParams(config),
-                basePath: ''
-            });
-            if (!connection || connection.success !== true) {
-                throw new Error(connection && connection.error ? connection.error : t('GitHub 连接失败', 'GitHub connection failed'));
-            }
-            if (connection.branchExists === false) {
-                throw new Error(t('目标分支不存在，无法拉取。请先推送一次或换一个分支。', 'Target branch does not exist. Push once first or choose another branch.'));
+            let connection = null;
+            let listResult = null;
+
+            if (config.branch) {
+                try {
+                    listResult = await api.listRepoFiles({
+                        token: config.token,
+                        owner: config.owner,
+                        repo: config.repo,
+                        branch: config.branch,
+                        rootPath
+                    });
+                    if (listResult && listResult.success === true) {
+                        connection = {
+                            success: true,
+                            branchExists: true,
+                            resolvedBranch: config.branch
+                        };
+                    }
+                } catch (err) {
+                    console.log('[Pull Preflight] Optimized tree fetch failed, falling back to full connection test:', err);
+                }
             }
 
-            const listResult = await api.listRepoFiles({
-                token: config.token,
-                owner: config.owner,
-                repo: config.repo,
-                branch: connection.resolvedBranch || config.branch,
-                rootPath
-            });
-            if (!listResult || listResult.success !== true) {
-                throw new Error(listResult && listResult.error ? listResult.error : t('读取远端路径失败', 'Failed to read remote path'));
+            if (!connection || !listResult || listResult.success !== true) {
+                connection = await api.testRepoConnection({
+                    ...getRepoParams(config),
+                    basePath: ''
+                });
+                if (!connection || connection.success !== true) {
+                    throw new Error(connection && connection.error ? connection.error : t('GitHub 连接失败', 'GitHub connection failed'));
+                }
+                if (connection.branchExists === false) {
+                    throw new Error(t('目标分支不存在，无法拉取。请先推送一次或换一个分支。', 'Target branch does not exist. Push once first or choose another branch.'));
+                }
+
+                listResult = await api.listRepoFiles({
+                    token: config.token,
+                    owner: config.owner,
+                    repo: config.repo,
+                    branch: connection.resolvedBranch || config.branch,
+                    rootPath
+                });
+                if (!listResult || listResult.success !== true) {
+                    throw new Error(listResult && listResult.error ? listResult.error : t('读取远端路径失败', 'Failed to read remote path'));
+                }
             }
+
             const classification = classifyRemoteRoot(listResult, rootPath);
             if (classification.kind === 'missing' || classification.kind === 'empty') {
                 throw new Error(t('远端路径没有可拉取的 .canvas 包。', 'Remote path has no .canvas package to pull.'));
@@ -1671,12 +1724,63 @@
 
             showProgressDialog(t('GitHub 拉取中...', 'GitHub Pull...'));
             updateProgress(10, t('正在下载远端文件...', 'Downloading remote files...'));
-            const folderFiles = await downloadRemoteFilesToFolderMap({
-                api,
-                config,
-                branch: connection.resolvedBranch || config.branch,
-                files: classification.files
-            });
+
+            let folderFiles = null;
+
+            // Attempt to pull via ZIPball first to optimize network requests
+            if (typeof api.getRepoZipball === 'function' && typeof __unzipStore === 'function') {
+                try {
+                    updateProgress(15, t('正在获取远端 ZIP 压缩包...', 'Requesting remote ZIP archive...'));
+                    const zipResult = await api.getRepoZipball({
+                        token: config.token,
+                        owner: config.owner,
+                        repo: config.repo,
+                        branch: connection.resolvedBranch || config.branch
+                    });
+                    if (zipResult && zipResult.success === true && zipResult.bytes) {
+                        updateProgress(40, t('正在解析 ZIP 压缩包...', 'Parsing ZIP archive...'));
+                        const zipFiles = await __unzipStore(zipResult.bytes.buffer);
+
+                        // Find the zip root folder prefix generated by GitHub (owner-repo-sha)
+                        let zipRoot = '';
+                        for (const key of zipFiles.keys()) {
+                            const parts = key.split('/');
+                            if (parts.length > 0 && parts[0]) {
+                                zipRoot = parts[0];
+                                break;
+                            }
+                        }
+
+                        if (zipRoot) {
+                            const normalizedRootPath = normalizeRepoPath(rootPath);
+                            const zipPrefix = normalizedRootPath ? `${zipRoot}/${normalizedRootPath}/` : `${zipRoot}/`;
+                            folderFiles = new Map();
+
+                            for (const [name, bytes] of zipFiles.entries()) {
+                                if (name.startsWith(zipPrefix) && !name.endsWith('/')) {
+                                    const repoPath = name.slice(zipRoot.length + 1);
+                                    folderFiles.set(normalizeRepoPath(repoPath), bytes);
+                                }
+                            }
+                            console.log(`[Pull ZIP] Successfully extracted ${folderFiles.size} files from zipball.`);
+                        }
+                    }
+                } catch (zipErr) {
+                    console.error('[Pull ZIP] ZIPball pulling failed, falling back to sequential download:', zipErr);
+                    folderFiles = null;
+                }
+            }
+
+            // Fallback to sequential downloading if ZIPball fails or is unavailable
+            if (!folderFiles) {
+                console.log('[Pull] Using sequential file downloading.');
+                folderFiles = await downloadRemoteFilesToFolderMap({
+                    api,
+                    config,
+                    branch: connection.resolvedBranch || config.branch,
+                    files: classification.files
+                });
+            }
 
             const importFn = global.importCanvasGithubFolderPackage ||
                 (global.BookmarkCanvasPackageTransferBridge && global.BookmarkCanvasPackageTransferBridge.importCanvasGithubFolderPackage);
