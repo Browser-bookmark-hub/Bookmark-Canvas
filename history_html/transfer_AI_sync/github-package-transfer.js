@@ -6,6 +6,8 @@
     }
     const DEFAULT_PULL_MODE = 'overwrite';
     const DEFAULT_OVERWRITE_THRESHOLD = 300;
+    const DEFAULT_COMMIT_MSG_TEMPLATE = 'Bookmark Canvas: push package {path} {time}';
+    const DEFAULT_COMMIT_DESC_TEMPLATE = 'Updated: {updated} files, Deleted: {deleted} files';
     const STORAGE_KEYS = [
         'githubRepoToken',
         'githubRepoOwner',
@@ -18,7 +20,10 @@
         'githubLastOperation',
         'githubLastPullRemotePath',
         'githubCanvasPushGuideChoice',
-        'githubCanvasPushGuideCustomName'
+        'githubCanvasPushGuideCustomName',
+        'githubConfirmCommitDetails',
+        'githubCommitMsgTemplate',
+        'githubCommitDescTemplate'
     ];
 
     let activeConfigDialog = null;
@@ -127,7 +132,9 @@
             path,
             branch: String(value.branch || ''),
             sha: String(value.sha || ''),
-            at: Number.isFinite(at) && at > 0 ? at : 0
+            at: Number.isFinite(at) && at > 0 ? at : 0,
+            commitMessage: String(value.commitMessage || ''),
+            commitDescription: String(value.commitDescription || '')
         };
     }
 
@@ -225,7 +232,10 @@
             lastOperation: raw.githubLastOperation && typeof raw.githubLastOperation === 'object' ? raw.githubLastOperation : null,
             lastPullRemotePath: normalizeLastPullRemotePath(raw.githubLastPullRemotePath),
             pushGuideChoice: String(raw.githubCanvasPushGuideChoice || 'agents').trim(),
-            pushGuideCustomName: String(raw.githubCanvasPushGuideCustomName || '').trim()
+            pushGuideCustomName: String(raw.githubCanvasPushGuideCustomName || '').trim(),
+            confirmCommitDetails: raw.githubConfirmCommitDetails !== false,
+            commitMsgTemplate: String(raw.githubCommitMsgTemplate !== undefined ? raw.githubCommitMsgTemplate : DEFAULT_COMMIT_MSG_TEMPLATE).trim(),
+            commitDescTemplate: String(raw.githubCommitDescTemplate !== undefined ? raw.githubCommitDescTemplate : DEFAULT_COMMIT_DESC_TEMPLATE).trim()
         };
     }
 
@@ -240,7 +250,10 @@
             githubDefaultPullMode: normalizePullMode(config && config.defaultPullMode),
             githubOverwriteThreshold: normalizeThreshold(config && config.overwriteThreshold),
             githubCanvasPushGuideChoice: String(config && config.pushGuideChoice || 'agents').trim(),
-            githubCanvasPushGuideCustomName: String(config && config.pushGuideCustomName || '').trim()
+            githubCanvasPushGuideCustomName: String(config && config.pushGuideCustomName || '').trim(),
+            githubConfirmCommitDetails: config && config.confirmCommitDetails !== false,
+            githubCommitMsgTemplate: String(config && (config.commitMsgTemplate !== undefined ? config.commitMsgTemplate : DEFAULT_COMMIT_MSG_TEMPLATE)).trim(),
+            githubCommitDescTemplate: String(config && (config.commitDescTemplate !== undefined ? config.commitDescTemplate : DEFAULT_COMMIT_DESC_TEMPLATE)).trim()
         };
         await storageSet(safe);
         return await loadConfig();
@@ -255,7 +268,9 @@
             branch: String(operation && operation.branch || ''),
             sha: String(operation && operation.sha || '').trim(),
             message: String(operation && operation.message || ''),
-            error: String(operation && operation.error || '')
+            error: String(operation && operation.error || ''),
+            commitMessage: String(operation && operation.commitMessage || '').trim(),
+            commitDescription: String(operation && operation.commitDescription || '').trim()
         };
         await storageSet({ githubLastOperation: payload });
         return payload;
@@ -268,7 +283,9 @@
             path,
             branch: String(operation && operation.branch || ''),
             sha: String(operation && operation.sha || '').trim(),
-            at: Date.now()
+            at: Date.now(),
+            commitMessage: String(operation && operation.commitMessage || '').trim(),
+            commitDescription: String(operation && operation.commitDescription || '').trim()
         };
         await storageSet({ githubLastPullRemotePath: payload });
         return payload;
@@ -321,17 +338,41 @@
         const resultLabel = last.result === 'success'
             ? t('成功', 'Success')
             : (last.result === 'failed' ? t('失败', 'Failed') : (last.result || '-'));
-        const lines = [
-            `${t('类型', 'Type')}: ${typeLabel}`,
-            `${t('时间', 'Time')}: ${formatDateTime(last.at)}`,
-            `${t('结果', 'Result')}: ${resultLabel}`,
-            `${t('路径', 'Path')}: ${last.path || '-'}`
-        ];
-        if (last.branch) lines.push(`${t('分支', 'Branch')}: ${last.branch}`);
-        if (last.sha) lines.push(`${t('提交', 'Commit')}: ${last.sha.slice(0, 7)}`);
-        if (last.message) lines.push(`${t('说明', 'Note')}: ${last.message}`);
-        if (last.error) lines.push(`${t('错误', 'Error')}: ${last.error}`);
-        return lines.map((line) => `<div>${escapeHtml(line)}</div>`).join('');
+        
+        let html = '';
+        html += `<div><strong>${escapeHtml(t('类型', 'Type'))}:</strong> ${escapeHtml(typeLabel)}</div>`;
+        html += `<div><strong>${escapeHtml(t('时间', 'Time'))}:</strong> ${escapeHtml(formatDateTime(last.at))}</div>`;
+        html += `<div><strong>${escapeHtml(t('结果', 'Result'))}:</strong> ${escapeHtml(resultLabel)}</div>`;
+        html += `<div><strong>${escapeHtml(t('路径', 'Path'))}:</strong> ${escapeHtml(last.path || '-')}</div>`;
+        
+        if (last.branch) {
+            html += `<div><strong>${escapeHtml(t('分支', 'Branch'))}:</strong> ${escapeHtml(last.branch)}</div>`;
+        }
+        if (last.sha) {
+            html += `<div><strong>${escapeHtml(t('提交哈希', 'Commit SHA'))}:</strong> ${escapeHtml(last.sha.slice(0, 7))}</div>`;
+        }
+        if (last.commitMessage) {
+            html += `<div><strong>${escapeHtml(t('提交信息', 'Commit Message'))}:</strong> ${escapeHtml(last.commitMessage)}</div>`;
+        }
+        const displayDesc = (last.commitDescription || '').trim() || '-';
+        html += `
+            <div style="display: flex; align-items: flex-start; gap: 4px; margin-top: 2px;">
+                <span style="flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;">
+                    <strong>${escapeHtml(t('描述', 'Description'))}</strong>
+                    <span class="github-config-info-trigger">?
+                        <span class="github-config-info-tooltip is-zh" style="width: 170px;">${escapeHtml(t('描述过长时，此处仅展示前三行。', 'If the description is too long, only the first three lines are shown here.'))}</span>
+                    </span>
+                </span><strong>:</strong>
+                <span style="flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; font-family: inherit; font-size: 11px; color: var(--text-muted, var(--text-secondary)); margin-top: 1.5px; line-height: 1.4;">${escapeHtml(displayDesc)}</span>
+            </div>
+        `;
+        if (last.message) {
+            html += `<div><strong>${escapeHtml(t('说明', 'Note'))}:</strong> ${escapeHtml(last.message)}</div>`;
+        }
+        if (last.error) {
+            html += `<div><strong>${escapeHtml(t('错误', 'Error'))}:</strong> <span style="color: var(--tag-red, #cf222e);">${escapeHtml(last.error)}</span></div>`;
+        }
+        return html;
     }
 
     function formatLastPullRemotePath(lastPullInput) {
@@ -346,12 +387,35 @@
             branchWithSha ? `${t('分支', 'Branch')}: ${branchWithSha}` : '',
             lastPull.at ? `${t('时间', 'Time')}: ${formatDateTime(lastPull.at)}` : ''
         ].filter(Boolean).join(' · ');
+
+        let commitMsgHtml = '';
+        if (lastPull.commitMessage) {
+            commitMsgHtml = `
+                <div style="font-size: 11px; opacity: 0.85; margin-top: 4px; word-break: break-all;">
+                    <strong>${escapeHtml(t('提交信息', 'Commit Message'))}:</strong> ${escapeHtml(lastPull.commitMessage)}
+                </div>
+            `;
+        }
+        const displayPullDesc = (lastPull.commitDescription || '').trim() || '-';
+        commitMsgHtml += `
+            <div style="display: flex; align-items: flex-start; gap: 4px; margin-top: 2px;">
+                <span style="flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;">
+                    <strong>${escapeHtml(t('描述', 'Description'))}</strong>
+                    <span class="github-config-info-trigger">?
+                        <span class="github-config-info-tooltip is-zh" style="width: 170px;">${escapeHtml(t('描述过长时，此处仅展示前三行。', 'If the description is too long, only the first three lines are shown here.'))}</span>
+                    </span>
+                </span><strong>:</strong>
+                <span style="flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; font-family: inherit; font-size: 11px; color: var(--text-muted, var(--text-secondary)); margin-top: 1.5px; line-height: 1.4;">${escapeHtml(displayPullDesc)}</span>
+            </div>
+        `;
+
         return `
             <div class="github-config-last-pull-row">
                 <code>${escapeHtml(lastPull.path)}</code>
                 <button type="button" class="github-path-copy-btn import-option-btn" id="githubLastPullPathCopyBtn" data-copy-value="${escapeHtml(lastPull.path)}" style="min-width: 48px; display: inline-flex; justify-content: center; align-items: center; text-align: center; padding: 0 6px !important;">${escapeHtml(t('复制', 'Copy'))}</button>
             </div>
             ${meta ? `<div class="github-config-muted">${escapeHtml(meta)}</div>` : ''}
+            ${commitMsgHtml}
         `;
     }
 
@@ -412,6 +476,10 @@
             const el = dialog.querySelector(`input[name="${name}"]:checked`);
             return el ? el.value : 'agents';
         };
+        const getCheckbox = (id) => {
+            const el = dialog.querySelector(`#${id}`);
+            return el ? el.checked : false;
+        };
         return {
             token: get('githubConfigToken'),
             owner: get('githubConfigOwner'),
@@ -422,7 +490,10 @@
             defaultPullMode: normalizePullMode(get('githubConfigDefaultPullMode')),
             overwriteThreshold: normalizeThreshold(get('githubConfigOverwriteThreshold')),
             pushGuideChoice: getRadioValue('githubPushGuideChoice'),
-            pushGuideCustomName: get('githubPushGuideCustomInput')
+            pushGuideCustomName: get('githubPushGuideCustomInput'),
+            confirmCommitDetails: getRadioValue('githubPushMode') === 'prompt',
+            commitMsgTemplate: get('githubConfigCommitMsgTemplate'),
+            commitDescTemplate: get('githubConfigCommitDescTemplate')
         };
     }
 
@@ -632,6 +703,33 @@
                     <div class="github-config-subsection">
                         <div class="github-config-subtitle">${escapeHtml(t('2. 推送/拉取默认项', '2. Push/Pull Defaults'))}</div>
                         <div class="github-config-inline">
+                            <div style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px;">
+                                <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">${escapeHtml(t('推送提交模式', 'Push Commit Mode'))}</span>
+                                <div style="display: flex; align-items: center; gap: 16px; margin-top: 2px;">
+                                    <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--text-primary); user-select: none; font-weight: normal;">
+                                        <input type="radio" name="githubPushMode" value="prompt" ${config.confirmCommitDetails !== false ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                        <span>${escapeHtml(t('推送前弹出面板 (手动输入)', 'Pop up panel before push (Manual input)'))}</span>
+                                    </label>
+                                    <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--text-primary); user-select: none; font-weight: normal;">
+                                        <input type="radio" name="githubPushMode" value="silent" ${config.confirmCommitDetails === false ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                        <span>${escapeHtml(t('静默推送 (使用模板)', 'Silent push (Use templates)'))}</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="githubConfigCommitTemplatesContainer" style="grid-column: 1 / -1; display: ${config.confirmCommitDetails === false ? 'flex' : 'none'}; flex-direction: column; gap: 8px; margin-bottom: 8px; border-left: 2px solid var(--accent-primary, #7c3aed); padding-left: 8px; margin-left: 4px;">
+                                <label class="github-config-field" style="width: 100%;">
+                                    <span>${escapeHtml(t('提交信息模板', 'Commit Message Template'))}</span>
+                                    <input id="githubConfigCommitMsgTemplate" type="text" autocomplete="off" value="${escapeHtml(config.commitMsgTemplate)}" placeholder="e.g. Bookmark Canvas: push package {path} {time}">
+                                </label>
+                                <label class="github-config-field" style="width: 100%;">
+                                    <span>${escapeHtml(t('描述模板', 'Commit Description Template'))}</span>
+                                    <textarea id="githubConfigCommitDescTemplate" rows="2" style="resize: vertical; min-height: 40px; font-family: inherit; font-size: 12px;" placeholder="e.g. Updated: {updated} files, Deleted: {deleted} files">${escapeHtml(config.commitDescTemplate)}</textarea>
+                                </label>
+                                <div style="font-size: 11px; color: var(--text-secondary); opacity: 0.8; line-height: 1.4;">
+                                    ${escapeHtml(t('支持占位符：{time} (时间), {path} (路径), {updated} (更新数), {deleted} (删除数), {branch} (分支)', 'Supported placeholders: {time} (time), {path} (path), {updated} (updated files), {deleted} (deleted files), {branch} (branch)'))}
+                                </div>
+                            </div>
+                            <div class="github-config-divider-micro"></div>
                             <label class="github-config-field github-config-remote-field">
                                 <span>${escapeHtml(t('「.canvas」内部路径', '".canvas" Internal Path'))}</span>
                                 <div class="github-path-input-row">
@@ -642,6 +740,7 @@
                                     <button id="githubPathHelpBtn" type="button" class="import-option-btn github-path-detail-btn" style="border: 1px solid var(--accent-primary, #0969da) !important; color: var(--accent-primary, #0969da) !important;">${escapeHtml(t('详情', 'Details'))}</button>
                                 </div>
                             </label>
+                            <div class="github-config-divider-micro"></div>
                             <div class="github-config-guide-container" style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
                                 <span style="font-size: 12px; font-weight: 700; color: var(--text-primary);">${escapeHtml(t('AI 指南文件名', 'AI Guide Filename'))}</span>
                                 <div class="github-config-guide-rows" style="display: flex; flex-direction: column; gap: 8px;">
@@ -688,6 +787,7 @@
                                     <input id="githubConfigOverwriteThreshold" type="number" min="1" max="100000" step="1" value="${escapeHtml(config.overwriteThreshold)}">
                                 </label>
                             </div>
+                            <div class="github-config-divider-micro"></div>
                             <div class="github-config-inferred-row" style="grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; width: var(--github-config-control-width); max-width: 100%; margin-top: 8px;">
                                 <span style="font-size: 12px; font-weight: 600; white-space: nowrap; flex-shrink: 0; color: var(--text-primary); display: inline-flex; align-items: center; gap: 4px;">
                                     ${escapeHtml(t('拉取路径', 'Pull Path'))}
@@ -911,11 +1011,20 @@
                 });
             });
 
-            dialog.querySelectorAll('input, select').forEach((el) => {
+            const pushModeRadios = dialog.querySelectorAll('input[name="githubPushMode"]');
+            const templatesContainer = dialog.querySelector('#githubConfigCommitTemplatesContainer');
+            pushModeRadios.forEach((r) => {
+                r.addEventListener('change', () => {
+                    if (templatesContainer) {
+                        templatesContainer.style.display = r.value === 'silent' ? 'flex' : 'none';
+                    }
+                });
+            });
+
+            dialog.querySelectorAll('input, select, textarea').forEach((el) => {
                 el.addEventListener('input', scheduleAutoSave);
                 el.addEventListener('change', scheduleAutoSave);
             });
-
             const remoteRootEl = dialog.querySelector('#githubConfigRemoteRoot');
             if (remoteRootEl) {
                 remoteRootEl.addEventListener('blur', () => {
@@ -1325,6 +1434,20 @@
         };
     }
 
+    function resolveTemplate(template, { branch, path, updated, deleted }) {
+        const now = new Date();
+        const pad2 = (n) => String(n).padStart(2, '0');
+        const stamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
+        
+        return String(template || '')
+            .replace(/{time}/g, stamp)
+            .replace(/{datetime}/g, stamp)
+            .replace(/{path}/g, path || '')
+            .replace(/{updated}/g, String(updated || 0))
+            .replace(/{deleted}/g, String(deleted || 0))
+            .replace(/{branch}/g, branch || '');
+    }
+
     function buildCommitMessage(type, rootPath) {
         const now = new Date();
         const stamp = now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, 'Z');
@@ -1348,6 +1471,123 @@
             name = sanitizeGuideFileName(customName) || 'AGENTS.md';
         }
         return [name];
+    }
+
+    async function showPushCommitDetailsDialog({ config, branch, rootPath, updatedCount, deletedCount }) {
+        if (activeConfirmDialog) {
+            try { activeConfirmDialog.remove(); } catch (_) { }
+            activeConfirmDialog = null;
+        }
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog github-confirm-dialog';
+        
+        const resolvedMsg = resolveTemplate(config.commitMsgTemplate || DEFAULT_COMMIT_MSG_TEMPLATE, {
+            branch,
+            path: rootPath || getDefaultRemoteRoot(),
+            updated: updatedCount,
+            deleted: deletedCount
+        });
+        const resolvedDesc = resolveTemplate(config.commitDescTemplate || DEFAULT_COMMIT_DESC_TEMPLATE, {
+            branch,
+            path: rootPath || getDefaultRemoteRoot(),
+            updated: updatedCount,
+            deleted: deletedCount
+        });
+        
+        dialog.innerHTML = `
+            <div class="import-dialog-content github-confirm-content" style="width: min(94vw, 480px);">
+                <div class="import-dialog-header">
+                    <h3>${escapeHtml(t('推送确认 & 提交信息', 'Push Confirm & Commit Details'))}</h3>
+                    <button class="import-dialog-close" id="githubPushDetailsClose" type="button">&times;</button>
+                </div>
+                <div class="import-dialog-body github-confirm-body" style="display: flex; flex-direction: column; gap: 12px;">
+                    <!-- Push Summary Card -->
+                    <div style="padding: 10px; border-radius: 6px; background: var(--bg-secondary, rgba(0, 0, 0, 0.03)); border: 1px solid var(--border-color, rgba(0, 0, 0, 0.1)); font-size: 12px; line-height: 1.6;">
+                        <div style="display: flex; justify-content: space-between;">
+                            <span><strong>${escapeHtml(t('目标分支', 'Branch'))}:</strong></span>
+                            <span><code>${escapeHtml(branch)}</code></span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+                            <span><strong>${escapeHtml(t('远端路径', 'Remote Path'))}:</strong></span>
+                            <span><code>${escapeHtml(rootPath || getDefaultRemoteRoot())}</code></span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-top: 4px; border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.08)); padding-top: 4px;">
+                            <span><strong>${escapeHtml(t('待推送变更', 'Pending Changes'))}:</strong></span>
+                            <span>
+                                <span style="color: var(--accent-primary, #0969da); font-weight: bold;">${updatedCount}</span> ${escapeHtml(t('个更新', 'updated'))} · 
+                                <span style="color: var(--tag-red, #cf222e); font-weight: bold;">${deletedCount}</span> ${escapeHtml(t('个删除', 'deleted'))}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Input Fields -->
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600;">
+                            <span style="color: var(--accent-primary, #0969da);">${escapeHtml(t('提交信息 (Commit Message)', 'Commit Message'))}</span>
+                            <input id="githubPushCommitMsgInput" type="text" autocomplete="off" 
+                                class="github-config-guide-input"
+                                value="" 
+                                placeholder="${escapeHtml(resolvedMsg)}">
+                        </label>
+                        <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600;">
+                            <span style="color: var(--accent-primary, #0969da);">${escapeHtml(t('描述 (Commit Description)', 'Commit Description'))}</span>
+                            <textarea id="githubPushCommitDescInput" rows="4" 
+                                class="github-config-guide-input"
+                                placeholder="${escapeHtml(t('请输入描述（可选）...', 'Enter description (optional)...'))}"
+                                style="resize: vertical; min-height: 80px; font-family: inherit; height: auto;"></textarea>
+                        </label>
+                    </div>
+
+                    <div class="github-confirm-actions" style="margin-top: 8px;">
+                        <button id="githubPushDetailsCancel" type="button" class="import-mode-btn import-mode-btn-cancel">${escapeHtml(t('取消', 'Cancel'))}</button>
+                        <button id="githubPushDetailsConfirm" type="button" class="import-mode-btn import-mode-btn-confirm">${escapeHtml(t('推送', 'Push'))}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(dialog);
+        activeConfirmDialog = dialog;
+
+        return new Promise((resolve) => {
+            const cleanup = (value) => {
+                try { dialog.remove(); } catch (_) { }
+                if (activeConfirmDialog === dialog) activeConfirmDialog = null;
+                resolve(value);
+            };
+            const closeBtn = dialog.querySelector('#githubPushDetailsClose');
+            const cancelBtn = dialog.querySelector('#githubPushDetailsCancel');
+            const confirmBtn = dialog.querySelector('#githubPushDetailsConfirm');
+            const msgInput = dialog.querySelector('#githubPushCommitMsgInput');
+            const descInput = dialog.querySelector('#githubPushCommitDescInput');
+
+            if (closeBtn) closeBtn.addEventListener('click', () => cleanup(null));
+            if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(null));
+
+            if (confirmBtn) {
+                confirmBtn.addEventListener('click', () => {
+                    const msg = (msgInput ? msgInput.value : '').trim() || resolvedMsg;
+                    const desc = (descInput ? descInput.value : '').trim();
+                    cleanup({ commitMessage: msg, commitDescription: desc });
+                });
+            }
+
+            dialog.addEventListener('click', (event) => {
+                if (event.target === dialog) cleanup(null);
+            });
+
+            dialog.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cleanup(null);
+                } else if (event.key === 'Enter' && event.ctrlKey) {
+                    event.preventDefault();
+                    if (confirmBtn) confirmBtn.click();
+                }
+            });
+
+            try { if (msgInput) msgInput.focus(); } catch (_) {}
+        });
     }
 
     async function push() {
@@ -1430,8 +1670,6 @@
                 return;
             }
 
-            showProgressDialog(t('GitHub 推送中...', 'GitHub Push...'));
-            updateProgress(10, t('正在构建完整导出包...', 'Building full export package...'));
             const buildPackage = global.buildCanvasGithubPackageFiles ||
                 (global.BookmarkCanvasPackageTransferBridge && global.BookmarkCanvasPackageTransferBridge.buildFullCanvasPackageFromCurrent);
             if (typeof buildPackage !== 'function') throw new Error('Canvas export package bridge unavailable.');
@@ -1444,7 +1682,6 @@
                 guideNames: guideNames
             });
 
-            updateProgress(30, t('正在比对本地与远端文件...', 'Comparing local and remote files...'));
             const pushPlan = await buildPushChanges(bundle, config, classification.files, { packageRoot, remoteRootPath: rootPath });
             const changes = Array.isArray(pushPlan && pushPlan.changes) ? pushPlan.changes : [];
             if (!changes.length) {
@@ -1457,12 +1694,43 @@
                     sha: connection.branchHeadSha || null,
                     message: note
                 });
-                updateProgress(100, note);
-                await closeProgressDialog(800, true);
                 showToast(note, 'success', 4200);
                 return;
             }
 
+            let commitMessage = '';
+            let commitDescription = '';
+
+            if (config.confirmCommitDetails !== false) {
+                const commitDetails = await showPushCommitDetailsDialog({
+                    config,
+                    branch: connection.resolvedBranch || config.branch,
+                    rootPath,
+                    updatedCount: pushPlan.updated || 0,
+                    deletedCount: pushPlan.deleted || 0
+                });
+                if (!commitDetails) {
+                    operationRunning = false;
+                    return;
+                }
+                commitMessage = commitDetails.commitMessage;
+                commitDescription = commitDetails.commitDescription;
+            } else {
+                commitMessage = resolveTemplate(config.commitMsgTemplate || DEFAULT_COMMIT_MSG_TEMPLATE, {
+                    branch: connection.resolvedBranch || config.branch,
+                    path: rootPath || getDefaultRemoteRoot(),
+                    updated: pushPlan.updated || 0,
+                    deleted: pushPlan.deleted || 0
+                });
+                commitDescription = resolveTemplate(config.commitDescTemplate || DEFAULT_COMMIT_DESC_TEMPLATE, {
+                    branch: connection.resolvedBranch || config.branch,
+                    path: rootPath || getDefaultRemoteRoot(),
+                    updated: pushPlan.updated || 0,
+                    deleted: pushPlan.deleted || 0
+                });
+            }
+
+            showProgressDialog(t('GitHub 推送中...', 'GitHub Push...'));
             updateProgress(75, t('正在准备推送变更...', 'Preparing upload changes...'));
             updateProgress(
                 85,
@@ -1471,12 +1739,17 @@
                     `Pushing to GitHub (${pushPlan.updated || 0} changed, ${pushPlan.deleted || 0} deleted)...`
                 )
             );
+
+            const finalMessage = commitDescription
+                ? `${commitMessage}\n\n${commitDescription}`
+                : commitMessage;
+
             const result = await api.applyRepoFilesBatch({
                 token: config.token,
                 owner: config.owner,
                 repo: config.repo,
                 branch: connection.resolvedBranch || config.branch,
-                message: buildCommitMessage('push', rootPath),
+                message: finalMessage,
                 changes
             });
             if (!result || result.success !== true) {
@@ -1493,6 +1766,8 @@
                 path: rootPath,
                 branch: result.branch || connection.resolvedBranch || config.branch,
                 sha: result.commitSha || null,
+                commitMessage: commitMessage,
+                commitDescription: commitDescription,
                 message: note
             });
             await closeProgressDialog(800, true);
@@ -1560,15 +1835,58 @@
         return folderFiles;
     }
 
-    async function choosePullMode(config, rootPath, fileCount) {
+    async function choosePullMode(config, rootPath, fileCount, commitInfo = null) {
         const defaultMode = normalizePullMode(config.defaultPullMode);
+
+        const formatCommitDate = (isoString) => {
+            if (!isoString) return '';
+            try {
+                const date = new Date(isoString);
+                if (isNaN(date.getTime())) return isoString;
+                const pad2 = (n) => String(n).padStart(2, '0');
+                return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+            } catch (_) {
+                return isoString;
+            }
+        };
+
+        let commitInfoHtml = '';
+        if (commitInfo && commitInfo.sha) {
+            const displayDesc = (commitInfo.description || '').trim() || '-';
+            const descHtml = `
+                <div style="display: flex; align-items: flex-start; gap: 4px; margin-top: 2px;">
+                    <span style="flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;">
+                        <strong>${escapeHtml(t('描述', 'Description'))}</strong>
+                        <span class="github-config-info-trigger">?
+                            <span class="github-config-info-tooltip is-zh" style="width: 170px;">${escapeHtml(t('描述过长时，此处仅展示前三行。', 'If the description is too long, only the first three lines are shown here.'))}</span>
+                        </span>
+                    </span><strong>:</strong>
+                    <span style="flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; font-family: inherit; font-size: 11px; color: var(--text-muted, var(--text-secondary)); margin-top: 1.5px; line-height: 1.4;">${escapeHtml(displayDesc)}</span>
+                </div>
+            `;
+
+            commitInfoHtml = `
+                <div class="github-commit-info-card" style="margin-top: 10px; padding: 10px; border-radius: 6px; background: var(--bg-secondary, rgba(0, 0, 0, 0.03)); border: 1px dashed var(--border-color, rgba(0, 0, 0, 0.15)); font-size: 12px; line-height: 1.6; text-align: left;">
+                    <div style="font-weight: bold; margin-bottom: 6px; color: var(--accent-primary, #7c3aed); display: flex; align-items: center; gap: 6px;">
+                        <i class="fas fa-history"></i> ${escapeHtml(t('远端最新提交', 'Latest Cloud Commit'))}
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <div><strong>${escapeHtml(t('提交信息', 'Commit Message'))}:</strong> <span style="word-break: break-all; color: var(--text-primary); font-weight: 500;">${escapeHtml(commitInfo.message)}</span></div>
+                        ${descHtml}
+                        <div><strong>${escapeHtml(t('提交时间', 'Time'))}:</strong> <span style="color: var(--text-secondary);">${escapeHtml(formatCommitDate(commitInfo.date))}${commitInfo.authorName ? ` by ${escapeHtml(commitInfo.authorName)}` : ''}</span></div>
+                        <div><strong>${escapeHtml(t('提交哈希', 'Commit SHA'))}:</strong> <code style="background: rgba(0, 0, 0, 0.05); padding: 1px 4px; border-radius: 3px; font-family: monospace;">${escapeHtml(commitInfo.sha.slice(0, 7))}</code></div>
+                    </div>
+                </div>
+            `;
+        }
+
         const pullMessageHtml = buildOperationNoticeHtml({
             title: t('读取远端完整 .canvas 包', 'Read the full remote .canvas package'),
             description: t('请选择导入方式。', 'Choose an import mode.'),
             pathLabel: t('远端路径', 'Remote path'),
             path: rootPath || getDefaultRemoteRoot(),
             metaHtml: `<span>${escapeHtml(t('远端文件数', 'Remote files'))}</span><strong>${fileCount}</strong>`
-        });
+        }) + commitInfoHtml;
         const dialog = document.createElement('div');
         dialog.className = 'import-dialog github-pull-mode-dialog';
         dialog.innerHTML = `
@@ -1716,7 +2034,22 @@
                 throw new Error(t('远端路径已有文件，但没有识别到 .canvas 包。', 'Remote path has files but no recognizable .canvas package.'));
             }
 
-            const mode = await choosePullMode(config, rootPath, classification.files.length);
+            // Fetch latest commit details for UI display and history recording
+            let commitInfo = null;
+            if (typeof api.getRepoCommit === 'function') {
+                try {
+                    commitInfo = await api.getRepoCommit({
+                        token: config.token,
+                        owner: config.owner,
+                        repo: config.repo,
+                        ref: connection.resolvedBranch || config.branch
+                    });
+                } catch (commitErr) {
+                    console.warn('[Pull] Failed to fetch latest commit details:', commitErr);
+                }
+            }
+
+            const mode = await choosePullMode(config, rootPath, classification.files.length, commitInfo);
             if (!mode) {
                 operationRunning = false;
                 return;
@@ -1795,19 +2128,27 @@
                 ? t('已完成 GitHub 拉取：覆盖导入。', 'GitHub pull complete: overwrite import.')
                 : t('已完成 GitHub 拉取：快照包导入。', 'GitHub pull complete: snapshot import.');
             
+            const pulledSha = (commitInfo && commitInfo.sha) || connection.branchHeadSha || null;
+            const pulledCommitMessage = (commitInfo && commitInfo.message) || '';
+            const pulledCommitDescription = (commitInfo && commitInfo.description) || '';
+
             updateProgress(95, t('正在保存同步状态...', 'Saving sync status...'));
             await saveLastOperation({
                 type: 'pull',
                 result: 'success',
                 path: rootPath,
                 branch: connection.resolvedBranch || config.branch,
-                sha: connection.branchHeadSha || null,
-                message: note
+                sha: pulledSha,
+                message: note,
+                commitMessage: pulledCommitMessage,
+                commitDescription: pulledCommitDescription
             });
             await saveLastPullRemotePath({
                 path: rootPath,
                 branch: connection.resolvedBranch || config.branch,
-                sha: connection.branchHeadSha || null
+                sha: pulledSha,
+                commitMessage: pulledCommitMessage,
+                commitDescription: pulledCommitDescription
             });
             await closeProgressDialog(800, true);
             showToast(note, 'success', 5000);

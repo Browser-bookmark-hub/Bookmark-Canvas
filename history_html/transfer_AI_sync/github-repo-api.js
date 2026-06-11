@@ -638,6 +638,37 @@
         }
     }
 
+    async function getRepoCommit({ token, owner, repo, ref }) {
+        const authHeader = buildGitHubAuthHeader(token);
+        if (!authHeader) return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
+        const trimmedOwner = String(owner || '').trim();
+        const trimmedRepo = String(repo || '').trim();
+        if (!trimmedOwner || !trimmedRepo) return { success: false, error: '仓库未配置', repoNotConfigured: true };
+        const trimmedRef = String(ref || '').trim();
+        if (!trimmedRef) return { success: false, error: '缺少引用参数' };
+
+        const url = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/commits/${encodeURIComponent(trimmedRef)}`;
+        try {
+            const commitJson = await githubRequestJson(url, {
+                headers: { Authorization: authHeader }
+            });
+            const fullMessage = commitJson.commit && commitJson.commit.message ? commitJson.commit.message : '';
+            const msgLines = fullMessage.split('\n');
+            const title = String(msgLines[0] || '').trim();
+            const description = String(msgLines.slice(1).join('\n')).trim();
+            return {
+                success: true,
+                sha: commitJson.sha,
+                message: title,
+                description: description,
+                authorName: commitJson.commit && commitJson.commit.author && commitJson.commit.author.name ? commitJson.commit.author.name : '',
+                date: commitJson.commit && commitJson.commit.author && commitJson.commit.author.date ? commitJson.commit.author.date : ''
+            };
+        } catch (error) {
+            return { success: false, error: normalizeGitHubError(error) };
+        }
+    }
+
     async function getRepoFile({ token, owner, repo, branch, path }) {
         const authHeader = buildGitHubAuthHeader(token);
         if (!authHeader) return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
@@ -1136,6 +1167,7 @@
         getRepoFileRaw,
         getRepoFile,
         getRepoZipball,
+        getRepoCommit,
         applyRepoFilesBatch
     };
 })(window);

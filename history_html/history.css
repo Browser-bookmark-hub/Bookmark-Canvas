@@ -16292,7 +16292,8 @@ body.canvas-popover-active .md-align-popover {
 }
 
 .github-config-field input,
-.github-config-field select {
+.github-config-field select,
+.github-config-field textarea {
     width: 100%;
     min-height: 30px;
     box-sizing: border-box;
@@ -16306,7 +16307,8 @@ body.canvas-popover-active .md-align-popover {
 }
 
 .github-config-field input:focus,
-.github-config-field select:focus {
+.github-config-field select:focus,
+.github-config-field textarea:focus {
     border-color: #0969da;
     box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.16);
 }
@@ -16316,7 +16318,9 @@ body.canvas-popover-active .md-align-popover {
 }
 
 .github-config-field.is-disabled input,
-.github-config-field input:disabled {
+.github-config-field.is-disabled textarea,
+.github-config-field input:disabled,
+.github-config-field textarea:disabled {
     cursor: not-allowed;
     border-color: #d8dee4;
     background: #f6f8fa;
@@ -16362,6 +16366,13 @@ body.canvas-popover-active .md-align-popover {
     grid-column: 1 / -1;
     border-top: 1px solid var(--accent-primary, #0969da);
     width: 66.7%;
+    margin: 8px 0 2px;
+}
+
+.github-config-divider-micro {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--accent-primary, #0969da);
+    width: 33.3%;
     margin: 8px 0 2px;
 }
 
@@ -16549,9 +16560,9 @@ body.canvas-popover-active .md-align-popover {
 .github-config-info-tooltip {
     position: absolute;
     bottom: calc(100% + 6px);
-    left: 50%;
-    transform: translateX(-50%) translateY(4px);
-    width: 220px;
+    left: 0;
+    transform: translateY(4px);
+    width: max-content;
     padding: 6px 8px;
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -16566,21 +16577,20 @@ body.canvas-popover-active .md-align-popover {
     pointer-events: none;
     transition: opacity 0.15s ease, transform 0.15s ease;
     z-index: 999;
-    white-space: normal;
-    word-break: break-word;
+    white-space: nowrap;
 }
 
 .github-config-info-tooltip.is-zh {
-    width: 170px;
+    width: max-content;
 }
 
 .github-config-info-tooltip.is-en {
-    width: 240px;
+    width: max-content;
 }
 
 .github-config-info-trigger:hover .github-config-info-tooltip {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
 }
 
 .github-path-detail-btn {
@@ -16890,7 +16900,8 @@ body.canvas-popover-active .md-align-popover {
 }
 
 html[data-theme="dark"] .github-config-field input,
-html[data-theme="dark"] .github-config-field select {
+html[data-theme="dark"] .github-config-field select,
+html[data-theme="dark"] .github-config-field textarea {
     border-color: #3a3b3c;
     background: #242526;
     color: #e4e6eb;
@@ -16901,7 +16912,9 @@ html[data-theme="dark"] .github-config-field.is-disabled {
 }
 
 html[data-theme="dark"] .github-config-field.is-disabled input,
-html[data-theme="dark"] .github-config-field input:disabled {
+html[data-theme="dark"] .github-config-field.is-disabled textarea,
+html[data-theme="dark"] .github-config-field input:disabled,
+html[data-theme="dark"] .github-config-field textarea:disabled {
     border-color: #343536;
     background: #1f2021;
     color: #777b80;
@@ -16925,6 +16938,10 @@ html[data-theme="dark"] .github-config-guide-input:disabled {
 }
 
 html[data-theme="dark"] .github-config-divider-mini {
+    border-top-color: var(--accent-primary, #2d88ff);
+}
+
+html[data-theme="dark"] .github-config-divider-micro {
     border-top-color: var(--accent-primary, #2d88ff);
 }
 
