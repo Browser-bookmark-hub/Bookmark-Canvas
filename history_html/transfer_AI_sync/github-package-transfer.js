@@ -547,10 +547,25 @@
                  请确保在 Obsidian 中使用 ${hl('「打开本地仓库」')} 打开您从 GitHub 克隆（拉取）到本地的 ${hl(repoName)} 文件夹。
                </div>`;
 
+        const targetPath = getRemoteRootPath(config) || getDefaultRemoteRoot();
+        const targetFolderLeaf = getPathLeaf(targetPath);
+        const warningDesc = isEn()
+            ? `<div style="margin-top: 12px; line-height: 1.6; padding: 10px; border-radius: 6px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); color: var(--tag-red, #cf222e); font-size: 11px;">
+                 <strong>⚠️ Warning (Important):</strong><br>
+                 1. External file nodes (videos, audio, images, PDFs, etc.) are prohibited in the canvas.<br>
+                 2. Pushing will automatically clean up the remote directory. Do NOT store any unrelated files (e.g. personal notes, media files) inside the sync directory ${hl(targetPath)} (the ${hl(targetFolderLeaf)} folder), otherwise they will be deleted!
+               </div>`
+            : `<div style="margin-top: 12px; line-height: 1.6; padding: 10px; border-radius: 6px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); color: var(--tag-red, #cf222e); font-size: 11px;">
+                 <strong>⚠️ 安全警示 (切记)：</strong><br>
+                 1. 画布中禁止接入任何外部 file 节点（如视频、音频、图片、PDF 等）。<br>
+                 2. 推送时同步机制会清理远端目录。请勿在同步目录 ${hl(targetPath)}（即 ${hl(targetFolderLeaf)} 文件夹）下存放任何无关文件（如个人笔记、多媒体等），否则它们将被<strong>彻底删除</strong>！
+               </div>`;
+
         return `
             <div class="github-path-help-notes">
                 ${pathRelationHtml}
                 ${mainDesc}
+                ${warningDesc}
             </div>
         `;
     }
