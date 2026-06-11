@@ -626,6 +626,10 @@
 
   function getMdNodeTitle(node) {
     if (!node) return '--';
+    if (node.type === 'file') {
+      const fileName = String(node.file || '').split('/').pop();
+      if (fileName) return fileName;
+    }
     const mainText = (typeof node.title === 'string' && node.title.trim()) ? node.title.trim() : (node.markdownSource || node.text || node.html || '');
     const bySourceLine = normalizeMdNodeTitleLine(getFirstLineText(mainText));
     if (bySourceLine) return bySourceLine;
@@ -1313,6 +1317,83 @@
       });
     };
 
+    const getFileIconClass = (filePath) => {
+      const ext = String(filePath || '').split('.').pop().toLowerCase();
+      switch (ext) {
+        case 'mp4': case 'webm': case 'ogg': case 'mov': case 'avi': case 'flv': case 'mkv':
+          return 'fas fa-file-video';
+        case 'mp3': case 'wav': case 'flac': case 'aac': case 'm4a': case 'wma':
+          return 'fas fa-file-audio';
+        case 'png': case 'jpg': case 'jpeg': case 'gif': case 'webp': case 'svg': case 'bmp': case 'ico':
+          return 'fas fa-file-image';
+        case 'pdf':
+          return 'fas fa-file-pdf';
+        case 'zip': case 'rar': case '7z': case 'tar': case 'gz':
+          return 'fas fa-file-archive';
+        case 'md': case 'txt': case 'json': case 'js': case 'css': case 'html':
+          return 'fas fa-file-alt';
+        default:
+          return 'fas fa-file';
+      }
+    };
+
+    const buildUnsupportedFilesFolder = (nodes, config = {}) => {
+      const keyPrefix = config.itemKeyPrefix || '';
+      const nodeColorResolver = (typeof config.nodeColorResolver === 'function')
+        ? config.nodeColorResolver
+        : resolveMdNodeColor;
+      const folderColor = config.folderColor || colorTokens.blank;
+      const defaultColor = config.defaultColor || folderColor;
+      const folderIcon = config.folderIcon || 'fas fa-folder-open';
+      
+      const sortedNodes = [...nodes].sort((a, b) => {
+        const titleA = getMdNodeTitle(a);
+        const titleB = getMdNodeTitle(b);
+        const cmp = compareText(titleA, titleB);
+        if (cmp !== 0) return cmp;
+        return compareText(a && a.id, b && b.id);
+      });
+
+      const buildItems = (list) => {
+        return list.map((node, index) => {
+          const title = getMdNodeTitle(node);
+          const icon = getFileIconClass(node.file);
+          return makeItemNode({
+            key: `${keyPrefix}unsupported-file-${node.id}`,
+            code: '',
+            title: `${index + 1}. ${clampCardTitle(title, 30)}`,
+            color: nodeColorResolver(node),
+            defaultColor,
+            icon: icon,
+            showIcon: true,
+            variant: 'unsupported-file-item',
+            showDeleteControl: true,
+            deleteAction: {
+              kind: 'md-node',
+              nodeId: node.id,
+              scopeOptions: false
+            },
+            target: { kind: 'md-node', nodeId: node.id },
+            preview: node.file || ''
+          });
+        });
+      };
+
+      const directItems = buildItems(sortedNodes);
+
+      return makeFolderNode({
+        key: config.folderKey || 'folder-unsupported-files',
+        code: '',
+        title: config.title || t('其他', 'Other'),
+        color: folderColor,
+        defaultColor,
+        icon: folderIcon,
+        open: config.open !== false,
+        count: sortedNodes.length,
+        children: directItems
+      });
+    };
+
     const buildOtherFolder = (edgeList, titleLookup, config = {}) => {
       const keyPrefix = config.itemKeyPrefix || '';
       const edgeColorResolver = (typeof config.edgeColorResolver === 'function')
@@ -1476,7 +1557,9 @@
 
     const regularTempSections = tempSections.slice();
 
-    const regularMdNodes = mdNodes.slice();
+    const regularMdNodes = mdNodes.filter(node => node && node.subtype !== 'card-group' && node.type !== 'file');
+
+    const unsupportedFileNodes = mdNodes.filter(node => node && node.type === 'file');
 
     const regularEdges = edges.slice();
 
@@ -1545,6 +1628,13 @@
       emptyKey: 'blank-empty',
       open: false
     });
+
+    const unsupportedFilesFolder = unsupportedFileNodes.length > 0 ? buildUnsupportedFilesFolder(unsupportedFileNodes, {
+      folderKey: 'folder-unsupported-files',
+      count: unsupportedFileNodes.length,
+      emptyKey: 'unsupported-files-empty',
+      open: false
+    }) : null;
 
     const titleLookup = buildNodeTitleLookup(tempSections, mdNodes, copies);
     const otherFolder = buildOtherFolder(regularEdges, titleLookup, {
@@ -1821,7 +1911,8 @@
 
       // 5. Blank cards (folded under "Blank Cards")
       const blankSubChildren = [];
-      const nonGroupMdNodes = geo.mdNodes.filter((n) => n && n.subtype !== 'card-group');
+      const nonGroupMdNodes = geo.mdNodes.filter((n) => n && n.subtype !== 'card-group' && n.type !== 'file');
+      const groupUnsupportedFileNodes = geo.mdNodes.filter((n) => n && n.type === 'file');
       const sortedBlankNodes = [...nonGroupMdNodes].sort((a, b) => {
         const titleA = getMdNodeTitle(a);
         const titleB = getMdNodeTitle(b);
@@ -2022,6 +2113,49 @@
         }));
       }
 
+      // 7. Other files (folded under "Other" below Edges)
+      if (groupUnsupportedFileNodes.length > 0) {
+        const sortedGroupUnsupportedNodes = [...groupUnsupportedFileNodes].sort((a, b) => {
+          const titleA = getMdNodeTitle(a);
+          const titleB = getMdNodeTitle(b);
+          const cmp = compareText(titleA, titleB);
+          if (cmp !== 0) return cmp;
+          return compareText(a && a.id, b && b.id);
+        });
+        const groupUnsupportedItems = sortedGroupUnsupportedNodes.map((n, idx) => {
+          const nodeColor = resolveMdNodeColor(n);
+          const icon = getFileIconClass(n.file);
+          return makeItemNode({
+            key: `group-${parentSafeId}-unsupported-file-${n.id}`,
+            code: '',
+            title: `${idx + 1}. ${clampCardTitle(getMdNodeTitle(n), 30)}`,
+            color: nodeColor,
+            defaultColor: nodeColor,
+            icon: icon,
+            showIcon: true,
+            variant: 'unsupported-file-item',
+            showDeleteControl: true,
+            deleteAction: {
+              kind: 'md-node',
+              nodeId: n.id,
+              scopeOptions: false
+            },
+            target: { kind: 'md-node', nodeId: n.id },
+            preview: n.file || ''
+          });
+        });
+        otherChildren.push(makeFolderNode({
+          key: `group-${parentSafeId}-subfolder-unsupported-files`,
+          code: '',
+          title: t('其他', 'Other'),
+          icon: 'fas fa-folder-open',
+          count: sortedGroupUnsupportedNodes.length,
+          showFoldControl: true,
+          open: false,
+          children: groupUnsupportedItems
+        }));
+      }
+
       const allChildren = childrenNodes.concat(otherChildren);
       if (allChildren.length === 0) {
         allChildren.push(makePlaceholderItem(`group-${parentSafeId}-empty`, '', t('暂无成员', 'No members'), {
@@ -2108,6 +2242,9 @@
       nodes.push(groupsFolder);
     }
     nodes.push(permanentFolder, temporaryFolder, blankFolder, otherFolder);
+    if (unsupportedFilesFolder) {
+      nodes.push(unsupportedFilesFolder);
+    }
     return applyDirectoryColorControl(nodes);
   }
 
@@ -2659,6 +2796,14 @@
       }
       if (tempEl) return locateElement(module, tempEl, zoom);
       return false;
+    }
+
+    if (module && typeof module.locateMdNode === 'function') {
+      try {
+        module.locateMdNode(id, zoom);
+        highlightLocatedElement(document.getElementById(id));
+        return true;
+      } catch (_) { }
     }
 
     const target = document.getElementById(id);
