@@ -17169,3 +17169,56 @@ html[data-theme="dark"] .github-confirm-message code {
         opacity: 1;
     }
 }
+
+/* Canvas card load error styles */
+.canvas-node-load-error {
+    border: 2px dashed var(--error, #e74c3c) !important;
+    background: var(--error-light, #ffebee) !important;
+    position: relative;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 16px !important;
+    text-align: center !important;
+    box-sizing: border-box !important;
+}
+
+.canvas-node-load-error-title {
+    color: var(--error, #e74c3c);
+    font-weight: bold;
+    font-size: 14px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.canvas-node-load-error-msg {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    max-width: 100%;
+    word-break: break-all;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}
+
+.canvas-node-load-error-retry {
+    background: var(--error, #e74c3c);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: background 0.15s ease;
+}
+
+.canvas-node-load-error-retry:hover {
+    background: #c0392b;
+}

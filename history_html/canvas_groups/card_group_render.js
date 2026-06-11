@@ -424,6 +424,11 @@ function renderCardGroup(node) {
         el.classList.add('card-group-canvas-node');
         el.innerHTML = '';
         try { el.style.cssText = ''; } catch (_) { }
+        el.classList.remove('low-detail-active');
+    }
+
+    if (typeof CanvasState !== 'undefined' && CanvasState && CanvasState.lowDetailActive) {
+        el.classList.add('low-detail-active');
     }
 
     const width = Math.max(160, Number(node.width) || 480);

@@ -1818,6 +1818,65 @@ function __rectsOverlap(a, b, margin = 0) {
     );
 }
 
+function __isNodeGeometricallyInsideAnyCardGroup(nodeOrSection, type) {
+    if (!CanvasState || !Array.isArray(CanvasState.mdNodes)) return false;
+    const inner = __getRectOfSectionOrNode(nodeOrSection, type);
+    if (!inner) return false;
+
+    for (const group of CanvasState.mdNodes) {
+        if (!group || group.subtype !== 'card-group' || group.id === nodeOrSection.id) continue;
+        const outer = {
+            x: Number(group.x),
+            y: Number(group.y),
+            w: Number(group.width),
+            h: Number(group.height)
+        };
+        if (![outer.x, outer.y, outer.w, outer.h].every(v => typeof v === 'number' && isFinite(v))) continue;
+        if (inner.x >= outer.x &&
+            inner.y >= outer.y &&
+            inner.x + inner.w <= outer.x + outer.w &&
+            inner.y + inner.h <= outer.y + outer.h) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function __findHostCardGroup(nodeOrSection, type) {
+    if (!CanvasState || !Array.isArray(CanvasState.mdNodes)) return null;
+    const inner = __getRectOfSectionOrNode(nodeOrSection, type);
+    if (!inner) return null;
+
+    for (const group of CanvasState.mdNodes) {
+        if (!group || group.subtype !== 'card-group' || group.id === nodeOrSection.id) continue;
+        const outer = {
+            x: Number(group.x),
+            y: Number(group.y),
+            w: Number(group.width),
+            h: Number(group.height)
+        };
+        if (![outer.x, outer.y, outer.w, outer.h].every(v => typeof v === 'number' && isFinite(v))) continue;
+        if (inner.x >= outer.x &&
+            inner.y >= outer.y &&
+            inner.x + inner.w <= outer.x + outer.w &&
+            inner.y + inner.h <= outer.y + outer.h) {
+            return group;
+        }
+    }
+    return null;
+}
+
+function __willCanvasEnterLowDetailOnLoad() {
+    if (!CanvasState || !CanvasState.lowDetailEnabled) return false;
+    const enterThreshold = getCanvasLowDetailDisplayZoomThreshold();
+    const displayZoom = getCanvasDisplayZoom();
+    if (enterThreshold > 0 && displayZoom <= enterThreshold) {
+        return true;
+    }
+    if (displayZoom < 0.15) return true;
+    return false;
+}
+
 // Import/export transfer logic moved to transfer_AI_sync/import-export-transfer-ui-support.js
 
 function startSectionResize(element, event) {
@@ -6801,6 +6860,7 @@ function setupCanvasZoomAndPan() {
             // 这避免了在大数据量场景下缩放时的卡顿和闪烁
             if (shouldInstantLowDetailOnZoom() && !CanvasState.lowDetailActive) {
                 try {
+                    __clearCanvasLazyLoadQueue();
                     CanvasState.lowDetailActive = true;
                     // 设置冻结的缩放补偿值
                     const container = getCachedContainer();
@@ -9699,11 +9759,15 @@ function __getBookmarkAndFolderStats(items) {
 }
 
 function __getPermanentColumnCountForPerfTotals() {
+    let count = 0;
+    if (document.getElementById('permanentSection')) {
+        count += 1;
+    }
     try {
-        const n = document.querySelectorAll('.permanent-bookmark-section').length;
-        if (n > 0) return n;
+        const copies = __readPermanentSectionCopies() || [];
+        count += copies.filter(c => c && c.id).length;
     } catch (_) { }
-    return document.getElementById('permanentSection') ? 1 : 0;
+    return count;
 }
 
 function __getCanvasTotalDataStatsSync() {
@@ -10703,6 +10767,7 @@ function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoom
             __canvasLazyLoadQueue.frameId = requestAnimationFrame(step);
         } else {
             __canvasLazyLoadQueue.frameId = null;
+            try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
             try { scheduleEdgesRender(0); } catch (_) { }
         }
     };
@@ -10816,7 +10881,7 @@ function runCanvasVirtualizationUpdate(options = {}) {
     const viewportLeft = viewportLeft0 - margin;
     const viewportRight = viewportRight0 + margin;
     const viewportTop = viewportTop0 - margin;
-    const viewportBottom = viewportBottom0 - margin;
+    const viewportBottom = viewportBottom0 + margin;
     const viewportCenterX = (rect.width / 2 - panX) / zoom;
     const viewportCenterY = (rect.height / 2 - panY) / zoom;
 
@@ -12544,7 +12609,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         }
     });
 
-    try { __maybeApplyCardGroupLowDetailMembershipState(); } catch (_) { }
+    try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
 }
 
 function __ensureCanvasLowDetailOverlaysReady(workspace = null) {
@@ -12638,6 +12703,7 @@ function __forceCanvasLowDetailVisualExit(workspace = null, options = {}) {
     const opts = (options && typeof options === 'object') ? options : {};
     const clearAllCards = opts.clearAllCards === true;
 
+    __clearCanvasLazyLoadQueue();
     CanvasState.lowDetailActive = false;
     CanvasState.suppressTreeLoadAnimationUntil = Date.now() + CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS;
     try { __cancelCanvasLowDetailRipple(ws); } catch (_) { }
@@ -12841,6 +12907,7 @@ function __startCanvasLowDetailVisualRipple(shouldActive, workspace = null) {
     const ws = workspace || document.getElementById('canvasWorkspace');
     if (!ws || !ws.classList) return false;
 
+    __clearCanvasLazyLoadQueue();
     __cancelCanvasLowDetailRipple(ws);
     const generation = (Number(CanvasState.lowDetailRippleGeneration || 0) || 0) + 1;
     CanvasState.lowDetailRippleGeneration = generation;
@@ -12947,7 +13014,7 @@ function __exitCanvasLowDetailVisualState(workspace = null) {
     try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
 }
 
-function __applyLowDetailStateVisualSync(shouldActive) {
+function __applyLowDetailStateVisualSync(shouldActive, options = {}) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
 
@@ -12962,7 +13029,8 @@ function __applyLowDetailStateVisualSync(shouldActive) {
         return;
     }
 
-    if (__startCanvasLowDetailVisualRipple(shouldActive, workspace)) {
+    const opts = (options && typeof options === 'object') ? options : {};
+    if (!opts.skipRipple && __startCanvasLowDetailVisualRipple(shouldActive, workspace)) {
         return;
     }
 
@@ -13116,6 +13184,9 @@ function updateCanvasLowDetailMode(force = false) {
         return;
     }
 
+    if (shouldActive !== wasActive) {
+        __clearCanvasLazyLoadQueue();
+    }
     CanvasState.lowDetailActive = shouldActive;
 
     // 进入低细节：隐藏连接线工具栏（避免“悬空工具条”）
@@ -13145,7 +13216,7 @@ function updateCanvasLowDetailMode(force = false) {
 
     // 低细节视觉状态必须同步切换，避免出现“先隐藏内容、后补文字层”的中间态。
     try {
-        __applyLowDetailStateVisualSync(shouldActive);
+        __applyLowDetailStateVisualSync(shouldActive, { skipRipple: force });
     } catch (_) {
         if (shouldActive) {
             try { __enterCanvasLowDetailVisualState(workspace); } catch (_) {
@@ -17071,21 +17142,42 @@ function computeCanvasContentBounds() {
     let maxY = 0;
     let hasContent = false;
 
-    // 永久栏目（包含副本）也参与边界计算，避免拖动到视口外后滚动条无法覆盖
-    const canvasContent = document.getElementById('canvasContent');
-    const scope = canvasContent || document;
-    scope.querySelectorAll('.permanent-bookmark-section').forEach((permanentSection) => {
-        if (!permanentSection) return;
-        const left = parseFloat(permanentSection.style.left) || 0;
-        const top = parseFloat(permanentSection.style.top) || 0;
-        const width = permanentSection.offsetWidth || 0;
-        const height = permanentSection.offsetHeight || 0;
+    // 永久栏目（包含副本）也参与边界计算，直接读取内存/存储，避免虚拟化 DOM 被删除后滚动边界变小
+    const mainEl = document.getElementById('permanentSection');
+    if (mainEl) {
+        const left = parseFloat(mainEl.style.left) || 0;
+        const top = parseFloat(mainEl.style.top) || 0;
+        const size = getPermanentSectionBaseSize();
+        const width = mainEl.offsetWidth || size.width || 600;
+        const height = mainEl.offsetHeight || size.height || 600;
         minX = Math.min(minX, left);
         maxX = Math.max(maxX, left + width);
         minY = Math.min(minY, top);
         maxY = Math.max(maxY, top + height);
         hasContent = true;
-    });
+    }
+
+    try {
+        const existingMeta = (__readPermanentSectionCopies() || []).filter((item) => item && item.id);
+        const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
+            ? CanvasState.permanentLayout.copiesById
+            : {};
+        existingMeta.forEach(meta => {
+            const copyId = meta.id;
+            const cardState = copyStateById[copyId];
+            if (!cardState) return;
+            const left = Number(cardState.left) || 0;
+            const top = Number(cardState.top) || 0;
+            const size = getPermanentSectionBaseSize();
+            const width = Number(cardState.width) || size.width || 600;
+            const height = Number(cardState.height) || size.height || 600;
+            minX = Math.min(minX, left);
+            maxX = Math.max(maxX, left + width);
+            minY = Math.min(minY, top);
+            maxY = Math.max(maxY, top + height);
+            hasContent = true;
+        });
+    } catch (_) { }
 
     CanvasState.tempSections.forEach(section => {
         const tempBaseSize = getTempSectionBaseSize(section);
@@ -20484,7 +20576,16 @@ function __prepareMdNodeShellElement(el, node, options = {}) {
     try { el.replaceChildren(); } catch (_) { el.innerHTML = ''; }
     try {
         el.classList.add(CANVAS_MD_CONTENT_UNLOADED_CLASS);
-        el.classList.add('low-detail-active');
+        el.classList.remove('low-detail-active', 'card-group-low-detail-child-hidden');
+        if (CanvasState && CanvasState.lowDetailActive && __isNodeGeometricallyInsideAnyCardGroup(node, 'md-node')) {
+            el.classList.add('card-group-low-detail-child-hidden');
+            const hostGroup = __findHostCardGroup(node, 'md-node');
+            if (hostGroup) {
+                el.dataset.lowDetailHostGroupId = hostGroup.id;
+            }
+        } else {
+            el.classList.add('low-detail-active');
+        }
         el.classList.remove('editing');
         __setCanvasViewportLazyShellClass(el, true);
     } catch (_) { }
@@ -20543,7 +20644,85 @@ function __ensureMdNodeContentLoadedInPlace(node, options = {}) {
     return true;
 }
 
+function showCanvasNodeLoadError(element, data, errorMsg, isTemp) {
+    if (!element) return;
+    try {
+        element.innerHTML = '';
+        element.classList.add('canvas-node-load-error');
+        
+        const lang = typeof getCanvasLanguage === 'function' ? getCanvasLanguage() : 'zh';
+        const titleText = lang === 'en' ? 'Load Failed' : '加载失败';
+        const retryText = lang === 'en' ? 'Retry' : '重试';
+        
+        const titleEl = document.createElement('div');
+        titleEl.className = 'canvas-node-load-error-title';
+        titleEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i><span>${titleText}</span>`;
+        
+        const msgEl = document.createElement('div');
+        msgEl.className = 'canvas-node-load-error-msg';
+        msgEl.textContent = errorMsg || (lang === 'en' ? 'Unknown error occurred' : '未知错误');
+        
+        const retryBtn = document.createElement('button');
+        retryBtn.className = 'canvas-node-load-error-retry';
+        retryBtn.textContent = retryText;
+        retryBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            element.classList.remove('canvas-node-load-error');
+            element.innerHTML = '';
+            if (data) delete data.loadError;
+            if (isTemp) {
+                renderTempNode(data);
+            } else {
+                renderMdNode(data);
+            }
+        });
+        
+        element.appendChild(titleEl);
+        element.appendChild(msgEl);
+        element.appendChild(retryBtn);
+    } catch (_) {}
+}
+
 function renderMdNode(node, options = {}) {
+    const container = document.getElementById('canvasContent');
+    let el = node ? document.getElementById(node.id) : null;
+    if (node && node.loadError) {
+        if (container) {
+            if (!el) {
+                el = document.createElement('div');
+                el.id = node.id;
+                el.className = 'md-canvas-node';
+                container.appendChild(el);
+                const mdBaseSize = getBlankNodeDefaultSize();
+                const mdWidth = Math.max(mdBaseSize.minWidth, Number(node.width) || mdBaseSize.width);
+                const mdHeight = Math.max(mdBaseSize.minHeight, Number(node.height) || mdBaseSize.height);
+                el.style.left = node.x + 'px';
+                el.style.top = node.y + 'px';
+                el.style.width = mdWidth + 'px';
+                el.style.height = mdHeight + 'px';
+            }
+            showCanvasNodeLoadError(el, node, node.loadError, false);
+        }
+        return;
+    }
+    try {
+        return __renderMdNodeImpl(node, options);
+    } catch (err) {
+        if (container) {
+            if (!el && node) el = document.getElementById(node.id);
+            if (!el && node) {
+                el = document.createElement('div');
+                el.id = node.id;
+                el.className = 'md-canvas-node';
+                container.appendChild(el);
+            }
+            showCanvasNodeLoadError(el, node, err.message, false);
+        }
+    }
+}
+
+function __renderMdNodeImpl(node, options = {}) {
     const container = document.getElementById('canvasContent');
     if (!container) return;
 
@@ -20575,9 +20754,27 @@ function renderMdNode(node, options = {}) {
         container.appendChild(el);
     } else if (shellOnly && el.dataset && el.dataset.mdContentLoaded === 'false') {
         // Keep the existing light shell; only position/style/overlay need updating.
+        el.classList.remove('low-detail-active', 'card-group-low-detail-child-hidden');
+        if (el.dataset) delete el.dataset.lowDetailHostGroupId;
     } else {
         el = __resetMdNodeElementForRender(el);
         try { el.innerHTML = ''; } catch (_) { }
+        el.classList.remove('low-detail-active', 'card-group-low-detail-child-hidden');
+        if (el.dataset) delete el.dataset.lowDetailHostGroupId;
+    }
+
+    if (CanvasState && CanvasState.lowDetailActive) {
+        if (node.subtype === 'card-group') {
+            el.classList.add('low-detail-active');
+        } else if (__isNodeGeometricallyInsideAnyCardGroup(node, 'md-node')) {
+            el.classList.add('card-group-low-detail-child-hidden');
+            const hostGroup = __findHostCardGroup(node, 'md-node');
+            if (hostGroup) {
+                el.dataset.lowDetailHostGroupId = hostGroup.id;
+            }
+        } else {
+            el.classList.add('low-detail-active');
+        }
     }
 
     // Always update position/size/style
@@ -28902,6 +29099,44 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
 function renderTempNode(section, options = {}) {
     const container = document.getElementById('canvasContent');
+    let nodeElement = section ? document.getElementById(section.id) : null;
+    if (section && section.loadError) {
+        if (container) {
+            if (!nodeElement) {
+                nodeElement = document.createElement('div');
+                nodeElement.className = 'temp-canvas-node';
+                nodeElement.id = section.id;
+                nodeElement.dataset.sectionId = section.id;
+                container.appendChild(nodeElement);
+                const baseSize = getTempSectionBaseSize(section);
+                nodeElement.style.left = section.x + 'px';
+                nodeElement.style.top = section.y + 'px';
+                nodeElement.style.width = (section.width || baseSize.width) + 'px';
+                nodeElement.style.height = (section.height || baseSize.height) + 'px';
+            }
+            showCanvasNodeLoadError(nodeElement, section, section.loadError, true);
+        }
+        return;
+    }
+    try {
+        return __renderTempNodeImpl(section, options);
+    } catch (err) {
+        if (container) {
+            if (!nodeElement && section) nodeElement = document.getElementById(section.id);
+            if (!nodeElement && section) {
+                nodeElement = document.createElement('div');
+                nodeElement.className = 'temp-canvas-node';
+                nodeElement.id = section.id;
+                nodeElement.dataset.sectionId = section.id;
+                container.appendChild(nodeElement);
+            }
+            showCanvasNodeLoadError(nodeElement, section, err.message, true);
+        }
+    }
+}
+
+function __renderTempNodeImpl(section, options = {}) {
+    const container = document.getElementById('canvasContent');
     if (!container) {
         console.warn('[Canvas] 找不到canvasContent容器');
         return;
@@ -28966,6 +29201,20 @@ function renderTempNode(section, options = {}) {
     } else {
         // 更新时清空内容，但保持位置和大小不变
         nodeElement.innerHTML = '';
+        nodeElement.classList.remove('low-detail-active', 'card-group-low-detail-child-hidden');
+        if (nodeElement.dataset) delete nodeElement.dataset.lowDetailHostGroupId;
+    }
+
+    if (CanvasState && CanvasState.lowDetailActive) {
+        if (__isNodeGeometricallyInsideAnyCardGroup(section, 'temp-section')) {
+            nodeElement.classList.add('card-group-low-detail-child-hidden');
+            const hostGroup = __findHostCardGroup(section, 'temp-section');
+            if (hostGroup) {
+                nodeElement.dataset.lowDetailHostGroupId = hostGroup.id;
+            }
+        } else {
+            nodeElement.classList.add('low-detail-active');
+        }
     }
     if (applyElementMinimumSize(nodeElement, getSectionMinimumSize(nodeElement, section))) {
         section.width = parseFloat(nodeElement.style.width) || section.width || baseSize.width;
@@ -34895,6 +35144,14 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
             ? __getCanvasViewportBounds(workspace, __getCanvasViewportLazyMarginPx())
             : null;
 
+        const willBeLowDetail = __willCanvasEnterLowDetailOnLoad();
+        if (willBeLowDetail) {
+            CanvasState.lowDetailActive = true;
+            if (workspace) {
+                workspace.classList.add('canvas-low-detail');
+            }
+        }
+
         CanvasState.tempSections.forEach(section => {
             const baseSize = getTempSectionBaseSize(section);
             const w = Math.max(baseSize.minWidth, Number(section.width) || baseSize.width);
@@ -34914,8 +35171,15 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
                 if (!inLazyRange) return;
             }
 
+            let skipTree = shouldRenderShellOnly;
+            if (!skipTree && willBeLowDetail) {
+                if (__isNodeGeometricallyInsideAnyCardGroup(section, 'temp-section')) {
+                    skipTree = true;
+                }
+            }
+
             // 大数据/极限模式 / 区块休眠：先渲染“壳体”，树内容按需加载（避免启动即卡死/一上来全量加载）
-            renderTempNode(section, shouldRenderShellOnly ? { skipTree: true } : {});
+            renderTempNode(section, skipTree ? { skipTree: true } : {});
         });
 
         // 渲染 Markdown 文本卡片
@@ -34930,7 +35194,13 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
                 if (!inLazyRange) return;
             }
 
-            const shellOnly = shouldRenderShellOnly && node && node.subtype !== 'card-group';
+            let shellOnly = shouldRenderShellOnly && node && node.subtype !== 'card-group';
+            if (!shellOnly && willBeLowDetail && node && node.subtype !== 'card-group') {
+                if (__isNodeGeometricallyInsideAnyCardGroup(node, 'md-node')) {
+                    shellOnly = true;
+                }
+            }
+
             renderMdNode(node, shellOnly ? { shellOnly: true } : {});
         });
     } finally {
@@ -36386,6 +36656,12 @@ function renderEdges() {
     }
     svg.style.display = '';
 
+    const ws = document.getElementById('canvasWorkspace');
+    const virtEnabled = typeof isCanvasVirtualizationEnabled === 'function' && isCanvasVirtualizationEnabled();
+    const bounds = (virtEnabled && ws && typeof __getCanvasViewportBounds === 'function')
+        ? __getCanvasViewportBounds(ws, 300)
+        : null;
+
     const existingRecords = __collectEdgeDomRecords(svg);
     const staleEdgeIds = new Set(existingRecords.keys());
 
@@ -36407,6 +36683,33 @@ function renderEdges() {
         if (!geometry) {
             needsRetry = true;
             return;
+        }
+
+        if (bounds) {
+            const sx = Number(geometry.sourceX) || 0;
+            const sy = Number(geometry.sourceY) || 0;
+            const tx = Number(geometry.targetX) || 0;
+            const ty = Number(geometry.targetY) || 0;
+            const minX = Math.min(sx, tx);
+            const maxX = Math.max(sx, tx);
+            const minY = Math.min(sy, ty);
+            const maxY = Math.max(sy, ty);
+
+            if (
+                typeof bounds.left === 'number' &&
+                typeof bounds.right === 'number' &&
+                typeof bounds.top === 'number' &&
+                typeof bounds.bottom === 'number'
+            ) {
+                if (
+                    maxX < bounds.left ||
+                    minX > bounds.right ||
+                    maxY < bounds.top ||
+                    minY > bounds.bottom
+                ) {
+                    return; // Outside viewport bounds, skip rendering to prune from DOM
+                }
+            }
         }
 
         staleEdgeIds.delete(edgeId);
@@ -36508,21 +36811,78 @@ function updateEdgePath(edge, pathElement, geometry = null) {
 function getAnchorPosition(nodeId, side) {
     let el = __resolveCanvasNodeElementById(nodeId);
 
-    if (!el) return null;
+    let left = 0;
+    let top = 0;
+    let width = 0;
+    let height = 0;
 
-    // Must use style.left/top because they are in canvas-content coordinates
-    let left = parseFloat(el.style.left) || 0;
-    let top = parseFloat(el.style.top) || 0;
+    if (el) {
+        // Must use style.left/top because they are in canvas-content coordinates
+        left = parseFloat(el.style.left) || 0;
+        top = parseFloat(el.style.top) || 0;
 
-    // 检查是否有 transform: translate() 应用（拖动过程中）
-    const transform = el.style.transform;
-    if (transform && transform.includes('translate')) {
-        const match = transform.match(/translate\(([^,]+)px,\s*([^)]+)px\)/);
-        if (match) {
-            const translateX = parseFloat(match[1]) || 0;
-            const translateY = parseFloat(match[2]) || 0;
-            left += translateX;
-            top += translateY;
+        // 检查是否有 transform: translate() 应用（拖动过程中）
+        const transform = el.style.transform;
+        if (transform && transform.includes('translate')) {
+            const match = transform.match(/translate\(([^,]+)px,\s*([^)]+)px\)/);
+            if (match) {
+                const translateX = parseFloat(match[1]) || 0;
+                const translateY = parseFloat(match[2]) || 0;
+                left += translateX;
+                top += translateY;
+            }
+        }
+        width = el.offsetWidth || 0;
+        height = el.offsetHeight || 0;
+    } else {
+        // Fallback for virtualized out-of-DOM nodes using CanvasState / localStorage sources
+        const id = String(nodeId || '').trim();
+        if (id === 'permanent-section' || id === 'permanentSection') {
+            const size = getPermanentSectionBaseSize();
+            left = 0;
+            top = 0;
+            width = size.width || 600;
+            height = size.height || 600;
+        } else if (id.startsWith('permanent-section-copy-')) {
+            const copyId = id.slice('permanent-section-copy-'.length).trim();
+            const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
+                ? CanvasState.permanentLayout.copiesById
+                : {};
+            const cardState = copyStateById[copyId];
+            if (cardState) {
+                left = Number(cardState.left) || 0;
+                top = Number(cardState.top) || 0;
+                const size = getPermanentSectionBaseSize();
+                width = Number(cardState.width) || size.width || 600;
+                height = Number(cardState.height) || size.height || 600;
+            } else {
+                return null;
+            }
+        } else {
+            // Check tempSections
+            const section = Array.isArray(CanvasState.tempSections)
+                ? CanvasState.tempSections.find(s => s && s.id === id)
+                : null;
+            if (section) {
+                const baseSize = getTempSectionBaseSize(section);
+                left = Number(section.x) || 0;
+                top = Number(section.y) || 0;
+                width = Number(section.width || baseSize.width) || 300;
+                height = Number(section.height || baseSize.height) || 400;
+            } else {
+                // Check mdNodes & card-groups
+                const node = Array.isArray(CanvasState.mdNodes)
+                    ? CanvasState.mdNodes.find(n => n && n.id === id)
+                    : null;
+                if (node) {
+                    left = Number(node.x) || 0;
+                    top = Number(node.y) || 0;
+                    width = Number(node.width) || 300;
+                    height = Number(node.height) || 200;
+                } else {
+                    return null;
+                }
+            }
         }
     }
 
@@ -36538,8 +36898,34 @@ function getAnchorPosition(nodeId, side) {
         top += dy;
     }
 
-    const width = el.offsetWidth;
-    const height = el.offsetHeight;
+    if (width === 0 || height === 0) {
+        const id = String(nodeId || '').trim();
+        if (id === 'permanent-section' || id === 'permanentSection' || id.startsWith('permanent-section-copy-')) {
+            const size = getPermanentSectionBaseSize();
+            width = width || size.width || 600;
+            height = height || size.height || 600;
+        } else {
+            const section = Array.isArray(CanvasState.tempSections)
+                ? CanvasState.tempSections.find(s => s && s.id === id)
+                : null;
+            if (section) {
+                const baseSize = getTempSectionBaseSize(section);
+                width = width || Number(section.width || baseSize.width) || 300;
+                height = height || Number(section.height || baseSize.height) || 400;
+            } else {
+                const node = Array.isArray(CanvasState.mdNodes)
+                    ? CanvasState.mdNodes.find(n => n && n.id === id)
+                    : null;
+                if (node) {
+                    width = width || Number(node.width) || 300;
+                    height = height || Number(node.height) || 200;
+                } else {
+                    width = width || 300;
+                    height = height || 200;
+                }
+            }
+        }
+    }
 
     switch (side) {
         case 'top': return { x: left + width / 2, y: top };
