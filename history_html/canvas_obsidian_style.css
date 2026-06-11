@@ -1346,6 +1346,23 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     display: none;
 }
 
+/* 视口外懒加载壳体：保留几何尺寸供画布/连线计算，卸掉重内容与命中测试。 */
+.canvas-viewport-lazy-shell:not(.selected):not(.editing):not(.dragging):not(.resizing):not(.canvas-node-maximized) {
+    pointer-events: none !important;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 300px;
+}
+
+.md-canvas-node.md-content-unloaded .md-canvas-editor,
+.md-canvas-node.md-content-unloaded .md-canvas-text,
+.md-canvas-node.md-content-unloaded .md-node-toolbar {
+    display: none !important;
+}
+
+.md-canvas-node.md-content-unloaded .temp-node-low-detail-overlay {
+    display: flex;
+}
+
 /* 低缩放细节模式：用轻量色块 + 中央文字替代完整卡片内容。 */
 .temp-canvas-node.low-detail-active .temp-node-header,
 .temp-canvas-node.low-detail-active .temp-node-description-container,

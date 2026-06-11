@@ -57,6 +57,9 @@ try {
 } catch (_) { }
 
 const CanvasState = {
+    previousZoom: null,
+    previousPanOffsetX: null,
+    previousPanOffsetY: null,
     tempStateTimestamp: 0,
     tempSections: [],
     tempSectionCounter: 0,
@@ -108,11 +111,13 @@ const CanvasState = {
     lowDetailFreezeInv: null,
     lowDetailPrewarmRunning: false,
     lowDetailPrewarmQueue: null,
+    permanentLayout: null,
     lowDetailPrewarmIndex: 0,
     lowDetailPrewarmTimer: null,
     suppressTreeLoadAnimationUntil: 0,
     unloadedTempSectionTrees: new Set(),
     unloadedPermanentSectionTrees: new Set(),
+    unloadedMdNodeContent: new Set(),
     lowDetailDomPruned: false,
     lowDetailDomPruneGeneration: 0,
     lowDetailDomLastPruneAt: 0,
@@ -281,9 +286,18 @@ function getCanvasMinZoom() {
     return Math.max(0.0001, base * Math.max(CANVAS_MIN_DISPLAY_ZOOM, userLimit));
 }
 
+function getCanvasMaxZoom() {
+    const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : CANVAS_BASE_ZOOM_DEFAULT;
+    // 获取用户配置的缩放上限 (默认 300%)
+    const userLimitPercent = getCanvasMaxZoomLimit();
+    const userLimit = userLimitPercent / 100;
+
+    return base * userLimit;
+}
+
 function clampCanvasZoom(zoom) {
     const z = (typeof zoom === 'number' && isFinite(zoom)) ? zoom : 1;
-    return Math.max(getCanvasMinZoom(), Math.min(3, z));
+    return Math.max(getCanvasMinZoom(), Math.min(getCanvasMaxZoom(), z));
 }
 
 // 简易本地存储封装（仅用于滚动位置）
@@ -1572,6 +1586,8 @@ function __handleCardGroupBlankAreaCtrlContextMenu(event) {
 
 const CANVAS_LOW_DETAIL_SURFACE_SELECTOR = '.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .card-group-canvas-node';
 const CANVAS_LOW_DETAIL_RIPPLE_CLASS = 'canvas-low-detail-ripple';
+const CANVAS_VIEWPORT_LAZY_SHELL_CLASS = 'canvas-viewport-lazy-shell';
+const CANVAS_MD_CONTENT_UNLOADED_CLASS = 'md-content-unloaded';
 const CANVAS_LOW_DETAIL_RIPPLE_NEAR_MARGIN = 96;
 const CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME = 28;
 const CANVAS_LOW_DETAIL_RIPPLE_MIN_MS = 180;
@@ -9589,6 +9605,23 @@ function getCanvasMinZoomLimit() {
     return 10; // Default 10%
 }
 
+function getCanvasMaxZoomLimit() {
+    try {
+        const saved = localStorage.getItem('canvasMaxZoomLimit');
+        if (saved) {
+            const val = parseFloat(saved);
+            if (Number.isFinite(val)) {
+                const normalized = Math.min(1000, Math.max(100, val));
+                if (normalized !== val) {
+                    saveSharedState('canvasMaxZoomLimit', String(normalized), { asJSON: false });
+                }
+                return normalized;
+            }
+        }
+    } catch (_) { }
+    return 300; // Default 300%
+}
+
 /**
  * 获取安全区阈值 - 第一优先级
  * 当缩放 >= 此阈值时，绝对不进入低细节模式
@@ -10035,7 +10068,19 @@ function shouldInstantLowDetailOnZoom() {
 }
 
 function isCanvasVirtualizationEnabled() {
-    // 统一强制开启虚拟化：无论数据量大小，都采用按需加载策略
+    if (CanvasState.virtualizationEnabled === false) return false;
+
+    // 仅根据用户设置的栏目卡片数阈值自动绕过（小画布不启用虚拟化以保证零延迟）
+    try {
+        const totals = __getCanvasTotalDataStatsSync();
+        const minCols = (typeof CanvasState.virtualizationMinColumns === 'number' && isFinite(CanvasState.virtualizationMinColumns))
+            ? CanvasState.virtualizationMinColumns
+            : 30;
+        if (totals && totals.totalColumnCount < minCols) {
+            return false;
+        }
+    } catch (_) {}
+
     return true;
 }
 
@@ -10297,6 +10342,52 @@ function __unloadPermanentSectionTreesForLowDetail() {
     return changed;
 }
 
+function __ensurePermanentSectionTreeLoadedInPlace(sectionEl) {
+    if (!sectionEl || !sectionEl.querySelector) return false;
+    const tree = sectionEl.querySelector('.bookmark-tree');
+    if (!tree) return false;
+
+    const isUnloaded = (tree.dataset && tree.dataset.contentUnloaded === 'true') ||
+        (sectionEl.classList && sectionEl.classList.contains('permanent-tree-unloaded'));
+    if (!isUnloaded) return false;
+
+    try { tree.style.display = ''; } catch (_) { }
+    try { tree.dataset.contentHidden = 'false'; } catch (_) { }
+    try { tree.dataset.contentUnloaded = 'false'; } catch (_) { }
+
+    const body = sectionEl.querySelector('.permanent-section-body');
+    if (body && body.dataset) {
+        try { body.dataset.contentHidden = 'false'; } catch (_) { }
+        try { body.dataset.contentUnloaded = 'false'; } catch (_) { }
+    }
+
+    try { sectionEl.classList.remove('permanent-tree-unloaded'); } catch (_) { }
+    const key = __getPermanentSectionTreeUnloadKey(sectionEl);
+    if (key) {
+        try { CanvasState.unloadedPermanentSectionTrees.delete(key); } catch (_) { }
+    }
+
+    let rendered = false;
+    try {
+        if (tree && typeof window.__renderPermanentTreeIntoTree === 'function') {
+            rendered = !!window.__renderPermanentTreeIntoTree(tree, { force: true, reason: 'viewport-lazy-load' });
+        }
+    } catch (_) { }
+    if (!rendered) {
+        try {
+            if (typeof window.__renderPermanentTreeSharedViews === 'function') {
+                rendered = !!window.__renderPermanentTreeSharedViews({
+                    includePrimary: true,
+                    includeCopies: true,
+                    force: true,
+                    reason: 'viewport-lazy-load'
+                });
+            }
+        } catch (_) { }
+    }
+    return rendered;
+}
+
 function __restorePermanentSectionTreesAfterLowDetail() {
     const targets = __getPermanentSectionTreeTargets().filter((sectionEl) => {
         const tree = sectionEl && sectionEl.querySelector ? sectionEl.querySelector('.bookmark-tree') : null;
@@ -10480,6 +10571,7 @@ function scheduleCanvasVirtualizationUpdate(delayMs = null) {
         canvasVirtualizationPending = false;
         // 低细节：先切视觉，重 DOM 延迟卸载，避免边界附近来回缩放反复构建/销毁。
         if (CanvasState.lowDetailActive) {
+            try { __updateNonTempNodesViewportVisibility(); } catch (_) { }
             try { __scheduleCanvasLowDetailDomPrune(); } catch (_) { }
             return;
         }
@@ -10489,8 +10581,155 @@ function scheduleCanvasVirtualizationUpdate(delayMs = null) {
     }, delay);
 }
 
+let __canvasLazyLoadQueue = {
+    generation: 0,
+    frameId: null,
+    queue: []
+};
+
+function __clearCanvasLazyLoadQueue() {
+    __canvasLazyLoadQueue.generation++;
+    if (__canvasLazyLoadQueue.frameId) {
+        try { cancelAnimationFrame(__canvasLazyLoadQueue.frameId); } catch (_) { }
+        __canvasLazyLoadQueue.frameId = null;
+    }
+    __canvasLazyLoadQueue.queue = [];
+}
+
+function __enqueueCanvasLazyLoadNode(nodeInfo) {
+    __canvasLazyLoadQueue.queue.push(nodeInfo);
+}
+
+function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoomIn, viewportCenterX, viewportCenterY, options = {}) {
+    const generation = __canvasLazyLoadQueue.generation;
+    const queue = __canvasLazyLoadQueue.queue;
+    if (!queue.length) return;
+
+    // Calculate distance and sort the queue
+    queue.forEach(item => {
+        item.distance = Math.hypot(
+            item.x + item.w / 2 - viewportCenterX,
+            item.y + item.h / 2 - viewportCenterY
+        );
+    });
+
+    if (sortMode === 'x-asc') {
+        queue.sort((a, b) => a.x - b.x);
+    } else if (sortMode === 'x-desc') {
+        queue.sort((a, b) => b.x - a.x);
+    } else if (sortMode === 'y-asc') {
+        queue.sort((a, b) => a.y - b.y);
+    } else if (sortMode === 'y-desc') {
+        queue.sort((a, b) => b.y - a.y);
+    } else {
+        queue.sort((a, b) => a.distance - b.distance);
+    }
+
+    const LAZY_LOAD_MAX_PER_FRAME = 4;
+    let index = 0;
+
+    const renderItem = (item) => {
+        const type = item.type;
+        const data = item.data;
+        const id = item.id;
+
+        if (type === 'temp') {
+            try { renderTempNode(data, { skipTree: true }); } catch (_) { }
+            const el = document.getElementById(id);
+            if (el) {
+                __setCanvasViewportLazyShellClass(el, false);
+                if (CanvasState.lowDetailActive) {
+                    try { __unloadTempSectionTreeInPlace(id); } catch (_) { }
+                } else {
+                    try { __ensureTempSectionTreeLoadedInPlace(data); } catch (_) { }
+                }
+            }
+        } else if (type === 'md') {
+            try { renderMdNode(data, { shellOnly: item.shouldActive }); } catch (_) { }
+            const el = document.getElementById(id);
+            if (el) {
+                if (item.shouldActive) {
+                    try { __unloadMdNodeContentInPlace(data); } catch (_) { }
+                } else {
+                    try { __ensureMdNodeContentLoadedInPlace(data); } catch (_) { }
+                }
+                __setCanvasViewportLazyShellClass(el, false);
+                el.classList.toggle('low-detail-active', item.shouldActive);
+                if (item.shouldActive) {
+                    try { __ensureMdNodeLowDetailOverlay(el, data); } catch (_) { }
+                }
+            }
+        } else if (type === 'copy') {
+            try {
+                __createPermanentSectionCopyFromStorage({
+                    id: item.copyId,
+                    displayIndex: item.displayIndex,
+                    ...data
+                });
+            } catch (_) { }
+            const el = document.getElementById(id);
+            if (el) {
+                __setCanvasViewportLazyShellClass(el, false);
+                if (!CanvasState.lowDetailActive && !item.shouldActive) {
+                    try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) { }
+                }
+                el.classList.toggle('low-detail-active', item.shouldActive);
+                if (item.shouldActive) {
+                    try { __ensurePermanentSectionLowDetailOverlay(el); } catch (_) { }
+                }
+            }
+        } else if (type === 'group') {
+            try { renderMdNode(data); } catch (_) { }
+            const el = document.getElementById(id);
+            if (el) {
+                __setCanvasViewportLazyShellClass(el, false);
+                el.classList.toggle('low-detail-active', item.shouldActive);
+                if (item.shouldActive && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
+                    try { window.__BCSCardGroup.ensureLowDetailOverlay(el, data); } catch (_) { }
+                }
+            }
+        }
+    };
+
+    const step = () => {
+        if (__canvasLazyLoadQueue.generation !== generation) return;
+        let count = 0;
+
+        const currentBounds = __getCanvasViewportBounds(workspace, 0);
+
+        while (index < queue.length && count < LAZY_LOAD_MAX_PER_FRAME) {
+            const item = queue[index];
+            const inViewport = !__isCanvasRectOutsideBounds(item.x, item.y, item.w, item.h, currentBounds);
+
+            renderItem(item);
+            index++;
+
+            if (!inViewport) {
+                count++;
+            }
+        }
+        if (index < queue.length) {
+            __canvasLazyLoadQueue.frameId = requestAnimationFrame(step);
+        } else {
+            __canvasLazyLoadQueue.frameId = null;
+            try { scheduleEdgesRender(0); } catch (_) { }
+        }
+    };
+
+    __canvasLazyLoadQueue.frameId = requestAnimationFrame(step);
+}
+
+
 function runCanvasVirtualizationUpdate(options = {}) {
-    if (!isCanvasVirtualizationEnabled()) return;
+    const enabled = isCanvasVirtualizationEnabled();
+    if (!enabled) {
+        if (CanvasState.__virtualizationWasEnabled !== false) {
+            CanvasState.__virtualizationWasEnabled = false;
+            try { __restoreAllVirtualisedNodes(); } catch (_) {}
+        }
+        return;
+    }
+    CanvasState.__virtualizationWasEnabled = true;
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
 
@@ -10507,6 +10746,7 @@ function runCanvasVirtualizationUpdate(options = {}) {
     if (CanvasState.lowDetailActive) {
         doLoad = false;
         if (!allowLowDetailPrune) {
+            try { __updateNonTempNodesViewportVisibility({ doLoad: false, doUnload: doUnload }); } catch (_) { }
             if (doUnload) {
                 try { __scheduleCanvasLowDetailDomPrune(); } catch (_) { }
             }
@@ -10517,7 +10757,6 @@ function runCanvasVirtualizationUpdate(options = {}) {
     }
 
     // 交互中不做 DOM 装载/卸载（只做 transform），保证缩放/拖动过程流畅
-    // [Fix] 使用准确的 touchpadState.isScrolling 替代未定义的 isScrolling
     const isInteracting = (CanvasState.touchpadState && CanvasState.touchpadState.isScrolling) || CanvasState.isPanning || CanvasState.dragState.isDragging || workspace.classList.contains('is-zooming');
     if (isInteracting && !force) {
         if (!doLoad && doUnload) {
@@ -10540,6 +10779,36 @@ function runCanvasVirtualizationUpdate(options = {}) {
     }
     lastCanvasVirtualizationRunAt = now;
 
+    // Detect movement directions for sequential queue loading
+    const prevZoom = CanvasState.previousZoom !== null ? CanvasState.previousZoom : (CanvasState.zoom || 1);
+    const currentZoom = CanvasState.zoom || 1;
+    const prevPanX = CanvasState.previousPanOffsetX !== null ? CanvasState.previousPanOffsetX : (CanvasState.panOffsetX || 0);
+    const currentPanX = CanvasState.panOffsetX || 0;
+    const prevPanY = CanvasState.previousPanOffsetY !== null ? CanvasState.previousPanOffsetY : (CanvasState.panOffsetY || 0);
+    const currentPanY = CanvasState.panOffsetY || 0;
+
+    const zoomChanged = prevZoom !== currentZoom;
+    const panChanged = prevPanX !== currentPanX || prevPanY !== currentPanY;
+
+    let sortMode = 'distance';
+    let zoomIn = false;
+
+    if (zoomChanged) {
+        sortMode = 'distance';
+        zoomIn = currentZoom > prevZoom;
+    } else if (panChanged) {
+        const dx = currentPanX - prevPanX;
+        const dy = currentPanY - prevPanY;
+        if (Math.abs(dx) > Math.abs(dy)) {
+            sortMode = dx < 0 ? 'x-asc' : 'x-desc';
+        } else {
+            sortMode = dy < 0 ? 'y-asc' : 'y-desc';
+        }
+    }
+
+    // Clear previous queued frames
+    __clearCanvasLazyLoadQueue();
+
     const { marginPx, maxLoaded } = getCanvasVirtualizationBudget();
 
     const rect = workspace.getBoundingClientRect();
@@ -10556,9 +10825,11 @@ function runCanvasVirtualizationUpdate(options = {}) {
     const viewportLeft = viewportLeft0 - margin;
     const viewportRight = viewportRight0 + margin;
     const viewportTop = viewportTop0 - margin;
-    const viewportBottom = viewportBottom0 + margin;
+    const viewportBottom = viewportBottom0 - margin;
     const viewportCenterX = (rect.width / 2 - panX) / zoom;
     const viewportCenterY = (rect.height / 2 - panY) / zoom;
+
+    const visualBounds = __getCanvasViewportBounds(workspace, 0);
 
     const candidates = [];
     const mustLoad = new Set(); // 视界内：必须保持树内容加载（减少“可见区域闪烁”）
@@ -10586,9 +10857,9 @@ function runCanvasVirtualizationUpdate(options = {}) {
         if (!inRange) continue;
         const cx = x + w / 2;
         const cy = y + h / 2;
-        const dx = cx - viewportCenterX;
-        const dy = cy - viewportCenterY;
-        candidates.push({ section, dist2: dx * dx + dy * dy });
+        const dx_center = cx - viewportCenterX;
+        const dy_center = cy - viewportCenterY;
+        candidates.push({ section, dist2: dx_center * dx_center + dy_center * dy_center });
     }
 
     candidates.sort((a, b) => a.dist2 - b.dist2);
@@ -10621,11 +10892,13 @@ function runCanvasVirtualizationUpdate(options = {}) {
         desired.add(id);
     }
 
+    const isRippleOrLowDetail = !!CanvasState.lowDetailActive || (workspace && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS));
+
     for (const section of (CanvasState.tempSections || [])) {
         if (!section || !section.id) continue;
         let shouldLoad = desired.has(section.id);
         if (!shouldLoad) {
-            // 兜底：严格视口内永远不卸载（避免“看得见的栏目内容闪一下就没了”）
+            // 兜底：严格视口内永远不卸载
             const baseSize = getTempSectionBaseSize(section);
             const x = Number(section.x);
             const y = Number(section.y);
@@ -10641,36 +10914,149 @@ function runCanvasVirtualizationUpdate(options = {}) {
             if (inViewportStrict) shouldLoad = true;
         }
 
-        const element = document.getElementById(section.id);
+        let element = document.getElementById(section.id);
+        const shouldKeepLoaded = element && __shouldKeepLazyCardDomLoaded(element);
+
+        if (!shouldLoad && !shouldKeepLoaded) {
+            if (doUnload && element) {
+                try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
+                try { element.remove(); } catch (_) { }
+                element = null;
+            }
+            continue;
+        }
+
+        const baseSize = getTempSectionBaseSize(section);
+        const x = Number(section.x);
+        const y = Number(section.y);
+        const w = Number(section.width || baseSize.width);
+        const h = Number(section.height || baseSize.height);
+        const inViewportStrict = !(
+            x + w < viewportLeft0 ||
+            x > viewportRight0 ||
+            y + h < viewportTop0 ||
+            y > viewportBottom0
+        );
+
+        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
+
         if (!element) {
-            // 没有壳体：先渲染壳体（不构建树内容）
-            try { renderTempNode(section, { skipTree: true }); } catch (_) { }
-        }
-
-        if (!shouldLoad) {
-            // 不在预算内：卸载树 DOM（如果还存在）
-            if (doUnload) {
-                try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
+            if (shouldInstantLoad) {
+                try { renderTempNode(section, { skipTree: isRippleOrLowDetail }); } catch (_) { }
+                element = document.getElementById(section.id);
+            } else {
+                __enqueueCanvasLazyLoadNode({
+                    type: 'temp',
+                    id: section.id,
+                    x: x,
+                    y: y,
+                    w: w,
+                    h: h,
+                    data: section
+                });
             }
-            continue;
         }
 
-        if (CanvasState.lowDetailActive) {
-            // 低细节：即使在预算内也不加载树 DOM
-            if (doUnload) {
-                try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
+        if (element) {
+            __setCanvasViewportLazyShellClass(element, false);
+            if (CanvasState.lowDetailActive) {
+                if (doUnload) {
+                    try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
+                }
+            } else if (doLoad) {
+                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
             }
-            continue;
-        }
-
-        if (doLoad) {
-            try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
         }
     }
 
     try {
-        __updateNonTempNodesViewportVisibility();
+        __updateNonTempNodesViewportVisibility(options);
     } catch (_) {}
+
+    // Start sequential loading of enqueued items
+    try {
+        __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoomIn, viewportCenterX, viewportCenterY, options);
+    } catch (_) {}
+
+    // Save state for next interaction check
+    CanvasState.previousZoom = currentZoom;
+    CanvasState.previousPanOffsetX = currentPanX;
+    CanvasState.previousPanOffsetY = currentPanY;
+}
+
+function __restoreAllVirtualisedNodes() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    // 1. Temp sections
+    if (Array.isArray(CanvasState.tempSections)) {
+        CanvasState.tempSections.forEach(section => {
+            if (!section || !section.id) return;
+            let el = document.getElementById(section.id);
+            if (!el) {
+                try { renderTempNode(section); } catch (_) {}
+                el = document.getElementById(section.id);
+            }
+            if (el) {
+                __setCanvasViewportLazyShellClass(el, false);
+                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) {}
+            }
+        });
+    }
+
+    // 2. MD Nodes & Groups
+    if (Array.isArray(CanvasState.mdNodes)) {
+        CanvasState.mdNodes.forEach(node => {
+            if (!node || !node.id) return;
+            let el = document.getElementById(node.id);
+            if (!el) {
+                try { renderMdNode(node); } catch (_) {}
+                el = document.getElementById(node.id);
+            }
+            if (el) {
+                __setCanvasViewportLazyShellClass(el, false);
+                if (node.subtype !== 'card-group') {
+                    try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) {}
+                }
+            }
+        });
+    }
+
+    // 3. Permanent section
+    const mainEl = document.getElementById('permanentSection');
+    if (mainEl) {
+        __setCanvasViewportLazyShellClass(mainEl, false);
+        try { __ensurePermanentSectionTreeLoadedInPlace(mainEl); } catch (_) {}
+    }
+
+    // 4. Copies
+    const existingMeta = (__readPermanentSectionCopies() || []).filter(item => item && item.id);
+    const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
+        ? CanvasState.permanentLayout.copiesById
+        : {};
+    existingMeta.forEach(meta => {
+        const copyId = meta.id;
+        const displayIndex = meta.displayIndex;
+        const cardState = copyStateById[copyId];
+        if (!cardState) return;
+        const elId = 'permanent-section-copy-' + copyId;
+        let el = document.getElementById(elId);
+        if (!el) {
+            try {
+                el = __createPermanentSectionCopyFromStorage({
+                    id: copyId,
+                    displayIndex,
+                    ...cardState
+                });
+            } catch (_) {}
+        }
+        if (el) {
+            __setCanvasViewportLazyShellClass(el, false);
+            try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) {}
+        }
+    });
+
+    try { __maybeApplyCardGroupLowDetailMembershipState(); } catch (_) {}
 }
 
 function isCanvasBlockDormancyEnabled() {
@@ -11430,15 +11816,15 @@ function maybeStartCanvasLowDetailPrewarmJob() {
     }, 80);
 }
 
-function __getCanvasViewportBounds(workspace) {
+function __getCanvasViewportBounds(workspace, marginPx = 250) {
     if (!workspace) return null;
     const rect = workspace.getBoundingClientRect();
     const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
     const panX = CanvasState.panOffsetX || 0;
     const panY = CanvasState.panOffsetY || 0;
 
-    const marginPx = 250; 
-    const margin = marginPx / zoom;
+    const safeMarginPx = Math.max(0, Number(marginPx) || 0);
+    const margin = safeMarginPx / zoom;
     return {
         left: (0 - panX) / zoom - margin,
         right: (rect.width - panX) / zoom + margin,
@@ -11460,6 +11846,79 @@ function __isCardOutsideViewportBounds(el, bounds) {
         y + h < bounds.top ||
         y > bounds.bottom
     );
+}
+
+function __isCanvasRectOutsideBounds(x, y, width, height, bounds) {
+    if (!bounds) return false;
+    const w = Number(width) || 0;
+    const h = Number(height) || 0;
+    return (
+        x + w < bounds.left ||
+        x > bounds.right ||
+        y + h < bounds.top ||
+        y > bounds.bottom
+    );
+}
+
+function __getCanvasViewportLazyMarginPx() {
+    if (CanvasState.lowDetailActive) return 0;
+    try {
+        const dim = CanvasState.dataIntensiveMode || {};
+        if (dim.active || isCanvasHugeData()) return 0;
+        const budget = getCanvasVirtualizationBudget();
+        const margin = Number(budget && budget.marginPx);
+        return Number.isFinite(margin) ? Math.max(0, Math.min(160, margin)) : 80;
+    } catch (_) {
+        return 0;
+    }
+}
+
+function __getMdNodeRectForViewport(node, el = null) {
+    if (!node && !el) return null;
+    const mdBaseSize = getBlankNodeDefaultSize();
+    const x = Number(node && node.x);
+    const y = Number(node && node.y);
+    const w = Number(node && node.width) || (el ? (parseFloat(el.style.width) || el.offsetWidth) : 0) || mdBaseSize.width;
+    const h = Number(node && node.height) || (el ? (parseFloat(el.style.height) || el.offsetHeight) : 0) || mdBaseSize.height;
+    const left = Number.isFinite(x) ? x : (el ? (parseFloat(el.style.left) || 0) : 0);
+    const top = Number.isFinite(y) ? y : (el ? (parseFloat(el.style.top) || 0) : 0);
+    if (![left, top, w, h].every(v => typeof v === 'number' && isFinite(v))) return null;
+    return { x: left, y: top, width: w, height: h };
+}
+
+function __isMdNodeInViewportBounds(node, bounds, el = null) {
+    const rect = __getMdNodeRectForViewport(node, el);
+    if (!rect || !bounds) return true;
+    return !__isCanvasRectOutsideBounds(rect.x, rect.y, rect.width, rect.height, bounds);
+}
+
+function __setCanvasViewportLazyShellClass(el, active) {
+    if (!el || !el.classList) return;
+    const next = !!active;
+    try { el.classList.toggle(CANVAS_VIEWPORT_LAZY_SHELL_CLASS, next); } catch (_) { }
+    try {
+        if (el.dataset) {
+            if (next) el.dataset.viewportLazy = 'true';
+            else delete el.dataset.viewportLazy;
+        }
+    } catch (_) { }
+}
+
+function __shouldKeepLazyCardDomLoaded(el) {
+    if (!el || !el.classList) return false;
+    if (el.classList.contains('selected') ||
+        el.classList.contains('editing') ||
+        el.classList.contains('dragging') ||
+        el.classList.contains('resizing') ||
+        el.classList.contains('canvas-node-maximized')) {
+        return true;
+    }
+    if (el.dataset && el.dataset.editing === 'true') return true;
+    try {
+        const active = document.activeElement;
+        if (active && el.contains(active)) return true;
+    } catch (_) { }
+    return false;
 }
 
 function __getCardGroupLowDetailNodeById(id) {
@@ -11604,7 +12063,9 @@ function __applyCardGroupLowDetailMembershipState(options = {}) {
         return __clearCardGroupLowDetailMembershipState();
     }
 
-    const groupSelector = CanvasState.lowDetailActive ? '.card-group-canvas-node' : '.card-group-canvas-node.low-detail-active';
+    const groupSelector = CanvasState.lowDetailActive
+        ? `.card-group-canvas-node:not(.${CANVAS_VIEWPORT_LAZY_SHELL_CLASS})`
+        : `.card-group-canvas-node.low-detail-active:not(.${CANVAS_VIEWPORT_LAZY_SHELL_CLASS})`;
     const activeGroups = Array.from(workspace.querySelectorAll(groupSelector))
         .map((element) => {
             const node = __getCardGroupLowDetailNodeById(element.id);
@@ -11823,81 +12284,272 @@ function __maybeApplyCardGroupLowDetailMembershipState(options = {}) {
     return __applyCardGroupLowDetailMembershipState(opts);
 }
 
-function __updateNonTempNodesViewportVisibility() {
+function __updateNonTempNodesViewportVisibility(options = {}) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
     if (workspace.classList && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS)) return;
 
-    const bounds = __getCanvasViewportBounds(workspace);
+    if (typeof options !== 'object' || options === null) {
+        options = {};
+    }
+    const { doLoad = true, doUnload = true, force = false } = options;
+
+    const visualBounds = __getCanvasViewportBounds(workspace, 0);
+    const lazyBounds = __getCanvasViewportBounds(workspace, __getCanvasViewportLazyMarginPx());
     const isGlobalLowDetail = !!CanvasState.lowDetailActive;
     const isSafeZoneActive = __isCanvasSafeZoneActive();
     const allowViewportLowDetail = !!CanvasState.lowDetailEnabled && !isSafeZoneActive;
 
+    const isRippleOrLowDetail = isGlobalLowDetail || (workspace && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS));
+
     // 1) 空白栏目 (mdNodes)
-    const mdNodes = Array.from(workspace.querySelectorAll('.md-canvas-node'));
-    mdNodes.forEach(el => {
-        if (el.classList.contains('card-group-low-detail-child-hidden')) return;
+    const mdNodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(node => node && node.id && node.subtype !== 'card-group') : [];
+    mdNodes.forEach(node => {
+        let el = document.getElementById(node.id);
+        const inLazyRange = __isMdNodeInViewportBounds(node, lazyBounds, el);
+        const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
+
         let shouldActive = isGlobalLowDetail;
         if (!shouldActive && allowViewportLowDetail) {
-            shouldActive = __isCardOutsideViewportBounds(el, bounds);
+            shouldActive = !__isMdNodeInViewportBounds(node, visualBounds, el);
         }
 
-        const wasActive = el.classList.contains('low-detail-active');
-        if (shouldActive !== wasActive) {
-            el.classList.toggle('low-detail-active', shouldActive);
+        // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
+        if (!inLazyRange && !shouldKeepLoaded) {
+            if (doUnload && el) {
+                try { el.remove(); } catch (_) { }
+                el = null;
+            }
+            return;
         }
-        
-        // 进入低细节时，刷新文字叠层内容
-        if (shouldActive) {
-            try {
-                const nodeId = el.id;
-                const node = (typeof getMdNodeById === 'function') ? getMdNodeById(nodeId) : null;
-                if (node) {
-                    __ensureMdNodeLowDetailOverlay(el, node);
+
+        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(node.x), Number(node.y), Number(node.width || 100), Number(node.height || 100), visualBounds);
+        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
+
+        if (!el) {
+            if (shouldInstantLoad) {
+                try { renderMdNode(node, { shellOnly: shouldActive }); } catch (_) { }
+                el = document.getElementById(node.id);
+            } else {
+                __enqueueCanvasLazyLoadNode({
+                    type: 'md',
+                    id: node.id,
+                    x: Number(node.x) || 0,
+                    y: Number(node.y) || 0,
+                    w: Number(node.width) || 100,
+                    h: Number(node.height) || 100,
+                    shouldActive: shouldActive,
+                    data: node
+                });
+            }
+        }
+
+        if (el) {
+            if (el.classList.contains('card-group-low-detail-child-hidden')) return;
+
+            if (shouldActive && !shouldKeepLoaded) {
+                if (doUnload) {
+                    try { __unloadMdNodeContentInPlace(node); } catch (_) { }
+                    el = document.getElementById(node.id) || el;
                 }
-            } catch (_) {}
+            } else if (!shouldActive) {
+                if (doLoad) {
+                    try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) { }
+                    el = document.getElementById(node.id) || el;
+                }
+            }
+
+            __setCanvasViewportLazyShellClass(el, false);
+
+            const wasActive = el.classList.contains('low-detail-active');
+            if (shouldActive !== wasActive) {
+                el.classList.toggle('low-detail-active', shouldActive);
+            }
+
+            // 进入低细节时，刷新文字叠层内容
+            if (shouldActive) {
+                try {
+                    if (node) {
+                        __ensureMdNodeLowDetailOverlay(el, node);
+                    }
+                } catch (_) {}
+            }
         }
     });
 
     // 2) 永久栏目 (permanentSections)
-    const permSections = Array.from(workspace.querySelectorAll('.permanent-bookmark-section'));
-    permSections.forEach(el => {
-        if (el.classList.contains('card-group-low-detail-child-hidden')) return;
+    // 2a) 主永久栏目 (permanentSection) - 静态存在，不删除 DOM，仅卸载树
+    const mainEl = document.getElementById('permanentSection');
+    if (mainEl) {
+        const outsideLazyRange = __isCardOutsideViewportBounds(mainEl, lazyBounds);
+        const shouldKeepLoaded = __shouldKeepLazyCardDomLoaded(mainEl);
         let shouldActive = isGlobalLowDetail;
         if (!shouldActive && allowViewportLowDetail) {
-            shouldActive = __isCardOutsideViewportBounds(el, bounds);
+            shouldActive = __isCardOutsideViewportBounds(mainEl, visualBounds);
         }
 
-        const wasActive = el.classList.contains('low-detail-active');
+        if (outsideLazyRange && !shouldKeepLoaded) {
+            if (doUnload) {
+                try { __unloadPermanentSectionTreeInPlace(mainEl); } catch (_) { }
+                __setCanvasViewportLazyShellClass(mainEl, true);
+            }
+        } else {
+            __setCanvasViewportLazyShellClass(mainEl, false);
+            if (!CanvasState.lowDetailActive && !shouldActive) {
+                if (doLoad) {
+                    try { __ensurePermanentSectionTreeLoadedInPlace(mainEl); } catch (_) { }
+                }
+            }
+        }
+
+        const wasActive = mainEl.classList.contains('low-detail-active');
         if (shouldActive !== wasActive) {
-            el.classList.toggle('low-detail-active', shouldActive);
+            mainEl.classList.toggle('low-detail-active', shouldActive);
         }
 
         if (shouldActive) {
-            try { __ensurePermanentSectionLowDetailOverlay(el); } catch (_) { }
+            try { __ensurePermanentSectionLowDetailOverlay(mainEl); } catch (_) { }
+        }
+    }
+
+    // 2b) 永久栏目副本 (copies)
+    const existingMeta = (__readPermanentSectionCopies() || []).filter((item) => item && item.id);
+    const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
+        ? CanvasState.permanentLayout.copiesById
+        : {};
+
+    existingMeta.forEach(meta => {
+        const copyId = meta.id;
+        const displayIndex = meta.displayIndex;
+        const cardState = copyStateById[copyId];
+        if (!cardState) return;
+
+        const outsideLazyRange = __isCanvasRectOutsideBounds(cardState.left, cardState.top, cardState.width, cardState.height, lazyBounds);
+        const elId = 'permanent-section-copy-' + copyId;
+        let el = document.getElementById(elId);
+        const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
+
+        let shouldActive = isGlobalLowDetail;
+        if (!shouldActive && allowViewportLowDetail) {
+            shouldActive = __isCanvasRectOutsideBounds(cardState.left, cardState.top, cardState.width, cardState.height, visualBounds);
+        }
+
+        // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
+        if (outsideLazyRange && !shouldKeepLoaded) {
+            if (doUnload && el) {
+                try { __unloadPermanentSectionTreeInPlace(el); } catch (_) { }
+                try { el.remove(); } catch (_) { }
+                el = null;
+            }
+            return;
+        }
+
+        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(cardState.left), Number(cardState.top), Number(cardState.width || 100), Number(cardState.height || 100), visualBounds);
+        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
+
+        if (!el) {
+            if (shouldInstantLoad) {
+                try {
+                    el = __createPermanentSectionCopyFromStorage({
+                        id: copyId,
+                        displayIndex,
+                        ...cardState
+                    });
+                } catch (_) { }
+            } else {
+                __enqueueCanvasLazyLoadNode({
+                    type: 'copy',
+                    id: elId,
+                    x: Number(cardState.left) || 0,
+                    y: Number(cardState.top) || 0,
+                    w: Number(cardState.width) || 100,
+                    h: Number(cardState.height) || 100,
+                    shouldActive: shouldActive,
+                    copyId: copyId,
+                    displayIndex: displayIndex,
+                    data: cardState
+                });
+            }
+        }
+
+        if (el) {
+            if (el.classList.contains('card-group-low-detail-child-hidden')) return;
+
+            __setCanvasViewportLazyShellClass(el, false);
+            if (!CanvasState.lowDetailActive && !shouldActive) {
+                if (doLoad) {
+                    try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) { }
+                }
+            }
+
+            const wasActive = el.classList.contains('low-detail-active');
+            if (shouldActive !== wasActive) {
+                el.classList.toggle('low-detail-active', shouldActive);
+            }
+
+            if (shouldActive) {
+                try { __ensurePermanentSectionLowDetailOverlay(el); } catch (_) { }
+            }
         }
     });
 
-    // 3) 卡片组：组自己进入低细节，组内元素由组级占位托管。
-    const cardGroups = Array.from(workspace.querySelectorAll('.card-group-canvas-node'));
-    cardGroups.forEach(el => {
+    // 3) 卡片组
+    const cardGroupNodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(node => node && node.id && node.subtype === 'card-group') : [];
+    cardGroupNodes.forEach(node => {
+        let el = document.getElementById(node.id);
+        const inLazyRange = __isMdNodeInViewportBounds(node, lazyBounds, el);
+        const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
+
         let shouldActive = isGlobalLowDetail;
         if (!shouldActive && allowViewportLowDetail) {
-            shouldActive = __isCardOutsideViewportBounds(el, bounds);
+            shouldActive = !__isMdNodeInViewportBounds(node, visualBounds, el);
         }
 
-        const wasActive = el.classList.contains('low-detail-active');
-        if (shouldActive !== wasActive) {
-            el.classList.toggle('low-detail-active', shouldActive);
+        // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
+        if (!inLazyRange && !shouldKeepLoaded) {
+            if (doUnload && el) {
+                try { el.remove(); } catch (_) { }
+                el = null;
+            }
+            return;
         }
 
-        if (shouldActive) {
-            try {
-                const node = __getCardGroupLowDetailNodeById(el.id);
-                if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
-                    window.__BCSCardGroup.ensureLowDetailOverlay(el, node);
-                }
-            } catch (_) { }
+        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(node.x), Number(node.y), Number(node.width || 100), Number(node.height || 100), visualBounds);
+        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
+
+        if (!el) {
+            if (shouldInstantLoad) {
+                try { renderMdNode(node); } catch (_) { }
+                el = document.getElementById(node.id);
+            } else {
+                __enqueueCanvasLazyLoadNode({
+                    type: 'group',
+                    id: node.id,
+                    x: Number(node.x) || 0,
+                    y: Number(node.y) || 0,
+                    w: Number(node.width) || 100,
+                    h: Number(node.height) || 100,
+                    shouldActive: shouldActive,
+                    data: node
+                });
+            }
+        }
+
+        if (el) {
+            __setCanvasViewportLazyShellClass(el, false);
+
+            const wasActive = el.classList.contains('low-detail-active');
+            if (shouldActive !== wasActive) {
+                el.classList.toggle('low-detail-active', shouldActive);
+            }
+
+            if (shouldActive) {
+                try {
+                    if (window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
+                        window.__BCSCardGroup.ensureLowDetailOverlay(el, node);
+                    }
+                } catch (_) { }
+            }
         }
     });
 
@@ -12138,7 +12790,7 @@ function __collectCanvasLowDetailRippleCards(workspace, shouldActive) {
     if (!workspace || !viewportRect) return [];
     const centerX = viewportRect.left + viewportRect.width / 2;
     const centerY = viewportRect.top + viewportRect.height / 2;
-    const bounds = __getCanvasViewportBounds(workspace);
+    const bounds = __getCanvasViewportBounds(workspace, 0);
     const cards = Array.from(workspace.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
     const entries = [];
 
@@ -12179,7 +12831,7 @@ function __finalizeCanvasLowDetailExitVisualState(workspace) {
     ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
     try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
 
-    const bounds = __getCanvasViewportBounds(ws);
+    const bounds = __getCanvasViewportBounds(ws, 0);
     const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
     cards.forEach(card => {
         const activeForCard = __shouldKeepCardLowDetailAfterGlobalExit(card, bounds);
@@ -16826,6 +17478,7 @@ function __extractPermanentLayoutFromCanvasNodes(nodesInput) {
 
 function __applyPermanentLayoutFromCanvasNodes(nodesInput, options = {}) {
     const layout = __extractPermanentLayoutFromCanvasNodes(nodesInput);
+    CanvasState.permanentLayout = layout;
     const mainState = layout && layout.main ? layout.main : null;
     const copyStateById = layout && layout.copiesById && typeof layout.copiesById === 'object'
         ? layout.copiesById
@@ -19801,7 +20454,105 @@ function __updateAllMdNodeLowDetailOverlays() {
     });
 }
 
-function renderMdNode(node) {
+function __cleanupMdNodeElementLifecycle(el) {
+    if (!el) return;
+    try {
+        if (el.__mdNodeSelectionChangeHandler) {
+            document.removeEventListener('selectionchange', el.__mdNodeSelectionChangeHandler);
+            el.__mdNodeSelectionChangeHandler = null;
+        }
+    } catch (_) { }
+    try {
+        if (el.__mdNodeFullscreenObserver && typeof el.__mdNodeFullscreenObserver.disconnect === 'function') {
+            el.__mdNodeFullscreenObserver.disconnect();
+            el.__mdNodeFullscreenObserver = null;
+        }
+    } catch (_) { }
+    try {
+        const nodeId = String(el.id || '').trim();
+        if (nodeId && typeof CSS !== 'undefined' && CSS.escape) {
+            document.querySelectorAll(
+                `.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(nodeId)}"], .md-color-popover[data-md-node-id="${CSS.escape(nodeId)}"]`
+            ).forEach(pop => {
+                try { pop.remove(); } catch (_) { }
+            });
+        }
+    } catch (_) { }
+}
+
+function __resetMdNodeElementForRender(el) {
+    if (!el || !el.parentNode) return el;
+    __cleanupMdNodeElementLifecycle(el);
+    const fresh = el.cloneNode(false);
+    try { el.parentNode.replaceChild(fresh, el); } catch (_) { return el; }
+    return fresh;
+}
+
+function __prepareMdNodeShellElement(el, node, options = {}) {
+    if (!el || !node) return;
+    try { el.replaceChildren(); } catch (_) { el.innerHTML = ''; }
+    try {
+        el.classList.add(CANVAS_MD_CONTENT_UNLOADED_CLASS);
+        el.classList.add('low-detail-active');
+        el.classList.remove('editing');
+        __setCanvasViewportLazyShellClass(el, true);
+    } catch (_) { }
+    try {
+        if (el.dataset) {
+            el.dataset.mdContentLoaded = 'false';
+            el.dataset.contentUnloaded = 'true';
+            delete el.dataset.editing;
+        }
+        el.removeAttribute('data-editing');
+    } catch (_) { }
+    try { node.isEditing = false; } catch (_) { }
+    try { applyMdNodeColor(el, node); } catch (_) { }
+    try { __ensureMdNodeLowDetailOverlay(el, node); } catch (_) { }
+    try {
+        if (CanvasState.unloadedMdNodeContent) CanvasState.unloadedMdNodeContent.add(node.id);
+    } catch (_) { }
+    if (options && options.isNew) {
+        try {
+            el.classList.add('temp-node-enter');
+            requestAnimationFrame(() => el.classList.remove('temp-node-enter'));
+        } catch (_) { }
+    }
+}
+
+function __unloadMdNodeContentInPlace(node) {
+    if (!node || !node.id || node.subtype === 'card-group') return false;
+    let el = document.getElementById(node.id);
+    if (el && __shouldKeepLazyCardDomLoaded(el)) return false;
+    if (el && el.dataset && el.dataset.mdContentLoaded === 'false') {
+        try { __ensureMdNodeLowDetailOverlay(el, node); } catch (_) { }
+        __setCanvasViewportLazyShellClass(el, true);
+        return false;
+    }
+    renderMdNode(node, { shellOnly: true });
+    return true;
+}
+
+function __ensureMdNodeContentLoadedInPlace(node, options = {}) {
+    if (!node || !node.id || node.subtype === 'card-group') return false;
+    const opts = (options && typeof options === 'object') ? options : {};
+    let el = document.getElementById(node.id);
+    if (CanvasState.lowDetailActive && !opts.force) {
+        if (!el) renderMdNode(node, { shellOnly: true });
+        else {
+            try { __ensureMdNodeLowDetailOverlay(el, node); } catch (_) { }
+            __setCanvasViewportLazyShellClass(el, true);
+        }
+        return false;
+    }
+    if (el && el.dataset && el.dataset.mdContentLoaded === 'true' && !el.classList.contains(CANVAS_MD_CONTENT_UNLOADED_CLASS)) {
+        __setCanvasViewportLazyShellClass(el, false);
+        return false;
+    }
+    renderMdNode(node);
+    return true;
+}
+
+function renderMdNode(node, options = {}) {
     const container = document.getElementById('canvasContent');
     if (!container) return;
 
@@ -19821,6 +20572,9 @@ function renderMdNode(node) {
         refreshCachesFromMarkdown: shouldRefreshFromMarkdown
     });
 
+    const opts = (options && typeof options === 'object') ? options : {};
+    const shellOnly = !!(opts.shellOnly || opts.skipContent);
+
     let el = document.getElementById(node.id);
     const isNew = !el;
     if (!el) {
@@ -19828,8 +20582,11 @@ function renderMdNode(node) {
         el.id = node.id;
         el.className = 'md-canvas-node';
         container.appendChild(el);
+    } else if (shellOnly && el.dataset && el.dataset.mdContentLoaded === 'false') {
+        // Keep the existing light shell; only position/style/overlay need updating.
     } else {
-        el.innerHTML = '';
+        el = __resetMdNodeElementForRender(el);
+        try { el.innerHTML = ''; } catch (_) { }
     }
 
     // Always update position/size/style
@@ -19863,6 +20620,24 @@ function renderMdNode(node) {
         try { delete el.dataset.title; } catch (_) { }
         el.removeAttribute('aria-label');
     }
+
+    if (shellOnly) {
+        __prepareMdNodeShellElement(el, node, { isNew });
+        return;
+    }
+
+    try {
+        el.classList.remove(CANVAS_MD_CONTENT_UNLOADED_CLASS);
+        if (!CanvasState.lowDetailActive && !opts.preserveLowDetail) {
+            el.classList.remove('low-detail-active');
+        }
+        __setCanvasViewportLazyShellClass(el, false);
+        if (el.dataset) {
+            el.dataset.mdContentLoaded = 'true';
+            el.dataset.contentUnloaded = 'false';
+        }
+        if (CanvasState.unloadedMdNodeContent) CanvasState.unloadedMdNodeContent.delete(node.id);
+    } catch (_) { }
 
     // 顶部工具栏（选中/悬停可见）
     const toolbar = document.createElement('div');
@@ -22794,6 +23569,7 @@ function renderMdNode(node) {
         scheduleReRenderIfCaretLeftExpanded();
     };
     document.addEventListener('selectionchange', onSelectionChange);
+    el.__mdNodeSelectionChangeHandler = onSelectionChange;
 
     // 快捷键处理
     editor.addEventListener('keydown', (e) => {
@@ -23656,6 +24432,7 @@ function renderMdNode(node) {
 
     const fullscreenObserver = new MutationObserver(syncFullscreenEditing);
     fullscreenObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+    el.__mdNodeFullscreenObserver = fullscreenObserver;
     syncFullscreenEditing();
 
     // 工具栏mousedown：阻止默认行为防止编辑器失焦
@@ -33886,6 +34663,7 @@ function __handleCanvasRealtimeLocalStorageSync(key, rawValue) {
         || key === 'canvasZoomThresholds'
         || key === 'canvasSafeZoneSettings'
         || key === 'canvasMinZoomLimit'
+        || key === 'canvasMaxZoomLimit'
         || key === 'canvasZoomMagnetSettings'
     ) {
         try { loadCanvasDataIntensiveSettings(); } catch (_) { }
@@ -34121,18 +34899,48 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
     try {
         shouldRenderShellOnly = isCanvasVirtualizationEnabled() || isCanvasBlockDormancyEnabled();
         const mdBaseSize = getBlankNodeDefaultSize();
+        const workspace = document.getElementById('canvasWorkspace');
+        const initialLazyBounds = (shouldRenderShellOnly && workspace)
+            ? __getCanvasViewportBounds(workspace, __getCanvasViewportLazyMarginPx())
+            : null;
+
         CanvasState.tempSections.forEach(section => {
             const baseSize = getTempSectionBaseSize(section);
-            section.width = Math.max(baseSize.minWidth, Number(section.width) || baseSize.width);
-            section.height = Math.max(baseSize.minHeight, Number(section.height) || baseSize.height);
+            const w = Math.max(baseSize.minWidth, Number(section.width) || baseSize.width);
+            const h = Math.max(baseSize.minHeight, Number(section.height) || baseSize.height);
+            section.width = w;
+            section.height = h;
+
+            if (shouldRenderShellOnly && initialLazyBounds) {
+                const x = Number(section.x);
+                const y = Number(section.y);
+                const inLazyRange = [x, y, w, h].every(v => typeof v === 'number' && isFinite(v)) && !(
+                    x + w < initialLazyBounds.left ||
+                    x > initialLazyBounds.right ||
+                    y + h < initialLazyBounds.top ||
+                    y > initialLazyBounds.bottom
+                );
+                if (!inLazyRange) return;
+            }
+
             // 大数据/极限模式 / 区块休眠：先渲染“壳体”，树内容按需加载（避免启动即卡死/一上来全量加载）
             renderTempNode(section, shouldRenderShellOnly ? { skipTree: true } : {});
         });
+
         // 渲染 Markdown 文本卡片
         CanvasState.mdNodes.forEach(node => {
-            node.width = Math.max(mdBaseSize.minWidth, Number(node.width) || mdBaseSize.width);
-            node.height = Math.max(mdBaseSize.minHeight, Number(node.height) || mdBaseSize.height);
-            renderMdNode(node);
+            const w = Math.max(mdBaseSize.minWidth, Number(node.width) || mdBaseSize.width);
+            const h = Math.max(mdBaseSize.minHeight, Number(node.height) || mdBaseSize.height);
+            node.width = w;
+            node.height = h;
+
+            if (shouldRenderShellOnly && initialLazyBounds) {
+                const inLazyRange = __isMdNodeInViewportBounds(node, initialLazyBounds, null);
+                if (!inLazyRange) return;
+            }
+
+            const shellOnly = shouldRenderShellOnly && node && node.subtype !== 'card-group';
+            renderMdNode(node, shellOnly ? { shellOnly: true } : {});
         });
     } finally {
         suppressScrollSync = false;
@@ -34291,6 +35099,9 @@ function loadTempNodes() {
         CanvasState.mdNodeCounter = 0;
         CanvasState.edges = [];
         CanvasState.edgeCounter = 0;
+        try { if (CanvasState.unloadedTempSectionTrees) CanvasState.unloadedTempSectionTrees.clear(); } catch (_) { }
+        try { if (CanvasState.unloadedPermanentSectionTrees) CanvasState.unloadedPermanentSectionTrees.clear(); } catch (_) { }
+        try { if (CanvasState.unloadedMdNodeContent) CanvasState.unloadedMdNodeContent.clear(); } catch (_) { }
 
         // 仅使用 BCS 分片恢复（按严格分片存储方案执行）。
         if (__tryRestoreTempNodesFromBcs()) {
@@ -35212,6 +36023,9 @@ function __updateCanvasPerfHud() {
     const unloaded = CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.size
         ? CanvasState.unloadedTempSectionTrees.size
         : 0;
+    const unloadedMd = CanvasState.unloadedMdNodeContent && CanvasState.unloadedMdNodeContent.size
+        ? CanvasState.unloadedMdNodeContent.size
+        : 0;
     const displayZoom = getCanvasDisplayZoom();
     const virtual = isCanvasVirtualizationEnabled();
     const budget = virtual ? getCanvasVirtualizationBudget() : null;
@@ -35226,7 +36040,7 @@ function __updateCanvasPerfHud() {
         `virtual=${virtual} lowDetail=${!!CanvasState.lowDetailActive} zoomPerf=${!!CanvasState.zoomPerformanceModeActive}\n` +
         `displayZoom=${(displayZoom * 100).toFixed(1)}% rawZoom=${(CanvasState.zoom || 1).toFixed(3)}\n` +
         `temp=${tempCount} md=${mdCount} edges=${edgeCount}\n` +
-        `treesLoaded≈${loadedApprox} unloaded=${unloaded}\n` +
+        `treesLoaded≈${loadedApprox} unloaded=${unloaded} mdShell=${unloadedMd}\n` +
         (budget ? `budget: maxLoaded=${budget.maxLoaded} marginPx=${budget.marginPx}\n` : '') +
         `dataIntensive=${!!dim.active} visSec=${dimStats.visibleSectionCount || 0} visBm=${dimStats.totalBookmarkCount || 0}`;
 }
@@ -37664,8 +38478,6 @@ function createCanvasAppearanceSettingsModal() {
                             </label>
                         </div>
                     </div>
-                </div>
-            </div>
         </div>
         <div class="perf-help-popover" id="appearanceSpecialTempHelpPopover">
             <div class="perf-help-popover-content">
@@ -37962,8 +38774,15 @@ function openCanvasOtherSettingsModal() {
         const trackpadPercent = Math.round(getCanvasTrackpadZoomRate(settings) * 100);
         trackpadZoomRateInput.value = String(trackpadPercent);
     }
+    const minZoomInput = modal.querySelector('#otherInputMinZoom');
+    if (minZoomInput) {
+        minZoomInput.value = String(getCanvasMinZoomLimit());
+    }
+    const maxZoomInput = modal.querySelector('#otherInputMaxZoom');
+    if (maxZoomInput) {
+        maxZoomInput.value = String(getCanvasMaxZoomLimit());
+    }
     __updateOtherTempColorFollowLock(modal, colorFollow && colorFollow.checked);
-    if (defaultCurveToggle) defaultCurveToggle.checked = useDefaultCurve;
     modal._useDefaultZoomCurve = useDefaultCurve;
     const baseCurve = __normalizeZoomCurve(settings.zoomCurve);
     const baseMagnets = __normalizeMagnetPoints(settings.magnetPoints);
@@ -38025,8 +38844,7 @@ function saveCanvasOtherSettings(options = {}) {
     const colorFollow = modal.querySelector('#otherTempColorFollow');
     const unlockSync = modal.querySelector('#otherTempColorUnlockSync');
     const trackpadZoomRateInput = modal.querySelector('#otherTrackpadZoomRate');
-    const useDefaultCurve = modal.querySelector('#otherUseDefaultZoomCurve');
-    const useDefault = useDefaultCurve ? !!useDefaultCurve.checked : !(prevSettings && prevSettings.useDefaultZoomCurve === false);
+    const useDefault = (modal && typeof modal._useDefaultZoomCurve === 'boolean') ? modal._useDefaultZoomCurve : !(prevSettings && prevSettings.useDefaultZoomCurve === false);
     const defaultCurve = __cloneDefaultOtherSettings().zoomCurve;
     const defaultMagnets = __getDefaultMagnetPointsFromPerf();
     const trackpadRatePercentRaw = trackpadZoomRateInput
@@ -38071,6 +38889,20 @@ function saveCanvasOtherSettings(options = {}) {
 
     const normalized = normalizeCanvasOtherSettings(settingsInput);
     CanvasState.otherSettings = normalized;
+    const minZoomInput = modal.querySelector('#otherInputMinZoom');
+    if (minZoomInput) {
+        const val = parseInt(minZoomInput.value, 10);
+        if (Number.isFinite(val) && val > 0 && val <= 100) {
+            saveSharedState('canvasMinZoomLimit', val, { asJSON: false });
+        }
+    }
+    const maxZoomInput = modal.querySelector('#otherInputMaxZoom');
+    if (maxZoomInput) {
+        const val = parseInt(maxZoomInput.value, 10);
+        if (Number.isFinite(val) && val >= 100 && val <= 1000) {
+            saveSharedState('canvasMaxZoomLimit', val, { asJSON: false });
+        }
+    }
     try {
         saveSharedState(CANVAS_OTHER_SETTINGS_KEY, normalized);
     } catch (_) { }
@@ -38493,8 +39325,6 @@ function __bindOtherCurveInteractions(modal, onChange) {
     const ensureCustom = () => {
         if (modal && modal._useDefaultZoomCurve) {
             modal._useDefaultZoomCurve = false;
-            const toggle = modal.querySelector('#otherUseDefaultZoomCurve');
-            if (toggle) toggle.checked = false;
         }
     };
 
@@ -38741,6 +39571,44 @@ function createCanvasOtherSettingsModal() {
                 <button class="perf-modal-close" id="otherModalCloseBtn"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body">
+                <!-- 缩放上下限 -->
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'Zoom Limits' : '缩放上下限'}</div>
+                    <div class="appearance-row" style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
+                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Minimum Zoom Limit' : '缩放下限'}</div>
+                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
+                                <input
+                                    type="number"
+                                    id="otherInputMinZoom"
+                                    class="other-trackpad-speed-input"
+                                    min="1"
+                                    max="100"
+                                    step="1"
+                                    style="width: 70px; text-align: center;"
+                                >
+                                <span class="other-trackpad-speed-unit">%</span>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
+                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Maximum Zoom Limit' : '缩放上限'}</div>
+                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
+                                <input
+                                    type="number"
+                                    id="otherInputMaxZoom"
+                                    class="other-trackpad-speed-input"
+                                    min="100"
+                                    max="1000"
+                                    step="10"
+                                    style="width: 70px; text-align: center;"
+                                >
+                                <span class="other-trackpad-speed-unit">%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 缩放速率与磁矩 -->
                 <div class="detail-section">
                     <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? 'Zoom Speed & Magnet' : '缩放速率与磁矩'}</div>
                     <div class="other-zoom-input-title other-zoom-input-title-trackpad">${isEn ? '1. Trackpad' : '1. 触控板'} <span class="other-zoom-input-title-note" style="margin-left:8px;font-size:12px;color:rgba(var(--text-color-rgb),0.5);font-weight:normal;">${isEn ? '(Pinch)' : '（双指捏合）'}</span></div>
@@ -38758,24 +39626,10 @@ function createCanvasOtherSettingsModal() {
                             <span class="other-trackpad-speed-unit">%</span>
                         </div>
                     </div>
-                    <div class="other-zoom-input-title">${isEn ? '2. Scrolling' : '2. 滚动'} <span class="other-zoom-input-title-note" style="margin-left:8px;font-size:12px;color:rgba(var(--text-color-rgb),0.5);font-weight:normal;">${isEn ? '(Wheel / Swipe zoom)' : '（滚轮 / 双指滑动缩放）'}</span></div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Use default' : '使用默认'}</div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherUseDefaultZoomCurve">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="other-default-hint-row">
-                        <div class="other-default-hint">${defaultMagnetHint}</div>
-                        <button class="perf-source-btn other-default-jump-btn" id="otherDefaultJumpPerfBtn" title="${isEn ? 'Go to Performance' : '跳转到性能'}" aria-label="${isEn ? 'Go to Performance' : '跳转到性能'}">
-                            <svg class="jump-icon" viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M14 3h7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                <path d="M10 14L21 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                <path d="M21 14v7H3V3h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                            </svg>
+                    <div class="other-zoom-input-title" style="margin-top: 12px; display: flex; align-items: center; gap: 6px;">
+                        <span>${isEn ? '2. Magnet Points' : '2. 磁矩点'}</span>
+                        <button class="perf-help-btn" id="otherZoomMagnetHelpBtn" title="${isEn ? 'View help' : '查看说明'}" style="margin: 0; display: inline-flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-question-circle"></i>
                         </button>
                     </div>
                     <div class="other-magnet-toggle-row">
@@ -38796,6 +39650,11 @@ function createCanvasOtherSettingsModal() {
                                 <input type="checkbox" id="otherMagnetMidToggle">
                                 <span class="other-toggle-slider"></span>
                             </label>
+                        </div>
+                        <div class="other-magnet-toggle-item" style="margin-left: auto;">
+                            <button class="sidepanel-settings-btn" id="otherUseDefaultZoomCurve" style="height: 20px; line-height: 18px; padding: 0 8px; font-size: 11px; margin: 0; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px;">
+                                ${isEn ? 'Restore' : '还原'}
+                            </button>
                         </div>
                     </div>
                     <div class="other-curve-card">
@@ -38828,6 +39687,14 @@ function createCanvasOtherSettingsModal() {
                     </div>
                 </div>
             </div>
+            <!-- 缩放磁矩帮助弹层 -->
+            <div class="perf-help-popover" id="otherZoomMagnetHelpPopover">
+                <div class="perf-help-popover-content">
+                    ${isEn
+                ? '<b>Zoom Magnet</b>: Creates a slow zone around key zoom thresholds (resists approach, relaxes on leave). Magnet 1 follows the <b>P1 Safe Zone</b> threshold in the Performance panel. Magnet 2 is centered exactly on the <b>P3 Low Detail Switch</b> point, slowing zoom right as low-detail mode enters or exits.<br><br><b>Default values</b>: M1 (X=70%, Y=10%), M2 (X=50%, Y=50%).'
+                : `<b>缩放磁矩</b>：在关键缩放阈值附近创建“缓慢区”（来拒去留）。磁矩1跟随<b>「性能」面板的 P1 安全区</b>阈值；磁矩2精准居中在 <b>P3 低细节切换点</b>，在进入或退出低细节模式的边界使缩放变慢，以给系统更多反应时间。<br><br>${defaultMagnetHint}`}
+                </div>
+            </div>
         </div>
     `;
 
@@ -38855,19 +39722,21 @@ function createCanvasOtherSettingsModal() {
     const tempUnlockHelpPopover = modal.querySelector('#otherTempColorUnlockHelpPopover');
     const tempResetHelpBtn = modal.querySelector('#otherTempColorResetHelpBtn');
     const tempResetHelpPopover = modal.querySelector('#otherTempColorResetHelpPopover');
-    const jumpPerfBtn = modal.querySelector('#otherDefaultJumpPerfBtn');
+
     const safeToggle = modal.querySelector('#otherMagnetSafeToggle');
     const midToggle = modal.querySelector('#otherMagnetMidToggle');
     const trackpadZoomRateInput = modal.querySelector('#otherTrackpadZoomRate');
     if (defaultToggle) {
-        defaultToggle.addEventListener('change', () => {
-            const nextUseDefault = !!defaultToggle.checked;
-            if (nextUseDefault) {
-                modal._zoomCurve = __cloneDefaultOtherSettings().zoomCurve;
-                modal._magnetPoints = __getDefaultMagnetPointsFromPerf();
-                __applyPerfDefaultBaselineToPerf();
-            }
-            modal._useDefaultZoomCurve = nextUseDefault;
+        defaultToggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            modal._zoomCurve = __cloneDefaultOtherSettings().zoomCurve;
+            modal._magnetPoints = __getDefaultMagnetPointsFromPerf();
+            __applyPerfDefaultBaselineToPerf();
+            const minZoomInput = modal.querySelector('#otherInputMinZoom');
+            if (minZoomInput) minZoomInput.value = '10';
+            const maxZoomInput = modal.querySelector('#otherInputMaxZoom');
+            if (maxZoomInput) maxZoomInput.value = '300';
+            modal._useDefaultZoomCurve = true;
             try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
             scheduleOtherSave();
         });
@@ -38904,12 +39773,64 @@ function createCanvasOtherSettingsModal() {
             __resetAllTempSectionColorsToDefault();
         });
     }
-    if (jumpPerfBtn) {
-        jumpPerfBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            CanvasState.perfSettingsFocus = 'magnet';
-            closeCanvasOtherSettingsModal();
-            openCanvasPerfSettingsModal();
+    const zoomMagnetHelpBtn = modal.querySelector('#otherZoomMagnetHelpBtn');
+    const zoomMagnetHelpPopover = modal.querySelector('#otherZoomMagnetHelpPopover');
+    bindOtherHelpPopover(zoomMagnetHelpBtn, zoomMagnetHelpPopover, 'top');
+
+    const minZoomInput = modal.querySelector('#otherInputMinZoom');
+    if (minZoomInput) {
+        const normalizeMinZoomInput = () => {
+            const normalized = __clampNumber(
+                parseInt(minZoomInput.value, 10),
+                1,
+                100,
+                10
+            );
+            minZoomInput.value = String(Math.round(normalized));
+        };
+        minZoomInput.addEventListener('change', () => {
+            normalizeMinZoomInput();
+            scheduleOtherSave();
+        });
+        minZoomInput.addEventListener('blur', () => {
+            normalizeMinZoomInput();
+        });
+        minZoomInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                if (event.isComposing) return;
+                event.preventDefault();
+                normalizeMinZoomInput();
+                scheduleOtherSave();
+                minZoomInput.blur();
+            }
+        });
+    }
+    const maxZoomInput = modal.querySelector('#otherInputMaxZoom');
+    if (maxZoomInput) {
+        const normalizeMaxZoomInput = () => {
+            const normalized = __clampNumber(
+                parseInt(maxZoomInput.value, 10),
+                100,
+                1000,
+                300
+            );
+            maxZoomInput.value = String(Math.round(normalized));
+        };
+        maxZoomInput.addEventListener('change', () => {
+            normalizeMaxZoomInput();
+            scheduleOtherSave();
+        });
+        maxZoomInput.addEventListener('blur', () => {
+            normalizeMaxZoomInput();
+        });
+        maxZoomInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                if (event.isComposing) return;
+                event.preventDefault();
+                normalizeMaxZoomInput();
+                scheduleOtherSave();
+                maxZoomInput.blur();
+            }
         });
     }
     if (trackpadZoomRateInput) {
@@ -38940,14 +39861,23 @@ function createCanvasOtherSettingsModal() {
             }
         });
     }
-    const bindOtherHelpPopover = (btn, popover) => {
+    function bindOtherHelpPopover(btn, popover, position = 'bottom') {
         if (!btn || !popover) return;
         const showHelp = () => {
             modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
             const rect = btn.getBoundingClientRect();
             const modalRect = modal.querySelector('.modal-content').getBoundingClientRect();
-            popover.style.top = (rect.bottom - modalRect.top + 8) + 'px';
-            popover.style.left = (rect.left - modalRect.left) + 'px';
+            if (position === 'right') {
+                popover.style.top = (rect.top - modalRect.top - 8) + 'px';
+                popover.style.left = (rect.right - modalRect.left + 8) + 'px';
+            } else if (position === 'top') {
+                const parentRect = btn.parentElement ? btn.parentElement.getBoundingClientRect() : rect;
+                popover.style.top = (parentRect.top - modalRect.top - popover.offsetHeight - 8) + 'px';
+                popover.style.left = (parentRect.left - modalRect.left) + 'px';
+            } else {
+                popover.style.top = (rect.bottom - modalRect.top + 8) + 'px';
+                popover.style.left = (rect.left - modalRect.left) + 'px';
+            }
             popover.classList.add('show');
         };
         btn.addEventListener('click', (e) => {
@@ -38958,7 +39888,7 @@ function createCanvasOtherSettingsModal() {
                 showHelp();
             }
         });
-    };
+    }
     bindOtherHelpPopover(tempHelpBtn, tempHelpPopover);
     bindOtherHelpPopover(tempUnlockHelpBtn, tempUnlockHelpPopover);
     bindOtherHelpPopover(tempResetHelpBtn, tempResetHelpPopover);
@@ -39028,6 +39958,19 @@ function loadCanvasDataIntensiveSettings() {
         if (savedLowDetail !== null) {
             CanvasState.lowDetailEnabled = (savedLowDetail === 'true');
         }
+        const savedVirtualization = localStorage.getItem('canvasVirtualizationEnabled');
+        if (savedVirtualization !== null) {
+            CanvasState.virtualizationEnabled = (savedVirtualization === 'true');
+        } else {
+            CanvasState.virtualizationEnabled = true;
+        }
+        const minCols = localStorage.getItem('canvasVirtualizationMinColumns');
+        if (minCols !== null) {
+            CanvasState.virtualizationMinColumns = parseInt(minCols, 10);
+        } else {
+            CanvasState.virtualizationMinColumns = 30;
+        }
+
     } catch (e) {
         console.warn('Failed to load data intensive settings:', e);
     }
@@ -39076,8 +40019,7 @@ function openCanvasPerfSettingsModal() {
     const safeZoneInput = document.getElementById('perfInputSafeZone');
     if (safeZoneInput) safeZoneInput.value = __formatPercentInputValue(getCanvasSafeZoneThreshold() * 100);
 
-    const minZoomInput = document.getElementById('perfInputMinZoom');
-    if (minZoomInput) minZoomInput.value = getCanvasMinZoomLimit();
+
 
     // [New] 初始化开关状态
     const toggleSafeZone = document.getElementById('perfToggleSafeZone');
@@ -39097,6 +40039,13 @@ function openCanvasPerfSettingsModal() {
 
     const toggleLow = document.getElementById('perfToggleLowDetail');
     if (toggleLow) toggleLow.checked = !!CanvasState.lowDetailEnabled;
+
+    const toggleVirt = document.getElementById('perfToggleVirtualization');
+    if (toggleVirt) toggleVirt.checked = isCanvasVirtualizationEnabled();
+    const inputVirtMinCols = document.getElementById('perfInputVirtualizationMinCols');
+    if (inputVirtMinCols) {
+        inputVirtMinCols.value = typeof CanvasState.virtualizationMinColumns === 'number' ? CanvasState.virtualizationMinColumns : 30;
+    }
 
     // [P5] Zoom magnet toggles
     const magnetSettings = getCanvasZoomMagnetSettings();
@@ -39322,14 +40271,7 @@ function saveCanvasPerfSettings(options = {}) {
         enterLowDetail: zoomThresholds.enterLowDetail * 100
     });
 
-    // 保存缩放下限设置
-    const minZoomInput = document.getElementById('perfInputMinZoom');
-    if (minZoomInput) {
-        const val = parseInt(minZoomInput.value, 10);
-        if (Number.isFinite(val) && val > 0 && val <= 100) {
-            saveSharedState('canvasMinZoomLimit', val, { asJSON: false });
-        }
-    }
+
 
     // [New] 保存开关状态
     const toggleDim = document.getElementById('perfToggleDataIntensive');
@@ -39360,6 +40302,34 @@ function saveCanvasPerfSettings(options = {}) {
         CanvasState.lowDetailEnabled = toggleLow.checked;
         saveSharedState('canvasLowDetailEnabled', toggleLow.checked);
     }
+    const toggleVirt = document.getElementById('perfToggleVirtualization');
+    if (toggleVirt) {
+        const oldVal = CanvasState.virtualizationEnabled !== false;
+        const newVal = toggleVirt.checked;
+        CanvasState.virtualizationEnabled = newVal;
+        saveSharedState('canvasVirtualizationEnabled', newVal);
+        if (oldVal && !newVal) {
+            try { __restoreAllVirtualisedNodes(); } catch (e) { console.error('Failed to restore virtualized nodes:', e); }
+        }
+    }
+    const inputVirtMinCols = document.getElementById('perfInputVirtualizationMinCols');
+    if (inputVirtMinCols) {
+        const val = parseInt(inputVirtMinCols.value, 10);
+        if (Number.isFinite(val) && val >= 1) {
+            CanvasState.virtualizationMinColumns = val;
+            saveSharedState('canvasVirtualizationMinColumns', val, { asJSON: false });
+        }
+    }
+    // If virtualization is enabled but now dynamically bypassed because the values changed, restore nodes
+    if (CanvasState.virtualizationEnabled !== false) {
+        if (!isCanvasVirtualizationEnabled()) {
+            if (CanvasState.__virtualizationWasEnabled !== false) {
+                CanvasState.__virtualizationWasEnabled = false;
+                try { __restoreAllVirtualisedNodes(); } catch (_) {}
+            }
+        }
+    }
+
 
     // [P5] 保存缩放磁矩设置
     const toggleMagnet = document.getElementById('perfToggleZoomMagnet');
@@ -39506,13 +40476,7 @@ function createCanvasPerfSettingsModal() {
                             <span style="color: var(--text-secondary); font-size: 12px;">%</span>
                         </div>
                     </div>
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Minimum Zoom Limit' : '缩放下限'}</label>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <input type="number" id="perfInputMinZoom" min="1" max="100" step="1">
-                            <span style="color: var(--text-secondary); font-size: 12px;">%</span>
-                        </div>
-                    </div>
+
                 </div>
                 
                 <!-- [Priority 2] 触发阈值设置 -->
@@ -39612,63 +40576,29 @@ function createCanvasPerfSettingsModal() {
                     </div>
                 </div>
 
-                <!-- [Priority 5] Zoom Magnet (Lenz-like slow zone) -->
-                <div class="perf-settings-section" id="perfMagnetP5Section">
+                <!-- [Priority 5] 画布虚拟化按需加载 -->
+                <div class="perf-settings-section">
                     <div class="perf-settings-section-title">
                         <div style="display: flex; align-items: center; gap: 6px;">
-                            <span style="background: linear-gradient(135deg, #a855f7, #7c3aed); color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">P5</span>
-                            <span id="perfMagnetTitleText">${isEn ? 'Zoom Magnet' : '缩放磁矩'}</span>
-                            <button class="perf-help-btn" id="perfMagnetHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                            <span style="background: linear-gradient(135deg, #ec4899, #db2777); color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">P5</span>
+                            <span>${isEn ? 'Canvas Virtualization' : '画布卡片虚拟化加载'}</span>
+                            <button class="perf-help-btn" id="perfVirtualizationHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
                         </div>
                         <div class="toggle-wrapper">
-                            <button class="perf-restore-btn" id="perfRestoreMagnetDefaultsBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}">
+                            <button class="perf-restore-btn" id="perfRestoreVirtualizationDefaultsBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}">
                                 <i class="fas fa-undo"></i>
                             </button>
                             <label class="toggle-switch" title="${isEn ? 'Enable/Disable' : '启用/禁用'}">
-                                <input type="checkbox" id="perfToggleZoomMagnet">
+                                <input type="checkbox" id="perfToggleVirtualization">
                                 <span class="slider round"></span>
                             </label>
                         </div>
                     </div>
-
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Magnet 1: Safe Zone Threshold' : '磁矩1：安全区阈值'}</label>
-                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
-                            <div style="display: inline-flex; align-items: baseline; gap: 6px;">
-                                <span id="perfMagnetSafeValue" style="font-weight: 700;">70%</span>
-                                <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? '(from P1)' : '（来自 P1）'}</span>
-                            </div>
-                            <label class="toggle-switch" title="${isEn ? 'Enable this magnet' : '启用该磁矩'}">
-                                <input type="checkbox" id="perfToggleZoomMagnetSafe">
-                                <span class="slider round"></span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Magnet 2: Low Detail Switch Point' : '磁矩2：低细节切换点'}</label>
-                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
-                            <div style="display: inline-flex; align-items: baseline; gap: 6px;">
-                                <span id="perfMagnetMidValue" style="font-weight: 700;">50%</span>
-                                <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? '(follows P3 switch)' : '（跟随 P3 切换阈值）'}</span>
-                            </div>
-                            <label class="toggle-switch" title="${isEn ? 'Enable this magnet' : '启用该磁矩'}">
-                                <input type="checkbox" id="perfToggleZoomMagnetMid">
-                                <span class="slider round"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="perf-jump-row" id="perfMagnetJumpRow">
-                        <span id="perfMagnetJumpLabel">${isEn ? 'Go to Zoom Settings → Zoom Speed & Magnet' : '跳转到缩放设置 → 缩放速率与磁矩'}</span>
-                        <button class="perf-source-btn perf-jump-btn" id="perfMagnetJumpOtherBtn" title="${isEn ? 'Go to Zoom settings' : '跳转到缩放设置'}" aria-label="${isEn ? 'Go to Zoom settings' : '跳转到缩放设置'}">
-                            <svg class="jump-icon" viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M14 3h7v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                <path d="M10 14L21 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                                <path d="M21 14v7H3V3h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-                            </svg>
-                        </button>
+                    <div class="perf-input-group" style="margin-top: 10px;">
+                        <label>${isEn ? 'Min Column Cards for Virtualization' : '触发虚拟化的最小栏目卡片数'}</label>
+                        <input type="number" id="perfInputVirtualizationMinCols" min="1" step="1">
                     </div>
                 </div>
                  
@@ -39703,14 +40633,7 @@ function createCanvasPerfSettingsModal() {
             </div>
         </div>
 
-        <!-- 缩放磁矩帮助弹层 -->
-        <div class="perf-help-popover" id="perfMagnetHelpPopover">
-            <div class="perf-help-popover-content">
-                ${isEn
-            ? '<b>Zoom Magnet</b>: creates a slow zone around key zoom thresholds (Lenz-like: resist approach, relax on leave). Magnet 1 follows <b>P1 Safe Zone</b>. Magnet 2 is centered exactly on the <b>P3 Low Detail Switch</b> point and is enabled by default, slowing zoom right as low-detail mode enters or exits.'
-            : '<b>缩放磁矩</b>：在关键缩放阈值附近创建“缓慢区”（来拒去留）。磁矩1跟随<b>P1 安全区</b>阈值；磁矩2精准居中在<b>P3 低细节切换点</b>，默认开启，让进入/退出低细节模式的边界缩放变慢，给系统更多反应时间。'}
-            </div>
-        </div>
+
 
         <!-- 总量触发帮助弹层 -->
         <div class="perf-help-popover" id="perfTotalAlwaysHelpPopover">
@@ -39718,6 +40641,15 @@ function createCanvasPerfSettingsModal() {
                 ${isEn
             ? '<b>P4: Always Low Detail</b>: When enabled and the <b>total</b> bookmark/folder counts exceed the thresholds, low-detail mode stays ON once zoom is at or below the low-detail switch threshold (ignores <b>P2</b>). Above that threshold, zooming keeps full-detail cards.'
             : '<b>P4：始终低细节</b>：开启后，当<b>总书签/总文件夹</b>超过阈值时，只要缩放小于等于低细节显示切换阈值，就持续处于低细节模式（忽略<b>P2</b>）。高于该阈值缩放时保持完整卡片。'}
+            </div>
+        </div>
+
+        <!-- 虚拟化帮助弹层 -->
+        <div class="perf-help-popover" id="perfVirtualizationHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Canvas Virtualization</b>: On-demand sequential loading of cards. Dramatically improves scrolling and zooming smoothness in ultra-large canvases by rendering only visible and buffered cards, reducing DOM elements and CPU overhead.'
+            : '<b>画布卡片虚拟化</b>：按需顺序加载可视区及缓冲区卡片。在超大型画布中，大幅提升缩放和平移时的流畅度，减少 DOM 元素数量并降低 CPU 开销。'}
             </div>
         </div>
     `;
@@ -39754,11 +40686,7 @@ function createCanvasPerfSettingsModal() {
         schedulePerfSave();
     });
 
-    const restoreMagnetBtn = modal.querySelector('#perfRestoreMagnetDefaultsBtn');
-    if (restoreMagnetBtn) restoreMagnetBtn.addEventListener('click', () => {
-        restoreDefaultZoomMagnetSettings();
-        schedulePerfSave();
-    });
+
 
     // 帮助按钮弹层逻辑
     const safeZoneHelpBtn = modal.querySelector('#perfSafeZoneHelpBtn');
@@ -39767,14 +40695,10 @@ function createCanvasPerfSettingsModal() {
     const triggerHelpPopover = modal.querySelector('#perfTriggerHelpPopover');
     const zoomHelpBtn = modal.querySelector('#perfZoomHelpBtn');
     const zoomHelpPopover = modal.querySelector('#perfZoomHelpPopover');
-    const magnetHelpBtn = modal.querySelector('#perfMagnetHelpBtn');
-    const magnetHelpPopover = modal.querySelector('#perfMagnetHelpPopover');
     const totalAlwaysHelpBtn = modal.querySelector('#perfTotalAlwaysHelpBtn');
     const totalAlwaysHelpPopover = modal.querySelector('#perfTotalAlwaysHelpPopover');
     const sourceSafeBtn = modal.querySelector('#perfSourceSafeZoneBtn');
     const sourceLowBtn = modal.querySelector('#perfSourceLowDetailBtn');
-    const sourceMagnetBtn = modal.querySelector('#perfSourceMagnetBtn');
-    const jumpOtherBtn = modal.querySelector('#perfMagnetJumpOtherBtn');
 
     const openOtherFromPerf = () => {
         CanvasState.otherSettingsFocus = 'zoomMagnet';
@@ -39809,11 +40733,18 @@ function createCanvasPerfSettingsModal() {
             }
         });
     };
+    const virtualizationHelpBtn = modal.querySelector('#perfVirtualizationHelpBtn');
+    const virtualizationHelpPopover = modal.querySelector('#perfVirtualizationHelpPopover');
+    const restoreVirtualizationBtn = modal.querySelector('#perfRestoreVirtualizationDefaultsBtn');
+    if (restoreVirtualizationBtn) restoreVirtualizationBtn.addEventListener('click', () => {
+        restoreDefaultVirtualizationSettings();
+        schedulePerfSave();
+    });
     bindPerfHelpPopover(safeZoneHelpBtn, safeZoneHelpPopover);
     bindPerfHelpPopover(triggerHelpBtn, triggerHelpPopover);
     bindPerfHelpPopover(zoomHelpBtn, zoomHelpPopover);
     bindPerfHelpPopover(totalAlwaysHelpBtn, totalAlwaysHelpPopover);
-    bindPerfHelpPopover(magnetHelpBtn, magnetHelpPopover);
+    bindPerfHelpPopover(virtualizationHelpBtn, virtualizationHelpPopover);
 
     if (sourceSafeBtn) {
         sourceSafeBtn.addEventListener('click', (e) => {
@@ -39829,19 +40760,6 @@ function createCanvasPerfSettingsModal() {
         });
     }
 
-    if (sourceMagnetBtn) {
-        sourceMagnetBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openOtherFromPerf();
-        });
-    }
-    if (jumpOtherBtn) {
-        jumpOtherBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openOtherFromPerf();
-        });
-    }
-
     // 点击其他区域关闭弹层
     modal.addEventListener('click', (e) => {
         if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
@@ -39849,54 +40767,18 @@ function createCanvasPerfSettingsModal() {
         }
     });
 
-    // P5: master toggle disables sub toggles (UI only)
-    const toggleMagnet = modal.querySelector('#perfToggleZoomMagnet');
-    const toggleSafe = modal.querySelector('#perfToggleZoomMagnetSafe');
-    const toggleMid = modal.querySelector('#perfToggleZoomMagnetMid');
-    const applyMagnetToggleState = () => {
-        const on = toggleMagnet ? !!toggleMagnet.checked : true;
-        if (toggleSafe) toggleSafe.disabled = !on;
-        if (toggleMid) toggleMid.disabled = !on;
-    };
-    const syncMagnetSettingsFromPerf = () => {
-        const merged = __writeCanvasZoomMagnetSettings({
-            enabled: toggleMagnet ? !!toggleMagnet.checked : true,
-            enableSafeZone: toggleSafe ? !!toggleSafe.checked : true,
-            enableLowDetailMid: toggleMid ? !!toggleMid.checked : true
-        });
-        __syncOtherMagnetTogglesFromSettings(null, merged);
-        const otherModal = document.getElementById('canvasOtherSettingsModal');
-        if (otherModal && otherModal.style.display !== 'none') {
-            try { __renderOtherZoomMagnetCurve(otherModal); } catch (_) { }
-        }
-    };
-    if (toggleMagnet) {
-        toggleMagnet.addEventListener('change', () => {
-            applyMagnetToggleState();
-            syncMagnetSettingsFromPerf();
-            schedulePerfSave();
-        });
-    }
-    if (toggleSafe) toggleSafe.addEventListener('change', () => {
-        syncMagnetSettingsFromPerf();
-        schedulePerfSave();
-    });
-    if (toggleMid) toggleMid.addEventListener('change', () => {
-        syncMagnetSettingsFromPerf();
-        schedulePerfSave();
-    });
-    applyMagnetToggleState();
+
 
     const perfInputs = [
         '#perfInputSafeZone',
-        '#perfInputMinZoom',
         '#perfInputVisSec',
         '#perfInputVisBm',
         '#perfInputAvg',
         '#perfInputExitLowDetail',
         '#perfInputEnterLowDetail',
         '#perfInputTotalAlwaysBm',
-        '#perfInputTotalAlwaysFolder'
+        '#perfInputTotalAlwaysFolder',
+        '#perfInputVirtualizationMinCols'
     ];
     perfInputs.forEach(selector => {
         const el = modal.querySelector(selector);
@@ -39909,7 +40791,8 @@ function createCanvasPerfSettingsModal() {
         '#perfToggleSafeZone',
         '#perfToggleDataIntensive',
         '#perfToggleLowDetail',
-        '#perfToggleTotalAlways'
+        '#perfToggleTotalAlways',
+        '#perfToggleVirtualization'
     ];
     perfToggles.forEach(selector => {
         const el = modal.querySelector(selector);
@@ -39929,10 +40812,6 @@ function restoreDefaultSafeZoneSettings() {
     // 默认安全区阈值：70%
     const input = document.getElementById('perfInputSafeZone');
     if (input) input.value = 70;
-
-    // 恢复默认缩放下限：10%
-    const minZoomInput = document.getElementById('perfInputMinZoom');
-    if (minZoomInput) minZoomInput.value = 10;
 }
 
 function restoreDefaultTriggerSettings() {
@@ -39955,6 +40834,11 @@ function restoreDefaultZoomSettings() {
     if (exitInput) exitInput.value = __formatPercentInputValue(DEFAULT_PERF_BASELINE.exitLowDetail);
 }
 
+function restoreDefaultVirtualizationSettings() {
+    const minCols = document.getElementById('perfInputVirtualizationMinCols');
+    if (minCols) minCols.value = 30;
+}
+
 function restoreDefaultZoomMagnetSettings() {
     // 默认：整体开启；70% 磁矩开启；低细节切换点磁矩 50% 默认开启
     const t = document.getElementById('perfToggleZoomMagnet');
@@ -39974,5 +40858,6 @@ if (typeof window !== 'undefined') {
     window.restoreDefaultTriggerSettings = restoreDefaultTriggerSettings;
     window.restoreDefaultZoomSettings = restoreDefaultZoomSettings;
     window.restoreDefaultZoomMagnetSettings = restoreDefaultZoomMagnetSettings;
+    window.restoreDefaultVirtualizationSettings = restoreDefaultVirtualizationSettings;
     window.openCanvasPerfSettingsModal = openCanvasPerfSettingsModal;
 }
