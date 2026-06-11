@@ -9641,16 +9641,7 @@ function getCanvasSafeZoneThreshold() {
 }
 
 function isCanvasSafeZoneEnabled() {
-    try {
-        const saved = localStorage.getItem('canvasSafeZoneSettings');
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed && typeof parsed.enabled === 'boolean') {
-                return parsed.enabled;
-            }
-        }
-    } catch (_) { }
-    return true; // 默认启用
+    return true; // 默认就是开启的，不再支持关闭
 }
 
 function isCanvasHugeData() {
@@ -39691,8 +39682,8 @@ function createCanvasOtherSettingsModal() {
             <div class="perf-help-popover" id="otherZoomMagnetHelpPopover">
                 <div class="perf-help-popover-content">
                     ${isEn
-                ? '<b>Zoom Magnet</b>: Creates a slow zone around key zoom thresholds (resists approach, relaxes on leave). Magnet 1 follows the <b>P1 Safe Zone</b> threshold in the Performance panel. Magnet 2 is centered exactly on the <b>P3 Low Detail Switch</b> point, slowing zoom right as low-detail mode enters or exits.<br><br><b>Default values</b>: M1 (X=70%, Y=10%), M2 (X=50%, Y=50%).'
-                : `<b>缩放磁矩</b>：在关键缩放阈值附近创建“缓慢区”（来拒去留）。磁矩1跟随<b>「性能」面板的 P1 安全区</b>阈值；磁矩2精准居中在 <b>P3 低细节切换点</b>，在进入或退出低细节模式的边界使缩放变慢，以给系统更多反应时间。<br><br>${defaultMagnetHint}`}
+                ? '<b>Zoom Magnet</b>: Creates a slow zone around key zoom thresholds (resists approach, relaxes on leave). Magnet 1 follows the <b>"Safe Zone"</b> threshold in the Performance panel. Magnet 2 is centered exactly on the <b>"Zoom Degradation Threshold"</b>, slowing zoom right as low-detail mode enters or exits.<br><br><b>Default values</b>: M1 (X=70%, Y=10%), M2 (X=50%, Y=50%).'
+                : `<b>缩放磁矩</b>：在关键缩放阈值附近创建“缓慢区”（来拒去留）。磁矩1跟随<b>「性能」面板的「安全区」</b>阈值；磁矩2精准居中在 <b>「缩放降级阈值」</b>，在进入或退出低细节模式的边界使缩放变慢，以给系统更多反应时间。<br><br>${defaultMagnetHint}`}
                 </div>
             </div>
         </div>
@@ -40446,158 +40437,162 @@ function createCanvasPerfSettingsModal() {
                     </div>
                 </div>
                 
-                <!-- [Priority 1] 安全区设置 -->
-                <div class="perf-settings-section" id="perfMagnetSection">
-                    <div class="perf-settings-section-title">
-                        <div style="display: flex; align-items: center; gap: 6px;">
-                            <span style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">P1</span>
-                            <span>${isEn ? 'Safe Zone' : '安全区'}</span>
-                            <button class="perf-help-btn" id="perfSafeZoneHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                            <button class="perf-source-btn" id="perfSourceSafeZoneBtn" title="${isEn ? 'Go to source' : '跳转到来源'}">
-                                <i class="fas fa-link"></i>
-                            </button>
-                        </div>
-                        <div class="toggle-wrapper">
-                            <button class="perf-restore-btn" id="perfRestoreSafeZoneBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}">
-                                <i class="fas fa-undo"></i>
-                            </button>
-                            <label class="toggle-switch" title="${isEn ? 'Enable/Disable' : '启用/禁用'}">
-                                <input type="checkbox" id="perfToggleSafeZone">
-                                <span class="slider round"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Safe Zone Threshold' : '安全区阈值'}</label>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <input type="number" id="perfInputSafeZone" min="1" max="100" step="5">
-                            <span style="color: var(--text-secondary); font-size: 12px;">%</span>
-                        </div>
-                    </div>
+                <!-- Group 1: 低细节色块视觉模式 -->
+                <div class="perf-group-title" style="font-size: 13px; font-weight: 700; margin-bottom: 12px; margin-top: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); color: var(--accent-primary); display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-eye-slash"></i>
+                    <span>${isEn ? 'Low-Detail (Color Block) Mode' : '低细节（色块）显示模式'}</span>
+                </div>
 
-                </div>
-                
-                <!-- [Priority 2] 触发阈值设置 -->
+                <!-- 低细节显示控制 -->
                 <div class="perf-settings-section">
                     <div class="perf-settings-section-title">
                         <div style="display: flex; align-items: center; gap: 6px;">
-                            <span style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">P2</span>
-                            <span>${isEn ? 'Trigger Thresholds' : '触发阈值设置'}</span>
-                            <span id="perfStatusBadge" class="perf-status-badge inactive" style="margin-left: 4px;">${isEn ? 'Inactive' : '未激活'}</span>
-                            <button class="perf-help-btn" id="perfTriggerHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
+                            <span style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Basic Settings' : '1. 基础缩放控制'}</span>
                         </div>
+                    </div>
+                    
+                    <!-- 启用低细节模式 -->
+                    <div class="perf-input-group" style="margin-bottom: 14px;">
+                        <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Enable Low-Detail Mode' : '开启低细节模式'}</label>
                         <div class="toggle-wrapper">
-                            <button class="perf-restore-btn" id="perfRestoreDefaultsBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}">
-                                <i class="fas fa-undo"></i>
-                            </button>
-                            <label class="toggle-switch" title="${isEn ? 'Enable/Disable' : '启用/禁用'}">
-                                <input type="checkbox" id="perfToggleDataIntensive">
-                                <span class="slider round"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Visible Columns (Primary)' : '可见栏目数阈值（主触发）'}</label>
-                        <input type="number" id="perfInputVisSec" min="1" step="1">
-                    </div>
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Bookmark Count' : '可视书签总数阈值'}</label>
-                        <input type="number" id="perfInputVisBm" min="10" step="10">
-                    </div>
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Folder Count' : '可视文件夹总数阈值'}</label>
-                        <input type="number" id="perfInputAvg" min="1" step="1">
-                    </div>
-                </div>
-                
-                <!-- [Priority 3] 低细节模式缩放阈值 -->
-                <div class="perf-settings-section">
-                    <div class="perf-settings-section-title">
-                        <div style="display: flex; align-items: center; gap: 6px;">
-                            <span style="background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">P3</span>
-                            <span>${isEn ? 'Low Detail Mode Zoom Threshold' : '低细节模式缩放阈值'}</span>
-                            <button class="perf-help-btn" id="perfZoomHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                            <button class="perf-source-btn" id="perfSourceLowDetailBtn" title="${isEn ? 'Go to source' : '跳转到来源'}">
-                                <i class="fas fa-link"></i>
-                            </button>
-                        </div>
-                        <div class="toggle-wrapper">
-                            <button class="perf-restore-btn" id="perfRestoreZoomDefaultsBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}">
-                                <i class="fas fa-undo"></i>
-                            </button>
-                            <label class="toggle-switch" title="${isEn ? 'Enable/Disable' : '启用/禁用'}">
+                            <label class="toggle-switch">
                                 <input type="checkbox" id="perfToggleLowDetail">
                                 <span class="slider round"></span>
                             </label>
                         </div>
                     </div>
-                    <input type="hidden" id="perfInputExitLowDetail">
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Low Detail Switch Threshold' : '低细节显示切换阈值'}</label>
+
+                    <!-- 缩放降级阈值 -->
+                    <div class="perf-input-group" style="margin-bottom: 14px;">
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Zoom Degradation Threshold' : '缩放降级阈值'}</label>
+                            <button class="perf-help-btn" id="perfZoomHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                            <button class="perf-source-btn" id="perfSourceLowDetailBtn" title="${isEn ? 'Go to source' : '跳转到来源'}" style="width: 18px; height: 18px; font-size: 9px;">
+                                <i class="fas fa-link"></i>
+                            </button>
+                        </div>
+                        <input type="hidden" id="perfInputExitLowDetail">
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <input type="number" id="perfInputEnterLowDetail" min="10" max="100" step="0.5">
                             <span style="color: var(--text-secondary); font-size: 12px;">%</span>
                         </div>
                     </div>
-                </div>
 
-                <!-- [Priority 4] 总量触发：始终低细节 -->
-                <div class="perf-settings-section">
-                    <div class="perf-settings-section-title">
-                        <div style="display: flex; align-items: center; gap: 6px;">
-                            <span style="background: linear-gradient(135deg, #64748b, #334155); color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">P4</span>
-                            <span>${isEn ? 'Always Low Detail by Totals' : '总量触发：始终低细节'}</span>
-                            <span id="perfTotalAlwaysStatusBadge" class="perf-status-badge inactive" style="margin-left: 4px;">${isEn ? 'Inactive' : '未激活'}</span>
-                            <button class="perf-help-btn" id="perfTotalAlwaysHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                    <!-- 安全区 -->
+                    <div class="perf-input-group">
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Safe Zone' : '安全区'}</label>
+                            <button class="perf-help-btn" id="perfSafeZoneHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
+                            <button class="perf-source-btn" id="perfSourceSafeZoneBtn" title="${isEn ? 'Go to source' : '跳转到来源'}" style="width: 18px; height: 18px; font-size: 9px;">
+                                <i class="fas fa-link"></i>
+                            </button>
                         </div>
-                        <div class="toggle-wrapper">
-                            <label class="toggle-switch" title="${isEn ? 'Enable/Disable' : '启用/禁用'}">
-                                <input type="checkbox" id="perfToggleTotalAlways">
-                                <span class="slider round"></span>
-                            </label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" id="perfInputSafeZone" min="1" max="100" step="5">
+                            <span style="color: var(--text-secondary); font-size: 12px;">%</span>
                         </div>
-                    </div>
-
-                    <div class="perf-input-group" style="margin-top: 10px;">
-                        <label>${isEn ? 'Total Bookmarks Threshold' : '总书签阈值'}</label>
-                        <input type="number" id="perfInputTotalAlwaysBm" min="1" step="500">
-                    </div>
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Total Folders Threshold' : '总文件夹阈值'}</label>
-                        <input type="number" id="perfInputTotalAlwaysFolder" min="1" step="200">
                     </div>
                 </div>
 
-                <!-- [Priority 5] 画布虚拟化按需加载 -->
+                <!-- 降级触发条件 -->
                 <div class="perf-settings-section">
-                    <div class="perf-settings-section-title">
+                    <div class="perf-settings-section-title" style="margin-bottom: 14px;">
+                        <span style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Degradation Triggers' : '2. 自动降级触发条件'}</span>
+                    </div>
+
+                    <!-- 触发条件：当前视野超载触发 -->
+                    <div style="border-bottom: 1px dashed var(--border-color); padding-bottom: 12px; margin-bottom: 12px;">
+                        <div class="perf-input-group" style="margin-bottom: 10px;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">${isEn ? 'Viewport Overload Trigger' : '当前视野（视口）超载触发'}</span>
+                                <span id="perfStatusBadge" class="perf-status-badge inactive" style="margin-left: 4px;">${isEn ? 'Inactive' : '未激活'}</span>
+                                <button class="perf-help-btn" id="perfTriggerHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="toggle-wrapper">
+                                <button class="perf-restore-btn" id="perfRestoreDefaultsBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}" style="width: 22px; height: 22px; line-height: 20px;">
+                                    <i class="fas fa-undo"></i>
+                                </button>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="perfToggleDataIntensive">
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="perf-input-group" style="padding-left: 12px; margin-bottom: 8px;">
+                            <label style="font-size: 12px;">${isEn ? 'Visible Columns Threshold' : '可视栏目数阈值（主触发）'}</label>
+                            <input type="number" id="perfInputVisSec" min="1" step="1">
+                        </div>
+                        <div class="perf-input-group" style="padding-left: 12px; margin-bottom: 8px;">
+                            <label style="font-size: 12px;">${isEn ? 'Visible Bookmarks Warning Threshold' : '可视书签预警阈值'}</label>
+                            <input type="number" id="perfInputVisBm" min="10" step="10">
+                        </div>
+                        <div class="perf-input-group" style="padding-left: 12px;">
+                            <label style="font-size: 12px;">${isEn ? 'Visible Folders Warning Threshold' : '可视文件夹预警阈值'}</label>
+                            <input type="number" id="perfInputAvg" min="1" step="1">
+                        </div>
+                    </div>
+
+                    <!-- 触发条件：全局总量超标触发 -->
+                    <div>
+                        <div class="perf-input-group" style="margin-bottom: 10px;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">${isEn ? 'Global Totals Overload Trigger' : '全局数据总量超标触发'}</span>
+                                <span id="perfTotalAlwaysStatusBadge" class="perf-status-badge inactive" style="margin-left: 4px;">${isEn ? 'Inactive' : '未激活'}</span>
+                                <button class="perf-help-btn" id="perfTotalAlwaysHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="toggle-wrapper">
+                                <button class="perf-restore-btn" id="perfRestoreTotalAlwaysDefaultsBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}" style="width: 22px; height: 22px; line-height: 20px;">
+                                    <i class="fas fa-undo"></i>
+                                </button>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="perfToggleTotalAlways">
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="perf-input-group" style="padding-left: 12px; margin-bottom: 8px;">
+                            <label style="font-size: 12px;">${isEn ? 'Total Bookmarks Threshold' : '总书签数阈值'}</label>
+                            <input type="number" id="perfInputTotalAlwaysBm" min="1" step="500">
+                        </div>
+                        <div class="perf-input-group" style="padding-left: 12px;">
+                            <label style="font-size: 12px;">${isEn ? 'Total Folders Threshold' : '总文件夹数阈值'}</label>
+                            <input type="number" id="perfInputTotalAlwaysFolder" min="1" step="200">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Group 2: 画布卡片按需回收与加载 -->
+                <div class="perf-group-title" style="font-size: 13px; font-weight: 700; margin-bottom: 12px; margin-top: 20px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); color: var(--accent-primary); display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-layer-group"></i>
+                    <span>${isEn ? 'Card Virtualization (On-Demand Loading)' : '卡片按需回收与加载（虚拟化）'}</span>
+                </div>
+
+                <!-- 画布虚拟化按需加载 -->
+                <div class="perf-settings-section">
+                    <div class="perf-settings-section-title" style="margin-bottom: 12px;">
                         <div style="display: flex; align-items: center; gap: 6px;">
-                            <span style="background: linear-gradient(135deg, #ec4899, #db2777); color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">P5</span>
-                            <span>${isEn ? 'Canvas Virtualization' : '画布卡片虚拟化加载'}</span>
+                            <span style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Canvas Card Virtualization' : '启用虚拟化优化'}</span>
                             <button class="perf-help-btn" id="perfVirtualizationHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
                         </div>
                         <div class="toggle-wrapper">
-                            <button class="perf-restore-btn" id="perfRestoreVirtualizationDefaultsBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}">
-                                <i class="fas fa-undo"></i>
-                            </button>
-                            <label class="toggle-switch" title="${isEn ? 'Enable/Disable' : '启用/禁用'}">
+                            <label class="toggle-switch">
                                 <input type="checkbox" id="perfToggleVirtualization">
                                 <span class="slider round"></span>
                             </label>
                         </div>
                     </div>
-                    <div class="perf-input-group" style="margin-top: 10px;">
-                        <label>${isEn ? 'Min Column Cards for Virtualization' : '触发虚拟化的最小栏目卡片数'}</label>
+                    <div class="perf-input-group">
+                        <label>${isEn ? 'Min Column Cards for Virtualization' : '启用虚拟化的最小栏目数'}</label>
                         <input type="number" id="perfInputVirtualizationMinCols" min="1" step="1">
                     </div>
                 </div>
@@ -40610,8 +40605,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfSafeZoneHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Highest Priority</b>: When zoom level >= threshold (default 70%), absolutely NO low-detail mode will be triggered, regardless of data volume or Ctrl key.'
-            : '<b>最高优先级</b>：当缩放 >= 阈值（默认70%）时，<b>绝对不</b>进入低细节模式，无论数据量多大或是否按住Ctrl。'}
+            ? '<b>Visual Safe Zone</b>: When zoomed in above this threshold (default 70%), low-detail mode is <b>absolutely disabled</b> to ensure clear reading and editing.'
+            : '<b>视觉安全区</b>：为了方便编辑与阅读，当画布放大到此比例以上时，<b>绝对不</b>进入低细节模式，无论当前数据量有多大。'}
             </div>
         </div>
         
@@ -40619,8 +40614,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfTriggerHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Primary Trigger + Fuse</b>: P2 becomes <b>Active</b> when the <b>Visible Columns</b> count (permanent, temp, blank, groups) exceeds its threshold. When P2 is active, Bookmark/Folder thresholds show orange warnings. Hold <b>Ctrl</b> while zooming to force block mode, trading some detail for smoother navigation.'
-            : '<b>主触发 + 保险丝</b>：P2 是否<b>激活</b>主要看<b>可见栏目数阈值</b>（永久/临时/空白/组）。当 P2 激活时，书签/文件夹阈值会显示橙色预警；此时按住 <b>Ctrl</b> 缩放可强制进入色块模式，适当降低细节以提升流畅度。'}
+            ? '<b>Viewport Overload Trigger</b>: When enabled, automatically triggers visual simplification (below zoom threshold) and strictly limits virtualization budget if visible columns exceed the threshold.'
+            : '<b>当前视野（视口）超载触发</b>：开启后，当视野内可见的栏目数达到设定阈值时，自动触发视觉降级（在降级缩放比例以下时切换为色块），并且会严格限制 DOM 的虚拟化加载预算以大幅提升性能。'}
             </div>
         </div>
         
@@ -40628,19 +40623,17 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfZoomHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Low Detail Boundary</b>: Low-detail visual mode only enters at or below this user threshold (default 50%). A short internal buffer below it is handled automatically, and heavy DOM is pruned only after staying in low detail for about 12s, so boundary zooming avoids repeatedly rebuilding content.'
-            : '<b>低细节边界</b>：只有缩放小于等于这个用户阈值时才进入低细节视觉（默认50%）。阈值下方的短缓冲区由系统内部处理；进入低细节后约 12 秒仍未退出，才真正卸载重 DOM，避免边界附近缩放时反复重建内容。'}
+            ? '<b>Low-Detail Display Switch</b>: When enabled, cards automatically collapse into color blocks with large titles below this zoom level, reducing zoom/pan overhead.'
+            : '<b>低细节显示切换</b>：开启后，当画布缩放到此比例以下时，卡片内的书签列表会自动收起，简化为居中标题的大字色块，大幅减少缩放与平移时的渲染开销。'}
             </div>
         </div>
-
-
 
         <!-- 总量触发帮助弹层 -->
         <div class="perf-help-popover" id="perfTotalAlwaysHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>P4: Always Low Detail</b>: When enabled and the <b>total</b> bookmark/folder counts exceed the thresholds, low-detail mode stays ON once zoom is at or below the low-detail switch threshold (ignores <b>P2</b>). Above that threshold, zooming keeps full-detail cards.'
-            : '<b>P4：始终低细节</b>：开启后，当<b>总书签/总文件夹</b>超过阈值时，只要缩放小于等于低细节显示切换阈值，就持续处于低细节模式（忽略<b>P2</b>）。高于该阈值缩放时保持完整卡片。'}
+            ? '<b>Global Totals Overload Trigger</b>: Automatically keeps low-detail mode active below the zoom threshold if total bookmarks/folders in the canvas exceed these limits.'
+            : '<b>全局数据总量超标触发</b>：开启后，当整个画布中的总书签或总文件夹数超过设定值时，只要缩放比例在降级阈值以下，就自动保持在低细节色块模式下，保护超大画布的运行稳定性。'}
             </div>
         </div>
 
@@ -40648,8 +40641,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfVirtualizationHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Canvas Virtualization</b>: On-demand sequential loading of cards. Dramatically improves scrolling and zooming smoothness in ultra-large canvases by rendering only visible and buffered cards, reducing DOM elements and CPU overhead.'
-            : '<b>画布卡片虚拟化</b>：按需顺序加载可视区及缓冲区卡片。在超大型画布中，大幅提升缩放和平移时的流畅度，减少 DOM 元素数量并降低 CPU 开销。'}
+            ? '<b>Card Virtualization</b>: Dynamically loads visible/nearby column cards and unloads off-screen columns, drastically reducing DOM element count and memory footprint.'
+            : '<b>卡片虚拟化按需加载</b>：启用后，系统仅渲染视口中可见及附近的栏目，视口外较远的栏目将被动态卸载（回收其 DOM 元素），能成倍降低大型画布的内存占用与渲染耗时。'}
             </div>
         </div>
     `;
@@ -40670,19 +40663,18 @@ function createCanvasPerfSettingsModal() {
 
     const restoreBtn = modal.querySelector('#perfRestoreDefaultsBtn');
     if (restoreBtn) restoreBtn.addEventListener('click', () => {
-        restoreDefaultTriggerSettings();
+        document.getElementById('perfInputVisSec').value = 12;
+        document.getElementById('perfInputVisBm').value = 150;
+        document.getElementById('perfInputAvg').value = 100;
         schedulePerfSave();
     });
 
-    const restoreZoomBtn = modal.querySelector('#perfRestoreZoomDefaultsBtn');
-    if (restoreZoomBtn) restoreZoomBtn.addEventListener('click', () => {
-        restoreDefaultZoomSettings();
-        schedulePerfSave();
-    });
-
-    const restoreSafeZoneBtn = modal.querySelector('#perfRestoreSafeZoneBtn');
-    if (restoreSafeZoneBtn) restoreSafeZoneBtn.addEventListener('click', () => {
-        restoreDefaultSafeZoneSettings();
+    const restoreTotalBtn = modal.querySelector('#perfRestoreTotalAlwaysDefaultsBtn');
+    if (restoreTotalBtn) restoreTotalBtn.addEventListener('click', () => {
+        const totalBm = document.getElementById('perfInputTotalAlwaysBm');
+        const totalFo = document.getElementById('perfInputTotalAlwaysFolder');
+        if (totalBm) totalBm.value = typeof CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT !== 'undefined' ? CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT : 3000;
+        if (totalFo) totalFo.value = typeof CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT !== 'undefined' ? CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT : 1000;
         schedulePerfSave();
     });
 
@@ -40710,12 +40702,27 @@ function createCanvasPerfSettingsModal() {
         // 关闭其他弹层
         modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
 
+        popover.classList.add('show');
+
         // 定位弹层
         const rect = btn.getBoundingClientRect();
-        const modalRect = modal.querySelector('.modal-content').getBoundingClientRect();
-        popover.style.top = (rect.bottom - modalRect.top + 8) + 'px';
-        popover.style.left = (rect.left - modalRect.left) + 'px';
-        popover.classList.add('show');
+        const popoverHeight = popover.offsetHeight;
+        const popoverWidth = popover.offsetWidth;
+
+        // 定位在按钮正上方并居中
+        let top = rect.top - popoverHeight - 8;
+        if (top < 8) {
+            top = rect.bottom + 8; // 如果上方空间不足，显示在下方
+        }
+        popover.style.top = top + 'px';
+
+        let left = rect.left + rect.width / 2 - popoverWidth / 2;
+        if (left < 8) left = 8;
+        const maxLeft = window.innerWidth - popoverWidth - 8;
+        if (left > maxLeft) {
+            left = maxLeft;
+        }
+        popover.style.left = left + 'px';
     }
 
     function hidePopovers() {
@@ -40735,11 +40742,7 @@ function createCanvasPerfSettingsModal() {
     };
     const virtualizationHelpBtn = modal.querySelector('#perfVirtualizationHelpBtn');
     const virtualizationHelpPopover = modal.querySelector('#perfVirtualizationHelpPopover');
-    const restoreVirtualizationBtn = modal.querySelector('#perfRestoreVirtualizationDefaultsBtn');
-    if (restoreVirtualizationBtn) restoreVirtualizationBtn.addEventListener('click', () => {
-        restoreDefaultVirtualizationSettings();
-        schedulePerfSave();
-    });
+
     bindPerfHelpPopover(safeZoneHelpBtn, safeZoneHelpPopover);
     bindPerfHelpPopover(triggerHelpBtn, triggerHelpPopover);
     bindPerfHelpPopover(zoomHelpBtn, zoomHelpPopover);

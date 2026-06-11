@@ -1907,7 +1907,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     opacity: 0.85;
 }
 
-/* P5 来源提示 */
+/* 联动来源提示 */
 .perf-linked-note {
     margin-top: 8px;
     padding-top: 8px;
