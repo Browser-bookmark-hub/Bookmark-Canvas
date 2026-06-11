@@ -10130,7 +10130,7 @@ function isCanvasVirtualizationEnabled() {
         const totals = __getCanvasTotalDataStatsSync();
         const minCols = (typeof CanvasState.virtualizationMinColumns === 'number' && isFinite(CanvasState.virtualizationMinColumns))
             ? CanvasState.virtualizationMinColumns
-            : 30;
+            : 50;
         if (totals && totals.totalColumnCount < minCols) {
             return false;
         }
@@ -40345,7 +40345,7 @@ function loadCanvasDataIntensiveSettings() {
         if (minCols !== null) {
             CanvasState.virtualizationMinColumns = parseInt(minCols, 10);
         } else {
-            CanvasState.virtualizationMinColumns = 30;
+            CanvasState.virtualizationMinColumns = 50;
         }
 
     } catch (e) {
@@ -40421,7 +40421,7 @@ function openCanvasPerfSettingsModal() {
     if (toggleVirt) toggleVirt.checked = isCanvasVirtualizationEnabled();
     const inputVirtMinCols = document.getElementById('perfInputVirtualizationMinCols');
     if (inputVirtMinCols) {
-        inputVirtMinCols.value = typeof CanvasState.virtualizationMinColumns === 'number' ? CanvasState.virtualizationMinColumns : 30;
+        inputVirtMinCols.value = typeof CanvasState.virtualizationMinColumns === 'number' ? CanvasState.virtualizationMinColumns : 50;
     }
 
     // [P5] Zoom magnet toggles
@@ -40585,6 +40585,13 @@ function updateCanvasPerfSettingsUI() {
     const overTotalFo = totalAlwaysEnabled && Number.isFinite(totalTh.folders) && totalTh.folders > 0 && (totals.totalFolderCount || 0) >= totalTh.folders;
     setTotalColor('perfStatVisBm', overTotalBm ? 'var(--warning)' : null);
     setTotalColor('perfStatAvg', overTotalFo ? 'var(--warning)' : null);
+
+    // 超过用户设置的启用虚拟化的最小栏目数时，将总栏目数高亮显示为警告色（橙色）
+    const minColsLimit = (typeof CanvasState.virtualizationMinColumns === 'number' && Number.isFinite(CanvasState.virtualizationMinColumns))
+        ? CanvasState.virtualizationMinColumns
+        : 50;
+    const overTotalSec = (totals.totalColumnCount || 0) >= minColsLimit;
+    setTotalColor('perfStatVisSec', overTotalSec ? 'var(--warning)' : null);
 
     // P5: compute magnet positions from current inputs (live)
     const safeEl = document.getElementById('perfMagnetSafeValue');
@@ -40823,8 +40830,36 @@ function createCanvasPerfSettingsModal() {
                     </div>
                 </div>
                 
-                <!-- Group 1: 低细节色块视觉模式 -->
+                <!-- Group 2: 画布卡片按需回收与加载 -->
                 <div class="perf-group-title" style="font-size: 13px; font-weight: 700; margin-bottom: 12px; margin-top: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); color: var(--accent-primary); display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-layer-group"></i>
+                    <span>${isEn ? 'Card Virtualization (On-Demand Loading)' : '卡片按需回收与加载（虚拟化）'}</span>
+                </div>
+
+                <!-- 画布虚拟化按需加载 -->
+                <div class="perf-settings-section">
+                    <div class="perf-settings-section-title" style="margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Canvas Card Virtualization' : '启用虚拟化优化'}</span>
+                            <button class="perf-help-btn" id="perfVirtualizationHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="toggle-wrapper">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="perfToggleVirtualization">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="perf-input-group">
+                        <label>${isEn ? 'Min Column Cards for Virtualization' : '启用虚拟化的最小栏目数'}</label>
+                        <input type="number" id="perfInputVirtualizationMinCols" min="1" step="1">
+                    </div>
+                </div>
+
+                <!-- Group 1: 低细节色块视觉模式 -->
+                <div class="perf-group-title" style="font-size: 13px; font-weight: 700; margin-bottom: 12px; margin-top: 20px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); color: var(--accent-primary); display: flex; align-items: center; gap: 8px;">
                     <i class="fas fa-eye-slash"></i>
                     <span>${isEn ? 'Low-Detail (Color Block) Mode' : '低细节（色块）显示模式'}</span>
                 </div>
@@ -40872,9 +40907,6 @@ function createCanvasPerfSettingsModal() {
                             <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Safe Zone' : '安全区'}</label>
                             <button class="perf-help-btn" id="perfSafeZoneHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
-                            </button>
-                            <button class="perf-source-btn" id="perfSourceSafeZoneBtn" title="${isEn ? 'Go to source' : '跳转到来源'}" style="width: 18px; height: 18px; font-size: 9px;">
-                                <i class="fas fa-link"></i>
                             </button>
                         </div>
                         <div style="display: flex; align-items: center; gap: 8px;">
@@ -40952,34 +40984,6 @@ function createCanvasPerfSettingsModal() {
                             <label style="font-size: 12px;">${isEn ? 'Total Folders Threshold' : '总文件夹数阈值'}</label>
                             <input type="number" id="perfInputTotalAlwaysFolder" min="1" step="200">
                         </div>
-                    </div>
-                </div>
-
-                <!-- Group 2: 画布卡片按需回收与加载 -->
-                <div class="perf-group-title" style="font-size: 13px; font-weight: 700; margin-bottom: 12px; margin-top: 20px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); color: var(--accent-primary); display: flex; align-items: center; gap: 8px;">
-                    <i class="fas fa-layer-group"></i>
-                    <span>${isEn ? 'Card Virtualization (On-Demand Loading)' : '卡片按需回收与加载（虚拟化）'}</span>
-                </div>
-
-                <!-- 画布虚拟化按需加载 -->
-                <div class="perf-settings-section">
-                    <div class="perf-settings-section-title" style="margin-bottom: 12px;">
-                        <div style="display: flex; align-items: center; gap: 6px;">
-                            <span style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Canvas Card Virtualization' : '启用虚拟化优化'}</span>
-                            <button class="perf-help-btn" id="perfVirtualizationHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="toggle-wrapper">
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="perfToggleVirtualization">
-                                <span class="slider round"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Min Column Cards for Virtualization' : '启用虚拟化的最小栏目数'}</label>
-                        <input type="number" id="perfInputVirtualizationMinCols" min="1" step="1">
                     </div>
                 </div>
                  
@@ -41075,7 +41079,6 @@ function createCanvasPerfSettingsModal() {
     const zoomHelpPopover = modal.querySelector('#perfZoomHelpPopover');
     const totalAlwaysHelpBtn = modal.querySelector('#perfTotalAlwaysHelpBtn');
     const totalAlwaysHelpPopover = modal.querySelector('#perfTotalAlwaysHelpPopover');
-    const sourceSafeBtn = modal.querySelector('#perfSourceSafeZoneBtn');
     const sourceLowBtn = modal.querySelector('#perfSourceLowDetailBtn');
 
     const openOtherFromPerf = () => {
@@ -41134,13 +41137,6 @@ function createCanvasPerfSettingsModal() {
     bindPerfHelpPopover(zoomHelpBtn, zoomHelpPopover);
     bindPerfHelpPopover(totalAlwaysHelpBtn, totalAlwaysHelpPopover);
     bindPerfHelpPopover(virtualizationHelpBtn, virtualizationHelpPopover);
-
-    if (sourceSafeBtn) {
-        sourceSafeBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openOtherFromPerf();
-        });
-    }
 
     if (sourceLowBtn) {
         sourceLowBtn.addEventListener('click', (e) => {
@@ -41225,7 +41221,7 @@ function restoreDefaultZoomSettings() {
 
 function restoreDefaultVirtualizationSettings() {
     const minCols = document.getElementById('perfInputVirtualizationMinCols');
-    if (minCols) minCols.value = 30;
+    if (minCols) minCols.value = 50;
 }
 
 function restoreDefaultZoomMagnetSettings() {
