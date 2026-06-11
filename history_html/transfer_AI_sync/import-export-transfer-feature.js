@@ -1917,6 +1917,9 @@ async function handleFileImport(e) {
                 if (activeDialog) activeDialog.remove();
                 e.target.value = '';
                 e.target.__canvasImportOptions = null;
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
                 return;
             }
 
@@ -1948,6 +1951,9 @@ async function handleFileImport(e) {
                         // 避免 0 被静默吞成 300（未来 dialog 若放开 0=强制覆盖时也不会被劫持）。
                         threshold: Number.isFinite(overwriteThreshold) ? overwriteThreshold : 300
                     });
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
                 } catch (err) {
                     console.error('[Overwrite Import] failed:', err);
                     alert(isEn ? `Full overwrite failed: ${err.message}` : `全量覆盖失败：${err.message}`);
@@ -1961,11 +1967,17 @@ async function handleFileImport(e) {
                 trigger: canvasPosition ? 'canvas-position-import' : 'manual-file-import',
                 canvasPosition
             });
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
         } else if (type === 'html' || type === 'json') {
             if (files.length > 1) {
                 await __importBookmarkFilesBatch(type, files, {
                     canvasPosition
                 });
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
             } else {
                 const text = await file.text();
                 if (type === 'html') {
@@ -2033,6 +2045,9 @@ async function handleFolderImport(e) {
             if (activeDialog) activeDialog.remove();
             e.target.value = '';
             e.target.__canvasImportOptions = null;
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
             return;
         }
 
@@ -2063,6 +2078,9 @@ async function handleFolderImport(e) {
                     // doc 第三轮修复 §2.4: 同上，使用 Number.isFinite 而非 ||。
                     threshold: Number.isFinite(overwriteThreshold) ? overwriteThreshold : 300
                 });
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
             } catch (err) {
                 console.error('[Overwrite Import] failed:', err);
                 alert(isEn ? `Full overwrite failed: ${err.message}` : `全量覆盖失败：${err.message}`);
@@ -2079,6 +2097,9 @@ async function handleFolderImport(e) {
 
         const activeDialog = document.getElementById('canvasImportDialog');
         if (activeDialog) activeDialog.remove();
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
     } catch (error) {
         console.error('[Canvas] 文件夹导入失败:', error);
         showCanvasToast((isEn ? 'Import failed: ' : '导入失败: ') + (error && error.message ? error.message : error), 'error');

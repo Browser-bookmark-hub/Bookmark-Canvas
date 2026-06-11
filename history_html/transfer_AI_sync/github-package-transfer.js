@@ -1707,6 +1707,9 @@
             });
             await closeProgressDialog(800, true);
             showToast(note, 'success', 5000);
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
         } catch (error) {
             await closeProgressDialog(0, false);
             const msg = (error && error.message) || String(error);

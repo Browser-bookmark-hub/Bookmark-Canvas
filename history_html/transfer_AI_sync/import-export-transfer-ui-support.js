@@ -1450,6 +1450,9 @@ async function showBackupDialog() {
                     threshold: 0, // force overwrite branch
                     skipBackupWrite: true // doc §2.6 step 3: don't overwrite the slot we're restoring from
                 });
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
             } catch (e) {
                 console.error('[Backup] restore failed:', e);
                 alert(isEn ? `Restore failed: ${e.message}` : `恢复失败：${e.message}`);
