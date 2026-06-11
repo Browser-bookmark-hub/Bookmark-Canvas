@@ -30,6 +30,7 @@
     let activeConfirmDialog = null;
     let activeProgressDialog = null;
     let operationRunning = false;
+    let activeAbortController = null;
 
     function getApi() {
         return global.BookmarkCanvasGithubRepoApi || null;
@@ -337,7 +338,9 @@
             : (last.type === 'pull' ? t('拉取', 'Pull') : escapeHtml(last.type || '-'));
         const resultLabel = last.result === 'success'
             ? t('成功', 'Success')
-            : (last.result === 'failed' ? t('失败', 'Failed') : (last.result || '-'));
+            : (last.result === 'failed'
+                ? t('失败', 'Failed')
+                : (last.result === 'cancelled' ? t('已取消', 'Cancelled') : (last.result || '-')));
         
         let html = '';
         html += `<div><strong>${escapeHtml(t('类型', 'Type'))}:</strong> ${escapeHtml(typeLabel)}</div>`;
@@ -1159,9 +1162,22 @@
                         <div class="github-progress-bar" style="width: 0%"></div>
                     </div>
                     <div class="github-progress-percentage">0%</div>
+                    <div class="github-progress-actions" style="margin-top: 16px; display: flex; justify-content: center; width: 100%;">
+                        <button id="githubProgressCancel" type="button" class="import-mode-btn import-mode-btn-cancel" style="margin-top: 0; min-width: 100px;">
+                            ${escapeHtml(t('取消', 'Cancel'))}
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
+        const cancelBtn = dialog.querySelector('#githubProgressCancel');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => {
+                if (activeAbortController) {
+                    try { activeAbortController.abort(); } catch (_) { }
+                }
+            });
+        }
         document.body.appendChild(dialog);
         activeProgressDialog = dialog;
     }
@@ -1184,6 +1200,11 @@
         if (!activeProgressDialog) return Promise.resolve();
         const dialog = activeProgressDialog;
         activeProgressDialog = null;
+
+        const cancelBtn = dialog.querySelector('#githubProgressCancel');
+        if (cancelBtn) {
+            cancelBtn.style.display = 'none';
+        }
 
         if (isSuccess) {
             updateProgress(100, t('同步完成！', 'Sync complete!'));
@@ -1611,13 +1632,14 @@
             return;
         }
         operationRunning = true;
+        activeAbortController = new AbortController();
+        const signal = activeAbortController.signal;
         let rootPath = '';
         try {
             const api = getApi();
             if (!api) throw new Error('GitHub API unavailable.');
             const config = await ensureReadyConfig('push');
             if (!config) {
-                operationRunning = false;
                 return;
             }
             rootPath = getRemoteRootPath(config);
@@ -1635,7 +1657,8 @@
                         owner: config.owner,
                         repo: config.repo,
                         branch: config.branch,
-                        rootPath
+                        rootPath,
+                        signal
                     });
                     if (listResult && listResult.success === true) {
                         connection = {
@@ -1646,6 +1669,7 @@
                         classification = classifyRemoteRoot(listResult, rootPath);
                     }
                 } catch (err) {
+                    if (err && (err.code === 'GITHUB_OPERATION_CANCELLED' || err.name === 'AbortError')) throw err;
                     console.log('[Push Preflight] Optimized tree fetch failed, falling back to full connection test:', err);
                 }
             }
@@ -1653,7 +1677,8 @@
             if (!connection || !listResult || listResult.success !== true) {
                 connection = await api.testRepoConnection({
                     ...getRepoParams(config),
-                    basePath: ''
+                    basePath: '',
+                    signal
                 });
                 if (!connection || connection.success !== true) {
                     throw new Error(connection && connection.error ? connection.error : t('GitHub 连接失败', 'GitHub connection failed'));
@@ -1670,7 +1695,8 @@
                         owner: config.owner,
                         repo: config.repo,
                         branch: connection.resolvedBranch || config.branch,
-                        rootPath
+                        rootPath,
+                        signal
                     });
                     if (!listResult || listResult.success !== true) {
                         throw new Error(listResult && listResult.error ? listResult.error : t('读取远端路径失败', 'Failed to read remote path'));
@@ -1681,7 +1707,6 @@
 
             const ok = await confirmPushPreflight({ config, connection, classification, rootPath });
             if (!ok) {
-                operationRunning = false;
                 return;
             }
 
@@ -1696,6 +1721,12 @@
                 reason: 'github-push',
                 guideNames: guideNames
             });
+
+            if (signal.aborted) {
+                const err = new Error('GitHub operation cancelled');
+                err.code = 'GITHUB_OPERATION_CANCELLED';
+                throw err;
+            }
 
             const pushPlan = await buildPushChanges(bundle, config, classification.files, { packageRoot, remoteRootPath: rootPath });
             const changes = Array.isArray(pushPlan && pushPlan.changes) ? pushPlan.changes : [];
@@ -1725,7 +1756,6 @@
                     deletedCount: pushPlan.deleted || 0
                 });
                 if (!commitDetails) {
-                    operationRunning = false;
                     return;
                 }
                 commitMessage = commitDetails.commitMessage;
@@ -1765,7 +1795,8 @@
                 repo: config.repo,
                 branch: connection.resolvedBranch || config.branch,
                 message: finalMessage,
-                changes
+                changes,
+                signal
             });
             if (!result || result.success !== true) {
                 throw new Error(result && result.error ? result.error : t('推送失败', 'Push failed'));
@@ -1790,14 +1821,22 @@
         } catch (error) {
             await closeProgressDialog(0, false);
             const msg = (error && error.message) || String(error);
-            try { await saveLastOperation({ type: 'push', result: 'failed', path: rootPath, error: msg }); } catch (_) { }
-            showToast(`${t('推送失败：', 'Push failed: ')}${msg}`, 'error', 7000);
+            const isCancelled = error && (error.code === 'GITHUB_OPERATION_CANCELLED' || error.name === 'AbortError');
+            if (isCancelled) {
+                const cancelNote = t('操作已取消。', 'Operation cancelled.');
+                try { await saveLastOperation({ type: 'push', result: 'cancelled', path: rootPath, error: cancelNote }); } catch (_) { }
+                showToast(cancelNote, 'info', 4000);
+            } else {
+                try { await saveLastOperation({ type: 'push', result: 'failed', path: rootPath, error: msg }); } catch (_) { }
+                showToast(`${t('推送失败：', 'Push failed: ')}${msg}`, 'error', 7000);
+            }
         } finally {
             operationRunning = false;
+            activeAbortController = null;
         }
     }
 
-    async function downloadRemoteFilesToFolderMap({ api, config, branch, files }) {
+    async function downloadRemoteFilesToFolderMap({ api, config, branch, files, signal }) {
         const folderFiles = new Map();
         const list = Array.isArray(files) ? files : [];
         const concurrency = Math.max(1, Math.min(6, list.length || 1));
@@ -1807,6 +1846,11 @@
 
         const worker = async () => {
             while (nextIndex < list.length) {
+                if (signal && signal.aborted) {
+                    const err = new Error('GitHub operation cancelled');
+                    err.code = 'GITHUB_OPERATION_CANCELLED';
+                    throw err;
+                }
                 const file = list[nextIndex];
                 nextIndex += 1;
                 const filePath = normalizeRepoPath(file && file.path);
@@ -1822,7 +1866,8 @@
                         owner: config.owner,
                         repo: config.repo,
                         branch,
-                        path: filePath
+                        path: filePath,
+                        signal
                     });
                 }
                 if (!fileResult || fileResult.success !== true) {
@@ -1831,10 +1876,16 @@
                         owner: config.owner,
                         repo: config.repo,
                         branch,
-                        path: filePath
+                        path: filePath,
+                        signal
                     });
                 }
                 if (!fileResult || fileResult.success !== true) {
+                    if (signal && signal.aborted) {
+                        const err = new Error('GitHub operation cancelled');
+                        err.code = 'GITHUB_OPERATION_CANCELLED';
+                        throw err;
+                    }
                     throw new Error(fileResult && fileResult.error ? `${filePath}: ${fileResult.error}` : `${filePath}: ${t('下载失败', 'download failed')}`);
                 }
                 const resultPath = normalizeRepoPath(fileResult.path || filePath) || filePath;
@@ -1980,13 +2031,14 @@
             return;
         }
         operationRunning = true;
+        activeAbortController = new AbortController();
+        const signal = activeAbortController.signal;
         let rootPath = '';
         try {
             const api = getApi();
             if (!api) throw new Error('GitHub API unavailable.');
             const config = await ensureReadyConfig('pull');
             if (!config) {
-                operationRunning = false;
                 return;
             }
             rootPath = getRemoteRootPath(config);
@@ -2003,7 +2055,8 @@
                         owner: config.owner,
                         repo: config.repo,
                         branch: config.branch,
-                        rootPath
+                        rootPath,
+                        signal
                     });
                     if (listResult && listResult.success === true) {
                         connection = {
@@ -2013,6 +2066,7 @@
                         };
                     }
                 } catch (err) {
+                    if (err && (err.code === 'GITHUB_OPERATION_CANCELLED' || err.name === 'AbortError')) throw err;
                     console.log('[Pull Preflight] Optimized tree fetch failed, falling back to full connection test:', err);
                 }
             }
@@ -2020,7 +2074,8 @@
             if (!connection || !listResult || listResult.success !== true) {
                 connection = await api.testRepoConnection({
                     ...getRepoParams(config),
-                    basePath: ''
+                    basePath: '',
+                    signal
                 });
                 if (!connection || connection.success !== true) {
                     throw new Error(connection && connection.error ? connection.error : t('GitHub 连接失败', 'GitHub connection failed'));
@@ -2034,7 +2089,8 @@
                     owner: config.owner,
                     repo: config.repo,
                     branch: connection.resolvedBranch || config.branch,
-                    rootPath
+                    rootPath,
+                    signal
                 });
                 if (!listResult || listResult.success !== true) {
                     throw new Error(listResult && listResult.error ? listResult.error : t('读取远端路径失败', 'Failed to read remote path'));
@@ -2057,16 +2113,17 @@
                         token: config.token,
                         owner: config.owner,
                         repo: config.repo,
-                        ref: connection.resolvedBranch || config.branch
+                        ref: connection.resolvedBranch || config.branch,
+                        signal
                     });
                 } catch (commitErr) {
+                    if (commitErr && (commitErr.code === 'GITHUB_OPERATION_CANCELLED' || commitErr.name === 'AbortError')) throw commitErr;
                     console.warn('[Pull] Failed to fetch latest commit details:', commitErr);
                 }
             }
 
             const mode = await choosePullMode(config, rootPath, classification.files.length, commitInfo);
             if (!mode) {
-                operationRunning = false;
                 return;
             }
 
@@ -2083,7 +2140,8 @@
                         token: config.token,
                         owner: config.owner,
                         repo: config.repo,
-                        branch: connection.resolvedBranch || config.branch
+                        branch: connection.resolvedBranch || config.branch,
+                        signal
                     });
                     if (zipResult && zipResult.success === true && zipResult.bytes) {
                         updateProgress(40, t('正在解析 ZIP 压缩包...', 'Parsing ZIP archive...'));
@@ -2114,6 +2172,7 @@
                         }
                     }
                 } catch (zipErr) {
+                    if (zipErr && (zipErr.code === 'GITHUB_OPERATION_CANCELLED' || zipErr.name === 'AbortError')) throw zipErr;
                     console.error('[Pull ZIP] ZIPball pulling failed, falling back to sequential download:', zipErr);
                     folderFiles = null;
                 }
@@ -2126,7 +2185,8 @@
                     api,
                     config,
                     branch: connection.resolvedBranch || config.branch,
-                    files: classification.files
+                    files: classification.files,
+                    signal
                 });
             }
 
@@ -2173,10 +2233,18 @@
         } catch (error) {
             await closeProgressDialog(0, false);
             const msg = (error && error.message) || String(error);
-            try { await saveLastOperation({ type: 'pull', result: 'failed', path: rootPath, error: msg }); } catch (_) { }
-            showToast(`${t('拉取失败：', 'Pull failed: ')}${msg}`, 'error', 7000);
+            const isCancelled = error && (error.code === 'GITHUB_OPERATION_CANCELLED' || error.name === 'AbortError');
+            if (isCancelled) {
+                const cancelNote = t('操作已取消。', 'Operation cancelled.');
+                try { await saveLastOperation({ type: 'pull', result: 'cancelled', path: rootPath, error: cancelNote }); } catch (_) { }
+                showToast(cancelNote, 'info', 4000);
+            } else {
+                try { await saveLastOperation({ type: 'pull', result: 'failed', path: rootPath, error: msg }); } catch (_) { }
+                showToast(`${t('拉取失败：', 'Pull failed: ')}${msg}`, 'error', 7000);
+            }
         } finally {
             operationRunning = false;
+            activeAbortController = null;
         }
     }
 

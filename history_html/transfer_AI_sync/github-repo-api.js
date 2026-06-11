@@ -227,7 +227,7 @@
         }
     }
 
-    async function githubRequestRaw(url, { method = 'GET', headers = {}, body, timeoutMs = GITHUB_REQUEST_TIMEOUT_MS, returnBytes = false } = {}) {
+    async function githubRequestRaw(url, { method = 'GET', headers = {}, body, timeoutMs = GITHUB_REQUEST_TIMEOUT_MS, returnBytes = false, signal } = {}) {
         const normalizedMethod = String(method || 'GET').trim().toUpperCase();
         const requestHeaders = {
             Accept: 'application/vnd.github+json',
@@ -247,18 +247,53 @@
                     try { controller.abort(); } catch (_) { }
                 }, requestTimeoutMs);
             }
+            const abortHandler = () => {
+                try { controller.abort(); } catch (_) { }
+            };
+            if (signal && controller) {
+                signal.addEventListener('abort', abortHandler);
+                if (signal.aborted) {
+                    try { controller.abort(); } catch (_) { }
+                }
+            }
 
-            let response = null;
             try {
-                response = await fetch(url, {
-                    method: normalizedMethod,
-                    headers: effectiveHeaders,
-                    body,
-                    cache: normalizedMethod === 'GET' ? 'no-store' : 'default',
-                    signal: controller ? controller.signal : undefined
-                });
+                let response = null;
+                try {
+                    response = await fetch(url, {
+                        method: normalizedMethod,
+                        headers: effectiveHeaders,
+                        body,
+                        cache: normalizedMethod === 'GET' ? 'no-store' : 'default',
+                        signal: controller ? controller.signal : undefined
+                    });
+                } finally {
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
+                        timeoutId = null;
+                    }
+                }
+
+                let text = null;
+                let json = null;
+                let arrayBuffer = null;
+                let bytes = null;
+
+                if (returnBytes && response.ok) {
+                    arrayBuffer = await response.arrayBuffer();
+                    bytes = new Uint8Array(arrayBuffer);
+                } else {
+                    text = await response.text();
+                    try { json = text ? JSON.parse(text) : null; } catch (_) { json = null; }
+                }
+                return { response, text, json, arrayBuffer, bytes, headers: toHeaderMap(response.headers) };
             } catch (error) {
                 if (error && error.name === 'AbortError') {
+                    if (signal && signal.aborted) {
+                        const cancelError = new Error('GitHub operation cancelled');
+                        cancelError.code = 'GITHUB_OPERATION_CANCELLED';
+                        throw cancelError;
+                    }
                     const timeoutError = new Error('GitHub request timed out');
                     timeoutError.code = 'GITHUB_FETCH_TIMEOUT';
                     timeoutError.timeoutMs = requestTimeoutMs;
@@ -267,21 +302,10 @@
                 throw error;
             } finally {
                 if (timeoutId) clearTimeout(timeoutId);
+                if (signal && abortHandler) {
+                    signal.removeEventListener('abort', abortHandler);
+                }
             }
-
-            let text = null;
-            let json = null;
-            let arrayBuffer = null;
-            let bytes = null;
-
-            if (returnBytes && response.ok) {
-                arrayBuffer = await response.arrayBuffer();
-                bytes = new Uint8Array(arrayBuffer);
-            } else {
-                text = await response.text();
-                try { json = text ? JSON.parse(text) : null; } catch (_) { json = null; }
-            }
-            return { response, text, json, arrayBuffer, bytes, headers: toHeaderMap(response.headers) };
         };
 
         let result = await doFetch(requestHeaders);
@@ -293,8 +317,8 @@
         return result;
     }
 
-    async function githubRequestJson(url, { method = 'GET', headers = {}, body } = {}) {
-        const result = await githubRequestRaw(url, { method, headers, body });
+    async function githubRequestJson(url, { method = 'GET', headers = {}, body, signal } = {}) {
+        const result = await githubRequestRaw(url, { method, headers, body, signal });
         if (!result.response.ok) {
             const error = new Error(
                 result.json && typeof result.json.message === 'string' && result.json.message
@@ -309,8 +333,8 @@
         return result.json;
     }
 
-    async function githubRequestText(url, { method = 'GET', headers = {}, body } = {}) {
-        const result = await githubRequestRaw(url, { method, headers, body });
+    async function githubRequestText(url, { method = 'GET', headers = {}, body, signal } = {}) {
+        const result = await githubRequestRaw(url, { method, headers, body, signal });
         if (!result.response.ok) {
             const error = new Error(
                 result.json && typeof result.json.message === 'string' && result.json.message
@@ -325,8 +349,8 @@
         return result.text || '';
     }
 
-    async function githubRequestBytes(url, { method = 'GET', headers = {}, body } = {}) {
-        const result = await githubRequestRaw(url, { method, headers, body, returnBytes: true });
+    async function githubRequestBytes(url, { method = 'GET', headers = {}, body, signal } = {}) {
+        const result = await githubRequestRaw(url, { method, headers, body, returnBytes: true, signal });
         if (!result.response.ok) {
             const error = new Error(
                 result.json && typeof result.json.message === 'string' && result.json.message
@@ -344,19 +368,19 @@
         };
     }
 
-    async function resolveGitHubBranchOrDefault({ authHeader, owner, repo, branch }) {
+    async function resolveGitHubBranchOrDefault({ authHeader, owner, repo, branch, signal }) {
         const trimmedBranch = String(branch || '').trim();
         if (trimmedBranch) return trimmedBranch;
         const repoInfo = await githubRequestJson(
             `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
-            { headers: { Authorization: authHeader } }
+            { headers: { Authorization: authHeader }, signal }
         );
         const defaultBranch = repoInfo && typeof repoInfo.default_branch === 'string' ? repoInfo.default_branch.trim() : '';
         if (!defaultBranch) throw new Error('分支未配置');
         return defaultBranch;
     }
 
-    async function testRepoConnection({ token, owner, repo, branch, basePath }) {
+    async function testRepoConnection({ token, owner, repo, branch, basePath, signal }) {
         const authHeader = buildGitHubAuthHeader(token);
         if (!authHeader) return { success: false, error: 'GitHub Token 未配置' };
         const trimmedOwner = String(owner || '').trim();
@@ -366,7 +390,7 @@
         try {
             const repoInfo = await githubRequestJson(
                 `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}`,
-                { headers: { Authorization: authHeader } }
+                { headers: { Authorization: authHeader }, signal }
             );
             const defaultBranch = repoInfo && typeof repoInfo.default_branch === 'string' ? repoInfo.default_branch : null;
             const resolvedBranch = String(branch || '').trim() || defaultBranch || null;
@@ -378,7 +402,7 @@
                 try {
                     const refInfo = await githubRequestJson(
                         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/git/ref/heads/${encodeURIComponent(resolvedBranch)}`,
-                        { headers: { Authorization: authHeader } }
+                        { headers: { Authorization: authHeader }, signal }
                     );
                     branchExists = true;
                     if (refInfo && refInfo.object && refInfo.object.sha) {
@@ -400,7 +424,7 @@
                 try {
                     await githubRequestJson(
                         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/contents/${encodeGitHubPath(trimmedBasePath)}?ref=${encodeURIComponent(resolvedBranch)}`,
-                        { headers: { Authorization: authHeader } }
+                        { headers: { Authorization: authHeader }, signal }
                     );
                     basePathExists = true;
                 } catch (error) {
@@ -436,6 +460,7 @@
                 branchHeadSha
             };
         } catch (error) {
+            if (error && (error.code === 'GITHUB_OPERATION_CANCELLED' || error.name === 'AbortError')) throw error;
             return { success: false, error: normalizeGitHubError(error) };
         }
     }
@@ -449,12 +474,12 @@
             .replace(/\/+/g, '/');
     }
 
-    async function listRepoFilesByTree({ authHeader, owner, repo, ref, rootPath }) {
+    async function listRepoFilesByTree({ authHeader, owner, repo, ref, rootPath, signal }) {
         const normalizedRootPath = normalizeRepoPath(rootPath);
         const treeRef = String(ref || '').trim() || 'HEAD';
         const json = await githubRequestJson(
             `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(treeRef)}?recursive=1`,
-            { headers: { Authorization: authHeader } }
+            { headers: { Authorization: authHeader }, signal }
         );
 
         const files = [];
@@ -490,7 +515,7 @@
         };
     }
 
-    async function listRepoFilesRecursivelyByContents({ authHeader, owner, repo, ref, rootPath }) {
+    async function listRepoFilesRecursivelyByContents({ authHeader, owner, repo, ref, rootPath, signal }) {
         const normalizedRootPath = normalizeRepoPath(rootPath);
         if (!normalizedRootPath) return { success: true, rootPath: '', rootExists: true, files: [] };
         const buildUrl = (path) => {
@@ -507,7 +532,7 @@
         const processDir = async (dirPath) => {
             let json = null;
             try {
-                json = await githubRequestJson(buildUrl(dirPath), { headers: { Authorization: authHeader } });
+                json = await githubRequestJson(buildUrl(dirPath), { headers: { Authorization: authHeader }, signal });
             } catch (error) {
                 if (Number(error && error.status) === 404) {
                     if (dirPath === normalizedRootPath) rootExists = false;
@@ -547,7 +572,7 @@
         return { success: true, rootPath: normalizedRootPath, rootExists, files };
     }
 
-    async function listRepoFiles({ token, owner, repo, branch, rootPath }) {
+    async function listRepoFiles({ token, owner, repo, branch, rootPath, signal }) {
         const authHeader = buildGitHubAuthHeader(token);
         if (!authHeader) return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
         const trimmedOwner = String(owner || '').trim();
@@ -562,7 +587,8 @@
                 owner: trimmedOwner,
                 repo: trimmedRepo,
                 ref: rawBranch,
-                rootPath: normalizedRootPath
+                rootPath: normalizedRootPath,
+                signal
             });
             if (!treeResult.truncated || !normalizedRootPath) return treeResult;
 
@@ -572,16 +598,18 @@
                     owner: trimmedOwner,
                     repo: trimmedRepo,
                     ref: rawBranch,
-                    rootPath: normalizedRootPath
+                    rootPath: normalizedRootPath,
+                    signal
                 });
             }
             return treeResult;
         } catch (error) {
+            if (error && (error.code === 'GITHUB_OPERATION_CANCELLED' || error.name === 'AbortError')) throw error;
             return { success: false, error: normalizeGitHubError(error) };
         }
     }
 
-    async function getRepoFileRaw({ token, owner, repo, branch, path }) {
+    async function getRepoFileRaw({ token, owner, repo, branch, path, signal }) {
         const authHeader = buildGitHubAuthHeader(token);
         if (!authHeader) return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
         const trimmedOwner = String(owner || '').trim();
@@ -598,7 +626,8 @@
 
         try {
             const result = await githubRequestBytes(url, {
-                headers: { Authorization: authHeader, Accept: 'application/vnd.github.raw' }
+                headers: { Authorization: authHeader, Accept: 'application/vnd.github.raw' },
+                signal
             });
             return {
                 success: true,
@@ -609,12 +638,13 @@
                 fetchedVia: 'raw-bytes'
             };
         } catch (error) {
+            if (error && (error.code === 'GITHUB_OPERATION_CANCELLED' || error.name === 'AbortError')) throw error;
             if (Number(error && error.status) === 404) return { success: false, notFound: true, error: '云端文件不存在' };
             return { success: false, error: normalizeGitHubError(error) };
         }
     }
 
-    async function getRepoZipball({ token, owner, repo, branch }) {
+    async function getRepoZipball({ token, owner, repo, branch, signal }) {
         const authHeader = buildGitHubAuthHeader(token);
         if (!authHeader) return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
         const trimmedOwner = String(owner || '').trim();
@@ -627,18 +657,20 @@
         const url = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/zipball/${encodeURIComponent(trimmedBranch)}`;
         try {
             const result = await githubRequestBytes(url, {
-                headers: { Authorization: authHeader }
+                headers: { Authorization: authHeader },
+                signal
             });
             return {
                 success: true,
                 bytes: result.bytes
             };
         } catch (error) {
+            if (error && (error.code === 'GITHUB_OPERATION_CANCELLED' || error.name === 'AbortError')) throw error;
             return { success: false, error: normalizeGitHubError(error) };
         }
     }
 
-    async function getRepoCommit({ token, owner, repo, ref }) {
+    async function getRepoCommit({ token, owner, repo, ref, signal }) {
         const authHeader = buildGitHubAuthHeader(token);
         if (!authHeader) return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
         const trimmedOwner = String(owner || '').trim();
@@ -650,7 +682,8 @@
         const url = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/commits/${encodeURIComponent(trimmedRef)}`;
         try {
             const commitJson = await githubRequestJson(url, {
-                headers: { Authorization: authHeader }
+                headers: { Authorization: authHeader },
+                signal
             });
             const fullMessage = commitJson.commit && commitJson.commit.message ? commitJson.commit.message : '';
             const msgLines = fullMessage.split('\n');
@@ -665,11 +698,12 @@
                 date: commitJson.commit && commitJson.commit.author && commitJson.commit.author.date ? commitJson.commit.author.date : ''
             };
         } catch (error) {
+            if (error && (error.code === 'GITHUB_OPERATION_CANCELLED' || error.name === 'AbortError')) throw error;
             return { success: false, error: normalizeGitHubError(error) };
         }
     }
 
-    async function getRepoFile({ token, owner, repo, branch, path }) {
+    async function getRepoFile({ token, owner, repo, branch, path, signal }) {
         const authHeader = buildGitHubAuthHeader(token);
         if (!authHeader) return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
         const trimmedOwner = String(owner || '').trim();
@@ -685,7 +719,7 @@
             : `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/contents/${encodedPath}`;
 
         try {
-            const json = await githubRequestJson(url, { headers: { Authorization: authHeader } });
+            const json = await githubRequestJson(url, { headers: { Authorization: authHeader }, signal });
             if (!json || typeof json !== 'object' || json.type !== 'file') {
                 return { success: false, error: '目标路径不是文件' };
             }
@@ -698,7 +732,7 @@
                 try {
                     const blobJson = await githubRequestJson(
                         `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/git/blobs/${encodeURIComponent(String(json.sha))}`,
-                        { headers: { Authorization: authHeader } }
+                        { headers: { Authorization: authHeader }, signal }
                     );
                     const blobEncoding = blobJson && blobJson.encoding ? String(blobJson.encoding) : '';
                     const blobContent = blobJson && typeof blobJson.content === 'string' ? blobJson.content.replace(/\s+/g, '') : '';
@@ -707,12 +741,15 @@
                         encoding = 'base64';
                         fetchedVia = 'git-blob';
                     }
-                } catch (_) { }
+                } catch (err) {
+                    if (err && (err.code === 'GITHUB_OPERATION_CANCELLED' || err.name === 'AbortError')) throw err;
+                }
             }
 
             if (!contentBase64 && Number(json.size) > 0) {
                 const rawText = await githubRequestText(url, {
-                    headers: { Authorization: authHeader, Accept: 'application/vnd.github.raw' }
+                    headers: { Authorization: authHeader, Accept: 'application/vnd.github.raw' },
+                    signal
                 });
                 contentBase64 = textToBase64(rawText);
                 encoding = 'base64';
@@ -730,6 +767,7 @@
                 fetchedVia
             };
         } catch (error) {
+            if (error && (error.code === 'GITHUB_OPERATION_CANCELLED' || error.name === 'AbortError')) throw error;
             if (Number(error && error.status) === 404) return { success: false, notFound: true, error: '云端文件不存在' };
             return { success: false, error: normalizeGitHubError(error) };
         }
@@ -771,7 +809,7 @@
             combined.includes('payload');
     }
 
-    async function applyRepoFilesBatch({ token, owner, repo, branch, message, changes }) {
+    async function applyRepoFilesBatch({ token, owner, repo, branch, message, changes, signal }) {
         const authHeader = buildGitHubAuthHeader(token);
         if (!authHeader) return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
         const trimmedOwner = String(owner || '').trim();
@@ -810,7 +848,7 @@
 
             let resolvedBranch = '';
             try {
-                resolvedBranch = await resolveGitHubBranchOrDefault({ authHeader, owner: trimmedOwner, repo: trimmedRepo, branch });
+                resolvedBranch = await resolveGitHubBranchOrDefault({ authHeader, owner: trimmedOwner, repo: trimmedRepo, branch, signal });
             } catch (error) {
                 throw annotateStage(error, 'resolve-branch');
             }
@@ -847,6 +885,11 @@
                 const workerCount = Math.max(1, Math.min(GITHUB_BLOB_CREATE_CONCURRENCY, uploadEntries.length));
                 const workers = Array.from({ length: workerCount }, async () => {
                     while (true) {
+                        if (signal && signal.aborted) {
+                            const err = new Error('GitHub operation cancelled');
+                            err.code = 'GITHUB_OPERATION_CANCELLED';
+                            throw err;
+                        }
                         const index = cursor;
                         cursor += 1;
                         if (index >= uploadEntries.length) break;
@@ -856,7 +899,8 @@
                             blobJson = await githubRequestJson(`${repoApiBase}/git/blobs`, {
                                 method: 'POST',
                                 headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ content: entry.content || '', encoding: 'utf-8' })
+                                body: JSON.stringify({ content: entry.content || '', encoding: 'utf-8' }),
+                                signal
                             });
                         } catch (error) {
                             throw annotateStage(error, 'create-blob', { path: entry.path });
@@ -895,7 +939,8 @@
             const readCommitTreeSha = async (headSha) => {
                 try {
                     const commitJson = await githubRequestJson(`${commitsUrl}/${encodeURIComponent(headSha)}`, {
-                        headers: { Authorization: authHeader }
+                        headers: { Authorization: authHeader },
+                        signal
                     });
                     return commitJson && commitJson.tree && commitJson.tree.sha ? String(commitJson.tree.sha) : '';
                 } catch (error) {
@@ -918,7 +963,8 @@
                     return await githubRequestJson(treesUrl, {
                         method: 'POST',
                         headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
+                        body: JSON.stringify(payload),
+                        signal
                     });
                 } catch (error) {
                     throw annotateStage(error, 'create-tree');
@@ -930,7 +976,8 @@
                     return await githubRequestJson(commitsUrl, {
                         method: 'POST',
                         headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ message: safeMessage, tree: treeSha, parents: parentSha ? [parentSha] : [] })
+                        body: JSON.stringify({ message: safeMessage, tree: treeSha, parents: parentSha ? [parentSha] : [] }),
+                        signal
                     });
                 } catch (error) {
                     throw annotateStage(error, 'create-commit');
@@ -942,7 +989,8 @@
                     return await githubRequestJson(refsUrl, {
                         method: 'POST',
                         headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha: commitSha })
+                        body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha: commitSha }),
+                        signal
                     });
                 } catch (error) {
                     throw annotateStage(error, 'create-ref', { branch: branchName });
@@ -954,7 +1002,8 @@
                     await githubRequestJson(refUpdateUrl, {
                         method: 'PATCH',
                         headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ sha: commitSha, force: false })
+                        body: JSON.stringify({ sha: commitSha, force: false }),
+                        signal
                     });
                 } catch (error) {
                     throw annotateStage(error, 'update-ref');
@@ -963,7 +1012,7 @@
 
             const tryReadBranchHeadFromBranchApi = async () => {
                 try {
-                    const branchJson = await githubRequestJson(branchInfoUrl, { headers: { Authorization: authHeader } });
+                    const branchJson = await githubRequestJson(branchInfoUrl, { headers: { Authorization: authHeader }, signal });
                     const commitInfo = branchJson && typeof branchJson.commit === 'object' ? branchJson.commit : null;
                     const headSha = commitInfo && commitInfo.sha ? String(commitInfo.sha) : '';
                     if (!headSha) return null;
@@ -984,12 +1033,12 @@
 
                 let refJson = null;
                 try {
-                    refJson = await githubRequestJson(refReadUrl, { headers: { Authorization: authHeader } });
+                    refJson = await githubRequestJson(refReadUrl, { headers: { Authorization: authHeader }, signal });
                 } catch (error) {
                     if (Number(error && error.status) !== 404) throw annotateStage(error, 'read-ref');
                     let defaultBranch = '';
                     try {
-                        const repoInfo = await githubRequestJson(repoApiBase, { headers: { Authorization: authHeader } });
+                        const repoInfo = await githubRequestJson(repoApiBase, { headers: { Authorization: authHeader }, signal });
                         defaultBranch = repoInfo && typeof repoInfo.default_branch === 'string' ? repoInfo.default_branch.trim() : '';
                     } catch (repoError) {
                         throw annotateStage(repoError, 'resolve-branch');
@@ -999,7 +1048,7 @@
                         try {
                             const defaultRefJson = await githubRequestJson(
                                 `${repoApiBase}/git/ref/heads/${encodeURIComponent(defaultBranch)}`,
-                                { headers: { Authorization: authHeader } }
+                                { headers: { Authorization: authHeader }, signal }
                             );
                             const defaultHeadSha = defaultRefJson && defaultRefJson.object && defaultRefJson.object.sha
                                 ? String(defaultRefJson.object.sha)
@@ -1010,7 +1059,7 @@
                                 } catch (createError) {
                                     if (!isGitHubReferenceAlreadyExistsError(createError)) throw createError;
                                 }
-                                refJson = await githubRequestJson(refReadUrl, { headers: { Authorization: authHeader } });
+                                refJson = await githubRequestJson(refReadUrl, { headers: { Authorization: authHeader }, signal });
                             }
                         } catch (defaultRefError) {
                             if (Number(defaultRefError && defaultRefError.status) !== 404) {
@@ -1052,6 +1101,11 @@
             const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
             const maxAttempts = 6;
             for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+                if (signal && signal.aborted) {
+                    const err = new Error('GitHub operation cancelled');
+                    err.code = 'GITHUB_OPERATION_CANCELLED';
+                    throw err;
+                }
                 if (attempt > 0) {
                     const backoffMs = Math.min(250 * Math.pow(2, attempt - 1), 2000);
                     await sleep(backoffMs + Math.floor(Math.random() * 200));
@@ -1146,6 +1200,7 @@
             }
             return { success: false, error: '更新分支引用失败' };
         } catch (error) {
+            if (error && (error.code === 'GITHUB_OPERATION_CANCELLED' || error.name === 'AbortError')) throw error;
             return { success: false, error: normalizeGitHubError(error) };
         }
     }
