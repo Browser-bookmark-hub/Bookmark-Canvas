@@ -20467,10 +20467,6 @@ function __getMdNodeLowDetailTitleAndIndex(node) {
     let title = __getTitleFromDirectoryDom(node.id);
     let indexText = '';
     
-    if (node && node.type === 'file') {
-        title = String(node.file || '').split('/').pop();
-    }
-    
     if (!title) {
         if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.getMdNodeTitle === 'function' && typeof window.CanvasSidebarDirectory.getSortedMdNodes === 'function') {
             title = window.CanvasSidebarDirectory.getMdNodeTitle(node);
@@ -20688,173 +20684,6 @@ function showCanvasNodeLoadError(element, data, errorMsg, isTemp) {
     } catch (_) {}
 }
 
-function renderUnsupportedFileNode(node, options = {}) {
-    const container = document.getElementById('canvasContent');
-    if (!container) return;
-
-    let el = node ? document.getElementById(node.id) : null;
-    const isNew = !el;
-    if (!el) {
-        el = document.createElement('div');
-        el.id = node.id;
-        el.className = 'md-canvas-node unsupported-file-node';
-        container.appendChild(el);
-    } else {
-        el = __resetMdNodeElementForRender(el);
-        try { el.innerHTML = ''; } catch (_) { }
-        el.className = 'md-canvas-node unsupported-file-node';
-    }
-
-    const mdBaseSize = getBlankNodeDefaultSize();
-    const mdWidth = Math.max(mdBaseSize.minWidth, Number(node.width) || mdBaseSize.width);
-    const mdHeight = Math.max(mdBaseSize.minHeight, Number(node.height) || mdBaseSize.height);
-    node.width = mdWidth;
-    node.height = mdHeight;
-    el.style.left = node.x + 'px';
-    el.style.top = node.y + 'px';
-    el.style.width = mdWidth + 'px';
-    el.style.height = mdHeight + 'px';
-    el.style.zIndex = node.pinned ? '200' : '15';
-
-    try { applyMdNodeColor(el, node); } catch (_) { }
-
-    const toolbar = document.createElement('div');
-    toolbar.className = 'md-node-toolbar';
-
-    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
-    const deleteTitle = lang === 'en' ? 'Delete' : '删除';
-    const colorTitle = lang === 'en' ? 'Color' : '颜色';
-    const focusTitle = lang === 'en' ? 'Locate and zoom' : '定位并放大';
-    const pinTitle = lang === 'en' ? 'Pin' : '置顶';
-    const unpinTitle = lang === 'en' ? 'Unpin' : '取消置顶';
-    const mdPinBtnTitle = node.pinned ? unpinTitle : pinTitle;
-    const mdPinBtnIcon = node.pinned
-        ? '<i class="fas fa-thumbtack"></i>'
-        : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
-
-    toolbar.innerHTML = `
-        <button class="md-node-toolbar-btn" data-action="md-focus" data-tooltip="${focusTitle}"><i class="fas fa-search-plus"></i></button>
-        <button class="md-node-toolbar-btn" data-action="md-color-toggle" data-tooltip="${colorTitle}"><i class="fas fa-palette"></i></button>
-        <button class="md-node-toolbar-btn${node.pinned ? ' pinned' : ''}" data-action="md-pin" data-tooltip="${mdPinBtnTitle}">${mdPinBtnIcon}</button>
-        <button class="md-node-toolbar-btn md-delete-danger-btn" data-action="md-delete" data-tooltip="${deleteTitle}"><i class="far fa-trash-alt"></i></button>
-    `;
-
-    const contentContainer = document.createElement('div');
-    contentContainer.className = 'unsupported-file-content';
-
-    const fileIcon = document.createElement('div');
-    fileIcon.className = 'unsupported-file-icon';
-    
-    const fileName = String(node.file || '').split('/').pop();
-    const ext = fileName.split('.').pop().toLowerCase();
-    let iconClass = 'far fa-file';
-    if (['mp4', 'mkv', 'avi', 'mov'].includes(ext)) {
-        iconClass = 'far fa-file-video';
-    } else if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) {
-        iconClass = 'far fa-file-audio';
-    } else if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'].includes(ext)) {
-        iconClass = 'far fa-file-image';
-    } else if (['md', 'txt'].includes(ext)) {
-        iconClass = 'far fa-file-alt';
-    } else if (['pdf'].includes(ext)) {
-        iconClass = 'far fa-file-pdf';
-    }
-    fileIcon.innerHTML = `<i class="${iconClass}"></i>`;
-
-    const fileNameEl = document.createElement('div');
-    fileNameEl.className = 'unsupported-file-name';
-    fileNameEl.textContent = fileName || (lang === 'en' ? 'Unnamed File' : '未命名文件');
-
-    const fileBadgeEl = document.createElement('div');
-    fileBadgeEl.className = 'unsupported-file-badge';
-    fileBadgeEl.textContent = lang === 'en' ? 'Obsidian Attachment' : 'Obsidian 附件';
-
-    contentContainer.appendChild(fileIcon);
-    contentContainer.appendChild(fileNameEl);
-    contentContainer.appendChild(fileBadgeEl);
-
-    el.appendChild(toolbar);
-    el.appendChild(contentContainer);
-
-    makeMdNodeDraggable(el, node);
-    makeTempNodeResizable(el, node);
-
-    // 如果当前选中的是该节点，恢复选中外观
-    if (CanvasState.selectedMdNodeId === node.id) {
-        el.classList.add('selected');
-    }
-
-    addAnchorsToNode(el, node.id);
-
-    // Ctrl 蒙版同步
-    registerSectionCtrlOverlay(el);
-
-    toolbar.addEventListener('click', (e) => {
-        const btn = e.target.closest('.md-node-toolbar-btn');
-        if (!btn) return;
-        e.stopPropagation();
-        e.preventDefault();
-
-        const action = btn.getAttribute('data-action');
-        if (action === 'md-focus') {
-            selectMdNode(node.id);
-            try { if (typeof locateAndZoomToMdNode === 'function') locateAndZoomToMdNode(node.id); } catch (_) {}
-        } else if (action === 'md-delete') {
-            removeMdNode(node.id);
-            clearMdSelection();
-        } else if (action === 'md-pin') {
-            const pinned = toggleMdNodePin(node.id);
-            const title = pinned ? unpinTitle : pinTitle;
-            btn.classList.toggle('pinned', !!pinned);
-            btn.setAttribute('data-tooltip', title);
-            btn.title = title;
-            btn.innerHTML = pinned
-                ? '<i class="fas fa-thumbtack"></i>'
-                : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
-        } else if (action === 'md-color-toggle') {
-            const anchorPoint = e && e.__contextAnchorPoint
-                ? e.__contextAnchorPoint
-                : (e && e.detail && e.detail.__contextAnchorPoint ? e.detail.__contextAnchorPoint : null);
-            toggleMdColorPopover(toolbar, node, btn, { anchorPoint });
-        }
-    });
-
-    el.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        try { selectMdNode(node.id); } catch (_) { }
-    });
-
-    el.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
-        if (e.target.closest('.md-node-toolbar-btn') || e.target.closest('.resize-handle')) return;
-        try { selectMdNode(node.id); } catch (_) { }
-    });
-
-    el.addEventListener('contextmenu', (e) => {
-        if (e.target.closest('.md-node-toolbar') ||
-            e.target.closest('.md-color-popover') ||
-            e.target.closest('.md-format-popover') ||
-            e.target.closest('.md-delete-options-popover')) {
-            return;
-        }
-        e.preventDefault();
-        e.stopPropagation();
-        if (typeof showBookmarkTreeObjectContextMenu === 'function') {
-            showBookmarkTreeObjectContextMenu(e, {
-                type: 'md-node',
-                nodeId: node.id,
-                nodeData: node,
-                sectionElement: el
-            });
-        }
-    }, true);
-
-    if (options && options.isNew) {
-        el.classList.add('temp-node-enter');
-        requestAnimationFrame(() => el.classList.remove('temp-node-enter'));
-    }
-}
-
 function renderMdNode(node, options = {}) {
     const container = document.getElementById('canvasContent');
     let el = node ? document.getElementById(node.id) : null;
@@ -20896,10 +20725,6 @@ function renderMdNode(node, options = {}) {
 function __renderMdNodeImpl(node, options = {}) {
     const container = document.getElementById('canvasContent');
     if (!container) return;
-
-    if (node && node.type === 'file') {
-        return renderUnsupportedFileNode(node, options);
-    }
 
     if (node && node.subtype === 'card-group') {
         if (typeof window !== 'undefined' && window.__BCSCardGroup && typeof window.__BCSCardGroup.renderCardGroup === 'function') {
@@ -25417,14 +25242,7 @@ function closeDeleteOptionsPopover(toolbar) {
 
 // 定位并放大到指定 Markdown 节点
 function locateAndZoomToMdNode(nodeId, targetZoom = null) {
-    let el = document.getElementById(nodeId);
-    if (!el) {
-        const node = (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.find(n => n && n.id === nodeId) : null);
-        if (node) {
-            try { renderMdNode(node); } catch (_) { }
-            el = document.getElementById(nodeId);
-        }
-    }
+    const el = document.getElementById(nodeId);
     const workspace = document.getElementById('canvasWorkspace');
     if (!el || !workspace) return;
 
@@ -26851,7 +26669,7 @@ function __normalizeCanvasNativeTextNodeFields(node, options = {}) {
 function __normalizeCanvasPluginMarkdownNodeFields(node, options = {}) {
     if (!node || typeof node !== 'object') return node;
     if (__isCanvasNativeTextNode(node)) return node;
-    if (node.subtype === 'card-group' || node.type === 'file') return node;
+    if (node.subtype === 'card-group') return node;
 
     const markdownSource = __normalizeCanvasMarkdownSource(__deriveMdNodeMarkdownSource(node));
     node.subtype = CANVAS_PLUGIN_MARKDOWN_SUBTYPE;
@@ -26876,7 +26694,7 @@ function __normalizeCanvasPluginMarkdownNodeFields(node, options = {}) {
 
 function __ensureMdNodeMarkdownProtocol(node, options = {}) {
     if (!node || typeof node !== 'object') return node;
-    if (node.subtype === 'card-group' || node.type === 'file') return node;
+    if (node.subtype === 'card-group') return node;
     if (__isCanvasNativeTextNode(node)) {
         __normalizeCanvasNativeTextNodeFields(node, options);
         return node;
@@ -33082,10 +32900,7 @@ function executeClickToClearDeletion() {
     // 删除相关及选中的连接线
     CanvasState.edges = CanvasState.edges.filter(edge => {
         if (!edge) return false;
-        const eId = String(edge.id || '').trim();
-        const fromN = String(edge.fromNode || '').trim();
-        const toN = String(edge.toNode || '').trim();
-        if (selectedIdSet.has(eId) || selectedIdSet.has(fromN) || selectedIdSet.has(toN)) {
+        if (selectedIdSet.has(edge.id) || selectedIdSet.has(edge.fromNode) || selectedIdSet.has(edge.toNode)) {
             const hitArea = document.querySelector(`.canvas-edge-hit-area[data-edge-id="${edge.id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
             if (hitArea) hitArea.remove();
             const path = document.querySelector(`.canvas-edge[data-edge-id="${edge.id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`);
@@ -36205,8 +36020,7 @@ function removeEdgesForNode(nodeId, options = {}) {
     const before = CanvasState.edges.length;
     const removed = [];
     CanvasState.edges = CanvasState.edges.filter(e => {
-        const match = (String(e.fromNode || '').trim() === String(nodeId || '').trim()) ||
-                      (String(e.toNode || '').trim() === String(nodeId || '').trim());
+        const match = (e.fromNode === nodeId) || (e.toNode === nodeId);
         if (match) removed.push(e.id);
         return !match;
     });
@@ -36641,7 +36455,7 @@ function __syncEdgeHitAreaDom(hitArea, edge, geometry) {
     hitArea.setAttribute('class', 'canvas-edge-hit-area');
     hitArea.dataset.edgeId = edge.id;
     hitArea.classList.toggle('click-to-clear-selectable', !!clickToClearModeActive);
-    hitArea.classList.toggle('click-to-clear-selected', !!(clickToClearModeActive && clickToClearSelectedIds.has(normalizeEdgeId(edge.id))));
+    hitArea.classList.toggle('click-to-clear-selected', !!(clickToClearModeActive && clickToClearSelectedIds.has(edge.id)));
     updateEdgePath(edge, hitArea, geometry);
 }
 
@@ -36757,7 +36571,7 @@ function __syncEdgeLabelTextDom(text, edge, geometry) {
     }
 
     text.classList.toggle('click-to-clear-selectable', !!clickToClearModeActive);
-    text.classList.toggle('click-to-clear-selected', !!(clickToClearModeActive && clickToClearSelectedIds.has(normalizeEdgeId(edge.id))));
+    text.classList.toggle('click-to-clear-selected', !!(clickToClearModeActive && clickToClearSelectedIds.has(edge.id)));
 }
 
 function __syncEdgeLabelDom(svg, edge, geometry, record, bgColor) {
@@ -38066,17 +37880,6 @@ function __applyMdNodePinnedStateToElement(node) {
         }
         if (el.classList && el.classList.contains('card-group-canvas-node')) {
             el.classList.toggle('pinned', !!node.pinned);
-        }
-        const pinBtn = el.querySelector('.md-node-toolbar-btn[data-action="md-pin"]');
-        if (pinBtn) {
-            const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
-            const pinTitle = lang === 'en' ? 'Pin' : '置顶';
-            const unpinTitle = lang === 'en' ? 'Unpin' : '取消置顶';
-            pinBtn.classList.toggle('pinned', !!node.pinned);
-            pinBtn.setAttribute('data-tooltip', node.pinned ? unpinTitle : pinTitle);
-            pinBtn.innerHTML = node.pinned
-                ? '<i class="fas fa-thumbtack"></i>'
-                : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
         }
     }
 }

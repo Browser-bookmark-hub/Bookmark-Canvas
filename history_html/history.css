@@ -2994,28 +2994,24 @@ body.sidebar-resizing * {
     position: relative;
 }
 
-.canvas-dir-folder[data-node-key$="permanent"]>summary {
+.canvas-dir-folder[data-node-key="folder-permanent"]>summary {
     color: var(--canvas-dir-color-permanent, var(--quick-add-permanent-color, var(--text-secondary)));
 }
 
-.canvas-dir-folder[data-node-key$="temporary"]>summary,
-.canvas-dir-folder[data-node-key$="temp-split"]>summary,
-.canvas-dir-folder[data-node-key$="temporary-split"]>summary {
+.canvas-dir-folder[data-node-key="folder-temporary"]>summary,
+.canvas-dir-folder[data-node-key="folder-temp-split"]>summary {
     color: var(--canvas-dir-color-temp, var(--text-secondary));
 }
 
-.canvas-dir-folder[data-node-key$="temp-special"]>summary,
-.canvas-dir-folder[data-node-key$="temporary-special"]>summary {
+.canvas-dir-folder[data-node-key="folder-temp-special"]>summary {
     color: var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, var(--text-secondary)));
 }
 
-.canvas-dir-folder[data-node-key$="blank"]>summary,
-.canvas-dir-folder[data-node-key$="unsupported-files"]>summary {
+.canvas-dir-folder[data-node-key="folder-blank"]>summary {
     color: var(--canvas-dir-color-blank, var(--quick-add-blank-color, var(--text-secondary)));
 }
 
-.canvas-dir-folder[data-node-key$="other"]>summary,
-.canvas-dir-folder[data-node-key$="edges"]>summary {
+.canvas-dir-folder[data-node-key="folder-other"]>summary {
     color: var(--canvas-dir-color-edge, var(--text-secondary));
 }
 
@@ -3042,47 +3038,39 @@ body.sidebar-resizing * {
     flex: 0 0 18px;
 }
 
-.canvas-dir-folder[data-node-key$="permanent"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key$="permanent"]>summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key="folder-permanent"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-permanent"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-permanent, var(--quick-add-permanent-color, var(--text-tertiary)));
 }
 
-.canvas-dir-folder[data-node-key$="temporary"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key$="temporary"]>summary .canvas-dir-count,
-.canvas-dir-folder[data-node-key$="temp-split"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key$="temp-split"]>summary .canvas-dir-count,
-.canvas-dir-folder[data-node-key$="temporary-split"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key$="temporary-split"]>summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key="folder-temporary"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-temporary"]>summary .canvas-dir-count,
+.canvas-dir-folder[data-node-key="folder-temp-split"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-temp-split"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-temp, var(--text-tertiary));
 }
 
-.canvas-dir-folder[data-node-key$="temp-special"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key$="temp-special"]>summary .canvas-dir-count,
-.canvas-dir-folder[data-node-key$="temporary-special"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key$="temporary-special"]>summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key="folder-temp-special"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-temp-special"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, var(--text-tertiary)));
 }
 
-.canvas-dir-folder[data-node-key$="blank"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key$="blank"]>summary .canvas-dir-count,
-.canvas-dir-folder[data-node-key$="unsupported-files"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key$="unsupported-files"]>summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key="folder-blank"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-blank"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-blank, var(--quick-add-blank-color, var(--text-tertiary)));
 }
 
-.canvas-dir-folder[data-node-key$="card-groups"]>summary {
+.canvas-dir-folder[data-node-key="folder-card-groups"]>summary {
     color: var(--canvas-dir-color-card-group, var(--quick-add-card-group-color, var(--text-secondary)));
 }
 
-.canvas-dir-folder[data-node-key$="card-groups"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key$="card-groups"]>summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key="folder-card-groups"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-card-groups"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-card-group, var(--quick-add-card-group-color, var(--text-tertiary)));
 }
 
-.canvas-dir-folder[data-node-key$="other"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key$="other"]>summary .canvas-dir-count,
-.canvas-dir-folder[data-node-key$="edges"]>summary .canvas-dir-icon,
-.canvas-dir-folder[data-node-key$="edges"]>summary .canvas-dir-count {
+.canvas-dir-folder[data-node-key="folder-other"]>summary .canvas-dir-icon,
+.canvas-dir-folder[data-node-key="folder-other"]>summary .canvas-dir-count {
     color: var(--canvas-dir-color-edge, var(--text-tertiary));
 }
 
@@ -3255,8 +3243,7 @@ body.sidebar-resizing * {
 
 /* 非常规链式：特殊临时/空白/其他 所有条目缩进一致 */
 .canvas-dir-folder[data-node-key="folder-temp-special"]>.canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn,
-.canvas-dir-folder[data-node-key="folder-other"]>.canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn,
-.canvas-dir-folder[data-node-key="folder-unsupported-files"]>.canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn {
+.canvas-dir-folder[data-node-key="folder-other"]>.canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn {
     padding-left: 4px;
 }
 
@@ -17251,73 +17238,4 @@ html[data-theme="dark"] .github-confirm-message code {
 
 .canvas-node-load-error-retry:hover {
     background: #c0392b;
-}
-
-.unsupported-file-node {
-    background-color: var(--bg-primary, #ffffff);
-    border: 2px solid var(--border-color, rgba(27, 31, 36, 0.35));
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    overflow: visible;
-}
-
-[data-theme="dark"] .unsupported-file-node {
-    background-color: var(--bg-secondary, #1e1e1e);
-    border-color: var(--border-color, rgba(255, 255, 255, 0.4));
-}
-
-.unsupported-file-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    width: 100%;
-    padding: 16px;
-    box-sizing: border-box;
-    text-align: center;
-    color: var(--text, #111827);
-    overflow: hidden;
-    border-radius: 6px;
-}
-
-[data-theme="dark"] .unsupported-file-content {
-    color: var(--text, #f9fafb);
-}
-
-.unsupported-file-icon {
-    font-size: 36px;
-    margin-bottom: 10px;
-    color: var(--accent, #66bbff);
-}
-
-.unsupported-file-name {
-    font-weight: 500;
-    font-size: 14px;
-    line-height: 1.4;
-    word-break: break-all;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    margin-bottom: 6px;
-}
-
-.unsupported-file-badge {
-    font-size: 11px;
-    opacity: 0.6;
-    background: rgba(0, 0, 0, 0.05);
-    color: var(--text-secondary, #6b7280);
-    padding: 2px 8px;
-    border-radius: 4px;
-    border: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-[data-theme="dark"] .unsupported-file-badge {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-secondary, #9ca3af);
-    border-color: rgba(255, 255, 255, 0.05);
 }

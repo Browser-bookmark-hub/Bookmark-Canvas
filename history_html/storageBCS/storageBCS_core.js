@@ -4829,105 +4829,86 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
             return;
         }
 
-        if (node.type === 'file' && node.file) {
+        if (node.type === 'file' && node.file && /\.(md|json)$/i.test(String(node.file || ''))) {
+            const fileBytes = findFileBytes(node.file);
+            if (!fileBytes) return;
+
+            const fileText = new TextDecoder('utf-8').decode(fileBytes);
+            const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
+            const descriptionHtml = parsedMarkdown.descriptionHtml || '';
+            const contentToParse = parsedMarkdown.contentToParse || '';
             const isPermanent = __isPermanentMarkdownPath(node.file);
             const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
-            const isSpecialBookmark = (isPermanent || isTempSection) && /\.(md|json)$/i.test(String(node.file));
+            const isLivePermanentNode = isPermanent && __isExportedPermanentCanvasNode(node);
+            const resolvedContentToParse = isPermanent
+                ? __resolveCanvasMarkdownEmbeddedContent(contentToParse, node.file, readFileTextByPath)
+                : contentToParse;
 
-            if (isSpecialBookmark) {
-                const fileBytes = findFileBytes(node.file);
-                if (fileBytes) {
-                    const fileText = new TextDecoder('utf-8').decode(fileBytes);
-                    const parsedMarkdown = __parseCanvasMarkdownPayload(fileText);
-                    const descriptionHtml = parsedMarkdown.descriptionHtml || '';
-                    const contentToParse = parsedMarkdown.contentToParse || '';
-                    const isLivePermanentNode = isPermanent && __isExportedPermanentCanvasNode(node);
-                    const resolvedContentToParse = isPermanent
-                        ? __resolveCanvasMarkdownEmbeddedContent(contentToParse, node.file, readFileTextByPath)
-                        : contentToParse;
-
-                    if (isLivePermanentNode) {
-                        importedPermanentCount += 1;
-                        const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
-                        try {
-                            if (!safePrimaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
-                                const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
-                                    resolvedContentToParse,
-                                    parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
-                                );
-                                const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
-                                if (normalizedPermanentTreeSnapshot) {
-                                    safePrimaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
-                                }
-                            }
-                        } catch (_) { }
-
-                        if (overwriteMode) {
-                            return;
-                        }
-
-                        const items = __parseMarkdownAuto(resolvedContentToParse);
-                        const sectionId = node.id;
-                        const slotLabel = toAlphaLabel(resolvedSlot) || '';
-                        const suffix = slotLabel ? ` (#${slotLabel})` : '';
-                        const dateStr = new Date().toISOString().slice(0, 10);
-                        const snapshotTitle = isEn
-                            ? `[Snapshot] Permanent Sections (${dateStr})${suffix}`
-                            : `[快照] 永久栏目 (${dateStr})${suffix}`;
-
-                        tempState.sections.push({
-                            id: sectionId,
-                            title: snapshotTitle,
-                            x: node.x,
-                            y: node.y,
-                            width: node.width,
-                            height: node.height,
-                            color: convertObsidianColor(node.color) || '#44cf6e',
-                            items,
-                            descriptionMd: String(
-                                (parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string')
-                                    ? parsedMarkdown.descriptionMarkdown
-                                    : __htmlToMarkdown(descriptionHtml)
-                            ),
-                            isSnapshot: true
-                        });
-                        return;
-                    }
-
-                    if (isPermanent) {
-                        if (overwriteMode) {
-                            return;
-                        }
-                        tempState.sections.push(
-                            __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, resolvedContentToParse, isEn)
+            if (isLivePermanentNode) {
+                importedPermanentCount += 1;
+                const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
+                try {
+                    if (!safePrimaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
+                        const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
+                            resolvedContentToParse,
+                            parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
                         );
-                        return;
+                        const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
+                        if (normalizedPermanentTreeSnapshot) {
+                            safePrimaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
+                        }
                     }
+                } catch (_) { }
 
-                    if (isTempSection) {
-                        tempState.sections.push(
-                            __buildImportedTempSectionFromJsonMarkdown(node, parsedMarkdown, contentToParse, isEn)
-                        );
-                        return;
-                    }
+                if (overwriteMode) {
+                    return;
                 }
+
+                const items = __parseMarkdownAuto(resolvedContentToParse);
+                const sectionId = node.id;
+                const slotLabel = toAlphaLabel(resolvedSlot) || '';
+                const suffix = slotLabel ? ` (#${slotLabel})` : '';
+                const dateStr = new Date().toISOString().slice(0, 10);
+                const snapshotTitle = isEn
+                    ? `[Snapshot] Permanent Sections (${dateStr})${suffix}`
+                    : `[快照] 永久栏目 (${dateStr})${suffix}`;
+
+                tempState.sections.push({
+                    id: sectionId,
+                    title: snapshotTitle,
+                    x: node.x,
+                    y: node.y,
+                    width: node.width,
+                    height: node.height,
+                    color: convertObsidianColor(node.color) || '#44cf6e',
+                    items,
+                    descriptionMd: String(
+                        (parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string')
+                            ? parsedMarkdown.descriptionMarkdown
+                            : __htmlToMarkdown(descriptionHtml)
+                    ),
+                    isSnapshot: true
+                });
                 return;
             }
 
-            // Fallback for unrecognized/unsupported file nodes (like .mp4 or notes outside sync paths)
-            const convertedColor = convertObsidianColor(node.color);
-            const isHex = convertedColor && convertedColor.startsWith('#');
-            tempState.mdNodes.push({
-                id: node.id,
-                x: node.x,
-                y: node.y,
-                width: node.width,
-                height: node.height,
-                color: isHex ? null : node.color,
-                colorHex: isHex ? convertedColor : null,
-                file: String(node.file),
-                type: 'file'
-            });
+            if (isPermanent) {
+                if (overwriteMode) {
+                    return;
+                }
+                tempState.sections.push(
+                    __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, descriptionHtml, resolvedContentToParse, isEn)
+                );
+                return;
+            }
+
+            if (isTempSection) {
+                tempState.sections.push(
+                    __buildImportedTempSectionFromJsonMarkdown(node, parsedMarkdown, contentToParse, isEn)
+                );
+                return;
+            }
+
             return;
         }
 
@@ -5873,21 +5854,19 @@ function __buildPersistedCanvasState(state, options = {}) {
             if (!cloned || typeof cloned !== 'object') return null;
             if (!preserveRaw) {
                 const isGroupNode = cloned.subtype === 'card-group';
-                const isFileNode = cloned.type === 'file';
-                const isSpecialNode = isGroupNode || isFileNode;
                 const markedApi = (typeof marked !== 'undefined' && marked && typeof marked.parse === 'function')
                     ? marked
                     : (typeof window !== 'undefined' && window && window.marked && typeof window.marked.parse === 'function' ? window.marked : null);
                 const isMarkedLoaded = !!markedApi;
-                const refreshCachesFromMarkdown = !isSpecialNode && !(typeof cloned.html === 'string' && cloned.html.trim());
-                if (!isSpecialNode && !(options && options.skipValidation === true)) {
+                const refreshCachesFromMarkdown = !isGroupNode && !(typeof cloned.html === 'string' && cloned.html.trim());
+                if (!isGroupNode && !(options && options.skipValidation === true)) {
                     __ensureMdNodeMarkdownProtocol(cloned, {
                         refreshCachesFromMarkdown
                     });
                 }
-                if (!isSpecialNode && __isCanvasNativeTextNode(cloned)) {
+                if (!isGroupNode && __isCanvasNativeTextNode(cloned)) {
                     try { delete cloned.markdownSource; } catch (_) { }
-                } else if (!isSpecialNode) {
+                } else if (!isGroupNode) {
                     cloned.markdownSource = __normalizeCanvasMarkdownSource(__deriveMdNodeMarkdownSource(cloned));
                 }
             }
@@ -5903,16 +5882,16 @@ function __buildPersistedCanvasState(state, options = {}) {
     } else {
         const validIds = new Set();
         persistedSections.forEach((section) => {
-            if (section && section.id) validIds.add(String(section.id).trim());
+            if (section && section.id) validIds.add(section.id);
         });
         persistedMdNodes.forEach((node) => {
-            if (node && node.id) validIds.add(String(node.id).trim());
+            if (node && node.id) validIds.add(node.id);
         });
 
         persistedEdges = sourceEdges.filter((edge) => {
             if (!edge || typeof edge !== 'object') return false;
-            const fromNode = String(edge.fromNode || '').trim();
-            const toNode = String(edge.toNode || '').trim();
+            const fromNode = String(edge.fromNode || '');
+            const toNode = String(edge.toNode || '');
             if (!fromNode || !toNode) return false;
             const fromValid = validIds.has(fromNode) || __isPermanentCanvasNodeId(fromNode);
             const toValid = validIds.has(toNode) || __isPermanentCanvasNodeId(toNode);
@@ -6488,18 +6467,6 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
         if (!node || !node.id) return;
         if (node.subtype === 'card-group') return;
         const color = node.colorHex || node.color || null;
-        if (node.type === 'file') {
-            canvasData.nodes.push(__buildObsidianCanvasFileNode({
-                id: node.id,
-                file: String(node.file || ''),
-                x: Math.round(node.x || 0),
-                y: Math.round(node.y || 0),
-                width: Math.round(node.width || exportMdBase.width),
-                height: Math.round(node.height || exportMdBase.height),
-                color
-            }));
-            return;
-        }
         const body = __isCanvasNativeTextNode(node)
             ? __resolveCanvasNativeTextNodeBody(node)
             : __deriveMdNodeMarkdownSource(node);
@@ -7960,32 +7927,6 @@ function __buildCanvasTempStateFromBcsStorage(storageMap, metaPayload, options =
                 colorHex: isHex ? convertedColor : null,
                 pinned: false
             });
-            return;
-        }
-
-        if (node.type === 'file' && node.file) {
-            const isSection = sectionPayloadById.has(String(node.id));
-            if (!isSection) {
-                const isPermanent = __isPermanentMarkdownPath(node.file);
-                const isTempSection = node.file.includes('Temporary/') || node.file.includes('Temporary Sections/') || node.file.includes('临时栏目/');
-                const isSpecialBookmark = (isPermanent || isTempSection) && /\.(md|json)$/i.test(String(node.file));
-
-                if (!isSpecialBookmark) {
-                    const convertedColor = convertObsidianColor(node.color);
-                    const isHex = convertedColor && convertedColor.startsWith('#');
-                    tempState.mdNodes.push({
-                        id: node.id,
-                        x: node.x,
-                        y: node.y,
-                        width: node.width,
-                        height: node.height,
-                        color: isHex ? null : node.color,
-                        colorHex: isHex ? convertedColor : null,
-                        file: String(node.file),
-                        type: 'file'
-                    });
-                }
-            }
             return;
         }
 

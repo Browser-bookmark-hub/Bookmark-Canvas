@@ -14395,12 +14395,10 @@ function showBookmarkTreeObjectContextMenu(e, target) {
     e.stopPropagation();
     const labels = __getCanvasObjectMenuLabels();
     const type = target && target.type;
-    const isUnsupportedFile = target && target.nodeData && target.nodeData.type === 'file';
-    const items = [];
-    if (!isUnsupportedFile) {
-        items.push({ action: 'fullscreen', label: labels.fullscreen, icon: 'expand' });
-    }
-    items.push({ action: 'locate', label: labels.locate, icon: 'crosshairs' });
+    const items = [
+        { action: 'fullscreen', label: labels.fullscreen, icon: 'expand' },
+        { action: 'locate', label: labels.locate, icon: 'crosshairs' }
+    ];
     if (type === 'temporary') {
         items.push({ action: 'rename', label: labels.rename, icon: 'edit' });
     }
@@ -14418,10 +14416,7 @@ function showBookmarkTreeObjectContextMenu(e, target) {
         items.push({ action: 'delete', label: labels.delete, icon: 'trash-alt', className: 'color-red' });
     }
     if (type === 'md-node') {
-        const isUnsupportedFile = target && target.nodeData && target.nodeData.type === 'file';
-        if (!isUnsupportedFile) {
-            items.push({ action: 'copy-source', label: labels.copySource, icon: 'code' });
-        }
+        items.push({ action: 'copy-source', label: labels.copySource, icon: 'code' });
     } else {
         items.push(
             { action: 'export-json', label: labels.exportJson, icon: 'file-alt' },
