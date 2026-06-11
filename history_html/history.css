@@ -16266,6 +16266,7 @@ body.canvas-popover-active .md-align-popover {
     margin: 0 0 7px;
     font-size: 14px;
     font-weight: 700;
+    color: var(--accent-primary, #0969da);
 }
 
 .github-config-grid {
@@ -16380,6 +16381,7 @@ body.canvas-popover-active .md-align-popover {
     margin-bottom: 7px;
     font-size: 14px;
     font-weight: 700;
+    color: var(--accent-primary, #0969da);
 }
 
 .github-config-inline {
@@ -16623,6 +16625,7 @@ body.canvas-popover-active .md-align-popover {
 
 .github-config-last-pull-title {
     margin-top: 9px;
+    color: var(--text-primary, #24292f);
 }
 
 .github-config-last-pull-row {

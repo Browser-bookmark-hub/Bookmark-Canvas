@@ -23,7 +23,8 @@
         'githubCanvasPushGuideCustomName',
         'githubConfirmCommitDetails',
         'githubCommitMsgTemplate',
-        'githubCommitDescTemplate'
+        'githubCommitDescTemplate',
+        'githubPullMethod'
     ];
 
     let activeConfigDialog = null;
@@ -236,7 +237,8 @@
             pushGuideCustomName: String(raw.githubCanvasPushGuideCustomName || '').trim(),
             confirmCommitDetails: raw.githubConfirmCommitDetails !== false,
             commitMsgTemplate: String(raw.githubCommitMsgTemplate !== undefined ? raw.githubCommitMsgTemplate : DEFAULT_COMMIT_MSG_TEMPLATE).trim(),
-            commitDescTemplate: String(raw.githubCommitDescTemplate !== undefined ? raw.githubCommitDescTemplate : DEFAULT_COMMIT_DESC_TEMPLATE).trim()
+            commitDescTemplate: String(raw.githubCommitDescTemplate !== undefined ? raw.githubCommitDescTemplate : DEFAULT_COMMIT_DESC_TEMPLATE).trim(),
+            pullMethod: raw.githubPullMethod === 'targeted' ? 'targeted' : 'zipball'
         };
     }
 
@@ -254,7 +256,8 @@
             githubCanvasPushGuideCustomName: String(config && config.pushGuideCustomName || '').trim(),
             githubConfirmCommitDetails: config && config.confirmCommitDetails !== false,
             githubCommitMsgTemplate: String(config && (config.commitMsgTemplate !== undefined ? config.commitMsgTemplate : DEFAULT_COMMIT_MSG_TEMPLATE)).trim(),
-            githubCommitDescTemplate: String(config && (config.commitDescTemplate !== undefined ? config.commitDescTemplate : DEFAULT_COMMIT_DESC_TEMPLATE)).trim()
+            githubCommitDescTemplate: String(config && (config.commitDescTemplate !== undefined ? config.commitDescTemplate : DEFAULT_COMMIT_DESC_TEMPLATE)).trim(),
+            githubPullMethod: config && config.pullMethod === 'targeted' ? 'targeted' : 'zipball'
         };
         await storageSet(safe);
         return await loadConfig();
@@ -475,9 +478,9 @@
             const el = dialog.querySelector(`#${id}`);
             return el ? String(el.value || '').trim() : '';
         };
-        const getRadioValue = (name) => {
+        const getRadioValue = (name, fallback = 'agents') => {
             const el = dialog.querySelector(`input[name="${name}"]:checked`);
-            return el ? el.value : 'agents';
+            return el ? el.value : fallback;
         };
         const getCheckbox = (id) => {
             const el = dialog.querySelector(`#${id}`);
@@ -496,7 +499,8 @@
             pushGuideCustomName: get('githubPushGuideCustomInput'),
             confirmCommitDetails: getRadioValue('githubPushMode') === 'prompt',
             commitMsgTemplate: get('githubConfigCommitMsgTemplate'),
-            commitDescTemplate: get('githubConfigCommitDescTemplate')
+            commitDescTemplate: get('githubConfigCommitDescTemplate'),
+            pullMethod: getRadioValue('githubPullMethod', 'zipball')
         };
     }
 
@@ -654,6 +658,93 @@
         });
     }
 
+    function showPullMethodHelpDialog() {
+        if (activeConfirmDialog) {
+            try { activeConfirmDialog.remove(); } catch (_) { }
+            activeConfirmDialog = null;
+        }
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog github-path-help-dialog';
+        dialog.innerHTML = `
+            <div class="import-dialog-content github-path-help-content" style="width: min(92vw, 540px);">
+                <div class="import-dialog-header" style="padding-left: 14px; padding-right: 14px;">
+                    <h3>${escapeHtml(t('拉取数据包方式说明', 'Pull Package Method Explanation'))}</h3>
+                    <button class="import-dialog-close" id="githubPullMethodHelpClose" type="button">&times;</button>
+                </div>
+                <div class="import-dialog-body github-confirm-body" style="font-size: 13px; line-height: 1.6; color: var(--text-primary);">
+                    <div style="display: flex; flex-direction: column; gap: 12px; text-align: left;">
+                        
+                        <table style="width: 100%; border-collapse: collapse; margin-bottom: 4px; font-size: 12px; border: 1px solid var(--border-color, rgba(0,0,0,0.15)); border-radius: 6px; overflow: hidden;">
+                            <thead>
+                                <tr style="background: var(--bg-secondary, rgba(0, 0, 0, 0.04)); border-bottom: 2px solid var(--border-color, rgba(0,0,0,0.15));">
+                                    <th style="padding: 8px; text-align: left; font-weight: bold; width: 100px;">${escapeHtml(t('拉取方式', 'Method'))}</th>
+                                    <th style="padding: 8px; text-align: left; font-weight: bold; width: 130px;">${escapeHtml(t('特点', 'Characteristics'))}</th>
+                                    <th style="padding: 8px; text-align: left; font-weight: bold;">${escapeHtml(t('适用场景', 'Best Scenario'))}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr style="border-bottom: 1px solid var(--border-color, rgba(0,0,0,0.08));">
+                                    <td style="padding: 8px; font-weight: bold; color: var(--accent-primary, #0969da);">${escapeHtml(t('整仓压缩包法', 'Full Repo ZIP'))}</td>
+                                    <td style="padding: 8px; color: var(--text-primary); font-weight: 600;">${t('速度<span style="color: #2da44e;">快</span>，但需<span style="color: #bc4c00;">过滤</span>', 'Speed is <span style="color: #2da44e;">fast</span>, but needs <span style="color: #bc4c00;">filtering</span>')}</td>
+                                    <td style="padding: 8px; color: var(--text-secondary);">${t('永久/临时栏目卡片<span style="color: #0969da; font-weight: bold;">多</span>，仓库其他文件<span style="color: #2da44e; font-weight: bold;">少</span>', 'Canvas cards count is <span style="color: #0969da; font-weight: bold;">high</span>, other files in repo are <span style="color: #2da44e; font-weight: bold;">few</span>')}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 8px; font-weight: bold; color: var(--accent-primary, #0969da);">${escapeHtml(t('定点拉取法', 'Targeted Pull'))}</td>
+                                    <td style="padding: 8px; color: var(--text-primary); font-weight: 600;">${t('速度<span style="color: #cf222e;">慢</span>，但<span style="color: #2da44e;">精准</span>', 'Speed is <span style="color: #cf222e;">slow</span>, but <span style="color: #2da44e;">precise</span>')}</td>
+                                    <td style="padding: 8px; color: var(--text-secondary);">${t('永久/临时栏目卡片<span style="color: #2da44e; font-weight: bold;">少</span>，仓库其他文件<span style="color: #cf222e; font-weight: bold;">多</span>', 'Canvas cards count is <span style="color: #2da44e; font-weight: bold;">low</span>, other files in repo are <span style="color: #cf222e; font-weight: bold;">many</span>')}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <div>
+                            <strong style="font-size: 13px; display: block; margin-bottom: 4px;">${escapeHtml(t('原因妥协：', 'Technical Compromise:'))}</strong>
+                            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; padding: 10px; border-radius: 6px; background: var(--bg-secondary, rgba(0, 0, 0, 0.03)); border: 1px dashed var(--border-color, rgba(0, 0, 0, 0.15));">
+                                <span>「${t('GitHub 官方的 /zipball 接口设计非常简单，它只接受 owner（所有者）、repo（仓库）和 branch（分支/引用），<strong>无法指定路径的文件或文件夹进行压缩</strong>。', 'GitHub\'s /zipball API is simple and only accepts owner, repo, and branch, and <strong>cannot specify paths of files or folders to compress</strong>.')}」</span>
+                                <div style="margin-top: 6px;">
+                                    <a href="https://github.com/orgs/community/discussions/178419" target="_blank" rel="noopener noreferrer" style="color: var(--accent-primary, #0969da); text-decoration: underline; word-break: break-all;">https://github.com/orgs/community/discussions/178419</a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <strong style="font-size: 13px; display: block; margin-bottom: 4px;">${escapeHtml(t('建议：', 'Recommendation:'))}</strong>
+                            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; padding: 8px 10px; border-radius: 6px; background: rgba(9, 105, 218, 0.06); border: 1px solid rgba(9, 105, 218, 0.15);">
+                                <span>${t('默认选「整仓压缩包法」，强烈建议用一个<span style="color: #2da44e; font-weight: bold;">干净的仓库</span>存放。', 'Defaults to "Full Repo ZIPball", highly recommended to store in a <span style="color: #2da44e; font-weight: bold;">clean repository</span>.')}</span>
+                            </div>
+                        </div>
+
+                    </div>
+                    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+                        <button id="githubPullMethodHelpOk" type="button" class="import-mode-btn import-mode-btn-confirm" style="min-width: 80px;">${escapeHtml(t('关闭', 'Close'))}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(dialog);
+        activeConfirmDialog = dialog;
+
+        return new Promise((resolve) => {
+            const cleanup = () => {
+                try { dialog.remove(); } catch (_) { }
+                if (activeConfirmDialog === dialog) activeConfirmDialog = null;
+                resolve();
+            };
+            const closeBtn = dialog.querySelector('#githubPullMethodHelpClose');
+            const okBtn = dialog.querySelector('#githubPullMethodHelpOk');
+            if (closeBtn) closeBtn.addEventListener('click', cleanup);
+            if (okBtn) okBtn.addEventListener('click', cleanup);
+            dialog.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' || event.key === 'Enter') {
+                    event.preventDefault();
+                    cleanup();
+                }
+            });
+            dialog.addEventListener('click', (event) => {
+                if (event.target === dialog) cleanup();
+            });
+        });
+    }
+
     async function showConfigDialog(options = {}) {
         if (activeConfigDialog) {
             try { activeConfigDialog.remove(); } catch (_) { }
@@ -685,7 +776,7 @@
                 </div>
                 <div class="import-dialog-body github-config-body">
                     <div class="github-config-section">
-                        <div class="github-config-section-title">${escapeHtml(t('1. 仓库配置', '1. Repository'))}</div>
+                        <div class="github-config-section-title">${escapeHtml(t('1、仓库配置', '1. Repository'))}</div>
                         <div class="github-config-grid github-config-repo-grid">
                             <label class="github-config-field">
                                 <span>Owner</span>
@@ -719,10 +810,10 @@
                     <div id="githubConfigStatus" class="github-config-status" data-type="info">${escapeHtml(t('修改后会自动保存。', 'Changes are saved automatically.'))}</div>
 
                     <div class="github-config-subsection">
-                        <div class="github-config-subtitle">${escapeHtml(t('2. 推送/拉取默认项', '2. Push/Pull Defaults'))}</div>
+                        <div class="github-config-subtitle">${escapeHtml(t('2.1、推送', '2.1 Push'))}</div>
                         <div class="github-config-inline">
                             <div style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px;">
-                                <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">${escapeHtml(t('推送提交模式', 'Push Commit Mode'))}</span>
+                                <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">${escapeHtml(t('2.1.1、推送提交模式', '2.1.1 Push Commit Mode'))}</span>
                                 <div style="display: flex; align-items: center; gap: 16px; margin-top: 2px;">
                                     <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--text-primary); user-select: none; font-weight: normal;">
                                         <input type="radio" name="githubPushMode" value="prompt" ${config.confirmCommitDetails !== false ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
@@ -748,19 +839,8 @@
                                 </div>
                             </div>
                             <div class="github-config-divider-micro"></div>
-                            <label class="github-config-field github-config-remote-field">
-                                <span>${escapeHtml(t('「.canvas」内部路径', '".canvas" Internal Path'))}</span>
-                                <div class="github-path-input-row">
-                                    <div class="github-path-input-wrapper">
-                                        ${config.basePath ? `<span class="github-path-prefix" title="${escapeHtml(config.basePath)}/">${escapeHtml(config.basePath)}/</span>` : ''}
-                                        <input id="githubConfigRemoteRoot" type="text" autocomplete="off" value="${escapeHtml(config.remoteRoot)}" placeholder="${escapeHtml(getDefaultRemoteRoot())}">
-                                    </div>
-                                    <button id="githubPathHelpBtn" type="button" class="import-option-btn github-path-detail-btn" style="border: 1px solid var(--accent-primary, #0969da) !important; color: var(--accent-primary, #0969da) !important;">${escapeHtml(t('详情', 'Details'))}</button>
-                                </div>
-                            </label>
-                            <div class="github-config-divider-micro"></div>
                             <div class="github-config-guide-container" style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
-                                <span style="font-size: 12px; font-weight: 700; color: var(--text-primary);">${escapeHtml(t('AI 指南文件名', 'AI Guide Filename'))}</span>
+                                <span style="font-size: 12px; font-weight: 700; color: var(--text-primary);">${escapeHtml(t('2.1.2、AI 指南文件名', '2.1.2 AI Guide Filename'))}</span>
                                 <div class="github-config-guide-rows" style="display: flex; flex-direction: column; gap: 8px;">
                                     <div class="github-config-guide-row-1" style="display: flex; align-items: center; gap: 16px;">
                                         <label class="github-config-guide-option" style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary);">
@@ -786,10 +866,32 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="github-config-divider-mini"></div>
+                        </div>
+                    </div>
+
+                    <div class="github-config-subsection">
+                        <div class="github-config-subtitle">${escapeHtml(t('2.2、拉取', '2.2 Pull'))}</div>
+                        <div class="github-config-inline">
+                            <div class="github-config-pull-method-row" style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+                                <span style="font-size: 12px; font-weight: 700; color: var(--text-primary); display: inline-flex; align-items: center; gap: 4px; user-select: none;">
+                                    ${escapeHtml(t('2.2.1、拉取数据包方式', '2.2.1 Pull Package Method'))}
+                                    <span class="github-config-info-trigger" id="githubPullMethodHelpBtn" style="cursor: pointer;">?</span>
+                                </span>
+                                <div style="display: flex; align-items: center; gap: 16px; margin-top: 2px;">
+                                    <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary); margin: 0;">
+                                        <input type="radio" name="githubPullMethod" value="zipball" id="githubPullMethodZipball" ${config.pullMethod === 'zipball' ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                        <span style="font-weight: 600;">${escapeHtml(t('整仓压缩包法', 'Full Repo ZIPball'))}</span>
+                                    </label>
+                                    <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary); margin: 0;">
+                                        <input type="radio" name="githubPullMethod" value="targeted" id="githubPullMethodTargeted" ${config.pullMethod === 'targeted' ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                        <span style="font-weight: 600;">${escapeHtml(t('定点拉取法', 'Targeted Pull'))}</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="github-config-divider-micro"></div>
                             <div class="github-config-pull-row">
                                 <label class="github-config-field github-config-pull-mode-field">
-                                    <span>${escapeHtml(t('默认拉取方式', 'Default Pull Mode'))}</span>
+                                    <span>${escapeHtml(t('2.2.2、默认数据包导入方式', '2.2.2 Default Data Package Import Mode'))}</span>
                                     <select id="githubConfigDefaultPullMode">
                                         <option value="snapshot"${config.defaultPullMode === 'snapshot' ? ' selected' : ''}>${escapeHtml(t('快照包导入', 'Snapshot import'))}</option>
                                         <option value="overwrite"${config.defaultPullMode === 'overwrite' ? ' selected' : ''}>${escapeHtml(t('全量覆盖', 'Full Overwrite'))}</option>
@@ -806,9 +908,20 @@
                                 </label>
                             </div>
                             <div class="github-config-divider-micro"></div>
+                            <label class="github-config-field github-config-remote-field">
+                                <span>${escapeHtml(t('2.2.3、「.canvas」内部路径', '2.2.3 ".canvas" Internal Path'))}</span>
+                                <div class="github-path-input-row">
+                                    <div class="github-path-input-wrapper">
+                                        ${config.basePath ? `<span class="github-path-prefix" title="${escapeHtml(config.basePath)}/">${escapeHtml(config.basePath)}/</span>` : ''}
+                                        <input id="githubConfigRemoteRoot" type="text" autocomplete="off" value="${escapeHtml(config.remoteRoot)}" placeholder="${escapeHtml(getDefaultRemoteRoot())}">
+                                    </div>
+                                    <button id="githubPathHelpBtn" type="button" class="import-option-btn github-path-detail-btn" style="border: 1px solid var(--accent-primary, #0969da) !important; color: var(--accent-primary, #0969da) !important;">${escapeHtml(t('详情', 'Details'))}</button>
+                                </div>
+                            </label>
+                            <div class="github-config-divider-micro"></div>
                             <div class="github-config-inferred-row" style="grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; width: var(--github-config-control-width); max-width: 100%; margin-top: 8px;">
                                 <span style="font-size: 12px; font-weight: 600; white-space: nowrap; flex-shrink: 0; color: var(--text-primary); display: inline-flex; align-items: center; gap: 4px;">
-                                    ${escapeHtml(t('拉取路径', 'Pull Path'))}
+                                    ${escapeHtml(t('2.2.4、拉取路径', '2.2.4 Pull Path'))}
                                     <span class="github-config-info-trigger">?
                                         <span class="github-config-info-tooltip inferred-path-tooltip ${isEn() ? 'is-en' : 'is-zh'}">${t('根据「.canvas」内部路径计算。', 'Calculated from the ".canvas" internal path.')}</span>
                                     </span>
@@ -819,7 +932,7 @@
                     </div>
 
                     <div class="github-config-last">
-                        <div class="github-config-subtitle">${escapeHtml(t('3. 上一次操作', '3. Last Operation'))}</div>
+                        <div class="github-config-subtitle">${escapeHtml(t('3、上一次操作', '3. Last Operation'))}</div>
                         <div class="github-config-last-content">${formatLastOperation(config.lastOperation)}</div>
                         <div class="github-config-subtitle github-config-last-pull-title">${escapeHtml(t('上次拉取路径', 'Last Pull Path'))}</div>
                         <div class="github-config-last-content github-config-last-pull-content">${formatLastPullRemotePath(config.lastPullRemotePath)}</div>
@@ -959,6 +1072,15 @@
                     if (!remoteInput) return;
                     remoteInput.value = normalizeRepoPath(result.path) || getDefaultRemoteRoot();
                     remoteInput.dispatchEvent(new Event('input', { bubbles: true }));
+                });
+            }
+
+            const pullMethodHelpBtn = dialog.querySelector('#githubPullMethodHelpBtn');
+            if (pullMethodHelpBtn) {
+                pullMethodHelpBtn.addEventListener('click', async (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    await showPullMethodHelpDialog();
                 });
             }
 
@@ -1744,6 +1866,42 @@
                 return;
             }
 
+            // Detect files larger than 5MB
+            const LARGE_FILE_LIMIT = 5 * 1024 * 1024; // 5MB
+            const largeFiles = [];
+            changes.forEach((entry) => {
+                if (entry.delete) return;
+                const size = entry.content ? textToUtf8Bytes(entry.content).length : 0;
+                if (size > LARGE_FILE_LIMIT) {
+                    largeFiles.push({ path: entry.path, size });
+                }
+            });
+
+            if (largeFiles.length > 0) {
+                const listHtml = largeFiles.map((f) => {
+                    const sizeMB = (f.size / (1024 * 1024)).toFixed(2);
+                    return `<li style="word-break: break-all; margin-bottom: 4px;"><code>${escapeHtml(f.path)}</code> (${sizeMB} MB)</li>`;
+                }).join('');
+
+                const warningMsg = t(
+                    `检测到以下待推送文件超过了建议的 5MB 大小限制，可能会导致网络请求失败或耗时极长。是否继续推送？<br><ul style="text-align: left; margin-top: 8px; max-height: 120px; overflow-y: auto; padding-left: 20px;">${listHtml}</ul>`,
+                    `The following files exceed the recommended 5MB limit and might cause network failure or take too long. Do you want to continue?<br><ul style="text-align: left; margin-top: 8px; max-height: 120px; overflow-y: auto; padding-left: 20px;">${listHtml}</ul>`
+                );
+
+                const continuePush = await showConfirmDialog({
+                    title: t('大文件推送警告', 'Large File Warning'),
+                    messageHtml: warningMsg,
+                    confirmText: t('仍然推送', 'Push Anyway'),
+                    cancelText: t('取消', 'Cancel'),
+                    danger: true
+                });
+
+                if (!continuePush) {
+                    showToast(t('推送已取消。', 'Push cancelled.'), 'info', 3000);
+                    return;
+                }
+            }
+
             let commitMessage = '';
             let commitDescription = '';
 
@@ -2132,8 +2290,8 @@
 
             let folderFiles = null;
 
-            // Attempt to pull via ZIPball first to optimize network requests
-            if (typeof api.getRepoZipball === 'function' && typeof __unzipStore === 'function') {
+            // Attempt to pull via ZIPball first to optimize network requests (unless targeted pull is explicitly configured)
+            if (config.pullMethod !== 'targeted' && typeof api.getRepoZipball === 'function' && typeof __unzipStore === 'function') {
                 try {
                     updateProgress(15, t('正在获取远端 ZIP 压缩包...', 'Requesting remote ZIP archive...'));
                     const zipResult = await api.getRepoZipball({

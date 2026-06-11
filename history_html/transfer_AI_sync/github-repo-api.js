@@ -308,13 +308,111 @@
             }
         };
 
-        let result = await doFetch(requestHeaders);
-        const authHeader = typeof requestHeaders.Authorization === 'string' ? requestHeaders.Authorization : '';
-        const authToken = normalizeGitHubToken(authHeader);
-        if (result.response.status === 401 && /^Bearer\s+/i.test(authHeader) && authToken) {
-            result = await doFetch({ ...requestHeaders, Authorization: `token ${authToken}` });
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        let attempt = 0;
+        const maxAttempts = 3;
+
+        while (true) {
+            if (signal && signal.aborted) {
+                const cancelError = new Error('GitHub operation cancelled');
+                cancelError.code = 'GITHUB_OPERATION_CANCELLED';
+                throw cancelError;
+            }
+
+            let result = null;
+            let runError = null;
+
+            try {
+                result = await doFetch(requestHeaders);
+                const authHeader = typeof requestHeaders.Authorization === 'string' ? requestHeaders.Authorization : '';
+                const authToken = normalizeGitHubToken(authHeader);
+                if (result.response.status === 401 && /^Bearer\s+/i.test(authHeader) && authToken) {
+                    result = await doFetch({ ...requestHeaders, Authorization: `token ${authToken}` });
+                }
+            } catch (error) {
+                if (error && error.code === 'GITHUB_OPERATION_CANCELLED') {
+                    throw error;
+                }
+                runError = error;
+            }
+
+            let shouldRetry = false;
+            let waitMs = 0;
+
+            if (runError) {
+                if (attempt < maxAttempts - 1) {
+                    shouldRetry = true;
+                    waitMs = Math.min(1000 * Math.pow(2, attempt), 8000) + Math.floor(Math.random() * 200);
+                }
+            } else if (result && result.response) {
+                const status = result.response.status;
+                if (status === 502 || status === 503 || status === 504) {
+                    if (attempt < maxAttempts - 1) {
+                        shouldRetry = true;
+                        waitMs = Math.min(1000 * Math.pow(2, attempt), 8000) + Math.floor(Math.random() * 200);
+                    }
+                } else if (status === 403 || status === 429) {
+                    const headersMap = result.headers || {};
+                    const remaining = Number(headersMap['x-ratelimit-remaining']);
+                    const retryAfter = Number(headersMap['retry-after']);
+                    
+                    const responseText = result.text || '';
+                    const messageText = responseText.toLowerCase();
+                    const secondaryLimited = /secondary rate limit|abuse detection/i.test(messageText);
+                    const primaryLimited = Number.isFinite(remaining) && remaining === 0;
+
+                    if (secondaryLimited || primaryLimited || status === 429 || (Number.isFinite(retryAfter) && retryAfter > 0)) {
+                        if (attempt < maxAttempts - 1) {
+                            shouldRetry = true;
+                            let waitSeconds = 1;
+                            if (Number.isFinite(retryAfter) && retryAfter > 0) {
+                                waitSeconds = Math.max(1, Math.ceil(retryAfter));
+                            } else {
+                                waitSeconds = Math.min(2 * Math.pow(2, attempt), 10);
+                            }
+                            waitMs = waitSeconds * 1000 + Math.floor(Math.random() * 200);
+                        }
+                    }
+                }
+            }
+
+            if (shouldRetry) {
+                attempt += 1;
+                if (signal) {
+                    let onAbort;
+                    const sleepPromise = new Promise((resolve, reject) => {
+                        if (signal.aborted) {
+                            const cancelError = new Error('GitHub operation cancelled');
+                            cancelError.code = 'GITHUB_OPERATION_CANCELLED';
+                            reject(cancelError);
+                            return;
+                        }
+                        const timer = setTimeout(() => {
+                            signal.removeEventListener('abort', onAbort);
+                            resolve();
+                        }, waitMs);
+                        onAbort = () => {
+                            clearTimeout(timer);
+                            signal.removeEventListener('abort', onAbort);
+                            const cancelError = new Error('GitHub operation cancelled');
+                            cancelError.code = 'GITHUB_OPERATION_CANCELLED';
+                            reject(cancelError);
+                        };
+                        signal.addEventListener('abort', onAbort);
+                    });
+                    await sleepPromise;
+                } else {
+                    await sleep(waitMs);
+                }
+                continue;
+            }
+
+            if (runError) {
+                throw runError;
+            }
+            return result;
         }
-        return result;
     }
 
     async function githubRequestJson(url, { method = 'GET', headers = {}, body, signal } = {}) {
