@@ -3311,7 +3311,7 @@ function createInitialDemoTemplate() {
 
     // 中文版：画布基础（Markdown-first）
     const bookmarkGuideMarkdown_zh = `## 画布基础
-1. **拖动书签/文件夹至空白处**，创建书签型临时节点；
+1. **拖动书签/文件夹至空白处**，<font color="#44cf6e">创建书签型临时节点</font>；
 2. 临时节点的修改 **不计入核心数据**，可用于对比查看/整理；
 3. **栏目间可互相拖动/粘贴**。
 
@@ -3322,16 +3322,19 @@ function createInitialDemoTemplate() {
 - **创建卡片组**：框选多个元素后创建组，或右键画布空白处创建空组
 - **画布元素**：永久栏目及其副本、临时栏目、空白栏目、卡片组、连接线
 
+---
 ### 连接线
 - **创建连接**：点击栏目边缘连接点，拖向另一栏目
 - **编辑连接**：点击连接线，可修改颜色、方向、标签
 - **预设颜色**：<font color="#66bbff">蓝</font>、<font color="#fb464c">红</font>、<font color="#e9973f">橙</font>、<font color="#e0de71">黄</font>、<font color="#44cf6e">绿</font>、<font color="#53dfdd">青</font>、<font color="#a882ff">紫</font>
 
+---
 ### 卡片组
 - **嵌套组**：把栏目、空白卡片或其他组放进组框内，即可形成嵌套关系
 - **组内整理**：卡片组按 \`.canvas\` 几何包含关系保存，不需要手动维护 children
 - **组导出**：卡片组或临时选区可以单独导出为小型画布包
 
+---
 ### Markdown / HTML 编辑
 - **双击编辑**：空白栏目和说明框都可以双击进入编辑
 - **格式工具栏**：支持标题、列表、引用、加粗、斜体、下划线、字体颜色、对齐和高亮
@@ -3339,6 +3342,7 @@ function createInitialDemoTemplate() {
 - **Markdown 示例**：**加粗文字**、==高亮文字==
 > 引用内容
 - **HTML 示例**：<font color="#fb464c">红色文字</font>、<span style="color:#66bbff">蓝色文字</span>、<u>下划线</u>
+- **图片/图标**：轻量化 HTML/Markdown 图标支持，可以拖入，支持 URL 和 Base64，有 20KB 限制，一般不建议带图
 
 _提示：此卡片可自由编辑或删除_
 `;
@@ -3356,16 +3360,19 @@ _提示：此卡片可自由编辑或删除_
 - **Create card group**: Drag-select multiple elements and create a group, or right-click a blank canvas area to create an empty group
 - **Canvas elements**: Permanent section and copies, temporary sections, blank cards, card groups, and connection lines
 
+---
 ### Connection Lines
 - **Create connection**: Click a section edge anchor and drag to another section
 - **Edit connection**: Click a line to change color, direction, and label
 - **Preset colors**: <font color="#66bbff">Blue</font>, <font color="#fb464c">Red</font>, <font color="#e9973f">Orange</font>, <font color="#e0de71">Yellow</font>, <font color="#44cf6e">Green</font>, <font color="#53dfdd">Cyan</font>, <font color="#a882ff">Purple</font>
 
+---
 ### Card Groups
 - **Nested groups**: Place sections, blank cards, or other groups inside a group frame to create nesting
 - **Group organization**: Card groups are saved by \`.canvas\` geometric containment, without manually maintaining children
 - **Group export**: A card group or temporary selection can be exported as a smaller canvas package
 
+---
 ### Markdown / HTML Editing
 - **Double-click to edit**: Blank cards and description boxes can both be edited by double-clicking
 - **Format toolbar**: Supports headings, lists, quotes, bold, italic, underline, font color, alignment, and highlight
@@ -3373,71 +3380,116 @@ _提示：此卡片可自由编辑或删除_
 - **Markdown examples**: **bold text**, ==highlight text==
 > quote content
 - **HTML examples**: <font color="#fb464c">red text</font>, <span style="color:#66bbff">blue text</span>, <u>underline</u>
+- **Images/Icons**: Lightweight HTML/Markdown icon support, drag-and-drop allowed, URL and Base64 supported, with a 20KB limit (images are generally not recommended)
 
 _Tip: This card can be freely edited or deleted_
 `;
 
     // 中文版：快捷操作（Markdown-first）
     const shortcutGuideMarkdown_zh = `## 快捷操作
-- **点击左上角悬浮工具窗的「<span style="color: #66bbff">定位</span>」按钮直接定位永久栏目**
-- **点击标题栏最右边的按钮「<span style="color: #66bbff">HTML 页面</span>」可以打开标签页的书签画布**
+- **点击左上角悬浮工具窗的「<span style="color: #66bbff">定位</span>」按钮**：直接定位永久栏目
+- **点击右下角的按钮「<span style="color: #66bbff">HTML 页面</span>」**：打开/定位标签页(\`Option/Alt + Shift + S\`)
+
+---
 
 ### Ctrl 键操作
-- **Ctrl + 左键（按住）**：拖动画布或栏目卡片
-- **Ctrl + 滚轮（或触控板双指滑动）**：缩放画布
-- **Ctrl + 右键（单击）**：更改栏目卡片大小
+
+- **\`Ctrl + 左键\`（按住）**：拖动画布或栏目卡片
+- **\`Ctrl + 滚轮\`（或触控板\`双指滑动\`）**：缩放画布
+- **\`Ctrl + 右键\`（单击）**：更改栏目卡片大小
+
+---
 
 ### 空格键操作
-- **空格 + 左键（按住）**：拖动全局画布
+
+- **\`空格 + 左键\`（按住）**：拖动全局画布
+
+---
 
 ### 触控板操作
-- **双指捏合**：缩放画布
-- **Ctrl/Option + 双指滑动**：缩放（兼容侧边栏）
-- **双指滑动**：拖动画布
+
+- **\`双指捏合\`**：缩放画布
+- **\`Ctrl + 双指滑动\`**：缩放（兼容侧边栏）
+- **\`双指滑动\`**：拖动画布
+
+---
 
 ### 批量选择
-- **Shift / Cmd/Ctrl + 左键**：批量/单个选中书签（进入批量模式后左键单击也可以选中）
+
+- **\`Shift | Cmd/Ctrl + 左键\`**：批量/单个选中书签（进入批量模式后左键单击也可以选中）
+
+---
+
+### 左键框选
+
+- **\`左键拖动\`（画布空白处）**：多选元素并形成临时组，支持整组拖动、批量修改颜色/置顶/删除或转换为卡片组
+
+---
 
 ### 元素右键
-- **可右键元素**：永久栏目及其副本、临时栏目、空白栏目、卡片组、连接线
+
+- **可右键元素**：永久栏目及其副本、临时栏目、空白栏目、连接线、卡片组、左键框选的临时组、画布空白处
 - **常用操作**：全屏、定位、置顶、颜色、重命名、删除、复制源码、导出当前
 
 ---
+
 _快捷键可在左上角「管理」中自定义_
 `;
 
     // 英文版：快捷操作（Markdown-first）
     const shortcutGuideMarkdown_en = `## Quick Actions
-- **Click the 「<span style="color: #66bbff">Locate</span>」 button in the top-left floating tool window to directly locate the permanent column**
-- **Click the 「<span style="color: #66bbff">HTML Page</span>」 button on the far right of the title bar to open the bookmark canvas tab**
+- **Click the 「<span style="color: #66bbff">Locate</span>」 button in the top-left floating tool window**: Directly locate the permanent column
+- **Click the 「<span style="color: #66bbff">HTML Page</span>」 button at bottom-right**: Open/locate the tab (\`Option/Alt + Shift + S\`)
+
+---
 
 ### Ctrl Key Operations
-- **Ctrl + Left Click (hold)**: Drag canvas or section card
-- **Ctrl + Scroll (or trackpad swipe)**: Zoom canvas
-- **Ctrl + Right Click**: Resize section card
+
+- **\`Ctrl + Left Click\` (hold)**: Drag canvas or section card
+- **\`Ctrl + Scroll\` (or trackpad \`swipe\`)**: Zoom canvas
+- **\`Ctrl + Right Click\`**: Resize section card
+
+---
 
 ### Space Key Operations
-- **Space + Left Click (hold)**: Drag global canvas
+
+- **\`Space + Left Click\` (hold)**: Drag global canvas
+
+---
 
 ### Touchpad Operations
-- **Pinch gesture**: Zoom canvas
-- **Ctrl/Option + swipe**: Zoom (Sidebar compatible)
-- **Two-finger swipe**: Drag canvas
+
+- **\`Pinch gesture\`**: Zoom canvas
+- **\`Ctrl + swipe\`**: Zoom (Sidebar compatible)
+- **\`Two-finger swipe\`**: Drag canvas
+
+---
 
 ### Batch Selection
-- **Shift / Cmd/Ctrl + Left Click**: Batch/single selection of bookmarks (left click also selects under batch mode)
+
+- **\`Shift | Cmd/Ctrl + Left Click\`**: Batch/single selection of bookmarks (left click also selects under batch mode)
+
+---
+
+### Left-Click Selection
+
+- **\`Left Click + Drag\` (blank canvas)**: Select multiple elements to form a temporary group for group dragging, batch coloring, pinning, deleting, or creating a card group
+
+---
 
 ### Element Right-Click
-- **Right-clickable elements**: Permanent section and copies, temporary sections, blank cards, card groups, and connection lines
+
+- **Right-clickable elements**: Permanent section and copies, temporary sections, blank cards, connection lines, card groups, and temporary selection groups
 - **Common actions**: Fullscreen, locate, pin, color, rename, delete, copy source, export current
 
 ---
+
 _Shortcuts can be customized in the "Manage" button at top-left_
 `;
 
     const bookmarkGuideHtml_zh = `<h2>画布基础</h2>
 <ol>
-<li><strong>拖动书签/文件夹至空白处</strong>，创建书签型临时节点；</li>
+<li><strong>拖动书签/文件夹至空白处</strong>，<font color="#44cf6e">创建书签型临时节点</font>；</li>
 <li>临时节点的修改 <strong>不计入核心数据</strong>，可用于对比查看/整理；</li>
 <li><strong>栏目间可互相拖动/粘贴</strong>。</li>
 </ol>
@@ -3449,18 +3501,21 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <li><strong>创建卡片组</strong>：框选多个元素后创建组，或右键画布空白处创建空组</li>
 <li><strong>画布元素</strong>：永久栏目及其副本、临时栏目、空白栏目、卡片组、连接线</li>
 </ul>
+<hr>
 <h3>连接线</h3>
 <ul>
 <li><strong>创建连接</strong>：点击栏目边缘连接点，拖向另一栏目</li>
 <li><strong>编辑连接</strong>：点击连接线，可修改颜色、方向、标签</li>
 <li><strong>预设颜色</strong>：<font color="#66bbff">蓝</font>、<font color="#fb464c">红</font>、<font color="#e9973f">橙</font>、<font color="#e0de71">黄</font>、<font color="#44cf6e">绿</font>、<font color="#53dfdd">青</font>、<font color="#a882ff">紫</font></li>
 </ul>
+<hr>
 <h3>卡片组</h3>
 <ul>
 <li><strong>嵌套组</strong>：把栏目、空白卡片或其他组放进组框内，即可形成嵌套关系</li>
 <li><strong>组内整理</strong>：卡片组按 <code>.canvas</code> 几何包含关系保存，不需要手动维护 children</li>
 <li><strong>组导出</strong>：卡片组或临时选区可以单独导出为小型画布包</li>
 </ul>
+<hr>
 <h3>Markdown / HTML 编辑</h3>
 <ul>
 <li><strong>双击编辑</strong>：空白栏目和说明框都可以双击进入编辑</li>
@@ -3471,6 +3526,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 </blockquote>
 </li>
 <li><strong>HTML 示例</strong>：<font color="#fb464c">红色文字</font>、<span style="color: #66bbff">蓝色文字</span>、<u>下划线</u></li>
+<li><strong>图片/图标</strong>：轻量化 HTML/Markdown 图标支持，可以拖入，支持 URL 和 Base64，有 20KB 限制，一般不建议带图</li>
 </ul>
 <p><em>提示：此卡片可自由编辑或删除</em></p>
 `;
@@ -3489,18 +3545,21 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <li><strong>Create card group</strong>: Drag-select multiple elements and create a group, or right-click a blank canvas area to create an empty group</li>
 <li><strong>Canvas elements</strong>: Permanent section and copies, temporary sections, blank cards, card groups, and connection lines</li>
 </ul>
+<hr>
 <h3>Connection Lines</h3>
 <ul>
 <li><strong>Create connection</strong>: Click a section edge anchor and drag to another section</li>
 <li><strong>Edit connection</strong>: Click a line to change color, direction, and label</li>
 <li><strong>Preset colors</strong>: <font color="#66bbff">Blue</font>, <font color="#fb464c">Red</font>, <font color="#e9973f">Orange</font>, <font color="#e0de71">Yellow</font>, <font color="#44cf6e">Green</font>, <font color="#53dfdd">Cyan</font>, <font color="#a882ff">Purple</font></li>
 </ul>
+<hr>
 <h3>Card Groups</h3>
 <ul>
 <li><strong>Nested groups</strong>: Place sections, blank cards, or other groups inside a group frame to create nesting</li>
 <li><strong>Group organization</strong>: Card groups are saved by <code>.canvas</code> geometric containment, without manually maintaining children</li>
 <li><strong>Group export</strong>: A card group or temporary selection can be exported as a smaller canvas package</li>
 </ul>
+<hr>
 <h3>Markdown / HTML Editing</h3>
 <ul>
 <li><strong>Double-click to edit</strong>: Blank cards and description boxes can both be edited by double-clicking</li>
@@ -3511,41 +3570,55 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 </blockquote>
 </li>
 <li><strong>HTML examples</strong>: <font color="#fb464c">red text</font>, <span style="color: #66bbff">blue text</span>, <u>underline</u></li>
+<li><strong>Images/Icons</strong>: Lightweight HTML/Markdown icon support, drag-and-drop allowed, URL and Base64 supported, with a 20KB limit (images are generally not recommended)</li>
 </ul>
 <p><em>Tip: This card can be freely edited or deleted</em></p>
 `;
 
     const shortcutGuideHtml_zh = `<h2>快捷操作</h2>
 <ul>
-<li><strong>点击左上角悬浮工具窗的「<span style="color: #66bbff">定位</span>」按钮直接定位永久栏目</strong></li>
-<li><strong>点击标题栏最右边的按钮「<span style="color: #66bbff">HTML 页面</span>」可以打开标签页的书签画布</strong></li>
+<li><strong>点击左上角悬浮工具窗的「<span style="color: #66bbff">定位</span>」按钮</strong>：直接定位永久栏目</li>
+<li><strong>点击右下角的按钮「<span style="color: #66bbff">HTML 页面</span>」</strong>：打开/定位标签页(<code>Option/Alt + Shift + S</code>)</li>
 </ul>
 
+<hr>
 <h3>Ctrl 键操作</h3>
 <ul>
-<li><strong>Ctrl + 左键（按住）</strong>：拖动画布或栏目卡片</li>
-<li><strong>Ctrl + 滚轮（或触控板双指滑动）</strong>：缩放画布</li>
-<li><strong>Ctrl + 右键（单击）</strong>：更改栏目卡片大小</li>
+<li><strong><code>Ctrl + 左键</code>（按住）</strong>：拖动画布或栏目卡片</li>
+<li><strong><code>Ctrl + 滚轮</code>（或触控板<code>双指滑动</code>）</strong>：缩放画布</li>
+<li><strong><code>Ctrl + 右键</code>（单击）</strong>：更改栏目卡片大小</li>
 </ul>
+
+<hr>
 <h3>空格键操作</h3>
 <ul>
-<li><strong>空格 + 左键（按住）</strong>：拖动全局画布</li>
+<li><strong><code>空格 + 左键</code>（按住）</strong>：拖动全局画布</li>
 </ul>
+
+<hr>
 <h3>触控板操作</h3>
 <ul>
-<li><strong>双指捏合</strong>：缩放画布</li>
-<li><strong>Ctrl/Option + 双指滑动</strong>：缩放（兼容侧边栏）</li>
-<li><strong>双指滑动</strong>：拖动画布</li>
+<li><strong><code>双指捏合</code></strong>：缩放画布</li>
+<li><strong><code>Ctrl + 双指滑动</code></strong>：缩放（兼容侧边栏）</li>
+<li><strong><code>双指滑动</code></strong>：拖动画布</li>
 </ul>
 
+<hr>
 <h3>批量选择</h3>
 <ul>
-<li><strong>Shift / Cmd/Ctrl + 左键</strong>：批量/单个选中书签（进入批量模式后左键单击也可以选中）</li>
+<li><strong><code>Shift | Cmd/Ctrl + 左键</code></strong>：批量/单个选中书签（进入批量模式后左键单击也可以选中）</li>
 </ul>
 
+<hr>
+<h3>左键框选</h3>
+<ul>
+<li><strong><code>左键拖动</code>（画布空白处）</strong>：多选元素并形成临时组，支持整组拖动、批量修改颜色/置顶/删除或转换为卡片组</li>
+</ul>
+
+<hr>
 <h3>元素右键</h3>
 <ul>
-<li><strong>可右键元素</strong>：永久栏目及其副本、临时栏目、空白栏目、卡片组、连接线</li>
+<li><strong>可右键元素</strong>：永久栏目及其副本、临时栏目、空白栏目、连接线、卡片组、左键框选的临时组、画布空白处</li>
 <li><strong>常用操作</strong>：全屏、定位、置顶、颜色、重命名、删除、复制源码、导出当前</li>
 </ul>
 <hr>
@@ -3554,35 +3627,48 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 
     const shortcutGuideHtml_en = `<h2>Quick Actions</h2>
 <ul>
-<li><strong>Click the 「<span style="color: #66bbff">Locate</span>」 button in the top-left floating tool window to directly locate the permanent column</strong></li>
-<li><strong>Click the 「<span style="color: #66bbff">HTML Page</span>」 button on the far right of the title bar to open the bookmark canvas tab</strong></li>
+<li><strong>Click the 「<span style="color: #66bbff">Locate</span>」 button in the top-left floating tool window</strong>: Directly locate the permanent column</li>
+<li><strong>Click the 「<span style="color: #66bbff">HTML Page</span>」 button at bottom-right</strong>: Open/locate the tab (<code>Option/Alt + Shift + S</code>)</li>
 </ul>
 
+<hr>
 <h3>Ctrl Key Operations</h3>
 <ul>
-<li><strong>Ctrl + Left Click (hold)</strong>: Drag canvas or section card</li>
-<li><strong>Ctrl + Scroll (or trackpad swipe)</strong>: Zoom canvas</li>
-<li><strong>Ctrl + Right Click</strong>: Resize section card</li>
+<li><strong><code>Ctrl + Left Click</code> (hold)</strong>: Drag canvas or section card</li>
+<li><strong><code>Ctrl + Scroll</code> (or trackpad <code>swipe</code>)</strong>: Zoom canvas</li>
+<li><strong><code>Ctrl + Right Click</code></strong>: Resize section card</li>
 </ul>
+
+<hr>
 <h3>Space Key Operations</h3>
 <ul>
-<li><strong>Space + Left Click (hold)</strong>: Drag global canvas</li>
+<li><strong><code>Space + Left Click</code> (hold)</strong>: Drag global canvas</li>
 </ul>
+
+<hr>
 <h3>Touchpad Operations</h3>
 <ul>
-<li><strong>Pinch gesture</strong>: Zoom canvas</li>
-<li><strong>Ctrl/Option + swipe</strong>: Zoom (Sidebar compatible)</li>
-<li><strong>Two-finger swipe</strong>: Drag canvas</li>
+<li><strong><code>Pinch gesture</code></strong>: Zoom canvas</li>
+<li><strong><code>Ctrl + swipe</code></strong>: Zoom (Sidebar compatible)</li>
+<li><strong><code>Two-finger swipe</code></strong>: Drag canvas</li>
 </ul>
 
+<hr>
 <h3>Batch Selection</h3>
 <ul>
-<li><strong>Shift / Cmd/Ctrl + Left Click</strong>: Batch/single selection of bookmarks (left click also selects under batch mode)</li>
+<li><strong><code>Shift | Cmd/Ctrl + Left Click</code></strong>: Batch/single selection of bookmarks (left click also selects under batch mode)</li>
 </ul>
 
+<hr>
+<h3>Left-Click Selection</h3>
+<ul>
+<li><strong><code>Left Click + Drag</code> (blank canvas)</strong>: Select multiple elements to form a temporary group for group dragging, batch coloring, pinning, deleting, or creating a card group</li>
+</ul>
+
+<hr>
 <h3>Element Right-Click</h3>
 <ul>
-<li><strong>Right-clickable elements</strong>: Permanent section and copies, temporary sections, blank cards, card groups, and connection lines</li>
+<li><strong>Right-clickable elements</strong>: Permanent section and copies, temporary sections, blank cards, connection lines, card groups, and temporary selection groups</li>
 <li><strong>Common actions</strong>: Fullscreen, locate, pin, color, rename, delete, copy source, export current</li>
 </ul>
 <hr>
@@ -3590,62 +3676,81 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 `;
 
     const batchFeatureHtml_zh = `<h2>特色功能</h2>
-<h3>全屏与侧边栏</h3>
+<h3>全屏与跳转</h3>
 <ul>
-<li><strong>全屏模式</strong>：只聚焦一个栏目或空白卡片，适合整理内容和查看说明</li>
-<li><strong>侧边栏使用</strong>：侧边栏很适合配合全屏模式，把当前栏目当作浏览器侧边的专注工作区</li>
-<li><strong>定位按钮</strong>：从全屏、侧边栏或目录跳回目标栏目位置；组目录中的嵌套组也按普通组定位</li>
+<li><strong>全屏模式</strong>：全屏放大当前栏目卡片，适用于<span style="color: #66bbff">侧边栏</span></li>
+<li><strong>跳转</strong>：在全屏模式下，可通过「目录侧」或搜索中的「卡片模式」条目点击快速切换卡片跳转</li>
 </ul>
+
+<hr>
 <h3>一键连续打开</h3>
 <ul>
 <li><strong>勾选默认打开方式</strong>：右键菜单中选择并勾选你想要的打开方式</li>
 <li><strong>左键单击即生效</strong>：设置后，每次左键点击书签自动使用已选方式打开</li>
 <li><strong>右键打开方式</strong>：右键书签可选择新标签页、标签组、窗口、无痕窗口等打开方式</li>
 </ul>
+
+<hr>
 <h3>可选打开方式</h3>
 <ul>
 <li>新标签页 / 同一标签组 / 专属标签组</li>
 <li>新窗口 / 同一窗口 / 专属窗口 / 无痕窗口</li>
 <li><strong>同窗专属组</strong>：在同一窗口的专属标签组中打开</li>
-<li><strong>手动选择...</strong>：每次手动选择目标窗口 and 标签组</li>
+<li><strong>手动选择...</strong>：每次手动选择目标窗口和标签组</li>
 </ul>
+
+<hr>
 <h3>批量操作</h3>
 <ul>
 <li><strong>选择（批量操作）</strong>：进入多选模式，支持跨栏目多选</li>
 <li><strong>文件夹自动成组</strong>：批量打开时，文件夹自动创建标签组</li>
 </ul>
+
+<hr>
 <h3>搜索</h3>
 <ul>
 <li><strong>书签模式</strong>：搜索书签标题、URL、文件夹名称和 #标签</li>
 <li><strong>卡片（组）模式</strong>：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组等元素的序号、标题、组名和时间</li>
 <li><strong>说明模式</strong>：搜索栏目说明、空白卡片文本和连接线标签</li>
 </ul>
-<h3>导入导出 ⭐</h3>
+
+<hr>
+<h3>导入导出</h3>
 <ul>
 <li><strong>全局导出</strong>：导出 <code>.canvas</code>、栏目 JSON/Markdown、空白卡片和连接线</li>
 <li><strong>组导出</strong>：卡片组和临时框选组可单独导出，导入后仍按普通卡片组处理</li>
 <li><strong>快照包导入</strong>：文件夹或压缩包可作为画布快照包导入，用于恢复或对比一整套画布结构</li>
 <li><strong>覆盖导入</strong>：可用快照包覆盖当前画布内容，适合明确要恢复到某份备份时使用</li>
 <li><strong>此位置导入</strong>：在画布空白处或元素右键导入，可把文件夹/压缩包作为快照包导入到当前画布位置附近</li>
+<li><strong>拖入</strong>：支持直接拖入文件或书签到画布空白处。包括单个 JSON/HTML 文件的拖入恢复，以及书签横栏（书签栏）中的文件夹直接拖入的检测（注：Edge 侧边栏书签不支持拖拽到书签画布，Chrome 支持；Chrome 与 Edge 在横向条的拖拽只支持普通书签/链接）</li>
 <li><strong><mark>AI</mark> 指南</strong>：导出包可生成 <code>AGENTS.md</code> 或 <code>CLAUDE.md</code>，用于约束 <code>AI</code> 编辑画布包时保留结构</li>
+</ul>
+
+<hr>
+<h3>推送拉取</h3>
+<ul>
+<li><font color="#fb464c"><strong>安全警示 (切记)</strong></font>：推送时同步机制会清理远端目录。请勿在同步目录下存放任何无关文件（如个人笔记、多媒体等），否则它们将被<strong>彻底删除</strong>！另外，画布中禁止接入任何外部文件节点（如视频、音频、图片、PDF 等）。</li>
 </ul>
 <hr>
 <p><em>提示：此卡片可自由编辑或删除</em></p>
 `;
 
     const batchFeatureHtml_en = `<h2>Features</h2>
-<h3>Fullscreen and Side Panel</h3>
+<h3>Fullscreen and Navigation</h3>
 <ul>
-<li><strong>Fullscreen mode</strong>: Focus on one section or blank card, useful for organizing content and reading descriptions</li>
-<li><strong>Side panel use</strong>: The side panel works well with fullscreen mode, turning the current section into a focused browser-side workspace</li>
-<li><strong>Locate button</strong>: Jump back to a target section from fullscreen, side panel, or directory; nested groups locate like normal groups</li>
+<li><strong>Fullscreen mode</strong>: Expand current section card to fullscreen, suitable for the <span style="color: #66bbff">side panel</span></li>
+<li><strong>Navigation</strong>: In fullscreen mode, quickly switch and navigate between cards by clicking items in the "Directory Side Panel" or "Card Mode" in search results</li>
 </ul>
+
+<hr>
 <h3>One-Click Continuous Open</h3>
 <ul>
 <li><strong>Check default open mode</strong>: Select and check your preferred mode in the right-click menu</li>
 <li><strong>Left-click to open</strong>: After setting, each left-click opens bookmarks in the selected mode</li>
 <li><strong>Right-click open modes</strong>: Right-click a bookmark to choose new tab, tab group, window, incognito window, and other open modes</li>
 </ul>
+
+<hr>
 <h3>Available Open Modes</h3>
 <ul>
 <li>New Tab / Same Group / Exclusive Group</li>
@@ -3653,29 +3758,127 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <li><strong>Same Window + Exclusive Group</strong>: Open in an exclusive tab group in the current window</li>
 <li><strong>Manual Select...</strong>: Choose target window and tab group each time</li>
 </ul>
+
+<hr>
 <h3>Batch Operations</h3>
 <ul>
 <li><strong>Select (Batch)</strong>: Enter multi-select mode and select across sections</li>
 <li><strong>Auto folder grouping</strong>: Folders auto-create tab groups during batch open</li>
 </ul>
+
+<hr>
 <h3>Search</h3>
 <ul>
 <li><strong>Bookmark mode</strong>: Search bookmark titles, URLs, folder names, and #tags</li>
 <li><strong>Card (Group) mode</strong>: Search element indexes, titles, group names, and time for permanent sections and copies, temporary sections, blank cards, and card groups</li>
 <li><strong>Description mode</strong>: Search section descriptions, blank card text, and connection line labels</li>
 </ul>
-<h3>Import / Export ⭐</h3>
+
+<hr>
+<h3>Import / Export</h3>
 <ul>
 <li><strong>Global export</strong>: Exports <code>.canvas</code>, section JSON/Markdown, blank cards, and connections</li>
 <li><strong>Group export</strong>: Card groups and temporary selections can be exported separately, then imported back as normal card groups</li>
 <li><strong>Snapshot package import</strong>: Folders or zip files can be imported as canvas snapshot packages for restoring or comparing a full canvas structure</li>
 <li><strong>Overwrite import</strong>: A snapshot package can overwrite the current canvas when you explicitly want to restore a backup</li>
 <li><strong>Import at this position</strong>: Right-click a blank canvas area or an element to import a folder/zip snapshot package near the current canvas position</li>
+<li><strong>Drag and Drop</strong>: Supports dragging files/bookmarks directly onto the canvas. Includes single JSON/HTML file recovery detection, and folder drops from the bookmarks bar (Note: Edge side panel bookmarks do not support drag-and-drop, Chrome does; horizontal bookmarks bar drag-and-drop only supports single bookmarks in both Chrome & Edge)</li>
 <li><strong><mark>AI</mark> guide</strong>: Export packages can generate <code>AGENTS.md</code> or <code>CLAUDE.md</code> to guide <code>AI</code> edits while preserving structure</li>
+</ul>
+
+<hr>
+<h3>Push / Pull</h3>
+<ul>
+<li><strong>Safety Warning (Crucial)</strong>: Pushing automatically cleans up the remote sync directory. Do NOT store unrelated files (e.g. personal notes, media files) in the sync directory, otherwise they will be <strong>permanently deleted</strong>! Additionally, external file nodes (videos, audio, images, PDFs, etc.) are prohibited in the canvas.</li>
 </ul>
 <hr>
 <p><em>Tip: This card can be freely edited or deleted</em></p>
 `;
+
+    const openSourceHtml_zh = `<h2>开源信息</h2>
+<h3>主项目</h3>
+<ul>
+<li><strong>Bookmark Canvas</strong> (书签画布):<br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Canvas</a><br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> 问题反馈</a></li>
+</ul>
+<hr>
+<h3>关联生态项目</h3>
+<ul>
+<li><strong>组织仓库列表</strong>:<br>
+<a href="https://github.com/orgs/Browser-bookmark-hub/repositories" target="_blank"><i class="fab fa-github"></i> https://github.com/orgs/Browser-bookmark-hub/repositories</a></li>
+<li><strong>Bookmark Backup</strong> (书签备份):<br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Backup" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Backup</a></li>
+<li><strong>Bookmark Record and Recommend</strong> (书签记录与推荐):<br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend</a></li>
+</ul>
+<hr>
+<h3>数据兼容说明</h3>
+<p>这两个生态项目导出的 JSON 或 HTML 备份文件，均支持直接拖入或导入书签画布，在画布中自动生成临时的栏目卡片。</p>`;
+
+    const openSourceHtml_en = `<h2>Open Source</h2>
+<h3>Main Project</h3>
+<ul>
+<li><strong>Bookmark Canvas</strong>:<br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Canvas</a><br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> Feedback / Issues</a></li>
+</ul>
+<hr>
+<h3>Ecosystem Projects</h3>
+<ul>
+<li><strong>Repositories</strong>:<br>
+<a href="https://github.com/orgs/Browser-bookmark-hub/repositories" target="_blank"><i class="fab fa-github"></i> https://github.com/orgs/Browser-bookmark-hub/repositories</a></li>
+<li><strong>Bookmark Backup</strong>:<br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Backup" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Backup</a></li>
+<li><strong>Bookmark Record and Recommend</strong>:<br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend</a></li>
+</ul>
+<hr>
+<h3>Compatibility Note</h3>
+<p>JSON or HTML backup files exported by these projects can be directly dragged or imported onto the canvas to automatically generate temporary section cards.</p>`;
+
+    const openSourceMarkdown_zh = `## 开源信息
+### 主项目
+- **Bookmark Canvas** (书签画布):
+  [GitHub 仓库](https://github.com/Browser-bookmark-hub/Bookmark-Canvas) / [问题反馈](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues)
+
+---
+
+### 关联生态项目
+- **组织仓库列表**:
+  [Organizatonal Repositories](https://github.com/orgs/Browser-bookmark-hub/repositories)
+- **Bookmark Backup** (书签备份):
+  [GitHub 仓库](https://github.com/Browser-bookmark-hub/Bookmark-Backup)
+- **Bookmark Record and Recommend** (书签记录与推荐):
+  [GitHub 仓库](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
+
+---
+
+### 数据兼容说明
+这两个生态项目导出的 JSON 或 HTML 备份文件，均支持直接**拖入**或**导入**书签画布，在画布中自动生成临时的栏目卡片。`;
+
+    const openSourceMarkdown_en = `## Open Source
+### Main Project
+- **Bookmark Canvas**:
+  [GitHub Repository](https://github.com/Browser-bookmark-hub/Bookmark-Canvas) / [Feedback & Issues](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues)
+
+---
+
+### Ecosystem Projects
+- **Browser Bookmark Hub Org**:
+  [Repositories](https://github.com/orgs/Browser-bookmark-hub/repositories)
+- **Bookmark Backup**:
+  [GitHub Repository](https://github.com/Browser-bookmark-hub/Bookmark-Backup)
+- **Bookmark Record and Recommend**:
+  [GitHub Repository](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
+
+---
+
+### Compatibility Note
+JSON or HTML backup files exported by these projects can be directly **dragged** or **imported** onto the canvas to automatically generate temporary section cards.`;
+
+    const openSourceHtml = isEnglish ? openSourceHtml_en : openSourceHtml_zh;
+    const openSourceMarkdown = isEnglish ? openSourceMarkdown_en : openSourceMarkdown_zh;
 
     const bookmarkGuideHtml = isEnglish ? bookmarkGuideHtml_en : bookmarkGuideHtml_zh;
     const shortcutGuideHtml = isEnglish ? shortcutGuideHtml_en : shortcutGuideHtml_zh;
@@ -3760,15 +3963,18 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 
     // 中文版：特色功能（Markdown-first）
     const batchFeatureMarkdown_zh = `## 特色功能
-### 全屏与侧边栏
-- **全屏模式**：只聚焦一个栏目或空白卡片，适合整理内容和查看说明
-- **侧边栏使用**：侧边栏很适合配合全屏模式，把当前栏目当作浏览器侧边的专注工作区
-- **定位按钮**：从全屏、侧边栏或目录跳回目标栏目位置；组目录中的嵌套组也按普通组定位
+### 全屏与跳转
+- **全屏模式**：全屏放大当前栏目卡片，适用于<span style="color: #66bbff">侧边栏</span>
+- **跳转**：在全屏模式下，可通过「目录侧」或搜索中的「卡片模式」条目点击快速切换卡片跳转
+
+---
 
 ### 一键连续打开
 - **勾选默认打开方式**：右键菜单中选择并勾选你想要的打开方式
 - **左键单击即生效**：设置后，每次左键点击书签自动使用已选方式打开
 - **右键打开方式**：右键书签可选择新标签页、标签组、窗口、无痕窗口等打开方式
+
+---
 
 ### 可选打开方式
 - 新标签页 / 同一标签组 / 专属标签组
@@ -3776,22 +3982,34 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 - **同窗专属组**：在同一窗口的专属标签组中打开
 - **手动选择...**：每次手动选择目标窗口和标签组
 
+---
+
 ### 批量操作
 - **选择（批量操作）**：进入多选模式，支持跨栏目多选
 - **文件夹自动成组**：批量打开时，文件夹自动创建标签组
+
+---
 
 ### 搜索
 - **书签模式**：搜索书签标题、URL、文件夹名称和 #标签
 - **卡片（组）模式**：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组等元素的序号、标题、组名和时间
 - **说明模式**：搜索栏目说明、空白卡片文本和连接线标签
 
-### 导入导出 ⭐
+---
+
+### 导入导出
 - **全局导出**：导出 \`.canvas\`、栏目 JSON/Markdown、空白卡片和连接线
-- **组导出**：卡片组和临时框选组可单独导出，导入后仍按普通卡片组处理
+- **组导出**：卡片组 and 临时框选组可单独导出，导入后仍按普通卡片组处理
 - **快照包导入**：文件夹或压缩包可作为画布快照包导入，用于恢复或对比一整套画布结构
 - **覆盖导入**：可用快照包覆盖当前画布内容，适合明确要恢复到某份备份时使用
 - **此位置导入**：在画布空白处或元素右键导入，可把文件夹/压缩包作为快照包导入到当前画布位置附近
+- **拖入**：支持直接拖入文件或书签到画布空白处。包括单个 JSON/HTML 文件的拖入恢复，以及书签横栏（书签栏）中的文件夹直接拖入的检测（注：Edge 侧边栏书签不支持拖拽到书签画布，Chrome 支持；Chrome 与 Edge 在横向条的拖拽只支持普通书签/链接）
 - **==AI== 指南**：导出包可生成 \`AGENTS.md\` 或 \`CLAUDE.md\`，用于约束 ==AI== 编辑画布包时保留结构
+
+---
+
+### 推送拉取
+- <font color="#fb464c">**安全警示 (切记)**</font>：推送时同步机制会清理远端目录。请勿在同步目录下存放任何无关文件（如个人笔记、多媒体等），否则它们将被**彻底删除**！另外，画布中禁止接入任何外部文件节点（如视频、音频、图片、PDF 等）。
 
 ---
 _提示：此卡片可自由编辑或删除_
@@ -3799,15 +4017,18 @@ _提示：此卡片可自由编辑或删除_
 
     // 英文版：特色功能（Markdown-first）
     const batchFeatureMarkdown_en = `## Features
-### Fullscreen and Side Panel
-- **Fullscreen mode**: Focus on one section or blank card, useful for organizing content and reading descriptions
-- **Side panel use**: The side panel works well with fullscreen mode, turning the current section into a focused browser-side workspace
-- **Locate button**: Jump back to a target section from fullscreen, side panel, or directory; nested groups locate like normal groups
+### Fullscreen and Navigation
+- **Fullscreen mode**: Expand current section card to fullscreen, suitable for the <span style="color: #66bbff">side panel</span>
+- **Navigation**: In fullscreen mode, quickly switch and navigate between cards by clicking items in the "Directory Side Panel" or "Card Mode" in search results
+
+---
 
 ### One-Click Continuous Open
 - **Check default open mode**: Select and check your preferred mode in the right-click menu
 - **Left-click to open**: After setting, each left-click opens bookmarks in the selected mode
 - **Right-click open modes**: Right-click a bookmark to choose new tab, tab group, window, incognito window, and other open modes
+
+---
 
 ### Available Open Modes
 - New Tab / Same Group / Exclusive Group
@@ -3815,22 +4036,34 @@ _提示：此卡片可自由编辑或删除_
 - **Same Window + Exclusive Group**: Open in an exclusive tab group in the current window
 - **Manual Select...**: Choose target window and tab group each time
 
+---
+
 ### Batch Operations
 - **Select (Batch)**: Enter multi-select mode and select across sections
 - **Auto folder grouping**: Folders auto-create tab groups during batch open
+
+---
 
 ### Search
 - **Bookmark mode**: Search bookmark titles, URLs, folder names, and #tags
 - **Card (Group) mode**: Search element indexes, titles, group names, and time for permanent sections and copies, temporary sections, blank cards, and card groups
 - **Description mode**: Search section descriptions, blank card text, and connection line labels
 
-### Import / Export ⭐
+---
+
+### Import / Export
 - **Global export**: Exports \`.canvas\`, section JSON/Markdown, blank cards, and connections
 - **Group export**: Card groups and temporary selections can be exported separately, then imported back as normal card groups
 - **Snapshot package import**: Folders or zip files can be imported as canvas snapshot packages for restoring or comparing a full canvas structure
 - **Overwrite import**: A snapshot package can overwrite the current canvas when you explicitly want to restore a backup
 - **Import at this position**: Right-click a blank canvas area or an element to import a folder/zip snapshot package near the current canvas position
+- **Drag and Drop**: Supports dragging files/bookmarks directly onto the canvas. Includes single JSON/HTML file recovery detection, and folder drops from the bookmarks bar (Note: Edge side panel bookmarks do not support drag-and-drop, Chrome does; horizontal bookmarks bar drag-and-drop only supports single bookmarks in both Chrome & Edge)
 - **==AI== guide**: Export packages can generate \`AGENTS.md\` or \`CLAUDE.md\` to guide ==AI== edits while preserving structure
+
+---
+
+### Push / Pull
+- **Safety Warning (Crucial)**: Pushing automatically cleans up the remote sync directory. Do NOT store unrelated files (e.g. personal notes, media files) in the sync directory, otherwise they will be <strong>permanently deleted</strong>! Additionally, external file nodes (videos, audio, images, PDFs, etc.) are prohibited in the canvas.
 
 ---
 _Tip: This card can be freely edited or deleted_
@@ -3838,10 +4071,27 @@ _Tip: This card can be freely edited or deleted_
 
     const batchFeatureMarkdown = isEnglish ? batchFeatureMarkdown_en : batchFeatureMarkdown_zh;
 
-    // 特色功能卡片（三角布局：上方居中）- 黄色
+    // 开源信息卡片（2x2网格布局：左上）- 蓝色/青色 (颜色 '2' 代表青色)
+    const openSourceGuideNode = {
+        id: 'md-node-demo-open-source-guide',
+        x: -1620,
+        y: -600 + offsetY,
+        width: 420,
+        height: 560,
+        text: openSourceMarkdown,
+        markdownSource: openSourceMarkdown,
+        html: openSourceHtml,
+        subtype: CANVAS_PLUGIN_MARKDOWN_SUBTYPE,
+        source: CANVAS_PLUGIN_MARKDOWN_SOURCE,
+        canvasTextKind: 'blank',
+        color: '2', // 青色
+        createdAt: Date.now()
+    };
+
+    // 特色功能卡片（2x2网格布局：右上）- 黄色
     const batchFeatureNode = {
         id: 'md-node-demo-batch-feature',
-        x: -1320,
+        x: -1020,
         y: -600 + offsetY,
         width: 420,
         height: 560,
@@ -3868,10 +4118,10 @@ _Tip: This card can be freely edited or deleted_
         label: presetGroupEdgeLabel
     };
 
-    // 特色功能连接到画布基础（默认色、无箭头）
+    // 开源信息连接到画布基础（左侧垂直连接）
     const edge2 = {
         id: 'edge-demo-2',
-        fromNode: 'md-node-demo-batch-feature',
+        fromNode: 'md-node-demo-open-source-guide',
         fromSide: 'bottom',
         toNode: 'md-node-demo-bookmark-guide',
         toSide: 'top',
@@ -3881,7 +4131,7 @@ _Tip: This card can be freely edited or deleted_
         label: ''
     };
 
-    // 特色功能连接到快捷操作（默认色、无箭头）
+    // 特色功能连接到快捷操作（右侧垂直连接）
     const edge3 = {
         id: 'edge-demo-3',
         fromNode: 'md-node-demo-batch-feature',
@@ -3894,7 +4144,7 @@ _Tip: This card can be freely edited or deleted_
         label: ''
     };
 
-    // 画布基础连接到快捷操作（默认色、无箭头）
+    // 画布基础连接到快捷操作（下方水平连接）
     const edge4 = {
         id: 'edge-demo-4',
         fromNode: 'md-node-demo-bookmark-guide',
@@ -3907,11 +4157,24 @@ _Tip: This card can be freely edited or deleted_
         label: ''
     };
 
+    // 开源信息连接到特色功能（上方水平连接）
+    const edge5 = {
+        id: 'edge-demo-5',
+        fromNode: 'md-node-demo-open-source-guide',
+        fromSide: 'right',
+        toNode: 'md-node-demo-batch-feature',
+        toSide: 'left',
+        direction: 'none',
+        color: null,
+        colorHex: null,
+        label: ''
+    };
+
     return {
-        mdNodes: [presetGuideGroupNode, bookmarkGuideNode, shortcutGuideNode, batchFeatureNode],
-        edges: [edge1, edge2, edge3, edge4],
-        mdNodeCounter: 4,
-        edgeCounter: 4
+        mdNodes: [presetGuideGroupNode, bookmarkGuideNode, shortcutGuideNode, batchFeatureNode, openSourceGuideNode],
+        edges: [edge1, edge2, edge3, edge4, edge5],
+        mdNodeCounter: 5,
+        edgeCounter: 5
     };
 }
 
@@ -7446,6 +7709,7 @@ function setupCanvasManageModal() {
         if (otherManageModal) otherManageModal.style.display = 'none';
         if (helpModal) helpModal.style.display = 'none';
         if (shortcutsModal) shortcutsModal.style.display = 'none';
+        try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
         const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
         if (pop) pop.remove();
 
@@ -7497,6 +7761,7 @@ function setupCanvasManageModal() {
         manageModal.style.display = 'none';
         if (helpModal) helpModal.style.display = 'none';
         if (shortcutsModal) shortcutsModal.style.display = 'none';
+        try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
         const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
         if (pop) pop.remove();
 
@@ -7568,6 +7833,17 @@ function setupCanvasManageModal() {
                                    e.target.closest('.settings-menu-item[data-action="open-help"]');
             if (!isClickInside && !isClickTrigger) {
                 closeCanvasShortcutsModal();
+            }
+        }
+
+        const openSourceModal = document.getElementById('canvasOpenSourceModal');
+        if (openSourceModal && openSourceModal.style.display === 'block') {
+            const isClickInside = openSourceModal.contains(e.target);
+            const isClickTrigger = e.target.closest('#settingsToggle') ||
+                                   e.target.closest('#titleSettingsToggleBtn') ||
+                                   e.target.closest('.settings-menu-item[data-action="open-opensource"]');
+            if (!isClickInside && !isClickTrigger) {
+                closeCanvasOpenSourceModal();
             }
         }
     });
@@ -8707,6 +8983,7 @@ function openCanvasShortcutsModal(options = {}) {
     try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
     try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
     try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
 
     modal.style.display = 'block';
 
@@ -8728,6 +9005,40 @@ function closeCanvasShortcutsModal() {
     const modal = document.getElementById('canvasShortcutsModal');
     if (modal) modal.style.display = 'none';
     stopShortcutRecording(null);
+}
+
+function openCanvasOpenSourceModal() {
+    const modal = document.getElementById('canvasOpenSourceModal');
+    if (!modal) return;
+    setupCanvasOpenSourceModal();
+
+    // 先关闭帮助弹窗、快捷键弹窗和管理弹窗
+    try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasShortcutsModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+
+    modal.style.display = 'block';
+
+    window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(modal));
+}
+
+function closeCanvasOpenSourceModal() {
+    const modal = document.getElementById('canvasOpenSourceModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function setupCanvasOpenSourceModal() {
+    const modal = document.getElementById('canvasOpenSourceModal');
+    if (!modal || modal.dataset.bound === 'true') return;
+    modal.dataset.bound = 'true';
+
+    const closeBtn = document.getElementById('canvasOpenSourceModalClose');
+    if (closeBtn) {
+        closeBtn.onclick = () => {
+            closeCanvasOpenSourceModal();
+        };
+    }
 }
 
 // =============================================================================
@@ -9053,6 +9364,40 @@ function setupCanvasHelpModal() {
             helpModal.style.display = 'none';
         }
     });
+}
+
+function openCanvasHelpModal(tabName = 'shortcuts') {
+    const helpModal = document.getElementById('canvasHelpModal');
+    const manageModal = document.getElementById('canvasManageModal');
+    const shortcutsModal = document.getElementById('canvasShortcutsModal');
+    const otherManageModal = document.getElementById('canvasOtherManageModal');
+    if (!helpModal) return;
+
+    if (manageModal) {
+        stopShortcutRecording(null);
+        manageModal.style.display = 'none';
+    }
+    if (shortcutsModal) shortcutsModal.style.display = 'none';
+    if (otherManageModal) otherManageModal.style.display = 'none';
+    try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
+
+    const tabs = Array.from(helpModal.querySelectorAll('.canvas-help-tab'));
+    const panels = Array.from(helpModal.querySelectorAll('.canvas-help-panel'));
+    
+    tabs.forEach(tab => {
+        const isActive = tab.dataset.helpTab === tabName;
+        tab.classList.toggle('active', isActive);
+        tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    panels.forEach(panel => {
+        panel.classList.toggle('active', panel.dataset.helpPanel === tabName);
+    });
+
+    helpModal.style.display = 'block';
+
+    if (typeof positionManageModalUnderSettingsBtn === 'function') {
+        window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(helpModal));
+    }
 }
 
 function setCanvasScaleVars(container, scale, force = false) {
@@ -26606,7 +26951,8 @@ const __DEMO_PRESET_MD_NODE_IDS = new Set([
     'card-group-demo-preset-guides',
     'md-node-demo-bookmark-guide',
     'md-node-demo-shortcut-guide',
-    'md-node-demo-batch-feature'
+    'md-node-demo-batch-feature',
+    'md-node-demo-open-source-guide'
 ]);
 
 function __isPristineDemoPresetCanvasState(stateInput = null) {
@@ -38292,6 +38638,8 @@ window.CanvasModule = {
     init: initCanvasView,
     resetCanvasCtrlState: resetCanvasCtrlState,
     openShortcuts: openCanvasShortcutsModal,
+    openHelp: openCanvasHelpModal,
+    openOpenSource: openCanvasOpenSourceModal,
     enhance: enhanceBookmarkTreeForCanvas, // 增强书签树的Canvas功能
     clear: clearAllExceptPermanent,
     updateFullscreenButton: updateFullscreenButtonState,

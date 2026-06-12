@@ -983,6 +983,10 @@ html:not(.side-panel-mode) .tool-buttons #openCanvasPageBtn {
     display: none;
 }
 
+html:not(.side-panel-mode) .sidepanel-settings-only {
+    display: none !important;
+}
+
 html.side-panel-mode .tool-buttons .last-fullscreen-btn {
     display: inline-flex;
     order: 98;
@@ -12757,6 +12761,16 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     margin: 10px 0;
 }
 
+.canvas-help-panel-content a {
+    color: var(--link-color);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.canvas-help-panel-content a:hover {
+    text-decoration: underline;
+}
+
 /* Canvas 快捷键二级 UI */
 .modal-content.canvas-shortcuts-modal {
     width: 520px;
@@ -12898,12 +12912,14 @@ html[lang="en"] .canvas-manage-modal {
     width: min(420px, calc(100vw - 16px));
 }
 
-#canvasShortcutsModal.canvas-manage-modal {
+#canvasShortcutsModal.canvas-manage-modal,
+#canvasOpenSourceModal.canvas-manage-modal {
     min-width: 440px;
     width: min(480px, calc(100vw - 16px));
 }
 
-html[lang="en"] #canvasShortcutsModal.canvas-manage-modal {
+html[lang="en"] #canvasShortcutsModal.canvas-manage-modal,
+html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     min-width: 480px;
     width: min(520px, calc(100vw - 16px));
 }

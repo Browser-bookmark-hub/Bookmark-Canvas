@@ -284,10 +284,10 @@
     name: 'invertedSetext',
     level: 'block',
     start(src) {
-      return src.match(/^(?![ \t\n]+)([^\n]+)\n\s*(-{3,}|={3,})\s*(?:\n+|$)/)?.index;
+      return src.match(/^(?![ \t\n]+)([^\n]+)\n[ \t]*(-{3,}|={3,})[ \t]*(?:\n+|$)/)?.index;
     },
     tokenizer(src) {
-      const rule = /^(?![ \t\n]+)([^\n]+)\n\s*(-{3,}|={3,})\s*(?:\n+|$)/;
+      const rule = /^(?![ \t\n]+)([^\n]+)\n[ \t]*(-{3,}|={3,})[ \t]*(?:\n+|$)/;
       const match = rule.exec(src);
       if (match) {
         const text = match[1];
