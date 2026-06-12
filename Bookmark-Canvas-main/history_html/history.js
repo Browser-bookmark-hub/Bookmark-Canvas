@@ -4551,10 +4551,10 @@ const i18n = {
 <p><em>Shortcuts can be customized in the "Manage" button at top-left</em></p>`
     },
     canvasHelpPanelRelease: {
-        'zh_CN': `<h2>书签画布（dev） - 使用说明</h2>
+        'zh_CN': `<h2>画布基础</h2>
 <ol>
 <li><strong>拖动书签/文件夹至空白处</strong>，创建书签型临时节点；</li>
-<li>临时节点的修改<strong>不计入核心数据</strong>，可用来对比查看/整理；</li>
+<li>临时节点的修改 <strong>不计入核心数据</strong>，可用于对比查看/整理；</li>
 <li><strong>栏目间可互相拖动/粘贴</strong>。</li>
 </ol>
 <hr>
@@ -4562,72 +4562,154 @@ const i18n = {
 <ul>
 <li><strong>创建临时栏目</strong>：从书签树拖动书签到空白处</li>
 <li><strong>创建空白卡片</strong>：双击画布空白处</li>
+<li><strong>创建卡片组</strong>：框选多个元素后创建组，或右键画布空白处创建空组</li>
+<li><strong>画布元素</strong>：永久栏目及其副本、临时栏目、空白栏目、卡片组、连接线</li>
 </ul>
 <h3>连接线</h3>
 <ul>
 <li><strong>创建连接</strong>：点击栏目边缘连接点，拖向另一栏目</li>
 <li><strong>编辑连接</strong>：点击连接线，可修改颜色、方向、标签</li>
-<li><strong>预设颜色</strong>：<font color="#ff6666">红</font> <font color="#66bbff">蓝</font> <font color="#ffdd66">黄</font> <font color="#66ffaa">绿</font> <font color="#ffaa66">橙</font> <font color="#bf66ff">紫</font></li>
+<li><strong>预设颜色</strong>：<font color="#66bbff">蓝</font>、<font color="#fb464c">红</font>、<font color="#e9973f">橙</font>、<font color="#e0de71">黄</font>、<font color="#44cf6e">绿</font>、<font color="#53dfdd">青</font>、<font color="#a882ff">紫</font></li>
+</ul>
+<h3>卡片组</h3>
+<ul>
+<li><strong>嵌套组</strong>：把栏目、空白卡片或其他组放进组框内，即可形成嵌套关系</li>
+<li><strong>组内整理</strong>：卡片组按 <code>.canvas</code> 几何包含关系保存，不需要手动维护 children</li>
+<li><strong>组导出</strong>：卡片组或临时选区可以单独导出为小型画布包</li>
+</ul>
+<h3>Markdown / HTML 编辑</h3>
+<ul>
+<li><strong>双击编辑</strong>：空白栏目和说明框都可以双击进入编辑</li>
+<li><strong>格式工具栏</strong>：支持标题、列表、引用、加粗、斜体、下划线、字体颜色、对齐和高亮</li>
+<li><strong>安全 HTML</strong>：粘贴或使用格式按钮产生的 HTML 会按安全子集保存和渲染</li>
+<li><strong>Markdown 示例</strong>：<strong>加粗文字</strong>、<mark>高亮文字</mark><blockquote>
+<p>引用内容</p>
+</blockquote>
+</li>
+<li><strong>HTML 示例</strong>：<font color="#fb464c">红色文字</font>、<span style="color: #66bbff">蓝色文字</span>、<u>下划线</u></li>
 </ul>
 <p><em>提示：此卡片可自由编辑或删除</em></p>`,
-        'en': `<h2>Bookmark Canvas (dev) - User Guide</h2>
+        'en': `<h2>Canvas Basics</h2>
 <ol>
-<li><strong>Drag bookmarks/folders to blank area</strong> to create bookmark-type temp nodes;</li>
-<li>Temp node changes are <strong>not saved to core data</strong>, useful for comparison/organization;</li>
+<li><strong>Drag bookmarks/folders to a blank area</strong> to create bookmark-type temp nodes.</li>
+<li>Temp node changes are <strong>not saved to core data</strong>, useful for comparison and organization.</li>
 <li><strong>Drag/paste between sections</strong>.</li>
 </ol>
 <hr>
 <h3>Basic Operations</h3>
 <ul>
-<li><strong>Create temp section</strong>: Drag bookmark from tree to blank area</li>
+<li><strong>Create temp section</strong>: Drag a bookmark from the tree to a blank area</li>
 <li><strong>Create blank card</strong>: Double-click on canvas blank area</li>
+<li><strong>Create card group</strong>: Drag-select multiple elements and create a group, or right-click a blank canvas area to create an empty group</li>
+<li><strong>Canvas elements</strong>: Permanent section and copies, temporary sections, blank cards, card groups, and connection lines</li>
 </ul>
 <h3>Connection Lines</h3>
 <ul>
-<li><strong>Create connection</strong>: Click section edge anchor, drag to another section</li>
-<li><strong>Edit connection</strong>: Click line to change color, direction, label</li>
-<li><strong>Preset colors</strong>: <font color="#ff6666">Red</font> <font color="#66bbff">Blue</font> <font color="#ffdd66">Yellow</font> <font color="#66ffaa">Green</font> <font color="#ffaa66">Orange</font> <font color="#bf66ff">Purple</font></li>
+<li><strong>Create connection</strong>: Click a section edge anchor and drag to another section</li>
+<li><strong>Edit connection</strong>: Click a line to change color, direction, and label</li>
+<li><strong>Preset colors</strong>: <font color="#66bbff">Blue</font>, <font color="#fb464c">Red</font>, <font color="#e9973f">Orange</font>, <font color="#e0de71">Yellow</font>, <font color="#44cf6e">Green</font>, <font color="#53dfdd">Cyan</font>, <font color="#a882ff">Purple</font></li>
+</ul>
+<h3>Card Groups</h3>
+<ul>
+<li><strong>Nested groups</strong>: Place sections, blank cards, or other groups inside a group frame to create nesting</li>
+<li><strong>Group organization</strong>: Card groups are saved by <code>.canvas</code> geometric containment, without manually maintaining children</li>
+<li><strong>Group export</strong>: A card group or temporary selection can be exported as a smaller canvas package</li>
+</ul>
+<h3>Markdown / HTML Editing</h3>
+<ul>
+<li><strong>Double-click to edit</strong>: Blank cards and description boxes can both be edited by double-clicking</li>
+<li><strong>Format toolbar</strong>: Supports headings, lists, quotes, bold, italic, underline, font color, alignment, and highlight</li>
+<li><strong>Safe HTML</strong>: HTML created by paste or toolbar actions is saved and rendered through the safe subset</li>
+<li><strong>Markdown examples</strong>: <strong>bold text</strong>, <mark>highlight text</mark><blockquote>
+<p>quote content</p>
+</blockquote>
+</li>
+<li><strong>HTML examples</strong>: <font color="#fb464c">red text</font>, <span style="color: #66bbff">blue text</span>, <u>underline</u></li>
 </ul>
 <p><em>Tip: This card can be freely edited or deleted</em></p>`
     },
     canvasHelpPanelFeatures: {
-        'zh_CN': `<h2>打开方式特色功能</h2>
-<h3>⭐ 一键连续打开</h3>
+        'zh_CN': `<h2>特色功能</h2>
+<h3>全屏与侧边栏</h3>
+<ul>
+<li><strong>全屏模式</strong>：只聚焦一个栏目或空白卡片，适合整理内容和查看说明</li>
+<li><strong>侧边栏使用</strong>：侧边栏很适合配合全屏模式，把当前栏目当作浏览器侧边的专注工作区</li>
+<li><strong>定位按钮</strong>：从全屏、侧边栏或目录跳回目标栏目位置；组目录中的嵌套组也按普通组定位</li>
+</ul>
+<h3>一键连续打开</h3>
 <ul>
 <li><strong>勾选默认打开方式</strong>：右键菜单中选择并勾选你想要的打开方式</li>
 <li><strong>左键单击即生效</strong>：设置后，每次左键点击书签自动使用已选方式打开</li>
+<li><strong>右键打开方式</strong>：右键书签可选择新标签页、标签组、窗口、无痕窗口等打开方式</li>
 </ul>
 <h3>可选打开方式</h3>
 <ul>
-<li><strong>同窗专属组</strong>：在同一窗口的专属标签组中打开</li>
-<li><strong>手动选择...</strong>：每次手动选择目标窗口和标签组</li>
 <li>新标签页 / 同一标签组 / 专属标签组</li>
 <li>新窗口 / 同一窗口 / 专属窗口 / 无痕窗口</li>
+<li><strong>同窗专属组</strong>：在同一窗口的专属标签组中打开</li>
+<li><strong>手动选择...</strong>：每次手动选择目标窗口 and 标签组</li>
 </ul>
 <h3>批量操作</h3>
 <ul>
 <li><strong>选择（批量操作）</strong>：进入多选模式，支持跨栏目多选</li>
 <li><strong>文件夹自动成组</strong>：批量打开时，文件夹自动创建标签组</li>
 </ul>
+<h3>搜索</h3>
+<ul>
+<li><strong>书签模式</strong>：搜索书签标题、URL、文件夹名称和 #标签</li>
+<li><strong>卡片（组）模式</strong>：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组等元素的序号、标题、组名 and 时间</li>
+<li><strong>说明模式</strong>：搜索栏目说明、空白卡片文本 and 连接线标签</li>
+</ul>
+<h3>导入导出 ⭐</h3>
+<ul>
+<li><strong>全局导出</strong>：导出 <code>.canvas</code>、栏目 JSON/Markdown、空白卡片 and 连接线</li>
+<li><strong>组导出</strong>：卡片组和临时框选组可单独导出，导入后仍按普通卡片组处理</li>
+<li><strong>快照包导入</strong>：文件夹或压缩包可作为画布快照包导入，用于恢复或对比一整套画布结构</li>
+<li><strong>覆盖导入</strong>：可用快照包覆盖当前画布内容，适合明确要恢复到某份备份时使用</li>
+<li><strong>此位置导入</strong>：在画布空白处或元素右键导入，可把文件夹/压缩包作为快照包导入到当前画布位置附近</li>
+<li><strong><mark>AI</mark> 指南</strong>：导出包可生成 <code>AGENTS.md</code> 或 <code>CLAUDE.md</code>，用于约束 <code>AI</code> 编辑画布包时保留结构</li>
+</ul>
 <hr>
 <p><em>提示：此卡片可自由编辑或删除</em></p>`,
-        'en': `<h2>Open Mode Features</h2>
-<h3>⭐ One-Click Continuous Open</h3>
+        'en': `<h2>Features</h2>
+<h3>Fullscreen and Side Panel</h3>
 <ul>
-<li><strong>Check default open mode</strong>: Right-click menu to select and check your preferred mode</li>
-<li><strong>Left-click to open</strong>: After setting, each left-click opens bookmark in the chosen mode</li>
+<li><strong>Fullscreen mode</strong>: Focus on one section or blank card, useful for organizing content and reading descriptions</li>
+<li><strong>Side panel use</strong>: The side panel works well with fullscreen mode, turning the current section into a focused browser-side workspace</li>
+<li><strong>Locate button</strong>: Jump back to a target section from fullscreen, side panel, or directory; nested groups locate like normal groups</li>
+</ul>
+<h3>One-Click Continuous Open</h3>
+<ul>
+<li><strong>Check default open mode</strong>: Select and check your preferred mode in the right-click menu</li>
+<li><strong>Left-click to open</strong>: After setting, each left-click opens bookmarks in the selected mode</li>
+<li><strong>Right-click open modes</strong>: Right-click a bookmark to choose new tab, tab group, window, incognito window, and other open modes</li>
 </ul>
 <h3>Available Open Modes</h3>
 <ul>
-<li><strong>Same Window + Exclusive Group</strong>: Open in exclusive tab group of same window</li>
-<li><strong>Manual Select...</strong>: Manually choose target window and tab group each time</li>
 <li>New Tab / Same Group / Exclusive Group</li>
 <li>New Window / Same Window / Exclusive Window / Incognito</li>
+<li><strong>Same Window + Exclusive Group</strong>: Open in an exclusive tab group in the current window</li>
+<li><strong>Manual Select...</strong>: Choose target window and tab group each time</li>
 </ul>
 <h3>Batch Operations</h3>
 <ul>
-<li><strong>Select (Batch)</strong>: Enter multi-select mode, supports cross-column selection</li>
-<li><strong>Auto folder grouping</strong>: Folders auto-create tab groups when batch opening</li>
+<li><strong>Select (Batch)</strong>: Enter multi-select mode and select across sections</li>
+<li><strong>Auto folder grouping</strong>: Folders auto-create tab groups during batch open</li>
+</ul>
+<h3>Search</h3>
+<ul>
+<li><strong>Bookmark mode</strong>: Search bookmark titles, URLs, folder names, and #tags</li>
+<li><strong>Card (Group) mode</strong>: Search element indexes, titles, group names, and time for permanent sections and copies, temporary sections, blank cards, and card groups</li>
+<li><strong>Description mode</strong>: Search section descriptions, blank card text, and connection line labels</li>
+</ul>
+<h3>Import / Export ⭐</h3>
+<ul>
+<li><strong>Global export</strong>: Exports <code>.canvas</code>, section JSON/Markdown, blank cards, and connections</li>
+<li><strong>Group export</strong>: Card groups and temporary selections can be exported separately, then imported back as normal card groups</li>
+<li><strong>Snapshot package import</strong>: Folders or zip files can be imported as canvas snapshot packages for restoring or comparing a full canvas structure</li>
+<li><strong>Overwrite import</strong>: A snapshot package can overwrite the current canvas when you explicitly want to restore a backup</li>
+<li><strong>Import at this position</strong>: Right-click a blank canvas area or an element to import a folder/zip snapshot package near the current canvas position</li>
+<li><strong><mark>AI</mark> guide</strong>: Export packages can generate <code>AGENTS.md</code> or <code>CLAUDE.md</code> to guide <code>AI</code> edits while preserving structure</li>
 </ul>
 <hr>
 <p><em>Tip: This card can be freely edited or deleted</em></p>`
@@ -4643,6 +4725,22 @@ const i18n = {
     canvasHelpBatchSelectDesc: {
         'zh_CN': '批量/单个选中书签',
         'en': 'Batch/single selection of bookmarks'
+    },
+    canvasHelpBatchSelectLocateKey: {
+        'zh_CN': '点击左上角悬浮工具窗的「<span style="color: #66bbff">定位</span>」按钮',
+        'en': 'Click the 「<span style="color: #66bbff">Locate</span>」 button in the top-left floating tool window'
+    },
+    canvasHelpBatchSelectLocateDesc: {
+        'zh_CN': '直接定位永久栏目',
+        'en': 'Directly locate the permanent column'
+    },
+    canvasHelpBatchSelectHtmlKey: {
+        'zh_CN': '点击标题栏最右边的按钮「<span style="color: #66bbff">HTML 页面</span>」',
+        'en': 'Click the 「<span style="color: #66bbff">HTML Page</span>」 button on the far right of the title bar'
+    },
+    canvasHelpBatchSelectHtmlDesc: {
+        'zh_CN': '可以打开标签页的书签画布',
+        'en': 'Open the bookmark canvas in a new tab'
     },
     canvasHelpBatchSelectTooltip: {
         'zh_CN': '进入批量模式的时候鼠标左键单击也可以选中',
@@ -5409,6 +5507,18 @@ function applyLanguage() {
     if (canvasHelpBatchSelectDesc1) canvasHelpBatchSelectDesc1.textContent = i18n.canvasHelpBatchSelectDesc[currentLang];
     const canvasHelpBatchSelectDesc2 = document.getElementById('canvasHelpBatchSelectDesc2');
     if (canvasHelpBatchSelectDesc2) canvasHelpBatchSelectDesc2.textContent = i18n.canvasHelpBatchSelectDesc[currentLang];
+
+    const canvasHelpBatchSelectLocateKey1 = document.getElementById('canvasHelpBatchSelectLocateKey1');
+    if (canvasHelpBatchSelectLocateKey1) canvasHelpBatchSelectLocateKey1.innerHTML = i18n.canvasHelpBatchSelectLocateKey[currentLang];
+
+    const canvasHelpBatchSelectLocateDesc1 = document.getElementById('canvasHelpBatchSelectLocateDesc1');
+    if (canvasHelpBatchSelectLocateDesc1) canvasHelpBatchSelectLocateDesc1.textContent = i18n.canvasHelpBatchSelectLocateDesc[currentLang];
+
+    const canvasHelpBatchSelectHtmlKey1 = document.getElementById('canvasHelpBatchSelectHtmlKey1');
+    if (canvasHelpBatchSelectHtmlKey1) canvasHelpBatchSelectHtmlKey1.innerHTML = i18n.canvasHelpBatchSelectHtmlKey[currentLang];
+
+    const canvasHelpBatchSelectHtmlDesc1 = document.getElementById('canvasHelpBatchSelectHtmlDesc1');
+    if (canvasHelpBatchSelectHtmlDesc1) canvasHelpBatchSelectHtmlDesc1.textContent = i18n.canvasHelpBatchSelectHtmlDesc[currentLang];
 
     const batchSelectHelpText1 = document.getElementById('batchSelectHelpText1');
     if (batchSelectHelpText1) batchSelectHelpText1.innerHTML = i18n.canvasHelpBatchSelectTooltip[currentLang].replace(/\n/g, '<br>');

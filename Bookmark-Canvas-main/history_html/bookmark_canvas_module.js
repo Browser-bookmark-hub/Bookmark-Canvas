@@ -3379,8 +3379,8 @@ _Tip: This card can be freely edited or deleted_
 
     // 中文版：快捷操作（Markdown-first）
     const shortcutGuideMarkdown_zh = `## 快捷操作
-### 批量选择
-- **Shift / Cmd/Ctrl + 左键**：批量/单个选中书签（进入批量模式后左键单击也可以选中）
+- **点击左上角悬浮工具窗的「<span style="color: #66bbff">定位</span>」按钮直接定位永久栏目**
+- **点击标题栏最右边的按钮「<span style="color: #66bbff">HTML 页面</span>」可以打开标签页的书签画布**
 
 ### Ctrl 键操作
 - **Ctrl + 左键（按住）**：拖动画布或栏目卡片
@@ -3395,6 +3395,9 @@ _Tip: This card can be freely edited or deleted_
 - **Ctrl/Option + 双指滑动**：缩放（兼容侧边栏）
 - **双指滑动**：拖动画布
 
+### 批量选择
+- **Shift / Cmd/Ctrl + 左键**：批量/单个选中书签（进入批量模式后左键单击也可以选中）
+
 ### 元素右键
 - **可右键元素**：永久栏目及其副本、临时栏目、空白栏目、卡片组、连接线
 - **常用操作**：全屏、定位、置顶、颜色、重命名、删除、复制源码、导出当前
@@ -3405,8 +3408,8 @@ _快捷键可在左上角「管理」中自定义_
 
     // 英文版：快捷操作（Markdown-first）
     const shortcutGuideMarkdown_en = `## Quick Actions
-### Batch Selection
-- **Shift / Cmd/Ctrl + Left Click**: Batch/single selection of bookmarks (left click also selects under batch mode)
+- **Click the 「<span style="color: #66bbff">Locate</span>」 button in the top-left floating tool window to directly locate the permanent column**
+- **Click the 「<span style="color: #66bbff">HTML Page</span>」 button on the far right of the title bar to open the bookmark canvas tab**
 
 ### Ctrl Key Operations
 - **Ctrl + Left Click (hold)**: Drag canvas or section card
@@ -3420,6 +3423,9 @@ _快捷键可在左上角「管理」中自定义_
 - **Pinch gesture**: Zoom canvas
 - **Ctrl/Option + swipe**: Zoom (Sidebar compatible)
 - **Two-finger swipe**: Drag canvas
+
+### Batch Selection
+- **Shift / Cmd/Ctrl + Left Click**: Batch/single selection of bookmarks (left click also selects under batch mode)
 
 ### Element Right-Click
 - **Right-clickable elements**: Permanent section and copies, temporary sections, blank cards, card groups, and connection lines
@@ -3510,10 +3516,11 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 `;
 
     const shortcutGuideHtml_zh = `<h2>快捷操作</h2>
-<h3>批量选择</h3>
 <ul>
-<li><strong>Shift / Cmd/Ctrl + 左键</strong>：批量/单个选中书签（进入批量模式后左键单击也可以选中）</li>
+<li><strong>点击左上角悬浮工具窗的「<span style="color: #66bbff">定位</span>」按钮直接定位永久栏目</strong></li>
+<li><strong>点击标题栏最右边的按钮「<span style="color: #66bbff">HTML 页面</span>」可以打开标签页的书签画布</strong></li>
 </ul>
+
 <h3>Ctrl 键操作</h3>
 <ul>
 <li><strong>Ctrl + 左键（按住）</strong>：拖动画布或栏目卡片</li>
@@ -3530,6 +3537,12 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <li><strong>Ctrl/Option + 双指滑动</strong>：缩放（兼容侧边栏）</li>
 <li><strong>双指滑动</strong>：拖动画布</li>
 </ul>
+
+<h3>批量选择</h3>
+<ul>
+<li><strong>Shift / Cmd/Ctrl + 左键</strong>：批量/单个选中书签（进入批量模式后左键单击也可以选中）</li>
+</ul>
+
 <h3>元素右键</h3>
 <ul>
 <li><strong>可右键元素</strong>：永久栏目及其副本、临时栏目、空白栏目、卡片组、连接线</li>
@@ -3540,10 +3553,11 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 `;
 
     const shortcutGuideHtml_en = `<h2>Quick Actions</h2>
-<h3>Batch Selection</h3>
 <ul>
-<li><strong>Shift / Cmd/Ctrl + Left Click</strong>: Batch/single selection of bookmarks (left click also selects under batch mode)</li>
+<li><strong>Click the 「<span style="color: #66bbff">Locate</span>」 button in the top-left floating tool window to directly locate the permanent column</strong></li>
+<li><strong>Click the 「<span style="color: #66bbff">HTML Page</span>」 button on the far right of the title bar to open the bookmark canvas tab</strong></li>
 </ul>
+
 <h3>Ctrl Key Operations</h3>
 <ul>
 <li><strong>Ctrl + Left Click (hold)</strong>: Drag canvas or section card</li>
@@ -3560,6 +3574,12 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <li><strong>Ctrl/Option + swipe</strong>: Zoom (Sidebar compatible)</li>
 <li><strong>Two-finger swipe</strong>: Drag canvas</li>
 </ul>
+
+<h3>Batch Selection</h3>
+<ul>
+<li><strong>Shift / Cmd/Ctrl + Left Click</strong>: Batch/single selection of bookmarks (left click also selects under batch mode)</li>
+</ul>
+
 <h3>Element Right-Click</h3>
 <ul>
 <li><strong>Right-clickable elements</strong>: Permanent section and copies, temporary sections, blank cards, card groups, and connection lines</li>
