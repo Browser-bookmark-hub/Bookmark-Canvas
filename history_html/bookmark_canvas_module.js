@@ -6838,7 +6838,7 @@ function setupCanvasZoomAndPan() {
             return;
         }
 
-        if (isCustomCtrlKeyPressed(e) || e.metaKey) {
+        if (isCustomCtrlKeyPressed(e) || e.metaKey || __isCanvasTouchpadPinch(e)) {
             // [Feature] 全屏模式（卡片最大化或整体全屏）下禁用 Ctrl 缩放
             // 避免在全屏模式下缩放画布导致内部的书签树（虚拟列表）加载异常
             if (__isCanvasNodeMaximizedActive() || CanvasState.isFullscreen) {
@@ -7130,7 +7130,10 @@ function setupCanvasZoomAndPan() {
 
     function syncCanvasCtrlStateWithEvent(e) {
         if (!e) return;
-        const physicalCtrl = isCustomCtrlKeyPressed(e);
+        let physicalCtrl = isCustomCtrlKeyPressed(e);
+        if (e.type === 'wheel' && __isCanvasTouchpadPinch(e)) {
+            physicalCtrl = false;
+        }
         if (CanvasState.isCtrlPressed !== physicalCtrl) {
             CanvasState.isCtrlPressed = physicalCtrl;
             if (physicalCtrl) {
@@ -9492,6 +9495,14 @@ function __shouldSmoothCanvasWheelPan(event, isTouchpad) {
     return true;
 }
 
+function __isCanvasTouchpadPinch(e) {
+    if (!e) return false;
+    // Touchpad pinch always sends a wheel event with ctrlKey: true.
+    // And the physical Ctrl key is not pressed on the keyboard.
+    // Also, it is not a discrete/step-wise wheel event.
+    return !!(e.ctrlKey && !CanvasState.isCtrlPressed && !__isLikelyCanvasDiscreteWheelEvent(e));
+}
+
 function resolveCanvasZoomInputMode(event) {
     if (!event || event.deltaMode !== 0) return 'wheel';
 
@@ -9501,6 +9512,10 @@ function resolveCanvasZoomInputMode(event) {
         CanvasState.touchpadState.lastZoomInputTime = now;
         return mode;
     };
+
+    if (__isCanvasTouchpadPinch(event)) {
+        return commitMode('touchpad');
+    }
 
     const absDeltaX = Math.abs(Number(event.deltaX) || 0);
     const absDeltaY = Math.abs(Number(event.deltaY) || 0);
