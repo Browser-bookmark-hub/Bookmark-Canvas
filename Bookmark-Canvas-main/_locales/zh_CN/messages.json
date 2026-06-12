@@ -12,7 +12,7 @@
     "description": "工具栏悬浮标题"
   },
   "commandOpenCanvasView": {
-    "message": "打开/关闭「书签画布」视图",
-    "description": "打开或关闭画布视图的快捷键描述"
+    "message": "打开/定位「书签画布」标签页",
+    "description": "打开或定位画布标签页的快捷键描述"
   }
 }

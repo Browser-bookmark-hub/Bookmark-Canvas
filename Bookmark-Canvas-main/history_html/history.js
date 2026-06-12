@@ -4911,8 +4911,8 @@ const i18n = {
         'en': 'Toggle side panel'
     },
     shortcutCanvasPage: {
-        'zh_CN': '打开 HTML 页面',
-        'en': 'Open HTML page'
+        'zh_CN': '打开/定位 HTML 页面',
+        'en': 'Open/locate HTML page'
     },
     shortcutsUnset: {
         'zh_CN': '未设置',

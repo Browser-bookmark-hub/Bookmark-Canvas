@@ -12,7 +12,7 @@
     "description": "Toolbar tooltip title"
   },
   "commandOpenCanvasView": {
-    "message": "Toggle \"Bookmark Canvas\" view",
-    "description": "Command description for toggling the canvas view"
+    "message": "Open/locate \"Bookmark Canvas\" tab",
+    "description": "Command description for opening or focusing the canvas tab"
   }
 }

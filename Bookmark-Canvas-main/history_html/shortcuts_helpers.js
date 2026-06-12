@@ -19,13 +19,25 @@ function updateShortcutsDisplay() {
         return 'Other';
     })();
 
-    // 格式化快捷键显示（Mac上Alt显示为Option）
+    // 格式化快捷键显示（Mac上Alt显示为Option，并将原生符号转换为文字以美化 UI）
     const formatKey = (key) => {
         if (!key) {
             return i18n.shortcutsUnset?.[lang] || (lang === 'zh_CN' ? '未设置' : 'Not set');
         }
         let text = String(key);
         if (isMac) {
+            // 将 ⌥/⇧/⌘/⌃ 符号转换为文字，避免 Unicode 符号在 monospace 字体下大小不一或对齐难看的问题
+            text = text.replace(/⌃/g, 'Control+');
+            text = text.replace(/⌥/g, 'Option+');
+            text = text.replace(/⇧/g, 'Shift+');
+            text = text.replace(/⌘/g, 'Command+');
+            
+            // 清理可能产生的双加号或末尾加号
+            text = text.replace(/\++/g, '+');
+            if (text.endsWith('+')) {
+                text = text.slice(0, -1);
+            }
+            
             text = text.replace(/Alt/gi, 'Option');
         }
         return text.replace(/\+/g, ' + ');

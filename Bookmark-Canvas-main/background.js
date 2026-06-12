@@ -585,8 +585,19 @@ if (browserAPI.tabs && browserAPI.tabs.onUpdated) {
 }
 
 function openCanvasViewFromCommand() {
-  const url = browserAPI.runtime.getURL('history_html/history.html?view=canvas');
-  browserAPI.tabs.create({ url });
+  const targetUrl = browserAPI.runtime.getURL('history_html/history.html?view=canvas');
+  if (browserAPI.tabs && browserAPI.tabs.query) {
+    browserAPI.tabs.query({ currentWindow: true }, (tabs) => {
+      const existingTab = tabs.find(tab => tab.url && tab.url.includes('history_html/history.html'));
+      if (existingTab) {
+        browserAPI.tabs.update(existingTab.id, { active: true });
+      } else {
+        browserAPI.tabs.create({ url: targetUrl });
+      }
+    });
+  } else {
+    browserAPI.tabs.create({ url: targetUrl });
+  }
 }
 
 if (browserAPI.commands && browserAPI.commands.onCommand) {
