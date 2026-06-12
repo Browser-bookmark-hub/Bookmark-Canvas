@@ -1728,7 +1728,7 @@ function showImportDialog(options = {}) {
             Supports <span style="color: #f97316; font-weight: 600;">Full Overwrite Restore</span> (clearing current canvas and replacing all layout and bookmarks) or <span style="color: #f97316; font-weight: 600;">Import as Package</span> (incrementally loading as a grouped canvas section card).
         </div>
         <div style="margin-bottom: 8px; line-height: 1.4;">
-            <strong>Bookmarks (HTML / JSON)</strong><br>
+            <strong>Bookmarks (HTML / JSON - can be dragged directly onto canvas)</strong><br>
             Import standard HTML browser bookmarks or exported section JSON files. Imported bookmarks will create a <span style="color: #f97316; font-weight: 600;">new temporary section</span>.
         </div>
         <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
@@ -1742,7 +1742,7 @@ function showImportDialog(options = {}) {
             支持<span style="color: #f97316; font-weight: 600;">全量覆盖还原</span>（清空当前状态，重现快照的排版布局及所有书签数据）或<span style="color: #f97316; font-weight: 600;">快照包导入</span>（增量导入为当前画布下的一个分组卡片）。
         </div>
         <div style="margin-bottom: 8px; line-height: 1.4;">
-            <strong>书签文件 (HTML / JSON)</strong><br>
+            <strong>书签文件 (HTML / JSON - 可直接在画布中拖入)</strong><br>
             导入普通的 HTML 浏览器书签或导出的临时/永久栏目 JSON，导入后将创建为一块<span style="color: #f97316; font-weight: 600;">新的临时栏目</span>。
         </div>
         <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
@@ -1778,7 +1778,7 @@ function showImportDialog(options = {}) {
                             <span>${isEn ? 'Archive' : '压缩包'}</span>
                         </button>
                     </div>
-                    <div class="import-section-label-large" style="margin-top: 12px;">${isEn ? 'Bookmarks' : '书签文件'}</div>
+                    <div class="import-section-label-large" style="margin-top: 12px;">${isEn ? 'Bookmarks (can be dragged directly onto canvas)' : '书签文件（可直接在画布中拖入）'}</div>
                     <div class="import-row import-row-2cols">
                         <button class="import-option-btn-compact" id="importHtmlBtn" title="${isEn ? 'Import HTML Bookmarks' : '导入 HTML 书签'}">
                             <i class="fas fa-code"></i>
@@ -2360,8 +2360,54 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         return { ok: false, count: 0, section: null };
     }
 
+    // Automatically unpack wrapped bookmark API response wrappers / custom envelopes
+    const unpackEnvelope = (obj) => {
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+            return obj;
+        }
+        // If it looks like a valid named node or bookmark, do not unpack it
+        if ((obj.title && obj.title.trim() !== '') || obj.url) {
+            return obj;
+        }
+        // If it is a canvas protocol layout, do not unpack
+        if (obj.sectionType === 'permanent' || obj.sectionType === 'temporary') {
+            return obj;
+        }
+
+        const keys = ['data', 'tree', 'bookmarkTree', 'bookmarks', 'items'];
+        for (const key of keys) {
+            if (obj[key] && typeof obj[key] === 'object') {
+                const val = obj[key];
+                if (Array.isArray(val)) {
+                    if (val.length > 0 && (val[0].children || val[0].url || val[0].title)) {
+                        return val;
+                    }
+                } else if (val.children && Array.isArray(val.children)) {
+                    return val;
+                } else if (val.url || val.title) {
+                    return val;
+                }
+                // Recursively unpack nested structures
+                const nested = unpackEnvelope(val);
+                if (nested !== val) {
+                    return nested;
+                }
+            }
+        }
+        return obj;
+    };
+
+    data = unpackEnvelope(data);
+
     // 统计书签总数
     let totalBookmarkCount = 0;
+
+    const isRootNode = (node) => {
+        if (!node) return false;
+        if (node.id === '0') return true;
+        if (!node.title || node.title.trim() === '') return true;
+        return false;
+    };
 
     // 通用转换器 - 支持多种字段名
     const convert = (node) => {
@@ -2590,7 +2636,7 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
 
         // 检查是否是 Chrome bookmarks.getTree() 的输出格式
         // 通常返回 [{id: "0", title: "", children: [...]}]
-        if (data.length === 1 && data[0].children && !data[0].url) {
+        if (data.length === 1 && data[0].children && !data[0].url && isRootNode(data[0])) {
             // 可能是 Chrome API 格式的根节点
             data[0].children.forEach(child => {
                 const item = convert(child);
@@ -2602,7 +2648,7 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
                 if (item) items.push(item);
             });
         }
-    } else if (data.children && Array.isArray(data.children)) {
+    } else if (data.children && Array.isArray(data.children) && isRootNode(data)) {
         // 单个根节点格式（可能是 Chrome API 格式）
         console.log('[Canvas] Detected single root node format');
         data.children.forEach(child => {

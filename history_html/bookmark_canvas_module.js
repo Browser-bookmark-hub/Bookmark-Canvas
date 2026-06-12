@@ -5556,6 +5556,7 @@ function setupCanvasDropFeedback() {
         const dt = e.dataTransfer;
         const types = Array.from(dt.types || []);
         if (dt.files && dt.files.length) return true;
+        if (types.includes('Files')) return true;
         return types.includes('text/plain') || types.includes('text/html');
     };
 
@@ -5693,6 +5694,32 @@ function setupCanvasDropFeedback() {
         const zoom = CanvasState.zoom || 1;
         const dropX = (e.clientX - rect.left - CanvasState.panOffsetX) / zoom;
         const dropY = (e.clientY - rect.top - CanvasState.panOffsetY) / zoom;
+
+        // Check for single JSON/HTML file drop on the blank canvas area
+        if (dt.files && dt.files.length === 1) {
+            const file = dt.files[0];
+            const fileName = file.name || '';
+            const isJson = /\.json$/i.test(fileName);
+            const isHtml = /\.html$/i.test(fileName);
+            if (isJson || isHtml) {
+                try {
+                    const text = await file.text();
+                    if (isJson) {
+                        await importJsonBookmarks(text, fileName, {
+                            canvasPosition: { x: dropX, y: dropY }
+                        });
+                    } else if (isHtml) {
+                        await importHtmlBookmarks(text, fileName, {
+                            canvasPosition: { x: dropX, y: dropY }
+                        });
+                    }
+                } catch (fileError) {
+                    console.error('[Canvas] Failed to read dropped file:', fileError);
+                    showCanvasToast(isEn ? 'Failed to read file' : '读取文件失败', 'error');
+                }
+                return;
+            }
+        }
 
         let plainText = '';
         let htmlData = '';
