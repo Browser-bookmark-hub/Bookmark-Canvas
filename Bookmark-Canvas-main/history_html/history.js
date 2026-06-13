@@ -7666,7 +7666,33 @@ async function archiveAllWindowsToCardGroup(options = {}) {
             const groupWidth = (maxX - minX) + 2 * paddingX;
             const groupHeight = (maxY - minY) + paddingY + paddingX;
 
-            const groupLabel = isEn ? 'Archived Windows' : '一键存档';
+            const baseLabel = isEn ? 'Archived Windows' : '一键存档';
+            let groupLabel = baseLabel;
+            if (CanvasState && Array.isArray(CanvasState.mdNodes)) {
+                let maxIndex = 0;
+                let baseFound = false;
+                const escapeRegExp = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const pattern = new RegExp(`^${escapeRegExp(baseLabel)}(?:\\s*\\((\\d+)\\))?$`);
+
+                CanvasState.mdNodes.forEach(node => {
+                    if (!node || node.subtype !== 'card-group' || typeof node.label !== 'string') return;
+                    const match = node.label.match(pattern);
+                    if (match) {
+                        if (match[1]) {
+                            const num = parseInt(match[1], 10);
+                            if (Number.isFinite(num)) {
+                                maxIndex = Math.max(maxIndex, num);
+                            }
+                        } else {
+                            baseFound = true;
+                        }
+                    }
+                });
+
+                if (baseFound || maxIndex > 0) {
+                    groupLabel = `${baseLabel} (${maxIndex + 1})`;
+                }
+            }
             const defaultColor = (typeof getCardGroupDefaultColor === 'function')
                 ? getCardGroupDefaultColor()
                 : ((window.CanvasModule && typeof window.CanvasModule.getCardGroupDefaultColor === 'function')
@@ -7701,10 +7727,6 @@ async function archiveAllWindowsToCardGroup(options = {}) {
             }
             if (typeof scheduleBoundsUpdate === 'function') {
                 scheduleBoundsUpdate();
-            }
-
-            if (window.CanvasModule.locateMdNode) {
-                window.CanvasModule.locateMdNode(groupNode.id, 'fit');
             }
 
             const successMsg = isEn
