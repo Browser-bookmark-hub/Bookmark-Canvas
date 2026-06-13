@@ -6,11 +6,16 @@
   "description": "__MSG_extensionDescription__",
   "author": "kk1",
   "icons": {
-    "100": "icons/icon200.png"
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   },
   "action": {
     "default_icon": {
-      "200": "icons/icon200.png"
+      "16": "icons/icon16.png",
+      "24": "icons/icon24.png",
+      "32": "icons/icon32.png"
     },
     "default_title": "__MSG_actionTitle__"
   },
@@ -63,7 +68,11 @@
         "<all_urls>"
       ],
       "resources": [
-        "icons/icon200.png",
+        "icons/icon16.png",
+        "icons/icon24.png",
+        "icons/icon32.png",
+        "icons/icon48.png",
+        "icons/icon128.png",
         "history_html/*"
       ]
     }
