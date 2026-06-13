@@ -1360,12 +1360,26 @@ function isSectionCtrlModeEvent(e) {
 
 function resolveSectionMeta(element) {
     if (!element) return null;
+    const isMax = element.classList && element.classList.contains('canvas-node-maximized');
+    const getLeft = () => {
+        if (isMax && element.dataset && element.dataset.maxPrevLeft !== undefined) {
+            return parseFloat(element.dataset.maxPrevLeft) || 0;
+        }
+        return parseFloat(element.style.left) || 0;
+    };
+    const getTop = () => {
+        if (isMax && element.dataset && element.dataset.maxPrevTop !== undefined) {
+            return parseFloat(element.dataset.maxPrevTop) || 0;
+        }
+        return parseFloat(element.style.top) || 0;
+    };
+
     if (element.id === 'permanentSection' || (element.classList && element.classList.contains('permanent-bookmark-section'))) {
         return {
             type: 'permanent-section',
             data: null,
-            x: parseFloat(element.style.left) || 0,
-            y: parseFloat(element.style.top) || 0,
+            x: getLeft(),
+            y: getTop(),
             locked: element.dataset && element.dataset.locked === 'true',
             isEditing: false
         };
@@ -1377,8 +1391,8 @@ function resolveSectionMeta(element) {
         return {
             type: 'md-node',
             data,
-            x: typeof data.x === 'number' ? data.x : (parseFloat(element.style.left) || 0),
-            y: typeof data.y === 'number' ? data.y : (parseFloat(element.style.top) || 0),
+            x: typeof data.x === 'number' ? data.x : getLeft(),
+            y: typeof data.y === 'number' ? data.y : getTop(),
             locked: !!data.locked,
             isEditing: !!data.isEditing
         };
@@ -1390,8 +1404,8 @@ function resolveSectionMeta(element) {
         return {
             type: 'temp-node',
             data,
-            x: typeof data.x === 'number' ? data.x : (parseFloat(element.style.left) || 0),
-            y: typeof data.y === 'number' ? data.y : (parseFloat(element.style.top) || 0),
+            x: typeof data.x === 'number' ? data.x : getLeft(),
+            y: typeof data.y === 'number' ? data.y : getTop(),
             locked: false,
             isEditing: false
         };
@@ -4214,16 +4228,24 @@ function __computeTempSectionAutoSize(section, nodeElement, baseSize) {
 
 function applyTempSectionAutoSize(section, options = {}) {
     if (!section) return;
-    const baseSize = getTempSectionBaseSize(section);
     const el = document.getElementById(section.id);
     if (!el) return;
+    if (el.classList && el.classList.contains('canvas-node-maximized')) return;
+
+    const baseSize = getTempSectionBaseSize(section);
     const size = __computeTempSectionAutoSize(section, el, baseSize);
     if (!size) return;
 
-    section.width = size.width;
-    section.height = size.height;
     el.style.width = `${size.width}px`;
     el.style.height = `${size.height}px`;
+
+    const isSidePanel = typeof __getCanvasViewPartitionKey === 'function' && __getCanvasViewPartitionKey() === 'sidepanel';
+    if (isSidePanel) {
+        return;
+    }
+
+    section.width = size.width;
+    section.height = size.height;
 
     if (!options || options.save !== false) {
         saveTempNodes();
@@ -4249,20 +4271,30 @@ function applyTempSectionAutoSizeAll() {
 
     requestAnimationFrame(() => {
         let updated = false;
+        const isSidePanel = typeof __getCanvasViewPartitionKey === 'function' && __getCanvasViewPartitionKey() === 'sidepanel';
         sections.forEach(section => {
             if (!section || !section.id) return;
-            const baseSize = getTempSectionBaseSize(section);
-            if (baseSize.mode !== 'auto') return;
             const el = document.getElementById(section.id);
             if (!el) return;
+            if (el.classList && el.classList.contains('canvas-node-maximized')) return;
+
+            const baseSize = getTempSectionBaseSize(section);
+            if (baseSize.mode !== 'auto') return;
+
             const size = __computeTempSectionAutoSize(section, el, baseSize);
             if (!size) return;
-            if (section.width !== size.width || section.height !== size.height) {
-                section.width = size.width;
-                section.height = size.height;
+
+            if (isSidePanel) {
                 el.style.width = `${size.width}px`;
                 el.style.height = `${size.height}px`;
-                updated = true;
+            } else {
+                if (section.width !== size.width || section.height !== size.height) {
+                    section.width = size.width;
+                    section.height = size.height;
+                    el.style.width = `${size.width}px`;
+                    el.style.height = `${size.height}px`;
+                    updated = true;
+                }
             }
         });
         if (updated) {
@@ -18742,11 +18774,19 @@ function __applyPermanentViewShellToSectionElement(sectionEl, shell) {
     const cardState = __toPermanentViewCardStateStoragePayload(shell.cardState);
     sectionEl.style.transition = 'none';
     sectionEl.style.transform = 'none';
-    if (cardState.left) sectionEl.style.left = cardState.left;
-    if (cardState.top) sectionEl.style.top = cardState.top;
-    if (cardState.width) sectionEl.style.width = cardState.width;
-    if (cardState.height) sectionEl.style.height = cardState.height;
-    applyElementMinimumSize(sectionEl, getSectionMinimumSize(sectionEl));
+    const isMaximized = sectionEl.classList && sectionEl.classList.contains('canvas-node-maximized');
+    if (isMaximized) {
+        if (cardState.left) sectionEl.dataset.maxPrevLeft = cardState.left;
+        if (cardState.top) sectionEl.dataset.maxPrevTop = cardState.top;
+        if (cardState.width) sectionEl.dataset.maxPrevWidth = cardState.width;
+        if (cardState.height) sectionEl.dataset.maxPrevHeight = cardState.height;
+    } else {
+        if (cardState.left) sectionEl.style.left = cardState.left;
+        if (cardState.top) sectionEl.style.top = cardState.top;
+        if (cardState.width) sectionEl.style.width = cardState.width;
+        if (cardState.height) sectionEl.style.height = cardState.height;
+        applyElementMinimumSize(sectionEl, getSectionMinimumSize(sectionEl));
+    }
     sectionEl.offsetHeight;
     sectionEl.style.transition = '';
 
@@ -21230,11 +21270,20 @@ function __renderMdNodeImpl(node, options = {}) {
     const mdHeight = Math.max(mdBaseSize.minHeight, Number(node.height) || mdBaseSize.height);
     node.width = mdWidth;
     node.height = mdHeight;
-    el.style.left = node.x + 'px';
-    el.style.top = node.y + 'px';
-    el.style.width = mdWidth + 'px';
-    el.style.height = mdHeight + 'px';
-    applyElementMinimumSize(el, getSectionMinimumSize(el, node));
+
+    const isMax = el.classList && el.classList.contains('canvas-node-maximized');
+    if (isMax) {
+        el.dataset.maxPrevLeft = node.x + 'px';
+        el.dataset.maxPrevTop = node.y + 'px';
+        el.dataset.maxPrevWidth = mdWidth + 'px';
+        el.dataset.maxPrevHeight = mdHeight + 'px';
+    } else {
+        el.style.left = node.x + 'px';
+        el.style.top = node.y + 'px';
+        el.style.width = mdWidth + 'px';
+        el.style.height = mdHeight + 'px';
+        applyElementMinimumSize(el, getSectionMinimumSize(el, node));
+    }
 
     if (node.style) {
         el.style.cssText += node.style;
@@ -29666,9 +29715,15 @@ function __renderTempNodeImpl(section, options = {}) {
             nodeElement.classList.add('low-detail-active');
         }
     }
-    if (applyElementMinimumSize(nodeElement, getSectionMinimumSize(nodeElement, section))) {
-        section.width = parseFloat(nodeElement.style.width) || section.width || baseSize.width;
-        section.height = parseFloat(nodeElement.style.height) || section.height || baseSize.height;
+    const isMax = nodeElement.classList && nodeElement.classList.contains('canvas-node-maximized');
+    if (!isMax) {
+        if (applyElementMinimumSize(nodeElement, getSectionMinimumSize(nodeElement, section))) {
+            const isSidePanel = typeof __getCanvasViewPartitionKey === 'function' && __getCanvasViewPartitionKey() === 'sidepanel';
+            if (!isSidePanel) {
+                section.width = parseFloat(nodeElement.style.width) || section.width || baseSize.width;
+                section.height = parseFloat(nodeElement.style.height) || section.height || baseSize.height;
+            }
+        }
     }
 
     // 防御：避免状态类残留导致“内容被隐藏但 section 已非休眠”的空白显示
@@ -31120,13 +31175,24 @@ function patchTempSectionShellInPlace(section, options = {}) {
     section.color = section.color || getTempSectionDefaultColor(section);
     const baseSize = getTempSectionBaseSize(section);
 
-    if (Number.isFinite(Number(section.x))) nodeElement.style.left = Number(section.x) + 'px';
-    if (Number.isFinite(Number(section.y))) nodeElement.style.top = Number(section.y) + 'px';
-    nodeElement.style.width = (section.width || baseSize.width) + 'px';
-    nodeElement.style.height = (section.height || baseSize.height) + 'px';
-    if (applyElementMinimumSize(nodeElement, getSectionMinimumSize(nodeElement, section))) {
-        section.width = parseFloat(nodeElement.style.width) || section.width || baseSize.width;
-        section.height = parseFloat(nodeElement.style.height) || section.height || baseSize.height;
+    const isMaximized = nodeElement.classList && nodeElement.classList.contains('canvas-node-maximized');
+    if (isMaximized) {
+        if (Number.isFinite(Number(section.x))) nodeElement.dataset.maxPrevLeft = Number(section.x) + 'px';
+        if (Number.isFinite(Number(section.y))) nodeElement.dataset.maxPrevTop = Number(section.y) + 'px';
+        nodeElement.dataset.maxPrevWidth = (section.width || baseSize.width) + 'px';
+        nodeElement.dataset.maxPrevHeight = (section.height || baseSize.height) + 'px';
+    } else {
+        if (Number.isFinite(Number(section.x))) nodeElement.style.left = Number(section.x) + 'px';
+        if (Number.isFinite(Number(section.y))) nodeElement.style.top = Number(section.y) + 'px';
+        nodeElement.style.width = (section.width || baseSize.width) + 'px';
+        nodeElement.style.height = (section.height || baseSize.height) + 'px';
+        if (applyElementMinimumSize(nodeElement, getSectionMinimumSize(nodeElement, section))) {
+            const isSidePanel = typeof __getCanvasViewPartitionKey === 'function' && __getCanvasViewPartitionKey() === 'sidepanel';
+            if (!isSidePanel) {
+                section.width = parseFloat(nodeElement.style.width) || section.width || baseSize.width;
+                section.height = parseFloat(nodeElement.style.height) || section.height || baseSize.height;
+            }
+        }
     }
 
     const pinned = !!section.pinned;
@@ -34873,15 +34939,26 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external', optio
                         if (contentChanged || labelChanged) {
                             try { renderMdNode(oldNode); } catch (_) {}
                         } else {
+                            const isNodeMaximized = el.classList && el.classList.contains('canvas-node-maximized');
                             if (posChanged) {
-                                el.style.left = newNode.x + 'px';
-                                el.style.top = newNode.y + 'px';
+                                if (isNodeMaximized) {
+                                    el.dataset.maxPrevLeft = newNode.x + 'px';
+                                    el.dataset.maxPrevTop = newNode.y + 'px';
+                                } else {
+                                    el.style.left = newNode.x + 'px';
+                                    el.style.top = newNode.y + 'px';
+                                }
                             }
                             if (sizeChanged) {
-                                el.style.width = newNode.width + 'px';
-                                el.style.height = newNode.height + 'px';
-                                if (oldNode.subtype === 'card-group' && typeof __cardGroupUpdateHeaderPillScaleCap === 'function') {
-                                    try { __cardGroupUpdateHeaderPillScaleCap(el); } catch (_) {}
+                                if (isNodeMaximized) {
+                                    el.dataset.maxPrevWidth = newNode.width + 'px';
+                                    el.dataset.maxPrevHeight = newNode.height + 'px';
+                                } else {
+                                    el.style.width = newNode.width + 'px';
+                                    el.style.height = newNode.height + 'px';
+                                    if (oldNode.subtype === 'card-group' && typeof __cardGroupUpdateHeaderPillScaleCap === 'function') {
+                                        try { __cardGroupUpdateHeaderPillScaleCap(el); } catch (_) {}
+                                    }
                                 }
                             }
                             if (pinChanged) {

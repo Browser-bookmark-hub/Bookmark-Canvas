@@ -435,10 +435,19 @@ function renderCardGroup(node) {
     const height = Math.max(120, Number(node.height) || 320);
     node.width = width;
     node.height = height;
-    el.style.left = (Number(node.x) || 0) + 'px';
-    el.style.top = (Number(node.y) || 0) + 'px';
-    el.style.width = width + 'px';
-    el.style.height = height + 'px';
+
+    const isMax = el.classList && el.classList.contains('canvas-node-maximized');
+    if (isMax) {
+        el.dataset.maxPrevLeft = (Number(node.x) || 0) + 'px';
+        el.dataset.maxPrevTop = (Number(node.y) || 0) + 'px';
+        el.dataset.maxPrevWidth = width + 'px';
+        el.dataset.maxPrevHeight = height + 'px';
+    } else {
+        el.style.left = (Number(node.x) || 0) + 'px';
+        el.style.top = (Number(node.y) || 0) + 'px';
+        el.style.width = width + 'px';
+        el.style.height = height + 'px';
+    }
 
     __cardGroupApplyZIndex(el, node);
     applyCardGroupColor(node);
