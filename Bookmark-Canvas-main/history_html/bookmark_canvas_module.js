@@ -21275,11 +21275,13 @@ function __renderMdNodeImpl(node, options = {}) {
     `;
 
     toolbar.innerHTML = `
+        ${layoutZoomControlsHtml}
         <button class="md-node-toolbar-btn" data-action="md-format-toggle" data-tooltip="${formatTitle}"><i class="fas fa-font"></i></button>
         <button class="md-node-toolbar-btn" data-action="md-focus" data-tooltip="${focusTitle}"><i class="fas fa-search-plus"></i></button>
         <button class="md-node-toolbar-btn" data-action="md-color-toggle" data-tooltip="${colorTitle}"><i class="fas fa-palette"></i></button>
         <button class="md-node-toolbar-btn${node.pinned ? ' pinned' : ''}" data-action="md-pin" data-tooltip="${mdPinBtnTitle}">${mdPinBtnIcon}</button>
         <button class="md-node-toolbar-btn md-delete-danger-btn" data-action="md-delete" data-tooltip="${deleteTitle}"><i class="far fa-trash-alt"></i></button>
+        <button class="md-node-toolbar-btn canvas-node-fullscreen-btn" data-action="md-fullscreen" data-tooltip="${fullscreenTitle}"><i class="fas fa-expand"></i></button>
     `;
 
     // 初始化字体大小（从节点数据或默认值）

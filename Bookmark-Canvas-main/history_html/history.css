@@ -9612,7 +9612,6 @@ body.canvas-node-maximized-active #canvasContent>.canvas-node-maximized {
 .temp-canvas-node.canvas-node-maximized .temp-node-header,
 .temp-canvas-node.canvas-node-maximized .temp-node-description-container,
 .temp-canvas-node.canvas-node-maximized .temp-node-body,
-.md-canvas-node.canvas-node-maximized .md-node-toolbar,
 .md-canvas-node.canvas-node-maximized .md-canvas-editor {
     zoom: var(--canvas-node-layout-zoom, 1);
 }
@@ -9659,7 +9658,8 @@ body.canvas-node-maximized-active #canvasContent>.canvas-node-maximized {
 
 .md-canvas-node.canvas-node-maximized .md-node-toolbar {
     top: auto;
-    bottom: 12px;
+    bottom: 16px;
+    transform: translateX(-50%) scale(1) !important;
 }
 
 /* Hide canvas scrollbars + floating zoom tools while a node is maximized */
