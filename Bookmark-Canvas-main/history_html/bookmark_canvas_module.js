@@ -31341,18 +31341,18 @@ function getTempRootLazyCounts(total) {
     const safeTotal = Number.isFinite(total) ? total : 0;
     if (safeTotal <= 0) return { initial: 0, pageSize: 0 };
 
-    let initial = 200;
-    let pageSize = 200;
+    let initial = 100;
+    let pageSize = 100;
 
     if (isCanvasHugeData()) {
-        initial = Math.min(initial, 80);
-        pageSize = Math.min(pageSize, 80);
+        initial = Math.min(initial, 50);
+        pageSize = Math.min(pageSize, 50);
     }
 
     // 超大列表：再收紧一点，避免一次性创建过多 DOM
     if (safeTotal > 5000) {
-        initial = Math.min(initial, 150);
-        pageSize = Math.min(pageSize, 150);
+        initial = Math.min(initial, 100);
+        pageSize = Math.min(pageSize, 100);
     }
 
     return {
