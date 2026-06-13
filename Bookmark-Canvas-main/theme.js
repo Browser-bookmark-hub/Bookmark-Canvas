@@ -3,15 +3,8 @@
     // 主题类型枚举
     const ThemeType = {
         LIGHT: 'light',
-        DARK: 'dark',
-        SYSTEM: 'system'
+        DARK: 'dark'
     };
-
-    // 获取系统主题偏好
-    function getSystemThemePreference() {
-        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 
-            ThemeType.DARK : ThemeType.LIGHT;
-    }
 
     // 获取当前语言 (异步)
     async function getCurrentLanguage() {
@@ -39,11 +32,10 @@
         const lang = await getCurrentLanguage();
         const themeTexts = {
             [ThemeType.LIGHT]: { 'zh_CN': '浅色模式', 'en': 'Light Mode' },
-            [ThemeType.DARK]: { 'zh_CN': '深色模式', 'en': 'Dark Mode' },
-            [ThemeType.SYSTEM]: { 'zh_CN': '跟随系统', 'en': 'System Mode' }
+            [ThemeType.DARK]: { 'zh_CN': '深色模式', 'en': 'Dark Mode' }
         };
 
-        const textsForCurrentTheme = themeTexts[themeType] || themeTexts[ThemeType.SYSTEM];
+        const textsForCurrentTheme = themeTexts[themeType] || themeTexts[ThemeType.DARK];
         return textsForCurrentTheme[lang] || textsForCurrentTheme['zh_CN']; // 回退到中文
     }
     
@@ -54,15 +46,9 @@
             
             // 同时保存到chrome.storage，以便History Viewer可以同步
             if (chrome && chrome.storage && chrome.storage.local) {
-                // 获取实际应用的主题（如果是system，则转换为实际的light/dark）
-                const actualTheme = themeType === ThemeType.SYSTEM ? 
-                    getSystemThemePreference() : themeType;
-                
-                chrome.storage.local.set({ currentTheme: actualTheme }, () => {
+                chrome.storage.local.set({ currentTheme: themeType }, () => {
                     if (chrome.runtime.lastError) {
                         console.error('无法保存主题到chrome.storage:', chrome.runtime.lastError);
-                    } else {
-                        ;
                     }
                 });
             }
@@ -75,10 +61,10 @@
     function loadThemePreference() {
         try {
             const savedTheme = localStorage.getItem('themePreference');
-            return savedTheme || ThemeType.SYSTEM;
+            return (savedTheme === ThemeType.LIGHT || savedTheme === ThemeType.DARK) ? savedTheme : ThemeType.DARK;
         } catch (e) {
             console.error('无法加载主题偏好:', e);
-            return ThemeType.SYSTEM;
+            return ThemeType.DARK;
         }
     }
 
@@ -88,32 +74,22 @@
         const lightModeIcon = document.getElementById('lightModeIcon');
         const systemModeIcon = document.getElementById('systemModeIcon');
         
-        if (darkModeIcon && lightModeIcon && systemModeIcon) {
+        if (darkModeIcon && lightModeIcon) {
             darkModeIcon.style.display = 'none';
             lightModeIcon.style.display = 'none';
-            systemModeIcon.style.display = 'none';
+            if (systemModeIcon) systemModeIcon.style.display = 'none';
             
-            switch (themeType) {
-                case ThemeType.DARK:
-                    darkModeIcon.style.display = 'inline-block';
-                    break;
-                case ThemeType.LIGHT:
-                    lightModeIcon.style.display = 'inline-block';
-                    break;
-                case ThemeType.SYSTEM:
-                    systemModeIcon.style.display = 'inline-block';
-                    break;
+            if (themeType === ThemeType.DARK) {
+                darkModeIcon.style.display = 'inline-block';
+            } else {
+                lightModeIcon.style.display = 'inline-block';
             }
         }
     }
 
     // 应用主题到文档
     function applyTheme(themeType) {
-        
-        // 如果是系统主题，则检测系统当前偏好
-        const actualTheme = themeType === ThemeType.SYSTEM ? 
-            getSystemThemePreference() : themeType;
-        
+        const actualTheme = (themeType === ThemeType.LIGHT || themeType === ThemeType.DARK) ? themeType : ThemeType.DARK;
         
         // 直接设置 data-theme 属性
         if (actualTheme === ThemeType.DARK) {
@@ -132,34 +108,11 @@
         }
         
         // 更新图标显示
-        updateThemeIcons(themeType);
-    }
-
-    // 监听系统主题变化
-    function watchSystemThemeChanges() {
-        if (window.matchMedia) {
-            const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-            const handleChange = function(e) {
-                // 只有在跟随系统模式下才自动切换
-                if (loadThemePreference() === ThemeType.SYSTEM) {
-                    applyTheme(ThemeType.SYSTEM);
-                }
-            };
-            
-            // 现代浏览器使用 addEventListener
-            if (mediaQuery.addEventListener) {
-                mediaQuery.addEventListener('change', handleChange);
-            }
-            // 旧版浏览器使用 addListener
-            else if (mediaQuery.addListener) {
-                mediaQuery.addListener(handleChange);
-            }
-        }
+        updateThemeIcons(actualTheme);
     }
 
     // 初始化主题切换功能
     function initializeThemeSwitcher() {
-        
         const themeSwitcher = document.getElementById('themeSwitcher');
         if (!themeSwitcher) {
             // 仍然应用主题，但不初始化切换按钮的交互
@@ -173,7 +126,6 @@
         const themeSwitcherTooltip = document.getElementById('themeSwitcherTooltip');
 
         // 更新主题提示文本的函数 - 只显示主题状态 (异步)
-        // 定义在此处，以便在下面的 if 块和事件监听器中可用
         async function updateThemeTooltip(tooltipElement, themeType) {
             if (tooltipElement) {
                 tooltipElement.textContent = await getThemeStatusText(themeType);
@@ -205,35 +157,16 @@
             });
         }
         
-        
         // 应用主题
         applyTheme(savedTheme);
-        
-        // 监听系统主题变化
-        watchSystemThemeChanges();
         
         // 点击切换主题
         themeSwitcher.addEventListener('click', function() {
             // 获取当前主题
             const currentTheme = loadThemePreference();
             
-            // 循环切换主题: 系统 -> 浅色 -> 深色 -> 系统
-            let newTheme;
-            switch (currentTheme) {
-                case ThemeType.SYSTEM:
-                    newTheme = ThemeType.LIGHT;
-                    break;
-                case ThemeType.LIGHT:
-                    newTheme = ThemeType.DARK;
-                    break;
-                case ThemeType.DARK:
-                case "dark": // 兼容可能的字符串值
-                    newTheme = ThemeType.SYSTEM;
-                    break;
-                default:
-                    newTheme = ThemeType.SYSTEM;
-            }
-            
+            // 仅在浅色和深色之间循环切换
+            const newTheme = currentTheme === ThemeType.DARK ? ThemeType.LIGHT : ThemeType.DARK;
             
             // 保存并应用新主题
             saveThemePreference(newTheme);
@@ -244,7 +177,6 @@
                 updateThemeTooltip(themeSwitcherTooltip, newTheme);
             }
         });
-        
 
         // 监听语言变化以更新工具提示
         if (chrome && chrome.storage && chrome.storage.onChanged) {

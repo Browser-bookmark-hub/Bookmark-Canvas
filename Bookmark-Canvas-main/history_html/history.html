@@ -14,14 +14,6 @@
             background: #ffffff;
         }
 
-        @media (prefers-color-scheme: dark) {
-
-            html,
-            body {
-                background: #242526;
-            }
-        }
-
         html[data-theme="dark"],
         html[data-theme="dark"] body {
             background: #242526;
@@ -32,7 +24,7 @@
         html.side-panel-mode.canvas-view-active #canvasView,
         html.side-panel-mode.canvas-view-active .canvas-main-container,
         html.side-panel-mode.canvas-view-active .canvas-workspace {
-            background: #ffffff;
+            background: var(--bg-tertiary);
         }
 
         html[data-theme="dark"].side-panel-mode.canvas-view-active,

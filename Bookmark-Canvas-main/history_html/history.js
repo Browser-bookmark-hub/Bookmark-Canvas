@@ -5293,10 +5293,7 @@ async function loadUserSettings() {
                     } catch (_) { }
                     return 'en';
                 })();
-            const prefersDark = typeof window !== 'undefined'
-                && window.matchMedia
-                && window.matchMedia('(prefers-color-scheme: dark)').matches;
-            const mainUITheme = result.currentTheme || (prefersDark ? 'dark' : 'light');
+            const mainUITheme = result.currentTheme || 'dark';
 
             // Keep History Viewer in sync with main UI.
             // Legacy: older versions supported per-page overrides, but that commonly caused "not linked" confusion.
@@ -6706,7 +6703,11 @@ function refreshLastFullscreenButtonsVisibility() {
         const button = document.getElementById(buttonId);
         if (!button) return;
 
-        const shouldHide = !hasStoredNode;
+        let shouldHide = !hasStoredNode;
+        if (buttonId === 'titleLastFullscreenBtn' && !isSidePanelMode) {
+            shouldHide = true;
+        }
+
         if (shouldHide && document.activeElement === button) {
             try { button.blur(); } catch (_) { }
         }
@@ -14254,6 +14255,13 @@ function handleStorageChange(changes, namespace) {
         currentTheme = newTheme;
         if (currentTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
         else document.documentElement.removeAttribute('data-theme');
+
+        // 主题切换后立即刷新连线标签背景色
+        try {
+            if (currentView === 'canvas' && typeof renderEdges === 'function') {
+                renderEdges();
+            }
+        } catch (_) { }
 
         // 更新主题切换按钮图标
         const icon = document.querySelector('#themeToggle i');

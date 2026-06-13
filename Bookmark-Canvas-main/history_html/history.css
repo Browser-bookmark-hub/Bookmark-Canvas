@@ -5,16 +5,16 @@
 
     /* Light Theme */
     --bg-primary: #ffffff;
-    --bg-secondary: #f8f9fa;
-    --bg-tertiary: #f0f2f5;
+    --bg-secondary: #fafafa;
+    --bg-tertiary: #f5f5f7;
     --bg-elevated: #ffffff;
 
-    --text-primary: #1c1e21;
-    --text-secondary: #65676b;
+    --text-primary: #18181b;
+    --text-secondary: #52525b;
     --text-tertiary: #8a8d91;
 
-    --border-color: #e4e6eb;
-    --border-hover: #ccd0d5;
+    --border-color: #e4e4e7;
+    --border-hover: #d4d4d8;
 
     --accent-primary: #1877f2;
     --accent-hover: #166fe5;
@@ -30,9 +30,9 @@
     --info: #17a2b8;
     --info-light: #e0f7fa;
 
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
-    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.1);
-    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.15);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
 
     /* Git 风格颜色 */
     --git-added: #22863a;
@@ -60,8 +60,8 @@
     --permanent-section-color-dark: #059669;
     --permanent-section-color-rgb: 16, 185, 129;
     --appearance-edge-color-preview: #999999;
-    --canvas-tip-bg: #e5e7eb;
-    --canvas-tip-border: #d1d5db;
+    --canvas-tip-bg: #ffffff;
+    --canvas-tip-border: #e4e4e7;
     --canvas-tip-blur: 0px;
 }
 
@@ -580,6 +580,7 @@ option {
     top: 0;
     z-index: 100;
     overflow: visible;
+    transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
 .header-left {
@@ -7317,6 +7318,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .permanent-section-tip {
     margin: 0;
     font-size: 15px;
+    color: rgba(0, 0, 0, 0.65);
     opacity: 0.95;
     line-height: var(--desc-line-height, 1.4);
     flex: 1;
@@ -7342,7 +7344,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 /* 永久栏目说明：复用 WYSIWYG 的 placeholder 机制 */
 .permanent-section-tip.md-wysiwyg-editor:empty::before {
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(0, 0, 0, 0.4);
 }
 
 /* 永久栏目 Markdown 渲染样式 */
@@ -7373,7 +7375,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .permanent-section-tip code {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.08);
     padding: 2px 4px;
     border-radius: 2px;
     font-family: 'Courier New', monospace;
@@ -7383,7 +7385,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .permanent-section-tip blockquote {
     margin: 4px 0;
     padding-left: 8px;
-    border-left: 2px solid rgba(255, 255, 255, 0.3);
+    border-left: 2px solid rgba(0, 0, 0, 0.2);
 }
 
 .permanent-section-tip strong {
@@ -7429,9 +7431,9 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .permanent-section-tip a {
-    color: #93c5fd;
+    color: #2563eb;
     text-decoration: none;
-    border-bottom: 1px solid rgba(147, 197, 253, 0.4);
+    border-bottom: 1px solid rgba(37, 99, 235, 0.3);
     cursor: pointer;
     /* 使用伪元素扩大点击区域，不影响视觉效果 */
     position: relative;
@@ -7450,7 +7452,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .permanent-section-tip a:hover {
-    border-bottom-color: rgba(147, 197, 253, 0.7);
+    border-bottom-color: rgba(37, 99, 235, 0.6);
 }
 
 /* 任务列表样式（永久栏目说明） */
@@ -7477,9 +7479,9 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .permanent-section-tip-edit-btn,
 .permanent-section-tip-height-btn {
-    background: rgba(255, 255, 255, 0.25);
+    background: rgba(0, 0, 0, 0.08);
     border: none;
-    color: white;
+    color: rgba(0, 0, 0, 0.65);
     width: 16px;
     height: 16px;
     border-radius: 3px;
@@ -7495,9 +7497,9 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .permanent-section-tip-format-btn {
-    background: rgba(255, 255, 255, 0.25);
+    background: rgba(0, 0, 0, 0.08);
     border: none;
-    color: white;
+    color: rgba(0, 0, 0, 0.65);
     width: 16px;
     height: 16px;
     border-radius: 3px;
@@ -7513,9 +7515,9 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .permanent-section-tip-close {
-    background: rgba(255, 255, 255, 0.25);
+    background: rgba(0, 0, 0, 0.08);
     border: none;
-    color: white;
+    color: rgba(0, 0, 0, 0.65);
     width: 16px;
     height: 16px;
     border-radius: 3px;
@@ -7542,14 +7544,15 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .permanent-section-tip-format-btn:hover,
 .permanent-section-tip-height-btn:hover,
 .permanent-section-tip-close:hover {
-    background: rgba(255, 255, 255, 0.4);
+    background: rgba(0, 0, 0, 0.14);
+    color: rgba(0, 0, 0, 0.75);
     transform: scale(1.15);
 }
 
 .permanent-section-tip-height-btn.active {
-    background: rgba(255, 255, 255, 0.55);
-    color: #ffffff;
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+    color: rgba(37, 99, 235, 0.95);
+    background: rgba(37, 99, 235, 0.18);
+    box-shadow: none;
 }
 
 .permanent-section-tip-edit-btn:active,
@@ -7561,10 +7564,10 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .permanent-section-tip-container.editing .permanent-section-tip {
     padding: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    border: 1px solid var(--border-color);
     border-radius: 4px;
     background: transparent;
-    color: white;
+    color: var(--text-primary);
     font-size: 15px;
     font-family: inherit;
     line-height: var(--desc-line-height, 1.4);
@@ -7586,17 +7589,17 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .permanent-section-tip-container.editing .permanent-section-tip:focus {
     outline: none;
     background: transparent;
-    border-color: rgba(255, 255, 255, 0.5);
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-light);
 }
 
 .permanent-section-tip-editor {
     width: 100%;
     padding: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    border: 1px solid var(--border-color);
     border-radius: 4px;
     background: transparent;
-    color: white;
+    color: var(--text-primary);
     font-size: 15px;
     font-family: inherit;
     line-height: 1.4;
@@ -7609,8 +7612,8 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .permanent-section-tip-editor:focus {
     outline: none;
     background: transparent;
-    border-color: rgba(255, 255, 255, 0.5);
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-light);
 }
 
 [data-theme="dark"] .permanent-section-tip-container.editing .permanent-section-tip,
@@ -7623,34 +7626,50 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     background: transparent;
 }
 
-[data-theme="dark"] .permanent-section-tip-edit-btn {
-    opacity: 0;
-    pointer-events: none;
+[data-theme="dark"] .permanent-section-tip {
+    color: rgba(255, 255, 255, 0.65);
 }
 
-[data-theme="dark"] .permanent-section-tip-format-btn {
-    opacity: 0;
-    pointer-events: none;
+[data-theme="dark"] .permanent-section-tip.md-wysiwyg-editor:empty::before {
+    color: rgba(255, 255, 255, 0.5);
 }
 
-[data-theme="dark"] .permanent-section-tip-height-btn {
-    opacity: 0;
-    pointer-events: none;
+[data-theme="dark"] .permanent-section-tip code {
+    background: rgba(255, 255, 255, 0.15);
 }
 
-[data-theme="dark"] .permanent-section-tip-height-btn.active {
-    background: rgba(255, 255, 255, 0.45);
+[data-theme="dark"] .permanent-section-tip blockquote {
+    border-left: 2px solid rgba(255, 255, 255, 0.3);
 }
 
+[data-theme="dark"] .permanent-section-tip a {
+    color: #93c5fd;
+    border-bottom-color: rgba(147, 197, 253, 0.4);
+}
+
+[data-theme="dark"] .permanent-section-tip a:hover {
+    border-bottom-color: rgba(147, 197, 253, 0.7);
+}
+
+[data-theme="dark"] .permanent-section-tip-edit-btn,
+[data-theme="dark"] .permanent-section-tip-format-btn,
+[data-theme="dark"] .permanent-section-tip-height-btn,
 [data-theme="dark"] .permanent-section-tip-close {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.7);
 }
 
 [data-theme="dark"] .permanent-section-tip-edit-btn:hover,
 [data-theme="dark"] .permanent-section-tip-format-btn:hover,
 [data-theme="dark"] .permanent-section-tip-height-btn:hover,
 [data-theme="dark"] .permanent-section-tip-close:hover {
-    background: rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.25);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+[data-theme="dark"] .permanent-section-tip-height-btn.active {
+    background: rgba(59, 130, 246, 0.3);
+    color: #58a6ff;
 }
 
 [data-theme="dark"] .permanent-section-tip-container.editing .permanent-section-tip {
@@ -7692,18 +7711,22 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     border-bottom-right-radius: 9px;
     /* 外层 overflow:hidden 会自动裁剪圆角，无需单独设置 */
     /* 背景色填充整个区域 */
-    background: var(--bg-elevated);
+    background: #edf2f7;
     overscroll-behavior: contain;
     isolation: isolate;
 }
 
-/* 永久栏目内的书签树样式调整 */
-.permanent-bookmark-section .bookmark-tree {
-    /* 继承原有的bookmark-tree样式，不需要额外padding */
+/* 永久与临时栏目内的书签树样式调整 */
+.permanent-bookmark-section .bookmark-tree,
+.temp-canvas-node .bookmark-tree {
+    /* 继承原有的bookmark-tree样式，不需要额外padding和白背景 */
     flex: 1;
     /* 填充父容器 */
     overflow: visible;
     /* 让内容自然扩展 */
+    background: transparent;
+    border: none;
+    padding: 0;
 }
 
 /* 临时节点样式 */
@@ -7713,11 +7736,10 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     min-height: 180px;
     /* 移除背景色，让内层元素填充 */
     background: transparent;
-    border: 1.5px solid rgba(9, 105, 218, 0.18);
-    border-top: 4px solid var(--section-color, #2563eb);
+    border: 3px solid var(--section-color, #2563eb);
     border-radius: 12px;
     box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.08);
-    transition: box-shadow 0.18s ease, transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: box-shadow 0.18s ease, transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.32s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s ease;
     z-index: 10;
     will-change: auto;
     /* 默认关闭，拖拽时动态启用，减少内存占用 */
@@ -7737,19 +7759,17 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 [data-theme="dark"] .temp-canvas-node {
     background: transparent;
-    border-color: rgba(56, 139, 253, 0.25);
+    border-color: var(--section-color, #60a5fa);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.45);
 }
 
 .temp-canvas-node:hover {
     box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.12);
     transform: translateY(-1px);
-    border-color: rgba(9, 105, 218, 0.28);
 }
 
 [data-theme="dark"] .temp-canvas-node:hover {
     box-shadow: 0 14px 32px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.55);
-    border-color: rgba(88, 166, 255, 0.4);
 }
 
 .temp-canvas-node.dragging {
@@ -8233,14 +8253,16 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     /* 移除多余 margin，让 body 完全贴合边缘 */
     margin: 0;
     /* 背景色填充整个区域 */
-    background: linear-gradient(to bottom, #ffffff 0%, #f8fafc 100%);
+    background: #edf2f7;
     overscroll-behavior: contain;
     isolation: isolate;
 }
 
+[data-theme="dark"] .permanent-section-body,
 [data-theme="dark"] .temp-node-body {
-    background: linear-gradient(to bottom, #1f242b 0%, #14171c 100%);
+    background: var(--bg-secondary);
 }
+
 
 .permanent-section-body.canvas-scroll-perf-active,
 .temp-node-body.canvas-scroll-perf-active {
@@ -8609,6 +8631,14 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     color: rgba(255, 255, 255, 0.65);
 }
 
+[data-theme="dark"] .temp-node-description code {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="dark"] .temp-node-description blockquote {
+    border-left: 2px solid rgba(255, 255, 255, 0.3);
+}
+
 [data-theme="dark"] .temp-node-description-container {
     background: var(--canvas-tip-bg);
     border-top-color: var(--canvas-tip-border);
@@ -8625,6 +8655,11 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     border-color: rgba(59, 130, 246, 0.5);
     background: transparent;
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+[data-theme="dark"] .temp-node-desc-height-btn.active {
+    background: rgba(59, 130, 246, 0.3);
+    color: #58a6ff;
 }
 
 [data-theme="dark"] .temp-node-desc-action-btn {
@@ -9477,7 +9512,7 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
 .md-canvas-node {
     position: absolute;
     box-sizing: border-box;
-    background: #ffffff;
+    background: var(--bg-secondary);
     /* 与画布背景一致（亮色） */
     border: 2px solid rgba(27, 31, 36, 0.35);
     /* 默认边框，更重 */
@@ -9497,7 +9532,7 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
 }
 
 [data-theme="dark"] .md-canvas-node {
-    background: #242526;
+    background: var(--bg-secondary);
     /* 与画布背景一致（暗色） */
     border-color: rgba(255, 255, 255, 0.4);
     /* 默认边框，更重 */
@@ -12661,7 +12696,12 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     cursor: pointer;
     color: var(--text-tertiary);
     font-size: 14px;
-    padding: 4px;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
     border-radius: 4px;
     transition: all 0.15s ease;
 }
@@ -12945,7 +12985,12 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     cursor: pointer;
     color: var(--text-tertiary);
     font-size: 14px;
-    padding: 4px;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
     border-radius: 4px;
     transition: all 0.15s ease;
 }

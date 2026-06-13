@@ -21,7 +21,7 @@
     height: 100%;
     position: relative;
     /* 基础背景色保留在容器上 */
-    background-color: #ffffff;
+    background-color: var(--bg-tertiary);
     overflow: hidden;
     /* 无边框：移除 inset 线框 */
     box-shadow: none;
@@ -577,7 +577,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 .canvas-workspace {
-    transition: background-position 0.05s ease-out;
+    transition: background-position 0.05s ease-out, background-color 0.25s ease;
 }
 
 /* 拖出永久栏目边界时的“替代UI”样式（隐藏原图标并显示简洁提示） */
@@ -662,6 +662,12 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     stroke: #888;
 }
 
+/* 连接线标签背景框 */
+.canvas-edge-label-bg {
+    fill: var(--bg-tertiary);
+    transition: fill 0.25s ease;
+}
+
 /* 连接线标签样式 */
 .canvas-edge-label {
     --canvas-edge-label-scale-source: var(--canvas-scale-inv, 1);
@@ -729,6 +735,10 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .canvas-workspace.canvas-zoom-performance .canvas-edge {
     transition: none !important;
     filter: none !important;
+}
+
+[data-theme="dark"] .canvas-edge-label-bg {
+    fill: #242526;
 }
 
 [data-theme="dark"] .canvas-edge-label {

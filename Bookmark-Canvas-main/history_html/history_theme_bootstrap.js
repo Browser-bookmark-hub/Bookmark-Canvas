@@ -11,11 +11,9 @@
     } catch (_) { }
 
     const pref = localStorage.getItem('themePreference');
-    const prefersDark = window.matchMedia
-      && window.matchMedia('(prefers-color-scheme: dark)').matches;
     const theme = (pref === 'dark' || pref === 'light')
       ? pref
-      : (prefersDark ? 'dark' : 'light');
+      : 'dark';
 
     if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
     else document.documentElement.removeAttribute('data-theme');

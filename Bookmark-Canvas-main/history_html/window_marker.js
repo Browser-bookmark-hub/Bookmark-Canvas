@@ -233,10 +233,7 @@
   }
 
   function applyTheme(theme) {
-    let targetTheme = theme;
-    if (theme === 'system') {
-      targetTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    }
+    let targetTheme = (theme === 'dark' || theme === 'light') ? theme : 'dark';
     currentActiveTheme = targetTheme;
     if (targetTheme === 'dark') {
       document.documentElement.setAttribute('data-theme', 'dark');
@@ -926,18 +923,6 @@
             initUI(); 
             refreshTabsList(); 
           }
-        }
-      });
-    }
-
-    // 监听系统级深色/浅色偏好变化
-    if (window.matchMedia) {
-      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-        const localOverride = localStorage.getItem('marker_theme_override');
-        if (!localOverride) {
-          chrome.storage.local.get(['currentTheme'], (data) => {
-            applyTheme(data.currentTheme || 'system');
-          });
         }
       });
     }

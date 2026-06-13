@@ -30069,9 +30069,9 @@ function __renderTempNodeImpl(section, options = {}) {
 
     actions.appendChild(renameBtn);
     actions.appendChild(pinBtn);
-    actions.appendChild(fullscreenBtn);
     actions.appendChild(colorWrap);
     actions.appendChild(closeBtn);
+    actions.appendChild(fullscreenBtn);
 
     header.appendChild(titleContainer);
     header.appendChild(actions);
