@@ -11026,8 +11026,9 @@ function __scheduleCanvasLowDetailDomRestore(delayMs = CANVAS_LOW_DETAIL_DOM_RES
         clearTimeout(canvasLowDetailDomPruneTimer);
         canvasLowDetailDomPruneTimer = null;
     }
-    if (!CanvasState.lowDetailDomPruned &&
-        (!CanvasState.unloadedPermanentSectionTrees || !CanvasState.unloadedPermanentSectionTrees.size)) {
+    const hasUnloadedTemp = CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.size > 0;
+    const hasUnloadedPerm = CanvasState.unloadedPermanentSectionTrees && CanvasState.unloadedPermanentSectionTrees.size > 0;
+    if (!CanvasState.lowDetailDomPruned && !hasUnloadedTemp && !hasUnloadedPerm) {
         return;
     }
     if (canvasLowDetailDomRestoreTimer) {
@@ -11042,6 +11043,9 @@ function __scheduleCanvasLowDetailDomRestore(delayMs = CANVAS_LOW_DETAIL_DOM_RES
             return;
         }
         try { __restorePermanentSectionTreesAfterLowDetail(); } catch (_) { }
+        if (!isCanvasVirtualizationEnabled()) {
+            try { __restoreAllVirtualisedNodes(); } catch (_) { }
+        }
         CanvasState.lowDetailDomPruned = false;
         CanvasState.lowDetailDomLastRestoreAt = Date.now();
         try { scheduleCanvasVirtualizationUpdate(0); } catch (_) { }
@@ -13168,7 +13172,7 @@ function __hasCanvasSafeZoneLowDetailResidue(workspace = null) {
     if (!ws) return !!CanvasState.lowDetailActive;
     if (__hasCanvasGlobalLowDetailResidue(ws)) return true;
     try {
-        return !!ws.querySelector('.low-detail-active, .card-group-low-detail-child-hidden, .card-group-low-detail-nested-visible, [data-low-detail-host-group-id]');
+        return !!ws.querySelector('.low-detail-active, .temp-tree-unloaded, .permanent-tree-unloaded, .card-group-low-detail-child-hidden, .card-group-low-detail-nested-visible, [data-low-detail-host-group-id]');
     } catch (_) {
         return false;
     }
