@@ -81,7 +81,8 @@ const CanvasState = {
         lastZoomDelta: 0,
         zoomDeltaTimer: null,
         lastZoomInputMode: 'wheel',
-        lastZoomInputTime: 0
+        lastZoomInputTime: 0,
+        isPinchGestureActive: false
     },
     lastCanvasScrollTime: 0,
     // 自动滚动状态（拖动到边缘时）
@@ -7066,9 +7067,44 @@ function setupCanvasZoomAndPan() {
         }
     }, { passive: false });
 
+    // 监听触控板物理捏合手势的开始和结束，以便精准识别并丢弃手势结束后的物理惯性事件
+    workspace.addEventListener('gesturestart', (e) => {
+        CanvasState.touchpadState.isPinchGestureActive = true;
+    });
+    workspace.addEventListener('gestureend', (e) => {
+        CanvasState.touchpadState.isPinchGestureActive = false;
+        // 手势结束时，立即触发缩放清理，确保视觉和数据状态一致
+        const workspaceEl = document.getElementById('canvasWorkspace');
+        if (workspaceEl && workspaceEl._zoomEndTimer) {
+            clearTimeout(workspaceEl._zoomEndTimer);
+            workspaceEl._zoomEndTimer = null;
+        }
+        __onCanvasZoomEndCleanup();
+    });
+
     // Ctrl + 滚轮缩放（以鼠标位置为中心）- 性能优化版本
     workspace.addEventListener('wheel', (e) => {
         syncCanvasCtrlStateWithEvent(e);
+
+        // [Fix] 消除 缩放 结束并释放 Ctrl/修饰键 时，由于触控板惯性产生的突然平移 (突然加速、连带了一下)
+        const now = Date.now();
+        const lastZoomTime = CanvasState.touchpadState?.lastZoomInputTime || 0;
+        const workspaceEl = document.getElementById('canvasWorkspace');
+        const isZoomingActive = workspaceEl && (workspaceEl.classList.contains('is-zooming') || workspaceEl._zoomEndTimer);
+        const hasRecentZoom = isZoomingActive || (now - lastZoomTime < 800);
+
+        // 如果是触控板物理捏合，但物理手势已经结束（手指抬起），忽略后续的物理捏合惯性事件
+        if (__isCanvasTouchpadPinch(e) && !CanvasState.touchpadState.isPinchGestureActive) {
+            e.preventDefault();
+            return;
+        }
+
+        // 如果近期有缩放，且当前不是任何缩放控制输入，说明是释放修饰键后的惯性滚动，直接拦截
+        if (hasRecentZoom && !isCustomCtrlKeyPressed(e) && !e.metaKey && !__isCanvasTouchpadPinch(e)) {
+            e.preventDefault();
+            return;
+        }
+
         // 拖动时的滚轮滚动功能：
         // - 触控板双指滑动：四向自由滚动（横向 + 纵向同时支持）
         // - 鼠标滚轮：纵向滚动
@@ -7316,14 +7352,12 @@ function setupCanvasZoomAndPan() {
             };
             if (isTouchpad) {
                 __cancelCanvasSmoothWheelZoom();
-                // Windows/Linux 下触控板也用直达路径避免 rAF 被节流导致磁矩失效
+                __cancelCanvasTrackpadZoomInertia();
                 if (CANVAS_RUNTIME_WINDOWS_LIKE) {
-                    __cancelCanvasTrackpadZoomInertia();
                     __cancelCanvasPendingZoomUpdate();
                     setCanvasZoom(newZoom, mouseX, mouseY, zoomOptions);
                 } else {
                     scheduleZoomUpdate(newZoom, mouseX, mouseY, zoomOptions);
-                    __pushCanvasTrackpadZoomInertiaFromFactor(zoomFactor, mouseX, mouseY, zoomOptions);
                 }
                 __logCanvasWinInput('wheel-zoom-apply', {
                     route: 'touchpad-direct-inertia',
@@ -9712,7 +9746,6 @@ function __getZoomSpeedFactorFromCurve(displayZoom, curve) {
 }
 
 function getCanvasZoomSpeedFactor(displayZoom) {
-    if (shouldUseDefaultZoomCurve()) return 1;
     const curve = getCanvasZoomCurveSettings();
     return __getZoomSpeedFactorFromCurve(displayZoom, curve);
 }
@@ -9977,8 +10010,12 @@ function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
     // 与 Chromium 的 pinch->wheel 映射保持一致：scale = exp(-deltaY / 100)
     // 这里 rawDelta = -deltaY，因此 nativeLogDelta = rawDelta / 100
     const nativeLogDelta = delta / TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR;
-    // 触控板捏合保持独立：仅使用触控板速率 + 手感系数，不叠加滚轮曲线/磁矩
-    let targetLogDelta = nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER;
+    // 触控板捏合遵循滚轮曲线与磁矩
+    const curveFactor = getCanvasZoomSpeedFactor(_displayZoom);
+    const nextDisplayZoomNoMagnet = _displayZoom * Math.exp(nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER);
+    const magnet = getCanvasZoomMagnetEffect(_displayZoom, nextDisplayZoomNoMagnet);
+    const magnetFactor = magnet.factor;
+    let targetLogDelta = nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER * curveFactor * magnetFactor;
 
     const prevLogDelta = Number.isFinite(CanvasState.touchpadState.lastZoomDelta)
         ? CanvasState.touchpadState.lastZoomDelta
