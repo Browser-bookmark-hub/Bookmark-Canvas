@@ -9546,12 +9546,30 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
 
 /* Node maximize state (permanent/temp/blank cards) */
 .canvas-node-maximized {
-    border-radius: 0;
+    border-radius: 0 !important;
     box-shadow: var(--shadow-lg);
     transition: none !important;
     contain: layout style paint;
     isolation: isolate;
     will-change: auto;
+}
+
+/* Remove rounded corners when maximized to prevent empty white gaps at the screen viewport corners */
+.permanent-bookmark-section.canvas-node-maximized .permanent-section-header,
+.temp-canvas-node.canvas-node-maximized .temp-node-header {
+    border-top-left-radius: 0 !important;
+    border-top-right-radius: 0 !important;
+}
+
+.permanent-bookmark-section.canvas-node-maximized .permanent-section-body,
+.temp-canvas-node.canvas-node-maximized .temp-node-body {
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+}
+
+.md-canvas-node.canvas-node-maximized .md-canvas-editor,
+.md-canvas-node.canvas-node-maximized .md-canvas-text {
+    border-radius: 0 !important;
 }
 
 body.canvas-node-maximized-active #canvasContent {
