@@ -3364,7 +3364,7 @@ _提示：此卡片可自由编辑或删除_
 
     // 英文版：画布基础（Markdown-first）
     const bookmarkGuideMarkdown_en = `## Canvas Basics
-1. **Drag bookmarks/folders to a blank area** to create bookmark-type temp nodes.
+1. **Drag bookmarks/folders to a blank area** to <font color="#44cf6e">create bookmark-type temp nodes</font>.
 2. Temp node changes are **not saved to core data**, useful for comparison and organization.
 3. **Drag/paste between sections**.
 
@@ -3431,7 +3431,7 @@ _Tip: This card can be freely edited or deleted_
 
 ### 批量选择
 
-- **\`Shift | Cmd/Ctrl + 左键\`**：批量/单个选中书签（进入批量模式后左键单击也可以选中）
+- **\`Shift | Option/Alt + 左键\`**：批量/单个选中书签（进入批量模式后左键单击也可以选中）
 
 ---
 
@@ -3482,7 +3482,7 @@ _快捷键可在左上角「管理」中自定义_
 
 ### Batch Selection
 
-- **\`Shift | Cmd/Ctrl + Left Click\`**: Batch/single selection of bookmarks (left click also selects under batch mode)
+- **\`Shift | Option/Alt + Left Click\`**: Batch/single selection of bookmarks (left click also selects under batch mode)
 
 ---
 
@@ -3548,7 +3548,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 
     const bookmarkGuideHtml_en = `<h2>Canvas Basics</h2>
 <ol>
-<li><strong>Drag bookmarks/folders to a blank area</strong> to create bookmark-type temp nodes.</li>
+<li><strong>Drag bookmarks/folders to a blank area</strong> to <font color="#44cf6e">create bookmark-type temp nodes</font>.</li>
 <li>Temp node changes are <strong>not saved to core data</strong>, useful for comparison and organization.</li>
 <li><strong>Drag/paste between sections</strong>.</li>
 </ol>
@@ -3621,7 +3621,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <hr>
 <h3>批量选择</h3>
 <ul>
-<li><strong><code>Shift | Cmd/Ctrl + 左键</code></strong>：批量/单个选中书签（进入批量模式后左键单击也可以选中）</li>
+<li><strong><code>Shift | Option/Alt + 左键</code></strong>：批量/单个选中书签（进入批量模式后左键单击也可以选中）</li>
 </ul>
 
 <hr>
@@ -3671,7 +3671,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <hr>
 <h3>Batch Selection</h3>
 <ul>
-<li><strong><code>Shift | Cmd/Ctrl + Left Click</code></strong>: Batch/single selection of bookmarks (left click also selects under batch mode)</li>
+<li><strong><code>Shift | Option/Alt + Left Click</code></strong>: Batch/single selection of bookmarks (left click also selects under batch mode)</li>
 </ul>
 
 <hr>
@@ -3861,7 +3861,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 
 ### 关联生态项目
 - **组织仓库列表**:
-  [Organizatonal Repositories](https://github.com/orgs/Browser-bookmark-hub/repositories)
+  [组织仓库列表](https://github.com/orgs/Browser-bookmark-hub/repositories)
 - **Bookmark Backup** (书签备份):
   [GitHub 仓库](https://github.com/Browser-bookmark-hub/Bookmark-Backup)
 - **Bookmark Record and Recommend** (书签记录与推荐):
@@ -4014,7 +4014,7 @@ JSON or HTML backup files exported by these projects can be directly **dragged**
 
 ### 导入导出
 - **全局导出**：导出 \`.canvas\`、栏目 JSON/Markdown、空白卡片和连接线
-- **组导出**：卡片组 and 临时框选组可单独导出，导入后仍按普通卡片组处理
+- **组导出**：卡片组和临时框选组可单独导出，导入后仍按普通卡片组处理
 - **快照包导入**：文件夹或压缩包可作为画布快照包导入，用于恢复或对比一整套画布结构
 - **覆盖导入**：可用快照包覆盖当前画布内容，适合明确要恢复到某份备份时使用
 - **此位置导入**：在画布空白处或元素右键导入，可把文件夹/压缩包作为快照包导入到当前画布位置附近

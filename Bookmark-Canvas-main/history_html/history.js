@@ -4519,7 +4519,7 @@ const i18n = {
 </ul>
 <h3>空格键操作</h3>
 <ul>
-<li><strong>空格 + 左键（按住）</strong>：拖动画布</li>
+<li><strong>空格 + 左键（按住）</strong>：拖动全局画布</li>
 </ul>
 <h3>触控板操作</h3>
 <ul>
@@ -4538,7 +4538,7 @@ const i18n = {
 </ul>
 <h3>Space Key Operations</h3>
 <ul>
-<li><strong>Space + Left Click (hold)</strong>: Drag canvas</li>
+<li><strong>Space + Left Click (hold)</strong>: Drag global canvas</li>
 </ul>
 <h3>Touchpad Operations</h3>
 <ul>
@@ -4593,7 +4593,7 @@ const i18n = {
 </ul>`,
         'en': `<h2>Canvas Basics</h2>
 <ol>
-<li><strong>Drag bookmarks/folders to a blank area</strong> to create bookmark-type temp nodes.</li>
+<li><strong>Drag bookmarks/folders to a blank area</strong> to <font color="#44cf6e">create bookmark-type temp nodes</font>.</li>
 <li>Temp node changes are <strong>not saved to core data</strong>, useful for comparison and organization.</li>
 <li><strong>Drag/paste between sections</strong>.</li>
 </ol>
@@ -4707,13 +4707,13 @@ const i18n = {
 <h3>搜索</h3>
 <ul>
 <li><strong>书签模式</strong>：搜索书签标题、URL、文件夹名称和 #标签</li>
-<li><strong>卡片（组）模式</strong>：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组等元素的序号、标题、组名 and 时间</li>
-<li><strong>说明模式</strong>：搜索栏目说明、空白卡片文本 and 连接线标签</li>
+<li><strong>卡片（组）模式</strong>：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组等元素的序号、标题、组名和时间</li>
+<li><strong>说明模式</strong>：搜索栏目说明、空白卡片文本和连接线标签</li>
 </ul>
 <hr>
 <h3>导入导出</h3>
 <ul>
-<li><strong>全局导出</strong>：导出 <code>.canvas</code>、栏目 JSON/Markdown、空白卡片 and 连接线</li>
+<li><strong>全局导出</strong>：导出 <code>.canvas</code>、栏目 JSON/Markdown、空白卡片和连接线</li>
 <li><strong>组导出</strong>：卡片组和临时框选组可单独导出，导入后仍按普通卡片组处理</li>
 <li><strong>快照包导入</strong>：文件夹或压缩包可作为画布快照包导入，用于恢复或对比一整套画布结构</li>
 <li><strong>覆盖导入</strong>：可用快照包覆盖当前画布内容，适合明确要恢复到某份备份时使用</li>
@@ -4786,12 +4786,44 @@ const i18n = {
         'en': 'Left Click'
     },
     canvasHelpBatchSelectDesc: {
-        'zh_CN': '批量/单个选中书签',
-        'en': 'Batch/single selection of bookmarks'
+        'zh_CN': '批量/单个选中书签（进入批量模式后左键单击也可以选中）',
+        'en': 'Batch/single selection of bookmarks (left click also selects under batch mode)'
     },
     canvasHelpBatchSelectTooltip: {
         'zh_CN': '进入批量模式的时候鼠标左键单击也可以选中',
         'en': 'Clicking the left mouse button in batch mode can also select elements'
+    },
+    canvasHelpLeftClickSelectTitle: {
+        'zh_CN': '左键框选',
+        'en': 'Left-Click Selection'
+    },
+    canvasHelpLeftClickSelectDrag: {
+        'zh_CN': '左键拖动（画布空白处）',
+        'en': 'Left Click + Drag (blank canvas)'
+    },
+    canvasHelpLeftClickSelectDesc: {
+        'zh_CN': '多选元素并形成临时组，支持整组拖动、批量修改颜色/置顶/删除或转换为卡片组',
+        'en': 'Select multiple elements to form a temporary group for group dragging, batch coloring, pinning, deleting, or creating a card group'
+    },
+    canvasHelpRightClickTitle: {
+        'zh_CN': '元素右键',
+        'en': 'Element Right-Click'
+    },
+    canvasHelpRightClickTarget: {
+        'zh_CN': '可右键元素',
+        'en': 'Right-clickable elements'
+    },
+    canvasHelpRightClickTargetDesc: {
+        'zh_CN': '永久栏目及其副本、临时栏目、空白栏目、连接线、卡片组、左键框选的临时组、画布空白处',
+        'en': 'Permanent section and copies, temporary sections, blank cards, connection lines, card groups, and temporary selection groups'
+    },
+    canvasHelpRightClickAction: {
+        'zh_CN': '常用操作',
+        'en': 'Common actions'
+    },
+    canvasHelpRightClickActionDesc: {
+        'zh_CN': '全屏、定位、置顶、颜色、重命名、删除、复制源码、导出当前',
+        'en': 'Fullscreen, locate, pin, color, rename, delete, copy source, export current'
     },
     canvasHelpCtrlTitle: {
         'zh_CN': 'Ctrl 键操作',
@@ -4834,8 +4866,8 @@ const i18n = {
         'en': 'Left Click (Hold)'
     },
     canvasHelpSpaceDesc: {
-        'zh_CN': '拖动画布',
-        'en': 'Drag canvas'
+        'zh_CN': '拖动全局画布',
+        'en': 'Drag global canvas'
     },
     canvasHelpTouchpadTitle: {
         'zh_CN': '触控板操作',
