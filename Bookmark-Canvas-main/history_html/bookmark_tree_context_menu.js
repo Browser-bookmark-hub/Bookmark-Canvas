@@ -1944,8 +1944,8 @@ let currentBatchPanelAnchorInfo = null; // 当前批量面板定位信息
 let lastBatchSelectionInfo = null; // 最近一次选择所属栏目
 
 // 批量面板默认尺寸：固定，不跟随画布缩放
-const BATCH_PANEL_VERTICAL_DEFAULT_WIDTH = 280;
-const BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT = 700;
+const BATCH_PANEL_VERTICAL_DEFAULT_WIDTH = 200;
+const BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT = 450; // 450px 静默高度
 
 function getBatchPanelGlobalState() {
     try {
@@ -1953,6 +1953,14 @@ function getBatchPanelGlobalState() {
         if (raw) {
             const parsed = JSON.parse(raw);
             if (parsed && typeof parsed === 'object') {
+                // 如果是以前默认的 700px 高度或 null，重置为新的默认高度 450
+                if (parsed.vertical && (parsed.vertical.height === 700 || parsed.vertical.height === null)) {
+                    parsed.vertical.height = BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT;
+                }
+                // 如果是以前默认的 280px 宽度，重置为新的默认值 200px
+                if (parsed.vertical && parsed.vertical.width === 280) {
+                    parsed.vertical.width = BATCH_PANEL_VERTICAL_DEFAULT_WIDTH;
+                }
                 return parsed;
             }
         }
@@ -1993,8 +2001,14 @@ function clampValue(value, min, max) {
 
 function getStoredBatchPanelLayout() {
     try {
-        const raw = localStorage.getItem('batchPanelLayout');
-        return raw === 'horizontal' ? 'horizontal' : 'vertical';
+        const isSidePanel = __isSidePanelModeForAdd();
+        const storageKey = isSidePanel ? 'batchPanelLayout_sidepanel' : 'batchPanelLayout_page';
+        const raw = localStorage.getItem(storageKey);
+        
+        if (raw === 'horizontal') return 'horizontal';
+        if (raw === 'vertical') return 'vertical';
+        
+        return isSidePanel ? 'vertical' : 'horizontal';
     } catch (_) {
         return 'vertical';
     }
@@ -13312,7 +13326,9 @@ function toggleBatchPanelLayout() {
 
     batchPanelHorizontal = !batchPanelHorizontal;
     try {
-        localStorage.setItem('batchPanelLayout', batchPanelHorizontal ? 'horizontal' : 'vertical');
+        const isSidePanel = __isSidePanelModeForAdd();
+        const storageKey = isSidePanel ? 'batchPanelLayout_sidepanel' : 'batchPanelLayout_page';
+        localStorage.setItem(storageKey, batchPanelHorizontal ? 'horizontal' : 'vertical');
     } catch (e) {
         console.error('[批量面板] 保存布局状态失败:', e);
     }
