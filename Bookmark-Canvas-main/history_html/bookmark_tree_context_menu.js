@@ -7539,7 +7539,7 @@ function __buildBookmarkAddSecondaryModal() {
     return modal;
 }
 
-function __renderBookmarkAddActionOptions(container, lang, actionType, windowAsFolder = false) {
+function __renderBookmarkAddActionOptions(container, lang, actionType, windowAsFolder = false, context = null) {
     if (!container) return;
 
     const options = [
@@ -7569,11 +7569,13 @@ function __renderBookmarkAddActionOptions(container, lang, actionType, windowAsF
         icon: 'window-maximize'
     });
 
-    options.push({
-        value: 'add-all-windows-card-group',
-        label: lang === 'zh_CN' ? '一键存档（所有窗口）' : 'Archive All (All Windows)',
-        icon: 'archive'
-    });
+    if (context && context.blankRoot === true) {
+        options.push({
+            value: 'add-all-windows-card-group',
+            label: lang === 'zh_CN' ? '一键存档（所有窗口）' : 'Archive All (All Windows)',
+            icon: 'archive'
+        });
+    }
 
     const selected = __normalizeBookmarkAddActionType(actionType);
     const checkedWindowAsFolder = __normalizeBookmarkAddWindowAsFolder(windowAsFolder);
@@ -7649,6 +7651,10 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
     if (initialActionType === 'add-current-tab' && !__isSidePanelModeForAdd()) {
         initialActionType = 'add-page';
     }
+    if (initialActionType === 'add-all-windows-card-group' && !(context && context.blankRoot === true)) {
+        initialActionType = 'add-page';
+    }
+
     const initialPosition = __normalizeBookmarkAddPosition(context, options.position);
     const initialWindowAsFolder = (options && options.windowAsFolder !== undefined && options.windowAsFolder !== null)
         ? __normalizeBookmarkAddWindowAsFolder(options.windowAsFolder)
@@ -7673,8 +7679,9 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
     if (cancelBtn) cancelBtn.textContent = lang === 'zh_CN' ? '取消' : 'Cancel';
     if (confirmBtn) confirmBtn.textContent = lang === 'zh_CN' ? '确定' : 'Confirm';
 
-    __renderBookmarkAddActionOptions(actionWrap, lang, initialActionType, initialWindowAsFolder);
+    __renderBookmarkAddActionOptions(actionWrap, lang, initialActionType, initialWindowAsFolder, context);
     __renderBookmarkAddPositionOptions(positionWrap, context, initialPosition);
+
     if (locateAfterActionInput) {
         locateAfterActionInput.checked = initialLocateAfterAction;
     }
@@ -7770,7 +7777,10 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
 
 async function executeBookmarkAddAction(context, config, options = {}) {
     const lang = currentLang || 'zh_CN';
-    const actionType = __normalizeBookmarkAddActionType(config && config.actionType);
+    let actionType = __normalizeBookmarkAddActionType(config && config.actionType);
+    if (actionType === 'add-all-windows-card-group' && !(context && context.blankRoot === true)) {
+        actionType = 'add-page';
+    }
     const preferredPosition = __normalizeBookmarkAddPosition(context, config && config.position);
     const windowAsFolder = actionType === 'add-current-window' && __normalizeBookmarkAddWindowAsFolder(config && config.windowAsFolder);
     const locateAfterAction = (context && context.blankRoot) ? false : __normalizeBookmarkAddLocateAfterAction(config && config.locateAfterAction);
