@@ -3845,6 +3845,22 @@ function buildSubmenuItems(context) {
     const lang = currentLang || 'zh_CN';
     const items = [];
 
+    if (context && context.isFolder) {
+        items.push(
+            { action: 'open-all', label: lang === 'zh_CN' ? '打开全部' : 'Open All', icon: 'folder-open' },
+            { action: 'open-all-tab-group', label: lang === 'zh_CN' ? '标签页组' : 'Tab Group', icon: 'object-group' },
+            { action: 'open-all-new-window', label: lang === 'zh_CN' ? '新窗口' : 'New Window', icon: 'window-restore' },
+            { action: 'open-all-incognito', label: lang === 'zh_CN' ? '无痕窗口' : 'Incognito', icon: 'user-secret' },
+            {
+                action: 'open-all-manual-select',
+                labelHTML: `<span>${lang === 'zh_CN' ? '手动选择...' : 'Manual Select...'}<span class="sub-badge" data-sub-action="open-all-manual-select-template-run">${lang === 'zh_CN' ? '模版' : 'Template'}</span></span>`,
+                label: lang === 'zh_CN' ? '手动选择...' : 'Manual Select...',
+                icon: 'crosshairs'
+            }
+        );
+        return items;
+    }
+
     items.push(
         // 新增：手动选择窗口+组（可勾选）
         {
@@ -4005,17 +4021,13 @@ function buildMenuItems(context) {
             { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'actions' },
             { separator: true },
 
-            // 打开组
-            { action: 'open-all', label: lang === 'zh_CN' ? '打开全部' : 'Open All', icon: 'folder-open', group: 'open' },
-            { action: 'open-all-tab-group', label: lang === 'zh_CN' ? '标签页组' : 'Tab Group', icon: 'object-group', group: 'open' },
-            { action: 'open-all-new-window', label: lang === 'zh_CN' ? '新窗口' : 'New Window', icon: 'window-restore', group: 'open' },
-            { action: 'open-all-incognito', label: lang === 'zh_CN' ? '无痕窗口' : 'Incognito', icon: 'user-secret', group: 'open' },
+            // 打开方式（二级菜单）
             {
-                action: 'open-all-manual-select',
-                labelHTML: `<span>${lang === 'zh_CN' ? '手动选择...' : 'Manual Select...'}<span class="sub-badge" data-sub-action="open-all-manual-select-template-run">${lang === 'zh_CN' ? '模版' : 'Template'}</span></span>`,
-                label: lang === 'zh_CN' ? '手动选择...' : 'Manual Select...',
-                icon: 'crosshairs',
-                group: 'open'
+                action: 'open-submenu-trigger',
+                label: lang === 'zh_CN' ? '打开方式' : 'Open Mode',
+                icon: 'external-link-alt',
+                group: 'open',
+                hasSubmenu: true
             },
             { separator: true },
 
