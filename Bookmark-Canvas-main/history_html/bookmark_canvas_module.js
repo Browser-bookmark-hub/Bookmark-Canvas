@@ -20722,6 +20722,19 @@ function createEmptyTempSection(x, y, options = {}) {
         ? options.colorLocked
         : __getDefaultTempColorLockedState();
 
+    const initialItems = [];
+    if (options && Array.isArray(options.initialItems)) {
+        options.initialItems.forEach(payload => {
+            const item = createTempItemFromPayload(sectionId, payload);
+            if (item) {
+                initialItems.push(item);
+                if (typeof __collapseTempFolderRecursively === 'function') {
+                    __collapseTempFolderRecursively(sectionId, item);
+                }
+            }
+        });
+    }
+
     const section = {
         id: sectionId,
         title,
@@ -20733,7 +20746,7 @@ function createEmptyTempSection(x, y, options = {}) {
         width: 0,
         height: 0,
         pinned: !!(options && options.pinned),
-        items: []
+        items: initialItems
     };
 
     if (label) {

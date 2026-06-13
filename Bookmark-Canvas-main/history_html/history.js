@@ -7552,7 +7552,20 @@ async function archiveAllWindowsToCardGroup(options = {}) {
 
     const sectionIds = [];
 
+    let loadingToast = null;
+    if (typeof window.showLoadingToast === 'function' && addableTabsByWindow.length > 1) {
+        const initialMsg = isEn ? 'Archiving windows...' : '正在一键存档所有窗口...';
+        loadingToast = window.showLoadingToast(initialMsg);
+    }
+
     for (let i = 0; i < addableTabsByWindow.length; i++) {
+        if (loadingToast) {
+            const msg = isEn
+                ? `Archiving window ${i + 1} of ${addableTabsByWindow.length}...`
+                : `正在存档第 ${i + 1}/${addableTabsByWindow.length} 个窗口...`;
+            loadingToast.update(msg);
+        }
+
         const winData = addableTabsByWindow[i];
         const win = winData.window;
         const tabs = winData.tabs;
@@ -7601,16 +7614,23 @@ async function archiveAllWindowsToCardGroup(options = {}) {
         const sectionId = window.CanvasModule.createEmptyTempSection(x, y, {
             title: windowTitle,
             label: isEn ? 'Archive' : '存档',
-            source: 'quick-add'
+            source: 'quick-add',
+            initialItems: structuredItems
         });
 
         if (sectionId) {
             sectionIds.push(sectionId);
-            insertQuickAddItemsToTempSection(sectionId, structuredItems, '');
             if (window.CanvasModule.temp.ensureRendered) {
                 window.CanvasModule.temp.ensureRendered(sectionId);
             }
         }
+
+        // yield to event loop to prevent UI freezing
+        await new Promise(resolve => setTimeout(resolve, 30));
+    }
+
+    if (loadingToast) {
+        loadingToast.close();
     }
 
     requestAnimationFrame(() => {
@@ -8151,7 +8171,11 @@ async function addTabsToCurrentViewSection(tabs, scope, options = {}) {
             : [];
         const targetSection = sections.find((section) => section && section.id === tempTargetId);
         if (targetSection) {
-            insertQuickAddItemsToTempSection(tempTargetId, tabs, '');
+            if (window.CanvasModule.temp.insertFromPayload) {
+                window.CanvasModule.temp.insertFromPayload(tempTargetId, '', tabs);
+            } else {
+                insertQuickAddItemsToTempSection(tempTargetId, tabs, '');
+            }
             if (window.CanvasModule.temp.ensureRendered) {
                 window.CanvasModule.temp.ensureRendered(tempTargetId);
             }
@@ -8217,17 +8241,26 @@ async function addTabsToTempSection(tabs, scope) {
         } catch (_) { }
     }
 
+    let isNewSection = false;
     if (!sectionId) {
         const pos = getCanvasCenterPoint();
         const title = buildSectionTitle(tabs, scope);
         sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, {
             title,
             label: specialLabel,
-            source: specialSource
+            source: specialSource,
+            initialItems: tabs
         });
+        isNewSection = true;
     }
 
-    insertQuickAddItemsToTempSection(sectionId, tabs, '');
+    if (!isNewSection) {
+        if (window.CanvasModule.temp.insertFromPayload) {
+            window.CanvasModule.temp.insertFromPayload(sectionId, '', tabs);
+        } else {
+            insertQuickAddItemsToTempSection(sectionId, tabs, '');
+        }
+    }
     if (window.CanvasModule.temp.ensureRendered) {
         window.CanvasModule.temp.ensureRendered(sectionId);
     }
