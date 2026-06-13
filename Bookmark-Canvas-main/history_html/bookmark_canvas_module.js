@@ -40902,6 +40902,34 @@ function updateCanvasPerfSettingsUI() {
     const modal = document.getElementById('canvasPerfSettingsModal');
     if (!modal || modal.style.display === 'none') return;
 
+    // 动态更新低细节模式子控制容器的可点击和灰色状态
+    const toggleLow = document.getElementById('perfToggleLowDetail');
+    const isLowEnabled = toggleLow ? toggleLow.checked : true;
+    const subContainer = document.getElementById('perfLowDetailSubContainer');
+    const section2Container = document.getElementById('perfSection2Container');
+
+    [subContainer, section2Container].forEach(container => {
+        if (!container) return;
+        container.classList.toggle('perf-disabled-section', !isLowEnabled);
+        container.querySelectorAll('input, button, select').forEach(el => {
+            el.disabled = !isLowEnabled;
+        });
+    });
+
+    // 动态更新性能负载自适应优化范围的数值范围
+    const enterInput = document.getElementById('perfInputEnterLowDetail');
+    const safeInput = document.getElementById('perfInputSafeZone');
+    const section2Title = document.getElementById('perfSection2Title');
+    if (enterInput && safeInput && section2Title) {
+        const enterVal = enterInput.value || '0';
+        const safeVal = safeInput.value || '0';
+        const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
+        const isEn = lang === 'en';
+        section2Title.textContent = isEn
+            ? `2. Adaptive Overload Optimization Range (${enterVal}%--${safeVal}%)`
+            : `2. 性能超载自适应优化范围 (${enterVal}%--${safeVal}%)`;
+    }
+
     __applyPerfLinkedStyles();
 
     // 更新状态指示器
@@ -41153,6 +41181,9 @@ function saveCanvasPerfSettings(options = {}) {
     updateDataIntensiveMode(true);
     __clearPerfLinkedFromOther();
     try {
+        updateCanvasPerfSettingsUI();
+    } catch (_) {}
+    try {
         const otherModal = document.getElementById('canvasOtherSettingsModal');
         if (otherModal && otherModal.style.display !== 'none') {
             requestAnimationFrame(() => {
@@ -41223,6 +41254,18 @@ function createCanvasPerfSettingsModal() {
             }
             input:checked + .slider:before {
                 transform: translateX(16px);
+            }
+            .perf-disabled-section {
+                opacity: 0.45;
+                pointer-events: none;
+                filter: grayscale(0.8);
+                cursor: not-allowed;
+                transition: opacity 0.2s ease, filter 0.2s ease;
+            }
+            .perf-disabled-section input,
+            .perf-disabled-section button,
+            .perf-disabled-section label {
+                pointer-events: none !important;
             }
         </style>
         <div class="modal-content perf-settings-modal" style="display: flex; flex-direction: column; max-height: 90vh; position: relative;">
@@ -41301,43 +41344,46 @@ function createCanvasPerfSettingsModal() {
                         </div>
                     </div>
 
-                    <!-- 缩放降级阈值 -->
-                    <div class="perf-input-group" style="margin-bottom: 14px;">
-                        <div style="display: flex; align-items: center; gap: 4px;">
-                            <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Zoom Degradation Threshold' : '缩放降级阈值'}</label>
-                            <button class="perf-help-btn" id="perfZoomHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                            <button class="perf-source-btn" id="perfSourceLowDetailBtn" title="${isEn ? 'Go to source' : '跳转到来源'}" style="width: 18px; height: 18px; font-size: 9px;">
-                                <i class="fas fa-link"></i>
-                            </button>
+                    <!-- 触发的缩放比例 与 安全区 (包裹在子容器中) -->
+                    <div id="perfLowDetailSubContainer">
+                        <!-- 缩放降级阈值 -->
+                        <div class="perf-input-group" style="margin-bottom: 14px;">
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Zoom Trigger Percentage' : '触发的缩放比例'}</label>
+                                <button class="perf-help-btn" id="perfZoomHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                                <button class="perf-source-btn" id="perfSourceLowDetailBtn" title="${isEn ? 'Go to source' : '跳转到来源'}" style="width: 18px; height: 18px; font-size: 9px;">
+                                    <i class="fas fa-link"></i>
+                                </button>
+                            </div>
+                            <input type="hidden" id="perfInputExitLowDetail">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="number" id="perfInputEnterLowDetail" min="10" max="100" step="0.5">
+                                <span style="color: var(--text-secondary); font-size: 12px;">%</span>
+                            </div>
                         </div>
-                        <input type="hidden" id="perfInputExitLowDetail">
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <input type="number" id="perfInputEnterLowDetail" min="10" max="100" step="0.5">
-                            <span style="color: var(--text-secondary); font-size: 12px;">%</span>
-                        </div>
-                    </div>
 
-                    <!-- 安全区 -->
-                    <div class="perf-input-group">
-                        <div style="display: flex; align-items: center; gap: 4px;">
-                            <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Safe Zone' : '安全区'}</label>
-                            <button class="perf-help-btn" id="perfSafeZoneHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <input type="number" id="perfInputSafeZone" min="1" max="100" step="5">
-                            <span style="color: var(--text-secondary); font-size: 12px;">%</span>
+                        <!-- 安全区 -->
+                        <div class="perf-input-group">
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Safe Zone' : '安全区'}</label>
+                                <button class="perf-help-btn" id="perfSafeZoneHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="number" id="perfInputSafeZone" min="1" max="100" step="5">
+                                <span style="color: var(--text-secondary); font-size: 12px;">%</span>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 降级触发条件 -->
-                <div class="perf-settings-section">
+                <!-- 性能超载（数据密集）触发条件 -->
+                <div class="perf-settings-section" id="perfSection2Container">
                     <div class="perf-settings-section-title" style="margin-bottom: 14px;">
-                        <span style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Degradation Triggers' : '2. 自动降级触发条件'}</span>
+                        <span id="perfSection2Title" style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Performance Overload Triggers' : '2. 性能超载自适应优化范围'}</span>
                     </div>
 
                     <!-- 触发条件：当前视野超载触发 -->
@@ -41422,8 +41468,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfTriggerHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Viewport Overload Trigger</b>: When enabled, automatically triggers visual simplification (below zoom threshold) and strictly limits virtualization budget if visible columns exceed the threshold.'
-            : '<b>当前视野（视口）超载触发</b>：开启后，当视野内可见的栏目数达到设定阈值时，自动触发视觉降级（在降级缩放比例以下时切换为色块），并且会严格限制 DOM 的虚拟化加载预算以大幅提升性能。'}
+            ? '<b>Viewport Overload Trigger</b>: When enabled and visible columns exceed the threshold, the canvas enters a "Data Intensive State". It strictly limits DOM loading budgets to prevent lag, and allows Ctrl-zoom overrides (Note: entering low-detail color block mode below 50% is a baseline feature and is not governed by this toggle).'
+            : '<b>当前视野（视口）超载触发</b>：开启后，当视野内可见的栏目数超过阈值时，自动判定为<b>性能超载（数据密集）状态</b>，此时会严格限制 DOM 的虚拟化加载预算以防止卡顿，并允许通过 Ctrl 键缩放快速切换为色块（注：低于 50% 缩放比例时自动切换为色块属于常规基础功能，不受此开关限制）。'}
             </div>
         </div>
         
@@ -41440,8 +41486,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfTotalAlwaysHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Global Totals Overload Trigger</b>: Automatically keeps low-detail mode active below the zoom threshold if total bookmarks/folders in the canvas exceed these limits.'
-            : '<b>全局数据总量超标触发</b>：开启后，当整个画布中的总书签或总文件夹数超过设定值时，只要缩放比例在降级阈值以下，就自动保持在低细节色块模式下，保护超大画布的运行稳定性。'}
+            ? '<b>Global Totals Overload Trigger</b>: When enabled and total canvas data exceeds limits, automatically holds low-detail mode active below the zoom threshold to protect ultra-large canvas stability (Note: entering low-detail color block mode below 50% is a baseline feature and is not governed by this toggle).'
+            : '<b>全局数据总量超标触发</b>：开启后，当画布的总数据量超过设定值时，若缩放比例低于降级阈值则自动保持在色块降级状态，保护超大型画布的流畅与稳定（注：低于 50% 缩放比例时自动切换为色块属于常规基础功能，不受此开关限制）。'}
             </div>
         </div>
 
@@ -41475,6 +41521,7 @@ function createCanvasPerfSettingsModal() {
         document.getElementById('perfInputVisBm').value = 150;
         document.getElementById('perfInputAvg').value = 100;
         schedulePerfSave();
+        try { updateCanvasPerfSettingsUI(); } catch (_) {}
     });
 
     const restoreTotalBtn = modal.querySelector('#perfRestoreTotalAlwaysDefaultsBtn');
@@ -41484,6 +41531,7 @@ function createCanvasPerfSettingsModal() {
         if (totalBm) totalBm.value = typeof CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT !== 'undefined' ? CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT : 3000;
         if (totalFo) totalFo.value = typeof CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT !== 'undefined' ? CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT : 1000;
         schedulePerfSave();
+        try { updateCanvasPerfSettingsUI(); } catch (_) {}
     });
 
 
@@ -41588,6 +41636,11 @@ function createCanvasPerfSettingsModal() {
         if (!el) return;
         el.addEventListener('input', schedulePerfSave);
         el.addEventListener('change', schedulePerfSave);
+        if (selector === '#perfInputEnterLowDetail' || selector === '#perfInputSafeZone') {
+            el.addEventListener('input', () => {
+                updateCanvasPerfSettingsUI();
+            });
+        }
     });
 
     const perfToggles = [
@@ -41601,6 +41654,11 @@ function createCanvasPerfSettingsModal() {
         const el = modal.querySelector(selector);
         if (!el) return;
         el.addEventListener('change', schedulePerfSave);
+        if (selector === '#perfToggleLowDetail') {
+            el.addEventListener('change', () => {
+                updateCanvasPerfSettingsUI();
+            });
+        }
     });
 }
 
