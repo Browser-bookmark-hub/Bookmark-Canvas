@@ -16553,7 +16553,7 @@ function __bindMaximizedNodeRemovalSync() {
 function __clearOtherMaximizedNodes(except) {
     document.querySelectorAll('.canvas-node-maximized').forEach((el) => {
         if (except && el === except) return;
-        restoreCanvasNodeLayout(el);
+        restoreCanvasNodeLayout(el, { locate: false });
     });
 }
 
@@ -16665,7 +16665,7 @@ function maximizeCanvasNode(element, options = {}) {
     }
 }
 
-function restoreCanvasNodeLayout(element) {
+function restoreCanvasNodeLayout(element, options = {}) {
     if (!element || !element.dataset) return;
     if (!__isNodeMaximized(element)) return;
     __setFullscreenPreloadReady(element, false);
@@ -16695,6 +16695,12 @@ function restoreCanvasNodeLayout(element) {
     }
     updateNodeFullscreenButtons();
     __notifyNodeFullscreenContextChange(document.querySelector('.canvas-node-maximized'));
+
+    if (options.locate !== false) {
+        try {
+            locateToElement(element, CanvasState.zoom);
+        } catch (_) { }
+    }
 }
 
 function toggleElementFullscreen(element) {
