@@ -1792,7 +1792,7 @@
                     }
                 } catch (err) {
                     if (err && (err.code === 'GITHUB_OPERATION_CANCELLED' || err.name === 'AbortError')) throw err;
-                    console.log('[Push Preflight] Optimized tree fetch failed, falling back to full connection test:', err);
+                    ;
                 }
             }
 
@@ -2225,7 +2225,7 @@
                     }
                 } catch (err) {
                     if (err && (err.code === 'GITHUB_OPERATION_CANCELLED' || err.name === 'AbortError')) throw err;
-                    console.log('[Pull Preflight] Optimized tree fetch failed, falling back to full connection test:', err);
+                    ;
                 }
             }
 
@@ -2326,7 +2326,7 @@
                                     folderFiles.set(normalizeRepoPath(repoPath), bytes);
                                 }
                             }
-                            console.log(`[Pull ZIP] Successfully extracted ${folderFiles.size} files from zipball.`);
+                            ;
                         }
                     }
                 } catch (zipErr) {
@@ -2338,7 +2338,7 @@
 
             // Fallback to sequential downloading if ZIPball fails or is unavailable
             if (!folderFiles) {
-                console.log('[Pull] Using sequential file downloading.');
+                ;
                 folderFiles = await downloadRemoteFilesToFolderMap({
                     api,
                     config,

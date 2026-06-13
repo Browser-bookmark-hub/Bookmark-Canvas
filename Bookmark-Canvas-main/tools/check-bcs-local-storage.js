@@ -737,20 +737,10 @@
         log.call(console, `[BCS Local Storage Check] ${label}`, report.summary);
         if (report.errors.length) console.error('[BCS Local Storage Check] Errors', report.errors);
         if (report.warnings.length) console.warn('[BCS Local Storage Check] Warnings', report.warnings);
-        console.info('[BCS Local Storage Check] Full report saved to window.__bcsLocalStorageReport', report);
-        console.info('[BCS Local Storage Check] BCS storage snapshot saved to window.__bcsLocalStorageExport', report.bcsLocalStorageExport);
-        console.info('[BCS Local Storage Check] Permanent storage snapshot saved to window.__bcsPermanentStorageExport', {
-            mode: report && report.permanentStorageExport ? report.permanentStorageExport.mode : '',
-            keys: report && report.permanentStorageExport && Array.isArray(report.permanentStorageExport.keys)
-                ? report.permanentStorageExport.keys.length
-                : 0
-        });
-        console.info('[BCS Local Storage Check] Raw permanent storage snapshot saved to window.__bcsPermanentStorageExportRaw', {
-            mode: report && report.permanentStorageExportRaw ? report.permanentStorageExportRaw.mode : '',
-            keys: report && report.permanentStorageExportRaw && Array.isArray(report.permanentStorageExportRaw.keys)
-                ? report.permanentStorageExportRaw.keys.length
-                : 0
-        });
+        ;
+        ;
+        ;
+        ;
     }
 
     function shouldAutoDownloadSnapshot() {
@@ -763,14 +753,12 @@
         try {
             const businessFileCount = downloadObsidianStyleBusinessFiles(report);
             if (businessFileCount > 0) {
-                console.info('[BCS Local Storage Check] Obsidian-style business file downloads started.', {
-                    files: businessFileCount
-                });
+                ;
                 return;
             }
             if (!report.bcsLocalStorageExport) return;
             downloadJsonPayload(defaultSnapshotFilename('bcs-local-storage'), report.bcsLocalStorageExport);
-            console.info('[BCS Local Storage Check] BCS local storage JSON fallback download started.');
+            ;
         } catch (error) {
             warn(report, 'export', 'Automatic JSON download failed.', {
                 message: error && error.message ? error.message : String(error)

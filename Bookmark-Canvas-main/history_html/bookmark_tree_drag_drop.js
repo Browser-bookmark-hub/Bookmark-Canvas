@@ -342,7 +342,7 @@ function initDragDrop() {
     dropIndicator.style.display = 'none';
     document.body.appendChild(dropIndicator);
 
-    console.log('[拖拽] 初始化完成');
+    ;
 }
 
 // 为树节点绑定拖拽事件
@@ -379,7 +379,7 @@ function attachDragEvents(treeContainer) {
         node.addEventListener('dragend', handleDragEnd);
     });
 
-    console.log('[拖拽] 绑定拖拽事件:', draggableNodes.length, '个节点');
+    ;
 
     // 额外：在滚动容器层面也监听 dragover，用于容器空白区域的自动滚动
     try {
@@ -391,7 +391,7 @@ function attachDragEvents(treeContainer) {
                 updateAutoScroll(e);
             });
             scrollContainer.__autoScrollHooked = true;
-            console.log('[拖拽] 已在滚动容器绑定 dragover 自动滚动监听');
+            ;
         }
 
         const permanentBody = treeContainer.closest('.permanent-section-body');
@@ -434,7 +434,7 @@ function attachDragEvents(treeContainer) {
                 });
             });
             permanentBody.__blankDropHooked = true;
-            console.log('[拖拽] 已在永久栏目空白区域绑定 drop 监听');
+            ;
         }
 
         const tempBody = treeContainer.closest('.temp-node-body');
@@ -478,7 +478,7 @@ function attachDragEvents(treeContainer) {
                 });
             });
             tempBody.__blankDropHooked = true;
-            console.log('[拖拽] 已在临时栏目空白区域绑定 drop 监听');
+            ;
         }
     } catch (_) { }
 }
@@ -595,11 +595,11 @@ function handleDragStart(e) {
     // 添加拖拽样式
     draggedNode.classList.add('dragging');
 
-    console.log('[拖拽] ===== 开始拖拽 =====');
-    console.log('[拖拽] 被拖动节点ID:', draggedNodeId);
-    console.log('[拖拽] 被拖动节点标题:', draggedNode?.dataset?.nodeTitle);
-    console.log('[拖拽] 上一个同级节点ID:', draggedNodePrev?.dataset?.nodeId);
-    console.log('[拖拽] 下一个同级节点ID:', draggedNodeNext?.dataset?.nodeId);
+    ;
+    ;
+    ;
+    ;
+    ;
 
     // 启动自动滚动检测
     startAutoScroll();
@@ -833,7 +833,7 @@ async function handleDragEnd(e) {
         __hoverExpandState.lastAt.clear();
     } catch (_) { }
 
-    console.log('[拖拽] 拖拽结束');
+    ;
 }
 
 // 显示拖拽指示器
@@ -1346,7 +1346,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
                     await window.endBookmarkBulkMute('drag-temp-to-permanent', { refreshTree: true });
                 }
             }
-            console.log('[拖拽] 临时->永久完成，等待 onCreated 事件增量更新');
+            ;
             return;
         }
 
@@ -1420,11 +1420,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
             })
             : false;
 
-        console.log('[拖拽] 永久栏目内移动:', {
-            nodeId: dragNodeId,
-            parentId: insertInfo.parentId,
-            index: insertInfo.index
-        });
+        ;
 
         // 执行真实Chrome API移动，不进行克隆，保留原节点与原有标签
         try {
@@ -1455,7 +1451,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
             throw moveError;
         }
 
-        console.log('[拖拽] Chrome API 移动成功，onMoved 事件将作为兜底同步');
+        ;
 
     } catch (error) {
         if (error && error.message && error.message.includes('move parent is missing')) {
@@ -1613,7 +1609,7 @@ async function findMatchingChromeNode(urls, dataTransfer) {
             }
             
             if (matchedFolder) {
-                console.log('[拖拽反向查找] 成功通过 URL 集合匹配到最深文件夹:', matchedFolder.title, 'ID:', matchedFolder.id);
+                ;
                 const subTree = await chrome.bookmarks.getSubTree(matchedFolder.id);
                 return subTree && subTree[0] ? subTree[0] : matchedFolder;
             }
@@ -1635,7 +1631,7 @@ async function findMatchingChromeNode(urls, dataTransfer) {
             const folders = results.filter(node => !node.url);
             if (folders.length > 0) {
                 const matchedFolder = folders[0];
-                console.log('[拖拽反向查找] 成功通过名称匹配到文件夹:', matchedFolder.title, 'ID:', matchedFolder.id);
+                ;
                 const subTree = await chrome.bookmarks.getSubTree(matchedFolder.id);
                 return subTree && subTree[0] ? subTree[0] : matchedFolder;
             }

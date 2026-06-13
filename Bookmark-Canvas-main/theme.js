@@ -62,7 +62,7 @@
                     if (chrome.runtime.lastError) {
                         console.error('无法保存主题到chrome.storage:', chrome.runtime.lastError);
                     } else {
-                        console.log('[主UI] 主题已保存到storage:', actualTheme);
+                        ;
                     }
                 });
             }

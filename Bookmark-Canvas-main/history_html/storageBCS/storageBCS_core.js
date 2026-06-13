@@ -550,7 +550,7 @@ function __runCanonicalImportShadowAudit(channel, tempStateInput, storageInput, 
     if (!same) {
         console.warn('[Canvas Canonical] import shadow mismatch:', record);
     } else {
-        console.log('[Canvas Canonical] import shadow OK:', record.channel, record.source, record.trigger);
+        ;
     }
     return record;
 }
@@ -3614,7 +3614,7 @@ function __parseMarkdownAuto(content) {
     const trimmed = content.trim();
     const extractedJson = __extractCanvasSectionJsonCodeBlock(trimmed);
     if (extractedJson && extractedJson.jsonProtocol) {
-        console.log('[Canvas Import] Detected JSON Mode (code block)');
+        ;
         if (extractedJson.jsonProtocol.sectionType === 'temporary' && Array.isArray(extractedJson.jsonProtocol.items)) {
             return extractedJson.jsonProtocol.items;
         }
@@ -5337,11 +5337,7 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     remappedNodes.mdNodes.forEach(n => { n.x += offsetX; n.y += offsetY; });
     // 临时导入沙箱模式已下线：导入内容一律作为正式内容处理并持久化。
 
-    console.log(`[Canvas] Import Stats:
-        - Sections: ${remappedNodes.tempSections.length}
-        - MdNodes: ${remappedNodes.mdNodes.length}
-        - Edges: ${remappedEdges.length}
-        - Offset: (${offsetX}, ${offsetY})`);
+    ;
 
     // 6. Merge into CanvasState
     CanvasState.tempSections.push(...remappedNodes.tempSections);
@@ -5416,7 +5412,7 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
         }
     } catch (_) { }
 
-    console.log(`[Canvas] Import successful. mode=${importMode}. ID Remapped, Offset applied, Group created.`);
+    ;
     __setCanvasImportRuntimeMode('permanent');
 }
 
@@ -6853,7 +6849,7 @@ async function __migrateLegacyTempSectionKeysOnce() {
 
     if (toRemove.length) {
         try { await __bcsStorageRemove(toRemove); } catch (_) {}
-        try { console.info(`[BCS] legacy temp-section keys cleaned: ${toRemove.length}`); } catch (_) {}
+        try { ; } catch (_) {}
     }
 
     try { await __bcsStorageSet({ [BCS_LEGACY_TEMP_MIGRATION_DONE_KEY]: { migratedAt: Date.now(), removed: toRemove.length } }, { immediate: true }); } catch (_) {}

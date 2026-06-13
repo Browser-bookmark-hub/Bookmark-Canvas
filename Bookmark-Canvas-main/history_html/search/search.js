@@ -297,7 +297,7 @@ window.SearchContextManager = {
 
         this.currentContext = next;
         this._lastContextKey = key;
-        console.log('[SearchContext] Context Updated:', this.currentContext);
+        ;
 
         // [Search Isolation] Different pages share the same top search input but have different behaviors.
         // When context changes, clear the input + results so queries won't leak across views/tabs.
@@ -352,7 +352,7 @@ function syncSearchContextFromCurrentUI(reason = 'sync') {
             ? window.currentView
             : 'canvas';
         window.SearchContextManager.updateContext(view, null, null);
-        console.log('[SearchContext] Synced from UI:', { reason, view });
+        ;
     } catch (_) { }
 }
 
@@ -414,7 +414,7 @@ function hideSearchResultsPanel() {
     // 如果之前触发了同步构建 fallback，在搜索框关闭时将其回写到 IndexedDB，并清空 fallback 标记
     if (typeof SearchIndexManager !== 'undefined' && SearchIndexManager.hasPendingSyncWriteBack) {
         SearchIndexManager.hasPendingSyncWriteBack = false;
-        console.log('[Search] Sync build fallback was triggered. Writing back to IndexedDB on exit...');
+        ;
         saveMemoryIndexToIndexedDb().catch(err => {
             console.error('[Search] Failed to write back sync fallback index:', err);
         });
@@ -2899,7 +2899,7 @@ function resetCanvasSearchDb(reason = '') {
     if (searchUiState && searchUiState.domainIndexCache) {
         searchUiState.domainIndexCache = null;
     }
-    console.log('[Search] Phase 3 cache cleared:', reason);
+    ;
 }
 
 function updateCanvasSearchBookmarkTags(targets) {
@@ -2963,7 +2963,7 @@ function startListeningStorageChanges() {
         if (!isSearchStorageListening) {
             chrome.storage.onChanged.addListener(handleSearchStorageChange);
             isSearchStorageListening = true;
-            console.log('[Search] Started listening to chrome.storage changes.');
+            ;
         }
     }
 }
@@ -2973,7 +2973,7 @@ function stopListeningStorageChanges() {
         if (isSearchStorageListening) {
             chrome.storage.onChanged.removeListener(handleSearchStorageChange);
             isSearchStorageListening = false;
-            console.log('[Search] Stopped listening to chrome.storage changes.');
+            ;
         }
     }
 }
@@ -3926,12 +3926,12 @@ const SearchIndexManager = {
                 chrome.idle.setDetectionInterval(15);
                 this.idleListener = (state) => {
                     if (state === 'idle') {
-                        console.log('[SearchIndexManager] chrome.idle detected idle state.');
+                        ;
                         this.triggerIdleIndexing();
                     }
                 };
                 chrome.idle.onStateChanged.addListener(this.idleListener);
-                console.log('[SearchIndexManager] Persistent activity listeners: bound chrome.idle listener.');
+                ;
             } catch (e) {
                 console.error('[SearchIndexManager] Failed to bind chrome.idle:', e);
                 this.setupFallbackIdleTimer();
@@ -3952,11 +3952,11 @@ const SearchIndexManager = {
         this.checkTimer = setInterval(() => {
             const now = Date.now();
             if (this.isDirty && now - this.lastActivityTime > 15000 && document.visibilityState === 'visible') {
-                console.log('[SearchIndexManager] Fallback idle detected with dirty state.');
+                ;
                 this.triggerIdleIndexing();
             }
         }, 5000);
-        console.log('[SearchIndexManager] Dynamic activity listeners: fallback idle timer started.');
+        ;
     },
 
     unbindActivityListeners() {
@@ -3980,7 +3980,7 @@ const SearchIndexManager = {
             document.removeEventListener('visibilitychange', this.recordActivity);
             this.recordActivity = null;
         }
-        console.log('[SearchIndexManager] Dynamic activity listeners: stopped.');
+        ;
     },
 
     normalizeDirtyKeys(keys) {
@@ -4207,7 +4207,7 @@ const SearchIndexManager = {
         if (!this.isDirty) return;
         if (this.isIndexing) return;
         if (!isCanvasSearchStateReady()) {
-            console.log('[SearchIndexManager] Canvas state is not ready. Deferring idle indexing.');
+            ;
             await waitForCanvasSearchStateReady();
             if (this.isIndexing) return;
             try {
@@ -4224,7 +4224,7 @@ const SearchIndexManager = {
         try {
             const liveSig = getCanvasSearchSignature();
             if (window.SearchIndexDb && await window.SearchIndexDb.hasFreshIndex(liveSig)) {
-                console.log('[SearchIndexManager] IndexedDB search index already up-to-date. Skipping idle indexing.');
+                ;
                 await this.clearProcessedDirtyState();
 
                 if (typeof ensureIndexForModeLoaded === 'function') {
@@ -4241,7 +4241,7 @@ const SearchIndexManager = {
             console.error('[SearchIndexManager] Failed to check IndexedDB before idle indexing:', err);
         }
         
-        console.log('[SearchIndexManager] Idle time detected. Requesting idle callback for indexing...');
+        ;
         
         const runTask = () => {
             return new Promise((resolve, reject) => {
@@ -4526,7 +4526,7 @@ async function saveMemoryIndexToIndexedDb() {
     // Check if another tab/end already indexed and wrote it to IndexedDB.
     try {
         if (await window.SearchIndexDb.hasFreshIndex(liveSig)) {
-            console.log('[Search] IndexedDB signature is already up-to-date. Skipping write-back.');
+            ;
             await SearchIndexManager.clearProcessedDirtyState();
 
             // Preload the updated index from IndexedDB to ensure local memory DB is not stale.
@@ -4559,7 +4559,7 @@ async function saveMemoryIndexToIndexedDb() {
             meta = await window.SearchIndexDb.saveIncrementalSnapshot(patchPayload);
             if (meta && meta.applied === false) {
                 incrementalFallbackReason = meta.reason || '';
-                console.log('[Search] IndexedDB incremental save skipped. Falling back to full record save:', meta.reason);
+                ;
                 meta = null;
             }
         }
@@ -4577,7 +4577,7 @@ async function saveMemoryIndexToIndexedDb() {
             window.SearchIndexDb.clearLegacyChromeStorageIndex().catch(() => {});
         }
         const counts = meta && meta.counts ? meta.counts : {};
-        console.log(`[Search] IndexedDB search index save completed in ${(performance.now() - startTime).toFixed(1)}ms.`, counts);
+        ;
     } catch (err) {
         console.error('[Search] Failed to save search index to IndexedDB. Dirty state retained:', err);
         SearchIndexManager.hasPendingSyncWriteBack = true;
@@ -4687,7 +4687,7 @@ async function loadAllIndexShardsFromIndexedDb(options = {}) {
 function applyIncrementalUpdatesToMemory(dirtyKeys) {
     if (!dirtyKeys || dirtyKeys.size === 0) return;
     
-    console.log('[Search] Running true incremental index build in memory for keys:', Array.from(dirtyKeys));
+    ;
 
     // Save old bookmarkSearchOrder values and find max order to avoid duplicates or resetting to 0
     const oldBookmarkOrders = new Map();
@@ -5038,7 +5038,7 @@ async function buildCanvasSearchDbIncrementallyInMemory() {
     }
     
     if (keysToApply.size === 0 && canvasSearchDb.signature !== liveSig) {
-        console.info('[Search] IndexedDB base snapshot signature changed without indexable diffs. Updating signature only.');
+        ;
         canvasSearchDb.signature = liveSig;
         return;
     }
@@ -5092,7 +5092,7 @@ async function ensureIndexForModeLoaded(modeKey) {
         }
         
         if (SearchIndexManager.isDirty) {
-            console.log('[Search] Index is dirty. Rebuilding in memory incrementally.');
+            ;
             SearchIndexManager.snapshotDirtyState();
             await buildCanvasSearchDbIncrementallyInMemory();
             SearchIndexManager.hasPendingSyncWriteBack = true;
@@ -5110,7 +5110,7 @@ async function ensureIndexForModeLoaded(modeKey) {
         
         const result = await loadIndexForMode(modeKey);
         if (!result) {
-            console.log('[Search] Index out of date or empty. Falling back to incremental build in memory.');
+            ;
             SearchIndexManager.snapshotDirtyState();
             await buildCanvasSearchDbIncrementallyInMemory();
             SearchIndexManager.hasPendingSyncWriteBack = true;
@@ -5138,7 +5138,7 @@ function releaseSearchMemory() {
         searchUiState.resultSource = [];
         searchUiState.resultAll = [];
     }
-    console.log('[Search] In-memory search cache released.');
+    ;
 }
 
 let releaseSearchMemoryTimer = null;
@@ -5155,7 +5155,7 @@ function cancelReleaseSearchMemory() {
     if (releaseSearchMemoryTimer) {
         clearTimeout(releaseSearchMemoryTimer);
         releaseSearchMemoryTimer = null;
-        console.log('[Search] Cancelled pending in-memory cache release.');
+        ;
     }
 }
 
@@ -5258,7 +5258,7 @@ function buildCanvasSearchDbSync() {
     markAllCanvasSearchModesLoaded();
 
     const count = db.structureIndex.length + db.descriptionIndex.length + db.bookmarkIndex.length;
-    console.log(`[Search] Phase 3 index built (Partitioned): ${count} items (Structure:${db.structureIndex.length}, Desc:${db.descriptionIndex.length}, Bookmark:${db.bookmarkIndex.length}) in ${(performance.now() - startTime).toFixed(1)}ms`);
+    ;
     return canvasSearchDb;
 }
 

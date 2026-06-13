@@ -913,7 +913,7 @@ function __ensureCanvasStorageSchema() {
     __writeCanvasStorageSchemaVersion(CANVAS_STORAGE_SCHEMA_VERSION);
 
     try {
-        console.log(`[Canvas] Storage schema upgraded to v${CANVAS_STORAGE_SCHEMA_VERSION}.`);
+        ;
     } catch (_) { }
 }
 
@@ -2212,11 +2212,11 @@ function __logCanvasWinInput(tag, payload = null, options = {}) {
         payload
     };
     try {
-        console.log('[Canvas][WinInputDebug]', logData);
+        ;
     } catch (_) { }
     if (__isCanvasWinInputDebugJsonEnabled()) {
         try {
-            console.log('[Canvas][WinInputDebugJSON]', JSON.stringify(logData));
+            ;
         } catch (_) { }
     }
 }
@@ -5684,7 +5684,7 @@ function createTempFolder(sectionId, parentId, title, options = {}) {
 // =============================================================================
 
 function initCanvasView() {
-    console.log('[Canvas] 初始化Obsidian风格的Canvas');
+    ;
 
     // 存储 schema 入口：仅维护当前版本标记，不再处理旧键兼容清理。
     try { __ensureCanvasStorageSchema(); } catch (_) { }
@@ -6318,11 +6318,11 @@ async function handleBrowserBookmarkDrop(e) {
     if (matchedNode) {
         if (!matchedNode.url) {
             // 匹配到 Chrome 书签中的文件夹
-            console.log('[Canvas] 成功反向查找到匹配的 Chrome 文件夹:', matchedNode.title);
+            ;
             await createTempNodeFromBookmarkFolder(matchedNode, dropX, dropY);
         } else {
             // 匹配到 Chrome 书签中的单个书签
-            console.log('[Canvas] 成功反向查找到匹配的 Chrome 书签:', matchedNode.title);
+            ;
             await createTempNodeFromBrowserBookmark(matchedNode, dropX, dropY);
         }
     } else {
@@ -6331,10 +6331,10 @@ async function handleBrowserBookmarkDrop(e) {
             // 提取文件夹名称
             const folderTitle = plainText.trim().split(/[\r\n]+/)[0].trim();
             const resolvedFolderTitle = (folderTitle && !folderTitle.match(/^(https?|ftp|file):\/\//i)) ? folderTitle : '';
-            console.log('[Canvas] 未匹配到 Chrome 文件夹，作为第三方多 URL 文件夹导入:', resolvedFolderTitle || '拖入的文件夹');
+            ;
             await createTempNodeFromMultipleUrlsAsFolder(urls, dropX, dropY, resolvedFolderTitle);
         } else if (urls.length === 1) {
-            console.log('[Canvas] 未匹配到 Chrome 书签，直接创建单个书签临时栏目');
+            ;
             let title = '';
             if (htmlData) {
                 const match = htmlData.match(/<a[^>]*>([^<]*)<\/a>/i);
@@ -6351,7 +6351,7 @@ async function handleBrowserBookmarkDrop(e) {
             // 没有有效 URL，尝试作为文件夹名称匹配
             const folderName = plainText.trim().split(/[\r\n]+/)[0].trim();
             if (folderName && !folderName.match(/^(https?|ftp|file):\/\//i)) {
-                console.log('[Canvas] 尝试通过文件夹名称匹配:', folderName);
+                ;
                 await handleBrowserBookmarkFolderDrop(folderName, dropX, dropY);
             } else {
                 showCanvasToast(isEn ? 'Unable to recognize dropped content' : '无法识别拖入的内容', 'warning');
@@ -6676,7 +6676,7 @@ function enhanceBookmarkTreeForCanvas(treeContainer) {
 
     if (!trees.length) return;
 
-    console.log('[Canvas] 为书签树添加Canvas拖拽功能');
+    ;
 
     // 重要：不要覆盖原有的拖拽事件！
     // 原有的拖拽功能（bookmark_tree_drag_drop.js）已经通过 attachTreeEvents() 绑定了
@@ -6904,7 +6904,7 @@ function enhanceBookmarkTreeForCanvas(treeContainer) {
         bookmarkTree.addEventListener('dragend', (e) => { onDragEnd(e); }, true);
     });
 
-    console.log('[Canvas] 已为书签树启用委托拖拽支持');
+    ;
 }
 
 // 这两个函数已废弃，不再需要，因为原有的拖拽功能已经足够
@@ -8443,7 +8443,7 @@ function __consumeCanvasViewSyncSignal(payload, source = 'external') {
     }
 
     if (source === 'local-action') {
-        try { console.log('[Canvas] 未识别的视图同步信号:', payload); } catch (_) { }
+        try { ; } catch (_) { }
     }
 }
 
@@ -17796,10 +17796,7 @@ function locateToPermanentSection(targetZoom = null) {
     }
     savePanOffsetThrottled();
 
-    console.log('[Canvas] 定位到永久栏目:', {
-        sectionCenter: { x: sectionCenterX, y: sectionCenterY },
-        panOffset: { x: CanvasState.panOffsetX, y: CanvasState.panOffsetY }
-    });
+    ;
 }
 
 // 首次打开 Canvas（演示模板）时：定位并放大到「快捷操作」卡片
@@ -19592,7 +19589,7 @@ function makePermanentSectionDraggable(permanentSection) {
     }
     if (permanentSection.dataset) permanentSection.dataset.permanentDraggableBound = 'true';
 
-    console.log('[Canvas] 为永久栏目添加拖拽功能');
+    ;
 
     // 添加resize功能
     makePermanentSectionResizable(permanentSection);
@@ -20318,7 +20315,7 @@ async function handlePermanentDragEnd(e) {
                 alert('创建临时栏目失败: ' + error.message);
             }
         } else {
-            console.log('[Canvas] 拖拽结束位于永久栏目内，不创建临时栏目');
+            ;
         }
     }
 
@@ -29626,7 +29623,7 @@ function __renderTempNodeImpl(section, options = {}) {
                     });
                 }
             } catch (_) { }
-            console.log('[Canvas] 保存滚动位置:', { sectionId: section.id, scrollTop: savedScrollTop, scrollLeft: savedScrollLeft });
+            ;
         }
     }
     // 已有 DOM 的情况下，以实时滚动值为准；仅在首次创建/无现成 body 时回退到持久化值。
@@ -30676,7 +30673,7 @@ function __renderTempNodeImpl(section, options = {}) {
     // 绑定指针拖拽事件（支持滚轮滚动）
     if (typeof attachPointerDragEvents === 'function') {
         attachPointerDragEvents(treeContainer);
-        console.log('[Canvas] 临时栏目指针拖拽事件已绑定');
+        ;
     }
 
     // 恢复滚动位置（在所有事件绑定之后，使用多次尝试确保成功）
@@ -30690,11 +30687,7 @@ function __renderTempNodeImpl(section, options = {}) {
             target: nodeElement,
             fallbackDelays: [10, 50, 100]
         });
-        console.log('[Canvas] 恢复滚动位置:', {
-            sectionId: section.id,
-            target: { top: savedScrollTop, left: savedScrollLeft },
-            actual: { top: body.scrollTop, left: body.scrollLeft }
-        });
+        ;
     }
 
     nodeElement.offsetHeight;
@@ -30743,7 +30736,7 @@ function convertObsidianColor(obsidianColor) {
 
     // 如果是数字 1-6，转换为对应的十六进制颜色
     if (OBSIDIAN_COLOR_MAP[colorStr]) {
-        console.log(`[Canvas] 转换 Obsidian 颜色: ${colorStr} -> ${OBSIDIAN_COLOR_MAP[colorStr]}`);
+        ;
         return OBSIDIAN_COLOR_MAP[colorStr];
     }
 
@@ -30758,7 +30751,7 @@ function convertObsidianColor(obsidianColor) {
     }
 
     // 其他情况返回原值
-    console.log(`[Canvas] 保留原始颜色值: ${obsidianColor}`);
+    ;
     return obsidianColor;
 }
 
@@ -31444,9 +31437,7 @@ function loadTempExpandState() {
                     LAZY_LOAD_THRESHOLD.collapsedFolders = new Set(state.collapsed);
                 }
             }
-            console.log('[Canvas] 恢复临时栏目展开状态:',
-                LAZY_LOAD_THRESHOLD.expandedFolders.size, '个展开,',
-                LAZY_LOAD_THRESHOLD.collapsedFolders.size, '个折叠');
+            ;
         }
     } catch (e) {
         console.warn('[Canvas] 加载临时栏目展开状态失败:', e);
@@ -31854,7 +31845,7 @@ function setupTempSectionTreeInteractions(treeContainer, section) {
                 if (!childrenContainer.classList.contains('expanded') && document.body.contains(childrenContainer)) {
                     childrenContainer.innerHTML = '';
                     treeItem.dataset.childrenLoaded = 'false';
-                    console.log(`[Canvas] 临时栏目文件夹折叠超过5秒，已回收 DOM 节点: ${folderId}`);
+                    ;
                 }
             }, 5000);
         } else {
@@ -32621,7 +32612,7 @@ function wakeSection(section) {
 
             if (shouldHaveContent && !hasContent) {
                 // 这是正常的懒加载或恢复流程，使用 Log 而非 Warn
-                console.log('[Canvas] 唤醒栏目并构建内容:', sectionId);
+                ;
                 // 低细节模式：不要在唤醒时构建树 DOM（会导致缩放/拖动掉帧）
                 if (!CanvasState.lowDetailActive) {
                     renderTempNode(section);
@@ -32650,7 +32641,7 @@ if (typeof window !== 'undefined' && !window._canvasDormancyClickAttached) {
         if (dormantEl && dormantEl.id) {
             const section = getTempSection(dormantEl.id);
             if (section && section.dormant) {
-                console.log('[Canvas防御] 点击唤醒休眠节点:', section.id);
+                ;
                 wakeSection(section);
             }
         }
@@ -33468,7 +33459,7 @@ function reorderSectionSequenceNumbers() {
         const newSequenceNumber = index + 1;
         if (section.sequenceNumber !== newSequenceNumber) {
             section.sequenceNumber = newSequenceNumber;
-            console.log(`[Canvas] 重新编号：${section.id} -> 序号 ${newSequenceNumber}`);
+            ;
 
             // 更新DOM中的序号显示
             const element = document.getElementById(section.id);
@@ -33489,7 +33480,7 @@ function __resetTempSectionSequenceCounterIfEmpty() {
     try {
         if (!Array.isArray(CanvasState.tempSections) || CanvasState.tempSections.length === 0) {
             CanvasState.tempSectionSequenceNumber = 0;
-            console.log('[Canvas] 临时栏目已清空：序号计数器已重置');
+            ;
         }
     } catch (_) { }
 }
@@ -33509,7 +33500,7 @@ function __syncTempSectionSequenceCounterFromExisting() {
 // 保留此函数以防其他地方调用，但实际上不做任何事
 function movePermanentSectionToCanvas() {
     // 已废弃：永久栏目现在直接从template创建到canvas-content中
-    console.log('[Canvas] 永久栏目已在canvas-content中（从template创建）');
+    ;
 }
 
 // =============================================================================
@@ -34560,7 +34551,7 @@ function setupCanvasEventListeners() {
             const isBlockedByPermanent = !!elementAtPoint.closest('.permanent-bookmark-section');
             const isBlockedByMd = !!elementAtPoint.closest('.md-canvas-node');
             if (isBlockedByTemp || isBlockedByPermanent || isBlockedByMd) {
-                console.log('[Canvas] 双击位置被栏目遮挡，不生成空白栏目');
+                ;
                 return;
             }
 
@@ -34640,7 +34631,7 @@ function __tryRestoreTempNodesFromBcs() {
             }
 
             await applyInitialDemoTemplate();
-            console.log('[Canvas] 首次使用，加载演示模板');
+            ;
             __finalizeTempNodesLoad({ loadedFromStorage: false });
         })
         .catch((e) => {
@@ -34654,7 +34645,7 @@ function __tryRestoreTempNodesFromBcs() {
                     __applyCanvasTempStateObject(buildInitialDemoTemplateState());
                 })
                 .finally(() => {
-                    console.log('[Canvas] 首次使用，加载演示模板');
+                    ;
                     __finalizeTempNodesLoad({ loadedFromStorage: false });
                 });
         });
@@ -34961,7 +34952,7 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external', optio
             __canvasTempStateLastAppliedTimestamp = Math.max(__canvasTempStateLastAppliedTimestamp, ts);
         }
 
-        console.log('[Canvas] 已增量同步外部画布状态:', source, ts || 'no-ts');
+        ;
     } catch (error) {
         console.warn('[Canvas] 外部画布状态增量同步失败，尝试安全恢复:', error);
     } finally {
@@ -35448,10 +35439,10 @@ function __debugCanvasSyncState() {
 
     try {
         console.groupCollapsed(`[CanvasSyncDebug] partition=${partitionKey}`);
-        console.log(result);
+        ;
         console.groupEnd();
     } catch (_) {
-        console.log(result);
+        ;
     }
 
     return result;
@@ -35664,7 +35655,7 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
         try { applyTempSectionAutoSizeAll(); } catch (_) { }
     }
 
-    console.log(`[Canvas] 加载了 ${CanvasState.tempSections.length} 个临时栏目`);
+    ;
 
     loadPermanentSectionPosition();
     updateCanvasScrollBounds();
@@ -35829,7 +35820,7 @@ function loadTempNodes() {
         CanvasState.mdNodeCounter = demoTemplate.mdNodeCounter;
         CanvasState.edges = demoTemplate.edges;
         CanvasState.edgeCounter = demoTemplate.edgeCounter;
-        console.log('[Canvas] 首次使用，加载演示模板');
+        ;
 
         __finalizeTempNodesLoad({ loadedFromStorage: false });
     } catch (error) {
@@ -36091,7 +36082,7 @@ function endConnection(e) {
             const fromSide = CanvasState.connectionStart.side;
             // Block same-node connections entirely
             if (toNodeId === fromNodeId) {
-                console.log('[Canvas] 忽略同栏目的锚点连接');
+                ;
             } else if (toNodeId !== fromNodeId || toSide !== fromSide) {
                 addEdge(fromNodeId, fromSide, toNodeId, toSide);
 
@@ -36419,11 +36410,11 @@ function __isCardGroupMembershipConnectionBlocked(fromNode, toNode) {
 function addEdge(fromNode, fromSide, toNode, toSide) {
     // Block self-connections between anchors of the same node
     if (fromNode === toNode) {
-        console.log('[Canvas] 忽略同栏目的锚点连接');
+        ;
         return;
     }
     if (__isCardGroupMembershipConnectionBlocked(fromNode, toNode)) {
-        console.log('[Canvas] 忽略卡片组与其内部成员之间的连接线');
+        ;
         return;
     }
 
@@ -36486,7 +36477,7 @@ function removeEdgesForNode(nodeId, options = {}) {
         if (!skipSave) {
             saveTempNodes({ immediate });
         }
-        console.log(`[Canvas] 已移除与节点 ${nodeId} 相连的连接线: ${removed.length}/${before}`);
+        ;
     }
 }
 
@@ -36857,7 +36848,7 @@ function __createEdgeHitArea() {
         const edgeId = hitArea.dataset && hitArea.dataset.edgeId;
         const edge = getEdgeById(edgeId);
         if (!edge) return;
-        console.log('[Edge] Edge clicked:', edge.id);
+        ;
         e.stopPropagation();
         if (clickToClearModeActive) {
             const fakeEvent = {
@@ -36875,7 +36866,7 @@ function __createEdgeHitArea() {
         const edgeId = hitArea.dataset && hitArea.dataset.edgeId;
         const edge = getEdgeById(edgeId);
         if (!edge) return;
-        console.log('[Edge] Edge double-clicked:', edge.id);
+        ;
         e.stopPropagation();
         e.preventDefault();
         editEdgeLabel(edge.id);
@@ -37502,7 +37493,7 @@ function clearEdgeSelection() {
 }
 
 function showEdgeToolbar(edgeId, x, y) {
-    console.log('[Edge Toolbar] showEdgeToolbar called:', edgeId);
+    ;
     const edge = getEdgeById(edgeId);
     if (!edge) {
         console.warn('[Edge Toolbar] Edge not found:', edgeId);
@@ -37517,7 +37508,7 @@ function showEdgeToolbar(edgeId, x, y) {
 
     let toolbar = document.getElementById('edge-toolbar');
     if (!toolbar) {
-        console.log('[Edge Toolbar] Creating new toolbar');
+        ;
         toolbar = document.createElement('div');
         toolbar.id = 'edge-toolbar';
         toolbar.className = 'md-node-toolbar edge-toolbar'; // 添加专属类名
@@ -37527,9 +37518,9 @@ function showEdgeToolbar(edgeId, x, y) {
         toolbar.style.opacity = '1'; // 确保可见
         toolbar.style.pointerEvents = 'auto'; // 确保可交互
         canvasContent.appendChild(toolbar); // 添加到 canvas-content 中
-        console.log('[Edge Toolbar] Toolbar created and appended');
+        ;
     } else {
-        console.log('[Edge Toolbar] Using existing toolbar');
+        ;
         toolbar.style.display = 'flex';
         toolbar.style.opacity = '1';
         toolbar.style.pointerEvents = 'auto';
@@ -38492,7 +38483,7 @@ function toggleEdgeDirection(edgeId) {
     renderEdges();
     saveTempNodes();
 
-    console.log('[Canvas] 切换连接线方向:', edgeId);
+    ;
 }
 
 // 编辑连接线标签
@@ -38672,7 +38663,7 @@ function resetCanvasCtrlState() {
         workspace.classList.remove('space-pressed', 'ctrl-pressed', 'panning');
     }
     setSectionCtrlModeActive(false);
-    console.log('[CanvasModule] Canvas Ctrl/Space key states and drag states reset.');
+    ;
 }
 
 // =============================================================================

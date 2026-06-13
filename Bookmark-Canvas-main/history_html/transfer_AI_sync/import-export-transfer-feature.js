@@ -1150,7 +1150,7 @@ async function __performOverwriteImport(payload) {
     });
     const diff = __countOverwriteDiff(localContent, importTree);
     const goOverwrite = threshold <= 0 || diff >= threshold;
-    console.log(`[Overwrite Import] diff=${diff}, threshold=${threshold}, branch=${goOverwrite ? 'overwrite' : 'incremental'}`);
+    ;
 
     // 4. Open bulk-mute envelope.
     let muteSession = null;
@@ -2522,7 +2522,7 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
 
     // 检测并处理不同格式
     if (looksLikeCanvasPermanentProtocol) {
-        console.log('[Canvas] Detected Bookmark Canvas permanent section JSON format');
+        ;
         const permanentTree = data.tree;
         const roots = permanentTree && Array.isArray(permanentTree.children)
             ? permanentTree.children
@@ -2532,7 +2532,7 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
             if (item) items.push(item);
         });
     } else if (looksLikeCanvasTempProtocol) {
-        console.log('[Canvas] Detected Bookmark Canvas temporary section JSON format');
+        ;
         try {
             const normalizedProtocol = __normalizeTempSectionProtocolObject(data);
             if (normalizedProtocol) {
@@ -2567,7 +2567,7 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         }
     } else if (data && typeof data === 'object' && (Array.isArray(data.bookmarkTree) || (data.bookmarkTree && typeof data.bookmarkTree === 'object'))) {
         // Bookmark-Backup 快照格式：{ _exportInfo, bookmarkTree: chrome.bookmarks.getTree() }
-        console.log('[Canvas] Detected wrapped bookmarkTree snapshot format');
+        ;
         const treeEntries = Array.isArray(data.bookmarkTree) ? data.bookmarkTree : [data.bookmarkTree];
         if (treeEntries.length === 1 && treeEntries[0] && Array.isArray(treeEntries[0].children) && !treeEntries[0].url) {
             treeEntries[0].children.forEach((entry) => {
@@ -2582,21 +2582,21 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         }
     } else if (data && typeof data === 'object' && Array.isArray(data.bookmarks)) {
         // 第三方常见包裹格式：{ bookmarks: [...] }
-        console.log('[Canvas] Detected wrapped bookmarks array format');
+        ;
         data.bookmarks.forEach((entry) => {
             const item = convert(entry);
             if (item) items.push(item);
         });
     } else if (data && typeof data === 'object' && Array.isArray(data.items)) {
         // 第三方常见包裹格式：{ items: [...] }
-        console.log('[Canvas] Detected wrapped items array format');
+        ;
         data.items.forEach((entry) => {
             const item = convert(entry);
             if (item) items.push(item);
         });
     } else if (data.roots) {
         // Chrome/Edge 内部格式：{roots: {bookmark_bar, other, synced}}
-        console.log('[Canvas] Detected Chrome/Edge internal bookmark format');
+        ;
         for (const [key, root] of Object.entries(data.roots)) {
             if (root && typeof root === 'object') {
                 // 跳过 sync_transaction_version 等非书签字段
@@ -2623,7 +2623,7 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         }
     } else if (data.root && data.guid) {
         // Firefox JSON 格式（完整备份）
-        console.log('[Canvas] Detected Firefox bookmark format');
+        ;
         if (data.children && Array.isArray(data.children)) {
             data.children.forEach(child => {
                 const item = convert(child);
@@ -2632,7 +2632,7 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         }
     } else if (Array.isArray(data)) {
         // 数组格式 - 最通用的格式
-        console.log('[Canvas] Detected array bookmark format');
+        ;
 
         // 检查是否是 Chrome bookmarks.getTree() 的输出格式
         // 通常返回 [{id: "0", title: "", children: [...]}]
@@ -2650,14 +2650,14 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         }
     } else if (data.children && Array.isArray(data.children) && isRootNode(data)) {
         // 单个根节点格式（可能是 Chrome API 格式）
-        console.log('[Canvas] Detected single root node format');
+        ;
         data.children.forEach(child => {
             const item = convert(child);
             if (item) items.push(item);
         });
     } else {
         // 单个对象格式
-        console.log('[Canvas] Detected single object format');
+        ;
         const item = convert(data);
         if (item) items.push(item);
     }
@@ -4370,7 +4370,7 @@ async function __unzipStore(arrayBuffer) {
 
     const cdEntryCount = readU16(eocdOffset + 10);
     const cdOffset = readU32(eocdOffset + 16);
-    console.log(`[ZIP] 中央目录: ${cdEntryCount} 个条目, 偏移 ${cdOffset}`);
+    ;
 
     // 2. 遍历中央目录
     let cdPos = cdOffset;
@@ -4393,7 +4393,7 @@ async function __unzipStore(arrayBuffer) {
         // 跳过目录和 macOS 元数据
         const baseName = name.split('/').pop();
         if (name.endsWith('/') || name.includes('__MACOSX') || baseName.startsWith('._')) {
-            console.log(`[ZIP] 跳过: ${name}`);
+            ;
             continue;
         }
 
@@ -4403,7 +4403,7 @@ async function __unzipStore(arrayBuffer) {
         const dataStart = localOffset + 30 + localNameLen + localExtraLen;
         const compressedData = bytes.slice(dataStart, dataStart + compSize);
 
-        console.log(`[ZIP] 条目: "${name}", method=${method}, size=${compSize}`);
+        ;
 
         // 4. 解压
         if (method === 0) {
@@ -4414,13 +4414,13 @@ async function __unzipStore(arrayBuffer) {
             }
             const decompressed = await __inflateDeflate(compressedData);
             files.set(name, decompressed);
-            console.log(`[ZIP] 解压: ${name}, ${compSize} -> ${decompressed.length}`);
+            ;
         } else {
             throw new Error(`不支持的压缩方法 ${method}`);
         }
     }
 
-    console.log(`[ZIP] 完成，共 ${files.size} 个文件`);
+    ;
     return files;
 }
 
@@ -4626,7 +4626,7 @@ async function parseCanvasPackageFromZipFile(file, options = {}) {
     let canvasFileName = null;
 
     // 记录所有文件用于调试
-    console.log('[Canvas] ZIP 包含的文件:', Array.from(zipFiles.keys()));
+    ;
 
     for (const name of zipFiles.keys()) {
         // 获取文件名（不含路径）
@@ -4636,7 +4636,7 @@ async function parseCanvasPackageFromZipFile(file, options = {}) {
         if (baseName.endsWith('.canvas')) {
             if (!canvasFileName) {
                 canvasFileName = name;
-                console.log('[Canvas] 找到 canvas 文件:', name);
+                ;
             }
         }
     }
@@ -4646,7 +4646,7 @@ async function parseCanvasPackageFromZipFile(file, options = {}) {
     let primaryState = {}; // Mock primary state for compatibility
 
     if (canvasFileName) {
-        console.log(`[Canvas] Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
+        ;
         const canvasText = new TextDecoder('utf-8').decode(zipFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
         const packageLeaf = canvasFileName.split('/').pop().replace(/\.canvas$/i, '');
@@ -4740,7 +4740,7 @@ async function parseCanvasPackageFromFolderFiles(folderFiles, folderName, option
     let primaryState = {};
 
     if (canvasFileName) {
-        console.log(`[Canvas] Folder Import using OBSIDIAN CANVAS mode: ${canvasFileName}`);
+        ;
         const canvasText = new TextDecoder('utf-8').decode(folderFiles.get(canvasFileName));
         const canvasData = JSON.parse(canvasText);
         const packageLeaf = canvasFileName.split('/').pop().replace(/\.canvas$/i, '');

@@ -154,7 +154,7 @@ function attachPointerDragEvents(treeContainer) {
     }
     treeContainer.dataset.pointerDragAttached = 'true';
 
-    console.log('[指针拖拽] 为容器绑定指针拖拽事件:', treeContainer.id || treeContainer.className);
+    ;
 
     // 使用事件委托，只在容器上监听
     treeContainer.addEventListener('pointerdown', handlePointerDown);
@@ -525,7 +525,7 @@ function startPointerDrag(e) {
         }
     } catch (_) { }
 
-    console.log('[指针拖拽] 开始拖拽:', draggedElement.dataset.nodeTitle);
+    ;
 }
 
 function performDrop(draggedElement, targetElement, event) {
@@ -535,11 +535,7 @@ function performDrop(draggedElement, targetElement, event) {
     const targetId = targetElement.dataset.nodeId;
     const targetIsFolder = targetElement.dataset.nodeType === 'folder';
 
-    console.log('[指针拖拽] 执行放置:', {
-        from: dragNodeId,
-        to: targetId,
-        targetIsFolder
-    });
+    ;
 
     // 获取放置位置（before/inside/after）
     let position = 'inside';
@@ -626,7 +622,7 @@ async function handleDropToCanvas(event, workspaceRect) {
     const sourceTreeType = draggedElement.dataset.treeType || 'permanent';
     const sourceSectionId = draggedElement.dataset.sectionId || null;
 
-    console.log('[指针拖拽] 拖到Canvas外，创建临时栏目:', { nodeId, nodeTitle, isFolder, sourceTreeType });
+    ;
 
     // 获取Canvas状态（缩放和平移）
     const CanvasState = window.CanvasModule?.CanvasState || window.CanvasState;
@@ -676,10 +672,10 @@ async function handleDropToCanvas(event, workspaceRect) {
         // 调用Canvas模块创建临时栏目（复用原有逻辑）
         if (window.createTempNode && typeof window.createTempNode === 'function') {
             await window.createTempNode(dragData, canvasX, canvasY);
-            console.log('[指针拖拽] 临时栏目创建成功');
+            ;
         } else if (window.CanvasModule && typeof window.CanvasModule.createTempNode === 'function') {
             await window.CanvasModule.createTempNode(dragData, canvasX, canvasY);
-            console.log('[指针拖拽] 临时栏目创建成功 (通过CanvasModule)');
+            ;
         } else {
             console.warn('[指针拖拽] 未找到创建临时栏目的函数');
         }
@@ -759,5 +755,5 @@ function cleanupPointerDrag() {
 if (typeof window !== 'undefined') {
     window.attachPointerDragEvents = attachPointerDragEvents;
     window.pointerDragState = pointerDragState;
-    console.log('[指针拖拽] 模块已加载');
+    ;
 }

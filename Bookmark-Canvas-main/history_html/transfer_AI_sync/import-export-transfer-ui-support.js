@@ -203,7 +203,7 @@ async function handleSingleUrlDrop(url, htmlData, dropX, dropY) {
                 const bookmark = results[0];
                 let parentId = String(bookmark.parentId); // 确保是字符串
 
-                console.log('[Canvas] 书签 parentId:', parentId, '类型:', typeof bookmark.parentId);
+                ;
 
                 // 根级文件夹的 ID（不应该导入整个根文件夹）
                 const rootFolderIds = ['0', '1', '2']; // 0=root, 1=Bookmarks Bar, 2=Other Bookmarks
@@ -227,21 +227,21 @@ async function handleSingleUrlDrop(url, htmlData, dropX, dropY) {
                             folderTitle.toLowerCase() === name.toLowerCase()
                         );
 
-                        console.log('[Canvas] 父文件夹:', folderTitle, 'ID:', parentId, '是根文件夹:', isRootFolder);
+                        ;
 
                         if (isRootFolder) {
                             // 书签直接位于根文件夹下，创建单个书签
-                            console.log('[Canvas] 书签位于根文件夹下，直接创建单个书签');
+                            ;
                         } else {
                             // 获取父文件夹内的直接子项数量
                             const children = await browserAPI.bookmarks.getChildren(parentId);
                             const directChildCount = children ? children.length : 0;
 
-                            console.log('[Canvas] 普通文件夹，直接子项数量:', directChildCount);
+                            ;
 
                             // 如果父文件夹有多个子项，说明用户拖动的是文件夹，自动导入整个文件夹
                             if (directChildCount > 1) {
-                                console.log('[Canvas] 检测到不完整的文件夹拖拽，自动导入整个文件夹');
+                                ;
                                 await createTempNodeFromBookmarkFolder(parentFolder, dropX, dropY);
                                 return;
                             }
@@ -453,7 +453,7 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
                 }
             }
 
-            console.log('[Canvas] 书签信息:', bookmarkInfos.length, '个');
+            ;
 
             // 如果成功获取了所有书签信息，找最近公共祖先
             if (bookmarkInfos.length === urls.length && bookmarkInfos.length > 0) {
@@ -461,7 +461,7 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
                 const lcaId = findLowestCommonAncestor(bookmarkInfos.map(info => info.ancestors));
 
                 if (lcaId && lcaId !== '0' && lcaId !== '1' && lcaId !== '2') {
-                    console.log('[Canvas] 找到最近公共祖先:', lcaId);
+                    ;
                     const folder = await browserAPI.bookmarks.get(lcaId);
                     if (folder && folder[0] && !folder[0].url) {
                         // 确认是文件夹，使用 createTempNodeFromBookmarkFolder
@@ -701,8 +701,8 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
         }
 
         // 调试：打印创建的数据结构
-        console.log('[Canvas] 创建的临时栏目数据结构:', JSON.stringify(section, null, 2).substring(0, 2000));
-        console.log('[Canvas] 顶层项类型:', folderItem.type, '子项数量:', folderItem.children?.length);
+        ;
+        ;
 
         CanvasState.tempSections.push(section);
         renderTempNode(section);

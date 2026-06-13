@@ -31,13 +31,13 @@ let currentView = (() => {
         const params = new URLSearchParams(window.location.search);
         const viewFromUrl = params.get('view');
         if (viewFromUrl) {
-            console.log('[全局初始化] URL 参数中的视图:', viewFromUrl);
+            ;
             return viewFromUrl;
         }
 
         // 2. 其次尝试从 localStorage 获取
         const saved = localStorage.getItem('lastActiveView');
-        console.log('[全局初始化] localStorage中的视图:', saved);
+        ;
         return saved || DEFAULT_VIEW;
     } catch (e) {
         console.error('[全局初始化] 读取视图失败:', e);
@@ -1208,7 +1208,7 @@ async function endBookmarkBulkMute(reason = '', options = {}) {
     }
     const normalizedReason = String(reason || bookmarkBulkMuteReason || 'bulk-bookmark-operation');
     if (bookmarkBulkMuteDepth > 0) {
-        console.log('[BookmarkBulk] nested end:', normalizedReason, 'depth=', bookmarkBulkMuteDepth);
+        ;
         return { active: true, depth: bookmarkBulkMuteDepth, reason: normalizedReason };
     }
 
@@ -1354,7 +1354,7 @@ function extractLastBookmarkTree(storageData) {
     void storageData;
     return null;
 }
-console.log('[全局初始化] currentView初始值:', currentView);
+;
 let allBookmarks = [];
 let currentBookmarkData = null;
 
@@ -2962,7 +2962,7 @@ function refreshSharedPermanentTreeCopySourceData(reason = '') {
     };
 
     if (reason) {
-        console.log('[PermanentCopySync] 已刷新共享源数据:', reason);
+        ;
     }
     return true;
 }
@@ -3744,12 +3744,12 @@ function __debugPermanentCopyStates() {
     try {
         const canvasContent = document.getElementById('canvasContent');
         if (!canvasContent) {
-            console.log('[DebugCopyState] canvasContent not found');
+            ;
             return;
         }
         const sections = Array.from(canvasContent.querySelectorAll('.permanent-bookmark-section.permanent-section-copy'));
         if (!sections.length) {
-            console.log('[DebugCopyState] no permanent-section-copy found');
+            ;
             return;
         }
         sections.forEach((sec) => {
@@ -3776,16 +3776,7 @@ function __debugPermanentCopyStates() {
             let runtimeExpandedCount = null;
             try { runtimeExpandedCount = tree ? tree.querySelectorAll('.tree-children.expanded').length : null; } catch (_) { }
 
-            console.log('[DebugCopyState]', {
-                copyId,
-                scrollKey,
-                storedScroll,
-                runtimeScrollTop: body ? body.scrollTop : null,
-                runtimeScrollLeft: body ? body.scrollLeft : null,
-                expandKey,
-                storedExpandedCount,
-                runtimeExpandedCount
-            });
+            ;
         });
     } catch (e) {
         console.error('[DebugCopyState] failed:', e);
@@ -3867,7 +3858,7 @@ async function ensureBookmarkCacheLoaded(skipRender) {
                 .filter(Boolean);
             bookmarkCacheRestored = true;
             rebuildBookmarkUrlSet();
-            console.log('[BookmarkCache] 已从缓存恢复记录:', allBookmarks.length);
+            ;
             if (!skipRender) {
             }
         }
@@ -3883,7 +3874,7 @@ async function persistBookmarkCache() {
             bookmarks: allBookmarks.map(normalizeBookmarkCacheEntry).filter(Boolean)
         };
         await writeCachedValue(DATA_CACHE_KEYS.bookmarks, payload);
-        console.log('[BookmarkCache] 已保存:', payload.bookmarks.length);
+        ;
     } catch (error) {
         console.warn('[BookmarkCache] 保存失败:', error);
     }
@@ -5010,7 +5001,7 @@ window.i18n = i18n; // 暴露给其他模块使用
 // =============================================================================
 
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('历史查看器初始化...');
+    ;
 
     // ========================================================================
     // 【关键步骤 -1】检测是否需要清除 localStorage（"恢复到初始状态"功能触发）
@@ -5021,7 +5012,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         if (resetCheck && resetCheck.needClearLocalStorage === true) {
-            console.log('[初始化] 检测到重置标志，正在清除 localStorage...');
+            ;
 
             // 清除当前页面上下文的所有 localStorage
             localStorage.clear();
@@ -5031,7 +5022,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 browserAPI.storage.local.remove(['needClearLocalStorage'], resolve);
             });
 
-            console.log('[初始化] localStorage 已清除，重置标志已移除');
+            ;
         }
     } catch (error) {
         console.warn('[初始化] 检测重置标志时出错:', error);
@@ -5060,30 +5051,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (isSidePanelMode) {
         const sidePanelFixedView = isViewAllowed('canvas') ? 'canvas' : DEFAULT_VIEW;
         currentView = sidePanelFixedView;
-        console.log('[初始化] SidePanel 模式固定视图:', currentView);
+        ;
     } else if (viewParam && ALLOWED_VIEWS.includes(viewParam)) {
         currentView = viewParam;
-        console.log('[初始化] 从URL参数设置视图:', currentView);
+        ;
 
         // 【关键】应用 URL 参数后，立即从 URL 中移除 view 参数
         // 这样刷新页面时就会使用 localStorage，实现持久化
         const newUrl = new URL(window.location.href);
         newUrl.searchParams.delete('view');
         window.history.replaceState({}, '', newUrl.toString());
-        console.log('[初始化] 已从URL中移除view参数，刷新时将使用localStorage');
+        ;
     } else {
         const lastView = localStorage.getItem('lastActiveView');
         if (lastView && ALLOWED_VIEWS.includes(lastView)) {
             currentView = lastView;
-            console.log('[初始化] 从localStorage恢复视图:', currentView);
+            ;
         } else {
             currentView = DEFAULT_VIEW;
-            console.log('[初始化] 使用默认视图:', currentView);
+            ;
         }
     }
 
     // 立即应用视图状态到DOM
-    console.log('[初始化] >>>立即应用视图状态<<<:', currentView);
+    ;
     document.querySelectorAll('.nav-tab').forEach(tab => {
         if (tab.dataset.view === currentView) {
             tab.classList.add('active');
@@ -5111,7 +5102,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!isSidePanelMode) {
         __saveLocalStorageRaw('lastActiveView', currentView);
     }
-    console.log('[初始化] 视图状态已应用完成');
+    ;
 
     // [Search Context Boot] 首次加载时同步 SearchContextManager 的 view/tab/subTab。
     // 这里不能依赖 switchView()，因为初始化阶段是直接改 DOM 来显示视图。
@@ -5124,8 +5115,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ========================================================================
     // 其他初始化
     // ========================================================================
-    console.log('[URL参数] 完整URL:', window.location.href);
-    console.log('[URL参数] viewParam:', viewParam);
+    ;
+    ;
 
     // 加载用户设置
     await loadUserSettings();
@@ -5148,22 +5139,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 初始化批量操作相关功能
     if (typeof initBatchToolbar === 'function') {
         initBatchToolbar();
-        console.log('[主程序] 批量工具栏已初始化');
+        ;
     }
     if (typeof initKeyboardShortcuts === 'function') {
         initKeyboardShortcuts();
-        console.log('[主程序] 快捷键已初始化');
+        ;
     }
     if (typeof initClickSelect === 'function') {
         initClickSelect();
-        console.log('[主程序] 点击选择已初始化');
+        ;
     }
 
     // 注册消息监听
     setupRealtimeMessageListener();
 
     // 先加载基础数据
-    console.log('[初始化] 加载基础数据...');
+    ;
     await loadAllData();
 
     // 在渲染 Canvas 前确定当前视图分区信息（page / sidepanel），
@@ -5172,7 +5163,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 使用智能等待：尝试渲染，如果数据不完整则等待后重试
     // 初始化时强制刷新缓存，确保显示最新数据
-    console.log('[初始化] 开始渲染当前视图:', currentView);
+    ;
 
     // 根据当前视图渲染
     await renderCurrentView();
@@ -5238,7 +5229,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     Promise.all([
         preloadCommonIcons()
     ]).then(() => {
-        console.log('[初始化] 所有资源预加载完成');
+        ;
     }).catch(error => {
         console.error('[初始化] 预加载失败:', error);
     });
@@ -5249,7 +5240,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 监听书签API变化（实时更新书签树视图）
     setupBookmarkListener();
 
-    console.log('历史查看器初始化完成');
+    ;
 });
 
 // =============================================================================
@@ -5317,11 +5308,11 @@ async function loadUserSettings() {
             } catch (_) { }
 
             currentTheme = mainUITheme;
-            console.log('[加载用户设置] 跟随主UI主题:', currentTheme);
+            ;
 
             currentLang = mainUILang;
             window.currentLang = currentLang; // 同步到 window
-            console.log('[加载用户设置] 跟随主UI语言:', currentLang);
+            ;
 
             // 应用主题
             if (currentTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
@@ -8524,7 +8515,7 @@ function initializeUI() {
         document.documentElement.setAttribute('data-search-outside-bound', 'true');
     }
 
-    console.log('[initializeUI] UI事件监听器初始化完成，当前视图:', currentView);
+    ;
 }
 
 // =============================================================================
@@ -8533,7 +8524,7 @@ function initializeUI() {
 
 async function loadAllData(options = {}) {
     const { skipRender = false } = options;
-    console.log('[loadAllData] 开始加载所有数据...');
+    ;
 
     try {
         await ensureBookmarkCacheLoaded(skipRender);
@@ -8545,9 +8536,7 @@ async function loadAllData(options = {}) {
         await persistBookmarkCache();
         cachedBookmarkTree = bookmarkTree;
 
-        console.log('[loadAllData] 数据加载完成:', {
-            书签总数: allBookmarks.length
-        });
+        ;
     } catch (error) {
         console.error('[loadAllData] 加载数据失败:', error);
         showError('加载数据失败');
@@ -8556,7 +8545,7 @@ async function loadAllData(options = {}) {
 
 // 预加载常见网站的图标
 async function preloadCommonIcons() {
-    console.log('[图标预加载] 开始预加载常见图标...');
+    ;
 
     try {
         // 获取当前所有书签的 URL，过滤掉无效的
@@ -8565,7 +8554,7 @@ async function preloadCommonIcons() {
             .filter(url => url && url.trim() && (url.startsWith('http://') || url.startsWith('https://')));
 
         if (urls.length === 0) {
-            console.log('[图标预加载] 没有有效的 URL 需要预加载');
+            ;
             return;
         }
 
@@ -8578,7 +8567,7 @@ async function preloadCommonIcons() {
             await Promise.all(batch.map(url => preloadIcon(url)));
         }
 
-        console.log('[图标预加载] 完成，已预加载', maxPreload, '个图标');
+        ;
     } catch (error) {
         console.error('[图标预加载] 失败:', error);
     }
@@ -8605,7 +8594,7 @@ async function warmupFaviconCache(bookmarkUrls) {
     if (!bookmarkUrls || bookmarkUrls.length === 0) return;
 
     try {
-        console.log('[Favicon预热] 开始预热内存缓存，书签数量:', bookmarkUrls.length);
+        ;
 
         // 初始化 IndexedDB（如果还没初始化）
         if (!FaviconCache.db) {
@@ -8628,7 +8617,7 @@ async function warmupFaviconCache(bookmarkUrls) {
 
         if (domains.size === 0) return;
 
-        console.log('[Favicon预热] 需要预热的域名数:', domains.size);
+        ;
 
         // 批量读取
         const transaction = FaviconCache.db.transaction([FaviconCache.storeName], 'readonly');
@@ -8656,7 +8645,7 @@ async function warmupFaviconCache(bookmarkUrls) {
             }
         }
 
-        console.log('[Favicon预热] 完成，从IndexedDB加载了', loaded, '个favicon到内存');
+        ;
     } catch (error) {
         console.warn('[Favicon预热] 失败:', error);
     }
@@ -9656,14 +9645,14 @@ function initSidebarToggle() {
             currentState = setSidebarState(getAutoState(), { manual: false });
         }
         if (currentState !== 'expanded') {
-            console.log('[侧边栏] 恢复收起状态:', currentState);
+            ;
         }
     } else {
         currentState = applySidebarState('compact');
         syncSidebarWidth();
         scheduleMaximizedRefresh();
         scheduleCanvasLayoutStabilization({ syncBounds: false });
-        console.log('[侧边栏] 侧边栏模式默认完全收起');
+        ;
     }
 
     // 点击圆形按钮：展开 <-> 完全收起
@@ -9681,7 +9670,7 @@ function initSidebarToggle() {
         } else {
             currentState = setSidebarState('expanded', { manual: true });
         }
-        console.log('[侧边栏] 状态切换:', currentState);
+        ;
     });
 
     function clearToggleDragSession() {
@@ -10534,7 +10523,7 @@ function initHeaderToggle() {
 // =============================================================================
 
 function switchView(view) {
-    console.log('[switchView] 切换视图到:', view);
+    ;
 
     const previousView = currentView;
 
@@ -10603,7 +10592,7 @@ function switchView(view) {
     if (!isSidePanelMode) {
         __saveLocalStorageRaw('lastActiveView', view);
     }
-    console.log('[switchView] 已保存视图到localStorage:', view);
+    ;
 
     // 渲染当前视图
     renderCurrentView();
@@ -10641,12 +10630,12 @@ function renderCurrentView() {
                             permanentSectionEl.style.height = '600px';
                         }
                         canvasContent.appendChild(permanentSection);
-                        console.log('[Canvas] 永久栏目已从template创建到canvas-content');
+                        ;
 
                         // 立即应用语言设置（使用主UI的applyLanguage函数）
                         setTimeout(() => {
                             applyLanguage();
-                            console.log('[Canvas] 永久栏目语言已应用:', currentLang);
+                            ;
                         }, 0);
                     } else {
                         console.error('[Canvas] 找不到permanentSectionTemplate');
@@ -10654,7 +10643,7 @@ function renderCurrentView() {
                 } else if (!canvasContent) {
                     console.error('[Canvas] 找不到canvasContent');
                 } else {
-                    console.log('[Canvas] 永久栏目已存在，跳过创建');
+                    ;
                 }
 
                 try {
@@ -10684,14 +10673,14 @@ function renderCurrentView() {
                             canvasView.dataset.initialized = 'true';
                             canvasView.dataset.initTime = Date.now().toString();
                         }
-                        console.log('[Canvas] 首次初始化完成');
+                        ;
                     } catch (initError) {
                         console.error('[Canvas] 初始化失败:', initError);
                         // 初始化失败时不标记为已初始化，下次会重试
                     }
                 } else {
                     // 已初始化：验证状态
-                    console.log('[Canvas] 使用缓存状态，检查完整性');
+                    ;
 
                     // 验证Canvas状态是否有效
                     const canvasWorkspace = document.getElementById('canvasWorkspace');
@@ -10877,7 +10866,7 @@ function clearTreeCache() {
     lastTreeSnapshotVersion = null;
     cachedCurrentTreeIndex = null;
     cachedRenderTreeIndex = null;
-    console.log('[树缓存] 已清除');
+    ;
 }
 window.clearTreeCache = clearTreeCache;
 
@@ -10915,13 +10904,13 @@ function clearCanvasLazyChangeHints(reason = '') {
         deletedCount: 0,
         hasAny: false
     };
-    if (reason) console.log('[Canvas变化提示] 已清空:', reason);
+    if (reason) {}
 }
 
 function clearIncrementalDeletedSnapshots(reason = '') {
     incrementalDeletedNodeSnapshots = new Map();
     incrementalDeletedChildrenByParent = new Map();
-    if (reason) console.log('[Canvas删除快照] 已清空:', reason);
+    if (reason) {}
 }
 
 function cacheDeletedSnapshotForLazyRender(id, removeInfo) {
@@ -11282,7 +11271,7 @@ function schedulePermanentMainStorageSyncFromChrome(reason = '', delayMs = 180) 
                 assumeClean: false
             }).then((syncResult) => {
                 if (syncResult && syncResult.skipped) {
-                    console.log('[Permanent JSON] sync skipped (no change):', reason);
+                    ;
                     return;
                 }
                 if (!syncResult) return;
@@ -11363,7 +11352,7 @@ async function refreshCachedCurrentTreeSnapshot(reason = '') {
             if (typeof snapshot.version !== 'undefined') {
                 lastTreeSnapshotVersion = snapshot.version;
             }
-            console.log('[TreeSnapshot] 已刷新 cachedCurrentTree（Canvas懒加载）', reason || '');
+            ;
         }
     } catch (e) {
         console.warn('[TreeSnapshot] 刷新 cachedCurrentTree 失败:', e);
@@ -12150,7 +12139,7 @@ let isRenderingTree = false;
 let pendingRenderRequest = null;
 
 async function renderTreeViewSync() {
-    console.log('[renderTreeViewSync] 开始同步渲染...');
+    ;
 
     const treeContainer = document.getElementById('bookmarkTree');
     if (!treeContainer) {
@@ -12195,7 +12184,7 @@ async function renderTreeViewSync() {
         // 绑定事件
         attachTreeEvents(treeContainer);
 
-        console.log('[renderTreeViewSync] 渲染完成');
+        ;
 
     } catch (error) {
         console.error('[renderTreeViewSync] 渲染失败:', error);
@@ -12226,17 +12215,17 @@ async function ensureChangesPreviewTreeDataLoaded() {
 }
 
 async function renderTreeView(forceRefresh = false) {
-    console.log('[renderTreeView] 开始渲染, forceRefresh:', forceRefresh);
+    ;
 
     if (isBookmarkBulkMuteRenderingBlocked()) {
         bookmarkBulkNeedsRefresh = true;
-        console.log('[renderTreeView] bulk bookmark mode active, defer render');
+        ;
         return;
     }
 
     // 如果正在渲染中，合并请求，避免重复渲染导致闪烁
     if (isRenderingTree) {
-        console.log('[renderTreeView] 已有渲染进行中，合并请求');
+        ;
         pendingRenderRequest = forceRefresh;
         return;
     }
@@ -12299,7 +12288,7 @@ async function renderTreeView(forceRefresh = false) {
     // 但先检查 Chrome 实际树是否与已显示树相同，相同则跳过（避免无变化的全量重建）
     if (forceRefresh) {
         if (shouldSkipForceTreeRefreshForNoNetChange()) {
-            console.log('[renderTreeView] force-refresh-skipped-no-net-change: 缓存和指纹完好，无变化，跳过强制刷新');
+            ;
             isRenderingTree = false;
             if (pendingRenderRequest !== null) {
                 const pending = pendingRenderRequest;
@@ -12312,12 +12301,12 @@ async function renderTreeView(forceRefresh = false) {
         lastTreeFingerprint = null;
         lastTreeSnapshotVersion = null;
         cachedCurrentTreeIndex = null;
-        console.log('[renderTreeView] 强制刷新，已清除缓存');
+        ;
     }
 
     // 如果已有缓存且不强制刷新，直接使用（快速路径）
     if (!forceRefresh && cachedTreeData && (cachedTreeData.treeFragment || cachedTreeData.renderTree)) {
-        console.log('[renderTreeView] 使用现有缓存（快速显示）');
+        ;
         let renderedSharedViewsInFastPath = false;
         // Canvas 视图下尽量避免整树替换，减少“重新加载感”
         if (currentView === 'canvas' && treeContainer.children.length) {
@@ -12352,7 +12341,7 @@ async function renderTreeView(forceRefresh = false) {
             }
         }
 
-        console.log('[renderTreeView] 缓存显示完成');
+        ;
         // 恢复滚动位置（延迟确保展开状态恢复后再恢复滚动位置）
         if (permBody && permScrollTop !== null) {
             __scheduleCanvasBodyScrollRestoreInHistory(permBody, {
@@ -12405,7 +12394,7 @@ async function renderTreeView(forceRefresh = false) {
                             }
                         });
 
-                        console.log('[renderTreeView] 快速路径预热完成，已更新图标');
+                        ;
                     }
                 }
             } catch (e) {
@@ -12418,7 +12407,7 @@ async function renderTreeView(forceRefresh = false) {
         if (pendingRenderRequest !== null) {
             const pending = pendingRenderRequest;
             pendingRenderRequest = null;
-            console.log('[renderTreeView] 处理待处理的渲染请求（快速路径）');
+            ;
             renderTreeView(pending);
         }
         return;
@@ -12427,7 +12416,7 @@ async function renderTreeView(forceRefresh = false) {
     // 没有缓存，开始加载数据
     // 注意：不清空容器，保持原有内容，避免闪烁和滚动位置丢失
     // 只有在容器为空时才显示加载状态
-    console.log('[renderTreeView] 无缓存，开始加载数据');
+    ;
     if (!treeContainer.children.length || treeContainer.querySelector('.loading') || treeContainer.querySelector('.empty-state') || treeContainer.querySelector('.error')) {
         treeContainer.innerHTML = `<div class="loading">${i18n.loading[currentLang]}</div>`;
     }
@@ -12475,7 +12464,7 @@ async function renderTreeView(forceRefresh = false) {
 
         // 如果版本/指纹相同，直接使用缓存（树没有变化）
         if (cachedTreeData && ((canUseVersion && snapshotVersion === lastTreeSnapshotVersion) || (!canUseVersion && currentFingerprint === lastTreeFingerprint))) {
-            console.log('[renderTreeView] 使用缓存（书签未变化）');
+            ;
 
             // Canvas 视图下，如果已有 DOM，避免整树替换造成"重新加载感"
             if (currentView === 'canvas' && treeContainer.children.length) {
@@ -12517,7 +12506,7 @@ async function renderTreeView(forceRefresh = false) {
                 if (pendingRenderRequest !== null) {
                     const pending = pendingRenderRequest;
                     pendingRenderRequest = null;
-                    console.log('[renderTreeView] 处理待处理的渲染请求（Canvas无变化）');
+                    ;
                     renderTreeView(pending);
                 }
                 return;
@@ -12554,14 +12543,14 @@ async function renderTreeView(forceRefresh = false) {
             if (pendingRenderRequest !== null) {
                 const pending = pendingRenderRequest;
                 pendingRenderRequest = null;
-                console.log('[renderTreeView] 处理待处理的渲染请求（指纹一致）');
+                ;
                 renderTreeView(pending);
             }
             return;
         }
 
         // 树有变化，重新渲染
-        console.log('[renderTreeView] 检测到书签变化，重新渲染');
+        ;
 
         cachedOldTree = null;
         cachedCurrentTree = currentTree;
@@ -12679,7 +12668,7 @@ async function renderTreeView(forceRefresh = false) {
                 });
             }
 
-            console.log('[renderTreeView] 渲染完成');
+            ;
         });
 
         // 重置渲染标志
@@ -12689,7 +12678,7 @@ async function renderTreeView(forceRefresh = false) {
         if (pendingRenderRequest !== null) {
             const pending = pendingRenderRequest;
             pendingRenderRequest = null;
-            console.log('[renderTreeView] 处理待处理的渲染请求');
+            ;
             renderTreeView(pending);
         }
     }).catch(error => {
@@ -12871,25 +12860,21 @@ function attachTreeEvents(treeContainer) {
             // 找到包含这个tree-item的tree-node
             const node = treeItem.closest('.tree-node');
             if (!node) {
-                console.log('[树事件] 未找到tree-node');
+                ;
                 return;
             }
 
             const children = node.querySelector(':scope > .tree-children');
             const toggle = treeItem.querySelector(':scope > .tree-toggle');
 
-            console.log('[树事件] 点击节点:', {
-                hasChildren: !!children,
-                hasToggle: !!toggle,
-                nodeHTML: node.outerHTML.substring(0, 200)
-            });
+            ;
 
             if (children && toggle) {
                 e.stopPropagation();
                 children.classList.toggle('expanded');
                 toggle.classList.toggle('expanded');
 
-                console.log('[树事件] 切换展开状态:', toggle.classList.contains('expanded'));
+                ;
 
                 // 保存展开状态
                 saveTreeExpandState(treeContainer);
@@ -12936,16 +12921,16 @@ function attachTreeEvents(treeContainer) {
     // 绑定指针拖拽事件（支持滚轮滚动）
     if (typeof attachPointerDragEvents === 'function') {
         attachPointerDragEvents(treeContainer);
-        console.log('[树事件] 指针拖拽事件已绑定');
+        ;
     }
 
     // 如果在Canvas视图，重新绑定Canvas拖出功能
     if (currentView === 'canvas' && window.CanvasModule && window.CanvasModule.enhance) {
-        console.log('[树事件] 当前在Canvas视图，重新绑定Canvas拖出功能');
+        ;
         window.CanvasModule.enhance();
     }
 
-    console.log('[树事件] 事件绑定完成');
+    ;
 
     // 恢复展开状态
     restoreTreeExpandState(treeContainer);
@@ -12973,7 +12958,7 @@ function saveJSONScrollPosition(jsonContainer) {
         if (content) {
             const scrollTop = content.scrollTop;
             __saveLocalStorageRaw('jsonScrollPosition', scrollTop.toString());
-            console.log('[JSON状态] 保存滚动位置:', scrollTop);
+            ;
         }
     } catch (e) {
         console.error('[JSON状态] 保存滚动位置失败:', e);
@@ -12988,7 +12973,7 @@ function restoreJSONScrollPosition(jsonContainer) {
             const content = jsonContainer.querySelector('.json-diff-content');
             if (content) {
                 content.scrollTop = parseInt(savedPosition, 10);
-                console.log('[JSON状态] 恢复滚动位置:', savedPosition);
+                ;
             }
         }
     } catch (e) {
@@ -13058,7 +13043,7 @@ function __saveTreeExpandStateToStorage(treeContainer) {
                 __saveLocalStorageJSON(otherKey, expandedIds);
             }
         } catch (_) { }
-        console.log('[树状态] 保存展开节点:', expandedIds.length, 'key:', key);
+        ;
     } catch (e) {
         console.error('[树状态] 保存失败:', e);
     }
@@ -13156,7 +13141,7 @@ function restoreTreeExpandState(treeContainer) {
 
         // Canvas 懒加载模式：批量加载需要展开的文件夹的子节点
         if (nodesToLazyLoad.length > 0) {
-            console.log('[树状态] Canvas懒加载：需要加载', nodesToLazyLoad.length, '个文件夹的子节点');
+            ;
             const suppressBootstrapRestore = __shouldSuppressCanvasBootstrapRestoreInHistory(treeContainer);
             const hydrate = () => {
                 nodesToLazyLoad.forEach(({ parentId, children }) => {
@@ -13175,7 +13160,7 @@ function restoreTreeExpandState(treeContainer) {
             }
         }
 
-        console.log('[树状态] 恢复展开节点:', expandedIds.length);
+        ;
     } catch (e) {
         console.error('[树状态] 恢复失败:', e);
     }
@@ -13465,10 +13450,10 @@ async function detectTreeChangesFast(oldTree, newTree, options = {}) {
 
 // 重建树结构，包含删除的节点（保持原始位置）
 function rebuildTreeWithDeleted(oldTree, newTree, changeMap) {
-    console.log('[树重建] 开始重建树结构');
+    ;
 
     if (!oldTree || !oldTree[0] || !newTree || !newTree[0]) {
-        console.log('[树重建] 缺少树数据，返回新树');
+        ;
         return newTree;
     }
 
@@ -13480,7 +13465,7 @@ function rebuildTreeWithDeleted(oldTree, newTree, changeMap) {
     function rebuildNode(oldNode, newNodes, depth = 0) {
         // 安全检查
         if (!oldNode || typeof oldNode.id === 'undefined') {
-            console.log('[树重建] 跳过无效节点:', oldNode);
+            ;
             return null;
         }
 
@@ -13503,7 +13488,7 @@ function rebuildTreeWithDeleted(oldTree, newTree, changeMap) {
 
         if (change && change.type === 'deleted') {
             // 节点被删除，保留但标记
-            console.log('[树重建] 保留删除节点:', oldNode.title);
+            ;
             const snapshotNode = cloneBookmarkNodeSnapshot(change.deleted && (change.deleted.nodeSnapshot || change.deleted.node));
             const deletedNodeCopy = snapshotNode || JSON.parse(JSON.stringify(oldNode));
 
@@ -13564,7 +13549,7 @@ function rebuildTreeWithDeleted(oldTree, newTree, changeMap) {
 
                         if (!oldNode.children || !oldNode.children.find(c => c && c.id === newChild.id)) {
                             // 这是新增的节点
-                            console.log('[树重建] 添加新节点:', newChild.title);
+                            ;
                             rebuiltChildren.push(newChild);
                         }
                     });
@@ -13576,7 +13561,7 @@ function rebuildTreeWithDeleted(oldTree, newTree, changeMap) {
             return nodeCopy;
         } else if (newNodes === null && change && change.type === 'deleted') {
             // 父节点已删除，这个子节点也视为删除，保留但标记
-            console.log('[树重建] 保留已删除节点的子节点:', oldNode.title);
+            ;
             const deletedNodeCopy = JSON.parse(JSON.stringify(oldNode));
 
             // 递归处理子节点
@@ -13587,7 +13572,7 @@ function rebuildTreeWithDeleted(oldTree, newTree, changeMap) {
             return deletedNodeCopy;
         } else {
             // 节点在新树中不存在，不是删除，跳过它
-            console.log('[树重建] 节点在新树中不存在，跳过:', oldNode.title);
+            ;
             return null;
         }
     }
@@ -13595,7 +13580,7 @@ function rebuildTreeWithDeleted(oldTree, newTree, changeMap) {
     // 重建根节点
     const rebuiltRoot = rebuildNode(oldTree[0], [newTree[0]]);
 
-    console.log('[树重建] 重建完成');
+    ;
     return [rebuiltRoot];
 }
 
@@ -14250,7 +14235,7 @@ function updateLanguageDependentUI() {
         btn.title = isEn ? 'Format toolbar' : '格式工具栏';
     });
 
-    console.log('[toggleLanguage] 已更新UI文字（包括临时栏目）');
+    ;
 }
 
 // =============================================================================
@@ -14260,12 +14245,12 @@ function updateLanguageDependentUI() {
 function handleStorageChange(changes, namespace) {
     if (namespace !== 'local') return;
 
-    console.log('[存储监听] 检测到变化:', Object.keys(changes));
+    ;
 
     // 主题变化（只在没有覆盖设置时跟随主UI）
     if (changes.currentTheme && !hasThemeOverride()) {
         const newTheme = changes.currentTheme.newValue;
-        console.log('[存储监听] 主题变化，跟随主UI:', newTheme);
+        ;
         currentTheme = newTheme;
         if (currentTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
         else document.documentElement.removeAttribute('data-theme');
@@ -14280,7 +14265,7 @@ function handleStorageChange(changes, namespace) {
     // 语言变化（只在没有覆盖设置时跟随主UI）
     if (changes.preferredLang && !hasLangOverride()) {
         const newLang = changes.preferredLang.newValue;
-        console.log('[存储监听] 语言变化，跟随主UI:', newLang);
+        ;
         currentLang = newLang;
         window.currentLang = currentLang; // 同步到 window
 
@@ -14470,7 +14455,7 @@ async function flushPendingBookmarkMutationEvents(reason = '') {
                 const isBulk = batch.length >= BULK_BOOKMARK_MUTATION_THRESHOLD;
 
                 if (isBulk) {
-                    console.log(`[书签监听][批处理] 书签变更事件数=${batch.length}，触发批处理 (${flushReason || 'unknown'})`);
+                    ;
 
                     batch.forEach((event) => {
                         if (event.type === 'created') {
@@ -14534,11 +14519,11 @@ function setupBookmarkListener() {
         return;
     }
 
-    console.log('[书签监听] 设置书签API监听器');
+    ;
 
     // 书签创建
     browserAPI.bookmarks.onCreated.addListener((id, bookmark) => {
-        console.log('[书签监听] 书签创建:', bookmark.title);
+        ;
         try {
             if (isBookmarkBulkMuteActive()) {
                 noteBookmarkBulkMutation('bookmark-created');
@@ -14556,7 +14541,7 @@ function setupBookmarkListener() {
 
     // 书签删除
     browserAPI.bookmarks.onRemoved.addListener((id, removeInfo) => {
-        console.log('[书签监听] 书签删除:', id);
+        ;
         try {
             if (isBookmarkBulkMuteActive()) {
                 noteBookmarkBulkMutation('bookmark-removed');
@@ -14574,7 +14559,7 @@ function setupBookmarkListener() {
 
     // 书签修改
     browserAPI.bookmarks.onChanged.addListener(async (id, changeInfo) => {
-        console.log('[书签监听] 书签修改:', changeInfo);
+        ;
         try {
             if (isBookmarkBulkMuteActive()) {
                 noteBookmarkBulkMutation('bookmark-changed');
@@ -14609,7 +14594,7 @@ function setupBookmarkListener() {
 
     // 书签移动
     browserAPI.bookmarks.onMoved.addListener(async (id, moveInfo) => {
-        console.log('[书签监听] 书签移动:', id);
+        ;
 
         try {
             if (isBookmarkBulkMuteActive()) {
@@ -14629,7 +14614,7 @@ function setupBookmarkListener() {
 
     if (browserAPI.bookmarks.onChildrenReordered && typeof browserAPI.bookmarks.onChildrenReordered.addListener === 'function') {
         browserAPI.bookmarks.onChildrenReordered.addListener((id, reorderInfo) => {
-            console.log('[书签监听] 子书签重排:', id, reorderInfo);
+            ;
             try {
                 if (isBookmarkBulkMuteActive()) {
                     noteBookmarkBulkMutation('bookmark-children-reordered');
@@ -14669,7 +14654,7 @@ function setupBookmarkListener() {
 // 如果当前在 Canvas 视图，刷新书签树
 async function refreshTreeViewIfVisible() {
     if (currentView === 'canvas') {
-        console.log('[书签监听] 检测到书签变化，刷新树视图');
+        ;
 
         // 清除缓存，强制刷新
         cachedBookmarkTree = null;
@@ -14682,7 +14667,7 @@ async function refreshTreeViewIfVisible() {
         setTimeout(async () => {
             try {
                 await renderTreeView(true);
-                console.log('[书签监听] 树视图刷新完成');
+                ;
             } catch (error) {
                 console.error('[书签监听] 刷新树视图失败:', error);
             }
@@ -14755,10 +14740,10 @@ function setupRealtimeMessageListener() {
             tryHandleCanvasFullscreenBridgePayload(message);
         } else if (message.action === 'clearLocalStorage') {
             // 收到来自 background.js 的清除 localStorage 请求（"恢复到初始状态"功能）
-            console.log('[history.js] 收到清除 localStorage 请求');
+            ;
             try {
                 localStorage.clear();
-                console.log('[history.js] localStorage 已清除');
+                ;
             } catch (e) {
                 console.warn('[history.js] 清除 localStorage 失败:', e);
             }
