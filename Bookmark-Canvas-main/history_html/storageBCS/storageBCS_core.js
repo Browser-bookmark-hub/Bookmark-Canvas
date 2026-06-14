@@ -1281,7 +1281,7 @@ function __buildPermanentCopyAnchorContentPayload(copyIdInput, options = {}) {
     const slot = toAlphaLabel(displayIndex + 1) || 'B';
     const inheritFrom = __normalizeCanvasMarkdownPath(options && options.inheritFrom || '')
         || __buildPermanentSectionMarkdownRelativePath(1, isEn, __getBcsExportFormatCached());
-    return {
+    const payload = {
         format: __CANVAS_SECTION_JSON_FORMAT,
         schemaVersion: 2,
         sectionType: 'permanent',
@@ -1298,13 +1298,16 @@ function __buildPermanentCopyAnchorContentPayload(copyIdInput, options = {}) {
             preserveRawSource: true,
             sourceData: options && options.sourceData && typeof options.sourceData === 'object' ? options.sourceData : null,
             allowLiveFallback: true
-        }),
-        viewState: {
+        })
+    };
+    if (!(options && options.skipViewState === true)) {
+        payload.viewState = {
             scrollState: shell && shell.scrollState ? shell.scrollState : __collectPermanentViewScrollState(copyId),
             foldState: shell && shell.foldState ? shell.foldState : __collectPermanentViewFoldState(copyId),
             cardState: shell && shell.cardState ? shell.cardState : {}
-        }
-    };
+        };
+    }
+    return payload;
 }
 
 // doc 最终修复计划 §3.5: sandbox 路径与 live fallback 路径必须显式区分。
@@ -6124,8 +6127,11 @@ function __buildBcsObsidianPackageFilesFromSnapshot(snapshotInput, options = {})
         if (!rel) return;
         let payload = entry.payload;
         try { payload = JSON.parse(JSON.stringify(entry.payload)); } catch (_) { payload = entry.payload; }
-        if (payload && typeof payload === 'object' && String(payload.fileRole || '').trim() === 'copy-anchor') {
-            payload.inheritFrom = permanentPath;
+        if (payload && typeof payload === 'object') {
+            if (String(payload.fileRole || '').trim() === 'copy-anchor') {
+                payload.inheritFrom = permanentPath;
+            }
+            delete payload.viewState;
         }
         pushFile(
             __joinObsidianExportPath(exportRoot, rel),

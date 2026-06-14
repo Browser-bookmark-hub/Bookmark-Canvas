@@ -305,12 +305,7 @@ AI 应先根据用户原话、当前文件/目录、项目结构与本文件协�
   "fileNote": "永久栏目副本锚点文件：树内容继承自主文件；此文件仅保留副本说明与画布锚点。",
   "inheritFrom": "<vault 相对的 slot A json 路径>",
   "copyId": "permanent-copy-1780113045642-gtjhd",
-  "descriptionMd": "副本自己的说明。",
-  "viewState": {
-    "scrollState": { "page": { "top": 0, "left": 0 }, "sidepanel": { "top": 0, "left": 0 } },
-    "foldState": { "page": { "expanded": [] }, "sidepanel": { "expanded": [] } },
-    "cardState": {}
-  }
+  "descriptionMd": "副本自己的说明。"
 }
 ```
 

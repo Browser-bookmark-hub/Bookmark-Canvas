@@ -3084,7 +3084,8 @@ async function __exportCanvasSubsetPackage(rawMembers, options = {}) {
             const copyAnchorPayload = __buildPermanentCopyAnchorContentPayload(copyId, {
                 displayIndex: idx,
                 inheritFrom: permanentCanvasPath
-                    || __joinObsidianExportPath(exportRoot, __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat))
+                    || __joinObsidianExportPath(exportRoot, __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat)),
+                skipViewState: true
             });
             pushFile(`${exportRoot}/${copyMdRel}`, `${__buildCanvasSectionJsonCodeBlock(copyAnchorPayload)}\n`);
         });
@@ -4207,7 +4208,8 @@ async function exportCanvasPackage(options = {}) {
 
                 const copyAnchorPayload = __buildPermanentCopyAnchorContentPayload(copyId, {
                     displayIndex: idx,
-                    inheritFrom: __joinObsidianExportPath(exportRoot, permanentMdRel)
+                    inheritFrom: __joinObsidianExportPath(exportRoot, permanentMdRel),
+                    skipViewState: true
                 });
                 const fileContent = `${__buildCanvasSectionJsonCodeBlock(copyAnchorPayload)}\n`;
                 files.push({ name: `${exportRoot}/${copyMdRel}`, data: __toUint8(fileContent) });

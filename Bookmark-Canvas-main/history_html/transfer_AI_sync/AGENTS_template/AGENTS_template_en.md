@@ -305,12 +305,7 @@ A permanent copy is a view anchor, not another bookmark tree.
   "fileNote": "Permanent copy anchor file: tree content is inherited from primary file; this file keeps per-copy description and canvas anchor.",
   "inheritFrom": "<vault-relative path to slot A json>",
   "copyId": "permanent-copy-1780113045642-gtjhd",
-  "descriptionMd": "Copy-specific notes.",
-  "viewState": {
-    "scrollState": { "page": { "top": 0, "left": 0 }, "sidepanel": { "top": 0, "left": 0 } },
-    "foldState": { "page": { "expanded": [] }, "sidepanel": { "expanded": [] } },
-    "cardState": {}
-  }
+  "descriptionMd": "Copy-specific notes."
 }
 ```
 
