@@ -4594,10 +4594,12 @@ window.__updateTraceHighlights = function() {
     // 2. 映射 DOM 节点到颜色名集合，并计算每个垂直引导线的最远点高度与顶部偏移量
     const elementColorsMap = new Map();
     const childrenHeightsMap = new Map();
+    const startItemsSet = new Set();
 
     for (const trace of window.__activeTraces) {
         const startItems = document.querySelectorAll(`.tree-item[data-node-id="${trace.targetId}"]`);
         for (const startItem of startItems) {
+            startItemsSet.add(startItem);
             const path = getDOMPathElements(startItem, trace.level);
             
             // 逐级向上爬取并精确算得垂直引导线的可见截断高度和顶部偏移量
@@ -4664,6 +4666,10 @@ window.__updateTraceHighlights = function() {
     const noLineItemsSet = new Set();
     for (const el of elementColorsMap.keys()) {
         if (el.classList.contains('tree-item')) {
+            // 如果该节点是任何溯源路线的起点（即目标节点本身），则必须给水平引导线上颜色，不能去除横线
+            if (startItemsSet.has(el)) {
+                continue;
+            }
             const parentNode = el.closest('.tree-node');
             const parentChildren = parentNode ? parentNode.parentElement.closest('.tree-children') : null;
             if (!parentChildren || !elementColorsMap.has(parentChildren)) {
@@ -4790,7 +4796,7 @@ function renderTraceSubmenu(context) {
         `;
     }).join('');
 
-    const levels = [];
+    const levels = ['0'];
     if (availableLevels <= 15) {
         for (let i = 1; i <= availableLevels; i++) {
             levels.push(String(i));
@@ -4846,8 +4852,8 @@ function renderTraceSubmenu(context) {
     }).join('');
 
     const descText = lang === 'zh_CN' 
-        ? '点击颜色可对当前节点向上追溯 guide lines、文本及图标高亮标记。<br/>- 向上溯源：可选不同层级或直到根目录。<br/>- 临时标记：不保存到存储，刷新或重开侧栏即消失。<br/>- 颜色并排：多条路径并排显示，互不干扰颜色。<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">取消方式</span>：直接点击高亮引导线，或者开关插件侧边栏/标签页即可取消该溯源。'
-        : 'Click color to trace upward guide lines, text and icons.<br/>- Levels: Select parent level or up to root directory.<br/>- Temporary: Saved in-memory only, lost on reload/reopen.<br/>- Overlaps: Multiple paths run side-by-side, preserving distinct colors.<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">Cancel</span>: Click on any highlighted guide line, or toggle the extension sidebar/tab to cancel.';
+        ? '点击颜色可对当前节点向上追溯 guide lines、文本及图标高亮标记。<br/>- 向上溯源：可选不同层级或直到根目录。<br/>- 临时标记：<span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">不保存到存储，刷新或重开侧栏即消失。</span><br/>- 颜色并排：多条路径并排显示，互不干扰颜色。<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">取消方式</span>：直接点击高亮引导线，或者开关插件侧边栏/标签页即可取消该溯源。'
+        : 'Click color to trace upward guide lines, text and icons.<br/>- Levels: Select parent level or up to root directory.<br/>- Temporary: <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">Saved in-memory only, lost on reload/reopen.</span><br/>- Overlaps: Multiple paths run side-by-side, preserving distinct colors.<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">Cancel</span>: Click on any highlighted guide line, or toggle the extension sidebar/tab to cancel.';
 
     const helpLabel = lang === 'zh_CN' ? '说明' : 'Info';
 
