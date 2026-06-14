@@ -4774,7 +4774,7 @@ const i18n = {
 <hr>
 <h3>Push / Pull</h3>
 <ul>
-<li><strong>Safety Warning (Crucial)</strong>: Pushing automatically cleans up the remote sync directory. Do NOT store unrelated files (e.g. personal notes, media files) in the sync directory, otherwise they will be <strong>permanently deleted</strong>! Additionally, external file nodes (videos, audio, images, PDFs, etc.) are prohibited in the canvas.</li>
+<li><font color="#fb464c"><strong>Safety Warning (Crucial)</strong></font>: Pushing automatically cleans up the remote sync directory. Do NOT store unrelated files (e.g. personal notes, media files) in the sync directory, otherwise they will be <strong>permanently deleted</strong>! Additionally, external file nodes (videos, audio, images, PDFs, etc.) are prohibited in the canvas.</li>
 </ul>`
     },
     canvasHelpBatchSelectTitle: {

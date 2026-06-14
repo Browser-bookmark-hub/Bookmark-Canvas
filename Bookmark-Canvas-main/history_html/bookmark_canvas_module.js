@@ -3819,7 +3819,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <hr>
 <h3>Push / Pull</h3>
 <ul>
-<li><strong>Safety Warning (Crucial)</strong>: Pushing automatically cleans up the remote sync directory. Do NOT store unrelated files (e.g. personal notes, media files) in the sync directory, otherwise they will be <strong>permanently deleted</strong>! Additionally, external file nodes (videos, audio, images, PDFs, etc.) are prohibited in the canvas.</li>
+<li><font color="#fb464c"><strong>Safety Warning (Crucial)</strong></font>: Pushing automatically cleans up the remote sync directory. Do NOT store unrelated files (e.g. personal notes, media files) in the sync directory, otherwise they will be <strong>permanently deleted</strong>! Additionally, external file nodes (videos, audio, images, PDFs, etc.) are prohibited in the canvas.</li>
 </ul>
 <hr>
 <p><em>Tip: This card can be freely edited or deleted</em></p>
@@ -4093,7 +4093,7 @@ _提示：此卡片可自由编辑或删除_
 ---
 
 ### Push / Pull
-- **Safety Warning (Crucial)**: Pushing automatically cleans up the remote sync directory. Do NOT store unrelated files (e.g. personal notes, media files) in the sync directory, otherwise they will be <strong>permanently deleted</strong>! Additionally, external file nodes (videos, audio, images, PDFs, etc.) are prohibited in the canvas.
+- <font color="#fb464c">**Safety Warning (Crucial)**</font>: Pushing automatically cleans up the remote sync directory. Do NOT store unrelated files (e.g. personal notes, media files) in the sync directory, otherwise they will be **permanently deleted**! Additionally, external file nodes (videos, audio, images, PDFs, etc.) are prohibited in the canvas.
 
 ---
 _Tip: This card can be freely edited or deleted_
