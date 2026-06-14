@@ -3454,7 +3454,7 @@ async function showContextMenu(e, node) {
                 return;
             }
             // 如果是打开子菜单的触发器
-            if (action === 'open-submenu-trigger' || action === 'trace-submenu-trigger' || action === 'tag-submenu-trigger') {
+            if (action === 'open-submenu-trigger' || action === 'trace-submenu-trigger' || action === 'tag-submenu-trigger' || action === 'info-submenu-trigger') {
                 toggleSubmenu(item, context);
                 return;
             }
@@ -3475,7 +3475,7 @@ async function showContextMenu(e, node) {
 function renderSubmenu(context) {
     if (!contextSubmenu) return;
 
-    contextSubmenu.classList.remove('is-tag-submenu', 'is-trace-submenu');
+    contextSubmenu.classList.remove('is-tag-submenu', 'is-trace-submenu', 'is-info-submenu');
 
     if (contextSubmenu.dataset.triggerAction === 'trace-submenu-trigger') {
         renderTraceSubmenu(context);
@@ -3484,6 +3484,11 @@ function renderSubmenu(context) {
 
     if (contextSubmenu.dataset.triggerAction === 'tag-submenu-trigger') {
         renderTagSubmenu(context);
+        return;
+    }
+
+    if (contextSubmenu.dataset.triggerAction === 'info-submenu-trigger') {
+        renderInfoSubmenu(context);
         return;
     }
 
@@ -3661,6 +3666,8 @@ function toggleSubmenu(triggerItem, context) {
         return;
     }
 
+    lastSubmenuTriggerItem = triggerItem;
+    lastSubmenuContext = context;
     contextSubmenu.dataset.triggerAction = newTriggerAction;
 
     // 先渲染子菜单内容
@@ -3676,8 +3683,17 @@ function toggleSubmenu(triggerItem, context) {
     contextSubmenu.style.position = 'fixed';
     contextSubmenu.style.display = 'block';
 
-    // 计算二级菜单缩放比例。快捷按钮触发的临时溯源面板跟随 Tag 快捷面板：
-    // 使用显示缩放 zoom/baseZoom，而不是 raw canvas transform scale。
+    updateSubmenuPosition();
+}
+
+// 重新计算并更新二级子菜单位置
+function updateSubmenuPosition() {
+    if (!contextSubmenu || contextSubmenu.style.display !== 'block' || !lastSubmenuTriggerItem) return;
+
+    const triggerItem = lastSubmenuTriggerItem;
+    const newTriggerAction = contextSubmenu.dataset.triggerAction;
+
+    // 计算二级菜单缩放比例
     const scale = getContextSubmenuScale(triggerItem, newTriggerAction);
 
     const triggerRect = triggerItem.getBoundingClientRect();
@@ -3716,7 +3732,7 @@ function toggleSubmenu(triggerItem, context) {
         // 边界防护
         left = Math.max(8, left);
     } else if (!contextMenu || contextMenu.style.display === 'none') {
-        // 当主菜单未显示时（通过快捷按钮直接触发），直接在快捷按钮左侧或右侧定位二级子菜单，不涉及主菜单的偏移
+        // 当主菜单未显示时（通过快捷按钮直接触发），直接在快捷按钮左侧或右侧定位二级子菜单
         transformOriginY = 'center';
         const rightFits = (triggerRect.right + 4 + visualWidth <= viewportWidth - 8);
         const leftFits = (triggerRect.left - 4 - visualWidth >= 8);
@@ -3743,10 +3759,8 @@ function toggleSubmenu(triggerItem, context) {
         }
         top = visualCenterY - submenuHeight / 2;
     } else {
-        // 纵向布局下：二级子菜单显示在“打开/默认打开模式”按钮的右侧或左侧
-        transformOriginY = 'center';
-
-        // 检查左右是否有足够的位置显示二级子菜单
+        // 纵向布局下：始终显示在右侧或左侧 (与默认打开方式、溯源面板一致)
+        const primaryRect = contextMenu.getBoundingClientRect();
         const rightFits = (triggerRect.right + 4 + visualWidth <= viewportWidth - 8);
         const leftFits = (triggerRect.left - 4 - visualWidth >= 8);
 
@@ -3754,27 +3768,20 @@ function toggleSubmenu(triggerItem, context) {
         let showOnRight = true;
 
         if (rightFits) {
-            // 右侧空间足够，正常在右侧显示，不移动一级菜单
             showOnRight = true;
             shift = 0;
         } else if (leftFits) {
-            // 左侧空间足够，正常在左侧显示，不移动一级菜单
             showOnRight = false;
             shift = 0;
         } else {
-            // 左右两侧空间都不够，需要移动一级菜单 (contextMenu)
-            const neededShiftLeft = (viewportWidth - 8) - (triggerRect.right + 4 + visualWidth); // 负值 (向左移)
-            const neededShiftRight = 8 - (triggerRect.left - 4 - visualWidth); // 正值 (向右移)
+            // 左右都不够，尝试平移一级菜单
+            const neededShiftLeft = (viewportWidth - 8) - (triggerRect.right + 4 + visualWidth); // 负值
+            const neededShiftRight = 8 - (triggerRect.left - 4 - visualWidth); // 正值
 
-            const contextMenuRect = contextMenu.getBoundingClientRect();
-            
-            // 判断向左移动后，一级菜单是否会超出屏幕左边界
-            const canShiftLeft = (contextMenuRect.left + neededShiftLeft >= 8);
-            // 判断向右移动后，一级菜单是否会超出屏幕右边界
-            const canShiftRight = (contextMenuRect.right + neededShiftRight <= viewportWidth - 8);
+            const canShiftLeft = (primaryRect.left + neededShiftLeft >= 8);
+            const canShiftRight = (primaryRect.right + neededShiftRight <= viewportWidth - 8);
 
             if (canShiftLeft && canShiftRight) {
-                // 如果两边都可以，选择移动幅度较小的一边
                 if (Math.abs(neededShiftLeft) <= Math.abs(neededShiftRight)) {
                     shift = neededShiftLeft;
                     showOnRight = true;
@@ -3789,14 +3796,12 @@ function toggleSubmenu(triggerItem, context) {
                 shift = neededShiftRight;
                 showOnRight = false;
             } else {
-                // 如果两边移动都会导致一级菜单部分移出屏幕，则做折中处理，优先移动到空间较多的一侧，并做边界限制
-                if (contextMenuRect.left - 8 > (viewportWidth - 8) - contextMenuRect.right) {
-                    // 左边空间多，向左移，最大移到左边界 8px
-                    shift = Math.max(neededShiftLeft, 8 - contextMenuRect.left);
+                // 如果平移都会导致一级菜单部分移出屏幕，优先向空间多的一侧移动，并限制在边界内
+                if (primaryRect.left - 8 > (viewportWidth - 8) - primaryRect.right) {
+                    shift = Math.max(neededShiftLeft, 8 - primaryRect.left);
                     showOnRight = true;
                 } else {
-                    // 右边空间多，向右移，最大移到右边界 viewportWidth - 8
-                    shift = Math.min(neededShiftRight, (viewportWidth - 8) - contextMenuRect.right);
+                    shift = Math.min(neededShiftRight, (viewportWidth - 8) - primaryRect.right);
                     showOnRight = false;
                 }
             }
@@ -3828,9 +3833,11 @@ function toggleSubmenu(triggerItem, context) {
             transformOriginX = 'right';
         }
 
-        // 垂直定位：中心位置与 trigger 按钮 Y 轴中心对齐
+        // 垂直定位：与触发项 (triggerItem) 在 Y 轴中心对齐
         let visualCenterY = triggerRect.top + triggerRect.height / 2;
         const visualHalfHeight = visualHeight / 2;
+        
+        // 限制在视口上下安全区域内
         if (visualCenterY - visualHalfHeight < 8) {
             visualCenterY = 8 + visualHalfHeight;
         }
@@ -3838,6 +3845,7 @@ function toggleSubmenu(triggerItem, context) {
             visualCenterY = viewportHeight - 8 - visualHalfHeight;
         }
         top = visualCenterY - submenuHeight / 2;
+        transformOriginY = 'center';
     }
 
     // 应用 fixed 绝对定位和缩放 transform
@@ -3852,6 +3860,11 @@ function toggleSubmenu(triggerItem, context) {
         transform: scale(${scale}) !important;
         transform-origin: ${transformOriginX} ${transformOriginY} !important;
     `;
+}
+
+// 供外部/异步加载事件/折叠面板调用的公共位置修正接口
+function repositionSubmenu() {
+    updateSubmenuPosition();
 }
 
 // 构建子菜单项
@@ -4002,6 +4015,7 @@ function buildMenuItems(context) {
     }
 
     // 普通单项菜单
+    // 普通单项菜单
     if (isFolder) {
         // 文件夹菜单 - 按分组组织
         items.push(
@@ -4028,6 +4042,13 @@ function buildMenuItems(context) {
                 group: 'actions',
                 className: 'add-entry-option',
                 hidden: false
+            },
+            {
+                action: 'info-submenu-trigger',
+                label: lang === 'zh_CN' ? '信息' : 'Info',
+                icon: 'info-circle',
+                group: 'actions',
+                hasSubmenu: true
             },
             { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'actions' },
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'actions' },
@@ -4077,10 +4098,15 @@ function buildMenuItems(context) {
                 className: 'add-entry-option',
                 hidden: false
             },
+            {
+                action: 'info-submenu-trigger',
+                label: lang === 'zh_CN' ? '信息' : 'Info',
+                icon: 'info-circle',
+                group: 'actions',
+                hasSubmenu: true
+            },
             { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'actions' },
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'actions' },
-            // 将 Copy Link 放到 Copy 后面
-            { action: 'copy-url', label: lang === 'zh_CN' ? '复制链接' : 'Copy Link', icon: 'link', group: 'actions' },
             { action: 'paste', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴' : '粘贴到下方') : (contextMenuHorizontal ? 'Paste' : 'Paste Below'), icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'actions' },
             { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'actions' },
             { separator: true },
@@ -4939,6 +4965,298 @@ function renderTraceSubmenu(context) {
         closeBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             hideContextMenu();
+        });
+    }
+}
+
+// 渲染二级信息菜单
+function renderInfoSubmenu(context) {
+    if (!contextSubmenu) return;
+
+    contextSubmenu.classList.remove('is-tag-submenu', 'is-trace-submenu');
+    contextSubmenu.classList.add('is-info-submenu');
+
+    const lang = currentLang || 'zh_CN';
+    const isTemporary = context.treeType === 'temporary';
+    const nodeId = context.nodeId;
+
+    // 尝试直接提取被右键节点的图标 HTML (优先使用其已渲染的 favicon 或图标类)
+    let nodeIconHtml = '';
+    const nodeEl = context.node;
+    const treeIconEl = nodeEl ? nodeEl.querySelector('.tree-icon') : null;
+    if (treeIconEl) {
+        if (treeIconEl.tagName.toLowerCase() === 'img') {
+            nodeIconHtml = `<img src="${escapeHtml(treeIconEl.src)}" class="info-card-favicon" style="width: 14px; height: 14px; border-radius: 3px; object-fit: contain; flex-shrink: 0; margin-right: 4px;" onerror="this.outerHTML='<i class=\\'fas fa-bookmark\\' style=\\'color: #f59e0b; font-size: 13.5px;\\'></i>'">`;
+        } else {
+            const iconClass = treeIconEl.className || '';
+            const color = context.isFolder ? '#2563eb' : '#f59e0b';
+            nodeIconHtml = `<i class="${escapeHtml(iconClass)}" style="color: ${color}; font-size: 13.5px; flex-shrink: 0;"></i>`;
+        }
+    }
+
+    // 格式化时间辅助函数
+    function formatInfoTime(timestamp) {
+        if (!timestamp) return '';
+        try {
+            const date = new Date(timestamp);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
+        } catch (_) {
+            return '';
+        }
+    }
+
+    // 显示加载状态
+    contextSubmenu.innerHTML = `
+        <div class="info-loading">
+            <i class="fas fa-spinner fa-spin"></i>
+            <span>${lang === 'zh_CN' ? '正在查询...' : 'Querying...'}</span>
+        </div>
+    `;
+
+    const renderCard = (data) => {
+        let titleIconHtml = nodeIconHtml;
+        if (!titleIconHtml) {
+            const titleIcon = data.type === 'folder' ? 'fa-folder' : 'fa-bookmark';
+            const titleIconColor = data.type === 'folder' ? '#2563eb' : '#f59e0b';
+            titleIconHtml = `<i class="fas ${titleIcon}" style="color: ${titleIconColor};"></i>`;
+        }
+        
+        let pathHtml = '';
+        if (data.path) {
+            const needsTrunc = data.needsTruncation || data.path.startsWith('.../');
+            const pathStr = data.pathStr || (needsTrunc ? data.path.substring(4) : data.path);
+            if (needsTrunc) {
+                pathHtml = `
+                    <div class="info-card-row">
+                        <span class="info-card-label">${lang === 'zh_CN' ? '路径' : 'PATH'}</span>
+                        <div class="info-path-container">
+                            <span class="info-card-value info-path-collapsed">
+                                <button class="info-path-ellipsis-toggle" type="button">...</button>/${escapeHtml(pathStr)}
+                            </span>
+                            <span class="info-card-value info-path-expanded" style="display: none;">
+                                ${escapeHtml(data.fullPath || data.path)}
+                                <button class="info-path-collapse-toggle" type="button">${lang === 'zh_CN' ? '收起' : 'Collapse'}</button>
+                            </span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                pathHtml = `
+                    <div class="info-card-row">
+                        <span class="info-card-label">${lang === 'zh_CN' ? '路径' : 'PATH'}</span>
+                        <span class="info-card-value info-path-expanded">${escapeHtml(data.fullPath || data.path)}</span>
+                    </div>
+                `;
+            }
+        }
+
+        let urlHtml = '';
+        if (data.url) {
+            urlHtml = `
+                <div class="info-card-row">
+                    <span class="info-card-label">URL</span>
+                    <div class="info-url-row">
+                        <span class="info-url-text" title="${escapeHtml(data.url)}">${escapeHtml(data.url)}</span>
+                        <button class="info-copy-btn" id="infoCopyUrlBtn" data-url="${escapeHtml(data.url)}" title="${lang === 'zh_CN' ? '复制链接' : 'Copy Link'}">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        let timesHtml = '';
+        if (!isTemporary) {
+            const addedTime = formatInfoTime(data.dateAdded);
+            const modifiedTime = data.type === 'folder' ? formatInfoTime(data.dateGroupModified) : '';
+            
+            if (data.type === 'folder' && modifiedTime) {
+                timesHtml = `
+                    <div class="info-card-times-row">
+                        <div class="info-card-row">
+                            <span class="info-card-label">${lang === 'zh_CN' ? '创建时间' : 'CREATED AT'}</span>
+                            <span class="info-card-value">${escapeHtml(addedTime || '-')}</span>
+                        </div>
+                        <div class="info-card-row">
+                            <span class="info-card-label">${lang === 'zh_CN' ? '修改时间' : 'MODIFIED AT'}</span>
+                            <span class="info-card-value">${escapeHtml(modifiedTime || '-')}</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                timesHtml = `
+                    <div class="info-card-row">
+                        <span class="info-card-label">${lang === 'zh_CN' ? '创建时间' : 'CREATED AT'}</span>
+                        <span class="info-card-value">${escapeHtml(addedTime || '-')}</span>
+                    </div>
+                `;
+            }
+        }
+
+        return `
+            <div class="info-card-container">
+                <div class="info-card-title-row">
+                    ${titleIconHtml}
+                    <span class="info-card-title-text" title="${escapeHtml(data.title)}">${escapeHtml(data.title)}</span>
+                </div>
+                ${pathHtml}
+                ${urlHtml}
+                ${timesHtml}
+            </div>
+        `;
+    };
+
+    const bindCopyEvent = () => {
+        const copyBtn = contextSubmenu.querySelector('#infoCopyUrlBtn');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const url = copyBtn.dataset.url;
+                if (!url) return;
+                try {
+                    await navigator.clipboard.writeText(url);
+                    copyBtn.classList.add('copied');
+                    const icon = copyBtn.querySelector('i');
+                    if (icon) {
+                        icon.className = 'fas fa-check';
+                    }
+                    if (typeof showToast === 'function') {
+                        showToast(lang === 'zh_CN' ? '已复制链接' : 'Link copied');
+                    }
+                    setTimeout(() => {
+                        copyBtn.classList.remove('copied');
+                        if (icon) {
+                            icon.className = 'fas fa-copy';
+                        }
+                    }, 1500);
+                } catch (err) {
+                    console.error('Copy failed:', err);
+                }
+            });
+        }
+    };
+
+    const bindPathToggleEvent = () => {
+        const container = contextSubmenu.querySelector('.info-path-container');
+        if (!container) return;
+        const ellipsisBtn = container.querySelector('.info-path-ellipsis-toggle');
+        const collapseBtn = container.querySelector('.info-path-collapse-toggle');
+        const collapsedSpan = container.querySelector('.info-path-collapsed');
+        const expandedSpan = container.querySelector('.info-path-expanded');
+
+        if (ellipsisBtn && collapsedSpan && expandedSpan) {
+            ellipsisBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                collapsedSpan.style.display = 'none';
+                expandedSpan.style.display = 'block';
+            });
+        }
+        if (collapseBtn && collapsedSpan && expandedSpan) {
+            collapseBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                expandedSpan.style.display = 'none';
+                collapsedSpan.style.display = '';
+            });
+        }
+    };
+
+    if (isTemporary) {
+        const manager = getTempManager();
+        const entry = manager ? manager.findItem(context.sectionId, nodeId) : null;
+        if (!entry || !entry.item) {
+            contextSubmenu.innerHTML = `<div style="padding: 12px; color: var(--accent-red);">${lang === 'zh_CN' ? '未找到节点' : 'Node not found'}</div>`;
+            return;
+        }
+
+        const pathParts = [];
+        let current = entry;
+        while (current && current.parent) {
+            pathParts.unshift(current.parent.title || 'Folder');
+            current = manager.findItem(context.sectionId, current.parent.id);
+        }
+        const section = getTempSection(context.sectionId);
+        if (section) {
+            pathParts.unshift(section.title || (lang === 'zh_CN' ? '临时栏目' : 'Temp Column'));
+        }
+
+        const fullPath = pathParts.length > 0 ? pathParts.join(' > ') : (lang === 'zh_CN' ? '根目录' : 'Root');
+        const needsTruncation = pathParts.length > 3;
+        const visibleParts = needsTruncation ? pathParts.slice(-3) : pathParts;
+        const pathStr = visibleParts.join(' > ');
+        const path = needsTruncation ? `.../${pathStr}` : pathStr;
+
+        contextSubmenu.innerHTML = renderCard({
+            title: entry.item.title,
+            url: entry.item.url,
+            type: entry.item.type,
+            path,
+            fullPath,
+            needsTruncation,
+            pathStr,
+            id: entry.item.id
+        });
+        bindCopyEvent();
+        bindPathToggleEvent();
+    } else {
+        if (!chrome || !chrome.bookmarks) {
+            contextSubmenu.innerHTML = `<div style="padding: 12px; color: var(--accent-red);">${lang === 'zh_CN' ? '当前环境不支持书签 API' : 'Bookmarks API not supported'}</div>`;
+            return;
+        }
+
+        chrome.bookmarks.get(nodeId, async (nodes) => {
+            if (chrome.runtime.lastError || !nodes || !nodes[0]) {
+                contextSubmenu.innerHTML = `<div style="padding: 12px; color: var(--accent-red);">${lang === 'zh_CN' ? '未找到书签' : 'Bookmark not found'}</div>`;
+                return;
+            }
+            const node = nodes[0];
+
+            const pathParts = [];
+            let currentParentId = node.parentId;
+            while (currentParentId && currentParentId !== '0') {
+                try {
+                    const parentNodes = await new Promise((resolve) => {
+                        chrome.bookmarks.get(currentParentId, (p) => {
+                            if (chrome.runtime.lastError) resolve(null);
+                            else resolve(p);
+                        });
+                    });
+                    if (parentNodes && parentNodes[0]) {
+                        pathParts.unshift(parentNodes[0].title || (parentNodes[0].id === '1' ? '书签栏' : '文件夹'));
+                        currentParentId = parentNodes[0].parentId;
+                    } else {
+                        break;
+                    }
+                } catch (_) {
+                    break;
+                }
+            }
+
+            const fullPath = pathParts.length > 0 ? pathParts.join(' > ') : (lang === 'zh_CN' ? '书签根目录' : 'Bookmark Root');
+            const needsTruncation = pathParts.length > 3;
+            const visibleParts = needsTruncation ? pathParts.slice(-3) : pathParts;
+            const pathStr = visibleParts.join(' > ');
+            const path = needsTruncation ? `.../${pathStr}` : pathStr;
+
+            contextSubmenu.innerHTML = renderCard({
+                title: node.title,
+                url: node.url,
+                type: node.url ? 'bookmark' : 'folder',
+                path,
+                fullPath,
+                needsTruncation,
+                pathStr,
+                dateAdded: node.dateAdded,
+                dateGroupModified: node.dateGroupModified,
+                id: node.id
+            });
+            bindCopyEvent();
+            bindPathToggleEvent();
         });
     }
 }
