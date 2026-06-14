@@ -476,7 +476,7 @@
               <div class="badge ok">1</div>
               <div>
                 <p class="step-title">创建一个私有仓库（只做一次）</p>
-                <p class="step-desc">Fine-grained Token 必须绑定“已存在的仓库”。建议 <span style="color: #e9973f; font-weight: bold;">Private</span>。建议为此插件设置一个<span style="color: #2da44e; font-weight: bold;">干净的仓库</span>。</p>
+                <p class="step-desc">Fine-grained Token 必须绑定“已存在的仓库”。建议 <span style="color: #e9973f; font-weight: bold;">Private</span>。建议为此插件设置一个<span style="color: #2da44e; font-weight: bold;">干净的仓库</span>。<br><strong>建议：</strong>新建仓库时建议打开「<strong>Add README</strong>」右侧的开关进行初始化，否则空仓库的首次推送会拆分为两次 commit 提交。</p>
               </div>
             </div>
             <div class="actions">
@@ -498,7 +498,7 @@
             </div>
             <div class="actions">
               <a class="btn-link" href="https://github.com/settings/tokens?type=beta" target="_blank"
-                rel="noreferrer">打开 Token 页面</a>
+                rel="noreferrer">打开 Fine-grained tokens 页面</a>
             </div>
           </div>
 
@@ -546,7 +546,7 @@
           <div>
             <p class="desktop-tip-title" style="margin-top: 0;">建议安装 Obsidian Git 插件 (Obsidian端)</p>
             <p class="desktop-tip-desc">
-              在 Obsidian 侧自动或手动执行 commit、pull 和 push，将您的知识库同步到相同的 GitHub 仓库中，实现书签与 Obsidian 笔记的无缝互通。
+              在 Obsidian 侧自动或手动执行 commit、pull 和 push，将您的知识库同步到相同的 GitHub 仓库中，实现书签与 Obsidian 笔记的无缝互通。<span style="color: #e9973f; font-weight: bold;">（建议在 Obsidian 设置中开启「Detect all file extensions」开关以在文件列表里显示 .json 栏目文件）</span>
             </p>
             <div class="desktop-tip-actions">
               <a class="btn-link" href="obsidian://show-plugin?id=obsidian-git" rel="noreferrer">在 Obsidian 中安装</a>
@@ -563,6 +563,7 @@
         <li>打开：<a href="https://github.com/new" target="_blank">https://github.com/new</a></li>
         <li>填写：<strong>Repository name</strong>（例如 <code>bookmark-sync</code>），<strong>Visibility</strong> 选 Private（推荐）
         </li>
+        <li><strong>建议：</strong>打开 <strong>Add README</strong> 右侧的开关进行初始化（这会创建默认分支，避免首次推送时因空仓库被拆分为两次 commit）</li>
         <li>点击 <strong>Create repository</strong></li>
       </ol>
 
@@ -671,8 +672,7 @@
               <div class="badge ok">1</div>
               <div>
                 <p class="step-title">Create a private repo (one-time)</p>
-                <p class="step-desc">Fine‑grained PAT must be scoped to an existing repository. <span style="color: #e9973f; font-weight: bold;">Private</span> is recommended. We recommend setting up a <span style="color: #2da44e; font-weight: bold;">clean repository</span> for this extension.
-                </p>
+                <p class="step-desc">Fine‑grained PAT must be scoped to an existing repository. <span style="color: #e9973f; font-weight: bold;">Private</span> is recommended. We recommend setting up a <span style="color: #2da44e; font-weight: bold;">clean repository</span> for this extension.<br><strong>Recommendation:</strong> We recommend turning on the switch to the right of "<strong>Add README</strong>" when creating a new repository to initialize it, otherwise the first push to an empty repository will be split into two separate commits.</p>
               </div>
             </div>
             <div class="actions">
@@ -694,7 +694,7 @@
             </div>
             <div class="actions">
               <a class="btn-link" href="https://github.com/settings/tokens?type=beta" target="_blank"
-                rel="noreferrer">Open token page</a>
+                rel="noreferrer">Open Fine-grained tokens page</a>
             </div>
           </div>
 
@@ -742,7 +742,7 @@
           <div>
             <p class="desktop-tip-title" style="margin-top: 0;">Recommended: Obsidian Git Plugin (Obsidian Side)</p>
             <p class="desktop-tip-desc">
-              Runs commit, pull, and push automatically or manually inside your Obsidian vault to sync with the same GitHub repository, keeping your bookmarks and Obsidian notes perfectly in sync.
+              Runs commit, pull, and push automatically or manually inside your Obsidian vault to sync with the same GitHub repository, keeping your bookmarks and Obsidian notes perfectly in sync. <span style="color: #e9973f; font-weight: bold;">(Recommended: enable "Detect all file extensions" in Obsidian settings to show .json section files in the file explorer)</span>
             </p>
             <div class="desktop-tip-actions">
               <a class="btn-link" href="obsidian://show-plugin?id=obsidian-git" rel="noreferrer">Install in Obsidian</a>
@@ -759,6 +759,7 @@
         <li>Open: <a href="https://github.com/new" target="_blank">https://github.com/new</a></li>
         <li>Set <strong>Repository name</strong> (e.g. <code>bookmark-sync</code>), choose <strong>Private</strong>
           (recommended)</li>
+        <li><strong>Recommendation:</strong> Turn on the switch to the right of "<strong>Add README</strong>" to initialize (this creates the default branch, preventing the first push from being split into two commits)</li>
         <li>Click <strong>Create repository</strong></li>
       </ol>
 
