@@ -853,19 +853,8 @@
                                 </div>
                             </div>
                             <div class="github-config-divider-micro"></div>
-                            <label class="github-config-field github-config-remote-field">
-                                <span>${escapeHtml(t('2.1.2、「.canvas」内部路径', '2.1.2 ".canvas" Internal Path'))}</span>
-                                <div class="github-path-input-row">
-                                    <div class="github-path-input-wrapper">
-                                        ${config.basePath ? `<span class="github-path-prefix" title="${escapeHtml(config.basePath)}/">${escapeHtml(config.basePath)}/</span>` : ''}
-                                        <input id="githubConfigRemoteRoot" type="text" autocomplete="off" value="${escapeHtml(config.remoteRoot)}" placeholder="${escapeHtml(getDefaultRemoteRoot())}">
-                                    </div>
-                                    <button id="githubPathHelpBtn" type="button" class="import-option-btn github-path-detail-btn" style="border: 1px solid var(--accent-primary, #0969da) !important; color: var(--accent-primary, #0969da) !important;">${escapeHtml(t('详情', 'Details'))}</button>
-                                </div>
-                            </label>
-                            <div class="github-config-divider-micro"></div>
                             <div class="github-config-guide-container" style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
-                                <span style="font-size: 12px; font-weight: 700; color: var(--text-primary);">${escapeHtml(t('2.1.3、AI 指南文件名', '2.1.3 AI Guide Filename'))}</span>
+                                <span style="font-size: 12px; font-weight: 700; color: var(--text-primary);">${escapeHtml(t('2.1.2、AI 指南文件名', '2.1.2 AI Guide Filename'))}</span>
                                 <div class="github-config-guide-rows" style="display: flex; flex-direction: column; gap: 8px;">
                                     <div class="github-config-guide-row-1" style="display: flex; align-items: center; gap: 16px;">
                                         <label class="github-config-guide-option" style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary);">
@@ -891,6 +880,17 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="github-config-divider-micro"></div>
+                            <label class="github-config-field github-config-remote-field">
+                                <span>${escapeHtml(t('2.1.3、「.canvas」内部路径', '2.1.3 ".canvas" Internal Path'))}</span>
+                                <div class="github-path-input-row">
+                                    <div class="github-path-input-wrapper">
+                                        ${config.basePath ? `<span class="github-path-prefix" title="${escapeHtml(config.basePath)}/">${escapeHtml(config.basePath)}/</span>` : ''}
+                                        <input id="githubConfigRemoteRoot" type="text" autocomplete="off" value="${escapeHtml(config.remoteRoot)}" placeholder="${escapeHtml(getDefaultRemoteRoot())}">
+                                    </div>
+                                    <button id="githubPathHelpBtn" type="button" class="import-option-btn github-path-detail-btn" style="border: 1px solid var(--accent-primary, #0969da) !important; color: var(--accent-primary, #0969da) !important;">${escapeHtml(t('详情', 'Details'))}</button>
+                                </div>
+                            </label>
                         </div>
                     </div>
 
