@@ -1877,11 +1877,63 @@ function buildTimeSearchableString(timestamp) {
 
 // ==================== 初始化 ====================
 
+function initSearchClearButton() {
+    const searchInput = document.getElementById('searchInput');
+    const searchClearBtn = document.getElementById('searchClearBtn');
+    if (!searchInput || !searchClearBtn) return;
+
+    if (searchClearBtn.hasAttribute('data-clear-bound')) return;
+    searchClearBtn.setAttribute('data-clear-bound', 'true');
+
+    const updateClearButton = () => {
+        const hasText = !!(searchInput.value || '').trim();
+        searchClearBtn.style.display = hasText ? 'inline-flex' : 'none';
+    };
+
+    try {
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+        if (descriptor && descriptor.set) {
+            Object.defineProperty(searchInput, 'value', {
+                get: function() {
+                    return descriptor.get.call(this);
+                },
+                set: function(val) {
+                    descriptor.set.call(this, val);
+                    updateClearButton();
+                },
+                configurable: true
+            });
+        }
+    } catch (e) {
+        console.warn('[Search] Failed to hook programmatic value setter for searchInput:', e);
+    }
+
+    searchInput.addEventListener('input', updateClearButton);
+    searchInput.addEventListener('change', updateClearButton);
+    searchInput.addEventListener('focus', updateClearButton);
+
+    searchClearBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        searchInput.value = '';
+        updateClearButton();
+        searchInput.focus();
+
+        if (typeof handleSearch === 'function') {
+            handleSearch({ target: searchInput });
+        }
+    });
+
+    updateClearButton();
+}
+
 /**
  * 初始化搜索模块事件监听
  * 应在 DOM 加载完成后调用
  */
 function initSearchEvents() {
+    initSearchClearButton();
     if (typeof SearchIndexManager !== 'undefined' && typeof SearchIndexManager.init === 'function') {
         SearchIndexManager.init().catch(err => {
             console.error('[Search] Failed to initialize SearchIndexManager in initSearchEvents:', err);

@@ -1228,7 +1228,7 @@ html.side-panel-mode .search-mode-trigger.mode-color-green {
 
 .search-container input {
     width: 100%;
-    padding: 6px 12px 6px 4px;
+    padding: 6px 30px 6px 4px;
     border: none;
     background: transparent;
     color: var(--text-primary);
@@ -1244,6 +1244,39 @@ html.side-panel-mode .search-mode-trigger.mode-color-green {
     background: transparent;
     border: none;
     width: 100%;
+}
+
+/* Search Clear Button */
+.search-clear-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-tertiary);
+    font-size: 14px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    padding: 0;
+    transition: color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+    z-index: 10;
+}
+
+.search-clear-btn:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-tertiary);
+    transform: translateY(-50%) scale(1.1);
+}
+
+.search-clear-btn:active {
+    transform: translateY(-50%) scale(0.95);
 }
 
 /* Search Mode Trigger Button (Left - Expanded) */
