@@ -20817,6 +20817,24 @@ async function createTempNode(data, x, y) {
         });
     }
 
+    if (isTempSplit && parentSection) {
+        try {
+            const fallbackId = data.id || null;
+            let ids = [];
+            if (typeof collectTemporarySelectionIds === 'function') {
+                ids = collectTemporarySelectionIds(parentSection.id, fallbackId);
+            }
+            if (!Array.isArray(ids) || !ids.length) {
+                if (fallbackId) ids = [fallbackId];
+            }
+            if (ids.length) {
+                removeTempItemsById(parentSection.id, ids);
+            }
+        } catch (removeErr) {
+            console.error('[Canvas] 分裂临时节点后删除原节点失败:', removeErr);
+        }
+    }
+
     // 延迟管理休眠状态
     scheduleDormancyUpdate();
 
