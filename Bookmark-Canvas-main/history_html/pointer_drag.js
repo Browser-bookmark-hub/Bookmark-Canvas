@@ -156,6 +156,26 @@ function scheduleFolderExpand(targetNode) {
     __hoverExpandState.timers.set(folderId, timer);
 }
 
+function findClosestTreeItem(treeRoot, clientY) {
+    if (!treeRoot) return null;
+    const treeItems = Array.from(treeRoot.querySelectorAll('.tree-item[data-node-id]'));
+    let closestItem = null;
+    let minDistance = Infinity;
+    for (const item of treeItems) {
+        const rect = item.getBoundingClientRect();
+        const centerY = rect.top + rect.height / 2;
+        const dist = Math.abs(clientY - centerY);
+        if (dist < minDistance) {
+            minDistance = dist;
+            closestItem = item;
+        }
+    }
+    if (minDistance < 40) {
+        return closestItem;
+    }
+    return null;
+}
+
 function attachPointerDragEvents(treeContainer) {
     if (!treeContainer) {
         console.warn('[指针拖拽] 未提供树容器');
@@ -274,7 +294,13 @@ function handlePointerMove(e) {
         target = document.elementFromPoint(e.clientX, e.clientY);
     }
 
-    const targetTreeItem = target?.closest('.tree-item[data-node-id]');
+    let targetTreeItem = target?.closest('.tree-item[data-node-id]');
+    if (!targetTreeItem && target) {
+        const treeRoot = target.closest('.bookmark-tree, .temp-bookmark-tree');
+        if (treeRoot) {
+            targetTreeItem = findClosestTreeItem(treeRoot, e.clientY);
+        }
+    }
 
     if (targetTreeItem && targetTreeItem !== pointerDragState.draggedElement) {
         // 更新当前目标
@@ -343,7 +369,7 @@ async function handlePointerUp(e) {
 
         // 重新检测落点位置（确保最准确）
         const target = document.elementFromPoint(e.clientX, e.clientY);
-        const targetTreeItem = target?.closest('.tree-item[data-node-id]');
+        let targetTreeItem = target?.closest('.tree-item[data-node-id]');
         const permanentSection = target?.closest('.permanent-bookmark-section');
         const tempSection = target?.closest('.temp-canvas-node');
 
@@ -353,7 +379,17 @@ async function handlePointerUp(e) {
         }
 
         // 检查是否在树容器内
-        const treeContainer = target?.closest('.bookmark-tree, .temp-bookmark-tree');
+        let treeContainer = target?.closest('.bookmark-tree, .temp-bookmark-tree');
+
+        if (!targetTreeItem && target) {
+            const treeRoot = treeContainer || target.closest('.bookmark-tree, .temp-bookmark-tree');
+            if (treeRoot) {
+                targetTreeItem = findClosestTreeItem(treeRoot, e.clientY);
+                if (targetTreeItem) {
+                    treeContainer = treeRoot;
+                }
+            }
+        }
 
         if (targetTreeItem && targetTreeItem !== pointerDragState.draggedElement && treeContainer) {
             // 在树内放置

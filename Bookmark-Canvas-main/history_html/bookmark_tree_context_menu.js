@@ -4067,7 +4067,8 @@ function buildMenuItems(context) {
             },
             { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'actions' },
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'actions' },
-            { action: 'paste', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴' : '粘贴到文件夹内') : (contextMenuHorizontal ? 'Paste' : 'Paste into Folder'), icon: 'paste', disabled: !hasClipboard(), group: 'actions' },
+            { action: 'paste', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴' : '粘贴到文件夹内') : (contextMenuHorizontal ? 'Paste' : 'Paste into Folder'), icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'actions' },
+            { action: 'paste-below', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴到下方' : '粘贴到该文件夹下方') : (contextMenuHorizontal ? 'Paste Below' : 'Paste Below Folder'), icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'actions' },
             { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'actions' },
             { separator: true },
 
@@ -4307,7 +4308,11 @@ function showPasteButton() {
     if (pasteBtn) {
         pasteBtn.style.display = 'inline-flex';
         pasteBtn.classList.remove('paste-hidden');
-        ;
+    }
+    const pasteBelowBtn = contextMenu.querySelector('[data-action="paste-below"]');
+    if (pasteBelowBtn) {
+        pasteBelowBtn.style.display = 'inline-flex';
+        pasteBelowBtn.classList.remove('paste-hidden');
     }
 }
 
@@ -4317,7 +4322,11 @@ function hidePasteButton() {
     if (pasteBtn) {
         pasteBtn.style.display = 'none';
         pasteBtn.classList.add('paste-hidden');
-        ;
+    }
+    const pasteBelowBtn = contextMenu.querySelector('[data-action="paste-below"]');
+    if (pasteBelowBtn) {
+        pasteBelowBtn.style.display = 'none';
+        pasteBelowBtn.classList.add('paste-hidden');
     }
 }
 
@@ -5999,7 +6008,7 @@ async function openTempUrls(sectionId, nodeId, options = {}) {
     await openUrlList(urls, options);
 }
 
-function getTempPasteTarget(context) {
+function getTempPasteTarget(context, pasteBelow = false) {
     const manager = ensureTempManager();
     const sectionId = context.sectionId;
     if (!sectionId) throw new Error('未找到临时栏目');
@@ -6012,16 +6021,16 @@ function getTempPasteTarget(context) {
     let parentId = context.nodeId;
     let index = null;
 
-    // 如果是文件夹，粘贴到文件夹内部
-    if (context.isFolder) {
+    // 如果是文件夹，且不是粘贴到下方，粘贴到文件夹内部
+    if (context.isFolder && !pasteBelow) {
         parentId = context.nodeId;
         index = null; // 添加到文件夹末尾
     } else {
-        // 如果是书签，粘贴到书签的下面
+        // 如果是书签，或者是选择粘贴到文件夹下方，粘贴到该节点的下面
         const entry = manager.findItem(sectionId, context.nodeId);
         if (entry && entry.parent) {
             parentId = entry.parent.id || null;
-            index = entry.index + 1; // 插入到当前书签的下一个位置
+            index = entry.index + 1; // 插入到当前节点的下一个位置
         } else {
             // 如果找不到父节点，粘贴到根目录
             parentId = null;
@@ -6290,10 +6299,10 @@ async function cutTempNodes(sectionId, nodeIds) {
     ;
 }
 
-async function pasteIntoTemp(context) {
+async function pasteIntoTemp(context, pasteBelow = false) {
     if (!bookmarkClipboard) return;
     const manager = ensureTempManager();
-    const target = getTempPasteTarget(context);
+    const target = getTempPasteTarget(context, pasteBelow);
 
     try {
         if (bookmarkClipboard.source === 'temporary') {
@@ -6305,14 +6314,8 @@ async function pasteIntoTemp(context) {
                 } else {
                     manager.moveAcross(bookmarkClipboard.sectionId, target.sectionId, bookmarkClipboard.nodeIds, target.parentId, target.index);
                 }
-                bookmarkClipboard = null;
-                clipboardOperation = null;
-                unmarkCutNode();
             }
-            return;
-        }
-
-        if (bookmarkClipboard.source === 'permanent' || bookmarkClipboard.source === 'mixed') {
+        } else if (bookmarkClipboard.source === 'permanent' || bookmarkClipboard.source === 'mixed') {
             let payload = bookmarkClipboard.payload;
             if (!payload || !payload.length) {
                 payload = [];
@@ -6350,11 +6353,7 @@ async function pasteIntoTemp(context) {
                 }
             }
 
-            if (bookmarkClipboard.source === 'mixed') {
-                return;
-            }
-
-            if (bookmarkClipboard.action === 'cut' && bookmarkClipboard.nodeIds) {
+            if (bookmarkClipboard.source !== 'mixed' && bookmarkClipboard.action === 'cut' && bookmarkClipboard.nodeIds) {
                 for (const id of bookmarkClipboard.nodeIds) {
                     try {
                         if (chrome && chrome.bookmarks) {
@@ -6364,12 +6363,14 @@ async function pasteIntoTemp(context) {
                         console.warn('[临时栏目] 移除原始书签失败:', error);
                     }
                 }
-                // 不调用 refreshBookmarkTree()，让 onRemoved 事件触发增量更新
-                bookmarkClipboard = null;
-                clipboardOperation = null;
-                unmarkCutNode();
             }
         }
+
+        // 统一清理剪贴板状态
+        bookmarkClipboard = null;
+        clipboardOperation = null;
+        unmarkCutNode();
+        hidePasteButton();
     } catch (error) {
         console.error('[临时栏目] 粘贴失败:', error);
         const lang = currentLang || 'zh_CN';
@@ -6531,7 +6532,10 @@ async function handleTempMenuAction(action, context) {
             copyTempNodes(context.sectionId, context.nodeId);
             break;
         case 'paste':
-            await pasteIntoTemp(context);
+            await pasteIntoTemp(context, false);
+            break;
+        case 'paste-below':
+            await pasteIntoTemp(context, true);
             break;
         case 'select-item':
             // 进入Select模式并切换当前节点的选中状态
@@ -8683,7 +8687,11 @@ async function handleMenuAction(action, context) {
                 break;
 
             case 'paste':
-                await pasteBookmark(nodeId, isFolder);
+                await pasteBookmark(nodeId, isFolder, false);
+                break;
+
+            case 'paste-below':
+                await pasteBookmark(nodeId, isFolder, true);
                 break;
 
             case 'copy-url':
@@ -9741,7 +9749,7 @@ async function copyBookmark(nodeId, nodeTitle, isFolder) {
 }
 
 // 粘贴书签
-async function pasteBookmark(targetNodeId, isFolder) {
+async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
     if (!chrome || !chrome.bookmarks) {
         alert('此功能需要Chrome扩展环境');
         return;
@@ -9752,17 +9760,19 @@ async function pasteBookmark(targetNodeId, isFolder) {
     }
 
     try {
-        // 确定目标文件夹ID
+        // 确定目标文件夹ID和起始位置
         let targetFolderId;
+        let insertIndex = undefined;
 
-        if (isFolder) {
-            // 如果目标是文件夹，粘贴到文件夹内
+        if (isFolder && !pasteBelow) {
+            // 如果目标是文件夹，且不是粘贴到下方，粘贴到文件夹内
             targetFolderId = targetNodeId;
         } else {
-            // 如果目标是书签，获取其父文件夹ID，粘贴到书签下方
+            // 如果目标是书签，或者粘贴到该文件夹下方，获取其父文件夹ID及索引
             const nodes = await chrome.bookmarks.get(targetNodeId);
             if (nodes && nodes[0] && nodes[0].parentId) {
                 targetFolderId = nodes[0].parentId;
+                insertIndex = typeof nodes[0].index === 'number' ? nodes[0].index + 1 : undefined;
             } else {
                 throw new Error('无法找到父文件夹');
             }
@@ -9786,7 +9796,14 @@ async function pasteBookmark(targetNodeId, isFolder) {
                 try {
                     const tagUpdates = [];
                     for (const item of payload) {
-                        await duplicateNode(item, targetFolderId, { tagUpdates, createdEvents });
+                        const dupOptions = { tagUpdates, createdEvents };
+                        if (typeof insertIndex === 'number') {
+                            dupOptions.index = insertIndex;
+                        }
+                        await duplicateNode(item, targetFolderId, dupOptions);
+                        if (typeof insertIndex === 'number') {
+                            insertIndex++;
+                        }
                     }
                     if (tagUpdates.length > 0) {
                         const bridge = window.CanvasProtocolBridge;
@@ -9814,19 +9831,17 @@ async function pasteBookmark(targetNodeId, isFolder) {
                     }
                 }
             }
-            if (bookmarkClipboard.source === 'mixed') {
-                return;
-            }
 
-            if (bookmarkClipboard.action === 'cut' && bookmarkClipboard.sectionId && bookmarkClipboard.nodeIds) {
+            if (bookmarkClipboard.source !== 'mixed' && bookmarkClipboard.action === 'cut' && bookmarkClipboard.sectionId && bookmarkClipboard.nodeIds) {
                 const manager = getTempManager();
                 if (manager) {
                     manager.removeItems(bookmarkClipboard.sectionId, bookmarkClipboard.nodeIds);
                 }
-                bookmarkClipboard = null;
-                clipboardOperation = null;
-                unmarkCutNode();
             }
+            bookmarkClipboard = null;
+            clipboardOperation = null;
+            unmarkCutNode();
+            hidePasteButton();
         } else if (bookmarkClipboard.source === 'permanent') {
             if (bookmarkClipboard.action === 'cut' && bookmarkClipboard.nodeIds) {
                 const totalNodes = bookmarkClipboard.nodeIds.length;
@@ -9843,9 +9858,14 @@ async function pasteBookmark(targetNodeId, isFolder) {
                 const createdEvents = [];
                 try {
                     for (const id of bookmarkClipboard.nodeIds) {
-                        await movePermanentBookmarkNode(id, {
-                            parentId: targetFolderId
-                        }, { createdEvents });
+                        const target = { parentId: targetFolderId };
+                        if (typeof insertIndex === 'number') {
+                            target.index = insertIndex;
+                        }
+                        await movePermanentBookmarkNode(id, target, { createdEvents });
+                        if (typeof insertIndex === 'number') {
+                            insertIndex++;
+                        }
                     }
                     if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
                         await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'paste-permanent-cut');
@@ -9856,9 +9876,6 @@ async function pasteBookmark(targetNodeId, isFolder) {
                         await endBookmarkBulkMute('paste-permanent-cut', { refreshTree: true });
                     }
                 }
-                bookmarkClipboard = null;
-                clipboardOperation = null;
-                unmarkCutNode();
             } else if (bookmarkClipboard.action === 'copy') {
                 const payload = bookmarkClipboard.payload || (bookmarkClipboard.nodeData ? [bookmarkClipboard.nodeData] : []);
                 const totalNodes = countPayloadNodes(payload);
@@ -9876,7 +9893,14 @@ async function pasteBookmark(targetNodeId, isFolder) {
                 try {
                     const tagUpdates = [];
                     for (const node of payload) {
-                        await duplicateNode(node, targetFolderId, { tagUpdates, createdEvents });
+                        const dupOptions = { tagUpdates, createdEvents };
+                        if (typeof insertIndex === 'number') {
+                            dupOptions.index = insertIndex;
+                        }
+                        await duplicateNode(node, targetFolderId, dupOptions);
+                        if (typeof insertIndex === 'number') {
+                            insertIndex++;
+                        }
                     }
                     if (tagUpdates.length > 0) {
                         const bridge = window.CanvasProtocolBridge;
@@ -9904,6 +9928,10 @@ async function pasteBookmark(targetNodeId, isFolder) {
                     }
                 }
             }
+            bookmarkClipboard = null;
+            clipboardOperation = null;
+            unmarkCutNode();
+            hidePasteButton();
         }
 
         // 不调用 refreshBookmarkTree()，让 onMoved/onCreated 事件触发增量更新
@@ -9926,6 +9954,10 @@ async function duplicateNode(node, parentId, options = {}) {
         newNode.url = node.url;
     }
 
+    if (typeof options.index === 'number') {
+        newNode.index = options.index;
+    }
+
     // 创建节点
     const created = await createPermanentBookmarkNode(newNode, options);
 
@@ -9939,8 +9971,10 @@ async function duplicateNode(node, parentId, options = {}) {
 
     // 如果有子节点，递归复制
     if (node.children) {
+        const childOptions = { ...options };
+        delete childOptions.index; // 子节点不需要继承外层指定的 index，应该直接追加
         for (const child of node.children) {
-            await duplicateNode(child, created.id, options);
+            await duplicateNode(child, created.id, childOptions);
         }
     }
 
