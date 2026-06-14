@@ -507,7 +507,7 @@
                         branchHeadSha = String(refInfo.object.sha);
                     }
                 } catch (error) {
-                    if (Number(error && error.status) === 404) {
+                    if (Number(error && error.status) === 404 || Number(error && error.status) === 409) {
                         branchExists = false;
                         branchWillBeCreated = true;
                     } else {
@@ -1120,12 +1120,12 @@
                     const baseTreeSha = nestedTreeSha || await readCommitTreeSha(headSha);
                     return baseTreeSha ? { headSha, baseTreeSha, initialCommit: false, branchCreated: false } : null;
                 } catch (error) {
-                    if (Number(error && error.status) === 404) return null;
+                    if (Number(error && error.status) === 404 || Number(error && error.status) === 409) return null;
                     throw annotateStage(error, 'read-ref');
                 }
             };
 
-            const ensureBranchHead = async (initialTreeEntries = []) => {
+            const ensureBranchHead = async (initialFile = null) => {
                 const branchApiHeadInfo = await tryReadBranchHeadFromBranchApi();
                 if (branchApiHeadInfo) return branchApiHeadInfo;
 
@@ -1133,7 +1133,7 @@
                 try {
                     refJson = await githubRequestJson(refReadUrl, { headers: { Authorization: authHeader }, signal });
                 } catch (error) {
-                    if (Number(error && error.status) !== 404) throw annotateStage(error, 'read-ref');
+                    if (Number(error && error.status) !== 404 && Number(error && error.status) !== 409) throw annotateStage(error, 'read-ref');
                     let defaultBranch = '';
                     try {
                         const repoInfo = await githubRequestJson(repoApiBase, { headers: { Authorization: authHeader }, signal });
@@ -1160,33 +1160,40 @@
                                 refJson = await githubRequestJson(refReadUrl, { headers: { Authorization: authHeader }, signal });
                             }
                         } catch (defaultRefError) {
-                            if (Number(defaultRefError && defaultRefError.status) !== 404) {
+                            if (Number(defaultRefError && defaultRefError.status) !== 404 && Number(defaultRefError && defaultRefError.status) !== 409) {
                                 throw annotateStage(defaultRefError, 'create-ref', { branch: resolvedBranch, fromBranch: defaultBranch });
                             }
                         }
                     }
 
                     if (!refJson) {
-                        const initialTreeJson = await createTree('', initialTreeEntries);
-                        fillFileShasFromTree(initialTreeJson);
-                        const initialTreeSha = initialTreeJson && initialTreeJson.sha ? String(initialTreeJson.sha) : '';
-                        if (!initialTreeSha) return { headSha: '', baseTreeSha: '', initialCommit: false, branchCreated: false };
-                        const initialCommitJson = await createCommit(initialTreeSha, '');
-                        const initialCommitSha = initialCommitJson && initialCommitJson.sha ? String(initialCommitJson.sha) : '';
-                        if (!initialCommitSha) return { headSha: '', baseTreeSha: '', initialCommit: false, branchCreated: false };
-                        try {
-                            await createBranchRef(resolvedBranch, initialCommitSha);
-                        } catch (createError) {
-                            if (!isGitHubReferenceAlreadyExistsError(createError)) throw createError;
-                        }
-                        return {
-                            headSha: '',
-                            baseTreeSha: '',
-                            initialCommit: true,
-                            branchCreated: true,
-                            treeSha: initialTreeSha,
-                            commitSha: initialCommitSha
+                        const targetPath = initialFile && initialFile.path ? initialFile.path : '.canvas';
+                        const targetContent = initialFile && initialFile.content != null ? initialFile.content : 'initialized\n';
+                        const initUrl = `${repoApiBase}/contents/${encodeGitHubPath(targetPath)}`;
+                        const initPayload = {
+                            message: `Initial commit: create ${targetPath}`,
+                            content: textToBase64(targetContent),
+                            branch: resolvedBranch
                         };
+
+                        let initResult = null;
+                        try {
+                            initResult = await githubRequestJson(initUrl, {
+                                method: 'PUT',
+                                headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                                body: JSON.stringify(initPayload),
+                                signal
+                            });
+                        } catch (initError) {
+                            throw annotateStage(initError, 'create-ref', { branch: resolvedBranch });
+                        }
+
+                        const headCommitSha = initResult && initResult.commit && initResult.commit.sha ? String(initResult.commit.sha) : '';
+                        if (!headCommitSha) {
+                            throw annotateStage(new Error('初始化仓库提交失败'), 'create-ref');
+                        }
+
+                        refJson = await githubRequestJson(refReadUrl, { headers: { Authorization: authHeader }, signal });
                     }
                 }
 
@@ -1213,9 +1220,13 @@
                 if (treeMode === 'blob-sha') await ensureBlobShas();
                 const treeEntries = buildTreeEntries(treeMode);
 
+                const initialFile = uploadEntries.find(c => c.path.endsWith('.canvas')) ||
+                                    uploadEntries.find(c => c.path.endsWith('.md')) ||
+                                    uploadEntries[0] || null;
+
                 let headInfo = null;
                 try {
-                    headInfo = await ensureBranchHead(treeEntries);
+                    headInfo = await ensureBranchHead(initialFile);
                 } catch (error) {
                     if (treeMode === 'inline' && shouldFallbackInlineTreeContent(error)) {
                         preferInlineTreeContent = false;
