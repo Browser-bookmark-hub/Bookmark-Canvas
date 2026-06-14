@@ -8204,24 +8204,26 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .temp-node-title-input.editing {
     pointer-events: auto;
-    background: rgba(255, 255, 255, 0.18);
-    color: #0f172a;
+    background: var(--temp-header-badge-bg, rgba(255, 255, 255, 0.18));
+    color: var(--temp-header-text-color, inherit);
     border-radius: 6px;
     padding: 2px 6px;
     min-height: 24px;
 }
 
 [data-theme="dark"] .temp-node-title-input.editing {
-    background: rgba(248, 250, 252, 0.15);
-    color: #f8fafc;
+    background: var(--temp-header-badge-bg, rgba(248, 250, 252, 0.15));
+    color: var(--temp-header-text-color, inherit);
 }
 
 .temp-node-title-input.editing::placeholder {
-    color: rgba(15, 23, 42, 0.45);
+    color: var(--temp-header-text-color, currentColor);
+    opacity: 0.5;
 }
 
 [data-theme="dark"] .temp-node-title-input.editing::placeholder {
-    color: rgba(248, 250, 252, 0.55);
+    color: var(--temp-header-text-color, currentColor);
+    opacity: 0.5;
 }
 
 .temp-node-actions {
