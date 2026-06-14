@@ -330,7 +330,7 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
             try { window.defaultOpenMode = defaultOpenMode; } catch (_) {}
         }
         if (changes.hyperlinkDefaultOpenMode) {
-            hyperlinkDefaultOpenMode = changes.hyperlinkDefaultOpenMode.newValue || 'specific-window';
+            hyperlinkDefaultOpenMode = changes.hyperlinkDefaultOpenMode.newValue || 'new-tab';
             try { window.hyperlinkDefaultOpenMode = hyperlinkDefaultOpenMode; } catch (_) {}
         }
         if (changes.bookmarkSpecificWindowId) {
@@ -378,7 +378,7 @@ let specificTabGroupId = null; // chrome.tabGroups Group ID（在“特定标签
 let specificGroupWindowId = null; // 保存分组所在窗口，确保新开的标签在同一窗口
 
 // 超链接系统：独立的打开方式与窗口/分组ID（与书签系统完全隔离）
-let hyperlinkDefaultOpenMode = 'specific-window'; // 超链接的默认打开方式：'specific-window'（同一窗口）
+let hyperlinkDefaultOpenMode = 'new-tab'; // 超链接的默认打开方式：'new-tab'（新标签页）
 let hyperlinkSpecificWindowId = null; // 超链接专用的窗口ID
 let hyperlinkSpecificTabGroupId = null; // 超链接专用的分组ID
 let hyperlinkSpecificGroupWindowId = null; // 超链接分组所在窗口
