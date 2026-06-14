@@ -4876,8 +4876,8 @@ function renderTraceSubmenu(context) {
     }).join('');
 
     const descText = lang === 'zh_CN' 
-        ? '点击颜色可对当前节点向上追溯 guide lines、文本及图标高亮标记。<br/>- 向上溯源：可选不同层级或直到根目录。<br/>- 临时标记：<span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">不保存到存储，刷新或重开侧栏即消失。</span><br/>- 颜色并排：多条路径并排显示，互不干扰颜色。<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">取消方式</span>：直接点击高亮引导线，或者开关插件侧边栏/标签页即可取消该溯源。'
-        : 'Click color to trace upward guide lines, text and icons.<br/>- Levels: Select parent level or up to root directory.<br/>- Temporary: <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">Saved in-memory only, lost on reload/reopen.</span><br/>- Overlaps: Multiple paths run side-by-side, preserving distinct colors.<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">Cancel</span>: Click on any highlighted guide line, or toggle the extension sidebar/tab to cancel.';
+        ? '点击颜色可对当前节点向上追溯 guide lines、文本及图标高亮标记。<br/>- 向上溯源：可选不同层级或直到根目录。<br/>- 临时标记：<span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">不保存到存储，刷新或重开侧栏即消失。</span><br/>- 单层高亮：选择层级为 0 即可只高亮当前节点，充当临时高亮。<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">取消方式</span>：直接点击高亮引导线，或者开关插件侧边栏/标签页即可取消该溯源。'
+        : 'Click color to trace upward guide lines, text and icons.<br/>- Levels: Select parent level or up to root directory.<br/>- Temporary: <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">Saved in-memory only, lost on reload/reopen.</span><br/>- Single-layer Highlight: Select level 0 to highlight only the current node, serving as a temporary highlight.<br/>- <span style="color: var(--accent-orange, #ff9f0a); font-weight: 600;">Cancel</span>: Click on any highlighted guide line, or toggle the extension sidebar/tab to cancel.';
 
     const helpLabel = lang === 'zh_CN' ? '说明' : 'Info';
 
