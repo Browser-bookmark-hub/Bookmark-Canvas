@@ -11,6 +11,20 @@
  */
 
 
+function getOverlayContainer() {
+    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+        return window.getOverlayContainer();
+    }
+    const container = document.querySelector('.canvas-main-container');
+    if (container && (document.fullscreenElement === container || 
+                      document.webkitFullscreenElement === container || 
+                      document.mozFullScreenElement === container || 
+                      document.msFullscreenElement === container)) {
+        return container;
+    }
+    return document.body;
+}
+
 // ---- export-folder-name-helpers: source lines 5-7 ----
 
 // Unified Export Folder Paths - 统一的导出文件夹路径（根据语言动态选择）
@@ -345,7 +359,7 @@ async function showImportChoiceDialog(bookmark, parentFolder, dropX, dropY) {
         </div>
     `;
 
-    document.body.appendChild(dialog);
+    getOverlayContainer().appendChild(dialog);
 
     // 绑定事件
     dialog.querySelector('.import-dialog-close').onclick = () => dialog.remove();
@@ -873,7 +887,7 @@ async function showFolderSelectionDialog(folders, dropX, dropY) {
         </div>
     `;
 
-    document.body.appendChild(dialog);
+    getOverlayContainer().appendChild(dialog);
 
     // 绑定事件
     dialog.querySelector('.import-dialog-close').onclick = () => dialog.remove();
@@ -1310,7 +1324,7 @@ async function showBackupDialog() {
                 </div>
             </div>
         `;
-        document.body.appendChild(dialog);
+        getOverlayContainer().appendChild(dialog);
         const cleanup = () => { try { dialog.remove(); } catch (_) {} resolve(); };
         document.getElementById('closeBackupDialog').addEventListener('click', cleanup);
         document.getElementById('backupCloseBtn').addEventListener('click', cleanup);

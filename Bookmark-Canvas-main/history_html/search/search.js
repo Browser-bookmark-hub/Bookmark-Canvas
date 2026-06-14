@@ -6943,14 +6943,31 @@ function renderCanvasSearchSuggestions() {
         });
         const helpBtn = panel.querySelector('.search-hint-help-btn');
         if (helpBtn) {
+            const getOverlayContainer = () => {
+                if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+                    return window.getOverlayContainer();
+                }
+                const container = document.querySelector('.canvas-main-container');
+                if (container && (document.fullscreenElement === container || 
+                                  document.webkitFullscreenElement === container || 
+                                  document.mozFullScreenElement === container || 
+                                  document.msFullscreenElement === container)) {
+                    return container;
+                }
+                return document.body;
+            };
+
             const ensurePopover = () => {
                 let pop = document.getElementById('searchHintPopover');
+                const targetParent = getOverlayContainer();
                 if (!pop) {
                     pop = document.createElement('div');
                     pop.id = 'searchHintPopover';
                     pop.className = 'perf-help-popover search-hint-help-popover';
                     pop.innerHTML = '<div class="perf-help-popover-content"></div>';
-                    document.body.appendChild(pop);
+                    targetParent.appendChild(pop);
+                } else if (pop.parentElement !== targetParent) {
+                    targetParent.appendChild(pop);
                 }
                 return pop;
             };
@@ -6961,6 +6978,10 @@ function renderCanvasSearchSuggestions() {
 
             let outsideHandler = null;
             const showHelp = () => {
+                const targetParent = getOverlayContainer();
+                if (helpPopover.parentElement !== targetParent) {
+                    targetParent.appendChild(helpPopover);
+                }
                 helpPopover.classList.add('show');
                 helpPopover.style.visibility = 'hidden';
                 helpPopover.style.width = 'max-content';

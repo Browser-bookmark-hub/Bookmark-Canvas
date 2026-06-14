@@ -27,6 +27,20 @@
         'githubPullMethod'
     ];
 
+    function getOverlayContainer() {
+        if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+            return window.getOverlayContainer();
+        }
+        const container = document.querySelector('.canvas-main-container');
+        if (container && (document.fullscreenElement === container || 
+                          document.webkitFullscreenElement === container || 
+                          document.mozFullScreenElement === container || 
+                          document.msFullscreenElement === container)) {
+            return container;
+        }
+        return document.body;
+    }
+
     let activeConfigDialog = null;
     let activeConfirmDialog = null;
     let activeProgressDialog = null;
@@ -608,7 +622,7 @@
                 </div>
             </div>
         `;
-        document.body.appendChild(dialog);
+        getOverlayContainer().appendChild(dialog);
         activeConfirmDialog = dialog;
 
         return new Promise((resolve) => {
@@ -720,7 +734,7 @@
                 </div>
             </div>
         `;
-        document.body.appendChild(dialog);
+        getOverlayContainer().appendChild(dialog);
         activeConfirmDialog = dialog;
 
         return new Promise((resolve) => {
@@ -941,7 +955,7 @@
             </div>
         `;
 
-        document.body.appendChild(dialog);
+        getOverlayContainer().appendChild(dialog);
         activeConfigDialog = dialog;
 
         return new Promise((resolve) => {
@@ -1239,7 +1253,7 @@
                 </div>
             </div>
         `;
-        document.body.appendChild(dialog);
+        getOverlayContainer().appendChild(dialog);
         activeConfirmDialog = dialog;
         return new Promise((resolve) => {
             const cleanup = (value) => {
@@ -1300,7 +1314,7 @@
                 }
             });
         }
-        document.body.appendChild(dialog);
+        getOverlayContainer().appendChild(dialog);
         activeProgressDialog = dialog;
     }
 
@@ -1704,7 +1718,7 @@
             </div>
         `;
 
-        document.body.appendChild(dialog);
+        getOverlayContainer().appendChild(dialog);
         activeConfirmDialog = dialog;
 
         return new Promise((resolve) => {
@@ -2146,7 +2160,7 @@
                 </div>
             </div>
         `;
-        document.body.appendChild(dialog);
+        getOverlayContainer().appendChild(dialog);
         return new Promise((resolve) => {
             let selectedMode = defaultMode;
             const cleanup = (value) => {

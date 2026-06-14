@@ -7,6 +7,20 @@
  * so AI, sync, and import/export can use the same data core.
  */
 
+function getOverlayContainer() {
+    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+        return window.getOverlayContainer();
+    }
+    const container = document.querySelector('.canvas-main-container');
+    if (container && (document.fullscreenElement === container || 
+                      document.webkitFullscreenElement === container || 
+                      document.mozFullScreenElement === container || 
+                      document.msFullscreenElement === container)) {
+        return container;
+    }
+    return document.body;
+}
+
 function __trimImportPreviewText(value, max = 52) {
     const text = String(value || '').replace(/\u200B/g, '').replace(/\r\n?/g, '\n').trim();
     if (!text) return '';
@@ -546,7 +560,7 @@ function showImportStructurePreviewDialog(options = {}) {
             </div>
         `;
 
-        document.body.appendChild(dialog);
+        getOverlayContainer().appendChild(dialog);
 
         try {
             const previewTree = document.getElementById('canvasImportPreviewTree');
@@ -668,7 +682,7 @@ function showImportModeConfirmDialog(options = {}) {
             </div>
         `;
 
-        document.body.appendChild(dialog);
+        getOverlayContainer().appendChild(dialog);
 
         let selectedMode = defaultMode;
         let currentThreshold = 300;
@@ -1796,7 +1810,7 @@ function showImportDialog(options = {}) {
         </div>
     `;
 
-    document.body.appendChild(dialog);
+    getOverlayContainer().appendChild(dialog);
 
     // 事件监听
     const importInfoBtn = dialog.querySelector('#importInfoBtn');
@@ -3354,7 +3368,7 @@ function showExportModeDialog(options = {}) {
         </div>
     `;
 
-    document.body.appendChild(dialog);
+    getOverlayContainer().appendChild(dialog);
 
     // ===== AI 指南文件名选择（单选）：启用自定义输入 / 持久化 / 收集 =====
     const guideNameRadios = dialog.querySelectorAll('input[name="guideNameChoice"]');
@@ -4073,7 +4087,7 @@ async function exportCanvasPackage(options = {}) {
             if (e.target === dialog) cleanup(null);
         });
 
-        document.body.appendChild(dialog);
+        getOverlayContainer().appendChild(dialog);
 
         const closeBtn = document.getElementById('closeCanvasExportVaultPrefixDialog');
         if (closeBtn) closeBtn.addEventListener('click', () => cleanup(null));

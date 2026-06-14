@@ -17,6 +17,21 @@ let tagSubmenuCtx = null;
 let currentContextNode = null;
 let bookmarkClipboard = null; // 剪贴板 { action: 'cut'|'copy', nodeId, nodeData }
 
+function getOverlayContainer() {
+    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+        return window.getOverlayContainer();
+    }
+    const container = document.querySelector('.canvas-main-container');
+    if (container && (document.fullscreenElement === container || 
+                      document.webkitFullscreenElement === container || 
+                      document.mozFullScreenElement === container || 
+                      document.msFullscreenElement === container)) {
+        return container;
+    }
+    return document.body;
+}
+
+
 // 防抖机制：防止重复打开书签
 const bookmarkOpenDebounce = {
     lastActionTime: 0,
@@ -2131,7 +2146,7 @@ function showBatchHelpPopover() {
                 <div class="batch-help-popover-body">${getBatchHelpHtml(lang)}</div>
             </div>
         `;
-        document.body.appendChild(el);
+        getOverlayContainer().appendChild(el);
         batchHelpPopoverEl = el;
 
         // Add numeric anchors on buttons while help is visible
@@ -2673,15 +2688,15 @@ function initContextMenu() {
         contextMenu.classList.add('horizontal-layout');
     }
 
-    // 初始挂载到body，使用时会动态插入到目标节点附近
-    document.body.appendChild(contextMenu);
+    // 初始挂载，使用时会动态插入到目标节点附近
+    getOverlayContainer().appendChild(contextMenu);
 
     // 创建子菜单容器
     contextSubmenu = document.createElement('div');
     contextSubmenu.id = 'bookmark-context-submenu';
     contextSubmenu.className = 'bookmark-context-menu bookmark-context-submenu';
     contextSubmenu.style.display = 'none';
-    document.body.appendChild(contextSubmenu);
+    getOverlayContainer().appendChild(contextSubmenu);
 
     // 绑定超链接的右键菜单
     attachHyperlinkContextMenu();
@@ -2960,8 +2975,8 @@ async function showHyperlinkContextMenu(e, linkElement) {
 // 为超链接菜单使用固定定位（浮动在鼠标位置）
 function positionHyperlinkContextMenu(event, linkElement) {
     // 确保菜单在body中
-    if (contextMenu.parentElement !== document.body) {
-        document.body.appendChild(contextMenu);
+    if (contextMenu.parentElement !== getOverlayContainer()) {
+        getOverlayContainer().appendChild(contextMenu);
     }
 
     // 使用固定定位
@@ -3674,8 +3689,8 @@ function toggleSubmenu(triggerItem, context) {
     renderSubmenu(context);
 
     // 挂载到 body 以便进行屏幕绝对定位
-    if (contextSubmenu.parentElement !== document.body) {
-        document.body.appendChild(contextSubmenu);
+    if (contextSubmenu.parentElement !== getOverlayContainer()) {
+        getOverlayContainer().appendChild(contextSubmenu);
     }
 
     // 关键：在测量前临时设置为 fixed 并重置 transform，确保浏览器计算出正确的 offsetWidth / offsetHeight
@@ -4162,8 +4177,8 @@ function embedContextMenu(node) {
 // 使用固定定位定位一级菜单（悬浮在卡片之上）
 function positionPrimaryContextMenu(event, node) {
     // 确保菜单在body中
-    if (contextMenu.parentElement !== document.body) {
-        document.body.appendChild(contextMenu);
+    if (contextMenu.parentElement !== getOverlayContainer()) {
+        getOverlayContainer().appendChild(contextMenu);
     }
 
     // 计算缩放比例
@@ -4263,18 +4278,18 @@ function hideContextMenu() {
         contextMenu.style.transform = ''; // Reset transform!
         contextMenu.style.transformOrigin = ''; // Reset transform-origin!
 
-        // 将菜单移回body，避免影响DOM结构
-        if (contextMenu.parentElement !== document.body) {
-            document.body.appendChild(contextMenu);
+        // 将菜单移回body/fullscreen容器，避免影响DOM结构
+        if (contextMenu.parentElement !== getOverlayContainer()) {
+            getOverlayContainer().appendChild(contextMenu);
         }
     }
 
     if (contextSubmenu) {
         hideSubmenu();
 
-        // 将子菜单移回body，避免影响DOM结构
-        if (contextSubmenu.parentElement !== document.body) {
-            document.body.appendChild(contextSubmenu);
+        // 将子菜单移回body/fullscreen容器，避免影响DOM结构
+        if (contextSubmenu.parentElement !== getOverlayContainer()) {
+            getOverlayContainer().appendChild(contextSubmenu);
         }
     }
 
@@ -7873,7 +7888,7 @@ function __buildBookmarkAddSecondaryModal() {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    getOverlayContainer().appendChild(modal);
     return modal;
 }
 
@@ -10662,8 +10677,8 @@ function showBatchContextMenu(e) {
     if (batchPanel) {
         // 如果已存在，只需确保显示
         batchPanel.style.display = 'block';
-        if (batchPanel.parentNode !== document.body) {
-            document.body.appendChild(batchPanel);
+        if (batchPanel.parentNode !== getOverlayContainer()) {
+            getOverlayContainer().appendChild(batchPanel);
         }
         batchPanel.dataset.anchorKey = anchorKey;
         batchPanel.dataset.treeType = anchorInfo.treeType || 'permanent';
@@ -10910,8 +10925,8 @@ function showBatchContextMenu(e) {
     initBatchPanelWindowResize(batchPanel);
 
     // 始终挂载到 body，避免祖先 transform 影响定位
-    if (batchPanel.parentNode !== document.body) {
-        document.body.appendChild(batchPanel);
+    if (batchPanel.parentNode !== getOverlayContainer()) {
+        getOverlayContainer().appendChild(batchPanel);
         ;
     }
 
@@ -11588,9 +11603,8 @@ async function showBatchManualWindowGroupSelector(selectionInfo, lang) {
         dialog.appendChild(footer);
         overlay.appendChild(dialog);
 
-        // 将overlay添加到画布工作区或body
-        const canvasWorkspace = document.getElementById('canvasWorkspace');
-        const canvasContainer = canvasWorkspace || document.body;
+        // 将overlay添加到全屏容器或body
+        const canvasContainer = getOverlayContainer();
         canvasContainer.appendChild(overlay);
 
         // 存储批量选择的临时状态
@@ -14059,7 +14073,7 @@ async function __openCanvasCardGroupCreateUiAtPosition(left, top) {
         modal = document.createElement('div');
         modal.id = 'canvasCardGroupCreateModal';
         modal.className = 'modal content-center canvas-card-group-create-modal';
-        document.body.appendChild(modal);
+        getOverlayContainer().appendChild(modal);
     }
     modal.innerHTML = `
         <div class="modal-content">
@@ -14332,8 +14346,8 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
 
     // 移除之前的嵌入样式
     contextMenu.style.position = 'fixed';
-    if (contextMenu.parentElement && contextMenu.parentElement !== document.body) {
-        document.body.appendChild(contextMenu);
+    if (contextMenu.parentElement && contextMenu.parentElement !== getOverlayContainer()) {
+        getOverlayContainer().appendChild(contextMenu);
     }
 }
 
@@ -14793,7 +14807,7 @@ function showBookmarkTreeObjectContextMenu(e, target) {
     menu.style.transformOrigin = '';
     menu.style.transform = '';
     menu.style.display = 'block';
-    if (menu.parentElement && menu.parentElement !== document.body) document.body.appendChild(menu);
+    if (menu.parentElement && menu.parentElement !== getOverlayContainer()) getOverlayContainer().appendChild(menu);
     const colorItem = menu.querySelector('.context-menu-item[data-action="color"]');
     if (colorItem) {
         target.contextMenuColorPoint = {
@@ -14859,7 +14873,7 @@ function showCanvasEdgeObjectContextMenu(e, edgeId) {
     menu.style.transformOrigin = '';
     menu.style.transform = '';
     menu.style.display = 'block';
-    if (menu.parentElement && menu.parentElement !== document.body) document.body.appendChild(menu);
+    if (menu.parentElement && menu.parentElement !== getOverlayContainer()) getOverlayContainer().appendChild(menu);
     target.contextMenuActionPoints = {};
     menu.querySelectorAll('.context-menu-item').forEach(item => {
         const action = item.dataset.action;
@@ -15527,18 +15541,9 @@ async function showManualWindowGroupSelector(context) {
         dialog.appendChild(footer);
         overlay.appendChild(dialog);
 
-        // 将overlay添加到画布工作区，而不是body
-        const canvasWorkspace = document.getElementById('canvasWorkspace');
-        const canvasContainer = canvasWorkspace || document.body;
+        // 将overlay添加到全屏容器或body
+        const canvasContainer = getOverlayContainer();
         canvasContainer.appendChild(overlay);
-
-        // 如果添加到画布工作区，确保容器是relative定位
-        if (canvasWorkspace) {
-            const originalPosition = canvasWorkspace.style.position;
-            if (!originalPosition || originalPosition === 'static') {
-                canvasWorkspace.style.position = 'relative';
-            }
-        }
 
         // 加载窗口和组数据
         await loadWindowsAndGroups(overlay, lang);

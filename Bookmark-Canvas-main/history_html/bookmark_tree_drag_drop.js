@@ -20,6 +20,20 @@ if (typeof window !== 'undefined') window.__hoverExpandState = __hoverExpandStat
 // 长时间不拖动后重置的阈值（毫秒）
 var HOVER_EXPAND_RESET_THRESHOLD = 5000; // 5秒不拖动则重置
 
+function getOverlayContainer() {
+    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+        return window.getOverlayContainer();
+    }
+    const container = document.querySelector('.canvas-main-container');
+    if (container && (document.fullscreenElement === container || 
+                      document.webkitFullscreenElement === container || 
+                      document.mozFullScreenElement === container || 
+                      document.msFullscreenElement === container)) {
+        return container;
+    }
+    return document.body;
+}
+
 function countPayloadNodes(payload) {
     if (!payload) return 0;
     const items = Array.isArray(payload) ? payload : [payload];
@@ -340,7 +354,7 @@ function initDragDrop() {
     dropIndicator = document.createElement('div');
     dropIndicator.className = 'drop-indicator';
     dropIndicator.style.display = 'none';
-    document.body.appendChild(dropIndicator);
+    getOverlayContainer().appendChild(dropIndicator);
 
     ;
 }
@@ -586,7 +600,7 @@ function handleDragStart(e) {
             preview.className = 'drag-preview';
             preview.textContent = previewText || '';
             preview.style.left = '-9999px';
-            document.body.appendChild(preview);
+            getOverlayContainer().appendChild(preview);
             e.dataTransfer.setDragImage(preview, 0, 0);
             setTimeout(() => preview.remove(), 0);
         }
@@ -885,15 +899,22 @@ function showDropIndicator(targetNode, e) {
     }
 
     // 设置指示器位置
+    const targetParent = getOverlayContainer();
+    if (dropIndicator.parentElement !== targetParent) {
+        targetParent.appendChild(dropIndicator);
+    }
+
+    const parentRect = dropIndicator.parentElement.getBoundingClientRect();
+
     if (position === 'before') {
-        dropIndicator.style.top = (rect.top + window.scrollY) + 'px';
-        dropIndicator.style.left = rect.left + 'px';
+        dropIndicator.style.top = (rect.top - parentRect.top) + 'px';
+        dropIndicator.style.left = (rect.left - parentRect.left) + 'px';
         dropIndicator.style.width = rect.width + 'px';
         dropIndicator.style.height = '2px';
         dropIndicator.style.display = 'block';
     } else if (position === 'after') {
-        dropIndicator.style.top = (rect.bottom + window.scrollY) + 'px';
-        dropIndicator.style.left = rect.left + 'px';
+        dropIndicator.style.top = (rect.bottom - parentRect.top) + 'px';
+        dropIndicator.style.left = (rect.left - parentRect.left) + 'px';
         dropIndicator.style.width = rect.width + 'px';
         dropIndicator.style.height = '2px';
         dropIndicator.style.display = 'block';

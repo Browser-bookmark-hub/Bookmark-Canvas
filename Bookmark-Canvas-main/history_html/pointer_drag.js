@@ -3,6 +3,20 @@
 // 解决原生HTML5 DnD拖拽期间无法使用滚轮的问题
 // =============================================================================
 
+function getOverlayContainer() {
+    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+        return window.getOverlayContainer();
+    }
+    const container = document.querySelector('.canvas-main-container');
+    if (container && (document.fullscreenElement === container || 
+                      document.webkitFullscreenElement === container || 
+                      document.mozFullScreenElement === container || 
+                      document.msFullscreenElement === container)) {
+        return container;
+    }
+    return document.body;
+}
+
 let pointerDragState = {
     isDragging: false,
     draggedElement: null,
@@ -511,7 +525,7 @@ function startPointerDrag(e) {
     overlay.style.textOverflow = 'ellipsis';
     overlay.style.whiteSpace = 'nowrap';
 
-    document.body.appendChild(overlay);
+    getOverlayContainer().appendChild(overlay);
     pointerDragState.dragOverlay = overlay;
 
     // 重置“本次拖动”的悬停展开加速状态

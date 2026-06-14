@@ -26,6 +26,20 @@ let __lassoOnUp = null;
 
 let __tempGroup = null; // {members:[{type,data,el}], rect:{x,y,w,h}, maskEl, toolbarEl}
 
+function getOverlayContainer() {
+    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+        return window.getOverlayContainer();
+    }
+    const container = document.querySelector('.canvas-main-container');
+    if (container && (document.fullscreenElement === container || 
+                      document.webkitFullscreenElement === container || 
+                      document.mozFullScreenElement === container || 
+                      document.msFullscreenElement === container)) {
+        return container;
+    }
+    return document.body;
+}
+
 function __resolvePermanentSectionNodeId(el) {
     if (!el) return '';
     try {
@@ -1000,7 +1014,7 @@ function __openTempGroupContextColorPopover(anchorPoint) {
     if (existing) existing.remove();
     const pop = __buildTempGroupColorPopover();
     pop.classList.add('temp-group-context-color-popover');
-    document.body.appendChild(pop);
+    getOverlayContainer().appendChild(pop);
     pop.addEventListener('click', (ev) => {
         const chip = ev.target && ev.target.closest ? ev.target.closest('[data-temp-color-action]') : null;
         if (!chip) return;
@@ -1101,7 +1115,7 @@ function showTempGroupContextMenu(event) {
     menu.style.transformOrigin = '';
     menu.style.transform = '';
     menu.style.display = 'block';
-    if (menu.parentElement && menu.parentElement !== document.body) document.body.appendChild(menu);
+    if (menu.parentElement && menu.parentElement !== getOverlayContainer()) getOverlayContainer().appendChild(menu);
     return true;
 }
 

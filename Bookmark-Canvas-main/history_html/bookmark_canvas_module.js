@@ -47,6 +47,21 @@ function __createDefaultCanvasTotalAlwaysThresholds() {
     };
 }
 
+function getOverlayContainer() {
+    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+        return window.getOverlayContainer();
+    }
+    const container = document.querySelector('.canvas-main-container');
+    if (container && (document.fullscreenElement === container || 
+                      document.webkitFullscreenElement === container || 
+                      document.mozFullScreenElement === container || 
+                      document.msFullscreenElement === container)) {
+        return container;
+    }
+    return document.body;
+}
+
+
 // 统一的首屏初始缩放：让 HTML 不需要再手动同步数值
 try {
     const initialContainer = document.querySelector('.canvas-main-container');
@@ -343,7 +358,7 @@ function __showDescClearConfirmPopover(anchorEl, options = {}) {
         </div>
     `;
 
-    document.body.appendChild(pop);
+    getOverlayContainer().appendChild(pop);
 
     const rect = anchorEl.getBoundingClientRect();
     const popRect = pop.getBoundingClientRect();
@@ -473,7 +488,7 @@ function __showDescHeightSettingsPopover(anchorEl, options = {}) {
         </div>
     `;
 
-    document.body.appendChild(pop);
+    getOverlayContainer().appendChild(pop);
 
     const rect = anchorEl.getBoundingClientRect();
     const popRect = pop.getBoundingClientRect();
@@ -680,7 +695,7 @@ function __showCanvasSidePanelPopover(anchorEl) {
         <div class="canvas-sidepanel-hint">${hintText}</div>
     `;
 
-    document.body.appendChild(pop);
+    getOverlayContainer().appendChild(pop);
     __positionCanvasSidePanelPopover(pop, anchorEl, null);
     updateCanvasPopoverState(true);
 
@@ -4419,7 +4434,8 @@ function showCanvasToast(message, type = 'info', duration = 3000) {
         document.head.appendChild(style);
     }
 
-    document.body.appendChild(toast);
+    const targetParent = getOverlayContainer();
+    targetParent.appendChild(toast);
 
     // 自动移除
     setTimeout(() => {
@@ -6807,7 +6823,7 @@ function enhanceBookmarkTreeForCanvas(treeContainer) {
                     preview.className = 'drag-preview';
                     preview.textContent = previewText || '';
                     preview.style.left = '-9999px';
-                    document.body.appendChild(preview);
+                    getOverlayContainer().appendChild(preview);
                     e.dataTransfer.setDragImage(preview, 0, 0);
                     setTimeout(() => preview.remove(), 0);
                 }
@@ -7081,11 +7097,11 @@ function setupCanvasZoomAndPan() {
     setupCanvasFullscreenControls();
     setupCanvasPerfHud();
 
-    // [Feature] 全屏模式（卡片最大化或整体全屏）下全局禁用浏览器原生及画布的 Ctrl 缩放（包括按键和滚轮）
+    // [Feature] 全屏模式（卡片最大化）下全局禁用浏览器原生及画布的 Ctrl 缩放（包括按键和滚轮）
     // 避免导致内部虚拟列表书签树加载异常
     window.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '_' || e.key === '0')) {
-            if (__isCanvasNodeMaximizedActive() || CanvasState.isFullscreen) {
+            if (__isCanvasNodeMaximizedActive()) {
                 e.preventDefault();
             }
         }
@@ -7093,7 +7109,7 @@ function setupCanvasZoomAndPan() {
 
     window.addEventListener('wheel', (e) => {
         if (e.ctrlKey || e.metaKey) {
-            if (__isCanvasNodeMaximizedActive() || CanvasState.isFullscreen) {
+            if (__isCanvasNodeMaximizedActive()) {
                 e.preventDefault();
             }
         }
@@ -7217,9 +7233,9 @@ function setupCanvasZoomAndPan() {
         }
 
         if (isCustomCtrlKeyPressed(e) || e.metaKey || __isCanvasTouchpadPinch(e)) {
-            // [Feature] 全屏模式（卡片最大化或整体全屏）下禁用 Ctrl 缩放
+            // [Feature] 全屏模式（卡片最大化）下禁用 Ctrl 缩放
             // 避免在全屏模式下缩放画布导致内部的书签树（虚拟列表）加载异常
-            if (__isCanvasNodeMaximizedActive() || CanvasState.isFullscreen) {
+            if (__isCanvasNodeMaximizedActive()) {
                 e.preventDefault();
                 return;
             }
@@ -7679,8 +7695,8 @@ function setupCanvasZoomAndPan() {
     const zoomLocateBtn = document.getElementById('zoomLocateBtn');
     // [OPT] 优化缩放手感：添加平滑动画，使用 1.2 倍指数缩放
     const animateZoomStep = (factor) => {
-        // [Feature] 全屏模式（卡片最大化或整体全屏）下禁用 UI 缩放按钮
-        if (__isCanvasNodeMaximizedActive() || CanvasState.isFullscreen) {
+        // [Feature] 全屏模式（卡片最大化）下禁用 UI 缩放按钮
+        if (__isCanvasNodeMaximizedActive()) {
             return;
         }
         const content = document.getElementById('canvasContent');
@@ -8876,7 +8892,7 @@ function createCanvasSidePanelSettingsModal() {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    getOverlayContainer().appendChild(modal);
 
     const closeBtn = modal.querySelector('#sidePanelModalCloseBtn');
     if (closeBtn) closeBtn.addEventListener('click', closeCanvasSidePanelSettingsModal);
@@ -15252,10 +15268,10 @@ function setupCanvasFullscreenControls() {
     if (!btn || !container) return;
 
     const inSidePanelMode = window.__SIDE_PANEL_MODE__ === true;
-    const canRequestFullscreen = container.requestFullscreen ||
-        container.webkitRequestFullscreen ||
-        container.mozRequestFullScreen ||
-        container.msRequestFullscreen;
+    const canRequestFullscreen = document.documentElement.requestFullscreen ||
+        document.documentElement.webkitRequestFullscreen ||
+        document.documentElement.mozRequestFullScreen ||
+        document.documentElement.msRequestFullscreen;
     if (!canRequestFullscreen && !inSidePanelMode) {
         btn.style.display = 'none';
         return;
@@ -15264,6 +15280,74 @@ function setupCanvasFullscreenControls() {
     if (!CanvasState.fullscreenHandlersBound) {
         btn.addEventListener('click', toggleCanvasFullscreen);
         document.addEventListener('fullscreenchange', handleCanvasFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleCanvasFullscreenChange);
+        document.addEventListener('mozfullscreenchange', handleCanvasFullscreenChange);
+        document.addEventListener('MSFullscreenChange', handleCanvasFullscreenChange);
+        
+        // Listen to window resize events to detect Chrome window fullscreen state changes
+        window.addEventListener('resize', () => {
+            if (window.__canvasResizeTimeout) clearTimeout(window.__canvasResizeTimeout);
+            window.__canvasResizeTimeout = setTimeout(() => {
+                handleCanvasFullscreenChange();
+            }, 120);
+        });
+
+        // ESC key listener to exit fullscreen mode safely without conflicting with overlays/selectMode
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const isCurrentlyFullscreen = !!getCurrentFullscreenElement() || (CanvasState.isFullscreen === true);
+                if (!isCurrentlyFullscreen) return;
+
+                // 1. If pointer drag is active, let drag-and-drop handle it
+                if (window.pointerDragState && window.pointerDragState.isDragging) {
+                    return;
+                }
+
+                // 2. If selectMode is active (batch operations), let selectMode handle it
+                if (typeof window.selectMode !== 'undefined' && window.selectMode === true) {
+                    return;
+                }
+
+                // 3. If context menu is open, let context menu handle it
+                const contextMenu = document.getElementById('bookmark-context-menu');
+                if (contextMenu && contextMenu.style.display !== 'none') {
+                    return;
+                }
+
+                // 4. If settingsMenu or quickAddMenu is open, let them handle it
+                const settingsMenu = document.getElementById('settingsMenu');
+                if (settingsMenu && !settingsMenu.hasAttribute('hidden')) {
+                    return;
+                }
+                const quickAddMenu = document.getElementById('quickAddMenu');
+                if (quickAddMenu && !quickAddMenu.hasAttribute('hidden')) {
+                    return;
+                }
+
+                // 5. If tag popover is open, let tag popover handle it
+                const tagPopover = document.querySelector('.tag-popover');
+                if (tagPopover && !tagPopover.hidden) {
+                    return;
+                }
+
+                // 6. If any modal / dialog is active, let them handle it
+                const hasVisibleModal = Array.from(document.querySelectorAll('.modal, .canvas-manage-modal, .canvas-help-modal')).some(el => {
+                    return el.classList.contains('show') || (el.style.display && el.style.display !== 'none');
+                });
+                if (hasVisibleModal) {
+                    return;
+                }
+
+                // 7. If typing in an input or textarea, let that handle it (e.g. revert / blur)
+                const activeEl = document.activeElement;
+                if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
+                    return;
+                }
+
+                toggleCanvasFullscreen();
+            }
+        });
+
         CanvasState.fullscreenHandlersBound = true;
     }
 
@@ -15294,44 +15378,90 @@ function toggleCanvasFullscreen() {
         return;
     }
 
-    const container = document.querySelector('.canvas-main-container');
-    if (!container) return;
-
+    const target = document.documentElement;
     const fullscreenElement = getCurrentFullscreenElement();
-    if (fullscreenElement === container) {
+    const isCurrentlyFullscreen = !!fullscreenElement || (CanvasState.isFullscreen === true);
+
+    if (isCurrentlyFullscreen) {
         const exit = document.exitFullscreen ||
             document.webkitExitFullscreen ||
             document.mozCancelFullScreen ||
             document.msExitFullscreen;
-        if (exit) {
+        if (exit && fullscreenElement) {
             Promise.resolve(exit.call(document)).catch(error => {
-                console.warn('[Canvas] 退出全屏失败:', error);
+                console.warn('[Canvas] HTML5 退出全屏失败:', error);
+            });
+        }
+        if (typeof chrome !== 'undefined' && chrome.windows && typeof chrome.windows.getCurrent === 'function') {
+            chrome.windows.getCurrent((win) => {
+                if (win && win.state === 'fullscreen') {
+                    const prevState = localStorage.getItem('canvas-pre-fullscreen-window-state') || 'normal';
+                    const targetState = (prevState === 'fullscreen') ? 'normal' : prevState;
+                    chrome.windows.update(win.id, { state: targetState });
+                }
             });
         }
         return;
     }
 
-    const request = container.requestFullscreen ||
-        container.webkitRequestFullscreen ||
-        container.mozRequestFullScreen ||
-        container.msRequestFullscreen;
-    if (request) {
-        const hasTransientActivation = (typeof navigator !== 'undefined' && navigator.userActivation)
-            ? navigator.userActivation.isActive === true
-            : true;
-        if (!hasTransientActivation) {
-            console.warn('[Canvas] 无法进入全屏: 当前没有用户手势激活 (API只能由用户手势触发)');
-            return;
-        }
-        Promise.resolve(request.call(container)).catch(error => {
-            console.warn('[Canvas] 进入全屏失败:', error);
+    const request = target.requestFullscreen ||
+        target.webkitRequestFullscreen ||
+        target.mozRequestFullScreen ||
+        target.msRequestFullscreen;
+
+    const hasTransientActivation = (typeof navigator !== 'undefined' && navigator.userActivation)
+        ? navigator.userActivation.isActive === true
+        : true;
+
+    if (request && hasTransientActivation) {
+        Promise.resolve(request.call(target)).catch(error => {
+            console.warn('[Canvas] HTML5 进入全屏失败, 尝试使用 Chrome 窗口全屏 API:', error);
+            enterExtensionWindowFullscreen();
+        });
+    } else {
+        console.warn('[Canvas] 无用户手势激活或 API 不可用, 尝试使用 Chrome 窗口全屏 API');
+        enterExtensionWindowFullscreen();
+    }
+}
+
+function enterExtensionWindowFullscreen() {
+    if (typeof chrome !== 'undefined' && chrome.windows && typeof chrome.windows.getCurrent === 'function') {
+        chrome.windows.getCurrent((win) => {
+            if (win && typeof win.id === 'number') {
+                const prevState = win.state || 'normal';
+                localStorage.setItem('canvas-pre-fullscreen-window-state', prevState);
+                chrome.windows.update(win.id, { state: 'fullscreen' });
+            }
         });
     }
 }
 
 function handleCanvasFullscreenChange() {
-    const container = document.querySelector('.canvas-main-container');
-    CanvasState.isFullscreen = getCurrentFullscreenElement() === container;
+    const fullscreenElement = getCurrentFullscreenElement();
+    const isHtmlFullscreen = !!fullscreenElement;
+
+    if (typeof chrome !== 'undefined' && chrome.windows && typeof chrome.windows.getCurrent === 'function') {
+        chrome.windows.getCurrent((win) => {
+            const isWindowFullscreen = win && win.state === 'fullscreen';
+            applyCanvasFullscreenState(isHtmlFullscreen || isWindowFullscreen);
+        });
+    } else {
+        applyCanvasFullscreenState(isHtmlFullscreen);
+    }
+}
+
+function applyCanvasFullscreenState(nextIsFullscreen) {
+    CanvasState.isFullscreen = nextIsFullscreen;
+
+    // Toggle page-level CSS classes so styles adjust correctly
+    if (CanvasState.isFullscreen) {
+        document.documentElement.classList.add('canvas-page-fullscreen-active');
+        document.body.classList.add('canvas-page-fullscreen-active');
+    } else {
+        document.documentElement.classList.remove('canvas-page-fullscreen-active');
+        document.body.classList.remove('canvas-page-fullscreen-active');
+    }
+
     updateFullscreenButtonState();
     updateNodeFullscreenButtons();
 
@@ -15351,13 +15481,12 @@ function handleCanvasFullscreenChange() {
 
 function updateFullscreenButtonState() {
     const btn = document.getElementById('canvasFullscreenBtn');
-    const container = document.querySelector('.canvas-main-container');
-    if (!btn || !container) return;
+    if (!btn) return;
 
     const lang = getCanvasLanguage();
     const enterLabel = getFullscreenLabel('canvasFullscreenEnter', lang);
     const exitLabel = getFullscreenLabel('canvasFullscreenExit', lang);
-    let isFullscreen = getCurrentFullscreenElement() === container;
+    let isFullscreen = CanvasState.isFullscreen === true;
     if (window.__SIDE_PANEL_MODE__ === true) {
         const sidePanelFullscreenGetter = window.__canvasSidePanelGetFullscreenState;
         if (typeof sidePanelFullscreenGetter === 'function') {
@@ -20303,7 +20432,7 @@ function handlePermanentDragStart(e, data, type) {
     preview.className = 'drag-preview';
     preview.textContent = previewText || '';
     preview.style.left = '-9999px';
-    document.body.appendChild(preview);
+    getOverlayContainer().appendChild(preview);
     e.dataTransfer.setDragImage(preview, 0, 0);
     setTimeout(() => preview.remove(), 0);
 }
@@ -21676,7 +21805,7 @@ function __renderMdNodeImpl(node, options = {}) {
                 closeFontColorPopover();
             });
         }
-        document.body.appendChild(pop);
+        getOverlayContainer().appendChild(pop);
         return pop;
     };
 
@@ -25609,8 +25738,9 @@ function __clearMdColorPopoverContextAnchor(toolbar, pop) {
 
 function __positionMdColorPopoverAtViewportPoint(toolbar, pop, anchorPoint) {
     if (!toolbar || !pop || !anchorPoint || !pop.classList.contains('open')) return;
-    if (pop.parentElement !== document.body) {
-        document.body.appendChild(pop);
+    const targetParent = getOverlayContainer();
+    if (pop.parentElement !== targetParent) {
+        targetParent.appendChild(pop);
     }
     pop.classList.add('context-anchored');
     pop.dataset.contextAnchored = '1';
@@ -28987,7 +29117,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                 closeFontColorPopover();
             });
         }
-        document.body.appendChild(pop);
+        getOverlayContainer().appendChild(pop);
         return pop;
     };
 
@@ -29898,8 +30028,9 @@ function __renderTempNodeImpl(section, options = {}) {
 
     const positionColorPopoverAtViewportPoint = (anchorPoint) => {
         if (!anchorPoint || !colorPopover.classList.contains('open')) return;
-        if (colorPopover.parentElement !== document.body) {
-            document.body.appendChild(colorPopover);
+        const targetParent = getOverlayContainer();
+        if (colorPopover.parentElement !== targetParent) {
+            targetParent.appendChild(colorPopover);
         }
         colorPopover.classList.add('context-anchored');
         colorPopover.dataset.contextAnchored = '1';
@@ -33286,7 +33417,7 @@ function showClickToClearToolbar() {
         </div>
     `;
 
-    document.body.appendChild(toolbar);
+    getOverlayContainer().appendChild(toolbar);
 
     // 绑定事件
     document.getElementById('clickToClearConfirmBtn').addEventListener('click', confirmClickToClear);
@@ -33353,7 +33484,7 @@ function confirmClickToClear() {
         </div>
     `;
 
-    document.body.appendChild(popup);
+    getOverlayContainer().appendChild(popup);
 
     // 绑定事件
     document.getElementById('clickToClearPopupCancelBtn').addEventListener('click', () => {
@@ -36813,7 +36944,7 @@ function __updateCanvasPerfHud() {
             'white-space:pre',
             'pointer-events:none'
         ].join(';');
-        document.body.appendChild(el);
+        getOverlayContainer().appendChild(el);
     }
 
     const tempCount = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
@@ -38052,7 +38183,7 @@ function __createEdgeContextPopoverHost(edgeId, className) {
     host.style.top = '0px';
     host.style.zIndex = '10001';
     host.style.pointerEvents = 'auto';
-    document.body.appendChild(host);
+    getOverlayContainer().appendChild(host);
     preventCanvasEventsPropagation(host);
     host.addEventListener('click', (event) => {
         const btn = event.target.closest('.md-color-chip, .md-color-picker-btn, .md-node-toolbar-btn');
@@ -38248,7 +38379,7 @@ function openEdgeLabelPopover(edgeId, options = {}) {
 
     popover.appendChild(input);
     popover.appendChild(confirmBtn);
-    document.body.appendChild(popover);
+    getOverlayContainer().appendChild(popover);
     preventCanvasEventsPropagation(popover);
     __positionTempFloatingPopoverAtPoint(popover, options && options.anchorPoint ? options.anchorPoint : null);
 
@@ -38321,7 +38452,7 @@ function openTempSectionRename(sectionId, options = {}) {
         confirmBtn.innerHTML = '<i class="fas fa-check"></i>';
         popover.appendChild(input);
         popover.appendChild(confirmBtn);
-        document.body.appendChild(popover);
+        getOverlayContainer().appendChild(popover);
         preventCanvasEventsPropagation(popover);
         __positionTempFloatingPopoverAtPoint(popover, anchorPoint);
 
@@ -39447,7 +39578,7 @@ function createCanvasAppearanceSettingsModal() {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    getOverlayContainer().appendChild(modal);
 
     const closeBtn = modal.querySelector('#appearanceModalCloseBtn');
     if (closeBtn) closeBtn.addEventListener('click', closeCanvasAppearanceSettingsModal);
@@ -40615,7 +40746,7 @@ function createCanvasOtherSettingsModal() {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    getOverlayContainer().appendChild(modal);
 
     const closeBtn = modal.querySelector('#otherModalCloseBtn');
     if (closeBtn) closeBtn.addEventListener('click', closeCanvasOtherSettingsModal);
@@ -41623,7 +41754,7 @@ function createCanvasPerfSettingsModal() {
         </div>
     `;
 
-    document.body.appendChild(modal);
+    getOverlayContainer().appendChild(modal);
 
     // Bind events programmatically
     const closeBtn = modal.querySelector('#perfModalCloseBtn');

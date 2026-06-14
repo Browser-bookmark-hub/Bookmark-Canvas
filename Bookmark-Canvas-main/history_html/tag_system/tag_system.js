@@ -12,6 +12,20 @@
 (function tagSystemModule() {
     const TAG_PALETTE = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
 
+    function getOverlayContainer() {
+        if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+            return window.getOverlayContainer();
+        }
+        const container = document.querySelector('.canvas-main-container');
+        if (container && (document.fullscreenElement === container || 
+                          document.webkitFullscreenElement === container || 
+                          document.mozFullScreenElement === container || 
+                          document.msFullscreenElement === container)) {
+            return container;
+        }
+        return document.body;
+    }
+
     const TAG_COLOR_NAMES = {
         red:    { 'zh_CN': '红色',  'en': 'Red' },
         orange: { 'zh_CN': '橙色',  'en': 'Orange' },
@@ -189,7 +203,7 @@
                 <button class="tag-popover-more" data-role="recent-more" type="button" hidden></button>
             </div>
         `;
-        document.body.appendChild(el);
+        getOverlayContainer().appendChild(el);
         __popoverEl = el;
 
         el.addEventListener('click', __onPopoverClick);
@@ -294,8 +308,9 @@
         if (top + popRect.height > vh - 8) {
             top = Math.max(8, vh - popRect.height - 8);
         }
-        pop.style.left = `${Math.round(left + window.scrollX)}px`;
-        pop.style.top = `${Math.round(top + window.scrollY)}px`;
+        const parentRect = pop.parentElement.getBoundingClientRect();
+        pop.style.left = `${Math.round(left - parentRect.left)}px`;
+        pop.style.top = `${Math.round(top - parentRect.top)}px`;
     }
 
     function __updatePreview() {
@@ -844,12 +859,16 @@
         const el = document.createElement('div');
         el.className = 'tag-hover-bubble';
         el.hidden = true;
-        document.body.appendChild(el);
+        getOverlayContainer().appendChild(el);
         __hoverBubble = el;
         return el;
     }
     function __showHoverBubble(dot) {
         const bubble = __ensureHoverBubble();
+        const targetParent = getOverlayContainer();
+        if (bubble.parentElement !== targetParent) {
+            targetParent.appendChild(bubble);
+        }
         const color = dot.dataset.color;
         const text = dot.dataset.text || __colorName(color);
         bubble.dataset.color = color;
@@ -1085,7 +1104,11 @@
             editingTag: initialTag,
             recentLimit: RECENT_INITIAL_VISIBLE
         };
-        __ensurePopoverDom();
+        const pop = __ensurePopoverDom();
+        const targetParent = getOverlayContainer();
+        if (pop.parentElement !== targetParent) {
+            targetParent.appendChild(pop);
+        }
         const inputEl = __popoverEl.querySelector('[data-role="input"]');
         if (inputEl) inputEl.value = initialTag ? (initialTag.text || __colorName(initialTag.color)) : '';
         __renderPopover().then(() => __positionPopover(anchor));

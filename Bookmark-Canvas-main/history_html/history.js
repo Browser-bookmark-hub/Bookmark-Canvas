@@ -5724,7 +5724,7 @@ function applyLanguage() {
         }
         const container = document.querySelector('.canvas-main-container');
         const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
-        const isFullscreen = container && fullscreenElement === container;
+        const isFullscreen = !!(fullscreenElement && (fullscreenElement === container || fullscreenElement === document.documentElement || fullscreenElement === document.body)) || (window.CanvasModule && window.CanvasModule.CanvasState && window.CanvasModule.CanvasState.isFullscreen === true);
         const key = isFullscreen ? 'canvasFullscreenExit' : 'canvasFullscreenEnter';
         const text = i18n[key] && i18n[key][currentLang] ? i18n[key][currentLang] : (key === 'canvasFullscreenExit' ? (currentLang === 'en' ? 'Exit' : '退出') : (currentLang === 'en' ? 'Fullscreen' : '全屏'));
         fullscreenBtn.textContent = text;
@@ -6378,14 +6378,34 @@ function getCanvasContainerFullscreenState() {
             || document.webkitFullscreenElement
             || document.mozFullScreenElement
             || document.msFullscreenElement;
+        
+        let isNowFullscreen = false;
+        if (window.CanvasModule && window.CanvasModule.CanvasState && typeof window.CanvasModule.CanvasState.isFullscreen === 'boolean') {
+            isNowFullscreen = window.CanvasModule.CanvasState.isFullscreen;
+        } else {
+            isNowFullscreen = !!(fullscreenElement && (fullscreenElement === container || fullscreenElement === document.documentElement || fullscreenElement === document.body));
+        }
+
         return {
             container,
-            isFullscreen: Boolean(container && fullscreenElement === container)
+            isFullscreen: isNowFullscreen
         };
     } catch (_) {
         return { container: null, isFullscreen: false };
     }
 }
+
+window.getOverlayContainer = function() {
+    const container = document.querySelector('.canvas-main-container');
+    if (container && (document.fullscreenElement === container || 
+                      document.webkitFullscreenElement === container || 
+                      document.mozFullScreenElement === container || 
+                      document.msFullscreenElement === container)) {
+        return container;
+    }
+    return document.body;
+};
+
 
 function isCanvasFullscreenControlReady() {
     try {
@@ -6683,6 +6703,11 @@ async function openOrFocusCanvasPage(options = {}) {
             await waitForTabComplete(targetTabId);
         }
         await requestCanvasTabFullscreen(targetTabId, normalizedIntent);
+        if (isSidePanelMode && normalizedIntent === 'enter') {
+            try {
+                await requestSidePanelToggle('closeSidePanelFromCanvasPage');
+            } catch (_) {}
+        }
     }
 
     return targetTabId;
@@ -15047,7 +15072,8 @@ function showToast(message, options = {}) {
     textSpan.textContent = message;
     toast.appendChild(textSpan);
     
-    document.body.appendChild(toast);
+    const targetParent = (typeof window.getOverlayContainer === 'function') ? window.getOverlayContainer() : document.body;
+    targetParent.appendChild(toast);
 
     if (duration > 0) {
         setTimeout(() => {
