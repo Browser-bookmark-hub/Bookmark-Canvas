@@ -1870,10 +1870,13 @@ function __rebuildIdentityMapPreservingExisting(prevContent, nextTreeRoot) {
 }
 
 function __applyIdentityMapDeltaFromBookmarkEvents(content, events) {
-    if (!content || typeof content !== 'object' || !Array.isArray(events) || !events.length) return content;
+    if (!content || typeof content !== 'object' || !Array.isArray(events) || !events.length) {
+        return { changed: false, content };
+    }
     if (!Array.isArray(content.identityMap)) content.identityMap = [];
-    const list = content.identityMap;
+    let list = content.identityMap;
     const idx = __getIdentityMapIndex(content);
+    let changed = false;
 
     for (const ev of events) {
         if (!ev || typeof ev !== 'object') continue;
@@ -1885,6 +1888,7 @@ function __applyIdentityMapDeltaFromBookmarkEvents(content, events) {
             list.push(entry);
             idx.byChromeId.set(entry.id, entry);
             idx.bySyncId.set(entry.syncId, entry);
+            changed = true;
         } else if (type === 'removed') {
             const targetId = String(ev.id || '').trim();
             if (!targetId) continue;
@@ -1900,20 +1904,31 @@ function __applyIdentityMapDeltaFromBookmarkEvents(content, events) {
                     if (Array.isArray(child.children)) stack.push(...child.children);
                 }
             }
-            for (let i = list.length - 1; i >= 0; i--) {
-                if (descendants.has(list[i].id)) {
-                    const removed = list.splice(i, 1)[0];
-                    if (removed) {
-                        idx.byChromeId.delete(removed.id);
-                        idx.bySyncId.delete(removed.syncId);
-                    }
+            
+            // Rebuild list in O(N) to optimize splice performance
+            let removedAny = false;
+            const newList = [];
+            for (const item of list) {
+                if (descendants.has(String(item.id))) {
+                    idx.byChromeId.delete(item.id);
+                    idx.bySyncId.delete(item.syncId);
+                    removedAny = true;
+                } else {
+                    newList.push(item);
                 }
+            }
+            if (removedAny) {
+                list = newList;
+                content.identityMap = list;
+                changed = true;
             }
         }
         // 'moved' and 'changed' do not affect identityMap: syncId is bound to chromeId, not to position/title.
     }
-    __invalidateIdentityMapIndex(content);
-    return content;
+    if (changed) {
+        __invalidateIdentityMapIndex(content);
+    }
+    return { changed, content };
 }
 
 
@@ -2477,10 +2492,14 @@ async function __applyPermanentBookmarkEventsToBcs(eventsInput, options = {}) {
             if (eventChanged) changed = true;
             else noopCount += 1;
         }
+        let identityMapChanged = false;
         if (!suppressIdentityMapDelta && content && typeof content === 'object') {
-            __applyIdentityMapDeltaFromBookmarkEvents(content, events);
+            const deltaResult = __applyIdentityMapDeltaFromBookmarkEvents(content, events);
+            if (deltaResult && deltaResult.changed) {
+                identityMapChanged = true;
+            }
         }
-        if (!changed) return false;
+        if (!changed && !identityMapChanged) return false;
         return {
             applied: appliedCount,
             noops: noopCount,

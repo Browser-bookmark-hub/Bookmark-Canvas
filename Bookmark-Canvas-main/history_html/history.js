@@ -1260,7 +1260,7 @@ async function applyPermanentBookmarkEventsToDomIncremental(events, options = {}
         } else if (event.type === 'removed') {
             const id = event.id;
             const removeInfo = event.removeInfo || { parentId: event.parentId, index: event.index };
-            removeBookmarkFromCache(id);
+            removeBookmarkFromCache(id, removeInfo);
             const appliedToCachedTree = applyIncrementalRemoveFromCachedCurrentTree(id, removeInfo);
             if (appliedToCachedTree) {
                 refreshPermanentSharedSourceAfterDomPatch('remove');
@@ -3907,13 +3907,44 @@ function addBookmarkToCache(bookmark) {
     handleBookmarkCacheMutation(true);
 }
 
-function removeBookmarkFromCache(bookmarkId) {
+function removeBookmarkFromCache(bookmarkId, removeInfo = null) {
     if (!bookmarkId) return;
-    const index = allBookmarks.findIndex(item => item.id === bookmarkId);
-    if (index === -1) return;
-    removeUrlFromBookmarkSet(allBookmarks[index].url);
-    allBookmarks.splice(index, 1);
-    handleBookmarkCacheMutation(true);
+    const descendants = new Set([String(bookmarkId)]);
+    const removedNode = removeInfo && (removeInfo.node || removeInfo.bookmark);
+    if (removedNode && Array.isArray(removedNode.children)) {
+        const stack = [...removedNode.children];
+        while (stack.length) {
+            const child = stack.pop();
+            if (child) {
+                if (child.id) descendants.add(String(child.id));
+                if (Array.isArray(child.children)) stack.push(...child.children);
+            }
+        }
+    }
+
+    // Pre-collect all URLs of bookmarks that are NOT being deleted to make check O(1)
+    const remainingUrls = new Set();
+    for (const item of allBookmarks) {
+        if (!descendants.has(String(item.id))) {
+            remainingUrls.add(item.url);
+        }
+    }
+
+    let changed = false;
+    allBookmarks = allBookmarks.filter(item => {
+        if (descendants.has(String(item.id))) {
+            if (!remainingUrls.has(item.url)) {
+                removeUrlFromBookmarkSet(item.url);
+            }
+            changed = true;
+            return false;
+        }
+        return true;
+    });
+
+    if (changed) {
+        handleBookmarkCacheMutation(true);
+    }
 }
 
 function updateBookmarkInCache(bookmarkId, changeInfo = {}) {
@@ -3930,7 +3961,10 @@ function updateBookmarkInCache(bookmarkId, changeInfo = {}) {
     }
     if (typeof changeInfo.url !== 'undefined') {
         target.url = changeInfo.url;
-        removeUrlFromBookmarkSet(prevUrl);
+        const isUrlShared = allBookmarks.some(item => item.id !== bookmarkId && item.url === prevUrl);
+        if (!isUrlShared) {
+            removeUrlFromBookmarkSet(prevUrl);
+        }
         addUrlToBookmarkSet(changeInfo.url);
     }
     handleBookmarkCacheMutation(true);
@@ -14463,16 +14497,16 @@ async function handleBookmarkCreateRealtime(id, bookmark, options = {}) {
 }
 
 async function handleBookmarkRemoveRealtime(id, removeInfo, options = {}) {
+    const enrichedRemoveInfo = enrichRemoveInfoWithSnapshot(id, removeInfo);
     if (!(options && options.skipBcsIncremental === true)) {
         await applyPermanentBookmarkEventsToBcsIncremental({
             type: 'removed',
             id: String(id),
-            removeInfo
+            removeInfo: enrichedRemoveInfo || removeInfo
         }, 'onRemoved');
     }
-    removeBookmarkFromCache(id);
+    removeBookmarkFromCache(id, enrichedRemoveInfo || removeInfo);
 
-    const enrichedRemoveInfo = enrichRemoveInfoWithSnapshot(id, removeInfo);
     clearIncrementalDeletedSnapshots('onRemoved');
 
     if (enrichedRemoveInfo && enrichedRemoveInfo.node && enrichedRemoveInfo.node.url) {
@@ -14583,7 +14617,7 @@ async function flushPendingBookmarkMutationEvents(reason = '') {
                             return;
                         }
                         if (event.type === 'removed') {
-                            removeBookmarkFromCache(event.id);
+                            removeBookmarkFromCache(event.id, event.removeInfo);
                             if (event.removeInfo && event.removeInfo.node && event.removeInfo.node.url) {
                                 FaviconCache.clear(event.removeInfo.node.url);
                             }
@@ -14667,10 +14701,11 @@ function setupBookmarkListener() {
                 noteBookmarkBulkMutation('bookmark-removed');
                 return;
             }
+            const enriched = enrichRemoveInfoWithSnapshot(id, removeInfo);
             enqueueBookmarkMutationEvent({
                 type: 'removed',
                 id: String(id),
-                removeInfo
+                removeInfo: enriched
             });
         } catch (e) {
             console.warn('[书签监听] onRemoved 处理异常:', e);
