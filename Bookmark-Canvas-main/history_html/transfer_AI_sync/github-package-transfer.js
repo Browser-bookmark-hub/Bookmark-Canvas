@@ -565,7 +565,7 @@
                  Please ensure that you use ${hl('「Open folder as vault」')} in Obsidian to open the folder cloned (pulled) from GitHub: ${hl(repoName)}.
                </div>`
             : `<div style="margin-top: 12px; line-height: 1.6;">
-                 请确保在 Obsidian 中使用 ${hl('「打开本地仓库」')} 打开您从 GitHub 克隆（拉取）到本地的 ${hl(repoName)} 文件夹。
+                 请确保在 Obsidian 中使用 ${hl('「打开本地仓库」')} 打开您从 GitHub 克隆（拉取）到本地的 ${hl(repoName)} 文件夹（即Repo名字的文件夹）。
                </div>`;
 
         const targetPath = getRemoteRootPath(config) || getDefaultRemoteRoot();
