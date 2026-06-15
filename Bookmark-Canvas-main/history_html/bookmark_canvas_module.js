@@ -97,7 +97,8 @@ const CanvasState = {
         zoomDeltaTimer: null,
         lastZoomInputMode: 'wheel',
         lastZoomInputTime: 0,
-        isPinchGestureActive: false
+        isPinchGestureActive: false,
+        gestureEventsSupported: false
     },
     lastCanvasScrollTime: 0,
     // 自动滚动状态（拖动到边缘时）
@@ -7124,6 +7125,7 @@ function setupCanvasZoomAndPan() {
     // 监听触控板物理捏合手势的开始和结束，以便精准识别并丢弃手势结束后的物理惯性事件
     workspace.addEventListener('gesturestart', (e) => {
         CanvasState.touchpadState.isPinchGestureActive = true;
+        CanvasState.touchpadState.gestureEventsSupported = true;
     });
     workspace.addEventListener('gestureend', (e) => {
         CanvasState.touchpadState.isPinchGestureActive = false;
@@ -7147,8 +7149,10 @@ function setupCanvasZoomAndPan() {
         const isZoomingActive = workspaceEl && (workspaceEl.classList.contains('is-zooming') || workspaceEl._zoomEndTimer);
         const hasRecentZoom = isZoomingActive || (now - lastZoomTime < 800);
 
-        // 如果是触控板物理捏合，但物理手势已经结束（手指抬起），忽略后续的物理捏合惯性事件
-        if (__isCanvasTouchpadPinch(e) && !CanvasState.touchpadState.isPinchGestureActive) {
+        // 如果是触控板物理捏合，但物理手势已经结束（手指抬起），且不是缩放激活状态，忽略后续的物理捏合惯性事件
+        // 仅在支持且已触发过 gesture 事件的设备/浏览器上启用此惯性拦截，避免在 Windows/Linux 或不支持 gesturestart 的环境下导致缩放完全失效
+        const useGestureCheck = !!CanvasState.touchpadState.gestureEventsSupported;
+        if (__isCanvasTouchpadPinch(e) && useGestureCheck && !CanvasState.touchpadState.isPinchGestureActive && !isZoomingActive) {
             e.preventDefault();
             return;
         }
