@@ -1810,12 +1810,18 @@ const FaviconCache = {
     },
 
     // 清除特定URL的缓存（用于书签URL修改时）
-    async clear(url) {
+    async clear(url, options = {}) {
         if (this.isInvalidUrl(url)) return;
 
         try {
             const domain = this._getHostnameKey(url);
             if (!domain) return;
+
+            // 如果启用了共享检查，且还有其他书签共享该域名，则不予清除
+            if (options.checkShare === true && typeof allBookmarks !== 'undefined') {
+                const isDomainShared = allBookmarks.some(item => this._getHostnameKey(item.url) === domain);
+                if (isDomainShared) return;
+            }
 
             // 清除内存缓存
             this.memoryCache.delete(domain);
@@ -14510,7 +14516,7 @@ async function handleBookmarkRemoveRealtime(id, removeInfo, options = {}) {
     clearIncrementalDeletedSnapshots('onRemoved');
 
     if (enrichedRemoveInfo && enrichedRemoveInfo.node && enrichedRemoveInfo.node.url) {
-        FaviconCache.clear(enrichedRemoveInfo.node.url);
+        FaviconCache.clear(enrichedRemoveInfo.node.url, { checkShare: true });
     }
 
     if (currentView === 'canvas') {
@@ -14619,7 +14625,7 @@ async function flushPendingBookmarkMutationEvents(reason = '') {
                         if (event.type === 'removed') {
                             removeBookmarkFromCache(event.id, event.removeInfo);
                             if (event.removeInfo && event.removeInfo.node && event.removeInfo.node.url) {
-                                FaviconCache.clear(event.removeInfo.node.url);
+                                FaviconCache.clear(event.removeInfo.node.url, { checkShare: true });
                             }
                             return;
                         }
