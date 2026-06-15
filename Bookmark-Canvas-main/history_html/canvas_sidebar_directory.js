@@ -533,6 +533,9 @@
     if (!section) return '';
     const explicit = normalizeText(section.label);
     if (explicit) return explicit;
+    if (section.isSnapshot) {
+      return t('导入', 'Import');
+    }
     const seq = toPositiveInt(section.sequenceNumber);
     if (!seq) return '';
     const alpha = toAlphaLabel(seq);
@@ -560,6 +563,7 @@
 
   function isSpecialTempSection(section) {
     if (!section) return false;
+    if (section.isSnapshot) return true;
     const tempKindRaw = normalizeText(section.tempKind).toLowerCase();
     if (tempKindRaw === 'special') return true;
     if (tempKindRaw === 'regular') return false;

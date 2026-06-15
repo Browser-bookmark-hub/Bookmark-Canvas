@@ -1156,6 +1156,19 @@ async function __performOverwriteImport(payload) {
         throw new Error(isEn ? 'Import package missing permanent main content.' : '导入包缺少永久主体内容。');
     }
     const importTree = importPermMain.tree;
+    if (importTree && Array.isArray(importTree.children)) {
+        importTree.children = importTree.children.filter(child => {
+            if (!child) return false;
+            const rawFt = child.folderType || child.folder_type || '';
+            const ft = typeof __normalizeBookmarkFolderType === 'function'
+                ? __normalizeBookmarkFolderType(rawFt)
+                : String(rawFt).trim().toLowerCase();
+            if (typeof __canPersistBookmarkRootSyncing === 'function') {
+                return __canPersistBookmarkRootSyncing(ft);
+            }
+            return ft === 'bookmarks-bar' || ft === 'other' || ft === 'mobile' || ft === 'managed';
+        });
+    }
     const importIdentityMap = Array.isArray(importPermMain.identityMap) ? importPermMain.identityMap : [];
 
     // 3. Decide branch.
@@ -4480,8 +4493,7 @@ async function __inflateDeflate(compressed) {
 function __buildImportedStorageFromCanvasPackage(canvasData, sourceFiles, options = {}) {
     const storage = {};
     if (!(sourceFiles instanceof Map)) return storage;
-    const overwriteMode = !!(options && options.importMode === 'overwrite');
-    if (overwriteMode && canvasData && typeof canvasData === 'object') {
+    if (canvasData && typeof canvasData === 'object') {
         try {
             storage[BCS_CANVAS_KEY] = (typeof __formatObsidianCanvasJson === 'function')
                 ? __formatObsidianCanvasJson(canvasData)

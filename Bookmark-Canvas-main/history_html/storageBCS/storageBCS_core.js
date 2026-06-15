@@ -1132,6 +1132,9 @@ function __normalizePermanentTreeSnapshotForLocalStorage(rawTree, options = {}) 
                 || nodeInput.folder_type
                 || __permanentRootKeyToFolderType(inferredRootKey)
             );
+            if (!__canPersistBookmarkRootSyncing(folderType)) {
+                return null;
+            }
             const syncing = __canPersistBookmarkRootSyncing(folderType)
                 ? __normalizeBookmarkRootSyncing(nodeInput.syncing)
                 : null;
@@ -1819,22 +1822,25 @@ function __validateImportedIdentityMapAgainstTree(treeRoot, identityMap, expecte
 // doc 第三轮修复 §2.2: 默认从 fresh tree 中收集"应当跳过"的 chromeId。
 // 当前规则: 顶层 children 中 folderType === 'managed' 的节点（含其后代）整体跳过。
 // 日后若需要扩展（例如其它 read-only 根），在这里追加判定即可。
+// 额外追加: 任何 id 不为 '1', '2', '3' 的根节点及后代也一并忽略（如 Edge Workspace 文件夹），避免校验失败。
 function __collectIgnoredChromeIdsFromFreshTree(treeRoot) {
     const ignored = new Set();
     if (!treeRoot || typeof treeRoot !== 'object') return ignored;
     const topChildren = Array.isArray(treeRoot.children) ? treeRoot.children : [];
     for (const top of topChildren) {
         if (!top || typeof top !== 'object') continue;
+        const topId = String(top.id || '').trim();
         const ft = __normalizeBookmarkFolderType(top.folderType || top.folder_type || '');
-        if (ft !== 'managed') continue;
-        const stack = [top];
-        while (stack.length) {
-            const node = stack.pop();
-            if (!node || typeof node !== 'object') continue;
-            const id = String(node.id || '').trim();
-            if (id) ignored.add(id);
-            if (Array.isArray(node.children)) {
-                for (const child of node.children) stack.push(child);
+        if (ft === 'managed' || (topId !== '1' && topId !== '2' && topId !== '3')) {
+            const stack = [top];
+            while (stack.length) {
+                const node = stack.pop();
+                if (!node || typeof node !== 'object') continue;
+                const id = String(node.id || '').trim();
+                if (id) ignored.add(id);
+                if (Array.isArray(node.children)) {
+                    for (const child of node.children) stack.push(child);
+                }
             }
         }
     }
@@ -2973,6 +2979,7 @@ function __buildTempSectionJsonProtocol(section) {
         tempKind,
         source: normalizedSource,
         descriptionMd: String(sectionMeta.descriptionMd == null ? '' : sectionMeta.descriptionMd),
+        isSnapshot: sectionMeta.isSnapshot ? true : undefined,
         items
     };
     if (sectionMeta.originPermanent) payload.originPermanent = sectionMeta.originPermanent;
@@ -4539,7 +4546,10 @@ function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, d
         y: node.y,
         width: node.width,
         height: node.height,
-        color: convertObsidianColor(node.color) || '#fb464c'
+        color: convertObsidianColor(node.color) || '#fb464c',
+        isSnapshot: true,
+        tempKind: 'special',
+        label: isEn ? 'Import' : '导入'
     });
     if (restored) return restored;
 
@@ -4557,7 +4567,10 @@ function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, d
                 ? parsedMarkdown.descriptionMarkdown
                 : __htmlToMarkdown(descriptionHtml)
         ),
-        source: 'obsidian-permanent-reference'
+        source: 'obsidian-permanent-reference',
+        isSnapshot: true,
+        tempKind: 'special',
+        label: isEn ? 'Import' : '导入'
     };
 }
 
@@ -4863,35 +4876,6 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                     }
                 } catch (_) { }
 
-                if (overwriteMode) {
-                    return;
-                }
-
-                const items = __parseMarkdownAuto(resolvedContentToParse);
-                const sectionId = node.id;
-                const slotLabel = toAlphaLabel(resolvedSlot) || '';
-                const suffix = slotLabel ? ` (#${slotLabel})` : '';
-                const dateStr = new Date().toISOString().slice(0, 10);
-                const snapshotTitle = isEn
-                    ? `[Snapshot] Permanent Sections (${dateStr})${suffix}`
-                    : `[快照] 永久栏目 (${dateStr})${suffix}`;
-
-                tempState.sections.push({
-                    id: sectionId,
-                    title: snapshotTitle,
-                    x: node.x,
-                    y: node.y,
-                    width: node.width,
-                    height: node.height,
-                    color: convertObsidianColor(node.color) || '#44cf6e',
-                    items,
-                    descriptionMd: String(
-                        (parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string')
-                            ? parsedMarkdown.descriptionMarkdown
-                            : __htmlToMarkdown(descriptionHtml)
-                    ),
-                    isSnapshot: true
-                });
                 return;
             }
 
@@ -5598,7 +5582,9 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
         const snapshotTitle = isEn
             ? `[Snapshot] Permanent Sections (${dateStr}) (#${slotLabel})`
             : `[快照] 永久栏目 (${dateStr}) (#${slotLabel})`;
-        const originalTip = (fullStorage && fullStorage[PERMANENT_MAIN_TIP_STORAGE_KEY]) || '';
+        const originalTip = (importedPermMainPayload && typeof importedPermMainPayload.descriptionMd === 'string')
+            ? importedPermMainPayload.descriptionMd
+            : ((fullStorage && fullStorage[PERMANENT_MAIN_TIP_STORAGE_KEY]) || '');
 
         newTempSections.push({
             id: snapshotId,
@@ -5610,7 +5596,9 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
             color: '#44cf6e',
             items: cloneImportedTempItems(snapshotItems),
             descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
-            isSnapshot: true
+            isSnapshot: true,
+            tempKind: 'special',
+            label: isEn ? 'Import' : '导入'
         });
 
         const importedPermanentScroll = readImportedScrollState(PERMANENT_SECTION_SCROLL_KEY);
@@ -5636,6 +5624,7 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
             if (!copyPos) return;
             const oldCopyId = String(copyPos.id || '').trim() || `copy-${idx + 1}`;
             const snapshotId = getNewId(`permanent-section-copy:${oldCopyId}`);
+            idMap.set(`permanent-section-copy-${oldCopyId}`, snapshotId); // Map the canvas node ID as well!
             const displayIndex = __normalizePositiveInt(copyPos.displayIndex) || (idx + 1);
             const alphaBadge = toAlphaLabel(displayIndex + 1);
             const dateStr = new Date().toISOString().slice(0, 10);
@@ -5643,7 +5632,10 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
                 ? `[Snapshot] Permanent Sections (${dateStr}) (#${alphaBadge})`
                 : `[快照] 永久栏目 (${dateStr}) (#${alphaBadge})`;
             const copyTipKey = `${PERMANENT_COPY_TIP_STORAGE_PREFIX}${oldCopyId}`;
-            const originalTip = (fullStorage && fullStorage[copyTipKey]) || '';
+            const copyPayload = fullStorage && fullStorage[`bcs:perm:copy-${oldCopyId}`];
+            const originalTip = (copyPayload && typeof copyPayload.descriptionMd === 'string')
+                ? copyPayload.descriptionMd
+                : ((fullStorage && fullStorage[copyTipKey]) || '');
             const copyCardState = (copyPos.cardState && typeof copyPos.cardState === 'object') ? copyPos.cardState : {};
 
             newTempSections.push({
@@ -5656,7 +5648,9 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
                 color: '#44cf6e',
                 items: cloneImportedTempItems(snapshotItems),
                 descriptionMd: __normalizePermanentViewDescriptionMarkdown(originalTip),
-                isSnapshot: true
+                isSnapshot: true,
+                tempKind: 'special',
+                label: isEn ? 'Import' : '导入'
             });
 
             const oldScrollKey = `${PERMANENT_SECTION_SCROLL_KEY}:${oldCopyId}`;
@@ -6393,6 +6387,15 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
             });
         } catch (_) { }
 
+        try {
+            const isBackground = typeof localStorage === 'undefined' || typeof document === 'undefined';
+            if (preferStoragePermanentLayout || isBackground) {
+                Object.keys(existingCopyCardStateById || {}).forEach((id) => {
+                    if (id) copyIds.add(String(id));
+                });
+            }
+        } catch (_) { }
+
         Array.from(copyIds.values()).forEach((copyId) => {
             if (!copyId) return;
             const domPos = domPositions.get(copyId) || null;
@@ -6628,6 +6631,7 @@ function __buildTempSectionProtocolMeta(section) {
         title: String(section && section.title || '').trim(),
         descriptionMd: __normalizeTempSectionDescriptionMarkdown(section)
     };
+    if (section && section.isSnapshot) meta.isSnapshot = true;
 
     if (normalizedLabel) meta.label = normalizedLabel;
     if (normalizedSource) meta.source = normalizedSource;
@@ -6681,7 +6685,8 @@ function __normalizeTempSectionProtocolObject(protocolInput) {
         source: rawMeta.source,
         sequenceNumber: rawMeta.sequenceNumber,
         descriptionMd: rawMeta.descriptionMd,
-        originPermanent: rawMeta.originPermanent
+        originPermanent: rawMeta.originPermanent,
+        isSnapshot: !!rawMeta.isSnapshot
     };
     const sectionMeta = __buildTempSectionProtocolMeta(sectionLike);
     let sourceItems = [];
@@ -6779,6 +6784,12 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
     const restoredDescriptionMd = String(sectionMeta.descriptionMd == null ? '' : sectionMeta.descriptionMd);
     restored.descriptionMd = restoredDescriptionMd;
     restored.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(restoredDescriptionMd));
+    if (options.isSnapshot || sectionMeta.isSnapshot) {
+        restored.isSnapshot = true;
+        restored.tempKind = restored.tempKind || 'special';
+        const { isEn } = __getLang();
+        restored.label = restored.label || (isEn ? 'Import' : '导入');
+    }
 
     return restored;
 }

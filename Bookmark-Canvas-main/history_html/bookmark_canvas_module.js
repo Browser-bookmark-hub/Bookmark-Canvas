@@ -2744,6 +2744,7 @@ const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch
 
 function __isSpecialTempSection(section) {
     if (!section) return false;
+    if (section.isSnapshot) return true;
     const tempKindRaw = (typeof section.tempKind === 'string') ? section.tempKind.trim().toLowerCase() : '';
     if (tempKindRaw === 'special') return true;
     if (tempKindRaw === 'regular') return false;
@@ -3124,12 +3125,13 @@ function getTempSectionBaseSize(section = null) {
     const size = __getTempSectionSizeSettings(section);
     const minWidth = Number.isFinite(Number(size.minWidth)) ? Number(size.minWidth) : TEMP_SECTION_MIN_WIDTH;
     const minHeight = Number.isFinite(Number(size.minHeight)) ? Number(size.minHeight) : TEMP_SECTION_MIN_HEIGHT;
+    const isSnapshot = !!(section && section.isSnapshot);
     return {
         width: Math.max(minWidth, Number(size.width) || TEMP_SECTION_DEFAULT_WIDTH),
         height: Math.max(minHeight, Number(size.height) || TEMP_SECTION_DEFAULT_HEIGHT),
         minWidth,
         minHeight,
-        mode: size.mode || 'manual'
+        mode: isSnapshot ? 'manual' : (size.mode || 'manual')
     };
 }
 
@@ -4617,6 +4619,10 @@ function getTempSectionLabel(section) {
     if (!section) return '';
     const explicit = (typeof section.label === 'string') ? section.label.trim() : '';
     if (explicit) return explicit;
+    if (section.isSnapshot) {
+        const { isEn } = __getLang();
+        return isEn ? 'Import' : '导入';
+    }
     if (section.sequenceNumber) {
         const alpha = toAlphaLabel(section.sequenceNumber);
         return alpha ? `${alpha}-1` : '';
