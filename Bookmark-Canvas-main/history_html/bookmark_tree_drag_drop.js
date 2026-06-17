@@ -987,6 +987,32 @@ function computeTempInsertion(sectionId, targetId, position) {
 
 async function createBookmarkFromPayload(parentId, index, payload, tagUpdates = null, options = {}) {
     if (!chrome || !chrome.bookmarks || !payload) return;
+
+    if (options.progressTracker) {
+        options.progressTracker.current++;
+        if (options.loadingToast && typeof options.loadingToast.update === 'function') {
+            const current = options.progressTracker.current;
+            const total = options.progressTracker.total;
+            const elapsedMs = Date.now() - options.progressTracker.startTime;
+            const elapsedSec = (elapsedMs / 1000).toFixed(1);
+            let msg = '';
+            if (current > 1) {
+                const msPerItem = elapsedMs / (current - 1);
+                const remainingItems = total - current + 1;
+                const estimatedRemainingMs = msPerItem * remainingItems;
+                const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
+                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                    ? `Creating: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
+                    : `正在创建: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
+            } else {
+                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                    ? `Creating: ${current}/${total} (0%) | Elapsed ${elapsedSec}s`
+                    : `正在创建: ${current}/${total} (0%) | 已用 ${elapsedSec}s`;
+            }
+            options.loadingToast.update(msg);
+        }
+    }
+
     const createInfo = {
         parentId: parentId,
         title: payload.title || ''
@@ -1159,26 +1185,48 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
                 // Calculate total operations (permanent nodes are moved, temporary nodes are created)
                 const totalNodesToAdd = countPayloadNodes(tempPayload);
                 const totalOperations = permanentIds.length + totalNodesToAdd;
-                const useBulkMute = totalOperations > 15;
+                const useBulkMute = totalOperations > 1;
                 let muteSession = null;
                 let loadingToast = null;
 
                 if (useBulkMute && typeof window !== 'undefined' && typeof window.beginBookmarkBulkMute === 'function') {
                     muteSession = await window.beginBookmarkBulkMute('drag-batch-to-permanent');
                 }
-                if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function' && totalOperations > 15) {
+                if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function' && totalOperations > 1) {
                     const msg = typeof currentLang !== 'undefined' && currentLang === 'en' ? `Processing ${totalOperations} items...` : `正在处理 ${totalOperations} 项...`;
                     loadingToast = window.showLoadingToast(msg);
                 }
 
+                const progressTracker = {
+                    total: totalOperations,
+                    current: 0,
+                    startTime: Date.now()
+                };
+
                 const createdEvents = [];
-                const createOptions = { createdEvents };
+                const createOptions = { createdEvents, progressTracker, loadingToast };
 
                 try {
                     // 1. Move permanent nodes instead of cloning them (using simulation to prevent index drift)
                     if (permanentIds.length > 0) {
                         const targetParentId = insertInfo.parentId;
                         const targetIndex = insertInfo.index;
+
+                        // Pre-fetch original nodes to get oldParentId and oldIndex
+                        let originalNodeMap = new Map();
+                        try {
+                            const originalNodes = await chrome.bookmarks.get(permanentIds);
+                            originalNodes.forEach(node => {
+                                if (node) {
+                                    originalNodeMap.set(node.id, {
+                                        oldParentId: node.parentId,
+                                        oldIndex: node.index
+                                    });
+                                }
+                            });
+                        } catch (err) {
+                            console.warn('[拖拽] 获取原始节点信息失败:', err);
+                        }
 
                         // Retrieve current children of targetParentId to build simulation
                         const currentNodes = await chrome.bookmarks.getChildren(targetParentId);
@@ -1224,9 +1272,35 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
 
                         // Execute the planned moves in reverse order (same order as collected)
                         for (const move of plannedMoves) {
+                            const orig = originalNodeMap.get(move.id) || {};
+                            progressTracker.current++;
+                            if (loadingToast) {
+                                const current = progressTracker.current;
+                                const elapsedMs = Date.now() - progressTracker.startTime;
+                                const elapsedSec = (elapsedMs / 1000).toFixed(1);
+                                let msg = '';
+                                if (current > 1) {
+                                    const msPerItem = elapsedMs / (current - 1);
+                                    const remainingItems = totalOperations - current + 1;
+                                    const estimatedRemainingMs = msPerItem * remainingItems;
+                                    const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
+                                    msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                                        ? `Moving: ${current}/${totalOperations} (${Math.round((current - 1) / totalOperations * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
+                                        : `正在移动: ${current}/${totalOperations} (${Math.round((current - 1) / totalOperations * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
+                                } else {
+                                    msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                                        ? `Moving: ${current}/${totalOperations} (0%) | Elapsed ${elapsedSec}s`
+                                        : `正在移动: ${current}/${totalOperations} (0%) | 已用 ${elapsedSec}s`;
+                                }
+                                loadingToast.update(msg);
+                            }
                             await movePermanentBookmarkNodeViaSharedOps(move.id, {
                                 parentId: targetParentId,
                                 index: move.index
+                            }, {
+                                ...createOptions,
+                                oldParentId: orig.oldParentId,
+                                oldIndex: orig.oldIndex
                             });
                         }
                     }
@@ -1318,19 +1392,24 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
             const { parentId, index } = await computePermanentInsertion(targetId, targetIsFolder, position);
             
             const totalNodes = countPayloadNodes(payload);
-            const useBulkMute = totalNodes > 15;
+            const useBulkMute = totalNodes > 1;
             let muteSession = null;
             let loadingToast = null;
             
             if (useBulkMute && typeof window !== 'undefined' && typeof window.beginBookmarkBulkMute === 'function') {
                 muteSession = await window.beginBookmarkBulkMute('drag-temp-to-permanent');
             }
-            if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function' && totalNodes > 15) {
+            if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function' && totalNodes > 1) {
                 const msg = typeof currentLang !== 'undefined' && currentLang === 'en' ? `Moving ${totalNodes} items...` : `正在移动 ${totalNodes} 项...`;
                 loadingToast = window.showLoadingToast(msg);
             }
+            const progressTracker = {
+                total: totalNodes,
+                current: 0,
+                startTime: Date.now()
+            };
             const createdEvents = [];
-            const createOptions = { createdEvents };
+            const createOptions = { createdEvents, progressTracker, loadingToast };
             try {
                 const tagUpdates = [];
                 for (const item of payload) {

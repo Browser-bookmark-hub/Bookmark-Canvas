@@ -9782,21 +9782,26 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
             const payload = bookmarkClipboard.payload || [];
             if (payload.length) {
                 const totalNodes = countPayloadNodes(payload);
-                const useBulkMute = totalNodes > 15;
+                const useBulkMute = totalNodes > 1;
                 let muteSession = null;
                 let loadingToast = null;
                 if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                     muteSession = await beginBookmarkBulkMute('paste-temp-to-permanent');
                 }
-                if (typeof window.showLoadingToast === 'function' && totalNodes > 15) {
+                if (typeof window.showLoadingToast === 'function' && totalNodes > 1) {
                     const lang = currentLang || 'zh_CN';
                     loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在粘贴 ${totalNodes} 项...` : `Pasting ${totalNodes} items...`);
                 }
+                const progressTracker = {
+                    total: totalNodes,
+                    current: 0,
+                    startTime: Date.now()
+                };
                 const createdEvents = [];
                 try {
                     const tagUpdates = [];
                     for (const item of payload) {
-                        const dupOptions = { tagUpdates, createdEvents };
+                        const dupOptions = { tagUpdates, createdEvents, progressTracker, loadingToast };
                         if (typeof insertIndex === 'number') {
                             dupOptions.index = insertIndex;
                         }
@@ -9845,24 +9850,72 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
         } else if (bookmarkClipboard.source === 'permanent') {
             if (bookmarkClipboard.action === 'cut' && bookmarkClipboard.nodeIds) {
                 const totalNodes = bookmarkClipboard.nodeIds.length;
-                const useBulkMute = totalNodes > 15;
+                const useBulkMute = totalNodes > 1;
                 let muteSession = null;
                 let loadingToast = null;
                 if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                     muteSession = await beginBookmarkBulkMute('paste-permanent-cut');
                 }
-                if (typeof window.showLoadingToast === 'function' && totalNodes > 15) {
+                if (typeof window.showLoadingToast === 'function' && totalNodes > 1) {
                     const lang = currentLang || 'zh_CN';
                     loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在移动 ${totalNodes} 项...` : `Moving ${totalNodes} items...`);
                 }
+                const progressTracker = {
+                    total: totalNodes,
+                    current: 0,
+                    startTime: Date.now()
+                };
                 const createdEvents = [];
                 try {
+                    // Pre-fetch original nodes to get oldParentId and oldIndex
+                    let originalNodeMap = new Map();
+                    try {
+                        const originalNodes = await chrome.bookmarks.get(bookmarkClipboard.nodeIds);
+                        originalNodes.forEach(node => {
+                            if (node) {
+                                originalNodeMap.set(node.id, {
+                                    oldParentId: node.parentId,
+                                    oldIndex: node.index
+                                });
+                            }
+                        });
+                    } catch (err) {
+                        console.warn('[粘贴] 获取原始节点信息失败:', err);
+                    }
+
                     for (const id of bookmarkClipboard.nodeIds) {
                         const target = { parentId: targetFolderId };
                         if (typeof insertIndex === 'number') {
                             target.index = insertIndex;
                         }
-                        await movePermanentBookmarkNode(id, target, { createdEvents });
+                        const orig = originalNodeMap.get(id) || {};
+                        progressTracker.current++;
+                        if (loadingToast) {
+                            const current = progressTracker.current;
+                            const total = progressTracker.total;
+                            const elapsedMs = Date.now() - progressTracker.startTime;
+                            const elapsedSec = (elapsedMs / 1000).toFixed(1);
+                            let msg = '';
+                            if (current > 1) {
+                                const msPerItem = elapsedMs / (current - 1);
+                                const remainingItems = total - current + 1;
+                                const estimatedRemainingMs = msPerItem * remainingItems;
+                                const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
+                                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                                    ? `Moving: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
+                                    : `正在移动: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
+                            } else {
+                                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                                    ? `Moving: ${current}/${total} (0%) | Elapsed ${elapsedSec}s`
+                                    : `正在移动: ${current}/${total} (0%) | 已用 ${elapsedSec}s`;
+                            }
+                            loadingToast.update(msg);
+                        }
+                        await movePermanentBookmarkNode(id, target, {
+                            createdEvents,
+                            oldParentId: orig.oldParentId,
+                            oldIndex: orig.oldIndex
+                        });
                         if (typeof insertIndex === 'number') {
                             insertIndex++;
                         }
@@ -9879,21 +9932,26 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
             } else if (bookmarkClipboard.action === 'copy') {
                 const payload = bookmarkClipboard.payload || (bookmarkClipboard.nodeData ? [bookmarkClipboard.nodeData] : []);
                 const totalNodes = countPayloadNodes(payload);
-                const useBulkMute = totalNodes > 15;
+                const useBulkMute = totalNodes > 1;
                 let muteSession = null;
                 let loadingToast = null;
                 if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                     muteSession = await beginBookmarkBulkMute('paste-permanent-copy');
                 }
-                if (typeof window.showLoadingToast === 'function' && totalNodes > 15) {
+                if (typeof window.showLoadingToast === 'function' && totalNodes > 1) {
                     const lang = currentLang || 'zh_CN';
                     loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在复制 ${totalNodes} 项...` : `Copying ${totalNodes} items...`);
                 }
+                const progressTracker = {
+                    total: totalNodes,
+                    current: 0,
+                    startTime: Date.now()
+                };
                 const createdEvents = [];
                 try {
                     const tagUpdates = [];
                     for (const node of payload) {
-                        const dupOptions = { tagUpdates, createdEvents };
+                        const dupOptions = { tagUpdates, createdEvents, progressTracker, loadingToast };
                         if (typeof insertIndex === 'number') {
                             dupOptions.index = insertIndex;
                         }
@@ -9945,6 +10003,31 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
 
 // 递归复制节点
 async function duplicateNode(node, parentId, options = {}) {
+    if (options.progressTracker) {
+        options.progressTracker.current++;
+        if (options.loadingToast && typeof options.loadingToast.update === 'function') {
+            const current = options.progressTracker.current;
+            const total = options.progressTracker.total;
+            const elapsedMs = Date.now() - options.progressTracker.startTime;
+            const elapsedSec = (elapsedMs / 1000).toFixed(1);
+            let msg = '';
+            if (current > 1) {
+                const msPerItem = elapsedMs / (current - 1);
+                const remainingItems = total - current + 1;
+                const estimatedRemainingMs = msPerItem * remainingItems;
+                const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
+                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                    ? `Pasting: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
+                    : `正在粘贴: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
+            } else {
+                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                    ? `Pasting: ${current}/${total} (0%) | Elapsed ${elapsedSec}s`
+                    : `正在粘贴: ${current}/${total} (0%) | 已用 ${elapsedSec}s`;
+            }
+            options.loadingToast.update(msg);
+        }
+    }
+
     const newNode = {
         parentId: parentId,
         title: node.title
@@ -12384,18 +12467,77 @@ async function batchDelete() {
                 }
             }
 
-            // 执行永久书签删除
-            for (const rootNode of permanentRoots) {
-                try {
-                    if (rootNode.url) {
-                        await removePermanentBookmarkNode(rootNode.id, false);
-                    } else {
-                        await removePermanentBookmarkNode(rootNode.id, true);
+            const useBulkMute = permanentRoots.length > 1;
+            let muteSession = null;
+            let loadingToast = null;
+            if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
+                muteSession = await beginBookmarkBulkMute('batch-delete-permanent');
+            }
+            if (typeof window.showLoadingToast === 'function' && permanentRoots.length > 1) {
+                loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在删除 ${permanentRoots.length} 项...` : `Deleting ${permanentRoots.length} items...`);
+            }
+
+            const progressTracker = {
+                total: permanentRoots.length,
+                current: 0,
+                startTime: Date.now()
+            };
+
+            const createdEvents = [];
+            const createOptions = { createdEvents };
+
+            try {
+                // 执行永久书签删除
+                for (const rootNode of permanentRoots) {
+                    try {
+                        progressTracker.current++;
+                        if (loadingToast) {
+                            const current = progressTracker.current;
+                            const total = progressTracker.total;
+                            const elapsedMs = Date.now() - progressTracker.startTime;
+                            const elapsedSec = (elapsedMs / 1000).toFixed(1);
+                            let msg = '';
+                            if (current > 1) {
+                                const msPerItem = elapsedMs / (current - 1);
+                                const remainingItems = total - current + 1;
+                                const estimatedRemainingMs = msPerItem * remainingItems;
+                                const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
+                                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                                    ? `Deleting: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
+                                    : `正在删除: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
+                            } else {
+                                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                                    ? `Deleting: ${current}/${total} (0%) | Elapsed ${elapsedSec}s`
+                                    : `正在删除: ${current}/${total} (0%) | 已用 ${elapsedSec}s`;
+                            }
+                            loadingToast.update(msg);
+                        }
+                        if (rootNode.url) {
+                            await removePermanentBookmarkNode(rootNode.id, false, {
+                                ...createOptions,
+                                parentId: rootNode.parentId,
+                                index: rootNode.index
+                            });
+                        } else {
+                            await removePermanentBookmarkNode(rootNode.id, true, {
+                                ...createOptions,
+                                parentId: rootNode.parentId,
+                                index: rootNode.index
+                            });
+                        }
+                        successCount++;
+                    } catch (error) {
+                        console.error('[批量] 删除失败:', rootNode && rootNode.id, error);
+                        failCount++;
                     }
-                    successCount++;
-                } catch (error) {
-                    console.error('[批量] 删除失败:', rootNode && rootNode.id, error);
-                    failCount++;
+                }
+                if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
+                    await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'batch-delete-permanent');
+                }
+            } finally {
+                if (loadingToast) loadingToast.close();
+                if (useBulkMute && typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                    await endBookmarkBulkMute('batch-delete-permanent', { refreshTree: true });
                 }
             }
         }
@@ -12485,9 +12627,62 @@ async function batchRename() {
                 alert('此功能需要Chrome扩展环境');
                 return;
             }
-            for (const nodeId of permanentIds) {
-                await updatePermanentBookmarkNode(nodeId, { title: normalizedTitle });
-                count++;
+
+            const useBulkMute = permanentIds.length > 1;
+            let muteSession = null;
+            let loadingToast = null;
+            if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
+                muteSession = await beginBookmarkBulkMute('batch-rename-permanent');
+            }
+            if (typeof window.showLoadingToast === 'function' && permanentIds.length > 1) {
+                loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在重命名 ${permanentIds.length} 项...` : `Renaming ${permanentIds.length} items...`);
+            }
+
+            const progressTracker = {
+                total: permanentIds.length,
+                current: 0,
+                startTime: Date.now()
+            };
+
+            const createdEvents = [];
+            const createOptions = { createdEvents };
+
+            try {
+                for (const nodeId of permanentIds) {
+                    progressTracker.current++;
+                    if (loadingToast) {
+                        const current = progressTracker.current;
+                        const total = progressTracker.total;
+                        const elapsedMs = Date.now() - progressTracker.startTime;
+                        const elapsedSec = (elapsedMs / 1000).toFixed(1);
+                        let msg = '';
+                        if (current > 1) {
+                            const msPerItem = elapsedMs / (current - 1);
+                            const remainingItems = total - current + 1;
+                            const estimatedRemainingMs = msPerItem * remainingItems;
+                            const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
+                            msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                                ? `Renaming: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
+                                : `正在重命名: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
+                        } else {
+                            msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                                ? `Renaming: ${current}/${total} (0%) | Elapsed ${elapsedSec}s`
+                                : `正在重命名: ${current}/${total} (0%) | 已用 ${elapsedSec}s`;
+                        }
+                        loadingToast.update(msg);
+                    }
+                    await updatePermanentBookmarkNode(nodeId, { title: normalizedTitle }, createOptions);
+                    count++;
+                }
+
+                if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
+                    await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'batch-rename-permanent');
+                }
+            } finally {
+                if (loadingToast) loadingToast.close();
+                if (useBulkMute && typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
+                    await endBookmarkBulkMute('batch-rename-permanent', { refreshTree: true });
+                }
             }
         }
 
@@ -12505,7 +12700,7 @@ async function batchRename() {
                 updatedSections.add(node.sectionId);
                 count++;
             }
-            // 批量修改完成后，对所有受影响的栏目各触发一次统一重绘和存储保存
+            // 批量修改完成后，对所有受影响的栏目各触发一次统一重绘 and 存储保存
             updatedSections.forEach(sectionId => {
                 manager.ensureRendered(sectionId);
             });
@@ -12816,30 +13011,78 @@ async function batchMergeFolder() {
     }
 
     const totalNodes = permanentIds.length + 1;
-    const useBulkMute = totalNodes > 15;
+    const useBulkMute = totalNodes > 1;
     let muteSession = null;
     let loadingToast = null;
     const createdEvents = [];
-    const createOptions = { createdEvents };
+    const progressTracker = {
+        total: totalNodes,
+        current: 0,
+        startTime: Date.now()
+    };
+    const createOptions = { createdEvents, progressTracker, loadingToast };
     try {
         if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
             muteSession = await beginBookmarkBulkMute('batch-merge-folder');
         }
-        if (typeof window.showLoadingToast === 'function' && totalNodes > 15) {
+        if (typeof window.showLoadingToast === 'function' && totalNodes > 1) {
             loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在合并 ${permanentIds.length} 项...` : `Merging ${permanentIds.length} items...`);
         }
 
         // 在书签栏下创建新文件夹
+        progressTracker.current++;
         const newFolder = await createPermanentBookmarkNode({
             parentId: bookmarkBar.id,
             title: folderName
         }, createOptions);
 
+        // Pre-fetch original nodes to get oldParentId and oldIndex
+        let originalNodeMap = new Map();
+        try {
+            const originalNodes = await chrome.bookmarks.get(permanentIds);
+            originalNodes.forEach(node => {
+                if (node) {
+                    originalNodeMap.set(node.id, {
+                        oldParentId: node.parentId,
+                        oldIndex: node.index
+                    });
+                }
+            });
+        } catch (err) {
+            console.warn('[批量] 获取原始节点信息失败:', err);
+        }
+
         // 移动所有选中项到新文件夹
         let count = 0;
         for (const nodeId of permanentIds) {
             try {
-                await movePermanentBookmarkNode(nodeId, { parentId: newFolder.id }, createOptions);
+                const orig = originalNodeMap.get(nodeId) || {};
+                progressTracker.current++;
+                if (loadingToast) {
+                    const current = progressTracker.current;
+                    const elapsedMs = Date.now() - progressTracker.startTime;
+                    const elapsedSec = (elapsedMs / 1000).toFixed(1);
+                    let msg = '';
+                    if (current > 1) {
+                        const msPerItem = elapsedMs / (current - 1);
+                        const remainingItems = totalNodes - current + 1;
+                        const estimatedRemainingMs = msPerItem * remainingItems;
+                        const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
+                        msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                            ? `Merging: ${current}/${totalNodes} (${Math.round((current - 1) / totalNodes * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
+                            : `正在合并: ${current}/${totalNodes} (${Math.round((current - 1) / totalNodes * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
+                    } else {
+                        msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                            ? `Merging: ${current}/${totalNodes} (0%) | Elapsed ${elapsedSec}s`
+                            : `正在合并: ${current}/${totalNodes} (0%) | 已用 ${elapsedSec}s`;
+                    }
+                    loadingToast.update(msg);
+                }
+                await movePermanentBookmarkNode(nodeId, { parentId: newFolder.id }, {
+                    ...createOptions,
+                    oldParentId: orig.oldParentId,
+                    oldIndex: orig.oldIndex
+                });
                 count++;
             } catch (error) {
                 console.error('[批量] 移动失败:', nodeId, error);
