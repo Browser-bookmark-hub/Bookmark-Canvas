@@ -1290,7 +1290,7 @@
             <div class="github-progress-content">
                 <div class="github-progress-body">
                     <div class="github-progress-icon-container">
-                        <span class="github-progress-spinner"><i class="fas fa-sync"></i></span>
+                        <span class="github-progress-spinner"></span>
                     </div>
                     <div class="github-progress-title">${escapeHtml(title)}</div>
                     <div class="github-progress-text">${escapeHtml(t('正在初始化...', 'Initializing...'))}</div>

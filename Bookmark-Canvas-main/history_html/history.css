@@ -17469,10 +17469,14 @@ html[data-theme="dark"] .github-confirm-message code {
 }
 
 .github-progress-spinner {
-    font-size: 32px;
-    color: var(--accent-primary, #0969da);
-    animation: github-spinner-spin 1.5s linear infinite;
+    width: 32px;
+    height: 32px;
+    border: 3.5px solid rgba(9, 105, 218, 0.15);
+    border-radius: 50%;
+    border-top-color: var(--accent-primary, #0969da);
+    animation: github-spinner-spin 0.85s cubic-bezier(0.4, 0, 0.2, 1) infinite;
     display: inline-block;
+    box-sizing: border-box;
 }
 
 @keyframes github-spinner-spin {
