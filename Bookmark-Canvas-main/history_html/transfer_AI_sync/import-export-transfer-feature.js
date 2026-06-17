@@ -846,19 +846,136 @@ function __collectChromeIdsFromLocalContent(content) {
     return set;
 }
 
+function __indexTreeBySyncId(root, idMap = null) {
+    const map = new Map();
+    if (!root || typeof root !== 'object') return map;
+    const walk = (node, parentSyncId) => {
+        if (!node || typeof node !== 'object') return;
+        const rawId = String(node.id || '').trim();
+        let syncId = rawId;
+        if (idMap) {
+            syncId = idMap.get(rawId) || rawId;
+        }
+        if (syncId) {
+            const children = Array.isArray(node.children) ? node.children : [];
+            map.set(syncId, {
+                syncId,
+                chromeId: rawId,
+                parentSyncId,
+                title: String(node.title || ''),
+                url: String(node.url || ''),
+                isFolder: !node.url,
+                childrenSyncIds: children.map(c => {
+                    const cid = String(c && c.id || '').trim();
+                    return idMap ? (idMap.get(cid) || cid) : cid;
+                }).filter(Boolean)
+            });
+            children.forEach((child) => {
+                walk(child, syncId);
+            });
+        }
+    };
+    walk(root, null);
+    return map;
+}
+
 function __countOverwriteDiff(localContent, importTreeRoot) {
-    // Returns approximate diff count: |importSyncIds ⊖ localSyncIds| + same-syncId field diffs.
-    const localList = (localContent && Array.isArray(localContent.identityMap)) ? localContent.identityMap : [];
-    const localBySyncId = new Map();
-    for (const entry of localList) {
-        if (entry && entry.syncId) localBySyncId.set(String(entry.syncId), entry);
+    // Build local chromeId -> syncId translation map from identityMap
+    const localChromeIdToSyncId = new Map();
+    if (localContent && Array.isArray(localContent.identityMap)) {
+        for (const entry of localContent.identityMap) {
+            if (entry && entry.id && entry.syncId) {
+                localChromeIdToSyncId.set(String(entry.id), String(entry.syncId));
+            }
+        }
     }
-    const importSyncIds = __collectSyncIdsFromImportTree(importTreeRoot);
-    let diff = 0;
-    importSyncIds.forEach((syncId) => { if (!localBySyncId.has(syncId)) diff += 1; });
-    localBySyncId.forEach((_v, syncId) => { if (!importSyncIds.has(syncId)) diff += 1; });
-    // Approximation: don't recurse into title/url comparison here; overwrite path doesn't need exact value.
-    return diff;
+
+    const localMap = __indexTreeBySyncId(localContent && localContent.tree, localChromeIdToSyncId);
+    const importMap = __indexTreeBySyncId(importTreeRoot);
+    
+    let adds = 0;
+    let deletes = 0;
+    let updates = 0;
+    let moves = 0;
+    const siblingFilterCache = new Map();
+
+    importMap.forEach((impNode, syncId) => {
+        const isRootOrTopRoot = (syncId === 'syncId_root' || syncId === importTreeRoot.id || impNode.parentSyncId === null || impNode.parentSyncId === importTreeRoot.id);
+        const locNode = localMap.get(syncId);
+        if (!locNode) {
+            if (!isRootOrTopRoot) {
+                adds += 1;
+            }
+        } else {
+            if (!isRootOrTopRoot) {
+                const needTitle = locNode.title !== impNode.title;
+                const needUrl = !impNode.isFolder && locNode.url !== impNode.url;
+                if (needTitle || needUrl) {
+                    updates += 1;
+                }
+                
+                const parentDiffers = locNode.parentSyncId !== impNode.parentSyncId;
+                let orderDiffers = false;
+                if (!parentDiffers && impNode.parentSyncId) {
+                    let cache = siblingFilterCache.get(impNode.parentSyncId);
+                    if (!cache) {
+                        const parentImpNode = importMap.get(impNode.parentSyncId);
+                        const parentLocNode = localMap.get(impNode.parentSyncId);
+                        const impSiblingsMap = new Map();
+                        const locSiblingsMap = new Map();
+                        if (parentImpNode && parentLocNode) {
+                            let impIdx = 0;
+                            for (const id of parentImpNode.childrenSyncIds) {
+                                if (localMap.has(id)) {
+                                    impSiblingsMap.set(id, impIdx++);
+                                }
+                            }
+                            let locIdx = 0;
+                            for (const id of parentLocNode.childrenSyncIds) {
+                                if (importMap.has(id)) {
+                                    locSiblingsMap.set(id, locIdx++);
+                                }
+                            }
+                        }
+                        cache = { impSiblingsMap, locSiblingsMap };
+                        siblingFilterCache.set(impNode.parentSyncId, cache);
+                    }
+                    const impIndex = cache.impSiblingsMap.has(syncId) ? cache.impSiblingsMap.get(syncId) : -1;
+                    const locIndex = cache.locSiblingsMap.has(syncId) ? cache.locSiblingsMap.get(syncId) : -1;
+                    if (impIndex >= 0 && locIndex >= 0 && impIndex !== locIndex) {
+                        orderDiffers = true;
+                    }
+                }
+                if (parentDiffers || orderDiffers) {
+                    moves += 1;
+                }
+            }
+        }
+    });
+    
+    localMap.forEach((locNode, syncId) => {
+        if (!importMap.has(syncId)) {
+            const cid = locNode.chromeId;
+            const isRootOrTopRoot = (syncId === 'syncId_root' || cid === '0' || cid === '1' || cid === '2' || cid === '3');
+            if (!isRootOrTopRoot) {
+                deletes += 1;
+            }
+        }
+    });
+    
+    const totalImportedNodes = importMap.size;
+    const totalLocalNodes = localMap.size;
+    
+    return {
+        adds,
+        deletes,
+        updates,
+        moves,
+        totalImportedNodes,
+        totalLocalNodes,
+        costIncremental: adds + deletes + updates + moves,
+        costOverwrite: 3 + totalImportedNodes
+    };
 }
 
 function __chromeBookmarksRemoveNodeByType(node) {
@@ -1122,6 +1239,8 @@ async function __applyOverwriteImportedCanvasState(parsedTempState, bridge, pars
     return persisted;
 }
 
+
+
 async function __performOverwriteImport(payload) {
     const { isEn } = __getLang();
     const parsedTempState = payload && payload.parsedTempState;
@@ -1175,9 +1294,11 @@ async function __performOverwriteImport(payload) {
     const localContent = await bridge.readPermanentMainContentFromBcs({
         skipIdentityMapHeal: true
     });
-    const diff = __countOverwriteDiff(localContent, importTree);
-    const goOverwrite = threshold <= 0 || diff >= threshold;
-    ;
+    const costEval = __countOverwriteDiff(localContent, importTree);
+    const goOverwrite = threshold <= 0 || costEval.costIncremental >= threshold;
+    try {
+        console.log('[Overwrite Import] Cost evaluation:', costEval, 'threshold:', threshold, 'goOverwrite:', goOverwrite);
+    } catch (_) {}
 
     // 4. Open bulk-mute envelope.
     let muteSession = null;
@@ -1215,7 +1336,7 @@ async function __performOverwriteImport(payload) {
         } catch (_) {}
     };
     try {
-        if (goOverwrite) {
+        const executeOverwriteBranch = async () => {
             // -- Overwrite branch ---------------------------------------------------------
             // Clear Chrome bookmark roots (immediate children of the bookmarks tree root).
             const tree = await new Promise((resolve) => chrome.bookmarks.getTree((t) => resolve(t)));
@@ -1264,8 +1385,12 @@ async function __performOverwriteImport(payload) {
                     identityMap: nextIdentityMap
                 }
             });
-        } else {
-            // -- Incremental branch -------------------------------------------------------
+        };
+
+        let runOverwrite = goOverwrite;
+        if (!runOverwrite) {
+            try {
+                // -- Incremental branch -------------------------------------------------------
             // doc 最终修复计划 §3.2 / §3.3 / §3.4: 删除后必须清理 mapping；root/top-root syncId
             // 必须以导入包为准；move/sort 必须基于 fresh tree。
 
@@ -1337,29 +1462,7 @@ async function __performOverwriteImport(payload) {
 
             const importNormalSyncIds = new Set(importNormalNodesBySyncId.keys());
 
-            // 1) Delete: local syncId not in expectedSyncIds. (Skip root/top-roots — they always exist.)
-            const toDeleteEntries = [];
-            for (const [syncId, entry] of localBySyncId) {
-                if (expectedSyncIds.has(syncId)) continue; // import has it, keep
-                if (importTopSyncIdToChromeId.has(syncId)) continue; // top root; keep chromeId, syncId rewritten later
-                if (syncId === importRootSyncId) continue; // root; same
-                // Skip if the chromeId is one of the fixed Chrome roots (defensive; shouldn't happen).
-                if (entry.id === '0' || entry.id === '1' || entry.id === '2' || entry.id === '3') continue;
-                toDeleteEntries.push(entry);
-            }
-            for (const entry of toDeleteEntries) {
-                try {
-                    await __chromeBookmarksRemoveExistingNodeById(entry.id);
-                } catch (_) {}
-            }
-            // §3.2: drop deleted entries from local maps so they cannot leak into nextIdentityMap.
-            for (const entry of toDeleteEntries) {
-                localBySyncId.delete(String(entry.syncId));
-                localByChromeId.delete(String(entry.id));
-            }
-            // Also drop descendants whose chromeId no longer exists. We'll re-validate against fresh tree below.
-
-            // 2) Pull fresh tree after deletes, then create missing nodes (parents first via DFS over import tree).
+            // 1) Create missing nodes & Update title/url. (DFS over import tree, parents first).
             //    syncIdToChromeId is rebuilt from scratch, seeded only by import-package authoritative ids.
             const syncIdToChromeId = new Map();
             // Root + top-roots come from import (§3.3).
@@ -1403,7 +1506,7 @@ async function __performOverwriteImport(payload) {
                 }
             }
 
-            // 3) Update title/url. We need fresh local tree to compare correctly after creates/deletes.
+            // Update title/url. We need fresh local tree to compare correctly after creates.
             const buildFreshLookups = async () => {
                 const t = await new Promise((resolve) => chrome.bookmarks.getTree((tree) => resolve(tree)));
                 const root = Array.isArray(t) ? t[0] : null;
@@ -1444,74 +1547,160 @@ async function __performOverwriteImport(payload) {
                 }
             }
 
-            // 4) Move/reorder. §3.4: refresh lookups so parent/index decisions reflect post-create/delete state.
-            //    Walk top-down per parent so parents move before children.
+            // 2) Move/reorder.
+            //    Phase 1: Resolve parent modifications (move nodes to their desired parents first, appended to the end).
+            //    Phase 2: Sort children within each modified folder in memory without rebuilding tree lookups.
             lookups = await buildFreshLookups();
-            const moveWalk = async (importChildren) => {
+
+            const parentMoveQueue = [];
+            const collectParentMoves = (importChildren) => {
                 if (!Array.isArray(importChildren)) return;
-                for (let i = 0; i < importChildren.length; i++) {
-                    const node = importChildren[i];
+                for (const node of importChildren) {
                     if (!node || !node.id) continue;
                     const syncId = String(node.id);
                     const chromeId = syncIdToChromeId.get(syncId);
-                    if (!chromeId) continue;
-                    const parentSyncId = String(node.parentId || '').trim();
-                    const desiredParentChromeId = syncIdToChromeId.get(parentSyncId);
-                    const currentInfo = lookups.parentByChildId.get(chromeId);
-                    const parentDiffers = !!(desiredParentChromeId && currentInfo && String(currentInfo.parentId) !== String(desiredParentChromeId));
-                    const desiredIndex = i;
-                    // When import contains unmapped siblings, raw `i` can exceed the current live
-                    // sibling range and trigger "Index out of bounds". Clamp before move.
-                    const desiredParentNode = desiredParentChromeId
-                        ? lookups.nodeByChromeId.get(String(desiredParentChromeId))
-                        : null;
-                    const desiredParentChildCount = Array.isArray(desiredParentNode && desiredParentNode.children)
-                        ? desiredParentNode.children.length
-                        : 0;
-                    const maxAllowedIndex = Math.max(
-                        0,
-                        desiredParentChildCount - (parentDiffers ? 0 : 1)
-                    );
-                    const safeDesiredIndex = Math.max(0, Math.min(desiredIndex, maxAllowedIndex));
-                    const indexDiffers = !!(currentInfo && Number(currentInfo.index) !== Number(safeDesiredIndex));
-                    if ((parentDiffers || indexDiffers) && desiredParentChromeId) {
-                        try {
-                            await new Promise((resolve) => {
-                                try {
-                                    chrome.bookmarks.move(
-                                        chromeId,
-                                        { parentId: desiredParentChromeId, index: safeDesiredIndex },
-                                        () => {
-                                            // Read lastError to avoid "Unchecked runtime.lastError" noise.
-                                            const err = chrome.runtime && chrome.runtime.lastError
-                                                ? String(chrome.runtime.lastError.message || '')
-                                                : '';
-                                            if (err) {
-                                                try { console.warn('[Incremental Import] bookmarks.move skipped:', { chromeId, desiredParentChromeId, safeDesiredIndex, err }); } catch (_) {}
-                                            }
-                                            resolve();
-                                        }
-                                    );
-                                }
-                                catch (_) { resolve(); }
-                            });
-                        } catch (_) {}
-                        // Refresh after each move so subsequent siblings see the new ordering.
-                        lookups = await buildFreshLookups();
+                    if (chromeId) {
+                        const parentSyncId = String(node.parentId || '').trim();
+                        const desiredParentChromeId = syncIdToChromeId.get(parentSyncId);
+                        const currentInfo = lookups.parentByChildId.get(chromeId);
+                        const parentDiffers = !!(desiredParentChromeId && currentInfo && String(currentInfo.parentId) !== String(desiredParentChromeId));
+                        if (parentDiffers && desiredParentChromeId) {
+                            parentMoveQueue.push({ chromeId, desiredParentChromeId, syncId });
+                        }
                     }
                     if (Array.isArray(node.children) && node.children.length) {
-                        await moveWalk(node.children);
+                        collectParentMoves(node.children);
                     }
                 }
             };
             if (Array.isArray(importTree.children)) {
                 for (const topChild of importTree.children) {
                     if (!topChild) continue;
-                    await moveWalk(topChild.children);
+                    collectParentMoves(topChild.children);
                 }
             }
 
-            // 5) Rebuild identityMap. §3.3: only include syncIds that come from the import package.
+            for (const item of parentMoveQueue) {
+                try {
+                    await new Promise((resolve) => {
+                        try {
+                            chrome.bookmarks.move(
+                                item.chromeId,
+                                { parentId: item.desiredParentChromeId },
+                                () => {
+                                    const err = chrome.runtime && chrome.runtime.lastError ? String(chrome.runtime.lastError.message || '') : '';
+                                    if (err) {
+                                        try { console.warn('[Incremental Import] parent move failed:', item.syncId, err); } catch (_) {}
+                                    }
+                                    resolve();
+                                }
+                            );
+                        } catch (_) { resolve(); }
+                    });
+                } catch (_) {}
+            }
+
+            // 3) Delete: local syncId not in expectedSyncIds. (Skip root/top-roots — they always exist.)
+            //    Since we delete after move, any surviving node under a deleted folder has already been
+            //    safely moved out to its new parent, avoiding cascade deletion errors.
+            const toDeleteEntries = [];
+            for (const [syncId, entry] of localBySyncId) {
+                if (expectedSyncIds.has(syncId)) continue; // import has it, keep
+                if (importTopSyncIdToChromeId.has(syncId)) continue; // top root; keep chromeId, syncId rewritten later
+                if (syncId === importRootSyncId) continue; // root; same
+                // Skip if the chromeId is one of the fixed Chrome roots (defensive; shouldn't happen).
+                if (entry.id === '0' || entry.id === '1' || entry.id === '2' || entry.id === '3') continue;
+                toDeleteEntries.push(entry);
+            }
+            for (const entry of toDeleteEntries) {
+                try {
+                    await __chromeBookmarksRemoveExistingNodeById(entry.id);
+                } catch (_) {}
+            }
+
+            const foldersToSort = [];
+            const collectFolders = (node) => {
+                if (!node || typeof node !== 'object') return;
+                const syncId = String(node.id || '').trim();
+                const chromeId = syncIdToChromeId.get(syncId);
+                const children = Array.isArray(node.children) ? node.children : [];
+                if (chromeId && chromeId !== '0' && children.length > 0) {
+                    foldersToSort.push({
+                        chromeId,
+                        expectedChildrenSyncIds: children.map(c => String(c.id)).filter(Boolean)
+                    });
+                }
+                for (const child of children) {
+                    if (Array.isArray(child.children)) {
+                        collectFolders(child);
+                    }
+                }
+            };
+            if (Array.isArray(importTree.children)) {
+                for (const topChild of importTree.children) {
+                    if (!topChild) continue;
+                    collectFolders(topChild);
+                }
+            }
+
+            const chromeIdToSyncId = new Map();
+            syncIdToChromeId.forEach((cid, sid) => {
+                chromeIdToSyncId.set(String(cid), String(sid));
+            });
+
+            const finalPreSortLookups = await buildFreshLookups();
+
+            for (const folder of foldersToSort) {
+                const parentId = folder.chromeId;
+                const expectedSyncIdsList = folder.expectedChildrenSyncIds;
+
+                const parentNode = finalPreSortLookups.nodeByChromeId.get(parentId);
+                const currentChromeChildren = (parentNode && Array.isArray(parentNode.children)) ? parentNode.children : [];
+
+                const simulatedList = currentChromeChildren.map(c => {
+                    const cid = String(c.id);
+                    return {
+                        chromeId: cid,
+                        syncId: chromeIdToSyncId.get(cid) || ''
+                    };
+                });
+
+                for (let i = 0; i < expectedSyncIdsList.length; i++) {
+                    const targetSyncId = expectedSyncIdsList[i];
+                    const targetChromeId = syncIdToChromeId.get(targetSyncId);
+                    if (!targetChromeId) continue;
+
+                    const currentItem = simulatedList[i];
+                    if (currentItem && currentItem.chromeId === targetChromeId) {
+                        continue;
+                    }
+
+                    const currentIndex = simulatedList.findIndex(item => item.chromeId === targetChromeId);
+                    if (currentIndex < 0) {
+                        simulatedList.splice(i, 0, { chromeId: targetChromeId, syncId: targetSyncId });
+                    } else {
+                        const [movedItem] = simulatedList.splice(currentIndex, 1);
+                        simulatedList.splice(i, 0, movedItem);
+                    }
+
+                    try {
+                        await new Promise((resolve) => {
+                            try {
+                                chrome.bookmarks.move(
+                                    targetChromeId,
+                                    { parentId, index: i },
+                                    () => {
+                                        const err = chrome.runtime && chrome.runtime.lastError ? String(chrome.runtime.lastError.message) : '';
+                                        resolve();
+                                    }
+                                );
+                            } catch (_) { resolve(); }
+                        });
+                    } catch (_) {}
+                }
+            }
+
+            // 4) Rebuild identityMap. §3.3: only include syncIds that come from the import package.
             const nextIdentityMap = [];
             const seenSyncIds = new Set();
             const pushEntry = (syncId, chromeId) => {
@@ -1532,6 +1721,7 @@ async function __performOverwriteImport(payload) {
             });
 
             const freshFinal = await buildFreshLookups();
+
             // doc 最终修复计划 §3.8 + 第三轮 §2.2/§2.3: validate before write via bridge,
             // 并把 fresh tree 中 managed 等不可写根的 chromeId 列入 ignoredChromeIds。
             const ignoredChromeIdsFinal = (typeof bridge.collectIgnoredChromeIdsFromFreshTree === 'function')
@@ -1551,7 +1741,14 @@ async function __performOverwriteImport(payload) {
                     identityMap: nextIdentityMap
                 }
             });
+        } catch (incErr) {
+            try { console.warn('[Incremental Import] Error encountered, falling back to Overwrite:', incErr); } catch (_) {}
+            runOverwrite = true;
         }
+        if (runOverwrite) {
+            await executeOverwriteBranch();
+        }
+    }
 
         // 5. Overwrite non-Chrome state directly (temp sections, mdNodes, edges, canvas state, copies).
         try {
