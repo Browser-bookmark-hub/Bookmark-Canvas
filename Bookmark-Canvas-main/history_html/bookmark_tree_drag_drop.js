@@ -999,22 +999,9 @@ async function createBookmarkFromPayload(parentId, index, payload, tagUpdates = 
         if (options.loadingToast && typeof options.loadingToast.update === 'function') {
             const current = options.progressTracker.current;
             const total = options.progressTracker.total;
-            const elapsedMs = Date.now() - options.progressTracker.startTime;
-            const elapsedSec = (elapsedMs / 1000).toFixed(1);
-            let msg = '';
-            if (current > 1) {
-                const msPerItem = elapsedMs / (current - 1);
-                const remainingItems = total - current + 1;
-                const estimatedRemainingMs = msPerItem * remainingItems;
-                const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
-                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                    ? `Creating: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
-                    : `正在创建: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
-            } else {
-                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                    ? `Creating: ${current}/${total} (0%) | Elapsed ${elapsedSec}s`
-                    : `正在创建: ${current}/${total} (0%) | 已用 ${elapsedSec}s`;
-            }
+            const msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                ? `Creating: ${current}/${total}`
+                : `正在创建: ${current}/${total}`;
             options.loadingToast.update(msg);
         }
     }
@@ -1198,7 +1185,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
                 if (useBulkMute && typeof window !== 'undefined' && typeof window.beginBookmarkBulkMute === 'function') {
                     muteSession = await window.beginBookmarkBulkMute('drag-batch-to-permanent');
                 }
-                if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function' && totalOperations > 1) {
+                if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function' && totalOperations > 30) {
                     const msg = typeof currentLang !== 'undefined' && currentLang === 'en' ? `Processing ${totalOperations} items...` : `正在处理 ${totalOperations} 项...`;
                     loadingToast = window.showLoadingToast(msg);
                 }
@@ -1282,22 +1269,9 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
                             progressTracker.current++;
                             if (loadingToast) {
                                 const current = progressTracker.current;
-                                const elapsedMs = Date.now() - progressTracker.startTime;
-                                const elapsedSec = (elapsedMs / 1000).toFixed(1);
-                                let msg = '';
-                                if (current > 1) {
-                                    const msPerItem = elapsedMs / (current - 1);
-                                    const remainingItems = totalOperations - current + 1;
-                                    const estimatedRemainingMs = msPerItem * remainingItems;
-                                    const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
-                                    msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                                        ? `Moving: ${current}/${totalOperations} (${Math.round((current - 1) / totalOperations * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
-                                        : `正在移动: ${current}/${totalOperations} (${Math.round((current - 1) / totalOperations * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
-                                } else {
-                                    msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                                        ? `Moving: ${current}/${totalOperations} (0%) | Elapsed ${elapsedSec}s`
-                                        : `正在移动: ${current}/${totalOperations} (0%) | 已用 ${elapsedSec}s`;
-                                }
+                                const msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                                    ? `Moving: ${current}/${totalOperations}`
+                                    : `正在移动: ${current}/${totalOperations}`;
                                 loadingToast.update(msg);
                             }
                             await movePermanentBookmarkNodeViaSharedOps(move.id, {
@@ -1405,7 +1379,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
             if (useBulkMute && typeof window !== 'undefined' && typeof window.beginBookmarkBulkMute === 'function') {
                 muteSession = await window.beginBookmarkBulkMute('drag-temp-to-permanent');
             }
-            if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function' && totalNodes > 1) {
+            if (typeof window !== 'undefined' && typeof window.showLoadingToast === 'function' && totalNodes > 30) {
                 const msg = typeof currentLang !== 'undefined' && currentLang === 'en' ? `Moving ${totalNodes} items...` : `正在移动 ${totalNodes} 项...`;
                 loadingToast = window.showLoadingToast(msg);
             }

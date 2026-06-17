@@ -9788,7 +9788,7 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                 if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                     muteSession = await beginBookmarkBulkMute('paste-temp-to-permanent');
                 }
-                if (typeof window.showLoadingToast === 'function' && totalNodes > 1) {
+                if (typeof window.showLoadingToast === 'function' && totalNodes > 30) {
                     const lang = currentLang || 'zh_CN';
                     loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在粘贴 ${totalNodes} 项...` : `Pasting ${totalNodes} items...`);
                 }
@@ -9856,7 +9856,7 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                 if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                     muteSession = await beginBookmarkBulkMute('paste-permanent-cut');
                 }
-                if (typeof window.showLoadingToast === 'function' && totalNodes > 1) {
+                if (typeof window.showLoadingToast === 'function' && totalNodes > 30) {
                     const lang = currentLang || 'zh_CN';
                     loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在移动 ${totalNodes} 项...` : `Moving ${totalNodes} items...`);
                 }
@@ -9892,23 +9892,9 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                         progressTracker.current++;
                         if (loadingToast) {
                             const current = progressTracker.current;
-                            const total = progressTracker.total;
-                            const elapsedMs = Date.now() - progressTracker.startTime;
-                            const elapsedSec = (elapsedMs / 1000).toFixed(1);
-                            let msg = '';
-                            if (current > 1) {
-                                const msPerItem = elapsedMs / (current - 1);
-                                const remainingItems = total - current + 1;
-                                const estimatedRemainingMs = msPerItem * remainingItems;
-                                const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
-                                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                                    ? `Moving: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
-                                    : `正在移动: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
-                            } else {
-                                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                                    ? `Moving: ${current}/${total} (0%) | Elapsed ${elapsedSec}s`
-                                    : `正在移动: ${current}/${total} (0%) | 已用 ${elapsedSec}s`;
-                            }
+                            const msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                                ? `Moving: ${current}/${total}`
+                                : `正在移动: ${current}/${total}`;
                             loadingToast.update(msg);
                         }
                         await movePermanentBookmarkNode(id, target, {
@@ -9938,7 +9924,7 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                 if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                     muteSession = await beginBookmarkBulkMute('paste-permanent-copy');
                 }
-                if (typeof window.showLoadingToast === 'function' && totalNodes > 1) {
+                if (typeof window.showLoadingToast === 'function' && totalNodes > 30) {
                     const lang = currentLang || 'zh_CN';
                     loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在复制 ${totalNodes} 项...` : `Copying ${totalNodes} items...`);
                 }
@@ -10008,22 +9994,9 @@ async function duplicateNode(node, parentId, options = {}) {
         if (options.loadingToast && typeof options.loadingToast.update === 'function') {
             const current = options.progressTracker.current;
             const total = options.progressTracker.total;
-            const elapsedMs = Date.now() - options.progressTracker.startTime;
-            const elapsedSec = (elapsedMs / 1000).toFixed(1);
-            let msg = '';
-            if (current > 1) {
-                const msPerItem = elapsedMs / (current - 1);
-                const remainingItems = total - current + 1;
-                const estimatedRemainingMs = msPerItem * remainingItems;
-                const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
-                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                    ? `Pasting: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
-                    : `正在粘贴: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
-            } else {
-                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                    ? `Pasting: ${current}/${total} (0%) | Elapsed ${elapsedSec}s`
-                    : `正在粘贴: ${current}/${total} (0%) | 已用 ${elapsedSec}s`;
-            }
+            const msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                ? `Pasting: ${current}/${total}`
+                : `正在粘贴: ${current}/${total}`;
             options.loadingToast.update(msg);
         }
     }
@@ -12473,7 +12446,7 @@ async function batchDelete() {
             if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                 muteSession = await beginBookmarkBulkMute('batch-delete-permanent');
             }
-            if (typeof window.showLoadingToast === 'function' && permanentRoots.length > 1) {
+            if (typeof window.showLoadingToast === 'function' && permanentRoots.length > 30) {
                 loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在删除 ${permanentRoots.length} 项...` : `Deleting ${permanentRoots.length} items...`);
             }
 
@@ -12493,23 +12466,9 @@ async function batchDelete() {
                         progressTracker.current++;
                         if (loadingToast) {
                             const current = progressTracker.current;
-                            const total = progressTracker.total;
-                            const elapsedMs = Date.now() - progressTracker.startTime;
-                            const elapsedSec = (elapsedMs / 1000).toFixed(1);
-                            let msg = '';
-                            if (current > 1) {
-                                const msPerItem = elapsedMs / (current - 1);
-                                const remainingItems = total - current + 1;
-                                const estimatedRemainingMs = msPerItem * remainingItems;
-                                const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
-                                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                                    ? `Deleting: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
-                                    : `正在删除: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
-                            } else {
-                                msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                                    ? `Deleting: ${current}/${total} (0%) | Elapsed ${elapsedSec}s`
-                                    : `正在删除: ${current}/${total} (0%) | 已用 ${elapsedSec}s`;
-                            }
+                            const msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                                ? `Deleting: ${current}/${total}`
+                                : `正在删除: ${current}/${total}`;
                             loadingToast.update(msg);
                         }
                         if (rootNode.url) {
@@ -12634,7 +12593,7 @@ async function batchRename() {
             if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
                 muteSession = await beginBookmarkBulkMute('batch-rename-permanent');
             }
-            if (typeof window.showLoadingToast === 'function' && permanentIds.length > 1) {
+            if (typeof window.showLoadingToast === 'function' && permanentIds.length > 30) {
                 loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在重命名 ${permanentIds.length} 项...` : `Renaming ${permanentIds.length} items...`);
             }
 
@@ -12652,23 +12611,9 @@ async function batchRename() {
                     progressTracker.current++;
                     if (loadingToast) {
                         const current = progressTracker.current;
-                        const total = progressTracker.total;
-                        const elapsedMs = Date.now() - progressTracker.startTime;
-                        const elapsedSec = (elapsedMs / 1000).toFixed(1);
-                        let msg = '';
-                        if (current > 1) {
-                            const msPerItem = elapsedMs / (current - 1);
-                            const remainingItems = total - current + 1;
-                            const estimatedRemainingMs = msPerItem * remainingItems;
-                            const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
-                            msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                                ? `Renaming: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
-                                : `正在重命名: ${current}/${total} (${Math.round((current - 1) / total * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
-                        } else {
-                            msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                                ? `Renaming: ${current}/${total} (0%) | Elapsed ${elapsedSec}s`
-                                : `正在重命名: ${current}/${total} (0%) | 已用 ${elapsedSec}s`;
-                        }
+                        const msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                            ? `Renaming: ${current}/${total}`
+                            : `正在重命名: ${current}/${total}`;
                         loadingToast.update(msg);
                     }
                     await updatePermanentBookmarkNode(nodeId, { title: normalizedTitle }, createOptions);
@@ -13025,7 +12970,7 @@ async function batchMergeFolder() {
         if (useBulkMute && typeof beginBookmarkBulkMute === 'function') {
             muteSession = await beginBookmarkBulkMute('batch-merge-folder');
         }
-        if (typeof window.showLoadingToast === 'function' && totalNodes > 1) {
+        if (typeof window.showLoadingToast === 'function' && totalNodes > 30) {
             loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在合并 ${permanentIds.length} 项...` : `Merging ${permanentIds.length} items...`);
         }
 
@@ -13060,22 +13005,9 @@ async function batchMergeFolder() {
                 progressTracker.current++;
                 if (loadingToast) {
                     const current = progressTracker.current;
-                    const elapsedMs = Date.now() - progressTracker.startTime;
-                    const elapsedSec = (elapsedMs / 1000).toFixed(1);
-                    let msg = '';
-                    if (current > 1) {
-                        const msPerItem = elapsedMs / (current - 1);
-                        const remainingItems = totalNodes - current + 1;
-                        const estimatedRemainingMs = msPerItem * remainingItems;
-                        const estimatedRemainingSec = (estimatedRemainingMs / 1000).toFixed(1);
-                        msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                            ? `Merging: ${current}/${totalNodes} (${Math.round((current - 1) / totalNodes * 100)}%) | Elapsed ${elapsedSec}s | Est. remaining ${estimatedRemainingSec}s`
-                            : `正在合并: ${current}/${totalNodes} (${Math.round((current - 1) / totalNodes * 100)}%) | 已用 ${elapsedSec}s | 预计剩余 ${estimatedRemainingSec}s`;
-                    } else {
-                        msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                            ? `Merging: ${current}/${totalNodes} (0%) | Elapsed ${elapsedSec}s`
-                            : `正在合并: ${current}/${totalNodes} (0%) | 已用 ${elapsedSec}s`;
-                    }
+                    const msg = typeof currentLang !== 'undefined' && currentLang === 'en'
+                        ? `Merging: ${current}/${totalNodes}`
+                        : `正在合并: ${current}/${totalNodes}`;
                     loadingToast.update(msg);
                 }
                 await movePermanentBookmarkNode(nodeId, { parentId: newFolder.id }, {
