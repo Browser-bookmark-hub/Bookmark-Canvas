@@ -95,6 +95,12 @@ function scheduleFolderExpand(targetNode) {
             const icon = targetNode.querySelector('.tree-icon.fas');
 
             if (children && children.classList.contains('tree-children') && !children.classList.contains('expanded')) {
+                // 自动展开时，若存在挂起的卸载定时器，立刻清除
+                if (children.__unloadTimer__) {
+                    clearTimeout(children.__unloadTimer__);
+                    children.__unloadTimer__ = null;
+                }
+
                 children.classList.add('expanded');
                 if (toggle) toggle.classList.add('expanded');
 

@@ -12101,6 +12101,16 @@ async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, star
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = html;
 
+        // 恢复子节点的选中状态
+        if (typeof selectedNodes !== 'undefined' && selectedNodes && selectedNodes.size > 0) {
+            tempDiv.querySelectorAll('.tree-item[data-node-id]').forEach(item => {
+                const nid = item.dataset.nodeId;
+                if (nid && selectedNodes.has(nid)) {
+                    item.classList.add('selected');
+                }
+            });
+        }
+
         const frag = document.createDocumentFragment();
         while (tempDiv.firstChild) {
             frag.appendChild(tempDiv.firstChild);
@@ -13069,18 +13079,34 @@ function attachTreeEvents(treeContainer) {
                 children.classList.toggle('expanded');
                 toggle.classList.toggle('expanded');
 
-                ;
-
                 // 保存展开状态
                 saveTreeExpandState(treeContainer);
-                // Canvas 永久栏目懒加载：展开时按需加载子节点
+                // Canvas 永久栏目懒加载：展开时按需加载子节点，折叠时延迟卸载释放 DOM
                 try {
                     const expanded = children.classList.contains('expanded');
-                    if (expanded &&
-                        CANVAS_PERMANENT_TREE_LAZY_ENABLED &&
-                        (currentView === 'canvas' || isReadOnlyChangesPreview) &&
-                        __shouldHydratePermanentFolderChildren(treeItem, children)) {
-                        loadPermanentFolderChildrenLazy(treeItem.dataset.nodeId, children, 0, null, isReadOnlyChangesPreview);
+                    if (expanded) {
+                        if (children.__unloadTimer__) {
+                            clearTimeout(children.__unloadTimer__);
+                            children.__unloadTimer__ = null;
+                        }
+                        if (CANVAS_PERMANENT_TREE_LAZY_ENABLED &&
+                            (currentView === 'canvas' || isReadOnlyChangesPreview) &&
+                            __shouldHydratePermanentFolderChildren(treeItem, children)) {
+                            loadPermanentFolderChildrenLazy(treeItem.dataset.nodeId, children, 0, null, isReadOnlyChangesPreview);
+                        }
+                    } else {
+                        if (CANVAS_PERMANENT_TREE_LAZY_ENABLED && (currentView === 'canvas' || isReadOnlyChangesPreview)) {
+                            if (children.__unloadTimer__) {
+                                clearTimeout(children.__unloadTimer__);
+                            }
+                            children.__unloadTimer__ = setTimeout(() => {
+                                children.__unloadTimer__ = null;
+                                if (!children.classList.contains('expanded') && document.body.contains(children)) {
+                                    children.innerHTML = '';
+                                    treeItem.dataset.childrenLoaded = 'false';
+                                }
+                            }, 15000);
+                        }
                     }
                 } catch (_) { }
             }

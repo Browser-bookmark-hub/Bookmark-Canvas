@@ -31802,6 +31802,11 @@ function buildTempTreeNode(section, item, level, options = {}) {
     treeItem.appendChild(hoverActions);
     wrapper.appendChild(treeItem);
 
+    // 【关键改进】若临时节点 ID 在全局选中集合中，还原 selected 类以避免折叠重构时状态丢失
+    if (typeof selectedNodes !== 'undefined' && selectedNodes && selectedNodes.has(item.id)) {
+        treeItem.classList.add('selected');
+    }
+
     setupTempTreeNodeDropHandlers(treeItem, section, item);
 
     if (item.type === 'folder') {
@@ -32071,7 +32076,7 @@ function setupTempSectionTreeInteractions(treeContainer, section) {
             LAZY_LOAD_THRESHOLD.collapsedFolders.add(folderId);
             saveTempExpandState();
 
-            // 5秒防抖延迟卸载子 DOM，防止误触或高频折叠展开带来的重绘开销
+            // 15秒防抖延迟卸载子 DOM，防止误触或高频折叠展开带来的重绘开销
             if (childrenContainer.__unloadTimer__) {
                 clearTimeout(childrenContainer.__unloadTimer__);
             }
@@ -32083,7 +32088,7 @@ function setupTempSectionTreeInteractions(treeContainer, section) {
                     treeItem.dataset.childrenLoaded = 'false';
                     ;
                 }
-            }, 5000);
+            }, 15000);
         } else {
             // 展开
             // 如果存在等待中的卸载定时器，立刻取消，直接复用已有 DOM
