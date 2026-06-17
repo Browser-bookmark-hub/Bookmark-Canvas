@@ -2104,7 +2104,8 @@ const DISCRETE_WHEEL_EVENT_DELTA_MIN = 24;
 const CANVAS_WHEEL_LINE_PIXEL = 12;
 const WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR = 0.5;
 const WINDOWS_LINUX_WHEEL_PAN_MAX_PER_FRAME = 160;
-const WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL = 0.3;
+const WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL = 0.35;
+const WINDOWS_LINUX_WHEEL_PAN_EXPONENTIAL_DRAIN = 0.14;
 const WINDOWS_LINUX_WHEEL_ZOOM_MAX_FACTOR_PER_FRAME = 1.10;
 const WINDOWS_LINUX_WHEEL_ZOOM_PUMP_SPEED = 0.001;
 
@@ -2120,7 +2121,7 @@ let winWheelZoomPumpOptions = null;
 
 const WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR = 1.0;
 const WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND = 0.7;
-const WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER = 1.0;
+const WINDOWS_LINUX_WHEEL_ZOOM_SMOOTH_STEP_MULTIPLIER = 0.7;
 const WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST = 1.80;
 const WINDOWS_LINUX_WHEEL_PAN_INERTIA_ENABLED = false;
 const WINDOWS_LINUX_WHEEL_PAN_MICRO_SMOOTH_ENABLED = false;
@@ -14224,16 +14225,9 @@ function __startWinWheelPanPump() {
             return;
         }
 
-        let stepX = winWheelPanAccumX;
-        let stepY = winWheelPanAccumY;
-
-        const dist = Math.sqrt(stepX * stepX + stepY * stepY);
-        if (dist > WINDOWS_LINUX_WHEEL_PAN_MAX_PER_FRAME) {
-            const ratio = WINDOWS_LINUX_WHEEL_PAN_MAX_PER_FRAME / dist;
-            stepX *= ratio;
-            stepY *= ratio;
-        }
-
+        const stepX = winWheelPanAccumX * WINDOWS_LINUX_WHEEL_PAN_EXPONENTIAL_DRAIN;
+        const stepY = winWheelPanAccumY * WINDOWS_LINUX_WHEEL_PAN_EXPONENTIAL_DRAIN;
+        
         winWheelPanAccumX -= stepX;
         winWheelPanAccumY -= stepY;
 
@@ -14665,7 +14659,7 @@ function __runCanvasSmoothWheelZoomStep() {
     const fastStep = 0.34;
     const slowStep = 0.26;
     const baseStep = (Math.abs(diff) > 0.06 ? fastStep : slowStep) * wheelStepMultiplier;
-    const stepFactor = Math.max(0.16, Math.min(0.38, baseStep * responseFromCurve * responseFromMagnet));
+    const stepFactor = Math.max(0.10, Math.min(0.38, baseStep * responseFromCurve * responseFromMagnet));
     const nextZoom = currentZoom + diff * stepFactor;
     __logCanvasWinInput('wheel-zoom-smooth-step', {
         currentZoom: __roundCanvasDebugNumber(currentZoom, 5),
