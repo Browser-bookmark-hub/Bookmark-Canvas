@@ -1451,6 +1451,16 @@ const FaviconCache = {
     cravatarDefaultCheckCache: new BoundedLruMap(1200), // {dataUrl: boolean}
     pendingRequests: new Map(), // inflight(hostname) 请求去重
 
+    scheduleIdleCleanup() {
+        try {
+            if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                window.requestIdleCallback(() => this.checkAndEvictOldest(), { timeout: 5000 });
+            } else {
+                setTimeout(() => this.checkAndEvictOldest(), 2000);
+            }
+        } catch (_) { }
+    },
+
     // 初始化 IndexedDB
     async init() {
         if (this.db) return;
@@ -1470,7 +1480,11 @@ const FaviconCache = {
                     .catch(() => {
                         // ignore init errors
                     })
-                    .finally(() => resolve());
+                    .finally(() => {
+                        resolve();
+                        // 触发容量检查与超限淘汰
+                        this.scheduleIdleCleanup();
+                    });
             };
 
             request.onupgradeneeded = (event) => {
@@ -1794,6 +1808,40 @@ const FaviconCache = {
         }
     },
 
+    // 检查图标缓存容量并淘汰最老的数据，保证不超过 2000 个域名
+    async checkAndEvictOldest() {
+        try {
+            if (!this.db) await this.init();
+
+            const transaction = this.db.transaction([this.storeName], 'readwrite');
+            const store = transaction.objectStore(this.storeName);
+
+            const countRequest = store.count();
+            countRequest.onsuccess = () => {
+                const count = countRequest.result;
+                if (count < 2000) return; // 没到 2000 个域名，不进行任何处理
+
+                const deleteCount = 500; // 超限后淘汰最老的 500 个
+                const index = store.index('timestamp');
+                const cursorRequest = index.openCursor(null, 'next'); // 按时间戳升序遍历（最老的最先）
+
+                let evicted = 0;
+                cursorRequest.onsuccess = (event) => {
+                    const cursor = event.target.result;
+                    if (cursor && evicted < deleteCount) {
+                        const domain = cursor.value.domain;
+                        this.memoryCache.delete(domain);
+                        cursor.delete();
+                        evicted++;
+                        cursor.continue();
+                    }
+                };
+            };
+        } catch (_) {
+            // 静默处理
+        }
+    },
+
     // 移除失败记录（当URL被修改时）
     async removeFailure(domain) {
         try {
@@ -1810,18 +1858,12 @@ const FaviconCache = {
     },
 
     // 清除特定URL的缓存（用于书签URL修改时）
-    async clear(url, options = {}) {
+    async clear(url) {
         if (this.isInvalidUrl(url)) return;
 
         try {
             const domain = this._getHostnameKey(url);
             if (!domain) return;
-
-            // 如果启用了共享检查，且还有其他书签共享该域名，则不予清除
-            if (options.checkShare === true && typeof allBookmarks !== 'undefined') {
-                const isDomainShared = allBookmarks.some(item => this._getHostnameKey(item.url) === domain);
-                if (isDomainShared) return;
-            }
 
             // 清除内存缓存
             this.memoryCache.delete(domain);
@@ -14515,10 +14557,6 @@ async function handleBookmarkRemoveRealtime(id, removeInfo, options = {}) {
 
     clearIncrementalDeletedSnapshots('onRemoved');
 
-    if (enrichedRemoveInfo && enrichedRemoveInfo.node && enrichedRemoveInfo.node.url) {
-        FaviconCache.clear(enrichedRemoveInfo.node.url, { checkShare: true });
-    }
-
     if (currentView === 'canvas') {
         const appliedToCachedTree = applyIncrementalRemoveFromCachedCurrentTree(id, enrichedRemoveInfo);
         if (!appliedToCachedTree) {
@@ -14624,9 +14662,6 @@ async function flushPendingBookmarkMutationEvents(reason = '') {
                         }
                         if (event.type === 'removed') {
                             removeBookmarkFromCache(event.id, event.removeInfo);
-                            if (event.removeInfo && event.removeInfo.node && event.removeInfo.node.url) {
-                                FaviconCache.clear(event.removeInfo.node.url, { checkShare: true });
-                            }
                             return;
                         }
                         if (event.type === 'moved') {
