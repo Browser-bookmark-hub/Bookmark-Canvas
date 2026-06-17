@@ -44,6 +44,8 @@
     let activeConfigDialog = null;
     let activeConfirmDialog = null;
     let activeProgressDialog = null;
+    let originalProgressTitle = '';
+    let progressStuckTimer = null;
     let operationRunning = false;
     let activeAbortController = null;
 
@@ -1280,6 +1282,12 @@
     }
 
     function showProgressDialog(title) {
+        originalProgressTitle = title;
+        if (progressStuckTimer) {
+            clearTimeout(progressStuckTimer);
+            progressStuckTimer = null;
+        }
+
         if (activeProgressDialog) {
             try { activeProgressDialog.remove(); } catch (_) { }
             activeProgressDialog = null;
@@ -1330,9 +1338,36 @@
         if (text) {
             if (textEl) textEl.textContent = text;
         }
+
+        if (percent === 15 || percent === 85) {
+            if (!progressStuckTimer) {
+                progressStuckTimer = setTimeout(() => {
+                    if (activeProgressDialog) {
+                        const titleEl = activeProgressDialog.querySelector('.github-progress-title');
+                        if (titleEl) {
+                            titleEl.textContent = t('时间稍长, 请核查数据大小或者网络问题', 'Taking a while, please check data size or network issues');
+                        }
+                    }
+                }, 10000);
+            }
+        } else {
+            if (progressStuckTimer) {
+                clearTimeout(progressStuckTimer);
+                progressStuckTimer = null;
+            }
+            const titleEl = activeProgressDialog.querySelector('.github-progress-title');
+            if (titleEl && originalProgressTitle) {
+                titleEl.textContent = originalProgressTitle;
+            }
+        }
     }
 
     function closeProgressDialog(delay = 0, isSuccess = true) {
+        if (progressStuckTimer) {
+            clearTimeout(progressStuckTimer);
+            progressStuckTimer = null;
+        }
+
         if (!activeProgressDialog) return Promise.resolve();
         const dialog = activeProgressDialog;
         activeProgressDialog = null;
