@@ -685,11 +685,11 @@ function showImportModeConfirmDialog(options = {}) {
         getOverlayContainer().appendChild(dialog);
 
         let selectedMode = defaultMode;
-        let currentThreshold = 300;
+        let currentThreshold = 500;
         const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
         if (bridge && typeof bridge.getImportOverwriteThreshold === 'function') {
             bridge.getImportOverwriteThreshold().then((v) => {
-                currentThreshold = Number(v) || 300;
+                currentThreshold = Number(v) || 500;
                 const inp = document.getElementById('importModeThresholdInput');
                 if (inp) inp.value = String(currentThreshold);
             }).catch(() => {});
@@ -765,7 +765,7 @@ function showImportModeConfirmDialog(options = {}) {
                     // Capture threshold from input (or fall back to default), persist, and confirm.
                     const inp = document.getElementById('importModeThresholdInput');
                     if (inp) {
-                        const v = Math.max(1, Math.min(100000, parseInt(inp.value, 10) || 300));
+                        const v = Math.max(1, Math.min(100000, parseInt(inp.value, 10) || 500));
                         currentThreshold = v;
                         if (bridge && typeof bridge.setImportOverwriteThreshold === 'function') {
                             try { await bridge.setImportOverwriteThreshold(v); } catch (_) {}
@@ -1250,7 +1250,7 @@ async function __performOverwriteImport(payload) {
     // doc 最终修复计划 §3.1: threshold:0 必须强制覆盖。
     // 旧实现 `parseInt(...) || 300` 会把 0 重新映射成 300，导致 backup restore / auto-rollback 走增量分支。
     const __parsedThreshold = parseInt(payload && payload.threshold, 10);
-    const threshold = Number.isFinite(__parsedThreshold) ? Math.max(0, __parsedThreshold) : 300;
+    const threshold = Number.isFinite(__parsedThreshold) ? Math.max(0, __parsedThreshold) : 500;
     const skipBackupWrite = !!(payload && payload.skipBackupWrite === true);
     const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
     if (!bridge) throw new Error('Storage bridge unavailable.');
@@ -2173,7 +2173,7 @@ async function handleFileImport(e) {
                         importFileName: file && file.name ? file.name : '',
                         // doc 第三轮修复 §2.4: 与 __performOverwriteImport 入口的 Number.isFinite 语义对齐，
                         // 避免 0 被静默吞成 300（未来 dialog 若放开 0=强制覆盖时也不会被劫持）。
-                        threshold: Number.isFinite(overwriteThreshold) ? overwriteThreshold : 300
+                        threshold: Number.isFinite(overwriteThreshold) ? overwriteThreshold : 500
                     });
                     setTimeout(() => {
                         window.location.reload();

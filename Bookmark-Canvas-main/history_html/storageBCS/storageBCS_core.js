@@ -56,7 +56,7 @@ const PERMANENT_COPY_TIP_STORAGE_PREFIX = 'bcs:perm:tip-copy-';
 const PERMANENT_ROOT_META_STORAGE_KEY = 'bcs:perm:root-meta';
 const BCS_BACKUP_SLOT_KEY = 'bcs:backup:slot';
 const BCS_IMPORT_THRESHOLD_KEY = 'canvas-import-threshold-v1';
-const BCS_IMPORT_THRESHOLD_DEFAULT = 300;
+const BCS_IMPORT_THRESHOLD_DEFAULT = 500;
 const BCS_LEGACY_TEMP_MIGRATION_DONE_KEY = 'bcs:legacy-temp-migrated-v1';
 
 // =============================================================================

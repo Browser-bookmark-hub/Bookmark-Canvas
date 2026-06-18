@@ -5,7 +5,7 @@
         return t('书签画布', 'bookmark-canvas');
     }
     const DEFAULT_PULL_MODE = 'overwrite';
-    const DEFAULT_OVERWRITE_THRESHOLD = 300;
+    const DEFAULT_OVERWRITE_THRESHOLD = 500;
     const DEFAULT_COMMIT_MSG_TEMPLATE = 'Bookmark Canvas: push package {path} {time}';
     const DEFAULT_COMMIT_DESC_TEMPLATE = 'Updated: {updated} files, Deleted: {deleted} files';
     const STORAGE_KEYS = [
