@@ -7147,7 +7147,9 @@ function setupQuickAddMenu() {
     });
 
     const getQuickAddInlineOptionMode = (action) => {
-        if (!action || !action.includes('window') || action === 'add-all-windows-card-group') return '';
+        if (!action) return '';
+        if (action === 'add-all-windows-card-group') return 'folder';
+        if (!action.includes('window')) return '';
         if (action === 'add-window-blank') return 'heading';
         if (action === 'add-window-view' && !!getMaximizedMdNodeId()) return 'heading';
         return 'folder';
@@ -7460,6 +7462,9 @@ function readQuickAddInlineActionOptionState(action, mode) {
     if (Object.prototype.hasOwnProperty.call(stateMap, stateKey)) {
         return normalizeQuickAddInlineOptionState(stateMap[stateKey], true);
     }
+    if (action === 'add-all-windows-card-group') {
+        return false;
+    }
     return true;
 }
 
@@ -7484,7 +7489,8 @@ async function handleQuickAddAction(action) {
     if (!action) return;
 
     if (action === 'add-all-windows-card-group') {
-        await archiveAllWindowsToCardGroup();
+        const windowAsFolder = readQuickAddInlineActionOptionState(action, 'folder');
+        await archiveAllWindowsToCardGroup({ windowAsFolder });
         return;
     }
 
@@ -7718,11 +7724,18 @@ async function archiveAllWindowsToCardGroup(options = {}) {
         }
         windowTitle += ` (${tabs.length})`;
 
+        const windowAsFolder = !!(options && options.windowAsFolder);
+        const initialItems = windowAsFolder ? [{
+            type: 'folder',
+            title: windowTitle,
+            children: structuredItems
+        }] : structuredItems;
+
         const sectionId = window.CanvasModule.createEmptyTempSection(x, y, {
             title: windowTitle,
             label: isEn ? 'Archive' : '存档',
             source: 'quick-add',
-            initialItems: structuredItems
+            initialItems: initialItems
         });
 
         if (sectionId) {
