@@ -3284,7 +3284,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 /* 工具栏：复用空白栏目/连接线的 md-node-toolbar 视觉，位于上边界上方 */
 .card-group-toolbar {
-    top: calc(-46px * var(--canvas-scale-inv, 1));
+    top: calc(-55px * var(--canvas-scale-inv, 1));
     left: 50%;
     right: auto;
     transform: translateX(-50%) scale(var(--canvas-scale-inv, 1));
